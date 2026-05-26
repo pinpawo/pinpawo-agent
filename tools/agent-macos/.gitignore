@@ -1,0 +1,6 @@
+*.xcuserstate
+xcuserdata/
+.build/
+build/
+com.apple.DeveloperTools/
+release.env

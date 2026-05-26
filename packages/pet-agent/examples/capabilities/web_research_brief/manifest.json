@@ -1,0 +1,9 @@
+{
+  "id": "web_research_brief",
+  "name": "网页调研简报",
+  "description": "公开网页和 URL 调研，HTTP 内容抓取，多来源摘要，事实核查，引用链接整理；适合阅读用户提供的网页、API JSON、RSS 或静态公开页面并输出结构化简报",
+  "icon": "doc.text.magnifyingglass",
+  "color": "green",
+  "defaultEnabled": true,
+  "builtIn": false
+}

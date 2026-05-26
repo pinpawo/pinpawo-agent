@@ -1,0 +1,58 @@
+/**
+ * Capability metadata used by the UI (macOS app, settings panel) and
+ * the capability loader at runtime.  Keep this in sync with the actual
+ * capability implementations in ./capabilities/.
+ */
+export type CapabilityMeta = {
+  /** Unique stable identifier — matches AgentCapability.name */
+  id: string;
+  /** Human-readable display name (Chinese) */
+  name: string;
+  /** One-sentence description shown in settings */
+  description: string;
+  /** SF Symbol name for the icon */
+  icon: string;
+  /** Tint colour token: "blue" | "orange" | "purple" | "green" | "red" | "gray" */
+  color: string;
+  /** Whether the capability is enabled by default */
+  defaultEnabled: boolean;
+  /** True for capabilities shipped with the app bundle */
+  builtIn: boolean;
+  /** Not yet functional — shown with a badge in the UI */
+  comingSoon?: boolean;
+};
+
+/**
+ * Registry of all built-in capabilities.
+ * This list is serialised to `dist/capability-manifest.json` at build time
+ * and read by the macOS app to populate the Capabilities settings pane.
+ */
+export const BUILT_IN_CAPABILITY_REGISTRY: CapabilityMeta[] = [
+  {
+    id: 'daily_post',
+    name: '日常动态',
+    description: '根据当前趋势自动生成宠物日常内容并定时发布',
+    icon: 'doc.text.fill',
+    color: 'blue',
+    defaultEnabled: true,
+    builtIn: true,
+  },
+  {
+    id: 'capability_creator',
+    name: '能力创建',
+    description: '生成和验证用户自定义 capability 插件模板',
+    icon: 'wand.and.stars',
+    color: 'purple',
+    defaultEnabled: true,
+    builtIn: true,
+  },
+  {
+    id: 'browser',
+    name: '浏览器',
+    description: '使用本机浏览器打开网页、复用登录态、操作页面并提取页面内容',
+    icon: 'globe',
+    color: 'green',
+    defaultEnabled: true,
+    builtIn: true,
+  },
+];

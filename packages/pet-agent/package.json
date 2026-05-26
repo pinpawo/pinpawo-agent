@@ -1,0 +1,31 @@
+{
+  "name": "@pinpawo/pet-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --import tsx/esm --test src/agent/orchestrator/*.test.ts src/agent/studio/*.test.ts",
+    "eval:dataset": "node --env-file=.env --import tsx/esm evals/dataset.ts",
+    "eval:route": "node --env-file=.env --import tsx/esm evals/orchestrator-route.eval.ts",
+    "eval:flow:mock-subagent": "node --env-file=.env --import tsx/esm evals/orchestrator-flow.mock-subagent.eval.ts",
+    "eval:hitl": "node --env-file=.env --import tsx/esm evals/orchestrator-hitl.eval.ts",
+    "eval:subagent": "node --env-file=.env --import tsx/esm evals/subagent.eval.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.1.17",
+    "@langchain/langgraph": "^1.2.0",
+    "@langchain/langgraph-checkpoint": "^1.0.0",
+    "langchain": "^1.2.15",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "@langchain/openai": "^1.2.3",
+    "@types/node": "^22.0.0",
+    "langsmith": "^0.5.21",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

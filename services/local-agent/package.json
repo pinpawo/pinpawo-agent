@@ -1,0 +1,49 @@
+{
+  "name": "pinpawo-local-agent",
+  "version": "0.1.0",
+  "description": "Local agent client for PinPawo — runs LLM locally and posts on behalf of your pet",
+  "type": "module",
+  "bin": {
+    "pinpawo-agent": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "login": "tsx src/index.ts login",
+    "actor": "tsx src/index.ts actor",
+    "once": "tsx src/index.ts once",
+    "once:dry": "tsx src/index.ts once --dry-run",
+    "tui": "tsx src/index.ts tui",
+    "tui:dry": "tsx src/index.ts tui --dry-run",
+    "test:live": "node --import tsx --test tests/live-agent.test.ts",
+    "test:unit": "node --import tsx --test src/studio/*.test.ts",
+    "build": "tsup && node --import tsx/esm scripts/gen-manifest.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@inkkit/ink-markdown": "^1.0.0",
+    "@langchain/langgraph-checkpoint": "^1.0.0",
+    "@langchain/openai": "^1.2.3",
+    "@pinpawo/pet-agent": "*",
+    "@tavily/core": "^0.7.1",
+    "ink": "^6.8.0",
+    "ink-text-input": "^6.0.0",
+    "openai": "^4.77.0",
+    "react": "19.1.0",
+    "react-devtools-core": "^6.1.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "~19.1.0",
+    "@types/ws": "^8.5.14",
+    "agent-browser": "^0.25.3",
+    "playwright-core": "^1.59.1",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}

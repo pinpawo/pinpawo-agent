@@ -1,0 +1,71 @@
+import { tool } from '@langchain/core/tools';
+import type { StructuredTool } from '@langchain/core/tools';
+import { z } from 'zod';
+import type { AgentActor } from '../types/agent';
+
+export type PetProfileToolOptions = {
+  actor: AgentActor;
+  profileText?: string | null;
+};
+
+function formatSelfIntroduction(actor: AgentActor) {
+  const segments = [`我是${actor.name}`];
+
+  if (actor.species) {
+    segments.push(`一只${actor.species}`);
+  }
+
+  if (actor.stage) {
+    segments.push(`现在处于${actor.stage}阶段`);
+  }
+
+  if (actor.personality) {
+    segments.push(`性格偏${actor.personality}`);
+  }
+
+  return `${segments.join('，')}。`;
+}
+
+function selectProfileDetails(options: PetProfileToolOptions, focus?: string) {
+  const normalizedFocus = focus?.trim();
+  const lines = ['[Pet Profile]'];
+
+  if (!normalizedFocus || /自我介绍|介绍|intro/i.test(normalizedFocus)) {
+    lines.push(`自我介绍：${formatSelfIntroduction(options.actor)}`);
+  }
+
+  if (!normalizedFocus || /名字|name/i.test(normalizedFocus)) {
+    lines.push(`名字：${options.actor.name}`);
+  }
+
+  if ((!normalizedFocus || /物种|species/i.test(normalizedFocus)) && options.actor.species) {
+    lines.push(`物种：${options.actor.species}`);
+  }
+
+  if ((!normalizedFocus || /阶段|成长|stage/i.test(normalizedFocus)) && options.actor.stage) {
+    lines.push(`阶段：${options.actor.stage}`);
+  }
+
+  if ((!normalizedFocus || /性格|personality/i.test(normalizedFocus)) && options.actor.personality) {
+    lines.push(`性格：${options.actor.personality}`);
+  }
+
+  if (options.profileText?.trim()) {
+    lines.push(`补充信息：${options.profileText.trim().slice(0, 600)}`);
+  }
+
+  return lines.join('\n');
+}
+
+export function createPetProfileTool(options: PetProfileToolOptions): StructuredTool {
+  return tool(
+    async ({ focus }) => selectProfileDetails(options, focus),
+    {
+      name: 'describe_pet_profile',
+      description: '查看当前宠物的基本信息和自我介绍，可选聚焦名字、性格、物种、成长阶段等。',
+      schema: z.object({
+        focus: z.string().optional().describe('可选的查看重点，例如“自我介绍”“性格”“物种”“成长阶段”。'),
+      }),
+    },
+  );
+}

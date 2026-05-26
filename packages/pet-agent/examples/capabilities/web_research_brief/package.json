@@ -1,0 +1,8 @@
+{
+  "name": "pinpawo-capability-web-research-brief-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node index.test.mjs"
+  }
+}

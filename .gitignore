@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# local agent runtime data
+.pinpawo/
+
+# macOS/Xcode output
+tools/agent-macos/build/
+tools/agent-macos/.build/
+tools/agent-macos/release.env
+
+# logs
+*.log

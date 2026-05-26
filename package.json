@@ -1,0 +1,23 @@
+{
+  "name": "pinpawo-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source PinPawo agent runtime, local agent, and desktop companion.",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "services/local-agent"
+  ],
+  "scripts": {
+    "build": "npm run build -w pinpawo-local-agent",
+    "test": "npm run test -w @pinpawo/pet-agent && npm run test:unit -w pinpawo-local-agent",
+    "typecheck": "npm run typecheck -w pinpawo-local-agent"
+  },
+  "overrides": {
+    "langsmith": "^0.7.2",
+    "uuid": "^11.1.1"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}

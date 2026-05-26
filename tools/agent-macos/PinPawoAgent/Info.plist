@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>PinPawo Agent</string>
+  <key>CFBundleIdentifier</key>
+  <string>app.pinpawo.agent</string>
+  <key>CFBundleName</key>
+  <string>PinPawoAgent</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleExecutable</key>
+  <string>$(EXECUTABLE_NAME)</string>
+  <!-- Hide from Dock, appear only in menu bar -->
+  <key>LSUIElement</key>
+  <true/>
+  <!-- Minimum macOS version for MenuBarExtra -->
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+
+  <!-- TCC usage descriptions (required for permission persistence) -->
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>PinPawo Agent 需要访问下载文件夹，以保存和读取 Agent 下载的文件。</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>PinPawo Agent 需要访问文稿文件夹，以读写 Agent 工作目录中的文件。</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>PinPawo Agent 需要访问桌面文件夹，以读写 Agent 工作目录中的文件。</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>PinPawo Agent 需要控制浏览器，以自动化执行网页操作（如登录、内容采集）。</string>
+</dict>
+</plist>

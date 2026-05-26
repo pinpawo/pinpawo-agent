@@ -1,0 +1,73 @@
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
+import { loadStoredConfig } from './storage';
+
+function parseDotEnv(content: string) {
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq < 1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+    if (!(key in process.env)) process.env[key] = val;
+  }
+}
+
+function loadDotEnv() {
+  // 1. ~/.pinpawo/.env — always accessible (dev + app bundle)
+  try { parseDotEnv(readFileSync(resolve(homedir(), '.pinpawo', '.env'), 'utf-8')); } catch { /* ok */ }
+  // 2. cwd/.env — dev mode convenience (wins only for keys not already set)
+  try { parseDotEnv(readFileSync(resolve(process.cwd(), '.env'), 'utf-8')); } catch { /* ok */ }
+}
+
+loadDotEnv();
+
+const stored = loadStoredConfig();
+
+function get(envKey: string, storedKey: keyof typeof stored): string {
+  const storedVal = stored[storedKey];
+  return process.env[envKey] || (typeof storedVal === 'string' ? storedVal : '') || '';
+}
+
+function required(envKey: string, storedKey: keyof typeof stored, label: string): string {
+  const val = get(envKey, storedKey);
+  if (!val) {
+    throw new Error(
+      `Missing: ${label}\nRun "pinpawo-agent login" or set ${envKey} in .env`
+    );
+  }
+  return val;
+}
+
+export const config = {
+  apiBaseUrl: required('API_BASE_URL', 'api_base_url', 'API_BASE_URL').replace(/\/$/, ''),
+  hasuraEndpoint: required('HASURA_ENDPOINT', 'hasura_endpoint', 'HASURA_ENDPOINT').replace(/\/$/, ''),
+  agentToken: required('AGENT_TOKEN', 'agent_token', 'AGENT_TOKEN'),
+  hasuraJwt: required('HASURA_JWT', 'hasura_jwt', 'HASURA_JWT'),
+
+  llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
+  llmBaseUrl: get('LLM_BASE_URL', 'llm_base_url') || 'https://api.deepseek.com',
+  llmModel: get('LLM_MODEL', 'llm_model') || 'deepseek-v4-pro',
+
+  workdir: get('PINPAWO_WORKDIR', 'workdir') || homedir(),
+  browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
+
+  /** Extra capability plugin directories beyond ~/.pinpawo/capabilities/ */
+  get capabilityDirs(): string[] {
+    const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(':').filter(Boolean) ?? [];
+    const fromStored = (stored.capability_dirs ?? []);
+    return [...new Set([...fromEnv, ...fromStored])];
+  },
+
+  mediaCrawlerDir: get('MEDIACRAWLER_DIR', 'mediacrawler_dir'),
+  xhsCookie: get('XHS_COOKIE', 'xhs_cookie'),
+
+  pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
+  heartbeatIntervalSeconds: Number(process.env.HEARTBEAT_INTERVAL_SECONDS ?? 900),
+  postIntervalHours: Number(process.env.POST_INTERVAL_HOURS ?? 6),
+  trendRefreshCooldownSeconds: Number(process.env.TREND_REFRESH_COOLDOWN_SECONDS ?? 900),
+
+  localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
+};

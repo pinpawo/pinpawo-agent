@@ -1,0 +1,493 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0EC683CA23B07E97267B6034 /* media.gif in Resources */ = {isa = PBXBuildFile; fileRef = C39EB37626589852FFDE4684 /* media.gif */; };
+		10C90E4F7E1852AC5BDBCCDF /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE1D64376EB8076CA82A0DAA /* Config.swift */; };
+		114B429B483F8D8445B29EAA /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C72FA4654C5E970A9FC621D3 /* SettingsView.swift */; };
+		16631C1D7BA9DC09184257CB /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12FF621A71C53D60A95F8A84 /* AuthService.swift */; };
+		1BC2C10E418B161AFD799468 /* LLMSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FF98751AE96D3E61C60BC8F /* LLMSettingsView.swift */; };
+		27CCB8F56F3E6BE72642DA92 /* slacking.gif in Resources */ = {isa = PBXBuildFile; fileRef = 3B6ED8CFDAFE2DD308517648 /* slacking.gif */; };
+		27E963B4E268B5E65980B4B2 /* AgentProcess.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00F5F706938FBA65627EAFF /* AgentProcess.swift */; };
+		2873FCD457213945BA51C661 /* SettingsWindowFocus.swift in Sources */ = {isa = PBXBuildFile; fileRef = D41BB0724F6967AFEB8C2D47 /* SettingsWindowFocus.swift */; };
+		3405911C7E71F22756BBDAD6 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B890CEA97A156F364C84C0 /* KeychainService.swift */; };
+		44033C45B252D4FDBA794A8E /* browser.gif in Resources */ = {isa = PBXBuildFile; fileRef = DA54EB732BF714BE2672464D /* browser.gif */; };
+		55970212083ABAB95936CE21 /* waiting.gif in Resources */ = {isa = PBXBuildFile; fileRef = 856D8BAABD3663C199ED9A88 /* waiting.gif */; };
+		5637158402553B2843F07BB6 /* DesktopPetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24A4868D9F3F55EFFEF48650 /* DesktopPetView.swift */; };
+		6397AEBC0F155D29AAE03A6B /* StatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C072C916C9F010477F4337C9 /* StatusView.swift */; };
+		8227CE83135FFED0474D43D6 /* DesktopPetController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A67AA67DF99F7FF837E5DFED /* DesktopPetController.swift */; };
+		9C1AF8C729F13A098D1156D9 /* AnimatedGIFView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446F54A4DB5D7010FC240655 /* AnimatedGIFView.swift */; };
+		BD5B9E0A5AED70573CB2C8B6 /* PinPawoAgentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 616272DEE19CE693814D21F5 /* PinPawoAgentApp.swift */; };
+		C1FDD27DFF75ED31ECE23567 /* thinking.gif in Resources */ = {isa = PBXBuildFile; fileRef = 57B6AE59F0E0281FAE84E8B6 /* thinking.gif */; };
+		C81E355255BAFB7D179C93DC /* file.gif in Resources */ = {isa = PBXBuildFile; fileRef = 39628AAFC1F86E185334094C /* file.gif */; };
+		CC588A860FC6ED9C29B2074C /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2362ED6B6B3962BBA8030A82 /* MenuBarView.swift */; };
+		CCEFBC488021BB5F864B3E0A /* ActorMissingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C05606F9252CB6992F6582A /* ActorMissingView.swift */; };
+		D31ABF8B204E3DACE6B2159E /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 663C593131B44FAC708ED0D9 /* AuthModels.swift */; };
+		EA505892B2273084101F6424 /* StatusPoller.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D6DF994C49417C25714063 /* StatusPoller.swift */; };
+		EDC207C26ED09D08D136BC7F /* HealthData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E3C46EE605E544C958BAF28 /* HealthData.swift */; };
+		F0C6B7247AE7D611BAFCD843 /* interrupted.gif in Resources */ = {isa = PBXBuildFile; fileRef = 2D74ACDBCFF2C9BB1E0F53FA /* interrupted.gif */; };
+		F523DF1CAAC8F2B7404602D6 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D4A0F4F69CC03C215EF1DE4 /* LoginView.swift */; };
+		F88C860F6F828E39EC29EECF /* typing.gif in Resources */ = {isa = PBXBuildFile; fileRef = 7315DFF5C20D371D0C28CA2F /* typing.gif */; };
+		FAA99A8318A5D8EAFB358FC7 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A524B379B9B3D0AA389BD20 /* AppState.swift */; };
+		FBF723699C0B5E30F6BE0BEF /* do-not-disturb.gif in Resources */ = {isa = PBXBuildFile; fileRef = 65A42D41F07A62FFDE816246 /* do-not-disturb.gif */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0FF98751AE96D3E61C60BC8F /* LLMSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMSettingsView.swift; sourceTree = "<group>"; };
+		12FF621A71C53D60A95F8A84 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		2362ED6B6B3962BBA8030A82 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		24A4868D9F3F55EFFEF48650 /* DesktopPetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopPetView.swift; sourceTree = "<group>"; };
+		2D4A0F4F69CC03C215EF1DE4 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		2D74ACDBCFF2C9BB1E0F53FA /* interrupted.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = interrupted.gif; sourceTree = "<group>"; };
+		39628AAFC1F86E185334094C /* file.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = file.gif; sourceTree = "<group>"; };
+		3B6ED8CFDAFE2DD308517648 /* slacking.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = slacking.gif; sourceTree = "<group>"; };
+		446F54A4DB5D7010FC240655 /* AnimatedGIFView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimatedGIFView.swift; sourceTree = "<group>"; };
+		57B6AE59F0E0281FAE84E8B6 /* thinking.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = thinking.gif; sourceTree = "<group>"; };
+		616272DEE19CE693814D21F5 /* PinPawoAgentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinPawoAgentApp.swift; sourceTree = "<group>"; };
+		65A42D41F07A62FFDE816246 /* do-not-disturb.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = "do-not-disturb.gif"; sourceTree = "<group>"; };
+		663C593131B44FAC708ED0D9 /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
+		7315DFF5C20D371D0C28CA2F /* typing.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = typing.gif; sourceTree = "<group>"; };
+		754C820C2AF74212A208020E /* PinPawoAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PinPawoAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C05606F9252CB6992F6582A /* ActorMissingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActorMissingView.swift; sourceTree = "<group>"; };
+		856D8BAABD3663C199ED9A88 /* waiting.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = waiting.gif; sourceTree = "<group>"; };
+		89E7150F7183CF2A95EFF451 /* PinPawoAgent.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PinPawoAgent.entitlements; sourceTree = "<group>"; };
+		8CAFE1D4A13B60FBE3FE6439 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		8E3C46EE605E544C958BAF28 /* HealthData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthData.swift; sourceTree = "<group>"; };
+		9A524B379B9B3D0AA389BD20 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		9DB5D67CF0FA7ADC55C3F5E7 /* NodeRuntime.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NodeRuntime.entitlements; sourceTree = "<group>"; };
+		A0D6DF994C49417C25714063 /* StatusPoller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusPoller.swift; sourceTree = "<group>"; };
+		A67AA67DF99F7FF837E5DFED /* DesktopPetController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopPetController.swift; sourceTree = "<group>"; };
+		BE1D64376EB8076CA82A0DAA /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
+		C00F5F706938FBA65627EAFF /* AgentProcess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentProcess.swift; sourceTree = "<group>"; };
+		C072C916C9F010477F4337C9 /* StatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusView.swift; sourceTree = "<group>"; };
+		C39EB37626589852FFDE4684 /* media.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = media.gif; sourceTree = "<group>"; };
+		C72FA4654C5E970A9FC621D3 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		D41BB0724F6967AFEB8C2D47 /* SettingsWindowFocus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowFocus.swift; sourceTree = "<group>"; };
+		DA54EB732BF714BE2672464D /* browser.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = browser.gif; sourceTree = "<group>"; };
+		E6B890CEA97A156F364C84C0 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		141143B3E3D7DFB6F99C251B /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				663C593131B44FAC708ED0D9 /* AuthModels.swift */,
+				8E3C46EE605E544C958BAF28 /* HealthData.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		2D4CDF9B5C7B95C44C602B55 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				D39297D6AD580633EF2D63AE /* DesktopPet */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		3A970023EBEBE41A9184AD19 /* PinPawoAgent */ = {
+			isa = PBXGroup;
+			children = (
+				8CAFE1D4A13B60FBE3FE6439 /* Info.plist */,
+				9DB5D67CF0FA7ADC55C3F5E7 /* NodeRuntime.entitlements */,
+				89E7150F7183CF2A95EFF451 /* PinPawoAgent.entitlements */,
+				779697E928877F41F73FDD1F /* App */,
+				8B96A92B11F5C5D70697135A /* Core */,
+				141143B3E3D7DFB6F99C251B /* Models */,
+				2D4CDF9B5C7B95C44C602B55 /* Resources */,
+				EB280376791A83CC6585E3DB /* UI */,
+			);
+			path = PinPawoAgent;
+			sourceTree = "<group>";
+		};
+		779697E928877F41F73FDD1F /* App */ = {
+			isa = PBXGroup;
+			children = (
+				616272DEE19CE693814D21F5 /* PinPawoAgentApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		8B96A92B11F5C5D70697135A /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				C00F5F706938FBA65627EAFF /* AgentProcess.swift */,
+				9A524B379B9B3D0AA389BD20 /* AppState.swift */,
+				12FF621A71C53D60A95F8A84 /* AuthService.swift */,
+				BE1D64376EB8076CA82A0DAA /* Config.swift */,
+				A67AA67DF99F7FF837E5DFED /* DesktopPetController.swift */,
+				E6B890CEA97A156F364C84C0 /* KeychainService.swift */,
+				D41BB0724F6967AFEB8C2D47 /* SettingsWindowFocus.swift */,
+				A0D6DF994C49417C25714063 /* StatusPoller.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		AB9EECCB3C1A10093AD96009 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				754C820C2AF74212A208020E /* PinPawoAgent.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D39297D6AD580633EF2D63AE /* DesktopPet */ = {
+			isa = PBXGroup;
+			children = (
+				DA54EB732BF714BE2672464D /* browser.gif */,
+				65A42D41F07A62FFDE816246 /* do-not-disturb.gif */,
+				39628AAFC1F86E185334094C /* file.gif */,
+				2D74ACDBCFF2C9BB1E0F53FA /* interrupted.gif */,
+				C39EB37626589852FFDE4684 /* media.gif */,
+				3B6ED8CFDAFE2DD308517648 /* slacking.gif */,
+				57B6AE59F0E0281FAE84E8B6 /* thinking.gif */,
+				7315DFF5C20D371D0C28CA2F /* typing.gif */,
+				856D8BAABD3663C199ED9A88 /* waiting.gif */,
+			);
+			path = DesktopPet;
+			sourceTree = "<group>";
+		};
+		D7C093C72F6AF2E02BFAEF0E = {
+			isa = PBXGroup;
+			children = (
+				3A970023EBEBE41A9184AD19 /* PinPawoAgent */,
+				AB9EECCB3C1A10093AD96009 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		EB280376791A83CC6585E3DB /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				7C05606F9252CB6992F6582A /* ActorMissingView.swift */,
+				446F54A4DB5D7010FC240655 /* AnimatedGIFView.swift */,
+				24A4868D9F3F55EFFEF48650 /* DesktopPetView.swift */,
+				0FF98751AE96D3E61C60BC8F /* LLMSettingsView.swift */,
+				2D4A0F4F69CC03C215EF1DE4 /* LoginView.swift */,
+				2362ED6B6B3962BBA8030A82 /* MenuBarView.swift */,
+				C72FA4654C5E970A9FC621D3 /* SettingsView.swift */,
+				C072C916C9F010477F4337C9 /* StatusView.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		EA6266B720A2DF62941AC749 /* PinPawoAgent */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0521626DE433619776458404 /* Build configuration list for PBXNativeTarget "PinPawoAgent" */;
+			buildPhases = (
+				838313B045493F720EF78AF5 /* Sources */,
+				B58C89841F7AA405AEC59BA3 /* Resources */,
+				7701FE186A3A540C7F841A36 /* Copy agent runtime into bundle */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PinPawoAgent;
+			packageProductDependencies = (
+			);
+			productName = PinPawoAgent;
+			productReference = 754C820C2AF74212A208020E /* PinPawoAgent.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		3AAF44D6F964F1D0A18F6A07 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					EA6266B720A2DF62941AC749 = {
+						DevelopmentTeam = R3WSWC6S6F;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = F49AF96F19E48255E06DF022 /* Build configuration list for PBXProject "PinPawoAgent" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = D7C093C72F6AF2E02BFAEF0E;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = AB9EECCB3C1A10093AD96009 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				EA6266B720A2DF62941AC749 /* PinPawoAgent */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B58C89841F7AA405AEC59BA3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				44033C45B252D4FDBA794A8E /* browser.gif in Resources */,
+				FBF723699C0B5E30F6BE0BEF /* do-not-disturb.gif in Resources */,
+				C81E355255BAFB7D179C93DC /* file.gif in Resources */,
+				F0C6B7247AE7D611BAFCD843 /* interrupted.gif in Resources */,
+				0EC683CA23B07E97267B6034 /* media.gif in Resources */,
+				27CCB8F56F3E6BE72642DA92 /* slacking.gif in Resources */,
+				C1FDD27DFF75ED31ECE23567 /* thinking.gif in Resources */,
+				F88C860F6F828E39EC29EECF /* typing.gif in Resources */,
+				55970212083ABAB95936CE21 /* waiting.gif in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		7701FE186A3A540C7F841A36 /* Copy agent runtime into bundle */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy agent runtime into bundle";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "AGENT_SRC=\"${SRCROOT}/../../services/local-agent\"\nRES_DIR=\"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources\"\nRELEASE_ENV_FILE=\"${SRCROOT}/release.env\"\nmkdir -p \"$RES_DIR\"\n\nnode_has_external_deps() {\n  /usr/bin/otool -L \"$1\" 2>/dev/null | /usr/bin/tail -n +2 | /usr/bin/awk '{print $1}' | \\\n    /usr/bin/grep -E -v '^(/System/|/usr/lib/|@rpath/|@executable_path/|@loader_path/)' >/dev/null\n}\n\nfirst_portable_node() {\n  for candidate in \"$@\"; do\n    [ -n \"$candidate\" ] || continue\n    [ -x \"$candidate\" ] || continue\n    if node_has_external_deps \"$candidate\"; then\n      continue\n    fi\n    echo \"$candidate\"\n    return 0\n  done\n  return 1\n}\n\nnode_version_ok() {\n  case \"$1\" in\n    v20.*) return 0 ;;\n    *) return 1 ;;\n  esac\n}\n\nSHELL_NODE=\"$(/bin/zsh -lc 'command -v node' 2>/dev/null || true)\"\nPATH_NODE=\"$(command -v node 2>/dev/null || true)\"\nNVM_CANDIDATES=\"\"\nfor candidate in \"$HOME\"/.nvm/versions/node/*/bin/node; do\n  [ -e \"$candidate\" ] || continue\n  NVM_CANDIDATES=\"${NVM_CANDIDATES}${candidate}\n\"\ndone\n\n# Release builds use a checked-in template plus a local release.env file for\n# stable Xcode Archive behavior. Environment variables still override the file.\nif [ -z \"${PINPAWO_NODE_PATH:-}\" ] && [ -f \"$RELEASE_ENV_FILE\" ]; then\n  set -a\n  . \"$RELEASE_ENV_FILE\"\n  set +a\nfi\n\n# Bundle a concrete Node runtime so the app is self-contained on target machines.\nif [ \"${CONFIGURATION}\" = \"Release\" ] && [ -z \"${PINPAWO_NODE_PATH:-}\" ]; then\n  echo \"error: Release builds require PINPAWO_NODE_PATH in tools/agent-macos/release.env or the build environment.\" >&2\n  echo \"error: copy tools/agent-macos/release.env.example to tools/agent-macos/release.env and set your local Node 20 path.\" >&2\n  exit 1\nfi\n\nif [ -n \"${PINPAWO_NODE_PATH:-}\" ]; then\n  NODE_SRC=\"$(first_portable_node \"${PINPAWO_NODE_PATH}\")\"\nelse\n  NODE_SRC=\"$(first_portable_node \\\n    \"$SHELL_NODE\" \\\n    $NVM_CANDIDATES \\\n    \"$PATH_NODE\")\"\nfi\nif [ -z \"$NODE_SRC\" ] || [ ! -x \"$NODE_SRC\" ]; then\n  echo \"error: unable to find a portable Node.js binary to bundle.\" >&2\n  echo \"error: the bundled node must not depend on external Homebrew/macPorts libraries such as libuv.\" >&2\n  echo \"error: set PINPAWO_NODE_PATH to a self-contained Node binary, for example an nvm-installed node.\" >&2\n  exit 1\nfi\nNODE_VERSION=\"$(\"$NODE_SRC\" -v 2>/dev/null || true)\"\nif ! node_version_ok \"$NODE_VERSION\"; then\n  echo \"error: bundled Node version must be 20.x, got '${NODE_VERSION:-unknown}' from $NODE_SRC.\" >&2\n  echo \"error: update PINPAWO_NODE_PATH or your local Node installation to match .nvmrc.\" >&2\n  exit 1\nfi\nNODE_DST=\"${RES_DIR}/bin/node\"\nNODE_ENTITLEMENTS=\"${SRCROOT}/PinPawoAgent/NodeRuntime.entitlements\"\nmkdir -p \"$(dirname \"$NODE_DST\")\"\ncp -fL \"$NODE_SRC\" \"$NODE_DST\"\nchmod 755 \"$NODE_DST\"\nSIGN_IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:--}\"\n/usr/bin/codesign \\\n  --force \\\n  --sign \"$SIGN_IDENTITY\" \\\n  --entitlements \"$NODE_ENTITLEMENTS\" \\\n  --options runtime \\\n  \"$NODE_DST\"\n\n# dist\necho \"Building local agent runtime...\"\n(cd \"$AGENT_SRC\" && PATH=\"$(dirname \"$NODE_SRC\"):$PATH\" npm run build)\nDIST_DST=\"${RES_DIR}/dist\"\nmkdir -p \"$DIST_DST\"\nrsync -a --delete \"$AGENT_SRC/dist/\" \"$DIST_DST/\"\n\n# node_modules: only copy local-agent runtime deps.\n# Do not bundle workspace-root node_modules or external browser helpers.\nNM_DST=\"${RES_DIR}/node_modules\"\nmkdir -p \"$NM_DST\"\nrsync -a --delete \"$AGENT_SRC/node_modules/\" \"$NM_DST/\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		838313B045493F720EF78AF5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CCEFBC488021BB5F864B3E0A /* ActorMissingView.swift in Sources */,
+				27E963B4E268B5E65980B4B2 /* AgentProcess.swift in Sources */,
+				9C1AF8C729F13A098D1156D9 /* AnimatedGIFView.swift in Sources */,
+				FAA99A8318A5D8EAFB358FC7 /* AppState.swift in Sources */,
+				D31ABF8B204E3DACE6B2159E /* AuthModels.swift in Sources */,
+				16631C1D7BA9DC09184257CB /* AuthService.swift in Sources */,
+				10C90E4F7E1852AC5BDBCCDF /* Config.swift in Sources */,
+				8227CE83135FFED0474D43D6 /* DesktopPetController.swift in Sources */,
+				5637158402553B2843F07BB6 /* DesktopPetView.swift in Sources */,
+				EDC207C26ED09D08D136BC7F /* HealthData.swift in Sources */,
+				3405911C7E71F22756BBDAD6 /* KeychainService.swift in Sources */,
+				1BC2C10E418B161AFD799468 /* LLMSettingsView.swift in Sources */,
+				F523DF1CAAC8F2B7404602D6 /* LoginView.swift in Sources */,
+				CC588A860FC6ED9C29B2074C /* MenuBarView.swift in Sources */,
+				BD5B9E0A5AED70573CB2C8B6 /* PinPawoAgentApp.swift in Sources */,
+				114B429B483F8D8445B29EAA /* SettingsView.swift in Sources */,
+				2873FCD457213945BA51C661 /* SettingsWindowFocus.swift in Sources */,
+				EA505892B2273084101F6424 /* StatusPoller.swift in Sources */,
+				6397AEBC0F155D29AAE03A6B /* StatusView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2EB7445080C8182226E6D3FD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = PinPawoAgent/PinPawoAgent.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = R3WSWC6S6F;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = PinPawoAgent/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.pinpawo.agent;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		3CAFBFA201ABE992F1A7E9DA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		45695328712DEE0F50826B7B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = PinPawoAgent/PinPawoAgent.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = R3WSWC6S6F;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = PinPawoAgent/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.pinpawo.agent;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		7F8C2ADD3399B296279ACF0F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0521626DE433619776458404 /* Build configuration list for PBXNativeTarget "PinPawoAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				45695328712DEE0F50826B7B /* Debug */,
+				2EB7445080C8182226E6D3FD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F49AF96F19E48255E06DF022 /* Build configuration list for PBXProject "PinPawoAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3CAFBFA201ABE992F1A7E9DA /* Debug */,
+				7F8C2ADD3399B296279ACF0F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 3AAF44D6F964F1D0A18F6A07 /* Project object */;
+}

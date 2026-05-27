@@ -73,11 +73,12 @@ const INTERNAL_AI_STREAM_NODES = new Set([
 
 async function filterAvailableUserCapabilities(
   loaded: LoadedUserCapability[],
+  options: { force?: boolean } = {},
 ): Promise<LoadedUserCapability[]> {
   const records = await Promise.all(
     loaded.map(async (item) => ({
       item,
-      availability: await resolveCapabilityAvailability(item.capability),
+      availability: await resolveCapabilityAvailability(item.capability, options),
     })),
   );
   return records
@@ -293,6 +294,21 @@ export class LocalAgentRuntime {
 
   getUserCapabilityDefinitions(): LoadedUserCapability[] {
     return this.userCapabilityDefinitions;
+  }
+
+  async rescanUserCapabilities(): Promise<{
+    userCapabilityDefinitions: LoadedUserCapability[];
+    userCapabilities: LoadedUserCapability[];
+  }> {
+    this.userCapabilityDefinitions = await loadUserCapabilities();
+    this.userCapabilities = await filterAvailableUserCapabilities(
+      this.userCapabilityDefinitions,
+      { force: true },
+    );
+    return {
+      userCapabilityDefinitions: this.userCapabilityDefinitions,
+      userCapabilities: this.userCapabilities,
+    };
   }
 
   getStats() {

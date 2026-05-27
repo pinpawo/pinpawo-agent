@@ -22,9 +22,12 @@ if (command === 'login') {
 } else if (command === 'detect') {
   const { runDetect } = await import('./commands/detect');
   await runDetect();
+} else if (command === 'capability') {
+  const { runCapabilityCommand } = await import('./commands/capability');
+  await runCapabilityCommand(process.argv.slice(3));
 } else {
   console.error(`Unknown command: ${command}`);
-  console.error('Usage: pinpawo-agent <login|actor|run|once|tui|detect> [--dry-run] [--no-db]');
+  console.error('Usage: pinpawo-agent <login|actor|run|once|tui|detect|capability> [--dry-run] [--no-db]');
   process.exit(1);
 }
 

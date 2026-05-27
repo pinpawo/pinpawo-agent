@@ -13,12 +13,17 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
-import { type AgentCapability, type AgentToolkit } from '@pinpawo/pet-agent';
+import {
+  BUILT_IN_CAPABILITY_REGISTRY,
+  type AgentCapability,
+  type AgentToolkit,
+} from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 import { loadAgentContext } from './contextLoader';
 import {
   getCachedCapabilityAvailability,
   refreshCapability,
+  resolveCapabilityAvailability,
   type CapabilityAvailabilityRecord,
   refreshToolkit,
   type ToolkitAvailabilityRecord,
@@ -27,6 +32,8 @@ import { FileSaver } from './fileSaver';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
 import type { LoadedUserCapability } from './capabilityLoader';
+import { loadUserCapabilities, readUserCapabilityManifests } from './capabilityLoader';
+import { loadStoredConfig } from './storage';
 import { authorizeShellPattern, clearSessionAuthorizations } from './sessionAuthorizations';
 import {
   buildTuiChatThreadId,
@@ -72,6 +79,10 @@ export type LocalServerDeps = {
   localCapabilities?: AgentCapability[];
   userCapabilityDefinitions?: LoadedUserCapability[];
   userCapabilities?: LoadedUserCapability[];
+  rescanUserCapabilities?: () => Promise<{
+    userCapabilityDefinitions: LoadedUserCapability[];
+    userCapabilities: LoadedUserCapability[];
+  }>;
   getStats: () => AgentStats;
 };
 
@@ -923,6 +934,94 @@ async function refreshRuntimeCapability(deps: LocalServerDeps, name: string) {
   replaceUserCapability(deps, name, userRecord);
 }
 
+function isCapabilityEnabled(id: string) {
+  const caps = loadStoredConfig().capabilities;
+  return !caps || !(id in caps) ? true : caps[id] === true;
+}
+
+async function filterAvailableUserCapabilities(
+  loaded: LoadedUserCapability[],
+  options: { force?: boolean } = {},
+): Promise<LoadedUserCapability[]> {
+  const records = await Promise.all(
+    loaded.map(async (item) => ({
+      item,
+      availability: await resolveCapabilityAvailability(item.capability, options),
+    })),
+  );
+  return records
+    .filter((record) => record.availability.availability.available)
+    .map((record) => record.item);
+}
+
+async function rescanUserCapabilities(deps: LocalServerDeps) {
+  const runtimeRescan = deps.rescanUserCapabilities
+    ? await deps.rescanUserCapabilities()
+    : null;
+  const definitions = runtimeRescan?.userCapabilityDefinitions ?? await loadUserCapabilities();
+  const available = runtimeRescan?.userCapabilities
+    ?? await filterAvailableUserCapabilities(definitions, { force: true });
+  deps.userCapabilityDefinitions = definitions;
+  deps.userCapabilities = available;
+  return {
+    loaded: definitions.length,
+    available: available.length,
+  };
+}
+
+function buildCapabilitiesPayload(deps: LocalServerDeps) {
+  const localCapabilityIds = new Set((deps.localCapabilities ?? []).map((item) => item.name));
+  const localDefinitionIds = new Set((deps.localCapabilityDefinitions ?? []).map((item) => item.name));
+  const userDefinitions = deps.userCapabilityDefinitions ?? [];
+  const userDefinitionIds = new Set(userDefinitions.flatMap((item) => [item.meta.id, item.capability.name]));
+  const userAvailableIds = new Set(
+    (deps.userCapabilities ?? []).flatMap((item) => [item.meta.id, item.capability.name]),
+  );
+
+  const builtIns = BUILT_IN_CAPABILITY_REGISTRY.map((meta) => {
+    const availability = getCachedCapabilityAvailability(meta.id);
+    const isHostRuntimeCapability = localDefinitionIds.has(meta.id);
+    return {
+      ...meta,
+      enabled: isCapabilityEnabled(meta.id),
+      loaded: true,
+      available: isHostRuntimeCapability ? localCapabilityIds.has(meta.id) : isCapabilityEnabled(meta.id),
+      availability: availability
+        ? {
+          available: availability.available,
+          reason: availability.reason,
+          detail: availability.detail,
+          metadata: availability.metadata,
+        }
+        : null,
+    };
+  });
+
+  const userManifests = readUserCapabilityManifests().map((meta) => {
+    const definition = userDefinitions.find((item) => item.meta.id === meta.id);
+    const availability = definition ? getCachedCapabilityAvailability(definition.capability.name) : null;
+    return {
+      ...meta,
+      enabled: isCapabilityEnabled(meta.id),
+      loaded: userDefinitionIds.has(meta.id),
+      available: userAvailableIds.has(meta.id),
+      availability: availability
+        ? {
+          available: availability.available,
+          reason: availability.reason,
+          detail: availability.detail,
+          metadata: availability.metadata,
+        }
+        : null,
+    };
+  });
+
+  return {
+    builtIns,
+    userCapabilities: userManifests,
+  };
+}
+
 function readBrowserHealthFields() {
   const availability = getCachedCapabilityAvailability('browser');
   if (!availability) return {};
@@ -971,6 +1070,28 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
         }
 
         writeHealth();
+        return;
+      }
+      if (pathname === '/capabilities') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(buildCapabilitiesPayload(deps)));
+        return;
+      }
+      if (pathname === '/capabilities/rescan') {
+        rescanUserCapabilities(deps).then((summary) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            status: 'ok',
+            ...summary,
+            ...buildCapabilitiesPayload(deps),
+          }));
+        }).catch((err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            status: 'error',
+            error: err instanceof Error ? err.message : 'capability rescan failed',
+          }));
+        });
         return;
       }
       if (pathname === '/history') {

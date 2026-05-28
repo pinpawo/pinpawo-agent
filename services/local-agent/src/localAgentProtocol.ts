@@ -1,3 +1,9 @@
+import type { LocalAgentEvent, LocalAgentOperationPhase } from './events/localAgentEvent';
+import {
+  buildLocalAgentEventFromLegacyMessage,
+  type LegacyServerMessage,
+} from './protocol/legacyProtocolAdapter';
+
 export type ChatRequestMessage = {
   type: 'chat_request';
   requestId: string;
@@ -43,9 +49,18 @@ export type LocalAgentClientMessage =
 
 export type ToolLogPhase = 'start' | 'end' | 'complete' | 'error' | 'event' | 'interrupt';
 
+export type LocalAgentEventMessage = {
+  type: 'event';
+  requestId: string;
+  event: LocalAgentEvent;
+};
+
 export type LocalAgentServerMessage =
   | { type: 'pong' }
+  | LocalAgentEventMessage
+  /** @deprecated compatibility only; use type: 'event' with event.type: 'message.delta'. */
   | { type: 'chat_token'; requestId: string; token: string }
+  /** @deprecated compatibility only; use type: 'event' with event.type: 'operation'. */
   | {
       type: 'tool_log';
       requestId: string;
@@ -56,6 +71,7 @@ export type LocalAgentServerMessage =
       output?: string;
       error?: string;
     }
+  /** @deprecated compatibility only; use type: 'event' with event.type: 'human_review.requested'. */
   | {
       type: 'human_interrupt';
       requestId: string;
@@ -66,7 +82,9 @@ export type LocalAgentServerMessage =
     }
   | { type: 'interrupting'; requestId: string; message?: string }
   | { type: 'interrupted'; requestId: string; message?: string }
+  /** @deprecated compatibility only; use type: 'event' with event.type: 'system.notice'. */
   | { type: 'system_notice'; requestId: string; message: string }
+  /** @deprecated compatibility only; use type: 'event' with event.type: 'message.completed'. */
   | {
       type: 'chat_response';
       requestId: string;
@@ -75,6 +93,7 @@ export type LocalAgentServerMessage =
       topic: string | null;
       tags: string[];
     }
+  /** @deprecated compatibility only; use type: 'event' with event.type: 'studio.progress'. */
   | {
       /**
        * Studio orchestrator 编排进度事件。turn_started / plan_set /
@@ -140,6 +159,97 @@ function readStringArray(record: Record<string, unknown>, key: string) {
     : null;
 }
 
+function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent | null {
+  const type = readString(record, 'type');
+  const requestId = readString(record, 'requestId');
+  if (!type || !requestId) return null;
+
+  if (type === 'message.delta') {
+    const role = readString(record, 'role');
+    const text = readString(record, 'text');
+    return role === 'assistant' && text != null
+      ? { type, requestId, role, text }
+      : null;
+  }
+  if (type === 'message.completed') {
+    const role = readString(record, 'role');
+    const text = readString(record, 'text');
+    if (role !== 'assistant' || text == null) return null;
+    const metadata = readRecord(record, 'metadata');
+    const tags = metadata ? readStringArray(metadata, 'tags') : null;
+    return {
+      type,
+      requestId,
+      role,
+      text,
+      ...(metadata
+        ? {
+            metadata: {
+              mood: readOptionalString(metadata, 'mood') ?? null,
+              topic: readOptionalString(metadata, 'topic') ?? null,
+              ...(tags ? { tags } : {}),
+            },
+          }
+        : {}),
+    };
+  }
+  if (type === 'operation') {
+    const phase = readString(record, 'phase');
+    const operation = readRecord(record, 'operation');
+    const kind = operation ? readString(operation, 'kind') : null;
+    if (!isOperationPhase(phase) || !operation || !kind) return null;
+    const source = readRecord(operation, 'source');
+    const sourceProvider = source ? readString(source, 'provider') : null;
+    const sourceName = source ? readString(source, 'name') : null;
+    const raw = readRecord(record, 'raw');
+    return {
+      type,
+      requestId,
+      phase,
+      operation: {
+        id: readOptionalString(operation, 'id'),
+        kind,
+        title: readOptionalString(operation, 'title'),
+        target: readOptionalString(operation, 'target'),
+        summary: readOptionalString(operation, 'summary'),
+        details: readRecord(operation, 'details') ?? undefined,
+        ...(sourceProvider && isOperationSourceProvider(sourceProvider) && sourceName
+          ? {
+              source: {
+                provider: sourceProvider,
+                name: sourceName,
+                callId: source ? readOptionalString(source, 'callId') : undefined,
+              },
+            }
+          : {}),
+      },
+      ...(raw ? { raw } : {}),
+    };
+  }
+  if (type === 'human_review.requested') {
+    const prompt = readString(record, 'prompt');
+    const payload = readRecord(record, 'payload');
+    const actor = readRecord(record, 'actor');
+    if (prompt == null || !payload) return null;
+    return {
+      type,
+      requestId,
+      prompt,
+      payload,
+      ...(actor ? { actor: { petId: readOptionalString(actor, 'petId') } } : {}),
+    };
+  }
+  if (type === 'studio.progress') {
+    const event = readRecord(record, 'event');
+    return event ? { type, requestId, event } : null;
+  }
+  if (type === 'system.notice' || type === 'error') {
+    const message = readString(record, 'message');
+    return message == null ? null : { type, requestId, message };
+  }
+  return null;
+}
+
 export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMessage | null {
   const record = readJsonRecord(raw);
   if (!record) return null;
@@ -201,6 +311,11 @@ export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMess
   if (type === 'pong') return { type };
   const requestId = readString(record, 'requestId');
   if (!requestId) return null;
+  if (type === 'event') {
+    const eventRecord = readRecord(record, 'event');
+    const event = eventRecord ? readLocalAgentEvent(eventRecord) : null;
+    return event && event.requestId === requestId ? { type, requestId, event } : null;
+  }
   if (type === 'chat_token') {
     const token = readString(record, 'token');
     return token == null ? null : { type, requestId, token };
@@ -280,8 +395,24 @@ export function sendLocalAgentMessage(ws: WsLike, message: LocalAgentServerMessa
   if (ws.readyState !== WS_OPEN) {
     return false;
   }
+  if (isLegacyServerMessage(message)) {
+    ws.send(JSON.stringify({
+      type: 'event',
+      requestId: message.requestId,
+      event: buildLocalAgentEventFromLegacyMessage(message),
+    } satisfies LocalAgentEventMessage));
+  }
   ws.send(JSON.stringify(message));
   return true;
+}
+
+function isLegacyServerMessage(message: LocalAgentServerMessage | LocalAgentClientMessage): message is LegacyServerMessage {
+  return message.type === 'chat_token'
+    || message.type === 'human_interrupt'
+    || message.type === 'system_notice'
+    || message.type === 'chat_response'
+    || message.type === 'studio_turn_event'
+    || message.type === 'error';
 }
 
 function isToolLogPhase(value: string): value is ToolLogPhase {
@@ -291,4 +422,16 @@ function isToolLogPhase(value: string): value is ToolLogPhase {
     || value === 'error'
     || value === 'event'
     || value === 'interrupt';
+}
+
+function isOperationPhase(value: string | null): value is LocalAgentOperationPhase {
+  return value === 'started'
+    || value === 'updated'
+    || value === 'completed'
+    || value === 'failed'
+    || value === 'interrupted';
+}
+
+function isOperationSourceProvider(value: string): value is 'toolkit' | 'capability' | 'runtime' {
+  return value === 'toolkit' || value === 'capability' || value === 'runtime';
 }

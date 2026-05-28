@@ -31,14 +31,14 @@ import { homedir } from 'node:os';
 import { LocalAgentGraphService } from './agentGraphService';
 import { ensureActorSelected, loadSelectedActorName } from './actorSelection';
 import { loadStoredConfig, saveStoredConfig } from './storage';
+import { buildAppChatThreadId } from './chatInterface';
 import {
-  buildAppChatThreadId,
   parseLocalAgentClientMessage,
   sendLocalAgentMessage,
   type ChatRequestMessage,
   type InterruptRequestMessage,
   type NewSessionMessage,
-} from './chatInterface';
+} from './localAgentProtocol';
 import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
 import {
   buildToolLogMessage,

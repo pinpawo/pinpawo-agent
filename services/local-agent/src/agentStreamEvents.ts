@@ -1,5 +1,5 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import type { ToolLogPhase } from './chatInterface';
+import type { ToolLogPhase } from './localAgentProtocol';
 
 export type StreamToolsPayload = {
   event: 'on_tool_start' | 'on_tool_event' | 'on_tool_end' | 'on_tool_error';
@@ -21,12 +21,6 @@ export type ToolLogMessagePayload = {
   output?: string;
   error?: string;
 };
-
-export const INTERNAL_AI_STREAM_NODES = new Set([
-  'capabilityDiscovery',
-  'userIntentDecision',
-  'delegationOutcomeDecision',
-]);
 
 export function readFinalMessageText(message: { content?: unknown }) {
   const content = message.content;

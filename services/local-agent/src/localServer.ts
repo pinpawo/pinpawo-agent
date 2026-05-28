@@ -17,15 +17,15 @@ import { FileSaver } from './fileSaver';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
 import { authorizeShellPattern, clearSessionAuthorizations } from './sessionAuthorizations';
+import { buildTuiChatThreadId } from './chatInterface';
+import { readShellReviewCommand } from './chatInterrupts';
 import {
-  buildTuiChatThreadId,
   parseLocalAgentClientMessage,
-  readShellReviewCommand,
   sendLocalAgentMessage,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
   type StudioRequestMessage,
-} from './chatInterface';
+} from './localAgentProtocol';
 import { readFirstHumanReviewDecision, type HumanReviewDecision } from '@pinpawo/pet-agent';
 import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
 import {

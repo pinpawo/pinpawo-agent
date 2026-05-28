@@ -7,7 +7,7 @@ import WebSocket from 'ws';
 import { config } from '../config';
 import { loadAgentContext } from '../contextLoader';
 import { ensureActorSelected } from '../actorSelection';
-import { parseLocalAgentServerMessage, sendLocalAgentMessage } from '../chatInterface';
+import { parseLocalAgentServerMessage, sendLocalAgentMessage } from '../localAgentProtocol';
 import {
   formatStudioTurnEvent,
   formatToolProgress,

@@ -1,4 +1,4 @@
-import type { ToolLogPhase } from './chatInterface';
+import type { ToolLogPhase } from './localAgentProtocol';
 
 type ActiveToolState = {
   name: string;

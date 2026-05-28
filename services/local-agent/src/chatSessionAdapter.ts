@@ -1,15 +1,17 @@
 import type { BaseMessage } from '@langchain/core/messages';
+import { isOrchestratorInternalAiStreamNode } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { LocalAgentGraphService } from './agentGraphService';
 import {
   formatInterruptPrompt,
   normalizeInterruptResume,
   readPendingInterrupt,
-  type ChatRequestMessage,
-  type LocalAgentServerMessage,
-} from './chatInterface';
+} from './chatInterrupts';
+import type {
+  ChatRequestMessage,
+  LocalAgentServerMessage,
+} from './localAgentProtocol';
 import {
-  INTERNAL_AI_STREAM_NODES,
   isLaneTaggedAiMessage,
   readFinalMessageText,
   readMessageChunkText,
@@ -87,7 +89,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
           continue;
         }
         const streamNode = readStreamNode(metadata);
-        if (streamNode && INTERNAL_AI_STREAM_NODES.has(streamNode)) {
+        if (streamNode && isOrchestratorInternalAiStreamNode(streamNode)) {
           continue;
         }
         if (isLaneTaggedAiMessage(streamMessage)) {

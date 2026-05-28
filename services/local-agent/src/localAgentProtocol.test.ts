@@ -4,7 +4,7 @@ import {
   parseLocalAgentClientMessage,
   parseLocalAgentServerMessage,
   sendLocalAgentMessage,
-} from './chatInterface';
+} from './localAgentProtocol';
 
 test('parseLocalAgentClientMessage accepts valid chat requests and rejects malformed payloads', () => {
   assert.deepEqual(

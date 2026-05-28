@@ -48,6 +48,8 @@ export type {
 export {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
+  isOrchestratorInternalAiStreamNode,
+  ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_NAMES,
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,
   validateUniqueToolNames,

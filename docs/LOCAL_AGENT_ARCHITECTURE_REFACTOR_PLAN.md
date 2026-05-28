@@ -171,16 +171,35 @@ toolName -> operation metadata
 
 adapter 可以有自己的 i18n / copy，但不能重新解析内部 tool input/output。
 
-### 3.4 兼容优先，分阶段迁移
+### 3.4 协议采用 `type: 'event'`，旧消息只做兼容
 
-短期不能直接删除 `tool_log`，否则会影响当前 app/TUI。
+新协议使用统一 server message：
+
+```ts
+type LocalAgentEventMessage = {
+  type: 'event';
+  requestId: string;
+  event: LocalAgentEvent;
+};
+```
+
+旧消息短期保留，但只作为兼容层：
+
+- `tool_log`
+- `chat_token`
+- `chat_response`
+- `human_interrupt`
+- `studio_turn_event`
+
+这些 legacy messages 在代码里需要明确标注 `@deprecated compatibility only`。等 app / TUI / macOS companion 全部切到 `type: 'event'` 后删除。
 
 迁移策略：
 
 1. 新增 `LocalAgentEvent`。
-2. 由 `LocalAgentEvent` 反向生成 legacy `tool_log`。
-3. app/TUI 逐步切到新事件。
-4. 旧 `tool_log` 降级为 compatibility/debug。
+2. server 同时输出 `type: 'event'` 和 legacy messages。
+3. app/TUI 逐步切到 `type: 'event'`。
+4. 旧 messages 降级为 compatibility/debug。
+5. 全部客户端迁移完成后删除 legacy messages。
 
 ## 4. 目标分层
 
@@ -255,6 +274,48 @@ type LocalAgentEvent =
   | LocalAgentStudioEvent
   | LocalAgentSystemEvent;
 ```
+
+### 5.0 LangGraph stream 到 LocalAgentEvent 的映射
+
+local-agent 内部可以参考 LangGraph `astream` 的返回形态，但不能把它原样暴露给客户端。
+
+当前 chat session 已经消费这些 stream mode：
+
+```txt
+messages -> assistant token stream
+tools    -> tool start/event/end/error
+values   -> final graph state 或 interrupt state
+```
+
+目标映射：
+
+```txt
+astream messages
+  -> LocalAgentEvent message.delta
+  -> legacy chat_token
+
+astream values final messages
+  -> LocalAgentEvent message.completed
+  -> legacy chat_response
+
+astream tools
+  -> LocalAgentEvent operation
+  -> legacy tool_log
+
+astream values __interrupt__
+  -> LocalAgentEvent human_review.requested
+  -> legacy human_interrupt
+
+studio runtime progress
+  -> LocalAgentEvent studio.progress
+  -> legacy studio_turn_event
+```
+
+原则：
+
+- LangGraph stream 是 runtime internal API。
+- `LocalAgentEvent` 是 local-agent 对 app/TUI/macOS companion 的 public event API。
+- legacy messages 只能从 `LocalAgentEvent` 派生，不能继续作为 primary event model。
 
 ### 5.1 Operation event
 
@@ -398,20 +459,23 @@ type OperationRegistry = {
 
 ### 阶段 1：引入事件模型，不改变对外协议
 
-目标：新增 `LocalAgentEvent` 和 normalizer，但仍输出 legacy protocol。
+目标：新增 `LocalAgentEvent` 和 normalizer，并开始输出 `type: 'event'`。legacy protocol 同时保留。
 
 工作项：
 
 - 新增 `events/LocalAgentEvent.ts`。
 - 新增 `events/OperationRegistry.ts`。
 - 新增 `events/AgentStreamNormalizer.ts`。
-- `buildToolLogMessage()` 改为通过 `LocalAgentOperationEvent -> legacy tool_log` 派生。
+- 新增 `protocol/LegacyProtocolAdapter.ts`，从 `LocalAgentEvent` 派生 legacy messages。
+- `buildToolLogMessage()` 这类旧入口改为走 `astream tools -> LocalAgentOperationEvent -> legacy tool_log`。
 - 内置 local tools 注册 operation metadata。
+- `localAgentProtocol.ts` 中 legacy server message 类型加 `@deprecated compatibility only` 注释。
 
 约束：
 
 - 不改 app/TUI 行为。
 - 不删除 `tool_log`。
+- 不让 legacy messages 继续成为 primary event model。
 - 不让 presentation 直接读内部 toolName。
 
 ### 阶段 2：TUI 切到 LocalAgentEvent
@@ -437,7 +501,7 @@ type OperationRegistry = {
 
 - app websocket/API 输出 typed local-agent events。
 - app run state 基于 `message.delta`、`operation.*`、`human_review.requested`。
-- 旧 SSE/WS `tool_log` 保持一段兼容期。
+- 旧 SSE/WS `tool_log/chat_token/chat_response/human_interrupt` 保持一段兼容期，并继续标注为 deprecated。
 
 产出：
 
@@ -480,7 +544,7 @@ type OperationRegistry = {
 
 工作项：
 
-- 删除或 debug-only 化 legacy `tool_log`。
+- 删除或 debug-only 化 legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event`。
 - 删除面向内部 toolName 的 formatter。
 - 清理 `chatInterface.ts` 中 thread id 推断能力的逻辑。
 - 更新 AGENTS.md 和开发文档。
@@ -493,7 +557,7 @@ type OperationRegistry = {
 
 1. `docs: add local-agent architecture refactor plan`
 2. `events: introduce LocalAgentEvent and operation registry`
-3. `events: normalize tool stream events behind legacy tool_log`
+3. `events: normalize LangGraph astream events and emit type:event`
 4. `tui: render operation events instead of internal tool logs`
 5. `protocol: expose typed local-agent events for app`
 6. `server: split websocket/http handlers from runtime`
@@ -518,8 +582,15 @@ type OperationRegistry = {
 
 ## 10. 待确认问题
 
-1. 新协议是直接替换 websocket server message，还是新增 `event` message 并保留旧 message 并行。
-2. app 是否需要接收 `raw.input/output`，还是只在 debug mode 开启。
-3. operation metadata 应该挂在 toolkit runtime、tool wrapper，还是 local-agent host registry。
-4. user capability 的 metadata manifest 形态是否需要进入公开 capability contract。
-5. i18n 是 metadata 直接给 `title`，还是给 `titleKey` 由 adapter locale 渲染。
+已确认：
+
+1. 新协议新增 `type: 'event'` message，并保留旧 message 并行兼容。
+2. legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event` 要在代码里标注 compatibility only，等其他部分改造完成后删除。
+3. LangGraph `astream` 的 `messages/tools/values` 只作为 internal stream source，不能作为 app/TUI public protocol。
+
+仍待确认：
+
+1. app 是否需要接收 `raw.input/output`，还是只在 debug mode 开启。
+2. operation metadata 应该挂在 toolkit runtime、tool wrapper，还是 local-agent host registry。
+3. user capability 的 metadata manifest 形态是否需要进入公开 capability contract。
+4. i18n 是 metadata 直接给 `title`，还是给 `titleKey` 由 adapter locale 渲染。

@@ -16,7 +16,7 @@
     "tui": "tsx src/index.ts tui",
     "tui:dry": "tsx src/index.ts tui --dry-run",
     "test:live": "node --import tsx --test tests/live-agent.test.ts",
-    "test:unit": "node --import tsx --test src/studio/*.test.ts",
+    "test:unit": "node --import tsx --test src/*.test.ts src/studio/*.test.ts",
     "build": "tsup && node --import tsx/esm scripts/gen-manifest.ts",
     "typecheck": "tsc --noEmit"
   },
@@ -26,6 +26,7 @@
     "@langchain/openai": "^1.2.3",
     "@pinpawo/pet-agent": "*",
     "@tavily/core": "^0.7.1",
+    "commander": "^12.1.0",
     "ink": "^6.8.0",
     "ink-text-input": "^6.0.0",
     "openai": "^4.77.0",

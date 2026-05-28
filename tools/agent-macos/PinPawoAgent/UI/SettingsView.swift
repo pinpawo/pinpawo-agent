@@ -461,6 +461,8 @@ private enum CapabilityDetailPage: Hashable {
 }
 
 private struct CapabilitiesSettingsPane: View {
+  @EnvironmentObject private var appState: AppState
+
   @State private var items: [CapabilityItem]
   /// Enabled states keyed by capability id. Separated from items so that
   /// toggling a switch never mutates the items array and won't reset navigation.
@@ -644,6 +646,7 @@ private struct CapabilitiesSettingsPane: View {
         HStack(spacing: 6) {
           Button {
             loadItems()
+            Task { await rescanRunningAgentCapabilities() }
           } label: {
             Label("重新扫描", systemImage: "arrow.clockwise")
               .font(.callout)
@@ -707,6 +710,7 @@ private struct CapabilitiesSettingsPane: View {
       cfg.capabilityDirs = dirs
     }
     loadItems()
+    Task { await rescanRunningAgentCapabilities() }
   }
 
   private func removeExtraDir(_ url: URL) {
@@ -714,6 +718,7 @@ private struct CapabilitiesSettingsPane: View {
       cfg.capabilityDirs = (cfg.capabilityDirs ?? []).filter { $0 != url.path }
     }
     loadItems()
+    Task { await rescanRunningAgentCapabilities() }
   }
 
   // MARK: - Capability loading
@@ -778,6 +783,14 @@ private struct CapabilitiesSettingsPane: View {
        !validIds.contains(id) {
       detailPage = nil
     }
+  }
+
+  private func rescanRunningAgentCapabilities() async {
+    guard appState.agent.isRunning else { return }
+    guard let url = URL(string: "http://127.0.0.1:3210/capabilities/rescan") else { return }
+    var req = URLRequest(url: url)
+    req.timeoutInterval = 6
+    _ = try? await URLSession.shared.data(for: req)
   }
 }
 

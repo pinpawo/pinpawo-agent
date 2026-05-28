@@ -32,6 +32,10 @@ function normalizeOptionalInput(input: string): string | null {
   return trimmed;
 }
 
+function fail(message: string): never {
+  throw new Error(message);
+}
+
 function isValidMediaCrawlerDir(dir: string): boolean {
   return existsSync(resolve(dir, 'main.py'));
 }
@@ -65,8 +69,7 @@ export async function runLogin() {
     let apiBaseUrl = await prompt(rl, `API URL${defaultApi ? ` [${defaultApi}]` : ''}: `);
     if (!apiBaseUrl && defaultApi) apiBaseUrl = defaultApi;
     if (!apiBaseUrl) {
-      console.error('API URL is required.');
-      process.exit(1);
+      fail('API URL is required.');
     }
     apiBaseUrl = apiBaseUrl.replace(/\/$/, '');
 
@@ -75,16 +78,14 @@ export async function runLogin() {
     let hasuraEndpoint = await prompt(rl, `Hasura GraphQL URL${defaultHasura ? ` [${defaultHasura}]` : ''}: `);
     if (!hasuraEndpoint && defaultHasura) hasuraEndpoint = defaultHasura;
     if (!hasuraEndpoint) {
-      console.error('Hasura GraphQL URL is required.');
-      process.exit(1);
+      fail('Hasura GraphQL URL is required.');
     }
     hasuraEndpoint = hasuraEndpoint.replace(/\/$/, '');
 
     // Phone
     const phone = await prompt(rl, 'Phone number (e.g. 13800138000): ');
     if (!phone) {
-      console.error('Phone number is required.');
-      process.exit(1);
+      fail('Phone number is required.');
     }
 
     // Send SMS
@@ -95,8 +96,7 @@ export async function runLogin() {
     // Verify SMS
     const code = await prompt(rl, 'Enter the 6-digit SMS code: ');
     if (!code) {
-      console.error('Code is required.');
-      process.exit(1);
+      fail('Code is required.');
     }
 
     process.stdout.write('Verifying...');
@@ -121,8 +121,7 @@ export async function runLogin() {
     let llmApiKey = await prompt(rl, `LLM API Key${defaultLlmKey ? ' [already set, press Enter to keep]' : ''}: `);
     if (!llmApiKey && defaultLlmKey) llmApiKey = defaultLlmKey;
     if (!llmApiKey) {
-      console.error('LLM API Key is required.');
-      process.exit(1);
+      fail('LLM API Key is required.');
     }
 
     let llmBaseUrl = await prompt(rl, `LLM Base URL [${defaultLlmBase}]: `);
@@ -149,9 +148,7 @@ export async function runLogin() {
       mediaCrawlerDir = mediaCrawlerDirInput;
     }
     if (mediaCrawlerDir && !isValidMediaCrawlerDir(mediaCrawlerDir)) {
-      console.error(`MediaCrawler directory is invalid: ${mediaCrawlerDir}`);
-      console.error('Expected to find main.py in that directory.');
-      process.exit(1);
+      fail(`MediaCrawler directory is invalid: ${mediaCrawlerDir}\nExpected to find main.py in that directory.`);
     }
 
     let xhsCookie = defaultXhsCookie;

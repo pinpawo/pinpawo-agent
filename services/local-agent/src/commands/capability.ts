@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
+import type { Command } from 'commander';
 import { DEFAULT_CAPABILITIES_DIR, readUserCapabilityManifests, validateCapabilityPlugin } from '../capabilityLoader';
 
 type CapabilityCommandOptions = {
@@ -12,35 +13,6 @@ function expandHome(path: string): string {
   if (path === '~') return homedir();
   if (path.startsWith('~/')) return resolve(homedir(), path.slice(2));
   return path;
-}
-
-function parseOptions(args: string[]): { positional: string[]; options: CapabilityCommandOptions } {
-  const positional: string[] = [];
-  const options: CapabilityCommandOptions = {
-    overwrite: false,
-    link: false,
-  };
-
-  for (const arg of args) {
-    if (arg === '--overwrite') {
-      options.overwrite = true;
-    } else if (arg === '--link') {
-      options.link = true;
-    } else {
-      positional.push(arg);
-    }
-  }
-
-  return { positional, options };
-}
-
-function usage(): string {
-  return [
-    'Usage:',
-    '  pinpawo-agent capability list',
-    '  pinpawo-agent capability validate <directory>',
-    '  pinpawo-agent capability install <directory> [--overwrite] [--link]',
-  ].join('\n');
 }
 
 function readDependencyWarning(rootDir: string, linked: boolean): string | null {
@@ -62,11 +34,10 @@ function readDependencyWarning(rootDir: string, linked: boolean): string | null 
   }
 }
 
-async function validateCommand(rootDir: string): Promise<number> {
+async function validateCommand(rootDir: string): Promise<void> {
   const result = await validateCapabilityPlugin(rootDir);
   if (!result.ok) {
-    process.stderr.write(`Capability plugin invalid: ${result.errors.join('; ')}\n`);
-    return 1;
+    throw new Error(`Capability plugin invalid: ${result.errors.join('; ')}`);
   }
 
   process.stdout.write(JSON.stringify({
@@ -78,15 +49,13 @@ async function validateCommand(rootDir: string): Promise<number> {
     indexPath: result.indexPath,
     warnings: result.warnings,
   }, null, 2) + '\n');
-  return 0;
 }
 
-async function installCommand(sourceArg: string, options: CapabilityCommandOptions): Promise<number> {
+async function installCommand(sourceArg: string, options: CapabilityCommandOptions): Promise<void> {
   const sourceDir = resolve(expandHome(sourceArg));
   const validation = await validateCapabilityPlugin(sourceDir);
   if (!validation.ok || !validation.meta) {
-    process.stderr.write(`Capability plugin invalid: ${validation.errors.join('; ')}\n`);
-    return 1;
+    throw new Error(`Capability plugin invalid: ${validation.errors.join('; ')}`);
   }
 
   const targetDir = resolve(DEFAULT_CAPABILITIES_DIR, validation.meta.id);
@@ -96,15 +65,14 @@ async function installCommand(sourceArg: string, options: CapabilityCommandOptio
       id: validation.meta.id,
       targetDir,
     }, null, 2) + '\n');
-    return 0;
+    return;
   }
 
   if (existsSync(targetDir)) {
     if (!options.overwrite) {
-      process.stderr.write(
-        `Capability "${validation.meta.id}" already exists at ${targetDir}. Re-run with --overwrite to replace it.\n`,
+      throw new Error(
+        `Capability "${validation.meta.id}" already exists at ${targetDir}. Re-run with --overwrite to replace it.`,
       );
-      return 1;
     }
     rmSync(targetDir, { recursive: true, force: true });
   }
@@ -122,8 +90,7 @@ async function installCommand(sourceArg: string, options: CapabilityCommandOptio
 
   const installedValidation = await validateCapabilityPlugin(targetDir);
   if (!installedValidation.ok) {
-    process.stderr.write(`Capability installed but validation failed: ${installedValidation.errors.join('; ')}\n`);
-    return 1;
+    throw new Error(`Capability installed but validation failed: ${installedValidation.errors.join('; ')}`);
   }
 
   const warning = readDependencyWarning(targetDir, options.link);
@@ -136,46 +103,44 @@ async function installCommand(sourceArg: string, options: CapabilityCommandOptio
     warning,
     nextStep: 'Restart the agent or call GET http://127.0.0.1:3210/capabilities/rescan to load it in a running agent.',
   }, null, 2) + '\n');
-  return 0;
 }
 
-function listCommand(): number {
+function listCommand(): void {
   process.stdout.write(JSON.stringify({
     defaultDir: DEFAULT_CAPABILITIES_DIR,
     capabilities: readUserCapabilityManifests(),
   }, null, 2) + '\n');
-  return 0;
 }
 
-export async function runCapabilityCommand(args: string[]): Promise<void> {
-  const subcommand = args[0] ?? 'list';
-  const { positional, options } = parseOptions(args.slice(1));
-  let exitCode = 0;
+export function registerCapabilityCommand(program: Command): void {
+  const capability = program
+    .command('capability')
+    .description('Manage local user capability plugins');
 
-  if (subcommand === 'list') {
-    exitCode = listCommand();
-  } else if (subcommand === 'validate') {
-    const rootDir = positional[0];
-    if (!rootDir) {
-      process.stderr.write(`${usage()}\n`);
-      exitCode = 1;
-    } else {
-      exitCode = await validateCommand(rootDir);
-    }
-  } else if (subcommand === 'install') {
-    const sourceDir = positional[0];
-    if (!sourceDir) {
-      process.stderr.write(`${usage()}\n`);
-      exitCode = 1;
-    } else {
-      exitCode = await installCommand(sourceDir, options);
-    }
-  } else {
-    process.stderr.write(`Unknown capability command: ${subcommand}\n${usage()}\n`);
-    exitCode = 1;
-  }
+  capability
+    .command('list')
+    .description('List installed user capabilities')
+    .action(() => {
+      listCommand();
+    });
 
-  if (exitCode !== 0) {
-    process.exitCode = exitCode;
-  }
+  capability
+    .command('validate <directory>')
+    .description('Validate a capability plugin directory')
+    .action(async (rootDir: string) => {
+      await validateCommand(rootDir);
+    });
+
+  capability
+    .command('install <directory>')
+    .description('Install a capability plugin into the local capabilities directory')
+    .option('--overwrite', 'replace an existing installed capability with the same id')
+    .option('--link', 'install a symlink instead of copying the source directory')
+    .action(async (sourceDir: string, command: Command) => {
+      const options = command.opts() as Partial<CapabilityCommandOptions>;
+      await installCommand(sourceDir, {
+        overwrite: options.overwrite ?? false,
+        link: options.link ?? false,
+      });
+    });
 }

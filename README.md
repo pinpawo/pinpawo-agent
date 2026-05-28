@@ -34,6 +34,22 @@ npm run tui
 - `@pinpawo/pet-agent`
 - `pinpawo-local-agent`
 
+## Quick Install
+
+After publishing the local-agent package to npm:
+
+```bash
+npm install -g pinpawo-local-agent
+pinpawo-agent login
+pinpawo-agent tui
+```
+
+For a one-off run:
+
+```bash
+npx pinpawo-local-agent tui
+```
+
 ## User Capabilities
 
 User capability plugins live in `~/.pinpawo/capabilities/<id>/` and must contain `manifest.json` plus `index.js`.

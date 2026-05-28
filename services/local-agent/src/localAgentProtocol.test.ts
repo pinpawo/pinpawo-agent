@@ -1,0 +1,91 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  parseLocalAgentClientMessage,
+  parseLocalAgentServerMessage,
+  sendLocalAgentMessage,
+} from './localAgentProtocol';
+
+test('parseLocalAgentClientMessage accepts valid chat requests and rejects malformed payloads', () => {
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'chat_request',
+      requestId: 'req-1',
+      message: 'hello',
+      userId: 'user-1',
+      resume: { decisions: [{ type: 'approve' }] },
+    })),
+    {
+      type: 'chat_request',
+      requestId: 'req-1',
+      message: 'hello',
+      petId: undefined,
+      userId: 'user-1',
+      resume: { decisions: [{ type: 'approve' }] },
+    },
+  );
+  assert.equal(parseLocalAgentClientMessage('{bad json'), null);
+  assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'chat_request', message: 'missing request' })), null);
+});
+
+test('parseLocalAgentClientMessage accepts explicit human review responses', () => {
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      message: '批准',
+      resume: { decisions: [{ type: 'approve' }] },
+    })),
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      message: '批准',
+      resume: { decisions: [{ type: 'approve' }] },
+    },
+  );
+  assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
+});
+
+test('parseLocalAgentServerMessage accepts valid tool logs and rejects malformed payloads', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'tool_log',
+      requestId: 'req-1',
+      phase: 'start',
+      toolName: 'read_file',
+      input: '{"path":"README.md"}',
+    })),
+    {
+      type: 'tool_log',
+      requestId: 'req-1',
+      phase: 'start',
+      toolName: 'read_file',
+      toolCallId: undefined,
+      input: '{"path":"README.md"}',
+      output: undefined,
+      error: undefined,
+    },
+  );
+  assert.equal(parseLocalAgentServerMessage(JSON.stringify({ type: 'tool_log', requestId: 'req-1', phase: 'bad', toolName: 'x' })), null);
+  assert.equal(parseLocalAgentServerMessage(JSON.stringify({ type: 'chat_token', requestId: 'req-1' })), null);
+});
+
+test('sendLocalAgentMessage writes only when websocket-like object is open', () => {
+  const sent: string[] = [];
+  const openWs = {
+    readyState: 1,
+    send(data: string) {
+      sent.push(data);
+    },
+  };
+  const closedWs = {
+    readyState: 3,
+    send() {
+      throw new Error('should not send');
+    },
+  };
+
+  assert.equal(sendLocalAgentMessage(openWs, { type: 'pong' }), true);
+  assert.equal(sendLocalAgentMessage(closedWs, { type: 'pong' }), false);
+  assert.deepEqual(sent.map((item) => JSON.parse(item)), [{ type: 'pong' }]);
+});

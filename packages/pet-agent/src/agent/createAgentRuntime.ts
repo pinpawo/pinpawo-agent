@@ -98,6 +98,20 @@ export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniq
 const GENERAL_SUBAGENT_MAX_ITERATIONS = 16;
 const CAPABILITY_SUBAGENT_MAX_ITERATIONS = 8;
 
+const ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_NAMES = [
+  'capabilityDiscovery',
+  'userIntentDecision',
+  'delegationOutcomeDecision',
+] as const;
+
+const ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_SET = new Set<string>(
+  ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_NAMES,
+);
+
+export function isOrchestratorInternalAiStreamNode(node: string) {
+  return ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_SET.has(node);
+}
+
 // --- Configurable helpers ---
 
 function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOptions {

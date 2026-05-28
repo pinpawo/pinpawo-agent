@@ -98,7 +98,7 @@ export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniq
 const GENERAL_SUBAGENT_MAX_ITERATIONS = 16;
 const CAPABILITY_SUBAGENT_MAX_ITERATIONS = 8;
 
-export const ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_NAMES = [
+const ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_NAMES = [
   'capabilityDiscovery',
   'userIntentDecision',
   'delegationOutcomeDecision',

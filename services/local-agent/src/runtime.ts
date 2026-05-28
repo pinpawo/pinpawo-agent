@@ -21,7 +21,6 @@ import {
 } from './capabilities/capabilityAvailability';
 import { createBrowserCapability, createBrowserToolkit } from './capabilities/browserCapability';
 import type { StructuredTool } from '@langchain/core/tools';
-import { type BaseMessage } from '@langchain/core/messages';
 import type { AgentLlmConfig } from './agentConfig';
 import {
   buildLocalLlmConfig,
@@ -34,15 +33,18 @@ import { ensureActorSelected, loadSelectedActorName } from './actorSelection';
 import { loadStoredConfig, saveStoredConfig } from './storage';
 import {
   buildAppChatThreadId,
-  formatInterruptPrompt,
-  normalizeInterruptResume,
-  readPendingInterrupt,
+  parseLocalAgentClientMessage,
+  sendLocalAgentMessage,
   type ChatRequestMessage,
   type InterruptRequestMessage,
   type NewSessionMessage,
-  type ToolLogPhase,
 } from './chatInterface';
-import { clearAgentRunActivity, recordAgentRunActivity, recordToolActivity } from './toolActivityState';
+import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
+import {
+  buildToolLogMessage,
+  type StreamToolsPayload,
+} from './agentStreamEvents';
+import { runChatSession } from './chatSessionAdapter';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
@@ -54,22 +56,6 @@ type InflightRequest = {
   interruptedSent?: boolean;
   interruptTimer?: ReturnType<typeof setTimeout>;
 };
-
-type StreamToolsPayload = {
-  event: 'on_tool_start' | 'on_tool_event' | 'on_tool_end' | 'on_tool_error';
-  toolCallId?: string;
-  name: string;
-  input?: unknown;
-  output?: unknown;
-  error?: unknown;
-  data?: unknown;
-};
-
-const INTERNAL_AI_STREAM_NODES = new Set([
-  'capabilityDiscovery',
-  'userIntentDecision',
-  'delegationOutcomeDecision',
-]);
 
 async function filterAvailableUserCapabilities(
   loaded: LoadedUserCapability[],
@@ -86,112 +72,10 @@ async function filterAvailableUserCapabilities(
     .map((record) => record.item);
 }
 
-function readFinalMessageText(message: { content?: unknown }) {
-  const content = message.content;
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
-          return part.text;
-        }
-        return '';
-      })
-      .join('\n')
-      .trim();
-  }
-  return '';
-}
-
-function readMessageChunkText(message: { content?: unknown }) {
-  const content = message.content;
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
-          return part.text;
-        }
-        return '';
-      })
-      .join('');
-  }
-  return '';
-}
-
-function readStreamNode(metadata: unknown): string | null {
-  if (!metadata || typeof metadata !== 'object' || !('langgraph_node' in metadata)) {
-    return null;
-  }
-  const node = metadata.langgraph_node;
-  return typeof node === 'string' ? node : null;
-}
-
-function isLaneTaggedAiMessage(message: BaseMessage) {
-  const pinpawo = message.additional_kwargs?.pinpawo;
-  return Boolean(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
-}
-
-function stringifyToolData(value: unknown) {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (value && typeof value === 'object') {
-    const content = (value as { content?: unknown }).content;
-    if (typeof content === 'string') {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      return content
-        .map((part) => (typeof part === 'string' ? part : ((part as { text?: string }).text ?? '')))
-        .join('');
-    }
-  }
-  try {
-    return JSON.stringify(value ?? '');
-  } catch {
-    return String(value);
-  }
-}
-
 function emitToolLog(ws: WebSocket, requestId: string, payload: StreamToolsPayload) {
-  const phase: ToolLogPhase = payload.event === 'on_tool_start'
-    ? 'start'
-    : payload.event === 'on_tool_end'
-      ? 'end'
-      : payload.event === 'on_tool_error'
-        ? 'error'
-        : 'event';
-  const input = payload.input !== undefined ? stringifyToolData(payload.input) : undefined;
-  const output = payload.output !== undefined
-    ? stringifyToolData(payload.output)
-    : payload.data !== undefined
-      ? stringifyToolData(payload.data)
-      : undefined;
-  const error = payload.error !== undefined ? stringifyToolData(payload.error) : undefined;
-
-  recordToolActivity(payload.name, phase, requestId);
-
-  if (ws.readyState !== WebSocket.OPEN) {
-    return;
-  }
-
-  ws.send(JSON.stringify({
-    type: 'tool_log',
-    requestId,
-    phase,
-    toolName: payload.name,
-    toolCallId: payload.toolCallId,
-    input,
-    output,
-    error,
-  }));
+  const message = buildToolLogMessage(requestId, payload);
+  recordToolActivity(payload.name, message.phase, requestId);
+  sendLocalAgentMessage(ws, message);
 }
 
 export class LocalAgentRuntime {
@@ -373,27 +257,26 @@ export class LocalAgentRuntime {
     ws.on('open', () => {
       console.log('[local-agent] WS connected');
       this.wsPingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'pong' }));
-        }
+        sendLocalAgentMessage(ws, { type: 'pong' });
       }, WS_PING_INTERVAL_MS);
     });
 
     ws.on('message', (data: Buffer | string) => {
       try {
-        const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+        const msg = parseLocalAgentClientMessage(data);
+        if (!msg) return;
         if (msg.type === 'ping') {
-          ws.send(JSON.stringify({ type: 'pong' }));
+          sendLocalAgentMessage(ws, { type: 'pong' });
         } else if (msg.type === 'chat_request') {
-          this.handleChatRequest(msg as unknown as ChatRequestMessage).catch((err) => {
+          this.handleChatRequest(msg).catch((err) => {
             console.error('[local-agent] handleChatRequest error:', err instanceof Error ? err.message : err);
           });
         } else if (msg.type === 'new_session') {
-          this.sessionResetPromise = this.handleNewSession(msg as unknown as NewSessionMessage).catch((err) => {
+          this.sessionResetPromise = this.handleNewSession(msg).catch((err) => {
             console.error('[local-agent] new_session error:', err instanceof Error ? err.message : err);
           });
         } else if (msg.type === 'interrupt_request') {
-          this.handleInterruptRequest(msg as unknown as InterruptRequestMessage);
+          this.handleInterruptRequest(msg);
         }
       } catch {
         // ignore malformed messages
@@ -471,23 +354,19 @@ export class LocalAgentRuntime {
       return;
     }
     inflight.interruptedSent = true;
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'interrupted',
-        requestId: inflight.requestId,
-        message: 'interrupted',
-      }));
-    }
+    sendLocalAgentMessage(ws, {
+      type: 'interrupted',
+      requestId: inflight.requestId,
+      message: 'interrupted',
+    });
   }
 
   private interruptInflightRequest(inflight: InflightRequest, ws: WebSocket) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'interrupting',
-        requestId: inflight.requestId,
-        message: 'interrupting',
-      }));
-    }
+    sendLocalAgentMessage(ws, {
+      type: 'interrupting',
+      requestId: inflight.requestId,
+      message: 'interrupting',
+    });
     inflight.controller.abort();
     if (inflight.interruptTimer) {
       return;
@@ -530,11 +409,11 @@ export class LocalAgentRuntime {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const userId = msg.userId?.trim();
     if (!userId) {
-      this.ws.send(JSON.stringify({
+      sendLocalAgentMessage(this.ws, {
         type: 'error',
         requestId,
         message: 'userId is required',
-      }));
+      });
       return;
     }
 
@@ -585,151 +464,30 @@ export class LocalAgentRuntime {
       });
       setup.input.signal = controller.signal;
 
-      const snapshot = await this.graphService.getState(setup);
-      if (!isCurrent()) {
-        finishInterrupted();
-        return;
-      }
-      const pendingInterrupt = readPendingInterrupt(snapshot);
-      const resumeValue = pendingInterrupt
-        ? normalizeInterruptResume(pendingInterrupt, message, msg.resume)
-        : undefined;
-      const graphInput = pendingInterrupt
-        ? this.graphService.buildResumeCommand(resumeValue)
-        : undefined;
-      setup.input.onToolEvent = (event) => {
-        if (isCurrent()) {
+      const result = await runChatSession({
+        request: msg,
+        setup,
+        graphService: this.graphService,
+        isCurrent,
+        finishInterrupted,
+        emit: (event) => {
+          sendLocalAgentMessage(ws, event);
+        },
+        emitToolLog: (event) => {
           emitToolLog(ws, requestId, event);
-        }
-      };
-
-      let finalMessages: BaseMessage[] = [];
-      let streamedReply = '';
-
-      for await (const chunk of this.graphService.stream(setup, graphInput)) {
-        if (!isCurrent()) {
-          finishInterrupted();
-          return;
-        }
-
-        if (!Array.isArray(chunk)) {
-          continue;
-        }
-
-        const [mode, payload] = chunk as [string, unknown];
-
-        if (mode === 'messages' && Array.isArray(payload)) {
-          const [streamMessage, metadata] = payload as [BaseMessage, Record<string, unknown> | undefined];
-          if (streamMessage._getType() !== 'ai') {
-            continue;
-          }
-          const streamNode = readStreamNode(metadata);
-          if (streamNode && INTERNAL_AI_STREAM_NODES.has(streamNode)) {
-            continue;
-          }
-          if (isLaneTaggedAiMessage(streamMessage)) {
-            continue;
-          }
-          const chunkText = readMessageChunkText(streamMessage);
-          if (!chunkText || ws.readyState !== WebSocket.OPEN) {
-            continue;
-          }
-          const token = chunkText.startsWith(streamedReply)
-            ? chunkText.slice(streamedReply.length)
-            : chunkText;
-          if (!token) {
-            continue;
-          }
-          streamedReply += token;
-          recordAgentRunActivity('streaming', requestId);
-          ws.send(JSON.stringify({
-            type: 'chat_token',
-            requestId,
-            token,
-          }));
-          continue;
-        }
-
-        if (mode === 'tools' && payload && typeof payload === 'object' && 'event' in payload && 'name' in payload) {
-          emitToolLog(ws, requestId, payload as StreamToolsPayload);
-          continue;
-        }
-
-        if (mode === 'values' && payload && typeof payload === 'object' && 'messages' in payload) {
-          finalMessages = ((payload as { messages?: BaseMessage[] }).messages ?? []);
-          continue;
-        }
-
-        if (mode === 'values' && payload && typeof payload === 'object' && '__interrupt__' in payload) {
-          const rawInterrupts = (payload as { __interrupt__?: unknown }).__interrupt__;
-          const firstInterrupt = Array.isArray(rawInterrupts) ? rawInterrupts[0] : null;
-          const interruptPayload = firstInterrupt
-            && typeof firstInterrupt === 'object'
-            && 'value' in firstInterrupt
-            && firstInterrupt.value
-            && typeof firstInterrupt.value === 'object'
-            ? firstInterrupt.value as Record<string, unknown>
-            : null;
-          if (interruptPayload && ws.readyState === WebSocket.OPEN) {
-            recordAgentRunActivity('waiting_human', requestId);
-            this.clearInflightRequest(inflight);
-            ws.send(JSON.stringify({
-              type: 'human_interrupt',
-              requestId,
-              prompt: formatInterruptPrompt(interruptPayload),
-              payload: interruptPayload,
-            }));
-            console.log(`[local-agent] human_interrupt requestId=${requestId}`);
-            return;
-          }
-        }
-      }
-
-      if (!isCurrent()) {
-        finishInterrupted();
-        return;
-      }
-
-      setup.input.onToolEvent = undefined;
-      const finalSnapshot = await this.graphService.getState(setup);
-      if (!isCurrent()) {
-        finishInterrupted();
-        return;
-      }
-      const finalInterrupt = readPendingInterrupt(finalSnapshot);
-      if (finalInterrupt) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'human_interrupt',
-            requestId,
-            prompt: formatInterruptPrompt(finalInterrupt),
-            payload: finalInterrupt,
-          }));
-        }
-        recordAgentRunActivity('waiting_human', requestId);
+        },
+      });
+      if (result.status === 'waiting_human') {
         console.log(`[local-agent] human_interrupt requestId=${requestId}`);
         this.clearInflightRequest(inflight);
         return;
       }
-
-      const finalReply = finalMessages.length > 0
-        ? readFinalMessageText(finalMessages.at(-1) ?? {})
-        : '';
-
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'chat_response',
-          requestId,
-          message: finalReply,
-          mood: null,
-          topic: null,
-          tags: [],
-        }));
+      if (result.status === 'interrupted') {
+        return;
       }
       this.clearInflightRequest(inflight);
-      clearAgentRunActivity(requestId);
 
-      console.log(`[local-agent] chat_response sent requestId=${requestId} reply="${finalReply.slice(0, 100)}"`);
+      console.log(`[local-agent] chat_response sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
 
     } catch (err) {
       const isStillCurrent = this.inflightRequest === inflight;
@@ -746,11 +504,11 @@ export class LocalAgentRuntime {
       recordAgentRunActivity('error', requestId, 5_000);
       console.error('[local-agent] chat error:', err instanceof Error ? err.message : err);
       if (isStillCurrent && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
+        sendLocalAgentMessage(ws, {
           type: 'error',
           requestId,
           message: err instanceof Error ? err.message : 'internal error',
-        }));
+        });
       }
     }
   }

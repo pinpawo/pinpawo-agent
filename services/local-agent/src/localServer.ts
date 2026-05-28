@@ -12,41 +12,28 @@ import { homedir } from 'node:os';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
-import type { StructuredTool } from '@langchain/core/tools';
-import {
-  BUILT_IN_CAPABILITY_REGISTRY,
-  type AgentCapability,
-  type AgentToolkit,
-} from '@pinpawo/pet-agent';
-import type { AgentLlmConfig } from './agentConfig';
 import { loadAgentContext } from './contextLoader';
-import {
-  getCachedCapabilityAvailability,
-  refreshCapability,
-  resolveCapabilityAvailability,
-  type CapabilityAvailabilityRecord,
-  refreshToolkit,
-  type ToolkitAvailabilityRecord,
-} from './capabilities/capabilityAvailability';
 import { FileSaver } from './fileSaver';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
-import type { LoadedUserCapability } from './capabilityLoader';
-import { loadUserCapabilities, readUserCapabilityManifests } from './capabilityLoader';
-import { loadStoredConfig } from './storage';
 import { authorizeShellPattern, clearSessionAuthorizations } from './sessionAuthorizations';
 import {
   buildTuiChatThreadId,
-  formatInterruptPrompt,
-  normalizeInterruptResume,
-  readPendingInterrupt,
+  parseLocalAgentClientMessage,
   readShellReviewCommand,
+  sendLocalAgentMessage,
   type ChatRequestMessage,
+  type HumanReviewResponseMessage,
   type StudioRequestMessage,
-  type ToolLogPhase,
 } from './chatInterface';
 import { readFirstHumanReviewDecision, type HumanReviewDecision } from '@pinpawo/pet-agent';
-import { clearAgentRunActivity, readActiveToolHealthFields, recordAgentRunActivity, recordToolActivity } from './toolActivityState';
+import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
+import {
+  buildToolLogMessage,
+  readFinalMessageText,
+  type StreamToolsPayload,
+} from './agentStreamEvents';
+import { runChatSession } from './chatSessionAdapter';
 import {
   buildStudioForTurn,
   StudioNotConfiguredError,
@@ -57,34 +44,10 @@ import {
   resolveReview,
   type PendingReviewSlot,
 } from './studio/studioBridge';
+import { handleLocalHttpRequest } from './localHttpHandlers';
+import type { AgentStats, LocalServerDeps } from './localServerTypes';
 
-export type AgentStats = {
-  startedAt: string;
-  totalRuns: number;
-  successfulRuns: number;
-  failedRuns: number;
-  lastRunAt: string | null;
-  lastRunOk: boolean | null;
-};
-
-export type LocalServerDeps = {
-  actorId: string;
-  actorName?: string;
-  llmConfig: AgentLlmConfig;
-  localTools: StructuredTool[];
-  localToolkitDefinitions?: AgentToolkit[];
-  localToolkits?: AgentToolkit[];
-  pluginTools: StructuredTool[];
-  localCapabilityDefinitions?: AgentCapability[];
-  localCapabilities?: AgentCapability[];
-  userCapabilityDefinitions?: LoadedUserCapability[];
-  userCapabilities?: LoadedUserCapability[];
-  rescanUserCapabilities?: () => Promise<{
-    userCapabilityDefinitions: LoadedUserCapability[];
-    userCapabilities: LoadedUserCapability[];
-  }>;
-  getStats: () => AgentStats;
-};
+export type { AgentStats, LocalServerDeps };
 
 const chatCheckpointer = new FileSaver(
   resolve(homedir(), '.pinpawo', 'checkpoints-tui.json'),
@@ -95,9 +58,8 @@ const chatGraphService = new LocalAgentGraphService();
 
 /**
  * Per-ws HITL 答复槽。Studio 模式下,pet 触发 humanReviewer 时,humanReviewer 把
- * promise resolver 寄存在这里;chat_request handler 收到 resume 字段时,
- * 走 additive 分支调 resolveReview() 喂答复。chat 无 Studio 活跃时此 map 为空,
- * 现有 chat 路径行为 0 变化。
+ * promise resolver 寄存在这里;human_review_response handler 调 resolveReview()
+ * 喂答复。chat 无 Studio 活跃时此 map 为空。
  */
 const studioPendingReviews = new Map<WebSocket, PendingReviewSlot>();
 
@@ -111,14 +73,14 @@ function getOrCreateStudioReviewSlot(ws: WebSocket): PendingReviewSlot {
 }
 
 /**
- * 从 chat_request 的 message + resume 字段解码出 HumanReviewDecision。
+ * 从 human_review_response / legacy chat_request 的 message + resume 字段解码出 HumanReviewDecision。
  * 用于 Studio HITL 答复路由:
  * - msg.resume 显式提供 → 解析
  * - "/allow" 前缀 → approve
  * - 非空 message → respond
  * - 否则 → reject
  */
-function decodeStudioDecision(msg: ChatRequestMessage): HumanReviewDecision | null {
+function decodeStudioDecision(msg: Pick<ChatRequestMessage | HumanReviewResponseMessage, 'message' | 'resume'>): HumanReviewDecision | null {
   if (msg.resume !== undefined) {
     const decoded = readFirstHumanReviewDecision(msg.resume);
     if (decoded) return decoded;
@@ -132,11 +94,22 @@ function decodeStudioDecision(msg: ChatRequestMessage): HumanReviewDecision | nu
   }
   return { type: 'reject' };
 }
-const INTERNAL_AI_STREAM_NODES = new Set([
-  'capabilityDiscovery',
-  'userIntentDecision',
-  'delegationOutcomeDecision',
-]);
+
+function routeStudioHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage | ChatRequestMessage) {
+  const studioSlot = studioPendingReviews.get(ws);
+  if (!studioSlot?.current) {
+    return false;
+  }
+  const decision = decodeStudioDecision(msg);
+  if (!decision) {
+    return false;
+  }
+  console.log(
+    `[local-server] route ${msg.type} as studio HITL answer (reviewId=${studioSlot.current.reviewId}, decision=${decision.type})`,
+  );
+  resolveReview(studioSlot, decision);
+  return true;
+}
 const INTERRUPT_FORCE_REPLY_MS = 1800;
 
 function loadSessionSuffixes() {
@@ -265,23 +238,19 @@ function sendInterrupted(ws: WebSocket, inflight: InflightRequest) {
     return;
   }
   inflight.interruptedSent = true;
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'interrupted',
-      requestId: inflight.requestId,
-      message: 'interrupted',
-    }));
-  }
+  sendLocalAgentMessage(ws, {
+    type: 'interrupted',
+    requestId: inflight.requestId,
+    message: 'interrupted',
+  });
 }
 
 function interruptInflightRequest(ws: WebSocket, inflight: InflightRequest) {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'interrupting',
-      requestId: inflight.requestId,
-      message: 'interrupting',
-    }));
-  }
+  sendLocalAgentMessage(ws, {
+    type: 'interrupting',
+    requestId: inflight.requestId,
+    message: 'interrupting',
+  });
   inflight.controller.abort();
   if (inflight.interruptTimer) {
     return;
@@ -296,94 +265,9 @@ function interruptInflightRequest(ws: WebSocket, inflight: InflightRequest) {
   }, INTERRUPT_FORCE_REPLY_MS);
 }
 
-function readFinalMessageText(message: { content?: unknown }) {
-  const content = message.content;
-  if (typeof content === 'string') {
-    return content.trim();
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
-          return part.text;
-        }
-        return '';
-      })
-      .join('\n')
-      .trim();
-  }
-  return '';
-}
-
-function readMessageChunkText(message: { content?: unknown }) {
-  const content = message.content;
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
-          return part.text;
-        }
-        return '';
-      })
-      .join('');
-  }
-  return '';
-}
-
-function readStreamNode(metadata: unknown): string | null {
-  if (!metadata || typeof metadata !== 'object' || !('langgraph_node' in metadata)) {
-    return null;
-  }
-  const node = metadata.langgraph_node;
-  return typeof node === 'string' ? node : null;
-}
-
-function isLaneTaggedAiMessage(message: BaseMessage) {
-  const pinpawo = message.additional_kwargs?.pinpawo;
-  return Boolean(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
-}
-
-type StreamToolsPayload = {
-  event: 'on_tool_start' | 'on_tool_event' | 'on_tool_end' | 'on_tool_error';
-  toolCallId?: string;
-  name: string;
-  input?: unknown;
-  output?: unknown;
-  error?: unknown;
-  data?: unknown;
-};
-
 function maybeTrimForLog(value: string | undefined, max = 300) {
   if (!value) return value;
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
-}
-
-function stringifyToolData(value: unknown) {
-  if (typeof value === 'string') {
-    return value;
-  }
-  // LangChain message objects (e.g. ToolMessage) carry their text in .content
-  if (value && typeof value === 'object') {
-    const content = (value as { content?: unknown }).content;
-    if (typeof content === 'string') {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      return content
-        .map((part) => (typeof part === 'string' ? part : ((part as { text?: string }).text ?? '')))
-        .join('');
-    }
-  }
-  try {
-    return JSON.stringify(value ?? '');
-  } catch {
-    return String(value);
-  }
 }
 
 function isHumanReviewInterruptError(value: unknown): boolean {
@@ -419,59 +303,24 @@ function isToolProtocolHistoryError(value: unknown): boolean {
 }
 
 function emitToolLog(ws: WebSocket, requestId: string, payload: StreamToolsPayload) {
-  const phase: ToolLogPhase = payload.event === 'on_tool_start'
-    ? 'start'
-    : payload.event === 'on_tool_end'
-      ? 'end'
-      : payload.event === 'on_tool_error'
-        ? 'error'
-        : 'event';
-  const input = payload.input !== undefined ? stringifyToolData(payload.input) : undefined;
-  const output = payload.output !== undefined
-    ? stringifyToolData(payload.output)
-    : payload.data !== undefined
-      ? stringifyToolData(payload.data)
-      : undefined;
-  const error = payload.error !== undefined ? stringifyToolData(payload.error) : undefined;
+  const message = buildToolLogMessage(requestId, payload);
 
-  if (phase === 'error' && isHumanReviewInterruptError(payload.error)) {
+  if (message.phase === 'error' && isHumanReviewInterruptError(payload.error)) {
     recordToolActivity(payload.name, 'interrupt', requestId);
     console.log(`[local-server] tool_interrupt requestId=${requestId} tool=${payload.name}`);
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'tool_log',
-        requestId,
-        phase: 'interrupt',
-        toolName: payload.name,
-        toolCallId: payload.toolCallId,
-        input,
-      }));
-    }
+    sendLocalAgentMessage(ws, { ...message, phase: 'interrupt', output: undefined, error: undefined });
     return;
   }
 
-  recordToolActivity(payload.name, phase, requestId);
+  recordToolActivity(payload.name, message.phase, requestId);
 
   console.log(
-    `[local-server] tool_${phase} requestId=${requestId} tool=${payload.name}`
-      + (input ? ` input=${maybeTrimForLog(input, 200)}` : '')
-      + (error ? ` error=${maybeTrimForLog(error)}` : ''),
+    `[local-server] tool_${message.phase} requestId=${requestId} tool=${payload.name}`
+      + (message.input ? ` input=${maybeTrimForLog(message.input, 200)}` : '')
+      + (message.error ? ` error=${maybeTrimForLog(message.error)}` : ''),
   );
 
-  if (ws.readyState !== WebSocket.OPEN) {
-    return;
-  }
-
-  ws.send(JSON.stringify({
-    type: 'tool_log',
-    requestId,
-    phase,
-    toolName: payload.name,
-    toolCallId: payload.toolCallId,
-    input,
-    output,
-    error,
-  }));
+  sendLocalAgentMessage(ws, message);
 }
 
 async function handleStudioRequest(
@@ -502,9 +351,8 @@ async function handleStudioRequest(
   }
 
   const send = (envelope: unknown) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(envelope));
-    }
+    if (!envelope || typeof envelope !== 'object') return;
+    sendLocalAgentMessage(ws, envelope as Parameters<typeof sendLocalAgentMessage>[1]);
   };
 
   try {
@@ -585,18 +433,9 @@ async function handleStudioRequest(
 async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: LocalServerDeps) {
   const { requestId, message } = msg;
 
-  // ── Additive 分支:若 Studio 内 pet 正在等 HITL 答复,把这次 chat_request 解读为答复 ──
-  // chat 路径无 Studio 活跃时(slot 为空),此分支不触发,行为与之前 100% 一致。
-  const studioSlot = studioPendingReviews.get(ws);
-  if (studioSlot?.current) {
-    const decision = decodeStudioDecision(msg);
-    if (decision) {
-      console.log(
-        `[local-server] route chat_request as studio HITL answer (reviewId=${studioSlot.current.reviewId}, decision=${decision.type})`,
-      );
-      resolveReview(studioSlot, decision);
-      return;
-    }
+  // Legacy compatibility: old TUI builds answered Studio HITL with chat_request.
+  if (routeStudioHumanReviewResponse(ws, msg)) {
+    return;
   }
 
   const threadId = getChatThreadId(deps.actorId);
@@ -636,167 +475,48 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
       new HumanMessage(message),
     ];
     setup.input.signal = controller.signal;
-    const threadSnapshot = await chatGraphService.getState(setup);
-    if (!isCurrent()) {
-      finishInterrupted();
-      return;
-    }
-    const pendingInterrupt = readPendingInterrupt(threadSnapshot);
-    const pendingShellCommand = pendingInterrupt ? readShellReviewCommand(pendingInterrupt) : null;
-    if (
-      pendingShellCommand
-      && message.trim().startsWith('/allow')
-    ) {
-      const requestedPattern = message.trim().slice('/allow'.length).trim();
-      const authorizedPattern = authorizeShellPattern(
-        threadId,
-        requestedPattern || pendingShellCommand,
-      );
-      if (authorizedPattern && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'system_notice',
-          requestId,
-          message: `已授权本次会话中的 shell 模式：${authorizedPattern}`,
-        }));
-      }
-    }
-    const resumeValue = pendingInterrupt
-      ? normalizeInterruptResume(pendingInterrupt, message, msg.resume)
-      : undefined;
-    const graphInput = pendingInterrupt
-      ? chatGraphService.buildResumeCommand(resumeValue)
-      : undefined;
-    setup.input.onToolEvent = (event) => {
-      if (isCurrent()) {
+    const result = await runChatSession({
+      request: msg,
+      setup,
+      graphService: chatGraphService,
+      isCurrent,
+      finishInterrupted,
+      emit: (event) => {
+        sendLocalAgentMessage(ws, event);
+      },
+      emitToolLog: (event) => {
         emitToolLog(ws, requestId, event);
-      }
-    };
-
-    let finalMessages: BaseMessage[] = [];
-    let streamedReply = '';
-    for await (const chunk of chatGraphService.stream(setup, graphInput)) {
-      if (!isCurrent()) {
-        finishInterrupted();
-        return;
-      }
-
-      if (!Array.isArray(chunk)) {
-        continue;
-      }
-
-      const [mode, payload] = chunk as [string, unknown];
-
-      if (mode === 'messages' && Array.isArray(payload)) {
-        const [message, metadata] = payload as [BaseMessage, Record<string, unknown> | undefined];
-        if (message._getType() !== 'ai') {
-          continue;
-        }
-        const streamNode = readStreamNode(metadata);
-        if (streamNode && INTERNAL_AI_STREAM_NODES.has(streamNode)) {
-          continue;
-        }
-        // Skip lane-tagged messages (subagent internal); only stream user-visible replies.
-        if (isLaneTaggedAiMessage(message)) {
-          continue;
-        }
-        const chunkText = readMessageChunkText(message);
-        if (!chunkText || ws.readyState !== WebSocket.OPEN) {
-          continue;
-        }
-        const token = chunkText.startsWith(streamedReply)
-          ? chunkText.slice(streamedReply.length)
-          : chunkText;
-        if (!token) {
-          continue;
-        }
-        streamedReply += token;
-        recordAgentRunActivity('streaming', requestId);
-        ws.send(JSON.stringify({
-          type: 'chat_token',
-          requestId,
-          token,
-        }));
-        continue;
-      }
-
-      if (mode === 'tools' && payload && typeof payload === 'object' && 'event' in payload && 'name' in payload) {
-        emitToolLog(ws, requestId, payload as StreamToolsPayload);
-        continue;
-      }
-
-      if (mode === 'values' && payload && typeof payload === 'object' && 'messages' in payload) {
-        finalMessages = ((payload as { messages?: BaseMessage[] }).messages ?? []);
-        continue;
-      }
-
-      if (mode === 'values' && payload && typeof payload === 'object' && '__interrupt__' in payload) {
-        const rawInterrupts = (payload as { __interrupt__?: unknown }).__interrupt__;
-        const firstInterrupt = Array.isArray(rawInterrupts) ? rawInterrupts[0] : null;
-        const interruptPayload = firstInterrupt
-          && typeof firstInterrupt === 'object'
-          && 'value' in firstInterrupt
-          && firstInterrupt.value
-          && typeof firstInterrupt.value === 'object'
-          ? firstInterrupt.value as Record<string, unknown>
-          : null;
-        if (interruptPayload && ws.readyState === WebSocket.OPEN) {
-          recordAgentRunActivity('waiting_human', requestId);
-          clearInflightRequest(ws, inflight);
-          ws.send(JSON.stringify({
-            type: 'human_interrupt',
-            requestId,
-            prompt: formatInterruptPrompt(interruptPayload),
-            payload: interruptPayload,
-          }));
-          console.log(`[local-server] human_interrupt requestId=${requestId}`);
+      },
+      onPendingInterrupt: (pendingInterrupt) => {
+        const pendingShellCommand = readShellReviewCommand(pendingInterrupt);
+        if (!pendingShellCommand || !message.trim().startsWith('/allow')) {
           return;
         }
-      }
-    }
-    if (!isCurrent()) {
-      finishInterrupted();
-      return;
-    }
-
-    setup.input.onToolEvent = undefined;
-    const finalSnapshot = await chatGraphService.getState(setup);
-    if (!isCurrent()) {
-      finishInterrupted();
-      return;
-    }
-    const finalInterrupt = readPendingInterrupt(finalSnapshot);
-    if (finalInterrupt) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'human_interrupt',
-          requestId,
-          prompt: formatInterruptPrompt(finalInterrupt),
-          payload: finalInterrupt,
-        }));
-      }
-      recordAgentRunActivity('waiting_human', requestId);
+        const requestedPattern = message.trim().slice('/allow'.length).trim();
+        const authorizedPattern = authorizeShellPattern(
+          threadId,
+          requestedPattern || pendingShellCommand,
+        );
+        if (authorizedPattern) {
+          sendLocalAgentMessage(ws, {
+            type: 'system_notice',
+            requestId,
+            message: `已授权本次会话中的 shell 模式：${authorizedPattern}`,
+          });
+        }
+      },
+    });
+    if (result.status === 'waiting_human') {
       console.log(`[local-server] human_interrupt requestId=${requestId}`);
       clearInflightRequest(ws, inflight);
       return;
     }
-    const finalReply = finalMessages.length > 0
-      ? readFinalMessageText(finalMessages.at(-1) ?? {})
-      : '';
-
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'chat_response',
-        requestId,
-        message: finalReply,
-        mood: null,
-        topic: null,
-        tags: [],
-      }));
+    if (result.status === 'interrupted') {
+      return;
     }
     clearInflightRequest(ws, inflight);
-    clearAgentRunActivity(requestId);
 
-    console.log(`[local-server] chat_response sent requestId=${requestId} reply="${finalReply.slice(0, 100)}"`);
+    console.log(`[local-server] chat_response sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
   } catch (err) {
     const isStillCurrent = inflightRequests.get(ws) === inflight;
     const aborted = controller.signal.aborted
@@ -825,15 +545,27 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
     }
     if (isStillCurrent && ws.readyState === WebSocket.OPEN) {
       const message = err instanceof Error ? err.message : 'internal error';
-      ws.send(JSON.stringify({
+      sendLocalAgentMessage(ws, {
         type: 'error',
         requestId,
         message: recoveredFromToolProtocolError
           ? `${message}\n\n已重置本地 TUI 会话，下一条消息会从新的后端会话继续。`
           : message,
-      }));
+      });
     }
   }
+}
+
+async function handleHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage, deps: LocalServerDeps) {
+  if (routeStudioHumanReviewResponse(ws, msg)) {
+    return;
+  }
+  await handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: msg.requestId,
+    message: msg.message,
+    ...(msg.resume !== undefined ? { resume: msg.resume } : {}),
+  }, deps);
 }
 
 async function handleHistoryRequest(deps: LocalServerDeps) {
@@ -843,267 +575,13 @@ async function handleHistoryRequest(deps: LocalServerDeps) {
   return readHistoryMessages(readSnapshotMessages(snapshot));
 }
 
-function replaceLocalCapability(
-  deps: LocalServerDeps,
-  name: string,
-  record: CapabilityAvailabilityRecord | null,
-) {
-  const localCapabilities = deps.localCapabilities;
-  if (!localCapabilities) return;
-
-  const index = localCapabilities.findIndex((item) => item.name === name);
-  if (record?.availability.available) {
-    if (index >= 0) {
-      localCapabilities[index] = record.capability;
-    } else {
-      localCapabilities.push(record.capability);
-    }
-  } else if (index >= 0) {
-    localCapabilities.splice(index, 1);
-  }
-}
-
-function replaceLocalToolkit(
-  deps: LocalServerDeps,
-  name: string,
-  record: ToolkitAvailabilityRecord | null,
-) {
-  const localToolkits = deps.localToolkits;
-  if (!localToolkits) return;
-
-  const index = localToolkits.findIndex((item) => item.name === name);
-  if (record?.availability.available) {
-    if (index >= 0) {
-      localToolkits[index] = record.toolkit;
-    } else {
-      localToolkits.push(record.toolkit);
-    }
-  } else if (index >= 0) {
-    localToolkits.splice(index, 1);
-  }
-}
-
-function replaceUserCapability(
-  deps: LocalServerDeps,
-  name: string,
-  record: CapabilityAvailabilityRecord | null,
-) {
-  const userCapabilities = deps.userCapabilities;
-  if (!userCapabilities) return;
-
-  const index = userCapabilities.findIndex((item) =>
-    item.meta.id === name || item.capability.name === name,
-  );
-  if (record?.availability.available) {
-    const definition = deps.userCapabilityDefinitions?.find((item) =>
-      item.meta.id === name || item.capability.name === name,
-    );
-    if (!definition) return;
-    if (index >= 0) {
-      userCapabilities[index] = definition;
-    } else {
-      userCapabilities.push(definition);
-    }
-  } else if (index >= 0) {
-    userCapabilities.splice(index, 1);
-  }
-}
-
-async function refreshRuntimeCapability(deps: LocalServerDeps, name: string) {
-  const localRecord = await refreshCapability(deps.localCapabilityDefinitions ?? [], name);
-  const localToolkitRecord = await refreshToolkit(deps.localToolkitDefinitions ?? [], name);
-  if (localRecord) {
-    replaceLocalCapability(deps, name, localRecord);
-  }
-  if (localToolkitRecord) {
-    replaceLocalToolkit(deps, name, localToolkitRecord);
-  }
-  if (localRecord || localToolkitRecord) {
-    return;
-  }
-
-  const userDefinition = deps.userCapabilityDefinitions?.find((item) =>
-    item.meta.id === name || item.capability.name === name,
-  );
-  if (!userDefinition) return;
-
-  const userRecord = await refreshCapability(
-    deps.userCapabilityDefinitions?.map((item) => item.capability) ?? [],
-    userDefinition.capability.name,
-  );
-  replaceUserCapability(deps, name, userRecord);
-}
-
-function isCapabilityEnabled(id: string) {
-  const caps = loadStoredConfig().capabilities;
-  return !caps || !(id in caps) ? true : caps[id] === true;
-}
-
-async function filterAvailableUserCapabilities(
-  loaded: LoadedUserCapability[],
-  options: { force?: boolean } = {},
-): Promise<LoadedUserCapability[]> {
-  const records = await Promise.all(
-    loaded.map(async (item) => ({
-      item,
-      availability: await resolveCapabilityAvailability(item.capability, options),
-    })),
-  );
-  return records
-    .filter((record) => record.availability.availability.available)
-    .map((record) => record.item);
-}
-
-async function rescanUserCapabilities(deps: LocalServerDeps) {
-  const runtimeRescan = deps.rescanUserCapabilities
-    ? await deps.rescanUserCapabilities()
-    : null;
-  const definitions = runtimeRescan?.userCapabilityDefinitions ?? await loadUserCapabilities();
-  const available = runtimeRescan?.userCapabilities
-    ?? await filterAvailableUserCapabilities(definitions, { force: true });
-  deps.userCapabilityDefinitions = definitions;
-  deps.userCapabilities = available;
-  return {
-    loaded: definitions.length,
-    available: available.length,
-  };
-}
-
-function buildCapabilitiesPayload(deps: LocalServerDeps) {
-  const localCapabilityIds = new Set((deps.localCapabilities ?? []).map((item) => item.name));
-  const localDefinitionIds = new Set((deps.localCapabilityDefinitions ?? []).map((item) => item.name));
-  const userDefinitions = deps.userCapabilityDefinitions ?? [];
-  const userDefinitionIds = new Set(userDefinitions.flatMap((item) => [item.meta.id, item.capability.name]));
-  const userAvailableIds = new Set(
-    (deps.userCapabilities ?? []).flatMap((item) => [item.meta.id, item.capability.name]),
-  );
-
-  const builtIns = BUILT_IN_CAPABILITY_REGISTRY.map((meta) => {
-    const availability = getCachedCapabilityAvailability(meta.id);
-    const isHostRuntimeCapability = localDefinitionIds.has(meta.id);
-    return {
-      ...meta,
-      enabled: isCapabilityEnabled(meta.id),
-      loaded: true,
-      available: isHostRuntimeCapability ? localCapabilityIds.has(meta.id) : isCapabilityEnabled(meta.id),
-      availability: availability
-        ? {
-          available: availability.available,
-          reason: availability.reason,
-          detail: availability.detail,
-          metadata: availability.metadata,
-        }
-        : null,
-    };
-  });
-
-  const userManifests = readUserCapabilityManifests().map((meta) => {
-    const definition = userDefinitions.find((item) => item.meta.id === meta.id);
-    const availability = definition ? getCachedCapabilityAvailability(definition.capability.name) : null;
-    return {
-      ...meta,
-      enabled: isCapabilityEnabled(meta.id),
-      loaded: userDefinitionIds.has(meta.id),
-      available: userAvailableIds.has(meta.id),
-      availability: availability
-        ? {
-          available: availability.available,
-          reason: availability.reason,
-          detail: availability.detail,
-          metadata: availability.metadata,
-        }
-        : null,
-    };
-  });
-
-  return {
-    builtIns,
-    userCapabilities: userManifests,
-  };
-}
-
-function readBrowserHealthFields() {
-  const availability = getCachedCapabilityAvailability('browser');
-  if (!availability) return {};
-
-  const mode = availability.metadata?.mode;
-  return {
-    browser_mode: typeof mode === 'string'
-      ? mode
-      : availability.available
-        ? 'available'
-        : 'none',
-    browser_detail: availability.detail ?? availability.reason,
-  };
-}
-
 export function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
-      // Health check endpoint (used by TUI to verify server is running)
-      const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-      const pathname = url.pathname;
-      if (pathname === '/health') {
-        const writeHealth = () => {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            status: 'ok',
-            actor_id: deps.actorId,
-            actor_name: deps.actorName,
-            ...deps.getStats(),
-            ...readBrowserHealthFields(),
-            ...readActiveToolHealthFields(),
-          }));
-        };
-
-        const refreshCapabilityName = url.searchParams.get('refresh_capability')
-          ?? (url.searchParams.get('refresh_browser') === '1' ? 'browser' : null);
-        if (refreshCapabilityName) {
-          refreshRuntimeCapability(deps, refreshCapabilityName).then(() => {
-            writeHealth();
-          }).catch(() => {
-            replaceLocalCapability(deps, refreshCapabilityName, null);
-            replaceUserCapability(deps, refreshCapabilityName, null);
-            writeHealth();
-          });
-          return;
-        }
-
-        writeHealth();
-        return;
-      }
-      if (pathname === '/capabilities') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(buildCapabilitiesPayload(deps)));
-        return;
-      }
-      if (pathname === '/capabilities/rescan') {
-        rescanUserCapabilities(deps).then((summary) => {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            status: 'ok',
-            ...summary,
-            ...buildCapabilitiesPayload(deps),
-          }));
-        }).catch((err) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            status: 'error',
-            error: err instanceof Error ? err.message : 'capability rescan failed',
-          }));
-        });
-        return;
-      }
-      if (pathname === '/history') {
-        handleHistoryRequest(deps).then((messages) => {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ messages }));
-        }).catch((err) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            error: err instanceof Error ? err.message : 'history load failed',
-          }));
-        });
+      const handled = handleLocalHttpRequest(req, res, deps, {
+        loadHistory: () => handleHistoryRequest(deps),
+      });
+      if (handled) {
         return;
       }
       res.writeHead(404);
@@ -1117,18 +595,23 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
 
       ws.on('message', (data: Buffer | string) => {
         try {
-          const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+          const msg = parseLocalAgentClientMessage(data);
+          if (!msg) return;
           if (msg.type === 'chat_request') {
-            handleChatRequest(ws, msg as unknown as ChatRequestMessage, deps).catch((err) => {
+            handleChatRequest(ws, msg, deps).catch((err) => {
               console.error('[local-server] handleChatRequest error:', err instanceof Error ? err.message : err);
             });
           } else if (msg.type === 'studio_request') {
-            handleStudioRequest(ws, msg as unknown as StudioRequestMessage, deps).catch((err) => {
+            handleStudioRequest(ws, msg, deps).catch((err) => {
               console.error('[local-server] handleStudioRequest error:', err instanceof Error ? err.message : err);
+            });
+          } else if (msg.type === 'human_review_response') {
+            handleHumanReviewResponse(ws, msg, deps).catch((err) => {
+              console.error('[local-server] handleHumanReviewResponse error:', err instanceof Error ? err.message : err);
             });
           } else if (msg.type === 'interrupt_request') {
             const inflight = inflightRequests.get(ws);
-            const requestId = typeof msg.requestId === 'string' ? msg.requestId : '';
+            const requestId = msg.requestId;
             if (inflight && (!requestId || inflight.requestId === requestId)) {
               interruptInflightRequest(ws, inflight);
               console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
@@ -1140,7 +623,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
               console.error('[local-server] new_session error:', err instanceof Error ? err.message : err);
             });
           } else if (msg.type === 'ping') {
-            ws.send(JSON.stringify({ type: 'pong' }));
+            sendLocalAgentMessage(ws, { type: 'pong' });
           }
         } catch {
           // ignore malformed messages

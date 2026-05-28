@@ -150,6 +150,12 @@ function resolvePlaywrightCorePath(): string | null {
     return override;
   }
 
+  try {
+    return nodeRequire.resolve('playwright-core');
+  } catch {
+    // Optional package dependency not installed; fall back to global search roots.
+  }
+
   for (const root of resolvePlaywrightSearchRoots()) {
     try {
       const resolved = nodeRequire.resolve('playwright-core', { paths: [root] });

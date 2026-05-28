@@ -9,12 +9,13 @@ import { loadAgentContext } from '../contextLoader';
 import { ensureActorSelected } from '../actorSelection';
 import { parseLocalAgentServerMessage, sendLocalAgentMessage } from '../localAgentProtocol';
 import {
-  formatStudioTurnEvent,
-  formatToolProgress,
-  formatToolResult,
-  formatToolStart,
-  shorten,
-} from './tuiFormatters';
+  presentToolProgress,
+  presentToolResult,
+  presentToolStart,
+} from '../presentation/toolPresentation';
+import { presentStudioTurnEvent } from '../presentation/studioPresentation';
+import { renderZhCN } from '../presentation/zhCN';
+import { shorten } from '../presentation/utils';
 
 type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -753,20 +754,21 @@ function TuiApp(props: { actorId: string }) {
 
         setActiveTools((current) => {
           if (phase === 'start') {
-            const summary = formatToolStart(toolName, input);
+            const summary = presentToolStart(toolName, input);
             const next = current.filter((tool) => tool.name !== toolName);
             next.push({
               name: toolName,
-              label: summary.label,
-              detail: summary.detail,
+              label: renderZhCN(summary.label),
+              detail: renderZhCN(summary.detail),
               startedAt: Date.now(),
             });
             return next;
           }
           if (phase === 'event') {
+            const progress = renderZhCN(presentToolProgress(output || input || error));
             return current.map((tool) => (
               tool.name === toolName
-                ? { ...tool, detail: formatToolProgress(toolName, output || input || error) || tool.detail }
+                ? { ...tool, detail: progress || tool.detail }
                 : tool
             ));
           }
@@ -774,7 +776,9 @@ function TuiApp(props: { actorId: string }) {
         });
 
         if (phase === 'end' || phase === 'error') {
-          appendMessage('system', `${formatToolStart(toolName, input).label}：${formatToolResult(toolName, output, error)}`);
+          const start = presentToolStart(toolName, input);
+          const result = presentToolResult({ toolName, input, output, error });
+          appendMessage('system', `${renderZhCN(start.label)}：${renderZhCN(result)}`);
         }
         return;
       }
@@ -839,7 +843,7 @@ function TuiApp(props: { actorId: string }) {
       }
 
       if (msg.type === 'studio_turn_event') {
-        const line = formatStudioTurnEvent(msg.event);
+        const line = renderZhCN(presentStudioTurnEvent(msg.event));
         if (line) appendMessage('system', line);
         return;
       }

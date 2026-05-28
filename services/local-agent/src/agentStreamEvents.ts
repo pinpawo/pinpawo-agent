@@ -1,26 +1,21 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import type { ToolLogPhase } from './localAgentProtocol';
+import {
+  normalizeToolStreamEvent,
+  type StreamToolsPayload,
+} from './events/agentStreamNormalizer';
+import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import { localToolOperationRegistry } from './plugins/localToolOperations';
+import {
+  buildLegacyToolLogMessage,
+  type LegacyToolLogMessagePayload,
+} from './protocol/legacyProtocolAdapter';
 
-export type StreamToolsPayload = {
-  event: 'on_tool_start' | 'on_tool_event' | 'on_tool_end' | 'on_tool_error';
-  toolCallId?: string;
-  name: string;
-  input?: unknown;
-  output?: unknown;
-  error?: unknown;
-  data?: unknown;
-};
+export type { StreamToolsPayload };
+export type ToolLogMessagePayload = LegacyToolLogMessagePayload;
 
-export type ToolLogMessagePayload = {
-  type: 'tool_log';
-  requestId: string;
-  phase: ToolLogPhase;
-  toolName: string;
-  toolCallId?: string;
-  input?: string;
-  output?: string;
-  error?: string;
-};
+export function buildToolOperationEvent(requestId: string, payload: StreamToolsPayload): LocalAgentOperationEvent {
+  return normalizeToolStreamEvent(requestId, payload, localToolOperationRegistry);
+}
 
 export function readFinalMessageText(message: { content?: unknown }) {
   const content = message.content;
@@ -74,52 +69,6 @@ export function isLaneTaggedAiMessage(message: BaseMessage) {
   return Boolean(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
 }
 
-export function stringifyToolData(value: unknown) {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (value && typeof value === 'object') {
-    const content = (value as { content?: unknown }).content;
-    if (typeof content === 'string') {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      return content
-        .map((part) => (typeof part === 'string' ? part : ((part as { text?: string }).text ?? '')))
-        .join('');
-    }
-  }
-  try {
-    return JSON.stringify(value ?? '');
-  } catch {
-    return String(value);
-  }
-}
-
 export function buildToolLogMessage(requestId: string, payload: StreamToolsPayload): ToolLogMessagePayload {
-  const phase: ToolLogPhase = payload.event === 'on_tool_start'
-    ? 'start'
-    : payload.event === 'on_tool_end'
-      ? 'end'
-      : payload.event === 'on_tool_error'
-        ? 'error'
-        : 'event';
-  const input = payload.input !== undefined ? stringifyToolData(payload.input) : undefined;
-  const output = payload.output !== undefined
-    ? stringifyToolData(payload.output)
-    : payload.data !== undefined
-      ? stringifyToolData(payload.data)
-      : undefined;
-  const error = payload.error !== undefined ? stringifyToolData(payload.error) : undefined;
-
-  return {
-    type: 'tool_log',
-    requestId,
-    phase,
-    toolName: payload.name,
-    toolCallId: payload.toolCallId,
-    input,
-    output,
-    error,
-  };
+  return buildLegacyToolLogMessage(buildToolOperationEvent(requestId, payload));
 }

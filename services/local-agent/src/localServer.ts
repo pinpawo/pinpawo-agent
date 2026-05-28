@@ -29,6 +29,7 @@ import {
 import { readFirstHumanReviewDecision, type HumanReviewDecision } from '@pinpawo/pet-agent';
 import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
 import {
+  buildToolOperationEvent,
   buildToolLogMessage,
   readFinalMessageText,
   type StreamToolsPayload,
@@ -303,11 +304,20 @@ function isToolProtocolHistoryError(value: unknown): boolean {
 }
 
 function emitToolLog(ws: WebSocket, requestId: string, payload: StreamToolsPayload) {
+  const event = buildToolOperationEvent(requestId, payload);
   const message = buildToolLogMessage(requestId, payload);
 
   if (message.phase === 'error' && isHumanReviewInterruptError(payload.error)) {
+    const interruptedEvent = {
+      ...event,
+      phase: 'interrupted' as const,
+      raw: {
+        input: event.raw?.input,
+      },
+    };
     recordToolActivity(payload.name, 'interrupt', requestId);
     console.log(`[local-server] tool_interrupt requestId=${requestId} tool=${payload.name}`);
+    sendLocalAgentMessage(ws, { type: 'event', requestId, event: interruptedEvent });
     sendLocalAgentMessage(ws, { ...message, phase: 'interrupt', output: undefined, error: undefined });
     return;
   }
@@ -320,6 +330,7 @@ function emitToolLog(ws: WebSocket, requestId: string, payload: StreamToolsPaylo
       + (message.error ? ` error=${maybeTrimForLog(message.error)}` : ''),
   );
 
+  sendLocalAgentMessage(ws, { type: 'event', requestId, event });
   sendLocalAgentMessage(ws, message);
 }
 

@@ -41,6 +41,7 @@ import {
 } from './localAgentProtocol';
 import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
 import {
+  buildToolOperationEvent,
   buildToolLogMessage,
   type StreamToolsPayload,
 } from './agentStreamEvents';
@@ -73,8 +74,10 @@ async function filterAvailableUserCapabilities(
 }
 
 function emitToolLog(ws: WebSocket, requestId: string, payload: StreamToolsPayload) {
+  const event = buildToolOperationEvent(requestId, payload);
   const message = buildToolLogMessage(requestId, payload);
   recordToolActivity(payload.name, message.phase, requestId);
+  sendLocalAgentMessage(ws, { type: 'event', requestId, event });
   sendLocalAgentMessage(ws, message);
 }
 

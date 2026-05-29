@@ -632,12 +632,14 @@ TUI 重构不是孤立的一块。下面这些是**同一次项目重构**的不
 
 ## 12. 下一步建议
 
-合并本文档后，下一 PR 做"阶段 1：拆分 + session-keyed reducer"。
+合并本文档后，下一 PR 做"阶段 1A：无行为变化拆边界"。
 
 第一轮必须小心控制范围：
 
-- 拆分 + reducer 一起做，但**用户可见行为保持不变**。
-- state 用 session-keyed 形状，但 v1 UI 单焦点、单连接（`sessions` 通常一个条目）。
-- WebSocket protocol 保持不变；session/run 路由在客户端用 `runRoute` 维护。
+- 只移动/拆分现有 TUI 组件、layout helper 和 render helper。
+- 保留现有 `useState` / `useRef` / `useEffect` 状态结构。
+- 不引入 session-keyed reducer、`runRoute` 或 `TuiRuntimeController`。
+- WebSocket protocol 和 WebSocket 连接逻辑保持不变。
 - `/studio` / `/chat` / `/new` / `/allow` 行为保持不变。
-- 拆分后必须通过 typecheck 和 unit tests，并新增迟到 / 陌生 requestId 事件被丢弃的专项测试。
+- 拆分后必须通过 typecheck 和 unit tests。
+- 迟到 / 陌生 requestId 过滤、两个 requestId 不串 `assistantDraft` 等专项 reducer 测试放到阶段 1B。

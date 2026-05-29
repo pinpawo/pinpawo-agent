@@ -326,6 +326,16 @@ type ActiveRunModel = {
   startedAt: number;
   charCount: number;
 };
+
+// 模型用量统计,非鉴权 token / API key / 本地 secret。
+// 协议尚无来源字段(见 §3.5):字段先定义好,但来源落地前 session.tokenUsage 恒为 null。
+type TokenUsageModel = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  contextWindow?: number;
+  updatedAt?: string;
+};
 ```
 
 > 注意：`ActiveRunModel` 里没有 spinner 帧、`now` 时间戳这类动画时钟字段。这些是纯展示状态，应留在组件 local state（一个 `setInterval` tick），**不要进 reducer**——否则 spinner 每 ~120ms 灌一个 action，纯噪音污染状态流，也让 reducer 测试难写。`startedAt` 进 state（用于算 elapsed），但"当前时间"在组件里取。

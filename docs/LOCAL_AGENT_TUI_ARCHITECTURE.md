@@ -374,7 +374,7 @@ type ApprovalRequestModel = {
 
 - 用户消息和最终 assistant 回复进入对应 session 的 `history`。
 - **事件路由**：收到 `{ requestId, event }` → `sessionId = runRoute[requestId]` → 落到该 session 的 `activeRun`。
-- **迟到 / 陌生事件过滤**（reducer 头等不变量）：`runRoute` 里查不到 `requestId` 的事件直接丢弃。这取代了初稿"对比唯一 requestId"的写法，将来并发时也天然安全。阶段 1 的 reducer 必须为这条规则单独加测试。
+- **迟到 / 陌生事件过滤**（reducer 头等不变量）：`runRoute` 里查不到 `requestId` 的事件直接丢弃。这取代了初稿"对比唯一 requestId"的写法，将来并发时也天然安全。阶段 1B 的 reducer 必须为这条规则单独加测试。
 - operation start/update 默认只更新该 session 的 `activeRun.activeOperations`。
 - operation failed / interrupted / 重要 completed 事件可以按摘要进入该 session 的 system history。
 - `message.delta` 更新对应 session 的 `assistantDraft` 和 phase。

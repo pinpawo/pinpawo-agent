@@ -234,7 +234,7 @@ services/local-agent/src/
 
   tui/
     TuiApp.tsx               # app shell: compose hooks/components
-    TuiRuntimeController.ts  # websocket/http 副作用、发送 client message、session/history 加载
+    TuiRuntimeController.ts  # 阶段 1C: websocket/http 副作用、发送 client message、session/history 加载
 
     state/
       tuiState.ts            # TuiState / TuiAction types(session-keyed,见 §5)
@@ -271,7 +271,7 @@ services/local-agent/src/
 - `commands/tui.tsx` 最终收敛为 CLI entry。
 - `tui/render/*` 面向 normalized event fields。
 - `tui/state/*` 保持纯状态计算（不含网络副作用，也不含动画时钟，见 §5）。
-- `TuiRuntimeController` 负责 local-agent server 通信、发送 client message、session/history 加载。
+- `TuiRuntimeController` 在阶段 1C 落地，负责 local-agent server 通信、发送 client message、session/history 加载。
 
 ## 5. TUI State 草案
 
@@ -497,7 +497,7 @@ LocalAgentEvent
 
 ## 10. 分阶段计划
 
-> 相比初稿的 5 个串行阶段，这里把"拆分"和"引入 reducer"合并（初稿分两步等于对同一批行改两遍），并把高价值的用户可见能力从最后一个阶段提前，避免连做多个纯重构 PR 而用户无感。
+> 阶段 1 拆成 1A / 1B / 1C。原因是 `commands/tui.tsx` 当前同时承载组件、事件状态、WebSocket 副作用和命令输入；一次同时拆文件、引入 session-keyed reducer、再抽 controller，review 面会过大。先拆展示边界，再改状态模型，最后抽副作用层。
 
 ### 阶段 0：文档对齐
 
@@ -507,19 +507,38 @@ LocalAgentEvent
 
 - `docs/LOCAL_AGENT_TUI_ARCHITECTURE.md`
 
-### 阶段 1：拆分 + session-keyed reducer（合并原阶段 1、2）
+### 阶段 1A：无行为变化拆边界
 
-目标：降低 `commands/tui.tsx` 复杂度，并把 WebSocket event handling 与 UI state transition 分开。一次做完是因为"先纯移动、下个 PR 再加 reducer"会对同一批行改两遍。
+目标：降低 `commands/tui.tsx` 复杂度，但不改变 state 语义、WebSocket 逻辑和用户可见行为。
 
 工作项：
 
 - 新增 `src/tui/` 目录，`commands/tui.tsx` 变成 thin entry。
-- 移出 `MessageBlock`、`SmartTextInput`、`InterruptSelector`、layout helpers 到 `tui/components/`。
+- 移出 `MessageBlock`、`SmartTextInput`、`InterruptSelector`、status/active operation/layout helpers 到 `tui/components/` 或 `tui/layout`。
 - `tuiEventRenderer.ts` 演进为 `tui/render/eventText.ts`，仍只面向 `LocalAgentEvent` / `studio.progress`。
-- 新增 `tui/state/tuiState.ts`、`tui/state/tuiStateReducer.ts`，采用 §5 的 **session-keyed 形状**（v1 UI 单焦点、单连接，`sessions` 通常一个条目）。
-- 把 `LocalAgentEvent`、control message、user action 映射成 `TuiAction`；chat 的 `message.completed` 与 studio 的 `studio_response` / `studio_error` 收敛到同一个"run 结束"动作。
+- 保留现有 `useState` / `useRef` / `useEffect` 结构。
+- 不引入 `TuiRuntimeController`。
+- 不引入 session-keyed reducer。
+
+验收：
+
+- `npm run typecheck -w pinpawo-local-agent`
+- `npm run test:unit -w pinpawo-local-agent`
+- `/studio` / `/chat` / `/new` / `/allow` 行为保持不变。
+- 第一轮 diff 主要是移动代码和 import 调整。
+
+### 阶段 1B：引入 session-keyed reducer
+
+目标：把 WebSocket event handling 与 UI state transition 分开，采用 §5 的 session-keyed state 形状；v1 UI 仍然单焦点、单连接。
+
+工作项：
+
+- 新增 `tui/state/tuiState.ts`、`tui/state/tuiStateReducer.ts`。
+- state 采用 `sessions + focusedSessionId + runRoute`，但 `sessions` 通常只有一个当前 session。
+- 把 `LocalAgentEvent`、control message、user action 映射成 `TuiAction`。
+- chat 的 `message.completed` 与 studio 的 `studio_response` / `studio_error` 收敛到同一个"run 结束"动作。
 - 动画时钟（spinner / now）留在组件 local state，不进 reducer。
-- network 副作用、session/history 加载、断线后的重连策略都放在 `TuiRuntimeController`。
+- network 副作用、session/history 加载、断线后的重连策略暂时保留在现有 effect/controller 位置。
 
 验收：
 
@@ -527,6 +546,24 @@ LocalAgentEvent
 - `npm run test:unit -w pinpawo-local-agent`
 - reducer unit tests 覆盖：message.delta/completed、operation、human_review、interrupt、error、studio_response/error。
 - **专项测试**：`runRoute` 查不到 requestId 的事件被丢弃（迟到 / 陌生 run）；两条不同 requestId 的 `message.delta` 不会串进同一个 `assistantDraft`。
+
+### 阶段 1C：抽 TuiRuntimeController
+
+目标：在 reducer 稳定后，把 WebSocket / HTTP / session side effects 从 `TuiApp` 中抽出。
+
+工作项：
+
+- 新增 `TuiRuntimeController` 或等价 hook/controller。
+- 负责 local-agent health check、WebSocket connect/retry、history restore。
+- 负责发送 chat/studio/review/interrupt/new_session client message。
+- controller 只 dispatch action，不持有展示逻辑。
+- 断线/重连状态通过 reducer 更新 connection state。
+
+验收：
+
+- `npm run typecheck -w pinpawo-local-agent`
+- `npm run test:unit -w pinpawo-local-agent`
+- TUI reconnect / init / history restore 行为与当前版本一致。
 
 ### 阶段 2：Command registry + keymap + composer
 

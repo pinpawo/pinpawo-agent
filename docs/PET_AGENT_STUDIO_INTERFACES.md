@@ -244,3 +244,9 @@ retry 由 Studio 调度(execute 状态机再次输出 dispatch 同 taskIndex,dis
 
 - 多媒体路径引用用约定标记还是纯自然语言识别?(curator prompt 可控)
 - chat 层(目前用 ws stream + `__interrupt__` 直推客户端)是否最终也迁移到统一构造 pet runtime + 注入 humanReviewer 的模式?这是一个相对大的内务清理,见 [LangGraph 多 agent HITL 调研结论](#) 中提到的"a 的外壳 + b 的内核"思路。
+- **tool event 是否升级为可靠的单一结构化源,直接归一化成 `operation`,退役 `tool_log` 中间层并收敛 chat / studio 两条路径?** 现状:`operation`(LocalAgentEvent 的对外稳定边界)目前是 legacy `tool_log` 经 `legacyProtocolAdapter` 重新格式化得到的;`tool_log` 的源头有多处(chat 的 `setup.input.onToolEvent` 回调 + chat stream 的 `mode === 'tools'` chunk,studio 的 `onToolEvent` 透传)。引入 LocalAgentEvent 后这件事**更有必要**,原因:
+  - `operation` 的质量上限被 `tool_log` 限死——边界拔高了,源头没拔高。
+  - `operation` 现在带 `phase` 生命周期,reducer 把 `activeOperations` 当权威 state;但 `SubagentToolEvent`(on_tool_start/event/end/error)**不保证每个 start 都有配对 terminal**,掉一个 end 就会让 `activeOperations` 永久泄漏——start↔end 的可靠配对从"美观"变成"正确性"。
+  - 多源汇入一个 legacy 中间人,正是 LocalAgentEvent"单一归一化边界"想消灭的形态。
+
+  目标方向:pet runtime 直接发**生命周期完整(start 必配 terminal)、带稳定 callId、有序**的结构化 tool 事件,作为唯一源,一次归一化成 `operation`,砍掉 `tool_log` 中间层,chat 停止 stream `'tools'` 抓取冗余源,chat / studio 收敛到同一条。利好:客户端只认 `operation` 稳定形状,这次优化可在不动客户端的前提下做。与上一条 chat/studio 统一是同一方向。详见 `docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0(stream→event 映射)。

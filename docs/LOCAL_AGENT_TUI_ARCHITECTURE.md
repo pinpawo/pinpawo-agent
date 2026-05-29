@@ -3,7 +3,7 @@
 > 状态：Draft v2
 > 日期：2026-05-29
 
-> v2 修订重点：① 明确范围边界——TUI 文档只定义 TUI 客户端如何消费归一化事件、维护 state，并为 studio 留出 state 形状；studio 完整链路归 `PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN.md` / `PET_AGENT_STUDIO_INTERFACES.md`，事件归一化归 `LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5。② state 改为 session-keyed，为 chat ∥ studio、multi-agent 多 session 留空间（v1 UI 单焦点）。③ 收敛目标目录粒度、去掉冗余中间 model、标注 token usage 来源、写清动画时钟与迟到事件过滤两条 reducer 边界。④ 记录"每个 pet run 事件投递尚不可靠/不统一"为 TUI 重构的前置依赖（修复不在 TUI 范围）。⑤ 分阶段计划压缩为更早交付用户价值的顺序。
+> v2 修订重点：① 明确范围边界——TUI 文档只定义 TUI 客户端如何消费归一化事件、维护 state，并为 studio 留出 state 形状；studio 完整链路归 `PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN.md` / `PET_AGENT_STUDIO_INTERFACES.md`，事件归一化归 `LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5。② state 改为 session-keyed，为 chat ∥ studio、multi-agent 多 session 留空间（v1 UI 单焦点）。③ 收敛目标目录粒度、去掉冗余中间 model、标注 token usage 来源、写清动画时钟与迟到事件过滤两条 reducer 边界。④ 把 `operation` 事件模型与 tool event 源可靠性、chat/studio 收敛、message token boundary 作为**同一次重构的不同部分**对齐（不是 TUI 等谁的前置依赖，见 §11）。⑤ 分阶段计划压缩为更早交付用户价值的顺序。
 
 ## 1. 文档目标
 
@@ -336,6 +336,36 @@ type TokenUsageModel = {
   contextWindow?: number;
   updatedAt?: string;
 };
+
+// 一条历史条目。v1 故意保持简单,与现实现行为对齐:
+// operation 的 completed/failed/interrupted 摘要以 kind:'system' 写入(见 §5.3)。
+// 更丰富的 cell(独立的 operation cell / diff cell / 区分 durable vs run activity)
+// 属于阶段 4 的 transcript model,这里不预先拆。
+type HistoryCellModel = {
+  id: string;
+  kind: 'user' | 'assistant' | 'system';
+  text: string;
+  timestamp?: string;
+};
+
+// activeRun 期间在途的一个 operation,来自归一化后的 operation 事件字段。
+type ActiveOperationModel = {
+  key: string;        // 去重键:operation.id ?? source.callId ?? source.name ?? kind
+  kind: string;       // operation.kind
+  title: string;      // operation.title ?? kind
+  detail: string;     // target / summary / details 拼成的展示文案
+  startedAt: number;
+};
+
+// 一次待处理的 human review,来自 human_review.requested 事件。
+// ApprovalPanel 据 payload 生成候选动作(见 §7);TUI 只消费归一化后的请求结构。
+type ApprovalRequestModel = {
+  requestId: RunId;
+  kind: string;                     // payload.kind ?? 'interrupt'
+  prompt: string;
+  payload: Record<string, unknown>; // 归一化后的 approval payload(actionRequests / reviewConfigs 等)
+  petId?: string;                   // studio 路径下触发 HITL 的 pet;chat 路径 undefined
+};
 ```
 
 > 注意：`ActiveRunModel` 里没有 spinner 帧、`now` 时间戳这类动画时钟字段。这些是纯展示状态，应留在组件 local state（一个 `setInterval` tick），**不要进 reducer**——否则 spinner 每 ~120ms 灌一个 action，纯噪音污染状态流，也让 reducer 测试难写。`startedAt` 进 state（用于算 elapsed），但"当前时间"在组件里取。
@@ -550,15 +580,18 @@ LocalAgentEvent
 - TUI formatter 保持 terminal adapter 定位。
 - 新 TUI 路径以 `LocalAgentEvent` 为主事件模型。
 
-跨层依赖（不在本轮 TUI 范围，但影响 TUI 演进）：
+与同一次重构对齐的其他部分：
 
-- server 当前是**一个 ws 连接一个 inflight**（`inflightRequests` 按 `ws` 存，新请求会 abort 旧 inflight）。所以真正的多 run 并行——chat ∥ studio，或 multi-agent 下多个 chat session 同时跑——依赖 local-agent server 阶段支持"同一连接多 inflight"或"一 session 一连接"，并让事件 envelope 能区分属于哪个 run（`requestId` 已具备）。
-- 在 server 支持并行前，TUI 用 §5 的 session-keyed 形状跑单连接：state 形状先就位，UI 单焦点，`sessions` 通常只有一个条目。这样 server 端并行能力到位时，TUI 不需要推倒重写 state。
-- **每个 pet run 的事件投递目前不够可靠 / 不够统一**，这是 TUI 运行态展示的前置依赖，但修复不在 TUI 范围：
-  - pet 调用契约没有 message token boundary——`PetAgentRuntimeInvokeInput` 只有 `onToolEvent`，没有 token 流回调，所以 studio 路径下 pet 的 `message.delta` 无处可出（要放出需扩 INTERFACES 的 Boundary 1，不只是 invoke→stream）。
-  - `onToolEvent` 是 fire-and-forget、无顺序/完整性保证，TUI 不能把它当成权威的"pet 在干什么"视图。
-  - chat 与 studio 是同一个 `OrchestratorGraph` 的两条不同投递路径（chat = ws stream + 直推中断；studio = pet runtime + onToolEvent + humanReviewer 桥），尚未统一（见 INTERFACES 的 Open Questions）。
-  - 这些归 `docs/PET_AGENT_STUDIO_INTERFACES.md`（Boundary 1/2 + Open Question）与 `docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5（stream→event 映射）解决。TUI 重构应假设"每个 pet run 有可靠、统一的事件流"，并在这条依赖落地前对缺失的 token / 不可靠的 operation 做降级展示。
+TUI 重构不是孤立的一块。下面这些是**同一次项目重构**的不同部分，归属不同文件/文档，但**一起改、对齐同一份契约**——不是 TUI 等谁、也不是谁等 TUI，重构时一并推进、契约对齐即可。
+
+- **`operation` 事件模型 ↔ tool event 源的可靠性**，是这次重构的两端，一起改：
+  - `operation` 现在带 `phase` 生命周期，TUI reducer 把 `activeOperations` 当权威 state（§5）。
+  - 对应地，tool event 的**结构化源要做成生命周期完整**——start 必配 terminal、有序、稳定 callId，`operation` 从它直接产出，**退役 `tool_log`**（见 `docs/PET_AGENT_STUDIO_INTERFACES.md` Boundary 2 + Open Question、`docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0）。
+  - pet 调用契约同时补 **message token boundary**——现 `PetAgentRuntimeInvokeInput` 只有 `onToolEvent`、没有 token 回调，需扩 INTERFACES 的 Boundary 1，让 pet 的 `message.delta` 在各路径都有出口。
+  - chat 与 studio 当前是同一个 `OrchestratorGraph` 的两条投递路径（chat = ws stream + 直推中断；studio = pet runtime + onToolEvent + humanReviewer 桥），这次一并**收敛到同一条**。
+  - 对齐点：两端共用 `operation` 的 `phase` 生命周期语义与 `activeOperations` 的 state 语义，源侧产出什么、TUI 侧怎么消费，用同一份契约定义。
+
+- **session-keyed 形状 ↔ run 身份契约**：state 按"run 身份 = `requestId`、session 身份由客户端分配"设计（§5），与 server 端 run 标识对齐。完整 server 拆分（同一连接多 inflight / 一 session 一连接以支持真正并发）按非目标归入后续 local-agent 架构阶段，但 run 身份契约现在就对齐，到时直接契合、无需重写 state。
 
 ## 12. 下一步建议
 

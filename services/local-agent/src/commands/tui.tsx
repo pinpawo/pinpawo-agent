@@ -9,12 +9,13 @@ import { loadAgentContext } from '../contextLoader';
 import { ensureActorSelected } from '../actorSelection';
 import { parseLocalAgentServerMessage, sendLocalAgentMessage } from '../localAgentProtocol';
 import {
-  formatStudioTurnEvent,
-  formatToolProgress,
-  formatToolResult,
-  formatToolStart,
+  formatOperationProgress,
+  formatOperationResult,
+  formatOperationStart,
+  formatStudioProgressEvent,
+  getOperationKey,
   shorten,
-} from './tuiFormatters';
+} from './tuiEventRenderer';
 
 type MessageRole = 'user' | 'assistant' | 'system';
 
@@ -744,51 +745,98 @@ function TuiApp(props: { actorId: string }) {
         return;
       }
 
-      if (msg.type === 'tool_log') {
-        const phase = msg.phase;
-        const toolName = msg.toolName;
-        const input = msg.input ?? '';
-        const output = msg.output ?? '';
-        const error = msg.error ?? '';
+      if (msg.type === 'event') {
+        const event = msg.event;
+        if (event.type === 'operation') {
+          const operationKey = getOperationKey(event);
+          setActiveTools((current) => {
+            if (event.phase === 'started') {
+              const summary = formatOperationStart(event);
+              const next = current.filter((tool) => tool.name !== operationKey);
+              next.push({
+                name: operationKey,
+                label: summary.label,
+                detail: summary.detail,
+                startedAt: Date.now(),
+              });
+              return next;
+            }
+            if (event.phase === 'updated') {
+              const progress = formatOperationProgress(event);
+              return current.map((tool) => (
+                tool.name === operationKey
+                  ? { ...tool, detail: progress || tool.detail }
+                  : tool
+              ));
+            }
+            return current.filter((tool) => tool.name !== operationKey);
+          });
 
-        setActiveTools((current) => {
-          if (phase === 'start') {
-            const summary = formatToolStart(toolName, input);
-            const next = current.filter((tool) => tool.name !== toolName);
-            next.push({
-              name: toolName,
-              label: summary.label,
-              detail: summary.detail,
-              startedAt: Date.now(),
-            });
-            return next;
+          if (event.phase === 'completed' || event.phase === 'failed' || event.phase === 'interrupted') {
+            appendMessage('system', formatOperationResult(event));
           }
-          if (phase === 'event') {
-            return current.map((tool) => (
-              tool.name === toolName
-                ? { ...tool, detail: formatToolProgress(toolName, output || input || error) || tool.detail }
-                : tool
-            ));
-          }
-          return current.filter((tool) => tool.name !== toolName);
-        });
-
-        if (phase === 'end' || phase === 'error') {
-          appendMessage('system', `${formatToolStart(toolName, input).label}：${formatToolResult(toolName, output, error)}`);
+          return;
         }
-        return;
-      }
 
-      if (msg.type === 'chat_token') {
-        const token = msg.token;
-        if (!token) return;
-        assistantDraftRef.current += token;
-        setPendingUi((current) => current ? {
-          ...current,
-          phase: 'replying',
-          charCount: current.charCount + token.length,
-        } : current);
-        return;
+        if (event.type === 'message.delta') {
+          const token = event.text;
+          if (!token) return;
+          assistantDraftRef.current += token;
+          setPendingUi((current) => current ? {
+            ...current,
+            phase: 'replying',
+            charCount: current.charCount + token.length,
+          } : current);
+          return;
+        }
+
+        if (event.type === 'human_review.requested') {
+          const prompt = event.prompt.trim() || '当前流程需要你的确认，请直接回复继续或说明下一步。';
+          const interruptPayload = event.payload;
+          const petId = event.actor?.petId || undefined;
+          setPendingInterrupt({
+            kind: typeof interruptPayload.kind === 'string' ? interruptPayload.kind : 'interrupt',
+            requestId: event.requestId,
+            prompt,
+            payload: interruptPayload,
+            ...(petId ? { petId } : {}),
+          });
+          finishRequest(petId ? `等待你的决定(${petId})` : '等待你的决定');
+          return;
+        }
+
+        if (event.type === 'system.notice') {
+          const notice = event.message.trim();
+          if (notice) {
+            appendMessage('system', notice);
+          }
+          return;
+        }
+
+        if (event.type === 'message.completed') {
+          const reply = event.text.trim();
+          const finalText = assistantDraftRef.current.trim() || reply || '...';
+          if (finalText) {
+            appendMessage('assistant', finalText);
+          }
+          setPendingInterrupt(null);
+          finishRequest();
+          return;
+        }
+
+        if (event.type === 'studio.progress') {
+          const line = formatStudioProgressEvent(event);
+          if (line) appendMessage('system', line);
+          return;
+        }
+
+        if (event.type === 'error') {
+          const error = event.message || 'internal error';
+          appendMessage('system', `出错: ${error}`);
+          setPendingInterrupt(null);
+          finishRequest('出错，已恢复输入');
+          return;
+        }
       }
 
       if (msg.type === 'interrupting') {
@@ -797,50 +845,10 @@ function TuiApp(props: { actorId: string }) {
         return;
       }
 
-      if (msg.type === 'human_interrupt') {
-        const prompt = msg.prompt.trim() || '当前流程需要你的确认，请直接回复继续或说明下一步。';
-        const interruptPayload = msg.payload;
-        const petId = msg.petId || undefined;
-        setPendingInterrupt({
-          kind: typeof interruptPayload.kind === 'string' ? interruptPayload.kind : 'interrupt',
-          requestId: msg.requestId,
-          prompt,
-          payload: interruptPayload,
-          ...(petId ? { petId } : {}),
-        });
-        finishRequest(petId ? `等待你的决定(${petId})` : '等待你的决定');
-        return;
-      }
-
-      if (msg.type === 'system_notice') {
-        const notice = msg.message.trim();
-        if (notice) {
-          appendMessage('system', notice);
-        }
-        return;
-      }
-
-      if (msg.type === 'chat_response') {
-        const reply = msg.message.trim();
-        const finalText = assistantDraftRef.current.trim() || reply || '...';
-        if (finalText) {
-          appendMessage('assistant', finalText);
-        }
-        setPendingInterrupt(null);
-        finishRequest();
-        return;
-      }
-
       if (msg.type === 'interrupted') {
         appendMessage('assistant', '[interrupted]');
         setPendingInterrupt(null);
         finishRequest('已打断');
-        return;
-      }
-
-      if (msg.type === 'studio_turn_event') {
-        const line = formatStudioTurnEvent(msg.event);
-        if (line) appendMessage('system', line);
         return;
       }
 

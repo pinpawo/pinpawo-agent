@@ -1,7 +1,7 @@
 import type {
   LocalAgentOperationEvent,
   LocalAgentStudioProgressEvent,
-} from '../events/localAgentEvent';
+} from '../../events/localAgentEvent';
 
 export function shorten(value: string, max = 60) {
   const normalized = value.replace(/\s+/g, ' ').trim();

@@ -5,7 +5,7 @@ import {
   formatOperationStart,
   formatStudioProgressEvent,
   getOperationKey,
-} from './commands/tuiEventRenderer';
+} from './tui/render/eventText';
 import type { LocalAgentOperationEvent } from './events/localAgentEvent';
 
 test('formats operation events without reading legacy tool input/output', () => {

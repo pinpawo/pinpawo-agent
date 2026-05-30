@@ -50,17 +50,18 @@ export function TuiApp(props: { actorId: string }) {
 
   const stateRef = useRef<TuiState>(tuiState);
   const lastInterruptAtRef = useRef(0);
+  const localServerPort = config.localServerPort;
   // Studio 模式持续期间共用一个 conversationId,这样 wiki 跨 turn 累积、
   // pet runtime 的 thread namespace 也保持一致
   const studioConversationIdRef = useRef<string | null>(null);
   const studioModeRef = useRef(false);
   const runtimeController = useMemo(() => new TuiRuntimeController({
     actorId: props.actorId,
-    localServerPort: config.localServerPort,
+    localServerPort,
     dispatch,
     getState: () => stateRef.current,
     setNow,
-  }), [props.actorId]);
+  }), [props.actorId, localServerPort, dispatch, setNow]);
   const focusedSession = selectFocusedSession(tuiState);
   const messages = selectFocusedHistory(tuiState);
   const inputValue = tuiState.input.value;
@@ -141,7 +142,7 @@ export function TuiApp(props: { actorId: string }) {
         appendMessage('system', '未连接,无法发送');
         return;
       }
-      if (busy) {
+      if (runtimeController.isBusy()) {
         appendMessage('system', '当前任务仍在进行中,按 Ctrl+C 或 Esc 打断');
         return;
       }

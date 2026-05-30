@@ -14,6 +14,8 @@ import type { InterruptOption } from './types';
 const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
 const LOCAL_SERVER_HEALTH_TIMEOUT_MS = 1500;
+const LOCAL_SERVER_RECONNECT_RETRIES = 5;
+const LOCAL_SERVER_RECONNECT_DELAY_MS = 2000;
 
 type TuiRuntimeControllerOptions = {
   actorId: string;
@@ -61,6 +63,8 @@ export class TuiRuntimeController {
   private ws: WebSocket | null = null;
   private disposed = false;
   private interruptTimeout: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
 
   constructor(private readonly options: TuiRuntimeControllerOptions) {}
 
@@ -81,6 +85,7 @@ export class TuiRuntimeController {
   dispose() {
     this.disposed = true;
     this.clearInterruptTimeout();
+    this.clearReconnectTimeout();
     if (this.ws) {
       this.ws.removeAllListeners();
       this.ws.close();
@@ -90,6 +95,10 @@ export class TuiRuntimeController {
 
   isConnected() {
     return Boolean(this.getOpenWebSocket());
+  }
+
+  isBusy() {
+    return this.isCurrentBusy();
   }
 
   sendChatRequest(message: string) {
@@ -288,13 +297,8 @@ export class TuiRuntimeController {
     for (let attempt = 0; attempt <= LOCAL_SERVER_CONNECT_RETRIES; attempt += 1) {
       if (this.disposed) return false;
       try {
-        const healthRes = await fetchWithTimeout(
-          `http://127.0.0.1:${this.options.localServerPort}/health`,
-          LOCAL_SERVER_HEALTH_TIMEOUT_MS,
-        );
-        if (!healthRes.ok) {
-          throw new Error(`health check failed: ${healthRes.status}`);
-        }
+        const healthy = await this.checkLocalServerHealth();
+        if (!healthy) throw new Error('health check failed');
         return true;
       } catch {
         if (this.disposed) return false;
@@ -358,6 +362,7 @@ export class TuiRuntimeController {
   }
 
   private connectWebSocket() {
+    this.clearReconnectTimeout();
     const ws = new WebSocket(`ws://127.0.0.1:${this.options.localServerPort}`);
     this.ws = ws;
 
@@ -366,6 +371,8 @@ export class TuiRuntimeController {
         ws.close();
         return;
       }
+      if (this.ws !== ws) return;
+      this.reconnectAttempt = 0;
       this.options.dispatch({
         type: 'connection.set',
         status: 'ready',
@@ -374,23 +381,85 @@ export class TuiRuntimeController {
     });
 
     ws.on('message', (data) => {
+      if (this.ws !== ws) return;
       this.handleWsMessage(data);
     });
 
     ws.on('close', () => {
       if (this.disposed) return;
+      if (this.ws !== ws) return;
       this.options.dispatch({
         type: 'connection.set',
         status: 'disconnected',
         message: '连接断开',
       });
       this.ws = null;
+      this.scheduleReconnect();
     });
 
     ws.on('error', (err) => {
       if (this.disposed) return;
+      if (this.ws !== ws) return;
       this.appendSystemMessage(`WS error: ${err.message}`);
     });
+  }
+
+  private async checkLocalServerHealth() {
+    try {
+      const healthRes = await fetchWithTimeout(
+        `http://127.0.0.1:${this.options.localServerPort}/health`,
+        LOCAL_SERVER_HEALTH_TIMEOUT_MS,
+      );
+      return healthRes.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  private scheduleReconnect() {
+    if (this.disposed || this.reconnectTimeout || this.ws) return;
+
+    if (this.reconnectAttempt >= LOCAL_SERVER_RECONNECT_RETRIES) {
+      this.options.dispatch({
+        type: 'connection.set',
+        status: 'disconnected',
+        message: '连接断开，重连失败',
+      });
+      return;
+    }
+
+    this.reconnectAttempt += 1;
+    const attempt = this.reconnectAttempt;
+    const retryText = `连接断开，${LOCAL_SERVER_RECONNECT_DELAY_MS / 1000}s 后重连 ${attempt}/${LOCAL_SERVER_RECONNECT_RETRIES}`;
+    this.options.dispatch({
+      type: 'connection.set',
+      status: 'connecting',
+      message: retryText,
+    });
+
+    this.reconnectTimeout = setTimeout(() => {
+      this.reconnectTimeout = null;
+      void this.reconnect().catch((err) => {
+        if (this.disposed) return;
+        const message = err instanceof Error ? err.message : String(err);
+        this.appendSystemMessage(`重连失败: ${message}`);
+        this.scheduleReconnect();
+      });
+    }, LOCAL_SERVER_RECONNECT_DELAY_MS);
+  }
+
+  private async reconnect() {
+    if (this.disposed || this.ws) return;
+
+    const healthy = await this.checkLocalServerHealth();
+    if (this.disposed || this.ws) return;
+
+    if (!healthy) {
+      this.scheduleReconnect();
+      return;
+    }
+
+    this.connectWebSocket();
   }
 
   private async loadActorContext() {
@@ -509,6 +578,13 @@ export class TuiRuntimeController {
     if (this.interruptTimeout) {
       clearTimeout(this.interruptTimeout);
       this.interruptTimeout = null;
+    }
+  }
+
+  private clearReconnectTimeout() {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
     }
   }
 }

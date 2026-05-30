@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import { config } from '../config';
-import { InterruptSelector } from './components/InterruptSelector';
+import { Composer } from './components/Composer';
+import { buildInterruptSelectOptions, InterruptSelector } from './components/InterruptSelector';
 import { MessageBlock } from './components/MessageBlock';
-import { SmartTextInput } from './components/SmartTextInput';
+import { formatTuiCommandHelp, parseTuiCommand } from './input/commandRegistry';
+import { applyComposerInput, resolveTuiKeyAction } from './input/keymap';
 import {
   buildActiveToolLines,
   buildBusyStatusLine,
@@ -47,6 +49,8 @@ export function TuiApp(props: { actorId: string }) {
     rows: stdout.rows ?? 24,
   }));
   const [studioMode, setStudioMode] = useState(false);
+  const [composerCursorOffset, setComposerCursorOffset] = useState(0);
+  const [approvalIndex, setApprovalIndex] = useState(0);
 
   const stateRef = useRef<TuiState>(tuiState);
   const lastInterruptAtRef = useRef(0);
@@ -70,6 +74,10 @@ export function TuiApp(props: { actorId: string }) {
   const pendingUi = selectFocusedPendingUi(tuiState);
   const activeTools = selectFocusedActiveTools(tuiState);
   const pendingInterrupt = selectFocusedPendingInterrupt(tuiState);
+  const approvalOptions = useMemo(
+    () => (pendingInterrupt ? buildInterruptSelectOptions(pendingInterrupt) : []),
+    [pendingInterrupt],
+  );
   const petName = focusedSession?.actor.label ?? '宠物';
   const petSummary = focusedSession?.actor.summary ?? 'pet 未加载';
   const status = tuiState.connection.message;
@@ -77,6 +85,18 @@ export function TuiApp(props: { actorId: string }) {
   useEffect(() => {
     stateRef.current = tuiState;
   }, [tuiState]);
+
+  useEffect(() => {
+    setComposerCursorOffset((current) => Math.min(current, inputValue.length));
+  }, [inputValue.length]);
+
+  useEffect(() => {
+    setApprovalIndex(0);
+  }, [pendingInterrupt?.requestId]);
+
+  useEffect(() => {
+    setApprovalIndex((current) => Math.min(current, Math.max(0, approvalOptions.length - 1)));
+  }, [approvalOptions.length]);
 
   const appendMessage = (role: MessageRole, text: string) => {
     dispatch({
@@ -94,94 +114,102 @@ export function TuiApp(props: { actorId: string }) {
     dispatch({ type: 'input.set', value });
   };
 
+  const clearInputValue = () => {
+    setInputValue('');
+    setComposerCursorOffset(0);
+  };
+
   const submitCurrentInput = () => {
-    const text = inputValue.trim();
-    if (!text) return;
+    const parsed = parseTuiCommand(inputValue);
+    if (parsed.type === 'empty') return;
 
-    if (text === '/quit' || text === '/exit') {
-      exit();
-      return;
-    }
-
-    if (text === '/help' || text === '/') {
-      appendMessage(
-        'system',
-        '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /help · /quit',
-      );
-      setInputValue('');
-      return;
-    }
-
-    if (text === '/chat') {
-      if (studioModeRef.current) {
-        studioModeRef.current = false;
-        studioConversationIdRef.current = null;
-        setStudioMode(false);
-        dispatch({ type: 'session.set_kind', kind: 'chat' });
-        appendMessage('system', '已退出 Studio 模式,回到单 pet chat');
-      } else {
-        appendMessage('system', '当前不在 Studio 模式');
-      }
-      setInputValue('');
-      return;
-    }
-
-    if (text === '/studio' || text.startsWith('/studio ')) {
-      const userRequest = text === '/studio' ? '' : text.slice('/studio '.length).trim();
-      if (!userRequest && studioModeRef.current) {
-        // toggle 退出
-        studioModeRef.current = false;
-        studioConversationIdRef.current = null;
-        setStudioMode(false);
-        dispatch({ type: 'session.set_kind', kind: 'chat' });
-        appendMessage('system', '已退出 Studio 模式');
-        setInputValue('');
+    if (parsed.type === 'command') {
+      if (parsed.name === 'quit') {
+        exit();
         return;
       }
-      if (!runtimeController.isConnected()) {
-        appendMessage('system', '未连接,无法发送');
-        return;
-      }
-      if (runtimeController.isBusy()) {
-        appendMessage('system', '当前任务仍在进行中,按 Ctrl+C 或 Esc 打断');
-        return;
-      }
-      // 进入 Studio 模式(若不在)
-      if (!studioModeRef.current) {
-        studioModeRef.current = true;
-        studioConversationIdRef.current = randomUUID();
-        setStudioMode(true);
-        dispatch({ type: 'session.set_kind', kind: 'studio' });
-        appendMessage(
-          'system',
-          `已进入 Studio 模式 (conversation=${studioConversationIdRef.current.slice(0, 8)})。后续输入都属于此会话,输入 /chat 或 /studio 退出。`,
-        );
-      }
-      if (!userRequest) {
-        // 仅 toggle 进入,没首棒输入
-        setInputValue('');
-        return;
-      }
-      runtimeController.sendStudioRequest(userRequest, studioConversationIdRef.current);
-      return;
-    }
 
-    if (text === '/new') {
-      runtimeController.startNewSession();
-      return;
-    }
+      if (parsed.name === 'help') {
+        appendMessage('system', formatTuiCommandHelp());
+        clearInputValue();
+        return;
+      }
 
-    if (text.startsWith('/')) {
-      if (text.startsWith('/allow')) {
+      if (parsed.name === 'chat') {
+        if (studioModeRef.current) {
+          studioModeRef.current = false;
+          studioConversationIdRef.current = null;
+          setStudioMode(false);
+          dispatch({ type: 'session.set_kind', kind: 'chat' });
+          appendMessage('system', '已退出 Studio 模式,回到单 pet chat');
+        } else {
+          appendMessage('system', '当前不在 Studio 模式');
+        }
+        clearInputValue();
+        return;
+      }
+
+      if (parsed.name === 'studio') {
+        const userRequest = parsed.args;
+        if (!userRequest && studioModeRef.current) {
+          // toggle 退出
+          studioModeRef.current = false;
+          studioConversationIdRef.current = null;
+          setStudioMode(false);
+          dispatch({ type: 'session.set_kind', kind: 'chat' });
+          appendMessage('system', '已退出 Studio 模式');
+          clearInputValue();
+          return;
+        }
+        if (!runtimeController.isConnected()) {
+          appendMessage('system', '未连接,无法发送');
+          return;
+        }
+        if (runtimeController.isBusy()) {
+          appendMessage('system', '当前任务仍在进行中,按 Ctrl+C 或 Esc 打断');
+          return;
+        }
+        // 进入 Studio 模式(若不在)
+        if (!studioModeRef.current) {
+          studioModeRef.current = true;
+          studioConversationIdRef.current = randomUUID();
+          setStudioMode(true);
+          dispatch({ type: 'session.set_kind', kind: 'studio' });
+          appendMessage(
+            'system',
+            `已进入 Studio 模式 (conversation=${studioConversationIdRef.current.slice(0, 8)})。后续输入都属于此会话,输入 /chat 或 /studio 退出。`,
+          );
+        }
+        if (!userRequest) {
+          // 仅 toggle 进入,没首棒输入
+          clearInputValue();
+          return;
+        }
+        runtimeController.sendStudioRequest(userRequest, studioConversationIdRef.current);
+        return;
+      }
+
+      if (parsed.name === 'new') {
+        runtimeController.startNewSession();
+        return;
+      }
+
+      if (parsed.name === 'allow') {
         // /allow always submits as interrupt decision (server checks pending interrupt)
-        runtimeController.submitReviewResponse({ label: text, message: text });
+        runtimeController.submitReviewResponse({ label: parsed.raw, message: parsed.raw });
         return;
       }
-      appendMessage('system', `未知命令：${text}`);
-      setInputValue('');
+
       return;
     }
 
+    if (parsed.type === 'unknown') {
+      appendMessage('system', `未知命令：${parsed.raw}`);
+      clearInputValue();
+      return;
+    }
+
+    const text = parsed.text;
     // Free-text input while interrupt selector was dismissed via Esc:
     // server still has the pending interrupt, so this text becomes the resume value
     // Studio 模式下:普通文本走 studio_request(沿用同一 conversationId)
@@ -224,40 +252,83 @@ export function TuiApp(props: { actorId: string }) {
     return () => runtimeController.dispose();
   }, [runtimeController]);
 
-  // Global key handler — only handles Ctrl+C and Esc (when not in interrupt selector)
   useInput((input, key) => {
-    if (key.ctrl && input === 'c') {
-      if (busy) {
-        const nowMs = Date.now();
-        if (nowMs - lastInterruptAtRef.current < 1200) {
-          appendMessage('system', '收到第二次 Ctrl+C，立即退出 TUI。');
-          exit();
+    const action = resolveTuiKeyAction(input, key, {
+      ready,
+      busy,
+      hasPendingInterrupt: Boolean(pendingInterrupt),
+    });
+
+    switch (action.type) {
+      case 'global.ctrl_c':
+        if (busy) {
+          const nowMs = Date.now();
+          if (nowMs - lastInterruptAtRef.current < 1200) {
+            appendMessage('system', '收到第二次 Ctrl+C，立即退出 TUI。');
+            exit();
+            return;
+          }
+          if (runtimeController.requestInterrupt()) {
+            lastInterruptAtRef.current = nowMs;
+          }
+          appendMessage('system', '已发送打断请求。再次按 Ctrl+C 可直接退出 TUI。');
           return;
         }
-        if (runtimeController.requestInterrupt()) {
-          lastInterruptAtRef.current = nowMs;
-        }
-        appendMessage('system', '已发送打断请求。再次按 Ctrl+C 可直接退出 TUI。');
+        appendMessage('system', '正在退出 TUI。');
+        exit();
         return;
-      }
-      appendMessage('system', '正在退出 TUI。');
-      exit();
-      return;
-    }
 
-    if (!ready) {
-      return;
-    }
-
-    if (key.escape) {
-      // Interrupt selector dismissal is handled inside InterruptSelector itself via onDismiss.
-      // Here we only handle Esc for non-interrupt scenarios.
-      if (pendingInterrupt) return; // InterruptSelector owns Esc
-      if (busy) {
+      case 'global.interrupt':
         runtimeController.requestInterrupt();
         return;
+
+      case 'approval.previous':
+        setApprovalIndex((current) => Math.max(0, current - 1));
+        return;
+
+      case 'approval.next':
+        setApprovalIndex((current) => Math.max(0, Math.min(approvalOptions.length - 1, current + 1)));
+        return;
+
+      case 'approval.submit': {
+        const option = approvalOptions[approvalIndex] ?? approvalOptions[0];
+        if (option) {
+          runtimeController.submitReviewResponse(option);
+        }
+        return;
       }
-      setInputValue('');
+
+      case 'approval.dismiss':
+        if (pendingInterrupt) {
+          runtimeController.dismissReview(pendingInterrupt.requestId);
+        }
+        return;
+
+      case 'composer.clear':
+        clearInputValue();
+        return;
+
+      case 'composer.submit':
+        submitCurrentInput();
+        return;
+
+      case 'composer.edit': {
+        const nextComposerState = applyComposerInput(input, key, {
+          value: inputValue,
+          cursorOffset: composerCursorOffset,
+        });
+        setComposerCursorOffset(nextComposerState.cursorOffset);
+        if (nextComposerState.value !== inputValue) {
+          setInputValue(nextComposerState.value);
+        }
+        return;
+      }
+
+      case 'none':
+        return;
+
+      default:
+        return;
     }
   }, { isActive: true });
 
@@ -297,8 +368,8 @@ export function TuiApp(props: { actorId: string }) {
         <InterruptSelector
           interrupt={pendingInterrupt}
           width={contentWidth}
-          onSelect={(option) => runtimeController.submitReviewResponse(option)}
-          onDismiss={() => runtimeController.dismissReview(pendingInterrupt.requestId)}
+          options={approvalOptions}
+          selectedIndex={approvalIndex}
         />
       ) : null}
       {!pendingInterrupt ? (
@@ -319,10 +390,9 @@ export function TuiApp(props: { actorId: string }) {
         ) : (
           <>
             <Text color="cyan">{'> '}</Text>
-            <SmartTextInput
+            <Composer
               value={inputValue}
-              onChange={setInputValue}
-              onSubmit={submitCurrentInput}
+              cursorOffset={composerCursorOffset}
               placeholder={pendingInterrupt ? '输入自由回复，或按 ↑ 返回选择器' : '输入消息'}
               focus={inputFocused}
             />

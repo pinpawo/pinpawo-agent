@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import WebSocket from 'ws';
 import { config } from '../config';
@@ -9,27 +9,25 @@ import { InterruptSelector } from './components/InterruptSelector';
 import { MessageBlock } from './components/MessageBlock';
 import { SmartTextInput } from './components/SmartTextInput';
 import {
-  formatOperationProgress,
-  formatOperationResult,
-  formatOperationStart,
-  formatStudioProgressEvent,
-  getOperationKey,
-} from './render/eventText';
-import {
   buildActiveToolLines,
   buildBusyStatusLine,
   formatNow,
 } from './render/terminalText';
-import type {
-  ActiveTool,
-  InterruptOption,
-  MessageEntry,
-  MessageRole,
-  PendingInterrupt,
-  PendingUiState,
-} from './types';
+import { createInitialTuiState, createSession } from './state/tuiState';
+import {
+  selectFocusedActiveRun,
+  selectFocusedActiveTools,
+  selectFocusedBusy,
+  selectFocusedHistory,
+  selectFocusedPendingInterrupt,
+  selectFocusedPendingUi,
+  selectFocusedSession,
+  selectReady,
+  tuiStateReducer,
+} from './state/tuiStateReducer';
+import type { HistoryCellModel, TuiState } from './state/tuiState';
+import type { InterruptOption, MessageRole } from './types';
 
-const MAX_MESSAGES = 240;
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
 const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
@@ -53,10 +51,6 @@ async function fetchWithTimeout(url: string, timeoutMs: number) {
   }
 }
 
-function trimItems<T>(items: T[], max: number) {
-  return items.length > max ? items.slice(items.length - max) : items;
-}
-
 function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) {
   const pet = context.pet;
   const pieces = [pet.species || '未知物种', pet.stage || '未知阶段'];
@@ -73,78 +67,92 @@ function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) 
 export function TuiApp(props: { actorId: string }) {
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const [status, setStatus] = useState('初始化中');
-  const [petName, setPetName] = useState('宠物');
-  const [petSummary, setPetSummary] = useState('pet 未加载');
-  const [messages, setMessages] = useState<MessageEntry[]>([]);
-  const [inputValue, setInputValue] = useState('');
-  const [ready, setReady] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [pendingUi, setPendingUi] = useState<PendingUiState | null>(null);
+  const defaultSessionId = useMemo(() => `chat:${props.actorId}`, [props.actorId]);
+  const [tuiState, dispatch] = useReducer(
+    tuiStateReducer,
+    defaultSessionId,
+    (sessionId) => createInitialTuiState(createSession({ id: sessionId })),
+  );
   const [animationFrame, setAnimationFrame] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const [terminalSize, setTerminalSize] = useState(() => ({
     columns: stdout.columns ?? 80,
     rows: stdout.rows ?? 24,
   }));
-  const [activeTools, setActiveTools] = useState<ActiveTool[]>([]);
-  const [pendingInterrupt, setPendingInterrupt] = useState<PendingInterrupt | null>(null);
   const [studioMode, setStudioMode] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const busyRef = useRef(false);
+  const stateRef = useRef<TuiState>(tuiState);
   const lastInterruptAtRef = useRef(0);
-  const pendingRef = useRef<{ requestId: string } | null>(null);
-  const assistantDraftRef = useRef('');
   const interruptTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Studio 模式持续期间共用一个 conversationId,这样 wiki 跨 turn 累积、
   // pet runtime 的 thread namespace 也保持一致
   const studioConversationIdRef = useRef<string | null>(null);
   const studioModeRef = useRef(false);
+  const focusedSession = selectFocusedSession(tuiState);
+  const messages = selectFocusedHistory(tuiState);
+  const inputValue = tuiState.input.value;
+  const ready = selectReady(tuiState);
+  const busy = selectFocusedBusy(tuiState);
+  const pendingUi = selectFocusedPendingUi(tuiState);
+  const activeTools = selectFocusedActiveTools(tuiState);
+  const pendingInterrupt = selectFocusedPendingInterrupt(tuiState);
+  const petName = focusedSession?.actor.label ?? '宠物';
+  const petSummary = focusedSession?.actor.summary ?? 'pet 未加载';
+  const status = tuiState.connection.message;
+
+  useEffect(() => {
+    stateRef.current = tuiState;
+  }, [tuiState]);
 
   const appendMessage = (role: MessageRole, text: string) => {
-    setMessages((current) => trimItems([
-      ...current,
-      {
+    dispatch({
+      type: 'history.append',
+      cell: {
         id: randomUUID(),
-        role,
+        kind: role,
         timestamp: formatNow(),
         text,
       },
-    ], MAX_MESSAGES));
+    });
   };
 
-  const finishRequest = (nextStatus = '就绪') => {
+  const setInputValue = (value: string) => {
+    dispatch({ type: 'input.set', value });
+  };
+
+  const clearInterruptTimeout = () => {
     if (interruptTimeoutRef.current) {
       clearTimeout(interruptTimeoutRef.current);
       interruptTimeoutRef.current = null;
     }
-    busyRef.current = false;
-    setBusy(false);
-    setPendingUi(null);
-    assistantDraftRef.current = '';
-    setActiveTools([]);
-    pendingRef.current = null;
-    setStatus(nextStatus);
   };
+
+  const makeHistoryMeta = () => ({
+    id: randomUUID(),
+    timestamp: formatNow(),
+  });
+
+  const getCurrentActiveRun = () => selectFocusedActiveRun(stateRef.current);
+
+  const getCurrentBusy = () => selectFocusedBusy(stateRef.current);
+
+  const getCurrentPendingInterrupt = () => selectFocusedPendingInterrupt(stateRef.current);
 
   /** 发起一次 Studio turn(复用本会话的 conversationId) */
   const fireStudioRequest = (ws: WebSocket, userRequest: string) => {
     const requestId = randomUUID();
-    busyRef.current = true;
-    setBusy(true);
-    setInputValue('');
-    setStatus('Studio 编排中');
-    setNow(Date.now());
-    setPendingUi({
-      startedAt: Date.now(),
-      phase: 'thinking',
-      charCount: 0,
+    const nowMs = Date.now();
+    setNow(nowMs);
+    dispatch({
+      type: 'run.start',
+      requestId,
+      kind: 'studio',
+      userText: `[studio] ${userRequest}`,
+      now: nowMs,
+      userCell: makeHistoryMeta(),
+      statusMessage: 'Studio 编排中',
     });
-    assistantDraftRef.current = '';
-    setActiveTools([]);
-    appendMessage('user', `[studio] ${userRequest}`);
-    pendingRef.current = { requestId };
     sendLocalAgentMessage(ws, {
       type: 'studio_request',
       requestId,
@@ -163,21 +171,18 @@ export function TuiApp(props: { actorId: string }) {
       appendMessage('system', '未连接，无法提交确认。');
       return;
     }
-    const requestId = pendingInterrupt?.requestId ?? randomUUID();
-    setInputValue('');
-    setPendingInterrupt(null);
-    busyRef.current = true;
-    setBusy(true);
-    setStatus('提交确认');
-    setNow(Date.now());
-    setPendingUi({
-      startedAt: Date.now(),
-      phase: 'thinking',
-      charCount: 0,
+    const currentInterrupt = getCurrentPendingInterrupt();
+    const requestId = currentInterrupt?.requestId ?? randomUUID();
+    const nowMs = Date.now();
+    setNow(nowMs);
+    dispatch({
+      type: 'review.response.start',
+      requestId,
+      message: decision,
+      now: nowMs,
+      userCell: makeHistoryMeta(),
+      statusMessage: '提交确认',
     });
-    assistantDraftRef.current = '';
-    pendingRef.current = { requestId };
-    appendMessage('user', decision);
     sendLocalAgentMessage(ws, {
       type: 'human_review_response',
       requestId,
@@ -188,27 +193,37 @@ export function TuiApp(props: { actorId: string }) {
 
   const interruptCurrentInput = () => {
     const ws = wsRef.current;
-    const pending = pendingRef.current;
-    if (!busyRef.current || !ws || ws.readyState !== WebSocket.OPEN || !pending) {
+    const activeRun = getCurrentActiveRun();
+    if (!getCurrentBusy() || !ws || ws.readyState !== WebSocket.OPEN || !activeRun) {
       return;
     }
     sendLocalAgentMessage(ws, {
       type: 'interrupt_request',
-      requestId: pending.requestId,
+      requestId: activeRun.requestId,
     });
     lastInterruptAtRef.current = Date.now();
-    setPendingUi((current) => current ? { ...current, phase: 'interrupting' } : current);
-    setStatus('正在打断');
-    if (interruptTimeoutRef.current) {
-      clearTimeout(interruptTimeoutRef.current);
-    }
-    const interruptRequestId = pending.requestId;
+    dispatch({
+      type: 'run.interrupting',
+      requestId: activeRun.requestId,
+      statusMessage: '正在打断',
+    });
+    clearInterruptTimeout();
+    const interruptRequestId = activeRun.requestId;
     interruptTimeoutRef.current = setTimeout(() => {
-      if (!busyRef.current || pendingRef.current?.requestId !== interruptRequestId) {
+      const currentRun = selectFocusedActiveRun(stateRef.current);
+      if (!selectFocusedBusy(stateRef.current) || currentRun?.requestId !== interruptRequestId) {
         return;
       }
-      appendMessage('system', '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。');
-      finishRequest('已请求打断');
+      dispatch({
+        type: 'run.finish',
+        requestId: interruptRequestId,
+        statusMessage: '已请求打断',
+        history: [{
+          ...makeHistoryMeta(),
+          kind: 'system',
+          text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+        }],
+      });
     }, 1800);
   };
 
@@ -235,6 +250,7 @@ export function TuiApp(props: { actorId: string }) {
         studioModeRef.current = false;
         studioConversationIdRef.current = null;
         setStudioMode(false);
+        dispatch({ type: 'session.set_kind', kind: 'chat' });
         appendMessage('system', '已退出 Studio 模式,回到单 pet chat');
       } else {
         appendMessage('system', '当前不在 Studio 模式');
@@ -250,6 +266,7 @@ export function TuiApp(props: { actorId: string }) {
         studioModeRef.current = false;
         studioConversationIdRef.current = null;
         setStudioMode(false);
+        dispatch({ type: 'session.set_kind', kind: 'chat' });
         appendMessage('system', '已退出 Studio 模式');
         setInputValue('');
         return;
@@ -259,7 +276,7 @@ export function TuiApp(props: { actorId: string }) {
         appendMessage('system', '未连接,无法发送');
         return;
       }
-      if (busyRef.current) {
+      if (getCurrentBusy()) {
         appendMessage('system', '当前任务仍在进行中,按 Ctrl+C 或 Esc 打断');
         return;
       }
@@ -268,6 +285,7 @@ export function TuiApp(props: { actorId: string }) {
         studioModeRef.current = true;
         studioConversationIdRef.current = randomUUID();
         setStudioMode(true);
+        dispatch({ type: 'session.set_kind', kind: 'studio' });
         appendMessage(
           'system',
           `已进入 Studio 模式 (conversation=${studioConversationIdRef.current.slice(0, 8)})。后续输入都属于此会话,输入 /chat 或 /studio 退出。`,
@@ -283,15 +301,16 @@ export function TuiApp(props: { actorId: string }) {
     }
 
     if (text === '/new') {
-      setMessages([]);
-      setActiveTools([]);
-      setPendingInterrupt(null);
       setInputValue('');
+      clearInterruptTimeout();
+      dispatch({
+        type: 'session.clear',
+        statusMessage: '已创建新会话',
+      });
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
         sendLocalAgentMessage(ws, { type: 'new_session' });
       }
-      setStatus('已创建新会话');
       return;
     }
 
@@ -314,7 +333,7 @@ export function TuiApp(props: { actorId: string }) {
       return;
     }
 
-    if (busyRef.current) {
+    if (getCurrentBusy()) {
       appendMessage('system', '当前任务仍在进行中，按 Ctrl+C 或 Esc 打断');
       return;
     }
@@ -326,22 +345,17 @@ export function TuiApp(props: { actorId: string }) {
     }
 
     const requestId = randomUUID();
-    busyRef.current = true;
-    setBusy(true);
-    setInputValue('');
-    setStatus('等待回复');
-    setNow(Date.now());
-    setPendingUi({
-      startedAt: Date.now(),
-      phase: 'thinking',
-      charCount: 0,
-    });
-    assistantDraftRef.current = '';
-    setActiveTools([]);
-    appendMessage('user', text);
-    pendingRef.current = {
+    const nowMs = Date.now();
+    setNow(nowMs);
+    dispatch({
+      type: 'run.start',
       requestId,
-    };
+      kind: 'chat',
+      userText: text,
+      now: nowMs,
+      userCell: makeHistoryMeta(),
+      statusMessage: '等待回复',
+    });
 
     sendLocalAgentMessage(ws, {
       type: 'chat_request',
@@ -356,147 +370,73 @@ export function TuiApp(props: { actorId: string }) {
       if (!msg || msg.type === 'pong') {
         return;
       }
-      const pending = pendingRef.current;
-      if (!pending || msg.requestId !== pending.requestId) {
+
+      if (msg.type === 'event') {
+        dispatch({
+          type: 'event.received',
+          event: msg.event,
+          now: Date.now(),
+          historyCell: makeHistoryMeta(),
+        });
         return;
       }
 
-      if (msg.type === 'event') {
-        const event = msg.event;
-        if (event.type === 'operation') {
-          const operationKey = getOperationKey(event);
-          setActiveTools((current) => {
-            if (event.phase === 'started') {
-              const summary = formatOperationStart(event);
-              const next = current.filter((tool) => tool.name !== operationKey);
-              next.push({
-                name: operationKey,
-                label: summary.label,
-                detail: summary.detail,
-                startedAt: Date.now(),
-              });
-              return next;
-            }
-            if (event.phase === 'updated') {
-              const progress = formatOperationProgress(event);
-              return current.map((tool) => (
-                tool.name === operationKey
-                  ? { ...tool, detail: progress || tool.detail }
-                  : tool
-              ));
-            }
-            return current.filter((tool) => tool.name !== operationKey);
-          });
-
-          if (event.phase === 'completed' || event.phase === 'failed' || event.phase === 'interrupted') {
-            appendMessage('system', formatOperationResult(event));
-          }
-          return;
-        }
-
-        if (event.type === 'message.delta') {
-          const token = event.text;
-          if (!token) return;
-          assistantDraftRef.current += token;
-          setPendingUi((current) => current ? {
-            ...current,
-            phase: 'replying',
-            charCount: current.charCount + token.length,
-          } : current);
-          return;
-        }
-
-        if (event.type === 'human_review.requested') {
-          const prompt = event.prompt.trim() || '当前流程需要你的确认，请直接回复继续或说明下一步。';
-          const interruptPayload = event.payload;
-          const petId = event.actor?.petId || undefined;
-          setPendingInterrupt({
-            kind: typeof interruptPayload.kind === 'string' ? interruptPayload.kind : 'interrupt',
-            requestId: event.requestId,
-            prompt,
-            payload: interruptPayload,
-            ...(petId ? { petId } : {}),
-          });
-          finishRequest(petId ? `等待你的决定(${petId})` : '等待你的决定');
-          return;
-        }
-
-        if (event.type === 'system.notice') {
-          const notice = event.message.trim();
-          if (notice) {
-            appendMessage('system', notice);
-          }
-          return;
-        }
-
-        if (event.type === 'message.completed') {
-          const reply = event.text.trim();
-          const finalText = assistantDraftRef.current.trim() || reply || '...';
-          if (finalText) {
-            appendMessage('assistant', finalText);
-          }
-          setPendingInterrupt(null);
-          finishRequest();
-          return;
-        }
-
-        if (event.type === 'studio.progress') {
-          const line = formatStudioProgressEvent(event);
-          if (line) appendMessage('system', line);
-          return;
-        }
-
-        if (event.type === 'error') {
-          const error = event.message || 'internal error';
-          appendMessage('system', `出错: ${error}`);
-          setPendingInterrupt(null);
-          finishRequest('出错，已恢复输入');
-          return;
-        }
-      }
-
       if (msg.type === 'interrupting') {
-        setPendingUi((current) => current ? { ...current, phase: 'interrupting' } : current);
-        setStatus('正在打断');
+        dispatch({
+          type: 'server.interrupting',
+          requestId: msg.requestId,
+          statusMessage: '正在打断',
+        });
         return;
       }
 
       if (msg.type === 'interrupted') {
-        appendMessage('assistant', '[interrupted]');
-        setPendingInterrupt(null);
-        finishRequest('已打断');
+        clearInterruptTimeout();
+        dispatch({
+          type: 'server.interrupted',
+          requestId: msg.requestId,
+          historyCell: makeHistoryMeta(),
+          statusMessage: '已打断',
+        });
         return;
       }
 
       if (msg.type === 'studio_response') {
-        const reply = msg.reply.trim();
-        const outcome = msg.outcome;
-        if (reply) {
-          appendMessage('assistant', reply);
-        } else {
-          appendMessage('system', `[studio] turn ${outcome} (无最终输出)`);
-        }
-        if (outcome === 'stopped' && msg.reason) {
-          appendMessage('system', `[studio] stopped: ${msg.reason}`);
-        }
-        setPendingInterrupt(null);
-        finishRequest();
+        clearInterruptTimeout();
+        dispatch({
+          type: 'server.studio_response',
+          requestId: msg.requestId,
+          outcome: msg.outcome,
+          reply: msg.reply,
+          reason: msg.reason,
+          historyCell: makeHistoryMeta(),
+          stoppedReasonCell: makeHistoryMeta(),
+          statusMessage: '就绪',
+        });
         return;
       }
 
       if (msg.type === 'studio_error') {
-        const message = msg.message || 'studio error';
-        appendMessage('system', `[studio 出错] ${message}`);
-        setPendingInterrupt(null);
-        finishRequest('Studio 出错,已恢复输入');
+        clearInterruptTimeout();
+        dispatch({
+          type: 'server.studio_error',
+          requestId: msg.requestId,
+          message: msg.message,
+          historyCell: makeHistoryMeta(),
+          statusMessage: 'Studio 出错,已恢复输入',
+        });
         return;
       }
 
       if (msg.type === 'error') {
-        const error = msg.message || 'internal error';
-        appendMessage('system', `出错: ${error}`);
-        setPendingInterrupt(null);
-        finishRequest('出错，已恢复输入');
+        clearInterruptTimeout();
+        dispatch({
+          type: 'server.error',
+          requestId: msg.requestId,
+          message: msg.message,
+          historyCell: makeHistoryMeta(),
+          statusMessage: '出错，已恢复输入',
+        });
       }
     } catch {
       // ignore malformed messages
@@ -505,8 +445,8 @@ export function TuiApp(props: { actorId: string }) {
 
   useEffect(() => {
     if (!busy) {
-      setPendingUi(null);
       setAnimationFrame(0);
+      clearInterruptTimeout();
       return;
     }
     const interval = setInterval(() => {
@@ -534,7 +474,11 @@ export function TuiApp(props: { actorId: string }) {
     let disposed = false;
 
     const init = async () => {
-      setStatus('连接本地服务');
+      dispatch({
+        type: 'connection.set',
+        status: 'connecting',
+        message: '连接本地服务',
+      });
       let connected = false;
       for (let attempt = 0; attempt <= LOCAL_SERVER_CONNECT_RETRIES; attempt += 1) {
         if (disposed) return;
@@ -552,12 +496,20 @@ export function TuiApp(props: { actorId: string }) {
           if (disposed) return;
           if (attempt >= LOCAL_SERVER_CONNECT_RETRIES) {
             appendMessage('system', `无法连接本地服务 (port ${config.localServerPort})，请先运行 pinpawo-agent run`);
-            setStatus('未连接');
+            dispatch({
+              type: 'connection.set',
+              status: 'disconnected',
+              message: '未连接',
+            });
             return;
           }
           const retryIndex = attempt + 1;
           const retryText = `本地服务暂不可用，${LOCAL_SERVER_CONNECT_RETRY_DELAY_MS / 1000}s 后重试 ${retryIndex}/${LOCAL_SERVER_CONNECT_RETRIES}`;
-          setStatus(retryText);
+          dispatch({
+            type: 'connection.set',
+            status: 'connecting',
+            message: retryText,
+          });
           appendMessage('system', retryText);
           await sleep(LOCAL_SERVER_CONNECT_RETRY_DELAY_MS);
         }
@@ -580,15 +532,18 @@ export function TuiApp(props: { actorId: string }) {
               ) {
                 return [{
                   id: randomUUID(),
-                  role: item.role,
+                  kind: item.role,
                   text: item.text,
-                } satisfies MessageEntry];
+                } satisfies HistoryCellModel];
               }
               return [];
             })
             : [];
           if (restored.length > 0) {
-            setMessages(trimItems(restored, MAX_MESSAGES));
+            dispatch({
+              type: 'session.replace_history',
+              history: restored,
+            });
           }
         }
       } catch {
@@ -603,16 +558,22 @@ export function TuiApp(props: { actorId: string }) {
           ws.close();
           return;
         }
-        setReady(true);
-        setStatus('就绪');
+        dispatch({
+          type: 'connection.set',
+          status: 'ready',
+          message: '就绪',
+        });
       });
 
       ws.on('message', handleWsMessage);
 
       ws.on('close', () => {
         if (disposed) return;
-        setReady(false);
-        setStatus('连接断开');
+        dispatch({
+          type: 'connection.set',
+          status: 'disconnected',
+          message: '连接断开',
+        });
         wsRef.current = null;
       });
 
@@ -624,8 +585,13 @@ export function TuiApp(props: { actorId: string }) {
       try {
         const context = await loadAgentContext(props.actorId);
         if (disposed) return;
-        setPetName(context.pet.name);
-        setPetSummary(buildPetSummary(context));
+        dispatch({
+          type: 'session.set_actor',
+          actor: {
+            label: context.pet.name,
+            summary: buildPetSummary(context),
+          },
+        });
       } catch {
         if (!disposed) {
           appendMessage('system', '无法加载宠物信息，使用默认名称');
@@ -637,7 +603,11 @@ export function TuiApp(props: { actorId: string }) {
       if (disposed) return;
       const message = err instanceof Error ? err.message : String(err);
       appendMessage('system', `初始化失败: ${message}`);
-      setStatus(`初始化失败: ${message}`);
+      dispatch({
+        type: 'connection.set',
+        status: 'error',
+        message: `初始化失败: ${message}`,
+      });
     });
 
     return () => {
@@ -653,7 +623,7 @@ export function TuiApp(props: { actorId: string }) {
   // Global key handler — only handles Ctrl+C and Esc (when not in interrupt selector)
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
-      if (busyRef.current) {
+      if (getCurrentBusy()) {
         const nowMs = Date.now();
         if (nowMs - lastInterruptAtRef.current < 1200) {
           appendMessage('system', '收到第二次 Ctrl+C，立即退出 TUI。');
@@ -677,7 +647,7 @@ export function TuiApp(props: { actorId: string }) {
       // Interrupt selector dismissal is handled inside InterruptSelector itself via onDismiss.
       // Here we only handle Esc for non-interrupt scenarios.
       if (pendingInterrupt) return; // InterruptSelector owns Esc
-      if (busyRef.current) {
+      if (getCurrentBusy()) {
         interruptCurrentInput();
         return;
       }
@@ -723,9 +693,12 @@ export function TuiApp(props: { actorId: string }) {
           width={contentWidth}
           onSelect={submitInterruptDecision}
           onDismiss={() => {
-            setPendingInterrupt(null);
+            dispatch({
+              type: 'review.dismiss',
+              requestId: pendingInterrupt.requestId,
+              statusMessage: '已关闭确认面板 · 可自由输入',
+            });
             setInputValue('');
-            setStatus('已关闭确认面板 · 可自由输入');
           }}
         />
       ) : null}

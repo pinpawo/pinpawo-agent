@@ -1,0 +1,242 @@
+import type { LocalAgentEvent } from '../../events/localAgentEvent';
+
+export const MAX_TUI_HISTORY_ITEMS = 240;
+
+export type RunId = string;
+export type SessionId = string;
+
+export type TuiConnectionStatus =
+  | 'initializing'
+  | 'connecting'
+  | 'ready'
+  | 'disconnected'
+  | 'error';
+
+export type TuiConnectionState = {
+  status: TuiConnectionStatus;
+  message: string;
+};
+
+export type TuiState = {
+  connection: TuiConnectionState;
+  sessions: Record<SessionId, SessionModel>;
+  focusedSessionId: SessionId | null;
+  runRoute: Record<RunId, SessionId>;
+  input: {
+    value: string;
+    focused: boolean;
+  };
+};
+
+export type SessionModel = {
+  id: SessionId;
+  kind: 'chat' | 'studio';
+  actor: {
+    label: string;
+    summary: string;
+  };
+  history: HistoryCellModel[];
+  activeRun: ActiveRunModel | null;
+  tokenUsage: TokenUsageModel | null;
+};
+
+export type ActiveRunModel = {
+  requestId: RunId;
+  phase: 'thinking' | 'using_tool' | 'streaming' | 'waiting_human' | 'interrupting';
+  assistantDraft: string;
+  activeOperations: ActiveOperationModel[];
+  pendingReview?: ApprovalRequestModel;
+  startedAt: number;
+  charCount: number;
+};
+
+export type TokenUsageModel = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  contextWindow?: number;
+  updatedAt?: string;
+};
+
+export type HistoryCellModel = {
+  id: string;
+  kind: 'user' | 'assistant' | 'system';
+  text: string;
+  timestamp?: string;
+};
+
+export type ActiveOperationModel = {
+  key: string;
+  kind: string;
+  title: string;
+  detail: string;
+  startedAt: number;
+};
+
+export type ApprovalRequestModel = {
+  requestId: RunId;
+  kind: string;
+  prompt: string;
+  payload: Record<string, unknown>;
+  petId?: string;
+};
+
+export type HistoryCellDraft = {
+  id: string;
+  kind: HistoryCellModel['kind'];
+  text: string;
+  timestamp?: string;
+};
+
+export type HistoryCellMeta = {
+  id: string;
+  timestamp?: string;
+};
+
+export type TuiAction =
+  | {
+      type: 'connection.set';
+      status: TuiConnectionStatus;
+      message: string;
+    }
+  | {
+      type: 'session.set_actor';
+      sessionId?: SessionId;
+      actor: SessionModel['actor'];
+    }
+  | {
+      type: 'session.set_kind';
+      sessionId?: SessionId;
+      kind: SessionModel['kind'];
+    }
+  | {
+      type: 'session.replace_history';
+      sessionId?: SessionId;
+      history: HistoryCellModel[];
+    }
+  | {
+      type: 'session.clear';
+      sessionId?: SessionId;
+      statusMessage?: string;
+    }
+  | {
+      type: 'input.set';
+      value: string;
+    }
+  | {
+      type: 'history.append';
+      sessionId?: SessionId;
+      cell: HistoryCellDraft;
+    }
+  | {
+      type: 'run.start';
+      sessionId?: SessionId;
+      requestId: RunId;
+      kind: SessionModel['kind'];
+      userText: string;
+      now: number;
+      userCell: HistoryCellMeta;
+      statusMessage: string;
+    }
+  | {
+      type: 'review.response.start';
+      requestId: RunId;
+      message: string;
+      now: number;
+      userCell: HistoryCellMeta;
+      statusMessage: string;
+    }
+  | {
+      type: 'run.interrupting';
+      requestId: RunId;
+      statusMessage: string;
+    }
+  | {
+      type: 'run.finish';
+      requestId: RunId;
+      statusMessage: string;
+      history?: HistoryCellDraft[];
+    }
+  | {
+      type: 'event.received';
+      event: LocalAgentEvent;
+      now: number;
+      historyCell?: HistoryCellMeta;
+    }
+  | {
+      type: 'server.interrupting';
+      requestId: RunId;
+      statusMessage: string;
+    }
+  | {
+      type: 'server.interrupted';
+      requestId: RunId;
+      historyCell: HistoryCellMeta;
+      statusMessage: string;
+    }
+  | {
+      type: 'server.studio_response';
+      requestId: RunId;
+      outcome: 'done' | 'stopped';
+      reply: string;
+      reason?: string;
+      historyCell: HistoryCellMeta;
+      stoppedReasonCell?: HistoryCellMeta;
+      statusMessage: string;
+    }
+  | {
+      type: 'server.studio_error';
+      requestId: RunId;
+      message: string;
+      historyCell: HistoryCellMeta;
+      statusMessage: string;
+    }
+  | {
+      type: 'server.error';
+      requestId: RunId;
+      message: string;
+      historyCell: HistoryCellMeta;
+      statusMessage: string;
+    }
+  | {
+      type: 'review.dismiss';
+      requestId: RunId;
+      statusMessage: string;
+    };
+
+export function createInitialTuiState(defaultSession: SessionModel): TuiState {
+  return {
+    connection: {
+      status: 'initializing',
+      message: '初始化中',
+    },
+    sessions: {
+      [defaultSession.id]: defaultSession,
+    },
+    focusedSessionId: defaultSession.id,
+    runRoute: {},
+    input: {
+      value: '',
+      focused: true,
+    },
+  };
+}
+
+export function createSession(params: {
+  id: SessionId;
+  kind?: SessionModel['kind'];
+  actor?: Partial<SessionModel['actor']>;
+  history?: HistoryCellModel[];
+}): SessionModel {
+  return {
+    id: params.id,
+    kind: params.kind ?? 'chat',
+    actor: {
+      label: params.actor?.label ?? '宠物',
+      summary: params.actor?.summary ?? 'pet 未加载',
+    },
+    history: params.history ?? [],
+    activeRun: null,
+    tokenUsage: null,
+  };
+}

@@ -3,13 +3,13 @@ import Markdown from '@inkkit/ink-markdown';
 import type { MessageEntry } from '../types';
 
 export function MessageBlock(props: {
-  entry: Pick<MessageEntry, 'role' | 'timestamp' | 'text'>;
+  entry: Pick<MessageEntry, 'kind' | 'timestamp' | 'text'>;
   petName: string;
   width: number;
 }) {
   const timestamp = props.entry.timestamp ? `[${props.entry.timestamp}]` : '';
 
-  if (props.entry.role === 'system') {
+  if (props.entry.kind === 'system') {
     return (
       <Box flexDirection="column" marginBottom={1}>
         {props.entry.text.split('\n').map((line, index) => (
@@ -22,7 +22,7 @@ export function MessageBlock(props: {
     );
   }
 
-  if (props.entry.role === 'user') {
+  if (props.entry.kind === 'user') {
     const label = `${timestamp} 你`;
     return (
       <Box flexDirection="column" marginBottom={1}>

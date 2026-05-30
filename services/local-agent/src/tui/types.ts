@@ -1,11 +1,11 @@
-export type MessageRole = 'user' | 'assistant' | 'system';
+import type {
+  ApprovalRequestModel,
+  HistoryCellModel,
+} from './state/tuiState';
 
-export type MessageEntry = {
-  id: string;
-  role: MessageRole;
-  timestamp?: string;
-  text: string;
-};
+export type MessageRole = HistoryCellModel['kind'];
+
+export type MessageEntry = HistoryCellModel;
 
 export type PendingUiState = {
   startedAt: number;
@@ -13,14 +13,7 @@ export type PendingUiState = {
   charCount: number;
 };
 
-export type PendingInterrupt = {
-  kind: string;
-  requestId: string;
-  prompt: string;
-  payload: Record<string, unknown>;
-  /** Studio 模式下,触发本次 HITL 的 pet id;chat 路径下为 undefined */
-  petId?: string;
-};
+export type PendingInterrupt = ApprovalRequestModel;
 
 export type InterruptOption = {
   label: string;

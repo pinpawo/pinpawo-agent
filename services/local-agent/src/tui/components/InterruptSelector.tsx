@@ -1,10 +1,9 @@
-import { useMemo, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
 import { shorten } from '../render/eventText';
 import { wrapLine } from '../render/terminalText';
 import type { InterruptOption, PendingInterrupt } from '../types';
 
-function buildInterruptSelectOptions(interrupt: PendingInterrupt): InterruptOption[] {
+export function buildInterruptSelectOptions(interrupt: PendingInterrupt): InterruptOption[] {
   const actionRequests = Array.isArray(interrupt.payload.actionRequests)
     ? interrupt.payload.actionRequests.filter((item): item is Record<string, unknown> =>
       Boolean(item && typeof item === 'object'),
@@ -65,35 +64,11 @@ function buildInterruptSelectOptions(interrupt: PendingInterrupt): InterruptOpti
 export function InterruptSelector(props: {
   interrupt: PendingInterrupt;
   width: number;
-  onSelect: (option: InterruptOption) => void;
-  onDismiss: () => void;
+  options: InterruptOption[];
+  selectedIndex: number;
 }) {
-  const [index, setIndex] = useState(0);
-  const options = useMemo(
-    () => buildInterruptSelectOptions(props.interrupt),
-    [props.interrupt],
-  );
-
-  useInput((input, key) => {
-    if (key.ctrl && input === 'c') return; // let parent handle
-    if (key.upArrow) {
-      setIndex((i) => Math.max(0, i - 1));
-      return;
-    }
-    if (key.downArrow) {
-      setIndex((i) => Math.min(options.length - 1, i + 1));
-      return;
-    }
-    if (key.return) {
-      props.onSelect(options[index]!);
-      return;
-    }
-    if (key.escape) {
-      props.onDismiss();
-    }
-  }, { isActive: true });
-
   const promptLines = wrapLine(props.interrupt.prompt, props.width - 4);
+  const selectedIndex = Math.max(0, Math.min(props.options.length - 1, props.selectedIndex));
 
   return (
     <Box
@@ -111,9 +86,9 @@ export function InterruptSelector(props: {
         <Text key={`p-${i}`}>{line}</Text>
       ))}
       <Text>{' '}</Text>
-      {options.map((opt, i) => (
-        <Text key={`o-${i}`} color={i === index ? 'cyan' : undefined} bold={i === index}>
-          {i === index ? '› ' : '  '}{opt.label}
+      {props.options.map((opt, i) => (
+        <Text key={`o-${i}`} color={i === selectedIndex ? 'cyan' : undefined} bold={i === selectedIndex}>
+          {i === selectedIndex ? '› ' : '  '}{opt.label}
         </Text>
       ))}
       <Text>{' '}</Text>

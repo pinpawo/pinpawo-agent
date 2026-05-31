@@ -5,7 +5,7 @@ import { createInitialTuiState, createSession, type TuiState } from './tui/state
 import {
   selectFocusedActiveRun,
   selectFocusedBusy,
-  selectFocusedPendingInterrupt,
+  selectFocusedPendingApproval,
   tuiStateReducer,
 } from './tui/state/tuiStateReducer';
 
@@ -214,7 +214,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
 
   assert.equal(selectFocusedBusy(state), false);
   assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
-  assert.deepEqual(selectFocusedPendingInterrupt(state), {
+  assert.deepEqual(selectFocusedPendingApproval(state), {
     kind: 'approval',
     requestId: 'req-1',
     prompt: 'Approve?',
@@ -234,7 +234,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
 
   assert.equal(selectFocusedBusy(state), true);
   assert.equal(selectFocusedActiveRun(state)?.phase, 'thinking');
-  assert.equal(selectFocusedPendingInterrupt(state), null);
+  assert.equal(selectFocusedPendingApproval(state), null);
 
   state = tuiStateReducer(state, {
     type: 'run.interrupting',

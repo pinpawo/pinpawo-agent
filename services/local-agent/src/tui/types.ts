@@ -13,9 +13,9 @@ export type PendingUiState = {
   charCount: number;
 };
 
-export type PendingInterrupt = ApprovalRequestModel;
+export type PendingApproval = ApprovalRequestModel;
 
-export type InterruptOption = {
+export type ApprovalOption = {
   label: string;
   message: string;
   resume?: unknown;

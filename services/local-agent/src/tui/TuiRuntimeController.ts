@@ -2,14 +2,15 @@ import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 import { loadAgentContext } from '../contextLoader';
 import { parseLocalAgentServerMessage, sendLocalAgentMessage } from '../localAgentProtocol';
+import { TUI_TEXT } from './render/text';
 import { formatNow } from './render/terminalText';
 import {
   selectFocusedActiveRun,
   selectFocusedBusy,
-  selectFocusedPendingInterrupt,
+  selectFocusedPendingApproval,
 } from './state/tuiStateReducer';
 import type { HistoryCellModel, TuiAction, TuiState } from './state/tuiState';
-import type { InterruptOption } from './types';
+import type { ApprovalOption } from './types';
 
 const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
@@ -45,9 +46,9 @@ async function fetchWithTimeout(url: string, timeoutMs: number) {
 
 function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) {
   const pet = context.pet;
-  const pieces = [pet.species || '未知物种', pet.stage || '未知阶段'];
+  const pieces = [pet.species || TUI_TEXT.unknownSpecies, pet.stage || TUI_TEXT.unknownStage];
   if (typeof pet.growth_value === 'number') {
-    pieces.push(`成长值 ${pet.growth_value}`);
+    pieces.push(TUI_TEXT.growthValue(pet.growth_value));
   }
   return pieces.join(' · ');
 }
@@ -104,11 +105,11 @@ export class TuiRuntimeController {
   sendChatRequest(message: string) {
     const ws = this.getOpenWebSocket();
     if (!ws) {
-      this.appendSystemMessage('未连接，无法发送');
+      this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
     }
     if (this.isCurrentBusy()) {
-      this.appendSystemMessage('当前任务仍在进行中，按 Ctrl+C 或 Esc 打断');
+      this.appendSystemMessage(TUI_TEXT.busyCannotSend);
       return false;
     }
 
@@ -136,11 +137,11 @@ export class TuiRuntimeController {
   sendStudioRequest(userRequest: string, conversationId: string | null) {
     const ws = this.getOpenWebSocket();
     if (!ws) {
-      this.appendSystemMessage('未连接,无法发送');
+      this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
     }
     if (this.isCurrentBusy()) {
-      this.appendSystemMessage('当前任务仍在进行中,按 Ctrl+C 或 Esc 打断');
+      this.appendSystemMessage(TUI_TEXT.busyCannotSend);
       return false;
     }
 
@@ -165,7 +166,7 @@ export class TuiRuntimeController {
     return true;
   }
 
-  submitReviewResponse(option: InterruptOption) {
+  submitReviewResponse(option: ApprovalOption) {
     const decision = option.message.trim();
     if (!decision) return false;
 
@@ -175,8 +176,8 @@ export class TuiRuntimeController {
       return false;
     }
 
-    const currentInterrupt = selectFocusedPendingInterrupt(this.options.getState());
-    const requestId = currentInterrupt?.requestId ?? randomUUID();
+    const currentApproval = selectFocusedPendingApproval(this.options.getState());
+    const requestId = currentApproval?.requestId ?? randomUUID();
     const now = Date.now();
     this.options.setNow(now);
     this.options.dispatch({
@@ -256,7 +257,7 @@ export class TuiRuntimeController {
     this.options.dispatch({
       type: 'review.dismiss',
       requestId,
-      statusMessage: '已关闭确认面板 · 可自由输入',
+      statusMessage: TUI_TEXT.approvalClosed,
     });
     this.options.dispatch({
       type: 'input.set',
@@ -376,7 +377,7 @@ export class TuiRuntimeController {
       this.options.dispatch({
         type: 'connection.set',
         status: 'ready',
-        message: '就绪',
+        message: TUI_TEXT.statusReady,
       });
     });
 
@@ -534,7 +535,7 @@ export class TuiRuntimeController {
           reason: msg.reason,
           historyCell: makeHistoryMeta(),
           stoppedReasonCell: makeHistoryMeta(),
-          statusMessage: '就绪',
+          statusMessage: TUI_TEXT.statusReady,
         });
         return;
       }
@@ -558,7 +559,7 @@ export class TuiRuntimeController {
           requestId: msg.requestId,
           message: msg.message,
           historyCell: makeHistoryMeta(),
-          statusMessage: '出错，已恢复输入',
+          statusMessage: TUI_TEXT.statusErrorRecovered,
         });
       }
     } catch {

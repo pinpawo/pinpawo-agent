@@ -1,7 +1,11 @@
 import type {
   LocalAgentOperationEvent,
+  LocalAgentSystemNoticeEvent,
   LocalAgentStudioProgressEvent,
 } from '../../events/localAgentEvent';
+import { TUI_TEXT } from './text';
+import { formatElapsed, wrapLine } from './terminalText';
+import type { ActiveTool, PendingUiState } from '../types';
 
 export function shorten(value: string, max = 60) {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -36,6 +40,11 @@ export function formatOperationResult(event: LocalAgentOperationEvent) {
   }
   const detail = formatOperationDetail(event, 80);
   return `${label}：${detail || '已完成'}`;
+}
+
+export function formatSystemNoticeEvent(event: LocalAgentSystemNoticeEvent): string | null {
+  const notice = event.message.trim();
+  return notice || null;
 }
 
 export function formatStudioProgressEvent(event: LocalAgentStudioProgressEvent): string | null {
@@ -75,6 +84,40 @@ export function formatStudioProgressEvent(event: LocalAgentStudioProgressEvent):
     default:
       return `[studio] event: ${type}`;
   }
+}
+
+export function buildBusyStatusLine(
+  pending: PendingUiState,
+  now: number,
+  spinnerFrame: string,
+  activeTools: ActiveTool[],
+) {
+  const phase = buildBusyPhaseLabel(pending, now);
+  const elapsed = formatElapsed(pending.startedAt, now);
+  const detail = pending.charCount > 0 ? ` · ${TUI_TEXT.modelOutputChars(pending.charCount)}` : '';
+  const tools = activeTools.length > 0 ? ` · ${activeTools.map((tool) => tool.name).join(', ')}` : '';
+  return `${spinnerFrame} ${phase} · ${elapsed}${detail}${tools}`;
+}
+
+export function buildActiveToolLines(activeTools: ActiveTool[], now: number, width: number) {
+  return activeTools.flatMap((tool, index) =>
+    wrapLine(
+      `${tool.label} · ${formatElapsed(tool.startedAt, now)}${tool.detail ? ` · ${tool.detail}` : ''}`,
+      width,
+    ).map((text, lineIndex) => ({
+      id: `tool-${tool.name}-${index}-${lineIndex}`,
+      text,
+    })),
+  );
+}
+
+function buildBusyPhaseLabel(pending: PendingUiState, now: number) {
+  if (pending.phase === 'interrupting') return TUI_TEXT.busyPhaseInterrupting;
+  if (pending.phase === 'replying') return TUI_TEXT.busyPhaseReplying;
+  const elapsedMs = now - pending.startedAt;
+  if (elapsedMs < 3000) return TUI_TEXT.busyPhaseThinking;
+  if (elapsedMs < 10000) return TUI_TEXT.busyPhaseUsingTools;
+  return TUI_TEXT.busyPhaseLongRunning;
 }
 
 function formatOperationDetail(event: LocalAgentOperationEvent, max = 60) {

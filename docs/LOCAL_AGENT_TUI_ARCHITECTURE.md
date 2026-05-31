@@ -246,7 +246,7 @@ services/local-agent/src/
 
     render/
       eventText.ts           # LocalAgentEvent / studio.progress -> 终端文案(由现 tuiEventRenderer.ts 演进)
-      copy.ts                # 集中的中文文案常量
+      text.ts                # TUI_TEXT: 当前中文 TUI 文本入口；完整 i18n 后续单独设计
 
     components/
       MessageHistory.tsx
@@ -264,7 +264,7 @@ services/local-agent/src/
 - **`render/eventToActivity.ts` + `operationText.ts` + `studioText.ts` 合并为 `render/eventText.ts`**：这三件事现在都在同一个 97 行文件里，拆成三个是碎片化。
 - **去掉 `input/composerModel.ts`**：在 multiline / paste / mention 都还不存在时拆 model/component 是为想象功能预留。先让 `Composer.tsx` 自带光标和快捷键，等真要做这些能力再拆 model。
 - **去掉 `session/historyAdapter.ts` 子目录**：history restore 现在是 `init()` 里 ~30 行内联 fetch，归到 `TuiRuntimeController` 即可，不需要独立子系统。
-- **`copy.zh-CN.ts` → `copy.ts`**：没有第二语言，先做集中文案常量；"i18n key 框架"是空头预算，等真要 i18n 再加。
+- **`copy.zh-CN.ts` → `text.ts` / `TUI_TEXT`**：当前只有中文一种，先做 single-locale TUI 文本入口；完整 i18n 的 locale lookup、fallback 和参数协议后续单独设计。
 
 关键约束：
 
@@ -456,7 +456,7 @@ Composer 是 terminal 输入系统的承载层。后续需要支持：
 
 ## 8. Rendering / i18n
 
-短期 TUI 文案集中到 `tui/render/copy.ts`，先建立 copy 集中管理入口。当前只有中文一种，先做集中文案常量即可；等真要支持第二语言再引入 i18n key 结构，不预先搭框架。
+短期 TUI 文案集中到 `tui/render/text.ts` 的 `TUI_TEXT`，先建立 single-locale TUI 文本入口。当前只有中文一种，不在本阶段引入完整 i18n 框架；等真要支持第二语言时，再单独设计 locale lookup、fallback 和参数协议。
 
 render adapter 的职责：
 
@@ -588,7 +588,7 @@ LocalAgentEvent
 
 - active operation、status line、system notice、studio progress 统一走 `render/eventText.ts`，直接映射成组件 props。
 - `InterruptSelector` 升级为 `ApprovalPanel`。
-- TUI 文案集中到 `tui/render/copy.ts`。
+- TUI 文案集中到 `tui/render/text.ts` 的 `TUI_TEXT`。
 
 验收：
 

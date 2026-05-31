@@ -15,7 +15,7 @@ export type TuiKeyInput = {
 export type TuiKeyContext = {
   ready: boolean;
   busy: boolean;
-  hasPendingInterrupt: boolean;
+  hasPendingApproval: boolean;
 };
 
 export type TuiKeyAction =
@@ -48,7 +48,7 @@ export function resolveTuiKeyAction(
     return { type: 'none' };
   }
 
-  if (context.hasPendingInterrupt) {
+  if (context.hasPendingApproval) {
     if (key.upArrow) return { type: 'approval.previous' };
     if (key.downArrow) return { type: 'approval.next' };
     if (key.return) return { type: 'approval.submit' };

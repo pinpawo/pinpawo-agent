@@ -2,22 +2,23 @@ import { randomUUID } from 'node:crypto';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import { config } from '../config';
+import { ApprovalPanel, buildApprovalOptions } from './components/ApprovalPanel';
 import { Composer } from './components/Composer';
-import { buildInterruptSelectOptions, InterruptSelector } from './components/InterruptSelector';
 import { MessageBlock } from './components/MessageBlock';
 import { formatTuiCommandHelp, parseTuiCommand } from './input/commandRegistry';
 import { applyComposerInput, resolveTuiKeyAction } from './input/keymap';
 import {
   buildActiveToolLines,
   buildBusyStatusLine,
-  formatNow,
-} from './render/terminalText';
+} from './render/eventText';
+import { formatNow } from './render/terminalText';
+import { TUI_TEXT } from './render/text';
 import { createInitialTuiState, createSession } from './state/tuiState';
 import {
   selectFocusedActiveTools,
   selectFocusedBusy,
   selectFocusedHistory,
-  selectFocusedPendingInterrupt,
+  selectFocusedPendingApproval,
   selectFocusedPendingUi,
   selectFocusedSession,
   selectReady,
@@ -73,13 +74,13 @@ export function TuiApp(props: { actorId: string }) {
   const busy = selectFocusedBusy(tuiState);
   const pendingUi = selectFocusedPendingUi(tuiState);
   const activeTools = selectFocusedActiveTools(tuiState);
-  const pendingInterrupt = selectFocusedPendingInterrupt(tuiState);
+  const pendingApproval = selectFocusedPendingApproval(tuiState);
   const approvalOptions = useMemo(
-    () => (pendingInterrupt ? buildInterruptSelectOptions(pendingInterrupt) : []),
-    [pendingInterrupt],
+    () => (pendingApproval ? buildApprovalOptions(pendingApproval) : []),
+    [pendingApproval],
   );
-  const petName = focusedSession?.actor.label ?? '宠物';
-  const petSummary = focusedSession?.actor.summary ?? 'pet 未加载';
+  const petName = focusedSession?.actor.label ?? TUI_TEXT.defaultPetName;
+  const petSummary = focusedSession?.actor.summary ?? TUI_TEXT.defaultPetSummary;
   const status = tuiState.connection.message;
 
   useEffect(() => {
@@ -92,7 +93,7 @@ export function TuiApp(props: { actorId: string }) {
 
   useEffect(() => {
     setApprovalIndex(0);
-  }, [pendingInterrupt?.requestId]);
+  }, [pendingApproval?.requestId]);
 
   useEffect(() => {
     setApprovalIndex((current) => Math.min(current, Math.max(0, approvalOptions.length - 1)));
@@ -141,9 +142,9 @@ export function TuiApp(props: { actorId: string }) {
           studioConversationIdRef.current = null;
           setStudioMode(false);
           dispatch({ type: 'session.set_kind', kind: 'chat' });
-          appendMessage('system', '已退出 Studio 模式,回到单 pet chat');
+          appendMessage('system', TUI_TEXT.studioExitedToChat);
         } else {
-          appendMessage('system', '当前不在 Studio 模式');
+          appendMessage('system', TUI_TEXT.studioNotActive);
         }
         clearInputValue();
         return;
@@ -157,16 +158,16 @@ export function TuiApp(props: { actorId: string }) {
           studioConversationIdRef.current = null;
           setStudioMode(false);
           dispatch({ type: 'session.set_kind', kind: 'chat' });
-          appendMessage('system', '已退出 Studio 模式');
+          appendMessage('system', TUI_TEXT.studioExited);
           clearInputValue();
           return;
         }
         if (!runtimeController.isConnected()) {
-          appendMessage('system', '未连接,无法发送');
+          appendMessage('system', TUI_TEXT.disconnectedCannotSend);
           return;
         }
         if (runtimeController.isBusy()) {
-          appendMessage('system', '当前任务仍在进行中,按 Ctrl+C 或 Esc 打断');
+          appendMessage('system', TUI_TEXT.busyCannotSend);
           return;
         }
         // 进入 Studio 模式(若不在)
@@ -177,7 +178,7 @@ export function TuiApp(props: { actorId: string }) {
           dispatch({ type: 'session.set_kind', kind: 'studio' });
           appendMessage(
             'system',
-            `已进入 Studio 模式 (conversation=${studioConversationIdRef.current.slice(0, 8)})。后续输入都属于此会话,输入 /chat 或 /studio 退出。`,
+            TUI_TEXT.studioModeEntered(studioConversationIdRef.current),
           );
         }
         if (!userRequest) {
@@ -195,7 +196,7 @@ export function TuiApp(props: { actorId: string }) {
       }
 
       if (parsed.name === 'allow') {
-        // /allow always submits as interrupt decision (server checks pending interrupt)
+        // /allow always submits as a review decision; the server validates whether one is pending.
         runtimeController.submitReviewResponse({ label: parsed.raw, message: parsed.raw });
         return;
       }
@@ -204,14 +205,14 @@ export function TuiApp(props: { actorId: string }) {
     }
 
     if (parsed.type === 'unknown') {
-      appendMessage('system', `未知命令：${parsed.raw}`);
+      appendMessage('system', TUI_TEXT.unknownCommand(parsed.raw));
       clearInputValue();
       return;
     }
 
     const text = parsed.text;
-    // Free-text input while interrupt selector was dismissed via Esc:
-    // server still has the pending interrupt, so this text becomes the resume value
+    // Free-text input while approval panel was dismissed via Esc:
+    // server still has the pending approval, so this text becomes the resume value
     // Studio 模式下:普通文本走 studio_request(沿用同一 conversationId)
     if (studioModeRef.current) {
       runtimeController.sendStudioRequest(text, studioConversationIdRef.current);
@@ -256,7 +257,7 @@ export function TuiApp(props: { actorId: string }) {
     const action = resolveTuiKeyAction(input, key, {
       ready,
       busy,
-      hasPendingInterrupt: Boolean(pendingInterrupt),
+      hasPendingApproval: Boolean(pendingApproval),
     });
 
     switch (action.type) {
@@ -264,17 +265,17 @@ export function TuiApp(props: { actorId: string }) {
         if (busy) {
           const nowMs = Date.now();
           if (nowMs - lastInterruptAtRef.current < 1200) {
-            appendMessage('system', '收到第二次 Ctrl+C，立即退出 TUI。');
+            appendMessage('system', TUI_TEXT.secondCtrlCExit);
             exit();
             return;
           }
           if (runtimeController.requestInterrupt()) {
             lastInterruptAtRef.current = nowMs;
           }
-          appendMessage('system', '已发送打断请求。再次按 Ctrl+C 可直接退出 TUI。');
+          appendMessage('system', TUI_TEXT.interruptRequested);
           return;
         }
-        appendMessage('system', '正在退出 TUI。');
+        appendMessage('system', TUI_TEXT.exiting);
         exit();
         return;
 
@@ -299,8 +300,8 @@ export function TuiApp(props: { actorId: string }) {
       }
 
       case 'approval.dismiss':
-        if (pendingInterrupt) {
-          runtimeController.dismissReview(pendingInterrupt.requestId);
+        if (pendingApproval) {
+          runtimeController.dismissReview(pendingApproval.requestId);
         }
         return;
 
@@ -339,19 +340,19 @@ export function TuiApp(props: { actorId: string }) {
     [activeTools, now, contentWidth],
   );
 
-  // Input area focus: only when ready, not busy, and no interrupt selector
-  const inputFocused = ready && !busy && !pendingInterrupt;
+  // Input area focus: only when ready, not busy, and no approval panel
+  const inputFocused = ready && !busy && !pendingApproval;
 
   // Contextual help text
   const helpText = busy
-    ? 'Ctrl+C 打断 · 再按一次退出'
-    : pendingInterrupt
-      ? '' // help is shown inside InterruptSelector
-      : '/new 新会话 · /help 帮助 · /quit 退出';
+    ? TUI_TEXT.helpBusy
+    : pendingApproval
+      ? '' // help is shown inside ApprovalPanel
+      : TUI_TEXT.helpIdle;
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {messages.length === 0 ? <Text dimColor>和 {petName} 聊天吧。</Text> : null}
+      {messages.length === 0 ? <Text dimColor>{TUI_TEXT.emptyHistory(petName)}</Text> : null}
       <Static items={messages}>
         {(entry) => <MessageBlock key={entry.id} entry={entry} petName={petName} width={contentWidth} />}
       </Static>
@@ -364,15 +365,15 @@ export function TuiApp(props: { actorId: string }) {
           ))}
         </Box>
       ) : null}
-      {pendingInterrupt ? (
-        <InterruptSelector
-          interrupt={pendingInterrupt}
+      {pendingApproval ? (
+        <ApprovalPanel
+          approval={pendingApproval}
           width={contentWidth}
           options={approvalOptions}
           selectedIndex={approvalIndex}
         />
       ) : null}
-      {!pendingInterrupt ? (
+      {!pendingApproval ? (
         <Text dimColor>
           {pendingUi
             ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeTools)
@@ -381,19 +382,19 @@ export function TuiApp(props: { actorId: string }) {
       ) : null}
       <Box
         borderStyle="round"
-        borderColor={busy ? 'yellow' : pendingInterrupt ? 'yellow' : 'gray'}
+        borderColor={busy ? 'yellow' : pendingApproval ? 'yellow' : 'gray'}
         paddingX={1}
-        marginTop={pendingInterrupt ? 0 : 1}
+        marginTop={pendingApproval ? 0 : 1}
       >
         {busy ? (
-          <Text dimColor>{'> 处理中…'}</Text>
+          <Text dimColor>{TUI_TEXT.inputBusy}</Text>
         ) : (
           <>
             <Text color="cyan">{'> '}</Text>
             <Composer
               value={inputValue}
               cursorOffset={composerCursorOffset}
-              placeholder={pendingInterrupt ? '输入自由回复，或按 ↑ 返回选择器' : '输入消息'}
+              placeholder={pendingApproval ? TUI_TEXT.approvalFreeReplyPlaceholder : TUI_TEXT.inputPlaceholder}
               focus={inputFocused}
             />
           </>

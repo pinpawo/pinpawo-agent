@@ -1,16 +1,17 @@
 import { Box, Text } from 'ink';
 import { shorten } from '../render/eventText';
+import { TUI_TEXT } from '../render/text';
 import { wrapLine } from '../render/terminalText';
-import type { InterruptOption, PendingInterrupt } from '../types';
+import type { ApprovalOption, PendingApproval } from '../types';
 
-export function buildInterruptSelectOptions(interrupt: PendingInterrupt): InterruptOption[] {
-  const actionRequests = Array.isArray(interrupt.payload.actionRequests)
-    ? interrupt.payload.actionRequests.filter((item): item is Record<string, unknown> =>
+export function buildApprovalOptions(approval: PendingApproval): ApprovalOption[] {
+  const actionRequests = Array.isArray(approval.payload.actionRequests)
+    ? approval.payload.actionRequests.filter((item): item is Record<string, unknown> =>
       Boolean(item && typeof item === 'object'),
     )
     : [];
-  const reviewConfigs = Array.isArray(interrupt.payload.reviewConfigs)
-    ? interrupt.payload.reviewConfigs.filter((item): item is Record<string, unknown> =>
+  const reviewConfigs = Array.isArray(approval.payload.reviewConfigs)
+    ? approval.payload.reviewConfigs.filter((item): item is Record<string, unknown> =>
       Boolean(item && typeof item === 'object'),
     )
     : [];
@@ -30,24 +31,32 @@ export function buildInterruptSelectOptions(interrupt: PendingInterrupt): Interr
     : ['approve', 'reject', 'respond'];
 
   if (actionRequests.length > 0) {
-    const options: InterruptOption[] = [];
+    const options: ApprovalOption[] = [];
     if (allowedDecisions.includes('approve')) {
       options.push({
-        label: actionName === 'continue_execution_window' ? '继续' : '批准执行',
-        message: actionName === 'continue_execution_window' ? '继续' : '批准执行',
+        label: actionName === 'continue_execution_window'
+          ? TUI_TEXT.approvalContinue
+          : TUI_TEXT.approvalApproveExecution,
+        message: actionName === 'continue_execution_window'
+          ? TUI_TEXT.approvalContinue
+          : TUI_TEXT.approvalApproveExecution,
         resume: { decisions: [{ type: 'approve' }] },
       });
     }
     if ((actionName === 'shell' || actionName === 'run_shell') && command) {
       options.push({
-        label: `本次会话授权：${shorten(command, 40)}`,
+        label: TUI_TEXT.approvalAllowSession(shorten(command, 40)),
         message: '/allow',
       });
     }
     if (allowedDecisions.includes('reject')) {
       options.push({
-        label: actionName === 'continue_execution_window' ? '停在这里' : '拒绝',
-        message: actionName === 'continue_execution_window' ? '停在这里' : '拒绝',
+        label: actionName === 'continue_execution_window'
+          ? TUI_TEXT.approvalStopHere
+          : TUI_TEXT.approvalReject,
+        message: actionName === 'continue_execution_window'
+          ? TUI_TEXT.approvalStopHere
+          : TUI_TEXT.approvalReject,
         resume: { decisions: [{ type: 'reject' }] },
       });
     }
@@ -56,18 +65,26 @@ export function buildInterruptSelectOptions(interrupt: PendingInterrupt): Interr
     }
   }
   return [
-    { label: '批准', message: '批准', resume: { decisions: [{ type: 'approve' }] } },
-    { label: '拒绝', message: '拒绝', resume: { decisions: [{ type: 'reject' }] } },
+    {
+      label: TUI_TEXT.approvalApprove,
+      message: TUI_TEXT.approvalApprove,
+      resume: { decisions: [{ type: 'approve' }] },
+    },
+    {
+      label: TUI_TEXT.approvalReject,
+      message: TUI_TEXT.approvalReject,
+      resume: { decisions: [{ type: 'reject' }] },
+    },
   ];
 }
 
-export function InterruptSelector(props: {
-  interrupt: PendingInterrupt;
+export function ApprovalPanel(props: {
+  approval: PendingApproval;
   width: number;
-  options: InterruptOption[];
+  options: ApprovalOption[];
   selectedIndex: number;
 }) {
-  const promptLines = wrapLine(props.interrupt.prompt, props.width - 4);
+  const promptLines = wrapLine(props.approval.prompt, props.width - 4);
   const selectedIndex = Math.max(0, Math.min(props.options.length - 1, props.selectedIndex));
 
   return (
@@ -80,7 +97,7 @@ export function InterruptSelector(props: {
       width={props.width}
     >
       <Text color="yellow">
-        {props.interrupt.petId ? `[${props.interrupt.petId} 想问你]` : '需要确认'}
+        {TUI_TEXT.approvalHeading(props.approval.petId)}
       </Text>
       {promptLines.map((line, i) => (
         <Text key={`p-${i}`}>{line}</Text>
@@ -92,7 +109,7 @@ export function InterruptSelector(props: {
         </Text>
       ))}
       <Text>{' '}</Text>
-      <Text dimColor>↑↓ 选择 · Enter 确认 · Esc 自由输入</Text>
+      <Text dimColor>{TUI_TEXT.approvalHelp}</Text>
     </Box>
   );
 }

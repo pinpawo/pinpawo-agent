@@ -5,6 +5,7 @@ import {
   listTuiCommands,
   parseTuiCommand,
 } from './tui/input/commandRegistry';
+import { buildApprovalOptions } from './tui/components/ApprovalPanel';
 import {
   applyComposerInput,
   resolveTuiKeyAction,
@@ -51,27 +52,27 @@ test('formatTuiCommandHelp is generated from visible command metadata', () => {
 
 test('resolveTuiKeyAction routes global, approval, busy, and composer keys', () => {
   assert.deepEqual(
-    resolveTuiKeyAction('c', { ctrl: true }, { ready: false, busy: false, hasPendingInterrupt: false }),
+    resolveTuiKeyAction('c', { ctrl: true }, { ready: false, busy: false, hasPendingApproval: false }),
     { type: 'global.ctrl_c' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingInterrupt: true }),
+    resolveTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: true }),
     { type: 'approval.previous' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingInterrupt: true }),
+    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: true }),
     { type: 'approval.submit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: true, hasPendingInterrupt: false }),
+    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: true, hasPendingApproval: false }),
     { type: 'global.interrupt' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingInterrupt: false }),
+    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: false }),
     { type: 'composer.clear' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingInterrupt: false }),
+    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false }),
     { type: 'composer.submit' },
   );
 });
@@ -98,4 +99,38 @@ test('applyComposerInput keeps cursor editing behavior in pure input reducer', (
     value: 'run  command',
     cursorOffset: 4,
   });
+});
+
+test('buildApprovalOptions derives action review decisions from normalized approval payload', () => {
+  const options = buildApprovalOptions({
+    requestId: 'req-1',
+    kind: 'tool',
+    prompt: 'Run command?',
+    payload: {
+      actionRequests: [{
+        name: 'run_shell',
+        args: { command: 'git status --short' },
+      }],
+      reviewConfigs: [{
+        allowedDecisions: ['approve', 'reject'],
+      }],
+    },
+  });
+
+  assert.deepEqual(options, [
+    {
+      label: '批准执行',
+      message: '批准执行',
+      resume: { decisions: [{ type: 'approve' }] },
+    },
+    {
+      label: '本次会话授权：git status --short',
+      message: '/allow',
+    },
+    {
+      label: '拒绝',
+      message: '拒绝',
+      resume: { decisions: [{ type: 'reject' }] },
+    },
+  ]);
 });

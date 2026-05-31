@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildActiveToolLines,
+  buildBusyStatusLine,
   formatOperationResult,
   formatOperationStart,
   formatStudioProgressEvent,
+  formatSystemNoticeEvent,
   getOperationKey,
 } from './tui/render/eventText';
 import type { LocalAgentOperationEvent } from './events/localAgentEvent';
@@ -78,5 +81,51 @@ test('formats studio progress events from typed local-agent events', () => {
       },
     }),
     '[studio] dispatch[#2] → pet:planner',
+  );
+});
+
+test('formats status and active operation lines from render adapter props', () => {
+  assert.equal(
+    buildBusyStatusLine(
+      { phase: 'thinking', startedAt: 1000, charCount: 8 },
+      2500,
+      '-',
+      [],
+    ),
+    '- 正在思考 · 1s · 8 字',
+  );
+
+  assert.deepEqual(
+    buildActiveToolLines([
+      {
+        name: 'tool-1',
+        label: '读文件',
+        detail: '/tmp/example.md',
+        startedAt: 1000,
+      },
+    ], 3500, 80),
+    [{
+      id: 'tool-tool-1-0-0',
+      text: '读文件 · 2s · /tmp/example.md',
+    }],
+  );
+});
+
+test('formats system notice events without preserving empty notices', () => {
+  assert.equal(
+    formatSystemNoticeEvent({
+      type: 'system.notice',
+      requestId: 'req-1',
+      message: '  已切换模型  ',
+    }),
+    '已切换模型',
+  );
+  assert.equal(
+    formatSystemNoticeEvent({
+      type: 'system.notice',
+      requestId: 'req-1',
+      message: '   ',
+    }),
+    null,
   );
 });

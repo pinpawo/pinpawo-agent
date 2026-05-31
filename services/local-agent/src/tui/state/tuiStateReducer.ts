@@ -3,8 +3,10 @@ import {
   formatOperationResult,
   formatOperationStart,
   formatStudioProgressEvent,
+  formatSystemNoticeEvent,
   getOperationKey,
 } from '../render/eventText';
+import { TUI_TEXT } from '../render/text';
 import type {
   ActiveOperationModel,
   ActiveRunModel,
@@ -125,7 +127,7 @@ function activeRunToActiveTools(run: ActiveRunModel | null) {
   })) ?? [];
 }
 
-function activeRunToPendingInterrupt(run: ActiveRunModel | null) {
+function activeRunToPendingApproval(run: ActiveRunModel | null) {
   return run?.pendingReview
     ? {
         kind: run.pendingReview.kind,
@@ -389,14 +391,14 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       }
 
       if (event.type === 'human_review.requested') {
-        const prompt = event.prompt.trim() || '当前流程需要你的确认，请直接回复继续或说明下一步。';
+        const prompt = event.prompt.trim() || TUI_TEXT.approvalFallbackPrompt;
         const kind = typeof event.payload.kind === 'string' ? event.payload.kind : 'interrupt';
         const petId = event.actor?.petId || undefined;
         return updateSession({
           ...state,
           connection: {
             ...state.connection,
-            message: petId ? `等待你的决定(${petId})` : '等待你的决定',
+            message: TUI_TEXT.approvalWaiting(petId),
           },
         }, sessionId, (currentSession) => ({
           ...currentSession,
@@ -420,7 +422,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       }
 
       if (event.type === 'system.notice') {
-        const notice = event.message.trim();
+        const notice = formatSystemNoticeEvent(event);
         return notice
           ? updateSession(state, sessionId, (currentSession) =>
               appendHistory(currentSession, [
@@ -432,7 +434,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (event.type === 'message.completed') {
         const reply = event.text.trim();
         const finalText = activeRun.assistantDraft.trim() || reply || '...';
-        return finishRun(state, event.requestId, '就绪', finalText
+        return finishRun(state, event.requestId, TUI_TEXT.statusReady, finalText
           ? [historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`)]
           : []);
       }
@@ -449,8 +451,8 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
       if (event.type === 'error') {
         const message = event.message || 'internal error';
-        return finishRun(state, event.requestId, '出错，已恢复输入', [
-          historyDraft('system', `出错: ${message}`, action.historyCell, `${event.requestId}:event-error`),
+        return finishRun(state, event.requestId, TUI_TEXT.statusErrorRecovered, [
+          historyDraft('system', TUI_TEXT.errorLine(message), action.historyCell, `${event.requestId}:event-error`),
         ]);
       }
 
@@ -459,7 +461,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
     case 'server.interrupted':
       return finishRun(state, action.requestId, action.statusMessage, [
-        historyDraft('assistant', '[interrupted]', action.historyCell, `${action.requestId}:interrupted`),
+        historyDraft('assistant', TUI_TEXT.interrupted, action.historyCell, `${action.requestId}:interrupted`),
       ]);
 
     case 'server.studio_response': {
@@ -468,7 +470,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ? historyDraft('assistant', action.reply.trim(), action.historyCell, `${action.requestId}:studio-response`)
           : historyDraft(
               'system',
-              `[studio] turn ${action.outcome} (无最终输出)`,
+              TUI_TEXT.studioEmptyTurn(action.outcome),
               action.historyCell,
               `${action.requestId}:studio-empty`,
             ),
@@ -476,7 +478,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (action.outcome === 'stopped' && action.reason) {
         history.push(historyDraft(
           'system',
-          `[studio] stopped: ${action.reason}`,
+          TUI_TEXT.studioStoppedReason(action.reason),
           action.stoppedReasonCell,
           `${action.requestId}:studio-stopped`,
         ));
@@ -486,12 +488,12 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
     case 'server.studio_error':
       return finishRun(state, action.requestId, action.statusMessage, [
-        historyDraft('system', `[studio 出错] ${action.message || 'studio error'}`, action.historyCell, `${action.requestId}:studio-error`),
+        historyDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.historyCell, `${action.requestId}:studio-error`),
       ]);
 
     case 'server.error':
       return finishRun(state, action.requestId, action.statusMessage, [
-        historyDraft('system', `出错: ${action.message || 'internal error'}`, action.historyCell, `${action.requestId}:server-error`),
+        historyDraft('system', TUI_TEXT.errorLine(action.message || 'internal error'), action.historyCell, `${action.requestId}:server-error`),
       ]);
 
     case 'review.dismiss': {
@@ -528,8 +530,8 @@ export function selectFocusedActiveTools(state: TuiState) {
   return activeRunToActiveTools(selectFocusedActiveRun(state));
 }
 
-export function selectFocusedPendingInterrupt(state: TuiState) {
-  return activeRunToPendingInterrupt(selectFocusedActiveRun(state));
+export function selectFocusedPendingApproval(state: TuiState) {
+  return activeRunToPendingApproval(selectFocusedActiveRun(state));
 }
 
 export function selectReady(state: TuiState) {

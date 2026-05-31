@@ -35,6 +35,11 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
   assert.equal(exit.type, 'command');
   assert.equal(exit.type === 'command' ? exit.name : null, 'quit');
 
+  const exportCommand = parseTuiCommand('/export transcripts/today.md');
+  assert.equal(exportCommand.type, 'command');
+  assert.equal(exportCommand.type === 'command' ? exportCommand.name : null, 'export');
+  assert.equal(exportCommand.type === 'command' ? exportCommand.args : null, 'transcripts/today.md');
+
   assert.deepEqual(parseTuiCommand('/studiox'), {
     type: 'unknown',
     raw: '/studiox',
@@ -46,7 +51,7 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
 test('formatTuiCommandHelp is generated from visible command metadata', () => {
   assert.equal(
     formatTuiCommandHelp(),
-    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /help · /quit',
+    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /help · /export 导出 transcript · /quit',
   );
 });
 

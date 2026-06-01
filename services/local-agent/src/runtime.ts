@@ -34,12 +34,12 @@ import { loadStoredConfig, saveStoredConfig } from './storage';
 import { buildAppChatThreadId } from './chatInterface';
 import {
   parseLocalAgentClientMessage,
-  sendLocalAgentCompatibilityEvent,
   sendLocalAgentMessage,
   type ChatRequestMessage,
   type InterruptRequestMessage,
   type NewSessionMessage,
 } from './localAgentProtocol';
+import { sendLocalAgentCompatibilityEvent } from './protocol/legacyProtocolAdapter';
 import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
 import {
   buildToolOperationEvent,

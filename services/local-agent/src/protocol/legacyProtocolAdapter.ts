@@ -2,6 +2,11 @@ import type {
   LocalAgentEvent,
   LocalAgentOperationEvent,
 } from '../events/localAgentEvent';
+import {
+  parseLocalAgentServerMessage,
+  type LocalAgentEventMessage,
+  type LocalAgentServerMessage,
+} from '../localAgentProtocol';
 
 export type LegacyToolLogPhase = 'start' | 'end' | 'complete' | 'error' | 'event' | 'interrupt';
 
@@ -47,6 +52,29 @@ export type LegacyServerMessage =
       event: Record<string, unknown>;
     }
   | { type: 'error'; requestId: string; message: string };
+
+export type LocalAgentCompatibilityServerMessage =
+  | LocalAgentServerMessage
+  | LegacyServerMessage;
+
+type WsLike = {
+  readyState: number;
+  send(data: string): unknown;
+};
+
+const WS_OPEN = 1;
+
+function readJsonRecord(raw: unknown): Record<string, unknown> | null {
+  try {
+    const text = typeof raw === 'string' ? raw : raw instanceof Buffer ? raw.toString() : String(raw);
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function readString(record: Record<string, unknown>, key: string) {
   const value = record[key];
@@ -175,6 +203,17 @@ export function parseLegacyServerMessageRecord(
   return null;
 }
 
+export function parseLocalAgentCompatibilityServerMessage(
+  raw: unknown,
+): LocalAgentCompatibilityServerMessage | null {
+  const serverMessage = parseLocalAgentServerMessage(raw);
+  if (serverMessage) return serverMessage;
+  const record = readJsonRecord(raw);
+  if (!record) return null;
+  const requestId = readString(record, 'requestId');
+  return requestId ? parseLegacyServerMessageRecord(record, requestId) : null;
+}
+
 export function buildLegacyToolLogMessage(event: LocalAgentOperationEvent): LegacyToolLogMessagePayload {
   const source = event.operation.source;
   return {
@@ -238,4 +277,20 @@ export function buildLegacyServerMessageFromLocalAgentEvent(event: LocalAgentEve
     };
   }
   return buildLegacyToolLogMessage(event);
+}
+
+export function sendLocalAgentCompatibilityEvent(ws: WsLike, event: LocalAgentEvent) {
+  if (ws.readyState !== WS_OPEN) {
+    return false;
+  }
+  ws.send(JSON.stringify({
+    type: 'event',
+    requestId: event.requestId,
+    event,
+  } satisfies LocalAgentEventMessage));
+  const legacyMessage = buildLegacyServerMessageFromLocalAgentEvent(event);
+  if (legacyMessage) {
+    ws.send(JSON.stringify(legacyMessage));
+  }
+  return true;
 }

@@ -1,9 +1,4 @@
 import type { LocalAgentEvent, LocalAgentOperationPhase } from './events/localAgentEvent';
-import {
-  buildLegacyServerMessageFromLocalAgentEvent,
-  parseLegacyServerMessageRecord,
-  type LegacyServerMessage,
-} from './protocol/legacyProtocolAdapter';
 
 export type ChatRequestMessage = {
   type: 'chat_request';
@@ -71,10 +66,6 @@ export type LocalAgentControlServerMessage =
 export type LocalAgentServerMessage =
   | LocalAgentEventMessage
   | LocalAgentControlServerMessage;
-
-export type LocalAgentCompatibilityServerMessage =
-  | LocalAgentServerMessage
-  | LegacyServerMessage;
 
 type WsLike = {
   readyState: number;
@@ -303,17 +294,6 @@ export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMess
   return parseLocalAgentServerRecord(record);
 }
 
-export function parseLocalAgentCompatibilityServerMessage(
-  raw: unknown,
-): LocalAgentCompatibilityServerMessage | null {
-  const record = readJsonRecord(raw);
-  if (!record) return null;
-  const serverMessage = parseLocalAgentServerRecord(record);
-  if (serverMessage) return serverMessage;
-  const requestId = readString(record, 'requestId');
-  return requestId ? parseLegacyServerMessageRecord(record, requestId) : null;
-}
-
 export function sendLocalAgentMessage(
   ws: WsLike,
   message: LocalAgentServerMessage | LocalAgentClientMessage,
@@ -334,22 +314,6 @@ export function sendLocalAgentEvent(ws: WsLike, event: LocalAgentEvent) {
     requestId: event.requestId,
     event,
   } satisfies LocalAgentEventMessage));
-  return true;
-}
-
-export function sendLocalAgentCompatibilityEvent(ws: WsLike, event: LocalAgentEvent) {
-  if (ws.readyState !== WS_OPEN) {
-    return false;
-  }
-  ws.send(JSON.stringify({
-    type: 'event',
-    requestId: event.requestId,
-    event,
-  } satisfies LocalAgentEventMessage));
-  const legacyMessage = buildLegacyServerMessageFromLocalAgentEvent(event);
-  if (legacyMessage) {
-    ws.send(JSON.stringify(legacyMessage));
-  }
   return true;
 }
 

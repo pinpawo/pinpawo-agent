@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  parseLocalAgentCompatibilityServerMessage,
   parseLocalAgentClientMessage,
   parseLocalAgentServerMessage,
-  sendLocalAgentCompatibilityEvent,
   sendLocalAgentEvent,
   sendLocalAgentMessage,
 } from './localAgentProtocol';
+import {
+  parseLocalAgentCompatibilityServerMessage,
+  sendLocalAgentCompatibilityEvent,
+} from './protocol/legacyProtocolAdapter';
 
 test('parseLocalAgentClientMessage accepts valid chat requests and rejects malformed payloads', () => {
   assert.deepEqual(

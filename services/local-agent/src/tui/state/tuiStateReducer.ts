@@ -491,11 +491,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         historyDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.historyCell, `${action.requestId}:studio-error`),
       ]);
 
-    case 'server.error':
-      return finishRun(state, action.requestId, action.statusMessage, [
-        historyDraft('system', TUI_TEXT.errorLine(action.message || 'internal error'), action.historyCell, `${action.requestId}:server-error`),
-      ]);
-
     case 'review.dismiss': {
       return finishRun(state, action.requestId, action.statusMessage);
     }

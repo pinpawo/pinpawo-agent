@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  parseLocalAgentCompatibilityServerMessage,
   parseLocalAgentClientMessage,
   parseLocalAgentServerMessage,
   sendLocalAgentEvent,
@@ -47,9 +48,22 @@ test('parseLocalAgentClientMessage accepts explicit human review responses', () 
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
 });
 
-test('parseLocalAgentServerMessage accepts valid tool logs and rejects malformed payloads', () => {
-  assert.deepEqual(
+test('parseLocalAgentServerMessage rejects legacy server messages by default', () => {
+  assert.equal(
     parseLocalAgentServerMessage(JSON.stringify({
+      type: 'tool_log',
+      requestId: 'req-1',
+      phase: 'start',
+      toolName: 'read_file',
+      input: '{"path":"README.md"}',
+    })),
+    null,
+  );
+});
+
+test('parseLocalAgentCompatibilityServerMessage accepts valid tool logs and rejects malformed payloads', () => {
+  assert.deepEqual(
+    parseLocalAgentCompatibilityServerMessage(JSON.stringify({
       type: 'tool_log',
       requestId: 'req-1',
       phase: 'start',
@@ -67,8 +81,8 @@ test('parseLocalAgentServerMessage accepts valid tool logs and rejects malformed
       error: undefined,
     },
   );
-  assert.equal(parseLocalAgentServerMessage(JSON.stringify({ type: 'tool_log', requestId: 'req-1', phase: 'bad', toolName: 'x' })), null);
-  assert.equal(parseLocalAgentServerMessage(JSON.stringify({ type: 'chat_token', requestId: 'req-1' })), null);
+  assert.equal(parseLocalAgentCompatibilityServerMessage(JSON.stringify({ type: 'tool_log', requestId: 'req-1', phase: 'bad', toolName: 'x' })), null);
+  assert.equal(parseLocalAgentCompatibilityServerMessage(JSON.stringify({ type: 'chat_token', requestId: 'req-1' })), null);
 });
 
 test('parseLocalAgentServerMessage accepts typed local-agent event messages', () => {

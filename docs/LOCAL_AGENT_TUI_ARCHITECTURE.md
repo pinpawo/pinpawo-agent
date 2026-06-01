@@ -171,6 +171,7 @@ API 层负责用户、pet、session、鉴权和网络 envelope。它可以把 `L
 - `human_review.requested` 表示 agent 主动等待用户确认或补充，approval UI 和 app HITL UI 都基于它进入 waiting_human。
 - token usage / context usage 是 session 级可观测数据。**当前协议还没有这个字段**——`message.completed.metadata` 现在只有 `mood` / `topic` / `tags`，没有 token 用量。要在 TUI 展示用量，需要先定义来源：要么扩 `message.completed.metadata.usage`，要么加一个独立的 `usage` 事件。在来源落地前，§5 的 `tokenUsage` 字段是预留位，应保持为 `null` 并在 UI 上不展示。
 - API 层可以包一层自己的 HTTP/SSE/WS envelope，但保留 `LocalAgentEvent` 的事件语义。
+- TUI 直连路径使用默认 server parser，只接受新协议 event/control message；legacy wire shape 只允许在显式 compatibility bridge 中解析。
 
 ### 3.6 Operation 展示语义
 

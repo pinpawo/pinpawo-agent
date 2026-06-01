@@ -192,13 +192,6 @@ export type TuiAction =
       statusMessage: string;
     }
   | {
-      type: 'server.error';
-      requestId: RunId;
-      message: string;
-      historyCell: HistoryCellMeta;
-      statusMessage: string;
-    }
-  | {
       type: 'review.dismiss';
       requestId: RunId;
       statusMessage: string;

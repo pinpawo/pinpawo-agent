@@ -610,16 +610,6 @@ export class TuiRuntimeController {
         return;
       }
 
-      if (msg.type === 'error') {
-        this.clearInterruptTimeout();
-        this.options.dispatch({
-          type: 'server.error',
-          requestId: msg.requestId,
-          message: msg.message,
-          historyCell: makeHistoryMeta(),
-          statusMessage: TUI_TEXT.statusErrorRecovered,
-        });
-      }
     } catch {
       // ignore malformed messages
     }

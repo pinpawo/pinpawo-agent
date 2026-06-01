@@ -72,7 +72,10 @@ export type LocalAgentControlServerMessage =
 
 export type LocalAgentServerMessage =
   | LocalAgentEventMessage
-  | LocalAgentControlServerMessage
+  | LocalAgentControlServerMessage;
+
+export type LocalAgentCompatibilityServerMessage =
+  | LocalAgentServerMessage
   | LegacyServerMessage;
 
 type WsLike = {
@@ -267,9 +270,7 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
   return null;
 }
 
-export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMessage | null {
-  const record = readJsonRecord(raw);
-  if (!record) return null;
+function parseLocalAgentServerRecord(record: Record<string, unknown>): LocalAgentServerMessage | null {
   const type = readString(record, 'type');
   if (type === 'pong') return { type };
   const requestId = readString(record, 'requestId');
@@ -299,10 +300,30 @@ export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMess
       reason: readOptionalString(record, 'reason'),
     };
   }
-  return parseLegacyServerMessageRecord(record, requestId);
+  return null;
 }
 
-export function sendLocalAgentMessage(ws: WsLike, message: LocalAgentServerMessage | LocalAgentClientMessage) {
+export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMessage | null {
+  const record = readJsonRecord(raw);
+  if (!record) return null;
+  return parseLocalAgentServerRecord(record);
+}
+
+export function parseLocalAgentCompatibilityServerMessage(
+  raw: unknown,
+): LocalAgentCompatibilityServerMessage | null {
+  const record = readJsonRecord(raw);
+  if (!record) return null;
+  const serverMessage = parseLocalAgentServerRecord(record);
+  if (serverMessage) return serverMessage;
+  const requestId = readString(record, 'requestId');
+  return requestId ? parseLegacyServerMessageRecord(record, requestId) : null;
+}
+
+export function sendLocalAgentMessage(
+  ws: WsLike,
+  message: LocalAgentServerMessage | LocalAgentClientMessage | LegacyServerMessage,
+) {
   if (ws.readyState !== WS_OPEN) {
     return false;
   }

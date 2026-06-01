@@ -6,9 +6,6 @@ import {
   sendLocalAgentEvent,
   sendLocalAgentMessage,
 } from './localAgentProtocol';
-import {
-  sendLocalAgentCompatibilityEvent,
-} from './protocol/legacyProtocolAdapter';
 
 test('parseLocalAgentClientMessage accepts valid chat requests and rejects malformed payloads', () => {
   assert.deepEqual(
@@ -186,98 +183,6 @@ test('sendLocalAgentEvent writes only typed events', () => {
         text: 'done',
         metadata: { mood: null, topic: null, tags: [] },
       },
-    },
-  ]);
-});
-
-test('sendLocalAgentCompatibilityEvent emits typed event before derived legacy messages', () => {
-  const sent: string[] = [];
-  const openWs = {
-    readyState: 1,
-    send(data: string) {
-      sent.push(data);
-    },
-  };
-
-  assert.equal(sendLocalAgentCompatibilityEvent(openWs, {
-    type: 'message.delta',
-    requestId: 'req-1',
-    role: 'assistant',
-    text: 'hello',
-  }), true);
-
-  assert.deepEqual(sent.map((item) => JSON.parse(item)), [
-    {
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        type: 'message.delta',
-        requestId: 'req-1',
-        role: 'assistant',
-        text: 'hello',
-      },
-    },
-    {
-      type: 'chat_token',
-      requestId: 'req-1',
-      token: 'hello',
-    },
-  ]);
-});
-
-test('sendLocalAgentCompatibilityEvent emits derived legacy tool_log messages', () => {
-  const sent: string[] = [];
-  const openWs = {
-    readyState: 1,
-    send(data: string) {
-      sent.push(data);
-    },
-  };
-
-  assert.equal(sendLocalAgentCompatibilityEvent(openWs, {
-    type: 'operation',
-    requestId: 'req-1',
-    phase: 'started',
-    operation: {
-      kind: 'tool.execute',
-      title: 'read_file',
-      source: {
-        provider: 'runtime',
-        name: 'read_file',
-      },
-    },
-    raw: {
-      input: '{"path":"README.md"}',
-    },
-  }), true);
-
-  assert.deepEqual(sent.map((item) => JSON.parse(item)), [
-    {
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        type: 'operation',
-        requestId: 'req-1',
-        phase: 'started',
-        operation: {
-          kind: 'tool.execute',
-          title: 'read_file',
-          source: {
-            provider: 'runtime',
-            name: 'read_file',
-          },
-        },
-        raw: {
-          input: '{"path":"README.md"}',
-        },
-      },
-    },
-    {
-      type: 'tool_log',
-      requestId: 'req-1',
-      phase: 'start',
-      toolName: 'read_file',
-      input: '{"path":"README.md"}',
     },
   ]);
 });

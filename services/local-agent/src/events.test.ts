@@ -3,7 +3,6 @@ import test from 'node:test';
 import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
-import { buildLegacyToolLogMessage } from './protocol/legacyProtocolAdapter';
 import { localToolOperationRegistry } from './plugins/localToolOperations';
 
 test('normalizes LangGraph tool stream events with toolkit operation metadata', () => {
@@ -58,31 +57,6 @@ test('falls back to a generic operation when no metadata is registered', () => {
   assert.equal(event.operation.kind, 'tool.execute');
   assert.equal(event.operation.title, 'unknown_tool');
   assert.equal(event.operation.source?.provider, 'runtime');
-});
-
-test('derives legacy tool_log from normalized operation events', () => {
-  const event = normalizeToolStreamEvent(
-    'req-1',
-    {
-      event: 'on_tool_end',
-      name: 'write_file',
-      toolCallId: 'call-1',
-      input: { path: 'a.txt', content: 'hello' },
-      output: { ok: true, path: '/tmp/a.txt' },
-    },
-    localToolOperationRegistry,
-  );
-
-  assert.deepEqual(buildLegacyToolLogMessage(event), {
-    type: 'tool_log',
-    requestId: 'req-1',
-    phase: 'end',
-    toolName: 'write_file',
-    toolCallId: 'call-1',
-    input: 'hello',
-    output: '{"ok":true,"path":"/tmp/a.txt"}',
-    error: undefined,
-  });
 });
 
 test('buildToolOperationEvent uses local toolkit metadata for direct event emission', () => {

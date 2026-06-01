@@ -126,6 +126,7 @@ function isLegacyToolLogPhase(value: string): value is LegacyToolLogPhase {
 
 export function isLegacyServerMessage(message: { type: string }): message is LegacyServerMessage {
   return message.type === 'chat_token'
+    || message.type === 'tool_log'
     || message.type === 'human_interrupt'
     || message.type === 'system_notice'
     || message.type === 'chat_response'

@@ -240,7 +240,7 @@ test('sendLocalAgentMessage emits typed event before legacy compatibility messag
   ]);
 });
 
-test('sendLocalAgentMessage does not synthesize generic events for legacy tool_log', () => {
+test('sendLocalAgentMessage emits typed operation events before legacy tool_log compatibility messages', () => {
   const sent: string[] = [];
   const openWs = {
     readyState: 1,
@@ -258,6 +258,26 @@ test('sendLocalAgentMessage does not synthesize generic events for legacy tool_l
   }), true);
 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'operation',
+        requestId: 'req-1',
+        phase: 'started',
+        operation: {
+          kind: 'tool.execute',
+          title: 'read_file',
+          source: {
+            provider: 'runtime',
+            name: 'read_file',
+          },
+        },
+        raw: {
+          input: '{"path":"README.md"}',
+        },
+      },
+    },
     {
       type: 'tool_log',
       requestId: 'req-1',

@@ -2,7 +2,7 @@
 
 > 状态：Draft v2
 > 日期：2026-05-29
-> 更新：PR #18 已把 local-agent runtime/TUI 主链路切到 `LocalAgentEvent` / `operation` first；legacy message 仅保留为 PinPet app/API 迁移前的 compatibility adapter。剩余跨仓库迁移见 issue #19。
+> 更新：PR #18 已把 local-agent runtime/TUI 主链路切到 `LocalAgentEvent` / `operation` first；legacy message 仅保留为 `pinpawo-app` app/API 迁移前的 compatibility adapter。剩余跨仓库迁移见 issue #19。
 
 ## 1. 文档目标
 
@@ -307,7 +307,7 @@ studio runtime progress
   -> LocalAgentEvent studio.progress
 ```
 
-兼容输出是独立的发送层行为：PinPet app/API 旧路径尚未完成 `LocalAgentEvent` 迁移前，可以由 `LocalAgentEvent` 派生 `chat_token` / `chat_response` / `tool_log` / `human_interrupt` / `studio_turn_event`。TUI 本地路径不应依赖这些 legacy messages。
+兼容输出是独立的发送层行为：`pinpawo-app` app/API 旧路径尚未完成 `LocalAgentEvent` 迁移前，可以由 `LocalAgentEvent` 派生 `chat_token` / `chat_response` / `tool_log` / `human_interrupt` / `studio_turn_event`。TUI 本地路径不应依赖这些 legacy messages。
 
 原则：
 
@@ -499,7 +499,9 @@ type OperationRegistry = {
 
 ### 阶段 3：App/API 切到 LocalAgentEvent
 
-状态：未完成。PinPet app/API 仍需要迁移，见 issue #19。
+状态：未完成。`pinpawo-app` app/API 仍需要迁移，见 issue #19。
+
+迁移仓库：`~/Develop/src/pinpawo/pinpawo-app`。本仓库只维护 local-agent 协议、compatibility adapter 和迁移说明；app/API 代码迁移在 `pinpawo-app` 侧单独推进。
 
 目标：app 不再依赖 `tool_log`。
 
@@ -593,7 +595,7 @@ type OperationRegistry = {
 已确认：
 
 1. 新协议使用 `type: 'event'` message，agent run activity 以 `LocalAgentEvent` 为 primary event model。
-2. legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event` 只保留在 compatibility adapter，等 PinPet app/API 迁移完成后删除。
+2. legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event` 只保留在 compatibility adapter，等 `pinpawo-app` app/API 迁移完成后删除。
 3. LangGraph `astream` 的 `messages/tools/values` 只作为 internal stream source，不能作为 app/TUI public protocol。
 
 仍待确认：

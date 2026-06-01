@@ -144,7 +144,7 @@ local-agent runtime
   -> mobile app run state
 ```
 
-当前过渡状态：local-agent runtime 内部已经以 `LocalAgentEvent` 为主事件模型；PinPet app/API 旧实现尚未完全迁移前，runtime 发送出口可以从 `LocalAgentEvent` 派生 legacy 消息用于兼容。这个兼容只属于 API-facing adapter / bridge，不属于 TUI 本地协议。
+当前过渡状态：local-agent runtime 内部已经以 `LocalAgentEvent` 为主事件模型；`pinpawo-app` app/API 旧实现尚未完全迁移前，runtime 发送出口可以从 `LocalAgentEvent` 派生 legacy 消息用于兼容。这个兼容只属于 API-facing adapter / bridge，不属于 TUI 本地协议。
 
 API 层负责用户、pet、session、鉴权和网络 envelope。它可以把 `LocalAgentEvent` 包进 HTTP/SSE/WS 响应格式，但应保留这些语义字段：
 

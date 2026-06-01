@@ -116,11 +116,6 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
         continue;
       }
 
-      if (mode === 'tools' && payload && typeof payload === 'object' && 'event' in payload && 'name' in payload) {
-        emitToolEvent(payload as StreamToolsPayload);
-        continue;
-      }
-
       if (mode === 'values' && payload && typeof payload === 'object' && 'messages' in payload) {
         finalMessages = ((payload as { messages?: BaseMessage[] }).messages ?? []);
         continue;

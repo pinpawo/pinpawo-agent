@@ -49,7 +49,7 @@ export class LocalAgentGraphService {
       {
         signal: setup.input.signal,
         configurable: buildConfigurable(setup),
-        streamMode: ['messages', 'tools', 'values'],
+        streamMode: ['messages', 'values'],
       },
     );
     for await (const chunk of stream as AsyncIterable<unknown>) {

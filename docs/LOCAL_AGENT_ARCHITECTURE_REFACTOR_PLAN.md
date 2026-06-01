@@ -297,7 +297,7 @@ astream messages
 astream values final messages
   -> LocalAgentEvent message.completed
 
-astream tools
+pet/subagent onToolEvent
   -> LocalAgentEvent operation
 
 astream values __interrupt__
@@ -468,7 +468,7 @@ type OperationRegistry = {
 - 新增 `events/LocalAgentEvent.ts`。
 - 新增 `events/OperationRegistry.ts`。
 - 新增 `events/AgentStreamNormalizer.ts`。
-- 运行链路改为走 `astream tools -> LocalAgentOperationEvent`。
+- 运行链路改为走 `onToolEvent -> LocalAgentOperationEvent`，chat 顶层 stream 不再订阅 `tools` mode。
 - 内置 local tools 注册 operation metadata。
 
 约束：

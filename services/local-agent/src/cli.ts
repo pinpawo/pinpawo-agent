@@ -4,6 +4,15 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
 
+type LocalAgentCliHandlers = {
+  runLogin?: () => Promise<void> | void;
+  runActorSelect?: () => Promise<void> | void;
+  runAgent?: () => Promise<void> | void;
+  runOnce?: (opts: { dryRun: boolean; noDb: boolean }) => Promise<void> | void;
+  runTui?: (opts: { dryRun: boolean }) => Promise<void> | void;
+  runDetect?: () => Promise<void> | void;
+};
+
 function readPackageVersion(): string {
   try {
     const packagePath = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
@@ -24,7 +33,7 @@ function readExitCode(error: unknown): number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 1;
 }
 
-export function createLocalAgentCli(): Command {
+export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Command {
   const program = new Command();
   program
     .name('pinpawo-agent')
@@ -35,7 +44,7 @@ export function createLocalAgentCli(): Command {
     .command('login')
     .description('Sign in and write local agent configuration')
     .action(async () => {
-      const { runLogin } = await import('./commands/login');
+      const runLogin = handlers.runLogin ?? (await import('./commands/login')).runLogin;
       await runLogin();
     });
 
@@ -43,7 +52,7 @@ export function createLocalAgentCli(): Command {
     .command('actor')
     .description('Choose the pet actor used by this local agent')
     .action(async () => {
-      const { runActorSelect } = await import('./actorSelection');
+      const runActorSelect = handlers.runActorSelect ?? (await import('./actorSelection')).runActorSelect;
       await runActorSelect();
     });
 
@@ -51,7 +60,7 @@ export function createLocalAgentCli(): Command {
     .command('run')
     .description('Start the local agent service')
     .action(async () => {
-      const { runAgent } = await import('./commands/run');
+      const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
       await runAgent();
     });
 
@@ -60,12 +69,11 @@ export function createLocalAgentCli(): Command {
     .description('Run the deprecated one-shot daily post flow')
     .option('--dry-run', 'run without writing generated post changes')
     .option('--no-db', 'read crawler JSON output without DB ingest')
-    .action(async (command: Command) => {
-      const options = command.opts() as { dryRun?: boolean; noDb?: boolean };
-      const { runOnce } = await import('./commands/once');
+    .action(async (options: { dryRun?: boolean; db?: boolean; noDb?: boolean }) => {
+      const runOnce = handlers.runOnce ?? (await import('./commands/once')).runOnce;
       await runOnce({
         dryRun: options.dryRun ?? false,
-        noDb: options.noDb ?? false,
+        noDb: options.noDb === true || options.db === false,
       });
     });
 
@@ -73,9 +81,8 @@ export function createLocalAgentCli(): Command {
     .command('tui')
     .description('Start the interactive terminal UI')
     .option('--dry-run', 'run without writing generated post changes')
-    .action(async (command: Command) => {
-      const options = command.opts() as { dryRun?: boolean };
-      const { runTui } = await import('./commands/tui');
+    .action(async (options: { dryRun?: boolean }) => {
+      const runTui = handlers.runTui ?? (await import('./commands/tui')).runTui;
       await runTui({ dryRun: options.dryRun ?? false });
     });
 
@@ -83,7 +90,7 @@ export function createLocalAgentCli(): Command {
     .command('detect')
     .description('Print local browser/backend detection as JSON')
     .action(async () => {
-      const { runDetect } = await import('./commands/detect');
+      const runDetect = handlers.runDetect ?? (await import('./commands/detect')).runDetect;
       await runDetect();
     });
 

@@ -39,7 +39,7 @@ import {
   type InterruptRequestMessage,
   type NewSessionMessage,
 } from './localAgentProtocol';
-import { sendLocalAgentCompatibilityEvent } from './protocol/legacyProtocolAdapter';
+import { sendAppCompatibilityEvent } from './protocol/appCompatibilityBridge';
 import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
 import {
   buildToolOperationEvent,
@@ -77,7 +77,7 @@ async function filterAvailableUserCapabilities(
 function sendToolOperationEvent(ws: WebSocket, requestId: string, payload: StreamToolsPayload) {
   const event = buildToolOperationEvent(requestId, payload);
   recordToolActivity(payload.name, toToolActivityPhase(event.phase), requestId);
-  sendLocalAgentCompatibilityEvent(ws, event);
+  sendAppCompatibilityEvent(ws, event);
 }
 
 function toToolActivityPhase(phase: LocalAgentOperationPhase) {
@@ -419,7 +419,7 @@ export class LocalAgentRuntime {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const userId = msg.userId?.trim();
     if (!userId) {
-      sendLocalAgentCompatibilityEvent(this.ws, {
+      sendAppCompatibilityEvent(this.ws, {
         type: 'error',
         requestId,
         message: 'userId is required',
@@ -481,7 +481,7 @@ export class LocalAgentRuntime {
         isCurrent,
         finishInterrupted,
         emitEvent: (event) => {
-          sendLocalAgentCompatibilityEvent(ws, event);
+          sendAppCompatibilityEvent(ws, event);
         },
         emitToolEvent: (event) => {
           sendToolOperationEvent(ws, requestId, event);
@@ -514,7 +514,7 @@ export class LocalAgentRuntime {
       recordAgentRunActivity('error', requestId, 5_000);
       console.error('[local-agent] chat error:', err instanceof Error ? err.message : err);
       if (isStillCurrent && ws.readyState === WebSocket.OPEN) {
-        sendLocalAgentCompatibilityEvent(ws, {
+        sendAppCompatibilityEvent(ws, {
           type: 'error',
           requestId,
           message: err instanceof Error ? err.message : 'internal error',

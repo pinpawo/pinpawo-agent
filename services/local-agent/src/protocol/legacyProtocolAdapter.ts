@@ -2,7 +2,6 @@ import type {
   LocalAgentEvent,
   LocalAgentOperationEvent,
 } from '../events/localAgentEvent';
-import type { LocalAgentEventMessage } from '../localAgentProtocol';
 
 export type LegacyToolLogPhase = 'start' | 'end' | 'complete' | 'error' | 'event' | 'interrupt';
 
@@ -48,13 +47,6 @@ export type LegacyServerMessage =
       event: Record<string, unknown>;
     }
   | { type: 'error'; requestId: string; message: string };
-
-type WsLike = {
-  readyState: number;
-  send(data: string): unknown;
-};
-
-const WS_OPEN = 1;
 
 function stringifyLegacyValue(value: unknown) {
   if (typeof value === 'string') {
@@ -149,20 +141,4 @@ export function buildLegacyServerMessageFromLocalAgentEvent(event: LocalAgentEve
     };
   }
   return buildLegacyToolLogMessage(event);
-}
-
-export function sendLocalAgentCompatibilityEvent(ws: WsLike, event: LocalAgentEvent) {
-  if (ws.readyState !== WS_OPEN) {
-    return false;
-  }
-  ws.send(JSON.stringify({
-    type: 'event',
-    requestId: event.requestId,
-    event,
-  } satisfies LocalAgentEventMessage));
-  const legacyMessage = buildLegacyServerMessageFromLocalAgentEvent(event);
-  if (legacyMessage) {
-    ws.send(JSON.stringify(legacyMessage));
-  }
-  return true;
 }

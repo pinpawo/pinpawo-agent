@@ -81,14 +81,14 @@ function getOrCreateStudioReviewSlot(ws: WebSocket): PendingReviewSlot {
 }
 
 /**
- * 从 human_review_response / legacy chat_request 的 message + resume 字段解码出 HumanReviewDecision。
+ * 从 human_review_response 的 message + resume 字段解码出 HumanReviewDecision。
  * 用于 Studio HITL 答复路由:
  * - msg.resume 显式提供 → 解析
  * - "/allow" 前缀 → approve
  * - 非空 message → respond
  * - 否则 → reject
  */
-function decodeStudioDecision(msg: Pick<ChatRequestMessage | HumanReviewResponseMessage, 'message' | 'resume'>): HumanReviewDecision | null {
+function decodeStudioDecision(msg: Pick<HumanReviewResponseMessage, 'message' | 'resume'>): HumanReviewDecision | null {
   if (msg.resume !== undefined) {
     const decoded = readFirstHumanReviewDecision(msg.resume);
     if (decoded) return decoded;
@@ -103,7 +103,7 @@ function decodeStudioDecision(msg: Pick<ChatRequestMessage | HumanReviewResponse
   return { type: 'reject' };
 }
 
-function routeStudioHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage | ChatRequestMessage) {
+function routeStudioHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
   const studioSlot = studioPendingReviews.get(ws);
   if (!studioSlot?.current) {
     return false;
@@ -513,11 +513,6 @@ async function handleStudioRequest(
 
 async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: LocalServerDeps) {
   const { requestId, message } = msg;
-
-  // Legacy compatibility: old TUI builds answered Studio HITL with chat_request.
-  if (routeStudioHumanReviewResponse(ws, msg)) {
-    return;
-  }
 
   const threadId = getChatThreadId(deps.actorId);
 

@@ -2,7 +2,7 @@
 
 > 状态：Draft v2
 > 日期：2026-05-29
-> 更新：PR #18 已把 local-agent runtime/TUI 主链路切到 `LocalAgentEvent` / `operation` first；legacy message 仅保留为 `pinpawo-app` app/API 迁移前的 compatibility adapter。剩余跨仓库迁移见 issue #19。
+> 更新：local-agent runtime/TUI/app-facing WS 出口已经切到 `LocalAgentEvent` / `operation` first；本仓库不再派发 `tool_log` / `chat_token` / `chat_response` / `human_interrupt` / `studio_turn_event` 兼容消息。剩余跨仓库迁移见 issue #19。
 
 ## 1. 文档目标
 
@@ -42,7 +42,7 @@ local-agent 的定位是：
 
 这会让 app / TUI 被迫理解内部 `read_file`、`grep_search`、`run_shell` 等工具名和输入输出结构。
 
-问题不在于 formatter 放在哪个文件，而是协议层没有稳定的 local-agent event。只要协议仍然暴露内部 tool call，presentation 层就会自然变成内部工具 formatter。当前 local-agent runtime/TUI 已改为 `LocalAgentEvent` / `operation`；旧消息只在 `protocol/legacyProtocolAdapter.ts` 中作为 compatibility layer 存在。
+问题不在于 formatter 放在哪个文件，而是协议层没有稳定的 local-agent event。只要协议仍然暴露内部 tool call，presentation 层就会自然变成内部工具 formatter。当前 local-agent runtime/TUI/app-facing WS 已改为 `LocalAgentEvent` / `operation`；本仓库不再保留 legacy wire compatibility layer。
 
 ### 2.2 local-agent 承担了过多职责
 
@@ -184,7 +184,7 @@ type LocalAgentEventMessage = {
 };
 ```
 
-旧消息短期保留，但只作为兼容层：
+旧消息已经从本仓库 wire protocol 中移除：
 
 - `tool_log`
 - `chat_token`
@@ -192,15 +192,15 @@ type LocalAgentEventMessage = {
 - `human_interrupt`
 - `studio_turn_event`
 
-这些 legacy messages 在代码里需要明确标注 `@deprecated compatibility only`。等 app / TUI / macOS companion 全部切到 `type: 'event'` 后删除。
+这些 legacy messages 不再作为 local-agent 对外协议。若 app/API 仍有依赖，应在 `pinpawo-app` 仓库迁移到 `type: 'event'` envelope，而不是在本仓库恢复兼容层。
 
 迁移策略：
 
 1. 新增 `LocalAgentEvent`。
 2. runtime / server 内部优先产出 `LocalAgentEvent`。
 3. TUI 本地链路直接消费 `type: 'event'`。
-4. app/API 旧链路在发送出口由 `LocalAgentEvent` 派生 legacy messages。
-5. 全部客户端迁移完成后删除 legacy messages。
+4. app-facing WS 发送出口只发送 `LocalAgentEvent`。
+5. app/API 在 `pinpawo-app` 仓库消费新 envelope 并完成端到端验证。
 
 ## 4. 目标分层
 
@@ -307,14 +307,13 @@ studio runtime progress
   -> LocalAgentEvent studio.progress
 ```
 
-兼容输出是独立的发送层行为：`pinpawo-app` app/API 旧路径尚未完成 `LocalAgentEvent` 迁移前，可以由 `LocalAgentEvent` 派生 `chat_token` / `chat_response` / `tool_log` / `human_interrupt` / `studio_turn_event`。新客户端使用 `sendLocalAgentEvent`，旧 app/API 迁移期只允许显式使用 `protocol/appCompatibilityBridge.ts` 中的 `sendAppCompatibilityEvent`；legacy message 派生留在 `protocol/legacyProtocolAdapter.ts`。TUI 本地路径不应依赖这些 legacy messages。
+local-agent 对外只发送 `LocalAgentEvent` envelope。`pinpawo-app` app/API 旧路径需要在 app 仓库迁移到该 envelope 后再对接；本仓库不再从 `LocalAgentEvent` 派生 `chat_token` / `chat_response` / `tool_log` / `human_interrupt` / `studio_turn_event`。
 
 原则：
 
 - LangGraph stream 是 runtime internal API。
 - `LocalAgentEvent` 是 local-agent 对 app/TUI/macOS companion 的 public event API。
-- legacy messages 只能从 `LocalAgentEvent` 派生，不能继续作为 primary event model。
-- `sendLocalAgentMessage` 和 `sendLocalAgentEvent` 不接受 legacy 输出开关；兼容输出必须走 `protocol/appCompatibilityBridge.ts` 中命名明确的 app compatibility API。
+- `sendLocalAgentMessage` 和 `sendLocalAgentEvent` 不接受 legacy 输出开关。
 - `parseLocalAgentServerMessage` 只解析新协议 event/control message；local-agent 不再提供通用 legacy server message parser，避免 TUI 或新客户端重新依赖 legacy wire shape。
 
 ### 5.1 Operation event
@@ -445,14 +444,13 @@ type OperationRegistry = {
 
 状态：已完成。
 
-目标：明确当前行为，避免重构时破坏 app/TUI。
+目标：明确当时行为，避免重构时破坏 app/TUI。旧协议 baseline tests 已在 wire compatibility 删除后移除，保留 `parseLocalAgentServerMessage` 拒绝旧消息的回归测试。
 
 工作项：
 
 - 记录当前 websocket server messages。
-- 给 legacy `tool_log`、`chat_token`、`chat_response`、`human_interrupt` 补 baseline tests。
-- 明确 app 当前依赖哪些字段。
-- 明确 TUI 当前依赖哪些字段。
+- 明确 app 旧实现依赖哪些字段。
+- 明确 TUI 旧实现依赖哪些字段。
 
 产出：
 
@@ -461,24 +459,20 @@ type OperationRegistry = {
 
 ### 阶段 1：引入事件模型，不改变对外协议
 
-状态：已完成。runtime 主链路产出 `LocalAgentEvent`，legacy 输出由 compatibility adapter 派生。
+状态：已完成。runtime 主链路产出 `LocalAgentEvent`。
 
-目标：新增 `LocalAgentEvent` 和 normalizer，并开始输出 `type: 'event'`。legacy protocol 同时保留。
+目标：新增 `LocalAgentEvent` 和 normalizer，并开始输出 `type: 'event'`。
 
 工作项：
 
 - 新增 `events/LocalAgentEvent.ts`。
 - 新增 `events/OperationRegistry.ts`。
 - 新增 `events/AgentStreamNormalizer.ts`。
-- 新增 `protocol/LegacyProtocolAdapter.ts`，从 `LocalAgentEvent` 派生 legacy messages。
-- 运行链路改为走 `astream tools -> LocalAgentOperationEvent`，legacy `tool_log` 只从 compatibility adapter 派生。
+- 运行链路改为走 `astream tools -> LocalAgentOperationEvent`。
 - 内置 local tools 注册 operation metadata。
-- `localAgentProtocol.ts` 中 legacy server message 类型加 `@deprecated compatibility only` 注释。
 
 约束：
 
-- 不改 app/TUI 行为。
-- 不删除 `tool_log`。
 - 不让 legacy messages 继续成为 primary event model。
 - 不让 presentation 直接读内部 toolName。
 
@@ -501,17 +495,16 @@ type OperationRegistry = {
 
 ### 阶段 3：App/API 切到 LocalAgentEvent
 
-状态：未完成。`pinpawo-app` app/API 仍需要迁移，见 issue #19。
+状态：本仓库侧已完成 local-agent 发送出口切换；`pinpawo-app` app/API 仍需要迁移，见 issue #19。
 
-迁移仓库：`~/Develop/src/pinpawo/pinpawo-app`。本仓库只维护 local-agent 协议、compatibility adapter 和迁移说明；app/API 代码迁移在 `pinpawo-app` 侧单独推进。
+迁移仓库：`~/Develop/src/pinpawo/pinpawo-app`。本仓库只维护 local-agent 新协议和迁移说明；app/API 代码迁移在 `pinpawo-app` 侧单独推进。
 
 目标：app 不再依赖 `tool_log`。
 
 工作项：
 
-- app websocket/API 输出 typed local-agent events。
+- app websocket/API 消费 typed local-agent events。
 - app run state 基于 `message.delta`、`operation.*`、`human_review.requested`。
-- 旧 SSE/WS `tool_log/chat_token/chat_response/human_interrupt` 保持一段兼容期，并继续标注为 deprecated。
 
 产出：
 
@@ -550,13 +543,13 @@ type OperationRegistry = {
 
 ### 阶段 6：清理 legacy
 
-状态：阻塞于阶段 3 完成。
+状态：本仓库 wire protocol 兼容层已清理；剩余工作集中在 app 仓库迁移验证，以及少量历史数据迁移代码、文档表述和内部 formatter 收敛。
 
 目标：删除过渡层。
 
 工作项：
 
-- 删除或 debug-only 化 legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event`。
+- 确认 app/API 不再引用 `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event`。
 - 删除面向内部 toolName 的 formatter。
 - 清理 `chatInterface.ts` 中 thread id 推断能力的逻辑。
 - 更新 AGENTS.md 和开发文档。
@@ -574,7 +567,7 @@ type OperationRegistry = {
 5. `protocol: expose typed local-agent events for app`
 6. `server: split websocket/http handlers from runtime`
 7. `tools: split local tools and register operation metadata`
-8. `cleanup: remove legacy tool formatter and tool_log dependency`
+8. `cleanup: remove legacy tool formatter and tool_log references`
 
 每个 PR 都必须保持：
 
@@ -597,7 +590,7 @@ type OperationRegistry = {
 已确认：
 
 1. 新协议使用 `type: 'event'` message，agent run activity 以 `LocalAgentEvent` 为 primary event model。
-2. legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event` 只保留在 compatibility adapter，等 `pinpawo-app` app/API 迁移完成后删除。
+2. local-agent 不再发送 legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event`；`pinpawo-app` app/API 迁移是剩余跨仓库工作。
 3. LangGraph `astream` 的 `messages/tools/values` 只作为 internal stream source，不能作为 app/TUI public protocol。
 
 仍待确认：

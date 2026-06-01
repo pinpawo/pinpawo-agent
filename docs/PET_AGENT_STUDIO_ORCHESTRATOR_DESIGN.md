@@ -610,7 +610,7 @@ const humanReviewer = createWsHumanReviewer({
 //   这样 pet HITL 的答复就经由现有 chat_request.resume 机制回到 pet runtime
 ```
 
-Studio 内 pet HITL 跟单 pet chat HITL 用同一条答复链路。`pinpawo-app` app/API 旧路径未迁移前,compatibility adapter 可以从 `LocalAgentEvent` 派生旧消息;TUI 本地路径不依赖旧消息。
+Studio 内 pet HITL 跟单 pet chat HITL 用同一条答复链路。local-agent 对外只发送 `LocalAgentEvent`；`pinpawo-app` app/API 需要在 app 仓库消费该 envelope。
 
 ### TUI 集成
 

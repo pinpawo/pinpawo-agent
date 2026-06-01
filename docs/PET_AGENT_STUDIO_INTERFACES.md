@@ -244,9 +244,9 @@ retry 由 Studio 调度(execute 状态机再次输出 dispatch 同 taskIndex,dis
 
 - 多媒体路径引用用约定标记还是纯自然语言识别?(curator prompt 可控)
 - chat 层(目前用 ws stream + `__interrupt__` 直推客户端)是否最终也迁移到统一构造 pet runtime + 注入 humanReviewer 的模式?这是一个相对大的内务清理,见 [LangGraph 多 agent HITL 调研结论](#) 中提到的"a 的外壳 + b 的内核"思路。
-- **tool event 是否升级为可靠的结构化源,`operation` 从它直接产生,退役 `tool_log`?** 现状:local-agent 运行链路已经从结构化源 `StreamToolsPayload` 直接产出 `operation`(`buildToolOperationEvent`),TUI 本地路径不再双发 legacy `tool_log`。`pinpawo-app` app/API 旧路径尚未完成迁移前,`tool_log` 只应由 compatibility adapter 从 `LocalAgentEvent` 派生。引入 LocalAgentEvent 后,把这个源做可靠**更有必要**:
+- **tool event 是否升级为可靠的结构化源,`operation` 从它直接产生,退役 `tool_log`?** 现状:local-agent 运行链路已经从结构化源 `StreamToolsPayload` 直接产出 `operation`(`buildToolOperationEvent`),TUI 本地路径和 app-facing WS 都不再双发 legacy `tool_log`。引入 LocalAgentEvent 后,把这个源做可靠**更有必要**:
   - `operation` 的质量上限取决于结构化源 `StreamToolsPayload`,而它(on_tool_start/event/end/error)**不保证每个 start 都有配对 terminal、也不保证顺序**。
   - `operation` 现在带 `phase` 生命周期,reducer 把 `activeOperations` 当权威 state;掉一个 end 就会让 `activeOperations` 永久泄漏——start↔terminal 的可靠配对从"美观"变成"正确性"。
   - 该源在 chat / studio 仍是两条投递路径(chat 的 `setup.input.onToolEvent` 回调 + chat stream 的 `mode === 'tools'` chunk,studio 的 `onToolEvent` 透传),与上一条 chat/studio 统一是同一方向。
 
-  目标方向:把结构化 tool 事件源做成**生命周期完整(start 必配 terminal)、带稳定 callId、有序**,`operation` 从它一次归一化产出;chat 停止 stream `'tools'` 这条冗余来源,chat / studio 收敛到同一条源。等 `pinpawo-app` app/API 完成 `LocalAgentEvent` 迁移后,删除 compatibility `tool_log`。利好:客户端只认 `operation` 稳定形状,退 `tool_log`、换源都可在不动客户端的前提下做。详见 `docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0(stream→event 映射)。
+  目标方向:把结构化 tool 事件源做成**生命周期完整(start 必配 terminal)、带稳定 callId、有序**,`operation` 从它一次归一化产出;chat 停止 stream `'tools'` 这条冗余来源,chat / studio 收敛到同一条源。利好:客户端只认 `operation` 稳定形状,退 `tool_log`、换源都可在不动客户端的前提下做。详见 `docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0(stream→event 映射)。

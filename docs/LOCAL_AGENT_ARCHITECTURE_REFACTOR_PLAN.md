@@ -1,11 +1,12 @@
 # Local Agent Architecture Refactor Plan
 
-> 状态：Draft v1
+> 状态：Draft v2
 > 日期：2026-05-29
+> 更新：PR #18 已把 local-agent runtime/TUI 主链路切到 `LocalAgentEvent` / `operation` first；legacy message 仅保留为 PinPet app/API 迁移前的 compatibility adapter。剩余跨仓库迁移见 issue #19。
 
 ## 1. 文档目标
 
-这份文档用于对齐 `services/local-agent/` 的重构方向。当前先不继续改实现，先明确边界、事件模型和迁移步骤。
+这份文档用于对齐 `services/local-agent/` 的重构方向，明确边界、事件模型和迁移步骤。
 
 local-agent 的定位是：
 
@@ -20,13 +21,13 @@ local-agent 的定位是：
 2. app / TUI 应该消费什么事件。
 3. tool/capability 的展示语义应该由谁定义。
 
-## 2. 当前问题
+## 2. 历史问题与剩余风险
 
-当前代码能跑，但结构已经不适合继续堆功能。
+重构前代码能跑，但结构不适合继续堆功能。PR #18 已解决 agent run activity 主链路的事件模型问题；以下问题用于说明设计动机和仍待收敛的风险。
 
-### 2.1 对外协议泄漏内部 tool call
+### 2.1 对外协议曾泄漏内部 tool call
 
-当前 `localAgentProtocol.ts` 对外暴露：
+旧协议直接对外暴露：
 
 ```ts
 {
@@ -41,11 +42,11 @@ local-agent 的定位是：
 
 这会让 app / TUI 被迫理解内部 `read_file`、`grep_search`、`run_shell` 等工具名和输入输出结构。
 
-问题不在于 formatter 放在哪个文件，而是协议层没有稳定的 local-agent event。只要协议仍然暴露内部 tool call，presentation 层就会自然变成内部工具 formatter。
+问题不在于 formatter 放在哪个文件，而是协议层没有稳定的 local-agent event。只要协议仍然暴露内部 tool call，presentation 层就会自然变成内部工具 formatter。当前 local-agent runtime/TUI 已改为 `LocalAgentEvent` / `operation`；旧消息只在 `protocol/legacyProtocolAdapter.ts` 中作为 compatibility layer 存在。
 
 ### 2.2 local-agent 承担了过多职责
 
-目前 local-agent 同时包含：
+local-agent 仍然包含多类职责：
 
 - CLI/TUI command
 - websocket/http server
@@ -440,6 +441,8 @@ type OperationRegistry = {
 
 ### 阶段 0：冻结现状
 
+状态：已完成。
+
 目标：明确当前行为，避免重构时破坏 app/TUI。
 
 工作项：
@@ -455,6 +458,8 @@ type OperationRegistry = {
 - baseline tests。
 
 ### 阶段 1：引入事件模型，不改变对外协议
+
+状态：已完成。runtime 主链路产出 `LocalAgentEvent`，legacy 输出由 compatibility adapter 派生。
 
 目标：新增 `LocalAgentEvent` 和 normalizer，并开始输出 `type: 'event'`。legacy protocol 同时保留。
 
@@ -477,6 +482,8 @@ type OperationRegistry = {
 
 ### 阶段 2：TUI 切到 LocalAgentEvent
 
+状态：已完成。TUI 本地路径消费 `LocalAgentEvent`，tool activity 使用 `operation` 展示语义。
+
 目标：TUI 不再对内部 toolName 做 formatter。
 
 工作项：
@@ -491,6 +498,8 @@ type OperationRegistry = {
 - `adapters/tui/renderEvent.ts` 面向 `LocalAgentEvent`。
 
 ### 阶段 3：App/API 切到 LocalAgentEvent
+
+状态：未完成。PinPet app/API 仍需要迁移，见 issue #19。
 
 目标：app 不再依赖 `tool_log`。
 
@@ -537,6 +546,8 @@ type OperationRegistry = {
 
 ### 阶段 6：清理 legacy
 
+状态：阻塞于阶段 3 完成。
+
 目标：删除过渡层。
 
 工作项：
@@ -581,8 +592,8 @@ type OperationRegistry = {
 
 已确认：
 
-1. 新协议新增 `type: 'event'` message，并保留旧 message 并行兼容。
-2. legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event` 要在代码里标注 compatibility only，等其他部分改造完成后删除。
+1. 新协议使用 `type: 'event'` message，agent run activity 以 `LocalAgentEvent` 为 primary event model。
+2. legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event` 只保留在 compatibility adapter，等 PinPet app/API 迁移完成后删除。
 3. LangGraph `astream` 的 `messages/tools/values` 只作为 internal stream source，不能作为 app/TUI public protocol。
 
 仍待确认：

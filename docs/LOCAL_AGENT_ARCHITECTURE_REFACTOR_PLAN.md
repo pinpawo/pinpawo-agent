@@ -307,13 +307,14 @@ studio runtime progress
   -> LocalAgentEvent studio.progress
 ```
 
-兼容输出是独立的发送层行为：`pinpawo-app` app/API 旧路径尚未完成 `LocalAgentEvent` 迁移前，可以由 `LocalAgentEvent` 派生 `chat_token` / `chat_response` / `tool_log` / `human_interrupt` / `studio_turn_event`。TUI 本地路径不应依赖这些 legacy messages。
+兼容输出是独立的发送层行为：`pinpawo-app` app/API 旧路径尚未完成 `LocalAgentEvent` 迁移前，可以由 `LocalAgentEvent` 派生 `chat_token` / `chat_response` / `tool_log` / `human_interrupt` / `studio_turn_event`。新客户端使用 `sendLocalAgentEvent`，旧 app/API 迁移期只允许显式使用 `sendLocalAgentCompatibilityEvent`。TUI 本地路径不应依赖这些 legacy messages。
 
 原则：
 
 - LangGraph stream 是 runtime internal API。
 - `LocalAgentEvent` 是 local-agent 对 app/TUI/macOS companion 的 public event API。
 - legacy messages 只能从 `LocalAgentEvent` 派生，不能继续作为 primary event model。
+- `sendLocalAgentMessage` 和 `sendLocalAgentEvent` 不接受 legacy 输出开关；兼容输出必须走命名明确的 compatibility API。
 - `parseLocalAgentServerMessage` 只解析新协议 event/control message；旧消息解析必须显式走 compatibility parser，避免 TUI 或新客户端重新依赖 legacy wire shape。
 
 ### 5.1 Operation event

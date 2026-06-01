@@ -628,7 +628,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
     }
     if (isStillCurrent && ws.readyState === WebSocket.OPEN) {
       const message = err instanceof Error ? err.message : 'internal error';
-      sendLocalAgentMessage(ws, {
+      sendLocalAgentEvent(ws, {
         type: 'error',
         requestId,
         message: recoveredFromToolProtocolError

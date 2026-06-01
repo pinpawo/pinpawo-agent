@@ -1,8 +1,6 @@
 import type { LocalAgentEvent, LocalAgentOperationPhase } from './events/localAgentEvent';
 import {
-  buildLocalAgentEventFromLegacyMessage,
   buildLegacyServerMessageFromLocalAgentEvent,
-  isLegacyServerMessage,
   parseLegacyServerMessageRecord,
   type LegacyServerMessage,
 } from './protocol/legacyProtocolAdapter';
@@ -84,10 +82,6 @@ type WsLike = {
 };
 
 const WS_OPEN = 1;
-
-type SendLocalAgentEventOptions = {
-  legacyCompatibility?: boolean;
-};
 
 function readJsonRecord(raw: unknown): Record<string, unknown> | null {
   try {
@@ -322,27 +316,16 @@ export function parseLocalAgentCompatibilityServerMessage(
 
 export function sendLocalAgentMessage(
   ws: WsLike,
-  message: LocalAgentServerMessage | LocalAgentClientMessage | LegacyServerMessage,
+  message: LocalAgentServerMessage | LocalAgentClientMessage,
 ) {
   if (ws.readyState !== WS_OPEN) {
     return false;
-  }
-  if (isLegacyServerMessage(message)) {
-    ws.send(JSON.stringify({
-      type: 'event',
-      requestId: message.requestId,
-      event: buildLocalAgentEventFromLegacyMessage(message),
-    } satisfies LocalAgentEventMessage));
   }
   ws.send(JSON.stringify(message));
   return true;
 }
 
-export function sendLocalAgentEvent(
-  ws: WsLike,
-  event: LocalAgentEvent,
-  options: SendLocalAgentEventOptions = {},
-) {
+export function sendLocalAgentEvent(ws: WsLike, event: LocalAgentEvent) {
   if (ws.readyState !== WS_OPEN) {
     return false;
   }
@@ -351,11 +334,21 @@ export function sendLocalAgentEvent(
     requestId: event.requestId,
     event,
   } satisfies LocalAgentEventMessage));
-  if (options.legacyCompatibility) {
-    const legacyMessage = buildLegacyServerMessageFromLocalAgentEvent(event);
-    if (legacyMessage) {
-      ws.send(JSON.stringify(legacyMessage));
-    }
+  return true;
+}
+
+export function sendLocalAgentCompatibilityEvent(ws: WsLike, event: LocalAgentEvent) {
+  if (ws.readyState !== WS_OPEN) {
+    return false;
+  }
+  ws.send(JSON.stringify({
+    type: 'event',
+    requestId: event.requestId,
+    event,
+  } satisfies LocalAgentEventMessage));
+  const legacyMessage = buildLegacyServerMessageFromLocalAgentEvent(event);
+  if (legacyMessage) {
+    ws.send(JSON.stringify(legacyMessage));
   }
   return true;
 }

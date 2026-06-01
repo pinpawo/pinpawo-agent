@@ -4,6 +4,7 @@ import {
   parseLocalAgentCompatibilityServerMessage,
   parseLocalAgentClientMessage,
   parseLocalAgentServerMessage,
+  sendLocalAgentCompatibilityEvent,
   sendLocalAgentEvent,
   sendLocalAgentMessage,
 } from './localAgentProtocol';
@@ -164,7 +165,7 @@ test('sendLocalAgentMessage writes only when websocket-like object is open', () 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [{ type: 'pong' }]);
 });
 
-test('sendLocalAgentEvent writes typed events and optional legacy compatibility messages', () => {
+test('sendLocalAgentEvent writes only typed events', () => {
   const sent: string[] = [];
   const openWs = {
     readyState: 1,
@@ -185,7 +186,7 @@ test('sendLocalAgentEvent writes typed events and optional legacy compatibility 
     role: 'assistant',
     text: 'done',
     metadata: { mood: null, topic: null, tags: [] },
-  }, { legacyCompatibility: true }), true);
+  }), true);
 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [
     {
@@ -209,18 +210,10 @@ test('sendLocalAgentEvent writes typed events and optional legacy compatibility 
         metadata: { mood: null, topic: null, tags: [] },
       },
     },
-    {
-      type: 'chat_response',
-      requestId: 'req-1',
-      message: 'done',
-      mood: null,
-      topic: null,
-      tags: [],
-    },
   ]);
 });
 
-test('sendLocalAgentMessage emits typed event before legacy compatibility messages', () => {
+test('sendLocalAgentCompatibilityEvent emits typed event before derived legacy messages', () => {
   const sent: string[] = [];
   const openWs = {
     readyState: 1,
@@ -229,10 +222,11 @@ test('sendLocalAgentMessage emits typed event before legacy compatibility messag
     },
   };
 
-  assert.equal(sendLocalAgentMessage(openWs, {
-    type: 'chat_token',
+  assert.equal(sendLocalAgentCompatibilityEvent(openWs, {
+    type: 'message.delta',
     requestId: 'req-1',
-    token: 'hello',
+    role: 'assistant',
+    text: 'hello',
   }), true);
 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [
@@ -254,7 +248,7 @@ test('sendLocalAgentMessage emits typed event before legacy compatibility messag
   ]);
 });
 
-test('sendLocalAgentMessage emits typed operation events before legacy tool_log compatibility messages', () => {
+test('sendLocalAgentCompatibilityEvent emits derived legacy tool_log messages', () => {
   const sent: string[] = [];
   const openWs = {
     readyState: 1,
@@ -263,12 +257,21 @@ test('sendLocalAgentMessage emits typed operation events before legacy tool_log 
     },
   };
 
-  assert.equal(sendLocalAgentMessage(openWs, {
-    type: 'tool_log',
+  assert.equal(sendLocalAgentCompatibilityEvent(openWs, {
+    type: 'operation',
     requestId: 'req-1',
-    phase: 'start',
-    toolName: 'read_file',
-    input: '{"path":"README.md"}',
+    phase: 'started',
+    operation: {
+      kind: 'tool.execute',
+      title: 'read_file',
+      source: {
+        provider: 'runtime',
+        name: 'read_file',
+      },
+    },
+    raw: {
+      input: '{"path":"README.md"}',
+    },
   }), true);
 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [

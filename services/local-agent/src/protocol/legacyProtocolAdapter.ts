@@ -1,11 +1,6 @@
 import type {
   LocalAgentEvent,
-  LocalAgentHumanReviewRequestedEvent,
-  LocalAgentMessageCompletedEvent,
-  LocalAgentMessageDeltaEvent,
   LocalAgentOperationEvent,
-  LocalAgentStudioProgressEvent,
-  LocalAgentSystemNoticeEvent,
 } from '../events/localAgentEvent';
 
 export type LegacyToolLogPhase = 'start' | 'end' | 'complete' | 'error' | 'event' | 'interrupt';
@@ -107,14 +102,6 @@ function readLegacyOperationPhase(event: LocalAgentOperationEvent): LegacyToolLo
   return 'event';
 }
 
-function readEventOperationPhase(phase: LegacyToolLogPhase) {
-  if (phase === 'start') return 'started';
-  if (phase === 'end' || phase === 'complete') return 'completed';
-  if (phase === 'error') return 'failed';
-  if (phase === 'interrupt') return 'interrupted';
-  return 'updated';
-}
-
 function isLegacyToolLogPhase(value: string): value is LegacyToolLogPhase {
   return value === 'start'
     || value === 'end'
@@ -122,16 +109,6 @@ function isLegacyToolLogPhase(value: string): value is LegacyToolLogPhase {
     || value === 'error'
     || value === 'event'
     || value === 'interrupt';
-}
-
-export function isLegacyServerMessage(message: { type: string }): message is LegacyServerMessage {
-  return message.type === 'chat_token'
-    || message.type === 'tool_log'
-    || message.type === 'human_interrupt'
-    || message.type === 'system_notice'
-    || message.type === 'chat_response'
-    || message.type === 'studio_turn_event'
-    || message.type === 'error';
 }
 
 export function parseLegacyServerMessageRecord(
@@ -261,78 +238,4 @@ export function buildLegacyServerMessageFromLocalAgentEvent(event: LocalAgentEve
     };
   }
   return buildLegacyToolLogMessage(event);
-}
-
-export function buildLocalAgentEventFromLegacyMessage(message: LegacyServerMessage): LocalAgentEvent {
-  if (message.type === 'chat_token') {
-    return {
-      type: 'message.delta',
-      requestId: message.requestId,
-      role: 'assistant',
-      text: message.token,
-    } satisfies LocalAgentMessageDeltaEvent;
-  }
-  if (message.type === 'chat_response') {
-    return {
-      type: 'message.completed',
-      requestId: message.requestId,
-      role: 'assistant',
-      text: message.message,
-      metadata: {
-        mood: message.mood,
-        topic: message.topic,
-        tags: message.tags,
-      },
-    } satisfies LocalAgentMessageCompletedEvent;
-  }
-  if (message.type === 'human_interrupt') {
-    return {
-      type: 'human_review.requested',
-      requestId: message.requestId,
-      prompt: message.prompt,
-      payload: message.payload,
-      actor: message.petId ? { petId: message.petId } : undefined,
-    } satisfies LocalAgentHumanReviewRequestedEvent;
-  }
-  if (message.type === 'studio_turn_event') {
-    return {
-      type: 'studio.progress',
-      requestId: message.requestId,
-      event: message.event,
-    } satisfies LocalAgentStudioProgressEvent;
-  }
-  if (message.type === 'system_notice') {
-    return {
-      type: 'system.notice',
-      requestId: message.requestId,
-      message: message.message,
-    } satisfies LocalAgentSystemNoticeEvent;
-  }
-  if (message.type === 'error') {
-    return {
-      type: 'error',
-      requestId: message.requestId,
-      message: message.message,
-    };
-  }
-  return {
-    type: 'operation',
-    requestId: message.requestId,
-    phase: readEventOperationPhase(message.phase),
-    operation: {
-      id: message.toolCallId,
-      kind: 'tool.execute',
-      title: message.toolName,
-      source: {
-        provider: 'runtime',
-        name: message.toolName,
-        callId: message.toolCallId,
-      },
-    },
-    raw: {
-      input: message.input,
-      output: message.output,
-      error: message.error,
-    },
-  };
 }

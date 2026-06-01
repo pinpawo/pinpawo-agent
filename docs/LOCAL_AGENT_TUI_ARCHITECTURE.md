@@ -601,10 +601,11 @@ LocalAgentEvent
 
 工作项（可按价值再拆小 PR）：
 
+- transcript export / debug view：先提供 `/export [path]`，把当前 session history 导出为 Markdown，作为 transcript model 前的可用调试入口。未传 `path` 时默认写入 TUI 启动目录（`process.cwd()`）；`~/foo.md` 会展开到当前用户 home；有扩展名的 `path` 视为目标文件，无扩展名的 `path` 视为目录并在其下生成默认文件名；显式目标文件已存在时按常规导出语义覆盖。
 - diff renderer：文件修改 / shell patch / capability 变更的可审查 diff。
 - resume picker：展示可恢复会话，选择后加载 transcript。
 - transcript model：区分 durable messages 和 run activity。
-- file mention / path search、richer status line、transcript export / debug view。
+- file mention / path search、richer status line。
 
 ## 11. 非目标
 

@@ -25,6 +25,7 @@ import {
   tuiStateReducer,
 } from './state/tuiStateReducer';
 import { TuiRuntimeController } from './TuiRuntimeController';
+import { exportSessionTranscript } from './transcript/transcriptExport';
 import type { TuiState } from './state/tuiState';
 import type { MessageRole } from './types';
 
@@ -133,6 +134,25 @@ export function TuiApp(props: { actorId: string }) {
       if (parsed.name === 'help') {
         appendMessage('system', formatTuiCommandHelp());
         clearInputValue();
+        return;
+      }
+
+      if (parsed.name === 'export') {
+        const session = focusedSession;
+        clearInputValue();
+        if (!session) {
+          appendMessage('system', TUI_TEXT.exportNoSession);
+          return;
+        }
+        void exportSessionTranscript({
+          session,
+          requestedPath: parsed.args || undefined,
+        }).then(({ filePath }) => {
+          appendMessage('system', TUI_TEXT.exportSucceeded(filePath));
+        }).catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          appendMessage('system', TUI_TEXT.exportFailed(message));
+        });
         return;
       }
 

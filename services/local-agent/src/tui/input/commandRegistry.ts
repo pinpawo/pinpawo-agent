@@ -4,7 +4,8 @@ export type TuiCommandName =
   | 'chat'
   | 'studio'
   | 'new'
-  | 'allow';
+  | 'allow'
+  | 'export';
 
 export type TuiCommandDefinition = {
   name: TuiCommandName;
@@ -61,6 +62,12 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/help',
     description: '显示帮助',
     helpText: '/help',
+  },
+  {
+    name: 'export',
+    usage: '/export [path]',
+    description: '导出当前会话 transcript；默认写入启动目录，无扩展名 path 视为目录',
+    helpText: '/export [path] 导出 transcript(默认当前目录)',
   },
   {
     name: 'quit',

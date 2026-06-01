@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { HistoryCellModel, SessionModel } from '../state/tuiState';
 
@@ -37,10 +38,17 @@ export function resolveTranscriptExportPath(params: {
   if (!requested) {
     return path.join(params.cwd, fileName);
   }
-  const resolved = path.isAbsolute(requested)
-    ? requested
-    : path.resolve(params.cwd, requested);
+  const expanded = expandHomePath(requested);
+  const resolved = path.isAbsolute(expanded)
+    ? expanded
+    : path.resolve(params.cwd, expanded);
   return path.extname(resolved) ? resolved : path.join(resolved, fileName);
+}
+
+function expandHomePath(value: string) {
+  if (value === '~') return os.homedir();
+  if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
+  return value;
 }
 
 export function formatTranscriptMarkdown(session: SessionModel, exportedAt: Date) {

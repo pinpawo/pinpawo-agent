@@ -75,6 +75,24 @@ test('resolveTranscriptExportPath handles default, file, and directory paths', (
     }),
     '/tmp/project/transcripts/pinpawo-transcript-chat-pet-a-2026-06-01T01-02-03-000Z.md',
   );
+  assert.equal(
+    resolveTranscriptExportPath({
+      cwd: '/tmp/project',
+      requestedPath: '~/out.md',
+      sessionId: 'chat:pet/a',
+      now: FIXED_NOW,
+    }),
+    path.join(os.homedir(), 'out.md'),
+  );
+  assert.equal(
+    resolveTranscriptExportPath({
+      cwd: '/tmp/project',
+      requestedPath: '~',
+      sessionId: 'chat:pet/a',
+      now: FIXED_NOW,
+    }),
+    path.join(os.homedir(), 'pinpawo-transcript-chat-pet-a-2026-06-01T01-02-03-000Z.md'),
+  );
 });
 
 test('exportSessionTranscript creates parent directories and writes markdown', async () => {

@@ -2,7 +2,8 @@ import type { LocalAgentEvent, LocalAgentOperationPhase } from './events/localAg
 import {
   buildLocalAgentEventFromLegacyMessage,
   buildLegacyServerMessageFromLocalAgentEvent,
-  type LegacyToolLogPhase,
+  isLegacyServerMessage,
+  parseLegacyServerMessageRecord,
   type LegacyServerMessage,
 } from './protocol/legacyProtocolAdapter';
 
@@ -278,64 +279,12 @@ export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMess
     const event = eventRecord ? readLocalAgentEvent(eventRecord) : null;
     return event && event.requestId === requestId ? { type, requestId, event } : null;
   }
-  if (type === 'chat_token') {
-    const token = readString(record, 'token');
-    return token == null ? null : { type, requestId, token };
-  }
-  if (type === 'tool_log') {
-    const phase = readString(record, 'phase');
-    const toolName = readString(record, 'toolName');
-    if (!phase || !isToolLogPhase(phase) || !toolName) return null;
+  if (type === 'interrupting' || type === 'interrupted' || type === 'studio_error') {
     return {
       type,
       requestId,
-      phase,
-      toolName,
-      toolCallId: readOptionalString(record, 'toolCallId'),
-      input: readOptionalString(record, 'input'),
-      output: readOptionalString(record, 'output'),
-      error: readOptionalString(record, 'error'),
-    };
-  }
-  if (type === 'human_interrupt') {
-    const prompt = readString(record, 'prompt');
-    const payload = readRecord(record, 'payload');
-    if (prompt == null || !payload) return null;
-    return {
-      type,
-      requestId,
-      petId: readOptionalString(record, 'petId'),
-      prompt,
-      payload,
-    };
-  }
-  if (type === 'interrupting' || type === 'interrupted' || type === 'studio_error' || type === 'error') {
-    return {
-      type,
-      requestId,
-      message: readOptionalString(record, 'message') ?? (type.endsWith('error') ? '' : undefined),
+      message: readOptionalString(record, 'message') ?? (type === 'studio_error' ? '' : undefined),
     } as LocalAgentServerMessage;
-  }
-  if (type === 'system_notice') {
-    const message = readString(record, 'message');
-    return message == null ? null : { type, requestId, message };
-  }
-  if (type === 'chat_response') {
-    const message = readString(record, 'message');
-    const tags = readStringArray(record, 'tags');
-    if (message == null || !tags) return null;
-    return {
-      type,
-      requestId,
-      message,
-      mood: readOptionalString(record, 'mood') ?? null,
-      topic: readOptionalString(record, 'topic') ?? null,
-      tags,
-    };
-  }
-  if (type === 'studio_turn_event') {
-    const event = readRecord(record, 'event');
-    return event ? { type, requestId, event } : null;
   }
   if (type === 'studio_response') {
     const outcome = readString(record, 'outcome');
@@ -350,7 +299,7 @@ export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMess
       reason: readOptionalString(record, 'reason'),
     };
   }
-  return null;
+  return parseLegacyServerMessageRecord(record, requestId);
 }
 
 export function sendLocalAgentMessage(ws: WsLike, message: LocalAgentServerMessage | LocalAgentClientMessage) {
@@ -388,24 +337,6 @@ export function sendLocalAgentEvent(
     }
   }
   return true;
-}
-
-function isLegacyServerMessage(message: LocalAgentServerMessage | LocalAgentClientMessage): message is LegacyServerMessage {
-  return message.type === 'chat_token'
-    || message.type === 'human_interrupt'
-    || message.type === 'system_notice'
-    || message.type === 'chat_response'
-    || message.type === 'studio_turn_event'
-    || message.type === 'error';
-}
-
-function isToolLogPhase(value: string): value is LegacyToolLogPhase {
-  return value === 'start'
-    || value === 'end'
-    || value === 'complete'
-    || value === 'error'
-    || value === 'event'
-    || value === 'interrupt';
 }
 
 function isOperationPhase(value: string | null): value is LocalAgentOperationPhase {

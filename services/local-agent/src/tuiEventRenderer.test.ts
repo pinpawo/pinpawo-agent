@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   buildActiveToolLines,
   buildBusyStatusLine,
+  formatOperationDiffPreview,
   formatOperationResult,
   formatOperationStart,
   formatStudioProgressEvent,
@@ -66,6 +67,113 @@ test('formats completed and failed operation summaries from event fields', () =>
       },
     }),
     '执行命令：失败 · exit 1',
+  );
+});
+
+test('formats file edit operations with a reviewable diff preview', () => {
+  const event: LocalAgentOperationEvent = {
+    type: 'operation',
+    requestId: 'req-1',
+    phase: 'completed',
+    operation: {
+      kind: 'file.update',
+      title: '改文件',
+      target: 'src/app.ts',
+    },
+    raw: {
+      input: {
+        path: 'src/app.ts',
+        find: 'const oldValue = 1;\nexport { oldValue };',
+        replace: 'const newValue = 2;\nexport { newValue };',
+      },
+    },
+  };
+
+  const diffPreview = [
+    'diff 预览：',
+    '```diff',
+    '--- src/app.ts',
+    '+++ src/app.ts',
+    '@@ edit 1 @@',
+    '-const oldValue = 1;',
+    '-export { oldValue };',
+    '+const newValue = 2;',
+    '+export { newValue };',
+    '```',
+  ].join('\n');
+
+  assert.equal(formatOperationDiffPreview(event), diffPreview);
+  assert.equal(formatOperationResult(event), `改文件：src/app.ts\n${diffPreview}`);
+});
+
+test('formats unified patch operations as diff preview', () => {
+  assert.equal(
+    formatOperationDiffPreview({
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        kind: 'patch.apply',
+        title: '应用 diff',
+      },
+      raw: {
+        input: {
+          patch: [
+            '--- a/file.txt',
+            '+++ b/file.txt',
+            '@@ -1 +1 @@',
+            '-old',
+            '+new',
+          ].join('\n'),
+        },
+      },
+    }),
+    [
+      'diff 预览：',
+      '```diff',
+      '--- a/file.txt',
+      '+++ b/file.txt',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      '```',
+    ].join('\n'),
+  );
+});
+
+test('formats shell output when it contains unified diff text', () => {
+  assert.equal(
+    formatOperationDiffPreview({
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        kind: 'shell.run',
+        title: '执行命令',
+      },
+      raw: {
+        output: [
+          'some preface',
+          'diff --git a/file.txt b/file.txt',
+          '--- a/file.txt',
+          '+++ b/file.txt',
+          '@@ -1 +1 @@',
+          '-old',
+          '+new',
+        ].join('\n'),
+      },
+    }),
+    [
+      'diff 预览：',
+      '```diff',
+      'diff --git a/file.txt b/file.txt',
+      '--- a/file.txt',
+      '+++ b/file.txt',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      '```',
+    ].join('\n'),
   );
 });
 

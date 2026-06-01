@@ -32,6 +32,8 @@ export const TUI_TEXT = {
   exportNoSession: '当前没有可导出的会话。',
   exportSucceeded: (filePath: string) => `已导出 transcript：${filePath}`,
   exportFailed: (message: string) => `导出 transcript 失败：${message}`,
+  diffPreviewHeader: 'diff 预览：',
+  diffPreviewTruncated: (lineCount: number) => `... 已截断 ${lineCount} 行`,
   secondCtrlCExit: '收到第二次 Ctrl+C，立即退出 TUI。',
   interruptRequested: '已发送打断请求。再次按 Ctrl+C 可直接退出 TUI。',
   exiting: '正在退出 TUI。',

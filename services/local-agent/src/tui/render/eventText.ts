@@ -3,9 +3,12 @@ import type {
   LocalAgentSystemNoticeEvent,
   LocalAgentStudioProgressEvent,
 } from '../../events/localAgentEvent';
+import { formatOperationDiffPreview } from './diffText';
 import { TUI_TEXT } from './text';
 import { formatElapsed, wrapLine } from './terminalText';
 import type { ActiveTool, PendingUiState } from '../types';
+
+export { formatOperationDiffPreview } from './diffText';
 
 export function shorten(value: string, max = 60) {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -32,14 +35,17 @@ export function formatOperationProgress(event: LocalAgentOperationEvent) {
 
 export function formatOperationResult(event: LocalAgentOperationEvent) {
   const label = event.operation.title ?? event.operation.kind;
+  let line: string;
   if (event.phase === 'failed') {
-    return `${label}：失败${event.operation.summary ? ` · ${shorten(event.operation.summary, 80)}` : ''}`;
+    line = `${label}：失败${event.operation.summary ? ` · ${shorten(event.operation.summary, 80)}` : ''}`;
+  } else if (event.phase === 'interrupted') {
+    line = `${label}：已中断`;
+  } else {
+    const detail = formatOperationDetail(event, 80);
+    line = `${label}：${detail || '已完成'}`;
   }
-  if (event.phase === 'interrupted') {
-    return `${label}：已中断`;
-  }
-  const detail = formatOperationDetail(event, 80);
-  return `${label}：${detail || '已完成'}`;
+  const diffPreview = formatOperationDiffPreview(event);
+  return diffPreview ? `${line}\n${diffPreview}` : line;
 }
 
 export function formatSystemNoticeEvent(event: LocalAgentSystemNoticeEvent): string | null {

@@ -1,6 +1,8 @@
 import type { LocalAgentEvent, LocalAgentOperationPhase } from './events/localAgentEvent';
 import {
   buildLocalAgentEventFromLegacyMessage,
+  buildLegacyServerMessageFromLocalAgentEvent,
+  type LegacyToolLogPhase,
   type LegacyServerMessage,
 } from './protocol/legacyProtocolAdapter';
 
@@ -47,64 +49,16 @@ export type LocalAgentClientMessage =
   | HumanReviewResponseMessage
   | { type: 'ping' };
 
-export type ToolLogPhase = 'start' | 'end' | 'complete' | 'error' | 'event' | 'interrupt';
-
 export type LocalAgentEventMessage = {
   type: 'event';
   requestId: string;
   event: LocalAgentEvent;
 };
 
-export type LocalAgentServerMessage =
+export type LocalAgentControlServerMessage =
   | { type: 'pong' }
-  | LocalAgentEventMessage
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'message.delta'. */
-  | { type: 'chat_token'; requestId: string; token: string }
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'operation'. */
-  | {
-      type: 'tool_log';
-      requestId: string;
-      phase: ToolLogPhase;
-      toolName: string;
-      toolCallId?: string;
-      input?: string;
-      output?: string;
-      error?: string;
-    }
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'human_review.requested'. */
-  | {
-      type: 'human_interrupt';
-      requestId: string;
-      /** Studio 模式下表示是哪个 pet 在问;chat 路径不带此字段 */
-      petId?: string;
-      prompt: string;
-      payload: Record<string, unknown>;
-    }
   | { type: 'interrupting'; requestId: string; message?: string }
   | { type: 'interrupted'; requestId: string; message?: string }
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'system.notice'. */
-  | { type: 'system_notice'; requestId: string; message: string }
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'message.completed'. */
-  | {
-      type: 'chat_response';
-      requestId: string;
-      message: string;
-      mood: string | null;
-      topic: string | null;
-      tags: string[];
-    }
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'studio.progress'. */
-  | {
-      /**
-       * Studio orchestrator 编排进度事件。turn_started / plan_set /
-       * dispatch_started / task_status_changed / dispatch_finished /
-       * wiki_updated / turn_finished 等。客户端按 `event.type` 分情况渲染
-       * (StudioTurnEvent 形态定义在 @pinpawo/pet-agent 中)。
-       */
-      type: 'studio_turn_event';
-      requestId: string;
-      event: Record<string, unknown>;
-    }
   | {
       type: 'studio_response';
       requestId: string;
@@ -113,8 +67,12 @@ export type LocalAgentServerMessage =
       finalDispatchId?: string;
       reason?: string;
     }
-  | { type: 'studio_error'; requestId: string; message: string }
-  | { type: 'error'; requestId: string; message: string };
+  | { type: 'studio_error'; requestId: string; message: string };
+
+export type LocalAgentServerMessage =
+  | LocalAgentEventMessage
+  | LocalAgentControlServerMessage
+  | LegacyServerMessage;
 
 type WsLike = {
   readyState: number;
@@ -122,6 +80,10 @@ type WsLike = {
 };
 
 const WS_OPEN = 1;
+
+type SendLocalAgentEventOptions = {
+  legacyCompatibility?: boolean;
+};
 
 function readJsonRecord(raw: unknown): Record<string, unknown> | null {
   try {
@@ -406,6 +368,28 @@ export function sendLocalAgentMessage(ws: WsLike, message: LocalAgentServerMessa
   return true;
 }
 
+export function sendLocalAgentEvent(
+  ws: WsLike,
+  event: LocalAgentEvent,
+  options: SendLocalAgentEventOptions = {},
+) {
+  if (ws.readyState !== WS_OPEN) {
+    return false;
+  }
+  ws.send(JSON.stringify({
+    type: 'event',
+    requestId: event.requestId,
+    event,
+  } satisfies LocalAgentEventMessage));
+  if (options.legacyCompatibility) {
+    const legacyMessage = buildLegacyServerMessageFromLocalAgentEvent(event);
+    if (legacyMessage) {
+      ws.send(JSON.stringify(legacyMessage));
+    }
+  }
+  return true;
+}
+
 function isLegacyServerMessage(message: LocalAgentServerMessage | LocalAgentClientMessage): message is LegacyServerMessage {
   return message.type === 'chat_token'
     || message.type === 'human_interrupt'
@@ -415,7 +399,7 @@ function isLegacyServerMessage(message: LocalAgentServerMessage | LocalAgentClie
     || message.type === 'error';
 }
 
-function isToolLogPhase(value: string): value is ToolLogPhase {
+function isToolLogPhase(value: string): value is LegacyToolLogPhase {
   return value === 'start'
     || value === 'end'
     || value === 'complete'

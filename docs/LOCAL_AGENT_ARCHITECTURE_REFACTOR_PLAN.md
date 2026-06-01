@@ -196,9 +196,9 @@ type LocalAgentEventMessage = {
 迁移策略：
 
 1. 新增 `LocalAgentEvent`。
-2. server 同时输出 `type: 'event'` 和 legacy messages。
-3. app/TUI 逐步切到 `type: 'event'`。
-4. 旧 messages 降级为 compatibility/debug。
+2. runtime / server 内部优先产出 `LocalAgentEvent`。
+3. TUI 本地链路直接消费 `type: 'event'`。
+4. app/API 旧链路在发送出口由 `LocalAgentEvent` 派生 legacy messages。
 5. 全部客户端迁移完成后删除 legacy messages。
 
 ## 4. 目标分层
@@ -292,24 +292,21 @@ values   -> final graph state 或 interrupt state
 ```txt
 astream messages
   -> LocalAgentEvent message.delta
-  -> legacy chat_token
 
 astream values final messages
   -> LocalAgentEvent message.completed
-  -> legacy chat_response
 
 astream tools
   -> LocalAgentEvent operation
-  -> legacy tool_log
 
 astream values __interrupt__
   -> LocalAgentEvent human_review.requested
-  -> legacy human_interrupt
 
 studio runtime progress
   -> LocalAgentEvent studio.progress
-  -> legacy studio_turn_event
 ```
+
+兼容输出是独立的发送层行为：PinPet app/API 旧路径尚未完成 `LocalAgentEvent` 迁移前，可以由 `LocalAgentEvent` 派生 `chat_token` / `chat_response` / `tool_log` / `human_interrupt` / `studio_turn_event`。TUI 本地路径不应依赖这些 legacy messages。
 
 原则：
 
@@ -467,7 +464,7 @@ type OperationRegistry = {
 - 新增 `events/OperationRegistry.ts`。
 - 新增 `events/AgentStreamNormalizer.ts`。
 - 新增 `protocol/LegacyProtocolAdapter.ts`，从 `LocalAgentEvent` 派生 legacy messages。
-- `buildToolLogMessage()` 这类旧入口改为走 `astream tools -> LocalAgentOperationEvent -> legacy tool_log`。
+- 运行链路改为走 `astream tools -> LocalAgentOperationEvent`，legacy `tool_log` 只从 compatibility adapter 派生。
 - 内置 local tools 注册 operation metadata。
 - `localAgentProtocol.ts` 中 legacy server message 类型加 `@deprecated compatibility only` 注释。
 
@@ -484,7 +481,7 @@ type OperationRegistry = {
 
 工作项：
 
-- server 同时发送 new event 和 legacy event，或在 TUI 内部先用 compatibility adapter 转换。
+- TUI 本地 server 只发送 `type: 'event'` agent run activity。
 - TUI active tool state 消费 `operation.title/target/summary`。
 - 删除或降级当前面向 toolName 的 presentation registry。
 

@@ -32,7 +32,7 @@ function startRun(state: TuiState, requestId = 'req-1', sessionId?: string) {
   });
 }
 
-test('tuiStateReducer routes message delta and completed through active run', () => {
+test('tuiStateReducer uses completed message text for final assistant history', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -41,7 +41,7 @@ test('tuiStateReducer routes message delta and completed through active run', ()
       type: 'message.delta',
       requestId: 'req-1',
       role: 'assistant',
-      text: '你',
+      text: '我先检查一下仓库状态。',
     },
     now: 1100,
   });
@@ -51,15 +51,15 @@ test('tuiStateReducer routes message delta and completed through active run', ()
       type: 'message.delta',
       requestId: 'req-1',
       role: 'assistant',
-      text: '好',
+      text: '检查完毕，下面汇总。',
     },
     now: 1200,
   });
 
   const activeRun = selectFocusedActiveRun(state);
-  assert.equal(activeRun?.assistantDraft, '你好');
+  assert.equal(activeRun?.assistantDraft, '我先检查一下仓库状态。检查完毕，下面汇总。');
   assert.equal(activeRun?.phase, 'streaming');
-  assert.equal(activeRun?.charCount, 2);
+  assert.equal(activeRun?.charCount, activeRun?.assistantDraft.length);
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -67,7 +67,7 @@ test('tuiStateReducer routes message delta and completed through active run', ()
       type: 'message.completed',
       requestId: 'req-1',
       role: 'assistant',
-      text: 'ignored fallback',
+      text: '最终回答只应该使用 completed 的内容。',
     },
     now: 1300,
     historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
@@ -76,6 +76,40 @@ test('tuiStateReducer routes message delta and completed through active run', ()
   const session = state.sessions['chat:pet']!;
   assert.equal(session.activeRun, null);
   assert.equal(state.runRoute['req-1'], undefined);
+  assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
+    ['user', 'hello'],
+    ['assistant', '最终回答只应该使用 completed 的内容。'],
+  ]);
+});
+
+test('tuiStateReducer falls back to assistant draft when completed text is empty', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.delta',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '你好',
+    },
+    now: 1100,
+  });
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '   ',
+    },
+    now: 1200,
+    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  const session = state.sessions['chat:pet']!;
+  assert.equal(session.activeRun, null);
   assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
     ['user', 'hello'],
     ['assistant', '你好'],

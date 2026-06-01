@@ -1,8 +1,8 @@
-import type { ToolLogPhase } from './localAgentProtocol';
+export type ToolActivityPhase = 'start' | 'end' | 'complete' | 'error' | 'event' | 'interrupt';
 
 type ActiveToolState = {
   name: string;
-  phase: ToolLogPhase;
+  phase: ToolActivityPhase;
   updatedAt: number;
   eventId: number;
   expiresAt?: number;
@@ -27,7 +27,7 @@ let activeToolState: ActiveToolState | null = null;
 let agentRunState: AgentRunState | null = null;
 let nextToolEventId = 1;
 
-function setActiveTool(name: string, phase: ToolLogPhase, visibleForMs?: number) {
+function setActiveTool(name: string, phase: ToolActivityPhase, visibleForMs?: number) {
   const now = Date.now();
   activeToolState = {
     name,
@@ -60,7 +60,7 @@ export function clearAgentRunActivity(requestId?: string) {
   activeToolState = null;
 }
 
-export function recordToolActivity(name: string, phase: ToolLogPhase, requestId?: string) {
+export function recordToolActivity(name: string, phase: ToolActivityPhase, requestId?: string) {
   if (!name) return;
 
   if (phase === 'start' || phase === 'event') {

@@ -34,6 +34,7 @@ import { loadStoredConfig, saveStoredConfig } from './storage';
 import { buildAppChatThreadId } from './chatInterface';
 import {
   parseLocalAgentClientMessage,
+  sendLocalAgentEvent,
   sendLocalAgentMessage,
   type ChatRequestMessage,
   type InterruptRequestMessage,
@@ -42,9 +43,9 @@ import {
 import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
 import {
   buildToolOperationEvent,
-  buildToolLogMessage,
   type StreamToolsPayload,
 } from './agentStreamEvents';
+import type { LocalAgentOperationPhase } from './events/localAgentEvent';
 import { runChatSession } from './chatSessionAdapter';
 
 const WS_RECONNECT_DELAY_MS = 10000;
@@ -73,12 +74,18 @@ async function filterAvailableUserCapabilities(
     .map((record) => record.item);
 }
 
-function emitToolLog(ws: WebSocket, requestId: string, payload: StreamToolsPayload) {
+function sendToolOperationEvent(ws: WebSocket, requestId: string, payload: StreamToolsPayload) {
   const event = buildToolOperationEvent(requestId, payload);
-  const message = buildToolLogMessage(requestId, payload);
-  recordToolActivity(payload.name, message.phase, requestId);
-  sendLocalAgentMessage(ws, { type: 'event', requestId, event });
-  sendLocalAgentMessage(ws, message);
+  recordToolActivity(payload.name, toToolActivityPhase(event.phase), requestId);
+  sendLocalAgentEvent(ws, event, { legacyCompatibility: true });
+}
+
+function toToolActivityPhase(phase: LocalAgentOperationPhase) {
+  if (phase === 'started') return 'start';
+  if (phase === 'completed') return 'end';
+  if (phase === 'failed') return 'error';
+  if (phase === 'interrupted') return 'interrupt';
+  return 'event';
 }
 
 export class LocalAgentRuntime {
@@ -473,15 +480,15 @@ export class LocalAgentRuntime {
         graphService: this.graphService,
         isCurrent,
         finishInterrupted,
-        emit: (event) => {
-          sendLocalAgentMessage(ws, event);
+        emitEvent: (event) => {
+          sendLocalAgentEvent(ws, event, { legacyCompatibility: true });
         },
-        emitToolLog: (event) => {
-          emitToolLog(ws, requestId, event);
+        emitToolEvent: (event) => {
+          sendToolOperationEvent(ws, requestId, event);
         },
       });
       if (result.status === 'waiting_human') {
-        console.log(`[local-agent] human_interrupt requestId=${requestId}`);
+        console.log(`[local-agent] human_review.requested requestId=${requestId}`);
         this.clearInflightRequest(inflight);
         return;
       }
@@ -490,7 +497,7 @@ export class LocalAgentRuntime {
       }
       this.clearInflightRequest(inflight);
 
-      console.log(`[local-agent] chat_response sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
+      console.log(`[local-agent] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
 
     } catch (err) {
       const isStillCurrent = this.inflightRequest === inflight;

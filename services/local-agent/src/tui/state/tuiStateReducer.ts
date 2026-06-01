@@ -433,7 +433,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
       if (event.type === 'message.completed') {
         const reply = event.text.trim();
-        const finalText = activeRun.assistantDraft.trim() || reply || '...';
+        const finalText = reply || activeRun.assistantDraft.trim() || '...';
         return finishRun(state, event.requestId, TUI_TEXT.statusReady, finalText
           ? [historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`)]
           : []);

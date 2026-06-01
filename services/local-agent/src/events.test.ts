@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildToolLogMessage, buildToolOperationEvent } from './agentStreamEvents';
+import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
 import { buildLegacyToolLogMessage } from './protocol/legacyProtocolAdapter';
@@ -83,26 +83,6 @@ test('derives legacy tool_log from normalized operation events', () => {
     output: '{"ok":true,"path":"/tmp/a.txt"}',
     error: undefined,
   });
-});
-
-test('buildToolLogMessage keeps legacy output while routing through LocalAgentEvent', () => {
-  assert.deepEqual(
-    buildToolLogMessage('req-1', {
-      event: 'on_tool_start',
-      name: 'grep_search',
-      input: { path: 'src', query: 'needle' },
-    }),
-    {
-      type: 'tool_log',
-      requestId: 'req-1',
-      phase: 'start',
-      toolName: 'grep_search',
-      toolCallId: undefined,
-      input: '{"path":"src","query":"needle"}',
-      output: undefined,
-      error: undefined,
-    },
-  );
 });
 
 test('buildToolOperationEvent uses local toolkit metadata for direct event emission', () => {

@@ -9,8 +9,8 @@ import {
 } from './chatInterrupts';
 import type {
   ChatRequestMessage,
-  LocalAgentServerMessage,
 } from './localAgentProtocol';
+import type { LocalAgentEvent } from './events/localAgentEvent';
 import {
   isLaneTaggedAiMessage,
   readFinalMessageText,
@@ -31,13 +31,13 @@ export type ChatSessionAdapterOptions = {
   graphService: LocalAgentGraphService;
   isCurrent: () => boolean;
   finishInterrupted: () => void;
-  emit: (message: LocalAgentServerMessage) => void;
-  emitToolLog: (payload: StreamToolsPayload) => void;
+  emitEvent: (event: LocalAgentEvent) => void;
+  emitToolEvent: (payload: StreamToolsPayload) => void;
   onPendingInterrupt?: (interruptPayload: Record<string, unknown>) => void | Promise<void>;
 };
 
 export async function runChatSession(options: ChatSessionAdapterOptions): Promise<ChatSessionResult> {
-  const { request, setup, graphService, isCurrent, finishInterrupted, emit, emitToolLog } = options;
+  const { request, setup, graphService, isCurrent, finishInterrupted, emitEvent, emitToolEvent } = options;
   const { requestId, message } = request;
 
   const threadSnapshot = await graphService.getState(setup);
@@ -64,7 +64,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   setup.input.onToolEvent = (event) => {
     if (isCurrent()) {
-      emitToolLog(event);
+      emitToolEvent(event);
     }
   };
 
@@ -107,16 +107,17 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
         }
         streamedReply += token;
         recordAgentRunActivity('streaming', requestId);
-        emit({
-          type: 'chat_token',
+        emitEvent({
+          type: 'message.delta',
           requestId,
-          token,
+          role: 'assistant',
+          text: token,
         });
         continue;
       }
 
       if (mode === 'tools' && payload && typeof payload === 'object' && 'event' in payload && 'name' in payload) {
-        emitToolLog(payload as StreamToolsPayload);
+        emitToolEvent(payload as StreamToolsPayload);
         continue;
       }
 
@@ -129,8 +130,8 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
         const interruptPayload = readFirstInterruptPayload(payload);
         if (interruptPayload) {
           recordAgentRunActivity('waiting_human', requestId);
-          emit({
-            type: 'human_interrupt',
+          emitEvent({
+            type: 'human_review.requested',
             requestId,
             prompt: formatInterruptPrompt(interruptPayload),
             payload: interruptPayload,
@@ -157,8 +158,8 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   const finalInterrupt = readPendingInterrupt(finalSnapshot);
   if (finalInterrupt) {
     recordAgentRunActivity('waiting_human', requestId);
-    emit({
-      type: 'human_interrupt',
+    emitEvent({
+      type: 'human_review.requested',
       requestId,
       prompt: formatInterruptPrompt(finalInterrupt),
       payload: finalInterrupt,
@@ -169,13 +170,16 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   const finalReply = finalMessages.length > 0
     ? readFinalMessageText(finalMessages.at(-1) ?? {})
     : '';
-  emit({
-    type: 'chat_response',
+  emitEvent({
+    type: 'message.completed',
     requestId,
-    message: finalReply,
-    mood: null,
-    topic: null,
-    tags: [],
+    role: 'assistant',
+    text: finalReply,
+    metadata: {
+      mood: null,
+      topic: null,
+      tags: [],
+    },
   });
   clearAgentRunActivity(requestId);
 

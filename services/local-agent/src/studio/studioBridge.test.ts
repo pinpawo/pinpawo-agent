@@ -35,7 +35,7 @@ test('resolveReview / rejectReview return false when slot empty', () => {
   assert.equal(rejectReview(slot, new Error('x')), false);
 });
 
-test('createWsHumanReviewer sends human_interrupt and resolves when slot resolved', async () => {
+test('createWsHumanReviewer sends human review event and resolves when slot resolved', async () => {
   const sent: Array<Record<string, unknown>> = [];
   const slot = createPendingReviewSlot();
   const reviewer = createWsHumanReviewer({
@@ -50,11 +50,15 @@ test('createWsHumanReviewer sends human_interrupt and resolves when slot resolve
   // 推了 ws 消息
   assert.equal(sent.length, 1);
   const msg = sent[0];
-  assert.equal(msg.type, 'human_interrupt');
+  assert.equal(msg.type, 'event');
   assert.equal(msg.requestId, 'r1');
-  assert.equal(msg.petId, 'planner', 'human_interrupt should carry petId so TUI can attribute');
-  assert.equal(msg.prompt, 'go ahead?');
-  assert.ok(msg.payload, 'payload should carry the original request');
+  assert.deepEqual(msg.event, {
+    type: 'human_review.requested',
+    requestId: 'r1',
+    prompt: 'go ahead?',
+    payload: sampleRequest({ prompt: 'go ahead?' }),
+    actor: { petId: 'planner' },
+  });
 
   // slot 占用中
   assert.ok(slot.current);
@@ -82,13 +86,13 @@ test('createWsHumanReviewer falls back prompt text when request has no prompt', 
   reviewer(sampleRequest({
     actionRequests: [{ name: 'shell', args: { cmd: 'ls' }, description: '执行 ls 命令' }],
   })).catch(() => {});
-  assert.match(sent[0].prompt as string, /执行 ls 命令/);
+  assert.match((sent[0].event as { prompt?: string }).prompt ?? '', /执行 ls 命令/);
 
   // 清掉 pending,再测无 description 时的兜底
   resolveReview(slot, { type: 'reject' });
   sent.length = 0;
   reviewer(sampleRequest({ actionRequests: [{ name: 'x', args: {} }] })).catch(() => {});
-  assert.match(sent[0].prompt as string, /需要你的确认/);
+  assert.match((sent[0].event as { prompt?: string }).prompt ?? '', /需要你的确认/);
 });
 
 test('createWsHumanReviewer rejects when slot already occupied', async () => {

@@ -18,6 +18,7 @@ import { authorizeShellPattern, clearSessionAuthorizations } from './sessionAuth
 import { readShellReviewCommand } from './chatInterrupts';
 import {
   parseLocalAgentClientMessage,
+  sendLocalAgentEvent,
   sendLocalAgentMessage,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
@@ -27,10 +28,10 @@ import { readFirstHumanReviewDecision, type HumanReviewDecision } from '@pinpawo
 import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
 import {
   buildToolOperationEvent,
-  buildToolLogMessage,
   readFinalMessageText,
   type StreamToolsPayload,
 } from './agentStreamEvents';
+import type { LocalAgentOperationPhase } from './events/localAgentEvent';
 import { runChatSession } from './chatSessionAdapter';
 import {
   buildStudioForTurn,
@@ -306,6 +307,36 @@ function maybeTrimForLog(value: string | undefined, max = 300) {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
+function stringifyLogValue(value: unknown) {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value && typeof value === 'object') {
+    const content = (value as { content?: unknown }).content;
+    if (typeof content === 'string') {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      return content
+        .map((part) => (typeof part === 'string' ? part : ((part as { text?: string }).text ?? '')))
+        .join('');
+    }
+  }
+  try {
+    return JSON.stringify(value ?? '');
+  } catch {
+    return String(value);
+  }
+}
+
+function toToolActivityPhase(phase: LocalAgentOperationPhase) {
+  if (phase === 'started') return 'start';
+  if (phase === 'completed') return 'end';
+  if (phase === 'failed') return 'error';
+  if (phase === 'interrupted') return 'interrupt';
+  return 'event';
+}
+
 function isHumanReviewInterruptError(value: unknown): boolean {
   if (!value || typeof value !== 'object') {
     return false;
@@ -338,11 +369,10 @@ function isToolProtocolHistoryError(value: unknown): boolean {
     || text.includes('insufficient tool messages following tool_calls message');
 }
 
-function emitToolLog(ws: WebSocket, requestId: string, payload: StreamToolsPayload) {
+function sendToolOperationEvent(ws: WebSocket, requestId: string, payload: StreamToolsPayload) {
   const event = buildToolOperationEvent(requestId, payload);
-  const message = buildToolLogMessage(requestId, payload);
 
-  if (message.phase === 'error' && isHumanReviewInterruptError(payload.error)) {
+  if (event.phase === 'failed' && isHumanReviewInterruptError(payload.error)) {
     const interruptedEvent = {
       ...event,
       phase: 'interrupted' as const,
@@ -352,21 +382,22 @@ function emitToolLog(ws: WebSocket, requestId: string, payload: StreamToolsPaylo
     };
     recordToolActivity(payload.name, 'interrupt', requestId);
     console.log(`[local-server] tool_interrupt requestId=${requestId} tool=${payload.name}`);
-    sendLocalAgentMessage(ws, { type: 'event', requestId, event: interruptedEvent });
-    sendLocalAgentMessage(ws, { ...message, phase: 'interrupt', output: undefined, error: undefined });
+    sendLocalAgentEvent(ws, interruptedEvent);
     return;
   }
 
-  recordToolActivity(payload.name, message.phase, requestId);
+  const phase = toToolActivityPhase(event.phase);
+  const input = event.raw?.input !== undefined ? stringifyLogValue(event.raw.input) : undefined;
+  const error = event.raw?.error !== undefined ? stringifyLogValue(event.raw.error) : undefined;
+  recordToolActivity(payload.name, phase, requestId);
 
   console.log(
-    `[local-server] tool_${message.phase} requestId=${requestId} tool=${payload.name}`
-      + (message.input ? ` input=${maybeTrimForLog(message.input, 200)}` : '')
-      + (message.error ? ` error=${maybeTrimForLog(message.error)}` : ''),
+    `[local-server] tool_${phase} requestId=${requestId} tool=${payload.name}`
+      + (input ? ` input=${maybeTrimForLog(input, 200)}` : '')
+      + (error ? ` error=${maybeTrimForLog(error)}` : ''),
   );
 
-  sendLocalAgentMessage(ws, { type: 'event', requestId, event });
-  sendLocalAgentMessage(ws, message);
+  sendLocalAgentEvent(ws, event);
 }
 
 async function handleStudioRequest(
@@ -419,10 +450,14 @@ async function handleStudioRequest(
       turnId: requestId,
       signal: controller.signal,
       onTurnEvent: (event) => {
-        send({ type: 'studio_turn_event', requestId, event });
+        sendLocalAgentEvent(ws, {
+          type: 'studio.progress',
+          requestId,
+          event,
+        });
       },
       onToolEvent: (event) => {
-        emitToolLog(ws, requestId, event as StreamToolsPayload);
+        sendToolOperationEvent(ws, requestId, event as StreamToolsPayload);
       },
     });
 
@@ -527,11 +562,11 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
       graphService: chatGraphService,
       isCurrent,
       finishInterrupted,
-      emit: (event) => {
-        sendLocalAgentMessage(ws, event);
+      emitEvent: (event) => {
+        sendLocalAgentEvent(ws, event);
       },
-      emitToolLog: (event) => {
-        emitToolLog(ws, requestId, event);
+      emitToolEvent: (event) => {
+        sendToolOperationEvent(ws, requestId, event);
       },
       onPendingInterrupt: (pendingInterrupt) => {
         const pendingShellCommand = readShellReviewCommand(pendingInterrupt);
@@ -544,8 +579,8 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
           requestedPattern || pendingShellCommand,
         );
         if (authorizedPattern) {
-          sendLocalAgentMessage(ws, {
-            type: 'system_notice',
+          sendLocalAgentEvent(ws, {
+            type: 'system.notice',
             requestId,
             message: `已授权本次会话中的 shell 模式：${authorizedPattern}`,
           });
@@ -554,7 +589,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
     });
     if (result.status === 'waiting_human') {
       await refreshActiveSessionSummary(deps);
-      console.log(`[local-server] human_interrupt requestId=${requestId}`);
+      console.log(`[local-server] human_review.requested requestId=${requestId}`);
       clearInflightRequest(ws, inflight);
       return;
     }
@@ -564,7 +599,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
     clearInflightRequest(ws, inflight);
     await refreshActiveSessionSummary(deps);
 
-    console.log(`[local-server] chat_response sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
+    console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
   } catch (err) {
     const isStillCurrent = inflightRequests.get(ws) === inflight;
     const aborted = controller.signal.aborted

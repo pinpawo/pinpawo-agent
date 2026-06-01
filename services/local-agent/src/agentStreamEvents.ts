@@ -5,13 +5,8 @@ import {
 } from './events/agentStreamNormalizer';
 import type { LocalAgentOperationEvent } from './events/localAgentEvent';
 import { localToolOperationRegistry } from './plugins/localToolOperations';
-import {
-  buildLegacyToolLogMessage,
-  type LegacyToolLogMessagePayload,
-} from './protocol/legacyProtocolAdapter';
 
 export type { StreamToolsPayload };
-export type ToolLogMessagePayload = LegacyToolLogMessagePayload;
 
 export function buildToolOperationEvent(requestId: string, payload: StreamToolsPayload): LocalAgentOperationEvent {
   return normalizeToolStreamEvent(requestId, payload, localToolOperationRegistry);
@@ -67,8 +62,4 @@ export function readStreamNode(metadata: unknown): string | null {
 export function isLaneTaggedAiMessage(message: BaseMessage) {
   const pinpawo = message.additional_kwargs?.pinpawo;
   return Boolean(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
-}
-
-export function buildToolLogMessage(requestId: string, payload: StreamToolsPayload): ToolLogMessagePayload {
-  return buildLegacyToolLogMessage(buildToolOperationEvent(requestId, payload));
 }

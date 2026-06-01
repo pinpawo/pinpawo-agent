@@ -10,6 +10,7 @@ import type {
 
 export type LegacyToolLogPhase = 'start' | 'end' | 'complete' | 'error' | 'event' | 'interrupt';
 
+/** @deprecated compatibility only; use LocalAgentEvent type: 'operation'. */
 export type LegacyToolLogMessagePayload = {
   type: 'tool_log';
   requestId: string;
@@ -21,6 +22,11 @@ export type LegacyToolLogMessagePayload = {
   error?: string;
 };
 
+/**
+ * @deprecated compatibility only. New local-agent code should emit
+ * LocalAgentEvent and let this adapter derive legacy messages only for
+ * unmigrated app/API clients.
+ */
 export type LegacyServerMessage =
   | { type: 'chat_token'; requestId: string; token: string }
   | LegacyToolLogMessagePayload
@@ -97,6 +103,57 @@ export function buildLegacyToolLogMessage(event: LocalAgentOperationEvent): Lega
     output: event.raw?.output !== undefined ? stringifyLegacyValue(event.raw.output) : undefined,
     error: event.raw?.error !== undefined ? stringifyLegacyValue(event.raw.error) : undefined,
   };
+}
+
+export function buildLegacyServerMessageFromLocalAgentEvent(event: LocalAgentEvent): LegacyServerMessage | null {
+  if (event.type === 'message.delta') {
+    return {
+      type: 'chat_token',
+      requestId: event.requestId,
+      token: event.text,
+    };
+  }
+  if (event.type === 'message.completed') {
+    return {
+      type: 'chat_response',
+      requestId: event.requestId,
+      message: event.text,
+      mood: event.metadata?.mood ?? null,
+      topic: event.metadata?.topic ?? null,
+      tags: event.metadata?.tags ?? [],
+    };
+  }
+  if (event.type === 'human_review.requested') {
+    return {
+      type: 'human_interrupt',
+      requestId: event.requestId,
+      petId: event.actor?.petId,
+      prompt: event.prompt,
+      payload: event.payload,
+    };
+  }
+  if (event.type === 'studio.progress') {
+    return {
+      type: 'studio_turn_event',
+      requestId: event.requestId,
+      event: event.event,
+    };
+  }
+  if (event.type === 'system.notice') {
+    return {
+      type: 'system_notice',
+      requestId: event.requestId,
+      message: event.message,
+    };
+  }
+  if (event.type === 'error') {
+    return {
+      type: 'error',
+      requestId: event.requestId,
+      message: event.message,
+    };
+  }
+  return buildLegacyToolLogMessage(event);
 }
 
 export function buildLocalAgentEventFromLegacyMessage(message: LegacyServerMessage): LocalAgentEvent {

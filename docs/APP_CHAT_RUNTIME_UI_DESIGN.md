@@ -100,23 +100,25 @@ HITL 和 interrupt 分开处理。
 - interrupt 是用户主动停止当前 run。
 - HITL 是 agent 主动请求用户确认、选择或提供信息。
 
-服务端输出独立事件 `human_interrupt`。app 进入 `waiting_human`，在输入框上方展示确认面板，支持批准、拒绝和直接输入补充说明。确认后携带 resume 继续同一个任务上下文；补充说明不做前端文本映射，交给 local-agent 侧按当前 pending interrupt 解释。
+服务端输出 `LocalAgentEvent`：`human_review.requested`。app 进入 `waiting_human`，在输入框上方展示确认面板，支持批准、拒绝和直接输入补充说明。确认后携带 resume 继续同一个任务上下文；补充说明不做前端文本映射，交给 local-agent 侧按当前 pending interrupt 解释。
 
 ## Event Evolution
 
-当前 SSE 已经支持：
+目标事件模型以 `LocalAgentEvent` 为准：
 
-- `token`
-- `tool_log`
-- `done`
+- `message.delta`
+- `message.completed`
+- `operation`
+- `human_review.requested`
+- `system.notice`
 - `error`
 
-短期先兼容这些事件。后续建议补充 typed events：
+PinPet app/API 旧路径在迁移期可以继续接收兼容事件，例如 `token` / `tool_log` / `done`。这些兼容事件只能由 `LocalAgentEvent` 派生，不能作为新的运行态 source of truth。
+
+app run state 可以在 API envelope 中补充这些控制字段：
 
 - `run_started`
 - `run_interrupted`
-- `human_review_required`
-- `system_notice`
 - `request_id`
 
 ## Implementation Plan

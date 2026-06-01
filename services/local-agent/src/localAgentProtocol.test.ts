@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   parseLocalAgentClientMessage,
   parseLocalAgentServerMessage,
+  sendLocalAgentEvent,
   sendLocalAgentMessage,
 } from './localAgentProtocol';
 
@@ -147,6 +148,62 @@ test('sendLocalAgentMessage writes only when websocket-like object is open', () 
   assert.equal(sendLocalAgentMessage(openWs, { type: 'pong' }), true);
   assert.equal(sendLocalAgentMessage(closedWs, { type: 'pong' }), false);
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [{ type: 'pong' }]);
+});
+
+test('sendLocalAgentEvent writes typed events and optional legacy compatibility messages', () => {
+  const sent: string[] = [];
+  const openWs = {
+    readyState: 1,
+    send(data: string) {
+      sent.push(data);
+    },
+  };
+
+  assert.equal(sendLocalAgentEvent(openWs, {
+    type: 'message.delta',
+    requestId: 'req-1',
+    role: 'assistant',
+    text: 'hello',
+  }), true);
+  assert.equal(sendLocalAgentEvent(openWs, {
+    type: 'message.completed',
+    requestId: 'req-1',
+    role: 'assistant',
+    text: 'done',
+    metadata: { mood: null, topic: null, tags: [] },
+  }, { legacyCompatibility: true }), true);
+
+  assert.deepEqual(sent.map((item) => JSON.parse(item)), [
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'message.delta',
+        requestId: 'req-1',
+        role: 'assistant',
+        text: 'hello',
+      },
+    },
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'message.completed',
+        requestId: 'req-1',
+        role: 'assistant',
+        text: 'done',
+        metadata: { mood: null, topic: null, tags: [] },
+      },
+    },
+    {
+      type: 'chat_response',
+      requestId: 'req-1',
+      message: 'done',
+      mood: null,
+      topic: null,
+      tags: [],
+    },
+  ]);
 });
 
 test('sendLocalAgentMessage emits typed event before legacy compatibility messages', () => {

@@ -27,3 +27,12 @@ export type ActiveTool = {
   detail: string;
   startedAt: number;
 };
+
+export type ResumeSessionSummary = {
+  id: string;
+  title: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+  active: boolean;
+};

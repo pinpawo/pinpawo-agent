@@ -5,6 +5,7 @@ import { config } from '../config';
 import { ApprovalPanel, buildApprovalOptions } from './components/ApprovalPanel';
 import { Composer } from './components/Composer';
 import { MessageBlock } from './components/MessageBlock';
+import { ResumePicker } from './components/ResumePicker';
 import { formatTuiCommandHelp, parseTuiCommand } from './input/commandRegistry';
 import { applyComposerInput, resolveTuiKeyAction } from './input/keymap';
 import {
@@ -27,9 +28,14 @@ import {
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { exportSessionTranscript } from './transcript/transcriptExport';
 import type { TuiState } from './state/tuiState';
-import type { MessageRole } from './types';
+import type { MessageRole, ResumeSessionSummary } from './types';
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
+
+type ResumePickerState =
+  | { status: 'closed'; sessions: ResumeSessionSummary[]; selectedIndex: number }
+  | { status: 'loading'; sessions: ResumeSessionSummary[]; selectedIndex: number }
+  | { status: 'open'; sessions: ResumeSessionSummary[]; selectedIndex: number };
 
 // ---------------------------------------------------------------------------
 // Main TUI application
@@ -53,9 +59,15 @@ export function TuiApp(props: { actorId: string }) {
   const [studioMode, setStudioMode] = useState(false);
   const [composerCursorOffset, setComposerCursorOffset] = useState(0);
   const [approvalIndex, setApprovalIndex] = useState(0);
+  const [resumePicker, setResumePicker] = useState<ResumePickerState>({
+    status: 'closed',
+    sessions: [],
+    selectedIndex: 0,
+  });
 
   const stateRef = useRef<TuiState>(tuiState);
   const lastInterruptAtRef = useRef(0);
+  const resumeRequestIdRef = useRef(0);
   const localServerPort = config.localServerPort;
   // Studio 模式持续期间共用一个 conversationId,这样 wiki 跨 turn 累积、
   // pet runtime 的 thread namespace 也保持一致
@@ -76,6 +88,7 @@ export function TuiApp(props: { actorId: string }) {
   const pendingUi = selectFocusedPendingUi(tuiState);
   const activeTools = selectFocusedActiveTools(tuiState);
   const pendingApproval = selectFocusedPendingApproval(tuiState);
+  const resumePickerOpen = resumePicker.status !== 'closed';
   const approvalOptions = useMemo(
     () => (pendingApproval ? buildApprovalOptions(pendingApproval) : []),
     [pendingApproval],
@@ -121,6 +134,93 @@ export function TuiApp(props: { actorId: string }) {
     setComposerCursorOffset(0);
   };
 
+  const openResumePicker = () => {
+    if (!ready) {
+      appendMessage('system', TUI_TEXT.disconnectedCannotSend);
+      return;
+    }
+    if (busy) {
+      appendMessage('system', TUI_TEXT.busyCannotSend);
+      return;
+    }
+    clearInputValue();
+    const requestId = resumeRequestIdRef.current + 1;
+    resumeRequestIdRef.current = requestId;
+    setResumePicker((current) => ({
+      status: 'loading',
+      sessions: current.sessions,
+      selectedIndex: current.selectedIndex,
+    }));
+    void runtimeController.listResumeSessions().then((sessions) => {
+      if (resumeRequestIdRef.current !== requestId) return;
+      setResumePicker({
+        status: 'open',
+        sessions,
+        selectedIndex: 0,
+      });
+    }).catch((err) => {
+      if (resumeRequestIdRef.current !== requestId) return;
+      const message = err instanceof Error ? err.message : String(err);
+      setResumePicker({ status: 'closed', sessions: [], selectedIndex: 0 });
+      appendMessage('system', TUI_TEXT.resumeFailed(message));
+    });
+  };
+
+  const closeResumePicker = () => {
+    resumeRequestIdRef.current += 1;
+    setResumePicker((current) => ({
+      status: 'closed',
+      sessions: current.sessions,
+      selectedIndex: current.selectedIndex,
+    }));
+  };
+
+  const resumeSelectedSession = () => {
+    if (resumePicker.status !== 'open') return;
+    const selected = resumePicker.sessions[resumePicker.selectedIndex];
+    if (!selected) {
+      closeResumePicker();
+      appendMessage('system', TUI_TEXT.resumeEmpty);
+      return;
+    }
+    const requestId = resumeRequestIdRef.current + 1;
+    resumeRequestIdRef.current = requestId;
+    setResumePicker((current) => ({
+      status: 'loading',
+      sessions: current.sessions,
+      selectedIndex: current.selectedIndex,
+    }));
+    void runtimeController.resumeSession(selected.id).then(({ session, history }) => {
+      if (resumeRequestIdRef.current !== requestId) return;
+      studioModeRef.current = false;
+      studioConversationIdRef.current = null;
+      setStudioMode(false);
+      dispatch({
+        type: 'session.clear',
+        statusMessage: TUI_TEXT.resumeSucceeded(session.title),
+      });
+      dispatch({
+        type: 'session.set_kind',
+        kind: 'chat',
+      });
+      dispatch({
+        type: 'session.replace_history',
+        history,
+      });
+      dispatch({
+        type: 'input.set',
+        value: '',
+      });
+      setResumePicker({ status: 'closed', sessions: [], selectedIndex: 0 });
+      appendMessage('system', TUI_TEXT.resumeSucceeded(session.title));
+    }).catch((err) => {
+      if (resumeRequestIdRef.current !== requestId) return;
+      const message = err instanceof Error ? err.message : String(err);
+      setResumePicker({ status: 'closed', sessions: [], selectedIndex: 0 });
+      appendMessage('system', TUI_TEXT.resumeFailed(message));
+    });
+  };
+
   const submitCurrentInput = () => {
     const parsed = parseTuiCommand(inputValue);
     if (parsed.type === 'empty') return;
@@ -153,6 +253,11 @@ export function TuiApp(props: { actorId: string }) {
           const message = err instanceof Error ? err.message : String(err);
           appendMessage('system', TUI_TEXT.exportFailed(message));
         });
+        return;
+      }
+
+      if (parsed.name === 'resume') {
+        openResumePicker();
         return;
       }
 
@@ -278,6 +383,7 @@ export function TuiApp(props: { actorId: string }) {
       ready,
       busy,
       hasPendingApproval: Boolean(pendingApproval),
+      hasResumePicker: resumePickerOpen,
     });
 
     switch (action.type) {
@@ -325,6 +431,28 @@ export function TuiApp(props: { actorId: string }) {
         }
         return;
 
+      case 'resume.previous':
+        setResumePicker((current) => ({
+          ...current,
+          selectedIndex: Math.max(0, current.selectedIndex - 1),
+        }));
+        return;
+
+      case 'resume.next':
+        setResumePicker((current) => ({
+          ...current,
+          selectedIndex: Math.min(Math.max(0, current.sessions.length - 1), current.selectedIndex + 1),
+        }));
+        return;
+
+      case 'resume.submit':
+        resumeSelectedSession();
+        return;
+
+      case 'resume.dismiss':
+        closeResumePicker();
+        return;
+
       case 'composer.clear':
         clearInputValue();
         return;
@@ -360,15 +488,17 @@ export function TuiApp(props: { actorId: string }) {
     [activeTools, now, contentWidth],
   );
 
-  // Input area focus: only when ready, not busy, and no approval panel
-  const inputFocused = ready && !busy && !pendingApproval;
+  // Input area focus: only when ready, not busy, and no modal panel.
+  const inputFocused = ready && !busy && !pendingApproval && !resumePickerOpen;
 
   // Contextual help text
   const helpText = busy
     ? TUI_TEXT.helpBusy
     : pendingApproval
       ? '' // help is shown inside ApprovalPanel
-      : TUI_TEXT.helpIdle;
+      : resumePickerOpen
+        ? ''
+        : TUI_TEXT.helpIdle;
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -384,6 +514,14 @@ export function TuiApp(props: { actorId: string }) {
             </Text>
           ))}
         </Box>
+      ) : null}
+      {resumePickerOpen ? (
+        <ResumePicker
+          sessions={resumePicker.sessions}
+          selectedIndex={resumePicker.selectedIndex}
+          loading={resumePicker.status === 'loading'}
+          width={contentWidth}
+        />
       ) : null}
       {pendingApproval ? (
         <ApprovalPanel

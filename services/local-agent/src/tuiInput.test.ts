@@ -40,6 +40,10 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
   assert.equal(exportCommand.type === 'command' ? exportCommand.name : null, 'export');
   assert.equal(exportCommand.type === 'command' ? exportCommand.args : null, 'transcripts/today.md');
 
+  const resumeCommand = parseTuiCommand('/resume');
+  assert.equal(resumeCommand.type, 'command');
+  assert.equal(resumeCommand.type === 'command' ? resumeCommand.name : null, 'resume');
+
   assert.deepEqual(parseTuiCommand('/studiox'), {
     type: 'unknown',
     raw: '/studiox',
@@ -51,34 +55,42 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
 test('formatTuiCommandHelp is generated from visible command metadata', () => {
   assert.equal(
     formatTuiCommandHelp(),
-    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /help · /export [path] 导出 transcript(默认当前目录) · /quit',
+    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /help · /export [path] 导出 transcript(默认当前目录) · /resume 恢复会话 · /quit',
   );
 });
 
 test('resolveTuiKeyAction routes global, approval, busy, and composer keys', () => {
   assert.deepEqual(
-    resolveTuiKeyAction('c', { ctrl: true }, { ready: false, busy: false, hasPendingApproval: false }),
+    resolveTuiKeyAction('c', { ctrl: true }, { ready: false, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'global.ctrl_c' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: true }),
+    resolveTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
     { type: 'approval.previous' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: true }),
+    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
     { type: 'approval.submit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: true, hasPendingApproval: false }),
+    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: true, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'global.interrupt' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: false }),
+    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'composer.clear' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false }),
+    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'composer.submit' },
+  );
+  assert.deepEqual(
+    resolveTuiKeyAction('', { downArrow: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: true }),
+    { type: 'resume.next' },
+  );
+  assert.deepEqual(
+    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: true }),
+    { type: 'resume.submit' },
   );
 });
 

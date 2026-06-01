@@ -10,7 +10,7 @@ import {
   selectFocusedPendingApproval,
 } from './state/tuiStateReducer';
 import type { HistoryCellModel, TuiAction, TuiState } from './state/tuiState';
-import type { ApprovalOption } from './types';
+import type { ApprovalOption, ResumeSessionSummary } from './types';
 
 const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
@@ -57,6 +57,46 @@ function makeHistoryMeta() {
   return {
     id: randomUUID(),
     timestamp: formatNow(),
+  };
+}
+
+function parseHistoryMessages(messages: Array<{ role?: string; text?: string }> | undefined) {
+  return Array.isArray(messages)
+    ? messages.flatMap((item) => {
+      if (
+        (item.role === 'user' || item.role === 'assistant' || item.role === 'system')
+        && typeof item.text === 'string'
+        && item.text.trim()
+      ) {
+        return [{
+          id: randomUUID(),
+          kind: item.role,
+          text: item.text,
+        } satisfies HistoryCellModel];
+      }
+      return [];
+    })
+    : [];
+}
+
+function parseResumeSessionSummary(value: unknown): ResumeSessionSummary | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== 'string'
+    || typeof record.title !== 'string'
+    || typeof record.createdAt !== 'string'
+    || typeof record.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    id: record.id,
+    title: record.title,
+    messageCount: typeof record.messageCount === 'number' ? record.messageCount : 0,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    active: record.active === true,
   };
 }
 
@@ -277,6 +317,39 @@ export class TuiRuntimeController {
     });
   }
 
+  async listResumeSessions() {
+    const res = await fetch(`http://127.0.0.1:${this.options.localServerPort}/sessions`);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const payload = await res.json() as { sessions?: unknown };
+    return Array.isArray(payload.sessions)
+      ? payload.sessions.flatMap((item) => {
+          const session = parseResumeSessionSummary(item);
+          return session ? [session] : [];
+        })
+      : [];
+  }
+
+  async resumeSession(sessionId: string) {
+    const res = await fetch(
+      `http://127.0.0.1:${this.options.localServerPort}/sessions/resume?sessionId=${encodeURIComponent(sessionId)}`,
+    );
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const payload = await res.json() as {
+      session?: unknown;
+      messages?: Array<{ role?: string; text?: string }>;
+    };
+    const session = parseResumeSessionSummary(payload.session);
+    if (!session) {
+      throw new Error('invalid resume session payload');
+    }
+    const history = parseHistoryMessages(payload.messages);
+    return { session, history };
+  }
+
   private async initialize() {
     this.options.dispatch({
       type: 'connection.set',
@@ -335,22 +408,7 @@ export class TuiRuntimeController {
       const payload = await historyRes.json() as {
         messages?: Array<{ role?: string; text?: string }>;
       };
-      const restored = Array.isArray(payload.messages)
-        ? payload.messages.flatMap((item) => {
-          if (
-            (item.role === 'user' || item.role === 'assistant' || item.role === 'system')
-            && typeof item.text === 'string'
-            && item.text.trim()
-          ) {
-            return [{
-              id: randomUUID(),
-              kind: item.role,
-              text: item.text,
-            } satisfies HistoryCellModel];
-          }
-          return [];
-        })
-        : [];
+      const restored = parseHistoryMessages(payload.messages);
       if (restored.length > 0) {
         this.options.dispatch({
           type: 'session.replace_history',

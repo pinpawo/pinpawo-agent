@@ -5,11 +5,9 @@
  * Protocol matches the App WS relay format so both paths share the same
  * message types.
  */
-import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { loadAgentContext } from './contextLoader';
@@ -17,7 +15,6 @@ import { FileSaver } from './fileSaver';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
 import { authorizeShellPattern, clearSessionAuthorizations } from './sessionAuthorizations';
-import { buildTuiChatThreadId } from './chatInterface';
 import { readShellReviewCommand } from './chatInterrupts';
 import {
   parseLocalAgentClientMessage,
@@ -47,13 +44,22 @@ import {
 } from './studio/studioBridge';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import type { AgentStats, LocalServerDeps } from './localServerTypes';
+import {
+  createTuiSession,
+  ensureActiveTuiSession,
+  listTuiSessions,
+  loadTuiSessionState,
+  resumeTuiSession,
+  saveTuiSessionState,
+  updateTuiSessionSummary,
+  type TuiSessionRecord,
+} from './tuiSessionRegistry';
 
 export type { AgentStats, LocalServerDeps };
 
 const chatCheckpointer = new FileSaver(
   resolve(homedir(), '.pinpawo', 'checkpoints-tui.json'),
 );
-const sessionStatePath = resolve(homedir(), '.pinpawo', 'tui-sessions.json');
 
 const chatGraphService = new LocalAgentGraphService();
 
@@ -113,62 +119,47 @@ function routeStudioHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseM
 }
 const INTERRUPT_FORCE_REPLY_MS = 1800;
 
-function loadSessionSuffixes() {
-  try {
-    if (!existsSync(sessionStatePath)) {
-      return new Map<string, string>();
-    }
-    const raw = readFileSync(sessionStatePath, 'utf-8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return new Map(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, string] => typeof entry[0] === 'string' && typeof entry[1] === 'string' && Boolean(entry[1]),
-      ),
-    );
-  } catch {
-    return new Map<string, string>();
-  }
+const tuiSessionState = loadTuiSessionState();
+
+function saveTuiSessions() {
+  saveTuiSessionState(tuiSessionState);
 }
 
-function saveSessionSuffixes(suffixes: Map<string, string>) {
-  try {
-    mkdirSync(resolve(homedir(), '.pinpawo'), { recursive: true });
-    writeFileSync(
-      sessionStatePath,
-      JSON.stringify(Object.fromEntries(suffixes), null, 2),
-      'utf-8',
-    );
-  } catch {
-    // best-effort persistence only
-  }
-}
-
-const sessionSuffixes = loadSessionSuffixes();
-
-function ensureSessionSuffix(petId: string) {
-  let suffix = sessionSuffixes.get(petId);
-  if (!suffix) {
-    suffix = randomUUID().slice(0, 8);
-    sessionSuffixes.set(petId, suffix);
-    saveSessionSuffixes(sessionSuffixes);
-  }
-  return suffix;
+function getActiveTuiSession(petId: string) {
+  const session = ensureActiveTuiSession(tuiSessionState, petId);
+  saveTuiSessions();
+  return session;
 }
 
 function getChatThreadId(petId: string) {
-  const suffix = ensureSessionSuffix(petId);
-  return buildTuiChatThreadId({ petId, sessionSuffix: suffix });
+  return getActiveTuiSession(petId).threadId;
 }
 
-async function resetChatSession(petId: string) {
-  const previousThreadId = getChatThreadId(petId);
-  sessionSuffixes.set(petId, randomUUID().slice(0, 8));
-  saveSessionSuffixes(sessionSuffixes);
-  clearSessionAuthorizations(previousThreadId);
-  await chatCheckpointer.deleteThread(previousThreadId);
+function createNewChatSession(petId: string) {
+  const previous = getActiveTuiSession(petId);
+  const next = createTuiSession(tuiSessionState, petId);
+  clearSessionAuthorizations(previous.threadId);
+  saveTuiSessions();
+  return next;
 }
 
-function buildChatSetup(deps: LocalServerDeps, ctx: Awaited<ReturnType<typeof loadAgentContext>>) {
+async function resetChatSession(petId: string, options: { deletePrevious?: boolean } = {}) {
+  const previous = getActiveTuiSession(petId);
+  const next = createTuiSession(tuiSessionState, petId);
+  clearSessionAuthorizations(previous.threadId);
+  if (options.deletePrevious) {
+    await chatCheckpointer.deleteThread(previous.threadId);
+    delete tuiSessionState.sessions[previous.id];
+  }
+  saveTuiSessions();
+  return next;
+}
+
+function buildChatSetup(
+  deps: LocalServerDeps,
+  ctx: Awaited<ReturnType<typeof loadAgentContext>>,
+  threadId = getChatThreadId(deps.actorId),
+) {
   return buildLocalChatAgentInput({
     context: ctx,
     userMessage: '',
@@ -176,7 +167,7 @@ function buildChatSetup(deps: LocalServerDeps, ctx: Awaited<ReturnType<typeof lo
     tools: deps.pluginTools,
     toolkits: deps.localToolkits,
     extraCapabilities: deps.localCapabilities,
-    threadId: getChatThreadId(deps.actorId),
+    threadId,
     dryRun: false,
     checkpoint: chatCheckpointer,
     userCapabilities: deps.userCapabilities,
@@ -209,6 +200,50 @@ function readHistoryMessages(messages: BaseMessage[]) {
       text,
     }];
   });
+}
+
+function summarizeHistoryMessages(
+  messages: Array<{ role: string; text: string }>,
+  updatedAt = new Date().toISOString(),
+) {
+  const titleSource = messages.find((message) => message.role === 'user' && message.text.trim())
+    ?? messages.find((message) => message.text.trim());
+  const title = titleSource
+    ? titleSource.text.replace(/\s+/g, ' ').trim().slice(0, 60)
+    : '空会话';
+  return {
+    title,
+    messageCount: messages.length,
+    updatedAt,
+  };
+}
+
+async function readSessionHistoryMessages(
+  deps: LocalServerDeps,
+  session: TuiSessionRecord,
+) {
+  const ctx = await loadAgentContext(deps.actorId);
+  const setup = buildChatSetup(deps, ctx, session.threadId);
+  const snapshot = await chatGraphService.getState(setup);
+  return readHistoryMessages(readSnapshotMessages(snapshot));
+}
+
+function updateSessionSummaryFromHistory(
+  session: TuiSessionRecord,
+  messages: Array<{ role: string; text: string }>,
+) {
+  updateTuiSessionSummary(tuiSessionState, session.id, summarizeHistoryMessages(messages));
+  saveTuiSessions();
+}
+
+async function refreshActiveSessionSummary(deps: LocalServerDeps) {
+  try {
+    const session = getActiveTuiSession(deps.actorId);
+    const messages = await readSessionHistoryMessages(deps, session);
+    updateSessionSummaryFromHistory(session, messages);
+  } catch (err) {
+    console.warn('[local-server] failed to refresh TUI session summary:', err instanceof Error ? err.message : err);
+  }
 }
 
 type InflightRequest = {
@@ -518,6 +553,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
       },
     });
     if (result.status === 'waiting_human') {
+      await refreshActiveSessionSummary(deps);
       console.log(`[local-server] human_interrupt requestId=${requestId}`);
       clearInflightRequest(ws, inflight);
       return;
@@ -526,6 +562,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
       return;
     }
     clearInflightRequest(ws, inflight);
+    await refreshActiveSessionSummary(deps);
 
     console.log(`[local-server] chat_response sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
   } catch (err) {
@@ -545,7 +582,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
     const recoveredFromToolProtocolError = isToolProtocolHistoryError(err);
     if (recoveredFromToolProtocolError) {
       try {
-        await resetChatSession(deps.actorId);
+        await resetChatSession(deps.actorId, { deletePrevious: true });
         console.warn(`[local-server] reset TUI chat session after tool protocol error requestId=${requestId}`);
       } catch (resetError) {
         console.warn(
@@ -580,10 +617,52 @@ async function handleHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponse
 }
 
 async function handleHistoryRequest(deps: LocalServerDeps) {
-  const ctx = await loadAgentContext(deps.actorId);
-  const setup = buildChatSetup(deps, ctx);
-  const snapshot = await chatGraphService.getState(setup);
-  return readHistoryMessages(readSnapshotMessages(snapshot));
+  const session = getActiveTuiSession(deps.actorId);
+  const messages = await readSessionHistoryMessages(deps, session);
+  updateTuiSessionSummary(tuiSessionState, session.id, summarizeHistoryMessages(messages, session.updatedAt));
+  saveTuiSessions();
+  return messages;
+}
+
+async function handleSessionsRequest(deps: LocalServerDeps) {
+  getActiveTuiSession(deps.actorId);
+  const sessions = listTuiSessions(tuiSessionState, deps.actorId);
+  const enriched = await Promise.all(sessions.map(async (session) => {
+    const messages = await readSessionHistoryMessages(deps, session);
+    const summary = summarizeHistoryMessages(messages, session.updatedAt);
+    const updated = updateTuiSessionSummary(tuiSessionState, session.id, summary) ?? session;
+    return {
+      ...updated,
+      active: session.active,
+      messageCount: summary.messageCount,
+      title: summary.title,
+      updatedAt: summary.updatedAt,
+    };
+  }));
+  saveTuiSessions();
+  return enriched.sort((a, b) => Number(b.active) - Number(a.active) || b.updatedAt.localeCompare(a.updatedAt));
+}
+
+async function handleResumeSessionRequest(deps: LocalServerDeps, sessionId: string) {
+  const candidate = tuiSessionState.sessions[sessionId];
+  if (!candidate || candidate.petId !== deps.actorId) {
+    throw new Error('session not found');
+  }
+  const messages = await readSessionHistoryMessages(deps, candidate);
+  const session = resumeTuiSession(tuiSessionState, deps.actorId, sessionId);
+  if (!session) {
+    throw new Error('session not found');
+  }
+  saveTuiSessions();
+  updateTuiSessionSummary(tuiSessionState, session.id, summarizeHistoryMessages(messages, session.updatedAt));
+  saveTuiSessions();
+  return {
+    session: {
+      ...(tuiSessionState.sessions[session.id] ?? session),
+      active: true,
+    },
+    messages,
+  };
 }
 
 export function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
@@ -591,6 +670,8 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
     const server = createServer((req, res) => {
       const handled = handleLocalHttpRequest(req, res, deps, {
         loadHistory: () => handleHistoryRequest(deps),
+        listSessions: () => handleSessionsRequest(deps),
+        resumeSession: (sessionId) => handleResumeSessionRequest(deps, sessionId),
       });
       if (handled) {
         return;
@@ -628,7 +709,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
               console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
             }
           } else if (msg.type === 'new_session') {
-            resetChatSession(deps.actorId).then(() => {
+            Promise.resolve(createNewChatSession(deps.actorId)).then(() => {
               console.log(`[local-server] new session created for pet ${deps.actorId}`);
             }).catch((err) => {
               console.error('[local-server] new_session error:', err instanceof Error ? err.message : err);

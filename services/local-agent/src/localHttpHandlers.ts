@@ -16,6 +16,11 @@ import type { LocalServerDeps } from './localServerTypes';
 
 type LocalHttpHandlerOptions = {
   loadHistory: () => Promise<Array<{ role: string; text: string }>>;
+  listSessions: () => Promise<Array<Record<string, unknown>>>;
+  resumeSession: (sessionId: string) => Promise<{
+    session: Record<string, unknown>;
+    messages: Array<{ role: string; text: string }>;
+  }>;
 };
 
 export function handleLocalHttpRequest(
@@ -83,6 +88,33 @@ export function handleLocalHttpRequest(
     }).catch((err) => {
       writeJson(res, 500, {
         error: err instanceof Error ? err.message : 'history load failed',
+      });
+    });
+    return true;
+  }
+
+  if (pathname === '/sessions') {
+    options.listSessions().then((sessions) => {
+      writeJson(res, 200, { sessions });
+    }).catch((err) => {
+      writeJson(res, 500, {
+        error: err instanceof Error ? err.message : 'sessions load failed',
+      });
+    });
+    return true;
+  }
+
+  if (pathname === '/sessions/resume') {
+    const sessionId = url.searchParams.get('sessionId')?.trim();
+    if (!sessionId) {
+      writeJson(res, 400, { error: 'sessionId is required' });
+      return true;
+    }
+    options.resumeSession(sessionId).then((result) => {
+      writeJson(res, 200, result);
+    }).catch((err) => {
+      writeJson(res, 404, {
+        error: err instanceof Error ? err.message : 'session resume failed',
       });
     });
     return true;

@@ -16,6 +16,7 @@ export type TuiKeyContext = {
   ready: boolean;
   busy: boolean;
   hasPendingApproval: boolean;
+  hasResumePicker: boolean;
 };
 
 export type TuiKeyAction =
@@ -25,6 +26,10 @@ export type TuiKeyAction =
   | { type: 'approval.next' }
   | { type: 'approval.submit' }
   | { type: 'approval.dismiss' }
+  | { type: 'resume.previous' }
+  | { type: 'resume.next' }
+  | { type: 'resume.submit' }
+  | { type: 'resume.dismiss' }
   | { type: 'composer.submit' }
   | { type: 'composer.clear' }
   | { type: 'composer.edit' }
@@ -45,6 +50,14 @@ export function resolveTuiKeyAction(
   }
 
   if (!context.ready) {
+    return { type: 'none' };
+  }
+
+  if (context.hasResumePicker) {
+    if (key.upArrow) return { type: 'resume.previous' };
+    if (key.downArrow) return { type: 'resume.next' };
+    if (key.return) return { type: 'resume.submit' };
+    if (key.escape) return { type: 'resume.dismiss' };
     return { type: 'none' };
   }
 

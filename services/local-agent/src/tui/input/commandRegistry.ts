@@ -5,7 +5,8 @@ export type TuiCommandName =
   | 'studio'
   | 'new'
   | 'allow'
-  | 'export';
+  | 'export'
+  | 'resume';
 
 export type TuiCommandDefinition = {
   name: TuiCommandName;
@@ -68,6 +69,12 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/export [path]',
     description: '导出当前会话 transcript；默认写入启动目录，无扩展名 path 视为目录',
     helpText: '/export [path] 导出 transcript(默认当前目录)',
+  },
+  {
+    name: 'resume',
+    usage: '/resume',
+    description: '打开可恢复会话选择器',
+    helpText: '/resume 恢复会话',
   },
   {
     name: 'quit',

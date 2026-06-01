@@ -315,7 +315,7 @@ studio runtime progress
 - `LocalAgentEvent` 是 local-agent 对 app/TUI/macOS companion 的 public event API。
 - legacy messages 只能从 `LocalAgentEvent` 派生，不能继续作为 primary event model。
 - `sendLocalAgentMessage` 和 `sendLocalAgentEvent` 不接受 legacy 输出开关；兼容输出必须走 `protocol/legacyProtocolAdapter.ts` 中命名明确的 compatibility API。
-- `parseLocalAgentServerMessage` 只解析新协议 event/control message；旧消息解析必须显式走 `protocol/legacyProtocolAdapter.ts` 中的 compatibility parser，避免 TUI 或新客户端重新依赖 legacy wire shape。
+- `parseLocalAgentServerMessage` 只解析新协议 event/control message；local-agent 不再提供通用 legacy server message parser，避免 TUI 或新客户端重新依赖 legacy wire shape。
 
 ### 5.1 Operation event
 

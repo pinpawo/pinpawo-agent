@@ -7,7 +7,6 @@ import {
   sendLocalAgentMessage,
 } from './localAgentProtocol';
 import {
-  parseLocalAgentCompatibilityServerMessage,
   sendLocalAgentCompatibilityEvent,
 } from './protocol/legacyProtocolAdapter';
 
@@ -62,30 +61,6 @@ test('parseLocalAgentServerMessage rejects legacy server messages by default', (
     })),
     null,
   );
-});
-
-test('parseLocalAgentCompatibilityServerMessage accepts valid tool logs and rejects malformed payloads', () => {
-  assert.deepEqual(
-    parseLocalAgentCompatibilityServerMessage(JSON.stringify({
-      type: 'tool_log',
-      requestId: 'req-1',
-      phase: 'start',
-      toolName: 'read_file',
-      input: '{"path":"README.md"}',
-    })),
-    {
-      type: 'tool_log',
-      requestId: 'req-1',
-      phase: 'start',
-      toolName: 'read_file',
-      toolCallId: undefined,
-      input: '{"path":"README.md"}',
-      output: undefined,
-      error: undefined,
-    },
-  );
-  assert.equal(parseLocalAgentCompatibilityServerMessage(JSON.stringify({ type: 'tool_log', requestId: 'req-1', phase: 'bad', toolName: 'x' })), null);
-  assert.equal(parseLocalAgentCompatibilityServerMessage(JSON.stringify({ type: 'chat_token', requestId: 'req-1' })), null);
 });
 
 test('parseLocalAgentServerMessage accepts typed local-agent event messages', () => {

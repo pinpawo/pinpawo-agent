@@ -2,11 +2,7 @@ import type {
   LocalAgentEvent,
   LocalAgentOperationEvent,
 } from '../events/localAgentEvent';
-import {
-  parseLocalAgentServerMessage,
-  type LocalAgentEventMessage,
-  type LocalAgentServerMessage,
-} from '../localAgentProtocol';
+import type { LocalAgentEventMessage } from '../localAgentProtocol';
 
 export type LegacyToolLogPhase = 'start' | 'end' | 'complete' | 'error' | 'event' | 'interrupt';
 
@@ -53,52 +49,12 @@ export type LegacyServerMessage =
     }
   | { type: 'error'; requestId: string; message: string };
 
-export type LocalAgentCompatibilityServerMessage =
-  | LocalAgentServerMessage
-  | LegacyServerMessage;
-
 type WsLike = {
   readyState: number;
   send(data: string): unknown;
 };
 
 const WS_OPEN = 1;
-
-function readJsonRecord(raw: unknown): Record<string, unknown> | null {
-  try {
-    const text = typeof raw === 'string' ? raw : raw instanceof Buffer ? raw.toString() : String(raw);
-    const parsed = JSON.parse(text) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function readString(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  return typeof value === 'string' ? value : null;
-}
-
-function readOptionalString(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
-function readRecord(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-function readStringArray(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  return Array.isArray(value) && value.every((item) => typeof item === 'string')
-    ? value
-    : null;
-}
 
 function stringifyLegacyValue(value: unknown) {
   if (typeof value === 'string') {
@@ -128,90 +84,6 @@ function readLegacyOperationPhase(event: LocalAgentOperationEvent): LegacyToolLo
   if (event.phase === 'failed') return 'error';
   if (event.phase === 'interrupted') return 'interrupt';
   return 'event';
-}
-
-function isLegacyToolLogPhase(value: string): value is LegacyToolLogPhase {
-  return value === 'start'
-    || value === 'end'
-    || value === 'complete'
-    || value === 'error'
-    || value === 'event'
-    || value === 'interrupt';
-}
-
-export function parseLegacyServerMessageRecord(
-  record: Record<string, unknown>,
-  requestId: string,
-): LegacyServerMessage | null {
-  const type = readString(record, 'type');
-  if (type === 'chat_token') {
-    const token = readString(record, 'token');
-    return token == null ? null : { type, requestId, token };
-  }
-  if (type === 'tool_log') {
-    const phase = readString(record, 'phase');
-    const toolName = readString(record, 'toolName');
-    if (!phase || !isLegacyToolLogPhase(phase) || !toolName) return null;
-    return {
-      type,
-      requestId,
-      phase,
-      toolName,
-      toolCallId: readOptionalString(record, 'toolCallId'),
-      input: readOptionalString(record, 'input'),
-      output: readOptionalString(record, 'output'),
-      error: readOptionalString(record, 'error'),
-    };
-  }
-  if (type === 'human_interrupt') {
-    const prompt = readString(record, 'prompt');
-    const payload = readRecord(record, 'payload');
-    if (prompt == null || !payload) return null;
-    return {
-      type,
-      requestId,
-      petId: readOptionalString(record, 'petId'),
-      prompt,
-      payload,
-    };
-  }
-  if (type === 'system_notice') {
-    const message = readString(record, 'message');
-    return message == null ? null : { type, requestId, message };
-  }
-  if (type === 'chat_response') {
-    const message = readString(record, 'message');
-    const tags = readStringArray(record, 'tags');
-    if (message == null || !tags) return null;
-    return {
-      type,
-      requestId,
-      message,
-      mood: readOptionalString(record, 'mood') ?? null,
-      topic: readOptionalString(record, 'topic') ?? null,
-      tags,
-    };
-  }
-  if (type === 'studio_turn_event') {
-    const event = readRecord(record, 'event');
-    return event ? { type, requestId, event } : null;
-  }
-  if (type === 'error') {
-    const message = readOptionalString(record, 'message') ?? '';
-    return { type, requestId, message };
-  }
-  return null;
-}
-
-export function parseLocalAgentCompatibilityServerMessage(
-  raw: unknown,
-): LocalAgentCompatibilityServerMessage | null {
-  const serverMessage = parseLocalAgentServerMessage(raw);
-  if (serverMessage) return serverMessage;
-  const record = readJsonRecord(raw);
-  if (!record) return null;
-  const requestId = readString(record, 'requestId');
-  return requestId ? parseLegacyServerMessageRecord(record, requestId) : null;
 }
 
 export function buildLegacyToolLogMessage(event: LocalAgentOperationEvent): LegacyToolLogMessagePayload {

@@ -8,15 +8,7 @@ import {
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
 import { collectPluginHooks, loadPlugins } from './pluginLoader';
-import { loadUserCapabilities } from './capabilityLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
-import { createBashToolkit, loadLocalPluginTools } from './plugins/localTools';
-import {
-  resolveAvailableCapabilities,
-  resolveAvailableToolkits,
-  resolveCapabilityAvailability,
-} from './capabilities/capabilityAvailability';
-import { createBrowserCapability, createBrowserToolkit } from './capabilities/browserCapability';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentLlmConfig } from './agentConfig';
 import {
@@ -35,25 +27,11 @@ import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 import { LocalAgentScheduledJob } from './localAgentScheduledJob';
+import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
 const INTERRUPT_FORCE_REPLY_MS = 1800;
-
-async function filterAvailableUserCapabilities(
-  loaded: LoadedUserCapability[],
-  options: { force?: boolean } = {},
-): Promise<LoadedUserCapability[]> {
-  const records = await Promise.all(
-    loaded.map(async (item) => ({
-      item,
-      availability: await resolveCapabilityAvailability(item.capability, options),
-    })),
-  );
-  return records
-    .filter((record) => record.availability.availability.available)
-    .map((record) => record.item);
-}
 
 export class LocalAgentRuntime {
   private stopRequested = false;
@@ -62,13 +40,7 @@ export class LocalAgentRuntime {
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginTools: StructuredTool[] = [];
-  private localTools: StructuredTool[] = [];
-  private localToolkitDefinitions: AgentToolkit[] = [];
-  private localToolkits: AgentToolkit[] = [];
-  private localCapabilityDefinitions: AgentCapability[] = [];
-  private localCapabilities: AgentCapability[] = [];
-  private userCapabilityDefinitions: LoadedUserCapability[] = [];
-  private userCapabilities: LoadedUserCapability[] = [];
+  private readonly capabilityRegistry = new LocalAgentCapabilityRegistry();
   private readonly chatCheckpointer = new FileSaver(
     resolve(homedir(), '.pinpawo', 'checkpoints.json'),
   );
@@ -89,36 +61,25 @@ export class LocalAgentRuntime {
     getActorId: () => this.getActorId(),
     getLlmConfig: () => this.llmConfig,
     getPluginTools: () => this.pluginTools,
-    getLocalToolkits: () => this.localToolkits,
-    getLocalCapabilities: () => this.localCapabilities,
-    getUserCapabilities: () => this.userCapabilities,
+    getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
+    getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
+    getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
   });
   private readonly scheduledJob = new LocalAgentScheduledJob({
     graphService: this.graphService,
     getActorId: () => this.getActorId(),
     getLlmConfig: () => this.llmConfig,
     getHooks: () => this.hooks,
-    getLocalToolkits: () => this.localToolkits,
-    getUserCapabilities: () => this.userCapabilities,
+    getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
+    getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
   });
 
   async init() {
     const { plugins, tools } = await loadPlugins();
     this.llmConfig = buildLocalLlmConfig();
     this.pluginTools = tools;
-    this.localTools = await loadLocalPluginTools();
-    this.localToolkitDefinitions = [
-      createBashToolkit(this.localTools),
-      createBrowserToolkit(),
-    ];
-    this.localToolkits = await resolveAvailableToolkits(this.localToolkitDefinitions);
-    this.localCapabilityDefinitions = [
-      createBrowserCapability(),
-    ];
-    this.localCapabilities = await resolveAvailableCapabilities(this.localCapabilityDefinitions);
+    await this.capabilityRegistry.load();
     this.hooks = collectPluginHooks(plugins);
-    this.userCapabilityDefinitions = await loadUserCapabilities();
-    this.userCapabilities = await filterAvailableUserCapabilities(this.userCapabilityDefinitions);
     this.actorId = await ensureActorSelected({ interactive: false });
     this.actorName = loadSelectedActorName();
     const ctx = await loadAgentContext(this.actorId);
@@ -145,46 +106,38 @@ export class LocalAgentRuntime {
   }
 
   getLocalTools(): StructuredTool[] {
-    return this.localTools;
+    return this.capabilityRegistry.getLocalTools();
   }
 
   getLocalToolkits(): AgentToolkit[] {
-    return this.localToolkits;
+    return this.capabilityRegistry.getLocalToolkits();
   }
 
   getLocalToolkitDefinitions(): AgentToolkit[] {
-    return this.localToolkitDefinitions;
+    return this.capabilityRegistry.getLocalToolkitDefinitions();
   }
 
   getLocalCapabilities(): AgentCapability[] {
-    return this.localCapabilities;
+    return this.capabilityRegistry.getLocalCapabilities();
   }
 
   getLocalCapabilityDefinitions(): AgentCapability[] {
-    return this.localCapabilityDefinitions;
+    return this.capabilityRegistry.getLocalCapabilityDefinitions();
   }
 
   getUserCapabilities(): LoadedUserCapability[] {
-    return this.userCapabilities;
+    return this.capabilityRegistry.getUserCapabilities();
   }
 
   getUserCapabilityDefinitions(): LoadedUserCapability[] {
-    return this.userCapabilityDefinitions;
+    return this.capabilityRegistry.getUserCapabilityDefinitions();
   }
 
   async rescanUserCapabilities(): Promise<{
     userCapabilityDefinitions: LoadedUserCapability[];
     userCapabilities: LoadedUserCapability[];
   }> {
-    this.userCapabilityDefinitions = await loadUserCapabilities();
-    this.userCapabilities = await filterAvailableUserCapabilities(
-      this.userCapabilityDefinitions,
-      { force: true },
-    );
-    return {
-      userCapabilityDefinitions: this.userCapabilityDefinitions,
-      userCapabilities: this.userCapabilities,
-    };
+    return this.capabilityRegistry.rescanUserCapabilities();
   }
 
   getStats() {

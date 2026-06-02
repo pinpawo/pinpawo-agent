@@ -492,6 +492,8 @@ type OperationRegistry = {
 
 ### 阶段 4：拆分 server/runtime
 
+状态：进行中。已抽出 shared inflight operation run lifecycle，`localServer.ts` 和 `runtime.ts` 不再各自直接维护 `ToolOperationTracker` 创建、operation activity 记录和 dangling operation 收尾。
+
 目标：把 transport、session orchestration、runtime execution 分离。
 
 工作项：

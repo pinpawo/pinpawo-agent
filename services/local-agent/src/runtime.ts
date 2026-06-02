@@ -40,24 +40,25 @@ import {
   type InterruptRequestMessage,
   type NewSessionMessage,
 } from './localAgentProtocol';
-import { recordAgentRunActivity, recordOperationActivity } from './operationActivityState';
+import { recordAgentRunActivity } from './operationActivityState';
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
 import { runChatSession } from './chatSessionAdapter';
-import { ToolOperationTracker } from './toolOperationTracker';
+import {
+  clearInflightOperationTimer,
+  createInflightOperationRun,
+  emitInflightToolEvent,
+  finishInflightOperations,
+  type InflightOperationRun,
+  type TerminalOperationPhase,
+} from './inflightOperationRun';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
 const INTERRUPT_FORCE_REPLY_MS = 1800;
 
-type InflightRequest = {
-  requestId: string;
-  controller: AbortController;
-  toolOperations: ToolOperationTracker;
-  interruptedSent?: boolean;
-  interruptTimer?: ReturnType<typeof setTimeout>;
-};
+type InflightRequest = InflightOperationRun;
 
 async function filterAvailableUserCapabilities(
   loaded: LoadedUserCapability[],
@@ -74,22 +75,17 @@ async function filterAvailableUserCapabilities(
     .map((record) => record.item);
 }
 
-function sendToolOperationEvent(ws: WebSocket, inflight: InflightRequest, payload: StreamToolsPayload) {
-  const event = inflight.toolOperations.accept(payload);
-  recordOperationActivity(event);
-  sendLocalAgentEvent(ws, event);
+function sendStreamToolOperationEvent(ws: WebSocket, inflight: InflightRequest, payload: StreamToolsPayload) {
+  emitInflightToolEvent(inflight, payload, (event) => sendLocalAgentEvent(ws, event));
 }
 
-function finishToolOperations(
+function finishOperationRun(
   ws: WebSocket,
   inflight: InflightRequest,
-  phase: 'completed' | 'failed' | 'interrupted',
+  phase: TerminalOperationPhase,
   error?: unknown,
 ) {
-  for (const event of inflight.toolOperations.finishActive(phase, error)) {
-    recordOperationActivity(event);
-    sendLocalAgentEvent(ws, event);
-  }
+  finishInflightOperations(inflight, phase, (event) => sendLocalAgentEvent(ws, event), error);
 }
 
 export class LocalAgentRuntime {
@@ -319,7 +315,7 @@ export class LocalAgentRuntime {
     if (this.inflightRequest) {
       this.clearInflightTimer(this.inflightRequest);
       if (this.ws?.readyState === WebSocket.OPEN) {
-        finishToolOperations(this.ws, this.inflightRequest, 'interrupted');
+        finishOperationRun(this.ws, this.inflightRequest, 'interrupted');
       }
       this.inflightRequest.controller.abort();
       this.inflightRequest = null;
@@ -353,10 +349,7 @@ export class LocalAgentRuntime {
   }
 
   private clearInflightTimer(inflight: InflightRequest) {
-    if (inflight.interruptTimer) {
-      clearTimeout(inflight.interruptTimer);
-      inflight.interruptTimer = undefined;
-    }
+    clearInflightOperationTimer(inflight);
   }
 
   private clearInflightRequest(inflight: InflightRequest) {
@@ -371,7 +364,7 @@ export class LocalAgentRuntime {
       return;
     }
     inflight.interruptedSent = true;
-    finishToolOperations(ws, inflight, 'interrupted');
+    finishOperationRun(ws, inflight, 'interrupted');
     sendLocalAgentMessage(ws, {
       type: 'interrupted',
       requestId: inflight.requestId,
@@ -443,19 +436,15 @@ export class LocalAgentRuntime {
     console.log(`[local-agent] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
 
     if (this.inflightRequest) {
-      finishToolOperations(ws, this.inflightRequest, 'interrupted');
+      finishOperationRun(ws, this.inflightRequest, 'interrupted');
       this.clearInflightTimer(this.inflightRequest);
       this.inflightRequest.controller.abort();
     }
 
     recordAgentRunActivity('thinking', requestId);
 
-    const controller = new AbortController();
-    const inflight: InflightRequest = {
-      requestId,
-      controller,
-      toolOperations: new ToolOperationTracker(requestId),
-    };
+    const inflight = createInflightOperationRun(requestId);
+    const { controller } = inflight;
     this.inflightRequest = inflight;
     const isCurrent = () => this.inflightRequest === inflight && !controller.signal.aborted;
     const finishInterrupted = () => {
@@ -498,11 +487,11 @@ export class LocalAgentRuntime {
           sendLocalAgentEvent(ws, event);
         },
         emitToolEvent: (event) => {
-          sendToolOperationEvent(ws, inflight, event);
+          sendStreamToolOperationEvent(ws, inflight, event);
         },
       });
       if (result.status === 'waiting_human') {
-        finishToolOperations(ws, inflight, 'interrupted');
+        finishOperationRun(ws, inflight, 'interrupted');
         console.log(`[local-agent] human_review.requested requestId=${requestId}`);
         this.clearInflightRequest(inflight);
         return;
@@ -510,7 +499,7 @@ export class LocalAgentRuntime {
       if (result.status === 'interrupted') {
         return;
       }
-      finishToolOperations(ws, inflight, 'completed');
+      finishOperationRun(ws, inflight, 'completed');
       this.clearInflightRequest(inflight);
 
       console.log(`[local-agent] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
@@ -526,7 +515,7 @@ export class LocalAgentRuntime {
         this.clearInflightRequest(inflight);
         return;
       }
-      finishToolOperations(ws, inflight, 'failed', err);
+      finishOperationRun(ws, inflight, 'failed', err);
       this.clearInflightRequest(inflight);
       recordAgentRunActivity('error', requestId, 5_000);
       console.error('[local-agent] chat error:', err instanceof Error ? err.message : err);

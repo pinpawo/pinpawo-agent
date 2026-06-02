@@ -5,6 +5,7 @@ import { TUI_TEXT } from './render/text';
 import { formatNow } from './render/terminalText';
 import { TuiLocalServerClient } from './tuiLocalServerClient';
 import { TuiLocalWebSocketClient } from './tuiLocalWebSocketClient';
+import { buildTuiActionsFromServerMessage } from './tuiServerMessageActions';
 import {
   selectFocusedActiveRun,
   selectFocusedBusy,
@@ -453,77 +454,15 @@ export class TuiRuntimeController {
   }
 
   private handleServerMessage(msg: LocalAgentServerMessage) {
-    try {
-      if (msg.type === 'pong') {
-        return;
-      }
-
-      if (msg.type === 'event') {
-        if (
-          msg.event.type === 'human_review.requested'
-          || msg.event.type === 'message.completed'
-          || msg.event.type === 'error'
-        ) {
-          this.clearInterruptTimeout();
-        }
-        this.options.dispatch({
-          type: 'event.received',
-          event: msg.event,
-          now: Date.now(),
-          historyCell: makeHistoryMeta(),
-        });
-        return;
-      }
-
-      if (msg.type === 'interrupting') {
-        this.options.dispatch({
-          type: 'server.interrupting',
-          requestId: msg.requestId,
-          statusMessage: TUI_TEXT.interrupting,
-        });
-        return;
-      }
-
-      if (msg.type === 'interrupted') {
-        this.clearInterruptTimeout();
-        this.options.dispatch({
-          type: 'server.interrupted',
-          requestId: msg.requestId,
-          historyCell: makeHistoryMeta(),
-          statusMessage: TUI_TEXT.interruptedStatus,
-        });
-        return;
-      }
-
-      if (msg.type === 'studio_response') {
-        this.clearInterruptTimeout();
-        this.options.dispatch({
-          type: 'server.studio_response',
-          requestId: msg.requestId,
-          outcome: msg.outcome,
-          reply: msg.reply,
-          reason: msg.reason,
-          historyCell: makeHistoryMeta(),
-          stoppedReasonCell: makeHistoryMeta(),
-          statusMessage: TUI_TEXT.statusReady,
-        });
-        return;
-      }
-
-      if (msg.type === 'studio_error') {
-        this.clearInterruptTimeout();
-        this.options.dispatch({
-          type: 'server.studio_error',
-          requestId: msg.requestId,
-          message: msg.message,
-          historyCell: makeHistoryMeta(),
-          statusMessage: TUI_TEXT.studioErrorRecovered,
-        });
-        return;
-      }
-
-    } catch {
-      // ignore malformed messages
+    const result = buildTuiActionsFromServerMessage(msg, {
+      now: Date.now(),
+      makeHistoryCell: makeHistoryMeta,
+    });
+    if (result.clearInterrupt) {
+      this.clearInterruptTimeout();
+    }
+    for (const action of result.actions) {
+      this.options.dispatch(action);
     }
   }
 

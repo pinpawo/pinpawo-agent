@@ -229,7 +229,7 @@ app / TUI / macOS companion 可以共享：
 
 短期建议聚焦整理 TUI 目录，server/runtime 拆分保留给 local-agent 架构阶段。
 
-目录粒度的原则：**只为当前已存在的代码建文件，不为想象中的功能预留空目录**。当前 TUI 是 ~1250 行单文件，`tuiEventRenderer.ts` 是 97 行单文件。拆分目标是把这两块按职责切开，而不是一步切成十几个小文件——后者会把 1250 行变成一堆相互跳转的碎片，反而更难读。
+目录粒度的原则：**只为当前已存在的代码建文件，不为想象中的功能预留空目录**。当前 TUI 已拆为 `TuiApp`、runtime controller、HTTP/WS clients、state reducer、input registry/keymap、render adapter 和组件；后续继续按真实职责收敛，不为尚未落地的能力预留空目录。
 
 ```txt
 services/local-agent/src/
@@ -241,6 +241,7 @@ services/local-agent/src/
     TuiRuntimeController.ts  # 阶段 1C: 运行时编排、重连策略、dispatch actions
     tuiLocalServerClient.ts  # TUI -> local HTTP: health/history/sessions/resume
     tuiLocalWebSocketClient.ts # TUI -> local WS: socket lifecycle + client message send
+    tuiServerMessageActions.ts # typed server messages -> TuiAction[]
 
     state/
       tuiState.ts            # TuiState / TuiAction types(session-keyed,见 §5)
@@ -268,9 +269,9 @@ services/local-agent/src/
 相对初稿砍掉/合并的部分，以及理由：
 
 - **去掉 `state/selectors.ts`**：当前没有跨组件复用的派生状态，组件内 `useMemo` 就够；真出现重复再抽。
-- **`render/eventToActivity.ts` + `operationText.ts` + `studioText.ts` 合并为 `render/eventText.ts`**：这三件事现在都在同一个 97 行文件里，拆成三个是碎片化。
+- **`render/eventToActivity.ts` + `operationText.ts` + `studioText.ts` 合并为 `render/eventText.ts`**：当前事件文本映射规模仍适合单文件，拆成三个会碎片化。
 - **去掉 `input/composerModel.ts`**：在 multiline / paste / mention 都还不存在时拆 model/component 是为想象功能预留。先让 `Composer.tsx` 自带光标和快捷键，等真要做这些能力再拆 model。
-- **去掉 `session/historyAdapter.ts` 子目录**：history restore 现在是 `init()` 里 ~30 行内联 fetch，归到 `TuiRuntimeController` 即可，不需要独立子系统。
+- **去掉 `session/historyAdapter.ts` 子目录**：history/session restore 目前通过 `TuiLocalServerClient` 访问本地 HTTP，归在 TUI client 边界内即可，不需要独立子系统。
 - **`copy.zh-CN.ts` → `text.ts` / `TUI_TEXT`**：当前只有中文一种，先做 single-locale TUI 文本入口；完整 i18n 的 locale lookup、fallback 和参数协议后续单独设计。
 
 关键约束：
@@ -278,7 +279,7 @@ services/local-agent/src/
 - `commands/tui.tsx` 最终收敛为 CLI entry。
 - `tui/render/*` 面向 normalized event fields。
 - `tui/state/*` 保持纯状态计算（不含网络副作用，也不含动画时钟，见 §5）。
-- `TuiRuntimeController` 在阶段 1C 落地，负责 local-agent server 通信、发送 client message、session/history 加载。
+- `TuiRuntimeController` 负责运行时编排、重连策略和 action dispatch；HTTP payload 解析在 `TuiLocalServerClient`，WS socket lifecycle 和 server message parsing 在 `TuiLocalWebSocketClient`，server message 到 reducer action 的纯映射在 `tuiServerMessageActions.ts`。
 
 ## 5. TUI State 草案
 
@@ -504,7 +505,7 @@ LocalAgentEvent
 
 ## 10. 分阶段计划
 
-> 阶段 1 拆成 1A / 1B / 1C。原因是 `commands/tui.tsx` 当前同时承载组件、事件状态、WebSocket 副作用和命令输入；一次同时拆文件、引入 session-keyed reducer、再抽 controller，review 面会过大。先拆展示边界，再改状态模型，最后抽副作用层。
+> 阶段 1 已按 1A / 1B / 1C 拆分落地：先拆展示边界，再改 session-keyed reducer，最后抽 controller/client 副作用层。下面保留阶段说明作为架构记录，并在每个阶段标注当前状态。
 
 ### 阶段 0：文档对齐
 
@@ -516,16 +517,16 @@ LocalAgentEvent
 
 ### 阶段 1A：无行为变化拆边界
 
+状态：已完成。TUI entry、组件、input、render adapter 和主要 layout/helper 已从原入口拆出。
+
 目标：降低 `commands/tui.tsx` 复杂度，但不改变 state 语义、WebSocket 逻辑和用户可见行为。
 
 工作项：
 
 - 新增 `src/tui/` 目录，`commands/tui.tsx` 变成 thin entry。
 - 移出 `MessageBlock`、`SmartTextInput`、`InterruptSelector`、status/active operation/layout helpers 到 `tui/components/` 或 `tui/layout`。
-- `tuiEventRenderer.ts` 演进为 `tui/render/eventText.ts`，仍只面向 `LocalAgentEvent` / `studio.progress`。
-- 保留现有 `useState` / `useRef` / `useEffect` 结构。
-- 不引入 `TuiRuntimeController`。
-- 不引入 session-keyed reducer。
+- event render adapter 收敛为 `tui/render/eventText.ts`，只面向 `LocalAgentEvent` / `studio.progress`。
+- 本阶段完成后，后续阶段已继续引入 session-keyed reducer 和 controller/client 副作用层。
 
 验收：
 
@@ -536,6 +537,8 @@ LocalAgentEvent
 
 ### 阶段 1B：引入 session-keyed reducer
 
+状态：已完成。`TuiState` 已采用 `sessions + focusedSessionId + runRoute`，并有专项 reducer tests 覆盖迟到 / 陌生 requestId 丢弃、多 requestId 不串 assistant draft、run finish 收尾、operation lifecycle、HITL 和 tokenUsage reset。
+
 目标：把 WebSocket event handling 与 UI state transition 分开，采用 §5 的 session-keyed state 形状；v1 UI 仍然单焦点、单连接。
 
 工作项：
@@ -545,7 +548,7 @@ LocalAgentEvent
 - 把 `LocalAgentEvent`、control message、user action 映射成 `TuiAction`。
 - chat 的 `message.completed` 与 studio 的 `studio_response` / `studio_error` 收敛到同一个"run 结束"动作。
 - 动画时钟（spinner / now）留在组件 local state，不进 reducer。
-- network 副作用、session/history 加载、断线后的重连策略暂时保留在现有 effect/controller 位置。
+- network 副作用、session/history 加载和重连策略已在阶段 1C 收敛到 controller/client。
 
 验收：
 
@@ -555,6 +558,8 @@ LocalAgentEvent
 - **专项测试**：`runRoute` 查不到 requestId 的事件被丢弃（迟到 / 陌生 run）；两条不同 requestId 的 `message.delta` 不会串进同一个 `assistantDraft`。
 
 ### 阶段 1C：抽 TuiRuntimeController
+
+状态：已完成。`TuiRuntimeController` 负责运行时编排和 action dispatch；`TuiLocalServerClient` 负责本地 HTTP；`TuiLocalWebSocketClient` 负责 WS socket lifecycle、server message parsing 和 client message send；`tuiServerMessageActions.ts` 负责 typed server message 到 `TuiAction` 的纯映射。
 
 目标：在 reducer 稳定后，把 WebSocket / HTTP / session side effects 从 `TuiApp` 中抽出。
 
@@ -575,6 +580,8 @@ LocalAgentEvent
 
 ### 阶段 2：Command registry + keymap + composer
 
+状态：已完成。slash command registry、keymap、composer、resume picker key routing 已落地，并有 unit tests 覆盖 command parse/help、keymap 和 composer editing。
+
 目标：把输入系统产品化，并用单一 key 分发取代多个 `useInput` 的穿透 hack（见 §6.2）。
 
 工作项：
@@ -589,6 +596,8 @@ LocalAgentEvent
 - keymap 保持现有快捷键语义，无"按键被吞 / 被处理两次"。
 
 ### 阶段 3：render adapter 收敛 + ApprovalPanel
+
+状态：已完成。operation/status/system/studio 文案走 `render/eventText.ts`；assistant Markdown 预处理走 `render/messageText.ts`；TUI 文案集中到 `render/text.ts`；审批 UI 已收敛为 `ApprovalPanel`。
 
 目标：让 TUI 渲染从事件处理路径中独立出来（不引入冗余中间 model，见 §8）。
 
@@ -642,14 +651,9 @@ TUI 重构不是孤立的一块。下面这些是**同一次项目重构**的不
 
 ## 12. 下一步建议
 
-合并本文档后，下一 PR 做"阶段 1A：无行为变化拆边界"。
+当前阶段 1A / 1B / 1C / 2 / 3 已完成，阶段 4 已完成 `/export`、`/resume` 和 terminal message rendering 的基础可用性。下一 PR 建议继续做阶段 4 中仍未完成的高价值能力：
 
-第一轮必须小心控制范围：
-
-- 只移动/拆分现有 TUI 组件、layout helper 和 render helper。
-- 保留现有 `useState` / `useRef` / `useEffect` 状态结构。
-- 不引入 session-keyed reducer、`runRoute` 或 `TuiRuntimeController`。
-- WebSocket protocol 和 WebSocket 连接逻辑保持不变。
-- `/studio` / `/chat` / `/new` / `/allow` 行为保持不变。
-- 拆分后必须通过 typecheck 和 unit tests。
-- 迟到 / 陌生 requestId 过滤、两个 requestId 不串 `assistantDraft` 等专项 reducer 测试放到阶段 1B。
+- transcript model：把 durable chat messages 与 run activity 分开，避免 operation/system 摘要长期混在同一种 history cell。
+- file mention / path search：提高 TUI 输入效率。
+- richer status line：在不引入新协议字段的前提下，只展示已有 connection/run/operation state。
+- diff renderer：等真实 before/after diff 源从 toolkit/capability metadata 侧落地后再做；TUI 不生成伪 diff。

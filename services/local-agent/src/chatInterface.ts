@@ -1,6 +1,7 @@
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 
 export type LocalAgentInterfaceKind = 'tui' | 'app-chat';
+export const LOCAL_AGENT_INTERFACE_CONFIG_KEY = 'localAgentInterface';
 
 export type LocalAgentInterfaceCapabilities = {
   humanReview: boolean;
@@ -40,13 +41,6 @@ export function buildAppChatThreadId(params: { petId: string; userId: string }) 
   return `petbot:chat:pet:${params.petId}:user:${params.userId}`;
 }
 
-export function readLocalAgentInterfaceKind(threadId: string | null): LocalAgentInterfaceKind | null {
-  if (!threadId) return null;
-  if (threadId.startsWith('petbot:tui:')) return 'tui';
-  if (threadId.startsWith('petbot:chat:')) return 'app-chat';
-  return null;
-}
-
 export function readLocalAgentInterfaceCapabilities(
   kind: LocalAgentInterfaceKind | null,
 ): LocalAgentInterfaceCapabilities {
@@ -55,14 +49,41 @@ export function readLocalAgentInterfaceCapabilities(
   return NO_CAPABILITIES;
 }
 
-export function getCurrentLocalAgentInterface(): LocalAgentInterfaceContext {
-  const runnableConfig = AsyncLocalStorageProviderSingleton.getRunnableConfig();
-  const threadId = runnableConfig?.configurable?.thread_id;
-  const normalizedThreadId = typeof threadId === 'string' && threadId ? threadId : null;
-  const kind = readLocalAgentInterfaceKind(normalizedThreadId);
+function readInterfaceKind(value: unknown): LocalAgentInterfaceKind | null {
+  return value === 'tui' || value === 'app-chat' ? value : null;
+}
+
+function readThreadId(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+export function buildLocalAgentInterfaceContext(params: {
+  threadId?: string | null;
+  kind?: LocalAgentInterfaceKind | null;
+}): LocalAgentInterfaceContext {
+  const kind = params.kind ?? null;
   return {
-    threadId: normalizedThreadId,
+    threadId: readThreadId(params.threadId),
     kind,
     capabilities: readLocalAgentInterfaceCapabilities(kind),
   };
+}
+
+export function readLocalAgentInterfaceContext(value: unknown): LocalAgentInterfaceContext {
+  if (!value || typeof value !== 'object') {
+    return buildLocalAgentInterfaceContext({});
+  }
+  const record = value as Record<string, unknown>;
+  const kind = readInterfaceKind(record.kind);
+  return buildLocalAgentInterfaceContext({
+    kind,
+    threadId: readThreadId(record.threadId),
+  });
+}
+
+export function getCurrentLocalAgentInterface(): LocalAgentInterfaceContext {
+  const runnableConfig = AsyncLocalStorageProviderSingleton.getRunnableConfig();
+  return readLocalAgentInterfaceContext(
+    runnableConfig?.configurable?.[LOCAL_AGENT_INTERFACE_CONFIG_KEY],
+  );
 }

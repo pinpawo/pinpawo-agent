@@ -27,51 +27,9 @@ export type AgentRunResult = {
   messages: BaseMessage[];
 };
 
-export type ToolCallLog = {
-  toolName: string;
-  input: string;
-  output: string;
-};
-
 function readReply(messages: BaseMessage[]): string {
   const last = messages.at(-1);
   return typeof last?.content === 'string' ? last.content.trim() : '';
-}
-
-export function extractToolCallLogs(messages: BaseMessage[]): ToolCallLog[] {
-  const logs: ToolCallLog[] = [];
-
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
-    if (msg._getType() !== 'ai') continue;
-
-    const toolCalls = 'tool_calls' in msg && Array.isArray(msg.tool_calls)
-      ? msg.tool_calls
-      : [];
-
-    for (const tc of toolCalls) {
-      const toolName = tc.name ?? 'unknown';
-      const input = typeof tc.args === 'string'
-        ? tc.args
-        : JSON.stringify(tc.args ?? '');
-
-      // Find the matching tool message
-      let output = '';
-      for (let j = i + 1; j < messages.length; j++) {
-        const candidate = messages[j];
-        if (candidate._getType() === 'tool' && 'tool_call_id' in candidate && candidate.tool_call_id === tc.id) {
-          output = typeof candidate.content === 'string'
-            ? candidate.content
-            : JSON.stringify(candidate.content ?? '');
-          break;
-        }
-      }
-
-      logs.push({ toolName, input: input.slice(0, 400), output: output.slice(0, 300) });
-    }
-  }
-
-  return logs;
 }
 
 export async function runAgent(

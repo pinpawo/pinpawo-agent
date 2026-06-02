@@ -244,9 +244,9 @@ retry 由 Studio 调度(execute 状态机再次输出 dispatch 同 taskIndex,dis
 
 - 多媒体路径引用用约定标记还是纯自然语言识别?(curator prompt 可控)
 - chat 层(目前用 ws stream + `__interrupt__` 直推客户端)是否最终也迁移到统一构造 pet runtime + 注入 humanReviewer 的模式?这是一个相对大的内务清理,见 [LangGraph 多 agent HITL 调研结论](#) 中提到的"a 的外壳 + b 的内核"思路。
-- **tool event 是否升级为可靠的结构化源,`operation` 从它直接产生,退役 `tool_log`?** 现状:local-agent 运行链路已经从结构化源 `StreamToolsPayload` 直接产出 `operation`(`ToolOperationTracker -> buildToolOperationEvent`),TUI 本地路径和 app-facing WS 都不再双发 legacy `tool_log`；chat 顶层 stream 也不再订阅 `tools` mode，operation 只从 `onToolEvent` 边界进入。pet-agent subagent 层会规范缺失的 `toolCallId`，并在自然完成、limit reached、异常时关闭仍 active 的 tool event。
+- **tool event 是否升级为可靠的结构化源,`operation` 从它直接产生?** 现状:local-agent 运行链路已经从结构化源 `StreamToolsPayload` 直接产出 `operation`(`ToolOperationTracker -> buildToolOperationEvent`),TUI 本地路径和 app-facing WS 都不再双发旧运行态消息；chat 顶层 stream 也不再订阅 `tools` mode，operation 只从 `onToolEvent` 边界进入。pet-agent subagent 层会规范缺失的 `toolCallId`，并在自然完成、limit reached、异常时关闭仍 active 的 tool event。
   - `operation` 的质量上限取决于结构化源 `StreamToolsPayload`；subagent/local-agent 已补 stable id 和 terminal closure，底层 LangChain 原始事件仍可能存在顺序不确定。
   - `operation` 现在带 `phase` 生命周期,reducer 把 `activeOperations` 当权威 state;掉一个 end 就会让 `activeOperations` 永久泄漏——start↔terminal 的可靠配对从"美观"变成"正确性"。
   - 该源在 chat / studio 现在都通过 `onToolEvent` 进入 local-agent；pet-agent subagent 层和 local-agent 运行层都会为缺失 `toolCallId` 的事件补 synthetic id，并关闭仍 active 的 operation/tool event。
 
-  目标方向:继续把底层结构化 tool 事件源做成**有序、原生稳定 callId**,`operation` 从它一次归一化产出。利好:客户端只认 `operation` 稳定形状,退 `tool_log`、换源都可在不动客户端的前提下做。详见 `docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0(stream→event 映射)。
+  目标方向:继续把底层结构化 tool 事件源做成**有序、原生稳定 callId**,`operation` 从它一次归一化产出。利好:客户端只认 `operation` 稳定形状,源侧调整可在不动客户端的前提下做。详见 `docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0(stream→event 映射)。

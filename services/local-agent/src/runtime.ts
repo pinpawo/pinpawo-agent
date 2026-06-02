@@ -494,6 +494,7 @@ export class LocalAgentRuntime {
         toolkits: this.localToolkits,
         extraCapabilities: this.localCapabilities,
         threadId: this.getChatThreadId(this.getActorId(), userId),
+        interfaceKind: 'app-chat',
         dryRun: false,
         checkpoint: this.chatCheckpointer,
         userCapabilities: this.userCapabilities,

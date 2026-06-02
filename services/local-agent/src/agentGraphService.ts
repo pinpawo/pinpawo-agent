@@ -9,6 +9,7 @@ import {
 import { Command } from '@langchain/langgraph';
 import type { ZodType } from 'zod';
 import type { AgentChannelSetup } from './agentChannel';
+import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
 
 function buildConfigurable(setup: AgentChannelSetup) {
   const configurable: Record<string, unknown> = {};
@@ -21,6 +22,9 @@ function buildConfigurable(setup: AgentChannelSetup) {
   if (setup.input.workdir) configurable.workdir = setup.input.workdir;
   if (setup.input.runtimeEnvironment) configurable.runtimeEnvironment = setup.input.runtimeEnvironment;
   if (setup.input.onToolEvent) configurable.onToolEvent = setup.input.onToolEvent;
+  if (setup.interfaceContext?.kind) {
+    configurable[LOCAL_AGENT_INTERFACE_CONFIG_KEY] = setup.interfaceContext;
+  }
   return Object.keys(configurable).length > 0 ? configurable : undefined;
 }
 

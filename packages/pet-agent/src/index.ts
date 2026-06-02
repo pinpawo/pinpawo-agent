@@ -72,8 +72,8 @@ export type {
   HumanReviewDecisionType,
   HumanReviewRequest,
 } from './agent/orchestrator/humanReview';
-export { runAgent, extractToolCallLogs } from './agent/runAgent';
-export type { AgentInvokeInput, AgentRunResult, ToolCallLog } from './agent/runAgent';
+export { runAgent } from './agent/runAgent';
+export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
 export { createSubagent } from './subagent/createSubagent';
 export {
   createLLMWikiCurator,

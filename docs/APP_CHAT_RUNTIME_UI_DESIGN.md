@@ -113,7 +113,7 @@ HITL 和 interrupt 分开处理。
 - `system.notice`
 - `error`
 
-`pinpawo-app` app/API 需要消费 `LocalAgentEvent` envelope；local-agent 不再发送 `token` / `tool_log` / `done` 这类旧运行态消息。
+`pinpawo-app` app/API 需要消费 `LocalAgentEvent` envelope；local-agent 不再发送旧运行态消息。
 
 app run state 可以在 API envelope 中补充这些控制字段：
 

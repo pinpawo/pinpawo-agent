@@ -169,6 +169,7 @@ function buildChatSetup(
     toolkits: deps.localToolkits,
     extraCapabilities: deps.localCapabilities,
     threadId,
+    interfaceKind: 'tui',
     dryRun: false,
     checkpoint: chatCheckpointer,
     userCapabilities: deps.userCapabilities,

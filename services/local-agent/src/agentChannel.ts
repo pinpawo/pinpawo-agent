@@ -26,6 +26,11 @@ import { agentStore } from './agentStore';
 import { loadStoredConfig } from './storage';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
 import type { LoadedUserCapability } from './capabilityLoader';
+import {
+  buildLocalAgentInterfaceContext,
+  type LocalAgentInterfaceContext,
+  type LocalAgentInterfaceKind,
+} from './chatInterface';
 
 function buildActor(context: AgentContext) {
   return {
@@ -153,6 +158,7 @@ export type AgentChannelSetup = {
   graphKey: string;
   graphConfig: OrchestratorConfig;
   input: AgentInvokeInput;
+  interfaceContext?: LocalAgentInterfaceContext;
 };
 
 function buildGraphKey(parts: Array<string | null | undefined>) {
@@ -174,6 +180,7 @@ export function buildLocalChatAgentInput(params: {
   tools?: StructuredTool[];
   toolkits?: AgentToolkit[];
   threadId?: string;
+  interfaceKind?: LocalAgentInterfaceKind | null;
   dryRun?: boolean;
   logger?: CrawlerLogFn;
   checkpoint?: BaseCheckpointSaver;
@@ -250,6 +257,10 @@ export function buildLocalChatAgentInput(params: {
       workdir: config.workdir,
       runtimeEnvironment: buildRuntimeEnvironmentSummary(),
     },
+    interfaceContext: buildLocalAgentInterfaceContext({
+      threadId: params.threadId,
+      kind: params.interfaceKind ?? null,
+    }),
   };
 }
 

@@ -50,8 +50,9 @@ services/local-agent/src/commands/tui.tsx
 当前重构入口：
 
 - `commands/tui.tsx` 是 CLI entry，主要负责加载配置并挂载 TUI app。
-- `tui/TuiApp.tsx` 负责 Ink layout、输入组合、命令分发和 modal 状态。
+- `tui/TuiApp.tsx` 负责 Ink layout、输入组合、命令分发和 hooks/components 组装。
 - `tui/TuiRuntimeController.ts` 负责 websocket lifecycle、发送 client message、session/history 加载；本地 HTTP 访问由 `tui/tuiLocalServerClient.ts` 承担。
+- `/resume` picker 的 modal 状态、sessions 加载和恢复流程由 `tui/useResumePickerController.ts` 承担。
 - slash command 已收敛为 `tui/input/commandRegistry.ts`，统一承载 help metadata。
 - key handling 已收敛为 `tui/input/keymap.ts`，统一表达 global、composer、approval、resume picker 快捷键。
 - message history、active operation、pending review、connection state 已收敛到 `tui/state/tuiStateReducer.ts`。
@@ -229,7 +230,7 @@ app / TUI / macOS companion 可以共享：
 
 短期建议聚焦整理 TUI 目录，server/runtime 拆分保留给 local-agent 架构阶段。
 
-目录粒度的原则：**只为当前已存在的代码建文件，不为想象中的功能预留空目录**。当前 TUI 已拆为 `TuiApp`、runtime controller、HTTP/WS clients、state reducer、input registry/keymap、render adapter 和组件；后续继续按真实职责收敛，不为尚未落地的能力预留空目录。
+目录粒度的原则：**只为当前已存在的代码建文件，不为想象中的功能预留空目录**。当前 TUI 已拆为 `TuiApp`、runtime controller、HTTP/WS clients、resume picker controller、state reducer、input registry/keymap、render adapter 和组件；后续继续按真实职责收敛，不为尚未落地的能力预留空目录。
 
 ```txt
 services/local-agent/src/
@@ -242,6 +243,7 @@ services/local-agent/src/
     tuiLocalServerClient.ts  # TUI -> local HTTP: health/history/sessions/resume
     tuiLocalWebSocketClient.ts # TUI -> local WS: socket lifecycle + client message send
     tuiServerMessageActions.ts # typed server messages -> TuiAction[]
+    useResumePickerController.ts # resume picker modal state + async session resume flow
 
     state/
       tuiState.ts            # TuiState / TuiAction types(session-keyed,见 §5)
@@ -280,6 +282,7 @@ services/local-agent/src/
 - `tui/render/*` 面向 normalized event fields。
 - `tui/state/*` 保持纯状态计算（不含网络副作用，也不含动画时钟，见 §5）。
 - `TuiRuntimeController` 负责运行时编排、重连策略和 action dispatch；HTTP payload 解析在 `TuiLocalServerClient`，WS socket lifecycle 和 server message parsing 在 `TuiLocalWebSocketClient`，server message 到 reducer action 的纯映射在 `tuiServerMessageActions.ts`。
+- `useResumePickerController` 负责 `/resume` 的 picker 状态、异步加载和恢复 action 编排；`TuiApp` 只负责把它接入命令和 keymap。
 
 ## 5. TUI State 草案
 
@@ -620,7 +623,7 @@ LocalAgentEvent
 工作项（可按价值再拆小 PR）：
 
 - transcript export / debug view：先提供 `/export [path]`，把当前 session history 导出为 Markdown，作为 transcript model 前的可用调试入口。未传 `path` 时默认写入 TUI 启动目录（`process.cwd()`）；`~/foo.md` 会展开到当前用户 home；有扩展名的 `path` 视为目标文件，无扩展名的 `path` 视为目录并在其下生成默认文件名；显式目标文件已存在时按常规导出语义覆盖。
-- resume picker：提供 `/resume`，从 local server 的 TUI session registry 读取可恢复 chat sessions；TUI session registry 使用 versioned state，并保留 v1 petId→suffix map 迁移读取，避免已有本地 TUI 会话丢失。TUI 侧通过 `TuiLocalServerClient` 访问本地 HTTP `/health`、`/history`、`/sessions`、`/sessions/resume`，让 controller 只负责运行时状态和 websocket lifecycle；TUI 中用 picker 展示会话标题、消息数、更新时间和当前会话标记，选择后 local server 切换 active thread 并返回该 session transcript，TUI 替换当前 history。`/new` 创建新 TUI session 时保留旧 checkpoint，工具协议错误恢复这类内部 reset 可以删除坏 checkpoint。
+- resume picker：提供 `/resume`，从 local server 的 TUI session registry 读取可恢复 chat sessions；TUI session registry 使用 versioned state，并保留 v1 petId→suffix map 迁移读取，避免已有本地 TUI 会话丢失。TUI 侧通过 `TuiLocalServerClient` 访问本地 HTTP `/health`、`/history`、`/sessions`、`/sessions/resume`，让 controller 只负责运行时状态和 websocket lifecycle；TUI 中用 picker 展示会话标题、消息数、更新时间和当前会话标记，picker 状态与异步恢复流程由 `useResumePickerController` 管理；选择后 local server 切换 active thread 并返回该 session transcript，TUI 替换当前 history。`/new` 创建新 TUI session 时保留旧 checkpoint，工具协议错误恢复这类内部 reset 可以删除坏 checkpoint。
 - diff renderer：文件修改 / shell patch / capability 变更的可审查 diff。此项依赖真实 before/after diff 源；TUI 不生成伪 diff。
 - transcript model：区分 durable messages 和 run activity。
 - file mention / path search、richer status line。

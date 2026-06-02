@@ -27,15 +27,11 @@ import {
 } from './state/tuiStateReducer';
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { exportSessionTranscript } from './transcript/transcriptExport';
+import { useResumePickerController } from './useResumePickerController';
 import type { TuiState } from './state/tuiState';
-import type { MessageRole, ResumeSessionSummary } from './types';
+import type { MessageRole } from './types';
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
-
-type ResumePickerState =
-  | { status: 'closed'; sessions: ResumeSessionSummary[]; selectedIndex: number }
-  | { status: 'loading'; sessions: ResumeSessionSummary[]; selectedIndex: number }
-  | { status: 'open'; sessions: ResumeSessionSummary[]; selectedIndex: number };
 
 // ---------------------------------------------------------------------------
 // Main TUI application
@@ -59,15 +55,9 @@ export function TuiApp(props: { actorId: string }) {
   const [studioMode, setStudioMode] = useState(false);
   const [composerCursorOffset, setComposerCursorOffset] = useState(0);
   const [approvalIndex, setApprovalIndex] = useState(0);
-  const [resumePicker, setResumePicker] = useState<ResumePickerState>({
-    status: 'closed',
-    sessions: [],
-    selectedIndex: 0,
-  });
 
   const stateRef = useRef<TuiState>(tuiState);
   const lastInterruptAtRef = useRef(0);
-  const resumeRequestIdRef = useRef(0);
   const localServerPort = config.localServerPort;
   // Studio 模式持续期间共用一个 conversationId,这样 wiki 跨 turn 累积、
   // pet runtime 的 thread namespace 也保持一致
@@ -88,7 +78,6 @@ export function TuiApp(props: { actorId: string }) {
   const pendingUi = selectFocusedPendingUi(tuiState);
   const activeOperations = selectFocusedActiveOperations(tuiState);
   const pendingApproval = selectFocusedPendingApproval(tuiState);
-  const resumePickerOpen = resumePicker.status !== 'closed';
   const approvalOptions = useMemo(
     () => (pendingApproval ? buildApprovalOptions(pendingApproval) : []),
     [pendingApproval],
@@ -134,92 +123,28 @@ export function TuiApp(props: { actorId: string }) {
     setComposerCursorOffset(0);
   };
 
-  const openResumePicker = () => {
-    if (!ready) {
-      appendMessage('system', TUI_TEXT.disconnectedCannotSend);
-      return;
-    }
-    if (busy) {
-      appendMessage('system', TUI_TEXT.busyCannotSend);
-      return;
-    }
-    clearInputValue();
-    const requestId = resumeRequestIdRef.current + 1;
-    resumeRequestIdRef.current = requestId;
-    setResumePicker((current) => ({
-      status: 'loading',
-      sessions: current.sessions,
-      selectedIndex: current.selectedIndex,
-    }));
-    void runtimeController.listResumeSessions().then((sessions) => {
-      if (resumeRequestIdRef.current !== requestId) return;
-      setResumePicker({
-        status: 'open',
-        sessions,
-        selectedIndex: 0,
-      });
-    }).catch((err) => {
-      if (resumeRequestIdRef.current !== requestId) return;
-      const message = err instanceof Error ? err.message : String(err);
-      setResumePicker({ status: 'closed', sessions: [], selectedIndex: 0 });
-      appendMessage('system', TUI_TEXT.resumeFailed(message));
-    });
+  const resetStudioMode = () => {
+    studioModeRef.current = false;
+    studioConversationIdRef.current = null;
+    setStudioMode(false);
   };
 
-  const closeResumePicker = () => {
-    resumeRequestIdRef.current += 1;
-    setResumePicker((current) => ({
-      status: 'closed',
-      sessions: current.sessions,
-      selectedIndex: current.selectedIndex,
-    }));
-  };
-
-  const resumeSelectedSession = () => {
-    if (resumePicker.status !== 'open') return;
-    const selected = resumePicker.sessions[resumePicker.selectedIndex];
-    if (!selected) {
-      closeResumePicker();
-      appendMessage('system', TUI_TEXT.resumeEmpty);
-      return;
-    }
-    const requestId = resumeRequestIdRef.current + 1;
-    resumeRequestIdRef.current = requestId;
-    setResumePicker((current) => ({
-      status: 'loading',
-      sessions: current.sessions,
-      selectedIndex: current.selectedIndex,
-    }));
-    void runtimeController.resumeSession(selected.id).then(({ session, history }) => {
-      if (resumeRequestIdRef.current !== requestId) return;
-      studioModeRef.current = false;
-      studioConversationIdRef.current = null;
-      setStudioMode(false);
-      dispatch({
-        type: 'session.clear',
-        statusMessage: TUI_TEXT.resumeSucceeded(session.title),
-      });
-      dispatch({
-        type: 'session.set_kind',
-        kind: 'chat',
-      });
-      dispatch({
-        type: 'session.replace_history',
-        history,
-      });
-      dispatch({
-        type: 'input.set',
-        value: '',
-      });
-      setResumePicker({ status: 'closed', sessions: [], selectedIndex: 0 });
-      appendMessage('system', TUI_TEXT.resumeSucceeded(session.title));
-    }).catch((err) => {
-      if (resumeRequestIdRef.current !== requestId) return;
-      const message = err instanceof Error ? err.message : String(err);
-      setResumePicker({ status: 'closed', sessions: [], selectedIndex: 0 });
-      appendMessage('system', TUI_TEXT.resumeFailed(message));
-    });
-  };
+  const {
+    resumePicker,
+    resumePickerOpen,
+    openResumePicker,
+    closeResumePicker,
+    resumeSelectedSession,
+    moveResumeSelection,
+  } = useResumePickerController({
+    ready,
+    busy,
+    appendSystemMessage: (text) => appendMessage('system', text),
+    clearInputValue,
+    dispatch,
+    resetStudioMode,
+    runtimeController,
+  });
 
   const submitCurrentInput = () => {
     const parsed = parseTuiCommand(inputValue);
@@ -432,17 +357,11 @@ export function TuiApp(props: { actorId: string }) {
         return;
 
       case 'resume.previous':
-        setResumePicker((current) => ({
-          ...current,
-          selectedIndex: Math.max(0, current.selectedIndex - 1),
-        }));
+        moveResumeSelection(-1);
         return;
 
       case 'resume.next':
-        setResumePicker((current) => ({
-          ...current,
-          selectedIndex: Math.min(Math.max(0, current.sessions.length - 1), current.selectedIndex + 1),
-        }));
+        moveResumeSelection(1);
         return;
 
       case 'resume.submit':

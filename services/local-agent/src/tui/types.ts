@@ -21,7 +21,7 @@ export type ApprovalOption = {
   resume?: unknown;
 };
 
-export type ActiveTool = {
+export type ActiveOperation = {
   name: string;
   label: string;
   detail: string;

@@ -153,7 +153,7 @@ toolName -> operation metadata
 
 不同客户端可以消费同一个事件，但渲染不同。
 
-- TUI：渲染成紧凑文本、active tool line、system message。
+- TUI：渲染成紧凑文本、active operation line、system message。
 - App：渲染成结构化 run state、pet gif、compact activity strip。
 - macOS companion：通过 `/health` 读取 agent run 和 active operation 摘要，pet 动画按 `operation.kind/title/target/summary` 映射。
 - Logs/debug：保留 JSON。
@@ -458,14 +458,14 @@ type OperationRegistry = {
 
 ### 阶段 2：TUI 切到 LocalAgentEvent
 
-状态：已完成。TUI 本地路径消费 `LocalAgentEvent`，tool activity 使用 `operation` 展示语义。
+状态：已完成。TUI 本地路径消费 `LocalAgentEvent`，operation activity 使用 `operation` 展示语义。
 
 目标：TUI 不再对内部 toolName 做 formatter。
 
 工作项：
 
 - TUI 本地 server 只发送 `type: 'event'` agent run activity。
-- TUI active tool state 消费 `operation.title/target/summary`。
+- TUI active operation state 消费 `operation.title/target/summary`。
 - 删除或降级当前面向 toolName 的 presentation registry。
 
 产出：

@@ -118,7 +118,7 @@ function activeRunToPendingUi(run: ActiveRunModel | null) {
   };
 }
 
-function activeRunToActiveTools(run: ActiveRunModel | null) {
+function activeRunToActiveOperations(run: ActiveRunModel | null) {
   return run?.activeOperations.map((operation) => ({
     name: operation.key,
     label: operation.title,
@@ -521,8 +521,8 @@ export function selectFocusedPendingUi(state: TuiState) {
   return activeRunToPendingUi(selectFocusedActiveRun(state));
 }
 
-export function selectFocusedActiveTools(state: TuiState) {
-  return activeRunToActiveTools(selectFocusedActiveRun(state));
+export function selectFocusedActiveOperations(state: TuiState) {
+  return activeRunToActiveOperations(selectFocusedActiveRun(state));
 }
 
 export function selectFocusedPendingApproval(state: TuiState) {

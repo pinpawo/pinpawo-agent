@@ -54,7 +54,7 @@
 - app 清空当前 pet 的本地聊天显示，并写入一条可见的 `system` 消息。
 - 如果服务端重置失败，app 不清空当前聊天，只写入系统错误消息。
 
-## Tool Activity UI
+## Operation Activity UI
 
 工具执行应该显示成当前运行状态，而不是连续刷屏：
 

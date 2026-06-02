@@ -5,7 +5,7 @@ import type {
 } from '../../events/localAgentEvent';
 import { TUI_TEXT } from './text';
 import { formatElapsed, wrapLine } from './terminalText';
-import type { ActiveTool, PendingUiState } from '../types';
+import type { ActiveOperation, PendingUiState } from '../types';
 
 export function shorten(value: string, max = 60) {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -90,22 +90,24 @@ export function buildBusyStatusLine(
   pending: PendingUiState,
   now: number,
   spinnerFrame: string,
-  activeTools: ActiveTool[],
+  activeOperations: ActiveOperation[],
 ) {
   const phase = buildBusyPhaseLabel(pending, now);
   const elapsed = formatElapsed(pending.startedAt, now);
   const detail = pending.charCount > 0 ? ` · ${TUI_TEXT.modelOutputChars(pending.charCount)}` : '';
-  const tools = activeTools.length > 0 ? ` · ${activeTools.map((tool) => tool.name).join(', ')}` : '';
-  return `${spinnerFrame} ${phase} · ${elapsed}${detail}${tools}`;
+  const operations = activeOperations.length > 0
+    ? ` · ${activeOperations.map((operation) => operation.name).join(', ')}`
+    : '';
+  return `${spinnerFrame} ${phase} · ${elapsed}${detail}${operations}`;
 }
 
-export function buildActiveToolLines(activeTools: ActiveTool[], now: number, width: number) {
-  return activeTools.flatMap((tool, index) =>
+export function buildActiveOperationLines(activeOperations: ActiveOperation[], now: number, width: number) {
+  return activeOperations.flatMap((operation, index) =>
     wrapLine(
-      `${tool.label} · ${formatElapsed(tool.startedAt, now)}${tool.detail ? ` · ${tool.detail}` : ''}`,
+      `${operation.label} · ${formatElapsed(operation.startedAt, now)}${operation.detail ? ` · ${operation.detail}` : ''}`,
       width,
     ).map((text, lineIndex) => ({
-      id: `tool-${tool.name}-${index}-${lineIndex}`,
+      id: `operation-${operation.name}-${index}-${lineIndex}`,
       text,
     })),
   );

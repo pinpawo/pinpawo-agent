@@ -45,7 +45,7 @@ services/local-agent/src/commands/tui.tsx
   - `system.notice`
   - `error`
 - 支持 `interrupting` / `interrupted` / `studio_response` / `studio_error` 这些 session control message。
-- 有基础 input、slash commands、active tool line、system message、interrupt selector。
+- 有基础 input、slash commands、active operation line、system message、interrupt selector。
 
 当前重构入口：
 

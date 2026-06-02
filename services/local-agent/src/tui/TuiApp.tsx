@@ -9,14 +9,14 @@ import { ResumePicker } from './components/ResumePicker';
 import { formatTuiCommandHelp, parseTuiCommand } from './input/commandRegistry';
 import { applyComposerInput, resolveTuiKeyAction } from './input/keymap';
 import {
-  buildActiveToolLines,
+  buildActiveOperationLines,
   buildBusyStatusLine,
 } from './render/eventText';
 import { formatNow } from './render/terminalText';
 import { TUI_TEXT } from './render/text';
 import { createInitialTuiState, createSession } from './state/tuiState';
 import {
-  selectFocusedActiveTools,
+  selectFocusedActiveOperations,
   selectFocusedBusy,
   selectFocusedHistory,
   selectFocusedPendingApproval,
@@ -86,7 +86,7 @@ export function TuiApp(props: { actorId: string }) {
   const ready = selectReady(tuiState);
   const busy = selectFocusedBusy(tuiState);
   const pendingUi = selectFocusedPendingUi(tuiState);
-  const activeTools = selectFocusedActiveTools(tuiState);
+  const activeOperations = selectFocusedActiveOperations(tuiState);
   const pendingApproval = selectFocusedPendingApproval(tuiState);
   const resumePickerOpen = resumePicker.status !== 'closed';
   const approvalOptions = useMemo(
@@ -483,9 +483,9 @@ export function TuiApp(props: { actorId: string }) {
 
   const spinnerFrame = SPINNER_FRAMES[animationFrame];
   const contentWidth = Math.max(20, terminalSize.columns - 4);
-  const activeToolLines = useMemo(
-    () => buildActiveToolLines(activeTools, now, contentWidth),
-    [activeTools, now, contentWidth],
+  const activeOperationLines = useMemo(
+    () => buildActiveOperationLines(activeOperations, now, contentWidth),
+    [activeOperations, now, contentWidth],
   );
 
   // Input area focus: only when ready, not busy, and no modal panel.
@@ -506,9 +506,9 @@ export function TuiApp(props: { actorId: string }) {
       <Static items={messages}>
         {(entry) => <MessageBlock key={entry.id} entry={entry} petName={petName} width={contentWidth} />}
       </Static>
-      {activeToolLines.length > 0 ? (
+      {activeOperationLines.length > 0 ? (
         <Box flexDirection="column" marginTop={1}>
-          {activeToolLines.map((line) => (
+          {activeOperationLines.map((line) => (
             <Text key={line.id} color="blue" dimColor>
               {line.text}
             </Text>
@@ -534,7 +534,7 @@ export function TuiApp(props: { actorId: string }) {
       {!pendingApproval ? (
         <Text dimColor>
           {pendingUi
-            ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeTools)
+            ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeOperations)
             : `${status} · ${petSummary}`}
         </Text>
       ) : null}

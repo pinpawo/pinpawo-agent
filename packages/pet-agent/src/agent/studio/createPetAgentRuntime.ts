@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import type { AgentCapability, CapabilityAvailability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
+import type { ToolkitOperationMetadata } from '../../types/toolkit';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -26,7 +27,7 @@ import type {
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
 } from './types';
-import { createWikiReadToolkit } from './wikiReadToolkit';
+import { createWikiReadToolkit, wikiReadToolOperations } from './wikiReadToolkit';
 
 export type PetAgentRuntimeConfig = {
   models: AgentModels;
@@ -38,6 +39,7 @@ export type PetAgentRuntimeConfig = {
   capabilities?: AgentCapability[];
   capabilityAvailability?: Record<string, CapabilityAvailability>;
   tools?: StructuredTool[];
+  toolOperations?: Record<string, ToolkitOperationMetadata>;
   execution?: AgentExecution;
   workdir?: string;
   /**
@@ -136,14 +138,21 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     }
 
     const messages = await buildInvokeMessages(input.brief, input.wikiRoot);
+    const tools = [
+      ...(config.tools ?? []),
+      ...(input.wikiRoot ? createWikiReadToolkit(input.wikiRoot) : []),
+    ];
+    const toolOperations = {
+      ...(config.toolOperations ?? {}),
+      ...(input.toolOperations ?? {}),
+      ...(input.wikiRoot ? wikiReadToolOperations : {}),
+    };
     const configurable = {
       actor: config.actor,
       thread_id: input.threadId,
       capabilities: [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])],
-      tools: [
-        ...(config.tools ?? []),
-        ...(input.wikiRoot ? createWikiReadToolkit(input.wikiRoot) : []),
-      ],
+      tools,
+      toolOperations,
       execution: input.execution ?? config.execution,
       workdir: input.workdir ?? config.workdir,
       runtimeEnvironment: input.runtimeEnvironment,

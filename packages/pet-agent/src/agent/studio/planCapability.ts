@@ -2,6 +2,7 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 
 import type { AgentCapability } from '../../types/capability';
+import type { ToolkitOperationMetadata } from '../../types/toolkit';
 import type { StudioTask, StudioTaskPlan } from './types';
 
 /**
@@ -51,6 +52,49 @@ function buildAgentsHint(agents?: CreatePlanCapabilityOptions['availableAgents']
   });
   return ['当前 Studio 内可用的 agents:', ...lines].join('\n');
 }
+
+function readTasks(input: unknown) {
+  if (!input || typeof input !== 'object' || !('tasks' in input)) {
+    return [];
+  }
+  const tasks = (input as { tasks?: unknown }).tasks;
+  return Array.isArray(tasks) ? tasks : [];
+}
+
+export const planCapabilityToolOperations = {
+  submit_plan: {
+    kind: 'studio.plan.submit',
+    title: '提交计划',
+    summarizeInput: (input: unknown) => {
+      const tasks = readTasks(input);
+      const petIds = tasks
+        .map((task) => task && typeof task === 'object' && 'petId' in task
+          ? (task as { petId?: unknown }).petId
+          : null)
+        .filter((petId): petId is string => typeof petId === 'string' && petId.length > 0);
+      return {
+        summary: `提交 ${tasks.length} 个任务`,
+        details: {
+          taskCount: tasks.length,
+          petIds,
+        },
+      };
+    },
+    summarizeOutput: (output: unknown) => {
+      if (typeof output !== 'string') {
+        return null;
+      }
+      try {
+        const parsed = JSON.parse(output) as { taskCount?: unknown };
+        return typeof parsed.taskCount === 'number'
+          ? { summary: `已接收 ${parsed.taskCount} 个任务` }
+          : null;
+      } catch {
+        return null;
+      }
+    },
+  },
+} satisfies Record<string, ToolkitOperationMetadata>;
 
 export function createPlanCapability(options: CreatePlanCapabilityOptions): AgentCapability {
   const agentsHint = buildAgentsHint(options.availableAgents);
@@ -113,6 +157,7 @@ export function createPlanCapability(options: CreatePlanCapabilityOptions): Agen
 
       return {
         tools: [submitPlan],
+        operations: planCapabilityToolOperations,
         instructions,
       };
     },

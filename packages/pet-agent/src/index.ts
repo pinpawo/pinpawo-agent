@@ -90,6 +90,8 @@ export {
   defaultPromptProvider,
   ensureWikiSkeleton,
   fileReadPromptProvider,
+  planCapabilityToolOperations,
+  wikiReadToolOperations,
 } from './agent/studio/index';
 export type {
   CreatePlanCapabilityOptions,

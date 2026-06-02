@@ -5,10 +5,31 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import type { ToolkitOperationMetadata } from '../../types/toolkit';
 
 const execFileAsync = promisify(execFile);
 
 const MAX_OUTPUT_BYTES = 64 * 1024;
+
+function readString(input: unknown, key: string) {
+  if (!input || typeof input !== 'object' || !(key in input)) {
+    return null;
+  }
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim()
+    ? value.trim()
+    : null;
+}
+
+function readNumber(input: unknown, key: string) {
+  if (!input || typeof input !== 'object' || !(key in input)) {
+    return null;
+  }
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : null;
+}
 
 function truncate(text: string, limit = MAX_OUTPUT_BYTES): string {
   if (Buffer.byteLength(text, 'utf8') <= limit) return text;
@@ -29,6 +50,86 @@ function ensureInsideRoot(root: string, target: string): string {
   }
   return absoluteTarget;
 }
+
+export const wikiReadToolOperations = {
+  wiki_read_ls: {
+    kind: 'wiki.dir.list',
+    title: '列出知识库',
+    summarizeInput: (input: unknown) => {
+      const target = readString(input, 'path') ?? '.';
+      return {
+        target,
+        summary: target === '.' ? '列出根目录' : `列出 ${target}`,
+      };
+    },
+  },
+  wiki_read_cat: {
+    kind: 'wiki.file.read',
+    title: '读取知识库文件',
+    summarizeInput: (input: unknown) => ({
+      target: readString(input, 'path') ?? undefined,
+      summary: '读取完整文件',
+    }),
+  },
+  wiki_read_grep: {
+    kind: 'wiki.search.grep',
+    title: '搜索知识库内容',
+    summarizeInput: (input: unknown) => {
+      const pattern = readString(input, 'pattern');
+      const target = readString(input, 'path') ?? '.';
+      return {
+        target,
+        summary: pattern ?? undefined,
+        details: {
+          pattern,
+          path: target,
+        },
+      };
+    },
+  },
+  wiki_read_find: {
+    kind: 'wiki.search.find',
+    title: '查找知识库文件',
+    summarizeInput: (input: unknown) => {
+      const name = readString(input, 'name');
+      const ext = readString(input, 'ext');
+      return {
+        target: name ?? (ext ? `*.${ext.replace(/^\./, '')}` : undefined),
+        summary: name ?? (ext ? `扩展名 ${ext.replace(/^\./, '')}` : '查找文件'),
+        details: {
+          name,
+          ext,
+        },
+      };
+    },
+  },
+  wiki_read_head: {
+    kind: 'wiki.file.head',
+    title: '读取知识库文件开头',
+    summarizeInput: (input: unknown) => {
+      const target = readString(input, 'path');
+      const count = readNumber(input, 'n') ?? 20;
+      return {
+        target: target ?? undefined,
+        summary: `读取前 ${count} 行`,
+        details: { lines: count },
+      };
+    },
+  },
+  wiki_read_tail: {
+    kind: 'wiki.file.tail',
+    title: '读取知识库文件结尾',
+    summarizeInput: (input: unknown) => {
+      const target = readString(input, 'path');
+      const count = readNumber(input, 'n') ?? 20;
+      return {
+        target: target ?? undefined,
+        summary: `读取最后 ${count} 行`,
+        details: { lines: count },
+      };
+    },
+  },
+} satisfies Record<string, ToolkitOperationMetadata>;
 
 async function readDirRecursive(absolutePath: string, root: string, depth: number, maxDepth = 8): Promise<string[]> {
   const lines: string[] = [];

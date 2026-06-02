@@ -49,12 +49,13 @@ services/local-agent/src/commands/tui.tsx
 
 当前重构入口：
 
-- `commands/tui.tsx` 聚合了连接、协议处理、状态维护、输入、命令、按键、渲染、布局和 HITL 选择器。
-- `commands/tuiEventRenderer.ts` 已经面向 `LocalAgentEvent`，后续适合移动到 TUI render adapter 边界内。
-- slash command 适合收敛为 registry，统一承载 help metadata、enabled state 和补全入口。
-- key handling 适合收敛为 keymap，统一表达 global、composer、approval 三类快捷键。
-- message history、active operation、pending review、studio mode、connection state 适合收敛为统一的 TUI state model。
-- formatter 目前是 TUI 临时文本渲染。后续可以演进为 TUI render adapter，并与 app 的移动端 run state 保持同一事件语义。
+- `commands/tui.tsx` 是 CLI entry，主要负责加载配置并挂载 TUI app。
+- `tui/TuiApp.tsx` 负责 Ink layout、输入组合、命令分发和 modal 状态。
+- `tui/TuiRuntimeController.ts` 负责 websocket lifecycle、发送 client message、session/history 加载；本地 HTTP 访问由 `tui/tuiLocalServerClient.ts` 承担。
+- slash command 已收敛为 `tui/input/commandRegistry.ts`，统一承载 help metadata。
+- key handling 已收敛为 `tui/input/keymap.ts`，统一表达 global、composer、approval、resume picker 快捷键。
+- message history、active operation、pending review、connection state 已收敛到 `tui/state/tuiStateReducer.ts`。
+- terminal render adapter 位于 `tui/render/`：`eventText.ts` 面向 `LocalAgentEvent` 展示字段，`messageText.ts` 处理 assistant Markdown 到终端可读文本的预处理，`text.ts` 集中 TUI 文案。
 
 ## 3. 设计原则
 
@@ -237,7 +238,9 @@ services/local-agent/src/
 
   tui/
     TuiApp.tsx               # app shell: compose hooks/components
-    TuiRuntimeController.ts  # 阶段 1C: websocket/http 副作用、发送 client message、session/history 加载
+    TuiRuntimeController.ts  # 阶段 1C: 运行时编排、重连策略、dispatch actions
+    tuiLocalServerClient.ts  # TUI -> local HTTP: health/history/sessions/resume
+    tuiLocalWebSocketClient.ts # TUI -> local WS: socket lifecycle + client message send
 
     state/
       tuiState.ts            # TuiState / TuiAction types(session-keyed,见 §5)
@@ -248,7 +251,8 @@ services/local-agent/src/
       keymap.ts              # global/composer/approval key bindings
 
     render/
-      eventText.ts           # LocalAgentEvent / studio.progress -> 终端文案(由现 tuiEventRenderer.ts 演进)
+      eventText.ts           # LocalAgentEvent / studio.progress -> terminal text props
+      messageText.ts         # assistant Markdown -> terminal-stable Markdown/text preprocessing
       text.ts                # TUI_TEXT: 当前中文 TUI 文本入口；完整 i18n 后续单独设计
 
     components/
@@ -558,6 +562,7 @@ LocalAgentEvent
 
 - 新增 `TuiRuntimeController` 或等价 hook/controller。
 - 负责 local-agent health check、WebSocket connect/retry、history restore。
+- HTTP payload 解析和 WebSocket socket lifecycle 可拆到专用 client，controller 保留运行时编排和 action dispatch。
 - 负责发送 chat/studio/review/interrupt/new_session client message。
 - controller 只 dispatch action，不持有展示逻辑。
 - 断线/重连状态通过 reducer 更新 connection state。
@@ -590,6 +595,7 @@ LocalAgentEvent
 工作项：
 
 - active operation、status line、system notice、studio progress 统一走 `render/eventText.ts`，直接映射成组件 props。
+- assistant Markdown 进入 Ink Markdown 前先走 `render/messageText.ts`，把 terminal 宽度敏感的 table / 长装饰分隔线转成稳定文本。
 - `InterruptSelector` 升级为 `ApprovalPanel`。
 - TUI 文案集中到 `tui/render/text.ts` 的 `TUI_TEXT`。
 

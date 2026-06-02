@@ -388,7 +388,7 @@ type ApprovalRequestModel = {
 - **run 结束统一收尾**：`message.completed`（chat）、`studio_response`（studio done/stopped）、`studio_error` 都映射到同一个内部"run 结束"动作，作用在各自 session 上——写入 history、清空 `activeRun`、删除 `runRoute[requestId]`、清理 pending review。收尾逻辑只有一处（见 §3.3）。
 - `human_review.requested` 让对应 session 进入 `waiting_human`，由 `ApprovalPanel` 接管输入区域。
 - 用户主动 interrupt 让对应 session 进入 `interrupting`；该 run 的迟到事件因为后续会从 `runRoute` 移除而被忽略。
-- `tokenUsage` 记录当前会话可观察到的 LLM token usage / context usage；这里的 token 是模型用量统计，不保存鉴权 token、API key 或本地 secret。协议字段落地前保持 `null`（见 §3.5）。
+- `tokenUsage` 记录当前会话可观察到的 LLM token usage / context usage；这里的 token 是模型用量统计，不保存鉴权 token、API key 或本地 secret。协议字段落地前保持 `null`（见 §3.5）；`/new` 清空会话或 `/resume` 替换历史时也重置为 `null`，避免展示旧 run 的统计。
 
 ### 5.4 history 与 `<Static>` 的交互
 

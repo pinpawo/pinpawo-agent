@@ -190,6 +190,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) => ({
         ...session,
         history: trimHistory(action.history),
+        tokenUsage: null,
       }));
 
     case 'session.clear':
@@ -204,6 +205,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...session,
           history: [],
           activeRun: null,
+          tokenUsage: null,
         }));
         return sessionId
           ? { ...nextState, runRoute: removeSessionRunRoutes(nextState, sessionId) }

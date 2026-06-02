@@ -116,6 +116,52 @@ test('tuiStateReducer falls back to assistant draft when completed text is empty
   ]);
 });
 
+test('tuiStateReducer clears session token usage when replacing or clearing history', () => {
+  let state = initialState();
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        tokenUsage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          totalTokens: 150,
+        },
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: 'session.replace_history',
+    history: [{ id: 'restored', kind: 'assistant', text: 'restored' }],
+  });
+
+  assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
+
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        },
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: 'session.clear',
+  });
+
+  assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
+});
+
 test('tuiStateReducer drops late or unknown requestId events', () => {
   const state = startRun(initialState(), 'req-1');
 

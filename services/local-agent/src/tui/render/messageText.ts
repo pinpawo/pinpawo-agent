@@ -1,4 +1,5 @@
 const LONG_SEPARATOR_RE = /^\s*[-=─]{10,}\s*$/u;
+const MARKDOWN_SEPARATOR_RE = /^\s*(?:-{3,}|={3,}|_{3,}|\*{3,}|─{3,})\s*$/u;
 
 export function normalizeAssistantMessageMarkdown(text: string) {
   const lines = text.split('\n');
@@ -31,7 +32,7 @@ export function normalizeAssistantMessageMarkdown(text: string) {
         continue;
       }
 
-      if (LONG_SEPARATOR_RE.test(line)) {
+      if (isDecorativeSeparator(lines, index)) {
         normalized.push('. . .');
         index += 1;
         continue;
@@ -43,6 +44,17 @@ export function normalizeAssistantMessageMarkdown(text: string) {
   }
 
   return normalized.join('\n');
+}
+
+function isDecorativeSeparator(lines: string[], index: number) {
+  const line = lines[index] ?? '';
+  if (LONG_SEPARATOR_RE.test(line)) return true;
+  if (!MARKDOWN_SEPARATOR_RE.test(line)) return false;
+  return isBlank(lines[index - 1]);
+}
+
+function isBlank(line: string | undefined) {
+  return line === undefined || line.trim() === '';
 }
 
 function parseMarkdownTableRow(line: string | undefined) {

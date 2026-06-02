@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { loadAgentContext } from '../contextLoader';
-import { parseLocalAgentServerMessage } from '../localAgentProtocol';
+import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { TUI_TEXT } from './render/text';
 import { formatNow } from './render/terminalText';
 import { TuiLocalServerClient } from './tuiLocalServerClient';
@@ -64,7 +64,7 @@ export class TuiRuntimeController {
       port: options.localServerPort,
       handlers: {
         onOpen: () => this.handleWebSocketOpen(),
-        onMessage: (data) => this.handleWsMessage(data),
+        onServerMessage: (message) => this.handleServerMessage(message),
         onClose: () => this.handleWebSocketClose(),
         onError: (err) => this.handleWebSocketError(err),
       },
@@ -452,10 +452,9 @@ export class TuiRuntimeController {
     }
   }
 
-  private handleWsMessage(data: unknown) {
+  private handleServerMessage(msg: LocalAgentServerMessage) {
     try {
-      const msg = parseLocalAgentServerMessage(data);
-      if (!msg || msg.type === 'pong') {
+      if (msg.type === 'pong') {
         return;
       }
 

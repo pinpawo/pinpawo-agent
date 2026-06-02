@@ -200,7 +200,7 @@ LocalAgentEvent / ServerControlMessage / UserInputAction
 
 职责边界：
 
-- WebSocket JSON 解析属于 protocol/controller。
+- WebSocket JSON 解析属于 protocol/client boundary；controller 只接收 typed server messages。
 - 协议版本适配属于 protocol adapter。
 - agent runtime stream normalization 属于 local-agent event normalizer。
 - terminal 文案格式化属于 TUI render adapter。
@@ -562,7 +562,7 @@ LocalAgentEvent
 
 - 新增 `TuiRuntimeController` 或等价 hook/controller。
 - 负责 local-agent health check、WebSocket connect/retry、history restore。
-- HTTP payload 解析和 WebSocket socket lifecycle 可拆到专用 client，controller 保留运行时编排和 action dispatch。
+- HTTP payload 解析和 WebSocket socket lifecycle / server message parsing 可拆到专用 client，controller 保留运行时编排和 action dispatch。
 - 负责发送 chat/studio/review/interrupt/new_session client message。
 - controller 只 dispatch action，不持有展示逻辑。
 - 断线/重连状态通过 reducer 更新 connection state。

@@ -1,12 +1,14 @@
 import WebSocket from 'ws';
 import {
+  parseLocalAgentServerMessage,
   sendLocalAgentMessage,
   type LocalAgentClientMessage,
+  type LocalAgentServerMessage,
 } from '../localAgentProtocol';
 
 export type TuiLocalWebSocketClientHandlers = {
   onOpen: () => void;
-  onMessage: (data: WebSocket.RawData) => void;
+  onServerMessage: (message: LocalAgentServerMessage) => void;
   onClose: () => void;
   onError: (error: Error) => void;
 };
@@ -40,7 +42,10 @@ export class TuiLocalWebSocketClient {
 
     ws.on('message', (data) => {
       if (this.ws !== ws) return;
-      this.options.handlers.onMessage(data);
+      const message = parseLocalAgentServerMessage(data);
+      if (message) {
+        this.options.handlers.onServerMessage(message);
+      }
     });
 
     ws.on('close', () => {

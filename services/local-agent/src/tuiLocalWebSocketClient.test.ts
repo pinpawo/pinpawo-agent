@@ -57,10 +57,16 @@ test('TuiLocalWebSocketClient connects, sends messages, and dispatches socket ev
   assert.deepEqual(sockets[0]?.sent, [{ type: 'new_session' }]);
 
   sockets[0]?.emit('message', JSON.stringify({ type: 'pong' }));
+  sockets[0]?.emit('message', '{bad json');
+  sockets[0]?.emit('message', JSON.stringify({
+    type: 'tool_log',
+    requestId: 'legacy',
+    toolName: 'read_file',
+  }));
   sockets[0]?.emit('error', new Error('boom'));
   sockets[0]?.close();
 
-  assert.deepEqual(events, ['open', 'message:{"type":"pong"}', 'error:boom', 'close']);
+  assert.deepEqual(events, ['open', 'message:pong', 'error:boom', 'close']);
   assert.equal(client.hasSocket(), false);
   assert.equal(client.isConnected(), false);
 });
@@ -99,8 +105,8 @@ function createHandlers(events: string[]): TuiLocalWebSocketClientHandlers {
     onOpen: () => {
       events.push('open');
     },
-    onMessage: (data) => {
-      events.push(`message:${String(data)}`);
+    onServerMessage: (message) => {
+      events.push(`message:${message.type}`);
     },
     onClose: () => {
       events.push('close');

@@ -28,14 +28,35 @@ test('normalizeAssistantMessageMarkdown shortens decorative separators', () => {
     normalizeAssistantMessageMarkdown([
       'before',
       '------------------------------------------------------------------------',
+      '',
+      '---',
       'after',
     ].join('\n')),
     [
       'before',
       '. . .',
+      '',
+      '. . .',
       'after',
     ].join('\n'),
   );
+});
+
+test('normalizeAssistantMessageMarkdown preserves setext headings', () => {
+  const headingWithBlankAfter = [
+    'Heading',
+    '---',
+    '',
+    'body',
+  ].join('\n');
+  const headingWithBodyAfter = [
+    'Heading',
+    '---',
+    'body',
+  ].join('\n');
+
+  assert.equal(normalizeAssistantMessageMarkdown(headingWithBlankAfter), headingWithBlankAfter);
+  assert.equal(normalizeAssistantMessageMarkdown(headingWithBodyAfter), headingWithBodyAfter);
 });
 
 test('normalizeAssistantMessageMarkdown leaves fenced code blocks unchanged', () => {

@@ -4,17 +4,17 @@ import { loadAgentContext } from '../contextLoader';
 import { parseLocalAgentServerMessage, sendLocalAgentMessage } from '../localAgentProtocol';
 import { TUI_TEXT } from './render/text';
 import { formatNow } from './render/terminalText';
+import { TuiLocalServerClient } from './tuiLocalServerClient';
 import {
   selectFocusedActiveRun,
   selectFocusedBusy,
   selectFocusedPendingApproval,
 } from './state/tuiStateReducer';
-import type { HistoryCellModel, TuiAction, TuiState } from './state/tuiState';
-import type { ApprovalOption, ResumeSessionSummary } from './types';
+import type { TuiAction, TuiState } from './state/tuiState';
+import type { ApprovalOption } from './types';
 
 const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
-const LOCAL_SERVER_HEALTH_TIMEOUT_MS = 1500;
 const LOCAL_SERVER_RECONNECT_RETRIES = 5;
 const LOCAL_SERVER_RECONNECT_DELAY_MS = 2000;
 
@@ -30,18 +30,6 @@ function sleep(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-async function fetchWithTimeout(url: string, timeoutMs: number) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
-  try {
-    return await fetch(url, { signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) {
@@ -60,54 +48,19 @@ function makeHistoryMeta() {
   };
 }
 
-function parseHistoryMessages(messages: Array<{ role?: string; text?: string }> | undefined) {
-  return Array.isArray(messages)
-    ? messages.flatMap((item) => {
-      if (
-        (item.role === 'user' || item.role === 'assistant' || item.role === 'system')
-        && typeof item.text === 'string'
-        && item.text.trim()
-      ) {
-        return [{
-          id: randomUUID(),
-          kind: item.role,
-          text: item.text,
-        } satisfies HistoryCellModel];
-      }
-      return [];
-    })
-    : [];
-}
-
-function parseResumeSessionSummary(value: unknown): ResumeSessionSummary | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.id !== 'string'
-    || typeof record.title !== 'string'
-    || typeof record.createdAt !== 'string'
-    || typeof record.updatedAt !== 'string'
-  ) {
-    return null;
-  }
-  return {
-    id: record.id,
-    title: record.title,
-    messageCount: typeof record.messageCount === 'number' ? record.messageCount : 0,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-    active: record.active === true,
-  };
-}
-
 export class TuiRuntimeController {
   private ws: WebSocket | null = null;
   private disposed = false;
   private interruptTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  private readonly localServerClient: TuiLocalServerClient;
 
-  constructor(private readonly options: TuiRuntimeControllerOptions) {}
+  constructor(private readonly options: TuiRuntimeControllerOptions) {
+    this.localServerClient = new TuiLocalServerClient({
+      port: options.localServerPort,
+    });
+  }
 
   start() {
     this.disposed = false;
@@ -318,36 +271,11 @@ export class TuiRuntimeController {
   }
 
   async listResumeSessions() {
-    const res = await fetch(`http://127.0.0.1:${this.options.localServerPort}/sessions`);
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const payload = await res.json() as { sessions?: unknown };
-    return Array.isArray(payload.sessions)
-      ? payload.sessions.flatMap((item) => {
-          const session = parseResumeSessionSummary(item);
-          return session ? [session] : [];
-        })
-      : [];
+    return this.localServerClient.listResumeSessions();
   }
 
   async resumeSession(sessionId: string) {
-    const res = await fetch(
-      `http://127.0.0.1:${this.options.localServerPort}/sessions/resume?sessionId=${encodeURIComponent(sessionId)}`,
-    );
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const payload = await res.json() as {
-      session?: unknown;
-      messages?: Array<{ role?: string; text?: string }>;
-    };
-    const session = parseResumeSessionSummary(payload.session);
-    if (!session) {
-      throw new Error('invalid resume session payload');
-    }
-    const history = parseHistoryMessages(payload.messages);
-    return { session, history };
+    return this.localServerClient.resumeSession(sessionId);
   }
 
   private async initialize() {
@@ -407,12 +335,7 @@ export class TuiRuntimeController {
 
   private async restoreHistory() {
     try {
-      const historyRes = await fetch(`http://127.0.0.1:${this.options.localServerPort}/history`);
-      if (!historyRes.ok) return;
-      const payload = await historyRes.json() as {
-        messages?: Array<{ role?: string; text?: string }>;
-      };
-      const restored = parseHistoryMessages(payload.messages);
+      const restored = await this.localServerClient.readHistory();
       if (restored.length > 0) {
         this.options.dispatch({
           type: 'session.replace_history',
@@ -468,15 +391,7 @@ export class TuiRuntimeController {
   }
 
   private async checkLocalServerHealth() {
-    try {
-      const healthRes = await fetchWithTimeout(
-        `http://127.0.0.1:${this.options.localServerPort}/health`,
-        LOCAL_SERVER_HEALTH_TIMEOUT_MS,
-      );
-      return healthRes.ok;
-    } catch {
-      return false;
-    }
+    return this.localServerClient.isHealthy();
   }
 
   private scheduleReconnect() {

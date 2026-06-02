@@ -523,7 +523,7 @@ type OperationRegistry = {
 
 ### 阶段 4：拆分 server/runtime
 
-状态：进行中。已抽出 shared inflight operation run lifecycle，`localServer.ts` 和 `runtime.ts` 不再各自直接维护 `ToolOperationTracker` 创建、operation activity 记录和 dangling operation 收尾。`localServer.ts` 的 tool stream 到 operation 事件发送逻辑已拆为 server adapter，并有专项测试覆盖单次 emit 与 human review interrupt 转换。Studio human review response routing 已抽为独立 router，WS server 只负责调用路由器和连接生命周期清理。TUI session/history orchestration 已抽为 `LocalServerTuiSessionService`，`localServer.ts` 不再直接持有 session registry、history summary 或 checkpoint reset 细节。app WS 与 TUI local server 的 inflight request replace/interrupt/cleanup 逻辑已收敛为 `InflightRequestController`，避免两条路径各自维护 request slot、interrupt timer 和 terminal operation 收尾。local TUI WebSocket parse/dispatch/connect/close 逻辑已抽为 `attachLocalServerWebSocketTransport`，`localServer.ts` 通过 callbacks 连接 transport 与 chat/studio handlers。TUI chat request execution、`/allow` 授权、human-review fallback 和 tool-protocol recovery 已抽为 `LocalServerChatHandler`。Studio turn execution、Studio HITL routing 和 disconnect cleanup 已抽为 `LocalServerStudioHandler`。app-facing WebSocket connect/ping/reconnect/message dispatch 已抽为 `LocalAgentAppWsClient`，app chat request execution、checkpoint reset、thread routing 和 app operation emit 已抽为 `LocalAgentAppChatHandler`，scheduled heartbeat / next-tick / crawler / daily post execution 和 run stats 已抽为 `LocalAgentScheduledJob`，`runtime.ts` 不再直接持有 app WS timer、parser dispatch、app chat execution 或 scheduled post execution 细节。
+状态：进行中。已抽出 shared inflight operation run lifecycle，`localServer.ts` 和 `runtime.ts` 不再各自直接维护 `ToolOperationTracker` 创建、operation activity 记录和 dangling operation 收尾。`localServer.ts` 的 tool stream 到 operation 事件发送逻辑已拆为 server adapter，并有专项测试覆盖单次 emit 与 human review interrupt 转换。Studio human review response routing 已抽为独立 router，WS server 只负责调用路由器和连接生命周期清理。TUI session/history orchestration 已抽为 `LocalServerTuiSessionService`，`localServer.ts` 不再直接持有 session registry、history summary 或 checkpoint reset 细节。app WS 与 TUI local server 的 inflight request replace/interrupt/cleanup 逻辑已收敛为 `InflightRequestController`，避免两条路径各自维护 request slot、interrupt timer 和 terminal operation 收尾。local TUI WebSocket parse/dispatch/connect/close 逻辑已抽为 `attachLocalServerWebSocketTransport`，`localServer.ts` 通过 callbacks 连接 transport 与 chat/studio handlers。TUI chat request execution、`/allow` 授权、human-review fallback 和 tool-protocol recovery 已抽为 `LocalServerChatHandler`。Studio turn execution、Studio HITL routing 和 disconnect cleanup 已抽为 `LocalServerStudioHandler`。app-facing WebSocket connect/ping/reconnect/message dispatch 已抽为 `LocalAgentAppWsClient`，app chat request execution、checkpoint reset、thread routing 和 app operation emit 已抽为 `LocalAgentAppChatHandler`，scheduled heartbeat / next-tick / crawler / daily post execution 和 run stats 已抽为 `LocalAgentScheduledJob`，`runtime.ts` 不再直接持有 app WS timer、parser dispatch、app chat execution 或 scheduled post execution 细节。TUI 到本地 HTTP server 的 `/health`、`/history`、`/sessions`、`/sessions/resume` 访问已抽为 `TuiLocalServerClient`，`TuiRuntimeController` 不再直接解析这些 HTTP payload。
 
 目标：把 transport、session orchestration、runtime execution 分离。
 
@@ -558,7 +558,7 @@ type OperationRegistry = {
 
 ### 阶段 6：清理 legacy
 
-状态：本仓库 wire protocol 兼容层已清理；operation raw 调试数据已从 public event 出口剥离。本阶段剩余工作集中在 app 仓库迁移验证、历史数据迁移代码确认、文档表述收敛、内部 formatter 和 interface context 收敛。
+状态：本仓库 wire protocol 兼容层已清理；operation raw 调试数据已从 public event 出口剥离；interface capability 已改为由 session/interface context 显式提供，`threadId` 只保留 checkpoint/session scope 语义。本阶段剩余工作集中在 app 仓库迁移验证、历史数据迁移代码确认、文档表述收敛和内部 formatter 收敛。
 
 目标：删除过渡层。
 
@@ -566,7 +566,7 @@ type OperationRegistry = {
 
 - 确认 app/API 不再引用旧运行态消息。
 - 删除面向内部 toolName 的 formatter 或降级为 debug-only。
-- 清理通过 thread id 推断 endpoint capability 的逻辑，改为显式 interface context。
+- 保持 endpoint capability 只来自显式 interface context，不从 thread id 命名推断。
 - 更新 AGENTS.md 和开发文档。
 
 ## 8. PR 拆分建议

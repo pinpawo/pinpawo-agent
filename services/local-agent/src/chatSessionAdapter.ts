@@ -20,6 +20,31 @@ import {
 } from './agentStreamEvents';
 import { clearAgentRunActivity, recordAgentRunActivity } from './toolActivityState';
 
+const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
+const CHARS_PER_TOKEN = 4;
+
+function readMessages(snapshot: unknown): BaseMessage[] {
+  const values = (snapshot as { values?: { messages?: unknown } } | null)?.values;
+  const messages = values?.messages;
+  return Array.isArray(messages) ? messages as BaseMessage[] : [];
+}
+
+function estimateTextTokens(text: string) {
+  return Math.max(0, Math.ceil(text.length / CHARS_PER_TOKEN));
+}
+
+function estimateMessageTokens(message: BaseMessage) {
+  const content = readFinalMessageText(message);
+  const metadata = message.additional_kwargs && Object.keys(message.additional_kwargs).length > 0
+    ? JSON.stringify(message.additional_kwargs)
+    : '';
+  return estimateTextTokens(`${message._getType()}\n${content}\n${metadata}`);
+}
+
+function estimateMessagesTokens(messages: BaseMessage[]) {
+  return messages.reduce((total, message) => total + estimateMessageTokens(message), 0);
+}
+
 export type ChatSessionResult =
   | { status: 'completed'; reply: string }
   | { status: 'waiting_human' }
@@ -108,9 +133,14 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
         streamedReply += token;
         recordAgentRunActivity('streaming', requestId);
         emit({
-          type: 'chat_token',
+          type: 'event',
           requestId,
-          token,
+          event: {
+            type: 'message.delta',
+            requestId,
+            role: 'assistant',
+            text: token,
+          },
         });
         continue;
       }
@@ -130,10 +160,14 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
         if (interruptPayload) {
           recordAgentRunActivity('waiting_human', requestId);
           emit({
-            type: 'human_interrupt',
+            type: 'event',
             requestId,
-            prompt: formatInterruptPrompt(interruptPayload),
-            payload: interruptPayload,
+            event: {
+              type: 'human_review.requested',
+              requestId,
+              prompt: formatInterruptPrompt(interruptPayload),
+              payload: interruptPayload,
+            },
           });
           return { status: 'waiting_human' };
         }
@@ -158,10 +192,14 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   if (finalInterrupt) {
     recordAgentRunActivity('waiting_human', requestId);
     emit({
-      type: 'human_interrupt',
+      type: 'event',
       requestId,
-      prompt: formatInterruptPrompt(finalInterrupt),
-      payload: finalInterrupt,
+      event: {
+        type: 'human_review.requested',
+        requestId,
+        prompt: formatInterruptPrompt(finalInterrupt),
+        payload: finalInterrupt,
+      },
     });
     return { status: 'waiting_human' };
   }
@@ -169,13 +207,35 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   const finalReply = finalMessages.length > 0
     ? readFinalMessageText(finalMessages.at(-1) ?? {})
     : '';
+  const finalTokens = estimateMessagesTokens(readMessages(finalSnapshot));
+  const inputTokens = estimateMessagesTokens([
+    ...readMessages(threadSnapshot),
+    ...setup.input.messages.slice(-1),
+  ]);
+  const outputTokens = Math.max(0, finalTokens - inputTokens);
+  const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+  const finalUsage = {
+    inputTokens,
+    outputTokens,
+    totalTokens: finalTokens,
+    contextWindow,
+    updatedAt: new Date().toISOString(),
+  };
   emit({
-    type: 'chat_response',
+    type: 'event',
     requestId,
-    message: finalReply,
-    mood: null,
-    topic: null,
-    tags: [],
+    event: {
+      type: 'message.completed',
+      requestId,
+      role: 'assistant',
+      text: finalReply,
+      usage: finalUsage,
+      metadata: {
+        mood: null,
+        topic: null,
+        tags: [],
+      },
+    },
   });
   clearAgentRunActivity(requestId);
 

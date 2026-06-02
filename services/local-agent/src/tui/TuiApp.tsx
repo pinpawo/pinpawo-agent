@@ -5,6 +5,7 @@ import { config } from '../config';
 import { ApprovalPanel, buildApprovalOptions } from './components/ApprovalPanel';
 import { Composer } from './components/Composer';
 import { MessageBlock } from './components/MessageBlock';
+import { TokenUsageLine } from './components/TokenUsageLine';
 import { ResumePicker } from './components/ResumePicker';
 import { formatTuiCommandHelp, parseTuiCommand } from './input/commandRegistry';
 import { applyComposerInput, resolveTuiKeyAction } from './input/keymap';
@@ -94,8 +95,8 @@ export function TuiApp(props: { actorId: string }) {
     [pendingApproval],
   );
   const petName = focusedSession?.actor.label ?? TUI_TEXT.defaultPetName;
-  const petSummary = focusedSession?.actor.summary ?? TUI_TEXT.defaultPetSummary;
   const status = tuiState.connection.message;
+  const petSummary = focusedSession?.actor.summary ?? TUI_TEXT.defaultPetSummary;
 
   useEffect(() => {
     stateRef.current = tuiState;
@@ -532,11 +533,14 @@ export function TuiApp(props: { actorId: string }) {
         />
       ) : null}
       {!pendingApproval ? (
-        <Text dimColor>
-          {pendingUi
-            ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeTools)
-            : `${status} · ${petSummary}`}
-        </Text>
+        <>
+          <Text dimColor>
+            {pendingUi
+              ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeTools)
+              : `${status} · ${petSummary}`}
+          </Text>
+          {focusedSession?.tokenUsage ? <TokenUsageLine tokenUsage={focusedSession.tokenUsage} /> : null}
+        </>
       ) : null}
       <Box
         borderStyle="round"

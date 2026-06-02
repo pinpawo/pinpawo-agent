@@ -82,6 +82,67 @@ test('tuiStateReducer routes message delta and completed through active run', ()
   ]);
 });
 
+test('tuiStateReducer stores usage on completed message', () => {
+  let state = startRun(initialState(), 'req-1');
+  const usage = {
+    inputTokens: 50,
+    outputTokens: 20,
+    totalTokens: 70,
+    contextWindow: 100,
+  };
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '回答完成',
+      usage,
+    },
+    now: 1300,
+    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  const session = state.sessions['chat:pet']!;
+  assert.equal(session.activeRun, null);
+  assert.deepEqual(session.tokenUsage, usage);
+});
+
+test('tuiStateReducer falls back to assistant draft when completed text is empty', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.delta',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '你好',
+    },
+    now: 1100,
+  });
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '   ',
+    },
+    now: 1200,
+    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  const session = state.sessions['chat:pet']!;
+  assert.equal(session.activeRun, null);
+  assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
+    ['user', 'hello'],
+    ['assistant', '你好'],
+  ]);
+});
+
 test('tuiStateReducer drops late or unknown requestId events', () => {
   const state = startRun(initialState(), 'req-1');
 

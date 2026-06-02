@@ -129,6 +129,80 @@ test('parseLocalAgentServerMessage accepts typed local-agent event messages', ()
   );
 });
 
+test('parseLocalAgentServerMessage keeps usage on message.completed event when valid', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'message.completed',
+        requestId: 'req-1',
+        role: 'assistant',
+        text: 'done',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 90,
+          totalTokens: 100,
+          contextWindow: 2000,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    })),
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'message.completed',
+        requestId: 'req-1',
+        role: 'assistant',
+        text: 'done',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 90,
+          totalTokens: 100,
+          contextWindow: 2000,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    },
+  );
+});
+
+test('parseLocalAgentServerMessage accepts legacy top-level human_review.requested messages', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'human_review.requested',
+      requestId: 'req-1',
+      prompt: '确认执行高风险 shell 命令？',
+      payload: {
+        kind: 'human_review',
+        actionRequests: [{
+          name: 'run_shell',
+          args: { command: 'rm -rf /tmp/demo' },
+          description: '删除',
+        }],
+      },
+    })),
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'human_review.requested',
+        requestId: 'req-1',
+        prompt: '确认执行高风险 shell 命令？',
+        payload: {
+          kind: 'human_review',
+          actionRequests: [{
+            name: 'run_shell',
+            args: { command: 'rm -rf /tmp/demo' },
+            description: '删除',
+          }],
+        },
+      },
+    },
+  );
+});
+
 test('sendLocalAgentMessage writes only when websocket-like object is open', () => {
   const sent: string[] = [];
   const openWs = {

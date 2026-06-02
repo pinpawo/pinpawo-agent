@@ -47,9 +47,6 @@ async function fetchWithTimeout(url: string, timeoutMs: number) {
 function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) {
   const pet = context.pet;
   const pieces = [pet.species || TUI_TEXT.unknownSpecies, pet.stage || TUI_TEXT.unknownStage];
-  if (typeof pet.growth_value === 'number') {
-    pieces.push(TUI_TEXT.growthValue(pet.growth_value));
-  }
   return pieces.join(' · ');
 }
 

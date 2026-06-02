@@ -145,6 +145,11 @@ function readOptionalString(record: Record<string, unknown>, key: string) {
   return typeof value === 'string' ? value : undefined;
 }
 
+function readOptionalNumber(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function readRecord(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -177,9 +182,27 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     if (role !== 'assistant' || text == null) return null;
     const metadata = readRecord(record, 'metadata');
     const tags = metadata ? readStringArray(metadata, 'tags') : null;
+    const usageRecord = readRecord(record, 'usage');
+    const inputTokens = usageRecord ? readOptionalNumber(usageRecord, 'inputTokens') : undefined;
+    const outputTokens = usageRecord ? readOptionalNumber(usageRecord, 'outputTokens') : undefined;
+    const totalTokens = usageRecord ? readOptionalNumber(usageRecord, 'totalTokens') : undefined;
+    const contextWindow = usageRecord ? readOptionalNumber(usageRecord, 'contextWindow') : undefined;
+    const updatedAt = usageRecord ? readOptionalString(usageRecord, 'updatedAt') : undefined;
+    const usage = inputTokens !== undefined
+      && outputTokens !== undefined
+      && totalTokens !== undefined
+      ? {
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          ...(contextWindow !== undefined ? { contextWindow } : {}),
+          ...(updatedAt !== undefined ? { updatedAt } : {}),
+        }
+      : undefined;
     return {
       type,
       requestId,
+      ...(usage ? { usage } : {}),
       role,
       text,
       ...(metadata

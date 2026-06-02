@@ -1,4 +1,5 @@
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
+import { TUI_TEXT } from '../render/text';
 
 export const MAX_TUI_HISTORY_ITEMS = 240;
 
@@ -201,7 +202,7 @@ export function createInitialTuiState(defaultSession: SessionModel): TuiState {
   return {
     connection: {
       status: 'initializing',
-      message: '初始化中',
+      message: TUI_TEXT.statusInitializing,
     },
     sessions: {
       [defaultSession.id]: defaultSession,
@@ -225,8 +226,8 @@ export function createSession(params: {
     id: params.id,
     kind: params.kind ?? 'chat',
     actor: {
-      label: params.actor?.label ?? '宠物',
-      summary: params.actor?.summary ?? 'pet 未加载',
+      label: params.actor?.label ?? TUI_TEXT.defaultPetName,
+      summary: params.actor?.summary ?? TUI_TEXT.defaultPetSummary,
     },
     history: params.history ?? [],
     activeRun: null,

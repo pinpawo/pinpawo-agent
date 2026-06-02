@@ -295,7 +295,7 @@ test('tuiStateReducer finishes error and studio control messages', () => {
 
   assert.equal(selectFocusedActiveRun(state), null);
   assert.equal(state.connection.message, '出错，已恢复输入');
-  assert.equal(state.sessions['chat:pet']?.history.at(-1)?.text, '出错: boom');
+  assert.equal(state.sessions['chat:pet']?.history.at(-1)?.text, '出错：boom');
 
   state = startRun(state, 'studio-req');
   state = tuiStateReducer(state, {
@@ -321,10 +321,10 @@ test('tuiStateReducer finishes error and studio control messages', () => {
     requestId: 'studio-error',
     message: 'planner failed',
     historyCell: { id: 'studio-error-cell' },
-    statusMessage: 'Studio 出错,已恢复输入',
+    statusMessage: 'Studio 出错，已恢复输入',
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
-  assert.equal(state.connection.message, 'Studio 出错,已恢复输入');
+  assert.equal(state.connection.message, 'Studio 出错，已恢复输入');
   assert.equal(state.sessions['chat:pet']?.history.at(-1)?.text, '[studio 出错] planner failed');
 });

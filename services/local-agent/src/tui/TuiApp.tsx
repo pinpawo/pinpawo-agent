@@ -307,7 +307,7 @@ export function TuiApp(props: { actorId: string }) {
           );
         }
         if (!userRequest) {
-          // 仅 toggle 进入,没首棒输入
+          // 仅 toggle 进入，没首条输入
           clearInputValue();
           return;
         }

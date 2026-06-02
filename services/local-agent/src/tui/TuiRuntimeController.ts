@@ -114,11 +114,11 @@ export class TuiRuntimeController {
     void this.initialize().catch((err) => {
       if (this.disposed) return;
       const message = err instanceof Error ? err.message : String(err);
-      this.appendSystemMessage(`初始化失败: ${message}`);
+      this.appendSystemMessage(TUI_TEXT.initializationFailed(message));
       this.options.dispatch({
         type: 'connection.set',
         status: 'error',
-        message: `初始化失败: ${message}`,
+        message: TUI_TEXT.initializationFailed(message),
       });
     });
   }
@@ -163,7 +163,7 @@ export class TuiRuntimeController {
       userText: message,
       now,
       userCell: makeHistoryMeta(),
-      statusMessage: '等待回复',
+      statusMessage: TUI_TEXT.waitingForReply,
     });
 
     sendLocalAgentMessage(ws, {
@@ -192,10 +192,10 @@ export class TuiRuntimeController {
       type: 'run.start',
       requestId,
       kind: 'studio',
-      userText: `[studio] ${userRequest}`,
+      userText: TUI_TEXT.studioUserMessage(userRequest),
       now,
       userCell: makeHistoryMeta(),
-      statusMessage: 'Studio 编排中',
+      statusMessage: TUI_TEXT.studioRunning,
     });
     sendLocalAgentMessage(ws, {
       type: 'studio_request',
@@ -212,7 +212,7 @@ export class TuiRuntimeController {
 
     const ws = this.getOpenWebSocket();
     if (!ws) {
-      this.appendSystemMessage('未连接，无法提交确认。');
+      this.appendSystemMessage(TUI_TEXT.reviewDisconnectedCannotSubmit);
       return false;
     }
 
@@ -226,7 +226,7 @@ export class TuiRuntimeController {
       message: decision,
       now,
       userCell: makeHistoryMeta(),
-      statusMessage: '提交确认',
+      statusMessage: TUI_TEXT.reviewSubmitting,
     });
     sendLocalAgentMessage(ws, {
       type: 'human_review_response',
@@ -251,7 +251,7 @@ export class TuiRuntimeController {
     this.options.dispatch({
       type: 'run.interrupting',
       requestId: activeRun.requestId,
-      statusMessage: '正在打断',
+      statusMessage: TUI_TEXT.interrupting,
     });
     this.clearInterruptTimeout();
 
@@ -265,11 +265,11 @@ export class TuiRuntimeController {
       this.options.dispatch({
         type: 'run.finish',
         requestId: interruptRequestId,
-        statusMessage: '已请求打断',
+        statusMessage: TUI_TEXT.interruptRequestedStatus,
         history: [{
           ...makeHistoryMeta(),
           kind: 'system',
-          text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+          text: TUI_TEXT.interruptRequestedLocalRelease,
         }],
       });
     }, 1800);
@@ -284,7 +284,7 @@ export class TuiRuntimeController {
     });
     this.options.dispatch({
       type: 'session.clear',
-      statusMessage: '已创建新会话',
+      statusMessage: TUI_TEXT.newSessionCreated,
     });
 
     const ws = this.getOpenWebSocket();
@@ -354,7 +354,7 @@ export class TuiRuntimeController {
     this.options.dispatch({
       type: 'connection.set',
       status: 'connecting',
-      message: '连接本地服务',
+      message: TUI_TEXT.connectionConnecting,
     });
 
     const connected = await this.waitForLocalServer();
@@ -378,17 +378,21 @@ export class TuiRuntimeController {
         if (this.disposed) return false;
         if (attempt >= LOCAL_SERVER_CONNECT_RETRIES) {
           this.appendSystemMessage(
-            `无法连接本地服务 (port ${this.options.localServerPort})，请先运行 pinpawo-agent run`,
+            TUI_TEXT.connectionUnavailable(this.options.localServerPort),
           );
           this.options.dispatch({
             type: 'connection.set',
             status: 'disconnected',
-            message: '未连接',
+            message: TUI_TEXT.connectionDisconnected,
           });
           return false;
         }
         const retryIndex = attempt + 1;
-        const retryText = `本地服务暂不可用，${LOCAL_SERVER_CONNECT_RETRY_DELAY_MS / 1000}s 后重试 ${retryIndex}/${LOCAL_SERVER_CONNECT_RETRIES}`;
+        const retryText = TUI_TEXT.connectionRetrying(
+          LOCAL_SERVER_CONNECT_RETRY_DELAY_MS / 1000,
+          retryIndex,
+          LOCAL_SERVER_CONNECT_RETRIES,
+        );
         this.options.dispatch({
           type: 'connection.set',
           status: 'connecting',
@@ -450,7 +454,7 @@ export class TuiRuntimeController {
       this.options.dispatch({
         type: 'connection.set',
         status: 'disconnected',
-        message: '连接断开',
+        message: TUI_TEXT.connectionClosed,
       });
       this.ws = null;
       this.scheduleReconnect();
@@ -459,7 +463,7 @@ export class TuiRuntimeController {
     ws.on('error', (err) => {
       if (this.disposed) return;
       if (this.ws !== ws) return;
-      this.appendSystemMessage(`WS error: ${err.message}`);
+      this.appendSystemMessage(TUI_TEXT.websocketError(err.message));
     });
   }
 
@@ -482,14 +486,18 @@ export class TuiRuntimeController {
       this.options.dispatch({
         type: 'connection.set',
         status: 'disconnected',
-        message: '连接断开，重连失败',
+        message: TUI_TEXT.connectionReconnectFailed,
       });
       return;
     }
 
     this.reconnectAttempt += 1;
     const attempt = this.reconnectAttempt;
-    const retryText = `连接断开，${LOCAL_SERVER_RECONNECT_DELAY_MS / 1000}s 后重连 ${attempt}/${LOCAL_SERVER_RECONNECT_RETRIES}`;
+    const retryText = TUI_TEXT.connectionReconnectRetrying(
+      LOCAL_SERVER_RECONNECT_DELAY_MS / 1000,
+      attempt,
+      LOCAL_SERVER_RECONNECT_RETRIES,
+    );
     this.options.dispatch({
       type: 'connection.set',
       status: 'connecting',
@@ -501,7 +509,7 @@ export class TuiRuntimeController {
       void this.reconnect().catch((err) => {
         if (this.disposed) return;
         const message = err instanceof Error ? err.message : String(err);
-        this.appendSystemMessage(`重连失败: ${message}`);
+        this.appendSystemMessage(TUI_TEXT.reconnectFailed(message));
         this.scheduleReconnect();
       });
     }, LOCAL_SERVER_RECONNECT_DELAY_MS);
@@ -534,7 +542,7 @@ export class TuiRuntimeController {
       });
     } catch {
       if (!this.disposed) {
-        this.appendSystemMessage('无法加载宠物信息，使用默认名称');
+        this.appendSystemMessage(TUI_TEXT.actorContextUnavailable);
       }
     }
   }
@@ -567,7 +575,7 @@ export class TuiRuntimeController {
         this.options.dispatch({
           type: 'server.interrupting',
           requestId: msg.requestId,
-          statusMessage: '正在打断',
+          statusMessage: TUI_TEXT.interrupting,
         });
         return;
       }
@@ -578,7 +586,7 @@ export class TuiRuntimeController {
           type: 'server.interrupted',
           requestId: msg.requestId,
           historyCell: makeHistoryMeta(),
-          statusMessage: '已打断',
+          statusMessage: TUI_TEXT.interruptedStatus,
         });
         return;
       }
@@ -605,7 +613,7 @@ export class TuiRuntimeController {
           requestId: msg.requestId,
           message: msg.message,
           historyCell: makeHistoryMeta(),
-          statusMessage: 'Studio 出错,已恢复输入',
+          statusMessage: TUI_TEXT.studioErrorRecovered,
         });
         return;
       }

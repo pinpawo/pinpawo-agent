@@ -7,8 +7,8 @@ struct DesktopPetView: View {
   let onDragChanged: (CGSize) -> Void
   let onDragEnded: () -> Void
 
-  private var activeToolName: String? {
-    appState.poller.health?.activeToolName
+  private var activeOperationKind: String? {
+    appState.poller.health?.activeOperationKind
   }
 
   private var agentRunPhase: String? {
@@ -17,7 +17,7 @@ struct DesktopPetView: View {
 
   private var gifName: String {
     if appState.agent.isStarting { return "thinking" }
-    if let tool = activeToolName { return gifName(for: tool) }
+    if activeOperationKind != nil { return gifNameForActiveOperation() }
 
     switch agentRunPhase {
     case "streaming":
@@ -34,7 +34,7 @@ struct DesktopPetView: View {
   }
 
   private var shouldAnimate: Bool {
-    appState.agent.isStarting || activeToolName != nil || agentRunPhase != nil
+    appState.agent.isStarting || activeOperationKind != nil || agentRunPhase != nil
   }
 
   var body: some View {
@@ -59,31 +59,37 @@ struct DesktopPetView: View {
       )
   }
 
-  private func gifName(for toolName: String) -> String {
-    let normalized = toolName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    if normalized.contains("browser")
-      || normalized.contains("playwright")
-      || normalized.contains("search")
-      || normalized.contains("fetch")
-      || normalized.contains("snapshot")
-      || normalized.contains("open")
-      || normalized.contains("click")
-      || normalized.contains("type") {
+  private func gifNameForActiveOperation() -> String {
+    let parts = [
+      appState.poller.health?.activeOperationKind,
+      appState.poller.health?.activeOperationTitle,
+      appState.poller.health?.activeOperationTarget,
+      appState.poller.health?.activeOperationSummary,
+    ].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+    let descriptor = parts.joined(separator: " ")
+    if descriptor.contains("browser")
+      || descriptor.contains("playwright")
+      || descriptor.contains("search")
+      || descriptor.contains("fetch")
+      || descriptor.contains("snapshot")
+      || descriptor.contains("open")
+      || descriptor.contains("click")
+      || descriptor.contains("type") {
       return "browser"
     }
-    if normalized.contains("audio")
-      || normalized.contains("music")
-      || normalized.contains("play")
-      || normalized.contains("video")
-      || normalized.contains("media") {
+    if descriptor.contains("audio")
+      || descriptor.contains("music")
+      || descriptor.contains("play")
+      || descriptor.contains("video")
+      || descriptor.contains("media") {
       return "media"
     }
-    if normalized.contains("shell")
-      || normalized.contains("command")
-      || normalized.contains("file")
-      || normalized.contains("read")
-      || normalized.contains("write")
-      || normalized.contains("edit") {
+    if descriptor.contains("shell")
+      || descriptor.contains("command")
+      || descriptor.contains("file")
+      || descriptor.contains("read")
+      || descriptor.contains("write")
+      || descriptor.contains("edit") {
       return "file"
     }
     return "typing"

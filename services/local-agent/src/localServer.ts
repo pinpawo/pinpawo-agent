@@ -25,12 +25,11 @@ import {
   type StudioRequestMessage,
 } from './localAgentProtocol';
 import { readFirstHumanReviewDecision, type HumanReviewDecision } from '@pinpawo/pet-agent';
-import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
+import { recordAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import {
   readFinalMessageText,
   type StreamToolsPayload,
 } from './agentStreamEvents';
-import type { LocalAgentOperationPhase } from './events/localAgentEvent';
 import { runChatSession } from './chatSessionAdapter';
 import { ToolOperationTracker } from './toolOperationTracker';
 import {
@@ -332,14 +331,6 @@ function stringifyLogValue(value: unknown) {
   }
 }
 
-function toToolActivityPhase(phase: LocalAgentOperationPhase) {
-  if (phase === 'started') return 'start';
-  if (phase === 'completed') return 'end';
-  if (phase === 'failed') return 'error';
-  if (phase === 'interrupted') return 'interrupt';
-  return 'event';
-}
-
 function finishToolOperations(
   ws: WebSocket,
   inflight: InflightRequest,
@@ -347,11 +338,7 @@ function finishToolOperations(
   error?: unknown,
 ) {
   for (const event of inflight.toolOperations.finishActive(phase, error)) {
-    recordToolActivity(
-      event.operation.source?.name ?? event.operation.kind,
-      toToolActivityPhase(event.phase),
-      inflight.requestId,
-    );
+    recordOperationActivity(event);
     sendLocalAgentEvent(ws, event);
   }
 }
@@ -399,19 +386,18 @@ function sendToolOperationEvent(ws: WebSocket, inflight: InflightRequest, payloa
         input: event.raw?.input,
       },
     };
-    recordToolActivity(payload.name, 'interrupt', inflight.requestId);
-    console.log(`[local-server] tool_interrupt requestId=${inflight.requestId} tool=${payload.name}`);
+    recordOperationActivity(interruptedEvent);
+    console.log(`[local-server] operation_interrupted requestId=${inflight.requestId} kind=${interruptedEvent.operation.kind}`);
     sendLocalAgentEvent(ws, interruptedEvent);
     return;
   }
 
-  const phase = toToolActivityPhase(event.phase);
   const input = event.raw?.input !== undefined ? stringifyLogValue(event.raw.input) : undefined;
   const error = event.raw?.error !== undefined ? stringifyLogValue(event.raw.error) : undefined;
-  recordToolActivity(payload.name, phase, inflight.requestId);
+  recordOperationActivity(event);
 
   console.log(
-    `[local-server] tool_${phase} requestId=${inflight.requestId} tool=${payload.name}`
+    `[local-server] operation_${event.phase} requestId=${inflight.requestId} kind=${event.operation.kind}`
       + (input ? ` input=${maybeTrimForLog(input, 200)}` : '')
       + (error ? ` error=${maybeTrimForLog(error)}` : ''),
   );

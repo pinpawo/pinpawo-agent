@@ -40,11 +40,10 @@ import {
   type InterruptRequestMessage,
   type NewSessionMessage,
 } from './localAgentProtocol';
-import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
+import { recordAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
-import type { LocalAgentOperationPhase } from './events/localAgentEvent';
 import { runChatSession } from './chatSessionAdapter';
 import { ToolOperationTracker } from './toolOperationTracker';
 
@@ -77,7 +76,7 @@ async function filterAvailableUserCapabilities(
 
 function sendToolOperationEvent(ws: WebSocket, inflight: InflightRequest, payload: StreamToolsPayload) {
   const event = inflight.toolOperations.accept(payload);
-  recordToolActivity(payload.name, toToolActivityPhase(event.phase), inflight.requestId);
+  recordOperationActivity(event);
   sendLocalAgentEvent(ws, event);
 }
 
@@ -88,21 +87,9 @@ function finishToolOperations(
   error?: unknown,
 ) {
   for (const event of inflight.toolOperations.finishActive(phase, error)) {
-    recordToolActivity(
-      event.operation.source?.name ?? event.operation.kind,
-      toToolActivityPhase(event.phase),
-      inflight.requestId,
-    );
+    recordOperationActivity(event);
     sendLocalAgentEvent(ws, event);
   }
-}
-
-function toToolActivityPhase(phase: LocalAgentOperationPhase) {
-  if (phase === 'started') return 'start';
-  if (phase === 'completed') return 'end';
-  if (phase === 'failed') return 'error';
-  if (phase === 'interrupted') return 'interrupt';
-  return 'event';
 }
 
 export class LocalAgentRuntime {

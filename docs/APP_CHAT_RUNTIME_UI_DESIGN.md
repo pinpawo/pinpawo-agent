@@ -58,22 +58,22 @@
 
 工具执行应该显示成当前运行状态，而不是连续刷屏：
 
-- 顶部 pet 展位展示当前工具对应的 gif 和短文案。
+- 顶部 pet 展位展示当前 operation 对应的 gif 和短文案。
 - 聊天列表 footer 只在没有 token 时显示等待气泡。
-- 后续可以增加一个 compact tool activity strip，显示最后一个工具和状态。
+- 后续可以增加一个 compact operation activity strip，显示最后一个 operation 和状态。
 
 gif 映射建议：
 
 - thinking: `thinking`，使用 `assets/chat/sheep/thinking.gif`
 - streaming: `typing`，使用 `assets/chat/sheep/typing.gif`
 - waiting_human: `waiting`，使用 `assets/chat/sheep/waiting.gif`
-- browser/search/fetch/open/click/type: `browser`，使用 `assets/chat/sheep/browser.gif`
-- shell/command/file/read/write/edit: `file`，使用 `assets/chat/sheep/file.gif`
+- `operation.kind` / `title` / `summary` 命中 browser / network / search / fetch / open / click / type：`browser`，使用 `assets/chat/sheep/browser.gif`
+- `operation.kind` / `title` / `summary` 命中 shell / command / file / read / write / edit：`file`，使用 `assets/chat/sheep/file.gif`
 - interrupting/error: `interrupted`，使用 `assets/chat/sheep/interrupted.gif`
 - audio/music/play/video/media: `media`，使用 `assets/chat/sheep/media.gif`
 - idle/low priority: `slacking`，使用 `assets/chat/sheep/slacking.gif`
 - legacy do-not-disturb: `doNotDisturb` 仍保留，当前指向文件处理动画。
-- unknown tool: `typing`
+- unknown operation: `typing`
 
 ## Interrupt
 

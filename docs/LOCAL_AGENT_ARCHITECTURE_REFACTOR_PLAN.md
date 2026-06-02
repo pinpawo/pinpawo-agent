@@ -155,6 +155,7 @@ toolName -> operation metadata
 
 - TUI：渲染成紧凑文本、active tool line、system message。
 - App：渲染成结构化 run state、pet gif、compact activity strip。
+- macOS companion：通过 `/health` 读取 agent run 和 active operation 摘要，pet 动画按 `operation.kind/title/target/summary` 映射。
 - Logs/debug：保留 JSON。
 
 adapter 可以有自己的 i18n / copy，但不能重新解析内部 tool input/output。

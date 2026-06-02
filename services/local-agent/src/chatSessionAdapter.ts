@@ -18,7 +18,7 @@ import {
   readStreamNode,
   type StreamToolsPayload,
 } from './agentStreamEvents';
-import { clearAgentRunActivity, recordAgentRunActivity } from './toolActivityState';
+import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
 
 export type ChatSessionResult =
   | { status: 'completed'; reply: string }

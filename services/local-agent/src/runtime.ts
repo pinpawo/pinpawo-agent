@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import WebSocket from 'ws';
+import { WebSocket } from 'ws';
 import { FileSaver } from './fileSaver';
 import { config } from './config';
 import { loadAgentContext, sendHeartbeat, getNextTickAt } from './contextLoader';
@@ -33,7 +33,6 @@ import { ensureActorSelected, loadSelectedActorName } from './actorSelection';
 import { loadStoredConfig, saveStoredConfig } from './storage';
 import { buildAppChatThreadId } from './chatInterface';
 import {
-  parseLocalAgentClientMessage,
   sendLocalAgentEvent,
   sendLocalAgentMessage,
   type ChatRequestMessage,
@@ -50,6 +49,7 @@ import {
   type InflightOperationRun,
 } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
+import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
@@ -102,9 +102,7 @@ export class LocalAgentRuntime {
     resolve(homedir(), '.pinpawo', 'checkpoints.json'),
   );
   private readonly graphService = new LocalAgentGraphService();
-  private ws: WebSocket | null = null;
-  private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private wsPingInterval: ReturnType<typeof setInterval> | null = null;
+  private appWsClient: LocalAgentAppWsClient | null = null;
   private sessionResetPromise: Promise<void> = Promise.resolve();
   private readonly inflightRequests = new InflightRequestController<WebSocket>({
     forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
@@ -252,85 +250,42 @@ export class LocalAgentRuntime {
     }
 
     const wsUrl = `${config.apiBaseUrl.replace(/^https?/, (m) => m === 'https' ? 'wss' : 'ws')}/ws/agent?token=${encodeURIComponent(config.agentToken)}&actorId=${encodeURIComponent(this.actorId)}`;
-    console.log(`[local-agent] connecting WS... actorId=${this.actorId}`);
 
-    const ws = new WebSocket(wsUrl);
-    this.ws = ws;
-
-    ws.on('open', () => {
-      console.log('[local-agent] WS connected');
-      this.wsPingInterval = setInterval(() => {
-        sendLocalAgentMessage(ws, { type: 'pong' });
-      }, WS_PING_INTERVAL_MS);
-    });
-
-    ws.on('message', (data: Buffer | string) => {
-      try {
-        const msg = parseLocalAgentClientMessage(data);
-        if (!msg) return;
-        if (msg.type === 'ping') {
-          sendLocalAgentMessage(ws, { type: 'pong' });
-        } else if (msg.type === 'chat_request') {
-          this.handleChatRequest(msg).catch((err) => {
-            console.error('[local-agent] handleChatRequest error:', err instanceof Error ? err.message : err);
-          });
-        } else if (msg.type === 'new_session') {
+    this.disconnectWs();
+    this.appWsClient = new LocalAgentAppWsClient({
+      actorId: this.actorId,
+      url: wsUrl,
+      reconnectDelayMs: WS_RECONNECT_DELAY_MS,
+      pingIntervalMs: WS_PING_INTERVAL_MS,
+      handlers: {
+        onChatRequest: (ws, msg) => this.handleChatRequest(ws, msg),
+        onNewSession: (_ws, msg) => {
           this.sessionResetPromise = this.handleNewSession(msg).catch((err) => {
             console.error('[local-agent] new_session error:', err instanceof Error ? err.message : err);
           });
-        } else if (msg.type === 'interrupt_request') {
-          this.handleInterruptRequest(msg);
-        }
-      } catch {
-        // ignore malformed messages
-      }
+          return this.sessionResetPromise;
+        },
+        onInterruptRequest: (ws, msg) => this.handleInterruptRequest(ws, msg),
+        onClose: (ws) => {
+          this.inflightRequests.abortAndClear(ws);
+        },
+      },
     });
-
-    ws.on('close', (code, reason) => {
-      const detail = reason.length > 0 ? ` reason=${reason.toString()}` : '';
-      console.log(`[local-agent] WS disconnected code=${code}${detail}`);
-      this.clearWsPing();
-      this.inflightRequests.abortAndClear(ws);
-      this.scheduleWsReconnect();
-    });
-
-    ws.on('error', (err: Error) => {
-      console.warn('[local-agent] WS error:', err.message);
-      this.clearWsPing();
-    });
+    this.appWsClient.connect();
   }
 
   private disconnectWs() {
-    if (this.wsReconnectTimer) {
-      clearTimeout(this.wsReconnectTimer);
-      this.wsReconnectTimer = null;
-    }
-    this.clearWsPing();
-    if (this.ws) {
-      const inflight = this.inflightRequests.get(this.ws);
-      if (inflight && this.ws.readyState === WebSocket.OPEN) {
-        this.inflightRequests.finish(this.ws, inflight, 'interrupted');
+    const client = this.appWsClient;
+    const ws = client?.getCurrentSocket() ?? null;
+    if (ws) {
+      const inflight = this.inflightRequests.get(ws);
+      if (inflight && ws.readyState === WebSocket.OPEN) {
+        this.inflightRequests.finish(ws, inflight, 'interrupted');
       }
-      this.inflightRequests.abortAndClear(this.ws, inflight);
-      this.ws.removeAllListeners();
-      this.ws.close();
-      this.ws = null;
+      this.inflightRequests.abortAndClear(ws, inflight);
     }
-  }
-
-  private clearWsPing() {
-    if (this.wsPingInterval) {
-      clearInterval(this.wsPingInterval);
-      this.wsPingInterval = null;
-    }
-  }
-
-  private scheduleWsReconnect() {
-    if (this.stopRequested) return;
-    this.wsReconnectTimer = setTimeout(() => {
-      this.wsReconnectTimer = null;
-      if (!this.stopRequested) this.connectWs();
-    }, WS_RECONNECT_DELAY_MS);
+    client?.disconnect();
+    this.appWsClient = null;
   }
 
   // ---- Handle incoming chat_request from server ----
@@ -350,20 +305,19 @@ export class LocalAgentRuntime {
     console.log(`[local-agent] new session created threadId=${threadId}`);
   }
 
-  private handleInterruptRequest(msg: InterruptRequestMessage) {
-    const ws = this.ws;
+  private handleInterruptRequest(ws: WebSocket, msg: InterruptRequestMessage) {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return;
     }
     this.inflightRequests.interrupt(ws, { requestId: msg.requestId });
   }
 
-  private async handleChatRequest(msg: ChatRequestMessage) {
+  private async handleChatRequest(ws: WebSocket, msg: ChatRequestMessage) {
     const { requestId, message } = msg;
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.appWsClient?.isCurrentSocket(ws) || ws.readyState !== WebSocket.OPEN) return;
     const userId = msg.userId?.trim();
     if (!userId) {
-      sendLocalAgentEvent(this.ws, {
+      sendLocalAgentEvent(ws, {
         type: 'error',
         requestId,
         message: 'userId is required',
@@ -373,8 +327,7 @@ export class LocalAgentRuntime {
 
     await this.sessionResetPromise;
 
-    const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!this.appWsClient?.isCurrentSocket(ws) || ws.readyState !== WebSocket.OPEN) return;
 
     console.log(`[local-agent] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
 

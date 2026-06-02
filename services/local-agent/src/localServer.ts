@@ -6,14 +6,13 @@
  * message types.
  */
 import { createServer } from 'node:http';
-import { WebSocketServer, WebSocket } from 'ws';
+import { WebSocket } from 'ws';
 import { HumanMessage } from '@langchain/core/messages';
 import { loadAgentContext } from './contextLoader';
 import { LocalAgentGraphService } from './agentGraphService';
 import { authorizeShellPattern } from './sessionAuthorizations';
 import { readShellReviewCommand } from './chatInterrupts';
 import {
-  parseLocalAgentClientMessage,
   sendLocalAgentEvent,
   sendLocalAgentMessage,
   type ChatRequestMessage,
@@ -37,6 +36,7 @@ import {
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { handleLocalHttpRequest } from './localHttpHandlers';
+import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
 import type { AgentStats, LocalServerDeps } from './localServerTypes';
 
 export type { AgentStats, LocalServerDeps };
@@ -333,55 +333,24 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
       res.end();
     });
 
-    const wss = new WebSocketServer({ server });
-
-    wss.on('connection', (ws) => {
-      console.log('[local-server] TUI client connected');
-
-      ws.on('message', (data: Buffer | string) => {
-        try {
-          const msg = parseLocalAgentClientMessage(data);
-          if (!msg) return;
-          if (msg.type === 'chat_request') {
-            handleChatRequest(ws, msg, deps).catch((err) => {
-              console.error('[local-server] handleChatRequest error:', err instanceof Error ? err.message : err);
-            });
-          } else if (msg.type === 'studio_request') {
-            handleStudioRequest(ws, msg, deps).catch((err) => {
-              console.error('[local-server] handleStudioRequest error:', err instanceof Error ? err.message : err);
-            });
-          } else if (msg.type === 'human_review_response') {
-            handleHumanReviewResponse(ws, msg, deps).catch((err) => {
-              console.error('[local-server] handleHumanReviewResponse error:', err instanceof Error ? err.message : err);
-            });
-          } else if (msg.type === 'interrupt_request') {
-            const inflight = inflightRequests.interrupt(ws, { requestId: msg.requestId });
-            if (inflight) {
-              console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
-            }
-          } else if (msg.type === 'new_session') {
-            Promise.resolve(tuiSessions.createNewSession(deps.actorId)).then(() => {
-              console.log(`[local-server] new session created for pet ${deps.actorId}`);
-            }).catch((err) => {
-              console.error('[local-server] new_session error:', err instanceof Error ? err.message : err);
-            });
-          } else if (msg.type === 'ping') {
-            sendLocalAgentMessage(ws, { type: 'pong' });
-          }
-        } catch {
-          // ignore malformed messages
+    attachLocalServerWebSocketTransport(server, {
+      onChatRequest: (ws, msg) => handleChatRequest(ws, msg, deps),
+      onStudioRequest: (ws, msg) => handleStudioRequest(ws, msg, deps),
+      onHumanReviewResponse: (ws, msg) => handleHumanReviewResponse(ws, msg, deps),
+      onInterruptRequest: (ws, msg) => {
+        const inflight = inflightRequests.interrupt(ws, { requestId: msg.requestId });
+        if (inflight) {
+          console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
         }
-      });
-
-      ws.on('close', () => {
+      },
+      onNewSession: () => {
+        tuiSessions.createNewSession(deps.actorId);
+        console.log(`[local-server] new session created for pet ${deps.actorId}`);
+      },
+      onClose: (ws) => {
         inflightRequests.abortAndClear(ws);
         studioReviewRouter.rejectAndDelete(ws, new Error('ws disconnected'));
-        console.log('[local-server] TUI client disconnected');
-      });
-
-      ws.on('error', (err) => {
-        console.warn('[local-server] WS error:', err.message);
-      });
+      },
     });
 
     server.listen(port, '127.0.0.1', () => {

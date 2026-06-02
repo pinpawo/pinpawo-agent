@@ -24,7 +24,6 @@ import {
   type HumanReviewResponseMessage,
   type StudioRequestMessage,
 } from './localAgentProtocol';
-import { readFirstHumanReviewDecision, type HumanReviewDecision } from '@pinpawo/pet-agent';
 import { recordAgentRunActivity } from './operationActivityState';
 import {
   readFinalMessageText,
@@ -43,12 +42,7 @@ import {
   buildStudioForTurn,
   StudioNotConfiguredError,
 } from './studio/studioRuntime';
-import {
-  createPendingReviewSlot,
-  rejectReview,
-  resolveReview,
-  type PendingReviewSlot,
-} from './studio/studioBridge';
+import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import type { AgentStats, LocalServerDeps } from './localServerTypes';
 import {
@@ -70,60 +64,7 @@ const chatCheckpointer = new FileSaver(
 
 const chatGraphService = new LocalAgentGraphService();
 
-/**
- * Per-ws HITL 答复槽。Studio 模式下,pet 触发 humanReviewer 时,humanReviewer 把
- * promise resolver 寄存在这里;human_review_response handler 调 resolveReview()
- * 喂答复。chat 无 Studio 活跃时此 map 为空。
- */
-const studioPendingReviews = new Map<WebSocket, PendingReviewSlot>();
-
-function getOrCreateStudioReviewSlot(ws: WebSocket): PendingReviewSlot {
-  let slot = studioPendingReviews.get(ws);
-  if (!slot) {
-    slot = createPendingReviewSlot();
-    studioPendingReviews.set(ws, slot);
-  }
-  return slot;
-}
-
-/**
- * 从 human_review_response 的 message + resume 字段解码出 HumanReviewDecision。
- * 用于 Studio HITL 答复路由:
- * - msg.resume 显式提供 → 解析
- * - "/allow" 前缀 → approve
- * - 非空 message → respond
- * - 否则 → reject
- */
-function decodeStudioDecision(msg: Pick<HumanReviewResponseMessage, 'message' | 'resume'>): HumanReviewDecision | null {
-  if (msg.resume !== undefined) {
-    const decoded = readFirstHumanReviewDecision(msg.resume);
-    if (decoded) return decoded;
-  }
-  const text = (msg.message ?? '').trim();
-  if (text.startsWith('/allow')) {
-    return { type: 'approve' };
-  }
-  if (text) {
-    return { type: 'respond', message: text };
-  }
-  return { type: 'reject' };
-}
-
-function routeStudioHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
-  const studioSlot = studioPendingReviews.get(ws);
-  if (!studioSlot?.current) {
-    return false;
-  }
-  const decision = decodeStudioDecision(msg);
-  if (!decision) {
-    return false;
-  }
-  console.log(
-    `[local-server] route ${msg.type} as studio HITL answer (reviewId=${studioSlot.current.reviewId}, decision=${decision.type})`,
-  );
-  resolveReview(studioSlot, decision);
-  return true;
-}
+const studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
 const INTERRUPT_FORCE_REPLY_MS = 1800;
 
 const tuiSessionState = loadTuiSessionState();
@@ -352,9 +293,9 @@ async function handleStudioRequest(
   inflightRequests.set(ws, inflight);
 
   // 重置 review slot(防止上一 turn 残留)
-  const slot = getOrCreateStudioReviewSlot(ws);
+  const slot = studioReviewRouter.getOrCreateSlot(ws);
   if (slot.current) {
-    rejectReview(slot, new Error('superseded by new studio_request'));
+    studioReviewRouter.rejectPending(ws, new Error('superseded by new studio_request'));
   }
 
   const send = (envelope: unknown) => {
@@ -436,7 +377,7 @@ async function handleStudioRequest(
     }
   } finally {
     if (slot.current) {
-      rejectReview(slot, new Error('studio turn ended with unresolved review'));
+      studioReviewRouter.rejectPending(ws, new Error('studio turn ended with unresolved review'));
     }
     if (inflightRequests.get(ws) === inflight) {
       clearInflightRequest(ws, inflight);
@@ -573,7 +514,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
 }
 
 async function handleHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage, deps: LocalServerDeps) {
-  if (routeStudioHumanReviewResponse(ws, msg)) {
+  if (studioReviewRouter.routeResponse(ws, msg)) {
     return;
   }
   await handleChatRequest(ws, {
@@ -697,11 +638,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
           inflight.controller.abort();
           inflightRequests.delete(ws);
         }
-        const slot = studioPendingReviews.get(ws);
-        if (slot) {
-          rejectReview(slot, new Error('ws disconnected'));
-          studioPendingReviews.delete(ws);
-        }
+        studioReviewRouter.rejectAndDelete(ws, new Error('ws disconnected'));
         console.log('[local-server] TUI client disconnected');
       });
 

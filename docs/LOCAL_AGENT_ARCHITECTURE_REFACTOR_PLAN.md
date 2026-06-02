@@ -95,7 +95,7 @@ type LocalAgentOperationKind =
 
 这会把 local-agent 变成“所有 tools/capabilities 语义的中央表”，和当前 formatter 知道内部工具名的问题本质相同。
 
-### 3.2 toolkit / capability 拥有 operation metadata
+### 3.2 tool provider 拥有 operation metadata
 
 工具展示语义应该由提供工具的一方声明。
 
@@ -141,13 +141,31 @@ const capability = {
 };
 ```
 
+对于 host 直接注入的 shared/global tools：
+
+```ts
+const input = {
+  tools: [createPetProfileTool({ actor })],
+  toolOperations: {
+    describe_pet_profile: {
+      kind: 'pet.profile.read',
+      title: '读取宠物资料',
+      summarizeInput: (input) => ({ summary: input.focus ? `查看 ${input.focus}` : '查看基础资料' }),
+    },
+  },
+};
+```
+
 pet-agent 在创建 subagent 时负责收集这些 metadata，并随工具事件透传：
 
 ```txt
-SubagentToolEvent.operation -> operation metadata
+AgentToolkit.operations
+CapabilityRuntime.operations
+AgentInvokeInput.toolOperations
+  -> SubagentToolEvent.operation -> operation metadata
 ```
 
-local-agent 在每个 run 上也建立由当前 `toolkits` 生成的 registry，作为 host/studio 事件和未携带 metadata 的工具事件 fallback。然后把内部 tool event normalize 成 stable local-agent event。
+local-agent 在每个 run 上也建立由当前 `toolkits` 和 `toolOperations` 生成的 registry，作为 host/studio 事件和未携带 metadata 的工具事件 fallback。然后把内部 tool event normalize 成 stable local-agent event。
 
 ### 3.3 adapter 拥有渲染
 
@@ -385,7 +403,7 @@ type LocalAgentStudioEvent = {
 
 ## 6. Operation Metadata 草案
 
-operation metadata 由 toolkit / capability 暴露。
+operation metadata 由 toolkit / capability / host-provided tools 暴露。
 
 ```ts
 type OperationMetadata = {
@@ -408,6 +426,7 @@ type OperationSummary = {
 
 - `AgentToolkit.operations` 描述 toolkit tools 的展示语义。
 - `CapabilityRuntime.operations` 描述 capability runtime 自带 tools 的展示语义。
+- `AgentInvokeInput.toolOperations` 描述 host 直接注入的 shared/global tools 的展示语义。
 - pet-agent 的 subagent 工具事件会携带 `operation` metadata。
 - local-agent 的 `ToolOperationTracker` 使用 run-local registry 兜底，不再依赖全局固定 local tool registry。
 
@@ -422,6 +441,7 @@ type OperationRegistry = {
 重要约束：
 
 - local-agent 可以为内置 local toolkit 提供 metadata。
+- local-agent 可以为 host 注入的 shared tools 提供 metadata，例如 `describe_pet_profile`。
 - 第三方/user capability 可以提供自己的 metadata。
 - 没有 metadata 时，local-agent 生成 generic operation：`kind: 'tool.execute'`，`title: toolName`。
 - adapter 不应该回退解析 raw input/output。
@@ -519,7 +539,7 @@ type OperationRegistry = {
 
 ### 阶段 5：拆分 tools/policy/capability registry
 
-状态：进行中。`plugins/localTools.ts` 已收敛为 toolkit 装配入口；file/path tools 已抽到 `plugins/localTools/fileTools.ts`，`run_shell` implementation 与 review policy 已抽到 `plugins/localTools/shellTools.ts`，`http_fetch` / `download_file` 已抽到 `plugins/localTools/networkTools.ts`，`glob_search` / `grep_search` 已抽到 `plugins/localTools/searchTools.ts`；本地路径解析和文件遍历 helper 已抽到 `plugins/localTools/pathUtils.ts` / `plugins/localTools/fileSystemUtils.ts`，operation metadata helper 已提升到 `plugins/operationMetadata.ts`，供 local/browser tool metadata 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability operation metadata 随 subagent tool event 透传；`daily_post` 与 `capability_creator` 的 runtime tools 已挂载 capability operation metadata。local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。
+状态：进行中。`plugins/localTools.ts` 已收敛为 toolkit 装配入口；file/path tools 已抽到 `plugins/localTools/fileTools.ts`，`run_shell` implementation 与 review policy 已抽到 `plugins/localTools/shellTools.ts`，`http_fetch` / `download_file` 已抽到 `plugins/localTools/networkTools.ts`，`glob_search` / `grep_search` 已抽到 `plugins/localTools/searchTools.ts`；本地路径解析和文件遍历 helper 已抽到 `plugins/localTools/pathUtils.ts` / `plugins/localTools/fileSystemUtils.ts`，operation metadata helper 已提升到 `plugins/operationMetadata.ts`，供 local/browser tool metadata 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability/host tool operation metadata 随 subagent tool event 透传；`daily_post` 与 `capability_creator` 的 runtime tools 已挂载 capability operation metadata，`describe_pet_profile` 已通过 `AgentInvokeInput.toolOperations` 挂载 host tool operation metadata。local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。
 
 目标：让 local tools 和 capability 管理可维护。
 
@@ -528,7 +548,7 @@ type OperationRegistry = {
 - `plugins/localTools.ts` 拆成 file/search/shell/network。
 - shell policy 从 tool implementation 中拆出。
 - capability loader/rescan/runtime state 收敛进 registry。
-- toolkit/capability operation metadata 与工具注册一起装配。
+- toolkit/capability/host tool operation metadata 与工具注册一起装配。
 
 产出：
 

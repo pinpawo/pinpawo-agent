@@ -1,6 +1,7 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { SubagentInput, SubagentResult, SubagentToolEvent } from '../types/subagent';
 import { createAgent } from 'langchain';
+import { SubagentToolEventTracker } from './toolEventTracker';
 
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 12;
 
@@ -53,6 +54,15 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
   });
 
   let latestMessages = input.messages;
+  const toolEvents = new SubagentToolEventTracker();
+  const emitToolEvent = async (event: SubagentToolEvent) => {
+    await input.onToolEvent?.(toolEvents.accept(event));
+  };
+  const finishToolEvents = async (outcome: 'completed' | 'failed', error?: unknown) => {
+    for (const event of toolEvents.finishActive(outcome, error)) {
+      await input.onToolEvent?.(event);
+    }
+  };
 
   try {
     const stream = await agent.stream(
@@ -71,7 +81,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
           latestMessages = readMessagesFromValuesChunk(payload) ?? latestMessages;
         }
         if (mode === 'tools' && isSubagentToolEvent(payload)) {
-          await input.onToolEvent?.(payload);
+          await emitToolEvent(payload);
         }
         continue;
       }
@@ -79,6 +89,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
       latestMessages = readMessagesFromValuesChunk(chunk) ?? latestMessages;
     }
 
+    await finishToolEvents('completed');
     return {
       messages: latestMessages,
       completionReason: 'natural',
@@ -92,12 +103,14 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
       );
 
     if (isLimitReached) {
+      await finishToolEvents('failed', err);
       return {
         messages: latestMessages,
         completionReason: 'limit_reached',
       };
     }
 
+    await finishToolEvents('failed', err);
     throw err;
   }
 }

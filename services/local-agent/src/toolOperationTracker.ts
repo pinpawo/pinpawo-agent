@@ -71,6 +71,12 @@ export class ToolOperationTracker {
       const active = this.activeById.get(id);
       if (active) {
         this.activeById.set(id, { ...active, event });
+      } else {
+        this.activeById.set(id, { id, name, event });
+      }
+      const ids = this.activeIdsByName.get(name) ?? [];
+      if (!ids.includes(id)) {
+        this.activeIdsByName.set(name, [...ids, id]);
       }
       return;
     }

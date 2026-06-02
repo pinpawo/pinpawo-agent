@@ -84,3 +84,21 @@ test('ToolOperationTracker does not reuse synthetic ids after terminal events', 
   assert.equal(first.operation.id, 'tool-1');
   assert.equal(second.operation.id, 'tool-2');
 });
+
+test('ToolOperationTracker can recover from update-before-start events', () => {
+  const tracker = new ToolOperationTracker('req-1');
+  const updated = tracker.accept({
+    event: 'on_tool_event',
+    name: 'read_file',
+    data: { progress: 'reading' },
+  });
+  const completed = tracker.accept({
+    event: 'on_tool_end',
+    name: 'read_file',
+    output: 'done',
+  });
+
+  assert.equal(updated.operation.id, 'tool-1');
+  assert.equal(completed.operation.id, 'tool-1');
+  assert.deepEqual(tracker.finishActive('interrupted'), []);
+});

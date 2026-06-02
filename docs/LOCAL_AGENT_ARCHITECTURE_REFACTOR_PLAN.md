@@ -347,6 +347,7 @@ type LocalAgentOperationEvent = {
 说明：
 
 - `kind` 是开放字符串，由 toolkit/capability metadata 提供。
+- pet-agent subagent 层通过 `SubagentToolEventTracker` 规范 `onToolEvent` 的 `toolCallId`，并在 subagent 自然完成、limit reached、异常时关闭仍 active 的 tool event。
 - local-agent 运行层通过 `ToolOperationTracker` 保证发给客户端的 operation 有稳定 `id`；当上游缺失 `toolCallId` 时按 request 生成 synthetic id。
 - request 正常完成、异常、中断或等待人工时，tracker 会关闭仍 active 的 operation，避免客户端 `activeOperations` 泄漏。
 - `title` / `target` / `summary` 是已经归一化后的展示信息，adapter 可以直接使用。

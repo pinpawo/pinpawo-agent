@@ -34,12 +34,14 @@ export class SubagentToolEventTracker {
           toolCallId: item.id,
           name: item.name,
           output: undefined,
+          ...(item.event.operation ? { operation: item.event.operation } : {}),
         }
       : {
           event: 'on_tool_error',
           toolCallId: item.id,
           name: item.name,
           error,
+          ...(item.event.operation ? { operation: item.event.operation } : {}),
         });
   }
 

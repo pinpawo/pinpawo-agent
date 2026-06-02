@@ -13,12 +13,16 @@ import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
 import { runChatSession } from './chatSessionAdapter';
-import type { InflightOperationRun } from './inflightOperationRun';
+import {
+  configureInflightOperationRegistry,
+  type InflightOperationRun,
+} from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
 import { LocalAgentGraphService } from './agentGraphService';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import type { LocalServerDeps } from './localServerTypes';
+import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
 type InflightRequest = InflightOperationRun;
 
@@ -80,6 +84,10 @@ export class LocalServerChatHandler {
       }
 
       const setup = this.tuiSessions.buildChatSetup(deps, ctx);
+      configureInflightOperationRegistry(
+        inflight,
+        createOperationRegistryForAgentSetup(setup),
+      );
       setup.input.messages = [
         ...setup.input.messages.slice(0, -1),
         new HumanMessage(message),

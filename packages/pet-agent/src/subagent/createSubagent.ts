@@ -56,7 +56,8 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
   let latestMessages = input.messages;
   const toolEvents = new SubagentToolEventTracker();
   const emitToolEvent = async (event: SubagentToolEvent) => {
-    await input.onToolEvent?.(toolEvents.accept(event));
+    const operation = event.operation ?? input.operations?.[event.name];
+    await input.onToolEvent?.(toolEvents.accept(operation ? { ...event, operation } : event));
   };
   const finishToolEvents = async (outcome: 'completed' | 'failed', error?: unknown) => {
     for (const event of toolEvents.finishActive(outcome, error)) {

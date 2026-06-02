@@ -34,6 +34,7 @@ export type {
   SubagentResult,
   SubagentToolEvent,
   SubagentToolEventHandler,
+  SubagentToolOperationMetadata,
 } from './types/subagent';
 
 export type {

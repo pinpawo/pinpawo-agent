@@ -19,10 +19,12 @@ import type { StreamToolsPayload } from './agentStreamEvents';
 import { runChatSession } from './chatSessionAdapter';
 import type { LocalAgentGraphService } from './agentGraphService';
 import {
+  configureInflightOperationRegistry,
   emitInflightToolEvent,
   type InflightOperationRun,
 } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
+import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
 type InflightRequest = InflightOperationRun;
 type LoadContext = (actorId: string) => Promise<AgentContext>;
@@ -140,6 +142,10 @@ export class LocalAgentAppChatHandler {
       }
 
       const setup = this.buildSetup(ctx, message, userId);
+      configureInflightOperationRegistry(
+        inflight,
+        createOperationRegistryForAgentSetup(setup),
+      );
       setup.input.signal = controller.signal;
 
       const result = await this.runChat({

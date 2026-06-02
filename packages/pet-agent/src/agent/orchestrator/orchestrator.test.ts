@@ -15,6 +15,8 @@ import {
   splitCapabilitySearchTerms,
 } from './capabilitySearch';
 import {
+  collectCapabilityOperations,
+  collectToolkitOperations,
   readLatestToolArtifact,
   resolveToolkitResources,
   selectCapabilityTools,
@@ -368,6 +370,47 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
     'browser_open',
     'custom_tool',
   ]);
+});
+
+test('toolkit and capability operations are collected with their source', () => {
+  const toolkits: AgentToolkit[] = [{
+    name: 'bash',
+    description: 'bash toolkit',
+    operations: {
+      read_file: {
+        kind: 'file.read',
+        title: 'Read File',
+      },
+      shared_tool: {
+        kind: 'toolkit.shared',
+      },
+    },
+  }];
+
+  const toolkitOperations = collectToolkitOperations(toolkits);
+  assert.equal(toolkitOperations.read_file?.kind, 'file.read');
+  assert.deepEqual(toolkitOperations.read_file?.source, {
+    provider: 'toolkit',
+    name: 'read_file',
+  });
+
+  const capabilityOperations = collectCapabilityOperations(toolkits, {
+    operations: {
+      custom_tool: {
+        kind: 'capability.custom',
+      },
+      shared_tool: {
+        kind: 'capability.shared',
+      },
+    },
+  });
+
+  assert.equal(capabilityOperations.custom_tool?.kind, 'capability.custom');
+  assert.deepEqual(capabilityOperations.custom_tool?.source, {
+    provider: 'capability',
+    name: 'custom_tool',
+  });
+  assert.equal(capabilityOperations.shared_tool?.kind, 'toolkit.shared');
 });
 
 test('toolkit review policy wraps tool calls without changing tool identity', async () => {

@@ -3,13 +3,16 @@ import test from 'node:test';
 import type { LocalAgentOperationEvent } from './events/localAgentEvent';
 import {
   clearInflightOperationTimer,
+  configureInflightOperationRegistry,
   createInflightOperationRun,
   emitInflightToolEvent,
   finishInflightOperations,
 } from './inflightOperationRun';
+import { localToolOperationRegistry } from './plugins/localTools';
 
 test('inflight operation run emits tool stream events as operations', () => {
   const run = createInflightOperationRun('req-1');
+  configureInflightOperationRegistry(run, localToolOperationRegistry);
   const emitted: LocalAgentOperationEvent[] = [];
 
   const event = emitInflightToolEvent(run, {

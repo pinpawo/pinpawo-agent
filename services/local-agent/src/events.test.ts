@@ -4,6 +4,7 @@ import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
 import { createBashToolkit, localToolOperationRegistry } from './plugins/localTools';
+import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
 test('normalizes LangGraph tool stream events with toolkit operation metadata', () => {
   const event = normalizeToolStreamEvent(
@@ -59,13 +60,67 @@ test('falls back to a generic operation when no metadata is registered', () => {
   assert.equal(event.operation.source?.provider, 'runtime');
 });
 
-test('buildToolOperationEvent uses local toolkit metadata for direct event emission', () => {
+test('normalizes tool stream events with event-provided operation metadata first', () => {
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'run_shell',
+      toolCallId: 'call-1',
+      input: { command: 'git status' },
+      operation: {
+        kind: 'capability.shell_alias',
+        title: 'Capability Shell',
+        summarizeInput: () => ({
+          target: 'custom-target',
+          summary: 'custom summary',
+        }),
+        source: {
+          provider: 'capability',
+          name: 'run_shell',
+        },
+      },
+    },
+    localToolOperationRegistry,
+  );
+
+  assert.equal(event.operation.kind, 'capability.shell_alias');
+  assert.equal(event.operation.title, 'Capability Shell');
+  assert.equal(event.operation.target, 'custom-target');
+  assert.equal(event.operation.summary, 'custom summary');
+  assert.deepEqual(event.operation.source, {
+    provider: 'capability',
+    name: 'run_shell',
+    callId: 'call-1',
+  });
+});
+
+test('buildToolOperationEvent defaults to generic runtime operations', () => {
   const event = buildToolOperationEvent('req-1', {
     event: 'on_tool_start',
     name: 'run_shell',
     toolCallId: 'call-1',
     input: { command: 'git status --short', cwd: '/repo' },
   });
+
+  assert.equal(event.type, 'operation');
+  assert.equal(event.phase, 'started');
+  assert.equal(event.operation.kind, 'tool.execute');
+  assert.equal(event.operation.title, 'run_shell');
+  assert.deepEqual(event.operation.source, {
+    provider: 'runtime',
+    name: 'run_shell',
+    callId: 'call-1',
+  });
+});
+
+test('buildToolOperationEvent uses explicit toolkit metadata', () => {
+  const event = buildToolOperationEvent('req-1', {
+    event: 'on_tool_start',
+    name: 'run_shell',
+    toolCallId: 'call-1',
+    input: { command: 'git status --short', cwd: '/repo' },
+  }, localToolOperationRegistry);
 
   assert.equal(event.type, 'operation');
   assert.equal(event.phase, 'started');
@@ -86,4 +141,38 @@ test('createBashToolkit exposes operation metadata with the toolkit definition',
   assert.equal(toolkit.operations?.read_file?.kind, 'file.read');
   assert.equal(toolkit.operations?.grep_search?.kind, 'search.grep');
   assert.equal(toolkit.operations?.run_shell?.kind, 'shell.run');
+});
+
+test('createOperationRegistryForAgentSetup reads operation metadata from setup toolkits', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolkits: [{
+        name: 'test-toolkit',
+        operations: {
+          custom_tool: {
+            kind: 'custom.run',
+            title: 'Custom Run',
+          },
+        },
+      }],
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'custom_tool',
+      input: {},
+    },
+    registry,
+  );
+
+  assert.equal(event.operation.kind, 'custom.run');
+  assert.equal(event.operation.title, 'Custom Run');
+  assert.deepEqual(event.operation.source, {
+    provider: 'toolkit',
+    name: 'custom_tool',
+    callId: undefined,
+  });
 });

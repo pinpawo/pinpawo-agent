@@ -40,6 +40,22 @@ function createDeps(): LocalServerDeps {
       baseUrl: 'https://example.test/v1',
     } as unknown as LocalServerDeps['llmConfig'],
     localTools: [{ name: 'local-tool' }] as LocalServerDeps['localTools'],
+    localToolkits: [{
+      name: 'local-toolkit',
+      description: 'local toolkit',
+      operations: {
+        read_file: {
+          kind: 'file.read',
+          title: '读文件',
+          summarizeInput: (input: unknown) => {
+            const path = input && typeof input === 'object' && 'path' in input
+              ? (input as { path?: unknown }).path
+              : null;
+            return typeof path === 'string' ? { target: path } : null;
+          },
+        },
+      },
+    }] as LocalServerDeps['localToolkits'],
     pluginTools: [{ name: 'plugin-tool' }] as LocalServerDeps['pluginTools'],
     localCapabilities: [{ name: 'browser' }] as LocalServerDeps['localCapabilities'],
     userCapabilities: [{

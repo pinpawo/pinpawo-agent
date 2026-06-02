@@ -6,6 +6,10 @@ import type {
   LocalAgentOperationEvent,
   LocalAgentOperationPhase,
 } from './events/localAgentEvent';
+import {
+  emptyOperationRegistry,
+  type OperationRegistry,
+} from './events/operationRegistry';
 
 type ActiveTrackedOperation = {
   id: string;
@@ -19,15 +23,25 @@ export class ToolOperationTracker {
   private sequence = 0;
   private readonly activeById = new Map<string, ActiveTrackedOperation>();
   private readonly activeIdsByName = new Map<string, string[]>();
+  private operationRegistry: OperationRegistry;
 
-  constructor(private readonly requestId: string) {}
+  constructor(
+    private readonly requestId: string,
+    operationRegistry: OperationRegistry = emptyOperationRegistry,
+  ) {
+    this.operationRegistry = operationRegistry;
+  }
+
+  setOperationRegistry(operationRegistry: OperationRegistry) {
+    this.operationRegistry = operationRegistry;
+  }
 
   accept(payload: StreamToolsPayload): LocalAgentOperationEvent {
     const id = this.resolveOperationId(payload);
     const event = buildToolOperationEvent(this.requestId, {
       ...payload,
       toolCallId: id,
-    });
+    }, this.operationRegistry);
     this.track(event, payload.name, id);
     return event;
   }

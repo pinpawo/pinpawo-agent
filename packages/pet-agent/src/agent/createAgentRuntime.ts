@@ -79,6 +79,8 @@ import {
 } from './orchestrator/messageLanes';
 import {
   buildDelegationHandoffInstruction,
+  collectCapabilityOperations,
+  collectToolkitOperations,
   resolveInstructions,
   resolveToolkitResources,
   selectCapabilityTools,
@@ -600,6 +602,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       model: config.models.subagent ?? config.models.act,
       tools: selectCapabilityTools(runtime, usedToolkitResources.tools),
       instructions: [handoffInstruction, ...usedToolkitResources.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
+      operations: collectCapabilityOperations(usedToolkitResources.toolkits, runtime),
       messages: scopedMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       signal: runnableConfig?.signal,
@@ -704,6 +707,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       model: config.models.subagent ?? config.models.act,
       tools: toolList,
       instructions: [handoffInstruction, ...toolkitResources.instructions, ...instructions],
+      operations: collectToolkitOperations(toolkitResources.toolkits),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
       signal: runnableConfig?.signal,

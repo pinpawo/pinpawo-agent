@@ -8,7 +8,10 @@ import {
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
-import type { InflightOperationRun } from './inflightOperationRun';
+import {
+  configureInflightOperationRegistry,
+  type InflightOperationRun,
+} from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
 import {
@@ -19,6 +22,7 @@ import {
 } from './studio/studioRuntime';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import type { LocalServerDeps } from './localServerTypes';
+import { createOperationRegistryForLocalServerDeps } from './runtimeOperationRegistry';
 
 type InflightRequest = InflightOperationRun;
 type BuildStudioForTurn = (input: BuildStudioInput) => Promise<BuildStudioResult>;
@@ -62,6 +66,10 @@ export class LocalServerStudioHandler {
       notifyPrevious: true,
     });
     const { controller } = inflight;
+    configureInflightOperationRegistry(
+      inflight,
+      createOperationRegistryForLocalServerDeps(deps),
+    );
 
     // 重置 review slot(防止上一 turn 残留)
     const slot = this.reviewRouter.getOrCreateSlot(ws);

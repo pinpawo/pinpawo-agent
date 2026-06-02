@@ -65,6 +65,35 @@ test('SubagentToolEventTracker closes dangling tools on natural completion', () 
   assert.deepEqual(tracker.finishActive('failed'), []);
 });
 
+test('SubagentToolEventTracker keeps operation metadata on dangling terminal events', () => {
+  const tracker = new SubagentToolEventTracker();
+  tracker.accept({
+    event: 'on_tool_start',
+    name: 'custom_tool',
+    input: {},
+    operation: {
+      kind: 'capability.custom',
+      title: 'Custom Tool',
+      source: {
+        provider: 'capability',
+        name: 'custom_tool',
+      },
+    },
+  });
+
+  const completed = tracker.finishActive('completed');
+
+  assert.equal(completed.length, 1);
+  assert.deepEqual(completed[0]?.operation, {
+    kind: 'capability.custom',
+    title: 'Custom Tool',
+    source: {
+      provider: 'capability',
+      name: 'custom_tool',
+    },
+  });
+});
+
 test('SubagentToolEventTracker closes dangling tools on failure', () => {
   const tracker = new SubagentToolEventTracker();
   tracker.accept({

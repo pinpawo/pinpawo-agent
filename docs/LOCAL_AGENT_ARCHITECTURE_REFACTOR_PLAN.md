@@ -141,13 +141,13 @@ const capability = {
 };
 ```
 
-local-agent 只负责收集这些 metadata，建立 registry：
+pet-agent 在创建 subagent 时负责收集这些 metadata，并随工具事件透传：
 
 ```txt
-toolName -> operation metadata
+SubagentToolEvent.operation -> operation metadata
 ```
 
-然后把内部 tool event normalize 成 stable local-agent event。
+local-agent 在每个 run 上也建立由当前 `toolkits` 生成的 registry，作为 host/studio 事件和未携带 metadata 的工具事件 fallback。然后把内部 tool event normalize 成 stable local-agent event。
 
 ### 3.3 adapter 拥有渲染
 
@@ -403,6 +403,13 @@ type OperationSummary = {
 };
 ```
 
+当前实现边界：
+
+- `AgentToolkit.operations` 描述 toolkit tools 的展示语义。
+- `CapabilityRuntime.operations` 描述 capability runtime 自带 tools 的展示语义。
+- pet-agent 的 subagent 工具事件会携带 `operation` metadata。
+- local-agent 的 `ToolOperationTracker` 使用 run-local registry 兜底，不再依赖全局固定 local tool registry。
+
 Registry 由 local-agent 建立：
 
 ```ts
@@ -450,6 +457,7 @@ type OperationRegistry = {
 - 新增 `events/AgentStreamNormalizer.ts`。
 - 运行链路改为走 `onToolEvent -> LocalAgentOperationEvent`，chat 顶层 stream 不再订阅 `tools` mode。
 - 内置 local tools 注册 operation metadata。
+- toolkit/capability metadata 随 subagent tool event 透传，local-agent run registry 作为 fallback。
 
 约束：
 
@@ -510,7 +518,7 @@ type OperationRegistry = {
 
 ### 阶段 5：拆分 tools/policy/capability registry
 
-状态：进行中。`plugins/localTools.ts` 已收敛为 toolkit 装配入口；file/path tools 已抽到 `plugins/localTools/fileTools.ts`，`run_shell` implementation 与 review policy 已抽到 `plugins/localTools/shellTools.ts`，`http_fetch` / `download_file` 已抽到 `plugins/localTools/networkTools.ts`，`glob_search` / `grep_search` 已抽到 `plugins/localTools/searchTools.ts`；本地路径解析和文件遍历 helper 已抽到 `plugins/localTools/pathUtils.ts` / `plugins/localTools/fileSystemUtils.ts`，供 tools 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，并通过 `createBashToolkit().operations` 建立 registry，旧的集中 `localToolOperations.ts` 已删除。
+状态：进行中。`plugins/localTools.ts` 已收敛为 toolkit 装配入口；file/path tools 已抽到 `plugins/localTools/fileTools.ts`，`run_shell` implementation 与 review policy 已抽到 `plugins/localTools/shellTools.ts`，`http_fetch` / `download_file` 已抽到 `plugins/localTools/networkTools.ts`，`glob_search` / `grep_search` 已抽到 `plugins/localTools/searchTools.ts`；本地路径解析和文件遍历 helper 已抽到 `plugins/localTools/pathUtils.ts` / `plugins/localTools/fileSystemUtils.ts`，供 tools 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，pet-agent 已支持 toolkit/capability operation metadata 随 subagent tool event 透传，local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。
 
 目标：让 local tools 和 capability 管理可维护。
 
@@ -580,6 +588,5 @@ type OperationRegistry = {
 仍待确认：
 
 1. app 是否需要接收 `raw.input/output`，还是只在 debug mode 开启。
-2. operation metadata 应该挂在 toolkit runtime、tool wrapper，还是 local-agent host registry。
-3. user capability 的 metadata manifest 形态是否需要进入公开 capability contract。
-4. i18n 是 metadata 直接给 `title`，还是给 `titleKey` 由 adapter locale 渲染。
+2. user capability 的 metadata manifest 形态是否需要进入公开 capability contract。
+3. i18n 是 metadata 直接给 `title`，还是给 `titleKey` 由 adapter locale 渲染。

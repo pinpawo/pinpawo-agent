@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { LocalAgentOperationEvent } from './events/localAgentEvent';
-import { createInflightOperationRun } from './inflightOperationRun';
+import {
+  configureInflightOperationRegistry,
+  createInflightOperationRun,
+} from './inflightOperationRun';
 import {
   emitLocalServerToolOperationEvent,
   isHumanReviewInterruptError,
 } from './localServerOperationEvents';
+import { localToolOperationRegistry } from './plugins/localTools';
 
 test('emitLocalServerToolOperationEvent emits one operation for a normal tool event', () => {
   const run = createInflightOperationRun('req-1');
+  configureInflightOperationRegistry(run, localToolOperationRegistry);
   const emitted: LocalAgentOperationEvent[] = [];
 
   const event = emitLocalServerToolOperationEvent({

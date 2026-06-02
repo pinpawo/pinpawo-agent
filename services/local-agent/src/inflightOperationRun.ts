@@ -3,6 +3,7 @@ import type {
   LocalAgentOperationEvent,
   LocalAgentOperationPhase,
 } from './events/localAgentEvent';
+import type { OperationRegistry } from './events/operationRegistry';
 import { recordOperationActivity } from './operationActivityState';
 import { ToolOperationTracker } from './toolOperationTracker';
 
@@ -21,12 +22,22 @@ export type TerminalOperationPhase = Extract<
 
 export type EmitOperationEvent = (event: LocalAgentOperationEvent) => void;
 
-export function createInflightOperationRun(requestId: string): InflightOperationRun {
+export function createInflightOperationRun(
+  requestId: string,
+  operationRegistry?: OperationRegistry,
+): InflightOperationRun {
   return {
     requestId,
     controller: new AbortController(),
-    operationTracker: new ToolOperationTracker(requestId),
+    operationTracker: new ToolOperationTracker(requestId, operationRegistry),
   };
+}
+
+export function configureInflightOperationRegistry(
+  run: InflightOperationRun,
+  operationRegistry: OperationRegistry,
+) {
+  run.operationTracker.setOperationRegistry(operationRegistry);
 }
 
 export function clearInflightOperationTimer(run: InflightOperationRun) {

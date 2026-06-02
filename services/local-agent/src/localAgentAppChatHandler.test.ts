@@ -33,7 +33,25 @@ function createSetup(): AgentChannelSetup {
   return {
     graphKey: 'test',
     graphConfig: {} as AgentChannelSetup['graphConfig'],
-    input: {} as AgentChannelSetup['input'],
+    input: {
+      messages: [],
+      toolkits: [{
+        name: 'local-toolkit',
+        description: 'local toolkit',
+        operations: {
+          read_file: {
+            kind: 'file.read',
+            title: '读文件',
+            summarizeInput: (input: unknown) => {
+              const path = input && typeof input === 'object' && 'path' in input
+                ? (input as { path?: unknown }).path
+                : null;
+              return typeof path === 'string' ? { target: path } : null;
+            },
+          },
+        },
+      }],
+    } as AgentChannelSetup['input'],
   };
 }
 

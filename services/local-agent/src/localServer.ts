@@ -26,12 +26,9 @@ import {
 } from './agentStreamEvents';
 import { runChatSession } from './chatSessionAdapter';
 import {
-  clearInflightOperationTimer,
-  createInflightOperationRun,
-  finishInflightOperations,
   type InflightOperationRun,
-  type TerminalOperationPhase,
 } from './inflightOperationRun';
+import { InflightRequestController } from './inflightRequestController';
 import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
 import {
   buildStudioForTurn,
@@ -52,60 +49,12 @@ const INTERRUPT_FORCE_REPLY_MS = 1800;
 
 type InflightRequest = InflightOperationRun;
 
-const inflightRequests = new Map<WebSocket, InflightRequest>();
-
-function clearInflightTimer(inflight: InflightRequest) {
-  clearInflightOperationTimer(inflight);
-}
-
-function clearInflightRequest(ws: WebSocket, inflight: InflightRequest) {
-  clearInflightTimer(inflight);
-  if (inflightRequests.get(ws) === inflight) {
-    inflightRequests.delete(ws);
-  }
-}
-
-function sendInterrupted(ws: WebSocket, inflight: InflightRequest) {
-  if (inflight.interruptedSent) {
-    return;
-  }
-  inflight.interruptedSent = true;
-  finishOperationRun(ws, inflight, 'interrupted');
-  sendLocalAgentMessage(ws, {
-    type: 'interrupted',
-    requestId: inflight.requestId,
-    message: 'interrupted',
-  });
-}
-
-function interruptInflightRequest(ws: WebSocket, inflight: InflightRequest) {
-  sendLocalAgentMessage(ws, {
-    type: 'interrupting',
-    requestId: inflight.requestId,
-    message: 'interrupting',
-  });
-  inflight.controller.abort();
-  if (inflight.interruptTimer) {
-    return;
-  }
-  inflight.interruptTimer = setTimeout(() => {
-    if (inflightRequests.get(ws) !== inflight || !inflight.controller.signal.aborted) {
-      return;
-    }
-    sendInterrupted(ws, inflight);
-    clearInflightRequest(ws, inflight);
-    console.warn(`[local-server] force interrupted requestId=${inflight.requestId}`);
-  }, INTERRUPT_FORCE_REPLY_MS);
-}
-
-function finishOperationRun(
-  ws: WebSocket,
-  inflight: InflightRequest,
-  phase: TerminalOperationPhase,
-  error?: unknown,
-) {
-  finishInflightOperations(inflight, phase, (event) => sendLocalAgentEvent(ws, event), error);
-}
+const inflightRequests = new InflightRequestController<WebSocket>({
+  forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
+  emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
+  sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
+  logPrefix: 'local-server',
+});
 
 function isToolProtocolHistoryError(value: unknown): boolean {
   const text = value instanceof Error
@@ -135,17 +84,11 @@ async function handleStudioRequest(
   console.log(`[local-server] studio_request requestId=${requestId} userRequest="${userRequest.slice(0, 80)}"`);
 
   // 取消已有 inflight(避免跟 chat 重叠)
-  const previousInflight = inflightRequests.get(ws);
-  if (previousInflight) {
-    sendInterrupted(ws, previousInflight);
-    clearInflightTimer(previousInflight);
-    previousInflight.controller.abort();
-    clearInflightRequest(ws, previousInflight);
-  }
-
-  const inflight = createInflightOperationRun(requestId);
+  const inflight = inflightRequests.start(ws, requestId, {
+    interruptPrevious: true,
+    notifyPrevious: true,
+  });
   const { controller } = inflight;
-  inflightRequests.set(ws, inflight);
 
   // 重置 review slot(防止上一 turn 残留)
   const slot = studioReviewRouter.getOrCreateSlot(ws);
@@ -188,12 +131,12 @@ async function handleStudioRequest(
     });
 
     if (controller.signal.aborted) {
-      finishOperationRun(ws, inflight, 'interrupted');
+      inflightRequests.finish(ws, inflight, 'interrupted');
       send({ type: 'studio_error', requestId, message: 'aborted by client' });
       return;
     }
 
-    finishOperationRun(ws, inflight, 'completed');
+    inflightRequests.finish(ws, inflight, 'completed');
     if (result.outcome.outcome === 'done') {
       send({
         type: 'studio_response',
@@ -212,7 +155,7 @@ async function handleStudioRequest(
       });
     }
   } catch (err) {
-    finishOperationRun(ws, inflight, 'failed', err);
+    inflightRequests.finish(ws, inflight, 'failed', err);
     if (err instanceof StudioNotConfiguredError) {
       send({
         type: 'studio_error',
@@ -234,9 +177,7 @@ async function handleStudioRequest(
     if (slot.current) {
       studioReviewRouter.rejectPending(ws, new Error('studio turn ended with unresolved review'));
     }
-    if (inflightRequests.get(ws) === inflight) {
-      clearInflightRequest(ws, inflight);
-    }
+    inflightRequests.clear(ws, inflight);
   }
 }
 
@@ -249,24 +190,21 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
   recordAgentRunActivity('thinking', requestId);
 
   const previousInflight = inflightRequests.get(ws);
+  const inflight = inflightRequests.start(ws, requestId, {
+    interruptPrevious: true,
+    notifyPrevious: true,
+  });
   if (previousInflight) {
-    sendInterrupted(ws, previousInflight);
-    clearInflightTimer(previousInflight);
-    previousInflight.controller.abort();
-    clearInflightRequest(ws, previousInflight);
     console.warn(`[local-server] abort previous inflight requestId=${previousInflight.requestId} before starting requestId=${requestId}`);
   }
-
-  const inflight = createInflightOperationRun(requestId);
   const { controller } = inflight;
-  inflightRequests.set(ws, inflight);
-  const isCurrent = () => inflightRequests.get(ws) === inflight && !controller.signal.aborted;
+  const isCurrent = () => inflightRequests.isCurrentActive(ws, inflight);
   const finishInterrupted = () => {
     if (!controller.signal.aborted) {
       return;
     }
-    sendInterrupted(ws, inflight);
-    clearInflightRequest(ws, inflight);
+    inflightRequests.sendInterrupted(ws, inflight);
+    inflightRequests.clear(ws, inflight);
   };
 
   try {
@@ -314,33 +252,33 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
       },
     });
     if (result.status === 'waiting_human') {
-      finishOperationRun(ws, inflight, 'interrupted');
+      inflightRequests.finish(ws, inflight, 'interrupted');
       await tuiSessions.refreshActiveSessionSummary(deps);
       console.log(`[local-server] human_review.requested requestId=${requestId}`);
-      clearInflightRequest(ws, inflight);
+      inflightRequests.clear(ws, inflight);
       return;
     }
     if (result.status === 'interrupted') {
       return;
     }
-    finishOperationRun(ws, inflight, 'completed');
-    clearInflightRequest(ws, inflight);
+    inflightRequests.finish(ws, inflight, 'completed');
+    inflightRequests.clear(ws, inflight);
     await tuiSessions.refreshActiveSessionSummary(deps);
 
     console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
   } catch (err) {
-    const isStillCurrent = inflightRequests.get(ws) === inflight;
+    const isStillCurrent = inflightRequests.isCurrent(ws, inflight);
     const aborted = controller.signal.aborted
       || (err instanceof Error && err.name === 'AbortError');
     if (aborted) {
       console.warn(`[local-server] chat interrupted requestId=${requestId}`);
-      sendInterrupted(ws, inflight);
+      inflightRequests.sendInterrupted(ws, inflight);
       recordAgentRunActivity('interrupted', requestId, 2_500);
-      clearInflightRequest(ws, inflight);
+      inflightRequests.clear(ws, inflight);
       return;
     }
-    finishOperationRun(ws, inflight, 'failed', err);
-    clearInflightRequest(ws, inflight);
+    inflightRequests.finish(ws, inflight, 'failed', err);
+    inflightRequests.clear(ws, inflight);
     recordAgentRunActivity('error', requestId, 5_000);
     console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
     const recoveredFromToolProtocolError = isToolProtocolHistoryError(err);
@@ -417,10 +355,8 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
               console.error('[local-server] handleHumanReviewResponse error:', err instanceof Error ? err.message : err);
             });
           } else if (msg.type === 'interrupt_request') {
-            const inflight = inflightRequests.get(ws);
-            const requestId = msg.requestId;
-            if (inflight && (!requestId || inflight.requestId === requestId)) {
-              interruptInflightRequest(ws, inflight);
+            const inflight = inflightRequests.interrupt(ws, { requestId: msg.requestId });
+            if (inflight) {
               console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
             }
           } else if (msg.type === 'new_session') {
@@ -438,12 +374,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
       });
 
       ws.on('close', () => {
-        const inflight = inflightRequests.get(ws);
-        if (inflight) {
-          clearInflightTimer(inflight);
-          inflight.controller.abort();
-          inflightRequests.delete(ws);
-        }
+        inflightRequests.abortAndClear(ws);
         studioReviewRouter.rejectAndDelete(ws, new Error('ws disconnected'));
         console.log('[local-server] TUI client disconnected');
       });

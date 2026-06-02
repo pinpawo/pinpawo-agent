@@ -117,6 +117,45 @@ test('parseLocalAgentServerMessage accepts typed local-agent event messages', ()
   );
 });
 
+test('parseLocalAgentServerMessage keeps usage on message.completed event when valid', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'message.completed',
+        requestId: 'req-1',
+        role: 'assistant',
+        text: 'done',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 90,
+          totalTokens: 100,
+          contextWindow: 2000,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    })),
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'message.completed',
+        requestId: 'req-1',
+        role: 'assistant',
+        text: 'done',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 90,
+          totalTokens: 100,
+          contextWindow: 2000,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    },
+  );
+});
+
 test('parseLocalAgentServerMessage accepts legacy top-level human_review.requested messages', () => {
   assert.deepEqual(
     parseLocalAgentServerMessage(JSON.stringify({
@@ -192,6 +231,11 @@ test('sendLocalAgentEvent writes only typed events', () => {
     requestId: 'req-1',
     role: 'assistant',
     text: 'done',
+    usage: {
+      inputTokens: 10,
+      outputTokens: 4,
+      totalTokens: 14,
+    },
     metadata: { mood: null, topic: null, tags: [] },
   }), true);
   const internalOperationEvent: LocalAgentOperationInternalEvent = {
@@ -227,6 +271,11 @@ test('sendLocalAgentEvent writes only typed events', () => {
         requestId: 'req-1',
         role: 'assistant',
         text: 'done',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 4,
+          totalTokens: 14,
+        },
         metadata: { mood: null, topic: null, tags: [] },
       },
     },

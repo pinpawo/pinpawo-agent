@@ -19,6 +19,13 @@ export type LocalAgentMessageCompletedEvent = {
   requestId: string;
   role: 'assistant';
   text: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    contextWindow?: number;
+    updatedAt?: string;
+  };
   metadata?: {
     mood?: string | null;
     topic?: string | null;

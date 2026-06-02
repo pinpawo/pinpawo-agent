@@ -75,6 +75,11 @@ export const TUI_TEXT = {
   statusInitializing: '初始化中',
   statusReady: '就绪',
   statusErrorRecovered: '出错，已恢复输入',
+  tokenUsageLine: (inputTokens: string, outputTokens: string, totalTokens: string, contextWindow: string | null, ratio: string | null) => (
+    ratio
+      ? `Token 用量：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens} (${ratio}，上下文 ${contextWindow})`
+      : `Token 用量：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens}`
+  ),
   interrupted: '[interrupted]',
   errorLine: (message: string) => `出错：${message}`,
   studioEmptyTurn: (outcome: 'done' | 'stopped') => `[studio] turn ${outcome} (无最终输出)`,

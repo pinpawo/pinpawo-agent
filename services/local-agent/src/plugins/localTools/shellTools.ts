@@ -3,12 +3,14 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import {
   buildHumanReviewRequest,
+  type ToolkitOperationMetadata,
   type HumanReviewActionRequest,
   type ToolkitToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { isShellCommandAuthorized } from '../../sessionAuthorizations';
 import { config } from '../../config';
+import { readRecord, readString } from './operationMetadata';
 import { resolveUserPath } from './pathUtils';
 
 export function getBlockedShellReason(command: string) {
@@ -219,4 +221,18 @@ export const shellReviewPolicy: ToolkitToolReviewPolicy = {
     editedAction,
     normalizeShellActionInput(input),
   ),
+};
+
+export const shellToolOperations: Record<string, ToolkitOperationMetadata> = {
+  run_shell: {
+    kind: 'shell.run',
+    title: '执行命令',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'cwd'),
+        summary: readString(record, 'command'),
+      };
+    },
+  },
 };

@@ -2,6 +2,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import {
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
+import { createOperationRegistryFromToolkits } from '../events/operationRegistry';
 import type { LocalAgentPlugin } from '../pluginLoader';
 import {
   applyFilePatchTool,
@@ -17,10 +18,11 @@ import {
   validateStructuredFileTool,
   viewFileChunkTool,
   writeFileTool,
+  fileToolOperations,
 } from './localTools/fileTools';
-import { downloadFileTool, httpFetchTool } from './localTools/networkTools';
-import { globSearchTool, grepSearchTool } from './localTools/searchTools';
-import { runShellTool, shellReviewPolicy } from './localTools/shellTools';
+import { downloadFileTool, httpFetchTool, networkToolOperations } from './localTools/networkTools';
+import { globSearchTool, grepSearchTool, searchToolOperations } from './localTools/searchTools';
+import { runShellTool, shellReviewPolicy, shellToolOperations } from './localTools/shellTools';
 
 const coreLocalPluginTools: StructuredTool[] = [
   readFileTool,
@@ -51,12 +53,20 @@ const bashToolkitInstructions = [
   '修改文件前先读取现状；修改后优先用 validate_structured_file、grep_search 或 run_shell 做必要验证。',
 ];
 
+const bashToolkitOperations = {
+  ...fileToolOperations,
+  ...searchToolOperations,
+  ...networkToolOperations,
+  ...shellToolOperations,
+};
+
 export function createBashToolkit(tools: StructuredTool[] = coreLocalPluginTools): AgentToolkit {
   return {
     name: 'bash',
     description: '本地文件读写、目录操作、代码搜索、补丁应用、HTTP 下载，以及受控 shell 命令执行。',
     tools,
     instructions: bashToolkitInstructions,
+    operations: bashToolkitOperations,
     policy: {
       toolReview: {
         run_shell: shellReviewPolicy,
@@ -64,6 +74,10 @@ export function createBashToolkit(tools: StructuredTool[] = coreLocalPluginTools
     },
   };
 }
+
+export const localToolOperationRegistry = createOperationRegistryFromToolkits([
+  createBashToolkit(),
+]);
 
 let cachedLocalPluginTools: StructuredTool[] | null = null;
 

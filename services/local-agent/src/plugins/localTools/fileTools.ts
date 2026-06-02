@@ -3,9 +3,19 @@ import { cpSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, 
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
+import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { config } from '../../config';
 import { tryStat } from './fileSystemUtils';
+import {
+  okOutputPathSummary,
+  pathInputSummary,
+  readBoolean,
+  readNumber,
+  readRecord,
+  readString,
+  sourceDestinationInputSummary,
+} from './operationMetadata';
 import { resolveUserPath } from './pathUtils';
 
 const capabilityManifestSchema = z.object({
@@ -610,3 +620,124 @@ export const listDirTool = tool(
     schema: z.object({ path: z.string().describe('目录路径，默认 "." 表示当前目录') }),
   },
 );
+
+export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
+  read_file: {
+    kind: 'file.read',
+    title: '读文件',
+    summarizeInput: pathInputSummary,
+  },
+  view_file_chunk: {
+    kind: 'file.chunk.read',
+    title: '看片段',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      const target = readString(record, 'path');
+      const startLine = readNumber(record, 'startLine');
+      const endLine = readNumber(record, 'endLine');
+      return target ? { target, details: { startLine, endLine } } : null;
+    },
+  },
+  stat_path: {
+    kind: 'file.stat',
+    title: '看属性',
+    summarizeInput: pathInputSummary,
+  },
+  write_file: {
+    kind: 'file.write',
+    title: '写文件',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      const target = readString(record, 'path');
+      return target
+        ? { target, summary: readBoolean(record, 'append') ? 'append' : 'write' }
+        : null;
+    },
+    summarizeOutput: (output) => okOutputPathSummary(output),
+  },
+  update_file: {
+    kind: 'file.update',
+    title: '改文件',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      const target = readString(record, 'path');
+      return target
+        ? { target, summary: readBoolean(record, 'replaceAll') ? 'replace_all' : 'replace' }
+        : null;
+    },
+    summarizeOutput: (output) => okOutputPathSummary(output),
+  },
+  multi_edit: {
+    kind: 'file.multi_edit',
+    title: '批量修改',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      const target = readString(record, 'path');
+      const rawEdits = record?.edits;
+      const edits = Array.isArray(rawEdits) ? rawEdits.length : undefined;
+      return target ? { target, details: { edits } } : null;
+    },
+    summarizeOutput: (output) => okOutputPathSummary(output),
+  },
+  apply_file_patch: {
+    kind: 'file.patch',
+    title: '应用补丁',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      const target = readString(record, 'path');
+      const rawHunks = record?.hunks;
+      const hunks = Array.isArray(rawHunks) ? rawHunks.length : undefined;
+      return target ? { target, details: { hunks } } : null;
+    },
+    summarizeOutput: (output) => okOutputPathSummary(output),
+  },
+  apply_unified_patch: {
+    kind: 'patch.apply',
+    title: '应用 diff',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      const target = readString(record, 'cwd');
+      return {
+        target,
+        details: {
+          strip: readNumber(record, 'strip') ?? 0,
+          dryRun: readBoolean(record, 'dryRun') ?? false,
+        },
+      };
+    },
+    summarizeOutput: (output) => okOutputPathSummary(output, 'cwd'),
+  },
+  validate_structured_file: {
+    kind: 'file.validate',
+    title: '验证结构',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      const target = readString(record, 'path');
+      return target ? { target, details: { schema: readString(record, 'schema') } } : null;
+    },
+    summarizeOutput: (output) => okOutputPathSummary(output),
+  },
+  move_path: {
+    kind: 'path.move',
+    title: '移动文件',
+    summarizeInput: sourceDestinationInputSummary,
+    summarizeOutput: (output) => okOutputPathSummary(output, 'destination'),
+  },
+  copy_path: {
+    kind: 'path.copy',
+    title: '复制文件',
+    summarizeInput: sourceDestinationInputSummary,
+    summarizeOutput: (output) => okOutputPathSummary(output, 'destination'),
+  },
+  mkdir_path: {
+    kind: 'directory.create',
+    title: '建目录',
+    summarizeInput: pathInputSummary,
+    summarizeOutput: (output) => okOutputPathSummary(output),
+  },
+  list_dir: {
+    kind: 'directory.list',
+    title: '列目录',
+    summarizeInput: pathInputSummary,
+  },
+};

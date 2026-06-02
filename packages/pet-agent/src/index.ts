@@ -39,6 +39,8 @@ export type {
 export type {
   AgentToolkit,
   ToolkitContext,
+  ToolkitOperationMetadata,
+  ToolkitOperationSummary,
   ToolkitPolicy,
   ToolkitResource,
   ToolkitToolReviewContext,

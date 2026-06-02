@@ -3,7 +3,7 @@ import test from 'node:test';
 import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
-import { localToolOperationRegistry } from './plugins/localToolOperations';
+import { createBashToolkit, localToolOperationRegistry } from './plugins/localTools';
 
 test('normalizes LangGraph tool stream events with toolkit operation metadata', () => {
   const event = normalizeToolStreamEvent(
@@ -78,4 +78,12 @@ test('buildToolOperationEvent uses local toolkit metadata for direct event emiss
     name: 'run_shell',
     callId: 'call-1',
   });
+});
+
+test('createBashToolkit exposes operation metadata with the toolkit definition', () => {
+  const toolkit = createBashToolkit();
+
+  assert.equal(toolkit.operations?.read_file?.kind, 'file.read');
+  assert.equal(toolkit.operations?.grep_search?.kind, 'search.grep');
+  assert.equal(toolkit.operations?.run_shell?.kind, 'shell.run');
 });

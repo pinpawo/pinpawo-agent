@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { tool } from '@langchain/core/tools';
+import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
+import { readRecord, readString } from './operationMetadata';
 import { resolveUserPath } from './pathUtils';
 import { walkFiles, wildcardToRegExp } from './fileSystemUtils';
 
@@ -92,3 +94,28 @@ export const grepSearchTool = tool(
     }),
   },
 );
+
+export const searchToolOperations: Record<string, ToolkitOperationMetadata> = {
+  glob_search: {
+    kind: 'search.glob',
+    title: '找文件',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'path'),
+        summary: readString(record, 'pattern'),
+      };
+    },
+  },
+  grep_search: {
+    kind: 'search.grep',
+    title: '搜内容',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'path'),
+        summary: readString(record, 'query'),
+      };
+    },
+  },
+};

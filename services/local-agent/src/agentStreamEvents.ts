@@ -4,7 +4,7 @@ import {
   type StreamToolsPayload,
 } from './events/agentStreamNormalizer';
 import type { LocalAgentOperationEvent } from './events/localAgentEvent';
-import { localToolOperationRegistry } from './plugins/localToolOperations';
+import { localToolOperationRegistry } from './plugins/localTools';
 
 export type { StreamToolsPayload };
 

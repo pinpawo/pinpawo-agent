@@ -2,7 +2,13 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, extname, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
+import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
+import {
+  okOutputPathSummary,
+  readRecord,
+  readString,
+} from './operationMetadata';
 
 const DEFAULT_DOWNLOADS_DIR = resolve(homedir(), 'Downloads');
 const MAX_FETCH_BYTES = 100_000;
@@ -183,3 +189,29 @@ export const downloadFileTool = tool(
     }),
   },
 );
+
+export const networkToolOperations: Record<string, ToolkitOperationMetadata> = {
+  http_fetch: {
+    kind: 'network.http_fetch',
+    title: '请求网页',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'url'),
+        details: { method: readString(record, 'method') ?? 'GET' },
+      };
+    },
+  },
+  download_file: {
+    kind: 'file.download',
+    title: '下载文件',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'url'),
+        summary: readString(record, 'filename'),
+      };
+    },
+    summarizeOutput: (output) => okOutputPathSummary(output),
+  },
+};

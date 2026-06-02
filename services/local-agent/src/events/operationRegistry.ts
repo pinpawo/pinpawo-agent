@@ -21,7 +21,7 @@ export type RegisteredOperationMetadata = OperationMetadata & {
 };
 
 export type OperationRegistry = {
-  resolveTool(name: string): RegisteredOperationMetadata | null;
+  resolveToolOperation(toolName: string): RegisteredOperationMetadata | null;
 };
 
 export function createOperationRegistry(
@@ -29,8 +29,8 @@ export function createOperationRegistry(
 ): OperationRegistry {
   const operations = new Map(Object.entries(entries));
   return {
-    resolveTool(name: string) {
-      return operations.get(name) ?? null;
+    resolveToolOperation(toolName: string) {
+      return operations.get(toolName) ?? null;
     },
   };
 }

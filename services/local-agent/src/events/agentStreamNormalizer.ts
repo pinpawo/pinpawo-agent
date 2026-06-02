@@ -47,7 +47,7 @@ export function normalizeToolStreamEvent(
   payload: StreamToolsPayload,
   registry: OperationRegistry = emptyOperationRegistry,
 ): LocalAgentOperationEvent {
-  const metadata = registry.resolveTool(payload.name);
+  const metadata = registry.resolveToolOperation(payload.name);
   const output = payload.output !== undefined ? payload.output : payload.data;
   const summary = [
     metadata?.summarizeInput?.(payload.input),

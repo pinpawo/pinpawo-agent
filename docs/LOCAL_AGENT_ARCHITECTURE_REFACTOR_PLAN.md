@@ -407,7 +407,7 @@ Registry 由 local-agent 建立：
 
 ```ts
 type OperationRegistry = {
-  resolveTool(name: string): OperationMetadata | null;
+  resolveToolOperation(toolName: string): OperationMetadata | null;
 };
 ```
 

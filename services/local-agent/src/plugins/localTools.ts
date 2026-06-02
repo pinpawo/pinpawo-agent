@@ -10,8 +10,10 @@ import {
 } from '@pinpawo/pet-agent';
 import type { LocalAgentPlugin } from '../pluginLoader';
 import { config } from '../config';
+import { tryStat } from './localTools/fileSystemUtils';
 import { downloadFileTool, httpFetchTool } from './localTools/networkTools';
 import { resolveUserPath } from './localTools/pathUtils';
+import { globSearchTool, grepSearchTool } from './localTools/searchTools';
 import { runShellTool, shellReviewPolicy } from './localTools/shellTools';
 
 const capabilityManifestSchema = z.object({
@@ -24,14 +26,6 @@ const capabilityManifestSchema = z.object({
   builtIn: z.boolean(),
   comingSoon: z.boolean().optional(),
 });
-
-function tryStat(path: string) {
-  try {
-    return statSync(path);
-  } catch {
-    return null;
-  }
-}
 
 function formatStat(path: string) {
   const stat = statSync(path);
@@ -55,31 +49,6 @@ function resolveMoveTarget(sourcePath: string, destinationPath: string) {
 
 function resolveCopyTarget(sourcePath: string, destinationPath: string) {
   return resolveMoveTarget(sourcePath, destinationPath);
-}
-
-function wildcardToRegExp(pattern: string) {
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`^${escaped.replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
-}
-
-function walkFiles(rootPath: string, visit: (filePath: string) => boolean | void) {
-  const stack = [rootPath];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current) continue;
-    const stat = tryStat(current);
-    if (!stat) continue;
-    if (stat.isDirectory()) {
-      const entries = readdirSync(current);
-      for (let i = entries.length - 1; i >= 0; i -= 1) {
-        stack.push(resolve(current, entries[i] ?? ''));
-      }
-      continue;
-    }
-    if (visit(current) === false) {
-      return;
-    }
-  }
 }
 
 const readFileTool = tool(
@@ -621,94 +590,6 @@ const mkdirPathTool = tool(
     schema: z.object({
       path: z.string().describe('要创建的目录路径'),
       recursive: z.boolean().optional().describe('是否递归创建；默认 true'),
-    }),
-  },
-);
-
-const globSearchTool = tool(
-  async ({ path, pattern, limit }: { path?: string; pattern: string; limit?: number }) => {
-    try {
-      const rootPath = resolveUserPath(path ?? '.');
-      const regex = wildcardToRegExp(pattern);
-      const maxResults = Math.max(1, Math.min(limit ?? 50, 200));
-      const matches: string[] = [];
-
-      walkFiles(rootPath, (filePath) => {
-        const relative = filePath.startsWith(`${rootPath}/`)
-          ? filePath.slice(rootPath.length + 1)
-          : basename(filePath);
-        if (regex.test(relative) || regex.test(basename(filePath))) {
-          matches.push(filePath);
-        }
-        return matches.length < maxResults;
-      });
-
-      return matches.length > 0 ? matches.join('\n') : '(no matches)';
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'glob_search',
-    description: '按通配符模式递归搜索文件。适合查找某类文件，如 *.md、src/**/*.ts 的简化匹配。返回匹配到的文件路径列表。',
-    schema: z.object({
-      path: z.string().optional().describe('搜索起点目录，默认 "."'),
-      pattern: z.string().describe('通配符模式，支持 * 和 ?'),
-      limit: z.number().int().positive().max(200).optional().describe('最多返回多少条，默认 50'),
-    }),
-  },
-);
-
-const grepSearchTool = tool(
-  async ({ path, query, limit, caseSensitive }: {
-    path?: string;
-    query: string;
-    limit?: number;
-    caseSensitive?: boolean;
-  }) => {
-    try {
-      const rootPath = resolveUserPath(path ?? '.');
-      const maxResults = Math.max(1, Math.min(limit ?? 50, 200));
-      const needle = caseSensitive ? query : query.toLowerCase();
-      const results: string[] = [];
-
-      walkFiles(rootPath, (filePath) => {
-        let content: string;
-        try {
-          content = readFileSync(filePath, 'utf-8');
-        } catch {
-          return results.length < maxResults;
-        }
-
-        const lines = content.split('\n');
-        for (let i = 0; i < lines.length; i += 1) {
-          const line = lines[i] ?? '';
-          const haystack = caseSensitive ? line : line.toLowerCase();
-          if (!haystack.includes(needle)) {
-            continue;
-          }
-          results.push(`${filePath}:${i + 1}: ${line}`);
-          if (results.length >= maxResults) {
-            return false;
-          }
-        }
-
-        return results.length < maxResults;
-      });
-
-      return results.length > 0 ? results.join('\n') : '(no matches)';
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'grep_search',
-    description: '递归搜索文件内容，返回匹配行及其文件路径和行号。适合定位某个词、函数名或报错文本。',
-    schema: z.object({
-      path: z.string().optional().describe('搜索起点目录，默认 "."'),
-      query: z.string().describe('要搜索的文本'),
-      limit: z.number().int().positive().max(200).optional().describe('最多返回多少条，默认 50'),
-      caseSensitive: z.boolean().optional().describe('是否区分大小写，默认 false'),
     }),
   },
 );

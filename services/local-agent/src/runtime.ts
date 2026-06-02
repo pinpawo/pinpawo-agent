@@ -25,37 +25,23 @@ import type { AgentLlmConfig } from './agentConfig';
 import {
   buildLocalLlmConfig,
 } from './llmConfig';
-import { buildLocalChatAgentInput, buildLocalScheduledAgentInput } from './agentChannel';
+import { buildLocalScheduledAgentInput } from './agentChannel';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { LocalAgentGraphService } from './agentGraphService';
 import { ensureActorSelected, loadSelectedActorName } from './actorSelection';
 import { loadStoredConfig, saveStoredConfig } from './storage';
-import { buildAppChatThreadId } from './chatInterface';
 import {
   sendLocalAgentEvent,
   sendLocalAgentMessage,
-  type ChatRequestMessage,
-  type InterruptRequestMessage,
-  type NewSessionMessage,
 } from './localAgentProtocol';
-import { recordAgentRunActivity } from './operationActivityState';
-import {
-  type StreamToolsPayload,
-} from './agentStreamEvents';
-import { runChatSession } from './chatSessionAdapter';
-import {
-  emitInflightToolEvent,
-  type InflightOperationRun,
-} from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppWsClient } from './localAgentAppWsClient';
+import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
 const INTERRUPT_FORCE_REPLY_MS = 1800;
-
-type InflightRequest = InflightOperationRun;
 
 async function filterAvailableUserCapabilities(
   loaded: LoadedUserCapability[],
@@ -70,10 +56,6 @@ async function filterAvailableUserCapabilities(
   return records
     .filter((record) => record.availability.availability.available)
     .map((record) => record.item);
-}
-
-function sendStreamToolOperationEvent(ws: WebSocket, inflight: InflightRequest, payload: StreamToolsPayload) {
-  emitInflightToolEvent(inflight, payload, (event) => sendLocalAgentEvent(ws, event));
 }
 
 export class LocalAgentRuntime {
@@ -103,12 +85,24 @@ export class LocalAgentRuntime {
   );
   private readonly graphService = new LocalAgentGraphService();
   private appWsClient: LocalAgentAppWsClient | null = null;
-  private sessionResetPromise: Promise<void> = Promise.resolve();
   private readonly inflightRequests = new InflightRequestController<WebSocket>({
     forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
     emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
     logPrefix: 'local-agent',
+  });
+  private readonly appChatHandler = new LocalAgentAppChatHandler({
+    graphService: this.graphService,
+    checkpoint: this.chatCheckpointer,
+    deleteThread: (threadId) => this.chatCheckpointer.deleteThread(threadId),
+    inflightRequests: this.inflightRequests,
+    isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
+    getActorId: () => this.getActorId(),
+    getLlmConfig: () => this.llmConfig,
+    getPluginTools: () => this.pluginTools,
+    getLocalToolkits: () => this.localToolkits,
+    getLocalCapabilities: () => this.localCapabilities,
+    getUserCapabilities: () => this.userCapabilities,
   });
 
   async init() {
@@ -258,17 +252,10 @@ export class LocalAgentRuntime {
       reconnectDelayMs: WS_RECONNECT_DELAY_MS,
       pingIntervalMs: WS_PING_INTERVAL_MS,
       handlers: {
-        onChatRequest: (ws, msg) => this.handleChatRequest(ws, msg),
-        onNewSession: (_ws, msg) => {
-          this.sessionResetPromise = this.handleNewSession(msg).catch((err) => {
-            console.error('[local-agent] new_session error:', err instanceof Error ? err.message : err);
-          });
-          return this.sessionResetPromise;
-        },
-        onInterruptRequest: (ws, msg) => this.handleInterruptRequest(ws, msg),
-        onClose: (ws) => {
-          this.inflightRequests.abortAndClear(ws);
-        },
+        onChatRequest: (ws, msg) => this.appChatHandler.handleChatRequest(ws, msg),
+        onNewSession: (_ws, msg) => this.appChatHandler.handleNewSession(msg),
+        onInterruptRequest: (ws, msg) => this.appChatHandler.handleInterruptRequest(ws, msg),
+        onClose: (ws) => this.appChatHandler.handleClose(ws),
       },
     });
     this.appWsClient.connect();
@@ -286,139 +273,6 @@ export class LocalAgentRuntime {
     }
     client?.disconnect();
     this.appWsClient = null;
-  }
-
-  // ---- Handle incoming chat_request from server ----
-
-  private getChatThreadId(petId: string, userId: string) {
-    return buildAppChatThreadId({ petId, userId });
-  }
-
-  private async handleNewSession(msg: NewSessionMessage) {
-    const userId = msg.userId?.trim();
-    if (!userId) {
-      return;
-    }
-
-    const threadId = this.getChatThreadId(this.getActorId(), userId);
-    await this.chatCheckpointer.deleteThread(threadId);
-    console.log(`[local-agent] new session created threadId=${threadId}`);
-  }
-
-  private handleInterruptRequest(ws: WebSocket, msg: InterruptRequestMessage) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return;
-    }
-    this.inflightRequests.interrupt(ws, { requestId: msg.requestId });
-  }
-
-  private async handleChatRequest(ws: WebSocket, msg: ChatRequestMessage) {
-    const { requestId, message } = msg;
-    if (!this.appWsClient?.isCurrentSocket(ws) || ws.readyState !== WebSocket.OPEN) return;
-    const userId = msg.userId?.trim();
-    if (!userId) {
-      sendLocalAgentEvent(ws, {
-        type: 'error',
-        requestId,
-        message: 'userId is required',
-      });
-      return;
-    }
-
-    await this.sessionResetPromise;
-
-    if (!this.appWsClient?.isCurrentSocket(ws) || ws.readyState !== WebSocket.OPEN) return;
-
-    console.log(`[local-agent] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
-
-    recordAgentRunActivity('thinking', requestId);
-
-    const inflight = this.inflightRequests.start(ws, requestId, {
-      interruptPrevious: true,
-      notifyPrevious: false,
-    });
-    const { controller } = inflight;
-    const isCurrent = () => this.inflightRequests.isCurrentActive(ws, inflight);
-    const finishInterrupted = () => {
-      if (!controller.signal.aborted) {
-        return;
-      }
-      this.inflightRequests.sendInterrupted(ws, inflight);
-      this.inflightRequests.clear(ws, inflight);
-    };
-
-    try {
-      const ctx = await loadAgentContext(this.getActorId());
-      if (!isCurrent()) {
-        finishInterrupted();
-        return;
-      }
-
-      const setup = buildLocalChatAgentInput({
-        context: ctx,
-        userMessage: message,
-        llmConfig: this.llmConfig ?? buildLocalLlmConfig(),
-        tools: this.pluginTools,
-        toolkits: this.localToolkits,
-        extraCapabilities: this.localCapabilities,
-        threadId: this.getChatThreadId(this.getActorId(), userId),
-        interfaceKind: 'app-chat',
-        dryRun: false,
-        checkpoint: this.chatCheckpointer,
-        userCapabilities: this.userCapabilities,
-      });
-      setup.input.signal = controller.signal;
-
-      const result = await runChatSession({
-        request: msg,
-        setup,
-        graphService: this.graphService,
-        isCurrent,
-        finishInterrupted,
-        emitEvent: (event) => {
-          sendLocalAgentEvent(ws, event);
-        },
-        emitToolEvent: (event) => {
-          sendStreamToolOperationEvent(ws, inflight, event);
-        },
-      });
-      if (result.status === 'waiting_human') {
-        this.inflightRequests.finish(ws, inflight, 'interrupted');
-        console.log(`[local-agent] human_review.requested requestId=${requestId}`);
-        this.inflightRequests.clear(ws, inflight);
-        return;
-      }
-      if (result.status === 'interrupted') {
-        return;
-      }
-      this.inflightRequests.finish(ws, inflight, 'completed');
-      this.inflightRequests.clear(ws, inflight);
-
-      console.log(`[local-agent] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
-
-    } catch (err) {
-      const isStillCurrent = this.inflightRequests.isCurrent(ws, inflight);
-      const aborted = controller.signal.aborted
-        || (err instanceof Error && err.name === 'AbortError');
-      if (aborted) {
-        console.warn(`[local-agent] chat interrupted requestId=${requestId}`);
-        this.inflightRequests.sendInterrupted(ws, inflight);
-        recordAgentRunActivity('interrupted', requestId, 2_500);
-        this.inflightRequests.clear(ws, inflight);
-        return;
-      }
-      this.inflightRequests.finish(ws, inflight, 'failed', err);
-      this.inflightRequests.clear(ws, inflight);
-      recordAgentRunActivity('error', requestId, 5_000);
-      console.error('[local-agent] chat error:', err instanceof Error ? err.message : err);
-      if (isStillCurrent && ws.readyState === WebSocket.OPEN) {
-        sendLocalAgentEvent(ws, {
-          type: 'error',
-          requestId,
-          message: err instanceof Error ? err.message : 'internal error',
-        });
-      }
-    }
   }
 
   // ---- Post generation tick ----

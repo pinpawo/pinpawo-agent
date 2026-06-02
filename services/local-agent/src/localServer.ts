@@ -32,14 +32,13 @@ import {
 } from './agentStreamEvents';
 import { runChatSession } from './chatSessionAdapter';
 import {
-  acceptInflightToolEvent,
   clearInflightOperationTimer,
   createInflightOperationRun,
-  emitInflightOperationEvent,
   finishInflightOperations,
   type InflightOperationRun,
   type TerminalOperationPhase,
 } from './inflightOperationRun';
+import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
 import {
   buildStudioForTurn,
   StudioNotConfiguredError,
@@ -303,33 +302,6 @@ function interruptInflightRequest(ws: WebSocket, inflight: InflightRequest) {
   }, INTERRUPT_FORCE_REPLY_MS);
 }
 
-function maybeTrimForLog(value: string | undefined, max = 300) {
-  if (!value) return value;
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
-}
-
-function stringifyLogValue(value: unknown) {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (value && typeof value === 'object') {
-    const content = (value as { content?: unknown }).content;
-    if (typeof content === 'string') {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      return content
-        .map((part) => (typeof part === 'string' ? part : ((part as { text?: string }).text ?? '')))
-        .join('');
-    }
-  }
-  try {
-    return JSON.stringify(value ?? '');
-  } catch {
-    return String(value);
-  }
-}
-
 function finishOperationRun(
   ws: WebSocket,
   inflight: InflightRequest,
@@ -337,29 +309,6 @@ function finishOperationRun(
   error?: unknown,
 ) {
   finishInflightOperations(inflight, phase, (event) => sendLocalAgentEvent(ws, event), error);
-}
-
-function isHumanReviewInterruptError(value: unknown): boolean {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  const interrupts = Array.isArray(record.interrupts)
-    ? record.interrupts
-    : Array.isArray(record.__interrupt__)
-      ? record.__interrupt__
-      : [];
-  return interrupts.some((interrupt) => {
-    const payload = interrupt && typeof interrupt === 'object' && 'value' in interrupt
-      ? (interrupt as { value?: unknown }).value
-      : interrupt;
-    if (!payload || typeof payload !== 'object') {
-      return false;
-    }
-    const payloadRecord = payload as Record<string, unknown>;
-    return payloadRecord.kind === 'human_review'
-      || (Array.isArray(payloadRecord.actionRequests) && Array.isArray(payloadRecord.reviewConfigs));
-  });
 }
 
 function isToolProtocolHistoryError(value: unknown): boolean {
@@ -372,32 +321,11 @@ function isToolProtocolHistoryError(value: unknown): boolean {
 }
 
 function sendStreamToolOperationEvent(ws: WebSocket, inflight: InflightRequest, payload: StreamToolsPayload) {
-  const event = acceptInflightToolEvent(inflight, payload);
-
-  if (event.phase === 'failed' && isHumanReviewInterruptError(payload.error)) {
-    const interruptedEvent = {
-      ...event,
-      phase: 'interrupted' as const,
-      raw: {
-        input: event.raw?.input,
-      },
-    };
-    emitInflightOperationEvent(interruptedEvent, (item) => sendLocalAgentEvent(ws, item));
-    console.log(`[local-server] operation_interrupted requestId=${inflight.requestId} kind=${interruptedEvent.operation.kind}`);
-    return;
-  }
-
-  const input = event.raw?.input !== undefined ? stringifyLogValue(event.raw.input) : undefined;
-  const error = event.raw?.error !== undefined ? stringifyLogValue(event.raw.error) : undefined;
-  emitInflightOperationEvent(event, (item) => sendLocalAgentEvent(ws, item));
-
-  console.log(
-    `[local-server] operation_${event.phase} requestId=${inflight.requestId} kind=${event.operation.kind}`
-      + (input ? ` input=${maybeTrimForLog(input, 200)}` : '')
-      + (error ? ` error=${maybeTrimForLog(error)}` : ''),
-  );
-
-  sendLocalAgentEvent(ws, event);
+  emitLocalServerToolOperationEvent({
+    run: inflight,
+    payload,
+    emit: (event) => sendLocalAgentEvent(ws, event),
+  });
 }
 
 async function handleStudioRequest(

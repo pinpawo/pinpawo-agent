@@ -1,6 +1,7 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
+import type { ToolkitOperationMetadata } from '../types/toolkit';
 
 export type WebSearchResult = {
   title: string;
@@ -20,6 +21,65 @@ export type WebSearchToolOptions = {
 function formatUnavailableMessage(message?: string) {
   return message ?? '当前还没有接入可用的 web search provider。';
 }
+
+function readInput(input: unknown) {
+  const value = input && typeof input === 'object'
+    ? input as { query?: unknown; limit?: unknown }
+    : {};
+  return {
+    query: typeof value.query === 'string' && value.query.trim()
+      ? value.query.trim()
+      : null,
+    limit: typeof value.limit === 'number' && Number.isFinite(value.limit)
+      ? value.limit
+      : null,
+  };
+}
+
+function parseJsonObject(output: unknown): Record<string, unknown> | null {
+  if (typeof output !== 'string') {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export const webSearchToolOperations = {
+  search_web: {
+    kind: 'web.search',
+    title: '搜索网页',
+    summarizeInput: (input: unknown) => {
+      const { query, limit } = readInput(input);
+      return {
+        target: query ?? undefined,
+        summary: query ?? '搜索网页',
+        details: {
+          limit: limit ?? 5,
+        },
+      };
+    },
+    summarizeOutput: (output: unknown) => {
+      const parsed = parseJsonObject(output);
+      if (!parsed) {
+        return null;
+      }
+      if (parsed.ok === false) {
+        return {
+          summary: typeof parsed.reason === 'string' ? parsed.reason : '网页搜索不可用',
+        };
+      }
+      return typeof parsed.count === 'number'
+        ? { summary: `找到 ${parsed.count} 条结果` }
+        : null;
+    },
+  },
+} satisfies Record<string, ToolkitOperationMetadata>;
 
 export function createWebSearchTool(options: WebSearchToolOptions = {}): StructuredTool {
   return tool(

@@ -32,11 +32,27 @@ export type ToolkitPolicy = {
   toolReview?: Record<string, ToolkitToolReviewPolicy>;
 };
 
+export type ToolkitOperationSummary = {
+  target?: string;
+  summary?: string;
+  details?: Record<string, unknown>;
+};
+
+export type ToolkitOperationMetadata = {
+  kind: string;
+  title?: string;
+  titleKey?: string;
+  summarizeInput?: (input: unknown) => ToolkitOperationSummary | null;
+  summarizeOutput?: (output: unknown) => ToolkitOperationSummary | null;
+  summarizeError?: (error: unknown) => ToolkitOperationSummary | null;
+};
+
 export type AgentToolkit = {
   name: string;
   description: string;
   availability?: CapabilityAvailabilityConfig;
   tools?: ToolkitResource<StructuredTool[]>;
   instructions?: ToolkitResource<string[]>;
+  operations?: Record<string, ToolkitOperationMetadata>;
   policy?: ToolkitPolicy;
 };

@@ -58,10 +58,8 @@ export function rejectReview(slot: PendingReviewSlot, error: Error): boolean {
  * 构造一个绑定到当前 ws 连接的 humanReviewer 回调,交给 PetAgentRuntime 构造时注入。
  *
  * 内部:
- * - 推 `human_interrupt` ws 消息(pet 现有 ws 链路,跟 chat 模式时一模一样)
+ * - 推 `human_review.requested` 事件
  * - 把 promise resolver 寄存到 slot,等待外部 `resolveReview()` 喂答复
- *
- * 该函数对 ws 协议层 0 改动:human_interrupt 消息形态与 chat 模式完全一致。
  */
 export function createWsHumanReviewer(opts: {
   send: (msg: unknown) => void;
@@ -79,12 +77,17 @@ export function createWsHumanReviewer(opts: {
       }
       const reviewId = randomUUID().slice(0, 8);
       opts.slot.current = { resolve, reject, petId: opts.petId, reviewId };
+      const prompt = extractPromptText(request);
       opts.send({
-        type: 'human_interrupt',
         requestId: opts.requestId,
-        petId: opts.petId,
-        prompt: extractPromptText(request),
-        payload: request,
+        type: 'event',
+        event: {
+          type: 'human_review.requested',
+          requestId: opts.requestId,
+          prompt,
+          payload: request,
+          actor: { petId: opts.petId },
+        },
       });
     });
   };

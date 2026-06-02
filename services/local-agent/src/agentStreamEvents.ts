@@ -3,18 +3,20 @@ import {
   normalizeToolStreamEvent,
   type StreamToolsPayload,
 } from './events/agentStreamNormalizer';
-import type { LocalAgentOperationEvent } from './events/localAgentEvent';
-import { localToolOperationRegistry } from './plugins/localToolOperations';
+import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
 import {
-  buildLegacyToolLogMessage,
-  type LegacyToolLogMessagePayload,
-} from './protocol/legacyProtocolAdapter';
+  emptyOperationRegistry,
+  type OperationRegistry,
+} from './events/operationRegistry';
 
 export type { StreamToolsPayload };
-export type ToolLogMessagePayload = LegacyToolLogMessagePayload;
 
-export function buildToolOperationEvent(requestId: string, payload: StreamToolsPayload): LocalAgentOperationEvent {
-  return normalizeToolStreamEvent(requestId, payload, localToolOperationRegistry);
+export function buildToolOperationEvent(
+  requestId: string,
+  payload: StreamToolsPayload,
+  registry: OperationRegistry = emptyOperationRegistry,
+): LocalAgentOperationInternalEvent {
+  return normalizeToolStreamEvent(requestId, payload, registry);
 }
 
 export function readFinalMessageText(message: { content?: unknown }) {
@@ -67,8 +69,4 @@ export function readStreamNode(metadata: unknown): string | null {
 export function isLaneTaggedAiMessage(message: BaseMessage) {
   const pinpawo = message.additional_kwargs?.pinpawo;
   return Boolean(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
-}
-
-export function buildToolLogMessage(requestId: string, payload: StreamToolsPayload): ToolLogMessagePayload {
-  return buildLegacyToolLogMessage(buildToolOperationEvent(requestId, payload));
 }

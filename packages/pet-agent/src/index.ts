@@ -34,11 +34,14 @@ export type {
   SubagentResult,
   SubagentToolEvent,
   SubagentToolEventHandler,
+  SubagentToolOperationMetadata,
 } from './types/subagent';
 
 export type {
   AgentToolkit,
   ToolkitContext,
+  ToolkitOperationMetadata,
+  ToolkitOperationSummary,
   ToolkitPolicy,
   ToolkitResource,
   ToolkitToolReviewContext,
@@ -72,8 +75,16 @@ export type {
   HumanReviewDecisionType,
   HumanReviewRequest,
 } from './agent/orchestrator/humanReview';
-export { runAgent, extractToolCallLogs } from './agent/runAgent';
-export type { AgentInvokeInput, AgentRunResult, ToolCallLog } from './agent/runAgent';
+export {
+  readBoolean,
+  readJsonRecord,
+  readNumber,
+  readRecord,
+  readString,
+  resultStatusSummary,
+} from './capabilities/operationMetadata';
+export { runAgent } from './agent/runAgent';
+export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
 export { createSubagent } from './subagent/createSubagent';
 export {
   createLLMWikiCurator,
@@ -87,6 +98,8 @@ export {
   defaultPromptProvider,
   ensureWikiSkeleton,
   fileReadPromptProvider,
+  planCapabilityToolOperations,
+  wikiReadToolOperations,
 } from './agent/studio/index';
 export type {
   CreatePlanCapabilityOptions,
@@ -119,12 +132,14 @@ export type {
 
 export {
   createPetProfileTool,
+  petProfileToolOperations,
 } from './tools/petProfile';
 export type {
   PetProfileToolOptions,
 } from './tools/petProfile';
 export {
   createMemoriesTool,
+  memoriesToolOperations,
 } from './tools/memories';
 export type {
   MemoriesToolOptions,
@@ -132,6 +147,7 @@ export type {
 } from './tools/memories';
 export {
   createWebSearchTool,
+  webSearchToolOperations,
 } from './tools/webSearch';
 export type {
   WebSearchResult,

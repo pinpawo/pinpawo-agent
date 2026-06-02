@@ -1,9 +1,9 @@
 export { createPetAgentRuntime } from './createPetAgentRuntime';
 export type { PetAgentRuntimeConfig } from './createPetAgentRuntime';
 export { createStudioOrchestrator } from './createStudioOrchestrator';
-export { createPlanCapability } from './planCapability';
+export { createPlanCapability, planCapabilityToolOperations } from './planCapability';
 export type { CreatePlanCapabilityOptions } from './planCapability';
-export { createWikiReadToolkit } from './wikiReadToolkit';
+export { createWikiReadToolkit, wikiReadToolOperations } from './wikiReadToolkit';
 export {
   createSkeletonWikiCurator,
   createLLMWikiCurator,

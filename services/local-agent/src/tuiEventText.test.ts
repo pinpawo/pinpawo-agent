@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  buildActiveToolLines,
+  buildActiveOperationLines,
   buildBusyStatusLine,
   formatOperationResult,
   formatOperationStart,
@@ -9,10 +9,10 @@ import {
   formatSystemNoticeEvent,
   getOperationKey,
 } from './tui/render/eventText';
-import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
 
 test('formats operation events without reading legacy tool input/output', () => {
-  const event: LocalAgentOperationEvent = {
+  const event: LocalAgentOperationInternalEvent = {
     type: 'operation',
     requestId: 'req-1',
     phase: 'started',
@@ -96,7 +96,7 @@ test('formats status and active operation lines from render adapter props', () =
   );
 
   assert.deepEqual(
-    buildActiveToolLines([
+    buildActiveOperationLines([
       {
         name: 'tool-1',
         label: '读文件',
@@ -105,7 +105,7 @@ test('formats status and active operation lines from render adapter props', () =
       },
     ], 3500, 80),
     [{
-      id: 'tool-tool-1-0-0',
+      id: 'operation-tool-1-0-0',
       text: '读文件 · 2s · /tmp/example.md',
     }],
   );

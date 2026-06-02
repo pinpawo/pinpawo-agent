@@ -1,11 +1,12 @@
 # Local Agent Architecture Refactor Plan
 
-> 状态：Draft v1
+> 状态：Draft v2
 > 日期：2026-05-29
+> 更新：local-agent runtime/TUI/app-facing WS 出口已经切到 `LocalAgentEvent` / `operation` first；本仓库不再派发旧运行态兼容消息。剩余跨仓库迁移见 issue #19（本仓库侧的 adapter 已移除，#19 仅表示 pinpawo-app / API 仓库侧协议迁移）。
 
 ## 1. 文档目标
 
-这份文档用于对齐 `services/local-agent/` 的重构方向。当前先不继续改实现，先明确边界、事件模型和迁移步骤。
+这份文档用于对齐 `services/local-agent/` 的重构方向，明确边界、事件模型和迁移步骤。
 
 local-agent 的定位是：
 
@@ -20,32 +21,19 @@ local-agent 的定位是：
 2. app / TUI 应该消费什么事件。
 3. tool/capability 的展示语义应该由谁定义。
 
-## 2. 当前问题
+## 2. 历史问题与剩余风险
 
-当前代码能跑，但结构已经不适合继续堆功能。
+重构前代码能跑，但结构不适合继续堆功能。PR #18 已解决 agent run activity 主链路的事件模型问题；以下问题用于说明设计动机和仍待收敛的风险。
 
-### 2.1 对外协议泄漏内部 tool call
+### 2.1 对外协议曾泄漏内部 tool call
 
-当前 `localAgentProtocol.ts` 对外暴露：
+旧协议曾直接对外暴露工具名、工具输入输出和工具生命周期。这会让 app / TUI 被迫理解内部 `read_file`、`grep_search`、`run_shell` 等工具名和输入输出结构。
 
-```ts
-{
-  type: 'tool_log',
-  phase: 'start' | 'event' | 'end' | 'error',
-  toolName: string,
-  input?: string,
-  output?: string,
-  error?: string
-}
-```
-
-这会让 app / TUI 被迫理解内部 `read_file`、`grep_search`、`run_shell` 等工具名和输入输出结构。
-
-问题不在于 formatter 放在哪个文件，而是协议层没有稳定的 local-agent event。只要协议仍然暴露内部 tool call，presentation 层就会自然变成内部工具 formatter。
+问题不在于 formatter 放在哪个文件，而是协议层没有稳定的 local-agent event。只要协议仍然暴露内部 tool call，presentation 层就会自然变成内部工具 formatter。当前 local-agent runtime/TUI/app-facing WS 已改为 `LocalAgentEvent` / `operation`；本仓库不再保留 legacy wire compatibility layer。
 
 ### 2.2 local-agent 承担了过多职责
 
-目前 local-agent 同时包含：
+local-agent 仍然包含多类职责：
 
 - CLI/TUI command
 - websocket/http server
@@ -61,9 +49,9 @@ local-agent 的定位是：
 
 ### 2.3 endpoint 能力渗入工具运行层
 
-当前 `chatInterface.ts` 通过 thread id 推断 `tui` / `app-chat`，再决定是否支持 human review、session authorization。
+早期 `chatInterface.ts` 通过 thread id 推断 `tui` / `app-chat`，再决定是否支持 human review、session authorization。
 
-这说明“客户端类型”和“工具执行策略”已经耦合。长期看，接口能力应该由 session/interface context 显式提供，而不是通过 thread id 字符串推断。
+这说明“客户端类型”和“工具执行策略”曾经耦合。当前实现已改为由 session/interface context 显式提供 `kind`，`readLocalAgentInterfaceContext` 不再从 thread id 字符串推断能力。
 
 ### 2.4 presentation 不是根因
 
@@ -107,7 +95,7 @@ type LocalAgentOperationKind =
 
 这会把 local-agent 变成“所有 tools/capabilities 语义的中央表”，和当前 formatter 知道内部工具名的问题本质相同。
 
-### 3.2 toolkit / capability 拥有 operation metadata
+### 3.2 tool provider 拥有 operation metadata
 
 工具展示语义应该由提供工具的一方声明。
 
@@ -133,6 +121,11 @@ const bashToolkit = {
     },
   },
 };
+
+命名约定约束：
+- 真实工具来源（local toolkit、capability、host tool）各自维护自己的 operation metadata。
+- `@pinpawo/pet-agent` 侧 `operationMetadata.ts` 只共享 reader/summarizer 的基础能力，不定义 local-agent 专属 kind；local-agent 的 kind 命名由 toolkit/provider 自行定义。
+- `kind` 采用 `domain.action` 的小写点分层风格（例如 `file.write`、`search.grep`、`shell.run`），避免跨层漂移。
 ```
 
 对于用户 capability：
@@ -153,25 +146,44 @@ const capability = {
 };
 ```
 
-local-agent 只负责收集这些 metadata，建立 registry：
+对于 host 直接注入的 shared/global tools：
 
-```txt
-toolName -> operation metadata
+```ts
+const input = {
+  tools: [createPetProfileTool({ actor })],
+  toolOperations: {
+    describe_pet_profile: {
+      kind: 'pet.profile.read',
+      title: '读取宠物资料',
+      summarizeInput: (input) => ({ summary: input.focus ? `查看 ${input.focus}` : '查看基础资料' }),
+    },
+  },
+};
 ```
 
-然后把内部 tool event normalize 成 stable local-agent event。
+pet-agent 在创建 subagent 时负责收集这些 metadata，并随工具事件透传：
+
+```txt
+AgentToolkit.operations
+CapabilityRuntime.operations
+AgentInvokeInput.toolOperations
+  -> SubagentToolEvent.operation -> operation metadata
+```
+
+local-agent 在每个 run 上也建立由当前 `toolkits` 和 `toolOperations` 生成的 registry，作为 host/studio 事件和未携带 metadata 的工具事件 fallback。然后把内部 tool event normalize 成 stable local-agent event。
 
 ### 3.3 adapter 拥有渲染
 
 不同客户端可以消费同一个事件，但渲染不同。
 
-- TUI：渲染成紧凑文本、active tool line、system message。
+- TUI：渲染成紧凑文本、active operation line、system message。
 - App：渲染成结构化 run state、pet gif、compact activity strip。
+- macOS companion：通过 `/health` 读取 agent run 和 active operation 摘要，pet 动画按 `operation.kind/title/target/summary` 映射。
 - Logs/debug：保留 JSON。
 
 adapter 可以有自己的 i18n / copy，但不能重新解析内部 tool input/output。
 
-### 3.4 协议采用 `type: 'event'`，旧消息只做兼容
+### 3.4 协议采用 `type: 'event'`，旧消息不再作为本仓库协议
 
 新协议使用统一 server message：
 
@@ -183,23 +195,14 @@ type LocalAgentEventMessage = {
 };
 ```
 
-旧消息短期保留，但只作为兼容层：
+旧运行态消息已经从本仓库 wire protocol 中移除，并且不再作为本仓库的兼容输出。若 app/API 仍有依赖，应在 `pinpawo-app` 仓库迁移到 `type: 'event'` envelope，而不是在本仓库恢复兼容层。
 
-- `tool_log`
-- `chat_token`
-- `chat_response`
-- `human_interrupt`
-- `studio_turn_event`
+当前迁移边界：
 
-这些 legacy messages 在代码里需要明确标注 `@deprecated compatibility only`。等 app / TUI / macOS companion 全部切到 `type: 'event'` 后删除。
-
-迁移策略：
-
-1. 新增 `LocalAgentEvent`。
-2. server 同时输出 `type: 'event'` 和 legacy messages。
-3. app/TUI 逐步切到 `type: 'event'`。
-4. 旧 messages 降级为 compatibility/debug。
-5. 全部客户端迁移完成后删除 legacy messages。
+1. runtime / server 内部产出 `LocalAgentEvent`。
+2. TUI 本地链路直接消费 `type: 'event'`。
+3. app-facing WS 发送出口只发送 `LocalAgentEvent`。
+4. app/API 在 `pinpawo-app` 仓库消费新 envelope 并完成端到端验证。
 
 ## 4. 目标分层
 
@@ -218,13 +221,11 @@ services/local-agent/src/
     LocalAgentEvent.ts
     AgentStreamNormalizer.ts
     OperationRegistry.ts
-    LegacyProtocolAdapter.ts
 
   protocol/
     clientMessages.ts
     serverMessages.ts
     codec.ts
-    compatibility.ts
 
   server/
     httpServer.ts
@@ -292,30 +293,29 @@ values   -> final graph state 或 interrupt state
 ```txt
 astream messages
   -> LocalAgentEvent message.delta
-  -> legacy chat_token
 
 astream values final messages
   -> LocalAgentEvent message.completed
-  -> legacy chat_response
 
-astream tools
+pet/subagent onToolEvent
   -> LocalAgentEvent operation
-  -> legacy tool_log
 
 astream values __interrupt__
   -> LocalAgentEvent human_review.requested
-  -> legacy human_interrupt
 
 studio runtime progress
   -> LocalAgentEvent studio.progress
-  -> legacy studio_turn_event
 ```
+
+local-agent 对外只发送 `LocalAgentEvent` envelope。`pinpawo-app` app/API 旧路径需要在 app 仓库迁移到该 envelope 后再对接；本仓库不再从 `LocalAgentEvent` 派生旧运行态消息。
 
 原则：
 
 - LangGraph stream 是 runtime internal API。
 - `LocalAgentEvent` 是 local-agent 对 app/TUI/macOS companion 的 public event API。
-- legacy messages 只能从 `LocalAgentEvent` 派生，不能继续作为 primary event model。
+- `sendLocalAgentMessage` 和 `sendLocalAgentEvent` 不接受 legacy 输出开关。
+- `parseLocalAgentServerMessage` 只解析新协议 event/control message；local-agent 不再提供通用 legacy server message parser，避免 TUI 或新客户端重新依赖 legacy wire shape。
+- `raw.input/output/error` 仅保留为 local-agent 内部调试数据，`sendLocalAgentEvent` 发送 public event 前会剥离 raw。
 
 ### 5.1 Operation event
 
@@ -348,9 +348,12 @@ type LocalAgentOperationEvent = {
 说明：
 
 - `kind` 是开放字符串，由 toolkit/capability metadata 提供。
+- pet-agent subagent 层通过 `SubagentToolEventTracker` 规范 `onToolEvent` 的 `toolCallId`，并在 subagent 自然完成、limit reached、异常时关闭仍 active 的 tool event。
+- local-agent 运行层通过 `ToolOperationTracker` 保证发给客户端的 operation 有稳定 `id`；当上游缺失 `toolCallId` 时按 request 生成 synthetic id。
+- request 正常完成、异常、中断或等待人工时，tracker 会关闭仍 active 的 operation，避免客户端 `activeOperations` 泄漏。
 - `title` / `target` / `summary` 是已经归一化后的展示信息，adapter 可以直接使用。
 - `source` 只用于 debug 和兼容，不应该成为 UI 主要判断依据。
-- `raw` 默认不面向普通 UI，可用于 debug、日志或兼容层。
+- `raw` 默认不面向普通 UI，可用于 debug、日志或诊断。
 
 ### 5.2 Chat message event
 
@@ -405,7 +408,7 @@ type LocalAgentStudioEvent = {
 
 ## 6. Operation Metadata 草案
 
-operation metadata 由 toolkit / capability 暴露。
+operation metadata 由 toolkit / capability / host-provided tools 暴露。
 
 ```ts
 type OperationMetadata = {
@@ -424,17 +427,28 @@ type OperationSummary = {
 };
 ```
 
+当前实现边界：
+
+- `AgentToolkit.operations` 描述 toolkit tools 的展示语义。
+- `CapabilityRuntime.operations` 描述 capability runtime 自带 tools 的展示语义。
+- `AgentInvokeInput.toolOperations` 描述 host 直接注入的 shared/global tools 的展示语义。
+- pet-agent 的 subagent 工具事件会携带 `operation` metadata。
+- local-agent 的 `ToolOperationTracker` 使用 run-local registry 兜底，不再依赖全局固定 local tool registry。
+
 Registry 由 local-agent 建立：
 
 ```ts
 type OperationRegistry = {
-  resolveTool(name: string): OperationMetadata | null;
+  resolveToolOperation(toolName: string): OperationMetadata | null;
 };
 ```
 
 重要约束：
 
 - local-agent 可以为内置 local toolkit 提供 metadata。
+- local-agent 可以为 host 注入的 shared tools 提供 metadata，例如 `describe_pet_profile`。
+- shared tools 可以随工具导出 metadata，例如 `get_memories`、`search_web`。
+- Studio planner capability 暴露 `submit_plan` metadata；Studio worker 的 wiki read tools 通过 host `toolOperations` 暴露 metadata。
 - 第三方/user capability 可以提供自己的 metadata。
 - 没有 metadata 时，local-agent 生成 generic operation：`kind: 'tool.execute'`，`title: toolName`。
 - adapter 不应该回退解析 raw input/output。
@@ -443,49 +457,51 @@ type OperationRegistry = {
 
 ### 阶段 0：冻结现状
 
-目标：明确当前行为，避免重构时破坏 app/TUI。
+状态：已完成。
+
+目标：明确当时行为，避免重构时破坏 app/TUI。旧协议 baseline tests 已在 wire compatibility 删除后移除，保留 `parseLocalAgentServerMessage` 拒绝旧消息的回归测试。
 
 工作项：
 
 - 记录当前 websocket server messages。
-- 给 legacy `tool_log`、`chat_token`、`chat_response`、`human_interrupt` 补 baseline tests。
-- 明确 app 当前依赖哪些字段。
-- 明确 TUI 当前依赖哪些字段。
+- 明确 app 旧实现依赖哪些字段。
+- 明确 TUI 旧实现依赖哪些字段。
 
 产出：
 
 - 协议样例文档。
 - baseline tests。
 
-### 阶段 1：引入事件模型，不改变对外协议
+### 阶段 1：引入事件模型并切换 local-agent 出口
 
-目标：新增 `LocalAgentEvent` 和 normalizer，并开始输出 `type: 'event'`。legacy protocol 同时保留。
+状态：已完成。runtime 主链路产出 `LocalAgentEvent`。
+
+目标：新增 `LocalAgentEvent` 和 normalizer，并开始输出 `type: 'event'`。
 
 工作项：
 
 - 新增 `events/LocalAgentEvent.ts`。
 - 新增 `events/OperationRegistry.ts`。
 - 新增 `events/AgentStreamNormalizer.ts`。
-- 新增 `protocol/LegacyProtocolAdapter.ts`，从 `LocalAgentEvent` 派生 legacy messages。
-- `buildToolLogMessage()` 这类旧入口改为走 `astream tools -> LocalAgentOperationEvent -> legacy tool_log`。
+- 运行链路改为走 `onToolEvent -> LocalAgentOperationEvent`，chat 顶层 stream 不再订阅 `tools` mode。
 - 内置 local tools 注册 operation metadata。
-- `localAgentProtocol.ts` 中 legacy server message 类型加 `@deprecated compatibility only` 注释。
+- toolkit/capability metadata 随 subagent tool event 透传，local-agent run registry 作为 fallback。
 
 约束：
 
-- 不改 app/TUI 行为。
-- 不删除 `tool_log`。
 - 不让 legacy messages 继续成为 primary event model。
 - 不让 presentation 直接读内部 toolName。
 
 ### 阶段 2：TUI 切到 LocalAgentEvent
 
+状态：已完成。TUI 本地路径消费 `LocalAgentEvent`，operation activity 使用 `operation` 展示语义。
+
 目标：TUI 不再对内部 toolName 做 formatter。
 
 工作项：
 
-- server 同时发送 new event 和 legacy event，或在 TUI 内部先用 compatibility adapter 转换。
-- TUI active tool state 消费 `operation.title/target/summary`。
+- TUI 本地 server 只发送 `type: 'event'` agent run activity。
+- TUI active operation state 消费 `operation.title/target/summary`。
 - 删除或降级当前面向 toolName 的 presentation registry。
 
 产出：
@@ -495,19 +511,24 @@ type OperationRegistry = {
 
 ### 阶段 3：App/API 切到 LocalAgentEvent
 
-目标：app 不再依赖 `tool_log`。
+状态：本仓库侧已完成 local-agent 发送出口切换；`pinpawo-app` app/API 仍需要迁移，见 issue #19（范围仅限 app/API 侧）。
+
+迁移仓库：`~/Develop/src/pinpawo/pinpawo-app`。本仓库只维护 local-agent 新协议和迁移说明；app/API 代码迁移在 `pinpawo-app` 侧单独推进。
+
+目标：app 不再依赖旧运行态消息，只消费 `LocalAgentEvent` envelope。
 
 工作项：
 
-- app websocket/API 输出 typed local-agent events。
+- app websocket/API 消费 typed local-agent events。
 - app run state 基于 `message.delta`、`operation.*`、`human_review.requested`。
-- 旧 SSE/WS `tool_log/chat_token/chat_response/human_interrupt` 保持一段兼容期，并继续标注为 deprecated。
 
 产出：
 
 - app 和 TUI 共享同一事件语义。
 
 ### 阶段 4：拆分 server/runtime
+
+状态：进行中。已抽出 shared inflight operation run lifecycle，`localServer.ts` 和 `runtime.ts` 不再各自直接维护 `ToolOperationTracker` 创建、operation activity 记录和 dangling operation 收尾。`localServer.ts` 的 tool stream 到 operation 事件发送逻辑已拆为 server adapter，并有专项测试覆盖单次 emit 与 human review interrupt 转换。Studio human review response routing 已抽为独立 router，WS server 只负责调用路由器和连接生命周期清理。TUI session/history orchestration 已抽为 `LocalServerTuiSessionService`，`localServer.ts` 不再直接持有 session registry、history summary 或 checkpoint reset 细节。app WS 与 TUI local server 的 inflight request replace/interrupt/cleanup 逻辑已收敛为 `InflightRequestController`，避免两条路径各自维护 request slot、interrupt timer 和 terminal operation 收尾。local TUI WebSocket parse/dispatch/connect/close 逻辑已抽为 `attachLocalServerWebSocketTransport`，`localServer.ts` 通过 callbacks 连接 transport 与 chat/studio handlers。TUI chat request execution、`/allow` 授权、human-review fallback 和 tool-protocol recovery 已抽为 `LocalServerChatHandler`。Studio turn execution、Studio HITL routing 和 disconnect cleanup 已抽为 `LocalServerStudioHandler`。app-facing WebSocket connect/ping/reconnect/message dispatch 已抽为 `LocalAgentAppWsClient`，app chat request execution、checkpoint reset、thread routing 和 app operation emit 已抽为 `LocalAgentAppChatHandler`，scheduled heartbeat / next-tick / crawler / daily post execution 和 run stats 已抽为 `LocalAgentScheduledJob`，`runtime.ts` 不再直接持有 app WS timer、parser dispatch、app chat execution 或 scheduled post execution 细节。TUI 到本地 HTTP server 的 `/health`、`/history`、`/sessions`、`/sessions/resume` 访问已抽为 `TuiLocalServerClient`，`TuiRuntimeController` 不再直接解析这些 HTTP payload。TUI WebSocket socket 对象、open/message/close/error 监听、server message parsing 和 client message 发送已抽为 `TuiLocalWebSocketClient`，controller 保留重连策略和 action dispatch。
 
 目标：把 transport、session orchestration、runtime execution 分离。
 
@@ -525,6 +546,8 @@ type OperationRegistry = {
 
 ### 阶段 5：拆分 tools/policy/capability registry
 
+状态：进行中。`plugins/localTools.ts` 已收敛为 toolkit 装配入口；file/path tools 已抽到 `plugins/localTools/fileTools.ts`，`run_shell` implementation 与 review policy 已抽到 `plugins/localTools/shellTools.ts`，`http_fetch` / `download_file` 已抽到 `plugins/localTools/networkTools.ts`，`glob_search` / `grep_search` 已抽到 `plugins/localTools/searchTools.ts`；本地路径解析和文件遍历 helper 已抽到 `plugins/localTools/pathUtils.ts` / `plugins/localTools/fileSystemUtils.ts`，operation metadata helper 已提升到 `plugins/operationMetadata.ts`，供 local/browser tool metadata 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability/host tool operation metadata 随 subagent tool event 透传；`daily_post`、`capability_creator` 与 Studio planner `submit_plan` runtime tools 已挂载 capability operation metadata，`describe_pet_profile`、`get_memories`、`search_web` 与 Studio worker wiki read tools 已通过 shared tool metadata / `AgentInvokeInput.toolOperations` / `PetAgentRuntimeInvokeInput.toolOperations` 挂载 host tool operation metadata。local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。runtime 中的 local toolkit/capability/user capability loading 与 rescan state 已收敛为 `LocalAgentCapabilityRegistry`。
+
 目标：让 local tools 和 capability 管理可维护。
 
 工作项：
@@ -532,7 +555,7 @@ type OperationRegistry = {
 - `plugins/localTools.ts` 拆成 file/search/shell/network。
 - shell policy 从 tool implementation 中拆出。
 - capability loader/rescan/runtime state 收敛进 registry。
-- toolkit/capability operation metadata 与工具注册一起装配。
+- toolkit/capability/host tool operation metadata 与工具注册一起装配。
 
 产出：
 
@@ -540,13 +563,15 @@ type OperationRegistry = {
 
 ### 阶段 6：清理 legacy
 
+状态：本仓库 wire protocol 兼容层已清理；operation raw 调试数据已从 public event 出口剥离；interface capability 已改为由 session/interface context 显式提供，`threadId` 只保留 checkpoint/session scope 语义。本阶段剩余工作集中在 app 仓库迁移验证、历史数据迁移代码确认、文档表述收敛和内部 formatter 收敛。
+
 目标：删除过渡层。
 
 工作项：
 
-- 删除或 debug-only 化 legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event`。
-- 删除面向内部 toolName 的 formatter。
-- 清理 `chatInterface.ts` 中 thread id 推断能力的逻辑。
+- 确认 app/API 不再引用旧运行态消息。
+- 删除面向内部 toolName 的 formatter 或降级为 debug-only。
+- 保持 endpoint capability 只来自显式 interface context，不从 thread id 命名推断。
 - 更新 AGENTS.md 和开发文档。
 
 ## 8. PR 拆分建议
@@ -562,7 +587,7 @@ type OperationRegistry = {
 5. `protocol: expose typed local-agent events for app`
 6. `server: split websocket/http handlers from runtime`
 7. `tools: split local tools and register operation metadata`
-8. `cleanup: remove legacy tool formatter and tool_log dependency`
+8. `cleanup: remove legacy tool formatter and old protocol references`
 
 每个 PR 都必须保持：
 
@@ -576,7 +601,7 @@ type OperationRegistry = {
 
 - 不重写 pet-agent orchestrator。
 - 不改变 capability/subagent 的核心执行模型。
-- 不一次性删除 legacy protocol。
+- 不在本仓库恢复旧协议兼容输出。
 - 不把 app UI 重写和 local-agent 重构混在同一个 PR。
 - 不把所有工具语义写进 local-agent 的全局枚举。
 
@@ -584,13 +609,12 @@ type OperationRegistry = {
 
 已确认：
 
-1. 新协议新增 `type: 'event'` message，并保留旧 message 并行兼容。
-2. legacy `tool_log/chat_token/chat_response/human_interrupt/studio_turn_event` 要在代码里标注 compatibility only，等其他部分改造完成后删除。
+1. 新协议使用 `type: 'event'` message，agent run activity 以 `LocalAgentEvent` 为 primary event model。
+2. local-agent 不再发送旧运行态消息；`pinpawo-app` app/API 迁移是剩余跨仓库工作。
 3. LangGraph `astream` 的 `messages/tools/values` 只作为 internal stream source，不能作为 app/TUI public protocol。
+4. public `LocalAgentEvent` 不发送 `raw.input/output/error`；这些字段只在 local-agent 内部 adapter/logging 使用。
 
 仍待确认：
 
-1. app 是否需要接收 `raw.input/output`，还是只在 debug mode 开启。
-2. operation metadata 应该挂在 toolkit runtime、tool wrapper，还是 local-agent host registry。
-3. user capability 的 metadata manifest 形态是否需要进入公开 capability contract。
-4. i18n 是 metadata 直接给 `title`，还是给 `titleKey` 由 adapter locale 渲染。
+1. user capability 的 metadata manifest 形态是否需要进入公开 capability contract。
+2. i18n 是 metadata 直接给 `title`，还是给 `titleKey` 由 adapter locale 渲染。

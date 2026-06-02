@@ -1,20 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import WebSocket from 'ws';
 import { loadAgentContext } from '../contextLoader';
-import { parseLocalAgentServerMessage, sendLocalAgentMessage } from '../localAgentProtocol';
+import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { TUI_TEXT } from './render/text';
 import { formatNow } from './render/terminalText';
+import { TuiLocalServerClient } from './tuiLocalServerClient';
+import { TuiLocalWebSocketClient } from './tuiLocalWebSocketClient';
+import { buildTuiActionsFromServerMessage } from './tuiServerMessageActions';
 import {
   selectFocusedActiveRun,
   selectFocusedBusy,
   selectFocusedPendingApproval,
 } from './state/tuiStateReducer';
-import type { HistoryCellModel, TuiAction, TuiState } from './state/tuiState';
-import type { ApprovalOption, ResumeSessionSummary } from './types';
+import type { TuiAction, TuiState } from './state/tuiState';
+import type { ApprovalOption } from './types';
 
 const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
-const LOCAL_SERVER_HEALTH_TIMEOUT_MS = 1500;
 const LOCAL_SERVER_RECONNECT_RETRIES = 5;
 const LOCAL_SERVER_RECONNECT_DELAY_MS = 2000;
 
@@ -30,18 +31,6 @@ function sleep(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-async function fetchWithTimeout(url: string, timeoutMs: number) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
-  try {
-    return await fetch(url, { signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) {
@@ -60,65 +49,39 @@ function makeHistoryMeta() {
   };
 }
 
-function parseHistoryMessages(messages: Array<{ role?: string; text?: string }> | undefined) {
-  return Array.isArray(messages)
-    ? messages.flatMap((item) => {
-      if (
-        (item.role === 'user' || item.role === 'assistant' || item.role === 'system')
-        && typeof item.text === 'string'
-        && item.text.trim()
-      ) {
-        return [{
-          id: randomUUID(),
-          kind: item.role,
-          text: item.text,
-        } satisfies HistoryCellModel];
-      }
-      return [];
-    })
-    : [];
-}
-
-function parseResumeSessionSummary(value: unknown): ResumeSessionSummary | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.id !== 'string'
-    || typeof record.title !== 'string'
-    || typeof record.createdAt !== 'string'
-    || typeof record.updatedAt !== 'string'
-  ) {
-    return null;
-  }
-  return {
-    id: record.id,
-    title: record.title,
-    messageCount: typeof record.messageCount === 'number' ? record.messageCount : 0,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-    active: record.active === true,
-  };
-}
-
 export class TuiRuntimeController {
-  private ws: WebSocket | null = null;
   private disposed = false;
   private interruptTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  private readonly localServerClient: TuiLocalServerClient;
+  private readonly wsClient: TuiLocalWebSocketClient;
 
-  constructor(private readonly options: TuiRuntimeControllerOptions) {}
+  constructor(private readonly options: TuiRuntimeControllerOptions) {
+    this.localServerClient = new TuiLocalServerClient({
+      port: options.localServerPort,
+    });
+    this.wsClient = new TuiLocalWebSocketClient({
+      port: options.localServerPort,
+      handlers: {
+        onOpen: () => this.handleWebSocketOpen(),
+        onServerMessage: (message) => this.handleServerMessage(message),
+        onClose: () => this.handleWebSocketClose(),
+        onError: (err) => this.handleWebSocketError(err),
+      },
+    });
+  }
 
   start() {
     this.disposed = false;
     void this.initialize().catch((err) => {
       if (this.disposed) return;
       const message = err instanceof Error ? err.message : String(err);
-      this.appendSystemMessage(`初始化失败: ${message}`);
+      this.appendSystemMessage(TUI_TEXT.initializationFailed(message));
       this.options.dispatch({
         type: 'connection.set',
         status: 'error',
-        message: `初始化失败: ${message}`,
+        message: TUI_TEXT.initializationFailed(message),
       });
     });
   }
@@ -127,15 +90,11 @@ export class TuiRuntimeController {
     this.disposed = true;
     this.clearInterruptTimeout();
     this.clearReconnectTimeout();
-    if (this.ws) {
-      this.ws.removeAllListeners();
-      this.ws.close();
-      this.ws = null;
-    }
+    this.wsClient.disconnect();
   }
 
   isConnected() {
-    return Boolean(this.getOpenWebSocket());
+    return this.wsClient.isConnected();
   }
 
   isBusy() {
@@ -143,8 +102,7 @@ export class TuiRuntimeController {
   }
 
   sendChatRequest(message: string) {
-    const ws = this.getOpenWebSocket();
-    if (!ws) {
+    if (!this.wsClient.isConnected()) {
       this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
     }
@@ -163,10 +121,10 @@ export class TuiRuntimeController {
       userText: message,
       now,
       userCell: makeHistoryMeta(),
-      statusMessage: '等待回复',
+      statusMessage: TUI_TEXT.waitingForReply,
     });
 
-    sendLocalAgentMessage(ws, {
+    this.wsClient.send({
       type: 'chat_request',
       requestId,
       message,
@@ -175,8 +133,7 @@ export class TuiRuntimeController {
   }
 
   sendStudioRequest(userRequest: string, conversationId: string | null) {
-    const ws = this.getOpenWebSocket();
-    if (!ws) {
+    if (!this.wsClient.isConnected()) {
       this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
     }
@@ -192,12 +149,12 @@ export class TuiRuntimeController {
       type: 'run.start',
       requestId,
       kind: 'studio',
-      userText: `[studio] ${userRequest}`,
+      userText: TUI_TEXT.studioUserMessage(userRequest),
       now,
       userCell: makeHistoryMeta(),
-      statusMessage: 'Studio 编排中',
+      statusMessage: TUI_TEXT.studioRunning,
     });
-    sendLocalAgentMessage(ws, {
+    this.wsClient.send({
       type: 'studio_request',
       requestId,
       userRequest,
@@ -210,9 +167,8 @@ export class TuiRuntimeController {
     const decision = option.message.trim();
     if (!decision) return false;
 
-    const ws = this.getOpenWebSocket();
-    if (!ws) {
-      this.appendSystemMessage('未连接，无法提交确认。');
+    if (!this.wsClient.isConnected()) {
+      this.appendSystemMessage(TUI_TEXT.reviewDisconnectedCannotSubmit);
       return false;
     }
 
@@ -226,9 +182,9 @@ export class TuiRuntimeController {
       message: decision,
       now,
       userCell: makeHistoryMeta(),
-      statusMessage: '提交确认',
+      statusMessage: TUI_TEXT.reviewSubmitting,
     });
-    sendLocalAgentMessage(ws, {
+    this.wsClient.send({
       type: 'human_review_response',
       requestId,
       message: decision,
@@ -238,20 +194,19 @@ export class TuiRuntimeController {
   }
 
   requestInterrupt() {
-    const ws = this.getOpenWebSocket();
     const activeRun = selectFocusedActiveRun(this.options.getState());
-    if (!this.isCurrentBusy() || !ws || !activeRun) {
+    if (!this.isCurrentBusy() || !this.wsClient.isConnected() || !activeRun) {
       return false;
     }
 
-    sendLocalAgentMessage(ws, {
+    this.wsClient.send({
       type: 'interrupt_request',
       requestId: activeRun.requestId,
     });
     this.options.dispatch({
       type: 'run.interrupting',
       requestId: activeRun.requestId,
-      statusMessage: '正在打断',
+      statusMessage: TUI_TEXT.interrupting,
     });
     this.clearInterruptTimeout();
 
@@ -265,11 +220,11 @@ export class TuiRuntimeController {
       this.options.dispatch({
         type: 'run.finish',
         requestId: interruptRequestId,
-        statusMessage: '已请求打断',
+        statusMessage: TUI_TEXT.interruptRequestedStatus,
         history: [{
           ...makeHistoryMeta(),
           kind: 'system',
-          text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+          text: TUI_TEXT.interruptRequestedLocalRelease,
         }],
       });
     }, 1800);
@@ -284,12 +239,11 @@ export class TuiRuntimeController {
     });
     this.options.dispatch({
       type: 'session.clear',
-      statusMessage: '已创建新会话',
+      statusMessage: TUI_TEXT.newSessionCreated,
     });
 
-    const ws = this.getOpenWebSocket();
-    if (ws) {
-      sendLocalAgentMessage(ws, { type: 'new_session' });
+    if (this.wsClient.isConnected()) {
+      this.wsClient.send({ type: 'new_session' });
     }
   }
 
@@ -318,43 +272,18 @@ export class TuiRuntimeController {
   }
 
   async listResumeSessions() {
-    const res = await fetch(`http://127.0.0.1:${this.options.localServerPort}/sessions`);
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const payload = await res.json() as { sessions?: unknown };
-    return Array.isArray(payload.sessions)
-      ? payload.sessions.flatMap((item) => {
-          const session = parseResumeSessionSummary(item);
-          return session ? [session] : [];
-        })
-      : [];
+    return this.localServerClient.listResumeSessions();
   }
 
   async resumeSession(sessionId: string) {
-    const res = await fetch(
-      `http://127.0.0.1:${this.options.localServerPort}/sessions/resume?sessionId=${encodeURIComponent(sessionId)}`,
-    );
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const payload = await res.json() as {
-      session?: unknown;
-      messages?: Array<{ role?: string; text?: string }>;
-    };
-    const session = parseResumeSessionSummary(payload.session);
-    if (!session) {
-      throw new Error('invalid resume session payload');
-    }
-    const history = parseHistoryMessages(payload.messages);
-    return { session, history };
+    return this.localServerClient.resumeSession(sessionId);
   }
 
   private async initialize() {
     this.options.dispatch({
       type: 'connection.set',
       status: 'connecting',
-      message: '连接本地服务',
+      message: TUI_TEXT.connectionConnecting,
     });
 
     const connected = await this.waitForLocalServer();
@@ -378,17 +307,21 @@ export class TuiRuntimeController {
         if (this.disposed) return false;
         if (attempt >= LOCAL_SERVER_CONNECT_RETRIES) {
           this.appendSystemMessage(
-            `无法连接本地服务 (port ${this.options.localServerPort})，请先运行 pinpawo-agent run`,
+            TUI_TEXT.connectionUnavailable(this.options.localServerPort),
           );
           this.options.dispatch({
             type: 'connection.set',
             status: 'disconnected',
-            message: '未连接',
+            message: TUI_TEXT.connectionDisconnected,
           });
           return false;
         }
         const retryIndex = attempt + 1;
-        const retryText = `本地服务暂不可用，${LOCAL_SERVER_CONNECT_RETRY_DELAY_MS / 1000}s 后重试 ${retryIndex}/${LOCAL_SERVER_CONNECT_RETRIES}`;
+        const retryText = TUI_TEXT.connectionRetrying(
+          LOCAL_SERVER_CONNECT_RETRY_DELAY_MS / 1000,
+          retryIndex,
+          LOCAL_SERVER_CONNECT_RETRIES,
+        );
         this.options.dispatch({
           type: 'connection.set',
           status: 'connecting',
@@ -403,12 +336,7 @@ export class TuiRuntimeController {
 
   private async restoreHistory() {
     try {
-      const historyRes = await fetch(`http://127.0.0.1:${this.options.localServerPort}/history`);
-      if (!historyRes.ok) return;
-      const payload = await historyRes.json() as {
-        messages?: Array<{ role?: string; text?: string }>;
-      };
-      const restored = parseHistoryMessages(payload.messages);
+      const restored = await this.localServerClient.readHistory();
       if (restored.length > 0) {
         this.options.dispatch({
           type: 'session.replace_history',
@@ -422,74 +350,32 @@ export class TuiRuntimeController {
 
   private connectWebSocket() {
     this.clearReconnectTimeout();
-    const ws = new WebSocket(`ws://127.0.0.1:${this.options.localServerPort}`);
-    this.ws = ws;
-
-    ws.on('open', () => {
-      if (this.disposed) {
-        ws.close();
-        return;
-      }
-      if (this.ws !== ws) return;
-      this.reconnectAttempt = 0;
-      this.options.dispatch({
-        type: 'connection.set',
-        status: 'ready',
-        message: TUI_TEXT.statusReady,
-      });
-    });
-
-    ws.on('message', (data) => {
-      if (this.ws !== ws) return;
-      this.handleWsMessage(data);
-    });
-
-    ws.on('close', () => {
-      if (this.disposed) return;
-      if (this.ws !== ws) return;
-      this.options.dispatch({
-        type: 'connection.set',
-        status: 'disconnected',
-        message: '连接断开',
-      });
-      this.ws = null;
-      this.scheduleReconnect();
-    });
-
-    ws.on('error', (err) => {
-      if (this.disposed) return;
-      if (this.ws !== ws) return;
-      this.appendSystemMessage(`WS error: ${err.message}`);
-    });
+    this.wsClient.connect();
   }
 
   private async checkLocalServerHealth() {
-    try {
-      const healthRes = await fetchWithTimeout(
-        `http://127.0.0.1:${this.options.localServerPort}/health`,
-        LOCAL_SERVER_HEALTH_TIMEOUT_MS,
-      );
-      return healthRes.ok;
-    } catch {
-      return false;
-    }
+    return this.localServerClient.isHealthy();
   }
 
   private scheduleReconnect() {
-    if (this.disposed || this.reconnectTimeout || this.ws) return;
+    if (this.disposed || this.reconnectTimeout || this.wsClient.hasSocket()) return;
 
     if (this.reconnectAttempt >= LOCAL_SERVER_RECONNECT_RETRIES) {
       this.options.dispatch({
         type: 'connection.set',
         status: 'disconnected',
-        message: '连接断开，重连失败',
+        message: TUI_TEXT.connectionReconnectFailed,
       });
       return;
     }
 
     this.reconnectAttempt += 1;
     const attempt = this.reconnectAttempt;
-    const retryText = `连接断开，${LOCAL_SERVER_RECONNECT_DELAY_MS / 1000}s 后重连 ${attempt}/${LOCAL_SERVER_RECONNECT_RETRIES}`;
+    const retryText = TUI_TEXT.connectionReconnectRetrying(
+      LOCAL_SERVER_RECONNECT_DELAY_MS / 1000,
+      attempt,
+      LOCAL_SERVER_RECONNECT_RETRIES,
+    );
     this.options.dispatch({
       type: 'connection.set',
       status: 'connecting',
@@ -501,17 +387,17 @@ export class TuiRuntimeController {
       void this.reconnect().catch((err) => {
         if (this.disposed) return;
         const message = err instanceof Error ? err.message : String(err);
-        this.appendSystemMessage(`重连失败: ${message}`);
+        this.appendSystemMessage(TUI_TEXT.reconnectFailed(message));
         this.scheduleReconnect();
       });
     }, LOCAL_SERVER_RECONNECT_DELAY_MS);
   }
 
   private async reconnect() {
-    if (this.disposed || this.ws) return;
+    if (this.disposed || this.wsClient.hasSocket()) return;
 
     const healthy = await this.checkLocalServerHealth();
-    if (this.disposed || this.ws) return;
+    if (this.disposed || this.wsClient.hasSocket()) return;
 
     if (!healthy) {
       this.scheduleReconnect();
@@ -519,6 +405,34 @@ export class TuiRuntimeController {
     }
 
     this.connectWebSocket();
+  }
+
+  private handleWebSocketOpen() {
+    if (this.disposed) {
+      this.wsClient.disconnect();
+      return;
+    }
+    this.reconnectAttempt = 0;
+    this.options.dispatch({
+      type: 'connection.set',
+      status: 'ready',
+      message: TUI_TEXT.statusReady,
+    });
+  }
+
+  private handleWebSocketClose() {
+    if (this.disposed) return;
+    this.options.dispatch({
+      type: 'connection.set',
+      status: 'disconnected',
+      message: TUI_TEXT.connectionClosed,
+    });
+    this.scheduleReconnect();
+  }
+
+  private handleWebSocketError(err: Error) {
+    if (this.disposed) return;
+    this.appendSystemMessage(TUI_TEXT.websocketError(err.message));
   }
 
   private async loadActorContext() {
@@ -534,99 +448,22 @@ export class TuiRuntimeController {
       });
     } catch {
       if (!this.disposed) {
-        this.appendSystemMessage('无法加载宠物信息，使用默认名称');
+        this.appendSystemMessage(TUI_TEXT.actorContextUnavailable);
       }
     }
   }
 
-  private handleWsMessage(data: WebSocket.RawData) {
-    try {
-      const msg = parseLocalAgentServerMessage(data);
-      if (!msg || msg.type === 'pong') {
-        return;
-      }
-
-      if (msg.type === 'event') {
-        if (
-          msg.event.type === 'human_review.requested'
-          || msg.event.type === 'message.completed'
-          || msg.event.type === 'error'
-        ) {
-          this.clearInterruptTimeout();
-        }
-        this.options.dispatch({
-          type: 'event.received',
-          event: msg.event,
-          now: Date.now(),
-          historyCell: makeHistoryMeta(),
-        });
-        return;
-      }
-
-      if (msg.type === 'interrupting') {
-        this.options.dispatch({
-          type: 'server.interrupting',
-          requestId: msg.requestId,
-          statusMessage: '正在打断',
-        });
-        return;
-      }
-
-      if (msg.type === 'interrupted') {
-        this.clearInterruptTimeout();
-        this.options.dispatch({
-          type: 'server.interrupted',
-          requestId: msg.requestId,
-          historyCell: makeHistoryMeta(),
-          statusMessage: '已打断',
-        });
-        return;
-      }
-
-      if (msg.type === 'studio_response') {
-        this.clearInterruptTimeout();
-        this.options.dispatch({
-          type: 'server.studio_response',
-          requestId: msg.requestId,
-          outcome: msg.outcome,
-          reply: msg.reply,
-          reason: msg.reason,
-          historyCell: makeHistoryMeta(),
-          stoppedReasonCell: makeHistoryMeta(),
-          statusMessage: TUI_TEXT.statusReady,
-        });
-        return;
-      }
-
-      if (msg.type === 'studio_error') {
-        this.clearInterruptTimeout();
-        this.options.dispatch({
-          type: 'server.studio_error',
-          requestId: msg.requestId,
-          message: msg.message,
-          historyCell: makeHistoryMeta(),
-          statusMessage: 'Studio 出错,已恢复输入',
-        });
-        return;
-      }
-
-      if (msg.type === 'error') {
-        this.clearInterruptTimeout();
-        this.options.dispatch({
-          type: 'server.error',
-          requestId: msg.requestId,
-          message: msg.message,
-          historyCell: makeHistoryMeta(),
-          statusMessage: TUI_TEXT.statusErrorRecovered,
-        });
-      }
-    } catch {
-      // ignore malformed messages
+  private handleServerMessage(msg: LocalAgentServerMessage) {
+    const result = buildTuiActionsFromServerMessage(msg, {
+      now: Date.now(),
+      makeHistoryCell: makeHistoryMeta,
+    });
+    if (result.clearInterrupt) {
+      this.clearInterruptTimeout();
     }
-  }
-
-  private getOpenWebSocket() {
-    return this.ws?.readyState === WebSocket.OPEN ? this.ws : null;
+    for (const action of result.actions) {
+      this.options.dispatch(action);
+    }
   }
 
   private isCurrentBusy() {

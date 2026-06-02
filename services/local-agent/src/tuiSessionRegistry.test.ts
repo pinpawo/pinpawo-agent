@@ -35,7 +35,7 @@ test('tui session registry creates, lists, and resumes sessions without deleting
   ]);
 });
 
-test('tui session registry reads legacy petId to suffix map', async () => {
+test('tui session registry migrates v1 petId to suffix map', async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
   const filePath = path.join(tmp, 'tui-sessions.json');
   await writeFile(filePath, JSON.stringify({ 'pet-a': 'abc12345' }), 'utf8');

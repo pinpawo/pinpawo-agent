@@ -1,5 +1,8 @@
 import type {
-  LocalAgentOperationEvent,
+  SubagentToolOperationMetadata,
+} from '@pinpawo/pet-agent';
+import type {
+  LocalAgentOperationInternalEvent,
   LocalAgentOperationPhase,
 } from './localAgentEvent';
 import {
@@ -16,6 +19,7 @@ export type StreamToolsPayload = {
   output?: unknown;
   error?: unknown;
   data?: unknown;
+  operation?: SubagentToolOperationMetadata;
 };
 
 function readToolPhase(event: StreamToolsPayload['event']): LocalAgentOperationPhase {
@@ -46,8 +50,16 @@ export function normalizeToolStreamEvent(
   requestId: string,
   payload: StreamToolsPayload,
   registry: OperationRegistry = emptyOperationRegistry,
-): LocalAgentOperationEvent {
-  const metadata = registry.resolveTool(payload.name);
+): LocalAgentOperationInternalEvent {
+  const metadata = payload.operation
+    ? {
+        ...payload.operation,
+        source: payload.operation.source ?? {
+          provider: 'runtime' as const,
+          name: payload.name,
+        },
+      }
+    : registry.resolveToolOperation(payload.name);
   const output = payload.output !== undefined ? payload.output : payload.data;
   const summary = [
     metadata?.summarizeInput?.(payload.input),

@@ -5,7 +5,7 @@ import type {
 } from '../../events/localAgentEvent';
 import { TUI_TEXT } from './text';
 import { formatElapsed, wrapLine } from './terminalText';
-import type { ActiveTool, PendingUiState } from '../types';
+import type { ActiveOperation, PendingUiState } from '../types';
 
 export function shorten(value: string, max = 60) {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -33,13 +33,13 @@ export function formatOperationProgress(event: LocalAgentOperationEvent) {
 export function formatOperationResult(event: LocalAgentOperationEvent) {
   const label = event.operation.title ?? event.operation.kind;
   if (event.phase === 'failed') {
-    return `${label}：失败${event.operation.summary ? ` · ${shorten(event.operation.summary, 80)}` : ''}`;
+    return `${label}：${TUI_TEXT.operationFailed}${event.operation.summary ? ` · ${shorten(event.operation.summary, 80)}` : ''}`;
   }
   if (event.phase === 'interrupted') {
-    return `${label}：已中断`;
+    return `${label}：${TUI_TEXT.operationInterrupted}`;
   }
   const detail = formatOperationDetail(event, 80);
-  return `${label}：${detail || '已完成'}`;
+  return `${label}：${detail || TUI_TEXT.operationCompleted}`;
 }
 
 export function formatSystemNoticeEvent(event: LocalAgentSystemNoticeEvent): string | null {
@@ -60,29 +60,29 @@ export function formatStudioProgressEvent(event: LocalAgentStudioProgressEvent):
         ? payload.plan as Record<string, unknown>
         : null;
       const tasks = plan && Array.isArray(plan.tasks) ? plan.tasks : [];
-      return `[studio] plan 设定:${tasks.length} 棒`;
+      return TUI_TEXT.studioProgressPlanSet(tasks.length);
     }
     case 'dispatch_started': {
       const petId = typeof payload.petId === 'string' ? payload.petId : '?';
       const taskIndex = typeof payload.taskIndex === 'number' ? payload.taskIndex : '?';
-      return `[studio] dispatch[#${taskIndex}] → pet:${petId}`;
+      return TUI_TEXT.studioProgressDispatchStarted(taskIndex, petId);
     }
     case 'task_status_changed': {
       const taskIndex = typeof payload.taskIndex === 'number' ? payload.taskIndex : '?';
       const status = typeof payload.status === 'string' ? payload.status : '?';
-      return `[studio] task[#${taskIndex}] → ${status}`;
+      return TUI_TEXT.studioProgressTaskStatusChanged(taskIndex, status);
     }
     case 'wiki_updated': {
       const changed = Array.isArray(payload.changedPaths) ? payload.changedPaths : [];
-      return `[studio] wiki 更新 ${changed.length} 项`;
+      return TUI_TEXT.studioProgressWikiUpdated(changed.length);
     }
     case 'dispatch_finished': {
       const dispatchId = typeof payload.dispatchId === 'string' ? payload.dispatchId : '?';
       const status = typeof payload.status === 'string' ? payload.status : '?';
-      return `[studio] dispatch ${dispatchId} → ${status}`;
+      return TUI_TEXT.studioProgressDispatchFinished(dispatchId, status);
     }
     default:
-      return `[studio] event: ${type}`;
+      return TUI_TEXT.studioProgressUnknown(type);
   }
 }
 
@@ -90,22 +90,24 @@ export function buildBusyStatusLine(
   pending: PendingUiState,
   now: number,
   spinnerFrame: string,
-  activeTools: ActiveTool[],
+  activeOperations: ActiveOperation[],
 ) {
   const phase = buildBusyPhaseLabel(pending, now);
   const elapsed = formatElapsed(pending.startedAt, now);
   const detail = pending.charCount > 0 ? ` · ${TUI_TEXT.modelOutputChars(pending.charCount)}` : '';
-  const tools = activeTools.length > 0 ? ` · ${activeTools.map((tool) => tool.name).join(', ')}` : '';
-  return `${spinnerFrame} ${phase} · ${elapsed}${detail}${tools}`;
+  const operations = activeOperations.length > 0
+    ? ` · ${activeOperations.map((operation) => operation.name).join(', ')}`
+    : '';
+  return `${spinnerFrame} ${phase} · ${elapsed}${detail}${operations}`;
 }
 
-export function buildActiveToolLines(activeTools: ActiveTool[], now: number, width: number) {
-  return activeTools.flatMap((tool, index) =>
+export function buildActiveOperationLines(activeOperations: ActiveOperation[], now: number, width: number) {
+  return activeOperations.flatMap((operation, index) =>
     wrapLine(
-      `${tool.label} · ${formatElapsed(tool.startedAt, now)}${tool.detail ? ` · ${tool.detail}` : ''}`,
+      `${operation.label} · ${formatElapsed(operation.startedAt, now)}${operation.detail ? ` · ${operation.detail}` : ''}`,
       width,
     ).map((text, lineIndex) => ({
-      id: `tool-${tool.name}-${index}-${lineIndex}`,
+      id: `operation-${operation.name}-${index}-${lineIndex}`,
       text,
     })),
   );

@@ -1,17 +1,11 @@
-export type OperationSummary = {
-  target?: string;
-  summary?: string;
-  details?: Record<string, unknown>;
-};
+import type {
+  AgentToolkit,
+  ToolkitOperationMetadata,
+  ToolkitOperationSummary,
+} from '@pinpawo/pet-agent';
 
-export type OperationMetadata = {
-  kind: string;
-  title?: string;
-  titleKey?: string;
-  summarizeInput?: (input: unknown) => OperationSummary | null;
-  summarizeOutput?: (output: unknown) => OperationSummary | null;
-  summarizeError?: (error: unknown) => OperationSummary | null;
-};
+export type OperationSummary = ToolkitOperationSummary;
+export type OperationMetadata = ToolkitOperationMetadata;
 
 export type RegisteredOperationMetadata = OperationMetadata & {
   source: {
@@ -21,7 +15,7 @@ export type RegisteredOperationMetadata = OperationMetadata & {
 };
 
 export type OperationRegistry = {
-  resolveTool(name: string): RegisteredOperationMetadata | null;
+  resolveToolOperation(toolName: string): RegisteredOperationMetadata | null;
 };
 
 export function createOperationRegistry(
@@ -29,10 +23,47 @@ export function createOperationRegistry(
 ): OperationRegistry {
   const operations = new Map(Object.entries(entries));
   return {
-    resolveTool(name: string) {
-      return operations.get(name) ?? null;
+    resolveToolOperation(toolName: string) {
+      return operations.get(toolName) ?? null;
     },
   };
+}
+
+export function createOperationRegistryFromToolkits(
+  toolkits: AgentToolkit[],
+): OperationRegistry {
+  return createOperationRegistryFromSources({ toolkits });
+}
+
+export function createOperationRegistryFromSources(params: {
+  toolkits: AgentToolkit[];
+  runtimeOperations?: Record<string, ToolkitOperationMetadata>;
+}): OperationRegistry {
+  const entries: Record<string, RegisteredOperationMetadata> = {};
+
+  for (const toolkit of params.toolkits) {
+    for (const [toolName, metadata] of Object.entries(toolkit.operations ?? {})) {
+      entries[toolName] = {
+        ...metadata,
+        source: {
+          provider: 'toolkit',
+          name: toolName,
+        },
+      };
+    }
+  }
+
+  for (const [toolName, metadata] of Object.entries(params.runtimeOperations ?? {})) {
+    entries[toolName] = {
+      ...metadata,
+      source: {
+        provider: 'runtime',
+        name: toolName,
+      },
+    };
+  }
+
+  return createOperationRegistry(entries);
 }
 
 export const emptyOperationRegistry = createOperationRegistry();

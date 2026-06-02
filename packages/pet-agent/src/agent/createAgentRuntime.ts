@@ -79,6 +79,9 @@ import {
 } from './orchestrator/messageLanes';
 import {
   buildDelegationHandoffInstruction,
+  collectCapabilityOperations,
+  collectGeneralOperations,
+  collectToolkitOperations,
   resolveInstructions,
   resolveToolkitResources,
   selectCapabilityTools,
@@ -120,6 +123,7 @@ function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOp
     actor: cfg.actor as AgentActor | undefined,
     capabilities: (cfg.capabilities ?? []) as AgentCapability[],
     tools: (cfg.tools ?? []) as StructuredTool[],
+    toolOperations: cfg.toolOperations as OrchestratorInvokeOptions['toolOperations'] | undefined,
     toolkits: (cfg.toolkits ?? []) as AgentToolkit[],
     execution: cfg.execution as AgentExecution | undefined,
     maxIterations: cfg.maxIterations as number | undefined,
@@ -600,6 +604,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       model: config.models.subagent ?? config.models.act,
       tools: selectCapabilityTools(runtime, usedToolkitResources.tools),
       instructions: [handoffInstruction, ...usedToolkitResources.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
+      operations: collectCapabilityOperations(usedToolkitResources.toolkits, runtime),
       messages: scopedMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       signal: runnableConfig?.signal,
@@ -660,7 +665,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   // Node: general — reads tools from configurable
   async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { tools: globalTools, toolkits, execution, workdir, runtimeEnvironment, onToolEvent } = getInvokeOptions(runnableConfig);
+    const { tools: globalTools, toolOperations, toolkits, execution, workdir, runtimeEnvironment, onToolEvent } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = toolkits ?? [];
     validateUniqueToolkitNames(toolkitList);
@@ -704,6 +709,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       model: config.models.subagent ?? config.models.act,
       tools: toolList,
       instructions: [handoffInstruction, ...toolkitResources.instructions, ...instructions],
+      operations: collectGeneralOperations(toolkitResources.toolkits, toolOperations),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
       signal: runnableConfig?.signal,

@@ -9,6 +9,7 @@ import {
 import { Command } from '@langchain/langgraph';
 import type { ZodType } from 'zod';
 import type { AgentChannelSetup } from './agentChannel';
+import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
 
 function buildConfigurable(setup: AgentChannelSetup) {
   const configurable: Record<string, unknown> = {};
@@ -16,11 +17,15 @@ function buildConfigurable(setup: AgentChannelSetup) {
   if (setup.input.threadId) configurable.thread_id = setup.input.threadId;
   if (setup.input.capabilities) configurable.capabilities = setup.input.capabilities;
   if (setup.input.tools) configurable.tools = setup.input.tools;
+  if (setup.input.toolOperations) configurable.toolOperations = setup.input.toolOperations;
   if (setup.input.toolkits) configurable.toolkits = setup.input.toolkits;
   if (setup.input.execution) configurable.execution = setup.input.execution;
   if (setup.input.workdir) configurable.workdir = setup.input.workdir;
   if (setup.input.runtimeEnvironment) configurable.runtimeEnvironment = setup.input.runtimeEnvironment;
   if (setup.input.onToolEvent) configurable.onToolEvent = setup.input.onToolEvent;
+  if (setup.interfaceContext?.kind) {
+    configurable[LOCAL_AGENT_INTERFACE_CONFIG_KEY] = setup.interfaceContext;
+  }
   return Object.keys(configurable).length > 0 ? configurable : undefined;
 }
 
@@ -49,7 +54,7 @@ export class LocalAgentGraphService {
       {
         signal: setup.input.signal,
         configurable: buildConfigurable(setup),
-        streamMode: ['messages', 'tools', 'values'],
+        streamMode: ['messages', 'values'],
       },
     );
     for await (const chunk of stream as AsyncIterable<unknown>) {

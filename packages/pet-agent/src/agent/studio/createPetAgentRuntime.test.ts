@@ -30,13 +30,13 @@ function fakeActor(): AgentActor {
 
 function makeStubGraph(responses: unknown[]): {
   graph: OrchestratorGraph;
-  calls: { input: unknown }[];
+  calls: { input: unknown; options?: unknown }[];
 } {
-  const calls: { input: unknown }[] = [];
+  const calls: { input: unknown; options?: unknown }[] = [];
   let i = 0;
   const graph = {
-    invoke: async (input: unknown) => {
-      calls.push({ input });
+    invoke: async (input: unknown, options?: unknown) => {
+      calls.push({ input, options });
       const r = responses[i++];
       if (r === undefined) {
         throw new Error(`graph stub exhausted at call #${i}`);
@@ -164,4 +164,33 @@ test('humanReviewer: non-human_review interrupt is not treated as HITL', async (
   const result = await runtime.invoke({ brief: 'go' });
   assert.equal(reviewerCalled, false);
   assert.equal(result.reply, '');
+});
+
+test('pet runtime passes wiki read tools and operation metadata when wikiRoot is provided', async () => {
+  const { graph, calls } = makeStubGraph([
+    { messages: [new AIMessage('done')] },
+  ]);
+
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+  });
+
+  const result = await runtime.invoke({
+    brief: 'read wiki',
+    wikiRoot: '/tmp/pinpawo-test-wiki',
+  });
+
+  assert.equal(result.reply, 'done');
+  const configurable = (calls[0]?.options as {
+    configurable?: {
+      tools?: Array<{ name?: string }>;
+      toolOperations?: Record<string, { kind?: string }>;
+    };
+  } | undefined)?.configurable;
+  assert.ok(configurable, 'graph should receive configurable');
+  assert.ok(configurable.tools?.some((tool) => tool.name === 'wiki_read_cat'));
+  assert.equal(configurable.toolOperations?.wiki_read_cat?.kind, 'wiki.file.read');
+  assert.equal(configurable.toolOperations?.wiki_read_grep?.kind, 'wiki.search.grep');
 });

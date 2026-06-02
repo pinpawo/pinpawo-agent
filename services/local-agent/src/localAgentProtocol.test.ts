@@ -3,8 +3,10 @@ import test from 'node:test';
 import {
   parseLocalAgentClientMessage,
   parseLocalAgentServerMessage,
+  sendLocalAgentEvent,
   sendLocalAgentMessage,
 } from './localAgentProtocol';
+import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
 
 test('parseLocalAgentClientMessage accepts valid chat requests and rejects malformed payloads', () => {
   assert.deepEqual(
@@ -46,8 +48,8 @@ test('parseLocalAgentClientMessage accepts explicit human review responses', () 
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
 });
 
-test('parseLocalAgentServerMessage accepts valid tool logs and rejects malformed payloads', () => {
-  assert.deepEqual(
+test('parseLocalAgentServerMessage rejects legacy server messages by default', () => {
+  assert.equal(
     parseLocalAgentServerMessage(JSON.stringify({
       type: 'tool_log',
       requestId: 'req-1',
@@ -55,19 +57,8 @@ test('parseLocalAgentServerMessage accepts valid tool logs and rejects malformed
       toolName: 'read_file',
       input: '{"path":"README.md"}',
     })),
-    {
-      type: 'tool_log',
-      requestId: 'req-1',
-      phase: 'start',
-      toolName: 'read_file',
-      toolCallId: undefined,
-      input: '{"path":"README.md"}',
-      output: undefined,
-      error: undefined,
-    },
+    null,
   );
-  assert.equal(parseLocalAgentServerMessage(JSON.stringify({ type: 'tool_log', requestId: 'req-1', phase: 'bad', toolName: 'x' })), null);
-  assert.equal(parseLocalAgentServerMessage(JSON.stringify({ type: 'chat_token', requestId: 'req-1' })), null);
 });
 
 test('parseLocalAgentServerMessage accepts typed local-agent event messages', () => {
@@ -113,9 +104,6 @@ test('parseLocalAgentServerMessage accepts typed local-agent event messages', ()
             callId: undefined,
           },
         },
-        raw: {
-          input: { path: 'README.md' },
-        },
       },
     },
   );
@@ -126,6 +114,41 @@ test('parseLocalAgentServerMessage accepts typed local-agent event messages', ()
       event: { type: 'operation', requestId: 'other', phase: 'started', operation: { kind: 'x' } },
     })),
     null,
+  );
+});
+
+test('parseLocalAgentServerMessage accepts legacy top-level human_review.requested messages', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'human_review.requested',
+      requestId: 'req-1',
+      prompt: '确认执行高风险 shell 命令？',
+      payload: {
+        kind: 'human_review',
+        actionRequests: [{
+          name: 'run_shell',
+          args: { command: 'rm -rf /tmp/demo' },
+          description: '删除',
+        }],
+      },
+    })),
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'human_review.requested',
+        requestId: 'req-1',
+        prompt: '确认执行高风险 shell 命令？',
+        payload: {
+          kind: 'human_review',
+          actionRequests: [{
+            name: 'run_shell',
+            args: { command: 'rm -rf /tmp/demo' },
+            description: '删除',
+          }],
+        },
+      },
+    },
   );
 });
 
@@ -149,7 +172,7 @@ test('sendLocalAgentMessage writes only when websocket-like object is open', () 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [{ type: 'pong' }]);
 });
 
-test('sendLocalAgentMessage emits typed event before legacy compatibility messages', () => {
+test('sendLocalAgentEvent writes only typed events', () => {
   const sent: string[] = [];
   const openWs = {
     readyState: 1,
@@ -158,11 +181,32 @@ test('sendLocalAgentMessage emits typed event before legacy compatibility messag
     },
   };
 
-  assert.equal(sendLocalAgentMessage(openWs, {
-    type: 'chat_token',
+  assert.equal(sendLocalAgentEvent(openWs, {
+    type: 'message.delta',
     requestId: 'req-1',
-    token: 'hello',
+    role: 'assistant',
+    text: 'hello',
   }), true);
+  assert.equal(sendLocalAgentEvent(openWs, {
+    type: 'message.completed',
+    requestId: 'req-1',
+    role: 'assistant',
+    text: 'done',
+    metadata: { mood: null, topic: null, tags: [] },
+  }), true);
+  const internalOperationEvent: LocalAgentOperationInternalEvent = {
+    type: 'operation',
+    requestId: 'req-1',
+    phase: 'started',
+    operation: {
+      kind: 'file.read',
+      title: '读文件',
+    },
+    raw: {
+      input: { path: 'README.md' },
+    },
+  };
+  assert.equal(sendLocalAgentEvent(openWs, internalOperationEvent), true);
 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [
     {
@@ -176,37 +220,28 @@ test('sendLocalAgentMessage emits typed event before legacy compatibility messag
       },
     },
     {
-      type: 'chat_token',
+      type: 'event',
       requestId: 'req-1',
-      token: 'hello',
+      event: {
+        type: 'message.completed',
+        requestId: 'req-1',
+        role: 'assistant',
+        text: 'done',
+        metadata: { mood: null, topic: null, tags: [] },
+      },
     },
-  ]);
-});
-
-test('sendLocalAgentMessage does not synthesize generic events for legacy tool_log', () => {
-  const sent: string[] = [];
-  const openWs = {
-    readyState: 1,
-    send(data: string) {
-      sent.push(data);
-    },
-  };
-
-  assert.equal(sendLocalAgentMessage(openWs, {
-    type: 'tool_log',
-    requestId: 'req-1',
-    phase: 'start',
-    toolName: 'read_file',
-    input: '{"path":"README.md"}',
-  }), true);
-
-  assert.deepEqual(sent.map((item) => JSON.parse(item)), [
     {
-      type: 'tool_log',
+      type: 'event',
       requestId: 'req-1',
-      phase: 'start',
-      toolName: 'read_file',
-      input: '{"path":"README.md"}',
+      event: {
+        type: 'operation',
+        requestId: 'req-1',
+        phase: 'started',
+        operation: {
+          kind: 'file.read',
+          title: '读文件',
+        },
+      },
     },
   ]);
 });

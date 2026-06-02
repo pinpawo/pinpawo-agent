@@ -1,8 +1,8 @@
-import type { LocalAgentEvent, LocalAgentOperationPhase } from './events/localAgentEvent';
-import {
-  buildLocalAgentEventFromLegacyMessage,
-  type LegacyServerMessage,
-} from './protocol/legacyProtocolAdapter';
+import type {
+  LocalAgentEvent,
+  LocalAgentOperationInternalEvent,
+  LocalAgentOperationPhase,
+} from './events/localAgentEvent';
 
 export type ChatRequestMessage = {
   type: 'chat_request';
@@ -47,64 +47,16 @@ export type LocalAgentClientMessage =
   | HumanReviewResponseMessage
   | { type: 'ping' };
 
-export type ToolLogPhase = 'start' | 'end' | 'complete' | 'error' | 'event' | 'interrupt';
-
 export type LocalAgentEventMessage = {
   type: 'event';
   requestId: string;
   event: LocalAgentEvent;
 };
 
-export type LocalAgentServerMessage =
+export type LocalAgentControlServerMessage =
   | { type: 'pong' }
-  | LocalAgentEventMessage
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'message.delta'. */
-  | { type: 'chat_token'; requestId: string; token: string }
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'operation'. */
-  | {
-      type: 'tool_log';
-      requestId: string;
-      phase: ToolLogPhase;
-      toolName: string;
-      toolCallId?: string;
-      input?: string;
-      output?: string;
-      error?: string;
-    }
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'human_review.requested'. */
-  | {
-      type: 'human_interrupt';
-      requestId: string;
-      /** Studio 模式下表示是哪个 pet 在问;chat 路径不带此字段 */
-      petId?: string;
-      prompt: string;
-      payload: Record<string, unknown>;
-    }
   | { type: 'interrupting'; requestId: string; message?: string }
   | { type: 'interrupted'; requestId: string; message?: string }
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'system.notice'. */
-  | { type: 'system_notice'; requestId: string; message: string }
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'message.completed'. */
-  | {
-      type: 'chat_response';
-      requestId: string;
-      message: string;
-      mood: string | null;
-      topic: string | null;
-      tags: string[];
-    }
-  /** @deprecated compatibility only; use type: 'event' with event.type: 'studio.progress'. */
-  | {
-      /**
-       * Studio orchestrator 编排进度事件。turn_started / plan_set /
-       * dispatch_started / task_status_changed / dispatch_finished /
-       * wiki_updated / turn_finished 等。客户端按 `event.type` 分情况渲染
-       * (StudioTurnEvent 形态定义在 @pinpawo/pet-agent 中)。
-       */
-      type: 'studio_turn_event';
-      requestId: string;
-      event: Record<string, unknown>;
-    }
   | {
       type: 'studio_response';
       requestId: string;
@@ -113,8 +65,11 @@ export type LocalAgentServerMessage =
       finalDispatchId?: string;
       reason?: string;
     }
-  | { type: 'studio_error'; requestId: string; message: string }
-  | { type: 'error'; requestId: string; message: string };
+  | { type: 'studio_error'; requestId: string; message: string };
+
+export type LocalAgentServerMessage =
+  | LocalAgentEventMessage
+  | LocalAgentControlServerMessage;
 
 type WsLike = {
   readyState: number;
@@ -201,7 +156,6 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     const source = readRecord(operation, 'source');
     const sourceProvider = source ? readString(source, 'provider') : null;
     const sourceName = source ? readString(source, 'name') : null;
-    const raw = readRecord(record, 'raw');
     return {
       type,
       requestId,
@@ -223,7 +177,6 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
             }
           : {}),
       },
-      ...(raw ? { raw } : {}),
     };
   }
   if (type === 'human_review.requested') {
@@ -304,9 +257,7 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
   return null;
 }
 
-export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMessage | null {
-  const record = readJsonRecord(raw);
-  if (!record) return null;
+function parseLocalAgentServerRecord(record: Record<string, unknown>): LocalAgentServerMessage | null {
   const type = readString(record, 'type');
   if (type === 'pong') return { type };
   const requestId = readString(record, 'requestId');
@@ -316,64 +267,18 @@ export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMess
     const event = eventRecord ? readLocalAgentEvent(eventRecord) : null;
     return event && event.requestId === requestId ? { type, requestId, event } : null;
   }
-  if (type === 'chat_token') {
-    const token = readString(record, 'token');
-    return token == null ? null : { type, requestId, token };
+  if (type === 'human_review.requested') {
+    const event = readLocalAgentEvent(record);
+    return event && event.requestId === requestId && event.type === 'human_review.requested'
+      ? { type: 'event', requestId, event }
+      : null;
   }
-  if (type === 'tool_log') {
-    const phase = readString(record, 'phase');
-    const toolName = readString(record, 'toolName');
-    if (!phase || !isToolLogPhase(phase) || !toolName) return null;
+  if (type === 'interrupting' || type === 'interrupted' || type === 'studio_error') {
     return {
       type,
       requestId,
-      phase,
-      toolName,
-      toolCallId: readOptionalString(record, 'toolCallId'),
-      input: readOptionalString(record, 'input'),
-      output: readOptionalString(record, 'output'),
-      error: readOptionalString(record, 'error'),
-    };
-  }
-  if (type === 'human_interrupt') {
-    const prompt = readString(record, 'prompt');
-    const payload = readRecord(record, 'payload');
-    if (prompt == null || !payload) return null;
-    return {
-      type,
-      requestId,
-      petId: readOptionalString(record, 'petId'),
-      prompt,
-      payload,
-    };
-  }
-  if (type === 'interrupting' || type === 'interrupted' || type === 'studio_error' || type === 'error') {
-    return {
-      type,
-      requestId,
-      message: readOptionalString(record, 'message') ?? (type.endsWith('error') ? '' : undefined),
+      message: readOptionalString(record, 'message') ?? (type === 'studio_error' ? '' : undefined),
     } as LocalAgentServerMessage;
-  }
-  if (type === 'system_notice') {
-    const message = readString(record, 'message');
-    return message == null ? null : { type, requestId, message };
-  }
-  if (type === 'chat_response') {
-    const message = readString(record, 'message');
-    const tags = readStringArray(record, 'tags');
-    if (message == null || !tags) return null;
-    return {
-      type,
-      requestId,
-      message,
-      mood: readOptionalString(record, 'mood') ?? null,
-      topic: readOptionalString(record, 'topic') ?? null,
-      tags,
-    };
-  }
-  if (type === 'studio_turn_event') {
-    const event = readRecord(record, 'event');
-    return event ? { type, requestId, event } : null;
   }
   if (type === 'studio_response') {
     const outcome = readString(record, 'outcome');
@@ -391,37 +296,42 @@ export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMess
   return null;
 }
 
-export function sendLocalAgentMessage(ws: WsLike, message: LocalAgentServerMessage | LocalAgentClientMessage) {
+export function parseLocalAgentServerMessage(raw: unknown): LocalAgentServerMessage | null {
+  const record = readJsonRecord(raw);
+  if (!record) return null;
+  return parseLocalAgentServerRecord(record);
+}
+
+export function sendLocalAgentMessage(
+  ws: WsLike,
+  message: LocalAgentServerMessage | LocalAgentClientMessage,
+) {
   if (ws.readyState !== WS_OPEN) {
     return false;
-  }
-  if (isLegacyServerMessage(message)) {
-    ws.send(JSON.stringify({
-      type: 'event',
-      requestId: message.requestId,
-      event: buildLocalAgentEventFromLegacyMessage(message),
-    } satisfies LocalAgentEventMessage));
   }
   ws.send(JSON.stringify(message));
   return true;
 }
 
-function isLegacyServerMessage(message: LocalAgentServerMessage | LocalAgentClientMessage): message is LegacyServerMessage {
-  return message.type === 'chat_token'
-    || message.type === 'human_interrupt'
-    || message.type === 'system_notice'
-    || message.type === 'chat_response'
-    || message.type === 'studio_turn_event'
-    || message.type === 'error';
+export function sendLocalAgentEvent(ws: WsLike, event: LocalAgentEvent) {
+  if (ws.readyState !== WS_OPEN) {
+    return false;
+  }
+  const publicEvent = toPublicLocalAgentEvent(event);
+  ws.send(JSON.stringify({
+    type: 'event',
+    requestId: publicEvent.requestId,
+    event: publicEvent,
+  } satisfies LocalAgentEventMessage));
+  return true;
 }
 
-function isToolLogPhase(value: string): value is ToolLogPhase {
-  return value === 'start'
-    || value === 'end'
-    || value === 'complete'
-    || value === 'error'
-    || value === 'event'
-    || value === 'interrupt';
+function toPublicLocalAgentEvent(event: LocalAgentEvent): LocalAgentEvent {
+  if (event.type !== 'operation') {
+    return event;
+  }
+  const { raw: _raw, ...publicEvent } = event as LocalAgentOperationInternalEvent;
+  return publicEvent;
 }
 
 function isOperationPhase(value: string | null): value is LocalAgentOperationPhase {

@@ -45,16 +45,18 @@ services/local-agent/src/commands/tui.tsx
   - `system.notice`
   - `error`
 - 支持 `interrupting` / `interrupted` / `studio_response` / `studio_error` 这些 session control message。
-- 有基础 input、slash commands、active tool line、system message、interrupt selector。
+- 有基础 input、slash commands、active operation line、system message、interrupt selector。
 
 当前重构入口：
 
-- `commands/tui.tsx` 聚合了连接、协议处理、状态维护、输入、命令、按键、渲染、布局和 HITL 选择器。
-- `commands/tuiEventRenderer.ts` 已经面向 `LocalAgentEvent`，后续适合移动到 TUI render adapter 边界内。
-- slash command 适合收敛为 registry，统一承载 help metadata、enabled state 和补全入口。
-- key handling 适合收敛为 keymap，统一表达 global、composer、approval 三类快捷键。
-- message history、active operation、pending review、studio mode、connection state 适合收敛为统一的 TUI state model。
-- formatter 目前是 TUI 临时文本渲染。后续可以演进为 TUI render adapter，并与 app 的移动端 run state 保持同一事件语义。
+- `commands/tui.tsx` 是 CLI entry，主要负责加载配置并挂载 TUI app。
+- `tui/TuiApp.tsx` 负责 Ink layout、输入组合、命令分发和 hooks/components 组装。
+- `tui/TuiRuntimeController.ts` 负责 websocket lifecycle、发送 client message、session/history 加载；本地 HTTP 访问由 `tui/tuiLocalServerClient.ts` 承担。
+- `/resume` picker 的 modal 状态、sessions 加载和恢复流程由 `tui/useResumePickerController.ts` 承担。
+- slash command 已收敛为 `tui/input/commandRegistry.ts`，统一承载 help metadata。
+- key handling 已收敛为 `tui/input/keymap.ts`，统一表达 global、composer、approval、resume picker 快捷键。
+- message history、active operation、pending review、connection state 已收敛到 `tui/state/tuiStateReducer.ts`。
+- terminal render adapter 位于 `tui/render/`：`eventText.ts` 面向 `LocalAgentEvent` 展示字段，`messageText.ts` 处理 assistant Markdown 到终端可读文本的预处理，`text.ts` 集中 TUI 文案。
 
 ## 3. 设计原则
 
@@ -139,10 +141,12 @@ app 路径通过 API-facing adapter / bridge 转发：
 ```txt
 local-agent runtime
   -> LocalAgentEvent
-  -> API-facing adapter / bridge
+  -> API-facing transport
   -> app API stream envelope
   -> mobile app run state
 ```
+
+当前实现：local-agent runtime/TUI/app-facing WS 都只发送 `LocalAgentEvent` envelope，本仓库已经删除 legacy 派生兼容层。`pinpawo-app` app/API 需要在 app 仓库消费该 envelope 后再完成端到端验证。
 
 API 层负责用户、pet、session、鉴权和网络 envelope。它可以把 `LocalAgentEvent` 包进 HTTP/SSE/WS 响应格式，但应保留这些语义字段：
 
@@ -169,6 +173,7 @@ API 层负责用户、pet、session、鉴权和网络 envelope。它可以把 `L
 - `human_review.requested` 表示 agent 主动等待用户确认或补充，approval UI 和 app HITL UI 都基于它进入 waiting_human。
 - token usage / context usage 是 session 级可观测数据。**当前协议还没有这个字段**——`message.completed.metadata` 现在只有 `mood` / `topic` / `tags`，没有 token 用量。要在 TUI 展示用量，需要先定义来源：要么扩 `message.completed.metadata.usage`，要么加一个独立的 `usage` 事件。在来源落地前，§5 的 `tokenUsage` 字段是预留位，应保持为 `null` 并在 UI 上不展示。
 - API 层可以包一层自己的 HTTP/SSE/WS envelope，但保留 `LocalAgentEvent` 的事件语义。
+- TUI 直连路径使用默认 server parser，只接受新协议 event/control message；local-agent 不再为 TUI 或新客户端提供 legacy wire shape 解析。
 
 ### 3.6 Operation 展示语义
 
@@ -196,7 +201,7 @@ LocalAgentEvent / ServerControlMessage / UserInputAction
 
 职责边界：
 
-- WebSocket JSON 解析属于 protocol/controller。
+- WebSocket JSON 解析属于 protocol/client boundary；controller 只接收 typed server messages。
 - 协议版本适配属于 protocol adapter。
 - agent runtime stream normalization 属于 local-agent event normalizer。
 - terminal 文案格式化属于 TUI render adapter。
@@ -225,7 +230,7 @@ app / TUI / macOS companion 可以共享：
 
 短期建议聚焦整理 TUI 目录，server/runtime 拆分保留给 local-agent 架构阶段。
 
-目录粒度的原则：**只为当前已存在的代码建文件，不为想象中的功能预留空目录**。当前 TUI 是 ~1250 行单文件，`tuiEventRenderer.ts` 是 97 行单文件。拆分目标是把这两块按职责切开，而不是一步切成十几个小文件——后者会把 1250 行变成一堆相互跳转的碎片，反而更难读。
+目录粒度的原则：**只为当前已存在的代码建文件，不为想象中的功能预留空目录**。当前 TUI 已拆为 `TuiApp`、runtime controller、HTTP/WS clients、resume picker controller、state reducer、input registry/keymap、render adapter 和组件；后续继续按真实职责收敛，不为尚未落地的能力预留空目录。
 
 ```txt
 services/local-agent/src/
@@ -234,7 +239,11 @@ services/local-agent/src/
 
   tui/
     TuiApp.tsx               # app shell: compose hooks/components
-    TuiRuntimeController.ts  # 阶段 1C: websocket/http 副作用、发送 client message、session/history 加载
+    TuiRuntimeController.ts  # 阶段 1C: 运行时编排、重连策略、dispatch actions
+    tuiLocalServerClient.ts  # TUI -> local HTTP: health/history/sessions/resume
+    tuiLocalWebSocketClient.ts # TUI -> local WS: socket lifecycle + client message send
+    tuiServerMessageActions.ts # typed server messages -> TuiAction[]
+    useResumePickerController.ts # resume picker modal state + async session resume flow
 
     state/
       tuiState.ts            # TuiState / TuiAction types(session-keyed,见 §5)
@@ -245,7 +254,8 @@ services/local-agent/src/
       keymap.ts              # global/composer/approval key bindings
 
     render/
-      eventText.ts           # LocalAgentEvent / studio.progress -> 终端文案(由现 tuiEventRenderer.ts 演进)
+      eventText.ts           # LocalAgentEvent / studio.progress -> terminal text props
+      messageText.ts         # assistant Markdown -> terminal-stable Markdown/text preprocessing
       text.ts                # TUI_TEXT: 当前中文 TUI 文本入口；完整 i18n 后续单独设计
 
     components/
@@ -261,9 +271,9 @@ services/local-agent/src/
 相对初稿砍掉/合并的部分，以及理由：
 
 - **去掉 `state/selectors.ts`**：当前没有跨组件复用的派生状态，组件内 `useMemo` 就够；真出现重复再抽。
-- **`render/eventToActivity.ts` + `operationText.ts` + `studioText.ts` 合并为 `render/eventText.ts`**：这三件事现在都在同一个 97 行文件里，拆成三个是碎片化。
+- **`render/eventToActivity.ts` + `operationText.ts` + `studioText.ts` 合并为 `render/eventText.ts`**：当前事件文本映射规模仍适合单文件，拆成三个会碎片化。
 - **去掉 `input/composerModel.ts`**：在 multiline / paste / mention 都还不存在时拆 model/component 是为想象功能预留。先让 `Composer.tsx` 自带光标和快捷键，等真要做这些能力再拆 model。
-- **去掉 `session/historyAdapter.ts` 子目录**：history restore 现在是 `init()` 里 ~30 行内联 fetch，归到 `TuiRuntimeController` 即可，不需要独立子系统。
+- **去掉 `session/historyAdapter.ts` 子目录**：history/session restore 目前通过 `TuiLocalServerClient` 访问本地 HTTP，归在 TUI client 边界内即可，不需要独立子系统。
 - **`copy.zh-CN.ts` → `text.ts` / `TUI_TEXT`**：当前只有中文一种，先做 single-locale TUI 文本入口；完整 i18n 的 locale lookup、fallback 和参数协议后续单独设计。
 
 关键约束：
@@ -271,7 +281,8 @@ services/local-agent/src/
 - `commands/tui.tsx` 最终收敛为 CLI entry。
 - `tui/render/*` 面向 normalized event fields。
 - `tui/state/*` 保持纯状态计算（不含网络副作用，也不含动画时钟，见 §5）。
-- `TuiRuntimeController` 在阶段 1C 落地，负责 local-agent server 通信、发送 client message、session/history 加载。
+- `TuiRuntimeController` 负责运行时编排、重连策略和 action dispatch；HTTP payload 解析在 `TuiLocalServerClient`，WS socket lifecycle 和 server message parsing 在 `TuiLocalWebSocketClient`，server message 到 reducer action 的纯映射在 `tuiServerMessageActions.ts`。
+- `useResumePickerController` 负责 `/resume` 的 picker 状态、异步加载和恢复 action 编排；`TuiApp` 只负责把它接入命令和 keymap。
 
 ## 5. TUI State 草案
 
@@ -381,7 +392,7 @@ type ApprovalRequestModel = {
 - **run 结束统一收尾**：`message.completed`（chat）、`studio_response`（studio done/stopped）、`studio_error` 都映射到同一个内部"run 结束"动作，作用在各自 session 上——写入 history、清空 `activeRun`、删除 `runRoute[requestId]`、清理 pending review。收尾逻辑只有一处（见 §3.3）。
 - `human_review.requested` 让对应 session 进入 `waiting_human`，由 `ApprovalPanel` 接管输入区域。
 - 用户主动 interrupt 让对应 session 进入 `interrupting`；该 run 的迟到事件因为后续会从 `runRoute` 移除而被忽略。
-- `tokenUsage` 记录当前会话可观察到的 LLM token usage / context usage；这里的 token 是模型用量统计，不保存鉴权 token、API key 或本地 secret。协议字段落地前保持 `null`（见 §3.5）。
+- `tokenUsage` 记录当前会话可观察到的 LLM token usage / context usage；这里的 token 是模型用量统计，不保存鉴权 token、API key 或本地 secret。协议字段落地前保持 `null`（见 §3.5）；`/new` 清空会话或 `/resume` 替换历史时也重置为 `null`，避免展示旧 run 的统计。
 
 ### 5.4 history 与 `<Static>` 的交互
 
@@ -497,7 +508,7 @@ LocalAgentEvent
 
 ## 10. 分阶段计划
 
-> 阶段 1 拆成 1A / 1B / 1C。原因是 `commands/tui.tsx` 当前同时承载组件、事件状态、WebSocket 副作用和命令输入；一次同时拆文件、引入 session-keyed reducer、再抽 controller，review 面会过大。先拆展示边界，再改状态模型，最后抽副作用层。
+> 阶段 1 已按 1A / 1B / 1C 拆分落地：先拆展示边界，再改 session-keyed reducer，最后抽 controller/client 副作用层。下面保留阶段说明作为架构记录，并在每个阶段标注当前状态。
 
 ### 阶段 0：文档对齐
 
@@ -509,16 +520,16 @@ LocalAgentEvent
 
 ### 阶段 1A：无行为变化拆边界
 
+状态：已完成。TUI entry、组件、input、render adapter 和主要 layout/helper 已从原入口拆出。
+
 目标：降低 `commands/tui.tsx` 复杂度，但不改变 state 语义、WebSocket 逻辑和用户可见行为。
 
 工作项：
 
 - 新增 `src/tui/` 目录，`commands/tui.tsx` 变成 thin entry。
 - 移出 `MessageBlock`、`SmartTextInput`、`InterruptSelector`、status/active operation/layout helpers 到 `tui/components/` 或 `tui/layout`。
-- `tuiEventRenderer.ts` 演进为 `tui/render/eventText.ts`，仍只面向 `LocalAgentEvent` / `studio.progress`。
-- 保留现有 `useState` / `useRef` / `useEffect` 结构。
-- 不引入 `TuiRuntimeController`。
-- 不引入 session-keyed reducer。
+- event render adapter 收敛为 `tui/render/eventText.ts`，只面向 `LocalAgentEvent` / `studio.progress`。
+- 本阶段完成后，后续阶段已继续引入 session-keyed reducer 和 controller/client 副作用层。
 
 验收：
 
@@ -529,6 +540,8 @@ LocalAgentEvent
 
 ### 阶段 1B：引入 session-keyed reducer
 
+状态：已完成。`TuiState` 已采用 `sessions + focusedSessionId + runRoute`，并有专项 reducer tests 覆盖迟到 / 陌生 requestId 丢弃、多 requestId 不串 assistant draft、run finish 收尾、operation lifecycle、HITL 和 tokenUsage reset。
+
 目标：把 WebSocket event handling 与 UI state transition 分开，采用 §5 的 session-keyed state 形状；v1 UI 仍然单焦点、单连接。
 
 工作项：
@@ -538,7 +551,7 @@ LocalAgentEvent
 - 把 `LocalAgentEvent`、control message、user action 映射成 `TuiAction`。
 - chat 的 `message.completed` 与 studio 的 `studio_response` / `studio_error` 收敛到同一个"run 结束"动作。
 - 动画时钟（spinner / now）留在组件 local state，不进 reducer。
-- network 副作用、session/history 加载、断线后的重连策略暂时保留在现有 effect/controller 位置。
+- network 副作用、session/history 加载和重连策略已在阶段 1C 收敛到 controller/client。
 
 验收：
 
@@ -549,12 +562,15 @@ LocalAgentEvent
 
 ### 阶段 1C：抽 TuiRuntimeController
 
+状态：已完成。`TuiRuntimeController` 负责运行时编排和 action dispatch；`TuiLocalServerClient` 负责本地 HTTP；`TuiLocalWebSocketClient` 负责 WS socket lifecycle、server message parsing 和 client message send；`tuiServerMessageActions.ts` 负责 typed server message 到 `TuiAction` 的纯映射。
+
 目标：在 reducer 稳定后，把 WebSocket / HTTP / session side effects 从 `TuiApp` 中抽出。
 
 工作项：
 
 - 新增 `TuiRuntimeController` 或等价 hook/controller。
 - 负责 local-agent health check、WebSocket connect/retry、history restore。
+- HTTP payload 解析和 WebSocket socket lifecycle / server message parsing 可拆到专用 client，controller 保留运行时编排和 action dispatch。
 - 负责发送 chat/studio/review/interrupt/new_session client message。
 - controller 只 dispatch action，不持有展示逻辑。
 - 断线/重连状态通过 reducer 更新 connection state。
@@ -566,6 +582,8 @@ LocalAgentEvent
 - TUI reconnect / init / history restore 行为与当前版本一致。
 
 ### 阶段 2：Command registry + keymap + composer
+
+状态：已完成。slash command registry、keymap、composer、resume picker key routing 已落地，并有 unit tests 覆盖 command parse/help、keymap 和 composer editing。
 
 目标：把输入系统产品化，并用单一 key 分发取代多个 `useInput` 的穿透 hack（见 §6.2）。
 
@@ -582,11 +600,14 @@ LocalAgentEvent
 
 ### 阶段 3：render adapter 收敛 + ApprovalPanel
 
+状态：已完成。operation/status/system/studio 文案走 `render/eventText.ts`；assistant Markdown 预处理走 `render/messageText.ts`；TUI 文案集中到 `render/text.ts`；审批 UI 已收敛为 `ApprovalPanel`。
+
 目标：让 TUI 渲染从事件处理路径中独立出来（不引入冗余中间 model，见 §8）。
 
 工作项：
 
 - active operation、status line、system notice、studio progress 统一走 `render/eventText.ts`，直接映射成组件 props。
+- assistant Markdown 进入 Ink Markdown 前先走 `render/messageText.ts`，把 terminal 宽度敏感的 table / 长装饰分隔线转成稳定文本。
 - `InterruptSelector` 升级为 `ApprovalPanel`。
 - TUI 文案集中到 `tui/render/text.ts` 的 `TUI_TEXT`。
 
@@ -602,7 +623,7 @@ LocalAgentEvent
 工作项（可按价值再拆小 PR）：
 
 - transcript export / debug view：先提供 `/export [path]`，把当前 session history 导出为 Markdown，作为 transcript model 前的可用调试入口。未传 `path` 时默认写入 TUI 启动目录（`process.cwd()`）；`~/foo.md` 会展开到当前用户 home；有扩展名的 `path` 视为目标文件，无扩展名的 `path` 视为目录并在其下生成默认文件名；显式目标文件已存在时按常规导出语义覆盖。
-- resume picker：提供 `/resume`，从 local server 的 TUI session registry 读取可恢复 chat sessions；TUI 中用 picker 展示会话标题、消息数、更新时间和当前会话标记，选择后 local server 切换 active thread 并返回该 session transcript，TUI 替换当前 history。`/new` 创建新 TUI session 时保留旧 checkpoint，工具协议错误恢复这类内部 reset 可以删除坏 checkpoint。
+- resume picker：提供 `/resume`，从 local server 的 TUI session registry 读取可恢复 chat sessions；TUI session registry 使用 versioned state，并保留 v1 petId→suffix map 迁移读取，避免已有本地 TUI 会话丢失。TUI 侧通过 `TuiLocalServerClient` 访问本地 HTTP `/health`、`/history`、`/sessions`、`/sessions/resume`，让 controller 只负责运行时状态和 websocket lifecycle；TUI 中用 picker 展示会话标题、消息数、更新时间和当前会话标记，picker 状态与异步恢复流程由 `useResumePickerController` 管理；选择后 local server 切换 active thread 并返回该 session transcript，TUI 替换当前 history。`/new` 创建新 TUI session 时保留旧 checkpoint，工具协议错误恢复这类内部 reset 可以删除坏 checkpoint。
 - diff renderer：文件修改 / shell patch / capability 变更的可审查 diff。此项依赖真实 before/after diff 源；TUI 不生成伪 diff。
 - transcript model：区分 durable messages 和 run activity。
 - file mention / path search、richer status line。
@@ -624,23 +645,18 @@ TUI 重构不是孤立的一块。下面这些是**同一次项目重构**的不
 
 - **`operation` 事件模型 ↔ tool event 源的可靠性**，是这次重构的两端，一起改：
   - `operation` 现在带 `phase` 生命周期，TUI reducer 把 `activeOperations` 当权威 state（§5）。
-  - 对应地，tool event 的**结构化源要做成生命周期完整**——start 必配 terminal、有序、稳定 callId，`operation` 从它直接产出，**退役 `tool_log`**（见 `docs/PET_AGENT_STUDIO_INTERFACES.md` Boundary 2 + Open Question、`docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0）。
+  - 对应地，tool event 的**结构化源要做成生命周期完整**——pet-agent 已通过 `SubagentToolEventTracker` 规范 `onToolEvent`，local-agent 已通过 `ToolOperationTracker` 给 operation 补稳定 id 并关闭 dangling operation；后续继续朝底层事件有序、原生稳定 callId 收敛，`operation` 从 `onToolEvent` 直接产出（见 `docs/PET_AGENT_STUDIO_INTERFACES.md` Boundary 2 + Open Question、`docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0）。
   - pet 调用契约同时补 **message token boundary**——现 `PetAgentRuntimeInvokeInput` 只有 `onToolEvent`、没有 token 回调，需扩 INTERFACES 的 Boundary 1，让 pet 的 `message.delta` 在各路径都有出口。
-  - chat 与 studio 当前是同一个 `OrchestratorGraph` 的两条投递路径（chat = ws stream + 直推中断；studio = pet runtime + onToolEvent + humanReviewer 桥），这次一并**收敛到同一条**。
+  - chat 与 studio 当前仍是同一个 `OrchestratorGraph` 的两条外壳（chat = messages/values stream + onToolEvent + 直推中断；studio = pet runtime + onToolEvent + humanReviewer 桥），tool operation 已收敛到同一条 `onToolEvent` 边界；后续继续收敛 message token 与 HITL 外壳。
   - 对齐点：两端共用 `operation` 的 `phase` 生命周期语义与 `activeOperations` 的 state 语义，源侧产出什么、TUI 侧怎么消费，用同一份契约定义。
 
 - **session-keyed 形状 ↔ run 身份契约**：state 按"run 身份 = `requestId`、session 身份由客户端分配"设计（§5），与 server 端 run 标识对齐。完整 server 拆分（同一连接多 inflight / 一 session 一连接以支持真正并发）按非目标归入后续 local-agent 架构阶段，但 run 身份契约现在就对齐，到时直接契合、无需重写 state。
 
 ## 12. 下一步建议
 
-合并本文档后，下一 PR 做"阶段 1A：无行为变化拆边界"。
+当前阶段 1A / 1B / 1C / 2 / 3 已完成，阶段 4 已完成 `/export`、`/resume` 和 terminal message rendering 的基础可用性。下一 PR 建议继续做阶段 4 中仍未完成的高价值能力：
 
-第一轮必须小心控制范围：
-
-- 只移动/拆分现有 TUI 组件、layout helper 和 render helper。
-- 保留现有 `useState` / `useRef` / `useEffect` 状态结构。
-- 不引入 session-keyed reducer、`runRoute` 或 `TuiRuntimeController`。
-- WebSocket protocol 和 WebSocket 连接逻辑保持不变。
-- `/studio` / `/chat` / `/new` / `/allow` 行为保持不变。
-- 拆分后必须通过 typecheck 和 unit tests。
-- 迟到 / 陌生 requestId 过滤、两个 requestId 不串 `assistantDraft` 等专项 reducer 测试放到阶段 1B。
+- transcript model：把 durable chat messages 与 run activity 分开，避免 operation/system 摘要长期混在同一种 history cell。
+- file mention / path search：提高 TUI 输入效率。
+- richer status line：在不引入新协议字段的前提下，只展示已有 connection/run/operation state。
+- diff renderer：等真实 before/after diff 源从 toolkit/capability metadata 侧落地后再做；TUI 不生成伪 diff。

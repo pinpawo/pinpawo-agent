@@ -54,26 +54,26 @@
 - app 清空当前 pet 的本地聊天显示，并写入一条可见的 `system` 消息。
 - 如果服务端重置失败，app 不清空当前聊天，只写入系统错误消息。
 
-## Tool Activity UI
+## Operation Activity UI
 
 工具执行应该显示成当前运行状态，而不是连续刷屏：
 
-- 顶部 pet 展位展示当前工具对应的 gif 和短文案。
+- 顶部 pet 展位展示当前 operation 对应的 gif 和短文案。
 - 聊天列表 footer 只在没有 token 时显示等待气泡。
-- 后续可以增加一个 compact tool activity strip，显示最后一个工具和状态。
+- 后续可以增加一个 compact operation activity strip，显示最后一个 operation 和状态。
 
 gif 映射建议：
 
 - thinking: `thinking`，使用 `assets/chat/sheep/thinking.gif`
 - streaming: `typing`，使用 `assets/chat/sheep/typing.gif`
 - waiting_human: `waiting`，使用 `assets/chat/sheep/waiting.gif`
-- browser/search/fetch/open/click/type: `browser`，使用 `assets/chat/sheep/browser.gif`
-- shell/command/file/read/write/edit: `file`，使用 `assets/chat/sheep/file.gif`
+- `operation.kind` / `title` / `summary` 命中 browser / network / search / fetch / open / click / type：`browser`，使用 `assets/chat/sheep/browser.gif`
+- `operation.kind` / `title` / `summary` 命中 shell / command / file / read / write / edit：`file`，使用 `assets/chat/sheep/file.gif`
 - interrupting/error: `interrupted`，使用 `assets/chat/sheep/interrupted.gif`
 - audio/music/play/video/media: `media`，使用 `assets/chat/sheep/media.gif`
 - idle/low priority: `slacking`，使用 `assets/chat/sheep/slacking.gif`
 - legacy do-not-disturb: `doNotDisturb` 仍保留，当前指向文件处理动画。
-- unknown tool: `typing`
+- unknown operation: `typing`
 
 ## Interrupt
 
@@ -100,23 +100,25 @@ HITL 和 interrupt 分开处理。
 - interrupt 是用户主动停止当前 run。
 - HITL 是 agent 主动请求用户确认、选择或提供信息。
 
-服务端输出独立事件 `human_interrupt`。app 进入 `waiting_human`，在输入框上方展示确认面板，支持批准、拒绝和直接输入补充说明。确认后携带 resume 继续同一个任务上下文；补充说明不做前端文本映射，交给 local-agent 侧按当前 pending interrupt 解释。
+服务端输出 `LocalAgentEvent`：`human_review.requested`。app 进入 `waiting_human`，在输入框上方展示确认面板，支持批准、拒绝和直接输入补充说明。确认后携带 resume 继续同一个任务上下文；补充说明不做前端文本映射，交给 local-agent 侧按当前 pending interrupt 解释。
 
 ## Event Evolution
 
-当前 SSE 已经支持：
+目标事件模型以 `LocalAgentEvent` 为准：
 
-- `token`
-- `tool_log`
-- `done`
+- `message.delta`
+- `message.completed`
+- `operation`
+- `human_review.requested`
+- `system.notice`
 - `error`
 
-短期先兼容这些事件。后续建议补充 typed events：
+`pinpawo-app` app/API 需要消费 `LocalAgentEvent` envelope；local-agent 不再发送旧运行态消息。
+
+app run state 可以在 API envelope 中补充这些控制字段：
 
 - `run_started`
 - `run_interrupted`
-- `human_review_required`
-- `system_notice`
 - `request_id`
 
 ## Implementation Plan

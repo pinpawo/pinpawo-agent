@@ -579,12 +579,13 @@ Phase 2 在 `services/local-agent/` 落地 Studio。配置层、运行时层、�
 
 ### ws 协议
 
-新增 4 个 Studio 专属 ws 消息,**pet 现有 ws 消息(`tool_log` / `human_interrupt`)0 改动**:
+Studio 客户端消息保持 `studio_request` 起手；server 端 agent run activity 统一走 `LocalAgentEventMessage { type: 'event', requestId, event }`。Studio 编排进度使用 `event.type: 'studio.progress'`，pet HITL 使用 `event.type: 'human_review.requested'`。
 
 | 消息 | 方向 | 用途 |
 |------|------|------|
 | `studio_request { requestId, userRequest }` | client → server | turn 起手 |
-| `studio_turn_event { requestId, event }` | server → client | Studio 编排进度(turn_started / plan_set / dispatch_started 等) |
+| `event { requestId, event: { type: 'studio.progress', ... } }` | server → client | Studio 编排进度(turn_started / plan_set / dispatch_started 等) |
+| `event { requestId, event: { type: 'human_review.requested', ... } }` | server → client | Studio 内 pet HITL |
 | `studio_response { requestId, outcome, reply, finalDispatchId?, reason? }` | server → client | turn 终态 + 最终 reply |
 | `studio_error { requestId, message }` | server → client | turn 失败 |
 
@@ -601,7 +602,7 @@ const humanReviewer = createWsHumanReviewer({
   send, requestId, petId, slot,
 });
 // → pet 内部 HITL 触发时:
-//   - 通过 send 推现有 `human_interrupt` ws 消息(跟 chat 模式时一模一样)
+//   - 通过 send 推 `human_review.requested` event
 //   - 把 promise resolver 寄存在 slot
 
 // 3. chat_request handler 加 additive 分支:
@@ -609,15 +610,15 @@ const humanReviewer = createWsHumanReviewer({
 //   这样 pet HITL 的答复就经由现有 chat_request.resume 机制回到 pet runtime
 ```
 
-**ws 协议层 0 改动**,Studio 内 pet HITL 跟单 pet chat HITL 用同一条答复链路。
+Studio 内 pet HITL 跟单 pet chat HITL 用同一条答复链路。local-agent 对外只发送 `LocalAgentEvent`；`pinpawo-app` app/API 需要在 app 仓库消费该 envelope。
 
 ### TUI 集成
 
 `services/local-agent/src/commands/tui.tsx` 加 `/studio <文本>` 命令:
 
 - 输入 `/studio xxx` → 发 `studio_request`
-- 收 `studio_turn_event` → 渲染到 system 行(`[studio] dispatch[#0] → pet:script-writer`)
-- 收 `human_interrupt`(由 Studio 内 pet 触发)→ 走现有 HITL 渲染逻辑
+- 收 `studio.progress` event → 渲染到 system 行(`[studio] dispatch[#0] → pet:script-writer`)
+- 收 `human_review.requested` event(由 Studio 内 pet 触发)→ 走现有 HITL 渲染逻辑
 - 收 `studio_response` → 显示最终 reply(`assistant` 行)
 - 收 `studio_error` → 显示错误
 

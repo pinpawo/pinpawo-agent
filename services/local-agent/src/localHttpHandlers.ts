@@ -11,7 +11,7 @@ import {
 import { loadUserCapabilities, readUserCapabilityManifests } from './capabilityLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { loadStoredConfig } from './storage';
-import { readActiveToolHealthFields } from './toolActivityState';
+import { readAgentActivityHealthFields } from './operationActivityState';
 import type { LocalServerDeps } from './localServerTypes';
 
 type LocalHttpHandlerOptions = {
@@ -40,7 +40,7 @@ export function handleLocalHttpRequest(
         actor_name: deps.actorName,
         ...deps.getStats(),
         ...readBrowserHealthFields(),
-        ...readActiveToolHealthFields(),
+        ...readAgentActivityHealthFields(),
       });
     };
 

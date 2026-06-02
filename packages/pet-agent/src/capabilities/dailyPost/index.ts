@@ -4,7 +4,7 @@ import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from '../../t
 import { readLatestToolArtifact } from '../../agent/orchestrator/subagentHandoff';
 import { dailyPostInstructions } from './instructions';
 import { dailyPostResultSchema } from './schemas';
-import { buildDailyPostTools } from './tools';
+import { buildDailyPostTools, dailyPostToolOperations } from './tools';
 
 export type DailyPostResult = {
   status: 'created' | 'skipped' | 'failed';
@@ -56,6 +56,7 @@ export function createDailyPostCapability(
         markSkipped: options.markSkipped,
         requestImageProcessing: options.requestImageProcessing,
       }),
+      operations: dailyPostToolOperations,
       instructions: options.instructions ?? dailyPostInstructions,
       readResult: readLatestToolArtifact,
     }),

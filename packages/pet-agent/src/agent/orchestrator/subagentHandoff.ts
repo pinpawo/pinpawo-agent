@@ -5,7 +5,8 @@ import { interrupt } from '@langchain/langgraph';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { CapabilityRuntime } from '../../types/capability';
 import type { AgentExecution } from '../../types/agent';
-import type { AgentToolkit, ToolkitContext } from '../../types/toolkit';
+import type { AgentToolkit, ToolkitContext, ToolkitOperationMetadata } from '../../types/toolkit';
+import type { SubagentToolOperationMetadata } from '../../types/subagent';
 import type { HumanReviewRequest } from './humanReview';
 import { readFirstHumanReviewDecision } from './humanReview';
 import type { MessageLane } from './types';
@@ -68,6 +69,76 @@ export function selectCapabilityTools(runtime: CapabilityRuntime, toolkitTools: 
   }
 
   return selectedTools;
+}
+
+export function collectToolkitOperations(
+  toolkits: AgentToolkit[],
+): Record<string, SubagentToolOperationMetadata> {
+  const operations: Record<string, SubagentToolOperationMetadata> = {};
+
+  for (const toolkit of toolkits) {
+    for (const [toolName, metadata] of Object.entries(toolkit.operations ?? {})) {
+      operations[toolName] = {
+        ...metadata,
+        source: {
+          provider: 'toolkit',
+          name: toolName,
+        },
+      };
+    }
+  }
+
+  return operations;
+}
+
+export function collectRuntimeOperations(
+  runtimeOperations: Record<string, ToolkitOperationMetadata> | undefined,
+): Record<string, SubagentToolOperationMetadata> {
+  const operations: Record<string, SubagentToolOperationMetadata> = {};
+
+  for (const [toolName, metadata] of Object.entries(runtimeOperations ?? {})) {
+    operations[toolName] = {
+      ...metadata,
+      source: {
+        provider: 'runtime',
+        name: toolName,
+      },
+    };
+  }
+
+  return operations;
+}
+
+export function collectGeneralOperations(
+  toolkits: AgentToolkit[],
+  runtimeOperations: Record<string, ToolkitOperationMetadata> | undefined,
+): Record<string, SubagentToolOperationMetadata> {
+  return {
+    ...collectToolkitOperations(toolkits),
+    ...collectRuntimeOperations(runtimeOperations),
+  };
+}
+
+export function collectCapabilityOperations(
+  toolkits: AgentToolkit[],
+  runtime: CapabilityRuntime,
+): Record<string, SubagentToolOperationMetadata> {
+  const operations = collectToolkitOperations(toolkits);
+
+  for (const [toolName, metadata] of Object.entries(runtime.operations ?? {})) {
+    if (operations[toolName]) {
+      continue;
+    }
+    operations[toolName] = {
+      ...metadata,
+      source: {
+        provider: 'capability',
+        name: toolName,
+      },
+    };
+  }
+
+  return operations;
 }
 
 async function resolveToolkitTools(toolkit: AgentToolkit, ctx: ToolkitContext) {

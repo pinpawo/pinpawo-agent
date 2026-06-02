@@ -136,7 +136,7 @@ function parseTuiSessionState(value: unknown): TuiSessionState {
   if (record.version === 2) {
     return parseVersionedState(record);
   }
-  return parseLegacySuffixMap(record);
+  return parseV1SuffixMap(record);
 }
 
 function parseVersionedState(record: Record<string, unknown>): TuiSessionState {
@@ -162,7 +162,7 @@ function parseVersionedState(record: Record<string, unknown>): TuiSessionState {
   return state;
 }
 
-function parseLegacySuffixMap(record: Record<string, unknown>): TuiSessionState {
+function parseV1SuffixMap(record: Record<string, unknown>): TuiSessionState {
   const state = createEmptyTuiSessionState();
   const now = new Date().toISOString();
   for (const [petId, suffix] of Object.entries(record)) {

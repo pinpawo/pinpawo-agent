@@ -8,6 +8,8 @@ import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { AgentToolkit } from '../../types/toolkit';
+import { createCapabilityCreatorCapability } from '../../capabilities/capabilityCreator/index';
+import { createDailyPostCapability } from '../../capabilities/dailyPost/index';
 import { buildOrchestratorTurnInput, createOrchestratorGraph } from '../createAgentRuntime';
 import {
   capabilitySearchTool,
@@ -15,6 +17,10 @@ import {
   splitCapabilitySearchTerms,
 } from './capabilitySearch';
 import {
+  collectCapabilityOperations,
+  collectGeneralOperations,
+  collectRuntimeOperations,
+  collectToolkitOperations,
   readLatestToolArtifact,
   resolveToolkitResources,
   selectCapabilityTools,
@@ -368,6 +374,123 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
     'browser_open',
     'custom_tool',
   ]);
+});
+
+test('toolkit and capability operations are collected with their source', () => {
+  const toolkits: AgentToolkit[] = [{
+    name: 'bash',
+    description: 'bash toolkit',
+    operations: {
+      read_file: {
+        kind: 'file.read',
+        title: 'Read File',
+      },
+      shared_tool: {
+        kind: 'toolkit.shared',
+      },
+    },
+  }];
+
+  const toolkitOperations = collectToolkitOperations(toolkits);
+  assert.equal(toolkitOperations.read_file?.kind, 'file.read');
+  assert.deepEqual(toolkitOperations.read_file?.source, {
+    provider: 'toolkit',
+    name: 'read_file',
+  });
+
+  const capabilityOperations = collectCapabilityOperations(toolkits, {
+    operations: {
+      custom_tool: {
+        kind: 'capability.custom',
+      },
+      shared_tool: {
+        kind: 'capability.shared',
+      },
+    },
+  });
+
+  assert.equal(capabilityOperations.custom_tool?.kind, 'capability.custom');
+  assert.deepEqual(capabilityOperations.custom_tool?.source, {
+    provider: 'capability',
+    name: 'custom_tool',
+  });
+  assert.equal(capabilityOperations.shared_tool?.kind, 'toolkit.shared');
+});
+
+test('runtime tool operations are collected for host-provided tools', () => {
+  const runtimeOperations = collectRuntimeOperations({
+    describe_pet_profile: {
+      kind: 'pet.profile.read',
+      title: '读取宠物资料',
+    },
+  });
+
+  assert.equal(runtimeOperations.describe_pet_profile?.kind, 'pet.profile.read');
+  assert.deepEqual(runtimeOperations.describe_pet_profile?.source, {
+    provider: 'runtime',
+    name: 'describe_pet_profile',
+  });
+
+  const generalOperations = collectGeneralOperations([{
+    name: 'bash',
+    description: 'bash toolkit',
+    operations: {
+      read_file: {
+        kind: 'file.read',
+      },
+    },
+  }], {
+    describe_pet_profile: {
+      kind: 'pet.profile.read',
+    },
+  });
+
+  assert.equal(generalOperations.read_file?.kind, 'file.read');
+  assert.equal(generalOperations.describe_pet_profile?.kind, 'pet.profile.read');
+});
+
+test('built-in capability runtimes expose operation metadata', async () => {
+  const dailyPost = createDailyPostCapability({
+    savePost: async () => ({ postId: 'post-1' }),
+  });
+  const dailyPostRuntime = await dailyPost.createRuntime({
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+  });
+
+  assert.equal(dailyPostRuntime.operations?.finalize_post?.kind, 'daily_post.finalize');
+  assert.equal(dailyPostRuntime.operations?.skip_post?.kind, 'daily_post.skip');
+
+  const finalizeSummary = dailyPostRuntime.operations?.finalize_post?.summarizeInput?.({
+    mode: 'original',
+    content: '这是一段待发布的正文',
+    topic: '早餐',
+    tags: ['日常'],
+    citations: ['trend-1'],
+    requestImage: true,
+  });
+  assert.equal(finalizeSummary?.target, '早餐');
+  assert.equal(finalizeSummary?.summary, '保存原创动态');
+  assert.deepEqual(finalizeSummary?.details, {
+    mode: 'original',
+    topic: '早餐',
+    requestImage: true,
+    contentLength: '这是一段待发布的正文'.length,
+    tagCount: 1,
+    citationCount: 1,
+  });
+  assert.equal(JSON.stringify(finalizeSummary).includes('这是一段待发布的正文'), false);
+
+  const creatorRuntime = await createCapabilityCreatorCapability().createRuntime({
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+  });
+
+  assert.equal(creatorRuntime.operations?.scaffold_capability_plugin?.kind, 'capability.scaffold');
+  assert.equal(creatorRuntime.operations?.validate_capability_plugin?.kind, 'capability.validate');
+  assert.equal(creatorRuntime.operations?.check_capability_keywords?.kind, 'capability.keyword_check');
 });
 
 test('toolkit review policy wraps tool calls without changing tool identity', async () => {

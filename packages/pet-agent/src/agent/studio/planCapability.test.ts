@@ -11,6 +11,20 @@ test('submit_plan tool captures tasks via onSubmit, in submission order', async 
   });
   const runtime = await cap.createRuntime({} as never);
   const submitPlanTool = runtime.tools![0];
+  assert.equal(runtime.operations?.submit_plan?.kind, 'studio.plan.submit');
+  assert.equal(runtime.operations?.submit_plan?.title, '提交计划');
+
+  const summary = runtime.operations?.submit_plan?.summarizeInput?.({
+    tasks: [
+      { petId: 'script', goal: '写脚本' },
+      { petId: 'audio', goal: '配音' },
+    ],
+  });
+  assert.equal(summary?.summary, '提交 2 个任务');
+  assert.deepEqual(summary?.details, {
+    taskCount: 2,
+    petIds: ['script', 'audio'],
+  });
 
   await submitPlanTool.invoke({
     tasks: [

@@ -118,7 +118,7 @@ function activeRunToPendingUi(run: ActiveRunModel | null) {
   };
 }
 
-function activeRunToActiveTools(run: ActiveRunModel | null) {
+function activeRunToActiveOperations(run: ActiveRunModel | null) {
   return run?.activeOperations.map((operation) => ({
     name: operation.key,
     label: operation.title,
@@ -190,6 +190,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) => ({
         ...session,
         history: trimHistory(action.history),
+        tokenUsage: null,
       }));
 
     case 'session.clear':
@@ -204,6 +205,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...session,
           history: [],
           activeRun: null,
+          tokenUsage: null,
         }));
         return sessionId
           ? { ...nextState, runRoute: removeSessionRunRoutes(nextState, sessionId) }
@@ -433,7 +435,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
       if (event.type === 'message.completed') {
         const reply = event.text.trim();
-        const finalText = activeRun.assistantDraft.trim() || reply || '...';
+        const finalText = reply || activeRun.assistantDraft.trim() || '...';
         return finishRun(state, event.requestId, TUI_TEXT.statusReady, finalText
           ? [historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`)]
           : []);
@@ -491,11 +493,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         historyDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.historyCell, `${action.requestId}:studio-error`),
       ]);
 
-    case 'server.error':
-      return finishRun(state, action.requestId, action.statusMessage, [
-        historyDraft('system', TUI_TEXT.errorLine(action.message || 'internal error'), action.historyCell, `${action.requestId}:server-error`),
-      ]);
-
     case 'review.dismiss': {
       return finishRun(state, action.requestId, action.statusMessage);
     }
@@ -526,8 +523,8 @@ export function selectFocusedPendingUi(state: TuiState) {
   return activeRunToPendingUi(selectFocusedActiveRun(state));
 }
 
-export function selectFocusedActiveTools(state: TuiState) {
-  return activeRunToActiveTools(selectFocusedActiveRun(state));
+export function selectFocusedActiveOperations(state: TuiState) {
+  return activeRunToActiveOperations(selectFocusedActiveRun(state));
 }
 
 export function selectFocusedPendingApproval(state: TuiState) {

@@ -627,7 +627,7 @@ TUI 重构不是孤立的一块。下面这些是**同一次项目重构**的不
 
 - **`operation` 事件模型 ↔ tool event 源的可靠性**，是这次重构的两端，一起改：
   - `operation` 现在带 `phase` 生命周期，TUI reducer 把 `activeOperations` 当权威 state（§5）。
-  - 对应地，tool event 的**结构化源要做成生命周期完整**——start 必配 terminal、有序、稳定 callId，`operation` 从 `onToolEvent` 直接产出，**退役 `tool_log`**（见 `docs/PET_AGENT_STUDIO_INTERFACES.md` Boundary 2 + Open Question、`docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0）。
+  - 对应地，tool event 的**结构化源要做成生命周期完整**——local-agent 已通过 `ToolOperationTracker` 给 operation 补稳定 id 并关闭 dangling operation；上游仍应继续朝 start 必配 terminal、有序、稳定 callId 收敛，`operation` 从 `onToolEvent` 直接产出，**退役 `tool_log`**（见 `docs/PET_AGENT_STUDIO_INTERFACES.md` Boundary 2 + Open Question、`docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0）。
   - pet 调用契约同时补 **message token boundary**——现 `PetAgentRuntimeInvokeInput` 只有 `onToolEvent`、没有 token 回调，需扩 INTERFACES 的 Boundary 1，让 pet 的 `message.delta` 在各路径都有出口。
   - chat 与 studio 当前仍是同一个 `OrchestratorGraph` 的两条外壳（chat = messages/values stream + onToolEvent + 直推中断；studio = pet runtime + onToolEvent + humanReviewer 桥），tool operation 已收敛到同一条 `onToolEvent` 边界；后续继续收敛 message token 与 HITL 外壳。
   - 对齐点：两端共用 `operation` 的 `phase` 生命周期语义与 `activeOperations` 的 state 语义，源侧产出什么、TUI 侧怎么消费，用同一份契约定义。

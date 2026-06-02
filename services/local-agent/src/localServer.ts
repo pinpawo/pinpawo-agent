@@ -27,12 +27,12 @@ import {
 import { readFirstHumanReviewDecision, type HumanReviewDecision } from '@pinpawo/pet-agent';
 import { recordAgentRunActivity, recordToolActivity } from './toolActivityState';
 import {
-  buildToolOperationEvent,
   readFinalMessageText,
   type StreamToolsPayload,
 } from './agentStreamEvents';
 import type { LocalAgentOperationPhase } from './events/localAgentEvent';
 import { runChatSession } from './chatSessionAdapter';
+import { ToolOperationTracker } from './toolOperationTracker';
 import {
   buildStudioForTurn,
   StudioNotConfiguredError,
@@ -250,6 +250,7 @@ async function refreshActiveSessionSummary(deps: LocalServerDeps) {
 type InflightRequest = {
   requestId: string;
   controller: AbortController;
+  toolOperations: ToolOperationTracker;
   interruptedSent?: boolean;
   interruptTimer?: ReturnType<typeof setTimeout>;
 };
@@ -275,6 +276,7 @@ function sendInterrupted(ws: WebSocket, inflight: InflightRequest) {
     return;
   }
   inflight.interruptedSent = true;
+  finishToolOperations(ws, inflight, 'interrupted');
   sendLocalAgentMessage(ws, {
     type: 'interrupted',
     requestId: inflight.requestId,
@@ -337,6 +339,22 @@ function toToolActivityPhase(phase: LocalAgentOperationPhase) {
   return 'event';
 }
 
+function finishToolOperations(
+  ws: WebSocket,
+  inflight: InflightRequest,
+  phase: 'completed' | 'failed' | 'interrupted',
+  error?: unknown,
+) {
+  for (const event of inflight.toolOperations.finishActive(phase, error)) {
+    recordToolActivity(
+      event.operation.source?.name ?? event.operation.kind,
+      toToolActivityPhase(event.phase),
+      inflight.requestId,
+    );
+    sendLocalAgentEvent(ws, event);
+  }
+}
+
 function isHumanReviewInterruptError(value: unknown): boolean {
   if (!value || typeof value !== 'object') {
     return false;
@@ -369,8 +387,8 @@ function isToolProtocolHistoryError(value: unknown): boolean {
     || text.includes('insufficient tool messages following tool_calls message');
 }
 
-function sendToolOperationEvent(ws: WebSocket, requestId: string, payload: StreamToolsPayload) {
-  const event = buildToolOperationEvent(requestId, payload);
+function sendToolOperationEvent(ws: WebSocket, inflight: InflightRequest, payload: StreamToolsPayload) {
+  const event = inflight.toolOperations.accept(payload);
 
   if (event.phase === 'failed' && isHumanReviewInterruptError(payload.error)) {
     const interruptedEvent = {
@@ -380,8 +398,8 @@ function sendToolOperationEvent(ws: WebSocket, requestId: string, payload: Strea
         input: event.raw?.input,
       },
     };
-    recordToolActivity(payload.name, 'interrupt', requestId);
-    console.log(`[local-server] tool_interrupt requestId=${requestId} tool=${payload.name}`);
+    recordToolActivity(payload.name, 'interrupt', inflight.requestId);
+    console.log(`[local-server] tool_interrupt requestId=${inflight.requestId} tool=${payload.name}`);
     sendLocalAgentEvent(ws, interruptedEvent);
     return;
   }
@@ -389,10 +407,10 @@ function sendToolOperationEvent(ws: WebSocket, requestId: string, payload: Strea
   const phase = toToolActivityPhase(event.phase);
   const input = event.raw?.input !== undefined ? stringifyLogValue(event.raw.input) : undefined;
   const error = event.raw?.error !== undefined ? stringifyLogValue(event.raw.error) : undefined;
-  recordToolActivity(payload.name, phase, requestId);
+  recordToolActivity(payload.name, phase, inflight.requestId);
 
   console.log(
-    `[local-server] tool_${phase} requestId=${requestId} tool=${payload.name}`
+    `[local-server] tool_${phase} requestId=${inflight.requestId} tool=${payload.name}`
       + (input ? ` input=${maybeTrimForLog(input, 200)}` : '')
       + (error ? ` error=${maybeTrimForLog(error)}` : ''),
   );
@@ -413,12 +431,18 @@ async function handleStudioRequest(
   // 取消已有 inflight(避免跟 chat 重叠)
   const previousInflight = inflightRequests.get(ws);
   if (previousInflight) {
+    sendInterrupted(ws, previousInflight);
     clearInflightTimer(previousInflight);
     previousInflight.controller.abort();
+    clearInflightRequest(ws, previousInflight);
   }
 
   const controller = new AbortController();
-  const inflight: InflightRequest = { requestId, controller };
+  const inflight: InflightRequest = {
+    requestId,
+    controller,
+    toolOperations: new ToolOperationTracker(requestId),
+  };
   inflightRequests.set(ws, inflight);
 
   // 重置 review slot(防止上一 turn 残留)
@@ -457,15 +481,17 @@ async function handleStudioRequest(
         });
       },
       onToolEvent: (event) => {
-        sendToolOperationEvent(ws, requestId, event as StreamToolsPayload);
+        sendToolOperationEvent(ws, inflight, event as StreamToolsPayload);
       },
     });
 
     if (controller.signal.aborted) {
+      finishToolOperations(ws, inflight, 'interrupted');
       send({ type: 'studio_error', requestId, message: 'aborted by client' });
       return;
     }
 
+    finishToolOperations(ws, inflight, 'completed');
     if (result.outcome.outcome === 'done') {
       send({
         type: 'studio_response',
@@ -484,6 +510,7 @@ async function handleStudioRequest(
       });
     }
   } catch (err) {
+    finishToolOperations(ws, inflight, 'failed', err);
     if (err instanceof StudioNotConfiguredError) {
       send({
         type: 'studio_error',
@@ -506,7 +533,7 @@ async function handleStudioRequest(
       rejectReview(slot, new Error('studio turn ended with unresolved review'));
     }
     if (inflightRequests.get(ws) === inflight) {
-      inflightRequests.delete(ws);
+      clearInflightRequest(ws, inflight);
     }
   }
 }
@@ -521,13 +548,19 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
 
   const previousInflight = inflightRequests.get(ws);
   if (previousInflight) {
+    sendInterrupted(ws, previousInflight);
     clearInflightTimer(previousInflight);
     previousInflight.controller.abort();
+    clearInflightRequest(ws, previousInflight);
     console.warn(`[local-server] abort previous inflight requestId=${previousInflight.requestId} before starting requestId=${requestId}`);
   }
 
   const controller = new AbortController();
-  const inflight: InflightRequest = { requestId, controller };
+  const inflight: InflightRequest = {
+    requestId,
+    controller,
+    toolOperations: new ToolOperationTracker(requestId),
+  };
   inflightRequests.set(ws, inflight);
   const isCurrent = () => inflightRequests.get(ws) === inflight && !controller.signal.aborted;
   const finishInterrupted = () => {
@@ -561,7 +594,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
         sendLocalAgentEvent(ws, event);
       },
       emitToolEvent: (event) => {
-        sendToolOperationEvent(ws, requestId, event);
+        sendToolOperationEvent(ws, inflight, event);
       },
       onPendingInterrupt: (pendingInterrupt) => {
         const pendingShellCommand = readShellReviewCommand(pendingInterrupt);
@@ -583,6 +616,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
       },
     });
     if (result.status === 'waiting_human') {
+      finishToolOperations(ws, inflight, 'interrupted');
       await refreshActiveSessionSummary(deps);
       console.log(`[local-server] human_review.requested requestId=${requestId}`);
       clearInflightRequest(ws, inflight);
@@ -591,6 +625,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
     if (result.status === 'interrupted') {
       return;
     }
+    finishToolOperations(ws, inflight, 'completed');
     clearInflightRequest(ws, inflight);
     await refreshActiveSessionSummary(deps);
 
@@ -606,6 +641,7 @@ async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: L
       clearInflightRequest(ws, inflight);
       return;
     }
+    finishToolOperations(ws, inflight, 'failed', err);
     clearInflightRequest(ws, inflight);
     recordAgentRunActivity('error', requestId, 5_000);
     console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);

@@ -11,6 +11,7 @@ import {
   okOutputPathSummary,
   pathInputSummary,
   readBoolean,
+  readJsonRecord,
   readNumber,
   readRecord,
   readString,
@@ -38,6 +39,35 @@ function formatStat(path: string) {
     mtime: stat.mtime.toISOString(),
     ctime: stat.ctime.toISOString(),
   });
+}
+
+const MAX_FILE_DIFF_PREVIEW_CHARS = 6_000;
+
+function truncateForOperationDetails(content: string) {
+  if (content.length <= MAX_FILE_DIFF_PREVIEW_CHARS) {
+    return content;
+  }
+  return `${content.slice(0, MAX_FILE_DIFF_PREVIEW_CHARS)}\n[truncated ${(content.length - MAX_FILE_DIFF_PREVIEW_CHARS).toString()} chars]`;
+}
+
+function readFileContentPreview(filePath: string) {
+  try {
+    return truncateForOperationDetails(readFileSync(filePath, 'utf-8'));
+  } catch {
+    return undefined;
+  }
+}
+
+function mergeOperationOutputSummary(
+  target: string | undefined,
+  details?: Record<string, unknown>,
+) {
+  if (!target) return null;
+  const after = readFileContentPreview(target);
+  return {
+    target,
+    ...(details ? { details: { ...details, after } } : {}),
+  } satisfies ReturnType<typeof okOutputPathSummary> | null;
 }
 
 function resolveMoveTarget(sourcePath: string, destinationPath: string) {
@@ -649,11 +679,24 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
     summarizeInput: (input) => {
       const record = readRecord(input);
       const target = readString(record, 'path');
-      return target
-        ? { target, summary: readBoolean(record, 'append') ? 'append' : 'write' }
-        : null;
+      if (!target) return null;
+      const safePath = resolveUserPath(target);
+      return {
+        target: safePath,
+        summary: readBoolean(record, 'append') ? 'append' : 'write',
+        details: {
+          append: readBoolean(record, 'append') ?? false,
+          before: readFileContentPreview(safePath),
+        },
+      };
     },
-    summarizeOutput: (output) => okOutputPathSummary(output),
+    summarizeOutput: (output) => {
+      const record = readJsonRecord(output);
+      return mergeOperationOutputSummary(
+        readString(record, 'path'),
+        { mode: readString(record, 'mode') },
+      );
+    },
   },
   update_file: {
     kind: 'file.update',
@@ -661,11 +704,28 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
     summarizeInput: (input) => {
       const record = readRecord(input);
       const target = readString(record, 'path');
-      return target
-        ? { target, summary: readBoolean(record, 'replaceAll') ? 'replace_all' : 'replace' }
-        : null;
+      if (!target) return null;
+      const safePath = resolveUserPath(target);
+      return {
+        target: safePath,
+        summary: readBoolean(record, 'replaceAll') ? 'replace_all' : 'replace',
+        details: {
+          find: readString(record, 'find'),
+          replace: readString(record, 'replace') ? '[provided]' : undefined,
+          before: readFileContentPreview(safePath),
+        },
+      };
     },
-    summarizeOutput: (output) => okOutputPathSummary(output),
+    summarizeOutput: (output) => {
+      const record = readJsonRecord(output);
+      return mergeOperationOutputSummary(
+        readString(record, 'path'),
+        {
+          replaced: readNumber(record, 'replaced'),
+          replaceAll: readBoolean(record, 'replaceAll'),
+        },
+      );
+    },
   },
   multi_edit: {
     kind: 'file.multi_edit',
@@ -675,9 +735,23 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
       const target = readString(record, 'path');
       const rawEdits = record?.edits;
       const edits = Array.isArray(rawEdits) ? rawEdits.length : undefined;
-      return target ? { target, details: { edits } } : null;
+      if (!target) return null;
+      const safePath = resolveUserPath(target);
+      return {
+        target: safePath,
+        details: {
+          edits,
+          before: readFileContentPreview(safePath),
+        },
+      };
     },
-    summarizeOutput: (output) => okOutputPathSummary(output),
+    summarizeOutput: (output) => {
+      const record = readJsonRecord(output);
+      return mergeOperationOutputSummary(
+        readString(record, 'path'),
+        { edits: readNumber(record, 'edits') },
+      );
+    },
   },
   apply_file_patch: {
     kind: 'file.patch',
@@ -687,9 +761,23 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
       const target = readString(record, 'path');
       const rawHunks = record?.hunks;
       const hunks = Array.isArray(rawHunks) ? rawHunks.length : undefined;
-      return target ? { target, details: { hunks } } : null;
+      if (!target) return null;
+      const safePath = resolveUserPath(target);
+      return {
+        target: safePath,
+        details: {
+          hunks,
+          before: readFileContentPreview(safePath),
+        },
+      };
     },
-    summarizeOutput: (output) => okOutputPathSummary(output),
+    summarizeOutput: (output) => {
+      const record = readJsonRecord(output);
+      return mergeOperationOutputSummary(
+        readString(record, 'path'),
+        { hunks: readNumber(record, 'hunks') },
+      );
+    },
   },
   apply_unified_patch: {
     kind: 'patch.apply',
@@ -697,11 +785,13 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
     summarizeInput: (input) => {
       const record = readRecord(input);
       const target = readString(record, 'cwd');
+      const patch = readString(record, 'patch');
       return {
         target,
         details: {
           strip: readNumber(record, 'strip') ?? 0,
           dryRun: readBoolean(record, 'dryRun') ?? false,
+          patch: patch ? truncateForOperationDetails(patch) : undefined,
         },
       };
     },

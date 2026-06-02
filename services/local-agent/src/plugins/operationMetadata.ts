@@ -1,34 +1,26 @@
-import type { ToolkitOperationSummary } from '@pinpawo/pet-agent';
-
-export function readRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-export function readString(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === 'string' ? value : undefined;
-}
-
-export function readNumber(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === 'number' ? value : undefined;
-}
-
-export function readBoolean(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === 'boolean' ? value : undefined;
-}
-
-export function readJsonRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'string') return readRecord(value);
-  try {
-    return readRecord(JSON.parse(value));
-  } catch {
-    return null;
-  }
-}
+import {
+  readBoolean,
+  readJsonRecord,
+  readNumber,
+  readRecord,
+  readString,
+  type ToolkitOperationSummary,
+} from '@pinpawo/pet-agent';
+/**
+ * Local-agent plugin metadata helpers.
+ *
+ * - Common record/read helpers are sourced from `@pinpawo/pet-agent`
+ *   to keep behavior aligned with capability metadata.
+ * - File/path helpers here are intentionally local-tool specific and are
+ *   not part of shared pet-agent API surface.
+ */
+export {
+  readBoolean,
+  readJsonRecord,
+  readNumber,
+  readRecord,
+  readString,
+};
 
 export function pathInputSummary(input: unknown): ToolkitOperationSummary | null {
   const record = readRecord(input);

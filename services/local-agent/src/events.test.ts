@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import test from 'node:test';
 import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
@@ -279,4 +282,48 @@ test('createOperationRegistryForAgentSetup reads host tool operation metadata fr
     name: 'describe_pet_profile',
     callId: undefined,
   });
+});
+
+test('file tool metadata includes before/after snapshots', (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), 'pinpawo-file-op-meta-'));
+  const filePath = resolve(root, 'note.txt');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  writeFileSync(filePath, 'alpha\nbeta\n', 'utf-8');
+
+  const startEvent = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'write_file',
+      toolCallId: 'call-1',
+      input: {
+        path: filePath,
+        content: 'alpha\nbeta\ngamma\n',
+      },
+    },
+    localToolOperationRegistry,
+  );
+
+  assert.equal(startEvent.operation.target, filePath);
+  assert.equal(startEvent.operation.details?.before, 'alpha\nbeta\n');
+
+  writeFileSync(filePath, 'alpha\nbeta\ngamma\n', 'utf-8');
+  const endEvent = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'write_file',
+      toolCallId: 'call-1',
+      output: {
+        ok: true,
+        path: filePath,
+        mode: 'write',
+      },
+    },
+    localToolOperationRegistry,
+  );
+
+  assert.equal(endEvent.operation.details?.after, 'alpha\nbeta\ngamma\n');
+  assert.equal(endEvent.operation.target, filePath);
 });

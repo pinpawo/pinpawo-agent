@@ -2,7 +2,7 @@
 
 > 状态：Draft v2
 > 日期：2026-05-29
-> 更新：local-agent runtime/TUI/app-facing WS 出口已经切到 `LocalAgentEvent` / `operation` first；本仓库不再派发旧运行态兼容消息。剩余跨仓库迁移见 issue #19。
+> 更新：local-agent runtime/TUI/app-facing WS 出口已经切到 `LocalAgentEvent` / `operation` first；本仓库不再派发旧运行态兼容消息。剩余跨仓库迁移见 issue #19（本仓库侧的 adapter 已移除，#19 仅表示 pinpawo-app / API 仓库侧协议迁移）。
 
 ## 1. 文档目标
 
@@ -121,6 +121,11 @@ const bashToolkit = {
     },
   },
 };
+
+命名约定约束：
+- 真实工具来源（local toolkit、capability、host tool）各自维护自己的 operation metadata。
+- `@pinpawo/pet-agent` 侧 `operationMetadata.ts` 只共享 reader/summarizer 的基础能力，不定义 local-agent 专属 kind；local-agent 的 kind 命名由 toolkit/provider 自行定义。
+- `kind` 采用 `domain.action` 的小写点分层风格（例如 `file.write`、`search.grep`、`shell.run`），避免跨层漂移。
 ```
 
 对于用户 capability：
@@ -506,7 +511,7 @@ type OperationRegistry = {
 
 ### 阶段 3：App/API 切到 LocalAgentEvent
 
-状态：本仓库侧已完成 local-agent 发送出口切换；`pinpawo-app` app/API 仍需要迁移，见 issue #19。
+状态：本仓库侧已完成 local-agent 发送出口切换；`pinpawo-app` app/API 仍需要迁移，见 issue #19（范围仅限 app/API 侧）。
 
 迁移仓库：`~/Develop/src/pinpawo/pinpawo-app`。本仓库只维护 local-agent 新协议和迁移说明；app/API 代码迁移在 `pinpawo-app` 侧单独推进。
 

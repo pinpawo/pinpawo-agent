@@ -1,3 +1,11 @@
+/**
+ * Shared operation-metadata helpers for capability and toolkit metadata consumers
+ * outside local-agent runtime.
+ *
+ * NOTE:
+ *  - This file owns schema-safe readers and common capability-host summaries.
+ *  - Tool kind values are still defined by each toolkit/capability provider.
+ */
 import type { ToolkitOperationSummary } from '../types/toolkit';
 
 export function readRecord(value: unknown): Record<string, unknown> | null {
@@ -9,6 +17,11 @@ export function readRecord(value: unknown): Record<string, unknown> | null {
 export function readString(record: Record<string, unknown> | null, key: string) {
   const value = record?.[key];
   return typeof value === 'string' ? value : undefined;
+}
+
+export function readNumber(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  return typeof value === 'number' ? value : undefined;
 }
 
 export function readBoolean(record: Record<string, unknown> | null, key: string) {

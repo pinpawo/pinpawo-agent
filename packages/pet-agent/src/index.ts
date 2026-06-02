@@ -75,6 +75,14 @@ export type {
   HumanReviewDecisionType,
   HumanReviewRequest,
 } from './agent/orchestrator/humanReview';
+export {
+  readBoolean,
+  readJsonRecord,
+  readNumber,
+  readRecord,
+  readString,
+  resultStatusSummary,
+} from './capabilities/operationMetadata';
 export { runAgent } from './agent/runAgent';
 export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
 export { createSubagent } from './subagent/createSubagent';

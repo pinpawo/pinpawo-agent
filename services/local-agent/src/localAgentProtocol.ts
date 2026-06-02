@@ -267,6 +267,12 @@ function parseLocalAgentServerRecord(record: Record<string, unknown>): LocalAgen
     const event = eventRecord ? readLocalAgentEvent(eventRecord) : null;
     return event && event.requestId === requestId ? { type, requestId, event } : null;
   }
+  if (type === 'human_review.requested') {
+    const event = readLocalAgentEvent(record);
+    return event && event.requestId === requestId && event.type === 'human_review.requested'
+      ? { type: 'event', requestId, event }
+      : null;
+  }
   if (type === 'interrupting' || type === 'interrupted' || type === 'studio_error') {
     return {
       type,

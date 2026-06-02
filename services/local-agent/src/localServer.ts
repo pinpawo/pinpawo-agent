@@ -7,23 +7,15 @@
  */
 import { createServer } from 'node:http';
 import { WebSocket } from 'ws';
-import { HumanMessage } from '@langchain/core/messages';
-import { loadAgentContext } from './contextLoader';
 import { LocalAgentGraphService } from './agentGraphService';
-import { authorizeShellPattern } from './sessionAuthorizations';
-import { readShellReviewCommand } from './chatInterrupts';
 import {
   sendLocalAgentEvent,
   sendLocalAgentMessage,
-  type ChatRequestMessage,
-  type HumanReviewResponseMessage,
   type StudioRequestMessage,
 } from './localAgentProtocol';
-import { recordAgentRunActivity } from './operationActivityState';
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
-import { runChatSession } from './chatSessionAdapter';
 import {
   type InflightOperationRun,
 } from './inflightOperationRun';
@@ -37,6 +29,7 @@ import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
+import { LocalServerChatHandler } from './localServerChatHandler';
 import type { AgentStats, LocalServerDeps } from './localServerTypes';
 
 export type { AgentStats, LocalServerDeps };
@@ -56,14 +49,11 @@ const inflightRequests = new InflightRequestController<WebSocket>({
   logPrefix: 'local-server',
 });
 
-function isToolProtocolHistoryError(value: unknown): boolean {
-  const text = value instanceof Error
-    ? `${value.name}\n${value.message}\n${value.stack ?? ''}`
-    : String(value ?? '');
-  return text.includes('INVALID_TOOL_RESULTS')
-    || text.includes("An assistant message with 'tool_calls' must be followed by tool messages")
-    || text.includes('insufficient tool messages following tool_calls message');
-}
+const chatHandler = new LocalServerChatHandler({
+  graphService: chatGraphService,
+  tuiSessions,
+  inflightRequests,
+});
 
 function sendStreamToolOperationEvent(ws: WebSocket, inflight: InflightRequest, payload: StreamToolsPayload) {
   emitLocalServerToolOperationEvent({
@@ -181,143 +171,6 @@ async function handleStudioRequest(
   }
 }
 
-async function handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: LocalServerDeps) {
-  const { requestId, message } = msg;
-
-  const threadId = tuiSessions.getChatThreadId(deps.actorId);
-
-  console.log(`[local-server] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
-  recordAgentRunActivity('thinking', requestId);
-
-  const previousInflight = inflightRequests.get(ws);
-  const inflight = inflightRequests.start(ws, requestId, {
-    interruptPrevious: true,
-    notifyPrevious: true,
-  });
-  if (previousInflight) {
-    console.warn(`[local-server] abort previous inflight requestId=${previousInflight.requestId} before starting requestId=${requestId}`);
-  }
-  const { controller } = inflight;
-  const isCurrent = () => inflightRequests.isCurrentActive(ws, inflight);
-  const finishInterrupted = () => {
-    if (!controller.signal.aborted) {
-      return;
-    }
-    inflightRequests.sendInterrupted(ws, inflight);
-    inflightRequests.clear(ws, inflight);
-  };
-
-  try {
-    const ctx = await loadAgentContext(deps.actorId);
-    if (!isCurrent()) {
-      finishInterrupted();
-      return;
-    }
-
-    const setup = tuiSessions.buildChatSetup(deps, ctx);
-    setup.input.messages = [
-      ...setup.input.messages.slice(0, -1),
-      new HumanMessage(message),
-    ];
-    setup.input.signal = controller.signal;
-    const result = await runChatSession({
-      request: msg,
-      setup,
-      graphService: chatGraphService,
-      isCurrent,
-      finishInterrupted,
-      emitEvent: (event) => {
-        sendLocalAgentEvent(ws, event);
-      },
-      emitToolEvent: (event) => {
-        sendStreamToolOperationEvent(ws, inflight, event);
-      },
-      onPendingInterrupt: (pendingInterrupt) => {
-        const pendingShellCommand = readShellReviewCommand(pendingInterrupt);
-        if (!pendingShellCommand || !message.trim().startsWith('/allow')) {
-          return;
-        }
-        const requestedPattern = message.trim().slice('/allow'.length).trim();
-        const authorizedPattern = authorizeShellPattern(
-          threadId,
-          requestedPattern || pendingShellCommand,
-        );
-        if (authorizedPattern) {
-          sendLocalAgentEvent(ws, {
-            type: 'system.notice',
-            requestId,
-            message: `已授权本次会话中的 shell 模式：${authorizedPattern}`,
-          });
-        }
-      },
-    });
-    if (result.status === 'waiting_human') {
-      inflightRequests.finish(ws, inflight, 'interrupted');
-      await tuiSessions.refreshActiveSessionSummary(deps);
-      console.log(`[local-server] human_review.requested requestId=${requestId}`);
-      inflightRequests.clear(ws, inflight);
-      return;
-    }
-    if (result.status === 'interrupted') {
-      return;
-    }
-    inflightRequests.finish(ws, inflight, 'completed');
-    inflightRequests.clear(ws, inflight);
-    await tuiSessions.refreshActiveSessionSummary(deps);
-
-    console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
-  } catch (err) {
-    const isStillCurrent = inflightRequests.isCurrent(ws, inflight);
-    const aborted = controller.signal.aborted
-      || (err instanceof Error && err.name === 'AbortError');
-    if (aborted) {
-      console.warn(`[local-server] chat interrupted requestId=${requestId}`);
-      inflightRequests.sendInterrupted(ws, inflight);
-      recordAgentRunActivity('interrupted', requestId, 2_500);
-      inflightRequests.clear(ws, inflight);
-      return;
-    }
-    inflightRequests.finish(ws, inflight, 'failed', err);
-    inflightRequests.clear(ws, inflight);
-    recordAgentRunActivity('error', requestId, 5_000);
-    console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
-    const recoveredFromToolProtocolError = isToolProtocolHistoryError(err);
-    if (recoveredFromToolProtocolError) {
-      try {
-        await tuiSessions.resetSession(deps.actorId, { deletePrevious: true });
-        console.warn(`[local-server] reset TUI chat session after tool protocol error requestId=${requestId}`);
-      } catch (resetError) {
-        console.warn(
-          '[local-server] failed to reset TUI chat session after tool protocol error:',
-          resetError instanceof Error ? resetError.message : resetError,
-        );
-      }
-    }
-    if (isStillCurrent && ws.readyState === WebSocket.OPEN) {
-      const message = err instanceof Error ? err.message : 'internal error';
-      sendLocalAgentEvent(ws, {
-        type: 'error',
-        requestId,
-        message: recoveredFromToolProtocolError
-          ? `${message}\n\n已重置本地 TUI 会话，下一条消息会从新的后端会话继续。`
-          : message,
-      });
-    }
-  }
-}
-
-async function handleHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage, deps: LocalServerDeps) {
-  if (studioReviewRouter.routeResponse(ws, msg)) {
-    return;
-  }
-  await handleChatRequest(ws, {
-    type: 'chat_request',
-    requestId: msg.requestId,
-    message: msg.message,
-    ...(msg.resume !== undefined ? { resume: msg.resume } : {}),
-  }, deps);
-}
-
 export function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -334,9 +187,14 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
     });
 
     attachLocalServerWebSocketTransport(server, {
-      onChatRequest: (ws, msg) => handleChatRequest(ws, msg, deps),
+      onChatRequest: (ws, msg) => chatHandler.handleChatRequest(ws, msg, deps),
       onStudioRequest: (ws, msg) => handleStudioRequest(ws, msg, deps),
-      onHumanReviewResponse: (ws, msg) => handleHumanReviewResponse(ws, msg, deps),
+      onHumanReviewResponse: (ws, msg) => {
+        if (studioReviewRouter.routeResponse(ws, msg)) {
+          return;
+        }
+        return chatHandler.handleHumanReviewResponse(ws, msg, deps);
+      },
       onInterruptRequest: (ws, msg) => {
         const inflight = inflightRequests.interrupt(ws, { requestId: msg.requestId });
         if (inflight) {

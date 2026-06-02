@@ -519,7 +519,7 @@ type OperationRegistry = {
 
 ### 阶段 5：拆分 tools/policy/capability registry
 
-状态：进行中。`plugins/localTools.ts` 已收敛为 toolkit 装配入口；file/path tools 已抽到 `plugins/localTools/fileTools.ts`，`run_shell` implementation 与 review policy 已抽到 `plugins/localTools/shellTools.ts`，`http_fetch` / `download_file` 已抽到 `plugins/localTools/networkTools.ts`，`glob_search` / `grep_search` 已抽到 `plugins/localTools/searchTools.ts`；本地路径解析和文件遍历 helper 已抽到 `plugins/localTools/pathUtils.ts` / `plugins/localTools/fileSystemUtils.ts`，operation metadata helper 已提升到 `plugins/operationMetadata.ts`，供 local/browser tool metadata 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability operation metadata 随 subagent tool event 透传，local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。
+状态：进行中。`plugins/localTools.ts` 已收敛为 toolkit 装配入口；file/path tools 已抽到 `plugins/localTools/fileTools.ts`，`run_shell` implementation 与 review policy 已抽到 `plugins/localTools/shellTools.ts`，`http_fetch` / `download_file` 已抽到 `plugins/localTools/networkTools.ts`，`glob_search` / `grep_search` 已抽到 `plugins/localTools/searchTools.ts`；本地路径解析和文件遍历 helper 已抽到 `plugins/localTools/pathUtils.ts` / `plugins/localTools/fileSystemUtils.ts`，operation metadata helper 已提升到 `plugins/operationMetadata.ts`，供 local/browser tool metadata 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability operation metadata 随 subagent tool event 透传；`daily_post` 与 `capability_creator` 的 runtime tools 已挂载 capability operation metadata。local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。
 
 目标：让 local tools 和 capability 管理可维护。
 

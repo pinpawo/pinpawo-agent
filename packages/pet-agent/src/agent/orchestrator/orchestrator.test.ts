@@ -8,6 +8,8 @@ import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { AgentToolkit } from '../../types/toolkit';
+import { createCapabilityCreatorCapability } from '../../capabilities/capabilityCreator/index';
+import { createDailyPostCapability } from '../../capabilities/dailyPost/index';
 import { buildOrchestratorTurnInput, createOrchestratorGraph } from '../createAgentRuntime';
 import {
   capabilitySearchTool,
@@ -411,6 +413,50 @@ test('toolkit and capability operations are collected with their source', () => 
     name: 'custom_tool',
   });
   assert.equal(capabilityOperations.shared_tool?.kind, 'toolkit.shared');
+});
+
+test('built-in capability runtimes expose operation metadata', async () => {
+  const dailyPost = createDailyPostCapability({
+    savePost: async () => ({ postId: 'post-1' }),
+  });
+  const dailyPostRuntime = await dailyPost.createRuntime({
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+  });
+
+  assert.equal(dailyPostRuntime.operations?.finalize_post?.kind, 'daily_post.finalize');
+  assert.equal(dailyPostRuntime.operations?.skip_post?.kind, 'daily_post.skip');
+
+  const finalizeSummary = dailyPostRuntime.operations?.finalize_post?.summarizeInput?.({
+    mode: 'original',
+    content: '这是一段待发布的正文',
+    topic: '早餐',
+    tags: ['日常'],
+    citations: ['trend-1'],
+    requestImage: true,
+  });
+  assert.equal(finalizeSummary?.target, '早餐');
+  assert.equal(finalizeSummary?.summary, '保存原创动态');
+  assert.deepEqual(finalizeSummary?.details, {
+    mode: 'original',
+    topic: '早餐',
+    requestImage: true,
+    contentLength: '这是一段待发布的正文'.length,
+    tagCount: 1,
+    citationCount: 1,
+  });
+  assert.equal(JSON.stringify(finalizeSummary).includes('这是一段待发布的正文'), false);
+
+  const creatorRuntime = await createCapabilityCreatorCapability().createRuntime({
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+  });
+
+  assert.equal(creatorRuntime.operations?.scaffold_capability_plugin?.kind, 'capability.scaffold');
+  assert.equal(creatorRuntime.operations?.validate_capability_plugin?.kind, 'capability.validate');
+  assert.equal(creatorRuntime.operations?.check_capability_keywords?.kind, 'capability.keyword_check');
 });
 
 test('toolkit review policy wraps tool calls without changing tool identity', async () => {

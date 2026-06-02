@@ -3,7 +3,15 @@ import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from '../../types/domain';
+import type { ToolkitOperationMetadata } from '../../types/toolkit';
 import { isSemanticDuplicate, isUuid } from '../../utils/trends';
+import {
+  readBoolean,
+  readRecord,
+  readString,
+  readStringArray,
+  resultStatusSummary,
+} from '../operationMetadata';
 import { dailyPostResultSchema, finalizePostSchema } from './schemas';
 import type { DailyPostResultShape } from './schemas';
 
@@ -90,6 +98,64 @@ function finalResult(result: DailyPostResultShape): [string, DailyPostResultShap
   const parsed = dailyPostResultSchema.parse(result);
   return [JSON.stringify(parsed), parsed];
 }
+
+function finalizePostInputSummary(input: unknown) {
+  const record = readRecord(input);
+  const mode = readString(record, 'mode');
+  const topic = readString(record, 'topic');
+  const content = readString(record, 'content');
+  const tags = readStringArray(record, 'tags');
+  const citations = readStringArray(record, 'citations');
+  const requestImage = readBoolean(record, 'requestImage');
+  return mode || topic
+    ? {
+        target: topic ?? mode,
+        summary: mode === 'repost' ? '转发动态' : '保存原创动态',
+        details: {
+          mode,
+          topic,
+          requestImage,
+          contentLength: content?.length,
+          tagCount: tags.length,
+          citationCount: citations.length,
+        },
+      }
+    : null;
+}
+
+function skipPostInputSummary(input: unknown) {
+  const record = readRecord(input);
+  const reason = readString(record, 'reason');
+  return {
+    summary: '跳过动态',
+    details: {
+      reason,
+    },
+  };
+}
+
+const dailyPostResultLabels: Record<string, string> = {
+  created: '动态已保存',
+  skipped: '动态已跳过',
+  failed: '动态处理失败',
+};
+
+export const dailyPostToolOperations: Record<string, ToolkitOperationMetadata> = {
+  finalize_post: {
+    kind: 'daily_post.finalize',
+    title: '保存动态',
+    summarizeInput: finalizePostInputSummary,
+    summarizeOutput: (output) => resultStatusSummary(output, dailyPostResultLabels),
+    summarizeError: () => ({ summary: '动态保存失败' }),
+  },
+  skip_post: {
+    kind: 'daily_post.skip',
+    title: '跳过动态',
+    summarizeInput: skipPostInputSummary,
+    summarizeOutput: (output) => resultStatusSummary(output, dailyPostResultLabels),
+    summarizeError: () => ({ summary: '跳过动态失败' }),
+  },
+};
 
 export function createFinalizePostTool(options: DailyPostToolOptions): StructuredTool {
   let duplicateRetries = 0;

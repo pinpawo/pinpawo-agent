@@ -4,6 +4,7 @@ import { basename, dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
+import type { ToolkitOperationMetadata } from '../../types/toolkit';
 import {
   capabilityCreatorResultSchema,
   checkCapabilityKeywordsInputSchema,
@@ -16,6 +17,12 @@ import {
   searchCapabilities,
   splitCapabilitySearchTerms,
 } from '../../agent/orchestrator/capabilitySearch';
+import {
+  readRecord,
+  readString,
+  readStringArray,
+  resultStatusSummary,
+} from '../operationMetadata';
 
 function expandHome(p: string) {
   if (p === '~') return homedir();
@@ -45,6 +52,86 @@ function toolResult(value: CapabilityCreatorResult): [string, CapabilityCreatorR
   const parsed = capabilityCreatorResultSchema.parse(value);
   return [json(parsed), parsed];
 }
+
+function scaffoldInputSummary(input: unknown) {
+  const record = readRecord(input);
+  const id = readString(record, 'id');
+  const rootDir = readString(record, 'rootDir');
+  const name = readString(record, 'name');
+  return id || rootDir || name
+    ? {
+        target: rootDir ?? id,
+        summary: name ? `生成 ${name}` : '生成 capability 插件',
+        details: {
+          id,
+          rootDir,
+          overwrite: record?.overwrite,
+          includePackageJson: record?.includePackageJson,
+          includeReadme: record?.includeReadme,
+          includeSmokeTest: record?.includeSmokeTest,
+        },
+      }
+    : null;
+}
+
+function validateInputSummary(input: unknown) {
+  const record = readRecord(input);
+  const rootDir = readString(record, 'rootDir');
+  return rootDir
+    ? {
+        target: rootDir,
+        summary: '验证 capability 插件',
+      }
+    : null;
+}
+
+function keywordInputSummary(input: unknown) {
+  const record = readRecord(input);
+  const rootDir = readString(record, 'rootDir');
+  const name = readString(record, 'name');
+  const queries = readStringArray(record, 'queries');
+  return rootDir || name
+    ? {
+        target: rootDir ?? name,
+        summary: '检查 capability 关键词',
+        details: {
+          rootDir,
+          name,
+          queryCount: queries.length,
+        },
+      }
+    : null;
+}
+
+const capabilityCreatorResultLabels: Record<string, string> = {
+  created: 'capability 插件已生成',
+  validated: 'capability 插件已验证',
+  failed: 'capability 处理失败',
+};
+
+export const capabilityCreatorToolOperations: Record<string, ToolkitOperationMetadata> = {
+  scaffold_capability_plugin: {
+    kind: 'capability.scaffold',
+    title: '生成 capability 插件',
+    summarizeInput: scaffoldInputSummary,
+    summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),
+    summarizeError: () => ({ summary: '生成 capability 插件失败' }),
+  },
+  validate_capability_plugin: {
+    kind: 'capability.validate',
+    title: '验证 capability 插件',
+    summarizeInput: validateInputSummary,
+    summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),
+    summarizeError: () => ({ summary: '验证 capability 插件失败' }),
+  },
+  check_capability_keywords: {
+    kind: 'capability.keyword_check',
+    title: '检查 capability 关键词',
+    summarizeInput: keywordInputSummary,
+    summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),
+    summarizeError: () => ({ summary: '检查 capability 关键词失败' }),
+  },
+};
 
 function renderManifest(params: {
   id: string;

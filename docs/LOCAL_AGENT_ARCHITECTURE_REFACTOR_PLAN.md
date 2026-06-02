@@ -510,7 +510,7 @@ type OperationRegistry = {
 
 ### 阶段 5：拆分 tools/policy/capability registry
 
-状态：进行中。`run_shell` implementation 与 review policy 已从 `plugins/localTools.ts` 抽到 `plugins/localTools/shellTools.ts`；本地路径解析 helper 已抽到 `plugins/localTools/pathUtils.ts`，供 tools 共享。
+状态：进行中。`run_shell` implementation 与 review policy 已从 `plugins/localTools.ts` 抽到 `plugins/localTools/shellTools.ts`；`http_fetch` / `download_file` 已抽到 `plugins/localTools/networkTools.ts`；本地路径解析 helper 已抽到 `plugins/localTools/pathUtils.ts`，供 tools 共享。
 
 目标：让 local tools 和 capability 管理可维护。
 

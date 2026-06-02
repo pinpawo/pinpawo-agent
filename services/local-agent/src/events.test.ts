@@ -6,6 +6,7 @@ import { createOperationRegistry } from './events/operationRegistry';
 import { createBrowserToolkit } from './capabilities/browserCapability';
 import { createBashToolkit, localToolOperationRegistry } from './plugins/localTools';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
+import { petProfileToolOperations } from '@pinpawo/pet-agent';
 
 test('normalizes LangGraph tool stream events with toolkit operation metadata', () => {
   const event = normalizeToolStreamEvent(
@@ -248,6 +249,34 @@ test('createOperationRegistryForAgentSetup reads operation metadata from setup t
   assert.deepEqual(event.operation.source, {
     provider: 'toolkit',
     name: 'custom_tool',
+    callId: undefined,
+  });
+});
+
+test('createOperationRegistryForAgentSetup reads host tool operation metadata from setup input', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolOperations: petProfileToolOperations,
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'describe_pet_profile',
+      input: { focus: '性格' },
+    },
+    registry,
+  );
+
+  assert.equal(event.operation.kind, 'pet.profile.read');
+  assert.equal(event.operation.title, '读取宠物资料');
+  assert.equal(event.operation.target, '性格');
+  assert.equal(event.operation.summary, '查看 性格');
+  assert.deepEqual(event.operation.source, {
+    provider: 'runtime',
+    name: 'describe_pet_profile',
     callId: undefined,
   });
 });

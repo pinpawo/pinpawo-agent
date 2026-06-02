@@ -122,6 +122,7 @@ export type {
 
 export {
   createPetProfileTool,
+  petProfileToolOperations,
 } from './tools/petProfile';
 export type {
   PetProfileToolOptions,

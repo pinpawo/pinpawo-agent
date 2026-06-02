@@ -32,9 +32,16 @@ export function createOperationRegistry(
 export function createOperationRegistryFromToolkits(
   toolkits: AgentToolkit[],
 ): OperationRegistry {
+  return createOperationRegistryFromSources({ toolkits });
+}
+
+export function createOperationRegistryFromSources(params: {
+  toolkits: AgentToolkit[];
+  runtimeOperations?: Record<string, ToolkitOperationMetadata>;
+}): OperationRegistry {
   const entries: Record<string, RegisteredOperationMetadata> = {};
 
-  for (const toolkit of toolkits) {
+  for (const toolkit of params.toolkits) {
     for (const [toolName, metadata] of Object.entries(toolkit.operations ?? {})) {
       entries[toolName] = {
         ...metadata,
@@ -44,6 +51,16 @@ export function createOperationRegistryFromToolkits(
         },
       };
     }
+  }
+
+  for (const [toolName, metadata] of Object.entries(params.runtimeOperations ?? {})) {
+    entries[toolName] = {
+      ...metadata,
+      source: {
+        provider: 'runtime',
+        name: toolName,
+      },
+    };
   }
 
   return createOperationRegistry(entries);

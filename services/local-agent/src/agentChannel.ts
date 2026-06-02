@@ -5,6 +5,7 @@ import {
   buildDailyPostTaskMessage,
   createCapabilityCreatorCapability,
   createPetProfileTool,
+  petProfileToolOperations,
   createDailyPostCapability,
   type AgentCapability,
   type AgentActor,
@@ -250,6 +251,7 @@ export function buildLocalChatAgentInput(params: {
       threadId: params.threadId,
       capabilities,
       tools: [...sharedTools, ...(params.tools ?? [])],
+      toolOperations: petProfileToolOperations,
       toolkits: params.toolkits,
       execution: {
         dryRun: params.dryRun,
@@ -347,6 +349,7 @@ export function buildLocalScheduledAgentInput(params: {
       ],
       capabilities,
       tools: sharedTools,
+      toolOperations: petProfileToolOperations,
       toolkits: params.toolkits,
       execution: {
         dryRun: params.dryRun,

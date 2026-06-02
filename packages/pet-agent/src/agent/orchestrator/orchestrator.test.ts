@@ -18,6 +18,8 @@ import {
 } from './capabilitySearch';
 import {
   collectCapabilityOperations,
+  collectGeneralOperations,
+  collectRuntimeOperations,
   collectToolkitOperations,
   readLatestToolArtifact,
   resolveToolkitResources,
@@ -413,6 +415,38 @@ test('toolkit and capability operations are collected with their source', () => 
     name: 'custom_tool',
   });
   assert.equal(capabilityOperations.shared_tool?.kind, 'toolkit.shared');
+});
+
+test('runtime tool operations are collected for host-provided tools', () => {
+  const runtimeOperations = collectRuntimeOperations({
+    describe_pet_profile: {
+      kind: 'pet.profile.read',
+      title: '读取宠物资料',
+    },
+  });
+
+  assert.equal(runtimeOperations.describe_pet_profile?.kind, 'pet.profile.read');
+  assert.deepEqual(runtimeOperations.describe_pet_profile?.source, {
+    provider: 'runtime',
+    name: 'describe_pet_profile',
+  });
+
+  const generalOperations = collectGeneralOperations([{
+    name: 'bash',
+    description: 'bash toolkit',
+    operations: {
+      read_file: {
+        kind: 'file.read',
+      },
+    },
+  }], {
+    describe_pet_profile: {
+      kind: 'pet.profile.read',
+    },
+  });
+
+  assert.equal(generalOperations.read_file?.kind, 'file.read');
+  assert.equal(generalOperations.describe_pet_profile?.kind, 'pet.profile.read');
 });
 
 test('built-in capability runtimes expose operation metadata', async () => {

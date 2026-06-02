@@ -16,6 +16,7 @@ import type {
   SessionId,
   SessionModel,
   TuiAction,
+  TokenUsageModel,
   TuiState,
 } from './tuiState';
 import { MAX_TUI_HISTORY_ITEMS } from './tuiState';
@@ -83,25 +84,46 @@ function finishRun(
   requestId: string,
   statusMessage: string,
   history: HistoryCellDraft[] = [],
+  tokenUsage?: TokenUsageModel | null,
 ) {
   const sessionId = state.runRoute[requestId];
   if (!sessionId) return state;
-  const nextState = updateSession(state, sessionId, (session) => {
-    if (!session.activeRun || session.activeRun.requestId !== requestId) {
-      return session;
+  const session = state.sessions[sessionId];
+  const nextState = updateSession(state, sessionId, (sessionToUpdate) => {
+    if (!sessionToUpdate.activeRun || sessionToUpdate.activeRun.requestId !== requestId) {
+      return sessionToUpdate;
     }
     return appendHistory({
-      ...session,
+      ...sessionToUpdate,
       activeRun: null,
     }, history);
   });
-  return {
+
+  const stateWithRouteRemoved = {
     ...nextState,
     connection: {
       ...nextState.connection,
       message: statusMessage,
     },
     runRoute: removeRunRoute(nextState, requestId),
+  };
+
+  if (tokenUsage === undefined) {
+    return stateWithRouteRemoved;
+  }
+
+  const nextTokenUsage = tokenUsage;
+  return {
+    ...stateWithRouteRemoved,
+    sessions: nextState.sessions[sessionId]
+      ? {
+          ...nextState.sessions,
+          [sessionId]: {
+            ...nextState.sessions[sessionId]!,
+            tokenUsage: nextTokenUsage,
+          },
+        }
+      : nextState.sessions,
   };
 }
 
@@ -253,6 +275,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           startedAt: action.now,
           charCount: 0,
         },
+        tokenUsage: null,
       }, [
         historyDraft('user', action.userText, action.userCell, `${action.requestId}:user`),
       ]));
@@ -285,6 +308,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           startedAt: action.now,
           charCount: 0,
         },
+        tokenUsage: null,
       }, [
         historyDraft('user', action.message, action.userCell, `${action.requestId}:review-response`),
       ]));
@@ -438,7 +462,9 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         const finalText = reply || activeRun.assistantDraft.trim() || '...';
         return finishRun(state, event.requestId, TUI_TEXT.statusReady, finalText
           ? [historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`)]
-          : []);
+          : [],
+          event.usage ?? null,
+        );
       }
 
       if (event.type === 'studio.progress') {

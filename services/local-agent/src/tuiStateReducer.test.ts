@@ -116,6 +116,33 @@ test('tuiStateReducer falls back to assistant draft when completed text is empty
   ]);
 });
 
+test('tuiStateReducer stores usage on completed message', () => {
+  let state = startRun(initialState(), 'req-1');
+  const usage = {
+    inputTokens: 50,
+    outputTokens: 20,
+    totalTokens: 70,
+    contextWindow: 100,
+  };
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '回答完成',
+      usage,
+    },
+    now: 1300,
+    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  const session = state.sessions['chat:pet']!;
+  assert.equal(session.activeRun, null);
+  assert.deepEqual(session.tokenUsage, usage);
+});
+
 test('tuiStateReducer clears session token usage when replacing or clearing history', () => {
   let state = initialState();
   state = {

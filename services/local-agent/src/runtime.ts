@@ -2,13 +2,10 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { WebSocket } from 'ws';
 import { FileSaver } from './fileSaver';
 import { config } from './config';
-import { loadAgentContext, sendHeartbeat, getNextTickAt } from './contextLoader';
-import { generateCrawlKeywords, ingestCrawlerResults, runMediaCrawler } from './crawler';
+import { loadAgentContext } from './contextLoader';
 import {
-  dailyPostResultSchema,
   type AgentCapability,
   type AgentToolkit,
-  type DailyPostResult,
 } from '@pinpawo/pet-agent';
 import { collectPluginHooks, loadPlugins } from './pluginLoader';
 import { loadUserCapabilities } from './capabilityLoader';
@@ -25,7 +22,6 @@ import type { AgentLlmConfig } from './agentConfig';
 import {
   buildLocalLlmConfig,
 } from './llmConfig';
-import { buildLocalScheduledAgentInput } from './agentChannel';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { LocalAgentGraphService } from './agentGraphService';
@@ -38,6 +34,7 @@ import {
 import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
+import { LocalAgentScheduledJob } from './localAgentScheduledJob';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
@@ -60,16 +57,8 @@ async function filterAvailableUserCapabilities(
 
 export class LocalAgentRuntime {
   private stopRequested = false;
-  private lastHeartbeatAt = 0;
-  private lastPostAt = 0;
   private actorId: string | null = null;
   private actorName: string | null = null;
-  private readonly startedAt = new Date().toISOString();
-  private totalRuns = 0;
-  private successfulRuns = 0;
-  private failedRuns = 0;
-  private lastRunAt: string | null = null;
-  private lastRunOk: boolean | null = null;
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginTools: StructuredTool[] = [];
@@ -102,6 +91,14 @@ export class LocalAgentRuntime {
     getPluginTools: () => this.pluginTools,
     getLocalToolkits: () => this.localToolkits,
     getLocalCapabilities: () => this.localCapabilities,
+    getUserCapabilities: () => this.userCapabilities,
+  });
+  private readonly scheduledJob = new LocalAgentScheduledJob({
+    graphService: this.graphService,
+    getActorId: () => this.getActorId(),
+    getLlmConfig: () => this.llmConfig,
+    getHooks: () => this.hooks,
+    getLocalToolkits: () => this.localToolkits,
     getUserCapabilities: () => this.userCapabilities,
   });
 
@@ -191,14 +188,7 @@ export class LocalAgentRuntime {
   }
 
   getStats() {
-    return {
-      startedAt: this.startedAt,
-      totalRuns: this.totalRuns,
-      successfulRuns: this.successfulRuns,
-      failedRuns: this.failedRuns,
-      lastRunAt: this.lastRunAt,
-      lastRunOk: this.lastRunOk,
-    };
+    return this.scheduledJob.getStats();
   }
 
   getActorId(): string {
@@ -223,7 +213,7 @@ export class LocalAgentRuntime {
 
     while (!this.stopRequested) {
       try {
-        await this.tick();
+        await this.scheduledJob.tick();
       } catch (err) {
         console.error('[local-agent] tick error:', err instanceof Error ? err.message : err);
       }
@@ -273,94 +263,5 @@ export class LocalAgentRuntime {
     }
     client?.disconnect();
     this.appWsClient = null;
-  }
-
-  // ---- Post generation tick ----
-
-  private async tick() {
-    const now = Date.now();
-
-    // Heartbeat via GraphQL
-    if (now - this.lastHeartbeatAt >= config.heartbeatIntervalSeconds * 1000) {
-      await sendHeartbeat(this.getActorId());
-      this.lastHeartbeatAt = now;
-      console.log('[local-agent] heartbeat sent');
-    }
-
-    // Check next_tick_at from DB (authoritative) — fall back to local timer
-    const nextTickAt = await getNextTickAt(this.getActorId());
-    if (nextTickAt && nextTickAt.getTime() > now) {
-      return;
-    }
-    if (!nextTickAt && now - this.lastPostAt < config.postIntervalHours * 3600 * 1000) {
-      return;
-    }
-
-    const initialCtx = await loadAgentContext(this.getActorId());
-    const recentTopics = initialCtx.context.recentDaily
-      .slice(0, 5)
-      .map((p) => p.topic)
-      .filter((t): t is string => Boolean(t));
-    const crawlKeywords = await generateCrawlKeywords({
-      pet: {
-        name: initialCtx.pet.name,
-        personality: initialCtx.pet.personality ?? null,
-        species: initialCtx.pet.species ?? null,
-      },
-      recentTopics,
-      today: initialCtx.context.today,
-    });
-
-    // Run plugin hooks + MediaCrawler
-    try {
-      await this.hooks!.beforeCrawl();
-      await runMediaCrawler({ keywords: crawlKeywords, maxCount: 10 });
-      await ingestCrawlerResults(10);
-    } catch (err) {
-      console.warn('[local-agent] crawler failed, continuing with existing trends:', err instanceof Error ? err.message : err);
-    }
-
-    console.log('[local-agent] loading context...');
-    const ctx = await loadAgentContext(this.getActorId());
-    console.log(`[local-agent] pet: ${ctx.pet.name}, trends: ${ctx.context.trendItems.length}`);
-
-    console.log('[local-agent] running agent...');
-    this.totalRuns++;
-    this.lastRunAt = new Date().toISOString();
-    try {
-        const setup = buildLocalScheduledAgentInput({
-          context: ctx,
-          llmConfig: this.llmConfig ?? buildLocalLlmConfig(),
-          dryRun: false,
-          toolkits: this.localToolkits,
-          userCapabilities: this.userCapabilities,
-        });
-        const { result } = await this.graphService.invokeStructuredResult(
-          setup,
-          dailyPostResultSchema,
-        );
-        const dailyPostResult: DailyPostResult = result
-          ? result as DailyPostResult
-          : { status: 'skipped', postId: null, reason: 'no-post', payload: null, imageRequested: false };
-        console.log(`[local-agent] result: ${dailyPostResult.status}${dailyPostResult.postId ? ` post=${dailyPostResult.postId}` : ''}${dailyPostResult.reason ? ` reason=${dailyPostResult.reason}` : ''}`);
-        this.lastPostAt = now;
-        this.successfulRuns++;
-        this.lastRunOk = true;
-        if (dailyPostResult.status === 'created' && dailyPostResult.postId && dailyPostResult.payload) {
-          await this.hooks?.afterPostSaved(dailyPostResult.postId, dailyPostResult.payload);
-        }
-      } catch (err) {
-        const status = (err as { status?: number }).status;
-        if (status === 429) {
-          console.log('[local-agent] rate limited by server, backing off');
-          this.lastPostAt = now;
-          this.successfulRuns++;
-          this.lastRunOk = true;
-        } else {
-          this.failedRuns++;
-          this.lastRunOk = false;
-          throw err;
-        }
-      }
   }
 }

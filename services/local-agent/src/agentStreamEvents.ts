@@ -3,7 +3,7 @@ import {
   normalizeToolStreamEvent,
   type StreamToolsPayload,
 } from './events/agentStreamNormalizer';
-import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
 import {
   emptyOperationRegistry,
   type OperationRegistry,
@@ -15,7 +15,7 @@ export function buildToolOperationEvent(
   requestId: string,
   payload: StreamToolsPayload,
   registry: OperationRegistry = emptyOperationRegistry,
-): LocalAgentOperationEvent {
+): LocalAgentOperationInternalEvent {
   return normalizeToolStreamEvent(requestId, payload, registry);
 }
 

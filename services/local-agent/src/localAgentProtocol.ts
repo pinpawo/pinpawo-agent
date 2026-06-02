@@ -1,4 +1,8 @@
-import type { LocalAgentEvent, LocalAgentOperationPhase } from './events/localAgentEvent';
+import type {
+  LocalAgentEvent,
+  LocalAgentOperationInternalEvent,
+  LocalAgentOperationPhase,
+} from './events/localAgentEvent';
 
 export type ChatRequestMessage = {
   type: 'chat_request';
@@ -152,7 +156,6 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     const source = readRecord(operation, 'source');
     const sourceProvider = source ? readString(source, 'provider') : null;
     const sourceName = source ? readString(source, 'name') : null;
-    const raw = readRecord(record, 'raw');
     return {
       type,
       requestId,
@@ -174,7 +177,6 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
             }
           : {}),
       },
-      ...(raw ? { raw } : {}),
     };
   }
   if (type === 'human_review.requested') {
@@ -309,12 +311,21 @@ export function sendLocalAgentEvent(ws: WsLike, event: LocalAgentEvent) {
   if (ws.readyState !== WS_OPEN) {
     return false;
   }
+  const publicEvent = toPublicLocalAgentEvent(event);
   ws.send(JSON.stringify({
     type: 'event',
-    requestId: event.requestId,
-    event,
+    requestId: publicEvent.requestId,
+    event: publicEvent,
   } satisfies LocalAgentEventMessage));
   return true;
+}
+
+function toPublicLocalAgentEvent(event: LocalAgentEvent): LocalAgentEvent {
+  if (event.type !== 'operation') {
+    return event;
+  }
+  const { raw: _raw, ...publicEvent } = event as LocalAgentOperationInternalEvent;
+  return publicEvent;
 }
 
 function isOperationPhase(value: string | null): value is LocalAgentOperationPhase {

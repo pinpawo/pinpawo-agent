@@ -3,6 +3,7 @@ import test from 'node:test';
 import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
+import { createBrowserToolkit } from './capabilities/browserCapability';
 import { createBashToolkit, localToolOperationRegistry } from './plugins/localTools';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
@@ -141,6 +142,80 @@ test('createBashToolkit exposes operation metadata with the toolkit definition',
   assert.equal(toolkit.operations?.read_file?.kind, 'file.read');
   assert.equal(toolkit.operations?.grep_search?.kind, 'search.grep');
   assert.equal(toolkit.operations?.run_shell?.kind, 'shell.run');
+});
+
+test('createBrowserToolkit exposes browser operation metadata', () => {
+  const toolkit = createBrowserToolkit();
+
+  assert.equal(toolkit.operations?.browser_open?.kind, 'browser.open');
+  assert.equal(toolkit.operations?.browser_click?.kind, 'browser.click');
+  assert.equal(toolkit.operations?.browser_type?.kind, 'browser.type');
+});
+
+test('browser operation metadata summarizes page output', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolkits: [createBrowserToolkit()],
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'browser_open',
+      toolCallId: 'call-1',
+      input: { url: 'https://example.com', headless: true },
+      output: JSON.stringify({
+        title: 'Example Domain',
+        url: 'https://example.com/',
+        text: 'Example text',
+      }),
+    },
+    registry,
+  );
+
+  assert.equal(event.operation.kind, 'browser.open');
+  assert.equal(event.operation.title, '打开网页');
+  assert.equal(event.operation.target, 'https://example.com/');
+  assert.equal(event.operation.summary, '页面：Example Domain');
+  assert.deepEqual(event.operation.source, {
+    provider: 'toolkit',
+    name: 'browser_open',
+    callId: 'call-1',
+  });
+});
+
+test('browser type operation metadata does not expose typed text in display fields', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolkits: [createBrowserToolkit()],
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'browser_type',
+      input: {
+        selector: '#password',
+        text: 'super-secret-token',
+        submit: true,
+      },
+    },
+    registry,
+  );
+
+  assert.equal(event.operation.kind, 'browser.type');
+  assert.equal(event.operation.target, '#password');
+  assert.equal(event.operation.summary, '输入到 #password');
+  assert.deepEqual(event.operation.details, {
+    selector: '#password',
+    submit: true,
+    textLength: 'super-secret-token'.length,
+  });
+  assert.equal(JSON.stringify(event.operation).includes('super-secret-token'), false);
 });
 
 test('createOperationRegistryForAgentSetup reads operation metadata from setup toolkits', () => {

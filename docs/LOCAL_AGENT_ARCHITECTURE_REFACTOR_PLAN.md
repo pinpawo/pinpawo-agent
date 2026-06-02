@@ -292,6 +292,7 @@ local-agent 对外只发送 `LocalAgentEvent` envelope。`pinpawo-app` app/API �
 - `LocalAgentEvent` 是 local-agent 对 app/TUI/macOS companion 的 public event API。
 - `sendLocalAgentMessage` 和 `sendLocalAgentEvent` 不接受 legacy 输出开关。
 - `parseLocalAgentServerMessage` 只解析新协议 event/control message；local-agent 不再提供通用 legacy server message parser，避免 TUI 或新客户端重新依赖 legacy wire shape。
+- `raw.input/output/error` 仅保留为 local-agent 内部调试数据，`sendLocalAgentEvent` 发送 public event 前会剥离 raw。
 
 ### 5.1 Operation event
 
@@ -518,7 +519,7 @@ type OperationRegistry = {
 
 ### 阶段 5：拆分 tools/policy/capability registry
 
-状态：进行中。`plugins/localTools.ts` 已收敛为 toolkit 装配入口；file/path tools 已抽到 `plugins/localTools/fileTools.ts`，`run_shell` implementation 与 review policy 已抽到 `plugins/localTools/shellTools.ts`，`http_fetch` / `download_file` 已抽到 `plugins/localTools/networkTools.ts`，`glob_search` / `grep_search` 已抽到 `plugins/localTools/searchTools.ts`；本地路径解析和文件遍历 helper 已抽到 `plugins/localTools/pathUtils.ts` / `plugins/localTools/fileSystemUtils.ts`，供 tools 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，pet-agent 已支持 toolkit/capability operation metadata 随 subagent tool event 透传，local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。
+状态：进行中。`plugins/localTools.ts` 已收敛为 toolkit 装配入口；file/path tools 已抽到 `plugins/localTools/fileTools.ts`，`run_shell` implementation 与 review policy 已抽到 `plugins/localTools/shellTools.ts`，`http_fetch` / `download_file` 已抽到 `plugins/localTools/networkTools.ts`，`glob_search` / `grep_search` 已抽到 `plugins/localTools/searchTools.ts`；本地路径解析和文件遍历 helper 已抽到 `plugins/localTools/pathUtils.ts` / `plugins/localTools/fileSystemUtils.ts`，operation metadata helper 已提升到 `plugins/operationMetadata.ts`，供 local/browser tool metadata 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability operation metadata 随 subagent tool event 透传，local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。
 
 目标：让 local tools 和 capability 管理可维护。
 
@@ -535,7 +536,7 @@ type OperationRegistry = {
 
 ### 阶段 6：清理 legacy
 
-状态：本仓库 wire protocol 兼容层已清理；本阶段剩余工作集中在 app 仓库迁移验证、历史数据迁移代码确认、文档表述收敛、内部 formatter 和 interface context 收敛。
+状态：本仓库 wire protocol 兼容层已清理；operation raw 调试数据已从 public event 出口剥离。本阶段剩余工作集中在 app 仓库迁移验证、历史数据迁移代码确认、文档表述收敛、内部 formatter 和 interface context 收敛。
 
 目标：删除过渡层。
 
@@ -584,9 +585,9 @@ type OperationRegistry = {
 1. 新协议使用 `type: 'event'` message，agent run activity 以 `LocalAgentEvent` 为 primary event model。
 2. local-agent 不再发送旧运行态消息；`pinpawo-app` app/API 迁移是剩余跨仓库工作。
 3. LangGraph `astream` 的 `messages/tools/values` 只作为 internal stream source，不能作为 app/TUI public protocol。
+4. public `LocalAgentEvent` 不发送 `raw.input/output/error`；这些字段只在 local-agent 内部 adapter/logging 使用。
 
 仍待确认：
 
-1. app 是否需要接收 `raw.input/output`，还是只在 debug mode 开启。
-2. user capability 的 metadata manifest 形态是否需要进入公开 capability contract。
-3. i18n 是 metadata 直接给 `title`，还是给 `titleKey` 由 adapter locale 渲染。
+1. user capability 的 metadata manifest 形态是否需要进入公开 capability contract。
+2. i18n 是 metadata 直接给 `title`，还是给 `titleKey` 由 adapter locale 渲染。

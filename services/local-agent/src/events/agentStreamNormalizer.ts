@@ -2,7 +2,7 @@ import type {
   SubagentToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import type {
-  LocalAgentOperationEvent,
+  LocalAgentOperationInternalEvent,
   LocalAgentOperationPhase,
 } from './localAgentEvent';
 import {
@@ -50,7 +50,7 @@ export function normalizeToolStreamEvent(
   requestId: string,
   payload: StreamToolsPayload,
   registry: OperationRegistry = emptyOperationRegistry,
-): LocalAgentOperationEvent {
+): LocalAgentOperationInternalEvent {
   const metadata = payload.operation
     ? {
         ...payload.operation,

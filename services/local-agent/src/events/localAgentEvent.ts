@@ -50,11 +50,16 @@ export type LocalAgentOperationEvent = {
       callId?: string;
     };
   };
-  raw?: {
-    input?: unknown;
-    output?: unknown;
-    error?: unknown;
-  };
+};
+
+export type LocalAgentOperationRaw = {
+  input?: unknown;
+  output?: unknown;
+  error?: unknown;
+};
+
+export type LocalAgentOperationInternalEvent = LocalAgentOperationEvent & {
+  raw?: LocalAgentOperationRaw;
 };
 
 export type LocalAgentHumanReviewRequestedEvent = {

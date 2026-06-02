@@ -3,7 +3,7 @@ import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
 import type {
-  LocalAgentOperationEvent,
+  LocalAgentOperationInternalEvent,
   LocalAgentOperationPhase,
 } from './events/localAgentEvent';
 import {
@@ -14,7 +14,7 @@ import {
 type ActiveTrackedOperation = {
   id: string;
   name: string;
-  event: LocalAgentOperationEvent;
+  event: LocalAgentOperationInternalEvent;
 };
 
 type TerminalPhase = Extract<LocalAgentOperationPhase, 'completed' | 'failed' | 'interrupted'>;
@@ -36,7 +36,7 @@ export class ToolOperationTracker {
     this.operationRegistry = operationRegistry;
   }
 
-  accept(payload: StreamToolsPayload): LocalAgentOperationEvent {
+  accept(payload: StreamToolsPayload): LocalAgentOperationInternalEvent {
     const id = this.resolveOperationId(payload);
     const event = buildToolOperationEvent(this.requestId, {
       ...payload,
@@ -46,7 +46,7 @@ export class ToolOperationTracker {
     return event;
   }
 
-  finishActive(phase: TerminalPhase, error?: unknown): LocalAgentOperationEvent[] {
+  finishActive(phase: TerminalPhase, error?: unknown): LocalAgentOperationInternalEvent[] {
     const active = [...this.activeById.values()];
     this.activeById.clear();
     this.activeIdsByName.clear();
@@ -74,7 +74,7 @@ export class ToolOperationTracker {
     return `tool-${this.sequence}`;
   }
 
-  private track(event: LocalAgentOperationEvent, name: string, id: string) {
+  private track(event: LocalAgentOperationInternalEvent, name: string, id: string) {
     if (event.phase === 'started') {
       this.activeById.set(id, { id, name, event });
       const ids = this.activeIdsByName.get(name) ?? [];

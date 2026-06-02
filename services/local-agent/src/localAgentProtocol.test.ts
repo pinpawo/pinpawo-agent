@@ -6,6 +6,7 @@ import {
   sendLocalAgentEvent,
   sendLocalAgentMessage,
 } from './localAgentProtocol';
+import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
 
 test('parseLocalAgentClientMessage accepts valid chat requests and rejects malformed payloads', () => {
   assert.deepEqual(
@@ -103,9 +104,6 @@ test('parseLocalAgentServerMessage accepts typed local-agent event messages', ()
             callId: undefined,
           },
         },
-        raw: {
-          input: { path: 'README.md' },
-        },
       },
     },
   );
@@ -161,6 +159,19 @@ test('sendLocalAgentEvent writes only typed events', () => {
     text: 'done',
     metadata: { mood: null, topic: null, tags: [] },
   }), true);
+  const internalOperationEvent: LocalAgentOperationInternalEvent = {
+    type: 'operation',
+    requestId: 'req-1',
+    phase: 'started',
+    operation: {
+      kind: 'file.read',
+      title: '读文件',
+    },
+    raw: {
+      input: { path: 'README.md' },
+    },
+  };
+  assert.equal(sendLocalAgentEvent(openWs, internalOperationEvent), true);
 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [
     {
@@ -182,6 +193,19 @@ test('sendLocalAgentEvent writes only typed events', () => {
         role: 'assistant',
         text: 'done',
         metadata: { mood: null, topic: null, tags: [] },
+      },
+    },
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'operation',
+        requestId: 'req-1',
+        phase: 'started',
+        operation: {
+          kind: 'file.read',
+          title: '读文件',
+        },
       },
     },
   ]);

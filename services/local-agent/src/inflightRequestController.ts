@@ -1,5 +1,5 @@
 import type { LocalAgentControlServerMessage } from './localAgentProtocol';
-import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
 import {
   clearInflightOperationTimer,
   createInflightOperationRun,
@@ -15,7 +15,7 @@ type InflightInterruptMessage = Extract<
 
 type InflightRequestControllerOptions<TKey> = {
   forceInterruptMs: number;
-  emitOperation: (key: TKey, event: LocalAgentOperationEvent) => void;
+  emitOperation: (key: TKey, event: LocalAgentOperationInternalEvent) => void;
   sendControl: (key: TKey, message: InflightInterruptMessage) => void;
   log?: (message: string) => void;
   logPrefix?: string;
@@ -34,7 +34,7 @@ type InterruptInflightRequestOptions = {
 export class InflightRequestController<TKey> {
   private readonly requests = new Map<TKey, InflightOperationRun>();
   private readonly forceInterruptMs: number;
-  private readonly emitOperation: (key: TKey, event: LocalAgentOperationEvent) => void;
+  private readonly emitOperation: (key: TKey, event: LocalAgentOperationInternalEvent) => void;
   private readonly sendControl: (key: TKey, message: InflightInterruptMessage) => void;
   private readonly log: (message: string) => void;
   private readonly logPrefix: string;

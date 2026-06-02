@@ -1,6 +1,6 @@
 import type { StreamToolsPayload } from './agentStreamEvents';
 import type {
-  LocalAgentOperationEvent,
+  LocalAgentOperationInternalEvent,
   LocalAgentOperationPhase,
 } from './events/localAgentEvent';
 import type { OperationRegistry } from './events/operationRegistry';
@@ -20,7 +20,7 @@ export type TerminalOperationPhase = Extract<
   'completed' | 'failed' | 'interrupted'
 >;
 
-export type EmitOperationEvent = (event: LocalAgentOperationEvent) => void;
+export type EmitOperationEvent = (event: LocalAgentOperationInternalEvent) => void;
 
 export function createInflightOperationRun(
   requestId: string,
@@ -50,12 +50,12 @@ export function clearInflightOperationTimer(run: InflightOperationRun) {
 export function acceptInflightToolEvent(
   run: InflightOperationRun,
   payload: StreamToolsPayload,
-): LocalAgentOperationEvent {
+): LocalAgentOperationInternalEvent {
   return run.operationTracker.accept(payload);
 }
 
 export function emitInflightOperationEvent(
-  event: LocalAgentOperationEvent,
+  event: LocalAgentOperationInternalEvent,
   emit: EmitOperationEvent,
 ) {
   recordOperationActivity(event);

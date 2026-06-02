@@ -9,10 +9,10 @@ import {
   formatSystemNoticeEvent,
   getOperationKey,
 } from './tui/render/eventText';
-import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
 
 test('formats operation events without reading legacy tool input/output', () => {
-  const event: LocalAgentOperationEvent = {
+  const event: LocalAgentOperationInternalEvent = {
     type: 'operation',
     requestId: 'req-1',
     phase: 'started',

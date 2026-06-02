@@ -1,12 +1,12 @@
 import type { StreamToolsPayload } from './agentStreamEvents';
-import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
 import {
   acceptInflightToolEvent,
   emitInflightOperationEvent,
   type InflightOperationRun,
 } from './inflightOperationRun';
 
-type EmitEvent = (event: LocalAgentOperationEvent) => void;
+type EmitEvent = (event: LocalAgentOperationInternalEvent) => void;
 type Log = (message: string) => void;
 
 function maybeTrimForLog(value: string | undefined, max = 300) {
@@ -69,7 +69,7 @@ export function emitLocalServerToolOperationEvent(options: {
   const event = acceptInflightToolEvent(run, payload);
 
   if (event.phase === 'failed' && isHumanReviewInterruptError(payload.error)) {
-    const interruptedEvent = {
+    const interruptedEvent: LocalAgentOperationInternalEvent = {
       ...event,
       phase: 'interrupted' as const,
       raw: {

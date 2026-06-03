@@ -9,7 +9,7 @@ export function buildLocalLlmConfig(overrides: Partial<AgentLlmConfig> = {}): Ag
     baseUrl: config.llmBaseUrl,
     model: config.llmModel,
     observeModel: config.llmModel,
-    contextWindowTokens: 32000,
+    contextWindowTokens: config.llmContextWindowTokens,
     temperature: 0.7,
     timeoutMs: 120000,
     maxRetries: 2,

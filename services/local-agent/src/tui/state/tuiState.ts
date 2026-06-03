@@ -36,6 +36,11 @@ export type SessionModel = {
     label: string;
     summary: string;
   };
+  runtime: {
+    model?: string;
+    cwd?: string;
+    contextWindow?: number;
+  };
   history: HistoryCellModel[];
   activeRun: ActiveRunModel | null;
   tokenUsage: TokenUsageModel | null;
@@ -104,6 +109,11 @@ export type TuiAction =
       type: 'session.set_actor';
       sessionId?: SessionId;
       actor: SessionModel['actor'];
+    }
+  | {
+      type: 'session.set_runtime';
+      sessionId?: SessionId;
+      runtime: Pick<SessionModel['runtime'], 'model' | 'cwd' | 'contextWindow'>;
     }
   | {
       type: 'session.set_kind';
@@ -229,6 +239,7 @@ export function createSession(params: {
       label: params.actor?.label ?? TUI_TEXT.defaultPetName,
       summary: params.actor?.summary ?? TUI_TEXT.defaultPetSummary,
     },
+    runtime: {},
     history: params.history ?? [],
     activeRun: null,
     tokenUsage: null,

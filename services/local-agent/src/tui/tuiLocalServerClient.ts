@@ -11,6 +11,12 @@ type TuiLocalServerClientOptions = {
   fetchImpl?: FetchLike;
 };
 
+export type LocalServerRuntimeSnapshot = {
+  model?: string;
+  contextWindow?: number;
+  cwd?: string;
+};
+
 export class TuiLocalServerClient {
   private readonly fetchImpl: FetchLike;
 
@@ -34,6 +40,16 @@ export class TuiLocalServerClient {
       messages?: Array<{ role?: string; text?: string }>;
     };
     return parseHistoryMessages(payload.messages);
+  }
+
+  async readRuntime(timeoutMs = DEFAULT_HEALTH_TIMEOUT_MS): Promise<LocalServerRuntimeSnapshot | null> {
+    try {
+      const res = await this.fetchWithTimeout(this.url('/runtime'), timeoutMs);
+      if (!res.ok) return null;
+      return parseLocalServerRuntime(await res.json());
+    } catch {
+      return null;
+    }
   }
 
   async listResumeSessions(): Promise<ResumeSessionSummary[]> {
@@ -130,5 +146,58 @@ export function parseResumeSessionSummary(value: unknown): ResumeSessionSummary 
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     active: record.active === true,
+  };
+}
+
+function parsePositiveInteger(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function pickString(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSnapshot | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  const llmConfig = record.llmConfig;
+  const nested =
+    typeof llmConfig === 'object' && llmConfig !== null && !Array.isArray(llmConfig)
+      ? llmConfig as Record<string, unknown>
+      : null;
+  const rawModel = pickString(record, ['llm_model', 'llmModel', 'model']);
+  const rawWorkdir = pickString(record, ['workdir', 'workDir', 'cwd', 'work_dir']);
+  const rawContextWindow =
+    pickString(record, ['llm_context_window_tokens', 'llmContextWindowTokens', 'contextWindow', 'context_window_tokens'])
+    ?? record.llm_context_window_tokens
+    ?? record.llmContextWindowTokens
+    ?? record.contextWindow
+    ?? record.context_window_tokens;
+  const nestedContextWindow = nested
+    ? (parsePositiveInteger(nested.contextWindow)
+      ?? parsePositiveInteger(nested.context_window_tokens)
+      ?? parsePositiveInteger(nested.context_window))
+    : undefined;
+  const nestedModel = nested ? pickString(nested, ['model', 'llmModel']) : undefined;
+
+  return {
+    model: rawModel ?? nestedModel,
+    contextWindow: parsePositiveInteger(rawContextWindow) ?? nestedContextWindow,
+    cwd: rawWorkdir ?? pickString(nested ?? {}, ['workdir', 'cwd']),
   };
 }

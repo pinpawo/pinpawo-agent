@@ -2,6 +2,7 @@ import { createInterface } from 'node:readline/promises';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
+import { inferLlmContextWindowTokens } from '../llmContextWindow';
 import { loadStoredConfig, saveStoredConfig, configPath } from '../storage';
 
 type AuthResponse = {
@@ -30,6 +31,18 @@ function normalizeOptionalInput(input: string): string | null {
   if (!trimmed) return null;
   if (trimmed === '-' || trimmed.toLowerCase() === 'clear') return '';
   return trimmed;
+}
+
+function parsePositiveInteger(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number(value.trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function formatContextWindow(value: number | undefined): string {
+  return typeof value === 'number'
+    ? new Intl.NumberFormat('zh-CN').format(value)
+    : '手动填写';
 }
 
 function fail(message: string): never {
@@ -117,6 +130,10 @@ export async function runLogin() {
     const defaultLlmKey = stored.llm_api_key ?? process.env.LLM_API_KEY ?? '';
     const defaultLlmBase = stored.llm_base_url ?? process.env.LLM_BASE_URL ?? 'https://api.deepseek.com';
     const defaultLlmModel = stored.llm_model ?? process.env.LLM_MODEL ?? 'deepseek-v4-pro';
+    const defaultLlmContextWindow =
+      stored.llm_context_window_tokens
+      ?? parsePositiveInteger(process.env.LLM_CONTEXT_WINDOW_TOKENS)
+      ?? inferLlmContextWindowTokens(defaultLlmModel);
 
     let llmApiKey = await prompt(rl, `LLM API Key${defaultLlmKey ? ' [already set, press Enter to keep]' : ''}: `);
     if (!llmApiKey && defaultLlmKey) llmApiKey = defaultLlmKey;
@@ -129,6 +146,25 @@ export async function runLogin() {
 
     let llmModel = await prompt(rl, `LLM Model [${defaultLlmModel}]: `);
     if (!llmModel) llmModel = defaultLlmModel;
+
+    const inferredContextWindow = inferLlmContextWindowTokens(llmModel);
+    let llmContextWindow = await prompt(
+      rl,
+      inferredContextWindow || defaultLlmContextWindow
+        ? `LLM Context Window Tokens [${formatContextWindow(inferredContextWindow ?? defaultLlmContextWindow ?? undefined)}]: `
+        : 'LLM Context Window Tokens (custom model, required): ',
+    );
+    if (!llmContextWindow) {
+      if (inferredContextWindow ?? defaultLlmContextWindow) {
+        llmContextWindow = String(inferredContextWindow ?? defaultLlmContextWindow);
+      } else {
+        fail('LLM Context Window Tokens are required for an unknown model.');
+      }
+    }
+    const parsedContextWindow = parsePositiveInteger(llmContextWindow);
+    if (parsedContextWindow === null) {
+      fail('LLM Context Window Tokens must be a positive integer.');
+    }
 
     // MediaCrawler configuration (optional)
     console.log('\nMediaCrawler Configuration (optional):');
@@ -178,6 +214,7 @@ export async function runLogin() {
       llm_api_key: llmApiKey,
       llm_base_url: llmBaseUrl,
       llm_model: llmModel,
+      llm_context_window_tokens: parsedContextWindow,
       mediacrawler_dir: mediaCrawlerDir || undefined,
       xhs_cookie: xhsCookie || undefined,
     };

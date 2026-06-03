@@ -16,6 +16,7 @@ import type {
   SessionId,
   SessionModel,
   TuiAction,
+  TokenUsageModel,
   TuiState,
 } from './tuiState';
 import { MAX_TUI_HISTORY_ITEMS } from './tuiState';
@@ -83,19 +84,22 @@ function finishRun(
   requestId: string,
   statusMessage: string,
   history: HistoryCellDraft[] = [],
+  tokenUsage?: TokenUsageModel | null,
 ) {
   const sessionId = state.runRoute[requestId];
   if (!sessionId) return state;
-  const nextState = updateSession(state, sessionId, (session) => {
-    if (!session.activeRun || session.activeRun.requestId !== requestId) {
-      return session;
+  const session = state.sessions[sessionId];
+  const nextState = updateSession(state, sessionId, (sessionToUpdate) => {
+    if (!sessionToUpdate.activeRun || sessionToUpdate.activeRun.requestId !== requestId) {
+      return sessionToUpdate;
     }
     return appendHistory({
-      ...session,
+      ...sessionToUpdate,
       activeRun: null,
     }, history);
   });
-  return {
+
+  const stateWithRouteRemoved = {
     ...nextState,
     connection: {
       ...nextState.connection,
@@ -103,6 +107,56 @@ function finishRun(
     },
     runRoute: removeRunRoute(nextState, requestId),
   };
+
+  if (tokenUsage === undefined) {
+    return stateWithRouteRemoved;
+  }
+
+  if (tokenUsage === null) {
+    const sessionToClear = stateWithRouteRemoved.sessions[sessionId];
+    if (!sessionToClear) {
+      return stateWithRouteRemoved;
+    }
+    return {
+      ...stateWithRouteRemoved,
+      sessions: {
+        ...stateWithRouteRemoved.sessions,
+        [sessionId]: {
+          ...sessionToClear,
+          tokenUsage: null,
+        },
+      },
+    };
+  }
+
+  const runtimeContextWindow = stateWithRouteRemoved.sessions[sessionId]?.runtime.contextWindow;
+  const nextTokenUsage: TokenUsageModel = tokenUsage.contextWindow === undefined && runtimeContextWindow !== undefined
+    ? { ...tokenUsage, contextWindow: runtimeContextWindow }
+    : tokenUsage;
+  const stateWithRuntimeUpdated = nextTokenUsage.contextWindow === undefined
+    ? stateWithRouteRemoved
+    : updateSession(stateWithRouteRemoved, sessionId, (sessionToUpdate) => ({
+      ...sessionToUpdate,
+      runtime: {
+        ...sessionToUpdate.runtime,
+        contextWindow: nextTokenUsage.contextWindow,
+      },
+    }));
+  const runtimeUpdatedSession = stateWithRuntimeUpdated.sessions[sessionId];
+  if (!runtimeUpdatedSession) {
+    return stateWithRuntimeUpdated;
+  }
+
+  return {
+      ...stateWithRuntimeUpdated,
+      sessions: {
+        ...stateWithRuntimeUpdated.sessions,
+        [sessionId]: {
+          ...runtimeUpdatedSession,
+          tokenUsage: nextTokenUsage,
+        },
+      },
+    };
 }
 
 function activeRunToPendingUi(run: ActiveRunModel | null) {
@@ -180,6 +234,15 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         actor: action.actor,
       }));
 
+    case 'session.set_runtime':
+      return updateSession(state, resolveSessionId(state, action.sessionId), (session) => ({
+        ...session,
+        runtime: {
+          ...session.runtime,
+          ...action.runtime,
+        },
+      }));
+
     case 'session.set_kind':
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) => ({
         ...session,
@@ -253,6 +316,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           startedAt: action.now,
           charCount: 0,
         },
+        tokenUsage: null,
       }, [
         historyDraft('user', action.userText, action.userCell, `${action.requestId}:user`),
       ]));
@@ -285,6 +349,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           startedAt: action.now,
           charCount: 0,
         },
+        tokenUsage: null,
       }, [
         historyDraft('user', action.message, action.userCell, `${action.requestId}:review-response`),
       ]));
@@ -438,7 +503,9 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         const finalText = reply || activeRun.assistantDraft.trim() || '...';
         return finishRun(state, event.requestId, TUI_TEXT.statusReady, finalText
           ? [historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`)]
-          : []);
+          : [],
+          event.usage ?? null,
+        );
       }
 
       if (event.type === 'studio.progress') {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
+import { config } from '../config';
 import { TUI_TEXT } from './render/text';
 import { formatNow } from './render/terminalText';
 import { TuiLocalServerClient } from './tuiLocalServerClient';
@@ -36,9 +37,6 @@ function sleep(ms: number) {
 function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) {
   const pet = context.pet;
   const pieces = [pet.species || TUI_TEXT.unknownSpecies, pet.stage || TUI_TEXT.unknownStage];
-  if (typeof pet.growth_value === 'number') {
-    pieces.push(TUI_TEXT.growthValue(pet.growth_value));
-  }
   return pieces.join(' · ');
 }
 
@@ -271,6 +269,31 @@ export class TuiRuntimeController {
     });
   }
 
+  private setRuntimeFromHealth(payload: { model?: string; contextWindow?: number; cwd?: string }) {
+    const model = payload.model ?? config.llmModel;
+    const cwd = payload.cwd ?? config.workdir;
+
+    if (!model && !cwd && !payload.contextWindow) {
+      return;
+    }
+
+    this.options.dispatch({
+      type: 'session.set_runtime',
+      runtime: {
+        ...(model ? { model } : {}),
+        ...(payload.contextWindow !== undefined ? { contextWindow: payload.contextWindow } : {}),
+        ...(cwd ? { cwd } : {}),
+      },
+    });
+  }
+
+  private async fetchLocalRuntime() {
+    const payload = await this.localServerClient.readRuntime();
+    if (!payload) return false;
+    this.setRuntimeFromHealth(payload);
+    return true;
+  }
+
   async listResumeSessions() {
     return this.localServerClient.listResumeSessions();
   }
@@ -300,8 +323,9 @@ export class TuiRuntimeController {
     for (let attempt = 0; attempt <= LOCAL_SERVER_CONNECT_RETRIES; attempt += 1) {
       if (this.disposed) return false;
       try {
-        const healthy = await this.checkLocalServerHealth();
-        if (!healthy) throw new Error('health check failed');
+        const health = await this.checkLocalServerHealth();
+        if (!health) throw new Error('health check failed');
+        await this.fetchLocalRuntime();
         return true;
       } catch {
         if (this.disposed) return false;
@@ -396,13 +420,15 @@ export class TuiRuntimeController {
   private async reconnect() {
     if (this.disposed || this.wsClient.hasSocket()) return;
 
-    const healthy = await this.checkLocalServerHealth();
+    const health = await this.checkLocalServerHealth();
     if (this.disposed || this.wsClient.hasSocket()) return;
 
-    if (!healthy) {
+    if (!health) {
       this.scheduleReconnect();
       return;
     }
+
+    await this.fetchLocalRuntime();
 
     this.connectWebSocket();
   }

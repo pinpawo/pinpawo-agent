@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentChannelSetup } from './agentChannel';
+import type { LocalAgentEvent } from './events/localAgentEvent';
 import type { LocalAgentGraphService } from './agentGraphService';
 import { runChatSession } from './chatSessionAdapter';
-import type { StreamToolsPayload } from './agentStreamEvents';
+import { readFinalMessageText, type StreamToolsPayload } from './agentStreamEvents';
+
+function estimateTestTokens(messages: BaseMessage[]) {
+  return messages.reduce((total, message) => {
+    const content = readFinalMessageText(message);
+    const metadata = message.additional_kwargs && Object.keys(message.additional_kwargs).length > 0
+      ? JSON.stringify(message.additional_kwargs)
+      : '';
+    return total + Math.max(0, Math.ceil(`${message._getType()}\n${content}\n${metadata}`.length / 4));
+  }, 0);
+}
 
 test('runChatSession uses onToolEvent as the only operation source', async () => {
   const emittedTools: StreamToolsPayload[] = [];
@@ -81,4 +92,83 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
     ),
     true,
   );
+});
+
+test('runChatSession emits token usage in completed event', async () => {
+  const emittedEvents: unknown[] = [];
+  const promptMessages = [
+    new HumanMessage('历史问题'),
+    new AIMessage('历史回答'),
+    new HumanMessage('你是谁？'),
+  ];
+  const snapshotMessages = [
+    new HumanMessage('已保存的历史消息'),
+  ];
+  const finalMessages = [
+    ...snapshotMessages,
+    ...promptMessages,
+    new AIMessage('这里是回执。'),
+  ];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: promptMessages,
+    },
+  } as unknown as AgentChannelSetup;
+
+  let getStateCalls = 0;
+  const graphService = {
+    async getState() {
+      getStateCalls += 1;
+      return {
+        values: {
+          messages: getStateCalls === 1 ? snapshotMessages : finalMessages,
+        },
+      };
+    },
+    async *stream(streamSetup: AgentChannelSetup) {
+      yield [
+        'messages',
+        [
+          new AIMessage('你好，'),
+          { node: 'assistant' },
+        ],
+      ];
+      yield [
+        'values',
+        {
+          messages: finalMessages,
+        },
+      ];
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      requestId: 'req-1',
+      message: '你是谁？',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: '这里是回执。' });
+  const completed = (emittedEvents as LocalAgentEvent[])
+    .find((message): message is LocalAgentEvent => message.type === 'message.completed') ?? null;
+  assert.equal(completed?.type, 'message.completed');
+  assert.equal(completed?.role, 'assistant');
+  assert.equal(completed.usage?.contextWindow, 32000);
+  assert.equal(completed.usage?.inputTokens, estimateTestTokens([...snapshotMessages, ...promptMessages]));
+  assert.equal(completed.usage?.totalTokens, estimateTestTokens(finalMessages));
+  assert.equal(typeof completed.usage?.outputTokens, 'number');
+  assert.equal(completed.usage?.outputTokens >= 0, true);
 });

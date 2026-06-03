@@ -21,6 +21,8 @@ npx pinpawo-local-agent tui
 
 Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Browser automation uses the optional bundled browser backend when available, or an externally installed `agent-browser` / `playwright-core`.
 
+The `browser_screenshot` tool captures the current page as a PNG (saved under `~/.pinpawo/screenshots`). If the configured model supports image input, set `"multimodal": true` in `~/.pinpawo/config.json` — the agent then feeds the screenshot to the model so it can "see" the page. With `multimodal` off (default), the tool only returns the saved path. Screenshots currently require the `playwright` browser backend.
+
 ## Commands
 
 ```bash

@@ -242,6 +242,7 @@ export function buildLocalChatAgentInput(params: {
       checkpoint: params.checkpoint,
       decisionStructuredOutput: buildDecisionStructuredOutput(llmConfig),
       contextWindowTokens: llmConfig.contextWindowTokens,
+      multimodal: llmConfig.multimodal,
     },
     input: {
       messages: [
@@ -333,6 +334,7 @@ export function buildLocalScheduledAgentInput(params: {
       actor,
       decisionStructuredOutput: buildDecisionStructuredOutput(llmConfig),
       contextWindowTokens: llmConfig.contextWindowTokens,
+      multimodal: llmConfig.multimodal,
     },
     input: {
       messages: [

@@ -142,6 +142,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       capabilities: capsForThisPet,
       tools: input.tools,
       contextWindowTokens: input.llmConfig.contextWindowTokens,
+      multimodal: input.llmConfig.multimodal,
       decisionStructuredOutput: petDecisionStructuredOutput,
       humanReviewer: createWsHumanReviewer({
         send: input.bridge.send,

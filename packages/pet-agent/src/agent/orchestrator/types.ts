@@ -69,6 +69,8 @@ export type OrchestratorConfig = {
   checkpoint?: BaseCheckpointSaver;
   decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
+  /** 模型是否支持多模态(图片输入);透传给 capability subagent(见 SubagentInput.multimodal)。 */
+  multimodal?: boolean;
 };
 
 export type OrchestratorInvokeOptions = {

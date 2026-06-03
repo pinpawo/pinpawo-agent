@@ -51,6 +51,12 @@ export type SubagentInput = {
   maxIterations?: number;
   signal?: AbortSignal;
   onToolEvent?: SubagentToolEventHandler;
+  /**
+   * 模型是否支持多模态(图片输入)。为 true 时,subagent 会把工具结果 artifact
+   * 里携带的图片(`{ images: [...] }`)在下一次模型调用前作为一条 HumanMessage 喂给模型,
+   * 让模型"看"到图片。默认 false(模型不支持图片,图片不喂入,只保留工具文本结果)。
+   */
+  multimodal?: boolean;
 };
 
 export type SubagentCompletionReason = 'natural' | 'limit_reached' | 'error';

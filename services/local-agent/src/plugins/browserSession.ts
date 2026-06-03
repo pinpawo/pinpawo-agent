@@ -21,7 +21,17 @@ const MAX_INTERACTIVE_ELEMENTS = 20;
 const DEFAULT_CHROME_EXECUTABLE_PATH =
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const SESSIONS_DIR = resolve(homedir(), '.pinpawo', 'sessions');
+const SCREENSHOTS_DIR = resolve(homedir(), '.pinpawo', 'screenshots');
 const DEFAULT_SESSION = 'default';
+
+/** 一次截屏的结构化结果。`dataUrl` 供多模态工具结果直接喂给视觉模型(见 #21 slice 2)。 */
+export type BrowserScreenshot = {
+  path: string;
+  base64: string;
+  dataUrl: string;
+  byteLength: number;
+  fullPage: boolean;
+};
 const SAFE_SESSION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -382,6 +392,27 @@ class PlaywrightBrowserSession {
 
   async snapshot(): Promise<string> { return this.buildSnapshot(await this.requirePage()); }
 
+  /**
+   * 对当前页面截屏(PNG),保存到 ~/.pinpawo/screenshots 并返回结构化结果。
+   * 两种后端(playwright / agent-browser)都最终持有 Playwright Page,因此 page.screenshot() 通用。
+   */
+  async screenshot(opts: { fullPage?: boolean } = {}): Promise<BrowserScreenshot> {
+    const page = await this.requirePage();
+    const fullPage = opts.fullPage ?? false;
+    const buffer = await page.screenshot({ fullPage, type: 'png' });
+    if (!existsSync(SCREENSHOTS_DIR)) mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+    const path = resolve(SCREENSHOTS_DIR, `screenshot-${Date.now()}.png`);
+    writeFileSync(path, buffer);
+    const base64 = buffer.toString('base64');
+    return {
+      path,
+      base64,
+      dataUrl: `data:image/png;base64,${base64}`,
+      byteLength: buffer.length,
+      fullPage,
+    };
+  }
+
   async click(selector: string): Promise<string> {
     const page = await this.requirePage();
     await page.locator(selector).first().click({ timeout: DEFAULT_TIMEOUT_MS });
@@ -607,6 +638,10 @@ class AgentBrowserSession {
 
   async snapshot(): Promise<string> { return this.buildSnapshot(); }
 
+  async screenshot(_opts: { fullPage?: boolean } = {}): Promise<BrowserScreenshot> {
+    throw new Error('当前为 agent-browser 后端，暂不支持截屏；截屏目前仅支持 playwright 后端。');
+  }
+
   async click(selector: string): Promise<string> {
     await this.exec(['click', selector]);
     return this.buildSnapshot();
@@ -672,6 +707,7 @@ export class BrowserSession {
     return (await this.ensureImpl()).open(url, { ...opts, userDataDir });
   }
   async snapshot() { return (await this.ensureImpl()).snapshot(); }
+  async screenshot(opts?: { fullPage?: boolean }) { return (await this.ensureImpl()).screenshot(opts); }
   async click(selector: string) { return (await this.ensureImpl()).click(selector); }
   async type(selector: string, text: string, submit?: boolean) {
     return (await this.ensureImpl()).type(selector, text, submit);

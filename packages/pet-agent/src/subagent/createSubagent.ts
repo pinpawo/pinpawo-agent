@@ -1,6 +1,7 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import { HumanMessage } from '@langchain/core/messages';
+import type { BaseMessage, ToolMessage } from '@langchain/core/messages';
 import type { SubagentInput, SubagentResult, SubagentToolEvent } from '../types/subagent';
-import { createAgent } from 'langchain';
+import { createAgent, createMiddleware } from 'langchain';
 import { SubagentToolEventTracker } from './toolEventTracker';
 
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 12;
@@ -43,6 +44,54 @@ function isSubagentToolEvent(payload: unknown): payload is SubagentToolEvent {
   );
 }
 
+type ToolImageArtifact = { images?: Array<{ dataUrl: string }> };
+
+function readToolImages(message: BaseMessage): Array<{ dataUrl: string }> | null {
+  if (message._getType() !== 'tool') return null;
+  const artifact = (message as ToolMessage).artifact as ToolImageArtifact | undefined;
+  return artifact?.images?.length ? artifact.images : null;
+}
+
+/**
+ * 把"最后一条 human 消息之后"出现的工具图片 artifact(`{ images: [...] }`)转成
+ * 待注入的 HumanMessage(image_url)。注入后这些工具结果就落在新 human 消息之前,
+ * 因此再次调用时不会重复注入(天然去重)。纯函数,便于单测。
+ */
+export function buildToolImageRelayMessages(messages: BaseMessage[]): HumanMessage[] {
+  let lastHuman = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?._getType() === 'human') {
+      lastHuman = i;
+      break;
+    }
+  }
+  const injected: HumanMessage[] = [];
+  for (let i = lastHuman + 1; i < messages.length; i += 1) {
+    const images = readToolImages(messages[i]!);
+    if (!images) continue;
+    injected.push(new HumanMessage({
+      content: [
+        { type: 'text', text: '以下是工具返回的图片(如网页截图),请据此理解当前页面内容:' },
+        ...images.map((img) => ({ type: 'image_url' as const, image_url: { url: img.dataUrl } })),
+      ],
+    }));
+  }
+  return injected;
+}
+
+/**
+ * 模型支持多模态时启用:每次模型调用前,把工具图片注入为 HumanMessage,让模型"看"到图片。
+ */
+function buildToolImageRelayMiddleware() {
+  return createMiddleware({
+    name: 'ToolImageRelay',
+    beforeModel: (state) => {
+      const injected = buildToolImageRelayMessages((state as { messages: BaseMessage[] }).messages);
+      return injected.length ? { messages: injected } : undefined;
+    },
+  });
+}
+
 export async function createSubagent(input: SubagentInput): Promise<SubagentResult> {
   const systemPrompt = [SUBAGENT_GOVERNING_PROMPT, ...input.instructions].join('\n\n');
   const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
@@ -51,6 +100,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
     model: input.model,
     tools: input.tools,
     systemPrompt,
+    ...(input.multimodal ? { middleware: [buildToolImageRelayMiddleware()] } : {}),
   });
 
   let latestMessages = input.messages;

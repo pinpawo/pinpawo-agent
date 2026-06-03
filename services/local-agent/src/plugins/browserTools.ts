@@ -224,11 +224,41 @@ const browserSessionTool = tool(
   },
 );
 
+const browserScreenshotTool = tool(
+  async ({ fullPage }: { fullPage?: boolean }): Promise<[string, unknown]> => {
+    try {
+      const shot = await browserSession.screenshot({ fullPage });
+      const kb = Math.round(shot.byteLength / 1024);
+      const scope = shot.fullPage ? '整页' : '当前视口';
+      const text = `已对${scope}截屏并保存到 ${shot.path}(${kb} KB)。`;
+      // 图片放进 artifact:模型支持多模态时,subagent 中间件会把它喂给模型(见 createSubagent);
+      // 否则只用上面的文本结果。
+      return [text, { images: [{ dataUrl: shot.dataUrl, mimeType: 'image/png' }] }];
+    } catch (err) {
+      return [`Error: ${err instanceof Error ? err.message : err}`, undefined];
+    }
+  },
+  {
+    name: 'browser_screenshot',
+    description:
+      '对当前浏览器页面截屏并保存为 PNG，返回保存路径；模型支持多模态时还会把截图喂给模型“看”。\n' +
+      '- fullPage: true 截取整页（含滚动区域），默认 false 只截当前视口。',
+    schema: z.object({
+      fullPage: z
+        .boolean()
+        .optional()
+        .describe('是否截取整页（含滚动区域）。默认 false，只截当前视口。'),
+    }),
+    responseFormat: 'content_and_artifact',
+  },
+);
+
 export const browserTools: StructuredTool[] = [
   browserOpenTool,
   browserOpenWithSessionTool,
   browserOpenWithProfileTool,
   browserSnapshotTool,
+  browserScreenshotTool,
   browserClickTool,
   browserTypeTool,
   browserWaitTool,

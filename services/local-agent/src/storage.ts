@@ -28,6 +28,11 @@ export type StoredConfig = {
    */
   /** Enable thinking/reasoning for subagent calls. Default: false. */
   subagent_thinking?: boolean;
+  /**
+   * 配置的模型是否支持多模态(图片输入)。为 true 时,capability subagent 会把工具产出的
+   * 图片(如浏览器截图)喂给模型。默认 false。
+   */
+  multimodal?: boolean;
   capabilities?: Record<string, boolean>;
   /**
    * Additional directories to scan for user-defined capability plugins,

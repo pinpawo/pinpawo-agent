@@ -609,6 +609,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       signal: runnableConfig?.signal,
       onToolEvent,
+      multimodal: config.multimodal,
     };
     validateUniqueToolNames(subagentInput.tools);
 

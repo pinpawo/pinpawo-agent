@@ -14,6 +14,7 @@ export function buildLocalLlmConfig(overrides: Partial<AgentLlmConfig> = {}): Ag
     timeoutMs: 120000,
     maxRetries: 2,
     subagentThinking: stored.subagent_thinking ?? false,
+    multimodal: stored.multimodal ?? false,
     ...overrides,
   };
 }

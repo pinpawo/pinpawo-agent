@@ -32,15 +32,17 @@ function get(envKey: string, storedKey: keyof typeof stored): string {
   return process.env[envKey] || (typeof storedVal === 'string' ? storedVal : '') || '';
 }
 
-function getNumber(envKey: string, storedKey: keyof typeof stored): number | undefined {
-  const storedVal = stored[storedKey];
-  const envVal = process.env[envKey];
-  const raw = envVal ?? (typeof storedVal === 'number' ? String(storedVal) : '');
+export function resolveNumberConfigValue(envVal: string | undefined, storedVal: unknown): number | undefined {
+  const raw = envVal?.trim() ? envVal : (typeof storedVal === 'number' ? String(storedVal) : '');
   if (!raw.trim()) return undefined;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 && Number.isInteger(parsed)
     ? parsed
     : undefined;
+}
+
+function getNumber(envKey: string, storedKey: keyof typeof stored): number | undefined {
+  return resolveNumberConfigValue(process.env[envKey], stored[storedKey]);
 }
 
 function required(envKey: string, storedKey: keyof typeof stored, label: string): string {

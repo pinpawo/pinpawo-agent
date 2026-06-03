@@ -193,7 +193,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   const finalTokens = estimateMessagesTokens(readMessages(finalSnapshot));
   const inputTokens = estimateMessagesTokens([
     ...readMessages(threadSnapshot),
-    ...setup.input.messages.slice(-1),
+    ...setup.input.messages,
   ]);
   const outputTokens = Math.max(0, finalTokens - inputTokens);
   const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;

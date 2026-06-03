@@ -17,6 +17,7 @@ export type StoredConfig = {
   llm_base_url?: string;
   llm_model?: string;
   llm_observe_model?: string;
+  llm_context_window_tokens?: number;
   mediacrawler_dir?: string;
   xhs_cookie?: string;
   workdir?: string;

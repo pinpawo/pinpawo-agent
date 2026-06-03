@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 import { loadAgentContext } from '../contextLoader';
 import { parseLocalAgentServerMessage, sendLocalAgentMessage } from '../localAgentProtocol';
+import { config } from '../config';
 import { TUI_TEXT } from './render/text';
 import { formatNow } from './render/terminalText';
 import {
@@ -94,6 +95,65 @@ function parseResumeSessionSummary(value: unknown): ResumeSessionSummary | null 
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     active: record.active === true,
+  };
+}
+
+function parsePositiveInteger(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+type LocalServerRuntimeSnapshot = {
+  model?: string;
+  contextWindow?: number;
+  cwd?: string;
+};
+
+function pickString(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSnapshot | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  const llmConfig = record.llmConfig;
+  const nested =
+    typeof llmConfig === 'object' && llmConfig !== null && !Array.isArray(llmConfig)
+      ? llmConfig as Record<string, unknown>
+      : null;
+  const rawModel = pickString(record, ['llm_model', 'llmModel', 'model']);
+  const rawWorkdir = pickString(record, ['workdir', 'workDir', 'cwd', 'work_dir']);
+  const rawContextWindow =
+    pickString(record, ['llm_context_window_tokens', 'llmContextWindowTokens', 'contextWindow', 'context_window_tokens'])
+    ?? record.llm_context_window_tokens
+    ?? record.llmContextWindowTokens
+    ?? record.contextWindow
+    ?? record.context_window_tokens;
+  const nestedContextWindow = nested
+    ? (parsePositiveInteger(nested.contextWindow)
+      ?? parsePositiveInteger(nested.context_window_tokens)
+      ?? parsePositiveInteger(nested.context_window))
+    : undefined;
+  const nestedModel = nested ? pickString(nested, ['model', 'llmModel']) : undefined;
+
+  return {
+    model: rawModel ?? nestedModel,
+    contextWindow: parsePositiveInteger(rawContextWindow) ?? nestedContextWindow,
+    cwd: rawWorkdir ?? pickString(nested ?? {}, ['workdir', 'cwd']),
   };
 }
 
@@ -314,6 +374,44 @@ export class TuiRuntimeController {
     });
   }
 
+  private setRuntimeFromHealth(payload: { model?: string; contextWindow?: number; cwd?: string }) {
+    const model = payload.model ?? config.llmModel;
+    const cwd = payload.cwd ?? config.workdir;
+
+    if (!model && !cwd && !payload.contextWindow) {
+      return;
+    }
+
+    this.options.dispatch({
+      type: 'session.set_runtime',
+      runtime: {
+        ...(model ? { model } : {}),
+        ...(payload.contextWindow !== undefined ? { contextWindow: payload.contextWindow } : {}),
+        ...(cwd ? { cwd } : {}),
+      },
+    });
+  }
+
+  private async fetchLocalRuntime() {
+    try {
+      const response = await fetchWithTimeout(
+        `http://127.0.0.1:${this.options.localServerPort}/runtime`,
+        LOCAL_SERVER_HEALTH_TIMEOUT_MS,
+      );
+      if (!response.ok) {
+        return false;
+      }
+      const payload = parseLocalServerRuntime(await response.json());
+      if (!payload) {
+        return false;
+      }
+      this.setRuntimeFromHealth(payload);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async listResumeSessions() {
     const res = await fetch(`http://127.0.0.1:${this.options.localServerPort}/sessions`);
     if (!res.ok) {
@@ -368,8 +466,9 @@ export class TuiRuntimeController {
     for (let attempt = 0; attempt <= LOCAL_SERVER_CONNECT_RETRIES; attempt += 1) {
       if (this.disposed) return false;
       try {
-        const healthy = await this.checkLocalServerHealth();
-        if (!healthy) throw new Error('health check failed');
+        const health = await this.checkLocalServerHealth();
+        if (!health) throw new Error('health check failed');
+        await this.fetchLocalRuntime();
         return true;
       } catch {
         if (this.disposed) return false;
@@ -507,13 +606,15 @@ export class TuiRuntimeController {
   private async reconnect() {
     if (this.disposed || this.ws) return;
 
-    const healthy = await this.checkLocalServerHealth();
+    const health = await this.checkLocalServerHealth();
     if (this.disposed || this.ws) return;
 
-    if (!healthy) {
+    if (!health) {
       this.scheduleReconnect();
       return;
     }
+
+    await this.fetchLocalRuntime();
 
     this.connectWebSocket();
   }

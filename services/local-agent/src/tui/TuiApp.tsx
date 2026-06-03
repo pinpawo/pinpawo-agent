@@ -5,6 +5,7 @@ import { config } from '../config';
 import { ApprovalPanel, buildApprovalOptions } from './components/ApprovalPanel';
 import { Composer } from './components/Composer';
 import { MessageBlock } from './components/MessageBlock';
+import { RuntimeInfoLine } from './components/RuntimeInfoLine';
 import { TokenUsageLine } from './components/TokenUsageLine';
 import { ResumePicker } from './components/ResumePicker';
 import { formatTuiCommandHelp, parseTuiCommand } from './input/commandRegistry';
@@ -96,7 +97,6 @@ export function TuiApp(props: { actorId: string }) {
   );
   const petName = focusedSession?.actor.label ?? TUI_TEXT.defaultPetName;
   const status = tuiState.connection.message;
-  const petSummary = focusedSession?.actor.summary ?? TUI_TEXT.defaultPetSummary;
 
   useEffect(() => {
     stateRef.current = tuiState;
@@ -537,8 +537,9 @@ export function TuiApp(props: { actorId: string }) {
           <Text dimColor>
             {pendingUi
               ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeTools)
-              : `${status} · ${petSummary}`}
+              : status}
           </Text>
+          {focusedSession ? <RuntimeInfoLine runtime={focusedSession.runtime} /> : null}
           {focusedSession?.tokenUsage ? <TokenUsageLine tokenUsage={focusedSession.tokenUsage} /> : null}
         </>
       ) : null}

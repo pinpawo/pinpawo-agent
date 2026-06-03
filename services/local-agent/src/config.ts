@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import { inferLlmContextWindowTokens } from './llmContextWindow';
 import { loadStoredConfig } from './storage';
 
 function parseDotEnv(content: string) {
@@ -31,6 +32,17 @@ function get(envKey: string, storedKey: keyof typeof stored): string {
   return process.env[envKey] || (typeof storedVal === 'string' ? storedVal : '') || '';
 }
 
+function getNumber(envKey: string, storedKey: keyof typeof stored): number | undefined {
+  const storedVal = stored[storedKey];
+  const envVal = process.env[envKey];
+  const raw = envVal ?? (typeof storedVal === 'number' ? String(storedVal) : '');
+  if (!raw.trim()) return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 && Number.isInteger(parsed)
+    ? parsed
+    : undefined;
+}
+
 function required(envKey: string, storedKey: keyof typeof stored, label: string): string {
   const val = get(envKey, storedKey);
   if (!val) {
@@ -50,6 +62,10 @@ export const config = {
   llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
   llmBaseUrl: get('LLM_BASE_URL', 'llm_base_url') || 'https://api.deepseek.com',
   llmModel: get('LLM_MODEL', 'llm_model') || 'deepseek-v4-pro',
+  llmContextWindowTokens:
+    getNumber('LLM_CONTEXT_WINDOW_TOKENS', 'llm_context_window_tokens')
+    ?? inferLlmContextWindowTokens(get('LLM_MODEL', 'llm_model') || 'deepseek-v4-pro')
+    ?? 32000,
 
   workdir: get('PINPAWO_WORKDIR', 'workdir') || homedir(),
   browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',

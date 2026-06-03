@@ -112,19 +112,51 @@ function finishRun(
     return stateWithRouteRemoved;
   }
 
-  const nextTokenUsage = tokenUsage;
+  if (tokenUsage === null) {
+    const sessionToClear = stateWithRouteRemoved.sessions[sessionId];
+    if (!sessionToClear) {
+      return stateWithRouteRemoved;
+    }
+    return {
+      ...stateWithRouteRemoved,
+      sessions: {
+        ...stateWithRouteRemoved.sessions,
+        [sessionId]: {
+          ...sessionToClear,
+          tokenUsage: null,
+        },
+      },
+    };
+  }
+
+  const runtimeContextWindow = stateWithRouteRemoved.sessions[sessionId]?.runtime.contextWindow;
+  const nextTokenUsage: TokenUsageModel = tokenUsage.contextWindow === undefined && runtimeContextWindow !== undefined
+    ? { ...tokenUsage, contextWindow: runtimeContextWindow }
+    : tokenUsage;
+  const stateWithRuntimeUpdated = nextTokenUsage.contextWindow === undefined
+    ? stateWithRouteRemoved
+    : updateSession(stateWithRouteRemoved, sessionId, (sessionToUpdate) => ({
+      ...sessionToUpdate,
+      runtime: {
+        ...sessionToUpdate.runtime,
+        contextWindow: nextTokenUsage.contextWindow,
+      },
+    }));
+  const runtimeUpdatedSession = stateWithRuntimeUpdated.sessions[sessionId];
+  if (!runtimeUpdatedSession) {
+    return stateWithRuntimeUpdated;
+  }
+
   return {
-    ...stateWithRouteRemoved,
-    sessions: nextState.sessions[sessionId]
-      ? {
-          ...nextState.sessions,
-          [sessionId]: {
-            ...nextState.sessions[sessionId]!,
-            tokenUsage: nextTokenUsage,
-          },
-        }
-      : nextState.sessions,
-  };
+      ...stateWithRuntimeUpdated,
+      sessions: {
+        ...stateWithRuntimeUpdated.sessions,
+        [sessionId]: {
+          ...runtimeUpdatedSession,
+          tokenUsage: nextTokenUsage,
+        },
+      },
+    };
 }
 
 function activeRunToPendingUi(run: ActiveRunModel | null) {
@@ -200,6 +232,15 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) => ({
         ...session,
         actor: action.actor,
+      }));
+
+    case 'session.set_runtime':
+      return updateSession(state, resolveSessionId(state, action.sessionId), (session) => ({
+        ...session,
+        runtime: {
+          ...session.runtime,
+          ...action.runtime,
+        },
       }));
 
     case 'session.set_kind':

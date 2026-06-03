@@ -61,6 +61,15 @@ export function handleLocalHttpRequest(
     return true;
   }
 
+  if (pathname === '/runtime') {
+    writeJson(res, 200, {
+      llm_model: deps.llmConfig.model,
+      llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
+      workdir: deps.workdir,
+    });
+    return true;
+  }
+
   if (pathname === '/capabilities') {
     writeJson(res, 200, buildCapabilitiesPayload(deps));
     return true;

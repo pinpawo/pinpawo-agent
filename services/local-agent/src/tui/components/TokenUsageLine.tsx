@@ -10,7 +10,7 @@ function formatTokenUsage(value: number) {
 
 export function TokenUsageLine({ tokenUsage }: { tokenUsage: TokenUsageModel }) {
   const ratio = tokenUsage.contextWindow
-    ? `${Math.min(100, (tokenUsage.totalTokens / tokenUsage.contextWindow) * 100).toFixed(1)}%`
+    ? `${((tokenUsage.totalTokens / tokenUsage.contextWindow) * 100).toFixed(1)}%`
     : null;
 
   return (

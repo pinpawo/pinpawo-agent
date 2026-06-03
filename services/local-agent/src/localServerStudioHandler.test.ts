@@ -39,6 +39,7 @@ function createDeps(): LocalServerDeps {
       apiKey: 'test-key',
       baseUrl: 'https://example.test/v1',
     } as unknown as LocalServerDeps['llmConfig'],
+    workdir: '/tmp/pinpawo-test',
     localTools: [{ name: 'local-tool' }] as LocalServerDeps['localTools'],
     localToolkits: [{
       name: 'local-toolkit',

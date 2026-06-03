@@ -345,7 +345,7 @@ export function TuiApp(props: { actorId: string }) {
           <Text dimColor>
             {pendingUi
               ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeOperations)
-              : `${status} · ${petSummary}`}
+              : status}
           </Text>
           {focusedSession ? <RuntimeInfoLine runtime={focusedSession.runtime} /> : null}
           {focusedSession?.tokenUsage ? <TokenUsageLine tokenUsage={focusedSession.tokenUsage} /> : null}

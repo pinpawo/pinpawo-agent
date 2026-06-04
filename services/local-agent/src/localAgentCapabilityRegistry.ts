@@ -24,8 +24,8 @@ type LocalAgentCapabilityRegistryDeps = {
 const defaultDeps: LocalAgentCapabilityRegistryDeps = {
   loadLocalTools: loadLocalPluginTools,
   loadUserCapabilities,
-  createLocalToolkits: (localTools) => [
-    createBashToolkit(localTools),
+  createLocalToolkits: () => [
+    createBashToolkit(),
     createGitToolkit(),
     createBrowserToolkit(),
   ],

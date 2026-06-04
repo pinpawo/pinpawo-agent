@@ -1,5 +1,6 @@
 import type { StructuredTool } from '@langchain/core/tools';
 import {
+  defineToolkit,
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
 import { createOperationRegistryFromToolkits } from '../events/operationRegistry';
@@ -95,7 +96,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
 }
 
 export function createGitToolkit(): AgentToolkit {
-  return {
+  return defineToolkit({
     name: 'git',
     description: '本地 git 仓库查看、暂存和本地提交工具。',
     tools: gitTools,
@@ -106,7 +107,7 @@ export function createGitToolkit(): AgentToolkit {
         git_commit: gitCommitReviewPolicy,
       },
     },
-  };
+  });
 }
 
 export const localToolOperationRegistry = createOperationRegistryFromToolkits([

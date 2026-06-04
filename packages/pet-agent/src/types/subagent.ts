@@ -1,9 +1,9 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { StructuredTool } from '@langchain/core/tools';
-import type { ToolkitOperationMetadata } from './toolkit';
+import type { ToolOperationMetadata } from './toolkit';
 
-export type SubagentToolOperationMetadata = ToolkitOperationMetadata & {
+export type SubagentToolOperationMetadata = ToolOperationMetadata & {
   source?: {
     provider: 'toolkit' | 'capability' | 'runtime';
     name: string;

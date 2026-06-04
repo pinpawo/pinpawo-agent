@@ -3,7 +3,8 @@ import { tool } from '@langchain/core/tools';
 import {
   buildHumanReviewRequest,
   type HumanReviewActionRequest,
-  type ToolkitOperationMetadata,
+  type NamedStructuredTool,
+  type ToolOperationMetadataMapFor,
   type ToolkitToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
@@ -254,16 +255,16 @@ export const gitCommitReviewPolicy: ToolkitToolReviewPolicy = {
 };
 
 export const gitTools = [
-  gitStatusTool,
-  gitDiffTool,
-  gitLogTool,
-  gitBranchTool,
-  gitShowTool,
-  gitAddTool,
-  gitCommitTool,
-];
+  gitStatusTool as NamedStructuredTool<'git_status'>,
+  gitDiffTool as NamedStructuredTool<'git_diff'>,
+  gitLogTool as NamedStructuredTool<'git_log'>,
+  gitBranchTool as NamedStructuredTool<'git_branch'>,
+  gitShowTool as NamedStructuredTool<'git_show'>,
+  gitAddTool as NamedStructuredTool<'git_add'>,
+  gitCommitTool as NamedStructuredTool<'git_commit'>,
+] as const;
 
-export const gitToolOperations: Record<string, ToolkitOperationMetadata> = {
+export const gitToolOperations = {
   git_status: {
     kind: 'git.status',
     title: '查看 git 状态',
@@ -319,4 +320,4 @@ export const gitToolOperations: Record<string, ToolkitOperationMetadata> = {
       };
     },
   },
-};
+} satisfies ToolOperationMetadataMapFor<typeof gitTools>;

@@ -3,7 +3,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution } from '../types/agent';
 import type { SubagentToolEventHandler } from '../types/subagent';
-import type { AgentToolkit, ToolkitOperationMetadata } from '../types/toolkit';
+import type { AgentToolkit, ToolOperationMetadataMap } from '../types/toolkit';
 import { buildOrchestratorTurnInput, type OrchestratorGraph } from './createAgentRuntime';
 
 export type AgentInvokeInput = {
@@ -12,7 +12,7 @@ export type AgentInvokeInput = {
   threadId?: string;
   capabilities?: AgentCapability[];
   tools?: StructuredTool[];
-  toolOperations?: Record<string, ToolkitOperationMetadata>;
+  toolOperations?: ToolOperationMetadataMap;
   toolkits?: AgentToolkit[];
   execution?: AgentExecution;
   signal?: AbortSignal;

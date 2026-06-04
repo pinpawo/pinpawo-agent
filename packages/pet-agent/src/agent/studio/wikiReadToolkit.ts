@@ -1,11 +1,15 @@
 import { tool } from '@langchain/core/tools';
-import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { ToolkitOperationMetadata } from '../../types/toolkit';
+import {
+  defineToolkit,
+  type AgentToolkit,
+  type NamedStructuredTool,
+  type ToolkitOperationMetadata,
+} from '../../types/toolkit';
 
 const execFileAsync = promisify(execFile);
 
@@ -155,7 +159,7 @@ async function readDirRecursive(absolutePath: string, root: string, depth: numbe
  *
  * pet 装备这套 toolkit 后,可以自主检索 wiki,Studio 不指定文件路径。
  */
-export function createWikiReadToolkit(wikiRoot: string): StructuredTool[] {
+export function createWikiReadToolkit(wikiRoot: string): AgentToolkit {
   const root = path.resolve(wikiRoot);
 
   const ls = tool(
@@ -301,7 +305,21 @@ export function createWikiReadToolkit(wikiRoot: string): StructuredTool[] {
     },
   );
 
-  return [ls, cat, grep, find, head, tail];
+  const wikiReadTools = [
+    ls as NamedStructuredTool<'wiki_read_ls'>,
+    cat as NamedStructuredTool<'wiki_read_cat'>,
+    grep as NamedStructuredTool<'wiki_read_grep'>,
+    find as NamedStructuredTool<'wiki_read_find'>,
+    head as NamedStructuredTool<'wiki_read_head'>,
+    tail as NamedStructuredTool<'wiki_read_tail'>,
+  ] as const;
+
+  return defineToolkit({
+    name: 'wiki_read',
+    description: '只读知识库查询能力，提供目录浏览、文件读取、检索和查找。',
+    tools: wikiReadTools,
+    operations: wikiReadToolOperations,
+  });
 }
 
 function escapeRegExp(input: string): string {

@@ -3,7 +3,8 @@ export type { PetAgentRuntimeConfig } from './createPetAgentRuntime';
 export { createStudioOrchestrator } from './createStudioOrchestrator';
 export { createPlanCapability, planCapabilityToolOperations } from './planCapability';
 export type { CreatePlanCapabilityOptions } from './planCapability';
-export { createWikiReadToolkit, wikiReadToolOperations } from './wikiReadToolkit';
+export { createWikiReadToolkit } from './wikiReadToolkit';
+export { wikiReadToolOperations, wikiReadToolOperationMetadata } from './wikiReadToolkit';
 export {
   createSkeletonWikiCurator,
   createLLMWikiCurator,

@@ -27,7 +27,7 @@ import type {
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
 } from './types';
-import { createWikiReadToolkit, wikiReadToolOperations } from './wikiReadToolkit';
+import { createWikiReadToolkit } from './wikiReadToolkit';
 
 export type PetAgentRuntimeConfig = {
   models: AgentModels;
@@ -140,12 +140,13 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     const messages = await buildInvokeMessages(input.brief, input.wikiRoot);
     const tools = [
       ...(config.tools ?? []),
-      ...(input.wikiRoot ? createWikiReadToolkit(input.wikiRoot) : []),
+    ];
+    const toolkits = [
+      ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
     const toolOperations = {
       ...(config.toolOperations ?? {}),
       ...(input.toolOperations ?? {}),
-      ...(input.wikiRoot ? wikiReadToolOperations : {}),
     };
     const configurable = {
       actor: config.actor,
@@ -153,6 +154,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       capabilities: [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])],
       tools,
       toolOperations,
+      toolkits,
       execution: input.execution ?? config.execution,
       workdir: input.workdir ?? config.workdir,
       runtimeEnvironment: input.runtimeEnvironment,

@@ -99,6 +99,7 @@ export {
   ensureWikiSkeleton,
   fileReadPromptProvider,
   planCapabilityToolOperations,
+  wikiReadToolOperationMetadata,
   wikiReadToolOperations,
 } from './agent/studio/index';
 export type {
@@ -131,14 +132,18 @@ export type {
 } from './agent/studio/index';
 
 export {
+  createPetProfileToolkit,
   createPetProfileTool,
   petProfileToolOperations,
+  petProfileToolkitOperationMetadata,
 } from './tools/petProfile';
 export type {
   PetProfileToolOptions,
 } from './tools/petProfile';
 export {
+  createMemoriesToolkit,
   createMemoriesTool,
+  memoriesToolkitOperationMetadata,
   memoriesToolOperations,
 } from './tools/memories';
 export type {
@@ -146,7 +151,9 @@ export type {
   MemorySearchResult,
 } from './tools/memories';
 export {
+  createWebSearchToolkit,
   createWebSearchTool,
+  webSearchToolkitOperationMetadata,
   webSearchToolOperations,
 } from './tools/webSearch';
 export type {

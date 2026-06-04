@@ -1,7 +1,7 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { ToolkitOperationMetadata } from '../types/toolkit';
+import type { AgentToolkit, ToolkitOperationMetadata } from '../types/toolkit';
 
 export type WebSearchResult = {
   title: string;
@@ -50,7 +50,7 @@ function parseJsonObject(output: unknown): Record<string, unknown> | null {
   }
 }
 
-export const webSearchToolOperations = {
+export const webSearchToolkitOperationMetadata = {
   search_web: {
     kind: 'web.search',
     title: '搜索网页',
@@ -80,6 +80,17 @@ export const webSearchToolOperations = {
     },
   },
 } satisfies Record<string, ToolkitOperationMetadata>;
+
+export const webSearchToolOperations = webSearchToolkitOperationMetadata;
+
+export function createWebSearchToolkit(options: WebSearchToolOptions = {}): AgentToolkit {
+  return {
+    name: 'web_search',
+    description: '获取最新网络信息，支持关键词检索和结果筛选。',
+    tools: [createWebSearchTool(options)],
+    operations: webSearchToolkitOperationMetadata,
+  };
+}
 
 export function createWebSearchTool(options: WebSearchToolOptions = {}): StructuredTool {
   return tool(

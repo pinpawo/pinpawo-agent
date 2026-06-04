@@ -5,7 +5,10 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { ToolkitOperationMetadata } from '../../types/toolkit';
+import type {
+  AgentToolkit,
+  ToolkitOperationMetadata,
+} from '../../types/toolkit';
 
 const execFileAsync = promisify(execFile);
 
@@ -51,7 +54,7 @@ function ensureInsideRoot(root: string, target: string): string {
   return absoluteTarget;
 }
 
-export const wikiReadToolOperations = {
+export const wikiReadToolOperationMetadata = {
   wiki_read_ls: {
     kind: 'wiki.dir.list',
     title: '列出知识库',
@@ -131,6 +134,8 @@ export const wikiReadToolOperations = {
   },
 } satisfies Record<string, ToolkitOperationMetadata>;
 
+export const wikiReadToolOperations = wikiReadToolOperationMetadata;
+
 async function readDirRecursive(absolutePath: string, root: string, depth: number, maxDepth = 8): Promise<string[]> {
   const lines: string[] = [];
   const entries = await fs.readdir(absolutePath, { withFileTypes: true });
@@ -155,7 +160,7 @@ async function readDirRecursive(absolutePath: string, root: string, depth: numbe
  *
  * pet 装备这套 toolkit 后,可以自主检索 wiki,Studio 不指定文件路径。
  */
-export function createWikiReadToolkit(wikiRoot: string): StructuredTool[] {
+export function createWikiReadToolkit(wikiRoot: string): AgentToolkit {
   const root = path.resolve(wikiRoot);
 
   const ls = tool(
@@ -301,7 +306,12 @@ export function createWikiReadToolkit(wikiRoot: string): StructuredTool[] {
     },
   );
 
-  return [ls, cat, grep, find, head, tail];
+  return {
+    name: 'wiki_read',
+    description: '只读知识库查询能力，提供目录浏览、文件读取、检索和查找。',
+    tools: [ls, cat, grep, find, head, tail],
+    operations: wikiReadToolOperationMetadata,
+  };
 }
 
 function escapeRegExp(input: string): string {

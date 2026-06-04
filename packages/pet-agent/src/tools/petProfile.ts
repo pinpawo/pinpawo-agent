@@ -1,8 +1,9 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { AgentActor } from '../types/agent';
 import type { ToolkitOperationMetadata } from '../types/toolkit';
+import type { AgentActor } from '../types/agent';
+import type { AgentToolkit } from '../types/toolkit';
 
 export type PetProfileToolOptions = {
   actor: AgentActor;
@@ -68,7 +69,7 @@ function readFocus(input: unknown) {
     : null;
 }
 
-export const petProfileToolOperations = {
+export const petProfileToolkitOperationMetadata = {
   describe_pet_profile: {
     kind: 'pet.profile.read',
     title: '读取宠物资料',
@@ -82,6 +83,17 @@ export const petProfileToolOperations = {
     },
   },
 } satisfies Record<string, ToolkitOperationMetadata>;
+
+export const petProfileToolOperations = petProfileToolkitOperationMetadata;
+
+export function createPetProfileToolkit(options: PetProfileToolOptions): AgentToolkit {
+  return {
+    name: 'pet_profile',
+    description: '读取宠物内在信息与自我介绍，支持按 focus 聚焦查看。',
+    tools: [createPetProfileTool(options)],
+    operations: petProfileToolkitOperationMetadata,
+  };
+}
 
 export function createPetProfileTool(options: PetProfileToolOptions): StructuredTool {
   return tool(

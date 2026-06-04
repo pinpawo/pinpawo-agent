@@ -1,7 +1,7 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { ToolkitOperationMetadata } from '../types/toolkit';
+import type { AgentToolkit, ToolkitOperationMetadata } from '../types/toolkit';
 
 export type MemorySearchResult = {
   id?: string | null;
@@ -51,7 +51,7 @@ function parseJsonObject(output: unknown): Record<string, unknown> | null {
   }
 }
 
-export const memoriesToolOperations = {
+export const memoriesToolkitOperationMetadata = {
   get_memories: {
     kind: 'memory.search',
     title: '搜索记忆',
@@ -81,6 +81,17 @@ export const memoriesToolOperations = {
     },
   },
 } satisfies Record<string, ToolkitOperationMetadata>;
+
+export const memoriesToolOperations = memoriesToolkitOperationMetadata;
+
+export function createMemoriesToolkit(options: MemoriesToolOptions = {}): AgentToolkit {
+  return {
+    name: 'memories',
+    description: '按 query 检索上下文相关记忆与偏好数据。',
+    tools: [createMemoriesTool(options)],
+    operations: memoriesToolkitOperationMetadata,
+  };
+}
 
 export function createMemoriesTool(options: MemoriesToolOptions = {}): StructuredTool {
   return tool(

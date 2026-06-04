@@ -7,7 +7,7 @@ import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
 import { createBrowserToolkit } from './capabilities/browserCapability';
-import { createBashToolkit, localToolOperationRegistry } from './plugins/localTools';
+import { createBashToolkit, createGitToolkit, localToolOperationRegistry } from './plugins/localTools';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import { petProfileToolOperations } from '@pinpawo/pet-agent';
 
@@ -140,12 +140,42 @@ test('buildToolOperationEvent uses explicit toolkit metadata', () => {
   });
 });
 
+test('buildToolOperationEvent uses git toolkit metadata', () => {
+  const event = buildToolOperationEvent('req-1', {
+    event: 'on_tool_start',
+    name: 'git_commit',
+    toolCallId: 'call-1',
+    input: { message: 'test: update toolkit boundaries', cwd: '/repo' },
+  }, localToolOperationRegistry);
+
+  assert.equal(event.type, 'operation');
+  assert.equal(event.phase, 'started');
+  assert.equal(event.operation.kind, 'git.commit');
+  assert.equal(event.operation.title, '创建 git commit');
+  assert.equal(event.operation.target, '/repo');
+  assert.equal(event.operation.summary, 'test: update toolkit boundaries');
+  assert.deepEqual(event.operation.source, {
+    provider: 'toolkit',
+    name: 'git_commit',
+    callId: 'call-1',
+  });
+});
+
 test('createBashToolkit exposes operation metadata with the toolkit definition', () => {
   const toolkit = createBashToolkit();
 
   assert.equal(toolkit.operations?.read_file?.kind, 'file.read');
   assert.equal(toolkit.operations?.grep_search?.kind, 'search.grep');
   assert.equal(toolkit.operations?.run_shell?.kind, 'shell.run');
+  assert.equal(toolkit.operations?.git_status, undefined);
+});
+
+test('createGitToolkit exposes git operation metadata with the toolkit definition', () => {
+  const toolkit = createGitToolkit();
+
+  assert.equal(toolkit.operations?.git_status?.kind, 'git.status');
+  assert.equal(toolkit.operations?.git_commit?.kind, 'git.commit');
+  assert.equal(Boolean(toolkit.policy?.toolReview?.git_commit), true);
 });
 
 test('createBrowserToolkit exposes browser operation metadata', () => {

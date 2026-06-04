@@ -4,6 +4,8 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
+import { createBashToolkit, createGitToolkit } from './plugins/localTools';
+import { createBrowserToolkit } from './capabilities/browserCapability';
 
 function capability(name: string): AgentCapability {
   return {
@@ -94,4 +96,29 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
   assert.deepEqual(rescanned.userCapabilities.map((item) => item.meta.id), ['rescanned-user-cap']);
   assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), ['rescanned-user-cap']);
   assert.deepEqual(availabilityForceValues, [undefined, undefined, true]);
+});
+
+test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async () => {
+  const registry = new LocalAgentCapabilityRegistry({
+    loadLocalTools: async () => [],
+    loadUserCapabilities: async () => [],
+    createLocalToolkits: (localTools) => [
+      createBashToolkit(localTools),
+      createGitToolkit(),
+      createBrowserToolkit(),
+    ],
+    resolveAvailableToolkits: async (toolkits) => toolkits,
+    resolveAvailableCapabilities: async (capabilities) => capabilities,
+    resolveCapabilityAvailability: async (capabilityItem) => ({
+      capability: capabilityItem,
+      availability: { available: true },
+    }),
+  });
+
+  await registry.load();
+
+  assert.deepEqual(
+    registry.getLocalToolkitDefinitions().map((item) => item.name),
+    ['bash', 'git', 'browser'],
+  );
 });

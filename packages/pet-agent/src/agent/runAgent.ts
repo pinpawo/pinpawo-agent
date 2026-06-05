@@ -50,9 +50,9 @@ export async function runAgent(
   if (input.actor) configurable.actor = input.actor;
   if (input.threadId) configurable.thread_id = input.threadId;
   if (input.capabilities) configurable.capabilities = input.capabilities;
-  if (input.tools) configurable.tools = input.tools;
+  if (input.tools && input.tools.length > 0) configurable.tools = input.tools;
   if (hasToolOperationMetadata(input.toolOperations)) configurable.toolOperations = input.toolOperations;
-  if (input.toolkits) configurable.toolkits = input.toolkits;
+  if (input.toolkits && input.toolkits.length > 0) configurable.toolkits = input.toolkits;
   if (input.execution) configurable.execution = input.execution;
   if (input.workdir) configurable.workdir = input.workdir;
   if (input.runtimeEnvironment) configurable.runtimeEnvironment = input.runtimeEnvironment;

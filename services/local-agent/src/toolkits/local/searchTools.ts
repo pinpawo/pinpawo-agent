@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { tool } from '@langchain/core/tools';
 import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
-import { readRecord, readString } from '../operationMetadata';
+import { readRecord, readString } from '../../plugins/operationMetadata';
 import { resolveUserPath } from './pathUtils';
 import { walkFiles, wildcardToRegExp } from './fileSystemUtils';
 

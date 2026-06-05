@@ -3,8 +3,8 @@ import {
   defineToolkit,
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
-import { createOperationRegistryFromToolkits } from '../events/operationRegistry';
-import type { LocalAgentPlugin } from '../pluginLoader';
+import { createOperationRegistryFromToolkits } from '../../events/operationRegistry';
+import type { LocalAgentPlugin } from '../../pluginLoader';
 import {
   applyFilePatchTool,
   applyUnifiedPatchTool,
@@ -20,11 +20,11 @@ import {
   viewFileChunkTool,
   writeFileTool,
   fileToolOperations,
-} from './localTools/fileTools';
-import { downloadFileTool, httpFetchTool, networkToolOperations } from './localTools/networkTools';
-import { gitCommitReviewPolicy, gitTools, gitToolOperations } from './localTools/gitTools';
-import { globSearchTool, grepSearchTool, searchToolOperations } from './localTools/searchTools';
-import { runShellTool, shellReviewPolicy, shellToolOperations } from './localTools/shellTools';
+} from './fileTools';
+import { downloadFileTool, httpFetchTool, networkToolOperations } from './networkTools';
+import { gitCommitReviewPolicy, gitTools, gitToolOperations } from './gitTools';
+import { globSearchTool, grepSearchTool, searchToolOperations } from './searchTools';
+import { runShellTool, shellReviewPolicy, shellToolOperations } from './shellTools';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,

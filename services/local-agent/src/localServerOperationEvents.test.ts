@@ -12,7 +12,7 @@ import {
   emitLocalServerToolOperationEvent,
   isHumanReviewInterruptError,
 } from './localServerOperationEvents';
-import { localToolOperationRegistry } from './plugins/localTools';
+import { localToolOperationRegistry } from './toolkits/local';
 
 test('emitLocalServerToolOperationEvent emits one operation for a normal tool event', () => {
   const run = createInflightOperationRun('req-1');

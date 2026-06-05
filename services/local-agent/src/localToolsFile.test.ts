@@ -16,7 +16,7 @@ import {
   validateStructuredFileTool,
   viewFileChunkTool,
   writeFileTool,
-} from './plugins/localTools/fileTools';
+} from './toolkits/local/fileTools';
 
 function createFileFixture(t: TestContext) {
   const root = mkdtempSync(resolve(tmpdir(), 'pinpawo-files-'));

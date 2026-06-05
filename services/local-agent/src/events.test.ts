@@ -7,7 +7,7 @@ import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
 import { createBrowserToolkit } from './toolkits/browser/toolkit';
-import { createBashToolkit, createGitToolkit, localToolOperationRegistry } from './plugins/localTools';
+import { createBashToolkit, createGitToolkit, localToolOperationRegistry } from './toolkits/local';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import { petProfileToolOperations } from '@pinpawo/pet-agent';
 

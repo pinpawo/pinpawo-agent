@@ -10,7 +10,7 @@ import {
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { isShellCommandAuthorized } from '../../sessionAuthorizations';
 import { config } from '../../config';
-import { readRecord, readString } from '../operationMetadata';
+import { readRecord, readString } from '../../plugins/operationMetadata';
 import { resolveUserPath } from './pathUtils';
 
 export function getBlockedShellReason(command: string) {

@@ -16,7 +16,7 @@ import {
   readRecord,
   readString,
   sourceDestinationInputSummary,
-} from '../operationMetadata';
+} from '../../plugins/operationMetadata';
 import { resolveUserPath } from './pathUtils';
 
 const capabilityManifestSchema = z.object({

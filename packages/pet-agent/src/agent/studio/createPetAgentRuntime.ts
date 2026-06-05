@@ -148,6 +148,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     ];
     const toolkits = [
       ...(config.toolkits ?? []),
+      ...(input.toolkits ?? []),
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
     const legacyToolOperations = {

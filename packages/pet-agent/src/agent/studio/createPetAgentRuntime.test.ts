@@ -189,6 +189,15 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   const result = await runtime.invoke({
     brief: 'read wiki',
     wikiRoot: '/tmp/pinpawo-test-wiki',
+    toolkits: [{
+      name: 'invoke_toolkit',
+      description: 'invoke toolkit',
+      operations: {
+        invoke_tool: {
+          kind: 'invoke.tool',
+        },
+      },
+    }],
   });
 
   assert.equal(result.reply, 'done');
@@ -203,8 +212,11 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   assert.ok(!configurable.tools?.some((tool) => tool.name === 'wiki_read_cat'));
   const wikiToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'wiki_read');
   const pluginToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'plugin_toolkit');
+  const invokeToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'invoke_toolkit');
   assert.ok(pluginToolkit, 'config toolkits should be forwarded to runtime invoke');
   assert.equal(pluginToolkit.operations?.plugin_tool?.kind, 'plugin.tool');
+  assert.ok(invokeToolkit, 'invoke toolkits should be forwarded to runtime invoke');
+  assert.equal(invokeToolkit.operations?.invoke_tool?.kind, 'invoke.tool');
   assert.ok(wikiToolkit, 'wikiRoot should install wiki_read as a toolkit');
   assert.equal(wikiToolkit.operations?.wiki_read_cat?.kind, 'wiki.file.read');
   assert.equal(wikiToolkit.operations?.wiki_read_grep?.kind, 'wiki.search.grep');

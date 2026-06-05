@@ -219,7 +219,7 @@ export class LocalAgentAppChatHandler {
       context: ctx,
       userMessage,
       llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
-      tools: this.getLegacyPluginTools(),
+      legacyDirectTools: this.getLegacyPluginTools(),
       toolkits: [...this.getPluginToolkits(), ...this.getLocalToolkits()],
       extraCapabilities: this.getLocalCapabilities(),
       threadId: this.getChatThreadId(userId),

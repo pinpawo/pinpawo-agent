@@ -178,7 +178,7 @@ export function buildLocalChatAgentInput(params: {
   userMessage: string;
   llmConfig?: AgentLlmConfig;
   /** Deprecated direct tools fallback. New local tools should be exposed through toolkits. */
-  tools?: StructuredTool[];
+  legacyDirectTools?: StructuredTool[];
   toolkits?: AgentToolkit[];
   threadId?: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
@@ -226,7 +226,7 @@ export function buildLocalChatAgentInput(params: {
     if (isCapabilityEnabled(meta.id)) capabilities.push(capability);
   }
 
-  const legacyDirectTools = params.tools ?? [];
+  const legacyDirectTools = params.legacyDirectTools ?? [];
 
   return {
     graphKey: buildGraphKey([

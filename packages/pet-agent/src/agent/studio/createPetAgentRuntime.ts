@@ -38,6 +38,10 @@ export type PetAgentRuntimeConfig = {
   status?: PetAgentStatus;
   capabilities?: AgentCapability[];
   capabilityAvailability?: Record<string, CapabilityAvailability>;
+  /**
+   * @deprecated Migration fallback for host-provided direct tools. New runtime
+   * tools should be exposed through toolkits/toolsets.
+   */
   tools?: StructuredTool[];
   toolkits?: AgentToolkit[];
   /**

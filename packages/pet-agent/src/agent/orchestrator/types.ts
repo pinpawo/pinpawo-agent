@@ -74,6 +74,11 @@ export type OrchestratorConfig = {
 export type OrchestratorInvokeOptions = {
   actor?: AgentActor;
   capabilities?: AgentCapability[];
+  /**
+   * @deprecated Migration fallback for host-provided direct tools. New code
+   * should use AgentToolkit definitions so tools, operation metadata, and
+   * review policy stay under one owner.
+   */
   tools?: StructuredTool[];
   /**
    * @deprecated Migration fallback for host-provided direct tools. New code

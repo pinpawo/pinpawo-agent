@@ -117,7 +117,7 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
 
   assert.equal(buildInputs.length, 1);
   assert.deepEqual(buildInputs[0]?.capabilities.map((item) => item.name), ['browser', 'user-capability']);
-  assert.deepEqual(buildInputs[0]?.tools.map((item) => item.name), ['plugin-tool']);
+  assert.deepEqual(buildInputs[0]?.legacyDirectTools.map((item) => item.name), ['plugin-tool']);
   assert.deepEqual(buildInputs[0]?.toolkits?.map((item) => item.name), ['plugin-toolkit', 'local-toolkit']);
   assert.equal(buildInputs[0]?.bridge.requestId, 'studio-1');
 

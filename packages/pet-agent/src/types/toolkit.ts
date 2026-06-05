@@ -98,11 +98,42 @@ type StaticToolsetDefinition<
   };
 };
 
+function assertStaticToolsetDefinition(
+  definition: StaticToolsetDefinition<
+    readonly NamedStructuredTool[],
+    Partial<Record<string, ToolOperationMetadata>>,
+    Partial<Record<string, ToolkitToolReviewPolicy>>
+  >,
+) {
+  const ownerName = definition.name ?? 'anonymous';
+  const toolNames = new Set<string>();
+
+  for (const tool of definition.tools) {
+    if (toolNames.has(tool.name)) {
+      throw new Error(`Toolkit/toolset "${ownerName}" defines duplicate tool "${tool.name}"`);
+    }
+    toolNames.add(tool.name);
+  }
+
+  for (const operationKey of Object.keys(definition.operations ?? {})) {
+    if (!toolNames.has(operationKey)) {
+      throw new Error(`Toolkit/toolset "${ownerName}" operation metadata references unknown tool "${operationKey}"`);
+    }
+  }
+
+  for (const reviewKey of Object.keys(definition.policy?.toolReview ?? {})) {
+    if (!toolNames.has(reviewKey)) {
+      throw new Error(`Toolkit/toolset "${ownerName}" review policy references unknown tool "${reviewKey}"`);
+    }
+  }
+}
+
 export function defineToolset<
   const TTools extends readonly NamedStructuredTool[],
   const TOperations extends Partial<Record<string, ToolOperationMetadata>> = ToolOperationMetadataMapFor<TTools>,
   const TToolReview extends Partial<Record<string, ToolkitToolReviewPolicy>> = ToolkitToolReviewPolicyMapFor<TTools>,
 >(definition: StaticToolsetDefinition<TTools, TOperations, TToolReview>): AgentToolset {
+  assertStaticToolsetDefinition(definition);
   return {
     ...definition,
     tools: [...definition.tools],

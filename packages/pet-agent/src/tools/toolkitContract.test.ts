@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { NamedStructuredTool, ToolkitToolReviewPolicy } from '../types/toolkit';
-import { defineToolkit, defineToolset } from '../types/toolkit';
+import { defineToolkit, defineToolset, hasToolOperationMetadata } from '../types/toolkit';
 
 const alphaTool = { name: 'alpha_tool' } as NamedStructuredTool<'alpha_tool'>;
 const betaTool = { name: 'beta_tool' } as NamedStructuredTool<'beta_tool'>;
@@ -72,4 +72,10 @@ test('defineToolkit preserves valid tool metadata and review policy', () => {
   assert.deepEqual(toolkit.tools.map((tool) => tool.name), ['alpha_tool', 'beta_tool']);
   assert.equal(toolkit.operations?.alpha_tool?.kind, 'alpha.run');
   assert.equal(toolkit.policy?.toolReview?.beta_tool, reviewPolicy);
+});
+
+test('hasToolOperationMetadata treats empty legacy operation maps as absent', () => {
+  assert.equal(hasToolOperationMetadata(undefined), false);
+  assert.equal(hasToolOperationMetadata({}), false);
+  assert.equal(hasToolOperationMetadata({ alpha_tool: { kind: 'alpha.run' } }), true);
 });

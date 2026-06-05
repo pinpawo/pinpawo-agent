@@ -3,7 +3,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution } from '../types/agent';
 import type { SubagentToolEventHandler } from '../types/subagent';
-import type { AgentToolkit, ToolOperationMetadataMap } from '../types/toolkit';
+import { hasToolOperationMetadata, type AgentToolkit, type ToolOperationMetadataMap } from '../types/toolkit';
 import { buildOrchestratorTurnInput, type OrchestratorGraph } from './createAgentRuntime';
 
 export type AgentInvokeInput = {
@@ -46,7 +46,7 @@ export async function runAgent(
   if (input.threadId) configurable.thread_id = input.threadId;
   if (input.capabilities) configurable.capabilities = input.capabilities;
   if (input.tools) configurable.tools = input.tools;
-  if (input.toolOperations) configurable.toolOperations = input.toolOperations;
+  if (hasToolOperationMetadata(input.toolOperations)) configurable.toolOperations = input.toolOperations;
   if (input.toolkits) configurable.toolkits = input.toolkits;
   if (input.execution) configurable.execution = input.execution;
   if (input.workdir) configurable.workdir = input.workdir;

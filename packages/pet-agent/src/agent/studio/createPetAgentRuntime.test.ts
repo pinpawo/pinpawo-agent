@@ -208,5 +208,5 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   assert.ok(wikiToolkit, 'wikiRoot should install wiki_read as a toolkit');
   assert.equal(wikiToolkit.operations?.wiki_read_cat?.kind, 'wiki.file.read');
   assert.equal(wikiToolkit.operations?.wiki_read_grep?.kind, 'wiki.search.grep');
-  assert.equal(configurable.toolOperations?.wiki_read_cat, undefined);
+  assert.equal(configurable.toolOperations, undefined);
 });

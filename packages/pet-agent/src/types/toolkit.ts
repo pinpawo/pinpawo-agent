@@ -49,6 +49,12 @@ export type ToolOperationMetadata = {
 
 export type ToolOperationMetadataMap = Record<string, ToolOperationMetadata>;
 
+export function hasToolOperationMetadata(
+  operations: ToolOperationMetadataMap | undefined,
+): operations is ToolOperationMetadataMap {
+  return Boolean(operations && Object.keys(operations).length > 0);
+}
+
 export type ToolkitOperationSummary = ToolOperationSummary;
 export type ToolkitOperationMetadata = ToolOperationMetadata;
 

@@ -76,6 +76,7 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
       baseUrl: 'https://example.test/v1',
     } as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLlmConfig'] extends () => infer T ? T : never),
     getPluginTools: () => [{ name: 'plugin-tool' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginTools'] extends () => infer T ? T : never,
+    getPluginToolkits: () => [{ name: 'plugin-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginToolkits'] extends () => infer T ? T : never,
     getLocalToolkits: () => [{ name: 'local-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalToolkits'] extends () => infer T ? T : never,
     getLocalCapabilities: () => [{ name: 'browser' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalCapabilities'] extends () => infer T ? T : never,
     getUserCapabilities: () => [{
@@ -174,6 +175,10 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
   assert.equal(buildInputs[0]?.userMessage, 'hello');
   assert.equal(buildInputs[0]?.threadId, 'petbot:chat:pet:pet-a:user:user-1');
   assert.equal(buildInputs[0]?.interfaceKind, 'app-chat');
+  assert.deepEqual((buildInputs[0]?.toolkits as Array<{ name?: string }>).map((toolkit) => toolkit.name), [
+    'plugin-toolkit',
+    'local-toolkit',
+  ]);
 
   const eventMessages = sent.filter((item): item is { type: string; event?: { type?: string; phase?: string; operation?: { kind?: string; target?: string } } } =>
     Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'event'),

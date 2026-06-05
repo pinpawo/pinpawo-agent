@@ -15,9 +15,12 @@ export function createOperationRegistryForAgentSetup(
 }
 
 export function createOperationRegistryForLocalServerDeps(
-  deps: Pick<LocalServerDeps, 'localToolkits' | 'localToolkitDefinitions'>,
+  deps: Pick<LocalServerDeps, 'localToolkits' | 'localToolkitDefinitions' | 'pluginToolkits'>,
 ): OperationRegistry {
   return createOperationRegistryFromSources({
-    toolkits: deps.localToolkits ?? deps.localToolkitDefinitions ?? [],
+    toolkits: [
+      ...(deps.pluginToolkits ?? []),
+      ...(deps.localToolkits ?? deps.localToolkitDefinitions ?? []),
+    ],
   });
 }

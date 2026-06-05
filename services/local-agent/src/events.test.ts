@@ -286,7 +286,7 @@ test('createOperationRegistryForAgentSetup reads operation metadata from setup t
   });
 });
 
-test('createOperationRegistryForAgentSetup reads host tool operation metadata from setup tool operations', () => {
+test('createOperationRegistryForAgentSetup reads legacy runtime operation metadata as fallback', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
       toolOperations: petProfileToolOperations,
@@ -309,6 +309,46 @@ test('createOperationRegistryForAgentSetup reads host tool operation metadata fr
   assert.equal(event.operation.summary, '查看 性格');
   assert.deepEqual(event.operation.source, {
     provider: 'runtime',
+    name: 'describe_pet_profile',
+    callId: undefined,
+  });
+});
+
+test('createOperationRegistryForAgentSetup prefers toolkit metadata over legacy runtime metadata', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolkits: [{
+        name: 'profile-toolkit',
+        operations: {
+          describe_pet_profile: {
+            kind: 'profile.toolkit',
+            title: 'Toolkit Profile',
+          },
+        },
+      }],
+      toolOperations: {
+        describe_pet_profile: {
+          kind: 'profile.legacy',
+          title: 'Legacy Profile',
+        },
+      },
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'describe_pet_profile',
+      input: {},
+    },
+    registry,
+  );
+
+  assert.equal(event.operation.kind, 'profile.toolkit');
+  assert.equal(event.operation.title, 'Toolkit Profile');
+  assert.deepEqual(event.operation.source, {
+    provider: 'toolkit',
     name: 'describe_pet_profile',
     callId: undefined,
   });

@@ -2,7 +2,8 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 
 import type { AgentCapability } from '../../types/capability';
-import type { ToolkitOperationMetadata } from '../../types/toolkit';
+import { defineToolset } from '../../types/toolkit';
+import type { AgentToolset, NamedStructuredTool, ToolkitOperationMetadata } from '../../types/toolkit';
 import type { StudioTask, StudioTaskPlan } from './types';
 
 /**
@@ -42,6 +43,8 @@ const submitPlanSchema = z.object({
     .min(1)
     .describe('task 列表,顺序即执行顺序;数组下标(0 开始)即 task 身份'),
 });
+
+type SubmitPlanInput = z.infer<typeof submitPlanSchema>;
 
 function buildAgentsHint(agents?: CreatePlanCapabilityOptions['availableAgents']): string | null {
   if (!agents || agents.length === 0) return null;
@@ -96,6 +99,38 @@ export const planCapabilityToolOperations = {
   },
 } satisfies Record<string, ToolkitOperationMetadata>;
 
+function createPlanToolset(options: Pick<CreatePlanCapabilityOptions, 'onSubmit'>): AgentToolset {
+  const submitPlan = tool(
+    async (input: SubmitPlanInput) => {
+      const { tasks } = input;
+      const plan: StudioTaskPlan = {
+        tasks: tasks.map((task): StudioTask => ({
+          petId: task.petId,
+          goal: task.goal,
+          acceptanceCriteria: task.acceptanceCriteria ?? [],
+          status: 'pending',
+          retryCount: 0,
+        })),
+      };
+      options.onSubmit(plan);
+      return JSON.stringify({ ok: true, taskCount: plan.tasks.length });
+    },
+    {
+      name: 'submit_plan',
+      description: 'Planner 角色的**主要工具**:一次性提交本次 turn 的完整任务计划(有序 task 列表)。'
+        + '应该在分析完用户请求后立即调用,无需先用其它工具探索。提交即视为规划完成,不要重复调用。',
+      schema: submitPlanSchema,
+    },
+  ) as NamedStructuredTool<'submit_plan'>;
+
+  return defineToolset({
+    name: 'studio_plan',
+    description: 'Studio planner 提交任务计划的 capability-private toolset。',
+    tools: [submitPlan] as const,
+    operations: planCapabilityToolOperations,
+  });
+}
+
 export function createPlanCapability(options: CreatePlanCapabilityOptions): AgentCapability {
   const agentsHint = buildAgentsHint(options.availableAgents);
 
@@ -104,28 +139,6 @@ export function createPlanCapability(options: CreatePlanCapabilityOptions): Agen
     description: 'Planner 唯一的目标:把用户请求拆解为一份 plan(有序 task 列表),指定每棒由哪个 worker pet 执行 + 目标。'
       + 'plan 提交后 planner 退出,workers 接手执行 —— planner 本身不做实际工作。',
     createRuntime() {
-      const submitPlan = tool(
-        async ({ tasks }) => {
-          const plan: StudioTaskPlan = {
-            tasks: tasks.map<StudioTask>((task) => ({
-              petId: task.petId,
-              goal: task.goal,
-              acceptanceCriteria: task.acceptanceCriteria ?? [],
-              status: 'pending',
-              retryCount: 0,
-            })),
-          };
-          options.onSubmit(plan);
-          return JSON.stringify({ ok: true, taskCount: plan.tasks.length });
-        },
-        {
-          name: 'submit_plan',
-          description: 'Planner 角色的**主要工具**:一次性提交本次 turn 的完整任务计划(有序 task 列表)。'
-            + '应该在分析完用户请求后立即调用,无需先用其它工具探索。提交即视为规划完成,不要重复调用。',
-          schema: submitPlanSchema,
-        },
-      );
-
       const instructions = [
         // 角色定位:规划者,不是执行者
         '【你的角色】你是 Studio 的 **planner**。'
@@ -156,8 +169,7 @@ export function createPlanCapability(options: CreatePlanCapabilityOptions): Agen
       if (agentsHint) instructions.push(agentsHint);
 
       return {
-        tools: [submitPlan],
-        operations: planCapabilityToolOperations,
+        toolsets: [createPlanToolset(options)],
         instructions,
       };
     },

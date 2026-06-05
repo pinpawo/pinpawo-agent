@@ -5,7 +5,7 @@ import { interrupt } from '@langchain/langgraph';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { CapabilityRuntime } from '../../types/capability';
 import type { AgentExecution } from '../../types/agent';
-import type { AgentToolkit, ToolkitContext, ToolOperationMetadataMap } from '../../types/toolkit';
+import type { AgentToolkit, AgentToolset, ToolkitContext, ToolOperationMetadataMap } from '../../types/toolkit';
 import type { SubagentToolOperationMetadata } from '../../types/subagent';
 import type { HumanReviewRequest } from './humanReview';
 import { readFirstHumanReviewDecision } from './humanReview';
@@ -64,6 +64,12 @@ export function selectCapabilityTools(runtime: CapabilityRuntime, toolkitTools: 
     addTool(toolItem);
   }
 
+  for (const toolset of runtime.toolsets ?? []) {
+    for (const toolItem of toolset.tools) {
+      addTool(toolItem);
+    }
+  }
+
   for (const toolItem of runtime.tools ?? []) {
     addTool(toolItem);
   }
@@ -109,6 +115,26 @@ export function collectRuntimeOperations(
   return operations;
 }
 
+export function collectToolsetOperations(
+  toolsets: AgentToolset[] | undefined,
+): Record<string, SubagentToolOperationMetadata> {
+  const operations: Record<string, SubagentToolOperationMetadata> = {};
+
+  for (const toolset of toolsets ?? []) {
+    for (const [toolName, metadata] of Object.entries(toolset.operations ?? {})) {
+      operations[toolName] = {
+        ...metadata,
+        source: {
+          provider: 'capability',
+          name: toolName,
+        },
+      };
+    }
+  }
+
+  return operations;
+}
+
 export function collectGeneralOperations(
   toolkits: AgentToolkit[],
   runtimeOperations: ToolOperationMetadataMap | undefined,
@@ -124,6 +150,13 @@ export function collectCapabilityOperations(
   runtime: CapabilityRuntime,
 ): Record<string, SubagentToolOperationMetadata> {
   const operations = collectToolkitOperations(toolkits);
+
+  for (const [toolName, metadata] of Object.entries(collectToolsetOperations(runtime.toolsets))) {
+    if (operations[toolName]) {
+      continue;
+    }
+    operations[toolName] = metadata;
+  }
 
   for (const [toolName, metadata] of Object.entries(runtime.operations ?? {})) {
     if (operations[toolName]) {

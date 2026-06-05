@@ -397,7 +397,9 @@ test('studio invokes planner agent when no explicit plan, captures submitted pla
       );
       assert.ok(planCap, 'planner should receive studio_plan capability');
       const runtime = await planCap!.createRuntime({} as never);
-      const submitTool = runtime.tools?.find((t) => t.name === 'submit_plan');
+      const submitTool = runtime.toolsets
+        ?.flatMap((toolset) => toolset.tools)
+        .find((t) => t.name === 'submit_plan');
       assert.ok(submitTool, 'submit_plan tool should be available');
       // 模拟 LLM 调 tool 提交 plan
       await submitTool!.invoke({

@@ -32,7 +32,6 @@ export async function runAgent() {
     actorName: runtime.getActorName() ?? undefined,
     llmConfig: runtime.getLlmConfig(),
     workdir: config.workdir,
-    localTools: runtime.getLocalTools(),
     localToolkitDefinitions: runtime.getLocalToolkitDefinitions(),
     localToolkits: runtime.getLocalToolkits(),
     pluginTools: runtime.getPluginTools(),

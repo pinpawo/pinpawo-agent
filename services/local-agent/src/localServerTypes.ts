@@ -17,7 +17,6 @@ export type LocalServerDeps = {
   actorName?: string;
   llmConfig: AgentLlmConfig;
   workdir: string;
-  localTools: StructuredTool[];
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];
   pluginTools: StructuredTool[];

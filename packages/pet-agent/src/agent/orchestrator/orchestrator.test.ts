@@ -464,9 +464,16 @@ test('runtime tool operations are collected for host-provided tools', () => {
     describe_pet_profile: {
       kind: 'pet.profile.read',
     },
+    read_file: {
+      kind: 'legacy.file.read',
+    },
   });
 
   assert.equal(generalOperations.read_file?.kind, 'file.read');
+  assert.deepEqual(generalOperations.read_file?.source, {
+    provider: 'toolkit',
+    name: 'read_file',
+  });
   assert.equal(generalOperations.describe_pet_profile?.kind, 'pet.profile.read');
 });
 

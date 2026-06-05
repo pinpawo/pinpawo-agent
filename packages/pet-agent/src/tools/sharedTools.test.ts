@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createPetProfileToolkit, petProfileToolOperations } from './petProfile';
-import { memoriesToolOperations } from './memories';
-import { webSearchToolOperations } from './webSearch';
+import { createMemoriesToolkit, memoriesToolOperations } from './memories';
+import { createWebSearchToolkit, webSearchToolOperations } from './webSearch';
 
 test('shared pet profile toolkit exposes tool operation metadata', () => {
   const toolkit = createPetProfileToolkit({
@@ -25,8 +25,13 @@ test('shared pet profile toolkit exposes tool operation metadata', () => {
 });
 
 test('shared memory tool exposes operation metadata without raw memory content', () => {
+  const toolkit = createMemoriesToolkit();
   const metadata = memoriesToolOperations.get_memories;
 
+  assert.equal(toolkit.name, 'memory');
+  assert.ok(Array.isArray(toolkit.tools));
+  assert.equal(toolkit.tools[0]?.name, 'get_memories');
+  assert.equal(toolkit.operations?.get_memories, metadata);
   assert.equal(metadata.kind, 'memory.search');
   assert.equal(metadata.title, '搜索记忆');
   assert.deepEqual(metadata.summarizeInput?.({
@@ -47,8 +52,13 @@ test('shared memory tool exposes operation metadata without raw memory content',
 });
 
 test('shared web search tool exposes operation metadata without raw result snippets', () => {
+  const toolkit = createWebSearchToolkit();
   const metadata = webSearchToolOperations.search_web;
 
+  assert.equal(toolkit.name, 'web_search');
+  assert.ok(Array.isArray(toolkit.tools));
+  assert.equal(toolkit.tools[0]?.name, 'search_web');
+  assert.equal(toolkit.operations?.search_web, metadata);
   assert.equal(metadata.kind, 'web.search');
   assert.equal(metadata.title, '搜索网页');
   assert.deepEqual(metadata.summarizeInput?.({

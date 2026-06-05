@@ -1,7 +1,8 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { ToolkitOperationMetadata } from '../types/toolkit';
+import { defineToolkit } from '../types/toolkit';
+import type { AgentToolkit, NamedStructuredTool, ToolkitOperationMetadata } from '../types/toolkit';
 
 export type MemorySearchResult = {
   id?: string | null;
@@ -117,4 +118,14 @@ export function createMemoriesTool(options: MemoriesToolOptions = {}): Structure
       }),
     },
   );
+}
+
+export function createMemoriesToolkit(options: MemoriesToolOptions = {}): AgentToolkit {
+  const memoriesTool = createMemoriesTool(options) as NamedStructuredTool<'get_memories'>;
+  return defineToolkit({
+    name: 'memory',
+    description: '搜索与当前问题相关的记忆、偏好或过往事实。',
+    tools: [memoriesTool] as const,
+    operations: memoriesToolOperations,
+  });
 }

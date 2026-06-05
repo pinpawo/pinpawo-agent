@@ -148,6 +148,7 @@ export type {
   PetProfileToolOptions,
 } from './tools/petProfile';
 export {
+  createMemoriesToolkit,
   createMemoriesTool,
   memoriesToolOperations,
 } from './tools/memories';
@@ -156,6 +157,7 @@ export type {
   MemorySearchResult,
 } from './tools/memories';
 export {
+  createWebSearchToolkit,
   createWebSearchTool,
   webSearchToolOperations,
 } from './tools/webSearch';

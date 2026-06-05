@@ -1,7 +1,8 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { ToolkitOperationMetadata } from '../types/toolkit';
+import { defineToolkit } from '../types/toolkit';
+import type { AgentToolkit, NamedStructuredTool, ToolkitOperationMetadata } from '../types/toolkit';
 
 export type WebSearchResult = {
   title: string;
@@ -116,4 +117,14 @@ export function createWebSearchTool(options: WebSearchToolOptions = {}): Structu
       }),
     },
   );
+}
+
+export function createWebSearchToolkit(options: WebSearchToolOptions = {}): AgentToolkit {
+  const webSearchTool = createWebSearchTool(options) as NamedStructuredTool<'search_web'>;
+  return defineToolkit({
+    name: 'web_search',
+    description: '搜索外部网络获取最新信息。',
+    tools: [webSearchTool] as const,
+    operations: webSearchToolOperations,
+  });
 }

@@ -10,7 +10,7 @@ export function createOperationRegistryForAgentSetup(
 ): OperationRegistry {
   return createOperationRegistryFromSources({
     toolkits: setup.input.toolkits ?? [],
-    runtimeOperations: setup.input.toolOperations,
+    legacyRuntimeOperations: setup.input.toolOperations,
   });
 }
 

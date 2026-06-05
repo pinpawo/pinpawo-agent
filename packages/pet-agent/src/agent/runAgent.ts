@@ -12,6 +12,10 @@ export type AgentInvokeInput = {
   threadId?: string;
   capabilities?: AgentCapability[];
   tools?: StructuredTool[];
+  /**
+   * @deprecated Migration fallback for host-provided direct tools. New code
+   * should pass toolkits instead.
+   */
   toolOperations?: ToolOperationMetadataMap;
   toolkits?: AgentToolkit[];
   execution?: AgentExecution;

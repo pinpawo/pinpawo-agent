@@ -226,6 +226,8 @@ export function buildLocalChatAgentInput(params: {
     if (isCapabilityEnabled(meta.id)) capabilities.push(capability);
   }
 
+  const legacyDirectTools = params.tools ?? [];
+
   return {
     graphKey: buildGraphKey([
       'local',
@@ -250,7 +252,7 @@ export function buildLocalChatAgentInput(params: {
       ],
       threadId: params.threadId,
       capabilities,
-      tools: [...(params.tools ?? [])],
+      ...(legacyDirectTools.length > 0 ? { tools: [...legacyDirectTools] } : {}),
       toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
       execution: {
         dryRun: params.dryRun,
@@ -347,7 +349,6 @@ export function buildLocalScheduledAgentInput(params: {
         ),
       ],
       capabilities,
-      tools: [],
       toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
       execution: {
         dryRun: params.dryRun,

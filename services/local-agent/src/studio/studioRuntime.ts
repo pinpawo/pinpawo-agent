@@ -59,7 +59,7 @@ export type BuildStudioInput = {
   llmConfig: AgentLlmConfig;
   /** 全局 capability 池(local + user 合并);按 pet config 的 capability 名筛选 */
   capabilities: AgentCapability[];
-  /** 全局 tool 池(plugin + local);所有 pet 共享 */
+  /** 迁移期 direct tool fallback;新本地工具应通过 toolkits 暴露 */
   tools: StructuredTool[];
   /** 全局 toolkit 池(plugin + local);所有 pet 共享 */
   toolkits?: AgentToolkit[];

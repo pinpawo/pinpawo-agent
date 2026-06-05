@@ -140,6 +140,7 @@ export type {
 } from './agent/studio/index';
 
 export {
+  createPetProfileToolkit,
   createPetProfileTool,
   petProfileToolOperations,
 } from './tools/petProfile';

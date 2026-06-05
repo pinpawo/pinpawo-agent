@@ -2,7 +2,12 @@ import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentActor } from '../types/agent';
-import type { ToolkitOperationMetadata } from '../types/toolkit';
+import {
+  defineToolkit,
+  type AgentToolkit,
+  type NamedStructuredTool,
+  type ToolkitOperationMetadata,
+} from '../types/toolkit';
 
 export type PetProfileToolOptions = {
   actor: AgentActor;
@@ -94,4 +99,14 @@ export function createPetProfileTool(options: PetProfileToolOptions): Structured
       }),
     },
   );
+}
+
+export function createPetProfileToolkit(options: PetProfileToolOptions): AgentToolkit {
+  const petProfileTool = createPetProfileTool(options) as NamedStructuredTool<'describe_pet_profile'>;
+  return defineToolkit({
+    name: 'pet_profile',
+    description: '读取当前宠物的基本信息、自我介绍和补充资料。',
+    tools: [petProfileTool] as const,
+    operations: petProfileToolOperations,
+  });
 }

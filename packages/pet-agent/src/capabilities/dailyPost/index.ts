@@ -4,7 +4,7 @@ import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from '../../t
 import { readLatestToolArtifact } from '../../agent/orchestrator/subagentHandoff';
 import { dailyPostInstructions } from './instructions';
 import { dailyPostResultSchema } from './schemas';
-import { buildDailyPostTools, dailyPostToolOperations } from './tools';
+import { createDailyPostToolset } from './tools';
 
 export type DailyPostResult = {
   status: 'created' | 'skipped' | 'failed';
@@ -45,7 +45,7 @@ export function createDailyPostCapability(
     name: 'daily_post',
     description: '生成、保存或跳过 daily post，并产出本轮动态处理结果。',
     createRuntime: async (context) => ({
-      tools: buildDailyPostTools({
+      toolsets: [createDailyPostToolset({
         actor: context.actor,
         models: context.models,
         dryRun: context.execution?.dryRun,
@@ -55,8 +55,7 @@ export function createDailyPostCapability(
         markUsed: options.markUsed,
         markSkipped: options.markSkipped,
         requestImageProcessing: options.requestImageProcessing,
-      }),
-      operations: dailyPostToolOperations,
+      })],
       instructions: options.instructions ?? dailyPostInstructions,
       readResult: readLatestToolArtifact,
     }),

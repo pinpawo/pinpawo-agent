@@ -4,7 +4,8 @@ import { basename, dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
-import type { ToolkitOperationMetadata } from '../../types/toolkit';
+import { defineToolset } from '../../types/toolkit';
+import type { AgentToolset, NamedStructuredTool, ToolkitOperationMetadata } from '../../types/toolkit';
 import {
   capabilityCreatorResultSchema,
   checkCapabilityKeywordsInputSchema,
@@ -109,7 +110,7 @@ const capabilityCreatorResultLabels: Record<string, string> = {
   failed: 'capability 处理失败',
 };
 
-export const capabilityCreatorToolOperations: Record<string, ToolkitOperationMetadata> = {
+export const capabilityCreatorToolOperations = {
   scaffold_capability_plugin: {
     kind: 'capability.scaffold',
     title: '生成 capability 插件',
@@ -131,7 +132,10 @@ export const capabilityCreatorToolOperations: Record<string, ToolkitOperationMet
     summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),
     summarizeError: () => ({ summary: '检查 capability 关键词失败' }),
   },
-};
+} satisfies Record<
+  'scaffold_capability_plugin' | 'validate_capability_plugin' | 'check_capability_keywords',
+  ToolkitOperationMetadata
+>;
 
 function renderManifest(params: {
   id: string;
@@ -606,4 +610,18 @@ export function buildCapabilityCreatorTools(): StructuredTool[] {
     createValidateCapabilityPluginTool(),
     createCheckCapabilityKeywordsTool(),
   ];
+}
+
+export function createCapabilityCreatorToolset(): AgentToolset {
+  const tools = buildCapabilityCreatorTools() as [
+    NamedStructuredTool<'scaffold_capability_plugin'>,
+    NamedStructuredTool<'validate_capability_plugin'>,
+    NamedStructuredTool<'check_capability_keywords'>,
+  ];
+  return defineToolset({
+    name: 'capability_creator',
+    description: '生成、验证和检查 capability 插件模板的 capability-private toolset。',
+    tools,
+    operations: capabilityCreatorToolOperations,
+  });
 }

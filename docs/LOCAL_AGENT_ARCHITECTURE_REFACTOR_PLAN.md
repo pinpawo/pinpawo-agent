@@ -161,7 +161,6 @@ pet-agent 在创建 subagent 时负责收集这些 metadata，并随工具事件
 ```txt
 AgentToolkit.operations
 CapabilityRuntime.toolsets[].operations
-CapabilityRuntime.operations (迁移期 fallback)
 AgentInvokeInput.toolOperations (deprecated host direct-tool fallback)
   -> SubagentToolEvent.operation -> operation metadata
 ```
@@ -429,7 +428,6 @@ type ToolOperationSummary = {
 - 新的静态 toolkit/toolset 定义优先使用 `defineToolkit()` / `defineToolset()`，由 TypeScript 约束 `operations` / `policy.toolReview` 的 key 必须来自对应 tools。
 - `AgentToolkit.operations` 描述 toolkit tools 的展示语义。
 - `CapabilityRuntime.toolsets[].operations` 描述 capability-private tools 的展示语义。
-- `CapabilityRuntime.operations` 只作为迁移期 fallback，不再作为新代码主路径。
 - `AgentInvokeInput.toolOperations` 是 deprecated host direct-tool fallback，只用于尚未迁移到 toolkit/toolset 的兼容路径。
 - pet-agent 的 subagent 工具事件会携带 `operation` metadata。
 - local-agent 的 `ToolOperationTracker` 使用 run-local registry 兜底，不再依赖全局固定 local tool registry。

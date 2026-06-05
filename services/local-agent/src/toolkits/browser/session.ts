@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
-import { config } from '../config';
+import { config } from '../../config';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { isAbsolute, resolve } from 'node:path';

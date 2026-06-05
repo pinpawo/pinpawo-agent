@@ -6,7 +6,7 @@ import test from 'node:test';
 import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
-import { createBrowserToolkit } from './capabilities/browserCapability';
+import { createBrowserToolkit } from './toolkits/browser/toolkit';
 import { createBashToolkit, createGitToolkit, localToolOperationRegistry } from './plugins/localTools';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import { petProfileToolOperations } from '@pinpawo/pet-agent';

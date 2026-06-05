@@ -16,17 +16,17 @@ export type LocalAgentPlugin = {
 
 const PLUGINS_DIR = resolve(homedir(), '.pinpawo', 'plugins');
 
-export async function loadPlugins(): Promise<{ tools: StructuredTool[]; toolkits: AgentToolkit[]; plugins: LocalAgentPlugin[] }> {
+export async function loadPlugins(): Promise<{ legacyTools: StructuredTool[]; toolkits: AgentToolkit[]; plugins: LocalAgentPlugin[] }> {
   return loadPluginsFromDir(PLUGINS_DIR);
 }
 
-export async function loadPluginsFromDir(pluginsDir: string): Promise<{ tools: StructuredTool[]; toolkits: AgentToolkit[]; plugins: LocalAgentPlugin[] }> {
-  if (!existsSync(pluginsDir)) return { tools: [], toolkits: [], plugins: [] };
+export async function loadPluginsFromDir(pluginsDir: string): Promise<{ legacyTools: StructuredTool[]; toolkits: AgentToolkit[]; plugins: LocalAgentPlugin[] }> {
+  if (!existsSync(pluginsDir)) return { legacyTools: [], toolkits: [], plugins: [] };
 
   const files = readdirSync(pluginsDir).filter((file) => file.endsWith('.mjs') || file.endsWith('.js'));
-  if (files.length === 0) return { tools: [], toolkits: [], plugins: [] };
+  if (files.length === 0) return { legacyTools: [], toolkits: [], plugins: [] };
 
-  const tools: StructuredTool[] = [];
+  const legacyTools: StructuredTool[] = [];
   const toolkits: AgentToolkit[] = [];
   const plugins: LocalAgentPlugin[] = [];
 
@@ -42,7 +42,7 @@ export async function loadPluginsFromDir(pluginsDir: string): Promise<{ tools: S
       }
 
       if (Array.isArray(mod.tools)) {
-        tools.push(...(mod.tools as StructuredTool[]));
+        legacyTools.push(...(mod.tools as StructuredTool[]));
       }
       if (Array.isArray(mod.toolkits)) {
         toolkits.push(...(mod.toolkits as AgentToolkit[]));
@@ -57,7 +57,7 @@ export async function loadPluginsFromDir(pluginsDir: string): Promise<{ tools: S
     }
   }
 
-  return { tools, toolkits, plugins };
+  return { legacyTools, toolkits, plugins };
 }
 
 export function collectPluginHooks(plugins: LocalAgentPlugin[]) {

@@ -8,7 +8,7 @@ import {
   okOutputPathSummary,
   readRecord,
   readString,
-} from '../operationMetadata';
+} from '../../plugins/operationMetadata';
 
 const DEFAULT_DOWNLOADS_DIR = resolve(homedir(), 'Downloads');
 const MAX_FETCH_BYTES = 100_000;

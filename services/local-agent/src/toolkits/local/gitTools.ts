@@ -10,7 +10,7 @@ import {
 import { z } from 'zod';
 import { config } from '../../config';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
-import { readBoolean, readRecord, readString } from '../operationMetadata';
+import { readBoolean, readRecord, readString } from '../../plugins/operationMetadata';
 import { resolveUserPath } from './pathUtils';
 
 const MAX_GIT_OUTPUT_CHARS = 12_000;

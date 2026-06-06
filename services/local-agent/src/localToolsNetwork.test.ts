@@ -5,7 +5,7 @@ import {
   httpFetchTool,
   inferFilename,
   sanitizeFilename,
-} from './plugins/localTools/networkTools';
+} from './toolkits/local/networkTools';
 
 test('network tool helpers sanitize names and infer image extensions', () => {
   assert.equal(sanitizeFilename('a/b:c?.png'), 'a_b_c_.png');

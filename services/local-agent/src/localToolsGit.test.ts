@@ -4,13 +4,13 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createBashToolkit, createGitToolkit, loadLocalPluginTools } from './plugins/localTools';
+import { createBashToolkit, createGitToolkit, loadLocalPluginTools } from './toolkits/local';
 import {
   gitAddTool,
   gitCommitTool,
   gitDiffTool,
   gitStatusTool,
-} from './plugins/localTools/gitTools';
+} from './toolkits/local/gitTools';
 
 function createRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'pinpawo-git-tools-'));

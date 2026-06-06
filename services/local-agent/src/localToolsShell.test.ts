@@ -7,7 +7,7 @@ import {
   hasBlockedOutputRedirection,
   normalizeShellActionInput,
   runShellTool,
-} from './plugins/localTools/shellTools';
+} from './toolkits/local/shellTools';
 
 test('shell policy blocks output redirection write commands', () => {
   assert.equal(hasBlockedOutputRedirection('echo ok > out.txt'), true);

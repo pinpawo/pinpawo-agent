@@ -8,7 +8,7 @@ import {
 } from './capabilities/capabilityAvailability';
 import { createBrowserCapability } from './capabilities/browserCapability';
 import { createBrowserToolkit } from './toolkits/browser/toolkit';
-import { createBashToolkit, createGitToolkit, loadLocalPluginTools } from './plugins/localTools';
+import { createBashToolkit, createGitToolkit, loadLocalPluginTools } from './toolkits/local';
 
 type ResolveCapabilityAvailability = typeof resolveCapabilityAvailability;
 

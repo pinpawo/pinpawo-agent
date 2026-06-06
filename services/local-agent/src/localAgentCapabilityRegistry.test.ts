@@ -4,7 +4,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
-import { createBashToolkit, createGitToolkit } from './plugins/localTools';
+import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import { createBrowserToolkit } from './toolkits/browser/toolkit';
 
 function capability(name: string): AgentCapability {

@@ -8,7 +8,7 @@ import {
   emitInflightToolEvent,
   finishInflightOperations,
 } from './inflightOperationRun';
-import { localToolOperationRegistry } from './plugins/localTools';
+import { localToolOperationRegistry } from './toolkits/local';
 
 test('inflight operation run emits tool stream events as operations', () => {
   const run = createInflightOperationRun('req-1');

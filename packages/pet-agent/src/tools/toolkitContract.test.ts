@@ -74,7 +74,7 @@ test('defineToolkit preserves valid tool metadata and review policy', () => {
   assert.equal(toolkit.policy?.toolReview?.beta_tool, reviewPolicy);
 });
 
-test('hasToolOperationMetadata treats empty legacy operation maps as absent', () => {
+test('hasToolOperationMetadata treats empty operation maps as absent', () => {
   assert.equal(hasToolOperationMetadata(undefined), false);
   assert.equal(hasToolOperationMetadata({}), false);
   assert.equal(hasToolOperationMetadata({ alpha_tool: { kind: 'alpha.run' } }), true);

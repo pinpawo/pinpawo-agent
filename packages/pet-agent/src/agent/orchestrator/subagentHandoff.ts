@@ -5,7 +5,7 @@ import { interrupt } from '@langchain/langgraph';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { CapabilityRuntime } from '../../types/capability';
 import type { AgentExecution } from '../../types/agent';
-import type { AgentToolkit, AgentToolset, ToolkitContext, ToolOperationMetadataMap } from '../../types/toolkit';
+import type { AgentToolkit, AgentToolset, ToolkitContext } from '../../types/toolkit';
 import type { SubagentToolOperationMetadata } from '../../types/subagent';
 import type { HumanReviewRequest } from './humanReview';
 import { readFirstHumanReviewDecision } from './humanReview';
@@ -70,10 +70,6 @@ export function selectCapabilityTools(runtime: CapabilityRuntime, toolkitTools: 
     }
   }
 
-  for (const toolItem of runtime.tools ?? []) {
-    addTool(toolItem);
-  }
-
   return selectedTools;
 }
 
@@ -92,24 +88,6 @@ export function collectToolkitOperations(
         },
       };
     }
-  }
-
-  return operations;
-}
-
-export function collectRuntimeOperations(
-  legacyRuntimeOperations: ToolOperationMetadataMap | undefined,
-): Record<string, SubagentToolOperationMetadata> {
-  const operations: Record<string, SubagentToolOperationMetadata> = {};
-
-  for (const [toolName, metadata] of Object.entries(legacyRuntimeOperations ?? {})) {
-    operations[toolName] = {
-      ...metadata,
-      source: {
-        provider: 'runtime',
-        name: toolName,
-      },
-    };
   }
 
   return operations;
@@ -137,18 +115,8 @@ export function collectToolsetOperations(
 
 export function collectGeneralOperations(
   toolkits: AgentToolkit[],
-  legacyRuntimeOperations: ToolOperationMetadataMap | undefined,
 ): Record<string, SubagentToolOperationMetadata> {
-  const operations = collectToolkitOperations(toolkits);
-
-  for (const [toolName, metadata] of Object.entries(collectRuntimeOperations(legacyRuntimeOperations))) {
-    if (operations[toolName]) {
-      continue;
-    }
-    operations[toolName] = metadata;
-  }
-
-  return operations;
+  return collectToolkitOperations(toolkits);
 }
 
 export function collectCapabilityOperations(

@@ -1,4 +1,3 @@
-import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
@@ -19,8 +18,6 @@ export type LocalServerDeps = {
   workdir: string;
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];
-  /** Deprecated raw plugin tools fallback. New plugins should export toolkits. */
-  legacyPluginTools: StructuredTool[];
   pluginToolkits?: AgentToolkit[];
   localCapabilityDefinitions?: AgentCapability[];
   localCapabilities?: AgentCapability[];

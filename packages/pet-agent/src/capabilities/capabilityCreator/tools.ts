@@ -110,7 +110,7 @@ const capabilityCreatorResultLabels: Record<string, string> = {
   failed: 'capability 处理失败',
 };
 
-export const capabilityCreatorToolOperations = {
+const capabilityCreatorToolOperations = {
   scaffold_capability_plugin: {
     kind: 'capability.scaffold',
     title: '生成 capability 插件',

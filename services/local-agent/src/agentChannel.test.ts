@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { StructuredTool } from '@langchain/core/tools';
 
 import { buildLocalChatAgentInput, buildLocalScheduledAgentInput } from './agentChannel';
 import type { AgentContext } from './contextLoader';
@@ -26,33 +25,19 @@ function createContext(): AgentContext {
   };
 }
 
-test('buildLocalChatAgentInput omits empty legacy direct tools', () => {
+test('buildLocalChatAgentInput omits empty toolkit configurable arrays', () => {
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
   });
 
-  assert.equal(setup.input.tools, undefined);
-  assert.equal(setup.input.legacyDirectTools, undefined);
+  assert.ok(setup.input.toolkits);
 });
 
-test('buildLocalChatAgentInput keeps non-empty legacy direct tools', () => {
-  const legacyTool = { name: 'legacy_tool' } as StructuredTool;
-  const setup = buildLocalChatAgentInput({
-    context: createContext(),
-    userMessage: 'hello',
-    legacyDirectTools: [legacyTool],
-  });
-
-  assert.equal(setup.input.tools, undefined);
-  assert.deepEqual(setup.input.legacyDirectTools, [legacyTool]);
-});
-
-test('buildLocalScheduledAgentInput omits empty legacy direct tools', () => {
+test('buildLocalScheduledAgentInput omits empty toolkit configurable arrays', () => {
   const setup = buildLocalScheduledAgentInput({
     context: createContext(),
   });
 
-  assert.equal(setup.input.tools, undefined);
-  assert.equal(setup.input.legacyDirectTools, undefined);
+  assert.ok(setup.input.toolkits);
 });

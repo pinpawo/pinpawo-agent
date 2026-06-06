@@ -20,7 +20,6 @@ import {
 import {
   collectCapabilityOperations,
   collectGeneralOperations,
-  collectRuntimeOperations,
   collectToolkitOperations,
   readLatestToolArtifact,
   resolveToolkitResources,
@@ -381,11 +380,16 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
 
   const dedupedTools = selectCapabilityTools({
     uses: ['browser'],
-    toolsets: [{
-      name: 'private',
-      tools: [customTool],
-    }],
-    tools: [customTool],
+    toolsets: [
+      {
+        name: 'private',
+        tools: [customTool],
+      },
+      {
+        name: 'private_duplicate',
+        tools: [customTool],
+      },
+    ],
   }, browserResources.tools);
 
   assert.deepEqual(dedupedTools.map((toolItem) => toolItem.name), [
@@ -439,20 +443,7 @@ test('toolkit and capability toolset operations are collected with their source'
   assert.equal(capabilityOperations.shared_tool?.kind, 'toolkit.shared');
 });
 
-test('runtime tool operations are collected for host-provided tools', () => {
-  const legacyRuntimeOperations = collectRuntimeOperations({
-    describe_pet_profile: {
-      kind: 'pet.profile.read',
-      title: '读取宠物资料',
-    },
-  });
-
-  assert.equal(legacyRuntimeOperations.describe_pet_profile?.kind, 'pet.profile.read');
-  assert.deepEqual(legacyRuntimeOperations.describe_pet_profile?.source, {
-    provider: 'runtime',
-    name: 'describe_pet_profile',
-  });
-
+test('general operations are collected from toolkits', () => {
   const generalOperations = collectGeneralOperations([{
     name: 'bash',
     description: 'bash toolkit',
@@ -461,24 +452,16 @@ test('runtime tool operations are collected for host-provided tools', () => {
         kind: 'file.read',
       },
     },
-  }], {
-    describe_pet_profile: {
-      kind: 'pet.profile.read',
-    },
-    read_file: {
-      kind: 'legacy.file.read',
-    },
-  });
+  }]);
 
   assert.equal(generalOperations.read_file?.kind, 'file.read');
   assert.deepEqual(generalOperations.read_file?.source, {
     provider: 'toolkit',
     name: 'read_file',
   });
-  assert.equal(generalOperations.describe_pet_profile?.kind, 'pet.profile.read');
 });
 
-test('runAgent omits empty direct tool and toolkit configurable arrays', async () => {
+test('runAgent omits empty toolkit configurable arrays', async () => {
   const calls: Array<{ configurable?: Record<string, unknown> }> = [];
   const graph = {
     invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
@@ -489,56 +472,12 @@ test('runAgent omits empty direct tool and toolkit configurable arrays', async (
 
   const result = await runAgent(graph as never, {
     messages: [new HumanMessage('hello')],
-    tools: [],
     toolkits: [],
   });
 
   assert.equal(result.reply, 'done');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.configurable?.tools, undefined);
   assert.equal(calls[0]?.configurable?.toolkits, undefined);
-});
-
-test('runAgent maps explicit legacy direct tools to graph configurable tools', async () => {
-  const directTool = mockTool('legacy_direct_tool');
-  const calls: Array<{ configurable?: Record<string, unknown> }> = [];
-  const graph = {
-    invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
-      calls.push({ configurable: options?.configurable });
-      return { messages: [new AIMessage('done')] };
-    },
-  };
-
-  await runAgent(graph as never, {
-    messages: [new HumanMessage('hello')],
-    legacyDirectTools: [directTool],
-  });
-
-  assert.deepEqual(calls[0]?.configurable?.tools, [directTool]);
-});
-
-test('runAgent maps explicit legacy tool operations to graph configurable fallback', async () => {
-  const calls: Array<{ configurable?: Record<string, unknown> }> = [];
-  const graph = {
-    invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
-      calls.push({ configurable: options?.configurable });
-      return { messages: [new AIMessage('done')] };
-    },
-  };
-  const legacyToolOperations = {
-    legacy_tool: {
-      kind: 'legacy.run',
-      title: 'Legacy Run',
-    },
-  };
-
-  await runAgent(graph as never, {
-    messages: [new HumanMessage('hello')],
-    legacyToolOperations,
-  });
-
-  assert.deepEqual(calls[0]?.configurable?.legacyToolOperations, legacyToolOperations);
-  assert.equal(calls[0]?.configurable?.toolOperations, undefined);
 });
 
 test('built-in capability runtimes expose operation metadata', async () => {

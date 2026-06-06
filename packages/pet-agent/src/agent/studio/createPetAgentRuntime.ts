@@ -1,6 +1,5 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
-import type { StructuredTool } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -38,11 +37,6 @@ export type PetAgentRuntimeConfig = {
   status?: PetAgentStatus;
   capabilities?: AgentCapability[];
   capabilityAvailability?: Record<string, CapabilityAvailability>;
-  /**
-   * @deprecated Migration fallback for host-provided direct tools. New runtime
-   * tools should be exposed through toolkits/toolsets.
-   */
-  tools?: StructuredTool[];
   toolkits?: AgentToolkit[];
   execution?: AgentExecution;
   workdir?: string;
@@ -142,9 +136,6 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     }
 
     const messages = await buildInvokeMessages(input.brief, input.wikiRoot);
-    const tools = [
-      ...(config.tools ?? []),
-    ];
     const toolkits = [
       ...(config.toolkits ?? []),
       ...(input.toolkits ?? []),
@@ -154,7 +145,6 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       actor: config.actor,
       thread_id: input.threadId,
       capabilities: [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])],
-      tools,
       toolkits,
       execution: input.execution ?? config.execution,
       workdir: input.workdir ?? config.workdir,

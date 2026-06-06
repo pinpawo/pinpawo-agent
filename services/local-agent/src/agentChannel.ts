@@ -1,5 +1,4 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
-import type { StructuredTool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   buildDailyPostTaskMessage,
@@ -177,8 +176,6 @@ export function buildLocalChatAgentInput(params: {
   context: AgentContext;
   userMessage: string;
   llmConfig?: AgentLlmConfig;
-  /** Deprecated direct tools fallback. New local tools should be exposed through toolkits. */
-  legacyDirectTools?: StructuredTool[];
   toolkits?: AgentToolkit[];
   threadId?: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
@@ -226,8 +223,6 @@ export function buildLocalChatAgentInput(params: {
     if (isCapabilityEnabled(meta.id)) capabilities.push(capability);
   }
 
-  const legacyDirectTools = params.legacyDirectTools ?? [];
-
   return {
     graphKey: buildGraphKey([
       'local',
@@ -252,7 +247,6 @@ export function buildLocalChatAgentInput(params: {
       ],
       threadId: params.threadId,
       capabilities,
-      ...(legacyDirectTools.length > 0 ? { legacyDirectTools: [...legacyDirectTools] } : {}),
       toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
       execution: {
         dryRun: params.dryRun,

@@ -51,7 +51,7 @@ function parseJsonObject(output: unknown): Record<string, unknown> | null {
   }
 }
 
-export const webSearchToolOperations = {
+const webSearchToolOperations = {
   search_web: {
     kind: 'web.search',
     title: '搜索网页',

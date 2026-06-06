@@ -1,7 +1,6 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
-import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentToolkit, DailyPostPayload } from '@pinpawo/pet-agent';
 
 export type LocalAgentPluginHooks = {
@@ -16,17 +15,16 @@ export type LocalAgentPlugin = {
 
 const PLUGINS_DIR = resolve(homedir(), '.pinpawo', 'plugins');
 
-export async function loadPlugins(): Promise<{ legacyTools: StructuredTool[]; toolkits: AgentToolkit[]; plugins: LocalAgentPlugin[] }> {
+export async function loadPlugins(): Promise<{ toolkits: AgentToolkit[]; plugins: LocalAgentPlugin[] }> {
   return loadPluginsFromDir(PLUGINS_DIR);
 }
 
-export async function loadPluginsFromDir(pluginsDir: string): Promise<{ legacyTools: StructuredTool[]; toolkits: AgentToolkit[]; plugins: LocalAgentPlugin[] }> {
-  if (!existsSync(pluginsDir)) return { legacyTools: [], toolkits: [], plugins: [] };
+export async function loadPluginsFromDir(pluginsDir: string): Promise<{ toolkits: AgentToolkit[]; plugins: LocalAgentPlugin[] }> {
+  if (!existsSync(pluginsDir)) return { toolkits: [], plugins: [] };
 
   const files = readdirSync(pluginsDir).filter((file) => file.endsWith('.mjs') || file.endsWith('.js'));
-  if (files.length === 0) return { legacyTools: [], toolkits: [], plugins: [] };
+  if (files.length === 0) return { toolkits: [], plugins: [] };
 
-  const legacyTools: StructuredTool[] = [];
   const toolkits: AgentToolkit[] = [];
   const plugins: LocalAgentPlugin[] = [];
 
@@ -41,9 +39,6 @@ export async function loadPluginsFromDir(pluginsDir: string): Promise<{ legacyTo
         continue;
       }
 
-      if (Array.isArray(mod.tools)) {
-        legacyTools.push(...(mod.tools as StructuredTool[]));
-      }
       if (Array.isArray(mod.toolkits)) {
         toolkits.push(...(mod.toolkits as AgentToolkit[]));
       }
@@ -51,13 +46,14 @@ export async function loadPluginsFromDir(pluginsDir: string): Promise<{ legacyTo
       plugins.push(plugin as LocalAgentPlugin);
       const toolCount = Array.isArray(mod.tools) ? mod.tools.length : 0;
       const toolkitCount = Array.isArray(mod.toolkits) ? mod.toolkits.length : 0;
-      console.log(`[plugins] loaded "${(plugin as LocalAgentPlugin).name}" (${toolCount} tool${toolCount !== 1 ? 's' : ''}, ${toolkitCount} toolkit${toolkitCount !== 1 ? 's' : ''})`);
+      const ignoredTools = toolCount > 0 ? `, ignored ${toolCount} legacy direct tool${toolCount !== 1 ? 's' : ''}` : '';
+      console.log(`[plugins] loaded "${(plugin as LocalAgentPlugin).name}" (${toolkitCount} toolkit${toolkitCount !== 1 ? 's' : ''}${ignoredTools})`);
     } catch (err) {
       console.warn(`[plugins] failed to load ${file}:`, err instanceof Error ? err.message : err);
     }
   }
 
-  return { legacyTools, toolkits, plugins };
+  return { toolkits, plugins };
 }
 
 export function collectPluginHooks(plugins: LocalAgentPlugin[]) {

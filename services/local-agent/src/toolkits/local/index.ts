@@ -51,7 +51,7 @@ const bashToolkitTools: StructuredTool[] = [
   runShellTool,
 ];
 
-const coreLocalPluginTools: StructuredTool[] = [
+const coreLocalTools: StructuredTool[] = [
   ...localUtilityTools,
   ...gitTools,
   runShellTool,
@@ -115,16 +115,16 @@ export const localToolOperationRegistry = createOperationRegistryFromToolkits([
   createGitToolkit(),
 ]);
 
-let cachedLocalPluginTools: StructuredTool[] | null = null;
+let cachedCoreLocalTools: StructuredTool[] | null = null;
 
-export async function loadLocalPluginTools(): Promise<StructuredTool[]> {
-  if (cachedLocalPluginTools) {
-    return cachedLocalPluginTools;
+export async function loadCoreLocalTools(): Promise<StructuredTool[]> {
+  if (cachedCoreLocalTools) {
+    return cachedCoreLocalTools;
   }
 
-  cachedLocalPluginTools = coreLocalPluginTools;
+  cachedCoreLocalTools = coreLocalTools;
 
-  return cachedLocalPluginTools;
+  return cachedCoreLocalTools;
 }
 
 export const localPlugin: LocalAgentPlugin = {

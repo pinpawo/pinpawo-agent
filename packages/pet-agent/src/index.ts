@@ -107,8 +107,6 @@ export {
   defaultPromptProvider,
   ensureWikiSkeleton,
   fileReadPromptProvider,
-  planCapabilityToolOperations,
-  wikiReadToolOperations,
 } from './agent/studio/index';
 export type {
   CreatePlanCapabilityOptions,
@@ -142,7 +140,6 @@ export type {
 export {
   createPetProfileToolkit,
   createPetProfileTool,
-  petProfileToolOperations,
 } from './tools/petProfile';
 export type {
   PetProfileToolOptions,
@@ -150,7 +147,6 @@ export type {
 export {
   createMemoriesToolkit,
   createMemoriesTool,
-  memoriesToolOperations,
 } from './tools/memories';
 export type {
   MemoriesToolOptions,
@@ -159,7 +155,6 @@ export type {
 export {
   createWebSearchToolkit,
   createWebSearchTool,
-  webSearchToolOperations,
 } from './tools/webSearch';
 export type {
   WebSearchResult,

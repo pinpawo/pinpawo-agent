@@ -64,7 +64,7 @@ function readTasks(input: unknown) {
   return Array.isArray(tasks) ? tasks : [];
 }
 
-export const planCapabilityToolOperations = {
+const planCapabilityToolOperations = {
   submit_plan: {
     kind: 'studio.plan.submit',
     title: '提交计划',

@@ -5,7 +5,7 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
-import type { AgentToolkit, ToolOperationMetadataMap } from '../../types/toolkit';
+import type { AgentToolkit } from '../../types/toolkit';
 import type { OrchestrationDecision } from './schemas';
 
 export type MessageLane = 'general' | `capability:${string}`;
@@ -74,24 +74,6 @@ export type OrchestratorConfig = {
 export type OrchestratorInvokeOptions = {
   actor?: AgentActor;
   capabilities?: AgentCapability[];
-  /**
-   * @deprecated Migration fallback for host-provided direct tools. New code
-   * should use AgentToolkit definitions so tools, operation metadata, and
-   * review policy stay under one owner.
-   */
-  tools?: StructuredTool[];
-  /**
-   * @deprecated Migration fallback for host-provided direct tools. New code
-   * should use legacyToolOperations for explicit fallback usage, and should
-   * expose operation metadata through AgentToolkit.operations or
-   * CapabilityRuntime.toolsets[].operations.
-   */
-  toolOperations?: ToolOperationMetadataMap;
-  /**
-   * Explicit migration fallback for host-provided direct tool operation
-   * metadata. New tool surfaces should still prefer toolkit/toolset operations.
-   */
-  legacyToolOperations?: ToolOperationMetadataMap;
   toolkits?: AgentToolkit[];
   maxIterations?: number;
   execution?: AgentExecution;

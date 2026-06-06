@@ -203,12 +203,10 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   assert.equal(result.reply, 'done');
   const configurable = (calls[0]?.options as {
     configurable?: {
-      tools?: Array<{ name?: string }>;
       toolkits?: Array<{ name?: string; operations?: Record<string, { kind?: string }> }>;
     };
   } | undefined)?.configurable;
   assert.ok(configurable, 'graph should receive configurable');
-  assert.ok(!configurable.tools?.some((tool) => tool.name === 'wiki_read_cat'));
   const wikiToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'wiki_read');
   const pluginToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'plugin_toolkit');
   const invokeToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'invoke_toolkit');

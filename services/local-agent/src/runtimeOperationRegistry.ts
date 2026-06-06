@@ -1,3 +1,4 @@
+import { hasToolOperationMetadata } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { LocalServerDeps } from './localServerTypes';
 import {
@@ -10,7 +11,9 @@ export function createOperationRegistryForAgentSetup(
 ): OperationRegistry {
   return createOperationRegistryFromSources({
     toolkits: setup.input.toolkits ?? [],
-    legacyRuntimeOperations: setup.input.toolOperations,
+    legacyRuntimeOperations: hasToolOperationMetadata(setup.input.toolOperations)
+      ? setup.input.toolOperations
+      : undefined,
   });
 }
 

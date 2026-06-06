@@ -314,6 +314,31 @@ test('createOperationRegistryForAgentSetup reads host tool operation metadata fr
   });
 });
 
+test('createOperationRegistryForAgentSetup ignores empty legacy tool operation maps', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolOperations: {},
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'describe_pet_profile',
+      input: { focus: '性格' },
+    },
+    registry,
+  );
+
+  assert.equal(event.operation.kind, 'tool.execute');
+  assert.deepEqual(event.operation.source, {
+    provider: 'runtime',
+    name: 'describe_pet_profile',
+    callId: undefined,
+  });
+});
+
 test('createOperationRegistryForAgentSetup reads host tool metadata from setup toolkits', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {

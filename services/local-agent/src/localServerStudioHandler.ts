@@ -89,7 +89,7 @@ export class LocalServerStudioHandler {
           ...(deps.localCapabilities ?? []),
           ...(deps.userCapabilities ?? []).map((u) => u.capability),
         ],
-        tools: [...deps.pluginTools, ...deps.localTools],
+        tools: deps.pluginTools,
         toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
         ownerUserId: null, // Phase 2 MVP: 纯本地,无服务端 owner 绑定
         bridge: { send, requestId, slot },

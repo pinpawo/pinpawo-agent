@@ -2,7 +2,7 @@ import { LocalAgentRuntime } from '../runtime';
 import { startLocalServer } from '../localServer';
 import { config } from '../config';
 import { ensureActorSelected } from '../actorSelection';
-import { browserSession } from '../toolkits/browser/session';
+import { browserSession } from '../toolkits/browser';
 
 export async function runAgent() {
   await ensureActorSelected({ interactive: true });

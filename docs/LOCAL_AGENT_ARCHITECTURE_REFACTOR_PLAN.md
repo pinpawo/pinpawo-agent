@@ -146,20 +146,15 @@ const capability = {
 };
 ```
 
-对于 host 直接注入的 shared/global tools：
+对于已经有 toolkit 归属的 shared/global tools：
 
 ```ts
 const input = {
-  tools: [createPetProfileTool({ actor })],
-  toolOperations: {
-    describe_pet_profile: {
-      kind: 'pet.profile.read',
-      title: '读取宠物资料',
-      summarizeInput: (input) => ({ summary: input.focus ? `查看 ${input.focus}` : '查看基础资料' }),
-    },
-  },
+  toolkits: [createPetProfileToolkit({ actor })],
 };
 ```
+
+对于尚未迁移到 toolkit 的 host direct tools，迁移期仍可通过 `toolOperations` 暴露展示 metadata。
 
 pet-agent 在创建 subagent 时负责收集这些 metadata，并随工具事件透传：
 
@@ -448,8 +443,8 @@ type OperationRegistry = {
 重要约束：
 
 - local-agent 可以为内置 local toolkit 提供 metadata。
-- local-agent 可以为 host 注入的 shared tools 提供 metadata，例如 `describe_pet_profile`。
-- shared tools 可以随工具导出 metadata，例如 `get_memories`、`search_web`。
+- local-agent 可以为 shared toolkit 提供 metadata，例如 `pet_profile` toolkit 中的 `describe_pet_profile`。
+- 尚未迁移到 toolkit 的 shared tools 可以随工具导出 metadata，例如 `get_memories`、`search_web`。
 - Studio planner capability 暴露 `submit_plan` metadata；Studio worker 的 wiki read tools 由 `wiki_read` toolkit 暴露 metadata。
 - 第三方/user capability 可以提供自己的 metadata。
 - 没有 metadata 时，local-agent 生成 generic operation：`kind: 'tool.execute'`，`title: toolName`。
@@ -548,7 +543,7 @@ type OperationRegistry = {
 
 ### 阶段 5：拆分 tools/policy/capability registry
 
-状态：进行中。local 内置 tools/toolkits 已迁移到 `toolkits/local/`，其中 file/path、shell、network、search、git tools 与对应 operation metadata/review policy 同目录维护；browser toolkit 已迁移到 `toolkits/browser/`，browser capability 只保留 capability routing；operation metadata helper 已提升到 `plugins/operationMetadata.ts`，供 local/browser tool metadata 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability/host tool operation metadata 随 subagent tool event 透传；`daily_post`、`capability_creator` 与 Studio planner `submit_plan` runtime tools 已挂载 capability operation metadata，Studio worker wiki read tools 已通过 `wiki_read` toolkit 暴露 metadata，`describe_pet_profile`、`get_memories`、`search_web` 仍通过 shared tool metadata / `AgentInvokeInput.toolOperations` / `PetAgentRuntimeInvokeInput.toolOperations` 挂载 host tool operation metadata。local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。runtime 中的 local toolkit/capability/user capability loading 与 rescan state 已收敛为 `LocalAgentCapabilityRegistry`。
+状态：进行中。local 内置 tools/toolkits 已迁移到 `toolkits/local/`，其中 file/path、shell、network、search、git tools 与对应 operation metadata/review policy 同目录维护；browser toolkit 已迁移到 `toolkits/browser/`，browser capability 只保留 capability routing；operation metadata helper 已提升到 `plugins/operationMetadata.ts`，供 local/browser tool metadata 共享。内置 local tool operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability/host tool operation metadata 随 subagent tool event 透传；`daily_post`、`capability_creator` 与 Studio planner `submit_plan` runtime tools 已挂载 capability operation metadata，Studio worker wiki read tools 已通过 `wiki_read` toolkit 暴露 metadata，`describe_pet_profile` 已通过 `pet_profile` toolkit 暴露 metadata，`get_memories`、`search_web` 仍通过 shared tool metadata / `AgentInvokeInput.toolOperations` / `PetAgentRuntimeInvokeInput.toolOperations` 挂载 host tool operation metadata。local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。runtime 中的 local toolkit/capability/user capability loading 与 rescan state 已收敛为 `LocalAgentCapabilityRegistry`。
 
 目标：让 local tools 和 capability 管理可维护。
 

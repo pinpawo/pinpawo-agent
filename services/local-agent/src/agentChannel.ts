@@ -4,8 +4,7 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   buildDailyPostTaskMessage,
   createCapabilityCreatorCapability,
-  createPetProfileTool,
-  petProfileToolOperations,
+  createPetProfileToolkit,
   createDailyPostCapability,
   type AgentCapability,
   type AgentActor,
@@ -193,8 +192,8 @@ export function buildLocalChatAgentInput(params: {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const actor = buildActor(params.context);
   const trendItems = toTrendPromptItems(params.context.context.trendItems);
-  const sharedTools = [
-    createPetProfileTool({
+  const sharedToolkits = [
+    createPetProfileToolkit({
       actor,
       profileText: params.context.context.petMemoryText,
     }),
@@ -250,9 +249,8 @@ export function buildLocalChatAgentInput(params: {
       ],
       threadId: params.threadId,
       capabilities,
-      tools: [...sharedTools, ...(params.tools ?? [])],
-      toolOperations: petProfileToolOperations,
-      toolkits: params.toolkits,
+      tools: [...(params.tools ?? [])],
+      toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
       execution: {
         dryRun: params.dryRun,
       },
@@ -285,8 +283,8 @@ export function buildLocalScheduledAgentInput(params: {
   const trendItems = toTrendPromptItems(params.context.context.trendItems);
   const recentDaily = toRecentDaily(params.context.context.recentDaily);
   const avoidTopics = buildAvoidTopics(params.context.context.recentDaily);
-  const sharedTools = [
-    createPetProfileTool({
+  const sharedToolkits = [
+    createPetProfileToolkit({
       actor,
       profileText: params.context.context.petMemoryText,
     }),
@@ -348,9 +346,8 @@ export function buildLocalScheduledAgentInput(params: {
         ),
       ],
       capabilities,
-      tools: sharedTools,
-      toolOperations: petProfileToolOperations,
-      toolkits: params.toolkits,
+      tools: [],
+      toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
       execution: {
         dryRun: params.dryRun,
       },

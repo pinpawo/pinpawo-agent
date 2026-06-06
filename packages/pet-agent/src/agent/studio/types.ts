@@ -1,6 +1,6 @@
 import type { AgentActor, AgentExecution } from '../../types/agent';
 import type { AgentCapability } from '../../types/capability';
-import type { ToolkitOperationMetadata } from '../../types/toolkit';
+import type { AgentToolkit, ToolkitOperationMetadata } from '../../types/toolkit';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -41,6 +41,7 @@ export type PetAgentRuntimeDescriptor = AgentActor & {
  *   {wikiRoot}/index.md 注入到 system prompt,并装备 wiki_read toolkit。
  * - signal: Studio 取消信号。
  * - threadId / execution / workdir / onToolEvent: 运行时透传字段。
+ * - toolkits: 本次 invoke 临时注入的 toolkit,会与 runtime config toolkits 合并。
  */
 export type PetAgentRuntimeInvokeInput = {
   brief: string;
@@ -51,6 +52,7 @@ export type PetAgentRuntimeInvokeInput = {
   workdir?: string;
   runtimeEnvironment?: string;
   onToolEvent?: SubagentToolEventHandler;
+  toolkits?: AgentToolkit[];
   /**
    * 本次 invoke 临时注入的 host/global tools 展示 metadata。
    * 这些 tools 不属于 toolkit/capability runtime 时,由调用方通过这里声明 operation 语义。

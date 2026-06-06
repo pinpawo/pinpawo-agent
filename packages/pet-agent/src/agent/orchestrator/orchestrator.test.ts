@@ -367,10 +367,27 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
 
   const selectedTools = selectCapabilityTools({
     uses: ['browser'],
-    tools: [customTool],
+    toolsets: [{
+      name: 'private',
+      tools: [customTool],
+    }],
   }, browserResources.tools);
 
   assert.deepEqual(selectedTools.map((toolItem) => toolItem.name), [
+    'browser_open',
+    'custom_tool',
+  ]);
+
+  const dedupedTools = selectCapabilityTools({
+    uses: ['browser'],
+    toolsets: [{
+      name: 'private',
+      tools: [customTool],
+    }],
+    tools: [customTool],
+  }, browserResources.tools);
+
+  assert.deepEqual(dedupedTools.map((toolItem) => toolItem.name), [
     'browser_open',
     'custom_tool',
   ]);
@@ -399,12 +416,24 @@ test('toolkit and capability operations are collected with their source', () => 
   });
 
   const capabilityOperations = collectCapabilityOperations(toolkits, {
+    toolsets: [{
+      name: 'private',
+      tools: [],
+      operations: {
+        custom_tool: {
+          kind: 'capability.custom',
+        },
+        shared_tool: {
+          kind: 'capability.shared',
+        },
+      },
+    }],
     operations: {
-      custom_tool: {
-        kind: 'capability.custom',
+      legacy_tool: {
+        kind: 'capability.legacy',
       },
       shared_tool: {
-        kind: 'capability.shared',
+        kind: 'capability.legacy_shared',
       },
     },
   });
@@ -414,6 +443,7 @@ test('toolkit and capability operations are collected with their source', () => 
     provider: 'capability',
     name: 'custom_tool',
   });
+  assert.equal(capabilityOperations.legacy_tool?.kind, 'capability.legacy');
   assert.equal(capabilityOperations.shared_tool?.kind, 'toolkit.shared');
 });
 

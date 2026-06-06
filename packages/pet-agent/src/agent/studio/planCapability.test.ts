@@ -10,11 +10,13 @@ test('submit_plan tool captures tasks via onSubmit, in submission order', async 
     onSubmit: (plan) => { submitted = plan; },
   });
   const runtime = await cap.createRuntime({} as never);
-  const submitPlanTool = runtime.tools![0];
-  assert.equal(runtime.operations?.submit_plan?.kind, 'studio.plan.submit');
-  assert.equal(runtime.operations?.submit_plan?.title, '提交计划');
+  const planToolset = runtime.toolsets![0];
+  const submitPlanTool = planToolset.tools[0];
+  assert.equal(planToolset.name, 'studio_plan');
+  assert.equal(planToolset.operations?.submit_plan?.kind, 'studio.plan.submit');
+  assert.equal(planToolset.operations?.submit_plan?.title, '提交计划');
 
-  const summary = runtime.operations?.submit_plan?.summarizeInput?.({
+  const summary = planToolset.operations?.submit_plan?.summarizeInput?.({
     tasks: [
       { petId: 'script', goal: '写脚本' },
       { petId: 'audio', goal: '配音' },
@@ -49,7 +51,7 @@ test('submit_plan tool rejects empty tasks array via zod min(1)', async () => {
     onSubmit: (plan) => { submitted = plan; },
   });
   const runtime = await cap.createRuntime({} as never);
-  const submitPlanTool = runtime.tools![0];
+  const submitPlanTool = runtime.toolsets![0].tools[0];
 
   // schema 要求至少 1 个 task;空数组让 zod 校验失败 → langchain tool 抛错。
   // 关键约束:onSubmit 不应被调用。

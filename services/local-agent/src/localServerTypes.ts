@@ -21,6 +21,7 @@ export type LocalServerDeps = {
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];
   pluginTools: StructuredTool[];
+  pluginToolkits?: AgentToolkit[];
   localCapabilityDefinitions?: AgentCapability[];
   localCapabilities?: AgentCapability[];
   userCapabilityDefinitions?: LoadedUserCapability[];

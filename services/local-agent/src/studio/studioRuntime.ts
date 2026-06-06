@@ -8,6 +8,7 @@ import {
   defaultPromptProvider,
   fileReadPromptProvider,
   type AgentCapability,
+  type AgentToolkit,
   type AgentModels,
   type CuratorPromptProvider,
   type PetAgentRuntime,
@@ -60,6 +61,8 @@ export type BuildStudioInput = {
   capabilities: AgentCapability[];
   /** 全局 tool 池(plugin + local);所有 pet 共享 */
   tools: StructuredTool[];
+  /** 全局 toolkit 池(plugin + local);所有 pet 共享 */
+  toolkits?: AgentToolkit[];
   /** 当前 local-agent 进程的 owner user id;无服务端绑定时为 null */
   ownerUserId: string | null;
   /** ws 桥三件套:供 humanReviewer 绑定到本次 turn 的 ws 连接 */
@@ -141,6 +144,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       serviceSummary: petConfig.serviceSummary ?? null,
       capabilities: capsForThisPet,
       tools: input.tools,
+      toolkits: input.toolkits,
       contextWindowTokens: input.llmConfig.contextWindowTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,
       humanReviewer: createWsHumanReviewer({

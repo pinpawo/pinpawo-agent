@@ -58,6 +58,7 @@ function createDeps(): LocalServerDeps {
       },
     }] as LocalServerDeps['localToolkits'],
     pluginTools: [{ name: 'plugin-tool' }] as LocalServerDeps['pluginTools'],
+    pluginToolkits: [{ name: 'plugin-toolkit' }] as LocalServerDeps['pluginToolkits'],
     localCapabilities: [{ name: 'browser' }] as LocalServerDeps['localCapabilities'],
     userCapabilities: [{
       meta: { id: 'user-cap' },
@@ -118,6 +119,7 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
   assert.equal(buildInputs.length, 1);
   assert.deepEqual(buildInputs[0]?.capabilities.map((item) => item.name), ['browser', 'user-capability']);
   assert.deepEqual(buildInputs[0]?.tools.map((item) => item.name), ['plugin-tool', 'local-tool']);
+  assert.deepEqual(buildInputs[0]?.toolkits?.map((item) => item.name), ['plugin-toolkit', 'local-toolkit']);
   assert.equal(buildInputs[0]?.bridge.requestId, 'studio-1');
 
   const eventMessages = sent.filter((item): item is { type: string; event?: { type?: string; phase?: string } } =>

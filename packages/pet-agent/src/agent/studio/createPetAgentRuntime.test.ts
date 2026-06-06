@@ -175,6 +175,15 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
     models: fakeModels(),
     actor: fakeActor(),
     graph,
+    toolkits: [{
+      name: 'plugin_toolkit',
+      description: 'plugin toolkit',
+      operations: {
+        plugin_tool: {
+          kind: 'plugin.tool',
+        },
+      },
+    }],
   });
 
   const result = await runtime.invoke({
@@ -193,6 +202,9 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   assert.ok(configurable, 'graph should receive configurable');
   assert.ok(!configurable.tools?.some((tool) => tool.name === 'wiki_read_cat'));
   const wikiToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'wiki_read');
+  const pluginToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'plugin_toolkit');
+  assert.ok(pluginToolkit, 'config toolkits should be forwarded to runtime invoke');
+  assert.equal(pluginToolkit.operations?.plugin_tool?.kind, 'plugin.tool');
   assert.ok(wikiToolkit, 'wikiRoot should install wiki_read as a toolkit');
   assert.equal(wikiToolkit.operations?.wiki_read_cat?.kind, 'wiki.file.read');
   assert.equal(wikiToolkit.operations?.wiki_read_grep?.kind, 'wiki.search.grep');

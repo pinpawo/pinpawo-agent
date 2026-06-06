@@ -7,7 +7,7 @@ import path from 'node:path';
 
 import type { AgentCapability, CapabilityAvailability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
-import type { ToolkitOperationMetadata } from '../../types/toolkit';
+import type { AgentToolkit, ToolkitOperationMetadata } from '../../types/toolkit';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -39,6 +39,7 @@ export type PetAgentRuntimeConfig = {
   capabilities?: AgentCapability[];
   capabilityAvailability?: Record<string, CapabilityAvailability>;
   tools?: StructuredTool[];
+  toolkits?: AgentToolkit[];
   /**
    * @deprecated Migration fallback for host-provided direct tools. New runtime
    * tools should be exposed through toolkits/toolsets.
@@ -146,6 +147,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       ...(config.tools ?? []),
     ];
     const toolkits = [
+      ...(config.toolkits ?? []),
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
     const legacyToolOperations = {

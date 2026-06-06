@@ -36,6 +36,7 @@ export async function runAgent() {
     localToolkitDefinitions: runtime.getLocalToolkitDefinitions(),
     localToolkits: runtime.getLocalToolkits(),
     pluginTools: runtime.getPluginTools(),
+    pluginToolkits: runtime.getPluginToolkits(),
     localCapabilityDefinitions: runtime.getLocalCapabilityDefinitions(),
     localCapabilities: runtime.getLocalCapabilities(),
     userCapabilityDefinitions: runtime.getUserCapabilityDefinitions(),

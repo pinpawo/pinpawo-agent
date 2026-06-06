@@ -40,6 +40,7 @@ export class LocalAgentRuntime {
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginTools: StructuredTool[] = [];
+  private pluginToolkits: AgentToolkit[] = [];
   private readonly capabilityRegistry = new LocalAgentCapabilityRegistry();
   private readonly chatCheckpointer = new FileSaver(
     resolve(homedir(), '.pinpawo', 'checkpoints.json'),
@@ -61,6 +62,7 @@ export class LocalAgentRuntime {
     getActorId: () => this.getActorId(),
     getLlmConfig: () => this.llmConfig,
     getPluginTools: () => this.pluginTools,
+    getPluginToolkits: () => this.pluginToolkits,
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
     getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
@@ -75,9 +77,10 @@ export class LocalAgentRuntime {
   });
 
   async init() {
-    const { plugins, tools } = await loadPlugins();
+    const { plugins, tools, toolkits } = await loadPlugins();
     this.llmConfig = buildLocalLlmConfig();
     this.pluginTools = tools;
+    this.pluginToolkits = toolkits;
     await this.capabilityRegistry.load();
     this.hooks = collectPluginHooks(plugins);
     this.actorId = await ensureActorSelected({ interactive: false });
@@ -103,6 +106,10 @@ export class LocalAgentRuntime {
 
   getPluginTools(): StructuredTool[] {
     return this.pluginTools;
+  }
+
+  getPluginToolkits(): AgentToolkit[] {
+    return this.pluginToolkits;
   }
 
   getLocalTools(): StructuredTool[] {

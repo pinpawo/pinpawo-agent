@@ -24,7 +24,7 @@ export default { name: 'valid-plugin' };
   const result = await loadPluginsFromDir(root);
 
   assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['valid-plugin']);
-  assert.deepEqual(result.tools.map((tool) => tool.name), ['legacy_tool']);
+  assert.deepEqual(result.legacyTools.map((tool) => tool.name), ['legacy_tool']);
   assert.deepEqual(result.toolkits.map((toolkit) => toolkit.name), ['sample_toolkit']);
   assert.equal(result.toolkits[0]?.operations?.sample_tool?.kind, 'sample.tool');
 });
@@ -40,6 +40,6 @@ export default {};
   const result = await loadPluginsFromDir(root);
 
   assert.deepEqual(result.plugins, []);
-  assert.deepEqual(result.tools, []);
+  assert.deepEqual(result.legacyTools, []);
   assert.deepEqual(result.toolkits, []);
 });

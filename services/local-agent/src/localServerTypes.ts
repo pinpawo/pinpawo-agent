@@ -19,7 +19,8 @@ export type LocalServerDeps = {
   workdir: string;
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];
-  pluginTools: StructuredTool[];
+  /** Deprecated raw plugin tools fallback. New plugins should export toolkits. */
+  legacyPluginTools: StructuredTool[];
   pluginToolkits?: AgentToolkit[];
   localCapabilityDefinitions?: AgentCapability[];
   localCapabilities?: AgentCapability[];

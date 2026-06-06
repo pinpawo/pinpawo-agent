@@ -39,7 +39,8 @@ export type LocalAgentAppChatHandlerOptions = {
   isCurrentSocket: (ws: WebSocket) => boolean;
   getActorId: () => string;
   getLlmConfig: () => AgentLlmConfig | null;
-  getPluginTools: () => StructuredTool[];
+  /** Deprecated raw plugin tools fallback. New plugins should export toolkits. */
+  getLegacyPluginTools: () => StructuredTool[];
   getPluginToolkits: () => AgentToolkit[];
   getLocalToolkits: () => AgentToolkit[];
   getLocalCapabilities: () => AgentCapability[];
@@ -57,7 +58,7 @@ export class LocalAgentAppChatHandler {
   private readonly isCurrentSocket: (ws: WebSocket) => boolean;
   private readonly getActorId: () => string;
   private readonly getLlmConfig: () => AgentLlmConfig | null;
-  private readonly getPluginTools: () => StructuredTool[];
+  private readonly getLegacyPluginTools: () => StructuredTool[];
   private readonly getPluginToolkits: () => AgentToolkit[];
   private readonly getLocalToolkits: () => AgentToolkit[];
   private readonly getLocalCapabilities: () => AgentCapability[];
@@ -75,7 +76,7 @@ export class LocalAgentAppChatHandler {
     this.isCurrentSocket = options.isCurrentSocket;
     this.getActorId = options.getActorId;
     this.getLlmConfig = options.getLlmConfig;
-    this.getPluginTools = options.getPluginTools;
+    this.getLegacyPluginTools = options.getLegacyPluginTools;
     this.getPluginToolkits = options.getPluginToolkits;
     this.getLocalToolkits = options.getLocalToolkits;
     this.getLocalCapabilities = options.getLocalCapabilities;
@@ -218,7 +219,7 @@ export class LocalAgentAppChatHandler {
       context: ctx,
       userMessage,
       llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
-      tools: this.getPluginTools(),
+      tools: this.getLegacyPluginTools(),
       toolkits: [...this.getPluginToolkits(), ...this.getLocalToolkits()],
       extraCapabilities: this.getLocalCapabilities(),
       threadId: this.getChatThreadId(userId),

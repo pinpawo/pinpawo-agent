@@ -39,7 +39,7 @@ export class LocalAgentRuntime {
   private actorName: string | null = null;
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
-  private pluginTools: StructuredTool[] = [];
+  private legacyPluginTools: StructuredTool[] = [];
   private pluginToolkits: AgentToolkit[] = [];
   private readonly capabilityRegistry = new LocalAgentCapabilityRegistry();
   private readonly chatCheckpointer = new FileSaver(
@@ -61,7 +61,7 @@ export class LocalAgentRuntime {
     isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
     getActorId: () => this.getActorId(),
     getLlmConfig: () => this.llmConfig,
-    getPluginTools: () => this.pluginTools,
+    getLegacyPluginTools: () => this.legacyPluginTools,
     getPluginToolkits: () => this.pluginToolkits,
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
     getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
@@ -77,9 +77,9 @@ export class LocalAgentRuntime {
   });
 
   async init() {
-    const { plugins, tools, toolkits } = await loadPlugins();
+    const { plugins, legacyTools, toolkits } = await loadPlugins();
     this.llmConfig = buildLocalLlmConfig();
-    this.pluginTools = tools;
+    this.legacyPluginTools = legacyTools;
     this.pluginToolkits = toolkits;
     await this.capabilityRegistry.load();
     this.hooks = collectPluginHooks(plugins);
@@ -104,8 +104,8 @@ export class LocalAgentRuntime {
     return this.llmConfig ?? buildLocalLlmConfig();
   }
 
-  getPluginTools(): StructuredTool[] {
-    return this.pluginTools;
+  getLegacyPluginTools(): StructuredTool[] {
+    return this.legacyPluginTools;
   }
 
   getPluginToolkits(): AgentToolkit[] {

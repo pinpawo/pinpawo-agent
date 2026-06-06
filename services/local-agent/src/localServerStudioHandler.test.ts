@@ -56,7 +56,7 @@ function createDeps(): LocalServerDeps {
         },
       },
     }] as LocalServerDeps['localToolkits'],
-    pluginTools: [{ name: 'plugin-tool' }] as LocalServerDeps['pluginTools'],
+    legacyPluginTools: [{ name: 'plugin-tool' }] as LocalServerDeps['legacyPluginTools'],
     pluginToolkits: [{ name: 'plugin-toolkit' }] as LocalServerDeps['pluginToolkits'],
     localCapabilities: [{ name: 'browser' }] as LocalServerDeps['localCapabilities'],
     userCapabilities: [{

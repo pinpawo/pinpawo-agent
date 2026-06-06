@@ -135,7 +135,7 @@ export class LocalServerTuiSessionService {
       context: ctx,
       userMessage: '',
       llmConfig: deps.llmConfig,
-      tools: deps.pluginTools,
+      tools: deps.legacyPluginTools,
       toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
       extraCapabilities: deps.localCapabilities,
       threadId,

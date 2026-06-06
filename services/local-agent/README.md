@@ -21,6 +21,39 @@ npx pinpawo-local-agent tui
 
 Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Browser automation uses the optional bundled browser backend when available, or an externally installed `agent-browser` / `playwright-core`.
 
+## External Plugins
+
+Local external plugins are loaded from `~/.pinpawo/plugins/*.mjs` or `*.js`.
+Each plugin module must export a default object with `{ name }`.
+
+New plugins should export `toolkits`; this keeps tools, operation metadata, and review policy under one owner. A legacy `tools` export is still accepted as a direct-tool fallback, but it cannot carry toolkit-owned metadata or policy.
+
+```js
+import { defineToolkit } from '@pinpawo/pet-agent';
+
+// Use a real LangChain StructuredTool instance here. Its name must match the
+// operation metadata key below.
+const sampleTool = createYourStructuredTool({ name: 'sample_tool' });
+
+export const toolkits = [
+  defineToolkit({
+    name: 'sample_plugin',
+    description: 'Sample local plugin toolkit',
+    tools: [sampleTool],
+    operations: {
+      sample_tool: {
+        kind: 'sample.tool',
+        title: 'Sample tool',
+      },
+    },
+  }),
+];
+
+export default {
+  name: 'sample-plugin',
+};
+```
+
 ## Commands
 
 ```bash

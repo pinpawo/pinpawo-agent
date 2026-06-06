@@ -1,6 +1,6 @@
 import type { AgentActor, AgentExecution } from '../../types/agent';
 import type { AgentCapability } from '../../types/capability';
-import type { AgentToolkit, ToolkitOperationMetadata } from '../../types/toolkit';
+import type { AgentToolkit } from '../../types/toolkit';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -53,13 +53,6 @@ export type PetAgentRuntimeInvokeInput = {
   runtimeEnvironment?: string;
   onToolEvent?: SubagentToolEventHandler;
   toolkits?: AgentToolkit[];
-  /**
-   * 本次 invoke 临时注入的 host/global tools 展示 metadata。
-   * 这些 tools 不属于 toolkit/capability runtime 时,由调用方通过这里声明 operation 语义。
-   *
-   * @deprecated 迁移期 fallback。新代码应优先通过 toolkit/toolset 暴露 operation metadata。
-   */
-  toolOperations?: Record<string, ToolkitOperationMetadata>;
   /**
    * 调用方在本次 invoke 临时注入的 capability(例如 Studio 给 planner agent 的
    * `studio_plan` capability)。与 runtime 构造时声明的 capability 合并使用。

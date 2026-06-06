@@ -7,7 +7,7 @@ import path from 'node:path';
 
 import type { AgentCapability, CapabilityAvailability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
-import { hasToolOperationMetadata, type AgentToolkit, type ToolkitOperationMetadata } from '../../types/toolkit';
+import type { AgentToolkit } from '../../types/toolkit';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -44,11 +44,6 @@ export type PetAgentRuntimeConfig = {
    */
   tools?: StructuredTool[];
   toolkits?: AgentToolkit[];
-  /**
-   * @deprecated Migration fallback for host-provided direct tools. New runtime
-   * tools should be exposed through toolkits/toolsets.
-   */
-  toolOperations?: Record<string, ToolkitOperationMetadata>;
   execution?: AgentExecution;
   workdir?: string;
   /**
@@ -155,10 +150,6 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       ...(input.toolkits ?? []),
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
-    const legacyToolOperations = {
-      ...(config.toolOperations ?? {}),
-      ...(input.toolOperations ?? {}),
-    };
     const configurable: Record<string, unknown> = {
       actor: config.actor,
       thread_id: input.threadId,
@@ -171,9 +162,6 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       onToolEvent: input.onToolEvent,
       forcedCapabilityNames: input.forcedCapabilityNames,
     };
-    if (hasToolOperationMetadata(legacyToolOperations)) {
-      configurable.toolOperations = legacyToolOperations;
-    }
 
     const previousStatus = status;
     status = 'active';

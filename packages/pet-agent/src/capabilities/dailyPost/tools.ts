@@ -3,7 +3,8 @@ import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from '../../types/domain';
-import type { ToolkitOperationMetadata } from '../../types/toolkit';
+import { defineToolset } from '../../types/toolkit';
+import type { AgentToolset, NamedStructuredTool, ToolkitOperationMetadata } from '../../types/toolkit';
 import { isSemanticDuplicate, isUuid } from '../../utils/trends';
 import {
   readBoolean,
@@ -140,7 +141,7 @@ const dailyPostResultLabels: Record<string, string> = {
   failed: '动态处理失败',
 };
 
-export const dailyPostToolOperations: Record<string, ToolkitOperationMetadata> = {
+export const dailyPostToolOperations = {
   finalize_post: {
     kind: 'daily_post.finalize',
     title: '保存动态',
@@ -155,7 +156,7 @@ export const dailyPostToolOperations: Record<string, ToolkitOperationMetadata> =
     summarizeOutput: (output) => resultStatusSummary(output, dailyPostResultLabels),
     summarizeError: () => ({ summary: '跳过动态失败' }),
   },
-};
+} satisfies Record<'finalize_post' | 'skip_post', ToolkitOperationMetadata>;
 
 export function createFinalizePostTool(options: DailyPostToolOptions): StructuredTool {
   let duplicateRetries = 0;
@@ -296,4 +297,17 @@ export function buildDailyPostTools(options: DailyPostToolOptions): StructuredTo
     createFinalizePostTool(options),
     createSkipPostTool(options),
   ];
+}
+
+export function createDailyPostToolset(options: DailyPostToolOptions): AgentToolset {
+  const tools = buildDailyPostTools(options) as [
+    NamedStructuredTool<'finalize_post'>,
+    NamedStructuredTool<'skip_post'>,
+  ];
+  return defineToolset({
+    name: 'daily_post',
+    description: '生成、保存或跳过 daily post 的 capability-private toolset。',
+    tools,
+    operations: dailyPostToolOperations,
+  });
 }

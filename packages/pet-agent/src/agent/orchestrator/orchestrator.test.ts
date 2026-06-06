@@ -488,11 +488,13 @@ test('built-in capability runtimes expose operation metadata', async () => {
     actor: testActor,
     messages: [],
   });
+  const dailyPostToolset = dailyPostRuntime.toolsets?.find((toolset) => toolset.name === 'daily_post');
 
-  assert.equal(dailyPostRuntime.operations?.finalize_post?.kind, 'daily_post.finalize');
-  assert.equal(dailyPostRuntime.operations?.skip_post?.kind, 'daily_post.skip');
+  assert.equal(dailyPostToolset?.operations?.finalize_post?.kind, 'daily_post.finalize');
+  assert.equal(dailyPostToolset?.operations?.skip_post?.kind, 'daily_post.skip');
+  assert.equal(collectCapabilityOperations([], dailyPostRuntime).finalize_post?.source?.provider, 'capability');
 
-  const finalizeSummary = dailyPostRuntime.operations?.finalize_post?.summarizeInput?.({
+  const finalizeSummary = dailyPostToolset?.operations?.finalize_post?.summarizeInput?.({
     mode: 'original',
     content: '这是一段待发布的正文',
     topic: '早餐',
@@ -517,10 +519,12 @@ test('built-in capability runtimes expose operation metadata', async () => {
     actor: testActor,
     messages: [],
   });
+  const creatorToolset = creatorRuntime.toolsets?.find((toolset) => toolset.name === 'capability_creator');
 
-  assert.equal(creatorRuntime.operations?.scaffold_capability_plugin?.kind, 'capability.scaffold');
-  assert.equal(creatorRuntime.operations?.validate_capability_plugin?.kind, 'capability.validate');
-  assert.equal(creatorRuntime.operations?.check_capability_keywords?.kind, 'capability.keyword_check');
+  assert.equal(creatorToolset?.operations?.scaffold_capability_plugin?.kind, 'capability.scaffold');
+  assert.equal(creatorToolset?.operations?.validate_capability_plugin?.kind, 'capability.validate');
+  assert.equal(creatorToolset?.operations?.check_capability_keywords?.kind, 'capability.keyword_check');
+  assert.equal(collectCapabilityOperations([], creatorRuntime).scaffold_capability_plugin?.source?.provider, 'capability');
 });
 
 test('toolkit review policy wraps tool calls without changing tool identity', async () => {

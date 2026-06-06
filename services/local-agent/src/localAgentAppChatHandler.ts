@@ -1,6 +1,5 @@
 import { WebSocket } from 'ws';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput, type AgentChannelSetup } from './agentChannel';
 import { loadAgentContext, type AgentContext } from './contextLoader';
@@ -39,8 +38,6 @@ export type LocalAgentAppChatHandlerOptions = {
   isCurrentSocket: (ws: WebSocket) => boolean;
   getActorId: () => string;
   getLlmConfig: () => AgentLlmConfig | null;
-  /** Deprecated raw plugin tools fallback. New plugins should export toolkits. */
-  getLegacyPluginTools: () => StructuredTool[];
   getPluginToolkits: () => AgentToolkit[];
   getLocalToolkits: () => AgentToolkit[];
   getLocalCapabilities: () => AgentCapability[];
@@ -58,7 +55,6 @@ export class LocalAgentAppChatHandler {
   private readonly isCurrentSocket: (ws: WebSocket) => boolean;
   private readonly getActorId: () => string;
   private readonly getLlmConfig: () => AgentLlmConfig | null;
-  private readonly getLegacyPluginTools: () => StructuredTool[];
   private readonly getPluginToolkits: () => AgentToolkit[];
   private readonly getLocalToolkits: () => AgentToolkit[];
   private readonly getLocalCapabilities: () => AgentCapability[];
@@ -76,7 +72,6 @@ export class LocalAgentAppChatHandler {
     this.isCurrentSocket = options.isCurrentSocket;
     this.getActorId = options.getActorId;
     this.getLlmConfig = options.getLlmConfig;
-    this.getLegacyPluginTools = options.getLegacyPluginTools;
     this.getPluginToolkits = options.getPluginToolkits;
     this.getLocalToolkits = options.getLocalToolkits;
     this.getLocalCapabilities = options.getLocalCapabilities;
@@ -219,7 +214,6 @@ export class LocalAgentAppChatHandler {
       context: ctx,
       userMessage,
       llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
-      legacyDirectTools: this.getLegacyPluginTools(),
       toolkits: [...this.getPluginToolkits(), ...this.getLocalToolkits()],
       extraCapabilities: this.getLocalCapabilities(),
       threadId: this.getChatThreadId(userId),

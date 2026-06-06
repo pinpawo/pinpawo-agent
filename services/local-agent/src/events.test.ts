@@ -9,7 +9,6 @@ import { createOperationRegistry } from './events/operationRegistry';
 import { createBrowserToolkit } from './toolkits/browser/toolkit';
 import { createBashToolkit, createGitToolkit, localToolOperationRegistry } from './toolkits/local';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
-import { petProfileToolOperations } from '@pinpawo/pet-agent';
 
 test('normalizes LangGraph tool stream events with toolkit operation metadata', () => {
   const event = normalizeToolStreamEvent(
@@ -286,106 +285,26 @@ test('createOperationRegistryForAgentSetup reads operation metadata from setup t
   });
 });
 
-test('createOperationRegistryForAgentSetup reads explicit legacy runtime operation metadata as fallback', () => {
-  const registry = createOperationRegistryForAgentSetup({
-    input: {
-      legacyToolOperations: petProfileToolOperations,
-    },
-  } as never);
-
-  const event = normalizeToolStreamEvent(
-    'req-1',
-    {
-      event: 'on_tool_start',
-      name: 'describe_pet_profile',
-      input: { focus: '性格' },
-    },
-    registry,
-  );
-
-  assert.equal(event.operation.kind, 'pet.profile.read');
-  assert.equal(event.operation.title, '读取宠物资料');
-  assert.equal(event.operation.target, '性格');
-  assert.equal(event.operation.summary, '查看 性格');
-  assert.deepEqual(event.operation.source, {
-    provider: 'runtime',
-    name: 'describe_pet_profile',
-    callId: undefined,
-  });
-});
-
-test('createOperationRegistryForAgentSetup prefers toolkit metadata over legacy runtime metadata', () => {
-  const registry = createOperationRegistryForAgentSetup({
-    input: {
-      toolkits: [{
-        name: 'profile-toolkit',
-        operations: {
-          describe_pet_profile: {
-            kind: 'profile.toolkit',
-            title: 'Toolkit Profile',
-          },
-        },
-      }],
-      legacyToolOperations: {
-        describe_pet_profile: {
-          kind: 'profile.legacy',
-          title: 'Legacy Profile',
-        },
-      },
-    },
-  } as never);
-
-  const event = normalizeToolStreamEvent(
-    'req-1',
-    {
-      event: 'on_tool_start',
-      name: 'describe_pet_profile',
-      input: {},
-    },
-    registry,
-  );
-
-  assert.equal(event.operation.kind, 'profile.toolkit');
-  assert.equal(event.operation.title, 'Toolkit Profile');
-  assert.deepEqual(event.operation.source, {
-    provider: 'toolkit',
-    name: 'describe_pet_profile',
-    callId: undefined,
-  });
-});
-
-test('createOperationRegistryForAgentSetup ignores empty legacy tool operation maps', () => {
-  const registry = createOperationRegistryForAgentSetup({
-    input: {
-      legacyToolOperations: {},
-    },
-  } as never);
-
-  const event = normalizeToolStreamEvent(
-    'req-1',
-    {
-      event: 'on_tool_start',
-      name: 'describe_pet_profile',
-      input: { focus: '性格' },
-    },
-    registry,
-  );
-
-  assert.equal(event.operation.kind, 'tool.execute');
-  assert.deepEqual(event.operation.source, {
-    provider: 'runtime',
-    name: 'describe_pet_profile',
-    callId: undefined,
-  });
-});
-
 test('createOperationRegistryForAgentSetup reads host tool metadata from setup toolkits', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
       toolkits: [{
         name: 'fake_pet_profile',
         description: 'Fake toolkit for registry coverage.',
-        operations: petProfileToolOperations,
+        operations: {
+          describe_pet_profile: {
+            kind: 'pet.profile.read',
+            title: '读取宠物资料',
+            summarizeInput: (input: unknown) => {
+              const focus = input && typeof input === 'object' && 'focus' in input
+                ? (input as { focus?: unknown }).focus
+                : null;
+              return typeof focus === 'string'
+                ? { target: focus, summary: `查看 ${focus}` }
+                : null;
+            },
+          },
+        },
       }],
     },
   } as never);

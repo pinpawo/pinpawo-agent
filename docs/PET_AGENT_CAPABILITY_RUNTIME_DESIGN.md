@@ -149,7 +149,6 @@ context 只包含 agent 级别的公共信息。不包含其他 capability 的�
 type CapabilityRuntime = {
   uses?: string[];
   toolsets?: AgentToolset[];
-  tools?: StructuredTool[];
   instructions?: string[] | ((ctx: CapabilityInstructionContext) => string[] | Promise<string[]>);
   middleware?: CapabilityMiddleware;
 };
@@ -158,8 +157,7 @@ type CapabilityRuntime = {
 runtime 是 subagent 的配置：它使用哪些 toolkit、带哪些 capability-private toolsets、用什么 instructions，以及可选的输入/输出调整 hook。
 
 - `uses`：声明要装配的 toolkit，例如 `['browser']`、`['bash']`
-- `toolsets`：capability-private 工具组；新 capability-local tools 应通过这里暴露，并在同一 toolset 内声明 operation metadata / review policy。
-- `tools`：迁移期 direct-tool fallback；新代码不要继续新增。
+- `toolsets`：capability-private 工具组；capability-local tools 必须通过这里暴露，并在同一 toolset 内声明 operation metadata / review policy。
 - toolkit tools 的可见性只由 `uses` 决定；不再提供按工具名继承 global/toolkit tools 的兼容层。
 
 ```typescript
@@ -413,7 +411,7 @@ type OrchestratorConfig = {
 它负责：
 
 - invoke 已编译的 graph
-- 传递 messages 以及 configurable 中的 `actor?/threadId/capabilities/toolkits/tools/toolOperations/execution`
+- 传递 messages 以及 configurable 中的 `actor?/threadId/capabilities/toolkits/execution`
 - 返回 reply / messages
 
 ```typescript
@@ -423,10 +421,6 @@ type AgentInvokeInput = {
   threadId?: string;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
-  /** @deprecated host direct-tool fallback */
-  tools?: StructuredTool[];
-  /** @deprecated metadata fallback for host direct tools */
-  toolOperations?: ToolOperationMetadataMap;
   execution?: AgentExecution;
 };
 

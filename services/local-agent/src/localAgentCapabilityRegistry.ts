@@ -8,7 +8,7 @@ import {
 } from './capabilities/capabilityAvailability';
 import { createBrowserCapability } from './capabilities/browserCapability';
 import { createBrowserToolkit } from './toolkits/browser/toolkit';
-import { createBashToolkit, createGitToolkit, loadLocalPluginTools } from './toolkits/local';
+import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
 
 type ResolveCapabilityAvailability = typeof resolveCapabilityAvailability;
 
@@ -23,7 +23,7 @@ type LocalAgentCapabilityRegistryDeps = {
 };
 
 const defaultDeps: LocalAgentCapabilityRegistryDeps = {
-  loadLocalTools: loadLocalPluginTools,
+  loadLocalTools: loadCoreLocalTools,
   loadUserCapabilities,
   createLocalToolkits: () => [
     createBashToolkit(),

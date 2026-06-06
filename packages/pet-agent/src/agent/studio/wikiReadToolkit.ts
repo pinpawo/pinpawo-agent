@@ -55,7 +55,7 @@ function ensureInsideRoot(root: string, target: string): string {
   return absoluteTarget;
 }
 
-export const wikiReadToolOperations = {
+const wikiReadToolOperations = {
   wiki_read_ls: {
     kind: 'wiki.dir.list',
     title: '列出知识库',

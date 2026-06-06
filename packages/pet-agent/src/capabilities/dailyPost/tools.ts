@@ -141,7 +141,7 @@ const dailyPostResultLabels: Record<string, string> = {
   failed: '动态处理失败',
 };
 
-export const dailyPostToolOperations = {
+const dailyPostToolOperations = {
   finalize_post: {
     kind: 'daily_post.finalize',
     title: '保存动态',

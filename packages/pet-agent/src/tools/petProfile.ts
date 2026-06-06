@@ -73,7 +73,7 @@ function readFocus(input: unknown) {
     : null;
 }
 
-export const petProfileToolOperations = {
+const petProfileToolOperations = {
   describe_pet_profile: {
     kind: 'pet.profile.read',
     title: '读取宠物资料',

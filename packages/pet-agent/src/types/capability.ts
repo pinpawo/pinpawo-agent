@@ -1,5 +1,4 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import type { StructuredTool } from '@langchain/core/tools';
 import type { ZodType } from 'zod';
 import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { SubagentInput, SubagentResult } from './subagent';
@@ -30,7 +29,6 @@ export type CapabilityRuntime = {
    * toolsets so tools and operation metadata stay under the same typed owner.
    */
   toolsets?: AgentToolset[];
-  tools?: StructuredTool[];
   instructions?: string[] | ((ctx: CapabilityInstructionContext) => string[] | Promise<string[]>);
   middleware?: CapabilityMiddleware;
   readResult?: (messages: BaseMessage[]) => unknown | null;

@@ -154,18 +154,17 @@ const input = {
 };
 ```
 
-对于尚未迁移到 toolkit 的 host direct tools，迁移期仍可通过 deprecated `toolOperations` fallback 暴露展示 metadata；新代码必须优先使用 toolkit/toolset。
+host tools 必须通过 toolkit/toolset 暴露，工具本体、展示 metadata 与 review policy 不再通过 invoke-level direct-tool fallback 分散传入。
 
 pet-agent 在创建 subagent 时负责收集这些 metadata，并随工具事件透传：
 
 ```txt
 AgentToolkit.operations
 CapabilityRuntime.toolsets[].operations
-AgentInvokeInput.toolOperations (deprecated host direct-tool fallback)
   -> SubagentToolEvent.operation -> operation metadata
 ```
 
-local-agent 在每个 run 上建立由当前 `toolkits` 和 deprecated `toolOperations` fallback 生成的 registry，作为 host/studio 事件和未携带 metadata 的工具事件 fallback。然后把内部 tool event normalize 成 stable local-agent event。
+local-agent 在每个 run 上建立由当前 `toolkits` 生成的 registry，作为 host/studio 事件和未携带 metadata 的工具事件 fallback。然后把内部 tool event normalize 成 stable local-agent event。
 
 ### 3.3 adapter 拥有渲染
 
@@ -428,7 +427,6 @@ type ToolOperationSummary = {
 - 新的静态 toolkit/toolset 定义优先使用 `defineToolkit()` / `defineToolset()`，由 TypeScript 约束 `operations` / `policy.toolReview` 的 key 必须来自对应 tools。
 - `AgentToolkit.operations` 描述 toolkit tools 的展示语义。
 - `CapabilityRuntime.toolsets[].operations` 描述 capability-private tools 的展示语义。
-- `AgentInvokeInput.toolOperations` 是 deprecated host direct-tool fallback，只用于尚未迁移到 toolkit/toolset 的兼容路径。
 - pet-agent 的 subagent 工具事件会携带 `operation` metadata。
 - local-agent 的 `ToolOperationTracker` 使用 run-local registry 兜底，不再依赖全局固定 local tool registry。
 
@@ -543,7 +541,7 @@ type OperationRegistry = {
 
 ### 阶段 5：拆分 tools/policy/capability registry
 
-状态：进行中。local 内置 tools/toolkits 已迁移到 `toolkits/local/`，其中 file/path、shell、network、search、git tools 与对应 operation metadata/review policy 同目录维护；browser toolkit 已迁移到 `toolkits/browser/`，browser capability 只保留 capability routing；operation metadata helper 已提升到 `plugins/operationMetadata.ts`，供 local/browser tool metadata 共享。`defineToolkit()` / `defineToolset()` 已提供 tool name 与 operation metadata/review policy key 的类型约束和运行时兜底校验。内置 local tool operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability/host tool operation metadata 随 subagent tool event 透传；external plugin loader 已支持 plugin 导出 `toolkits`，raw `tools` 只保留为 direct-tool fallback；Studio local 内置 tools 已停止走 direct tools 注入，改由 local toolkits 暴露；`daily_post`、`capability_creator` 与 Studio planner `submit_plan` 已通过 capability-private toolset 暴露 metadata，Studio worker wiki read tools 已通过 `wiki_read` toolkit 暴露 metadata，`describe_pet_profile` 已通过 `pet_profile` toolkit 暴露 metadata，`get_memories` 已通过 `memory` toolkit 暴露 metadata，`search_web` 已通过 `web_search` toolkit 暴露 metadata；shared tool metadata export / `AgentInvokeInput.toolOperations` / `PetAgentRuntimeInvokeInput.toolOperations` 只保留为 deprecated host direct-tool fallback。local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。runtime 中的 local toolkit/capability/user capability loading 与 rescan state 已收敛为 `LocalAgentCapabilityRegistry`。
+状态：进行中。local 内置 tools/toolkits 已迁移到 `toolkits/local/`，其中 file/path、shell、network、search、git tools 与对应 operation metadata/review policy 同目录维护；browser toolkit 已迁移到 `toolkits/browser/`，browser capability 只保留 capability routing；operation metadata helper 已提升到 `plugins/operationMetadata.ts`，供 local/browser tool metadata 共享。`defineToolkit()` / `defineToolset()` 已提供 tool name 与 operation metadata/review policy key 的类型约束和运行时兜底校验。内置 local tool operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability/host tool operation metadata 随 subagent tool event 透传；external plugin loader 已支持 plugin 导出 `toolkits`，并忽略 plugin 顶层 raw `tools`；Studio local 内置 tools 已停止走 direct tools 注入，改由 local toolkits 暴露；`daily_post`、`capability_creator` 与 Studio planner `submit_plan` 已通过 capability-private toolset 暴露 metadata，Studio worker wiki read tools 已通过 `wiki_read` toolkit 暴露 metadata，`describe_pet_profile` 已通过 `pet_profile` toolkit 暴露 metadata，`get_memories` 已通过 `memory` toolkit 暴露 metadata，`search_web` 已通过 `web_search` toolkit 暴露 metadata；invoke-level direct tools / tool operations fallback 已删除。local-agent 使用 run-local registry 兜底，旧的集中 `localToolOperations.ts` 已删除。runtime 中的 local toolkit/capability/user capability loading 与 rescan state 已收敛为 `LocalAgentCapabilityRegistry`。
 
 目标：让 local tools 和 capability 管理可维护。
 

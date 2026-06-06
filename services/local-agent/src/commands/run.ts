@@ -34,7 +34,6 @@ export async function runAgent() {
     workdir: config.workdir,
     localToolkitDefinitions: runtime.getLocalToolkitDefinitions(),
     localToolkits: runtime.getLocalToolkits(),
-    legacyPluginTools: runtime.getLegacyPluginTools(),
     pluginToolkits: runtime.getPluginToolkits(),
     localCapabilityDefinitions: runtime.getLocalCapabilityDefinitions(),
     localCapabilities: runtime.getLocalCapabilities(),

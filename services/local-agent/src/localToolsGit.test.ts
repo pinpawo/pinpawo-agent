@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createBashToolkit, createGitToolkit, loadLocalPluginTools } from './toolkits/local';
+import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
 import {
   gitAddTool,
   gitCommitTool,
@@ -64,8 +64,8 @@ test('createBashToolkit does not own git tools or operation metadata', () => {
   assert.equal(toolkit.policy?.toolReview?.git_commit, undefined);
 });
 
-test('loadLocalPluginTools keeps git tools available for legacy direct tool paths', async () => {
-  const tools = await loadLocalPluginTools();
+test('loadCoreLocalTools keeps git tools available for toolkit composition', async () => {
+  const tools = await loadCoreLocalTools();
 
   assert.equal(tools.some((item) => item.name === 'git_status'), true);
   assert.equal(tools.some((item) => item.name === 'git_commit'), true);

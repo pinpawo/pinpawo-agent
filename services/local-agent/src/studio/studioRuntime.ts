@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { homedir } from 'node:os';
-import type { StructuredTool } from '@langchain/core/tools';
 import {
   createLLMWikiCurator,
   createPetAgentRuntime,
@@ -59,8 +58,6 @@ export type BuildStudioInput = {
   llmConfig: AgentLlmConfig;
   /** 全局 capability 池(local + user 合并);按 pet config 的 capability 名筛选 */
   capabilities: AgentCapability[];
-  /** 迁移期 direct tool fallback;新本地工具应通过 toolkits 暴露 */
-  legacyDirectTools: StructuredTool[];
   /** 全局 toolkit 池(plugin + local);所有 pet 共享 */
   toolkits?: AgentToolkit[];
   /** 当前 local-agent 进程的 owner user id;无服务端绑定时为 null */
@@ -143,7 +140,6 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       role: petConfig.role ?? null,
       serviceSummary: petConfig.serviceSummary ?? null,
       capabilities: capsForThisPet,
-      ...(input.legacyDirectTools.length > 0 ? { tools: input.legacyDirectTools } : {}),
       toolkits: input.toolkits,
       contextWindowTokens: input.llmConfig.contextWindowTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,

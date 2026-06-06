@@ -1,5 +1,4 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
-import type { StructuredTool } from '@langchain/core/tools';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { StateGraph, START, END, interrupt } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
@@ -119,13 +118,9 @@ export function isOrchestratorInternalAiStreamNode(node: string) {
 
 function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOptions {
   const cfg = runnableConfig?.configurable ?? {};
-  const legacyToolOperations = cfg.legacyToolOperations ?? cfg.toolOperations;
   return {
     actor: cfg.actor as AgentActor | undefined,
     capabilities: (cfg.capabilities ?? []) as AgentCapability[],
-    tools: (cfg.tools ?? []) as StructuredTool[],
-    toolOperations: cfg.toolOperations as OrchestratorInvokeOptions['toolOperations'] | undefined,
-    legacyToolOperations: legacyToolOperations as OrchestratorInvokeOptions['legacyToolOperations'] | undefined,
     toolkits: (cfg.toolkits ?? []) as AgentToolkit[],
     execution: cfg.execution as AgentExecution | undefined,
     maxIterations: cfg.maxIterations as number | undefined,
@@ -257,7 +252,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   async function capabilityDiscovery(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
       capabilities,
-      tools: globalTools,
       toolkits,
       execution,
       workdir,
@@ -273,7 +267,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       messages: state.messages,
       execution,
     }, { includeInstructions: false });
-    const generalTools = [...(globalTools ?? []), ...generalToolkitResources.tools];
+    const generalTools = generalToolkitResources.tools;
     validateUniqueToolNames(generalTools);
     const capabilityList = capabilities ?? [];
     validateUniqueCapabilityNames(capabilityList);
@@ -344,7 +338,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) {
-    const { capabilities, tools: globalTools, toolkits, execution, maxIterations, workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
+    const { capabilities, toolkits, execution, maxIterations, workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const maxIter = maxIterations ?? 5;
 
@@ -385,7 +379,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       messages: state.messages,
       execution,
     }, { includeInstructions: false });
-    const generalTools = [...(globalTools ?? []), ...generalToolkitResources.tools];
+    const generalTools = generalToolkitResources.tools;
     validateUniqueToolNames(generalTools);
 
     const capabilityList = capabilities ?? [];
@@ -667,7 +661,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   // Node: general — reads tools from configurable
   async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { tools: globalTools, toolOperations, legacyToolOperations, toolkits, execution, workdir, runtimeEnvironment, onToolEvent } = getInvokeOptions(runnableConfig);
+    const { toolkits, execution, workdir, runtimeEnvironment, onToolEvent } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = toolkits ?? [];
     validateUniqueToolkitNames(toolkitList);
@@ -677,7 +671,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       messages: state.messages,
       execution,
     });
-    const toolList = [...(globalTools ?? []), ...toolkitResources.tools];
+    const toolList = [...toolkitResources.tools];
     validateUniqueToolNames(toolList);
 
     if (toolList.length === 0) {
@@ -711,7 +705,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       model: config.models.subagent ?? config.models.act,
       tools: toolList,
       instructions: [handoffInstruction, ...toolkitResources.instructions, ...instructions],
-      operations: collectGeneralOperations(toolkitResources.toolkits, legacyToolOperations ?? toolOperations),
+      operations: collectGeneralOperations(toolkitResources.toolkits),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
       signal: runnableConfig?.signal,

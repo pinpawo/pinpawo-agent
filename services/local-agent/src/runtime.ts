@@ -9,7 +9,6 @@ import {
 } from '@pinpawo/pet-agent';
 import { collectPluginHooks, loadPlugins } from './pluginLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
-import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentLlmConfig } from './agentConfig';
 import {
   buildLocalLlmConfig,
@@ -39,7 +38,6 @@ export class LocalAgentRuntime {
   private actorName: string | null = null;
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
-  private legacyPluginTools: StructuredTool[] = [];
   private pluginToolkits: AgentToolkit[] = [];
   private readonly capabilityRegistry = new LocalAgentCapabilityRegistry();
   private readonly chatCheckpointer = new FileSaver(
@@ -61,7 +59,6 @@ export class LocalAgentRuntime {
     isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
     getActorId: () => this.getActorId(),
     getLlmConfig: () => this.llmConfig,
-    getLegacyPluginTools: () => this.legacyPluginTools,
     getPluginToolkits: () => this.pluginToolkits,
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
     getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
@@ -77,9 +74,8 @@ export class LocalAgentRuntime {
   });
 
   async init() {
-    const { plugins, legacyTools, toolkits } = await loadPlugins();
+    const { plugins, toolkits } = await loadPlugins();
     this.llmConfig = buildLocalLlmConfig();
-    this.legacyPluginTools = legacyTools;
     this.pluginToolkits = toolkits;
     await this.capabilityRegistry.load();
     this.hooks = collectPluginHooks(plugins);
@@ -102,10 +98,6 @@ export class LocalAgentRuntime {
 
   getLlmConfig(): AgentLlmConfig {
     return this.llmConfig ?? buildLocalLlmConfig();
-  }
-
-  getLegacyPluginTools(): StructuredTool[] {
-    return this.legacyPluginTools;
   }
 
   getPluginToolkits(): AgentToolkit[] {

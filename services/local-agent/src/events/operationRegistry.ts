@@ -1,7 +1,6 @@
 import type {
   AgentToolkit,
   ToolOperationMetadata,
-  ToolOperationMetadataMap,
   ToolOperationSummary,
 } from '@pinpawo/pet-agent';
 
@@ -10,7 +9,7 @@ export type OperationMetadata = ToolOperationMetadata;
 
 export type RegisteredOperationMetadata = OperationMetadata & {
   source: {
-    provider: 'toolkit' | 'capability' | 'runtime';
+    provider: 'toolkit' | 'capability';
     name: string;
   };
 };
@@ -38,7 +37,6 @@ export function createOperationRegistryFromToolkits(
 
 export function createOperationRegistryFromSources(params: {
   toolkits: AgentToolkit[];
-  legacyRuntimeOperations?: ToolOperationMetadataMap;
 }): OperationRegistry {
   const entries: Record<string, RegisteredOperationMetadata> = {};
 
@@ -52,17 +50,6 @@ export function createOperationRegistryFromSources(params: {
         },
       };
     }
-  }
-
-  for (const [toolName, metadata] of Object.entries(params.legacyRuntimeOperations ?? {})) {
-    if (entries[toolName]) continue;
-    entries[toolName] = {
-      ...metadata,
-      source: {
-        provider: 'runtime',
-        name: toolName,
-      },
-    };
   }
 
   return createOperationRegistry(entries);

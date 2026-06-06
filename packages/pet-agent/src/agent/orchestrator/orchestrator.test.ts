@@ -10,6 +10,7 @@ import type { AgentActor, AgentModels } from '../../types/agent';
 import type { AgentToolkit } from '../../types/toolkit';
 import { createCapabilityCreatorCapability } from '../../capabilities/capabilityCreator/index';
 import { createDailyPostCapability } from '../../capabilities/dailyPost/index';
+import { runAgent } from '../runAgent';
 import { buildOrchestratorTurnInput, createOrchestratorGraph } from '../createAgentRuntime';
 import {
   capabilitySearchTool,
@@ -475,6 +476,27 @@ test('runtime tool operations are collected for host-provided tools', () => {
     name: 'read_file',
   });
   assert.equal(generalOperations.describe_pet_profile?.kind, 'pet.profile.read');
+});
+
+test('runAgent omits empty direct tool and toolkit configurable arrays', async () => {
+  const calls: Array<{ configurable?: Record<string, unknown> }> = [];
+  const graph = {
+    invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
+      calls.push({ configurable: options?.configurable });
+      return { messages: [new AIMessage('done')] };
+    },
+  };
+
+  const result = await runAgent(graph as never, {
+    messages: [new HumanMessage('hello')],
+    tools: [],
+    toolkits: [],
+  });
+
+  assert.equal(result.reply, 'done');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.configurable?.tools, undefined);
+  assert.equal(calls[0]?.configurable?.toolkits, undefined);
 });
 
 test('built-in capability runtimes expose operation metadata', async () => {

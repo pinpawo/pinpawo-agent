@@ -66,7 +66,6 @@ function readTasks(input: unknown) {
 
 const planCapabilityToolOperations = {
   submit_plan: {
-    kind: 'studio.plan.submit',
     title: '提交计划',
     summarizeInput: (input: unknown) => {
       const tasks = readTasks(input);

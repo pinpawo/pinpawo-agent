@@ -180,7 +180,7 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
       description: 'plugin toolkit',
       operations: {
         plugin_tool: {
-          kind: 'plugin.tool',
+          title: 'Plugin Tool',
         },
       },
     }],
@@ -194,7 +194,7 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
       description: 'invoke toolkit',
       operations: {
         invoke_tool: {
-          kind: 'invoke.tool',
+          title: 'Invoke Tool',
         },
       },
     }],
@@ -203,7 +203,7 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   assert.equal(result.reply, 'done');
   const configurable = (calls[0]?.options as {
     configurable?: {
-      toolkits?: Array<{ name?: string; operations?: Record<string, { kind?: string }> }>;
+      toolkits?: Array<{ name?: string; operations?: Record<string, { title?: string }> }>;
     };
   } | undefined)?.configurable;
   assert.ok(configurable, 'graph should receive configurable');
@@ -211,10 +211,10 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   const pluginToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'plugin_toolkit');
   const invokeToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'invoke_toolkit');
   assert.ok(pluginToolkit, 'config toolkits should be forwarded to runtime invoke');
-  assert.equal(pluginToolkit.operations?.plugin_tool?.kind, 'plugin.tool');
+  assert.equal(pluginToolkit.operations?.plugin_tool?.title, 'Plugin Tool');
   assert.ok(invokeToolkit, 'invoke toolkits should be forwarded to runtime invoke');
-  assert.equal(invokeToolkit.operations?.invoke_tool?.kind, 'invoke.tool');
+  assert.equal(invokeToolkit.operations?.invoke_tool?.title, 'Invoke Tool');
   assert.ok(wikiToolkit, 'wikiRoot should install wiki_read as a toolkit');
-  assert.equal(wikiToolkit.operations?.wiki_read_cat?.kind, 'wiki.file.read');
-  assert.equal(wikiToolkit.operations?.wiki_read_grep?.kind, 'wiki.search.grep');
+  assert.equal(wikiToolkit.operations?.wiki_read_cat?.title, '读取知识库文件');
+  assert.equal(wikiToolkit.operations?.wiki_read_grep?.title, '搜索知识库内容');
 });

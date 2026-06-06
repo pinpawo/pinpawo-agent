@@ -84,7 +84,8 @@ export function collectToolkitOperations(
         ...metadata,
         source: {
           provider: 'toolkit',
-          name: toolName,
+          name: toolkit.name,
+          toolName,
         },
       };
     }
@@ -103,8 +104,9 @@ export function collectToolsetOperations(
       operations[toolName] = {
         ...metadata,
         source: {
-          provider: 'capability',
-          name: toolName,
+          provider: 'toolset',
+          name: toolset.name ?? 'toolset',
+          toolName,
         },
       };
     }

@@ -40,7 +40,6 @@ function createSetup(): AgentChannelSetup {
         description: 'local toolkit',
         operations: {
           read_file: {
-            kind: 'file.read',
             title: '读文件',
             summarizeInput: (input: unknown) => {
               const path = input && typeof input === 'object' && 'path' in input
@@ -194,6 +193,6 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
       .map((item) => item.event?.operation)
       .filter(Boolean)
       .map((operation) => [operation?.kind, operation?.target]),
-    [['file.read', 'README.md'], ['file.read', undefined]],
+    [['local-toolkit.read_file', 'README.md'], ['local-toolkit.read_file', undefined]],
   );
 });

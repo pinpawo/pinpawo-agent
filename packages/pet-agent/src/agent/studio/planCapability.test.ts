@@ -13,7 +13,6 @@ test('submit_plan tool captures tasks via onSubmit, in submission order', async 
   const planToolset = runtime.toolsets![0];
   const submitPlanTool = planToolset.tools[0];
   assert.equal(planToolset.name, 'studio_plan');
-  assert.equal(planToolset.operations?.submit_plan?.kind, 'studio.plan.submit');
   assert.equal(planToolset.operations?.submit_plan?.title, '提交计划');
 
   const summary = planToolset.operations?.submit_plan?.summarizeInput?.({

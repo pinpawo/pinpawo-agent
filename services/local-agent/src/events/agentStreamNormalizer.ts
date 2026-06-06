@@ -46,6 +46,16 @@ function mergeSummary(
   };
 }
 
+function operationKindFromSource(
+  source: NonNullable<SubagentToolOperationMetadata['source']> | undefined,
+  fallbackToolName: string,
+) {
+  const provider = source?.provider ?? 'runtime';
+  const ownerName = source?.name ?? provider;
+  const toolName = source?.toolName ?? fallbackToolName;
+  return `${ownerName}.${toolName}`;
+}
+
 export function normalizeToolStreamEvent(
   requestId: string,
   payload: StreamToolsPayload,
@@ -56,7 +66,8 @@ export function normalizeToolStreamEvent(
         ...payload.operation,
         source: payload.operation.source ?? {
           provider: 'runtime' as const,
-          name: payload.name,
+          name: 'runtime',
+          toolName: payload.name,
         },
       }
     : registry.resolveToolOperation(payload.name);
@@ -73,14 +84,15 @@ export function normalizeToolStreamEvent(
     phase: readToolPhase(payload.event),
     operation: {
       id: payload.toolCallId,
-      kind: metadata?.kind ?? 'tool.execute',
+      kind: operationKindFromSource(metadata?.source, payload.name),
       title: metadata?.title ?? metadata?.titleKey ?? payload.name,
       target: summary.target,
       summary: summary.summary,
       details: summary.details,
       source: {
         provider: metadata?.source.provider ?? 'runtime',
-        name: metadata?.source.name ?? payload.name,
+        name: metadata?.source.name ?? 'runtime',
+        toolName: metadata?.source.toolName ?? payload.name,
         callId: payload.toolCallId,
       },
     },

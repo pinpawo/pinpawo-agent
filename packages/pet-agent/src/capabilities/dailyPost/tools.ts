@@ -143,14 +143,12 @@ const dailyPostResultLabels: Record<string, string> = {
 
 const dailyPostToolOperations = {
   finalize_post: {
-    kind: 'daily_post.finalize',
     title: '保存动态',
     summarizeInput: finalizePostInputSummary,
     summarizeOutput: (output) => resultStatusSummary(output, dailyPostResultLabels),
     summarizeError: () => ({ summary: '动态保存失败' }),
   },
   skip_post: {
-    kind: 'daily_post.skip',
     title: '跳过动态',
     summarizeInput: skipPostInputSummary,
     summarizeOutput: (output) => resultStatusSummary(output, dailyPostResultLabels),

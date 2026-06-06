@@ -179,6 +179,9 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     const source = readRecord(operation, 'source');
     const sourceProvider = source ? readString(source, 'provider') : null;
     const sourceName = source ? readString(source, 'name') : null;
+    const normalizedProvider = normalizeOperationSourceProvider(sourceProvider);
+    const sourceToolName = source ? readOptionalString(source, 'toolName') : undefined;
+    const sourceCallId = source ? readOptionalString(source, 'callId') : undefined;
     return {
       type,
       requestId,
@@ -190,12 +193,13 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
         target: readOptionalString(operation, 'target'),
         summary: readOptionalString(operation, 'summary'),
         details: readRecord(operation, 'details') ?? undefined,
-        ...(sourceProvider && isOperationSourceProvider(sourceProvider) && sourceName
+        ...(normalizedProvider && sourceName
           ? {
               source: {
-                provider: sourceProvider,
+                provider: normalizedProvider,
                 name: sourceName,
-                callId: source ? readOptionalString(source, 'callId') : undefined,
+                ...(sourceToolName ? { toolName: sourceToolName } : {}),
+                ...(sourceCallId ? { callId: sourceCallId } : {}),
               },
             }
           : {}),
@@ -365,6 +369,8 @@ function isOperationPhase(value: string | null): value is LocalAgentOperationPha
     || value === 'interrupted';
 }
 
-function isOperationSourceProvider(value: string): value is 'toolkit' | 'capability' | 'runtime' {
-  return value === 'toolkit' || value === 'capability' || value === 'runtime';
+function normalizeOperationSourceProvider(value: string | null): 'toolkit' | 'toolset' | 'runtime' | null {
+  if (value === 'toolkit' || value === 'toolset' || value === 'runtime') return value;
+  if (value === 'capability') return 'toolset';
+  return null;
 }

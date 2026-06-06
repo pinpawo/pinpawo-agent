@@ -225,7 +225,6 @@ export const shellReviewPolicy: ToolkitToolReviewPolicy = {
 
 export const shellToolOperations: Record<string, ToolkitOperationMetadata> = {
   run_shell: {
-    kind: 'shell.run',
     title: '执行命令',
     summarizeInput: (input) => {
       const record = readRecord(input);

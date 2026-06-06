@@ -20,7 +20,7 @@ test('shared pet profile toolkit exposes tool operation metadata', () => {
   assert.equal(toolkit.name, 'pet_profile');
   assert.ok(Array.isArray(toolkit.tools));
   assert.equal(toolkit.tools[0]?.name, 'describe_pet_profile');
-  assert.equal(toolkit.operations?.describe_pet_profile?.kind, 'pet.profile.read');
+  assert.equal(toolkit.operations?.describe_pet_profile?.title, '读取宠物资料');
 });
 
 test('shared memory tool exposes operation metadata without raw memory content', () => {
@@ -31,7 +31,6 @@ test('shared memory tool exposes operation metadata without raw memory content',
   assert.ok(Array.isArray(toolkit.tools));
   assert.equal(toolkit.tools[0]?.name, 'get_memories');
   assert.ok(metadata);
-  assert.equal(metadata.kind, 'memory.search');
   assert.equal(metadata.title, '搜索记忆');
   assert.deepEqual(metadata.summarizeInput?.({
     query: '最近喜欢什么',
@@ -58,7 +57,6 @@ test('shared web search tool exposes operation metadata without raw result snipp
   assert.ok(Array.isArray(toolkit.tools));
   assert.equal(toolkit.tools[0]?.name, 'search_web');
   assert.ok(metadata);
-  assert.equal(metadata.kind, 'web.search');
   assert.equal(metadata.title, '搜索网页');
   assert.deepEqual(metadata.summarizeInput?.({
     query: 'PinPawo',

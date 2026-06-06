@@ -52,8 +52,9 @@ export type LocalAgentOperationEvent = {
     summary?: string;
     details?: Record<string, unknown>;
     source?: {
-      provider: 'toolkit' | 'capability' | 'runtime';
+      provider: 'toolkit' | 'toolset' | 'runtime';
       name: string;
+      toolName?: string;
       callId?: string;
     };
   };

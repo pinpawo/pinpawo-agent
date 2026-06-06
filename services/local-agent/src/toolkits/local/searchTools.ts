@@ -97,7 +97,6 @@ export const grepSearchTool = tool(
 
 export const searchToolOperations: Record<string, ToolkitOperationMetadata> = {
   glob_search: {
-    kind: 'search.glob',
     title: '找文件',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -108,7 +107,6 @@ export const searchToolOperations: Record<string, ToolkitOperationMetadata> = {
     },
   },
   grep_search: {
-    kind: 'search.grep',
     title: '搜内容',
     summarizeInput: (input) => {
       const record = readRecord(input);

@@ -57,7 +57,6 @@ function ensureInsideRoot(root: string, target: string): string {
 
 const wikiReadToolOperations = {
   wiki_read_ls: {
-    kind: 'wiki.dir.list',
     title: '列出知识库',
     summarizeInput: (input: unknown) => {
       const target = readString(input, 'path') ?? '.';
@@ -68,7 +67,6 @@ const wikiReadToolOperations = {
     },
   },
   wiki_read_cat: {
-    kind: 'wiki.file.read',
     title: '读取知识库文件',
     summarizeInput: (input: unknown) => ({
       target: readString(input, 'path') ?? undefined,
@@ -76,7 +74,6 @@ const wikiReadToolOperations = {
     }),
   },
   wiki_read_grep: {
-    kind: 'wiki.search.grep',
     title: '搜索知识库内容',
     summarizeInput: (input: unknown) => {
       const pattern = readString(input, 'pattern');
@@ -92,7 +89,6 @@ const wikiReadToolOperations = {
     },
   },
   wiki_read_find: {
-    kind: 'wiki.search.find',
     title: '查找知识库文件',
     summarizeInput: (input: unknown) => {
       const name = readString(input, 'name');
@@ -108,7 +104,6 @@ const wikiReadToolOperations = {
     },
   },
   wiki_read_head: {
-    kind: 'wiki.file.head',
     title: '读取知识库文件开头',
     summarizeInput: (input: unknown) => {
       const target = readString(input, 'path');
@@ -121,7 +116,6 @@ const wikiReadToolOperations = {
     },
   },
   wiki_read_tail: {
-    kind: 'wiki.file.tail',
     title: '读取知识库文件结尾',
     summarizeInput: (input: unknown) => {
       const target = readString(input, 'path');

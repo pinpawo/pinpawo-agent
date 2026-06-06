@@ -266,12 +266,10 @@ export const gitTools = [
 
 export const gitToolOperations = {
   git_status: {
-    kind: 'git.status',
     title: '查看 git 状态',
     summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
   },
   git_diff: {
-    kind: 'git.diff',
     title: '查看 git diff',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -285,17 +283,14 @@ export const gitToolOperations = {
     },
   },
   git_log: {
-    kind: 'git.log',
     title: '查看 git 历史',
     summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
   },
   git_branch: {
-    kind: 'git.branch',
     title: '查看 git 分支',
     summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
   },
   git_show: {
-    kind: 'git.show',
     title: '查看 git 对象',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -305,12 +300,10 @@ export const gitToolOperations = {
     },
   },
   git_add: {
-    kind: 'git.stage',
     title: '暂存 git 文件',
     summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
   },
   git_commit: {
-    kind: 'git.commit',
     title: '创建 git commit',
     summarizeInput: (input) => {
       const record = readRecord(input);

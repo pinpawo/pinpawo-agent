@@ -33,7 +33,7 @@ test('emitLocalServerToolOperationEvent emits one operation for a normal tool ev
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0], event);
   assert.equal(emitted[0]?.phase, 'started');
-  assert.equal(emitted[0]?.operation.kind, 'file.read');
+  assert.equal(emitted[0]?.operation.kind, 'bash.read_file');
 });
 
 test('emitLocalServerToolOperationEvent maps human review tool errors to interrupted operations', () => {

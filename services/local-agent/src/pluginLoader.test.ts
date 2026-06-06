@@ -15,7 +15,7 @@ export const toolkits = [{
   description: 'Sample toolkit',
   tools: [{ name: 'sample_tool' }],
   operations: {
-    sample_tool: { kind: 'sample.tool' },
+    sample_tool: { title: 'Sample Tool' },
   },
 }];
 export default { name: 'valid-plugin' };
@@ -25,7 +25,7 @@ export default { name: 'valid-plugin' };
 
   assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['valid-plugin']);
   assert.deepEqual(result.toolkits.map((toolkit) => toolkit.name), ['sample_toolkit']);
-  assert.equal(result.toolkits[0]?.operations?.sample_tool?.kind, 'sample.tool');
+  assert.equal(result.toolkits[0]?.operations?.sample_tool?.title, 'Sample Tool');
 });
 
 test('loadPluginsFromDir skips tools and toolkits from invalid plugin modules', async () => {

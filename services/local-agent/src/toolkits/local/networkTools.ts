@@ -192,7 +192,6 @@ export const downloadFileTool = tool(
 
 export const networkToolOperations: Record<string, ToolkitOperationMetadata> = {
   http_fetch: {
-    kind: 'network.http_fetch',
     title: '请求网页',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -203,7 +202,6 @@ export const networkToolOperations: Record<string, ToolkitOperationMetadata> = {
     },
   },
   download_file: {
-    kind: 'file.download',
     title: '下载文件',
     summarizeInput: (input) => {
       const record = readRecord(input);

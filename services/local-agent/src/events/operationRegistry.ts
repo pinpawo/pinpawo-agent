@@ -9,8 +9,9 @@ export type OperationMetadata = ToolOperationMetadata;
 
 export type RegisteredOperationMetadata = OperationMetadata & {
   source: {
-    provider: 'toolkit' | 'capability';
+    provider: 'toolkit' | 'toolset';
     name: string;
+    toolName: string;
   };
 };
 
@@ -46,7 +47,8 @@ export function createOperationRegistryFromSources(params: {
         ...metadata,
         source: {
           provider: 'toolkit',
-          name: toolName,
+          name: toolkit.name,
+          toolName,
         },
       };
     }

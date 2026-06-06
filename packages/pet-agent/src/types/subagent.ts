@@ -5,8 +5,9 @@ import type { ToolOperationMetadata } from './toolkit';
 
 export type SubagentToolOperationMetadata = ToolOperationMetadata & {
   source?: {
-    provider: 'toolkit' | 'capability' | 'runtime';
+    provider: 'toolkit' | 'toolset' | 'runtime';
     name: string;
+    toolName?: string;
   };
 };
 

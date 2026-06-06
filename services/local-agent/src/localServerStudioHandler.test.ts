@@ -43,11 +43,10 @@ function createDeps(): LocalServerDeps {
     localToolkits: [{
       name: 'local-toolkit',
       description: 'local toolkit',
-      operations: {
-        read_file: {
-          kind: 'file.read',
-          title: '读文件',
-          summarizeInput: (input: unknown) => {
+        operations: {
+          read_file: {
+            title: '读文件',
+            summarizeInput: (input: unknown) => {
             const path = input && typeof input === 'object' && 'path' in input
               ? (input as { path?: unknown }).path
               : null;

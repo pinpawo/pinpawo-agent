@@ -51,7 +51,7 @@ function parseJsonObject(output: unknown): Record<string, unknown> | null {
   }
 }
 
-const webSearchToolOperations = {
+const webSearchOperationMetadata = {
   search_web: {
     title: '搜索网页',
     summarizeInput: (input: unknown) => {
@@ -124,6 +124,6 @@ export function createWebSearchToolkit(options: WebSearchToolOptions = {}): Agen
     name: 'web_search',
     description: '搜索外部网络获取最新信息。',
     tools: [webSearchTool] as const,
-    operations: webSearchToolOperations,
+    operations: webSearchOperationMetadata,
   });
 }

@@ -64,7 +64,7 @@ function readTasks(input: unknown) {
   return Array.isArray(tasks) ? tasks : [];
 }
 
-const planCapabilityToolOperations = {
+const planCapabilityOperationMetadata = {
   submit_plan: {
     title: '提交计划',
     summarizeInput: (input: unknown) => {
@@ -126,7 +126,7 @@ function createPlanToolset(options: Pick<CreatePlanCapabilityOptions, 'onSubmit'
     name: 'studio_plan',
     description: 'Studio planner 提交任务计划的 capability-private toolset。',
     tools: [submitPlan] as const,
-    operations: planCapabilityToolOperations,
+    operations: planCapabilityOperationMetadata,
   });
 }
 

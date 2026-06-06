@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { tool } from '@langchain/core/tools';
 import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
-import { readRecord, readString } from '../../plugins/operationMetadata';
+import { readRecord, readString } from '../operationMetadata';
 import { resolveUserPath } from './pathUtils';
 import { walkFiles, wildcardToRegExp } from './fileSystemUtils';
 
@@ -95,7 +95,7 @@ export const grepSearchTool = tool(
   },
 );
 
-export const searchToolOperations: Record<string, ToolkitOperationMetadata> = {
+export const searchOperationMetadata: Record<string, ToolkitOperationMetadata> = {
   glob_search: {
     title: '找文件',
     summarizeInput: (input) => {

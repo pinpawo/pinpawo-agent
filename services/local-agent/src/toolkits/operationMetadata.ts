@@ -7,7 +7,7 @@ import {
   type ToolkitOperationSummary,
 } from '@pinpawo/pet-agent';
 /**
- * Local-agent plugin metadata helpers.
+ * Local-agent toolkit metadata helpers.
  *
  * - Common record/read helpers are sourced from `@pinpawo/pet-agent`
  *   to keep behavior aligned with capability metadata.

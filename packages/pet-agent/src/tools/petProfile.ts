@@ -73,7 +73,7 @@ function readFocus(input: unknown) {
     : null;
 }
 
-const petProfileToolOperations = {
+const petProfileOperationMetadata = {
   describe_pet_profile: {
     title: '读取宠物资料',
     summarizeInput: (input: unknown) => {
@@ -106,6 +106,6 @@ export function createPetProfileToolkit(options: PetProfileToolOptions): AgentTo
     name: 'pet_profile',
     description: '读取当前宠物的基本信息、自我介绍和补充资料。',
     tools: [petProfileTool] as const,
-    operations: petProfileToolOperations,
+    operations: petProfileOperationMetadata,
   });
 }

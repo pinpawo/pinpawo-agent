@@ -55,7 +55,7 @@ function ensureInsideRoot(root: string, target: string): string {
   return absoluteTarget;
 }
 
-const wikiReadToolOperations = {
+const wikiReadOperationMetadata = {
   wiki_read_ls: {
     title: '列出知识库',
     summarizeInput: (input: unknown) => {
@@ -312,7 +312,7 @@ export function createWikiReadToolkit(wikiRoot: string): AgentToolkit {
     name: 'wiki_read',
     description: '只读知识库查询能力，提供目录浏览、文件读取、检索和查找。',
     tools: wikiReadTools,
-    operations: wikiReadToolOperations,
+    operations: wikiReadOperationMetadata,
   });
 }
 

@@ -2,7 +2,7 @@ import type { AgentToolkit, CapabilityAvailability } from '@pinpawo/pet-agent';
 import { loadStoredConfig } from '../../storage';
 import { detectBrowserStatus } from './session';
 import { browserTools } from './tools';
-import { browserToolkitOperationMetadata } from './operationMetadata';
+import { browserOperationMetadata } from './operationMetadata';
 
 export const BROWSER_TOOLKIT_NAME = 'browser';
 
@@ -52,6 +52,6 @@ export function createBrowserToolkit(): AgentToolkit {
     },
     tools: browserTools,
     instructions: browserToolkitInstructions,
-    operations: browserToolkitOperationMetadata,
+    operations: browserOperationMetadata,
   };
 }

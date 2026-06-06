@@ -52,7 +52,7 @@ function parseJsonObject(output: unknown): Record<string, unknown> | null {
   }
 }
 
-const memoriesToolOperations = {
+const memoriesOperationMetadata = {
   get_memories: {
     title: '搜索记忆',
     summarizeInput: (input: unknown) => {
@@ -125,6 +125,6 @@ export function createMemoriesToolkit(options: MemoriesToolOptions = {}): AgentT
     name: 'memory',
     description: '搜索与当前问题相关的记忆、偏好或过往事实。',
     tools: [memoriesTool] as const,
-    operations: memoriesToolOperations,
+    operations: memoriesOperationMetadata,
   });
 }

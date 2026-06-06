@@ -33,6 +33,7 @@ test('buildLocalChatAgentInput omits empty legacy direct tools', () => {
   });
 
   assert.equal(setup.input.tools, undefined);
+  assert.equal(setup.input.legacyDirectTools, undefined);
 });
 
 test('buildLocalChatAgentInput keeps non-empty legacy direct tools', () => {
@@ -43,7 +44,8 @@ test('buildLocalChatAgentInput keeps non-empty legacy direct tools', () => {
     legacyDirectTools: [legacyTool],
   });
 
-  assert.deepEqual(setup.input.tools, [legacyTool]);
+  assert.equal(setup.input.tools, undefined);
+  assert.deepEqual(setup.input.legacyDirectTools, [legacyTool]);
 });
 
 test('buildLocalScheduledAgentInput omits empty legacy direct tools', () => {
@@ -52,4 +54,5 @@ test('buildLocalScheduledAgentInput omits empty legacy direct tools', () => {
   });
 
   assert.equal(setup.input.tools, undefined);
+  assert.equal(setup.input.legacyDirectTools, undefined);
 });

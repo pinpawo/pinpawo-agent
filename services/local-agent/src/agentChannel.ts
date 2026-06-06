@@ -252,7 +252,7 @@ export function buildLocalChatAgentInput(params: {
       ],
       threadId: params.threadId,
       capabilities,
-      ...(legacyDirectTools.length > 0 ? { tools: [...legacyDirectTools] } : {}),
+      ...(legacyDirectTools.length > 0 ? { legacyDirectTools: [...legacyDirectTools] } : {}),
       toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
       execution: {
         dryRun: params.dryRun,

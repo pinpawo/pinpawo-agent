@@ -47,7 +47,7 @@ function capability(name: string, description: string): AgentCapability {
   return {
     name,
     description,
-    createRuntime: () => ({ tools: [] }),
+    createRuntime: () => ({}),
   };
 }
 

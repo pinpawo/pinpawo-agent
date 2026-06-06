@@ -11,7 +11,7 @@ function capability(name: string): AgentCapability {
   return {
     name,
     description: `${name} capability`,
-    createRuntime: () => ({ tools: [] }),
+    createRuntime: () => ({}),
   };
 }
 

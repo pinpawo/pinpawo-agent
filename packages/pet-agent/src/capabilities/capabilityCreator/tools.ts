@@ -296,7 +296,7 @@ function checkCapabilityKeywordQueries(params: {
   const capability = {
     name: params.name,
     description: params.description,
-    createRuntime: () => ({ tools: [] }),
+    createRuntime: () => ({}),
   };
   const keywords = extractCapabilityKeywords(`${params.name} ${params.description}`);
   const queries = (params.queries?.length ? params.queries : defaultKeywordQueries({

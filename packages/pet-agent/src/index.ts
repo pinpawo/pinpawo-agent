@@ -55,7 +55,7 @@ export type {
   ToolkitToolReviewPolicy,
   ToolkitToolReviewPolicyMapFor,
 } from './types/toolkit';
-export { defineToolkit, defineToolset } from './types/toolkit';
+export { defineToolkit, defineToolset, hasToolOperationMetadata } from './types/toolkit';
 
 export {
   buildOrchestratorTurnInput,

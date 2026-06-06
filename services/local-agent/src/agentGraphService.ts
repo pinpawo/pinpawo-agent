@@ -1,6 +1,7 @@
 import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
+  hasToolOperationMetadata,
   runAgent,
   type AgentRunResult,
   type OrchestratorGraph,
@@ -17,7 +18,7 @@ function buildConfigurable(setup: AgentChannelSetup) {
   if (setup.input.threadId) configurable.thread_id = setup.input.threadId;
   if (setup.input.capabilities) configurable.capabilities = setup.input.capabilities;
   if (setup.input.tools) configurable.tools = setup.input.tools;
-  if (setup.input.toolOperations) configurable.toolOperations = setup.input.toolOperations;
+  if (hasToolOperationMetadata(setup.input.toolOperations)) configurable.toolOperations = setup.input.toolOperations;
   if (setup.input.toolkits) configurable.toolkits = setup.input.toolkits;
   if (setup.input.execution) configurable.execution = setup.input.execution;
   if (setup.input.workdir) configurable.workdir = setup.input.workdir;

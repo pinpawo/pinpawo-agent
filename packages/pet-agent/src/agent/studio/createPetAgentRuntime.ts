@@ -7,7 +7,7 @@ import path from 'node:path';
 
 import type { AgentCapability, CapabilityAvailability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
-import type { AgentToolkit, ToolkitOperationMetadata } from '../../types/toolkit';
+import { hasToolOperationMetadata, type AgentToolkit, type ToolkitOperationMetadata } from '../../types/toolkit';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -154,12 +154,11 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       ...(config.toolOperations ?? {}),
       ...(input.toolOperations ?? {}),
     };
-    const configurable = {
+    const configurable: Record<string, unknown> = {
       actor: config.actor,
       thread_id: input.threadId,
       capabilities: [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])],
       tools,
-      toolOperations: legacyToolOperations,
       toolkits,
       execution: input.execution ?? config.execution,
       workdir: input.workdir ?? config.workdir,
@@ -167,6 +166,9 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       onToolEvent: input.onToolEvent,
       forcedCapabilityNames: input.forcedCapabilityNames,
     };
+    if (hasToolOperationMetadata(legacyToolOperations)) {
+      configurable.toolOperations = legacyToolOperations;
+    }
 
     const previousStatus = status;
     status = 'active';

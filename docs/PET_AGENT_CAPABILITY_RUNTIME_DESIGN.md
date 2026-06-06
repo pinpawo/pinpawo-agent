@@ -84,7 +84,7 @@ orchestrator 不需要 activation 机制。它决定调用哪个 capability 时�
 ```
 orchestrator 收到消息
   → 判断需要使用某个 capability
-  → 动态创建 subagent（装配该 capability 声明的 toolkit/tools + instructions）
+  → 动态创建 subagent（装配该 capability 声明的 toolkits/toolsets + instructions）
   → subagent 执行 agent loop
   → subagent 返回结果
   → orchestrator 拿到结果，继续对话或调用下一个 capability
@@ -127,7 +127,7 @@ type AgentCapability = {
 
 - `name`：唯一标识
 - `description`：描述该能力做什么，供 orchestrator 判断何时调用
-- `createRuntime`：在 subagent 创建时调用，生成 tools + instructions
+- `createRuntime`：在 subagent 创建时调用，生成 toolsets / tools fallback + instructions
 - `resultSchema`：可选，定义该 capability 的结构化结果 schema
 
 ### 4.2 CapabilityContext
@@ -148,16 +148,18 @@ context 只包含 agent 级别的公共信息。不包含其他 capability 的�
 ```typescript
 type CapabilityRuntime = {
   uses?: string[];
+  toolsets?: AgentToolset[];
   tools?: StructuredTool[];
   instructions?: string[] | ((ctx: CapabilityInstructionContext) => string[] | Promise<string[]>);
   middleware?: CapabilityMiddleware;
 };
 ```
 
-runtime 是 subagent 的配置：它带什么 tools、用什么 instructions，以及可选的输入/输出调整 hook。
+runtime 是 subagent 的配置：它使用哪些 toolkit、带哪些 capability-private toolsets、用什么 instructions，以及可选的输入/输出调整 hook。
 
 - `uses`：声明要装配的 toolkit，例如 `['browser']`、`['bash']`
-- `tools`：capability 自带业务工具
+- `toolsets`：capability-private 工具组；新 capability-local tools 应通过这里暴露，并在同一 toolset 内声明 operation metadata / review policy。
+- `tools`：迁移期 direct-tool fallback；新代码不要继续新增。
 - toolkit tools 的可见性只由 `uses` 决定；不再提供按工具名继承 global/toolkit tools 的兼容层。
 
 ```typescript
@@ -204,7 +206,7 @@ type SubagentResult = {
 ### 5.2 生命周期
 
 1. orchestrator 决定调用某个 capability
-2. 创建 subagent，装配 capability runtime 的 tools + instructions
+2. 创建 subagent，装配 toolkit tools、capability toolsets 和 instructions
 3. subagent 执行自己的 agent loop
 4. subagent 返回结果
 5. subagent 销毁
@@ -411,7 +413,7 @@ type OrchestratorConfig = {
 它负责：
 
 - invoke 已编译的 graph
-- 传递 messages 以及 configurable 中的 `actor?/threadId/capabilities/tools/execution`
+- 传递 messages 以及 configurable 中的 `actor?/threadId/capabilities/toolkits/tools/toolOperations/execution`
 - 返回 reply / messages
 
 ```typescript
@@ -420,7 +422,11 @@ type AgentInvokeInput = {
   actor?: AgentActor;
   threadId?: string;
   capabilities?: AgentCapability[];
+  toolkits?: AgentToolkit[];
+  /** @deprecated host direct-tool fallback */
   tools?: StructuredTool[];
+  /** @deprecated metadata fallback for host direct tools */
+  toolOperations?: ToolOperationMetadataMap;
   execution?: AgentExecution;
 };
 
@@ -476,4 +482,4 @@ actor 规则：
 
 ## 11. 一句话总结
 
-> capability 定义业务能力（tools + instructions + result），通过动态创建 subagent 执行；subagent 是通用的隔离执行机制，capability 之间通过 orchestrator 传递数据，互不感知。
+> capability 定义业务能力（toolkits/toolsets + instructions + result），通过动态创建 subagent 执行；subagent 是通用的隔离执行机制，capability 之间通过 orchestrator 传递数据，互不感知。

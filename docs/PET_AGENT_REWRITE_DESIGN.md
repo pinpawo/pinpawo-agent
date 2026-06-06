@@ -259,7 +259,11 @@ type AgentInvokeInput = {
   actor?: AgentActor;
   threadId?: string;
   capabilities?: AgentCapability[];
+  toolkits?: AgentToolkit[];
+  /** @deprecated host direct-tool fallback */
   tools?: StructuredTool[];
+  /** @deprecated metadata fallback for host direct tools */
+  toolOperations?: ToolOperationMetadataMap;
   execution?: AgentExecution;
 };
 

@@ -119,11 +119,13 @@ export function isOrchestratorInternalAiStreamNode(node: string) {
 
 function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOptions {
   const cfg = runnableConfig?.configurable ?? {};
+  const legacyToolOperations = cfg.legacyToolOperations ?? cfg.toolOperations;
   return {
     actor: cfg.actor as AgentActor | undefined,
     capabilities: (cfg.capabilities ?? []) as AgentCapability[],
     tools: (cfg.tools ?? []) as StructuredTool[],
     toolOperations: cfg.toolOperations as OrchestratorInvokeOptions['toolOperations'] | undefined,
+    legacyToolOperations: legacyToolOperations as OrchestratorInvokeOptions['legacyToolOperations'] | undefined,
     toolkits: (cfg.toolkits ?? []) as AgentToolkit[],
     execution: cfg.execution as AgentExecution | undefined,
     maxIterations: cfg.maxIterations as number | undefined,
@@ -665,7 +667,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   // Node: general — reads tools from configurable
   async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { tools: globalTools, toolOperations, toolkits, execution, workdir, runtimeEnvironment, onToolEvent } = getInvokeOptions(runnableConfig);
+    const { tools: globalTools, toolOperations, legacyToolOperations, toolkits, execution, workdir, runtimeEnvironment, onToolEvent } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = toolkits ?? [];
     validateUniqueToolkitNames(toolkitList);
@@ -709,7 +711,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       model: config.models.subagent ?? config.models.act,
       tools: toolList,
       instructions: [handoffInstruction, ...toolkitResources.instructions, ...instructions],
-      operations: collectGeneralOperations(toolkitResources.toolkits, toolOperations),
+      operations: collectGeneralOperations(toolkitResources.toolkits, legacyToolOperations ?? toolOperations),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
       signal: runnableConfig?.signal,

@@ -26,9 +26,17 @@ export type AgentInvokeInput = {
   legacyDirectTools?: StructuredTool[];
   /**
    * @deprecated Migration fallback for host-provided direct tools. New code
-   * should expose operation metadata through toolkits instead.
+   * should use legacyToolOperations for explicit fallback usage, and should
+   * expose operation metadata through toolkits instead.
    */
   toolOperations?: ToolOperationMetadataMap;
+  /**
+   * Explicit migration fallback for host-provided direct tool operation
+   * metadata. New tool surfaces should still prefer toolkit operations; this
+   * field exists to keep legacy raw tool metadata visibly separate from the
+   * toolkit path while callers migrate.
+   */
+  legacyToolOperations?: ToolOperationMetadataMap;
   toolkits?: AgentToolkit[];
   execution?: AgentExecution;
   signal?: AbortSignal;
@@ -55,11 +63,12 @@ export async function runAgent(
 ): Promise<AgentRunResult> {
   const configurable: Record<string, unknown> = {};
   const legacyDirectTools = input.legacyDirectTools ?? input.tools;
+  const legacyToolOperations = input.legacyToolOperations ?? input.toolOperations;
   if (input.actor) configurable.actor = input.actor;
   if (input.threadId) configurable.thread_id = input.threadId;
   if (input.capabilities) configurable.capabilities = input.capabilities;
   if (legacyDirectTools && legacyDirectTools.length > 0) configurable.tools = legacyDirectTools;
-  if (hasToolOperationMetadata(input.toolOperations)) configurable.toolOperations = input.toolOperations;
+  if (hasToolOperationMetadata(legacyToolOperations)) configurable.legacyToolOperations = legacyToolOperations;
   if (input.toolkits && input.toolkits.length > 0) configurable.toolkits = input.toolkits;
   if (input.execution) configurable.execution = input.execution;
   if (input.workdir) configurable.workdir = input.workdir;

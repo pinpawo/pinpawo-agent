@@ -82,10 +82,16 @@ export type OrchestratorInvokeOptions = {
   tools?: StructuredTool[];
   /**
    * @deprecated Migration fallback for host-provided direct tools. New code
-   * should expose operation metadata through AgentToolkit.operations or
+   * should use legacyToolOperations for explicit fallback usage, and should
+   * expose operation metadata through AgentToolkit.operations or
    * CapabilityRuntime.toolsets[].operations.
    */
   toolOperations?: ToolOperationMetadataMap;
+  /**
+   * Explicit migration fallback for host-provided direct tool operation
+   * metadata. New tool surfaces should still prefer toolkit/toolset operations.
+   */
+  legacyToolOperations?: ToolOperationMetadataMap;
   toolkits?: AgentToolkit[];
   maxIterations?: number;
   execution?: AgentExecution;

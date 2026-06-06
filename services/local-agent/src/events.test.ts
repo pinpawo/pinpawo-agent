@@ -314,26 +314,6 @@ test('createOperationRegistryForAgentSetup reads explicit legacy runtime operati
   });
 });
 
-test('createOperationRegistryForAgentSetup keeps deprecated toolOperations compatibility', () => {
-  const registry = createOperationRegistryForAgentSetup({
-    input: {
-      toolOperations: petProfileToolOperations,
-    },
-  } as never);
-
-  const event = normalizeToolStreamEvent(
-    'req-1',
-    {
-      event: 'on_tool_start',
-      name: 'describe_pet_profile',
-      input: { focus: '性格' },
-    },
-    registry,
-  );
-
-  assert.equal(event.operation.kind, 'pet.profile.read');
-});
-
 test('createOperationRegistryForAgentSetup prefers toolkit metadata over legacy runtime metadata', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {

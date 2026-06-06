@@ -40,7 +40,7 @@ test('buildLocalChatAgentInput keeps non-empty legacy direct tools', () => {
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    tools: [legacyTool],
+    legacyDirectTools: [legacyTool],
   });
 
   assert.deepEqual(setup.input.tools, [legacyTool]);

@@ -499,6 +499,24 @@ test('runAgent omits empty direct tool and toolkit configurable arrays', async (
   assert.equal(calls[0]?.configurable?.toolkits, undefined);
 });
 
+test('runAgent maps explicit legacy direct tools to graph configurable tools', async () => {
+  const directTool = mockTool('legacy_direct_tool');
+  const calls: Array<{ configurable?: Record<string, unknown> }> = [];
+  const graph = {
+    invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
+      calls.push({ configurable: options?.configurable });
+      return { messages: [new AIMessage('done')] };
+    },
+  };
+
+  await runAgent(graph as never, {
+    messages: [new HumanMessage('hello')],
+    legacyDirectTools: [directTool],
+  });
+
+  assert.deepEqual(calls[0]?.configurable?.tools, [directTool]);
+});
+
 test('built-in capability runtimes expose operation metadata', async () => {
   const dailyPost = createDailyPostCapability({
     savePost: async () => ({ postId: 'post-1' }),

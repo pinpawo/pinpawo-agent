@@ -13,10 +13,17 @@ export type AgentInvokeInput = {
   capabilities?: AgentCapability[];
   /**
    * @deprecated Migration fallback for host-provided direct tools. New code
-   * should pass AgentToolkit definitions through toolkits so tools, operation
-   * metadata, and review policy stay under one owner.
+   * should use legacyDirectTools for explicit fallback usage, and should pass
+   * AgentToolkit definitions through toolkits for new tools so tools,
+   * operation metadata, and review policy stay under one owner.
    */
   tools?: StructuredTool[];
+  /**
+   * Explicit migration fallback for host-provided direct tools. New tool
+   * surfaces should still prefer toolkits; this field exists to keep legacy raw
+   * tools visibly separate from the toolkit path while callers migrate.
+   */
+  legacyDirectTools?: StructuredTool[];
   /**
    * @deprecated Migration fallback for host-provided direct tools. New code
    * should expose operation metadata through toolkits instead.
@@ -47,10 +54,11 @@ export async function runAgent(
   input: AgentInvokeInput,
 ): Promise<AgentRunResult> {
   const configurable: Record<string, unknown> = {};
+  const legacyDirectTools = input.legacyDirectTools ?? input.tools;
   if (input.actor) configurable.actor = input.actor;
   if (input.threadId) configurable.thread_id = input.threadId;
   if (input.capabilities) configurable.capabilities = input.capabilities;
-  if (input.tools && input.tools.length > 0) configurable.tools = input.tools;
+  if (legacyDirectTools && legacyDirectTools.length > 0) configurable.tools = legacyDirectTools;
   if (hasToolOperationMetadata(input.toolOperations)) configurable.toolOperations = input.toolOperations;
   if (input.toolkits && input.toolkits.length > 0) configurable.toolkits = input.toolkits;
   if (input.execution) configurable.execution = input.execution;

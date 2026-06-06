@@ -286,10 +286,10 @@ test('createOperationRegistryForAgentSetup reads operation metadata from setup t
   });
 });
 
-test('createOperationRegistryForAgentSetup reads legacy runtime operation metadata as fallback', () => {
+test('createOperationRegistryForAgentSetup reads explicit legacy runtime operation metadata as fallback', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
-      toolOperations: petProfileToolOperations,
+      legacyToolOperations: petProfileToolOperations,
     },
   } as never);
 
@@ -314,6 +314,26 @@ test('createOperationRegistryForAgentSetup reads legacy runtime operation metada
   });
 });
 
+test('createOperationRegistryForAgentSetup keeps deprecated toolOperations compatibility', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolOperations: petProfileToolOperations,
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'describe_pet_profile',
+      input: { focus: '性格' },
+    },
+    registry,
+  );
+
+  assert.equal(event.operation.kind, 'pet.profile.read');
+});
+
 test('createOperationRegistryForAgentSetup prefers toolkit metadata over legacy runtime metadata', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
@@ -326,7 +346,7 @@ test('createOperationRegistryForAgentSetup prefers toolkit metadata over legacy 
           },
         },
       }],
-      toolOperations: {
+      legacyToolOperations: {
         describe_pet_profile: {
           kind: 'profile.legacy',
           title: 'Legacy Profile',
@@ -357,7 +377,7 @@ test('createOperationRegistryForAgentSetup prefers toolkit metadata over legacy 
 test('createOperationRegistryForAgentSetup ignores empty legacy tool operation maps', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
-      toolOperations: {},
+      legacyToolOperations: {},
     },
   } as never);
 

@@ -517,6 +517,30 @@ test('runAgent maps explicit legacy direct tools to graph configurable tools', a
   assert.deepEqual(calls[0]?.configurable?.tools, [directTool]);
 });
 
+test('runAgent maps explicit legacy tool operations to graph configurable fallback', async () => {
+  const calls: Array<{ configurable?: Record<string, unknown> }> = [];
+  const graph = {
+    invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
+      calls.push({ configurable: options?.configurable });
+      return { messages: [new AIMessage('done')] };
+    },
+  };
+  const legacyToolOperations = {
+    legacy_tool: {
+      kind: 'legacy.run',
+      title: 'Legacy Run',
+    },
+  };
+
+  await runAgent(graph as never, {
+    messages: [new HumanMessage('hello')],
+    legacyToolOperations,
+  });
+
+  assert.deepEqual(calls[0]?.configurable?.legacyToolOperations, legacyToolOperations);
+  assert.equal(calls[0]?.configurable?.toolOperations, undefined);
+});
+
 test('built-in capability runtimes expose operation metadata', async () => {
   const dailyPost = createDailyPostCapability({
     savePost: async () => ({ postId: 'post-1' }),

@@ -133,59 +133,49 @@ function browserSessionInputSummary(input: unknown): ToolkitOperationSummary | n
 
 export const browserToolkitOperationMetadata: Record<string, ToolkitOperationMetadata> = {
   browser_open: {
-    kind: 'browser.open',
     title: '打开网页',
     summarizeInput: browserOpenInputSummary,
     summarizeOutput: browserSnapshotSummary,
   },
   browser_open_with_session: {
-    kind: 'browser.open_session',
     title: '打开浏览器会话',
     summarizeInput: browserOpenWithSessionInputSummary,
     summarizeOutput: browserSnapshotSummary,
   },
   browser_open_with_profile: {
-    kind: 'browser.open_profile',
     title: '打开浏览器 profile',
     summarizeInput: browserOpenWithProfileInputSummary,
     summarizeOutput: browserSnapshotSummary,
   },
   browser_snapshot: {
-    kind: 'browser.snapshot',
     title: '查看页面',
     summarizeInput: () => ({ summary: '查看当前页面' }),
     summarizeOutput: browserSnapshotSummary,
   },
   browser_click: {
-    kind: 'browser.click',
     title: '点击页面',
     summarizeInput: (input) => selectorInputSummary('点击', input),
     summarizeOutput: browserSnapshotSummary,
   },
   browser_type: {
-    kind: 'browser.type',
     title: '输入文本',
     summarizeInput: typeInputSummary,
     summarizeOutput: browserSnapshotSummary,
   },
   browser_wait: {
-    kind: 'browser.wait',
     title: '等待页面',
     summarizeInput: waitInputSummary,
     summarizeOutput: browserSnapshotSummary,
   },
   browser_extract: {
-    kind: 'browser.extract',
     title: '提取页面文本',
     summarizeInput: (input) => selectorInputSummary('提取', input),
   },
   browser_close: {
-    kind: 'browser.close',
     title: '关闭浏览器',
     summarizeInput: () => ({ summary: '关闭当前浏览器会话' }),
   },
   browser_session: {
-    kind: 'browser.session',
     title: '管理浏览器会话',
     summarizeInput: browserSessionInputSummary,
   },

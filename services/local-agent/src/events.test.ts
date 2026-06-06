@@ -28,14 +28,15 @@ test('normalizes LangGraph tool stream events with toolkit operation metadata', 
     phase: 'started',
     operation: {
       id: 'call-1',
-      kind: 'file.read',
+      kind: 'bash.read_file',
       title: '读文件',
       target: '/tmp/example.md',
       summary: undefined,
       details: undefined,
       source: {
         provider: 'toolkit',
-        name: 'read_file',
+        name: 'bash',
+        toolName: 'read_file',
         callId: 'call-1',
       },
     },
@@ -59,7 +60,7 @@ test('falls back to a generic operation when no metadata is registered', () => {
   );
 
   assert.equal(event.phase, 'completed');
-  assert.equal(event.operation.kind, 'tool.execute');
+  assert.equal(event.operation.kind, 'runtime.unknown_tool');
   assert.equal(event.operation.title, 'unknown_tool');
   assert.equal(event.operation.source?.provider, 'runtime');
 });
@@ -73,28 +74,29 @@ test('normalizes tool stream events with event-provided operation metadata first
       toolCallId: 'call-1',
       input: { command: 'git status' },
       operation: {
-        kind: 'capability.shell_alias',
         title: 'Capability Shell',
         summarizeInput: () => ({
           target: 'custom-target',
           summary: 'custom summary',
         }),
         source: {
-          provider: 'capability',
-          name: 'run_shell',
+          provider: 'toolset',
+          name: 'private_shell',
+          toolName: 'run_shell',
         },
       },
     },
     localToolOperationRegistry,
   );
 
-  assert.equal(event.operation.kind, 'capability.shell_alias');
+  assert.equal(event.operation.kind, 'private_shell.run_shell');
   assert.equal(event.operation.title, 'Capability Shell');
   assert.equal(event.operation.target, 'custom-target');
   assert.equal(event.operation.summary, 'custom summary');
   assert.deepEqual(event.operation.source, {
-    provider: 'capability',
-    name: 'run_shell',
+    provider: 'toolset',
+    name: 'private_shell',
+    toolName: 'run_shell',
     callId: 'call-1',
   });
 });
@@ -109,11 +111,12 @@ test('buildToolOperationEvent defaults to generic runtime operations', () => {
 
   assert.equal(event.type, 'operation');
   assert.equal(event.phase, 'started');
-  assert.equal(event.operation.kind, 'tool.execute');
+  assert.equal(event.operation.kind, 'runtime.run_shell');
   assert.equal(event.operation.title, 'run_shell');
   assert.deepEqual(event.operation.source, {
     provider: 'runtime',
-    name: 'run_shell',
+    name: 'runtime',
+    toolName: 'run_shell',
     callId: 'call-1',
   });
 });
@@ -128,13 +131,14 @@ test('buildToolOperationEvent uses explicit toolkit metadata', () => {
 
   assert.equal(event.type, 'operation');
   assert.equal(event.phase, 'started');
-  assert.equal(event.operation.kind, 'shell.run');
+  assert.equal(event.operation.kind, 'bash.run_shell');
   assert.equal(event.operation.title, '执行命令');
   assert.equal(event.operation.target, '/repo');
   assert.equal(event.operation.summary, 'git status --short');
   assert.deepEqual(event.operation.source, {
     provider: 'toolkit',
-    name: 'run_shell',
+    name: 'bash',
+    toolName: 'run_shell',
     callId: 'call-1',
   });
 });
@@ -149,13 +153,14 @@ test('buildToolOperationEvent uses git toolkit metadata', () => {
 
   assert.equal(event.type, 'operation');
   assert.equal(event.phase, 'started');
-  assert.equal(event.operation.kind, 'git.commit');
+  assert.equal(event.operation.kind, 'git.git_commit');
   assert.equal(event.operation.title, '创建 git commit');
   assert.equal(event.operation.target, '/repo');
   assert.equal(event.operation.summary, 'test: update toolkit boundaries');
   assert.deepEqual(event.operation.source, {
     provider: 'toolkit',
-    name: 'git_commit',
+    name: 'git',
+    toolName: 'git_commit',
     callId: 'call-1',
   });
 });
@@ -163,26 +168,26 @@ test('buildToolOperationEvent uses git toolkit metadata', () => {
 test('createBashToolkit exposes operation metadata with the toolkit definition', () => {
   const toolkit = createBashToolkit();
 
-  assert.equal(toolkit.operations?.read_file?.kind, 'file.read');
-  assert.equal(toolkit.operations?.grep_search?.kind, 'search.grep');
-  assert.equal(toolkit.operations?.run_shell?.kind, 'shell.run');
+  assert.equal(toolkit.operations?.read_file?.title, '读文件');
+  assert.equal(toolkit.operations?.grep_search?.title, '搜内容');
+  assert.equal(toolkit.operations?.run_shell?.title, '执行命令');
   assert.equal(toolkit.operations?.git_status, undefined);
 });
 
 test('createGitToolkit exposes git operation metadata with the toolkit definition', () => {
   const toolkit = createGitToolkit();
 
-  assert.equal(toolkit.operations?.git_status?.kind, 'git.status');
-  assert.equal(toolkit.operations?.git_commit?.kind, 'git.commit');
+  assert.equal(toolkit.operations?.git_status?.title, '查看 git 状态');
+  assert.equal(toolkit.operations?.git_commit?.title, '创建 git commit');
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_commit), true);
 });
 
 test('createBrowserToolkit exposes browser operation metadata', () => {
   const toolkit = createBrowserToolkit();
 
-  assert.equal(toolkit.operations?.browser_open?.kind, 'browser.open');
-  assert.equal(toolkit.operations?.browser_click?.kind, 'browser.click');
-  assert.equal(toolkit.operations?.browser_type?.kind, 'browser.type');
+  assert.equal(toolkit.operations?.browser_open?.title, '打开网页');
+  assert.equal(toolkit.operations?.browser_click?.title, '点击页面');
+  assert.equal(toolkit.operations?.browser_type?.title, '输入文本');
 });
 
 test('browser operation metadata summarizes page output', () => {
@@ -208,13 +213,14 @@ test('browser operation metadata summarizes page output', () => {
     registry,
   );
 
-  assert.equal(event.operation.kind, 'browser.open');
+  assert.equal(event.operation.kind, 'browser.browser_open');
   assert.equal(event.operation.title, '打开网页');
   assert.equal(event.operation.target, 'https://example.com/');
   assert.equal(event.operation.summary, '页面：Example Domain');
   assert.deepEqual(event.operation.source, {
     provider: 'toolkit',
-    name: 'browser_open',
+    name: 'browser',
+    toolName: 'browser_open',
     callId: 'call-1',
   });
 });
@@ -240,7 +246,7 @@ test('browser type operation metadata does not expose typed text in display fiel
     registry,
   );
 
-  assert.equal(event.operation.kind, 'browser.type');
+  assert.equal(event.operation.kind, 'browser.browser_type');
   assert.equal(event.operation.target, '#password');
   assert.equal(event.operation.summary, '输入到 #password');
   assert.deepEqual(event.operation.details, {
@@ -258,7 +264,6 @@ test('createOperationRegistryForAgentSetup reads operation metadata from setup t
         name: 'test-toolkit',
         operations: {
           custom_tool: {
-            kind: 'custom.run',
             title: 'Custom Run',
           },
         },
@@ -276,11 +281,12 @@ test('createOperationRegistryForAgentSetup reads operation metadata from setup t
     registry,
   );
 
-  assert.equal(event.operation.kind, 'custom.run');
+  assert.equal(event.operation.kind, 'test-toolkit.custom_tool');
   assert.equal(event.operation.title, 'Custom Run');
   assert.deepEqual(event.operation.source, {
     provider: 'toolkit',
-    name: 'custom_tool',
+    name: 'test-toolkit',
+    toolName: 'custom_tool',
     callId: undefined,
   });
 });
@@ -293,7 +299,6 @@ test('createOperationRegistryForAgentSetup reads host tool metadata from setup t
         description: 'Fake toolkit for registry coverage.',
         operations: {
           describe_pet_profile: {
-            kind: 'pet.profile.read',
             title: '读取宠物资料',
             summarizeInput: (input: unknown) => {
               const focus = input && typeof input === 'object' && 'focus' in input
@@ -319,13 +324,14 @@ test('createOperationRegistryForAgentSetup reads host tool metadata from setup t
     registry,
   );
 
-  assert.equal(event.operation.kind, 'pet.profile.read');
+  assert.equal(event.operation.kind, 'fake_pet_profile.describe_pet_profile');
   assert.equal(event.operation.title, '读取宠物资料');
   assert.equal(event.operation.target, '性格');
   assert.equal(event.operation.summary, '查看 性格');
   assert.deepEqual(event.operation.source, {
     provider: 'toolkit',
-    name: 'describe_pet_profile',
+    name: 'fake_pet_profile',
+    toolName: 'describe_pet_profile',
     callId: undefined,
   });
 });

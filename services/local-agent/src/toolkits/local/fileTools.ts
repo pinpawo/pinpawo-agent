@@ -653,12 +653,10 @@ export const listDirTool = tool(
 
 export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
   read_file: {
-    kind: 'file.read',
     title: '读文件',
     summarizeInput: pathInputSummary,
   },
   view_file_chunk: {
-    kind: 'file.chunk.read',
     title: '看片段',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -669,12 +667,10 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
     },
   },
   stat_path: {
-    kind: 'file.stat',
     title: '看属性',
     summarizeInput: pathInputSummary,
   },
   write_file: {
-    kind: 'file.write',
     title: '写文件',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -699,7 +695,6 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
     },
   },
   update_file: {
-    kind: 'file.update',
     title: '改文件',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -728,7 +723,6 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
     },
   },
   multi_edit: {
-    kind: 'file.multi_edit',
     title: '批量修改',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -754,7 +748,6 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
     },
   },
   apply_file_patch: {
-    kind: 'file.patch',
     title: '应用补丁',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -780,7 +773,6 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
     },
   },
   apply_unified_patch: {
-    kind: 'patch.apply',
     title: '应用 diff',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -798,7 +790,6 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
     summarizeOutput: (output) => okOutputPathSummary(output, 'cwd'),
   },
   validate_structured_file: {
-    kind: 'file.validate',
     title: '验证结构',
     summarizeInput: (input) => {
       const record = readRecord(input);
@@ -808,25 +799,21 @@ export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
     summarizeOutput: (output) => okOutputPathSummary(output),
   },
   move_path: {
-    kind: 'path.move',
     title: '移动文件',
     summarizeInput: sourceDestinationInputSummary,
     summarizeOutput: (output) => okOutputPathSummary(output, 'destination'),
   },
   copy_path: {
-    kind: 'path.copy',
     title: '复制文件',
     summarizeInput: sourceDestinationInputSummary,
     summarizeOutput: (output) => okOutputPathSummary(output, 'destination'),
   },
   mkdir_path: {
-    kind: 'directory.create',
     title: '建目录',
     summarizeInput: pathInputSummary,
     summarizeOutput: (output) => okOutputPathSummary(output),
   },
   list_dir: {
-    kind: 'directory.list',
     title: '列目录',
     summarizeInput: pathInputSummary,
   },

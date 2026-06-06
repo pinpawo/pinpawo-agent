@@ -112,21 +112,18 @@ const capabilityCreatorResultLabels: Record<string, string> = {
 
 const capabilityCreatorToolOperations = {
   scaffold_capability_plugin: {
-    kind: 'capability.scaffold',
     title: '生成 capability 插件',
     summarizeInput: scaffoldInputSummary,
     summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),
     summarizeError: () => ({ summary: '生成 capability 插件失败' }),
   },
   validate_capability_plugin: {
-    kind: 'capability.validate',
     title: '验证 capability 插件',
     summarizeInput: validateInputSummary,
     summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),
     summarizeError: () => ({ summary: '验证 capability 插件失败' }),
   },
   check_capability_keywords: {
-    kind: 'capability.keyword_check',
     title: '检查 capability 关键词',
     summarizeInput: keywordInputSummary,
     summarizeOutput: (output) => resultStatusSummary(output, capabilityCreatorResultLabels),

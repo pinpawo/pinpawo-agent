@@ -39,7 +39,6 @@ export type ToolOperationSummary = {
 };
 
 export type ToolOperationMetadata = {
-  kind: string;
   title?: string;
   titleKey?: string;
   summarizeInput?: (input: unknown) => ToolOperationSummary | null;

@@ -18,12 +18,13 @@ test('formats operation events without reading legacy tool input/output', () => 
     phase: 'started',
     operation: {
       id: 'call-1',
-      kind: 'file.read',
+      kind: 'bash.read_file',
       title: '读文件',
       target: '/tmp/example.md',
       source: {
         provider: 'toolkit',
-        name: 'read_file',
+        name: 'bash',
+        toolName: 'read_file',
         callId: 'call-1',
       },
     },
@@ -46,7 +47,7 @@ test('formats completed and failed operation summaries from event fields', () =>
       requestId: 'req-1',
       phase: 'completed',
       operation: {
-        kind: 'shell.run',
+        kind: 'bash.run_shell',
         title: '执行命令',
         summary: 'git status --short',
       },
@@ -60,7 +61,7 @@ test('formats completed and failed operation summaries from event fields', () =>
       requestId: 'req-1',
       phase: 'failed',
       operation: {
-        kind: 'shell.run',
+        kind: 'bash.run_shell',
         title: '执行命令',
         summary: 'exit 1',
       },

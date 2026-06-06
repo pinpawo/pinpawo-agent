@@ -53,7 +53,6 @@ function parseJsonObject(output: unknown): Record<string, unknown> | null {
 
 const webSearchToolOperations = {
   search_web: {
-    kind: 'web.search',
     title: '搜索网页',
     summarizeInput: (input: unknown) => {
       const { query, limit } = readInput(input);

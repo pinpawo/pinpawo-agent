@@ -89,7 +89,7 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
     requestId: 'req-1',
     phase: 'started',
     operation: {
-      kind: 'file.read',
+      kind: 'bash.read_file',
       title: '读文件',
       target: 'README.md',
       summary: 'read',
@@ -118,7 +118,7 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
 
   assert.equal(res.statusCode, 200);
   const payload = JSON.parse(res.body);
-  assert.equal(payload.active_operation_kind, 'file.read');
+  assert.equal(payload.active_operation_kind, 'bash.read_file');
   assert.equal(payload.active_operation_title, '读文件');
   assert.equal(payload.active_operation_target, 'README.md');
   assert.equal(payload.active_operation_summary, 'read');

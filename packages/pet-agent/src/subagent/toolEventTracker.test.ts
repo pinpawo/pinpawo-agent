@@ -72,11 +72,11 @@ test('SubagentToolEventTracker keeps operation metadata on dangling terminal eve
     name: 'custom_tool',
     input: {},
     operation: {
-      kind: 'capability.custom',
       title: 'Custom Tool',
       source: {
-        provider: 'capability',
-        name: 'custom_tool',
+        provider: 'toolset',
+        name: 'private',
+        toolName: 'custom_tool',
       },
     },
   });
@@ -85,11 +85,11 @@ test('SubagentToolEventTracker keeps operation metadata on dangling terminal eve
 
   assert.equal(completed.length, 1);
   assert.deepEqual(completed[0]?.operation, {
-    kind: 'capability.custom',
     title: 'Custom Tool',
     source: {
-      provider: 'capability',
-      name: 'custom_tool',
+      provider: 'toolset',
+      name: 'private',
+      toolName: 'custom_tool',
     },
   });
 });

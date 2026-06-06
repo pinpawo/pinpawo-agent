@@ -107,12 +107,10 @@ const bashToolkit = {
   tools: [readFileTool, grepSearchTool, runShellTool],
   operations: {
     read_file: {
-      kind: 'file.read',
       title: '读文件',
       summarizeInput: (input) => ({ target: input.path }),
     },
     grep_search: {
-      kind: 'search.grep',
       title: '搜内容',
       summarizeInput: (input) => ({
         target: input.path,
@@ -121,12 +119,12 @@ const bashToolkit = {
     },
   },
 };
+```
 
 命名约定约束：
 - 真实工具来源（local toolkit、capability、host tool）各自维护自己的 operation metadata。
-- `@pinpawo/pet-agent` 侧 `operationMetadata.ts` 只共享 reader/summarizer 的基础能力，不定义 local-agent 专属 kind；local-agent 的 kind 命名由 toolkit/provider 自行定义。
-- `kind` 采用 `domain.action` 的小写点分层风格（例如 `file.write`、`search.grep`、`shell.run`），避免跨层漂移。
-```
+- `@pinpawo/pet-agent` 侧 `operationMetadata.ts` 只共享 reader/summarizer 的基础能力，不定义 local-agent 专属 UI 标识。
+- `LocalAgentOperationEvent.operation.kind` 由运行时统一派生：`<toolkitName>.<toolName>` 或 `<toolsetName>.<toolName>`；没有 metadata 时使用 `runtime.<toolName>`。
 
 对于用户 capability：
 
@@ -137,7 +135,6 @@ const capability = {
     tools: [createCalendarEventTool],
     operations: {
       create_calendar_event: {
-        kind: 'calendar.event.create',
         title: '创建日程',
         summarizeInput: (input) => ({ summary: input.title }),
       },
@@ -406,7 +403,6 @@ operation metadata 由 toolkit / capability / host-provided tools 暴露。
 
 ```ts
 type ToolOperationMetadata = {
-  kind: string;
   title?: string;
   titleKey?: string;
   summarizeInput?: (input: unknown) => ToolOperationSummary | null;
@@ -427,6 +423,7 @@ type ToolOperationSummary = {
 - 新的静态 toolkit/toolset 定义优先使用 `defineToolkit()` / `defineToolset()`，由 TypeScript 约束 `operations` / `policy.toolReview` 的 key 必须来自对应 tools。
 - `AgentToolkit.operations` 描述 toolkit tools 的展示语义。
 - `CapabilityRuntime.toolsets[].operations` 描述 capability-private tools 的展示语义。
+- `operations` 不再声明 `kind`；local-agent 事件里的 `operation.kind` 由 owner 和 tool name 派生。
 - pet-agent 的 subagent 工具事件会携带 `operation` metadata。
 - local-agent 的 `ToolOperationTracker` 使用 run-local registry 兜底，不再依赖全局固定 local tool registry。
 
@@ -445,7 +442,7 @@ type OperationRegistry = {
 - 迁移期仍可通过 shared tool metadata export 支撑 host 直接注入路径；新代码应优先使用 shared toolkit factory。
 - Studio planner capability 通过 capability-private toolset 暴露 `submit_plan` metadata；Studio worker 的 wiki read tools 由 `wiki_read` toolkit 暴露 metadata。
 - 第三方/user capability 可以提供自己的 metadata。
-- 没有 metadata 时，local-agent 生成 generic operation：`kind: 'tool.execute'`，`title: toolName`。
+- 没有 metadata 时，local-agent 生成 runtime operation：`kind: 'runtime.<toolName>'`，`title: toolName`。
 - adapter 不应该回退解析 raw input/output。
 
 ## 7. 迁移阶段

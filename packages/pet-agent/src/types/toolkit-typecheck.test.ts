@@ -13,7 +13,7 @@ defineToolkit({
   description: 'Type-level toolkit contract coverage.',
   tools: [alphaTool, betaTool] as const,
   operations: {
-    alpha_tool: { kind: 'alpha.run' },
+    alpha_tool: { title: 'Alpha' },
   },
   policy: {
     toolReview: {
@@ -27,9 +27,9 @@ defineToolkit({
   description: 'Operation metadata keys must match toolkit tools.',
   tools: [alphaTool] as const,
   operations: {
-    alpha_tool: { kind: 'alpha.run' },
+    alpha_tool: {},
     // @ts-expect-error operation metadata keys must come from toolkit tools
-    beta_tool: { kind: 'beta.run' },
+    beta_tool: {},
   },
 });
 
@@ -51,9 +51,9 @@ defineToolset({
   description: 'Type-level toolset contract coverage.',
   tools: [alphaTool] as const,
   operations: {
-    alpha_tool: { kind: 'alpha.run' },
+    alpha_tool: {},
     // @ts-expect-error toolset operation metadata keys must come from toolset tools
-    beta_tool: { kind: 'beta.run' },
+    beta_tool: {},
   },
   policy: {
     toolReview: {

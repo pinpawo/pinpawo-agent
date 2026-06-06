@@ -75,7 +75,6 @@ function readFocus(input: unknown) {
 
 const petProfileToolOperations = {
   describe_pet_profile: {
-    kind: 'pet.profile.read',
     title: '读取宠物资料',
     summarizeInput: (input: unknown) => {
       const focus = readFocus(input);

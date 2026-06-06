@@ -25,7 +25,7 @@ test('inflight operation run emits tool stream events as operations', () => {
   assert.equal(event.requestId, 'req-1');
   assert.equal(event.phase, 'started');
   assert.equal(event.operation.id, 'tool-1');
-  assert.equal(event.operation.kind, 'file.read');
+  assert.equal(event.operation.kind, 'bash.read_file');
   assert.deepEqual(emitted, [event]);
 });
 

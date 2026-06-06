@@ -71,12 +71,13 @@ test('parseLocalAgentServerMessage accepts typed local-agent event messages', ()
         requestId: 'req-1',
         phase: 'started',
         operation: {
-          kind: 'file.read',
+          kind: 'bash.read_file',
           title: '读文件',
           target: 'README.md',
           source: {
             provider: 'toolkit',
-            name: 'read_file',
+            name: 'bash',
+            toolName: 'read_file',
           },
         },
         raw: {
@@ -93,15 +94,15 @@ test('parseLocalAgentServerMessage accepts typed local-agent event messages', ()
         phase: 'started',
         operation: {
           id: undefined,
-          kind: 'file.read',
+          kind: 'bash.read_file',
           title: '读文件',
           target: 'README.md',
           summary: undefined,
           details: undefined,
           source: {
             provider: 'toolkit',
-            name: 'read_file',
-            callId: undefined,
+            name: 'bash',
+            toolName: 'read_file',
           },
         },
       },
@@ -238,7 +239,7 @@ test('sendLocalAgentEvent writes only typed events', () => {
     requestId: 'req-1',
     phase: 'started',
     operation: {
-      kind: 'file.read',
+      kind: 'bash.read_file',
       title: '读文件',
     },
     raw: {
@@ -277,7 +278,7 @@ test('sendLocalAgentEvent writes only typed events', () => {
         requestId: 'req-1',
         phase: 'started',
         operation: {
-          kind: 'file.read',
+          kind: 'bash.read_file',
           title: '读文件',
         },
       },

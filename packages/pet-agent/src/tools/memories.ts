@@ -54,7 +54,6 @@ function parseJsonObject(output: unknown): Record<string, unknown> | null {
 
 const memoriesToolOperations = {
   get_memories: {
-    kind: 'memory.search',
     title: '搜索记忆',
     summarizeInput: (input: unknown) => {
       const { query, limit } = readInput(input);

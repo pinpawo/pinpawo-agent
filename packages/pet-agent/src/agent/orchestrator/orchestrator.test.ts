@@ -404,20 +404,18 @@ test('toolkit and capability toolset operations are collected with their source'
     description: 'bash toolkit',
     operations: {
       read_file: {
-        kind: 'file.read',
         title: 'Read File',
       },
-      shared_tool: {
-        kind: 'toolkit.shared',
-      },
+      shared_tool: {},
     },
   }];
 
   const toolkitOperations = collectToolkitOperations(toolkits);
-  assert.equal(toolkitOperations.read_file?.kind, 'file.read');
+  assert.equal(toolkitOperations.read_file?.title, 'Read File');
   assert.deepEqual(toolkitOperations.read_file?.source, {
     provider: 'toolkit',
-    name: 'read_file',
+    name: 'bash',
+    toolName: 'read_file',
   });
 
   const capabilityOperations = collectCapabilityOperations(toolkits, {
@@ -425,22 +423,22 @@ test('toolkit and capability toolset operations are collected with their source'
       name: 'private',
       tools: [],
       operations: {
-        custom_tool: {
-          kind: 'capability.custom',
-        },
-        shared_tool: {
-          kind: 'capability.shared',
-        },
+        custom_tool: {},
+        shared_tool: {},
       },
     }],
   });
 
-  assert.equal(capabilityOperations.custom_tool?.kind, 'capability.custom');
   assert.deepEqual(capabilityOperations.custom_tool?.source, {
-    provider: 'capability',
-    name: 'custom_tool',
+    provider: 'toolset',
+    name: 'private',
+    toolName: 'custom_tool',
   });
-  assert.equal(capabilityOperations.shared_tool?.kind, 'toolkit.shared');
+  assert.deepEqual(capabilityOperations.shared_tool?.source, {
+    provider: 'toolkit',
+    name: 'bash',
+    toolName: 'shared_tool',
+  });
 });
 
 test('general operations are collected from toolkits', () => {
@@ -448,16 +446,14 @@ test('general operations are collected from toolkits', () => {
     name: 'bash',
     description: 'bash toolkit',
     operations: {
-      read_file: {
-        kind: 'file.read',
-      },
+      read_file: {},
     },
   }]);
 
-  assert.equal(generalOperations.read_file?.kind, 'file.read');
   assert.deepEqual(generalOperations.read_file?.source, {
     provider: 'toolkit',
-    name: 'read_file',
+    name: 'bash',
+    toolName: 'read_file',
   });
 });
 
@@ -491,9 +487,13 @@ test('built-in capability runtimes expose operation metadata', async () => {
   });
   const dailyPostToolset = dailyPostRuntime.toolsets?.find((toolset) => toolset.name === 'daily_post');
 
-  assert.equal(dailyPostToolset?.operations?.finalize_post?.kind, 'daily_post.finalize');
-  assert.equal(dailyPostToolset?.operations?.skip_post?.kind, 'daily_post.skip');
-  assert.equal(collectCapabilityOperations([], dailyPostRuntime).finalize_post?.source?.provider, 'capability');
+  assert.equal(dailyPostToolset?.operations?.finalize_post?.title, '保存动态');
+  assert.equal(dailyPostToolset?.operations?.skip_post?.title, '跳过动态');
+  assert.deepEqual(collectCapabilityOperations([], dailyPostRuntime).finalize_post?.source, {
+    provider: 'toolset',
+    name: 'daily_post',
+    toolName: 'finalize_post',
+  });
 
   const finalizeSummary = dailyPostToolset?.operations?.finalize_post?.summarizeInput?.({
     mode: 'original',
@@ -522,10 +522,14 @@ test('built-in capability runtimes expose operation metadata', async () => {
   });
   const creatorToolset = creatorRuntime.toolsets?.find((toolset) => toolset.name === 'capability_creator');
 
-  assert.equal(creatorToolset?.operations?.scaffold_capability_plugin?.kind, 'capability.scaffold');
-  assert.equal(creatorToolset?.operations?.validate_capability_plugin?.kind, 'capability.validate');
-  assert.equal(creatorToolset?.operations?.check_capability_keywords?.kind, 'capability.keyword_check');
-  assert.equal(collectCapabilityOperations([], creatorRuntime).scaffold_capability_plugin?.source?.provider, 'capability');
+  assert.equal(creatorToolset?.operations?.scaffold_capability_plugin?.title, '生成 capability 插件');
+  assert.equal(creatorToolset?.operations?.validate_capability_plugin?.title, '验证 capability 插件');
+  assert.equal(creatorToolset?.operations?.check_capability_keywords?.title, '检查 capability 关键词');
+  assert.deepEqual(collectCapabilityOperations([], creatorRuntime).scaffold_capability_plugin?.source, {
+    provider: 'toolset',
+    name: 'capability_creator',
+    toolName: 'scaffold_capability_plugin',
+  });
 });
 
 test('toolkit review policy wraps tool calls without changing tool identity', async () => {

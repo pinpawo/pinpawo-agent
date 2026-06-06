@@ -158,19 +158,6 @@ export function collectCapabilityOperations(
     operations[toolName] = metadata;
   }
 
-  for (const [toolName, metadata] of Object.entries(runtime.operations ?? {})) {
-    if (operations[toolName]) {
-      continue;
-    }
-    operations[toolName] = {
-      ...metadata,
-      source: {
-        provider: 'capability',
-        name: toolName,
-      },
-    };
-  }
-
   return operations;
 }
 

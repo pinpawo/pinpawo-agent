@@ -112,10 +112,6 @@ export class LocalAgentRuntime {
     return this.pluginToolkits;
   }
 
-  getLocalTools(): StructuredTool[] {
-    return this.capabilityRegistry.getLocalTools();
-  }
-
   getLocalToolkits(): AgentToolkit[] {
     return this.capabilityRegistry.getLocalToolkits();
   }

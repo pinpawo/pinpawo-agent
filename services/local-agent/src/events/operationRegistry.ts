@@ -55,6 +55,7 @@ export function createOperationRegistryFromSources(params: {
   }
 
   for (const [toolName, metadata] of Object.entries(params.legacyRuntimeOperations ?? {})) {
+    if (entries[toolName]) continue;
     entries[toolName] = {
       ...metadata,
       source: {

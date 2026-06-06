@@ -17,8 +17,9 @@ function buildConfigurable(setup: AgentChannelSetup) {
   configurable.actor = setup.input.actor;
   if (setup.input.threadId) configurable.thread_id = setup.input.threadId;
   if (setup.input.capabilities) configurable.capabilities = setup.input.capabilities;
-  const legacyDirectTools = setup.input.legacyDirectTools ?? setup.input.tools;
-  if (legacyDirectTools && legacyDirectTools.length > 0) configurable.tools = legacyDirectTools;
+  if (setup.input.legacyDirectTools && setup.input.legacyDirectTools.length > 0) {
+    configurable.tools = setup.input.legacyDirectTools;
+  }
   if (hasToolOperationMetadata(setup.input.legacyToolOperations)) {
     configurable.legacyToolOperations = setup.input.legacyToolOperations;
   }

@@ -75,6 +75,11 @@ export type OrchestratorInvokeOptions = {
   actor?: AgentActor;
   capabilities?: AgentCapability[];
   tools?: StructuredTool[];
+  /**
+   * @deprecated Migration fallback for host-provided direct tools. New code
+   * should expose operation metadata through AgentToolkit.operations or
+   * CapabilityRuntime.toolsets[].operations.
+   */
   toolOperations?: ToolOperationMetadataMap;
   toolkits?: AgentToolkit[];
   maxIterations?: number;

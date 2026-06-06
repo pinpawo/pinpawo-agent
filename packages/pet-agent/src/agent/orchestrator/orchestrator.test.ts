@@ -448,15 +448,15 @@ test('toolkit and capability operations are collected with their source', () => 
 });
 
 test('runtime tool operations are collected for host-provided tools', () => {
-  const runtimeOperations = collectRuntimeOperations({
+  const legacyRuntimeOperations = collectRuntimeOperations({
     describe_pet_profile: {
       kind: 'pet.profile.read',
       title: '读取宠物资料',
     },
   });
 
-  assert.equal(runtimeOperations.describe_pet_profile?.kind, 'pet.profile.read');
-  assert.deepEqual(runtimeOperations.describe_pet_profile?.source, {
+  assert.equal(legacyRuntimeOperations.describe_pet_profile?.kind, 'pet.profile.read');
+  assert.deepEqual(legacyRuntimeOperations.describe_pet_profile?.source, {
     provider: 'runtime',
     name: 'describe_pet_profile',
   });
@@ -490,6 +490,7 @@ test('built-in capability runtimes expose operation metadata', async () => {
   });
   const dailyPostToolset = dailyPostRuntime.toolsets?.find((toolset) => toolset.name === 'daily_post');
 
+  assert.equal(dailyPostRuntime.operations, undefined);
   assert.equal(dailyPostToolset?.operations?.finalize_post?.kind, 'daily_post.finalize');
   assert.equal(dailyPostToolset?.operations?.skip_post?.kind, 'daily_post.skip');
   assert.equal(collectCapabilityOperations([], dailyPostRuntime).finalize_post?.source?.provider, 'capability');
@@ -521,6 +522,7 @@ test('built-in capability runtimes expose operation metadata', async () => {
   });
   const creatorToolset = creatorRuntime.toolsets?.find((toolset) => toolset.name === 'capability_creator');
 
+  assert.equal(creatorRuntime.operations, undefined);
   assert.equal(creatorToolset?.operations?.scaffold_capability_plugin?.kind, 'capability.scaffold');
   assert.equal(creatorToolset?.operations?.validate_capability_plugin?.kind, 'capability.validate');
   assert.equal(creatorToolset?.operations?.check_capability_keywords?.kind, 'capability.keyword_check');

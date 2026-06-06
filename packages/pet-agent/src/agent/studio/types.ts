@@ -54,6 +54,8 @@ export type PetAgentRuntimeInvokeInput = {
   /**
    * 本次 invoke 临时注入的 host/global tools 展示 metadata。
    * 这些 tools 不属于 toolkit/capability runtime 时,由调用方通过这里声明 operation 语义。
+   *
+   * @deprecated 迁移期 fallback。新代码应优先通过 toolkit/toolset 暴露 operation metadata。
    */
   toolOperations?: Record<string, ToolkitOperationMetadata>;
   /**

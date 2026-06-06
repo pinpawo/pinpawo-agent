@@ -98,11 +98,11 @@ export function collectToolkitOperations(
 }
 
 export function collectRuntimeOperations(
-  runtimeOperations: ToolOperationMetadataMap | undefined,
+  legacyRuntimeOperations: ToolOperationMetadataMap | undefined,
 ): Record<string, SubagentToolOperationMetadata> {
   const operations: Record<string, SubagentToolOperationMetadata> = {};
 
-  for (const [toolName, metadata] of Object.entries(runtimeOperations ?? {})) {
+  for (const [toolName, metadata] of Object.entries(legacyRuntimeOperations ?? {})) {
     operations[toolName] = {
       ...metadata,
       source: {
@@ -137,11 +137,11 @@ export function collectToolsetOperations(
 
 export function collectGeneralOperations(
   toolkits: AgentToolkit[],
-  runtimeOperations: ToolOperationMetadataMap | undefined,
+  legacyRuntimeOperations: ToolOperationMetadataMap | undefined,
 ): Record<string, SubagentToolOperationMetadata> {
   return {
     ...collectToolkitOperations(toolkits),
-    ...collectRuntimeOperations(runtimeOperations),
+    ...collectRuntimeOperations(legacyRuntimeOperations),
   };
 }
 

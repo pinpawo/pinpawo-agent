@@ -39,6 +39,10 @@ export type PetAgentRuntimeConfig = {
   capabilities?: AgentCapability[];
   capabilityAvailability?: Record<string, CapabilityAvailability>;
   tools?: StructuredTool[];
+  /**
+   * @deprecated Migration fallback for host-provided direct tools. New runtime
+   * tools should be exposed through toolkits/toolsets.
+   */
   toolOperations?: Record<string, ToolkitOperationMetadata>;
   execution?: AgentExecution;
   workdir?: string;
@@ -144,7 +148,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     const toolkits = [
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
-    const toolOperations = {
+    const legacyToolOperations = {
       ...(config.toolOperations ?? {}),
       ...(input.toolOperations ?? {}),
     };
@@ -153,7 +157,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       thread_id: input.threadId,
       capabilities: [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])],
       tools,
-      toolOperations,
+      toolOperations: legacyToolOperations,
       toolkits,
       execution: input.execution ?? config.execution,
       workdir: input.workdir ?? config.workdir,

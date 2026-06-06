@@ -38,7 +38,7 @@ export function createOperationRegistryFromToolkits(
 
 export function createOperationRegistryFromSources(params: {
   toolkits: AgentToolkit[];
-  runtimeOperations?: ToolOperationMetadataMap;
+  legacyRuntimeOperations?: ToolOperationMetadataMap;
 }): OperationRegistry {
   const entries: Record<string, RegisteredOperationMetadata> = {};
 
@@ -54,7 +54,7 @@ export function createOperationRegistryFromSources(params: {
     }
   }
 
-  for (const [toolName, metadata] of Object.entries(params.runtimeOperations ?? {})) {
+  for (const [toolName, metadata] of Object.entries(params.legacyRuntimeOperations ?? {})) {
     entries[toolName] = {
       ...metadata,
       source: {

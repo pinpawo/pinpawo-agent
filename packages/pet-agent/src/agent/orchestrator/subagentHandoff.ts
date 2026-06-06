@@ -139,10 +139,16 @@ export function collectGeneralOperations(
   toolkits: AgentToolkit[],
   legacyRuntimeOperations: ToolOperationMetadataMap | undefined,
 ): Record<string, SubagentToolOperationMetadata> {
-  return {
-    ...collectToolkitOperations(toolkits),
-    ...collectRuntimeOperations(legacyRuntimeOperations),
-  };
+  const operations = collectToolkitOperations(toolkits);
+
+  for (const [toolName, metadata] of Object.entries(collectRuntimeOperations(legacyRuntimeOperations))) {
+    if (operations[toolName]) {
+      continue;
+    }
+    operations[toolName] = metadata;
+  }
+
+  return operations;
 }
 
 export function collectCapabilityOperations(

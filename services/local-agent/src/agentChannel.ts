@@ -177,6 +177,7 @@ export function buildLocalChatAgentInput(params: {
   context: AgentContext;
   userMessage: string;
   llmConfig?: AgentLlmConfig;
+  /** Deprecated direct tools fallback. New local tools should be exposed through toolkits. */
   tools?: StructuredTool[];
   toolkits?: AgentToolkit[];
   threadId?: string;

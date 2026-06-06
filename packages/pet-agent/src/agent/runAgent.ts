@@ -11,10 +11,15 @@ export type AgentInvokeInput = {
   actor?: AgentActor;
   threadId?: string;
   capabilities?: AgentCapability[];
+  /**
+   * @deprecated Migration fallback for host-provided direct tools. New code
+   * should pass AgentToolkit definitions through toolkits so tools, operation
+   * metadata, and review policy stay under one owner.
+   */
   tools?: StructuredTool[];
   /**
    * @deprecated Migration fallback for host-provided direct tools. New code
-   * should pass toolkits instead.
+   * should expose operation metadata through toolkits instead.
    */
   toolOperations?: ToolOperationMetadataMap;
   toolkits?: AgentToolkit[];

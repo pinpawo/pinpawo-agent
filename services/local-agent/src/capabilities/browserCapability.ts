@@ -2,7 +2,7 @@ import type { AgentCapability, AgentToolkit, CapabilityAvailability } from '@pin
 import { loadStoredConfig } from '../storage';
 import { detectBrowserStatus } from '../plugins/browserSession';
 import { browserTools } from '../plugins/browserTools';
-import { browserToolOperations } from '../plugins/browserToolOperations';
+import { browserToolkitOperationMetadata } from '../plugins/browserToolOperations';
 
 const BROWSER_TOOLKIT_NAME = 'browser';
 
@@ -52,7 +52,7 @@ export function createBrowserToolkit(): AgentToolkit {
     },
     tools: browserTools,
     instructions: browserToolkitInstructions,
-    operations: browserToolOperations,
+    operations: browserToolkitOperationMetadata,
   };
 }
 

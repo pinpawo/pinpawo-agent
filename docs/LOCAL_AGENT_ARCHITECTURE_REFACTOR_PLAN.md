@@ -411,16 +411,16 @@ type LocalAgentStudioEvent = {
 operation metadata 由 toolkit / capability / host-provided tools 暴露。
 
 ```ts
-type OperationMetadata = {
+type ToolOperationMetadata = {
   kind: string;
   title?: string;
   titleKey?: string;
-  summarizeInput?: (input: unknown) => OperationSummary | null;
-  summarizeOutput?: (output: unknown) => OperationSummary | null;
-  summarizeError?: (error: unknown) => OperationSummary | null;
+  summarizeInput?: (input: unknown) => ToolOperationSummary | null;
+  summarizeOutput?: (output: unknown) => ToolOperationSummary | null;
+  summarizeError?: (error: unknown) => ToolOperationSummary | null;
 };
 
-type OperationSummary = {
+type ToolOperationSummary = {
   target?: string;
   summary?: string;
   details?: Record<string, unknown>;
@@ -429,6 +429,8 @@ type OperationSummary = {
 
 当前实现边界：
 
+- public contract 使用中性的 `ToolOperationMetadata` / `ToolOperationMetadataMap`；`ToolkitOperationMetadata` 只保留为兼容别名。
+- 新的静态 toolkit/toolset 定义优先使用 `defineToolkit()` / `defineToolset()`，由 TypeScript 约束 `operations` / `policy.toolReview` 的 key 必须来自对应 tools。
 - `AgentToolkit.operations` 描述 toolkit tools 的展示语义。
 - `CapabilityRuntime.operations` 描述 capability runtime 自带 tools 的展示语义。
 - `AgentInvokeInput.toolOperations` 描述 host 直接注入的 shared/global tools 的展示语义。

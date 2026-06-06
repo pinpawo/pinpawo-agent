@@ -131,7 +131,7 @@ function browserSessionInputSummary(input: unknown): ToolkitOperationSummary | n
     : null;
 }
 
-export const browserToolOperations: Record<string, ToolkitOperationMetadata> = {
+export const browserToolkitOperationMetadata: Record<string, ToolkitOperationMetadata> = {
   browser_open: {
     kind: 'browser.open',
     title: '打开网页',

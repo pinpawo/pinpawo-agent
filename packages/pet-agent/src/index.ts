@@ -38,15 +38,24 @@ export type {
 } from './types/subagent';
 
 export type {
+  AgentToolset,
   AgentToolkit,
+  NamedStructuredTool,
+  ToolOperationMetadata,
+  ToolOperationMetadataMap,
+  ToolOperationMetadataMapFor,
+  ToolOperationSummary,
   ToolkitContext,
   ToolkitOperationMetadata,
   ToolkitOperationSummary,
+  ToolkitToolName,
   ToolkitPolicy,
   ToolkitResource,
   ToolkitToolReviewContext,
   ToolkitToolReviewPolicy,
+  ToolkitToolReviewPolicyMapFor,
 } from './types/toolkit';
+export { defineToolkit, defineToolset } from './types/toolkit';
 
 export {
   buildOrchestratorTurnInput,

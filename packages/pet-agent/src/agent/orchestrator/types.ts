@@ -5,7 +5,7 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
-import type { AgentToolkit, ToolkitOperationMetadata } from '../../types/toolkit';
+import type { AgentToolkit, ToolOperationMetadataMap } from '../../types/toolkit';
 import type { OrchestrationDecision } from './schemas';
 
 export type MessageLane = 'general' | `capability:${string}`;
@@ -75,7 +75,7 @@ export type OrchestratorInvokeOptions = {
   actor?: AgentActor;
   capabilities?: AgentCapability[];
   tools?: StructuredTool[];
-  toolOperations?: Record<string, ToolkitOperationMetadata>;
+  toolOperations?: ToolOperationMetadataMap;
   toolkits?: AgentToolkit[];
   maxIterations?: number;
   execution?: AgentExecution;

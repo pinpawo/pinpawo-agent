@@ -5,7 +5,7 @@ import { interrupt } from '@langchain/langgraph';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { CapabilityRuntime } from '../../types/capability';
 import type { AgentExecution } from '../../types/agent';
-import type { AgentToolkit, ToolkitContext, ToolkitOperationMetadata } from '../../types/toolkit';
+import type { AgentToolkit, ToolkitContext, ToolOperationMetadataMap } from '../../types/toolkit';
 import type { SubagentToolOperationMetadata } from '../../types/subagent';
 import type { HumanReviewRequest } from './humanReview';
 import { readFirstHumanReviewDecision } from './humanReview';
@@ -92,7 +92,7 @@ export function collectToolkitOperations(
 }
 
 export function collectRuntimeOperations(
-  runtimeOperations: Record<string, ToolkitOperationMetadata> | undefined,
+  runtimeOperations: ToolOperationMetadataMap | undefined,
 ): Record<string, SubagentToolOperationMetadata> {
   const operations: Record<string, SubagentToolOperationMetadata> = {};
 
@@ -111,7 +111,7 @@ export function collectRuntimeOperations(
 
 export function collectGeneralOperations(
   toolkits: AgentToolkit[],
-  runtimeOperations: Record<string, ToolkitOperationMetadata> | undefined,
+  runtimeOperations: ToolOperationMetadataMap | undefined,
 ): Record<string, SubagentToolOperationMetadata> {
   return {
     ...collectToolkitOperations(toolkits),

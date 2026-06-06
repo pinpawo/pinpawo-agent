@@ -3,7 +3,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { ZodType } from 'zod';
 import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { SubagentInput, SubagentResult } from './subagent';
-import type { ToolkitOperationMetadata } from './toolkit';
+import type { ToolOperationMetadataMap } from './toolkit';
 
 export type CapabilityContext = {
   models: AgentModels;
@@ -27,7 +27,7 @@ export type CapabilityRuntime = {
   uses?: string[];
   tools?: StructuredTool[];
   instructions?: string[] | ((ctx: CapabilityInstructionContext) => string[] | Promise<string[]>);
-  operations?: Record<string, ToolkitOperationMetadata>;
+  operations?: ToolOperationMetadataMap;
   middleware?: CapabilityMiddleware;
   readResult?: (messages: BaseMessage[]) => unknown | null;
 };

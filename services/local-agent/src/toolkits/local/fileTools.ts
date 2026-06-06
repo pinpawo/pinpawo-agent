@@ -16,7 +16,7 @@ import {
   readRecord,
   readString,
   sourceDestinationInputSummary,
-} from '../../plugins/operationMetadata';
+} from '../operationMetadata';
 import { resolveUserPath } from './pathUtils';
 
 const capabilityManifestSchema = z.object({
@@ -651,7 +651,7 @@ export const listDirTool = tool(
   },
 );
 
-export const fileToolOperations: Record<string, ToolkitOperationMetadata> = {
+export const fileOperationMetadata: Record<string, ToolkitOperationMetadata> = {
   read_file: {
     title: '读文件',
     summarizeInput: pathInputSummary,

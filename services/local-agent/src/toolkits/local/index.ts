@@ -19,12 +19,12 @@ import {
   validateStructuredFileTool,
   viewFileChunkTool,
   writeFileTool,
-  fileToolOperations,
+  fileOperationMetadata,
 } from './fileTools';
-import { downloadFileTool, httpFetchTool, networkToolOperations } from './networkTools';
-import { gitCommitReviewPolicy, gitTools, gitToolOperations } from './gitTools';
-import { globSearchTool, grepSearchTool, searchToolOperations } from './searchTools';
-import { runShellTool, shellReviewPolicy, shellToolOperations } from './shellTools';
+import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
+import { gitCommitReviewPolicy, gitTools, gitOperationMetadata } from './gitTools';
+import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
+import { runShellTool, shellReviewPolicy, shellOperationMetadata } from './shellTools';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
@@ -67,10 +67,10 @@ const bashToolkitInstructions = [
 ];
 
 const bashToolkitOperations = {
-  ...fileToolOperations,
-  ...searchToolOperations,
-  ...networkToolOperations,
-  ...shellToolOperations,
+  ...fileOperationMetadata,
+  ...searchOperationMetadata,
+  ...networkOperationMetadata,
+  ...shellOperationMetadata,
 };
 
 const gitToolkitInstructions = [
@@ -101,7 +101,7 @@ export function createGitToolkit(): AgentToolkit {
     description: '本地 git 仓库查看、暂存和本地提交工具。',
     tools: gitTools,
     instructions: gitToolkitInstructions,
-    operations: gitToolOperations,
+    operations: gitOperationMetadata,
     policy: {
       toolReview: {
         git_commit: gitCommitReviewPolicy,

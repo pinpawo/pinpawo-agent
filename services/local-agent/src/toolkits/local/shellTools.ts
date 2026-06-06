@@ -10,7 +10,7 @@ import {
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { isShellCommandAuthorized } from '../../sessionAuthorizations';
 import { config } from '../../config';
-import { readRecord, readString } from '../../plugins/operationMetadata';
+import { readRecord, readString } from '../operationMetadata';
 import { resolveUserPath } from './pathUtils';
 
 export function getBlockedShellReason(command: string) {
@@ -223,7 +223,7 @@ export const shellReviewPolicy: ToolkitToolReviewPolicy = {
   ),
 };
 
-export const shellToolOperations: Record<string, ToolkitOperationMetadata> = {
+export const shellOperationMetadata: Record<string, ToolkitOperationMetadata> = {
   run_shell: {
     title: '执行命令',
     summarizeInput: (input) => {

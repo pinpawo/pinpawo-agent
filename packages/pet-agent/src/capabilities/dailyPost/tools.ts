@@ -141,7 +141,7 @@ const dailyPostResultLabels: Record<string, string> = {
   failed: '动态处理失败',
 };
 
-const dailyPostToolOperations = {
+const dailyPostOperationMetadata = {
   finalize_post: {
     title: '保存动态',
     summarizeInput: finalizePostInputSummary,
@@ -306,6 +306,6 @@ export function createDailyPostToolset(options: DailyPostToolOptions): AgentTool
     name: 'daily_post',
     description: '生成、保存或跳过 daily post 的 capability-private toolset。',
     tools,
-    operations: dailyPostToolOperations,
+    operations: dailyPostOperationMetadata,
   });
 }

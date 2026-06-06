@@ -10,7 +10,7 @@ import {
 import { z } from 'zod';
 import { config } from '../../config';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
-import { readBoolean, readRecord, readString } from '../../plugins/operationMetadata';
+import { readBoolean, readRecord, readString } from '../operationMetadata';
 import { resolveUserPath } from './pathUtils';
 
 const MAX_GIT_OUTPUT_CHARS = 12_000;
@@ -264,7 +264,7 @@ export const gitTools = [
   gitCommitTool as NamedStructuredTool<'git_commit'>,
 ] as const;
 
-export const gitToolOperations = {
+export const gitOperationMetadata = {
   git_status: {
     title: '查看 git 状态',
     summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),

@@ -110,7 +110,7 @@ const capabilityCreatorResultLabels: Record<string, string> = {
   failed: 'capability 处理失败',
 };
 
-const capabilityCreatorToolOperations = {
+const capabilityCreatorOperationMetadata = {
   scaffold_capability_plugin: {
     title: '生成 capability 插件',
     summarizeInput: scaffoldInputSummary,
@@ -619,6 +619,6 @@ export function createCapabilityCreatorToolset(): AgentToolset {
     name: 'capability_creator',
     description: '生成、验证和检查 capability 插件模板的 capability-private toolset。',
     tools,
-    operations: capabilityCreatorToolOperations,
+    operations: capabilityCreatorOperationMetadata,
   });
 }

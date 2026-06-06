@@ -5,7 +5,7 @@ import {
   readNumber,
   readRecord,
   readString,
-} from '../../plugins/operationMetadata';
+} from '../operationMetadata';
 
 function browserSnapshotSummary(output: unknown): ToolkitOperationSummary | null {
   const record = readJsonRecord(output);
@@ -131,7 +131,7 @@ function browserSessionInputSummary(input: unknown): ToolkitOperationSummary | n
     : null;
 }
 
-export const browserToolkitOperationMetadata: Record<string, ToolkitOperationMetadata> = {
+export const browserOperationMetadata: Record<string, ToolkitOperationMetadata> = {
   browser_open: {
     title: '打开网页',
     summarizeInput: browserOpenInputSummary,

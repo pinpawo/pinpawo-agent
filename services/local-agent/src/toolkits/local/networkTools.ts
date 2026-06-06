@@ -8,7 +8,7 @@ import {
   okOutputPathSummary,
   readRecord,
   readString,
-} from '../../plugins/operationMetadata';
+} from '../operationMetadata';
 
 const DEFAULT_DOWNLOADS_DIR = resolve(homedir(), 'Downloads');
 const MAX_FETCH_BYTES = 100_000;
@@ -190,7 +190,7 @@ export const downloadFileTool = tool(
   },
 );
 
-export const networkToolOperations: Record<string, ToolkitOperationMetadata> = {
+export const networkOperationMetadata: Record<string, ToolkitOperationMetadata> = {
   http_fetch: {
     title: '请求网页',
     summarizeInput: (input) => {

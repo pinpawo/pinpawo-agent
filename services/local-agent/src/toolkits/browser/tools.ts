@@ -1,7 +1,7 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { browserSession } from './browserSession';
+import { browserSession } from './session';
 
 const browserOpenTool = tool(
   async ({ url, headless }: { url: string; headless?: boolean }) => {

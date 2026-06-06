@@ -5,7 +5,7 @@ import {
   readNumber,
   readRecord,
   readString,
-} from './operationMetadata';
+} from '../../plugins/operationMetadata';
 
 function browserSnapshotSummary(output: unknown): ToolkitOperationSummary | null {
   const record = readJsonRecord(output);

@@ -1,4 +1,4 @@
-import { detectBrowserEnvironment } from '../toolkits/browser/session';
+import { detectBrowserEnvironment } from '../toolkits/browser';
 
 export async function runDetect() {
   const browser = await detectBrowserEnvironment().catch(() => ({

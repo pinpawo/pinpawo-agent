@@ -2,7 +2,7 @@ import type { AgentCapability } from '@pinpawo/pet-agent';
 import {
   BROWSER_TOOLKIT_NAME,
   checkBrowserAvailability,
-} from '../toolkits/browser/toolkit';
+} from '../toolkits/browser';
 
 export function createBrowserCapability(): AgentCapability {
   return {

@@ -9,11 +9,10 @@ import {
 export function createOperationRegistryForAgentSetup(
   setup: Pick<AgentChannelSetup, 'input'>,
 ): OperationRegistry {
-  const legacyToolOperations = setup.input.legacyToolOperations ?? setup.input.toolOperations;
   return createOperationRegistryFromSources({
     toolkits: setup.input.toolkits ?? [],
-    legacyRuntimeOperations: hasToolOperationMetadata(legacyToolOperations)
-      ? legacyToolOperations
+    legacyRuntimeOperations: hasToolOperationMetadata(setup.input.legacyToolOperations)
+      ? setup.input.legacyToolOperations
       : undefined,
   });
 }

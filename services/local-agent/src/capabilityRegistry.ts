@@ -1,7 +1,6 @@
 /**
  * Capability metadata used by the UI (macOS app, settings panel) and
- * the capability loader at runtime.  Keep this in sync with the actual
- * capability implementations in ./capabilities/.
+ * the local-agent capability loader/runtime.
  */
 export type CapabilityMeta = {
   /** Unique stable identifier — matches AgentCapability.name */
@@ -22,11 +21,6 @@ export type CapabilityMeta = {
   comingSoon?: boolean;
 };
 
-/**
- * Registry of all built-in capabilities.
- * This list is serialised to `dist/capability-manifest.json` at build time
- * and read by the macOS app to populate the Capabilities settings pane.
- */
 export const BUILT_IN_CAPABILITY_REGISTRY: CapabilityMeta[] = [
   {
     id: 'daily_post',

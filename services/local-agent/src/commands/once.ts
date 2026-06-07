@@ -7,10 +7,10 @@
 import { loadAgentContext, sendHeartbeat } from '../contextLoader';
 import { runMediaCrawler, ingestCrawlerResults, readCrawlerResults, generateCrawlKeywords } from '../crawler';
 import {
+  dailyPostResultSchema,
   type DailyPostPayload,
   type DailyPostResult,
-  dailyPostResultSchema,
-} from '@pinpawo/pet-agent';
+} from '../capabilities/dailyPost';
 import { config } from '../config';
 import { loadPlugins, collectPluginHooks } from '../pluginLoader';
 import { buildLocalLlmConfig } from '../llmConfig';

@@ -1,9 +1,9 @@
+import { type AgentToolkit } from '@pinpawo/pet-agent';
 import {
   dailyPostResultSchema,
-  type AgentToolkit,
   type DailyPostPayload,
   type DailyPostResult,
-} from '@pinpawo/pet-agent';
+} from './capabilities/dailyPost';
 import { buildLocalScheduledAgentInput, type AgentChannelSetup } from './agentChannel';
 import type { AgentLlmConfig } from './agentConfig';
 import type { LocalAgentGraphService } from './agentGraphService';

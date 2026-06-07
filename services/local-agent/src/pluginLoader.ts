@@ -1,7 +1,8 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
-import type { AgentToolkit, DailyPostPayload } from '@pinpawo/pet-agent';
+import type { AgentToolkit } from '@pinpawo/pet-agent';
+import type { DailyPostPayload } from './capabilities/dailyPost';
 
 export type LocalAgentPluginHooks = {
   beforeCrawl?: () => Promise<void>;

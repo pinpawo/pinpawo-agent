@@ -1,10 +1,21 @@
-import type { AgentCapability } from '../../types/capability';
-import type { AgentActor } from '../../types/agent';
-import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from '../../types/domain';
-import { readLatestToolArtifact } from '../../agent/orchestrator/subagentHandoff';
+import {
+  readLatestToolArtifact,
+  type AgentActor,
+  type AgentCapability,
+} from '@pinpawo/pet-agent';
+import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from './types';
 import { dailyPostInstructions } from './instructions';
 import { dailyPostResultSchema } from './schemas';
 import { createDailyPostToolset } from './tools';
+
+export { dailyPostResultSchema } from './schemas';
+export { buildDailyPostTaskMessage } from './task';
+export type {
+  DailyImagePlan,
+  DailyPostPayload,
+  RecentDailyPost,
+  TrendPromptItem,
+} from './types';
 
 export type DailyPostResult = {
   status: 'created' | 'skipped' | 'failed';

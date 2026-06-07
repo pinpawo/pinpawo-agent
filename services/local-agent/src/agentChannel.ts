@@ -1,20 +1,22 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
-  buildDailyPostTaskMessage,
-  createCapabilityCreatorCapability,
-  createPetProfileToolkit,
-  createDailyPostCapability,
   type AgentCapability,
   type AgentActor,
   type AgentInvokeInput,
   type AgentToolkit,
+  type OrchestratorConfig,
+} from '@pinpawo/pet-agent';
+import { createCapabilityCreatorCapability } from './capabilities/capabilityCreator';
+import {
+  buildDailyPostTaskMessage,
+  createDailyPostCapability,
   type DailyImagePlan,
   type DailyPostCapabilityOptions,
   type DailyPostPayload,
-  type OrchestratorConfig,
   type TrendPromptItem,
-} from '@pinpawo/pet-agent';
+} from './capabilities/dailyPost';
+import { createPetProfileToolkit } from './toolkits/petProfile';
 import { buildLocalAgentModels } from './agentModels';
 import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';

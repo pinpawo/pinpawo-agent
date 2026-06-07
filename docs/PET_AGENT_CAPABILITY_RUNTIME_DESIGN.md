@@ -351,6 +351,7 @@ LLM 作为数据中介，通过 message history 自然传递 capability 之间�
 capability 的 tool 需要的外部数据（trendItems, recentDaily 等），通过 capability factory options 注入，由 channel 在构造 capability 时提供：
 
 ```typescript
+// implemented by the host layer, for example services/local-agent
 createDailyPostCapability({
   trendItems,
   recentDaily,

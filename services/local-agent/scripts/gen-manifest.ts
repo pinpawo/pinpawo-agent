@@ -9,7 +9,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUILT_IN_CAPABILITY_REGISTRY } from '@pinpawo/pet-agent';
+import { BUILT_IN_CAPABILITY_REGISTRY } from '../src/capabilityRegistry';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outDir = resolve(__dirname, '../dist');

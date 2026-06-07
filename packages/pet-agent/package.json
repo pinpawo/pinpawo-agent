@@ -8,7 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx/esm --test src/agent/orchestrator/*.test.ts src/agent/studio/*.test.ts src/subagent/*.test.ts src/tools/*.test.ts",
+    "test": "node --import tsx/esm --test src/agent/orchestrator/*.test.ts src/agent/studio/*.test.ts src/subagent/*.test.ts src/types/toolkitContract.test.ts",
     "eval:dataset": "node --env-file=.env --import tsx/esm evals/dataset.ts",
     "eval:route": "node --env-file=.env --import tsx/esm evals/orchestrator-route.eval.ts",
     "eval:flow:mock-subagent": "node --env-file=.env --import tsx/esm evals/orchestrator-flow.mock-subagent.eval.ts",

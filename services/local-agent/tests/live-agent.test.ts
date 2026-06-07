@@ -5,18 +5,20 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { HumanMessage } from '@langchain/core/messages';
 import {
-  createPetProfileTool,
-  createDailyPostCapability,
   createOrchestratorGraph,
-  dailyPostResultSchema,
   type AgentActor,
-  type DailyPostPayload,
   type OrchestratorStateType,
-  type TrendPromptItem,
 } from '@pinpawo/pet-agent';
+import {
+  createDailyPostCapability,
+  dailyPostResultSchema,
+  type DailyPostPayload,
+  type TrendPromptItem,
+} from '../src/capabilities/dailyPost';
 import { buildLocalAgentModels } from '../src/agentModels';
 import type { AgentLlmConfig } from '../src/agentConfig';
 import { loadStoredConfig } from '../src/storage';
+import { createPetProfileTool } from '../src/toolkits/petProfile';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = resolve(__dirname, '..');

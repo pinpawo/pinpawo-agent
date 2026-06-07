@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import OpenAI from 'openai';
 import { config } from './config';
 import { postTrends } from './apiClient';
-import type { TrendPromptItem } from '@pinpawo/pet-agent';
+import type { TrendPromptItem } from './capabilities/dailyPost';
 
 export type CrawlerLogFn = (line: string) => void;
 

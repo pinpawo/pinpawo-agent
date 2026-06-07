@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, cpSync, mkdtempSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
@@ -42,6 +42,7 @@ function formatStat(path: string) {
 }
 
 const MAX_FILE_DIFF_PREVIEW_CHARS = 6_000;
+const TEXT_FILE_SAMPLE_BYTES = 8_192;
 
 function truncateForOperationDetails(content: string) {
   if (content.length <= MAX_FILE_DIFF_PREVIEW_CHARS) {
@@ -56,6 +57,42 @@ function readFileContentPreview(filePath: string) {
   } catch {
     return undefined;
   }
+}
+
+function readFileSample(filePath: string) {
+  const fd = openSync(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(TEXT_FILE_SAMPLE_BYTES);
+    const bytesRead = readSync(fd, buffer, 0, TEXT_FILE_SAMPLE_BYTES, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function countOccurrences(value: string, pattern: RegExp) {
+  return value.match(pattern)?.length ?? 0;
+}
+
+function looksLikeUtf8Text(buffer: Buffer) {
+  if (buffer.length === 0) return true;
+  if (buffer.includes(0)) return false;
+
+  const decoded = buffer.toString('utf-8');
+  const replacementChars = countOccurrences(decoded, /\uFFFD/g);
+  if (replacementChars > Math.max(1, decoded.length * 0.01)) {
+    return false;
+  }
+
+  const controlChars = countOccurrences(decoded, /[\x00-\x08\x0B\x0C\x0E-\x1F]/g);
+  return controlChars <= Math.max(2, decoded.length * 0.02);
+}
+
+function readUtf8TextFile(filePath: string) {
+  if (!looksLikeUtf8Text(readFileSample(filePath))) {
+    throw new Error('not a UTF-8 text file; use read_file for document analysis');
+  }
+  return readFileSync(filePath, 'utf-8');
 }
 
 function mergeOperationOutputSummary(
@@ -86,15 +123,34 @@ function resolveCopyTarget(sourcePath: string, destinationPath: string) {
 export const readFileTool = tool(
   async ({ path }: { path: string }) => {
     try {
-      const content = readFileSync(resolveUserPath(path), 'utf-8');
-      return content.slice(0, 8000);
+      const filePath = resolveUserPath(path);
+      const stat = statSync(filePath);
+      if (!stat.isFile()) {
+        return `Error: read_file expects a file path, got ${stat.isDirectory() ? 'directory' : 'non-file'}: ${filePath}`;
+      }
+
+      const extension = extname(filePath).toLowerCase();
+      if (looksLikeUtf8Text(readFileSample(filePath))) {
+        return `Error: ${filePath} is a readable UTF-8 text file; use view_file_chunk for line-numbered text reading.`;
+      }
+
+      return JSON.stringify({
+        ok: false,
+        path: filePath,
+        type: 'document_or_binary',
+        extension: extension || null,
+        size: stat.size,
+        readableAsText: false,
+        reason: 'No document reader is registered for this non-text file.',
+        recommendation: 'Install or enable a document/image reader plugin or toolset that can handle this file type.',
+      });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
   },
   {
     name: 'read_file',
-    description: '读取本地文件内容。path 支持绝对路径或相对路径（相对于当前工作目录）。',
+    description: '分析非 UTF-8 文本的本地文档或二进制文件。普通代码、Markdown、JSON、配置等可读文本请优先使用 view_file_chunk；只有 view_file_chunk 判断不是可读文本，或已知目标是 PDF、Word、表格、图片等非文本文件时才使用。',
     schema: z.object({ path: z.string().describe('文件路径') }),
   },
 );
@@ -107,7 +163,7 @@ export const viewFileChunkTool = tool(
   }) => {
     try {
       const filePath = resolveUserPath(path);
-      const content = readFileSync(filePath, 'utf-8');
+      const content = readUtf8TextFile(filePath);
       const lines = content.split('\n');
       const start = Math.max(1, startLine ?? 1);
       const end = Math.min(lines.length, endLine ?? Math.min(start + 199, lines.length));
@@ -653,7 +709,7 @@ export const listDirTool = tool(
 
 export const fileOperationMetadata: Record<string, ToolkitOperationMetadata> = {
   read_file: {
-    title: '读文件',
+    title: '析文档',
     summarizeInput: pathInputSummary,
   },
   view_file_chunk: {

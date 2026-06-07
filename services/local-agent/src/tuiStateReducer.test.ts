@@ -364,8 +364,9 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   });
   assert.equal(state.connection.message, '等待你的决定(pet-a)');
 
+  const activeRunBefore = selectFocusedActiveRun(state);
   state = tuiStateReducer(state, {
-    type: 'review.response.start',
+    type: 'review.response.resume',
     requestId: 'req-1',
     message: '批准',
     now: 1300,
@@ -375,6 +376,9 @@ test('tuiStateReducer handles human review and interrupt state', () => {
 
   assert.equal(selectFocusedBusy(state), true);
   assert.equal(selectFocusedActiveRun(state)?.phase, 'thinking');
+  // resume preserves the same run identity (same startedAt, same requestId)
+  assert.equal(selectFocusedActiveRun(state)?.requestId, 'req-1');
+  assert.equal(selectFocusedActiveRun(state)?.startedAt, activeRunBefore?.startedAt);
   assert.equal(selectFocusedPendingApproval(state), null);
 
   state = tuiStateReducer(state, {

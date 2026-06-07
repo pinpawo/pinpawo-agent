@@ -16,12 +16,21 @@ test('decodeStudioReviewDecision prefers structured resume decisions', () => {
 });
 
 test('decodeStudioReviewDecision maps local text conventions', () => {
-  assert.deepEqual(decodeStudioReviewDecision({ message: '/allow rm -rf nope' }), { type: 'approve' });
   assert.deepEqual(decodeStudioReviewDecision({ message: '补充说明' }), {
     type: 'respond',
     message: '补充说明',
   });
   assert.deepEqual(decodeStudioReviewDecision({ message: '' }), { type: 'reject' });
+});
+
+test('decodeStudioReviewDecision treats structured approve resume as approve, not the legacy /allow text', () => {
+  assert.deepEqual(
+    decodeStudioReviewDecision({
+      message: '批准执行',
+      resume: { decisions: [{ type: 'approve' }] },
+    }),
+    { type: 'approve' },
+  );
 });
 
 test('LocalServerStudioReviewRouter routes response only when a review is pending', async () => {

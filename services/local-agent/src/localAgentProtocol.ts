@@ -32,11 +32,32 @@ export type StudioRequestMessage = {
   conversationId?: string;
 };
 
+/**
+ * Extra typed fields a client can attach to a human_review_response so it
+ * doesn't have to smuggle decisions through the free-text `message` channel.
+ */
+export type ReviewResumeExtras = {
+  /**
+   * Session-scoped shell authorization request. When set, the local server
+   * registers the pattern via authorizeShellPattern(threadId, pattern) and
+   * forwards an `approve` decision to the graph. When `pattern` is omitted
+   * the pending shell command is used.
+   */
+  authorizeShellPattern?: { pattern?: string };
+  /**
+   * sessionId that originated this human_review. When set, the server must
+   * resume on the originating session's thread; mismatches are rejected so
+   * the resume cannot land on the wrong checkpoint.
+   */
+  originSessionId?: string;
+};
+
 export type HumanReviewResponseMessage = {
   type: 'human_review_response';
   requestId: string;
   message: string;
   resume?: unknown;
+  extras?: ReviewResumeExtras;
 };
 
 export type LocalAgentClientMessage =
@@ -117,6 +138,23 @@ function readStringArray(record: Record<string, unknown>, key: string) {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
     ? value
     : null;
+}
+
+function readReviewResumeExtras(record: Record<string, unknown>): ReviewResumeExtras | null {
+  const extras = readRecord(record, 'extras');
+  if (!extras) return null;
+  const result: ReviewResumeExtras = {};
+  const authorize = readRecord(extras, 'authorizeShellPattern');
+  if (authorize) {
+    const pattern = readOptionalString(authorize, 'pattern');
+    result.authorizeShellPattern = pattern !== undefined ? { pattern } : {};
+  } else if (extras.authorizeShellPattern === true) {
+    // shorthand: { authorizeShellPattern: true } → authorize the pending command
+    result.authorizeShellPattern = {};
+  }
+  const originSessionId = readOptionalString(extras, 'originSessionId');
+  if (originSessionId) result.originSessionId = originSessionId;
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent | null {
@@ -252,11 +290,13 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
     const requestId = readString(record, 'requestId');
     const message = readString(record, 'message');
     if (!requestId || message == null) return null;
+    const extras = readReviewResumeExtras(record);
     return {
       type,
       requestId,
       message,
       ...(record.resume !== undefined ? { resume: record.resume } : {}),
+      ...(extras ? { extras } : {}),
     };
   }
   if (type === 'interrupt_request') {

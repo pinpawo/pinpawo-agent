@@ -48,6 +48,31 @@ test('parseLocalAgentClientMessage accepts explicit human review responses', () 
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
 });
 
+test('parseLocalAgentClientMessage carries typed review extras (authorizeShellPattern, originSessionId)', () => {
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      message: '本次会话授权：git status',
+      resume: { decisions: [{ type: 'approve' }] },
+      extras: {
+        authorizeShellPattern: { pattern: 'git status' },
+        originSessionId: 'sess-1',
+      },
+    })),
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      message: '本次会话授权：git status',
+      resume: { decisions: [{ type: 'approve' }] },
+      extras: {
+        authorizeShellPattern: { pattern: 'git status' },
+        originSessionId: 'sess-1',
+      },
+    },
+  );
+});
+
 test('parseLocalAgentServerMessage rejects legacy server messages by default', () => {
   assert.equal(
     parseLocalAgentServerMessage(JSON.stringify({

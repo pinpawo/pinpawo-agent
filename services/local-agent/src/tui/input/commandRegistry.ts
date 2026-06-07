@@ -85,9 +85,9 @@ const COMMANDS: TuiCommandDefinition[] = [
   },
   {
     name: 'allow',
-    usage: '/allow',
-    description: '提交当前 human review 授权',
-    helpText: '/allow',
+    usage: '/allow [pattern]',
+    description: '批准当前 human review，并在本会话授权该 shell 模式（默认沿用待审命令）',
+    helpText: '/allow [pattern]',
   },
 ];
 

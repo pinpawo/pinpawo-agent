@@ -46,7 +46,9 @@ export function buildApprovalOptions(approval: PendingApproval): ApprovalOption[
     if ((actionName === 'shell' || actionName === 'run_shell') && command) {
       options.push({
         label: TUI_TEXT.approvalAllowSession(shorten(command, 40)),
-        message: '/allow',
+        message: TUI_TEXT.approvalAllowSession(shorten(command, 40)),
+        resume: { decisions: [{ type: 'approve' }] },
+        extras: { authorizeShellPattern: { pattern: command } },
       });
     }
     if (allowedDecisions.includes('reject')) {

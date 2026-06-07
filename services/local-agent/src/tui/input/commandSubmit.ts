@@ -119,9 +119,17 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
     }
 
     if (parsed.name === 'allow') {
+      // `/allow [pattern]` is the typed shortcut for the same authorization
+      // option the approval panel exposes — it builds an approve decision
+      // and asks the server to remember the pattern for this session.
+      const requestedPattern = parsed.args.trim();
       options.runtimeController.submitReviewResponse({
         label: parsed.raw,
         message: parsed.raw,
+        resume: { decisions: [{ type: 'approve' }] },
+        extras: {
+          authorizeShellPattern: requestedPattern ? { pattern: requestedPattern } : {},
+        },
       });
       return;
     }

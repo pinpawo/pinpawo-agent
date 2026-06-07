@@ -7,6 +7,7 @@ import {
   sendLocalAgentEvent,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
+  type ReviewResumeExtras,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
 import {
@@ -50,7 +51,12 @@ export class LocalServerChatHandler {
     this.inflightRequests = options.inflightRequests;
   }
 
-  async handleChatRequest(ws: WebSocket, msg: ChatRequestMessage, deps: LocalServerDeps) {
+  async handleChatRequest(
+    ws: WebSocket,
+    msg: ChatRequestMessage,
+    deps: LocalServerDeps,
+    reviewExtras?: ReviewResumeExtras,
+  ) {
     const { requestId, message } = msg;
 
     const threadId = this.tuiSessions.getChatThreadId(deps.actorId);
@@ -106,14 +112,17 @@ export class LocalServerChatHandler {
           this.sendStreamToolOperationEvent(ws, inflight, event);
         },
         onPendingInterrupt: (pendingInterrupt) => {
-          const pendingShellCommand = readShellReviewCommand(pendingInterrupt);
-          if (!pendingShellCommand || !message.trim().startsWith('/allow')) {
+          const authorizeRequest = reviewExtras?.authorizeShellPattern;
+          if (!authorizeRequest) {
             return;
           }
-          const requestedPattern = message.trim().slice('/allow'.length).trim();
+          const pendingShellCommand = readShellReviewCommand(pendingInterrupt);
+          if (!pendingShellCommand) {
+            return;
+          }
           const authorizedPattern = authorizeShellPattern(
             threadId,
-            requestedPattern || pendingShellCommand,
+            authorizeRequest.pattern?.trim() || pendingShellCommand,
           );
           if (authorizedPattern) {
             sendLocalAgentEvent(ws, {
@@ -184,12 +193,33 @@ export class LocalServerChatHandler {
     msg: HumanReviewResponseMessage,
     deps: LocalServerDeps,
   ) {
+    // The HITL resume always lands on the originating session's checkpoint.
+    // If a client tells us where the review came from, refuse to resume on a
+    // different session/thread — otherwise the LangGraph resume would attempt
+    // to apply the decision to the wrong checkpoint.
+    const originSessionId = msg.extras?.originSessionId;
+    if (originSessionId) {
+      const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
+      if (activeSessionId && activeSessionId !== originSessionId) {
+        console.warn(
+          `[local-server] human_review_response rejected: originSessionId=${originSessionId} `
+          + `does not match active session=${activeSessionId}`,
+        );
+        sendLocalAgentEvent(ws, {
+          type: 'error',
+          requestId: msg.requestId,
+          message: '请回到发起该 review 的会话再应答。',
+        });
+        return;
+      }
+    }
+
     await this.handleChatRequest(ws, {
       type: 'chat_request',
       requestId: msg.requestId,
       message: msg.message,
       ...(msg.resume !== undefined ? { resume: msg.resume } : {}),
-    }, deps);
+    }, deps, msg.extras);
   }
 
   private sendStreamToolOperationEvent(

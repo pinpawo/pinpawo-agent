@@ -150,7 +150,12 @@ export type TuiAction =
       statusMessage: string;
     }
   | {
-      type: 'review.response.start';
+      // The user answered a HITL review. Server resumes the same LangGraph
+      // run from its checkpoint, so this is modeled as resuming the existing
+      // activeRun (phase: 'waiting_human' → 'thinking'), not starting a new
+      // run. requestId stays the same as the human_review.requested it
+      // answers.
+      type: 'review.response.resume';
       requestId: RunId;
       message: string;
       now: number;

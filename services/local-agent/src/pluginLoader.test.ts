@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { loadPluginsFromDir } from './pluginLoader';
 
-test('loadPluginsFromDir loads plugin toolkits and ignores legacy direct tools', async () => {
+test('loadPluginsFromDir loads plugin toolkits and ignores unsupported tools exports', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-'));
   await fs.writeFile(path.join(root, 'valid-plugin.mjs'), `
 export const tools = [{ name: 'legacy_tool' }];

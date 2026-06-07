@@ -47,7 +47,7 @@ export async function loadPluginsFromDir(pluginsDir: string): Promise<{ toolkits
       plugins.push(plugin as LocalAgentPlugin);
       const toolCount = Array.isArray(mod.tools) ? mod.tools.length : 0;
       const toolkitCount = Array.isArray(mod.toolkits) ? mod.toolkits.length : 0;
-      const ignoredTools = toolCount > 0 ? `, ignored ${toolCount} legacy direct tool${toolCount !== 1 ? 's' : ''}` : '';
+      const ignoredTools = toolCount > 0 ? `, ignored ${toolCount} unsupported tools export${toolCount !== 1 ? 's' : ''}` : '';
       console.log(`[plugins] loaded "${(plugin as LocalAgentPlugin).name}" (${toolkitCount} toolkit${toolkitCount !== 1 ? 's' : ''}${ignoredTools})`);
     } catch (err) {
       console.warn(`[plugins] failed to load ${file}:`, err instanceof Error ? err.message : err);

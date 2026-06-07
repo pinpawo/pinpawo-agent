@@ -125,13 +125,6 @@ export function createSkeletonWikiCurator(): WikiCurator {
   };
 }
 
-/**
- * 兼容旧 API:直接调用 skeleton curator。供未明确注入 curator 的场景使用。
- */
-export async function curateDispatch(input: WikiCurateInput): Promise<WikiCurateResult> {
-  return createSkeletonWikiCurator().curate(input);
-}
-
 /* ─────────────── LLM-driven implementation ─────────────── */
 
 export const DEFAULT_CURATOR_PROMPT = [

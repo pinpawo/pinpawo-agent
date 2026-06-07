@@ -18,8 +18,6 @@
     "start": "tsx src/index.ts",
     "login": "tsx src/index.ts login",
     "actor": "tsx src/index.ts actor",
-    "once": "tsx src/index.ts once",
-    "once:dry": "tsx src/index.ts once --dry-run",
     "tui": "tsx src/index.ts tui",
     "tui:dry": "tsx src/index.ts tui --dry-run",
     "test:live": "node --import tsx --test tests/live-agent.test.ts",

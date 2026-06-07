@@ -34,15 +34,15 @@ const examples = [
   {
     name: 'read-file-and-summarize',
     inputs: {
-      task: '请调用 read_file 读取 README.md，然后用一句话总结文件内容。',
+      task: '请调用 view_file_chunk 读取 README.md，然后用一句话总结文件内容。',
       files: {
         'README.md': '# PinPawo\n\nPinPawo 是一个本地宠物助手项目，包含移动端、后端和本地 agent。',
       },
     },
     outputs: {
       expected_completion_reason: 'natural',
-      expected_tools: ['read_file'],
-      expected_tool_sequence: ['read_file'],
+      expected_tools: ['view_file_chunk'],
+      expected_tool_sequence: ['view_file_chunk'],
       expected_final_terms: ['PinPawo'],
       reason: 'Subagent should actually read the requested file before summarizing.',
     },
@@ -52,7 +52,7 @@ const examples = [
     inputs: {
       task: [
         '请严格按顺序完成：',
-        '1. 调用 read_file 读取 src/demo.ts。',
+        '1. 调用 view_file_chunk 读取 src/demo.ts。',
         '2. 把里面的 var 改成 const，并调用 write_file 写回 src/demo.ts。',
         '3. 调用 shell 运行 npm run lint。',
         '4. 最后用中文汇总修改和 lint 结果。',
@@ -66,8 +66,8 @@ const examples = [
     },
     outputs: {
       expected_completion_reason: 'natural',
-      expected_tools: ['read_file', 'write_file', 'shell'],
-      expected_tool_sequence: ['read_file', 'write_file', 'shell'],
+      expected_tools: ['view_file_chunk', 'write_file', 'shell'],
+      expected_tool_sequence: ['view_file_chunk', 'write_file', 'shell'],
       expected_file_contains: { path: 'src/demo.ts', text: 'const count = 1' },
       expected_final_terms: ['lint'],
       reason: 'Subagent should complete both edit and verification steps before returning.',
@@ -177,14 +177,25 @@ function buildMockTools(inputs: Record<string, unknown>) {
     ? inputs.search_results as Record<string, unknown>
     : {};
 
-  const readFileTool = tool(async ({ path }) => {
-    calls.push({ name: 'read_file', args: { path } });
+  const viewFileChunkTool = tool(async ({ path, startLine, endLine }) => {
+    calls.push({ name: 'view_file_chunk', args: { path, startLine, endLine } });
     const content = files.get(path);
-    return content ?? `Error: file not found: ${path}`;
+    if (!content) return `Error: file not found: ${path}`;
+    const lines = content.split('\n');
+    const start = Math.max(1, startLine ?? 1);
+    const end = Math.min(lines.length, endLine ?? Math.min(start + 199, lines.length));
+    return lines
+      .slice(start - 1, end)
+      .map((line, index) => `${start + index}: ${line}`)
+      .join('\n');
   }, {
-    name: 'read_file',
-    description: '读取指定文件的内容。',
-    schema: z.object({ path: z.string().describe('文件路径') }),
+    name: 'view_file_chunk',
+    description: '按行读取可读文本文件片段。',
+    schema: z.object({
+      path: z.string().describe('文件路径'),
+      startLine: z.number().int().positive().optional().describe('起始行号'),
+      endLine: z.number().int().positive().optional().describe('结束行号'),
+    }),
   });
 
   const writeFileTool = tool(async ({ path, content }) => {
@@ -223,7 +234,7 @@ function buildMockTools(inputs: Record<string, unknown>) {
   });
 
   return {
-    tools: [readFileTool, writeFileTool, shellTool, webSearchTool],
+    tools: [viewFileChunkTool, writeFileTool, shellTool, webSearchTool],
     calls,
     readFile: (path: string) => files.get(path) ?? null,
   };

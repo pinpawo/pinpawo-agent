@@ -29,7 +29,7 @@ test('normalizes LangGraph tool stream events with toolkit operation metadata', 
     operation: {
       id: 'call-1',
       kind: 'bash.read_file',
-      title: '读文件',
+      title: '析文档',
       target: '/tmp/example.md',
       summary: undefined,
       details: undefined,
@@ -168,7 +168,7 @@ test('buildToolOperationEvent uses git toolkit metadata', () => {
 test('createBashToolkit exposes operation metadata with the toolkit definition', () => {
   const toolkit = createBashToolkit();
 
-  assert.equal(toolkit.operations?.read_file?.title, '读文件');
+  assert.equal(toolkit.operations?.read_file?.title, '析文档');
   assert.equal(toolkit.operations?.grep_search?.title, '搜内容');
   assert.equal(toolkit.operations?.run_shell?.title, '执行命令');
   assert.equal(toolkit.operations?.git_status, undefined);

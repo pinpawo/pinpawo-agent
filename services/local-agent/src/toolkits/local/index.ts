@@ -59,7 +59,8 @@ const coreLocalTools: StructuredTool[] = [
 
 const bashToolkitInstructions = [
   '你可以使用本地文件、搜索、下载和 shell 工具完成任务。',
-  '优先使用语义具体的文件工具：read_file、view_file_chunk、list_dir、glob_search、grep_search、update_file、apply_file_patch。',
+  '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；read_file 只用于 PDF、Word、表格、图片等非文本文件的分析。',
+  '优先使用语义具体的文件工具：view_file_chunk、read_file、list_dir、glob_search、grep_search、update_file、apply_file_patch。',
   'run_shell 只作为兜底工具；不要用它替代已有的读写、移动、复制、下载或 HTTP 工具。',
   '常规 git 操作由 git toolkit 提供；不要用 run_shell 包装这些常规 git 操作。',
   '执行高风险 shell 命令时必须遵守 toolkit 的人类审批流程，不要绕过审批。',

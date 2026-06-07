@@ -1,6 +1,6 @@
 import { gql } from './graphqlClient';
 import { submitPost, requestPostImage } from './apiClient';
-import type { DailyPostPayload } from '@pinpawo/pet-agent';
+import type { DailyPostPayload } from './capabilities/dailyPost';
 
 type ImpressionStatus = 'seen' | 'selected' | 'used' | 'skipped';
 

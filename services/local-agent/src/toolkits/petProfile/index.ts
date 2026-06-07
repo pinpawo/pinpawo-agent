@@ -1,13 +1,13 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { AgentActor } from '../types/agent';
 import {
   defineToolkit,
+  type AgentActor,
   type AgentToolkit,
   type NamedStructuredTool,
   type ToolkitOperationMetadata,
-} from '../types/toolkit';
+} from '@pinpawo/pet-agent';
 
 export type PetProfileToolOptions = {
   actor: AgentActor;

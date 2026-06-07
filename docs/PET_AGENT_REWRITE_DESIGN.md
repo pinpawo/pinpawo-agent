@@ -164,38 +164,20 @@ packages/pet-agent/src/
     runAgent.ts
   subagent/
     createSubagent.ts
-  capabilities/
-    dailyPost/
-      index.ts
-      task.ts
-      tools.ts
-      instructions.ts
-      schemas.ts
-    trendObserve/
-      index.ts
-      tools.ts
-      instructions.ts
-      schemas.ts
-  tools/
-    petProfile.ts
-    memories.ts
-    webSearch.ts
   types/
     agent.ts
     capability.ts
+    toolkit.ts
     subagent.ts
-    run.ts
   utils/
     async.ts
-    prompts.ts
-    text.ts
-    trends.ts
+    operationMetadata.ts
 ```
 
 说明：
 
 - `src/subagent/` 放通用的 subagent 创建逻辑，不绑定具体 capability。
-- `src/tools/` 放跨 capability 复用的 global tools。
+- pet-agent core 不放具体用户可见 toolkit/toolset 实现；host-owned toolkit 放在对应 host（例如 local-agent）中。
 - capability 目录不再包含 `result.ts`，result contract 声明收入 `index.ts`。
 - `dailyPost/task.ts` 当前保留共享 task helper（如 daily post task message builder）。
 - `types/run.ts` 当前保留低层运行类型，但不作为 channel 的稳定事件 contract。

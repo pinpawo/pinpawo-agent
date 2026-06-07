@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { BUILT_IN_CAPABILITY_REGISTRY } from '@pinpawo/pet-agent';
+import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
   getCachedCapabilityAvailability,
   refreshCapability,

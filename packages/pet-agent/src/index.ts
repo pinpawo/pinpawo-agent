@@ -13,13 +13,6 @@ export type {
 } from './types/studio';
 
 export type {
-  DailyImagePlan,
-  DailyPostPayload,
-  RecentDailyPost,
-  TrendPromptItem,
-} from './types/domain';
-
-export type {
   AgentCapability,
   CapabilityAvailability,
   CapabilityAvailabilityConfig,
@@ -65,6 +58,11 @@ export {
   validateUniqueToolkitNames,
   validateUniqueToolNames,
 } from './agent/createAgentRuntime';
+export {
+  extractCapabilityKeywords,
+  searchCapabilities,
+  splitCapabilitySearchTerms,
+} from './agent/orchestrator/capabilitySearch';
 export type {
   OrchestratorConfig,
   OrchestratorInvokeOptions,
@@ -90,8 +88,10 @@ export {
   readNumber,
   readRecord,
   readString,
+  readStringArray,
   resultStatusSummary,
-} from './capabilities/operationMetadata';
+} from './utils/operationMetadata';
+export { readLatestToolArtifact } from './agent/orchestrator/subagentHandoff';
 export { runAgent } from './agent/runAgent';
 export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
 export { createSubagent } from './subagent/createSubagent';
@@ -136,48 +136,3 @@ export type {
   WikiCurateResult,
   WikiCurator,
 } from './agent/studio/index';
-
-export {
-  createPetProfileToolkit,
-  createPetProfileTool,
-} from './tools/petProfile';
-export type {
-  PetProfileToolOptions,
-} from './tools/petProfile';
-export {
-  createMemoriesToolkit,
-  createMemoriesTool,
-} from './tools/memories';
-export type {
-  MemoriesToolOptions,
-  MemorySearchResult,
-} from './tools/memories';
-export {
-  createWebSearchToolkit,
-  createWebSearchTool,
-} from './tools/webSearch';
-export type {
-  WebSearchResult,
-  WebSearchToolOptions,
-} from './tools/webSearch';
-
-export type {
-  DailyPostResult,
-} from './capabilities/dailyPost/index';
-export {
-  createDailyPostCapability,
-} from './capabilities/dailyPost/index';
-export {
-  dailyPostResultSchema,
-} from './capabilities/dailyPost/schemas';
-export {
-  buildDailyPostObserveObjective,
-  buildDailyPostTaskMessage,
-} from './capabilities/dailyPost/task';
-export type {
-  DailyPostCapabilityOptions,
-} from './capabilities/dailyPost/index';
-
-export type { CapabilityMeta } from './capability-registry';
-export { BUILT_IN_CAPABILITY_REGISTRY } from './capability-registry';
-export { createCapabilityCreatorCapability } from './capabilities/capabilityCreator/index';

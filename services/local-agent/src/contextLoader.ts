@@ -1,5 +1,5 @@
 import { gql } from './graphqlClient';
-import type { TrendPromptItem } from '@pinpawo/pet-agent';
+import type { TrendPromptItem } from './capabilities/dailyPost';
 
 export type PetProfile = {
   id: string;

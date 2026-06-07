@@ -1,5 +1,4 @@
-import type { AgentCapability } from '../../types/capability';
-import { readLatestToolArtifact } from '../../agent/orchestrator/subagentHandoff';
+import { readLatestToolArtifact, type AgentCapability } from '@pinpawo/pet-agent';
 import { capabilityCreatorInstructions } from './instructions';
 import { capabilityCreatorResultSchema } from './schemas';
 import { createCapabilityCreatorToolset } from './tools';

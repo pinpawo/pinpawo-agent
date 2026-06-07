@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { NamedStructuredTool, ToolkitToolReviewPolicy } from '../types/toolkit';
-import { defineToolkit, defineToolset, hasToolOperationMetadata } from '../types/toolkit';
+import type { NamedStructuredTool, ToolkitToolReviewPolicy } from './toolkit';
+import { defineToolkit, defineToolset, hasToolOperationMetadata } from './toolkit';
 
 const alphaTool = { name: 'alpha_tool' } as NamedStructuredTool<'alpha_tool'>;
 const betaTool = { name: 'beta_tool' } as NamedStructuredTool<'beta_tool'>;

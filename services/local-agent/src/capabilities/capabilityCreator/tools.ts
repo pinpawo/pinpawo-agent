@@ -4,8 +4,19 @@ import { basename, dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
-import { defineToolset } from '../../types/toolkit';
-import type { AgentToolset, NamedStructuredTool, ToolkitOperationMetadata } from '../../types/toolkit';
+import {
+  defineToolset,
+  extractCapabilityKeywords,
+  readRecord,
+  readString,
+  readStringArray,
+  resultStatusSummary,
+  searchCapabilities,
+  splitCapabilitySearchTerms,
+  type AgentToolset,
+  type NamedStructuredTool,
+  type ToolkitOperationMetadata,
+} from '@pinpawo/pet-agent';
 import {
   capabilityCreatorResultSchema,
   checkCapabilityKeywordsInputSchema,
@@ -13,17 +24,6 @@ import {
   validateCapabilityPluginInputSchema,
 } from './schemas';
 import type { CapabilityCreatorResult } from './schemas';
-import {
-  extractCapabilityKeywords,
-  searchCapabilities,
-  splitCapabilitySearchTerms,
-} from '../../agent/orchestrator/capabilitySearch';
-import {
-  readRecord,
-  readString,
-  readStringArray,
-  resultStatusSummary,
-} from '../operationMetadata';
 
 function expandHome(p: string) {
   if (p === '~') return homedir();

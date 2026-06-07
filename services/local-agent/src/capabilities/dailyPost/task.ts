@@ -1,6 +1,6 @@
-import type { AgentActor } from '../../types/agent';
-import type { RecentDailyPost, TrendPromptItem } from '../../types/domain';
-import { formatTrendPromptItems } from '../../utils/prompts';
+import type { AgentActor } from '@pinpawo/pet-agent';
+import type { RecentDailyPost, TrendPromptItem } from './types';
+import { formatTrendPromptItems } from './utils';
 
 function normalizeText(input: string | null | undefined) {
   if (!input) return '';

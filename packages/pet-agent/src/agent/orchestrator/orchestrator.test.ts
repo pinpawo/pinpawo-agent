@@ -7,9 +7,7 @@ import { Command, isCommand } from '@langchain/langgraph';
 import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
-import type { AgentToolkit } from '../../types/toolkit';
-import { createCapabilityCreatorCapability } from '../../capabilities/capabilityCreator/index';
-import { createDailyPostCapability } from '../../capabilities/dailyPost/index';
+import { defineToolset, type AgentToolkit } from '../../types/toolkit';
 import { runAgent } from '../runAgent';
 import { buildOrchestratorTurnInput, createOrchestratorGraph } from '../createAgentRuntime';
 import {
@@ -476,60 +474,68 @@ test('runAgent omits empty toolkit configurable arrays', async () => {
   assert.equal(calls[0]?.configurable?.toolkits, undefined);
 });
 
-test('built-in capability runtimes expose operation metadata', async () => {
-  const dailyPost = createDailyPostCapability({
-    savePost: async () => ({ postId: 'post-1' }),
+test('capability toolset runtimes expose operation metadata', async () => {
+  const saveDraftTool = tool(async () => 'ok', {
+    name: 'save_draft',
+    description: 'save a draft',
+    schema: z.object({
+      topic: z.string(),
+      content: z.string(),
+    }),
   });
-  const dailyPostRuntime = await dailyPost.createRuntime({
+  const fixtureCapability: AgentCapability = {
+    name: 'draft_writer',
+    description: 'Test capability with private toolset metadata.',
+    createRuntime: () => ({
+      toolsets: [defineToolset({
+        name: 'draft_writer',
+        description: 'Draft writer private tools.',
+        tools: [saveDraftTool] as const,
+        operations: {
+          save_draft: {
+            title: '保存草稿',
+            summarizeInput: (input) => {
+              const value = input && typeof input === 'object'
+                ? input as { topic?: unknown; content?: unknown }
+                : {};
+              return {
+                target: typeof value.topic === 'string' ? value.topic : undefined,
+                summary: '保存草稿',
+                details: {
+                  contentLength: typeof value.content === 'string' ? value.content.length : undefined,
+                },
+              };
+            },
+          },
+        },
+      })],
+    }),
+  };
+
+  const runtime = await fixtureCapability.createRuntime({
     models: {} as AgentModels,
     actor: testActor,
     messages: [],
   });
-  const dailyPostToolset = dailyPostRuntime.toolsets?.find((toolset) => toolset.name === 'daily_post');
+  const toolset = runtime.toolsets?.find((item) => item.name === 'draft_writer');
 
-  assert.equal(dailyPostToolset?.operations?.finalize_post?.title, '保存动态');
-  assert.equal(dailyPostToolset?.operations?.skip_post?.title, '跳过动态');
-  assert.deepEqual(collectCapabilityOperations([], dailyPostRuntime).finalize_post?.source, {
+  assert.equal(toolset?.operations?.save_draft?.title, '保存草稿');
+  assert.deepEqual(collectCapabilityOperations([], runtime).save_draft?.source, {
     provider: 'toolset',
-    name: 'daily_post',
-    toolName: 'finalize_post',
+    name: 'draft_writer',
+    toolName: 'save_draft',
   });
 
-  const finalizeSummary = dailyPostToolset?.operations?.finalize_post?.summarizeInput?.({
-    mode: 'original',
+  const summary = toolset?.operations?.save_draft?.summarizeInput?.({
     content: '这是一段待发布的正文',
     topic: '早餐',
-    tags: ['日常'],
-    citations: ['trend-1'],
-    requestImage: true,
   });
-  assert.equal(finalizeSummary?.target, '早餐');
-  assert.equal(finalizeSummary?.summary, '保存原创动态');
-  assert.deepEqual(finalizeSummary?.details, {
-    mode: 'original',
-    topic: '早餐',
-    requestImage: true,
+  assert.equal(summary?.target, '早餐');
+  assert.equal(summary?.summary, '保存草稿');
+  assert.deepEqual(summary?.details, {
     contentLength: '这是一段待发布的正文'.length,
-    tagCount: 1,
-    citationCount: 1,
   });
-  assert.equal(JSON.stringify(finalizeSummary).includes('这是一段待发布的正文'), false);
-
-  const creatorRuntime = await createCapabilityCreatorCapability().createRuntime({
-    models: {} as AgentModels,
-    actor: testActor,
-    messages: [],
-  });
-  const creatorToolset = creatorRuntime.toolsets?.find((toolset) => toolset.name === 'capability_creator');
-
-  assert.equal(creatorToolset?.operations?.scaffold_capability_plugin?.title, '生成 capability 插件');
-  assert.equal(creatorToolset?.operations?.validate_capability_plugin?.title, '验证 capability 插件');
-  assert.equal(creatorToolset?.operations?.check_capability_keywords?.title, '检查 capability 关键词');
-  assert.deepEqual(collectCapabilityOperations([], creatorRuntime).scaffold_capability_plugin?.source, {
-    provider: 'toolset',
-    name: 'capability_creator',
-    toolName: 'scaffold_capability_plugin',
-  });
+  assert.equal(JSON.stringify(summary).includes('这是一段待发布的正文'), false);
 });
 
 test('toolkit review policy wraps tool calls without changing tool identity', async () => {

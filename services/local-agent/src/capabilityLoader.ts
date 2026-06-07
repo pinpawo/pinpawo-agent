@@ -19,7 +19,7 @@ import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import type { AgentCapability } from '@pinpawo/pet-agent';
-import type { CapabilityMeta } from '@pinpawo/pet-agent';
+import type { CapabilityMeta } from './capabilityRegistry';
 import { loadStoredConfig } from './storage';
 
 /** Default user-global capabilities directory — always scanned. */

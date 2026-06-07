@@ -135,7 +135,9 @@ const examples: Array<{
     },
     outputs: {
       expected_interrupt_received: true,
-      expected_pending_interrupt_callback_called: true,
+      // onPendingInterrupt only fires on the resume turn; if no resume is
+      // submitted, the second turn never runs and the callback never fires.
+      expected_pending_interrupt_callback_called: false,
       expected_final_status: 'waiting_human',
       expected_authorization_recorded: false,
       reason: 'First turn with no resume should leave the session in waiting_human; second turn never runs.',
@@ -272,6 +274,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
   // installs an onPendingInterrupt that translates extras.authorizeShellPattern
   // into a real authorizeShellPattern() call on the thread.
   let pendingCallbackCalled = false;
+  let lastPendingInterruptKind: string | null = null;
   let authorizedPattern: string | null = null;
 
   const secondTurnEvents: LocalAgentEvent[] = [];
@@ -287,8 +290,9 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     finishInterrupted: () => {},
     emitEvent: (event) => secondTurnEvents.push(event),
     emitToolEvent: () => {},
-    onPendingInterrupt: () => {
+    onPendingInterrupt: (payload) => {
       pendingCallbackCalled = true;
+      lastPendingInterruptKind = typeof payload.kind === 'string' ? payload.kind : null;
       const authorize = inputs.extras?.authorizeShellPattern;
       if (!authorize) return;
       const requestedPattern = authorize.pattern?.trim() || inputs.pending_shell_command;
@@ -304,7 +308,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     first_turn_status: firstTurn.status,
     pending_interrupt_callback_called: pendingCallbackCalled,
     interrupt_received: firstTurn.status === 'waiting_human',
-    last_pending_interrupt_kind: lastPendingInterrupt?.kind ?? null,
+    last_pending_interrupt_kind: lastPendingInterruptKind,
     authorized_pattern: authorizedPattern,
     authorization_recorded: isShellCommandAuthorized(
       FAKE_THREAD_ID,

@@ -102,7 +102,6 @@ export {
   createSkeletonWikiCurator,
   createStudioOrchestrator,
   createWikiReadToolkit,
-  curateDispatch,
   DEFAULT_CURATOR_PROMPT,
   defaultPromptProvider,
   ensureWikiSkeleton,

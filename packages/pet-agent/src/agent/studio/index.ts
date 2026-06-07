@@ -7,7 +7,6 @@ export { createWikiReadToolkit } from './wikiReadToolkit';
 export {
   createSkeletonWikiCurator,
   createLLMWikiCurator,
-  curateDispatch,
   ensureWikiSkeleton,
   DEFAULT_CURATOR_PROMPT,
   defaultPromptProvider,

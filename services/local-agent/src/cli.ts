@@ -8,7 +8,6 @@ type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
   runAgent?: () => Promise<void> | void;
-  runOnce?: (opts: { dryRun: boolean; noDb: boolean }) => Promise<void> | void;
   runTui?: (opts: { dryRun: boolean }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
 };
@@ -62,19 +61,6 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .action(async () => {
       const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
       await runAgent();
-    });
-
-  program
-    .command('once')
-    .description('Run the deprecated one-shot daily post flow')
-    .option('--dry-run', 'run without writing generated post changes')
-    .option('--no-db', 'read crawler JSON output without DB ingest')
-    .action(async (options: { dryRun?: boolean; db?: boolean; noDb?: boolean }) => {
-      const runOnce = handlers.runOnce ?? (await import('./commands/once')).runOnce;
-      await runOnce({
-        dryRun: options.dryRun ?? false,
-        noDb: options.noDb === true || options.db === false,
-      });
     });
 
   program

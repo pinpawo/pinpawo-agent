@@ -26,7 +26,7 @@ Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and envi
 Local external plugins are loaded from `~/.pinpawo/plugins/*.mjs` or `*.js`.
 Each plugin module must export a default object with `{ name }`.
 
-New plugins should export `toolkits`; this keeps tools, operation metadata, and review policy under one owner. A legacy `tools` export is still accepted as a direct-tool fallback, but it cannot carry toolkit-owned metadata or policy.
+Plugins must export `toolkits`; this keeps tools, operation metadata, and review policy under one owner. A legacy `tools` export is ignored.
 
 ```js
 import { defineToolkit } from '@pinpawo/pet-agent';
@@ -60,7 +60,6 @@ export default {
 pinpawo-agent login
 pinpawo-agent actor
 pinpawo-agent run
-pinpawo-agent once
 pinpawo-agent tui
 pinpawo-agent detect
 pinpawo-agent capability list

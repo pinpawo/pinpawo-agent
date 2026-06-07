@@ -28,6 +28,7 @@ import {
 } from '../src/agent/createAgentRuntime';
 import type { AgentActor, AgentModels } from '../src/types/agent';
 import type { AgentCapability } from '../src/types/capability';
+import { defineToolkit } from '../src/types/toolkit';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
 
 const DATASET_NAME = 'orchestrator-flow-mock-subagent';
@@ -206,8 +207,14 @@ const mockTools = [
       name: 'web_search',
       description: '在互联网上搜索信息',
       schema: z.object({ query: z.string() }),
-    }),
+  }),
 ];
+
+const mockGeneralToolkit = defineToolkit({
+  name: 'eval_general',
+  description: 'Mock general tools for flow evaluation.',
+  tools: mockTools,
+});
 
 const mockCapabilities: AgentCapability[] = [
   {
@@ -295,7 +302,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     configurable: {
       thread_id: `eval-flow-${Date.now()}-${++evalCounter}`,
       actor: testActor,
-      tools: mockTools,
+      toolkits: [mockGeneralToolkit],
       capabilities: capabilityList,
       maxIterations: 3,
       workdir: '/mock/project',

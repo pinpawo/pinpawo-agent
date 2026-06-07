@@ -26,6 +26,7 @@ import {
 } from '../src/agent/createAgentRuntime';
 import type { AgentActor, AgentModels } from '../src/types/agent';
 import type { AgentCapability } from '../src/types/capability';
+import { defineToolkit } from '../src/types/toolkit';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
 import { MemorySaver } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
@@ -146,6 +147,12 @@ const mockTools = [
     schema: z.object({ query: z.string() }),
   }),
 ];
+
+const mockGeneralToolkit = defineToolkit({
+  name: 'eval_general',
+  description: 'Mock general tools for route evaluation.',
+  tools: mockTools,
+});
 
 const mockCapabilities: AgentCapability[] = [
   {
@@ -297,7 +304,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     configurable: {
       thread_id: threadId,
       actor: testActor,
-      tools: mockTools,
+      toolkits: [mockGeneralToolkit],
       capabilities: capabilityList,
       maxIterations: 1,
     },

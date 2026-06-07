@@ -47,6 +47,8 @@ export class LocalAgentRuntime {
   private appWsClient: LocalAgentAppWsClient | null = null;
   private readonly inflightRequests = new InflightRequestController<WebSocket>({
     forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
+    // Hosted app WS relay: do NOT include raw — keeps payloads small and
+    // avoids leaking raw tool input/output through the remote channel.
     emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
     logPrefix: 'local-agent',

@@ -52,6 +52,36 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
   });
 });
 
+test('parseTuiCommand treats slash-prefixed non-command shapes as plain text', () => {
+  // Absolute paths must reach the agent unchanged, not surface "unknown
+  // command" feedback that swallows the message.
+  assert.deepEqual(
+    parseTuiCommand('/Users/wangxianbin/Develop/src/hughub/ look at this'),
+    { type: 'text', text: '/Users/wangxianbin/Develop/src/hughub/ look at this' },
+  );
+  assert.deepEqual(parseTuiCommand('/etc/hosts'), {
+    type: 'text',
+    text: '/etc/hosts',
+  });
+  // Double slash and leading-non-letter forms also fall through to chat.
+  assert.deepEqual(parseTuiCommand('//comment'), {
+    type: 'text',
+    text: '//comment',
+  });
+  assert.deepEqual(parseTuiCommand('/123abc'), {
+    type: 'text',
+    text: '/123abc',
+  });
+  // /<name>-<rest> is still a valid command-name shape (kebab-case names
+  // could be added later); preserve as unknown so feedback still fires.
+  assert.deepEqual(parseTuiCommand('/foo-bar'), {
+    type: 'unknown',
+    raw: '/foo-bar',
+    name: 'foo-bar',
+    args: '',
+  });
+});
+
 test('formatTuiCommandHelp is generated from visible command metadata', () => {
   assert.equal(
     formatTuiCommandHelp(),

@@ -110,6 +110,14 @@ export function formatTuiCommandHelp() {
     .join(' · ');
 }
 
+// A command name must look like /<word>(<space><args>)?
+// — starting with an ASCII letter and continuing with letters/digits/_/-.
+// Anything else (/ followed by a slash, digit, space, …) is treated as
+// plain text so users can paste absolute paths like /Users/... or send a
+// literal message starting with a slash without triggering "unknown
+// command" feedback.
+const COMMAND_LIKE_RE = /^\/([A-Za-z][A-Za-z0-9_-]*)(?:\s+(.*))?$/;
+
 export function parseTuiCommand(input: string): ParsedTuiCommand {
   const raw = input.trim();
   if (!raw) return { type: 'empty' };
@@ -127,10 +135,15 @@ export function parseTuiCommand(input: string): ParsedTuiCommand {
     return { type: 'text', text: raw };
   }
 
-  const withoutSlash = raw.slice(1);
-  const firstSpace = withoutSlash.search(/\s/);
-  const name = firstSpace === -1 ? withoutSlash : withoutSlash.slice(0, firstSpace);
-  const args = firstSpace === -1 ? '' : withoutSlash.slice(firstSpace).trim();
+  const match = COMMAND_LIKE_RE.exec(raw);
+  if (!match) {
+    // Looks like a slash but not a command — e.g. /Users/foo, //comment,
+    // /123. Fall through to chat so the message reaches the agent.
+    return { type: 'text', text: raw };
+  }
+
+  const name = match[1];
+  const args = (match[2] ?? '').trim();
   const command = COMMAND_BY_NAME.get(name);
 
   if (!command) {

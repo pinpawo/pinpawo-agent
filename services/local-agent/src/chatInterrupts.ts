@@ -98,16 +98,13 @@ export function normalizeInterruptResume(
   explicitResume: unknown,
 ) {
   if (isHumanReviewInterruptPayload(interruptPayload)) {
+    // Structured decisions take precedence. Otherwise treat the free-text
+    // message as a `respond` decision (or `reject` if empty).
     return explicitResume !== undefined
       ? explicitResume
-      : message.trim().startsWith('/allow')
-        ? buildHumanReviewResume([{ type: 'approve' }])
-        : buildResumeFromUserText(message);
+      : buildResumeFromUserText(message);
   }
 
-  if (message.trim().startsWith('/allow')) {
-    return { action: 'continue' };
-  }
   const explicitDecision = readFirstResumeDecisionType(explicitResume);
   if (explicitDecision === 'approve') {
     return { action: 'continue' };

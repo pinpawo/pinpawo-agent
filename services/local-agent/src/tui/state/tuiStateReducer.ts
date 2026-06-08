@@ -181,6 +181,13 @@ function activeRunToActiveOperations(run: ActiveRunModel | null) {
   })) ?? [];
 }
 
+function clearPendingReview(run: ActiveRunModel): ActiveRunModel {
+  if (!run.pendingReview) return run;
+  const { pendingReview, ...rest } = run;
+  void pendingReview;
+  return rest;
+}
+
 function activeRunToPendingApproval(run: ActiveRunModel | null) {
   return run?.pendingReview
     ? {
@@ -322,7 +329,13 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       ]));
     }
 
-    case 'review.response.start': {
+    case 'review.response.resume': {
+      // Server resumes the same LangGraph run from its checkpoint, so we
+      // preserve the existing activeRun (and its startedAt) — only the phase
+      // flips from waiting_human back to thinking, and the pending approval
+      // is cleared. If for some reason there is no existing activeRun (e.g.
+      // a stale review handed out before this controller loaded), fall back
+      // to creating one keyed by the same requestId.
       const sessionId = state.runRoute[action.requestId] ?? state.focusedSessionId;
       if (!sessionId) return state;
       return updateSession({
@@ -341,15 +354,20 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         },
       }, sessionId, (session) => appendHistory({
         ...session,
-        activeRun: {
-          requestId: action.requestId,
-          phase: 'thinking',
-          assistantDraft: '',
-          activeOperations: [],
-          startedAt: action.now,
-          charCount: 0,
-        },
-        tokenUsage: null,
+        activeRun: session.activeRun?.requestId === action.requestId
+          ? clearPendingReview({
+              ...session.activeRun,
+              phase: 'thinking',
+              assistantDraft: '',
+            })
+          : {
+              requestId: action.requestId,
+              phase: 'thinking',
+              assistantDraft: '',
+              activeOperations: [],
+              startedAt: action.now,
+              charCount: 0,
+            },
       }, [
         historyDraft('user', action.message, action.userCell, `${action.requestId}:review-response`),
       ]));

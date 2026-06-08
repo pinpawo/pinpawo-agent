@@ -19,9 +19,6 @@ export function decodeStudioReviewDecision(
     if (decoded) return decoded;
   }
   const text = (msg.message ?? '').trim();
-  if (text.startsWith('/allow')) {
-    return { type: 'approve' };
-  }
   if (text) {
     return { type: 'respond', message: text };
   }

@@ -29,6 +29,7 @@ Per-workspace (use `-w <pkg>` or `cd`):
 - TUI dev: `cd services/local-agent && npm run tui` (or `npm run tui:dry` for dry-run). `npm run login` first to set credentials.
 - One-shot post: `npm run once` / `npm run once:dry`.
 - Evals (pet-agent, needs `.env`): `npm run eval:route`, `eval:flow:mock-subagent`, `eval:hitl`, `eval:subagent`, `eval:dataset`.
+- Eval (local-agent, needs `.env`): `npm run eval:hitl -w pinpawo-local-agent` — drives `runChatSession` through a fake graph to verify structured-resume + shell authorization extras.
 
 ## Pet-agent architecture (where to look)
 

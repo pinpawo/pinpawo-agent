@@ -106,6 +106,10 @@ export class LocalServerTuiSessionService {
     return this.getActiveSession(petId).threadId;
   }
 
+  getActiveSessionId(petId: string) {
+    return this.getActiveSession(petId).id;
+  }
+
   createNewSession(petId: string) {
     const previous = this.getActiveSession(petId);
     const next = createTuiSession(this.state, petId);

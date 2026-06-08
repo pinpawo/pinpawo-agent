@@ -142,7 +142,9 @@ test('buildApprovalOptions derives action review decisions from normalized appro
     },
     {
       label: '本次会话授权：git status --short',
-      message: '/allow',
+      message: '本次会话授权：git status --short',
+      resume: { decisions: [{ type: 'approve' }] },
+      extras: { authorizeShellPattern: { pattern: 'git status --short' } },
     },
     {
       label: '拒绝',

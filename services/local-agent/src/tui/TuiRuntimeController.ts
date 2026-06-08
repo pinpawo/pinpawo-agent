@@ -170,12 +170,18 @@ export class TuiRuntimeController {
       return false;
     }
 
-    const currentApproval = selectFocusedPendingApproval(this.options.getState());
+    const state = this.options.getState();
+    const currentApproval = selectFocusedPendingApproval(state);
     const requestId = currentApproval?.requestId ?? randomUUID();
+    const originSessionId = state.runRoute[requestId] ?? state.focusedSessionId ?? undefined;
+    const extras = { ...(option.extras ?? {}) };
+    if (originSessionId && !extras.originSessionId) {
+      extras.originSessionId = originSessionId;
+    }
     const now = Date.now();
     this.options.setNow(now);
     this.options.dispatch({
-      type: 'review.response.start',
+      type: 'review.response.resume',
       requestId,
       message: decision,
       now,
@@ -187,6 +193,7 @@ export class TuiRuntimeController {
       requestId,
       message: decision,
       ...(option.resume !== undefined ? { resume: option.resume } : {}),
+      ...(Object.keys(extras).length > 0 ? { extras } : {}),
     });
     return true;
   }

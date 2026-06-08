@@ -15,10 +15,13 @@ export type PendingUiState = {
 
 export type PendingApproval = ApprovalRequestModel;
 
+import type { ReviewResumeExtras } from '../localAgentProtocol';
+
 export type ApprovalOption = {
   label: string;
   message: string;
   resume?: unknown;
+  extras?: ReviewResumeExtras;
 };
 
 export type ActiveOperation = {

@@ -209,41 +209,6 @@ test('parseLocalAgentServerMessage keeps usage on message.completed event when v
   );
 });
 
-test('parseLocalAgentServerMessage accepts legacy top-level human_review.requested messages', () => {
-  assert.deepEqual(
-    parseLocalAgentServerMessage(JSON.stringify({
-      type: 'human_review.requested',
-      requestId: 'req-1',
-      prompt: '确认执行高风险 shell 命令？',
-      payload: {
-        kind: 'human_review',
-        actionRequests: [{
-          name: 'run_shell',
-          args: { command: 'rm -rf /tmp/demo' },
-          description: '删除',
-        }],
-      },
-    })),
-    {
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        type: 'human_review.requested',
-        requestId: 'req-1',
-        prompt: '确认执行高风险 shell 命令？',
-        payload: {
-          kind: 'human_review',
-          actionRequests: [{
-            name: 'run_shell',
-            args: { command: 'rm -rf /tmp/demo' },
-            description: '删除',
-          }],
-        },
-      },
-    },
-  );
-});
-
 test('parseLocalAgentServerMessage accepts canonical human_review.requested review specs', () => {
   assert.deepEqual(
     parseLocalAgentServerMessage(JSON.stringify({

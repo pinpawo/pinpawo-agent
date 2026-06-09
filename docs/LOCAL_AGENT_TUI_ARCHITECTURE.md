@@ -369,12 +369,13 @@ type ActiveOperationModel = {
 };
 
 // 一次待处理的 human review,来自 human_review.requested 事件。
-// ApprovalPanel 据 payload 生成候选动作(见 §7);TUI 只消费归一化后的请求结构。
+// ApprovalPanel 只消费 review spec;TUI 不从 payload/tool args 推断候选动作。
 type ApprovalRequestModel = {
   requestId: RunId;
-  kind: string;                     // payload.kind ?? 'interrupt'
+  kind: string;
   prompt: string;
-  payload: Record<string, unknown>; // 归一化后的 approval payload(actionRequests / reviewConfigs 等)
+  review: ReviewSpec;
+  payload?: Record<string, unknown>; // 仅用于调试/溯源,不驱动 UI 行为
   petId?: string;                   // studio 路径下触发 HITL 的 pet;chat 路径 undefined
 };
 ```

@@ -265,11 +265,11 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     const payload = readRecord(record, 'payload');
     const review = readReviewSpec(record, 'review');
     const actor = readRecord(record, 'actor');
-    if (!review && (prompt == null || !payload)) return null;
+    if (!review) return null;
     return {
       type,
       requestId,
-      ...(review ? { review } : {}),
+      review,
       ...(prompt != null ? { prompt } : {}),
       ...(payload ? { payload } : {}),
       ...(actor ? { actor: { petId: readOptionalString(actor, 'petId') } } : {}),
@@ -358,12 +358,6 @@ function parseLocalAgentServerRecord(record: Record<string, unknown>): LocalAgen
     const eventRecord = readRecord(record, 'event');
     const event = eventRecord ? readLocalAgentEvent(eventRecord) : null;
     return event && event.requestId === requestId ? { type, requestId, event } : null;
-  }
-  if (type === 'human_review.requested') {
-    const event = readLocalAgentEvent(record);
-    return event && event.requestId === requestId && event.type === 'human_review.requested'
-      ? { type: 'event', requestId, event }
-      : null;
   }
   if (type === 'interrupting' || type === 'interrupted' || type === 'studio_error') {
     return {

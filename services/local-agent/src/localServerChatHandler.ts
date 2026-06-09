@@ -408,29 +408,5 @@ function readPendingReviewAction(
   if (actionFromPayload) {
     return actionFromPayload;
   }
-
-  const actionRequests = Array.isArray(event.payload?.actionRequests)
-    ? event.payload.actionRequests
-    : [];
-  const firstAction = actionRequests[0] && typeof actionRequests[0] === 'object'
-    ? actionRequests[0] as Record<string, unknown>
-    : null;
-  const args = firstAction?.args && typeof firstAction.args === 'object' && !Array.isArray(firstAction.args)
-    ? firstAction.args as Record<string, unknown>
-    : {};
-  const toolName = typeof firstAction?.name === 'string' && firstAction.name.trim()
-    ? firstAction.name.trim()
-    : null;
-  if (!toolName) {
-    return null;
-  }
-  const description = typeof firstAction?.description === 'string' && firstAction.description.trim()
-    ? firstAction.description.trim()
-    : null;
-  return {
-    actionId: 'pending_action',
-    toolName,
-    args,
-    ...(description ? { description } : {}),
-  };
+  return null;
 }

@@ -195,8 +195,8 @@ function activeRunToPendingApproval(run: ActiveRunModel | null) {
         kind: run.pendingReview.kind,
         requestId: run.pendingReview.requestId,
         prompt: run.pendingReview.prompt,
-        payload: run.pendingReview.payload,
-        ...(run.pendingReview.review ? { review: run.pendingReview.review } : {}),
+        review: run.pendingReview.review,
+        ...(run.pendingReview.payload ? { payload: run.pendingReview.payload } : {}),
         ...(run.pendingReview.petId ? { petId: run.pendingReview.petId } : {}),
       }
     : null;
@@ -489,8 +489,8 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
       if (event.type === 'human_review.requested') {
         const prompt = formatReviewPrompt(event);
-        const payload = event.payload ?? {};
-        const kind = typeof payload.kind === 'string' ? payload.kind : 'interrupt';
+        const payload = event.payload;
+        const kind = typeof payload?.kind === 'string' ? payload.kind : 'interrupt';
         const petId = event.actor?.petId || undefined;
         return updateSession({
           ...state,
@@ -511,8 +511,8 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
                   requestId: event.requestId,
                   kind,
                   prompt,
-                  payload,
-                  ...(event.review ? { review: event.review } : {}),
+                  review: event.review,
+                  ...(payload ? { payload } : {}),
                   ...(petId ? { petId } : {}),
                 },
               }

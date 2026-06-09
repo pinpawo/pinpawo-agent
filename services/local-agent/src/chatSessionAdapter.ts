@@ -73,6 +73,10 @@ export type ChatSessionAdapterOptions = {
   emitToolEvent: (payload: StreamToolsPayload) => void;
 };
 
+function throwUnexpectedInterruptPayload(): never {
+  throw new Error('Received an interrupt without canonical human review payload.');
+}
+
 export async function runChatSession(options: ChatSessionAdapterOptions): Promise<ChatSessionResult> {
   const { request, setup, graphService, isCurrent, finishInterrupted, emitEvent, emitToolEvent } = options;
   const { requestId, message } = request;
@@ -160,16 +164,17 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       if (mode === 'values' && payload && typeof payload === 'object' && '__interrupt__' in payload) {
         const interruptPayload = readFirstInterruptPayload(payload);
         if (interruptPayload) {
-          const review = buildReviewSpecFromInterruptPayload(interruptPayload, {
-            toolkits: setup.input.toolkits,
-          });
+          const review = buildReviewSpecFromInterruptPayload(interruptPayload);
+          if (!review) {
+            throwUnexpectedInterruptPayload();
+          }
           recordAgentRunActivity('waiting_human', requestId);
           emitEvent({
             type: 'human_review.requested',
             requestId,
             prompt: formatInterruptPrompt(interruptPayload),
             payload: interruptPayload,
-            ...(review ? { review } : {}),
+            review,
           });
           return { status: 'waiting_human' };
         }
@@ -192,16 +197,17 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   const finalInterrupt = readPendingInterrupt(finalSnapshot);
   if (finalInterrupt) {
-    const review = buildReviewSpecFromInterruptPayload(finalInterrupt, {
-      toolkits: setup.input.toolkits,
-    });
+    const review = buildReviewSpecFromInterruptPayload(finalInterrupt);
+    if (!review) {
+      throwUnexpectedInterruptPayload();
+    }
     recordAgentRunActivity('waiting_human', requestId);
     emitEvent({
       type: 'human_review.requested',
       requestId,
       prompt: formatInterruptPrompt(finalInterrupt),
       payload: finalInterrupt,
-      ...(review ? { review } : {}),
+      review,
     });
     return { status: 'waiting_human' };
   }

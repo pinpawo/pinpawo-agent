@@ -75,7 +75,7 @@ export type LocalAgentOperationInternalEvent = LocalAgentOperationEvent & {
 export type LocalAgentHumanReviewRequestedEvent = {
   type: 'human_review.requested';
   requestId: string;
-  review?: ReviewSpec;
+  review: ReviewSpec;
   prompt?: string;
   payload?: Record<string, unknown>;
   actor?: {

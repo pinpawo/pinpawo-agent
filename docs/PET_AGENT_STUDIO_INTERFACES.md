@@ -132,10 +132,10 @@ runtime.invoke({
 
 ## Boundary 3: HITL Bridge (`humanReviewer`)
 
-pet 内 tool 触发 `interrupt(...)`(由 toolkit 的 `policy.toolReview` 在调用前决定)。新 toolkit policy 返回 `ReviewSpec`，wrapper 会生成 canonical `review` interrupt payload。Studio `humanReviewer` 桥目前同时接收 legacy `HumanReviewRequest` 和 canonical `review` payload；新路径直接转发 `ReviewSpec`。
+pet 内 tool 触发 `interrupt(...)`(由 toolkit 的 `policy.toolReview` 在调用前决定)。toolkit policy 返回 `ReviewSpec`，wrapper 生成 canonical `review` interrupt payload。Studio `humanReviewer` 桥只接收 canonical `HumanReviewInterruptPayload`，并直接转发 `ReviewSpec`。
 
 ```ts
-type HumanReviewer = (request: HumanReviewRequest | HumanReviewInterruptPayload) => Promise<HumanReviewDecision>;
+type HumanReviewer = (request: HumanReviewInterruptPayload) => Promise<HumanReviewDecision>;
 
 // 构造时注入
 const pet = createPetAgentRuntime({
@@ -147,7 +147,7 @@ const pet = createPetAgentRuntime({
 });
 ```
 
-`HumanReviewRequest` 与 `HumanReviewDecision`(approve / edit / reject / respond)定义见 `packages/pet-agent/src/agent/orchestrator/humanReview.ts`。`HumanReviewInterruptPayload` / `ReviewSpec` 定义见 `packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts`。
+`HumanReviewDecision`(approve / edit / reject / respond)定义见 `packages/pet-agent/src/agent/orchestrator/humanReview.ts`。`HumanReviewInterruptPayload` / `ReviewSpec` 定义见 `packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts`。
 
 流程:
 

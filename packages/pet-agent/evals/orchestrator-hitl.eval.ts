@@ -137,13 +137,7 @@ function readAllowedDecisions(payload: Record<string, unknown> | null): string[]
     });
   }
 
-  const configs = payload && Array.isArray(payload.reviewConfigs) ? payload.reviewConfigs : [];
-  const first = configs[0];
-  if (!first || typeof first !== 'object') return [];
-  const allowed = (first as Record<string, unknown>).allowedDecisions;
-  return Array.isArray(allowed)
-    ? allowed.filter((item): item is string => typeof item === 'string')
-    : [];
+  return [];
 }
 
 function routeModeFromResult(result: Record<string, unknown>): string {

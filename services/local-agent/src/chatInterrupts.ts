@@ -1,20 +1,7 @@
 import {
-  buildReviewSpecFromHumanReviewRequest,
-  type AgentToolkit,
-  type HumanReviewActionRequest,
-  type HumanReviewConfig,
-  type HumanReviewDecisionType,
-  type HumanReviewRequest,
   type PendingReviewAction,
-  type ReviewOption,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
-
-function readDecisionType(value: unknown): HumanReviewDecisionType | null {
-  return value === 'approve' || value === 'edit' || value === 'reject' || value === 'respond'
-    ? value
-    : null;
-}
 
 function readRecordValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -79,45 +66,6 @@ function readPendingReviewActionValue(value: unknown): PendingReviewAction | nul
   };
 }
 
-function readHumanReviewActionRequest(value: unknown): HumanReviewActionRequest | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const name = typeof record.name === 'string' && record.name.trim()
-    ? record.name.trim()
-    : typeof record.action === 'string' && record.action.trim()
-      ? record.action.trim()
-      : null;
-  const args = record.args && typeof record.args === 'object' && !Array.isArray(record.args)
-    ? record.args as Record<string, unknown>
-    : {};
-  if (!name) return null;
-  return {
-    name,
-    args,
-    ...(typeof record.description === 'string' ? { description: record.description } : {}),
-  };
-}
-
-function readHumanReviewConfig(value: unknown): HumanReviewConfig | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const actionName = typeof record.actionName === 'string' && record.actionName.trim()
-    ? record.actionName.trim()
-    : null;
-  const allowedDecisions = Array.isArray(record.allowedDecisions)
-    ? record.allowedDecisions.flatMap((decision) => {
-      const type = readDecisionType(decision);
-      return type ? [type] : [];
-    })
-    : [];
-  if (!actionName) return null;
-  return {
-    actionName,
-    allowedDecisions,
-    ...(typeof record.description === 'string' ? { description: record.description } : {}),
-  };
-}
-
 export function readPendingInterrupt(snapshot: { tasks?: unknown }): Record<string, unknown> | null {
   const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
   for (const task of tasks) {
@@ -133,56 +81,13 @@ export function readPendingInterrupt(snapshot: { tasks?: unknown }): Record<stri
   return null;
 }
 
-export function readHumanReviewActionRequests(interruptPayload: Record<string, unknown>) {
-  return Array.isArray(interruptPayload.actionRequests)
-    ? interruptPayload.actionRequests.filter((action): action is Record<string, unknown> =>
-      Boolean(action && typeof action === 'object'),
-    )
-    : [];
-}
-
 function isReviewInterruptPayload(interruptPayload: Record<string, unknown>) {
   return interruptPayload.kind === 'review'
     && Boolean(readReviewSpecValue(interruptPayload.review));
 }
 
-function isLegacyHumanReviewInterruptPayload(interruptPayload: Record<string, unknown>) {
-  return interruptPayload.kind === 'human_review'
-    || (
-      Array.isArray(interruptPayload.actionRequests)
-      && Array.isArray(interruptPayload.reviewConfigs)
-    );
-}
-
 export function isHumanReviewInterruptPayload(interruptPayload: Record<string, unknown>) {
-  return isReviewInterruptPayload(interruptPayload)
-    || isLegacyHumanReviewInterruptPayload(interruptPayload);
-}
-
-export function readHumanReviewRequest(interruptPayload: Record<string, unknown>): HumanReviewRequest | null {
-  if (!isLegacyHumanReviewInterruptPayload(interruptPayload)) {
-    return null;
-  }
-  const actionRequests = Array.isArray(interruptPayload.actionRequests)
-    ? interruptPayload.actionRequests.flatMap((action) => {
-      const request = readHumanReviewActionRequest(action);
-      return request ? [request] : [];
-    })
-    : [];
-  const reviewConfigs = Array.isArray(interruptPayload.reviewConfigs)
-    ? interruptPayload.reviewConfigs.flatMap((config) => {
-      const reviewConfig = readHumanReviewConfig(config);
-      return reviewConfig ? [reviewConfig] : [];
-    })
-    : [];
-
-  return {
-    kind: 'human_review',
-    actionRequests,
-    reviewConfigs,
-    ...(typeof interruptPayload.prompt === 'string' ? { prompt: interruptPayload.prompt } : {}),
-    ...(typeof interruptPayload.error === 'string' ? { error: interruptPayload.error } : {}),
-  };
+  return isReviewInterruptPayload(interruptPayload);
 }
 
 export function readPendingReviewActionFromInterruptPayload(
@@ -193,86 +98,17 @@ export function readPendingReviewActionFromInterruptPayload(
     return directAction;
   }
 
-  const firstAction = readHumanReviewActionRequests(interruptPayload)[0] ?? null;
-  if (!firstAction) {
-    return null;
-  }
-  const args = readRecordValue(firstAction.args) ?? {};
-  const toolName = readNonEmptyString(firstAction.name) ?? readNonEmptyString(firstAction.action);
-  const description = readNonEmptyString(firstAction.description);
-  return toolName
-    ? {
-        actionId: 'pending_action',
-        toolName,
-        args,
-        ...(description ? { description } : {}),
-      }
-    : null;
-}
-
-function hasAuthorizationPolicy(toolkits: AgentToolkit[], toolName: string) {
-  return toolkits.some((toolkit) =>
-    Boolean(toolkit.policy?.toolReview?.[toolName]?.buildAuthorizationMatcher),
-  );
-}
-
-function addAuthorizationOption(
-  spec: ReviewSpec,
-  request: HumanReviewRequest,
-  toolkits: AgentToolkit[],
-): ReviewSpec {
-  const pendingAction = request.actionRequests.length === 1 ? request.actionRequests[0] : null;
-  if (!pendingAction || !hasAuthorizationPolicy(toolkits, pendingAction.name)) {
-    return spec;
-  }
-  if (spec.options.some((option) =>
-    option.effects?.some((effect) => effect.type === 'graph.authorize_tool_action'),
-  )) {
-    return spec;
-  }
-
-  const approveIndex = spec.options.findIndex((option) => option.decision.type === 'approve');
-  if (approveIndex < 0) {
-    return spec;
-  }
-
-  const authorizeOption: ReviewOption = {
-    id: 'approve-and-authorize-thread',
-    label: 'Approve and authorize',
-    description: 'Approve this action and authorize matching actions in this thread.',
-    decision: { type: 'approve' },
-    effects: [{
-      type: 'graph.authorize_tool_action',
-      scope: 'thread',
-      actionRef: { type: 'pending_action' },
-      matcher: { type: 'policy_hook' },
-    }],
-  };
-  return {
-    ...spec,
-    options: [
-      ...spec.options.slice(0, approveIndex + 1),
-      authorizeOption,
-      ...spec.options.slice(approveIndex + 1),
-    ],
-  };
+  return null;
 }
 
 export function buildReviewSpecFromInterruptPayload(
   interruptPayload: Record<string, unknown>,
-  options: { toolkits?: AgentToolkit[] } = {},
 ): ReviewSpec | undefined {
   const directReview = readReviewSpecValue(interruptPayload.review);
   if (directReview) {
     return directReview;
   }
-
-  const request = readHumanReviewRequest(interruptPayload);
-  if (!request) {
-    return undefined;
-  }
-  const spec = buildReviewSpecFromHumanReviewRequest(request);
-  return addAuthorizationOption(spec, request, options.toolkits ?? []);
+  return undefined;
 }
 
 export function formatInterruptPrompt(interruptPayload: Record<string, unknown>) {
@@ -285,23 +121,7 @@ export function formatInterruptPrompt(interruptPayload: Record<string, unknown>)
       || '当前流程需要你的确认，请直接回复继续或说明下一步。';
   }
 
-  if (typeof interruptPayload.prompt === 'string' && interruptPayload.prompt.trim()) {
-    return interruptPayload.prompt.trim();
-  }
-  const descriptions = readHumanReviewActionRequests(interruptPayload).flatMap((action) => {
-    if (typeof action.description === 'string' && action.description.trim()) {
-      return [action.description.trim()];
-    }
-    const name = typeof action.name === 'string'
-      ? action.name
-      : typeof action.action === 'string'
-        ? action.action
-        : null;
-    return name ? [`待审批动作：${name}`] : [];
-  });
-  return descriptions.length > 0
-    ? descriptions.join('\n')
-    : '当前流程需要你的确认，请直接回复继续或说明下一步。';
+  return '当前流程需要你的确认，请等待当前确认面板刷新后再应答。';
 }
 
 export function buildHumanReviewResume(decisions: Array<Record<string, unknown>>) {

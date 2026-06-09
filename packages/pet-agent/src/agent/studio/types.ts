@@ -8,16 +8,16 @@ import type {
   StudioContext,
 } from '../../types/studio';
 import type { SubagentToolEventHandler } from '../../types/subagent';
-import type { HumanReviewDecision, HumanReviewRequest } from '../orchestrator/humanReview';
+import type { HumanReviewDecision } from '../orchestrator/humanReview';
 import type { HumanReviewInterruptPayload } from '../orchestrator/review/reviewSpec';
 
-export type HumanReviewerRequest = HumanReviewRequest | HumanReviewInterruptPayload;
+export type HumanReviewerRequest = HumanReviewInterruptPayload;
 
 /**
  * HumanReviewer:pet runtime 在 invoke 期间撞到 HITL interrupt 时回调的桥。
  *
  * pet runtime 不关心上层是 ws / SSE / TUI / 进程内 mock,只承诺:
- * - 给出 legacy `HumanReviewRequest` 或 canonical `HumanReviewInterruptPayload`
+ * - 给出 canonical `HumanReviewInterruptPayload`
  * - 拿回 `HumanReviewDecision` 后续跑 graph
  *
  * 上层(chat 层 / 测试)在构造 pet runtime 时注入这个函数,内部自行把

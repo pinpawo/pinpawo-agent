@@ -84,8 +84,8 @@ export type ApprovalRequestModel = {
   requestId: RunId;
   kind: string;
   prompt: string;
-  payload: Record<string, unknown>;
-  review?: ReviewSpec;
+  review: ReviewSpec;
+  payload?: Record<string, unknown>;
   petId?: string;
 };
 

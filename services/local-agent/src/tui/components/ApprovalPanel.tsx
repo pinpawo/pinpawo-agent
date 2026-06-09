@@ -1,17 +1,24 @@
 import { Box, Text } from 'ink';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import { TUI_TEXT } from '../render/text';
 import { wrapLine } from '../render/terminalText';
-import type { ApprovalOption } from '../types';
+
+function formatReviewView(review: ReviewSpec) {
+  return [
+    review.view.title,
+    review.view.body,
+  ].filter((line): line is string => Boolean(line && line.trim())).join('\n');
+}
 
 export function ApprovalPanel(props: {
-  prompt: string;
+  review: ReviewSpec;
   petId?: string;
   width: number;
-  options: ApprovalOption[];
   selectedIndex: number;
 }) {
-  const promptLines = wrapLine(props.prompt, props.width - 4);
-  const selectedIndex = Math.max(0, Math.min(props.options.length - 1, props.selectedIndex));
+  const options = props.review.options;
+  const promptLines = wrapLine(formatReviewView(props.review), props.width - 4);
+  const selectedIndex = Math.max(0, Math.min(options.length - 1, props.selectedIndex));
 
   return (
     <Box
@@ -29,7 +36,7 @@ export function ApprovalPanel(props: {
         <Text key={`p-${i}`}>{line}</Text>
       ))}
       <Text>{' '}</Text>
-      {props.options.map((opt, i) => (
+      {options.map((opt, i) => (
         <Box key={`o-${i}`} flexDirection="column">
           <Text color={i === selectedIndex ? 'cyan' : undefined} bold={i === selectedIndex}>
             {i === selectedIndex ? '› ' : '  '}{opt.label}

@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import { config } from '../config';
-import { buildApprovalOptions, findTextInputOption } from './approvalOptions';
 import { ApprovalPanel } from './components/ApprovalPanel';
 import { Composer } from './components/Composer';
 import { MessageBlock } from './components/MessageBlock';
@@ -80,10 +79,7 @@ export function TuiApp(props: { actorId: string }) {
   const pendingUi = selectFocusedPendingUi(tuiState);
   const activeOperations = selectFocusedActiveOperations(tuiState);
   const pendingApproval = selectFocusedPendingApproval(tuiState);
-  const approvalOptions = useMemo(
-    () => (pendingApproval ? buildApprovalOptions(pendingApproval) : []),
-    [pendingApproval],
-  );
+  const reviewOptions = pendingApproval?.review.options ?? [];
   const petName = focusedSession?.actor.label ?? TUI_TEXT.defaultPetName;
   const status = tuiState.connection.message;
 
@@ -100,8 +96,8 @@ export function TuiApp(props: { actorId: string }) {
   }, [pendingApproval?.requestId]);
 
   useEffect(() => {
-    setApprovalIndex((current) => Math.min(current, Math.max(0, approvalOptions.length - 1)));
-  }, [approvalOptions.length]);
+    setApprovalIndex((current) => Math.min(current, Math.max(0, reviewOptions.length - 1)));
+  }, [reviewOptions.length]);
 
   const appendMessage = (role: MessageRole, text: string) => {
     dispatch({
@@ -230,12 +226,14 @@ export function TuiApp(props: { actorId: string }) {
         return;
 
       case 'approval.next':
-        setApprovalIndex((current) => Math.max(0, Math.min(approvalOptions.length - 1, current + 1)));
+        setApprovalIndex((current) => Math.max(0, Math.min(reviewOptions.length - 1, current + 1)));
         return;
 
       case 'approval.submit': {
-        const textInputOption = inputValue.trim() ? findTextInputOption(approvalOptions) : null;
-        const option = textInputOption ?? approvalOptions[approvalIndex] ?? approvalOptions[0];
+        const textInputOption = inputValue.trim()
+          ? reviewOptions.find((option) => option.input?.kind === 'text') ?? null
+          : null;
+        const option = textInputOption ?? reviewOptions[approvalIndex] ?? reviewOptions[0];
         if (option) {
           runtimeController.submitReviewResponse(option, inputValue);
         }
@@ -336,10 +334,9 @@ export function TuiApp(props: { actorId: string }) {
       ) : null}
       {pendingApproval ? (
         <ApprovalPanel
-          prompt={pendingApproval.prompt}
+          review={pendingApproval.review}
           petId={pendingApproval.petId}
           width={contentWidth}
-          options={approvalOptions}
           selectedIndex={approvalIndex}
         />
       ) : null}

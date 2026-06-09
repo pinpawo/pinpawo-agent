@@ -54,8 +54,8 @@ const sampleReview: HumanReviewRequest = buildHumanReviewRequest({
   prompt: 'Approve do_x?',
 });
 
-const sampleToolReview = {
-  kind: 'tool_review' as const,
+const sampleReviewInterrupt = {
+  kind: 'review' as const,
   review: {
     id: 'review-direct',
     schemaVersion: 1,
@@ -120,10 +120,10 @@ test('humanReviewer: multi-round interrupt loops until resolved', async () => {
   assert.equal(requests.length, 2);
 });
 
-test('humanReviewer: canonical tool_review interrupt → approve → reply', async () => {
+test('humanReviewer: canonical review interrupt → approve → reply', async () => {
   const requests: HumanReviewerRequest[] = [];
   const { graph } = makeStubGraph([
-    { __interrupt__: [{ value: sampleToolReview }], messages: [] },
+    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
     { messages: [new AIMessage('direct done')] },
   ]);
 
@@ -141,8 +141,8 @@ test('humanReviewer: canonical tool_review interrupt → approve → reply', asy
   assert.equal(result.reply, 'direct done');
   assert.equal(requests.length, 1);
   const request = requests[0];
-  assert.equal(request?.kind, 'tool_review');
-  assert.equal(request?.kind === 'tool_review' ? request.review.id : null, 'review-direct');
+  assert.equal(request?.kind, 'review');
+  assert.equal(request?.kind === 'review' ? request.review.id : null, 'review-direct');
 });
 
 test('humanReviewer: missing reviewer + interrupt → invoke throws', async () => {

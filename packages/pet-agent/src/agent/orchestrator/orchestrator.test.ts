@@ -646,7 +646,7 @@ test('iteration limit review emits canonical ReviewSpec interrupt payload', asyn
     reviewConfigs?: unknown;
   } | undefined;
 
-  assert.equal(payload?.kind, 'tool_review');
+  assert.equal(payload?.kind, 'review');
   assert.equal(payload?.review?.schemaVersion, 1);
   assert.deepEqual(payload?.review?.options?.map((option) => option.id), ['approve', 'reject', 'respond']);
   assert.equal(payload?.pendingAction?.toolName, 'continue_execution_window');

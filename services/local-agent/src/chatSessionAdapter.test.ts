@@ -158,7 +158,7 @@ test('runChatSession materializes ReviewSpec for human review interrupts', async
   assert.deepEqual(event.review?.options.map((option) => option.id), ['approve', 'reject', 'respond']);
 });
 
-test('runChatSession forwards canonical tool review interrupt specs unchanged', async () => {
+test('runChatSession forwards canonical review interrupt specs unchanged', async () => {
   const emittedEvents: LocalAgentEvent[] = [];
   const setup = {
     graphKey: 'test',
@@ -191,7 +191,7 @@ test('runChatSession forwards canonical tool review interrupt specs unchanged', 
         {
           __interrupt__: [{
             value: {
-              kind: 'tool_review',
+              kind: 'review',
               review,
               pendingAction: {
                 actionId: 'call-1',
@@ -228,7 +228,7 @@ test('runChatSession forwards canonical tool review interrupt specs unchanged', 
   assert.equal(event?.type, 'human_review.requested');
   assert.deepEqual(event.review, review);
   assert.equal(event.prompt, 'Shell command approval\nRun git status?');
-  assert.equal(event.payload?.kind, 'tool_review');
+  assert.equal(event.payload?.kind, 'review');
 });
 
 test('runChatSession adds authorization option from toolkit review policy hook', async () => {

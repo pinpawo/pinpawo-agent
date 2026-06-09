@@ -86,7 +86,7 @@ test('isHumanReviewInterruptError accepts LangGraph interrupt shapes', () => {
   assert.equal(isHumanReviewInterruptError({
     __interrupt__: [{
       value: {
-        kind: 'tool_review',
+        kind: 'review',
         review: {
           id: 'review-1',
           schemaVersion: 1,

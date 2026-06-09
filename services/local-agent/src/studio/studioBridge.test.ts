@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { HumanReviewRequest, ToolReviewInterruptPayload } from '@pinpawo/pet-agent';
+import type { HumanReviewRequest, HumanReviewInterruptPayload } from '@pinpawo/pet-agent';
 
 import {
   buildPetActorFromLocalConfig,
@@ -24,9 +24,9 @@ function sampleRequest(overrides: Partial<HumanReviewRequest> = {}): HumanReview
   };
 }
 
-function sampleToolReview(overrides: Partial<ToolReviewInterruptPayload> = {}): ToolReviewInterruptPayload {
+function sampleReviewInterrupt(overrides: Partial<HumanReviewInterruptPayload> = {}): HumanReviewInterruptPayload {
   return {
-    kind: 'tool_review',
+    kind: 'review',
     review: {
       id: 'review-direct',
       schemaVersion: 1,
@@ -131,7 +131,7 @@ test('createWsHumanReviewer falls back prompt text when request has no prompt', 
   assert.match((sent[0].event as { prompt?: string }).prompt ?? '', /需要你的确认/);
 });
 
-test('createWsHumanReviewer forwards canonical tool review specs unchanged', async () => {
+test('createWsHumanReviewer forwards canonical review specs unchanged', async () => {
   const sent: Array<Record<string, unknown>> = [];
   const slot = createPendingReviewSlot();
   const reviewer = createWsHumanReviewer({
@@ -141,7 +141,7 @@ test('createWsHumanReviewer forwards canonical tool review specs unchanged', asy
     slot,
   });
 
-  const request = sampleToolReview();
+  const request = sampleReviewInterrupt();
   const promise = reviewer(request);
 
   assert.equal(sent.length, 1);

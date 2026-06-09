@@ -125,7 +125,7 @@ export type {
   ReviewResponseResolution,
   ReviewSpec,
   ReviewView,
-  ToolReviewInterruptPayload,
+  HumanReviewInterruptPayload,
   ToolAuthorizationMatcher,
   ToolAuthorizationMatcherTemplate,
 } from './agent/orchestrator/review/reviewSpec';

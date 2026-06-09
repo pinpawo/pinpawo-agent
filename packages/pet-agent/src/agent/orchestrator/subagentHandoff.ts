@@ -11,7 +11,7 @@ import { readFirstHumanReviewDecision } from './humanReview';
 import type {
   PendingReviewAction,
   ReviewSpec,
-  ToolReviewInterruptPayload,
+  HumanReviewInterruptPayload,
 } from './review/reviewSpec';
 import type { MessageLane } from './types';
 
@@ -207,26 +207,24 @@ function buildPendingReviewAction(params: {
   };
 }
 
-function buildToolReviewInterruptPayload(params: {
+function buildHumanReviewInterruptPayload(params: {
   toolName: string;
   input: unknown;
   review: ReviewSpec;
   runtime: ToolRuntime;
-}): ToolReviewInterruptPayload {
+}): HumanReviewInterruptPayload {
   return {
-    kind: 'tool_review',
+    kind: 'review',
     review: params.review,
     pendingAction: buildPendingReviewAction(params),
-    prompt: formatReviewPrompt(params.review),
   };
 }
 
-function buildInvalidDecisionRequest(payload: ToolReviewInterruptPayload): ToolReviewInterruptPayload {
+function buildInvalidDecisionRequest(payload: HumanReviewInterruptPayload): HumanReviewInterruptPayload {
   const message = '无法识别你的决定。请批准、拒绝，或直接输入新的处理方向。';
   return {
     ...payload,
     error: 'invalid_decision',
-    prompt: `${payload.prompt ?? '当前工具调用需要确认。'}\n\n${message}`,
     review: {
       ...payload.review,
       view: {
@@ -263,7 +261,7 @@ function wrapToolkitTool(
           return toolItem.invoke(currentInput as never, runtime as never);
         }
 
-        const reviewPayload = buildToolReviewInterruptPayload({
+        const reviewPayload = buildHumanReviewInterruptPayload({
           toolName: toolItem.name,
           input: currentInput,
           review: reviewSpec,

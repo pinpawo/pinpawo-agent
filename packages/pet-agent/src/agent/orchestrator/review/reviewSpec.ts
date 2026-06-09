@@ -85,11 +85,10 @@ export type PendingReviewState = {
   pendingAction: PendingReviewAction;
 };
 
-export type ToolReviewInterruptPayload = {
-  kind: 'tool_review';
+export type HumanReviewInterruptPayload = {
+  kind: 'review';
   review: ReviewSpec;
   pendingAction: PendingReviewAction;
-  prompt?: string;
   error?: string;
 };
 

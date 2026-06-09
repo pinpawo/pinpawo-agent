@@ -60,7 +60,7 @@ import {
 import {
   readFirstHumanReviewDecision,
 } from './orchestrator/humanReview';
-import { buildReviewSpec, type ToolReviewInterruptPayload } from './orchestrator/review/reviewSpec';
+import { buildReviewSpec, type HumanReviewInterruptPayload } from './orchestrator/review/reviewSpec';
 import {
   reuseOrAppendTurnDelegation,
   updateTurnDelegationResult,
@@ -226,11 +226,11 @@ function buildIterationLimitReviewPayload(params: {
   iterationCount: number;
   maxIterations: number;
   delegationSummary: string;
-}): ToolReviewInterruptPayload {
+}): HumanReviewInterruptPayload {
   const description = `已执行 ${params.iterationCount} 轮循环（上限 ${params.maxIterations}）。`;
   const body = `已执行 ${params.iterationCount} 轮循环（上限 ${params.maxIterations}），当前任务状态：\n${params.delegationSummary}\n\n是否批准继续执行？`;
   return {
-    kind: 'tool_review',
+    kind: 'review',
     review: buildReviewSpec({
       view: {
         kind: 'plain',
@@ -273,18 +273,16 @@ function buildIterationLimitReviewPayload(params: {
       },
       description,
     },
-    prompt: body,
   };
 }
 
 function buildInvalidIterationLimitReviewPayload(
-  payload: ToolReviewInterruptPayload,
-): ToolReviewInterruptPayload {
+  payload: HumanReviewInterruptPayload,
+): HumanReviewInterruptPayload {
   const message = '请选择批准继续，或拒绝停止。';
   return {
     ...payload,
     error: 'invalid_decision',
-    prompt: `${payload.prompt ?? payload.review.view.body}\n\n${message}`,
     review: {
       ...payload.review,
       view: {

@@ -489,7 +489,7 @@ test('handleHumanReviewResponse stores declared authorization effects in graph s
     type: 'human_review.requested',
     requestId: 'req-1',
     payload: {
-      kind: 'tool_review',
+      kind: 'review',
       pendingAction: {
         actionId: 'call-1',
         toolName: 'run_shell',

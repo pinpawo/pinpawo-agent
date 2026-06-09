@@ -79,7 +79,7 @@ export function createWsHumanReviewer(opts: {
         ));
         return;
       }
-      const reviewId = request.kind === 'tool_review'
+      const reviewId = request.kind === 'review'
         ? request.review.id
         : randomUUID().slice(0, 8);
       const prompt = extractPromptText(request);
@@ -102,16 +102,13 @@ export function createWsHumanReviewer(opts: {
 }
 
 function materializeReviewSpec(request: HumanReviewerRequest, reviewId: string): ReviewSpec {
-  return request.kind === 'tool_review'
+  return request.kind === 'review'
     ? request.review
     : buildReviewSpecFromHumanReviewRequest(request, { id: reviewId });
 }
 
 function extractPromptText(request: HumanReviewerRequest): string {
-  if (request.kind === 'tool_review') {
-    if (typeof request.prompt === 'string' && request.prompt.trim()) {
-      return request.prompt.trim();
-    }
+  if (request.kind === 'review') {
     return [
       request.review.view.title,
       request.review.view.body,

@@ -266,6 +266,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       actor,
       messages: state.messages,
       execution,
+      toolAuthorizations: state.toolAuthorizations,
     }, { includeInstructions: false });
     const generalTools = generalToolkitResources.tools;
     validateUniqueToolNames(generalTools);
@@ -378,6 +379,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       actor,
       messages: state.messages,
       execution,
+      toolAuthorizations: state.toolAuthorizations,
     }, { includeInstructions: false });
     const generalTools = generalToolkitResources.tools;
     validateUniqueToolNames(generalTools);
@@ -585,6 +587,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       actor,
       messages: scopedMessages,
       execution,
+      toolAuthorizations: state.toolAuthorizations,
     };
     const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
     const runtimeInstructions = await resolveInstructions(runtime, { models: config.models, actor }, execution);
@@ -670,6 +673,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       actor,
       messages: state.messages,
       execution,
+      toolAuthorizations: state.toolAuthorizations,
     });
     const toolList = [...toolkitResources.tools];
     validateUniqueToolNames(toolList);

@@ -6,15 +6,13 @@ import type {
   ToolAuthorizationMatcherTemplate,
 } from './reviewSpec';
 
-export type ToolAuthorizationRule = {
-  threadId: string;
+export type ToolAuthorizationRecord = {
   toolName: string;
   matcher: ToolAuthorizationMatcher;
   createdAt: string;
 };
 
 export type ApplyReviewEffectsOptions = {
-  threadId: string | null | undefined;
   pendingAction: PendingReviewAction;
   effects: ReviewEffect[];
   toolkits: AgentToolkit[];
@@ -39,8 +37,6 @@ export class ReviewEffectApplicationError extends Error {
     this.code = code;
   }
 }
-
-const threadAuthorizations = new Map<string, ToolAuthorizationRule[]>();
 
 export function normalizeShellPattern(pattern: string) {
   return pattern.replace(/\s+/g, ' ').trim();
@@ -109,7 +105,7 @@ function stableJson(value: unknown) {
   );
 }
 
-function matchesAuthorizationRule(rule: ToolAuthorizationRule, params: {
+function matchesAuthorizationRule(rule: ToolAuthorizationRecord, params: {
   toolName: string;
   args: Record<string, unknown>;
 }) {
@@ -132,40 +128,28 @@ function matchesAuthorizationRule(rule: ToolAuthorizationRule, params: {
   return stableJson(rule.matcher.value) === stableJson(params.args);
 }
 
-export function authorizeToolAction(params: {
-  threadId: string | null | undefined;
+export function buildToolAuthorizationRecord(params: {
   toolName: string;
   matcher: ToolAuthorizationMatcher;
   now?: () => Date;
-}): ToolAuthorizationRule | null {
-  const threadId = params.threadId?.trim();
-  if (!threadId) {
-    return null;
-  }
+}): ToolAuthorizationRecord {
   const matcher = assertToolAuthorizationMatcher(params.matcher, 'authorizeToolAction');
   const createdAt = (params.now ?? (() => new Date()))().toISOString();
-  const rule: ToolAuthorizationRule = {
-    threadId,
+  return {
     toolName: params.toolName,
     matcher,
     createdAt,
   };
-  const rules = threadAuthorizations.get(threadId) ?? [];
-  rules.push(rule);
-  threadAuthorizations.set(threadId, rules);
-  return rule;
 }
 
+export const authorizeToolAction = buildToolAuthorizationRecord;
+
 export function isToolActionAuthorized(params: {
-  threadId: string | null | undefined;
+  authorizations: ToolAuthorizationRecord[];
   toolName: string;
   args: Record<string, unknown>;
 }) {
-  const threadId = params.threadId?.trim();
-  if (!threadId) {
-    return false;
-  }
-  return (threadAuthorizations.get(threadId) ?? []).some((rule) =>
+  return params.authorizations.some((rule) =>
     matchesAuthorizationRule(rule, {
       toolName: params.toolName,
       args: params.args,
@@ -173,11 +157,11 @@ export function isToolActionAuthorized(params: {
   );
 }
 
-export function clearToolAuthorizations(threadId: string | null | undefined) {
-  const key = threadId?.trim();
-  if (key) {
-    threadAuthorizations.delete(key);
-  }
+export function mergeToolAuthorizations(
+  current: ToolAuthorizationRecord[] | null | undefined,
+  next: ToolAuthorizationRecord[],
+) {
+  return [...(current ?? []), ...next];
 }
 
 function findReviewPolicy(toolkits: AgentToolkit[], toolName: string): {
@@ -245,15 +229,7 @@ async function buildMatcherFromTemplate(params: {
 }
 
 export async function applyReviewEffects(options: ApplyReviewEffectsOptions) {
-  const threadId = options.threadId?.trim();
-  if (!threadId && options.effects.length > 0) {
-    throw new ReviewEffectApplicationError(
-      'missing_thread',
-      'Cannot apply review effects without a graph thread id.',
-    );
-  }
-
-  const applied: ToolAuthorizationRule[] = [];
+  const applied: ToolAuthorizationRecord[] = [];
   for (const effect of options.effects) {
     if (effect.type !== 'graph.authorize_tool_action') {
       throw new ReviewEffectApplicationError(
@@ -274,15 +250,12 @@ export async function applyReviewEffects(options: ApplyReviewEffectsOptions) {
       pendingAction: options.pendingAction,
       toolkits: options.toolkits,
     });
-    const rule = authorizeToolAction({
-      threadId,
+    const rule = buildToolAuthorizationRecord({
       toolName: options.pendingAction.toolName,
       matcher,
       now: options.now,
     });
-    if (rule) {
-      applied.push(rule);
-    }
+    applied.push(rule);
   }
   return applied;
 }

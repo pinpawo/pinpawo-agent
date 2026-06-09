@@ -2,7 +2,6 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import { clearToolAuthorizations } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
@@ -111,9 +110,8 @@ export class LocalServerTuiSessionService {
   }
 
   createNewSession(petId: string) {
-    const previous = this.getActiveSession(petId);
+    this.getActiveSession(petId);
     const next = createTuiSession(this.state, petId);
-    clearToolAuthorizations(previous.threadId);
     this.save();
     return next;
   }
@@ -121,7 +119,6 @@ export class LocalServerTuiSessionService {
   async resetSession(petId: string, options: { deletePrevious?: boolean } = {}) {
     const previous = this.getActiveSession(petId);
     const next = createTuiSession(this.state, petId);
-    clearToolAuthorizations(previous.threadId);
     if (options.deletePrevious) {
       await this.checkpointer.deleteThread(previous.threadId);
       delete this.state.sessions[previous.id];

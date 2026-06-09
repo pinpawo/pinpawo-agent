@@ -33,9 +33,9 @@ import { Command } from '@langchain/langgraph';
 import {
   applyReviewEffects,
   buildHumanReviewRequest,
-  clearToolAuthorizations,
   isToolActionAuthorized,
   type AgentToolkit,
+  type ToolAuthorizationRecord,
 } from '@pinpawo/pet-agent';
 import { runChatSession } from '../src/chatSessionAdapter';
 import type { LocalAgentEvent } from '../src/events/localAgentEvent';
@@ -249,8 +249,6 @@ function buildFakeSetup() {
 }
 
 async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
-  clearToolAuthorizations(FAKE_THREAD_ID);
-
   const fakeGraph = createFakeGraphService({
     pendingShellCommand: inputs.pending_shell_command,
     finalReply: inputs.final_reply ?? '',
@@ -303,9 +301,9 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     ),
   );
   let authorizedPattern: string | null = null;
+  let appliedAuthorizations: ToolAuthorizationRecord[] = [];
   if (selectedOption?.effects?.length) {
-    const applied = await applyReviewEffects({
-      threadId: FAKE_THREAD_ID,
+    appliedAuthorizations = await applyReviewEffects({
       pendingAction: {
         actionId: 'pending_action',
         toolName: 'run_shell',
@@ -314,7 +312,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
       effects: selectedOption.effects,
       toolkits: FAKE_TOOLKITS,
     });
-    const matcher = applied[0]?.matcher;
+    const matcher = appliedAuthorizations[0]?.matcher;
     authorizedPattern = matcher?.type === 'shell_pattern' ? matcher.value : null;
   }
 
@@ -343,7 +341,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     authorization_option_present: authorizationOptionPresent,
     authorized_pattern: authorizedPattern,
     authorization_recorded: isToolActionAuthorized({
-      threadId: FAKE_THREAD_ID,
+      authorizations: appliedAuthorizations,
       toolName: 'run_shell',
       args: { command: inputs.pending_shell_command },
     }),

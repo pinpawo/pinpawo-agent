@@ -3,15 +3,13 @@ import test from 'node:test';
 import {
   applyReviewEffects,
   authorizeToolAction,
-  clearToolAuthorizations,
   isToolActionAuthorized,
   readToolAuthorizationMatcher,
   ReviewEffectApplicationError,
 } from './review/reviewAuthorizations';
 import type { AgentToolkit } from '../../types/toolkit';
 
-test('applyReviewEffects stores policy-derived thread authorization', async () => {
-  clearToolAuthorizations('thread-1');
+test('applyReviewEffects builds policy-derived authorization records', async () => {
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
@@ -29,7 +27,6 @@ test('applyReviewEffects stores policy-derived thread authorization', async () =
   }];
 
   const applied = await applyReviewEffects({
-    threadId: 'thread-1',
     pendingAction: {
       actionId: 'pending_action',
       toolName: 'run_shell',
@@ -46,14 +43,13 @@ test('applyReviewEffects stores policy-derived thread authorization', async () =
   });
 
   assert.deepEqual(applied, [{
-    threadId: 'thread-1',
     toolName: 'run_shell',
     matcher: { type: 'shell_pattern', value: 'git status' },
     createdAt: '2026-06-09T00:00:00.000Z',
   }]);
   assert.equal(
     isToolActionAuthorized({
-      threadId: 'thread-1',
+      authorizations: applied,
       toolName: 'run_shell',
       args: { command: 'git   status', cwd: '/repo' },
     }),
@@ -61,13 +57,12 @@ test('applyReviewEffects stores policy-derived thread authorization', async () =
   );
   assert.equal(
     isToolActionAuthorized({
-      threadId: 'thread-1',
+      authorizations: applied,
       toolName: 'run_shell',
       args: { command: 'git push', cwd: '/repo' },
     }),
     false,
   );
-  clearToolAuthorizations('thread-1');
 });
 
 test('readToolAuthorizationMatcher accepts only declared matcher structures', () => {
@@ -100,7 +95,6 @@ test('applyReviewEffects rejects policy hooks that return undeclared matcher str
 
   await assert.rejects(
     () => applyReviewEffects({
-      threadId: 'thread-1',
       pendingAction: {
         actionId: 'pending_action',
         toolName: 'run_shell',
@@ -120,10 +114,8 @@ test('applyReviewEffects rejects policy hooks that return undeclared matcher str
 });
 
 test('authorizeToolAction validates matcher shape before storing state', () => {
-  clearToolAuthorizations('thread-2');
   assert.throws(
     () => authorizeToolAction({
-      threadId: 'thread-2',
       toolName: 'run_shell',
       matcher: { type: 'shell_pattern', value: '   ' },
     }),
@@ -132,7 +124,7 @@ test('authorizeToolAction validates matcher shape before storing state', () => {
   );
   assert.equal(
     isToolActionAuthorized({
-      threadId: 'thread-2',
+      authorizations: [],
       toolName: 'run_shell',
       args: { command: 'git status' },
     }),

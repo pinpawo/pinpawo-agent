@@ -66,7 +66,8 @@ export function resolveTuiKeyAction(
     if (key.downArrow) return { type: 'approval.next' };
     if (key.return) return { type: 'approval.submit' };
     if (key.escape) return { type: 'approval.dismiss' };
-    return { type: 'none' };
+    if (key.tab || (key.shift && key.tab)) return { type: 'none' };
+    return { type: 'composer.edit' };
   }
 
   if (context.busy) {

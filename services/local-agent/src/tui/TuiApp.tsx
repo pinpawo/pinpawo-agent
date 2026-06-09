@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import { config } from '../config';
-import { ApprovalPanel, buildApprovalOptions } from './components/ApprovalPanel';
+import { buildApprovalOptions, findTextInputOption } from './approvalOptions';
+import { ApprovalPanel } from './components/ApprovalPanel';
 import { Composer } from './components/Composer';
 import { MessageBlock } from './components/MessageBlock';
 import { RuntimeInfoLine } from './components/RuntimeInfoLine';
@@ -233,9 +234,10 @@ export function TuiApp(props: { actorId: string }) {
         return;
 
       case 'approval.submit': {
-        const option = approvalOptions[approvalIndex] ?? approvalOptions[0];
+        const textInputOption = inputValue.trim() ? findTextInputOption(approvalOptions) : null;
+        const option = textInputOption ?? approvalOptions[approvalIndex] ?? approvalOptions[0];
         if (option) {
-          runtimeController.submitReviewResponse(option);
+          runtimeController.submitReviewResponse(option, inputValue);
         }
         return;
       }
@@ -298,7 +300,7 @@ export function TuiApp(props: { actorId: string }) {
   );
 
   // Input area focus: only when ready, not busy, and no modal panel.
-  const inputFocused = ready && !busy && !pendingApproval && !resumePickerOpen;
+  const inputFocused = ready && !busy && !resumePickerOpen;
 
   // Contextual help text
   const helpText = busy
@@ -334,7 +336,8 @@ export function TuiApp(props: { actorId: string }) {
       ) : null}
       {pendingApproval ? (
         <ApprovalPanel
-          approval={pendingApproval}
+          prompt={pendingApproval.prompt}
+          petId={pendingApproval.petId}
           width={contentWidth}
           options={approvalOptions}
           selectedIndex={approvalIndex}

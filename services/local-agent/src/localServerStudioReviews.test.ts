@@ -39,6 +39,8 @@ test('LocalServerStudioReviewRouter routes response only when a review is pendin
     type: 'human_review_response',
     requestId: 'req-1',
     message: 'hello',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
   }, () => undefined), false);
 
   const slot = router.getOrCreateSlot(connection);
@@ -84,7 +86,7 @@ test('LocalServerStudioReviewRouter rejects non-canonical responses while review
     requestId: 'req-1',
     message: '继续',
     resume: { decisions: [{ type: 'approve' }] },
-  }, () => undefined), true);
+  } as never, () => undefined), true);
   assert.equal(resolved, false);
   assert.notEqual(slot.current, null);
 });
@@ -110,5 +112,7 @@ test('LocalServerStudioReviewRouter rejects and deletes disconnected slots', asy
     type: 'human_review_response',
     requestId: 'req-1',
     message: 'late',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
   }, () => undefined), false);
 });

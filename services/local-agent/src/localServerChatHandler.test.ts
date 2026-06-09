@@ -70,51 +70,6 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
   assert.match(event.event?.message ?? '', /过期/);
 });
 
-test('handleHumanReviewResponse rejects canonical option without reviewId', async () => {
-  const handleChatCalls: unknown[] = [];
-  const sentEvents: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
-  const handler = new LocalServerChatHandler({
-    graphService: {} as never,
-    tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
-      getChatThreadId: () => 'thread-x',
-    } as never,
-    inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
-      emitOperation: () => {},
-      sendControl: () => {},
-    }),
-  });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).handleChatRequest = async (...args: unknown[]) => {
-    handleChatCalls.push(args);
-  };
-
-  await handler.handleHumanReviewResponse(
-    fakeWs,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      message: '',
-      selectedOptionId: 'approve',
-    },
-    { actorId: 'pet-1' } as never,
-  );
-
-  assert.equal(handleChatCalls.length, 0);
-  assert.equal(sentEvents.length, 1);
-  const event = sentEvents[0] as { type: string; event?: { type: string; message: string } };
-  assert.equal(event.type, 'event');
-  assert.equal(event.event?.type, 'error');
-  assert.match(event.event?.message ?? '', /reviewId/);
-});
-
 test('handleHumanReviewResponse consumes matching canonical review route once', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
@@ -246,7 +201,6 @@ test('handleHumanReviewResponse resolves canonical respond input and keeps route
       reviewId: 'review-current',
       selectedOptionId: 'respond',
       input: { message: '请先解释风险' },
-      resume: { decisions: [{ type: 'approve' }] },
     },
     { actorId: 'pet-1' } as never,
   );
@@ -323,43 +277,6 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.match(event.event?.message ?? '', /发起该 review 的会话/);
-});
-
-test('handleHumanReviewResponse forwards explicit resume responses without client session extras', async () => {
-  const handleChatCalls: unknown[] = [];
-  const fakeWs = { readyState: WebSocket.OPEN, send: () => {} } as unknown as WebSocket;
-
-  const tuiSessions = {
-    getActiveSessionId: () => 'sess-active',
-    getChatThreadId: () => 'thread-x',
-  } as never;
-
-  const handler = new LocalServerChatHandler({
-    graphService: {} as never,
-    tuiSessions,
-    inflightRequests: new InflightRequestController({
-      forceInterruptMs: 1000,
-      emitOperation: () => {},
-      sendControl: () => {},
-    }),
-  });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).handleChatRequest = async (...args: unknown[]) => {
-    handleChatCalls.push(args);
-  };
-
-  await handler.handleHumanReviewResponse(
-    fakeWs,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      message: '批准',
-      resume: { decisions: [{ type: 'approve' }] },
-    },
-    { actorId: 'pet-1' } as never,
-  );
-
-  assert.equal(handleChatCalls.length, 1, 'absent origin should forward without guarding');
 });
 
 test('handleHumanReviewResponse stores declared authorization effects in graph state before forwarding', async () => {

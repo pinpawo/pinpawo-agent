@@ -37,10 +37,9 @@ export type HumanReviewResponseMessage = {
   type: 'human_review_response';
   requestId: string;
   message: string;
-  reviewId?: string;
-  selectedOptionId?: string;
+  reviewId: string;
+  selectedOptionId: string;
   input?: Record<string, unknown>;
-  resume?: unknown;
 };
 
 export type LocalAgentClientMessage =
@@ -291,16 +290,14 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
     const reviewId = readOptionalString(record, 'reviewId');
     const selectedOptionId = readOptionalString(record, 'selectedOptionId');
     const input = readRecord(record, 'input');
-    if (!requestId || (message == null && !selectedOptionId)) return null;
-    if (selectedOptionId && !reviewId) return null;
+    if (!requestId || !reviewId || !selectedOptionId) return null;
     return {
       type,
       requestId,
       message: message ?? '',
-      ...(reviewId ? { reviewId } : {}),
-      ...(selectedOptionId ? { selectedOptionId } : {}),
+      reviewId,
+      selectedOptionId,
       ...(input ? { input } : {}),
-      ...(record.resume !== undefined ? { resume: record.resume } : {}),
     };
   }
   if (type === 'interrupt_request') {

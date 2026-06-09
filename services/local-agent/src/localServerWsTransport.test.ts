@@ -44,7 +44,13 @@ test('local websocket transport dispatches typed client messages and pong', asyn
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'ping' }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'chat_request', requestId: 'chat-1', message: 'hi' }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'studio_request', requestId: 'studio-1', userRequest: 'plan' }), handlers);
-  dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'human_review_response', requestId: 'review-1', message: 'approve' }), handlers);
+  dispatchLocalServerWebSocketMessage(ws, JSON.stringify({
+    type: 'human_review_response',
+    requestId: 'review-1',
+    reviewId: 'review-spec-1',
+    selectedOptionId: 'approve',
+    message: 'approve',
+  }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'interrupt_request', requestId: 'chat-1' }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'new_session', userId: 'user-1' }), handlers);
   dispatchLocalServerWebSocketMessage(ws, '{bad json', handlers);

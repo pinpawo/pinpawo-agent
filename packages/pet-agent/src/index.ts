@@ -82,6 +82,32 @@ export type {
   HumanReviewDecisionType,
   HumanReviewRequest,
 } from './agent/orchestrator/humanReview';
+export { buildReviewSpecFromHumanReviewRequest } from './agent/orchestrator/review/reviewSpecFromHumanReview';
+export type {
+  BuildReviewSpecFromHumanReviewRequestOptions,
+} from './agent/orchestrator/review/reviewSpecFromHumanReview';
+export {
+  resolveHumanReviewResponse,
+  ReviewResponseResolutionError,
+} from './agent/orchestrator/review/reviewResponseResolver';
+export type {
+  ReviewResponseResolutionErrorCode,
+} from './agent/orchestrator/review/reviewResponseResolver';
+export type {
+  PendingReviewAction,
+  PendingReviewState,
+  ReviewActionRef,
+  ReviewEffect,
+  ReviewOption,
+  ReviewOptionDecision,
+  ReviewOptionInput,
+  ReviewResponse,
+  ReviewResponseResolution,
+  ReviewSpec,
+  ReviewView,
+  ToolAuthorizationMatcher,
+  ToolAuthorizationMatcherTemplate,
+} from './agent/orchestrator/review/reviewSpec';
 export {
   readBoolean,
   readJsonRecord,

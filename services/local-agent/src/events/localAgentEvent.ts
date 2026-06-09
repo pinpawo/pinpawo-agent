@@ -1,3 +1,5 @@
+import type { ReviewSpec } from '@pinpawo/pet-agent';
+
 export type LocalAgentEvent =
   | LocalAgentMessageDeltaEvent
   | LocalAgentMessageCompletedEvent
@@ -73,8 +75,9 @@ export type LocalAgentOperationInternalEvent = LocalAgentOperationEvent & {
 export type LocalAgentHumanReviewRequestedEvent = {
   type: 'human_review.requested';
   requestId: string;
-  prompt: string;
-  payload: Record<string, unknown>;
+  review?: ReviewSpec;
+  prompt?: string;
+  payload?: Record<string, unknown>;
   actor?: {
     petId?: string;
   };

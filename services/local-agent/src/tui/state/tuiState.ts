@@ -1,3 +1,4 @@
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
 import { TUI_TEXT } from '../render/text';
 
@@ -84,6 +85,7 @@ export type ApprovalRequestModel = {
   kind: string;
   prompt: string;
   payload: Record<string, unknown>;
+  review?: ReviewSpec;
   petId?: string;
 };
 

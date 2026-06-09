@@ -94,6 +94,70 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
   );
 });
 
+test('runChatSession materializes ReviewSpec for human review interrupts', async () => {
+  const emittedEvents: LocalAgentEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+  const graphService = {
+    async getState() {
+      return { tasks: [] };
+    },
+    async *stream() {
+      yield [
+        'values',
+        {
+          __interrupt__: [{
+            value: {
+              kind: 'human_review',
+              prompt: 'Approve shell command?',
+              actionRequests: [{
+                name: 'shell',
+                args: { command: 'npm test' },
+                description: 'Run tests',
+              }],
+              reviewConfigs: [{
+                actionName: 'shell',
+                allowedDecisions: ['approve', 'reject', 'respond'],
+              }],
+            },
+          }],
+        },
+      ];
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'waiting_human' });
+  const event = emittedEvents[0];
+  assert.equal(event?.type, 'human_review.requested');
+  assert.equal(event.requestId, 'req-1');
+  assert.equal(event.prompt, 'Approve shell command?');
+  assert.equal(event.review?.schemaVersion, 1);
+  assert.equal(event.review?.view.body.includes('Approve shell command?'), true);
+  assert.deepEqual(event.review?.options.map((option) => option.id), ['approve', 'reject', 'respond']);
+});
+
 test('runChatSession emits token usage in completed event', async () => {
   const emittedEvents: unknown[] = [];
   const promptMessages = [

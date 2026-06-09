@@ -7,6 +7,7 @@ import {
   getOperationKey,
 } from '../render/eventText';
 import { TUI_TEXT } from '../render/text';
+import type { LocalAgentEvent } from '../../events/localAgentEvent';
 import type {
   ActiveOperationModel,
   ActiveRunModel,
@@ -195,9 +196,20 @@ function activeRunToPendingApproval(run: ActiveRunModel | null) {
         requestId: run.pendingReview.requestId,
         prompt: run.pendingReview.prompt,
         payload: run.pendingReview.payload,
+        ...(run.pendingReview.review ? { review: run.pendingReview.review } : {}),
         ...(run.pendingReview.petId ? { petId: run.pendingReview.petId } : {}),
       }
     : null;
+}
+
+function formatReviewPrompt(event: Extract<LocalAgentEvent, { type: 'human_review.requested' }>) {
+  const prompt = event.prompt?.trim();
+  if (prompt) return prompt;
+  const review = event.review;
+  if (review?.view.title && review.view.body) {
+    return `${review.view.title}\n${review.view.body}`;
+  }
+  return review?.view.body.trim() || TUI_TEXT.approvalFallbackPrompt;
 }
 
 function updateOperation(
@@ -476,8 +488,9 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       }
 
       if (event.type === 'human_review.requested') {
-        const prompt = event.prompt.trim() || TUI_TEXT.approvalFallbackPrompt;
-        const kind = typeof event.payload.kind === 'string' ? event.payload.kind : 'interrupt';
+        const prompt = formatReviewPrompt(event);
+        const payload = event.payload ?? {};
+        const kind = typeof payload.kind === 'string' ? payload.kind : 'interrupt';
         const petId = event.actor?.petId || undefined;
         return updateSession({
           ...state,
@@ -498,7 +511,8 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
                   requestId: event.requestId,
                   kind,
                   prompt,
-                  payload: event.payload,
+                  payload,
+                  ...(event.review ? { review: event.review } : {}),
                   ...(petId ? { petId } : {}),
                 },
               }

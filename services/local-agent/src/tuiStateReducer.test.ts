@@ -391,6 +391,54 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.equal(state.connection.message, '正在打断');
 });
 
+test('tuiStateReducer accepts canonical human review specs without legacy payload', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'human_review.requested',
+      requestId: 'req-1',
+      review: {
+        id: 'review-1',
+        schemaVersion: 1,
+        view: {
+          kind: 'plain',
+          title: 'Needs approval',
+          body: 'Run command?',
+        },
+        options: [{
+          id: 'approve',
+          label: 'Approve',
+          decision: { type: 'approve' },
+        }],
+      },
+    },
+    now: 1200,
+  });
+
+  assert.deepEqual(selectFocusedPendingApproval(state), {
+    kind: 'interrupt',
+    requestId: 'req-1',
+    prompt: 'Needs approval\nRun command?',
+    payload: {},
+    review: {
+      id: 'review-1',
+      schemaVersion: 1,
+      view: {
+        kind: 'plain',
+        title: 'Needs approval',
+        body: 'Run command?',
+      },
+      options: [{
+        id: 'approve',
+        label: 'Approve',
+        decision: { type: 'approve' },
+      }],
+    },
+  });
+});
+
 test('tuiStateReducer finishes error and studio control messages', () => {
   let state = startRun(initialState(), 'chat-req');
   state = tuiStateReducer(state, {

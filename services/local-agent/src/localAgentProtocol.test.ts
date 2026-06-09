@@ -48,6 +48,35 @@ test('parseLocalAgentClientMessage accepts explicit human review responses', () 
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
 });
 
+test('parseLocalAgentClientMessage accepts canonical human review response fields', () => {
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      reviewId: 'review-1',
+      selectedOptionId: 'respond',
+      input: { message: 'list files first' },
+    })),
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      message: '',
+      reviewId: 'review-1',
+      selectedOptionId: 'respond',
+      input: { message: 'list files first' },
+    },
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      selectedOptionId: 'respond',
+      input: { message: 'missing review id' },
+    })),
+    null,
+  );
+});
+
 test('parseLocalAgentClientMessage carries typed review extras (authorizeShellPattern, originSessionId)', () => {
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({
@@ -210,6 +239,55 @@ test('parseLocalAgentServerMessage accepts legacy top-level human_review.request
             name: 'run_shell',
             args: { command: 'rm -rf /tmp/demo' },
             description: '删除',
+          }],
+        },
+      },
+    },
+  );
+});
+
+test('parseLocalAgentServerMessage accepts canonical human_review.requested review specs', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'human_review.requested',
+        requestId: 'req-1',
+        review: {
+          id: 'review-1',
+          schemaVersion: 1,
+          view: {
+            kind: 'plain',
+            title: 'Needs approval',
+            body: 'Run command?',
+          },
+          options: [{
+            id: 'approve',
+            label: 'Approve',
+            decision: { type: 'approve' },
+          }],
+        },
+      },
+    })),
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'human_review.requested',
+        requestId: 'req-1',
+        review: {
+          id: 'review-1',
+          schemaVersion: 1,
+          view: {
+            kind: 'plain',
+            title: 'Needs approval',
+            body: 'Run command?',
+          },
+          options: [{
+            id: 'approve',
+            label: 'Approve',
+            decision: { type: 'approve' },
           }],
         },
       },

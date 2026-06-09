@@ -1,3 +1,4 @@
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type {
   LocalAgentEvent,
   LocalAgentOperationInternalEvent,
@@ -56,6 +57,9 @@ export type HumanReviewResponseMessage = {
   type: 'human_review_response';
   requestId: string;
   message: string;
+  reviewId?: string;
+  selectedOptionId?: string;
+  input?: Record<string, unknown>;
   resume?: unknown;
   extras?: ReviewResumeExtras;
 };
@@ -138,6 +142,37 @@ function readStringArray(record: Record<string, unknown>, key: string) {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
     ? value
     : null;
+}
+
+function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpec | null {
+  const review = readRecord(record, key);
+  if (!review) return null;
+  const id = readString(review, 'id');
+  const schemaVersion = readOptionalNumber(review, 'schemaVersion');
+  const view = readRecord(review, 'view');
+  const viewKind = view ? readString(view, 'kind') : null;
+  const viewBody = view ? readString(view, 'body') : null;
+  const options = review.options;
+  if (
+    !id
+    || schemaVersion === undefined
+    || (viewKind !== 'plain' && viewKind !== 'markdown')
+    || viewBody == null
+    || !Array.isArray(options)
+  ) {
+    return null;
+  }
+
+  const validOptions = options.every((option) => {
+    if (!option || typeof option !== 'object' || Array.isArray(option)) return false;
+    const optionRecord = option as Record<string, unknown>;
+    return typeof optionRecord.id === 'string'
+      && typeof optionRecord.label === 'string'
+      && optionRecord.decision
+      && typeof optionRecord.decision === 'object'
+      && !Array.isArray(optionRecord.decision);
+  });
+  return validOptions ? review as ReviewSpec : null;
 }
 
 function readReviewResumeExtras(record: Record<string, unknown>): ReviewResumeExtras | null {
@@ -245,15 +280,17 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     };
   }
   if (type === 'human_review.requested') {
-    const prompt = readString(record, 'prompt');
+    const prompt = readOptionalString(record, 'prompt');
     const payload = readRecord(record, 'payload');
+    const review = readReviewSpec(record, 'review');
     const actor = readRecord(record, 'actor');
-    if (prompt == null || !payload) return null;
+    if (!review && (prompt == null || !payload)) return null;
     return {
       type,
       requestId,
-      prompt,
-      payload,
+      ...(review ? { review } : {}),
+      ...(prompt != null ? { prompt } : {}),
+      ...(payload ? { payload } : {}),
       ...(actor ? { actor: { petId: readOptionalString(actor, 'petId') } } : {}),
     };
   }
@@ -289,12 +326,19 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
   if (type === 'human_review_response') {
     const requestId = readString(record, 'requestId');
     const message = readString(record, 'message');
-    if (!requestId || message == null) return null;
+    const reviewId = readOptionalString(record, 'reviewId');
+    const selectedOptionId = readOptionalString(record, 'selectedOptionId');
+    const input = readRecord(record, 'input');
+    if (!requestId || (message == null && !selectedOptionId)) return null;
+    if (selectedOptionId && !reviewId) return null;
     const extras = readReviewResumeExtras(record);
     return {
       type,
       requestId,
-      message,
+      message: message ?? '',
+      ...(reviewId ? { reviewId } : {}),
+      ...(selectedOptionId ? { selectedOptionId } : {}),
+      ...(input ? { input } : {}),
       ...(record.resume !== undefined ? { resume: record.resume } : {}),
       ...(extras ? { extras } : {}),
     };

@@ -3,6 +3,7 @@ import { isOrchestratorInternalAiStreamNode } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { LocalAgentGraphService } from './agentGraphService';
 import {
+  buildReviewSpecFromInterruptPayload,
   formatInterruptPrompt,
   normalizeInterruptResume,
   readPendingInterrupt,
@@ -149,12 +150,14 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       if (mode === 'values' && payload && typeof payload === 'object' && '__interrupt__' in payload) {
         const interruptPayload = readFirstInterruptPayload(payload);
         if (interruptPayload) {
+          const review = buildReviewSpecFromInterruptPayload(interruptPayload);
           recordAgentRunActivity('waiting_human', requestId);
           emitEvent({
             type: 'human_review.requested',
             requestId,
             prompt: formatInterruptPrompt(interruptPayload),
             payload: interruptPayload,
+            ...(review ? { review } : {}),
           });
           return { status: 'waiting_human' };
         }
@@ -177,12 +180,14 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   const finalInterrupt = readPendingInterrupt(finalSnapshot);
   if (finalInterrupt) {
+    const review = buildReviewSpecFromInterruptPayload(finalInterrupt);
     recordAgentRunActivity('waiting_human', requestId);
     emitEvent({
       type: 'human_review.requested',
       requestId,
       prompt: formatInterruptPrompt(finalInterrupt),
       payload: finalInterrupt,
+      ...(review ? { review } : {}),
     });
     return { status: 'waiting_human' };
   }

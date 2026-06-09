@@ -52,13 +52,23 @@ test('createWsHumanReviewer sends human review event and resolves when slot reso
   const msg = sent[0];
   assert.equal(msg.type, 'event');
   assert.equal(msg.requestId, 'r1');
-  assert.deepEqual(msg.event, {
-    type: 'human_review.requested',
-    requestId: 'r1',
-    prompt: 'go ahead?',
-    payload: sampleRequest({ prompt: 'go ahead?' }),
-    actor: { petId: 'planner' },
-  });
+  const event = msg.event as {
+    type: string;
+    requestId: string;
+    prompt: string;
+    payload: unknown;
+    review?: { id: string; schemaVersion: number; view: { body: string }; options: Array<{ id: string }> };
+    actor: { petId: string };
+  };
+  assert.equal(event.type, 'human_review.requested');
+  assert.equal(event.requestId, 'r1');
+  assert.equal(event.prompt, 'go ahead?');
+  assert.deepEqual(event.payload, sampleRequest({ prompt: 'go ahead?' }));
+  assert.deepEqual(event.actor, { petId: 'planner' });
+  assert.equal(event.review?.id, slot.current?.reviewId);
+  assert.equal(event.review?.schemaVersion, 1);
+  assert.equal(event.review?.view.body, 'go ahead?');
+  assert.deepEqual(event.review?.options.map((option) => option.id), ['approve', 'reject', 'respond']);
 
   // slot 占用中
   assert.ok(slot.current);

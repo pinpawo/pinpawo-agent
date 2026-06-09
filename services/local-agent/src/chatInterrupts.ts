@@ -1,3 +1,57 @@
+import {
+  buildReviewSpecFromHumanReviewRequest,
+  type HumanReviewActionRequest,
+  type HumanReviewConfig,
+  type HumanReviewDecisionType,
+  type HumanReviewRequest,
+  type ReviewSpec,
+} from '@pinpawo/pet-agent';
+
+function readDecisionType(value: unknown): HumanReviewDecisionType | null {
+  return value === 'approve' || value === 'edit' || value === 'reject' || value === 'respond'
+    ? value
+    : null;
+}
+
+function readHumanReviewActionRequest(value: unknown): HumanReviewActionRequest | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const name = typeof record.name === 'string' && record.name.trim()
+    ? record.name.trim()
+    : typeof record.action === 'string' && record.action.trim()
+      ? record.action.trim()
+      : null;
+  const args = record.args && typeof record.args === 'object' && !Array.isArray(record.args)
+    ? record.args as Record<string, unknown>
+    : {};
+  if (!name) return null;
+  return {
+    name,
+    args,
+    ...(typeof record.description === 'string' ? { description: record.description } : {}),
+  };
+}
+
+function readHumanReviewConfig(value: unknown): HumanReviewConfig | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const actionName = typeof record.actionName === 'string' && record.actionName.trim()
+    ? record.actionName.trim()
+    : null;
+  const allowedDecisions = Array.isArray(record.allowedDecisions)
+    ? record.allowedDecisions.flatMap((decision) => {
+      const type = readDecisionType(decision);
+      return type ? [type] : [];
+    })
+    : [];
+  if (!actionName) return null;
+  return {
+    actionName,
+    allowedDecisions,
+    ...(typeof record.description === 'string' ? { description: record.description } : {}),
+  };
+}
+
 export function readPendingInterrupt(snapshot: { tasks?: unknown }): Record<string, unknown> | null {
   const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
   for (const task of tasks) {
@@ -27,6 +81,39 @@ export function isHumanReviewInterruptPayload(interruptPayload: Record<string, u
       Array.isArray(interruptPayload.actionRequests)
       && Array.isArray(interruptPayload.reviewConfigs)
     );
+}
+
+export function readHumanReviewRequest(interruptPayload: Record<string, unknown>): HumanReviewRequest | null {
+  if (!isHumanReviewInterruptPayload(interruptPayload)) {
+    return null;
+  }
+  const actionRequests = Array.isArray(interruptPayload.actionRequests)
+    ? interruptPayload.actionRequests.flatMap((action) => {
+      const request = readHumanReviewActionRequest(action);
+      return request ? [request] : [];
+    })
+    : [];
+  const reviewConfigs = Array.isArray(interruptPayload.reviewConfigs)
+    ? interruptPayload.reviewConfigs.flatMap((config) => {
+      const reviewConfig = readHumanReviewConfig(config);
+      return reviewConfig ? [reviewConfig] : [];
+    })
+    : [];
+
+  return {
+    kind: 'human_review',
+    actionRequests,
+    reviewConfigs,
+    ...(typeof interruptPayload.prompt === 'string' ? { prompt: interruptPayload.prompt } : {}),
+    ...(typeof interruptPayload.error === 'string' ? { error: interruptPayload.error } : {}),
+  };
+}
+
+export function buildReviewSpecFromInterruptPayload(
+  interruptPayload: Record<string, unknown>,
+): ReviewSpec | undefined {
+  const request = readHumanReviewRequest(interruptPayload);
+  return request ? buildReviewSpecFromHumanReviewRequest(request) : undefined;
 }
 
 export function formatInterruptPrompt(interruptPayload: Record<string, unknown>) {

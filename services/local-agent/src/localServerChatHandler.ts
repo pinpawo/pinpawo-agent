@@ -1,5 +1,12 @@
 import { WebSocket } from 'ws';
 import { HumanMessage } from '@langchain/core/messages';
+import {
+  buildHumanReviewResume,
+  resolveHumanReviewResponse,
+  ReviewResponseResolutionError,
+  type PendingReviewAction,
+  type ReviewSpec,
+} from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
 import { authorizeShellPattern } from './sessionAuthorizations';
 import { readShellReviewCommand } from './chatInterrupts';
@@ -24,8 +31,17 @@ import { LocalAgentGraphService } from './agentGraphService';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
+import type { LocalAgentEvent } from './events/localAgentEvent';
 
 type InflightRequest = InflightOperationRun;
+
+type PendingReviewRoute = {
+  reviewId: string;
+  threadId: string;
+  reviewSpec: ReviewSpec;
+  pendingAction: PendingReviewAction;
+  sessionId?: string;
+};
 
 export function isToolProtocolHistoryError(value: unknown): boolean {
   const text = value instanceof Error
@@ -40,6 +56,7 @@ export class LocalServerChatHandler {
   private readonly graphService: LocalAgentGraphService;
   private readonly tuiSessions: LocalServerTuiSessionService;
   private readonly inflightRequests: InflightRequestController<WebSocket>;
+  private readonly pendingReviewRoutes = new Map<string, PendingReviewRoute>();
 
   constructor(options: {
     graphService: LocalAgentGraphService;
@@ -49,6 +66,24 @@ export class LocalServerChatHandler {
     this.graphService = options.graphService;
     this.tuiSessions = options.tuiSessions;
     this.inflightRequests = options.inflightRequests;
+  }
+
+  private recordPendingReviewRoute(
+    event: LocalAgentEvent,
+    threadId: string,
+    deps: LocalServerDeps,
+  ) {
+    if (event.type !== 'human_review.requested' || !event.review?.id) {
+      return;
+    }
+    const sessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
+    this.pendingReviewRoutes.set(event.requestId, {
+      reviewId: event.review.id,
+      threadId,
+      reviewSpec: event.review,
+      pendingAction: readPendingReviewAction(event),
+      ...(sessionId ? { sessionId } : {}),
+    });
   }
 
   async handleChatRequest(
@@ -106,6 +141,7 @@ export class LocalServerChatHandler {
         isCurrent,
         finishInterrupted,
         emitEvent: (event) => {
+          this.recordPendingReviewRoute(event, threadId, deps);
           sendLocalAgentEvent(ws, event);
         },
         emitToolEvent: (event) => {
@@ -193,6 +229,95 @@ export class LocalServerChatHandler {
     msg: HumanReviewResponseMessage,
     deps: LocalServerDeps,
   ) {
+    const route = this.pendingReviewRoutes.get(msg.requestId);
+    let canonicalResume: unknown;
+    let canonicalMessage: string | undefined;
+    if (msg.selectedOptionId && !msg.reviewId) {
+      sendLocalAgentEvent(ws, {
+        type: 'error',
+        requestId: msg.requestId,
+        message: '这个 review 应答缺少 reviewId，请等待当前确认面板刷新后再应答。',
+      });
+      return;
+    }
+    if (msg.reviewId) {
+      if (!route) {
+        console.warn(
+          `[local-server] human_review_response rejected: no pending review route for requestId=${msg.requestId}`,
+        );
+        sendLocalAgentEvent(ws, {
+          type: 'error',
+          requestId: msg.requestId,
+          message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
+        });
+        return;
+      }
+      if (msg.reviewId !== route.reviewId) {
+        console.warn(
+          `[local-server] human_review_response rejected: reviewId=${msg.reviewId} `
+          + `does not match pending review=${route.reviewId}`,
+        );
+        sendLocalAgentEvent(ws, {
+          type: 'error',
+          requestId: msg.requestId,
+          message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
+        });
+        return;
+      }
+
+      const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
+      if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
+        console.warn(
+          `[local-server] human_review_response rejected: route sessionId=${route.sessionId} `
+          + `does not match active session=${activeSessionId}`,
+        );
+        sendLocalAgentEvent(ws, {
+          type: 'error',
+          requestId: msg.requestId,
+          message: '请回到发起该 review 的会话再应答。',
+        });
+        return;
+      }
+
+      if (!msg.selectedOptionId) {
+        sendLocalAgentEvent(ws, {
+          type: 'error',
+          requestId: msg.requestId,
+          message: '这个 review 应答缺少选项，请等待当前确认面板刷新后再应答。',
+        });
+        return;
+      }
+
+      try {
+        const resolution = resolveHumanReviewResponse(
+          {
+            requestId: msg.requestId,
+            reviewSpec: route.reviewSpec,
+            pendingAction: route.pendingAction,
+          },
+          {
+            reviewId: msg.reviewId,
+            selectedOptionId: msg.selectedOptionId,
+            ...(msg.input ? { input: msg.input } : {}),
+          },
+        );
+        canonicalResume = buildHumanReviewResume([resolution.decision]);
+        canonicalMessage = resolution.display.userInputMessage ?? resolution.display.label;
+      } catch (error) {
+        const message = error instanceof ReviewResponseResolutionError
+          ? `这个 review 应答无效：${error.message}`
+          : '这个 review 应答无效，请等待当前确认面板刷新后再应答。';
+        sendLocalAgentEvent(ws, {
+          type: 'error',
+          requestId: msg.requestId,
+          message,
+        });
+        return;
+      }
+
+      this.pendingReviewRoutes.delete(msg.requestId);
+    }
+
     // The HITL resume always lands on the originating session's checkpoint.
     // If a client tells us where the review came from, refuse to resume on a
     // different session/thread — otherwise the LangGraph resume would attempt
@@ -217,8 +342,12 @@ export class LocalServerChatHandler {
     await this.handleChatRequest(ws, {
       type: 'chat_request',
       requestId: msg.requestId,
-      message: msg.message,
-      ...(msg.resume !== undefined ? { resume: msg.resume } : {}),
+      message: canonicalMessage ?? msg.message,
+      ...(canonicalResume !== undefined
+        ? { resume: canonicalResume }
+        : msg.resume !== undefined
+          ? { resume: msg.resume }
+          : {}),
     }, deps, msg.extras);
   }
 
@@ -233,4 +362,30 @@ export class LocalServerChatHandler {
       emit: (event) => sendLocalAgentEvent(ws, event),
     });
   }
+}
+
+function readPendingReviewAction(
+  event: Extract<LocalAgentEvent, { type: 'human_review.requested' }>,
+): PendingReviewAction {
+  const actionRequests = Array.isArray(event.payload?.actionRequests)
+    ? event.payload.actionRequests
+    : [];
+  const firstAction = actionRequests[0] && typeof actionRequests[0] === 'object'
+    ? actionRequests[0] as Record<string, unknown>
+    : null;
+  const args = firstAction?.args && typeof firstAction.args === 'object' && !Array.isArray(firstAction.args)
+    ? firstAction.args as Record<string, unknown>
+    : {};
+  const toolName = typeof firstAction?.name === 'string' && firstAction.name.trim()
+    ? firstAction.name.trim()
+    : 'unknown';
+  const description = typeof firstAction?.description === 'string' && firstAction.description.trim()
+    ? firstAction.description.trim()
+    : null;
+  return {
+    actionId: 'pending_action',
+    toolName,
+    args,
+    ...(description ? { description } : {}),
+  };
 }

@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  AgentActor,
-  HumanReviewDecision,
-  HumanReviewer,
-  HumanReviewRequest,
+import {
+  buildReviewSpecFromHumanReviewRequest,
+  type AgentActor,
+  type HumanReviewDecision,
+  type HumanReviewer,
+  type HumanReviewRequest,
 } from '@pinpawo/pet-agent';
 
 import type { PetLocalConfig } from './petConfig';
@@ -78,12 +79,14 @@ export function createWsHumanReviewer(opts: {
       const reviewId = randomUUID().slice(0, 8);
       opts.slot.current = { resolve, reject, petId: opts.petId, reviewId };
       const prompt = extractPromptText(request);
+      const review = buildReviewSpecFromHumanReviewRequest(request, { id: reviewId });
       opts.send({
         requestId: opts.requestId,
         type: 'event',
         event: {
           type: 'human_review.requested',
           requestId: opts.requestId,
+          review,
           prompt,
           payload: request,
           actor: { petId: opts.petId },

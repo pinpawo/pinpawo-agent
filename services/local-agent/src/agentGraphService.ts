@@ -78,6 +78,21 @@ export class LocalAgentGraphService {
     });
   }
 
+  async updateState(
+    setup: AgentChannelSetup,
+    values: Partial<OrchestratorStateType>,
+    asNode?: string,
+  ) {
+    const graph = this.getGraph(setup);
+    return graph.updateState(
+      {
+        configurable: buildConfigurable(setup),
+      },
+      values,
+      asNode,
+    );
+  }
+
   buildResumeCommand(resume: unknown) {
     return new Command({
       resume,

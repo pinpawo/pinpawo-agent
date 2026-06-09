@@ -6,6 +6,7 @@ import type {
   ReviewEffect,
   ToolAuthorizationMatcher,
 } from '../agent/orchestrator/review/reviewSpec';
+import type { ToolAuthorizationRecord } from '../agent/orchestrator/review/reviewAuthorizations';
 import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { CapabilityAvailabilityConfig } from './capability';
 
@@ -14,6 +15,7 @@ export type ToolkitContext = {
   actor: AgentActor;
   messages: BaseMessage[];
   execution?: AgentExecution;
+  toolAuthorizations?: ToolAuthorizationRecord[];
 };
 
 export type ToolkitResource<T> = T | ((ctx: ToolkitContext) => T | Promise<T>);

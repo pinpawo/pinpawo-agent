@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { WebSocket } from 'ws';
-import { clearToolAuthorizations, isToolActionAuthorized } from '@pinpawo/pet-agent';
 import { isToolProtocolHistoryError, LocalServerChatHandler } from './localServerChatHandler';
 import { InflightRequestController } from './inflightRequestController';
 
@@ -99,7 +98,7 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
       view: { kind: 'plain', body: 'Approve?' },
       options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
     },
-  }, 'thread-x', { actorId: 'pet-1' });
+  }, { actorId: 'pet-1' });
 
   await handler.handleHumanReviewResponse(
     fakeWs,
@@ -203,7 +202,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
       view: { kind: 'plain', body: 'Approve?' },
       options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
     },
-  }, 'thread-x', { actorId: 'pet-1' });
+  }, { actorId: 'pet-1' });
 
   const message = {
     type: 'human_review_response' as const,
@@ -276,7 +275,7 @@ test('handleHumanReviewResponse resolves canonical respond input and keeps route
         decision: { type: 'respond', messageInputKey: 'message' },
       }],
     },
-  }, 'thread-x', { actorId: 'pet-1' });
+  }, { actorId: 'pet-1' });
 
   await handler.handleHumanReviewResponse(
     fakeWs,
@@ -354,7 +353,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
       view: { kind: 'plain', body: 'Approve?' },
       options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
     },
-  }, 'thread-x', { actorId: 'pet-1' });
+  }, { actorId: 'pet-1' });
   activeSessionId = 'sess-other';
 
   await handler.handleHumanReviewResponse(
@@ -453,10 +452,10 @@ test('handleHumanReviewResponse forwards when extras.originSessionId is absent (
   assert.equal(handleChatCalls.length, 1, 'absent origin should forward without guarding');
 });
 
-test('handleHumanReviewResponse applies declared authorization effects before forwarding', async () => {
-  clearToolAuthorizations('thread-x');
+test('handleHumanReviewResponse stores declared authorization effects in graph state before forwarding', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
+  const updateStateCalls: unknown[] = [];
   const fakeWs = {
     readyState: WebSocket.OPEN,
     send: (data: string) => {
@@ -465,7 +464,12 @@ test('handleHumanReviewResponse applies declared authorization effects before fo
   } as unknown as WebSocket;
 
   const handler = new LocalServerChatHandler({
-    graphService: {} as never,
+    graphService: {
+      getState: async () => ({ values: { toolAuthorizations: [] } }),
+      updateState: async (...args: unknown[]) => {
+        updateStateCalls.push(args);
+      },
+    } as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
@@ -507,7 +511,7 @@ test('handleHumanReviewResponse applies declared authorization effects before fo
         }],
       }],
     },
-  }, 'thread-x', { actorId: 'pet-1' });
+  }, { actorId: 'pet-1' }, {} as never);
 
   await handler.handleHumanReviewResponse(
     fakeWs,
@@ -539,14 +543,23 @@ test('handleHumanReviewResponse applies declared authorization effects before fo
   );
 
   assert.equal(handleChatCalls.length, 1);
-  assert.equal(
-    isToolActionAuthorized({
-      threadId: 'thread-x',
+  assert.equal(updateStateCalls.length, 1);
+  const updateValues = (updateStateCalls[0] as unknown[])[1] as {
+    toolAuthorizations?: Array<{
+      toolName: string;
+      matcher: unknown;
+      createdAt: string;
+    }>;
+  };
+  assert.equal(updateValues.toolAuthorizations?.length, 1);
+  assert.deepEqual(
+    updateValues.toolAuthorizations?.map(({ createdAt: _createdAt, ...authorization }) => authorization),
+    [{
       toolName: 'run_shell',
-      args: { command: 'git status', cwd: '/repo' },
-    }),
-    true,
+      matcher: { type: 'shell_pattern', value: 'git status' },
+    }],
   );
+  assert.match(updateValues.toolAuthorizations?.[0]?.createdAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
     message: string;
     resume?: unknown;
@@ -565,5 +578,4 @@ test('handleHumanReviewResponse applies declared authorization effects before fo
     ),
     true,
   );
-  clearToolAuthorizations('thread-x');
 });

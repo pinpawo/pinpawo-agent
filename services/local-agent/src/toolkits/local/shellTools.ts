@@ -144,15 +144,8 @@ export const runShellTool = tool(
     }
 
     const confirmationRisk = getShellConfirmationRisk(shellAction.command);
-    const { threadId, capabilities } = getCurrentLocalAgentInterface();
-    const isAuthorized = threadId && capabilities.sessionAuthorization
-      ? isToolActionAuthorized({
-          threadId,
-          toolName: 'run_shell',
-          args: shellAction,
-        })
-      : false;
-    if (confirmationRisk && !isAuthorized && !capabilities.humanReview) {
+    const { capabilities } = getCurrentLocalAgentInterface();
+    if (confirmationRisk && !capabilities.humanReview) {
       return `Error: shell command requires human review before execution: ${confirmationRisk}`;
     }
 
@@ -186,7 +179,7 @@ export const runShellTool = tool(
 );
 
 export const shellReviewPolicy: ToolkitToolReviewPolicy = {
-  request: ({ input }) => {
+  request: ({ input, toolAuthorizations }) => {
     let shellAction: { command: string; cwd: string };
     try {
       shellAction = normalizeShellActionInput(input);
@@ -203,10 +196,10 @@ export const shellReviewPolicy: ToolkitToolReviewPolicy = {
       return null;
     }
 
-    const { threadId, capabilities } = getCurrentLocalAgentInterface();
-    const isAuthorized = threadId && capabilities.sessionAuthorization
+    const { capabilities } = getCurrentLocalAgentInterface();
+    const isAuthorized = capabilities.sessionAuthorization
       ? isToolActionAuthorized({
-          threadId,
+          authorizations: toolAuthorizations ?? [],
           toolName: 'run_shell',
           args: shellAction,
         })

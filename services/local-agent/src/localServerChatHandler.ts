@@ -3,11 +3,13 @@ import { HumanMessage } from '@langchain/core/messages';
 import {
   applyReviewEffects,
   buildHumanReviewResume,
+  mergeToolAuthorizations,
   resolveHumanReviewResponse,
   ReviewEffectApplicationError,
   ReviewResponseResolutionError,
   type PendingReviewAction,
   type ReviewSpec,
+  type ToolAuthorizationRecord,
 } from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
 import {
@@ -31,16 +33,26 @@ import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import type { LocalAgentEvent } from './events/localAgentEvent';
+import type { AgentChannelSetup } from './agentChannel';
 
 type InflightRequest = InflightOperationRun;
 
 type PendingReviewRoute = {
   reviewId: string;
-  threadId: string;
   reviewSpec: ReviewSpec;
   pendingAction: PendingReviewAction;
+  setup?: AgentChannelSetup;
   sessionId?: string;
 };
+
+function readSnapshotToolAuthorizations(
+  snapshot: Awaited<ReturnType<LocalAgentGraphService['getState']>>,
+): ToolAuthorizationRecord[] {
+  const values = (snapshot as { values?: { toolAuthorizations?: unknown } }).values;
+  return Array.isArray(values?.toolAuthorizations)
+    ? values.toolAuthorizations as ToolAuthorizationRecord[]
+    : [];
+}
 
 export function isToolProtocolHistoryError(value: unknown): boolean {
   const text = value instanceof Error
@@ -69,8 +81,8 @@ export class LocalServerChatHandler {
 
   private recordPendingReviewRoute(
     event: LocalAgentEvent,
-    threadId: string,
     deps: LocalServerDeps,
+    setup?: AgentChannelSetup,
   ) {
     if (event.type !== 'human_review.requested' || !event.review?.id) {
       return;
@@ -78,10 +90,30 @@ export class LocalServerChatHandler {
     const sessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
     this.pendingReviewRoutes.set(event.requestId, {
       reviewId: event.review.id,
-      threadId,
       reviewSpec: event.review,
       pendingAction: readPendingReviewAction(event),
+      ...(setup ? { setup } : {}),
       ...(sessionId ? { sessionId } : {}),
+    });
+  }
+
+  private async appendToolAuthorizationsToGraphState(
+    route: PendingReviewRoute,
+    authorizations: ToolAuthorizationRecord[],
+  ) {
+    if (authorizations.length === 0) {
+      return;
+    }
+    if (!route.setup) {
+      throw new ReviewEffectApplicationError(
+        'missing_thread',
+        'Cannot apply review effects without the pending graph setup.',
+      );
+    }
+    const snapshot = await this.graphService.getState(route.setup);
+    const current = readSnapshotToolAuthorizations(snapshot);
+    await this.graphService.updateState(route.setup, {
+      toolAuthorizations: mergeToolAuthorizations(current, authorizations),
     });
   }
 
@@ -91,8 +123,6 @@ export class LocalServerChatHandler {
     deps: LocalServerDeps,
   ) {
     const { requestId, message } = msg;
-
-    const threadId = this.tuiSessions.getChatThreadId(deps.actorId);
 
     console.log(`[local-server] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
     recordAgentRunActivity('thinking', requestId);
@@ -139,7 +169,7 @@ export class LocalServerChatHandler {
         isCurrent,
         finishInterrupted,
         emitEvent: (event) => {
-          this.recordPendingReviewRoute(event, threadId, deps);
+          this.recordPendingReviewRoute(event, deps, setup);
           sendLocalAgentEvent(ws, event);
         },
         emitToolEvent: (event) => {
@@ -300,7 +330,6 @@ export class LocalServerChatHandler {
           },
         );
         const appliedEffects = await applyReviewEffects({
-          threadId: route.threadId,
           pendingAction: route.pendingAction,
           effects: resolution.effects,
           toolkits: [
@@ -308,6 +337,7 @@ export class LocalServerChatHandler {
             ...(deps.localToolkits ?? []),
           ],
         });
+        await this.appendToolAuthorizationsToGraphState(route, appliedEffects);
         for (const effect of appliedEffects) {
           sendLocalAgentEvent(ws, {
             type: 'system.notice',

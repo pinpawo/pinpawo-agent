@@ -97,8 +97,9 @@ export type {
 export {
   applyReviewEffects,
   authorizeToolAction,
-  clearToolAuthorizations,
+  buildToolAuthorizationRecord,
   isToolActionAuthorized,
+  mergeToolAuthorizations,
   normalizeShellPattern,
   readToolAuthorizationMatcher,
   ReviewEffectApplicationError,
@@ -106,7 +107,7 @@ export {
 export type {
   ApplyReviewEffectsOptions,
   ReviewEffectApplicationErrorCode,
-  ToolAuthorizationRule,
+  ToolAuthorizationRecord,
 } from './agent/orchestrator/review/reviewAuthorizations';
 export type {
   PendingReviewAction,

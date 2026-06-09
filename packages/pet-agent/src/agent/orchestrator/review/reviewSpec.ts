@@ -82,13 +82,13 @@ export type PendingReviewAction = {
 export type PendingReviewState = {
   requestId: string;
   reviewSpec: ReviewSpec;
-  pendingAction: PendingReviewAction;
+  pendingAction?: PendingReviewAction;
 };
 
 export type HumanReviewInterruptPayload = {
   kind: 'review';
   review: ReviewSpec;
-  pendingAction: PendingReviewAction;
+  pendingAction?: PendingReviewAction;
   error?: string;
 };
 

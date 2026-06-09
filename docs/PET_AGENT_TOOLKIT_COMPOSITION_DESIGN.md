@@ -123,7 +123,7 @@ const bashToolkit = {
 wrapper 的职责：
 
 - `request()` 返回 `null`：直接调用原始工具。
-- `request()` 返回 `ReviewSpec`：wrapper 生成 canonical `review` interrupt payload，包含 `review` 和当前 `pendingAction`，恢复后读取人类决策。
+- `request()` 返回 `ReviewSpec`：wrapper 生成 canonical `review` interrupt payload，包含 `review`；tool action review 额外携带当前 `pendingAction`，恢复后读取人类决策。
 - human `approve`：调用原始工具。
 - human `edit`：只作为 legacy resume 兼容路径；V1 review options 不再暴露 edit。
 - human `reject/respond`：不调用原始工具，返回结构化 cancelled 结果。

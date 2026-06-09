@@ -46,28 +46,6 @@ export function buildHumanReviewResume(decisions: HumanReviewDecision[]) {
   return { decisions };
 }
 
-export function buildIterationLimitHumanReviewRequest(params: {
-  iterationCount: number;
-  maxIterations: number;
-  delegationSummary: string;
-}): HumanReviewRequest {
-  return buildHumanReviewRequest({
-    actionRequests: [{
-      name: 'continue_execution_window',
-      args: {
-        iterationCount: params.iterationCount,
-        maxIterations: params.maxIterations,
-      },
-      description: `已执行 ${params.iterationCount} 轮循环（上限 ${params.maxIterations}）。`,
-    }],
-    reviewConfigs: [{
-      actionName: 'continue_execution_window',
-      allowedDecisions: ['approve', 'reject', 'respond'],
-    }],
-    prompt: `已执行 ${params.iterationCount} 轮循环（上限 ${params.maxIterations}），当前任务状态：\n${params.delegationSummary}\n\n是否批准继续执行？`,
-  });
-}
-
 function readDecisionType(value: unknown): HumanReviewDecisionType | null {
   if (value !== 'approve' && value !== 'edit' && value !== 'reject' && value !== 'respond') {
     return null;

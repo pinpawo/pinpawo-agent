@@ -154,7 +154,7 @@ const pet = createPetAgentRuntime({
 ```text
 pet 内部 tool 调用:
   policy.toolReview.request(ctx) → ReviewSpec
-  interrupt({ kind: "review", review, pendingAction })  // LangGraph 暂停,checkpoint 写入
+  interrupt({ kind: "review", review, pendingAction? })  // LangGraph 暂停,checkpoint 写入
 
 pet runtime invoke 循环:
   graph.invoke(...) 返回带 __interrupt__ 的 state

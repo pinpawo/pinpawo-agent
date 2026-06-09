@@ -41,7 +41,7 @@ type InflightRequest = InflightOperationRun;
 type PendingReviewRoute = {
   reviewId: string;
   reviewSpec: ReviewSpec;
-  pendingAction: PendingReviewAction;
+  pendingAction?: PendingReviewAction;
   setup?: AgentChannelSetup;
   sessionId?: string;
 };
@@ -89,12 +89,13 @@ export class LocalServerChatHandler {
       return;
     }
     const sessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
+    const pendingAction = readPendingReviewAction(event);
     this.pendingReviewRoutes.set(event.requestId, {
       reviewId: event.review.id,
       reviewSpec: event.review,
-      pendingAction: readPendingReviewAction(event),
       ...(setup ? { setup } : {}),
       ...(sessionId ? { sessionId } : {}),
+      ...(pendingAction ? { pendingAction } : {}),
     });
   }
 
@@ -330,14 +331,22 @@ export class LocalServerChatHandler {
             ...(msg.input ? { input: msg.input } : {}),
           },
         );
-        const appliedEffects = await applyReviewEffects({
-          pendingAction: route.pendingAction,
-          effects: resolution.effects,
-          toolkits: [
-            ...(deps.pluginToolkits ?? []),
-            ...(deps.localToolkits ?? []),
-          ],
-        });
+        if (resolution.effects.length > 0 && !route.pendingAction) {
+          throw new ReviewEffectApplicationError(
+            'missing_pending_action',
+            'Cannot apply review effects without a pending action.',
+          );
+        }
+        const appliedEffects = route.pendingAction
+          ? await applyReviewEffects({
+              pendingAction: route.pendingAction,
+              effects: resolution.effects,
+              toolkits: [
+                ...(deps.pluginToolkits ?? []),
+                ...(deps.localToolkits ?? []),
+              ],
+            })
+          : [];
         await this.appendToolAuthorizationsToGraphState(route, appliedEffects);
         for (const effect of appliedEffects) {
           sendLocalAgentEvent(ws, {
@@ -392,7 +401,7 @@ export class LocalServerChatHandler {
 
 function readPendingReviewAction(
   event: Extract<LocalAgentEvent, { type: 'human_review.requested' }>,
-): PendingReviewAction {
+): PendingReviewAction | null {
   const actionFromPayload = event.payload
     ? readPendingReviewActionFromInterruptPayload(event.payload)
     : null;
@@ -411,7 +420,10 @@ function readPendingReviewAction(
     : {};
   const toolName = typeof firstAction?.name === 'string' && firstAction.name.trim()
     ? firstAction.name.trim()
-    : 'unknown';
+    : null;
+  if (!toolName) {
+    return null;
+  }
   const description = typeof firstAction?.description === 'string' && firstAction.description.trim()
     ? firstAction.description.trim()
     : null;

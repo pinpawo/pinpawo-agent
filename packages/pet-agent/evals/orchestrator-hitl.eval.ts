@@ -42,9 +42,9 @@ const examples = [
     },
     outputs: {
       expected_initial_interrupted: true,
-      expected_initial_action_name: 'continue_execution_window',
+      expected_initial_kind: 'review',
       expected_allowed_decisions: ['approve', 'reject', 'respond'],
-      reason: 'Iteration limit uses the same human review interrupt shape, independent of decision schema.',
+      reason: 'Iteration limit uses the canonical human review interrupt shape without pretending to be a tool action.',
     },
   },
 ];
@@ -120,23 +120,6 @@ function readInterruptPayload(result: Record<string, unknown>): Record<string, u
   return first && typeof first === 'object' && first.value && typeof first.value === 'object'
     ? first.value as Record<string, unknown>
     : null;
-}
-
-function readActionRequests(payload: Record<string, unknown> | null): Record<string, unknown>[] {
-  const pendingAction = payload?.pendingAction;
-  if (pendingAction && typeof pendingAction === 'object') {
-    const record = pendingAction as Record<string, unknown>;
-    return [{
-      name: record.toolName,
-      args: record.args,
-      description: record.description,
-    }];
-  }
-  return payload && Array.isArray(payload.actionRequests)
-    ? payload.actionRequests.filter((item): item is Record<string, unknown> =>
-      Boolean(item && typeof item === 'object'),
-    )
-    : [];
 }
 
 function readAllowedDecisions(payload: Record<string, unknown> | null): string[] {
@@ -228,13 +211,9 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     ) as Record<string, unknown>;
   }
 
-  const actionRequests = readActionRequests(initialPayload);
   return {
     initial_interrupted: Boolean(initialPayload),
     initial_kind: initialPayload?.kind ?? null,
-    initial_action_names: actionRequests.flatMap((action) =>
-      typeof action.name === 'string' ? [action.name] : [],
-    ),
     allowed_decisions: readAllowedDecisions(initialPayload),
     after_resume_mode: afterResume ? routeModeFromResult(afterResume) : null,
     after_resume_task: afterResume ? pendingTaskFromResult(afterResume) : null,
@@ -311,7 +290,7 @@ async function main() {
     experimentPrefix: 'orchestrator-hitl',
     evaluators: [
       booleanCorrectness('initial_interrupted', 'expected_initial_interrupted', 'initial_interrupted_correct'),
-      arrayIncludesCorrectness('initial_action_names', 'expected_initial_action_name', 'initial_action_name_correct'),
+      equalsCorrectness('initial_kind', 'expected_initial_kind', 'initial_kind_correct'),
       arrayIncludesCorrectness('allowed_decisions', 'expected_allowed_decisions', 'allowed_decisions_correct'),
       equalsCorrectness('after_resume_mode', 'expected_after_resume_mode', 'after_resume_mode_correct'),
       includesCorrectness('after_resume_task', 'expected_after_resume_task_includes', 'after_resume_task_correct'),
@@ -323,7 +302,7 @@ async function main() {
 
   const keys = [
     'initial_interrupted_correct',
-    'initial_action_name_correct',
+    'initial_kind_correct',
     'allowed_decisions_correct',
     'after_resume_mode_correct',
     'after_resume_task_correct',

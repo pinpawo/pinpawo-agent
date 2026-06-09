@@ -21,6 +21,7 @@ export type ApplyReviewEffectsOptions = {
 
 export type ReviewEffectApplicationErrorCode =
   | 'missing_thread'
+  | 'missing_pending_action'
   | 'unsupported_effect'
   | 'unsupported_action_ref'
   | 'missing_policy_hook'

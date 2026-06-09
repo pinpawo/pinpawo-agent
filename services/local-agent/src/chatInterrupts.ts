@@ -143,8 +143,7 @@ export function readHumanReviewActionRequests(interruptPayload: Record<string, u
 
 function isReviewInterruptPayload(interruptPayload: Record<string, unknown>) {
   return interruptPayload.kind === 'review'
-    && Boolean(readReviewSpecValue(interruptPayload.review))
-    && Boolean(readPendingReviewActionValue(interruptPayload.pendingAction));
+    && Boolean(readReviewSpecValue(interruptPayload.review));
 }
 
 function isLegacyHumanReviewInterruptPayload(interruptPayload: Record<string, unknown>) {

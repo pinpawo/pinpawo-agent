@@ -227,7 +227,6 @@ function buildIterationLimitReviewPayload(params: {
   maxIterations: number;
   delegationSummary: string;
 }): HumanReviewInterruptPayload {
-  const description = `已执行 ${params.iterationCount} 轮循环（上限 ${params.maxIterations}）。`;
   const body = `已执行 ${params.iterationCount} 轮循环（上限 ${params.maxIterations}），当前任务状态：\n${params.delegationSummary}\n\n是否批准继续执行？`;
   return {
     kind: 'review',
@@ -264,15 +263,6 @@ function buildIterationLimitReviewPayload(params: {
         },
       ],
     }),
-    pendingAction: {
-      actionId: 'iteration_limit',
-      toolName: 'continue_execution_window',
-      args: {
-        iterationCount: params.iterationCount,
-        maxIterations: params.maxIterations,
-      },
-      description,
-    },
   };
 }
 

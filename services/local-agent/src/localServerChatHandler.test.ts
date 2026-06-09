@@ -581,3 +581,84 @@ test('handleHumanReviewResponse stores declared authorization effects in graph s
     true,
   );
 });
+
+test('handleHumanReviewResponse rejects authorization effects without pending action context', async () => {
+  const handleChatCalls: unknown[] = [];
+  const sentEvents: unknown[] = [];
+  const updateStateCalls: unknown[] = [];
+  const fakeWs = {
+    readyState: WebSocket.OPEN,
+    send: (data: string) => {
+      sentEvents.push(JSON.parse(data));
+    },
+  } as unknown as WebSocket;
+
+  const handler = new LocalServerChatHandler({
+    graphService: {
+      getState: async () => ({ values: { toolAuthorizations: [] } }),
+      updateState: async (...args: unknown[]) => {
+        updateStateCalls.push(args);
+      },
+    } as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+    } as never,
+    inflightRequests: new InflightRequestController({
+      forceInterruptMs: 1000,
+      emitOperation: () => {},
+      sendControl: () => {},
+    }),
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+    handleChatCalls.push(args);
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).recordPendingReviewRoute({
+    type: 'human_review.requested',
+    requestId: 'req-1',
+    payload: {
+      kind: 'review',
+    },
+    review: {
+      id: 'review-current',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [{
+        id: 'approve-and-authorize-thread',
+        label: 'Approve and authorize',
+        decision: { type: 'approve' },
+        effects: [{
+          type: 'graph.authorize_tool_action',
+          scope: 'thread',
+          actionRef: { type: 'pending_action' },
+          matcher: { type: 'policy_hook' },
+        }],
+      }],
+    },
+  }, { actorId: 'pet-1' }, {} as never);
+
+  await handler.handleHumanReviewResponse(
+    fakeWs,
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      message: '',
+      reviewId: 'review-current',
+      selectedOptionId: 'approve-and-authorize-thread',
+    },
+    { actorId: 'pet-1' } as never,
+  );
+
+  assert.equal(handleChatCalls.length, 0);
+  assert.equal(updateStateCalls.length, 0);
+  assert.equal(
+    sentEvents.some((event) =>
+      Boolean(event && typeof event === 'object' && String((event as {
+        event?: { message?: string };
+      }).event?.message ?? '').includes('Cannot apply review effects without a pending action')),
+    ),
+    true,
+  );
+});

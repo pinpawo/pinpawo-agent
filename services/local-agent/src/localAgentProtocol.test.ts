@@ -77,25 +77,23 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
   );
 });
 
-test('parseLocalAgentClientMessage carries typed review extras (authorizeShellPattern, originSessionId)', () => {
+test('parseLocalAgentClientMessage carries review origin session extras only', () => {
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'human_review_response',
       requestId: 'req-1',
-      message: '本次会话授权：git status',
+      message: '批准',
       resume: { decisions: [{ type: 'approve' }] },
       extras: {
-        authorizeShellPattern: { pattern: 'git status' },
         originSessionId: 'sess-1',
       },
     })),
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      message: '本次会话授权：git status',
+      message: '批准',
       resume: { decisions: [{ type: 'approve' }] },
       extras: {
-        authorizeShellPattern: { pattern: 'git status' },
         originSessionId: 'sess-1',
       },
     },

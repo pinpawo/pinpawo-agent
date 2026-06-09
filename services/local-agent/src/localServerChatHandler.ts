@@ -1,20 +1,19 @@
 import { WebSocket } from 'ws';
 import { HumanMessage } from '@langchain/core/messages';
 import {
+  applyReviewEffects,
   buildHumanReviewResume,
   resolveHumanReviewResponse,
+  ReviewEffectApplicationError,
   ReviewResponseResolutionError,
   type PendingReviewAction,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
-import { authorizeShellPattern } from './sessionAuthorizations';
-import { readShellReviewCommand } from './chatInterrupts';
 import {
   sendLocalAgentEvent,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
-  type ReviewResumeExtras,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
 import {
@@ -90,7 +89,6 @@ export class LocalServerChatHandler {
     ws: WebSocket,
     msg: ChatRequestMessage,
     deps: LocalServerDeps,
-    reviewExtras?: ReviewResumeExtras,
   ) {
     const { requestId, message } = msg;
 
@@ -146,27 +144,6 @@ export class LocalServerChatHandler {
         },
         emitToolEvent: (event) => {
           this.sendStreamToolOperationEvent(ws, inflight, event);
-        },
-        onPendingInterrupt: (pendingInterrupt) => {
-          const authorizeRequest = reviewExtras?.authorizeShellPattern;
-          if (!authorizeRequest) {
-            return;
-          }
-          const pendingShellCommand = readShellReviewCommand(pendingInterrupt);
-          if (!pendingShellCommand) {
-            return;
-          }
-          const authorizedPattern = authorizeShellPattern(
-            threadId,
-            authorizeRequest.pattern?.trim() || pendingShellCommand,
-          );
-          if (authorizedPattern) {
-            sendLocalAgentEvent(ws, {
-              type: 'system.notice',
-              requestId,
-              message: `已授权本次会话中的 shell 模式：${authorizedPattern}`,
-            });
-          }
         },
       });
       if (result.status === 'waiting_human') {
@@ -240,6 +217,27 @@ export class LocalServerChatHandler {
       });
       return;
     }
+
+    // The HITL resume always lands on the originating session's checkpoint.
+    // If a client tells us where the review came from, refuse to resume on a
+    // different session/thread before resolving decisions or applying effects.
+    const originSessionId = msg.extras?.originSessionId;
+    if (originSessionId) {
+      const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
+      if (activeSessionId && activeSessionId !== originSessionId) {
+        console.warn(
+          `[local-server] human_review_response rejected: originSessionId=${originSessionId} `
+          + `does not match active session=${activeSessionId}`,
+        );
+        sendLocalAgentEvent(ws, {
+          type: 'error',
+          requestId: msg.requestId,
+          message: '请回到发起该 review 的会话再应答。',
+        });
+        return;
+      }
+    }
+
     if (msg.reviewId) {
       if (!route) {
         console.warn(
@@ -301,11 +299,29 @@ export class LocalServerChatHandler {
             ...(msg.input ? { input: msg.input } : {}),
           },
         );
+        const appliedEffects = await applyReviewEffects({
+          threadId: route.threadId,
+          pendingAction: route.pendingAction,
+          effects: resolution.effects,
+          toolkits: [
+            ...(deps.pluginToolkits ?? []),
+            ...(deps.localToolkits ?? []),
+          ],
+        });
+        for (const effect of appliedEffects) {
+          sendLocalAgentEvent(ws, {
+            type: 'system.notice',
+            requestId: msg.requestId,
+            message: `已授权当前会话中的 ${effect.toolName} 操作。`,
+          });
+        }
         canonicalResume = buildHumanReviewResume([resolution.decision]);
         canonicalMessage = resolution.display.userInputMessage ?? resolution.display.label;
       } catch (error) {
         const message = error instanceof ReviewResponseResolutionError
           ? `这个 review 应答无效：${error.message}`
+          : error instanceof ReviewEffectApplicationError
+            ? `这个 review effect 无法应用：${error.message}`
           : '这个 review 应答无效，请等待当前确认面板刷新后再应答。';
         sendLocalAgentEvent(ws, {
           type: 'error',
@@ -318,27 +334,6 @@ export class LocalServerChatHandler {
       this.pendingReviewRoutes.delete(msg.requestId);
     }
 
-    // The HITL resume always lands on the originating session's checkpoint.
-    // If a client tells us where the review came from, refuse to resume on a
-    // different session/thread — otherwise the LangGraph resume would attempt
-    // to apply the decision to the wrong checkpoint.
-    const originSessionId = msg.extras?.originSessionId;
-    if (originSessionId) {
-      const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
-      if (activeSessionId && activeSessionId !== originSessionId) {
-        console.warn(
-          `[local-server] human_review_response rejected: originSessionId=${originSessionId} `
-          + `does not match active session=${activeSessionId}`,
-        );
-        sendLocalAgentEvent(ws, {
-          type: 'error',
-          requestId: msg.requestId,
-          message: '请回到发起该 review 的会话再应答。',
-        });
-        return;
-      }
-    }
-
     await this.handleChatRequest(ws, {
       type: 'chat_request',
       requestId: msg.requestId,
@@ -348,7 +343,7 @@ export class LocalServerChatHandler {
         : msg.resume !== undefined
           ? { resume: msg.resume }
           : {}),
-    }, deps, msg.extras);
+    }, deps);
   }
 
   private sendStreamToolOperationEvent(

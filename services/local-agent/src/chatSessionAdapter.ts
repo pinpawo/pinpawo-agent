@@ -59,7 +59,6 @@ export type ChatSessionAdapterOptions = {
   finishInterrupted: () => void;
   emitEvent: (event: LocalAgentEvent) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
-  onPendingInterrupt?: (interruptPayload: Record<string, unknown>) => void | Promise<void>;
 };
 
 export async function runChatSession(options: ChatSessionAdapterOptions): Promise<ChatSessionResult> {
@@ -73,14 +72,6 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   }
 
   const pendingInterrupt = readPendingInterrupt(threadSnapshot);
-  if (pendingInterrupt) {
-    await options.onPendingInterrupt?.(pendingInterrupt);
-    if (!isCurrent()) {
-      finishInterrupted();
-      return { status: 'interrupted' };
-    }
-  }
-
   const resumeValue = pendingInterrupt
     ? normalizeInterruptResume(pendingInterrupt, message, request.resume)
     : undefined;
@@ -150,7 +141,9 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       if (mode === 'values' && payload && typeof payload === 'object' && '__interrupt__' in payload) {
         const interruptPayload = readFirstInterruptPayload(payload);
         if (interruptPayload) {
-          const review = buildReviewSpecFromInterruptPayload(interruptPayload);
+          const review = buildReviewSpecFromInterruptPayload(interruptPayload, {
+            toolkits: setup.input.toolkits,
+          });
           recordAgentRunActivity('waiting_human', requestId);
           emitEvent({
             type: 'human_review.requested',
@@ -180,7 +173,9 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   const finalInterrupt = readPendingInterrupt(finalSnapshot);
   if (finalInterrupt) {
-    const review = buildReviewSpecFromInterruptPayload(finalInterrupt);
+    const review = buildReviewSpecFromInterruptPayload(finalInterrupt, {
+      toolkits: setup.input.toolkits,
+    });
     recordAgentRunActivity('waiting_human', requestId);
     emitEvent({
       type: 'human_review.requested',

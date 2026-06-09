@@ -92,7 +92,7 @@ function optionForDecision(decision: Exclude<HumanReviewDecisionType, 'edit'>): 
   };
 }
 
-function buildLegacyOptions(request: HumanReviewRequest) {
+function buildOptionsFromHumanReviewRequest(request: HumanReviewRequest) {
   const allowed = collectAllowedDecisions(request);
   const options: ReviewOption[] = [];
 
@@ -118,6 +118,6 @@ export function buildReviewSpecFromHumanReviewRequest(
       ...(options.title ? { title: options.title } : {}),
       body: buildReviewBody(request),
     },
-    options: buildLegacyOptions(request),
+    options: buildOptionsFromHumanReviewRequest(request),
   };
 }

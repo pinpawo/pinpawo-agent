@@ -33,18 +33,7 @@ export type StudioRequestMessage = {
   conversationId?: string;
 };
 
-/**
- * Extra typed fields a client can attach to a human_review_response so it
- * doesn't have to smuggle decisions through the free-text `message` channel.
- */
 export type ReviewResumeExtras = {
-  /**
-   * Session-scoped shell authorization request. When set, the local server
-   * registers the pattern via authorizeShellPattern(threadId, pattern) and
-   * forwards an `approve` decision to the graph. When `pattern` is omitted
-   * the pending shell command is used.
-   */
-  authorizeShellPattern?: { pattern?: string };
   /**
    * sessionId that originated this human_review. When set, the server must
    * resume on the originating session's thread; mismatches are rejected so
@@ -179,14 +168,6 @@ function readReviewResumeExtras(record: Record<string, unknown>): ReviewResumeEx
   const extras = readRecord(record, 'extras');
   if (!extras) return null;
   const result: ReviewResumeExtras = {};
-  const authorize = readRecord(extras, 'authorizeShellPattern');
-  if (authorize) {
-    const pattern = readOptionalString(authorize, 'pattern');
-    result.authorizeShellPattern = pattern !== undefined ? { pattern } : {};
-  } else if (extras.authorizeShellPattern === true) {
-    // shorthand: { authorizeShellPattern: true } → authorize the pending command
-    result.authorizeShellPattern = {};
-  }
   const originSessionId = readOptionalString(extras, 'originSessionId');
   if (originSessionId) result.originSessionId = originSessionId;
   return Object.keys(result).length > 0 ? result : null;

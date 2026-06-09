@@ -3,12 +3,12 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import {
   buildHumanReviewRequest,
+  isToolActionAuthorized,
   type ToolkitOperationMetadata,
   type HumanReviewActionRequest,
   type ToolkitToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
-import { isShellCommandAuthorized } from '../../sessionAuthorizations';
 import { config } from '../../config';
 import { readRecord, readString } from '../operationMetadata';
 import { resolveUserPath } from './pathUtils';
@@ -146,7 +146,11 @@ export const runShellTool = tool(
     const confirmationRisk = getShellConfirmationRisk(shellAction.command);
     const { threadId, capabilities } = getCurrentLocalAgentInterface();
     const isAuthorized = threadId && capabilities.sessionAuthorization
-      ? isShellCommandAuthorized(threadId, shellAction.command)
+      ? isToolActionAuthorized({
+          threadId,
+          toolName: 'run_shell',
+          args: shellAction,
+        })
       : false;
     if (confirmationRisk && !isAuthorized && !capabilities.humanReview) {
       return `Error: shell command requires human review before execution: ${confirmationRisk}`;
@@ -201,7 +205,11 @@ export const shellReviewPolicy: ToolkitToolReviewPolicy = {
 
     const { threadId, capabilities } = getCurrentLocalAgentInterface();
     const isAuthorized = threadId && capabilities.sessionAuthorization
-      ? isShellCommandAuthorized(threadId, shellAction.command)
+      ? isToolActionAuthorized({
+          threadId,
+          toolName: 'run_shell',
+          args: shellAction,
+        })
       : false;
     if (isAuthorized) {
       return null;
@@ -221,6 +229,13 @@ export const shellReviewPolicy: ToolkitToolReviewPolicy = {
     editedAction,
     normalizeShellActionInput(input),
   ),
+  buildAuthorizationMatcher: ({ input }) => {
+    const shellAction = normalizeShellActionInput(input);
+    return {
+      type: 'shell_pattern',
+      value: shellAction.command,
+    };
+  },
 };
 
 export const shellOperationMetadata: Record<string, ToolkitOperationMetadata> = {

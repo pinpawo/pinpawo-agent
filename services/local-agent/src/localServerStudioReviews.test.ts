@@ -23,7 +23,7 @@ test('decodeStudioReviewDecision maps local text conventions', () => {
   assert.deepEqual(decodeStudioReviewDecision({ message: '' }), { type: 'reject' });
 });
 
-test('decodeStudioReviewDecision treats structured approve resume as approve, not the legacy /allow text', () => {
+test('decodeStudioReviewDecision treats structured approve resume as approve', () => {
   assert.deepEqual(
     decodeStudioReviewDecision({
       message: '批准执行',

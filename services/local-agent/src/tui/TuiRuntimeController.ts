@@ -175,7 +175,11 @@ export class TuiRuntimeController {
 
     const state = this.options.getState();
     const currentApproval = selectFocusedPendingApproval(state);
-    const requestId = currentApproval?.requestId ?? randomUUID();
+    if (!currentApproval) {
+      this.appendSystemMessage(TUI_TEXT.approvalClosed);
+      return false;
+    }
+    const requestId = currentApproval.requestId;
 
     if (option.input?.kind === 'text' && !inputText) {
       this.appendSystemMessage(TUI_TEXT.approvalRespondRequiresInput);
@@ -193,32 +197,13 @@ export class TuiRuntimeController {
       statusMessage: TUI_TEXT.reviewSubmitting,
     });
 
-    if (option.reviewId && option.selectedOptionId) {
-      this.wsClient.send({
-        type: 'human_review_response',
-        requestId,
-        message: decision,
-        reviewId: option.reviewId,
-        selectedOptionId: option.selectedOptionId,
-        ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),
-      });
-      return true;
-    }
-
-    // Legacy migration path for `/allow` until PR3 moves authorization into
-    // graph review effects. ApprovalPanel options should always use the
-    // canonical reviewId + selectedOptionId path above.
-    const originSessionId = state.runRoute[requestId] ?? state.focusedSessionId ?? undefined;
-    const extras = { ...(option.extras ?? {}) };
-    if (originSessionId && !extras.originSessionId) {
-      extras.originSessionId = originSessionId;
-    }
     this.wsClient.send({
       type: 'human_review_response',
       requestId,
       message: decision,
-      ...(option.resume !== undefined ? { resume: option.resume } : {}),
-      ...(Object.keys(extras).length > 0 ? { extras } : {}),
+      reviewId: option.reviewId,
+      selectedOptionId: option.selectedOptionId,
+      ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),
     });
     return true;
   }

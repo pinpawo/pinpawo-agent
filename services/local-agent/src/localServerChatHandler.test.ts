@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { WebSocket } from 'ws';
+import { clearToolAuthorizations, isToolActionAuthorized } from '@pinpawo/pet-agent';
 import { isToolProtocolHistoryError, LocalServerChatHandler } from './localServerChatHandler';
 import { InflightRequestController } from './inflightRequestController';
 
@@ -412,9 +413,7 @@ test('handleHumanReviewResponse forwards to chat handler when originSessionId ma
   );
 
   assert.equal(handleChatCalls.length, 1, 'matching origin should forward to chat handler');
-  // 4th arg is the extras forwarded to handleChatRequest
-  const forwardedExtras = (handleChatCalls[0] as unknown[])[3];
-  assert.deepEqual(forwardedExtras, { originSessionId: 'sess-active' });
+  assert.equal((handleChatCalls[0] as unknown[]).length, 3);
 });
 
 test('handleHumanReviewResponse forwards when extras.originSessionId is absent (no guard)', async () => {
@@ -452,4 +451,119 @@ test('handleHumanReviewResponse forwards when extras.originSessionId is absent (
   );
 
   assert.equal(handleChatCalls.length, 1, 'absent origin should forward without guarding');
+});
+
+test('handleHumanReviewResponse applies declared authorization effects before forwarding', async () => {
+  clearToolAuthorizations('thread-x');
+  const handleChatCalls: unknown[] = [];
+  const sentEvents: unknown[] = [];
+  const fakeWs = {
+    readyState: WebSocket.OPEN,
+    send: (data: string) => {
+      sentEvents.push(JSON.parse(data));
+    },
+  } as unknown as WebSocket;
+
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+    } as never,
+    inflightRequests: new InflightRequestController({
+      forceInterruptMs: 1000,
+      emitOperation: () => {},
+      sendControl: () => {},
+    }),
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+    handleChatCalls.push(args);
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).recordPendingReviewRoute({
+    type: 'human_review.requested',
+    requestId: 'req-1',
+    payload: {
+      actionRequests: [{
+        name: 'run_shell',
+        args: { command: 'git status', cwd: '/repo' },
+        description: 'Run git status',
+      }],
+    },
+    review: {
+      id: 'review-current',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [{
+        id: 'approve-and-authorize-thread',
+        label: 'Approve and authorize',
+        decision: { type: 'approve' },
+        effects: [{
+          type: 'graph.authorize_tool_action',
+          scope: 'thread',
+          actionRef: { type: 'pending_action' },
+          matcher: { type: 'policy_hook' },
+        }],
+      }],
+    },
+  }, 'thread-x', { actorId: 'pet-1' });
+
+  await handler.handleHumanReviewResponse(
+    fakeWs,
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      message: '',
+      reviewId: 'review-current',
+      selectedOptionId: 'approve-and-authorize-thread',
+    },
+    {
+      actorId: 'pet-1',
+      localToolkits: [{
+        name: 'local',
+        description: 'local tools',
+        policy: {
+          toolReview: {
+            run_shell: {
+              request: () => null,
+              buildAuthorizationMatcher: (ctx: { input: unknown }) => ({
+                type: 'shell_pattern',
+                value: (ctx.input as { command: string }).command,
+              }),
+            },
+          },
+        },
+      }],
+    } as never,
+  );
+
+  assert.equal(handleChatCalls.length, 1);
+  assert.equal(
+    isToolActionAuthorized({
+      threadId: 'thread-x',
+      toolName: 'run_shell',
+      args: { command: 'git status', cwd: '/repo' },
+    }),
+    true,
+  );
+  const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
+    message: string;
+    resume?: unknown;
+  };
+  assert.deepEqual(forwardedMessage, {
+    type: 'chat_request',
+    requestId: 'req-1',
+    message: 'Approve and authorize',
+    resume: { decisions: [{ type: 'approve' }] },
+  });
+  assert.equal(
+    sentEvents.some((event) =>
+      Boolean(event && typeof event === 'object' && (event as {
+        event?: { type?: string };
+      }).event?.type === 'system.notice'),
+    ),
+    true,
+  );
+  clearToolAuthorizations('thread-x');
 });

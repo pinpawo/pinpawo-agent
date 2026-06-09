@@ -1,6 +1,11 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { HumanReviewActionRequest, HumanReviewRequest } from '../agent/orchestrator/humanReview';
+import type {
+  PendingReviewAction,
+  ReviewEffect,
+  ToolAuthorizationMatcher,
+} from '../agent/orchestrator/review/reviewSpec';
 import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { CapabilityAvailabilityConfig } from './capability';
 
@@ -19,6 +24,14 @@ export type ToolkitToolReviewContext = ToolkitContext & {
   input: unknown;
 };
 
+export type ToolkitToolAuthorizationMatcherContext = {
+  toolkitName: string;
+  toolName: string;
+  input: unknown;
+  pendingAction: PendingReviewAction;
+  effect: Extract<ReviewEffect, { type: 'graph.authorize_tool_action' }>;
+};
+
 export type ToolkitToolReviewPolicy = {
   request: (
     ctx: ToolkitToolReviewContext
@@ -26,6 +39,9 @@ export type ToolkitToolReviewPolicy = {
   applyEdit?: (
     ctx: ToolkitToolReviewContext & { editedAction: HumanReviewActionRequest }
   ) => unknown | Promise<unknown>;
+  buildAuthorizationMatcher?: (
+    ctx: ToolkitToolAuthorizationMatcherContext
+  ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
 };
 
 export type ToolkitPolicy = {

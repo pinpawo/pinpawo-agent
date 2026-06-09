@@ -4,7 +4,6 @@ export type TuiCommandName =
   | 'chat'
   | 'studio'
   | 'new'
-  | 'allow'
   | 'export'
   | 'resume';
 
@@ -83,12 +82,6 @@ const COMMANDS: TuiCommandDefinition[] = [
     description: '退出 TUI',
     helpText: '/quit',
   },
-  {
-    name: 'allow',
-    usage: '/allow [pattern]',
-    description: '批准当前 human review，并在本会话授权该 shell 模式（默认沿用待审命令）',
-    helpText: '/allow [pattern]',
-  },
 ];
 
 const COMMAND_BY_NAME = new Map<string, TuiCommandDefinition>();
@@ -105,7 +98,6 @@ export function listTuiCommands() {
 
 export function formatTuiCommandHelp() {
   return COMMANDS
-    .filter((command) => command.name !== 'allow')
     .map((command) => command.helpText)
     .join(' · ');
 }

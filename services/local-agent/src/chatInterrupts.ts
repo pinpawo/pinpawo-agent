@@ -1,9 +1,11 @@
 import {
   buildReviewSpecFromHumanReviewRequest,
+  type AgentToolkit,
   type HumanReviewActionRequest,
   type HumanReviewConfig,
   type HumanReviewDecisionType,
   type HumanReviewRequest,
+  type ReviewOption,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 
@@ -109,11 +111,64 @@ export function readHumanReviewRequest(interruptPayload: Record<string, unknown>
   };
 }
 
+function hasAuthorizationPolicy(toolkits: AgentToolkit[], toolName: string) {
+  return toolkits.some((toolkit) =>
+    Boolean(toolkit.policy?.toolReview?.[toolName]?.buildAuthorizationMatcher),
+  );
+}
+
+function addAuthorizationOption(
+  spec: ReviewSpec,
+  request: HumanReviewRequest,
+  toolkits: AgentToolkit[],
+): ReviewSpec {
+  const pendingAction = request.actionRequests.length === 1 ? request.actionRequests[0] : null;
+  if (!pendingAction || !hasAuthorizationPolicy(toolkits, pendingAction.name)) {
+    return spec;
+  }
+  if (spec.options.some((option) =>
+    option.effects?.some((effect) => effect.type === 'graph.authorize_tool_action'),
+  )) {
+    return spec;
+  }
+
+  const approveIndex = spec.options.findIndex((option) => option.decision.type === 'approve');
+  if (approveIndex < 0) {
+    return spec;
+  }
+
+  const authorizeOption: ReviewOption = {
+    id: 'approve-and-authorize-thread',
+    label: 'Approve and authorize',
+    description: 'Approve this action and authorize matching actions in this thread.',
+    decision: { type: 'approve' },
+    effects: [{
+      type: 'graph.authorize_tool_action',
+      scope: 'thread',
+      actionRef: { type: 'pending_action' },
+      matcher: { type: 'policy_hook' },
+    }],
+  };
+  return {
+    ...spec,
+    options: [
+      ...spec.options.slice(0, approveIndex + 1),
+      authorizeOption,
+      ...spec.options.slice(approveIndex + 1),
+    ],
+  };
+}
+
 export function buildReviewSpecFromInterruptPayload(
   interruptPayload: Record<string, unknown>,
+  options: { toolkits?: AgentToolkit[] } = {},
 ): ReviewSpec | undefined {
   const request = readHumanReviewRequest(interruptPayload);
-  return request ? buildReviewSpecFromHumanReviewRequest(request) : undefined;
+  if (!request) {
+    return undefined;
+  }
+  const spec = buildReviewSpecFromHumanReviewRequest(request);
+  return addAuthorizationOption(spec, request, options.toolkits ?? []);
 }
 
 export function formatInterruptPrompt(interruptPayload: Record<string, unknown>) {
@@ -134,26 +189,6 @@ export function formatInterruptPrompt(interruptPayload: Record<string, unknown>)
   return descriptions.length > 0
     ? descriptions.join('\n')
     : '当前流程需要你的确认，请直接回复继续或说明下一步。';
-}
-
-export function readShellReviewCommand(interruptPayload: Record<string, unknown>): string | null {
-  if (interruptPayload.kind === 'confirm_shell' && typeof interruptPayload.command === 'string' && interruptPayload.command.trim()) {
-    return interruptPayload.command.trim();
-  }
-  for (const action of readHumanReviewActionRequests(interruptPayload)) {
-    const name = typeof action.name === 'string'
-      ? action.name
-      : typeof action.action === 'string'
-        ? action.action
-        : null;
-    if (name !== 'shell' && name !== 'run_shell') continue;
-    const args = action.args && typeof action.args === 'object'
-      ? action.args as Record<string, unknown>
-      : null;
-    const command = args && typeof args.command === 'string' ? args.command.trim() : '';
-    if (command) return command;
-  }
-  return null;
 }
 
 export function buildHumanReviewResume(decisions: Array<Record<string, unknown>>) {

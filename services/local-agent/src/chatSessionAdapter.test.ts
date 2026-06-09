@@ -158,6 +158,100 @@ test('runChatSession materializes ReviewSpec for human review interrupts', async
   assert.deepEqual(event.review?.options.map((option) => option.id), ['approve', 'reject', 'respond']);
 });
 
+test('runChatSession adds authorization option from toolkit review policy hook', async () => {
+  const emittedEvents: LocalAgentEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+      toolkits: [{
+        name: 'local',
+        description: 'local tools',
+        policy: {
+          toolReview: {
+            run_shell: {
+              request: () => null,
+              buildAuthorizationMatcher: (ctx: { input: unknown }) => ({
+                type: 'shell_pattern',
+                value: (ctx.input as { command: string }).command,
+              }),
+            },
+          },
+        },
+      }],
+    },
+  } as unknown as AgentChannelSetup;
+  const graphService = {
+    async getState() {
+      return { tasks: [] };
+    },
+    async *stream() {
+      yield [
+        'values',
+        {
+          __interrupt__: [{
+            value: {
+              kind: 'human_review',
+              prompt: 'Approve shell command?',
+              actionRequests: [{
+                name: 'run_shell',
+                args: { command: 'git status', cwd: '/repo' },
+                description: 'Run git status',
+              }],
+              reviewConfigs: [{
+                actionName: 'run_shell',
+                allowedDecisions: ['approve', 'reject', 'respond'],
+              }],
+            },
+          }],
+        },
+      ];
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'waiting_human' });
+  const event = emittedEvents[0];
+  assert.equal(event?.type, 'human_review.requested');
+  assert.deepEqual(
+    event.review?.options.map((option) => ({
+      id: option.id,
+      effects: option.effects,
+    })),
+    [
+      { id: 'approve', effects: undefined },
+      {
+        id: 'approve-and-authorize-thread',
+        effects: [{
+          type: 'graph.authorize_tool_action',
+          scope: 'thread',
+          actionRef: { type: 'pending_action' },
+          matcher: { type: 'policy_hook' },
+        }],
+      },
+      { id: 'reject', effects: undefined },
+      { id: 'respond', effects: undefined },
+    ],
+  );
+});
+
 test('runChatSession emits token usage in completed event', async () => {
   const emittedEvents: unknown[] = [];
   const promptMessages = [

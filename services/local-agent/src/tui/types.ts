@@ -1,5 +1,4 @@
 import type { ReviewOptionInput } from '@pinpawo/pet-agent';
-import type { ReviewResumeExtras } from '../localAgentProtocol';
 import type {
   ApprovalRequestModel,
   HistoryCellModel,
@@ -22,11 +21,9 @@ export type ApprovalOption = {
   message: string;
   description?: string;
   variant?: 'primary' | 'normal' | 'danger';
-  reviewId?: string;
-  selectedOptionId?: string;
+  reviewId: string;
+  selectedOptionId: string;
   input?: ReviewOptionInput;
-  resume?: unknown;
-  extras?: ReviewResumeExtras;
 };
 
 export type ActiveOperation = {

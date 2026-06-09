@@ -7,17 +7,17 @@
  * that translates a structured human_review.requested event into a typed
  * resume, including the #20 cleanup items:
  *
- *   1. /allow → structured `extras.authorizeShellPattern` (no text-channel
- *      magic strings).
+ *   1. ReviewSpec option effect → runtime authorization state (no text-channel
+ *      magic strings, no client-submitted authorization extras).
  *   2. Server-side `handleHumanReviewResponse` rejects resumes whose
  *      `extras.originSessionId` does not match the active session.
- *   3. runChatSession surfaces the pendingInterrupt with structured resume
- *      semantics (decisions array), not free-text /allow.
+ *   3. runChatSession surfaces the pendingInterrupt with canonical ReviewSpec
+ *      options and structured resume semantics.
  *
  * SUT seams:
  *   - services/local-agent/src/chatSessionAdapter.ts (runChatSession)
  *   - services/local-agent/src/localServerChatHandler.ts (origin guard)
- *   - services/local-agent/src/sessionAuthorizations.ts (authorize side-effect)
+ *   - packages/pet-agent/src/agent/orchestrator/review/reviewAuthorizations.ts
  *
  * Model is not invoked: examples use a hand-built fake graph that yields the
  * exact LangGraph stream chunks runChatSession reads — the interrupt shape
@@ -30,17 +30,15 @@ import { evaluate } from 'langsmith/evaluation';
 import { Client } from 'langsmith';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
-import { buildHumanReviewRequest } from '@pinpawo/pet-agent';
-import { runChatSession } from '../src/chatSessionAdapter';
 import {
-  authorizeShellPattern,
-  clearSessionAuthorizations,
-  isShellCommandAuthorized,
-} from '../src/sessionAuthorizations';
-// `isShellCommandAuthorized` is exposed to derive `authorization_recorded`
-// from the same code path the production shell tool consults.
+  applyReviewEffects,
+  buildHumanReviewRequest,
+  clearToolAuthorizations,
+  isToolActionAuthorized,
+  type AgentToolkit,
+} from '@pinpawo/pet-agent';
+import { runChatSession } from '../src/chatSessionAdapter';
 import type { LocalAgentEvent } from '../src/events/localAgentEvent';
-import type { ReviewResumeExtras } from '../src/localAgentProtocol';
 
 const DATASET_NAME = 'local-agent-hitl-resume';
 
@@ -51,15 +49,15 @@ type ExampleInputs = {
   pending_shell_command: string;
   /** Resume the client sends back. */
   resume?: { decisions: Array<{ type: string; message?: string }> };
-  /** Optional extras attached to the human_review_response. */
-  extras?: ReviewResumeExtras;
+  /** ReviewSpec option selected by the client before resume. */
+  selected_option_id?: string;
   /** Final reply the fake graph returns after resume (none if rejected). */
   final_reply?: string;
 };
 
 type ExampleOutputs = {
   expected_interrupt_received: boolean;
-  expected_pending_interrupt_callback_called: boolean;
+  expected_authorization_option_present: boolean;
   expected_resume_authorized_pattern?: string | null;
   expected_final_status: 'completed' | 'waiting_human' | 'interrupted';
   expected_final_reply?: string;
@@ -73,22 +71,22 @@ const examples: Array<{
   outputs: ExampleOutputs;
 }> = [
   {
-    name: 'shell-review-authorize-via-extras',
+    name: 'shell-review-authorize-via-effect-option',
     inputs: {
       user_message: '帮我跑 git status',
       pending_shell_command: 'git status',
       resume: { decisions: [{ type: 'approve' }] },
-      extras: { authorizeShellPattern: { pattern: 'git status' } },
+      selected_option_id: 'approve-and-authorize-thread',
       final_reply: '已执行 git status。',
     },
     outputs: {
       expected_interrupt_received: true,
-      expected_pending_interrupt_callback_called: true,
+      expected_authorization_option_present: true,
       expected_resume_authorized_pattern: 'git status',
       expected_final_status: 'completed',
       expected_final_reply: '已执行 git status。',
       expected_authorization_recorded: true,
-      reason: 'Structured approve + authorizeShellPattern extras should both authorize and approve, no /allow text needed.',
+      reason: 'Structured approve + declared ReviewSpec effect should both authorize and approve, no slash-command or client extras needed.',
     },
   },
   {
@@ -97,11 +95,12 @@ const examples: Array<{
       user_message: '帮我跑 git status',
       pending_shell_command: 'git status',
       resume: { decisions: [{ type: 'approve' }] },
+      selected_option_id: 'approve',
       final_reply: '已执行 git status。',
     },
     outputs: {
       expected_interrupt_received: true,
-      expected_pending_interrupt_callback_called: true,
+      expected_authorization_option_present: true,
       expected_resume_authorized_pattern: null,
       expected_final_status: 'completed',
       expected_final_reply: '已执行 git status。',
@@ -115,11 +114,12 @@ const examples: Array<{
       user_message: '帮我跑 rm -rf /',
       pending_shell_command: 'rm -rf /',
       resume: { decisions: [{ type: 'reject', message: '太危险了' }] },
+      selected_option_id: 'reject',
       final_reply: '已拒绝执行。',
     },
     outputs: {
       expected_interrupt_received: true,
-      expected_pending_interrupt_callback_called: true,
+      expected_authorization_option_present: true,
       expected_resume_authorized_pattern: null,
       expected_final_status: 'completed',
       expected_final_reply: '已拒绝执行。',
@@ -135,9 +135,7 @@ const examples: Array<{
     },
     outputs: {
       expected_interrupt_received: true,
-      // onPendingInterrupt only fires on the resume turn; if no resume is
-      // submitted, the second turn never runs and the callback never fires.
-      expected_pending_interrupt_callback_called: false,
+      expected_authorization_option_present: true,
       expected_final_status: 'waiting_human',
       expected_authorization_recorded: false,
       reason: 'First turn with no resume should leave the session in waiting_human; second turn never runs.',
@@ -147,6 +145,21 @@ const examples: Array<{
 
 const FAKE_THREAD_ID = 'eval-thread';
 const FAKE_REQUEST_ID = 'eval-req';
+const FAKE_TOOLKITS: AgentToolkit[] = [{
+  name: 'local',
+  description: 'local tools',
+  policy: {
+    toolReview: {
+      run_shell: {
+        request: () => null,
+        buildAuthorizationMatcher: ({ input }) => ({
+          type: 'shell_pattern',
+          value: (input as { command: string }).command,
+        }),
+      },
+    },
+  },
+}];
 
 function buildShellReviewInterrupt(command: string) {
   const review = buildHumanReviewRequest({
@@ -229,13 +242,14 @@ function buildFakeSetup() {
       messages: [new HumanMessage('start')],
       actor: { petId: 'eval-pet', userId: 'eval-user' },
       threadId: FAKE_THREAD_ID,
+      toolkits: FAKE_TOOLKITS,
     },
     interfaceContext: { kind: 'tui' as const },
   } as unknown as Parameters<typeof runChatSession>[0]['setup'];
 }
 
 async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
-  clearSessionAuthorizations(FAKE_THREAD_ID);
+  clearToolAuthorizations(FAKE_THREAD_ID);
 
   const fakeGraph = createFakeGraphService({
     pendingShellCommand: inputs.pending_shell_command,
@@ -259,9 +273,16 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
   });
 
   if (firstTurn.status !== 'waiting_human' || !inputs.resume) {
+    const reviewEvent = firstTurnEvents.find(
+      (event) => event.type === 'human_review.requested',
+    ) as Extract<LocalAgentEvent, { type: 'human_review.requested' }> | undefined;
     return {
       first_turn_status: firstTurn.status,
-      pending_interrupt_callback_called: false,
+      authorization_option_present: Boolean(
+        reviewEvent?.review?.options.some((option) =>
+          option.effects?.some((effect) => effect.type === 'graph.authorize_tool_action'),
+        ),
+      ),
       interrupt_received: firstTurn.status === 'waiting_human',
       authorized_pattern: null,
       authorization_recorded: false,
@@ -270,12 +291,32 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     };
   }
 
-  // Resume turn: mirror localServerChatHandler.handleChatRequest, which
-  // installs an onPendingInterrupt that translates extras.authorizeShellPattern
-  // into a real authorizeShellPattern() call on the thread.
-  let pendingCallbackCalled = false;
-  let lastPendingInterruptKind: string | null = null;
+  const reviewEvent = firstTurnEvents.find(
+    (event) => event.type === 'human_review.requested',
+  ) as Extract<LocalAgentEvent, { type: 'human_review.requested' }> | undefined;
+  const selectedOption = reviewEvent?.review?.options.find((option) =>
+    option.id === inputs.selected_option_id,
+  );
+  const authorizationOptionPresent = Boolean(
+    reviewEvent?.review?.options.some((option) =>
+      option.effects?.some((effect) => effect.type === 'graph.authorize_tool_action'),
+    ),
+  );
   let authorizedPattern: string | null = null;
+  if (selectedOption?.effects?.length) {
+    const applied = await applyReviewEffects({
+      threadId: FAKE_THREAD_ID,
+      pendingAction: {
+        actionId: 'pending_action',
+        toolName: 'run_shell',
+        args: { command: inputs.pending_shell_command },
+      },
+      effects: selectedOption.effects,
+      toolkits: FAKE_TOOLKITS,
+    });
+    const matcher = applied[0]?.matcher;
+    authorizedPattern = matcher?.type === 'shell_pattern' ? matcher.value : null;
+  }
 
   const secondTurnEvents: LocalAgentEvent[] = [];
   const secondTurn = await runChatSession({
@@ -290,14 +331,6 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     finishInterrupted: () => {},
     emitEvent: (event) => secondTurnEvents.push(event),
     emitToolEvent: () => {},
-    onPendingInterrupt: (payload) => {
-      pendingCallbackCalled = true;
-      lastPendingInterruptKind = typeof payload.kind === 'string' ? payload.kind : null;
-      const authorize = inputs.extras?.authorizeShellPattern;
-      if (!authorize) return;
-      const requestedPattern = authorize.pattern?.trim() || inputs.pending_shell_command;
-      authorizedPattern = authorizeShellPattern(FAKE_THREAD_ID, requestedPattern);
-    },
   });
 
   const finalReplyEvent = secondTurnEvents.find(
@@ -306,14 +339,14 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
 
   return {
     first_turn_status: firstTurn.status,
-    pending_interrupt_callback_called: pendingCallbackCalled,
     interrupt_received: firstTurn.status === 'waiting_human',
-    last_pending_interrupt_kind: lastPendingInterruptKind,
+    authorization_option_present: authorizationOptionPresent,
     authorized_pattern: authorizedPattern,
-    authorization_recorded: isShellCommandAuthorized(
-      FAKE_THREAD_ID,
-      inputs.pending_shell_command,
-    ),
+    authorization_recorded: isToolActionAuthorized({
+      threadId: FAKE_THREAD_ID,
+      toolName: 'run_shell',
+      args: { command: inputs.pending_shell_command },
+    }),
     final_reply: finalReplyEvent?.text ?? '',
     final_status: secondTurn.status,
   };
@@ -356,7 +389,7 @@ async function recreateDataset(client: Client) {
   }
 
   const dataset = await client.createDataset(DATASET_NAME, {
-    description: 'Evaluates local-agent HITL resume flow: structured extras, authorization side effects, and resume status.',
+    description: 'Evaluates local-agent HITL resume flow: ReviewSpec effects, authorization state, and resume status.',
   });
   for (const example of examples) {
     await client.createExample({
@@ -377,7 +410,7 @@ async function main() {
     experimentPrefix: 'local-agent-hitl',
     evaluators: [
       booleanCorrectness('interrupt_received', 'expected_interrupt_received', 'interrupt_received_correct'),
-      booleanCorrectness('pending_interrupt_callback_called', 'expected_pending_interrupt_callback_called', 'pending_callback_correct'),
+      booleanCorrectness('authorization_option_present', 'expected_authorization_option_present', 'authorization_option_correct'),
       booleanCorrectness('authorization_recorded', 'expected_authorization_recorded', 'authorization_recorded_correct'),
       equalsCorrectness('authorized_pattern', 'expected_resume_authorized_pattern', 'authorized_pattern_correct'),
       equalsCorrectness('final_status', 'expected_final_status', 'final_status_correct'),
@@ -388,7 +421,7 @@ async function main() {
   const rows = results.results;
   const keys = [
     'interrupt_received_correct',
-    'pending_callback_correct',
+    'authorization_option_correct',
     'authorization_recorded_correct',
     'authorized_pattern_correct',
     'final_status_correct',

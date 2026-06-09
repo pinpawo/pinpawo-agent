@@ -44,6 +44,7 @@ export type {
   ToolkitToolName,
   ToolkitPolicy,
   ToolkitResource,
+  ToolkitToolAuthorizationMatcherContext,
   ToolkitToolReviewContext,
   ToolkitToolReviewPolicy,
   ToolkitToolReviewPolicyMapFor,
@@ -93,6 +94,20 @@ export {
 export type {
   ReviewResponseResolutionErrorCode,
 } from './agent/orchestrator/review/reviewResponseResolver';
+export {
+  applyReviewEffects,
+  authorizeToolAction,
+  clearToolAuthorizations,
+  isToolActionAuthorized,
+  normalizeShellPattern,
+  readToolAuthorizationMatcher,
+  ReviewEffectApplicationError,
+} from './agent/orchestrator/review/reviewAuthorizations';
+export type {
+  ApplyReviewEffectsOptions,
+  ReviewEffectApplicationErrorCode,
+  ToolAuthorizationRule,
+} from './agent/orchestrator/review/reviewAuthorizations';
 export type {
   PendingReviewAction,
   PendingReviewState,

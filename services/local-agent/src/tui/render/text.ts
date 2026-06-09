@@ -21,7 +21,6 @@ export const TUI_TEXT = {
   approvalApproveExecution: '批准执行',
   approvalContinue: '继续',
   approvalStopHere: '停在这里',
-  approvalAllowSession: (command: string) => `本次会话授权：${command}`,
   studioExited: '已退出 Studio 模式',
   studioExitedToChat: '已退出 Studio 模式，回到单 pet chat',
   studioNotActive: '当前不在 Studio 模式',

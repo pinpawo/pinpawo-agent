@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  decodeLegacyStudioReviewDecision,
   LocalServerStudioReviewRouter,
 } from './localServerStudioReviews';
 import type { ReviewSpec } from '@pinpawo/pet-agent';
@@ -31,25 +30,6 @@ function reviewSpec(): ReviewSpec {
     ],
   };
 }
-
-test('decodeLegacyStudioReviewDecision accepts only structured resume decisions', () => {
-  assert.deepEqual(
-    decodeLegacyStudioReviewDecision({
-      resume: { decisions: [{ type: 'reject' }] },
-    }),
-    { type: 'reject' },
-  );
-  assert.equal(decodeLegacyStudioReviewDecision({}), null);
-});
-
-test('decodeLegacyStudioReviewDecision treats structured approve resume as approve', () => {
-  assert.deepEqual(
-    decodeLegacyStudioReviewDecision({
-      resume: { decisions: [{ type: 'approve' }] },
-    }),
-    { type: 'approve' },
-  );
-});
 
 test('LocalServerStudioReviewRouter routes response only when a review is pending', async () => {
   const router = new LocalServerStudioReviewRouter<object>();
@@ -84,7 +64,7 @@ test('LocalServerStudioReviewRouter routes response only when a review is pendin
   assert.equal(slot.current, null);
 });
 
-test('LocalServerStudioReviewRouter rejects text-only responses while review stays pending', async () => {
+test('LocalServerStudioReviewRouter rejects non-canonical responses while review stays pending', async () => {
   const router = new LocalServerStudioReviewRouter<object>();
   const connection = {};
   const slot = router.getOrCreateSlot(connection);
@@ -103,6 +83,7 @@ test('LocalServerStudioReviewRouter rejects text-only responses while review sta
     type: 'human_review_response',
     requestId: 'req-1',
     message: '继续',
+    resume: { decisions: [{ type: 'approve' }] },
   }, () => undefined), true);
   assert.equal(resolved, false);
   assert.notEqual(slot.current, null);

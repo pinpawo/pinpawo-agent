@@ -33,15 +33,6 @@ export type StudioRequestMessage = {
   conversationId?: string;
 };
 
-export type ReviewResumeExtras = {
-  /**
-   * sessionId that originated this human_review. When set, the server must
-   * resume on the originating session's thread; mismatches are rejected so
-   * the resume cannot land on the wrong checkpoint.
-   */
-  originSessionId?: string;
-};
-
 export type HumanReviewResponseMessage = {
   type: 'human_review_response';
   requestId: string;
@@ -50,7 +41,6 @@ export type HumanReviewResponseMessage = {
   selectedOptionId?: string;
   input?: Record<string, unknown>;
   resume?: unknown;
-  extras?: ReviewResumeExtras;
 };
 
 export type LocalAgentClientMessage =
@@ -162,15 +152,6 @@ function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpe
       && !Array.isArray(optionRecord.decision);
   });
   return validOptions ? review as ReviewSpec : null;
-}
-
-function readReviewResumeExtras(record: Record<string, unknown>): ReviewResumeExtras | null {
-  const extras = readRecord(record, 'extras');
-  if (!extras) return null;
-  const result: ReviewResumeExtras = {};
-  const originSessionId = readOptionalString(extras, 'originSessionId');
-  if (originSessionId) result.originSessionId = originSessionId;
-  return Object.keys(result).length > 0 ? result : null;
 }
 
 function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent | null {
@@ -312,7 +293,6 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
     const input = readRecord(record, 'input');
     if (!requestId || (message == null && !selectedOptionId)) return null;
     if (selectedOptionId && !reviewId) return null;
-    const extras = readReviewResumeExtras(record);
     return {
       type,
       requestId,
@@ -321,7 +301,6 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
       ...(selectedOptionId ? { selectedOptionId } : {}),
       ...(input ? { input } : {}),
       ...(record.resume !== undefined ? { resume: record.resume } : {}),
-      ...(extras ? { extras } : {}),
     };
   }
   if (type === 'interrupt_request') {

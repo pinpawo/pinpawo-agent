@@ -698,7 +698,7 @@ resolve response 和执行 effect 前必须校验：
 - `requestId` 能 resume 到唯一 pending graph thread/checkpoint。
 - `reviewId` 必须等于当前 pending review 的 `reviewSpec.id`；不匹配说明客户端提交了 stale response，必须拒绝。
 - session/thread 路由信息来自 server/runtime metadata，而不是 client extras。local-agent server 必须用自己保存的 `requestId -> { sessionId, threadId, reviewId }` 路由 pending review；如果当前连接/当前 TUI focus 的 session 与这条 pending route 不匹配，必须拒绝 resume，避免把 response 送到错误 checkpoint。
-- 这条是 #20 / PR #76 `originSessionId` 约束的目标形态：客户端不再回传 session id 来证明自己，server/runtime 用自己保存的 request -> session/thread metadata 做路由和校验。迁移期如果仍接收 `originSessionId`，只能作为 legacy guard，不能作为新协议字段继续扩散。
+- `originSessionId` 这类 client extras 不再作为 review response 协议字段。客户端不回传 session id 来证明自己，server/runtime 用自己保存的 request -> session/thread metadata 做路由和校验。
 - 同一个 pending review 多客户端并发提交时，采用 first response wins：第一个通过校验并成功 resume 的 response 消费 pending review；后续 response 因 `reviewId` 不再匹配当前 pending review 而拒绝。
 - `selectedOptionId` 存在于 pending spec。
 - effect 来自 pending spec，而不是客户端临时传入。
@@ -761,7 +761,7 @@ V1 cancellation 默认策略：
 - TUI / App chat：通过 LangGraph checkpoint 中的 pending interrupt 恢复。server 从 `requestId` 找到 thread/checkpoint，并把 `{ reviewId, selectedOptionId, input }` 作为 resume payload。
 - Studio humanReviewer：可以保留 `createWsHumanReviewer()` 里的 pending promise slot，但 pending slot 必须保存当前 `ReviewSpec`。收到 canonical response 后调用同一个 `resolveHumanReviewResponse()` 得到 `HumanReviewDecision`，再 resolve promise。
 
-也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。迁移后只允许 canonical `{ reviewId, selectedOptionId, input }` 或 legacy structured `resume.decisions`；不能再从 `message` 文本猜 decision。
+也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。Studio review response 只允许 canonical `{ reviewId, selectedOptionId, input }`；不能再从 `message` 文本或 `resume.decisions` 猜 decision。
 
 ## 7. Toolkit policy 调整
 
@@ -932,16 +932,15 @@ services/local-agent/src/tui/
 - 删除 TUI 中的 `run_shell` / `shell` 等 tool/runtime 名称判断。
 - `prompt` / `payload` 不进入 `ApprovalPanel.tsx`，也不驱动 runtime 行为。
 
-### PR 3：迁移 session authorization
+### PR 3：session authorization 已迁移到 graph state
 
-- PR #76 已经完成 `/allow` text magic 的主要预备清理，包括 structured resume extras 和部分 legacy text fallback 移除。
-- 本 PR 将 `authorizeShellPattern` extras 通道继续升级为 graph option effect。
+- `/allow` text magic 和 client-submitted authorization extras 已移除。
+- `approve-with-effect` option 通过 `graph.authorize_tool_action` effect 表达授权意图。
 - graph/tool runtime 从 pending review state 解析 effect。
 - shell review policy 明确声明 `approve-with-effect` option 和 `buildAuthorizationMatcher` hook。
-- graph/tool runtime 校验 approve decision、thread、reviewId、option、single pending action 后写入 authorization state。
-- tool review policy 在下一次 tool call 前读取 graph state authorizations。
-- 删除 `services/local-agent/src/sessionAuthorizations.ts` 以及 `authorizeShellPattern` / `isShellCommandAuthorized` 的所有调用方；authorization 只从 graph state 读取。
-- 删除迁移后剩余的 message text magic fallback。
+- graph/tool runtime 校验 approve decision、thread、reviewId、option、single pending action 后写入 graph state authorization。
+- tool review policy 在下一次 tool call 前读取 graph state `toolAuthorizations`。
+- local-agent 不再维护独立 session authorization 模块；authorization 只从 graph state 读取。
 
 ### PR 4：收敛 toolkit policy API
 

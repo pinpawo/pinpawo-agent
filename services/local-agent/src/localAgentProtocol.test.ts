@@ -77,29 +77,6 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
   );
 });
 
-test('parseLocalAgentClientMessage carries review origin session extras only', () => {
-  assert.deepEqual(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'human_review_response',
-      requestId: 'req-1',
-      message: '批准',
-      resume: { decisions: [{ type: 'approve' }] },
-      extras: {
-        originSessionId: 'sess-1',
-      },
-    })),
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      message: '批准',
-      resume: { decisions: [{ type: 'approve' }] },
-      extras: {
-        originSessionId: 'sess-1',
-      },
-    },
-  );
-});
-
 test('parseLocalAgentServerMessage rejects legacy server messages by default', () => {
   assert.equal(
     parseLocalAgentServerMessage(JSON.stringify({

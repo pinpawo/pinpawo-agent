@@ -9,14 +9,14 @@
  *
  *   1. ReviewSpec option effect → runtime authorization state (no text-channel
  *      magic strings, no client-submitted authorization extras).
- *   2. Server-side `handleHumanReviewResponse` rejects resumes whose
- *      `extras.originSessionId` does not match the active session.
+ *   2. Server-side `handleHumanReviewResponse` validates stale review ids and
+ *      session routing from server-held pending review metadata.
  *   3. runChatSession surfaces the pendingInterrupt with canonical ReviewSpec
  *      options and structured resume semantics.
  *
  * SUT seams:
  *   - services/local-agent/src/chatSessionAdapter.ts (runChatSession)
- *   - services/local-agent/src/localServerChatHandler.ts (origin guard)
+ *   - services/local-agent/src/localServerChatHandler.ts (review route guard)
  *   - packages/pet-agent/src/agent/orchestrator/review/reviewAuthorizations.ts
  *
  * Model is not invoked: examples use a hand-built fake graph that yields the

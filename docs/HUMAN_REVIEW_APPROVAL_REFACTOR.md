@@ -590,7 +590,7 @@ type PendingReviewAction = {
 
 local-agent server 可以缓存 requestId/reviewId/sessionId 到 active graph thread 的路由关系，但不缓存 authorization，也不解释 shell tool 语义。
 
-`pendingAction` 只在 review 代表某个待执行 tool action，且后续 effect resolution 需要这个 action 上下文时存在；iteration-limit 这类 runtime gate 不应该伪造成 tool action。`pendingAction` 是 graph/tool runtime 自己保存的执行上下文，不来自 client response。对于旧 `HumanReviewActionRequest`，adapter 可以把 `name` 映射为 `toolName`，把 `args` 原样保存，并生成一个 runtime-local `actionId`。matcher hook 必须读取这个 `pendingAction`，不能反向读取 UI payload。
+`pendingAction` 只在 review 代表某个待执行 tool action，且后续 effect resolution 需要这个 action 上下文时存在；iteration-limit 这类 runtime gate 不应该伪造成 tool action。`pendingAction` 是 graph/tool runtime 自己保存的执行上下文，不来自 client response。matcher hook 必须读取这个 `pendingAction`，不能反向读取 UI payload。
 
 ### 6.3 UI 渲染 review spec
 
@@ -598,17 +598,10 @@ local-agent server 可以缓存 requestId/reviewId/sessionId 到 active graph th
 
 ```ts
 type ApprovalPanelProps = {
-  view: ReviewView;
-  options: Array<{
-    id: string;
-    label: string;
-    description?: string;
-    variant?: 'primary' | 'normal' | 'danger';
-    input?: ReviewOptionInput;
-  }>;
-  inputValues?: Record<string, string>;
+  review: ReviewSpec;
   selectedIndex: number;
   width: number;
+  petId?: string;
 };
 ```
 

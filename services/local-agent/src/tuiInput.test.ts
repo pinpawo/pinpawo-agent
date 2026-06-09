@@ -5,7 +5,6 @@ import {
   listTuiCommands,
   parseTuiCommand,
 } from './tui/input/commandRegistry';
-import { buildApprovalOptions } from './tui/approvalOptions';
 import {
   applyComposerInput,
   resolveTuiKeyAction,
@@ -150,64 +149,4 @@ test('applyComposerInput keeps cursor editing behavior in pure input reducer', (
     value: 'run  command',
     cursorOffset: 4,
   });
-});
-
-test('buildApprovalOptions maps canonical review options without reading tool payloads', () => {
-  const options = buildApprovalOptions({
-    requestId: 'req-1',
-    kind: 'tool',
-    prompt: 'Run command?',
-    payload: {},
-    review: {
-      id: 'review-1',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Run command?' },
-      options: [{
-        id: 'approve',
-        label: 'Approve',
-        variant: 'primary',
-        decision: { type: 'approve' },
-      }, {
-        id: 'respond',
-        label: 'Respond',
-        description: 'Ask the agent to revise the plan.',
-        input: { kind: 'text', key: 'message', required: true, multiline: true },
-        decision: { type: 'respond', messageInputKey: 'message' },
-      }],
-    },
-  });
-
-  assert.deepEqual(options, [
-    {
-      label: 'Approve',
-      message: 'Approve',
-      variant: 'primary',
-      reviewId: 'review-1',
-      selectedOptionId: 'approve',
-    },
-    {
-      label: 'Respond',
-      message: 'Respond',
-      description: 'Ask the agent to revise the plan.',
-      reviewId: 'review-1',
-      selectedOptionId: 'respond',
-      input: { kind: 'text', key: 'message', required: true, multiline: true },
-    },
-  ]);
-});
-
-test('buildApprovalOptions returns no options when canonical review has no options', () => {
-  const options = buildApprovalOptions({
-    requestId: 'req-1',
-    kind: 'tool',
-    prompt: 'Run command?',
-    review: {
-      id: 'review-1',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Run command?' },
-      options: [],
-    },
-  });
-
-  assert.deepEqual(options, []);
 });

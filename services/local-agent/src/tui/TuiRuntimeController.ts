@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ReviewOption } from '@pinpawo/pet-agent';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { config } from '../config';
@@ -13,7 +14,6 @@ import {
   selectFocusedPendingApproval,
 } from './state/tuiStateReducer';
 import type { TuiAction, TuiState } from './state/tuiState';
-import type { ApprovalOption } from './types';
 
 const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
@@ -161,11 +161,11 @@ export class TuiRuntimeController {
     return true;
   }
 
-  submitReviewResponse(option: ApprovalOption, inputValue = '') {
+  submitReviewResponse(option: ReviewOption, inputValue = '') {
     const inputText = inputValue.trim();
     const decision = option.input?.kind === 'text' && inputText
       ? inputText
-      : option.message.trim();
+      : option.label.trim();
     if (!decision) return false;
 
     if (!this.wsClient.isConnected()) {
@@ -180,6 +180,7 @@ export class TuiRuntimeController {
       return false;
     }
     const requestId = currentApproval.requestId;
+    const reviewId = currentApproval.review.id;
 
     if (option.input?.kind === 'text' && !inputText) {
       this.appendSystemMessage(TUI_TEXT.approvalRespondRequiresInput);
@@ -201,8 +202,8 @@ export class TuiRuntimeController {
       type: 'human_review_response',
       requestId,
       message: decision,
-      reviewId: option.reviewId,
-      selectedOptionId: option.selectedOptionId,
+      reviewId,
+      selectedOptionId: option.id,
       ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),
     });
     return true;

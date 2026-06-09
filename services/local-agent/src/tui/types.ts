@@ -1,4 +1,3 @@
-import type { ReviewOptionInput } from '@pinpawo/pet-agent';
 import type {
   ApprovalRequestModel,
   HistoryCellModel,
@@ -15,16 +14,6 @@ export type PendingUiState = {
 };
 
 export type PendingApproval = ApprovalRequestModel;
-
-export type ApprovalOption = {
-  label: string;
-  message: string;
-  description?: string;
-  variant?: 'primary' | 'normal' | 'danger';
-  reviewId: string;
-  selectedOptionId: string;
-  input?: ReviewOptionInput;
-};
 
 export type ActiveOperation = {
   name: string;

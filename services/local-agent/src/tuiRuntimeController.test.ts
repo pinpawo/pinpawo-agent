@@ -65,11 +65,10 @@ test('TuiRuntimeController submits canonical review responses without legacy res
   const { controller, actions, sent } = createController(pendingReviewState());
 
   const submitted = controller.submitReviewResponse({
+    id: 'respond',
     label: 'Respond',
-    message: 'Respond',
-    reviewId: 'review-1',
-    selectedOptionId: 'respond',
     input: { kind: 'text', key: 'message', required: true, multiline: true },
+    decision: { type: 'respond', messageInputKey: 'message' },
   }, '请先解释风险');
 
   assert.equal(submitted, true);
@@ -88,11 +87,10 @@ test('TuiRuntimeController blocks empty required review input', () => {
   const { controller, actions, sent } = createController(pendingReviewState());
 
   const submitted = controller.submitReviewResponse({
+    id: 'respond',
     label: 'Respond',
-    message: 'Respond',
-    reviewId: 'review-1',
-    selectedOptionId: 'respond',
     input: { kind: 'text', key: 'message', required: true },
+    decision: { type: 'respond', messageInputKey: 'message' },
   });
 
   assert.equal(submitted, false);

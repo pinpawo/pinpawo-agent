@@ -250,26 +250,6 @@ export class LocalServerChatHandler {
       return;
     }
 
-    // The HITL resume always lands on the originating session's checkpoint.
-    // If a client tells us where the review came from, refuse to resume on a
-    // different session/thread before resolving decisions or applying effects.
-    const originSessionId = msg.extras?.originSessionId;
-    if (originSessionId) {
-      const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
-      if (activeSessionId && activeSessionId !== originSessionId) {
-        console.warn(
-          `[local-server] human_review_response rejected: originSessionId=${originSessionId} `
-          + `does not match active session=${activeSessionId}`,
-        );
-        sendLocalAgentEvent(ws, {
-          type: 'error',
-          requestId: msg.requestId,
-          message: '请回到发起该 review 的会话再应答。',
-        });
-        return;
-      }
-    }
-
     if (msg.reviewId) {
       if (!route) {
         console.warn(

@@ -1,5 +1,4 @@
 import {
-  readFirstHumanReviewDecision,
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
   type HumanReviewDecision,
@@ -16,16 +15,6 @@ import {
 type Log = (message: string) => void;
 
 export type StudioReviewConnection = object;
-
-export function decodeLegacyStudioReviewDecision(
-  msg: Pick<HumanReviewResponseMessage, 'resume'>,
-): HumanReviewDecision | null {
-  if (msg.resume !== undefined) {
-    const decoded = readFirstHumanReviewDecision(msg.resume);
-    if (decoded) return decoded;
-  }
-  return null;
-}
 
 function resolveStudioReviewDecision(
   pending: PendingReview,
@@ -48,7 +37,7 @@ function resolveStudioReviewDecision(
     return resolution.decision;
   }
 
-  return decodeLegacyStudioReviewDecision(msg);
+  return null;
 }
 
 export class LocalServerStudioReviewRouter<Connection extends StudioReviewConnection = StudioReviewConnection> {

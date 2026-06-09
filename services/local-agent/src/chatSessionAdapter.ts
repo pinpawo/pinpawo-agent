@@ -30,6 +30,18 @@ function readMessages(snapshot: unknown): BaseMessage[] {
   return Array.isArray(messages) ? messages as BaseMessage[] : [];
 }
 
+function hasPendingGraphContinuation(snapshot: unknown) {
+  const record = snapshot && typeof snapshot === 'object'
+    ? snapshot as { next?: unknown; tasks?: unknown }
+    : null;
+  const next = Array.isArray(record?.next) ? record.next : [];
+  if (next.length > 0) {
+    return true;
+  }
+  const tasks = Array.isArray(record?.tasks) ? record.tasks : [];
+  return tasks.length > 0;
+}
+
 function estimateTextTokens(text: string) {
   return Math.max(0, Math.ceil(text.length / CHARS_PER_TOKEN));
 }
@@ -72,10 +84,17 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   }
 
   const pendingInterrupt = readPendingInterrupt(threadSnapshot);
+  const hasExplicitResume = request.resume !== undefined;
+  const shouldResume = Boolean(
+    pendingInterrupt
+    || (hasExplicitResume && hasPendingGraphContinuation(threadSnapshot)),
+  );
   const resumeValue = pendingInterrupt
     ? normalizeInterruptResume(pendingInterrupt, message, request.resume)
-    : undefined;
-  const graphInput = pendingInterrupt
+    : hasExplicitResume
+      ? request.resume
+      : undefined;
+  const graphInput = shouldResume
     ? graphService.buildResumeCommand(resumeValue)
     : undefined;
 

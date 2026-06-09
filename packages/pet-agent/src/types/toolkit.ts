@@ -1,9 +1,10 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
-import type { HumanReviewActionRequest, HumanReviewRequest } from '../agent/orchestrator/humanReview';
+import type { HumanReviewActionRequest } from '../agent/orchestrator/humanReview';
 import type {
   PendingReviewAction,
   ReviewEffect,
+  ReviewSpec,
   ToolAuthorizationMatcher,
 } from '../agent/orchestrator/review/reviewSpec';
 import type { ToolAuthorizationRecord } from '../agent/orchestrator/review/reviewAuthorizations';
@@ -37,7 +38,7 @@ export type ToolkitToolAuthorizationMatcherContext = {
 export type ToolkitToolReviewPolicy = {
   request: (
     ctx: ToolkitToolReviewContext
-  ) => HumanReviewRequest | null | Promise<HumanReviewRequest | null>;
+  ) => ReviewSpec | null | Promise<ReviewSpec | null>;
   applyEdit?: (
     ctx: ToolkitToolReviewContext & { editedAction: HumanReviewActionRequest }
   ) => unknown | Promise<unknown>;

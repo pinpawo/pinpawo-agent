@@ -132,10 +132,10 @@ runtime.invoke({
 
 ## Boundary 3: HITL Bridge (`humanReviewer`)
 
-pet 内 tool 触发 `interrupt(humanReviewRequest)`(由 toolkit 的 `policy.toolReview` 在调用前决定)。pet runtime 把这个 request 经一个**构造时注入**的 callback 拿到 decision,内部完成 `Command({ resume })` 续跑,**对 invoke 调用方原子化**。
+pet 内 tool 触发 `interrupt(...)`(由 toolkit 的 `policy.toolReview` 在调用前决定)。新 toolkit policy 返回 `ReviewSpec`，wrapper 会生成 canonical `tool_review` interrupt payload。Studio `humanReviewer` 桥目前同时接收 legacy `HumanReviewRequest` 和 canonical `tool_review` payload；新路径直接转发 `ReviewSpec`。
 
 ```ts
-type HumanReviewer = (request: HumanReviewRequest) => Promise<HumanReviewDecision>;
+type HumanReviewer = (request: HumanReviewRequest | ToolReviewInterruptPayload) => Promise<HumanReviewDecision>;
 
 // 构造时注入
 const pet = createPetAgentRuntime({
@@ -147,14 +147,14 @@ const pet = createPetAgentRuntime({
 });
 ```
 
-`HumanReviewRequest` 与 `HumanReviewDecision`(approve / edit / reject / respond)定义见 `packages/pet-agent/src/agent/orchestrator/humanReview.ts`。
+`HumanReviewRequest` 与 `HumanReviewDecision`(approve / edit / reject / respond)定义见 `packages/pet-agent/src/agent/orchestrator/humanReview.ts`。`ToolReviewInterruptPayload` / `ReviewSpec` 定义见 `packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts`。
 
 流程:
 
 ```text
 pet 内部 tool 调用:
-  policy.toolReview.request(ctx) → HumanReviewRequest
-  interrupt(request)  // LangGraph 暂停,checkpoint 写入
+  policy.toolReview.request(ctx) → ReviewSpec
+  interrupt({ kind: "tool_review", review, pendingAction })  // LangGraph 暂停,checkpoint 写入
 
 pet runtime invoke 循环:
   graph.invoke(...) 返回带 __interrupt__ 的 state

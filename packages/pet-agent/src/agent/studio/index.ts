@@ -22,6 +22,7 @@ export type {
 export type {
   ExecuteAction,
   HumanReviewer,
+  HumanReviewerRequest,
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,

@@ -22,6 +22,7 @@ import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
 import { runChatSession } from './chatSessionAdapter';
+import { readPendingReviewActionFromInterruptPayload } from './chatInterrupts';
 import {
   configureInflightOperationRegistry,
   type InflightOperationRun,
@@ -392,6 +393,13 @@ export class LocalServerChatHandler {
 function readPendingReviewAction(
   event: Extract<LocalAgentEvent, { type: 'human_review.requested' }>,
 ): PendingReviewAction {
+  const actionFromPayload = event.payload
+    ? readPendingReviewActionFromInterruptPayload(event.payload)
+    : null;
+  if (actionFromPayload) {
+    return actionFromPayload;
+  }
+
   const actionRequests = Array.isArray(event.payload?.actionRequests)
     ? event.payload.actionRequests
     : [];

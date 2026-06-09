@@ -489,11 +489,13 @@ test('handleHumanReviewResponse stores declared authorization effects in graph s
     type: 'human_review.requested',
     requestId: 'req-1',
     payload: {
-      actionRequests: [{
-        name: 'run_shell',
+      kind: 'tool_review',
+      pendingAction: {
+        actionId: 'call-1',
+        toolName: 'run_shell',
         args: { command: 'git status', cwd: '/repo' },
         description: 'Run git status',
-      }],
+      },
     },
     review: {
       id: 'review-current',

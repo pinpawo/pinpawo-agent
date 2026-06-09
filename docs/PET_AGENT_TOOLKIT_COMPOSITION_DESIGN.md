@@ -111,7 +111,7 @@ const bashToolkit = {
       run_shell: {
         request: ({ input }) => {
           if (!needsReview(input)) return null;
-          return humanReviewRequest;
+          return reviewSpec;
         },
         applyEdit: ({ editedAction }) => editedAction.args,
       },
@@ -123,12 +123,12 @@ const bashToolkit = {
 wrapper 的职责：
 
 - `request()` 返回 `null`：直接调用原始工具。
-- `request()` 返回 `HumanReviewRequest`：通过 LangGraph `interrupt(request)` 暂停，恢复后读取人类决策。
+- `request()` 返回 `ReviewSpec`：wrapper 生成 canonical `tool_review` interrupt payload，包含 `review` 和当前 `pendingAction`，恢复后读取人类决策。
 - human `approve`：调用原始工具。
-- human `edit`：把 edited action 转回工具入参，重新经过 `request()` 判断。
+- human `edit`：只作为 legacy resume 兼容路径；V1 review options 不再暴露 edit。
 - human `reject/respond`：不调用原始工具，返回结构化 cancelled 结果。
 
-`HumanReviewRequest` 是 UI/runtime 交互 payload，不是权限模型本身。这样 shell、browser、filesystem 等工具族可以独立定义自己的 HITL 策略，同一个底层工具在不同 toolkit 中也可以有不同 review policy。
+`ReviewSpec` 是 UI/runtime 的 canonical 交互协议；旧 `HumanReviewRequest` 只作为 legacy adapter 输入存在。这样 shell、browser、filesystem 等工具族可以独立定义自己的 HITL 策略，同一个底层工具在不同 toolkit 中也可以有不同 review policy。
 
 ### Shell review 分层
 
@@ -136,7 +136,7 @@ shell policy 使用确定性规则做默认判断：
 
 - 硬性禁止：保留在 `run_shell` raw tool 内，例如 `sudo`、`git reset --hard`、heredoc、输出重定向写文件。
 - 已授权或低风险：`request()` 返回 `null`，直接执行，例如普通只读命令，或当前会话已经授权的命令范式。
-- 高风险：返回 `HumanReviewRequest`，例如删除文件、git 写操作、发布、部署、权限变更、远程脚本执行。
+- 高风险：返回 `ReviewSpec`，例如删除文件、git 写操作、发布、部署、权限变更、远程脚本执行。
 - 不支持 HITL 的执行界面：`request()` 返回 `null`，raw tool 返回“需要 human review”的确定性错误，不触发无法恢复的 interrupt。
 
 如果未来引入模型判断，只能放在“中间敏感度”区间，并且建议只允许模型把调用升级为 review，不能把强制 review 或硬性禁止降级为直接执行。也就是说：

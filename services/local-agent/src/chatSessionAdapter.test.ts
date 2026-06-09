@@ -158,6 +158,79 @@ test('runChatSession materializes ReviewSpec for human review interrupts', async
   assert.deepEqual(event.review?.options.map((option) => option.id), ['approve', 'reject', 'respond']);
 });
 
+test('runChatSession forwards canonical tool review interrupt specs unchanged', async () => {
+  const emittedEvents: LocalAgentEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+  const review = {
+    id: 'review-direct',
+    schemaVersion: 1,
+    view: {
+      kind: 'plain' as const,
+      title: 'Shell command approval',
+      body: 'Run git status?',
+    },
+    options: [{
+      id: 'approve',
+      label: 'Approve',
+      decision: { type: 'approve' as const },
+    }],
+  };
+  const graphService = {
+    async getState() {
+      return { tasks: [] };
+    },
+    async *stream() {
+      yield [
+        'values',
+        {
+          __interrupt__: [{
+            value: {
+              kind: 'tool_review',
+              review,
+              pendingAction: {
+                actionId: 'call-1',
+                toolName: 'run_shell',
+                args: { command: 'git status', cwd: '/repo' },
+                description: 'Run git status?',
+              },
+            },
+          }],
+        },
+      ];
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'waiting_human' });
+  const event = emittedEvents[0];
+  assert.equal(event?.type, 'human_review.requested');
+  assert.deepEqual(event.review, review);
+  assert.equal(event.prompt, 'Shell command approval\nRun git status?');
+  assert.equal(event.payload?.kind, 'tool_review');
+});
+
 test('runChatSession adds authorization option from toolkit review policy hook', async () => {
   const emittedEvents: LocalAgentEvent[] = [];
   const setup = {

@@ -11,6 +11,7 @@ import {
 } from '../orchestrator/humanReview';
 import type { OrchestratorGraph } from '../createAgentRuntime';
 import type { AgentActor, AgentModels } from '../../types/agent';
+import type { HumanReviewerRequest } from './types';
 
 function fakeModels(): AgentModels {
   // graph 已被 stub,实际不会用到 models。
@@ -53,8 +54,27 @@ const sampleReview: HumanReviewRequest = buildHumanReviewRequest({
   prompt: 'Approve do_x?',
 });
 
+const sampleToolReview = {
+  kind: 'tool_review' as const,
+  review: {
+    id: 'review-direct',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve do_y?' },
+    options: [{
+      id: 'approve',
+      label: 'Approve',
+      decision: { type: 'approve' as const },
+    }],
+  },
+  pendingAction: {
+    actionId: 'call-1',
+    toolName: 'do_y',
+    args: { foo: 2 },
+  },
+};
+
 test('humanReviewer: single interrupt → approve → reply', async () => {
-  const requests: HumanReviewRequest[] = [];
+  const requests: HumanReviewerRequest[] = [];
   const { graph } = makeStubGraph([
     { __interrupt__: [{ value: sampleReview }], messages: [] },
     { messages: [new AIMessage('all done')] },
@@ -73,11 +93,12 @@ test('humanReviewer: single interrupt → approve → reply', async () => {
   const result = await runtime.invoke({ brief: 'go' });
   assert.equal(result.reply, 'all done');
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].prompt, 'Approve do_x?');
+  assert.equal(requests[0]?.kind, 'human_review');
+  assert.equal((requests[0] as HumanReviewRequest).prompt, 'Approve do_x?');
 });
 
 test('humanReviewer: multi-round interrupt loops until resolved', async () => {
-  const requests: HumanReviewRequest[] = [];
+  const requests: HumanReviewerRequest[] = [];
   const { graph } = makeStubGraph([
     { __interrupt__: [{ value: sampleReview }], messages: [] },
     { __interrupt__: [{ value: sampleReview }], messages: [] },
@@ -97,6 +118,31 @@ test('humanReviewer: multi-round interrupt loops until resolved', async () => {
   const result = await runtime.invoke({ brief: 'go' });
   assert.equal(result.reply, 'done after two reviews');
   assert.equal(requests.length, 2);
+});
+
+test('humanReviewer: canonical tool_review interrupt → approve → reply', async () => {
+  const requests: HumanReviewerRequest[] = [];
+  const { graph } = makeStubGraph([
+    { __interrupt__: [{ value: sampleToolReview }], messages: [] },
+    { messages: [new AIMessage('direct done')] },
+  ]);
+
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+    humanReviewer: async (req) => {
+      requests.push(req);
+      return { type: 'approve' };
+    },
+  });
+
+  const result = await runtime.invoke({ brief: 'go' });
+  assert.equal(result.reply, 'direct done');
+  assert.equal(requests.length, 1);
+  const request = requests[0];
+  assert.equal(request?.kind, 'tool_review');
+  assert.equal(request?.kind === 'tool_review' ? request.review.id : null, 'review-direct');
 });
 
 test('humanReviewer: missing reviewer + interrupt → invoke throws', async () => {
@@ -143,8 +189,8 @@ test('humanReviewer: resume call passes Command with decision', async () => {
   );
 });
 
-test('humanReviewer: non-human_review interrupt is not treated as HITL', async () => {
-  // 假设 graph 抛出某种非 human_review 类型的 interrupt;pet runtime 应直接返回(reply 空),
+test('humanReviewer: unknown interrupt is not treated as HITL', async () => {
+  // 假设 graph 抛出某种未知类型的 interrupt;pet runtime 应直接返回(reply 空),
   // 不调用 humanReviewer。
   let reviewerCalled = false;
   const { graph } = makeStubGraph([

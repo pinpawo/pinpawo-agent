@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export type ReviewView =
   | { kind: 'plain'; title?: string; body: string }
   | { kind: 'markdown'; title?: string; body: string };
@@ -54,6 +56,22 @@ export type ReviewSpec = {
   options: ReviewOption[];
 };
 
+export type BuildReviewSpecParams = {
+  id?: string;
+  schemaVersion?: number;
+  view: ReviewView;
+  options: ReviewOption[];
+};
+
+export function buildReviewSpec(params: BuildReviewSpecParams): ReviewSpec {
+  return {
+    id: params.id ?? randomUUID(),
+    schemaVersion: params.schemaVersion ?? 1,
+    view: params.view,
+    options: params.options,
+  };
+}
+
 export type PendingReviewAction = {
   actionId: string;
   toolName: string;
@@ -65,6 +83,14 @@ export type PendingReviewState = {
   requestId: string;
   reviewSpec: ReviewSpec;
   pendingAction: PendingReviewAction;
+};
+
+export type ToolReviewInterruptPayload = {
+  kind: 'tool_review';
+  review: ReviewSpec;
+  pendingAction: PendingReviewAction;
+  prompt?: string;
+  error?: string;
 };
 
 export type ReviewResponse = {

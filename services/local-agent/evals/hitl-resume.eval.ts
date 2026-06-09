@@ -21,7 +21,7 @@
  *
  * Model is not invoked: examples use a hand-built fake graph that yields the
  * exact LangGraph stream chunks runChatSession reads — the interrupt shape
- * comes from pet-agent's buildHumanReviewRequest so it tracks schema drift.
+ * is the canonical HumanReviewInterruptPayload emitted by pet-agent.
  *
  * Run:
  *   npm run eval:hitl -w pinpawo-local-agent
@@ -32,7 +32,7 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 import {
   applyReviewEffects,
-  buildHumanReviewRequest,
+  buildReviewSpec,
   isToolActionAuthorized,
   type AgentToolkit,
   type ToolAuthorizationRecord,
@@ -162,19 +162,58 @@ const FAKE_TOOLKITS: AgentToolkit[] = [{
 }];
 
 function buildShellReviewInterrupt(command: string) {
-  const review = buildHumanReviewRequest({
-    actionRequests: [{
-      name: 'run_shell',
+  return {
+    kind: 'review',
+    review: buildReviewSpec({
+      view: {
+        kind: 'plain',
+        title: 'Shell command approval',
+        body: `执行 shell 命令: ${command}?`,
+      },
+      options: [
+        {
+          id: 'approve',
+          label: 'Approve',
+          variant: 'primary',
+          decision: { type: 'approve' },
+        },
+        {
+          id: 'approve-and-authorize-thread',
+          label: 'Approve and authorize',
+          decision: { type: 'approve' },
+          effects: [{
+            type: 'graph.authorize_tool_action',
+            scope: 'thread',
+            actionRef: { type: 'pending_action' },
+            matcher: { type: 'policy_hook' },
+          }],
+        },
+        {
+          id: 'reject',
+          label: 'Reject',
+          variant: 'danger',
+          decision: { type: 'reject' },
+        },
+        {
+          id: 'respond',
+          label: 'Respond',
+          input: {
+            kind: 'text',
+            key: 'message',
+            required: true,
+            multiline: true,
+          },
+          decision: { type: 'respond', messageInputKey: 'message' },
+        },
+      ],
+    }),
+    pendingAction: {
+      actionId: 'pending_action',
+      toolName: 'run_shell',
       args: { command },
       description: `执行 shell 命令：${command}`,
-    }],
-    reviewConfigs: [{
-      actionName: 'run_shell',
-      allowedDecisions: ['approve', 'reject', 'respond'],
-    }],
-    prompt: `执行 shell 命令: ${command}?`,
-  });
-  return review;
+    },
+  };
 }
 
 /**

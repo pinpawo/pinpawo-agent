@@ -24,7 +24,6 @@ import {
   selectCapabilityTools,
 } from './subagentHandoff';
 import {
-  buildHumanReviewRequest,
   buildHumanReviewResume,
   readFirstHumanReviewDecision,
 } from './humanReview';
@@ -581,21 +580,6 @@ test('toolkit review policy wraps tool calls without changing tool identity', as
 });
 
 test('human review helpers use structured decisions', () => {
-  const request = buildHumanReviewRequest({
-    actionRequests: [{
-      name: 'run_shell',
-      args: { command: 'rm -rf tmp' },
-      description: 'Delete tmp',
-    }],
-    reviewConfigs: [{
-      actionName: 'run_shell',
-      allowedDecisions: ['approve', 'edit', 'reject'],
-    }],
-    prompt: 'Approve shell command?',
-  });
-
-  assert.equal(request.kind, 'human_review');
-  assert.equal(request.actionRequests[0]?.name, 'run_shell');
   assert.deepEqual(
     readFirstHumanReviewDecision(buildHumanReviewResume([{ type: 'approve' }])),
     { type: 'approve' },

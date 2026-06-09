@@ -1,6 +1,5 @@
 import type { NamedStructuredTool, ToolkitToolReviewPolicy } from './toolkit';
 import { defineToolkit, defineToolset } from './toolkit';
-import { buildHumanReviewRequest } from '../agent/orchestrator/humanReview';
 
 const alphaTool = { name: 'alpha_tool' } as NamedStructuredTool<'alpha_tool'>;
 const betaTool = { name: 'beta_tool' } as NamedStructuredTool<'beta_tool'>;
@@ -8,16 +7,6 @@ const betaTool = { name: 'beta_tool' } as NamedStructuredTool<'beta_tool'>;
 const reviewPolicy = {
   request: () => null,
 } satisfies ToolkitToolReviewPolicy;
-
-const legacyReviewPolicy = {
-  // @ts-expect-error toolkit review policies must return ReviewSpec, not legacy HumanReviewRequest
-  request: () => buildHumanReviewRequest({
-    actionRequests: [],
-    reviewConfigs: [],
-  }),
-} satisfies ToolkitToolReviewPolicy;
-
-void legacyReviewPolicy;
 
 defineToolkit({
   name: 'typed_toolkit',

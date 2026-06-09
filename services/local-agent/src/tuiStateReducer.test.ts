@@ -348,6 +348,12 @@ test('tuiStateReducer handles human review and interrupt state', () => {
       requestId: 'req-1',
       prompt: 'Approve?',
       payload: { kind: 'approval' },
+      review: {
+        id: 'review-1',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Approve?' },
+        options: [],
+      },
       actor: { petId: 'pet-a' },
     },
     now: 1200,
@@ -360,6 +366,12 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     requestId: 'req-1',
     prompt: 'Approve?',
     payload: { kind: 'approval' },
+    review: {
+      id: 'review-1',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [],
+    },
     petId: 'pet-a',
   });
   assert.equal(state.connection.message, '等待你的决定(pet-a)');
@@ -421,7 +433,6 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
     kind: 'interrupt',
     requestId: 'req-1',
     prompt: 'Needs approval\nRun command?',
-    payload: {},
     review: {
       id: 'review-1',
       schemaVersion: 1,

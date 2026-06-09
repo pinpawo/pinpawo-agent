@@ -198,6 +198,6 @@ function readPendingInterrupt(result: unknown): HumanReviewerRequest | undefined
     : null;
   if (!value || typeof value !== 'object') return undefined;
   const kind = (value as { kind?: unknown }).kind;
-  if (kind !== 'human_review' && kind !== 'review') return undefined;
+  if (kind !== 'review') return undefined;
   return value as HumanReviewerRequest;
 }

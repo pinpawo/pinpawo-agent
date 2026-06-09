@@ -7,40 +7,11 @@ export type HumanReviewActionRequest = {
   description?: string;
 };
 
-export type HumanReviewConfig = {
-  actionName: string;
-  allowedDecisions: HumanReviewDecisionType[];
-  description?: string;
-};
-
-export type HumanReviewRequest = {
-  kind: 'human_review';
-  actionRequests: HumanReviewActionRequest[];
-  reviewConfigs: HumanReviewConfig[];
-  prompt?: string;
-  error?: string;
-};
-
 export type HumanReviewDecision =
   | { type: 'approve' }
   | { type: 'edit'; editedAction: HumanReviewActionRequest }
   | { type: 'reject'; message?: string }
   | { type: 'respond'; message: string };
-
-export function buildHumanReviewRequest(params: {
-  actionRequests: HumanReviewActionRequest[];
-  reviewConfigs: HumanReviewConfig[];
-  prompt?: string | null;
-  error?: string | null;
-}): HumanReviewRequest {
-  return {
-    kind: 'human_review',
-    actionRequests: params.actionRequests,
-    reviewConfigs: params.reviewConfigs,
-    ...(params.prompt ? { prompt: params.prompt } : {}),
-    ...(params.error ? { error: params.error } : {}),
-  };
-}
 
 export function buildHumanReviewResume(decisions: HumanReviewDecision[]) {
   return { decisions };

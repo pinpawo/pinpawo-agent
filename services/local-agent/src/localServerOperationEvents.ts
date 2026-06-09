@@ -54,9 +54,7 @@ export function isHumanReviewInterruptError(value: unknown): boolean {
       return false;
     }
     const payloadRecord = payload as Record<string, unknown>;
-    return payloadRecord.kind === 'review'
-      || payloadRecord.kind === 'human_review'
-      || (Array.isArray(payloadRecord.actionRequests) && Array.isArray(payloadRecord.reviewConfigs));
+    return payloadRecord.kind === 'review';
   });
 }
 

@@ -196,12 +196,17 @@ test('buildApprovalOptions maps canonical review options without reading tool pa
   ]);
 });
 
-test('buildApprovalOptions returns no options without canonical review spec', () => {
+test('buildApprovalOptions returns no options when canonical review has no options', () => {
   const options = buildApprovalOptions({
     requestId: 'req-1',
     kind: 'tool',
     prompt: 'Run command?',
-    payload: {},
+    review: {
+      id: 'review-1',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Run command?' },
+      options: [],
+    },
   });
 
   assert.deepEqual(options, []);

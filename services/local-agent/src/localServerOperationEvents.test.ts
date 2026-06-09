@@ -58,7 +58,7 @@ test('emitLocalServerToolOperationEvent maps human review tool errors to interru
       error: {
         interrupts: [{
           value: {
-            kind: 'human_review',
+            kind: 'review',
           },
         }],
       },
@@ -75,14 +75,6 @@ test('emitLocalServerToolOperationEvent maps human review tool errors to interru
 });
 
 test('isHumanReviewInterruptError accepts LangGraph interrupt shapes', () => {
-  assert.equal(isHumanReviewInterruptError({
-    __interrupt__: [{
-      value: {
-        actionRequests: [],
-        reviewConfigs: [],
-      },
-    }],
-  }), true);
   assert.equal(isHumanReviewInterruptError({
     __interrupt__: [{
       value: {

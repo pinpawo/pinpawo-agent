@@ -5,9 +5,7 @@ import { isCommand } from '@langchain/langgraph';
 
 import { createPetAgentRuntime } from './createPetAgentRuntime';
 import {
-  buildHumanReviewRequest,
   type HumanReviewDecision,
-  type HumanReviewRequest,
 } from '../orchestrator/humanReview';
 import type { OrchestratorGraph } from '../createAgentRuntime';
 import type { AgentActor, AgentModels } from '../../types/agent';
@@ -48,12 +46,6 @@ function makeStubGraph(responses: unknown[]): {
   return { graph, calls };
 }
 
-const sampleReview: HumanReviewRequest = buildHumanReviewRequest({
-  actionRequests: [{ name: 'do_x', args: { foo: 1 }, description: 'do x' }],
-  reviewConfigs: [{ actionName: 'do_x', allowedDecisions: ['approve', 'reject', 'respond'] }],
-  prompt: 'Approve do_x?',
-});
-
 const sampleReviewInterrupt = {
   kind: 'review' as const,
   review: {
@@ -76,7 +68,7 @@ const sampleReviewInterrupt = {
 test('humanReviewer: single interrupt → approve → reply', async () => {
   const requests: HumanReviewerRequest[] = [];
   const { graph } = makeStubGraph([
-    { __interrupt__: [{ value: sampleReview }], messages: [] },
+    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
     { messages: [new AIMessage('all done')] },
   ]);
 
@@ -93,15 +85,15 @@ test('humanReviewer: single interrupt → approve → reply', async () => {
   const result = await runtime.invoke({ brief: 'go' });
   assert.equal(result.reply, 'all done');
   assert.equal(requests.length, 1);
-  assert.equal(requests[0]?.kind, 'human_review');
-  assert.equal((requests[0] as HumanReviewRequest).prompt, 'Approve do_x?');
+  assert.equal(requests[0]?.kind, 'review');
+  assert.equal(requests[0]?.review.id, 'review-direct');
 });
 
 test('humanReviewer: multi-round interrupt loops until resolved', async () => {
   const requests: HumanReviewerRequest[] = [];
   const { graph } = makeStubGraph([
-    { __interrupt__: [{ value: sampleReview }], messages: [] },
-    { __interrupt__: [{ value: sampleReview }], messages: [] },
+    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
+    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
     { messages: [new AIMessage('done after two reviews')] },
   ]);
 
@@ -147,7 +139,7 @@ test('humanReviewer: canonical review interrupt → approve → reply', async ()
 
 test('humanReviewer: missing reviewer + interrupt → invoke throws', async () => {
   const { graph } = makeStubGraph([
-    { __interrupt__: [{ value: sampleReview }], messages: [] },
+    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
   ]);
 
   const runtime = createPetAgentRuntime({
@@ -164,7 +156,7 @@ test('humanReviewer: missing reviewer + interrupt → invoke throws', async () =
 
 test('humanReviewer: resume call passes Command with decision', async () => {
   const { graph, calls } = makeStubGraph([
-    { __interrupt__: [{ value: sampleReview }], messages: [] },
+    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
     { messages: [new AIMessage('rejected')] },
   ]);
 

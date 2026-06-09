@@ -72,21 +72,14 @@ export type {
   OrchestrationDecisionStructuredOutputConfig,
 } from './agent/createAgentRuntime';
 export {
-  buildHumanReviewRequest,
   buildHumanReviewResume,
   readFirstHumanReviewDecision,
 } from './agent/orchestrator/humanReview';
 export type {
   HumanReviewActionRequest,
-  HumanReviewConfig,
   HumanReviewDecision,
   HumanReviewDecisionType,
-  HumanReviewRequest,
 } from './agent/orchestrator/humanReview';
-export { buildReviewSpecFromHumanReviewRequest } from './agent/orchestrator/review/reviewSpecFromHumanReview';
-export type {
-  BuildReviewSpecFromHumanReviewRequestOptions,
-} from './agent/orchestrator/review/reviewSpecFromHumanReview';
 export {
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,

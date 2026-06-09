@@ -242,13 +242,13 @@ type HumanReviewRequestedEvent = {
   review: ReviewSpec;
   actor?: { petId?: string };
 
-  // 迁移期兼容字段。新 TUI 只读 review。
+  // 派生展示/调试字段。runtime 行为只由 review + server-side route state 决定。
   prompt?: string;
-  payload?: HumanReviewRequest;
+  payload?: HumanReviewInterruptPayload;
 };
 ```
 
-迁移期可以继续发送 `prompt` / `payload` 给旧客户端，但只要 `review` 存在，新客户端必须以 `review` 为准。`prompt` 和 `payload` 只能用于 display fallback 或 legacy adapter，不能驱动 runtime 行为。
+`prompt` 和 `payload` 只能用于展示 fallback / 调试溯源，不能驱动 runtime 行为。旧 request interrupt adapter 已移除。
 
 V1 response schema：
 
@@ -270,7 +270,6 @@ V1 action cardinality：
 
 - 一个 `ReviewSpec` 对应一个 pending tool action。
 - `actionRef: { type: 'pending_action' }` 只在 pending review 有且只有一个 pending action 时合法。
-- 旧 `HumanReviewRequest.actionRequests` 如果包含多个 action，adapter 可以把它们渲染进 view，但不能生成 authorization effect，除非先把它拆成多个单 action review。
 - 后续如果要支持一次 review 多个 action，需要增加显式 action id，例如 `actionRef: { type: 'action_id'; actionId: string }`，不能复用隐式 `pending_action`。
 
 V1 response 不携带 `schemaVersion`，也不携带 `reviewVersion`。stale 校验只看当前 pending review 的 `reviewSpec.id`。
@@ -801,7 +800,7 @@ V1 cancellation 默认策略：
 
 ### 7.2 Policy API
 
-目标接口应该只返回 `ReviewSpec`，不要长期暴露 `HumanReviewRequest | ReviewSpec` 的 union。union 虽然迁移方便，但会让旧协议继续扩散，后续还要再收口。
+当前接口只返回 `ReviewSpec`，不再暴露旧 request union。
 
 目标形态：
 
@@ -824,37 +823,7 @@ type ToolkitToolReviewPolicy = {
 
 `buildAuthorizationMatcher` 只在 selected option 的 effect 使用 `matcher: { type: 'policy_hook' }` 时调用。对于 shell policy，它可以把 `pendingAction.args.command` 映射成 `{ type: 'shell_pattern', value }`；对于不支持 session authorization 的 tool，不实现这个 hook。
 
-迁移期对旧 policy 做 adapter，而不是改变主接口：
-
-```ts
-function adaptLegacyHumanReviewPolicy(
-  legacyRequest: (ctx: ToolkitToolReviewContext) => HumanReviewRequest | null | Promise<HumanReviewRequest | null>,
-): ToolkitToolReviewPolicy {
-  return {
-    async request(ctx) {
-      const request = await legacyRequest(ctx);
-      return request ? buildReviewSpecFromHumanReviewRequest(request, ctx) : null;
-    },
-  };
-}
-```
-
-`buildReviewSpecFromHumanReviewRequest()` 只作为兼容层存在：
-
-```ts
-function buildReviewSpecFromHumanReviewRequest(
-  request: HumanReviewRequest,
-  ctx: ToolkitToolReviewContext,
-): ReviewSpec {
-  // prompt -> view.body
-  // allowedDecisions -> default options
-  // graph/tool known metadata + policy hook -> effect options
-}
-```
-
-兼容 adapter 的权限要保守：不能仅凭 `allowedDecisions.includes('approve')` 自动生成 authorization effect。只有当前 review 是单 pending action，且对应 policy 明确声明 session authorization builder/hook 时，adapter 才能 materialize `approve-with-effect` option。
-
-更理想的是让 policy 明确声明 options，而不是让 adapter 从 `allowedDecisions` 推断所有 option：
+Policy 必须明确声明 options，而不是从旧 `allowedDecisions` 推断 option：
 
 ```ts
 return buildReviewSpec({
@@ -929,7 +898,6 @@ option 构造迁移到独立模块，例如：
 ```txt
 packages/pet-agent/src/agent/orchestrator/review/
   reviewSpec.ts
-  reviewSpecFromHumanReview.ts
   reviewResponseResolver.ts
   reviewAuthorizations.ts
 
@@ -937,16 +905,14 @@ services/local-agent/src/tui/
   approvalPanelView.ts
 ```
 
-`ApprovalPanel.tsx` 不应再导入 local protocol 类型，也不应导入 human review payload 类型。local-agent 的 TUI 层只接收已 materialize 的 `ReviewSpec` view model。
+`ApprovalPanel.tsx` 不应再导入 local protocol 类型，也不应导入 human review payload 类型。local-agent 的 TUI 层只接收已 materialized 的 `ReviewSpec` view model。
 
 ## 9. 迁移步骤
 
-### PR 1a：引入 ReviewSpec 类型和 legacy adapter
+### PR 1a：引入 ReviewSpec 类型
 
 - 新增 `ReviewSpec` / `ReviewView` / `ReviewOption` 类型。
-- 新增 `buildReviewSpecFromHumanReviewRequest()`。
 - 保持现有 runtime / UI 行为不变。
-- 测试覆盖 old `HumanReviewRequest` 到 new `ReviewSpec` 的转换。
 
 ### PR 1b：引入 pending review state 和 response resolver
 
@@ -957,13 +923,12 @@ services/local-agent/src/tui/
 
 ### PR 1c：升级 transport protocol
 
-- `human_review.requested` event 增加 canonical `review: ReviewSpec` 字段，同时保留 legacy `prompt` / `payload`。
-- local-agent 迁移桥把 legacy `HumanReviewRequest` interrupt materialize 成 `ReviewSpec`，让新客户端可以消费 canonical 字段。
-- local-agent protocol parser 接受新 response 字段 `reviewId` / `selectedOptionId` / `input`，迁移期保留 legacy `message` / `resume`。
+- `human_review.requested` event 使用 canonical `review: ReviewSpec` 字段。
+- local-agent protocol parser 接受新 response 字段 `reviewId` / `selectedOptionId` / `input`。
 - local-agent server 缓存 `requestId -> { sessionId, threadId, reviewId, reviewSpec }` route metadata，并对 response 做 fast-path stale 校验。
 - canonical response 必须由 server 使用缓存的 `ReviewSpec` resolve 成 legacy graph resume；client 不能直接用 `resume` 决定 runtime 行为。
 - 保持现有 UI 行为不变。
-- 测试覆盖新旧 response 并存、canonical event materialize、transport stale short-circuit、invalid option retry、session/thread route mismatch。
+- 测试覆盖 canonical response、transport stale short-circuit、invalid option retry、session/thread route mismatch。
 
 ### PR 2：让 TUI 使用 ReviewSpec
 
@@ -972,7 +937,7 @@ services/local-agent/src/tui/
 - TUI submit 改成发送 `selectedOptionId` 和可选 `input`。
 - TUI 支持 `respond` option 的最小文本输入，提交到 `input.message`。
 - 删除 TUI 中的 `run_shell` / `shell` 等 tool/runtime 名称判断。
-- 旧 `prompt` / `payload` 只作为没有 `review` 字段时的 fallback adapter，不再进入 `ApprovalPanel.tsx`。
+- `prompt` / `payload` 不进入 `ApprovalPanel.tsx`，也不驱动 runtime 行为。
 
 ### PR 3：迁移 session authorization
 
@@ -987,10 +952,9 @@ services/local-agent/src/tui/
 
 ### PR 4：收敛 toolkit policy API
 
-- 允许 toolkit policy 直接返回 `ReviewSpec`。
-- 将 shell review policy 改为直接声明 options。
-- 逐步减少从 `allowedDecisions` 自动推断 UI 的逻辑。
-- 删除主接口上的旧 `HumanReviewRequest` 返回类型；旧 request 只允许存在于 legacy adapter 内。
+- toolkit policy 直接返回 `ReviewSpec`。
+- shell review policy 直接声明 options。
+- 旧 request 返回类型和 adapter 已移除。
 
 ## 10. 验收标准
 

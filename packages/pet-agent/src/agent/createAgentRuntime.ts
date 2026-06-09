@@ -58,9 +58,9 @@ import {
   buildUserIntentDecisionSystemPrompt,
 } from './orchestrator/prompts';
 import {
-  buildIterationLimitHumanReviewRequest,
   readFirstHumanReviewDecision,
 } from './orchestrator/humanReview';
+import { buildReviewSpec, type ToolReviewInterruptPayload } from './orchestrator/review/reviewSpec';
 import {
   reuseOrAppendTurnDelegation,
   updateTurnDelegationResult,
@@ -222,6 +222,79 @@ function resolveActor(config: OrchestratorConfig, runnableConfig?: RunnableConfi
   throw new Error('Missing actor in orchestrator config and invoke options');
 }
 
+function buildIterationLimitReviewPayload(params: {
+  iterationCount: number;
+  maxIterations: number;
+  delegationSummary: string;
+}): ToolReviewInterruptPayload {
+  const description = `已执行 ${params.iterationCount} 轮循环（上限 ${params.maxIterations}）。`;
+  const body = `已执行 ${params.iterationCount} 轮循环（上限 ${params.maxIterations}），当前任务状态：\n${params.delegationSummary}\n\n是否批准继续执行？`;
+  return {
+    kind: 'tool_review',
+    review: buildReviewSpec({
+      view: {
+        kind: 'plain',
+        title: 'Iteration limit reached',
+        body,
+      },
+      options: [
+        {
+          id: 'approve',
+          label: 'Approve',
+          variant: 'primary',
+          decision: { type: 'approve' },
+        },
+        {
+          id: 'reject',
+          label: 'Reject',
+          variant: 'danger',
+          decision: { type: 'reject' },
+        },
+        {
+          id: 'respond',
+          label: 'Respond',
+          input: {
+            kind: 'text',
+            key: 'message',
+            required: true,
+            multiline: true,
+            placeholder: 'Tell the agent how to continue',
+          },
+          decision: { type: 'respond', messageInputKey: 'message' },
+        },
+      ],
+    }),
+    pendingAction: {
+      actionId: 'iteration_limit',
+      toolName: 'continue_execution_window',
+      args: {
+        iterationCount: params.iterationCount,
+        maxIterations: params.maxIterations,
+      },
+      description,
+    },
+    prompt: body,
+  };
+}
+
+function buildInvalidIterationLimitReviewPayload(
+  payload: ToolReviewInterruptPayload,
+): ToolReviewInterruptPayload {
+  const message = '请选择批准继续，或拒绝停止。';
+  return {
+    ...payload,
+    error: 'invalid_decision',
+    prompt: `${payload.prompt ?? payload.review.view.body}\n\n${message}`,
+    review: {
+      ...payload.review,
+      view: {
+        ...payload.review.view,
+        body: `${payload.review.view.body}\n\n${message}`,
+      },
+    },
+  };
+}
+
 // --- Graph builder ---
 
 export function createOrchestratorGraph(config: OrchestratorConfig) {
@@ -347,18 +420,16 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       const delegationSummary = state.turnDelegations
         .map((d) => `[${d.id}] ${d.lane} — ${formatDelegationStatus(d.status)}: ${clipForPrompt(d.task, 80)}`)
         .join('\n') || '无委派记录';
-      const reviewRequest = buildIterationLimitHumanReviewRequest({
+      const reviewPayload = buildIterationLimitReviewPayload({
         iterationCount: state.iterationCount,
         maxIterations: maxIter,
         delegationSummary,
       });
-      let decision = readFirstHumanReviewDecision(interrupt(reviewRequest));
+      let decision = readFirstHumanReviewDecision(interrupt(reviewPayload));
       while (!decision) {
-        decision = readFirstHumanReviewDecision(interrupt({
-          ...reviewRequest,
-          error: 'invalid_decision',
-          prompt: `${reviewRequest.prompt}\n\n请选择批准继续，或拒绝停止。`,
-        }));
+        decision = readFirstHumanReviewDecision(interrupt(
+          buildInvalidIterationLimitReviewPayload(reviewPayload),
+        ));
       }
       if (decision.type !== 'approve') {
         return {

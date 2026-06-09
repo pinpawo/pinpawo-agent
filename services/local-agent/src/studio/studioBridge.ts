@@ -25,6 +25,7 @@ export type PendingReview = {
   reject: (error: Error) => void;
   petId: string;
   reviewId: string;
+  reviewSpec: ReviewSpec;
 };
 
 export type PendingReviewSlot = {
@@ -81,9 +82,9 @@ export function createWsHumanReviewer(opts: {
       const reviewId = request.kind === 'tool_review'
         ? request.review.id
         : randomUUID().slice(0, 8);
-      opts.slot.current = { resolve, reject, petId: opts.petId, reviewId };
       const prompt = extractPromptText(request);
       const review = materializeReviewSpec(request, reviewId);
+      opts.slot.current = { resolve, reject, petId: opts.petId, reviewId, reviewSpec: review };
       opts.send({
         requestId: opts.requestId,
         type: 'event',

@@ -123,6 +123,15 @@ function readInterruptPayload(result: Record<string, unknown>): Record<string, u
 }
 
 function readActionRequests(payload: Record<string, unknown> | null): Record<string, unknown>[] {
+  const pendingAction = payload?.pendingAction;
+  if (pendingAction && typeof pendingAction === 'object') {
+    const record = pendingAction as Record<string, unknown>;
+    return [{
+      name: record.toolName,
+      args: record.args,
+      description: record.description,
+    }];
+  }
   return payload && Array.isArray(payload.actionRequests)
     ? payload.actionRequests.filter((item): item is Record<string, unknown> =>
       Boolean(item && typeof item === 'object'),
@@ -131,6 +140,20 @@ function readActionRequests(payload: Record<string, unknown> | null): Record<str
 }
 
 function readAllowedDecisions(payload: Record<string, unknown> | null): string[] {
+  const review = payload?.review && typeof payload.review === 'object'
+    ? payload.review as Record<string, unknown>
+    : null;
+  const options = Array.isArray(review?.options) ? review.options : [];
+  if (options.length > 0) {
+    return options.flatMap((option) => {
+      if (!option || typeof option !== 'object') return [];
+      const decision = (option as Record<string, unknown>).decision;
+      if (!decision || typeof decision !== 'object') return [];
+      const type = (decision as Record<string, unknown>).type;
+      return typeof type === 'string' ? [type] : [];
+    });
+  }
+
   const configs = payload && Array.isArray(payload.reviewConfigs) ? payload.reviewConfigs : [];
   const first = configs[0];
   if (!first || typeof first !== 'object') return [];

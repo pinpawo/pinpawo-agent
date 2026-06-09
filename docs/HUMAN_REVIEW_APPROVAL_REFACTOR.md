@@ -768,9 +768,9 @@ V1 cancellation 默认策略：
 当前代码有两条 HITL 入口，重构后都要归一到同一个 `ReviewSpec` / response resolver：
 
 - TUI / App chat：通过 LangGraph checkpoint 中的 pending interrupt 恢复。server 从 `requestId` 找到 thread/checkpoint，并把 `{ reviewId, selectedOptionId, input }` 作为 resume payload。
-- Studio humanReviewer：当前是 `createWsHumanReviewer()` 里的 pending promise slot。它也应该发送同样的 `review: ReviewSpec`，收到 response 后调用同一个 `resolveHumanReviewResponse()` 得到 `HumanReviewDecision`，再 resolve promise。
+- Studio humanReviewer：可以保留 `createWsHumanReviewer()` 里的 pending promise slot，但 pending slot 必须保存当前 `ReviewSpec`。收到 canonical response 后调用同一个 `resolveHumanReviewResponse()` 得到 `HumanReviewDecision`，再 resolve promise。
 
-也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。`LocalServerStudioReviewRouter.decodeStudioReviewDecision()` 这类逻辑在迁移后应该删除或变成 legacy adapter。
+也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。迁移后只允许 canonical `{ reviewId, selectedOptionId, input }` 或 legacy structured `resume.decisions`；不能再从 `message` 文本猜 decision。
 
 ## 7. Toolkit policy 调整
 

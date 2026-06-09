@@ -5,7 +5,7 @@ import {
   listTuiCommands,
   parseTuiCommand,
 } from './tui/input/commandRegistry';
-import { buildApprovalOptions } from './tui/components/ApprovalPanel';
+import { buildApprovalOptions } from './tui/approvalOptions';
 import {
   applyComposerInput,
   resolveTuiKeyAction,
@@ -103,6 +103,10 @@ test('resolveTuiKeyAction routes global, approval, busy, and composer keys', () 
     { type: 'approval.submit' },
   );
   assert.deepEqual(
+    resolveTuiKeyAction('x', {}, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
+    { type: 'composer.edit' },
+  );
+  assert.deepEqual(
     resolveTuiKeyAction('', { escape: true }, { ready: true, busy: true, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'global.interrupt' },
   );
@@ -148,38 +152,57 @@ test('applyComposerInput keeps cursor editing behavior in pure input reducer', (
   });
 });
 
-test('buildApprovalOptions derives action review decisions from normalized approval payload', () => {
+test('buildApprovalOptions maps canonical review options without reading tool payloads', () => {
   const options = buildApprovalOptions({
     requestId: 'req-1',
     kind: 'tool',
     prompt: 'Run command?',
-    payload: {
-      actionRequests: [{
-        name: 'run_shell',
-        args: { command: 'git status --short' },
-      }],
-      reviewConfigs: [{
-        allowedDecisions: ['approve', 'reject'],
+    payload: {},
+    review: {
+      id: 'review-1',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Run command?' },
+      options: [{
+        id: 'approve',
+        label: 'Approve',
+        variant: 'primary',
+        decision: { type: 'approve' },
+      }, {
+        id: 'respond',
+        label: 'Respond',
+        description: 'Ask the agent to revise the plan.',
+        input: { kind: 'text', key: 'message', required: true, multiline: true },
+        decision: { type: 'respond', messageInputKey: 'message' },
       }],
     },
   });
 
   assert.deepEqual(options, [
     {
-      label: '批准执行',
-      message: '批准执行',
-      resume: { decisions: [{ type: 'approve' }] },
+      label: 'Approve',
+      message: 'Approve',
+      variant: 'primary',
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
     },
     {
-      label: '本次会话授权：git status --short',
-      message: '本次会话授权：git status --short',
-      resume: { decisions: [{ type: 'approve' }] },
-      extras: { authorizeShellPattern: { pattern: 'git status --short' } },
-    },
-    {
-      label: '拒绝',
-      message: '拒绝',
-      resume: { decisions: [{ type: 'reject' }] },
+      label: 'Respond',
+      message: 'Respond',
+      description: 'Ask the agent to revise the plan.',
+      reviewId: 'review-1',
+      selectedOptionId: 'respond',
+      input: { kind: 'text', key: 'message', required: true, multiline: true },
     },
   ]);
+});
+
+test('buildApprovalOptions returns no options without canonical review spec', () => {
+  const options = buildApprovalOptions({
+    requestId: 'req-1',
+    kind: 'tool',
+    prompt: 'Run command?',
+    payload: {},
+  });
+
+  assert.deepEqual(options, []);
 });

@@ -161,8 +161,11 @@ export class TuiRuntimeController {
     return true;
   }
 
-  submitReviewResponse(option: ApprovalOption) {
-    const decision = option.message.trim();
+  submitReviewResponse(option: ApprovalOption, inputValue = '') {
+    const inputText = inputValue.trim();
+    const decision = option.input?.kind === 'text' && inputText
+      ? inputText
+      : option.message.trim();
     if (!decision) return false;
 
     if (!this.wsClient.isConnected()) {
@@ -173,11 +176,12 @@ export class TuiRuntimeController {
     const state = this.options.getState();
     const currentApproval = selectFocusedPendingApproval(state);
     const requestId = currentApproval?.requestId ?? randomUUID();
-    const originSessionId = state.runRoute[requestId] ?? state.focusedSessionId ?? undefined;
-    const extras = { ...(option.extras ?? {}) };
-    if (originSessionId && !extras.originSessionId) {
-      extras.originSessionId = originSessionId;
+
+    if (option.input?.kind === 'text' && !inputText) {
+      this.appendSystemMessage(TUI_TEXT.approvalRespondRequiresInput);
+      return false;
     }
+
     const now = Date.now();
     this.options.setNow(now);
     this.options.dispatch({
@@ -188,6 +192,27 @@ export class TuiRuntimeController {
       userCell: makeHistoryMeta(),
       statusMessage: TUI_TEXT.reviewSubmitting,
     });
+
+    if (option.reviewId && option.selectedOptionId) {
+      this.wsClient.send({
+        type: 'human_review_response',
+        requestId,
+        message: decision,
+        reviewId: option.reviewId,
+        selectedOptionId: option.selectedOptionId,
+        ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),
+      });
+      return true;
+    }
+
+    // Legacy migration path for `/allow` until PR3 moves authorization into
+    // graph review effects. ApprovalPanel options should always use the
+    // canonical reviewId + selectedOptionId path above.
+    const originSessionId = state.runRoute[requestId] ?? state.focusedSessionId ?? undefined;
+    const extras = { ...(option.extras ?? {}) };
+    if (originSessionId && !extras.originSessionId) {
+      extras.originSessionId = originSessionId;
+    }
     this.wsClient.send({
       type: 'human_review_response',
       requestId,

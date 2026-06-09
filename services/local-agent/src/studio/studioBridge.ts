@@ -4,7 +4,9 @@ import {
   type AgentActor,
   type HumanReviewDecision,
   type HumanReviewer,
+  type HumanReviewerRequest,
   type HumanReviewRequest,
+  type ReviewSpec,
 } from '@pinpawo/pet-agent';
 
 import type { PetLocalConfig } from './petConfig';
@@ -23,6 +25,7 @@ export type PendingReview = {
   reject: (error: Error) => void;
   petId: string;
   reviewId: string;
+  reviewSpec: ReviewSpec;
 };
 
 export type PendingReviewSlot = {
@@ -68,7 +71,7 @@ export function createWsHumanReviewer(opts: {
   petId: string;
   slot: PendingReviewSlot;
 }): HumanReviewer {
-  return (request: HumanReviewRequest) => {
+  return (request: HumanReviewerRequest) => {
     return new Promise<HumanReviewDecision>((resolve, reject) => {
       if (opts.slot.current) {
         reject(new Error(
@@ -76,10 +79,12 @@ export function createWsHumanReviewer(opts: {
         ));
         return;
       }
-      const reviewId = randomUUID().slice(0, 8);
-      opts.slot.current = { resolve, reject, petId: opts.petId, reviewId };
+      const reviewId = request.kind === 'review'
+        ? request.review.id
+        : randomUUID().slice(0, 8);
       const prompt = extractPromptText(request);
-      const review = buildReviewSpecFromHumanReviewRequest(request, { id: reviewId });
+      const review = materializeReviewSpec(request, reviewId);
+      opts.slot.current = { resolve, reject, petId: opts.petId, reviewId, reviewSpec: review };
       opts.send({
         requestId: opts.requestId,
         type: 'event',
@@ -96,7 +101,21 @@ export function createWsHumanReviewer(opts: {
   };
 }
 
-function extractPromptText(request: HumanReviewRequest): string {
+function materializeReviewSpec(request: HumanReviewerRequest, reviewId: string): ReviewSpec {
+  return request.kind === 'review'
+    ? request.review
+    : buildReviewSpecFromHumanReviewRequest(request, { id: reviewId });
+}
+
+function extractPromptText(request: HumanReviewerRequest): string {
+  if (request.kind === 'review') {
+    return [
+      request.review.view.title,
+      request.review.view.body,
+    ].filter((line): line is string => Boolean(line && line.trim())).join('\n')
+      || '当前流程需要你的确认,请直接回复继续或说明下一步。';
+  }
+
   if (typeof request.prompt === 'string' && request.prompt.trim()) {
     return request.prompt.trim();
   }

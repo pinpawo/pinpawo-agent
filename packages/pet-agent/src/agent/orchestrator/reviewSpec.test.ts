@@ -81,11 +81,11 @@ test('buildReviewSpecFromHumanReviewRequest materializes plain view and V1 optio
 test('buildReviewSpecFromHumanReviewRequest includes error and falls back to action names', () => {
   const request = buildHumanReviewRequest({
     actionRequests: [{
-      name: 'continue_execution_window',
+      name: 'legacy_action',
       args: { iterationCount: 10 },
     }],
     reviewConfigs: [{
-      actionName: 'continue_execution_window',
+      actionName: 'legacy_action',
       allowedDecisions: ['reject'],
     }],
     error: 'invalid_decision',
@@ -93,7 +93,7 @@ test('buildReviewSpecFromHumanReviewRequest includes error and falls back to act
 
   const spec = buildReviewSpecFromHumanReviewRequest(request, { id: 'review-2' });
 
-  assert.equal(spec.view.body, 'Error: invalid_decision\n\nPending action: continue_execution_window');
+  assert.equal(spec.view.body, 'Error: invalid_decision\n\nPending action: legacy_action');
   assert.deepEqual(spec.options.map((option) => option.id), ['reject']);
 });
 

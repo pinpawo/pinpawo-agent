@@ -5,6 +5,7 @@ import {
   type HumanReviewConfig,
   type HumanReviewDecisionType,
   type HumanReviewRequest,
+  type PendingReviewAction,
   type ReviewOption,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
@@ -13,6 +14,69 @@ function readDecisionType(value: unknown): HumanReviewDecisionType | null {
   return value === 'approve' || value === 'edit' || value === 'reject' || value === 'respond'
     ? value
     : null;
+}
+
+function readRecordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readNonEmptyString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readReviewSpecValue(value: unknown): ReviewSpec | null {
+  const record = readRecordValue(value);
+  if (!record) return null;
+
+  const id = readNonEmptyString(record.id);
+  const schemaVersion = typeof record.schemaVersion === 'number' && Number.isFinite(record.schemaVersion)
+    ? record.schemaVersion
+    : null;
+  const view = readRecordValue(record.view);
+  const viewKind = view ? readNonEmptyString(view.kind) : null;
+  const viewBody = view && typeof view.body === 'string' ? view.body : null;
+  const options = Array.isArray(record.options) ? record.options : null;
+
+  if (
+    !id
+    || schemaVersion == null
+    || (viewKind !== 'plain' && viewKind !== 'markdown')
+    || viewBody == null
+    || !options
+  ) {
+    return null;
+  }
+
+  const validOptions = options.every((option) => {
+    const optionRecord = readRecordValue(option);
+    const decision = optionRecord ? readRecordValue(optionRecord.decision) : null;
+    return Boolean(
+      optionRecord
+      && readNonEmptyString(optionRecord.id)
+      && typeof optionRecord.label === 'string'
+      && decision,
+    );
+  });
+
+  return validOptions ? record as ReviewSpec : null;
+}
+
+function readPendingReviewActionValue(value: unknown): PendingReviewAction | null {
+  const record = readRecordValue(value);
+  if (!record) return null;
+  const toolName = readNonEmptyString(record.toolName);
+  const args = readRecordValue(record.args) ?? {};
+  if (!toolName) return null;
+  const actionId = readNonEmptyString(record.actionId) ?? 'pending_action';
+  const description = readNonEmptyString(record.description);
+  return {
+    actionId,
+    toolName,
+    args,
+    ...(description ? { description } : {}),
+  };
 }
 
 function readHumanReviewActionRequest(value: unknown): HumanReviewActionRequest | null {
@@ -77,7 +141,12 @@ export function readHumanReviewActionRequests(interruptPayload: Record<string, u
     : [];
 }
 
-export function isHumanReviewInterruptPayload(interruptPayload: Record<string, unknown>) {
+function isReviewInterruptPayload(interruptPayload: Record<string, unknown>) {
+  return interruptPayload.kind === 'review'
+    && Boolean(readReviewSpecValue(interruptPayload.review));
+}
+
+function isLegacyHumanReviewInterruptPayload(interruptPayload: Record<string, unknown>) {
   return interruptPayload.kind === 'human_review'
     || (
       Array.isArray(interruptPayload.actionRequests)
@@ -85,8 +154,13 @@ export function isHumanReviewInterruptPayload(interruptPayload: Record<string, u
     );
 }
 
+export function isHumanReviewInterruptPayload(interruptPayload: Record<string, unknown>) {
+  return isReviewInterruptPayload(interruptPayload)
+    || isLegacyHumanReviewInterruptPayload(interruptPayload);
+}
+
 export function readHumanReviewRequest(interruptPayload: Record<string, unknown>): HumanReviewRequest | null {
-  if (!isHumanReviewInterruptPayload(interruptPayload)) {
+  if (!isLegacyHumanReviewInterruptPayload(interruptPayload)) {
     return null;
   }
   const actionRequests = Array.isArray(interruptPayload.actionRequests)
@@ -109,6 +183,31 @@ export function readHumanReviewRequest(interruptPayload: Record<string, unknown>
     ...(typeof interruptPayload.prompt === 'string' ? { prompt: interruptPayload.prompt } : {}),
     ...(typeof interruptPayload.error === 'string' ? { error: interruptPayload.error } : {}),
   };
+}
+
+export function readPendingReviewActionFromInterruptPayload(
+  interruptPayload: Record<string, unknown>,
+): PendingReviewAction | null {
+  const directAction = readPendingReviewActionValue(interruptPayload.pendingAction);
+  if (directAction) {
+    return directAction;
+  }
+
+  const firstAction = readHumanReviewActionRequests(interruptPayload)[0] ?? null;
+  if (!firstAction) {
+    return null;
+  }
+  const args = readRecordValue(firstAction.args) ?? {};
+  const toolName = readNonEmptyString(firstAction.name) ?? readNonEmptyString(firstAction.action);
+  const description = readNonEmptyString(firstAction.description);
+  return toolName
+    ? {
+        actionId: 'pending_action',
+        toolName,
+        args,
+        ...(description ? { description } : {}),
+      }
+    : null;
 }
 
 function hasAuthorizationPolicy(toolkits: AgentToolkit[], toolName: string) {
@@ -163,6 +262,11 @@ export function buildReviewSpecFromInterruptPayload(
   interruptPayload: Record<string, unknown>,
   options: { toolkits?: AgentToolkit[] } = {},
 ): ReviewSpec | undefined {
+  const directReview = readReviewSpecValue(interruptPayload.review);
+  if (directReview) {
+    return directReview;
+  }
+
   const request = readHumanReviewRequest(interruptPayload);
   if (!request) {
     return undefined;
@@ -172,6 +276,15 @@ export function buildReviewSpecFromInterruptPayload(
 }
 
 export function formatInterruptPrompt(interruptPayload: Record<string, unknown>) {
+  const directReview = readReviewSpecValue(interruptPayload.review);
+  if (directReview) {
+    return [
+      directReview.view.title,
+      directReview.view.body,
+    ].filter((line): line is string => Boolean(line && line.trim())).join('\n')
+      || '当前流程需要你的确认，请直接回复继续或说明下一步。';
+  }
+
   if (typeof interruptPayload.prompt === 'string' && interruptPayload.prompt.trim()) {
     return interruptPayload.prompt.trim();
   }

@@ -7,8 +7,12 @@ import type { CapabilityRuntime } from '../../types/capability';
 import type { AgentExecution } from '../../types/agent';
 import type { AgentToolkit, AgentToolset, ToolkitContext } from '../../types/toolkit';
 import type { SubagentToolOperationMetadata } from '../../types/subagent';
-import type { HumanReviewRequest } from './humanReview';
 import { readFirstHumanReviewDecision } from './humanReview';
+import type {
+  PendingReviewAction,
+  ReviewSpec,
+  HumanReviewInterruptPayload,
+} from './review/reviewSpec';
 import type { MessageLane } from './types';
 
 export function buildDelegationHandoffInstruction(params: {
@@ -167,11 +171,67 @@ function buildCancelledToolResult(params: {
   });
 }
 
-function buildInvalidDecisionRequest(request: HumanReviewRequest): HumanReviewRequest {
+function readToolCallId(runtime: ToolRuntime) {
+  const record = runtime && typeof runtime === 'object'
+    ? runtime as unknown as Record<string, unknown>
+    : {};
+  const id = record.toolCallId ?? record.tool_call_id;
+  return typeof id === 'string' && id.trim() ? id.trim() : 'pending_action';
+}
+
+function inputToActionArgs(input: unknown): Record<string, unknown> {
+  return input && typeof input === 'object' && !Array.isArray(input)
+    ? { ...(input as Record<string, unknown>) }
+    : { input };
+}
+
+function formatReviewPrompt(review: ReviewSpec) {
+  return [
+    review.view.title,
+    review.view.body,
+  ].filter((item): item is string => Boolean(item && item.trim())).join('\n');
+}
+
+function buildPendingReviewAction(params: {
+  toolName: string;
+  input: unknown;
+  review: ReviewSpec;
+  runtime: ToolRuntime;
+}): PendingReviewAction {
+  const prompt = formatReviewPrompt(params.review);
   return {
-    ...request,
+    actionId: readToolCallId(params.runtime),
+    toolName: params.toolName,
+    args: inputToActionArgs(params.input),
+    ...(prompt ? { description: prompt.split('\n')[0] } : {}),
+  };
+}
+
+function buildHumanReviewInterruptPayload(params: {
+  toolName: string;
+  input: unknown;
+  review: ReviewSpec;
+  runtime: ToolRuntime;
+}): HumanReviewInterruptPayload {
+  return {
+    kind: 'review',
+    review: params.review,
+    pendingAction: buildPendingReviewAction(params),
+  };
+}
+
+function buildInvalidDecisionRequest(payload: HumanReviewInterruptPayload): HumanReviewInterruptPayload {
+  const message = '无法识别你的决定。请批准、拒绝，或直接输入新的处理方向。';
+  return {
+    ...payload,
     error: 'invalid_decision',
-    prompt: `${request.prompt ?? '当前工具调用需要确认。'}\n\n无法识别你的决定。请批准、拒绝、编辑待执行工具调用，或直接输入新的处理方向。`,
+    review: {
+      ...payload.review,
+      view: {
+        ...payload.review.view,
+        body: `${payload.review.view.body}\n\n${message}`,
+      },
+    },
   };
 }
 
@@ -190,21 +250,27 @@ function wrapToolkitTool(
       let currentInput = input;
 
       while (true) {
-        const reviewRequest = await reviewPolicy.request({
+        const reviewSpec = await reviewPolicy.request({
           ...ctx,
           toolkitName: toolkit.name,
           toolName: toolItem.name,
           input: currentInput,
         });
 
-        if (!reviewRequest) {
+        if (!reviewSpec) {
           return toolItem.invoke(currentInput as never, runtime as never);
         }
 
-        let reviewDecision = readFirstHumanReviewDecision(interrupt(reviewRequest));
+        const reviewPayload = buildHumanReviewInterruptPayload({
+          toolName: toolItem.name,
+          input: currentInput,
+          review: reviewSpec,
+          runtime,
+        });
+        let reviewDecision = readFirstHumanReviewDecision(interrupt(reviewPayload));
         while (!reviewDecision) {
           reviewDecision = readFirstHumanReviewDecision(interrupt(
-            buildInvalidDecisionRequest(reviewRequest),
+            buildInvalidDecisionRequest(reviewPayload),
           ));
         }
 

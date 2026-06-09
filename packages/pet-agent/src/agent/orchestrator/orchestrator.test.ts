@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool } from '@langchain/core/tools';
-import { Command, isCommand } from '@langchain/langgraph';
+import { Command, isCommand, MemorySaver } from '@langchain/langgraph';
 import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
@@ -618,6 +618,40 @@ test('human review helpers use structured decisions', () => {
       },
     },
   );
+});
+
+test('iteration limit review emits canonical ReviewSpec interrupt payload', async () => {
+  const graph = createOrchestratorGraph({
+    models: {} as AgentModels,
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const input = buildOrchestratorTurnInput([new HumanMessage('继续处理')]);
+  input.iterationCount = 1;
+
+  const result = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'iteration-limit-review-spec',
+      actor: testActor,
+      capabilities: [],
+      tools: [],
+      maxIterations: 1,
+    },
+  }) as { __interrupt__?: Array<{ value?: unknown }> };
+  const payload = result.__interrupt__?.[0]?.value as {
+    kind?: string;
+    review?: { schemaVersion?: number; options?: Array<{ id: string }> };
+    pendingAction?: { toolName?: string };
+    actionRequests?: unknown;
+    reviewConfigs?: unknown;
+  } | undefined;
+
+  assert.equal(payload?.kind, 'review');
+  assert.equal(payload?.review?.schemaVersion, 1);
+  assert.deepEqual(payload?.review?.options?.map((option) => option.id), ['approve', 'reject', 'respond']);
+  assert.equal(payload?.pendingAction, undefined);
+  assert.equal(payload?.actionRequests, undefined);
+  assert.equal(payload?.reviewConfigs, undefined);
 });
 
 test('lane tagging hides subagent messages from route and records completed announce', () => {

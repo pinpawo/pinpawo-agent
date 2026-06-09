@@ -83,5 +83,23 @@ test('isHumanReviewInterruptError accepts LangGraph interrupt shapes', () => {
       },
     }],
   }), true);
+  assert.equal(isHumanReviewInterruptError({
+    __interrupt__: [{
+      value: {
+        kind: 'review',
+        review: {
+          id: 'review-1',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        },
+        pendingAction: {
+          actionId: 'call-1',
+          toolName: 'run_shell',
+          args: { command: 'git status' },
+        },
+      },
+    }],
+  }), true);
   assert.equal(isHumanReviewInterruptError(new Error('plain failure')), false);
 });

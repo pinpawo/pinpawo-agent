@@ -1,32 +1,50 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  decodeStudioReviewDecision,
+  decodeLegacyStudioReviewDecision,
   LocalServerStudioReviewRouter,
 } from './localServerStudioReviews';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 
-test('decodeStudioReviewDecision prefers structured resume decisions', () => {
+function reviewSpec(): ReviewSpec {
+  return {
+    id: 'review-1',
+    schemaVersion: 1,
+    view: { kind: 'plain', body: 'Approve?' },
+    options: [
+      {
+        id: 'approve',
+        label: 'Approve',
+        decision: { type: 'approve' },
+      },
+      {
+        id: 'respond',
+        label: 'Respond',
+        input: {
+          kind: 'text',
+          key: 'message',
+          required: true,
+          multiline: true,
+        },
+        decision: { type: 'respond', messageInputKey: 'message' },
+      },
+    ],
+  };
+}
+
+test('decodeLegacyStudioReviewDecision accepts only structured resume decisions', () => {
   assert.deepEqual(
-    decodeStudioReviewDecision({
-      message: 'ignored',
+    decodeLegacyStudioReviewDecision({
       resume: { decisions: [{ type: 'reject' }] },
     }),
     { type: 'reject' },
   );
+  assert.equal(decodeLegacyStudioReviewDecision({}), null);
 });
 
-test('decodeStudioReviewDecision maps local text conventions', () => {
-  assert.deepEqual(decodeStudioReviewDecision({ message: '补充说明' }), {
-    type: 'respond',
-    message: '补充说明',
-  });
-  assert.deepEqual(decodeStudioReviewDecision({ message: '' }), { type: 'reject' });
-});
-
-test('decodeStudioReviewDecision treats structured approve resume as approve', () => {
+test('decodeLegacyStudioReviewDecision treats structured approve resume as approve', () => {
   assert.deepEqual(
-    decodeStudioReviewDecision({
-      message: '批准执行',
+    decodeLegacyStudioReviewDecision({
       resume: { decisions: [{ type: 'approve' }] },
     }),
     { type: 'approve' },
@@ -48,6 +66,7 @@ test('LocalServerStudioReviewRouter routes response only when a review is pendin
     slot.current = {
       petId: 'pet-1',
       reviewId: 'review-1',
+      reviewSpec: reviewSpec(),
       resolve,
       reject,
     };
@@ -57,9 +76,36 @@ test('LocalServerStudioReviewRouter routes response only when a review is pendin
     type: 'human_review_response',
     requestId: 'req-1',
     message: '继续',
+    reviewId: 'review-1',
+    selectedOptionId: 'respond',
+    input: { message: '继续' },
   }, () => undefined), true);
   assert.deepEqual(await decisionPromise, { type: 'respond', message: '继续' });
   assert.equal(slot.current, null);
+});
+
+test('LocalServerStudioReviewRouter rejects text-only responses while review stays pending', async () => {
+  const router = new LocalServerStudioReviewRouter<object>();
+  const connection = {};
+  const slot = router.getOrCreateSlot(connection);
+  let resolved = false;
+  slot.current = {
+    petId: 'pet-1',
+    reviewId: 'review-1',
+    reviewSpec: reviewSpec(),
+    resolve: () => {
+      resolved = true;
+    },
+    reject: () => {},
+  };
+
+  assert.equal(router.routeResponse(connection, {
+    type: 'human_review_response',
+    requestId: 'req-1',
+    message: '继续',
+  }, () => undefined), true);
+  assert.equal(resolved, false);
+  assert.notEqual(slot.current, null);
 });
 
 test('LocalServerStudioReviewRouter rejects and deletes disconnected slots', async () => {
@@ -70,6 +116,7 @@ test('LocalServerStudioReviewRouter rejects and deletes disconnected slots', asy
     slot.current = {
       petId: 'pet-1',
       reviewId: 'review-1',
+      reviewSpec: reviewSpec(),
       resolve,
       reject: (error) => resolve(error),
     };

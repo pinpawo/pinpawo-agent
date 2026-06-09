@@ -136,7 +136,6 @@ UI 不应该知道：
 - `run_shell`
 - `shell`
 - `git_commit`
-- `continue_execution_window`
 - `args.command`
 - `reviewConfigs.allowedDecisions`
 
@@ -577,7 +576,7 @@ graph/tool runtime 在触发 interrupt 前，需要把 pending review 的必要�
 type PendingReviewState = {
   requestId: string;
   reviewSpec: ReviewSpec;
-  pendingAction: PendingReviewAction;
+  pendingAction?: PendingReviewAction;
 };
 
 type PendingReviewAction = {
@@ -592,7 +591,7 @@ type PendingReviewAction = {
 
 local-agent server 可以缓存 requestId/reviewId/sessionId 到 active graph thread 的路由关系，但不缓存 authorization，也不解释 shell tool 语义。
 
-`pendingAction` 是 graph/tool runtime 自己保存的执行上下文，不来自 client response。对于旧 `HumanReviewActionRequest`，adapter 可以把 `name` 映射为 `toolName`，把 `args` 原样保存，并生成一个 runtime-local `actionId`。matcher hook 必须读取这个 `pendingAction`，不能反向读取 UI payload。
+`pendingAction` 只在 review 代表某个待执行 tool action，且后续 effect resolution 需要这个 action 上下文时存在；iteration-limit 这类 runtime gate 不应该伪造成 tool action。`pendingAction` 是 graph/tool runtime 自己保存的执行上下文，不来自 client response。对于旧 `HumanReviewActionRequest`，adapter 可以把 `name` 映射为 `toolName`，把 `args` 原样保存，并生成一个 runtime-local `actionId`。matcher hook 必须读取这个 `pendingAction`，不能反向读取 UI payload。
 
 ### 6.3 UI 渲染 review spec
 
@@ -768,9 +767,9 @@ V1 cancellation 默认策略：
 当前代码有两条 HITL 入口，重构后都要归一到同一个 `ReviewSpec` / response resolver：
 
 - TUI / App chat：通过 LangGraph checkpoint 中的 pending interrupt 恢复。server 从 `requestId` 找到 thread/checkpoint，并把 `{ reviewId, selectedOptionId, input }` 作为 resume payload。
-- Studio humanReviewer：当前是 `createWsHumanReviewer()` 里的 pending promise slot。它也应该发送同样的 `review: ReviewSpec`，收到 response 后调用同一个 `resolveHumanReviewResponse()` 得到 `HumanReviewDecision`，再 resolve promise。
+- Studio humanReviewer：可以保留 `createWsHumanReviewer()` 里的 pending promise slot，但 pending slot 必须保存当前 `ReviewSpec`。收到 canonical response 后调用同一个 `resolveHumanReviewResponse()` 得到 `HumanReviewDecision`，再 resolve promise。
 
-也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。`LocalServerStudioReviewRouter.decodeStudioReviewDecision()` 这类逻辑在迁移后应该删除或变成 legacy adapter。
+也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。迁移后只允许 canonical `{ reviewId, selectedOptionId, input }` 或 legacy structured `resume.decisions`；不能再从 `message` 文本猜 decision。
 
 ## 7. Toolkit policy 调整
 
@@ -972,7 +971,7 @@ services/local-agent/src/tui/
 - `ApprovalPanel.tsx` 改成纯渲染。
 - TUI submit 改成发送 `selectedOptionId` 和可选 `input`。
 - TUI 支持 `respond` option 的最小文本输入，提交到 `input.message`。
-- 删除 TUI 中的 `run_shell` / `shell` / `continue_execution_window` 判断。
+- 删除 TUI 中的 `run_shell` / `shell` 等 tool/runtime 名称判断。
 - 旧 `prompt` / `payload` 只作为没有 `review` 字段时的 fallback adapter，不再进入 `ApprovalPanel.tsx`。
 
 ### PR 3：迁移 session authorization

@@ -18,9 +18,10 @@ import {
   type OrchestratorConfig,
   type OrchestratorGraph,
 } from '../createAgentRuntime';
-import { buildHumanReviewResume, type HumanReviewRequest } from '../orchestrator/humanReview';
+import { buildHumanReviewResume } from '../orchestrator/humanReview';
 import type {
   HumanReviewer,
+  HumanReviewerRequest,
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,
@@ -188,7 +189,7 @@ function readReply(result: unknown): string {
   return typeof last?.content === 'string' ? last.content.trim() : '';
 }
 
-function readPendingInterrupt(result: unknown): HumanReviewRequest | undefined {
+function readPendingInterrupt(result: unknown): HumanReviewerRequest | undefined {
   const raw = (result as { __interrupt__?: unknown } | undefined)?.__interrupt__;
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
   const first = raw[0];
@@ -196,6 +197,7 @@ function readPendingInterrupt(result: unknown): HumanReviewRequest | undefined {
     ? (first as { value?: unknown }).value
     : null;
   if (!value || typeof value !== 'object') return undefined;
-  if ((value as { kind?: unknown }).kind !== 'human_review') return undefined;
-  return value as HumanReviewRequest;
+  const kind = (value as { kind?: unknown }).kind;
+  if (kind !== 'human_review' && kind !== 'review') return undefined;
+  return value as HumanReviewerRequest;
 }

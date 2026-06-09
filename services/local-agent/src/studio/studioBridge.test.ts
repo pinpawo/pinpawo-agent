@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { HumanReviewRequest } from '@pinpawo/pet-agent';
+import type { HumanReviewRequest, HumanReviewInterruptPayload } from '@pinpawo/pet-agent';
 
 import {
   buildPetActorFromLocalConfig,
@@ -20,6 +20,32 @@ function sampleRequest(overrides: Partial<HumanReviewRequest> = {}): HumanReview
     kind: 'human_review',
     actionRequests: [],
     reviewConfigs: [],
+    ...overrides,
+  };
+}
+
+function sampleReviewInterrupt(overrides: Partial<HumanReviewInterruptPayload> = {}): HumanReviewInterruptPayload {
+  return {
+    kind: 'review',
+    review: {
+      id: 'review-direct',
+      schemaVersion: 1,
+      view: {
+        kind: 'plain',
+        title: 'Direct review',
+        body: 'Approve direct action?',
+      },
+      options: [{
+        id: 'approve',
+        label: 'Approve',
+        decision: { type: 'approve' },
+      }],
+    },
+    pendingAction: {
+      actionId: 'call-1',
+      toolName: 'run_shell',
+      args: { command: 'git status' },
+    },
     ...overrides,
   };
 }
@@ -103,6 +129,35 @@ test('createWsHumanReviewer falls back prompt text when request has no prompt', 
   sent.length = 0;
   reviewer(sampleRequest({ actionRequests: [{ name: 'x', args: {} }] })).catch(() => {});
   assert.match((sent[0].event as { prompt?: string }).prompt ?? '', /需要你的确认/);
+});
+
+test('createWsHumanReviewer forwards canonical review specs unchanged', async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  const slot = createPendingReviewSlot();
+  const reviewer = createWsHumanReviewer({
+    send: (msg) => sent.push(msg as Record<string, unknown>),
+    requestId: 'r1',
+    petId: 'planner',
+    slot,
+  });
+
+  const request = sampleReviewInterrupt();
+  const promise = reviewer(request);
+
+  assert.equal(sent.length, 1);
+  const event = sent[0].event as {
+    prompt: string;
+    payload: unknown;
+    review: { id: string; view: { title?: string; body: string } };
+  };
+  assert.equal(slot.current?.reviewId, 'review-direct');
+  assert.equal(event.prompt, 'Direct review\nApprove direct action?');
+  assert.equal(event.review.id, 'review-direct');
+  assert.equal(event.review, request.review);
+  assert.equal(event.payload, request);
+
+  assert.equal(resolveReview(slot, { type: 'approve' }), true);
+  assert.equal((await promise).type, 'approve');
 });
 
 test('createWsHumanReviewer rejects when slot already occupied', async () => {

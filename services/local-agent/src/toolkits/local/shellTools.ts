@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import {
-  buildHumanReviewRequest,
+  buildReviewSpec,
   isToolActionAuthorized,
   type ToolkitOperationMetadata,
   type HumanReviewActionRequest,
@@ -76,19 +76,51 @@ export function getShellConfirmationRisk(command: string) {
   return null;
 }
 
-function buildShellHumanReviewRequest(command: string, cwd: string, risk: string) {
-  return buildHumanReviewRequest({
-    actionRequests: [{
-      name: 'run_shell',
-      args: { command, cwd },
-      description: `即将执行高风险 shell 命令（${risk}）。`,
-    }],
-    reviewConfigs: [{
-      actionName: 'run_shell',
-      allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
-      description: risk,
-    }],
-    prompt: `即将执行高风险 shell 命令（${risk}）。\n目录：${cwd}\n命令：${command}\n请确认是否执行，或修改命令/说明新的处理方向。`,
+function buildShellReviewSpec(command: string, cwd: string, risk: string) {
+  return buildReviewSpec({
+    view: {
+      kind: 'plain',
+      title: 'Shell command approval',
+      body: `即将执行高风险 shell 命令（${risk}）。\n目录：${cwd}\n命令：${command}`,
+    },
+    options: [
+      {
+        id: 'approve',
+        label: 'Approve',
+        variant: 'primary',
+        decision: { type: 'approve' },
+      },
+      {
+        id: 'approve-and-authorize-thread',
+        label: 'Approve and authorize',
+        description: 'Approve this action and authorize matching actions in this thread.',
+        decision: { type: 'approve' },
+        effects: [{
+          type: 'graph.authorize_tool_action',
+          scope: 'thread',
+          actionRef: { type: 'pending_action' },
+          matcher: { type: 'policy_hook' },
+        }],
+      },
+      {
+        id: 'reject',
+        label: 'Reject',
+        variant: 'danger',
+        decision: { type: 'reject' },
+      },
+      {
+        id: 'respond',
+        label: 'Respond',
+        input: {
+          kind: 'text',
+          key: 'message',
+          required: true,
+          multiline: true,
+          placeholder: 'Tell the agent what to do instead',
+        },
+        decision: { type: 'respond', messageInputKey: 'message' },
+      },
+    ],
   });
 }
 
@@ -170,7 +202,7 @@ export const runShellTool = tool(
   },
   {
     name: 'run_shell',
-    description: '兜底工具：执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/write_file/update_file/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。超时 10s，输出截断至 4000 字符；不要用于需要输入、全屏 TTY、持续运行，或依赖 stdin 的命令（例如 cat > file）。高风险命令会先进入 toolkit 审批，可批准、编辑、拒绝或给出新的处理方向。',
+    description: '兜底工具：执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/write_file/update_file/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。超时 10s，输出截断至 4000 字符；不要用于需要输入、全屏 TTY、持续运行，或依赖 stdin 的命令（例如 cat > file）。高风险命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
     schema: z.object({
       command: z.string().describe('要执行的 shell 命令'),
       cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),
@@ -212,7 +244,7 @@ export const shellReviewPolicy: ToolkitToolReviewPolicy = {
       return null;
     }
 
-    return buildShellHumanReviewRequest(
+    return buildShellReviewSpec(
       shellAction.command,
       shellAction.cwd,
       confirmationRisk,

@@ -109,7 +109,11 @@ export type {
   ReviewEffectApplicationErrorCode,
   ToolAuthorizationRecord,
 } from './agent/orchestrator/review/reviewAuthorizations';
+export {
+  buildReviewSpec,
+} from './agent/orchestrator/review/reviewSpec';
 export type {
+  BuildReviewSpecParams,
   PendingReviewAction,
   PendingReviewState,
   ReviewActionRef,
@@ -121,6 +125,7 @@ export type {
   ReviewResponseResolution,
   ReviewSpec,
   ReviewView,
+  HumanReviewInterruptPayload,
   ToolAuthorizationMatcher,
   ToolAuthorizationMatcherTemplate,
 } from './agent/orchestrator/review/reviewSpec';
@@ -154,6 +159,7 @@ export type {
   CuratorPromptProvider,
   ExecuteAction,
   HumanReviewer,
+  HumanReviewerRequest,
   LLMWikiCuratorConfig,
   PetAgentRuntime,
   PetAgentRuntimeConfig,

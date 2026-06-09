@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { tool } from '@langchain/core/tools';
 import {
-  buildHumanReviewRequest,
+  buildReviewSpec,
   type HumanReviewActionRequest,
   type NamedStructuredTool,
   type ToolOperationMetadataMapFor,
@@ -225,6 +225,42 @@ function readEditedGitCommitAction(
   };
 }
 
+function buildGitCommitReviewSpec(gitAction: { cwd?: string; message: string }) {
+  return buildReviewSpec({
+    view: {
+      kind: 'plain',
+      title: 'Git commit approval',
+      body: `即将创建本地 git commit。\n目录：${gitAction.cwd ?? config.workdir}\nmessage：${gitAction.message}`,
+    },
+    options: [
+      {
+        id: 'approve',
+        label: 'Approve',
+        variant: 'primary',
+        decision: { type: 'approve' },
+      },
+      {
+        id: 'reject',
+        label: 'Reject',
+        variant: 'danger',
+        decision: { type: 'reject' },
+      },
+      {
+        id: 'respond',
+        label: 'Respond',
+        input: {
+          kind: 'text',
+          key: 'message',
+          required: true,
+          multiline: true,
+          placeholder: 'Tell the agent what to do instead',
+        },
+        decision: { type: 'respond', messageInputKey: 'message' },
+      },
+    ],
+  });
+}
+
 export const gitCommitReviewPolicy: ToolkitToolReviewPolicy = {
   request: ({ input }) => {
     let gitAction: { cwd?: string; message: string };
@@ -234,19 +270,7 @@ export const gitCommitReviewPolicy: ToolkitToolReviewPolicy = {
       return null;
     }
 
-    return buildHumanReviewRequest({
-      actionRequests: [{
-        name: 'git_commit',
-        args: gitAction,
-        description: '即将创建本地 git commit。',
-      }],
-      reviewConfigs: [{
-        actionName: 'git_commit',
-        allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
-        description: '创建本地 git commit',
-      }],
-      prompt: `即将创建本地 git commit。\n目录：${gitAction.cwd ?? config.workdir}\nmessage：${gitAction.message}\n请确认是否执行，或修改 message/说明新的处理方向。`,
-    });
+    return buildGitCommitReviewSpec(gitAction);
   },
   applyEdit: ({ input, editedAction }) => readEditedGitCommitAction(
     editedAction,

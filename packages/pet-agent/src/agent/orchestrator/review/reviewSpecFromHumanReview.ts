@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type {
   HumanReviewActionRequest,
   HumanReviewDecisionType,
@@ -9,6 +8,7 @@ import type {
   ReviewOptionDecision,
   ReviewSpec,
 } from './reviewSpec';
+import { buildReviewSpec } from './reviewSpec';
 
 const DEFAULT_REVIEW_BODY = 'This action requires human review.';
 const DECISION_ORDER: HumanReviewDecisionType[] = ['approve', 'reject', 'respond', 'edit'];
@@ -110,14 +110,14 @@ export function buildReviewSpecFromHumanReviewRequest(
   request: HumanReviewRequest,
   options: BuildReviewSpecFromHumanReviewRequestOptions = {},
 ): ReviewSpec {
-  return {
-    id: options.id ?? randomUUID(),
-    schemaVersion: options.schemaVersion ?? 1,
+  return buildReviewSpec({
+    ...(options.id ? { id: options.id } : {}),
+    ...(options.schemaVersion !== undefined ? { schemaVersion: options.schemaVersion } : {}),
     view: {
       kind: 'plain',
       ...(options.title ? { title: options.title } : {}),
       body: buildReviewBody(request),
     },
     options: buildOptionsFromHumanReviewRequest(request),
-  };
+  });
 }

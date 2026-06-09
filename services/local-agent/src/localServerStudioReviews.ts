@@ -1,7 +1,13 @@
-import { readFirstHumanReviewDecision, type HumanReviewDecision } from '@pinpawo/pet-agent';
+import {
+  readFirstHumanReviewDecision,
+  resolveHumanReviewResponse,
+  ReviewResponseResolutionError,
+  type HumanReviewDecision,
+} from '@pinpawo/pet-agent';
 import type { HumanReviewResponseMessage } from './localAgentProtocol';
 import {
   createPendingReviewSlot,
+  type PendingReview,
   rejectReview,
   resolveReview,
   type PendingReviewSlot,
@@ -11,18 +17,38 @@ type Log = (message: string) => void;
 
 export type StudioReviewConnection = object;
 
-export function decodeStudioReviewDecision(
-  msg: Pick<HumanReviewResponseMessage, 'message' | 'resume'>,
-): HumanReviewDecision {
+export function decodeLegacyStudioReviewDecision(
+  msg: Pick<HumanReviewResponseMessage, 'resume'>,
+): HumanReviewDecision | null {
   if (msg.resume !== undefined) {
     const decoded = readFirstHumanReviewDecision(msg.resume);
     if (decoded) return decoded;
   }
-  const text = (msg.message ?? '').trim();
-  if (text) {
-    return { type: 'respond', message: text };
+  return null;
+}
+
+function resolveStudioReviewDecision(
+  pending: PendingReview,
+  msg: HumanReviewResponseMessage,
+): HumanReviewDecision | null {
+  if (msg.reviewId && msg.selectedOptionId) {
+    const resolution = resolveHumanReviewResponse({
+      requestId: msg.requestId,
+      reviewSpec: pending.reviewSpec,
+      pendingAction: {
+        actionId: 'studio_review',
+        toolName: 'studio_review',
+        args: {},
+      },
+    }, {
+      reviewId: msg.reviewId,
+      selectedOptionId: msg.selectedOptionId,
+      ...(msg.input ? { input: msg.input } : {}),
+    });
+    return resolution.decision;
   }
-  return { type: 'reject' };
+
+  return decodeLegacyStudioReviewDecision(msg);
 }
 
 export class LocalServerStudioReviewRouter<Connection extends StudioReviewConnection = StudioReviewConnection> {
@@ -46,7 +72,24 @@ export class LocalServerStudioReviewRouter<Connection extends StudioReviewConnec
     if (!slot?.current) {
       return false;
     }
-    const decision = decodeStudioReviewDecision(msg);
+    let decision: HumanReviewDecision | null = null;
+    try {
+      decision = resolveStudioReviewDecision(slot.current, msg);
+    } catch (err) {
+      if (err instanceof ReviewResponseResolutionError) {
+        log(
+          `[local-server] rejected studio HITL answer (reviewId=${slot.current.reviewId}, code=${err.code})`,
+        );
+        return true;
+      }
+      throw err;
+    }
+    if (!decision) {
+      log(
+        `[local-server] rejected studio HITL answer (reviewId=${slot.current.reviewId}, reason=missing_decision)`,
+      );
+      return true;
+    }
     log(
       `[local-server] route ${msg.type} as studio HITL answer (reviewId=${slot.current.reviewId}, decision=${decision.type})`,
     );

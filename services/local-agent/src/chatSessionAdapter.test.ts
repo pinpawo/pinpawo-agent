@@ -264,8 +264,6 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
   const event = emittedEvents[0];
   assert.equal(event?.type, 'human_review.requested');
   assert.deepEqual(event.review, review);
-  assert.equal(event.prompt, 'Shell command approval\nRun git status?');
-  assert.equal(event.payload?.kind, 'review');
 });
 
 test('runChatSession resumes explicit response after state update clears interrupt payload', async () => {

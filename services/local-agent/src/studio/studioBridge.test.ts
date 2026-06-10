@@ -67,15 +67,11 @@ test('createWsHumanReviewer forwards canonical review specs unchanged', async ()
 
   assert.equal(sent.length, 1);
   const event = sent[0].event as {
-    prompt: string;
-    payload: unknown;
     review: { id: string; view: { title?: string; body: string } };
   };
   assert.equal(slot.current?.reviewId, 'review-direct');
-  assert.equal(event.prompt, 'Direct review\nApprove direct action?');
   assert.equal(event.review.id, 'review-direct');
   assert.equal(event.review, request.review);
-  assert.equal(event.payload, request);
 
   assert.equal(resolveReview(slot, { reviewId: 'review-direct', selectedOptionId: 'approve' }), true);
   assert.deepEqual(await promise, { reviewId: 'review-direct', selectedOptionId: 'approve' });

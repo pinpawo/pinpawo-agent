@@ -9,7 +9,6 @@ import type { AgentChannelSetup } from './agentChannel';
 import type { LocalAgentGraphService } from './agentGraphService';
 import {
   buildReviewSpecFromInterruptPayload,
-  formatInterruptPrompt,
   isHumanReviewInterruptPayload,
   normalizeInterruptResume,
   readPendingInterrupt,
@@ -99,8 +98,6 @@ function emitHumanReviewRequested(params: {
   params.emitEvent({
     type: 'human_review.requested',
     requestId: params.requestId,
-    prompt: formatInterruptPrompt(params.interruptPayload),
-    payload: params.interruptPayload,
     review,
   });
 }

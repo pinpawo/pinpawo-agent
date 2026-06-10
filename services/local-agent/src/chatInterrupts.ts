@@ -81,19 +81,6 @@ export function buildReviewSpecFromInterruptPayload(
   return undefined;
 }
 
-export function formatInterruptPrompt(interruptPayload: Record<string, unknown>) {
-  const directReview = readReviewSpecValue(interruptPayload.review);
-  if (directReview) {
-    return [
-      directReview.view.title,
-      directReview.view.body,
-    ].filter((line): line is string => Boolean(line && line.trim())).join('\n')
-      || '当前流程需要你的确认，请使用当前确认面板应答。';
-  }
-
-  return '当前流程需要你的确认，请等待当前确认面板刷新后再应答。';
-}
-
 export function normalizeInterruptResume(
   interruptPayload: Record<string, unknown>,
   message: string,

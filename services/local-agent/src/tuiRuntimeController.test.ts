@@ -24,9 +24,6 @@ function pendingReviewState(): TuiState {
           activeOperations: [],
           pendingReview: {
             requestId: 'req-1',
-            kind: 'human_review',
-            prompt: 'Need review',
-            payload: {},
             review: {
               id: 'review-1',
               schemaVersion: 1,

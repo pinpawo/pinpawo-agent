@@ -82,10 +82,7 @@ export type ActiveOperationModel = {
 
 export type ApprovalRequestModel = {
   requestId: RunId;
-  kind: string;
-  prompt: string;
   review: ReviewSpec;
-  payload?: Record<string, unknown>;
   petId?: string;
 };
 

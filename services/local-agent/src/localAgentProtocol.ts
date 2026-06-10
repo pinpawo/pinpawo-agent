@@ -240,8 +240,6 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     };
   }
   if (type === 'human_review.requested') {
-    const prompt = readOptionalString(record, 'prompt');
-    const payload = readRecord(record, 'payload');
     const review = readReviewSpec(record, 'review');
     const actor = readRecord(record, 'actor');
     if (!review) return null;
@@ -249,8 +247,6 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
       type,
       requestId,
       review,
-      ...(prompt != null ? { prompt } : {}),
-      ...(payload ? { payload } : {}),
       ...(actor ? { actor: { petId: readOptionalString(actor, 'petId') } } : {}),
     };
   }

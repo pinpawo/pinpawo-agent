@@ -77,7 +77,6 @@ export function createWsHumanReviewer(opts: {
         return;
       }
       const reviewId = request.review.id;
-      const prompt = extractPromptText(request);
       const review = request.review;
       opts.slot.current = { resolve, reject, petId: opts.petId, reviewId, reviewSpec: review };
       opts.send({
@@ -87,21 +86,11 @@ export function createWsHumanReviewer(opts: {
           type: 'human_review.requested',
           requestId: opts.requestId,
           review,
-          prompt,
-          payload: request,
           actor: { petId: opts.petId },
         },
       });
     });
   };
-}
-
-function extractPromptText(request: HumanReviewerRequest): string {
-  return [
-    request.review.view.title,
-    request.review.view.body,
-  ].filter((line): line is string => Boolean(line && line.trim())).join('\n')
-    || '当前流程需要你的确认,请使用当前确认面板应答。';
 }
 
 /**

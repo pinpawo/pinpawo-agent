@@ -28,11 +28,6 @@ function resolveStudioReviewResponse(
     };
     resolveHumanReviewResponse({
       reviewSpec: pending.reviewSpec,
-      pendingAction: {
-        actionId: 'studio_review',
-        toolName: 'studio_review',
-        args: {},
-      },
     }, response);
     return response;
   }

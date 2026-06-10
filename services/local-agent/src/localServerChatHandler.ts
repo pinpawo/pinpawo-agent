@@ -37,8 +37,6 @@ type PendingReviewRoute = {
   rejectOptionId?: string;
   sessionId?: string;
   review: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['review'];
-  prompt?: string;
-  payload?: Record<string, unknown>;
   actor?: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['actor'];
 };
 
@@ -81,8 +79,6 @@ export class LocalServerChatHandler {
       ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
       ...(sessionId ? { sessionId } : {}),
       review: event.review,
-      ...(event.prompt ? { prompt: event.prompt } : {}),
-      ...(event.payload ? { payload: event.payload } : {}),
       ...(event.actor ? { actor: event.actor } : {}),
     });
   }
@@ -316,8 +312,6 @@ export class LocalServerChatHandler {
         type: 'human_review.requested',
         requestId: msg.requestId,
         review: route.review,
-        ...(route.prompt ? { prompt: route.prompt } : {}),
-        ...(route.payload ? { payload: route.payload } : {}),
         ...(route.actor ? { actor: route.actor } : {}),
       });
       return true;

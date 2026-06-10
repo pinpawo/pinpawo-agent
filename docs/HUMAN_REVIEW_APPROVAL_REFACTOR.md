@@ -241,14 +241,10 @@ type HumanReviewRequestedEvent = {
   requestId: string;
   review: ReviewSpec;
   actor?: { petId?: string };
-
-  // 派生展示/调试字段。runtime 行为只由 review + server-side route state 决定。
-  prompt?: string;
-  payload?: HumanReviewInterruptPayload;
 };
 ```
 
-`prompt` 和 `payload` 只能用于展示 fallback / 调试溯源，不能驱动 runtime 行为。旧 request interrupt adapter 已移除。
+TUI 展示只能读取 `review.view` / `review.options`。raw interrupt payload 不进入 TUI state，也不能驱动 runtime 行为。旧 request interrupt adapter 已移除。
 
 V1 response schema：
 

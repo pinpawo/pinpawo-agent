@@ -385,8 +385,8 @@ execute → finish { finalDispatchId, reason }
 
 HITL 完全发生在 pet runtime 与 UI 之间(INTERFACES 文档的 Boundary 2 / 3),**对 Studio 透明**:
 
-- pet 内部 tool 触发 `interrupt(humanReviewRequest)`(由 toolkit `policy.toolReview` 在调用前决定)。
-- pet runtime 接到 LangGraph 暂停信号 → 调构造时注入的 `humanReviewer` 桥 → 该桥内部把 request 送到 pet 自己的 UI session(ws/SSE/进程内),拿回 decision。
+- pet 内部 tool review 由 toolkit `policy.toolReview` 在调用前决定，orchestrator runtime 写入 pending review state 后触发 canonical review interrupt。
+- pet runtime 接到 LangGraph 暂停信号 → 调构造时注入的 `humanReviewer` 桥 → 该桥内部把 request 送到 pet 自己的 UI session(ws/SSE/进程内),拿回 canonical `ReviewResponse`。
 - pet runtime 用 `Command({ resume })` 续跑 graph;若仍有 interrupt 则继续循环,直到 graph 给出最终文本。
 - 最终 pet runtime invoke Promise resolve,Studio 才收到信号(整个 HITL 过程对 Studio 来说就是"invoke 一直 pending,然后正常 resolve")。
 

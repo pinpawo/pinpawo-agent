@@ -2,6 +2,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { SubagentInput, SubagentResult, SubagentToolLifecycleEvent } from '../types/subagent';
 import { createAgent } from 'langchain';
 import { SubagentToolEventTracker } from './toolEventTracker';
+import { isToolReviewRequiredError } from '../agent/orchestrator/review/toolReviewSignal';
 
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 12;
 
@@ -65,6 +66,9 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
   let latestMessages = input.messages;
   const toolEvents = new SubagentToolEventTracker();
   const emitToolEvent = async (event: SubagentToolLifecycleEvent) => {
+    if (event.event === 'on_tool_error' && isToolReviewRequiredError(event.error)) {
+      throw event.error;
+    }
     const operation = event.operation ?? input.operations?.[event.name];
     await input.onToolEvent?.(toolEvents.accept(operation ? { ...event, operation } : event));
   };

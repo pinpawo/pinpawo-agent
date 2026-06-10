@@ -42,7 +42,7 @@ export type PetAgentRuntimeConfig = {
   workdir?: string;
   /**
    * HITL 应答桥。pet runtime 在 invoke 期间撞到 interrupt 时调用,
-   * 拿到 decision 后续跑 graph。不提供时 pet 不应触发 HITL tool;
+   * 拿到 canonical ReviewResponse 后续跑 graph。不提供时 pet 不应触发 HITL tool;
    * 若仍触发 interrupt,invoke 将抛错。
    */
   humanReviewer?: HumanReviewer;

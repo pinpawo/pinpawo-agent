@@ -1,27 +1,18 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
-import { interrupt } from '@langchain/langgraph';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { CapabilityRuntime } from '../../types/capability';
 import type { AgentExecution } from '../../types/agent';
 import type { AgentToolkit, AgentToolset, ToolkitContext } from '../../types/toolkit';
 import type { SubagentToolOperationMetadata } from '../../types/subagent';
-import {
-  applyReviewEffects,
-  ReviewEffectApplicationError,
-  type ToolAuthorizationRecord,
-} from './review/reviewAuthorizations';
-import {
-  resolveHumanReviewResume,
-  ReviewResponseResolutionError,
-} from './review/reviewResponseResolver';
 import type {
   PendingReviewAction,
-  ReviewResponseResolution,
+  PendingReviewState,
   ReviewSpec,
-  HumanReviewInterruptPayload,
+  ToolReviewResolutionState,
 } from './review/reviewSpec';
+import { ToolReviewRequiredError } from './review/toolReviewSignal';
 import type { MessageLane } from './types';
 
 export function buildDelegationHandoffInstruction(params: {
@@ -227,92 +218,60 @@ function materializeToolReviewSpec(review: ReviewSpec, action: PendingReviewActi
     : { ...review, id };
 }
 
-function buildHumanReviewInterruptPayload(params: {
+function buildPendingToolReviewState(params: {
   toolName: string;
   input: unknown;
   review: ReviewSpec;
   runtime: ToolRuntime;
-}): HumanReviewInterruptPayload {
+  source: PendingReviewState['source'];
+}): PendingReviewState {
   const pendingAction = buildPendingReviewAction(params);
   return {
-    kind: 'review',
-    review: materializeToolReviewSpec(params.review, pendingAction),
+    source: params.source,
+    reviewSpec: materializeToolReviewSpec(params.review, pendingAction),
     pendingAction,
   };
 }
 
-function buildInvalidDecisionRequest(payload: HumanReviewInterruptPayload): HumanReviewInterruptPayload {
-  const message = '无法识别你的决定。请批准、拒绝，或直接输入新的处理方向。';
-  return {
-    ...payload,
-    error: 'invalid_decision',
-    review: {
-      ...payload.review,
-      view: {
-        ...payload.review.view,
-        body: `${payload.review.view.body}\n\n${message}`,
-      },
-    },
-  };
-}
-
-async function resolveRuntimeReviewResume(params: {
-  reviewPayload: HumanReviewInterruptPayload;
-  resume: unknown;
-  toolkits: AgentToolkit[];
-}): Promise<{
-  resolution: ReviewResponseResolution;
-  authorizations: ToolAuthorizationRecord[];
-}> {
-  const resolution = resolveHumanReviewResume({
-    requestId: 'tool_review',
-    reviewSpec: params.reviewPayload.review,
-    ...(params.reviewPayload.pendingAction ? { pendingAction: params.reviewPayload.pendingAction } : {}),
-  }, params.resume);
-  if (resolution.effects.length > 0 && !params.reviewPayload.pendingAction) {
-    throw new ReviewEffectApplicationError(
-      'missing_pending_action',
-      'Cannot apply review effects without a pending action.',
-    );
+function stableJson(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return JSON.stringify(value);
   }
-  const authorizations = params.reviewPayload.pendingAction
-    ? await applyReviewEffects({
-        pendingAction: params.reviewPayload.pendingAction,
-        effects: resolution.effects,
-        toolkits: params.toolkits,
-      })
-    : [];
-  return { resolution, authorizations };
+  const record = value as Record<string, unknown>;
+  return JSON.stringify(
+    Object.keys(record)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = record[key];
+        return acc;
+      }, {}),
+  );
 }
 
-async function recordToolAuthorizations(
-  ctx: ToolkitContext,
-  authorizations: ToolAuthorizationRecord[],
+function samePendingAction(left: PendingReviewAction, right: PendingReviewAction) {
+  return left.toolName === right.toolName
+    && stableJson(left.args) === stableJson(right.args);
+}
+
+function takeToolReviewResolution(
+  resolutions: ToolReviewResolutionState[] | undefined,
+  pendingReview: PendingReviewState,
 ) {
-  if (authorizations.length === 0) {
-    return;
-  }
-  if (!ctx.recordToolAuthorization) {
-    throw new ReviewEffectApplicationError(
-      'missing_thread',
-      'Cannot apply authorization effects without an orchestrator authorization recorder.',
-    );
-  }
-  for (const authorization of authorizations) {
-    await ctx.recordToolAuthorization(authorization);
-  }
-  await ctx.emitRuntimeEvent?.({
-    event: 'on_runtime_event',
-    name: 'tool_authorization_recorded',
-    data: { authorizations },
-  });
+  const pendingAction = pendingReview.pendingAction;
+  if (!pendingAction) return null;
+  const index = (resolutions ?? []).findIndex((resolution) =>
+    resolution.reviewId === pendingReview.reviewSpec.id
+      || samePendingAction(resolution.pendingAction, pendingAction),
+  );
+  return index >= 0
+    ? resolutions?.splice(index, 1)[0] ?? null
+    : null;
 }
 
 function wrapToolkitTool(
   toolkit: AgentToolkit,
   toolItem: StructuredTool,
   ctx: ToolkitContext,
-  toolkits: AgentToolkit[],
 ): StructuredTool {
   const reviewPolicy = toolkit.policy?.toolReview?.[toolItem.name];
   if (!reviewPolicy) {
@@ -335,37 +294,25 @@ function wrapToolkitTool(
           return toolItem.invoke(currentInput as never, runtime as never);
         }
 
-        const reviewPayload = buildHumanReviewInterruptPayload({
+        const source = ctx.toolReviewSource;
+        if (!source) {
+          throw new Error(`Tool review for "${toolItem.name}" requires an orchestrator review source.`);
+        }
+
+        const pendingReview = buildPendingToolReviewState({
           toolName: toolItem.name,
           input: currentInput,
           review: reviewSpec,
           runtime,
+          source,
         });
-        let reviewResume = interrupt(reviewPayload);
-        let reviewDecision: ReviewResponseResolution['decision'] | null = null;
-        let authorizations: ToolAuthorizationRecord[] = [];
-        while (!reviewDecision) {
-          try {
-            const resolved = await resolveRuntimeReviewResume({
-              reviewPayload,
-              resume: reviewResume,
-              toolkits,
-            });
-            reviewDecision = resolved.resolution.decision;
-            authorizations = resolved.authorizations;
-          } catch (error) {
-            if (
-              !(error instanceof ReviewResponseResolutionError)
-              && !(error instanceof ReviewEffectApplicationError)
-            ) {
-              throw error;
-            }
-            reviewResume = interrupt(buildInvalidDecisionRequest(reviewPayload));
-          }
+        const storedResolution = takeToolReviewResolution(ctx.toolReviewResolutions, pendingReview);
+        if (!storedResolution) {
+          throw new ToolReviewRequiredError(pendingReview);
         }
+        const reviewDecision = storedResolution.decision;
 
         if (reviewDecision.type === 'approve') {
-          await recordToolAuthorizations(ctx, authorizations);
           return toolItem.invoke(currentInput as never, runtime as never);
         }
 
@@ -425,7 +372,7 @@ export async function resolveToolkitResources(
   const instructions: string[] = [];
   for (const toolkit of selectedToolkits) {
     const toolkitTools = await resolveToolkitTools(toolkit, ctx);
-    tools.push(...toolkitTools.map((toolItem) => wrapToolkitTool(toolkit, toolItem, ctx, selectedToolkits)));
+    tools.push(...toolkitTools.map((toolItem) => wrapToolkitTool(toolkit, toolItem, ctx)));
     if (options.includeInstructions !== false) {
       instructions.push(...await resolveToolkitInstructions(toolkit, ctx));
     }

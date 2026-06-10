@@ -573,7 +573,9 @@ graph/tool runtime 在触发 interrupt 前，需要把 pending review 的必要�
 
 ```ts
 type PendingReviewState = {
-  requestId: string;
+  source:
+    | { type: 'iteration_limit'; decisionNode: 'userIntentDecision' | 'delegationOutcomeDecision' }
+    | { type: 'tool_call'; lane: string };
   reviewSpec: ReviewSpec;
   pendingAction?: PendingReviewAction;
 };
@@ -591,6 +593,20 @@ type PendingReviewAction = {
 local-agent server 可以缓存 requestId/reviewId/sessionId 到 active graph thread 的路由关系，但不缓存 authorization，也不解释 shell tool 语义。
 
 `pendingAction` 只在 review 代表某个待执行 tool action，且后续 effect resolution 需要这个 action 上下文时存在；iteration-limit 这类 runtime gate 不应该伪造成 tool action。`pendingAction` 是 graph/tool runtime 自己保存的执行上下文，不来自 client response。matcher hook 必须读取这个 `pendingAction`，不能反向读取 UI payload。
+
+tool review 的实现不能在子图 wrapper 中直接 `interrupt()` 后重建 review spec。wrapper 只能 materialize pending review 并向 orchestrator runtime 发出明确的 review-required signal；orchestrator node 接住 signal 后先把 `PendingReviewState` 写入 graph checkpoint，再进入统一的 `humanReview` node 发出 interrupt。resume 时以 checkpoint 里的 `PendingReviewState` 为事实源。
+
+对于普通 approve/reject/respond，graph 可以记录一次性的 tool review resolution，用于重新进入子图后让 wrapper 消费当前已 resolve 的 decision：
+
+```ts
+type ToolReviewResolutionState = {
+  reviewId: string;
+  pendingAction: PendingReviewAction;
+  decision: HumanReviewDecision;
+};
+```
+
+这个 resolution 只用于当前 pending tool action 的重放，不是长期授权；delegation 成功返回后必须清空。长期免审只能来自 `graph.authorize_tool_action` effect 写入的 authorization state。
 
 ### 6.3 UI 渲染 review spec
 
@@ -661,7 +677,11 @@ type ReviewResponse = {
   input?: Record<string, unknown>;
 };
 
-const response = interrupt(state.pendingReview.reviewSpec) as ReviewResponse;
+const response = interrupt({
+  kind: 'review',
+  review: state.pendingReview.reviewSpec,
+  pendingAction: state.pendingReview.pendingAction,
+}) as ReviewResponse;
 const option = state.pendingReview.reviewSpec.options.find(
   (item) => item.id === response.selectedOptionId,
 );
@@ -723,6 +743,8 @@ graph/tool runtime resume 后再从 pending `ReviewSpec` 解析 decision 和 eff
 const resolution = resolveHumanReviewResponse(state.pendingReview, response);
 ```
 
+effect 必须在继续执行 pending action 之前应用。对于 `graph.authorize_tool_action`，runtime 先根据 pending action 和 policy matcher hook 生成 authorization record 并写入 graph state；写入失败时不能执行该 tool call。
+
 `resolveHumanReviewResponse()` 负责校验输入：
 
 - `approve` / `reject` 不需要 input。
@@ -759,7 +781,7 @@ V1 cancellation 默认策略：
 当前代码有两条 HITL 入口，重构后都要归一到同一个 `ReviewSpec` / response resolver：
 
 - TUI / App chat：通过 LangGraph checkpoint 中的 pending interrupt 恢复。server 从 `requestId` 找到 thread/checkpoint，并把 `{ reviewId, selectedOptionId, input }` 作为 resume payload。
-- Studio humanReviewer：可以保留 `createWsHumanReviewer()` 里的 pending promise slot，但 pending slot 必须保存当前 `ReviewSpec`。收到 canonical response 后调用同一个 `resolveHumanReviewResponse()` 得到 `HumanReviewDecision`，再 resolve promise。
+- Studio humanReviewer：可以保留 `createWsHumanReviewer()` 里的 pending promise slot，但 pending slot 必须保存当前 `ReviewSpec`。收到 canonical response 后校验 `reviewId` / `selectedOptionId`，并把 canonical `{ reviewId, selectedOptionId, input }` 作为 graph resume payload。
 
 也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。Studio review response 只允许 canonical `{ reviewId, selectedOptionId, input }`；不能再从 `message` 文本或 `resume.decisions` 猜 decision。
 

@@ -9,7 +9,7 @@ import type { PendingReviewState } from './review/reviewSpec';
 
 function samplePendingReview(): PendingReviewState {
   return {
-    requestId: 'req-1',
+    source: { type: 'tool_call', lane: 'general' },
     reviewSpec: {
       id: 'review-1',
       schemaVersion: 1,

@@ -88,54 +88,10 @@ export function formatInterruptPrompt(interruptPayload: Record<string, unknown>)
       directReview.view.title,
       directReview.view.body,
     ].filter((line): line is string => Boolean(line && line.trim())).join('\n')
-      || '当前流程需要你的确认，请直接回复继续或说明下一步。';
+      || '当前流程需要你的确认，请使用当前确认面板应答。';
   }
 
   return '当前流程需要你的确认，请等待当前确认面板刷新后再应答。';
-}
-
-function buildCanonicalResumeFromUserText(
-  interruptPayload: Record<string, unknown>,
-  message: string,
-) {
-  const review = readReviewSpecValue(interruptPayload.review);
-  if (!review) {
-    return null;
-  }
-  const text = message.trim();
-  if (text) {
-    const respondOption = review.options.find((option) =>
-      option.decision.type === 'respond'
-      && option.input?.kind === 'text'
-      && option.input.key === option.decision.messageInputKey);
-    if (!respondOption || !respondOption.input) {
-      return {
-        reviewId: review.id,
-        selectedOptionId: '__invalid_free_text_response__',
-      };
-    }
-    return {
-      reviewId: review.id,
-      selectedOptionId: respondOption.id,
-      input: { [respondOption.input.key]: text },
-    };
-  }
-
-  const rejectOption = review.options.find((option) => option.decision.type === 'reject');
-  return {
-    reviewId: review.id,
-    selectedOptionId: rejectOption?.id ?? '__invalid_empty_response__',
-  };
-}
-
-function readFirstResumeDecisionType(value: unknown): string | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const decisions = Array.isArray(record.decisions) ? record.decisions : [];
-  const first = decisions[0];
-  if (!first || typeof first !== 'object') return null;
-  const type = (first as Record<string, unknown>).type;
-  return typeof type === 'string' ? type : null;
 }
 
 export function normalizeInterruptResume(
@@ -144,19 +100,8 @@ export function normalizeInterruptResume(
   explicitResume: unknown,
 ) {
   if (isHumanReviewInterruptPayload(interruptPayload)) {
-    // Canonical responses take precedence. Otherwise treat free text as a
-    // respond option (or reject if empty) using the pending ReviewSpec.
-    return explicitResume !== undefined
-      ? explicitResume
-      : buildCanonicalResumeFromUserText(interruptPayload, message);
+    return explicitResume;
   }
 
-  const explicitDecision = readFirstResumeDecisionType(explicitResume);
-  if (explicitDecision === 'approve') {
-    return { action: 'continue' };
-  }
-  if (explicitDecision === 'reject') {
-    return { action: 'reject' };
-  }
-  return message;
+  return explicitResume !== undefined ? explicitResume : message;
 }

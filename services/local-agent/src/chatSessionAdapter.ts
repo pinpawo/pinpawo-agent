@@ -9,6 +9,7 @@ import type { LocalAgentGraphService } from './agentGraphService';
 import {
   buildReviewSpecFromInterruptPayload,
   formatInterruptPrompt,
+  isHumanReviewInterruptPayload,
   normalizeInterruptResume,
   readPendingInterrupt,
 } from './chatInterrupts';
@@ -81,6 +82,25 @@ function throwUnexpectedInterruptPayload(): never {
   throw new Error('Received an interrupt without canonical human review payload.');
 }
 
+function emitHumanReviewRequested(params: {
+  interruptPayload: Record<string, unknown>;
+  requestId: string;
+  emitEvent: (event: LocalAgentEvent) => void;
+}) {
+  const review = buildReviewSpecFromInterruptPayload(params.interruptPayload);
+  if (!review) {
+    throwUnexpectedInterruptPayload();
+  }
+  recordAgentRunActivity('waiting_human', params.requestId);
+  params.emitEvent({
+    type: 'human_review.requested',
+    requestId: params.requestId,
+    prompt: formatInterruptPrompt(params.interruptPayload),
+    payload: params.interruptPayload,
+    review,
+  });
+}
+
 function isToolLifecycleEvent(event: SubagentToolEvent): event is SubagentToolLifecycleEvent {
   return event.event === 'on_tool_start'
     || event.event === 'on_tool_event'
@@ -130,6 +150,18 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   const pendingInterrupt = readPendingInterrupt(threadSnapshot);
   const hasExplicitResume = request.resume !== undefined;
+  if (
+    pendingInterrupt
+    && isHumanReviewInterruptPayload(pendingInterrupt)
+    && !hasExplicitResume
+  ) {
+    emitHumanReviewRequested({
+      interruptPayload: pendingInterrupt,
+      requestId,
+      emitEvent,
+    });
+    return { status: 'waiting_human' };
+  }
   const shouldResume = Boolean(
     pendingInterrupt
     || (hasExplicitResume && hasPendingGraphContinuation(threadSnapshot)),
@@ -216,17 +248,10 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
       if (mode === 'values' && payload && typeof payload === 'object' && '__interrupt__' in payload) {
         const interruptPayload = readFirstInterruptPayload(payload);
         if (interruptPayload) {
-          const review = buildReviewSpecFromInterruptPayload(interruptPayload);
-          if (!review) {
-            throwUnexpectedInterruptPayload();
-          }
-          recordAgentRunActivity('waiting_human', requestId);
-          emitEvent({
-            type: 'human_review.requested',
+          emitHumanReviewRequested({
+            interruptPayload,
             requestId,
-            prompt: formatInterruptPrompt(interruptPayload),
-            payload: interruptPayload,
-            review,
+            emitEvent,
           });
           return { status: 'waiting_human' };
         }
@@ -249,17 +274,10 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   const finalInterrupt = readPendingInterrupt(finalSnapshot);
   if (finalInterrupt) {
-    const review = buildReviewSpecFromInterruptPayload(finalInterrupt);
-    if (!review) {
-      throwUnexpectedInterruptPayload();
-    }
-    recordAgentRunActivity('waiting_human', requestId);
-    emitEvent({
-      type: 'human_review.requested',
+    emitHumanReviewRequested({
+      interruptPayload: finalInterrupt,
       requestId,
-      prompt: formatInterruptPrompt(finalInterrupt),
-      payload: finalInterrupt,
-      review,
+      emitEvent,
     });
     return { status: 'waiting_human' };
   }

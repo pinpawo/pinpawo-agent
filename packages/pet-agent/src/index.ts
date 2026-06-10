@@ -107,6 +107,7 @@ export {
 export type {
   BuildReviewSpecParams,
   PendingReviewAction,
+  PendingReviewSource,
   PendingReviewState,
   ReviewActionRef,
   ReviewEffect,
@@ -120,6 +121,7 @@ export type {
   HumanReviewInterruptPayload,
   ToolAuthorizationMatcher,
   ToolAuthorizationMatcherTemplate,
+  ToolReviewResolutionState,
 } from './agent/orchestrator/review/reviewSpec';
 export {
   readBoolean,

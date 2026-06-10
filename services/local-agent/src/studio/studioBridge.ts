@@ -101,7 +101,7 @@ function extractPromptText(request: HumanReviewerRequest): string {
     request.review.view.title,
     request.review.view.body,
   ].filter((line): line is string => Boolean(line && line.trim())).join('\n')
-    || '当前流程需要你的确认,请直接回复继续或说明下一步。';
+    || '当前流程需要你的确认,请使用当前确认面板应答。';
 }
 
 /**

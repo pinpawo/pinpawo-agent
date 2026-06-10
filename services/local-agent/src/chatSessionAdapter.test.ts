@@ -5,6 +5,7 @@ import type { AgentChannelSetup } from './agentChannel';
 import type { LocalAgentEvent } from './events/localAgentEvent';
 import type { LocalAgentGraphService } from './agentGraphService';
 import { runChatSession } from './chatSessionAdapter';
+import { normalizeInterruptResume } from './chatInterrupts';
 import { readFinalMessageText, type StreamToolsPayload } from './agentStreamEvents';
 
 function estimateTestTokens(messages: BaseMessage[]) {
@@ -16,6 +17,38 @@ function estimateTestTokens(messages: BaseMessage[]) {
     return total + Math.max(0, Math.ceil(`${message._getType()}\n${content}\n${metadata}`.length / 4));
   }, 0);
 }
+
+test('normalizeInterruptResume forwards explicit non-review resume without legacy decision decoding', () => {
+  const resume = { decisions: [{ type: 'approve' }] };
+  assert.equal(
+    normalizeInterruptResume({ kind: 'other_interrupt' }, 'Approve', resume),
+    resume,
+  );
+});
+
+test('normalizeInterruptResume requires explicit canonical resume for human review', () => {
+  const reviewInterrupt = {
+    kind: 'review',
+    review: {
+      id: 'review-1',
+      schemaVersion: 1,
+      view: {
+        kind: 'plain',
+        body: 'Need approval?',
+      },
+      options: [{
+        id: 'respond',
+        label: 'Respond',
+        input: { kind: 'text', key: 'message' },
+        decision: { type: 'respond', messageInputKey: 'message' },
+      }],
+    },
+  };
+  const resume = { reviewId: 'review-1', selectedOptionId: 'respond', input: { message: 'explain first' } };
+
+  assert.equal(normalizeInterruptResume(reviewInterrupt, 'explain first', undefined), undefined);
+  assert.equal(normalizeInterruptResume(reviewInterrupt, '', resume), resume);
+});
 
 test('runChatSession uses onToolEvent as the only operation source', async () => {
   const emittedTools: StreamToolsPayload[] = [];
@@ -303,8 +336,9 @@ test('runChatSession resumes explicit response after state update clears interru
   );
 });
 
-test('runChatSession maps pending review free text to canonical respond resume', async () => {
+test('runChatSession does not map pending review free text to review response', async () => {
   const streamInputs: unknown[] = [];
+  const emittedEvents: LocalAgentEvent[] = [];
   const review = {
     id: 'review-respond',
     schemaVersion: 1,
@@ -348,12 +382,19 @@ test('runChatSession maps pending review free text to canonical respond resume',
             values: { messages: [] },
           }
         : {
-            tasks: [],
+            tasks: [{
+              interrupts: [{
+                value: {
+                  kind: 'review',
+                  review,
+                },
+              }],
+            }],
             values: { messages: finalMessages },
           };
     },
     buildResumeCommand(value: unknown) {
-      return { kind: 'resume-command', value };
+      throw new Error(`should not build resume command: ${String(value)}`);
     },
     async *stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
       streamInputs.push(inputOverride);
@@ -377,19 +418,19 @@ test('runChatSession maps pending review free text to canonical respond resume',
     finishInterrupted: () => {
       throw new Error('should not interrupt');
     },
-    emitEvent: () => {},
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
     emitToolEvent: () => {},
   });
 
-  assert.deepEqual(result, { status: 'completed', reply: 'continued' });
-  assert.deepEqual(streamInputs, [{
-    kind: 'resume-command',
-    value: {
-      reviewId: 'review-respond',
-      selectedOptionId: 'respond',
-      input: { message: '请先解释风险' },
-    },
-  }]);
+  assert.deepEqual(result, { status: 'waiting_human' });
+  assert.deepEqual(streamInputs, []);
+  assert.equal(emittedEvents[0]?.type, 'human_review.requested');
+  assert.deepEqual(
+    emittedEvents[0]?.type === 'human_review.requested' ? emittedEvents[0].review : null,
+    review,
+  );
 });
 
 test('runChatSession emits token usage in completed event', async () => {

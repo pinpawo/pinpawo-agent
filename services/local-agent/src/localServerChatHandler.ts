@@ -10,7 +10,7 @@ import { recordAgentRunActivity } from './operationActivityState';
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
-import { runChatSession } from './chatSessionAdapter';
+import { runChatSession, type ChatSessionRequest } from './chatSessionAdapter';
 import {
   configureInflightOperationRegistry,
   type InflightOperationRun,
@@ -24,6 +24,13 @@ import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry
 import type { LocalAgentEvent } from './events/localAgentEvent';
 
 type InflightRequest = InflightOperationRun;
+
+type LocalServerRunRequest = ChatSessionRequest;
+
+type LocalServerRunSource =
+  | { type: 'chat_request' }
+  | { type: 'human_review_response'; reviewId: string; selectedOptionId: string }
+  | { type: 'interrupt_request'; reviewId: string; selectedOptionId: string };
 
 type PendingReviewRoute = {
   reviewId: string;
@@ -85,9 +92,31 @@ export class LocalServerChatHandler {
     msg: ChatRequestMessage,
     deps: LocalServerDeps,
   ) {
-    const { requestId, message } = msg;
+    return this.runChatRequest(ws, msg, deps, { type: 'chat_request' });
+  }
 
-    console.log(`[local-server] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
+  private async runChatRequest(
+    ws: WebSocket,
+    request: LocalServerRunRequest,
+    deps: LocalServerDeps,
+    source: LocalServerRunSource,
+  ) {
+    const { requestId } = request;
+    const message = request.message ?? '';
+
+    if (source.type === 'chat_request') {
+      console.log(`[local-server] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
+    } else if (source.type === 'human_review_response') {
+      console.log(
+        `[local-server] human_review_response requestId=${requestId} `
+        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`,
+      );
+    } else {
+      console.log(
+        `[local-server] interrupt_request resume human_review requestId=${requestId} `
+        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`,
+      );
+    }
     recordAgentRunActivity('thinking', requestId);
 
     const previousInflight = this.inflightRequests.get(ws);
@@ -122,7 +151,7 @@ export class LocalServerChatHandler {
       );
       setup.input.signal = controller.signal;
       const result = await runChatSession({
-        request: msg,
+        request,
         setup,
         graphService: this.graphService,
         isCurrent,
@@ -236,16 +265,18 @@ export class LocalServerChatHandler {
 
     this.pendingReviewRoutes.delete(msg.requestId);
 
-    await this.handleChatRequest(ws, {
-      type: 'chat_request',
+    await this.runChatRequest(ws, {
       requestId: msg.requestId,
-      message: '',
       resume: {
         reviewId: msg.reviewId,
         selectedOptionId: msg.selectedOptionId,
         ...(msg.input ? { input: msg.input } : {}),
       },
-    }, deps);
+    }, deps, {
+      type: 'human_review_response',
+      reviewId: msg.reviewId,
+      selectedOptionId: msg.selectedOptionId,
+    });
   }
 
   async handleInterruptRequest(
@@ -297,15 +328,17 @@ export class LocalServerChatHandler {
       `[local-server] interrupt pending human_review requestId=${msg.requestId} reviewId=${route.reviewId}`,
     );
 
-    await this.handleChatRequest(ws, {
-      type: 'chat_request',
+    await this.runChatRequest(ws, {
       requestId: msg.requestId,
-      message: '',
       resume: {
         reviewId: route.reviewId,
         selectedOptionId: route.rejectOptionId,
       },
-    }, deps);
+    }, deps, {
+      type: 'interrupt_request',
+      reviewId: route.reviewId,
+      selectedOptionId: route.rejectOptionId,
+    });
     return true;
   }
 

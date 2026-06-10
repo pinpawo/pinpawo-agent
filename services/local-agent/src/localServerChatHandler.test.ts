@@ -34,7 +34,7 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
     }),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -92,7 +92,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     }),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -110,7 +110,6 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   const message = {
     type: 'human_review_response' as const,
     requestId: 'req-1',
-    message: '',
     reviewId: 'review-current',
     selectedOptionId: 'approve',
   };
@@ -119,19 +118,21 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
 
   assert.equal(handleChatCalls.length, 1, 'matching review response should be forwarded once');
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
-    type: string;
     requestId: string;
-    message: string;
     resume?: unknown;
   };
+  const forwardedSource = (handleChatCalls[0] as unknown[])[3];
   assert.deepEqual(forwardedMessage, {
-    type: 'chat_request',
     requestId: 'req-1',
-    message: '',
     resume: {
       reviewId: 'review-current',
       selectedOptionId: 'approve',
     },
+  });
+  assert.deepEqual(forwardedSource, {
+    type: 'human_review_response',
+    reviewId: 'review-current',
+    selectedOptionId: 'approve',
   });
   assert.equal(sentEvents.length, 1, 'second response should be rejected after route is consumed');
   const event = sentEvents[0] as { type: string; event?: { type: string; message: string } };
@@ -162,7 +163,7 @@ test('handleInterruptRequest resumes pending review with canonical reject option
     }),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -193,19 +194,21 @@ test('handleInterruptRequest resumes pending review with canonical reject option
   assert.equal(sentEvents.length, 0);
   assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
-    type: string;
     requestId: string;
-    message: string;
     resume?: unknown;
   };
+  const forwardedSource = (handleChatCalls[0] as unknown[])[3];
   assert.deepEqual(forwardedMessage, {
-    type: 'chat_request',
     requestId: 'req-1',
-    message: '',
     resume: {
       reviewId: 'review-current',
       selectedOptionId: 'reject',
     },
+  });
+  assert.deepEqual(forwardedSource, {
+    type: 'interrupt_request',
+    reviewId: 'review-current',
+    selectedOptionId: 'reject',
   });
 
   await handler.handleHumanReviewResponse(
@@ -249,7 +252,7 @@ test('handleInterruptRequest restores pending review when no reject option exist
     }),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -325,7 +328,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
     }),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -360,18 +363,21 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
   assert.equal(sentEvents.length, 0);
   assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
-    message: string;
     resume?: unknown;
   };
+  const forwardedSource = (handleChatCalls[0] as unknown[])[3];
   assert.deepEqual(forwardedMessage, {
-    type: 'chat_request',
     requestId: 'req-1',
-    message: '',
     resume: {
       reviewId: 'review-current',
       selectedOptionId: 'respond',
       input: { message: '请先解释风险' },
     },
+  });
+  assert.deepEqual(forwardedSource, {
+    type: 'human_review_response',
+    reviewId: 'review-current',
+    selectedOptionId: 'respond',
   });
 });
 
@@ -399,7 +405,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
     }),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -463,7 +469,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
     }),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -528,17 +534,20 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
   assert.equal(handleChatCalls.length, 1);
   assert.equal(updateStateCalls.length, 0);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
-    message: string;
     resume?: unknown;
   };
+  const forwardedSource = (handleChatCalls[0] as unknown[])[3];
   assert.deepEqual(forwardedMessage, {
-    type: 'chat_request',
     requestId: 'req-1',
-    message: '',
     resume: {
       reviewId: 'review-current',
       selectedOptionId: 'approve-and-authorize-thread',
     },
+  });
+  assert.deepEqual(forwardedSource, {
+    type: 'human_review_response',
+    reviewId: 'review-current',
+    selectedOptionId: 'approve-and-authorize-thread',
   });
   assert.equal(
     sentEvents.some((event) =>
@@ -579,7 +588,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
     }),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

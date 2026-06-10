@@ -313,7 +313,6 @@ test('runChatSession resumes explicit response after state update clears interru
   const result = await runChatSession({
     request: {
       requestId: 'req-1',
-      message: '',
       resume,
     },
     setup,

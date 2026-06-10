@@ -14,9 +14,6 @@ import {
   normalizeInterruptResume,
   readPendingInterrupt,
 } from './chatInterrupts';
-import type {
-  ChatRequestMessage,
-} from './localAgentProtocol';
 import type { LocalAgentEvent } from './events/localAgentEvent';
 import {
   isLaneTaggedAiMessage,
@@ -69,8 +66,14 @@ export type ChatSessionResult =
   | { status: 'waiting_human' }
   | { status: 'interrupted' };
 
+export type ChatSessionRequest = {
+  requestId: string;
+  message?: string;
+  resume?: unknown;
+};
+
 export type ChatSessionAdapterOptions = {
-  request: Pick<ChatRequestMessage, 'requestId' | 'message' | 'resume'>;
+  request: ChatSessionRequest;
   setup: AgentChannelSetup;
   graphService: LocalAgentGraphService;
   isCurrent: () => boolean;
@@ -141,7 +144,8 @@ function formatToolAuthorizationNotice(event: SubagentToolEvent): string | null 
 
 export async function runChatSession(options: ChatSessionAdapterOptions): Promise<ChatSessionResult> {
   const { request, setup, graphService, isCurrent, finishInterrupted, emitEvent, emitToolEvent } = options;
-  const { requestId, message } = request;
+  const { requestId } = request;
+  const message = request.message ?? '';
 
   const threadSnapshot = await graphService.getState(setup);
   if (!isCurrent()) {

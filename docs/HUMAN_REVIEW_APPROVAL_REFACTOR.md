@@ -649,6 +649,8 @@ respond option 提交：
 
 客户端不提交 `decision`，也不提交 `effects`。
 
+local-agent server 收到 `human_review_response` 后只构造 graph resume payload；不能把它转成新的 `chat_request`，也不能为了复用 chat 入口而追加空的 `HumanMessage`。review response 是对当前 interrupt 的 resume，不是新的用户消息。
+
 ### 6.5 Graph/tool runtime resolve response
 
 graph/tool runtime 根据当前 interrupt stack frame 中 materialized 的 review payload 解析：

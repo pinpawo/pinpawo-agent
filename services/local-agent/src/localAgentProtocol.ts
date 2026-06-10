@@ -36,7 +36,6 @@ export type StudioRequestMessage = {
 export type HumanReviewResponseMessage = {
   type: 'human_review_response';
   requestId: string;
-  message: string;
   reviewId: string;
   selectedOptionId: string;
   input?: Record<string, unknown>;
@@ -286,7 +285,6 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
   }
   if (type === 'human_review_response') {
     const requestId = readString(record, 'requestId');
-    const message = readString(record, 'message');
     const reviewId = readOptionalString(record, 'reviewId');
     const selectedOptionId = readOptionalString(record, 'selectedOptionId');
     const input = readRecord(record, 'input');
@@ -294,7 +292,6 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
     return {
       type,
       requestId,
-      message: message ?? '',
       reviewId,
       selectedOptionId,
       ...(input ? { input } : {}),

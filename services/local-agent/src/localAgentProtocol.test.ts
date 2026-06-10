@@ -42,7 +42,6 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      message: '',
       reviewId: 'review-1',
       selectedOptionId: 'respond',
       input: { message: 'list files first' },

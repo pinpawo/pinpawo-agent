@@ -27,7 +27,7 @@ test('local websocket transport dispatches typed client messages and pong', asyn
       seen.push(`studio:${message.requestId}:${message.userRequest}`);
     },
     onHumanReviewResponse: (_ws, message) => {
-      seen.push(`review:${message.requestId}:${message.message}`);
+      seen.push(`review:${message.requestId}:${message.reviewId}:${message.selectedOptionId}`);
     },
     onInterruptRequest: (_ws, message) => {
       seen.push(`interrupt:${message.requestId}`);
@@ -49,7 +49,6 @@ test('local websocket transport dispatches typed client messages and pong', asyn
     requestId: 'review-1',
     reviewId: 'review-spec-1',
     selectedOptionId: 'approve',
-    message: 'approve',
   }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'interrupt_request', requestId: 'chat-1' }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'new_session', userId: 'user-1' }), handlers);
@@ -60,7 +59,7 @@ test('local websocket transport dispatches typed client messages and pong', asyn
     assert.deepEqual(seen, [
       'chat:chat-1:hi',
       'studio:studio-1:plan',
-      'review:review-1:approve',
+      'review:review-1:review-spec-1:approve',
       'interrupt:chat-1',
       'new:user-1',
     ]);

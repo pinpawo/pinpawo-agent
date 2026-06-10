@@ -38,7 +38,6 @@ test('LocalServerStudioReviewRouter routes response only when a review is pendin
   assert.equal(router.routeResponse(connection, {
     type: 'human_review_response',
     requestId: 'req-1',
-    message: 'hello',
     reviewId: 'review-1',
     selectedOptionId: 'approve',
   }, () => undefined), false);
@@ -57,7 +56,6 @@ test('LocalServerStudioReviewRouter routes response only when a review is pendin
   assert.equal(router.routeResponse(connection, {
     type: 'human_review_response',
     requestId: 'req-1',
-    message: '继续',
     reviewId: 'review-1',
     selectedOptionId: 'respond',
     input: { message: '继续' },
@@ -111,7 +109,6 @@ test('LocalServerStudioReviewRouter rejects and deletes disconnected slots', asy
   assert.equal(router.routeResponse(connection, {
     type: 'human_review_response',
     requestId: 'req-1',
-    message: 'late',
     reviewId: 'review-1',
     selectedOptionId: 'approve',
   }, () => undefined), false);

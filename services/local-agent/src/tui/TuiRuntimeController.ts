@@ -201,7 +201,6 @@ export class TuiRuntimeController {
     this.wsClient.send({
       type: 'human_review_response',
       requestId,
-      message: decision,
       reviewId,
       selectedOptionId: option.id,
       ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),

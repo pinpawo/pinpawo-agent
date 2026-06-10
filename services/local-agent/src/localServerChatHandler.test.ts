@@ -54,7 +54,6 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      message: '',
       reviewId: 'review-old',
       selectedOptionId: 'approve',
     },
@@ -189,7 +188,6 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      message: '',
       reviewId: 'review-current',
       selectedOptionId: 'respond',
       input: { message: '请先解释风险' },
@@ -260,7 +258,6 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      message: '',
       reviewId: 'review-current',
       selectedOptionId: 'approve',
     },
@@ -343,7 +340,6 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      message: '',
       reviewId: 'review-current',
       selectedOptionId: 'approve-and-authorize-thread',
     },
@@ -454,7 +450,6 @@ test('handleHumanReviewResponse does not validate authorization effect context i
     {
       type: 'human_review_response',
       requestId: 'req-1',
-      message: '',
       reviewId: 'review-current',
       selectedOptionId: 'approve-and-authorize-thread',
     },

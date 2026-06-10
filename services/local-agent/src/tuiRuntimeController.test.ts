@@ -75,7 +75,6 @@ test('TuiRuntimeController submits canonical review responses without legacy res
   assert.deepEqual(sent, [{
     type: 'human_review_response',
     requestId: 'req-1',
-    message: '请先解释风险',
     reviewId: 'review-1',
     selectedOptionId: 'respond',
     input: { message: '请先解释风险' },

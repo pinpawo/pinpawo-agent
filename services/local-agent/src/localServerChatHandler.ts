@@ -232,7 +232,7 @@ export class LocalServerChatHandler {
     await this.handleChatRequest(ws, {
       type: 'chat_request',
       requestId: msg.requestId,
-      message: msg.message,
+      message: '',
       resume: {
         reviewId: msg.reviewId,
         selectedOptionId: msg.selectedOptionId,

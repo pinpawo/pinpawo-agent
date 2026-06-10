@@ -1,16 +1,5 @@
 import { WebSocket } from 'ws';
 import { HumanMessage } from '@langchain/core/messages';
-import {
-  applyReviewEffects,
-  buildHumanReviewResume,
-  mergeToolAuthorizations,
-  resolveHumanReviewResponse,
-  ReviewEffectApplicationError,
-  ReviewResponseResolutionError,
-  type PendingReviewAction,
-  type ReviewSpec,
-  type ToolAuthorizationRecord,
-} from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
 import {
   sendLocalAgentEvent,
@@ -22,7 +11,6 @@ import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
 import { runChatSession } from './chatSessionAdapter';
-import { readPendingReviewActionFromInterruptPayload } from './chatInterrupts';
 import {
   configureInflightOperationRegistry,
   type InflightOperationRun,
@@ -34,26 +22,13 @@ import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import type { LocalAgentEvent } from './events/localAgentEvent';
-import type { AgentChannelSetup } from './agentChannel';
 
 type InflightRequest = InflightOperationRun;
 
 type PendingReviewRoute = {
   reviewId: string;
-  reviewSpec: ReviewSpec;
-  pendingAction?: PendingReviewAction;
-  setup?: AgentChannelSetup;
   sessionId?: string;
 };
-
-function readSnapshotToolAuthorizations(
-  snapshot: Awaited<ReturnType<LocalAgentGraphService['getState']>>,
-): ToolAuthorizationRecord[] {
-  const values = (snapshot as { values?: { toolAuthorizations?: unknown } }).values;
-  return Array.isArray(values?.toolAuthorizations)
-    ? values.toolAuthorizations as ToolAuthorizationRecord[]
-    : [];
-}
 
 export function isToolProtocolHistoryError(value: unknown): boolean {
   const text = value instanceof Error
@@ -83,39 +58,14 @@ export class LocalServerChatHandler {
   private recordPendingReviewRoute(
     event: LocalAgentEvent,
     deps: LocalServerDeps,
-    setup?: AgentChannelSetup,
   ) {
     if (event.type !== 'human_review.requested' || !event.review?.id) {
       return;
     }
     const sessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
-    const pendingAction = readPendingReviewAction(event);
     this.pendingReviewRoutes.set(event.requestId, {
       reviewId: event.review.id,
-      reviewSpec: event.review,
-      ...(setup ? { setup } : {}),
       ...(sessionId ? { sessionId } : {}),
-      ...(pendingAction ? { pendingAction } : {}),
-    });
-  }
-
-  private async appendToolAuthorizationsToGraphState(
-    route: PendingReviewRoute,
-    authorizations: ToolAuthorizationRecord[],
-  ) {
-    if (authorizations.length === 0) {
-      return;
-    }
-    if (!route.setup) {
-      throw new ReviewEffectApplicationError(
-        'missing_thread',
-        'Cannot apply review effects without the pending graph setup.',
-      );
-    }
-    const snapshot = await this.graphService.getState(route.setup);
-    const current = readSnapshotToolAuthorizations(snapshot);
-    await this.graphService.updateState(route.setup, {
-      toolAuthorizations: mergeToolAuthorizations(current, authorizations),
     });
   }
 
@@ -171,7 +121,7 @@ export class LocalServerChatHandler {
         isCurrent,
         finishInterrupted,
         emitEvent: (event) => {
-          this.recordPendingReviewRoute(event, deps, setup);
+          this.recordPendingReviewRoute(event, deps);
           sendLocalAgentEvent(ws, event);
         },
         emitToolEvent: (event) => {
@@ -277,68 +227,17 @@ export class LocalServerChatHandler {
       return;
     }
 
-    let canonicalResume: unknown;
-    let canonicalMessage: string;
-    try {
-      const resolution = resolveHumanReviewResponse(
-        {
-          requestId: msg.requestId,
-          reviewSpec: route.reviewSpec,
-          pendingAction: route.pendingAction,
-        },
-        {
-          reviewId: msg.reviewId,
-          selectedOptionId: msg.selectedOptionId,
-          ...(msg.input ? { input: msg.input } : {}),
-        },
-      );
-      if (resolution.effects.length > 0 && !route.pendingAction) {
-        throw new ReviewEffectApplicationError(
-          'missing_pending_action',
-          'Cannot apply review effects without a pending action.',
-        );
-      }
-      const appliedEffects = route.pendingAction
-        ? await applyReviewEffects({
-            pendingAction: route.pendingAction,
-            effects: resolution.effects,
-            toolkits: [
-              ...(deps.pluginToolkits ?? []),
-              ...(deps.localToolkits ?? []),
-            ],
-          })
-        : [];
-      await this.appendToolAuthorizationsToGraphState(route, appliedEffects);
-      for (const effect of appliedEffects) {
-        sendLocalAgentEvent(ws, {
-          type: 'system.notice',
-          requestId: msg.requestId,
-          message: `已授权当前会话中的 ${effect.toolName} 操作。`,
-        });
-      }
-      canonicalResume = buildHumanReviewResume([resolution.decision]);
-      canonicalMessage = resolution.display.userInputMessage ?? resolution.display.label;
-    } catch (error) {
-      const message = error instanceof ReviewResponseResolutionError
-        ? `这个 review 应答无效：${error.message}`
-        : error instanceof ReviewEffectApplicationError
-          ? `这个 review effect 无法应用：${error.message}`
-        : '这个 review 应答无效，请等待当前确认面板刷新后再应答。';
-      sendLocalAgentEvent(ws, {
-        type: 'error',
-        requestId: msg.requestId,
-        message,
-      });
-      return;
-    }
-
     this.pendingReviewRoutes.delete(msg.requestId);
 
     await this.handleChatRequest(ws, {
       type: 'chat_request',
       requestId: msg.requestId,
-      message: canonicalMessage,
-      resume: canonicalResume,
+      message: msg.message,
+      resume: {
+        reviewId: msg.reviewId,
+        selectedOptionId: msg.selectedOptionId,
+        ...(msg.input ? { input: msg.input } : {}),
+      },
     }, deps);
   }
 
@@ -353,16 +252,4 @@ export class LocalServerChatHandler {
       emit: (event) => sendLocalAgentEvent(ws, event),
     });
   }
-}
-
-function readPendingReviewAction(
-  event: Extract<LocalAgentEvent, { type: 'human_review.requested' }>,
-): PendingReviewAction | null {
-  const actionFromPayload = event.payload
-    ? readPendingReviewActionFromInterruptPayload(event.payload)
-    : null;
-  if (actionFromPayload) {
-    return actionFromPayload;
-  }
-  return null;
 }

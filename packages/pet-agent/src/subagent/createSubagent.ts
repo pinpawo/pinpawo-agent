@@ -51,6 +51,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
     model: input.model,
     tools: input.tools,
     systemPrompt,
+    ...(input.checkpoint ? { checkpointer: input.checkpoint } : {}),
   });
 
   let latestMessages = input.messages;
@@ -69,6 +70,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
     const stream = await agent.stream(
       { messages: input.messages },
       {
+        ...input.runnableConfig,
         signal: input.signal,
         recursionLimit: maxIterations,
         streamMode: ['values', 'tools'],

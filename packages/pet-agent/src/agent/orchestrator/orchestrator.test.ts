@@ -4,6 +4,7 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool } from '@langchain/core/tools';
 import { Command, isCommand, MemorySaver } from '@langchain/langgraph';
+import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
@@ -27,6 +28,8 @@ import {
   buildHumanReviewResume,
   readFirstHumanReviewDecision,
 } from './humanReview';
+import { buildReviewSpec } from './review/reviewSpec';
+import { isToolActionAuthorized } from './review/reviewAuthorizations';
 import {
   getMessageAnnounce,
   getMessageDelegationId,
@@ -577,6 +580,140 @@ test('toolkit review policy wraps tool calls without changing tool identity', as
   assert.equal(reviewCount, 1);
   assert.equal(callCount, 1);
   assert.equal(result, 'raw ok');
+});
+
+test('toolkit review policy records authorization through orchestrator runtime topology', async () => {
+  let runCount = 0;
+  let reviewCount = 0;
+  const rawTool = tool(async ({ command }: { command: string }) => {
+    runCount += 1;
+    return `ran ${command}`;
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [rawTool],
+    policy: {
+      toolReview: {
+        run_shell: {
+          request: ({ input, toolAuthorizations }) => {
+            const args = input as { command: string };
+            if (isToolActionAuthorized({
+              authorizations: toolAuthorizations ?? [],
+              toolName: 'run_shell',
+              args,
+            })) {
+              return null;
+            }
+            reviewCount += 1;
+            return buildReviewSpec({
+              view: { kind: 'plain', body: 'Approve shell?' },
+              options: [{
+                id: 'approve-and-authorize-thread',
+                label: 'Approve and authorize',
+                decision: { type: 'approve' },
+                effects: [{
+                  type: 'graph.authorize_tool_action',
+                  scope: 'thread',
+                  actionRef: { type: 'pending_action' },
+                  matcher: { type: 'policy_hook' },
+                }],
+              }],
+            });
+          },
+          buildAuthorizationMatcher: ({ input }) => ({
+            type: 'shell_pattern',
+            value: (input as { command: string }).command,
+          }),
+        },
+      },
+    },
+  }];
+
+  let routeCallCount = 0;
+  const routeModel = {
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_general',
+              task: 'run shell',
+              context_summary: null,
+            }
+          : {
+              action: 'finish',
+              answer: 'done',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({
+    toolCalls: [
+      [{
+        id: 'call-1',
+        name: 'run_shell',
+        args: { command: 'git status' },
+      }],
+      [{
+        id: 'call-2',
+        name: 'run_shell',
+        args: { command: 'git status' },
+      }],
+      [],
+    ],
+  });
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: subagentModel,
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const config = {
+    configurable: {
+      thread_id: 'canonical-review-runtime-auth',
+      actor: testActor,
+      capabilities: [],
+      toolkits,
+    },
+  };
+  const input = buildOrchestratorTurnInput([new HumanMessage('run git status')]);
+
+  const interrupted = await graph.invoke(input, config) as { __interrupt__?: Array<{ value?: unknown }> };
+  const payload = interrupted.__interrupt__?.[0]?.value as {
+    review?: { id?: string };
+  } | undefined;
+  assert.equal(payload?.review?.id, 'tool-review:run_shell:call-1');
+  assert.equal(reviewCount, 1);
+
+  subagentModel.index = 0;
+  const finalState = await graph.invoke(new Command({
+    resume: {
+      reviewId: payload?.review?.id,
+      selectedOptionId: 'approve-and-authorize-thread',
+    },
+  }), config) as {
+    __interrupt__?: unknown;
+    toolAuthorizations: Array<{ toolName: string; matcher: unknown; createdAt: string }>;
+  };
+
+  assert.equal(finalState.__interrupt__, undefined);
+  assert.deepEqual(finalState.toolAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
+    toolName: 'run_shell',
+    matcher: { type: 'shell_pattern', value: 'git status' },
+  }]);
+  assert.equal(reviewCount, 2);
+  assert.equal(runCount, 1);
 });
 
 test('human review helpers use structured decisions', () => {

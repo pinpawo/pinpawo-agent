@@ -5,6 +5,7 @@ import type {
   ReviewResponse,
   ReviewResponseResolution,
 } from './reviewSpec';
+import { readFirstHumanReviewDecision } from '../humanReview';
 
 export type ReviewResponseResolutionErrorCode =
   | 'stale_review'
@@ -12,7 +13,8 @@ export type ReviewResponseResolutionErrorCode =
   | 'unexpected_input'
   | 'missing_input'
   | 'invalid_input'
-  | 'invalid_effect';
+  | 'invalid_effect'
+  | 'invalid_response';
 
 export class ReviewResponseResolutionError extends Error {
   readonly code: ReviewResponseResolutionErrorCode;
@@ -75,6 +77,43 @@ function validateEffects(option: ReviewOption, effects: ReviewEffect[]) {
   }
 }
 
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readReviewResponse(value: unknown): ReviewResponse | null {
+  const record = readRecord(value);
+  if (!record) return null;
+  const reviewId = typeof record.reviewId === 'string' && record.reviewId.trim()
+    ? record.reviewId.trim()
+    : null;
+  const selectedOptionId = typeof record.selectedOptionId === 'string' && record.selectedOptionId.trim()
+    ? record.selectedOptionId.trim()
+    : null;
+  const input = readRecord(record.input);
+  return reviewId && selectedOptionId
+    ? {
+        reviewId,
+        selectedOptionId,
+        ...(input ? { input } : {}),
+      }
+    : null;
+}
+
+function hasCanonicalReviewResponseFields(value: unknown) {
+  const record = readRecord(value);
+  return Boolean(
+    record
+      && (
+        Object.prototype.hasOwnProperty.call(record, 'reviewId')
+        || Object.prototype.hasOwnProperty.call(record, 'selectedOptionId')
+        || Object.prototype.hasOwnProperty.call(record, 'input')
+      ),
+  );
+}
+
 export function resolveHumanReviewResponse(
   pendingReview: PendingReviewState,
   response: ReviewResponse,
@@ -126,6 +165,59 @@ export function resolveHumanReviewResponse(
     effects,
     display: {
       label: option.label,
+    },
+  };
+}
+
+function formatLegacyDecisionLabel(decision: ReviewResponseResolution['decision']) {
+  if (decision.type === 'approve') return 'Approve';
+  if (decision.type === 'reject') return decision.message ?? 'Reject';
+  if (decision.type === 'edit') return 'Edit';
+  return decision.message;
+}
+
+export function resolveHumanReviewResume(
+  pendingReview: PendingReviewState,
+  resume: unknown,
+): ReviewResponseResolution {
+  const response = readReviewResponse(resume);
+  if (response) {
+    return resolveHumanReviewResponse(pendingReview, response);
+  }
+
+  if (hasCanonicalReviewResponseFields(resume)) {
+    throw new ReviewResponseResolutionError(
+      'invalid_response',
+      `Review resume for pending review "${pendingReview.reviewSpec.id}" is an invalid canonical response.`,
+    );
+  }
+
+  const decision = readFirstHumanReviewDecision(resume);
+  if (!decision) {
+    throw new ReviewResponseResolutionError(
+      'invalid_response',
+      `Review resume for pending review "${pendingReview.reviewSpec.id}" is not a canonical response or legacy decision.`,
+    );
+  }
+  if (decision.type === 'edit') {
+    return {
+      reviewId: pendingReview.reviewSpec.id,
+      optionId: 'legacy.edit',
+      decision,
+      effects: [],
+      display: {
+        label: 'Edit',
+      },
+    };
+  }
+  return {
+    reviewId: pendingReview.reviewSpec.id,
+    optionId: `legacy.${decision.type}`,
+    decision,
+    effects: [],
+    display: {
+      label: formatLegacyDecisionLabel(decision),
+      ...(decision.type === 'respond' ? { userInputMessage: decision.message } : {}),
     },
   };
 }

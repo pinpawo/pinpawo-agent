@@ -106,6 +106,16 @@ function stableJson(value: unknown) {
   );
 }
 
+function toolAuthorizationKey(rule: ToolAuthorizationRecord) {
+  const matcher = readToolAuthorizationMatcher(rule.matcher);
+  if (!matcher) {
+    return null;
+  }
+  return matcher.type === 'shell_pattern'
+    ? `${rule.toolName}:shell_pattern:${matcher.value}`
+    : `${rule.toolName}:exact_args:${stableJson(matcher.value)}`;
+}
+
 function matchesAuthorizationRule(rule: ToolAuthorizationRecord, params: {
   toolName: string;
   args: Record<string, unknown>;
@@ -162,7 +172,24 @@ export function mergeToolAuthorizations(
   current: ToolAuthorizationRecord[] | null | undefined,
   next: ToolAuthorizationRecord[],
 ) {
-  return [...(current ?? []), ...next];
+  const merged: ToolAuthorizationRecord[] = [];
+  const seen = new Set<string>();
+
+  for (const rule of [...(current ?? []), ...next]) {
+    const matcher = readToolAuthorizationMatcher(rule.matcher);
+    if (!matcher) {
+      continue;
+    }
+    const normalized = { ...rule, matcher };
+    const key = toolAuthorizationKey(normalized);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(normalized);
+  }
+
+  return merged;
 }
 
 function findReviewPolicy(toolkits: AgentToolkit[], toolName: string): {

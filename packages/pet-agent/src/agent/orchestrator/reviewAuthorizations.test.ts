@@ -4,6 +4,7 @@ import {
   applyReviewEffects,
   authorizeToolAction,
   isToolActionAuthorized,
+  mergeToolAuthorizations,
   readToolAuthorizationMatcher,
   ReviewEffectApplicationError,
 } from './review/reviewAuthorizations';
@@ -130,4 +131,49 @@ test('authorizeToolAction validates matcher shape before storing state', () => {
     }),
     false,
   );
+});
+
+test('mergeToolAuthorizations appends unique records and dedupes matcher keys', () => {
+  const merged = mergeToolAuthorizations(
+    [{
+      toolName: 'run_shell',
+      matcher: { type: 'shell_pattern', value: ' git   status ' },
+      createdAt: '2026-06-09T00:00:00.000Z',
+    }],
+    [
+      {
+        toolName: 'run_shell',
+        matcher: { type: 'shell_pattern', value: 'git status' },
+        createdAt: '2026-06-09T00:00:01.000Z',
+      },
+      {
+        toolName: 'run_shell',
+        matcher: { type: 'shell_pattern', value: 'git push' },
+        createdAt: '2026-06-09T00:00:02.000Z',
+      },
+      {
+        toolName: 'read_file',
+        matcher: { type: 'exact_args', value: { path: 'README.md' } },
+        createdAt: '2026-06-09T00:00:03.000Z',
+      },
+    ],
+  );
+
+  assert.deepEqual(merged, [
+    {
+      toolName: 'run_shell',
+      matcher: { type: 'shell_pattern', value: 'git status' },
+      createdAt: '2026-06-09T00:00:00.000Z',
+    },
+    {
+      toolName: 'run_shell',
+      matcher: { type: 'shell_pattern', value: 'git push' },
+      createdAt: '2026-06-09T00:00:02.000Z',
+    },
+    {
+      toolName: 'read_file',
+      matcher: { type: 'exact_args', value: { path: 'README.md' } },
+      createdAt: '2026-06-09T00:00:03.000Z',
+    },
+  ]);
 });

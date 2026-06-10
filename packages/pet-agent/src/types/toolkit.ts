@@ -17,6 +17,7 @@ export type ToolkitContext = {
   messages: BaseMessage[];
   execution?: AgentExecution;
   toolAuthorizations?: ToolAuthorizationRecord[];
+  recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;
 };
 
 export type ToolkitResource<T> = T | ((ctx: ToolkitContext) => T | Promise<T>);

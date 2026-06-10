@@ -93,3 +93,20 @@ test('TuiRuntimeController blocks empty required review input', () => {
   assert.deepEqual(sent, []);
   assert.equal(actions.some((action) => action.type === 'history.append'), true);
 });
+
+test('TuiRuntimeController interrupts pending human review instead of dismissing it locally', () => {
+  const { controller, actions, sent } = createController(pendingReviewState());
+
+  const submitted = controller.requestInterrupt();
+
+  assert.equal(submitted, true);
+  assert.deepEqual(sent, [{
+    type: 'interrupt_request',
+    requestId: 'req-1',
+  }]);
+  assert.deepEqual(actions.find((action) => action.type === 'run.interrupting'), {
+    type: 'run.interrupting',
+    requestId: 'req-1',
+    statusMessage: '正在打断',
+  });
+});

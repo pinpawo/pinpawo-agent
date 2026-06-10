@@ -386,7 +386,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         ? {
             ...session,
             activeRun: {
-              ...session.activeRun,
+              ...clearPendingReview(session.activeRun),
               phase: 'interrupting',
             },
           }
@@ -572,10 +572,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       return finishRun(state, action.requestId, action.statusMessage, [
         historyDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.historyCell, `${action.requestId}:studio-error`),
       ]);
-
-    case 'review.dismiss': {
-      return finishRun(state, action.requestId, action.statusMessage);
-    }
 
     default:
       return state;

@@ -8,7 +8,7 @@
 
 这份文档用于重新设计 human review approval 的数据模型和端到端交互流程。
 
-当前 PR #76 尝试把 `/allow` 这种文本魔法改成 typed resume extras，方向是正确的，但也暴露出更大的架构问题：toolkit review policy、graph checkpoint/state、WebSocket 协议、TUI approval UI 之间的边界不清晰。
+当前 PR #76 尝试把 `/allow` 这种文本魔法改成 typed resume extras，方向是正确的，但也暴露出更大的架构问题：toolkit review policy、LangGraph interrupt/checkpoint、graph 业务 state、WebSocket 协议、TUI approval UI 之间的边界不清晰。
 
 重构目标不是只修 `ApprovalPanel.tsx`，而是建立一个简单、可扩展、可验证的 review 交互协议：
 
@@ -17,8 +17,9 @@
 - UI 只负责渲染 view 和 options。
 - 用户 response 只提交 option id 和必要输入。
 - graph/tool runtime 根据当前 interrupt payload / `ReviewResolutionContext` 解析 decision 和 review effects。
-- authorization state 写入 graph state/checkpoint，由 tool review policy 在下一次 tool call 前读取。
+- authorization state 写入 graph 业务 state，并随 checkpoint 持久化，由 tool review policy 在下一次 tool call 前读取。
 - local-agent server 只做 transport/session 连接，不拥有 shell 授权语义。
+- pending review 控制态由 LangGraph interrupt/checkpoint 拥有，不复制进普通 graph 业务 state。
 
 ## 2. 当前问题
 
@@ -101,7 +102,7 @@ type ReviewSpec = {
 - option 选择后对应的 decision。
 - option 可能附带的 review effects。
 
-`ReviewSpec.id` 是一次 pending review 的身份标识，由 graph/tool runtime 在 materialize 并校验 spec 后生成。只要 review 内容发生变化，或者 graph 进入下一次 human review，就必须生成新的 `ReviewSpec.id`。`schemaVersion` 只表示 ReviewSpec 协议版本，不用于 stale 校验；V1 使用 `schemaVersion: 1`，但类型保持 `number`，V2 出现时不需要让所有 producer 端字面量类型断裂。V1 不引入 `reviewVersion`。
+`ReviewSpec.id` 是一次 pending review 的身份标识，由 graph/tool runtime 在触发 interrupt 前 materialize 并校验 spec 后生成。这个 id 必须由当前 interrupt 的稳定上下文派生，例如 tool review 用 `tool_call_id` / pending action id，iteration-limit 用 gate 上下文；不能在 replay 时重新 `randomUUID()`。只要 review 内容发生变化，或者 graph 进入下一次 human review，就必须生成新的 `ReviewSpec.id`。`schemaVersion` 只表示 ReviewSpec 协议版本，不用于 stale 校验；V1 使用 `schemaVersion: 1`，但类型保持 `number`，V2 出现时不需要让所有 producer 端字面量类型断裂。V1 不引入 `reviewVersion`。
 
 ### 3.2 Options 可以静态或动态生成，但传输时必须 materialize
 
@@ -145,14 +146,14 @@ UI 不应该知道：
 
 “本会话授权”这种状态要跟 graph thread/checkpoint 走。local-agent server/TUI 不应该拥有 shell authorization store，也不应该把 authorization 当成 WebSocket extras 处理。
 
-授权状态的 owner 应该是 graph/tool runtime：
+授权状态的 owner 应该是 graph/tool runtime，具体落在 graph 业务 state 中，并随 checkpoint 持久化：
 
 - tool review policy 在 tool 执行前读取 graph state 里的 authorizations。
 - 未命中 authorization 时，tool review policy 生成 `ReviewSpec` 并触发 interrupt。
 - graph resume 后，根据 selected option 对应的 effect 更新 graph state。
 - 当前 tool call 继续按 selected option 的 decision 执行。
 
-这样 TUI、Studio、App 都只是 review UI。无论用户从哪个客户端批准，authorization 都落在同一个 graph thread/checkpoint 上。
+这样 TUI、Studio、App 都只是 review UI。无论用户从哪个客户端批准，authorization 都落在同一个 graph thread 的业务 state 中，并由 checkpoint 持久化。
 
 ### 3.5 `message` 不驱动行为
 
@@ -182,10 +183,10 @@ UI 不应该知道：
 | 对象 | Owner | 可读方 | 不允许做的事 |
 | --- | --- | --- | --- |
 | `ReviewSpec` | trusted review producer + graph runtime materializer | UI、transport、graph runtime | UI 不修改、不补全 option |
-| current review payload / `ReviewResolutionContext` | LangGraph interrupt/checkpoint + graph/tool runtime stack frame | graph/tool runtime | client 不提交 pending action |
+| current review payload / `ReviewResolutionContext` | LangGraph interrupt/checkpoint + graph/tool runtime stack frame | graph/tool runtime | client 不提交 pending action；runtime 不复制进普通 graph state |
 | `HumanReviewResponseMessage` | client transport | local-agent server、graph/tool runtime | client 不提交 decision/effects/sessionId |
 | `ReviewResponseResolution` | graph/tool runtime resolver | graph/tool runtime | transport 不解析 tool args |
-| authorization state | graph state/checkpoint | tool review policy / wrapper | local-agent server 不保存 authorization store |
+| authorization state | graph business state, persisted by checkpoint | tool review policy / wrapper | local-agent server 不保存 authorization store |
 | request/session/thread route | local-agent server runtime metadata | local-agent server | client extras 不参与证明路由 |
 
 这张表是实现边界：如果某层需要读表中“不允许做”的字段，说明设计正在回退到旧耦合。
@@ -275,7 +276,7 @@ V1 response 不携带 `schemaVersion`，也不携带 `reviewVersion`。stale 校
 V1 field ownership：
 
 - `requestId`：transport route key，由 server 建立 request -> session/thread metadata。
-- `reviewId`：pending review key，由 graph/tool runtime 在 interrupt payload 中 materialize，并由 LangGraph checkpoint 持有当前 pending review 的控制态。local-agent server 也应该在 route metadata 中缓存 `requestId -> reviewId`，client 提交时先做 fast-path stale 校验；graph/tool runtime 仍然必须做权威校验。
+- `reviewId`：pending review key，由 graph/tool runtime 在 interrupt payload 中 materialize，并由 LangGraph interrupt/checkpoint 持有当前 pending review 的控制态。local-agent server 也应该在 route metadata 中缓存 `requestId -> reviewId`，client 提交时先做 fast-path stale 校验；graph/tool runtime 仍然必须做权威校验。
 - `selectedOptionId`：用户选择的 option key。
 - `input`：selected option 声明过的用户输入；V1 只支持 `respond` 的 `input.message`。
 
@@ -391,7 +392,7 @@ type ToolAuthorizationMatcherHook = (ctx: {
 
 ### 5.3 Authorization state
 
-authorization state 应该进入 graph state/checkpoint，而不是 local-agent server 的外部 map。
+authorization state 应该进入 graph 业务 state，并随 checkpoint 持久化，而不是 local-agent server 的外部 map。
 
 V1 可以定义一个窄状态：
 
@@ -566,6 +567,8 @@ toolkit policy / model / function 生成 review request 时，最终要经过 tr
 ### 6.2 Pending review 由 interrupt/checkpoint 持有
 
 graph/tool runtime 在触发 `interrupt()` 前，需要 materialize 当前 review payload。LangGraph interrupt/checkpoint 自己会持有“当前卡在哪个 review、resume 要回到哪个 stack frame”这类控制态；不要再把同一份 pending review 复制到普通 graph state channel。
+
+这里需要和 authorization state 明确区分：pending review 是当前暂停点的控制流状态，owner 是 LangGraph interrupt/checkpoint；authorization 是用户批准后留下的长期运行策略，owner 是 graph 业务 state。为了解决 stale review 循环，应该让 `ReviewSpec.id` 稳定、让 resume 回到同一个 interrupt stack frame，而不是新增一个 `pendingReviewState` channel。
 
 ```ts
 type ReviewResolutionContext = {
@@ -760,7 +763,7 @@ V1 需要明确几个运行时边界：
 
 V1 cancellation 默认策略：
 
-- 用户主动 `/interrupt`：如果当前 session/thread 有 pending review，server 应 resume 当前 review 为 reject，例如 `{ type: 'reject', message: 'interrupted by user' }`，并清理本地 active run 状态。
+- 用户主动 `/interrupt`、TUI approval 面板中按 Esc、或 pending review 期间按 Ctrl+C：如果当前 session/thread 有 pending review，server 应 resume 当前 review 为 reject，例如 `{ type: 'reject', message: 'interrupted by user' }`，并清理本地 active run 状态。TUI 不能只本地关闭 approval 面板，因为 graph checkpoint 仍然停在同一个 interrupt。
 - WebSocket 断开：默认保留 graph checkpoint 中的 pending review，不自动 reject。下次客户端连接并恢复同一 session/thread 时，server 应重新发送当前 pending `ReviewSpec`。
 - TUI 进程崩溃或 local-agent 重启：只要 graph checkpoint 仍存在，pending review 继续保留；启动后通过 session/thread recovery 重新发现并展示。只有用户明确中断或 session 被显式删除时，才 resume reject 或删除对应 checkpoint。
 

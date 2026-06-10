@@ -200,7 +200,7 @@ export function TuiApp(props: { actorId: string }) {
 
     switch (action.type) {
       case 'global.ctrl_c':
-        if (busy) {
+        if (busy || pendingApproval) {
           const nowMs = Date.now();
           if (nowMs - lastInterruptAtRef.current < 1200) {
             appendMessage('system', TUI_TEXT.secondCtrlCExit);
@@ -239,12 +239,6 @@ export function TuiApp(props: { actorId: string }) {
         }
         return;
       }
-
-      case 'approval.dismiss':
-        if (pendingApproval) {
-          runtimeController.dismissReview(pendingApproval.requestId);
-        }
-        return;
 
       case 'resume.previous':
         moveResumeSelection(-1);

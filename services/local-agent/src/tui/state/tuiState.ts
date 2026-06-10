@@ -205,11 +205,6 @@ export type TuiAction =
       message: string;
       historyCell: HistoryCellMeta;
       statusMessage: string;
-    }
-  | {
-      type: 'review.dismiss';
-      requestId: RunId;
-      statusMessage: string;
     };
 
 export function createInitialTuiState(defaultSession: SessionModel): TuiState {

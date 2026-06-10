@@ -6,7 +6,6 @@ import type { ReviewSpec } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
-import { isHumanReviewInterruptPayload, readPendingInterrupt } from './chatInterrupts';
 import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
 import type { LocalServerDeps } from './localServerTypes';
@@ -33,7 +32,7 @@ export type ActivePendingReview = {
 };
 
 export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'deleteThread'>;
-type TuiSessionGraphService = Pick<LocalAgentGraphService, 'getState'>;
+type TuiSessionGraphService = Pick<LocalAgentGraphService, 'readThreadMessages' | 'readThreadState'>;
 
 export function readTuiHistoryMessages(messages: BaseMessage[]): TuiHistoryMessage[] {
   return messages.flatMap((message) => {
@@ -72,11 +71,6 @@ export function summarizeTuiHistoryMessages(
     messageCount: messages.length,
     updatedAt,
   };
-}
-
-function readSnapshotMessages(snapshot: Awaited<ReturnType<LocalAgentGraphService['getState']>>) {
-  const values = (snapshot as { values?: { messages?: BaseMessage[] } }).values;
-  return Array.isArray(values?.messages) ? values.messages : [];
 }
 
 export class LocalServerTuiSessionService {
@@ -159,8 +153,8 @@ export class LocalServerTuiSessionService {
   ) {
     const ctx = await this.loadContext(deps.actorId);
     const setup = this.buildChatSetup(deps, ctx, session.threadId);
-    const snapshot = await this.graphService.getState(setup);
-    return readTuiHistoryMessages(readSnapshotMessages(snapshot));
+    const messages = await this.graphService.readThreadMessages(setup);
+    return readTuiHistoryMessages(messages);
   }
 
   updateSessionSummaryFromHistory(
@@ -185,14 +179,13 @@ export class LocalServerTuiSessionService {
     const session = this.getActiveSession(deps.actorId);
     const ctx = await this.loadContext(deps.actorId);
     const setup = this.buildChatSetup(deps, ctx, session.threadId);
-    const snapshot = await this.graphService.getState(setup);
-    const pendingInterrupt = readPendingInterrupt(snapshot);
-    if (!pendingInterrupt || !isHumanReviewInterruptPayload(pendingInterrupt)) {
+    const threadState = await this.graphService.readThreadState(setup);
+    if (!threadState.pendingHumanReview) {
       return null;
     }
     return {
       sessionId: session.id,
-      review: pendingInterrupt.review,
+      review: threadState.pendingHumanReview.review,
     };
   }
 

@@ -16,7 +16,7 @@ import {
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
 import type { StreamToolsPayload } from './agentStreamEvents';
-import { runChatSession } from './chatSessionAdapter';
+import { runChatSession, type ChatSessionRequest } from './chatSessionAdapter';
 import type { LocalAgentGraphService } from './agentGraphService';
 import {
   configureInflightOperationRegistry,
@@ -31,11 +31,7 @@ type InflightRequest = InflightOperationRun;
 type LoadContext = (actorId: string) => Promise<AgentContext>;
 type RunChatSession = typeof runChatSession;
 type BuildChatSetup = typeof buildLocalChatAgentInput;
-type AppChatRunRequest = {
-  requestId: string;
-  message?: string;
-  resume?: unknown;
-};
+type AppChatRunRequest = ChatSessionRequest;
 type AppChatRunSource =
   | { type: 'chat_request' }
   | { type: 'human_review_response'; reviewId: string; selectedOptionId: string }
@@ -143,6 +139,7 @@ export class LocalAgentAppChatHandler {
 
     this.consumePendingReviewRoute(msg.requestId);
     await this.runChatRequest(ws, {
+      kind: 'resume',
       requestId: msg.requestId,
       resume: {
         reviewId: msg.reviewId,
@@ -177,7 +174,11 @@ export class LocalAgentAppChatHandler {
     await this.sessionResetPromise;
     if (!this.canUseSocket(ws)) return;
 
-    await this.runChatRequest(ws, msg, userId, { type: 'chat_request' });
+    await this.runChatRequest(ws, {
+      kind: 'user_message',
+      requestId,
+      message,
+    }, userId, { type: 'chat_request' });
   }
 
   private async handlePendingReviewInterrupt(
@@ -201,6 +202,7 @@ export class LocalAgentAppChatHandler {
 
     this.consumePendingReviewRoute(msg.requestId);
     await this.runChatRequest(ws, {
+      kind: 'resume',
       requestId: msg.requestId,
       resume: {
         reviewId: route.reviewId,
@@ -220,7 +222,7 @@ export class LocalAgentAppChatHandler {
     source: AppChatRunSource,
   ) {
     const { requestId } = request;
-    const message = request.message ?? '';
+    const message = request.kind === 'user_message' ? request.message : '';
 
     if (source.type === 'chat_request') {
       console.log(`[local-agent] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);

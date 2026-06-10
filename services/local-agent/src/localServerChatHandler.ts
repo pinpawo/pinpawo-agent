@@ -141,7 +141,11 @@ export class LocalServerChatHandler {
     msg: ChatRequestMessage,
     deps: LocalServerDeps,
   ) {
-    return this.runChatRequest(ws, msg, deps, { type: 'chat_request' });
+    return this.runChatRequest(ws, {
+      kind: 'user_message',
+      requestId: msg.requestId,
+      message: msg.message,
+    }, deps, { type: 'chat_request' });
   }
 
   private async runChatRequest(
@@ -151,7 +155,7 @@ export class LocalServerChatHandler {
     source: LocalServerRunSource,
   ) {
     const { requestId } = request;
-    const message = request.message ?? '';
+    const message = request.kind === 'user_message' ? request.message : '';
 
     if (source.type === 'chat_request') {
       console.log(`[local-server] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
@@ -316,6 +320,7 @@ export class LocalServerChatHandler {
     this.consumedPendingReviewRequestIds.add(msg.requestId);
 
     await this.runChatRequest(ws, {
+      kind: 'resume',
       requestId: msg.requestId,
       resume: {
         reviewId: msg.reviewId,
@@ -378,6 +383,7 @@ export class LocalServerChatHandler {
     );
 
     await this.runChatRequest(ws, {
+      kind: 'resume',
       requestId: msg.requestId,
       resume: {
         reviewId: route.reviewId,

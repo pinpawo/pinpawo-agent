@@ -85,17 +85,12 @@ test('LocalServerTuiSessionService reads active pending review from checkpoint i
     saveState: () => {},
     checkpointer,
     graphService: {
-      getState: async (setup: { input: { threadId?: string } }) => {
+      readThreadState: async (setup: { input: { threadId?: string } }) => {
         capturedThreadId = setup.input.threadId;
         return {
-          tasks: [{
-            interrupts: [{
-              value: {
-                kind: 'review',
-                review,
-              },
-            }],
-          }],
+          messages: [],
+          pendingHumanReview: { review },
+          hasPendingContinuation: true,
         };
       },
     } as never,

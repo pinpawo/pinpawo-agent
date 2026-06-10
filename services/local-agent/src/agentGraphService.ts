@@ -1,11 +1,14 @@
 import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
+  isHumanReviewInterruptPayload,
   runAgent,
   type AgentRunResult,
   type OrchestratorGraph,
   type OrchestratorStateType,
+  type ReviewSpec,
 } from '@pinpawo/pet-agent';
+import type { BaseMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 import type { ZodType } from 'zod';
 import type { AgentChannelSetup } from './agentChannel';
@@ -25,6 +28,61 @@ function buildConfigurable(setup: AgentChannelSetup) {
     configurable[LOCAL_AGENT_INTERFACE_CONFIG_KEY] = setup.interfaceContext;
   }
   return Object.keys(configurable).length > 0 ? configurable : undefined;
+}
+
+export type LocalAgentGraphPendingHumanReview = {
+  review: ReviewSpec;
+};
+
+export type LocalAgentGraphThreadState = {
+  messages: BaseMessage[];
+  pendingHumanReview: LocalAgentGraphPendingHumanReview | null;
+  hasPendingContinuation: boolean;
+};
+
+function readSnapshotMessages(snapshot: unknown): BaseMessage[] {
+  const values = (snapshot as { values?: { messages?: unknown } } | null)?.values;
+  const messages = values?.messages;
+  return Array.isArray(messages) ? messages as BaseMessage[] : [];
+}
+
+function readPendingInterrupt(snapshot: unknown): Record<string, unknown> | null {
+  const tasks = Array.isArray((snapshot as { tasks?: unknown } | null)?.tasks)
+    ? (snapshot as { tasks: unknown[] }).tasks
+    : [];
+  for (const task of tasks) {
+    if (!task || typeof task !== 'object') continue;
+    const interrupts = Array.isArray((task as { interrupts?: unknown }).interrupts)
+      ? (task as { interrupts: unknown[] }).interrupts
+      : [];
+    const first = interrupts[0];
+    if (first && typeof first === 'object' && 'value' in first && first.value && typeof first.value === 'object') {
+      return first.value as Record<string, unknown>;
+    }
+  }
+  return null;
+}
+
+function hasPendingContinuation(snapshot: unknown) {
+  const record = snapshot && typeof snapshot === 'object'
+    ? snapshot as { next?: unknown; tasks?: unknown }
+    : null;
+  const next = Array.isArray(record?.next) ? record.next : [];
+  if (next.length > 0) {
+    return true;
+  }
+  const tasks = Array.isArray(record?.tasks) ? record.tasks : [];
+  return tasks.length > 0;
+}
+
+function readPendingHumanReview(snapshot: unknown): LocalAgentGraphPendingHumanReview | null {
+  const pendingInterrupt = readPendingInterrupt(snapshot);
+  if (!pendingInterrupt || !isHumanReviewInterruptPayload(pendingInterrupt)) {
+    return null;
+  }
+  return {
+    review: pendingInterrupt.review,
+  };
 }
 
 export class LocalAgentGraphService {
@@ -71,11 +129,25 @@ export class LocalAgentGraphService {
     ) as OrchestratorStateType;
   }
 
-  async getState(setup: AgentChannelSetup) {
+  private async getRawState(setup: AgentChannelSetup) {
     const graph = this.getGraph(setup);
     return graph.getState({
       configurable: buildConfigurable(setup),
     });
+  }
+
+  async readThreadState(setup: AgentChannelSetup): Promise<LocalAgentGraphThreadState> {
+    const snapshot = await this.getRawState(setup);
+    return {
+      messages: readSnapshotMessages(snapshot),
+      pendingHumanReview: readPendingHumanReview(snapshot),
+      hasPendingContinuation: hasPendingContinuation(snapshot),
+    };
+  }
+
+  async readThreadMessages(setup: AgentChannelSetup): Promise<BaseMessage[]> {
+    const state = await this.readThreadState(setup);
+    return state.messages;
   }
 
   async updateState(

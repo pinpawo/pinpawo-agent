@@ -211,7 +211,7 @@ test('LocalAgentAppChatHandler resumes canonical human review responses through 
   const { handler, ws, sent, buildInputs } = createHandler({
     runChat: async (options) => {
       runRequests.push(options.request);
-      if (options.request.resume === undefined) {
+      if (options.request.kind === 'user_message') {
         options.emitEvent({
           type: 'human_review.requested',
           requestId: 'req-1',
@@ -244,12 +244,12 @@ test('LocalAgentAppChatHandler resumes canonical human review responses through 
 
   assert.deepEqual(runRequests, [
     {
-      type: 'chat_request',
+      kind: 'user_message',
       requestId: 'req-1',
       message: 'hello',
-      userId: 'user-1',
     },
     {
+      kind: 'resume',
       requestId: 'req-1',
       resume: {
         reviewId: 'review-1',
@@ -284,7 +284,7 @@ test('LocalAgentAppChatHandler interrupts pending human review with canonical re
   const { handler, ws } = createHandler({
     runChat: async (options) => {
       runRequests.push(options.request);
-      if (options.request.resume === undefined) {
+      if (options.request.kind === 'user_message') {
         options.emitEvent({
           type: 'human_review.requested',
           requestId: 'req-1',
@@ -309,12 +309,12 @@ test('LocalAgentAppChatHandler interrupts pending human review with canonical re
 
   assert.deepEqual(runRequests, [
     {
-      type: 'chat_request',
+      kind: 'user_message',
       requestId: 'req-1',
       message: 'hello',
-      userId: 'user-1',
     },
     {
+      kind: 'resume',
       requestId: 'req-1',
       resume: {
         reviewId: 'review-1',

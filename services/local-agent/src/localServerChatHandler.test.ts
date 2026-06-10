@@ -128,11 +128,13 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
 
   assert.equal(handleChatCalls.length, 1, 'matching review response should be forwarded once');
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
+    kind: string;
     requestId: string;
     resume?: unknown;
   };
   const forwardedSource = (handleChatCalls[0] as unknown[])[3];
   assert.deepEqual(forwardedMessage, {
+    kind: 'resume',
     requestId: 'req-1',
     resume: {
       reviewId: 'review-current',
@@ -200,10 +202,12 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
   assert.equal(sentEvents.length, 0);
   assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
+    kind: string;
     requestId: string;
     resume?: unknown;
   };
   assert.deepEqual(forwardedMessage, {
+    kind: 'resume',
     requestId: 'req-1',
     resume: {
       reviewId: 'review-current',
@@ -277,11 +281,13 @@ test('handleInterruptRequest resumes pending review with canonical reject option
   assert.equal(sentEvents.length, 0);
   assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
+    kind: string;
     requestId: string;
     resume?: unknown;
   };
   const forwardedSource = (handleChatCalls[0] as unknown[])[3];
   assert.deepEqual(forwardedMessage, {
+    kind: 'resume',
     requestId: 'req-1',
     resume: {
       reviewId: 'review-current',
@@ -364,11 +370,13 @@ test('handleInterruptRequest recovers missing route from active checkpoint revie
   assert.equal(sentEvents.length, 0);
   assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
+    kind: string;
     requestId: string;
     resume?: unknown;
   };
   const forwardedSource = (handleChatCalls[0] as unknown[])[3];
   assert.deepEqual(forwardedMessage, {
+    kind: 'resume',
     requestId: 'req-1',
     resume: {
       reviewId: 'review-current',
@@ -515,10 +523,12 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
   assert.equal(sentEvents.length, 0);
   assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
+    kind: string;
     resume?: unknown;
   };
   const forwardedSource = (handleChatCalls[0] as unknown[])[3];
   assert.deepEqual(forwardedMessage, {
+    kind: 'resume',
     requestId: 'req-1',
     resume: {
       reviewId: 'review-current',
@@ -605,7 +615,6 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
 
   const handler = new LocalServerChatHandler({
     graphService: {
-      getState: async () => ({ values: { toolAuthorizations: [] } }),
       updateState: async (...args: unknown[]) => {
         updateStateCalls.push(args);
       },
@@ -686,10 +695,12 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
   assert.equal(handleChatCalls.length, 1);
   assert.equal(updateStateCalls.length, 0);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
+    kind: string;
     resume?: unknown;
   };
   const forwardedSource = (handleChatCalls[0] as unknown[])[3];
   assert.deepEqual(forwardedMessage, {
+    kind: 'resume',
     requestId: 'req-1',
     resume: {
       reviewId: 'review-current',
@@ -724,7 +735,6 @@ test('handleHumanReviewResponse does not validate authorization effect context i
 
   const handler = new LocalServerChatHandler({
     graphService: {
-      getState: async () => ({ values: { toolAuthorizations: [] } }),
       updateState: async (...args: unknown[]) => {
         updateStateCalls.push(args);
       },

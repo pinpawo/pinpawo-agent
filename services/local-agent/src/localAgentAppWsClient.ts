@@ -3,6 +3,7 @@ import {
   parseLocalAgentClientMessage,
   sendLocalAgentMessage,
   type ChatRequestMessage,
+  type HumanReviewResponseMessage,
   type InterruptRequestMessage,
   type NewSessionMessage,
 } from './localAgentProtocol';
@@ -16,6 +17,7 @@ export type LocalAgentAppWsClientHandlers = {
   onChatRequest: (ws: WebSocket, message: ChatRequestMessage) => MaybePromise<void>;
   onNewSession: (ws: WebSocket, message: NewSessionMessage) => MaybePromise<void>;
   onInterruptRequest: (ws: WebSocket, message: InterruptRequestMessage) => MaybePromise<void>;
+  onHumanReviewResponse: (ws: WebSocket, message: HumanReviewResponseMessage) => MaybePromise<void>;
   onClose: (ws: WebSocket) => MaybePromise<void>;
 };
 
@@ -67,6 +69,8 @@ export function dispatchLocalAgentAppWebSocketMessage(
       runHandler('handleNewSession', () => handlers.onNewSession(ws, msg), logError);
     } else if (msg.type === 'interrupt_request') {
       runHandler('handleInterruptRequest', () => handlers.onInterruptRequest(ws, msg), logError);
+    } else if (msg.type === 'human_review_response') {
+      runHandler('handleHumanReviewResponse', () => handlers.onHumanReviewResponse(ws, msg), logError);
     } else if (msg.type === 'ping') {
       sendLocalAgentMessage(ws, { type: 'pong' });
     }

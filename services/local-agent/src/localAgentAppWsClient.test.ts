@@ -36,6 +36,9 @@ function createHandlers(events: string[] = []): LocalAgentAppWsClientHandlers {
     onInterruptRequest: async (_ws, message) => {
       events.push(`interrupt:${message.requestId}`);
     },
+    onHumanReviewResponse: async (_ws, message) => {
+      events.push(`review:${message.requestId}:${message.reviewId}:${message.selectedOptionId}`);
+    },
     onClose: async () => {
       events.push('close');
     },
@@ -65,10 +68,21 @@ test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', 
     type: 'interrupt_request',
     requestId: 'req-1',
   }), handlers);
+  dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
+    type: 'human_review_response',
+    requestId: 'req-1',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
+  }), handlers);
 
   await tick();
 
-  assert.deepEqual(events, ['chat:req-1', 'new:user-1', 'interrupt:req-1']);
+  assert.deepEqual(events, [
+    'chat:req-1',
+    'new:user-1',
+    'interrupt:req-1',
+    'review:req-1:review-1:approve',
+  ]);
 });
 
 test('dispatchLocalAgentAppWebSocketMessage replies to ping with pong', () => {

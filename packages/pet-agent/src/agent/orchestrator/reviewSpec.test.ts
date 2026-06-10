@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  resolveHumanReviewResume,
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
 } from './review/reviewResponseResolver';
@@ -107,6 +108,34 @@ test('resolveHumanReviewResponse resolves respond input into decision and displa
   });
 });
 
+test('resolveHumanReviewResume resolves canonical responses and keeps legacy decisions effect-free', () => {
+  assert.deepEqual(
+    resolveHumanReviewResume(samplePendingReview(), {
+      reviewId: 'review-1',
+      selectedOptionId: 'approve-with-auth',
+    }).effects,
+    [{
+      type: 'graph.authorize_tool_action',
+      scope: 'thread',
+      actionRef: { type: 'pending_action' },
+      matcher: { type: 'policy_hook' },
+    }],
+  );
+
+  assert.deepEqual(
+    resolveHumanReviewResume(samplePendingReview(), {
+      decisions: [{ type: 'approve' }],
+    }),
+    {
+      reviewId: 'review-1',
+      optionId: 'legacy.approve',
+      decision: { type: 'approve' },
+      effects: [],
+      display: { label: 'Approve' },
+    },
+  );
+});
+
 test('resolveHumanReviewResponse rejects stale review responses', () => {
   assertResolutionError(
     () => resolveHumanReviewResponse(samplePendingReview(), {
@@ -114,6 +143,24 @@ test('resolveHumanReviewResponse rejects stale review responses', () => {
       selectedOptionId: 'approve',
     }),
     'stale_review',
+  );
+});
+
+test('resolveHumanReviewResume does not fall back to legacy decisions for canonical-shaped resumes', () => {
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      reviewId: 'old-review',
+      selectedOptionId: 'approve',
+      decisions: [{ type: 'approve' }],
+    }),
+    'stale_review',
+  );
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      selectedOptionId: 'approve',
+      decisions: [{ type: 'approve' }],
+    }),
+    'invalid_response',
   );
 });
 

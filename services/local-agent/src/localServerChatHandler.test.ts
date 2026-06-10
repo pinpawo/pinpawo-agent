@@ -128,8 +128,11 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   assert.deepEqual(forwardedMessage, {
     type: 'chat_request',
     requestId: 'req-1',
-    message: 'Approve',
-    resume: { decisions: [{ type: 'approve' }] },
+    message: '',
+    resume: {
+      reviewId: 'review-current',
+      selectedOptionId: 'approve',
+    },
   });
   assert.equal(sentEvents.length, 1, 'second response should be rejected after route is consumed');
   const event = sentEvents[0] as { type: string; event?: { type: string; message: string } };
@@ -138,7 +141,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
 });
 
-test('handleHumanReviewResponse resolves canonical respond input and keeps route after invalid option', async () => {
+test('handleHumanReviewResponse forwards canonical selected option without resolving it', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakeWs = {
@@ -188,25 +191,14 @@ test('handleHumanReviewResponse resolves canonical respond input and keeps route
       requestId: 'req-1',
       message: '',
       reviewId: 'review-current',
-      selectedOptionId: 'approve',
-    },
-    { actorId: 'pet-1' } as never,
-  );
-  await handler.handleHumanReviewResponse(
-    fakeWs,
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      message: '',
-      reviewId: 'review-current',
       selectedOptionId: 'respond',
       input: { message: '请先解释风险' },
     },
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(sentEvents.length, 1, 'invalid option should emit an error');
-  assert.equal(handleChatCalls.length, 1, 'valid retry should still reach chat handler');
+  assert.equal(sentEvents.length, 0);
+  assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
     message: string;
     resume?: unknown;
@@ -214,8 +206,12 @@ test('handleHumanReviewResponse resolves canonical respond input and keeps route
   assert.deepEqual(forwardedMessage, {
     type: 'chat_request',
     requestId: 'req-1',
-    message: '请先解释风险',
-    resume: { decisions: [{ type: 'respond', message: '请先解释风险' }] },
+    message: '',
+    resume: {
+      reviewId: 'review-current',
+      selectedOptionId: 'respond',
+      input: { message: '请先解释风险' },
+    },
   });
 });
 
@@ -279,7 +275,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
   assert.match(event.event?.message ?? '', /发起该 review 的会话/);
 });
 
-test('handleHumanReviewResponse stores declared authorization effects in graph state before forwarding', async () => {
+test('handleHumanReviewResponse forwards effect-bearing options without local authorization side effects', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const updateStateCalls: unknown[] = [];
@@ -372,23 +368,7 @@ test('handleHumanReviewResponse stores declared authorization effects in graph s
   );
 
   assert.equal(handleChatCalls.length, 1);
-  assert.equal(updateStateCalls.length, 1);
-  const updateValues = (updateStateCalls[0] as unknown[])[1] as {
-    toolAuthorizations?: Array<{
-      toolName: string;
-      matcher: unknown;
-      createdAt: string;
-    }>;
-  };
-  assert.equal(updateValues.toolAuthorizations?.length, 1);
-  assert.deepEqual(
-    updateValues.toolAuthorizations?.map(({ createdAt: _createdAt, ...authorization }) => authorization),
-    [{
-      toolName: 'run_shell',
-      matcher: { type: 'shell_pattern', value: 'git status' },
-    }],
-  );
-  assert.match(updateValues.toolAuthorizations?.[0]?.createdAt ?? '', /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(updateStateCalls.length, 0);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
     message: string;
     resume?: unknown;
@@ -396,8 +376,11 @@ test('handleHumanReviewResponse stores declared authorization effects in graph s
   assert.deepEqual(forwardedMessage, {
     type: 'chat_request',
     requestId: 'req-1',
-    message: 'Approve and authorize',
-    resume: { decisions: [{ type: 'approve' }] },
+    message: '',
+    resume: {
+      reviewId: 'review-current',
+      selectedOptionId: 'approve-and-authorize-thread',
+    },
   });
   assert.equal(
     sentEvents.some((event) =>
@@ -405,11 +388,11 @@ test('handleHumanReviewResponse stores declared authorization effects in graph s
         event?: { type?: string };
       }).event?.type === 'system.notice'),
     ),
-    true,
+    false,
   );
 });
 
-test('handleHumanReviewResponse rejects authorization effects without pending action context', async () => {
+test('handleHumanReviewResponse does not validate authorization effect context in transport', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const updateStateCalls: unknown[] = [];
@@ -478,14 +461,7 @@ test('handleHumanReviewResponse rejects authorization effects without pending ac
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(handleChatCalls.length, 0);
+  assert.equal(handleChatCalls.length, 1);
   assert.equal(updateStateCalls.length, 0);
-  assert.equal(
-    sentEvents.some((event) =>
-      Boolean(event && typeof event === 'object' && String((event as {
-        event?: { message?: string };
-      }).event?.message ?? '').includes('Cannot apply review effects without a pending action')),
-    ),
-    true,
-  );
+  assert.equal(sentEvents.length, 0);
 });

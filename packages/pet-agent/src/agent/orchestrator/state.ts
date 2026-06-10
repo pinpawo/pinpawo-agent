@@ -7,7 +7,10 @@ import type {
   PendingDelegation,
   TurnDelegation,
 } from './types';
-import type { ToolAuthorizationRecord } from './review/reviewAuthorizations';
+import {
+  mergeToolAuthorizations,
+  type ToolAuthorizationRecord,
+} from './review/reviewAuthorizations';
 
 export const OrchestratorState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -39,7 +42,7 @@ export const OrchestratorState = Annotation.Root({
     default: () => '',
   }),
   toolAuthorizations: Annotation<ToolAuthorizationRecord[]>({
-    reducer: (_prev, next) => next,
+    reducer: (prev, next) => mergeToolAuthorizations(prev, next),
     default: () => [],
   }),
 });

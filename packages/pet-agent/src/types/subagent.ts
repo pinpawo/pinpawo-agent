@@ -1,6 +1,8 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
+import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { ToolOperationMetadata } from './toolkit';
 
 export type SubagentToolOperationMetadata = ToolOperationMetadata & {
@@ -50,6 +52,8 @@ export type SubagentInput = {
   operations?: Record<string, SubagentToolOperationMetadata>;
   messages: BaseMessage[];
   maxIterations?: number;
+  checkpoint?: BaseCheckpointSaver;
+  runnableConfig?: RunnableConfig;
   signal?: AbortSignal;
   onToolEvent?: SubagentToolEventHandler;
 };

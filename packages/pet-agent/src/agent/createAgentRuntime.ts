@@ -61,10 +61,14 @@ import {
   readFirstHumanReviewDecision,
 } from './orchestrator/humanReview';
 import {
-  resolveHumanReviewResponse,
+  resolveHumanReviewResume,
   ReviewResponseResolutionError,
 } from './orchestrator/review/reviewResponseResolver';
 import { buildReviewSpec, type HumanReviewInterruptPayload } from './orchestrator/review/reviewSpec';
+import {
+  mergeToolAuthorizations,
+  type ToolAuthorizationRecord,
+} from './orchestrator/review/reviewAuthorizations';
 import {
   reuseOrAppendTurnDelegation,
   updateTurnDelegationResult,
@@ -288,45 +292,35 @@ function buildInvalidIterationLimitReviewPayload(
   };
 }
 
-function readReviewResponseValue(value: unknown) {
-  const record = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-  if (!record) return null;
-  const reviewId = typeof record.reviewId === 'string' && record.reviewId.trim()
-    ? record.reviewId.trim()
-    : null;
-  const selectedOptionId = typeof record.selectedOptionId === 'string' && record.selectedOptionId.trim()
-    ? record.selectedOptionId.trim()
-    : null;
-  const input = record.input && typeof record.input === 'object' && !Array.isArray(record.input)
-    ? record.input as Record<string, unknown>
-    : null;
-  return reviewId && selectedOptionId
-    ? {
-        reviewId,
-        selectedOptionId,
-        ...(input ? { input } : {}),
-      }
-    : null;
-}
-
 function resolveIterationLimitReviewDecision(payload: HumanReviewInterruptPayload, resume: unknown) {
-  const response = readReviewResponseValue(resume);
-  if (response) {
-    try {
-      return resolveHumanReviewResponse({
-        requestId: 'iteration_limit',
-        reviewSpec: payload.review,
-      }, response).decision;
-    } catch (error) {
-      if (!(error instanceof ReviewResponseResolutionError)) {
-        throw error;
-      }
-      return null;
+  try {
+    return resolveHumanReviewResume({
+      requestId: 'iteration_limit',
+      reviewSpec: payload.review,
+    }, resume).decision;
+  } catch (error) {
+    if (!(error instanceof ReviewResponseResolutionError)) {
+      throw error;
     }
   }
   return readFirstHumanReviewDecision(resume);
+}
+
+function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {
+  const active = mergeToolAuthorizations([], current);
+  const recorded: ToolAuthorizationRecord[] = [];
+
+  return {
+    active,
+    recorded,
+    recordToolAuthorization: (authorization: ToolAuthorizationRecord) => {
+      const merged = mergeToolAuthorizations(active, [authorization]);
+      if (merged.length > active.length) {
+        recorded.push(authorization);
+      }
+      active.splice(0, active.length, ...merged);
+    },
+  };
 }
 
 // --- Graph builder ---
@@ -688,12 +682,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       execution,
     });
 
+    const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);
     const toolkitContext = {
       models: config.models,
       actor,
       messages: scopedMessages,
       execution,
-      toolAuthorizations: state.toolAuthorizations,
+      toolAuthorizations: authorizationRecorder.active,
+      recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
     };
     const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
     const runtimeInstructions = await resolveInstructions(runtime, { models: config.models, actor }, execution);
@@ -712,6 +708,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       operations: collectCapabilityOperations(usedToolkitResources.toolkits, runtime),
       messages: scopedMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
+      checkpoint: config.checkpoint,
+      runnableConfig,
       signal: runnableConfig?.signal,
       onToolEvent,
     };
@@ -765,6 +763,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       turnDelegations: updatedTurnDelegations,
       pendingDelegation: null,
       iterationCount: state.iterationCount + 1,
+      toolAuthorizations: authorizationRecorder.recorded,
     };
   }
 
@@ -774,12 +773,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = toolkits ?? [];
     validateUniqueToolkitNames(toolkitList);
+    const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);
     const toolkitResources = await resolveToolkitResources(toolkitList, undefined, {
       models: config.models,
       actor,
       messages: state.messages,
       execution,
-      toolAuthorizations: state.toolAuthorizations,
+      toolAuthorizations: authorizationRecorder.active,
+      recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
     });
     const toolList = [...toolkitResources.tools];
     validateUniqueToolNames(toolList);
@@ -818,6 +819,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       operations: collectGeneralOperations(toolkitResources.toolkits),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
+      checkpoint: config.checkpoint,
+      runnableConfig,
       signal: runnableConfig?.signal,
       onToolEvent,
     });
@@ -850,6 +853,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       turnDelegations: updatedTurnDelegations,
       pendingDelegation: null,
       iterationCount: state.iterationCount + 1,
+      toolAuthorizations: authorizationRecorder.recorded,
     };
   }
 

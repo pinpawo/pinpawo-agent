@@ -81,6 +81,7 @@ export type {
   HumanReviewDecisionType,
 } from './agent/orchestrator/humanReview';
 export {
+  resolveHumanReviewResume,
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
 } from './agent/orchestrator/review/reviewResponseResolver';

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { HumanReviewDecision } from '../humanReview';
 
 export type ReviewView =
   | { kind: 'plain'; title?: string; body: string }
@@ -101,10 +102,7 @@ export type ReviewResponse = {
 export type ReviewResponseResolution = {
   reviewId: string;
   optionId: string;
-  decision:
-    | { type: 'approve' }
-    | { type: 'reject'; message?: string }
-    | { type: 'respond'; message: string };
+  decision: HumanReviewDecision;
   effects: ReviewEffect[];
   display: {
     label: string;

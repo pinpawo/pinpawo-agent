@@ -47,10 +47,8 @@ type ExampleInputs = {
   user_message: string;
   /** Shell command the agent wants to run (review subject). */
   pending_shell_command: string;
-  /** Resume the client sends back. */
-  resume?: { decisions: Array<{ type: string; message?: string }> };
-  /** ReviewSpec option selected by the client before resume. */
-  selected_option_id?: string;
+  /** Canonical review response the client sends back. */
+  resume?: { reviewId: string; selectedOptionId: string; input?: Record<string, unknown> };
   /** Final reply the fake graph returns after resume (none if rejected). */
   final_reply?: string;
 };
@@ -75,8 +73,7 @@ const examples: Array<{
     inputs: {
       user_message: '帮我跑 git status',
       pending_shell_command: 'git status',
-      resume: { decisions: [{ type: 'approve' }] },
-      selected_option_id: 'approve-and-authorize-thread',
+      resume: { reviewId: 'review-shell-action', selectedOptionId: 'approve-and-authorize-thread' },
       final_reply: '已执行 git status。',
     },
     outputs: {
@@ -94,8 +91,7 @@ const examples: Array<{
     inputs: {
       user_message: '帮我跑 git status',
       pending_shell_command: 'git status',
-      resume: { decisions: [{ type: 'approve' }] },
-      selected_option_id: 'approve',
+      resume: { reviewId: 'review-shell-action', selectedOptionId: 'approve' },
       final_reply: '已执行 git status。',
     },
     outputs: {
@@ -113,8 +109,7 @@ const examples: Array<{
     inputs: {
       user_message: '帮我跑 rm -rf /',
       pending_shell_command: 'rm -rf /',
-      resume: { decisions: [{ type: 'reject', message: '太危险了' }] },
-      selected_option_id: 'reject',
+      resume: { reviewId: 'review-shell-action', selectedOptionId: 'reject' },
       final_reply: '已拒绝执行。',
     },
     outputs: {
@@ -124,7 +119,7 @@ const examples: Array<{
       expected_final_status: 'completed',
       expected_final_reply: '已拒绝执行。',
       expected_authorization_recorded: false,
-      reason: 'Reject decision must reach the graph as { decisions: [{ type: reject }] } and not authorize anything.',
+      reason: 'Reject response must reach the graph as canonical { reviewId, selectedOptionId } and not authorize anything.',
     },
   },
   {
@@ -145,6 +140,7 @@ const examples: Array<{
 
 const FAKE_THREAD_ID = 'eval-thread';
 const FAKE_REQUEST_ID = 'eval-req';
+const FAKE_REVIEW_ID = 'review-shell-action';
 const FAKE_TOOLKITS: AgentToolkit[] = [{
   name: 'local',
   description: 'local tools',
@@ -165,6 +161,7 @@ function buildShellReviewInterrupt(command: string) {
   return {
     kind: 'review',
     review: buildReviewSpec({
+      id: FAKE_REVIEW_ID,
       view: {
         kind: 'plain',
         title: 'Shell command approval',
@@ -226,29 +223,37 @@ function createFakeGraphService(params: {
   finalReply: string;
 }) {
   // Real flow: first turn starts with no interrupt; stream emits __interrupt__
-  // mid-run; subsequent getState() sees a pending interrupt that the resume
+  // mid-run; subsequent readThreadState() sees a pending interrupt that the resume
   // turn consumes. Track that with two flags.
   let interruptEmitted = false;
   let interruptResumed = false;
 
-  function snapshotWithInterrupt() {
+  function threadStateWithInterrupt() {
     const payload = buildShellReviewInterrupt(params.pendingShellCommand);
     return {
-      tasks: [{ interrupts: [{ value: payload }] }],
-      values: { messages: [] },
+      messages: [],
+      pendingHumanReview: { review: payload.review },
+      hasPendingContinuation: true,
     };
   }
-  function snapshotClean() {
+  function threadStateClean() {
     return {
-      tasks: [],
-      values: { messages: [new AIMessage(params.finalReply)] },
+      messages: interruptResumed ? [new AIMessage(params.finalReply)] : [],
+      pendingHumanReview: null,
+      hasPendingContinuation: false,
     };
   }
 
   return {
-    async getState(_setup: unknown) {
-      if (interruptEmitted && !interruptResumed) return snapshotWithInterrupt();
-      return snapshotClean();
+    async readThreadState(_setup: unknown) {
+      if (interruptEmitted && !interruptResumed) return threadStateWithInterrupt();
+      return threadStateClean();
+    },
+    async readThreadMessages(_setup: unknown) {
+      const state = interruptEmitted && !interruptResumed
+        ? threadStateWithInterrupt()
+        : threadStateClean();
+      return state.messages;
     },
     buildResumeCommand(resume: unknown) {
       return new Command({ resume });
@@ -294,13 +299,13 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
   });
 
   // Turn 1 (clean thread): runChatSession sees no pending interrupt via
-  // getState(), then stream emits __interrupt__ → status: waiting_human.
-  // Turn 2 (resume): getState() now reports the interrupt; the resume
+  // readThreadState(), then stream emits __interrupt__ → status: waiting_human.
+  // Turn 2 (resume): readThreadState() now reports the interrupt; the resume
   // Command flows back into stream which emits the final AI message.
 
   const firstTurnEvents: LocalAgentEvent[] = [];
   const firstTurn = await runChatSession({
-    request: { requestId: FAKE_REQUEST_ID, message: inputs.user_message },
+    request: { kind: 'user_message', requestId: FAKE_REQUEST_ID, message: inputs.user_message },
     setup: buildFakeSetup(),
     graphService: fakeGraph as never,
     isCurrent: () => true,
@@ -332,7 +337,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     (event) => event.type === 'human_review.requested',
   ) as Extract<LocalAgentEvent, { type: 'human_review.requested' }> | undefined;
   const selectedOption = reviewEvent?.review?.options.find((option) =>
-    option.id === inputs.selected_option_id,
+    option.id === inputs.resume?.selectedOptionId,
   );
   const authorizationOptionPresent = Boolean(
     reviewEvent?.review?.options.some((option) =>
@@ -358,8 +363,8 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
   const secondTurnEvents: LocalAgentEvent[] = [];
   const secondTurn = await runChatSession({
     request: {
+      kind: 'resume',
       requestId: FAKE_REQUEST_ID,
-      message: '',
       resume: inputs.resume,
     },
     setup: buildFakeSetup(),

@@ -43,7 +43,7 @@ const examples = [
     outputs: {
       expected_initial_interrupted: true,
       expected_initial_kind: 'review',
-      expected_allowed_decisions: ['approve', 'reject', 'respond'],
+      expected_review_option_decisions: ['approve', 'reject', 'respond'],
       reason: 'Iteration limit uses the canonical human review interrupt shape without pretending to be a tool action.',
     },
   },
@@ -122,7 +122,7 @@ function readInterruptPayload(result: Record<string, unknown>): Record<string, u
     : null;
 }
 
-function readAllowedDecisions(payload: Record<string, unknown> | null): string[] {
+function readReviewOptionDecisions(payload: Record<string, unknown> | null): string[] {
   const review = payload?.review && typeof payload.review === 'object'
     ? payload.review as Record<string, unknown>
     : null;
@@ -208,7 +208,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   return {
     initial_interrupted: Boolean(initialPayload),
     initial_kind: initialPayload?.kind ?? null,
-    allowed_decisions: readAllowedDecisions(initialPayload),
+    review_option_decisions: readReviewOptionDecisions(initialPayload),
     after_resume_mode: afterResume ? routeModeFromResult(afterResume) : null,
     after_resume_task: afterResume ? pendingTaskFromResult(afterResume) : null,
     reply: afterResume ? replyFromResult(afterResume) : '',
@@ -285,7 +285,11 @@ async function main() {
     evaluators: [
       booleanCorrectness('initial_interrupted', 'expected_initial_interrupted', 'initial_interrupted_correct'),
       equalsCorrectness('initial_kind', 'expected_initial_kind', 'initial_kind_correct'),
-      arrayIncludesCorrectness('allowed_decisions', 'expected_allowed_decisions', 'allowed_decisions_correct'),
+      arrayIncludesCorrectness(
+        'review_option_decisions',
+        'expected_review_option_decisions',
+        'review_option_decisions_correct',
+      ),
       equalsCorrectness('after_resume_mode', 'expected_after_resume_mode', 'after_resume_mode_correct'),
       includesCorrectness('after_resume_task', 'expected_after_resume_task_includes', 'after_resume_task_correct'),
       includesCorrectness('reply', 'expected_reply_includes', 'reply_correct'),
@@ -297,7 +301,7 @@ async function main() {
   const keys = [
     'initial_interrupted_correct',
     'initial_kind_correct',
-    'allowed_decisions_correct',
+    'review_option_decisions_correct',
     'after_resume_mode_correct',
     'after_resume_task_correct',
     'reply_correct',

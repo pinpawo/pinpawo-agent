@@ -638,6 +638,46 @@ test('iteration limit review emits canonical ReviewSpec interrupt payload', asyn
   assert.equal(payload?.reviewConfigs, undefined);
 });
 
+test('iteration limit review accepts canonical approve resume', async () => {
+  const graph = createOrchestratorGraph({
+    models: {} as AgentModels,
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const input = buildOrchestratorTurnInput([new HumanMessage('继续处理')]);
+  input.iterationCount = 1;
+  const config = {
+    configurable: {
+      thread_id: 'iteration-limit-canonical-approve',
+      actor: testActor,
+      capabilities: [],
+      tools: [],
+      maxIterations: 1,
+    },
+  };
+
+  const interrupted = await graph.invoke(input, config) as {
+    __interrupt__?: Array<{ value?: unknown }>;
+  };
+  const payload = interrupted.__interrupt__?.[0]?.value as {
+    review?: { id?: string };
+  } | undefined;
+  assert.equal(typeof payload?.review?.id, 'string');
+
+  const resumed = await graph.invoke(new Command({
+    resume: {
+      reviewId: payload?.review?.id,
+      selectedOptionId: 'approve',
+    },
+  }), config) as {
+    __interrupt__?: unknown;
+    iterationCount?: number;
+  };
+
+  assert.equal(resumed.__interrupt__, undefined);
+  assert.equal(resumed.iterationCount, 0);
+});
+
 test('lane tagging hides subagent messages from route and records completed announce', () => {
   const messages = [
     new HumanMessage('帮我查一下小红书动态'),

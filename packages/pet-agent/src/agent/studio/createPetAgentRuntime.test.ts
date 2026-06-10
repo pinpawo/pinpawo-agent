@@ -214,6 +214,30 @@ test('humanReviewer: unknown interrupt is not treated as HITL', async () => {
   assert.equal(result.reply, '');
 });
 
+test('humanReviewer: malformed review interrupt is not treated as HITL', async () => {
+  let reviewerCalled = false;
+  const { graph } = makeStubGraph([
+    { __interrupt__: [{ value: { kind: 'review' } }], messages: [] },
+  ]);
+
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+    humanReviewer: async (req) => {
+      reviewerCalled = true;
+      return {
+        reviewId: req.review.id,
+        selectedOptionId: 'approve',
+      };
+    },
+  });
+
+  const result = await runtime.invoke({ brief: 'go' });
+  assert.equal(reviewerCalled, false);
+  assert.equal(result.reply, '');
+});
+
 test('pet runtime passes wiki read tools and operation metadata when wikiRoot is provided', async () => {
   const { graph, calls } = makeStubGraph([
     { messages: [new AIMessage('done')] },

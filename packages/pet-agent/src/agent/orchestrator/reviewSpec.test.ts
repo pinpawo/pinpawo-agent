@@ -5,6 +5,7 @@ import {
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
 } from './review/reviewResponseResolver';
+import { isHumanReviewInterruptPayload, isReviewSpecValue } from './review/reviewSpec';
 import type { ReviewResolutionContext } from './review/reviewSpec';
 
 function samplePendingReview(): ReviewResolutionContext {
@@ -65,6 +66,34 @@ function assertResolutionError(fn: () => unknown, code: string) {
     (error) => error instanceof ReviewResponseResolutionError && error.code === code,
   );
 }
+
+test('review spec guards accept canonical values only', () => {
+  const reviewSpec = samplePendingReview().reviewSpec;
+
+  assert.equal(isReviewSpecValue(reviewSpec), true);
+  assert.equal(isHumanReviewInterruptPayload({
+    kind: 'review',
+    review: reviewSpec,
+    pendingAction: {
+      actionId: 'action-1',
+      toolName: 'run_shell',
+      args: { command: 'git status' },
+    },
+  }), true);
+  assert.equal(isHumanReviewInterruptPayload({ kind: 'review' }), false);
+  assert.equal(isReviewSpecValue({
+    ...reviewSpec,
+    options: [{
+      id: 'edit',
+      label: 'Edit',
+      decision: { type: 'edit' },
+    }],
+  }), false);
+  assert.equal(isReviewSpecValue({
+    ...reviewSpec,
+    extra: true,
+  }), false);
+});
 
 test('resolveHumanReviewResponse resolves approve option and declared effects', () => {
   const resolution = resolveHumanReviewResponse(samplePendingReview(), {

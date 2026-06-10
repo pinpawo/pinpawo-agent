@@ -98,6 +98,8 @@ export type {
 } from './agent/orchestrator/review/reviewAuthorizations';
 export {
   buildReviewSpec,
+  isHumanReviewInterruptPayload,
+  isReviewSpecValue,
 } from './agent/orchestrator/review/reviewSpec';
 export type {
   BuildReviewSpecParams,

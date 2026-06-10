@@ -296,6 +296,24 @@ test('parseLocalAgentServerMessage rejects legacy human_review.requested fields'
     })),
     null,
   );
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        ...canonicalEvent,
+        review: {
+          ...canonicalEvent.review,
+          options: [{
+            id: 'edit',
+            label: 'Edit',
+            decision: { type: 'edit' },
+          }],
+        },
+      },
+    })),
+    null,
+  );
 });
 
 test('sendLocalAgentMessage writes only when websocket-like object is open', () => {

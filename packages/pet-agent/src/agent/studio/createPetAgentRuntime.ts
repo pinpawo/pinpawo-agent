@@ -18,6 +18,7 @@ import {
   type OrchestratorConfig,
   type OrchestratorGraph,
 } from '../createAgentRuntime';
+import { isHumanReviewInterruptPayload } from '../orchestrator/review/reviewSpec';
 import type {
   HumanReviewer,
   HumanReviewerRequest,
@@ -195,8 +196,5 @@ function readPendingInterrupt(result: unknown): HumanReviewerRequest | undefined
   const value = first && typeof first === 'object' && 'value' in first
     ? (first as { value?: unknown }).value
     : null;
-  if (!value || typeof value !== 'object') return undefined;
-  const kind = (value as { kind?: unknown }).kind;
-  if (kind !== 'review') return undefined;
-  return value as HumanReviewerRequest;
+  return isHumanReviewInterruptPayload(value) ? value : undefined;
 }

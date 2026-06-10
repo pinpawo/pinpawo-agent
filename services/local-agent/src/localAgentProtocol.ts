@@ -1,4 +1,4 @@
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import { isReviewSpecValue, type ReviewSpec } from '@pinpawo/pet-agent';
 import type {
   LocalAgentEvent,
   LocalAgentOperationInternalEvent,
@@ -127,33 +127,7 @@ function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly stri
 
 function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpec | null {
   const review = readRecord(record, key);
-  if (!review) return null;
-  const id = readString(review, 'id');
-  const schemaVersion = readOptionalNumber(review, 'schemaVersion');
-  const view = readRecord(review, 'view');
-  const viewKind = view ? readString(view, 'kind') : null;
-  const viewBody = view ? readString(view, 'body') : null;
-  const options = review.options;
-  if (
-    !id
-    || schemaVersion === undefined
-    || (viewKind !== 'plain' && viewKind !== 'markdown')
-    || viewBody == null
-    || !Array.isArray(options)
-  ) {
-    return null;
-  }
-
-  const validOptions = options.every((option) => {
-    if (!option || typeof option !== 'object' || Array.isArray(option)) return false;
-    const optionRecord = option as Record<string, unknown>;
-    return typeof optionRecord.id === 'string'
-      && typeof optionRecord.label === 'string'
-      && optionRecord.decision
-      && typeof optionRecord.decision === 'object'
-      && !Array.isArray(optionRecord.decision);
-  });
-  return validOptions ? review as ReviewSpec : null;
+  return isReviewSpecValue(review) ? review : null;
 }
 
 function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent | null {

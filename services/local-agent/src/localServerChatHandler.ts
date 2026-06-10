@@ -5,6 +5,7 @@ import {
   sendLocalAgentEvent,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
+  type InterruptRequestMessage,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
 import {
@@ -27,7 +28,12 @@ type InflightRequest = InflightOperationRun;
 
 type PendingReviewRoute = {
   reviewId: string;
+  rejectOptionId?: string;
   sessionId?: string;
+  review: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['review'];
+  prompt?: string;
+  payload?: Record<string, unknown>;
+  actor?: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['actor'];
 };
 
 export function isToolProtocolHistoryError(value: unknown): boolean {
@@ -63,9 +69,15 @@ export class LocalServerChatHandler {
       return;
     }
     const sessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
+    const rejectOption = event.review.options.find((option) => option.decision.type === 'reject');
     this.pendingReviewRoutes.set(event.requestId, {
       reviewId: event.review.id,
+      ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
       ...(sessionId ? { sessionId } : {}),
+      review: event.review,
+      ...(event.prompt ? { prompt: event.prompt } : {}),
+      ...(event.payload ? { payload: event.payload } : {}),
+      ...(event.actor ? { actor: event.actor } : {}),
     });
   }
 
@@ -239,6 +251,67 @@ export class LocalServerChatHandler {
         ...(msg.input ? { input: msg.input } : {}),
       },
     }, deps);
+  }
+
+  async handleInterruptRequest(
+    ws: WebSocket,
+    msg: InterruptRequestMessage,
+    deps: LocalServerDeps,
+  ) {
+    const route = this.pendingReviewRoutes.get(msg.requestId);
+    if (!route) {
+      return false;
+    }
+
+    const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
+    if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
+      console.warn(
+        `[local-server] interrupt_request rejected: route sessionId=${route.sessionId} `
+        + `does not match active session=${activeSessionId}`,
+      );
+      sendLocalAgentEvent(ws, {
+        type: 'error',
+        requestId: msg.requestId,
+        message: '请回到发起该 review 的会话再打断。',
+      });
+      return true;
+    }
+
+    if (!route.rejectOptionId) {
+      console.warn(
+        `[local-server] interrupt_request rejected: pending review=${route.reviewId} has no reject option`,
+      );
+      sendLocalAgentEvent(ws, {
+        type: 'system.notice',
+        requestId: msg.requestId,
+        message: '当前 review 没有可用的拒绝选项，无法自动取消。',
+      });
+      sendLocalAgentEvent(ws, {
+        type: 'human_review.requested',
+        requestId: msg.requestId,
+        review: route.review,
+        ...(route.prompt ? { prompt: route.prompt } : {}),
+        ...(route.payload ? { payload: route.payload } : {}),
+        ...(route.actor ? { actor: route.actor } : {}),
+      });
+      return true;
+    }
+
+    this.pendingReviewRoutes.delete(msg.requestId);
+    console.log(
+      `[local-server] interrupt pending human_review requestId=${msg.requestId} reviewId=${route.reviewId}`,
+    );
+
+    await this.handleChatRequest(ws, {
+      type: 'chat_request',
+      requestId: msg.requestId,
+      message: '',
+      resume: {
+        reviewId: route.reviewId,
+        selectedOptionId: route.rejectOptionId,
+      },
+    }, deps);
+    return true;
   }
 
   private sendStreamToolOperationEvent(

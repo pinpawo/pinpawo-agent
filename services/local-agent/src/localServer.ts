@@ -70,7 +70,10 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
         }
         return chatHandler.handleHumanReviewResponse(ws, msg, deps);
       },
-      onInterruptRequest: (ws, msg) => {
+      onInterruptRequest: async (ws, msg) => {
+        if (await chatHandler.handleInterruptRequest(ws, msg, deps)) {
+          return;
+        }
         const inflight = inflightRequests.interrupt(ws, { requestId: msg.requestId });
         if (inflight) {
           console.log(`[local-server] interrupt requestId=${inflight.requestId}`);

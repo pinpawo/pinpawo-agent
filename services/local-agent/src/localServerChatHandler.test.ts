@@ -140,6 +140,168 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
 });
 
+test('handleInterruptRequest resumes pending review with canonical reject option', async () => {
+  const handleChatCalls: unknown[] = [];
+  const sentEvents: unknown[] = [];
+  const fakeWs = {
+    readyState: WebSocket.OPEN,
+    send: (data: string) => {
+      sentEvents.push(JSON.parse(data));
+    },
+  } as unknown as WebSocket;
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+    } as never,
+    inflightRequests: new InflightRequestController({
+      forceInterruptMs: 1000,
+      emitOperation: () => {},
+      sendControl: () => {},
+    }),
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+    handleChatCalls.push(args);
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).recordPendingReviewRoute({
+    type: 'human_review.requested',
+    requestId: 'req-1',
+    review: {
+      id: 'review-current',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [
+        { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
+        { id: 'reject', label: 'Reject', decision: { type: 'reject' } },
+      ],
+    },
+  }, { actorId: 'pet-1' });
+
+  const handled = await handler.handleInterruptRequest(
+    fakeWs,
+    {
+      type: 'interrupt_request',
+      requestId: 'req-1',
+    },
+    { actorId: 'pet-1' } as never,
+  );
+
+  assert.equal(handled, true);
+  assert.equal(sentEvents.length, 0);
+  assert.equal(handleChatCalls.length, 1);
+  const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
+    type: string;
+    requestId: string;
+    message: string;
+    resume?: unknown;
+  };
+  assert.deepEqual(forwardedMessage, {
+    type: 'chat_request',
+    requestId: 'req-1',
+    message: '',
+    resume: {
+      reviewId: 'review-current',
+      selectedOptionId: 'reject',
+    },
+  });
+
+  await handler.handleHumanReviewResponse(
+    fakeWs,
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      reviewId: 'review-current',
+      selectedOptionId: 'approve',
+    },
+    { actorId: 'pet-1' } as never,
+  );
+
+  assert.equal(handleChatCalls.length, 1, 'pending review route should be consumed by interrupt');
+  assert.equal(sentEvents.length, 1);
+  const event = sentEvents[0] as { type: string; event?: { type: string; message: string } };
+  assert.equal(event.type, 'event');
+  assert.equal(event.event?.type, 'error');
+  assert.match(event.event?.message ?? '', /已关闭|不存在/);
+});
+
+test('handleInterruptRequest restores pending review when no reject option exists', async () => {
+  const handleChatCalls: unknown[] = [];
+  const sentEvents: unknown[] = [];
+  const fakeWs = {
+    readyState: WebSocket.OPEN,
+    send: (data: string) => {
+      sentEvents.push(JSON.parse(data));
+    },
+  } as unknown as WebSocket;
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+    } as never,
+    inflightRequests: new InflightRequestController({
+      forceInterruptMs: 1000,
+      emitOperation: () => {},
+      sendControl: () => {},
+    }),
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).handleChatRequest = async (...args: unknown[]) => {
+    handleChatCalls.push(args);
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).recordPendingReviewRoute({
+    type: 'human_review.requested',
+    requestId: 'req-1',
+    prompt: 'Approve?',
+    review: {
+      id: 'review-current',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    },
+  }, { actorId: 'pet-1' });
+
+  const handled = await handler.handleInterruptRequest(
+    fakeWs,
+    {
+      type: 'interrupt_request',
+      requestId: 'req-1',
+    },
+    { actorId: 'pet-1' } as never,
+  );
+
+  assert.equal(handled, true);
+  assert.equal(handleChatCalls.length, 0);
+  assert.equal(sentEvents.length, 2);
+  const notice = sentEvents[0] as { type: string; event?: { type: string; message: string } };
+  assert.equal(notice.event?.type, 'system.notice');
+  assert.match(notice.event?.message ?? '', /无法自动取消/);
+  const reviewEvent = sentEvents[1] as {
+    type: string;
+    event?: { type: string; requestId: string; review?: { id: string } };
+  };
+  assert.equal(reviewEvent.event?.type, 'human_review.requested');
+  assert.equal(reviewEvent.event?.requestId, 'req-1');
+  assert.equal(reviewEvent.event?.review?.id, 'review-current');
+
+  await handler.handleHumanReviewResponse(
+    fakeWs,
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      reviewId: 'review-current',
+      selectedOptionId: 'approve',
+    },
+    { actorId: 'pet-1' } as never,
+  );
+
+  assert.equal(handleChatCalls.length, 1, 'route should remain available after failed interrupt');
+});
+
 test('handleHumanReviewResponse forwards canonical selected option without resolving it', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];

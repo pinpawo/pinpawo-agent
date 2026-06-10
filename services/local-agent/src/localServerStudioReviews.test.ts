@@ -43,7 +43,7 @@ test('LocalServerStudioReviewRouter routes response only when a review is pendin
   }, () => undefined), false);
 
   const slot = router.getOrCreateSlot(connection);
-  const decisionPromise = new Promise((resolve, reject) => {
+  const responsePromise = new Promise((resolve, reject) => {
     slot.current = {
       petId: 'pet-1',
       reviewId: 'review-1',
@@ -60,7 +60,11 @@ test('LocalServerStudioReviewRouter routes response only when a review is pendin
     selectedOptionId: 'respond',
     input: { message: '继续' },
   }, () => undefined), true);
-  assert.deepEqual(await decisionPromise, { type: 'respond', message: '继续' });
+  assert.deepEqual(await responsePromise, {
+    reviewId: 'review-1',
+    selectedOptionId: 'respond',
+    input: { message: '继续' },
+  });
   assert.equal(slot.current, null);
 });
 

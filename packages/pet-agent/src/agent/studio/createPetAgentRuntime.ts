@@ -18,7 +18,6 @@ import {
   type OrchestratorConfig,
   type OrchestratorGraph,
 } from '../createAgentRuntime';
-import { buildHumanReviewResume } from '../orchestrator/humanReview';
 import type {
   HumanReviewer,
   HumanReviewerRequest,
@@ -169,8 +168,8 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
             `Pet agent "${config.actor.petId}" hit HITL interrupt but no humanReviewer configured`,
           );
         }
-        const decision = await config.humanReviewer(pending);
-        graphInput = new Command({ resume: buildHumanReviewResume([decision]) });
+        const response = await config.humanReviewer(pending);
+        graphInput = new Command({ resume: response });
       }
     } finally {
       status = previousStatus === 'active' ? 'standby' : previousStatus;

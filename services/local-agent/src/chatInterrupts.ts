@@ -94,17 +94,38 @@ export function formatInterruptPrompt(interruptPayload: Record<string, unknown>)
   return '当前流程需要你的确认，请等待当前确认面板刷新后再应答。';
 }
 
-export function buildHumanReviewResume(decisions: Array<Record<string, unknown>>) {
-  return { decisions };
-}
-
-function buildResumeFromUserText(message: string) {
+function buildCanonicalResumeFromUserText(
+  interruptPayload: Record<string, unknown>,
+  message: string,
+) {
+  const review = readReviewSpecValue(interruptPayload.review);
+  if (!review) {
+    return null;
+  }
   const text = message.trim();
-  return buildHumanReviewResume([
-    text
-      ? { type: 'respond', message: text }
-      : { type: 'reject' },
-  ]);
+  if (text) {
+    const respondOption = review.options.find((option) =>
+      option.decision.type === 'respond'
+      && option.input?.kind === 'text'
+      && option.input.key === option.decision.messageInputKey);
+    if (!respondOption || !respondOption.input) {
+      return {
+        reviewId: review.id,
+        selectedOptionId: '__invalid_free_text_response__',
+      };
+    }
+    return {
+      reviewId: review.id,
+      selectedOptionId: respondOption.id,
+      input: { [respondOption.input.key]: text },
+    };
+  }
+
+  const rejectOption = review.options.find((option) => option.decision.type === 'reject');
+  return {
+    reviewId: review.id,
+    selectedOptionId: rejectOption?.id ?? '__invalid_empty_response__',
+  };
 }
 
 function readFirstResumeDecisionType(value: unknown): string | null {
@@ -123,11 +144,11 @@ export function normalizeInterruptResume(
   explicitResume: unknown,
 ) {
   if (isHumanReviewInterruptPayload(interruptPayload)) {
-    // Structured decisions take precedence. Otherwise treat the free-text
-    // message as a `respond` decision (or `reject` if empty).
+    // Canonical responses take precedence. Otherwise treat free text as a
+    // respond option (or reject if empty) using the pending ReviewSpec.
     return explicitResume !== undefined
       ? explicitResume
-      : buildResumeFromUserText(message);
+      : buildCanonicalResumeFromUserText(interruptPayload, message);
   }
 
   const explicitDecision = readFirstResumeDecisionType(explicitResume);

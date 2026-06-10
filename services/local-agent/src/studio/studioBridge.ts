@@ -1,8 +1,8 @@
 import {
   type AgentActor,
-  type HumanReviewDecision,
   type HumanReviewer,
   type HumanReviewerRequest,
+  type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 
@@ -18,7 +18,7 @@ import type { PetLocalConfig } from './petConfig';
  *   如果 pet runtime 在前一个 review 未答时又触发 humanReviewer,直接 reject。
  */
 export type PendingReview = {
-  resolve: (decision: HumanReviewDecision) => void;
+  resolve: (response: ReviewResponse) => void;
   reject: (error: Error) => void;
   petId: string;
   reviewId: string;
@@ -36,11 +36,11 @@ export function createPendingReviewSlot(): PendingReviewSlot {
 /**
  * 喂答复给当前 pending review。返回 true 表示有 pending 被 resolve;false 表示 slot 空。
  */
-export function resolveReview(slot: PendingReviewSlot, decision: HumanReviewDecision): boolean {
+export function resolveReview(slot: PendingReviewSlot, response: ReviewResponse): boolean {
   const pending = slot.current;
   if (!pending) return false;
   slot.current = null;
-  pending.resolve(decision);
+  pending.resolve(response);
   return true;
 }
 
@@ -69,7 +69,7 @@ export function createWsHumanReviewer(opts: {
   slot: PendingReviewSlot;
 }): HumanReviewer {
   return (request: HumanReviewerRequest) => {
-    return new Promise<HumanReviewDecision>((resolve, reject) => {
+    return new Promise<ReviewResponse>((resolve, reject) => {
       if (opts.slot.current) {
         reject(new Error(
           `Another HITL is already pending (petId=${opts.slot.current.petId}, reviewId=${opts.slot.current.reviewId})`,

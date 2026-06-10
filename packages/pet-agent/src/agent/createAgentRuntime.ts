@@ -58,9 +58,6 @@ import {
   buildUserIntentDecisionSystemPrompt,
 } from './orchestrator/prompts';
 import {
-  readFirstHumanReviewDecision,
-} from './orchestrator/humanReview';
-import {
   resolveHumanReviewResume,
   ReviewResponseResolutionError,
 } from './orchestrator/review/reviewResponseResolver';
@@ -303,7 +300,7 @@ function resolveIterationLimitReviewDecision(payload: HumanReviewInterruptPayloa
       throw error;
     }
   }
-  return readFirstHumanReviewDecision(resume);
+  return null;
 }
 
 function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {

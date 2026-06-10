@@ -24,10 +24,6 @@ import {
   resolveToolkitResources,
   selectCapabilityTools,
 } from './subagentHandoff';
-import {
-  buildHumanReviewResume,
-  readFirstHumanReviewDecision,
-} from './humanReview';
 import { buildReviewSpec } from './review/reviewSpec';
 import { isToolActionAuthorized } from './review/reviewAuthorizations';
 import {
@@ -714,31 +710,6 @@ test('toolkit review policy records authorization through orchestrator runtime t
   }]);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
-});
-
-test('human review helpers use structured decisions', () => {
-  assert.deepEqual(
-    readFirstHumanReviewDecision(buildHumanReviewResume([{ type: 'approve' }])),
-    { type: 'approve' },
-  );
-  assert.deepEqual(
-    readFirstHumanReviewDecision({
-      decisions: [{
-        type: 'edit',
-        editedAction: {
-          name: 'run_shell',
-          args: { command: 'ls tmp' },
-        },
-      }],
-    }),
-    {
-      type: 'edit',
-      editedAction: {
-        name: 'run_shell',
-        args: { command: 'ls tmp' },
-      },
-    },
-  );
 });
 
 test('iteration limit review emits canonical ReviewSpec interrupt payload', async () => {

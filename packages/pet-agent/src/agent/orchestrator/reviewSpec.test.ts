@@ -108,7 +108,7 @@ test('resolveHumanReviewResponse resolves respond input into decision and displa
   });
 });
 
-test('resolveHumanReviewResume resolves canonical responses and keeps legacy decisions effect-free', () => {
+test('resolveHumanReviewResume resolves canonical responses only', () => {
   assert.deepEqual(
     resolveHumanReviewResume(samplePendingReview(), {
       reviewId: 'review-1',
@@ -120,19 +120,6 @@ test('resolveHumanReviewResume resolves canonical responses and keeps legacy dec
       actionRef: { type: 'pending_action' },
       matcher: { type: 'policy_hook' },
     }],
-  );
-
-  assert.deepEqual(
-    resolveHumanReviewResume(samplePendingReview(), {
-      decisions: [{ type: 'approve' }],
-    }),
-    {
-      reviewId: 'review-1',
-      optionId: 'legacy.approve',
-      decision: { type: 'approve' },
-      effects: [],
-      display: { label: 'Approve' },
-    },
   );
 });
 
@@ -146,7 +133,13 @@ test('resolveHumanReviewResponse rejects stale review responses', () => {
   );
 });
 
-test('resolveHumanReviewResume does not fall back to legacy decisions for canonical-shaped resumes', () => {
+test('resolveHumanReviewResume rejects legacy decisions', () => {
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      decisions: [{ type: 'approve' }],
+    }),
+    'invalid_response',
+  );
   assertResolutionError(
     () => resolveHumanReviewResume(samplePendingReview(), {
       reviewId: 'old-review',

@@ -60,6 +60,10 @@ import {
 import {
   readFirstHumanReviewDecision,
 } from './orchestrator/humanReview';
+import {
+  resolveHumanReviewResponse,
+  ReviewResponseResolutionError,
+} from './orchestrator/review/reviewResponseResolver';
 import { buildReviewSpec, type HumanReviewInterruptPayload } from './orchestrator/review/reviewSpec';
 import {
   reuseOrAppendTurnDelegation,
@@ -231,6 +235,7 @@ function buildIterationLimitReviewPayload(params: {
   return {
     kind: 'review',
     review: buildReviewSpec({
+      id: `iteration-limit-${params.iterationCount}-${params.maxIterations}`,
       view: {
         kind: 'plain',
         title: 'Iteration limit reached',
@@ -281,6 +286,47 @@ function buildInvalidIterationLimitReviewPayload(
       },
     },
   };
+}
+
+function readReviewResponseValue(value: unknown) {
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  if (!record) return null;
+  const reviewId = typeof record.reviewId === 'string' && record.reviewId.trim()
+    ? record.reviewId.trim()
+    : null;
+  const selectedOptionId = typeof record.selectedOptionId === 'string' && record.selectedOptionId.trim()
+    ? record.selectedOptionId.trim()
+    : null;
+  const input = record.input && typeof record.input === 'object' && !Array.isArray(record.input)
+    ? record.input as Record<string, unknown>
+    : null;
+  return reviewId && selectedOptionId
+    ? {
+        reviewId,
+        selectedOptionId,
+        ...(input ? { input } : {}),
+      }
+    : null;
+}
+
+function resolveIterationLimitReviewDecision(payload: HumanReviewInterruptPayload, resume: unknown) {
+  const response = readReviewResponseValue(resume);
+  if (response) {
+    try {
+      return resolveHumanReviewResponse({
+        requestId: 'iteration_limit',
+        reviewSpec: payload.review,
+      }, response).decision;
+    } catch (error) {
+      if (!(error instanceof ReviewResponseResolutionError)) {
+        throw error;
+      }
+      return null;
+    }
+  }
+  return readFirstHumanReviewDecision(resume);
 }
 
 // --- Graph builder ---
@@ -413,11 +459,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         maxIterations: maxIter,
         delegationSummary,
       });
-      let decision = readFirstHumanReviewDecision(interrupt(reviewPayload));
+      let decision = resolveIterationLimitReviewDecision(reviewPayload, interrupt(reviewPayload));
       while (!decision) {
-        decision = readFirstHumanReviewDecision(interrupt(
-          buildInvalidIterationLimitReviewPayload(reviewPayload),
-        ));
+        decision = resolveIterationLimitReviewDecision(
+          reviewPayload,
+          interrupt(buildInvalidIterationLimitReviewPayload(reviewPayload)),
+        );
       }
       if (decision.type !== 'approve') {
         return {

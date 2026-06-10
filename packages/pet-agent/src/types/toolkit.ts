@@ -10,6 +10,7 @@ import type {
 import type { ToolAuthorizationRecord } from '../agent/orchestrator/review/reviewAuthorizations';
 import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { CapabilityAvailabilityConfig } from './capability';
+import type { SubagentRuntimeEvent } from './subagent';
 
 export type ToolkitContext = {
   models: AgentModels;
@@ -18,6 +19,7 @@ export type ToolkitContext = {
   execution?: AgentExecution;
   toolAuthorizations?: ToolAuthorizationRecord[];
   recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;
+  emitRuntimeEvent?: (event: SubagentRuntimeEvent) => void | Promise<void>;
 };
 
 export type ToolkitResource<T> = T | ((ctx: ToolkitContext) => T | Promise<T>);

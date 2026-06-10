@@ -25,8 +25,10 @@ export type {
 export type {
   SubagentInput,
   SubagentResult,
+  SubagentRuntimeEvent,
   SubagentToolEvent,
   SubagentToolEventHandler,
+  SubagentToolLifecycleEvent,
   SubagentToolOperationMetadata,
 } from './types/subagent';
 

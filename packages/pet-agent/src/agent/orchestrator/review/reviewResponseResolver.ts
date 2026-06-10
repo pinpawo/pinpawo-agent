@@ -5,7 +5,6 @@ import type {
   ReviewResponse,
   ReviewResponseResolution,
 } from './reviewSpec';
-import { readFirstHumanReviewDecision } from '../humanReview';
 
 export type ReviewResponseResolutionErrorCode =
   | 'stale_review'
@@ -169,13 +168,6 @@ export function resolveHumanReviewResponse(
   };
 }
 
-function formatLegacyDecisionLabel(decision: ReviewResponseResolution['decision']) {
-  if (decision.type === 'approve') return 'Approve';
-  if (decision.type === 'reject') return decision.message ?? 'Reject';
-  if (decision.type === 'edit') return 'Edit';
-  return decision.message;
-}
-
 export function resolveHumanReviewResume(
   pendingReview: PendingReviewState,
   resume: unknown,
@@ -185,39 +177,10 @@ export function resolveHumanReviewResume(
     return resolveHumanReviewResponse(pendingReview, response);
   }
 
-  if (hasCanonicalReviewResponseFields(resume)) {
-    throw new ReviewResponseResolutionError(
-      'invalid_response',
-      `Review resume for pending review "${pendingReview.reviewSpec.id}" is an invalid canonical response.`,
-    );
-  }
-
-  const decision = readFirstHumanReviewDecision(resume);
-  if (!decision) {
-    throw new ReviewResponseResolutionError(
-      'invalid_response',
-      `Review resume for pending review "${pendingReview.reviewSpec.id}" is not a canonical response or legacy decision.`,
-    );
-  }
-  if (decision.type === 'edit') {
-    return {
-      reviewId: pendingReview.reviewSpec.id,
-      optionId: 'legacy.edit',
-      decision,
-      effects: [],
-      display: {
-        label: 'Edit',
-      },
-    };
-  }
-  return {
-    reviewId: pendingReview.reviewSpec.id,
-    optionId: `legacy.${decision.type}`,
-    decision,
-    effects: [],
-    display: {
-      label: formatLegacyDecisionLabel(decision),
-      ...(decision.type === 'respond' ? { userInputMessage: decision.message } : {}),
-    },
-  };
+  throw new ReviewResponseResolutionError(
+    'invalid_response',
+    hasCanonicalReviewResponseFields(resume)
+      ? `Review resume for pending review "${pendingReview.reviewSpec.id}" is an invalid canonical response.`
+      : `Review resume for pending review "${pendingReview.reviewSpec.id}" is not a canonical response.`,
+  );
 }

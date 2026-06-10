@@ -1,7 +1,7 @@
 import {
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
-  type HumanReviewDecision,
+  type ReviewResponse,
 } from '@pinpawo/pet-agent';
 import type { HumanReviewResponseMessage } from './localAgentProtocol';
 import {
@@ -16,12 +16,17 @@ type Log = (message: string) => void;
 
 export type StudioReviewConnection = object;
 
-function resolveStudioReviewDecision(
+function resolveStudioReviewResponse(
   pending: PendingReview,
   msg: HumanReviewResponseMessage,
-): HumanReviewDecision | null {
+): ReviewResponse | null {
   if (msg.reviewId && msg.selectedOptionId) {
-    const resolution = resolveHumanReviewResponse({
+    const response = {
+      reviewId: msg.reviewId,
+      selectedOptionId: msg.selectedOptionId,
+      ...(msg.input ? { input: msg.input } : {}),
+    };
+    resolveHumanReviewResponse({
       requestId: msg.requestId,
       reviewSpec: pending.reviewSpec,
       pendingAction: {
@@ -29,12 +34,8 @@ function resolveStudioReviewDecision(
         toolName: 'studio_review',
         args: {},
       },
-    }, {
-      reviewId: msg.reviewId,
-      selectedOptionId: msg.selectedOptionId,
-      ...(msg.input ? { input: msg.input } : {}),
-    });
-    return resolution.decision;
+    }, response);
+    return response;
   }
 
   return null;
@@ -61,9 +62,9 @@ export class LocalServerStudioReviewRouter<Connection extends StudioReviewConnec
     if (!slot?.current) {
       return false;
     }
-    let decision: HumanReviewDecision | null = null;
+    let response: ReviewResponse | null = null;
     try {
-      decision = resolveStudioReviewDecision(slot.current, msg);
+      response = resolveStudioReviewResponse(slot.current, msg);
     } catch (err) {
       if (err instanceof ReviewResponseResolutionError) {
         log(
@@ -73,16 +74,16 @@ export class LocalServerStudioReviewRouter<Connection extends StudioReviewConnec
       }
       throw err;
     }
-    if (!decision) {
+    if (!response) {
       log(
         `[local-server] rejected studio HITL answer (reviewId=${slot.current.reviewId}, reason=missing_decision)`,
       );
       return true;
     }
     log(
-      `[local-server] route ${msg.type} as studio HITL answer (reviewId=${slot.current.reviewId}, decision=${decision.type})`,
+      `[local-server] route ${msg.type} as studio HITL answer (reviewId=${slot.current.reviewId}, option=${response.selectedOptionId})`,
     );
-    resolveReview(slot, decision);
+    resolveReview(slot, response);
     return true;
   }
 

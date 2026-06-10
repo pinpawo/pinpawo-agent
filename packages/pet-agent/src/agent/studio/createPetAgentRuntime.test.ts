@@ -4,9 +4,6 @@ import { AIMessage } from '@langchain/core/messages';
 import { isCommand } from '@langchain/langgraph';
 
 import { createPetAgentRuntime } from './createPetAgentRuntime';
-import {
-  type HumanReviewDecision,
-} from '../orchestrator/humanReview';
 import type { OrchestratorGraph } from '../createAgentRuntime';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { HumanReviewerRequest } from './types';
@@ -78,7 +75,10 @@ test('humanReviewer: single interrupt → approve → reply', async () => {
     graph,
     humanReviewer: async (req) => {
       requests.push(req);
-      return { type: 'approve' };
+      return {
+        reviewId: req.review.id,
+        selectedOptionId: 'approve',
+      };
     },
   });
 
@@ -103,7 +103,10 @@ test('humanReviewer: multi-round interrupt loops until resolved', async () => {
     graph,
     humanReviewer: async (req) => {
       requests.push(req);
-      return { type: 'approve' };
+      return {
+        reviewId: req.review.id,
+        selectedOptionId: 'approve',
+      };
     },
   });
 
@@ -125,7 +128,10 @@ test('humanReviewer: canonical review interrupt → approve → reply', async ()
     graph,
     humanReviewer: async (req) => {
       requests.push(req);
-      return { type: 'approve' };
+      return {
+        reviewId: req.review.id,
+        selectedOptionId: 'approve',
+      };
     },
   });
 
@@ -154,17 +160,20 @@ test('humanReviewer: missing reviewer + interrupt → invoke throws', async () =
   );
 });
 
-test('humanReviewer: resume call passes Command with decision', async () => {
+test('humanReviewer: resume call passes canonical response Command', async () => {
   const { graph, calls } = makeStubGraph([
     { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
-    { messages: [new AIMessage('rejected')] },
+    { messages: [new AIMessage('approved')] },
   ]);
 
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
     graph,
-    humanReviewer: async () => ({ type: 'reject', message: 'not now' }),
+    humanReviewer: async () => ({
+      reviewId: 'review-direct',
+      selectedOptionId: 'approve',
+    }),
   });
 
   await runtime.invoke({ brief: 'go' });
@@ -173,12 +182,10 @@ test('humanReviewer: resume call passes Command with decision', async () => {
   // 第一次调用应为初始 turn input(普通 object,带 messages);Command 实例的是第二次。
   assert.equal(isCommand(calls[0].input), false);
   assert.equal(isCommand(calls[1].input), true);
-  const resume = (calls[1].input as { resume: { decisions: HumanReviewDecision[] } }).resume;
-  assert.equal(resume.decisions[0]?.type, 'reject');
-  assert.equal(
-    (resume.decisions[0] as Extract<HumanReviewDecision, { type: 'reject' }>).message,
-    'not now',
-  );
+  assert.deepEqual((calls[1].input as { resume: unknown }).resume, {
+    reviewId: 'review-direct',
+    selectedOptionId: 'approve',
+  });
 });
 
 test('humanReviewer: unknown interrupt is not treated as HITL', async () => {
@@ -193,9 +200,12 @@ test('humanReviewer: unknown interrupt is not treated as HITL', async () => {
     models: fakeModels(),
     actor: fakeActor(),
     graph,
-    humanReviewer: async () => {
+    humanReviewer: async (req) => {
       reviewerCalled = true;
-      return { type: 'approve' };
+      return {
+        reviewId: req.review.id,
+        selectedOptionId: 'approve',
+      };
     },
   });
 

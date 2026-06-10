@@ -48,7 +48,7 @@ test('createPendingReviewSlot starts empty', () => {
 
 test('resolveReview / rejectReview return false when slot empty', () => {
   const slot = createPendingReviewSlot();
-  assert.equal(resolveReview(slot, { type: 'approve' }), false);
+  assert.equal(resolveReview(slot, { reviewId: 'review-direct', selectedOptionId: 'approve' }), false);
   assert.equal(rejectReview(slot, new Error('x')), false);
 });
 
@@ -77,8 +77,8 @@ test('createWsHumanReviewer forwards canonical review specs unchanged', async ()
   assert.equal(event.review, request.review);
   assert.equal(event.payload, request);
 
-  assert.equal(resolveReview(slot, { type: 'approve' }), true);
-  assert.equal((await promise).type, 'approve');
+  assert.equal(resolveReview(slot, { reviewId: 'review-direct', selectedOptionId: 'approve' }), true);
+  assert.deepEqual(await promise, { reviewId: 'review-direct', selectedOptionId: 'approve' });
 });
 
 test('createWsHumanReviewer rejects when slot already occupied', async () => {

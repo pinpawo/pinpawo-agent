@@ -170,7 +170,7 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
 test('runChatSession resumes explicit response after state update clears interrupt payload', async () => {
   const emittedEvents: LocalAgentEvent[] = [];
   const streamInputs: unknown[] = [];
-  const resume = { decisions: [{ type: 'approve' }] };
+  const resume = { reviewId: 'review-1', selectedOptionId: 'approve' };
   const finalMessages = [new AIMessage('approved')];
   const setup = {
     graphKey: 'test',
@@ -236,6 +236,95 @@ test('runChatSession resumes explicit response after state update clears interru
     emittedEvents.some((event) => event.type === 'human_review.requested'),
     false,
   );
+});
+
+test('runChatSession maps pending review free text to canonical respond resume', async () => {
+  const streamInputs: unknown[] = [];
+  const review = {
+    id: 'review-respond',
+    schemaVersion: 1,
+    view: {
+      kind: 'plain' as const,
+      body: 'Need guidance?',
+    },
+    options: [{
+      id: 'respond',
+      label: 'Respond',
+      input: {
+        kind: 'text' as const,
+        key: 'message' as const,
+        required: true,
+      },
+      decision: { type: 'respond' as const, messageInputKey: 'message' as const },
+    }],
+  };
+  const finalMessages = [new AIMessage('continued')];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+  let getStateCalls = 0;
+  const graphService = {
+    async getState() {
+      getStateCalls += 1;
+      return getStateCalls === 1
+        ? {
+            tasks: [{
+              interrupts: [{
+                value: {
+                  kind: 'review',
+                  review,
+                },
+              }],
+            }],
+            values: { messages: [] },
+          }
+        : {
+            tasks: [],
+            values: { messages: finalMessages },
+          };
+    },
+    buildResumeCommand(value: unknown) {
+      return { kind: 'resume-command', value };
+    },
+    async *stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
+      streamInputs.push(inputOverride);
+      yield [
+        'values',
+        {
+          messages: finalMessages,
+        },
+      ];
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      requestId: 'req-1',
+      message: '请先解释风险',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: () => {},
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'continued' });
+  assert.deepEqual(streamInputs, [{
+    kind: 'resume-command',
+    value: {
+      reviewId: 'review-respond',
+      selectedOptionId: 'respond',
+      input: { message: '请先解释风险' },
+    },
+  }]);
 });
 
 test('runChatSession emits token usage in completed event', async () => {

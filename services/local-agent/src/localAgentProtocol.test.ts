@@ -15,7 +15,7 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
       requestId: 'req-1',
       message: 'hello',
       userId: 'user-1',
-      resume: { decisions: [{ type: 'approve' }] },
+      resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
     })),
     {
       type: 'chat_request',
@@ -23,7 +23,7 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
       message: 'hello',
       petId: undefined,
       userId: 'user-1',
-      resume: { decisions: [{ type: 'approve' }] },
+      resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
     },
   );
   assert.equal(parseLocalAgentClientMessage('{bad json'), null);

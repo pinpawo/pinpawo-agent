@@ -1,5 +1,4 @@
 import { WebSocket } from 'ws';
-import { HumanMessage } from '@langchain/core/messages';
 import { loadAgentContext } from './contextLoader';
 import {
   sendLocalAgentEvent,
@@ -121,10 +120,6 @@ export class LocalServerChatHandler {
         inflight,
         createOperationRegistryForAgentSetup(setup),
       );
-      setup.input.messages = [
-        ...setup.input.messages.slice(0, -1),
-        new HumanMessage(message),
-      ];
       setup.input.signal = controller.signal;
       const result = await runChatSession({
         request: msg,

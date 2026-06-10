@@ -110,6 +110,9 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
   });
 
   assert.deepEqual(result, { status: 'completed', reply: 'done' });
+  assert.equal(setup.input.messages.length, 1);
+  assert.equal(setup.input.messages[0]?._getType(), 'human');
+  assert.equal(readFinalMessageText(setup.input.messages[0] ?? {}), 'hello');
   assert.deepEqual(emittedTools, [
     {
       event: 'on_tool_start',
@@ -330,6 +333,7 @@ test('runChatSession resumes explicit response after state update clears interru
     kind: 'resume-command',
     value: resume,
   }]);
+  assert.deepEqual(setup.input.messages, []);
   assert.equal(
     emittedEvents.some((event) => event.type === 'human_review.requested'),
     false,
@@ -426,6 +430,7 @@ test('runChatSession does not map pending review free text to review response', 
 
   assert.deepEqual(result, { status: 'waiting_human' });
   assert.deepEqual(streamInputs, []);
+  assert.deepEqual(setup.input.messages, []);
   assert.equal(emittedEvents[0]?.type, 'human_review.requested');
   assert.deepEqual(
     emittedEvents[0]?.type === 'human_review.requested' ? emittedEvents[0].review : null,

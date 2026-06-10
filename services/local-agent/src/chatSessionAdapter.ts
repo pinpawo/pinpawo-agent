@@ -1,4 +1,5 @@
 import type { BaseMessage } from '@langchain/core/messages';
+import { HumanMessage } from '@langchain/core/messages';
 import {
   isOrchestratorInternalAiStreamNode,
   type SubagentToolEvent,
@@ -174,6 +175,12 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   const graphInput = shouldResume
     ? graphService.buildResumeCommand(resumeValue)
     : undefined;
+  if (!shouldResume) {
+    setup.input.messages = [
+      ...setup.input.messages.slice(0, -1),
+      new HumanMessage(message),
+    ];
+  }
 
   setup.input.onToolEvent = (event) => {
     if (isCurrent()) {

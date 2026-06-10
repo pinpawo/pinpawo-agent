@@ -1,5 +1,5 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import type { SubagentInput, SubagentResult, SubagentToolEvent } from '../types/subagent';
+import type { SubagentInput, SubagentResult, SubagentToolLifecycleEvent } from '../types/subagent';
 import { createAgent } from 'langchain';
 import { SubagentToolEventTracker } from './toolEventTracker';
 
@@ -32,13 +32,21 @@ function readMessagesFromValuesChunk(chunk: unknown): BaseMessage[] | null {
   return null;
 }
 
-function isSubagentToolEvent(payload: unknown): payload is SubagentToolEvent {
+function isSubagentToolLifecycleEvent(payload: unknown): payload is SubagentToolLifecycleEvent {
+  const event = payload && typeof payload === 'object'
+    ? (payload as { event?: unknown }).event
+    : null;
   return Boolean(
     payload
       && typeof payload === 'object'
       && 'event' in payload
       && 'name' in payload
-      && typeof (payload as { event?: unknown }).event === 'string'
+      && (
+        event === 'on_tool_start'
+        || event === 'on_tool_event'
+        || event === 'on_tool_end'
+        || event === 'on_tool_error'
+      )
       && typeof (payload as { name?: unknown }).name === 'string',
   );
 }
@@ -56,7 +64,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
 
   let latestMessages = input.messages;
   const toolEvents = new SubagentToolEventTracker();
-  const emitToolEvent = async (event: SubagentToolEvent) => {
+  const emitToolEvent = async (event: SubagentToolLifecycleEvent) => {
     const operation = event.operation ?? input.operations?.[event.name];
     await input.onToolEvent?.(toolEvents.accept(operation ? { ...event, operation } : event));
   };
@@ -83,7 +91,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
         if (mode === 'values') {
           latestMessages = readMessagesFromValuesChunk(payload) ?? latestMessages;
         }
-        if (mode === 'tools' && isSubagentToolEvent(payload)) {
+        if (mode === 'tools' && isSubagentToolLifecycleEvent(payload)) {
           await emitToolEvent(payload);
         }
         continue;

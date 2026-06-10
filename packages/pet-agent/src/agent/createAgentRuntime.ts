@@ -687,6 +687,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       execution,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
+      emitRuntimeEvent: onToolEvent,
     };
     const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
     const runtimeInstructions = await resolveInstructions(runtime, { models: config.models, actor }, execution);
@@ -778,6 +779,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       execution,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
+      emitRuntimeEvent: onToolEvent,
     });
     const toolList = [...toolkitResources.tools];
     validateUniqueToolNames(toolList);

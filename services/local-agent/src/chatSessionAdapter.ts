@@ -1,5 +1,9 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import { isOrchestratorInternalAiStreamNode } from '@pinpawo/pet-agent';
+import {
+  isOrchestratorInternalAiStreamNode,
+  type SubagentToolEvent,
+  type SubagentToolLifecycleEvent,
+} from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { LocalAgentGraphService } from './agentGraphService';
 import {
@@ -77,6 +81,43 @@ function throwUnexpectedInterruptPayload(): never {
   throw new Error('Received an interrupt without canonical human review payload.');
 }
 
+function isToolLifecycleEvent(event: SubagentToolEvent): event is SubagentToolLifecycleEvent {
+  return event.event === 'on_tool_start'
+    || event.event === 'on_tool_event'
+    || event.event === 'on_tool_end'
+    || event.event === 'on_tool_error';
+}
+
+function readRuntimeEventData(event: SubagentToolEvent): Record<string, unknown> | null {
+  return event.event === 'on_runtime_event'
+    && event.data
+    && typeof event.data === 'object'
+    && !Array.isArray(event.data)
+    ? event.data as Record<string, unknown>
+    : null;
+}
+
+function formatToolAuthorizationNotice(event: SubagentToolEvent): string | null {
+  if (event.event !== 'on_runtime_event' || event.name !== 'tool_authorization_recorded') {
+    return null;
+  }
+  const data = readRuntimeEventData(event);
+  const authorizations = Array.isArray(data?.authorizations) ? data.authorizations : [];
+  const toolNames = [...new Set(authorizations
+    .map((item) => item && typeof item === 'object'
+      ? (item as { toolName?: unknown }).toolName
+      : null)
+    .filter((toolName): toolName is string => typeof toolName === 'string' && toolName.trim().length > 0))];
+
+  if (toolNames.length === 1) {
+    return `已授权当前会话中的 ${toolNames[0]} 操作。`;
+  }
+  if (toolNames.length > 1) {
+    return `已授权当前会话中的 ${toolNames.length} 个工具操作。`;
+  }
+  return '已授权当前会话中的工具操作。';
+}
+
 export async function runChatSession(options: ChatSessionAdapterOptions): Promise<ChatSessionResult> {
   const { request, setup, graphService, isCurrent, finishInterrupted, emitEvent, emitToolEvent } = options;
   const { requestId, message } = request;
@@ -104,7 +145,18 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   setup.input.onToolEvent = (event) => {
     if (isCurrent()) {
-      emitToolEvent(event);
+      const notice = formatToolAuthorizationNotice(event);
+      if (notice) {
+        emitEvent({
+          type: 'system.notice',
+          requestId,
+          message: notice,
+        });
+        return;
+      }
+      if (isToolLifecycleEvent(event)) {
+        emitToolEvent(event as StreamToolsPayload);
+      }
     }
   };
 

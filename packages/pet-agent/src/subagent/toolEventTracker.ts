@@ -1,9 +1,9 @@
-import type { SubagentToolEvent } from '../types/subagent';
+import type { SubagentToolLifecycleEvent } from '../types/subagent';
 
 type ActiveToolEvent = {
   id: string;
   name: string;
-  event: Extract<SubagentToolEvent, { event: 'on_tool_start' | 'on_tool_event' }>;
+  event: Extract<SubagentToolLifecycleEvent, { event: 'on_tool_start' | 'on_tool_event' }>;
 };
 
 export class SubagentToolEventTracker {
@@ -11,12 +11,12 @@ export class SubagentToolEventTracker {
   private readonly activeById = new Map<string, ActiveToolEvent>();
   private readonly activeIdsByName = new Map<string, string[]>();
 
-  accept(event: SubagentToolEvent): SubagentToolEvent {
+  accept(event: SubagentToolLifecycleEvent): SubagentToolLifecycleEvent {
     const id = this.resolveToolCallId(event);
     const normalized = {
       ...event,
       toolCallId: id,
-    } as SubagentToolEvent;
+    } as SubagentToolLifecycleEvent;
     this.track(normalized, id);
     return normalized;
   }
@@ -24,7 +24,7 @@ export class SubagentToolEventTracker {
   finishActive(
     outcome: 'completed' | 'failed',
     error: unknown = 'subagent finished before tool emitted a terminal event',
-  ): SubagentToolEvent[] {
+  ): SubagentToolLifecycleEvent[] {
     const active = [...this.activeById.values()];
     this.activeById.clear();
     this.activeIdsByName.clear();
@@ -45,7 +45,7 @@ export class SubagentToolEventTracker {
         });
   }
 
-  private resolveToolCallId(event: SubagentToolEvent) {
+  private resolveToolCallId(event: SubagentToolLifecycleEvent) {
     const explicitId = event.toolCallId?.trim();
     if (explicitId) {
       return explicitId;
@@ -58,7 +58,7 @@ export class SubagentToolEventTracker {
     return `subagent-tool-${this.sequence}`;
   }
 
-  private track(event: SubagentToolEvent, id: string) {
+  private track(event: SubagentToolLifecycleEvent, id: string) {
     if (event.event === 'on_tool_start' || event.event === 'on_tool_event') {
       this.activeById.set(id, { id, name: event.name, event });
       const ids = this.activeIdsByName.get(event.name) ?? [];

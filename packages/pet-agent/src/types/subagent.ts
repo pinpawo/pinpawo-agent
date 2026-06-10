@@ -17,7 +17,7 @@ type SubagentToolEventMetadata = {
   operation?: SubagentToolOperationMetadata;
 };
 
-export type SubagentToolEvent =
+export type SubagentToolLifecycleEvent =
   | ({
       event: 'on_tool_start';
       toolCallId?: string;
@@ -42,6 +42,14 @@ export type SubagentToolEvent =
       name: string;
       error: unknown;
     } & SubagentToolEventMetadata);
+
+export type SubagentRuntimeEvent = {
+  event: 'on_runtime_event';
+  name: string;
+  data: unknown;
+};
+
+export type SubagentToolEvent = SubagentToolLifecycleEvent | SubagentRuntimeEvent;
 
 export type SubagentToolEventHandler = (event: SubagentToolEvent) => void | Promise<void>;
 

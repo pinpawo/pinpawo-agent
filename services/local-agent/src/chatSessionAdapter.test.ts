@@ -94,6 +94,71 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
   );
 });
 
+test('runChatSession maps authorization runtime events to system notices', async () => {
+  const emittedTools: StreamToolsPayload[] = [];
+  const emittedEvents: LocalAgentEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+
+  const graphService = {
+    async getState() {
+      return { tasks: [] };
+    },
+    async *stream(streamSetup: AgentChannelSetup) {
+      streamSetup.input.onToolEvent?.({
+        event: 'on_runtime_event',
+        name: 'tool_authorization_recorded',
+        data: {
+          authorizations: [{
+            toolName: 'run_shell',
+            matcher: { type: 'shell_pattern', value: 'git status' },
+            createdAt: '2026-01-01T00:00:00.000Z',
+          }],
+        },
+      });
+      yield [
+        'values',
+        {
+          messages: [new AIMessage('done')],
+        },
+      ];
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: (event) => {
+      emittedTools.push(event);
+    },
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'done' });
+  assert.deepEqual(emittedTools, []);
+  const notice = emittedEvents.find((event) => event.type === 'system.notice');
+  assert.equal(notice?.requestId, 'req-1');
+  assert.equal(
+    notice?.type === 'system.notice' ? notice.message : '',
+    '已授权当前会话中的 run_shell 操作。',
+  );
+});
+
 test('runChatSession forwards canonical review interrupt specs unchanged', async () => {
   const emittedEvents: LocalAgentEvent[] = [];
   const setup = {

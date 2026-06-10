@@ -631,6 +631,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
   }];
 
   let routeCallCount = 0;
+  const runtimeEvents: unknown[] = [];
   const routeModel = {
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
@@ -681,6 +682,9 @@ test('toolkit review policy records authorization through orchestrator runtime t
       actor: testActor,
       capabilities: [],
       toolkits,
+      onToolEvent: (event: unknown) => {
+        runtimeEvents.push(event);
+      },
     },
   };
   const input = buildOrchestratorTurnInput([new HumanMessage('run git status')]);
@@ -705,6 +709,22 @@ test('toolkit review policy records authorization through orchestrator runtime t
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.deepEqual(finalState.toolAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
+    toolName: 'run_shell',
+    matcher: { type: 'shell_pattern', value: 'git status' },
+  }]);
+  const authorizationEvents = runtimeEvents.filter((event) =>
+    event
+    && typeof event === 'object'
+    && (event as { event?: unknown }).event === 'on_runtime_event'
+    && (event as { name?: unknown }).name === 'tool_authorization_recorded');
+  assert.equal(authorizationEvents.length, 1);
+  const eventData = (authorizationEvents[0] as { data?: { authorizations?: unknown[] } }).data;
+  const eventAuthorizations = eventData?.authorizations as Array<{
+    toolName: string;
+    matcher: unknown;
+    createdAt: string;
+  }>;
+  assert.deepEqual(eventAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
     toolName: 'run_shell',
     matcher: { type: 'shell_pattern', value: 'git status' },
   }]);

@@ -301,6 +301,11 @@ async function recordToolAuthorizations(
   for (const authorization of authorizations) {
     await ctx.recordToolAuthorization(authorization);
   }
+  await ctx.emitRuntimeEvent?.({
+    event: 'on_runtime_event',
+    name: 'tool_authorization_recorded',
+    data: { authorizations },
+  });
 }
 
 function wrapToolkitTool(

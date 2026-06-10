@@ -60,8 +60,30 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'human_review_response',
       requestId: 'req-1',
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
       message: '批准',
       resume: { decisions: [{ type: 'approve' }] },
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
+      originSessionId: 'session-1',
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      reviewId: 'review-1',
+      selectedOptionId: 'respond',
+      input: 'not-an-object',
     })),
     null,
   );
@@ -223,6 +245,49 @@ test('parseLocalAgentServerMessage accepts canonical human_review.requested revi
         },
       },
     },
+  );
+});
+
+test('parseLocalAgentServerMessage rejects legacy human_review.requested fields', () => {
+  const canonicalEvent = {
+    type: 'human_review.requested',
+    requestId: 'req-1',
+    review: {
+      id: 'review-1',
+      schemaVersion: 1,
+      view: {
+        kind: 'plain',
+        body: 'Run command?',
+      },
+      options: [{
+        id: 'approve',
+        label: 'Approve',
+        decision: { type: 'approve' },
+      }],
+    },
+  };
+
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        ...canonicalEvent,
+        prompt: 'Run command?',
+      },
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        ...canonicalEvent,
+        payload: { kind: 'review' },
+      },
+    })),
+    null,
   );
 });
 

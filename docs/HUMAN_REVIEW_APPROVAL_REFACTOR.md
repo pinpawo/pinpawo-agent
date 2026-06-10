@@ -262,6 +262,8 @@ type HumanReviewResponseMessage = {
 
 `reviewId` 用于 stale response 校验。客户端必须回传当前 `ReviewSpec.id`；local-agent transport 和 graph/tool runtime 都应拒绝与当前 pending review 不匹配的 `reviewId`。
 
+V1 response 是封闭协议面：除 `type`、`requestId`、`reviewId`、`selectedOptionId`、`input` 外，transport parser 必须拒绝额外字段。`message`、`resume`、`decisions`、`decision`、`effects`、`originSessionId` 等旧字段不能被忽略后继续传入 runtime。
+
 V1 action cardinality：
 
 - 一个 `ReviewSpec` 对应一个 pending tool action。
@@ -273,7 +275,7 @@ V1 response 不携带 `schemaVersion`，也不携带 `reviewVersion`。stale 校
 V1 field ownership：
 
 - `requestId`：transport route key，由 server 建立 request -> session/thread metadata。
-- `reviewId`：pending review key，由 graph/tool runtime 生成并保存在 pending state。local-agent server 也应该在 route metadata 中缓存 `requestId -> reviewId`，client 提交时先做 fast-path stale 校验；graph/tool runtime 仍然必须做权威校验。
+- `reviewId`：pending review key，由 graph/tool runtime 在 interrupt payload 中 materialize，并由 LangGraph checkpoint 持有当前 pending review 的控制态。local-agent server 也应该在 route metadata 中缓存 `requestId -> reviewId`，client 提交时先做 fast-path stale 校验；graph/tool runtime 仍然必须做权威校验。
 - `selectedOptionId`：用户选择的 option key。
 - `input`：selected option 声明过的用户输入；V1 只支持 `respond` 的 `input.message`。
 
@@ -920,9 +922,9 @@ services/local-agent/src/tui/
 ### PR 1c：升级 transport protocol
 
 - `human_review.requested` event 使用 canonical `review: ReviewSpec` 字段。
-- local-agent protocol parser 接受新 response 字段 `reviewId` / `selectedOptionId` / `input`。
-- local-agent server 缓存 `requestId -> { sessionId, threadId, reviewId, reviewSpec }` route metadata，并对 response 做 fast-path stale 校验。
-- canonical response 必须由 server 使用缓存的 `ReviewSpec` resolve 成 graph resume；client 不能直接用 `resume` 决定 runtime 行为。
+- local-agent protocol parser 只接受新 response 字段 `reviewId` / `selectedOptionId` / `input`，并拒绝旧的 `message` / `resume` / `decisions` / client session extras。
+- local-agent server 缓存 `requestId -> { sessionId, threadId, reviewId }` route metadata，并对 response 做 fast-path stale 校验。
+- canonical response 必须由 server 原样构造成 graph resume；decision/effects 只能由 graph/tool runtime 使用当前 interrupt payload / `ReviewResolutionContext` resolve。client 不能直接用 `resume` 决定 runtime 行为。
 - 保持现有 UI 行为不变。
 - 测试覆盖 canonical response、transport stale short-circuit、invalid option retry、session/thread route mismatch。
 
@@ -963,8 +965,8 @@ services/local-agent/src/tui/
 - graph/tool runtime 校验 session/thread、requestId、reviewId、option id 后才写入 authorization state。
 - 同一个 pending review 多客户端并发提交时采用 first response wins，后续 stale/review-closed response 必须拒绝。
 - shell session authorization 只能由 graph pending review 中声明过的 option 触发。
-- reject/respond option 不能触发 session authorization；后续 edit option 即使前端异常提交，也不能触发 session authorization。
-- 现有 graph-level approve / reject / respond / edit decision 语义保持兼容；V1 TUI materialize approve/reject/respond，edit 后续扩展。
+- reject/respond option 不能触发 session authorization；后续如果扩展 edit option，即使前端异常提交，也不能触发 session authorization。
+- V1 graph-level decision 只支持 approve / reject / respond；旧 edit decision 不再作为 runtime fallback 保留。
 
 ## 11. 后续扩展
 

@@ -121,6 +121,11 @@ function readStringArray(record: Record<string, unknown>, key: string) {
     : null;
 }
 
+function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const allowed = new Set(allowedKeys);
+  return Object.keys(record).every((key) => allowed.has(key));
+}
+
 function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpec | null {
   const review = readRecord(record, key);
   if (!review) return null;
@@ -240,9 +245,11 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     };
   }
   if (type === 'human_review.requested') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'review', 'actor'])) return null;
     const review = readReviewSpec(record, 'review');
     const actor = readRecord(record, 'actor');
     if (!review) return null;
+    if (actor && !hasOnlyKeys(actor, ['petId'])) return null;
     return {
       type,
       requestId,
@@ -280,10 +287,12 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
     };
   }
   if (type === 'human_review_response') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'reviewId', 'selectedOptionId', 'input'])) return null;
     const requestId = readString(record, 'requestId');
     const reviewId = readOptionalString(record, 'reviewId');
     const selectedOptionId = readOptionalString(record, 'selectedOptionId');
     const input = readRecord(record, 'input');
+    if (record.input !== undefined && !input) return null;
     if (!requestId || !reviewId || !selectedOptionId) return null;
     return {
       type,

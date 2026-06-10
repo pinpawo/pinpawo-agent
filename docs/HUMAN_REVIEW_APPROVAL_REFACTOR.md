@@ -36,9 +36,9 @@ if ((actionName === 'shell' || actionName === 'run_shell') && command) {
 
 这让 TUI 组件知道了 local-agent tool 的名字和参数结构。后续如果 shell tool 改名、插件提供类似 shell 的 action，或 action 参数结构变化，UI 层都会受到影响。
 
-### 2.2 `human_review_response` 混合了多种语义
+### 2.2 `human_review_response` 曾经混合了多种语义
 
-当前 response 同时承载：
+重构前 response 同时承载：
 
 - 展示给用户看的 message。
 - graph resume decision。
@@ -919,7 +919,7 @@ services/local-agent/src/tui/
 - `human_review.requested` event 使用 canonical `review: ReviewSpec` 字段。
 - local-agent protocol parser 接受新 response 字段 `reviewId` / `selectedOptionId` / `input`。
 - local-agent server 缓存 `requestId -> { sessionId, threadId, reviewId, reviewSpec }` route metadata，并对 response 做 fast-path stale 校验。
-- canonical response 必须由 server 使用缓存的 `ReviewSpec` resolve 成 legacy graph resume；client 不能直接用 `resume` 决定 runtime 行为。
+- canonical response 必须由 server 使用缓存的 `ReviewSpec` resolve 成 graph resume；client 不能直接用 `resume` 决定 runtime 行为。
 - 保持现有 UI 行为不变。
 - 测试覆盖 canonical response、transport stale short-circuit、invalid option retry、session/thread route mismatch。
 

@@ -30,24 +30,6 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'chat_request', message: 'missing request' })), null);
 });
 
-test('parseLocalAgentClientMessage accepts explicit human review responses', () => {
-  assert.deepEqual(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'human_review_response',
-      requestId: 'req-1',
-      message: '批准',
-      resume: { decisions: [{ type: 'approve' }] },
-    })),
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      message: '批准',
-      resume: { decisions: [{ type: 'approve' }] },
-    },
-  );
-  assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
-});
-
 test('parseLocalAgentClientMessage accepts canonical human review response fields', () => {
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({
@@ -75,6 +57,16 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     })),
     null,
   );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      message: '批准',
+      resume: { decisions: [{ type: 'approve' }] },
+    })),
+    null,
+  );
+  assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
 });
 
 test('parseLocalAgentServerMessage rejects legacy server messages by default', () => {

@@ -2,9 +2,11 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
+import { isHumanReviewInterruptPayload, readPendingInterrupt } from './chatInterrupts';
 import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
 import type { LocalServerDeps } from './localServerTypes';
@@ -23,6 +25,11 @@ import {
 export type TuiHistoryMessage = {
   role: string;
   text: string;
+};
+
+export type ActivePendingReview = {
+  sessionId: string;
+  review: ReviewSpec;
 };
 
 export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'deleteThread'>;
@@ -172,6 +179,21 @@ export class LocalServerTuiSessionService {
     } catch (err) {
       console.warn('[local-server] failed to refresh TUI session summary:', err instanceof Error ? err.message : err);
     }
+  }
+
+  async readActivePendingReview(deps: LocalServerDeps): Promise<ActivePendingReview | null> {
+    const session = this.getActiveSession(deps.actorId);
+    const ctx = await this.loadContext(deps.actorId);
+    const setup = this.buildChatSetup(deps, ctx, session.threadId);
+    const snapshot = await this.graphService.getState(setup);
+    const pendingInterrupt = readPendingInterrupt(snapshot);
+    if (!pendingInterrupt || !isHumanReviewInterruptPayload(pendingInterrupt)) {
+      return null;
+    }
+    return {
+      sessionId: session.id,
+      review: pendingInterrupt.review,
+    };
   }
 
   async loadHistory(deps: LocalServerDeps) {

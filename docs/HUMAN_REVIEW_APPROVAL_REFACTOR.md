@@ -705,7 +705,7 @@ resolve response 和执行 effect 前必须校验：
 
 - `requestId` 能 resume 到唯一 pending graph thread/checkpoint。
 - `reviewId` 必须等于当前 pending review 的 `reviewSpec.id`；不匹配说明客户端提交了 stale response，必须拒绝。
-- session/thread 路由信息来自 server/runtime metadata，而不是 client extras。local-agent server 必须用自己保存的 `requestId -> { sessionId, threadId, reviewId }` 路由 pending review；如果当前连接/当前 TUI focus 的 session 与这条 pending route 不匹配，必须拒绝 resume，避免把 response 送到错误 checkpoint。
+- session/thread 路由信息来自 server/runtime metadata，而不是 client extras。local-agent server 可以用内存中的 `requestId -> { sessionId, threadId, reviewId }` route 做 fast-path 校验；如果 route 缺失，必须从当前 active session/thread 的 LangGraph checkpoint 读取 pending interrupt 来恢复当前 `ReviewSpec`，不能把内存 map 当成权威状态。恢复后仍然要校验 `reviewId`。如果当前连接/当前 TUI focus 的 session 与 pending route 不匹配，必须拒绝 resume，避免把 response 送到错误 checkpoint。
 - `originSessionId` 这类 client extras 不再作为 review response 协议字段。客户端不回传 session id 来证明自己，server/runtime 用自己保存的 request -> session/thread metadata 做路由和校验。
 - 同一个 pending review 多客户端并发提交时，采用 first response wins：第一个通过校验并成功 resume 的 response 消费 pending review；后续 response 因 `reviewId` 不再匹配当前 pending review 而拒绝。
 - `selectedOptionId` 存在于 pending spec。
@@ -765,7 +765,7 @@ V1 cancellation 默认策略：
 
 - 用户主动 `/interrupt`、TUI approval 面板中按 Esc、或 pending review 期间按 Ctrl+C：如果当前 session/thread 有 pending review，server 应 resume 当前 review 为 reject，例如 `{ type: 'reject', message: 'interrupted by user' }`，并清理本地 active run 状态。TUI 不能只本地关闭 approval 面板，因为 graph checkpoint 仍然停在同一个 interrupt。
 - WebSocket 断开：默认保留 graph checkpoint 中的 pending review，不自动 reject。下次客户端连接并恢复同一 session/thread 时，server 应重新发送当前 pending `ReviewSpec`。
-- TUI 进程崩溃或 local-agent 重启：只要 graph checkpoint 仍存在，pending review 继续保留；启动后通过 session/thread recovery 重新发现并展示。只有用户明确中断或 session 被显式删除时，才 resume reject 或删除对应 checkpoint。
+- TUI 进程崩溃或 local-agent 重启：只要 graph checkpoint 仍存在，pending review 继续保留；启动后通过 session/thread recovery 重新发现并展示。内存里的 `pendingReviewRoutes` 丢失不代表 review 已关闭，server 必须能从 checkpoint pending interrupt 重建 route。只有用户明确中断或 session 被显式删除时，才 resume reject 或删除对应 checkpoint。
 
 ### 6.9 Runtime entry points
 

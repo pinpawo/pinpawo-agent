@@ -1,4 +1,5 @@
 import { WebSocket } from 'ws';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
 import {
   sendLocalAgentEvent,
@@ -36,7 +37,7 @@ type PendingReviewRoute = {
   reviewId: string;
   rejectOptionId?: string;
   sessionId?: string;
-  review: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['review'];
+  review: ReviewSpec;
   actor?: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['actor'];
 };
 
@@ -54,6 +55,7 @@ export class LocalServerChatHandler {
   private readonly tuiSessions: LocalServerTuiSessionService;
   private readonly inflightRequests: InflightRequestController<WebSocket>;
   private readonly pendingReviewRoutes = new Map<string, PendingReviewRoute>();
+  private readonly consumedPendingReviewRequestIds = new Set<string>();
 
   constructor(options: {
     graphService: LocalAgentGraphService;
@@ -65,6 +67,21 @@ export class LocalServerChatHandler {
     this.inflightRequests = options.inflightRequests;
   }
 
+  private buildPendingReviewRoute(params: {
+    review: ReviewSpec;
+    sessionId?: string;
+    actor?: PendingReviewRoute['actor'];
+  }): PendingReviewRoute {
+    const rejectOption = params.review.options.find((option) => option.decision.type === 'reject');
+    return {
+      reviewId: params.review.id,
+      ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
+      ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+      review: params.review,
+      ...(params.actor ? { actor: params.actor } : {}),
+    };
+  }
+
   private recordPendingReviewRoute(
     event: LocalAgentEvent,
     deps: LocalServerDeps,
@@ -72,15 +89,51 @@ export class LocalServerChatHandler {
     if (event.type !== 'human_review.requested' || !event.review?.id) {
       return;
     }
+    this.consumedPendingReviewRequestIds.delete(event.requestId);
     const sessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
-    const rejectOption = event.review.options.find((option) => option.decision.type === 'reject');
-    this.pendingReviewRoutes.set(event.requestId, {
-      reviewId: event.review.id,
-      ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
-      ...(sessionId ? { sessionId } : {}),
+    this.pendingReviewRoutes.set(event.requestId, this.buildPendingReviewRoute({
       review: event.review,
+      ...(sessionId ? { sessionId } : {}),
       ...(event.actor ? { actor: event.actor } : {}),
-    });
+    }));
+  }
+
+  private async recoverPendingReviewRoute(
+    requestId: string,
+    deps: LocalServerDeps,
+  ) {
+    try {
+      const pending = await this.tuiSessions.readActivePendingReview(deps);
+      if (!pending) {
+        return null;
+      }
+      const route = this.buildPendingReviewRoute({
+        review: pending.review,
+        sessionId: pending.sessionId,
+      });
+      this.pendingReviewRoutes.set(requestId, route);
+      return route;
+    } catch (err) {
+      console.warn(
+        '[local-server] failed to recover pending human_review from checkpoint:',
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    }
+  }
+
+  private async readPendingReviewRoute(
+    requestId: string,
+    deps: LocalServerDeps,
+  ) {
+    const route = this.pendingReviewRoutes.get(requestId);
+    if (route) {
+      return route;
+    }
+    if (this.consumedPendingReviewRequestIds.has(requestId)) {
+      return null;
+    }
+    return this.recoverPendingReviewRoute(requestId, deps);
   }
 
   async handleChatRequest(
@@ -220,7 +273,7 @@ export class LocalServerChatHandler {
     msg: HumanReviewResponseMessage,
     deps: LocalServerDeps,
   ) {
-    const route = this.pendingReviewRoutes.get(msg.requestId);
+    const route = await this.readPendingReviewRoute(msg.requestId, deps);
     if (!route) {
       console.warn(
         `[local-server] human_review_response rejected: no pending review route for requestId=${msg.requestId}`,
@@ -260,6 +313,7 @@ export class LocalServerChatHandler {
     }
 
     this.pendingReviewRoutes.delete(msg.requestId);
+    this.consumedPendingReviewRequestIds.add(msg.requestId);
 
     await this.runChatRequest(ws, {
       requestId: msg.requestId,
@@ -280,7 +334,7 @@ export class LocalServerChatHandler {
     msg: InterruptRequestMessage,
     deps: LocalServerDeps,
   ) {
-    const route = this.pendingReviewRoutes.get(msg.requestId);
+    const route = await this.readPendingReviewRoute(msg.requestId, deps);
     if (!route) {
       return false;
     }
@@ -318,6 +372,7 @@ export class LocalServerChatHandler {
     }
 
     this.pendingReviewRoutes.delete(msg.requestId);
+    this.consumedPendingReviewRequestIds.add(msg.requestId);
     console.log(
       `[local-server] interrupt pending human_review requestId=${msg.requestId} reviewId=${route.reviewId}`,
     );

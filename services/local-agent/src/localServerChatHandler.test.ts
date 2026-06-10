@@ -23,6 +23,15 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
+    readActivePendingReview: async () => ({
+      sessionId: 'sess-active',
+      review: {
+        id: 'review-current',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Approve?' },
+        options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+      },
+    }),
   } as never;
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
@@ -81,6 +90,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
+    readActivePendingReview: async () => null,
   } as never;
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
@@ -141,6 +151,67 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
 });
 
+test('handleHumanReviewResponse recovers missing route from active checkpoint review', async () => {
+  const handleChatCalls: unknown[] = [];
+  const sentEvents: unknown[] = [];
+  const fakeWs = {
+    readyState: WebSocket.OPEN,
+    send: (data: string) => {
+      sentEvents.push(JSON.parse(data));
+    },
+  } as unknown as WebSocket;
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      readActivePendingReview: async () => ({
+        sessionId: 'sess-active',
+        review: {
+          id: 'review-current',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        },
+      }),
+    } as never,
+    inflightRequests: new InflightRequestController({
+      forceInterruptMs: 1000,
+      emitOperation: () => {},
+      sendControl: () => {},
+    }),
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
+    handleChatCalls.push(args);
+  };
+
+  await handler.handleHumanReviewResponse(
+    fakeWs,
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      reviewId: 'review-current',
+      selectedOptionId: 'approve',
+    },
+    { actorId: 'pet-1' } as never,
+  );
+
+  assert.equal(sentEvents.length, 0);
+  assert.equal(handleChatCalls.length, 1);
+  const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
+    requestId: string;
+    resume?: unknown;
+  };
+  assert.deepEqual(forwardedMessage, {
+    requestId: 'req-1',
+    resume: {
+      reviewId: 'review-current',
+      selectedOptionId: 'approve',
+    },
+  });
+});
+
 test('handleInterruptRequest resumes pending review with canonical reject option', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
@@ -155,6 +226,18 @@ test('handleInterruptRequest resumes pending review with canonical reject option
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
+      readActivePendingReview: async () => ({
+        sessionId: 'sess-active',
+        review: {
+          id: 'review-current',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [
+            { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
+            { id: 'reject', label: 'Reject', decision: { type: 'reject' } },
+          ],
+        },
+      }),
     } as never,
     inflightRequests: new InflightRequestController({
       forceInterruptMs: 1000,
@@ -228,6 +311,75 @@ test('handleInterruptRequest resumes pending review with canonical reject option
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
+});
+
+test('handleInterruptRequest recovers missing route from active checkpoint review', async () => {
+  const handleChatCalls: unknown[] = [];
+  const sentEvents: unknown[] = [];
+  const fakeWs = {
+    readyState: WebSocket.OPEN,
+    send: (data: string) => {
+      sentEvents.push(JSON.parse(data));
+    },
+  } as unknown as WebSocket;
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      readActivePendingReview: async () => ({
+        sessionId: 'sess-active',
+        review: {
+          id: 'review-current',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [
+            { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
+            { id: 'reject', label: 'Reject', decision: { type: 'reject' } },
+          ],
+        },
+      }),
+    } as never,
+    inflightRequests: new InflightRequestController({
+      forceInterruptMs: 1000,
+      emitOperation: () => {},
+      sendControl: () => {},
+    }),
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
+    handleChatCalls.push(args);
+  };
+
+  const handled = await handler.handleInterruptRequest(
+    fakeWs,
+    {
+      type: 'interrupt_request',
+      requestId: 'req-1',
+    },
+    { actorId: 'pet-1' } as never,
+  );
+
+  assert.equal(handled, true);
+  assert.equal(sentEvents.length, 0);
+  assert.equal(handleChatCalls.length, 1);
+  const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
+    requestId: string;
+    resume?: unknown;
+  };
+  const forwardedSource = (handleChatCalls[0] as unknown[])[3];
+  assert.deepEqual(forwardedMessage, {
+    requestId: 'req-1',
+    resume: {
+      reviewId: 'review-current',
+      selectedOptionId: 'reject',
+    },
+  });
+  assert.deepEqual(forwardedSource, {
+    type: 'interrupt_request',
+    reviewId: 'review-current',
+    selectedOptionId: 'reject',
+  });
 });
 
 test('handleInterruptRequest restores pending review when no reject option exists', async () => {

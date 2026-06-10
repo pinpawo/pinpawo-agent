@@ -649,6 +649,8 @@ respond option 提交：
 
 local-agent server 收到 `human_review_response` 后只构造 graph resume payload；不能把它转成新的 `chat_request`，也不能为了复用 chat 入口而追加空的 `HumanMessage`。review response 是对当前 interrupt 的 resume，不是新的用户消息。
 
+公开 WebSocket `chat_request` 不能携带 `resume` 字段。graph resume 是 server 内部执行入口，只能由 `human_review_response`、明确的 interrupt cancellation，或其他受控 server-side runtime 流程构造，不能作为 client transport 的通用 escape hatch。
+
 ### 6.5 Graph/tool runtime resolve response
 
 graph/tool runtime 根据当前 interrupt stack frame 中 materialized 的 review payload 解析：

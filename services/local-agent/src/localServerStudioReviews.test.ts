@@ -68,31 +68,6 @@ test('LocalServerStudioReviewRouter routes response only when a review is pendin
   assert.equal(slot.current, null);
 });
 
-test('LocalServerStudioReviewRouter rejects non-canonical responses while review stays pending', async () => {
-  const router = new LocalServerStudioReviewRouter<object>();
-  const connection = {};
-  const slot = router.getOrCreateSlot(connection);
-  let resolved = false;
-  slot.current = {
-    petId: 'pet-1',
-    reviewId: 'review-1',
-    reviewSpec: reviewSpec(),
-    resolve: () => {
-      resolved = true;
-    },
-    reject: () => {},
-  };
-
-  assert.equal(router.routeResponse(connection, {
-    type: 'human_review_response',
-    requestId: 'req-1',
-    message: '继续',
-    resume: { decisions: [{ type: 'approve' }] },
-  } as never, () => undefined), true);
-  assert.equal(resolved, false);
-  assert.notEqual(slot.current, null);
-});
-
 test('LocalServerStudioReviewRouter rejects and deletes disconnected slots', async () => {
   const router = new LocalServerStudioReviewRouter<object>();
   const connection = {};

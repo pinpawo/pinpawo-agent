@@ -13,7 +13,7 @@ import type { PetLocalConfig } from './petConfig';
  *
  * 设计立场:
  * - Studio 内 pet 触发 humanReviewer → 把 promise resolver 放进 slot
- * - chat_request handler 收到 resume → 调 resolveReview 喂给 resolver
+ * - local server 收到 canonical human_review_response → 调 resolveReview 喂给 resolver
  * - **同一 ws 连接上同时只允许一个 pending review**(顺序 dispatch + 单 user TUI 假设)
  *   如果 pet runtime 在前一个 review 未答时又触发 humanReviewer,直接 reject。
  */

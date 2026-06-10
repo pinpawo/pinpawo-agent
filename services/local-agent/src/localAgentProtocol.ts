@@ -11,7 +11,6 @@ export type ChatRequestMessage = {
   message: string;
   petId?: string;
   userId?: string;
-  resume?: unknown;
 };
 
 export type InterruptRequestMessage = {
@@ -274,6 +273,7 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
   const type = readString(record, 'type');
   if (type === 'ping') return { type: 'ping' };
   if (type === 'chat_request') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'message', 'petId', 'userId'])) return null;
     const requestId = readString(record, 'requestId');
     const message = readString(record, 'message');
     if (!requestId || message == null) return null;
@@ -283,7 +283,6 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
       message,
       petId: readOptionalString(record, 'petId'),
       userId: readOptionalString(record, 'userId'),
-      ...(record.resume !== undefined ? { resume: record.resume } : {}),
     };
   }
   if (type === 'human_review_response') {

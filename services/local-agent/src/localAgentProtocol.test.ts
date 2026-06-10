@@ -15,7 +15,6 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
       requestId: 'req-1',
       message: 'hello',
       userId: 'user-1',
-      resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
     })),
     {
       type: 'chat_request',
@@ -23,11 +22,19 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
       message: 'hello',
       petId: undefined,
       userId: 'user-1',
-      resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
     },
   );
   assert.equal(parseLocalAgentClientMessage('{bad json'), null);
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'chat_request', message: 'missing request' })), null);
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'chat_request',
+      requestId: 'req-1',
+      message: 'Approve',
+      resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
+    })),
+    null,
+  );
 });
 
 test('parseLocalAgentClientMessage accepts canonical human review response fields', () => {

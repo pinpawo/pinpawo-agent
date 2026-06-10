@@ -1,7 +1,4 @@
-import {
-  type PendingReviewAction,
-  type ReviewSpec,
-} from '@pinpawo/pet-agent';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 
 function readRecordValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -50,22 +47,6 @@ function readReviewSpecValue(value: unknown): ReviewSpec | null {
   return validOptions ? record as ReviewSpec : null;
 }
 
-function readPendingReviewActionValue(value: unknown): PendingReviewAction | null {
-  const record = readRecordValue(value);
-  if (!record) return null;
-  const toolName = readNonEmptyString(record.toolName);
-  const args = readRecordValue(record.args) ?? {};
-  if (!toolName) return null;
-  const actionId = readNonEmptyString(record.actionId) ?? 'pending_action';
-  const description = readNonEmptyString(record.description);
-  return {
-    actionId,
-    toolName,
-    args,
-    ...(description ? { description } : {}),
-  };
-}
-
 export function readPendingInterrupt(snapshot: { tasks?: unknown }): Record<string, unknown> | null {
   const tasks = Array.isArray(snapshot.tasks) ? snapshot.tasks : [];
   for (const task of tasks) {
@@ -88,17 +69,6 @@ function isReviewInterruptPayload(interruptPayload: Record<string, unknown>) {
 
 export function isHumanReviewInterruptPayload(interruptPayload: Record<string, unknown>) {
   return isReviewInterruptPayload(interruptPayload);
-}
-
-export function readPendingReviewActionFromInterruptPayload(
-  interruptPayload: Record<string, unknown>,
-): PendingReviewAction | null {
-  const directAction = readPendingReviewActionValue(interruptPayload.pendingAction);
-  if (directAction) {
-    return directAction;
-  }
-
-  return null;
 }
 
 export function buildReviewSpecFromInterruptPayload(

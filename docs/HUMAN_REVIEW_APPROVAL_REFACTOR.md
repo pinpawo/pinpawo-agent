@@ -172,7 +172,7 @@ UI 不应该知道：
 - `session`：local-agent 的一次聊天会话，对应一个 graph thread/checkpoint 上下文。它不是用户登录 session。
 - `request`：一次 agent run / turn 的请求，用 `requestId` 在 WebSocket event、TUI active run、graph thread/checkpoint 路由之间做关联。
 - `review`：一次 pending human review 交互。一个 request 运行过程中可以顺序产生多个 review；任意时刻只有当前 pending review 的 `reviewId` 可以被接受。review 的完整 payload 由 LangGraph interrupt/checkpoint 持有，不作为普通业务 state 复制一份。
-- `decision`：graph/tool runtime resolve option 后得到的 human review 决策，用于处理当前 pending action，例如 approve、reject、respond、edit。
+- `decision`：graph/tool runtime resolve option 后得到的 human review 决策，用于处理当前 pending action。V1 只有 approve、reject、respond；edit 后续必须作为新的 canonical option/input 重新设计。
 - `effect`：选择某个 option 后，graph/tool runtime 需要额外应用的状态变更，例如“在当前 graph thread 授权当前 pending shell action”。effect 由 graph/tool runtime 根据 `selectedOptionId` 从 pending `ReviewSpec` 中解析出来；它不是 transport extras，也不是 tool input。
 
 ### 3.7 Owner matrix
@@ -789,7 +789,7 @@ V1 cancellation 默认策略：
    - `interruptOn` per-tool policy
    - `approve` / `edit` / `reject` decision handling
 
-   这个 middleware 运行在 model 产出 tool call 之后、tool 执行之前，结构上很接近我们需要的 review gate。但它解决的是“单次 tool call 是否需要 human approval”，不负责“本 graph thread 后续相似 action 免审”的 authorization state。
+   这个 middleware 运行在 model 产出 tool call 之后、tool 执行之前，结构上很接近我们需要的 review gate。但它解决的是“单次 tool call 是否需要 human approval”，不负责“本 graph thread 后续相似 action 免审”的 authorization state。它的 `edit` decision 不作为本项目 V1 兼容通道保留；后续编辑能力必须走新的 canonical option/input 设计。
 
 因此本项目 V1 推荐：
 

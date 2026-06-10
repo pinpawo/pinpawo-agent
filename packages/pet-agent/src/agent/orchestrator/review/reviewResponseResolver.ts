@@ -82,9 +82,15 @@ function readRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const allowed = new Set(allowedKeys);
+  return Object.keys(record).every((key) => allowed.has(key));
+}
+
 function readReviewResponse(value: unknown): ReviewResponse | null {
   const record = readRecord(value);
   if (!record) return null;
+  if (!hasOnlyKeys(record, ['reviewId', 'selectedOptionId', 'input'])) return null;
   const reviewId = typeof record.reviewId === 'string' && record.reviewId.trim()
     ? record.reviewId.trim()
     : null;
@@ -92,6 +98,7 @@ function readReviewResponse(value: unknown): ReviewResponse | null {
     ? record.selectedOptionId.trim()
     : null;
   const input = readRecord(record.input);
+  if (record.input !== undefined && !input) return null;
   return reviewId && selectedOptionId
     ? {
         reviewId,

@@ -132,7 +132,7 @@ test('resolveHumanReviewResponse rejects stale review responses', () => {
   );
 });
 
-test('resolveHumanReviewResume rejects legacy decisions', () => {
+test('resolveHumanReviewResume rejects legacy decisions and extra response fields', () => {
   assertResolutionError(
     () => resolveHumanReviewResume(samplePendingReview(), {
       decisions: [{ type: 'approve' }],
@@ -145,12 +145,44 @@ test('resolveHumanReviewResume rejects legacy decisions', () => {
       selectedOptionId: 'approve',
       decisions: [{ type: 'approve' }],
     }),
-    'stale_review',
+    'invalid_response',
   );
   assertResolutionError(
     () => resolveHumanReviewResume(samplePendingReview(), {
       selectedOptionId: 'approve',
       decisions: [{ type: 'approve' }],
+    }),
+    'invalid_response',
+  );
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
+      decision: { type: 'approve' },
+    }),
+    'invalid_response',
+  );
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
+      effects: [],
+    }),
+    'invalid_response',
+  );
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      type: 'human_review_response',
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
+    }),
+    'invalid_response',
+  );
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      reviewId: 'review-1',
+      selectedOptionId: 'respond',
+      input: 'please continue',
     }),
     'invalid_response',
   );

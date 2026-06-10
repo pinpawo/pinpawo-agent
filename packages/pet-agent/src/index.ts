@@ -73,11 +73,6 @@ export type {
   OrchestratorStateType,
   OrchestrationDecisionStructuredOutputConfig,
 } from './agent/createAgentRuntime';
-export type {
-  HumanReviewActionRequest,
-  HumanReviewDecision,
-  HumanReviewDecisionType,
-} from './agent/orchestrator/humanReview';
 export {
   resolveHumanReviewResume,
   resolveHumanReviewResponse,
@@ -112,6 +107,7 @@ export type {
   ReviewOption,
   ReviewOptionDecision,
   ReviewOptionInput,
+  ReviewResolvedDecision,
   ReviewResolutionContext,
   ReviewResponse,
   ReviewResponseResolution,

@@ -368,19 +368,6 @@ function wrapToolkitTool(
           return toolItem.invoke(currentInput as never, runtime as never);
         }
 
-        if (reviewDecision.type === 'edit') {
-          currentInput = reviewPolicy.applyEdit
-            ? await reviewPolicy.applyEdit({
-              ...ctx,
-              toolkitName: toolkit.name,
-              toolName: toolItem.name,
-              input: currentInput,
-              editedAction: reviewDecision.editedAction,
-            })
-            : reviewDecision.editedAction.args;
-          continue;
-        }
-
         const reason = reviewDecision.type === 'respond'
           ? reviewDecision.message
           : reviewDecision.message ?? 'tool call rejected by user';

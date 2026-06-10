@@ -306,22 +306,20 @@ type ReviewView =
 
 ### 5.1 Human review decision
 
-沿用现有 decision 语义：
+V1 canonical decision 只有三种：
 
 ```ts
-type HumanReviewDecision =
+type ReviewResolvedDecision =
   | { type: 'approve' }
-  | { type: 'edit'; editedAction: HumanReviewActionRequest }
   | { type: 'reject'; message?: string }
   | { type: 'respond'; message: string };
 ```
 
-四种 decision 的语义：
+三种 decision 的语义：
 
 - `approve`：批准当前 pending action，tool wrapper 可以继续执行原 action。
 - `reject`：拒绝当前 pending action，tool wrapper 不执行该 action，并把拒绝信息返回给 graph/model。
 - `respond`：不执行当前 pending action，而是把用户的一段反馈/新指令返回给 graph/model，让模型重新规划下一步。例如用户看到 `rm -rf tmp` 后回复“不要删除，先列出目录看看”。它需要用户输入文本。
-- `edit`：用户直接修改 pending action 的名字或参数，再让 tool wrapper 用修改后的 action 继续。它需要结构化输入，例如 edited action args。
 
 V1 的 TUI materialize 这四类 option：
 
@@ -330,7 +328,7 @@ V1 的 TUI materialize 这四类 option：
 - `reject` option：reject decision。
 - `respond` option：respond decision + 最小文本输入 `input.message`。
 
-`edit` 需要结构化 action/args 编辑器，后续扩展。
+`edit` 需要结构化 action/args 编辑器，后续作为新的 canonical option/input 重新设计；V1 不保留旧 `HumanReviewActionRequest` / `applyEdit` 通道。
 
 ### 5.2 Review effect
 
@@ -678,7 +676,7 @@ resolver 输出一个 runtime 内部对象：
 type ReviewResponseResolution = {
   reviewId: string;
   optionId: string;
-  decision: HumanReviewDecision;
+  decision: ReviewResolvedDecision;
   effects: ReviewEffect[];
   display: {
     label: string;
@@ -818,9 +816,6 @@ type ToolkitToolReviewPolicy = {
       pendingAction: PendingReviewAction;
     }
   ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
-  applyEdit?: (
-    ctx: ToolkitToolReviewContext & { editedAction: HumanReviewActionRequest }
-  ) => unknown | Promise<unknown>;
 };
 ```
 
@@ -870,7 +865,7 @@ return reviewSpec({
 
 复杂的协议字段由 builder 生成，不让每个 policy 重复拼结构。
 
-后续支持结构化编辑后，再增加：
+后续支持结构化编辑时，再增加 canonical `edit` option 和对应的 structured input builder；不要复活旧的 action request 通道。例如：
 
 ```ts
 edit({ inputKey: 'editedAction', argsSchema });

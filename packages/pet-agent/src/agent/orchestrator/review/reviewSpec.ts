@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import type { HumanReviewDecision } from '../humanReview';
 
 export type ReviewView =
   | { kind: 'plain'; title?: string; body: string }
@@ -19,6 +18,11 @@ export type ReviewOptionDecision =
   | { type: 'approve' }
   | { type: 'reject'; message?: string }
   | { type: 'respond'; messageInputKey: 'message' };
+
+export type ReviewResolvedDecision =
+  | { type: 'approve' }
+  | { type: 'reject'; message?: string }
+  | { type: 'respond'; message: string };
 
 export type ReviewActionRef =
   | { type: 'pending_action' };
@@ -101,7 +105,7 @@ export type ReviewResponse = {
 export type ReviewResponseResolution = {
   reviewId: string;
   optionId: string;
-  decision: HumanReviewDecision;
+  decision: ReviewResolvedDecision;
   effects: ReviewEffect[];
   display: {
     label: string;

@@ -1,9 +1,9 @@
 import type {
-  PendingReviewState,
   ReviewEffect,
   ReviewOption,
   ReviewResponse,
   ReviewResponseResolution,
+  ReviewResolutionContext,
 } from './reviewSpec';
 
 export type ReviewResponseResolutionErrorCode =
@@ -114,7 +114,7 @@ function hasCanonicalReviewResponseFields(value: unknown) {
 }
 
 export function resolveHumanReviewResponse(
-  pendingReview: PendingReviewState,
+  pendingReview: ReviewResolutionContext,
   response: ReviewResponse,
 ): ReviewResponseResolution {
   if (response.reviewId !== pendingReview.reviewSpec.id) {
@@ -169,7 +169,7 @@ export function resolveHumanReviewResponse(
 }
 
 export function resolveHumanReviewResume(
-  pendingReview: PendingReviewState,
+  pendingReview: ReviewResolutionContext,
   resume: unknown,
 ): ReviewResponseResolution {
   const response = readReviewResponse(resume);

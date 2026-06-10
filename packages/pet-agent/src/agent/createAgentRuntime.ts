@@ -61,16 +61,8 @@ import {
   resolveHumanReviewResume,
   ReviewResponseResolutionError,
 } from './orchestrator/review/reviewResponseResolver';
+import { buildReviewSpec, type HumanReviewInterruptPayload } from './orchestrator/review/reviewSpec';
 import {
-  buildReviewSpec,
-  type HumanReviewInterruptPayload,
-  type PendingReviewState,
-  type ReviewResponseResolution,
-  type ToolReviewResolutionState,
-} from './orchestrator/review/reviewSpec';
-import {
-  applyReviewEffects,
-  ReviewEffectApplicationError,
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
 } from './orchestrator/review/reviewAuthorizations';
@@ -98,7 +90,6 @@ import {
   resolveToolkitResources,
   selectCapabilityTools,
 } from './orchestrator/subagentHandoff';
-import { isToolReviewRequiredError } from './orchestrator/review/toolReviewSignal';
 import { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
 import { clipForPrompt, formatDelegationStatus } from './orchestrator/utils';
 
@@ -281,10 +272,10 @@ function buildIterationLimitReviewPayload(params: {
   };
 }
 
-function buildInvalidReviewPayload(
+function buildInvalidIterationLimitReviewPayload(
   payload: HumanReviewInterruptPayload,
 ): HumanReviewInterruptPayload {
-  const message = '无法识别你的决定。请从面板中选择一个可用选项。';
+  const message = '请选择批准继续、拒绝停止，或提供新的处理方向。';
   return {
     ...payload,
     error: 'invalid_decision',
@@ -298,75 +289,34 @@ function buildInvalidReviewPayload(
   };
 }
 
-function buildHumanReviewInterruptPayload(pendingReview: PendingReviewState): HumanReviewInterruptPayload {
-  return {
-    kind: 'review',
-    review: pendingReview.reviewSpec,
-    ...(pendingReview.pendingAction ? { pendingAction: pendingReview.pendingAction } : {}),
-  };
-}
-
-async function resolvePendingReviewResponse(params: {
-  pendingReview: PendingReviewState;
-  resume: unknown;
-  toolkits: AgentToolkit[];
-}): Promise<{
-  resolution: ReviewResponseResolution;
-  authorizations: ToolAuthorizationRecord[];
-} | null> {
+function resolveIterationLimitReviewDecision(payload: HumanReviewInterruptPayload, resume: unknown) {
   try {
-    const resolution = resolveHumanReviewResume(params.pendingReview, params.resume);
-    if (resolution.effects.length > 0 && !params.pendingReview.pendingAction) {
-      throw new ReviewEffectApplicationError(
-        'missing_pending_action',
-        'Cannot apply review effects without a pending action.',
-      );
-    }
-    const authorizations = params.pendingReview.pendingAction
-      ? await applyReviewEffects({
-          pendingAction: params.pendingReview.pendingAction,
-          effects: resolution.effects,
-          toolkits: params.toolkits,
-        })
-      : [];
-    return { resolution, authorizations };
+    return resolveHumanReviewResume({
+      reviewSpec: payload.review,
+    }, resume).decision;
   } catch (error) {
-    if (
-      !(error instanceof ReviewResponseResolutionError)
-      && !(error instanceof ReviewEffectApplicationError)
-    ) {
+    if (!(error instanceof ReviewResponseResolutionError)) {
       throw error;
     }
   }
   return null;
 }
 
-async function emitToolAuthorizationRecorded(
-  handler: SubagentToolEventHandler | undefined,
-  authorizations: ToolAuthorizationRecord[],
-) {
-  if (authorizations.length === 0) {
-    return;
-  }
-  await handler?.({
-    event: 'on_runtime_event',
-    name: 'tool_authorization_recorded',
-    data: { authorizations },
-  });
-}
+function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {
+  const active = mergeToolAuthorizations([], current);
+  const recorded: ToolAuthorizationRecord[] = [];
 
-function buildToolReviewResolution(
-  pendingReview: PendingReviewState,
-  resolution: ReviewResponseResolution,
-): ToolReviewResolutionState[] {
-  if (pendingReview.source.type !== 'tool_call' || !pendingReview.pendingAction) {
-    return [];
-  }
-  return [{
-    reviewId: resolution.reviewId,
-    pendingAction: pendingReview.pendingAction,
-    decision: resolution.decision,
-  }];
+  return {
+    active,
+    recorded,
+    recordToolAuthorization: (authorization: ToolAuthorizationRecord) => {
+      const merged = mergeToolAuthorizations(active, [authorization]);
+      if (merged.length > active.length) {
+        recorded.push(authorization);
+      }
+      active.splice(0, active.length, ...merged);
+    },
+  };
 }
 
 // --- Graph builder ---
@@ -489,6 +439,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const { capabilities, toolkits, execution, maxIterations, workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const maxIter = maxIterations ?? 5;
+    let iterationLimitMessages: BaseMessage[] = [];
+    let resetIterationCount = false;
 
     if (state.iterationCount >= maxIter) {
       const delegationSummary = state.turnDelegations
@@ -499,17 +451,35 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         maxIterations: maxIter,
         delegationSummary,
       });
-      return {
-        pendingReview: {
-          source: {
-            type: 'iteration_limit',
-            decisionNode: kind === 'user_intent' ? 'userIntentDecision' : 'delegationOutcomeDecision',
-          },
-          reviewSpec: reviewPayload.review,
-        },
-        pendingDelegation: null,
-        reviewResumeTarget: null,
-      };
+      let decision = resolveIterationLimitReviewDecision(reviewPayload, interrupt(reviewPayload));
+      while (!decision) {
+        decision = resolveIterationLimitReviewDecision(
+          reviewPayload,
+          interrupt(buildInvalidIterationLimitReviewPayload(reviewPayload)),
+        );
+      }
+      if (decision.type === 'respond') {
+        iterationLimitMessages = [new HumanMessage(decision.message)];
+        state = {
+          ...state,
+          messages: [...state.messages, ...iterationLimitMessages],
+          iterationCount: 0,
+          pendingDelegation: null,
+        };
+        resetIterationCount = true;
+      } else if (decision.type !== 'approve') {
+        return {
+          messages: [new AIMessage(`已停止，共执行 ${state.iterationCount} 轮。如需继续请告诉我。`)],
+          pendingDelegation: null,
+        };
+      } else {
+        state = {
+          ...state,
+          iterationCount: 0,
+          pendingDelegation: null,
+        };
+        resetIterationCount = true;
+      }
     }
 
     const toolkitList = toolkits ?? [];
@@ -675,18 +645,19 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const nextDelegationState = reuseOrAppendTurnDelegation(state.turnDelegations, pendingDelegation);
 
     return {
-      messages: decisionMode === 'finish' && finalReply
-        ? [new AIMessage(finalReply)]
-        : [],
+      messages: [
+        ...iterationLimitMessages,
+        ...(decisionMode === 'finish' && finalReply ? [new AIMessage(finalReply)] : []),
+      ],
       pendingDelegation: nextDelegationState.pendingDelegation,
       capabilityResult: decisionMode === 'capability' ? null : state.capabilityResult,
+      ...(resetIterationCount ? { iterationCount: 0 } : {}),
       ...(kind === 'delegation_outcome'
         ? {
             capabilitySearchState: buildEmptyCapabilitySearchState(),
           }
         : {}),
       turnDelegations: nextDelegationState.turnDelegations,
-      reviewResumeTarget: null,
     };
   }
 
@@ -696,69 +667,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   async function delegationOutcomeDecision(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     return runOrchestrationDecision('delegation_outcome', state, runnableConfig);
-  }
-
-  async function humanReview(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { toolkits, onToolEvent } = getInvokeOptions(runnableConfig);
-    const pendingReview = state.pendingReview;
-    if (!pendingReview) {
-      return {};
-    }
-
-    const reviewPayload = buildHumanReviewInterruptPayload(pendingReview);
-    let resolved = await resolvePendingReviewResponse({
-      pendingReview,
-      resume: interrupt(reviewPayload),
-      toolkits: toolkits ?? [],
-    });
-    while (!resolved) {
-      resolved = await resolvePendingReviewResponse({
-        pendingReview,
-        resume: interrupt(buildInvalidReviewPayload(reviewPayload)),
-        toolkits: toolkits ?? [],
-      });
-    }
-
-    const { resolution, authorizations } = resolved;
-    await emitToolAuthorizationRecorded(onToolEvent, authorizations);
-
-    if (pendingReview.source.type === 'tool_call') {
-      return {
-        pendingReview: null,
-        reviewResumeTarget: pendingReview.source,
-        toolAuthorizations: authorizations,
-        toolReviewResolutions: buildToolReviewResolution(pendingReview, resolution),
-      };
-    }
-
-    if (resolution.decision.type === 'respond') {
-      return {
-        messages: [new HumanMessage(resolution.decision.message)],
-        iterationCount: 0,
-        pendingDelegation: null,
-        pendingReview: null,
-        reviewResumeTarget: pendingReview.source,
-        toolReviewResolutions: [],
-      };
-    }
-
-    if (resolution.decision.type !== 'approve') {
-      return {
-        messages: [new AIMessage(`已停止，共执行 ${state.iterationCount} 轮。如需继续请告诉我。`)],
-        pendingDelegation: null,
-        pendingReview: null,
-        reviewResumeTarget: null,
-        toolReviewResolutions: [],
-      };
-    }
-
-    return {
-      iterationCount: 0,
-      pendingDelegation: null,
-      pendingReview: null,
-      reviewResumeTarget: pendingReview.source,
-      toolReviewResolutions: [],
-    };
   }
 
   // Node: capability — reads capabilities, tools, execution from configurable
@@ -786,14 +694,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       execution,
     });
 
+    const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);
     const toolkitContext = {
       models: config.models,
       actor,
       messages: scopedMessages,
       execution,
-      toolAuthorizations: state.toolAuthorizations,
-      toolReviewSource: { type: 'tool_call' as const, lane },
-      toolReviewResolutions: [...state.toolReviewResolutions],
+      toolAuthorizations: authorizationRecorder.active,
+      recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
       emitRuntimeEvent: onToolEvent,
     };
     const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
@@ -825,18 +733,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       validateUniqueToolNames(subagentInput.tools);
     }
 
-    let result;
-    try {
-      result = await createSubagent(subagentInput);
-    } catch (error) {
-      if (isToolReviewRequiredError(error)) {
-        return {
-          pendingReview: error.pendingReview,
-          reviewResumeTarget: null,
-        };
-      }
-      throw error;
-    }
+    let result = await createSubagent(subagentInput);
 
     if (middleware?.afterRun) {
       result = await middleware.afterRun(result);
@@ -879,8 +776,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       turnDelegations: updatedTurnDelegations,
       pendingDelegation: null,
       iterationCount: state.iterationCount + 1,
-      reviewResumeTarget: null,
-      toolReviewResolutions: [],
+      toolAuthorizations: authorizationRecorder.recorded,
     };
   }
 
@@ -890,14 +786,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = toolkits ?? [];
     validateUniqueToolkitNames(toolkitList);
+    const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);
     const toolkitResources = await resolveToolkitResources(toolkitList, undefined, {
       models: config.models,
       actor,
       messages: state.messages,
       execution,
-      toolAuthorizations: state.toolAuthorizations,
-      toolReviewSource: { type: 'tool_call', lane: 'general' },
-      toolReviewResolutions: [...state.toolReviewResolutions],
+      toolAuthorizations: authorizationRecorder.active,
+      recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
       emitRuntimeEvent: onToolEvent,
     });
     const toolList = [...toolkitResources.tools];
@@ -930,29 +826,18 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     ].filter((line) => line !== null) as string[];
 
     const subagentMessages = scopedMessages;
-    let result;
-    try {
-      result = await createSubagent({
-        model: config.models.subagent ?? config.models.act,
-        tools: toolList,
-        instructions: [handoffInstruction, ...toolkitResources.instructions, ...instructions],
-        operations: collectGeneralOperations(toolkitResources.toolkits),
-        messages: subagentMessages,
-        maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
-        checkpoint: config.checkpoint,
-        runnableConfig,
-        signal: runnableConfig?.signal,
-        onToolEvent,
-      });
-    } catch (error) {
-      if (isToolReviewRequiredError(error)) {
-        return {
-          pendingReview: error.pendingReview,
-          reviewResumeTarget: null,
-        };
-      }
-      throw error;
-    }
+    const result = await createSubagent({
+      model: config.models.subagent ?? config.models.act,
+      tools: toolList,
+      instructions: [handoffInstruction, ...toolkitResources.instructions, ...instructions],
+      operations: collectGeneralOperations(toolkitResources.toolkits),
+      messages: subagentMessages,
+      maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
+      checkpoint: config.checkpoint,
+      runnableConfig,
+      signal: runnableConfig?.signal,
+      onToolEvent,
+    });
 
     const outputMessages = tagNewLaneMessages(
       result.messages,
@@ -982,8 +867,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       turnDelegations: updatedTurnDelegations,
       pendingDelegation: null,
       iterationCount: state.iterationCount + 1,
-      reviewResumeTarget: null,
-      toolReviewResolutions: [],
+      toolAuthorizations: authorizationRecorder.recorded,
     };
   }
 
@@ -1008,24 +892,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   }
 
   function afterDecision(state: OrchestratorStateType) {
-    if (state.pendingReview) return 'humanReview';
     const decisionMode = decisionModeFromPendingDelegation(state.pendingDelegation);
     if (decisionMode === 'capability') return 'capability';
     if (decisionMode === 'general') return 'general';
     return 'end';
-  }
-
-  function afterDelegationExecution(state: OrchestratorStateType) {
-    return state.pendingReview ? 'humanReview' : 'delegationOutcomeDecision';
-  }
-
-  function afterHumanReview(state: OrchestratorStateType) {
-    const target = state.reviewResumeTarget;
-    if (!target) return 'end';
-    if (target.type === 'iteration_limit') {
-      return target.decisionNode;
-    }
-    return target.lane === 'general' ? 'general' : 'capability';
   }
 
   const graph = new StateGraph(OrchestratorState)
@@ -1035,7 +905,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('capabilitySearch', new ToolNode([capabilitySearchTool]))
     .addNode('userIntentDecision', userIntentDecision)
     .addNode('delegationOutcomeDecision', delegationOutcomeDecision)
-    .addNode('humanReview', humanReview)
     .addNode('capability', capabilityNode)
     .addNode('general', generalNode)
     .addEdge(START, 'prepare')
@@ -1050,32 +919,17 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     })
     .addConditionalEdges('userIntentDecision', afterDecision, {
       end: END,
-      humanReview: 'humanReview',
       capability: 'capability',
       general: 'general',
     })
     .addConditionalEdges('delegationOutcomeDecision', afterDecision, {
       end: END,
-      humanReview: 'humanReview',
       capability: 'capability',
       general: 'general',
     })
     .addEdge('capabilitySearch', 'userIntentDecision')
-    .addConditionalEdges('humanReview', afterHumanReview, {
-      end: END,
-      userIntentDecision: 'userIntentDecision',
-      delegationOutcomeDecision: 'delegationOutcomeDecision',
-      capability: 'capability',
-      general: 'general',
-    })
-    .addConditionalEdges('capability', afterDelegationExecution, {
-      humanReview: 'humanReview',
-      delegationOutcomeDecision: 'delegationOutcomeDecision',
-    })
-    .addConditionalEdges('general', afterDelegationExecution, {
-      humanReview: 'humanReview',
-      delegationOutcomeDecision: 'delegationOutcomeDecision',
-    });
+    .addEdge('capability', 'delegationOutcomeDecision')
+    .addEdge('general', 'delegationOutcomeDecision');
 
   return graph.compile({
     checkpointer: config.checkpoint,

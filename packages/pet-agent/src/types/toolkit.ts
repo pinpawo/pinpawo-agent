@@ -3,10 +3,8 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { HumanReviewActionRequest } from '../agent/orchestrator/humanReview';
 import type {
   PendingReviewAction,
-  PendingReviewSource,
   ReviewEffect,
   ReviewSpec,
-  ToolReviewResolutionState,
   ToolAuthorizationMatcher,
 } from '../agent/orchestrator/review/reviewSpec';
 import type { ToolAuthorizationRecord } from '../agent/orchestrator/review/reviewAuthorizations';
@@ -20,8 +18,7 @@ export type ToolkitContext = {
   messages: BaseMessage[];
   execution?: AgentExecution;
   toolAuthorizations?: ToolAuthorizationRecord[];
-  toolReviewSource?: Extract<PendingReviewSource, { type: 'tool_call' }>;
-  toolReviewResolutions?: ToolReviewResolutionState[];
+  recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;
   emitRuntimeEvent?: (event: SubagentRuntimeEvent) => void | Promise<void>;
 };
 

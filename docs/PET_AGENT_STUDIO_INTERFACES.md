@@ -132,7 +132,7 @@ runtime.invoke({
 
 ## Boundary 3: HITL Bridge (`humanReviewer`)
 
-pet 内 tool review 由 toolkit 的 `policy.toolReview` 在调用前决定。toolkit policy 返回 `ReviewSpec`，orchestrator runtime 把 pending review 写入 graph state/checkpoint 后发出 canonical `review` interrupt payload。Studio `humanReviewer` 桥只接收 canonical `HumanReviewInterruptPayload`，并直接转发 `ReviewSpec`。
+pet 内 tool review 由 toolkit 的 `policy.toolReview` 在调用前决定。toolkit policy 返回 `ReviewSpec`，tool wrapper materialize canonical `review` interrupt payload；LangGraph interrupt/checkpoint 持有当前 pending review 控制态。Studio `humanReviewer` 桥只接收 canonical `HumanReviewInterruptPayload`，并直接转发 `ReviewSpec`。
 
 ```ts
 type HumanReviewer = (request: HumanReviewInterruptPayload) => Promise<ReviewResponse>;
@@ -147,15 +147,14 @@ const pet = createPetAgentRuntime({
 });
 ```
 
-`ReviewResponse` 只包含 `{ reviewId, selectedOptionId, input? }`。graph runtime 会根据 checkpoint 中的 `PendingReviewState` 和 pending `ReviewSpec.options` 解析出内部 `HumanReviewDecision`(approve / edit / reject / respond)以及 effects。`HumanReviewInterruptPayload` / `ReviewSpec` / `ReviewResponse` 定义见 `packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts`。
+`ReviewResponse` 只包含 `{ reviewId, selectedOptionId, input? }`。graph runtime 会根据当前 interrupt payload / `ReviewResolutionContext` 和 pending `ReviewSpec.options` 解析出内部 `HumanReviewDecision`(approve / edit / reject / respond)以及 effects。`HumanReviewInterruptPayload` / `ReviewSpec` / `ReviewResponse` 定义见 `packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts`。
 
 流程:
 
 ```text
 pet 内部 tool 调用:
   policy.toolReview.request(ctx) → ReviewSpec
-  wrapper 发出 tool-review-required signal
-  orchestrator 写 PendingReviewState 到 graph state
+  wrapper materialize review payload
   interrupt({ kind: "review", review, pendingAction? })  // LangGraph 暂停,checkpoint 持有 pending review
 
 pet runtime invoke 循环:

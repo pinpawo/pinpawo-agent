@@ -691,24 +691,11 @@ test('toolkit review policy records authorization through orchestrator runtime t
 
   const interrupted = await graph.invoke(input, config) as {
     __interrupt__?: Array<{ value?: unknown }>;
-    pendingReview?: {
-      source?: { type?: string; lane?: string };
-      reviewSpec?: { id?: string };
-      pendingAction?: { actionId?: string; toolName?: string };
-    };
   };
   const payload = interrupted.__interrupt__?.[0]?.value as {
     review?: { id?: string };
   } | undefined;
   assert.equal(payload?.review?.id, 'tool-review:run_shell:call-1');
-  assert.equal(interrupted.pendingReview?.reviewSpec?.id, payload?.review?.id);
-  assert.deepEqual(interrupted.pendingReview?.source, { type: 'tool_call', lane: 'general' });
-  assert.deepEqual(interrupted.pendingReview?.pendingAction, {
-    actionId: 'call-1',
-    toolName: 'run_shell',
-    args: { command: 'git status' },
-    description: 'Approve shell?',
-  });
   assert.equal(reviewCount, 1);
 
   subagentModel.index = 0;
@@ -719,14 +706,10 @@ test('toolkit review policy records authorization through orchestrator runtime t
     },
   }), config) as {
     __interrupt__?: unknown;
-    pendingReview?: unknown;
-    toolReviewResolutions?: unknown[];
     toolAuthorizations: Array<{ toolName: string; matcher: unknown; createdAt: string }>;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
-  assert.equal(finalState.pendingReview, null);
-  assert.deepEqual(finalState.toolReviewResolutions, []);
   assert.deepEqual(finalState.toolAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
     toolName: 'run_shell',
     matcher: { type: 'shell_pattern', value: 'git status' },
@@ -751,7 +734,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
   assert.equal(runCount, 1);
 });
 
-test('toolkit review policy resumes plain approve from graph review state', async () => {
+test('toolkit review policy resumes plain approve through interrupt checkpoint', async () => {
   let runCount = 0;
   let reviewCount = 0;
   const rawTool = tool(async ({ command }: { command: string }) => {
@@ -839,13 +822,11 @@ test('toolkit review policy resumes plain approve from graph review state', asyn
     config,
   ) as {
     __interrupt__?: Array<{ value?: unknown }>;
-    pendingReview?: { reviewSpec?: { id?: string } };
   };
   const payload = interrupted.__interrupt__?.[0]?.value as {
     review?: { id?: string };
   } | undefined;
   assert.equal(payload?.review?.id, 'tool-review:run_shell:call-plain-1');
-  assert.equal(interrupted.pendingReview?.reviewSpec?.id, payload?.review?.id);
 
   subagentModel.index = 0;
   const finalState = await graph.invoke(new Command({
@@ -855,13 +836,9 @@ test('toolkit review policy resumes plain approve from graph review state', asyn
     },
   }), config) as {
     __interrupt__?: unknown;
-    pendingReview?: unknown;
-    toolReviewResolutions?: unknown[];
   };
 
   assert.equal(finalState.__interrupt__, undefined);
-  assert.equal(finalState.pendingReview, null);
-  assert.deepEqual(finalState.toolReviewResolutions, []);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
 });
@@ -885,9 +862,6 @@ test('iteration limit review emits canonical ReviewSpec interrupt payload', asyn
     },
   }) as {
     __interrupt__?: Array<{ value?: unknown }>;
-    pendingReview?: {
-      reviewSpec?: { id?: string };
-    };
   };
   const payload = result.__interrupt__?.[0]?.value as {
     kind?: string;
@@ -898,7 +872,6 @@ test('iteration limit review emits canonical ReviewSpec interrupt payload', asyn
   } | undefined;
 
   assert.equal(payload?.kind, 'review');
-  assert.equal(result.pendingReview?.reviewSpec?.id, payload?.review?.id);
   assert.equal(payload?.review?.schemaVersion, 1);
   assert.deepEqual(payload?.review?.options?.map((option) => option.id), ['approve', 'reject', 'respond']);
   assert.equal(payload?.pendingAction, undefined);
@@ -934,15 +907,11 @@ test('iteration limit review accepts canonical approve resume', async () => {
 
   const interrupted = await graph.invoke(input, config) as {
     __interrupt__?: Array<{ value?: unknown }>;
-    pendingReview?: {
-      reviewSpec?: { id?: string };
-    };
   };
   const payload = interrupted.__interrupt__?.[0]?.value as {
     review?: { id?: string };
   } | undefined;
   assert.equal(typeof payload?.review?.id, 'string');
-  assert.equal(interrupted.pendingReview?.reviewSpec?.id, payload?.review?.id);
 
   const resumed = await graph.invoke(new Command({
     resume: {
@@ -952,11 +921,9 @@ test('iteration limit review accepts canonical approve resume', async () => {
   }), config) as {
     __interrupt__?: unknown;
     iterationCount?: number;
-    pendingReview?: unknown;
   };
 
   assert.equal(resumed.__interrupt__, undefined);
-  assert.equal(resumed.pendingReview, null);
   assert.equal(resumed.iterationCount, 0);
 });
 
@@ -1007,11 +974,9 @@ test('iteration limit review accepts canonical respond resume as replanning feed
   }), config) as {
     __interrupt__?: unknown;
     iterationCount?: number;
-    pendingReview?: unknown;
   };
 
   assert.equal(resumed.__interrupt__, undefined);
-  assert.equal(resumed.pendingReview, null);
   assert.equal(resumed.iterationCount, 0);
   assert.match(decisionInput, /继续，但只做摘要。/);
 });

@@ -11,7 +11,6 @@ import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
-import type { PendingReviewSource, PendingReviewState, ToolReviewResolutionState } from './review/reviewSpec';
 
 export const OrchestratorState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
@@ -46,18 +45,6 @@ export const OrchestratorState = Annotation.Root({
     reducer: (prev, next) => mergeToolAuthorizations(prev, next),
     default: () => [],
   }),
-  pendingReview: Annotation<PendingReviewState | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  reviewResumeTarget: Annotation<PendingReviewSource | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  toolReviewResolutions: Annotation<ToolReviewResolutionState[]>({
-    reducer: (_prev, next) => next,
-    default: () => [],
-  }),
 });
 
 export type OrchestratorStateType = typeof OrchestratorState.State;
@@ -70,9 +57,6 @@ export type OrchestratorTurnState = Pick<
   | 'turnDelegations'
   | 'iterationCount'
   | 'turnId'
-  | 'pendingReview'
-  | 'reviewResumeTarget'
-  | 'toolReviewResolutions'
 >;
 
 export function buildEmptyCapabilitySearchState(): CapabilitySearchState {
@@ -91,9 +75,6 @@ export function buildTurnStateReset(): OrchestratorTurnState {
     turnDelegations: [],
     iterationCount: 0,
     turnId: randomUUID().slice(0, 8),
-    pendingReview: null,
-    reviewResumeTarget: null,
-    toolReviewResolutions: [],
   };
 }
 

@@ -5,11 +5,10 @@ import {
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
 } from './review/reviewResponseResolver';
-import type { PendingReviewState } from './review/reviewSpec';
+import type { ReviewResolutionContext } from './review/reviewSpec';
 
-function samplePendingReview(): PendingReviewState {
+function samplePendingReview(): ReviewResolutionContext {
   return {
-    source: { type: 'tool_call', lane: 'general' },
     reviewSpec: {
       id: 'review-1',
       schemaVersion: 1,

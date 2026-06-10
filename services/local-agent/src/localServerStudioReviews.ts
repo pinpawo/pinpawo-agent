@@ -27,7 +27,6 @@ function resolveStudioReviewResponse(
       ...(msg.input ? { input: msg.input } : {}),
     };
     resolveHumanReviewResponse({
-      source: { type: 'tool_call', lane: 'studio' },
       reviewSpec: pending.reviewSpec,
       pendingAction: {
         actionId: 'studio_review',

@@ -80,26 +80,9 @@ export type PendingReviewAction = {
   description?: string;
 };
 
-export type PendingReviewSource =
-  | {
-      type: 'iteration_limit';
-      decisionNode: 'userIntentDecision' | 'delegationOutcomeDecision';
-    }
-  | {
-      type: 'tool_call';
-      lane: string;
-    };
-
-export type PendingReviewState = {
-  source: PendingReviewSource;
+export type ReviewResolutionContext = {
   reviewSpec: ReviewSpec;
   pendingAction?: PendingReviewAction;
-};
-
-export type ToolReviewResolutionState = {
-  reviewId: string;
-  pendingAction: PendingReviewAction;
-  decision: HumanReviewDecision;
 };
 
 export type HumanReviewInterruptPayload = {

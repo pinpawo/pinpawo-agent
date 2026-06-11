@@ -151,6 +151,18 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
+
+  const interruptHandled = await handler.handleInterruptRequest(
+    fakeWs,
+    {
+      type: 'interrupt_request',
+      requestId: 'req-1',
+    },
+    { actorId: 'pet-1' } as never,
+  );
+  assert.equal(interruptHandled, false, 'consumed review route should fall through to inflight interrupt');
+  assert.equal(handleChatCalls.length, 1);
+  assert.equal(sentEvents.length, 1);
 });
 
 test('handleHumanReviewResponse recovers missing route from active checkpoint review', async () => {

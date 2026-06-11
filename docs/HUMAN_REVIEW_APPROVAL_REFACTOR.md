@@ -765,13 +765,15 @@ V1 cancellation 默认策略：
 
 - 用户主动 `/interrupt`、TUI approval 面板中按 Esc、或 pending review 期间按 Ctrl+C：如果当前 session/thread 有 pending review，server 应 resume 当前 review 为 reject，例如 `{ type: 'reject', message: 'interrupted by user' }`，并清理本地 active run 状态。TUI 不能只本地关闭 approval 面板，因为 graph checkpoint 仍然停在同一个 interrupt。
 - WebSocket 断开：默认保留 graph checkpoint 中的 pending review，不自动 reject。下次客户端连接并恢复同一 session/thread 时，server 应重新发送当前 pending `ReviewSpec`。
-- TUI 进程崩溃或 local-agent 重启：只要 graph checkpoint 仍存在，pending review 继续保留；启动后通过 session/thread recovery 重新发现并展示。内存里的 `pendingReviewRoutes` 丢失不代表 review 已关闭，server 必须能从 checkpoint pending interrupt 重建 route。只有用户明确中断或 session 被显式删除时，才 resume reject 或删除对应 checkpoint。
+- TUI 进程崩溃或 local-agent 重启：只要 graph checkpoint 仍存在，pending review 继续保留；启动后通过 session/thread recovery 重新发现并展示。内存里的 `pendingReviewRoutes` 丢失不代表 review 已关闭，TUI local server 必须能从 checkpoint pending interrupt 重建 route。只有用户明确中断或 session 被显式删除时，才 resume reject 或删除对应 checkpoint。
+- App chat 也应收敛到同样的 checkpoint recovery 语义，但需要先补清楚 app user/session route API。当前实现只支持运行中内存 route，不应把这个临时限制写成已完成能力。
 
 ### 6.9 Runtime entry points
 
 当前代码有两条 HITL 入口，重构后都要归一到同一个 `ReviewSpec` / response resolver：
 
-- TUI / App chat：通过 LangGraph checkpoint 中的 pending interrupt 恢复。server 从 `requestId` 找到 thread/checkpoint，并把 `{ reviewId, selectedOptionId, input }` 作为 resume payload。
+- TUI chat：通过 LangGraph checkpoint 中的 pending interrupt 恢复。server 从 active session/thread 找到 checkpoint，并把 `{ reviewId, selectedOptionId, input }` 作为 resume payload。
+- App chat：response payload 同样使用 canonical `{ reviewId, selectedOptionId, input }`。checkpoint recovery 需要后续通过明确的 app user/session route API 接入，不能依赖 local-agent 私有内存状态来伪装恢复。
 - Studio humanReviewer：可以保留 `createWsHumanReviewer()` 里的 pending promise slot，但 pending slot 必须保存当前 `ReviewSpec`。收到 canonical response 后校验 `reviewId` / `selectedOptionId`，并把 canonical `{ reviewId, selectedOptionId, input }` 作为 graph resume payload。
 
 也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。Studio review response 只允许 canonical `{ reviewId, selectedOptionId, input }`；不能再从 `message` 文本或 `resume.decisions` 猜 decision。

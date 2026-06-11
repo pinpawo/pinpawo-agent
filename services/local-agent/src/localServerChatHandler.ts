@@ -383,14 +383,12 @@ export class LocalServerChatHandler {
     msg: InterruptRequestMessage,
     deps: LocalServerDeps,
   ) {
-    if (!this.claimPendingReviewRequest(msg.requestId)) {
-      return true;
-    }
-
     const route = await this.readPendingReviewRoute(msg.requestId, deps);
     if (!route) {
-      this.releasePendingReviewRequest(msg.requestId);
       return false;
+    }
+    if (!this.claimPendingReviewRequest(msg.requestId)) {
+      return true;
     }
 
     const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);

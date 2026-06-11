@@ -110,7 +110,7 @@ test('parseLocalAgentServerMessage rejects legacy server messages by default', (
   );
 });
 
-test('parseLocalAgentServerMessage accepts typed local-agent event messages', () => {
+test('parseLocalAgentServerMessage accepts typed local-agent event messages and preserves raw when present', () => {
   assert.deepEqual(
     parseLocalAgentServerMessage(JSON.stringify({
       type: 'event',
@@ -153,6 +153,9 @@ test('parseLocalAgentServerMessage accepts typed local-agent event messages', ()
             name: 'bash',
             toolName: 'read_file',
           },
+        },
+        raw: {
+          input: { path: 'README.md' },
         },
       },
     },
@@ -203,6 +206,41 @@ test('parseLocalAgentServerMessage keeps usage on message.completed event when v
         },
       },
     },
+  );
+});
+
+test('parseLocalAgentServerMessage accepts subagent message delta events', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'subagent.message.delta',
+        requestId: 'req-1',
+        text: 'subagent output',
+      },
+    })),
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'subagent.message.delta',
+        requestId: 'req-1',
+        text: 'subagent output',
+      },
+    },
+  );
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'subagent.message.delta',
+        requestId: 'other',
+        text: 'wrong route',
+      },
+    })),
+    null,
   );
 });
 
@@ -336,7 +374,7 @@ test('sendLocalAgentMessage writes only when websocket-like object is open', () 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [{ type: 'pong' }]);
 });
 
-test('sendLocalAgentEvent writes only typed events', () => {
+test('sendLocalAgentEvent strips operation.raw by default (remote-safe)', () => {
   const sent: string[] = [];
   const openWs = {
     readyState: 1,
@@ -408,4 +446,65 @@ test('sendLocalAgentEvent writes only typed events', () => {
       },
     },
   ]);
+});
+
+test('sendLocalAgentEvent forwards operation.raw when includeRaw is true (trusted local transport)', () => {
+  const sent: string[] = [];
+  const openWs = {
+    readyState: 1,
+    send(data: string) {
+      sent.push(data);
+    },
+  };
+  const event: LocalAgentOperationInternalEvent = {
+    type: 'operation',
+    requestId: 'req-1',
+    phase: 'completed',
+    operation: { kind: 'bash.read_file', title: '读文件' },
+    raw: {
+      input: { path: 'README.md' },
+      output: 'file contents',
+    },
+  };
+  assert.equal(sendLocalAgentEvent(openWs, event, { includeRaw: true }), true);
+  assert.deepEqual(JSON.parse(sent[0] ?? '{}'), {
+    type: 'event',
+    requestId: 'req-1',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: { kind: 'bash.read_file', title: '读文件' },
+      raw: {
+        input: { path: 'README.md' },
+        output: 'file contents',
+      },
+    },
+  });
+});
+
+test('sendLocalAgentEvent leaves non-operation events untouched regardless of includeRaw', () => {
+  const sent: string[] = [];
+  const openWs = {
+    readyState: 1,
+    send(data: string) {
+      sent.push(data);
+    },
+  };
+  assert.equal(sendLocalAgentEvent(openWs, {
+    type: 'message.delta',
+    requestId: 'req-1',
+    role: 'assistant',
+    text: 'hi',
+  }, { includeRaw: true }), true);
+  assert.deepEqual(JSON.parse(sent[0] ?? '{}'), {
+    type: 'event',
+    requestId: 'req-1',
+    event: {
+      type: 'message.delta',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'hi',
+    },
+  });
 });

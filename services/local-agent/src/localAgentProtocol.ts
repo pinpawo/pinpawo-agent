@@ -1,8 +1,8 @@
 import { isReviewSpecValue, type ReviewSpec } from '@pinpawo/pet-agent';
 import type {
   LocalAgentEvent,
-  LocalAgentOperationInternalEvent,
   LocalAgentOperationPhase,
+  LocalAgentOperationRaw,
 } from './events/localAgentEvent';
 
 export type ChatRequestMessage = {
@@ -146,6 +146,18 @@ export function readLocalAgentClientMessageEnvelope(raw: unknown): LocalAgentCli
   };
 }
 
+function readRawOperationPayload(
+  record: Record<string, unknown>,
+): LocalAgentOperationRaw | null {
+  const raw = readRecord(record, 'raw');
+  if (!raw) return null;
+  const result: LocalAgentOperationRaw = {};
+  if ('input' in raw) result.input = raw.input;
+  if ('output' in raw) result.output = raw.output;
+  if ('error' in raw) result.error = raw.error;
+  return Object.keys(result).length > 0 ? result : null;
+}
+
 function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent | null {
   const type = readString(record, 'type');
   const requestId = readString(record, 'requestId');
@@ -157,6 +169,10 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     return role === 'assistant' && text != null
       ? { type, requestId, role, text }
       : null;
+  }
+  if (type === 'subagent.message.delta') {
+    const text = readString(record, 'text');
+    return text != null ? { type, requestId, text } : null;
   }
   if (type === 'message.completed') {
     const role = readString(record, 'role');
@@ -209,6 +225,7 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     const normalizedProvider = normalizeOperationSourceProvider(sourceProvider);
     const sourceToolName = source ? readOptionalString(source, 'toolName') : undefined;
     const sourceCallId = source ? readOptionalString(source, 'callId') : undefined;
+    const raw = readRawOperationPayload(record);
     return {
       type,
       requestId,
@@ -231,6 +248,7 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
             }
           : {}),
       },
+      ...(raw ? { raw } : {}),
     };
   }
   if (type === 'human_review.requested') {
@@ -366,25 +384,42 @@ export function sendLocalAgentMessage(
   return true;
 }
 
-export function sendLocalAgentEvent(ws: WsLike, event: LocalAgentEvent) {
+export type SendLocalAgentEventOptions = {
+  /**
+   * When false (default), strips `operation.raw` from operation events before
+   * serializing — safe default for transports that may reach an untrusted or
+   * bandwidth-sensitive peer (e.g. hosted app WS relay).
+   *
+   * Pass `true` for trusted local transports (TUI on 127.0.0.1, macOS
+   * companion) that need raw input/output to render diffs, expand payloads,
+   * or feed local-only debugging surfaces.
+   */
+  includeRaw?: boolean;
+};
+
+export function sendLocalAgentEvent(
+  ws: WsLike,
+  event: LocalAgentEvent,
+  options: SendLocalAgentEventOptions = {},
+) {
   if (ws.readyState !== WS_OPEN) {
     return false;
   }
-  const publicEvent = toPublicLocalAgentEvent(event);
+  const wireEvent = options.includeRaw ? event : stripRawFromEvent(event);
   ws.send(JSON.stringify({
     type: 'event',
-    requestId: publicEvent.requestId,
-    event: publicEvent,
+    requestId: wireEvent.requestId,
+    event: wireEvent,
   } satisfies LocalAgentEventMessage));
   return true;
 }
 
-function toPublicLocalAgentEvent(event: LocalAgentEvent): LocalAgentEvent {
-  if (event.type !== 'operation') {
+function stripRawFromEvent(event: LocalAgentEvent): LocalAgentEvent {
+  if (event.type !== 'operation' || event.raw === undefined) {
     return event;
   }
-  const { raw: _raw, ...publicEvent } = event as LocalAgentOperationInternalEvent;
-  return publicEvent;
+  const { raw: _raw, ...rest } = event;
+  return rest;
 }
 
 function isOperationPhase(value: string | null): value is LocalAgentOperationPhase {

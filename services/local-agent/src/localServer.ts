@@ -31,7 +31,9 @@ const INTERRUPT_FORCE_REPLY_MS = 1800;
 
 const inflightRequests = new InflightRequestController<WebSocket>({
   forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
-  emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
+  // Local TUI / companion: trusted transport — forward raw input/output so
+  // the UI can render diffs, expand payloads, etc.
+  emitOperation: (ws, event) => sendLocalAgentEvent(ws, event, { includeRaw: true }),
   sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
   logPrefix: 'local-server',
 });

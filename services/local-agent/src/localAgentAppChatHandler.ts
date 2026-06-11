@@ -441,6 +441,8 @@ export class LocalAgentAppChatHandler {
     inflight: InflightRequest,
     payload: StreamToolsPayload,
   ) {
+    // Hosted app relay: strip raw (default). Remote UI must derive its view
+    // from operation.summary/details — see docs/local-agent-events.md.
     emitInflightToolEvent(inflight, payload, (event) => sendLocalAgentEvent(ws, event));
   }
 }

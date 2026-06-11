@@ -2,6 +2,7 @@ import type { ReviewSpec } from '@pinpawo/pet-agent';
 
 export type LocalAgentEvent =
   | LocalAgentMessageDeltaEvent
+  | LocalAgentSubagentMessageDeltaEvent
   | LocalAgentMessageCompletedEvent
   | LocalAgentOperationEvent
   | LocalAgentHumanReviewRequestedEvent
@@ -13,6 +14,12 @@ export type LocalAgentMessageDeltaEvent = {
   type: 'message.delta';
   requestId: string;
   role: 'assistant';
+  text: string;
+};
+
+export type LocalAgentSubagentMessageDeltaEvent = {
+  type: 'subagent.message.delta';
+  requestId: string;
   text: string;
 };
 
@@ -42,6 +49,12 @@ export type LocalAgentOperationPhase =
   | 'failed'
   | 'interrupted';
 
+export type LocalAgentOperationRaw = {
+  input?: unknown;
+  output?: unknown;
+  error?: unknown;
+};
+
 export type LocalAgentOperationEvent = {
   type: 'operation';
   requestId: string;
@@ -60,17 +73,20 @@ export type LocalAgentOperationEvent = {
       callId?: string;
     };
   };
-};
-
-export type LocalAgentOperationRaw = {
-  input?: unknown;
-  output?: unknown;
-  error?: unknown;
-};
-
-export type LocalAgentOperationInternalEvent = LocalAgentOperationEvent & {
+  /**
+   * Raw tool-call input/output/error. Only forwarded over trusted local
+   * transports (e.g. 127.0.0.1 TUI/companion socket). Stripped before sending
+   * to remote app channels — remote UI must rely on operation.summary/details.
+   */
   raw?: LocalAgentOperationRaw;
 };
+
+/**
+ * @deprecated Alias kept for compatibility. `raw` is now a regular optional
+ * field on `LocalAgentOperationEvent`; whether it crosses the wire is decided
+ * by the transport (see `sendLocalAgentEvent`'s `includeRaw` flag).
+ */
+export type LocalAgentOperationInternalEvent = LocalAgentOperationEvent;
 
 export type LocalAgentHumanReviewRequestedEvent = {
   type: 'human_review.requested';

@@ -1,4 +1,5 @@
 import {
+  formatSubagentMessage,
   formatOperationProgress,
   formatOperationResult,
   formatOperationStart,
@@ -94,10 +95,16 @@ function finishRun(
     if (!sessionToUpdate.activeRun || sessionToUpdate.activeRun.requestId !== requestId) {
       return sessionToUpdate;
     }
+    const subagentMessage = formatSubagentMessage(sessionToUpdate.activeRun.subagentDraft);
     return appendHistory({
       ...sessionToUpdate,
       activeRun: null,
-    }, history);
+    }, [
+      ...(subagentMessage
+        ? [historyDraft('system', subagentMessage, undefined, `${requestId}:subagent-output`)]
+        : []),
+      ...history,
+    ]);
   });
 
   const stateWithRouteRemoved = {
@@ -318,6 +325,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           requestId: action.requestId,
           phase: 'thinking',
           assistantDraft: '',
+          subagentDraft: '',
           activeOperations: [],
           startedAt: action.now,
           charCount: 0,
@@ -363,6 +371,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
               requestId: action.requestId,
               phase: 'thinking',
               assistantDraft: '',
+              subagentDraft: '',
               activeOperations: [],
               startedAt: action.now,
               charCount: 0,
@@ -468,6 +477,24 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
                 ...currentSession.activeRun,
                 phase: 'streaming',
                 assistantDraft: currentSession.activeRun.assistantDraft + token,
+                charCount: currentSession.activeRun.charCount + token.length,
+              }
+            : currentSession.activeRun,
+        }));
+      }
+
+      if (event.type === 'subagent.message.delta') {
+        const token = event.text;
+        if (!token) return state;
+        return updateSession(state, sessionId, (currentSession) => ({
+          ...currentSession,
+          activeRun: currentSession.activeRun?.requestId === event.requestId
+            ? {
+                ...currentSession.activeRun,
+                phase: currentSession.activeRun.phase === 'waiting_human'
+                  ? currentSession.activeRun.phase
+                  : 'streaming',
+                subagentDraft: currentSession.activeRun.subagentDraft + token,
                 charCount: currentSession.activeRun.charCount + token.length,
               }
             : currentSession.activeRun,
@@ -601,6 +628,10 @@ export function selectFocusedPendingUi(state: TuiState) {
 
 export function selectFocusedActiveOperations(state: TuiState) {
   return activeRunToActiveOperations(selectFocusedActiveRun(state));
+}
+
+export function selectFocusedSubagentDraft(state: TuiState) {
+  return selectFocusedActiveRun(state)?.subagentDraft ?? '';
 }
 
 export function selectFocusedPendingApproval(state: TuiState) {

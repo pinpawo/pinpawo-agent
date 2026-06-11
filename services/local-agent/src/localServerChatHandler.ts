@@ -453,7 +453,8 @@ export class LocalServerChatHandler {
     emitLocalServerToolOperationEvent({
       run: inflight,
       payload,
-      emit: (event) => sendLocalAgentEvent(ws, event),
+      // Local TUI socket: include raw input/output so the UI can render diffs etc.
+      emit: (event) => sendLocalAgentEvent(ws, event, { includeRaw: true }),
     });
   }
 }

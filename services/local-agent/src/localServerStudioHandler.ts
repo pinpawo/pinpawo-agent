@@ -170,7 +170,8 @@ export class LocalServerStudioHandler {
     emitLocalServerToolOperationEvent({
       run: inflight,
       payload,
-      emit: (event) => sendLocalAgentEvent(ws, event),
+      // Local studio review socket: include raw for diff/inspection rendering.
+      emit: (event) => sendLocalAgentEvent(ws, event, { includeRaw: true }),
     });
   }
 }

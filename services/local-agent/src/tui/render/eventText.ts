@@ -7,6 +7,8 @@ import { TUI_TEXT } from './text';
 import { formatElapsed, wrapLine } from './terminalText';
 import type { ActiveOperation, PendingUiState } from '../types';
 
+const SUBAGENT_TEXT_LINE_CHARS = 64;
+
 export function shorten(value: string, max = 60) {
   const normalized = value.replace(/\s+/g, ' ').trim();
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
@@ -45,6 +47,11 @@ export function formatOperationResult(event: LocalAgentOperationEvent) {
 export function formatSystemNoticeEvent(event: LocalAgentSystemNoticeEvent): string | null {
   const notice = event.message.trim();
   return notice || null;
+}
+
+export function formatSubagentMessage(text: string): string | null {
+  const content = formatSubagentTextBody(text);
+  return content ? TUI_TEXT.subagentOutput(content) : null;
 }
 
 export function formatStudioProgressEvent(event: LocalAgentStudioProgressEvent): string | null {
@@ -139,4 +146,37 @@ function formatDetails(details: Record<string, unknown> | undefined) {
       return [`${key}=${String(value)}`];
     })
     .join(' · ');
+}
+
+function formatSubagentTextBody(text: string) {
+  const normalized = text
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  if (!normalized) return '';
+
+  return normalized
+    .split(/\n{2,}/)
+    .map((paragraph) => splitLongParagraph(paragraph.trim()).join('\n'))
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function splitLongParagraph(paragraph: string) {
+  const sentences = paragraph.match(/[^。！？!?]+[。！？!?]?/g) ?? [paragraph];
+  const lines: string[] = [];
+  let current = '';
+
+  for (const sentence of sentences) {
+    const item = sentence.trim();
+    if (!item) continue;
+    if (current && current.length + item.length > SUBAGENT_TEXT_LINE_CHARS) {
+      lines.push(current);
+      current = item;
+      continue;
+    }
+    current = current ? `${current}${item}` : item;
+  }
+  if (current) lines.push(current);
+  return lines;
 }

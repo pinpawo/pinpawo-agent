@@ -6,6 +6,7 @@ import {
   formatOperationResult,
   formatOperationStart,
   formatStudioProgressEvent,
+  formatSubagentMessage,
   formatSystemNoticeEvent,
   getOperationKey,
 } from './tui/render/eventText';
@@ -67,6 +68,21 @@ test('formats completed and failed operation summaries from event fields', () =>
       },
     }),
     '执行命令：失败 · exit 1',
+  );
+});
+
+test('formats subagent text into readable paragraphs', () => {
+  assert.equal(
+    formatSubagentMessage(
+      '我先打开页面。现在搜索结果出来了，我会查看第一个帖子。然后继续收集评论。最后汇总。'.repeat(2),
+    )?.startsWith('[subagent]\n'),
+    true,
+  );
+  assert.match(
+    formatSubagentMessage(
+      '我先打开页面。现在搜索结果出来了，我会查看第一个帖子。然后继续收集评论。最后汇总。'.repeat(2),
+    ) ?? '',
+    /\n.+\n.+/,
   );
 });
 

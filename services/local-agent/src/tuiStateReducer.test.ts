@@ -6,6 +6,7 @@ import {
   selectFocusedActiveRun,
   selectFocusedBusy,
   selectFocusedPendingApproval,
+  selectFocusedSubagentDraft,
   tuiStateReducer,
 } from './tui/state/tuiStateReducer';
 
@@ -147,6 +148,51 @@ test('tuiStateReducer falls back to assistant draft when completed text is empty
   assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
     ['user', 'hello'],
     ['assistant', '你好'],
+  ]);
+});
+
+test('tuiStateReducer displays subagent deltas during run and preserves them in history', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'subagent.message.delta',
+      requestId: 'req-1',
+      text: '先检查文件',
+    },
+    now: 1100,
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'subagent.message.delta',
+      requestId: 'req-1',
+      text: '，再整理结果。',
+    },
+    now: 1200,
+  });
+
+  assert.equal(selectFocusedSubagentDraft(state), '先检查文件，再整理结果。');
+  assert.equal(selectFocusedActiveRun(state)?.phase, 'streaming');
+  assert.equal(selectFocusedActiveRun(state)?.charCount, '先检查文件，再整理结果。'.length);
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '最终答复',
+    },
+    now: 1300,
+    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  assert.deepEqual(state.sessions['chat:pet']?.history.map((item) => [item.kind, item.text]), [
+    ['user', 'hello'],
+    ['system', '[subagent]\n先检查文件，再整理结果。'],
+    ['assistant', '最终答复'],
   ]);
 });
 

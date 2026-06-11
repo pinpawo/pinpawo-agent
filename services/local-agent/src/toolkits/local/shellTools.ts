@@ -1,4 +1,5 @@
-import { execSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import {
@@ -39,7 +40,8 @@ export function getBlockedShellReason(command: string) {
 
 export function hasBlockedOutputRedirection(command: string) {
   const withoutFdDuplication = command.replace(/(^|[\s;&|])\d*>\s*&\d+\b/g, '$1');
-  return /(^|[^=>])\d*>>?/.test(withoutFdDuplication);
+  const withoutDevNull = withoutFdDuplication.replace(/[&\d]*>>?\s*\/dev\/null\b/g, '');
+  return /(^|[^=>])\d*>>?/.test(withoutDevNull);
 }
 
 function processOutputToString(output: unknown) {
@@ -140,8 +142,33 @@ export function normalizeShellActionInput(input: unknown) {
   return { command, cwd };
 }
 
+const execFileAsync = promisify(execFile);
+
+const DEFAULT_SHELL_TIMEOUT_SECONDS = 60;
+const MAX_SHELL_TIMEOUT_SECONDS = 600;
+const SHELL_MAX_BUFFER_BYTES = 4 * 1024 * 1024;
+const SHELL_OUTPUT_LIMIT_CHARS = 20_000;
+
+export function truncateShellOutput(output: string, limit = SHELL_OUTPUT_LIMIT_CHARS) {
+  if (output.length <= limit) {
+    return output;
+  }
+  const headLength = Math.floor(limit * 0.7);
+  const tailLength = limit - headLength;
+  const omitted = output.length - headLength - tailLength;
+  return `${output.slice(0, headLength)}\n[... truncated ${omitted.toString()} chars ...]\n${output.slice(output.length - tailLength)}`;
+}
+
+function resolveShellTimeoutMs(timeoutSeconds: number | undefined) {
+  const seconds = Math.min(
+    Math.max(1, Math.floor(timeoutSeconds ?? DEFAULT_SHELL_TIMEOUT_SECONDS)),
+    MAX_SHELL_TIMEOUT_SECONDS,
+  );
+  return seconds * 1000;
+}
+
 export const runShellTool = tool(
-  async (input: { command: string; cwd?: string }) => {
+  async (input: { command: string; cwd?: string; timeoutSeconds?: number }) => {
     let shellAction: { command: string; cwd: string };
 
     try {
@@ -161,31 +188,44 @@ export const runShellTool = tool(
       return `Error: shell command requires human review before execution: ${confirmationRisk}`;
     }
 
+    const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);
+
     try {
-      const output = execSync(shellAction.command, {
+      const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellAction.command], {
         encoding: 'utf-8',
-        timeout: 10000,
-        maxBuffer: 1024 * 64,
+        timeout: timeoutMs,
+        maxBuffer: SHELL_MAX_BUFFER_BYTES,
         cwd: shellAction.cwd,
       });
-      return output.slice(0, 4000) || '(no output)';
+      const out = truncateShellOutput(processOutputToString(stdout));
+      const err = truncateShellOutput(processOutputToString(stderr));
+      return [out || '(no output)', err ? `--- stderr ---\n${err}` : '']
+        .filter(Boolean)
+        .join('\n');
     } catch (err) {
       if (err instanceof Error && ('stdout' in err || 'stderr' in err)) {
-        const stdout = processOutputToString((err as { stdout?: unknown }).stdout);
-        const stderr = processOutputToString((err as { stderr?: unknown }).stderr);
+        const stdout = truncateShellOutput(processOutputToString((err as { stdout?: unknown }).stdout));
+        const stderr = truncateShellOutput(processOutputToString((err as { stderr?: unknown }).stderr));
         const output = [stderr, stdout].filter(Boolean).join('\n');
-        const status = (err as NodeJS.ErrnoException & { status?: number }).status ?? '?';
-        return `Error (exit ${status}):\n${output || err.message}`;
+        const killed = Boolean((err as { killed?: boolean }).killed);
+        const signal = (err as { signal?: string | null }).signal;
+        if (killed || signal === 'SIGTERM') {
+          return `Error: command timed out after ${(timeoutMs / 1000).toString()}s\n${output}`.trimEnd();
+        }
+        const status = (err as NodeJS.ErrnoException & { code?: unknown }).code;
+        const exitCode = typeof status === 'number' ? status : '?';
+        return `Error (exit ${exitCode.toString()}):\n${output || err.message}`;
       }
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
   },
   {
     name: 'run_shell',
-    description: '兜底工具：执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/write_file/update_file/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。超时 10s，输出截断至 4000 字符；不要用于需要输入、全屏 TTY、持续运行，或依赖 stdin 的命令（例如 cat > file）。高风险命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
+    description: '兜底工具：异步执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。不要用于需要输入、全屏 TTY、持续运行，或依赖 stdin 的命令（例如 cat > file）。高风险命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
     schema: z.object({
       command: z.string().describe('要执行的 shell 命令'),
       cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),
+      timeoutSeconds: z.number().int().positive().optional().describe('超时秒数；默认 60，上限 600。运行测试或构建等较慢命令时记得调大'),
     }),
   },
 );

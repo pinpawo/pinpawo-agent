@@ -196,7 +196,7 @@ bash 也作为 toolkit，而不是一个必须独立委派的 capability：
 const bashToolkit = {
   name: 'bash',
   description: '本地文件读写、目录操作、代码搜索、补丁应用和受控 shell 命令执行。',
-  tools: [read_file, view_file_chunk, grep_search, apply_file_patch, run_shell],
+  tools: [read_file, view_file_chunk, grep_search, apply_patch, run_shell],
   instructions: [
     '优先使用语义具体的文件工具。',
     'run_shell 只作为兜底工具。',

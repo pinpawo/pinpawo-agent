@@ -228,6 +228,7 @@ function resolveActor(config: OrchestratorConfig, runnableConfig?: RunnableConfi
 }
 
 function buildIterationLimitReviewPayload(params: {
+  turnId: string;
   iterationCount: number;
   maxIterations: number;
   delegationSummary: string;
@@ -236,7 +237,7 @@ function buildIterationLimitReviewPayload(params: {
   return {
     kind: 'review',
     review: buildReviewSpec({
-      id: `iteration-limit-${params.iterationCount}-${params.maxIterations}`,
+      id: `iteration-limit:${params.turnId}:${params.iterationCount}:${params.maxIterations}`,
       view: {
         kind: 'plain',
         title: 'Iteration limit reached',
@@ -275,7 +276,7 @@ function buildIterationLimitReviewPayload(params: {
 function buildInvalidIterationLimitReviewPayload(
   payload: HumanReviewInterruptPayload,
 ): HumanReviewInterruptPayload {
-  const message = '请选择批准继续，或拒绝停止。';
+  const message = '请选择批准继续、拒绝停止，或提供新的处理方向。';
   return {
     ...payload,
     error: 'invalid_decision',
@@ -292,7 +293,6 @@ function buildInvalidIterationLimitReviewPayload(
 function resolveIterationLimitReviewDecision(payload: HumanReviewInterruptPayload, resume: unknown) {
   try {
     return resolveHumanReviewResume({
-      requestId: 'iteration_limit',
       reviewSpec: payload.review,
     }, resume).decision;
   } catch (error) {
@@ -440,12 +440,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const { capabilities, toolkits, execution, maxIterations, workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const maxIter = maxIterations ?? 5;
+    let iterationLimitMessages: BaseMessage[] = [];
+    let resetIterationCount = false;
 
     if (state.iterationCount >= maxIter) {
       const delegationSummary = state.turnDelegations
         .map((d) => `[${d.id}] ${d.lane} — ${formatDelegationStatus(d.status)}: ${clipForPrompt(d.task, 80)}`)
         .join('\n') || '无委派记录';
       const reviewPayload = buildIterationLimitReviewPayload({
+        turnId: state.turnId,
         iterationCount: state.iterationCount,
         maxIterations: maxIter,
         delegationSummary,
@@ -457,16 +460,28 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
           interrupt(buildInvalidIterationLimitReviewPayload(reviewPayload)),
         );
       }
-      if (decision.type !== 'approve') {
+      if (decision.type === 'respond') {
+        iterationLimitMessages = [new HumanMessage(decision.message)];
+        state = {
+          ...state,
+          messages: [...state.messages, ...iterationLimitMessages],
+          iterationCount: 0,
+          pendingDelegation: null,
+        };
+        resetIterationCount = true;
+      } else if (decision.type !== 'approve') {
         return {
           messages: [new AIMessage(`已停止，共执行 ${state.iterationCount} 轮。如需继续请告诉我。`)],
           pendingDelegation: null,
         };
+      } else {
+        state = {
+          ...state,
+          iterationCount: 0,
+          pendingDelegation: null,
+        };
+        resetIterationCount = true;
       }
-      return {
-        iterationCount: 0,
-        pendingDelegation: null,
-      };
     }
 
     const toolkitList = toolkits ?? [];
@@ -632,11 +647,13 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const nextDelegationState = reuseOrAppendTurnDelegation(state.turnDelegations, pendingDelegation);
 
     return {
-      messages: decisionMode === 'finish' && finalReply
-        ? [new AIMessage(finalReply)]
-        : [],
+      messages: [
+        ...iterationLimitMessages,
+        ...(decisionMode === 'finish' && finalReply ? [new AIMessage(finalReply)] : []),
+      ],
       pendingDelegation: nextDelegationState.pendingDelegation,
       capabilityResult: decisionMode === 'capability' ? null : state.capabilityResult,
+      ...(resetIterationCount ? { iterationCount: 0 } : {}),
       ...(kind === 'delegation_outcome'
         ? {
             capabilitySearchState: buildEmptyCapabilitySearchState(),

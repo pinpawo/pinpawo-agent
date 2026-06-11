@@ -2,6 +2,7 @@ import type { Server } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
   parseLocalAgentClientMessage,
+  readLocalAgentClientMessageEnvelope,
   sendLocalAgentMessage,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
@@ -12,6 +13,7 @@ import {
 
 type MaybePromise<T> = T | Promise<T>;
 type LogError = (message: string, error: unknown) => void;
+type LogWarn = (message: string) => void;
 
 export type LocalServerWsHandlers = {
   onChatRequest: (ws: WebSocket, message: ChatRequestMessage) => MaybePromise<void>;
@@ -22,10 +24,21 @@ export type LocalServerWsHandlers = {
   onClose: (ws: WebSocket) => MaybePromise<void>;
   log?: (message: string) => void;
   logError?: LogError;
+  logWarn?: LogWarn;
 };
 
 function defaultLogError(message: string, error: unknown) {
   console.error(message, error instanceof Error ? error.message : error);
+}
+
+function defaultLogWarn(message: string) {
+  console.warn(message);
+}
+
+function formatMalformedClientMessage(prefix: string, data: Buffer | string) {
+  const envelope = readLocalAgentClientMessageEnvelope(data);
+  return `${prefix} ignored malformed client message `
+    + `type=${envelope?.type ?? 'unknown'} requestId=${envelope?.requestId ?? 'unknown'}`;
 }
 
 function runHandler(
@@ -45,10 +58,14 @@ export function dispatchLocalServerWebSocketMessage(
   data: Buffer | string,
   handlers: LocalServerWsHandlers,
   logError: LogError = handlers.logError ?? defaultLogError,
+  logWarn: LogWarn = handlers.logWarn ?? defaultLogWarn,
 ) {
   try {
     const msg = parseLocalAgentClientMessage(data);
-    if (!msg) return;
+    if (!msg) {
+      logWarn(formatMalformedClientMessage('[local-server]', data));
+      return;
+    }
 
     if (msg.type === 'chat_request') {
       runHandler('handleChatRequest', () => handlers.onChatRequest(ws, msg), logError);
@@ -63,8 +80,8 @@ export function dispatchLocalServerWebSocketMessage(
     } else if (msg.type === 'ping') {
       sendLocalAgentMessage(ws, { type: 'pong' });
     }
-  } catch {
-    // ignore malformed messages
+  } catch (err) {
+    logError('[local-server] failed to dispatch websocket message:', err);
   }
 }
 
@@ -74,13 +91,14 @@ export function attachLocalServerWebSocketTransport(
 ) {
   const log = handlers.log ?? console.log;
   const logError = handlers.logError ?? defaultLogError;
+  const logWarn = handlers.logWarn ?? defaultLogWarn;
   const wss = new WebSocketServer({ server });
 
   wss.on('connection', (ws) => {
     log('[local-server] TUI client connected');
 
     ws.on('message', (data: Buffer | string) => {
-      dispatchLocalServerWebSocketMessage(ws, data, handlers, logError);
+      dispatchLocalServerWebSocketMessage(ws, data, handlers, logError, logWarn);
     });
 
     ws.on('close', () => {

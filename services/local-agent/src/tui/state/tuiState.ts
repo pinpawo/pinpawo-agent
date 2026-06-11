@@ -82,10 +82,7 @@ export type ActiveOperationModel = {
 
 export type ApprovalRequestModel = {
   requestId: RunId;
-  kind: string;
-  prompt: string;
   review: ReviewSpec;
-  payload?: Record<string, unknown>;
   petId?: string;
 };
 
@@ -207,11 +204,6 @@ export type TuiAction =
       requestId: RunId;
       message: string;
       historyCell: HistoryCellMeta;
-      statusMessage: string;
-    }
-  | {
-      type: 'review.dismiss';
-      requestId: RunId;
       statusMessage: string;
     };
 

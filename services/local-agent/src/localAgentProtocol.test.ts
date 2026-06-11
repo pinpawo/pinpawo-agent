@@ -15,7 +15,6 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
       requestId: 'req-1',
       message: 'hello',
       userId: 'user-1',
-      resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
     })),
     {
       type: 'chat_request',
@@ -23,11 +22,19 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
       message: 'hello',
       petId: undefined,
       userId: 'user-1',
-      resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
     },
   );
   assert.equal(parseLocalAgentClientMessage('{bad json'), null);
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'chat_request', message: 'missing request' })), null);
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'chat_request',
+      requestId: 'req-1',
+      message: 'Approve',
+      resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
+    })),
+    null,
+  );
 });
 
 test('parseLocalAgentClientMessage accepts canonical human review response fields', () => {
@@ -60,8 +67,30 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'human_review_response',
       requestId: 'req-1',
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
       message: '批准',
       resume: { decisions: [{ type: 'approve' }] },
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
+      originSessionId: 'session-1',
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      reviewId: 'review-1',
+      selectedOptionId: 'respond',
+      input: 'not-an-object',
     })),
     null,
   );
@@ -223,6 +252,67 @@ test('parseLocalAgentServerMessage accepts canonical human_review.requested revi
         },
       },
     },
+  );
+});
+
+test('parseLocalAgentServerMessage rejects legacy human_review.requested fields', () => {
+  const canonicalEvent = {
+    type: 'human_review.requested',
+    requestId: 'req-1',
+    review: {
+      id: 'review-1',
+      schemaVersion: 1,
+      view: {
+        kind: 'plain',
+        body: 'Run command?',
+      },
+      options: [{
+        id: 'approve',
+        label: 'Approve',
+        decision: { type: 'approve' },
+      }],
+    },
+  };
+
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        ...canonicalEvent,
+        prompt: 'Run command?',
+      },
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        ...canonicalEvent,
+        payload: { kind: 'review' },
+      },
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        ...canonicalEvent,
+        review: {
+          ...canonicalEvent.review,
+          options: [{
+            id: 'edit',
+            label: 'Edit',
+            decision: { type: 'edit' },
+          }],
+        },
+      },
+    })),
+    null,
   );
 });
 

@@ -210,7 +210,7 @@ export class TuiRuntimeController {
 
   requestInterrupt() {
     const activeRun = selectFocusedActiveRun(this.options.getState());
-    if (!this.isCurrentBusy() || !this.wsClient.isConnected() || !activeRun) {
+    if (!this.wsClient.isConnected() || !activeRun) {
       return false;
     }
 
@@ -260,18 +260,6 @@ export class TuiRuntimeController {
     if (this.wsClient.isConnected()) {
       this.wsClient.send({ type: 'new_session' });
     }
-  }
-
-  dismissReview(requestId: string) {
-    this.options.dispatch({
-      type: 'review.dismiss',
-      requestId,
-      statusMessage: TUI_TEXT.approvalClosed,
-    });
-    this.options.dispatch({
-      type: 'input.set',
-      value: '',
-    });
   }
 
   appendSystemMessage(text: string) {

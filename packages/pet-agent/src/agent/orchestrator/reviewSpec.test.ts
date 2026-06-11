@@ -5,11 +5,11 @@ import {
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
 } from './review/reviewResponseResolver';
-import type { PendingReviewState } from './review/reviewSpec';
+import { isHumanReviewInterruptPayload, isReviewSpecValue } from './review/reviewSpec';
+import type { ReviewResolutionContext } from './review/reviewSpec';
 
-function samplePendingReview(): PendingReviewState {
+function samplePendingReview(): ReviewResolutionContext {
   return {
-    requestId: 'req-1',
     reviewSpec: {
       id: 'review-1',
       schemaVersion: 1,
@@ -66,6 +66,34 @@ function assertResolutionError(fn: () => unknown, code: string) {
     (error) => error instanceof ReviewResponseResolutionError && error.code === code,
   );
 }
+
+test('review spec guards accept canonical values only', () => {
+  const reviewSpec = samplePendingReview().reviewSpec;
+
+  assert.equal(isReviewSpecValue(reviewSpec), true);
+  assert.equal(isHumanReviewInterruptPayload({
+    kind: 'review',
+    review: reviewSpec,
+    pendingAction: {
+      actionId: 'action-1',
+      toolName: 'run_shell',
+      args: { command: 'git status' },
+    },
+  }), true);
+  assert.equal(isHumanReviewInterruptPayload({ kind: 'review' }), false);
+  assert.equal(isReviewSpecValue({
+    ...reviewSpec,
+    options: [{
+      id: 'edit',
+      label: 'Edit',
+      decision: { type: 'edit' },
+    }],
+  }), false);
+  assert.equal(isReviewSpecValue({
+    ...reviewSpec,
+    extra: true,
+  }), false);
+});
 
 test('resolveHumanReviewResponse resolves approve option and declared effects', () => {
   const resolution = resolveHumanReviewResponse(samplePendingReview(), {
@@ -133,7 +161,7 @@ test('resolveHumanReviewResponse rejects stale review responses', () => {
   );
 });
 
-test('resolveHumanReviewResume rejects legacy decisions', () => {
+test('resolveHumanReviewResume rejects legacy decisions and extra response fields', () => {
   assertResolutionError(
     () => resolveHumanReviewResume(samplePendingReview(), {
       decisions: [{ type: 'approve' }],
@@ -146,12 +174,44 @@ test('resolveHumanReviewResume rejects legacy decisions', () => {
       selectedOptionId: 'approve',
       decisions: [{ type: 'approve' }],
     }),
-    'stale_review',
+    'invalid_response',
   );
   assertResolutionError(
     () => resolveHumanReviewResume(samplePendingReview(), {
       selectedOptionId: 'approve',
       decisions: [{ type: 'approve' }],
+    }),
+    'invalid_response',
+  );
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
+      decision: { type: 'approve' },
+    }),
+    'invalid_response',
+  );
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
+      effects: [],
+    }),
+    'invalid_response',
+  );
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      type: 'human_review_response',
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
+    }),
+    'invalid_response',
+  );
+  assertResolutionError(
+    () => resolveHumanReviewResume(samplePendingReview(), {
+      reviewId: 'review-1',
+      selectedOptionId: 'respond',
+      input: 'please continue',
     }),
     'invalid_response',
   );

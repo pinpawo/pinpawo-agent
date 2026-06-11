@@ -25,7 +25,6 @@ export type TuiKeyAction =
   | { type: 'approval.previous' }
   | { type: 'approval.next' }
   | { type: 'approval.submit' }
-  | { type: 'approval.dismiss' }
   | { type: 'resume.previous' }
   | { type: 'resume.next' }
   | { type: 'resume.submit' }
@@ -65,7 +64,7 @@ export function resolveTuiKeyAction(
     if (key.upArrow) return { type: 'approval.previous' };
     if (key.downArrow) return { type: 'approval.next' };
     if (key.return) return { type: 'approval.submit' };
-    if (key.escape) return { type: 'approval.dismiss' };
+    if (key.escape) return { type: 'global.interrupt' };
     if (key.tab || (key.shift && key.tab)) return { type: 'none' };
     return { type: 'composer.edit' };
   }

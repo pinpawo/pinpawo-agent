@@ -8,7 +8,7 @@
 
 这份文档用于重新设计 human review approval 的数据模型和端到端交互流程。
 
-当前 PR #76 尝试把 `/allow` 这种文本魔法改成 typed resume extras，方向是正确的，但也暴露出更大的架构问题：toolkit review policy、graph checkpoint/state、WebSocket 协议、TUI approval UI 之间的边界不清晰。
+当前 PR #76 尝试把 `/allow` 这种文本魔法改成 typed resume extras，方向是正确的，但也暴露出更大的架构问题：toolkit review policy、LangGraph interrupt/checkpoint、graph 业务 state、WebSocket 协议、TUI approval UI 之间的边界不清晰。
 
 重构目标不是只修 `ApprovalPanel.tsx`，而是建立一个简单、可扩展、可验证的 review 交互协议：
 
@@ -16,9 +16,10 @@
 - review producer 明确给出用户可选择的 options。
 - UI 只负责渲染 view 和 options。
 - 用户 response 只提交 option id 和必要输入。
-- graph/tool runtime 根据 pending review state 解析 decision 和 review effects。
-- authorization state 写入 graph state/checkpoint，由 tool review policy 在下一次 tool call 前读取。
+- graph/tool runtime 根据当前 interrupt payload / `ReviewResolutionContext` 解析 decision 和 review effects。
+- authorization state 写入 graph 业务 state，并随 checkpoint 持久化，由 tool review policy 在下一次 tool call 前读取。
 - local-agent server 只做 transport/session 连接，不拥有 shell 授权语义。
+- pending review 控制态由 LangGraph interrupt/checkpoint 拥有，不复制进普通 graph 业务 state。
 
 ## 2. 当前问题
 
@@ -101,7 +102,7 @@ type ReviewSpec = {
 - option 选择后对应的 decision。
 - option 可能附带的 review effects。
 
-`ReviewSpec.id` 是一次 pending review 的身份标识，由 graph/tool runtime 在 materialize 并校验 spec 后生成。只要 review 内容发生变化，或者 graph 进入下一次 human review，就必须生成新的 `ReviewSpec.id`。`schemaVersion` 只表示 ReviewSpec 协议版本，不用于 stale 校验；V1 使用 `schemaVersion: 1`，但类型保持 `number`，V2 出现时不需要让所有 producer 端字面量类型断裂。V1 不引入 `reviewVersion`。
+`ReviewSpec.id` 是一次 pending review 的身份标识，由 graph/tool runtime 在触发 interrupt 前 materialize 并校验 spec 后生成。这个 id 必须由当前 interrupt 的稳定上下文派生，例如 tool review 用 `tool_call_id` / pending action id，iteration-limit 用 gate 上下文；不能在 replay 时重新 `randomUUID()`。只要 review 内容发生变化，或者 graph 进入下一次 human review，就必须生成新的 `ReviewSpec.id`。`schemaVersion` 只表示 ReviewSpec 协议版本，不用于 stale 校验；V1 使用 `schemaVersion: 1`，但类型保持 `number`，V2 出现时不需要让所有 producer 端字面量类型断裂。V1 不引入 `reviewVersion`。
 
 ### 3.2 Options 可以静态或动态生成，但传输时必须 materialize
 
@@ -145,18 +146,18 @@ UI 不应该知道：
 
 “本会话授权”这种状态要跟 graph thread/checkpoint 走。local-agent server/TUI 不应该拥有 shell authorization store，也不应该把 authorization 当成 WebSocket extras 处理。
 
-授权状态的 owner 应该是 graph/tool runtime：
+授权状态的 owner 应该是 graph/tool runtime，具体落在 graph 业务 state 中，并随 checkpoint 持久化：
 
 - tool review policy 在 tool 执行前读取 graph state 里的 authorizations。
 - 未命中 authorization 时，tool review policy 生成 `ReviewSpec` 并触发 interrupt。
 - graph resume 后，根据 selected option 对应的 effect 更新 graph state。
 - 当前 tool call 继续按 selected option 的 decision 执行。
 
-这样 TUI、Studio、App 都只是 review UI。无论用户从哪个客户端批准，authorization 都落在同一个 graph thread/checkpoint 上。
+这样 TUI、Studio、App 都只是 review UI。无论用户从哪个客户端批准，authorization 都落在同一个 graph thread 的业务 state 中，并由 checkpoint 持久化。
 
 ### 3.5 `message` 不驱动行为
 
-用户展示文案可以作为 history/display 字段保留，但 runtime 行为必须来自 typed option 和 graph pending review state。
+用户展示文案可以作为 history/display 字段保留，但 runtime 行为必须来自 typed option 和当前 interrupt/checkpoint 持有的 review payload。
 
 也就是说：
 
@@ -171,8 +172,8 @@ UI 不应该知道：
 
 - `session`：local-agent 的一次聊天会话，对应一个 graph thread/checkpoint 上下文。它不是用户登录 session。
 - `request`：一次 agent run / turn 的请求，用 `requestId` 在 WebSocket event、TUI active run、graph thread/checkpoint 路由之间做关联。
-- `review`：一次 pending human review 交互。一个 request 运行过程中可以顺序产生多个 review；任意时刻只有当前 pending review 的 `reviewId` 可以被接受。review 的完整数据保存在 graph checkpoint/state 中。
-- `decision`：graph/tool runtime resolve option 后得到的 human review 决策，用于处理当前 pending action，例如 approve、reject、respond、edit。
+- `review`：一次 pending human review 交互。一个 request 运行过程中可以顺序产生多个 review；任意时刻只有当前 pending review 的 `reviewId` 可以被接受。review 的完整 payload 由 LangGraph interrupt/checkpoint 持有，不作为普通业务 state 复制一份。
+- `decision`：graph/tool runtime resolve option 后得到的 human review 决策，用于处理当前 pending action。V1 只有 approve、reject、respond；edit 后续必须作为新的 canonical option/input 重新设计。
 - `effect`：选择某个 option 后，graph/tool runtime 需要额外应用的状态变更，例如“在当前 graph thread 授权当前 pending shell action”。effect 由 graph/tool runtime 根据 `selectedOptionId` 从 pending `ReviewSpec` 中解析出来；它不是 transport extras，也不是 tool input。
 
 ### 3.7 Owner matrix
@@ -182,10 +183,10 @@ UI 不应该知道：
 | 对象 | Owner | 可读方 | 不允许做的事 |
 | --- | --- | --- | --- |
 | `ReviewSpec` | trusted review producer + graph runtime materializer | UI、transport、graph runtime | UI 不修改、不补全 option |
-| `PendingReviewState` | graph/tool runtime state | graph/tool runtime | client 不提交 pending action |
+| current review payload / `ReviewResolutionContext` | LangGraph interrupt/checkpoint + graph/tool runtime stack frame | graph/tool runtime | client 不提交 pending action；runtime 不复制进普通 graph state |
 | `HumanReviewResponseMessage` | client transport | local-agent server、graph/tool runtime | client 不提交 decision/effects/sessionId |
 | `ReviewResponseResolution` | graph/tool runtime resolver | graph/tool runtime | transport 不解析 tool args |
-| authorization state | graph state/checkpoint | tool review policy / wrapper | local-agent server 不保存 authorization store |
+| authorization state | graph business state, persisted by checkpoint | tool review policy / wrapper | local-agent server 不保存 authorization store |
 | request/session/thread route | local-agent server runtime metadata | local-agent server | client extras 不参与证明路由 |
 
 这张表是实现边界：如果某层需要读表中“不允许做”的字段，说明设计正在回退到旧耦合。
@@ -241,14 +242,10 @@ type HumanReviewRequestedEvent = {
   requestId: string;
   review: ReviewSpec;
   actor?: { petId?: string };
-
-  // 派生展示/调试字段。runtime 行为只由 review + server-side route state 决定。
-  prompt?: string;
-  payload?: HumanReviewInterruptPayload;
 };
 ```
 
-`prompt` 和 `payload` 只能用于展示 fallback / 调试溯源，不能驱动 runtime 行为。旧 request interrupt adapter 已移除。
+TUI 展示只能读取 `review.view` / `review.options`。raw interrupt payload 不进入 TUI state，也不能驱动 runtime 行为。旧 request interrupt adapter 已移除。
 
 V1 response schema：
 
@@ -266,6 +263,8 @@ type HumanReviewResponseMessage = {
 
 `reviewId` 用于 stale response 校验。客户端必须回传当前 `ReviewSpec.id`；local-agent transport 和 graph/tool runtime 都应拒绝与当前 pending review 不匹配的 `reviewId`。
 
+V1 response 是封闭协议面：除 `type`、`requestId`、`reviewId`、`selectedOptionId`、`input` 外，transport parser 必须拒绝额外字段。`message`、`resume`、`decisions`、`decision`、`effects`、`originSessionId` 等旧字段不能被忽略后继续传入 runtime。
+
 V1 action cardinality：
 
 - 一个 `ReviewSpec` 对应一个 pending tool action。
@@ -277,7 +276,7 @@ V1 response 不携带 `schemaVersion`，也不携带 `reviewVersion`。stale 校
 V1 field ownership：
 
 - `requestId`：transport route key，由 server 建立 request -> session/thread metadata。
-- `reviewId`：pending review key，由 graph/tool runtime 生成并保存在 pending state。local-agent server 也应该在 route metadata 中缓存 `requestId -> reviewId`，client 提交时先做 fast-path stale 校验；graph/tool runtime 仍然必须做权威校验。
+- `reviewId`：pending review key，由 graph/tool runtime 在 interrupt payload 中 materialize，并由 LangGraph interrupt/checkpoint 持有当前 pending review 的控制态。local-agent server 也应该在 route metadata 中缓存 `requestId -> reviewId`，client 提交时先做 fast-path stale 校验；graph/tool runtime 仍然必须做权威校验。
 - `selectedOptionId`：用户选择的 option key。
 - `input`：selected option 声明过的用户输入；V1 只支持 `respond` 的 `input.message`。
 
@@ -306,22 +305,20 @@ type ReviewView =
 
 ### 5.1 Human review decision
 
-沿用现有 decision 语义：
+V1 canonical decision 只有三种：
 
 ```ts
-type HumanReviewDecision =
+type ReviewResolvedDecision =
   | { type: 'approve' }
-  | { type: 'edit'; editedAction: HumanReviewActionRequest }
   | { type: 'reject'; message?: string }
   | { type: 'respond'; message: string };
 ```
 
-四种 decision 的语义：
+三种 decision 的语义：
 
 - `approve`：批准当前 pending action，tool wrapper 可以继续执行原 action。
 - `reject`：拒绝当前 pending action，tool wrapper 不执行该 action，并把拒绝信息返回给 graph/model。
 - `respond`：不执行当前 pending action，而是把用户的一段反馈/新指令返回给 graph/model，让模型重新规划下一步。例如用户看到 `rm -rf tmp` 后回复“不要删除，先列出目录看看”。它需要用户输入文本。
-- `edit`：用户直接修改 pending action 的名字或参数，再让 tool wrapper 用修改后的 action 继续。它需要结构化输入，例如 edited action args。
 
 V1 的 TUI materialize 这四类 option：
 
@@ -330,7 +327,7 @@ V1 的 TUI materialize 这四类 option：
 - `reject` option：reject decision。
 - `respond` option：respond decision + 最小文本输入 `input.message`。
 
-`edit` 需要结构化 action/args 编辑器，后续扩展。
+`edit` 需要结构化 action/args 编辑器，后续作为新的 canonical option/input 重新设计；V1 不保留旧 `HumanReviewActionRequest` / `applyEdit` 通道。
 
 ### 5.2 Review effect
 
@@ -375,7 +372,7 @@ V1 只需要支持 session authorization 这一个 effect。
 
 - `ReviewEffect` 只能由 pending `ReviewSpec.options` 声明。
 - 客户端不能临时构造未声明的 effect。
-- graph/tool runtime 必须根据 `selectedOptionId` 从 pending review state 解析 effect。
+- graph/tool runtime 必须根据 `selectedOptionId` 从当前 interrupt payload / `ReviewResolutionContext` 解析 effect。
 - effect 的应用必须经过 graph/tool runtime 校验，例如 authorization 必须要求 selected option 的 decision 是 approve。
 - `actionRef` 不能是任意字符串；V1 只支持 `{ type: 'pending_action' }`。
 - `matcher` 不能省略；producer 必须显式声明 matcher template，或者显式声明 `{ type: 'policy_hook' }`。
@@ -395,7 +392,7 @@ type ToolAuthorizationMatcherHook = (ctx: {
 
 ### 5.3 Authorization state
 
-authorization state 应该进入 graph state/checkpoint，而不是 local-agent server 的外部 map。
+authorization state 应该进入 graph 业务 state，并随 checkpoint 持久化，而不是 local-agent server 的外部 map。
 
 V1 可以定义一个窄状态：
 
@@ -567,13 +564,14 @@ toolkit policy / model / function 生成 review request 时，最终要经过 tr
 }
 ```
 
-### 6.2 Graph 保存 pending review state
+### 6.2 Pending review 由 interrupt/checkpoint 持有
 
-graph/tool runtime 在触发 interrupt 前，需要把 pending review 的必要上下文放进 graph checkpoint/state。LangGraph 的 interrupt 本身会保存当前 graph state；如果 effect resolution 需要额外上下文，可以把它放进 graph runtime state。
+graph/tool runtime 在触发 `interrupt()` 前，需要 materialize 当前 review payload。LangGraph interrupt/checkpoint 自己会持有“当前卡在哪个 review、resume 要回到哪个 stack frame”这类控制态；不要再把同一份 pending review 复制到普通 graph state channel。
+
+这里需要和 authorization state 明确区分：pending review 是当前暂停点的控制流状态，owner 是 LangGraph interrupt/checkpoint；authorization 是用户批准后留下的长期运行策略，owner 是 graph 业务 state。为了解决 stale review 循环，应该让 `ReviewSpec.id` 稳定、让 resume 回到同一个 interrupt stack frame，而不是新增一个 `pendingReviewState` channel。
 
 ```ts
-type PendingReviewState = {
-  requestId: string;
+type ReviewResolutionContext = {
   reviewSpec: ReviewSpec;
   pendingAction?: PendingReviewAction;
 };
@@ -586,11 +584,13 @@ type PendingReviewAction = {
 };
 ```
 
-这个 state 是后续 response resolution 和 effect 校验的依据。`reviewSpec.id` 和 `reviewSpec.schemaVersion` 保存在 graph state 中；V1 response 必须回传 `reviewId`，transport 层和 graph/tool runtime 都应拒绝 stale review response。
+`ReviewResolutionContext` 是当前 interrupt stack frame 里的解析上下文，不是 graph state。`reviewSpec.id` 必须在触发 interrupt 前稳定 materialize：tool review 用 pending action 的 stable `actionId`（例如 `tool_call_id`）派生；iteration-limit 这类 runtime gate 用当前 gate 上下文派生。这样 resume 重放时不会因为重新 `randomUUID()` 造成 stale review 循环。
 
 local-agent server 可以缓存 requestId/reviewId/sessionId 到 active graph thread 的路由关系，但不缓存 authorization，也不解释 shell tool 语义。
 
 `pendingAction` 只在 review 代表某个待执行 tool action，且后续 effect resolution 需要这个 action 上下文时存在；iteration-limit 这类 runtime gate 不应该伪造成 tool action。`pendingAction` 是 graph/tool runtime 自己保存的执行上下文，不来自 client response。matcher hook 必须读取这个 `pendingAction`，不能反向读取 UI payload。
+
+长期免审只能来自 `graph.authorize_tool_action` effect 写入的 graph authorization state。普通 approve/reject/respond 不需要额外的 one-shot graph state；resume 会回到原来的 interrupted stack frame，wrapper 直接消费解析后的 decision。
 
 ### 6.3 UI 渲染 review spec
 
@@ -650,9 +650,13 @@ respond option 提交：
 
 客户端不提交 `decision`，也不提交 `effects`。
 
+local-agent server 收到 `human_review_response` 后只构造 graph resume payload；不能把它转成新的 `chat_request`，也不能为了复用 chat 入口而追加空的 `HumanMessage`。review response 是对当前 interrupt 的 resume，不是新的用户消息。
+
+公开 WebSocket `chat_request` 不能携带 `resume` 字段。graph resume 是 server 内部执行入口，只能由 `human_review_response`、明确的 interrupt cancellation，或其他受控 server-side runtime 流程构造，不能作为 client transport 的通用 escape hatch。
+
 ### 6.5 Graph/tool runtime resolve response
 
-graph/tool runtime 根据 pending review state 解析：
+graph/tool runtime 根据当前 interrupt stack frame 中 materialized 的 review payload 解析：
 
 ```ts
 type ReviewResponse = {
@@ -661,8 +665,12 @@ type ReviewResponse = {
   input?: Record<string, unknown>;
 };
 
-const response = interrupt(state.pendingReview.reviewSpec) as ReviewResponse;
-const option = state.pendingReview.reviewSpec.options.find(
+const response = interrupt({
+  kind: 'review',
+  review: reviewPayload.review,
+  pendingAction: reviewPayload.pendingAction,
+}) as ReviewResponse;
+const option = reviewPayload.review.options.find(
   (item) => item.id === response.selectedOptionId,
 );
 ```
@@ -673,7 +681,7 @@ resolver 输出一个 runtime 内部对象：
 type ReviewResponseResolution = {
   reviewId: string;
   optionId: string;
-  decision: HumanReviewDecision;
+  decision: ReviewResolvedDecision;
   effects: ReviewEffect[];
   display: {
     label: string;
@@ -697,7 +705,7 @@ resolve response 和执行 effect 前必须校验：
 
 - `requestId` 能 resume 到唯一 pending graph thread/checkpoint。
 - `reviewId` 必须等于当前 pending review 的 `reviewSpec.id`；不匹配说明客户端提交了 stale response，必须拒绝。
-- session/thread 路由信息来自 server/runtime metadata，而不是 client extras。local-agent server 必须用自己保存的 `requestId -> { sessionId, threadId, reviewId }` 路由 pending review；如果当前连接/当前 TUI focus 的 session 与这条 pending route 不匹配，必须拒绝 resume，避免把 response 送到错误 checkpoint。
+- session/thread 路由信息来自 server/runtime metadata，而不是 client extras。local-agent server 可以用内存中的 `requestId -> { sessionId, threadId, reviewId }` route 做 fast-path 校验；如果 route 缺失，必须从当前 active session/thread 的 LangGraph checkpoint 读取 pending interrupt 来恢复当前 `ReviewSpec`，不能把内存 map 当成权威状态。恢复后仍然要校验 `reviewId`。如果当前连接/当前 TUI focus 的 session 与 pending route 不匹配，必须拒绝 resume，避免把 response 送到错误 checkpoint。
 - `originSessionId` 这类 client extras 不再作为 review response 协议字段。客户端不回传 session id 来证明自己，server/runtime 用自己保存的 request -> session/thread metadata 做路由和校验。
 - 同一个 pending review 多客户端并发提交时，采用 first response wins：第一个通过校验并成功 resume 的 response 消费 pending review；后续 response 因 `reviewId` 不再匹配当前 pending review 而拒绝。
 - `selectedOptionId` 存在于 pending spec。
@@ -720,8 +728,13 @@ resume = {
 graph/tool runtime resume 后再从 pending `ReviewSpec` 解析 decision 和 effects：
 
 ```ts
-const resolution = resolveHumanReviewResponse(state.pendingReview, response);
+const resolution = resolveHumanReviewResponse({
+  reviewSpec: reviewPayload.review,
+  pendingAction: reviewPayload.pendingAction,
+}, response);
 ```
+
+effect 必须在继续执行 pending action 之前应用。对于 `graph.authorize_tool_action`，runtime 先根据 pending action 和 policy matcher hook 生成 authorization record 并写入 graph state；写入失败时不能执行该 tool call。
 
 `resolveHumanReviewResponse()` 负责校验输入：
 
@@ -750,16 +763,18 @@ V1 需要明确几个运行时边界：
 
 V1 cancellation 默认策略：
 
-- 用户主动 `/interrupt`：如果当前 session/thread 有 pending review，server 应 resume 当前 review 为 reject，例如 `{ type: 'reject', message: 'interrupted by user' }`，并清理本地 active run 状态。
+- 用户主动 `/interrupt`、TUI approval 面板中按 Esc、或 pending review 期间按 Ctrl+C：如果当前 session/thread 有 pending review，server 应 resume 当前 review 为 reject，例如 `{ type: 'reject', message: 'interrupted by user' }`，并清理本地 active run 状态。TUI 不能只本地关闭 approval 面板，因为 graph checkpoint 仍然停在同一个 interrupt。
 - WebSocket 断开：默认保留 graph checkpoint 中的 pending review，不自动 reject。下次客户端连接并恢复同一 session/thread 时，server 应重新发送当前 pending `ReviewSpec`。
-- TUI 进程崩溃或 local-agent 重启：只要 graph checkpoint 仍存在，pending review 继续保留；启动后通过 session/thread recovery 重新发现并展示。只有用户明确中断或 session 被显式删除时，才 resume reject 或删除对应 checkpoint。
+- TUI 进程崩溃或 local-agent 重启：只要 graph checkpoint 仍存在，pending review 继续保留；启动后通过 session/thread recovery 重新发现并展示。内存里的 `pendingReviewRoutes` 丢失不代表 review 已关闭，TUI local server 必须能从 checkpoint pending interrupt 重建 route。只有用户明确中断或 session 被显式删除时，才 resume reject 或删除对应 checkpoint。
+- App chat 也应收敛到同样的 checkpoint recovery 语义，但需要先补清楚 app user/session route API。当前实现只支持运行中内存 route，不应把这个临时限制写成已完成能力。
 
 ### 6.9 Runtime entry points
 
 当前代码有两条 HITL 入口，重构后都要归一到同一个 `ReviewSpec` / response resolver：
 
-- TUI / App chat：通过 LangGraph checkpoint 中的 pending interrupt 恢复。server 从 `requestId` 找到 thread/checkpoint，并把 `{ reviewId, selectedOptionId, input }` 作为 resume payload。
-- Studio humanReviewer：可以保留 `createWsHumanReviewer()` 里的 pending promise slot，但 pending slot 必须保存当前 `ReviewSpec`。收到 canonical response 后调用同一个 `resolveHumanReviewResponse()` 得到 `HumanReviewDecision`，再 resolve promise。
+- TUI chat：通过 LangGraph checkpoint 中的 pending interrupt 恢复。server 从 active session/thread 找到 checkpoint，并把 `{ reviewId, selectedOptionId, input }` 作为 resume payload。
+- App chat：response payload 同样使用 canonical `{ reviewId, selectedOptionId, input }`。checkpoint recovery 需要后续通过明确的 app user/session route API 接入，不能依赖 local-agent 私有内存状态来伪装恢复。
+- Studio humanReviewer：可以保留 `createWsHumanReviewer()` 里的 pending promise slot，但 pending slot 必须保存当前 `ReviewSpec`。收到 canonical response 后校验 `reviewId` / `selectedOptionId`，并把 canonical `{ reviewId, selectedOptionId, input }` 作为 graph resume payload。
 
 也就是说，Studio 可以保留 promise slot 这个控制流实现，但不能保留另一套 message text decoder。Studio review response 只允许 canonical `{ reviewId, selectedOptionId, input }`；不能再从 `message` 文本或 `resume.decisions` 猜 decision。
 
@@ -781,7 +796,7 @@ V1 cancellation 默认策略：
    - `interruptOn` per-tool policy
    - `approve` / `edit` / `reject` decision handling
 
-   这个 middleware 运行在 model 产出 tool call 之后、tool 执行之前，结构上很接近我们需要的 review gate。但它解决的是“单次 tool call 是否需要 human approval”，不负责“本 graph thread 后续相似 action 免审”的 authorization state。
+   这个 middleware 运行在 model 产出 tool call 之后、tool 执行之前，结构上很接近我们需要的 review gate。但它解决的是“单次 tool call 是否需要 human approval”，不负责“本 graph thread 后续相似 action 免审”的 authorization state。它的 `edit` decision 不作为本项目 V1 兼容通道保留；后续编辑能力必须走新的 canonical option/input 设计。
 
 因此本项目 V1 推荐：
 
@@ -808,9 +823,6 @@ type ToolkitToolReviewPolicy = {
       pendingAction: PendingReviewAction;
     }
   ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
-  applyEdit?: (
-    ctx: ToolkitToolReviewContext & { editedAction: HumanReviewActionRequest }
-  ) => unknown | Promise<unknown>;
 };
 ```
 
@@ -860,7 +872,7 @@ return reviewSpec({
 
 复杂的协议字段由 builder 生成，不让每个 policy 重复拼结构。
 
-后续支持结构化编辑后，再增加：
+后续支持结构化编辑时，再增加 canonical `edit` option 和对应的 structured input builder；不要复活旧的 action request 通道。例如：
 
 ```ts
 edit({ inputKey: 'editedAction', argsSchema });
@@ -907,19 +919,19 @@ services/local-agent/src/tui/
 - 新增 `ReviewSpec` / `ReviewView` / `ReviewOption` 类型。
 - 保持现有 runtime / UI 行为不变。
 
-### PR 1b：引入 pending review state 和 response resolver
+### PR 1b：引入 review response resolver
 
 - 在 pet-agent graph/tool runtime 中新增 `resolveHumanReviewResponse()`。
-- 引入 `PendingReviewState` 类型，作为 graph/tool runtime 后续写入 checkpoint 的状态结构。
+- 引入 `ReviewResolutionContext` 类型，表示当前 interrupt stack frame 中用于 resolve response 的上下文；它不写入普通 graph state。
 - 本 PR 只解析 selected option 到 decision/effects，不应用 authorization effect。
 - 测试覆盖 `reviewId` stale response、unknown option、respond missing `input.message`、未声明 input key。
 
 ### PR 1c：升级 transport protocol
 
 - `human_review.requested` event 使用 canonical `review: ReviewSpec` 字段。
-- local-agent protocol parser 接受新 response 字段 `reviewId` / `selectedOptionId` / `input`。
-- local-agent server 缓存 `requestId -> { sessionId, threadId, reviewId, reviewSpec }` route metadata，并对 response 做 fast-path stale 校验。
-- canonical response 必须由 server 使用缓存的 `ReviewSpec` resolve 成 graph resume；client 不能直接用 `resume` 决定 runtime 行为。
+- local-agent protocol parser 只接受新 response 字段 `reviewId` / `selectedOptionId` / `input`，并拒绝旧的 `message` / `resume` / `decisions` / client session extras。
+- local-agent server 缓存 `requestId -> { sessionId, threadId, reviewId }` route metadata，并对 response 做 fast-path stale 校验。
+- canonical response 必须由 server 原样构造成 graph resume；decision/effects 只能由 graph/tool runtime 使用当前 interrupt payload / `ReviewResolutionContext` resolve。client 不能直接用 `resume` 决定 runtime 行为。
 - 保持现有 UI 行为不变。
 - 测试覆盖 canonical response、transport stale short-circuit、invalid option retry、session/thread route mismatch。
 
@@ -936,7 +948,7 @@ services/local-agent/src/tui/
 
 - `/allow` text magic 和 client-submitted authorization extras 已移除。
 - `approve-with-effect` option 通过 `graph.authorize_tool_action` effect 表达授权意图。
-- graph/tool runtime 从 pending review state 解析 effect。
+- graph/tool runtime 从当前 interrupt payload / `ReviewResolutionContext` 解析 effect。
 - shell review policy 明确声明 `approve-with-effect` option 和 `buildAuthorizationMatcher` hook。
 - graph/tool runtime 校验 approve decision、thread、reviewId、option、single pending action 后写入 graph state authorization。
 - tool review policy 在下一次 tool call 前读取 graph state `toolAuthorizations`。
@@ -954,14 +966,14 @@ services/local-agent/src/tui/
 - TUI 不从 `args.command` 等 tool input 里推断行为。
 - WebSocket response 不由 message 文本驱动 runtime 行为。
 - 客户端不提交 decision 或 effects；只提交 selected option id 和必要输入。
-- graph/tool runtime 从 pending review state 解析 decision 和 effects。
+- graph/tool runtime 从当前 interrupt payload / `ReviewResolutionContext` 解析 decision 和 effects。
 - V1 支持 `respond` 的文本输入，并校验非空 `input.message`。
 - V1 拒绝 selected option 未声明的 input key。
 - graph/tool runtime 校验 session/thread、requestId、reviewId、option id 后才写入 authorization state。
 - 同一个 pending review 多客户端并发提交时采用 first response wins，后续 stale/review-closed response 必须拒绝。
 - shell session authorization 只能由 graph pending review 中声明过的 option 触发。
-- reject/respond option 不能触发 session authorization；后续 edit option 即使前端异常提交，也不能触发 session authorization。
-- 现有 graph-level approve / reject / respond / edit decision 语义保持兼容；V1 TUI materialize approve/reject/respond，edit 后续扩展。
+- reject/respond option 不能触发 session authorization；后续如果扩展 edit option，即使前端异常提交，也不能触发 session authorization。
+- V1 graph-level decision 只支持 approve / reject / respond；旧 edit decision 不再作为 runtime fallback 保留。
 
 ## 11. 后续扩展
 

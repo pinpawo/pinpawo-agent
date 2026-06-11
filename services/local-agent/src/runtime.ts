@@ -193,6 +193,7 @@ export class LocalAgentRuntime {
         onChatRequest: (ws, msg) => this.appChatHandler.handleChatRequest(ws, msg),
         onNewSession: (_ws, msg) => this.appChatHandler.handleNewSession(msg),
         onInterruptRequest: (ws, msg) => this.appChatHandler.handleInterruptRequest(ws, msg),
+        onHumanReviewResponse: (ws, msg) => this.appChatHandler.handleHumanReviewResponse(ws, msg),
         onClose: (ws) => this.appChatHandler.handleClose(ws),
       },
     });

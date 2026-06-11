@@ -2,7 +2,6 @@ import { spawnSync } from 'node:child_process';
 import { tool } from '@langchain/core/tools';
 import {
   buildReviewSpec,
-  type HumanReviewActionRequest,
   type NamedStructuredTool,
   type ToolOperationMetadataMapFor,
   type ToolkitToolReviewPolicy,
@@ -206,25 +205,6 @@ function normalizeGitCommitInput(input: unknown) {
   };
 }
 
-function readEditedGitCommitAction(
-  editedAction: HumanReviewActionRequest,
-  fallback: { cwd?: string; message: string },
-) {
-  if (editedAction.name !== 'git_commit') {
-    return fallback;
-  }
-  const message = typeof editedAction.args.message === 'string' && editedAction.args.message.trim()
-    ? editedAction.args.message.trim()
-    : fallback.message;
-  const cwd = typeof editedAction.args.cwd === 'string' && editedAction.args.cwd.trim()
-    ? resolveUserPath(editedAction.args.cwd.trim())
-    : fallback.cwd;
-  return {
-    message,
-    ...(cwd ? { cwd } : {}),
-  };
-}
-
 function buildGitCommitReviewSpec(gitAction: { cwd?: string; message: string }) {
   return buildReviewSpec({
     view: {
@@ -272,10 +252,6 @@ export const gitCommitReviewPolicy: ToolkitToolReviewPolicy = {
 
     return buildGitCommitReviewSpec(gitAction);
   },
-  applyEdit: ({ input, editedAction }) => readEditedGitCommitAction(
-    editedAction,
-    normalizeGitCommitInput(input),
-  ),
 };
 
 export const gitTools = [

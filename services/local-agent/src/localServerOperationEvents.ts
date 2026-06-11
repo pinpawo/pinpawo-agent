@@ -1,3 +1,4 @@
+import { isHumanReviewInterruptPayload } from '@pinpawo/pet-agent';
 import type { StreamToolsPayload } from './agentStreamEvents';
 import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
 import {
@@ -53,8 +54,7 @@ export function isHumanReviewInterruptError(value: unknown): boolean {
     if (!payload || typeof payload !== 'object') {
       return false;
     }
-    const payloadRecord = payload as Record<string, unknown>;
-    return payloadRecord.kind === 'review';
+    return isHumanReviewInterruptPayload(payload);
   });
 }
 

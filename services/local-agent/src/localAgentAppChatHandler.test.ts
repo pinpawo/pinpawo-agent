@@ -196,3 +196,130 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     [['local-toolkit.read_file', 'README.md'], ['local-toolkit.read_file', undefined]],
   );
 });
+
+test('LocalAgentAppChatHandler resumes canonical human review responses through cached route', async () => {
+  const runRequests: unknown[] = [];
+  const review = {
+    id: 'review-1',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [
+      { id: 'approve', label: 'Approve', decision: { type: 'approve' as const } },
+      { id: 'reject', label: 'Reject', decision: { type: 'reject' as const } },
+    ],
+  };
+  const { handler, ws, sent, buildInputs } = createHandler({
+    runChat: async (options) => {
+      runRequests.push(options.request);
+      if (options.request.kind === 'user_message') {
+        options.emitEvent({
+          type: 'human_review.requested',
+          requestId: 'req-1',
+          review,
+        });
+        return { status: 'waiting_human' };
+      }
+      return { status: 'completed', reply: 'done after review' };
+    },
+  });
+
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-1',
+    message: 'hello',
+    userId: 'user-1',
+  });
+  await handler.handleHumanReviewResponse(ws, {
+    type: 'human_review_response',
+    requestId: 'req-1',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
+  });
+  await handler.handleHumanReviewResponse(ws, {
+    type: 'human_review_response',
+    requestId: 'req-1',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
+  });
+
+  assert.deepEqual(runRequests, [
+    {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    {
+      kind: 'resume',
+      requestId: 'req-1',
+      resume: {
+        reviewId: 'review-1',
+        selectedOptionId: 'approve',
+      },
+    },
+  ]);
+  assert.equal(buildInputs.length, 2);
+  assert.equal(buildInputs[1]?.userMessage, '');
+  assert.equal(buildInputs[1]?.threadId, 'petbot:chat:pet:pet-a:user:user-1');
+  const eventMessages = sent.filter((item): item is { type: string; event?: { type?: string; message?: string } } =>
+    Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'event'),
+  );
+  assert.deepEqual(eventMessages.map((item) => item.event?.type), [
+    'human_review.requested',
+    'error',
+  ]);
+  assert.match(eventMessages[1]?.event?.message ?? '', /已关闭|不存在/);
+});
+
+test('LocalAgentAppChatHandler interrupts pending human review with canonical reject option', async () => {
+  const runRequests: unknown[] = [];
+  const review = {
+    id: 'review-1',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [
+      { id: 'approve', label: 'Approve', decision: { type: 'approve' as const } },
+      { id: 'reject', label: 'Reject', decision: { type: 'reject' as const } },
+    ],
+  };
+  const { handler, ws } = createHandler({
+    runChat: async (options) => {
+      runRequests.push(options.request);
+      if (options.request.kind === 'user_message') {
+        options.emitEvent({
+          type: 'human_review.requested',
+          requestId: 'req-1',
+          review,
+        });
+        return { status: 'waiting_human' };
+      }
+      return { status: 'completed', reply: 'interrupted' };
+    },
+  });
+
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-1',
+    message: 'hello',
+    userId: 'user-1',
+  });
+  await handler.handleInterruptRequest(ws, {
+    type: 'interrupt_request',
+    requestId: 'req-1',
+  });
+
+  assert.deepEqual(runRequests, [
+    {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    {
+      kind: 'resume',
+      requestId: 'req-1',
+      resume: {
+        reviewId: 'review-1',
+        selectedOptionId: 'reject',
+      },
+    },
+  ]);
+});

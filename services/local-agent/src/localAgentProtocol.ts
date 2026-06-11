@@ -1,4 +1,4 @@
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import { isReviewSpecValue, type ReviewSpec } from '@pinpawo/pet-agent';
 import type {
   LocalAgentEvent,
   LocalAgentOperationInternalEvent,
@@ -11,7 +11,6 @@ export type ChatRequestMessage = {
   message: string;
   petId?: string;
   userId?: string;
-  resume?: unknown;
 };
 
 export type InterruptRequestMessage = {
@@ -73,6 +72,11 @@ export type LocalAgentServerMessage =
   | LocalAgentEventMessage
   | LocalAgentControlServerMessage;
 
+export type LocalAgentClientMessageEnvelope = {
+  type?: string;
+  requestId?: string;
+};
+
 type WsLike = {
   readyState: number;
   send(data: string): unknown;
@@ -121,35 +125,25 @@ function readStringArray(record: Record<string, unknown>, key: string) {
     : null;
 }
 
+function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const allowed = new Set(allowedKeys);
+  return Object.keys(record).every((key) => allowed.has(key));
+}
+
 function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpec | null {
   const review = readRecord(record, key);
-  if (!review) return null;
-  const id = readString(review, 'id');
-  const schemaVersion = readOptionalNumber(review, 'schemaVersion');
-  const view = readRecord(review, 'view');
-  const viewKind = view ? readString(view, 'kind') : null;
-  const viewBody = view ? readString(view, 'body') : null;
-  const options = review.options;
-  if (
-    !id
-    || schemaVersion === undefined
-    || (viewKind !== 'plain' && viewKind !== 'markdown')
-    || viewBody == null
-    || !Array.isArray(options)
-  ) {
+  return isReviewSpecValue(review) ? review : null;
+}
+
+export function readLocalAgentClientMessageEnvelope(raw: unknown): LocalAgentClientMessageEnvelope | null {
+  const record = readJsonRecord(raw);
+  if (!record) {
     return null;
   }
-
-  const validOptions = options.every((option) => {
-    if (!option || typeof option !== 'object' || Array.isArray(option)) return false;
-    const optionRecord = option as Record<string, unknown>;
-    return typeof optionRecord.id === 'string'
-      && typeof optionRecord.label === 'string'
-      && optionRecord.decision
-      && typeof optionRecord.decision === 'object'
-      && !Array.isArray(optionRecord.decision);
-  });
-  return validOptions ? review as ReviewSpec : null;
+  return {
+    type: readOptionalString(record, 'type'),
+    requestId: readOptionalString(record, 'requestId'),
+  };
 }
 
 function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent | null {
@@ -240,17 +234,15 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     };
   }
   if (type === 'human_review.requested') {
-    const prompt = readOptionalString(record, 'prompt');
-    const payload = readRecord(record, 'payload');
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'review', 'actor'])) return null;
     const review = readReviewSpec(record, 'review');
     const actor = readRecord(record, 'actor');
     if (!review) return null;
+    if (actor && !hasOnlyKeys(actor, ['petId'])) return null;
     return {
       type,
       requestId,
       review,
-      ...(prompt != null ? { prompt } : {}),
-      ...(payload ? { payload } : {}),
       ...(actor ? { actor: { petId: readOptionalString(actor, 'petId') } } : {}),
     };
   }
@@ -271,6 +263,7 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
   const type = readString(record, 'type');
   if (type === 'ping') return { type: 'ping' };
   if (type === 'chat_request') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'message', 'petId', 'userId'])) return null;
     const requestId = readString(record, 'requestId');
     const message = readString(record, 'message');
     if (!requestId || message == null) return null;
@@ -280,14 +273,15 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
       message,
       petId: readOptionalString(record, 'petId'),
       userId: readOptionalString(record, 'userId'),
-      ...(record.resume !== undefined ? { resume: record.resume } : {}),
     };
   }
   if (type === 'human_review_response') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'reviewId', 'selectedOptionId', 'input'])) return null;
     const requestId = readString(record, 'requestId');
     const reviewId = readOptionalString(record, 'reviewId');
     const selectedOptionId = readOptionalString(record, 'selectedOptionId');
     const input = readRecord(record, 'input');
+    if (record.input !== undefined && !input) return null;
     if (!requestId || !reviewId || !selectedOptionId) return null;
     return {
       type,

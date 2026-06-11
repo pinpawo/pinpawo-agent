@@ -132,10 +132,10 @@ runtime.invoke({
 
 ## Boundary 3: HITL Bridge (`humanReviewer`)
 
-pet 内 tool 触发 `interrupt(...)`(由 toolkit 的 `policy.toolReview` 在调用前决定)。toolkit policy 返回 `ReviewSpec`，wrapper 生成 canonical `review` interrupt payload。Studio `humanReviewer` 桥只接收 canonical `HumanReviewInterruptPayload`，并直接转发 `ReviewSpec`。
+pet 内 tool review 由 toolkit 的 `policy.toolReview` 在调用前决定。toolkit policy 返回 `ReviewSpec`，tool wrapper materialize canonical `review` interrupt payload；LangGraph interrupt/checkpoint 持有当前 pending review 控制态。Studio `humanReviewer` 桥只接收 canonical `HumanReviewInterruptPayload`，并直接转发 `ReviewSpec`。
 
 ```ts
-type HumanReviewer = (request: HumanReviewInterruptPayload) => Promise<HumanReviewDecision>;
+type HumanReviewer = (request: HumanReviewInterruptPayload) => Promise<ReviewResponse>;
 
 // 构造时注入
 const pet = createPetAgentRuntime({
@@ -147,19 +147,20 @@ const pet = createPetAgentRuntime({
 });
 ```
 
-`HumanReviewDecision`(approve / edit / reject / respond)定义见 `packages/pet-agent/src/agent/orchestrator/humanReview.ts`。`HumanReviewInterruptPayload` / `ReviewSpec` 定义见 `packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts`。
+`ReviewResponse` 只包含 `{ reviewId, selectedOptionId, input? }`。graph runtime 会根据当前 interrupt payload / `ReviewResolutionContext` 和 pending `ReviewSpec.options` 解析出内部 `HumanReviewDecision`(approve / edit / reject / respond)以及 effects。`HumanReviewInterruptPayload` / `ReviewSpec` / `ReviewResponse` 定义见 `packages/pet-agent/src/agent/orchestrator/review/reviewSpec.ts`。
 
 流程:
 
 ```text
 pet 内部 tool 调用:
   policy.toolReview.request(ctx) → ReviewSpec
-  interrupt({ kind: "review", review, pendingAction? })  // LangGraph 暂停,checkpoint 写入
+  wrapper materialize review payload
+  interrupt({ kind: "review", review, pendingAction? })  // LangGraph 暂停,checkpoint 持有 pending review
 
 pet runtime invoke 循环:
   graph.invoke(...) 返回带 __interrupt__ 的 state
   → 调 humanReviewer(request) → 等 UI 答复
-  → graph.invoke(Command({ resume: { decisions: [decision] } }), ...)
+  → graph.invoke(Command({ resume: { reviewId, selectedOptionId, input? } }), ...)
   → 检测仍有 __interrupt__ 则继续循环
 
 最终返回:

@@ -29,8 +29,8 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
   } as unknown as AgentChannelSetup;
 
   const graphService = {
-    async getState() {
-      return { tasks: [] };
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
     async *stream(streamSetup: AgentChannelSetup) {
       yield [
@@ -59,6 +59,7 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
 
   const result = await runChatSession({
     request: {
+      kind: 'user_message',
       requestId: 'req-1',
       message: 'hello',
     },
@@ -77,6 +78,9 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
   });
 
   assert.deepEqual(result, { status: 'completed', reply: 'done' });
+  assert.equal(setup.input.messages.length, 1);
+  assert.equal(setup.input.messages[0]?._getType(), 'human');
+  assert.equal(readFinalMessageText(setup.input.messages[0] ?? {}), 'hello');
   assert.deepEqual(emittedTools, [
     {
       event: 'on_tool_start',
@@ -106,8 +110,8 @@ test('runChatSession maps authorization runtime events to system notices', async
   } as unknown as AgentChannelSetup;
 
   const graphService = {
-    async getState() {
-      return { tasks: [] };
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
     async *stream(streamSetup: AgentChannelSetup) {
       streamSetup.input.onToolEvent?.({
@@ -132,6 +136,7 @@ test('runChatSession maps authorization runtime events to system notices', async
 
   const result = await runChatSession({
     request: {
+      kind: 'user_message',
       requestId: 'req-1',
       message: 'hello',
     },
@@ -183,8 +188,8 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
     }],
   };
   const graphService = {
-    async getState() {
-      return { tasks: [] };
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
     async *stream() {
       yield [
@@ -209,6 +214,7 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
 
   const result = await runChatSession({
     request: {
+      kind: 'user_message',
       requestId: 'req-1',
       message: 'hello',
     },
@@ -228,8 +234,6 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
   const event = emittedEvents[0];
   assert.equal(event?.type, 'human_review.requested');
   assert.deepEqual(event.review, review);
-  assert.equal(event.prompt, 'Shell command approval\nRun git status?');
-  assert.equal(event.payload?.kind, 'review');
 });
 
 test('runChatSession resumes explicit response after state update clears interrupt payload', async () => {
@@ -245,20 +249,13 @@ test('runChatSession resumes explicit response after state update clears interru
     },
   } as unknown as AgentChannelSetup;
 
-  let getStateCalls = 0;
+  let readThreadStateCalls = 0;
   const graphService = {
-    async getState() {
-      getStateCalls += 1;
-      return getStateCalls === 1
-        ? {
-            next: ['general'],
-            tasks: [{ interrupts: [] }],
-            values: { messages: [] },
-          }
-        : {
-            tasks: [],
-            values: { messages: finalMessages },
-          };
+    async readThreadState() {
+      readThreadStateCalls += 1;
+      return readThreadStateCalls === 1
+        ? { messages: [], pendingHumanReview: null, hasPendingContinuation: true }
+        : { messages: finalMessages, pendingHumanReview: null, hasPendingContinuation: false };
     },
     buildResumeCommand(value: unknown) {
       return { kind: 'resume-command', value };
@@ -276,8 +273,8 @@ test('runChatSession resumes explicit response after state update clears interru
 
   const result = await runChatSession({
     request: {
+      kind: 'resume',
       requestId: 'req-1',
-      message: '',
       resume,
     },
     setup,
@@ -297,14 +294,106 @@ test('runChatSession resumes explicit response after state update clears interru
     kind: 'resume-command',
     value: resume,
   }]);
+  assert.deepEqual(setup.input.messages, []);
   assert.equal(
     emittedEvents.some((event) => event.type === 'human_review.requested'),
     false,
   );
 });
 
-test('runChatSession maps pending review free text to canonical respond resume', async () => {
+test('runChatSession allows a user message when prior non-review continuation remains', async () => {
+  const finalMessages = [new AIMessage('continued after abort')];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
   const streamInputs: unknown[] = [];
+  let readThreadStateCalls = 0;
+  const graphService = {
+    async readThreadState() {
+      readThreadStateCalls += 1;
+      return readThreadStateCalls === 1
+        ? { messages: [], pendingHumanReview: null, hasPendingContinuation: true }
+        : { messages: finalMessages, pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    async *stream(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
+      streamInputs.push(inputOverride);
+      assert.equal(readFinalMessageText(streamSetup.input.messages.at(-1) ?? {}), 'new request');
+      yield [
+        'values',
+        {
+          messages: finalMessages,
+        },
+      ];
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: 'new request',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: () => {},
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'continued after abort' });
+  assert.deepEqual(streamInputs, [undefined]);
+});
+
+test('runChatSession rejects stale resume with user-facing message', async () => {
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    buildResumeCommand() {
+      throw new Error('should not build resume command');
+    },
+    async *stream() {
+      throw new Error('should not stream');
+    },
+  };
+
+  await assert.rejects(
+    () => runChatSession({
+      request: {
+        kind: 'resume',
+        requestId: 'req-1',
+        resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
+      },
+      setup,
+      graphService: graphService as unknown as LocalAgentGraphService,
+      isCurrent: () => true,
+      finishInterrupted: () => {
+        throw new Error('should not interrupt');
+      },
+      emitEvent: () => {},
+      emitToolEvent: () => {},
+    }),
+    /review 已关闭或不存在/,
+  );
+});
+
+test('runChatSession does not map pending review free text to review response', async () => {
+  const streamInputs: unknown[] = [];
+  const emittedEvents: LocalAgentEvent[] = [];
   const review = {
     id: 'review-respond',
     schemaVersion: 1,
@@ -331,29 +420,12 @@ test('runChatSession maps pending review free text to canonical respond resume',
       messages: [],
     },
   } as unknown as AgentChannelSetup;
-  let getStateCalls = 0;
   const graphService = {
-    async getState() {
-      getStateCalls += 1;
-      return getStateCalls === 1
-        ? {
-            tasks: [{
-              interrupts: [{
-                value: {
-                  kind: 'review',
-                  review,
-                },
-              }],
-            }],
-            values: { messages: [] },
-          }
-        : {
-            tasks: [],
-            values: { messages: finalMessages },
-          };
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: { review }, hasPendingContinuation: true };
     },
     buildResumeCommand(value: unknown) {
-      return { kind: 'resume-command', value };
+      throw new Error(`should not build resume command: ${String(value)}`);
     },
     async *stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
       streamInputs.push(inputOverride);
@@ -368,6 +440,7 @@ test('runChatSession maps pending review free text to canonical respond resume',
 
   const result = await runChatSession({
     request: {
+      kind: 'user_message',
       requestId: 'req-1',
       message: '请先解释风险',
     },
@@ -377,19 +450,25 @@ test('runChatSession maps pending review free text to canonical respond resume',
     finishInterrupted: () => {
       throw new Error('should not interrupt');
     },
-    emitEvent: () => {},
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
     emitToolEvent: () => {},
   });
 
-  assert.deepEqual(result, { status: 'completed', reply: 'continued' });
-  assert.deepEqual(streamInputs, [{
-    kind: 'resume-command',
-    value: {
-      reviewId: 'review-respond',
-      selectedOptionId: 'respond',
-      input: { message: '请先解释风险' },
-    },
-  }]);
+  assert.deepEqual(result, { status: 'waiting_human' });
+  assert.deepEqual(streamInputs, []);
+  assert.deepEqual(setup.input.messages, []);
+  assert.equal(emittedEvents[0]?.type, 'system.notice');
+  assert.match(
+    emittedEvents[0]?.type === 'system.notice' ? emittedEvents[0].message : '',
+    /确认面板/,
+  );
+  assert.equal(emittedEvents[1]?.type, 'human_review.requested');
+  assert.deepEqual(
+    emittedEvents[1]?.type === 'human_review.requested' ? emittedEvents[1].review : null,
+    review,
+  );
 });
 
 test('runChatSession emits token usage in completed event', async () => {
@@ -415,14 +494,14 @@ test('runChatSession emits token usage in completed event', async () => {
     },
   } as unknown as AgentChannelSetup;
 
-  let getStateCalls = 0;
+  let readThreadStateCalls = 0;
   const graphService = {
-    async getState() {
-      getStateCalls += 1;
+    async readThreadState() {
+      readThreadStateCalls += 1;
       return {
-        values: {
-          messages: getStateCalls === 1 ? snapshotMessages : finalMessages,
-        },
+        messages: readThreadStateCalls === 1 ? snapshotMessages : finalMessages,
+        pendingHumanReview: null,
+        hasPendingContinuation: false,
       };
     },
     async *stream(streamSetup: AgentChannelSetup) {
@@ -444,6 +523,7 @@ test('runChatSession emits token usage in completed event', async () => {
 
   const result = await runChatSession({
     request: {
+      kind: 'user_message',
       requestId: 'req-1',
       message: '你是谁？',
     },

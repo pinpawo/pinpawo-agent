@@ -106,6 +106,10 @@ test('resolveTuiKeyAction routes global, approval, busy, and composer keys', () 
     { type: 'composer.edit' },
   );
   assert.deepEqual(
+    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
+    { type: 'global.interrupt' },
+  );
+  assert.deepEqual(
     resolveTuiKeyAction('', { escape: true }, { ready: true, busy: true, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'global.interrupt' },
   );

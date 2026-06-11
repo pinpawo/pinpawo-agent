@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
@@ -25,8 +26,13 @@ export type TuiHistoryMessage = {
   text: string;
 };
 
+export type ActivePendingReview = {
+  sessionId: string;
+  review: ReviewSpec;
+};
+
 export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'deleteThread'>;
-type TuiSessionGraphService = Pick<LocalAgentGraphService, 'getState'>;
+type TuiSessionGraphService = Pick<LocalAgentGraphService, 'readThreadMessages' | 'readThreadState'>;
 
 export function readTuiHistoryMessages(messages: BaseMessage[]): TuiHistoryMessage[] {
   return messages.flatMap((message) => {
@@ -65,11 +71,6 @@ export function summarizeTuiHistoryMessages(
     messageCount: messages.length,
     updatedAt,
   };
-}
-
-function readSnapshotMessages(snapshot: Awaited<ReturnType<LocalAgentGraphService['getState']>>) {
-  const values = (snapshot as { values?: { messages?: BaseMessage[] } }).values;
-  return Array.isArray(values?.messages) ? values.messages : [];
 }
 
 export class LocalServerTuiSessionService {
@@ -152,8 +153,8 @@ export class LocalServerTuiSessionService {
   ) {
     const ctx = await this.loadContext(deps.actorId);
     const setup = this.buildChatSetup(deps, ctx, session.threadId);
-    const snapshot = await this.graphService.getState(setup);
-    return readTuiHistoryMessages(readSnapshotMessages(snapshot));
+    const messages = await this.graphService.readThreadMessages(setup);
+    return readTuiHistoryMessages(messages);
   }
 
   updateSessionSummaryFromHistory(
@@ -172,6 +173,20 @@ export class LocalServerTuiSessionService {
     } catch (err) {
       console.warn('[local-server] failed to refresh TUI session summary:', err instanceof Error ? err.message : err);
     }
+  }
+
+  async readActivePendingReview(deps: LocalServerDeps): Promise<ActivePendingReview | null> {
+    const session = this.getActiveSession(deps.actorId);
+    const ctx = await this.loadContext(deps.actorId);
+    const setup = this.buildChatSetup(deps, ctx, session.threadId);
+    const threadState = await this.graphService.readThreadState(setup);
+    if (!threadState.pendingHumanReview) {
+      return null;
+    }
+    return {
+      sessionId: session.id,
+      review: threadState.pendingHumanReview.review,
+    };
   }
 
   async loadHistory(deps: LocalServerDeps) {

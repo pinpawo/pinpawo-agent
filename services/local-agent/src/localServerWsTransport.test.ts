@@ -18,6 +18,7 @@ function createFakeWebSocket(sent: string[]) {
 test('local websocket transport dispatches typed client messages and pong', async () => {
   const seen: string[] = [];
   const sent: string[] = [];
+  const warnings: string[] = [];
   const ws = createFakeWebSocket(sent);
   const handlers: LocalServerWsHandlers = {
     onChatRequest: (_ws, message) => {
@@ -39,6 +40,9 @@ test('local websocket transport dispatches typed client messages and pong', asyn
       seen.push('close');
     },
     log: () => undefined,
+    logWarn: (message) => {
+      warnings.push(message);
+    },
   };
 
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'ping' }), handlers);
@@ -52,6 +56,12 @@ test('local websocket transport dispatches typed client messages and pong', asyn
   }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'interrupt_request', requestId: 'chat-1' }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'new_session', userId: 'user-1' }), handlers);
+  dispatchLocalServerWebSocketMessage(ws, JSON.stringify({
+    type: 'chat_request',
+    requestId: 'chat-old',
+    message: 'Approve',
+    resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
+  }), handlers);
   dispatchLocalServerWebSocketMessage(ws, '{bad json', handlers);
 
   await assertEventually(() => {
@@ -62,6 +72,10 @@ test('local websocket transport dispatches typed client messages and pong', asyn
       'review:review-1:review-spec-1:approve',
       'interrupt:chat-1',
       'new:user-1',
+    ]);
+    assert.deepEqual(warnings, [
+      '[local-server] ignored malformed client message type=chat_request requestId=chat-old',
+      '[local-server] ignored malformed client message type=unknown requestId=unknown',
     ]);
   });
 });

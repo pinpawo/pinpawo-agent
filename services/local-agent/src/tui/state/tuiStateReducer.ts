@@ -192,24 +192,11 @@ function clearPendingReview(run: ActiveRunModel): ActiveRunModel {
 function activeRunToPendingApproval(run: ActiveRunModel | null) {
   return run?.pendingReview
     ? {
-        kind: run.pendingReview.kind,
         requestId: run.pendingReview.requestId,
-        prompt: run.pendingReview.prompt,
         review: run.pendingReview.review,
-        ...(run.pendingReview.payload ? { payload: run.pendingReview.payload } : {}),
         ...(run.pendingReview.petId ? { petId: run.pendingReview.petId } : {}),
       }
     : null;
-}
-
-function formatReviewPrompt(event: Extract<LocalAgentEvent, { type: 'human_review.requested' }>) {
-  const prompt = event.prompt?.trim();
-  if (prompt) return prompt;
-  const review = event.review;
-  if (review?.view.title && review.view.body) {
-    return `${review.view.title}\n${review.view.body}`;
-  }
-  return review?.view.body.trim() || TUI_TEXT.approvalFallbackPrompt;
 }
 
 function updateOperation(
@@ -399,7 +386,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         ? {
             ...session,
             activeRun: {
-              ...session.activeRun,
+              ...clearPendingReview(session.activeRun),
               phase: 'interrupting',
             },
           }
@@ -488,9 +475,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       }
 
       if (event.type === 'human_review.requested') {
-        const prompt = formatReviewPrompt(event);
-        const payload = event.payload;
-        const kind = typeof payload?.kind === 'string' ? payload.kind : 'interrupt';
         const petId = event.actor?.petId || undefined;
         return updateSession({
           ...state,
@@ -509,10 +493,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
                 charCount: 0,
                 pendingReview: {
                   requestId: event.requestId,
-                  kind,
-                  prompt,
                   review: event.review,
-                  ...(payload ? { payload } : {}),
                   ...(petId ? { petId } : {}),
                 },
               }
@@ -591,10 +572,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       return finishRun(state, action.requestId, action.statusMessage, [
         historyDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.historyCell, `${action.requestId}:studio-error`),
       ]);
-
-    case 'review.dismiss': {
-      return finishRun(state, action.requestId, action.statusMessage);
-    }
 
     default:
       return state;

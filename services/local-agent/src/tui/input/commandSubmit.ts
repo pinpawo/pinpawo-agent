@@ -128,8 +128,8 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
   }
 
   const text = parsed.text;
-  // Free-text input while approval panel was dismissed via Esc:
-  // server still has the pending approval, so this text becomes the resume value
+  // Free text is never a human-review resume. Review responses are sent only
+  // through the approval panel's canonical human_review_response message.
   // Studio 模式下:普通文本走 studio_request(沿用同一 conversationId)
   if (options.studioModeRef.current) {
     options.runtimeController.sendStudioRequest(text, options.studioConversationIdRef.current);

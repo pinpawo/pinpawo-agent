@@ -5,7 +5,6 @@ import {
   buildReviewSpec,
   isToolActionAuthorized,
   type ToolkitOperationMetadata,
-  type HumanReviewActionRequest,
   type ToolkitToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
@@ -141,25 +140,6 @@ export function normalizeShellActionInput(input: unknown) {
   return { command, cwd };
 }
 
-function readEditedShellAction(
-  editedAction: HumanReviewActionRequest,
-  fallback: { command: string; cwd: string },
-) {
-  if (
-    editedAction.name !== 'run_shell'
-    && editedAction.name !== 'shell'
-  ) {
-    return fallback;
-  }
-  const command = typeof editedAction.args.command === 'string' && editedAction.args.command.trim()
-    ? editedAction.args.command.trim()
-    : fallback.command;
-  const cwd = typeof editedAction.args.cwd === 'string' && editedAction.args.cwd.trim()
-    ? resolveUserPath(editedAction.args.cwd.trim())
-    : fallback.cwd;
-  return { command, cwd };
-}
-
 export const runShellTool = tool(
   async (input: { command: string; cwd?: string }) => {
     let shellAction: { command: string; cwd: string };
@@ -250,10 +230,6 @@ export const shellReviewPolicy: ToolkitToolReviewPolicy = {
       confirmationRisk,
     );
   },
-  applyEdit: ({ input, editedAction }) => readEditedShellAction(
-    editedAction,
-    normalizeShellActionInput(input),
-  ),
   buildAuthorizationMatcher: ({ input }) => {
     const shellAction = normalizeShellActionInput(input);
     return {

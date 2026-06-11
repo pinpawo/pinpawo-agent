@@ -73,11 +73,6 @@ export type {
   OrchestratorStateType,
   OrchestrationDecisionStructuredOutputConfig,
 } from './agent/createAgentRuntime';
-export type {
-  HumanReviewActionRequest,
-  HumanReviewDecision,
-  HumanReviewDecisionType,
-} from './agent/orchestrator/humanReview';
 export {
   resolveHumanReviewResume,
   resolveHumanReviewResponse,
@@ -103,16 +98,19 @@ export type {
 } from './agent/orchestrator/review/reviewAuthorizations';
 export {
   buildReviewSpec,
+  isHumanReviewInterruptPayload,
+  isReviewSpecValue,
 } from './agent/orchestrator/review/reviewSpec';
 export type {
   BuildReviewSpecParams,
   PendingReviewAction,
-  PendingReviewState,
   ReviewActionRef,
   ReviewEffect,
   ReviewOption,
   ReviewOptionDecision,
   ReviewOptionInput,
+  ReviewResolvedDecision,
+  ReviewResolutionContext,
   ReviewResponse,
   ReviewResponseResolution,
   ReviewSpec,

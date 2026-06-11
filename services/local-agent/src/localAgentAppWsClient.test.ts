@@ -36,6 +36,9 @@ function createHandlers(events: string[] = []): LocalAgentAppWsClientHandlers {
     onInterruptRequest: async (_ws, message) => {
       events.push(`interrupt:${message.requestId}`);
     },
+    onHumanReviewResponse: async (_ws, message) => {
+      events.push(`review:${message.requestId}:${message.reviewId}:${message.selectedOptionId}`);
+    },
     onClose: async () => {
       events.push('close');
     },
@@ -49,6 +52,7 @@ async function tick() {
 test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', async () => {
   const ws = new FakeWebSocket() as unknown as WebSocket;
   const events: string[] = [];
+  const warnings: string[] = [];
   const handlers = createHandlers(events);
 
   dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
@@ -65,10 +69,33 @@ test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', 
     type: 'interrupt_request',
     requestId: 'req-1',
   }), handlers);
+  dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
+    type: 'human_review_response',
+    requestId: 'req-1',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
+  }), handlers);
+  dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
+    type: 'human_review_response',
+    requestId: 'req-1',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
+    message: 'Approve',
+  }), handlers, undefined, (message) => {
+    warnings.push(message);
+  });
 
   await tick();
 
-  assert.deepEqual(events, ['chat:req-1', 'new:user-1', 'interrupt:req-1']);
+  assert.deepEqual(events, [
+    'chat:req-1',
+    'new:user-1',
+    'interrupt:req-1',
+    'review:req-1:review-1:approve',
+  ]);
+  assert.deepEqual(warnings, [
+    '[local-agent] ignored malformed app client message type=human_review_response requestId=req-1',
+  ]);
 });
 
 test('dispatchLocalAgentAppWebSocketMessage replies to ping with pong', () => {

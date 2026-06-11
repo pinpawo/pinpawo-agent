@@ -67,3 +67,66 @@ test('LocalServerTuiSessionService creates and resets active sessions', async ()
   assert.deepEqual(deletedThreads, [second.threadId]);
   assert.equal(saved.length >= 4, true);
 });
+
+test('LocalServerTuiSessionService reads active pending review from checkpoint interrupt', async () => {
+  const state = createEmptyTuiSessionState();
+  const review = {
+    id: 'review-current',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  let capturedThreadId: string | undefined;
+  const checkpointer = {
+    deleteThread: async () => {},
+  } as unknown as TuiSessionCheckpointer;
+  const service = new LocalServerTuiSessionService({
+    state,
+    saveState: () => {},
+    checkpointer,
+    graphService: {
+      readThreadState: async (setup: { input: { threadId?: string } }) => {
+        capturedThreadId = setup.input.threadId;
+        return {
+          messages: [],
+          pendingHumanReview: { review },
+          hasPendingContinuation: true,
+        };
+      },
+    } as never,
+    loadContext: async () => ({
+      pet: {
+        id: 'pet-a',
+        name: 'Paw',
+        personality: null,
+        species: null,
+        stage: null,
+        growth_value: null,
+        stage_asset_id: null,
+      },
+      context: {
+        petMemoryText: '',
+        recentChatTurns: [],
+        recentDaily: [],
+        trendItems: [],
+        today: '2026-06-11',
+      },
+    }),
+  });
+
+  const session = service.getActiveSession('pet-a');
+  const pendingReview = await service.readActivePendingReview({
+    actorId: 'pet-a',
+    llmConfig: {
+      apiKey: 'test',
+      baseUrl: 'http://localhost',
+      model: 'test-model',
+    },
+  } as never);
+
+  assert.deepEqual(pendingReview, {
+    sessionId: session.id,
+    review,
+  });
+  assert.equal(capturedThreadId, session.threadId);
+});

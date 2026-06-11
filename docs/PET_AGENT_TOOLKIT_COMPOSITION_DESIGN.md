@@ -125,7 +125,7 @@ wrapper 的职责：
 - `request()` 返回 `null`：直接调用原始工具。
 - `request()` 返回 `ReviewSpec`：wrapper 生成 canonical `review` interrupt payload，包含 `review`；tool action review 额外携带当前 `pendingAction`，恢复后读取人类决策。
 - human `approve`：调用原始工具。
-- human `edit`：只作为 legacy resume 兼容路径；V1 review options 不再暴露 edit。
+- human `edit`：V1 review options 不暴露 edit；后续如需要再以结构化 option/input 扩展。
 - human `reject/respond`：不调用原始工具，返回结构化 cancelled 结果。
 
 `ReviewSpec` 是 UI/runtime 的 canonical 交互协议；旧 request adapter 已移除。这样 shell、browser、filesystem 等工具族可以独立定义自己的 HITL 策略，同一个底层工具在不同 toolkit 中也可以有不同 review policy。

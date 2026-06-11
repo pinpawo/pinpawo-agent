@@ -1,8 +1,10 @@
 import { WebSocket } from 'ws';
 import {
   parseLocalAgentClientMessage,
+  readLocalAgentClientMessageEnvelope,
   sendLocalAgentMessage,
   type ChatRequestMessage,
+  type HumanReviewResponseMessage,
   type InterruptRequestMessage,
   type NewSessionMessage,
 } from './localAgentProtocol';
@@ -10,12 +12,13 @@ import {
 type MaybePromise<T> = T | Promise<T>;
 type Log = (message: string) => void;
 type LogError = (message: string, error: unknown) => void;
-type LogWarn = (message: string, error: unknown) => void;
+type LogWarn = (message: string, error?: unknown) => void;
 
 export type LocalAgentAppWsClientHandlers = {
   onChatRequest: (ws: WebSocket, message: ChatRequestMessage) => MaybePromise<void>;
   onNewSession: (ws: WebSocket, message: NewSessionMessage) => MaybePromise<void>;
   onInterruptRequest: (ws: WebSocket, message: InterruptRequestMessage) => MaybePromise<void>;
+  onHumanReviewResponse: (ws: WebSocket, message: HumanReviewResponseMessage) => MaybePromise<void>;
   onClose: (ws: WebSocket) => MaybePromise<void>;
 };
 
@@ -35,8 +38,18 @@ function defaultLogError(message: string, error: unknown) {
   console.error(message, error instanceof Error ? error.message : error);
 }
 
-function defaultLogWarn(message: string, error: unknown) {
+function defaultLogWarn(message: string, error?: unknown) {
+  if (error === undefined) {
+    console.warn(message);
+    return;
+  }
   console.warn(message, error instanceof Error ? error.message : error);
+}
+
+function formatMalformedClientMessage(data: Buffer | string) {
+  const envelope = readLocalAgentClientMessageEnvelope(data);
+  return '[local-agent] ignored malformed app client message '
+    + `type=${envelope?.type ?? 'unknown'} requestId=${envelope?.requestId ?? 'unknown'}`;
 }
 
 function runHandler(
@@ -56,10 +69,14 @@ export function dispatchLocalAgentAppWebSocketMessage(
   data: Buffer | string,
   handlers: LocalAgentAppWsClientHandlers,
   logError: LogError = defaultLogError,
+  logWarn: LogWarn = defaultLogWarn,
 ) {
   try {
     const msg = parseLocalAgentClientMessage(data);
-    if (!msg) return;
+    if (!msg) {
+      logWarn(formatMalformedClientMessage(data));
+      return;
+    }
 
     if (msg.type === 'chat_request') {
       runHandler('handleChatRequest', () => handlers.onChatRequest(ws, msg), logError);
@@ -67,11 +84,13 @@ export function dispatchLocalAgentAppWebSocketMessage(
       runHandler('handleNewSession', () => handlers.onNewSession(ws, msg), logError);
     } else if (msg.type === 'interrupt_request') {
       runHandler('handleInterruptRequest', () => handlers.onInterruptRequest(ws, msg), logError);
+    } else if (msg.type === 'human_review_response') {
+      runHandler('handleHumanReviewResponse', () => handlers.onHumanReviewResponse(ws, msg), logError);
     } else if (msg.type === 'ping') {
       sendLocalAgentMessage(ws, { type: 'pong' });
     }
-  } catch {
-    // ignore malformed messages
+  } catch (err) {
+    logError('[local-agent] failed to dispatch app websocket message:', err);
   }
 }
 
@@ -120,7 +139,7 @@ export class LocalAgentAppWsClient {
     });
 
     ws.on('message', (data: Buffer | string) => {
-      dispatchLocalAgentAppWebSocketMessage(ws, data, this.handlers, this.logError);
+      dispatchLocalAgentAppWebSocketMessage(ws, data, this.handlers, this.logError, this.logWarn);
     });
 
     ws.on('close', (code, reason) => {

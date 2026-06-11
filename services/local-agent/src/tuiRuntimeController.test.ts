@@ -24,9 +24,6 @@ function pendingReviewState(): TuiState {
           activeOperations: [],
           pendingReview: {
             requestId: 'req-1',
-            kind: 'human_review',
-            prompt: 'Need review',
-            payload: {},
             review: {
               id: 'review-1',
               schemaVersion: 1,
@@ -95,4 +92,21 @@ test('TuiRuntimeController blocks empty required review input', () => {
   assert.equal(submitted, false);
   assert.deepEqual(sent, []);
   assert.equal(actions.some((action) => action.type === 'history.append'), true);
+});
+
+test('TuiRuntimeController interrupts pending human review instead of dismissing it locally', () => {
+  const { controller, actions, sent } = createController(pendingReviewState());
+
+  const submitted = controller.requestInterrupt();
+
+  assert.equal(submitted, true);
+  assert.deepEqual(sent, [{
+    type: 'interrupt_request',
+    requestId: 'req-1',
+  }]);
+  assert.deepEqual(actions.find((action) => action.type === 'run.interrupting'), {
+    type: 'run.interrupting',
+    requestId: 'req-1',
+    statusMessage: '正在打断',
+  });
 });

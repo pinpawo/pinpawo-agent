@@ -346,8 +346,6 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     event: {
       type: 'human_review.requested',
       requestId: 'req-1',
-      prompt: 'Approve?',
-      payload: { kind: 'approval' },
       review: {
         id: 'review-1',
         schemaVersion: 1,
@@ -362,10 +360,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.equal(selectFocusedBusy(state), false);
   assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
   assert.deepEqual(selectFocusedPendingApproval(state), {
-    kind: 'approval',
     requestId: 'req-1',
-    prompt: 'Approve?',
-    payload: { kind: 'approval' },
     review: {
       id: 'review-1',
       schemaVersion: 1,
@@ -403,6 +398,33 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.equal(state.connection.message, '正在打断');
 });
 
+test('tuiStateReducer clears pending review when interrupting human review', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'human_review.requested',
+      requestId: 'req-1',
+      review: {
+        id: 'review-1',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Approve?' },
+        options: [],
+      },
+    },
+    now: 1200,
+  });
+  state = tuiStateReducer(state, {
+    type: 'run.interrupting',
+    requestId: 'req-1',
+    statusMessage: '正在打断',
+  });
+
+  assert.equal(selectFocusedActiveRun(state)?.phase, 'interrupting');
+  assert.equal(selectFocusedPendingApproval(state), null);
+});
+
 test('tuiStateReducer accepts canonical human review specs without legacy payload', () => {
   let state = startRun(initialState(), 'req-1');
 
@@ -430,9 +452,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
   });
 
   assert.deepEqual(selectFocusedPendingApproval(state), {
-    kind: 'interrupt',
     requestId: 'req-1',
-    prompt: 'Needs approval\nRun command?',
     review: {
       id: 'review-1',
       schemaVersion: 1,

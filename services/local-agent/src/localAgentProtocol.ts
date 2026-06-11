@@ -170,6 +170,10 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
       ? { type, requestId, role, text }
       : null;
   }
+  if (type === 'subagent.message.delta') {
+    const text = readString(record, 'text');
+    return text != null ? { type, requestId, text } : null;
+  }
   if (type === 'message.completed') {
     const role = readString(record, 'role');
     const text = readString(record, 'text');

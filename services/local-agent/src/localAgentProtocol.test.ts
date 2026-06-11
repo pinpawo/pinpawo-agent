@@ -209,6 +209,41 @@ test('parseLocalAgentServerMessage keeps usage on message.completed event when v
   );
 });
 
+test('parseLocalAgentServerMessage accepts subagent message delta events', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'subagent.message.delta',
+        requestId: 'req-1',
+        text: 'subagent output',
+      },
+    })),
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'subagent.message.delta',
+        requestId: 'req-1',
+        text: 'subagent output',
+      },
+    },
+  );
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'subagent.message.delta',
+        requestId: 'other',
+        text: 'wrong route',
+      },
+    })),
+    null,
+  );
+});
+
 test('parseLocalAgentServerMessage accepts canonical human_review.requested review specs', () => {
   assert.deepEqual(
     parseLocalAgentServerMessage(JSON.stringify({

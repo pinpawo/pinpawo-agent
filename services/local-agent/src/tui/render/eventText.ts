@@ -47,6 +47,11 @@ export function formatSystemNoticeEvent(event: LocalAgentSystemNoticeEvent): str
   return notice || null;
 }
 
+export function formatSubagentMessage(text: string): string | null {
+  const content = text.trim();
+  return content ? TUI_TEXT.subagentOutput(content) : null;
+}
+
 export function formatStudioProgressEvent(event: LocalAgentStudioProgressEvent): string | null {
   const payload = event.event;
   const type = typeof payload.type === 'string' ? payload.type : null;

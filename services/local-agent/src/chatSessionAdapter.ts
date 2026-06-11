@@ -113,6 +113,15 @@ function formatToolAuthorizationNotice(event: SubagentToolEvent): string | null 
   return '已授权当前会话中的工具操作。';
 }
 
+function readSubagentMessageDelta(event: SubagentToolEvent): string | null {
+  if (event.event !== 'on_runtime_event' || event.name !== 'subagent_message_delta') {
+    return null;
+  }
+  const data = readRuntimeEventData(event);
+  const text = data && typeof data.text === 'string' ? data.text : null;
+  return text && text.length > 0 ? text : null;
+}
+
 export async function runChatSession(options: ChatSessionAdapterOptions): Promise<ChatSessionResult> {
   const { request, setup, graphService, isCurrent, finishInterrupted, emitEvent, emitToolEvent } = options;
   const { requestId } = request;
@@ -163,6 +172,15 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
           type: 'system.notice',
           requestId,
           message: notice,
+        });
+        return;
+      }
+      const subagentText = readSubagentMessageDelta(event);
+      if (subagentText) {
+        emitEvent({
+          type: 'subagent.message.delta',
+          requestId,
+          text: subagentText,
         });
         return;
       }

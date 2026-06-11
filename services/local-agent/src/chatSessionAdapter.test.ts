@@ -164,6 +164,68 @@ test('runChatSession maps authorization runtime events to system notices', async
   );
 });
 
+test('runChatSession forwards subagent model text runtime events as subagent deltas', async () => {
+  const emittedTools: StreamToolsPayload[] = [];
+  const emittedEvents: LocalAgentEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    async *stream(streamSetup: AgentChannelSetup) {
+      streamSetup.input.onToolEvent?.({
+        event: 'on_runtime_event',
+        name: 'subagent_message_delta',
+        data: { text: '正在整理' },
+      });
+      yield [
+        'values',
+        {
+          messages: [new AIMessage('done')],
+        },
+      ];
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: (event) => {
+      emittedTools.push(event);
+    },
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'done' });
+  assert.deepEqual(emittedTools, []);
+  assert.deepEqual(
+    emittedEvents.filter((event) => event.type === 'subagent.message.delta'),
+    [{
+      type: 'subagent.message.delta',
+      requestId: 'req-1',
+      text: '正在整理',
+    }],
+  );
+});
+
 test('runChatSession forwards canonical review interrupt specs unchanged', async () => {
   const emittedEvents: LocalAgentEvent[] = [];
   const setup = {

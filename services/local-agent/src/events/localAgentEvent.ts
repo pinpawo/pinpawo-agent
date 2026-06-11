@@ -2,6 +2,7 @@ import type { ReviewSpec } from '@pinpawo/pet-agent';
 
 export type LocalAgentEvent =
   | LocalAgentMessageDeltaEvent
+  | LocalAgentSubagentMessageDeltaEvent
   | LocalAgentMessageCompletedEvent
   | LocalAgentOperationEvent
   | LocalAgentHumanReviewRequestedEvent
@@ -13,6 +14,12 @@ export type LocalAgentMessageDeltaEvent = {
   type: 'message.delta';
   requestId: string;
   role: 'assistant';
+  text: string;
+};
+
+export type LocalAgentSubagentMessageDeltaEvent = {
+  type: 'subagent.message.delta';
+  requestId: string;
   text: string;
 };
 

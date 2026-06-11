@@ -51,6 +51,7 @@ export type ActiveRunModel = {
   requestId: RunId;
   phase: 'thinking' | 'using_tool' | 'streaming' | 'waiting_human' | 'interrupting';
   assistantDraft: string;
+  subagentDraft: string;
   activeOperations: ActiveOperationModel[];
   pendingReview?: ApprovalRequestModel;
   startedAt: number;

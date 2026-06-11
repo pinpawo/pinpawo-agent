@@ -32,6 +32,25 @@ function readMessagesFromValuesChunk(chunk: unknown): BaseMessage[] | null {
   return null;
 }
 
+function readMessageChunkText(message: { content?: unknown }) {
+  const content = message.content;
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+          return part.text;
+        }
+        return '';
+      })
+      .join('');
+  }
+  return '';
+}
+
 function isSubagentToolLifecycleEvent(payload: unknown): payload is SubagentToolLifecycleEvent {
   const event = payload && typeof payload === 'object'
     ? (payload as { event?: unknown }).event
@@ -73,6 +92,28 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
       await input.onToolEvent?.(event);
     }
   };
+  let streamedSubagentText = '';
+  const emitSubagentMessageDelta = async (message: BaseMessage) => {
+    if (message._getType() !== 'ai') {
+      return;
+    }
+    const chunkText = readMessageChunkText(message);
+    if (!chunkText) {
+      return;
+    }
+    const token = chunkText.startsWith(streamedSubagentText)
+      ? chunkText.slice(streamedSubagentText.length)
+      : chunkText;
+    if (!token) {
+      return;
+    }
+    streamedSubagentText += token;
+    await input.onToolEvent?.({
+      event: 'on_runtime_event',
+      name: 'subagent_message_delta',
+      data: { text: token },
+    });
+  };
 
   try {
     const stream = await agent.stream(
@@ -81,7 +122,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
         ...input.runnableConfig,
         signal: input.signal,
         recursionLimit: maxIterations,
-        streamMode: ['values', 'tools'],
+        streamMode: ['messages', 'values', 'tools'],
       },
     );
 
@@ -90,6 +131,9 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
         const [mode, payload] = chunk as [string, unknown];
         if (mode === 'values') {
           latestMessages = readMessagesFromValuesChunk(payload) ?? latestMessages;
+        }
+        if (mode === 'messages' && Array.isArray(payload)) {
+          await emitSubagentMessageDelta(payload[0] as BaseMessage);
         }
         if (mode === 'tools' && isSubagentToolLifecycleEvent(payload)) {
           await emitToolEvent(payload);

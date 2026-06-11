@@ -87,6 +87,7 @@ export const TUI_TEXT = {
   studioStoppedReason: (reason: string) => `[studio] stopped: ${reason}`,
   studioErrorLine: (message: string) => `[studio 出错] ${message}`,
   studioErrorRecovered: 'Studio 出错，已恢复输入',
+  subagentOutput: (text: string) => `[subagent]\n${text}`,
   operationFailed: '失败',
   operationInterrupted: '已中断',
   operationCompleted: '已完成',

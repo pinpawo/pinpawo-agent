@@ -13,6 +13,7 @@ import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
   buildActiveOperationLines,
   buildBusyStatusLine,
+  formatSubagentMessage,
 } from './render/eventText';
 import { formatNow } from './render/terminalText';
 import { TUI_TEXT } from './render/text';
@@ -24,6 +25,7 @@ import {
   selectFocusedPendingApproval,
   selectFocusedPendingUi,
   selectFocusedSession,
+  selectFocusedSubagentDraft,
   selectReady,
   tuiStateReducer,
 } from './state/tuiStateReducer';
@@ -78,6 +80,8 @@ export function TuiApp(props: { actorId: string }) {
   const busy = selectFocusedBusy(tuiState);
   const pendingUi = selectFocusedPendingUi(tuiState);
   const activeOperations = selectFocusedActiveOperations(tuiState);
+  const subagentDraft = selectFocusedSubagentDraft(tuiState);
+  const subagentMessage = formatSubagentMessage(subagentDraft);
   const pendingApproval = selectFocusedPendingApproval(tuiState);
   const reviewOptions = pendingApproval?.review.options ?? [];
   const petName = focusedSession?.actor.label ?? TUI_TEXT.defaultPetName;
@@ -317,6 +321,13 @@ export function TuiApp(props: { actorId: string }) {
             </Text>
           ))}
         </Box>
+      ) : null}
+      {subagentMessage ? (
+        <MessageBlock
+          entry={{ kind: 'system', text: subagentMessage }}
+          petName={petName}
+          width={contentWidth}
+        />
       ) : null}
       {resumePickerOpen ? (
         <ResumePicker

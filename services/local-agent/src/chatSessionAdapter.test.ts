@@ -363,8 +363,9 @@ test('runChatSession resumes explicit response after state update clears interru
   );
 });
 
-test('runChatSession allows a user message when prior non-review continuation remains', async () => {
+test('runChatSession allows a user message after an aborted non-review run leaves pending continuation', async () => {
   const finalMessages = [new AIMessage('continued after abort')];
+  const emittedEvents: LocalAgentEvent[] = [];
   const setup = {
     graphKey: 'test',
     graphConfig: {},
@@ -405,12 +406,18 @@ test('runChatSession allows a user message when prior non-review continuation re
     finishInterrupted: () => {
       throw new Error('should not interrupt');
     },
-    emitEvent: () => {},
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
     emitToolEvent: () => {},
   });
 
   assert.deepEqual(result, { status: 'completed', reply: 'continued after abort' });
   assert.deepEqual(streamInputs, [undefined]);
+  assert.equal(
+    emittedEvents.some((event) => event.type === 'human_review.requested' || event.type === 'system.notice'),
+    false,
+  );
 });
 
 test('runChatSession rejects stale resume with user-facing message', async () => {

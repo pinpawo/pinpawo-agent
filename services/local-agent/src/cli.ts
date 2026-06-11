@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
+import type { InitCommandOptions } from './commands/init';
 
 type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
@@ -10,6 +11,7 @@ type LocalAgentCliHandlers = {
   runAgent?: () => Promise<void> | void;
   runTui?: (opts: { dryRun: boolean }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
+  runInit?: (opts: InitCommandOptions) => Promise<void> | void;
 };
 
 function readPackageVersion(): string {
@@ -38,6 +40,21 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .name('pinpawo-agent')
     .description('PinPawo local agent CLI')
     .version(readPackageVersion());
+
+  program
+    .command('init')
+    .description('Scaffold local config and an example capability for a quick install')
+    .option('--dir <directory>', 'target PinPawo config directory', '~/.pinpawo')
+    .option('--force', 'overwrite generated scaffold files')
+    .option('--no-example-capability', 'skip the generated example capability')
+    .action(async (options: { dir?: string; force?: boolean; exampleCapability?: boolean }) => {
+      const runInit = handlers.runInit ?? (await import('./commands/init')).runInit;
+      await runInit({
+        dir: options.dir,
+        force: options.force ?? false,
+        exampleCapability: options.exampleCapability ?? true,
+      });
+    });
 
   program
     .command('login')

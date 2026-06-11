@@ -14,3 +14,20 @@ test('local agent CLI passes tui options to the handler', async () => {
 
   assert.deepEqual(received, { dryRun: true });
 });
+
+test('local agent CLI passes init options to the handler', async () => {
+  let received: unknown = null;
+  const program = createLocalAgentCli({
+    runInit: (options) => {
+      received = options;
+    },
+  });
+
+  await program.parseAsync(['init', '--dir', '/tmp/pinpawo-test', '--force', '--no-example-capability'], { from: 'user' });
+
+  assert.deepEqual(received, {
+    dir: '/tmp/pinpawo-test',
+    force: true,
+    exampleCapability: false,
+  });
+});

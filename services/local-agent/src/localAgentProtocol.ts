@@ -72,6 +72,11 @@ export type LocalAgentServerMessage =
   | LocalAgentEventMessage
   | LocalAgentControlServerMessage;
 
+export type LocalAgentClientMessageEnvelope = {
+  type?: string;
+  requestId?: string;
+};
+
 type WsLike = {
   readyState: number;
   send(data: string): unknown;
@@ -128,6 +133,17 @@ function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly stri
 function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpec | null {
   const review = readRecord(record, key);
   return isReviewSpecValue(review) ? review : null;
+}
+
+export function readLocalAgentClientMessageEnvelope(raw: unknown): LocalAgentClientMessageEnvelope | null {
+  const record = readJsonRecord(raw);
+  if (!record) {
+    return null;
+  }
+  return {
+    type: readOptionalString(record, 'type'),
+    requestId: readOptionalString(record, 'requestId'),
+  };
 }
 
 function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent | null {

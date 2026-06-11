@@ -21,6 +21,8 @@ import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivi
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
 const CHARS_PER_TOKEN = 4;
+const STALE_RESUME_MESSAGE = '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。';
+const PENDING_REVIEW_TEXT_NOTICE = '当前有待确认的 review，请先通过确认面板应答；这条文本没有作为新消息发送。';
 
 function estimateTextTokens(text: string) {
   return Math.max(0, Math.ceil(text.length / CHARS_PER_TOKEN));
@@ -124,6 +126,13 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   }
 
   if (initialThreadState.pendingHumanReview && !isResumeRequest) {
+    if (message.trim()) {
+      emitEvent({
+        type: 'system.notice',
+        requestId,
+        message: PENDING_REVIEW_TEXT_NOTICE,
+      });
+    }
     emitHumanReviewRequested({
       review: initialThreadState.pendingHumanReview.review,
       requestId,
@@ -133,10 +142,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   }
 
   if (isResumeRequest && !initialThreadState.hasPendingContinuation) {
-    throw new Error('Cannot resume graph thread because it has no pending continuation.');
-  }
-  if (!isResumeRequest && initialThreadState.hasPendingContinuation) {
-    throw new Error('Cannot start a new chat request while the graph thread is waiting for resume.');
+    throw new Error(STALE_RESUME_MESSAGE);
   }
 
   const graphInput = isResumeRequest

@@ -872,11 +872,53 @@ test('iteration limit review emits canonical ReviewSpec interrupt payload', asyn
   } | undefined;
 
   assert.equal(payload?.kind, 'review');
+  assert.equal(payload?.review?.id, `iteration-limit:${input.turnId}:1:1`);
   assert.equal(payload?.review?.schemaVersion, 1);
   assert.deepEqual(payload?.review?.options?.map((option) => option.id), ['approve', 'reject', 'respond']);
   assert.equal(payload?.pendingAction, undefined);
   assert.equal(payload?.actionRequests, undefined);
   assert.equal(payload?.reviewConfigs, undefined);
+});
+
+test('iteration limit review id is scoped to the turn id', async () => {
+  const graph = createOrchestratorGraph({
+    models: {} as AgentModels,
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const inputA = buildOrchestratorTurnInput([new HumanMessage('继续处理')]);
+  const inputB = buildOrchestratorTurnInput([new HumanMessage('继续处理')]);
+  inputA.turnId = 'turn-a';
+  inputB.turnId = 'turn-b';
+  inputA.iterationCount = 1;
+  inputB.iterationCount = 1;
+
+  const readInterruptedReviewId = async (
+    input: typeof inputA,
+    threadId: string,
+  ): Promise<string | undefined> => {
+    const result = await graph.invoke(input, {
+      configurable: {
+        thread_id: threadId,
+        actor: testActor,
+        capabilities: [],
+        tools: [],
+        maxIterations: 1,
+      },
+    }) as {
+      __interrupt__?: Array<{ value?: unknown }>;
+    };
+    return (result.__interrupt__?.[0]?.value as {
+      review?: { id?: string };
+    } | undefined)?.review?.id;
+  };
+
+  const idA = await readInterruptedReviewId(inputA, 'iteration-limit-turn-a');
+  const idB = await readInterruptedReviewId(inputB, 'iteration-limit-turn-b');
+
+  assert.equal(idA, 'iteration-limit:turn-a:1:1');
+  assert.equal(idB, 'iteration-limit:turn-b:1:1');
+  assert.notEqual(idA, idB);
 });
 
 test('iteration limit review accepts canonical approve resume', async () => {

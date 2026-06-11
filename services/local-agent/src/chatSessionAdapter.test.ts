@@ -301,6 +301,96 @@ test('runChatSession resumes explicit response after state update clears interru
   );
 });
 
+test('runChatSession allows a user message when prior non-review continuation remains', async () => {
+  const finalMessages = [new AIMessage('continued after abort')];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+  const streamInputs: unknown[] = [];
+  let readThreadStateCalls = 0;
+  const graphService = {
+    async readThreadState() {
+      readThreadStateCalls += 1;
+      return readThreadStateCalls === 1
+        ? { messages: [], pendingHumanReview: null, hasPendingContinuation: true }
+        : { messages: finalMessages, pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    async *stream(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
+      streamInputs.push(inputOverride);
+      assert.equal(readFinalMessageText(streamSetup.input.messages.at(-1) ?? {}), 'new request');
+      yield [
+        'values',
+        {
+          messages: finalMessages,
+        },
+      ];
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: 'new request',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: () => {},
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'continued after abort' });
+  assert.deepEqual(streamInputs, [undefined]);
+});
+
+test('runChatSession rejects stale resume with user-facing message', async () => {
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    buildResumeCommand() {
+      throw new Error('should not build resume command');
+    },
+    async *stream() {
+      throw new Error('should not stream');
+    },
+  };
+
+  await assert.rejects(
+    () => runChatSession({
+      request: {
+        kind: 'resume',
+        requestId: 'req-1',
+        resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
+      },
+      setup,
+      graphService: graphService as unknown as LocalAgentGraphService,
+      isCurrent: () => true,
+      finishInterrupted: () => {
+        throw new Error('should not interrupt');
+      },
+      emitEvent: () => {},
+      emitToolEvent: () => {},
+    }),
+    /review 已关闭或不存在/,
+  );
+});
+
 test('runChatSession does not map pending review free text to review response', async () => {
   const streamInputs: unknown[] = [];
   const emittedEvents: LocalAgentEvent[] = [];
@@ -369,9 +459,14 @@ test('runChatSession does not map pending review free text to review response', 
   assert.deepEqual(result, { status: 'waiting_human' });
   assert.deepEqual(streamInputs, []);
   assert.deepEqual(setup.input.messages, []);
-  assert.equal(emittedEvents[0]?.type, 'human_review.requested');
+  assert.equal(emittedEvents[0]?.type, 'system.notice');
+  assert.match(
+    emittedEvents[0]?.type === 'system.notice' ? emittedEvents[0].message : '',
+    /确认面板/,
+  );
+  assert.equal(emittedEvents[1]?.type, 'human_review.requested');
   assert.deepEqual(
-    emittedEvents[0]?.type === 'human_review.requested' ? emittedEvents[0].review : null,
+    emittedEvents[1]?.type === 'human_review.requested' ? emittedEvents[1].review : null,
     review,
   );
 });

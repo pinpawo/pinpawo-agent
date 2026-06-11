@@ -228,6 +228,7 @@ function resolveActor(config: OrchestratorConfig, runnableConfig?: RunnableConfi
 }
 
 function buildIterationLimitReviewPayload(params: {
+  turnId: string;
   iterationCount: number;
   maxIterations: number;
   delegationSummary: string;
@@ -236,7 +237,7 @@ function buildIterationLimitReviewPayload(params: {
   return {
     kind: 'review',
     review: buildReviewSpec({
-      id: `iteration-limit-${params.iterationCount}-${params.maxIterations}`,
+      id: `iteration-limit:${params.turnId}:${params.iterationCount}:${params.maxIterations}`,
       view: {
         kind: 'plain',
         title: 'Iteration limit reached',
@@ -447,6 +448,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         .map((d) => `[${d.id}] ${d.lane} — ${formatDelegationStatus(d.status)}: ${clipForPrompt(d.task, 80)}`)
         .join('\n') || '无委派记录';
       const reviewPayload = buildIterationLimitReviewPayload({
+        turnId: state.turnId,
         iterationCount: state.iterationCount,
         maxIterations: maxIter,
         delegationSummary,

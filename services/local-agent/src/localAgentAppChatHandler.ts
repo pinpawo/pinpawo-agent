@@ -43,6 +43,8 @@ type PendingReviewRoute = {
   review: ReviewSpec;
 };
 
+const MAX_CONSUMED_PENDING_REVIEW_REQUEST_IDS = 1000;
+
 export type LocalAgentAppChatHandlerOptions = {
   graphService: LocalAgentGraphService;
   checkpoint: BaseCheckpointSaver;
@@ -77,6 +79,7 @@ export class LocalAgentAppChatHandler {
   private readonly buildChatSetup: BuildChatSetup;
   private readonly pendingReviewRoutes = new Map<string, PendingReviewRoute>();
   private readonly consumedPendingReviewRequestIds = new Set<string>();
+  private readonly activePendingReviewRequestIds = new Set<string>();
   private sessionResetPromise: Promise<void> = Promise.resolve();
 
   constructor(options: LocalAgentAppChatHandlerOptions) {
@@ -119,16 +122,18 @@ export class LocalAgentAppChatHandler {
     if (!this.canUseSocket(ws)) {
       return;
     }
+    if (!this.claimPendingReviewRequest(msg.requestId)) {
+      this.sendClosedReviewError(ws, msg.requestId);
+      return;
+    }
     const route = this.readPendingReviewRoute(msg.requestId);
     if (!route) {
-      sendLocalAgentEvent(ws, {
-        type: 'error',
-        requestId: msg.requestId,
-        message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
-      });
+      this.releasePendingReviewRequest(msg.requestId);
+      this.sendClosedReviewError(ws, msg.requestId);
       return;
     }
     if (msg.reviewId !== route.reviewId) {
+      this.releasePendingReviewRequest(msg.requestId);
       sendLocalAgentEvent(ws, {
         type: 'error',
         requestId: msg.requestId,
@@ -186,7 +191,11 @@ export class LocalAgentAppChatHandler {
     msg: InterruptRequestMessage,
     route: PendingReviewRoute,
   ) {
+    if (!this.claimPendingReviewRequest(msg.requestId)) {
+      return;
+    }
     if (!route.rejectOptionId) {
+      this.releasePendingReviewRequest(msg.requestId);
       sendLocalAgentEvent(ws, {
         type: 'system.notice',
         requestId: msg.requestId,
@@ -346,6 +355,7 @@ export class LocalAgentAppChatHandler {
       return;
     }
     this.consumedPendingReviewRequestIds.delete(event.requestId);
+    this.activePendingReviewRequestIds.delete(event.requestId);
     this.pendingReviewRoutes.set(
       event.requestId,
       this.buildPendingReviewRoute(event.review, userId),
@@ -361,16 +371,46 @@ export class LocalAgentAppChatHandler {
 
   private consumePendingReviewRoute(requestId: string) {
     this.pendingReviewRoutes.delete(requestId);
+    this.activePendingReviewRequestIds.delete(requestId);
     this.consumedPendingReviewRequestIds.add(requestId);
+    while (this.consumedPendingReviewRequestIds.size > MAX_CONSUMED_PENDING_REVIEW_REQUEST_IDS) {
+      const oldest = this.consumedPendingReviewRequestIds.values().next().value as string | undefined;
+      if (!oldest) break;
+      this.consumedPendingReviewRequestIds.delete(oldest);
+    }
   }
 
   private clearPendingReviewRoutesForUser(userId: string) {
     for (const [requestId, route] of this.pendingReviewRoutes) {
       if (route.userId === userId) {
         this.pendingReviewRoutes.delete(requestId);
+        this.activePendingReviewRequestIds.delete(requestId);
         this.consumedPendingReviewRequestIds.delete(requestId);
       }
     }
+  }
+
+  private claimPendingReviewRequest(requestId: string) {
+    if (
+      this.consumedPendingReviewRequestIds.has(requestId)
+      || this.activePendingReviewRequestIds.has(requestId)
+    ) {
+      return false;
+    }
+    this.activePendingReviewRequestIds.add(requestId);
+    return true;
+  }
+
+  private releasePendingReviewRequest(requestId: string) {
+    this.activePendingReviewRequestIds.delete(requestId);
+  }
+
+  private sendClosedReviewError(ws: WebSocket, requestId: string) {
+    sendLocalAgentEvent(ws, {
+      type: 'error',
+      requestId,
+      message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
+    });
   }
 
   private buildSetup(ctx: AgentContext, userMessage: string, userId: string): AgentChannelSetup {

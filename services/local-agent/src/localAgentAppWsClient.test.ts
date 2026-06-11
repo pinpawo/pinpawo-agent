@@ -52,6 +52,7 @@ async function tick() {
 test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', async () => {
   const ws = new FakeWebSocket() as unknown as WebSocket;
   const events: string[] = [];
+  const warnings: string[] = [];
   const handlers = createHandlers(events);
 
   dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
@@ -74,6 +75,15 @@ test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', 
     reviewId: 'review-1',
     selectedOptionId: 'approve',
   }), handlers);
+  dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
+    type: 'human_review_response',
+    requestId: 'req-1',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
+    message: 'Approve',
+  }), handlers, undefined, (message) => {
+    warnings.push(message);
+  });
 
   await tick();
 
@@ -82,6 +92,9 @@ test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', 
     'new:user-1',
     'interrupt:req-1',
     'review:req-1:review-1:approve',
+  ]);
+  assert.deepEqual(warnings, [
+    '[local-agent] ignored malformed app client message type=human_review_response requestId=req-1',
   ]);
 });
 

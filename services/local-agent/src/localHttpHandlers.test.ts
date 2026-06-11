@@ -5,11 +5,12 @@ import { handleLocalHttpRequest } from './localHttpHandlers';
 import type { LocalServerDeps } from './localServerTypes';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 
-function makeReq(url: string): IncomingMessage {
+function makeReq(url: string, authorization?: string): IncomingMessage {
   return {
     url,
     headers: {
       host: '127.0.0.1:3210',
+      ...(authorization ? { authorization } : {}),
     },
   } as IncomingMessage;
 }
@@ -80,6 +81,38 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
     session: { id: 'pet-a:one', title: 'first' },
     messages: [{ role: 'user', text: 'hello' }],
   });
+});
+
+test('handleLocalHttpRequest rejects requests without a valid local token', async () => {
+  const deps = {} as LocalServerDeps;
+  const options = {
+    authToken: 'secret',
+    loadHistory: async () => {
+      throw new Error('not called');
+    },
+    listSessions: async () => {
+      throw new Error('not called');
+    },
+    resumeSession: async () => {
+      throw new Error('not called');
+    },
+  };
+
+  const missingRes = makeRes();
+  assert.equal(handleLocalHttpRequest(makeReq('/health'), missingRes, deps, options), true);
+  assert.equal(missingRes.statusCode, 401);
+  assert.deepEqual(JSON.parse(missingRes.body), { error: 'unauthorized' });
+
+  const wrongRes = makeRes();
+  assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer wrong'), wrongRes, deps, options), true);
+  assert.equal(wrongRes.statusCode, 401);
+
+  const okRes = makeRes();
+  assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), okRes, {
+    actorId: 'pet-a',
+    getStats: () => ({}),
+  } as LocalServerDeps, options), true);
+  assert.equal(okRes.statusCode, 200);
 });
 
 test('handleLocalHttpRequest exposes active operation health fields', async () => {

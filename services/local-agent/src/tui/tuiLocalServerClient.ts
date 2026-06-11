@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import {
+  buildLocalServerAuthHeaders,
+  readLocalServerAuthToken,
+} from '../localServerAuth';
 import type { HistoryCellModel } from './state/tuiState';
 import type { ResumeSessionSummary } from './types';
 
@@ -9,6 +13,7 @@ type FetchLike = typeof fetch;
 type TuiLocalServerClientOptions = {
   port: number;
   fetchImpl?: FetchLike;
+  tokenProvider?: () => string | null;
 };
 
 export type LocalServerRuntimeSnapshot = {
@@ -19,9 +24,11 @@ export type LocalServerRuntimeSnapshot = {
 
 export class TuiLocalServerClient {
   private readonly fetchImpl: FetchLike;
+  private readonly tokenProvider: () => string | null;
 
   constructor(private readonly options: TuiLocalServerClientOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.tokenProvider = options.tokenProvider ?? (() => readLocalServerAuthToken());
   }
 
   async isHealthy(timeoutMs = DEFAULT_HEALTH_TIMEOUT_MS) {
@@ -34,7 +41,7 @@ export class TuiLocalServerClient {
   }
 
   async readHistory(): Promise<HistoryCellModel[]> {
-    const res = await this.fetchImpl(this.url('/history'));
+    const res = await this.fetchAuth(this.url('/history'));
     if (!res.ok) return [];
     const payload = await res.json() as {
       messages?: Array<{ role?: string; text?: string }>;
@@ -53,7 +60,7 @@ export class TuiLocalServerClient {
   }
 
   async listResumeSessions(): Promise<ResumeSessionSummary[]> {
-    const res = await this.fetchImpl(this.url('/sessions'));
+    const res = await this.fetchAuth(this.url('/sessions'));
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
@@ -70,7 +77,7 @@ export class TuiLocalServerClient {
     session: ResumeSessionSummary;
     history: HistoryCellModel[];
   }> {
-    const res = await this.fetchImpl(
+    const res = await this.fetchAuth(
       this.url(`/sessions/resume?sessionId=${encodeURIComponent(sessionId)}`),
     );
     if (!res.ok) {
@@ -100,11 +107,32 @@ export class TuiLocalServerClient {
       controller.abort();
     }, timeoutMs);
     try {
-      return await this.fetchImpl(url, { signal: controller.signal });
+      return await this.fetchAuth(url, { signal: controller.signal });
     } finally {
       clearTimeout(timeout);
     }
   }
+
+  private fetchAuth(url: string, init: RequestInit = {}) {
+    return this.fetchImpl(url, {
+      ...init,
+      headers: {
+        ...buildLocalServerAuthHeaders(this.tokenProvider()),
+        ...normalizeHeaders(init.headers),
+      },
+    });
+  }
+}
+
+function normalizeHeaders(headers: RequestInit['headers']): Record<string, string> {
+  if (!headers) return {};
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+  return headers as Record<string, string>;
 }
 
 export function parseHistoryMessages(

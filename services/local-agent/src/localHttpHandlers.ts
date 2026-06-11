@@ -12,9 +12,11 @@ import { loadUserCapabilities, readUserCapabilityManifests } from './capabilityL
 import type { LoadedUserCapability } from './capabilityLoader';
 import { loadStoredConfig } from './storage';
 import { readAgentActivityHealthFields } from './operationActivityState';
+import { isAuthorizedLocalServerRequest } from './localServerAuth';
 import type { LocalServerDeps } from './localServerTypes';
 
 type LocalHttpHandlerOptions = {
+  authToken?: string;
   loadHistory: () => Promise<Array<{ role: string; text: string }>>;
   listSessions: () => Promise<Array<Record<string, unknown>>>;
   resumeSession: (sessionId: string) => Promise<{
@@ -31,6 +33,11 @@ export function handleLocalHttpRequest(
 ) {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const pathname = url.pathname;
+
+  if (options.authToken && !isAuthorizedLocalServerRequest(req, options.authToken)) {
+    writeJson(res, 401, { error: 'unauthorized' });
+    return true;
+  }
 
   if (pathname === '/health') {
     const writeHealth = () => {

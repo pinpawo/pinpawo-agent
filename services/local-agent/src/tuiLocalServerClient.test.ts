@@ -43,9 +43,11 @@ test('parseResumeSessionSummary validates resume session payloads', () => {
 
 test('TuiLocalServerClient reads sessions, resume payloads, history, and health', async () => {
   const seenUrls: string[] = [];
-  const fetchImpl = async (input: Parameters<typeof fetch>[0]) => {
+  const seenAuth: Array<string | undefined> = [];
+  const fetchImpl = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const url = String(input);
     seenUrls.push(url);
+    seenAuth.push((init?.headers as Record<string, string> | undefined)?.Authorization);
     if (url.endsWith('/health')) {
       return jsonResponse({ ok: true });
     }
@@ -87,6 +89,7 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
   const client = new TuiLocalServerClient({
     port: 3210,
     fetchImpl: fetchImpl as typeof fetch,
+    tokenProvider: () => 'secret',
   });
 
   assert.equal(await client.isHealthy(), true);
@@ -101,6 +104,12 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
     'http://127.0.0.1:3210/history',
     'http://127.0.0.1:3210/sessions',
     'http://127.0.0.1:3210/sessions/resume?sessionId=chat%3Aone',
+  ]);
+  assert.deepEqual(seenAuth, [
+    'Bearer secret',
+    'Bearer secret',
+    'Bearer secret',
+    'Bearer secret',
   ]);
 });
 

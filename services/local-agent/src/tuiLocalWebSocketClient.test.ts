@@ -35,6 +35,7 @@ test('TuiLocalWebSocketClient connects, sends messages, and dispatches socket ev
   const client = new TuiLocalWebSocketClient({
     port: 3210,
     handlers: createHandlers(events),
+    tokenProvider: () => 'secret',
     webSocketFactory: (url) => {
       urls.push(url);
       const ws = new FakeWebSocket();
@@ -45,7 +46,7 @@ test('TuiLocalWebSocketClient connects, sends messages, and dispatches socket ev
 
   client.connect();
 
-  assert.deepEqual(urls, ['ws://127.0.0.1:3210']);
+  assert.deepEqual(urls, ['ws://127.0.0.1:3210/?token=secret']);
   assert.equal(client.hasSocket(), true);
   assert.equal(client.isConnected(), false);
   assert.equal(client.send({ type: 'new_session' }), false);

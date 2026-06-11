@@ -1,6 +1,10 @@
 import type { Server } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
+  isAllowedLocalServerOrigin,
+  isAuthorizedLocalServerRequest,
+} from './localServerAuth';
+import {
   parseLocalAgentClientMessage,
   readLocalAgentClientMessageEnvelope,
   sendLocalAgentMessage,
@@ -25,6 +29,11 @@ export type LocalServerWsHandlers = {
   log?: (message: string) => void;
   logError?: LogError;
   logWarn?: LogWarn;
+};
+
+export type LocalServerWsTransportOptions = {
+  authToken: string;
+  port: number;
 };
 
 function defaultLogError(message: string, error: unknown) {
@@ -88,11 +97,32 @@ export function dispatchLocalServerWebSocketMessage(
 export function attachLocalServerWebSocketTransport(
   server: Server,
   handlers: LocalServerWsHandlers,
+  options: LocalServerWsTransportOptions,
 ) {
   const log = handlers.log ?? console.log;
   const logError = handlers.logError ?? defaultLogError;
   const logWarn = handlers.logWarn ?? defaultLogWarn;
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (req, socket, head) => {
+    if (!isAllowedLocalServerOrigin(req, options.port)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      log('[local-server] rejected WS upgrade from invalid Origin');
+      return;
+    }
+
+    if (!isAuthorizedLocalServerRequest(req, options.authToken)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      log('[local-server] rejected WS upgrade without valid token');
+      return;
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
+  });
 
   wss.on('connection', (ws) => {
     log('[local-server] TUI client connected');

@@ -17,6 +17,7 @@
 		2873FCD457213945BA51C661 /* SettingsWindowFocus.swift in Sources */ = {isa = PBXBuildFile; fileRef = D41BB0724F6967AFEB8C2D47 /* SettingsWindowFocus.swift */; };
 		3405911C7E71F22756BBDAD6 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B890CEA97A156F364C84C0 /* KeychainService.swift */; };
 		44033C45B252D4FDBA794A8E /* browser.gif in Resources */ = {isa = PBXBuildFile; fileRef = DA54EB732BF714BE2672464D /* browser.gif */; };
+		4D52433A83A459DD8946D891 /* LocalServerAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = D59D626FA78D82B30D87F2C9 /* LocalServerAuth.swift */; };
 		55970212083ABAB95936CE21 /* waiting.gif in Resources */ = {isa = PBXBuildFile; fileRef = 856D8BAABD3663C199ED9A88 /* waiting.gif */; };
 		5637158402553B2843F07BB6 /* DesktopPetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24A4868D9F3F55EFFEF48650 /* DesktopPetView.swift */; };
 		6397AEBC0F155D29AAE03A6B /* StatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C072C916C9F010477F4337C9 /* StatusView.swift */; };
@@ -67,6 +68,7 @@
 		C072C916C9F010477F4337C9 /* StatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusView.swift; sourceTree = "<group>"; };
 		C39EB37626589852FFDE4684 /* media.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = media.gif; sourceTree = "<group>"; };
 		C72FA4654C5E970A9FC621D3 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		D59D626FA78D82B30D87F2C9 /* LocalServerAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalServerAuth.swift; sourceTree = "<group>"; };
 		D41BB0724F6967AFEB8C2D47 /* SettingsWindowFocus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowFocus.swift; sourceTree = "<group>"; };
 		DA54EB732BF714BE2672464D /* browser.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = browser.gif; sourceTree = "<group>"; };
 		E6B890CEA97A156F364C84C0 /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
@@ -122,6 +124,7 @@
 				BE1D64376EB8076CA82A0DAA /* Config.swift */,
 				A67AA67DF99F7FF837E5DFED /* DesktopPetController.swift */,
 				E6B890CEA97A156F364C84C0 /* KeychainService.swift */,
+				D59D626FA78D82B30D87F2C9 /* LocalServerAuth.swift */,
 				D41BB0724F6967AFEB8C2D47 /* SettingsWindowFocus.swift */,
 				A0D6DF994C49417C25714063 /* StatusPoller.swift */,
 			);
@@ -288,6 +291,7 @@
 				EDC207C26ED09D08D136BC7F /* HealthData.swift in Sources */,
 				3405911C7E71F22756BBDAD6 /* KeychainService.swift in Sources */,
 				1BC2C10E418B161AFD799468 /* LLMSettingsView.swift in Sources */,
+				4D52433A83A459DD8946D891 /* LocalServerAuth.swift in Sources */,
 				F523DF1CAAC8F2B7404602D6 /* LoginView.swift in Sources */,
 				CC588A860FC6ED9C29B2074C /* MenuBarView.swift in Sources */,
 				BD5B9E0A5AED70573CB2C8B6 /* PinPawoAgentApp.swift in Sources */,

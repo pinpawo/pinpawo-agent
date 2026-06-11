@@ -1,5 +1,9 @@
 import WebSocket from 'ws';
 import {
+  appendLocalServerAuthToken,
+  readLocalServerAuthToken,
+} from '../localServerAuth';
+import {
   parseLocalAgentServerMessage,
   sendLocalAgentMessage,
   type LocalAgentClientMessage,
@@ -17,19 +21,28 @@ export type TuiLocalWebSocketClientOptions = {
   port: number;
   handlers: TuiLocalWebSocketClientHandlers;
   webSocketFactory?: (url: string) => WebSocket;
+  tokenProvider?: () => string | null;
 };
 
 export class TuiLocalWebSocketClient {
   private readonly webSocketFactory: (url: string) => WebSocket;
+  private readonly tokenProvider: () => string | null;
   private ws: WebSocket | null = null;
 
   constructor(private readonly options: TuiLocalWebSocketClientOptions) {
-    this.webSocketFactory = options.webSocketFactory ?? ((url) => new WebSocket(url));
+    this.tokenProvider = options.tokenProvider ?? (() => readLocalServerAuthToken());
+    this.webSocketFactory = options.webSocketFactory ?? ((url) => new WebSocket(url, {
+      headers: {
+        Authorization: `Bearer ${this.tokenProvider() ?? ''}`,
+      },
+    }));
   }
 
   connect() {
     this.disconnect();
-    const ws = this.webSocketFactory(`ws://127.0.0.1:${this.options.port}`);
+    const ws = this.webSocketFactory(
+      appendLocalServerAuthToken(`ws://127.0.0.1:${this.options.port}`, this.tokenProvider()),
+    );
     this.ws = ws;
 
     ws.on('open', () => {

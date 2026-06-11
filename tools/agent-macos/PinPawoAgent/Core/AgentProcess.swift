@@ -150,6 +150,7 @@ final class AgentProcess: ObservableObject {
     guard let url = URL(string: "http://127.0.0.1:3210/health") else { return false }
     var req = URLRequest(url: url, timeoutInterval: 1.5)
     req.httpMethod = "GET"
+    LocalServerAuth.authorize(&req)
     do {
       let (_, resp) = try await URLSession.shared.data(for: req)
       return (resp as? HTTPURLResponse)?.statusCode == 200

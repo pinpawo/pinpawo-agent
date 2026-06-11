@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import type { AddressInfo } from 'node:net';
+import { createServer } from 'node:http';
 import test from 'node:test';
-import type { WebSocket } from 'ws';
+import { WebSocket, type ClientOptions } from 'ws';
 import {
+  attachLocalServerWebSocketTransport,
   dispatchLocalServerWebSocketMessage,
   type LocalServerWsHandlers,
 } from './localServerWsTransport';
@@ -80,6 +83,38 @@ test('local websocket transport dispatches typed client messages and pong', asyn
   });
 });
 
+test('local websocket transport enforces token and Origin during upgrade', async () => {
+  const server = createServer();
+  const handlers = createHandlers();
+  attachLocalServerWebSocketTransport(server, handlers, {
+    authToken: 'secret',
+    port: 0,
+  });
+  await listen(server);
+  const address = server.address();
+  assertAddressInfo(address);
+  const port = address.port;
+
+  try {
+    await assert.rejects(openWebSocket(`ws://127.0.0.1:${port}`));
+    await assert.rejects(openWebSocket(`ws://127.0.0.1:${port}/?token=secret`));
+    await assert.rejects(openWebSocket(`ws://127.0.0.1:${port}`, {
+      headers: {
+        Authorization: 'Bearer secret',
+        Origin: 'https://evil.example',
+      },
+    }));
+    const ws = await openWebSocket(`ws://127.0.0.1:${port}`, {
+      headers: {
+        Authorization: 'Bearer secret',
+      },
+    });
+    ws.close();
+  } finally {
+    await closeServer(server);
+  }
+});
+
 async function assertEventually(assertion: () => void) {
   const startedAt = Date.now();
   let lastError: unknown;
@@ -95,4 +130,54 @@ async function assertEventually(assertion: () => void) {
     }
   }
   throw lastError;
+}
+
+function createHandlers(): LocalServerWsHandlers {
+  return {
+    onChatRequest: () => undefined,
+    onStudioRequest: () => undefined,
+    onHumanReviewResponse: () => undefined,
+    onInterruptRequest: () => undefined,
+    onNewSession: () => undefined,
+    onClose: () => undefined,
+    log: () => undefined,
+  };
+}
+
+function listen(server: ReturnType<typeof createServer>) {
+  return new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+}
+
+function closeServer(server: ReturnType<typeof createServer>) {
+  return new Promise<void>((resolve, reject) => {
+    server.close((err) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+function openWebSocket(url: string, options?: ClientOptions) {
+  return new Promise<WebSocket>((resolve, reject) => {
+    const ws = new WebSocket(url, options);
+    ws.once('open', () => {
+      ws.off('error', reject);
+      resolve(ws);
+    });
+    ws.once('error', reject);
+  });
+}
+
+function assertAddressInfo(address: ReturnType<ReturnType<typeof createServer>['address']>): asserts address is AddressInfo {
+  assert.equal(typeof address, 'object');
+  assert.notEqual(address, null);
 }

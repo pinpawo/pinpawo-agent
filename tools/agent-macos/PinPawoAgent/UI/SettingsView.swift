@@ -790,6 +790,7 @@ private struct CapabilitiesSettingsPane: View {
     guard let url = URL(string: "http://127.0.0.1:3210/capabilities/rescan") else { return }
     var req = URLRequest(url: url)
     req.timeoutInterval = 6
+    LocalServerAuth.authorize(&req)
     _ = try? await URLSession.shared.data(for: req)
   }
 }
@@ -980,6 +981,7 @@ private struct BrowserConfigView: View {
     guard let url = URL(string: "http://127.0.0.1:3210/health?refresh_capability=browser") else { return }
     var req = URLRequest(url: url)
     req.timeoutInterval = 4
+    LocalServerAuth.authorize(&req)
     _ = try? await URLSession.shared.data(for: req)
   }
 

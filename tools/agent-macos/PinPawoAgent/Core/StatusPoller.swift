@@ -31,6 +31,7 @@ final class StatusPoller: ObservableObject {
       do {
         var req = URLRequest(url: healthURL)
         req.timeoutInterval = 4
+        LocalServerAuth.authorize(&req)
         let (data, _) = try await URLSession.shared.data(for: req)
         let h = try JSONDecoder().decode(HealthResponse.self, from: data)
         health = h

@@ -17,6 +17,7 @@ import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
+import { ensureLocalServerAuthToken } from './localServerAuth';
 import { LocalServerChatHandler } from './localServerChatHandler';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
 import type { AgentStats, LocalServerDeps } from './localServerTypes';
@@ -50,8 +51,10 @@ const studioHandler = new LocalServerStudioHandler({
 
 export function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
   return new Promise((resolve, reject) => {
+    const authToken = ensureLocalServerAuthToken();
     const server = createServer((req, res) => {
       const handled = handleLocalHttpRequest(req, res, deps, {
+        authToken,
         loadHistory: () => tuiSessions.loadHistory(deps),
         listSessions: () => tuiSessions.listSessions(deps),
         resumeSession: (sessionId) => tuiSessions.resumeSession(deps, sessionId),
@@ -89,10 +92,14 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
         inflightRequests.abortAndClear(ws);
         studioHandler.rejectDisconnected(ws);
       },
+    }, {
+      authToken,
+      port,
     });
 
     server.listen(port, '127.0.0.1', () => {
       console.log(`[local-server] listening on ws://127.0.0.1:${port}`);
+      console.log('[local-server] local HTTP/WS auth enabled');
       resolve();
     });
 

@@ -34,21 +34,14 @@ export function formatOperationProgress(event: LocalAgentOperationEvent) {
 
 export function formatOperationResult(event: LocalAgentOperationEvent) {
   const label = event.operation.title ?? event.operation.kind;
-  const rawPreview = formatOperationRawPreview(event);
   if (event.phase === 'failed') {
-    return [
-      `${label}：${TUI_TEXT.operationFailed}${event.operation.summary ? ` · ${shorten(event.operation.summary, 80)}` : ''}`,
-      rawPreview,
-    ].filter((item): item is string => Boolean(item)).join('\n');
+    return `${label}：${TUI_TEXT.operationFailed}${event.operation.summary ? ` · ${shorten(event.operation.summary, 80)}` : ''}`;
   }
   if (event.phase === 'interrupted') {
     return `${label}：${TUI_TEXT.operationInterrupted}`;
   }
   const detail = formatOperationDetail(event, 80);
-  return [
-    `${label}：${detail || TUI_TEXT.operationCompleted}`,
-    rawPreview,
-  ].filter((item): item is string => Boolean(item)).join('\n');
+  return `${label}：${detail || TUI_TEXT.operationCompleted}`;
 }
 
 export function formatSystemNoticeEvent(event: LocalAgentSystemNoticeEvent): string | null {
@@ -143,38 +136,6 @@ function formatOperationDetail(event: LocalAgentOperationEvent, max = 60) {
     formatDetails(event.operation.details),
   ].filter((item): item is string => Boolean(item));
   return pieces.length > 0 ? shorten(pieces.join(' · '), max) : '';
-}
-
-function formatOperationRawPreview(event: LocalAgentOperationEvent) {
-  const raw = event.raw;
-  if (!raw) return '';
-  if (event.phase === 'failed' && raw.error !== undefined) {
-    return `${TUI_TEXT.operationRawError}: ${formatRawValue(raw.error)}`;
-  }
-  if (raw.output !== undefined) {
-    return `${TUI_TEXT.operationRawOutput}: ${formatRawValue(raw.output)}`;
-  }
-  if (raw.error !== undefined) {
-    return `${TUI_TEXT.operationRawError}: ${formatRawValue(raw.error)}`;
-  }
-  if (raw.input !== undefined) {
-    return `${TUI_TEXT.operationRawInput}: ${formatRawValue(raw.input)}`;
-  }
-  return '';
-}
-
-function formatRawValue(value: unknown) {
-  if (value instanceof Error) {
-    return shorten(value.message || value.name, 180);
-  }
-  if (typeof value === 'string') {
-    return shorten(value.replace(/\s+/g, ' ').trim(), 180);
-  }
-  try {
-    return shorten(JSON.stringify(value), 180);
-  } catch {
-    return shorten(String(value), 180);
-  }
 }
 
 function formatDetails(details: Record<string, unknown> | undefined) {

@@ -4,19 +4,18 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import {
-  applyFilePatchTool,
+  applyPatchTool,
   copyPathTool,
   listDirTool,
   mkdirPathTool,
   movePathTool,
-  multiEditTool,
   readFileTool,
   statPathTool,
-  updateFileTool,
   validateStructuredFileTool,
   viewFileChunkTool,
   writeFileTool,
 } from './toolkits/local/fileTools';
+import { parsePatch, PatchParseError } from './toolkits/local/applyPatch';
 
 function createFileFixture(t: TestContext) {
   const root = mkdtempSync(resolve(tmpdir(), 'pinpawo-files-'));
@@ -28,7 +27,7 @@ function readJsonOutput(output: unknown) {
   return JSON.parse(String(output)) as Record<string, unknown>;
 }
 
-test('file tools write, view, stat, update, and patch text files', async (t) => {
+test('file tools write, view, and stat text files', async (t) => {
   const root = createFileFixture(t);
   const filePath = resolve(root, 'nested', 'note.txt');
 
@@ -49,34 +48,201 @@ test('file tools write, view, stat, update, and patch text files', async (t) => 
   const stat = readJsonOutput(await statPathTool.invoke({ path: filePath }));
   assert.equal(stat.type, 'file');
   assert.equal(stat.path, filePath);
+});
 
-  assert.equal(readJsonOutput(await updateFileTool.invoke({
-    path: filePath,
-    find: 'beta',
-    replace: 'BETA',
-  })).replaced, 1);
+test('apply_patch updates a file with context-anchored chunks', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'note.txt');
+  writeFileSync(filePath, 'alpha\nbeta\ngamma\ndelta\n', 'utf-8');
+
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      ' alpha',
+      '-beta',
+      '+BETA',
+      ' gamma',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.files, [{ path: filePath, type: 'update', chunks: 1 }]);
+  assert.equal(readFileSync(filePath, 'utf-8'), 'alpha\nBETA\ngamma\ndelta\n');
+});
+
+test('apply_patch applies multiple chunks with @@ anchors in one file', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'code.ts');
+  writeFileSync(filePath, [
+    'function one() {',
+    '  return 1;',
+    '}',
+    'function two() {',
+    '  return 1;',
+    '}',
+    '',
+  ].join('\n'), 'utf-8');
+
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      '@@ function two() {',
+      '-  return 1;',
+      '+  return 2;',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(readFileSync(filePath, 'utf-8'), [
+    'function one() {',
+    '  return 1;',
+    '}',
+    'function two() {',
+    '  return 2;',
+    '}',
+    '',
+  ].join('\n'));
+});
+
+test('apply_patch tolerates whitespace drift in context lines', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'drift.txt');
+  writeFileSync(filePath, 'alpha   \n  beta\ngamma\n', 'utf-8');
+
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      ' alpha',
+      '-beta',
+      '+BETA',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, true);
+  const files = result.files as Array<Record<string, unknown>>;
+  assert.equal(files[0]?.fuzz, 'ignore-whitespace');
   assert.equal(readFileSync(filePath, 'utf-8'), 'alpha\nBETA\ngamma\n');
+});
 
-  assert.equal(readJsonOutput(await multiEditTool.invoke({
-    path: filePath,
-    edits: [
-      { find: 'alpha', replace: 'ALPHA' },
-      { find: 'gamma', replace: 'GAMMA' },
-    ],
-  })).replaced, 2);
+test('apply_patch handles add, delete, and move in one patch', async (t) => {
+  const root = createFileFixture(t);
+  const keepPath = resolve(root, 'keep.txt');
+  const dropPath = resolve(root, 'drop.txt');
+  const addedPath = resolve(root, 'sub', 'added.txt');
+  const renamedPath = resolve(root, 'renamed.txt');
+  writeFileSync(keepPath, 'old name\n', 'utf-8');
+  writeFileSync(dropPath, 'bye\n', 'utf-8');
 
-  assert.deepEqual(
-    readJsonOutput(await applyFilePatchTool.invoke({
-      path: filePath,
-      hunks: [{
-        oldText: 'ALPHA\nBETA',
-        newText: 'one\ntwo',
-        expectedOccurrences: 1,
-      }],
-    })).hunks,
-    [{ index: 0, replaced: 1, replaceAll: false }],
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Add File: ${addedPath}`,
+      '+hello',
+      '+world',
+      `*** Delete File: ${dropPath}`,
+      `*** Update File: ${keepPath}`,
+      `*** Move to: ${renamedPath}`,
+      '-old name',
+      '+new name',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(readFileSync(addedPath, 'utf-8'), 'hello\nworld');
+  assert.equal(existsSync(dropPath), false);
+  assert.equal(existsSync(keepPath), false);
+  assert.equal(readFileSync(renamedPath, 'utf-8'), 'new name\n');
+});
+
+test('apply_patch reports missing context with closest-match hint', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'note.txt');
+  writeFileSync(filePath, 'alpha\nbeta variant\ngamma\n', 'utf-8');
+
+  const output = String(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      '-beta original',
+      '+BETA',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.match(output, /^Error: chunk 1: context not found/);
+  assert.match(output, /beta variant/);
+  assert.equal(readFileSync(filePath, 'utf-8'), 'alpha\nbeta variant\ngamma\n');
+});
+
+test('apply_patch validates every file before touching any', async (t) => {
+  const root = createFileFixture(t);
+  const okPath = resolve(root, 'ok.txt');
+  writeFileSync(okPath, 'fine\n', 'utf-8');
+
+  const output = String(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${okPath}`,
+      '-fine',
+      '+changed',
+      `*** Update File: ${resolve(root, 'missing.txt')}`,
+      '-nope',
+      '+never',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.match(output, /^Error: Update File target is not an existing file/);
+  assert.equal(readFileSync(okPath, 'utf-8'), 'fine\n');
+});
+
+test('apply_patch rejects malformed patches', async () => {
+  assert.match(
+    String(await applyPatchTool.invoke({ patch: 'not a patch' })),
+    /must start with "\*\*\* Begin Patch"/,
   );
-  assert.equal(readFileSync(filePath, 'utf-8'), 'one\ntwo\nGAMMA\n');
+  assert.match(
+    String(await applyPatchTool.invoke({
+      patch: '*** Begin Patch\n*** End Patch',
+    })),
+    /contains no file operations/,
+  );
+  assert.throws(
+    () => parsePatch('*** Begin Patch\n*** Update File: a.txt\n-old\n+new'),
+    PatchParseError,
+  );
+});
+
+test('parsePatch parses anchors, moves, and end-of-file markers', () => {
+  const operations = parsePatch([
+    '*** Begin Patch',
+    '*** Update File: src/app.ts',
+    '*** Move to: src/main.ts',
+    '@@ function main()',
+    ' context',
+    '-old',
+    '+new',
+    '*** End of File',
+    '*** End Patch',
+  ].join('\n'));
+
+  assert.equal(operations.length, 1);
+  const update = operations[0];
+  assert.equal(update?.type, 'update');
+  if (update?.type !== 'update') return;
+  assert.equal(update.moveTo, 'src/main.ts');
+  assert.equal(update.chunks.length, 1);
+  assert.equal(update.chunks[0]?.anchor, 'function main()');
+  assert.deepEqual(update.chunks[0]?.oldLines, ['context', 'old']);
+  assert.deepEqual(update.chunks[0]?.newLines, ['context', 'new']);
+  assert.equal(update.chunks[0]?.isEndOfFile, true);
 });
 
 test('read_file analyzes non-text documents instead of reading text chunks', async (t) => {

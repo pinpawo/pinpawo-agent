@@ -1,12 +1,14 @@
-import { execFileSync } from 'node:child_process';
-import { closeSync, cpSync, mkdtempSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
 import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
-import { config } from '../../config';
 import { tryStat } from './fileSystemUtils';
+import {
+  applyChunksToContent,
+  parsePatch,
+  type PatchOperation,
+} from './applyPatch';
 import {
   okOutputPathSummary,
   pathInputSummary,
@@ -245,243 +247,147 @@ export const writeFileTool = tool(
   },
 );
 
-export const updateFileTool = tool(
-  async ({ path, find, replace, replaceAll }: {
-    path: string;
-    find: string;
-    replace: string;
-    replaceAll?: boolean;
-  }) => {
+interface ResolvedPatchWrite {
+  operation: PatchOperation;
+  absolutePath: string;
+  moveToPath: string | null;
+  nextContent: string | null;
+  before: string | undefined;
+  chunksApplied: number;
+  fuzz: 'exact' | 'ignore-trailing-whitespace' | 'ignore-whitespace';
+}
+
+function worstFuzz(chunks: Array<{ fuzz: ResolvedPatchWrite['fuzz'] }>): ResolvedPatchWrite['fuzz'] {
+  if (chunks.some((chunk) => chunk.fuzz === 'ignore-whitespace')) return 'ignore-whitespace';
+  if (chunks.some((chunk) => chunk.fuzz === 'ignore-trailing-whitespace')) return 'ignore-trailing-whitespace';
+  return 'exact';
+}
+
+function atomicWriteFile(filePath: string, content: string) {
+  const tempPath = `${filePath}.pinpawo-patch-${process.pid}-${Date.now()}.tmp`;
+  writeFileSync(tempPath, content, 'utf-8');
+  try {
+    renameSync(tempPath, filePath);
+  } catch (err) {
+    rmSync(tempPath, { force: true });
+    throw err;
+  }
+}
+
+const APPLY_PATCH_DESCRIPTION = [
+  '编辑本地文件的唯一补丁工具，使用 V4A patch 格式：靠上下文行定位（绝不使用行号），一次调用可以新增、修改、删除、移动多个文件。',
+  '格式：',
+  '*** Begin Patch',
+  '*** Update File: <相对或绝对路径>',
+  '@@ <可选的定位锚点，如函数签名>',
+  ' 上下文行（前缀一个空格，原样保留）',
+  '-要删除的行',
+  '+要新增的行',
+  '*** End Patch',
+  '其他指令：`*** Add File: <path>`（其后每行都以 + 开头）；`*** Delete File: <path>`；`*** Update File:` 之后可跟 `*** Move to: <newpath>` 重命名；补丁触及文件末尾时在该块末尾加 `*** End of File`。',
+  '规则：每个修改块前后各带 2-3 行上下文；同一文件内多个不相邻的修改块用 @@ 分隔；上下文必须与文件现状一致（允许少量空白差异，会自动容错）。',
+  '修改前先用 view_file_chunk 查看现状；若补丁报"context not found"，重新读取文件后基于最新内容重试。',
+  '如果修改的是 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，完成后应继续调用 validate_structured_file。整文件新建或完全重写可以直接用 write_file。',
+].join('\n');
+
+export const applyPatchTool = tool(
+  async ({ patch }: { patch: string }) => {
     try {
-      const filePath = resolveUserPath(path);
-      const original = readFileSync(filePath, 'utf-8');
+      const operations = parsePatch(patch);
 
-      if (!find) {
-        return 'Error: find must not be empty';
-      }
+      const writes: ResolvedPatchWrite[] = operations.map((operation) => {
+        if (operation.type === 'add') {
+          const absolutePath = resolveUserPath(operation.path);
+          if (tryStat(absolutePath)) {
+            throw new Error(`Add File target already exists: ${absolutePath}`);
+          }
+          return {
+            operation,
+            absolutePath,
+            moveToPath: null,
+            nextContent: operation.content,
+            before: undefined,
+            chunksApplied: 0,
+            fuzz: 'exact',
+          };
+        }
 
-      const matches = original.split(find).length - 1;
-      if (matches === 0) {
-        return `Error: target text not found in ${filePath}`;
-      }
+        if (operation.type === 'delete') {
+          const absolutePath = resolveUserPath(operation.path);
+          const stat = tryStat(absolutePath);
+          if (!stat?.isFile()) {
+            throw new Error(`Delete File target is not an existing file: ${absolutePath}`);
+          }
+          return {
+            operation,
+            absolutePath,
+            moveToPath: null,
+            nextContent: null,
+            before: readFileContentPreview(absolutePath),
+            chunksApplied: 0,
+            fuzz: 'exact',
+          };
+        }
 
-      const next = replaceAll
-        ? original.split(find).join(replace)
-        : original.replace(find, replace);
-
-      writeFileSync(filePath, next, 'utf-8');
-
-      return JSON.stringify({
-        ok: true,
-        path: filePath,
-        replaced: replaceAll ? matches : 1,
-        replaceAll: Boolean(replaceAll),
+        const absolutePath = resolveUserPath(operation.path);
+        const stat = tryStat(absolutePath);
+        if (!stat?.isFile()) {
+          throw new Error(`Update File target is not an existing file: ${absolutePath}`);
+        }
+        const original = readUtf8TextFile(absolutePath);
+        const result = applyChunksToContent(operation.path, original, operation.chunks);
+        const moveToPath = operation.moveTo ? resolveUserPath(operation.moveTo) : null;
+        if (moveToPath && moveToPath !== absolutePath && tryStat(moveToPath)) {
+          throw new Error(`Move to target already exists: ${moveToPath}`);
+        }
+        return {
+          operation,
+          absolutePath,
+          moveToPath,
+          nextContent: result.content,
+          before: truncateForOperationDetails(original),
+          chunksApplied: result.chunks.length,
+          fuzz: worstFuzz(result.chunks),
+        };
       });
+
+      // All operations validated; now touch the filesystem.
+      const files = writes.map((write) => {
+        if (write.operation.type === 'add') {
+          mkdirSync(dirname(write.absolutePath), { recursive: true });
+          atomicWriteFile(write.absolutePath, write.nextContent ?? '');
+          return { path: write.absolutePath, type: 'add' as const };
+        }
+        if (write.operation.type === 'delete') {
+          rmSync(write.absolutePath);
+          return { path: write.absolutePath, type: 'delete' as const };
+        }
+        const targetPath = write.moveToPath ?? write.absolutePath;
+        if (write.moveToPath && write.moveToPath !== write.absolutePath) {
+          mkdirSync(dirname(write.moveToPath), { recursive: true });
+          rmSync(write.absolutePath);
+        }
+        atomicWriteFile(targetPath, write.nextContent ?? '');
+        return {
+          path: targetPath,
+          type: write.moveToPath && write.moveToPath !== write.absolutePath
+            ? 'move' as const
+            : 'update' as const,
+          chunks: write.chunksApplied,
+          ...(write.fuzz !== 'exact' ? { fuzz: write.fuzz } : {}),
+        };
+      });
+
+      return JSON.stringify({ ok: true, files });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
   },
   {
-    name: 'update_file',
-    description: '更新本地文件中的已有内容。适合把文件里某一段文本替换成新文本；默认只替换首个匹配，传 replaceAll=true 可替换全部匹配。如果修改的是 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，修改后应继续调用 validate_structured_file。',
+    name: 'apply_patch',
+    description: APPLY_PATCH_DESCRIPTION,
     schema: z.object({
-      path: z.string().describe('目标文件路径'),
-      find: z.string().describe('要查找的原始文本，不能为空'),
-      replace: z.string().describe('替换后的新文本'),
-      replaceAll: z.boolean().optional().describe('是否替换全部匹配；默认 false'),
-    }),
-  },
-);
-
-export const multiEditTool = tool(
-  async ({ path, edits }: {
-    path: string;
-    edits: Array<{ find: string; replace: string; replaceAll?: boolean }>;
-  }) => {
-    try {
-      const filePath = resolveUserPath(path);
-      let content = readFileSync(filePath, 'utf-8');
-      let totalReplaced = 0;
-
-      for (const edit of edits) {
-        if (!edit.find) {
-          return 'Error: edit.find must not be empty';
-        }
-        const matches = content.split(edit.find).length - 1;
-        if (matches === 0) {
-          return `Error: target text not found in ${filePath}: ${edit.find.slice(0, 80)}`;
-        }
-        content = edit.replaceAll
-          ? content.split(edit.find).join(edit.replace)
-          : content.replace(edit.find, edit.replace);
-        totalReplaced += edit.replaceAll ? matches : 1;
-      }
-
-      writeFileSync(filePath, content, 'utf-8');
-      return JSON.stringify({
-        ok: true,
-        path: filePath,
-        edits: edits.length,
-        replaced: totalReplaced,
-      });
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'multi_edit',
-    description: '对同一个文件执行多组文本替换。适合一次完成多个局部更新，减少反复读写。如果目标是结构化文件，完成后应继续调用 validate_structured_file。',
-    schema: z.object({
-      path: z.string().describe('目标文件路径'),
-      edits: z.array(z.object({
-        find: z.string().describe('要查找的原始文本'),
-        replace: z.string().describe('替换后的新文本'),
-        replaceAll: z.boolean().optional().describe('是否替换全部匹配；默认 false'),
-      })).min(1).describe('要依次执行的编辑列表'),
-    }),
-  },
-);
-
-export const applyFilePatchTool = tool(
-  async ({ path, hunks }: {
-    path: string;
-    hunks: Array<{
-      oldText: string;
-      newText: string;
-      replaceAll?: boolean;
-      expectedOccurrences?: number;
-    }>;
-  }) => {
-    try {
-      const filePath = resolveUserPath(path);
-      let content = readFileSync(filePath, 'utf-8');
-      const applied: Array<{
-        index: number;
-        replaced: number;
-        replaceAll: boolean;
-      }> = [];
-
-      for (let index = 0; index < hunks.length; index += 1) {
-        const hunk = hunks[index];
-        if (!hunk || !hunk.oldText) {
-          return `Error: hunks[${index}] oldText must not be empty`;
-        }
-
-        const matches = content.split(hunk.oldText).length - 1;
-        if (matches === 0) {
-          return `Error: patch hunk ${index} not found in ${filePath}`;
-        }
-        if (typeof hunk.expectedOccurrences === 'number' && matches !== hunk.expectedOccurrences) {
-          return `Error: patch hunk ${index} expected ${hunk.expectedOccurrences} matches but found ${matches} in ${filePath}`;
-        }
-
-        const replaceAll = Boolean(hunk.replaceAll);
-        content = replaceAll
-          ? content.split(hunk.oldText).join(hunk.newText)
-          : content.replace(hunk.oldText, hunk.newText);
-
-        applied.push({
-          index,
-          replaced: replaceAll ? matches : 1,
-          replaceAll,
-        });
-      }
-
-      writeFileSync(filePath, content, 'utf-8');
-      return JSON.stringify({
-        ok: true,
-        path: filePath,
-        hunks: applied,
-      });
-    } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
-    }
-  },
-  {
-    name: 'apply_file_patch',
-    description: '用一组严格的文本 patch 更新文件。每个 hunk 都要求 oldText 精确命中；可设置 expectedOccurrences 防止文件漂移时误改。适合像 Claude Code/Codex 一样做最小补丁式更新。如果补丁修改的是结构化文件，完成后应继续调用 validate_structured_file。',
-    schema: z.object({
-      path: z.string().describe('目标文件路径'),
-      hunks: z.array(z.object({
-        oldText: z.string().describe('要精确匹配的原始文本块'),
-        newText: z.string().describe('替换后的新文本块'),
-        replaceAll: z.boolean().optional().describe('是否替换全部匹配；默认 false'),
-        expectedOccurrences: z.number().int().positive().optional().describe('期望匹配次数；若实际不符则直接报错'),
-      })).min(1).describe('按顺序应用的一组文本 patch'),
-    }),
-  },
-);
-
-export const applyUnifiedPatchTool = tool(
-  async ({ patch, cwd, strip, dryRun }: {
-    patch: string;
-    cwd?: string;
-    strip?: number;
-    dryRun?: boolean;
-  }) => {
-    let tempDir: string | null = null;
-    try {
-      const patchText = patch.trim();
-      if (!patchText) {
-        return 'Error: patch must not be empty';
-      }
-
-      const targetDir = cwd ? resolveUserPath(cwd) : config.workdir;
-      const targetStat = tryStat(targetDir);
-      if (!targetStat?.isDirectory()) {
-        return `Error: patch cwd must be an existing directory: ${targetDir}`;
-      }
-
-      tempDir = mkdtempSync(resolve(tmpdir(), 'pinpawo-patch-'));
-      const patchFile = resolve(tempDir, 'change.patch');
-      writeFileSync(patchFile, patchText.endsWith('\n') ? patchText : `${patchText}\n`, 'utf-8');
-
-      const patchArgs = [
-        '--batch',
-        '--forward',
-        `-p${Math.max(0, strip ?? 0)}`,
-        '-i',
-        patchFile,
-        '-d',
-        targetDir,
-      ];
-      if (dryRun) {
-        patchArgs.unshift('--dry-run');
-      }
-
-      const output = execFileSync('patch', patchArgs, {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      return JSON.stringify({
-        ok: true,
-        cwd: targetDir,
-        strip: Math.max(0, strip ?? 0),
-        dryRun: Boolean(dryRun),
-        output: output.trim() || null,
-      });
-    } catch (err) {
-      const message = err instanceof Error
-        ? ('stderr' in err && typeof (err as { stderr?: unknown }).stderr === 'string'
-          ? (err as { stderr: string }).stderr.trim() || err.message
-          : err.message)
-        : String(err);
-      return `Error: ${message}`;
-    } finally {
-      if (tempDir) {
-        rmSync(tempDir, { recursive: true, force: true });
-      }
-    }
-  },
-  {
-    name: 'apply_unified_patch',
-    description: '应用 unified diff / patch 到一个目录。适合多文件或更复杂的块级修改。默认在当前 workdir 执行 patch，可传 cwd 指定目标目录；可传 strip 控制 -p 层级，传 dryRun=true 先验证不落盘。若 patch 涉及 JSON、manifest.json、package.json、tsconfig.json 等结构化文件，应用后应继续调用 validate_structured_file 检查结果。',
-    schema: z.object({
-      patch: z.string().describe('unified diff / patch 文本'),
-      cwd: z.string().optional().describe('应用 patch 的目标目录；默认当前 workdir'),
-      strip: z.number().int().min(0).optional().describe('传给 patch 的 -p 层级；默认 0'),
-      dryRun: z.boolean().optional().describe('是否只做 dry-run 校验，不实际写入'),
+      patch: z.string().describe('完整的 V4A patch 文本，必须以 *** Begin Patch 开头、*** End Patch 结尾'),
     }),
   },
 );
@@ -750,100 +656,45 @@ export const fileOperationMetadata: Record<string, ToolkitOperationMetadata> = {
       );
     },
   },
-  update_file: {
-    title: '改文件',
-    summarizeInput: (input) => {
-      const record = readRecord(input);
-      const target = readString(record, 'path');
-      if (!target) return null;
-      const safePath = resolveUserPath(target);
-      return {
-        target: safePath,
-        summary: readBoolean(record, 'replaceAll') ? 'replace_all' : 'replace',
-        details: {
-          find: readString(record, 'find'),
-          replace: readString(record, 'replace') ? '[provided]' : undefined,
-          before: readFileContentPreview(safePath),
-        },
-      };
-    },
-    summarizeOutput: (output) => {
-      const record = readJsonRecord(output);
-      return mergeOperationOutputSummary(
-        readString(record, 'path'),
-        {
-          replaced: readNumber(record, 'replaced'),
-          replaceAll: readBoolean(record, 'replaceAll'),
-        },
-      );
-    },
-  },
-  multi_edit: {
-    title: '批量修改',
-    summarizeInput: (input) => {
-      const record = readRecord(input);
-      const target = readString(record, 'path');
-      const rawEdits = record?.edits;
-      const edits = Array.isArray(rawEdits) ? rawEdits.length : undefined;
-      if (!target) return null;
-      const safePath = resolveUserPath(target);
-      return {
-        target: safePath,
-        details: {
-          edits,
-          before: readFileContentPreview(safePath),
-        },
-      };
-    },
-    summarizeOutput: (output) => {
-      const record = readJsonRecord(output);
-      return mergeOperationOutputSummary(
-        readString(record, 'path'),
-        { edits: readNumber(record, 'edits') },
-      );
-    },
-  },
-  apply_file_patch: {
+  apply_patch: {
     title: '应用补丁',
     summarizeInput: (input) => {
       const record = readRecord(input);
-      const target = readString(record, 'path');
-      const rawHunks = record?.hunks;
-      const hunks = Array.isArray(rawHunks) ? rawHunks.length : undefined;
-      if (!target) return null;
-      const safePath = resolveUserPath(target);
+      const patch = readString(record, 'patch');
+      if (!patch) return null;
+      let files: Array<{ path: string; type: string }> = [];
+      let target: string | undefined;
+      try {
+        const operations = parsePatch(patch);
+        files = operations.map((operation) => ({ path: operation.path, type: operation.type }));
+        target = files[0]?.path;
+      } catch {
+        // Unparseable patch still gets a raw preview below.
+      }
       return {
-        target: safePath,
+        target,
+        summary: files.length > 1 ? `${files.length.toString()} files` : files[0]?.type,
         details: {
-          hunks,
-          before: readFileContentPreview(safePath),
+          files: files.length > 0 ? files : undefined,
+          patch: truncateForOperationDetails(patch),
         },
       };
     },
     summarizeOutput: (output) => {
       const record = readJsonRecord(output);
-      return mergeOperationOutputSummary(
-        readString(record, 'path'),
-        { hunks: readNumber(record, 'hunks') },
-      );
-    },
-  },
-  apply_unified_patch: {
-    title: '应用 diff',
-    summarizeInput: (input) => {
-      const record = readRecord(input);
-      const target = readString(record, 'cwd');
-      const patch = readString(record, 'patch');
+      const rawFiles = record?.files;
+      if (!Array.isArray(rawFiles)) return null;
+      const files = rawFiles.filter((file): file is Record<string, unknown> => Boolean(file) && typeof file === 'object');
+      const target = files.map((file) => file.path).find((path): path is string => typeof path === 'string');
+      if (!target) return null;
       return {
         target,
         details: {
-          strip: readNumber(record, 'strip') ?? 0,
-          dryRun: readBoolean(record, 'dryRun') ?? false,
-          patch: patch ? truncateForOperationDetails(patch) : undefined,
+          files,
+          after: files.length === 1 ? readFileContentPreview(target) : undefined,
         },
       };
     },
-    summarizeOutput: (output) => okOutputPathSummary(output, 'cwd'),
   },
   validate_structured_file: {
     title: '验证结构',

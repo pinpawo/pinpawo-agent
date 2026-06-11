@@ -173,7 +173,7 @@ function renderIndexJs(params: {
       instructions: [
         ${JSON.stringify(`你负责：${params.task}`)},
         ${JSON.stringify('先把用户目标拆成明确步骤，再决定要读取、写入或更新哪些文件。')},
-        ${JSON.stringify('修改文件前先确认目录和现有内容；可读文本优先使用 view_file_chunk；PDF、Word、表格、图片等非文本文件才用 read_file；编辑优先使用 apply_file_patch、update_file，只有需要整体重写时才用 write_file。')},
+        ${JSON.stringify('修改文件前先确认目录和现有内容；可读文本优先使用 view_file_chunk；PDF、Word、表格、图片等非文本文件才用 read_file；编辑优先使用 apply_patch，只有需要整体重写时才用 write_file。')},
         ${JSON.stringify('如果需要新增或调整 capability 插件文件，保持 manifest.json 的 id 与这里导出的 name 完全一致。')},
         ${JSON.stringify('完成后总结产出的文件、验证结果，以及用户接下来需要手动确认或补充的内容。')},
       ],

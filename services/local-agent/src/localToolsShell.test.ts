@@ -64,6 +64,16 @@ test('runShellTool separates stderr and reports exit codes', async () => {
   );
 });
 
+test('runShellTool truncates stdout larger than the old 64KB buffer limit', async () => {
+  const output = String(await runShellTool.invoke({
+    command: 'node -e "process.stdout.write(\'x\'.repeat(70 * 1024))"',
+  }));
+
+  assert.doesNotMatch(output, /ENOBUFS/);
+  assert.match(output, /^x+/);
+  assert.match(output, /\[\.\.\. truncated \d+ chars \.\.\.\]/);
+});
+
 test('runShellTool times out long-running commands', async () => {
   const output = String(await runShellTool.invoke({
     command: 'sleep 5',

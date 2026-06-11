@@ -6,6 +6,7 @@ import {
   formatOperationResult,
   formatOperationStart,
   formatStudioProgressEvent,
+  formatSubagentMessage,
   formatSystemNoticeEvent,
   getOperationKey,
 } from './tui/render/eventText';
@@ -67,6 +68,70 @@ test('formats completed and failed operation summaries from event fields', () =>
       },
     }),
     '执行命令：失败 · exit 1',
+  );
+});
+
+test('formats operation raw previews for trusted local events', () => {
+  assert.equal(
+    formatOperationResult({
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        kind: 'browser.read_page',
+        title: '读取页面',
+        summary: 'example.com',
+      },
+      raw: {
+        output: 'line 1\nline 2\nline 3',
+      },
+    }),
+    '读取页面：example.com\nraw 输出: line 1 line 2 line 3',
+  );
+  assert.equal(
+    formatOperationResult({
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'failed',
+      operation: {
+        kind: 'bash.run_shell',
+        title: '执行命令',
+      },
+      raw: {
+        error: new Error('permission denied'),
+      },
+    }),
+    '执行命令：失败\nraw 错误: permission denied',
+  );
+  assert.equal(
+    formatOperationResult({
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        kind: 'runtime.custom',
+        title: '自定义工具',
+      },
+      raw: {
+        input: { query: 'SpaceX 上市' },
+      },
+    }),
+    '自定义工具：已完成\nraw 输入: {"query":"SpaceX 上市"}',
+  );
+});
+
+test('formats subagent text into readable paragraphs', () => {
+  assert.equal(
+    formatSubagentMessage(
+      '我先打开页面。现在搜索结果出来了，我会查看第一个帖子。然后继续收集评论。最后汇总。'.repeat(2),
+    )?.startsWith('[subagent]\n'),
+    true,
+  );
+  assert.match(
+    formatSubagentMessage(
+      '我先打开页面。现在搜索结果出来了，我会查看第一个帖子。然后继续收集评论。最后汇总。'.repeat(2),
+    ) ?? '',
+    /\n.+\n.+/,
   );
 });
 

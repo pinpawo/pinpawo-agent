@@ -91,6 +91,9 @@ export const TUI_TEXT = {
   operationFailed: '失败',
   operationInterrupted: '已中断',
   operationCompleted: '已完成',
+  operationRawInput: 'raw 输入',
+  operationRawOutput: 'raw 输出',
+  operationRawError: 'raw 错误',
   studioProgressPlanSet: (taskCount: number) => `[studio] plan 设定：${taskCount} 项`,
   studioProgressDispatchStarted: (taskIndex: string | number, petId: string) =>
     `[studio] dispatch[#${taskIndex}] → pet:${petId}`,

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import type { IncomingMessage } from 'node:http';
 import test from 'node:test';
 import {
-  appendLocalServerAuthToken,
   buildLocalServerAuthHeaders,
   isAllowedLocalServerOrigin,
   isAuthorizedLocalServerRequest,
@@ -25,18 +24,18 @@ function makeReq(options: {
   } as IncomingMessage;
 }
 
-test('local server auth accepts bearer, query, and websocket protocol tokens', () => {
+test('local server auth accepts only bearer tokens', () => {
   assert.equal(
     isAuthorizedLocalServerRequest(makeReq({ authorization: 'Bearer secret' }), 'secret'),
     true,
   );
   assert.equal(
     isAuthorizedLocalServerRequest(makeReq({ url: '/?token=secret' }), 'secret'),
-    true,
+    false,
   );
   assert.equal(
     isAuthorizedLocalServerRequest(makeReq({ protocol: 'chat, pinpawo-token.secret' }), 'secret'),
-    true,
+    false,
   );
   assert.equal(
     isAuthorizedLocalServerRequest(makeReq({ authorization: 'Bearer wrong' }), 'secret'),
@@ -69,13 +68,9 @@ test('local server origin check permits only same-port loopback origins', () => 
   );
 });
 
-test('local server client auth helpers format headers and websocket urls', () => {
+test('local server client auth helper formats bearer headers', () => {
   assert.deepEqual(buildLocalServerAuthHeaders('secret'), {
     Authorization: 'Bearer secret',
   });
   assert.deepEqual(buildLocalServerAuthHeaders(null), {});
-  assert.equal(
-    appendLocalServerAuthToken('ws://127.0.0.1:3210', 'secret'),
-    'ws://127.0.0.1:3210/?token=secret',
-  );
 });

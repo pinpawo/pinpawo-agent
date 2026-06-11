@@ -101,7 +101,7 @@ async function installCommand(sourceArg: string, options: CapabilityCommandOptio
     targetDir,
     mode: options.link ? 'link' : 'copy',
     warning,
-    nextStep: 'Restart the agent or call GET http://127.0.0.1:3210/capabilities/rescan to load it in a running agent.',
+    nextStep: 'Restart the agent, or use the desktop settings refresh button to rescan capabilities in a running agent.',
   }, null, 2) + '\n');
 }
 

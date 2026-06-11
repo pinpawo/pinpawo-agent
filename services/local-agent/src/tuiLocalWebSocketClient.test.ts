@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import { WebSocket } from 'ws';
+import { WebSocket, type ClientOptions } from 'ws';
 import {
   TuiLocalWebSocketClient,
   type TuiLocalWebSocketClientHandlers,
@@ -31,13 +31,15 @@ class FakeWebSocket extends EventEmitter {
 test('TuiLocalWebSocketClient connects, sends messages, and dispatches socket events', () => {
   const sockets: FakeWebSocket[] = [];
   const urls: string[] = [];
+  const wsOptions: ClientOptions[] = [];
   const events: string[] = [];
   const client = new TuiLocalWebSocketClient({
     port: 3210,
     handlers: createHandlers(events),
     tokenProvider: () => 'secret',
-    webSocketFactory: (url) => {
+    webSocketFactory: (url, options) => {
       urls.push(url);
+      wsOptions.push(options);
       const ws = new FakeWebSocket();
       sockets.push(ws);
       return ws as unknown as WebSocket;
@@ -46,7 +48,8 @@ test('TuiLocalWebSocketClient connects, sends messages, and dispatches socket ev
 
   client.connect();
 
-  assert.deepEqual(urls, ['ws://127.0.0.1:3210/?token=secret']);
+  assert.deepEqual(urls, ['ws://127.0.0.1:3210']);
+  assert.deepEqual(wsOptions.map((item) => item.headers), [{ Authorization: 'Bearer secret' }]);
   assert.equal(client.hasSocket(), true);
   assert.equal(client.isConnected(), false);
   assert.equal(client.send({ type: 'new_session' }), false);

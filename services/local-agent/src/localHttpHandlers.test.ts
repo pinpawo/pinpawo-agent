@@ -37,7 +37,8 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
   const deps = {} as LocalServerDeps;
   const listRes = makeRes();
 
-  assert.equal(handleLocalHttpRequest(makeReq('/sessions'), listRes, deps, {
+  assert.equal(handleLocalHttpRequest(makeReq('/sessions', 'Bearer secret'), listRes, deps, {
+    authToken: 'secret',
     loadHistory: async () => [],
     listSessions: async () => [{
       id: 'pet-a:one',
@@ -66,7 +67,8 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
   });
 
   const resumeRes = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/sessions/resume?sessionId=pet-a%3Aone'), resumeRes, deps, {
+  assert.equal(handleLocalHttpRequest(makeReq('/sessions/resume?sessionId=pet-a%3Aone', 'Bearer secret'), resumeRes, deps, {
+    authToken: 'secret',
     loadHistory: async () => [],
     listSessions: async () => [],
     resumeSession: async (sessionId) => ({
@@ -130,7 +132,7 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
   });
 
   const res = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/health'), res, {
+  assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), res, {
     actorId: 'pet-a',
     actorName: '羊',
     getStats: () => ({
@@ -142,6 +144,7 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
       lastRunOk: null,
     }),
   } as LocalServerDeps, {
+    authToken: 'secret',
     loadHistory: async () => [],
     listSessions: async () => [],
     resumeSession: async () => {

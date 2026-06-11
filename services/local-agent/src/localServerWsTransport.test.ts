@@ -97,10 +97,18 @@ test('local websocket transport enforces token and Origin during upgrade', async
 
   try {
     await assert.rejects(openWebSocket(`ws://127.0.0.1:${port}`));
-    await assert.rejects(openWebSocket(`ws://127.0.0.1:${port}/?token=secret`, {
-      headers: { Origin: 'https://evil.example' },
+    await assert.rejects(openWebSocket(`ws://127.0.0.1:${port}/?token=secret`));
+    await assert.rejects(openWebSocket(`ws://127.0.0.1:${port}`, {
+      headers: {
+        Authorization: 'Bearer secret',
+        Origin: 'https://evil.example',
+      },
     }));
-    const ws = await openWebSocket(`ws://127.0.0.1:${port}/?token=secret`);
+    const ws = await openWebSocket(`ws://127.0.0.1:${port}`, {
+      headers: {
+        Authorization: 'Bearer secret',
+      },
+    });
     ws.close();
   } finally {
     await closeServer(server);

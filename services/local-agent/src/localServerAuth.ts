@@ -7,10 +7,6 @@ import { dirname, resolve } from 'node:path';
 const TOKEN_BYTES = 32;
 const TOKEN_FILE = resolve(homedir(), '.pinpawo', 'local-server-token');
 
-export function localServerAuthTokenPath() {
-  return TOKEN_FILE;
-}
-
 export function createLocalServerAuthToken() {
   return randomBytes(TOKEN_BYTES).toString('base64url');
 }
@@ -44,17 +40,8 @@ export function buildLocalServerAuthHeaders(token: string | null | undefined): R
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-export function appendLocalServerAuthToken(url: string, token: string | null | undefined) {
-  if (!token) return url;
-  const parsed = new URL(url);
-  parsed.searchParams.set('token', token);
-  return parsed.toString();
-}
-
 export function isAuthorizedLocalServerRequest(req: IncomingMessage, expectedToken: string) {
-  const provided = readBearerToken(req)
-    ?? readQueryToken(req)
-    ?? readWebSocketProtocolToken(req);
+  const provided = readBearerToken(req);
   return typeof provided === 'string' && safeTokenEqual(provided, expectedToken);
 }
 
@@ -86,29 +73,6 @@ function readBearerToken(req: IncomingMessage) {
   if (Array.isArray(authorization)) return null;
   const match = authorization?.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() || null;
-}
-
-function readQueryToken(req: IncomingMessage) {
-  try {
-    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
-    return url.searchParams.get('token')?.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-function readWebSocketProtocolToken(req: IncomingMessage) {
-  const protocol = req.headers['sec-websocket-protocol'];
-  if (Array.isArray(protocol)) return null;
-  if (!protocol) return null;
-
-  for (const item of protocol.split(',')) {
-    const value = item.trim();
-    if (value.startsWith('pinpawo-token.')) {
-      return value.slice('pinpawo-token.'.length).trim() || null;
-    }
-  }
-  return null;
 }
 
 function safeTokenEqual(provided: string, expected: string) {

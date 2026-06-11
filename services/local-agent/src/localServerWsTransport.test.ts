@@ -68,7 +68,18 @@ test('local websocket transport dispatches typed client messages and pong', asyn
   dispatchLocalServerWebSocketMessage(ws, '{bad json', handlers);
 
   await assertEventually(() => {
-    assert.deepEqual(sent.map((item) => JSON.parse(item)), [{ type: 'pong' }]);
+    assert.deepEqual(sent.map((item) => JSON.parse(item)), [
+      { type: 'pong' },
+      {
+        type: 'event',
+        requestId: 'chat-old',
+        event: {
+          type: 'error',
+          requestId: 'chat-old',
+          message: '客户端消息协议不兼容或格式无效，请升级客户端后重试。',
+        },
+      },
+    ]);
     assert.deepEqual(seen, [
       'chat:chat-1:hi',
       'studio:studio-1:plan',

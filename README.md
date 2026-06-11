@@ -11,6 +11,35 @@ Open-source agent components for PinPawo.
 
 The private PinPawo app/backend repository keeps the mobile app, hosted API, Hasura metadata, product logic, and internal docs.
 
+## 5-Minute Quick Start
+
+Requires Node.js 20.x.
+
+```bash
+npm install -g pinpawo-local-agent
+pinpawo-agent init
+pinpawo-agent login
+pinpawo-agent capability validate ~/.pinpawo/capabilities/hello-pinpawo
+pinpawo-agent tui
+```
+
+Use `pinpawo-agent init` first even if you plan to log in interactively. It creates `~/.pinpawo/.env`, `~/.pinpawo/capabilities/`, and a minimal `hello-pinpawo` capability that can be validated immediately. If you do not want a global install, use the same commands through `npx`:
+
+```bash
+npx pinpawo-local-agent init
+npx pinpawo-local-agent login
+npx pinpawo-local-agent tui
+```
+
+For local development from this repository:
+
+```bash
+npm install
+npm run build
+node services/local-agent/dist/index.js init --dir /tmp/pinpawo-agent-demo
+node services/local-agent/dist/index.js capability validate /tmp/pinpawo-agent-demo/capabilities/hello-pinpawo
+```
+
 ## Development
 
 ```bash
@@ -34,12 +63,13 @@ npm run tui
 - `@pinpawo/pet-agent`
 - `pinpawo-local-agent`
 
-## Quick Install
+## Package Install
 
 After publishing the local-agent package to npm:
 
 ```bash
 npm install -g pinpawo-local-agent
+pinpawo-agent init
 pinpawo-agent login
 pinpawo-agent tui
 ```

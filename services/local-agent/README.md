@@ -8,18 +8,36 @@ Requires Node.js 20.x.
 
 ```bash
 npm install -g pinpawo-local-agent
+pinpawo-agent init
 pinpawo-agent login
+pinpawo-agent capability validate ~/.pinpawo/capabilities/hello-pinpawo
 pinpawo-agent tui
 ```
 
 For one-off usage without a global install:
 
 ```bash
+npx pinpawo-local-agent init
 npx pinpawo-local-agent login
 npx pinpawo-local-agent tui
 ```
 
-Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Browser automation uses the optional bundled browser backend when available, or an externally installed `agent-browser` / `playwright-core`.
+`pinpawo-agent init` creates the quick-start scaffold:
+
+- `~/.pinpawo/.env` with all supported environment keys.
+- `~/.pinpawo/capabilities/` for user capabilities.
+- `~/.pinpawo/capabilities/hello-pinpawo/` as a minimal capability that validates and loads.
+
+Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Use `pinpawo-agent login` for interactive credential setup, or edit `~/.pinpawo/.env` directly. Browser automation uses the optional bundled browser backend when available, or an externally installed `agent-browser` / `playwright-core`.
+
+For a local repository smoke test:
+
+```bash
+npm install
+npm run build
+node services/local-agent/dist/index.js init --dir /tmp/pinpawo-agent-demo
+node services/local-agent/dist/index.js capability validate /tmp/pinpawo-agent-demo/capabilities/hello-pinpawo
+```
 
 ## External Plugins
 
@@ -57,6 +75,7 @@ export default {
 ## Commands
 
 ```bash
+pinpawo-agent init
 pinpawo-agent login
 pinpawo-agent actor
 pinpawo-agent run

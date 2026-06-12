@@ -3,11 +3,23 @@ import { config } from '../../config';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { isAbsolute, resolve } from 'node:path';
-import { execFile, spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 const nodeRequire = createRequire(import.meta.url);
+
+async function execLoginShellLine(command: string, timeoutMs = 3_000): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('/bin/zsh', ['-lc', command], {
+      timeout: timeoutMs,
+      encoding: 'utf8',
+    });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
 
 // ── Playwright types ───────────────────────────────────────────────────────────
 type PlaywrightCore = typeof import('playwright-core');
@@ -79,7 +91,7 @@ async function detectBackend(): Promise<BrowserBackend> {
   }
 
   if (forced === 'agent-browser') {
-    if (!canUseAgentBrowser()) {
+    if (!(await canUseAgentBrowser())) {
       throw new Error(
         'Browser backend forced to "agent-browser" but the binary was not found.\n' +
           '  Install an external agent-browser binary, then ensure it is in PATH or a standard install location.',
@@ -96,7 +108,7 @@ async function detectBackend(): Promise<BrowserBackend> {
     return 'agent-browser';
   }
   if (await canUsePlaywright()) { console.log('[browser] using playwright (auto)'); return 'playwright'; }
-  if (canUseAgentBrowser()) { console.log('[browser] using agent-browser (auto)'); return 'agent-browser'; }
+  if (await canUseAgentBrowser()) { console.log('[browser] using agent-browser (auto)'); return 'agent-browser'; }
   throw new Error(
       'No browser backend available.\n' +
       '  Option 1 — Playwright + Chrome:\n' +
@@ -106,7 +118,7 @@ async function detectBackend(): Promise<BrowserBackend> {
   );
 }
 
-function resolvePlaywrightSearchRoots(): string[] {
+async function resolvePlaywrightSearchRoots(): Promise<string[]> {
   const home = homedir();
   const roots = [
     process.env.PINPAWO_PLAYWRIGHT_CORE_PATH?.trim() || '',
@@ -117,10 +129,7 @@ function resolvePlaywrightSearchRoots(): string[] {
   ].filter(Boolean);
 
   // npm root -g via login shell
-  const npmRoot = spawnSync('/bin/zsh', ['-lc', 'npm root -g'], {
-    timeout: 3_000,
-    encoding: 'utf8',
-  }).stdout?.trim();
+  const npmRoot = await execLoginShellLine('npm root -g');
   if (npmRoot) {
     roots.push(npmRoot);
   }
@@ -144,7 +153,7 @@ function resolvePlaywrightSearchRoots(): string[] {
   return [...new Set(roots)];
 }
 
-function resolvePlaywrightCorePath(): string | null {
+async function resolvePlaywrightCorePath(): Promise<string | null> {
   const override = process.env.PINPAWO_PLAYWRIGHT_CORE_PATH?.trim();
   if (override && existsSync(override)) {
     return override;
@@ -156,7 +165,7 @@ function resolvePlaywrightCorePath(): string | null {
     // Optional package dependency not installed; fall back to global search roots.
   }
 
-  for (const root of resolvePlaywrightSearchRoots()) {
+  for (const root of await resolvePlaywrightSearchRoots()) {
     try {
       const resolved = nodeRequire.resolve('playwright-core', { paths: [root] });
       if (resolved) {
@@ -170,8 +179,8 @@ function resolvePlaywrightCorePath(): string | null {
   return null;
 }
 
-function loadPlaywrightCore(): PlaywrightCore | null {
-  const resolved = resolvePlaywrightCorePath();
+async function loadPlaywrightCore(): Promise<PlaywrightCore | null> {
+  const resolved = await resolvePlaywrightCorePath();
   if (!resolved) {
     return null;
   }
@@ -185,7 +194,7 @@ function loadPlaywrightCore(): PlaywrightCore | null {
 async function canUsePlaywright(): Promise<boolean> {
   const execPath =
     process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
-  return loadPlaywrightCore() !== null && existsSync(execPath);
+  return await loadPlaywrightCore() !== null && existsSync(execPath);
 }
 
 let _agentBrowserBinary: string | null | undefined;
@@ -220,7 +229,7 @@ function resolveAgentBrowserCandidates(): string[] {
   return [...new Set(candidates)];
 }
 
-function getAgentBrowserBinary(): string | null {
+async function getAgentBrowserBinary(): Promise<string | null> {
   if (_agentBrowserBinary !== undefined) return _agentBrowserBinary;
 
   for (const p of resolveAgentBrowserCandidates()) {
@@ -228,16 +237,13 @@ function getAgentBrowserBinary(): string | null {
   }
 
   // Login shell PATH
-  const result = spawnSync('/bin/zsh', ['-lc', 'which agent-browser'], {
-    timeout: 3_000, encoding: 'utf8',
-  });
-  const found = result.stdout?.trim();
+  const found = await execLoginShellLine('command -v agent-browser');
   _agentBrowserBinary = found && existsSync(found) ? found : null;
   return _agentBrowserBinary;
 }
 
-function canUseAgentBrowser(): boolean {
-  return getAgentBrowserBinary() !== null;
+async function canUseAgentBrowser(): Promise<boolean> {
+  return await getAgentBrowserBinary() !== null;
 }
 
 // ── Open options ──────────────────────────────────────────────────────────────
@@ -292,7 +298,7 @@ class PlaywrightBrowserSession {
     if (this.page) return this.page;
     await closeAgentBrowserSession(sessionPath);
 
-    const playwrightCore = loadPlaywrightCore();
+    const playwrightCore = await loadPlaywrightCore();
     if (!playwrightCore) {
       throw new Error(
         'playwright-core not found. Install external playwright-core or set PINPAWO_PLAYWRIGHT_CORE_PATH.',
@@ -491,7 +497,7 @@ async function execAgentBrowser(binary: string, sessionPath: string, args: strin
 }
 
 async function canReuseAgentBrowserSession(sessionPath: string): Promise<boolean> {
-  const binary = getAgentBrowserBinary();
+  const binary = await getAgentBrowserBinary();
   if (!binary) return false;
   return execAgentBrowser(binary, sessionPath, ['snapshot'], 5_000)
     .then(() => true)
@@ -499,7 +505,7 @@ async function canReuseAgentBrowserSession(sessionPath: string): Promise<boolean
 }
 
 async function closeAgentBrowserSession(sessionPath: string): Promise<void> {
-  const binary = getAgentBrowserBinary();
+  const binary = await getAgentBrowserBinary();
   if (!binary) return;
   await execAgentBrowser(binary, sessionPath, ['close'], 5_000).catch(() => {});
   if (readPersistedSession() === sessionPath) {
@@ -653,11 +659,17 @@ export class BrowserSession {
   private ensureImpl(): Promise<BrowserImpl> {
     if (this.impl) return Promise.resolve(this.impl);
     if (!this.initPromise) {
-      this.initPromise = detectBackend().then((backend) => {
+      this.initPromise = detectBackend().then(async (backend) => {
+        const agentBrowserBinary = backend === 'agent-browser'
+          ? await getAgentBrowserBinary()
+          : null;
+        if (backend === 'agent-browser' && !agentBrowserBinary) {
+          throw new Error('agent-browser backend selected but no binary was found');
+        }
         this.impl =
           backend === 'playwright'
             ? new PlaywrightBrowserSession()
-            : new AgentBrowserSession(getAgentBrowserBinary()!);
+            : new AgentBrowserSession(agentBrowserBinary!);
         return this.impl;
       }).catch((error) => {
         this.initPromise = null;
@@ -715,7 +727,7 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
     };
   }
   if (configured === 'agent-browser') {
-    const binary = getAgentBrowserBinary();
+    const binary = await getAgentBrowserBinary();
     if (binary) return { mode: 'agent-browser', detail: binary, configured };
     return {
       mode: 'none',
@@ -727,7 +739,7 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
   // auto-detect
   const persistedAgentBrowserSession = readPersistedSession();
   if (persistedAgentBrowserSession && await canReuseAgentBrowserSession(persistedAgentBrowserSession)) {
-    const binary = getAgentBrowserBinary();
+    const binary = await getAgentBrowserBinary();
     return {
       mode: 'agent-browser',
       detail: binary ? `${binary} (existing session)` : 'existing agent-browser session',
@@ -737,7 +749,7 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
   if (await canUsePlaywright()) {
     return { mode: 'playwright', detail: chromeExecPath, configured };
   }
-  const binary = getAgentBrowserBinary();
+  const binary = await getAgentBrowserBinary();
   if (binary) return { mode: 'agent-browser', detail: binary, configured };
   return { mode: 'none', detail: 'no external browser runtime available', configured };
 }
@@ -761,7 +773,7 @@ export async function detectBrowserEnvironment(): Promise<BrowserEnvironment> {
     configured: fromEnv || fromConfig || 'auto',
     chromePath,
     chromeAvailable: existsSync(chromePath),
-    playwrightCorePath: resolvePlaywrightCorePath(),
-    agentBrowserPath: getAgentBrowserBinary(),
+    playwrightCorePath: await resolvePlaywrightCorePath(),
+    agentBrowserPath: await getAgentBrowserBinary(),
   };
 }

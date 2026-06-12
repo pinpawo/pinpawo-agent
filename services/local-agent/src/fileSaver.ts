@@ -11,14 +11,14 @@ import { basename, dirname, extname, join } from 'node:path';
 import { MemorySaver } from '@langchain/langgraph-checkpoint';
 
 type MemorySaverData = {
-  storage: Record<string, Record<string, Record<string, [string, string, string | undefined]>>>;
+  storage: Record<string, Record<string, Record<string, [string, string, string | null | undefined]>>>;
   writes: Record<string, Record<string, [string, string, string]>>;
 };
 
 type ThreadShardData = {
   threadId: string;
   bucket: string;
-  storage: Record<string, Record<string, [string, string, string | undefined]>>;
+  storage: Record<string, Record<string, [string, string, string | null | undefined]>>;
   writes: Record<string, Record<string, [string, string, string]>>;
 };
 
@@ -41,7 +41,9 @@ function parseWriteThreadId(key: string): string | null {
   return parseWriteKey(key)?.threadId ?? null;
 }
 
-function parseWriteKey(key: string): { threadId: string; checkpointId: string } | null {
+function parseWriteKey(
+  key: string,
+): { threadId: string; checkpointNamespace: string; checkpointId: string } | null {
   try {
     const parsed = JSON.parse(key) as unknown;
     if (
@@ -49,7 +51,11 @@ function parseWriteKey(key: string): { threadId: string; checkpointId: string } 
       && typeof parsed[0] === 'string' && parsed[0]
       && typeof parsed[2] === 'string'
     ) {
-      return { threadId: parsed[0], checkpointId: parsed[2] };
+      return {
+        threadId: parsed[0],
+        checkpointNamespace: typeof parsed[1] === 'string' ? parsed[1] : '',
+        checkpointId: parsed[2],
+      };
     }
   } catch {
     // ignore malformed keys
@@ -100,7 +106,7 @@ export class FileSaver extends MemorySaver {
     this.shardRootDir = dirname(this.filePath);
     this.shardExt = extname(this.filePath) || '.json';
     this.shardBaseName = basename(this.filePath, this.shardExt);
-    this.load();
+    this.dirty = this.load();
     this.startAutoFlush();
   }
 
@@ -156,43 +162,58 @@ export class FileSaver extends MemorySaver {
    * Keep only the most recent `maxCheckpointsPerNamespace` checkpoints per
    * namespace for a thread, dropping older ones and their orphaned writes.
    *
-   * Insertion order in `storage[threadId][ns]` matches the order LangGraph
-   * wrote the checkpoints, and resume only ever walks back a short parent
-   * chain, so trimming the head of each namespace is safe.
+   * Checkpoint ids are uuid6 strings, so lexicographic ordering matches
+   * MemorySaver's "latest checkpoint" selection. Resume only ever walks back a
+   * short parent chain, so trimming the oldest ids in each namespace is safe.
    */
   private pruneThreadCheckpoints(threadId: unknown) {
     if (typeof threadId !== 'string' || !threadId || this.maxCheckpointsPerNamespace <= 0) {
-      return;
+      return false;
     }
     const namespaces = this.storage[threadId];
     if (!namespaces) {
-      return;
+      return false;
     }
 
-    const removedCheckpointIds = new Set<string>();
-    for (const checkpoints of Object.values(namespaces)) {
-      const checkpointIds = Object.keys(checkpoints);
+    const removedCheckpointIdsByNamespace = new Map<string, Set<string>>();
+    for (const [namespace, checkpoints] of Object.entries(namespaces)) {
+      const checkpointIds = Object.keys(checkpoints).sort();
       const overflow = checkpointIds.length - this.maxCheckpointsPerNamespace;
       if (overflow <= 0) {
         continue;
       }
+      const removedCheckpointIds = new Set<string>();
       for (const checkpointId of checkpointIds.slice(0, overflow)) {
         delete checkpoints[checkpointId];
         removedCheckpointIds.add(checkpointId);
       }
+      removedCheckpointIdsByNamespace.set(namespace, removedCheckpointIds);
     }
 
-    if (removedCheckpointIds.size === 0) {
-      return;
+    if (removedCheckpointIdsByNamespace.size === 0) {
+      return false;
     }
     // Drop writes that belonged to the pruned checkpoints so they don't linger
     // in the store (and the shard file) after their checkpoint is gone.
     for (const outerKey of Object.keys(this.writes)) {
       const parsed = parseWriteKey(outerKey);
-      if (parsed?.threadId === threadId && removedCheckpointIds.has(parsed.checkpointId)) {
+      if (!parsed || parsed.threadId !== threadId) {
+        continue;
+      }
+      const removedCheckpointIds = removedCheckpointIdsByNamespace.get(parsed.checkpointNamespace);
+      if (removedCheckpointIds?.has(parsed.checkpointId)) {
         delete this.writes[outerKey];
       }
     }
+    return true;
+  }
+
+  private pruneLoadedThreads() {
+    let pruned = false;
+    for (const threadId of Object.keys(this.storage)) {
+      pruned = this.pruneThreadCheckpoints(threadId) || pruned;
+    }
+    return pruned;
   }
 
   private buildShardFilePath(bucket: string, threadId: string) {
@@ -207,8 +228,9 @@ export class FileSaver extends MemorySaver {
       return [];
     }
     const prefix = `${this.shardBaseName}.`;
+    const legacyFileName = basename(this.filePath);
     return readdirSync(this.shardRootDir)
-      .filter((name) => name.startsWith(prefix) && name.endsWith(this.shardExt))
+      .filter((name) => name !== legacyFileName && name.startsWith(prefix) && name.endsWith(this.shardExt))
       .map((name) => join(this.shardRootDir, name));
   }
 
@@ -226,7 +248,7 @@ export class FileSaver extends MemorySaver {
         this.storage[threadId][namespace][checkpointId] = [
           base64ToUint8(tuple[0]),
           base64ToUint8(tuple[1]),
-          tuple[2],
+          typeof tuple[2] === 'string' ? tuple[2] : undefined,
         ];
       }
     }
@@ -261,7 +283,7 @@ export class FileSaver extends MemorySaver {
           // ignore corrupt shard files
         }
       }
-      return;
+      return this.pruneLoadedThreads();
     }
 
     try {
@@ -284,9 +306,11 @@ export class FileSaver extends MemorySaver {
           writes: threadWrites,
         }, legacyDate);
       }
+      return this.pruneLoadedThreads();
     } catch {
       // No file or corrupt — start fresh
     }
+    return false;
   }
 
   flush() {
@@ -307,7 +331,6 @@ export class FileSaver extends MemorySaver {
         }
       }
 
-      const desiredFiles = new Map<string, string>();
       let anyThreadFailed = false;
 
       for (const threadId of threadIds) {
@@ -335,7 +358,6 @@ export class FileSaver extends MemorySaver {
         this.threadBuckets.set(threadId, bucket);
 
         const file = this.buildShardFilePath(bucket, threadId);
-        desiredFiles.set(threadId, file);
 
         // Serialize and write each thread independently so one oversized
         // conversation (e.g. exceeding V8's max string length) does not abort
@@ -380,7 +402,6 @@ export class FileSaver extends MemorySaver {
           this.knownShardFiles.set(threadId, file);
         } catch (err) {
           anyThreadFailed = true;
-          desiredFiles.delete(threadId);
           console.error(
             `[file-saver] failed to persist thread ${threadId}: `
             + `${err instanceof Error ? err.message : err}`,
@@ -388,7 +409,7 @@ export class FileSaver extends MemorySaver {
         }
       }
 
-      if (existsSync(this.filePath) && this.listShardFiles().length > 0) {
+      if (!anyThreadFailed && existsSync(this.filePath) && this.listShardFiles().length > 0) {
         unlinkSync(this.filePath);
       }
 

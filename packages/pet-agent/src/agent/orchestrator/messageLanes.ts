@@ -115,15 +115,27 @@ export function toolProtocolSafeMessages(messages: BaseMessage[]) {
 }
 
 /**
- * Filter messages by lane + turnId.
- * Subagent sees: unlaned messages + messages matching both lane and turnId.
+ * Filter messages by lane + turnId + delegationId.
+ * Subagent sees: unlaned messages + messages from its own delegation only.
+ * A continued delegation (limit_reached -> resume) reuses its delegationId, so it
+ * carries its own transcript back; a new task in the same lane gets a fresh
+ * delegationId and starts clean — conclusions cross task boundaries via
+ * turnDelegations/announces, transcripts don't.
+ * Lane messages without a delegationId (legacy checkpoints) are excluded.
  * For orchestration decisions, use mainConversationMessages() instead.
  */
-export function laneMessages(messages: BaseMessage[], lane: MessageLane, turnId: string) {
+export function laneMessages(
+  messages: BaseMessage[],
+  lane: MessageLane,
+  turnId: string,
+  delegationId: string,
+) {
   return toolProtocolSafeMessages(messages.filter((message) => {
     const messageLane = getMessageLane(message);
     if (!messageLane) return true;
-    return messageLane === lane && getMessageTurnId(message) === turnId;
+    return messageLane === lane
+      && getMessageTurnId(message) === turnId
+      && getMessageDelegationId(message) === delegationId;
   }));
 }
 
@@ -159,7 +171,7 @@ export function tagNewLaneMessages(
   const nextMessages = messages.slice(existingCount);
   for (const message of nextMessages) {
     if (message._getType() === 'human') continue;
-    setPinpetMeta(message, { lane, turnId });
+    setPinpetMeta(message, { lane, turnId, delegationId: reportMeta?.delegationId ?? null });
   }
 
   // Find the last AI message with text content.

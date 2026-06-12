@@ -1038,7 +1038,7 @@ test('lane tagging hides subagent messages from route and records completed anno
   assert.equal(getMessageAnnounce(messages[1]), 'completed');
   assert.equal(getMessageDelegationId(messages[1]), 'task-1');
   assert.deepEqual(mainConversationMessages(messages).map((message) => message.content), ['帮我查一下小红书动态']);
-  assert.deepEqual(laneMessages(messages, 'general', 'turn-1').map((message) => message.content), [
+  assert.deepEqual(laneMessages(messages, 'general', 'turn-1', 'task-1').map((message) => message.content), [
     '帮我查一下小红书动态',
     '已查到热门动态。',
   ]);
@@ -1115,10 +1115,52 @@ test('lane messages sanitize legacy checkpoint history with dangling tool calls'
     content: '准备移动。',
     tool_calls: [{ id: 'call-legacy', name: 'move_path', args: { source: 'a', destination: 'b' } }],
   });
-  setPinpetMeta(danglingToolCall, { lane: 'general', turnId: 'turn-1' });
+  setPinpetMeta(danglingToolCall, { lane: 'general', turnId: 'turn-1', delegationId: 'task-legacy' });
 
-  assert.deepEqual(laneMessages([human, danglingToolCall], 'general', 'turn-1').map((message) => message.content), [
+  assert.deepEqual(laneMessages([human, danglingToolCall], 'general', 'turn-1', 'task-legacy').map((message) => message.content), [
     '继续归档',
+  ]);
+});
+
+test('lane messages scope to delegation: new task starts clean, reused id carries over', () => {
+  const human = new HumanMessage('帮我整理仓库');
+  const task1ToolCall = new AIMessage({
+    content: '先看一下目录。',
+    tool_calls: [{ id: 'call-t1', name: 'list_dir', args: { path: '.' } }],
+  });
+  const task1ToolResult = new ToolMessage({
+    content: '{"entries":["a.ts"]}',
+    tool_call_id: 'call-t1',
+  });
+  const task1Answer = new AIMessage('目录已整理完成。');
+  const messages = [human, task1ToolCall, task1ToolResult, task1Answer];
+
+  tagNewLaneMessages(messages, 1, 'general', 'turn-1', 'natural', {
+    delegationId: 'task-1',
+    task: '整理仓库',
+  });
+
+  // 同 turn 同 lane 的新 task：看不到上一个 task 的 transcript，只剩主对话。
+  assert.deepEqual(laneMessages(messages, 'general', 'turn-1', 'task-2').map((message) => message.content), [
+    '帮我整理仓库',
+  ]);
+
+  // 同一 delegation 续跑（复用 delegationId）：全量带回自己的 transcript。
+  assert.deepEqual(laneMessages(messages, 'general', 'turn-1', 'task-1').map((message) => message.content), [
+    '帮我整理仓库',
+    '先看一下目录。',
+    '{"entries":["a.ts"]}',
+    '目录已整理完成。',
+  ]);
+});
+
+test('lane messages exclude legacy lane history without per-message delegationId', () => {
+  const human = new HumanMessage('继续');
+  const legacyLaneMessage = new AIMessage('旧版本写入的 lane 消息。');
+  setPinpetMeta(legacyLaneMessage, { lane: 'general', turnId: 'turn-1' });
+
+  assert.deepEqual(laneMessages([human, legacyLaneMessage], 'general', 'turn-1', 'task-1').map((message) => message.content), [
+    '继续',
   ]);
 });
 

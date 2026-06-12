@@ -687,7 +687,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       return {};
     }
     const lane: MessageLane = `capability:${capability.name}`;
-    const scopedMessages = laneMessages(state.messages, lane, state.turnId);
+    const scopedMessages = laneMessages(state.messages, lane, state.turnId, pendingDelegation.id);
 
     const runtime = await capability.createRuntime({
       models: config.models,
@@ -806,11 +806,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     }
 
     const lane: MessageLane = 'general';
-    const scopedMessages = laneMessages(state.messages, lane, state.turnId);
     const pendingDelegation = state.pendingDelegation;
     if (!pendingDelegation || pendingDelegation.lane !== 'general') {
       return {};
     }
+    const scopedMessages = laneMessages(state.messages, lane, state.turnId, pendingDelegation.id);
     const handoffInstruction = buildDelegationHandoffInstruction({
       lane,
       task: pendingDelegation.task,

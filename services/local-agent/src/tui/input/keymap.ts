@@ -44,6 +44,8 @@ export function resolveTuiKeyAction(
   key: TuiKeyInput,
   context: TuiKeyContext,
 ): TuiKeyAction {
+  const isReturn = isReturnKeyInput(input, key);
+
   if (key.ctrl && input === 'c') {
     return { type: 'global.ctrl_c' };
   }
@@ -55,7 +57,7 @@ export function resolveTuiKeyAction(
   if (context.hasResumePicker) {
     if (key.upArrow) return { type: 'resume.previous' };
     if (key.downArrow) return { type: 'resume.next' };
-    if (key.return) return { type: 'resume.submit' };
+    if (isReturn) return { type: 'resume.submit' };
     if (key.escape) return { type: 'resume.dismiss' };
     return { type: 'none' };
   }
@@ -63,7 +65,7 @@ export function resolveTuiKeyAction(
   if (context.hasPendingApproval) {
     if (key.upArrow) return { type: 'approval.previous' };
     if (key.downArrow) return { type: 'approval.next' };
-    if (key.return) return { type: 'approval.submit' };
+    if (isReturn) return { type: 'approval.submit' };
     if (key.escape) return { type: 'global.interrupt' };
     if (key.tab || (key.shift && key.tab)) return { type: 'none' };
     return { type: 'composer.edit' };
@@ -75,7 +77,7 @@ export function resolveTuiKeyAction(
   }
 
   if (key.escape) return { type: 'composer.clear' };
-  if (key.return) return { type: 'composer.submit' };
+  if (isReturn) return { type: 'composer.submit' };
   if (key.upArrow || key.downArrow || key.tab || (key.shift && key.tab)) {
     return { type: 'none' };
   }
@@ -143,4 +145,8 @@ export function applyComposerInput(
 
 function clampCursor(cursorOffset: number, value: string) {
   return Math.max(0, Math.min(value.length, cursorOffset));
+}
+
+function isReturnKeyInput(input: string, key: TuiKeyInput) {
+  return Boolean(key.return) || input === '\r' || input === '\n' || input === '\r\n';
 }

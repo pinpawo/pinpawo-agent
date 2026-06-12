@@ -38,16 +38,35 @@ function formatDateBucket(date: Date) {
 }
 
 function parseWriteThreadId(key: string): string | null {
+  return parseWriteKey(key)?.threadId ?? null;
+}
+
+function parseWriteKey(key: string): { threadId: string; checkpointId: string } | null {
   try {
     const parsed = JSON.parse(key) as unknown;
-    if (Array.isArray(parsed) && typeof parsed[0] === 'string' && parsed[0]) {
-      return parsed[0];
+    if (
+      Array.isArray(parsed)
+      && typeof parsed[0] === 'string' && parsed[0]
+      && typeof parsed[2] === 'string'
+    ) {
+      return { threadId: parsed[0], checkpointId: parsed[2] };
     }
   } catch {
     // ignore malformed keys
   }
   return null;
 }
+
+/**
+ * Per-namespace cap on retained checkpoints for a single thread.
+ *
+ * MemorySaver keeps every checkpoint a thread ever produced. Each checkpoint is
+ * a full state snapshot (messages included), so a long conversation grows the
+ * thread shard without bound until `JSON.stringify` exceeds V8's max string
+ * length and flush throws `Invalid string length`. LangGraph only needs the
+ * most recent checkpoints to resume/replay, so we keep a bounded tail.
+ */
+const DEFAULT_MAX_CHECKPOINTS_PER_NAMESPACE = 40;
 
 /**
  * MemorySaver with file-based persistence.
@@ -75,6 +94,7 @@ export class FileSaver extends MemorySaver {
   constructor(
     private readonly filePath: string,
     private readonly flushIntervalMs = 30_000,
+    private readonly maxCheckpointsPerNamespace = DEFAULT_MAX_CHECKPOINTS_PER_NAMESPACE,
   ) {
     super();
     this.shardRootDir = dirname(this.filePath);
@@ -90,7 +110,9 @@ export class FileSaver extends MemorySaver {
     ...args: Parameters<MemorySaver['put']>
   ): ReturnType<MemorySaver['put']> {
     const result = await super.put(...args);
-    this.noteThreadBucket(args[0]?.configurable?.thread_id);
+    const threadId = args[0]?.configurable?.thread_id;
+    this.noteThreadBucket(threadId);
+    this.pruneThreadCheckpoints(threadId);
     this.dirty = true;
     return result;
   }
@@ -127,6 +149,49 @@ export class FileSaver extends MemorySaver {
     }
     if (!this.threadBuckets.has(threadId)) {
       this.threadBuckets.set(threadId, formatDateBucket(date));
+    }
+  }
+
+  /**
+   * Keep only the most recent `maxCheckpointsPerNamespace` checkpoints per
+   * namespace for a thread, dropping older ones and their orphaned writes.
+   *
+   * Insertion order in `storage[threadId][ns]` matches the order LangGraph
+   * wrote the checkpoints, and resume only ever walks back a short parent
+   * chain, so trimming the head of each namespace is safe.
+   */
+  private pruneThreadCheckpoints(threadId: unknown) {
+    if (typeof threadId !== 'string' || !threadId || this.maxCheckpointsPerNamespace <= 0) {
+      return;
+    }
+    const namespaces = this.storage[threadId];
+    if (!namespaces) {
+      return;
+    }
+
+    const removedCheckpointIds = new Set<string>();
+    for (const checkpoints of Object.values(namespaces)) {
+      const checkpointIds = Object.keys(checkpoints);
+      const overflow = checkpointIds.length - this.maxCheckpointsPerNamespace;
+      if (overflow <= 0) {
+        continue;
+      }
+      for (const checkpointId of checkpointIds.slice(0, overflow)) {
+        delete checkpoints[checkpointId];
+        removedCheckpointIds.add(checkpointId);
+      }
+    }
+
+    if (removedCheckpointIds.size === 0) {
+      return;
+    }
+    // Drop writes that belonged to the pruned checkpoints so they don't linger
+    // in the store (and the shard file) after their checkpoint is gone.
+    for (const outerKey of Object.keys(this.writes)) {
+      const parsed = parseWriteKey(outerKey);
+      if (parsed?.threadId === threadId && removedCheckpointIds.has(parsed.checkpointId)) {
+        delete this.writes[outerKey];
+      }
     }
   }
 
@@ -243,6 +308,7 @@ export class FileSaver extends MemorySaver {
       }
 
       const desiredFiles = new Map<string, string>();
+      let anyThreadFailed = false;
 
       for (const threadId of threadIds) {
         const namespaces = this.storage[threadId];
@@ -271,52 +337,65 @@ export class FileSaver extends MemorySaver {
         const file = this.buildShardFilePath(bucket, threadId);
         desiredFiles.set(threadId, file);
 
-        const shard: ThreadShardData = {
-          threadId,
-          bucket,
-          storage: {},
-          writes: {},
-        };
+        // Serialize and write each thread independently so one oversized
+        // conversation (e.g. exceeding V8's max string length) does not abort
+        // the whole batch and lose every other thread's checkpoints.
+        try {
+          const shard: ThreadShardData = {
+            threadId,
+            bucket,
+            storage: {},
+            writes: {},
+          };
 
-        if (hasStorage) {
-          for (const [namespace, checkpoints] of Object.entries(namespaces)) {
-            shard.storage[namespace] = {};
-            for (const [checkpointId, tuple] of Object.entries(checkpoints)) {
-              shard.storage[namespace][checkpointId] = [
-                uint8ToBase64(tuple[0]),
-                uint8ToBase64(tuple[1]),
-                tuple[2],
+          if (hasStorage) {
+            for (const [namespace, checkpoints] of Object.entries(namespaces)) {
+              shard.storage[namespace] = {};
+              for (const [checkpointId, tuple] of Object.entries(checkpoints)) {
+                shard.storage[namespace][checkpointId] = [
+                  uint8ToBase64(tuple[0]),
+                  uint8ToBase64(tuple[1]),
+                  tuple[2],
+                ];
+              }
+            }
+          }
+
+          for (const [outerKey, writes] of Object.entries(threadWrites)) {
+            shard.writes[outerKey] = {};
+            for (const [innerKey, tuple] of Object.entries(writes)) {
+              shard.writes[outerKey][innerKey] = [
+                tuple[0],
+                tuple[1],
+                uint8ToBase64(tuple[2]),
               ];
             }
           }
-        }
 
-        for (const [outerKey, writes] of Object.entries(threadWrites)) {
-          shard.writes[outerKey] = {};
-          for (const [innerKey, tuple] of Object.entries(writes)) {
-            shard.writes[outerKey][innerKey] = [
-              tuple[0],
-              tuple[1],
-              uint8ToBase64(tuple[2]),
-            ];
+          writeFileSync(file, JSON.stringify(shard), 'utf-8');
+
+          if (previousFile && previousFile !== file && existsSync(previousFile)) {
+            unlinkSync(previousFile);
           }
+          this.knownShardFiles.set(threadId, file);
+        } catch (err) {
+          anyThreadFailed = true;
+          desiredFiles.delete(threadId);
+          console.error(
+            `[file-saver] failed to persist thread ${threadId}: `
+            + `${err instanceof Error ? err.message : err}`,
+          );
         }
-
-        writeFileSync(file, JSON.stringify(shard), 'utf-8');
-
-        if (previousFile && previousFile !== file && existsSync(previousFile)) {
-          unlinkSync(previousFile);
-        }
-        this.knownShardFiles.set(threadId, file);
       }
 
       if (existsSync(this.filePath) && this.listShardFiles().length > 0) {
         unlinkSync(this.filePath);
       }
 
-      this.dirty = false;
+      // Keep dirty set if any thread failed so the next flush retries it.
+      this.dirty = anyThreadFailed;
     } catch (err) {
-      console.warn(`[file-saver] flush failed: ${err instanceof Error ? err.message : err}`);
+      console.error(`[file-saver] flush failed: ${err instanceof Error ? err.message : err}`);
     }
   }
 

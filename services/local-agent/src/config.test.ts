@@ -26,3 +26,26 @@ test('resolveNumberConfigValue prefers valid env number over stored number', asy
   const { resolveNumberConfigValue } = await loadConfigHelpers();
   assert.equal(resolveNumberConfigValue('64000', 131072), 64000);
 });
+
+test('isGeneratedPlaceholderConfigValue detects init template placeholders', async () => {
+  const { isGeneratedPlaceholderConfigValue } = await loadConfigHelpers();
+  assert.equal(isGeneratedPlaceholderConfigValue('API_BASE_URL', 'https://your-api.example.com'), true);
+  assert.equal(isGeneratedPlaceholderConfigValue('HASURA_JWT', 'eyJ...'), true);
+  assert.equal(isGeneratedPlaceholderConfigValue('LLM_API_KEY', 'real-key'), false);
+});
+
+test('resolveConnectionMode allows local-only mode without API credentials', async () => {
+  const { resolveConnectionMode } = await loadConfigHelpers();
+  assert.equal(resolveConnectionMode({
+    apiBaseUrl: '',
+    hasuraEndpoint: '',
+    agentToken: '',
+    hasuraJwt: '',
+  }), 'local-only');
+  assert.equal(resolveConnectionMode({
+    apiBaseUrl: 'https://api.example.test',
+    hasuraEndpoint: 'https://hasura.example.test/v1/graphql',
+    agentToken: 'agent-token',
+    hasuraJwt: 'jwt',
+  }), 'api-connected');
+});

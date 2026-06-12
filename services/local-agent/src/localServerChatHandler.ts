@@ -229,7 +229,7 @@ export class LocalServerChatHandler {
     };
 
     try {
-      const ctx = await loadAgentContext(deps.actorId);
+      const ctx = await (deps.loadContext ?? loadAgentContext)(deps.actorId);
       if (!isCurrent()) {
         finishInterrupted();
         return;

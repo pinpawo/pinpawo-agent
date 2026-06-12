@@ -41,6 +41,7 @@ export type SessionModel = {
     model?: string;
     cwd?: string;
     contextWindow?: number;
+    connectionMode?: 'api-connected' | 'local-only';
   };
   history: HistoryCellModel[];
   activeRun: ActiveRunModel | null;
@@ -113,7 +114,7 @@ export type TuiAction =
   | {
       type: 'session.set_runtime';
       sessionId?: SessionId;
-      runtime: Pick<SessionModel['runtime'], 'model' | 'cwd' | 'contextWindow'>;
+      runtime: Pick<SessionModel['runtime'], 'model' | 'cwd' | 'contextWindow' | 'connectionMode'>;
     }
   | {
       type: 'session.set_kind';

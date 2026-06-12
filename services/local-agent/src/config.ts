@@ -32,6 +32,38 @@ function get(envKey: string, storedKey: keyof typeof stored): string {
   return process.env[envKey] || (typeof storedVal === 'string' ? storedVal : '') || '';
 }
 
+export function isGeneratedPlaceholderConfigValue(envKey: string, value: string | undefined) {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) return false;
+  const placeholders: Record<string, string[]> = {
+    API_BASE_URL: ['https://your-api.example.com'],
+    HASURA_ENDPOINT: ['https://your-hasura.example.com/v1/graphql'],
+    AGENT_TOKEN: ['your-agent-token-here'],
+    HASURA_JWT: ['eyJ...'],
+    LLM_API_KEY: ['sk-xxx'],
+  };
+  return (placeholders[envKey] ?? []).includes(normalized);
+}
+
+function optional(envKey: string, storedKey: keyof typeof stored): string {
+  const val = get(envKey, storedKey).trim();
+  return isGeneratedPlaceholderConfigValue(envKey, val) ? '' : val;
+}
+
+export function resolveConnectionMode(values: {
+  apiBaseUrl?: string;
+  hasuraEndpoint?: string;
+  agentToken?: string;
+  hasuraJwt?: string;
+}) {
+  return values.apiBaseUrl?.trim()
+    && values.hasuraEndpoint?.trim()
+    && values.agentToken?.trim()
+    && values.hasuraJwt?.trim()
+    ? 'api-connected' as const
+    : 'local-only' as const;
+}
+
 export function resolveNumberConfigValue(envVal: string | undefined, storedVal: unknown): number | undefined {
   const raw = envVal?.trim() ? envVal : (typeof storedVal === 'number' ? String(storedVal) : '');
   if (!raw.trim()) return undefined;
@@ -47,7 +79,7 @@ function getNumber(envKey: string, storedKey: keyof typeof stored): number | und
 
 function required(envKey: string, storedKey: keyof typeof stored, label: string): string {
   const val = get(envKey, storedKey);
-  if (!val) {
+  if (!val || isGeneratedPlaceholderConfigValue(envKey, val)) {
     throw new Error(
       `Missing: ${label}\nRun "pinpawo-agent login" or set ${envKey} in .env`
     );
@@ -55,11 +87,18 @@ function required(envKey: string, storedKey: keyof typeof stored, label: string)
   return val;
 }
 
+const apiBaseUrl = optional('API_BASE_URL', 'api_base_url').replace(/\/$/, '');
+const hasuraEndpoint = optional('HASURA_ENDPOINT', 'hasura_endpoint').replace(/\/$/, '');
+const agentToken = optional('AGENT_TOKEN', 'agent_token');
+const hasuraJwt = optional('HASURA_JWT', 'hasura_jwt');
+const connectionMode = resolveConnectionMode({ apiBaseUrl, hasuraEndpoint, agentToken, hasuraJwt });
+
 export const config = {
-  apiBaseUrl: required('API_BASE_URL', 'api_base_url', 'API_BASE_URL').replace(/\/$/, ''),
-  hasuraEndpoint: required('HASURA_ENDPOINT', 'hasura_endpoint', 'HASURA_ENDPOINT').replace(/\/$/, ''),
-  agentToken: required('AGENT_TOKEN', 'agent_token', 'AGENT_TOKEN'),
-  hasuraJwt: required('HASURA_JWT', 'hasura_jwt', 'HASURA_JWT'),
+  connectionMode,
+  apiBaseUrl,
+  hasuraEndpoint,
+  agentToken,
+  hasuraJwt,
 
   llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
   llmBaseUrl: get('LLM_BASE_URL', 'llm_base_url') || 'https://api.deepseek.com',

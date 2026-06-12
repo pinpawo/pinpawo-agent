@@ -24,6 +24,9 @@ function checkJwtExpiry() {
 }
 
 export async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  if (config.connectionMode !== 'api-connected') {
+    throw new Error('GraphQL requires API login; local-only mode does not have Hasura credentials');
+  }
   checkJwtExpiry();
   const res = await fetch(config.hasuraEndpoint, {
     method: 'POST',

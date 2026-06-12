@@ -3,6 +3,7 @@ import { startLocalServer } from '../localServer';
 import { config } from '../config';
 import { ensureActorSelected } from '../actorSelection';
 import { browserSession } from '../toolkits/browser';
+import { loadAgentContext } from '../contextLoader';
 
 export async function runAgent() {
   await ensureActorSelected({ interactive: true });
@@ -30,8 +31,10 @@ export async function runAgent() {
   await startLocalServer(config.localServerPort, {
     actorId: runtime.getActorId(),
     actorName: runtime.getActorName() ?? undefined,
+    connectionMode: config.connectionMode,
     llmConfig: runtime.getLlmConfig(),
     workdir: config.workdir,
+    loadContext: loadAgentContext,
     localToolkitDefinitions: runtime.getLocalToolkitDefinitions(),
     localToolkits: runtime.getLocalToolkits(),
     pluginToolkits: runtime.getPluginToolkits(),

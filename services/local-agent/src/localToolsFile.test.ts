@@ -3,7 +3,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
+import { type ToolAuthorizationRecord } from '@pinpawo/pet-agent';
+import { readLocalAgentInterfaceCapabilities } from './chatInterface';
 import {
+  applyPatchReviewPolicy,
   applyPatchTool,
   copyPathTool,
   listDirTool,
@@ -13,8 +16,12 @@ import {
   statPathTool,
   validateStructuredFileTool,
   viewFileChunkTool,
+  requestApplyPatchReview,
+  requestWriteFileReview,
+  writeFileReviewPolicy,
   writeFileTool,
 } from './toolkits/local/fileTools';
+import { createBashToolkit } from './toolkits/local';
 import { parsePatch, PatchParseError } from './toolkits/local/applyPatch';
 
 function createFileFixture(t: TestContext) {
@@ -25,6 +32,18 @@ function createFileFixture(t: TestContext) {
 
 function readJsonOutput(output: unknown) {
   return JSON.parse(String(output)) as Record<string, unknown>;
+}
+
+function reviewContext(input: unknown, authorizations: ToolAuthorizationRecord[] = []) {
+  return {
+    input,
+    toolAuthorizations: authorizations,
+    toolkitName: 'bash',
+    toolName: 'write_file',
+    models: {} as never,
+    actor: {} as never,
+    messages: [],
+  };
 }
 
 test('file tools write, view, and stat text files', async (t) => {
@@ -48,6 +67,111 @@ test('file tools write, view, and stat text files', async (t) => {
   const stat = readJsonOutput(await statPathTool.invoke({ path: filePath }));
   assert.equal(stat.type, 'file');
   assert.equal(stat.path, filePath);
+});
+
+test('bash toolkit registers file mutation review policies', () => {
+  const toolkit = createBashToolkit();
+  assert.equal(Boolean(toolkit.policy?.toolReview?.write_file), true);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.apply_patch), true);
+});
+
+test('write_file review policy requires approval and honors exact session authorization', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'note.txt');
+  writeFileSync(filePath, 'before\n', 'utf-8');
+  const input = { path: filePath, content: 'after\n' };
+  const tuiCapabilities = readLocalAgentInterfaceCapabilities('tui');
+
+  const review = requestWriteFileReview(input, [], tuiCapabilities);
+
+  assert.equal(review?.view.title, 'File write approval');
+  assert.match(review?.view.body ?? '', /before/);
+
+  const matcher = await writeFileReviewPolicy.buildAuthorizationMatcher?.({
+    ...reviewContext(input),
+    pendingAction: {
+      actionId: 'action-1',
+      toolName: 'write_file',
+      args: input,
+    },
+    effect: {
+      type: 'graph.authorize_tool_action',
+      scope: 'thread',
+      actionRef: { type: 'pending_action' },
+      matcher: { type: 'policy_hook' },
+    },
+  });
+
+  assert.deepEqual(matcher, {
+    type: 'exact_args',
+    value: {
+      path: filePath,
+      content: 'after\n',
+      append: false,
+      createDirs: true,
+    },
+  });
+
+  const authorized = requestWriteFileReview(input, [{
+      toolName: 'write_file',
+      matcher: matcher as NonNullable<typeof matcher>,
+      createdAt: new Date(0).toISOString(),
+    }], tuiCapabilities);
+
+  assert.equal(authorized, null);
+});
+
+test('apply_patch review policy summarizes patch files and honors exact session authorization', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'note.txt');
+  writeFileSync(filePath, 'before\n', 'utf-8');
+  const patch = [
+    '*** Begin Patch',
+    `*** Update File: ${filePath}`,
+    '-before',
+    '+after',
+    '*** End Patch',
+  ].join('\n');
+  const input = { patch };
+  const tuiCapabilities = readLocalAgentInterfaceCapabilities('tui');
+
+  const review = requestApplyPatchReview(input, [], tuiCapabilities);
+
+  assert.equal(review?.view.title, 'Patch approval');
+  assert.match(review?.view.body ?? '', /update/);
+  assert.match(review?.view.body ?? '', /before/);
+
+  const matcher = await applyPatchReviewPolicy.buildAuthorizationMatcher?.({
+    ...reviewContext(input),
+    toolName: 'apply_patch',
+    pendingAction: {
+      actionId: 'action-1',
+      toolName: 'apply_patch',
+      args: input,
+    },
+    effect: {
+      type: 'graph.authorize_tool_action',
+      scope: 'thread',
+      actionRef: { type: 'pending_action' },
+      matcher: { type: 'policy_hook' },
+    },
+  });
+
+  assert.deepEqual(matcher, {
+    type: 'exact_args',
+    value: {
+      patch,
+      files: [{ path: filePath, type: 'update' }],
+    },
+  });
+
+  const authorized = requestApplyPatchReview(input, [{
+        toolName: 'apply_patch',
+        matcher: matcher as NonNullable<typeof matcher>,
+        createdAt: new Date(0).toISOString(),
+      }], tuiCapabilities);
+
+  assert.equal(authorized, null);
 });
 
 test('apply_patch updates a file with context-anchored chunks', async (t) => {

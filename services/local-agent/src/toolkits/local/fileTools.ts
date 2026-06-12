@@ -1,8 +1,19 @@
 import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, extname, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, relative as relativePath, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
-import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
+import {
+  buildReviewSpec,
+  isToolActionAuthorized,
+  type ToolAuthorizationRecord,
+  type ToolkitOperationMetadata,
+  type ToolkitToolReviewPolicy,
+} from '@pinpawo/pet-agent';
 import { z } from 'zod';
+import {
+  getCurrentLocalAgentInterface,
+  type LocalAgentInterfaceCapabilities,
+} from '../../chatInterface';
+import { config } from '../../config';
 import { tryStat } from './fileSystemUtils';
 import {
   applyChunksToContent,
@@ -272,6 +283,248 @@ function atomicWriteFile(filePath: string, content: string) {
     rmSync(tempPath, { force: true });
     throw err;
   }
+}
+
+function isInsidePath(parent: string, child: string) {
+  const relative = relativePath(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !isAbsolute(relative));
+}
+
+function formatFileReviewRisk(paths: string[], mutationTypes: string[]) {
+  const risks: string[] = [];
+  if (paths.some((path) => !isInsidePath(config.workdir, path))) {
+    risks.push('outside configured workdir');
+  }
+  if (paths.some((path) => /(^|[/\\])(\.env|\.pinpawo|config\.json)$/.test(path))) {
+    risks.push('sensitive config path');
+  }
+  if (mutationTypes.some((type) => type === 'delete' || type === 'move')) {
+    risks.push('destructive file operation');
+  }
+  return risks;
+}
+
+function fileMutationReviewOptions() {
+  return [
+    {
+      id: 'approve',
+      label: 'Approve',
+      variant: 'primary' as const,
+      decision: { type: 'approve' as const },
+    },
+    {
+      id: 'approve-and-authorize-thread',
+      label: 'Approve and authorize',
+      description: 'Approve this exact file action and authorize matching actions in this thread.',
+      decision: { type: 'approve' as const },
+      effects: [{
+        type: 'graph.authorize_tool_action' as const,
+        scope: 'thread' as const,
+        actionRef: { type: 'pending_action' as const },
+        matcher: { type: 'policy_hook' as const },
+      }],
+    },
+    {
+      id: 'reject',
+      label: 'Reject',
+      variant: 'danger' as const,
+      decision: { type: 'reject' as const },
+    },
+    {
+      id: 'respond',
+      label: 'Respond',
+      input: {
+        kind: 'text' as const,
+        key: 'message' as const,
+        required: true,
+        multiline: true,
+        placeholder: 'Tell the agent what to do instead',
+      },
+      decision: { type: 'respond' as const, messageInputKey: 'message' as const },
+    },
+  ];
+}
+
+type NormalizedWriteFileReviewInput = {
+  path: string;
+  content: string;
+  append: boolean;
+  createDirs: boolean;
+};
+
+function normalizeWriteFileReviewInput(input: unknown): NormalizedWriteFileReviewInput {
+  const record = readRecord(input);
+  const target = readString(record, 'path');
+  const content = readString(record, 'content');
+  if (!target) {
+    throw new Error('write_file requires path');
+  }
+  if (content === undefined) {
+    throw new Error('write_file requires content');
+  }
+  return {
+    path: resolveUserPath(target),
+    content,
+    append: readBoolean(record, 'append') ?? false,
+    createDirs: readBoolean(record, 'createDirs') ?? true,
+  };
+}
+
+function buildWriteFileReviewSpec(action: NormalizedWriteFileReviewInput) {
+  const risks = formatFileReviewRisk([action.path], ['write']);
+  const before = readFileContentPreview(action.path) ?? '(new file)';
+  return buildReviewSpec({
+    view: {
+      kind: 'markdown',
+      title: 'File write approval',
+      body: [
+        `即将${action.append ? '追加' : '写入/覆盖'}本地文件。`,
+        '',
+        `- Path: \`${action.path}\``,
+        `- Mode: ${action.append ? 'append' : 'write'}`,
+        `- Bytes: ${Buffer.byteLength(action.content, 'utf-8').toString()}`,
+        ...(risks.length > 0 ? [`- Risk: ${risks.join(', ')}`] : []),
+        '',
+        'Before preview:',
+        '```',
+        before,
+        '```',
+      ].join('\n'),
+    },
+    options: fileMutationReviewOptions(),
+  });
+}
+
+type NormalizedPatchFile = {
+  path: string;
+  type: PatchOperation['type'];
+  moveTo?: string;
+};
+
+type NormalizedApplyPatchReviewInput = {
+  patch: string;
+  files: NormalizedPatchFile[];
+};
+
+function normalizeApplyPatchReviewInput(input: unknown): NormalizedApplyPatchReviewInput {
+  const record = readRecord(input);
+  const patch = readString(record, 'patch');
+  if (!patch) {
+    throw new Error('apply_patch requires patch');
+  }
+  const operations = parsePatch(patch);
+  return {
+    patch,
+    files: operations.map((operation) => ({
+      path: resolveUserPath(operation.path),
+      type: operation.type,
+      ...(operation.type === 'update' && operation.moveTo
+        ? { moveTo: resolveUserPath(operation.moveTo) }
+        : {}),
+    })),
+  };
+}
+
+function buildApplyPatchReviewSpec(action: NormalizedApplyPatchReviewInput) {
+  const paths = action.files.flatMap((file) => file.moveTo ? [file.path, file.moveTo] : [file.path]);
+  const risks = formatFileReviewRisk(paths, action.files.map((file) => file.type));
+  const files = action.files.map((file) =>
+    `- ${file.type}: \`${file.path}\`${file.moveTo ? ` -> \`${file.moveTo}\`` : ''}`
+  );
+  return buildReviewSpec({
+    view: {
+      kind: 'markdown',
+      title: 'Patch approval',
+      body: [
+        '即将修改本地文件。',
+        '',
+        ...files,
+        ...(risks.length > 0 ? ['', `Risk: ${risks.join(', ')}`] : []),
+        '',
+        'Patch preview:',
+        '```diff',
+        truncateForOperationDetails(action.patch),
+        '```',
+      ].join('\n'),
+    },
+    options: fileMutationReviewOptions(),
+  });
+}
+
+export const writeFileReviewPolicy: ToolkitToolReviewPolicy = {
+  request: ({ input, toolAuthorizations }) =>
+    requestWriteFileReview(
+      input,
+      toolAuthorizations ?? [],
+      getCurrentLocalAgentInterface().capabilities,
+    ),
+  buildAuthorizationMatcher: ({ input }) => ({
+    type: 'exact_args',
+    value: normalizeWriteFileReviewInput(input),
+  }),
+};
+
+export const applyPatchReviewPolicy: ToolkitToolReviewPolicy = {
+  request: ({ input, toolAuthorizations }) =>
+    requestApplyPatchReview(
+      input,
+      toolAuthorizations ?? [],
+      getCurrentLocalAgentInterface().capabilities,
+    ),
+  buildAuthorizationMatcher: ({ input }) => ({
+    type: 'exact_args',
+    value: normalizeApplyPatchReviewInput(input),
+  }),
+};
+
+export function requestWriteFileReview(
+  input: unknown,
+  toolAuthorizations: ToolAuthorizationRecord[],
+  capabilities: LocalAgentInterfaceCapabilities,
+) {
+  let action: NormalizedWriteFileReviewInput;
+  try {
+    action = normalizeWriteFileReviewInput(input);
+  } catch {
+    return null;
+  }
+
+  if (!capabilities.humanReview) {
+    return null;
+  }
+  if (capabilities.sessionAuthorization && isToolActionAuthorized({
+    authorizations: toolAuthorizations,
+    toolName: 'write_file',
+    args: action,
+  })) {
+    return null;
+  }
+  return buildWriteFileReviewSpec(action);
+}
+
+export function requestApplyPatchReview(
+  input: unknown,
+  toolAuthorizations: ToolAuthorizationRecord[],
+  capabilities: LocalAgentInterfaceCapabilities,
+) {
+  let action: NormalizedApplyPatchReviewInput;
+  try {
+    action = normalizeApplyPatchReviewInput(input);
+  } catch {
+    return null;
+  }
+
+  if (!capabilities.humanReview) {
+    return null;
+  }
+  if (capabilities.sessionAuthorization && isToolActionAuthorized({
+    authorizations: toolAuthorizations,
+    toolName: 'apply_patch',
+    args: action,
+  })) {
+    return null;
+  }
+  return buildApplyPatchReviewSpec(action);
 }
 
 const APPLY_PATCH_DESCRIPTION = [

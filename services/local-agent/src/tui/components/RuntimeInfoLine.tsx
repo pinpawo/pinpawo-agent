@@ -9,6 +9,12 @@ function fallback(value: string | undefined) {
   return text ? text : '未提供';
 }
 
+function formatConnectionMode(mode: SessionModel['runtime']['connectionMode']) {
+  if (mode === 'local-only') return '本地模式';
+  if (mode === 'api-connected') return '联网模式';
+  return '模式未提供';
+}
+
 export function RuntimeInfoLine({ runtime }: { runtime: SessionModel['runtime'] }) {
   return (
     <Text dimColor>
@@ -16,8 +22,8 @@ export function RuntimeInfoLine({ runtime }: { runtime: SessionModel['runtime'] 
         fallback(runtime.model),
         fallback(runtime.cwd),
         runtime.contextWindow ? LOCALE_FORMATTER.format(runtime.contextWindow) : '未提供',
+        formatConnectionMode(runtime.connectionMode),
       )}
     </Text>
   );
 }
-

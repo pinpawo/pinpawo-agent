@@ -45,6 +45,7 @@ export function handleLocalHttpRequest(
         status: 'ok',
         actor_id: deps.actorId,
         actor_name: deps.actorName,
+        connection_mode: deps.connectionMode ?? 'api-connected',
         ...deps.getStats(),
         ...readBrowserHealthFields(),
         ...readAgentActivityHealthFields(),
@@ -72,6 +73,7 @@ export function handleLocalHttpRequest(
     writeJson(res, 200, {
       llm_model: deps.llmConfig.model,
       llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
+      connection_mode: deps.connectionMode ?? 'api-connected',
       workdir: deps.workdir,
     });
     return true;

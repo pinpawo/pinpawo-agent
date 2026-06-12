@@ -20,6 +20,7 @@ export type LocalServerRuntimeSnapshot = {
   model?: string;
   contextWindow?: number;
   cwd?: string;
+  connectionMode?: 'api-connected' | 'local-only';
 };
 
 export class TuiLocalServerClient {
@@ -222,10 +223,15 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
       ?? parsePositiveInteger(nested.context_window))
     : undefined;
   const nestedModel = nested ? pickString(nested, ['model', 'llmModel']) : undefined;
+  const rawConnectionMode = pickString(record, ['connection_mode', 'connectionMode']);
+  const connectionMode = rawConnectionMode === 'api-connected' || rawConnectionMode === 'local-only'
+    ? rawConnectionMode
+    : undefined;
 
   return {
     model: rawModel ?? nestedModel,
     contextWindow: parsePositiveInteger(rawContextWindow) ?? nestedContextWindow,
     cwd: rawWorkdir ?? pickString(nested ?? {}, ['workdir', 'cwd']),
+    ...(connectionMode ? { connectionMode } : {}),
   };
 }

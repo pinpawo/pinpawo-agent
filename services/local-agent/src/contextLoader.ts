@@ -1,5 +1,6 @@
 import { gql } from './graphqlClient';
 import type { TrendPromptItem } from './capabilities/dailyPost';
+import { config } from './config';
 
 export type PetProfile = {
   id: string;
@@ -30,6 +31,30 @@ export type AgentContext = {
     today: string;
   };
 };
+
+export const LOCAL_ONLY_ACTOR_ID = 'local-agent';
+export const LOCAL_ONLY_ACTOR_NAME = 'Local Agent';
+
+export function buildLocalOnlyAgentContext(): AgentContext {
+  return {
+    pet: {
+      id: LOCAL_ONLY_ACTOR_ID,
+      name: LOCAL_ONLY_ACTOR_NAME,
+      personality: 'pragmatic local assistant',
+      species: 'local runtime',
+      stage: 'local-only',
+      growth_value: null,
+      stage_asset_id: null,
+    },
+    context: {
+      petMemoryText: 'Local-only mode: API login is not configured, so server memories, remote actor state, trends, heartbeat, hosted app relay, and post submission are unavailable.',
+      recentChatTurns: [],
+      recentDaily: [],
+      trendItems: [],
+      today: new Date().toISOString().slice(0, 10),
+    },
+  };
+}
 
 // ---- GraphQL response types ----
 
@@ -183,6 +208,9 @@ const NEXT_TICK_QUERY = `
 `;
 
 export async function getNextTickAt(actorId: string): Promise<Date | null> {
+  if (config.connectionMode === 'local-only' || actorId === LOCAL_ONLY_ACTOR_ID) {
+    return null;
+  }
   const data = await gql<{ pet_agents: { next_tick_at: string | null }[] }>(NEXT_TICK_QUERY, {
     actorId,
   });
@@ -207,6 +235,9 @@ const HEARTBEAT_MUTATION = `
 `;
 
 export async function sendHeartbeat(actorId: string): Promise<void> {
+  if (config.connectionMode === 'local-only' || actorId === LOCAL_ONLY_ACTOR_ID) {
+    return;
+  }
   const nextTickAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
   await gql(HEARTBEAT_MUTATION, { actorId, nextTickAt });
 }
@@ -214,6 +245,10 @@ export async function sendHeartbeat(actorId: string): Promise<void> {
 // ---- Context loader ----
 
 export async function loadAgentContext(actorId: string): Promise<AgentContext> {
+  if (config.connectionMode === 'local-only' || actorId === LOCAL_ONLY_ACTOR_ID) {
+    return buildLocalOnlyAgentContext();
+  }
+
   const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
   const data = await gql<ContextQueryResult>(CONTEXT_QUERY, { since, actorId });
 

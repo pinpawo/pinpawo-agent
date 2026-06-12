@@ -151,7 +151,7 @@ export class LocalServerTuiSessionService {
     deps: LocalServerDeps,
     session: TuiSessionRecord,
   ) {
-    const ctx = await this.loadContext(deps.actorId);
+    const ctx = await (deps.loadContext ?? this.loadContext)(deps.actorId);
     const setup = this.buildChatSetup(deps, ctx, session.threadId);
     const messages = await this.graphService.readThreadMessages(setup);
     return readTuiHistoryMessages(messages);
@@ -177,7 +177,7 @@ export class LocalServerTuiSessionService {
 
   async readActivePendingReview(deps: LocalServerDeps): Promise<ActivePendingReview | null> {
     const session = this.getActiveSession(deps.actorId);
-    const ctx = await this.loadContext(deps.actorId);
+    const ctx = await (deps.loadContext ?? this.loadContext)(deps.actorId);
     const setup = this.buildChatSetup(deps, ctx, session.threadId);
     const threadState = await this.graphService.readThreadState(setup);
     if (!threadState.pendingHumanReview) {

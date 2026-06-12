@@ -75,7 +75,7 @@ export const TUI_TEXT = {
   statusInitializing: '初始化中',
   statusReady: '就绪',
   statusErrorRecovered: '出错，已恢复输入',
-  runtimeInfoLine: (model: string, cwd: string, contextWindow: string) => `模型: ${model} · 工作目录: ${cwd} · 上下文窗口上限: ${contextWindow}`,
+  runtimeInfoLine: (model: string, cwd: string, contextWindow: string, mode: string) => `模型: ${model} · 工作目录: ${cwd} · 上下文窗口上限: ${contextWindow} · ${mode}`,
   tokenUsageLine: (inputTokens: string, outputTokens: string, totalTokens: string, contextWindow: string | null, ratio: string | null) => (
     ratio
       ? `Token 用量：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens} (${ratio}，上下文上限 ${contextWindow})`

@@ -89,6 +89,10 @@ export class LocalAgentRuntime {
       this.actorName = ctx.pet.name;
       saveStoredConfig({ ...loadStoredConfig(), actor_name: ctx.pet.name });
     }
+    if (config.connectionMode === 'local-only') {
+      this.actorName = ctx.pet.name;
+      console.log('[local-agent] running in local-only mode; API login, app relay, heartbeat, and scheduled server jobs are disabled');
+    }
 
     return this.hooks;
   }
@@ -156,14 +160,22 @@ export class LocalAgentRuntime {
     if (!opts?.skipInit) {
       await this.init();
     }
-    console.log(`[local-agent] started — poll every ${config.pollIntervalSeconds}s, post every ${config.postIntervalHours}h`);
+    console.log(
+      config.connectionMode === 'api-connected'
+        ? `[local-agent] started — poll every ${config.pollIntervalSeconds}s, post every ${config.postIntervalHours}h`
+        : '[local-agent] started in local-only mode',
+    );
 
-    // Connect WebSocket for app ↔ local agent chat relay
-    this.connectWs();
+    if (config.connectionMode === 'api-connected') {
+      // Connect WebSocket for app ↔ local agent chat relay.
+      this.connectWs();
+    }
 
     while (!this.stopRequested) {
       try {
-        await this.scheduledJob.tick();
+        if (config.connectionMode === 'api-connected') {
+          await this.scheduledJob.tick();
+        }
       } catch (err) {
         console.error('[local-agent] tick error:', err instanceof Error ? err.message : err);
       }
@@ -179,6 +191,7 @@ export class LocalAgentRuntime {
 
   connectWs() {
     if (this.stopRequested) return;
+    if (config.connectionMode !== 'api-connected') return;
     if (!this.actorId) {
       throw new Error('Local agent actorId is missing; run init() before connectWs()');
     }

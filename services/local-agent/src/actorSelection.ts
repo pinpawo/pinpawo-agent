@@ -1,6 +1,8 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { gql } from './graphqlClient';
+import { config } from './config';
+import { LOCAL_ONLY_ACTOR_ID, LOCAL_ONLY_ACTOR_NAME } from './contextLoader';
 import { loadStoredConfig, saveStoredConfig } from './storage';
 
 export type AvailableActor = {
@@ -72,6 +74,16 @@ export function loadSelectedActorName(): string | null {
 }
 
 export async function listAvailableActors(): Promise<AvailableActor[]> {
+  if (config.connectionMode === 'local-only') {
+    return [{
+      actorId: LOCAL_ONLY_ACTOR_ID,
+      name: LOCAL_ONLY_ACTOR_NAME,
+      species: 'local runtime',
+      personality: 'pragmatic local assistant',
+      stage: 'local-only',
+    }];
+  }
+
   const data = await gql<ActorQueryResult>(AVAILABLE_ACTORS_QUERY);
   const seen = new Set<string>();
   const actors: AvailableActor[] = [];
@@ -133,6 +145,10 @@ export async function selectActorInteractively(options?: {
 export async function ensureActorSelected(options?: {
   interactive?: boolean;
 }): Promise<string> {
+  if (config.connectionMode === 'local-only') {
+    return LOCAL_ONLY_ACTOR_ID;
+  }
+
   const interactive = options?.interactive ?? false;
   const storedActorId = loadSelectedActorId();
   const actors = await listAvailableActors();

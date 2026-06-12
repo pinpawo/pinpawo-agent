@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   parseHistoryMessages,
+  parseLocalServerRuntime,
   parseResumeSessionSummary,
   TuiLocalServerClient,
 } from './tui/tuiLocalServerClient';
@@ -39,6 +40,20 @@ test('parseResumeSessionSummary validates resume session payloads', () => {
     active: true,
   });
   assert.equal(parseResumeSessionSummary({ id: 'missing-title' }), null);
+});
+
+test('parseLocalServerRuntime preserves local-only connection mode', () => {
+  assert.deepEqual(parseLocalServerRuntime({
+    llm_model: 'qwen-test',
+    llm_context_window_tokens: 32000,
+    workdir: '/tmp/work',
+    connection_mode: 'local-only',
+  }), {
+    model: 'qwen-test',
+    contextWindow: 32000,
+    cwd: '/tmp/work',
+    connectionMode: 'local-only',
+  });
 });
 
 test('TuiLocalServerClient reads sessions, resume payloads, history, and health', async () => {

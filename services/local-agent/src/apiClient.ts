@@ -17,7 +17,14 @@ export type PostPayload = {
   };
 };
 
+function assertApiConnected(operation: string) {
+  if (config.connectionMode !== 'api-connected') {
+    throw new Error(`${operation} requires API login; local-only mode does not have API server credentials`);
+  }
+}
+
 export async function submitPost(payload: PostPayload): Promise<{ post_id: string }> {
+  assertApiConnected('submitPost');
   const res = await fetch(`${config.apiBaseUrl}/agent/post`, {
     method: 'POST',
     headers: {
@@ -42,6 +49,7 @@ export async function submitPost(payload: PostPayload): Promise<{ post_id: strin
 }
 
 export async function requestPostImage(postId: string): Promise<void> {
+  assertApiConnected('requestPostImage');
   const res = await fetch(`${config.apiBaseUrl}/agent/post/${postId}/image-request`, {
     method: 'PATCH',
     headers: {
@@ -70,6 +78,7 @@ export async function postTrends(
   platform: string,
   items: TrendItemInput[],
 ): Promise<{ accepted: number; duplicates: number }> {
+  assertApiConnected('postTrends');
   const res = await fetch(`${config.apiBaseUrl}/agent/trends`, {
     method: 'POST',
     headers: {

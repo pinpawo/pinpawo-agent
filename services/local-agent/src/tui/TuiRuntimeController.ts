@@ -274,7 +274,12 @@ export class TuiRuntimeController {
     });
   }
 
-  private setRuntimeFromHealth(payload: { model?: string; contextWindow?: number; cwd?: string }) {
+  private setRuntimeFromHealth(payload: {
+    model?: string;
+    contextWindow?: number;
+    cwd?: string;
+    connectionMode?: 'api-connected' | 'local-only';
+  }) {
     const model = payload.model ?? config.llmModel;
     const cwd = payload.cwd ?? config.workdir;
 
@@ -288,6 +293,7 @@ export class TuiRuntimeController {
         ...(model ? { model } : {}),
         ...(payload.contextWindow !== undefined ? { contextWindow: payload.contextWindow } : {}),
         ...(cwd ? { cwd } : {}),
+        ...(payload.connectionMode ? { connectionMode: payload.connectionMode } : {}),
       },
     });
   }

@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { tool } from '@langchain/core/tools';
 import {
   buildReviewSpec,
@@ -13,6 +14,14 @@ import { readBoolean, readRecord, readString } from '../operationMetadata';
 import { resolveUserPath } from './pathUtils';
 
 const MAX_GIT_OUTPUT_CHARS = 12_000;
+const execFileAsync = promisify(execFile);
+
+type GitCommandResult = {
+  stdout?: unknown;
+  stderr?: unknown;
+  status?: number | null;
+  error?: Error;
+};
 
 function truncateOutput(output: string) {
   if (output.length <= MAX_GIT_OUTPUT_CHARS) return output;
@@ -25,31 +34,46 @@ function normalizePathspecs(pathspecs: string[] | undefined) {
     : [];
 }
 
-function formatGitResult(result: ReturnType<typeof spawnSync>) {
+function formatGitResult(result: GitCommandResult) {
   const stdout = typeof result.stdout === 'string' ? result.stdout.trimEnd() : '';
   const stderr = typeof result.stderr === 'string' ? result.stderr.trimEnd() : '';
   const output = [stdout, stderr].filter(Boolean).join('\n');
-
-  if (result.error) {
-    return `Error: ${result.error.message}`;
-  }
 
   if (result.status && result.status !== 0) {
     return `Error (exit ${result.status}):\n${truncateOutput(output || 'git command failed')}`;
   }
 
+  if (result.error) {
+    return `Error: ${result.error.message}`;
+  }
+
   return truncateOutput(output || '(no output)');
 }
 
-export function runGit(args: string[], cwd?: string) {
+export async function runGit(args: string[], cwd?: string) {
   const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : config.workdir;
-  const result = spawnSync('git', args, {
-    cwd: repo,
-    encoding: 'utf-8',
-    timeout: 15_000,
-    maxBuffer: 1024 * 256,
-  });
-  return formatGitResult(result);
+  try {
+    const result = await execFileAsync('git', args, {
+      cwd: repo,
+      encoding: 'utf-8',
+      timeout: 15_000,
+      maxBuffer: 1024 * 256,
+    });
+    return formatGitResult(result);
+  } catch (err) {
+    if (err instanceof Error && ('stdout' in err || 'stderr' in err)) {
+      const errorRecord = err as Error & { stdout?: unknown; stderr?: unknown; code?: unknown };
+      return formatGitResult({
+        stdout: errorRecord.stdout,
+        stderr: errorRecord.stderr,
+        status: typeof errorRecord.code === 'number'
+          ? errorRecord.code
+          : null,
+        error: errorRecord,
+      });
+    }
+    return formatGitResult({ error: err instanceof Error ? err : new Error(String(err)) });
+  }
 }
 
 const gitPathspecSchema = z.array(z.string().min(1)).optional();

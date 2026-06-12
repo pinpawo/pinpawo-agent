@@ -7,6 +7,7 @@ import {
 import {
   parseLocalAgentClientMessage,
   readLocalAgentClientMessageEnvelope,
+  sendLocalAgentEvent,
   sendLocalAgentMessage,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
@@ -50,6 +51,18 @@ function formatMalformedClientMessage(prefix: string, data: Buffer | string) {
     + `type=${envelope?.type ?? 'unknown'} requestId=${envelope?.requestId ?? 'unknown'}`;
 }
 
+function sendMalformedClientMessageError(ws: WebSocket, data: Buffer | string) {
+  const envelope = readLocalAgentClientMessageEnvelope(data);
+  if (!envelope?.requestId) {
+    return;
+  }
+  sendLocalAgentEvent(ws, {
+    type: 'error',
+    requestId: envelope.requestId,
+    message: '客户端消息协议不兼容或格式无效，请升级客户端后重试。',
+  });
+}
+
 function runHandler(
   name: string,
   handler: () => MaybePromise<void>,
@@ -73,6 +86,7 @@ export function dispatchLocalServerWebSocketMessage(
     const msg = parseLocalAgentClientMessage(data);
     if (!msg) {
       logWarn(formatMalformedClientMessage('[local-server]', data));
+      sendMalformedClientMessageError(ws, data);
       return;
     }
 

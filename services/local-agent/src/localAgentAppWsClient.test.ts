@@ -96,6 +96,15 @@ test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', 
   assert.deepEqual(warnings, [
     '[local-agent] ignored malformed app client message type=human_review_response requestId=req-1',
   ]);
+  assert.deepEqual((ws as unknown as FakeWebSocket).sent, [{
+    type: 'event',
+    requestId: 'req-1',
+    event: {
+      type: 'error',
+      requestId: 'req-1',
+      message: '客户端消息协议不兼容或格式无效，请升级客户端后重试。',
+    },
+  }]);
 });
 
 test('dispatchLocalAgentAppWebSocketMessage replies to ping with pong', () => {

@@ -39,18 +39,16 @@
 
 ### 语义
 
-- 委派状态变为 `completed` 的那一刻，把该 delegationId 的 lane 消息折叠为**纯文本 AI 消息**（中间结论 + announce），删除工具消息和带 tool_calls 的 AI 消息。
+- 委派状态变为 `completed` 的那一刻，该 delegationId 的 lane 消息**只保留 announce 一条**，其余全部清除——包括纯文本 AI 中间笔记。依据：完成后的下游消费者只有三个，全部只读 announce——决策节点（`readLatestAnnounce` / `readRecentAnnounces`）、compaction（`formatLaneAnnounceForSummary`）、handoff 转发（previousReport）。中间笔记的服务对象是"本任务的后续迭代"，任务完成即失去全部读者；`readResult` / `resultSchema` 的解析发生在折叠之前的 `laneOutputMessages` 上，不受影响。
 - `progress` / `limit_reached` 的委派**原样保留**（transcript-continuation 是被打断任务的生命线；它的 announce 只是最后一条 progress 文本，不是完整汇报）。
 - 折叠时机选"完成时"而非"turn 结束时"：turn 内每个 super-step 都在写 checkpoint，晚折叠让整个 turn 的快照都背着死流水。
 
 ### 实现要点
 
-折叠分两条路径，都在 `completed` 判定处触发：
+折叠 = 只留 announce。分两条路径，都在 `completed` 判定处触发：
 
-1. **当次完成**（`capabilityNode`/`generalNode` 返回时 announce 即为 completed）：在 `tagNewLaneMessages` 之后、返回 state 之前，直接把本次新增消息过滤为纯文本 AI 消息。最简单，不需要 RemoveMessage。
-2. **续跑后完成**（前几轮 progress 留下的旧流水，本轮才 completed）：旧消息已在 state 里，需要节点返回 `RemoveMessage`（按消息 id）清除该 delegationId 的历史工具消息。messages channel 的 reducer 会给无 id 消息补 uuid，但实现时要在写入侧确保 id 存在，避免删不掉。
-
-过滤规则与读取侧 `toolProtocolSafeMessages` 保持自洽：删 tool 消息时必须同时删发起它的带 tool_calls 的 AI 消息，不留孤儿（读取侧虽会兜底丢弃孤儿，state 里也不应留垃圾）。
+1. **当次完成**（`capabilityNode`/`generalNode` 返回时 announce 即为 completed）：`tagNewLaneMessages` 选定 announce 后，只把 announce 消息合入 state，其余本次新增消息直接不返回。最简单，不需要 RemoveMessage。
+2. **续跑后完成**（前几轮 progress 留下的旧流水，本轮才 completed）：旧消息已在 state 里，需要节点返回 `RemoveMessage`（按消息 id）清除该 delegationId 除 announce 外的全部历史消息。messages channel 的 reducer 会给无 id 消息补 uuid，但实现时要在写入侧确保 id 存在，避免删不掉。
 
 ### 配套修正
 
@@ -58,8 +56,8 @@
 
 ### 测试点
 
-- 当次完成：合入 state 的消息不含 tool 消息；announce 文本保留。
-- 续跑链：progress → 续跑（同 delegationId，transcript 完整）→ completed → 旧流水被 RemoveMessage 清除。
+- 当次完成：合入 state 的消息只有 announce 一条。
+- 续跑链：progress → 续跑（同 delegationId，transcript 完整）→ completed → 除 announce 外的旧消息全部被 RemoveMessage 清除。
 - HITL 回归：委派中途 review interrupt → resume 正常（子代理内部状态在 checkpointer 的子 namespace 里，不受 state.messages 折叠影响——用 `npm run eval:hitl` 验证这个假设）。
 - compaction 触发不再被 lane 噪音点燃（构造大量 lane 消息 + 少量主线消息，断言不触发）。
 
@@ -73,32 +71,71 @@
 
 ### 4.2 contextPolicy（第四个 runtime 覆盖项，explore 首个使用者）
 
+#### 设计前提：可重取性是工具属性，不是全局常量
+
+`view_file_chunk` / `grep_search` 幂等可重取；`http_fetch` / `download_file` 半可重取（有网络成本、内容时变）；browser 交互、有副作用的 shell 命令不可重取。单层扁平配置表达不了这个差异，所以规范分三层——**工具作者声明性质，能力作者声明预算，逃生舱兜底**：
+
+**层 1：工具级提示（toolkit 作者声明）**——挂在现有 `ToolkitOperationMetadata` 上，和 `summarizeInput` 等元数据同源维护：
+
+```ts
+// ToolkitOperationMetadata 扩展
+contextHints?: {
+  refetchable?: boolean;                       // 默认 false（保守：未声明的工具不淘汰）
+  stub?: (input: unknown, output: unknown) => string;
+  // 自定义存根；缺省实现复用 summarizeInput 生成调用指纹 + 一行摘要
+};
+```
+
+**层 2：能力级声明策略（capability 作者声明预算与窗口）**：
+
 ```ts
 // CapabilityRuntime 新增可选项；capabilityNode 透传进 SubagentInput
 contextPolicy?: {
   evictToolResults?: {
-    keepRecent: number;      // 最近 K 次工具结果全文保留（建议 5）
-    minSizeChars: number;    // 只有大于阈值的才可淘汰（建议 2000）
-    keepFailures: true;      // 失败结果永不淘汰
+    keepRecent: number;          // 最近 K 次工具结果全文保留（recency 下限保护）
+    budgetTokens?: number;       // 目标预算：超出时从最老的可淘汰结果开始淘汰，直到回到预算内
+    minSizeChars?: number;       // 小于该值不淘汰（默认 2000）
+    keepFailures?: boolean;      // 默认 true：失败结果永不淘汰
+    perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
+    // 工具名级覆盖，优先级最高；'truncate' 保留头部 minSizeChars 字符
   };
+  rewrite?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[];
+  // 逃生舱：完全自定义改写，声明后 evictToolResults 失效；ctx 提供窗口估算、迭代计数、operation metadata
+};
+```
+
+规则合成优先级（高到低）：`perTool` 覆盖 → `keepFailures` 保护 → 层 1 `refetchable` 提示（false 则不淘汰）→ `keepRecent` / `minSizeChars` / `budgetTokens` 体积与预算规则。`budgetTokens` 与 `keepRecent` 的关系：K 是地板（最近 K 次无论预算如何都保留全文），预算是目标（超出时从最老的可淘汰项开始动手）。
+
+**explore 的预设值（作为本规范的第一个校验用例）**：
+
+```ts
+contextPolicy: {
+  evictToolResults: {
+    keepRecent: 5,
+    budgetTokens: 24_000,   // 配合便宜模型的窗口（qwen-flash/glm-air 档）
+    keepFailures: true,
+    // 只读工具子集全部 refetchable: true（由 bash toolkit 层 1 声明），无需 perTool 覆盖
+  },
 }
 ```
 
 **不对称可重取规则**——淘汰判据不是"旧"，是"可重取"：
 
-- **可淘汰**：大体积的成功输出（文件读取、grep 命中——窗口成本的大头）。幂等可重取，且重读返回的是当前状态，自我修改之后比记忆更正确。替换为确定性存根，保留调用指纹 + 一行摘要：`[evicted: view_file_chunk src/foo.ts:1-200 → 已读；需要时重新调用]`。
-- **永不淘汰**：失败结果（stderr/exit code 天然很小，是"别重犯这个错"的载体；判定：`ToolMessage.status === 'error'` 或文本 `^Error` 前缀）、AI 文本消息（模型自己的笔记）、存根本身（连成功调用也留"试过了"的记录）。
+- **可淘汰**：大体积、`refetchable: true` 的成功输出（文件读取、grep 命中——窗口成本的大头）。重读返回的是当前状态，自我修改之后比记忆更正确。替换为确定性存根：`[evicted: view_file_chunk src/foo.ts:1-200 → 已读；需要时重新调用]`。
+- **永不淘汰**：失败结果（stderr/exit code 天然很小，是"别重犯这个错"的载体；判定：`ToolMessage.status === 'error'` 或文本 `^Error` 前缀）、AI 文本消息（模型自己的笔记）、存根本身（连成功调用也留"试过了"的记录）、未声明 refetchable 的工具结果。
 - **破坏性改写**：直接改写子代理消息状态，而不是只裁喂给模型的视图。收益：子代理返回的 transcript 天然有界（L2 的"未决保留窗口"自动有上界）；续跑时模型看到的现场与被打断前自己经历的窗口完全一致。
 - **零 LLM 调用**：纯字符串规则。子代理循环内不做 LLM compaction（额外调用复杂度 + 有损，两条都被否决）。
 - 配套 governing instruction 一行："较早的工具原始输出会被淘汰，重要发现要随时写进你的回复里。"
 
 ### 管道
 
-`CapabilityRuntime` → `capabilityNode` → `SubagentInput`，与 #75 的 `model` / `maxIterations` 覆盖项同一条管道（三个一起加，types 改一次）。general lane 不声明 contextPolicy，保持全保留。
+`CapabilityRuntime` → `capabilityNode` → `SubagentInput`，与 #75 的 `model` / `maxIterations` 覆盖项同一条管道（三个一起加，types 改一次）。general lane 不声明 contextPolicy，保持全保留。层 1 的 `contextHints` 随 toolkit operation metadata 一起进入 `SubagentInput.operations`，淘汰器从那里读。
 
 ### 测试点
 
-- 淘汰规则单测：大成功结果被存根化、小结果/失败/AI 消息原样保留、K 窗口滑动正确。
+- 淘汰规则单测：大且 refetchable 的成功结果被存根化；小结果 / 失败 / AI 消息 / 未声明 refetchable 的结果原样保留；K 地板与 budgetTokens 目标的相互作用正确；`perTool` 覆盖优先级最高。
+- 层 1 缺省存根：未提供 `stub` 的工具用 `summarizeInput` 指纹兜底。
+- `rewrite` 逃生舱：声明后声明式规则不再生效。
 - 保险丝：构造超长 messages，断言以 limit_reached 收场而非抛错。
 - 不声明 contextPolicy 的能力：行为与现状逐字节一致。
 

@@ -131,6 +131,31 @@ test('resolveTuiKeyAction routes global, approval, busy, and composer keys', () 
   );
 });
 
+test('resolveTuiKeyAction treats raw return input as submit', () => {
+  const readyContext = {
+    ready: true,
+    busy: false,
+    hasPendingApproval: false,
+    hasResumePicker: false,
+  };
+  const rawReturnInputs = ['\r', '\n', '\r\n'];
+
+  for (const input of rawReturnInputs) {
+    assert.deepEqual(
+      resolveTuiKeyAction(input, {}, readyContext),
+      { type: 'composer.submit' },
+    );
+    assert.deepEqual(
+      resolveTuiKeyAction(input, {}, { ...readyContext, hasPendingApproval: true }),
+      { type: 'approval.submit' },
+    );
+    assert.deepEqual(
+      resolveTuiKeyAction(input, {}, { ...readyContext, hasResumePicker: true }),
+      { type: 'resume.submit' },
+    );
+  }
+});
+
 test('applyComposerInput keeps cursor editing behavior in pure input reducer', () => {
   let state: ComposerInputState = { value: 'helo', cursorOffset: 2 };
   state = applyComposerInput('l', {}, state);

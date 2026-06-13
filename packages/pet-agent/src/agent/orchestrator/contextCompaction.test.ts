@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { ToolMessage } from '@langchain/core/messages/tool';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
@@ -40,6 +41,39 @@ test('orchestrator context compaction stays idle below high-watermark threshold'
 
   assert.equal(result.compacted, false);
   assert.deepEqual(result.messages, []);
+});
+
+test('orchestrator context compaction trigger ignores lane transcript noise', async () => {
+  let invoked = false;
+  const messages: BaseMessage[] = [
+    new HumanMessage('用户只发了一个很短的请求。'),
+    new AIMessage('主线回复也很短。'),
+  ];
+
+  for (let index = 0; index < 20; index++) {
+    const toolResult = new ToolMessage({
+      content: `lane-noise-${index} ${'x'.repeat(3200)}`,
+      tool_call_id: `call-${index}`,
+    });
+    setPinpetMeta(toolResult, {
+      lane: 'general',
+      turnId: 'turn-1',
+      delegationId: 'task-noise',
+    });
+    messages.push(toolResult);
+  }
+
+  const result = await compactOrchestratorMessages({
+    messages,
+    model: fakeSummaryModel('should not run', () => {
+      invoked = true;
+    }),
+    options: { contextWindowTokens: 8000, keepMessages: 1 },
+  });
+
+  assert.equal(result.compacted, false);
+  assert.equal(invoked, false);
+  assert.equal(result.estimatedTokens, estimateMessagesTokens(messages.slice(0, 2)));
 });
 
 test('orchestrator context compaction summarizes old messages and keeps recent suffix', async () => {

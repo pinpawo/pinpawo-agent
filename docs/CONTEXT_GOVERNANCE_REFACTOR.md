@@ -2,7 +2,7 @@
 
 > 状态：Spec v1（issue #115 讨论定稿）
 > 日期：2026-06-13
-> 关联：#115（本文档的事实来源）、#114/PR #114（L3/L4 止血）、#117（已合并，L2 的读取侧前置）、#75（explore，依赖 L1/L2）、#77（availableToolkits）
+> 关联：#115（本文档的事实来源）、#117（已合并，L2 的读取侧前置）、#75（explore，依赖 L1/L2）、#77（availableToolkits）。#114（L3 止血补丁）不合并——直接由 L4 取代，见第 5 节。
 
 ## 1. 问题与不变量
 
@@ -12,8 +12,8 @@
 |---|---|---|
 | L1 子代理模型窗口 | `createSubagent` 是裸循环，无淘汰；每轮重发全量历史，token O(n²)，高迭代任务顶穿窗口 | 待实现 |
 | L2 orchestrator state | lane 全量工具流水合入 `state.messages`；污染 compaction 触发估算；膨胀每个 checkpoint | #117 已做读取侧隔离；写侧折叠待实现 |
-| L3 checkpoint 数量 | 每 super-step 全量快照，数量无界 | PR #114 封顶 40/namespace（review 修复待合） |
-| L4 落盘 | 单 thread 拼一个 JSON 字符串，撞 V8 字符串上限 | PR #114 隔离止血；git 式布局为终态方案 |
+| L3 checkpoint 数量 | 每 super-step 全量快照，数量无界 | 不单独做——根因（全量快照）由 L4 内容寻址消除；#114 不合并 |
+| L4 落盘 | 单 thread 拼一个 JSON 字符串，撞 V8 字符串上限 | git 式内容寻址布局为终态方案，直接落地 |
 
 三条设计不变量，所有改动必须服从：
 
@@ -140,9 +140,16 @@ contextPolicy: {
 - 保险丝：构造超长 messages，断言以 limit_reached 收场而非抛错。
 - 不声明 contextPolicy 的能力：行为与现状逐字节一致。
 
-## 5. L3：checkpoint 数量封顶（收尾中）
+## 5. L3：checkpoint 数量封顶（不做，直接上 L4）
 
-PR #114 已实现每 namespace 保留 40 + flush 隔离。代码评审产出 F1–F6 修复（关键：F1 legacy 文件删除必须以 flush 全部成功为前提，否则动机场景下丢数据；F2 加载后立即裁剪 + 置 dirty），已在 worktree `pinpawo-agent-worktrees/fix-filesaver` 实现并通过 7 个测试，**待提交合并**。L2 落地后单快照变小，40 这个值可下调（构造参数已留好）。
+**决定放弃 L3 这一层独立改动。** PR #114（每 namespace 保留 40 + flush 隔离）尚未合并；与其先合一个止血补丁、隔天又被 L4 取代，不如直接落 L4——内容寻址从根因（全量快照 = N 份 messages 拷贝）上消除了"必须靠砍数量止血"的前提，"数量"不再是需要防御的因子（blob 共享后多保留 checkpoint 几乎免费）。L4 一天内可落地（vibe coding），不值得为这个窗口期合 L3。
+
+#114 的代码评审成果不浪费——它揭示的两条**正确性约束与全量/内容寻址无关，迁移到 L4 实现时必须带上**：
+
+- **F1：写失败不得删旧数据。** 任何"用新布局取代旧文件"的迁移/重写路径，删除旧持久副本前必须确认新副本已完整落盘；任一 thread 序列化失败时保留旧文件，下周期重试。
+- **F2：加载即应用保留策略。** 从盘上恢复后立即对超限内容执行裁剪/GC，否则已经超大的旧 thread 永远不会被瘦身，反复触发同一失败。
+
+这两条在 L4 里对应：object 写 tmp+rename 确认成功后才更新 ref / 删旧 manifest（F1）；启动加载后立即跑一次 GC（F2）。
 
 ## 6. L4：git 式内容寻址 FileSaver（终态设计）
 
@@ -158,7 +165,7 @@ checkpoint 链与 git commit 模型同构（parent 指针 / 不可变快照 / la
 
 - **put**：channel values 分解到消息粒度逐条 hash → 只写不存在的 object（tmp+rename）→ 写 manifest → 更新 ref。写入成本 ∝ 新增内容。
 - **getTuple**：ref → manifest → 按 hash 取 object，按需懒加载。
-- **prune/GC**：删 manifest（#114 的保留 K 策略原样迁移）；GC 从存活 manifest 标记可达 object，低频清扫（启动时即可）。
+- **prune/GC**：删 manifest（如需限制历史长度，保留最近 K 个 manifest）；GC 从存活 manifest 标记可达 object，低频清扫（启动时即可，满足 F2）。注意 blob 共享后多保留 manifest 成本极低，K 可以设得很大甚至不裁——L3 那种"为省钱牺牲历史"的权衡不再必要。
 - **附带退役**：MemorySaver 继承（全库 RAM 镜像）、flush 定时器、dirty 标志、30 秒崩溃丢失窗口——每次 put 落盘即持久。
 - **与 L2 联动**：折叠后的 blob 失去引用，GC 自然回收。
 - **trade-off**：`setPinpetMeta` 原地改 meta 产生垃圾 blob（GC 兜底）；文件数用 git 两级散列目录，packfile 类比列为远期。
@@ -171,8 +178,9 @@ checkpoint 链与 git commit 模型同构（parent 指针 / 不可变快照 / la
 ① L2 completed 折叠 + compaction 估算修正   （#117 已铺好 delegationId 基础，立即可做）
 ② L1 保险丝（全局）
 ③ L1 contextPolicy 机制 + 类型管道           （与 #75 的 model/maxIterations 覆盖同批）
-④ L3 收尾：PR #114 + review 修复合并         （与 ①② 并行无依赖）
-⑤ L4 git 式 FileSaver                        （存储再出问题或排期空闲时）
+④ L4 git 式 FileSaver                        （取代 L3；带上 F1/F2 约束。与 ①②③ 并行无依赖）
+
+L3 不单独做（见第 5 节）；#114 不合并。
 ```
 
 验收标准（按策略分别适用）：

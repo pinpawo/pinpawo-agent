@@ -40,6 +40,7 @@
 ### 语义
 
 - 委派状态变为 `completed` 的那一刻，该 delegationId 的 lane 消息**只保留 announce 一条**，其余全部清除——包括纯文本 AI 中间笔记。依据：完成后的下游消费者只有三个，全部只读 announce——决策节点（`readLatestAnnounce` / `readRecentAnnounces`）、compaction（`formatLaneAnnounceForSummary`）、handoff 转发（previousReport）。中间笔记的服务对象是"本任务的后续迭代"，任务完成即失去全部读者；`readResult` / `resultSchema` 的解析发生在折叠之前的 `laneOutputMessages` 上，不受影响。
+- **超出 announce 的收割走 `resultSchema`，不要回头保留笔记**：announce 是给人/下游 LLM 读的自然语言结论，`capabilityResult`（schema 校验后进 state）是给程序读的结构化收割通道——两者都在折叠前定型。将来 memory 层若要收割探索发现，正确做法是给该能力定义 `resultSchema`（与 #75 "ExploreResult schema 延后到需要时再做"对齐），而不是改折叠逻辑。折叠清掉的只是产生 announce / result 的过程性废料。
 - `progress` / `limit_reached` 的委派**原样保留**（transcript-continuation 是被打断任务的生命线；它的 announce 只是最后一条 progress 文本，不是完整汇报）。
 - 折叠时机选"完成时"而非"turn 结束时"：turn 内每个 super-step 都在写 checkpoint，晚折叠让整个 turn 的快照都背着死流水。
 
@@ -178,7 +179,7 @@ checkpoint 链与 git commit 模型同构（parent 指针 / 不可变快照 / la
 
 - 声明 evictToolResults 的能力：30 轮读密集运行 token 近似线性增长，32k 窗口内完成。
 - 全保留能力：接近窗口上限时以 limit_reached 体面收场（保险丝覆盖）。
-- `state.messages` 不含已完成委派的工具消息；checkpoint 体积由会话长度决定，不再由工具调用量决定。
+- 已完成委派在 `state.messages` 中只剩 announce 一条（工具消息和中间 AI 笔记均已清除）；checkpoint 体积由会话长度决定，不再由工具调用量决定。
 - 同 turn 续跑（progress/limit_reached）拿到完整（L1 限界后的）现场；新任务从零开始（#117 已保证）。
 - HITL 委派中途 resume 回归通过（`eval:hitl`）。
 - compaction 不再被 lane 噪音触发。

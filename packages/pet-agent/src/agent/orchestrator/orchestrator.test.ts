@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool } from '@langchain/core/tools';
-import { Command, isCommand, MemorySaver } from '@langchain/langgraph';
+import { Command, isCommand, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
@@ -30,6 +30,7 @@ import {
   getMessageAnnounce,
   getMessageDelegationId,
   laneMessages,
+  laneMessagesForStateUpdate,
   mainConversationMessages,
   readLatestAnnounce,
   setPinpetMeta,
@@ -836,11 +837,20 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     },
   }), config) as {
     __interrupt__?: unknown;
+    messages: Array<AIMessage | HumanMessage | ToolMessage>;
+    turnId: string;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
+  const announce = readLatestAnnounce(finalState.messages, { turnId: finalState.turnId });
+  assert.equal(announce?.announce, 'progress');
+  assert.ok(announce?.delegationId);
+  assert.ok(
+    laneMessages(finalState.messages, 'general', finalState.turnId, announce.delegationId)
+      .some((message) => message.content === 'ran git status'),
+  );
 });
 
 test('iteration limit review emits canonical ReviewSpec interrupt payload', async () => {
@@ -1069,6 +1079,100 @@ test('lane tagging marks limit-reached result as progress', () => {
     task: '读取文件并运行 lint',
     announce: 'progress',
     text: '文件读取完成，lint 还没跑。',
+  });
+});
+
+test('completed lane state update keeps only the announce from the current run', () => {
+  const human = new HumanMessage('检查项目并汇报');
+  const toolCall = new AIMessage({
+    content: '先读取 package.json。',
+    tool_calls: [{ id: 'call-read', name: 'read_file', args: { path: 'package.json' } }],
+  });
+  const toolResult = new ToolMessage({
+    content: '{"scripts":{"test":"node --test"}}',
+    tool_call_id: 'call-read',
+  });
+  const note = new AIMessage('已经确认测试脚本。');
+  const announce = new AIMessage('检查完成，测试脚本是 node --test。');
+  const outputMessages = [human, toolCall, toolResult, note, announce];
+
+  const tagged = tagNewLaneMessages(outputMessages, 1, 'general', 'turn-1', 'natural', {
+    delegationId: 'task-complete',
+    task: '检查项目并汇报',
+  });
+  const update = laneMessagesForStateUpdate({
+    existingMessages: [human],
+    outputMessages: tagged,
+    lane: 'general',
+    turnId: 'turn-1',
+    delegationId: 'task-complete',
+  });
+  const stateMessages = messagesStateReducer([human], update);
+
+  assert.deepEqual(stateMessages.map((message) => message.content), [
+    '检查项目并汇报',
+    '检查完成，测试脚本是 node --test。',
+  ]);
+  assert.equal(getMessageAnnounce(stateMessages[1]), 'completed');
+  assert.equal(getMessageDelegationId(stateMessages[1]), 'task-complete');
+});
+
+test('completed continuation removes old progress transcript for the same delegation', () => {
+  const human = new HumanMessage('处理所有分片');
+  const oldToolCall = new AIMessage({
+    content: '处理第一个分片。',
+    tool_calls: [{ id: 'call-old', name: 'process_next_chunk', args: { source: 'items.csv' } }],
+  });
+  const oldToolResult = new ToolMessage({
+    content: '第一个分片完成，还有剩余。',
+    tool_call_id: 'call-old',
+  });
+  const oldProgress = new AIMessage('已处理第一个分片，尚未完成。');
+  const previousRun = [human, oldToolCall, oldToolResult, oldProgress];
+  const previousUpdate = tagNewLaneMessages(previousRun, 1, 'general', 'turn-1', 'limit_reached', {
+    delegationId: 'task-resume',
+    task: '处理所有分片',
+  });
+  const stateWithProgress = messagesStateReducer([human], previousUpdate);
+  assert.equal(laneMessages(stateWithProgress, 'general', 'turn-1', 'task-resume').length, 4);
+
+  const finalNote = new AIMessage('继续处理剩余分片。');
+  const completedAnnounce = new AIMessage('全部分片已处理完成，共 120 条。');
+  const continuationOutput = [
+    ...laneMessages(stateWithProgress, 'general', 'turn-1', 'task-resume'),
+    finalNote,
+    completedAnnounce,
+  ];
+  const taggedContinuation = tagNewLaneMessages(
+    continuationOutput,
+    stateWithProgress.length,
+    'general',
+    'turn-1',
+    'natural',
+    {
+      delegationId: 'task-resume',
+      task: '处理所有分片',
+    },
+  );
+  const foldedUpdate = laneMessagesForStateUpdate({
+    existingMessages: stateWithProgress,
+    outputMessages: taggedContinuation,
+    lane: 'general',
+    turnId: 'turn-1',
+    delegationId: 'task-resume',
+  });
+  const finalState = messagesStateReducer(stateWithProgress, foldedUpdate);
+
+  assert.deepEqual(laneMessages(finalState, 'general', 'turn-1', 'task-resume').map((message) => message.content), [
+    '处理所有分片',
+    '全部分片已处理完成，共 120 条。',
+  ]);
+  assert.deepEqual(readLatestAnnounce(finalState, { delegationId: 'task-resume' }), {
+    lane: 'general',
+    delegationId: 'task-resume',
+    task: '处理所有分片',
+    announce: 'completed',
+    text: '全部分片已处理完成，共 120 条。',
   });
 });
 

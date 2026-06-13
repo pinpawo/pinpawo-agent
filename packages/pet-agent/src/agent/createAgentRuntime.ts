@@ -74,6 +74,7 @@ import {
   getMessageLane,
   getMessageTurnId,
   laneMessages,
+  laneMessagesForStateUpdate,
   mainConversationMessages,
   readLatestHumanRequest,
   readLatestAnnounce,
@@ -772,7 +773,13 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     );
 
     return {
-      messages: laneOutputMessages,
+      messages: laneMessagesForStateUpdate({
+        existingMessages: state.messages,
+        outputMessages: laneOutputMessages,
+        lane,
+        turnId: state.turnId,
+        delegationId: pendingDelegation.id,
+      }),
       capabilityResult,
       capabilitySearchState: buildEmptyCapabilitySearchState(),
       turnDelegations: updatedTurnDelegations,
@@ -864,7 +871,13 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     );
 
     return {
-      messages: outputMessages,
+      messages: laneMessagesForStateUpdate({
+        existingMessages: state.messages,
+        outputMessages,
+        lane,
+        turnId: state.turnId,
+        delegationId: pendingDelegation.id,
+      }),
       capabilitySearchState: buildEmptyCapabilitySearchState(),
       turnDelegations: updatedTurnDelegations,
       pendingDelegation: null,

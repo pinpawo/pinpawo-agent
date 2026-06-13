@@ -1,4 +1,5 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import { RemoveMessage, type BaseMessage } from '@langchain/core/messages';
+import { randomUUID } from 'node:crypto';
 import type { AnnounceKind, MessageLane, PinpetMessageLane, SubagentAnnounce, SubagentCompletionReason } from './types';
 import { readMessageText } from './utils';
 
@@ -30,6 +31,13 @@ export function getMessageAnnounce(message: BaseMessage): AnnounceKind | null {
 
 export function setMessageAnnounce(message: BaseMessage, kind: AnnounceKind) {
   setPinpetMeta(message, { announce: kind });
+}
+
+function ensureMessageId(message: BaseMessage): string {
+  if (!message.id) {
+    message.id = randomUUID();
+  }
+  return message.id;
 }
 
 export function getMessageDelegationId(message: BaseMessage): string | null {
@@ -153,9 +161,9 @@ export const routeMessages = mainConversationMessages;
 /**
  * Tag new messages from subagent result and select an announce message.
  *
- * Announce kind is determined by completionReason + last message type:
+ * Announce kind is determined by completionReason + message content:
  * - natural + last AI with text -> completed
- * - limit_reached or last message is tool result -> progress
+ * - otherwise, last AI/tool with text -> progress
  */
 export function tagNewLaneMessages(
   messages: BaseMessage[],
@@ -171,6 +179,7 @@ export function tagNewLaneMessages(
   const nextMessages = messages.slice(existingCount);
   for (const message of nextMessages) {
     if (message._getType() === 'human') continue;
+    ensureMessageId(message);
     setPinpetMeta(message, { lane, turnId, delegationId: reportMeta?.delegationId ?? null });
   }
 
@@ -214,6 +223,39 @@ export function tagNewLaneMessages(
   return toolProtocolSafeMessages(nextMessages);
 }
 
+export function laneMessagesForStateUpdate(params: {
+  existingMessages: BaseMessage[];
+  outputMessages: BaseMessage[];
+  lane: MessageLane;
+  turnId: string;
+  delegationId: string;
+}): BaseMessage[] {
+  const completedAnnounce = readLatestAnnounceMessage(params.outputMessages, {
+    turnId: params.turnId,
+    delegationId: params.delegationId,
+  });
+  if (!completedAnnounce || getMessageAnnounce(completedAnnounce) !== 'completed') {
+    return params.outputMessages;
+  }
+
+  const announceId = ensureMessageId(completedAnnounce);
+  const removeMessages = params.existingMessages.flatMap((message) => {
+    if (getMessageLane(message) !== params.lane) return [];
+    if (getMessageTurnId(message) !== params.turnId) return [];
+    if (getMessageDelegationId(message) !== params.delegationId) return [];
+    // Legacy checkpointed lane messages may predate message ids; LangGraph
+    // RemoveMessage cannot target them, so those old messages are accepted as
+    // residual history instead of risking an invalid delete.
+    if (!message.id || message.id === announceId) return [];
+    return [new RemoveMessage({ id: message.id }) as BaseMessage];
+  });
+
+  return [
+    ...removeMessages,
+    completedAnnounce,
+  ];
+}
+
 export function readLatestHumanRequest(messages: BaseMessage[]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
@@ -242,18 +284,25 @@ function readTaggedAnnounce(message: BaseMessage): SubagentAnnounce | null {
   };
 }
 
-export function readLatestAnnounce(
+function readLatestAnnounceMessage(
   messages: BaseMessage[],
   options: { turnId?: string | null; delegationId?: string | null } = {},
-): SubagentAnnounce | null {
+): BaseMessage | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
     if (options.turnId && getMessageTurnId(message) !== options.turnId) continue;
     if (options.delegationId && getMessageDelegationId(message) !== options.delegationId) continue;
-    const announce = readTaggedAnnounce(message);
-    if (announce) return announce;
+    if (readTaggedAnnounce(message)) return message;
   }
   return null;
+}
+
+export function readLatestAnnounce(
+  messages: BaseMessage[],
+  options: { turnId?: string | null; delegationId?: string | null } = {},
+): SubagentAnnounce | null {
+  const message = readLatestAnnounceMessage(messages, options);
+  return message ? readTaggedAnnounce(message) : null;
 }
 
 export function readRecentAnnounces(messages: BaseMessage[], limit = 5): SubagentAnnounce[] {

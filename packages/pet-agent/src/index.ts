@@ -24,6 +24,7 @@ export type {
 
 export type {
   SubagentInput,
+  SubagentContextPolicy,
   SubagentResult,
   SubagentRuntimeEvent,
   SubagentToolEvent,

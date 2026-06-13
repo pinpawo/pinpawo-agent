@@ -8,6 +8,7 @@ import {
   getMessageDelegationId,
   getMessageLane,
   getMessageTurnId,
+  mainConversationMessages,
   toolProtocolSafeMessages,
 } from './messageLanes';
 import { clipForPrompt, readMessageText } from './utils';
@@ -210,9 +211,10 @@ export async function compactOrchestratorMessages(params: {
   const contextWindowTokens = params.options?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   const keepMessages = params.options?.keepMessages ?? DEFAULT_KEEP_MESSAGES;
   const triggerTokens = buildTriggerTokens(contextWindowTokens);
-  const estimatedTokens = estimateMessagesTokens(messages);
+  const triggerMessages = mainConversationMessages(messages);
+  const estimatedTokens = estimateMessagesTokens(triggerMessages);
 
-  if (messages.length <= keepMessages || estimatedTokens < triggerTokens) {
+  if (triggerMessages.length <= keepMessages || estimatedTokens < triggerTokens) {
     return { messages: [], compacted: false, estimatedTokens, triggerTokens };
   }
 

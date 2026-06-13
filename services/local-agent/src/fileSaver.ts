@@ -3,12 +3,29 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, extname, join } from 'node:path';
-import { MemorySaver } from '@langchain/langgraph-checkpoint';
+import type { RunnableConfig } from '@langchain/core/runnables';
+import {
+  BaseCheckpointSaver,
+  TASKS,
+  WRITES_IDX_MAP,
+  copyCheckpoint,
+  getCheckpointId,
+  maxChannelVersion,
+  type Checkpoint,
+  type CheckpointListOptions,
+  type CheckpointMetadata,
+  type CheckpointPendingWrite,
+  type CheckpointTuple,
+  type PendingWrite,
+} from '@langchain/langgraph-checkpoint';
 
 type MemorySaverData = {
   storage: Record<string, Record<string, Record<string, [string, string, string | undefined]>>>;
@@ -22,26 +39,60 @@ type ThreadShardData = {
   writes: Record<string, Record<string, [string, string, string]>>;
 };
 
-function uint8ToBase64(u8: Uint8Array): string {
-  return Buffer.from(u8).toString('base64');
-}
+type CheckpointManifest = {
+  version: 1;
+  threadId: string;
+  namespace: string;
+  checkpointId: string;
+  parentCheckpointId?: string;
+  checkpointShellHash: string;
+  metadataHash: string;
+  channelValueHashes?: Record<string, string>;
+  channelValueRefs?: Record<string, ChannelValueRef>;
+};
+
+type WritesManifest = {
+  version: 1;
+  threadId: string;
+  namespace: string;
+  checkpointId: string;
+  outerKey: string;
+  writes: Record<string, {
+    taskId: string;
+    channel: string;
+    valueHash: string;
+  }>;
+};
+
+type SerializedCheckpointTuple = [Uint8Array, Uint8Array, string | undefined];
+
+type ChannelValueRef =
+  | { kind: 'object'; hash: string }
+  | { kind: 'array'; itemHashes: string[] };
+
+const ROOT_NAMESPACE_SEGMENT = '__root__';
 
 function base64ToUint8(b64: string): Uint8Array {
   return new Uint8Array(Buffer.from(b64, 'base64'));
 }
 
-function formatDateBucket(date: Date) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function generateWriteKey(threadId: string, checkpointNamespace: string | undefined, checkpointId: string) {
+  return JSON.stringify([threadId, checkpointNamespace, checkpointId]);
 }
 
-function parseWriteThreadId(key: string): string | null {
+function parseWriteKey(key: string): { threadId: string; namespace: string | undefined; checkpointId: string } | null {
   try {
     const parsed = JSON.parse(key) as unknown;
-    if (Array.isArray(parsed) && typeof parsed[0] === 'string' && parsed[0]) {
-      return parsed[0];
+    if (
+      Array.isArray(parsed)
+      && typeof parsed[0] === 'string'
+      && typeof parsed[2] === 'string'
+    ) {
+      return {
+        threadId: parsed[0],
+        namespace: typeof parsed[1] === 'string' ? parsed[1] : undefined,
+        checkpointId: parsed[2],
+      };
     }
   } catch {
     // ignore malformed keys
@@ -49,151 +100,349 @@ function parseWriteThreadId(key: string): string | null {
   return null;
 }
 
-/**
- * MemorySaver with file-based persistence.
- * Periodically flushes to disk and saves on process exit.
- *
- * Checkpoints are sharded by day and thread so one oversized conversation
- * does not force us to stringify the whole in-memory store into a single file.
- */
-export class FileSaver extends MemorySaver {
-  private dirty = false;
-  private flushTimer: ReturnType<typeof setInterval> | null = null;
-  private exitHandler: (() => void) | null = null;
-  private _loadedThreadCount = 0;
-  private readonly shardRootDir: string;
-  private readonly shardBaseName: string;
-  private readonly shardExt: string;
-  private readonly threadBuckets = new Map<string, string>();
-  private readonly knownShardFiles = new Map<string, string>();
+function encodePathSegment(value: string) {
+  return encodeURIComponent(value || ROOT_NAMESPACE_SEGMENT);
+}
 
-  /** Number of threads restored from file. */
+function objectHash(bytes: Uint8Array) {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function objectPath(rootDir: string, hash: string) {
+  return join(rootDir, 'objects', hash.slice(0, 2), hash.slice(2));
+}
+
+function atomicWriteFile(path: string, data: string | Uint8Array) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
+  writeFileSync(tmp, data);
+  renameSync(tmp, path);
+}
+
+function safeReadDir(path: string) {
+  try {
+    return readdirSync(path);
+  } catch {
+    return [];
+  }
+}
+
+function bytesToJson(bytes: Uint8Array): unknown {
+  return JSON.parse(Buffer.from(bytes).toString('utf-8')) as unknown;
+}
+
+function jsonToBytes(value: unknown): Uint8Array {
+  return new Uint8Array(Buffer.from(JSON.stringify(value), 'utf-8'));
+}
+
+function readObject(rootDir: string, hash: string): Uint8Array {
+  return new Uint8Array(readFileSync(objectPath(rootDir, hash)));
+}
+
+function isChannelValueRef(value: unknown): value is ChannelValueRef {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return (record.kind === 'object' && typeof record.hash === 'string')
+    || (record.kind === 'array' && Array.isArray(record.itemHashes) && record.itemHashes.every((hash) => typeof hash === 'string'));
+}
+
+/**
+ * Content-addressed checkpoint saver.
+ *
+ * Disk layout:
+ *   <base>/objects/ab/cdef...
+ *   <base>/threads/<threadId>/refs/<namespace>
+ *   <base>/threads/<threadId>/manifests/<namespace>/<checkpointId>.json
+ *   <base>/threads/<threadId>/writes/<namespace>/<checkpointId>.json
+ *
+ * Checkpoint channel values and pending writes are immutable blobs addressed by
+ * content hash. Refs are updated only after the referenced manifest and objects
+ * are safely written, so a failed write leaves the previous ref readable.
+ */
+export class FileSaver extends BaseCheckpointSaver {
+  private _loadedThreadCount = 0;
+  private readonly legacyRootDir: string;
+  private readonly legacyBaseName: string;
+  private readonly legacyExt: string;
+  private readonly casRootDir: string;
+
+  /** Number of threads visible in the content-addressed checkpoint store. */
   get loadedThreadCount() {
     return this._loadedThreadCount;
   }
 
-  constructor(
-    private readonly filePath: string,
-    private readonly flushIntervalMs = 30_000,
-  ) {
+  constructor(private readonly filePath: string) {
     super();
-    this.shardRootDir = dirname(this.filePath);
-    this.shardExt = extname(this.filePath) || '.json';
-    this.shardBaseName = basename(this.filePath, this.shardExt);
+    this.legacyRootDir = dirname(this.filePath);
+    this.legacyExt = extname(this.filePath) || '.json';
+    this.legacyBaseName = basename(this.filePath, this.legacyExt);
+    this.casRootDir = join(this.legacyRootDir, this.legacyBaseName);
     this.load();
-    this.startAutoFlush();
   }
 
-  // --- Override put/putWrites to mark dirty ---
-
-  override async put(
-    ...args: Parameters<MemorySaver['put']>
-  ): ReturnType<MemorySaver['put']> {
-    const result = await super.put(...args);
-    this.noteThreadBucket(args[0]?.configurable?.thread_id);
-    this.dirty = true;
-    return result;
-  }
-
-  override async putWrites(
-    ...args: Parameters<MemorySaver['putWrites']>
-  ): ReturnType<MemorySaver['putWrites']> {
-    const result = await super.putWrites(...args);
-    this.noteThreadBucket(args[0]?.configurable?.thread_id);
-    this.dirty = true;
-    return result;
-  }
-
-  override async deleteThread(
-    ...args: Parameters<MemorySaver['deleteThread']>
-  ): ReturnType<MemorySaver['deleteThread']> {
-    const result = await super.deleteThread(...args);
-    const firstArg = args[0] as unknown;
-    const threadId = typeof firstArg === 'string'
-      ? firstArg
-      : (firstArg as { configurable?: { thread_id?: unknown } } | undefined)?.configurable?.thread_id;
-    if (typeof threadId === 'string' && threadId) {
-      this.threadBuckets.delete(threadId);
+  private writeObject(bytes: Uint8Array) {
+    const hash = objectHash(bytes);
+    const path = objectPath(this.casRootDir, hash);
+    if (!existsSync(path)) {
+      atomicWriteFile(path, bytes);
     }
-    this.dirty = true;
-    return result;
+    return hash;
   }
 
-  // --- Persistence ---
-
-  private noteThreadBucket(threadId: unknown, date = new Date()) {
-    if (typeof threadId !== 'string' || !threadId) {
-      return;
+  private listLegacyShardFiles() {
+    if (!existsSync(this.legacyRootDir)) {
+      return [];
     }
-    if (!this.threadBuckets.has(threadId)) {
-      this.threadBuckets.set(threadId, formatDateBucket(date));
-    }
+    const prefix = `${this.legacyBaseName}.`;
+    const legacyFileName = basename(this.filePath);
+    return readdirSync(this.legacyRootDir)
+      .filter((name) => name !== legacyFileName && name.startsWith(prefix) && name.endsWith(this.legacyExt))
+      .map((name) => join(this.legacyRootDir, name));
   }
 
-  private buildShardFilePath(bucket: string, threadId: string) {
+  private threadDir(threadId: string) {
+    return join(this.casRootDir, 'threads', encodePathSegment(threadId));
+  }
+
+  private manifestPath(threadId: string, namespace: string, checkpointId: string) {
     return join(
-      this.shardRootDir,
-      `${this.shardBaseName}.${bucket}.${encodeURIComponent(threadId)}${this.shardExt}`,
+      this.threadDir(threadId),
+      'manifests',
+      encodePathSegment(namespace),
+      `${encodePathSegment(checkpointId)}.json`,
     );
   }
 
-  private listShardFiles() {
-    if (!existsSync(this.shardRootDir)) {
-      return [];
-    }
-    const prefix = `${this.shardBaseName}.`;
-    return readdirSync(this.shardRootDir)
-      .filter((name) => name.startsWith(prefix) && name.endsWith(this.shardExt))
-      .map((name) => join(this.shardRootDir, name));
+  private writesPath(threadId: string, namespace: string, checkpointId: string) {
+    return join(
+      this.threadDir(threadId),
+      'writes',
+      encodePathSegment(namespace),
+      `${encodePathSegment(checkpointId)}.json`,
+    );
   }
 
-  private restoreThreadShard(data: ThreadShardData, fallbackDate: Date) {
-    const bucket = data.bucket || formatDateBucket(fallbackDate);
-    const threadId = data.threadId;
-    if (!threadId) {
-      return;
-    }
+  private refPath(threadId: string, namespace: string) {
+    return join(this.threadDir(threadId), 'refs', encodePathSegment(namespace));
+  }
 
-    this.storage[threadId] ??= {};
+  private readManifest(path: string): CheckpointManifest | null {
+    try {
+      return JSON.parse(readFileSync(path, 'utf-8')) as CheckpointManifest;
+    } catch {
+      return null;
+    }
+  }
+
+  private readWritesManifest(path: string): WritesManifest | null {
+    try {
+      return JSON.parse(readFileSync(path, 'utf-8')) as WritesManifest;
+    } catch {
+      return null;
+    }
+  }
+
+  private readLatestCheckpointId(threadId: string, namespace: string) {
+    try {
+      const checkpointId = readFileSync(this.refPath(threadId, namespace), 'utf-8').trim();
+      return checkpointId || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private checkpointTupleBytes(manifest: CheckpointManifest): SerializedCheckpointTuple {
+    const checkpointShell = bytesToJson(readObject(this.casRootDir, manifest.checkpointShellHash));
+    const checkpoint = checkpointShell && typeof checkpointShell === 'object'
+      ? { ...(checkpointShell as Record<string, unknown>) }
+      : {};
+    const channelValues: Record<string, unknown> = {};
+    for (const [channel, ref] of Object.entries(manifest.channelValueRefs ?? {})) {
+      if (!isChannelValueRef(ref)) continue;
+      channelValues[channel] = ref.kind === 'array'
+        ? ref.itemHashes.map((hash) => bytesToJson(readObject(this.casRootDir, hash)))
+        : bytesToJson(readObject(this.casRootDir, ref.hash));
+    }
+    for (const [channel, hash] of Object.entries(manifest.channelValueHashes ?? {})) {
+      if (!(channel in channelValues)) {
+        channelValues[channel] = bytesToJson(readObject(this.casRootDir, hash));
+      }
+    }
+    checkpoint.channel_values = channelValues;
+    return [
+      jsonToBytes(checkpoint),
+      readObject(this.casRootDir, manifest.metadataHash),
+      manifest.parentCheckpointId,
+    ];
+  }
+
+  private async pendingWritesFor(threadId: string, namespace: string | undefined, checkpointId: string) {
+    const normalizedNamespace = namespace ?? '';
+    const manifest = this.readWritesManifest(this.writesPath(threadId, normalizedNamespace, checkpointId));
+    if (!manifest) return [];
+    const pendingWrites: CheckpointPendingWrite[] = [];
+    for (const record of Object.values(manifest.writes ?? {})) {
+      pendingWrites.push([
+        record.taskId,
+        record.channel,
+        await this.serde.loadsTyped('json', readObject(this.casRootDir, record.valueHash)),
+      ]);
+    }
+    return pendingWrites;
+  }
+
+  private async migratePendingSends(
+    mutableCheckpoint: Checkpoint,
+    threadId: string,
+    checkpointNs: string,
+    parentCheckpointId: string,
+  ) {
+    const pendingSends = (await this.pendingWritesFor(threadId, checkpointNs, parentCheckpointId))
+      .filter(([_taskId, channel]) => channel === TASKS)
+      .map(([_taskId, _channel, value]) => value);
+    mutableCheckpoint.channel_values ??= {};
+    mutableCheckpoint.channel_values[TASKS] = pendingSends;
+    mutableCheckpoint.channel_versions ??= {};
+    mutableCheckpoint.channel_versions[TASKS] = Object.keys(mutableCheckpoint.channel_versions).length > 0
+      ? maxChannelVersion(...Object.values(mutableCheckpoint.channel_versions))
+      : this.getNextVersion(undefined);
+  }
+
+  private async tupleFromManifest(manifest: CheckpointManifest, config: RunnableConfig): Promise<CheckpointTuple> {
+    const [checkpointBytes, metadataBytes, parentCheckpointId] = this.checkpointTupleBytes(manifest);
+    const checkpoint = await this.serde.loadsTyped('json', checkpointBytes) as Checkpoint;
+    if (checkpoint.v < 4 && parentCheckpointId !== undefined) {
+      await this.migratePendingSends(checkpoint, manifest.threadId, manifest.namespace, parentCheckpointId);
+    }
+    const checkpointTuple: CheckpointTuple = {
+      config,
+      checkpoint,
+      metadata: await this.serde.loadsTyped('json', metadataBytes),
+      pendingWrites: await this.pendingWritesFor(manifest.threadId, manifest.namespace, manifest.checkpointId),
+    };
+    if (parentCheckpointId !== undefined) {
+      checkpointTuple.parentConfig = {
+        configurable: {
+          thread_id: manifest.threadId,
+          checkpoint_ns: manifest.namespace,
+          checkpoint_id: parentCheckpointId,
+        },
+      };
+    }
+    return checkpointTuple;
+  }
+
+  private buildCheckpointManifest(
+    threadId: string,
+    namespace: string,
+    checkpointId: string,
+    tuple: SerializedCheckpointTuple,
+  ): CheckpointManifest {
+    const checkpoint = bytesToJson(tuple[0]);
+    const checkpointRecord = checkpoint && typeof checkpoint === 'object'
+      ? { ...(checkpoint as Record<string, unknown>) }
+      : {};
+    const rawChannelValues = checkpointRecord.channel_values;
+    const channelValues = rawChannelValues && typeof rawChannelValues === 'object' && !Array.isArray(rawChannelValues)
+      ? rawChannelValues as Record<string, unknown>
+      : {};
+    const channelValueRefs: Record<string, ChannelValueRef> = {};
+    for (const [channel, value] of Object.entries(channelValues)) {
+      channelValueRefs[channel] = Array.isArray(value)
+        ? { kind: 'array', itemHashes: value.map((item) => this.writeObject(jsonToBytes(item))) }
+        : { kind: 'object', hash: this.writeObject(jsonToBytes(value)) };
+    }
+    checkpointRecord.channel_values = {};
+
+    return {
+      version: 1,
+      threadId,
+      namespace,
+      checkpointId,
+      ...(tuple[2] ? { parentCheckpointId: tuple[2] } : {}),
+      checkpointShellHash: this.writeObject(jsonToBytes(checkpointRecord)),
+      metadataHash: this.writeObject(tuple[1]),
+      channelValueRefs,
+    };
+  }
+
+  private writeCheckpointTuple(
+    threadId: string,
+    namespace: string,
+    checkpointId: string,
+    tuple: SerializedCheckpointTuple,
+  ) {
+    mkdirSync(this.casRootDir, { recursive: true });
+    const manifest = this.buildCheckpointManifest(threadId, namespace, checkpointId, tuple);
+    atomicWriteFile(this.manifestPath(threadId, namespace, checkpointId), JSON.stringify(manifest));
+    atomicWriteFile(this.refPath(threadId, namespace), checkpointId);
+  }
+
+  private writeWritesManifest(
+    threadId: string,
+    namespace: string | undefined,
+    checkpointId: string,
+    outerKey: string,
+    writes: Record<string, [string, string, Uint8Array]>,
+  ) {
+    const normalizedNamespace = namespace ?? '';
+    const writeManifest: WritesManifest = {
+      version: 1,
+      threadId,
+      namespace: normalizedNamespace,
+      checkpointId,
+      outerKey,
+      writes: {},
+    };
+    for (const [innerKey, tuple] of Object.entries(writes)) {
+      writeManifest.writes[innerKey] = {
+        taskId: tuple[0],
+        channel: tuple[1],
+        valueHash: this.writeObject(tuple[2]),
+      };
+    }
+    atomicWriteFile(this.writesPath(threadId, normalizedNamespace, checkpointId), JSON.stringify(writeManifest));
+  }
+
+  private migrateLegacyThreadShard(data: ThreadShardData) {
+    const threadId = data.threadId;
+    if (!threadId) return;
     for (const [namespace, checkpoints] of Object.entries(data.storage ?? {})) {
-      this.storage[threadId][namespace] ??= {};
       for (const [checkpointId, tuple] of Object.entries(checkpoints)) {
-        this.storage[threadId][namespace][checkpointId] = [
+        this.writeCheckpointTuple(threadId, namespace, checkpointId, [
           base64ToUint8(tuple[0]),
           base64ToUint8(tuple[1]),
           tuple[2],
-        ];
+        ]);
       }
     }
-
     for (const [outerKey, writes] of Object.entries(data.writes ?? {})) {
-      this.writes[outerKey] ??= {};
+      const parsed = parseWriteKey(outerKey);
+      if (!parsed) continue;
+      const restored: Record<string, [string, string, Uint8Array]> = {};
       for (const [innerKey, tuple] of Object.entries(writes)) {
-        this.writes[outerKey][innerKey] = [
-          tuple[0],
-          tuple[1],
-          base64ToUint8(tuple[2]),
-        ];
+        restored[innerKey] = [tuple[0], tuple[1], base64ToUint8(tuple[2])];
       }
+      this.writeWritesManifest(parsed.threadId, parsed.namespace, parsed.checkpointId, outerKey, restored);
     }
-
-    this.threadBuckets.set(threadId, bucket);
-    this._loadedThreadCount += 1;
   }
 
-  private load() {
-    const shardFiles = this.listShardFiles();
+  private migrateLegacy() {
+    const shardFiles = this.listLegacyShardFiles();
     if (shardFiles.length > 0) {
+      const migratedFiles: string[] = [];
       for (const file of shardFiles) {
         try {
           const raw = readFileSync(file, 'utf-8');
-          const data = JSON.parse(raw) as ThreadShardData;
-          this.restoreThreadShard(data, statSync(file).mtime);
-          if (data.threadId) {
-            this.knownShardFiles.set(data.threadId, file);
-          }
+          this.migrateLegacyThreadShard(JSON.parse(raw) as ThreadShardData);
+          migratedFiles.push(file);
         } catch {
           // ignore corrupt shard files
+        }
+      }
+      for (const shardFile of migratedFiles) {
+        if (existsSync(shardFile)) {
+          unlinkSync(shardFile);
         }
       }
       return;
@@ -202,150 +451,270 @@ export class FileSaver extends MemorySaver {
     try {
       const raw = readFileSync(this.filePath, 'utf-8');
       const data = JSON.parse(raw) as MemorySaverData;
-      const legacyDate = statSync(this.filePath).mtime;
-      const bucket = formatDateBucket(legacyDate);
-
+      let migrated = false;
       for (const [threadId, namespaces] of Object.entries(data.storage ?? {})) {
         const threadWrites: Record<string, Record<string, [string, string, string]>> = {};
         for (const [outerKey, writes] of Object.entries(data.writes ?? {})) {
-          if (parseWriteThreadId(outerKey) === threadId) {
+          if (parseWriteKey(outerKey)?.threadId === threadId) {
             threadWrites[outerKey] = writes;
           }
         }
-        this.restoreThreadShard({
+        this.migrateLegacyThreadShard({
           threadId,
-          bucket,
+          bucket: '',
           storage: namespaces,
           writes: threadWrites,
-        }, legacyDate);
+        });
+        migrated = true;
+      }
+      if (migrated && existsSync(this.filePath)) {
+        unlinkSync(this.filePath);
       }
     } catch {
-      // No file or corrupt — start fresh
+      // No file or corrupt legacy checkpoint store.
     }
+  }
+
+  private contentAddressedManifestCount() {
+    let count = 0;
+    const threadsDir = join(this.casRootDir, 'threads');
+    for (const threadSegment of safeReadDir(threadsDir)) {
+      const manifestsDir = join(threadsDir, threadSegment, 'manifests');
+      for (const namespaceSegment of safeReadDir(manifestsDir)) {
+        count += safeReadDir(join(manifestsDir, namespaceSegment)).filter((name) => name.endsWith('.json')).length;
+      }
+    }
+    return count;
+  }
+
+  private countThreads() {
+    const threadsDir = join(this.casRootDir, 'threads');
+    return safeReadDir(threadsDir).filter((threadSegment) => {
+      try {
+        return statSync(join(threadsDir, threadSegment)).isDirectory();
+      } catch {
+        return false;
+      }
+    }).length;
+  }
+
+  private load() {
+    if (this.contentAddressedManifestCount() === 0 || this.listLegacyShardFiles().length > 0) {
+      this.migrateLegacy();
+    }
+    this._loadedThreadCount = this.countThreads();
+    this.gcObjects();
+  }
+
+  async getTuple(config: RunnableConfig): Promise<CheckpointTuple | undefined> {
+    const threadId = config.configurable?.thread_id;
+    if (threadId === undefined) return undefined;
+    const checkpointNamespace = config.configurable?.checkpoint_ns ?? '';
+    const checkpointId = getCheckpointId(config) || this.readLatestCheckpointId(threadId, checkpointNamespace);
+    if (!checkpointId) return undefined;
+    const manifest = this.readManifest(this.manifestPath(threadId, checkpointNamespace, checkpointId));
+    if (!manifest) return undefined;
+
+    return this.tupleFromManifest(manifest, {
+      configurable: {
+        thread_id: threadId,
+        checkpoint_ns: checkpointNamespace,
+        checkpoint_id: checkpointId,
+      },
+    });
+  }
+
+  async *list(config: RunnableConfig, options?: CheckpointListOptions): AsyncGenerator<CheckpointTuple> {
+    let { before, limit, filter } = options ?? {};
+    const threadsDir = join(this.casRootDir, 'threads');
+    const requestedThreadIds = config.configurable?.thread_id ? [config.configurable.thread_id] : undefined;
+    const requestedNamespace = config.configurable?.checkpoint_ns;
+    const requestedCheckpointId = config.configurable?.checkpoint_id;
+
+    const manifests: CheckpointManifest[] = [];
+    const threadSegments = requestedThreadIds?.map(encodePathSegment) ?? safeReadDir(threadsDir);
+    for (const threadSegment of threadSegments) {
+      const manifestsDir = join(threadsDir, threadSegment, 'manifests');
+      for (const namespaceSegment of safeReadDir(manifestsDir)) {
+        const namespaceDir = join(manifestsDir, namespaceSegment);
+        for (const fileName of safeReadDir(namespaceDir)) {
+          if (!fileName.endsWith('.json')) continue;
+          const manifest = this.readManifest(join(namespaceDir, fileName));
+          if (!manifest) continue;
+          if (requestedThreadIds && !requestedThreadIds.includes(manifest.threadId)) continue;
+          if (requestedNamespace !== undefined && manifest.namespace !== requestedNamespace) continue;
+          if (requestedCheckpointId && manifest.checkpointId !== requestedCheckpointId) continue;
+          if (before?.configurable?.checkpoint_id && manifest.checkpointId >= before.configurable.checkpoint_id) continue;
+          manifests.push(manifest);
+        }
+      }
+    }
+
+    manifests.sort((a, b) => b.checkpointId.localeCompare(a.checkpointId));
+    for (const manifest of manifests) {
+      const [, metadataBytes] = this.checkpointTupleBytes(manifest);
+      const metadata = await this.serde.loadsTyped('json', metadataBytes) as CheckpointMetadata;
+      const metadataRecord = metadata as Record<string, unknown>;
+      if (filter && !Object.entries(filter).every(([key, value]) => metadataRecord[key] === value)) {
+        continue;
+      }
+      if (limit !== undefined) {
+        if (limit <= 0) break;
+        limit -= 1;
+      }
+      yield this.tupleFromManifest(manifest, {
+        configurable: {
+          thread_id: manifest.threadId,
+          checkpoint_ns: manifest.namespace,
+          checkpoint_id: manifest.checkpointId,
+        },
+      });
+    }
+  }
+
+  async put(
+    config: RunnableConfig,
+    checkpoint: Checkpoint,
+    metadata: CheckpointMetadata,
+  ): Promise<RunnableConfig> {
+    const threadId = config.configurable?.thread_id;
+    const checkpointNamespace = config.configurable?.checkpoint_ns ?? '';
+    if (threadId === undefined) {
+      throw new Error('Failed to put checkpoint. The passed RunnableConfig is missing a required "thread_id" field in its "configurable" property. When using a checkpointer, you must pass a "thread_id" so the checkpointer knows which conversation thread to persist state for. Example: graph.stream(input, { configurable: { thread_id: "my-thread-id" } })');
+    }
+
+    const preparedCheckpoint = copyCheckpoint(checkpoint);
+    const [[, serializedCheckpoint], [, serializedMetadata]] = await Promise.all([
+      this.serde.dumpsTyped(preparedCheckpoint),
+      this.serde.dumpsTyped(metadata),
+    ]);
+    this.writeCheckpointTuple(threadId, checkpointNamespace, checkpoint.id, [
+      serializedCheckpoint,
+      serializedMetadata,
+      config.configurable?.checkpoint_id,
+    ]);
+    this._loadedThreadCount = this.countThreads();
+    return {
+      configurable: {
+        thread_id: threadId,
+        checkpoint_ns: checkpointNamespace,
+        checkpoint_id: checkpoint.id,
+      },
+    };
+  }
+
+  async putWrites(config: RunnableConfig, writes: PendingWrite[], taskId: string): Promise<void> {
+    const threadId = config.configurable?.thread_id;
+    const checkpointNamespace = config.configurable?.checkpoint_ns;
+    const checkpointId = config.configurable?.checkpoint_id;
+    if (threadId === undefined) {
+      throw new Error('Failed to put writes. The passed RunnableConfig is missing a required "thread_id" field in its "configurable" property. When using a checkpointer, you must pass a "thread_id" so the checkpointer knows which conversation thread to persist state for. Example: graph.stream(input, { configurable: { thread_id: "my-thread-id" } })');
+    }
+    if (checkpointId === undefined) {
+      throw new Error('Failed to put writes. The passed RunnableConfig is missing a required "checkpoint_id" field in its "configurable" property.');
+    }
+
+    const outerKey = generateWriteKey(threadId, checkpointNamespace, checkpointId);
+    const existingManifest = this.readWritesManifest(this.writesPath(threadId, checkpointNamespace ?? '', checkpointId));
+    const outerWrites: Record<string, [string, string, Uint8Array]> = {};
+    for (const [innerKey, record] of Object.entries(existingManifest?.writes ?? {})) {
+      outerWrites[innerKey] = [
+        record.taskId,
+        record.channel,
+        readObject(this.casRootDir, record.valueHash),
+      ];
+    }
+
+    await Promise.all(writes.map(async ([channel, value], idx) => {
+      const [, serializedValue] = await this.serde.dumpsTyped(value);
+      const writeIndex = WRITES_IDX_MAP[channel] ?? idx;
+      const innerKeyStr = `${taskId},${writeIndex}`;
+      if (writeIndex >= 0 && innerKeyStr in outerWrites) return;
+      outerWrites[innerKeyStr] = [
+        taskId,
+        channel,
+        serializedValue,
+      ];
+    }));
+
+    this.writeWritesManifest(threadId, checkpointNamespace, checkpointId, outerKey, outerWrites);
+    this._loadedThreadCount = this.countThreads();
+  }
+
+  async deleteThread(threadId: string): Promise<void> {
+    rmSync(this.threadDir(threadId), { recursive: true, force: true });
+    this._loadedThreadCount = this.countThreads();
+    this.gcObjects();
   }
 
   flush() {
-    if (!this.dirty) return;
-    try {
-      mkdirSync(this.shardRootDir, { recursive: true });
-
-      const threadIds = new Set<string>([
-        ...Object.keys(this.storage),
-        ...Array.from(this.threadBuckets.keys()),
-      ]);
-
-      for (const outerKey of Object.keys(this.writes)) {
-        const threadId = parseWriteThreadId(outerKey);
-        if (threadId) {
-          threadIds.add(threadId);
-          this.noteThreadBucket(threadId);
-        }
-      }
-
-      const desiredFiles = new Map<string, string>();
-
-      for (const threadId of threadIds) {
-        const namespaces = this.storage[threadId];
-        const threadWrites: Record<string, Record<string, [string, string, Uint8Array]>> = {};
-        for (const [outerKey, writes] of Object.entries(this.writes)) {
-          if (parseWriteThreadId(outerKey) === threadId) {
-            threadWrites[outerKey] = writes;
-          }
-        }
-
-        const hasStorage = namespaces && Object.keys(namespaces).length > 0;
-        const hasWrites = Object.keys(threadWrites).length > 0;
-        const previousFile = this.knownShardFiles.get(threadId);
-
-        if (!hasStorage && !hasWrites) {
-          if (previousFile && existsSync(previousFile)) {
-            unlinkSync(previousFile);
-          }
-          this.knownShardFiles.delete(threadId);
-          continue;
-        }
-
-        const bucket = this.threadBuckets.get(threadId) ?? formatDateBucket(new Date());
-        this.threadBuckets.set(threadId, bucket);
-
-        const file = this.buildShardFilePath(bucket, threadId);
-        desiredFiles.set(threadId, file);
-
-        const shard: ThreadShardData = {
-          threadId,
-          bucket,
-          storage: {},
-          writes: {},
-        };
-
-        if (hasStorage) {
-          for (const [namespace, checkpoints] of Object.entries(namespaces)) {
-            shard.storage[namespace] = {};
-            for (const [checkpointId, tuple] of Object.entries(checkpoints)) {
-              shard.storage[namespace][checkpointId] = [
-                uint8ToBase64(tuple[0]),
-                uint8ToBase64(tuple[1]),
-                tuple[2],
-              ];
-            }
-          }
-        }
-
-        for (const [outerKey, writes] of Object.entries(threadWrites)) {
-          shard.writes[outerKey] = {};
-          for (const [innerKey, tuple] of Object.entries(writes)) {
-            shard.writes[outerKey][innerKey] = [
-              tuple[0],
-              tuple[1],
-              uint8ToBase64(tuple[2]),
-            ];
-          }
-        }
-
-        writeFileSync(file, JSON.stringify(shard), 'utf-8');
-
-        if (previousFile && previousFile !== file && existsSync(previousFile)) {
-          unlinkSync(previousFile);
-        }
-        this.knownShardFiles.set(threadId, file);
-      }
-
-      if (existsSync(this.filePath) && this.listShardFiles().length > 0) {
-        unlinkSync(this.filePath);
-      }
-
-      this.dirty = false;
-    } catch (err) {
-      console.warn(`[file-saver] flush failed: ${err instanceof Error ? err.message : err}`);
-    }
-  }
-
-  private startAutoFlush() {
-    this.flushTimer = setInterval(() => this.flush(), this.flushIntervalMs);
-    // Prevent timer from keeping the process alive
-    this.flushTimer.unref();
-
-    this.exitHandler = () => this.flush();
-    process.on('exit', this.exitHandler);
-    process.on('SIGINT', () => {
-      this.flush();
-      process.exit(0);
-    });
-    process.on('SIGTERM', () => {
-      this.flush();
-      process.exit(0);
-    });
+    // Kept as a no-op compatibility hook for callers that dispose old savers.
   }
 
   dispose() {
     this.flush();
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
-      this.flushTimer = null;
+  }
+
+  private collectReachableObjectHashes() {
+    const hashes = new Set<string>();
+    const threadsDir = join(this.casRootDir, 'threads');
+    for (const threadSegment of safeReadDir(threadsDir)) {
+      const threadDir = join(threadsDir, threadSegment);
+      const manifestsDir = join(threadDir, 'manifests');
+      for (const namespaceSegment of safeReadDir(manifestsDir)) {
+        const namespaceDir = join(manifestsDir, namespaceSegment);
+        for (const fileName of safeReadDir(namespaceDir)) {
+          if (!fileName.endsWith('.json')) continue;
+          const manifest = this.readManifest(join(namespaceDir, fileName));
+          if (!manifest) continue;
+          hashes.add(manifest.checkpointShellHash);
+          hashes.add(manifest.metadataHash);
+          for (const ref of Object.values(manifest.channelValueRefs ?? {})) {
+            if (!isChannelValueRef(ref)) continue;
+            if (ref.kind === 'array') {
+              for (const hash of ref.itemHashes) {
+                hashes.add(hash);
+              }
+            } else {
+              hashes.add(ref.hash);
+            }
+          }
+          for (const hash of Object.values(manifest.channelValueHashes ?? {})) {
+            hashes.add(hash);
+          }
+        }
+      }
+      const writesDir = join(threadDir, 'writes');
+      for (const namespaceSegment of safeReadDir(writesDir)) {
+        const namespaceDir = join(writesDir, namespaceSegment);
+        for (const fileName of safeReadDir(namespaceDir)) {
+          if (!fileName.endsWith('.json')) continue;
+          const manifest = this.readWritesManifest(join(namespaceDir, fileName));
+          if (!manifest) continue;
+          for (const write of Object.values(manifest.writes ?? {})) {
+            hashes.add(write.valueHash);
+          }
+        }
+      }
     }
-    if (this.exitHandler) {
-      process.removeListener('exit', this.exitHandler);
-      this.exitHandler = null;
+    return hashes;
+  }
+
+  private gcObjects() {
+    const objectsDir = join(this.casRootDir, 'objects');
+    if (!existsSync(objectsDir)) return;
+    const reachable = this.collectReachableObjectHashes();
+    for (const prefix of safeReadDir(objectsDir)) {
+      const prefixDir = join(objectsDir, prefix);
+      for (const fileName of safeReadDir(prefixDir)) {
+        const hash = `${prefix}${fileName}`;
+        if (!reachable.has(hash)) {
+          rmSync(join(prefixDir, fileName), { force: true });
+        }
+      }
+      if (safeReadDir(prefixDir).length === 0) {
+        rmSync(prefixDir, { recursive: true, force: true });
+      }
     }
   }
 }

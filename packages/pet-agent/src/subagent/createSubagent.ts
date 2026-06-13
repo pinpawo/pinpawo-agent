@@ -1,9 +1,15 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { SubagentInput, SubagentResult, SubagentToolLifecycleEvent } from '../types/subagent';
-import { createAgent } from 'langchain';
+import { createAgent, createMiddleware } from 'langchain';
 import { SubagentToolEventTracker } from './toolEventTracker';
+import { estimateMessagesTokens } from '../agent/orchestrator/contextCompaction';
+import {
+  buildContextPolicyStateUpdate,
+  rewriteMessagesForContextPolicy,
+} from './contextPolicy';
 
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 12;
+const DEFAULT_CONTEXT_FUSE_RATIO = 0.85;
 
 const SUBAGENT_GOVERNING_PROMPT = [
   '你是任务执行器，负责精确完成分配给你的任务。',
@@ -19,6 +25,8 @@ const SUBAGENT_GOVERNING_PROMPT = [
   '- 选择工具时优先使用语义最具体的工具；shell/run_shell 这类通用命令执行工具只作为兜底。',
   '- 返回明确、具体的结果。',
 ].join('\n');
+
+const CONTEXT_POLICY_GOVERNING_PROMPT = '较早的工具原始输出可能会被淘汰，重要发现要随时写进你的回复里。';
 
 function readMessagesFromValuesChunk(chunk: unknown): BaseMessage[] | null {
   if (
@@ -70,14 +78,102 @@ function isSubagentToolLifecycleEvent(payload: unknown): payload is SubagentTool
   );
 }
 
+class SubagentContextLimitReachedError extends Error {
+  constructor(
+    readonly estimatedTokens: number,
+    readonly limitTokens: number,
+  ) {
+    super(`Subagent context window fuse reached: estimated ${estimatedTokens} tokens exceeds limit ${limitTokens}`);
+    this.name = 'SubagentContextLimitReachedError';
+  }
+}
+
+function buildContextFuseLimit(contextWindowTokens: number | undefined): number | null {
+  if (!contextWindowTokens || !Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
+    return null;
+  }
+  return Math.max(1, Math.floor(contextWindowTokens * DEFAULT_CONTEXT_FUSE_RATIO));
+}
+
+function buildContextFuseProgressMessage(error: SubagentContextLimitReachedError): AIMessage {
+  return new AIMessage([
+    '当前子任务的上下文已接近模型窗口上限，已暂停继续调用模型。',
+    `估算 token：${error.estimatedTokens}，保险丝阈值：${error.limitTokens}。`,
+    '请根据现有进度决定是否拆分任务、续跑或收窄范围。',
+  ].join('\n'));
+}
+
+function createContextWindowFuseMiddleware(systemPrompt: string, contextWindowTokens: number | undefined) {
+  const limitTokens = buildContextFuseLimit(contextWindowTokens);
+  if (!limitTokens) return null;
+
+  return createMiddleware({
+    name: 'SubagentContextWindowFuse',
+    wrapModelCall: async (request, handler) => {
+      const messages = [
+        request.systemMessage ?? new SystemMessage(request.systemPrompt ?? systemPrompt),
+        ...request.messages,
+      ];
+      const estimatedTokens = estimateMessagesTokens(messages);
+      if (estimatedTokens >= limitTokens) {
+        throw new SubagentContextLimitReachedError(estimatedTokens, limitTokens);
+      }
+      return handler(request);
+    },
+  });
+}
+
+function createContextPolicyMiddleware(input: SubagentInput) {
+  if (!input.contextPolicy) return null;
+  let iterationCount = 0;
+  const operations = input.operations ?? {};
+  return createMiddleware({
+    name: 'SubagentContextPolicy',
+    beforeModel: (state) => {
+      iterationCount += 1;
+      const messages = state.messages;
+      if (!Array.isArray(messages) || messages.length === 0) {
+        return undefined;
+      }
+      const rewritten = rewriteMessagesForContextPolicy(messages as BaseMessage[], input.contextPolicy, {
+        estimateMessagesTokens,
+        iterationCount,
+        operations,
+      });
+      return buildContextPolicyStateUpdate(messages as BaseMessage[], rewritten);
+    },
+  });
+}
+
+function readContextLimitReachedError(error: unknown): SubagentContextLimitReachedError | null {
+  if (error instanceof SubagentContextLimitReachedError) {
+    return error;
+  }
+  const cause = error && typeof error === 'object'
+    ? (error as { cause?: unknown }).cause
+    : null;
+  return cause instanceof SubagentContextLimitReachedError ? cause : null;
+}
+
 export async function createSubagent(input: SubagentInput): Promise<SubagentResult> {
-  const systemPrompt = [SUBAGENT_GOVERNING_PROMPT, ...input.instructions].join('\n\n');
+  const systemPrompt = [
+    SUBAGENT_GOVERNING_PROMPT,
+    input.contextPolicy ? CONTEXT_POLICY_GOVERNING_PROMPT : null,
+    ...input.instructions,
+  ].filter((item): item is string => Boolean(item)).join('\n\n');
   const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
+  const contextFuseMiddleware = createContextWindowFuseMiddleware(systemPrompt, input.contextWindowTokens);
+  const contextPolicyMiddleware = createContextPolicyMiddleware(input);
+  const middleware = [
+    contextPolicyMiddleware,
+    contextFuseMiddleware,
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   const agent = createAgent({
     model: input.model,
     tools: input.tools,
     systemPrompt,
+    ...(middleware.length > 0 ? { middleware } : {}),
     ...(input.checkpoint ? { checkpointer: input.checkpoint } : {}),
   });
 
@@ -150,6 +246,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
       completionReason: 'natural',
     };
   } catch (err) {
+    const contextLimitReached = readContextLimitReachedError(err);
     const isLimitReached = err instanceof Error
       && (
         (typeof (err as { lc_error_code?: unknown }).lc_error_code === 'string'
@@ -157,10 +254,12 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
         || /GRAPH_RECURSION_LIMIT|Recursion limit of \d+ reached/i.test(err.message)
       );
 
-    if (isLimitReached) {
+    if (isLimitReached || contextLimitReached) {
       await finishToolEvents('failed', err);
       return {
-        messages: latestMessages,
+        messages: contextLimitReached
+          ? [...latestMessages, buildContextFuseProgressMessage(contextLimitReached)]
+          : latestMessages,
         completionReason: 'limit_reached',
       };
     }

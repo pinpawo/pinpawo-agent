@@ -21,6 +21,7 @@ import {
 } from '../src/index';
 import type { AgentActor, AgentModels } from '../src/types/agent';
 import type { RouteDecision } from '../src/agent/orchestrator/schemas';
+import { defineToolkit } from '../src/types/toolkit';
 
 const DATASET_NAME = 'orchestrator-hitl';
 
@@ -47,6 +48,61 @@ const examples = [
       reason: 'Iteration limit uses the canonical human review interrupt shape without pretending to be a tool action.',
     },
   },
+  {
+    name: 'iteration-limit-approve-resumes-delegation',
+    inputs: {
+      user_message: '继续处理这个长任务',
+      route_decisions: [
+        { action: 'delegate_general', task: '继续整理剩余的日志文件', context_summary: '用户已批准继续执行长任务。' },
+      ],
+      iteration_count: 1,
+      max_iterations: 1,
+      resume: { selectedOptionId: 'approve' },
+    },
+    outputs: {
+      expected_initial_interrupted: true,
+      expected_initial_kind: 'review',
+      expected_after_resume_mode: 'general',
+      expected_after_resume_task_includes: '日志',
+      reason: 'Approve must reset the iteration count and let the orchestrator keep delegating the same turn.',
+    },
+  },
+  {
+    name: 'iteration-limit-respond-injects-guidance',
+    inputs: {
+      user_message: '继续处理这个长任务',
+      route_decisions: [
+        { action: 'delegate_general', task: '只处理 src 目录的文件，其余跳过', context_summary: '用户补充了新的处理方向。' },
+      ],
+      iteration_count: 1,
+      max_iterations: 1,
+      resume: { selectedOptionId: 'respond', input: { message: '只处理 src 目录，其他跳过。' } },
+    },
+    outputs: {
+      expected_initial_interrupted: true,
+      expected_initial_kind: 'review',
+      expected_after_resume_mode: 'general',
+      expected_after_resume_task_includes: 'src',
+      reason: 'Respond must inject the user guidance as a human message and continue with a fresh decision.',
+    },
+  },
+  {
+    name: 'iteration-limit-reject-stops',
+    inputs: {
+      user_message: '继续处理这个长任务',
+      route_decisions: [],
+      iteration_count: 1,
+      max_iterations: 1,
+      resume: { selectedOptionId: 'reject' },
+    },
+    outputs: {
+      expected_initial_interrupted: true,
+      expected_initial_kind: 'review',
+      expected_after_resume_mode: 'finish',
+      expected_reply_includes: '已停止',
+      reason: 'Reject must stop the loop with a user-facing stop message and no pending delegation.',
+    },
+  },
 ];
 
 const testActor: AgentActor = {
@@ -70,6 +126,14 @@ const mockTools = [
     schema: z.object({ command: z.string() }),
   }),
 ];
+
+// getInvokeOptions only reads `toolkits`; a bare `tools` key is ignored and
+// delegate_general would be forced to finish without any general tools.
+const mockToolkit = defineToolkit({
+  name: 'eval_general',
+  description: 'Mock general tools for HITL evaluation.',
+  tools: mockTools,
+});
 
 function buildDeterministicModels(decisions: RouteDecision[]): AgentModels {
   let index = 0;
@@ -186,7 +250,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const configurable = {
     thread_id: threadId,
     actor: testActor,
-    tools: mockTools,
+    toolkits: [mockToolkit],
     capabilities: [],
     maxIterations: typeof inputs.max_iterations === 'number' ? inputs.max_iterations : 5,
   };
@@ -196,8 +260,17 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   let afterResume: Record<string, unknown> | null = null;
 
   if (inputs.resume !== undefined) {
+    // The review id embeds the random turnId, so the dataset stays declarative
+    // (selectedOptionId only) and the target injects the live reviewId.
+    const resumeRecord = inputs.resume && typeof inputs.resume === 'object'
+      ? inputs.resume as Record<string, unknown>
+      : {};
+    const resume = {
+      reviewId: (initialPayload?.review as Record<string, unknown> | undefined)?.id,
+      ...resumeRecord,
+    };
     afterResume = await graph.invoke(
-      new Command({ resume: inputs.resume }),
+      new Command({ resume }),
       {
         configurable,
         interruptBefore: ['general', 'capability'],

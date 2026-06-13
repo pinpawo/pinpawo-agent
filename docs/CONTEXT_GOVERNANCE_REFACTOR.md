@@ -70,24 +70,13 @@
 
 实现位置：`createSubagent.ts`。优先尝试 langchain 1.x `createAgent` 的 middleware/pre-model hook 挂载；若 API 不支持，把 `createSubagent` 改成自持 ReAct 循环（该文件本来就薄，自持循环同时为 contextPolicy 铺路）。
 
-### 4.2 contextPolicy（第四个 runtime 覆盖项，explore 首个使用者）
+### 4.2 contextPolicy（第四个 runtime 覆盖项，能力级）
 
-#### 设计前提：可重取性是工具属性，不是全局常量
+#### 设计前提：淘汰策略属于能力场景，不属于工具定义
 
-`view_file_chunk` / `grep_search` 幂等可重取；`http_fetch` / `download_file` 半可重取（有网络成本、内容时变）；browser 交互、有副作用的 shell 命令不可重取。单层扁平配置表达不了这个差异，所以规范分三层——**工具作者声明性质，能力作者声明预算，逃生舱兜底**：
+同一个工具在不同能力里的上下文价值不同：一次 `grep_search` 在探索代码结构时可能只是可重跑的中间材料，在排错能力里也可能是关键证据。工具自身很难判断"旧结果是否可以被遗忘"；这个决策应由 capability/runtime 按任务场景声明。工具 metadata 只提供 `summarizeInput` / `summarizeOutput` 这类中性摘要能力，不承载淘汰策略。
 
-**层 1：工具级提示（toolkit 作者声明）**——挂在现有 `ToolkitOperationMetadata` 上，和 `summarizeInput` 等元数据同源维护：
-
-```ts
-// ToolkitOperationMetadata 扩展
-contextHints?: {
-  refetchable?: boolean;                       // 默认 false（保守：未声明的工具不淘汰）
-  stub?: (input: unknown, output: unknown) => string;
-  // 自定义存根；缺省实现复用 summarizeInput 生成调用指纹 + 一行摘要
-};
-```
-
-**层 2：能力级声明策略（capability 作者声明预算与窗口）**：
+**能力级声明策略（capability 作者声明预算与窗口）**：
 
 ```ts
 // CapabilityRuntime 新增可选项；capabilityNode 透传进 SubagentInput
@@ -105,9 +94,9 @@ contextPolicy?: {
 };
 ```
 
-规则合成优先级（高到低）：`perTool` 覆盖 → `keepFailures` 保护 → 层 1 `refetchable` 提示（false 则不淘汰）→ `keepRecent` / `minSizeChars` / `budgetTokens` 体积与预算规则。`budgetTokens` 与 `keepRecent` 的关系：K 是地板（最近 K 次无论预算如何都保留全文），预算是目标（超出时从最老的可淘汰项开始动手）。
+规则合成优先级（高到低）：`perTool` 覆盖 → `keepFailures` 保护 → `keepRecent` / `minSizeChars` / `budgetTokens` 体积与预算规则。`budgetTokens` 与 `keepRecent` 的关系：K 是地板（最近 K 次无论预算如何都保留全文），预算是目标（超出时从最老的可淘汰项开始动手）。
 
-**explore 的预设值（作为本规范的第一个校验用例）**：
+**capability_creator 的预设值（作为本规范的第一个校验用例）**：
 
 ```ts
 contextPolicy: {
@@ -115,27 +104,27 @@ contextPolicy: {
     keepRecent: 5,
     budgetTokens: 24_000,   // 配合便宜模型的窗口（qwen-flash/glm-air 档）
     keepFailures: true,
-    // 只读工具子集全部 refetchable: true（由 bash toolkit 层 1 声明），无需 perTool 覆盖
   },
 }
 ```
 
-**不对称可重取规则**——淘汰判据不是"旧"，是"可重取"：
+**能力级淘汰规则**——淘汰判据不是"旧"，而是"该能力声明了如何收缩旧工具结果"：
 
-- **可淘汰**：大体积、`refetchable: true` 的成功输出（文件读取、grep 命中——窗口成本的大头）。重读返回的是当前状态，自我修改之后比记忆更正确。替换为确定性存根：`[evicted: view_file_chunk src/foo.ts:1-200 → 已读；需要时重新调用]`。
-- **永不淘汰**：失败结果（stderr/exit code 天然很小，是"别重犯这个错"的载体；判定：`ToolMessage.status === 'error'` 或文本 `^Error` 前缀）、AI 文本消息（模型自己的笔记）、存根本身（连成功调用也留"试过了"的记录）、未声明 refetchable 的工具结果。
+- **默认可淘汰**：声明了 `evictToolResults` 的能力中，旧的大体积成功工具输出可被替换为确定性存根：`[evicted: view_file_chunk src/foo.ts:1-200 → 已读；需要时重新调用]`。存根指纹优先复用 tool operation metadata 的 `summarizeInput`，但是否淘汰由 capability policy 决定。
+- **按工具覆盖**：如果某个工具在该能力里必须保留、必须淘汰或只适合截断，由能力配置 `perTool`。工具定义本身不声明可淘汰性，避免工具越多策略越散。
+- **永不淘汰**：失败结果（stderr/exit code 天然很小，是"别重犯这个错"的载体；判定：`ToolMessage.status === 'error'` 或文本 `^Error` 前缀）、AI 文本消息（模型自己的笔记）、存根本身（连成功调用也留"试过了"的记录）。
 - **破坏性改写**：直接改写子代理消息状态，而不是只裁喂给模型的视图。收益：子代理返回的 transcript 天然有界（L2 的"未决保留窗口"自动有上界）；续跑时模型看到的现场与被打断前自己经历的窗口完全一致。
 - **零 LLM 调用**：纯字符串规则。子代理循环内不做 LLM compaction（额外调用复杂度 + 有损，两条都被否决）。
 - 配套 governing instruction 一行："较早的工具原始输出会被淘汰，重要发现要随时写进你的回复里。"
 
 ### 管道
 
-`CapabilityRuntime` → `capabilityNode` → `SubagentInput`，与 #75 的 `model` / `maxIterations` 覆盖项同一条管道（三个一起加，types 改一次）。general lane 不声明 contextPolicy，保持全保留。层 1 的 `contextHints` 随 toolkit operation metadata 一起进入 `SubagentInput.operations`，淘汰器从那里读。
+`CapabilityRuntime` → `capabilityNode` → `SubagentInput`，与 #75 的 `model` / `maxIterations` 覆盖项同一条管道（三个一起加，types 改一次）。general lane 不声明 contextPolicy，保持全保留。tool operation metadata 随 `SubagentInput.operations` 进入淘汰器，仅用于生成稳定存根指纹，不决定是否淘汰。
 
 ### 测试点
 
-- 淘汰规则单测：大且 refetchable 的成功结果被存根化；小结果 / 失败 / AI 消息 / 未声明 refetchable 的结果原样保留；K 地板与 budgetTokens 目标的相互作用正确；`perTool` 覆盖优先级最高。
-- 层 1 缺省存根：未提供 `stub` 的工具用 `summarizeInput` 指纹兜底。
+- 淘汰规则单测：声明了 `contextPolicy` 的能力里，大的成功结果被存根化；小结果 / 失败 / AI 消息原样保留；K 地板与 budgetTokens 目标的相互作用正确；`perTool` 覆盖优先级最高。
+- 缺省存根：用 `summarizeInput` 指纹兜底；没有摘要 metadata 时退回工具名 + 输入 JSON。
 - `rewrite` 逃生舱：声明后声明式规则不再生效。
 - 保险丝：构造超长 messages，断言以 limit_reached 收场而非抛错。
 - 不声明 contextPolicy 的能力：行为与现状逐字节一致。

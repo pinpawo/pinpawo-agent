@@ -53,6 +53,23 @@ export type SubagentToolEvent = SubagentToolLifecycleEvent | SubagentRuntimeEven
 
 export type SubagentToolEventHandler = (event: SubagentToolEvent) => void | Promise<void>;
 
+export type ContextPolicyContext = {
+  estimateMessagesTokens: (messages: BaseMessage[]) => number;
+  iterationCount: number;
+  operations: Record<string, SubagentToolOperationMetadata>;
+};
+
+export type SubagentContextPolicy = {
+  evictToolResults?: {
+    keepRecent: number;
+    budgetTokens?: number;
+    minSizeChars?: number;
+    keepFailures?: boolean;
+    perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
+  };
+  rewrite?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[];
+};
+
 export type SubagentInput = {
   model: BaseChatModel;
   tools: StructuredTool[];
@@ -60,6 +77,8 @@ export type SubagentInput = {
   operations?: Record<string, SubagentToolOperationMetadata>;
   messages: BaseMessage[];
   maxIterations?: number;
+  contextWindowTokens?: number;
+  contextPolicy?: SubagentContextPolicy;
   checkpoint?: BaseCheckpointSaver;
   runnableConfig?: RunnableConfig;
   signal?: AbortSignal;

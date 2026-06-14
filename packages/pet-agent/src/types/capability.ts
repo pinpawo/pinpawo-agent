@@ -10,6 +10,10 @@ export type CapabilityContext = {
   actor: AgentActor;
   messages: BaseMessage[];
   execution?: AgentExecution;
+  availableToolkits?: ReadonlyArray<{
+    name: string;
+    description: string;
+  }>;
 };
 
 export type CapabilityInstructionContext = CapabilityContext;
@@ -28,7 +32,7 @@ export type CapabilityRuntime = {
   /**
    * Capability-private tool groups. New capability-local tools should use
    * toolsets so tools and operation metadata stay under the same typed owner.
-   */
+  */
   toolsets?: AgentToolset[];
   contextPolicy?: SubagentContextPolicy;
   instructions?: string[] | ((ctx: CapabilityInstructionContext) => string[] | Promise<string[]>);

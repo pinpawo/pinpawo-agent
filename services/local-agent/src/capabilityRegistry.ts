@@ -23,6 +23,15 @@ export type CapabilityMeta = {
 
 export const BUILT_IN_CAPABILITY_REGISTRY: CapabilityMeta[] = [
   {
+    id: 'explore',
+    name: '探索调查',
+    description: '只读探索、资料检索、代码库理解和证据汇总',
+    icon: 'magnifyingglass',
+    color: 'gray',
+    defaultEnabled: true,
+    builtIn: true,
+  },
+  {
     id: 'daily_post',
     name: '日常动态',
     description: '根据当前趋势自动生成宠物日常内容并定时发布',

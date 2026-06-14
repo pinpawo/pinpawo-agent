@@ -7,6 +7,8 @@ import {
 } from './tui/input/commandRegistry';
 import {
   applyComposerInput,
+  createInitialTuiInputBufferState,
+  normalizeTuiInputEvent,
   resolveTuiKeyAction,
   type ComposerInputState,
   type TuiKeyInput,
@@ -156,6 +158,57 @@ test('resolveTuiKeyAction treats raw return input as submit', () => {
   }
 });
 
+test('resolveTuiKeyAction treats Shift+Enter as composer edit newline', () => {
+  const readyContext = {
+    ready: true,
+    busy: false,
+    hasPendingApproval: false,
+    hasResumePicker: false,
+  };
+
+  assert.deepEqual(
+    resolveTuiKeyAction('', { return: true, shift: true }, readyContext),
+    { type: 'composer.edit' },
+  );
+  assert.deepEqual(
+    resolveTuiKeyAction('\x1b[13;2u', {}, readyContext),
+    { type: 'composer.edit' },
+  );
+  assert.deepEqual(
+    resolveTuiKeyAction('[27;2;13~', {}, readyContext),
+    { type: 'composer.edit' },
+  );
+  assert.deepEqual(
+    resolveTuiKeyAction('\x1b[13;2u', {}, { ...readyContext, hasPendingApproval: true }),
+    { type: 'composer.edit' },
+  );
+});
+
+test('resolveTuiKeyAction ignores unrelated terminal control sequences', () => {
+  assert.deepEqual(
+    resolveTuiKeyAction('\x1b[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    { type: 'none' },
+  );
+  assert.deepEqual(
+    resolveTuiKeyAction('[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    { type: 'none' },
+  );
+});
+
+test('normalizeTuiInputEvent buffers split terminal control sequences', () => {
+  let state = createInitialTuiInputBufferState();
+  let normalized = normalizeTuiInputEvent('[2', {}, state);
+  assert.equal(normalized.event, null);
+  state = normalized.state;
+
+  normalized = normalizeTuiInputEvent('7;2;13~', {}, state);
+  assert.deepEqual(normalized.event, { input: '[27;2;13~', key: {} });
+  state = normalized.state;
+
+  normalized = normalizeTuiInputEvent('x', {}, state);
+  assert.deepEqual(normalized.event, { input: 'x', key: {} });
+});
+
 test('applyComposerInput keeps cursor editing behavior in pure input reducer', () => {
   let state: ComposerInputState = { value: 'helo', cursorOffset: 2 };
   state = applyComposerInput('l', {}, state);
@@ -178,4 +231,27 @@ test('applyComposerInput keeps cursor editing behavior in pure input reducer', (
     value: 'run  command',
     cursorOffset: 4,
   });
+});
+
+test('applyComposerInput inserts Shift+Enter newline and normalizes pasted multiline text', () => {
+  assert.deepEqual(
+    applyComposerInput('', { return: true, shift: true }, { value: 'hello', cursorOffset: 5 }),
+    { value: 'hello\n', cursorOffset: 6 },
+  );
+  assert.deepEqual(
+    applyComposerInput('\x1b[13;2u', {}, { value: 'hello', cursorOffset: 5 }),
+    { value: 'hello\n', cursorOffset: 6 },
+  );
+  assert.deepEqual(
+    applyComposerInput('[27;2;13~', {}, { value: 'hello', cursorOffset: 5 }),
+    { value: 'hello\n', cursorOffset: 6 },
+  );
+  assert.deepEqual(
+    applyComposerInput('a\r\nb\rc', {}, { value: '', cursorOffset: 0 }),
+    { value: 'a\nb\nc', cursorOffset: 5 },
+  );
+  assert.deepEqual(
+    applyComposerInput('\x1b[200~a\r\nb\x1b[201~', {}, { value: '', cursorOffset: 0 }),
+    { value: 'a\nb', cursorOffset: 3 },
+  );
 });

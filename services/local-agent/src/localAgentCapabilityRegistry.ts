@@ -7,6 +7,7 @@ import {
   resolveCapabilityAvailability,
 } from './capabilities/capabilityAvailability';
 import { createBrowserCapability } from './capabilities/browserCapability';
+import { createExploreCapability } from './capabilities/explore';
 import { createBrowserToolkit } from './toolkits/browser';
 import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
 
@@ -31,6 +32,7 @@ const defaultDeps: LocalAgentCapabilityRegistryDeps = {
     createBrowserToolkit(),
   ],
   createLocalCapabilities: () => [
+    createExploreCapability(),
     createBrowserCapability(),
   ],
   resolveAvailableToolkits,

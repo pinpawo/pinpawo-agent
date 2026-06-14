@@ -15,7 +15,7 @@ import { Client } from 'langsmith';
 import { ChatOpenAI } from '@langchain/openai';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { MemorySaver } from '@langchain/langgraph';
+import { Command, MemorySaver } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { readFileSync } from 'node:fs';
@@ -128,6 +128,29 @@ const examples = [
       expected_delegation_count: 1,
       expected_carryover_seen: true,
       reason: 'limit_reached continuation must reuse the delegation id and carry the prior transcript back into the subagent input.',
+    },
+  },
+  {
+    name: 'capability-limit-orchestrator-resume-stays-on-explore-lane',
+    inputs: {
+      user_message: '帮我调查 pinpawo-agent 仓库里 local-agent 的 capability 注册链路，列出关键文件和证据。',
+      capability_pack: 'explore',
+      capability_candidates: ['explore'],
+      subagent_script: 'tool_calls_until_carryover',
+      subagent_final_response: '已完成 local-agent capability 注册链路调查：入口在 localAgentCapabilityRegistry，channel 装配后传入 pet-agent orchestrator。',
+      max_iterations: 1,
+      auto_resume_iteration_limit: true,
+    },
+    outputs: {
+      expected_route: 'finish',
+      expected_mode: 'finish',
+      expected_phase: 'after_subagent',
+      expected_latest_announce_kind: 'completed',
+      expected_latest_announce_lane: 'capability:explore',
+      expected_delegation_count: 1,
+      expected_carryover_seen: true,
+      expected_iteration_limit_interrupt_count: 2,
+      reason: 'Capability progress caused by subagent limit plus orchestrator iteration-limit resume should continue the same capability lane, then finish.',
     },
   },
   {
@@ -346,6 +369,15 @@ const mockGeneralToolkit = defineToolkit({
 
 const mockCapabilities: AgentCapability[] = [
   {
+    name: 'explore',
+    description: '通用探索、调查、资料检索和代码库理解 capability。适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。',
+    createRuntime: () => ({
+      uses: ['eval_general'],
+      instructions: ['负责只读探索、代码库理解、资料检索和证据汇总。'],
+      tools: [],
+    }),
+  },
+  {
     name: 'daily_post',
     description: '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿，并产出本轮动态处理结果。',
     createRuntime: () => ({
@@ -372,12 +404,30 @@ const mockCapabilities: AgentCapability[] = [
 ];
 
 function resolveCapabilityList(pack: unknown): AgentCapability[] {
-  if (pack === 'pet_content') return mockCapabilities.filter((capability) => capability.name !== 'browser');
+  if (pack === 'pet_content') {
+    return mockCapabilities.filter((capability) => capability.name !== 'browser' && capability.name !== 'explore');
+  }
   if (pack === 'browser') return mockCapabilities.filter((capability) => capability.name === 'browser');
+  if (pack === 'explore') return mockCapabilities.filter((capability) => capability.name === 'explore');
   if (pack === 'daily_post_only') {
     return mockCapabilities.filter((capability) => capability.name === 'daily_post');
   }
   return [];
+}
+
+function readInterruptPayload(result: Record<string, unknown>): Record<string, unknown> | null {
+  const interrupts = Array.isArray(result.__interrupt__) ? result.__interrupt__ : [];
+  const first = interrupts[0];
+  return first && typeof first === 'object' && first.value && typeof first.value === 'object'
+    ? first.value as Record<string, unknown>
+    : null;
+}
+
+function readReviewId(payload: Record<string, unknown> | null): string | null {
+  const review = payload?.review && typeof payload.review === 'object'
+    ? payload.review as Record<string, unknown>
+    : null;
+  return typeof review?.id === 'string' ? review.id : null;
 }
 
 const testActor: AgentActor = {
@@ -426,24 +476,46 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     };
   }
 
-  const result = await compiled.invoke(turnInput, {
+  const configurable = {
+    thread_id: `eval-flow-${Date.now()}-${++evalCounter}`,
+    actor: testActor,
+    toolkits: [mockGeneralToolkit],
+    capabilities: capabilityList,
+    maxIterations: typeof inputs.max_iterations === 'number' ? inputs.max_iterations : 3,
+    workdir: '/mock/project',
+  };
+  let result = await compiled.invoke(turnInput, {
     configurable: {
-      thread_id: `eval-flow-${Date.now()}-${++evalCounter}`,
-      actor: testActor,
-      toolkits: [mockGeneralToolkit],
-      capabilities: capabilityList,
-      maxIterations: 3,
-      workdir: '/mock/project',
+      ...configurable,
     },
   });
+  let iterationLimitInterruptCount = 0;
+  if (inputs.auto_resume_iteration_limit === true) {
+    for (let i = 0; i < 5; i += 1) {
+      const payload = readInterruptPayload(result as Record<string, unknown>);
+      const reviewId = readReviewId(payload);
+      if (!reviewId?.startsWith('iteration-limit:')) break;
+      iterationLimitInterruptCount += 1;
+      result = await compiled.invoke(
+        new Command({
+          resume: {
+            reviewId,
+            selectedOptionId: 'approve',
+          },
+        }),
+        { configurable },
+      );
+    }
+  }
 
-  return extractResult(result, inputs, subagentModel);
+  return extractResult(result, inputs, subagentModel, iterationLimitInterruptCount);
 }
 
 function extractResult(
   result: Record<string, unknown>,
   inputs: Record<string, unknown>,
   subagentModel: ProbeSubagentModel,
+  iterationLimitInterruptCount: number,
 ): Record<string, unknown> {
   const pendingDelegation = result.pendingDelegation && typeof result.pendingDelegation === 'object'
     ? result.pendingDelegation as Record<string, unknown>
@@ -493,6 +565,7 @@ function extractResult(
     subagent_invocation_count: invocationStats.length,
     transcript_leak: transcriptLeak,
     carryover_seen: carryoverSeen,
+    iteration_limit_interrupt_count: iterationLimitInterruptCount,
   };
 }
 
@@ -528,6 +601,11 @@ function delegationCountEvaluator({ outputs, referenceOutputs }) {
 }
 
 async function ensureDataset() {
+  if (process.env.SKIP_DATASET_SYNC === '1') {
+    console.log(`Using existing LangSmith dataset "${DATASET_NAME}" (SKIP_DATASET_SYNC=1).`);
+    return;
+  }
+
   const client = new Client();
   try {
     const existing = await client.readDataset({ datasetName: DATASET_NAME });
@@ -568,6 +646,7 @@ async function main() {
       exactFieldEvaluator('latest_announce_lane', 'expected_latest_announce_lane'),
       exactFieldEvaluator('transcript_leak', 'expected_transcript_leak'),
       exactFieldEvaluator('carryover_seen', 'expected_carryover_seen'),
+      exactFieldEvaluator('iteration_limit_interrupt_count', 'expected_iteration_limit_interrupt_count'),
       delegationCountEvaluator,
     ],
     experimentPrefix: 'orchestrator-flow-mock-subagent',
@@ -583,6 +662,7 @@ async function main() {
     'latest_announce_lane_correct',
     'transcript_leak_correct',
     'carryover_seen_correct',
+    'iteration_limit_interrupt_count_correct',
     'delegation_count_correct',
   ];
   console.log('\n=== Evaluation complete ===');

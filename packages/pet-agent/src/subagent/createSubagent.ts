@@ -1,5 +1,9 @@
 import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
-import type { SubagentInput, SubagentResult, SubagentToolLifecycleEvent } from '../types/subagent';
+import type {
+  SubagentInput,
+  SubagentResult,
+  SubagentToolLifecycleEvent,
+} from '../types/subagent';
 import { createAgent, createMiddleware } from 'langchain';
 import { SubagentToolEventTracker } from './toolEventTracker';
 import { estimateMessagesTokens } from '../agent/orchestrator/contextCompaction';
@@ -124,22 +128,27 @@ function createContextWindowFuseMiddleware(systemPrompt: string, contextWindowTo
 }
 
 function createContextPolicyMiddleware(input: SubagentInput) {
-  if (!input.contextPolicy) return null;
+  const policy = input.contextPolicy;
+  if (!policy) return null;
   let iterationCount = 0;
   const operations = input.operations ?? {};
   return createMiddleware({
     name: 'SubagentContextPolicy',
-    beforeModel: (state) => {
+    beforeModel: async (state) => {
       iterationCount += 1;
       const messages = state.messages;
       if (!Array.isArray(messages) || messages.length === 0) {
         return undefined;
       }
-      const rewritten = rewriteMessagesForContextPolicy(messages as BaseMessage[], input.contextPolicy, {
+      const context = {
         estimateMessagesTokens,
         iterationCount,
         operations,
-      });
+        ...(input.contextWindowTokens ? { contextWindowTokens: input.contextWindowTokens } : {}),
+      };
+      const rewritten = policy.rewriteAsync
+        ? await policy.rewriteAsync(messages as BaseMessage[], context)
+        : rewriteMessagesForContextPolicy(messages as BaseMessage[], policy, context);
       return buildContextPolicyStateUpdate(messages as BaseMessage[], rewritten);
     },
   });

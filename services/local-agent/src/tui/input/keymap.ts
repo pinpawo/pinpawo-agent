@@ -39,12 +39,72 @@ export type ComposerInputState = {
   cursorOffset: number;
 };
 
+export type TuiInputBufferState = {
+  pendingControlSequence: string;
+};
+
+export type NormalizedTuiInputEvent = {
+  input: string;
+  key: TuiKeyInput;
+};
+
+export function createInitialTuiInputBufferState(): TuiInputBufferState {
+  return { pendingControlSequence: '' };
+}
+
+export function normalizeTuiInputEvent(
+  input: string,
+  key: TuiKeyInput,
+  state: TuiInputBufferState,
+): { state: TuiInputBufferState; event: NormalizedTuiInputEvent | null } {
+  if (!input) {
+    return {
+      state: createInitialTuiInputBufferState(),
+      event: { input, key },
+    };
+  }
+
+  if (state.pendingControlSequence) {
+    const combined = state.pendingControlSequence + input;
+    if (isTerminalControlSequence(combined)) {
+      return {
+        state: createInitialTuiInputBufferState(),
+        event: { input: combined, key },
+      };
+    }
+    if (isTerminalControlSequencePrefix(combined)) {
+      return {
+        state: { pendingControlSequence: combined },
+        event: null,
+      };
+    }
+    return {
+      state: createInitialTuiInputBufferState(),
+      event: { input, key },
+    };
+  }
+
+  if (isTerminalControlSequencePrefix(input)) {
+    return {
+      state: { pendingControlSequence: input },
+      event: null,
+    };
+  }
+
+  return {
+    state: createInitialTuiInputBufferState(),
+    event: { input, key },
+  };
+}
+
 export function resolveTuiKeyAction(
   input: string,
   key: TuiKeyInput,
   context: TuiKeyContext,
 ): TuiKeyAction {
   const isReturn = isReturnKeyInput(input, key);
+  const isNewline = isComposerNewlineInput(input, key);
+  const isControlSequence = isTerminalControlSequence(input);
 
   if (key.ctrl && input === 'c') {
     return { type: 'global.ctrl_c' };
@@ -65,9 +125,11 @@ export function resolveTuiKeyAction(
   if (context.hasPendingApproval) {
     if (key.upArrow) return { type: 'approval.previous' };
     if (key.downArrow) return { type: 'approval.next' };
+    if (isNewline) return { type: 'composer.edit' };
     if (isReturn) return { type: 'approval.submit' };
     if (key.escape) return { type: 'global.interrupt' };
     if (key.tab || (key.shift && key.tab)) return { type: 'none' };
+    if (isControlSequence) return { type: 'none' };
     return { type: 'composer.edit' };
   }
 
@@ -77,10 +139,12 @@ export function resolveTuiKeyAction(
   }
 
   if (key.escape) return { type: 'composer.clear' };
+  if (isNewline) return { type: 'composer.edit' };
   if (isReturn) return { type: 'composer.submit' };
   if (key.upArrow || key.downArrow || key.tab || (key.shift && key.tab)) {
     return { type: 'none' };
   }
+  if (isControlSequence) return { type: 'none' };
 
   return { type: 'composer.edit' };
 }
@@ -132,9 +196,19 @@ export function applyComposerInput(
       nextValue = state.value.slice(0, cursorOffset - 1) + state.value.slice(cursorOffset);
       nextCursor = cursorOffset - 1;
     }
+  } else if (isComposerNewlineInput(input, key)) {
+    nextValue = state.value.slice(0, cursorOffset) + '\n' + state.value.slice(cursorOffset);
+    nextCursor = cursorOffset + 1;
   } else {
-    nextValue = state.value.slice(0, cursorOffset) + input + state.value.slice(cursorOffset);
-    nextCursor = cursorOffset + input.length;
+    const text = normalizeComposerTextInput(input);
+    if (!text) {
+      return {
+        value: state.value,
+        cursorOffset,
+      };
+    }
+    nextValue = state.value.slice(0, cursorOffset) + text + state.value.slice(cursorOffset);
+    nextCursor = cursorOffset + text.length;
   }
 
   return {
@@ -148,5 +222,30 @@ function clampCursor(cursorOffset: number, value: string) {
 }
 
 function isReturnKeyInput(input: string, key: TuiKeyInput) {
-  return Boolean(key.return) || input === '\r' || input === '\n' || input === '\r\n';
+  return (Boolean(key.return) && !key.shift) || input === '\r' || input === '\n' || input === '\r\n';
+}
+
+function isComposerNewlineInput(input: string, key: TuiKeyInput) {
+  return Boolean(key.shift && key.return)
+    || input === '\x1b[13;2u'
+    || input === '\x1b[13;2~'
+    || input === '\x1b[27;2;13~'
+    || input === '[13;2u'
+    || input === '[13;2~'
+    || input === '[27;2;13~';
+}
+
+function isTerminalControlSequence(input: string) {
+  return /^(?:\x1b)?\[[0-9;?]*[A-Za-z~]$/.test(input);
+}
+
+function isTerminalControlSequencePrefix(input: string) {
+  return /^(?:\x1b)?\[[0-9;?]*$/.test(input);
+}
+
+function normalizeComposerTextInput(input: string) {
+  if (!input || isTerminalControlSequence(input)) return '';
+  const text = input.replace(/(?:\x1b)?\[200~([\s\S]*?)(?:\x1b)?\[201~/g, '$1');
+  if (isTerminalControlSequence(text)) return '';
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }

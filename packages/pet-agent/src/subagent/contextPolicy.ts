@@ -28,6 +28,11 @@ type ToolResultCandidate = {
   recentProtected: boolean;
 };
 
+type RewriteDecision = {
+  mode: 'evict' | 'truncate';
+  respectBudget: boolean;
+};
+
 function readToolCalls(message: BaseMessage): ToolCallInfo[] {
   const record = message as BaseMessage & {
     tool_calls?: unknown;
@@ -173,7 +178,7 @@ function readRewriteMarker(message: ToolMessage): string | null {
 function shouldRewriteCandidate(
   candidate: ToolResultCandidate,
   policy: NonNullable<SubagentContextPolicy['evictToolResults']>,
-): 'evict' | 'truncate' | null {
+): RewriteDecision | null {
   const toolName = candidate.toolName ?? '';
   const perTool = toolName ? policy.perTool?.[toolName] : undefined;
   if (perTool === 'keep') return null;
@@ -181,17 +186,19 @@ function shouldRewriteCandidate(
 
   const minSizeChars = policy.minSizeChars ?? DEFAULT_MIN_SIZE_CHARS;
   if (perTool === 'truncate') {
-    return candidate.content.length > minSizeChars ? 'truncate' : null;
+    return candidate.content.length > minSizeChars
+      ? { mode: 'truncate', respectBudget: false }
+      : null;
   }
   if (candidate.recentProtected) return null;
   if (perTool === 'evict') {
-    return 'evict';
+    return { mode: 'evict', respectBudget: true };
   }
   if ((policy.keepFailures ?? true) && isToolFailure(candidate.message, candidate.content)) {
     return null;
   }
   if (candidate.content.length < minSizeChars) return null;
-  return 'evict';
+  return { mode: policy.defaultMode ?? 'evict', respectBudget: true };
 }
 
 function rewriteCandidate(
@@ -227,13 +234,13 @@ export function rewriteMessagesForContextPolicy(
   let currentTokens = ctx.estimateMessagesTokens(nextMessages);
 
   for (const candidate of candidates) {
-    const mode = shouldRewriteCandidate(candidate, evictPolicy);
-    if (!mode) continue;
-    if (mode === 'evict' && evictPolicy.budgetTokens !== undefined && currentTokens <= evictPolicy.budgetTokens) {
+    const decision = shouldRewriteCandidate(candidate, evictPolicy);
+    if (!decision) continue;
+    if (decision.respectBudget && evictPolicy.budgetTokens !== undefined && currentTokens <= evictPolicy.budgetTokens) {
       continue;
     }
 
-    const rewritten = rewriteCandidate(candidate, mode, minSizeChars);
+    const rewritten = rewriteCandidate(candidate, decision.mode, minSizeChars);
     const beforeTokens = estimateMessagesTokens([nextMessages[candidate.index]]);
     nextMessages[candidate.index] = rewritten;
     currentTokens += estimateMessagesTokens([rewritten]) - beforeTokens;

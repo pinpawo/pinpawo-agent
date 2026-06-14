@@ -156,6 +156,14 @@ const mockGeneralToolkit = defineToolkit({
 
 const mockCapabilities: AgentCapability[] = [
   {
+    name: 'explore',
+    description: '通用探索、调查、资料检索和代码库理解 capability。适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。',
+    createRuntime: () => ({
+      instructions: ['负责只读探索、代码库理解、资料检索和证据汇总。'],
+      tools: [],
+    }),
+  },
+  {
     name: 'daily_post',
     description: '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿，并产出本轮动态处理结果。',
     createRuntime: () => ({
@@ -196,10 +204,13 @@ let evalCounter = 0;
 
 function resolveCapabilityList(pack: unknown): AgentCapability[] {
   if (pack === 'pet_content') {
-    return mockCapabilities.filter((capability) => capability.name !== 'browser');
+    return mockCapabilities.filter((capability) => capability.name !== 'browser' && capability.name !== 'explore');
   }
   if (pack === 'browser') {
     return mockCapabilities.filter((capability) => capability.name === 'browser');
+  }
+  if (pack === 'explore') {
+    return mockCapabilities.filter((capability) => capability.name === 'explore');
   }
   return [];
 }
@@ -219,7 +230,31 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const userMessage = inputs.user_message as string;
   const capabilityList = resolveCapabilityList(inputs.capability_pack);
 
-  const turnInput = buildOrchestratorTurnInput([new HumanMessage(userMessage)]);
+  const resumeProgressLane = typeof inputs.resume_progress_lane === 'string'
+    && inputs.resume_progress_lane.trim()
+    ? inputs.resume_progress_lane.trim()
+    : null;
+  const turnInput = buildOrchestratorTurnInput(resumeProgressLane
+    ? [
+        new HumanMessage(String(inputs.resume_original_user_message ?? userMessage)),
+        new AIMessage({
+          content: String(inputs.resume_progress_result ?? ''),
+          additional_kwargs: {
+            pinpawo: {
+              lane: resumeProgressLane,
+              turnId: 'previous-turn',
+              announce: 'progress',
+              delegationId: 'resume-progress-1',
+              task: String(inputs.resume_progress_task ?? inputs.resume_original_user_message ?? userMessage),
+              ...(typeof inputs.resume_progress_completion_reason === 'string'
+                ? { completionReason: inputs.resume_progress_completion_reason }
+                : {}),
+            },
+          },
+        }),
+        new HumanMessage(userMessage),
+      ]
+    : [new HumanMessage(userMessage)]);
   const completedResults = Array.isArray(inputs.completed_results)
     ? inputs.completed_results.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : [];

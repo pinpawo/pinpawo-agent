@@ -23,6 +23,7 @@ export type {
 } from './types/capability';
 
 export type {
+  ContextPolicyContext,
   SubagentInput,
   SubagentContextPolicy,
   SubagentResult,

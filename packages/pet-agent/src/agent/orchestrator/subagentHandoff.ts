@@ -46,7 +46,12 @@ export function buildDelegationHandoffInstruction(params: {
 
 export async function resolveInstructions(
   runtime: CapabilityRuntime,
-  params: { models: AgentModels; actor: AgentActor },
+  params: {
+    models: AgentModels;
+    actor: AgentActor;
+    messages?: BaseMessage[];
+    availableToolkits?: ReadonlyArray<{ name: string; description: string }>;
+  },
   execution?: AgentExecution,
 ): Promise<string[]> {
   if (!runtime.instructions) return [];
@@ -54,8 +59,9 @@ export async function resolveInstructions(
     return runtime.instructions({
       models: params.models,
       actor: params.actor,
-      messages: [],
+      messages: params.messages ?? [],
       execution,
+      availableToolkits: params.availableToolkits,
     });
   }
   return runtime.instructions;

@@ -24,8 +24,14 @@ type Example = {
     completed_tasks?: string[];
     /** Optional: simulated in-progress subagent announce results already in context */
     progress_results?: string[];
+    /** Optional: simulated prior-turn in-progress announce before the current user resume */
+    resume_progress_result?: string;
+    resume_progress_lane?: string;
+    resume_progress_task?: string;
+    resume_progress_completion_reason?: string;
+    resume_original_user_message?: string;
     /** Optional: enable a mock capability registry for capability-search tests */
-    capability_pack?: 'pet_content' | 'browser';
+    capability_pack?: 'pet_content' | 'browser' | 'explore';
     /** Optional: preloaded capability candidates, as if capability_search had already run */
     capability_candidates?: string[];
   };
@@ -365,6 +371,25 @@ const examples: Example[] = [
       expected_active_capability: 'daily_post',
       expected_capability_candidates_include: ['daily_post'],
       reason: 'Candidate is already injected — route should delegate to that capability.',
+    },
+  },
+  {
+    name: 'resume-progress-capability-lane',
+    inputs: {
+      user_message: '继续',
+      resume_original_user_message: '帮我调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
+      resume_progress_lane: 'capability:explore',
+      resume_progress_task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
+      resume_progress_result: '已定位到部分 local-agent capability registry 文件，但调查还没有完成，需要继续读取注册链路和调用路径。',
+      resume_progress_completion_reason: 'limit_reached',
+      capability_pack: 'explore',
+    },
+    outputs: {
+      expected_route: 'delegate',
+      expected_mode: 'capability',
+      expected_phase: 'initial_request',
+      expected_active_capability: 'explore',
+      reason: 'A user resume after prior capability progress should expose the same capability lane as a candidate and delegate back to it.',
     },
   },
   {

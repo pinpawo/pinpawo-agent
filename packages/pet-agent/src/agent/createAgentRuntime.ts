@@ -78,6 +78,7 @@ import {
   mainConversationMessages,
   readLatestHumanRequest,
   readLatestAnnounce,
+  readLatestAnnounceCompletionReason,
   readRecentAnnounces,
   setPinpetMeta,
   tagNewLaneMessages,
@@ -215,6 +216,42 @@ function readCapabilityNameFromLane(lane: MessageLane): string | null {
 
 function mainMessagesWithoutCompaction(messages: BaseMessage[]): BaseMessage[] {
   return mainConversationMessages(messages).filter((message) => !isContextCompactionMessage(message));
+}
+
+function buildCapabilityCandidatesFromLanes(
+  capabilityList: AgentCapability[],
+  lanes: Array<MessageLane | null | undefined>,
+): CapabilityCandidate[] {
+  const candidates: CapabilityCandidate[] = [];
+  const seen = new Set<string>();
+  for (const lane of lanes) {
+    if (!lane) continue;
+    const capabilityName = readCapabilityNameFromLane(lane);
+    if (!capabilityName || seen.has(capabilityName)) continue;
+    const capability = capabilityList.find((item) => item.name === capabilityName);
+    if (!capability) continue;
+    seen.add(capabilityName);
+    candidates.push({
+      name: capability.name,
+      description: capability.description,
+      score: Number.POSITIVE_INFINITY,
+      matchedTerms: ['in_progress'],
+    });
+  }
+  return candidates;
+}
+
+function mergeCapabilityCandidates(...groups: CapabilityCandidate[][]): CapabilityCandidate[] {
+  const candidates: CapabilityCandidate[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const candidate of group) {
+      if (seen.has(candidate.name)) continue;
+      seen.add(candidate.name);
+      candidates.push(candidate);
+    }
+  }
+  return candidates;
 }
 
 function resolveActor(config: OrchestratorConfig, runnableConfig?: RunnableConfig): AgentActor {
@@ -387,10 +424,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
     const decisionBaseModel = config.models.act;
     const latestHumanRequest = readLatestHumanRequest(state.messages);
+    const recentAnnounces = readRecentAnnounces(state.messages);
     const requestContext = buildCapabilityDiscoveryRequestContext({
       latestUserRequest: latestHumanRequest,
       recentMessages: mainMessagesWithoutCompaction(state.messages),
-      recentAnnounces: readRecentAnnounces(state.messages),
+      recentAnnounces,
       contextSummaries: readContextCompactionSummaries(state.messages),
     });
     const searchAvailable = canSearchCapabilities(decisionBaseModel, state, capabilityList);
@@ -502,14 +540,26 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const latestHumanRequest = readLatestHumanRequest(state.messages);
     const recentMainMessages = mainMessagesWithoutCompaction(state.messages);
     const contextSummaries = readContextCompactionSummaries(state.messages);
+    const recentAnnounces = readRecentAnnounces(state.messages);
+    const latestTurnAnnounce = readLatestAnnounce(state.messages, { turnId: state.turnId });
     const requestContext = buildPreparedRequestContext({
       latestUserRequest: latestHumanRequest,
       recentMessages: recentMainMessages,
-      recentAnnounces: readRecentAnnounces(state.messages),
+      recentAnnounces,
       contextSummaries,
     });
     const isUserIntentDecision = kind === 'user_intent';
-    const decisionCapabilityCandidates = isUserIntentDecision ? state.capabilitySearchState.candidates : [];
+    const inProgressCapabilityCandidates = buildCapabilityCandidatesFromLanes(
+      capabilityList,
+      isUserIntentDecision
+        ? recentAnnounces
+          .filter((announce) => announce.announce === 'progress')
+          .map((announce) => announce.lane)
+        : [latestTurnAnnounce?.lane],
+    );
+    const decisionCapabilityCandidates = isUserIntentDecision
+      ? mergeCapabilityCandidates(state.capabilitySearchState.candidates, inProgressCapabilityCandidates)
+      : inProgressCapabilityCandidates;
     const decisionCapabilitySearchAttempted = isUserIntentDecision && state.capabilitySearchState.attempted;
     const decisionCapabilitySearchQuery = isUserIntentDecision ? state.capabilitySearchState.query : null;
     const searchAvailable = isUserIntentDecision
@@ -543,7 +593,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         actor,
         targetsContext: buildDecisionTargetsContext({
           generalTools,
-          capabilityCandidates: [],
+          capabilityCandidates: decisionCapabilityCandidates,
           capabilitySearchAttempted: false,
           capabilitySearchAvailable: false,
           capabilitySearchQuery: null,
@@ -563,7 +613,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         latestUserRequest: latestHumanRequest,
         turnDelegationContext,
         subagentAnnounceContext: buildSubagentAnnounceContext(
-          readLatestAnnounce(state.messages, { turnId: state.turnId }),
+          latestTurnAnnounce,
+          readLatestAnnounceCompletionReason(state.messages, { turnId: state.turnId }),
         ),
       }));
 
@@ -690,11 +741,17 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const lane: MessageLane = `capability:${capability.name}`;
     const scopedMessages = laneMessages(state.messages, lane, state.turnId, pendingDelegation.id);
 
+    const availableToolkits = toolkitList.map(({ name, description }) => ({
+      name,
+      description,
+    }));
+
     const runtime = await capability.createRuntime({
       models: config.models,
       actor,
       messages: scopedMessages,
       execution,
+      availableToolkits,
     });
 
     const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);
@@ -708,7 +765,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       emitRuntimeEvent: onToolEvent,
     };
     const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
-    const runtimeInstructions = await resolveInstructions(runtime, { models: config.models, actor }, execution);
+    const runtimeInstructions = await resolveInstructions(runtime, {
+      models: config.models,
+      actor,
+      messages: scopedMessages,
+      availableToolkits,
+    }, execution);
     const middleware = runtime.middleware;
     const handoffInstruction = buildDelegationHandoffInstruction({
       lane,

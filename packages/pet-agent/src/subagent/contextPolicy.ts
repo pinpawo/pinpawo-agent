@@ -7,16 +7,11 @@ import type {
   SubagentToolOperationMetadata,
 } from '../types/subagent';
 import { estimateMessagesTokens } from '../agent/orchestrator/contextCompaction';
+import { readToolCalls, readToolMessageCallId, type ToolCallInfo } from '../agent/orchestrator/toolMessages';
 import { readMessageText } from '../agent/orchestrator/utils';
 
 const DEFAULT_MIN_SIZE_CHARS = 2000;
 const CONTEXT_POLICY_MARKER_KEY = 'contextPolicyRewrite';
-
-type ToolCallInfo = {
-  id: string;
-  name: string;
-  args: unknown;
-};
 
 type ToolResultCandidate = {
   index: number;
@@ -32,33 +27,6 @@ type RewriteDecision = {
   mode: 'evict' | 'truncate';
   respectBudget: boolean;
 };
-
-function readToolCalls(message: BaseMessage): ToolCallInfo[] {
-  const record = message as BaseMessage & {
-    tool_calls?: unknown;
-    additional_kwargs?: { tool_calls?: unknown };
-  };
-  const toolCalls = Array.isArray(record.tool_calls)
-    ? record.tool_calls
-    : Array.isArray(record.additional_kwargs?.tool_calls)
-      ? record.additional_kwargs.tool_calls
-      : [];
-
-  return toolCalls.flatMap((call) => {
-    if (!call || typeof call !== 'object') return [];
-    const item = call as Record<string, unknown>;
-    const id = item.id;
-    const name = item.name;
-    return typeof id === 'string' && id && typeof name === 'string' && name
-      ? [{ id, name, args: item.args }]
-      : [];
-  });
-}
-
-function readToolCallId(message: ToolMessage): string | null {
-  const toolCallId = message.tool_call_id;
-  return typeof toolCallId === 'string' && toolCallId ? toolCallId : null;
-}
 
 function collectToolCallInfo(messages: BaseMessage[]) {
   const calls = new Map<string, ToolCallInfo>();
@@ -136,7 +104,7 @@ function collectToolResultCandidates(
     .filter((item): item is { message: ToolMessage; index: number } => ToolMessage.isInstance(item.message));
 
   return toolMessages.map((item) => {
-    const callId = readToolCallId(item.message);
+    const callId = readToolMessageCallId(item.message);
     const call = callId ? calls.get(callId) : null;
     const toolName = call?.name ?? (typeof item.message.name === 'string' ? item.message.name : null);
     return {

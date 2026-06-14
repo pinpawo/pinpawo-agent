@@ -1,8 +1,14 @@
 import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, resolve } from 'node:path';
 import { tool } from '@langchain/core/tools';
-import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
+import {
+  buildReviewSpec,
+  isToolActionAuthorized,
+  type ToolkitOperationMetadata,
+  type ToolkitToolReviewPolicy,
+} from '@pinpawo/pet-agent';
 import { z } from 'zod';
+import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { tryStat } from './fileSystemUtils';
 import {
   applyChunksToContent,
@@ -246,6 +252,203 @@ export const writeFileTool = tool(
     }),
   },
 );
+
+type WriteFileAction = {
+  path: string;
+  content: string;
+  append: boolean;
+  createDirs: boolean;
+};
+
+type ApplyPatchAction = {
+  patch: string;
+};
+
+function normalizeWriteFileAction(input: unknown): WriteFileAction {
+  const record = readRecord(input);
+  const path = readString(record, 'path');
+  const content = readString(record, 'content');
+  if (!path) {
+    throw new Error('write_file requires a path');
+  }
+  if (content === undefined) {
+    throw new Error('write_file requires content');
+  }
+  return {
+    path: resolveUserPath(path),
+    content,
+    append: readBoolean(record, 'append') ?? false,
+    createDirs: readBoolean(record, 'createDirs') ?? true,
+  };
+}
+
+function normalizeApplyPatchAction(input: unknown): ApplyPatchAction {
+  const record = readRecord(input);
+  const patch = readString(record, 'patch');
+  if (!patch || !patch.trim()) {
+    throw new Error('apply_patch requires a patch');
+  }
+  return { patch };
+}
+
+function buildFileMutationReviewSpec(params: {
+  title: string;
+  body: string;
+}) {
+  return buildReviewSpec({
+    view: {
+      kind: 'plain',
+      title: params.title,
+      body: params.body,
+    },
+    options: [
+      {
+        id: 'approve',
+        label: 'Approve',
+        variant: 'primary',
+        decision: { type: 'approve' },
+      },
+      {
+        id: 'approve-and-authorize-thread',
+        label: 'Approve and authorize',
+        description: 'Approve this action and authorize the exact same file mutation in this thread.',
+        decision: { type: 'approve' },
+        effects: [{
+          type: 'graph.authorize_tool_action',
+          scope: 'thread',
+          actionRef: { type: 'pending_action' },
+          matcher: { type: 'policy_hook' },
+        }],
+      },
+      {
+        id: 'reject',
+        label: 'Reject',
+        variant: 'danger',
+        decision: { type: 'reject' },
+      },
+      {
+        id: 'respond',
+        label: 'Respond',
+        input: {
+          kind: 'text',
+          key: 'message',
+          required: true,
+          multiline: true,
+          placeholder: 'Tell the agent what to do instead',
+        },
+        decision: { type: 'respond', messageInputKey: 'message' },
+      },
+    ],
+  });
+}
+
+function isAuthorizedFileMutation(params: {
+  toolName: 'write_file' | 'apply_patch';
+  args: Record<string, unknown>;
+  toolAuthorizations: Parameters<ToolkitToolReviewPolicy['request']>[0]['toolAuthorizations'];
+}) {
+  const { capabilities } = getCurrentLocalAgentInterface();
+  return capabilities.sessionAuthorization
+    ? isToolActionAuthorized({
+        authorizations: params.toolAuthorizations ?? [],
+        toolName: params.toolName,
+        args: params.args,
+      })
+    : false;
+}
+
+function formatWriteFileReviewBody(action: WriteFileAction) {
+  const before = readFileContentPreview(action.path);
+  return [
+    `即将${action.append ? '追加写入' : before === undefined ? '创建' : '覆盖'}本地文件。`,
+    `路径：${action.path}`,
+    `模式：${action.append ? 'append' : 'write'}`,
+    `创建父目录：${action.createDirs ? 'yes' : 'no'}`,
+    `写入字节：${Buffer.byteLength(action.content, 'utf-8').toString()}`,
+    before === undefined ? null : `\n--- before ---\n${before}`,
+    `\n--- content ---\n${truncateForOperationDetails(action.content)}`,
+  ].filter((line): line is string => line !== null).join('\n');
+}
+
+function formatApplyPatchReviewBody(action: ApplyPatchAction) {
+  const operations = parsePatch(action.patch);
+  const files = operations.map((operation) => ({
+    path: operation.path,
+    type: operation.type,
+    ...(operation.type === 'update' && operation.moveTo ? { moveTo: operation.moveTo } : {}),
+  }));
+  return [
+    '即将应用本地文件补丁。',
+    `文件数：${files.length.toString()}`,
+    `文件：${files.map((file) => `${file.type}:${file.path}${'moveTo' in file ? ` -> ${file.moveTo}` : ''}`).join(', ')}`,
+    `\n--- patch ---\n${truncateForOperationDetails(action.patch)}`,
+  ].join('\n');
+}
+
+export const writeFileReviewPolicy: ToolkitToolReviewPolicy = {
+  request: ({ input, toolAuthorizations }) => {
+    let action: WriteFileAction;
+    try {
+      action = normalizeWriteFileAction(input);
+    } catch {
+      return null;
+    }
+
+    const { capabilities } = getCurrentLocalAgentInterface();
+    if (!capabilities.humanReview) {
+      return null;
+    }
+
+    const args = { ...action };
+    if (isAuthorizedFileMutation({ toolName: 'write_file', args, toolAuthorizations })) {
+      return null;
+    }
+
+    return buildFileMutationReviewSpec({
+      title: 'File write approval',
+      body: formatWriteFileReviewBody(action),
+    });
+  },
+  buildAuthorizationMatcher: ({ input }) => {
+    return {
+      type: 'exact_args',
+      value: { ...normalizeWriteFileAction(input) },
+    };
+  },
+};
+
+export const applyPatchReviewPolicy: ToolkitToolReviewPolicy = {
+  request: ({ input, toolAuthorizations }) => {
+    let action: ApplyPatchAction;
+    try {
+      action = normalizeApplyPatchAction(input);
+      parsePatch(action.patch);
+    } catch {
+      return null;
+    }
+
+    const { capabilities } = getCurrentLocalAgentInterface();
+    if (!capabilities.humanReview) {
+      return null;
+    }
+
+    const args = { ...action };
+    if (isAuthorizedFileMutation({ toolName: 'apply_patch', args, toolAuthorizations })) {
+      return null;
+    }
+
+    return buildFileMutationReviewSpec({
+      title: 'Patch approval',
+      body: formatApplyPatchReviewBody(action),
+    });
+  },
+  buildAuthorizationMatcher: ({ input }) => {
+    return {
+      type: 'exact_args',
+      value: { ...normalizeApplyPatchAction(input) },
+    };
+  },
+};
 
 interface ResolvedPatchWrite {
   operation: PatchOperation;

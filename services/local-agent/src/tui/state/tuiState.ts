@@ -1,5 +1,6 @@
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
+import type { TextAreaModel } from '../input/textareaModel';
 import { TUI_TEXT } from '../render/text';
 
 export const MAX_TUI_HISTORY_ITEMS = 240;
@@ -24,8 +25,7 @@ export type TuiState = {
   sessions: Record<SessionId, SessionModel>;
   focusedSessionId: SessionId | null;
   runRoute: Record<RunId, SessionId>;
-  input: {
-    value: string;
+  input: TextAreaModel & {
     focused: boolean;
   };
 };
@@ -133,6 +133,11 @@ export type TuiAction =
   | {
       type: 'input.set';
       value: string;
+      cursorOffset?: number;
+    }
+  | {
+      type: 'input.apply';
+      value: TextAreaModel;
     }
   | {
       type: 'history.append';
@@ -220,7 +225,8 @@ export function createInitialTuiState(defaultSession: SessionModel): TuiState {
     focusedSessionId: defaultSession.id,
     runRoute: {},
     input: {
-      value: '',
+      text: '',
+      cursorOffset: 0,
       focused: true,
     },
   };

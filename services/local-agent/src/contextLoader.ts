@@ -1,4 +1,6 @@
 import { gql } from './graphqlClient';
+import { config } from './config';
+import { LOCAL_ONLY_ACTOR_ID, LOCAL_ONLY_ACTOR_NAME } from './actorSelection';
 import type { TrendPromptItem } from './capabilities/dailyPost';
 
 export type PetProfile = {
@@ -183,6 +185,7 @@ const NEXT_TICK_QUERY = `
 `;
 
 export async function getNextTickAt(actorId: string): Promise<Date | null> {
+  if (!config.apiConnected) return null;
   const data = await gql<{ pet_agents: { next_tick_at: string | null }[] }>(NEXT_TICK_QUERY, {
     actorId,
   });
@@ -207,13 +210,39 @@ const HEARTBEAT_MUTATION = `
 `;
 
 export async function sendHeartbeat(actorId: string): Promise<void> {
+  if (!config.apiConnected) return;
   const nextTickAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
   await gql(HEARTBEAT_MUTATION, { actorId, nextTickAt });
 }
 
 // ---- Context loader ----
 
+export function buildLocalOnlyAgentContext(actorId = LOCAL_ONLY_ACTOR_ID): AgentContext {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    pet: {
+      id: actorId,
+      name: LOCAL_ONLY_ACTOR_NAME,
+      personality: 'Local-only mode. API-backed memory, posts, trends, hosted relay, and mobile control are unavailable until login.',
+      species: 'local',
+      stage: null,
+      growth_value: null,
+      stage_asset_id: null,
+    },
+    context: {
+      petMemoryText: '',
+      recentChatTurns: [],
+      recentDaily: [],
+      trendItems: [],
+      today,
+    },
+  };
+}
+
 export async function loadAgentContext(actorId: string): Promise<AgentContext> {
+  if (!config.apiConnected) {
+    return buildLocalOnlyAgentContext(actorId);
+  }
   const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
   const data = await gql<ContextQueryResult>(CONTEXT_QUERY, { since, actorId });
 

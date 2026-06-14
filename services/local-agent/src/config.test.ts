@@ -26,3 +26,14 @@ test('resolveNumberConfigValue prefers valid env number over stored number', asy
   const { resolveNumberConfigValue } = await loadConfigHelpers();
   assert.equal(resolveNumberConfigValue('64000', 131072), 64000);
 });
+
+test('isMissingOrGeneratedApiPlaceholder detects init scaffold values', async () => {
+  const { isMissingOrGeneratedApiPlaceholder } = await loadConfigHelpers();
+
+  assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', ''), true);
+  assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', 'https://your-api.example.com'), true);
+  assert.equal(isMissingOrGeneratedApiPlaceholder('HASURA_ENDPOINT', 'https://your-hasura.example.com/v1/graphql'), true);
+  assert.equal(isMissingOrGeneratedApiPlaceholder('AGENT_TOKEN', 'your-agent-token-here'), true);
+  assert.equal(isMissingOrGeneratedApiPlaceholder('HASURA_JWT', 'eyJ...'), true);
+  assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', 'https://api.example.test'), false);
+});

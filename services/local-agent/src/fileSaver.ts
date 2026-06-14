@@ -32,6 +32,9 @@ type MemorySaverData = {
   writes: Record<string, Record<string, [string, string, string]>>;
 };
 
+// Legacy day/thread shard format read only during migration. `bucket` is no
+// longer meaningful in the content-addressed layout; it is parsed for
+// back-compat and otherwise ignored.
 type ThreadShardData = {
   threadId: string;
   bucket: string;
@@ -47,6 +50,8 @@ type CheckpointManifest = {
   parentCheckpointId?: string;
   checkpointShellHash: string;
   metadataHash: string;
+  // Older manifest format: a flat channel->hash map. Still read for back-compat,
+  // but new manifests are written with `channelValueRefs` instead.
   channelValueHashes?: Record<string, string>;
   channelValueRefs?: Record<string, ChannelValueRef>;
 };
@@ -165,10 +170,32 @@ export class FileSaver extends BaseCheckpointSaver {
   private readonly legacyBaseName: string;
   private readonly legacyExt: string;
   private readonly casRootDir: string;
+  /**
+   * Per-checkpoint write locks. LangGraph fans out putWrites for multiple tasks
+   * against the same checkpoint concurrently; each call read-modify-writes the
+   * shared writes manifest, so they must be serialized or one task's writes are
+   * lost. The map holds the tail of a promise chain keyed by checkpoint.
+   */
+  private readonly writeLocks = new Map<string, Promise<void>>();
+  /**
+   * Threads observed this process lifetime. Lets put/putWrites keep
+   * `loadedThreadCount` current without re-reading the threads directory on
+   * every checkpoint write.
+   */
+  private readonly knownThreads = new Set<string>();
 
   /** Number of threads visible in the content-addressed checkpoint store. */
   get loadedThreadCount() {
     return this._loadedThreadCount;
+  }
+
+  /** Record a thread we just wrote to, bumping the count if it is new. */
+  private noteThread(threadId: string) {
+    const segment = encodePathSegment(threadId);
+    if (!this.knownThreads.has(segment)) {
+      this.knownThreads.add(segment);
+      this._loadedThreadCount += 1;
+    }
   }
 
   constructor(private readonly filePath: string) {
@@ -178,6 +205,25 @@ export class FileSaver extends BaseCheckpointSaver {
     this.legacyBaseName = basename(this.filePath, this.legacyExt);
     this.casRootDir = join(this.legacyRootDir, this.legacyBaseName);
     this.load();
+  }
+
+  /** Serialize `fn` against others sharing `key` (a promise-chain mutex). */
+  private async runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.writeLocks.get(key) ?? Promise.resolve();
+    const run = previous.then(() => fn());
+    // Keep the chain alive even if `fn` rejects, so a failure does not wedge
+    // every later waiter on this key.
+    const tail = run.then(() => undefined, () => undefined);
+    this.writeLocks.set(key, tail);
+    try {
+      return await run;
+    } finally {
+      // Drop the entry once we are the last in line, so the map does not grow
+      // unbounded across distinct checkpoints.
+      if (this.writeLocks.get(key) === tail) {
+        this.writeLocks.delete(key);
+      }
+    }
   }
 
   private writeObject(bytes: Uint8Array) {
@@ -487,22 +533,27 @@ export class FileSaver extends BaseCheckpointSaver {
     return count;
   }
 
-  private countThreads() {
+  /** Re-scan the threads directory and reset the known-thread set + count. */
+  private seedKnownThreads() {
     const threadsDir = join(this.casRootDir, 'threads');
-    return safeReadDir(threadsDir).filter((threadSegment) => {
+    this.knownThreads.clear();
+    for (const threadSegment of safeReadDir(threadsDir)) {
       try {
-        return statSync(join(threadsDir, threadSegment)).isDirectory();
+        if (statSync(join(threadsDir, threadSegment)).isDirectory()) {
+          this.knownThreads.add(threadSegment);
+        }
       } catch {
-        return false;
+        // skip entries we cannot stat
       }
-    }).length;
+    }
+    this._loadedThreadCount = this.knownThreads.size;
   }
 
   private load() {
     if (this.contentAddressedManifestCount() === 0 || this.listLegacyShardFiles().length > 0) {
       this.migrateLegacy();
     }
-    this._loadedThreadCount = this.countThreads();
+    this.seedKnownThreads();
     this.gcObjects();
   }
 
@@ -550,6 +601,8 @@ export class FileSaver extends BaseCheckpointSaver {
       }
     }
 
+    // Newest first. Relies on LangGraph checkpoint ids being lexicographically
+    // time-ordered (sortable UUIDs), the same assumption `before` filtering uses.
     manifests.sort((a, b) => b.checkpointId.localeCompare(a.checkpointId));
     for (const manifest of manifests) {
       const [, metadataBytes] = this.checkpointTupleBytes(manifest);
@@ -593,7 +646,7 @@ export class FileSaver extends BaseCheckpointSaver {
       serializedMetadata,
       config.configurable?.checkpoint_id,
     ]);
-    this._loadedThreadCount = this.countThreads();
+    this.noteThread(threadId);
     return {
       configurable: {
         thread_id: threadId,
@@ -615,35 +668,42 @@ export class FileSaver extends BaseCheckpointSaver {
     }
 
     const outerKey = generateWriteKey(threadId, checkpointNamespace, checkpointId);
-    const existingManifest = this.readWritesManifest(this.writesPath(threadId, checkpointNamespace ?? '', checkpointId));
-    const outerWrites: Record<string, [string, string, Uint8Array]> = {};
-    for (const [innerKey, record] of Object.entries(existingManifest?.writes ?? {})) {
-      outerWrites[innerKey] = [
-        record.taskId,
-        record.channel,
-        readObject(this.casRootDir, record.valueHash),
-      ];
-    }
 
-    await Promise.all(writes.map(async ([channel, value], idx) => {
-      const [, serializedValue] = await this.serde.dumpsTyped(value);
-      const writeIndex = WRITES_IDX_MAP[channel] ?? idx;
-      const innerKeyStr = `${taskId},${writeIndex}`;
-      if (writeIndex >= 0 && innerKeyStr in outerWrites) return;
-      outerWrites[innerKeyStr] = [
-        taskId,
-        channel,
-        serializedValue,
-      ];
-    }));
+    // Serialize the read-modify-write so concurrent putWrites for sibling tasks
+    // on the same checkpoint do not clobber each other's writes manifest.
+    await this.runExclusive(outerKey, async () => {
+      const existingManifest = this.readWritesManifest(this.writesPath(threadId, checkpointNamespace ?? '', checkpointId));
+      const outerWrites: Record<string, [string, string, Uint8Array]> = {};
+      for (const [innerKey, record] of Object.entries(existingManifest?.writes ?? {})) {
+        outerWrites[innerKey] = [
+          record.taskId,
+          record.channel,
+          readObject(this.casRootDir, record.valueHash),
+        ];
+      }
 
-    this.writeWritesManifest(threadId, checkpointNamespace, checkpointId, outerKey, outerWrites);
-    this._loadedThreadCount = this.countThreads();
+      await Promise.all(writes.map(async ([channel, value], idx) => {
+        const [, serializedValue] = await this.serde.dumpsTyped(value);
+        const writeIndex = WRITES_IDX_MAP[channel] ?? idx;
+        const innerKeyStr = `${taskId},${writeIndex}`;
+        if (writeIndex >= 0 && innerKeyStr in outerWrites) return;
+        outerWrites[innerKeyStr] = [
+          taskId,
+          channel,
+          serializedValue,
+        ];
+      }));
+
+      this.writeWritesManifest(threadId, checkpointNamespace, checkpointId, outerKey, outerWrites);
+    });
+    this.noteThread(threadId);
   }
 
   async deleteThread(threadId: string): Promise<void> {
     rmSync(this.threadDir(threadId), { recursive: true, force: true });
-    this._loadedThreadCount = this.countThreads();
+    if (this.knownThreads.delete(encodePathSegment(threadId))) {
+      this._loadedThreadCount -= 1;
+    }
     this.gcObjects();
   }
 
@@ -700,6 +760,15 @@ export class FileSaver extends BaseCheckpointSaver {
     return hashes;
   }
 
+  // GC walks every manifest to build the reachable set, then deletes any object
+  // not in it. This is only invoked from `load()` (constructor) and
+  // `deleteThread`. It is NOT safe to run concurrently with `put`/`putWrites`:
+  // an object written between collecting the reachable set and the delete pass
+  // would look unreachable and be removed. All writers here are synchronous up
+  // to their final atomic rename, and the manifest's ref is written last, so
+  // within a single FileSaver instance no in-flight put overlaps GC today. Keep
+  // it that way — if a writer ever becomes async across the rename, gate GC
+  // behind the same lock.
   private gcObjects() {
     const objectsDir = join(this.casRootDir, 'objects');
     if (!existsSync(objectsDir)) return;

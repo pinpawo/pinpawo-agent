@@ -133,6 +133,29 @@ test('FileSaver persists pending writes beside checkpoint manifests', async (t) 
   assert.deepEqual(tuple?.pendingWrites, [['task-1', 'messages', { role: 'ai', content: 'pending' }]]);
 });
 
+test('FileSaver serializes concurrent putWrites for the same checkpoint', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const saver = new FileSaver(filePath);
+  t.after(() => saver.dispose());
+
+  const config = await saver.put({ configurable: { thread_id: 'thread-1' } }, checkpoint('cp-1', {
+    messages: [],
+  }), { source: 'loop', step: 1, parents: {} });
+
+  // LangGraph fans these out concurrently for sibling tasks on one checkpoint.
+  await Promise.all([
+    saver.putWrites(config, [['channel-a', { content: 'a' }]], 'task-a'),
+    saver.putWrites(config, [['channel-b', { content: 'b' }]], 'task-b'),
+  ]);
+
+  const restored = new FileSaver(filePath);
+  t.after(() => restored.dispose());
+  const tuple = await restored.getTuple(config);
+  const channels = (tuple?.pendingWrites ?? []).map((write) => write[1]).sort();
+  assert.deepEqual(channels, ['channel-a', 'channel-b']);
+});
+
 test('FileSaver migrates legacy monolith data into content-addressed layout', async (t) => {
   const root = createTempDir(t);
   const filePath = join(root, 'checkpoints.json');

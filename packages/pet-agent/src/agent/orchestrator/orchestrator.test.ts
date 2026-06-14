@@ -94,6 +94,15 @@ test('capability search finds video script assistant for short creation request'
   assert.deepEqual(results.map((item) => item.name), ['trend_video_script']);
 });
 
+test('capability search can select explore for read-heavy investigation requests', () => {
+  const results = searchCapabilities('代码库理解|调查|先探索再决定', [
+    capability('explore', '通用探索、调查、资料检索和代码库理解 capability。适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。'),
+    capability('daily_post', '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿。'),
+  ]);
+
+  assert.equal(results[0]?.name, 'explore');
+});
+
 test('capability search tool returns a state update command with candidates', async () => {
   const capabilities = [
     capability('daily_post', '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿。'),
@@ -180,6 +189,80 @@ test('capability discovery receives compact task status context', async () => {
   assert.match(discoveryInput, /任务目标：归档 Downloads/);
   assert.doesNotMatch(discoveryInput, /最近 subagent announce/);
   assert.doesNotMatch(discoveryInput, /打包因超时停止/);
+});
+
+test('user intent decision exposes in-progress capability candidates independent of latest user text', async () => {
+  let decisionSystemPrompt = '';
+  let decisionInput = '';
+  let decisionCallCount = 0;
+  let schemaAllowsExplore = false;
+  const model = {
+    bindTools: () => ({
+      invoke: async () => {
+        return new AIMessage('');
+      },
+    }),
+    withStructuredOutput: (schema: unknown) => ({
+      invoke: async (messages: unknown[]) => {
+        decisionCallCount += 1;
+        if (decisionCallCount > 1) {
+          return { action: 'finish', answer: 'done' };
+        }
+        schemaAllowsExplore = Boolean(
+          (schema as { safeParse?: (value: unknown) => { success: boolean } }).safeParse?.({
+            action: 'delegate_capability.explore',
+            task: '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
+            context_summary: '上一轮 explore 调查仍处于 progress 状态。',
+          }).success,
+        );
+        decisionSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
+        decisionInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
+        return {
+          action: 'delegate_capability.explore',
+          task: '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
+          context_summary: '上一轮 explore 调查仍处于 progress 状态。',
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+
+  const graph = createOrchestratorGraph({
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+  });
+  const previousAnnounce = new AIMessage('(no matches)');
+  setPinpetMeta(previousAnnounce, {
+    lane: 'capability:explore',
+    turnId: 'prev-turn',
+    announce: 'progress',
+    delegationId: 'task-prev',
+    task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
+  });
+  const input = buildOrchestratorTurnInput([
+    new HumanMessage('帮我调查 pet-app 里的 capability 注册链路。'),
+    previousAnnounce,
+    new HumanMessage('现在状态如何？'),
+  ]);
+
+  await graph.invoke(input, {
+    configurable: {
+      thread_id: 'test-in-progress-capability-candidate',
+      actor: testActor,
+      capabilities: [capability('explore', '通用探索、调查、代码库理解 capability。')],
+      tools: [],
+    },
+  });
+
+  assert.equal(schemaAllowsExplore, true);
+  assert.match(decisionSystemPrompt, /delegate_capability\.explore/);
+  assert.match(decisionInput, /当前用户请求：现在状态如何？/);
+  assert.match(decisionInput, /capability:explore，progress/);
+  assert.match(decisionInput, /调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
+  assert.equal(decisionCallCount, 2);
 });
 
 test('forcedCapabilityNames pre-seeds capability candidates and skips capability discovery LLM call', async () => {
@@ -316,6 +399,83 @@ test('delegation outcome decision receives subagent announce as explicit input a
   assert.match(decisionInput, /文件读取完成，lint 已通过/);
 });
 
+test('limit-reached progress announce lets model choose the same capability delegation', async () => {
+  let capabilityRunCount = 0;
+  let decisionCallCount = 0;
+  let decisionSystemPrompt = '';
+  let decisionInput = '';
+  const routeModel = {
+    bindTools: () => ({
+      invoke: async () => {
+        throw new Error('capability discovery should be skipped for current-turn announce');
+      },
+    }),
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        decisionCallCount += 1;
+        if (decisionCallCount === 1) {
+          decisionSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
+          decisionInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
+          return {
+            action: 'delegate_capability.inspect_repo',
+            task: '继续调查仓库 capability 注册链路。',
+            context_summary: '上一轮因迭代上限停止，任务仍未完成。',
+          };
+        }
+        return { action: 'finish', answer: 'done' };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const inspectCapability: AgentCapability = {
+    name: 'inspect_repo',
+    description: 'Inspect repository.',
+    createRuntime: () => {
+      capabilityRunCount += 1;
+      return {};
+    },
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+  });
+  const input = buildOrchestratorTurnInput([new HumanMessage('继续')]);
+  const progressAnnounce = new AIMessage('(no matches)');
+  setPinpetMeta(progressAnnounce, {
+    lane: 'capability:inspect_repo',
+    turnId: input.turnId,
+    announce: 'progress',
+    completionReason: 'limit_reached',
+    delegationId: 'task-limit',
+    task: '调查仓库 capability 注册链路。',
+  });
+  input.messages.push(progressAnnounce);
+  input.turnDelegations = [{
+    id: 'task-limit',
+    lane: 'capability:inspect_repo',
+    task: '调查仓库 capability 注册链路。',
+    status: 'progress',
+    resultPreview: '(no matches)',
+  }];
+
+  await graph.invoke(input, {
+    configurable: {
+      thread_id: 'limit-progress-auto-resume',
+      actor: testActor,
+      capabilities: [inspectCapability],
+      toolkits: [],
+    },
+  });
+
+  assert.equal(capabilityRunCount, 1);
+  assert.equal(decisionCallCount, 2);
+  assert.match(decisionSystemPrompt, /delegate_capability\.inspect_repo/);
+  assert.match(decisionInput, /停止原因：limit_reached/);
+});
+
 test('capability result helper reads latest tool artifact, not JSON content', () => {
   const result = readLatestToolArtifact([
     new ToolMessage({
@@ -393,6 +553,76 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
     'browser_open',
     'custom_tool',
   ]);
+});
+
+test('capability runtime receives available toolkit metadata and fixed uses still resolve normally', async () => {
+  let routeCallCount = 0;
+  let runtimeToolkitNames: string[] = [];
+  const routeModel = {
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_capability.inspect_repo',
+              task: 'inspect repository',
+              context_summary: null,
+            }
+          : {
+              action: 'finish',
+              answer: 'done',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({ toolCalls: [[]] });
+  const runtimeCapability: AgentCapability = {
+    name: 'inspect_repo',
+    description: 'Inspect repository with bash tools.',
+    createRuntime: async (ctx) => {
+      runtimeToolkitNames = ctx.availableToolkits?.map((item) => item.name) ?? [];
+      return {
+        uses: ['bash'],
+        instructions: (instructionCtx) => [
+          `available=${instructionCtx.availableToolkits?.map((item) => item.name).join(',') ?? ''}`,
+        ],
+      };
+    },
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: subagentModel,
+    },
+    actor: testActor,
+  });
+
+  await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('inspect')]), {
+    configurable: {
+      thread_id: 'available-toolkits-runtime',
+      actor: testActor,
+      capabilities: [runtimeCapability],
+      toolkits: [
+        {
+          name: 'bash',
+          description: 'bash toolkit',
+          tools: [mockTool('read_file')],
+        },
+        {
+          name: 'browser',
+          description: 'browser toolkit',
+          tools: [mockTool('browser_open')],
+        },
+      ],
+      forcedCapabilityNames: ['inspect_repo'],
+    },
+  });
+
+  assert.deepEqual(runtimeToolkitNames, ['bash', 'browser']);
 });
 
 test('toolkit and capability toolset operations are collected with their source', () => {
@@ -975,8 +1205,87 @@ test('iteration limit review accepts canonical approve resume', async () => {
     iterationCount?: number;
   };
 
-  assert.equal(resumed.__interrupt__, undefined);
+  assert.equal(Array.isArray(resumed.__interrupt__) ? resumed.__interrupt__.length : 0, 0);
   assert.equal(resumed.iterationCount, 0);
+});
+
+test('iteration limit approve can resume an in-progress capability lane', async () => {
+  let schemaAllowsExplore = false;
+  const routeModel = {
+    withStructuredOutput: (schema: unknown) => ({
+      invoke: async () => {
+        schemaAllowsExplore = Boolean(
+          (schema as { safeParse?: (value: unknown) => { success: boolean } }).safeParse?.({
+            action: 'delegate_capability.explore',
+            task: '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
+            context_summary: '上一轮 explore lane 仍处于 progress。',
+          }).success,
+        );
+        return {
+          action: 'delegate_capability.explore',
+          task: '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
+          context_summary: '上一轮 explore lane 仍处于 progress。',
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: { act: routeModel },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const previousAnnounce = new AIMessage('已定位到部分 registry 文件，但还没有完成完整调用链路调查。');
+  setPinpetMeta(previousAnnounce, {
+    lane: 'capability:explore',
+    turnId: 'previous-turn',
+    announce: 'progress',
+    completionReason: 'limit_reached',
+    delegationId: 'previous-progress-1',
+    task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
+  });
+  const input = buildOrchestratorTurnInput([
+    new HumanMessage('帮我调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。'),
+    previousAnnounce,
+    new HumanMessage('继续'),
+  ]);
+  input.iterationCount = 1;
+  const config = {
+    configurable: {
+      thread_id: 'iteration-limit-capability-resume',
+      actor: testActor,
+      capabilities: [capability('explore', '通用探索、调查、代码库理解 capability。')],
+      tools: [],
+      maxIterations: 1,
+    },
+  };
+
+  const interrupted = await graph.invoke(input, config) as {
+    __interrupt__?: Array<{ value?: unknown }>;
+  };
+  const payload = interrupted.__interrupt__?.[0]?.value as {
+    review?: { id?: string };
+  } | undefined;
+  assert.equal(typeof payload?.review?.id, 'string');
+
+  const resumed = await graph.invoke(new Command({
+    resume: {
+      reviewId: payload?.review?.id,
+      selectedOptionId: 'approve',
+    },
+  }), {
+    ...config,
+    interruptBefore: ['capability'],
+  }) as {
+    __interrupt__?: unknown;
+    iterationCount?: number;
+    pendingDelegation?: { lane?: string; task?: string } | null;
+  };
+
+  assert.equal(Array.isArray(resumed.__interrupt__) ? resumed.__interrupt__.length : 0, 0);
+  assert.equal(resumed.iterationCount, 0);
+  assert.equal(schemaAllowsExplore, true);
+  assert.equal(resumed.pendingDelegation?.lane, 'capability:explore');
+  assert.match(resumed.pendingDelegation?.task ?? '', /继续调查/);
 });
 
 test('iteration limit review accepts canonical respond resume as replanning feedback', async () => {

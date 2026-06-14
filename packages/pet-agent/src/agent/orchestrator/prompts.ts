@@ -6,6 +6,7 @@ import type {
   CapabilityCandidate,
   CapabilityDecisionState,
   SubagentAnnounce,
+  SubagentCompletionReason,
   TurnDelegation,
 } from './types';
 import { clipForPrompt, describeAnnounceKind, formatDelegationStatus, readMessageText } from './utils';
@@ -201,6 +202,7 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
     '决策原则：',
     '- 如果 subagent announce 已经满足用户当前轮目标，选择 finish。',
     '- 如果 subagent announce 只是阶段性进展，判断还缺什么；需要执行器继续时再委派。',
+    '- 如果 subagent 因迭代上限、上下文限制或阶段性停止而返回 progress，但用户目标仍明确且不需要用户补充信息，优先继续委派给同一类执行器；不要仅因为 progress 就 ask_user。',
     '- 如果用户原始请求仍有明确未完成目标，选择一个最明确的下一步。',
     '- 如果信息不足、用户意图不明确，或下一步具有破坏性、不可逆、涉及敏感凭据、外部真实副作用，选择 ask_user 先向用户确认。',
     '- 如果下一步需要 general 的工具能力，选择 delegate_general。',
@@ -244,6 +246,7 @@ export function buildCapabilityDiscoverySystemPrompt(params: {
     '当前阶段：用户请求后的 capability 候选发现。',
     `如果用户目标可能需要业务 capability，调用 ${CAPABILITY_SEARCH_TOOL_NAME}。`,
     '如果用户明确要求某类执行环境、应用或专门能力，而 general 只提供近似替代工具，先搜索 capability。',
+    '如果用户请求需要大量阅读、调查、代码库理解、资料检索、上下文发现或先探索再决定下一步，先搜索 explore/探索/investigate/research capability。',
     '如果用户要打开 URL/链接/网站/网页，或需要真实浏览器、Chrome、登录态、JS 渲染、点击、输入、等待页面变化，先搜索 browser/浏览器/网页/url/链接 capability。',
     '如果用户明确要访问 REST API、RSS、静态文本内容，且不需要浏览器状态或页面交互，可以不搜索 browser capability。',
     '如果用户只是询问已有上下文、最近任务状态或之前结果，不调用任何工具。',
@@ -273,13 +276,17 @@ function buildCapabilityDecisionInstructions(capabilityDecisionState: Capability
   return [];
 }
 
-export function buildSubagentAnnounceContext(item: SubagentAnnounce | null): string | null {
+export function buildSubagentAnnounceContext(
+  item: SubagentAnnounce | null,
+  completionReason?: SubagentCompletionReason | null,
+): string | null {
   if (!item) return null;
   const lines = [
     'subagent announce：',
     item.delegationId ? `- 任务标识：${item.delegationId}` : null,
     `- 执行器：${item.lane}`,
     `- 状态：${describeAnnounceKind(item.announce)}`,
+    completionReason ? `- 停止原因：${completionReason}` : null,
     item.task ? `- 委派任务：${clipForPrompt(item.task, 180)}` : null,
     item.text ? `- 返回摘要：${clipForPrompt(item.text, 320)}` : null,
   ].filter(Boolean);

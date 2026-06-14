@@ -121,4 +121,8 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
     registry.getLocalToolkitDefinitions().map((item) => item.name),
     ['bash', 'git', 'browser'],
   );
+  assert.ok(
+    registry.getLocalCapabilityDefinitions().some((item) => item.name === 'explore'),
+    'default local capabilities should include explore',
+  );
 });

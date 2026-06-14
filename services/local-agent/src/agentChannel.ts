@@ -8,6 +8,7 @@ import {
   type OrchestratorConfig,
 } from '@pinpawo/pet-agent';
 import { createCapabilityCreatorCapability } from './capabilities/capabilityCreator';
+import { createExploreCapability } from './capabilities/explore';
 import {
   buildDailyPostTaskMessage,
   createDailyPostCapability,
@@ -168,6 +169,16 @@ function buildGraphKey(parts: Array<string | null | undefined>) {
     .join(':');
 }
 
+function appendCapability(
+  capabilities: AgentCapability[],
+  capability: AgentCapability,
+) {
+  if (capabilities.some((item) => item.name === capability.name)) {
+    return;
+  }
+  capabilities.push(capability);
+}
+
 export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): OrchestratorConfig['decisionStructuredOutput'] {
   return llmConfig.model.includes('deepseek')
     ? { method: 'functionCalling' }
@@ -190,6 +201,7 @@ export function buildLocalChatAgentInput(params: {
   userCapabilities?: LoadedUserCapability[];
 }): AgentChannelSetup {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
+  const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const actor = buildActor(params.context);
   const trendItems = toTrendPromptItems(params.context.context.trendItems);
   const sharedToolkits = [
@@ -201,8 +213,14 @@ export function buildLocalChatAgentInput(params: {
 
   const capabilities: AgentCapability[] = [];
 
+  if (isCapabilityEnabled('explore')) {
+    appendCapability(capabilities, createExploreCapability({
+      structuredOutput: decisionStructuredOutput,
+    }));
+  }
+
   if (isCapabilityEnabled('daily_post')) {
-    capabilities.push(createDailyPostCapability({
+    appendCapability(capabilities, createDailyPostCapability({
       recentDaily: toRecentDaily(params.context.context.recentDaily),
       trendItems,
       savePost: saveDailyPost,
@@ -215,14 +233,16 @@ export function buildLocalChatAgentInput(params: {
   }
 
   if (isCapabilityEnabled('capability_creator')) {
-    capabilities.push(createCapabilityCreatorCapability());
+    appendCapability(capabilities, createCapabilityCreatorCapability());
   }
 
-  capabilities.push(...(params.extraCapabilities ?? []));
+  for (const capability of params.extraCapabilities ?? []) {
+    appendCapability(capabilities, capability);
+  }
 
   // Append user-defined capabilities (enabled state checked against their manifest id)
   for (const { meta, capability } of params.userCapabilities ?? []) {
-    if (isCapabilityEnabled(meta.id)) capabilities.push(capability);
+    if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
   }
 
   return {
@@ -239,7 +259,7 @@ export function buildLocalChatAgentInput(params: {
       models: buildLocalAgentModels(llmConfig),
       actor,
       checkpoint: params.checkpoint,
-      decisionStructuredOutput: buildDecisionStructuredOutput(llmConfig),
+      decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
     },
     input: {
@@ -278,6 +298,7 @@ export function buildLocalScheduledAgentInput(params: {
   userCapabilities?: LoadedUserCapability[];
 }): AgentChannelSetup {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
+  const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const actor = buildActor(params.context);
   const trendItems = toTrendPromptItems(params.context.context.trendItems);
   const recentDaily = toRecentDaily(params.context.context.recentDaily);
@@ -291,8 +312,14 @@ export function buildLocalScheduledAgentInput(params: {
 
   const capabilities: AgentCapability[] = [];
 
+  if (isCapabilityEnabled('explore')) {
+    appendCapability(capabilities, createExploreCapability({
+      structuredOutput: decisionStructuredOutput,
+    }));
+  }
+
   if (isCapabilityEnabled('daily_post')) {
-    capabilities.push(createDailyPostCapability({
+    appendCapability(capabilities, createDailyPostCapability({
       recentDaily,
       trendItems,
       savePost: params.dailyPost?.savePost ?? saveDailyPost,
@@ -312,7 +339,7 @@ export function buildLocalScheduledAgentInput(params: {
 
   // Append user-defined capabilities
   for (const { meta, capability } of params.userCapabilities ?? []) {
-    if (isCapabilityEnabled(meta.id)) capabilities.push(capability);
+    if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
   }
 
   return {
@@ -328,7 +355,7 @@ export function buildLocalScheduledAgentInput(params: {
     graphConfig: {
       models: buildLocalAgentModels(llmConfig),
       actor,
-      decisionStructuredOutput: buildDecisionStructuredOutput(llmConfig),
+      decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
     },
     input: {

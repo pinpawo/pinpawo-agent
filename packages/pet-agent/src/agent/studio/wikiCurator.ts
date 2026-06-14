@@ -195,6 +195,11 @@ export function fileReadPromptProvider(absPath: string): CuratorPromptProvider {
   };
 }
 
+export type LLMWikiCuratorStructuredOutputConfig = {
+  method?: 'functionCalling' | 'jsonMode' | 'jsonSchema';
+  strict?: boolean;
+};
+
 export type LLMWikiCuratorConfig = {
   models: AgentModels;
   /**
@@ -204,6 +209,7 @@ export type LLMWikiCuratorConfig = {
    * - 传任意 async fn:custom 控制(可以每次重读、动态拼装等)
    */
   promptProvider?: CuratorPromptProvider;
+  structuredOutput?: LLMWikiCuratorStructuredOutputConfig;
 };
 
 async function readWikiSnapshot(wikiRoot: string): Promise<{
@@ -320,6 +326,8 @@ export function createLLMWikiCurator(config: LLMWikiCuratorConfig): WikiCurator 
   const promptProvider = config.promptProvider ?? defaultPromptProvider();
   const model = config.models.act.withStructuredOutput(curatorOutputSchema, {
     name: 'curate_wiki',
+    ...(config.structuredOutput?.method ? { method: config.structuredOutput.method } : {}),
+    ...(typeof config.structuredOutput?.strict === 'boolean' ? { strict: config.structuredOutput.strict } : {}),
   });
 
   return {

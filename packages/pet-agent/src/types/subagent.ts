@@ -57,17 +57,20 @@ export type ContextPolicyContext = {
   estimateMessagesTokens: (messages: BaseMessage[]) => number;
   iterationCount: number;
   operations: Record<string, SubagentToolOperationMetadata>;
+  contextWindowTokens?: number;
 };
 
 export type SubagentContextPolicy = {
   evictToolResults?: {
     keepRecent: number;
+    defaultMode?: 'evict' | 'truncate';
     budgetTokens?: number;
     minSizeChars?: number;
     keepFailures?: boolean;
     perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
   };
   rewrite?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[];
+  rewriteAsync?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[] | Promise<BaseMessage[]>;
 };
 
 export type SubagentInput = {

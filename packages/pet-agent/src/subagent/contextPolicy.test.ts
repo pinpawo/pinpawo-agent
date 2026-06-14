@@ -163,6 +163,33 @@ test('context policy keeps recent tool results even when budget remains high', (
   assert.equal(rewritten[4]?.content, messages[4]?.content);
 });
 
+test('context policy default truncate preserves older tool result prefixes while reducing budget', () => {
+  const operations = {
+    view_file_chunk: {},
+  } satisfies Record<string, SubagentToolOperationMetadata>;
+  const messages: BaseMessage[] = [
+    new HumanMessage('inspect'),
+    toolCallMessage('call-old', 'view_file_chunk', { path: 'src/old.ts' }),
+    toolResult('call-old', `old evidence line\n${'x'.repeat(2600)}`),
+    toolCallMessage('call-new', 'view_file_chunk', { path: 'src/new.ts' }),
+    toolResult('call-new', `new evidence line\n${'y'.repeat(2600)}`),
+  ];
+
+  const rewritten = rewriteMessagesForContextPolicy(messages, {
+    evictToolResults: {
+      keepRecent: 1,
+      defaultMode: 'truncate',
+      budgetTokens: 1,
+      minSizeChars: 80,
+    },
+  }, ctx(operations));
+
+  assert.match(String(rewritten[2]?.content), /^old evidence line/);
+  assert.match(String(rewritten[2]?.content), /\[truncated: older tool result; recall or rerun tool if needed\]$/);
+  assert.doesNotMatch(String(rewritten[2]?.content), /^\[evicted:/);
+  assert.equal(rewritten[4]?.content, messages[4]?.content);
+});
+
 test('context policy bounds thirty read-heavy tool results under budget while preserving recent floor', () => {
   const operations = {
     view_file_chunk: {

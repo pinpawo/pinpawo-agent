@@ -149,6 +149,34 @@ test('LLM curator uses caller-provided promptProvider override', async () => {
   assert.equal(capturedSystemPrompt.trim(), customPrompt.trim());
 });
 
+test('LLM curator forwards structured output options to model', async () => {
+  const wikiRoot = await makeWikiTempDir('curator-llm-structured-output-');
+  await ensureWikiSkeleton(wikiRoot);
+
+  let capturedOptions: unknown;
+  const fakeModel = {
+    withStructuredOutput: (_schema: unknown, options: unknown) => {
+      capturedOptions = options;
+      return {
+        invoke: async () => ({ topicUpdates: [], indexContent: '# x' }),
+      };
+    },
+  } as unknown as BaseChatModel;
+
+  const curator = createLLMWikiCurator({
+    models: { act: fakeModel },
+    structuredOutput: { method: 'functionCalling', strict: false },
+  });
+
+  await curator.curate({ wikiRoot, dispatch: sampleDispatch() });
+
+  assert.deepEqual(capturedOptions, {
+    name: 'curate_wiki',
+    method: 'functionCalling',
+    strict: false,
+  });
+});
+
 test('LLM curator calls promptProvider on each curate invocation', async () => {
   const wikiRoot = await makeWikiTempDir('curator-llm-provider-calls-');
   await ensureWikiSkeleton(wikiRoot);

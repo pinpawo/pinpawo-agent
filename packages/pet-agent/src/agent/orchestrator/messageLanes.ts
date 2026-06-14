@@ -29,6 +29,11 @@ export function getMessageAnnounce(message: BaseMessage): AnnounceKind | null {
   return announce === 'completed' || announce === 'progress' ? announce : null;
 }
 
+export function getMessageCompletionReason(message: BaseMessage): SubagentCompletionReason | null {
+  const completionReason = getPinpetMeta(message).completionReason;
+  return typeof completionReason === 'string' ? completionReason as SubagentCompletionReason : null;
+}
+
 export function setMessageAnnounce(message: BaseMessage, kind: AnnounceKind) {
   setPinpetMeta(message, { announce: kind });
 }
@@ -201,6 +206,7 @@ export function tagNewLaneMessages(
     setPinpetMeta(nextMessages[lastAiIndex], {
       delegationId: reportMeta?.delegationId ?? null,
       task: reportMeta?.task ?? null,
+      completionReason,
     });
   } else {
     for (let i = nextMessages.length - 1; i >= 0; i--) {
@@ -214,6 +220,7 @@ export function tagNewLaneMessages(
         setPinpetMeta(nextMessages[i], {
           delegationId: reportMeta?.delegationId ?? null,
           task: reportMeta?.task ?? null,
+          completionReason,
         });
         break;
       }
@@ -303,6 +310,14 @@ export function readLatestAnnounce(
 ): SubagentAnnounce | null {
   const message = readLatestAnnounceMessage(messages, options);
   return message ? readTaggedAnnounce(message) : null;
+}
+
+export function readLatestAnnounceCompletionReason(
+  messages: BaseMessage[],
+  options: { turnId?: string | null; delegationId?: string | null } = {},
+): SubagentCompletionReason | null {
+  const message = readLatestAnnounceMessage(messages, options);
+  return message ? getMessageCompletionReason(message) : null;
 }
 
 export function readRecentAnnounces(messages: BaseMessage[], limit = 5): SubagentAnnounce[] {

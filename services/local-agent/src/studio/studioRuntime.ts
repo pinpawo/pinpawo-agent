@@ -17,6 +17,7 @@ import {
 import { buildLocalAgentModels } from '../agentModels';
 import type { AgentLlmConfig } from '../agentConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
+import { createExploreCapability } from '../capabilities/explore';
 import { loadPetLocalConfigs } from './petConfig';
 import {
   DEFAULT_STUDIO_CONFIG_PATH,
@@ -113,16 +114,6 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
   const capabilitiesByName = new Map(input.capabilities.map((c) => [c.name, c]));
 
   const petAgents: PetAgentRuntime[] = resolved.agents.map((petConfig) => {
-    const capsForThisPet: AgentCapability[] = petConfig.capabilities.map((name) => {
-      const cap = capabilitiesByName.get(name);
-      if (!cap) {
-        throw new Error(
-          `pet "${petConfig.petId}" references capability "${name}" which is not registered in this local-agent`,
-        );
-      }
-      return cap;
-    });
-
     // 每个 pet 按需挑 model:pet 自己声明了就 build pet-级 models + 重算 decisionStructuredOutput
     const petLlmConfig = petConfig.model
       ? { ...input.llmConfig, model: petConfig.model }
@@ -133,6 +124,20 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     const petDecisionStructuredOutput = petConfig.model
       ? buildDecisionStructuredOutput(petLlmConfig)
       : globalDecisionStructuredOutput;
+    const capsForThisPet: AgentCapability[] = petConfig.capabilities.map((name) => {
+      if (name === 'explore') {
+        return createExploreCapability({
+          structuredOutput: petDecisionStructuredOutput,
+        });
+      }
+      const cap = capabilitiesByName.get(name);
+      if (!cap) {
+        throw new Error(
+          `pet "${petConfig.petId}" references capability "${name}" which is not registered in this local-agent`,
+        );
+      }
+      return cap;
+    });
 
     return createPetAgentRuntime({
       models: petModels,
@@ -156,7 +161,11 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     ? fileReadPromptProvider(path.resolve(studioConfigDir, studio.curator.promptPath))
     : defaultPromptProvider();
 
-  const curator = createLLMWikiCurator({ models: globalModels, promptProvider });
+  const curator = createLLMWikiCurator({
+    models: globalModels,
+    promptProvider,
+    structuredOutput: globalDecisionStructuredOutput,
+  });
 
   const orchestrator = createStudioOrchestrator({
     studioId: studio.studioId,

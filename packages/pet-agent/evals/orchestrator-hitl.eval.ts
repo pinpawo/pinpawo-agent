@@ -10,7 +10,7 @@
  */
 import { evaluate } from 'langsmith/evaluation';
 import { Client } from 'langsmith';
-import { HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 import { MemorySaver } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
@@ -20,6 +20,7 @@ import {
   createOrchestratorGraph,
 } from '../src/index';
 import type { AgentActor, AgentModels } from '../src/types/agent';
+import type { AgentCapability } from '../src/types/capability';
 import type { RouteDecision } from '../src/agent/orchestrator/schemas';
 import { defineToolkit } from '../src/types/toolkit';
 
@@ -65,6 +66,36 @@ const examples = [
       expected_after_resume_mode: 'general',
       expected_after_resume_task_includes: '日志',
       reason: 'Approve must reset the iteration count and let the orchestrator keep delegating the same turn.',
+    },
+  },
+  {
+    name: 'iteration-limit-approve-resumes-in-progress-capability-lane',
+    inputs: {
+      user_message: '继续',
+      previous_user_message: '帮我调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
+      progress_lane: 'capability:explore',
+      progress_task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
+      progress_result: '已定位到部分 registry 文件，但还没有完成完整调用链路调查。',
+      progress_completion_reason: 'limit_reached',
+      capability_pack: 'explore',
+      route_decisions: [
+        {
+          action: 'delegate_capability.explore',
+          task: '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
+          context_summary: '上一轮 explore lane 仍处于 progress，用户 resume 后继续同一 capability。',
+        },
+      ],
+      iteration_count: 1,
+      max_iterations: 1,
+      resume: { selectedOptionId: 'approve' },
+    },
+    outputs: {
+      expected_initial_interrupted: true,
+      expected_initial_kind: 'review',
+      expected_after_resume_mode: 'capability',
+      expected_after_resume_lane: 'capability:explore',
+      expected_after_resume_task_includes: '继续调查',
+      reason: 'Approve after an orchestrator iteration-limit interrupt should still let the model continue the prior in-progress capability lane.',
     },
   },
   {
@@ -134,6 +165,22 @@ const mockToolkit = defineToolkit({
   description: 'Mock general tools for HITL evaluation.',
   tools: mockTools,
 });
+
+const mockCapabilities: AgentCapability[] = [
+  {
+    name: 'explore',
+    description: '通用探索、调查、资料检索和代码库理解 capability。适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。',
+    createRuntime: () => ({
+      instructions: ['负责只读探索、代码库理解、资料检索和证据汇总。'],
+      tools: [],
+    }),
+  },
+];
+
+function resolveCapabilityList(pack: unknown): AgentCapability[] {
+  if (pack === 'explore') return mockCapabilities.filter((capability) => capability.name === 'explore');
+  return [];
+}
 
 function buildDeterministicModels(decisions: RouteDecision[]): AgentModels {
   let index = 0;
@@ -214,6 +261,13 @@ function routeModeFromResult(result: Record<string, unknown>): string {
   return 'finish';
 }
 
+function pendingLaneFromResult(result: Record<string, unknown>): string | null {
+  const pending = result.pendingDelegation && typeof result.pendingDelegation === 'object'
+    ? result.pendingDelegation as Record<string, unknown>
+    : null;
+  return typeof pending?.lane === 'string' ? pending.lane : null;
+}
+
 function pendingTaskFromResult(result: Record<string, unknown>): string | null {
   const pending = result.pendingDelegation && typeof result.pendingDelegation === 'object'
     ? result.pendingDelegation as Record<string, unknown>
@@ -240,9 +294,32 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     checkpoint: checkpointer,
   });
   const threadId = `hitl-eval-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const turnInput = buildOrchestratorTurnInput([
-    new HumanMessage(String(inputs.user_message ?? '')),
-  ]);
+  const progressLane = typeof inputs.progress_lane === 'string' && inputs.progress_lane.trim()
+    ? inputs.progress_lane.trim()
+    : null;
+  const turnInput = buildOrchestratorTurnInput(progressLane
+    ? [
+        new HumanMessage(String(inputs.previous_user_message ?? inputs.user_message ?? '')),
+        new AIMessage({
+          content: String(inputs.progress_result ?? ''),
+          additional_kwargs: {
+            pinpawo: {
+              lane: progressLane,
+              turnId: 'previous-turn',
+              announce: 'progress',
+              delegationId: 'previous-progress-1',
+              task: String(inputs.progress_task ?? inputs.previous_user_message ?? inputs.user_message ?? ''),
+              ...(typeof inputs.progress_completion_reason === 'string'
+                ? { completionReason: inputs.progress_completion_reason }
+                : {}),
+            },
+          },
+        }),
+        new HumanMessage(String(inputs.user_message ?? '')),
+      ]
+    : [
+        new HumanMessage(String(inputs.user_message ?? '')),
+      ]);
   if (typeof inputs.iteration_count === 'number') {
     turnInput.iterationCount = inputs.iteration_count;
   }
@@ -251,7 +328,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     thread_id: threadId,
     actor: testActor,
     toolkits: [mockToolkit],
-    capabilities: [],
+    capabilities: resolveCapabilityList(inputs.capability_pack),
     maxIterations: typeof inputs.max_iterations === 'number' ? inputs.max_iterations : 5,
   };
 
@@ -283,6 +360,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     initial_kind: initialPayload?.kind ?? null,
     review_option_decisions: readReviewOptionDecisions(initialPayload),
     after_resume_mode: afterResume ? routeModeFromResult(afterResume) : null,
+    after_resume_lane: afterResume ? pendingLaneFromResult(afterResume) : null,
     after_resume_task: afterResume ? pendingTaskFromResult(afterResume) : null,
     reply: afterResume ? replyFromResult(afterResume) : '',
   };
@@ -348,37 +426,74 @@ function arrayIncludesCorrectness(field: string, expectedField: string, key: str
   };
 }
 
+const hitlEvaluators = [
+  booleanCorrectness('initial_interrupted', 'expected_initial_interrupted', 'initial_interrupted_correct'),
+  equalsCorrectness('initial_kind', 'expected_initial_kind', 'initial_kind_correct'),
+  arrayIncludesCorrectness(
+    'review_option_decisions',
+    'expected_review_option_decisions',
+    'review_option_decisions_correct',
+  ),
+  equalsCorrectness('after_resume_mode', 'expected_after_resume_mode', 'after_resume_mode_correct'),
+  equalsCorrectness('after_resume_lane', 'expected_after_resume_lane', 'after_resume_lane_correct'),
+  includesCorrectness('after_resume_task', 'expected_after_resume_task_includes', 'after_resume_task_correct'),
+  includesCorrectness('reply', 'expected_reply_includes', 'reply_correct'),
+];
+
+const hitlScoreKeys = [
+  'initial_interrupted_correct',
+  'initial_kind_correct',
+  'review_option_decisions_correct',
+  'after_resume_mode_correct',
+  'after_resume_lane_correct',
+  'after_resume_task_correct',
+  'reply_correct',
+];
+
+async function runLocal() {
+  console.log(`Running local orchestrator HITL evaluation against ${examples.length} example(s)...`);
+  const rows = [];
+  for (const example of examples) {
+    const outputs = await target(example.inputs);
+    const scores = hitlEvaluators.map((evaluator) =>
+      evaluator({
+        outputs,
+        referenceOutputs: example.outputs,
+      }),
+    );
+    rows.push({ example, outputs, scores });
+  }
+
+  console.log('\n=== Local HITL evaluation complete ===');
+  for (const key of hitlScoreKeys) {
+    const scores = rows.flatMap((row) => row.scores.filter((item) => item.key === key));
+    const passed = scores.filter((item) => item.score === 1).length;
+    console.log(`${key}: ${passed}/${scores.length} passed, ${scores.length - passed} failed.`);
+  }
+  for (const row of rows) {
+    const failedScores = row.scores.filter((item) => hitlScoreKeys.includes(item.key) && item.score !== 1);
+    if (failedScores.length === 0) continue;
+    console.log(`  - ${row.example.name}: ${failedScores.map((item) => item.comment).join(' | ')}`);
+    console.log(`    outputs: ${JSON.stringify(row.outputs)}`);
+  }
+}
+
 async function main() {
-  const client = new Client();
-  await recreateDataset(client);
+  if (process.env.SKIP_DATASET_SYNC === '1') {
+    console.log(`Using existing LangSmith dataset "${DATASET_NAME}" (SKIP_DATASET_SYNC=1).`);
+  } else {
+    const client = new Client();
+    await recreateDataset(client);
+  }
   console.log(`Running orchestrator HITL evaluation against "${DATASET_NAME}"...`);
   const results = await evaluate(target, {
     data: DATASET_NAME,
     experimentPrefix: 'orchestrator-hitl',
-    evaluators: [
-      booleanCorrectness('initial_interrupted', 'expected_initial_interrupted', 'initial_interrupted_correct'),
-      equalsCorrectness('initial_kind', 'expected_initial_kind', 'initial_kind_correct'),
-      arrayIncludesCorrectness(
-        'review_option_decisions',
-        'expected_review_option_decisions',
-        'review_option_decisions_correct',
-      ),
-      equalsCorrectness('after_resume_mode', 'expected_after_resume_mode', 'after_resume_mode_correct'),
-      includesCorrectness('after_resume_task', 'expected_after_resume_task_includes', 'after_resume_task_correct'),
-      includesCorrectness('reply', 'expected_reply_includes', 'reply_correct'),
-    ],
+    evaluators: hitlEvaluators,
   });
 
   const rows = results.results;
 
-  const keys = [
-    'initial_interrupted_correct',
-    'initial_kind_correct',
-    'review_option_decisions_correct',
-    'after_resume_mode_correct',
-    'after_resume_task_correct',
-    'reply_correct',
-  ];
   const summarizeScore = (key: string) => {
     const scores = rows.flatMap((row) =>
       row.evaluationResults.results.filter((item) => item.key === key),
@@ -388,13 +503,13 @@ async function main() {
   };
 
   console.log('\n=== HITL evaluation complete ===');
-  for (const key of keys) {
+  for (const key of hitlScoreKeys) {
     const score = summarizeScore(key);
     console.log(`${key}: ${score.passed}/${score.total} passed, ${score.failed} failed.`);
   }
   for (const row of rows) {
     const failedScores = row.evaluationResults.results.filter((item) =>
-      keys.includes(item.key) && item.score !== 1,
+      hitlScoreKeys.includes(item.key) && item.score !== 1,
     );
     if (failedScores.length === 0) continue;
     const name = row.example.metadata?.name ?? row.example.id;
@@ -403,7 +518,7 @@ async function main() {
   console.log('View results in LangSmith dashboard.');
 }
 
-main().catch((err) => {
+(process.env.LOCAL_EVAL === '1' ? runLocal() : main()).catch((err) => {
   console.error(err);
   process.exit(1);
 });

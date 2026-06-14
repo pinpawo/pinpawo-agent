@@ -8,7 +8,12 @@ import { MessageBlock } from './components/MessageBlock';
 import { RuntimeInfoLine } from './components/RuntimeInfoLine';
 import { TokenUsageLine } from './components/TokenUsageLine';
 import { ResumePicker } from './components/ResumePicker';
-import { applyComposerInput, resolveTuiKeyAction } from './input/keymap';
+import {
+  applyComposerInput,
+  createInitialTuiInputBufferState,
+  normalizeTuiInputEvent,
+  resolveTuiKeyAction,
+} from './input/keymap';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
   buildActiveOperationLines,
@@ -60,6 +65,7 @@ export function TuiApp(props: { actorId: string }) {
   const [approvalIndex, setApprovalIndex] = useState(0);
 
   const stateRef = useRef<TuiState>(tuiState);
+  const inputBufferRef = useRef(createInitialTuiInputBufferState());
   const lastInterruptAtRef = useRef(0);
   const localServerPort = config.localServerPort;
   // Studio 模式持续期间共用一个 conversationId,这样 wiki 跨 turn 累积、
@@ -195,7 +201,14 @@ export function TuiApp(props: { actorId: string }) {
   }, [runtimeController]);
 
   useInput((input, key) => {
-    const action = resolveTuiKeyAction(input, key, {
+    const normalized = normalizeTuiInputEvent(input, key, inputBufferRef.current);
+    inputBufferRef.current = normalized.state;
+    if (!normalized.event) {
+      return;
+    }
+    const normalizedInput = normalized.event.input;
+    const normalizedKey = normalized.event.key;
+    const action = resolveTuiKeyAction(normalizedInput, normalizedKey, {
       ready,
       busy,
       hasPendingApproval: Boolean(pendingApproval),
@@ -269,7 +282,7 @@ export function TuiApp(props: { actorId: string }) {
         return;
 
       case 'composer.edit': {
-        const nextComposerState = applyComposerInput(input, key, {
+        const nextComposerState = applyComposerInput(normalizedInput, normalizedKey, {
           value: inputValue,
           cursorOffset: composerCursorOffset,
         });
@@ -372,6 +385,7 @@ export function TuiApp(props: { actorId: string }) {
               cursorOffset={composerCursorOffset}
               placeholder={pendingApproval ? TUI_TEXT.approvalFreeReplyPlaceholder : TUI_TEXT.inputPlaceholder}
               focus={inputFocused}
+              width={Math.max(8, contentWidth - 4)}
             />
           </>
         )}

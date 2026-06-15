@@ -13,7 +13,6 @@ import {
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { StringDecoder } from 'node:string_decoder';
 import type {
@@ -22,7 +21,11 @@ import type {
   CapabilityArtifactWriteInput,
 } from '@pinpawo/pet-agent';
 
-export const DEFAULT_CAPABILITY_ARTIFACT_ROOT = resolve(homedir(), '.pinpawo', 'capability-artifacts');
+export function defaultCapabilityArtifactRoot(workdir = process.cwd()) {
+  return resolve(workdir, '.pinpawo', 'capability-artifacts');
+}
+
+export const DEFAULT_CAPABILITY_ARTIFACT_ROOT = defaultCapabilityArtifactRoot();
 
 type StoredArtifactRef = CapabilityArtifactRef & {
   relativePath?: string;

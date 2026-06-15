@@ -146,10 +146,10 @@ marker 字段与 `CapabilityArtifactRef` 尽量同名，但多出写入来源：
 
 ## 8. 存储布局
 
-v1 使用独立 artifact store，不耦合 `FileSaver` 的内部 CAS 目录。
+v1 使用独立 artifact store，不耦合 `FileSaver` 的内部 CAS 目录。默认落盘在 agent `workdir` 下，方便和当前项目/会话目录一起查看、清理和迁移；host 仍可显式注入其他 root。
 
 ```text
-~/.pinpawo/
+<workdir>/.pinpawo/
   capability-artifacts/
     threads/
       <encodedThreadId>/
@@ -453,7 +453,7 @@ v1 不需要复杂 GC。只要确保 session 删除时不会留下无限增长�
 
 - 新增公开 `CapabilityArtifactRef` 类型；artifact marker 类型可作为 runtime/store 内部写入类型实现。
 - 新增 `capabilityArtifacts` state channel，持久跨 turn，不被 `buildTurnStateReset()` 清空。
-- 新增 local-agent `CapabilityArtifactStore`，落盘到 `~/.pinpawo/capability-artifacts/threads/<threadId>/...`。
+- 新增 local-agent `CapabilityArtifactStore`，默认落盘到 `<workdir>/.pinpawo/capability-artifacts/threads/<threadId>/...`。
 - 新增 generic artifact marker collector。
 - 保留 `capabilityResult` 兼容路径。
 

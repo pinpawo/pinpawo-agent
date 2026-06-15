@@ -4,8 +4,15 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { defaultCapabilityArtifactRoot, FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import { createCapabilityArtifactToolkit } from './toolkits/capabilityArtifact';
+
+test('defaultCapabilityArtifactRoot is scoped under the agent workdir', () => {
+  assert.equal(
+    defaultCapabilityArtifactRoot('/tmp/pinpawo-workdir'),
+    '/tmp/pinpawo-workdir/.pinpawo/capability-artifacts',
+  );
+});
 
 test('FileCapabilityArtifactStore writes, lists, and reads text artifacts', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-artifacts-'));

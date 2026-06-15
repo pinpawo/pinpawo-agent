@@ -27,7 +27,7 @@ import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 import { LocalAgentScheduledJob } from './localAgentScheduledJob';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
-import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { defaultCapabilityArtifactRoot, FileCapabilityArtifactStore } from './capabilityArtifactStore';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
@@ -40,7 +40,9 @@ export class LocalAgentRuntime {
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginToolkits: AgentToolkit[] = [];
-  private readonly capabilityArtifactStore = new FileCapabilityArtifactStore();
+  private readonly capabilityArtifactStore = new FileCapabilityArtifactStore(
+    defaultCapabilityArtifactRoot(config.workdir),
+  );
   private readonly capabilityRegistry = new LocalAgentCapabilityRegistry({
     capabilityArtifactStore: this.capabilityArtifactStore,
   });

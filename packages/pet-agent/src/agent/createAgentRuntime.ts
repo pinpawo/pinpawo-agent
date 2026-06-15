@@ -92,6 +92,11 @@ import {
   resolveToolkitResources,
   selectCapabilityTools,
 } from './orchestrator/subagentHandoff';
+import {
+  collectCapabilityArtifactRefs,
+  hasCapabilityResultMarker,
+  readCapabilityResultValue,
+} from './orchestrator/capabilityArtifacts';
 import { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
 import { clipForPrompt, formatDelegationStatus } from './orchestrator/utils';
 
@@ -140,6 +145,11 @@ function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOp
         )
       : undefined,
   };
+}
+
+function readThreadId(runnableConfig?: RunnableConfig): string | null {
+  const value = runnableConfig?.configurable?.thread_id;
+  return typeof value === 'string' && value.trim() ? value : null;
 }
 
 /**
@@ -430,6 +440,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       recentMessages: mainMessagesWithoutCompaction(state.messages),
       recentAnnounces,
       contextSummaries: readContextCompactionSummaries(state.messages),
+      capabilityArtifacts: state.capabilityArtifacts,
     });
     const searchAvailable = canSearchCapabilities(decisionBaseModel, state, capabilityList);
 
@@ -547,6 +558,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       recentMessages: recentMainMessages,
       recentAnnounces,
       contextSummaries,
+      capabilityArtifacts: state.capabilityArtifacts,
     });
     const isUserIntentDecision = kind === 'user_intent';
     const inProgressCapabilityCandidates = buildCapabilityCandidatesFromLanes(
@@ -616,6 +628,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
           latestTurnAnnounce,
           readLatestAnnounceCompletionReason(state.messages, { turnId: state.turnId }),
         ),
+        capabilityArtifacts: state.capabilityArtifacts,
       }));
 
     const decisionSchema = buildOrchestrationDecisionSchema({
@@ -759,6 +772,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       models: config.models,
       actor,
       messages: scopedMessages,
+      threadId: readThreadId(runnableConfig),
       execution,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
@@ -818,8 +832,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       },
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: pendingDelegation.id });
-    const rawCapabilityResult = runtime.readResult
-      ? runtime.readResult(laneOutputMessages)
+    const rawCapabilityResult = capability.resultSchema
+      ? readCapabilityResultValue(laneOutputMessages)
       : null;
     const parsedCapabilityResult = rawCapabilityResult && capability.resultSchema
       ? capability.resultSchema.safeParse(rawCapabilityResult)
@@ -827,6 +841,40 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const capabilityResult = parsedCapabilityResult?.success
       ? parsedCapabilityResult.data as Record<string, unknown>
       : null;
+    const capabilityArtifacts = await collectCapabilityArtifactRefs({
+      messages: laneOutputMessages,
+      store: config.capabilityArtifactStore,
+      threadId: readThreadId(runnableConfig),
+      capabilityId: capability.name,
+      delegationId: pendingDelegation.id,
+      turnId: state.turnId,
+    });
+    const threadId = readThreadId(runnableConfig);
+    if (
+      capabilityResult
+      && config.capabilityArtifactStore
+      && threadId
+      && !hasCapabilityResultMarker(laneOutputMessages)
+    ) {
+      const serializedResult = JSON.stringify(capabilityResult);
+      capabilityArtifacts.push(await config.capabilityArtifactStore.writeArtifact({
+        threadId,
+        capabilityId: capability.name,
+        delegationId: pendingDelegation.id,
+        turnId: state.turnId,
+        marker: {
+          kind: 'result',
+          mimeType: 'application/json',
+          title: `${capability.name} result`,
+          preview: clipForPrompt(serializedResult, 500),
+          content: capabilityResult,
+          schema: {
+            name: `${capability.name}.result`,
+            version: 1,
+          },
+        },
+      }));
+    }
     const updatedTurnDelegations = updateTurnDelegationResult(
       state.turnDelegations,
       pendingDelegation.id,
@@ -845,6 +893,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         delegationId: pendingDelegation.id,
       }),
       capabilityResult,
+      capabilityArtifacts,
       capabilitySearchState: buildEmptyCapabilitySearchState(),
       turnDelegations: updatedTurnDelegations,
       pendingDelegation: null,
@@ -864,6 +913,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       models: config.models,
       actor,
       messages: state.messages,
+      threadId: readThreadId(runnableConfig),
       execution,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,

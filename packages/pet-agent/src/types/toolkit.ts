@@ -15,6 +15,7 @@ export type ToolkitContext = {
   models: AgentModels;
   actor: AgentActor;
   messages: BaseMessage[];
+  threadId?: string | null;
   execution?: AgentExecution;
   toolAuthorizations?: ToolAuthorizationRecord[];
   recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;

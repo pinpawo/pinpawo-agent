@@ -7,6 +7,8 @@ import type {
   PendingDelegation,
   TurnDelegation,
 } from './types';
+import type { CapabilityArtifactRef } from '../../types/artifact';
+import { mergeCapabilityArtifactRefs } from './capabilityArtifacts';
 import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
@@ -24,6 +26,10 @@ export const OrchestratorState = Annotation.Root({
   capabilityResult: Annotation<Record<string, unknown> | null>({
     reducer: (_prev, next) => next,
     default: () => null,
+  }),
+  capabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
+    reducer: (prev, next) => mergeCapabilityArtifactRefs(prev, next),
+    default: () => [],
   }),
   capabilitySearchState: Annotation<CapabilitySearchState>({
     reducer: (_prev, next) => next,

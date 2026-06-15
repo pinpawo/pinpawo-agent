@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import type { AgentCapability, AgentToolkit, ReviewSpec } from '@pinpawo/pet-agent';
+import type { AgentCapability, AgentToolkit, CapabilityArtifactStore, ReviewSpec } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput, type AgentChannelSetup } from './agentChannel';
 import { loadAgentContext, type AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
@@ -57,6 +57,7 @@ export type LocalAgentAppChatHandlerOptions = {
   getLocalToolkits: () => AgentToolkit[];
   getLocalCapabilities: () => AgentCapability[];
   getUserCapabilities: () => LoadedUserCapability[];
+  getCapabilityArtifactStore?: () => CapabilityArtifactStore;
   loadContext?: LoadContext;
   runChat?: RunChatSession;
   buildChatSetup?: BuildChatSetup;
@@ -74,6 +75,7 @@ export class LocalAgentAppChatHandler {
   private readonly getLocalToolkits: () => AgentToolkit[];
   private readonly getLocalCapabilities: () => AgentCapability[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
+  private readonly getCapabilityArtifactStore?: () => CapabilityArtifactStore;
   private readonly loadContext: LoadContext;
   private readonly runChat: RunChatSession;
   private readonly buildChatSetup: BuildChatSetup;
@@ -94,6 +96,7 @@ export class LocalAgentAppChatHandler {
     this.getLocalToolkits = options.getLocalToolkits;
     this.getLocalCapabilities = options.getLocalCapabilities;
     this.getUserCapabilities = options.getUserCapabilities;
+    this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
     this.loadContext = options.loadContext ?? loadAgentContext;
     this.runChat = options.runChat ?? runChatSession;
     this.buildChatSetup = options.buildChatSetup ?? buildLocalChatAgentInput;
@@ -424,6 +427,7 @@ export class LocalAgentAppChatHandler {
       interfaceKind: 'app-chat',
       dryRun: false,
       checkpoint: this.checkpoint,
+      capabilityArtifactStore: this.getCapabilityArtifactStore?.(),
       userCapabilities: this.getUserCapabilities(),
     });
   }

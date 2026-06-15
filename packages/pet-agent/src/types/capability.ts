@@ -37,7 +37,6 @@ export type CapabilityRuntime = {
   contextPolicy?: SubagentContextPolicy;
   instructions?: string[] | ((ctx: CapabilityInstructionContext) => string[] | Promise<string[]>);
   middleware?: CapabilityMiddleware;
-  readResult?: (messages: BaseMessage[]) => unknown | null;
 };
 
 export type CapabilityAvailability = {

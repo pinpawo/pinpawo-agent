@@ -5,6 +5,15 @@ export type {
 } from './types/agent';
 
 export type {
+  CapabilityArtifactKind,
+  CapabilityArtifactMarker,
+  CapabilityArtifactRef,
+  CapabilityArtifactSchemaRef,
+  CapabilityArtifactStore,
+  CapabilityArtifactWriteInput,
+} from './types/artifact';
+
+export type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
   PetAgentStatus,
@@ -63,6 +72,9 @@ export {
   validateUniqueToolkitNames,
   validateUniqueToolNames,
 } from './agent/createAgentRuntime';
+export {
+  readCapabilityArtifactMarkers,
+} from './agent/orchestrator/capabilityArtifacts';
 export {
   extractCapabilityKeywords,
   searchCapabilities,

@@ -1,4 +1,4 @@
-import { readLatestToolArtifact, type AgentCapability } from '@pinpawo/pet-agent';
+import { type AgentCapability } from '@pinpawo/pet-agent';
 import { capabilityCreatorInstructions } from './instructions';
 import { capabilityCreatorResultSchema } from './schemas';
 import { createCapabilityCreatorToolset } from './tools';
@@ -18,7 +18,6 @@ export function createCapabilityCreatorCapability(): AgentCapability {
         },
       },
       instructions: capabilityCreatorInstructions,
-      readResult: readLatestToolArtifact,
     }),
     resultSchema: capabilityCreatorResultSchema,
   };

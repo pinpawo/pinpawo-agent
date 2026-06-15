@@ -8,6 +8,7 @@ import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
+import type { CapabilityArtifactStore, CapabilityArtifactWriteInput } from '../../types/artifact';
 import { defineToolset, type AgentToolkit } from '../../types/toolkit';
 import { runAgent } from '../runAgent';
 import { buildOrchestratorTurnInput, createOrchestratorGraph } from '../createAgentRuntime';
@@ -38,6 +39,7 @@ import {
 } from './messageLanes';
 import { reuseOrAppendTurnDelegation, updateTurnDelegationResult } from './delegations';
 import type { TurnDelegation } from './types';
+import { readCapabilityArtifactMarkers } from './capabilityArtifacts';
 
 function capability(name: string, description: string): AgentCapability {
   return {
@@ -682,6 +684,252 @@ test('general operations are collected from toolkits', () => {
     name: 'bash',
     toolName: 'read_file',
   });
+});
+
+test('capability artifact marker helper reads valid pinpawo markers only', () => {
+  const message = new AIMessage({
+    content: 'artifact ready',
+    additional_kwargs: {
+      pinpawo: {
+        capabilityArtifacts: [
+          {
+            kind: 'report',
+            mimeType: 'text/markdown',
+            title: 'Explore report',
+            preview: 'Found prior evidence.',
+            content: '# Report',
+            schema: { name: 'ExploreReport', version: 1 },
+            metadata: { sourceCount: 3 },
+          },
+          {
+            kind: 'unknown',
+            mimeType: 'text/plain',
+          },
+          {
+            kind: 'image',
+          },
+        ],
+      },
+    },
+  });
+
+  assert.deepEqual(readCapabilityArtifactMarkers(message), [{
+    kind: 'report',
+    mimeType: 'text/markdown',
+    title: 'Explore report',
+    preview: 'Found prior evidence.',
+    content: '# Report',
+    schema: { name: 'ExploreReport', version: 1 },
+    metadata: { sourceCount: 3 },
+    sourceUri: undefined,
+    existingUri: undefined,
+  }]);
+});
+
+test('capability artifact markers are persisted as state refs through host store', async () => {
+  let routeCallCount = 0;
+  const writes: CapabilityArtifactWriteInput[] = [];
+  const store: CapabilityArtifactStore = {
+    writeArtifact: async (input) => {
+      writes.push(input);
+      return {
+        id: `artifact-${writes.length}`,
+        threadId: input.threadId,
+        capabilityId: input.capabilityId,
+        delegationId: input.delegationId,
+        turnId: input.turnId,
+        kind: input.marker.kind,
+        mimeType: input.marker.mimeType,
+        uri: `capability-artifact://thread/${encodeURIComponent(input.threadId)}/artifact/${writes.length}`,
+        title: input.marker.title,
+        preview: input.marker.preview,
+        sizeBytes: JSON.stringify(input.marker.content ?? '').length,
+        createdAt: '2026-06-16T00:00:00.000Z',
+        schema: input.marker.schema,
+        metadata: input.marker.metadata,
+      };
+    },
+  };
+  const routeModel = {
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_capability.explore',
+              task: 'inspect issue context',
+              context_summary: null,
+            }
+          : {
+              action: 'finish',
+              answer: 'done',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const fixtureCapability: AgentCapability = {
+    name: 'explore',
+    description: 'Explore issue context.',
+    createRuntime: () => ({
+      middleware: {
+        afterRun: (result) => ({
+          ...result,
+          messages: [
+            ...result.messages,
+            new AIMessage({
+              content: 'report stored',
+              additional_kwargs: {
+                pinpawo: {
+                  capabilityArtifacts: [{
+                    kind: 'report',
+                    mimeType: 'text/markdown',
+                    title: 'Issue exploration',
+                    preview: 'Checked the artifact handoff path.',
+                    content: '# Issue exploration',
+                    schema: { name: 'ExploreReport', version: 1 },
+                    metadata: { sourceCount: 2 },
+                  }],
+                },
+              },
+            }),
+          ],
+        }),
+      },
+    }),
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    capabilityArtifactStore: store,
+  });
+
+  const state = await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('explore issue')]), {
+    configurable: {
+      thread_id: 'artifact-thread',
+      actor: testActor,
+      capabilities: [fixtureCapability],
+      forcedCapabilityNames: ['explore'],
+    },
+  });
+
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0]?.threadId, 'artifact-thread');
+  assert.equal(writes[0]?.capabilityId, 'explore');
+  assert.equal(writes[0]?.marker.kind, 'report');
+  assert.equal(state.capabilityArtifacts.length, 1);
+  assert.equal(state.capabilityArtifacts[0]?.title, 'Issue exploration');
+  assert.equal(state.capabilityArtifacts[0]?.uri, 'capability-artifact://thread/artifact-thread/artifact/1');
+});
+
+test('schema-validated capability result is also persisted as a JSON result artifact', async () => {
+  let routeCallCount = 0;
+  const writes: CapabilityArtifactWriteInput[] = [];
+  const store: CapabilityArtifactStore = {
+    writeArtifact: async (input) => {
+      writes.push(input);
+      return {
+        id: `artifact-${writes.length}`,
+        threadId: input.threadId,
+        capabilityId: input.capabilityId,
+        delegationId: input.delegationId,
+        turnId: input.turnId,
+        kind: input.marker.kind,
+        mimeType: input.marker.mimeType,
+        uri: `capability-artifact://thread/${input.threadId}/artifact/${writes.length}`,
+        title: input.marker.title,
+        preview: input.marker.preview,
+        sizeBytes: JSON.stringify(input.marker.content ?? '').length,
+        createdAt: '2026-06-16T00:00:00.000Z',
+        schema: input.marker.schema,
+      };
+    },
+  };
+  const routeModel = {
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_capability.daily_post',
+              task: 'create post',
+              context_summary: null,
+            }
+          : {
+              action: 'finish',
+              answer: 'done',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const fixtureCapability: AgentCapability = {
+    name: 'daily_post',
+    description: 'Create post.',
+    resultSchema: z.object({
+      status: z.literal('created'),
+      postId: z.string(),
+    }),
+    createRuntime: () => ({
+      middleware: {
+        afterRun: (result) => ({
+          ...result,
+          messages: [
+            ...result.messages,
+            new AIMessage({
+              content: 'created post',
+              additional_kwargs: {
+                pinpawo: {
+                  capabilityArtifacts: [{
+                    kind: 'result',
+                    mimeType: 'application/json',
+                    title: 'Daily post result',
+                    preview: 'created post-1',
+                    content: { status: 'created', postId: 'post-1' },
+                    schema: { name: 'daily_post.result', version: 1 },
+                  }],
+                },
+              },
+            }),
+          ],
+        }),
+      },
+    }),
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    capabilityArtifactStore: store,
+  });
+
+  const state = await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('post')]), {
+    configurable: {
+      thread_id: 'result-artifact-thread',
+      actor: testActor,
+      capabilities: [fixtureCapability],
+      forcedCapabilityNames: ['daily_post'],
+    },
+  });
+
+  assert.deepEqual(state.capabilityResult, { status: 'created', postId: 'post-1' });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0]?.marker.kind, 'result');
+  assert.equal(writes[0]?.marker.mimeType, 'application/json');
+  assert.deepEqual(writes[0]?.marker.content, { status: 'created', postId: 'post-1' });
+  assert.equal(state.capabilityArtifacts[0]?.kind, 'result');
+  assert.equal(state.capabilityArtifacts[0]?.schema?.name, 'daily_post.result');
 });
 
 test('runAgent omits empty toolkit configurable arrays', async () => {

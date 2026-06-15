@@ -9,6 +9,8 @@ import {
 import { createBrowserCapability } from './capabilities/browserCapability';
 import { createExploreCapability } from './capabilities/explore';
 import { createBrowserToolkit } from './toolkits/browser';
+import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { createCapabilityArtifactToolkit } from './toolkits/capabilityArtifact';
 import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
 
 type ResolveCapabilityAvailability = typeof resolveCapabilityAvailability;
@@ -16,17 +18,22 @@ type ResolveCapabilityAvailability = typeof resolveCapabilityAvailability;
 type LocalAgentCapabilityRegistryDeps = {
   loadLocalTools: () => Promise<StructuredTool[]>;
   loadUserCapabilities: () => Promise<LoadedUserCapability[]>;
-  createLocalToolkits: (localTools: StructuredTool[]) => AgentToolkit[];
+  createLocalToolkits: (
+    localTools: StructuredTool[],
+    artifactStore: FileCapabilityArtifactStore
+  ) => AgentToolkit[];
   createLocalCapabilities: () => AgentCapability[];
   resolveAvailableToolkits: typeof resolveAvailableToolkits;
   resolveAvailableCapabilities: typeof resolveAvailableCapabilities;
   resolveCapabilityAvailability: ResolveCapabilityAvailability;
+  capabilityArtifactStore?: FileCapabilityArtifactStore;
 };
 
 const defaultDeps: LocalAgentCapabilityRegistryDeps = {
   loadLocalTools: loadCoreLocalTools,
   loadUserCapabilities,
-  createLocalToolkits: () => [
+  createLocalToolkits: (_localTools, artifactStore) => [
+    createCapabilityArtifactToolkit(artifactStore),
     createBashToolkit(),
     createGitToolkit(),
     createBrowserToolkit(),
@@ -65,17 +72,19 @@ export class LocalAgentCapabilityRegistry {
   private userCapabilityDefinitions: LoadedUserCapability[] = [];
   private userCapabilities: LoadedUserCapability[] = [];
   private readonly deps: LocalAgentCapabilityRegistryDeps;
+  private readonly capabilityArtifactStore: FileCapabilityArtifactStore;
 
   constructor(deps: Partial<LocalAgentCapabilityRegistryDeps> = {}) {
     this.deps = {
       ...defaultDeps,
       ...deps,
     };
+    this.capabilityArtifactStore = this.deps.capabilityArtifactStore ?? new FileCapabilityArtifactStore();
   }
 
   async load() {
     this.localTools = await this.deps.loadLocalTools();
-    this.localToolkitDefinitions = this.deps.createLocalToolkits(this.localTools);
+    this.localToolkitDefinitions = this.deps.createLocalToolkits(this.localTools, this.capabilityArtifactStore);
     this.localToolkits = await this.deps.resolveAvailableToolkits(this.localToolkitDefinitions);
     this.localCapabilityDefinitions = this.deps.createLocalCapabilities();
     this.localCapabilities = await this.deps.resolveAvailableCapabilities(this.localCapabilityDefinitions);
@@ -96,6 +105,10 @@ export class LocalAgentCapabilityRegistry {
 
   getLocalToolkitDefinitions(): AgentToolkit[] {
     return this.localToolkitDefinitions;
+  }
+
+  getCapabilityArtifactStore(): FileCapabilityArtifactStore {
+    return this.capabilityArtifactStore;
   }
 
   getLocalCapabilities(): AgentCapability[] {

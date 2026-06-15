@@ -9,6 +9,7 @@ import type {
 import { z } from 'zod';
 
 const DEFAULT_EXPLORE_TOOLKITS = [
+  'capability_artifact',
   'bash',
   'browser',
   'github',
@@ -98,12 +99,41 @@ function readLatestExploreSummary(messages: BaseMessage[]): string | null {
   return null;
 }
 
-function createExploreSummaryMessage(summary: string): AIMessage {
+function createExploreSummaryMessage(summary: string, status: ExploreResult['status'] = 'completed'): AIMessage {
+  const normalized = summary.trim();
   return new AIMessage({
-    content: ['Explore summary:', '', summary.trim()].join('\n'),
+    content: ['Explore summary:', '', normalized].join('\n'),
     additional_kwargs: {
       pinpawo: {
-        exploreSummary: summary.trim(),
+        exploreSummary: normalized,
+        capabilityArtifacts: [
+          {
+            kind: 'result',
+            mimeType: 'application/json',
+            title: 'Explore result',
+            preview: clipText(normalized, 500),
+            content: {
+              status,
+              summary: normalized,
+              nextSteps: [],
+            },
+            schema: {
+              name: 'ExploreResult',
+              version: 1,
+            },
+          },
+          {
+            kind: 'report',
+            mimeType: 'text/markdown',
+            title: 'Explore report',
+            preview: clipText(normalized, 500),
+            content: normalized,
+            schema: {
+              name: 'ExploreReport',
+              version: 1,
+            },
+          },
+        ],
       },
     },
   });
@@ -396,7 +426,10 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
             ...result,
             messages: [
               ...result.messages,
-              createExploreSummaryMessage(summary),
+              createExploreSummaryMessage(
+                summary,
+                result.completionReason === 'natural' ? 'completed' : 'progress',
+              ),
             ],
           };
         } catch (error) {
@@ -420,13 +453,13 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
           '不要修改文件，不要提交、推送、删除、写入、发送消息、发布内容，或执行任何外部真实副作用。',
           '使用可用工具在执行过程中自行规划探索；createRuntime 阶段不做额外模型规划。',
           '优先先确认候选范围，再读取详细内容；避免无界浏览或无目的扫描。',
+          '如果当前会话已有相关 capability_artifact，先用 artifact 工具读取短引用，避免重复探索已经确认过的内容。',
           '上下文足够时会保留完整工具输出；只有接近上下文预算时，较早的大型工具输出才会被知识摘要替换。',
           '结论必须包含简洁探索摘要、已查看文件列表、关键发现、证据引用（文件路径、URL、issue/PR 编号或命令输出来源）和建议下一步。',
         ],
         middleware: {
           afterRun: ingestFinalResult,
         },
-        readResult: readExploreResult,
       };
     },
     resultSchema: exploreResultSchema,

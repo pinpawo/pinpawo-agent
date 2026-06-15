@@ -1,5 +1,4 @@
 import {
-  readLatestToolArtifact,
   type AgentActor,
   type AgentCapability,
 } from '@pinpawo/pet-agent';
@@ -68,7 +67,6 @@ export function createDailyPostCapability(
         requestImageProcessing: options.requestImageProcessing,
       })],
       instructions: options.instructions ?? dailyPostInstructions,
-      readResult: readLatestToolArtifact,
     }),
     resultSchema: dailyPostResultSchema,
   };

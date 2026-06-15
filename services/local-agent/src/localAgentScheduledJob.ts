@@ -1,4 +1,4 @@
-import { type AgentToolkit } from '@pinpawo/pet-agent';
+import { type AgentToolkit, type CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import {
   dailyPostResultSchema,
   type DailyPostPayload,
@@ -42,6 +42,7 @@ export type LocalAgentScheduledJobOptions = {
   getHooks: () => LocalAgentScheduledHooks | null;
   getLocalToolkits: () => AgentToolkit[];
   getUserCapabilities: () => LoadedUserCapability[];
+  getCapabilityArtifactStore?: () => CapabilityArtifactStore;
   timings?: LocalAgentScheduledJobTimings;
   deps?: Partial<LocalAgentScheduledJobDeps>;
 };
@@ -53,6 +54,7 @@ export class LocalAgentScheduledJob {
   private readonly getHooks: () => LocalAgentScheduledHooks | null;
   private readonly getLocalToolkits: () => AgentToolkit[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
+  private readonly getCapabilityArtifactStore?: () => CapabilityArtifactStore;
   private readonly timings: LocalAgentScheduledJobTimings;
   private readonly deps: LocalAgentScheduledJobDeps;
   private readonly startedAt = new Date().toISOString();
@@ -71,6 +73,7 @@ export class LocalAgentScheduledJob {
     this.getHooks = options.getHooks;
     this.getLocalToolkits = options.getLocalToolkits;
     this.getUserCapabilities = options.getUserCapabilities;
+    this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
     this.timings = options.timings ?? {
       heartbeatIntervalSeconds: config.heartbeatIntervalSeconds,
       postIntervalHours: config.postIntervalHours,
@@ -188,6 +191,7 @@ export class LocalAgentScheduledJob {
       llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
       dryRun: false,
       toolkits: this.getLocalToolkits(),
+      capabilityArtifactStore: this.getCapabilityArtifactStore?.(),
       userCapabilities: this.getUserCapabilities(),
     });
   }

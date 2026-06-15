@@ -143,6 +143,7 @@ export class LocalServerTuiSessionService {
       interfaceKind: 'tui',
       dryRun: false,
       checkpoint: this.checkpointer,
+      capabilityArtifactStore: deps.capabilityArtifactStore,
       userCapabilities: deps.userCapabilities,
     });
   }

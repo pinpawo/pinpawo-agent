@@ -122,6 +122,15 @@ export type {
   ToolAuthorizationMatcherTemplate,
 } from './agent/orchestrator/review/reviewSpec';
 export {
+  messageHasToolCalls,
+  readMessageToolCallIds,
+  readMessageToolCalls,
+  readToolResultCallId,
+} from './utils/messages';
+export type {
+  MessageToolCallInfo,
+} from './utils/messages';
+export {
   readBoolean,
   readJsonRecord,
   readNumber,

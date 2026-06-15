@@ -1,6 +1,7 @@
 import { RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
 import type { AnnounceKind, MessageLane, PinpetMessageLane, SubagentAnnounce, SubagentCompletionReason } from './types';
+import { messageHasToolCalls, readMessageToolCallIds, readToolResultCallId } from '../../utils/messages';
 import { readMessageText } from './utils';
 
 export function getMessageLane(message: BaseMessage): PinpetMessageLane | null {
@@ -60,40 +61,12 @@ export function getMessageTurnId(message: BaseMessage): string | null {
   return typeof turnId === 'string' ? turnId : null;
 }
 
-function readToolCallIds(message: BaseMessage): string[] {
-  const record = message as BaseMessage & {
-    tool_calls?: unknown;
-    additional_kwargs?: { tool_calls?: unknown };
-  };
-  const toolCalls = Array.isArray(record.tool_calls)
-    ? record.tool_calls
-    : Array.isArray(record.additional_kwargs?.tool_calls)
-      ? record.additional_kwargs.tool_calls
-      : [];
-
-  return toolCalls.flatMap((call) => {
-    if (!call || typeof call !== 'object') return [];
-    const id = (call as Record<string, unknown>).id;
-    return typeof id === 'string' && id ? [id] : [];
-  });
-}
-
-function getToolMessageCallId(message: BaseMessage): string | null {
-  if (message._getType() !== 'tool') return null;
-  const toolCallId = (message as BaseMessage & { tool_call_id?: unknown }).tool_call_id;
-  return typeof toolCallId === 'string' && toolCallId ? toolCallId : null;
-}
-
-function messageHasToolCalls(message: BaseMessage) {
-  return readToolCallIds(message).length > 0;
-}
-
 export function toolProtocolSafeMessages(messages: BaseMessage[]) {
   const safeMessages: BaseMessage[] = [];
 
   for (let i = 0; i < messages.length;) {
     const message = messages[i];
-    const toolCallIds = readToolCallIds(message);
+    const toolCallIds = readMessageToolCallIds(message);
 
     if (toolCallIds.length === 0) {
       if (message._getType() !== 'tool') {
@@ -109,7 +82,7 @@ export function toolProtocolSafeMessages(messages: BaseMessage[]) {
     while (nextIndex < messages.length && messages[nextIndex]._getType() === 'tool') {
       const toolMessage = messages[nextIndex];
       followingToolMessages.push(toolMessage);
-      const toolCallId = getToolMessageCallId(toolMessage);
+      const toolCallId = readToolResultCallId(toolMessage);
       if (toolCallId) {
         answeredToolCallIds.add(toolCallId);
       }

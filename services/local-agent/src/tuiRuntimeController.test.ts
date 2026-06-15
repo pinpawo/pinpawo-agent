@@ -8,7 +8,7 @@ function pendingReviewState(): TuiState {
     connection: { status: 'ready', message: 'ready' },
     focusedSessionId: 'sess-1',
     runRoute: { 'req-1': 'sess-1' },
-    input: { value: '', focused: true },
+    input: { text: '', cursorOffset: 0, focused: true },
     sessions: {
       'sess-1': {
         id: 'sess-1',

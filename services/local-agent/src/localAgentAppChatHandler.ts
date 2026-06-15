@@ -55,7 +55,6 @@ export type LocalAgentAppChatHandlerOptions = {
   getLlmConfig: () => AgentLlmConfig | null;
   getPluginToolkits: () => AgentToolkit[];
   getLocalToolkits: () => AgentToolkit[];
-  getLocalCapabilityToolkits: () => AgentToolkit[];
   getLocalCapabilities: () => AgentCapability[];
   getUserCapabilities: () => LoadedUserCapability[];
   getCapabilityArtifactStore?: () => CapabilityArtifactStore;
@@ -74,7 +73,6 @@ export class LocalAgentAppChatHandler {
   private readonly getLlmConfig: () => AgentLlmConfig | null;
   private readonly getPluginToolkits: () => AgentToolkit[];
   private readonly getLocalToolkits: () => AgentToolkit[];
-  private readonly getLocalCapabilityToolkits: () => AgentToolkit[];
   private readonly getLocalCapabilities: () => AgentCapability[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
   private readonly getCapabilityArtifactStore?: () => CapabilityArtifactStore;
@@ -96,7 +94,6 @@ export class LocalAgentAppChatHandler {
     this.getLlmConfig = options.getLlmConfig;
     this.getPluginToolkits = options.getPluginToolkits;
     this.getLocalToolkits = options.getLocalToolkits;
-    this.getLocalCapabilityToolkits = options.getLocalCapabilityToolkits;
     this.getLocalCapabilities = options.getLocalCapabilities;
     this.getUserCapabilities = options.getUserCapabilities;
     this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
@@ -425,7 +422,6 @@ export class LocalAgentAppChatHandler {
       userMessage,
       llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
       toolkits: [...this.getPluginToolkits(), ...this.getLocalToolkits()],
-      capabilityToolkits: [...this.getPluginToolkits(), ...this.getLocalCapabilityToolkits()],
       extraCapabilities: this.getLocalCapabilities(),
       threadId: this.getChatThreadId(userId),
       interfaceKind: 'app-chat',

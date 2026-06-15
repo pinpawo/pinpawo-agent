@@ -30,6 +30,9 @@ export function createCapabilityArtifactToolkit(store: ArtifactStore): AgentTool
   return {
     name: 'capability_artifact',
     description: '读取、列出和写入当前会话线程的 capability artifacts。',
+    exposure: {
+      general: false,
+    },
     tools: (ctx) => {
       return [
         tool(async (input) => {

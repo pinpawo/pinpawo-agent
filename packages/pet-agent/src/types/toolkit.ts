@@ -95,6 +95,10 @@ type NoExtraToolkitToolKeys<TMap, TTools extends readonly NamedStructuredTool[]>
 export type AgentToolkit = {
   name: string;
   description: string;
+  exposure?: {
+    general?: boolean;
+    capability?: boolean;
+  };
   availability?: CapabilityAvailabilityConfig;
   tools?: ToolkitResource<StructuredTool[]>;
   instructions?: ToolkitResource<string[]>;

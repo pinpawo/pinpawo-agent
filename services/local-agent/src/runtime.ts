@@ -72,7 +72,6 @@ export class LocalAgentRuntime {
     getLlmConfig: () => this.llmConfig,
     getPluginToolkits: () => this.pluginToolkits,
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
-    getLocalCapabilityToolkits: () => this.capabilityRegistry.getLocalCapabilityToolkits(),
     getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
     getCapabilityArtifactStore: () => this.capabilityArtifactStore,
@@ -83,7 +82,6 @@ export class LocalAgentRuntime {
     getLlmConfig: () => this.llmConfig,
     getHooks: () => this.hooks,
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
-    getLocalCapabilityToolkits: () => this.capabilityRegistry.getLocalCapabilityToolkits(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
     getCapabilityArtifactStore: () => this.capabilityArtifactStore,
   });
@@ -123,20 +121,12 @@ export class LocalAgentRuntime {
     return this.capabilityRegistry.getLocalToolkits();
   }
 
-  getLocalCapabilityToolkits(): AgentToolkit[] {
-    return this.capabilityRegistry.getLocalCapabilityToolkits();
-  }
-
   getCapabilityArtifactStore(): FileCapabilityArtifactStore {
     return this.capabilityArtifactStore;
   }
 
   getLocalToolkitDefinitions(): AgentToolkit[] {
     return this.capabilityRegistry.getLocalToolkitDefinitions();
-  }
-
-  getLocalCapabilityToolkitDefinitions(): AgentToolkit[] {
-    return this.capabilityRegistry.getLocalCapabilityToolkitDefinitions();
   }
 
   getLocalCapabilities(): AgentCapability[] {

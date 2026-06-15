@@ -111,6 +111,14 @@ export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniq
 const GENERAL_SUBAGENT_MAX_ITERATIONS = 16;
 const CAPABILITY_SUBAGENT_MAX_ITERATIONS = 8;
 
+function generalLaneToolkits(toolkits: AgentToolkit[]) {
+  return toolkits.filter((toolkitItem) => toolkitItem.exposure?.general !== false);
+}
+
+function capabilityLaneToolkits(toolkits: AgentToolkit[]) {
+  return toolkits.filter((toolkitItem) => toolkitItem.exposure?.capability !== false);
+}
+
 const ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_NAMES = [
   'capabilityDiscovery',
   'userIntentDecision',
@@ -133,7 +141,6 @@ function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOp
     actor: cfg.actor as AgentActor | undefined,
     capabilities: (cfg.capabilities ?? []) as AgentCapability[],
     toolkits: (cfg.toolkits ?? []) as AgentToolkit[],
-    capabilityToolkits: (cfg.capabilityToolkits ?? cfg.toolkits ?? []) as AgentToolkit[],
     execution: cfg.execution as AgentExecution | undefined,
     maxIterations: cfg.maxIterations as number | undefined,
     workdir: cfg.workdir as string | undefined,
@@ -405,7 +412,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       forcedCapabilityNames,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const toolkitList = toolkits ?? [];
+    const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
     const generalToolkitResources = await resolveToolkitResources(toolkitList, undefined, {
       models: config.models,
@@ -534,7 +541,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       }
     }
 
-    const toolkitList = toolkits ?? [];
+    const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
     const generalToolkitResources = await resolveToolkitResources(toolkitList, undefined, {
       models: config.models,
@@ -738,9 +745,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   // Node: capability — reads capabilities, tools, execution from configurable
   async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { capabilities, capabilityToolkits, execution, onToolEvent, workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
+    const { capabilities, toolkits, execution, onToolEvent, workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const toolkitList = capabilityToolkits ?? [];
+    const toolkitList = capabilityLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
     const pendingDelegation = state.pendingDelegation;
     if (!pendingDelegation) {
@@ -878,7 +885,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const { toolkits, execution, workdir, runtimeEnvironment, onToolEvent } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const toolkitList = toolkits ?? [];
+    const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
     const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);
     const toolkitResources = await resolveToolkitResources(toolkitList, undefined, {

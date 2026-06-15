@@ -142,7 +142,6 @@ export class LocalServerTuiSessionService {
       userMessage: '',
       llmConfig: deps.llmConfig,
       toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
-      capabilityToolkits: [...(deps.pluginToolkits ?? []), ...(deps.localCapabilityToolkits ?? deps.localToolkits ?? [])],
       extraCapabilities: deps.localCapabilities,
       threadId,
       interfaceKind: 'tui',

@@ -191,7 +191,6 @@ export function buildLocalChatAgentInput(params: {
   userMessage: string;
   llmConfig?: AgentLlmConfig;
   toolkits?: AgentToolkit[];
-  capabilityToolkits?: AgentToolkit[];
   threadId?: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
   dryRun?: boolean;
@@ -274,10 +273,6 @@ export function buildLocalChatAgentInput(params: {
       threadId: params.threadId,
       capabilities,
       toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
-      capabilityToolkits: [
-        ...sharedToolkits,
-        ...(params.capabilityToolkits ?? params.toolkits ?? []),
-      ],
       execution: {
         dryRun: params.dryRun,
       },
@@ -296,7 +291,6 @@ export function buildLocalScheduledAgentInput(params: {
   llmConfig?: AgentLlmConfig;
   dryRun?: boolean;
   toolkits?: AgentToolkit[];
-  capabilityToolkits?: AgentToolkit[];
   capabilityArtifactStore?: CapabilityArtifactStore;
   dailyPost?: Partial<
     Pick<
@@ -384,10 +378,6 @@ export function buildLocalScheduledAgentInput(params: {
       ],
       capabilities,
       toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
-      capabilityToolkits: [
-        ...sharedToolkits,
-        ...(params.capabilityToolkits ?? params.toolkits ?? []),
-      ],
       execution: {
         dryRun: params.dryRun,
       },

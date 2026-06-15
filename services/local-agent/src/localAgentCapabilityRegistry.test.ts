@@ -75,10 +75,14 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
 
   assert.deepEqual(registry.getLocalTools(), [localTool]);
   assert.deepEqual(registry.getLocalToolkitDefinitions().map((item) => item.name), [
+    'capability_artifact',
     'available-toolkit',
     'unavailable-toolkit',
   ]);
-  assert.deepEqual(registry.getLocalToolkits().map((item) => item.name), ['available-toolkit']);
+  assert.deepEqual(registry.getLocalToolkits().map((item) => item.name), [
+    'capability_artifact',
+    'available-toolkit',
+  ]);
   assert.deepEqual(registry.getLocalCapabilityDefinitions().map((item) => item.name), [
     'available-local-cap',
     'unavailable-local-cap',
@@ -119,7 +123,7 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
 
   assert.deepEqual(
     registry.getLocalToolkitDefinitions().map((item) => item.name),
-    ['bash', 'git', 'browser'],
+    ['capability_artifact', 'bash', 'git', 'browser'],
   );
   assert.ok(
     registry.getLocalCapabilityDefinitions().some((item) => item.name === 'explore'),
@@ -127,7 +131,7 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
   );
 });
 
-test('LocalAgentCapabilityRegistry keeps artifact toolkit capability-only by default', async () => {
+test('LocalAgentCapabilityRegistry marks artifact toolkit as non-general by default', async () => {
   const registry = new LocalAgentCapabilityRegistry({
     loadLocalTools: async () => [],
     loadUserCapabilities: async () => [],
@@ -143,10 +147,10 @@ test('LocalAgentCapabilityRegistry keeps artifact toolkit capability-only by def
 
   assert.deepEqual(
     registry.getLocalToolkits().map((item) => item.name),
-    ['bash', 'git', 'browser'],
-  );
-  assert.deepEqual(
-    registry.getLocalCapabilityToolkits().map((item) => item.name),
     ['capability_artifact', 'bash', 'git', 'browser'],
+  );
+  assert.equal(
+    registry.getLocalToolkits().find((item) => item.name === 'capability_artifact')?.exposure?.general,
+    false,
   );
 });

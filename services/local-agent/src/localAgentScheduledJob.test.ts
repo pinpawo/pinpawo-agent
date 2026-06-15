@@ -79,7 +79,6 @@ function createJob(overrides: {
       },
     }),
     getLocalToolkits: () => [{ name: 'toolkit-a' }] as ConstructorParameters<typeof LocalAgentScheduledJob>[0]['getLocalToolkits'] extends () => infer T ? T : never,
-    getLocalCapabilityToolkits: () => [{ name: 'capability-toolkit-a' }] as ConstructorParameters<typeof LocalAgentScheduledJob>[0]['getLocalCapabilityToolkits'] extends () => infer T ? T : never,
     getUserCapabilities: () => [{
       meta: { id: 'user-cap' },
       capability: { name: 'user-capability' },

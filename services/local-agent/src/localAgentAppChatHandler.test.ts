@@ -76,7 +76,6 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
     } as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLlmConfig'] extends () => infer T ? T : never),
     getPluginToolkits: () => [{ name: 'plugin-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginToolkits'] extends () => infer T ? T : never,
     getLocalToolkits: () => [{ name: 'local-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalToolkits'] extends () => infer T ? T : never,
-    getLocalCapabilityToolkits: () => [{ name: 'local-capability-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalCapabilityToolkits'] extends () => infer T ? T : never,
     getLocalCapabilities: () => [{ name: 'browser' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalCapabilities'] extends () => infer T ? T : never,
     getUserCapabilities: () => [{
       meta: { id: 'user-cap' },

@@ -77,7 +77,6 @@ export type OrchestratorInvokeOptions = {
   actor?: AgentActor;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
-  capabilityToolkits?: AgentToolkit[];
   maxIterations?: number;
   execution?: AgentExecution;
   workdir?: string;

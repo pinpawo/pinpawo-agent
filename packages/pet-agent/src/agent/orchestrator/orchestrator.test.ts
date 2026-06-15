@@ -606,12 +606,82 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
           description: 'browser toolkit',
           tools: [mockTool('browser_open')],
         },
+        {
+          name: 'artifact',
+          description: 'artifact toolkit',
+          exposure: { general: false },
+          tools: [mockTool('artifact_read')],
+        },
       ],
       forcedCapabilityNames: ['inspect_repo'],
     },
   });
 
-  assert.deepEqual(runtimeToolkitNames, ['bash', 'browser']);
+  assert.deepEqual(runtimeToolkitNames, ['bash', 'browser', 'artifact']);
+});
+
+test('toolkit exposure can hide tools from the general lane', async () => {
+  let routeCallCount = 0;
+  let generalToolNames: string[] = [];
+  const routeModel = {
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_general',
+              task: 'inspect with tools',
+              context_summary: null,
+            }
+          : {
+              action: 'finish',
+              answer: 'done',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({ toolCalls: [[]] });
+  const bindTools = subagentModel.bindTools.bind(subagentModel);
+  (subagentModel as unknown as {
+    bindTools: (tools: Array<{ name: string }>) => unknown;
+  }).bindTools = (tools) => {
+    generalToolNames = tools.map((toolItem) => toolItem.name);
+    return bindTools(tools as never);
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: subagentModel,
+    },
+    actor: testActor,
+  });
+
+  await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('inspect')]), {
+    configurable: {
+      thread_id: 'general-toolkit-exposure',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [
+        {
+          name: 'visible',
+          description: 'visible toolkit',
+          tools: [mockTool('visible_tool')],
+        },
+        {
+          name: 'artifact',
+          description: 'artifact toolkit',
+          exposure: { general: false },
+          tools: [mockTool('artifact_read')],
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(generalToolNames, ['visible_tool']);
 });
 
 test('toolkit and capability toolset operations are collected with their source', () => {

@@ -9,21 +9,17 @@ export function createOperationRegistryForAgentSetup(
   setup: Pick<AgentChannelSetup, 'input'>,
 ): OperationRegistry {
   return createOperationRegistryFromSources({
-    toolkits: [
-      ...(setup.input.toolkits ?? []),
-      ...(setup.input.capabilityToolkits ?? []),
-    ],
+    toolkits: setup.input.toolkits ?? [],
   });
 }
 
 export function createOperationRegistryForLocalServerDeps(
-  deps: Pick<LocalServerDeps, 'localToolkits' | 'localToolkitDefinitions' | 'localCapabilityToolkits' | 'localCapabilityToolkitDefinitions' | 'pluginToolkits'>,
+  deps: Pick<LocalServerDeps, 'localToolkits' | 'localToolkitDefinitions' | 'pluginToolkits'>,
 ): OperationRegistry {
   return createOperationRegistryFromSources({
     toolkits: [
       ...(deps.pluginToolkits ?? []),
       ...(deps.localToolkits ?? deps.localToolkitDefinitions ?? []),
-      ...(deps.localCapabilityToolkits ?? deps.localCapabilityToolkitDefinitions ?? []),
     ],
   });
 }

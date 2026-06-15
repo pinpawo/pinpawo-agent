@@ -240,6 +240,7 @@ test('explore final ingest failure stops without producing fallback result', asy
 
   const result = await runtime.middleware?.afterRun?.({
     messages: [new AIMessage('free-form final text')],
+    artifacts: [],
     completionReason: 'natural',
   });
 

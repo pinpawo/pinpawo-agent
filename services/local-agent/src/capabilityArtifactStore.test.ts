@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { z } from 'zod';
 import { defaultCapabilityArtifactRoot, FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import { createCapabilityArtifactToolkit } from './toolkits/capabilityArtifact';
 
@@ -23,7 +24,7 @@ test('FileCapabilityArtifactStore writes, lists, and reads text artifacts', asyn
     capabilityId: 'explore',
     delegationId: 'delegation-1',
     turnId: 'turn-1',
-    marker: {
+    artifact: {
       kind: 'report',
       mimeType: 'text/markdown',
       title: 'Explore report',
@@ -55,7 +56,7 @@ test('FileCapabilityArtifactStore is idempotent for retried writes', async () =>
     capabilityId: 'explore',
     delegationId: 'delegation-1',
     turnId: 'turn-1',
-    marker: {
+    artifact: {
       kind: 'result' as const,
       mimeType: 'application/json',
       content: { ok: true },
@@ -69,30 +70,52 @@ test('FileCapabilityArtifactStore is idempotent for retried writes', async () =>
   assert.equal(store.listArtifacts({ threadId: 'thread-1' }).length, 1);
 });
 
-test('FileCapabilityArtifactStore copies sourceUri files and does not expose binary content', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'pinpawo-artifacts-source-'));
-  const source = join(root, 'source.png');
-  writeFileSync(source, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-  const store = new FileCapabilityArtifactStore(join(root, 'store'));
+test('FileCapabilityArtifactStore writes inline binary content and does not expose it as text', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-artifacts-binary-'));
+  const store = new FileCapabilityArtifactStore(root);
 
   const ref = await store.writeArtifact({
     threadId: 'thread-1',
     capabilityId: 'image',
     delegationId: 'delegation-1',
     turnId: 'turn-1',
-    marker: {
+    artifact: {
       kind: 'image',
       mimeType: 'image/png',
-      sourceUri: source,
+      content: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
       preview: 'generated image',
     },
   });
 
   assert.equal(ref.sizeBytes, 4);
   assert.ok(ref.sha256);
-  assert.equal(ref.metadata?.sourceUri, source);
   const read = store.readArtifact({ uri: ref.uri });
   assert.equal(read.ref.id, ref.id);
+  assert.equal(read.content, null);
+});
+
+test('FileCapabilityArtifactStore stores externalUri refs without copying bytes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-artifacts-external-'));
+  const store = new FileCapabilityArtifactStore(root);
+
+  const ref = await store.writeArtifact({
+    threadId: 'thread-1',
+    capabilityId: 'image',
+    delegationId: 'delegation-1',
+    turnId: 'turn-1',
+    artifact: {
+      kind: 'image',
+      mimeType: 'image/png',
+      externalUri: 'https://cdn.example.com/generated.png',
+      preview: 'generated image',
+    },
+  });
+
+  assert.equal(ref.sizeBytes, 0);
+  assert.equal(ref.sha256, undefined);
+  assert.equal(ref.externalUri, 'https://cdn.example.com/generated.png');
+  const read = store.readArtifact({ uri: ref.uri });
+  assert.equal(read.ref.externalUri, 'https://cdn.example.com/generated.png');
   assert.equal(read.content, null);
 });
 
@@ -104,7 +127,7 @@ test('FileCapabilityArtifactStore reads text maxBytes without splitting UTF-8 ch
     capabilityId: 'explore',
     delegationId: 'delegation-1',
     turnId: 'turn-1',
-    marker: {
+    artifact: {
       kind: 'report',
       mimeType: 'text/plain',
       content: '你好世界',
@@ -125,7 +148,7 @@ test('FileCapabilityArtifactStore deletes all artifacts for a thread', async () 
     capabilityId: 'explore',
     delegationId: 'delegation-1',
     turnId: 'turn-1',
-    marker: {
+    artifact: {
       kind: 'report',
       mimeType: 'text/plain',
       content: 'content',
@@ -160,6 +183,7 @@ test('capability artifact toolkit scopes tools to the current thread', async () 
     : toolkit.tools ?? [];
   assert.ok(unscopedTools.some((item) => item.name === 'capability_artifact_list'));
 
+  const recordedRefs: Array<{ uri: string }> = [];
   const tools = typeof toolkit.tools === 'function'
       ? await toolkit.tools({
         models: {} as never,
@@ -173,6 +197,15 @@ test('capability artifact toolkit scopes tools to the current thread', async () 
         },
         messages: [],
         threadId: 'thread-toolkit',
+        capabilityId: 'daily_post',
+        delegationId: 'delegation-toolkit',
+        turnId: 'turn-toolkit',
+        resultSchema: z.object({
+          ok: z.literal(true),
+        }),
+        recordCapabilityArtifact: (ref) => {
+          recordedRefs.push(ref);
+        },
       })
     : toolkit.tools ?? [];
   const write = tools.find((item) => item.name === 'capability_artifact_write');
@@ -189,8 +222,27 @@ test('capability artifact toolkit scopes tools to the current thread', async () 
     title: 'JSON result',
     content: { ok: true },
   });
-  const ref = JSON.parse(String(writeResult)) as { uri: string; threadId: string };
+  const ref = JSON.parse(String(writeResult)) as {
+    uri: string;
+    threadId: string;
+    capabilityId: string;
+    delegationId: string;
+  };
   assert.equal(ref.threadId, 'thread-toolkit');
+  assert.equal(ref.capabilityId, 'daily_post');
+  assert.equal(ref.delegationId, 'delegation-toolkit');
+  assert.equal(recordedRefs.length, 1);
+  assert.equal(recordedRefs[0]?.uri, ref.uri);
+
+  await assert.rejects(
+    () => write.invoke({
+      kind: 'result',
+      mimeType: 'application/json',
+      title: 'Invalid JSON result',
+      content: { ok: false },
+    }),
+    /schema validation/,
+  );
 
   const listResult = JSON.parse(String(await list.invoke({ kind: 'result' }))) as Array<{ uri: string }>;
   assert.equal(listResult.length, 1);
@@ -204,7 +256,7 @@ test('capability artifact toolkit scopes tools to the current thread', async () 
     capabilityId: 'explore',
     delegationId: 'delegation-other',
     turnId: 'turn-other',
-    marker: {
+    artifact: {
       kind: 'report',
       mimeType: 'text/markdown',
       content: 'secret',

@@ -1,5 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
+import type { ZodType } from 'zod';
 import type {
   PendingReviewAction,
   ReviewEffect,
@@ -9,6 +10,7 @@ import type {
 import type { ToolAuthorizationRecord } from '../agent/orchestrator/review/reviewAuthorizations';
 import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { CapabilityAvailabilityConfig } from './capability';
+import type { CapabilityArtifactRef } from './artifact';
 import type { SubagentRuntimeEvent } from './subagent';
 
 export type ToolkitContext = {
@@ -16,9 +18,14 @@ export type ToolkitContext = {
   actor: AgentActor;
   messages: BaseMessage[];
   threadId?: string | null;
+  capabilityId?: string | null;
+  resultSchema?: ZodType;
+  delegationId?: string | null;
+  turnId?: string | null;
   execution?: AgentExecution;
   toolAuthorizations?: ToolAuthorizationRecord[];
   recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;
+  recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
   emitRuntimeEvent?: (event: SubagentRuntimeEvent) => void | Promise<void>;
 };
 

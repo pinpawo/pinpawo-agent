@@ -12,8 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { basename, dirname, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type {
   CapabilityArtifactRef,
@@ -81,7 +80,12 @@ function extensionForMimeType(mimeType: string) {
   return '.artifact';
 }
 
-function serializeContent(content: unknown, mimeType: string) {
+function serializeContent(content: unknown, mimeType: string): string | Uint8Array {
+  if (content instanceof Uint8Array) return content;
+  if (content instanceof ArrayBuffer) return new Uint8Array(content);
+  if (ArrayBuffer.isView(content)) {
+    return new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
+  }
   if (typeof content === 'string') return content;
   if (content === undefined) return '';
   return mimeType === 'application/json'
@@ -119,16 +123,6 @@ function parseArtifactUri(uri: string) {
   };
 }
 
-function resolveSourceFilePath(sourceUri: string) {
-  if (sourceUri.startsWith('file://')) {
-    return fileURLToPath(sourceUri);
-  }
-  if (isAbsolute(sourceUri)) {
-    return sourceUri;
-  }
-  throw new Error('capability artifact sourceUri must be a file:// URI or absolute local path');
-}
-
 function readUtf8Prefix(path: string, maxBytes: number) {
   const fd = openSync(path, 'r');
   try {
@@ -139,10 +133,6 @@ function readUtf8Prefix(path: string, maxBytes: number) {
   } finally {
     closeSync(fd);
   }
-}
-
-function readBytes(path: string) {
-  return readFileSync(path);
 }
 
 export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
@@ -180,46 +170,33 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
     }
   }
 
-  private readExistingArtifactBytes(uri: string) {
-    const parsed = parseArtifactUri(uri);
-    if (!parsed) {
-      throw new Error('existingUri must be a capability-artifact URI');
-    }
-    const manifest = readManifest(this.manifestPath(parsed.threadId, parsed.delegationId));
-    const stored = manifest?.artifacts.find((item) => item.id === parsed.artifactId);
-    if (!stored?.relativePath) {
-      throw new Error('existing capability artifact has no stored content');
-    }
-    return readBytes(join(this.delegationDir(parsed.threadId, parsed.delegationId), stored.relativePath));
-  }
-
   private buildStoredArtifact(input: CapabilityArtifactWriteInput, now: string): {
     ref: StoredArtifactRef;
-    bytes: string | Uint8Array;
+    bytes?: string | Uint8Array;
   } {
-    let bytes: string | Uint8Array;
-    if (input.marker.content !== undefined) {
-      bytes = serializeContent(input.marker.content, input.marker.mimeType);
-    } else if (input.marker.sourceUri) {
-      bytes = readBytes(resolveSourceFilePath(input.marker.sourceUri));
-    } else if (input.marker.existingUri) {
-      bytes = this.readExistingArtifactBytes(input.marker.existingUri);
-    } else {
-      throw new Error('capability artifact marker must include content, sourceUri, or existingUri');
+    const hasContent = input.artifact.content !== undefined;
+    const hasExternalUri = Boolean(input.artifact.externalUri);
+    if (hasContent === hasExternalUri) {
+      throw new Error('capability artifact must include exactly one of content or externalUri');
     }
 
-    const contentHash = sha256(bytes);
+    const bytes = hasContent
+      ? serializeContent(input.artifact.content, input.artifact.mimeType)
+      : undefined;
+    const hasBytes = bytes !== undefined;
+    const contentHash = hasBytes ? sha256(bytes) : undefined;
+    const sourceKey = contentHash ?? input.artifact.externalUri;
     const id = sha256(stableJson({
       capabilityId: input.capabilityId,
       delegationId: input.delegationId,
       turnId: input.turnId,
-      kind: input.marker.kind,
-      mimeType: input.marker.mimeType,
-      title: input.marker.title,
-      schema: input.marker.schema,
-      contentHash,
+      kind: input.artifact.kind,
+      mimeType: input.artifact.mimeType,
+      title: input.artifact.title,
+      schema: input.artifact.schema,
+      sourceKey,
     }));
-    const relativePath = `${id}${extensionForMimeType(input.marker.mimeType)}`;
+    const relativePath = hasBytes ? `${id}${extensionForMimeType(input.artifact.mimeType)}` : undefined;
     const uri = `capability-artifact://thread/${encodeURIComponent(input.threadId)}`
       + `/delegation/${encodeURIComponent(input.delegationId)}`
       + `/artifact/${encodeURIComponent(id)}`;
@@ -231,19 +208,18 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
         capabilityId: input.capabilityId,
         delegationId: input.delegationId,
         turnId: input.turnId,
-        kind: input.marker.kind,
-        mimeType: input.marker.mimeType,
+        kind: input.artifact.kind,
+        mimeType: input.artifact.mimeType,
         uri,
-        title: input.marker.title,
-        preview: input.marker.preview,
-        sizeBytes: Buffer.byteLength(bytes),
+        title: input.artifact.title,
+        preview: input.artifact.preview,
+        sizeBytes: hasBytes ? Buffer.byteLength(bytes) : 0,
         sha256: contentHash,
+        externalUri: input.artifact.externalUri,
         createdAt: now,
-        schema: input.marker.schema,
+        schema: input.artifact.schema,
         metadata: {
-          ...(input.marker.metadata ?? {}),
-          ...(input.marker.sourceUri ? { sourceUri: input.marker.sourceUri } : {}),
-          ...(input.marker.existingUri ? { existingUri: input.marker.existingUri } : {}),
+          ...(input.artifact.metadata ?? {}),
         },
         relativePath,
       },
@@ -283,7 +259,9 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
         const nextArtifacts = new Map(manifest.artifacts.map((item) => [item.id, item]));
         for (const item of group) {
           const built = this.buildStoredArtifact(item.input, now);
-          atomicWriteFile(join(dir, built.ref.relativePath ?? ''), built.bytes);
+          if (built.bytes !== undefined && built.ref.relativePath) {
+            atomicWriteFile(join(dir, built.ref.relativePath), built.bytes);
+          }
           nextArtifacts.set(built.ref.id, built.ref);
           const { relativePath: _relativePath, ...publicRef } = built.ref;
           refsByIndex.set(item.index, publicRef);

@@ -28,9 +28,9 @@
 
 ```text
 capability subagent
-  -> 标记标准 artifact marker
-  -> pet-agent runtime 收集 marker
-  -> host artifact store 落盘
+  -> 调用 capability_artifact_write
+  -> host artifact store 立即落盘并返回 ref
+  -> subagent result 携带 artifacts[]
   -> LangGraph state 保存 CapabilityArtifactRef
   -> orchestrator 默认只读 bounded preview
   -> 需要细节时通过 artifact tools 读取内容
@@ -39,7 +39,7 @@ capability subagent
 关键边界：
 
 - capability 负责定义自己产出什么 artifact、schema 是什么、preview 怎么写。
-- pet-agent runtime 负责识别标准 marker、校验通用结构、把内容转成 artifact refs。
+- pet-agent runtime 负责把 subagent loop 内产生的 artifact refs 合并进 state。
 - host 负责具体存储实现、文件路径、原子写、hash、GC。
 - orchestrator 不理解 explore / image / video 的业务字段，只消费通用 artifact ref。
 
@@ -64,7 +64,7 @@ capability subagent
 
 1. **state 存引用，不存内容**：LangGraph state 只保存 `CapabilityArtifactRef[]`，不保存大 JSON、长 markdown 或二进制内容。
 2. **URI 过境，路径不过境**：state 中不保存绝对文件路径，只保存 `capability-artifact://...` 逻辑 URI。
-3. **capability 标记语义，runtime 通用收集**：subagent 输出标准 artifact marker；pet-agent runtime 只识别通用 marker，不读取 capability 私有字段。
+3. **capability 主动沉淀产物**：subagent 通过 `capability_artifact_write` 写入 artifact；pet-agent runtime 只接收 refs，不解析 message metadata。
 4. **默认上下文有界**：prompt 中最多注入 artifact title / type / preview / URI，且按预算裁剪。
 5. **完整内容按需召回**：需要读取 artifact 内容时，通过工具读取，不默认注入。
 6. **resultSchema 继续存在**：`AgentCapability.resultSchema` 仍是 JSON result artifact 的 schema，不需要创造平行 contract。
@@ -75,13 +75,13 @@ v1 只需要一个公开核心概念：`CapabilityArtifactRef`。
 
 另外两个名字不应该升级为公共 contract：
 
-- `Artifact candidate`：不保留为核心概念。它只是 capability / tool 在消息 metadata 上写的 **artifact marker**，或者 local-agent store 的内部写入参数。
+- `Artifact candidate`：不保留为核心概念。它只是 capability / tool 调用写入工具前的临时输入。
 - `CapabilityArtifactManifest`：不保留为 pet-agent contract。`manifest.json` 是 local-agent artifact store 的私有落盘格式。
 
 因此对外心智模型收缩为：
 
 ```text
-artifact marker（消息上的写入约定）
+capability_artifact_write（subagent loop 内的一等动作）
   -> host artifact store 保存内容
   -> CapabilityArtifactRef（进入 LangGraph state / prompt / UI）
 ```
@@ -132,17 +132,16 @@ type CapabilityArtifactRef = {
 - `metadata` 只放低风险、小体积字段，例如 tags、dimensions、duration、sourceCount。
 - `schema` 用于 JSON result 或结构化 artifact 的版本识别。
 
-### 7.2 Artifact marker
+### 7.2 Artifact write payload
 
-artifact marker 是 capability / tool 写在 subagent message metadata 上的约定，不是一个需要暴露给消费者的领域对象。
+write payload 是 capability / tool 调用 `capability_artifact_write` 时提交给 store 的输入，不是 message metadata contract。
 
-marker 字段与 `CapabilityArtifactRef` 尽量同名，但多出写入来源：
+payload 字段与 `CapabilityArtifactRef` 尽量同名，但多出写入来源：
 
-- `content`：JSON / markdown 等小到中等文本内容。
-- `sourceUri`：工具已经生成但尚未进入 artifact store 的图片、视频、PDF、文件包。
-- `existingUri`：工具已经自行持久化到 artifact store 的产物。
+- `content`：JSON / markdown / `Uint8Array` 等 inline 内容。图片生成模型的 `b64_json` 或下载后的图片 bytes 都走这里。
+- `externalUri`：远程 URL 引用，例如后端带外生成的 CDN / 对象存储地址；store 不下载、不复制字节。
 
-`sourceUri` 也必须是逻辑 URI，例如 `tool-output://run/<runId>/hero.png`，不能是绝对文件路径。host 负责把 source URI 解析到受信临时目录。
+不再支持 `sourceUri` / 本地绝对路径导入。这样 artifact 写入不会成为任意文件读取入口。
 
 ## 8. 存储布局
 
@@ -190,9 +189,7 @@ capability-artifact://thread/petbot%3Atui%3Apet%3Aabc%3A1234/delegation/dg_02/ar
 const OrchestratorState = Annotation.Root({
   // existing
   messages: Annotation<BaseMessage[]>({ ... }),
-  capabilityResult: Annotation<Record<string, unknown> | null>({ ... }),
 
-  // new
   capabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
     reducer: mergeCapabilityArtifactRefs,
     default: () => [],
@@ -200,12 +197,7 @@ const OrchestratorState = Annotation.Root({
 });
 ```
 
-`capabilityArtifacts` 与 `capabilityResult` 的区别：
-
-| 字段 | 语义 | 生命周期 | 内容 |
-|---|---|---|---|
-| `capabilityResult` | 最近一次 JSON result 的兼容字段 | turn-scoped / invoke result | 小 JSON |
-| `capabilityArtifacts` | 当前 thread 可引用的 capability 产物索引 | thread-scoped | refs only |
+`capabilityArtifacts` 是当前 thread 可引用的 capability 产物索引，内容只存 refs。结构化 result 也是 `kind: 'result'` 的 artifact，不再有单独的 `capabilityResult` state channel。
 
 `buildTurnStateReset()` 不应重置 `capabilityArtifacts`。否则下一轮对话看不到前序 artifact refs。
 
@@ -215,54 +207,40 @@ const OrchestratorState = Annotation.Root({
 
 ### 10.1 产出 artifact
 
-capability 运行时，subagent 或 tool 通过标准 metadata 标记 artifact marker：
+capability 运行时，subagent 通过 `capability_artifact_write` 写入 artifact：
 
 ```ts
-additional_kwargs: {
-  pinpawo: {
-    capabilityArtifacts: [
-      {
-        kind: 'report',
-        mimeType: 'text/markdown',
-        title: 'issue explore result',
-        preview: '已确认重复探索的原因是...',
-        content: '...full markdown...'
-      }
-    ]
-  }
-}
+await capability_artifact_write({
+  kind: 'report',
+  mimeType: 'text/markdown',
+  title: 'issue explore result',
+  preview: '已确认重复探索的原因是...',
+  content: '...full markdown...',
+  schema: { name: 'ExploreReport', version: 1 },
+});
 ```
 
-也可以标记工具已生成的文件：
+也可以记录后端带外生成的远程媒体：
 
 ```ts
-additional_kwargs: {
-  pinpawo: {
-    capabilityArtifacts: [
-      {
-        kind: 'image',
-        mimeType: 'image/png',
-        title: 'generated hero image',
-        preview: '1024x1024 hero image for campaign draft',
-        sourceUri: 'tool-output://run/run_01/hero.png',
-        metadata: { width: 1024, height: 1024 }
-      }
-    ]
-  }
-}
+await capability_artifact_write({
+  kind: 'image',
+  mimeType: 'image/png',
+  title: 'generated hero image',
+  preview: '1024x1024 hero image for campaign draft',
+  externalUri: 'https://cdn.example.com/hero.png',
+  metadata: { width: 1024, height: 1024 },
+});
 ```
 
 ### 10.2 pet-agent runtime 收集
 
 capability 节点结束时：
 
-1. `tagNewLaneMessages(...)` 标记本次 delegation 的 lane messages。
-2. generic collector 扫描本次 `laneOutputMessages` 中的标准 `pinpawo.capabilityArtifacts` marker。
-3. collector 不解析自由文本，不理解 explore 私有字段。
-4. 对 `kind: 'result'` 且 capability 声明了 `resultSchema` 的 marker，执行 schema 校验。
-5. 校验通过后交给 host artifact store 持久化。
-6. 返回 `CapabilityArtifactRef[]` 写入 `state.capabilityArtifacts`。
-7. 若存在 JSON result artifact，可继续写入 `state.capabilityResult` 作为兼容字段。
+1. `capability_artifact_write` 在 subagent loop 内直接调用 host artifact store。
+2. 写入成功后返回 `CapabilityArtifactRef`，并通过 subagent artifact sink 记录到 `SubagentResult.artifacts`。
+3. `capabilityNode` 不扫描 message metadata，只把 `result.artifacts` merge 进 `state.capabilityArtifacts`。
+4. 对 `kind: 'result'` 且 capability 声明了 `resultSchema` 的写入，在 `capability_artifact_write` 执行前校验 schema。
 
 ### 10.3 prompt 使用
 
@@ -345,8 +323,7 @@ capability_artifact_search({
 
 - `resultSchema` 定义 `kind: 'result'`、`mimeType: 'application/json'` 的 artifact payload。
 - schema 校验成功后，payload 持久化为 JSON artifact。
-- `capabilityResult` 可以作为兼容字段保留，值来自最新 JSON result artifact。
-- 新消费方应优先读 `capabilityArtifacts` 和 artifact store。
+- host 需要结构化结果时，从 `state.capabilityArtifacts` 找最新 `kind: 'result'` ref，再通过 artifact store 读取并用调用方 schema parse。
 
 也就是说，`resultSchema` 不被废弃；废弃的是“把 capability 的跨边界产出等同于一个小型 in-state JSON”的假设。
 
@@ -361,12 +338,12 @@ capability_artifact_search({
 
 新的方式是：
 
-- capability / tool 自己在消息上打标准 artifact marker。
-- pet-agent runtime 只收集标准 marker。
-- capability 私有语义已经在 marker 生成前完成。
+- capability / subagent 自己调用 `capability_artifact_write`。
+- pet-agent runtime 只接收 `SubagentResult.artifacts`。
+- capability 私有语义已经在写入工具调用前完成。
 - main agent 只消费 `CapabilityArtifactRef`。
 
-这仍然复用统一 lanes message 机制，但读取的是统一协议，不是 capability-specific parser。
+lanes message 机制继续负责对话隔离；artifact 不再借 message metadata 过境。
 
 ## 14. Explore 的落点
 
@@ -442,7 +419,7 @@ v1 不需要复杂 GC。只要确保 session 删除时不会留下无限增长�
 
 - state 中禁止保存绝对路径。
 - artifact URI 解析必须校验 threadId / delegationId / artifactId，防止路径穿越。
-- `sourceUri` 只能解析到受信 tool output 目录或显式允许的工作区产物。
+- 不支持 `sourceUri` / 本地路径导入；inline bytes 用 `content: Uint8Array`，远程对象用 `externalUri`。
 - 读取工具必须限制最大读取大小。
 - 对二进制 artifact，默认不返回 base64 内容给 LLM，只返回 metadata 或可打开 URI。
 - manifest 不记录 token、secret、完整环境变量。
@@ -451,11 +428,11 @@ v1 不需要复杂 GC。只要确保 session 删除时不会留下无限增长�
 
 ### Phase 1：contract 与本地 store
 
-- 新增公开 `CapabilityArtifactRef` 类型；artifact marker 类型可作为 runtime/store 内部写入类型实现。
+- 新增公开 `CapabilityArtifactRef` / `CapabilityArtifactWritePayload` 类型。
 - 新增 `capabilityArtifacts` state channel，持久跨 turn，不被 `buildTurnStateReset()` 清空。
 - 新增 local-agent `CapabilityArtifactStore`，默认落盘到 `<workdir>/.pinpawo/capability-artifacts/threads/<threadId>/...`。
-- 新增 generic artifact marker collector。
-- 保留 `capabilityResult` 兼容路径。
+- `SubagentResult` 增加 `artifacts: CapabilityArtifactRef[]`。
+- `capability_artifact_write` 写入 store 后回填 ref 到 subagent artifact sink。
 
 ### Phase 2：读取工具与 prompt bounded view
 
@@ -465,9 +442,9 @@ v1 不需要复杂 GC。只要确保 session 删除时不会留下无限增长�
 
 ### Phase 3：迁移现有 capability
 
-- `dailyPost` / `capabilityCreator`：把现有 `ToolMessage.artifact` 包装为 JSON result artifact。
-- `explore`：产出 JSON result artifact + markdown report artifact。
-- 废弃 capability-specific `readResult(laneOutputMessages)`，保留一段兼容适配。
+- `dailyPost` / `capabilityCreator`：通过 `capability_artifact_write` 保存 JSON result artifact。
+- `explore`：通过 `capability_artifact_write` 保存 JSON result artifact + markdown report artifact。
+- 废弃 capability-specific `readResult(laneOutputMessages)` 和 message marker collector。
 
 ### Phase 4：UI 与媒体产物
 
@@ -484,17 +461,15 @@ v1 不需要复杂 GC。只要确保 session 删除时不会留下无限增长�
 
 - JSON result artifact 通过 `resultSchema` 后写入 store，并在 state 中只保存 ref。
 - 大 markdown report 不进入 state，只能通过 read tool 读取。
-- 图片 artifact 复制到 artifact store，state 中不出现绝对路径。
+- 图片 artifact 可以 inline bytes 落盘，或以 `externalUri` 保存远程引用；state 中不出现绝对路径。
 - 多个 artifact refs 跨 turn 保留，`buildTurnStateReset()` 不清空。
 - route prompt 对 artifact refs 有预算裁剪。
 - `read` 工具 obey `maxBytes`。
 - 删除 thread/session 时 artifact 目录被清理。
-- 兼容字段 `capabilityResult` 仍能满足旧 host structured result 调用。
+- host structured result 调用从最新 `kind: 'result'` artifact ref 读取内容并按调用方 schema parse。
 
 ## 20. 未决问题
 
-1. artifact marker 是否直接放在 `additional_kwargs.pinpawo.capabilityArtifacts`，还是提供 helper API 统一生成。
-2. `sourceUri` 允许范围是仅 tool temp dir，还是允许 workspace 内显式产物。
-3. `capabilityArtifacts` state 是否设全局 ref 数量上限，还是只靠 prompt budget 和 artifact store GC。
-4. Studio wiki 与 capability artifact 是否需要互相引用，还是保持 wiki 是 curated knowledge、artifact 是原始产物。
-5. app-chat 远端同步时，artifact store 是本地优先还是需要上传到后端对象存储。
+1. `capabilityArtifacts` state 是否设全局 ref 数量上限，还是只靠 prompt budget 和 artifact store GC。
+2. Studio wiki 与 capability artifact 是否需要互相引用，还是保持 wiki 是 curated knowledge、artifact 是原始产物。
+3. app-chat 远端同步时，artifact store 是本地优先还是需要上传到后端对象存储。

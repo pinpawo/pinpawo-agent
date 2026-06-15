@@ -43,7 +43,6 @@ export const capabilitySearchTool = tool(
       update: {
         messages: [toolMessage],
         pendingDelegation: null,
-        capabilityResult: null,
         capabilitySearchState: {
           query: searchQuery || null,
           attempted: true,

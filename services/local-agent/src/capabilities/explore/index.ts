@@ -101,7 +101,7 @@ function readLatestExploreSummary(messages: BaseMessage[]): string | null {
 
 function createExploreSummaryMessage(summary: string, status: ExploreResult['status'] = 'completed'): AIMessage {
   const normalized = summary.trim();
-  const result = exploreResultSchema.parse({
+  exploreResultSchema.parse({
     status,
     summary: normalized,
     nextSteps: [],
@@ -111,30 +111,6 @@ function createExploreSummaryMessage(summary: string, status: ExploreResult['sta
     additional_kwargs: {
       pinpawo: {
         exploreSummary: normalized,
-        capabilityArtifacts: [
-          {
-            kind: 'result',
-            mimeType: 'application/json',
-            title: 'Explore result',
-            preview: clipText(normalized, 500),
-            content: result,
-            schema: {
-              name: 'ExploreResult',
-              version: 1,
-            },
-          },
-          {
-            kind: 'report',
-            mimeType: 'text/markdown',
-            title: 'Explore report',
-            preview: clipText(normalized, 500),
-            content: normalized,
-            schema: {
-              name: 'ExploreReport',
-              version: 1,
-            },
-          },
-        ],
       },
     },
   });
@@ -455,6 +431,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
           '使用可用工具在执行过程中自行规划探索；createRuntime 阶段不做额外模型规划。',
           '优先先确认候选范围，再读取详细内容；避免无界浏览或无目的扫描。',
           '如果当前会话已有相关 capability_artifact，先用 artifact 工具读取短引用，避免重复探索已经确认过的内容。',
+          '形成稳定结论后，使用 capability_artifact_write 保存 kind=result、mimeType=application/json、title="Explore result"、schema={name:"ExploreResult",version:1} 的结构化结果；如有较长报告，再保存 kind=report、mimeType=text/markdown、title="Explore report"。',
           '上下文足够时会保留完整工具输出；只有接近上下文预算时，较早的大型工具输出才会被知识摘要替换。',
           '结论必须包含简洁探索摘要、已查看文件列表、关键发现、证据引用（文件路径、URL、issue/PR 编号或命令输出来源）和建议下一步。',
         ],

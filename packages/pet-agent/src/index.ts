@@ -6,11 +6,11 @@ export type {
 
 export type {
   CapabilityArtifactKind,
-  CapabilityArtifactMarker,
   CapabilityArtifactRef,
   CapabilityArtifactSchemaRef,
   CapabilityArtifactStore,
   CapabilityArtifactWriteInput,
+  CapabilityArtifactWritePayload,
 } from './types/artifact';
 
 export type {
@@ -72,9 +72,6 @@ export {
   validateUniqueToolkitNames,
   validateUniqueToolNames,
 } from './agent/createAgentRuntime';
-export {
-  readCapabilityArtifactMarkers,
-} from './agent/orchestrator/capabilityArtifacts';
 export {
   extractCapabilityKeywords,
   searchCapabilities,

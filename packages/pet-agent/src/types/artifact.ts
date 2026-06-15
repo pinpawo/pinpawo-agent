@@ -26,12 +26,13 @@ export type CapabilityArtifactRef = {
   preview?: string;
   sizeBytes: number;
   sha256?: string;
+  externalUri?: string;
   createdAt: string;
   schema?: CapabilityArtifactSchemaRef;
   metadata?: Record<string, unknown>;
 };
 
-export type CapabilityArtifactMarker = {
+export type CapabilityArtifactWritePayload = {
   kind: CapabilityArtifactKind;
   mimeType: string;
   title?: string;
@@ -39,8 +40,7 @@ export type CapabilityArtifactMarker = {
   schema?: CapabilityArtifactSchemaRef;
   metadata?: Record<string, unknown>;
   content?: unknown;
-  sourceUri?: string;
-  existingUri?: string;
+  externalUri?: string;
 };
 
 export type CapabilityArtifactWriteInput = {
@@ -48,11 +48,16 @@ export type CapabilityArtifactWriteInput = {
   capabilityId: string;
   delegationId: string;
   turnId: string;
-  marker: CapabilityArtifactMarker;
+  artifact: CapabilityArtifactWritePayload;
 };
 
 export type CapabilityArtifactStore = {
   writeArtifact: (input: CapabilityArtifactWriteInput) => Promise<CapabilityArtifactRef>;
   writeArtifacts?: (inputs: CapabilityArtifactWriteInput[]) => Promise<CapabilityArtifactRef[]>;
+  readArtifact?: (params: {
+    uri: string;
+    maxBytes?: number;
+    threadId?: string;
+  }) => { ref: CapabilityArtifactRef; content: string | null };
   deleteThreadArtifacts?: (threadId: string) => Promise<void>;
 };

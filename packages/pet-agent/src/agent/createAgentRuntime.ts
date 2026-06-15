@@ -4,6 +4,7 @@ import { StateGraph, START, END, interrupt } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../types/agent';
+import type { CapabilityArtifactRef } from '../types/artifact';
 import type { SubagentInput, SubagentToolEventHandler } from '../types/subagent';
 import type { AgentToolkit } from '../types/toolkit';
 import { randomUUID } from 'node:crypto';
@@ -92,10 +93,6 @@ import {
   resolveToolkitResources,
   selectCapabilityTools,
 } from './orchestrator/subagentHandoff';
-import {
-  collectCapabilityArtifactRefs,
-  readCapabilityResultValue,
-} from './orchestrator/capabilityArtifacts';
 import { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
 import { clipForPrompt, formatDelegationStatus } from './orchestrator/utils';
 
@@ -485,7 +482,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     return {
       messages: [response],
       pendingDelegation: null,
-      capabilityResult: null,
     };
   }
 
@@ -724,7 +720,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         ...(decisionMode === 'finish' && finalReply ? [new AIMessage(finalReply)] : []),
       ],
       pendingDelegation: nextDelegationState.pendingDelegation,
-      capabilityResult: decisionMode === 'capability' ? null : state.capabilityResult,
       ...(resetIterationCount ? { iterationCount: 0 } : {}),
       ...(kind === 'delegation_outcome'
         ? {
@@ -776,14 +771,22 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     });
 
     const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);
+    const artifactRefs: CapabilityArtifactRef[] = [];
     const toolkitContext = {
       models: config.models,
       actor,
       messages: scopedMessages,
       threadId,
+      capabilityId: capability.name,
+      resultSchema: capability.resultSchema,
+      delegationId: pendingDelegation.id,
+      turnId: state.turnId,
       execution,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
+      recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
+        artifactRefs.push(ref);
+      },
       emitRuntimeEvent: onToolEvent,
     };
     const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
@@ -813,6 +816,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       checkpoint: config.checkpoint,
       runnableConfig,
       signal: runnableConfig?.signal,
+      artifacts: artifactRefs,
       onToolEvent,
     };
     validateUniqueToolNames(subagentInput.tools);
@@ -840,20 +844,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       },
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: pendingDelegation.id });
-    const rawCapabilityResult = readCapabilityResultValue(laneOutputMessages);
-    const capabilityResult = rawCapabilityResult
-      && typeof rawCapabilityResult === 'object'
-      && !Array.isArray(rawCapabilityResult)
-      ? rawCapabilityResult as Record<string, unknown>
-      : null;
-    const capabilityArtifacts = await collectCapabilityArtifactRefs({
-      messages: laneOutputMessages,
-      store: config.capabilityArtifactStore,
-      threadId,
-      capabilityId: capability.name,
-      delegationId: pendingDelegation.id,
-      turnId: state.turnId,
-    });
     const updatedTurnDelegations = updateTurnDelegationResult(
       state.turnDelegations,
       pendingDelegation.id,
@@ -871,8 +861,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         turnId: state.turnId,
         delegationId: pendingDelegation.id,
       }),
-      capabilityResult,
-      capabilityArtifacts,
+      capabilityArtifacts: result.artifacts,
       capabilitySearchState: buildEmptyCapabilitySearchState(),
       turnDelegations: updatedTurnDelegations,
       pendingDelegation: null,

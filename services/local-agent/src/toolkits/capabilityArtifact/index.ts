@@ -37,33 +37,51 @@ export function createCapabilityArtifactToolkit(store: ArtifactStore): AgentTool
       return [
         tool(async (input) => {
           const threadId = requireThreadId(ctx.threadId);
+          let content = input.content;
+          if (input.kind === 'result' && ctx.resultSchema) {
+            const parsed = ctx.resultSchema.safeParse(content);
+            if (!parsed.success) {
+              throw new Error(`capability result artifact failed schema validation: ${parsed.error.message}`);
+            }
+            content = parsed.data;
+          }
           const ref = await store.writeArtifact({
             threadId,
-            capabilityId: 'toolkit',
-            delegationId: input.delegationId || 'manual',
-            turnId: input.turnId || 'manual',
-            marker: {
+            capabilityId: ctx.capabilityId || 'toolkit',
+            delegationId: input.delegationId || ctx.delegationId || 'manual',
+            turnId: input.turnId || ctx.turnId || 'manual',
+            artifact: {
               kind: input.kind as CapabilityArtifactKind,
               mimeType: input.mimeType,
               title: input.title,
               preview: input.preview,
-              content: input.content,
+              schema: input.schema,
+              content,
+              externalUri: input.externalUri,
               metadata: input.metadata,
             },
           });
+          await ctx.recordCapabilityArtifact?.(ref);
           return JSON.stringify(ref, null, 2);
         }, {
           name: 'capability_artifact_write',
-          description: '把当前任务产出的文本或 JSON 内容保存为 capability artifact，并返回 artifact ref。',
+          description: '把当前任务产出的文本、JSON、二进制内容或远程媒体引用保存为 capability artifact，并返回 artifact ref。',
           schema: z.object({
             kind: artifactKindSchema,
             mimeType: z.string().min(1),
             title: z.string().optional(),
             preview: z.string().optional(),
+            schema: z.object({
+              name: z.string().min(1),
+              version: z.number().int().positive(),
+            }).optional(),
             content: z.unknown().optional(),
+            externalUri: z.string().url().optional(),
             metadata: z.record(z.string(), z.unknown()).optional(),
             delegationId: z.string().optional(),
             turnId: z.string().optional(),
+          }).refine((value) => (value.content !== undefined) !== Boolean(value.externalUri), {
+            message: 'Provide exactly one of content or externalUri',
           }),
         }),
         tool(async (input) => {
@@ -104,7 +122,7 @@ export function createCapabilityArtifactToolkit(store: ArtifactStore): AgentTool
     },
     instructions: [
       '需要复用当前会话内已有能力产物时，先用 capability_artifact_list 查看短引用，再按需 capability_artifact_read。',
-      '需要保存长报告、结构化结果或媒体产物引用时，使用 capability_artifact_write；不要把大内容直接写进普通回复。',
+      '需要保存长报告、结构化结果或媒体产物引用时，使用 capability_artifact_write；inline 内容用 content，远程 URL 用 externalUri；不要把大内容直接写进普通回复。',
     ],
     operations: {
       capability_artifact_write: {

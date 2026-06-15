@@ -23,10 +23,6 @@ export const OrchestratorState = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  capabilityResult: Annotation<Record<string, unknown> | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
   capabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
     reducer: (prev, next) => mergeCapabilityArtifactRefs(prev, next),
     default: () => [],
@@ -58,7 +54,6 @@ export type OrchestratorStateType = typeof OrchestratorState.State;
 export type OrchestratorTurnState = Pick<
   OrchestratorStateType,
   | 'pendingDelegation'
-  | 'capabilityResult'
   | 'capabilitySearchState'
   | 'turnDelegations'
   | 'iterationCount'
@@ -76,7 +71,6 @@ export function buildEmptyCapabilitySearchState(): CapabilitySearchState {
 export function buildTurnStateReset(): OrchestratorTurnState {
   return {
     pendingDelegation: null,
-    capabilityResult: null,
     capabilitySearchState: buildEmptyCapabilitySearchState(),
     turnDelegations: [],
     iterationCount: 0,

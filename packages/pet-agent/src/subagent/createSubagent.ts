@@ -252,6 +252,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
     await finishToolEvents('completed');
     return {
       messages: latestMessages,
+      artifacts: input.artifacts ?? [],
       completionReason: 'natural',
     };
   } catch (err) {
@@ -269,6 +270,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
         messages: contextLimitReached
           ? [...latestMessages, buildContextFuseProgressMessage(contextLimitReached)]
           : latestMessages,
+        artifacts: input.artifacts ?? [],
         completionReason: 'limit_reached',
       };
     }

@@ -16,9 +16,15 @@ export type ToolkitContext = {
   actor: AgentActor;
   messages: BaseMessage[];
   execution?: AgentExecution;
+  reviewCapabilities?: ToolkitReviewCapabilities;
   toolAuthorizations?: ToolAuthorizationRecord[];
   recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;
   emitRuntimeEvent?: (event: SubagentRuntimeEvent) => void | Promise<void>;
+};
+
+export type ToolkitReviewCapabilities = {
+  humanReview: boolean;
+  sessionAuthorization: boolean;
 };
 
 export type ToolkitResource<T> = T | ((ctx: ToolkitContext) => T | Promise<T>);
@@ -27,20 +33,29 @@ export type ToolkitToolReviewContext = ToolkitContext & {
   toolkitName: string;
   toolName: string;
   input: unknown;
+  operation?: ToolOperationMetadata;
 };
 
 export type ToolkitToolAuthorizationMatcherContext = {
   toolkitName: string;
   toolName: string;
   input: unknown;
+  operation?: ToolOperationMetadata;
   pendingAction: PendingReviewAction;
   effect: Extract<ReviewEffect, { type: 'graph.authorize_tool_action' }>;
 };
 
+export type ToolkitToolReviewBlock = {
+  type: 'block';
+  reason: string;
+};
+
+export type ToolkitToolReviewResult = ReviewSpec | ToolkitToolReviewBlock | null;
+
 export type ToolkitToolReviewPolicy = {
   request: (
     ctx: ToolkitToolReviewContext
-  ) => ReviewSpec | null | Promise<ReviewSpec | null>;
+  ) => ToolkitToolReviewResult | Promise<ToolkitToolReviewResult>;
   buildAuthorizationMatcher?: (
     ctx: ToolkitToolAuthorizationMatcherContext
   ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;

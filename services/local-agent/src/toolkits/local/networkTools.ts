@@ -14,6 +14,19 @@ const DEFAULT_DOWNLOADS_DIR = resolve(homedir(), 'Downloads');
 const MAX_FETCH_BYTES = 100_000;
 const FETCH_TIMEOUT_MS = 15_000;
 
+
+function readHttpMethod(record: Record<string, unknown> | null) {
+  return (readString(record, 'method') ?? 'GET').trim().toUpperCase();
+}
+
+function hasSensitiveHeaders(headers: unknown) {
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) {
+    return false;
+  }
+  return Object.keys(headers).some((key) =>
+    ['authorization', 'cookie', 'x-api-key'].includes(key.toLowerCase()));
+}
+
 export function sanitizeFilename(filename: string) {
   return filename.replace(/[\\/:*?"<>|]/g, '_').trim() || `download-${Date.now()}`;
 }
@@ -197,7 +210,10 @@ export const networkOperationMetadata: Record<string, ToolkitOperationMetadata> 
       const record = readRecord(input);
       return {
         target: readString(record, 'url'),
-        details: { method: readString(record, 'method') ?? 'GET' },
+        details: {
+          method: readHttpMethod(record),
+          hasSensitiveHeaders: hasSensitiveHeaders(record?.headers),
+        },
       };
     },
   },

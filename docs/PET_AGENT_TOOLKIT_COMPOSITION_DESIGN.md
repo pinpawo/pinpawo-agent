@@ -98,6 +98,10 @@ general lane 默认接收 host 注册的所有 toolkit。capability lane 只有�
 
 ## 5. Toolkit Policy 与 HITL
 
+> 最新的通用 HITL policy preset 设计见
+> `docs/TOOLKIT_HITL_POLICY_PRESETS_DESIGN.md`。本节保留 toolkit policy
+> wrapper 的原始分层说明；preset 的职责边界以后者为准。
+
 toolkit 可以为工具声明 human review policy。policy 不改变模型看到的工具形态：工具名、描述和 schema 保持不变，运行时在 toolkit 装配阶段把原始工具包一层 wrapper。
 
 这层 policy 只回答一个问题：这次 tool call 是否需要 human review。它不负责决定“工具是否存在”，也不把“不允许”建模为 public state。工具面由 toolkit 装配决定；参数非法、硬性禁止的调用由 raw tool 自己返回错误。

@@ -5,7 +5,7 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
-import type { AgentToolkit } from '../../types/toolkit';
+import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
 import type { OrchestrationDecision } from './schemas';
 
 export type MessageLane = 'general' | `capability:${string}`;
@@ -80,6 +80,7 @@ export type OrchestratorInvokeOptions = {
   workdir?: string;
   runtimeEnvironment?: string;
   onToolEvent?: SubagentToolEventHandler;
+  reviewCapabilities?: ToolkitReviewCapabilities;
   /**
    * 强制以"已发现候选"形态登记的 capability 名字列表。`prepare` 节点会
    * 据此 pre-seed `capabilitySearchState`,跳过 capability discovery/search。

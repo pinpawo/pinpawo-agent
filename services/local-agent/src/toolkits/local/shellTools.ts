@@ -2,12 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import {
-  buildReviewSpec,
-  isToolActionAuthorized,
-  type ToolkitOperationMetadata,
-  type ToolkitToolReviewPolicy,
-} from '@pinpawo/pet-agent';
+import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { config } from '../../config';
 import { readRecord, readString } from '../operationMetadata';
@@ -75,54 +70,6 @@ export function getShellConfirmationRisk(command: string) {
   }
 
   return null;
-}
-
-function buildShellReviewSpec(command: string, cwd: string, risk: string) {
-  return buildReviewSpec({
-    view: {
-      kind: 'plain',
-      title: 'Shell command approval',
-      body: `即将执行高风险 shell 命令（${risk}）。\n目录：${cwd}\n命令：${command}`,
-    },
-    options: [
-      {
-        id: 'approve',
-        label: 'Approve',
-        variant: 'primary',
-        decision: { type: 'approve' },
-      },
-      {
-        id: 'approve-and-authorize-thread',
-        label: 'Approve and authorize',
-        description: 'Approve this action and authorize matching actions in this thread.',
-        decision: { type: 'approve' },
-        effects: [{
-          type: 'graph.authorize_tool_action',
-          scope: 'thread',
-          actionRef: { type: 'pending_action' },
-          matcher: { type: 'policy_hook' },
-        }],
-      },
-      {
-        id: 'reject',
-        label: 'Reject',
-        variant: 'danger',
-        decision: { type: 'reject' },
-      },
-      {
-        id: 'respond',
-        label: 'Respond',
-        input: {
-          kind: 'text',
-          key: 'message',
-          required: true,
-          multiline: true,
-          placeholder: 'Tell the agent what to do instead',
-        },
-        decision: { type: 'respond', messageInputKey: 'message' },
-      },
-    ],
-  });
 }
 
 export function normalizeShellActionInput(input: unknown) {
@@ -230,63 +177,18 @@ export const runShellTool = tool(
   },
 );
 
-export const shellReviewPolicy: ToolkitToolReviewPolicy = {
-  request: ({ input, toolAuthorizations }) => {
-    let shellAction: { command: string; cwd: string };
-    try {
-      shellAction = normalizeShellActionInput(input);
-    } catch {
-      return null;
-    }
-
-    if (getBlockedShellReason(shellAction.command)) {
-      return null;
-    }
-
-    const confirmationRisk = getShellConfirmationRisk(shellAction.command);
-    if (!confirmationRisk) {
-      return null;
-    }
-
-    const { capabilities } = getCurrentLocalAgentInterface();
-    const isAuthorized = capabilities.sessionAuthorization
-      ? isToolActionAuthorized({
-          authorizations: toolAuthorizations ?? [],
-          toolName: 'run_shell',
-          args: shellAction,
-        })
-      : false;
-    if (isAuthorized) {
-      return null;
-    }
-
-    if (!capabilities.humanReview) {
-      return null;
-    }
-
-    return buildShellReviewSpec(
-      shellAction.command,
-      shellAction.cwd,
-      confirmationRisk,
-    );
-  },
-  buildAuthorizationMatcher: ({ input }) => {
-    const shellAction = normalizeShellActionInput(input);
-    return {
-      type: 'shell_pattern',
-      value: shellAction.command,
-    };
-  },
-};
-
 export const shellOperationMetadata: Record<string, ToolkitOperationMetadata> = {
   run_shell: {
     title: '执行命令',
     summarizeInput: (input) => {
       const record = readRecord(input);
+      const command = readString(record, 'command');
       return {
         target: readString(record, 'cwd'),
-        summary: readString(record, 'command'),
+        summary: command,
+        details: {
+          risk: command ? getShellConfirmationRisk(command) : undefined,
+        },
       };
     },
   },

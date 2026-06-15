@@ -6,6 +6,7 @@ import {
   inferFilename,
   sanitizeFilename,
 } from './toolkits/local/networkTools';
+import { createBashToolkit } from './toolkits/local';
 
 test('network tool helpers sanitize names and infer image extensions', () => {
   assert.equal(sanitizeFilename('a/b:c?.png'), 'a_b_c_.png');
@@ -39,4 +40,47 @@ test('httpFetchTool uses mocked fetch and returns readable text', async (t) => {
     }),
     'Hello\nWorld',
   );
+});
+
+test('bash toolkit external access policy reviews configured network calls', async () => {
+  const toolkit = createBashToolkit();
+  const httpPolicy = toolkit.policy?.toolReview?.http_fetch;
+  const downloadPolicy = toolkit.policy?.toolReview?.download_file;
+  assert.ok(httpPolicy);
+  assert.ok(downloadPolicy);
+
+  const baseContext = {
+    models: {} as never,
+    actor: {} as never,
+    messages: [],
+    toolkitName: 'bash',
+    reviewCapabilities: {
+      humanReview: true,
+      sessionAuthorization: true,
+    },
+  };
+
+  const getReview = await httpPolicy.request({
+    ...baseContext,
+    toolName: 'http_fetch',
+    input: { url: 'https://example.test/page' },
+    operation: toolkit.operations?.http_fetch,
+  });
+  assert.equal(getReview && 'schemaVersion' in getReview ? getReview.view.title : null, '请求网页');
+
+  const postReview = await httpPolicy.request({
+    ...baseContext,
+    toolName: 'http_fetch',
+    input: { url: 'https://example.test/page', method: 'POST', body: 'ok' },
+    operation: toolkit.operations?.http_fetch,
+  });
+  assert.equal(postReview && 'schemaVersion' in postReview ? postReview.view.title : null, '请求网页');
+
+  const downloadReview = await downloadPolicy.request({
+    ...baseContext,
+    toolName: 'download_file',
+    input: { url: 'https://example.test/file.txt' },
+    operation: toolkit.operations?.download_file,
+  });
+  assert.equal(downloadReview && 'schemaVersion' in downloadReview ? downloadReview.view.title : null, '下载文件');
 });

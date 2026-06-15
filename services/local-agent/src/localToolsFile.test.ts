@@ -1,13 +1,10 @@
 import assert from 'node:assert/strict';
-import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
-import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
 import { createBashToolkit } from './toolkits/local';
 import {
-  applyPatchReviewPolicy,
   applyPatchTool,
   copyPathTool,
   listDirTool,
@@ -17,7 +14,6 @@ import {
   statPathTool,
   validateStructuredFileTool,
   viewFileChunkTool,
-  writeFileReviewPolicy,
   writeFileTool,
 } from './toolkits/local/fileTools';
 import { parsePatch, PatchParseError } from './toolkits/local/applyPatch';
@@ -32,15 +28,27 @@ function readJsonOutput(output: unknown) {
   return JSON.parse(String(output)) as Record<string, unknown>;
 }
 
-function runWithTuiInterface<T>(callback: () => T): T {
-  return AsyncLocalStorageProviderSingleton.runWithConfig({
-    configurable: {
-      [LOCAL_AGENT_INTERFACE_CONFIG_KEY]: {
-        kind: 'tui',
-        threadId: 'thread-1',
-      },
+function reviewPolicyFor(toolName: string) {
+  const policy = createBashToolkit().policy?.toolReview?.[toolName];
+  assert.ok(policy);
+  return policy;
+}
+
+function reviewContext(toolName: string, input: unknown) {
+  const toolkit = createBashToolkit();
+  return {
+    models: {} as never,
+    actor: {} as never,
+    messages: [],
+    toolkitName: 'bash',
+    toolName,
+    input,
+    operation: toolkit.operations?.[toolName],
+    reviewCapabilities: {
+      humanReview: true,
+      sessionAuthorization: true,
     },
-  }, callback);
+  };
 }
 
 test('file tools write, view, and stat text files', async (t) => {
@@ -64,6 +72,74 @@ test('file tools write, view, and stat text files', async (t) => {
   const stat = readJsonOutput(await statPathTool.invoke({ path: filePath }));
   assert.equal(stat.type, 'file');
   assert.equal(stat.path, filePath);
+});
+
+test('bash toolkit reviews write_file with preset policy', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'note.txt');
+  writeFileSync(filePath, 'before\n', 'utf-8');
+  const input = { path: filePath, content: 'after\n' };
+  const policy = reviewPolicyFor('write_file');
+
+  const review = await policy.request(reviewContext('write_file', input));
+  assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '写文件');
+  assert.match(review && 'schemaVersion' in review ? review.view.body : '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(review && 'schemaVersion' in review ? review.view.body : '', /afterPreview/);
+  assert.deepEqual(
+    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
+    ['approve', 'reject', 'respond'],
+  );
+});
+
+test('bash toolkit reviews apply_patch with resolved file paths', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'note.txt');
+  const input = {
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      ' alpha',
+      '-beta',
+      '+BETA',
+      '*** End Patch',
+    ].join('\n'),
+  };
+  const policy = reviewPolicyFor('apply_patch');
+
+  const review = await policy.request(reviewContext('apply_patch', input));
+  assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '应用补丁');
+  assert.match(review && 'schemaVersion' in review ? review.view.body : '', /patch/);
+  assert.match(review && 'schemaVersion' in review ? review.view.body : '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('bash toolkit reviews local path mutations with presets', () => {
+  const toolkit = createBashToolkit();
+
+  assert.equal(Boolean(toolkit.policy?.toolReview?.move_path), true);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.copy_path), true);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.mkdir_path), true);
+});
+
+test('bash toolkit leaves read-only file tools without review policy', () => {
+  const toolkit = createBashToolkit();
+
+  assert.equal(toolkit.policy?.toolReview?.read_file, undefined);
+  assert.equal(toolkit.policy?.toolReview?.view_file_chunk, undefined);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.write_file), true);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.apply_patch), true);
+});
+
+test('bash toolkit write policy blocks without HITL support', async () => {
+  const policy = reviewPolicyFor('write_file');
+  const result = await policy.request({
+    ...reviewContext('write_file', { path: '/tmp/a.txt', content: 'x' }),
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: false,
+    },
+  });
+
+  assert.equal(result && 'type' in result ? result.type : null, 'block');
 });
 
 test('apply_patch updates a file with context-anchored chunks', async (t) => {
@@ -259,65 +335,6 @@ test('parsePatch parses anchors, moves, and end-of-file markers', () => {
   assert.deepEqual(update.chunks[0]?.oldLines, ['context', 'old']);
   assert.deepEqual(update.chunks[0]?.newLines, ['context', 'new']);
   assert.equal(update.chunks[0]?.isEndOfFile, true);
-});
-
-test('file mutation review policies request approval and honor exact authorization', async (t) => {
-  const root = createFileFixture(t);
-  const filePath = resolve(root, 'note.txt');
-  writeFileSync(filePath, 'before\n', 'utf-8');
-  const writeInput = { path: filePath, content: 'after\n' };
-
-  const writeReview = await runWithTuiInterface(() =>
-    writeFileReviewPolicy.request({
-      input: writeInput,
-      toolAuthorizations: [],
-    } as never));
-  assert.equal(writeReview?.view.title, 'File write approval');
-  assert.match(writeReview?.view.body ?? '', /覆盖/);
-  assert.match(writeReview?.view.body ?? '', /--- before ---/);
-  assert.match(writeReview?.view.body ?? '', /--- content ---/);
-  assert.equal(
-    writeReview?.options.some((option) => option.id === 'approve-and-authorize-thread'),
-    true,
-  );
-
-  const writeMatcher = await writeFileReviewPolicy.buildAuthorizationMatcher?.({
-    input: writeInput,
-  } as never);
-  const authorizedWriteReview = await runWithTuiInterface(() =>
-    writeFileReviewPolicy.request({
-      input: writeInput,
-      toolAuthorizations: [{
-        toolName: 'write_file',
-        matcher: writeMatcher!,
-        createdAt: '2026-01-01T00:00:00.000Z',
-      }],
-    } as never));
-  assert.equal(authorizedWriteReview, null);
-
-  const patch = [
-    '*** Begin Patch',
-    `*** Update File: ${filePath}`,
-    '-before',
-    '+after',
-    '*** End Patch',
-  ].join('\n');
-  const patchReview = await runWithTuiInterface(() =>
-    applyPatchReviewPolicy.request({
-      input: { patch },
-      toolAuthorizations: [],
-    } as never));
-  assert.equal(patchReview?.view.title, 'Patch approval');
-  assert.match(patchReview?.view.body ?? '', /文件数：1/);
-  assert.match(patchReview?.view.body ?? '', /update:/);
-  assert.equal(
-    await runWithTuiInterface(() =>
-      applyPatchReviewPolicy.request({
-        input: { patch: 'not a patch' },
-        toolAuthorizations: [],
-      } as never)),
-    null,
-  );
 });
 
 test('createBashToolkit registers review policies for file mutation tools', () => {

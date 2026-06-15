@@ -193,6 +193,7 @@ export function mergeToolAuthorizations(
 }
 
 function findReviewPolicy(toolkits: AgentToolkit[], toolName: string): {
+  toolkit: AgentToolkit;
   toolkitName: string;
   policy: ToolkitToolReviewPolicy;
 } | null {
@@ -200,6 +201,7 @@ function findReviewPolicy(toolkits: AgentToolkit[], toolName: string): {
     const policy = toolkit.policy?.toolReview?.[toolName];
     if (policy) {
       return {
+        toolkit,
         toolkitName: toolkit.name,
         policy,
       };
@@ -241,6 +243,7 @@ async function buildMatcherFromTemplate(params: {
     toolkitName: policyRef.toolkitName,
     toolName: params.pendingAction.toolName,
     input: params.pendingAction.args,
+    operation: policyRef.toolkit.operations?.[params.pendingAction.toolName],
     pendingAction: params.pendingAction,
     effect: params.effect,
   });

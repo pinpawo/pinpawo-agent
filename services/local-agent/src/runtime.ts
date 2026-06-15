@@ -168,12 +168,18 @@ export class LocalAgentRuntime {
     }
     console.log(`[local-agent] started — poll every ${config.pollIntervalSeconds}s, post every ${config.postIntervalHours}h`);
 
-    // Connect WebSocket for app ↔ local agent chat relay
-    this.connectWs();
+    if (config.apiConnected) {
+      // Connect WebSocket for app ↔ local agent chat relay.
+      this.connectWs();
+    } else {
+      console.log(`[local-agent] ${config.apiSetupMessage}`);
+    }
 
     while (!this.stopRequested) {
       try {
-        await this.scheduledJob.tick();
+        if (config.apiConnected) {
+          await this.scheduledJob.tick();
+        }
       } catch (err) {
         console.error('[local-agent] tick error:', err instanceof Error ? err.message : err);
       }
@@ -189,6 +195,10 @@ export class LocalAgentRuntime {
 
   connectWs() {
     if (this.stopRequested) return;
+    if (!config.apiConnected) {
+      console.log(`[local-agent] hosted app WebSocket disabled: ${config.apiSetupMessage}`);
+      return;
+    }
     if (!this.actorId) {
       throw new Error('Local agent actorId is missing; run init() before connectWs()');
     }

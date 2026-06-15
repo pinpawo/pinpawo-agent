@@ -7,7 +7,11 @@ import type {
   SubagentToolOperationMetadata,
 } from '../types/subagent';
 import { estimateMessagesTokens } from '../agent/orchestrator/contextCompaction';
-import { readToolCalls, readToolMessageCallId, type ToolCallInfo } from '../agent/orchestrator/toolMessages';
+import {
+  readMessageToolCalls,
+  readToolResultCallId,
+  type MessageToolCallInfo,
+} from '../utils/messages';
 import { readMessageText } from '../agent/orchestrator/utils';
 
 const DEFAULT_MIN_SIZE_CHARS = 2000;
@@ -29,10 +33,10 @@ type RewriteDecision = {
 };
 
 function collectToolCallInfo(messages: BaseMessage[]) {
-  const calls = new Map<string, ToolCallInfo>();
+  const calls = new Map<string, MessageToolCallInfo>();
   for (const message of messages) {
     if (!AIMessage.isInstance(message)) continue;
-    for (const call of readToolCalls(message)) {
+    for (const call of readMessageToolCalls(message)) {
       calls.set(call.id, call);
     }
   }
@@ -104,7 +108,7 @@ function collectToolResultCandidates(
     .filter((item): item is { message: ToolMessage; index: number } => ToolMessage.isInstance(item.message));
 
   return toolMessages.map((item) => {
-    const callId = readToolMessageCallId(item.message);
+    const callId = readToolResultCallId(item.message);
     const call = callId ? calls.get(callId) : null;
     const toolName = call?.name ?? (typeof item.message.name === 'string' ? item.message.name : null);
     return {

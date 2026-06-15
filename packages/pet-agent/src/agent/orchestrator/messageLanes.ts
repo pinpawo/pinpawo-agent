@@ -1,7 +1,7 @@
 import { RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
 import type { AnnounceKind, MessageLane, PinpetMessageLane, SubagentAnnounce, SubagentCompletionReason } from './types';
-import { messageHasToolCalls, readToolCallIds, readToolMessageCallId } from './toolMessages';
+import { messageHasToolCalls, readMessageToolCallIds, readToolResultCallId } from '../../utils/messages';
 import { readMessageText } from './utils';
 
 export function getMessageLane(message: BaseMessage): PinpetMessageLane | null {
@@ -66,7 +66,7 @@ export function toolProtocolSafeMessages(messages: BaseMessage[]) {
 
   for (let i = 0; i < messages.length;) {
     const message = messages[i];
-    const toolCallIds = readToolCallIds(message);
+    const toolCallIds = readMessageToolCallIds(message);
 
     if (toolCallIds.length === 0) {
       if (message._getType() !== 'tool') {
@@ -82,7 +82,7 @@ export function toolProtocolSafeMessages(messages: BaseMessage[]) {
     while (nextIndex < messages.length && messages[nextIndex]._getType() === 'tool') {
       const toolMessage = messages[nextIndex];
       followingToolMessages.push(toolMessage);
-      const toolCallId = readToolMessageCallId(toolMessage);
+      const toolCallId = readToolResultCallId(toolMessage);
       if (toolCallId) {
         answeredToolCallIds.add(toolCallId);
       }

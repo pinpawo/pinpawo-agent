@@ -24,6 +24,9 @@ function checkJwtExpiry() {
 }
 
 export async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  if (!config.apiConnected) {
+    throw new Error(`${config.apiSetupMessage || 'API login is not configured.'}`);
+  }
   checkJwtExpiry();
   const res = await fetch(config.hasuraEndpoint, {
     method: 'POST',

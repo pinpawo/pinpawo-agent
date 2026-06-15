@@ -1,13 +1,13 @@
 import type { BaseMessage } from '@langchain/core/messages';
 
-export type ToolCallInfo = {
+export type MessageToolCallInfo = {
   id: string;
   name: string;
   args: unknown;
 };
 
-export function readToolCalls(message: BaseMessage): ToolCallInfo[] {
-  return readRawToolCalls(message).flatMap((call) => {
+export function readMessageToolCalls(message: BaseMessage): MessageToolCallInfo[] {
+  return readRawMessageToolCalls(message).flatMap((call) => {
     if (!call || typeof call !== 'object') return [];
     const item = call as Record<string, unknown>;
     const id = item.id;
@@ -21,8 +21,8 @@ export function readToolCalls(message: BaseMessage): ToolCallInfo[] {
   });
 }
 
-export function readToolCallIds(message: BaseMessage): string[] {
-  return readRawToolCalls(message).flatMap((call) => {
+export function readMessageToolCallIds(message: BaseMessage): string[] {
+  return readRawMessageToolCalls(message).flatMap((call) => {
     if (!call || typeof call !== 'object') return [];
     const id = (call as Record<string, unknown>).id;
     return typeof id === 'string' && id ? [id] : [];
@@ -30,16 +30,16 @@ export function readToolCallIds(message: BaseMessage): string[] {
 }
 
 export function messageHasToolCalls(message: BaseMessage) {
-  return readToolCallIds(message).length > 0;
+  return readMessageToolCallIds(message).length > 0;
 }
 
-export function readToolMessageCallId(message: BaseMessage): string | null {
+export function readToolResultCallId(message: BaseMessage): string | null {
   if (message._getType() !== 'tool') return null;
   const toolCallId = (message as BaseMessage & { tool_call_id?: unknown }).tool_call_id;
   return typeof toolCallId === 'string' && toolCallId ? toolCallId : null;
 }
 
-function readRawToolCalls(message: BaseMessage): unknown[] {
+function readRawMessageToolCalls(message: BaseMessage): unknown[] {
   const record = message as BaseMessage & {
     tool_calls?: unknown;
     additional_kwargs?: { tool_calls?: unknown };

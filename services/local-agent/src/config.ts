@@ -32,6 +32,10 @@ function get(envKey: string, storedKey: keyof typeof stored): string {
   return process.env[envKey] || (typeof storedVal === 'string' ? storedVal : '') || '';
 }
 
+function optional(envKey: string, storedKey: keyof typeof stored): string {
+  return get(envKey, storedKey).trim();
+}
+
 export function resolveNumberConfigValue(envVal: string | undefined, storedVal: unknown): number | undefined {
   const raw = envVal?.trim() ? envVal : (typeof storedVal === 'number' ? String(storedVal) : '');
   if (!raw.trim()) return undefined;
@@ -55,11 +59,39 @@ function required(envKey: string, storedKey: keyof typeof stored, label: string)
   return val;
 }
 
+export function isMissingOrGeneratedApiPlaceholder(envKey: string, value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  if (envKey === 'API_BASE_URL') return /your-api\.example\.com/i.test(trimmed);
+  if (envKey === 'HASURA_ENDPOINT') return /your-hasura\.example\.com/i.test(trimmed);
+  if (envKey === 'AGENT_TOKEN') return /^your-agent-token-here$/i.test(trimmed);
+  if (envKey === 'HASURA_JWT') return trimmed === 'eyJ...' || /^your-hasura-jwt/i.test(trimmed);
+  return false;
+}
+
+const apiBaseUrl = optional('API_BASE_URL', 'api_base_url').replace(/\/$/, '');
+const hasuraEndpoint = optional('HASURA_ENDPOINT', 'hasura_endpoint').replace(/\/$/, '');
+const agentToken = optional('AGENT_TOKEN', 'agent_token');
+const hasuraJwt = optional('HASURA_JWT', 'hasura_jwt');
+const apiCredentialValues = [
+  ['API_BASE_URL', apiBaseUrl],
+  ['HASURA_ENDPOINT', hasuraEndpoint],
+  ['AGENT_TOKEN', agentToken],
+  ['HASURA_JWT', hasuraJwt],
+] as const;
+const missingOrPlaceholderApiConfig = apiCredentialValues
+  .filter(([key, value]) => isMissingOrGeneratedApiPlaceholder(key, value))
+  .map(([key]) => key);
+
 export const config = {
-  apiBaseUrl: required('API_BASE_URL', 'api_base_url', 'API_BASE_URL').replace(/\/$/, ''),
-  hasuraEndpoint: required('HASURA_ENDPOINT', 'hasura_endpoint', 'HASURA_ENDPOINT').replace(/\/$/, ''),
-  agentToken: required('AGENT_TOKEN', 'agent_token', 'AGENT_TOKEN'),
-  hasuraJwt: required('HASURA_JWT', 'hasura_jwt', 'HASURA_JWT'),
+  apiBaseUrl,
+  hasuraEndpoint,
+  agentToken,
+  hasuraJwt,
+  apiConnected: missingOrPlaceholderApiConfig.length === 0,
+  apiSetupMessage: missingOrPlaceholderApiConfig.length > 0
+    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable hosted app, relay, heartbeat, scheduled posts, and Hasura-backed context.`
+    : '',
 
   llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
   llmBaseUrl: get('LLM_BASE_URL', 'llm_base_url') || 'https://api.deepseek.com',

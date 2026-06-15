@@ -16,6 +16,8 @@ import {
   validateStructuredFileTool,
   viewFileChunkTool,
   writeFileTool,
+  writeFileReviewPolicy,
+  applyPatchReviewPolicy,
   fileOperationMetadata,
 } from './fileTools';
 import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
@@ -85,6 +87,8 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     operations: bashToolkitOperations,
     policy: {
       toolReview: {
+        write_file: writeFileReviewPolicy,
+        apply_patch: applyPatchReviewPolicy,
         run_shell: shellReviewPolicy,
       },
     },

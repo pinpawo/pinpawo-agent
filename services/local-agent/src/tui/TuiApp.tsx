@@ -9,11 +9,11 @@ import { RuntimeInfoLine } from './components/RuntimeInfoLine';
 import { TokenUsageLine } from './components/TokenUsageLine';
 import { ResumePicker } from './components/ResumePicker';
 import {
-  applyComposerInput,
   createInitialTuiInputBufferState,
   normalizeTuiInputEvent,
   resolveTuiKeyAction,
 } from './input/keymap';
+import { applyTextAreaInput } from './input/textareaModel';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
   buildActiveOperationLines,
@@ -61,7 +61,6 @@ export function TuiApp(props: { actorId: string }) {
     rows: stdout.rows ?? 24,
   }));
   const [studioMode, setStudioMode] = useState(false);
-  const [composerCursorOffset, setComposerCursorOffset] = useState(0);
   const [approvalIndex, setApprovalIndex] = useState(0);
 
   const stateRef = useRef<TuiState>(tuiState);
@@ -81,7 +80,8 @@ export function TuiApp(props: { actorId: string }) {
   }), [props.actorId, localServerPort, dispatch, setNow]);
   const focusedSession = selectFocusedSession(tuiState);
   const messages = selectFocusedHistory(tuiState);
-  const inputValue = tuiState.input.value;
+  const inputValue = tuiState.input.text;
+  const inputCursorOffset = tuiState.input.cursorOffset;
   const ready = selectReady(tuiState);
   const busy = selectFocusedBusy(tuiState);
   const pendingUi = selectFocusedPendingUi(tuiState);
@@ -96,10 +96,6 @@ export function TuiApp(props: { actorId: string }) {
   useEffect(() => {
     stateRef.current = tuiState;
   }, [tuiState]);
-
-  useEffect(() => {
-    setComposerCursorOffset((current) => Math.min(current, inputValue.length));
-  }, [inputValue.length]);
 
   useEffect(() => {
     setApprovalIndex(0);
@@ -121,13 +117,8 @@ export function TuiApp(props: { actorId: string }) {
     });
   };
 
-  const setInputValue = (value: string) => {
-    dispatch({ type: 'input.set', value });
-  };
-
   const clearInputValue = () => {
-    setInputValue('');
-    setComposerCursorOffset(0);
+    dispatch({ type: 'input.set', value: '', cursorOffset: 0 });
   };
 
   const resetStudioMode = () => {
@@ -199,6 +190,8 @@ export function TuiApp(props: { actorId: string }) {
     runtimeController.start();
     return () => runtimeController.dispose();
   }, [runtimeController]);
+
+  const contentWidth = Math.max(20, terminalSize.columns - 4);
 
   useInput((input, key) => {
     const normalized = normalizeTuiInputEvent(input, key, inputBufferRef.current);
@@ -282,14 +275,11 @@ export function TuiApp(props: { actorId: string }) {
         return;
 
       case 'composer.edit': {
-        const nextComposerState = applyComposerInput(normalizedInput, normalizedKey, {
-          value: inputValue,
-          cursorOffset: composerCursorOffset,
-        });
-        setComposerCursorOffset(nextComposerState.cursorOffset);
-        if (nextComposerState.value !== inputValue) {
-          setInputValue(nextComposerState.value);
-        }
+        const nextInput = applyTextAreaInput(normalizedInput, normalizedKey, {
+          text: inputValue,
+          cursorOffset: inputCursorOffset,
+        }, { width: Math.max(8, contentWidth - 4) });
+        dispatch({ type: 'input.apply', value: nextInput });
         return;
       }
 
@@ -302,7 +292,6 @@ export function TuiApp(props: { actorId: string }) {
   }, { isActive: true });
 
   const spinnerFrame = SPINNER_FRAMES[animationFrame];
-  const contentWidth = Math.max(20, terminalSize.columns - 4);
   const activeOperationLines = useMemo(
     () => buildActiveOperationLines(activeOperations, now, contentWidth),
     [activeOperations, now, contentWidth],
@@ -382,7 +371,7 @@ export function TuiApp(props: { actorId: string }) {
             <Text color="cyan">{'> '}</Text>
             <Composer
               value={inputValue}
-              cursorOffset={composerCursorOffset}
+              cursorOffset={inputCursorOffset}
               placeholder={pendingApproval ? TUI_TEXT.approvalFreeReplyPlaceholder : TUI_TEXT.inputPlaceholder}
               focus={inputFocused}
               width={Math.max(8, contentWidth - 4)}

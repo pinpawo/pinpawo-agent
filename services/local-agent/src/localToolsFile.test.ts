@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
+import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
+import { createBashToolkit } from './toolkits/local';
 import {
+  applyPatchReviewPolicy,
   applyPatchTool,
   copyPathTool,
   listDirTool,
@@ -13,6 +17,7 @@ import {
   statPathTool,
   validateStructuredFileTool,
   viewFileChunkTool,
+  writeFileReviewPolicy,
   writeFileTool,
 } from './toolkits/local/fileTools';
 import { parsePatch, PatchParseError } from './toolkits/local/applyPatch';
@@ -25,6 +30,17 @@ function createFileFixture(t: TestContext) {
 
 function readJsonOutput(output: unknown) {
   return JSON.parse(String(output)) as Record<string, unknown>;
+}
+
+function runWithTuiInterface<T>(callback: () => T): T {
+  return AsyncLocalStorageProviderSingleton.runWithConfig({
+    configurable: {
+      [LOCAL_AGENT_INTERFACE_CONFIG_KEY]: {
+        kind: 'tui',
+        threadId: 'thread-1',
+      },
+    },
+  }, callback);
 }
 
 test('file tools write, view, and stat text files', async (t) => {
@@ -243,6 +259,72 @@ test('parsePatch parses anchors, moves, and end-of-file markers', () => {
   assert.deepEqual(update.chunks[0]?.oldLines, ['context', 'old']);
   assert.deepEqual(update.chunks[0]?.newLines, ['context', 'new']);
   assert.equal(update.chunks[0]?.isEndOfFile, true);
+});
+
+test('file mutation review policies request approval and honor exact authorization', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'note.txt');
+  writeFileSync(filePath, 'before\n', 'utf-8');
+  const writeInput = { path: filePath, content: 'after\n' };
+
+  const writeReview = await runWithTuiInterface(() =>
+    writeFileReviewPolicy.request({
+      input: writeInput,
+      toolAuthorizations: [],
+    } as never));
+  assert.equal(writeReview?.view.title, 'File write approval');
+  assert.match(writeReview?.view.body ?? '', /覆盖/);
+  assert.match(writeReview?.view.body ?? '', /--- before ---/);
+  assert.match(writeReview?.view.body ?? '', /--- content ---/);
+  assert.equal(
+    writeReview?.options.some((option) => option.id === 'approve-and-authorize-thread'),
+    true,
+  );
+
+  const writeMatcher = await writeFileReviewPolicy.buildAuthorizationMatcher?.({
+    input: writeInput,
+  } as never);
+  const authorizedWriteReview = await runWithTuiInterface(() =>
+    writeFileReviewPolicy.request({
+      input: writeInput,
+      toolAuthorizations: [{
+        toolName: 'write_file',
+        matcher: writeMatcher!,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }],
+    } as never));
+  assert.equal(authorizedWriteReview, null);
+
+  const patch = [
+    '*** Begin Patch',
+    `*** Update File: ${filePath}`,
+    '-before',
+    '+after',
+    '*** End Patch',
+  ].join('\n');
+  const patchReview = await runWithTuiInterface(() =>
+    applyPatchReviewPolicy.request({
+      input: { patch },
+      toolAuthorizations: [],
+    } as never));
+  assert.equal(patchReview?.view.title, 'Patch approval');
+  assert.match(patchReview?.view.body ?? '', /文件数：1/);
+  assert.match(patchReview?.view.body ?? '', /update:/);
+  assert.equal(
+    await runWithTuiInterface(() =>
+      applyPatchReviewPolicy.request({
+        input: { patch: 'not a patch' },
+        toolAuthorizations: [],
+      } as never)),
+    null,
+  );
+});
+
+test('createBashToolkit registers review policies for file mutation tools', () => {
+  const toolkit = createBashToolkit();
+
+  assert.equal(Boolean(toolkit.policy?.toolReview?.write_file), true);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.apply_patch), true);
 });
 
 test('read_file analyzes non-text documents instead of reading text chunks', async (t) => {

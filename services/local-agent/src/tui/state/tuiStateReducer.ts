@@ -293,7 +293,18 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         ...state,
         input: {
           ...state.input,
-          value: action.value,
+          text: action.value,
+          cursorOffset: action.cursorOffset ?? action.value.length,
+        },
+      };
+
+    case 'input.apply':
+      return {
+        ...state,
+        input: {
+          ...state.input,
+          text: action.value.text,
+          cursorOffset: action.value.cursorOffset,
         },
       };
 
@@ -312,7 +323,8 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         },
         input: {
           ...state.input,
-          value: '',
+          text: '',
+          cursorOffset: 0,
         },
         runRoute: {
           ...state.runRoute,
@@ -353,7 +365,8 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         },
         input: {
           ...state.input,
-          value: '',
+          text: '',
+          cursorOffset: 0,
         },
         runRoute: {
           ...state.runRoute,

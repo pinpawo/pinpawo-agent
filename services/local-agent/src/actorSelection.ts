@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import { config } from './config';
 import { gql } from './graphqlClient';
 import { loadStoredConfig, saveStoredConfig } from './storage';
 
@@ -41,6 +42,19 @@ const AVAILABLE_ACTORS_QUERY = `
   }
 `;
 
+export const LOCAL_ONLY_ACTOR_ID = 'local-only';
+export const LOCAL_ONLY_ACTOR_NAME = 'Local Agent';
+
+function localOnlyActor(): AvailableActor {
+  return {
+    actorId: LOCAL_ONLY_ACTOR_ID,
+    name: LOCAL_ONLY_ACTOR_NAME,
+    species: 'local',
+    personality: 'Local-only mode without PinPawo API login.',
+    stage: null,
+  };
+}
+
 function formatActorLabel(actor: AvailableActor) {
   const details = [
     actor.species,
@@ -72,6 +86,9 @@ export function loadSelectedActorName(): string | null {
 }
 
 export async function listAvailableActors(): Promise<AvailableActor[]> {
+  if (!config.apiConnected) {
+    return [localOnlyActor()];
+  }
   const data = await gql<ActorQueryResult>(AVAILABLE_ACTORS_QUERY);
   const seen = new Set<string>();
   const actors: AvailableActor[] = [];
@@ -133,6 +150,9 @@ export async function selectActorInteractively(options?: {
 export async function ensureActorSelected(options?: {
   interactive?: boolean;
 }): Promise<string> {
+  if (!config.apiConnected) {
+    return LOCAL_ONLY_ACTOR_ID;
+  }
   const interactive = options?.interactive ?? false;
   const storedActorId = loadSelectedActorId();
   const actors = await listAvailableActors();

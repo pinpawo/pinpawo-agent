@@ -2,6 +2,7 @@ import { type AgentCapability } from '@pinpawo/pet-agent';
 import { capabilityCreatorInstructions } from './instructions';
 import { capabilityCreatorResultSchema } from './schemas';
 import { createCapabilityCreatorToolset } from './tools';
+import { markLatestToolArtifactAsResult } from '../resultArtifactMarker';
 
 export function createCapabilityCreatorCapability(): AgentCapability {
   return {
@@ -16,6 +17,13 @@ export function createCapabilityCreatorCapability(): AgentCapability {
           budgetTokens: 24_000,
           keepFailures: true,
         },
+      },
+      middleware: {
+        afterRun: (result) => markLatestToolArtifactAsResult(result, {
+          schema: capabilityCreatorResultSchema,
+          schemaName: 'CapabilityCreatorResult',
+          title: 'Capability creator result',
+        }),
       },
       instructions: capabilityCreatorInstructions,
     }),

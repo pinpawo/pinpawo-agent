@@ -60,13 +60,17 @@ export class LocalAgentRuntime {
   private readonly appChatHandler = new LocalAgentAppChatHandler({
     graphService: this.graphService,
     checkpoint: this.chatCheckpointer,
-    deleteThread: (threadId) => this.chatCheckpointer.deleteThread(threadId),
+    deleteThread: async (threadId) => {
+      await this.chatCheckpointer.deleteThread(threadId);
+      await this.capabilityArtifactStore.deleteThreadArtifacts(threadId);
+    },
     inflightRequests: this.inflightRequests,
     isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
     getActorId: () => this.getActorId(),
     getLlmConfig: () => this.llmConfig,
     getPluginToolkits: () => this.pluginToolkits,
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
+    getLocalCapabilityToolkits: () => this.capabilityRegistry.getLocalCapabilityToolkits(),
     getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
     getCapabilityArtifactStore: () => this.capabilityArtifactStore,
@@ -77,6 +81,7 @@ export class LocalAgentRuntime {
     getLlmConfig: () => this.llmConfig,
     getHooks: () => this.hooks,
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
+    getLocalCapabilityToolkits: () => this.capabilityRegistry.getLocalCapabilityToolkits(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
     getCapabilityArtifactStore: () => this.capabilityArtifactStore,
   });
@@ -116,12 +121,20 @@ export class LocalAgentRuntime {
     return this.capabilityRegistry.getLocalToolkits();
   }
 
+  getLocalCapabilityToolkits(): AgentToolkit[] {
+    return this.capabilityRegistry.getLocalCapabilityToolkits();
+  }
+
   getCapabilityArtifactStore(): FileCapabilityArtifactStore {
     return this.capabilityArtifactStore;
   }
 
   getLocalToolkitDefinitions(): AgentToolkit[] {
     return this.capabilityRegistry.getLocalToolkitDefinitions();
+  }
+
+  getLocalCapabilityToolkitDefinitions(): AgentToolkit[] {
+    return this.capabilityRegistry.getLocalCapabilityToolkitDefinitions();
   }
 
   getLocalCapabilities(): AgentCapability[] {

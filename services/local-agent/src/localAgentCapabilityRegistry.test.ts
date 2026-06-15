@@ -126,3 +126,27 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
     'default local capabilities should include explore',
   );
 });
+
+test('LocalAgentCapabilityRegistry keeps artifact toolkit capability-only by default', async () => {
+  const registry = new LocalAgentCapabilityRegistry({
+    loadLocalTools: async () => [],
+    loadUserCapabilities: async () => [],
+    resolveAvailableToolkits: async (toolkits) => toolkits,
+    resolveAvailableCapabilities: async (capabilities) => capabilities,
+    resolveCapabilityAvailability: async (capabilityItem) => ({
+      capability: capabilityItem,
+      availability: { available: true },
+    }),
+  });
+
+  await registry.load();
+
+  assert.deepEqual(
+    registry.getLocalToolkits().map((item) => item.name),
+    ['bash', 'git', 'browser'],
+  );
+  assert.deepEqual(
+    registry.getLocalCapabilityToolkits().map((item) => item.name),
+    ['capability_artifact', 'bash', 'git', 'browser'],
+  );
+});

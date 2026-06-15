@@ -31,9 +31,9 @@ export function createCapabilityArtifactToolkit(store: ArtifactStore): AgentTool
     name: 'capability_artifact',
     description: '读取、列出和写入当前会话线程的 capability artifacts。',
     tools: (ctx) => {
-      const threadId = requireThreadId(ctx.threadId);
       return [
         tool(async (input) => {
+          const threadId = requireThreadId(ctx.threadId);
           const ref = await store.writeArtifact({
             threadId,
             capabilityId: 'toolkit',
@@ -64,6 +64,7 @@ export function createCapabilityArtifactToolkit(store: ArtifactStore): AgentTool
           }),
         }),
         tool(async (input) => {
+          const threadId = requireThreadId(ctx.threadId);
           const refs = store.listArtifacts({
             threadId,
             capabilityId: input.capabilityId,
@@ -81,6 +82,7 @@ export function createCapabilityArtifactToolkit(store: ArtifactStore): AgentTool
           }),
         }),
         tool(async (input) => {
+          const threadId = requireThreadId(ctx.threadId);
           const result = store.readArtifact({
             uri: input.uri,
             maxBytes: input.maxBytes,

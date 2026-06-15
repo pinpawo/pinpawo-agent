@@ -18,6 +18,8 @@ export type LocalServerDeps = {
   workdir: string;
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];
+  localCapabilityToolkitDefinitions?: AgentToolkit[];
+  localCapabilityToolkits?: AgentToolkit[];
   pluginToolkits?: AgentToolkit[];
   localCapabilityDefinitions?: AgentCapability[];
   localCapabilities?: AgentCapability[];

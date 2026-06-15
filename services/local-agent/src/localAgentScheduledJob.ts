@@ -41,6 +41,7 @@ export type LocalAgentScheduledJobOptions = {
   getLlmConfig: () => AgentLlmConfig | null;
   getHooks: () => LocalAgentScheduledHooks | null;
   getLocalToolkits: () => AgentToolkit[];
+  getLocalCapabilityToolkits: () => AgentToolkit[];
   getUserCapabilities: () => LoadedUserCapability[];
   getCapabilityArtifactStore?: () => CapabilityArtifactStore;
   timings?: LocalAgentScheduledJobTimings;
@@ -53,6 +54,7 @@ export class LocalAgentScheduledJob {
   private readonly getLlmConfig: () => AgentLlmConfig | null;
   private readonly getHooks: () => LocalAgentScheduledHooks | null;
   private readonly getLocalToolkits: () => AgentToolkit[];
+  private readonly getLocalCapabilityToolkits: () => AgentToolkit[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
   private readonly getCapabilityArtifactStore?: () => CapabilityArtifactStore;
   private readonly timings: LocalAgentScheduledJobTimings;
@@ -72,6 +74,7 @@ export class LocalAgentScheduledJob {
     this.getLlmConfig = options.getLlmConfig;
     this.getHooks = options.getHooks;
     this.getLocalToolkits = options.getLocalToolkits;
+    this.getLocalCapabilityToolkits = options.getLocalCapabilityToolkits;
     this.getUserCapabilities = options.getUserCapabilities;
     this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
     this.timings = options.timings ?? {
@@ -191,6 +194,7 @@ export class LocalAgentScheduledJob {
       llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
       dryRun: false,
       toolkits: this.getLocalToolkits(),
+      capabilityToolkits: this.getLocalCapabilityToolkits(),
       capabilityArtifactStore: this.getCapabilityArtifactStore?.(),
       userCapabilities: this.getUserCapabilities(),
     });

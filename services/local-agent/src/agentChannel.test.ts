@@ -5,7 +5,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { ToolMessage } from '@langchain/core/messages';
 import { buildLocalChatAgentInput, buildLocalScheduledAgentInput } from './agentChannel';
 import type { AgentContext } from './contextLoader';
-import type { AgentCapability } from '@pinpawo/pet-agent';
+import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
 
 function createContext(): AgentContext {
   return {
@@ -35,6 +35,26 @@ test('buildLocalChatAgentInput omits empty toolkit configurable arrays', () => {
   });
 
   assert.ok(setup.input.toolkits);
+});
+
+test('buildLocalChatAgentInput keeps general and capability toolkits separate', () => {
+  const generalToolkit = { name: 'general-toolkit' } as AgentToolkit;
+  const capabilityToolkit = { name: 'capability_artifact' } as AgentToolkit;
+  const setup = buildLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    toolkits: [generalToolkit],
+    capabilityToolkits: [capabilityToolkit],
+  });
+
+  assert.deepEqual(
+    setup.input.toolkits?.map((item) => item.name),
+    ['pet_profile', 'general-toolkit'],
+  );
+  assert.deepEqual(
+    setup.input.capabilityToolkits?.map((item) => item.name),
+    ['pet_profile', 'capability_artifact'],
+  );
 });
 
 test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
@@ -121,4 +141,21 @@ test('buildLocalScheduledAgentInput omits empty toolkit configurable arrays', ()
   });
 
   assert.ok(setup.input.toolkits);
+});
+
+test('buildLocalScheduledAgentInput keeps general and capability toolkits separate', () => {
+  const setup = buildLocalScheduledAgentInput({
+    context: createContext(),
+    toolkits: [{ name: 'general-toolkit' }] as AgentToolkit[],
+    capabilityToolkits: [{ name: 'capability_artifact' }] as AgentToolkit[],
+  });
+
+  assert.deepEqual(
+    setup.input.toolkits?.map((item) => item.name),
+    ['pet_profile', 'general-toolkit'],
+  );
+  assert.deepEqual(
+    setup.input.capabilityToolkits?.map((item) => item.name),
+    ['pet_profile', 'capability_artifact'],
+  );
 });

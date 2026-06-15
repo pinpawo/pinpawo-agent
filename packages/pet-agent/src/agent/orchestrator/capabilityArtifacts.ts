@@ -1,5 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
+import type { ZodType } from 'zod';
 import type {
   CapabilityArtifactKind,
   CapabilityArtifactMarker,
@@ -123,11 +124,17 @@ export async function collectCapabilityArtifactRefs(params: {
   capabilityId: string;
   delegationId: string;
   turnId: string;
+  resultSchema?: ZodType;
 }): Promise<CapabilityArtifactRef[]> {
   if (!params.store || !params.threadId) return [];
-  const refs: CapabilityArtifactRef[] = [];
+  const inputs: CapabilityArtifactWriteInput[] = [];
   for (const message of params.messages) {
     for (const marker of readCapabilityArtifactMarkers(message)) {
+      if (marker.kind === 'result' && params.resultSchema && marker.content !== undefined) {
+        const parsed = params.resultSchema.safeParse(marker.content);
+        if (!parsed.success) continue;
+        marker.content = parsed.data;
+      }
       const input: CapabilityArtifactWriteInput = {
         threadId: params.threadId,
         capabilityId: params.capabilityId,
@@ -135,8 +142,10 @@ export async function collectCapabilityArtifactRefs(params: {
         turnId: params.turnId,
         marker,
       };
-      refs.push(await params.store.writeArtifact(input));
+      inputs.push(input);
     }
   }
-  return refs;
+  return params.store.writeArtifacts
+    ? params.store.writeArtifacts(inputs)
+    : Promise.all(inputs.map((input) => params.store!.writeArtifact(input)));
 }

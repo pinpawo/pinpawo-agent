@@ -1,15 +1,21 @@
 import {
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { StringDecoder } from 'node:string_decoder';
 import type {
   CapabilityArtifactRef,
   CapabilityArtifactStore,
@@ -47,6 +53,19 @@ function sha256(data: string | Uint8Array) {
   return createHash('sha256').update(data).digest('hex');
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) =>
+      `${JSON.stringify(key)}:${stableJson(record[key])}`,
+    ).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function extensionForMimeType(mimeType: string) {
   if (mimeType === 'application/json') return '.json';
   if (mimeType === 'text/markdown') return '.md';
@@ -65,6 +84,14 @@ function serializeContent(content: unknown, mimeType: string) {
   return mimeType === 'application/json'
     ? JSON.stringify(content, null, 2)
     : String(content);
+}
+
+function isTextReadableMimeType(mimeType: string) {
+  return mimeType.startsWith('text/')
+    || mimeType === 'application/json'
+    || mimeType.endsWith('+json')
+    || mimeType === 'application/xml'
+    || mimeType.endsWith('+xml');
 }
 
 function readManifest(path: string): ArtifactManifest | null {
@@ -89,7 +116,35 @@ function parseArtifactUri(uri: string) {
   };
 }
 
+function resolveSourceFilePath(sourceUri: string) {
+  if (sourceUri.startsWith('file://')) {
+    return fileURLToPath(sourceUri);
+  }
+  if (isAbsolute(sourceUri)) {
+    return sourceUri;
+  }
+  throw new Error('capability artifact sourceUri must be a file:// URI or absolute local path');
+}
+
+function readUtf8Prefix(path: string, maxBytes: number) {
+  const fd = openSync(path, 'r');
+  try {
+    const buffer = Buffer.alloc(maxBytes);
+    const bytesRead = readSync(fd, buffer, 0, maxBytes, 0);
+    const decoder = new StringDecoder('utf8');
+    return decoder.write(buffer.subarray(0, bytesRead));
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readBytes(path: string) {
+  return readFileSync(path);
+}
+
 export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
+  private readonly manifestLocks = new Map<string, Promise<void>>();
+
   constructor(private readonly rootDir = DEFAULT_CAPABILITY_ARTIFACT_ROOT) {}
 
   private threadDir(threadId: string) {
@@ -104,60 +159,142 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
     return join(this.delegationDir(threadId, delegationId), 'manifest.json');
   }
 
-  async writeArtifact(input: CapabilityArtifactWriteInput): Promise<CapabilityArtifactRef> {
-    const now = new Date().toISOString();
-    const id = randomUUID();
-    const dir = this.delegationDir(input.threadId, input.delegationId);
-    const relativePath = input.marker.content !== undefined
-      ? `${id}${extensionForMimeType(input.marker.mimeType)}`
-      : undefined;
-    const content = serializeContent(input.marker.content, input.marker.mimeType);
-    if (relativePath) {
-      atomicWriteFile(join(dir, relativePath), content);
+  private async withManifestLock<T>(manifestPath: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.manifestLocks.get(manifestPath) ?? Promise.resolve();
+    let release!: () => void;
+    const next = new Promise<void>((resolveLock) => {
+      release = resolveLock;
+    });
+    this.manifestLocks.set(manifestPath, previous.then(() => next, () => next));
+    await previous;
+    try {
+      return await run();
+    } finally {
+      release();
+      if (this.manifestLocks.get(manifestPath) === next) {
+        this.manifestLocks.delete(manifestPath);
+      }
     }
-    const uri = `capability-artifact://thread/${encodeURIComponent(input.threadId)}`
-      + `/delegation/${encodeURIComponent(input.delegationId)}`
-      + `/artifact/${encodeURIComponent(id)}`;
-    const ref: StoredArtifactRef = {
-      id,
-      threadId: input.threadId,
+  }
+
+  private readExistingArtifactBytes(uri: string) {
+    const parsed = parseArtifactUri(uri);
+    if (!parsed) {
+      throw new Error('existingUri must be a capability-artifact URI');
+    }
+    const manifest = readManifest(this.manifestPath(parsed.threadId, parsed.delegationId));
+    const stored = manifest?.artifacts.find((item) => item.id === parsed.artifactId);
+    if (!stored?.relativePath) {
+      throw new Error('existing capability artifact has no stored content');
+    }
+    return readBytes(join(this.delegationDir(parsed.threadId, parsed.delegationId), stored.relativePath));
+  }
+
+  private buildStoredArtifact(input: CapabilityArtifactWriteInput, now: string): {
+    ref: StoredArtifactRef;
+    bytes: string | Uint8Array;
+  } {
+    let bytes: string | Uint8Array;
+    if (input.marker.content !== undefined) {
+      bytes = serializeContent(input.marker.content, input.marker.mimeType);
+    } else if (input.marker.sourceUri) {
+      bytes = readBytes(resolveSourceFilePath(input.marker.sourceUri));
+    } else if (input.marker.existingUri) {
+      bytes = this.readExistingArtifactBytes(input.marker.existingUri);
+    } else {
+      throw new Error('capability artifact marker must include content, sourceUri, or existingUri');
+    }
+
+    const contentHash = sha256(bytes);
+    const id = sha256(stableJson({
       capabilityId: input.capabilityId,
       delegationId: input.delegationId,
       turnId: input.turnId,
       kind: input.marker.kind,
       mimeType: input.marker.mimeType,
-      uri,
       title: input.marker.title,
-      preview: input.marker.preview,
-      sizeBytes: relativePath ? Buffer.byteLength(content, 'utf-8') : 0,
-      sha256: relativePath ? sha256(content) : undefined,
-      createdAt: now,
       schema: input.marker.schema,
-      metadata: {
-        ...(input.marker.metadata ?? {}),
-        ...(input.marker.sourceUri ? { sourceUri: input.marker.sourceUri } : {}),
-        ...(input.marker.existingUri ? { existingUri: input.marker.existingUri } : {}),
+      contentHash,
+    }));
+    const relativePath = `${id}${extensionForMimeType(input.marker.mimeType)}`;
+    const uri = `capability-artifact://thread/${encodeURIComponent(input.threadId)}`
+      + `/delegation/${encodeURIComponent(input.delegationId)}`
+      + `/artifact/${encodeURIComponent(id)}`;
+    return {
+      bytes,
+      ref: {
+        id,
+        threadId: input.threadId,
+        capabilityId: input.capabilityId,
+        delegationId: input.delegationId,
+        turnId: input.turnId,
+        kind: input.marker.kind,
+        mimeType: input.marker.mimeType,
+        uri,
+        title: input.marker.title,
+        preview: input.marker.preview,
+        sizeBytes: Buffer.byteLength(bytes),
+        sha256: contentHash,
+        createdAt: now,
+        schema: input.marker.schema,
+        metadata: {
+          ...(input.marker.metadata ?? {}),
+          ...(input.marker.sourceUri ? { sourceUri: input.marker.sourceUri } : {}),
+          ...(input.marker.existingUri ? { existingUri: input.marker.existingUri } : {}),
+        },
+        relativePath,
       },
-      relativePath,
     };
-    const manifestPath = this.manifestPath(input.threadId, input.delegationId);
-    const previous = readManifest(manifestPath);
-    const manifest: ArtifactManifest = previous ?? {
-      version: 1,
-      threadId: input.threadId,
-      delegationId: input.delegationId,
-      turnId: input.turnId,
-      capabilityId: input.capabilityId,
-      createdAt: now,
-      artifacts: [],
-    };
-    manifest.artifacts = [
-      ...manifest.artifacts.filter((item) => item.id !== id),
-      ref,
-    ];
-    atomicWriteFile(manifestPath, JSON.stringify(manifest, null, 2));
-    const { relativePath: _relativePath, ...publicRef } = ref;
-    return publicRef;
+  }
+
+  async writeArtifact(input: CapabilityArtifactWriteInput): Promise<CapabilityArtifactRef> {
+    const [ref] = await this.writeArtifacts([input]);
+    return ref;
+  }
+
+  async writeArtifacts(inputs: CapabilityArtifactWriteInput[]): Promise<CapabilityArtifactRef[]> {
+    const refsByIndex = new Map<number, CapabilityArtifactRef>();
+    const groups = new Map<string, Array<{ input: CapabilityArtifactWriteInput; index: number }>>();
+    for (const [index, input] of inputs.entries()) {
+      const key = `${input.threadId}\n${input.delegationId}`;
+      groups.set(key, [...(groups.get(key) ?? []), { input, index }]);
+    }
+
+    for (const group of groups.values()) {
+      const first = group[0]?.input;
+      if (!first) continue;
+      const manifestPath = this.manifestPath(first.threadId, first.delegationId);
+      await this.withManifestLock(manifestPath, async () => {
+        const now = new Date().toISOString();
+        const dir = this.delegationDir(first.threadId, first.delegationId);
+        const previous = readManifest(manifestPath);
+        const manifest: ArtifactManifest = previous ?? {
+          version: 1,
+          threadId: first.threadId,
+          delegationId: first.delegationId,
+          turnId: first.turnId,
+          capabilityId: first.capabilityId,
+          createdAt: now,
+          artifacts: [],
+        };
+        const nextArtifacts = new Map(manifest.artifacts.map((item) => [item.id, item]));
+        for (const item of group) {
+          const built = this.buildStoredArtifact(item.input, now);
+          atomicWriteFile(join(dir, built.ref.relativePath ?? ''), built.bytes);
+          nextArtifacts.set(built.ref.id, built.ref);
+          const { relativePath: _relativePath, ...publicRef } = built.ref;
+          refsByIndex.set(item.index, publicRef);
+        }
+        manifest.artifacts = [...nextArtifacts.values()];
+        atomicWriteFile(manifestPath, JSON.stringify(manifest, null, 2));
+      });
+    }
+
+    return inputs.map((_input, index) => {
+      const ref = refsByIndex.get(index);
+      if (!ref) throw new Error('failed to write capability artifact');
+      return ref;
+    });
   }
 
   listArtifacts(params: {
@@ -203,17 +340,24 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
       return { ref, content: null };
     }
     const path = join(this.delegationDir(parsed.threadId, parsed.delegationId), relativePath);
+    if (!isTextReadableMimeType(ref.mimeType)) {
+      return { ref, content: null };
+    }
     const size = statSync(path).size;
     const maxBytes = params.maxBytes ?? 64_000;
     if (size > maxBytes) {
       return {
         ref,
-        content: readFileSync(path).subarray(0, maxBytes).toString('utf-8'),
+        content: readUtf8Prefix(path, maxBytes),
       };
     }
     return {
       ref,
       content: readFileSync(path, 'utf-8'),
     };
+  }
+
+  async deleteThreadArtifacts(threadId: string): Promise<void> {
+    rmSync(this.threadDir(threadId), { recursive: true, force: true });
   }
 }

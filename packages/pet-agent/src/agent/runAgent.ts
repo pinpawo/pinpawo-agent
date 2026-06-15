@@ -11,6 +11,7 @@ export type AgentInvokeInput = {
   threadId?: string;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
+  capabilityToolkits?: AgentToolkit[];
   execution?: AgentExecution;
   signal?: AbortSignal;
   /** Agent working directory passed into system prompt so the agent knows its file scope. */
@@ -39,6 +40,9 @@ export async function runAgent(
   if (input.threadId) configurable.thread_id = input.threadId;
   if (input.capabilities) configurable.capabilities = input.capabilities;
   if (input.toolkits && input.toolkits.length > 0) configurable.toolkits = input.toolkits;
+  if (input.capabilityToolkits && input.capabilityToolkits.length > 0) {
+    configurable.capabilityToolkits = input.capabilityToolkits;
+  }
   if (input.execution) configurable.execution = input.execution;
   if (input.workdir) configurable.workdir = input.workdir;
   if (input.runtimeEnvironment) configurable.runtimeEnvironment = input.runtimeEnvironment;

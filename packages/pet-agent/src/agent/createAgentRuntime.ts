@@ -134,6 +134,7 @@ function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOp
     actor: cfg.actor as AgentActor | undefined,
     capabilities: (cfg.capabilities ?? []) as AgentCapability[],
     toolkits: (cfg.toolkits ?? []) as AgentToolkit[],
+    capabilityToolkits: (cfg.capabilityToolkits ?? cfg.toolkits ?? []) as AgentToolkit[],
     execution: cfg.execution as AgentExecution | undefined,
     maxIterations: cfg.maxIterations as number | undefined,
     workdir: cfg.workdir as string | undefined,
@@ -738,9 +739,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   // Node: capability — reads capabilities, tools, execution from configurable
   async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { capabilities, toolkits, execution, onToolEvent, workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
+    const { capabilities, capabilityToolkits, execution, onToolEvent, workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const toolkitList = toolkits ?? [];
+    const toolkitList = capabilityToolkits ?? [];
     validateUniqueToolkitNames(toolkitList);
     const pendingDelegation = state.pendingDelegation;
     if (!pendingDelegation) {
@@ -753,6 +754,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     }
     const lane: MessageLane = `capability:${capability.name}`;
     const scopedMessages = laneMessages(state.messages, lane, state.turnId, pendingDelegation.id);
+    const threadId = readThreadId(runnableConfig);
 
     const availableToolkits = toolkitList.map(({ name, description }) => ({
       name,
@@ -772,7 +774,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       models: config.models,
       actor,
       messages: scopedMessages,
-      threadId: readThreadId(runnableConfig),
+      threadId,
       execution,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
@@ -844,12 +846,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const capabilityArtifacts = await collectCapabilityArtifactRefs({
       messages: laneOutputMessages,
       store: config.capabilityArtifactStore,
-      threadId: readThreadId(runnableConfig),
+      threadId,
       capabilityId: capability.name,
       delegationId: pendingDelegation.id,
       turnId: state.turnId,
+      resultSchema: capability.resultSchema,
     });
-    const threadId = readThreadId(runnableConfig);
     if (
       capabilityResult
       && config.capabilityArtifactStore

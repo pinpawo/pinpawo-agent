@@ -53,5 +53,6 @@ export type CapabilityArtifactWriteInput = {
 
 export type CapabilityArtifactStore = {
   writeArtifact: (input: CapabilityArtifactWriteInput) => Promise<CapabilityArtifactRef>;
+  writeArtifacts?: (inputs: CapabilityArtifactWriteInput[]) => Promise<CapabilityArtifactRef[]>;
+  deleteThreadArtifacts?: (threadId: string) => Promise<void>;
 };
-

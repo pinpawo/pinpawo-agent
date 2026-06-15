@@ -6,6 +6,7 @@ import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from './types
 import { dailyPostInstructions } from './instructions';
 import { dailyPostResultSchema } from './schemas';
 import { createDailyPostToolset } from './tools';
+import { markLatestToolArtifactAsResult } from '../resultArtifactMarker';
 
 export { dailyPostResultSchema } from './schemas';
 export { buildDailyPostTaskMessage } from './task';
@@ -66,6 +67,13 @@ export function createDailyPostCapability(
         markSkipped: options.markSkipped,
         requestImageProcessing: options.requestImageProcessing,
       })],
+      middleware: {
+        afterRun: (result) => markLatestToolArtifactAsResult(result, {
+          schema: dailyPostResultSchema,
+          schemaName: 'DailyPostResult',
+          title: 'Daily post result',
+        }),
+      },
       instructions: options.instructions ?? dailyPostInstructions,
     }),
     resultSchema: dailyPostResultSchema,

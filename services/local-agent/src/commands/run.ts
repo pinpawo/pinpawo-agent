@@ -37,7 +37,6 @@ export async function runAgent() {
     pluginToolkits: runtime.getPluginToolkits(),
     localCapabilityDefinitions: runtime.getLocalCapabilityDefinitions(),
     localCapabilities: runtime.getLocalCapabilities(),
-    capabilityArtifactStore: runtime.getCapabilityArtifactStore(),
     userCapabilityDefinitions: runtime.getUserCapabilityDefinitions(),
     userCapabilities: runtime.getUserCapabilities(),
     rescanUserCapabilities: () => runtime.rescanUserCapabilities(),

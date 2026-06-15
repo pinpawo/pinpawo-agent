@@ -290,7 +290,6 @@ export class LocalServerChatHandler {
         try {
           await this.tuiSessions.resetSession(deps.actorId, {
             deletePrevious: true,
-            capabilityArtifactStore: deps.capabilityArtifactStore,
           });
           console.warn(`[local-server] reset TUI chat session after tool protocol error requestId=${requestId}`);
         } catch (resetError) {

@@ -44,7 +44,6 @@ test('LocalServerTuiSessionService creates and resets active sessions', async ()
   const state = createEmptyTuiSessionState();
   const saved: number[] = [];
   const deletedThreads: string[] = [];
-  const deletedArtifactThreads: string[] = [];
   const checkpointer = {
     deleteThread: async (threadId: string) => {
       deletedThreads.push(threadId);
@@ -62,19 +61,12 @@ test('LocalServerTuiSessionService creates and resets active sessions', async ()
   const second = service.createNewSession('pet-a');
   const third = await service.resetSession('pet-a', {
     deletePrevious: true,
-    capabilityArtifactStore: {
-      writeArtifact: async () => ({} as never),
-      deleteThreadArtifacts: async (threadId) => {
-        deletedArtifactThreads.push(threadId);
-      },
-    },
   });
 
   assert.equal(service.getChatThreadId('pet-a'), third.threadId);
   assert.equal(state.sessions[first.id] !== undefined, true);
   assert.equal(state.sessions[second.id], undefined);
   assert.deepEqual(deletedThreads, [second.threadId]);
-  assert.deepEqual(deletedArtifactThreads, [second.threadId]);
   assert.equal(saved.length >= 4, true);
 });
 

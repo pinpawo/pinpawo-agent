@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import type { CapabilityArtifactStore, ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
@@ -117,15 +117,11 @@ export class LocalServerTuiSessionService {
     return next;
   }
 
-  async resetSession(
-    petId: string,
-    options: { deletePrevious?: boolean; capabilityArtifactStore?: CapabilityArtifactStore } = {},
-  ) {
+  async resetSession(petId: string, options: { deletePrevious?: boolean } = {}) {
     const previous = this.getActiveSession(petId);
     const next = createTuiSession(this.state, petId);
     if (options.deletePrevious) {
       await this.checkpointer.deleteThread(previous.threadId);
-      await options.capabilityArtifactStore?.deleteThreadArtifacts?.(previous.threadId);
       delete this.state.sessions[previous.id];
     }
     this.save();
@@ -147,7 +143,6 @@ export class LocalServerTuiSessionService {
       interfaceKind: 'tui',
       dryRun: false,
       checkpoint: this.checkpointer,
-      capabilityArtifactStore: deps.capabilityArtifactStore,
       userCapabilities: deps.userCapabilities,
     });
   }

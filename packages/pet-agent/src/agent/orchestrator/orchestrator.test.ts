@@ -21,7 +21,6 @@ import {
   collectCapabilityOperations,
   collectGeneralOperations,
   collectToolkitOperations,
-  readLatestToolArtifact,
   resolveToolkitResources,
   selectCapabilityTools,
 } from './subagentHandoff';
@@ -478,18 +477,6 @@ test('limit-reached progress announce lets model choose the same capability dele
   assert.match(decisionInput, /停止原因：limit_reached/);
 });
 
-test('capability result helper reads latest tool artifact, not JSON content', () => {
-  const result = readLatestToolArtifact([
-    new ToolMessage({
-      content: '{"status":"failed","postId":"wrong"}',
-      artifact: { status: 'created', postId: 'post-1' },
-      tool_call_id: 'call-1',
-    }),
-  ]);
-
-  assert.deepEqual(result, { status: 'created', postId: 'post-1' });
-});
-
 test('toolkits compose tools and instructions for capability runtimes', async () => {
   const browserOpen = mockTool('browser_open');
   const readFile = mockTool('read_file');
@@ -828,7 +815,7 @@ test('capability artifact markers are persisted as state refs through host store
   assert.equal(state.capabilityArtifacts[0]?.uri, 'capability-artifact://thread/artifact-thread/artifact/1');
 });
 
-test('schema-validated capability result is also persisted as a JSON result artifact', async () => {
+test('capability result marker is persisted as a JSON result artifact', async () => {
   let routeCallCount = 0;
   const writes: CapabilityArtifactWriteInput[] = [];
   const store: CapabilityArtifactStore = {
@@ -874,10 +861,6 @@ test('schema-validated capability result is also persisted as a JSON result arti
   const fixtureCapability: AgentCapability = {
     name: 'daily_post',
     description: 'Create post.',
-    resultSchema: z.object({
-      status: z.literal('created'),
-      postId: z.string(),
-    }),
     createRuntime: () => ({
       middleware: {
         afterRun: (result) => ({
@@ -930,100 +913,6 @@ test('schema-validated capability result is also persisted as a JSON result arti
   assert.deepEqual(writes[0]?.marker.content, { status: 'created', postId: 'post-1' });
   assert.equal(state.capabilityArtifacts[0]?.kind, 'result');
   assert.equal(state.capabilityArtifacts[0]?.schema?.name, 'daily_post.result');
-});
-
-test('invalid capability result markers are not persisted as artifacts', async () => {
-  let routeCallCount = 0;
-  const writes: CapabilityArtifactWriteInput[] = [];
-  const store: CapabilityArtifactStore = {
-    writeArtifact: async (input) => {
-      writes.push(input);
-      return {
-        id: `artifact-${writes.length}`,
-        threadId: input.threadId,
-        capabilityId: input.capabilityId,
-        delegationId: input.delegationId,
-        turnId: input.turnId,
-        kind: input.marker.kind,
-        mimeType: input.marker.mimeType,
-        uri: `capability-artifact://thread/${input.threadId}/artifact/${writes.length}`,
-        sizeBytes: 0,
-        createdAt: '2026-06-16T00:00:00.000Z',
-      };
-    },
-  };
-  const routeModel = {
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        routeCallCount += 1;
-        return routeCallCount === 1
-          ? {
-              action: 'delegate_capability.daily_post',
-              task: 'create post',
-              context_summary: null,
-            }
-          : {
-              action: 'finish',
-              answer: 'done',
-            };
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const fixtureCapability: AgentCapability = {
-    name: 'daily_post',
-    description: 'Create post.',
-    resultSchema: z.object({
-      status: z.literal('created'),
-      postId: z.string(),
-    }),
-    createRuntime: () => ({
-      middleware: {
-        afterRun: (result) => ({
-          ...result,
-          messages: [
-            ...result.messages,
-            new AIMessage({
-              content: 'invalid post result',
-              additional_kwargs: {
-                pinpawo: {
-                  capabilityArtifacts: [{
-                    kind: 'result',
-                    mimeType: 'application/json',
-                    content: { status: 'failed', postId: null },
-                  }],
-                },
-              },
-            }),
-          ],
-        }),
-      },
-    }),
-  };
-  const graph = createOrchestratorGraph({
-    models: {
-      act: routeModel,
-      observe: routeModel,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    actor: testActor,
-    capabilityArtifactStore: store,
-  });
-
-  const state = await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('post')]), {
-    configurable: {
-      thread_id: 'invalid-result-artifact-thread',
-      actor: testActor,
-      capabilities: [fixtureCapability],
-      forcedCapabilityNames: ['daily_post'],
-    },
-  });
-
-  assert.equal(state.capabilityResult, null);
-  assert.equal(writes.length, 0);
-  assert.equal(state.capabilityArtifacts.length, 0);
 });
 
 test('runAgent omits empty toolkit configurable arrays', async () => {

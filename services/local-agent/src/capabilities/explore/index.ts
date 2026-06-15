@@ -101,6 +101,11 @@ function readLatestExploreSummary(messages: BaseMessage[]): string | null {
 
 function createExploreSummaryMessage(summary: string, status: ExploreResult['status'] = 'completed'): AIMessage {
   const normalized = summary.trim();
+  const result = exploreResultSchema.parse({
+    status,
+    summary: normalized,
+    nextSteps: [],
+  });
   return new AIMessage({
     content: ['Explore summary:', '', normalized].join('\n'),
     additional_kwargs: {
@@ -112,11 +117,7 @@ function createExploreSummaryMessage(summary: string, status: ExploreResult['sta
             mimeType: 'application/json',
             title: 'Explore result',
             preview: clipText(normalized, 500),
-            content: {
-              status,
-              summary: normalized,
-              nextSteps: [],
-            },
+            content: result,
             schema: {
               name: 'ExploreResult',
               version: 1,

@@ -151,7 +151,6 @@ export {
   readStringArray,
   resultStatusSummary,
 } from './utils/operationMetadata';
-export { readLatestToolArtifact } from './agent/orchestrator/subagentHandoff';
 export { runAgent } from './agent/runAgent';
 export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
 export { createSubagent } from './subagent/createSubagent';

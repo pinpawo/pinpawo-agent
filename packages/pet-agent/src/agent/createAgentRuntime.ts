@@ -94,7 +94,6 @@ import {
 } from './orchestrator/subagentHandoff';
 import {
   collectCapabilityArtifactRefs,
-  hasCapabilityResultMarker,
   readCapabilityResultValue,
 } from './orchestrator/capabilityArtifacts';
 import { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
@@ -834,14 +833,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       },
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: pendingDelegation.id });
-    const rawCapabilityResult = capability.resultSchema
-      ? readCapabilityResultValue(laneOutputMessages)
-      : null;
-    const parsedCapabilityResult = rawCapabilityResult && capability.resultSchema
-      ? capability.resultSchema.safeParse(rawCapabilityResult)
-      : null;
-    const capabilityResult = parsedCapabilityResult?.success
-      ? parsedCapabilityResult.data as Record<string, unknown>
+    const rawCapabilityResult = readCapabilityResultValue(laneOutputMessages);
+    const capabilityResult = rawCapabilityResult
+      && typeof rawCapabilityResult === 'object'
+      && !Array.isArray(rawCapabilityResult)
+      ? rawCapabilityResult as Record<string, unknown>
       : null;
     const capabilityArtifacts = await collectCapabilityArtifactRefs({
       messages: laneOutputMessages,
@@ -850,33 +846,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       capabilityId: capability.name,
       delegationId: pendingDelegation.id,
       turnId: state.turnId,
-      resultSchema: capability.resultSchema,
     });
-    if (
-      capabilityResult
-      && config.capabilityArtifactStore
-      && threadId
-      && !hasCapabilityResultMarker(laneOutputMessages)
-    ) {
-      const serializedResult = JSON.stringify(capabilityResult);
-      capabilityArtifacts.push(await config.capabilityArtifactStore.writeArtifact({
-        threadId,
-        capabilityId: capability.name,
-        delegationId: pendingDelegation.id,
-        turnId: state.turnId,
-        marker: {
-          kind: 'result',
-          mimeType: 'application/json',
-          title: `${capability.name} result`,
-          preview: clipForPrompt(serializedResult, 500),
-          content: capabilityResult,
-          schema: {
-            name: `${capability.name}.result`,
-            version: 1,
-          },
-        },
-      }));
-    }
     const updatedTurnDelegations = updateTurnDelegationResult(
       state.turnDelegations,
       pendingDelegation.id,

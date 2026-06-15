@@ -1,6 +1,4 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import { ToolMessage } from '@langchain/core/messages/tool';
-import type { ZodType } from 'zod';
 import type {
   CapabilityArtifactKind,
   CapabilityArtifactMarker,
@@ -79,12 +77,6 @@ export function readCapabilityArtifactMarkers(message: BaseMessage): CapabilityA
   return markers;
 }
 
-export function hasCapabilityResultMarker(messages: BaseMessage[]): boolean {
-  return messages.some((message) =>
-    readCapabilityArtifactMarkers(message).some((marker) => marker.kind === 'result' && marker.content !== undefined),
-  );
-}
-
 export function readCapabilityResultValue(messages: BaseMessage[]): unknown | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const markers = readCapabilityArtifactMarkers(messages[index]);
@@ -95,14 +87,6 @@ export function readCapabilityResultValue(messages: BaseMessage[]): unknown | nu
       }
     }
   }
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (ToolMessage.isInstance(message) && message.artifact !== undefined) {
-      return message.artifact;
-    }
-  }
-
   return null;
 }
 
@@ -124,17 +108,11 @@ export async function collectCapabilityArtifactRefs(params: {
   capabilityId: string;
   delegationId: string;
   turnId: string;
-  resultSchema?: ZodType;
 }): Promise<CapabilityArtifactRef[]> {
   if (!params.store || !params.threadId) return [];
   const inputs: CapabilityArtifactWriteInput[] = [];
   for (const message of params.messages) {
     for (const marker of readCapabilityArtifactMarkers(message)) {
-      if (marker.kind === 'result' && params.resultSchema && marker.content !== undefined) {
-        const parsed = params.resultSchema.safeParse(marker.content);
-        if (!parsed.success) continue;
-        marker.content = parsed.data;
-      }
       const input: CapabilityArtifactWriteInput = {
         threadId: params.threadId,
         capabilityId: params.capabilityId,

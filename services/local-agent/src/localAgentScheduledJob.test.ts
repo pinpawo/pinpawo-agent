@@ -1,8 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { CapabilityArtifactRef, OrchestratorStateType } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { AgentContext } from './contextLoader';
 import { LocalAgentScheduledJob } from './localAgentScheduledJob';
+
+const resultRef: CapabilityArtifactRef = {
+  id: 'result-1',
+  threadId: 'scheduled-thread',
+  capabilityId: 'daily_post',
+  delegationId: 'delegation-1',
+  turnId: 'turn-1',
+  kind: 'result',
+  mimeType: 'application/json',
+  uri: 'capability-artifact://thread/scheduled-thread/delegation/delegation-1/artifact/result-1',
+  sizeBytes: 100,
+  createdAt: '2026-06-02T00:00:00.000Z',
+};
 
 function createContext(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
@@ -34,15 +48,25 @@ function createSetup(): AgentChannelSetup {
   return {
     graphKey: 'scheduled:test',
     graphConfig: {} as AgentChannelSetup['graphConfig'],
-    input: {} as AgentChannelSetup['input'],
+    input: {
+      threadId: 'scheduled-thread',
+    } as AgentChannelSetup['input'],
   };
+}
+
+function createState(overrides: Partial<OrchestratorStateType> = {}): OrchestratorStateType {
+  return {
+    capabilityArtifacts: [resultRef],
+    ...overrides,
+  } as OrchestratorStateType;
 }
 
 function createJob(overrides: {
   now?: () => number;
   getNextTickAt?: () => Promise<Date | null>;
   loadContext?: (actorId: string) => Promise<AgentContext>;
-  invokeStructuredResult?: () => Promise<{ result: unknown }>;
+  invokeState?: () => Promise<OrchestratorStateType>;
+  readCapabilityArtifact?: ConstructorParameters<typeof LocalAgentScheduledJob>[0]['readCapabilityArtifact'];
   buildInputs?: Array<Record<string, unknown>>;
   hooksLog?: string[];
   heartbeatLog?: string[];
@@ -53,15 +77,7 @@ function createJob(overrides: {
   const loadContext = overrides.loadContext ?? (async () => createContext());
   const job = new LocalAgentScheduledJob({
     graphService: ({
-      invokeStructuredResult: overrides.invokeStructuredResult ?? (async () => ({
-        result: {
-          status: 'created',
-          postId: 'post-1',
-          reason: null,
-          payload: { content: 'post' },
-          imageRequested: false,
-        },
-      })),
+      invokeState: overrides.invokeState ?? (async () => createState()),
     } as unknown) as ConstructorParameters<typeof LocalAgentScheduledJob>[0]['graphService'],
     getActorId: () => 'pet-a',
     getLlmConfig: () => ({
@@ -83,6 +99,16 @@ function createJob(overrides: {
       meta: { id: 'user-cap' },
       capability: { name: 'user-capability' },
     }] as ConstructorParameters<typeof LocalAgentScheduledJob>[0]['getUserCapabilities'] extends () => infer T ? T : never,
+    readCapabilityArtifact: overrides.readCapabilityArtifact ?? (() => ({
+      ref: resultRef,
+      content: JSON.stringify({
+        status: 'created',
+        postId: 'post-1',
+        reason: null,
+        payload: { content: 'post' },
+        imageRequested: false,
+      }),
+    })),
     timings: {
       heartbeatIntervalSeconds: 1,
       postIntervalHours: 1,
@@ -159,6 +185,7 @@ test('LocalAgentScheduledJob runs scheduled post and records successful stats', 
   assert.equal(buildInputs.length, 1);
   assert.equal(buildInputs[0]?.dryRun, false);
   assert.equal((buildInputs[0]?.toolkits as Array<{ name?: string }> | undefined)?.[0]?.name, 'toolkit-a');
+  assert.equal('capabilityArtifactStore' in (buildInputs[0] ?? {}), false);
 
   const stats = job.getStats();
   assert.equal(stats.totalRuns, 1);
@@ -170,7 +197,7 @@ test('LocalAgentScheduledJob runs scheduled post and records successful stats', 
 
 test('LocalAgentScheduledJob treats 429 as successful backoff', async () => {
   const { job } = createJob({
-    invokeStructuredResult: async () => {
+    invokeState: async () => {
       throw { status: 429 };
     },
   });

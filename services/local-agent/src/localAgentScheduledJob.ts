@@ -1,4 +1,9 @@
-import { type AgentToolkit, type CapabilityArtifactStore } from '@pinpawo/pet-agent';
+import {
+  type AgentToolkit,
+  type CapabilityArtifactRef,
+  type OrchestratorStateType,
+} from '@pinpawo/pet-agent';
+import type { ZodType } from 'zod';
 import {
   dailyPostResultSchema,
   type DailyPostPayload,
@@ -35,6 +40,12 @@ type LocalAgentScheduledJobDeps = {
   buildScheduledInput: typeof buildLocalScheduledAgentInput;
 };
 
+type ReadCapabilityArtifact = (params: {
+  uri: string;
+  maxBytes?: number;
+  threadId?: string;
+}) => { ref: CapabilityArtifactRef; content: string | null };
+
 export type LocalAgentScheduledJobOptions = {
   graphService: LocalAgentGraphService;
   getActorId: () => string;
@@ -42,10 +53,41 @@ export type LocalAgentScheduledJobOptions = {
   getHooks: () => LocalAgentScheduledHooks | null;
   getLocalToolkits: () => AgentToolkit[];
   getUserCapabilities: () => LoadedUserCapability[];
-  getCapabilityArtifactStore?: () => CapabilityArtifactStore;
+  readCapabilityArtifact?: ReadCapabilityArtifact;
   timings?: LocalAgentScheduledJobTimings;
   deps?: Partial<LocalAgentScheduledJobDeps>;
 };
+
+function parseArtifactContent(content: string | null): unknown {
+  if (content === null) return null;
+  try {
+    return JSON.parse(content) as unknown;
+  } catch {
+    return content;
+  }
+}
+
+function readLatestStructuredCapabilityResult<T extends Record<string, unknown>>(params: {
+  state: OrchestratorStateType;
+  schema: ZodType<T>;
+  readArtifact?: ReadCapabilityArtifact;
+  threadId?: string;
+}): T | null {
+  const latestResultRef = [...params.state.capabilityArtifacts]
+    .reverse()
+    .find((artifact) => artifact.kind === 'result');
+  if (!latestResultRef || !params.readArtifact) {
+    return null;
+  }
+  const artifactContent = params.readArtifact({
+    uri: latestResultRef.uri,
+    threadId: params.threadId,
+  }).content;
+  const parsed = artifactContent !== null
+    ? params.schema.safeParse(parseArtifactContent(artifactContent))
+    : null;
+  return parsed?.success ? parsed.data : null;
+}
 
 export class LocalAgentScheduledJob {
   private readonly graphService: LocalAgentGraphService;
@@ -54,7 +96,7 @@ export class LocalAgentScheduledJob {
   private readonly getHooks: () => LocalAgentScheduledHooks | null;
   private readonly getLocalToolkits: () => AgentToolkit[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
-  private readonly getCapabilityArtifactStore?: () => CapabilityArtifactStore;
+  private readonly readCapabilityArtifact?: ReadCapabilityArtifact;
   private readonly timings: LocalAgentScheduledJobTimings;
   private readonly deps: LocalAgentScheduledJobDeps;
   private readonly startedAt = new Date().toISOString();
@@ -73,7 +115,7 @@ export class LocalAgentScheduledJob {
     this.getHooks = options.getHooks;
     this.getLocalToolkits = options.getLocalToolkits;
     this.getUserCapabilities = options.getUserCapabilities;
-    this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
+    this.readCapabilityArtifact = options.readCapabilityArtifact;
     this.timings = options.timings ?? {
       heartbeatIntervalSeconds: config.heartbeatIntervalSeconds,
       postIntervalHours: config.postIntervalHours,
@@ -156,10 +198,13 @@ export class LocalAgentScheduledJob {
     this.lastRunAt = new Date().toISOString();
     try {
       const setup = this.buildSetup(ctx);
-      const { result } = await this.graphService.invokeStructuredResult(
-        setup,
-        dailyPostResultSchema,
-      );
+      const state = await this.graphService.invokeState(setup);
+      const result = readLatestStructuredCapabilityResult({
+        state,
+        schema: dailyPostResultSchema,
+        readArtifact: this.readCapabilityArtifact,
+        threadId: setup.input.threadId,
+      });
       const dailyPostResult: DailyPostResult = result
         ? result as DailyPostResult
         : { status: 'skipped', postId: null, reason: 'no-post', payload: null, imageRequested: false };
@@ -191,7 +236,6 @@ export class LocalAgentScheduledJob {
       llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
       dryRun: false,
       toolkits: this.getLocalToolkits(),
-      capabilityArtifactStore: this.getCapabilityArtifactStore?.(),
       userCapabilities: this.getUserCapabilities(),
     });
   }

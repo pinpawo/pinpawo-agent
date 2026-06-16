@@ -13,7 +13,7 @@ Artifacts are created inside the subagent loop:
 ```text
 subagent tool call
   -> capability_artifact_write
-  -> host CapabilityArtifactStore.writeArtifact(...)
+  -> toolkit-closed CapabilityArtifactStore.writeArtifact(...)
   -> CapabilityArtifactRef
   -> SubagentResult.artifacts
   -> state.capabilityArtifacts
@@ -22,6 +22,17 @@ subagent tool call
 The orchestrator only consumes `CapabilityArtifactRef[]`. It does not parse
 capability-specific messages, inspect private tool artifacts, or scan message
 metadata for artifact registration.
+
+`CapabilityArtifactStore` is not an orchestrator config dependency. Artifact
+tools capture the store through their toolkit factory closure, for example
+`createCapabilityArtifactToolkit(store)`. Producer tools can follow the same
+shape: generate the output, write it through the closed-over store, return a
+short ref to the model, and push the ref into the subagent artifact sink.
+
+This removes untyped markers and message metadata registration. It does not
+remove the ref collection mechanism: tools still call the sink, the subagent
+returns `SubagentResult.artifacts`, and the orchestrator merges those refs into
+state.
 
 ## Contracts
 
@@ -44,6 +55,24 @@ Artifact writes support two source forms:
 
 `sourceUri` and `existingUri` are intentionally removed. Local file paths are not
 accepted as artifact sources.
+
+## Media Producers
+
+Image and video generation tools should be self-contained producer tools.
+
+- OpenAI-compatible image generation should normalize outputs to in-memory
+  bytes before writing an artifact. `gpt-image-1` returns `b64_json`; DALL-E or
+  compatible gateways should request `response_format: "b64_json"` when
+  available. If a gateway only returns a temporary URL, download it immediately
+  and write the resulting bytes as `content`.
+- Backend-owned asynchronous media, such as daily post image processing that
+  returns a CDN/object-storage URL, should write `externalUri` and should not
+  copy bytes into the local store.
+- Tools return refs, not base64 payloads, so large binary data does not enter
+  the model context.
+- `requireThreadId` checks must run inside each tool callback, not in the
+  `tools(ctx)` factory body. Toolkit construction must not throw before the
+  subagent decides whether it will use the tool.
 
 ## Schema Validation
 

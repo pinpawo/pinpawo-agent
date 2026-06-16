@@ -27,7 +27,7 @@ import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 import { LocalAgentScheduledJob } from './localAgentScheduledJob';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
-import { defaultCapabilityArtifactRoot, FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { defaultCapabilityArtifactRoot } from './capabilityArtifactStore';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
@@ -40,11 +40,8 @@ export class LocalAgentRuntime {
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginToolkits: AgentToolkit[] = [];
-  private readonly capabilityArtifactStore = new FileCapabilityArtifactStore(
-    defaultCapabilityArtifactRoot(config.workdir),
-  );
   private readonly capabilityRegistry = new LocalAgentCapabilityRegistry({
-    capabilityArtifactStore: this.capabilityArtifactStore,
+    capabilityArtifactRoot: defaultCapabilityArtifactRoot(config.workdir),
   });
   private readonly chatCheckpointer = new FileSaver(
     resolve(homedir(), '.pinpawo', 'checkpoints.json'),
@@ -64,7 +61,7 @@ export class LocalAgentRuntime {
     checkpoint: this.chatCheckpointer,
     deleteThread: async (threadId) => {
       await this.chatCheckpointer.deleteThread(threadId);
-      await this.capabilityArtifactStore.deleteThreadArtifacts(threadId);
+      await this.capabilityRegistry.deleteThreadArtifacts(threadId);
     },
     inflightRequests: this.inflightRequests,
     isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
@@ -74,7 +71,6 @@ export class LocalAgentRuntime {
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
     getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
-    getCapabilityArtifactStore: () => this.capabilityArtifactStore,
   });
   private readonly scheduledJob = new LocalAgentScheduledJob({
     graphService: this.graphService,
@@ -83,7 +79,7 @@ export class LocalAgentRuntime {
     getHooks: () => this.hooks,
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
-    getCapabilityArtifactStore: () => this.capabilityArtifactStore,
+    readCapabilityArtifact: (params) => this.capabilityRegistry.readCapabilityArtifact(params),
   });
 
   async init() {
@@ -119,10 +115,6 @@ export class LocalAgentRuntime {
 
   getLocalToolkits(): AgentToolkit[] {
     return this.capabilityRegistry.getLocalToolkits();
-  }
-
-  getCapabilityArtifactStore(): FileCapabilityArtifactStore {
-    return this.capabilityArtifactStore;
   }
 
   getLocalToolkitDefinitions(): AgentToolkit[] {

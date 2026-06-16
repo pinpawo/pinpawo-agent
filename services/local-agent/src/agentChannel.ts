@@ -1,6 +1,5 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import {
   type AgentCapability,
   type AgentActor,
@@ -196,7 +195,6 @@ export function buildLocalChatAgentInput(params: {
   dryRun?: boolean;
   logger?: CrawlerLogFn;
   checkpoint?: BaseCheckpointSaver;
-  capabilityArtifactStore?: CapabilityArtifactStore;
   /** Host-provided capabilities implemented by local-agent services */
   extraCapabilities?: AgentCapability[];
   /** User-defined capability plugins loaded by capabilityLoader */
@@ -261,7 +259,6 @@ export function buildLocalChatAgentInput(params: {
       models: buildLocalAgentModels(llmConfig),
       actor,
       checkpoint: params.checkpoint,
-      capabilityArtifactStore: params.capabilityArtifactStore,
       decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
     },
@@ -291,7 +288,6 @@ export function buildLocalScheduledAgentInput(params: {
   llmConfig?: AgentLlmConfig;
   dryRun?: boolean;
   toolkits?: AgentToolkit[];
-  capabilityArtifactStore?: CapabilityArtifactStore;
   dailyPost?: Partial<
     Pick<
       DailyPostCapabilityOptions,
@@ -359,7 +355,6 @@ export function buildLocalScheduledAgentInput(params: {
     graphConfig: {
       models: buildLocalAgentModels(llmConfig),
       actor,
-      capabilityArtifactStore: params.capabilityArtifactStore,
       decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
     },

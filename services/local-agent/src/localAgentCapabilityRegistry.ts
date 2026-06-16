@@ -28,7 +28,7 @@ type LocalAgentCapabilityRegistryDeps = {
 };
 
 type LocalAgentCapabilityRegistryOptions = Partial<LocalAgentCapabilityRegistryDeps> & {
-  capabilityArtifactStore?: FileCapabilityArtifactStore;
+  capabilityArtifactRoot?: string;
 };
 
 const defaultDeps: LocalAgentCapabilityRegistryDeps = {
@@ -76,12 +76,12 @@ export class LocalAgentCapabilityRegistry {
   private readonly capabilityArtifactStore: FileCapabilityArtifactStore;
 
   constructor(options: LocalAgentCapabilityRegistryOptions = {}) {
-    const { capabilityArtifactStore, ...deps } = options;
+    const { capabilityArtifactRoot, ...deps } = options;
     this.deps = {
       ...defaultDeps,
       ...deps,
     };
-    this.capabilityArtifactStore = capabilityArtifactStore ?? new FileCapabilityArtifactStore();
+    this.capabilityArtifactStore = new FileCapabilityArtifactStore(capabilityArtifactRoot);
   }
 
   async load() {
@@ -112,8 +112,12 @@ export class LocalAgentCapabilityRegistry {
     return this.localToolkitDefinitions;
   }
 
-  getCapabilityArtifactStore(): FileCapabilityArtifactStore {
-    return this.capabilityArtifactStore;
+  readCapabilityArtifact(params: Parameters<FileCapabilityArtifactStore['readArtifact']>[0]) {
+    return this.capabilityArtifactStore.readArtifact(params);
+  }
+
+  async deleteThreadArtifacts(threadId: string) {
+    await this.capabilityArtifactStore.deleteThreadArtifacts(threadId);
   }
 
   getLocalCapabilities(): AgentCapability[] {

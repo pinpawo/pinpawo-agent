@@ -174,7 +174,7 @@ test('live chat smoke: route to daily_post and persist a post result', { timeout
     }),
   ];
   const artifactStore = new FileCapabilityArtifactStore(await mkdtemp(resolve(tmpdir(), 'pinpawo-live-artifacts-')));
-  const graph = createOrchestratorGraph({ models, capabilityArtifactStore: artifactStore });
+  const graph = createOrchestratorGraph({ models });
   const state = await graph.invoke(
     {
       messages: [

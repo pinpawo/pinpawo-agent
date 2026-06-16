@@ -4,7 +4,6 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
-import type { CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
 import type { AgentToolkit } from '../../types/toolkit';
 import type { OrchestrationDecision } from './schemas';
@@ -68,7 +67,6 @@ export type OrchestratorConfig = {
   models: AgentModels;
   actor?: AgentActor;
   checkpoint?: BaseCheckpointSaver;
-  capabilityArtifactStore?: CapabilityArtifactStore;
   decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
 };

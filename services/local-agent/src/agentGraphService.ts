@@ -10,18 +10,8 @@ import {
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
-import type { ZodType } from 'zod';
 import type { AgentChannelSetup } from './agentChannel';
 import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
-
-function parseArtifactContent(content: string | null): unknown {
-  if (content === null) return null;
-  try {
-    return JSON.parse(content) as unknown;
-  } catch {
-    return content;
-  }
-}
 
 function buildConfigurable(setup: AgentChannelSetup) {
   const configurable: Record<string, unknown> = {};
@@ -178,29 +168,5 @@ export class LocalAgentGraphService {
     return new Command({
       resume,
     });
-  }
-
-  async invokeStructuredResult<T extends Record<string, unknown>>(
-    setup: AgentChannelSetup,
-    schema: ZodType<T>,
-  ): Promise<{ state: OrchestratorStateType; result: T | null }> {
-    const state = await this.invokeState(setup);
-    const latestResultRef = [...state.capabilityArtifacts]
-      .reverse()
-      .find((artifact) => artifact.kind === 'result');
-    const artifactContent = latestResultRef && setup.graphConfig.capabilityArtifactStore?.readArtifact
-      ? setup.graphConfig.capabilityArtifactStore.readArtifact({
-          uri: latestResultRef.uri,
-          threadId: setup.input.threadId,
-        }).content
-      : null;
-    const parsed = artifactContent !== null
-      ? schema.safeParse(parseArtifactContent(artifactContent))
-      : null;
-
-    return {
-      state,
-      result: parsed?.success ? parsed.data : null,
-    };
   }
 }

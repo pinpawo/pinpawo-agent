@@ -186,7 +186,7 @@ test('LocalAgentScheduledJob runs scheduled post and records successful stats', 
   assert.equal(buildInputs.length, 1);
   assert.equal(buildInputs[0]?.dryRun, false);
   assert.equal((buildInputs[0]?.toolkits as Array<{ name?: string }> | undefined)?.[0]?.name, 'toolkit-a');
-  assert.equal('capabilityArtifactStore' in (buildInputs[0] ?? {}), false);
+  assert.equal('capabilityArtifactStore' in (buildInputs[0] ?? {}), true);
 
   const stats = job.getStats();
   assert.equal(stats.totalRuns, 1);

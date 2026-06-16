@@ -9,6 +9,7 @@ import {
   runShellTool,
   truncateShellOutput,
 } from './toolkits/local/shellTools';
+import { createBashToolkit } from './toolkits/local';
 
 test('shell policy blocks output redirection write commands', () => {
   assert.equal(hasBlockedOutputRedirection('echo ok > out.txt'), true);
@@ -28,6 +29,27 @@ test('shell policy marks risky commands for review', () => {
     /git/,
   );
   assert.equal(getShellConfirmationRisk('printf ok'), null);
+});
+
+test('shell review policy reviews configured command execution', async () => {
+  const toolkit = createBashToolkit();
+  const policy = toolkit.policy?.toolReview?.run_shell;
+  assert.ok(policy);
+
+  const review = await policy.request({
+    models: {} as never,
+    actor: {} as never,
+    messages: [],
+    toolkitName: 'bash',
+    toolName: 'run_shell',
+    input: { command: 'pwd' },
+    operation: toolkit.operations?.run_shell,
+    reviewCapabilities: {
+      humanReview: true,
+      sessionAuthorization: true,
+    },
+  });
+  assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '执行命令');
 });
 
 test('normalizeShellActionInput trims commands and expands home cwd', () => {

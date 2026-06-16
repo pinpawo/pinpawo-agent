@@ -179,6 +179,7 @@ test('createGitToolkit exposes git operation metadata with the toolkit definitio
 
   assert.equal(toolkit.operations?.git_status?.title, '查看 git 状态');
   assert.equal(toolkit.operations?.git_commit?.title, '创建 git commit');
+  assert.equal(Boolean(toolkit.policy?.toolReview?.git_add), true);
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_commit), true);
 });
 
@@ -188,6 +189,14 @@ test('createBrowserToolkit exposes browser operation metadata', () => {
   assert.equal(toolkit.operations?.browser_open?.title, '打开网页');
   assert.equal(toolkit.operations?.browser_click?.title, '点击页面');
   assert.equal(toolkit.operations?.browser_type?.title, '输入文本');
+  assert.equal(Boolean(toolkit.policy?.toolReview?.browser_open), true);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.browser_open_with_session), true);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.browser_open_with_profile), true);
+  assert.equal(toolkit.policy?.toolReview?.browser_click, undefined);
+  assert.equal(toolkit.policy?.toolReview?.browser_type, undefined);
+  assert.equal(toolkit.policy?.toolReview?.browser_snapshot, undefined);
+  assert.equal(toolkit.policy?.toolReview?.browser_extract, undefined);
+  assert.equal(toolkit.policy?.toolReview?.browser_wait, undefined);
 });
 
 test('browser operation metadata summarizes page output', () => {

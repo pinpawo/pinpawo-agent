@@ -2,10 +2,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { tool } from '@langchain/core/tools';
 import {
-  buildReviewSpec,
   type NamedStructuredTool,
   type ToolOperationMetadataMapFor,
-  type ToolkitToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { config } from '../../config';
@@ -216,68 +214,6 @@ export const gitCommitTool = tool(
   },
 );
 
-function normalizeGitCommitInput(input: unknown) {
-  const record = readRecord(input);
-  const message = readString(record, 'message')?.trim();
-  if (!message) {
-    throw new Error('git_commit requires a non-empty message');
-  }
-  const cwd = readString(record, 'cwd');
-  return {
-    message,
-    ...(cwd ? { cwd: resolveUserPath(cwd) } : {}),
-  };
-}
-
-function buildGitCommitReviewSpec(gitAction: { cwd?: string; message: string }) {
-  return buildReviewSpec({
-    view: {
-      kind: 'plain',
-      title: 'Git commit approval',
-      body: `即将创建本地 git commit。\n目录：${gitAction.cwd ?? config.workdir}\nmessage：${gitAction.message}`,
-    },
-    options: [
-      {
-        id: 'approve',
-        label: 'Approve',
-        variant: 'primary',
-        decision: { type: 'approve' },
-      },
-      {
-        id: 'reject',
-        label: 'Reject',
-        variant: 'danger',
-        decision: { type: 'reject' },
-      },
-      {
-        id: 'respond',
-        label: 'Respond',
-        input: {
-          kind: 'text',
-          key: 'message',
-          required: true,
-          multiline: true,
-          placeholder: 'Tell the agent what to do instead',
-        },
-        decision: { type: 'respond', messageInputKey: 'message' },
-      },
-    ],
-  });
-}
-
-export const gitCommitReviewPolicy: ToolkitToolReviewPolicy = {
-  request: ({ input }) => {
-    let gitAction: { cwd?: string; message: string };
-    try {
-      gitAction = normalizeGitCommitInput(input);
-    } catch {
-      return null;
-    }
-
-    return buildGitCommitReviewSpec(gitAction);
-  },
-};
-
 export const gitTools = [
   gitStatusTool as NamedStructuredTool<'git_status'>,
   gitDiffTool as NamedStructuredTool<'git_diff'>,
@@ -325,7 +261,15 @@ export const gitOperationMetadata = {
   },
   git_add: {
     title: '暂存 git 文件',
-    summarizeInput: (input) => ({ target: readString(readRecord(input), 'cwd') }),
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'cwd'),
+        summary: normalizePathspecs(Array.isArray(record?.pathspecs)
+          ? record.pathspecs.filter((item): item is string => typeof item === 'string')
+          : undefined).join(' '),
+      };
+    },
   },
   git_commit: {
     title: '创建 git commit',

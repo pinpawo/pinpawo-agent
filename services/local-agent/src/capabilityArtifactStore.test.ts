@@ -39,11 +39,11 @@ test('FileCapabilityArtifactStore writes, lists, and reads text artifacts', asyn
   assert.equal(ref.kind, 'report');
   assert.match(ref.uri, /^capability-artifact:\/\/thread\/thread-1\/delegation\/delegation-1\/artifact\//);
 
-  const listed = store.listArtifacts({ threadId: 'thread-1', kind: 'report' });
+  const listed = await store.listArtifacts({ threadId: 'thread-1', kind: 'report' });
   assert.equal(listed.length, 1);
   assert.equal(listed[0]?.id, ref.id);
 
-  const read = store.readArtifact({ uri: ref.uri });
+  const read = await store.readArtifact({ uri: ref.uri });
   assert.equal(read.ref.id, ref.id);
   assert.equal(read.content, '# Explore report\n\nconfirmed facts');
 });
@@ -67,7 +67,7 @@ test('FileCapabilityArtifactStore is idempotent for retried writes', async () =>
   const second = await store.writeArtifact(input);
 
   assert.equal(second.id, first.id);
-  assert.equal(store.listArtifacts({ threadId: 'thread-1' }).length, 1);
+  assert.equal((await store.listArtifacts({ threadId: 'thread-1' })).length, 1);
 });
 
 test('FileCapabilityArtifactStore writes inline binary content and does not expose it as text', async () => {
@@ -89,9 +89,10 @@ test('FileCapabilityArtifactStore writes inline binary content and does not expo
 
   assert.equal(ref.sizeBytes, 4);
   assert.ok(ref.sha256);
-  const read = store.readArtifact({ uri: ref.uri });
+  const read = await store.readArtifact({ uri: ref.uri });
   assert.equal(read.ref.id, ref.id);
   assert.equal(read.content, null);
+  assert.match(await store.getDownloadUri(ref.uri), /^file:\/\//);
 });
 
 test('FileCapabilityArtifactStore stores externalUri refs without copying bytes', async () => {
@@ -114,9 +115,10 @@ test('FileCapabilityArtifactStore stores externalUri refs without copying bytes'
   assert.equal(ref.sizeBytes, 0);
   assert.equal(ref.sha256, undefined);
   assert.equal(ref.externalUri, 'https://cdn.example.com/generated.png');
-  const read = store.readArtifact({ uri: ref.uri });
+  const read = await store.readArtifact({ uri: ref.uri });
   assert.equal(read.ref.externalUri, 'https://cdn.example.com/generated.png');
   assert.equal(read.content, null);
+  assert.equal(await store.getDownloadUri(ref.uri), 'https://cdn.example.com/generated.png');
 });
 
 test('FileCapabilityArtifactStore reads text maxBytes without splitting UTF-8 characters', async () => {
@@ -134,7 +136,7 @@ test('FileCapabilityArtifactStore reads text maxBytes without splitting UTF-8 ch
     },
   });
 
-  const read = store.readArtifact({ uri: ref.uri, maxBytes: 5 });
+  const read = await store.readArtifact({ uri: ref.uri, maxBytes: 5 });
 
   assert.equal(read.content, '你');
   assert.equal(read.content?.includes('\uFFFD'), false);
@@ -155,10 +157,10 @@ test('FileCapabilityArtifactStore deletes all artifacts for a thread', async () 
     },
   });
 
-  assert.equal(store.listArtifacts({ threadId: 'thread-1' }).length, 1);
+  assert.equal((await store.listArtifacts({ threadId: 'thread-1' })).length, 1);
   await store.deleteThreadArtifacts('thread-1');
 
-  assert.equal(store.listArtifacts({ threadId: 'thread-1' }).length, 0);
+  assert.equal((await store.listArtifacts({ threadId: 'thread-1' })).length, 0);
   assert.equal(existsSync(join(root, 'threads', 'thread-1')), false);
 });
 

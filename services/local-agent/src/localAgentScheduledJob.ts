@@ -44,7 +44,7 @@ type ReadCapabilityArtifact = (params: {
   uri: string;
   maxBytes?: number;
   threadId?: string;
-}) => { ref: CapabilityArtifactRef; content: string | null };
+}) => Promise<{ ref: CapabilityArtifactRef; content: string | null }>;
 
 export type LocalAgentScheduledJobOptions = {
   graphService: LocalAgentGraphService;
@@ -53,7 +53,7 @@ export type LocalAgentScheduledJobOptions = {
   getHooks: () => LocalAgentScheduledHooks | null;
   getLocalToolkits: () => AgentToolkit[];
   getUserCapabilities: () => LoadedUserCapability[];
-  readCapabilityArtifact?: ReadCapabilityArtifact;
+  readCapabilityArtifact: ReadCapabilityArtifact;
   timings?: LocalAgentScheduledJobTimings;
   deps?: Partial<LocalAgentScheduledJobDeps>;
 };
@@ -67,22 +67,22 @@ function parseArtifactContent(content: string | null): unknown {
   }
 }
 
-function readLatestStructuredCapabilityResult<T extends Record<string, unknown>>(params: {
+async function readLatestStructuredCapabilityResult<T extends Record<string, unknown>>(params: {
   state: OrchestratorStateType;
   schema: ZodType<T>;
-  readArtifact?: ReadCapabilityArtifact;
+  readArtifact: ReadCapabilityArtifact;
   threadId?: string;
-}): T | null {
+}): Promise<T | null> {
   const latestResultRef = [...params.state.capabilityArtifacts]
     .reverse()
     .find((artifact) => artifact.kind === 'result');
-  if (!latestResultRef || !params.readArtifact) {
+  if (!latestResultRef) {
     return null;
   }
-  const artifactContent = params.readArtifact({
+  const artifactContent = (await params.readArtifact({
     uri: latestResultRef.uri,
     threadId: params.threadId,
-  }).content;
+  })).content;
   const parsed = artifactContent !== null
     ? params.schema.safeParse(parseArtifactContent(artifactContent))
     : null;
@@ -96,7 +96,7 @@ export class LocalAgentScheduledJob {
   private readonly getHooks: () => LocalAgentScheduledHooks | null;
   private readonly getLocalToolkits: () => AgentToolkit[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
-  private readonly readCapabilityArtifact?: ReadCapabilityArtifact;
+  private readonly readCapabilityArtifact: ReadCapabilityArtifact;
   private readonly timings: LocalAgentScheduledJobTimings;
   private readonly deps: LocalAgentScheduledJobDeps;
   private readonly startedAt = new Date().toISOString();
@@ -199,7 +199,7 @@ export class LocalAgentScheduledJob {
     try {
       const setup = this.buildSetup(ctx);
       const state = await this.graphService.invokeState(setup);
-      const result = readLatestStructuredCapabilityResult({
+      const result = await readLatestStructuredCapabilityResult({
         state,
         schema: dailyPostResultSchema,
         readArtifact: this.readCapabilityArtifact,

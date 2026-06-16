@@ -2,9 +2,9 @@ import { tool } from '@langchain/core/tools';
 import {
   type AgentToolkit,
   type CapabilityArtifactKind,
+  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
-import { FileCapabilityArtifactStore } from '../../capabilityArtifactStore';
 
 const artifactKindSchema = z.enum([
   'result',
@@ -17,8 +17,6 @@ const artifactKindSchema = z.enum([
   'bundle',
 ]);
 
-type ArtifactStore = Pick<FileCapabilityArtifactStore, 'writeArtifact' | 'listArtifacts' | 'readArtifact'>;
-
 function requireThreadId(threadId: string | null | undefined) {
   if (!threadId) {
     throw new Error('capability artifact tools require a thread_id');
@@ -26,7 +24,7 @@ function requireThreadId(threadId: string | null | undefined) {
   return threadId;
 }
 
-export function createCapabilityArtifactToolkit(store: ArtifactStore): AgentToolkit {
+export function createCapabilityArtifactToolkit(store: CapabilityArtifactStore): AgentToolkit {
   return {
     name: 'capability_artifact',
     description: '读取、列出和写入当前会话线程的 capability artifacts。',
@@ -86,7 +84,7 @@ export function createCapabilityArtifactToolkit(store: ArtifactStore): AgentTool
         }),
         tool(async (input) => {
           const threadId = requireThreadId(ctx.threadId);
-          const refs = store.listArtifacts({
+          const refs = await store.listArtifacts({
             threadId,
             capabilityId: input.capabilityId,
             kind: input.kind,
@@ -104,7 +102,7 @@ export function createCapabilityArtifactToolkit(store: ArtifactStore): AgentTool
         }),
         tool(async (input) => {
           const threadId = requireThreadId(ctx.threadId);
-          const result = store.readArtifact({
+          const result = await store.readArtifact({
             uri: input.uri,
             maxBytes: input.maxBytes,
             threadId,

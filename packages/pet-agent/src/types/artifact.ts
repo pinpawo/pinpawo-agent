@@ -53,11 +53,18 @@ export type CapabilityArtifactWriteInput = {
 
 export type CapabilityArtifactStore = {
   writeArtifact: (input: CapabilityArtifactWriteInput) => Promise<CapabilityArtifactRef>;
-  writeArtifacts?: (inputs: CapabilityArtifactWriteInput[]) => Promise<CapabilityArtifactRef[]>;
-  readArtifact?: (params: {
+  readArtifact: (params: {
     uri: string;
     maxBytes?: number;
     threadId?: string;
-  }) => { ref: CapabilityArtifactRef; content: string | null };
-  deleteThreadArtifacts?: (threadId: string) => Promise<void>;
+  }) => Promise<{ ref: CapabilityArtifactRef; content: string | null }>;
+  listArtifacts: (params: {
+    threadId: string;
+    capabilityId?: string;
+    kind?: string;
+    limit?: number;
+  }) => Promise<CapabilityArtifactRef[]>;
+  deleteThreadArtifacts: (threadId: string) => Promise<void>;
+  getDownloadUri: (uri: string) => Promise<string>;
+  writeArtifacts?: (inputs: CapabilityArtifactWriteInput[]) => Promise<CapabilityArtifactRef[]>;
 };

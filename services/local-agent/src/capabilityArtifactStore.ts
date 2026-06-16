@@ -14,6 +14,7 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { pathToFileURL } from 'node:url';
 import type {
   CapabilityArtifactRef,
   CapabilityArtifactStore,
@@ -152,6 +153,25 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
     return join(this.delegationDir(threadId, delegationId), 'manifest.json');
   }
 
+  private readStoredArtifact(params: {
+    uri: string;
+    threadId?: string;
+  }): { parsed: NonNullable<ReturnType<typeof parseArtifactUri>>; stored: StoredArtifactRef } {
+    const parsed = parseArtifactUri(params.uri);
+    if (!parsed) {
+      throw new Error('invalid capability artifact uri');
+    }
+    if (params.threadId && parsed.threadId !== params.threadId) {
+      throw new Error('capability artifact belongs to another thread');
+    }
+    const manifest = readManifest(this.manifestPath(parsed.threadId, parsed.delegationId));
+    const stored = manifest?.artifacts.find((item) => item.id === parsed.artifactId);
+    if (!stored) {
+      throw new Error('capability artifact not found');
+    }
+    return { parsed, stored };
+  }
+
   private async withManifestLock<T>(manifestPath: string, run: () => Promise<T>): Promise<T> {
     const previous = this.manifestLocks.get(manifestPath) ?? Promise.resolve();
     let release!: () => void;
@@ -278,12 +298,12 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
     });
   }
 
-  listArtifacts(params: {
+  async listArtifacts(params: {
     threadId: string;
     capabilityId?: string;
     kind?: string;
     limit?: number;
-  }): CapabilityArtifactRef[] {
+  }): Promise<CapabilityArtifactRef[]> {
     const threadDir = this.threadDir(params.threadId);
     if (!existsSync(threadDir)) return [];
     const refs: StoredArtifactRef[] = [];
@@ -299,23 +319,12 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
       .map(({ relativePath: _relativePath, ...ref }) => ref);
   }
 
-  readArtifact(params: {
+  async readArtifact(params: {
     uri: string;
     maxBytes?: number;
     threadId?: string;
-  }): { ref: CapabilityArtifactRef; content: string | null } {
-    const parsed = parseArtifactUri(params.uri);
-    if (!parsed) {
-      throw new Error('invalid capability artifact uri');
-    }
-    if (params.threadId && parsed.threadId !== params.threadId) {
-      throw new Error('capability artifact belongs to another thread');
-    }
-    const manifest = readManifest(this.manifestPath(parsed.threadId, parsed.delegationId));
-    const stored = manifest?.artifacts.find((item) => item.id === parsed.artifactId);
-    if (!stored) {
-      throw new Error('capability artifact not found');
-    }
+  }): Promise<{ ref: CapabilityArtifactRef; content: string | null }> {
+    const { parsed, stored } = this.readStoredArtifact(params);
     const { relativePath, ...ref } = stored;
     if (!relativePath) {
       return { ref, content: null };
@@ -336,6 +345,20 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
       ref,
       content: readFileSync(path, 'utf-8'),
     };
+  }
+
+  async getDownloadUri(uri: string): Promise<string> {
+    const { parsed, stored } = this.readStoredArtifact({ uri });
+    if (stored.externalUri) {
+      return stored.externalUri;
+    }
+    if (!stored.relativePath) {
+      throw new Error('capability artifact has no downloadable content');
+    }
+    return pathToFileURL(join(
+      this.delegationDir(parsed.threadId, parsed.delegationId),
+      stored.relativePath,
+    )).toString();
   }
 
   async deleteThreadArtifacts(threadId: string): Promise<void> {

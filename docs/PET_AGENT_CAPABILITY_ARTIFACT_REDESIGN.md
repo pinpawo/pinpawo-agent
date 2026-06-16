@@ -44,6 +44,27 @@ state.
 - `capabilityResult` is removed. Structured result consumers read the latest
   `kind: "result"` artifact and parse it with their schema.
 
+`CapabilityArtifactStore` is a single replaceable service port. A runtime uses
+one adapter at a time, such as the local file adapter or a future S3/OSS
+adapter. The port methods are intentionally async so cloud adapters can satisfy
+the same contract:
+
+```ts
+type CapabilityArtifactStore = {
+  writeArtifact(input): Promise<CapabilityArtifactRef>;
+  readArtifact(params): Promise<{ ref: CapabilityArtifactRef; content: string | null }>;
+  listArtifacts(params): Promise<CapabilityArtifactRef[]>;
+  deleteThreadArtifacts(threadId): Promise<void>;
+  getDownloadUri(uri): Promise<string>;
+  writeArtifacts?(inputs): Promise<CapabilityArtifactRef[]>;
+};
+```
+
+`readArtifact` is the LLM-facing text path and returns `content: null` for
+binary artifacts. `getDownloadUri` is the UI/download path; the file adapter
+returns a `file://` URL for local content, while cloud adapters should return a
+signed URL.
+
 ## Source Fields
 
 Artifact writes support two source forms:

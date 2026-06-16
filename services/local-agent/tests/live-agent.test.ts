@@ -196,7 +196,7 @@ test('live chat smoke: route to daily_post and persist a post result', { timeout
   ) as OrchestratorStateType;
 
   const latestResultRef = [...state.capabilityArtifacts].reverse().find((ref) => ref.kind === 'result');
-  const resultContent = latestResultRef ? artifactStore.readArtifact({ uri: latestResultRef.uri }).content : null;
+  const resultContent = latestResultRef ? (await artifactStore.readArtifact({ uri: latestResultRef.uri })).content : null;
   const dailyPostResult = resultContent
     ? dailyPostResultSchema.safeParse(JSON.parse(resultContent) as unknown)
     : null;

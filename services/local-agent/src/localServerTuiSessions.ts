@@ -144,6 +144,7 @@ export class LocalServerTuiSessionService {
       dryRun: false,
       checkpoint: this.checkpointer,
       userCapabilities: deps.userCapabilities,
+      capabilityArtifactStore: deps.capabilityArtifactStore,
     });
   }
 

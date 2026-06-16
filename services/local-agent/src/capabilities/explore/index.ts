@@ -2,6 +2,8 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type {
   AgentCapability,
+  CapabilityArtifactStore,
+  CapabilityMiddlewareContext,
   ContextPolicyContext,
   OrchestrationDecisionStructuredOutputConfig,
   SubagentResult,
@@ -24,6 +26,7 @@ export type ExploreResult = {
 
 export type ExploreCapabilityOptions = {
   structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
+  artifactStore?: CapabilityArtifactStore;
 };
 
 export const exploreResultSchema = z.object({
@@ -97,6 +100,60 @@ function readLatestExploreSummary(messages: BaseMessage[]): string | null {
     if (summary) return summary;
   }
   return null;
+}
+
+function clipExplorePreview(text: string, maxLength: number) {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+/**
+ * Deterministically persist explore's structured result + markdown report as
+ * artifacts, from `afterRun`, through the injected store + sink. This replaces
+ * the previous "instruct the model to call capability_artifact_write" approach
+ * (issue #137): the summary is already produced by ingestExploreKnowledge here,
+ * so we write it directly instead of hoping the model echoes it into a tool call.
+ * No-op when store/sink/threadId is unavailable (e.g. tests, degraded runtimes).
+ */
+async function recordExploreArtifacts(
+  store: CapabilityArtifactStore | undefined,
+  ctx: CapabilityMiddlewareContext,
+  summary: string,
+  status: ExploreResult['status'],
+): Promise<void> {
+  if (!store || !ctx.recordCapabilityArtifact || !ctx.threadId) return;
+  const normalized = summary.trim();
+  const result: ExploreResult = { status, summary: normalized, nextSteps: [] };
+  const base = {
+    threadId: ctx.threadId,
+    capabilityId: ctx.capabilityId,
+    delegationId: ctx.delegationId,
+    turnId: ctx.turnId,
+  };
+  const resultRef = await store.writeArtifact({
+    ...base,
+    artifact: {
+      kind: 'result',
+      mimeType: 'application/json',
+      title: 'Explore result',
+      preview: clipExplorePreview(normalized, 500),
+      content: result,
+      schema: { name: 'ExploreResult', version: 1 },
+    },
+  });
+  await ctx.recordCapabilityArtifact(resultRef);
+  const reportRef = await store.writeArtifact({
+    ...base,
+    artifact: {
+      kind: 'report',
+      mimeType: 'text/markdown',
+      title: 'Explore report',
+      preview: clipExplorePreview(normalized, 500),
+      content: normalized,
+    },
+  });
+  await ctx.recordCapabilityArtifact(reportRef);
 }
 
 function createExploreSummaryMessage(summary: string, status: ExploreResult['status'] = 'completed'): AIMessage {
@@ -387,7 +444,10 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
         currentSummary = summary;
         return replaceCompressedToolOutputs(messages, toolIndexes, summary);
       };
-      const ingestFinalResult = async (result: SubagentResult): Promise<SubagentResult> => {
+      const ingestFinalResult = async (
+        result: SubagentResult,
+        ctx: CapabilityMiddlewareContext,
+      ): Promise<SubagentResult> => {
         const evidence = buildFinalEvidence(result.messages);
         if (!evidence.trim()) return result;
         try {
@@ -399,14 +459,14 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
             reason: 'finalize',
           });
           currentSummary = summary;
+          const status: ExploreResult['status'] =
+            result.completionReason === 'natural' ? 'completed' : 'progress';
+          await recordExploreArtifacts(options.artifactStore, ctx, summary, status);
           return {
             ...result,
             messages: [
               ...result.messages,
-              createExploreSummaryMessage(
-                summary,
-                result.completionReason === 'natural' ? 'completed' : 'progress',
-              ),
+              createExploreSummaryMessage(summary, status),
             ],
           };
         } catch (error) {
@@ -431,7 +491,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
           '使用可用工具在执行过程中自行规划探索；createRuntime 阶段不做额外模型规划。',
           '优先先确认候选范围，再读取详细内容；避免无界浏览或无目的扫描。',
           '如果当前会话已有相关 capability_artifact，先用 artifact 工具读取短引用，避免重复探索已经确认过的内容。',
-          '形成稳定结论后，使用 capability_artifact_write 保存 kind=result、mimeType=application/json、title="Explore result"、schema={name:"ExploreResult",version:1} 的结构化结果；如有较长报告，再保存 kind=report、mimeType=text/markdown、title="Explore report"。',
+          '探索结论会在结束时由 capability 自动保存为 result/report artifact，无需你手动调用写入工具。',
           '上下文足够时会保留完整工具输出；只有接近上下文预算时，较早的大型工具输出才会被知识摘要替换。',
           '结论必须包含简洁探索摘要、已查看文件列表、关键发现、证据引用（文件路径、URL、issue/PR 编号或命令输出来源）和建议下一步。',
         ],

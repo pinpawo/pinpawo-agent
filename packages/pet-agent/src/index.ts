@@ -28,6 +28,7 @@ export type {
   CapabilityContext,
   CapabilityInstructionContext,
   CapabilityMiddleware,
+  CapabilityMiddlewareContext,
   CapabilityRuntime,
 } from './types/capability';
 

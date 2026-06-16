@@ -1,6 +1,7 @@
 import {
   type AgentToolkit,
   type CapabilityArtifactRef,
+  type CapabilityArtifactStore,
   type OrchestratorStateType,
 } from '@pinpawo/pet-agent';
 import type { ZodType } from 'zod';
@@ -53,6 +54,7 @@ export type LocalAgentScheduledJobOptions = {
   getHooks: () => LocalAgentScheduledHooks | null;
   getLocalToolkits: () => AgentToolkit[];
   getUserCapabilities: () => LoadedUserCapability[];
+  getCapabilityArtifactStore: () => CapabilityArtifactStore;
   readCapabilityArtifact: ReadCapabilityArtifact;
   timings?: LocalAgentScheduledJobTimings;
   deps?: Partial<LocalAgentScheduledJobDeps>;
@@ -96,6 +98,7 @@ export class LocalAgentScheduledJob {
   private readonly getHooks: () => LocalAgentScheduledHooks | null;
   private readonly getLocalToolkits: () => AgentToolkit[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
+  private readonly getCapabilityArtifactStore: () => CapabilityArtifactStore;
   private readonly readCapabilityArtifact: ReadCapabilityArtifact;
   private readonly timings: LocalAgentScheduledJobTimings;
   private readonly deps: LocalAgentScheduledJobDeps;
@@ -115,6 +118,7 @@ export class LocalAgentScheduledJob {
     this.getHooks = options.getHooks;
     this.getLocalToolkits = options.getLocalToolkits;
     this.getUserCapabilities = options.getUserCapabilities;
+    this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
     this.readCapabilityArtifact = options.readCapabilityArtifact;
     this.timings = options.timings ?? {
       heartbeatIntervalSeconds: config.heartbeatIntervalSeconds,
@@ -237,6 +241,7 @@ export class LocalAgentScheduledJob {
       dryRun: false,
       toolkits: this.getLocalToolkits(),
       userCapabilities: this.getUserCapabilities(),
+      capabilityArtifactStore: this.getCapabilityArtifactStore(),
     });
   }
 }

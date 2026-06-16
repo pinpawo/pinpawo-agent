@@ -829,7 +829,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     let result = await createSubagent(subagentInput);
 
     if (middleware?.afterRun) {
-      result = await middleware.afterRun(result);
+      result = await middleware.afterRun(result, {
+        recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
+          artifactRefs.push(ref);
+        },
+        threadId,
+        capabilityId: capability.name,
+        delegationId: pendingDelegation.id,
+        turnId: state.turnId,
+      });
     }
 
     const laneOutputMessages = tagNewLaneMessages(

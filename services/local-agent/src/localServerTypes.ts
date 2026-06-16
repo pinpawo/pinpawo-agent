@@ -1,4 +1,4 @@
-import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
+import type { AgentCapability, AgentToolkit, CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
 
@@ -23,6 +23,7 @@ export type LocalServerDeps = {
   localCapabilities?: AgentCapability[];
   userCapabilityDefinitions?: LoadedUserCapability[];
   userCapabilities?: LoadedUserCapability[];
+  capabilityArtifactStore?: CapabilityArtifactStore;
   rescanUserCapabilities?: () => Promise<{
     userCapabilityDefinitions: LoadedUserCapability[];
     userCapabilities: LoadedUserCapability[];

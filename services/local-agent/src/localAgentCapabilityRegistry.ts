@@ -21,7 +21,7 @@ type LocalAgentCapabilityRegistryDeps = {
   createLocalToolkits: (
     localTools: StructuredTool[],
   ) => AgentToolkit[];
-  createLocalCapabilities: () => AgentCapability[];
+  createLocalCapabilities: (artifactStore: FileCapabilityArtifactStore) => AgentCapability[];
   resolveAvailableToolkits: typeof resolveAvailableToolkits;
   resolveAvailableCapabilities: typeof resolveAvailableCapabilities;
   resolveCapabilityAvailability: ResolveCapabilityAvailability;
@@ -39,8 +39,8 @@ const defaultDeps: LocalAgentCapabilityRegistryDeps = {
     createGitToolkit(),
     createBrowserToolkit(),
   ],
-  createLocalCapabilities: () => [
-    createExploreCapability(),
+  createLocalCapabilities: (artifactStore) => [
+    createExploreCapability({ artifactStore }),
     createBrowserCapability(),
   ],
   resolveAvailableToolkits,
@@ -91,7 +91,7 @@ export class LocalAgentCapabilityRegistry {
       ...this.deps.createLocalToolkits(this.localTools),
     ];
     this.localToolkits = await this.deps.resolveAvailableToolkits(this.localToolkitDefinitions);
-    this.localCapabilityDefinitions = this.deps.createLocalCapabilities();
+    this.localCapabilityDefinitions = this.deps.createLocalCapabilities(this.capabilityArtifactStore);
     this.localCapabilities = await this.deps.resolveAvailableCapabilities(this.localCapabilityDefinitions);
     this.userCapabilityDefinitions = await this.deps.loadUserCapabilities();
     this.userCapabilities = await filterAvailableUserCapabilities(
@@ -110,6 +110,10 @@ export class LocalAgentCapabilityRegistry {
 
   getLocalToolkitDefinitions(): AgentToolkit[] {
     return this.localToolkitDefinitions;
+  }
+
+  getCapabilityArtifactStore(): FileCapabilityArtifactStore {
+    return this.capabilityArtifactStore;
   }
 
   readCapabilityArtifact(params: Parameters<FileCapabilityArtifactStore['readArtifact']>[0]) {

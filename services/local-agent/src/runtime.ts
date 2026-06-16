@@ -71,6 +71,7 @@ export class LocalAgentRuntime {
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
     getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
+    getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
   });
   private readonly scheduledJob = new LocalAgentScheduledJob({
     graphService: this.graphService,
@@ -79,6 +80,7 @@ export class LocalAgentRuntime {
     getHooks: () => this.hooks,
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
+    getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
     readCapabilityArtifact: (params) => this.capabilityRegistry.readCapabilityArtifact(params),
   });
 
@@ -123,6 +125,10 @@ export class LocalAgentRuntime {
 
   getLocalCapabilities(): AgentCapability[] {
     return this.capabilityRegistry.getLocalCapabilities();
+  }
+
+  getCapabilityArtifactStore() {
+    return this.capabilityRegistry.getCapabilityArtifactStore();
   }
 
   getLocalCapabilityDefinitions(): AgentCapability[] {

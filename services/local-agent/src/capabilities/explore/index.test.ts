@@ -242,6 +242,10 @@ test('explore final ingest failure stops without producing fallback result', asy
     messages: [new AIMessage('free-form final text')],
     artifacts: [],
     completionReason: 'natural',
+  }, {
+    capabilityId: 'explore',
+    delegationId: 'dg_test',
+    turnId: 'turn_test',
   });
 
   assert.ok(result);

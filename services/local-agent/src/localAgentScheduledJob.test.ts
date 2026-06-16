@@ -99,6 +99,7 @@ function createJob(overrides: {
       meta: { id: 'user-cap' },
       capability: { name: 'user-capability' },
     }] as ConstructorParameters<typeof LocalAgentScheduledJob>[0]['getUserCapabilities'] extends () => infer T ? T : never,
+    getCapabilityArtifactStore: () => ({}) as ConstructorParameters<typeof LocalAgentScheduledJob>[0]['getCapabilityArtifactStore'] extends () => infer T ? T : never,
     readCapabilityArtifact: overrides.readCapabilityArtifact ?? (async () => ({
       ref: resultRef,
       content: JSON.stringify({

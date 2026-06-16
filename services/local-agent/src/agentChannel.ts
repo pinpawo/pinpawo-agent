@@ -5,6 +5,7 @@ import {
   type AgentActor,
   type AgentInvokeInput,
   type AgentToolkit,
+  type CapabilityArtifactStore,
   type OrchestratorConfig,
 } from '@pinpawo/pet-agent';
 import { createCapabilityCreatorCapability } from './capabilities/capabilityCreator';
@@ -199,6 +200,8 @@ export function buildLocalChatAgentInput(params: {
   extraCapabilities?: AgentCapability[];
   /** User-defined capability plugins loaded by capabilityLoader */
   userCapabilities?: LoadedUserCapability[];
+  /** Store handed to capabilities so they can deterministically persist result artifacts */
+  capabilityArtifactStore?: CapabilityArtifactStore;
 }): AgentChannelSetup {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
@@ -216,6 +219,7 @@ export function buildLocalChatAgentInput(params: {
   if (isCapabilityEnabled('explore')) {
     appendCapability(capabilities, createExploreCapability({
       structuredOutput: decisionStructuredOutput,
+      artifactStore: params.capabilityArtifactStore,
     }));
   }
 
@@ -229,11 +233,14 @@ export function buildLocalChatAgentInput(params: {
       markSkipped: (trendItemId: string, reason: string) =>
         agentStore.upsertImpression(actor.petId, trendItemId, 'skipped', { reason }),
       requestImageProcessing: ({ postId }) => agentStore.requestImageProcessing(postId),
+      artifactStore: params.capabilityArtifactStore,
     }));
   }
 
   if (isCapabilityEnabled('capability_creator')) {
-    appendCapability(capabilities, createCapabilityCreatorCapability());
+    appendCapability(capabilities, createCapabilityCreatorCapability({
+      artifactStore: params.capabilityArtifactStore,
+    }));
   }
 
   for (const capability of params.extraCapabilities ?? []) {
@@ -296,6 +303,8 @@ export function buildLocalScheduledAgentInput(params: {
   >;
   /** User-defined capability plugins loaded by capabilityLoader */
   userCapabilities?: LoadedUserCapability[];
+  /** Store handed to capabilities so they can deterministically persist result artifacts */
+  capabilityArtifactStore?: CapabilityArtifactStore;
 }): AgentChannelSetup {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
@@ -315,6 +324,7 @@ export function buildLocalScheduledAgentInput(params: {
   if (isCapabilityEnabled('explore')) {
     appendCapability(capabilities, createExploreCapability({
       structuredOutput: decisionStructuredOutput,
+      artifactStore: params.capabilityArtifactStore,
     }));
   }
 
@@ -334,6 +344,7 @@ export function buildLocalScheduledAgentInput(params: {
       requestImageProcessing:
         params.dailyPost?.requestImageProcessing ??
         (({ postId }) => agentStore.requestImageProcessing(postId)),
+      artifactStore: params.capabilityArtifactStore,
     }));
   }
 

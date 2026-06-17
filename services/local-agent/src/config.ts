@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
 import { inferLlmContextWindowTokens } from './llmContextWindow';
 import { loadStoredConfig } from './storage';
+
+export { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
 
 function parseDotEnv(content: string) {
   for (const line of content.split('\n')) {
@@ -57,16 +60,6 @@ function required(envKey: string, storedKey: keyof typeof stored, label: string)
     );
   }
   return val;
-}
-
-export function isMissingOrGeneratedApiPlaceholder(envKey: string, value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) return true;
-  if (envKey === 'API_BASE_URL') return /your-api\.example\.com/i.test(trimmed);
-  if (envKey === 'HASURA_ENDPOINT') return /your-hasura\.example\.com/i.test(trimmed);
-  if (envKey === 'AGENT_TOKEN') return /^your-agent-token-here$/i.test(trimmed);
-  if (envKey === 'HASURA_JWT') return trimmed === 'eyJ...' || /^your-hasura-jwt/i.test(trimmed);
-  return false;
 }
 
 const apiBaseUrl = optional('API_BASE_URL', 'api_base_url').replace(/\/$/, '');

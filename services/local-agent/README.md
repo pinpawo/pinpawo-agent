@@ -10,6 +10,7 @@ Requires Node.js 20.x.
 npm install -g pinpawo-local-agent
 pinpawo-agent init
 pinpawo-agent login
+pinpawo-agent setup
 pinpawo-agent capability validate ~/.pinpawo/capabilities/hello-pinpawo
 pinpawo-agent tui
 ```
@@ -28,7 +29,7 @@ npx pinpawo-local-agent tui
 - `~/.pinpawo/capabilities/` for user capabilities.
 - `~/.pinpawo/capabilities/hello-pinpawo/` as a minimal capability that validates and loads.
 
-Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Use `pinpawo-agent login` for interactive credential setup, or edit `~/.pinpawo/.env` directly. Browser automation uses the optional bundled browser backend when available, or an externally installed `agent-browser` / `playwright-core`.
+Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Use `pinpawo-agent login` for interactive credential setup, `pinpawo-agent setup` to check missing config and next steps, or edit `~/.pinpawo/.env` directly. Browser automation uses the optional bundled browser backend when available, or an externally installed `agent-browser` / `playwright-core`.
 
 For a local repository smoke test:
 
@@ -77,6 +78,7 @@ export default {
 ```bash
 pinpawo-agent init
 pinpawo-agent login
+pinpawo-agent setup
 pinpawo-agent actor
 pinpawo-agent run
 pinpawo-agent tui

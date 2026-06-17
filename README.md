@@ -19,6 +19,7 @@ Requires Node.js 20.x.
 npm install -g pinpawo-local-agent
 pinpawo-agent init
 pinpawo-agent login
+pinpawo-agent setup
 pinpawo-agent capability validate ~/.pinpawo/capabilities/hello-pinpawo
 pinpawo-agent tui
 ```
@@ -55,6 +56,7 @@ Local agent configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.en
 cd services/local-agent
 cp .env.example .env
 npm run login
+npm run start -- setup
 npm run tui
 ```
 
@@ -71,6 +73,7 @@ After publishing the local-agent package to npm:
 npm install -g pinpawo-local-agent
 pinpawo-agent init
 pinpawo-agent login
+pinpawo-agent setup
 pinpawo-agent tui
 ```
 

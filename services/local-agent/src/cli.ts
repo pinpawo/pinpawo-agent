@@ -12,6 +12,7 @@ type LocalAgentCliHandlers = {
   runTui?: (opts: { dryRun: boolean }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
+  runSetup?: () => Promise<void> | void;
 };
 
 function readPackageVersion(): string {
@@ -54,6 +55,14 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
         force: options.force ?? false,
         exampleCapability: options.exampleCapability ?? true,
       });
+    });
+
+  program
+    .command('setup')
+    .description('Check local configuration and print guided setup steps')
+    .action(async () => {
+      const runSetup = handlers.runSetup ?? (await import('./commands/setup')).runSetupGuide;
+      await runSetup();
     });
 
   program

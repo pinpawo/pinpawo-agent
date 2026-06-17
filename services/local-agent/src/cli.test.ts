@@ -31,3 +31,16 @@ test('local agent CLI passes init options to the handler', async () => {
     exampleCapability: false,
   });
 });
+
+test('local agent CLI runs setup guide handler', async () => {
+  let called = false;
+  const program = createLocalAgentCli({
+    runSetup: () => {
+      called = true;
+    },
+  });
+
+  await program.parseAsync(['setup'], { from: 'user' });
+
+  assert.equal(called, true);
+});

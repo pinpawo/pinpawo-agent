@@ -5,6 +5,7 @@ import {
   buildTextAreaComposerProps,
   buildTextAreaControllerState,
   measureTextAreaControllerLayout,
+  resolveTextAreaHistoryBoundary,
 } from './useTextAreaController';
 
 test('buildTextAreaComposerProps builds textarea view model props', () => {
@@ -75,6 +76,10 @@ test('buildTextAreaControllerState composes host state from textarea input', () 
         isAtFirstVisualRow: false,
         isAtLastVisualRow: true,
       },
+      historyBoundary: {
+        previous: false,
+        next: true,
+      },
       composerProps: {
         model: {
           rows: [
@@ -84,6 +89,21 @@ test('buildTextAreaControllerState composes host state from textarea input', () 
         },
       },
     },
+  );
+});
+
+test('resolveTextAreaHistoryBoundary follows visual cursor boundaries', () => {
+  assert.deepEqual(
+    resolveTextAreaHistoryBoundary(measureTextAreaControllerLayout({ text: 'abc', cursorOffset: 1 }, 10)),
+    { previous: true, next: true },
+  );
+  assert.deepEqual(
+    resolveTextAreaHistoryBoundary(measureTextAreaControllerLayout({ text: 'abcdef', cursorOffset: 1 }, 3)),
+    { previous: true, next: false },
+  );
+  assert.deepEqual(
+    resolveTextAreaHistoryBoundary(measureTextAreaControllerLayout({ text: 'abcdef', cursorOffset: 4 }, 3)),
+    { previous: false, next: true },
   );
 });
 

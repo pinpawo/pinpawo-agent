@@ -6,18 +6,41 @@ import {
   measureTextAreaControllerLayout,
 } from './useTextAreaController';
 
-test('buildTextAreaComposerProps maps textarea input to composer props', () => {
+test('buildTextAreaComposerProps builds textarea view model props', () => {
   assert.deepEqual(
     buildTextAreaComposerProps(
       { text: 'hello', cursorOffset: 2 },
       { focused: true, placeholder: '输入消息', width: 24 },
     ),
     {
-      value: 'hello',
-      cursorOffset: 2,
-      placeholder: '输入消息',
-      focus: true,
-      width: 24,
+      model: {
+        rows: [
+          {
+            before: 'he',
+            cursor: 'l',
+            after: 'lo',
+            dim: false,
+            dimAfterCursor: false,
+          },
+        ],
+      },
+    },
+  );
+});
+
+test('buildTextAreaComposerProps keeps focus and placeholder display in view model', () => {
+  assert.deepEqual(
+    buildTextAreaComposerProps(
+      { text: '', cursorOffset: 0 },
+      { focused: false, placeholder: 'abcdef', width: 3 },
+    ),
+    {
+      model: {
+        rows: [
+          { before: 'abc', cursor: null, after: '', dim: true, dimAfterCursor: false },
+          { before: 'def', cursor: null, after: '', dim: true, dimAfterCursor: false },
+        ],
+      },
     },
   );
 });

@@ -1,28 +1,8 @@
 import { TextAreaView } from './TextAreaView';
-import { buildTextAreaViewModel } from '../input/textarea/viewModel';
+import type { TextAreaViewModel } from '../input/textarea/viewModel';
 
 export function Composer(props: {
-  value: string;
-  cursorOffset: number;
-  placeholder?: string;
-  focus?: boolean;
-  width?: number;
+  model: TextAreaViewModel;
 }) {
-  const {
-    value,
-    placeholder = '',
-    focus = true,
-    width = 60,
-  } = props;
-  return (
-    <TextAreaView
-      model={buildTextAreaViewModel({
-        text: value,
-        cursorOffset: props.cursorOffset,
-        placeholder,
-        focused: focus,
-        width,
-      })}
-    />
-  );
+  return <TextAreaView model={props.model} />;
 }

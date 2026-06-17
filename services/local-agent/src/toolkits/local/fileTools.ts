@@ -133,6 +133,19 @@ export const readFileTool = tool(
       }
 
       const extension = extname(filePath).toLowerCase();
+      if (extension === '.pdf') {
+        return JSON.stringify({
+          ok: false,
+          path: filePath,
+          type: 'pdf',
+          extension,
+          size: stat.size,
+          readableAsText: false,
+          reason: 'PDF files are handled by the dedicated read_pdf tool.',
+          recommendation: 'Use read_pdf with the same path. Optionally pass startPage, endPage, or maxChars.',
+        });
+      }
+
       if (looksLikeUtf8Text(readFileSample(filePath))) {
         return `Error: ${filePath} is a readable UTF-8 text file; use view_file_chunk for line-numbered text reading.`;
       }

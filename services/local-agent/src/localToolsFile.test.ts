@@ -346,15 +346,23 @@ test('createBashToolkit registers review policies for file mutation tools', () =
 
 test('read_file analyzes non-text documents instead of reading text chunks', async (t) => {
   const root = createFileFixture(t);
-  const filePath = resolve(root, 'report.pdf');
-  writeFileSync(filePath, Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0x01, 0x02]));
+  const pdfPath = resolve(root, 'report.pdf');
+  const binaryPath = resolve(root, 'report.bin');
+  writeFileSync(pdfPath, Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0x01, 0x02]));
+  writeFileSync(binaryPath, Buffer.from([0x00, 0x01, 0x02]));
 
   assert.match(
-    String(await viewFileChunkTool.invoke({ path: filePath })),
+    String(await viewFileChunkTool.invoke({ path: pdfPath })),
     /not a UTF-8 text file/,
   );
 
-  const result = readJsonOutput(await readFileTool.invoke({ path: filePath }));
+  const pdfResult = readJsonOutput(await readFileTool.invoke({ path: pdfPath }));
+  assert.equal(pdfResult.ok, false);
+  assert.equal(pdfResult.type, 'pdf');
+  assert.equal(pdfResult.readableAsText, false);
+  assert.match(String(pdfResult.recommendation), /read_pdf/);
+
+  const result = readJsonOutput(await readFileTool.invoke({ path: binaryPath }));
   assert.equal(result.ok, false);
   assert.equal(result.type, 'document_or_binary');
   assert.equal(result.readableAsText, false);

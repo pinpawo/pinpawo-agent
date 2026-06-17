@@ -20,12 +20,14 @@ import {
   fileOperationMetadata,
 } from './fileTools';
 import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
+import { readPdfTool, pdfOperationMetadata } from './pdfTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
 import { runShellTool, shellOperationMetadata } from './shellTools';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
+  readPdfTool,
   viewFileChunkTool,
   statPathTool,
   writeFileTool,
@@ -54,7 +56,7 @@ const coreLocalTools: StructuredTool[] = [
 
 const bashToolkitInstructions = [
   '你可以使用本地文件、搜索、下载和 shell 工具完成任务。',
-  '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；read_file 只用于 PDF、Word、表格、图片等非文本文件的分析。',
+  '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；读取 PDF 时使用 read_pdf；read_file 只用于 Word、表格、图片等其他非文本文件的分析。',
   '优先使用语义具体的文件工具：view_file_chunk、read_file、list_dir、glob_search、grep_search。',
   '编辑已有文件一律使用 apply_patch（V4A 上下文补丁，支持一次修改多个文件）；只有新建文件或完全重写整个文件时才用 write_file。',
   'run_shell 只作为兜底工具；不要用它替代已有的读写、移动、复制、下载或 HTTP 工具。',
@@ -65,6 +67,7 @@ const bashToolkitInstructions = [
 
 const bashToolkitOperations = {
   ...fileOperationMetadata,
+  ...pdfOperationMetadata,
   ...searchOperationMetadata,
   ...networkOperationMetadata,
   ...shellOperationMetadata,

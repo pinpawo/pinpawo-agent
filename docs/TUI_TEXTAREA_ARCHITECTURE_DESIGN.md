@@ -587,7 +587,8 @@ composition underline 不应该再散落到 `Composer`。
 - 渲染 textarea view model。
 - 不处理 key routing。
 - 不实现编辑算法。
-- 只接收 view model 或构建 view model 所需的 state、focus、placeholder、style。
+- `Composer` 只接收 view model。
+- host/controller 负责构建 view model 所需的 state、focus、placeholder、style。
 
 建议替代当前 `Composer` 的边界：
 
@@ -597,14 +598,14 @@ composition underline 不应该再散落到 `Composer`。
 />
 ```
 
-`Composer` 可以保留名称，但内部应从“计算并渲染 textarea”逐步收敛为“组合 view model
-并委托 `TextAreaView` 渲染”。再往后如果 textarea state 从 `TuiApp` 抽到 hook/controller，
-`Composer` 可以进一步只接收已经构建好的 view model。
+`Composer` 可以保留名称，但内部应从“计算并渲染 textarea”收敛为“接收 view model
+并委托 `TextAreaView` 渲染”。view model 构建应由 host/controller 完成。
 
 host/controller 层可以先落成一个轻量 hook，例如 `useTextAreaController`：
 
 - 输入：`TuiState.input`、focus、placeholder、textarea width、`dispatch`。
-- 输出：`composerProps`、`layout/cursor metrics`、`clear()`、`applyCommand(command)`。
+- 输出：`composerProps`（包含 `TextAreaViewModel`）、`layout/cursor metrics`、
+  `clear()`、`applyCommand(command)`。
 - 约束：它只做 textarea host wiring，不处理 app command、副作用、approval option
   navigation 或 resume picker。
 
@@ -903,7 +904,8 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 - `TuiApp.tsx` 中不再包含 raw key interpretation。
 - `textarea/engine.ts` 不依赖 Ink key shape。
 - `inputRouter.ts` 明确表达 composer / approval / resume / busy ownership。
-- `Composer` 只组合 textarea view model，`TextAreaView` 只消费 view model。
+- `useTextAreaController` 组合 textarea view model，`Composer` / `TextAreaView`
+  只消费 view model。
 
 行为验收：
 
@@ -961,9 +963,12 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 13. `codex/tui-textarea-host-metrics`
    - 从 controller 暴露 layout/cursor metrics。
    - 为 history 边界准备 `first/last visual row` contract，不改变当前输入行为。
-14. `codex/tui-textarea-history-selection`
+14. `codex/tui-composer-view-model-props`
+   - controller 产出 `TextAreaViewModel`，`Composer` 只接收 model 并渲染。
+   - 进一步防止 placeholder/focus/render 逻辑回流到组件。
+15. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-15. `codex/tui-opentui-spike`
+16. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

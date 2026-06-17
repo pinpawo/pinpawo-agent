@@ -41,6 +41,10 @@ export function toTextAreaCommand(event: CanonicalInputEvent): TextAreaCommand |
       return { type: 'deleteToLineStart' };
     case 'text.delete.to.line.end':
       return { type: 'deleteToLineEnd' };
+    case 'edit.undo':
+      return { type: 'undo' };
+    case 'edit.redo':
+      return { type: 'redo' };
     case 'cursor.left':
       return { type: 'moveLeft' };
     case 'cursor.right':

@@ -143,6 +143,22 @@ test('toCanonicalInputEvent maps supported control keys', () => {
     { type: 'text.delete.word.backward' },
   );
   assert.deepEqual(
+    toCanonicalInputEvent({ input: 'z', key: { ctrl: true } }),
+    { type: 'edit.undo' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: 'z', key: { ctrl: true, shift: true } }),
+    { type: 'edit.redo' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: 'Z', key: { ctrl: true } }),
+    { type: 'edit.redo' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: 'y', key: { ctrl: true } }),
+    { type: 'edit.redo' },
+  );
+  assert.deepEqual(
     toCanonicalInputEvent({ input: 'x', key: { ctrl: true } }),
     { type: 'noop' },
   );

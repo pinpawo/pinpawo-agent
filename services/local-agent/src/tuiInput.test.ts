@@ -224,6 +224,23 @@ test('resolveTuiKeyAction treats Shift+Arrow as composer selection edit', () => 
   );
 });
 
+test('resolveTuiKeyAction treats undo and redo controls as composer edits', () => {
+  const readyContext = { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false };
+
+  assert.deepEqual(
+    resolveRawTuiKeyAction('z', { ctrl: true }, readyContext),
+    { type: 'composer.edit' },
+  );
+  assert.deepEqual(
+    resolveRawTuiKeyAction('z', { ctrl: true, shift: true }, readyContext),
+    { type: 'composer.edit' },
+  );
+  assert.deepEqual(
+    resolveRawTuiKeyAction('y', { ctrl: true }, readyContext),
+    { type: 'composer.edit' },
+  );
+});
+
 test('normalizeTuiInputEvent buffers split terminal control sequences', () => {
   let state = createInitialTuiInputBufferState();
   let normalized = normalizeTuiInputEvent('[2', {}, state);
@@ -310,6 +327,29 @@ test('applyTextAreaInput supports textarea delete and line movement operations',
     applyTextAreaInput('', { end: true }, { text: 'one\ntwo three', cursorOffset: 8 }),
     { text: 'one\ntwo three', cursorOffset: 13 },
   );
+});
+
+test('applyTextAreaInput supports undo and redo controls', () => {
+  let state = applyTextAreaInput('!', {}, { text: 'hi', cursorOffset: 2 });
+  state = applyTextAreaInput('z', { ctrl: true }, state);
+  assert.deepEqual(state, {
+    text: 'hi',
+    cursorOffset: 2,
+    editHistory: {
+      undo: [],
+      redo: [{ text: 'hi!', cursorOffset: 3 }],
+    },
+  });
+
+  state = applyTextAreaInput('y', { ctrl: true }, state);
+  assert.deepEqual(state, {
+    text: 'hi!',
+    cursorOffset: 3,
+    editHistory: {
+      undo: [{ text: 'hi', cursorOffset: 2 }],
+      redo: [],
+    },
+  });
 });
 
 test('applyTextAreaInput moves cursor across wrapped and multiline rows', () => {

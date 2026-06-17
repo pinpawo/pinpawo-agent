@@ -117,6 +117,10 @@ test('resolveTuiInputCommand routes busy and composer commands', () => {
     { target: 'textarea', command: { type: 'redo' } },
   );
   assert.deepEqual(
+    resolveTuiInputCommand({ type: 'edit.select.all' }, { type: 'composer' }),
+    { target: 'textarea', command: { type: 'selectAll' } },
+  );
+  assert.deepEqual(
     resolveTuiInputCommand({ type: 'cursor.down' }, { type: 'composer' }),
     { target: 'textarea', command: { type: 'moveDown' } },
   );

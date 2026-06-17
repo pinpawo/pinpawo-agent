@@ -90,7 +90,7 @@ export const config = {
   hasuraJwt,
   apiConnected: missingOrPlaceholderApiConfig.length === 0,
   apiSetupMessage: missingOrPlaceholderApiConfig.length > 0
-    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable hosted app, relay, heartbeat, scheduled posts, and Hasura-backed context.`
+    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable the hosted app, chat relay, and Hasura-backed context.`
     : '',
 
   llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),

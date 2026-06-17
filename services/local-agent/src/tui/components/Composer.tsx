@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink';
-import { renderTextAreaRows, wrapTextAreaRows } from '../input/textareaModel';
+import { renderTextAreaRows, wrapTextAreaRows } from '../input/textarea/layout';
 
 export function Composer(props: {
   value: string;

@@ -1,23 +1,18 @@
 import {
-  isTextAreaControlSequence,
   isTextAreaNewlineInput,
 } from './textareaModel';
+import type { TuiKeyInput } from './keyInput';
+import { isTerminalControlSequence } from './terminalInput';
 
-export type TuiKeyInput = {
-  ctrl?: boolean;
-  shift?: boolean;
-  return?: boolean;
-  escape?: boolean;
-  upArrow?: boolean;
-  downArrow?: boolean;
-  leftArrow?: boolean;
-  rightArrow?: boolean;
-  tab?: boolean;
-  backspace?: boolean;
-  delete?: boolean;
-  home?: boolean;
-  end?: boolean;
-};
+export type { TuiKeyInput } from './keyInput';
+export {
+  createInitialTuiInputBufferState,
+  isTerminalControlSequence,
+  isTerminalControlSequencePrefix,
+  normalizeTuiInputEvent,
+  type NormalizedTuiInputEvent,
+  type TuiInputBufferState,
+} from './terminalInput';
 
 export type TuiKeyContext = {
   ready: boolean;
@@ -41,64 +36,6 @@ export type TuiKeyAction =
   | { type: 'composer.edit' }
   | { type: 'none' };
 
-export type TuiInputBufferState = {
-  pendingControlSequence: string;
-};
-
-export type NormalizedTuiInputEvent = {
-  input: string;
-  key: TuiKeyInput;
-};
-
-export function createInitialTuiInputBufferState(): TuiInputBufferState {
-  return { pendingControlSequence: '' };
-}
-
-export function normalizeTuiInputEvent(
-  input: string,
-  key: TuiKeyInput,
-  state: TuiInputBufferState,
-): { state: TuiInputBufferState; event: NormalizedTuiInputEvent | null } {
-  if (!input) {
-    return {
-      state: createInitialTuiInputBufferState(),
-      event: { input, key },
-    };
-  }
-
-  if (state.pendingControlSequence) {
-    const combined = state.pendingControlSequence + input;
-    if (isTerminalControlSequence(combined)) {
-      return {
-        state: createInitialTuiInputBufferState(),
-        event: { input: combined, key },
-      };
-    }
-    if (isTerminalControlSequencePrefix(combined)) {
-      return {
-        state: { pendingControlSequence: combined },
-        event: null,
-      };
-    }
-    return {
-      state: createInitialTuiInputBufferState(),
-      event: { input, key },
-    };
-  }
-
-  if (isTerminalControlSequencePrefix(input)) {
-    return {
-      state: { pendingControlSequence: input },
-      event: null,
-    };
-  }
-
-  return {
-    state: createInitialTuiInputBufferState(),
-    event: { input, key },
-  };
-}
-
 export function resolveTuiKeyAction(
   input: string,
   key: TuiKeyInput,
@@ -106,7 +43,7 @@ export function resolveTuiKeyAction(
 ): TuiKeyAction {
   const isReturn = isReturnKeyInput(input, key);
   const isNewline = isTextAreaNewlineInput(input, key);
-  const isControlSequence = isTextAreaControlSequence(input);
+  const isControlSequence = isTerminalControlSequence(input);
 
   if (key.ctrl && input === 'c') {
     return { type: 'global.ctrl_c' };
@@ -154,12 +91,4 @@ export function resolveTuiKeyAction(
 
 function isReturnKeyInput(input: string, key: TuiKeyInput) {
   return (Boolean(key.return) && !key.shift) || input === '\r' || input === '\n' || input === '\r\n';
-}
-
-function isTerminalControlSequence(input: string) {
-  return /^(?:\x1b)?\[[0-9;?]*[A-Za-z~]$/.test(input);
-}
-
-function isTerminalControlSequencePrefix(input: string) {
-  return /^(?:\x1b)?\[[0-9;?]*$/.test(input);
 }

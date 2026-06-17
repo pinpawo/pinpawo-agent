@@ -1,4 +1,4 @@
-import type { TuiKeyInput } from './keymap';
+import type { TuiKeyInput } from './keyInput';
 
 export type TextAreaModel = {
   text: string;

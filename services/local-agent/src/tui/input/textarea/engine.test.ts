@@ -100,6 +100,23 @@ test('textarea engine replaces and deletes selected ranges', () => {
   );
 });
 
+test('textarea engine replaces partial grapheme selections as whole graphemes', () => {
+  assert.deepEqual(
+    withoutEditHistory(applyTextAreaCommand(
+      { type: 'insert', text: 'x' },
+      { text: '🙂a', cursorOffset: 1, selection: { anchorOffset: 0, focusOffset: 1 } },
+    )),
+    { text: 'xa', cursorOffset: 1 },
+  );
+  assert.deepEqual(
+    withoutEditHistory(applyTextAreaCommand(
+      { type: 'deleteForward' },
+      { text: '🙂a', cursorOffset: 1, selection: { anchorOffset: 1, focusOffset: 3 } },
+    )),
+    { text: '', cursorOffset: 0 },
+  );
+});
+
 test('textarea engine keeps undo and redo stacks for text edits only', () => {
   let state = createTextAreaModel('hi', 2);
   state = applyTextAreaCommand({ type: 'insert', text: '!' }, state);

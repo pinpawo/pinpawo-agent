@@ -1,3 +1,5 @@
+import { segmentTextAreaText } from './textSegments';
+
 export type TextAreaSelection = {
   anchorOffset: number;
   focusOffset: number;
@@ -16,7 +18,15 @@ export function normalizeTextAreaSelection(
   const anchorOffset = clampOffset(selection.anchorOffset, text);
   const focusOffset = clampOffset(selection.focusOffset, text);
   if (anchorOffset === focusOffset) return undefined;
-  return { anchorOffset, focusOffset };
+  const range = expandRangeToGraphemeBoundaries(
+    text,
+    Math.min(anchorOffset, focusOffset),
+    Math.max(anchorOffset, focusOffset),
+  );
+  if (range.start === range.end) return undefined;
+  return anchorOffset <= focusOffset
+    ? { anchorOffset: range.start, focusOffset: range.end }
+    : { anchorOffset: range.end, focusOffset: range.start };
 }
 
 export function getTextAreaSelectionRange(
@@ -46,4 +56,24 @@ export function createTextAreaSelectAllSelection(text: string): TextAreaSelectio
 
 function clampOffset(offset: number, text: string) {
   return Math.max(0, Math.min(text.length, offset));
+}
+
+function expandRangeToGraphemeBoundaries(
+  text: string,
+  start: number,
+  end: number,
+): TextAreaSelectionRange {
+  let nextStart = start;
+  let nextEnd = end;
+
+  for (const segment of segmentTextAreaText(text)) {
+    if (nextStart > segment.start && nextStart < segment.end) {
+      nextStart = segment.start;
+    }
+    if (nextEnd > segment.start && nextEnd < segment.end) {
+      nextEnd = segment.end;
+    }
+  }
+
+  return { start: nextStart, end: nextEnd };
 }

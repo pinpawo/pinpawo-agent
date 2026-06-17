@@ -850,6 +850,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - prompt history state 属于 composer/input host，而不是 textarea engine。它应记录
   已提交 prompt entries、当前 history selection、进入 history 前的 draft；记录点应是
   composer `run.start`，approval `review.response.resume` 不进入 prompt history。
+- prompt history navigation 通过专门的 `input.history.navigate` reducer action 接入。
+  `TuiApp` 只处理 router 输出的 `composerHistory` command；普通 `input.set` /
+  `input.apply` 继续表示用户编辑，并会退出 history selection。
 - selection state。
 - undo/redo。
 - optional external editor flow。
@@ -999,9 +1002,14 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - `TuiState.input` 保存 prompt history entries、selection index、draft。
    - `run.start` 记录 composer prompt；review response 不进入 prompt history。
    - 暂不接上/下键导航行为。
-20. `codex/tui-textarea-history-selection`
+20. `codex/tui-composer-history-navigation`
+   - `TuiApp` 使用 prompt history availability 启用 `composerHistory` routing。
+   - 新增 `input.history.navigate` reducer action。
+   - 上/下键只在 textarea visual boundary 且 prompt history 方向可用时切 history；
+     非边界仍走 textarea vertical movement。
+21. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-21. `codex/tui-opentui-spike`
+22. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

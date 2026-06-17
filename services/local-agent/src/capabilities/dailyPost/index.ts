@@ -1,7 +1,6 @@
 import {
   type AgentActor,
   type AgentCapability,
-  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from './types';
 import { dailyPostInstructions } from './instructions';
@@ -48,7 +47,6 @@ export type DailyPostCapabilityOptions = {
     selectedTrendId: string | null;
   }) => Promise<void>;
   instructions?: string[];
-  artifactStore?: CapabilityArtifactStore;
 };
 
 export function createDailyPostCapability(
@@ -72,7 +70,7 @@ export function createDailyPostCapability(
       instructions: options.instructions ?? dailyPostInstructions,
       middleware: {
         afterRun: (result, ctx) => recordLatestToolResultArtifact(result, ctx, {
-          store: options.artifactStore,
+          store: context.artifactStore,
           schema: dailyPostResultSchema,
           title: 'Daily post result',
           schemaName: 'DailyPostResult',

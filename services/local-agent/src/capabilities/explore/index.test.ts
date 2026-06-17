@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import type { OrchestrationDecisionStructuredOutputConfig } from '@pinpawo/pet-agent';
+import type { CapabilityContext, OrchestrationDecisionStructuredOutputConfig } from '@pinpawo/pet-agent';
 import {
   createExploreCapability,
   exploreResultSchema,
@@ -42,12 +42,19 @@ function fakeSummaryModel(
   } as unknown as BaseChatModel;
 }
 
-async function createRuntime(model: BaseChatModel, options: Parameters<typeof createExploreCapability>[0] = {}) {
-  return createExploreCapability(options).createRuntime({
+async function createRuntime(
+  model: BaseChatModel,
+  opts: {
+    structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
+    artifactStore?: CapabilityContext['artifactStore'];
+  } = {},
+) {
+  return createExploreCapability({ structuredOutput: opts.structuredOutput }).createRuntime({
     models: { act: model },
     actor: {} as never,
     messages: [],
     availableToolkits: [],
+    artifactStore: opts.artifactStore,
   });
 }
 
@@ -234,7 +241,7 @@ test('explore context-pressure ingest persists a summary+evidence report artifac
       writes.push(input);
       return { id: `a-${writes.length}`, uri: `capability-artifact://t/d/artifact/${writes.length}`, kind: 'report' };
     },
-  } as unknown as NonNullable<Parameters<typeof createExploreCapability>[0]>['artifactStore'];
+  } as unknown as NonNullable<CapabilityContext['artifactStore']>;
 
   const model = {
     withStructuredOutput: () => ({
@@ -278,7 +285,7 @@ test('explore context-pressure ingest is a no-op write when no artifact sink is 
   const writes: unknown[] = [];
   const store = {
     writeArtifact: async (input: unknown) => { writes.push(input); return { id: 'x', uri: 'u', kind: 'report' }; },
-  } as unknown as NonNullable<Parameters<typeof createExploreCapability>[0]>['artifactStore'];
+  } as unknown as NonNullable<CapabilityContext['artifactStore']>;
   const runtime = await createRuntime(fakeSummaryModel(summary), { artifactStore: store });
 
   await runtime.contextPolicy?.rewriteAsync?.([

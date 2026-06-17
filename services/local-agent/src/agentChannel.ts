@@ -219,7 +219,6 @@ export function buildLocalChatAgentInput(params: {
   if (isCapabilityEnabled('explore')) {
     appendCapability(capabilities, createExploreCapability({
       structuredOutput: decisionStructuredOutput,
-      artifactStore: params.capabilityArtifactStore,
     }));
   }
 
@@ -233,14 +232,11 @@ export function buildLocalChatAgentInput(params: {
       markSkipped: (trendItemId: string, reason: string) =>
         agentStore.upsertImpression(actor.petId, trendItemId, 'skipped', { reason }),
       requestImageProcessing: ({ postId }) => agentStore.requestImageProcessing(postId),
-      artifactStore: params.capabilityArtifactStore,
     }));
   }
 
   if (isCapabilityEnabled('capability_creator')) {
-    appendCapability(capabilities, createCapabilityCreatorCapability({
-      artifactStore: params.capabilityArtifactStore,
-    }));
+    appendCapability(capabilities, createCapabilityCreatorCapability());
   }
 
   for (const capability of params.extraCapabilities ?? []) {
@@ -268,6 +264,7 @@ export function buildLocalChatAgentInput(params: {
       checkpoint: params.checkpoint,
       decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
+      capabilityArtifactStore: params.capabilityArtifactStore,
     },
     input: {
       messages: [
@@ -324,7 +321,6 @@ export function buildLocalScheduledAgentInput(params: {
   if (isCapabilityEnabled('explore')) {
     appendCapability(capabilities, createExploreCapability({
       structuredOutput: decisionStructuredOutput,
-      artifactStore: params.capabilityArtifactStore,
     }));
   }
 
@@ -344,7 +340,6 @@ export function buildLocalScheduledAgentInput(params: {
       requestImageProcessing:
         params.dailyPost?.requestImageProcessing ??
         (({ postId }) => agentStore.requestImageProcessing(postId)),
-      artifactStore: params.capabilityArtifactStore,
     }));
   }
 
@@ -368,6 +363,7 @@ export function buildLocalScheduledAgentInput(params: {
       actor,
       decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
+      capabilityArtifactStore: params.capabilityArtifactStore,
     },
     input: {
       messages: [

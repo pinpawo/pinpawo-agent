@@ -768,6 +768,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       messages: scopedMessages,
       execution,
       availableToolkits,
+      artifactStore: config.capabilityArtifactStore,
     });
 
     const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);

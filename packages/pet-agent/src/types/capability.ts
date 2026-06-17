@@ -4,7 +4,7 @@ import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { SubagentInput, SubagentResult } from './subagent';
 import type { SubagentContextPolicy } from './subagent';
 import type { AgentToolset } from './toolkit';
-import type { CapabilityArtifactRef } from './artifact';
+import type { CapabilityArtifactRef, CapabilityArtifactStore } from './artifact';
 
 export type CapabilityContext = {
   models: AgentModels;
@@ -15,6 +15,12 @@ export type CapabilityContext = {
     name: string;
     description: string;
   }>;
+  /**
+   * Artifact store (port) the runtime injects so a capability can persist its
+   * own artifacts by closure (afterRun / context-pressure ingest). Undefined on
+   * surfaces without a store; capabilities skip writes when absent.
+   */
+  artifactStore?: CapabilityArtifactStore;
 };
 
 export type CapabilityInstructionContext = CapabilityContext;

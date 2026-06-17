@@ -26,7 +26,6 @@ export type ExploreResult = {
 
 export type ExploreCapabilityOptions = {
   structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
-  artifactStore?: CapabilityArtifactStore;
 };
 
 export const exploreResultSchema = z.object({
@@ -328,6 +327,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
     createRuntime: async (context) => {
       const available = new Set(context.availableToolkits?.map((item) => item.name) ?? []);
       const ingestModel = context.models.observe ?? context.models.subagent ?? context.models.act;
+      const artifactStore = context.artifactStore;
       let currentSummary = readLatestExploreSummary(context.messages);
       const rewriteUnderContextPressure = async (
         messages: BaseMessage[],
@@ -360,7 +360,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
           // earlier raw outputs can be dropped from context yet remain recallable.
           // Record + evict before advancing currentSummary so a persistence
           // failure leaves summary/context consistent (review finding #2).
-          await recordExploreIngestArtifact(options.artifactStore, ctx.artifactSink, ingest);
+          await recordExploreIngestArtifact(artifactStore, ctx.artifactSink, ingest);
           // Only evict the outputs the summarizer actually saw (finding #3).
           const rewritten = replaceCompressedToolOutputs(messages, coveredIndexes, ingest.summary);
           currentSummary = ingest.summary;

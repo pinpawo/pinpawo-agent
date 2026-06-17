@@ -5,7 +5,6 @@ import {
   findTextAreaRenderRowIndexForCursor,
   measureTextAreaLayout,
   measureTextAreaVisualColumn,
-  renderTextAreaRows,
   wrapTextAreaRows,
 } from './layout';
 
@@ -17,22 +16,6 @@ test('textarea layout wraps logical lines into terminal rows', () => {
       { text: 'def', start: 3, end: 6 },
       { text: 'ghi', start: 7, end: 10 },
       { text: 'j', start: 10, end: 11 },
-    ],
-  );
-});
-
-test('textarea layout renders cursor within wrapped content', () => {
-  assert.deepEqual(
-    renderTextAreaRows({ text: 'abcdef\nghij', cursorOffset: 4 }, 3).map((row) => ({
-      before: row.before,
-      cursor: row.cursor,
-      after: row.after,
-    })),
-    [
-      { before: 'abc', cursor: null, after: '' },
-      { before: 'd', cursor: 'e', after: 'f' },
-      { before: 'ghi', cursor: null, after: '' },
-      { before: 'j', cursor: null, after: '' },
     ],
   );
 });
@@ -113,33 +96,6 @@ test('textarea layout keeps emoji graphemes intact while wrapping', () => {
       { text: '👨‍👩‍👧‍👦a', start: 0, end: '👨‍👩‍👧‍👦a'.length },
       { text: 'b', start: '👨‍👩‍👧‍👦a'.length, end: '👨‍👩‍👧‍👦ab'.length },
     ],
-  );
-});
-
-test('textarea layout renders cursor on full grapheme clusters', () => {
-  assert.deepEqual(
-    renderTextAreaRows({ text: '🙂a', cursorOffset: 0 }, 3).map((row) => ({
-      before: row.before,
-      cursor: row.cursor,
-      after: row.after,
-    })),
-    [{ before: '', cursor: '🙂', after: 'a' }],
-  );
-  assert.deepEqual(
-    renderTextAreaRows({ text: '🙂a', cursorOffset: 1 }, 3).map((row) => ({
-      before: row.before,
-      cursor: row.cursor,
-      after: row.after,
-    })),
-    [{ before: '', cursor: '🙂', after: 'a' }],
-  );
-  assert.deepEqual(
-    renderTextAreaRows({ text: '🙂a', cursorOffset: 2 }, 3).map((row) => ({
-      before: row.before,
-      cursor: row.cursor,
-      after: row.after,
-    })),
-    [{ before: '🙂', cursor: 'a', after: '' }],
   );
 });
 

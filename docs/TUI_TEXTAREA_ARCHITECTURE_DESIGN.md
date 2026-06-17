@@ -751,6 +751,12 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - Phase 4 可以先拆出 `textarea/engine.ts` 与 `textarea/layout.ts`，
   保留 `textareaModel.ts` 作为兼容 barrel。这样生产代码可以改为直接导入
   engine/layout，新旧测试仍能覆盖兼容路径。
+- engine 的主入口应逐步切到 `applyTextAreaCommand(command, state, options)`。
+  `applyTextAreaInputEvent(event, ...)` 和 raw `applyTextAreaInput(input, key, ...)`
+  可以短期保留为兼容 wrapper，但不应继续承载 reducer 的核心 switch。
+- `textarea/commands.ts` 负责 canonical event -> textarea command 的边界映射。
+  `submit`、`escape`、`tab`、`interrupt`、unknown control 等 app-level event 应映射为
+  `null`，避免泄漏进 textarea engine。
 - vertical cursor movement 当前需要 engine 使用 layout 的 row lookup helper，
   这是可以接受的单向依赖；layout 不应反向依赖 engine state。
 - `renderModel.ts` 可以在 layout/cursor metrics 稳定后拆出。拆出后，
@@ -885,9 +891,12 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 8. `codex/tui-textarea-render-model`
    - 把 `renderTextAreaRows` 从 layout 拆出到 render model。
    - 提取共享 text segmentation helper，避免 layout/render 各自处理 grapheme。
-9. `codex/tui-textarea-history-selection`
+9. `codex/tui-textarea-commands`
+   - 新增 textarea-owned command union。
+   - 让 engine 主入口消费 textarea command，canonical/raw 入口退为兼容 wrapper。
+10. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-10. `codex/tui-opentui-spike`
+11. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

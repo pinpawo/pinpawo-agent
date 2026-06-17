@@ -473,7 +473,20 @@ export type TextareaState = {
     anchorOffset: number;
     focusOffset: number;
   };
+  editHistory?: {
+    undo: TextareaHistoryEntry[];
+    redo: TextareaHistoryEntry[];
+  };
   preferredColumn?: number;
+};
+
+export type TextareaHistoryEntry = {
+  text: string;
+  cursorOffset: number;
+  selection?: {
+    anchorOffset: number;
+    focusOffset: number;
+  };
 };
 
 export type TextareaCommand =
@@ -497,7 +510,9 @@ export type TextareaCommand =
   | { type: 'selectDown' }
   | { type: 'selectLineStart' }
   | { type: 'selectLineEnd' }
-  | { type: 'selectAll' };
+  | { type: 'selectAll' }
+  | { type: 'undo' }
+  | { type: 'redo' };
 ```
 
 首版可以先不实现 selection/undo，但 state 形状要为它们留位置。
@@ -882,7 +897,10 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   映射到 selection movement commands。router 只决定 owner/target，不能把 selection
   up/down 误交给 prompt history routing。Ctrl+A/select-all 是否覆盖 line-start 语义仍需
   单独决策，不应混进 Shift+Arrow PR。
-- undo/redo。
+- undo/redo state 属于 textarea engine/model：文本编辑命令记录 bounded `editHistory`，
+  cursor/selection movement 保留但不新增 undo entry；host-level `input.set`、prompt
+  history navigation、submit/review resume 清理 edit history。Ctrl+Z/Ctrl+Y 等 key
+  routing 属于后续 canonical/router PR，不应混进 engine state PR。
 - optional external editor flow。
 - command palette / autocomplete target-bound routing。
 
@@ -1053,9 +1071,14 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - `toTextAreaCommand` 把 selection events 接到已有 selection movement commands。
    - router 确保 selection up/down 仍进入 textarea，不触发 prompt history navigation。
    - 暂不改变 Ctrl+A/select-all 语义。
-25. `codex/tui-textarea-history-selection`
-   - select-all key binding、undo/redo，以及 history/selection 交互细节。
-26. `codex/tui-opentui-spike`
+25. `codex/tui-textarea-undo-state`
+   - `TextAreaModel` 增加 bounded `editHistory`。
+   - 纯 engine `undo` / `redo` commands 恢复 textarea snapshot。
+   - 文本编辑入栈；cursor/selection movement 不入栈；host-level draft replacement 清理栈。
+   - 暂不接 Ctrl+Z/Ctrl+Y key binding。
+26. `codex/tui-textarea-history-selection`
+   - select-all key binding、undo/redo key routing，以及 history/selection/undo 交互细节。
+27. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

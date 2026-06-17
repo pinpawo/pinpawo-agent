@@ -1,6 +1,6 @@
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
-import type { TextAreaModel } from '../input/textareaModel';
+import type { TextAreaModel } from '../input/textarea/engine';
 import { TUI_TEXT } from '../render/text';
 
 export const MAX_TUI_HISTORY_ITEMS = 240;

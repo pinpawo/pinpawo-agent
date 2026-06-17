@@ -14,7 +14,7 @@ import {
   toCanonicalInputEvent,
 } from './input/keymap';
 import { resolveTuiInputAction } from './input/inputRouter';
-import { applyTextAreaInputEvent } from './input/textareaModel';
+import { applyTextAreaInputEvent } from './input/textarea/engine';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
   buildActiveOperationLines,

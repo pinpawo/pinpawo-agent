@@ -116,6 +116,14 @@ test('applyTextAreaControllerCommand applies textarea command with host width', 
     ),
     { text: 'abcdef', cursorOffset: 4 },
   );
+  assert.deepEqual(
+    applyTextAreaControllerCommand(
+      { text: 'hello', cursorOffset: 5, selection: { anchorOffset: 1, focusOffset: 4 } },
+      { type: 'insert', text: 'i' },
+      10,
+    ),
+    { text: 'hio', cursorOffset: 2 },
+  );
 });
 
 test('measureTextAreaControllerLayout exposes visual cursor boundaries', () => {

@@ -11,16 +11,29 @@ import {
   findTextAreaOffsetAtVisualColumn,
   measureTextAreaLayout,
 } from './layout';
+import {
+  createTextAreaSelectAllSelection,
+  getTextAreaSelectionRange,
+  normalizeTextAreaSelection,
+  type TextAreaSelection,
+} from './selection';
 
 export type TextAreaModel = {
   text: string;
   cursorOffset: number;
+  selection?: TextAreaSelection;
 };
 
-export function createTextAreaModel(text = '', cursorOffset = text.length): TextAreaModel {
+export function createTextAreaModel(
+  text = '',
+  cursorOffset = text.length,
+  selection?: TextAreaSelection,
+): TextAreaModel {
+  const nextSelection = normalizeTextAreaSelection(selection, text);
   return {
     text,
     cursorOffset: clampCursor(cursorOffset, text),
+    ...(nextSelection ? { selection: nextSelection } : {}),
   };
 }
 
@@ -39,7 +52,7 @@ export function applyTextAreaInputEvent(
   options: { width?: number } = {},
 ): TextAreaModel {
   const command = toTextAreaCommand(event);
-  if (!command) return createTextAreaModel(state.text, state.cursorOffset);
+  if (!command) return createTextAreaModel(state.text, state.cursorOffset, state.selection);
   return applyTextAreaCommand(command, state, options);
 }
 
@@ -50,27 +63,42 @@ export function applyTextAreaCommand(
 ): TextAreaModel {
   const text = state.text;
   const cursorOffset = clampCursor(state.cursorOffset, text);
+  const selectionRange = getTextAreaSelectionRange(state.selection, text);
   const width = options.width ?? Number.MAX_SAFE_INTEGER;
 
   switch (command.type) {
     case 'insert':
     case 'paste':
+      if (selectionRange) {
+        return replaceRange(
+          text,
+          selectionRange.start,
+          selectionRange.end,
+          command.text,
+          selectionRange.start + command.text.length,
+        );
+      }
       return replaceRange(text, cursorOffset, cursorOffset, command.text, cursorOffset + command.text.length);
     case 'deleteBackward':
+      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '', selectionRange.start);
       if (cursorOffset === 0) return createTextAreaModel(text, cursorOffset);
       return replaceRange(text, cursorOffset - 1, cursorOffset, '', cursorOffset - 1);
     case 'deleteForward':
+      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '', selectionRange.start);
       if (cursorOffset === text.length) return createTextAreaModel(text, cursorOffset);
       return replaceRange(text, cursorOffset, cursorOffset + 1, '', cursorOffset);
     case 'deleteWordBackward': {
+      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '', selectionRange.start);
       const wordStart = findPreviousWordStart(text, cursorOffset);
       return replaceRange(text, wordStart, cursorOffset, '', wordStart);
     }
     case 'deleteToLineStart': {
+      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '', selectionRange.start);
       const lineStart = findLogicalLineStart(text, cursorOffset);
       return replaceRange(text, lineStart, cursorOffset, '', lineStart);
     }
     case 'deleteToLineEnd':
+      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '', selectionRange.start);
       return replaceRange(text, cursorOffset, findLogicalLineEnd(text, cursorOffset), '', cursorOffset);
     case 'moveLeft':
       return createTextAreaModel(text, cursorOffset - 1);
@@ -85,7 +113,10 @@ export function applyTextAreaCommand(
     case 'moveLineEnd':
       return createTextAreaModel(text, findLogicalLineEnd(text, cursorOffset));
     case 'newline':
+      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '\n', selectionRange.start + 1);
       return replaceRange(text, cursorOffset, cursorOffset, '\n', cursorOffset + 1);
+    case 'selectAll':
+      return createTextAreaModel(text, text.length, createTextAreaSelectAllSelection(text));
   }
 }
 

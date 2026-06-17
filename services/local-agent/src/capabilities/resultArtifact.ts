@@ -1,16 +1,11 @@
 import { ToolMessage } from '@langchain/core/messages';
+import { clipForPrompt } from '@pinpawo/pet-agent';
 import type {
   CapabilityArtifactStore,
   CapabilityMiddlewareContext,
   SubagentResult,
 } from '@pinpawo/pet-agent';
 import type { ZodType } from 'zod';
-
-function clipText(text: string, maxLength: number) {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1)}…`;
-}
 
 /**
  * Deterministically persist a capability's structured result as a JSON result
@@ -59,7 +54,7 @@ export async function recordLatestToolResultArtifact(
         kind: 'result',
         mimeType: 'application/json',
         title: params.title,
-        preview: clipText(JSON.stringify(content), 500),
+        preview: clipForPrompt(JSON.stringify(content), 500),
         content,
         schema: { name: params.schemaName, version: 1 },
       },

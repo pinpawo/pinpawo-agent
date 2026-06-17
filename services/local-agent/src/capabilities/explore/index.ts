@@ -1,5 +1,6 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { clipForPrompt } from '@pinpawo/pet-agent';
 import type {
   AgentCapability,
   CapabilityArtifactSink,
@@ -55,12 +56,6 @@ const EXPLORE_COMPRESS_MIN_TOOL_CHARS = 800;
 const EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS = 18_000;
 const EXPLORE_SUMMARY_MESSAGE_MAX_CHARS = 2_000;
 const EXPLORE_RAW_EVICTED = '[explore raw tool output evicted after ingest]';
-
-function clipText(text: string, maxLength: number) {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1)}…`;
-}
 
 function readMessageText(message: { content?: unknown }): string {
   const content = message.content;
@@ -124,7 +119,7 @@ async function recordExploreIngestArtifact(
   sink: CapabilityArtifactSink | undefined,
   ingest: ExploreKnowledgeIngest,
 ): Promise<void> {
-  if (!store || !sink?.recordArtifact || !sink.threadId || !sink.delegationId || !sink.turnId) {
+  if (!store || !sink?.recordCapabilityArtifact || !sink.threadId || !sink.delegationId || !sink.turnId) {
     return;
   }
   const normalized = ingest.summary.trim();
@@ -137,12 +132,12 @@ async function recordExploreIngestArtifact(
       kind: 'report',
       mimeType: 'text/markdown',
       title: 'Explore knowledge summary',
-      preview: clipText(normalized, 500),
+      preview: clipForPrompt(normalized, 500),
       content: normalized,
       metadata: { evidence: ingest.evidence },
     },
   });
-  await sink.recordArtifact(ref);
+  await sink.recordCapabilityArtifact(ref);
 }
 
 function readMessageStatus(message: BaseMessage): ExploreResult['status'] | null {
@@ -178,7 +173,7 @@ async function ingestExploreKnowledge(params: {
   previousSummary: string | null;
   evidence: string;
 }): Promise<ExploreKnowledgeIngest> {
-  const evidence = clipText(params.evidence, EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS);
+  const evidence = clipForPrompt(params.evidence, EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS);
   if (!evidence.trim()) {
     throw new Error('explore ingest has no new evidence');
   }
@@ -288,7 +283,7 @@ function buildContextPressureEvidence(messages: BaseMessage[], toolIndexes: numb
     if (!text) continue;
     const entry = [
       `[tool_result] ${typeof (message as ToolMessage).name === 'string' ? (message as ToolMessage).name : 'tool'}`,
-      clipText(text, EXPLORE_SUMMARY_MESSAGE_MAX_CHARS),
+      clipForPrompt(text, EXPLORE_SUMMARY_MESSAGE_MAX_CHARS),
     ].join('\n');
     totalLength += entry.length;
     if (totalLength > EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS) break;

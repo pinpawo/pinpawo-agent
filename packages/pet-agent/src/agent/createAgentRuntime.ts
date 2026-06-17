@@ -818,7 +818,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,
       artifactSink: {
-        recordArtifact: (ref: CapabilityArtifactRef) => {
+        recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
           artifactRefs.push(ref);
         },
         threadId,

@@ -853,7 +853,10 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - prompt history navigation 通过专门的 `input.history.navigate` reducer action 接入。
   `TuiApp` 只处理 router 输出的 `composerHistory` command；普通 `input.set` /
   `input.apply` 继续表示用户编辑，并会退出 history selection。
-- selection state。
+- selection state 应先落在 textarea engine/model 内：`TextAreaModel` 可携带可选 selection，
+  `textarea/selection.ts` 负责 normalized range，engine 负责选区替换/删除，controller 和
+  reducer 只透传或清理 selection。Shift+Arrow、select-all key binding、selection
+  highlight 是后续 PR。
 - undo/redo。
 - optional external editor flow。
 - command palette / autocomplete target-bound routing。
@@ -1007,9 +1010,14 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - 新增 `input.history.navigate` reducer action。
    - 上/下键只在 textarea visual boundary 且 prompt history 方向可用时切 history；
      非边界仍走 textarea vertical movement。
-21. `codex/tui-textarea-history-selection`
-   - 上下历史边界、selection、undo/redo。
-22. `codex/tui-opentui-spike`
+21. `codex/tui-textarea-selection-state`
+   - 新增 `textarea/selection.ts` normalized selection helper。
+   - `TextAreaModel` 支持可选 selection，engine 支持选区替换/删除和 `selectAll` command。
+   - controller/reducer 透传 engine selection；直接输入、提交、history navigation 清理 selection。
+   - 暂不接新按键或 selection highlight。
+22. `codex/tui-textarea-history-selection`
+   - Shift+Arrow、select-all key binding、selection highlight、undo/redo。
+23. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

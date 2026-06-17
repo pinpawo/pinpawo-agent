@@ -61,14 +61,6 @@ function createDeps(): LocalServerDeps {
       meta: { id: 'user-cap' },
       capability: { name: 'user-capability' },
     }] as LocalServerDeps['userCapabilities'],
-    getStats: () => ({
-      startedAt: '2026-06-02T00:00:00.000Z',
-      totalRuns: 0,
-      successfulRuns: 0,
-      failedRuns: 0,
-      lastRunAt: null,
-      lastRunOk: null,
-    }),
   };
 }
 

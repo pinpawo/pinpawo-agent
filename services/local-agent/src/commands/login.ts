@@ -1,6 +1,4 @@
 import { createInterface } from 'node:readline/promises';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import { inferLlmContextWindowTokens } from '../llmContextWindow';
 import { loadStoredConfig, saveStoredConfig, configPath } from '../storage';
@@ -20,19 +18,6 @@ async function prompt(rl: ReturnType<typeof createInterface>, question: string):
   return (await rl.question(question)).trim();
 }
 
-function maskSecret(value: string): string {
-  if (!value) return '';
-  if (value.length <= 12) return `${value.slice(0, 4)}...`;
-  return `${value.slice(0, 8)}...${value.slice(-4)}`;
-}
-
-function normalizeOptionalInput(input: string): string | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  if (trimmed === '-' || trimmed.toLowerCase() === 'clear') return '';
-  return trimmed;
-}
-
 function parsePositiveInteger(value: string | undefined): number | null {
   if (!value) return null;
   const parsed = Number(value.trim());
@@ -47,10 +32,6 @@ function formatContextWindow(value: number | undefined): string {
 
 function fail(message: string): never {
   throw new Error(message);
-}
-
-function isValidMediaCrawlerDir(dir: string): boolean {
-  return existsSync(resolve(dir, 'main.py'));
 }
 
 async function apiPost<T>(url: string, body: unknown, authToken?: string): Promise<T> {
@@ -166,42 +147,6 @@ export async function runLogin() {
       fail('LLM Context Window Tokens must be a positive integer.');
     }
 
-    // MediaCrawler configuration (optional)
-    console.log('\nMediaCrawler Configuration (optional):');
-    const defaultCrawlerDir = stored.mediacrawler_dir ?? process.env.MEDIACRAWLER_DIR ?? '';
-    const defaultXhsCookie = stored.xhs_cookie ?? process.env.XHS_COOKIE ?? '';
-
-    console.log('Press Enter to keep existing value. Enter "-" to clear an existing value.');
-
-    let mediaCrawlerDir = defaultCrawlerDir;
-    const mediaCrawlerDirInput = normalizeOptionalInput(
-      await prompt(
-        rl,
-        `MediaCrawler directory${defaultCrawlerDir ? ` [${defaultCrawlerDir}]` : ' (e.g. /Users/you/MediaCrawler)'}: `
-      )
-    );
-    if (mediaCrawlerDirInput !== null) {
-      mediaCrawlerDir = mediaCrawlerDirInput;
-    }
-    if (mediaCrawlerDir && !isValidMediaCrawlerDir(mediaCrawlerDir)) {
-      fail(`MediaCrawler directory is invalid: ${mediaCrawlerDir}\nExpected to find main.py in that directory.`);
-    }
-
-    let xhsCookie = defaultXhsCookie;
-    if (mediaCrawlerDir) {
-      const cookieLabel = defaultXhsCookie
-        ? ` [configured: ${maskSecret(defaultXhsCookie)}]`
-        : ' (web_session=...)';
-      const xhsCookieInput = normalizeOptionalInput(
-        await prompt(rl, `XHS Cookie${cookieLabel}: `)
-      );
-      if (xhsCookieInput !== null) {
-        xhsCookie = xhsCookieInput;
-      }
-    } else if (defaultXhsCookie) {
-      console.log('Skipping XHS Cookie because MediaCrawler directory is empty.');
-    }
-
     // Save config
     const nextConfig = {
       ...stored,
@@ -215,19 +160,11 @@ export async function runLogin() {
       llm_base_url: llmBaseUrl,
       llm_model: llmModel,
       llm_context_window_tokens: parsedContextWindow,
-      mediacrawler_dir: mediaCrawlerDir || undefined,
-      xhs_cookie: xhsCookie || undefined,
     };
     saveStoredConfig(nextConfig);
 
     console.log(`\nConfig saved to: ${configPath()}`);
     console.log(`LLM: ${llmModel} @ ${llmBaseUrl}`);
-    if (mediaCrawlerDir) {
-      console.log(`MediaCrawler: ${mediaCrawlerDir}`);
-      console.log(`XHS Cookie: ${xhsCookie ? `configured (${maskSecret(xhsCookie)})` : 'not set; QR code login will be used'}`);
-    } else {
-      console.log('MediaCrawler: disabled');
-    }
     console.log('Run "pinpawo-agent actor" to choose an actor, then "pinpawo-agent run" to start the agent.\n');
   } finally {
     rl.close();

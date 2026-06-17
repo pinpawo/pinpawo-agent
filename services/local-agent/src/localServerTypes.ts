@@ -2,15 +2,6 @@ import type { AgentCapability, AgentToolkit, CapabilityArtifactStore } from '@pi
 import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
 
-export type AgentStats = {
-  startedAt: string;
-  totalRuns: number;
-  successfulRuns: number;
-  failedRuns: number;
-  lastRunAt: string | null;
-  lastRunOk: boolean | null;
-};
-
 export type LocalServerDeps = {
   actorId: string;
   actorName?: string;
@@ -28,5 +19,4 @@ export type LocalServerDeps = {
     userCapabilityDefinitions: LoadedUserCapability[];
     userCapabilities: LoadedUserCapability[];
   }>;
-  getStats: () => AgentStats;
 };

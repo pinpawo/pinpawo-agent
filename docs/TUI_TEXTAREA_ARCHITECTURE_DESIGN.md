@@ -583,6 +583,7 @@ composition underline 不应该再散落到 `Composer`。
 
 职责：
 
+- 维护 textarea host wiring：当前 textarea state、width、focus、placeholder、dispatch。
 - 渲染 textarea view model。
 - 不处理 key routing。
 - 不实现编辑算法。
@@ -600,6 +601,13 @@ composition underline 不应该再散落到 `Composer`。
 并委托 `TextAreaView` 渲染”。再往后如果 textarea state 从 `TuiApp` 抽到 hook/controller，
 `Composer` 可以进一步只接收已经构建好的 view model。
 
+host/controller 层可以先落成一个轻量 hook，例如 `useTextAreaController`：
+
+- 输入：`TuiState.input`、focus、placeholder、textarea width、`dispatch`。
+- 输出：`composerProps`、`clear()`、`applyCommand(command)`。
+- 约束：它只做 textarea host wiring，不处理 app command、副作用、approval option
+  navigation 或 resume picker。
+
 ## 6. 模块边界对照
 
 | 层 | 当前位置 | 目标位置 | 说明 |
@@ -610,7 +618,7 @@ composition underline 不应该再散落到 `Composer`。
 | text editing | `textareaModel.ts` | `textarea/engine.ts` | 纯 reducer |
 | layout wrapping | `textareaModel.ts` | `textarea/layout.ts` | 终端宽度、display width |
 | rendering | `Composer.tsx` | `textarea/viewModel.ts` + `TextAreaView` / `Composer` | view model 负责显示状态，view 只渲染 |
-| integration | `TuiApp.tsx` | `TuiApp.tsx` + controller/hook | 只做 wiring |
+| integration | `TuiApp.tsx` | `TuiApp.tsx` + `useTextAreaController` | TuiApp 执行业务副作用，controller 接 textarea host wiring |
 
 目标是让每层都有独立测试，不再只能从 `TuiApp` 黑盒修 bug。
 
@@ -815,6 +823,10 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   `Composer` 只是 host/component 边界，textarea 的显示 contract 可以独立测试。
 - placeholder cursor 也应复用 grapheme segmentation，避免实现层重新使用
   `placeholder[0]` 这类 UTF-16 切片。
+- view model 之后应继续抽 host/controller boundary。`useTextAreaController`
+  可以先承接 `clear`、`applyCommand`、`composerProps`，让 `TuiApp` 不再直接调用
+  textarea engine 或手动拼 `Composer` props；但 approval submit、resume picker、
+  interrupt/exit 等业务副作用仍留在 `TuiApp`。
 
 ### Phase 5: History, selection, undo, external editor
 
@@ -940,9 +952,12 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 11. `codex/tui-textarea-view-model`
    - 新增 `buildTextAreaViewModel` 和 `TextAreaView`。
    - `Composer` 不再直接计算 layout/render/placeholder 行。
-12. `codex/tui-textarea-history-selection`
+12. `codex/tui-textarea-controller`
+   - 新增 `useTextAreaController` 作为 host wiring 边界。
+   - `TuiApp` 不再直接调用 textarea engine 或手动拼 Composer props。
+13. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-13. `codex/tui-opentui-spike`
+14. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

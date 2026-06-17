@@ -677,6 +677,13 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - 当前 router 仍返回旧的 broad command union；下一步可以把命令进一步拆成
   `textarea command`、`app command`、`approval command`、`resume command`，
   让 `TuiApp` 的 switch target 更接近本节的目标。
+- router 输出可以采用 `{ target, action }` 形状，例如
+  `{ target: 'composer', action: 'edit' }`。旧的
+  `approval.previous` / `composer.edit` dotted command 可以保留为
+  `keymap.ts` 的兼容转换层，但不应再作为主路径。
+- `TuiApp` 接入 routed command 后，仍会承担具体副作用执行：
+  exit、interrupt、submit review、resume session、textarea edit。后续若继续缩小
+  `TuiApp`，应抽 handler/controller，而不是把副作用塞回 router。
 
 ### Phase 4: Promote textarea engine and layout
 

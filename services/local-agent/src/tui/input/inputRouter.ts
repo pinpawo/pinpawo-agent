@@ -1,4 +1,8 @@
 import type { CanonicalInputEvent } from './canonicalInput';
+import {
+  toTextAreaCommand,
+  type TextAreaCommand,
+} from './textarea/commands';
 
 export type TuiInputRouteContext = {
   ready: boolean;
@@ -19,6 +23,7 @@ export type TuiInputCommand =
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'composer'; action: 'submit' | 'clear' | 'edit' }
+  | { target: 'textarea'; command: TextAreaCommand }
   | { target: 'none' };
 
 export type TuiLegacyInputCommand =
@@ -67,7 +72,6 @@ export function resolveTuiInputCommand(
   owner: TuiInputOwner,
 ): TuiInputCommand {
   const isReturn = event.type === 'submit';
-  const isNewline = event.type === 'newline';
   const isControlSequence = event.type === 'unknown.control';
 
   switch (owner.type) {
@@ -84,13 +88,12 @@ export function resolveTuiInputCommand(
     case 'approval':
       if (event.type === 'cursor.up') return { target: 'approval', action: 'previous' };
       if (event.type === 'cursor.down') return { target: 'approval', action: 'next' };
-      if (isNewline) return { target: 'composer', action: 'edit' };
       if (isReturn) return { target: 'approval', action: 'submit' };
       if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
       if (event.type === 'tab') return { target: 'none' };
       if (isControlSequence) return { target: 'none' };
       if (event.type === 'noop') return { target: 'none' };
-      return { target: 'composer', action: 'edit' };
+      return routeTextAreaCommand(event);
 
     case 'busy':
       if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
@@ -98,13 +101,11 @@ export function resolveTuiInputCommand(
 
     case 'composer':
       if (event.type === 'escape') return { target: 'composer', action: 'clear' };
-      if (isNewline) return { target: 'composer', action: 'edit' };
       if (isReturn) return { target: 'composer', action: 'submit' };
-      if (event.type === 'cursor.up' || event.type === 'cursor.down') return { target: 'composer', action: 'edit' };
       if (event.type === 'tab') return { target: 'none' };
       if (isControlSequence) return { target: 'none' };
       if (event.type === 'noop') return { target: 'none' };
-      return { target: 'composer', action: 'edit' };
+      return routeTextAreaCommand(event);
   }
 }
 
@@ -118,7 +119,14 @@ export function toLegacyTuiInputCommand(command: TuiInputCommand): TuiLegacyInpu
       return { type: `resume.${command.action}` };
     case 'composer':
       return { type: `composer.${command.action}` };
+    case 'textarea':
+      return { type: 'composer.edit' };
     case 'none':
       return { type: 'none' };
   }
+}
+
+function routeTextAreaCommand(event: CanonicalInputEvent): TuiInputCommand {
+  const command = toTextAreaCommand(event);
+  return command ? { target: 'textarea', command } : { target: 'none' };
 }

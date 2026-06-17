@@ -5,9 +5,7 @@ import {
 import type { TuiKeyInput } from '../keyInput';
 import {
   findTextAreaOffsetAtVisualColumn,
-  findTextAreaRenderRowIndexForCursor,
-  measureTextAreaVisualColumn,
-  wrapTextAreaRows,
+  measureTextAreaLayout,
 } from './layout';
 
 export type TextAreaModel = {
@@ -96,12 +94,13 @@ function moveCursorVertically(
   width: number,
   direction: -1 | 1,
 ) {
-  const rows = wrapTextAreaRows(text, width);
-  const rowIndex = findTextAreaRenderRowIndexForCursor(rows, text, cursorOffset);
-  const row = rows[rowIndex] ?? rows[0]!;
-  const targetRow = rows[Math.max(0, Math.min(rows.length - 1, rowIndex + direction))] ?? row;
-  const column = measureTextAreaVisualColumn(row, text, cursorOffset);
-  return findTextAreaOffsetAtVisualColumn(targetRow, text, column);
+  const layout = measureTextAreaLayout({ text, cursorOffset }, width);
+  const targetRowIndex = Math.max(
+    0,
+    Math.min(layout.rows.length - 1, layout.cursor.rowIndex + direction),
+  );
+  const targetRow = layout.rows[targetRowIndex] ?? layout.rows[layout.cursor.rowIndex]!;
+  return findTextAreaOffsetAtVisualColumn(targetRow, text, layout.cursor.column);
 }
 
 function findLogicalLineStart(text: string, cursorOffset: number) {

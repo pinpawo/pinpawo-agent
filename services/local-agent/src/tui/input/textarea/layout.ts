@@ -13,6 +13,23 @@ export type TextAreaRenderRow = {
   end: number;
 };
 
+export type TextAreaLayoutRow = {
+  text: string;
+  start: number;
+  end: number;
+};
+
+export type TextAreaLayout = {
+  rows: TextAreaLayoutRow[];
+  cursor: {
+    offset: number;
+    rowIndex: number;
+    column: number;
+    isAtFirstVisualRow: boolean;
+    isAtLastVisualRow: boolean;
+  };
+};
+
 export function renderTextAreaRows(
   state: { text: string; cursorOffset: number },
   width: number,
@@ -54,13 +71,9 @@ export function renderTextAreaRows(
   });
 }
 
-export function wrapTextAreaRows(text: string, width: number): Array<{
-  text: string;
-  start: number;
-  end: number;
-}> {
+export function wrapTextAreaRows(text: string, width: number): TextAreaLayoutRow[] {
   const visualWidth = Math.max(1, width);
-  const rows: Array<{ text: string; start: number; end: number }> = [];
+  const rows: TextAreaLayoutRow[] = [];
   let offset = 0;
   const logicalLines = text.split('\n');
 
@@ -77,6 +90,29 @@ export function wrapTextAreaRows(text: string, width: number): Array<{
   }
 
   return rows.length > 0 ? rows : [{ text: '', start: 0, end: 0 }];
+}
+
+export function measureTextAreaLayout(
+  state: { text: string; cursorOffset: number },
+  width: number,
+): TextAreaLayout {
+  const text = state.text;
+  const cursorOffset = clampCursor(state.cursorOffset, text);
+  const rows = wrapTextAreaRows(text, width);
+  const rowIndex = findTextAreaRenderRowIndexForCursor(rows, text, cursorOffset);
+  const row = rows[rowIndex] ?? rows[0]!;
+  const column = measureTextAreaVisualColumn(row, text, cursorOffset);
+
+  return {
+    rows,
+    cursor: {
+      offset: cursorOffset,
+      rowIndex,
+      column,
+      isAtFirstVisualRow: rowIndex === 0,
+      isAtLastVisualRow: rowIndex === rows.length - 1,
+    },
+  };
 }
 
 function wrapTextAreaLine(

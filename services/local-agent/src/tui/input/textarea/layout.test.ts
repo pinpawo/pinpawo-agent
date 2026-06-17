@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   findTextAreaOffsetAtVisualColumn,
   findTextAreaRenderRowIndexForCursor,
+  measureTextAreaLayout,
   measureTextAreaVisualColumn,
   renderTextAreaRows,
   wrapTextAreaRows,
@@ -43,6 +44,42 @@ test('textarea layout locates cursor rows at soft-wrap and newline boundaries', 
   assert.equal(findTextAreaRenderRowIndexForCursor(rows, 'abcdef\ngh', 3), 1);
   assert.equal(findTextAreaRenderRowIndexForCursor(rows, 'abcdef\ngh', 6), 1);
   assert.equal(findTextAreaRenderRowIndexForCursor(rows, 'abcdef\ngh', 7), 2);
+});
+
+test('textarea layout reports cursor visual row boundaries', () => {
+  assert.deepEqual(measureTextAreaLayout({ text: '', cursorOffset: 0 }, 3).cursor, {
+    offset: 0,
+    rowIndex: 0,
+    column: 0,
+    isAtFirstVisualRow: true,
+    isAtLastVisualRow: true,
+  });
+
+  assert.deepEqual(measureTextAreaLayout({ text: 'abcdef', cursorOffset: 2 }, 3).cursor, {
+    offset: 2,
+    rowIndex: 0,
+    column: 2,
+    isAtFirstVisualRow: true,
+    isAtLastVisualRow: false,
+  });
+
+  assert.deepEqual(measureTextAreaLayout({ text: 'abcdef', cursorOffset: 3 }, 3).cursor, {
+    offset: 3,
+    rowIndex: 1,
+    column: 0,
+    isAtFirstVisualRow: false,
+    isAtLastVisualRow: true,
+  });
+});
+
+test('textarea layout reports cursor visual columns with wide characters', () => {
+  assert.deepEqual(measureTextAreaLayout({ text: '你a好b', cursorOffset: 3 }, 3).cursor, {
+    offset: 3,
+    rowIndex: 1,
+    column: 2,
+    isAtFirstVisualRow: false,
+    isAtLastVisualRow: true,
+  });
 });
 
 test('textarea layout wraps CJK text by terminal display width', () => {

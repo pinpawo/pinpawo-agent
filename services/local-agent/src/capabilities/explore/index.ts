@@ -269,9 +269,17 @@ function collectCompressibleToolResultIndexes(messages: BaseMessage[]): number[]
     .map((item) => item.index);
 }
 
+/**
+ * Builds the evidence string the summarizer sees, and returns the exact set of
+ * tool-output indexes that string actually covers. Only those covered indexes
+ * may be evicted afterwards — outputs dropped by the char-budget `break` were
+ * never shown to the summarizer, so evicting them would lose findings silently
+ * (review finding #3).
+ */
 function buildContextPressureEvidence(messages: BaseMessage[], toolIndexes: number[]) {
   const selected = new Set(toolIndexes);
   const lines: string[] = [];
+  const coveredIndexes: number[] = [];
   let totalLength = 0;
 
   for (const [index, message] of messages.entries()) {
@@ -285,9 +293,13 @@ function buildContextPressureEvidence(messages: BaseMessage[], toolIndexes: numb
     totalLength += entry.length;
     if (totalLength > EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS) break;
     lines.push(entry);
+    coveredIndexes.push(index);
   }
 
-  return lines.length > 0 ? `[context_pressure]\n${lines.join('\n\n')}` : '';
+  return {
+    evidence: lines.length > 0 ? `[context_pressure]\n${lines.join('\n\n')}` : '',
+    coveredIndexes,
+  };
 }
 
 function replaceCompressedToolOutputs(
@@ -334,21 +346,38 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
         if (toolIndexes.length === 0) {
           return messages;
         }
-        const evidence = buildContextPressureEvidence(messages, toolIndexes);
-        if (!evidence.trim()) {
+        const { evidence, coveredIndexes } = buildContextPressureEvidence(messages, toolIndexes);
+        if (!evidence.trim() || coveredIndexes.length === 0) {
           return messages;
         }
-        const ingest = await ingestExploreKnowledge({
-          model: ingestModel,
-          structuredOutput: options.structuredOutput,
-          previousSummary: currentSummary,
-          evidence,
-        });
-        currentSummary = ingest.summary;
-        // Persist the summary + structured evidence as a report artifact so the
-        // earlier raw outputs can be dropped from context yet remain recallable.
-        await recordExploreIngestArtifact(options.artifactStore, ctx.artifactSink, ingest);
-        return replaceCompressedToolOutputs(messages, toolIndexes, ingest.summary);
+        // Summarizing + persisting must never crash the explore run: an ingest
+        // model error (rate limit, timeout, structured-output parse failure) or a
+        // store write failure under context pressure should degrade to "keep the
+        // raw outputs this round", not abort the whole turn (review finding #1).
+        try {
+          const ingest = await ingestExploreKnowledge({
+            model: ingestModel,
+            structuredOutput: options.structuredOutput,
+            previousSummary: currentSummary,
+            evidence,
+          });
+          // Persist the summary + structured evidence as a report artifact so the
+          // earlier raw outputs can be dropped from context yet remain recallable.
+          // Record + evict before advancing currentSummary so a persistence
+          // failure leaves summary/context consistent (review finding #2).
+          await recordExploreIngestArtifact(options.artifactStore, ctx.artifactSink, ingest);
+          // Only evict the outputs the summarizer actually saw (finding #3).
+          const rewritten = replaceCompressedToolOutputs(messages, coveredIndexes, ingest.summary);
+          currentSummary = ingest.summary;
+          return rewritten;
+        } catch (error) {
+          console.warn(
+            `[explore] context-pressure ingest failed, keeping raw outputs this round: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return messages;
+        }
       };
       return {
         uses: DEFAULT_EXPLORE_TOOLKITS.filter((name) => available.has(name)),

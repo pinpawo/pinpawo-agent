@@ -198,7 +198,7 @@ test('explore ingest forwards configured structured output method', async () => 
   assert.deepEqual(readExploreResult(rewritten ?? [])?.summary, summary);
 });
 
-test('explore ingest propagates structured output failures instead of falling back', async () => {
+test('explore ingest failure under context pressure keeps raw outputs instead of crashing the run', async () => {
   const model = {
     withStructuredOutput: () => ({
       invoke: async () => {
@@ -209,19 +209,20 @@ test('explore ingest propagates structured output failures instead of falling ba
   const runtime = await createRuntime(model);
   assert.ok(runtime.contextPolicy?.rewriteAsync);
 
-  await assert.rejects(
-    () => Promise.resolve(runtime.contextPolicy!.rewriteAsync!([
-      toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
-      toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
-      toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
-    ], {
-      estimateMessagesTokens: () => 30_000,
-      iterationCount: 2,
-      operations: {},
-      contextWindowTokens: 32_000,
-    })),
-    /invalid structured output/,
-  );
+  const input = [
+    toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
+    toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
+    toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
+  ];
+  // An ingest model failure must degrade gracefully (review finding #1): the
+  // rewrite returns the original messages unchanged — no throw, no eviction.
+  const rewritten = await runtime.contextPolicy!.rewriteAsync!(input, {
+    estimateMessagesTokens: () => 30_000,
+    iterationCount: 2,
+    operations: {},
+    contextWindowTokens: 32_000,
+  });
+  assert.deepEqual(rewritten, input);
 });
 
 test('explore context-pressure ingest persists a summary+evidence report artifact via the sink', async () => {

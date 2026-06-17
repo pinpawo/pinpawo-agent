@@ -10,6 +10,8 @@ export type CanonicalInputEvent =
   | { type: 'text.delete.word.backward' }
   | { type: 'text.delete.to.line.start' }
   | { type: 'text.delete.to.line.end' }
+  | { type: 'edit.undo' }
+  | { type: 'edit.redo' }
   | { type: 'cursor.left' }
   | { type: 'cursor.right' }
   | { type: 'cursor.up' }
@@ -94,6 +96,12 @@ function toCanonicalControlKey(
       return { type: 'text.delete.to.line.start' };
     case 'w':
       return { type: 'text.delete.word.backward' };
+    case 'y':
+      return { type: 'edit.redo' };
+    case 'z':
+      return key.shift ? { type: 'edit.redo' } : { type: 'edit.undo' };
+    case 'Z':
+      return { type: 'edit.redo' };
     default:
       return { type: 'noop' };
   }

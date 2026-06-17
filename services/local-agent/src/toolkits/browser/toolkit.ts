@@ -1,4 +1,4 @@
-import type { AgentToolkit, CapabilityAvailability } from '@pinpawo/pet-agent';
+import { ReviewPolicies, type AgentToolkit, type CapabilityAvailability } from '@pinpawo/pet-agent';
 import { loadStoredConfig } from '../../storage';
 import { detectBrowserStatus } from './session';
 import { browserTools } from './tools';
@@ -53,5 +53,12 @@ export function createBrowserToolkit(): AgentToolkit {
     tools: browserTools,
     instructions: browserToolkitInstructions,
     operations: browserOperationMetadata,
+    policy: {
+      toolReview: {
+        browser_open: ReviewPolicies.externalAccess(),
+        browser_open_with_session: ReviewPolicies.externalAccess(),
+        browser_open_with_profile: ReviewPolicies.externalAccess(),
+      },
+    },
   };
 }

@@ -82,5 +82,6 @@ test('createGitToolkit exposes a dedicated git capability surface', () => {
   );
   assert.equal(toolkit.operations?.git_diff?.title, '查看 git diff');
   assert.equal(toolkit.operations?.git_commit?.title, '创建 git commit');
+  assert.equal(Boolean(toolkit.policy?.toolReview?.git_add), true);
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_commit), true);
 });

@@ -13,6 +13,11 @@ import { Command } from '@langchain/langgraph';
 import type { AgentChannelSetup } from './agentChannel';
 import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
 
+const HEADLESS_REVIEW_CAPABILITIES = {
+  humanReview: false,
+  sessionAuthorization: false,
+};
+
 function buildConfigurable(setup: AgentChannelSetup) {
   const configurable: Record<string, unknown> = {};
   configurable.actor = setup.input.actor;
@@ -25,6 +30,9 @@ function buildConfigurable(setup: AgentChannelSetup) {
   if (setup.input.onToolEvent) configurable.onToolEvent = setup.input.onToolEvent;
   if (setup.interfaceContext?.kind) {
     configurable[LOCAL_AGENT_INTERFACE_CONFIG_KEY] = setup.interfaceContext;
+    configurable.reviewCapabilities = setup.interfaceContext.capabilities;
+  } else {
+    configurable.reviewCapabilities = HEADLESS_REVIEW_CAPABILITIES;
   }
   return Object.keys(configurable).length > 0 ? configurable : undefined;
 }

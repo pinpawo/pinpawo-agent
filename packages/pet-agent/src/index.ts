@@ -59,10 +59,13 @@ export type {
   ToolkitToolName,
   ToolkitPolicy,
   ToolkitResource,
+  ToolkitReviewCapabilities,
   ToolkitToolAuthorizationMatcherContext,
+  ToolkitToolReviewBlock,
   ToolkitToolReviewContext,
   ToolkitToolReviewPolicy,
   ToolkitToolReviewPolicyMapFor,
+  ToolkitToolReviewResult,
 } from './types/toolkit';
 export { defineToolkit, defineToolset, hasToolOperationMetadata } from './types/toolkit';
 
@@ -109,6 +112,16 @@ export type {
   ReviewEffectApplicationErrorCode,
   ToolAuthorizationRecord,
 } from './agent/orchestrator/review/reviewAuthorizations';
+export {
+  buildStandardReviewOptions,
+  ReviewPolicies,
+  reviewPolicies,
+} from './agent/orchestrator/review/reviewPolicies';
+export type {
+  AuthorizationMode,
+  HitlPresetOptions,
+  ReviewUnavailableBehavior,
+} from './agent/orchestrator/review/reviewPolicies';
 export {
   buildReviewSpec,
   isHumanReviewInterruptPayload,

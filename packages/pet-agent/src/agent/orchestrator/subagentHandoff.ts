@@ -185,6 +185,15 @@ function buildCancelledToolResult(params: {
   });
 }
 
+function isToolkitReviewBlock(value: unknown): value is { type: 'block'; reason: string } {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && (value as { type?: unknown }).type === 'block'
+    && typeof (value as { reason?: unknown }).reason === 'string',
+  );
+}
+
 function readToolCallId(runtime: ToolRuntime) {
   const record = runtime && typeof runtime === 'object'
     ? runtime as unknown as Record<string, unknown>
@@ -319,6 +328,7 @@ function wrapToolkitTool(
   toolkits: AgentToolkit[],
 ): StructuredTool {
   const reviewPolicy = toolkit.policy?.toolReview?.[toolItem.name];
+  const operation = toolkit.operations?.[toolItem.name];
   if (!reviewPolicy) {
     return toolItem;
   }
@@ -333,10 +343,19 @@ function wrapToolkitTool(
           toolkitName: toolkit.name,
           toolName: toolItem.name,
           input: currentInput,
+          operation,
         });
 
         if (!reviewSpec) {
           return toolItem.invoke(currentInput as never, runtime as never);
+        }
+        if (isToolkitReviewBlock(reviewSpec)) {
+          return buildCancelledToolResult({
+            toolName: toolItem.name,
+            toolkitName: toolkit.name,
+            reason: reviewSpec.reason,
+            input: currentInput,
+          });
         }
 
         const reviewPayload = buildHumanReviewInterruptPayload({

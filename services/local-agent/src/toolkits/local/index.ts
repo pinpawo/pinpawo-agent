@@ -1,6 +1,7 @@
 import type { StructuredTool } from '@langchain/core/tools';
 import {
   defineToolkit,
+  ReviewPolicies,
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
 import { createOperationRegistryFromToolkits } from '../../events/operationRegistry';
@@ -16,14 +17,12 @@ import {
   validateStructuredFileTool,
   viewFileChunkTool,
   writeFileTool,
-  writeFileReviewPolicy,
-  applyPatchReviewPolicy,
   fileOperationMetadata,
 } from './fileTools';
 import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
-import { gitCommitReviewPolicy, gitTools, gitOperationMetadata } from './gitTools';
+import { gitTools, gitOperationMetadata } from './gitTools';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
-import { runShellTool, shellReviewPolicy, shellOperationMetadata } from './shellTools';
+import { runShellTool, shellOperationMetadata } from './shellTools';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
@@ -87,9 +86,14 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     operations: bashToolkitOperations,
     policy: {
       toolReview: {
-        write_file: writeFileReviewPolicy,
-        apply_patch: applyPatchReviewPolicy,
-        run_shell: shellReviewPolicy,
+        write_file: ReviewPolicies.localMutation(),
+        apply_patch: ReviewPolicies.localMutation(),
+        move_path: ReviewPolicies.localMutation(),
+        copy_path: ReviewPolicies.localMutation(),
+        mkdir_path: ReviewPolicies.localMutation(),
+        http_fetch: ReviewPolicies.externalAccess(),
+        download_file: ReviewPolicies.externalAccess(),
+        run_shell: ReviewPolicies.commandExecution(),
       },
     },
   };
@@ -104,7 +108,8 @@ export function createGitToolkit(): AgentToolkit {
     operations: gitOperationMetadata,
     policy: {
       toolReview: {
-        git_commit: gitCommitReviewPolicy,
+        git_add: ReviewPolicies.localMutation(),
+        git_commit: ReviewPolicies.localMutation(),
       },
     },
   });

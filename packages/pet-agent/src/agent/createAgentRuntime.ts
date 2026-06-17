@@ -6,7 +6,7 @@ import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../types/agent';
 import type { CapabilityArtifactRef } from '../types/artifact';
 import type { SubagentInput, SubagentToolEventHandler } from '../types/subagent';
-import type { AgentToolkit } from '../types/toolkit';
+import type { AgentToolkit, ToolkitReviewCapabilities } from '../types/toolkit';
 import { randomUUID } from 'node:crypto';
 import { createSubagent } from '../subagent/createSubagent';
 import {
@@ -143,6 +143,7 @@ function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOp
     workdir: cfg.workdir as string | undefined,
     runtimeEnvironment: cfg.runtimeEnvironment as string | undefined,
     onToolEvent: cfg.onToolEvent as SubagentToolEventHandler | undefined,
+    reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
     forcedCapabilityNames: Array.isArray((cfg as { forcedCapabilityNames?: unknown }).forcedCapabilityNames)
       ? (cfg as { forcedCapabilityNames: unknown[] }).forcedCapabilityNames.filter(
           (name): name is string => typeof name === 'string' && name.length > 0,
@@ -154,6 +155,20 @@ function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOp
 function readThreadId(runnableConfig?: RunnableConfig): string | null {
   const value = runnableConfig?.configurable?.thread_id;
   return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function readToolkitReviewCapabilities(value: unknown): ToolkitReviewCapabilities | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.humanReview !== 'boolean' || typeof record.sessionAuthorization !== 'boolean') {
+    return undefined;
+  }
+  return {
+    humanReview: record.humanReview,
+    sessionAuthorization: record.sessionAuthorization,
+  };
 }
 
 /**
@@ -406,6 +421,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       execution,
       workdir,
       runtimeEnvironment,
+      reviewCapabilities,
       forcedCapabilityNames,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
@@ -416,6 +432,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       actor,
       messages: state.messages,
       execution,
+      reviewCapabilities,
       toolAuthorizations: state.toolAuthorizations,
     }, { includeInstructions: false });
     const generalTools = generalToolkitResources.tools;
@@ -490,7 +507,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) {
-    const { capabilities, toolkits, execution, maxIterations, workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
+    const {
+      capabilities,
+      toolkits,
+      execution,
+      maxIterations,
+      workdir,
+      runtimeEnvironment,
+      reviewCapabilities,
+    } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const maxIter = maxIterations ?? 5;
     let iterationLimitMessages: BaseMessage[] = [];
@@ -544,6 +569,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       actor,
       messages: state.messages,
       execution,
+      reviewCapabilities,
       toolAuthorizations: state.toolAuthorizations,
     }, { includeInstructions: false });
     const generalTools = generalToolkitResources.tools;
@@ -740,7 +766,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   // Node: capability — reads capabilities, tools, execution from configurable
   async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { capabilities, toolkits, execution, onToolEvent, workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
+    const {
+      capabilities,
+      toolkits,
+      execution,
+      onToolEvent,
+      workdir,
+      runtimeEnvironment,
+      reviewCapabilities,
+    } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = capabilityLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
@@ -783,6 +817,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       delegationId: pendingDelegation.id,
       turnId: state.turnId,
       execution,
+      reviewCapabilities,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
       recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
@@ -889,7 +924,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   // Node: general — reads tools from configurable
   async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { toolkits, execution, workdir, runtimeEnvironment, onToolEvent } = getInvokeOptions(runnableConfig);
+    const { toolkits, execution, workdir, runtimeEnvironment, onToolEvent, reviewCapabilities } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
@@ -900,6 +935,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       messages: state.messages,
       threadId: readThreadId(runnableConfig),
       execution,
+      reviewCapabilities,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
       emitRuntimeEvent: onToolEvent,

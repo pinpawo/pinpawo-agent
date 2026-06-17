@@ -4,6 +4,10 @@ import {
 } from '../canonicalInput';
 import type { TuiKeyInput } from '../keyInput';
 import {
+  toTextAreaCommand,
+  type TextAreaCommand,
+} from './commands';
+import {
   findTextAreaOffsetAtVisualColumn,
   measureTextAreaLayout,
 } from './layout';
@@ -34,46 +38,54 @@ export function applyTextAreaInputEvent(
   state: TextAreaModel,
   options: { width?: number } = {},
 ): TextAreaModel {
+  const command = toTextAreaCommand(event);
+  if (!command) return createTextAreaModel(state.text, state.cursorOffset);
+  return applyTextAreaCommand(command, state, options);
+}
+
+export function applyTextAreaCommand(
+  command: TextAreaCommand,
+  state: TextAreaModel,
+  options: { width?: number } = {},
+): TextAreaModel {
   const text = state.text;
   const cursorOffset = clampCursor(state.cursorOffset, text);
   const width = options.width ?? Number.MAX_SAFE_INTEGER;
 
-  switch (event.type) {
-    case 'text.insert':
-    case 'text.paste':
-      return replaceRange(text, cursorOffset, cursorOffset, event.text, cursorOffset + event.text.length);
-    case 'text.delete.backward':
+  switch (command.type) {
+    case 'insert':
+    case 'paste':
+      return replaceRange(text, cursorOffset, cursorOffset, command.text, cursorOffset + command.text.length);
+    case 'deleteBackward':
       if (cursorOffset === 0) return createTextAreaModel(text, cursorOffset);
       return replaceRange(text, cursorOffset - 1, cursorOffset, '', cursorOffset - 1);
-    case 'text.delete.forward':
+    case 'deleteForward':
       if (cursorOffset === text.length) return createTextAreaModel(text, cursorOffset);
       return replaceRange(text, cursorOffset, cursorOffset + 1, '', cursorOffset);
-    case 'text.delete.word.backward': {
+    case 'deleteWordBackward': {
       const wordStart = findPreviousWordStart(text, cursorOffset);
       return replaceRange(text, wordStart, cursorOffset, '', wordStart);
     }
-    case 'text.delete.to.line.start': {
+    case 'deleteToLineStart': {
       const lineStart = findLogicalLineStart(text, cursorOffset);
       return replaceRange(text, lineStart, cursorOffset, '', lineStart);
     }
-    case 'text.delete.to.line.end':
+    case 'deleteToLineEnd':
       return replaceRange(text, cursorOffset, findLogicalLineEnd(text, cursorOffset), '', cursorOffset);
-    case 'cursor.left':
+    case 'moveLeft':
       return createTextAreaModel(text, cursorOffset - 1);
-    case 'cursor.right':
+    case 'moveRight':
       return createTextAreaModel(text, cursorOffset + 1);
-    case 'cursor.up':
+    case 'moveUp':
       return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, -1));
-    case 'cursor.down':
+    case 'moveDown':
       return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, 1));
-    case 'cursor.line.start':
+    case 'moveLineStart':
       return createTextAreaModel(text, findLogicalLineStart(text, cursorOffset));
-    case 'cursor.line.end':
+    case 'moveLineEnd':
       return createTextAreaModel(text, findLogicalLineEnd(text, cursorOffset));
     case 'newline':
       return replaceRange(text, cursorOffset, cursorOffset, '\n', cursorOffset + 1);
-    default:
-      return createTextAreaModel(text, cursorOffset);
   }
 }
 

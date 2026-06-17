@@ -59,7 +59,8 @@ Delete key -> raw terminal sequence "\x1b[3~"
 - `textareaModel` 接收 `input + key`，说明它仍暴露在 terminal event 细节下。
 - textarea state 只有 `text + cursorOffset`，还没有 selection、undo、grapheme/width-aware cursor 等扩展点。
 - layout wrapping 使用 JS string length，不足以长期支持中文宽字符、emoji、组合字符和真实终端宽度。
-- `Composer` 渲染直接依赖编辑模型输出，缺少独立 render model。
+- `Composer` 渲染直接混合 layout/render/placeholder/focus 逻辑，缺少独立 render model
+  与 view model。
 - approval free text 和 composer 共用 input，但 focus/mode ownership 没有抽象成明确协议。
 
 ### 2.2 操作清单不是设计起点
@@ -285,7 +286,9 @@ Ink useInput
   -> TextareaEngine or AppCommand
   -> TuiState reducer
   -> TextareaLayout
-  -> Composer render
+  -> TextareaRenderModel
+  -> TextAreaViewModel
+  -> TextAreaView / Composer render
 ```
 
 ### 5.1 TerminalInputDecoder
@@ -546,27 +549,56 @@ export type TextareaRenderRow = TextareaLayoutRow & {
 `renderModel` 和 `layout` 应共享同一套 `textSegments` / width helper，避免两个层各自
 实现 grapheme 规则。
 
-### 5.7 TextareaHost / Composer component
+### 5.7 TextAreaViewModel
+
+职责：
+
+- 把 render rows、focus、placeholder、style 状态合并成 UI 可直接消费的 view rows。
+- 处理 focused empty input、focused placeholder、unfocused display 等显示状态。
+- 不处理 key routing。
+- 不修改文本。
+- 不依赖 Ink。
+
+建议类型：
+
+```ts
+export type TextAreaViewRow = {
+  before: string;
+  cursor: string | null;
+  after: string;
+  dim: boolean;
+  dimAfterCursor: boolean;
+};
+
+export type TextAreaViewModel = {
+  rows: TextAreaViewRow[];
+};
+```
+
+这样 `renderModel` 保持“文本与 cursor 切片”职责，`viewModel` 承接“这个 textarea
+在当前 UI 状态下该如何显示”。placeholder、focus dim、未来 selection highlight /
+composition underline 不应该再散落到 `Composer`。
+
+### 5.8 TextareaHost / Composer component
 
 职责：
 
 - 渲染 textarea view model。
 - 不处理 key routing。
 - 不实现编辑算法。
-- 只接收 state、layout、focus、placeholder、style。
+- 只接收 view model 或构建 view model 所需的 state、focus、placeholder、style。
 
 建议替代当前 `Composer` 的边界：
 
 ```tsx
-<TextareaView
-  state={input.textarea}
-  layout={layout}
-  focused={focused}
-  placeholder={placeholder}
+<TextAreaView
+  model={textareaViewModel}
 />
 ```
 
-`Composer` 可以保留名称，但内部应从“计算并渲染 textarea”逐步收敛为“渲染传入的 textarea render model”。
+`Composer` 可以保留名称，但内部应从“计算并渲染 textarea”逐步收敛为“组合 view model
+并委托 `TextAreaView` 渲染”。再往后如果 textarea state 从 `TuiApp` 抽到 hook/controller，
+`Composer` 可以进一步只接收已经构建好的 view model。
 
 ## 6. 模块边界对照
 
@@ -577,7 +609,7 @@ export type TextareaRenderRow = TextareaLayoutRow & {
 | app/modal routing | `keymap.ts` | `inputRouter.ts` | 根据 owner/focus 决定 command |
 | text editing | `textareaModel.ts` | `textarea/engine.ts` | 纯 reducer |
 | layout wrapping | `textareaModel.ts` | `textarea/layout.ts` | 终端宽度、display width |
-| rendering | `Composer.tsx` | `TextareaView` / `Composer` | 只渲染 view model |
+| rendering | `Composer.tsx` | `textarea/viewModel.ts` + `TextAreaView` / `Composer` | view model 负责显示状态，view 只渲染 |
 | integration | `TuiApp.tsx` | `TuiApp.tsx` + controller/hook | 只做 wiring |
 
 目标是让每层都有独立测试，不再只能从 `TuiApp` 黑盒修 bug。
@@ -744,7 +776,7 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 
 - engine tests 不依赖 terminal key。
 - layout tests 覆盖 multiline、soft wrap、wide char。
-- `Composer` 不再调用编辑函数，只消费 render model。
+- `Composer` 不再调用编辑函数，也不直接计算 render/placeholder 行。
 
 实施反馈：
 
@@ -763,8 +795,8 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - vertical cursor movement 当前需要 engine 使用 layout 的 row lookup helper，
   这是可以接受的单向依赖；layout 不应反向依赖 engine state。
 - `renderModel.ts` 可以在 layout/cursor metrics 稳定后拆出。拆出后，
-  `Composer` 应直接消费 render model，layout 只暴露 rows、cursor metrics
-  和 offset/column 映射。
+  layout 只暴露 rows、cursor metrics 和 offset/column 映射；显示状态继续收进
+  view model，而不是回到 `Composer`。
 - wide char / emoji 支持应作为 layout-focused PR 推进，而不是混入 engine 拆分 PR。
   实施后验证了一个结构判断：engine 可以保留 offset 状态，但 vertical movement
   应通过 layout 提供的 visual-column helper 完成。
@@ -778,6 +810,11 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - render model 拆分后，`textSegments.ts` 应成为 layout 与 render model 的共享基础层。
   layout 使用它做 display-width wrapping，render model 使用它做 grapheme-safe cursor
   rendering。
+- `Composer` 不应继续承担 placeholder、focus dim、cursor row rendering 等显示状态判断。
+  这些状态应收进 `textarea/viewModel.ts`，再由 `TextAreaView` 做 Ink 适配。这样
+  `Composer` 只是 host/component 边界，textarea 的显示 contract 可以独立测试。
+- placeholder cursor 也应复用 grapheme segmentation，避免实现层重新使用
+  `placeholder[0]` 这类 UTF-16 切片。
 
 ### Phase 5: History, selection, undo, external editor
 
@@ -851,7 +888,7 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 - `TuiApp.tsx` 中不再包含 raw key interpretation。
 - `textarea/engine.ts` 不依赖 Ink key shape。
 - `inputRouter.ts` 明确表达 composer / approval / resume / busy ownership。
-- `Composer` 或 `TextareaView` 只消费 render model。
+- `Composer` 只组合 textarea view model，`TextAreaView` 只消费 view model。
 
 行为验收：
 
@@ -900,9 +937,12 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 10. `codex/tui-routed-textarea-commands`
    - router 输出 `{ target: 'textarea', command }`。
    - `TuiApp` 直接 dispatch `applyTextAreaCommand`，legacy `composer.edit` 仅保留兼容转换。
-11. `codex/tui-textarea-history-selection`
+11. `codex/tui-textarea-view-model`
+   - 新增 `buildTextAreaViewModel` 和 `TextAreaView`。
+   - `Composer` 不再直接计算 layout/render/placeholder 行。
+12. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-12. `codex/tui-opentui-spike`
+13. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions
@@ -925,6 +965,8 @@ prompt owns business behavior
 renderer owns layout and cursor display
 ```
 
-PinPawo 短期不必迁移 OpenTUI，但应该学习这个结构，把当前 input 拆成 terminal decoder、canonical event、router、textarea engine、layout/render model 五个明确层次。
+PinPawo 短期不必迁移 OpenTUI，但应该学习这个结构，把当前 input 拆成 terminal decoder、
+canonical event、router、textarea engine、layout/render model、view model/render view
+这些明确层次。
 
 这样后续再遇到 Delete、IME、paste、wide char、history 等问题时，我们能知道 bug 属于哪一层，并用对应层的测试固定下来。

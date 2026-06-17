@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   applyTextAreaControllerCommand,
   buildTextAreaComposerProps,
+  measureTextAreaControllerLayout,
 } from './useTextAreaController';
 
 test('buildTextAreaComposerProps maps textarea input to composer props', () => {
@@ -29,5 +30,28 @@ test('applyTextAreaControllerCommand applies textarea command with host width', 
       3,
     ),
     { text: 'abcdef', cursorOffset: 4 },
+  );
+});
+
+test('measureTextAreaControllerLayout exposes visual cursor boundaries', () => {
+  assert.deepEqual(
+    measureTextAreaControllerLayout({ text: 'abcdef', cursorOffset: 1 }, 3).cursor,
+    {
+      offset: 1,
+      rowIndex: 0,
+      column: 1,
+      isAtFirstVisualRow: true,
+      isAtLastVisualRow: false,
+    },
+  );
+  assert.deepEqual(
+    measureTextAreaControllerLayout({ text: 'abcdef', cursorOffset: 4 }, 3).cursor,
+    {
+      offset: 4,
+      rowIndex: 1,
+      column: 1,
+      isAtFirstVisualRow: false,
+      isAtLastVisualRow: true,
+    },
   );
 });

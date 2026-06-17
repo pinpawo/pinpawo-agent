@@ -3,6 +3,10 @@ import {
   applyTextAreaCommand,
   type TextAreaModel,
 } from './input/textarea/engine';
+import {
+  measureTextAreaLayout,
+  type TextAreaLayout,
+} from './input/textarea/layout';
 import type { TextAreaCommand } from './input/textarea/commands';
 import type { TuiAction, TuiState } from './state/tuiState';
 
@@ -19,6 +23,8 @@ export type TextAreaComposerProps = {
 export type TextAreaController = {
   value: string;
   cursorOffset: number;
+  layout: TextAreaLayout;
+  cursor: TextAreaLayout['cursor'];
   composerProps: TextAreaComposerProps;
   clear: () => void;
   applyCommand: (command: TextAreaCommand) => void;
@@ -43,6 +49,7 @@ export function useTextAreaController(options: {
     });
   }, [dispatch, input, width]);
 
+  const layout = useMemo(() => measureTextAreaControllerLayout(input, width), [input, width]);
   const composerProps = useMemo(() => buildTextAreaComposerProps(input, {
     focused: options.focused,
     placeholder: options.placeholder,
@@ -52,6 +59,8 @@ export function useTextAreaController(options: {
   return {
     value: input.text,
     cursorOffset: input.cursorOffset,
+    layout,
+    cursor: layout.cursor,
     composerProps,
     clear,
     applyCommand,
@@ -84,4 +93,14 @@ export function applyTextAreaControllerCommand(
     text: input.text,
     cursorOffset: input.cursorOffset,
   }, { width });
+}
+
+export function measureTextAreaControllerLayout(
+  input: TextAreaInputState,
+  width: number,
+): TextAreaLayout {
+  return measureTextAreaLayout({
+    text: input.text,
+    cursorOffset: input.cursorOffset,
+  }, width);
 }

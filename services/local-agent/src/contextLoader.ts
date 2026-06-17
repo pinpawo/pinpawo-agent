@@ -168,53 +168,6 @@ function formatMemories(memories: GqlMemory[]): string {
     .join('\n');
 }
 
-// ---- next_tick_at query ----
-
-const NEXT_TICK_QUERY = `
-  query GetNextTick($actorId: uuid!) {
-    pet_agents(
-      where: {
-        status: { _eq: "active" }
-        pet_id: { _eq: $actorId }
-      }
-      limit: 1
-    ) {
-      next_tick_at
-    }
-  }
-`;
-
-export async function getNextTickAt(actorId: string): Promise<Date | null> {
-  if (!config.apiConnected) return null;
-  const data = await gql<{ pet_agents: { next_tick_at: string | null }[] }>(NEXT_TICK_QUERY, {
-    actorId,
-  });
-  const raw = data.pet_agents[0]?.next_tick_at;
-  return raw ? new Date(raw) : null;
-}
-
-// ---- Heartbeat mutation ----
-
-const HEARTBEAT_MUTATION = `
-  mutation Heartbeat($actorId: uuid!, $nextTickAt: timestamptz!) {
-    update_pet_agents(
-      where: {
-        status: { _eq: "active" }
-        pet_id: { _eq: $actorId }
-      }
-      _set: { next_tick_at: $nextTickAt }
-    ) {
-      affected_rows
-    }
-  }
-`;
-
-export async function sendHeartbeat(actorId: string): Promise<void> {
-  if (!config.apiConnected) return;
-  const nextTickAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-  await gql(HEARTBEAT_MUTATION, { actorId, nextTickAt });
-}
-
 // ---- Context loader ----
 
 export function buildLocalOnlyAgentContext(actorId = LOCAL_ONLY_ACTOR_ID): AgentContext {

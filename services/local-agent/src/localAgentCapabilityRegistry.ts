@@ -112,10 +112,6 @@ export class LocalAgentCapabilityRegistry {
     return this.capabilityArtifactStore;
   }
 
-  readCapabilityArtifact(params: Parameters<FileCapabilityArtifactStore['readArtifact']>[0]) {
-    return this.capabilityArtifactStore.readArtifact(params);
-  }
-
   async deleteThreadArtifacts(threadId: string) {
     await this.capabilityArtifactStore.deleteThreadArtifacts(threadId);
   }

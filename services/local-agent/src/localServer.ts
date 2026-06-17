@@ -20,9 +20,9 @@ import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
 import { ensureLocalServerAuthToken } from './localServerAuth';
 import { LocalServerChatHandler } from './localServerChatHandler';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
-import type { AgentStats, LocalServerDeps } from './localServerTypes';
+import type { LocalServerDeps } from './localServerTypes';
 
-export type { AgentStats, LocalServerDeps };
+export type { LocalServerDeps };
 
 const chatGraphService = new LocalAgentGraphService();
 const tuiSessions = new LocalServerTuiSessionService({ graphService: chatGraphService });

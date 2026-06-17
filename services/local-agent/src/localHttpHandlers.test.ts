@@ -112,7 +112,6 @@ test('handleLocalHttpRequest rejects requests without a valid local token', asyn
   const okRes = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), okRes, {
     actorId: 'pet-a',
-    getStats: () => ({}),
   } as LocalServerDeps, options), true);
   assert.equal(okRes.statusCode, 200);
 });
@@ -135,14 +134,6 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
   assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), res, {
     actorId: 'pet-a',
     actorName: '羊',
-    getStats: () => ({
-      startedAt: '2026-06-01T01:00:00.000Z',
-      totalRuns: 0,
-      successfulRuns: 0,
-      failedRuns: 0,
-      lastRunAt: null,
-      lastRunOk: null,
-    }),
   } as LocalServerDeps, {
     authToken: 'secret',
     loadHistory: async () => [],

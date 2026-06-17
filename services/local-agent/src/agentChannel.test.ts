@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ToolMessage } from '@langchain/core/messages';
-import { buildLocalChatAgentInput, buildLocalScheduledAgentInput } from './agentChannel';
+import { buildLocalChatAgentInput } from './agentChannel';
 import type { AgentContext } from './contextLoader';
 import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
 
@@ -130,23 +130,3 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
   });
 });
 
-test('buildLocalScheduledAgentInput omits empty toolkit configurable arrays', () => {
-  const setup = buildLocalScheduledAgentInput({
-    context: createContext(),
-  });
-
-  assert.ok(setup.input.toolkits);
-});
-
-test('buildLocalScheduledAgentInput passes a single toolkit list', () => {
-  const setup = buildLocalScheduledAgentInput({
-    context: createContext(),
-    toolkits: [{ name: 'general-toolkit' }] as AgentToolkit[],
-  });
-
-  assert.deepEqual(
-    setup.input.toolkits?.map((item) => item.name),
-    ['pet_profile', 'general-toolkit'],
-  );
-  assert.equal('capabilityToolkits' in setup.input, false);
-});

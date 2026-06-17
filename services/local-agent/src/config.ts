@@ -111,13 +111,7 @@ export const config = {
     return [...new Set([...fromEnv, ...fromStored])];
   },
 
-  mediaCrawlerDir: get('MEDIACRAWLER_DIR', 'mediacrawler_dir'),
-  xhsCookie: get('XHS_COOKIE', 'xhs_cookie'),
-
   pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
-  heartbeatIntervalSeconds: Number(process.env.HEARTBEAT_INTERVAL_SECONDS ?? 900),
-  postIntervalHours: Number(process.env.POST_INTERVAL_HOURS ?? 6),
-  trendRefreshCooldownSeconds: Number(process.env.TREND_REFRESH_COOLDOWN_SECONDS ?? 900),
 
   localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
 };

@@ -4,7 +4,9 @@ import {
 } from '../canonicalInput';
 import type { TuiKeyInput } from '../keyInput';
 import {
+  findTextAreaOffsetAtVisualColumn,
   findTextAreaRenderRowIndexForCursor,
+  measureTextAreaVisualColumn,
   wrapTextAreaRows,
 } from './layout';
 
@@ -98,8 +100,8 @@ function moveCursorVertically(
   const rowIndex = findTextAreaRenderRowIndexForCursor(rows, text, cursorOffset);
   const row = rows[rowIndex] ?? rows[0]!;
   const targetRow = rows[Math.max(0, Math.min(rows.length - 1, rowIndex + direction))] ?? row;
-  const column = Math.max(0, Math.min(cursorOffset - row.start, row.end - row.start));
-  return targetRow.start + Math.min(column, targetRow.end - targetRow.start);
+  const column = measureTextAreaVisualColumn(row, text, cursorOffset);
+  return findTextAreaOffsetAtVisualColumn(targetRow, text, column);
 }
 
 function findLogicalLineStart(text: string, cursorOffset: number) {

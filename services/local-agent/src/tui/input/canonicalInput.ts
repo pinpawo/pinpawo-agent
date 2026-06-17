@@ -16,6 +16,12 @@ export type CanonicalInputEvent =
   | { type: 'cursor.down' }
   | { type: 'cursor.line.start' }
   | { type: 'cursor.line.end' }
+  | { type: 'selection.left' }
+  | { type: 'selection.right' }
+  | { type: 'selection.up' }
+  | { type: 'selection.down' }
+  | { type: 'selection.line.start' }
+  | { type: 'selection.line.end' }
   | { type: 'submit' }
   | { type: 'newline' }
   | { type: 'escape' }
@@ -31,12 +37,12 @@ export function toCanonicalInputEvent(
   const controlEvent = toCanonicalControlKey(input, key);
   if (controlEvent) return controlEvent;
 
-  if (key.leftArrow) return { type: 'cursor.left' };
-  if (key.rightArrow) return { type: 'cursor.right' };
-  if (key.upArrow) return { type: 'cursor.up' };
-  if (key.downArrow) return { type: 'cursor.down' };
-  if (key.home) return { type: 'cursor.line.start' };
-  if (key.end) return { type: 'cursor.line.end' };
+  if (key.leftArrow) return key.shift ? { type: 'selection.left' } : { type: 'cursor.left' };
+  if (key.rightArrow) return key.shift ? { type: 'selection.right' } : { type: 'cursor.right' };
+  if (key.upArrow) return key.shift ? { type: 'selection.up' } : { type: 'cursor.up' };
+  if (key.downArrow) return key.shift ? { type: 'selection.down' } : { type: 'cursor.down' };
+  if (key.home) return key.shift ? { type: 'selection.line.start' } : { type: 'cursor.line.start' };
+  if (key.end) return key.shift ? { type: 'selection.line.end' } : { type: 'cursor.line.end' };
   if (key.backspace) return { type: 'text.delete.backward' };
   if (key.delete) return { type: 'text.delete.forward' };
   if (key.escape) return { type: 'escape' };
@@ -46,6 +52,12 @@ export function toCanonicalInputEvent(
   if (isRawReturnInput(input)) return { type: 'submit' };
   if (isRawNewlineInput(input)) return { type: 'newline' };
   if (isRawDeleteForwardInput(input)) return { type: 'text.delete.forward' };
+  if (isRawShiftCursorInput(input, 'D')) return { type: 'selection.left' };
+  if (isRawShiftCursorInput(input, 'C')) return { type: 'selection.right' };
+  if (isRawShiftCursorInput(input, 'A')) return { type: 'selection.up' };
+  if (isRawShiftCursorInput(input, 'B')) return { type: 'selection.down' };
+  if (isRawShiftHomeInput(input)) return { type: 'selection.line.start' };
+  if (isRawShiftEndInput(input)) return { type: 'selection.line.end' };
   if (isRawCursorInput(input, 'D')) return { type: 'cursor.left' };
   if (isRawCursorInput(input, 'C')) return { type: 'cursor.right' };
   if (isRawCursorInput(input, 'A')) return { type: 'cursor.up' };
@@ -108,6 +120,10 @@ function isRawCursorInput(input: string, code: 'A' | 'B' | 'C' | 'D') {
   return input === `\x1b[${code}` || input === `[${code}`;
 }
 
+function isRawShiftCursorInput(input: string, code: 'A' | 'B' | 'C' | 'D') {
+  return input === `\x1b[1;2${code}` || input === `[1;2${code}`;
+}
+
 function isRawHomeInput(input: string) {
   return input === '\x1b[H'
     || input === '[H'
@@ -117,6 +133,10 @@ function isRawHomeInput(input: string) {
     || input === '[7~';
 }
 
+function isRawShiftHomeInput(input: string) {
+  return /^(?:\x1b)?\[(?:1;2H|7;2~)$/.test(input);
+}
+
 function isRawEndInput(input: string) {
   return input === '\x1b[F'
     || input === '[F'
@@ -124,6 +144,10 @@ function isRawEndInput(input: string) {
     || input === '[4~'
     || input === '\x1b[8~'
     || input === '[8~';
+}
+
+function isRawShiftEndInput(input: string) {
+  return /^(?:\x1b)?\[(?:1;2F|8;2~)$/.test(input);
 }
 
 function isBracketedPasteInput(input: string) {

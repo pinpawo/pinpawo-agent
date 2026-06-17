@@ -75,12 +75,10 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
 
   assert.deepEqual(registry.getLocalTools(), [localTool]);
   assert.deepEqual(registry.getLocalToolkitDefinitions().map((item) => item.name), [
-    'capability_artifact',
     'available-toolkit',
     'unavailable-toolkit',
   ]);
   assert.deepEqual(registry.getLocalToolkits().map((item) => item.name), [
-    'capability_artifact',
     'available-toolkit',
   ]);
   assert.deepEqual(registry.getLocalCapabilityDefinitions().map((item) => item.name), [
@@ -123,34 +121,10 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
 
   assert.deepEqual(
     registry.getLocalToolkitDefinitions().map((item) => item.name),
-    ['capability_artifact', 'bash', 'git', 'browser'],
+    ['bash', 'git', 'browser'],
   );
   assert.ok(
     registry.getLocalCapabilityDefinitions().some((item) => item.name === 'explore'),
     'default local capabilities should include explore',
-  );
-});
-
-test('LocalAgentCapabilityRegistry marks artifact toolkit as non-general by default', async () => {
-  const registry = new LocalAgentCapabilityRegistry({
-    loadLocalTools: async () => [],
-    loadUserCapabilities: async () => [],
-    resolveAvailableToolkits: async (toolkits) => toolkits,
-    resolveAvailableCapabilities: async (capabilities) => capabilities,
-    resolveCapabilityAvailability: async (capabilityItem) => ({
-      capability: capabilityItem,
-      availability: { available: true },
-    }),
-  });
-
-  await registry.load();
-
-  assert.deepEqual(
-    registry.getLocalToolkits().map((item) => item.name),
-    ['capability_artifact', 'bash', 'git', 'browser'],
-  );
-  assert.equal(
-    registry.getLocalToolkits().find((item) => item.name === 'capability_artifact')?.exposure?.general,
-    false,
   );
 });

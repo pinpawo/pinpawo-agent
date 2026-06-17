@@ -25,7 +25,6 @@ import {
 import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
-import { LocalAgentScheduledJob } from './localAgentScheduledJob';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
 import { defaultCapabilityArtifactRoot } from './capabilityArtifactStore';
 
@@ -71,15 +70,7 @@ export class LocalAgentRuntime {
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
     getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
-  });
-  private readonly scheduledJob = new LocalAgentScheduledJob({
-    graphService: this.graphService,
-    getActorId: () => this.getActorId(),
-    getLlmConfig: () => this.llmConfig,
-    getHooks: () => this.hooks,
-    getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
-    getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
-    readCapabilityArtifact: (params) => this.capabilityRegistry.readCapabilityArtifact(params),
+    getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
   });
 
   async init() {
@@ -125,6 +116,10 @@ export class LocalAgentRuntime {
     return this.capabilityRegistry.getLocalCapabilities();
   }
 
+  getCapabilityArtifactStore() {
+    return this.capabilityRegistry.getCapabilityArtifactStore();
+  }
+
   getLocalCapabilityDefinitions(): AgentCapability[] {
     return this.capabilityRegistry.getLocalCapabilityDefinitions();
   }
@@ -144,10 +139,6 @@ export class LocalAgentRuntime {
     return this.capabilityRegistry.rescanUserCapabilities();
   }
 
-  getStats() {
-    return this.scheduledJob.getStats();
-  }
-
   getActorId(): string {
     if (!this.actorId) {
       throw new Error('Local agent actorId is not initialized');
@@ -163,7 +154,7 @@ export class LocalAgentRuntime {
     if (!opts?.skipInit) {
       await this.init();
     }
-    console.log(`[local-agent] started — poll every ${config.pollIntervalSeconds}s, post every ${config.postIntervalHours}h`);
+    console.log('[local-agent] started — local server + chat relay');
 
     if (config.apiConnected) {
       // Connect WebSocket for app ↔ local agent chat relay.
@@ -172,16 +163,8 @@ export class LocalAgentRuntime {
       console.log(`[local-agent] ${config.apiSetupMessage}`);
     }
 
+    // Keep the process alive for the local server + WebSocket relay until stop.
     while (!this.stopRequested) {
-      try {
-        if (config.apiConnected) {
-          await this.scheduledJob.tick();
-        }
-      } catch (err) {
-        console.error('[local-agent] tick error:', err instanceof Error ? err.message : err);
-      }
-
-      if (this.stopRequested) break;
       await sleep(config.pollIntervalSeconds * 1000);
     }
 

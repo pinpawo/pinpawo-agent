@@ -28,10 +28,12 @@ export type {
   CapabilityContext,
   CapabilityInstructionContext,
   CapabilityMiddleware,
+  CapabilityMiddlewareContext,
   CapabilityRuntime,
 } from './types/capability';
 
 export type {
+  CapabilityArtifactSink,
   ContextPolicyContext,
   SubagentInput,
   SubagentContextPolicy,
@@ -151,6 +153,7 @@ export {
 export { runAgent } from './agent/runAgent';
 export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
 export { createSubagent } from './subagent/createSubagent';
+export { clipForPrompt } from './agent/orchestrator/utils';
 export {
   createLLMWikiCurator,
   createPetAgentRuntime,

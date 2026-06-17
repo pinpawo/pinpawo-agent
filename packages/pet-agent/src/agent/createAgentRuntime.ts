@@ -768,6 +768,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       messages: scopedMessages,
       execution,
       availableToolkits,
+      artifactStore: config.capabilityArtifactStore,
     });
 
     const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);
@@ -817,6 +818,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       runnableConfig,
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,
+      artifactSink: {
+        recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
+          artifactRefs.push(ref);
+        },
+        threadId,
+        delegationId: pendingDelegation.id,
+        turnId: state.turnId,
+      },
       onToolEvent,
     };
     validateUniqueToolNames(subagentInput.tools);
@@ -829,7 +838,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     let result = await createSubagent(subagentInput);
 
     if (middleware?.afterRun) {
-      result = await middleware.afterRun(result);
+      result = await middleware.afterRun(result, {
+        recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
+          artifactRefs.push(ref);
+        },
+        threadId,
+        capabilityId: capability.name,
+        delegationId: pendingDelegation.id,
+        turnId: state.turnId,
+      });
     }
 
     const laneOutputMessages = tagNewLaneMessages(

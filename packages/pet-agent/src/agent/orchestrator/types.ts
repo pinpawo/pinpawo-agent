@@ -4,6 +4,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
+import type { CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
 import type { AgentToolkit } from '../../types/toolkit';
 import type { OrchestrationDecision } from './schemas';
@@ -69,6 +70,13 @@ export type OrchestratorConfig = {
   checkpoint?: BaseCheckpointSaver;
   decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
+  /**
+   * Artifact store (a port; the host supplies the concrete adapter). Injected
+   * into each capability's `CapabilityContext` so capabilities can persist
+   * artifacts without the host threading the store through every capability
+   * factory. Optional — surfaces without a store (e.g. tests, studio) skip writes.
+   */
+  capabilityArtifactStore?: CapabilityArtifactStore;
 };
 
 export type OrchestratorInvokeOptions = {

@@ -6,6 +6,7 @@ import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from './types
 import { dailyPostInstructions } from './instructions';
 import { dailyPostResultSchema } from './schemas';
 import { createDailyPostToolset } from './tools';
+import { recordLatestToolResultArtifact } from '../resultArtifact';
 
 export { dailyPostResultSchema } from './schemas';
 export { buildDailyPostTaskMessage } from './task';
@@ -55,7 +56,6 @@ export function createDailyPostCapability(
     name: 'daily_post',
     description: '生成、保存或跳过 daily post，并产出本轮动态处理结果。',
     createRuntime: async (context) => ({
-      uses: ['capability_artifact'],
       toolsets: [createDailyPostToolset({
         actor: context.actor,
         models: context.models,
@@ -67,10 +67,15 @@ export function createDailyPostCapability(
         markSkipped: options.markSkipped,
         requestImageProcessing: options.requestImageProcessing,
       })],
-      instructions: [
-        ...(options.instructions ?? dailyPostInstructions),
-        'finalize_post 或 skip_post 返回最终结果后，必须调用 capability_artifact_write 保存 kind=result、mimeType=application/json、title="Daily post result"、schema={name:"DailyPostResult",version:1}，content 使用该最终结果对象。',
-      ],
+      instructions: options.instructions ?? dailyPostInstructions,
+      middleware: {
+        afterRun: (result, ctx) => recordLatestToolResultArtifact(result, ctx, {
+          store: context.artifactStore,
+          schema: dailyPostResultSchema,
+          title: 'Daily post result',
+          schemaName: 'DailyPostResult',
+        }),
+      },
     }),
     resultSchema: dailyPostResultSchema,
   };

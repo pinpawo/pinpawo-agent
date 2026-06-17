@@ -124,7 +124,7 @@ export async function runInit(options: InitCommandOptions = {}): Promise<void> {
     process.stdout.write('Use --force to overwrite generated scaffold files.\n');
   }
   process.stdout.write('\nNext steps:\n');
-  process.stdout.write('  1. Edit the generated .env or run: pinpawo-agent login\n');
+  process.stdout.write('  1. Review/fill local config: pinpawo-agent config --wizard\n');
   process.stdout.write(`  2. Validate the example capability: pinpawo-agent capability validate ${exampleCapabilityDir}\n`);
   process.stdout.write('  3. Start the TUI: pinpawo-agent tui\n');
 }

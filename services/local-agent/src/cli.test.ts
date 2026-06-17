@@ -31,3 +31,19 @@ test('local agent CLI passes init options to the handler', async () => {
     exampleCapability: false,
   });
 });
+
+test('local agent CLI passes config guide options to the handler', async () => {
+  let received: unknown = null;
+  const program = createLocalAgentCli({
+    runConfigGuide: (options) => {
+      received = options;
+    },
+  });
+
+  await program.parseAsync(['config', '--dir', '/tmp/pinpawo-test', '--wizard'], { from: 'user' });
+
+  assert.deepEqual(received, {
+    dir: '/tmp/pinpawo-test',
+    wizard: true,
+  });
+});

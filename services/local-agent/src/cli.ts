@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
+import type { ConfigGuideOptions } from './commands/config';
 import type { InitCommandOptions } from './commands/init';
 
 type LocalAgentCliHandlers = {
@@ -12,6 +13,7 @@ type LocalAgentCliHandlers = {
   runTui?: (opts: { dryRun: boolean }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
+  runConfigGuide?: (opts: ConfigGuideOptions) => Promise<void> | void;
 };
 
 function readPackageVersion(): string {
@@ -62,6 +64,19 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .action(async () => {
       const runLogin = handlers.runLogin ?? (await import('./commands/login')).runLogin;
       await runLogin();
+    });
+
+  program
+    .command('config')
+    .description('Check local configuration and optionally guide missing values')
+    .option('--dir <directory>', 'target PinPawo config directory', '~/.pinpawo')
+    .option('--wizard', 'prompt for missing required and defaulted config values')
+    .action(async (options: { dir?: string; wizard?: boolean }) => {
+      const runConfigGuide = handlers.runConfigGuide ?? (await import('./commands/config')).runConfigGuide;
+      await runConfigGuide({
+        dir: options.dir,
+        wizard: options.wizard ?? false,
+      });
     });
 
   program

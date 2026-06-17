@@ -7,17 +7,17 @@ import {
   measureTextAreaLayout,
   type TextAreaLayout,
 } from './input/textarea/layout';
+import {
+  buildTextAreaViewModel,
+  type TextAreaViewModel,
+} from './input/textarea/viewModel';
 import type { TextAreaCommand } from './input/textarea/commands';
 import type { TuiAction, TuiState } from './state/tuiState';
 
 type TextAreaInputState = Pick<TuiState['input'], 'text' | 'cursorOffset'>;
 
 export type TextAreaComposerProps = {
-  value: string;
-  cursorOffset: number;
-  placeholder: string;
-  focus: boolean;
-  width: number;
+  model: TextAreaViewModel;
 };
 
 export type TextAreaController = {
@@ -76,11 +76,13 @@ export function buildTextAreaComposerProps(
   },
 ): TextAreaComposerProps {
   return {
-    value: input.text,
-    cursorOffset: input.cursorOffset,
-    placeholder: options.placeholder,
-    focus: options.focused,
-    width: options.width,
+    model: buildTextAreaViewModel({
+      text: input.text,
+      cursorOffset: input.cursorOffset,
+      placeholder: options.placeholder,
+      focused: options.focused,
+      width: options.width,
+    }),
   };
 }
 

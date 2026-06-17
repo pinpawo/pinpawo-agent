@@ -357,6 +357,8 @@ export type CanonicalInputEvent =
   | { type: 'text.delete.word.backward' }
   | { type: 'text.delete.to.line.start' }
   | { type: 'text.delete.to.line.end' }
+  | { type: 'edit.undo' }
+  | { type: 'edit.redo' }
   | { type: 'cursor.left' }
   | { type: 'cursor.right' }
   | { type: 'cursor.up' }
@@ -383,6 +385,9 @@ export type CanonicalInputEvent =
 "\x1b[3~"      -> text.delete.forward
 key.delete     -> text.delete.forward
 ctrl+w         -> text.delete.word.backward
+ctrl+z         -> edit.undo
+ctrl+y         -> edit.redo
+ctrl+shift+z   -> edit.redo
 shift+return   -> newline
 shift+up       -> selection.up
 "\r"           -> submit
@@ -901,6 +906,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   cursor/selection movement 保留但不新增 undo entry；host-level `input.set`、prompt
   history navigation、submit/review resume 清理 edit history。Ctrl+Z/Ctrl+Y 等 key
   routing 属于后续 canonical/router PR，不应混进 engine state PR。
+- undo/redo key routing 属于 canonical-to-command boundary：Ctrl+Z 映射为
+  `edit.undo`，Ctrl+Y 和 Ctrl+Shift+Z 映射为 `edit.redo`，再由 `toTextAreaCommand`
+  接到 engine `undo`/`redo` commands。这个 PR 不应改变 Ctrl+A/select-all 语义。
 - optional external editor flow。
 - command palette / autocomplete target-bound routing。
 
@@ -1076,9 +1084,14 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - 纯 engine `undo` / `redo` commands 恢复 textarea snapshot。
    - 文本编辑入栈；cursor/selection movement 不入栈；host-level draft replacement 清理栈。
    - 暂不接 Ctrl+Z/Ctrl+Y key binding。
-26. `codex/tui-textarea-history-selection`
-   - select-all key binding、undo/redo key routing，以及 history/selection/undo 交互细节。
-27. `codex/tui-opentui-spike`
+26. `codex/tui-undo-key-routing`
+   - canonical input 把 Ctrl+Z 映射为 `edit.undo`。
+   - canonical input 把 Ctrl+Y / Ctrl+Shift+Z 映射为 `edit.redo`。
+   - `toTextAreaCommand` 把 edit undo/redo events 接到已有 engine commands。
+   - 暂不改变 Ctrl+A/select-all 语义。
+27. `codex/tui-textarea-history-selection`
+   - select-all key binding，以及 history/selection/undo 交互细节。
+28. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

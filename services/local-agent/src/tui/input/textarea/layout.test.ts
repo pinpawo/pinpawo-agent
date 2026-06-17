@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  findTextAreaOffsetAtVisualColumn,
   findTextAreaRenderRowIndexForCursor,
+  measureTextAreaVisualColumn,
   renderTextAreaRows,
   wrapTextAreaRows,
 } from './layout';
@@ -41,4 +43,78 @@ test('textarea layout locates cursor rows at soft-wrap and newline boundaries', 
   assert.equal(findTextAreaRenderRowIndexForCursor(rows, 'abcdef\ngh', 3), 1);
   assert.equal(findTextAreaRenderRowIndexForCursor(rows, 'abcdef\ngh', 6), 1);
   assert.equal(findTextAreaRenderRowIndexForCursor(rows, 'abcdef\ngh', 7), 2);
+});
+
+test('textarea layout wraps CJK text by terminal display width', () => {
+  assert.deepEqual(
+    wrapTextAreaRows('你好ab', 4),
+    [
+      { text: '你好', start: 0, end: 2 },
+      { text: 'ab', start: 2, end: 4 },
+    ],
+  );
+  assert.deepEqual(
+    wrapTextAreaRows('你a好b', 3),
+    [
+      { text: '你a', start: 0, end: 2 },
+      { text: '好b', start: 2, end: 4 },
+    ],
+  );
+});
+
+test('textarea layout keeps emoji graphemes intact while wrapping', () => {
+  assert.deepEqual(
+    wrapTextAreaRows('🙂a好', 3),
+    [
+      { text: '🙂a', start: 0, end: 3 },
+      { text: '好', start: 3, end: 4 },
+    ],
+  );
+  assert.deepEqual(
+    wrapTextAreaRows('👨‍👩‍👧‍👦ab', 3),
+    [
+      { text: '👨‍👩‍👧‍👦a', start: 0, end: '👨‍👩‍👧‍👦a'.length },
+      { text: 'b', start: '👨‍👩‍👧‍👦a'.length, end: '👨‍👩‍👧‍👦ab'.length },
+    ],
+  );
+});
+
+test('textarea layout renders cursor on full grapheme clusters', () => {
+  assert.deepEqual(
+    renderTextAreaRows({ text: '🙂a', cursorOffset: 0 }, 3).map((row) => ({
+      before: row.before,
+      cursor: row.cursor,
+      after: row.after,
+    })),
+    [{ before: '', cursor: '🙂', after: 'a' }],
+  );
+  assert.deepEqual(
+    renderTextAreaRows({ text: '🙂a', cursorOffset: 1 }, 3).map((row) => ({
+      before: row.before,
+      cursor: row.cursor,
+      after: row.after,
+    })),
+    [{ before: '', cursor: '🙂', after: 'a' }],
+  );
+  assert.deepEqual(
+    renderTextAreaRows({ text: '🙂a', cursorOffset: 2 }, 3).map((row) => ({
+      before: row.before,
+      cursor: row.cursor,
+      after: row.after,
+    })),
+    [{ before: '🙂', cursor: 'a', after: '' }],
+  );
+});
+
+test('textarea layout maps cursor offsets and display columns across wide rows', () => {
+  const text = '你a好b';
+  const rows = wrapTextAreaRows(text, 3);
+
+  assert.equal(measureTextAreaVisualColumn(rows[0]!, text, 0), 0);
+  assert.equal(measureTextAreaVisualColumn(rows[0]!, text, 1), 2);
+  assert.equal(measureTextAreaVisualColumn(rows[0]!, text, 2), 3);
+  assert.equal(findTextAreaOffsetAtVisualColumn(rows[1]!, text, 0), 2);
+  assert.equal(findTextAreaOffsetAtVisualColumn(rows[1]!, text, 1), 2);
+  assert.equal(findTextAreaOffsetAtVisualColumn(rows[1]!, text, 2), 3);
+  assert.equal(findTextAreaOffsetAtVisualColumn(rows[1]!, text, 3), 4);
 });

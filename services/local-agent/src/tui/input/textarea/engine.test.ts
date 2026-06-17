@@ -55,6 +55,19 @@ test('textarea engine uses layout rows for vertical cursor movement', () => {
   );
 });
 
+test('textarea engine preserves visual column across wide character rows', () => {
+  const text = '你a好b';
+
+  assert.deepEqual(
+    applyTextAreaInputEvent({ type: 'cursor.down' }, { text, cursorOffset: 1 }, { width: 3 }),
+    { text, cursorOffset: 3 },
+  );
+  assert.deepEqual(
+    applyTextAreaInputEvent({ type: 'cursor.up' }, { text, cursorOffset: 3 }, { width: 3 }),
+    { text, cursorOffset: 1 },
+  );
+});
+
 test('textarea engine keeps raw input wrapper compatibility', () => {
   assert.deepEqual(
     applyTextAreaInput('\x1b[3~', {}, { text: 'abc', cursorOffset: 1 }),

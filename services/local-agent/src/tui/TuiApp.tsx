@@ -14,7 +14,7 @@ import {
   toCanonicalInputEvent,
 } from './input/keymap';
 import { resolveTuiInputAction } from './input/inputRouter';
-import { applyTextAreaInputEvent } from './input/textarea/engine';
+import { applyTextAreaCommand } from './input/textarea/engine';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
   buildActiveOperationLines,
@@ -276,8 +276,11 @@ export function TuiApp(props: { actorId: string }) {
           submitCurrentInput();
           return;
         }
+        return;
+
+      case 'textarea':
         {
-          const nextInput = applyTextAreaInputEvent(inputEvent, {
+          const nextInput = applyTextAreaCommand(action.command, {
             text: inputValue,
             cursorOffset: inputCursorOffset,
           }, { width: Math.max(8, contentWidth - 4) });

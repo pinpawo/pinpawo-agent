@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   applyTextAreaControllerCommand,
   buildTextAreaComposerProps,
+  buildTextAreaControllerState,
   measureTextAreaControllerLayout,
 } from './useTextAreaController';
 
@@ -40,6 +41,47 @@ test('buildTextAreaComposerProps keeps focus and placeholder display in view mod
           { before: 'abc', cursor: null, after: '', dim: true, dimAfterCursor: false },
           { before: 'def', cursor: null, after: '', dim: true, dimAfterCursor: false },
         ],
+      },
+    },
+  );
+});
+
+test('buildTextAreaControllerState composes host state from textarea input', () => {
+  assert.deepEqual(
+    buildTextAreaControllerState(
+      { text: 'abcdef', cursorOffset: 4 },
+      { focused: true, placeholder: '输入消息', width: 3 },
+    ),
+    {
+      value: 'abcdef',
+      cursorOffset: 4,
+      layout: {
+        rows: [
+          { text: 'abc', start: 0, end: 3 },
+          { text: 'def', start: 3, end: 6 },
+        ],
+        cursor: {
+          offset: 4,
+          rowIndex: 1,
+          column: 1,
+          isAtFirstVisualRow: false,
+          isAtLastVisualRow: true,
+        },
+      },
+      cursor: {
+        offset: 4,
+        rowIndex: 1,
+        column: 1,
+        isAtFirstVisualRow: false,
+        isAtLastVisualRow: true,
+      },
+      composerProps: {
+        model: {
+          rows: [
+            { before: 'abc', cursor: null, after: '', dim: false, dimAfterCursor: false },
+            { before: 'd', cursor: 'e', after: 'f', dim: false, dimAfterCursor: false },
+          ],
+        },
       },
     },
   );

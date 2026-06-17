@@ -20,12 +20,15 @@ export type TextAreaComposerProps = {
   model: TextAreaViewModel;
 };
 
-export type TextAreaController = {
+export type TextAreaControllerState = {
   value: string;
   cursorOffset: number;
   layout: TextAreaLayout;
   cursor: TextAreaLayout['cursor'];
   composerProps: TextAreaComposerProps;
+};
+
+export type TextAreaController = TextAreaControllerState & {
   clear: () => void;
   applyCommand: (command: TextAreaCommand) => void;
 };
@@ -49,21 +52,34 @@ export function useTextAreaController(options: {
     });
   }, [dispatch, input, width]);
 
-  const layout = useMemo(() => measureTextAreaControllerLayout(input, width), [input, width]);
-  const composerProps = useMemo(() => buildTextAreaComposerProps(input, {
+  const controllerState = useMemo(() => buildTextAreaControllerState(input, {
     focused: options.focused,
     placeholder: options.placeholder,
     width,
   }), [input, options.focused, options.placeholder, width]);
 
   return {
+    ...controllerState,
+    clear,
+    applyCommand,
+  };
+}
+
+export function buildTextAreaControllerState(
+  input: TextAreaInputState,
+  options: {
+    focused: boolean;
+    placeholder: string;
+    width: number;
+  },
+): TextAreaControllerState {
+  const layout = measureTextAreaControllerLayout(input, options.width);
+  return {
     value: input.text,
     cursorOffset: input.cursorOffset,
     layout,
     cursor: layout.cursor,
-    composerProps,
-    clear,
-    applyCommand,
+    composerProps: buildTextAreaComposerProps(input, options),
   };
 }
 

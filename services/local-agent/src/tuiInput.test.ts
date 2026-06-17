@@ -204,12 +204,23 @@ test('resolveTuiKeyAction treats Shift+Enter as composer edit newline', () => {
 
 test('resolveTuiKeyAction ignores unrelated terminal control sequences', () => {
   assert.deepEqual(
-    resolveRawTuiKeyAction('\x1b[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('\x1b[1;3A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'none' },
   );
   assert.deepEqual(
-    resolveRawTuiKeyAction('[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('[1;3A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'none' },
+  );
+});
+
+test('resolveTuiKeyAction treats Shift+Arrow as composer selection edit', () => {
+  assert.deepEqual(
+    resolveRawTuiKeyAction('\x1b[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    { type: 'composer.edit' },
+  );
+  assert.deepEqual(
+    resolveRawTuiKeyAction('', { leftArrow: true, shift: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    { type: 'composer.edit' },
   );
 });
 

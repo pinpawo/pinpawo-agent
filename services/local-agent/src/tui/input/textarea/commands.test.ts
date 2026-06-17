@@ -28,6 +28,15 @@ test('toTextAreaCommand maps canonical cursor events to textarea commands', () =
   assert.deepEqual(toTextAreaCommand({ type: 'newline' }), { type: 'newline' });
 });
 
+test('toTextAreaCommand maps canonical selection events to textarea commands', () => {
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.left' }), { type: 'selectLeft' });
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.right' }), { type: 'selectRight' });
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.up' }), { type: 'selectUp' });
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.down' }), { type: 'selectDown' });
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.line.start' }), { type: 'selectLineStart' });
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.line.end' }), { type: 'selectLineEnd' });
+});
+
 test('toTextAreaCommand ignores app-level canonical events', () => {
   assert.equal(toTextAreaCommand({ type: 'submit' }), null);
   assert.equal(toTextAreaCommand({ type: 'escape' }), null);

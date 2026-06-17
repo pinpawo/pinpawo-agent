@@ -51,6 +51,18 @@ export function toTextAreaCommand(event: CanonicalInputEvent): TextAreaCommand |
       return { type: 'moveLineStart' };
     case 'cursor.line.end':
       return { type: 'moveLineEnd' };
+    case 'selection.left':
+      return { type: 'selectLeft' };
+    case 'selection.right':
+      return { type: 'selectRight' };
+    case 'selection.up':
+      return { type: 'selectUp' };
+    case 'selection.down':
+      return { type: 'selectDown' };
+    case 'selection.line.start':
+      return { type: 'selectLineStart' };
+    case 'selection.line.end':
+      return { type: 'selectLineEnd' };
     case 'newline':
       return { type: 'newline' };
     default:

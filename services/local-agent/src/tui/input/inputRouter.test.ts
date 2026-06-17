@@ -113,6 +113,10 @@ test('resolveTuiInputCommand routes busy and composer commands', () => {
     { target: 'textarea', command: { type: 'moveDown' } },
   );
   assert.deepEqual(
+    resolveTuiInputCommand({ type: 'selection.down' }, { type: 'composer' }),
+    { target: 'textarea', command: { type: 'selectDown' } },
+  );
+  assert.deepEqual(
     resolveTuiInputCommand(
       { type: 'cursor.up' },
       { type: 'composer' },
@@ -124,6 +128,19 @@ test('resolveTuiInputCommand routes busy and composer commands', () => {
       },
     ),
     { target: 'textarea', command: { type: 'moveUp' } },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand(
+      { type: 'selection.up' },
+      { type: 'composer' },
+      {
+        composerHistory: {
+          boundary: { previous: true, next: true },
+          available: { previous: true, next: true },
+        },
+      },
+    ),
+    { target: 'textarea', command: { type: 'selectUp' } },
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'tab', shift: true }, { type: 'composer' }),

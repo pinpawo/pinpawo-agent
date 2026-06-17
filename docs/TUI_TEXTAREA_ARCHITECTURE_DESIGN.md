@@ -627,6 +627,24 @@ services/local-agent/src/tui/input/textarea/layout.test.ts
 - `textareaModel` 不再新增 raw terminal sequence 判断。
 - Delete bug 类问题可以在 canonical tests 中定位。
 
+实施反馈：
+
+- Phase 2 适合拆成两个小 PR 推进：先抽 `terminalInput.ts`
+  作为 terminal sequence buffer 边界，再抽 `canonicalInput.ts`
+  作为 raw key / raw escape 到语义事件的收敛层。
+- `resolveTuiKeyAction` 可以先继续返回旧的 `TuiKeyAction`，
+  但入参应切到 `CanonicalInputEvent`；这样 router 仍保持小 diff，
+  同时停止读取 raw `input + key`。
+- `textareaModel` 应新增 canonical event 入口，例如
+  `applyTextAreaInputEvent(event, state, options)`；旧的
+  `applyTextAreaInput(input, key, ...)` 可以短期保留为兼容 wrapper。
+- raw Delete sequences（例如 `\x1b[3~` / `[3~` / split 后的 `[3~`）
+  应在 canonical mapper 中变成 `text.delete.forward`，不要在 router
+  或 textarea reducer 内做特殊判断。
+- bracketed paste 当前可以先在 canonical 层处理单次事件中的
+  `\x1b[200~...\x1b[201~` 和 CRLF normalization；跨多次 input event
+  的 paste start/body/end 聚合仍属于 `TerminalInputDecoder` 的后续小 PR。
+
 ### Phase 3: Extract input router
 
 把 `resolveTuiKeyAction` 改为：

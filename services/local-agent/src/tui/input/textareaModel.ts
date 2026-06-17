@@ -1,3 +1,7 @@
+import {
+  toCanonicalInputEvent,
+  type CanonicalInputEvent,
+} from './canonicalInput';
 import type { TuiKeyInput } from './keyInput';
 
 export type TextAreaModel = {
@@ -27,66 +31,55 @@ export function applyTextAreaInput(
   state: TextAreaModel,
   options: { width?: number } = {},
 ): TextAreaModel {
+  return applyTextAreaInputEvent(toCanonicalInputEvent({ input, key }), state, options);
+}
+
+export function applyTextAreaInputEvent(
+  event: CanonicalInputEvent,
+  state: TextAreaModel,
+  options: { width?: number } = {},
+): TextAreaModel {
   const text = state.text;
   const cursorOffset = clampCursor(state.cursorOffset, text);
   const width = options.width ?? Number.MAX_SAFE_INTEGER;
 
-  if (key.ctrl) {
-    switch (input) {
-      case 'a':
-        return createTextAreaModel(text, findLogicalLineStart(text, cursorOffset));
-      case 'e':
-        return createTextAreaModel(text, findLogicalLineEnd(text, cursorOffset));
-      case 'k':
-        return replaceRange(text, cursorOffset, findLogicalLineEnd(text, cursorOffset), '', cursorOffset);
-      case 'u': {
-        const lineStart = findLogicalLineStart(text, cursorOffset);
-        return replaceRange(text, lineStart, cursorOffset, '', lineStart);
-      }
-      case 'w': {
-        const wordStart = findPreviousWordStart(text, cursorOffset);
-        return replaceRange(text, wordStart, cursorOffset, '', wordStart);
-      }
-      default:
-        return createTextAreaModel(text, cursorOffset);
+  switch (event.type) {
+    case 'text.insert':
+    case 'text.paste':
+      return replaceRange(text, cursorOffset, cursorOffset, event.text, cursorOffset + event.text.length);
+    case 'text.delete.backward':
+      if (cursorOffset === 0) return createTextAreaModel(text, cursorOffset);
+      return replaceRange(text, cursorOffset - 1, cursorOffset, '', cursorOffset - 1);
+    case 'text.delete.forward':
+      if (cursorOffset === text.length) return createTextAreaModel(text, cursorOffset);
+      return replaceRange(text, cursorOffset, cursorOffset + 1, '', cursorOffset);
+    case 'text.delete.word.backward': {
+      const wordStart = findPreviousWordStart(text, cursorOffset);
+      return replaceRange(text, wordStart, cursorOffset, '', wordStart);
     }
+    case 'text.delete.to.line.start': {
+      const lineStart = findLogicalLineStart(text, cursorOffset);
+      return replaceRange(text, lineStart, cursorOffset, '', lineStart);
+    }
+    case 'text.delete.to.line.end':
+      return replaceRange(text, cursorOffset, findLogicalLineEnd(text, cursorOffset), '', cursorOffset);
+    case 'cursor.left':
+      return createTextAreaModel(text, cursorOffset - 1);
+    case 'cursor.right':
+      return createTextAreaModel(text, cursorOffset + 1);
+    case 'cursor.up':
+      return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, -1));
+    case 'cursor.down':
+      return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, 1));
+    case 'cursor.line.start':
+      return createTextAreaModel(text, findLogicalLineStart(text, cursorOffset));
+    case 'cursor.line.end':
+      return createTextAreaModel(text, findLogicalLineEnd(text, cursorOffset));
+    case 'newline':
+      return replaceRange(text, cursorOffset, cursorOffset, '\n', cursorOffset + 1);
+    default:
+      return createTextAreaModel(text, cursorOffset);
   }
-
-  if (key.leftArrow) {
-    return createTextAreaModel(text, cursorOffset - 1);
-  }
-  if (key.rightArrow) {
-    return createTextAreaModel(text, cursorOffset + 1);
-  }
-  if (key.upArrow) {
-    return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, -1));
-  }
-  if (key.downArrow) {
-    return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, 1));
-  }
-  if (key.home) {
-    return createTextAreaModel(text, findLogicalLineStart(text, cursorOffset));
-  }
-  if (key.end) {
-    return createTextAreaModel(text, findLogicalLineEnd(text, cursorOffset));
-  }
-  if (key.backspace) {
-    if (cursorOffset === 0) return createTextAreaModel(text, cursorOffset);
-    return replaceRange(text, cursorOffset - 1, cursorOffset, '', cursorOffset - 1);
-  }
-  if (key.delete) {
-    if (cursorOffset === text.length) return createTextAreaModel(text, cursorOffset);
-    return replaceRange(text, cursorOffset, cursorOffset + 1, '', cursorOffset);
-  }
-  if (isTextAreaNewlineInput(input, key)) {
-    return replaceRange(text, cursorOffset, cursorOffset, '\n', cursorOffset + 1);
-  }
-
-  const inserted = normalizeTextAreaTextInput(input);
-  if (!inserted) {
-    return createTextAreaModel(text, cursorOffset);
-  }
-  return replaceRange(text, cursorOffset, cursorOffset, inserted, cursorOffset + inserted.length);
 }
 
 export function renderTextAreaRows(
@@ -157,34 +150,6 @@ export function wrapTextAreaRows(text: string, width: number): Array<{
   }
 
   return rows.length > 0 ? rows : [{ text: '', start: 0, end: 0 }];
-}
-
-export function isTextAreaNewlineInput(input: string, key: TuiKeyInput) {
-  return Boolean(key.shift && key.return)
-    || input === '\x1b[13;2u'
-    || input === '\x1b[13;2~'
-    || input === '\x1b[27;2;13~'
-    || input === '[13;2u'
-    || input === '[13;2~'
-    || input === '[27;2;13~';
-}
-
-export function isTextAreaControlSequence(input: string) {
-  return /^(?:\x1b)?\[[0-9;?]*[A-Za-z~]$/.test(input);
-}
-
-export function normalizeTextAreaTextInput(input: string) {
-  if (!input) return '';
-  if (isTextAreaControlSequence(input)) return '';
-
-  const text = input
-    .replace(/(?:\x1b)?\[200~/g, '')
-    .replace(/(?:\x1b)?\[201~/g, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n');
-
-  if (isTextAreaControlSequence(text)) return '';
-  return text;
 }
 
 function replaceRange(

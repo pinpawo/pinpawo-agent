@@ -22,7 +22,7 @@ export type TuiInputCommand =
   | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
-  | { target: 'composer'; action: 'submit' | 'clear' | 'edit' }
+  | { target: 'composer'; action: 'submit' | 'clear' }
   | { target: 'textarea'; command: TextAreaCommand }
   | { target: 'none' };
 

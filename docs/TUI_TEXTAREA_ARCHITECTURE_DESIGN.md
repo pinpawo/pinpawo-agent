@@ -604,8 +604,8 @@ composition underline 不应该再散落到 `Composer`。
 host/controller 层可以先落成一个轻量 hook，例如 `useTextAreaController`：
 
 - 输入：`TuiState.input`、focus、placeholder、textarea width、`dispatch`。
-- 输出：`composerProps`（包含 `TextAreaViewModel`）、`layout/cursor metrics`、
-  `clear()`、`applyCommand(command)`。
+- 输出：`TextAreaControllerState`（`value`、`cursorOffset`、`layout/cursor metrics`、
+  `composerProps`）以及 `clear()`、`applyCommand(command)`。
 - 约束：它只做 textarea host wiring，不处理 app command、副作用、approval option
   navigation 或 resume picker。
 
@@ -826,6 +826,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   可以先承接 `clear`、`applyCommand`、`composerProps`，让 `TuiApp` 不再直接调用
   textarea engine 或手动拼 `Composer` props；但 approval submit、resume picker、
   interrupt/exit 等业务副作用仍留在 `TuiApp`。
+- controller 应有纯 `buildTextAreaControllerState` builder，把 value、cursorOffset、
+  layout/cursor metrics、composer props 聚成一个可测试的 host state。hook 只负责
+  绑定 dispatch callback。
 - history / selection 之前还应让 controller 暴露 layout/cursor metrics，例如
   `cursor.isAtFirstVisualRow` / `cursor.isAtLastVisualRow`。这一步只提供 host 可消费的
   结构 contract，不改变上下键行为；后续 history policy 再决定如何使用这些 metrics。
@@ -967,9 +970,12 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 15. `codex/tui-drop-composer-edit-command`
    - 从主 `TuiInputCommand` union 删除 `composer.edit`。
    - legacy `composer.edit` 仅保留在兼容转换中。
-16. `codex/tui-textarea-history-selection`
+16. `codex/tui-textarea-controller-state`
+   - 新增纯 `TextAreaControllerState` builder。
+   - `useTextAreaController` 只绑定 dispatch callbacks。
+17. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-17. `codex/tui-opentui-spike`
+18. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

@@ -12,12 +12,15 @@ export {
   type TuiInputBufferState,
 } from './terminalInput';
 export {
+  resolveLegacyTuiInputAction,
+  resolveLegacyTuiInputAction as resolveTuiKeyAction,
   resolveTuiInputAction,
-  resolveTuiInputAction as resolveTuiKeyAction,
   resolveTuiInputCommand,
   resolveTuiInputOwner,
+  toLegacyTuiInputCommand,
   type TuiInputCommand,
-  type TuiInputCommand as TuiKeyAction,
+  type TuiLegacyInputCommand,
+  type TuiLegacyInputCommand as TuiKeyAction,
   type TuiInputOwner,
   type TuiInputRouteContext,
   type TuiInputRouteContext as TuiKeyContext,

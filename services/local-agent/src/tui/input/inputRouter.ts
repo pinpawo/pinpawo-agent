@@ -15,6 +15,13 @@ export type TuiInputOwner =
   | { type: 'composer' };
 
 export type TuiInputCommand =
+  | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
+  | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
+  | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
+  | { target: 'composer'; action: 'submit' | 'clear' | 'edit' }
+  | { target: 'none' };
+
+export type TuiLegacyInputCommand =
   | { type: 'global.ctrl_c' }
   | { type: 'global.interrupt' }
   | { type: 'approval.previous' }
@@ -34,10 +41,17 @@ export function resolveTuiInputAction(
   context: TuiInputRouteContext,
 ): TuiInputCommand {
   if (event.type === 'interrupt') {
-    return { type: 'global.ctrl_c' };
+    return { target: 'global', action: 'ctrl_c' };
   }
 
   return resolveTuiInputCommand(event, resolveTuiInputOwner(context));
+}
+
+export function resolveLegacyTuiInputAction(
+  event: CanonicalInputEvent,
+  context: TuiInputRouteContext,
+): TuiLegacyInputCommand {
+  return toLegacyTuiInputCommand(resolveTuiInputAction(event, context));
 }
 
 export function resolveTuiInputOwner(context: TuiInputRouteContext): TuiInputOwner {
@@ -58,38 +72,53 @@ export function resolveTuiInputCommand(
 
   switch (owner.type) {
     case 'unready':
-      return { type: 'none' };
+      return { target: 'none' };
 
     case 'resumePicker':
-      if (event.type === 'cursor.up') return { type: 'resume.previous' };
-      if (event.type === 'cursor.down') return { type: 'resume.next' };
-      if (isReturn) return { type: 'resume.submit' };
-      if (event.type === 'escape') return { type: 'resume.dismiss' };
-      return { type: 'none' };
+      if (event.type === 'cursor.up') return { target: 'resume', action: 'previous' };
+      if (event.type === 'cursor.down') return { target: 'resume', action: 'next' };
+      if (isReturn) return { target: 'resume', action: 'submit' };
+      if (event.type === 'escape') return { target: 'resume', action: 'dismiss' };
+      return { target: 'none' };
 
     case 'approval':
-      if (event.type === 'cursor.up') return { type: 'approval.previous' };
-      if (event.type === 'cursor.down') return { type: 'approval.next' };
-      if (isNewline) return { type: 'composer.edit' };
-      if (isReturn) return { type: 'approval.submit' };
-      if (event.type === 'escape') return { type: 'global.interrupt' };
-      if (event.type === 'tab') return { type: 'none' };
-      if (isControlSequence) return { type: 'none' };
-      if (event.type === 'noop') return { type: 'none' };
-      return { type: 'composer.edit' };
+      if (event.type === 'cursor.up') return { target: 'approval', action: 'previous' };
+      if (event.type === 'cursor.down') return { target: 'approval', action: 'next' };
+      if (isNewline) return { target: 'composer', action: 'edit' };
+      if (isReturn) return { target: 'approval', action: 'submit' };
+      if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
+      if (event.type === 'tab') return { target: 'none' };
+      if (isControlSequence) return { target: 'none' };
+      if (event.type === 'noop') return { target: 'none' };
+      return { target: 'composer', action: 'edit' };
 
     case 'busy':
-      if (event.type === 'escape') return { type: 'global.interrupt' };
-      return { type: 'none' };
+      if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
+      return { target: 'none' };
 
     case 'composer':
-      if (event.type === 'escape') return { type: 'composer.clear' };
-      if (isNewline) return { type: 'composer.edit' };
-      if (isReturn) return { type: 'composer.submit' };
-      if (event.type === 'cursor.up' || event.type === 'cursor.down') return { type: 'composer.edit' };
-      if (event.type === 'tab') return { type: 'none' };
-      if (isControlSequence) return { type: 'none' };
-      if (event.type === 'noop') return { type: 'none' };
-      return { type: 'composer.edit' };
+      if (event.type === 'escape') return { target: 'composer', action: 'clear' };
+      if (isNewline) return { target: 'composer', action: 'edit' };
+      if (isReturn) return { target: 'composer', action: 'submit' };
+      if (event.type === 'cursor.up' || event.type === 'cursor.down') return { target: 'composer', action: 'edit' };
+      if (event.type === 'tab') return { target: 'none' };
+      if (isControlSequence) return { target: 'none' };
+      if (event.type === 'noop') return { target: 'none' };
+      return { target: 'composer', action: 'edit' };
+  }
+}
+
+export function toLegacyTuiInputCommand(command: TuiInputCommand): TuiLegacyInputCommand {
+  switch (command.target) {
+    case 'global':
+      return { type: `global.${command.action}` };
+    case 'approval':
+      return { type: `approval.${command.action}` };
+    case 'resume':
+      return { type: `resume.${command.action}` };
+    case 'composer':
+      return { type: `composer.${command.action}` };
+    case 'none':
+      return { type: 'none' };
   }
 }

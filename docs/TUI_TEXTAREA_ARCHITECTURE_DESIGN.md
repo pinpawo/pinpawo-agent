@@ -757,6 +757,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - `textarea/commands.ts` 负责 canonical event -> textarea command 的边界映射。
   `submit`、`escape`、`tab`、`interrupt`、unknown control 等 app-level event 应映射为
   `null`，避免泄漏进 textarea engine。
+- router 应把可编辑事件输出为 `{ target: 'textarea', command }`，由 `TuiApp`
+  调用 `applyTextAreaCommand`。旧的 `composer.edit` 可以保留在 compatibility
+  conversion 中，但不应再作为主路径命令。
 - vertical cursor movement 当前需要 engine 使用 layout 的 row lookup helper，
   这是可以接受的单向依赖；layout 不应反向依赖 engine state。
 - `renderModel.ts` 可以在 layout/cursor metrics 稳定后拆出。拆出后，
@@ -894,9 +897,12 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 9. `codex/tui-textarea-commands`
    - 新增 textarea-owned command union。
    - 让 engine 主入口消费 textarea command，canonical/raw 入口退为兼容 wrapper。
-10. `codex/tui-textarea-history-selection`
+10. `codex/tui-routed-textarea-commands`
+   - router 输出 `{ target: 'textarea', command }`。
+   - `TuiApp` 直接 dispatch `applyTextAreaCommand`，legacy `composer.edit` 仅保留兼容转换。
+11. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-11. `codex/tui-opentui-spike`
+12. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

@@ -19,6 +19,39 @@ test('textarea engine applies textarea edit commands', () => {
   assert.deepEqual(withoutEditHistory(state), { text: 'hllo', cursorOffset: 1 });
 });
 
+test('textarea engine moves and deletes across grapheme boundaries', () => {
+  const text = '🙂a';
+
+  assert.deepEqual(
+    applyTextAreaCommand({ type: 'moveRight' }, { text, cursorOffset: 0 }),
+    { text, cursorOffset: 2 },
+  );
+  assert.deepEqual(
+    applyTextAreaCommand({ type: 'moveLeft' }, { text, cursorOffset: 2 }),
+    { text, cursorOffset: 0 },
+  );
+  assert.deepEqual(
+    applyTextAreaCommand({ type: 'moveLeft' }, { text, cursorOffset: 1 }),
+    { text, cursorOffset: 0 },
+  );
+  assert.deepEqual(
+    withoutEditHistory(applyTextAreaCommand({ type: 'deleteForward' }, { text, cursorOffset: 0 })),
+    { text: 'a', cursorOffset: 0 },
+  );
+  assert.deepEqual(
+    withoutEditHistory(applyTextAreaCommand({ type: 'deleteForward' }, { text, cursorOffset: 1 })),
+    { text: 'a', cursorOffset: 0 },
+  );
+  assert.deepEqual(
+    withoutEditHistory(applyTextAreaCommand({ type: 'deleteBackward' }, { text, cursorOffset: 2 })),
+    { text: 'a', cursorOffset: 0 },
+  );
+  assert.deepEqual(
+    withoutEditHistory(applyTextAreaCommand({ type: 'deleteBackward' }, { text, cursorOffset: 1 })),
+    { text: 'a', cursorOffset: 0 },
+  );
+});
+
 test('textarea engine handles line and word editing commands', () => {
   assert.deepEqual(
     withoutEditHistory(applyTextAreaCommand(
@@ -131,6 +164,27 @@ test('textarea engine extends selection horizontally and clears collapsed select
 
   state = applyTextAreaCommand({ type: 'selectLeft' }, state);
   assert.deepEqual(state, { text: 'hello', cursorOffset: 1 });
+});
+
+test('textarea engine extends horizontal selection on grapheme boundaries', () => {
+  const text = '🙂a';
+
+  assert.deepEqual(
+    applyTextAreaCommand({ type: 'selectRight' }, { text, cursorOffset: 0 }),
+    {
+      text,
+      cursorOffset: 2,
+      selection: { anchorOffset: 0, focusOffset: 2 },
+    },
+  );
+  assert.deepEqual(
+    applyTextAreaCommand({ type: 'selectLeft' }, { text, cursorOffset: 2 }),
+    {
+      text,
+      cursorOffset: 0,
+      selection: { anchorOffset: 2, focusOffset: 0 },
+    },
+  );
 });
 
 test('textarea engine extends selection vertically using layout rows', () => {

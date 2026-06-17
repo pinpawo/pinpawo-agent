@@ -605,7 +605,7 @@ host/controller 层可以先落成一个轻量 hook，例如 `useTextAreaControl
 
 - 输入：`TuiState.input`、focus、placeholder、textarea width、`dispatch`。
 - 输出：`TextAreaControllerState`（`value`、`cursorOffset`、`layout/cursor metrics`、
-  `composerProps`）以及 `clear()`、`applyCommand(command)`。
+  `historyBoundary`、`composerProps`）以及 `clear()`、`applyCommand(command)`。
 - 约束：它只做 textarea host wiring，不处理 app command、副作用、approval option
   navigation 或 resume picker。
 
@@ -832,6 +832,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - history / selection 之前还应让 controller 暴露 layout/cursor metrics，例如
   `cursor.isAtFirstVisualRow` / `cursor.isAtLastVisualRow`。这一步只提供 host 可消费的
   结构 contract，不改变上下键行为；后续 history policy 再决定如何使用这些 metrics。
+- 在真正接入 history 行为前，可以先从 cursor metrics 派生
+  `historyBoundary.previous` / `historyBoundary.next`。这个字段只表达“host 可以考虑切
+  history 的视觉边界”，不表达具体按键策略，也不改变当前上下键移动行为。
 
 ### Phase 5: History, selection, undo, external editor
 
@@ -973,9 +976,12 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 16. `codex/tui-textarea-controller-state`
    - 新增纯 `TextAreaControllerState` builder。
    - `useTextAreaController` 只绑定 dispatch callbacks。
-17. `codex/tui-textarea-history-selection`
+17. `codex/tui-textarea-history-boundary`
+   - controller 从 visual cursor metrics 派生 `historyBoundary`。
+   - 只新增 host 可消费的结构信号，不接入上下键或 prompt history 行为。
+18. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-18. `codex/tui-opentui-spike`
+19. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

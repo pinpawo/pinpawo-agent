@@ -502,6 +502,8 @@ export type TextareaLayout = {
     row: number;
     column: number;
     offset: number;
+    isAtFirstVisualRow: boolean;
+    isAtLastVisualRow: boolean;
   };
 };
 
@@ -737,6 +739,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   row 的 `start/end` 仍保持 JS offset，render/cursor 逻辑负责保护 grapheme 不被拆开。
 - 这类改动的评估重点不是“中文 case 是否单独补丁”，而是 layout 是否成为唯一理解
   terminal visual cell 的层。
+- 在接入 history / selection 之前，应先让 layout 暴露 cursor metrics：
+  `rows + cursor row/column + first/last visual row`。这样 host 后续只问
+  “是否在视觉首行/尾行”，不会重新实现 soft-wrap、display width 或 grapheme 逻辑。
 
 ### Phase 5: History, selection, undo, external editor
 
@@ -847,9 +852,12 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 6. `codex/tui-textarea-display-width`
    - 让 layout 负责 grapheme segmentation、display width、offset/visual column 映射。
    - engine 只消费 layout 暴露的 visual-column helper。
-7. `codex/tui-textarea-history-selection`
+7. `codex/tui-textarea-cursor-layout`
+   - 暴露 `rows + cursor visual metrics`，包括 first/last visual row。
+   - 为 history boundary、selection、mouse positioning 预留同一个 layout contract。
+8. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-8. `codex/tui-opentui-spike`
+9. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

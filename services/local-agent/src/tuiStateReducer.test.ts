@@ -151,6 +151,22 @@ test('tuiStateReducer navigates composer prompt history and restores draft', () 
   assert.equal(state.input.history.selectedIndex, null);
 });
 
+test('tuiStateReducer preserves engine selection and clears it on direct input changes', () => {
+  let state = tuiStateReducer(initialState(), {
+    type: 'input.apply',
+    value: {
+      text: 'hello',
+      cursorOffset: 5,
+      selection: { anchorOffset: 1, focusOffset: 4 },
+    },
+  });
+
+  assert.deepEqual(state.input.selection, { anchorOffset: 1, focusOffset: 4 });
+
+  state = tuiStateReducer(state, { type: 'input.set', value: 'draft' });
+  assert.equal(state.input.selection, undefined);
+});
+
 test('tuiStateReducer infers usage context window from runtime when missing', () => {
   let state = startRun(initialState(), 'req-1');
   state = tuiStateReducer(state, {

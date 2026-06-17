@@ -14,7 +14,8 @@ export type TextAreaCommand =
   | { type: 'moveUp' }
   | { type: 'moveDown' }
   | { type: 'moveLineStart' }
-  | { type: 'moveLineEnd' };
+  | { type: 'moveLineEnd' }
+  | { type: 'selectAll' };
 
 export function toTextAreaCommand(event: CanonicalInputEvent): TextAreaCommand | null {
   switch (event.type) {

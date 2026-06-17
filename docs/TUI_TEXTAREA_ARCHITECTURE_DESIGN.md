@@ -760,13 +760,11 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   `resolveTuiKeyAction` / `TuiKeyAction` 名称，避免一次性修改所有调用方。
 - owner 优先级需要显式测试：`unready -> resumePicker -> approval -> busy -> composer`。
   这比在 `TuiApp` 或 `keymap` 中靠 if/else 顺序隐式表达更稳。
-- 当前 router 仍返回旧的 broad command union；下一步可以把命令进一步拆成
-  `textarea command`、`app command`、`approval command`、`resume command`，
-  让 `TuiApp` 的 switch target 更接近本节的目标。
-- router 输出可以采用 `{ target, action }` 形状，例如
-  `{ target: 'composer', action: 'edit' }`。旧的
-  `approval.previous` / `composer.edit` dotted command 可以保留为
-  `keymap.ts` 的兼容转换层，但不应再作为主路径。
+- router 主路径应使用明确 target：`textarea command`、`app/global command`、
+  `approval command`、`resume command`、`composer submit/clear`、`none`。
+- 可编辑事件应只走 `{ target: 'textarea', command }`。旧的 dotted command，
+  尤其 `composer.edit`，只能保留在 compatibility conversion 中，不应继续出现在
+  主 `TuiInputCommand` union。
 - `TuiApp` 接入 routed command 后，仍会承担具体副作用执行：
   exit、interrupt、submit review、resume session、textarea edit。后续若继续缩小
   `TuiApp`，应抽 handler/controller，而不是把副作用塞回 router。
@@ -966,9 +964,12 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 14. `codex/tui-composer-view-model-props`
    - controller 产出 `TextAreaViewModel`，`Composer` 只接收 model 并渲染。
    - 进一步防止 placeholder/focus/render 逻辑回流到组件。
-15. `codex/tui-textarea-history-selection`
+15. `codex/tui-drop-composer-edit-command`
+   - 从主 `TuiInputCommand` union 删除 `composer.edit`。
+   - legacy `composer.edit` 仅保留在兼容转换中。
+16. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-16. `codex/tui-opentui-spike`
+17. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

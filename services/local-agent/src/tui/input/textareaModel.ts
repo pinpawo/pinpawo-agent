@@ -16,3 +16,8 @@ export {
   renderTextAreaRows,
   type TextAreaRenderRow,
 } from './textarea/renderModel';
+export {
+  buildTextAreaViewModel,
+  type TextAreaViewModel,
+  type TextAreaViewRow,
+} from './textarea/viewModel';

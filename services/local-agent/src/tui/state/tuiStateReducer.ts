@@ -8,6 +8,7 @@ import {
   getOperationKey,
 } from '../render/eventText';
 import {
+  navigateComposerHistory,
   recordComposerHistoryEntry,
   resetComposerHistoryNavigation,
 } from '../input/composerHistory';
@@ -313,6 +314,20 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           history: resetComposerHistoryNavigation(state.input.history),
         },
       };
+
+    case 'input.history.navigate':
+      {
+        const result = navigateComposerHistory(state.input.history, state.input.text, action.direction);
+        return {
+          ...state,
+          input: {
+            ...state.input,
+            text: result.value,
+            cursorOffset: result.value.length,
+            history: result.history,
+          },
+        };
+      }
 
     case 'history.append':
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) =>

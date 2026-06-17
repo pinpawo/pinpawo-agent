@@ -13,6 +13,7 @@ import {
   normalizeTuiInputEvent,
   toCanonicalInputEvent,
 } from './input/keymap';
+import { getComposerHistoryAvailability } from './input/composerHistory';
 import { resolveTuiInputAction } from './input/inputRouter';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
@@ -217,8 +218,7 @@ export function TuiApp(props: { actorId: string }) {
       hasResumePicker: resumePickerOpen,
       composerHistory: {
         boundary: textArea.historyBoundary,
-        // Prompt-history state lands in a separate PR; keep this route disabled until then.
-        available: { previous: false, next: false },
+        available: getComposerHistoryAvailability(tuiState.input.history),
       },
     });
 
@@ -293,6 +293,7 @@ export function TuiApp(props: { actorId: string }) {
         return;
 
       case 'composerHistory':
+        dispatch({ type: 'input.history.navigate', direction: action.action });
         return;
 
       case 'textarea':

@@ -215,6 +215,11 @@ export function TuiApp(props: { actorId: string }) {
       busy,
       hasPendingApproval: Boolean(pendingApproval),
       hasResumePicker: resumePickerOpen,
+      composerHistory: {
+        boundary: textArea.historyBoundary,
+        // Prompt-history state lands in a separate PR; keep this route disabled until then.
+        available: { previous: false, next: false },
+      },
     });
 
     switch (action.target) {
@@ -285,6 +290,9 @@ export function TuiApp(props: { actorId: string }) {
           submitCurrentInput();
           return;
         }
+        return;
+
+      case 'composerHistory':
         return;
 
       case 'textarea':

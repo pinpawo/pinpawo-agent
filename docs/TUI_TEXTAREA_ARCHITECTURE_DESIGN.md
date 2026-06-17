@@ -446,6 +446,8 @@ export type AppInputCommand =
 services/local-agent/src/tui/input/textarea/
   engine.ts
   layout.ts
+  renderModel.ts
+  textSegments.ts
   commands.ts
   selection.ts
   history.ts
@@ -488,16 +490,16 @@ export type TextareaCommand =
 
 职责：
 
-- 根据 text、cursor、terminal width 生成 render model。
+- 根据 text、cursor、terminal width 生成 layout rows 和 cursor metrics。
 - 处理 logical line、visual line、cursor row/column。
-- 处理 grapheme / display-width aware wrapping 和 cursor placement。
+- 处理 grapheme / display-width aware wrapping。
 - 提供 offset <-> visual row/column 的映射接口，避免 engine 自己理解终端宽度。
 
 建议类型：
 
 ```ts
 export type TextareaLayout = {
-  rows: TextareaRenderRow[];
+  rows: TextareaLayoutRow[];
   cursor: {
     row: number;
     column: number;
@@ -507,11 +509,10 @@ export type TextareaLayout = {
   };
 };
 
-export type TextareaRenderRow = {
+export type TextareaLayoutRow = {
   text: string;
   startOffset: number;
   endOffset: number;
-  cursorColumn?: number;
 };
 ```
 
@@ -523,7 +524,29 @@ display width 切分。候选方案：
 - 引入稳定的 `string-width` 类库。
 - 如果不新增依赖，先封装 `measureCellWidth()`，让实现可替换。
 
-### 5.6 TextareaHost / Composer component
+### 5.6 TextareaRenderModel
+
+职责：
+
+- 把 layout rows 转成 render-facing rows。
+- 处理 cursor cell 的 `before / cursor / after` 切片。
+- 保护 grapheme cluster 不被 cursor rendering 拆开。
+- 不修改文本，不参与 input routing。
+
+建议类型：
+
+```ts
+export type TextareaRenderRow = TextareaLayoutRow & {
+  before: string;
+  cursor: string | null;
+  after: string;
+};
+```
+
+`renderModel` 和 `layout` 应共享同一套 `textSegments` / width helper，避免两个层各自
+实现 grapheme 规则。
+
+### 5.7 TextareaHost / Composer component
 
 职责：
 
@@ -730,8 +753,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   engine/layout，新旧测试仍能覆盖兼容路径。
 - vertical cursor movement 当前需要 engine 使用 layout 的 row lookup helper，
   这是可以接受的单向依赖；layout 不应反向依赖 engine state。
-- `renderModel.ts` 可以后续再拆。当前 `renderTextAreaRows` 仍在 layout 中，
-  `Composer` 直接消费 layout 输出。
+- `renderModel.ts` 可以在 layout/cursor metrics 稳定后拆出。拆出后，
+  `Composer` 应直接消费 render model，layout 只暴露 rows、cursor metrics
+  和 offset/column 映射。
 - wide char / emoji 支持应作为 layout-focused PR 推进，而不是混入 engine 拆分 PR。
   实施后验证了一个结构判断：engine 可以保留 offset 状态，但 vertical movement
   应通过 layout 提供的 visual-column helper 完成。
@@ -742,6 +766,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - 在接入 history / selection 之前，应先让 layout 暴露 cursor metrics：
   `rows + cursor row/column + first/last visual row`。这样 host 后续只问
   “是否在视觉首行/尾行”，不会重新实现 soft-wrap、display width 或 grapheme 逻辑。
+- render model 拆分后，`textSegments.ts` 应成为 layout 与 render model 的共享基础层。
+  layout 使用它做 display-width wrapping，render model 使用它做 grapheme-safe cursor
+  rendering。
 
 ### Phase 5: History, selection, undo, external editor
 
@@ -855,9 +882,12 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 7. `codex/tui-textarea-cursor-layout`
    - 暴露 `rows + cursor visual metrics`，包括 first/last visual row。
    - 为 history boundary、selection、mouse positioning 预留同一个 layout contract。
-8. `codex/tui-textarea-history-selection`
+8. `codex/tui-textarea-render-model`
+   - 把 `renderTextAreaRows` 从 layout 拆出到 render model。
+   - 提取共享 text segmentation helper，避免 layout/render 各自处理 grapheme。
+9. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-9. `codex/tui-opentui-spike`
+10. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

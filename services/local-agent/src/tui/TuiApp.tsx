@@ -12,8 +12,9 @@ import {
   createInitialTuiInputBufferState,
   normalizeTuiInputEvent,
   resolveTuiKeyAction,
+  toCanonicalInputEvent,
 } from './input/keymap';
-import { applyTextAreaInput } from './input/textareaModel';
+import { applyTextAreaInputEvent } from './input/textareaModel';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
   buildActiveOperationLines,
@@ -199,9 +200,8 @@ export function TuiApp(props: { actorId: string }) {
     if (!normalized.event) {
       return;
     }
-    const normalizedInput = normalized.event.input;
-    const normalizedKey = normalized.event.key;
-    const action = resolveTuiKeyAction(normalizedInput, normalizedKey, {
+    const inputEvent = toCanonicalInputEvent(normalized.event);
+    const action = resolveTuiKeyAction(inputEvent, {
       ready,
       busy,
       hasPendingApproval: Boolean(pendingApproval),
@@ -275,7 +275,7 @@ export function TuiApp(props: { actorId: string }) {
         return;
 
       case 'composer.edit': {
-        const nextInput = applyTextAreaInput(normalizedInput, normalizedKey, {
+        const nextInput = applyTextAreaInputEvent(inputEvent, {
           text: inputValue,
           cursorOffset: inputCursorOffset,
         }, { width: Math.max(8, contentWidth - 4) });

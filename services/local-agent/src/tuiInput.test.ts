@@ -9,6 +9,8 @@ import {
   createInitialTuiInputBufferState,
   normalizeTuiInputEvent,
   resolveTuiKeyAction,
+  toCanonicalInputEvent,
+  type TuiKeyContext,
   type TuiKeyInput,
 } from './tui/input/keymap';
 import {
@@ -17,6 +19,14 @@ import {
   wrapTextAreaRows,
   type TextAreaModel,
 } from './tui/input/textareaModel';
+
+function resolveRawTuiKeyAction(
+  input: string,
+  key: TuiKeyInput,
+  context: TuiKeyContext,
+) {
+  return resolveTuiKeyAction(toCanonicalInputEvent({ input, key }), context);
+}
 
 test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
   assert.deepEqual(parseTuiCommand('hello'), {
@@ -96,47 +106,47 @@ test('formatTuiCommandHelp is generated from visible command metadata', () => {
 
 test('resolveTuiKeyAction routes global, approval, busy, and composer keys', () => {
   assert.deepEqual(
-    resolveTuiKeyAction('c', { ctrl: true }, { ready: false, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('c', { ctrl: true }, { ready: false, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'global.ctrl_c' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
     { type: 'approval.previous' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
     { type: 'approval.submit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('x', {}, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
+    resolveRawTuiKeyAction('x', {}, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
     { type: 'composer.edit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
     { type: 'global.interrupt' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: true, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { escape: true }, { ready: true, busy: true, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'global.interrupt' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'composer.clear' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'composer.submit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'composer.edit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { downArrow: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: true }),
+    resolveRawTuiKeyAction('', { downArrow: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: true }),
     { type: 'resume.next' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: true }),
+    resolveRawTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: true }),
     { type: 'resume.submit' },
   );
 });
@@ -152,15 +162,15 @@ test('resolveTuiKeyAction treats raw return input as submit', () => {
 
   for (const input of rawReturnInputs) {
     assert.deepEqual(
-      resolveTuiKeyAction(input, {}, readyContext),
+      resolveRawTuiKeyAction(input, {}, readyContext),
       { type: 'composer.submit' },
     );
     assert.deepEqual(
-      resolveTuiKeyAction(input, {}, { ...readyContext, hasPendingApproval: true }),
+      resolveRawTuiKeyAction(input, {}, { ...readyContext, hasPendingApproval: true }),
       { type: 'approval.submit' },
     );
     assert.deepEqual(
-      resolveTuiKeyAction(input, {}, { ...readyContext, hasResumePicker: true }),
+      resolveRawTuiKeyAction(input, {}, { ...readyContext, hasResumePicker: true }),
       { type: 'resume.submit' },
     );
   }
@@ -175,30 +185,30 @@ test('resolveTuiKeyAction treats Shift+Enter as composer edit newline', () => {
   };
 
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true, shift: true }, readyContext),
+    resolveRawTuiKeyAction('', { return: true, shift: true }, readyContext),
     { type: 'composer.edit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('\x1b[13;2u', {}, readyContext),
+    resolveRawTuiKeyAction('\x1b[13;2u', {}, readyContext),
     { type: 'composer.edit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('[27;2;13~', {}, readyContext),
+    resolveRawTuiKeyAction('[27;2;13~', {}, readyContext),
     { type: 'composer.edit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('\x1b[13;2u', {}, { ...readyContext, hasPendingApproval: true }),
+    resolveRawTuiKeyAction('\x1b[13;2u', {}, { ...readyContext, hasPendingApproval: true }),
     { type: 'composer.edit' },
   );
 });
 
 test('resolveTuiKeyAction ignores unrelated terminal control sequences', () => {
   assert.deepEqual(
-    resolveTuiKeyAction('\x1b[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('\x1b[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'none' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'none' },
   );
 });
@@ -267,6 +277,10 @@ test('applyTextAreaInput inserts Shift+Enter newline and normalizes pasted multi
 test('applyTextAreaInput supports textarea delete and line movement operations', () => {
   assert.deepEqual(
     applyTextAreaInput('', { delete: true }, { text: 'abc', cursorOffset: 1 }),
+    { text: 'ac', cursorOffset: 1 },
+  );
+  assert.deepEqual(
+    applyTextAreaInput('\x1b[3~', {}, { text: 'abc', cursorOffset: 1 }),
     { text: 'ac', cursorOffset: 1 },
   );
   assert.deepEqual(

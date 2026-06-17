@@ -35,7 +35,8 @@ export function formatOperationProgress(event: LocalAgentOperationEvent) {
 export function formatOperationResult(event: LocalAgentOperationEvent) {
   const label = event.operation.title ?? event.operation.kind;
   if (event.phase === 'failed') {
-    return `${label}：${TUI_TEXT.operationFailed}${event.operation.summary ? ` · ${shorten(event.operation.summary, 80)}` : ''}`;
+    const detail = formatOperationDetail(event, 80);
+    return `${label}：${TUI_TEXT.operationFailed}${detail ? ` · ${detail}` : ''}`;
   }
   if (event.phase === 'interrupted') {
     return `${label}：${TUI_TEXT.operationInterrupted}`;

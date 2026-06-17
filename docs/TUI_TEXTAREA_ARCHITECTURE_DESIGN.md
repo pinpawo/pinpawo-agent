@@ -899,8 +899,7 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   `input.apply` 继续表示用户编辑，并会退出 history selection。
 - selection state 应先落在 textarea engine/model 内：`TextAreaModel` 可携带可选 selection，
   `textarea/selection.ts` 负责 normalized range，engine 负责选区替换/删除，controller 和
-  reducer 只透传或清理 selection。Shift+Arrow、select-all key binding、selection
-  highlight 是后续 PR。
+  reducer 只透传或清理 selection。selection highlight 是后续 PR。
 - selection display 属于 render/view boundary：`renderModel` 可以在有 selection 时产出
   grapheme-safe `segments`，`viewModel` 透传这些 segments，`TextAreaView` 用 Ink inverse
   渲染 selected/cursor segment。没有 selection 时继续使用旧的 `before/cursor/after`
@@ -911,8 +910,8 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - selection key routing 属于 canonical-to-command boundary：Shift+Arrow 和
   Shift+Home/End 先归一为 `selection.*` canonical events，再由 `toTextAreaCommand`
   映射到 selection movement commands。router 只决定 owner/target，不能把 selection
-  up/down 误交给 prompt history routing。Ctrl+A/select-all 是否覆盖 line-start 语义仍需
-  单独决策，不应混进 Shift+Arrow PR。
+  up/down 误交给 prompt history routing。Ctrl+A/select-all 应作为单独的 canonical
+  edit event 决策，不应混进 Shift+Arrow PR。
 - undo/redo state 属于 textarea engine/model：文本编辑命令记录 bounded `editHistory`，
   cursor/selection movement 保留但不新增 undo entry；host-level `input.set`、prompt
   history navigation、submit/review resume 清理 edit history。Ctrl+Z/Ctrl+Y 等 key
@@ -920,6 +919,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - undo/redo key routing 属于 canonical-to-command boundary：Ctrl+Z 映射为
   `edit.undo`，Ctrl+Y 和 Ctrl+Shift+Z 映射为 `edit.redo`，再由 `toTextAreaCommand`
   接到 engine `undo`/`redo` commands。这个 PR 不应改变 Ctrl+A/select-all 语义。
+- Ctrl+A/select-all 已决策为 textarea selection command，而不是 line-start alias：
+  canonical input 输出 `edit.select.all`，`toTextAreaCommand` 映射到 engine `selectAll`。
+  Home 继续承担 line-start，Ctrl+E 继续承担 line-end。
 - preferred-column state 属于 textarea engine/model：vertical cursor/selection movement
   记录目标 visual column，layout 仍只提供 row/column measurement 和 offset lookup。
   controller 和 reducer 应透传 `preferredColumn`；host-level draft replacement、submit、
@@ -1114,9 +1116,13 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
      计算 grapheme 边界。
    - `deleteBackward` / `deleteForward` 删除完整 grapheme range，避免拆开 emoji 或组合字符。
    - 暂不把 word movement/deletion 混进同一个 PR。
-29. `codex/tui-textarea-history-selection`
-   - select-all key binding，以及 history/selection/undo 交互细节。
-30. `codex/tui-opentui-spike`
+29. `codex/tui-select-all-key-routing`
+   - canonical input 把 Ctrl+A 映射为 `edit.select.all`，不再伪装成 `cursor.line.start`。
+   - `toTextAreaCommand` 把 `edit.select.all` 接到已有 engine `selectAll` command。
+   - router 继续只负责 owner/target，不新增 Ctrl+A special case。
+30. `codex/tui-textarea-history-selection`
+   - history/selection/undo 交互细节。
+31. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

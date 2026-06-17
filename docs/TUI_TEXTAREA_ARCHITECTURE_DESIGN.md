@@ -857,6 +857,10 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   `textarea/selection.ts` 负责 normalized range，engine 负责选区替换/删除，controller 和
   reducer 只透传或清理 selection。Shift+Arrow、select-all key binding、selection
   highlight 是后续 PR。
+- selection display 属于 render/view boundary：`renderModel` 可以在有 selection 时产出
+  grapheme-safe `segments`，`viewModel` 透传这些 segments，`TextAreaView` 用 Ink inverse
+  渲染 selected/cursor segment。没有 selection 时继续使用旧的 `before/cursor/after`
+  shape。
 - undo/redo。
 - optional external editor flow。
 - command palette / autocomplete target-bound routing。
@@ -1015,9 +1019,13 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - `TextAreaModel` 支持可选 selection，engine 支持选区替换/删除和 `selectAll` command。
    - controller/reducer 透传 engine selection；直接输入、提交、history navigation 清理 selection。
    - 暂不接新按键或 selection highlight。
-22. `codex/tui-textarea-history-selection`
-   - Shift+Arrow、select-all key binding、selection highlight、undo/redo。
-23. `codex/tui-opentui-spike`
+22. `codex/tui-textarea-selection-render`
+   - render model 在 selection 存在时输出 grapheme-safe selected/cursor segments。
+   - view model 和 `TextAreaView` 渲染 selection highlight。
+   - 暂不接新按键。
+23. `codex/tui-textarea-history-selection`
+   - Shift+Arrow、select-all key binding、undo/redo。
+24. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

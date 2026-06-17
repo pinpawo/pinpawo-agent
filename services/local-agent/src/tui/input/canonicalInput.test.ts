@@ -132,7 +132,7 @@ test('toCanonicalInputEvent maps supported control keys', () => {
   );
   assert.deepEqual(
     toCanonicalInputEvent({ input: 'a', key: { ctrl: true } }),
-    { type: 'cursor.line.start' },
+    { type: 'edit.select.all' },
   );
   assert.deepEqual(
     toCanonicalInputEvent({ input: 'k', key: { ctrl: true } }),

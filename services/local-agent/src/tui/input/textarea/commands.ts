@@ -45,6 +45,8 @@ export function toTextAreaCommand(event: CanonicalInputEvent): TextAreaCommand |
       return { type: 'undo' };
     case 'edit.redo':
       return { type: 'redo' };
+    case 'edit.select.all':
+      return { type: 'selectAll' };
     case 'cursor.left':
       return { type: 'moveLeft' };
     case 'cursor.right':

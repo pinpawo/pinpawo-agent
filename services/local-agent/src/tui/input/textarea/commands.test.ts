@@ -18,6 +18,7 @@ test('toTextAreaCommand maps canonical text events to textarea commands', () => 
   assert.deepEqual(toTextAreaCommand({ type: 'text.delete.to.line.end' }), { type: 'deleteToLineEnd' });
   assert.deepEqual(toTextAreaCommand({ type: 'edit.undo' }), { type: 'undo' });
   assert.deepEqual(toTextAreaCommand({ type: 'edit.redo' }), { type: 'redo' });
+  assert.deepEqual(toTextAreaCommand({ type: 'edit.select.all' }), { type: 'selectAll' });
 });
 
 test('toTextAreaCommand maps canonical cursor events to textarea commands', () => {

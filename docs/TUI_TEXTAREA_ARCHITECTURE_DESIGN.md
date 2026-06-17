@@ -857,6 +857,10 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - render model 拆分后，`textSegments.ts` 应成为 layout 与 render model 的共享基础层。
   layout 使用它做 display-width wrapping，render model 使用它做 grapheme-safe cursor
   rendering。
+- textarea engine 的 horizontal movement、horizontal selection 和 single-grapheme
+  delete/backspace 也应消费同一套 `textSegments` 边界。engine 可以继续保存 JS offset，
+  但不应再用 `cursorOffset +/- 1` 自己猜可编辑字符边界；word movement/deletion 可作为
+  后续独立 refinement。
 - `Composer` 不应继续承担 placeholder、focus dim、cursor row rendering 等显示状态判断。
   这些状态应收进 `textarea/viewModel.ts`，再由 `TextAreaView` 做 Ink 适配。这样
   `Composer` 只是 host/component 边界，textarea 的显示 contract 可以独立测试。
@@ -1105,9 +1109,14 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - up/down 和 shift-up/down 穿过短行后仍回到原视觉列。
    - controller/reducer 透传 engine-owned `editHistory` / `preferredColumn`，host-level
      replacement 清理 transient state。
-28. `codex/tui-textarea-history-selection`
+28. `codex/tui-textarea-grapheme-editing`
+   - `moveLeft` / `moveRight` / `selectLeft` / `selectRight` 通过 `textSegments`
+     计算 grapheme 边界。
+   - `deleteBackward` / `deleteForward` 删除完整 grapheme range，避免拆开 emoji 或组合字符。
+   - 暂不把 word movement/deletion 混进同一个 PR。
+29. `codex/tui-textarea-history-selection`
    - select-all key binding，以及 history/selection/undo 交互细节。
-29. `codex/tui-opentui-spike`
+30. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

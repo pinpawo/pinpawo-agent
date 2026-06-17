@@ -1,12 +1,11 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type {
   AgentCapability,
+  CapabilityArtifactSink,
   CapabilityArtifactStore,
-  CapabilityMiddlewareContext,
   ContextPolicyContext,
   OrchestrationDecisionStructuredOutputConfig,
-  SubagentResult,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 
@@ -35,9 +34,19 @@ export const exploreResultSchema = z.object({
   nextSteps: z.array(z.string().min(1)),
 });
 
+const exploreEvidenceItemSchema = z.object({
+  source: z.string().min(1),
+  proves: z.string().min(1),
+  value: z.string().min(1),
+});
+
 const exploreKnowledgeIngestSchema = z.object({
   summary: z.string().min(1),
+  evidence: z.array(exploreEvidenceItemSchema).default([]),
 });
+
+export type ExploreEvidenceItem = z.infer<typeof exploreEvidenceItemSchema>;
+export type ExploreKnowledgeIngest = z.infer<typeof exploreKnowledgeIngestSchema>;
 
 const EXPLORE_CONTEXT_COMPRESSION_RATIO = 0.75;
 const EXPLORE_FALLBACK_COMPRESSION_BUDGET_TOKENS = 24_000;
@@ -102,106 +111,38 @@ function readLatestExploreSummary(messages: BaseMessage[]): string | null {
   return null;
 }
 
-function clipExplorePreview(text: string, maxLength: number) {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1)}…`;
-}
-
 /**
- * Deterministically persist explore's structured result + markdown report as
- * artifacts, from `afterRun`, through the injected store + sink. This replaces
- * the previous "instruct the model to call capability_artifact_write" approach
- * (issue #137): the summary is already produced by ingestExploreKnowledge here,
- * so we write it directly instead of hoping the model echoes it into a tool call.
- * No-op when store/sink/threadId is unavailable (e.g. tests, degraded runtimes).
+ * Persist a context-pressure ingest as a single report artifact: the markdown
+ * summary as content, the structured evidence ({source, proves, value}[]) in
+ * metadata. Recorded into state via the subagent's artifact sink so the ref is
+ * visible across turns (avoids re-exploring; redesign §14). No-op when the
+ * store, sink, or threadId is unavailable (tests / degraded runtimes / explore
+ * surfaces without a store such as studio).
  */
-async function recordExploreArtifacts(
+async function recordExploreIngestArtifact(
   store: CapabilityArtifactStore | undefined,
-  ctx: CapabilityMiddlewareContext,
-  summary: string,
-  status: ExploreResult['status'],
+  sink: CapabilityArtifactSink | undefined,
+  ingest: ExploreKnowledgeIngest,
 ): Promise<void> {
-  if (!store || !ctx.recordCapabilityArtifact || !ctx.threadId) return;
-  const normalized = summary.trim();
-  const result: ExploreResult = { status, summary: normalized, nextSteps: [] };
-  const base = {
-    threadId: ctx.threadId,
-    capabilityId: ctx.capabilityId,
-    delegationId: ctx.delegationId,
-    turnId: ctx.turnId,
-  };
-  const resultRef = await store.writeArtifact({
-    ...base,
-    artifact: {
-      kind: 'result',
-      mimeType: 'application/json',
-      title: 'Explore result',
-      preview: clipExplorePreview(normalized, 500),
-      content: result,
-      schema: { name: 'ExploreResult', version: 1 },
-    },
-  });
-  await ctx.recordCapabilityArtifact(resultRef);
-  const reportRef = await store.writeArtifact({
-    ...base,
+  if (!store || !sink?.recordArtifact || !sink.threadId || !sink.delegationId || !sink.turnId) {
+    return;
+  }
+  const normalized = ingest.summary.trim();
+  const ref = await store.writeArtifact({
+    threadId: sink.threadId,
+    capabilityId: 'explore',
+    delegationId: sink.delegationId,
+    turnId: sink.turnId,
     artifact: {
       kind: 'report',
       mimeType: 'text/markdown',
-      title: 'Explore report',
-      preview: clipExplorePreview(normalized, 500),
+      title: 'Explore knowledge summary',
+      preview: clipText(normalized, 500),
       content: normalized,
+      metadata: { evidence: ingest.evidence },
     },
   });
-  await ctx.recordCapabilityArtifact(reportRef);
-}
-
-function createExploreSummaryMessage(summary: string, status: ExploreResult['status'] = 'completed'): AIMessage {
-  const normalized = summary.trim();
-  exploreResultSchema.parse({
-    status,
-    summary: normalized,
-    nextSteps: [],
-  });
-  return new AIMessage({
-    content: ['Explore summary:', '', normalized].join('\n'),
-    additional_kwargs: {
-      pinpawo: {
-        exploreSummary: normalized,
-      },
-    },
-  });
-}
-
-function readToolCallSummary(message: BaseMessage): string {
-  const record = message as BaseMessage & {
-    tool_calls?: unknown;
-    additional_kwargs?: { tool_calls?: unknown };
-  };
-  const toolCalls = Array.isArray(record.tool_calls)
-    ? record.tool_calls
-    : Array.isArray(record.additional_kwargs?.tool_calls)
-      ? record.additional_kwargs.tool_calls
-      : [];
-
-  return toolCalls
-    .map((call) => {
-      if (!call || typeof call !== 'object') return null;
-      const item = call as Record<string, unknown>;
-      const name = typeof item.name === 'string'
-        ? item.name
-        : typeof item.function === 'object' && item.function && 'name' in item.function && typeof item.function.name === 'string'
-          ? item.function.name
-          : 'tool';
-      const args = 'args' in item
-        ? item.args
-        : typeof item.function === 'object' && item.function && 'arguments' in item.function
-          ? item.function.arguments
-          : null;
-      return `${name} ${clipText(JSON.stringify(args ?? {}), 600)}`;
-    })
-    .filter((item): item is string => Boolean(item))
-    .join('\n');
+  await sink.recordArtifact(ref);
 }
 
 function readMessageStatus(message: BaseMessage): ExploreResult['status'] | null {
@@ -231,37 +172,12 @@ export function readExploreResult(messages: BaseMessage[]): ExploreResult | null
   return summary ? { status: readLatestStatus(messages), summary, nextSteps: [] } : null;
 }
 
-function buildExploreSummaryTranscript(messages: BaseMessage[]) {
-  const lines: string[] = [];
-  let totalLength = 0;
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    const text = readMessageText(message);
-    const toolCalls = readToolCallSummary(message);
-    if (!text && !toolCalls) continue;
-
-    const entry = [
-      `[${message._getType()}]`,
-      toolCalls ? `tool_calls:\n${toolCalls}` : null,
-      text ? `content:\n${clipText(text, EXPLORE_SUMMARY_MESSAGE_MAX_CHARS)}` : null,
-    ].filter(Boolean).join('\n');
-
-    totalLength += entry.length;
-    if (totalLength > EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS) break;
-    lines.unshift(entry);
-  }
-
-  return lines.join('\n\n');
-}
-
 async function ingestExploreKnowledge(params: {
   model: BaseChatModel;
   structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   previousSummary: string | null;
   evidence: string;
-  reason: 'context_pressure' | 'finalize';
-}): Promise<string> {
+}): Promise<ExploreKnowledgeIngest> {
   const evidence = clipText(params.evidence, EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS);
   if (!evidence.trim()) {
     throw new Error('explore ingest has no new evidence');
@@ -275,42 +191,30 @@ async function ingestExploreKnowledge(params: {
   const result = await model.invoke([
     new SystemMessage([
       '你是 explore capability 的知识 ingest 模块。',
-      '你的任务是维护一份短小、可恢复现场的探索摘要，而不是复制工具流水账。',
-      '输入包括上一版 summary 和新增 evidence。你必须更新 summary，必要时修正旧结论。',
+      '当探索的上下文接近预算上限时，你被调用来对较早的探索内容做一次完整总结，',
+      '使较早的原始工具输出可以从上下文中移除，只保留你的总结和最新若干条原文。',
+      '输入包括上一版 summary 和需要被总结的 evidence。你必须更新 summary，必要时修正旧结论。',
       'summary 必须用 Markdown，包含：目标、已查看文件、关键知识点 / 概念、已确认事实、未确认 / 风险、下一步。',
       'summary 要让下一轮 agent 不重复探索已看过的内容。',
+      'evidence 字段：为关键来源各给一条 { source, proves, value }：',
+      '- source：参考来源（文件路径、URL、issue/PR 编号、命令输出来源）。',
+      '- proves：该来源确认/证明了什么事实。',
+      '- value：它对当前推理或下一步的价值。',
       '不要复制大段原始工具输出。',
       '不要编造未查看过的文件、URL、issue、PR 或命令结果。',
     ].join('\n')),
     new HumanMessage([
-      `触发原因：${params.reason}`,
+      '触发原因：context_pressure',
       '上一版 summary：',
       params.previousSummary ?? '[无]',
-      '新增 evidence：',
+      '需要总结的 evidence：',
       evidence,
     ].join('\n\n')),
   ]);
-  return result.summary.trim();
-}
-
-function buildFinalEvidence(messages: BaseMessage[]) {
-  const transcript = buildExploreSummaryTranscript(messages);
-  return transcript ? `[finalize]\n${transcript}` : '';
-}
-
-function buildExploreIngestFailureMessage(error: unknown) {
-  return new AIMessage({
-    content: [
-      'explore 知识摘要更新失败，已停止继续探索。',
-      `错误：${error instanceof Error ? error.message : String(error)}`,
-      '未使用自由文本或低质量兜底摘要替代结构化 ingest 结果。',
-    ].join('\n'),
-    additional_kwargs: {
-      pinpawo: {
-        exploreIngestFailed: true,
-      },
-    },
-  });
+  return {
+    summary: result.summary.trim(),
+    evidence: result.evidence ?? [],
+  };
 }
 
 function replaceToolMessageContent(
@@ -434,51 +338,17 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
         if (!evidence.trim()) {
           return messages;
         }
-        const summary = await ingestExploreKnowledge({
+        const ingest = await ingestExploreKnowledge({
           model: ingestModel,
           structuredOutput: options.structuredOutput,
           previousSummary: currentSummary,
           evidence,
-          reason: 'context_pressure',
         });
-        currentSummary = summary;
-        return replaceCompressedToolOutputs(messages, toolIndexes, summary);
-      };
-      const ingestFinalResult = async (
-        result: SubagentResult,
-        ctx: CapabilityMiddlewareContext,
-      ): Promise<SubagentResult> => {
-        const evidence = buildFinalEvidence(result.messages);
-        if (!evidence.trim()) return result;
-        try {
-          const summary = await ingestExploreKnowledge({
-            model: ingestModel,
-            structuredOutput: options.structuredOutput,
-            previousSummary: currentSummary,
-            evidence,
-            reason: 'finalize',
-          });
-          currentSummary = summary;
-          const status: ExploreResult['status'] =
-            result.completionReason === 'natural' ? 'completed' : 'progress';
-          await recordExploreArtifacts(options.artifactStore, ctx, summary, status);
-          return {
-            ...result,
-            messages: [
-              ...result.messages,
-              createExploreSummaryMessage(summary, status),
-            ],
-          };
-        } catch (error) {
-          return {
-            ...result,
-            completionReason: 'error',
-            messages: [
-              ...result.messages,
-              buildExploreIngestFailureMessage(error),
-            ],
-          };
-        }
+        currentSummary = ingest.summary;
+        // Persist the summary + structured evidence as a report artifact so the
+        // earlier raw outputs can be dropped from context yet remain recallable.
+        await recordExploreIngestArtifact(options.artifactStore, ctx.artifactSink, ingest);
+        return replaceCompressedToolOutputs(messages, toolIndexes, ingest.summary);
       };
       return {
         uses: DEFAULT_EXPLORE_TOOLKITS.filter((name) => available.has(name)),
@@ -491,13 +361,9 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
           '使用可用工具在执行过程中自行规划探索；createRuntime 阶段不做额外模型规划。',
           '优先先确认候选范围，再读取详细内容；避免无界浏览或无目的扫描。',
           '如果当前会话已有相关 capability_artifact，先用 artifact 工具读取短引用，避免重复探索已经确认过的内容。',
-          '探索结论会在结束时由 capability 自动保存为 result/report artifact，无需你手动调用写入工具。',
-          '上下文足够时会保留完整工具输出；只有接近上下文预算时，较早的大型工具输出才会被知识摘要替换。',
+          '上下文足够时会保留完整工具输出；只有接近上下文预算时，较早的大型工具输出才会被知识摘要替换并沉淀为知识 artifact。',
           '结论必须包含简洁探索摘要、已查看文件列表、关键发现、证据引用（文件路径、URL、issue/PR 编号或命令输出来源）和建议下一步。',
         ],
-        middleware: {
-          afterRun: ingestFinalResult,
-        },
       };
     },
     resultSchema: exploreResultSchema,

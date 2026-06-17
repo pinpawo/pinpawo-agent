@@ -33,6 +33,7 @@ export type {
 } from './types/capability';
 
 export type {
+  CapabilityArtifactSink,
   ContextPolicyContext,
   SubagentInput,
   SubagentContextPolicy,

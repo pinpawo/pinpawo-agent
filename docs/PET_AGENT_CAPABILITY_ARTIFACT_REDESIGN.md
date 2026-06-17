@@ -103,9 +103,49 @@ the write tool validates the payload before persisting it.
 
 ## Capability Migration
 
-- `daily_post` uses `capability_artifact` and instructs the subagent to write a
-  JSON result artifact after `finalize_post` or `skip_post`.
-- `capability_creator` uses `capability_artifact` and writes its final JSON
-  result artifact through the same tool.
-- `explore` keeps its context-ingest summary behavior, but no longer hand-builds
-  artifact markers in message metadata.
+Capabilities persist their result deterministically in code (issue #137), not by
+instructing the model to call a write tool inside the loop:
+
+- `daily_post` persists its result in an `afterRun` middleware: it takes the
+  latest schema-valid `finalize_post` / `skip_post` tool artifact and writes it as
+  a `kind: "result"` artifact via the store it holds by closure. No
+  `uses: ['capability_artifact']`, no write-tool instruction.
+- `capability_creator` does the same via `afterRun` (keeps `uses: ['bash']`).
+- `explore` does **not** persist a result on finalize. See "Explore ingest" below.
+
+## Explore ingest
+
+Explore's summarization is **context-pressure-driven only**, not a per-run
+finalize step.
+
+**Trigger.** Ingest runs only when the subagent loop reaches its context limit
+(`contextPolicy.rewriteAsync`). A run that finishes naturally without hitting the
+limit produces **no** summary artifact — the raw tool outputs are still in the
+model context, and the subagent reports its conclusion through its returned text
+/ announce. The orchestrator does not need a persisted artifact for small
+explorations.
+
+**What ingest does.** It is a *complete summary of what came before*, not a
+lossy in-place compression:
+
+- Summarize the earlier portion of the transcript; **keep the most recent N raw
+  tool outputs** verbatim.
+- The summarized earlier raw outputs are **removed from the model context**
+  (they no longer cost tokens); they survive only as the artifact below.
+- The ingest output is **summary + evidence**, persisted as one artifact:
+  - `kind: "report"`, `mimeType: "text/markdown"` — the prose summary.
+  - structured **evidence** list, where each entry is `{ source, proves, value }`
+    — the reference source, what it established, and why it matters to the
+    reasoning. (Carried in the artifact's structured content / metadata; the
+    markdown body holds the readable summary.)
+
+This removes the prior `finalize`-time ingest, the `buildFinalEvidence` final
+pass, and the per-run result/report write. `ExploreResult` (`status`, `summary`,
+`nextSteps`) is no longer persisted as a `kind: "result"` artifact on finalize.
+
+> Open implementation detail: `ingestExploreKnowledge` currently returns a flat
+> `{ summary: string }`. The "summary + evidence" form needs its structured
+> output widened to `{ summary, evidence: { source, proves, value }[] }`, and
+> the context-pressure writer (`rewriteUnderContextPressure` →
+> `replaceCompressedToolOutputs`) becomes the single place that emits the
+> explore artifact through the injected store + sink.

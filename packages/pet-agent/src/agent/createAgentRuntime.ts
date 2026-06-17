@@ -817,6 +817,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       runnableConfig,
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,
+      artifactSink: {
+        recordArtifact: (ref: CapabilityArtifactRef) => {
+          artifactRefs.push(ref);
+        },
+        threadId,
+        delegationId: pendingDelegation.id,
+        turnId: state.turnId,
+      },
       onToolEvent,
     };
     validateUniqueToolNames(subagentInput.tools);

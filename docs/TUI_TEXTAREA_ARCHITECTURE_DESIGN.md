@@ -861,6 +861,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   grapheme-safe `segments`，`viewModel` 透传这些 segments，`TextAreaView` 用 Ink inverse
   渲染 selected/cursor segment。没有 selection 时继续使用旧的 `before/cursor/after`
   shape。
+- selection movement 应先作为 textarea engine command 落地：`selectLeft/Right/Up/Down`
+  和 `selectLineStart/End` 复用既有 cursor/layout helper，保持 selection anchor 并移动
+  focus。Shift+Arrow key binding 属于后续 router/canonical 接入，不应混进 engine PR。
 - undo/redo。
 - optional external editor flow。
 - command palette / autocomplete target-bound routing。
@@ -1023,9 +1026,13 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - render model 在 selection 存在时输出 grapheme-safe selected/cursor segments。
    - view model 和 `TextAreaView` 渲染 selection highlight。
    - 暂不接新按键。
-23. `codex/tui-textarea-history-selection`
+23. `codex/tui-textarea-selection-movement`
+   - 新增纯 textarea selection movement commands。
+   - selection movement 复用 cursor movement/layout helper，保持 anchor 并移动 focus。
+   - 暂不接 canonical/router key binding。
+24. `codex/tui-textarea-history-selection`
    - Shift+Arrow、select-all key binding、undo/redo。
-24. `codex/tui-opentui-spike`
+25. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

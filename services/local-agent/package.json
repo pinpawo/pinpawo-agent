@@ -1,5 +1,5 @@
 {
-  "name": "pinpawo-local-agent",
+  "name": "@pinpawo/local-agent",
   "version": "0.1.0",
   "description": "Local agent client for PinPawo — runs LLM locally and posts on behalf of your pet",
   "type": "module",

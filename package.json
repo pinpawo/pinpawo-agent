@@ -9,9 +9,9 @@
     "services/local-agent"
   ],
   "scripts": {
-    "build": "npm run build -w pinpawo-local-agent",
-    "test": "npm run test -w @pinpawo/pet-agent && npm run test:unit -w pinpawo-local-agent",
-    "typecheck": "npm run typecheck -w @pinpawo/pet-agent && npm run typecheck -w pinpawo-local-agent"
+    "build": "npm run build -w @pinpawo/local-agent",
+    "test": "npm run test -w @pinpawo/pet-agent && npm run test:unit -w @pinpawo/local-agent",
+    "typecheck": "npm run typecheck -w @pinpawo/pet-agent && npm run typecheck -w @pinpawo/local-agent"
   },
   "overrides": {
     "langsmith": "^0.7.2",

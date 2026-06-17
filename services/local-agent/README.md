@@ -7,7 +7,7 @@ Local CLI/TUI agent client for PinPawo.
 Requires Node.js 20.x.
 
 ```bash
-npm install -g pinpawo-local-agent
+npm install -g @pinpawo/local-agent
 pinpawo-agent init
 pinpawo-agent login
 pinpawo-agent capability validate ~/.pinpawo/capabilities/hello-pinpawo
@@ -17,9 +17,9 @@ pinpawo-agent tui
 For one-off usage without a global install:
 
 ```bash
-npx pinpawo-local-agent init
-npx pinpawo-local-agent login
-npx pinpawo-local-agent tui
+npx @pinpawo/local-agent init
+npx @pinpawo/local-agent login
+npx @pinpawo/local-agent tui
 ```
 
 `pinpawo-agent init` creates the quick-start scaffold:
@@ -94,6 +94,6 @@ From the repository root:
 npm run typecheck
 npm test
 npm run build
-npm run pack:dry -w pinpawo-local-agent
-npm publish -w pinpawo-local-agent
+npm run pack:dry -w @pinpawo/local-agent
+npm publish -w @pinpawo/local-agent --access public
 ```

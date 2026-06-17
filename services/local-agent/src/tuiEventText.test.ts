@@ -71,6 +71,38 @@ test('formats completed and failed operation summaries from event fields', () =>
   );
 });
 
+test('formats structured operation details as multiline result context', () => {
+  assert.equal(
+    formatOperationResult({
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'failed',
+      operation: {
+        kind: 'bash.run_shell',
+        title: '执行命令',
+        target: '/repo',
+        summary: 'npm test',
+        details: {
+          exitCode: 1,
+          warnings: ['deprecated api', 'retry skipped'],
+          stats: { durationMs: 1234, files: 3 },
+          empty: '',
+        },
+      },
+      raw: {
+        input: 'TOKEN=secret npm test',
+        output: 'raw output should stay hidden',
+      },
+    }),
+    [
+      '执行命令：失败 · /repo · npm test',
+      '  - exitCode: 1',
+      '  - warnings: deprecated api, retry skipped',
+      '  - stats: {"durationMs":1234,"files":3}',
+    ].join('\n'),
+  );
+});
+
 test('formats subagent text into readable paragraphs', () => {
   assert.equal(
     formatSubagentMessage(

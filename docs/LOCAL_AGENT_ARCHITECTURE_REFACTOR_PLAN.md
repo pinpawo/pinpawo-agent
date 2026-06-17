@@ -167,7 +167,8 @@ local-agent 在每个 run 上建立由当前 `toolkits` 生成的 registry，作
 
 不同客户端可以消费同一个事件，但渲染不同。
 
-- TUI：渲染成紧凑文本、active operation line、system message。
+- TUI：渲染成紧凑 active operation line；operation 完成/失败后可以把
+  `operation.details` 展开成多行 system message，便于调试和追踪。
 - App：渲染成结构化 run state、pet gif、compact activity strip。
 - macOS companion：通过 `/health` 读取 agent run 和 active operation 摘要，pet 动画按 `operation.kind/title/target/summary` 映射。
 - Logs/debug：保留 JSON。
@@ -343,6 +344,8 @@ type LocalAgentOperationEvent = {
 - local-agent 运行层通过 `ToolOperationTracker` 保证发给客户端的 operation 有稳定 `id`；当上游缺失 `toolCallId` 时按 request 生成 synthetic id。
 - request 正常完成、异常、中断或等待人工时，tracker 会关闭仍 active 的 operation，避免客户端 `activeOperations` 泄漏。
 - `title` / `target` / `summary` 是已经归一化后的展示信息，adapter 可以直接使用。
+- `details` 是安全的结构化补充信息，TUI 可用于展示 exit code、warnings、统计或上下文；
+  adapter 应限制长度和条数，避免把历史消息刷屏。
 - `source` 只用于 debug 和兼容，不应该成为 UI 主要判断依据。
 - `raw` 默认不面向普通 UI，可用于 debug、日志或诊断。
 
@@ -494,6 +497,7 @@ type OperationRegistry = {
 
 - TUI 本地 server 只发送 `type: 'event'` agent run activity。
 - TUI active operation state 消费 `operation.title/target/summary`。
+- TUI terminal operation summary 可以展开 `operation.details`，但不读取 raw input/output。
 - 删除或降级当前面向 toolName 的 presentation registry。
 
 产出：

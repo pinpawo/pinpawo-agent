@@ -8,6 +8,8 @@ import { formatElapsed, wrapLine } from './terminalText';
 import type { ActiveOperation, PendingUiState } from '../types';
 
 const SUBAGENT_TEXT_LINE_CHARS = 64;
+const OPERATION_DETAIL_LINE_MAX = 140;
+const OPERATION_DETAIL_ENTRY_LIMIT = 8;
 
 export function shorten(value: string, max = 60) {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -34,14 +36,16 @@ export function formatOperationProgress(event: LocalAgentOperationEvent) {
 
 export function formatOperationResult(event: LocalAgentOperationEvent) {
   const label = event.operation.title ?? event.operation.kind;
+  const headline = formatOperationHeadline(event, 80);
+  const details = formatDetailsBlock(event.operation.details);
+  const suffix = details.length > 0 ? `\n${details.map((line) => `  - ${line}`).join('\n')}` : '';
   if (event.phase === 'failed') {
-    return `${label}：${TUI_TEXT.operationFailed}${event.operation.summary ? ` · ${shorten(event.operation.summary, 80)}` : ''}`;
+    return `${label}：${TUI_TEXT.operationFailed}${headline ? ` · ${headline}` : ''}${suffix}`;
   }
   if (event.phase === 'interrupted') {
-    return `${label}：${TUI_TEXT.operationInterrupted}`;
+    return `${label}：${TUI_TEXT.operationInterrupted}${headline ? ` · ${headline}` : ''}${suffix}`;
   }
-  const detail = formatOperationDetail(event, 80);
-  return `${label}：${detail || TUI_TEXT.operationCompleted}`;
+  return `${label}：${headline || TUI_TEXT.operationCompleted}${suffix}`;
 }
 
 export function formatSystemNoticeEvent(event: LocalAgentSystemNoticeEvent): string | null {
@@ -133,19 +137,63 @@ function formatOperationDetail(event: LocalAgentOperationEvent, max = 60) {
   const pieces = [
     event.operation.target,
     event.operation.summary,
-    formatDetails(event.operation.details),
+    formatDetailsInline(event.operation.details),
   ].filter((item): item is string => Boolean(item));
   return pieces.length > 0 ? shorten(pieces.join(' · '), max) : '';
 }
 
-function formatDetails(details: Record<string, unknown> | undefined) {
-  if (!details) return '';
-  return Object.entries(details)
-    .flatMap(([key, value]) => {
-      if (value === undefined || value === null || value === '') return [];
-      return [`${key}=${String(value)}`];
-    })
+function formatOperationHeadline(event: LocalAgentOperationEvent, max = 80) {
+  const pieces = [
+    event.operation.target,
+    event.operation.summary,
+  ].filter((item): item is string => Boolean(item));
+  return pieces.length > 0 ? shorten(pieces.join(' · '), max) : '';
+}
+
+function formatDetailsInline(details: Record<string, unknown> | undefined) {
+  return readDetailEntries(details)
+    .map((entry) => `${entry.key}=${entry.value}`)
     .join(' · ');
+}
+
+function formatDetailsBlock(details: Record<string, unknown> | undefined) {
+  const entries = readDetailEntries(details);
+  const visible = entries.slice(0, OPERATION_DETAIL_ENTRY_LIMIT)
+    .map((entry) => `${entry.key}: ${shorten(entry.value, OPERATION_DETAIL_LINE_MAX)}`);
+  const hiddenCount = entries.length - visible.length;
+  return hiddenCount > 0 ? [...visible, `还有 ${hiddenCount} 项 details`] : visible;
+}
+
+function readDetailEntries(details: Record<string, unknown> | undefined) {
+  if (!details) return [];
+  return Object.entries(details).flatMap(([key, value]) => {
+    const formatted = formatDetailValue(value);
+    return formatted ? [{ key, value: formatted }] : [];
+  });
+}
+
+function formatDetailValue(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'string') return normalizeDetailText(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const items = value
+      .map((item) => formatDetailValue(item))
+      .filter((item): item is string => Boolean(item));
+    return items.length > 0 ? items.join(', ') : null;
+  }
+  if (typeof value === 'object') {
+    try {
+      return normalizeDetailText(JSON.stringify(value));
+    } catch {
+      return normalizeDetailText(String(value));
+    }
+  }
+  return normalizeDetailText(String(value));
+}
+
+function normalizeDetailText(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function formatSubagentTextBody(text: string) {

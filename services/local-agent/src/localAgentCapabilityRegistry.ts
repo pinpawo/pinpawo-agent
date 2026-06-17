@@ -10,7 +10,6 @@ import { createBrowserCapability } from './capabilities/browserCapability';
 import { createExploreCapability } from './capabilities/explore';
 import { createBrowserToolkit } from './toolkits/browser';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
-import { createCapabilityArtifactToolkit } from './toolkits/capabilityArtifact';
 import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
 
 type ResolveCapabilityAvailability = typeof resolveCapabilityAvailability;
@@ -86,10 +85,7 @@ export class LocalAgentCapabilityRegistry {
 
   async load() {
     this.localTools = await this.deps.loadLocalTools();
-    this.localToolkitDefinitions = [
-      createCapabilityArtifactToolkit(this.capabilityArtifactStore),
-      ...this.deps.createLocalToolkits(this.localTools),
-    ];
+    this.localToolkitDefinitions = this.deps.createLocalToolkits(this.localTools);
     this.localToolkits = await this.deps.resolveAvailableToolkits(this.localToolkitDefinitions);
     this.localCapabilityDefinitions = this.deps.createLocalCapabilities();
     this.localCapabilities = await this.deps.resolveAvailableCapabilities(this.localCapabilityDefinitions);

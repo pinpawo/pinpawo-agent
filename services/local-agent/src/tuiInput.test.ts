@@ -217,6 +217,19 @@ test('normalizeTuiInputEvent buffers split terminal control sequences', () => {
   assert.deepEqual(normalized.event, { input: 'x', key: {} });
 });
 
+test('normalizeTuiInputEvent maps raw delete sequences to delete key input', () => {
+  let state = createInitialTuiInputBufferState();
+  let normalized = normalizeTuiInputEvent('\x1b[3~', {}, state);
+  assert.deepEqual(normalized.event, { input: '\x1b[3~', key: { delete: true } });
+
+  normalized = normalizeTuiInputEvent('[3', {}, state);
+  assert.equal(normalized.event, null);
+  state = normalized.state;
+
+  normalized = normalizeTuiInputEvent('~', {}, state);
+  assert.deepEqual(normalized.event, { input: '[3~', key: { delete: true } });
+});
+
 test('applyTextAreaInput keeps cursor editing behavior in pure input reducer', () => {
   let state: TextAreaModel = { text: 'helo', cursorOffset: 2 };
   state = applyTextAreaInput('l', {}, state);

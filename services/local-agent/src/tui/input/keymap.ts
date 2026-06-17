@@ -71,7 +71,7 @@ export function normalizeTuiInputEvent(
     if (isTerminalControlSequence(combined)) {
       return {
         state: createInitialTuiInputBufferState(),
-        event: { input: combined, key },
+        event: { input: combined, key: normalizeTerminalKeyInput(combined, key) },
       };
     }
     if (isTerminalControlSequencePrefix(combined)) {
@@ -95,7 +95,7 @@ export function normalizeTuiInputEvent(
 
   return {
     state: createInitialTuiInputBufferState(),
-    event: { input, key },
+    event: { input, key: normalizeTerminalKeyInput(input, key) },
   };
 }
 
@@ -162,4 +162,14 @@ function isTerminalControlSequence(input: string) {
 
 function isTerminalControlSequencePrefix(input: string) {
   return /^(?:\x1b)?\[[0-9;?]*$/.test(input);
+}
+
+function normalizeTerminalKeyInput(input: string, key: TuiKeyInput): TuiKeyInput {
+  switch (input) {
+    case '\x1b[3~':
+    case '[3~':
+      return { ...key, delete: true };
+    default:
+      return key;
+  }
 }

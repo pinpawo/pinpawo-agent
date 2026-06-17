@@ -136,7 +136,7 @@ test('applyTextAreaControllerCommand applies textarea command with host width', 
       { type: 'moveDown' },
       3,
     ),
-    { text: 'abcdef', cursorOffset: 4 },
+    { text: 'abcdef', cursorOffset: 4, preferredColumn: 1 },
   );
   assert.deepEqual(
     withoutEditHistory(applyTextAreaControllerCommand(
@@ -145,6 +145,37 @@ test('applyTextAreaControllerCommand applies textarea command with host width', 
       10,
     )),
     { text: 'hio', cursorOffset: 2 },
+  );
+});
+
+test('applyTextAreaControllerCommand preserves engine-owned textarea state', () => {
+  assert.deepEqual(
+    applyTextAreaControllerCommand(
+      {
+        text: 'hi!',
+        cursorOffset: 3,
+        editHistory: { undo: [{ text: 'hi', cursorOffset: 2 }], redo: [] },
+      },
+      { type: 'undo' },
+      10,
+    ),
+    {
+      text: 'hi',
+      cursorOffset: 2,
+      editHistory: {
+        undo: [],
+        redo: [{ text: 'hi!', cursorOffset: 3 }],
+      },
+    },
+  );
+
+  assert.deepEqual(
+    applyTextAreaControllerCommand(
+      { text: 'abcd\nx\nabcd', cursorOffset: 6, preferredColumn: 3 },
+      { type: 'moveDown' },
+      10,
+    ),
+    { text: 'abcd\nx\nabcd', cursorOffset: 10, preferredColumn: 3 },
   );
 });
 

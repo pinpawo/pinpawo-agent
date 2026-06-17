@@ -142,6 +142,7 @@ test('textarea engine extends selection vertically using layout rows', () => {
       text,
       cursorOffset: 4,
       selection: { anchorOffset: 1, focusOffset: 4 },
+      preferredColumn: 1,
     },
   );
   assert.deepEqual(
@@ -150,7 +151,7 @@ test('textarea engine extends selection vertically using layout rows', () => {
       { text, cursorOffset: 4, selection: { anchorOffset: 1, focusOffset: 4 } },
       { width: 3 },
     ),
-    { text, cursorOffset: 1 },
+    { text, cursorOffset: 1, preferredColumn: 1 },
   );
 });
 
@@ -180,12 +181,25 @@ test('textarea engine uses layout rows for vertical cursor movement', () => {
 
   assert.deepEqual(
     applyTextAreaCommand({ type: 'moveUp' }, { text, cursorOffset: 4 }, { width: 3 }),
-    { text, cursorOffset: 1 },
+    { text, cursorOffset: 1, preferredColumn: 1 },
   );
   assert.deepEqual(
     applyTextAreaCommand({ type: 'moveDown' }, { text, cursorOffset: 5 }, { width: 3 }),
-    { text, cursorOffset: 9 },
+    { text, cursorOffset: 9, preferredColumn: 2 },
   );
+});
+
+test('textarea engine preserves preferred visual column across short rows', () => {
+  const text = 'abcd\nx\nabcd';
+
+  let state = applyTextAreaCommand({ type: 'moveDown' }, { text, cursorOffset: 3 }, { width: 10 });
+  assert.deepEqual(state, { text, cursorOffset: 6, preferredColumn: 3 });
+
+  state = applyTextAreaCommand({ type: 'moveDown' }, state, { width: 10 });
+  assert.deepEqual(state, { text, cursorOffset: 10, preferredColumn: 3 });
+
+  state = applyTextAreaCommand({ type: 'moveLeft' }, state, { width: 10 });
+  assert.deepEqual(state, { text, cursorOffset: 9 });
 });
 
 test('textarea engine preserves visual column across wide character rows', () => {
@@ -193,11 +207,11 @@ test('textarea engine preserves visual column across wide character rows', () =>
 
   assert.deepEqual(
     applyTextAreaCommand({ type: 'moveDown' }, { text, cursorOffset: 1 }, { width: 3 }),
-    { text, cursorOffset: 3 },
+    { text, cursorOffset: 3, preferredColumn: 2 },
   );
   assert.deepEqual(
     applyTextAreaCommand({ type: 'moveUp' }, { text, cursorOffset: 3 }, { width: 3 }),
-    { text, cursorOffset: 1 },
+    { text, cursorOffset: 1, preferredColumn: 2 },
   );
 });
 

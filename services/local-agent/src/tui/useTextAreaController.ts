@@ -14,7 +14,10 @@ import {
 import type { TextAreaCommand } from './input/textarea/commands';
 import type { TuiAction, TuiState } from './state/tuiState';
 
-type TextAreaInputState = Pick<TuiState['input'], 'text' | 'cursorOffset' | 'selection'>;
+type TextAreaInputState = Pick<
+  TuiState['input'],
+  'text' | 'cursorOffset' | 'selection' | 'editHistory' | 'preferredColumn'
+>;
 
 export type TextAreaComposerProps = {
   model: TextAreaViewModel;
@@ -128,6 +131,8 @@ export function applyTextAreaControllerCommand(
     text: input.text,
     cursorOffset: input.cursorOffset,
     ...(input.selection ? { selection: input.selection } : {}),
+    ...(input.editHistory ? { editHistory: input.editHistory } : {}),
+    ...(input.preferredColumn !== undefined ? { preferredColumn: input.preferredColumn } : {}),
   }, { width });
 }
 

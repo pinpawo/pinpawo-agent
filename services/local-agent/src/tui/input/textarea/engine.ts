@@ -36,6 +36,7 @@ export type TextAreaModel = {
   cursorOffset: number;
   selection?: TextAreaSelection;
   editHistory?: TextAreaEditHistory;
+  preferredColumn?: number;
 };
 
 export function createTextAreaModel(
@@ -43,14 +44,17 @@ export function createTextAreaModel(
   cursorOffset = text.length,
   selection?: TextAreaSelection,
   editHistory?: TextAreaEditHistory,
+  preferredColumn?: number,
 ): TextAreaModel {
   const nextSelection = normalizeTextAreaSelection(selection, text);
   const nextEditHistory = normalizeTextAreaEditHistory(editHistory);
+  const nextPreferredColumn = normalizePreferredColumn(preferredColumn);
   return {
     text,
     cursorOffset: clampCursor(cursorOffset, text),
     ...(nextSelection ? { selection: nextSelection } : {}),
     ...(nextEditHistory ? { editHistory: nextEditHistory } : {}),
+    ...(nextPreferredColumn !== undefined ? { preferredColumn: nextPreferredColumn } : {}),
   };
 }
 
@@ -69,7 +73,15 @@ export function applyTextAreaInputEvent(
   options: { width?: number } = {},
 ): TextAreaModel {
   const command = toTextAreaCommand(event);
-  if (!command) return createTextAreaModel(state.text, state.cursorOffset, state.selection, state.editHistory);
+  if (!command) {
+    return createTextAreaModel(
+      state.text,
+      state.cursorOffset,
+      state.selection,
+      state.editHistory,
+      state.preferredColumn,
+    );
+  }
   return applyTextAreaCommand(command, state, options);
 }
 
@@ -122,9 +134,9 @@ export function applyTextAreaCommand(
     case 'moveRight':
       return createTextAreaModel(text, cursorOffset + 1, undefined, state.editHistory);
     case 'moveUp':
-      return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, -1), undefined, state.editHistory);
+      return moveCursorVertically(text, state, cursorOffset, width, -1);
     case 'moveDown':
-      return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, 1), undefined, state.editHistory);
+      return moveCursorVertically(text, state, cursorOffset, width, 1);
     case 'moveLineStart':
       return createTextAreaModel(text, findLogicalLineStart(text, cursorOffset), undefined, state.editHistory);
     case 'moveLineEnd':
@@ -134,9 +146,9 @@ export function applyTextAreaCommand(
     case 'selectRight':
       return selectToOffset(text, state, cursorOffset + 1);
     case 'selectUp':
-      return selectToOffset(text, state, moveCursorVertically(text, cursorOffset, width, -1));
+      return selectVertically(text, state, cursorOffset, width, -1);
     case 'selectDown':
-      return selectToOffset(text, state, moveCursorVertically(text, cursorOffset, width, 1));
+      return selectVertically(text, state, cursorOffset, width, 1);
     case 'selectLineStart':
       return selectToOffset(text, state, findLogicalLineStart(text, cursorOffset));
     case 'selectLineEnd':
@@ -178,6 +190,24 @@ function selectToOffset(
     anchorOffset,
     focusOffset: boundedFocusOffset,
   }, state.editHistory);
+}
+
+function selectVertically(
+  text: string,
+  state: TextAreaModel,
+  cursorOffset: number,
+  width: number,
+  direction: -1 | 1,
+): TextAreaModel {
+  const movement = getVerticalCursorMovement(text, state, cursorOffset, width, direction);
+  const next = selectToOffset(text, state, movement.cursorOffset);
+  return createTextAreaModel(
+    next.text,
+    next.cursorOffset,
+    next.selection,
+    next.editHistory,
+    movement.preferredColumn,
+  );
 }
 
 function recordTextAreaEdit(previous: TextAreaModel, next: TextAreaModel): TextAreaModel {
@@ -261,17 +291,39 @@ function snapshotTextAreaModel(model: TextAreaModel): TextAreaEditHistoryEntry {
 
 function moveCursorVertically(
   text: string,
+  state: TextAreaModel,
+  cursorOffset: number,
+  width: number,
+  direction: -1 | 1,
+): TextAreaModel {
+  const movement = getVerticalCursorMovement(text, state, cursorOffset, width, direction);
+  return createTextAreaModel(
+    text,
+    movement.cursorOffset,
+    undefined,
+    state.editHistory,
+    movement.preferredColumn,
+  );
+}
+
+function getVerticalCursorMovement(
+  text: string,
+  state: TextAreaModel,
   cursorOffset: number,
   width: number,
   direction: -1 | 1,
 ) {
   const layout = measureTextAreaLayout({ text, cursorOffset }, width);
+  const preferredColumn = state.preferredColumn ?? layout.cursor.column;
   const targetRowIndex = Math.max(
     0,
     Math.min(layout.rows.length - 1, layout.cursor.rowIndex + direction),
   );
   const targetRow = layout.rows[targetRowIndex] ?? layout.rows[layout.cursor.rowIndex]!;
-  return findTextAreaOffsetAtVisualColumn(targetRow, text, layout.cursor.column);
+  return {
+    cursorOffset: findTextAreaOffsetAtVisualColumn(targetRow, text, preferredColumn),
+    preferredColumn,
+  };
 }
 
 function findLogicalLineStart(text: string, cursorOffset: number) {
@@ -292,4 +344,10 @@ function findPreviousWordStart(text: string, cursorOffset: number) {
 
 function clampCursor(cursorOffset: number, text: string) {
   return Math.max(0, Math.min(text.length, cursorOffset));
+}
+
+function normalizePreferredColumn(preferredColumn: number | null | undefined) {
+  return typeof preferredColumn === 'number' && Number.isFinite(preferredColumn)
+    ? Math.max(0, preferredColumn)
+    : undefined;
 }

@@ -357,15 +357,15 @@ test('applyTextAreaInput moves cursor across wrapped and multiline rows', () => 
 
   assert.deepEqual(
     applyTextAreaInput('', { upArrow: true }, { text, cursorOffset: 4 }, { width: 3 }),
-    { text, cursorOffset: 1 },
+    { text, cursorOffset: 1, preferredColumn: 1 },
   );
   assert.deepEqual(
     applyTextAreaInput('', { downArrow: true }, { text, cursorOffset: 1 }, { width: 3 }),
-    { text, cursorOffset: 4 },
+    { text, cursorOffset: 4, preferredColumn: 1 },
   );
   assert.deepEqual(
     applyTextAreaInput('', { downArrow: true }, { text, cursorOffset: 5 }, { width: 3 }),
-    { text, cursorOffset: 9 },
+    { text, cursorOffset: 9, preferredColumn: 2 },
   );
 });
 

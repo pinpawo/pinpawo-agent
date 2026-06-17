@@ -83,6 +83,44 @@ test('tuiStateReducer uses completed message text for final assistant history', 
   ]);
 });
 
+test('tuiStateReducer records composer prompt history only for run starts', () => {
+  let state = initialState();
+
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-1',
+    kind: 'chat',
+    userText: ' hello ',
+    now: 1000,
+    userCell: { id: 'req-1:user' },
+    statusMessage: '等待回复',
+  });
+  assert.deepEqual(state.input.history.entries, ['hello']);
+  assert.equal(state.input.text, '');
+  assert.equal(state.input.cursorOffset, 0);
+
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-2',
+    kind: 'chat',
+    userText: 'hello',
+    now: 2000,
+    userCell: { id: 'req-2:user' },
+    statusMessage: '等待回复',
+  });
+  assert.deepEqual(state.input.history.entries, ['hello']);
+
+  state = tuiStateReducer(state, {
+    type: 'review.response.resume',
+    requestId: 'req-2',
+    message: 'approval text',
+    now: 3000,
+    userCell: { id: 'req-2:review' },
+    statusMessage: '继续执行',
+  });
+  assert.deepEqual(state.input.history.entries, ['hello']);
+});
+
 test('tuiStateReducer infers usage context window from runtime when missing', () => {
   let state = startRun(initialState(), 'req-1');
   state = tuiStateReducer(state, {

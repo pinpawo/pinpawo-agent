@@ -7,6 +7,10 @@ import {
   formatSystemNoticeEvent,
   getOperationKey,
 } from '../render/eventText';
+import {
+  recordComposerHistoryEntry,
+  resetComposerHistoryNavigation,
+} from '../input/composerHistory';
 import { TUI_TEXT } from '../render/text';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
 import type {
@@ -295,6 +299,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.input,
           text: action.value,
           cursorOffset: action.cursorOffset ?? action.value.length,
+          history: resetComposerHistoryNavigation(state.input.history),
         },
       };
 
@@ -305,6 +310,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.input,
           text: action.value.text,
           cursorOffset: action.value.cursorOffset,
+          history: resetComposerHistoryNavigation(state.input.history),
         },
       };
 
@@ -325,6 +331,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.input,
           text: '',
           cursorOffset: 0,
+          history: recordComposerHistoryEntry(state.input.history, action.userText),
         },
         runRoute: {
           ...state.runRoute,
@@ -367,6 +374,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.input,
           text: '',
           cursorOffset: 0,
+          history: resetComposerHistoryNavigation(state.input.history),
         },
         runRoute: {
           ...state.runRoute,

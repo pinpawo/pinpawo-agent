@@ -18,22 +18,39 @@ import {
   type TextAreaSelection,
 } from './selection';
 
+const MAX_TEXTAREA_EDIT_HISTORY_ITEMS = 100;
+
+export type TextAreaEditHistoryEntry = {
+  text: string;
+  cursorOffset: number;
+  selection?: TextAreaSelection;
+};
+
+export type TextAreaEditHistory = {
+  undo: TextAreaEditHistoryEntry[];
+  redo: TextAreaEditHistoryEntry[];
+};
+
 export type TextAreaModel = {
   text: string;
   cursorOffset: number;
   selection?: TextAreaSelection;
+  editHistory?: TextAreaEditHistory;
 };
 
 export function createTextAreaModel(
   text = '',
   cursorOffset = text.length,
   selection?: TextAreaSelection,
+  editHistory?: TextAreaEditHistory,
 ): TextAreaModel {
   const nextSelection = normalizeTextAreaSelection(selection, text);
+  const nextEditHistory = normalizeTextAreaEditHistory(editHistory);
   return {
     text,
     cursorOffset: clampCursor(cursorOffset, text),
     ...(nextSelection ? { selection: nextSelection } : {}),
+    ...(nextEditHistory ? { editHistory: nextEditHistory } : {}),
   };
 }
 
@@ -52,7 +69,7 @@ export function applyTextAreaInputEvent(
   options: { width?: number } = {},
 ): TextAreaModel {
   const command = toTextAreaCommand(event);
-  if (!command) return createTextAreaModel(state.text, state.cursorOffset, state.selection);
+  if (!command) return createTextAreaModel(state.text, state.cursorOffset, state.selection, state.editHistory);
   return applyTextAreaCommand(command, state, options);
 }
 
@@ -71,47 +88,47 @@ export function applyTextAreaCommand(
     case 'paste':
       if (selectionRange) {
         return replaceRange(
-          text,
+          state,
           selectionRange.start,
           selectionRange.end,
           command.text,
           selectionRange.start + command.text.length,
         );
       }
-      return replaceRange(text, cursorOffset, cursorOffset, command.text, cursorOffset + command.text.length);
+      return replaceRange(state, cursorOffset, cursorOffset, command.text, cursorOffset + command.text.length);
     case 'deleteBackward':
-      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '', selectionRange.start);
-      if (cursorOffset === 0) return createTextAreaModel(text, cursorOffset);
-      return replaceRange(text, cursorOffset - 1, cursorOffset, '', cursorOffset - 1);
+      if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
+      if (cursorOffset === 0) return createTextAreaModel(text, cursorOffset, undefined, state.editHistory);
+      return replaceRange(state, cursorOffset - 1, cursorOffset, '', cursorOffset - 1);
     case 'deleteForward':
-      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '', selectionRange.start);
-      if (cursorOffset === text.length) return createTextAreaModel(text, cursorOffset);
-      return replaceRange(text, cursorOffset, cursorOffset + 1, '', cursorOffset);
+      if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
+      if (cursorOffset === text.length) return createTextAreaModel(text, cursorOffset, undefined, state.editHistory);
+      return replaceRange(state, cursorOffset, cursorOffset + 1, '', cursorOffset);
     case 'deleteWordBackward': {
-      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '', selectionRange.start);
+      if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
       const wordStart = findPreviousWordStart(text, cursorOffset);
-      return replaceRange(text, wordStart, cursorOffset, '', wordStart);
+      return replaceRange(state, wordStart, cursorOffset, '', wordStart);
     }
     case 'deleteToLineStart': {
-      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '', selectionRange.start);
+      if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
       const lineStart = findLogicalLineStart(text, cursorOffset);
-      return replaceRange(text, lineStart, cursorOffset, '', lineStart);
+      return replaceRange(state, lineStart, cursorOffset, '', lineStart);
     }
     case 'deleteToLineEnd':
-      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '', selectionRange.start);
-      return replaceRange(text, cursorOffset, findLogicalLineEnd(text, cursorOffset), '', cursorOffset);
+      if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
+      return replaceRange(state, cursorOffset, findLogicalLineEnd(text, cursorOffset), '', cursorOffset);
     case 'moveLeft':
-      return createTextAreaModel(text, cursorOffset - 1);
+      return createTextAreaModel(text, cursorOffset - 1, undefined, state.editHistory);
     case 'moveRight':
-      return createTextAreaModel(text, cursorOffset + 1);
+      return createTextAreaModel(text, cursorOffset + 1, undefined, state.editHistory);
     case 'moveUp':
-      return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, -1));
+      return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, -1), undefined, state.editHistory);
     case 'moveDown':
-      return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, 1));
+      return createTextAreaModel(text, moveCursorVertically(text, cursorOffset, width, 1), undefined, state.editHistory);
     case 'moveLineStart':
-      return createTextAreaModel(text, findLogicalLineStart(text, cursorOffset));
+      return createTextAreaModel(text, findLogicalLineStart(text, cursorOffset), undefined, state.editHistory);
     case 'moveLineEnd':
-      return createTextAreaModel(text, findLogicalLineEnd(text, cursorOffset));
+      return createTextAreaModel(text, findLogicalLineEnd(text, cursorOffset), undefined, state.editHistory);
     case 'selectLeft':
       return selectToOffset(text, state, cursorOffset - 1);
     case 'selectRight':
@@ -125,22 +142,27 @@ export function applyTextAreaCommand(
     case 'selectLineEnd':
       return selectToOffset(text, state, findLogicalLineEnd(text, cursorOffset));
     case 'newline':
-      if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '\n', selectionRange.start + 1);
-      return replaceRange(text, cursorOffset, cursorOffset, '\n', cursorOffset + 1);
+      if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '\n', selectionRange.start + 1);
+      return replaceRange(state, cursorOffset, cursorOffset, '\n', cursorOffset + 1);
     case 'selectAll':
-      return createTextAreaModel(text, text.length, createTextAreaSelectAllSelection(text));
+      return createTextAreaModel(text, text.length, createTextAreaSelectAllSelection(text), state.editHistory);
+    case 'undo':
+      return restoreTextAreaEditHistory(state, 'undo');
+    case 'redo':
+      return restoreTextAreaEditHistory(state, 'redo');
   }
 }
 
 function replaceRange(
-  text: string,
+  state: TextAreaModel,
   start: number,
   end: number,
   replacement: string,
   cursorOffset: number,
 ): TextAreaModel {
+  const text = state.text;
   const nextText = text.slice(0, start) + replacement + text.slice(end);
-  return createTextAreaModel(nextText, cursorOffset);
+  return recordTextAreaEdit(state, createTextAreaModel(nextText, cursorOffset));
 }
 
 function selectToOffset(
@@ -155,7 +177,86 @@ function selectToOffset(
   return createTextAreaModel(text, boundedFocusOffset, {
     anchorOffset,
     focusOffset: boundedFocusOffset,
+  }, state.editHistory);
+}
+
+function recordTextAreaEdit(previous: TextAreaModel, next: TextAreaModel): TextAreaModel {
+  if (previous.text === next.text) {
+    return createTextAreaModel(next.text, next.cursorOffset, next.selection, previous.editHistory);
+  }
+
+  const history = normalizeTextAreaEditHistory(previous.editHistory) ?? { undo: [], redo: [] };
+  return createTextAreaModel(next.text, next.cursorOffset, next.selection, {
+    undo: trimTextAreaEditHistory([...history.undo, snapshotTextAreaModel(previous)]),
+    redo: [],
   });
+}
+
+function restoreTextAreaEditHistory(
+  state: TextAreaModel,
+  direction: 'undo' | 'redo',
+): TextAreaModel {
+  const history = normalizeTextAreaEditHistory(state.editHistory) ?? { undo: [], redo: [] };
+  const source = history[direction];
+  const entry = source[source.length - 1];
+  if (!entry) return createTextAreaModel(state.text, state.cursorOffset, state.selection, history);
+
+  const current = snapshotTextAreaModel(state);
+  const nextHistory = direction === 'undo'
+    ? {
+        undo: history.undo.slice(0, -1),
+        redo: trimTextAreaEditHistory([...history.redo, current]),
+      }
+    : {
+        undo: trimTextAreaEditHistory([...history.undo, current]),
+        redo: history.redo.slice(0, -1),
+      };
+
+  return createTextAreaModel(entry.text, entry.cursorOffset, entry.selection, nextHistory);
+}
+
+function normalizeTextAreaEditHistory(
+  history: TextAreaEditHistory | null | undefined,
+): TextAreaEditHistory | undefined {
+  if (!history) return undefined;
+  const undoEntries = Array.isArray(history.undo) ? history.undo : [];
+  const redoEntries = Array.isArray(history.redo) ? history.redo : [];
+  const undo = trimTextAreaEditHistory(undoEntries.map(normalizeTextAreaEditHistoryEntry).filter(isTextAreaEditHistoryEntry));
+  const redo = trimTextAreaEditHistory(redoEntries.map(normalizeTextAreaEditHistoryEntry).filter(isTextAreaEditHistoryEntry));
+  return undo.length || redo.length ? { undo, redo } : undefined;
+}
+
+function normalizeTextAreaEditHistoryEntry(
+  entry: TextAreaEditHistoryEntry,
+): TextAreaEditHistoryEntry | null {
+  if (typeof entry.text !== 'string') return null;
+  const selection = normalizeTextAreaSelection(entry.selection, entry.text);
+  return {
+    text: entry.text,
+    cursorOffset: clampCursor(entry.cursorOffset, entry.text),
+    ...(selection ? { selection } : {}),
+  };
+}
+
+function isTextAreaEditHistoryEntry(
+  entry: TextAreaEditHistoryEntry | null,
+): entry is TextAreaEditHistoryEntry {
+  return entry !== null;
+}
+
+function trimTextAreaEditHistory(entries: TextAreaEditHistoryEntry[]) {
+  return entries.length > MAX_TEXTAREA_EDIT_HISTORY_ITEMS
+    ? entries.slice(entries.length - MAX_TEXTAREA_EDIT_HISTORY_ITEMS)
+    : entries;
+}
+
+function snapshotTextAreaModel(model: TextAreaModel): TextAreaEditHistoryEntry {
+  const normalized = createTextAreaModel(model.text, model.cursorOffset, model.selection);
+  return {
+    text: normalized.text,
+    cursorOffset: normalized.cursorOffset,
+    ...(normalized.selection ? { selection: normalized.selection } : {}),
+  };
 }
 
 function moveCursorVertically(

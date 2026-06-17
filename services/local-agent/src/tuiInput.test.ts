@@ -241,22 +241,22 @@ test('normalizeTuiInputEvent buffers split terminal control sequences', () => {
 test('applyTextAreaInput keeps cursor editing behavior in pure input reducer', () => {
   let state: TextAreaModel = { text: 'helo', cursorOffset: 2 };
   state = applyTextAreaInput('l', {}, state);
-  assert.deepEqual(state, { text: 'hello', cursorOffset: 3 });
+  assert.deepEqual(withoutEditHistory(state), { text: 'hello', cursorOffset: 3 });
 
   state = applyTextAreaInput('', { leftArrow: true }, state);
-  assert.deepEqual(state, { text: 'hello', cursorOffset: 2 });
+  assert.deepEqual(withoutEditHistory(state), { text: 'hello', cursorOffset: 2 });
 
   state = applyTextAreaInput('', { backspace: true }, state);
-  assert.deepEqual(state, { text: 'hllo', cursorOffset: 1 });
+  assert.deepEqual(withoutEditHistory(state), { text: 'hllo', cursorOffset: 1 });
 
   state = applyTextAreaInput('e', { ctrl: true }, state);
-  assert.deepEqual(state, { text: 'hllo', cursorOffset: 4 });
+  assert.deepEqual(withoutEditHistory(state), { text: 'hllo', cursorOffset: 4 });
 
   state = applyTextAreaInput('', { ctrl: true } as TuiKeyInput, state);
-  assert.deepEqual(state, { text: 'hllo', cursorOffset: 4 });
+  assert.deepEqual(withoutEditHistory(state), { text: 'hllo', cursorOffset: 4 });
 
   state = { text: 'run shell command', cursorOffset: 'run shell'.length };
-  assert.deepEqual(applyTextAreaInput('w', { ctrl: true }, state), {
+  assert.deepEqual(withoutEditHistory(applyTextAreaInput('w', { ctrl: true }, state)), {
     text: 'run  command',
     cursorOffset: 4,
   });
@@ -264,34 +264,34 @@ test('applyTextAreaInput keeps cursor editing behavior in pure input reducer', (
 
 test('applyTextAreaInput inserts Shift+Enter newline and normalizes pasted multiline text', () => {
   assert.deepEqual(
-    applyTextAreaInput('', { return: true, shift: true }, { text: 'hello', cursorOffset: 5 }),
+    withoutEditHistory(applyTextAreaInput('', { return: true, shift: true }, { text: 'hello', cursorOffset: 5 })),
     { text: 'hello\n', cursorOffset: 6 },
   );
   assert.deepEqual(
-    applyTextAreaInput('\x1b[13;2u', {}, { text: 'hello', cursorOffset: 5 }),
+    withoutEditHistory(applyTextAreaInput('\x1b[13;2u', {}, { text: 'hello', cursorOffset: 5 })),
     { text: 'hello\n', cursorOffset: 6 },
   );
   assert.deepEqual(
-    applyTextAreaInput('[27;2;13~', {}, { text: 'hello', cursorOffset: 5 }),
+    withoutEditHistory(applyTextAreaInput('[27;2;13~', {}, { text: 'hello', cursorOffset: 5 })),
     { text: 'hello\n', cursorOffset: 6 },
   );
   assert.deepEqual(
-    applyTextAreaInput('a\r\nb\rc', {}, { text: '', cursorOffset: 0 }),
+    withoutEditHistory(applyTextAreaInput('a\r\nb\rc', {}, { text: '', cursorOffset: 0 })),
     { text: 'a\nb\nc', cursorOffset: 5 },
   );
   assert.deepEqual(
-    applyTextAreaInput('\x1b[200~a\r\nb\x1b[201~', {}, { text: '', cursorOffset: 0 }),
+    withoutEditHistory(applyTextAreaInput('\x1b[200~a\r\nb\x1b[201~', {}, { text: '', cursorOffset: 0 })),
     { text: 'a\nb', cursorOffset: 3 },
   );
 });
 
 test('applyTextAreaInput supports textarea delete and line movement operations', () => {
   assert.deepEqual(
-    applyTextAreaInput('', { delete: true }, { text: 'abc', cursorOffset: 1 }),
+    withoutEditHistory(applyTextAreaInput('', { delete: true }, { text: 'abc', cursorOffset: 1 })),
     { text: 'ac', cursorOffset: 1 },
   );
   assert.deepEqual(
-    applyTextAreaInput('\x1b[3~', {}, { text: 'abc', cursorOffset: 1 }),
+    withoutEditHistory(applyTextAreaInput('\x1b[3~', {}, { text: 'abc', cursorOffset: 1 })),
     { text: 'ac', cursorOffset: 1 },
   );
   assert.deepEqual(
@@ -350,3 +350,8 @@ test('textarea render rows preserve long pasted text and place cursor in wrapped
     ],
   );
 });
+
+function withoutEditHistory<T extends { editHistory?: unknown }>(state: T): Omit<T, 'editHistory'> {
+  const { editHistory: _editHistory, ...rest } = state;
+  return rest;
+}

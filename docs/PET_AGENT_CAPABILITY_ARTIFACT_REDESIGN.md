@@ -1,20 +1,22 @@
 # Capability Artifact Redesign
 
-> Date: 2026-06-16
-> Status: Implemented in PR #134 follow-up
+> Date: 2026-06-17
+> Status: Implemented (PR #140, on top of PR #134)
 
 ## Decision
 
 Capability artifacts are no longer registered through message markers such as
 `additional_kwargs.pinpawo.capabilityArtifacts`.
 
-Artifacts are created inside the subagent loop:
+Artifacts are produced **in code by the capability**, not by the model calling a
+write tool. A capability writes through the store it receives on its
+`CapabilityContext`, and the resulting ref reaches state via the artifact sink:
 
 ```text
-subagent tool call
-  -> capability_artifact_write
-  -> toolkit-closed CapabilityArtifactStore.writeArtifact(...)
+capability code (afterRun / context-pressure ingest)
+  -> CapabilityArtifactStore.writeArtifact(...)   // store from CapabilityContext
   -> CapabilityArtifactRef
+  -> recordCapabilityArtifact(ref)  (artifact sink)
   -> SubagentResult.artifacts
   -> state.capabilityArtifacts
 ```
@@ -23,23 +25,39 @@ The orchestrator only consumes `CapabilityArtifactRef[]`. It does not parse
 capability-specific messages, inspect private tool artifacts, or scan message
 metadata for artifact registration.
 
-`CapabilityArtifactStore` is not an orchestrator config dependency. Artifact
-tools capture the store through their toolkit factory closure, for example
-`createCapabilityArtifactToolkit(store)`. Producer tools can follow the same
-shape: generate the output, write it through the closed-over store, return a
-short ref to the model, and push the ref into the subagent artifact sink.
+`CapabilityArtifactStore` is injected through `OrchestratorConfig.capabilityArtifactStore`,
+which `capabilityNode` forwards onto each capability's `CapabilityContext.artifactStore`.
+The store stays a port — pet-agent core depends only on the interface, never on a
+concrete adapter (the host wires the adapter). A surface without a store (e.g.
+studio, tests) simply leaves it undefined and capabilities skip writes.
 
 This removes untyped markers and message metadata registration. It does not
-remove the ref collection mechanism: tools still call the sink, the subagent
+remove the ref collection mechanism: the capability calls the sink, the subagent
 returns `SubagentResult.artifacts`, and the orchestrator merges those refs into
 state.
+
+### No artifact toolkit
+
+There is **no** `capability_artifact` toolkit (no `_write` / `_read` / `_list`
+tools handed to the model). It was removed: writes are deterministic in code, and
+nothing needs the model to read its own just-written artifact back —
+
+- under context pressure, ingest inlines the summary back into the model context
+  and the summary names its sources, so the subagent re-queries a source with
+  `view_file` etc. rather than reading the artifact through a tool;
+- cross-turn "has this been explored before" is served by the artifact ref +
+  preview that already lands in `state.capabilityArtifacts` and the orchestrator
+  prompt, not by a toolkit.
 
 ## Contracts
 
 - `SubagentResult.artifacts` carries refs produced during the subagent run.
-- `ToolkitContext.recordCapabilityArtifact(ref)` is the sink used by artifact
-  tools to attach refs to the current subagent result.
-- `capability_artifact_write` writes the artifact and records the returned ref.
+- `recordCapabilityArtifact(ref)` is the single artifact sink, exposed under that
+  name on every layer that can persist: `CapabilityMiddlewareContext` (afterRun),
+  `CapabilityArtifactSink` on `ContextPolicyContext` (in-loop context-pressure),
+  and `ToolkitContext` (if a toolkit ever needs it). All push into the same
+  `artifactRefs` array that becomes `SubagentResult.artifacts`.
+- `CapabilityContext.artifactStore` is the store a capability uses to write bytes.
 - `state.capabilityArtifacts` is the only cross-turn artifact state channel.
 - `capabilityResult` is removed. Structured result consumers read the latest
   `kind: "result"` artifact and parse it with their schema.
@@ -98,8 +116,11 @@ Image and video generation tools should be self-contained producer tools.
 ## Schema Validation
 
 `AgentCapability.resultSchema` remains the schema for `kind: "result"` artifacts.
-When a capability writes a result artifact through `capability_artifact_write`,
-the write tool validates the payload before persisting it.
+The capability's own persistence code validates the payload before writing: the
+shared `recordLatestToolResultArtifact` helper runs `schema.safeParse` on the
+candidate tool artifact and only writes a `kind: "result"` artifact when it
+matches. There is no write tool, so validation lives at the single deterministic
+write site rather than at a model-facing boundary.
 
 ## Capability Migration
 
@@ -108,9 +129,9 @@ instructing the model to call a write tool inside the loop:
 
 - `daily_post` persists its result in an `afterRun` middleware: it takes the
   latest schema-valid `finalize_post` / `skip_post` tool artifact and writes it as
-  a `kind: "result"` artifact via the store it holds by closure. No
-  `uses: ['capability_artifact']`, no write-tool instruction.
-- `capability_creator` does the same via `afterRun` (keeps `uses: ['bash']`).
+  a `kind: "result"` artifact via `ctx.artifactStore`. No model-facing write tool
+  and no write instruction — the persistence is unconditional code.
+- `capability_creator` does the same via `afterRun` (uses `['bash']`).
 - `explore` does **not** persist a result on finalize. See "Explore ingest" below.
 
 ## Explore ingest
@@ -143,9 +164,16 @@ This removes the prior `finalize`-time ingest, the `buildFinalEvidence` final
 pass, and the per-run result/report write. `ExploreResult` (`status`, `summary`,
 `nextSteps`) is no longer persisted as a `kind: "result"` artifact on finalize.
 
-> Open implementation detail: `ingestExploreKnowledge` currently returns a flat
-> `{ summary: string }`. The "summary + evidence" form needs its structured
-> output widened to `{ summary, evidence: { source, proves, value }[] }`, and
-> the context-pressure writer (`rewriteUnderContextPressure` →
-> `replaceCompressedToolOutputs`) becomes the single place that emits the
-> explore artifact through the injected store + sink.
+**Implemented shape.** `ingestExploreKnowledge` returns
+`{ summary, evidence: { source, proves, value }[] }`. `rewriteUnderContextPressure`
+is the single place that emits the explore artifact, via
+`recordExploreIngestArtifact(ctx.artifactStore, ctx.artifactSink, ingest)`
+(summary → markdown content, evidence → metadata).
+
+**Failure-safe.** Ingest runs inside the context-pressure rewrite, which has no
+graceful fallback layer above it. The rewrite wraps ingest + persist in
+try/catch: on any failure (model rate-limit/timeout, structured-output parse
+error, store write error) it logs and returns the messages unchanged — keep the
+raw outputs this round rather than aborting the whole explore turn. It records +
+evicts before advancing the running summary, and evicts only the tool outputs the
+summarizer actually saw (the char-budget-truncated tail is left intact).

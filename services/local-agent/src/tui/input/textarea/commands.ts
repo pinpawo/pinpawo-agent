@@ -21,7 +21,9 @@ export type TextAreaCommand =
   | { type: 'selectDown' }
   | { type: 'selectLineStart' }
   | { type: 'selectLineEnd' }
-  | { type: 'selectAll' };
+  | { type: 'selectAll' }
+  | { type: 'undo' }
+  | { type: 'redo' };
 
 export function toTextAreaCommand(event: CanonicalInputEvent): TextAreaCommand | null {
   switch (event.type) {

@@ -139,11 +139,11 @@ test('applyTextAreaControllerCommand applies textarea command with host width', 
     { text: 'abcdef', cursorOffset: 4 },
   );
   assert.deepEqual(
-    applyTextAreaControllerCommand(
+    withoutEditHistory(applyTextAreaControllerCommand(
       { text: 'hello', cursorOffset: 5, selection: { anchorOffset: 1, focusOffset: 4 } },
       { type: 'insert', text: 'i' },
       10,
-    ),
+    )),
     { text: 'hio', cursorOffset: 2 },
   );
 });
@@ -170,3 +170,8 @@ test('measureTextAreaControllerLayout exposes visual cursor boundaries', () => {
     },
   );
 });
+
+function withoutEditHistory<T extends { editHistory?: unknown }>(state: T): Omit<T, 'editHistory'> {
+  const { editHistory: _editHistory, ...rest } = state;
+  return rest;
+}

@@ -10,7 +10,7 @@ test('local agent CLI passes tui options to the handler', async () => {
     },
   });
 
-  await program.parseAsync(['tui', '--dry-run'], { from: 'user' });
+  await program.parseAsync(['node', 'pinpawo-agent', 'tui', '--dry-run']);
 
   assert.deepEqual(received, { dryRun: true });
 });
@@ -23,7 +23,15 @@ test('local agent CLI passes init options to the handler', async () => {
     },
   });
 
-  await program.parseAsync(['init', '--dir', '/tmp/pinpawo-test', '--force', '--no-example-capability'], { from: 'user' });
+  await program.parseAsync([
+    'node',
+    'pinpawo-agent',
+    'init',
+    '--dir',
+    '/tmp/pinpawo-test',
+    '--force',
+    '--no-example-capability',
+  ]);
 
   assert.deepEqual(received, {
     dir: '/tmp/pinpawo-test',

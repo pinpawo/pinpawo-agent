@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HumanMessage } from '@langchain/core/messages';
 import {
+  buildCapabilityArtifactContext,
   buildCapabilityDiscoveryRequestContext,
   buildDelegationOutcomeDecisionInput,
   buildPreparedRequestContext,
@@ -25,6 +26,52 @@ test('start-loop router request context includes compaction summaries outside re
   assert.doesNotMatch(requestContext, /recent-0/);
 });
 
+test('request contexts include bounded capability artifact refs', () => {
+  const artifactContext = buildCapabilityArtifactContext([
+    {
+      id: 'artifact-1',
+      threadId: 'thread-1',
+      capabilityId: 'explore',
+      delegationId: 'delegation-1',
+      turnId: 'turn-1',
+      kind: 'report',
+      mimeType: 'text/markdown',
+      uri: 'capability-artifact://thread/thread-1/delegation/delegation-1/artifact/artifact-1',
+      title: 'Issue explore report',
+      preview: '已确认 issue explore 的关键文件和下一步。',
+      sizeBytes: 1200,
+      createdAt: '2026-06-16T00:00:00.000Z',
+    },
+  ]);
+
+  assert.match(artifactContext, /当前会话 capability artifacts/);
+  assert.match(artifactContext, /Issue explore report/);
+  assert.match(artifactContext, /capability-artifact:\/\/thread\/thread-1/);
+
+  const requestContext = buildPreparedRequestContext({
+    latestUserRequest: '继续刚才的探索',
+    recentMessages: [],
+    recentAnnounces: [],
+    capabilityArtifacts: [{
+      id: 'artifact-1',
+      threadId: 'thread-1',
+      capabilityId: 'explore',
+      delegationId: 'delegation-1',
+      turnId: 'turn-1',
+      kind: 'report',
+      mimeType: 'text/markdown',
+      uri: 'capability-artifact://thread/thread-1/delegation/delegation-1/artifact/artifact-1',
+      title: 'Issue explore report',
+      preview: '已确认 issue explore 的关键文件和下一步。',
+      sizeBytes: 1200,
+      createdAt: '2026-06-16T00:00:00.000Z',
+    }],
+  });
+
+  assert.match(requestContext, /当前会话 capability artifacts/);
+  assert.match(requestContext, /继续刚才的探索/);
+});
+
 test('capability discovery request context also receives compaction summaries', () => {
   const requestContext = buildCapabilityDiscoveryRequestContext({
     latestUserRequest: '帮我继续',
@@ -42,6 +89,7 @@ test('loop-internal router input stays focused on current turn announce context'
     latestUserRequest: '继续推进',
     turnDelegationContext: '当前轮任务跟踪：\n- 所有已委派任务均为 completed。',
     subagentAnnounceContext: 'subagent announce：\n- 状态：completed',
+    capabilityArtifacts: [],
   });
 
   assert.doesNotMatch(input, /压缩任务上下文/);

@@ -1,5 +1,4 @@
 import {
-  readLatestToolArtifact,
   type AgentActor,
   type AgentCapability,
 } from '@pinpawo/pet-agent';
@@ -7,6 +6,7 @@ import type { DailyPostPayload, RecentDailyPost, TrendPromptItem } from './types
 import { dailyPostInstructions } from './instructions';
 import { dailyPostResultSchema } from './schemas';
 import { createDailyPostToolset } from './tools';
+import { recordLatestToolResultArtifact } from '../resultArtifact';
 
 export { dailyPostResultSchema } from './schemas';
 export { buildDailyPostTaskMessage } from './task';
@@ -68,7 +68,14 @@ export function createDailyPostCapability(
         requestImageProcessing: options.requestImageProcessing,
       })],
       instructions: options.instructions ?? dailyPostInstructions,
-      readResult: readLatestToolArtifact,
+      middleware: {
+        afterRun: (result, ctx) => recordLatestToolResultArtifact(result, ctx, {
+          store: context.artifactStore,
+          schema: dailyPostResultSchema,
+          title: 'Daily post result',
+          schemaName: 'DailyPostResult',
+        }),
+      },
     }),
     resultSchema: dailyPostResultSchema,
   };

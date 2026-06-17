@@ -25,8 +25,8 @@ import {
 import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
-import { LocalAgentScheduledJob } from './localAgentScheduledJob';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
+import { defaultCapabilityArtifactRoot } from './capabilityArtifactStore';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
@@ -39,7 +39,9 @@ export class LocalAgentRuntime {
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginToolkits: AgentToolkit[] = [];
-  private readonly capabilityRegistry = new LocalAgentCapabilityRegistry();
+  private readonly capabilityRegistry = new LocalAgentCapabilityRegistry({
+    capabilityArtifactRoot: defaultCapabilityArtifactRoot(config.workdir),
+  });
   private readonly chatCheckpointer = new FileSaver(
     resolve(homedir(), '.pinpawo', 'checkpoints.json'),
   );
@@ -56,7 +58,10 @@ export class LocalAgentRuntime {
   private readonly appChatHandler = new LocalAgentAppChatHandler({
     graphService: this.graphService,
     checkpoint: this.chatCheckpointer,
-    deleteThread: (threadId) => this.chatCheckpointer.deleteThread(threadId),
+    deleteThread: async (threadId) => {
+      await this.chatCheckpointer.deleteThread(threadId);
+      await this.capabilityRegistry.deleteThreadArtifacts(threadId);
+    },
     inflightRequests: this.inflightRequests,
     isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
     getActorId: () => this.getActorId(),
@@ -65,14 +70,7 @@ export class LocalAgentRuntime {
     getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
     getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
     getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
-  });
-  private readonly scheduledJob = new LocalAgentScheduledJob({
-    graphService: this.graphService,
-    getActorId: () => this.getActorId(),
-    getLlmConfig: () => this.llmConfig,
-    getHooks: () => this.hooks,
-    getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
-    getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
+    getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
   });
 
   async init() {
@@ -118,6 +116,10 @@ export class LocalAgentRuntime {
     return this.capabilityRegistry.getLocalCapabilities();
   }
 
+  getCapabilityArtifactStore() {
+    return this.capabilityRegistry.getCapabilityArtifactStore();
+  }
+
   getLocalCapabilityDefinitions(): AgentCapability[] {
     return this.capabilityRegistry.getLocalCapabilityDefinitions();
   }
@@ -137,10 +139,6 @@ export class LocalAgentRuntime {
     return this.capabilityRegistry.rescanUserCapabilities();
   }
 
-  getStats() {
-    return this.scheduledJob.getStats();
-  }
-
   getActorId(): string {
     if (!this.actorId) {
       throw new Error('Local agent actorId is not initialized');
@@ -156,7 +154,7 @@ export class LocalAgentRuntime {
     if (!opts?.skipInit) {
       await this.init();
     }
-    console.log(`[local-agent] started — poll every ${config.pollIntervalSeconds}s, post every ${config.postIntervalHours}h`);
+    console.log('[local-agent] started — local server + chat relay');
 
     if (config.apiConnected) {
       // Connect WebSocket for app ↔ local agent chat relay.
@@ -165,16 +163,8 @@ export class LocalAgentRuntime {
       console.log(`[local-agent] ${config.apiSetupMessage}`);
     }
 
+    // Keep the process alive for the local server + WebSocket relay until stop.
     while (!this.stopRequested) {
-      try {
-        if (config.apiConnected) {
-          await this.scheduledJob.tick();
-        }
-      } catch (err) {
-        console.error('[local-agent] tick error:', err instanceof Error ? err.message : err);
-      }
-
-      if (this.stopRequested) break;
       await sleep(config.pollIntervalSeconds * 1000);
     }
 

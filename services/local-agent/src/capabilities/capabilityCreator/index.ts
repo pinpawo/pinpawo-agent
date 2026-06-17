@@ -1,13 +1,14 @@
-import { readLatestToolArtifact, type AgentCapability } from '@pinpawo/pet-agent';
+import { type AgentCapability } from '@pinpawo/pet-agent';
 import { capabilityCreatorInstructions } from './instructions';
 import { capabilityCreatorResultSchema } from './schemas';
 import { createCapabilityCreatorToolset } from './tools';
+import { recordLatestToolResultArtifact } from '../resultArtifact';
 
 export function createCapabilityCreatorCapability(): AgentCapability {
   return {
     name: 'capability_creator',
     description: '生成、修改并验证用户自定义 capability 插件模板。',
-    createRuntime: async () => ({
+    createRuntime: async (context) => ({
       toolsets: [createCapabilityCreatorToolset()],
       uses: ['bash'],
       contextPolicy: {
@@ -18,7 +19,14 @@ export function createCapabilityCreatorCapability(): AgentCapability {
         },
       },
       instructions: capabilityCreatorInstructions,
-      readResult: readLatestToolArtifact,
+      middleware: {
+        afterRun: (result, ctx) => recordLatestToolResultArtifact(result, ctx, {
+          store: context.artifactStore,
+          schema: capabilityCreatorResultSchema,
+          title: 'Capability creator result',
+          schemaName: 'CapabilityCreatorResult',
+        }),
+      },
     }),
     resultSchema: capabilityCreatorResultSchema,
   };

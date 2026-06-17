@@ -5,6 +5,15 @@ export type {
 } from './types/agent';
 
 export type {
+  CapabilityArtifactKind,
+  CapabilityArtifactRef,
+  CapabilityArtifactSchemaRef,
+  CapabilityArtifactStore,
+  CapabilityArtifactWriteInput,
+  CapabilityArtifactWritePayload,
+} from './types/artifact';
+
+export type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
   PetAgentStatus,
@@ -19,10 +28,12 @@ export type {
   CapabilityContext,
   CapabilityInstructionContext,
   CapabilityMiddleware,
+  CapabilityMiddlewareContext,
   CapabilityRuntime,
 } from './types/capability';
 
 export type {
+  CapabilityArtifactSink,
   ContextPolicyContext,
   SubagentInput,
   SubagentContextPolicy,
@@ -152,10 +163,10 @@ export {
   readStringArray,
   resultStatusSummary,
 } from './utils/operationMetadata';
-export { readLatestToolArtifact } from './agent/orchestrator/subagentHandoff';
 export { runAgent } from './agent/runAgent';
 export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
 export { createSubagent } from './subagent/createSubagent';
+export { clipForPrompt } from './agent/orchestrator/utils';
 export {
   createLLMWikiCurator,
   createPetAgentRuntime,

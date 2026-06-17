@@ -39,8 +39,8 @@ export async function runAgent() {
     localCapabilities: runtime.getLocalCapabilities(),
     userCapabilityDefinitions: runtime.getUserCapabilityDefinitions(),
     userCapabilities: runtime.getUserCapabilities(),
+    capabilityArtifactStore: runtime.getCapabilityArtifactStore(),
     rescanUserCapabilities: () => runtime.rescanUserCapabilities(),
-    getStats: () => runtime.getStats(),
   });
 
   try {

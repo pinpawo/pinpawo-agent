@@ -288,7 +288,9 @@ export class LocalServerChatHandler {
       const recoveredFromToolProtocolError = isToolProtocolHistoryError(err);
       if (recoveredFromToolProtocolError) {
         try {
-          await this.tuiSessions.resetSession(deps.actorId, { deletePrevious: true });
+          await this.tuiSessions.resetSession(deps.actorId, {
+            deletePrevious: true,
+          });
           console.warn(`[local-server] reset TUI chat session after tool protocol error requestId=${requestId}`);
         } catch (resetError) {
           console.warn(

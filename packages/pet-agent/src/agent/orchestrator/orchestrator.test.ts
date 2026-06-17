@@ -20,7 +20,6 @@ import {
   collectCapabilityOperations,
   collectGeneralOperations,
   collectToolkitOperations,
-  readLatestToolArtifact,
   resolveToolkitResources,
   selectCapabilityTools,
 } from './subagentHandoff';
@@ -476,18 +475,6 @@ test('limit-reached progress announce lets model choose the same capability dele
   assert.match(decisionInput, /停止原因：limit_reached/);
 });
 
-test('capability result helper reads latest tool artifact, not JSON content', () => {
-  const result = readLatestToolArtifact([
-    new ToolMessage({
-      content: '{"status":"failed","postId":"wrong"}',
-      artifact: { status: 'created', postId: 'post-1' },
-      tool_call_id: 'call-1',
-    }),
-  ]);
-
-  assert.deepEqual(result, { status: 'created', postId: 'post-1' });
-});
-
 test('toolkits compose tools and instructions for capability runtimes', async () => {
   const browserOpen = mockTool('browser_open');
   const readFile = mockTool('read_file');
@@ -617,12 +604,82 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
           description: 'browser toolkit',
           tools: [mockTool('browser_open')],
         },
+        {
+          name: 'artifact',
+          description: 'artifact toolkit',
+          exposure: { general: false },
+          tools: [mockTool('artifact_read')],
+        },
       ],
       forcedCapabilityNames: ['inspect_repo'],
     },
   });
 
-  assert.deepEqual(runtimeToolkitNames, ['bash', 'browser']);
+  assert.deepEqual(runtimeToolkitNames, ['bash', 'browser', 'artifact']);
+});
+
+test('toolkit exposure can hide tools from the general lane', async () => {
+  let routeCallCount = 0;
+  let generalToolNames: string[] = [];
+  const routeModel = {
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_general',
+              task: 'inspect with tools',
+              context_summary: null,
+            }
+          : {
+              action: 'finish',
+              answer: 'done',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({ toolCalls: [[]] });
+  const bindTools = subagentModel.bindTools.bind(subagentModel);
+  (subagentModel as unknown as {
+    bindTools: (tools: Array<{ name: string }>) => unknown;
+  }).bindTools = (tools) => {
+    generalToolNames = tools.map((toolItem) => toolItem.name);
+    return bindTools(tools as never);
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: subagentModel,
+    },
+    actor: testActor,
+  });
+
+  await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('inspect')]), {
+    configurable: {
+      thread_id: 'general-toolkit-exposure',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [
+        {
+          name: 'visible',
+          description: 'visible toolkit',
+          tools: [mockTool('visible_tool')],
+        },
+        {
+          name: 'artifact',
+          description: 'artifact toolkit',
+          exposure: { general: false },
+          tools: [mockTool('artifact_read')],
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(generalToolNames, ['visible_tool']);
 });
 
 test('toolkit and capability toolset operations are collected with their source', () => {
@@ -682,6 +739,175 @@ test('general operations are collected from toolkits', () => {
     name: 'bash',
     toolName: 'read_file',
   });
+});
+
+test('capability artifact refs recorded by subagent tools are merged into state', async () => {
+  let routeCallCount = 0;
+  const routeModel = {
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_capability.explore',
+              task: 'inspect issue context',
+              context_summary: null,
+            }
+          : {
+              action: 'finish',
+              answer: 'done',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const artifactToolkit: AgentToolkit = {
+    name: 'artifact',
+    description: 'artifact recorder',
+    tools: (ctx) => [
+      tool(async () => {
+        const ref = {
+          id: 'artifact-1',
+          threadId: ctx.threadId ?? 'missing-thread',
+          capabilityId: ctx.capabilityId ?? 'missing-capability',
+          delegationId: ctx.delegationId ?? 'missing-delegation',
+          turnId: ctx.turnId ?? 'missing-turn',
+          kind: 'report' as const,
+          mimeType: 'text/markdown',
+          uri: `capability-artifact://thread/${encodeURIComponent(ctx.threadId ?? '')}/artifact/1`,
+          title: 'Issue exploration',
+          preview: 'Checked the artifact handoff path.',
+          sizeBytes: 19,
+          createdAt: '2026-06-16T00:00:00.000Z',
+          schema: { name: 'ExploreReport', version: 1 },
+          metadata: { sourceCount: 2 },
+        };
+        await ctx.recordCapabilityArtifact?.(ref);
+        return JSON.stringify(ref);
+      }, {
+        name: 'persist_report',
+        description: 'persist report',
+        schema: z.object({}),
+      }),
+    ],
+  };
+  const fixtureCapability: AgentCapability = {
+    name: 'explore',
+    description: 'Explore issue context.',
+    createRuntime: () => ({
+      uses: ['artifact'],
+    }),
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeToolCallingModel({
+        toolCalls: [[{ id: 'call-persist', name: 'persist_report', args: {} }], []],
+      }),
+    },
+    actor: testActor,
+  });
+
+  const state = await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('explore issue')]), {
+    configurable: {
+      thread_id: 'artifact-thread',
+      actor: testActor,
+      capabilities: [fixtureCapability],
+      toolkits: [artifactToolkit],
+      forcedCapabilityNames: ['explore'],
+    },
+  });
+
+  assert.equal(state.capabilityArtifacts.length, 1);
+  assert.equal(state.capabilityArtifacts[0]?.title, 'Issue exploration');
+  assert.equal(state.capabilityArtifacts[0]?.threadId, 'artifact-thread');
+  assert.equal(state.capabilityArtifacts[0]?.capabilityId, 'explore');
+});
+
+test('capability result artifacts are represented only as refs in state', async () => {
+  let routeCallCount = 0;
+  const routeModel = {
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_capability.daily_post',
+              task: 'create post',
+              context_summary: null,
+            }
+          : {
+              action: 'finish',
+              answer: 'done',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const artifactToolkit: AgentToolkit = {
+    name: 'artifact',
+    description: 'artifact recorder',
+    tools: (ctx) => [
+      tool(async () => {
+        const ref = {
+          id: 'result-1',
+          threadId: ctx.threadId ?? 'missing-thread',
+          capabilityId: ctx.capabilityId ?? 'missing-capability',
+          delegationId: ctx.delegationId ?? 'missing-delegation',
+          turnId: ctx.turnId ?? 'missing-turn',
+          kind: 'result' as const,
+          mimeType: 'application/json',
+          uri: `capability-artifact://thread/${encodeURIComponent(ctx.threadId ?? '')}/artifact/result-1`,
+          title: 'Daily post result',
+          preview: 'created post-1',
+          sizeBytes: 39,
+          createdAt: '2026-06-16T00:00:00.000Z',
+          schema: { name: 'daily_post.result', version: 1 },
+        };
+        await ctx.recordCapabilityArtifact?.(ref);
+        return JSON.stringify(ref);
+      }, {
+        name: 'persist_result',
+        description: 'persist result',
+        schema: z.object({}),
+      }),
+    ],
+  };
+  const fixtureCapability: AgentCapability = {
+    name: 'daily_post',
+    description: 'Create post.',
+    createRuntime: () => ({
+      uses: ['artifact'],
+    }),
+  };
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeToolCallingModel({
+        toolCalls: [[{ id: 'call-persist', name: 'persist_result', args: {} }], []],
+      }),
+    },
+    actor: testActor,
+  });
+
+  const state = await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('post')]), {
+    configurable: {
+      thread_id: 'result-artifact-thread',
+      actor: testActor,
+      capabilities: [fixtureCapability],
+      toolkits: [artifactToolkit],
+      forcedCapabilityNames: ['daily_post'],
+    },
+  });
+
+  assert.equal(state.capabilityArtifacts[0]?.kind, 'result');
+  assert.equal(state.capabilityArtifacts[0]?.schema?.name, 'daily_post.result');
 });
 
 test('runAgent omits empty toolkit configurable arrays', async () => {

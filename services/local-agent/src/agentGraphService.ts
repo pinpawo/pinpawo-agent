@@ -10,7 +10,6 @@ import {
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
-import type { ZodType } from 'zod';
 import type { AgentChannelSetup } from './agentChannel';
 import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
 
@@ -177,20 +176,5 @@ export class LocalAgentGraphService {
     return new Command({
       resume,
     });
-  }
-
-  async invokeStructuredResult<T extends Record<string, unknown>>(
-    setup: AgentChannelSetup,
-    schema: ZodType<T>,
-  ): Promise<{ state: OrchestratorStateType; result: T | null }> {
-    const state = await this.invokeState(setup);
-    const parsed = state.capabilityResult
-      ? schema.safeParse(state.capabilityResult)
-      : null;
-
-    return {
-      state,
-      result: parsed?.success ? parsed.data : null,
-    };
   }
 }

@@ -1,6 +1,7 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentActor } from '../../types/agent';
+import type { CapabilityArtifactRef } from '../../types/artifact';
 import { CAPABILITY_SEARCH_TOOL_NAME } from './capabilitySearch';
 import type {
   CapabilityCandidate,
@@ -15,6 +16,20 @@ const MAX_DECISION_TURN_DELEGATIONS = 6;
 const MAX_RECENT_MAIN_MESSAGES = 6;
 const MAX_RECENT_ANNOUNCE_CONTEXT = 5;
 const MAX_CONTEXT_SUMMARIES = 2;
+const MAX_RECENT_CAPABILITY_ARTIFACTS = 6;
+
+export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[] | undefined): string {
+  if (!artifacts || artifacts.length === 0) return '';
+  const lines = ['当前会话 capability artifacts（仅短引用；需要细节时交给对应 capability 用 artifact 工具读取）：'];
+  for (const artifact of artifacts.slice(-MAX_RECENT_CAPABILITY_ARTIFACTS)) {
+    lines.push(`- [${artifact.kind}] ${clipForPrompt(artifact.title ?? artifact.id, 120)}`);
+    lines.push(`  capability: ${artifact.capabilityId}; uri: ${artifact.uri}`);
+    if (artifact.preview) {
+      lines.push(`  preview: ${clipForPrompt(artifact.preview, 240)}`);
+    }
+  }
+  return lines.join('\n');
+}
 
 export function buildTurnDelegationContext(turnDelegations: TurnDelegation[]): string {
   if (turnDelegations.length === 0) {
@@ -352,6 +367,7 @@ export function buildPreparedRequestContext(params: {
   recentMessages: BaseMessage[];
   recentAnnounces: SubagentAnnounce[];
   contextSummaries?: string[];
+  capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
   const recentLines = params.recentMessages
     .slice(-MAX_RECENT_MAIN_MESSAGES)
@@ -362,6 +378,7 @@ export function buildPreparedRequestContext(params: {
     .filter((line): line is string => Boolean(line));
 
   const compactionSummaryContext = buildCompactionSummaryContext(params.contextSummaries);
+  const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
 
   return [
     params.latestUserRequest
@@ -369,6 +386,8 @@ export function buildPreparedRequestContext(params: {
       : '当前用户请求：未提供',
     compactionSummaryContext ? '' : null,
     compactionSummaryContext,
+    artifactContext ? '' : null,
+    artifactContext,
     params.recentAnnounces.length > 0 ? '' : null,
     params.recentAnnounces.length > 0 ? buildRecentSubagentAnnounceContext(params.recentAnnounces) : null,
     recentLines.length > 0 ? '' : null,
@@ -382,6 +401,7 @@ export function buildCapabilityDiscoveryRequestContext(params: {
   recentMessages: BaseMessage[];
   recentAnnounces: SubagentAnnounce[];
   contextSummaries?: string[];
+  capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
   const recentLines = params.recentMessages
     .slice(-MAX_RECENT_MAIN_MESSAGES)
@@ -392,6 +412,7 @@ export function buildCapabilityDiscoveryRequestContext(params: {
     .filter((line): line is string => Boolean(line));
 
   const compactionSummaryContext = buildCompactionSummaryContext(params.contextSummaries);
+  const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
 
   return [
     params.latestUserRequest
@@ -399,6 +420,8 @@ export function buildCapabilityDiscoveryRequestContext(params: {
       : '当前用户请求：未提供',
     compactionSummaryContext ? '' : null,
     compactionSummaryContext,
+    artifactContext ? '' : null,
+    artifactContext,
     params.recentAnnounces.length > 0 ? '' : null,
     params.recentAnnounces.length > 0 ? buildCapabilityDiscoveryTaskContext(params.recentAnnounces) : null,
     recentLines.length > 0 ? '' : null,
@@ -428,7 +451,9 @@ export function buildDelegationOutcomeDecisionInput(params: {
   latestUserRequest: string | null;
   turnDelegationContext: string;
   subagentAnnounceContext: string | null;
+  capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
+  const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
   return [
     params.latestUserRequest
       ? `用户原始请求：${clipForPrompt(params.latestUserRequest, 420)}`
@@ -437,6 +462,8 @@ export function buildDelegationOutcomeDecisionInput(params: {
     params.subagentAnnounceContext ?? 'subagent announce：无',
     '',
     params.turnDelegationContext,
+    artifactContext ? '' : null,
+    artifactContext,
     '',
     '请根据以上 subagent announce 和任务跟踪，判断当前轮下一步。',
   ].join('\n');

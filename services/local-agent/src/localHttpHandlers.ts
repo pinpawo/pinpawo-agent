@@ -45,7 +45,6 @@ export function handleLocalHttpRequest(
         status: 'ok',
         actor_id: deps.actorId,
         actor_name: deps.actorName,
-        ...deps.getStats(),
         ...readBrowserHealthFields(),
         ...readAgentActivityHealthFields(),
       });

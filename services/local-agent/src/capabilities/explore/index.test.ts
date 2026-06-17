@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import type { OrchestrationDecisionStructuredOutputConfig } from '@pinpawo/pet-agent';
+import type { CapabilityContext, OrchestrationDecisionStructuredOutputConfig } from '@pinpawo/pet-agent';
 import {
   createExploreCapability,
   exploreResultSchema,
@@ -42,12 +42,19 @@ function fakeSummaryModel(
   } as unknown as BaseChatModel;
 }
 
-async function createRuntime(model: BaseChatModel, options: Parameters<typeof createExploreCapability>[0] = {}) {
-  return createExploreCapability(options).createRuntime({
+async function createRuntime(
+  model: BaseChatModel,
+  opts: {
+    structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
+    artifactStore?: CapabilityContext['artifactStore'];
+  } = {},
+) {
+  return createExploreCapability({ structuredOutput: opts.structuredOutput }).createRuntime({
     models: { act: model },
     actor: {} as never,
     messages: [],
     availableToolkits: [],
+    artifactStore: opts.artifactStore,
   });
 }
 
@@ -70,8 +77,9 @@ test('explore capability filters default toolkits to host-available toolkits', a
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /上下文足够时会保留完整工具输出/);
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /已查看文件列表/);
   assert.equal(typeof runtime.contextPolicy?.rewriteAsync, 'function');
-  assert.equal(runtime.middleware?.beforeRun, undefined);
-  assert.equal(typeof runtime.middleware?.afterRun, 'function');
+  // Explore no longer persists on finalize via afterRun; summarization is
+  // context-pressure-driven only (issue #137 follow-up).
+  assert.equal(runtime.middleware, undefined);
   assert.equal(capability.resultSchema, exploreResultSchema);
 });
 
@@ -197,7 +205,7 @@ test('explore ingest forwards configured structured output method', async () => 
   assert.deepEqual(readExploreResult(rewritten ?? [])?.summary, summary);
 });
 
-test('explore ingest propagates structured output failures instead of falling back', async () => {
+test('explore ingest failure under context pressure keeps raw outputs instead of crashing the run', async () => {
   const model = {
     withStructuredOutput: () => ({
       invoke: async () => {
@@ -208,43 +216,89 @@ test('explore ingest propagates structured output failures instead of falling ba
   const runtime = await createRuntime(model);
   assert.ok(runtime.contextPolicy?.rewriteAsync);
 
-  await assert.rejects(
-    () => Promise.resolve(runtime.contextPolicy!.rewriteAsync!([
-      toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
-      toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
-      toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
-    ], {
-      estimateMessagesTokens: () => 30_000,
-      iterationCount: 2,
-      operations: {},
-      contextWindowTokens: 32_000,
-    })),
-    /invalid structured output/,
-  );
+  const input = [
+    toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
+    toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
+    toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
+  ];
+  // An ingest model failure must degrade gracefully (review finding #1): the
+  // rewrite returns the original messages unchanged — no throw, no eviction.
+  const rewritten = await runtime.contextPolicy!.rewriteAsync!(input, {
+    estimateMessagesTokens: () => 30_000,
+    iterationCount: 2,
+    operations: {},
+    contextWindowTokens: 32_000,
+  });
+  assert.deepEqual(rewritten, input);
 });
 
-test('explore final ingest failure stops without producing fallback result', async () => {
+test('explore context-pressure ingest persists a summary+evidence report artifact via the sink', async () => {
+  const summary = '已确认重复探索的原因\n\n已查看文件：services/local-agent/src/capabilities/explore/index.ts';
+  const writes: Array<Record<string, unknown>> = [];
+  const recorded: unknown[] = [];
+  const store = {
+    writeArtifact: async (input: Record<string, unknown>) => {
+      writes.push(input);
+      return { id: `a-${writes.length}`, uri: `capability-artifact://t/d/artifact/${writes.length}`, kind: 'report' };
+    },
+  } as unknown as NonNullable<CapabilityContext['artifactStore']>;
+
   const model = {
     withStructuredOutput: () => ({
-      invoke: async () => {
-        throw new Error('ingest failed');
-      },
+      invoke: async () => ({
+        summary,
+        evidence: [{ source: 'explore/index.ts', proves: 'ingest 只在 context 压力时触发', value: '避免重复探索' }],
+      }),
     }),
   } as unknown as BaseChatModel;
-  const runtime = await createExploreCapability().createRuntime({
-    models: { act: model },
-    actor: {} as never,
-    messages: [],
-    availableToolkits: [],
+  const runtime = await createRuntime(model, { artifactStore: store });
+
+  await runtime.contextPolicy?.rewriteAsync?.([
+    toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
+    toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
+    toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
+  ], {
+    estimateMessagesTokens: () => 30_000,
+    iterationCount: 2,
+    operations: {},
+    contextWindowTokens: 32_000,
+    artifactSink: {
+      recordCapabilityArtifact: (ref) => { recorded.push(ref); },
+      threadId: 'thread-1',
+      delegationId: 'dg_1',
+      turnId: 'turn_1',
+    },
   });
 
-  const result = await runtime.middleware?.afterRun?.({
-    messages: [new AIMessage('free-form final text')],
-    completionReason: 'natural',
+  assert.equal(writes.length, 1);
+  const artifact = writes[0]?.artifact as Record<string, unknown>;
+  assert.equal(artifact.kind, 'report');
+  assert.equal(artifact.mimeType, 'text/markdown');
+  assert.deepEqual((artifact.metadata as { evidence?: unknown })?.evidence, [
+    { source: 'explore/index.ts', proves: 'ingest 只在 context 压力时触发', value: '避免重复探索' },
+  ]);
+  assert.equal(recorded.length, 1);
+});
+
+test('explore context-pressure ingest is a no-op write when no artifact sink is provided', async () => {
+  const summary = '摘要\n\n已查看文件：a.ts';
+  const writes: unknown[] = [];
+  const store = {
+    writeArtifact: async (input: unknown) => { writes.push(input); return { id: 'x', uri: 'u', kind: 'report' }; },
+  } as unknown as NonNullable<CapabilityContext['artifactStore']>;
+  const runtime = await createRuntime(fakeSummaryModel(summary), { artifactStore: store });
+
+  await runtime.contextPolicy?.rewriteAsync?.([
+    toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
+    toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
+    toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
+  ], {
+    estimateMessagesTokens: () => 30_000,
+    iterationCount: 2,
+    operations: {},
+    contextWindowTokens: 32_000,
+    // no artifactSink
   });
 
-  assert.ok(result);
-  assert.equal(result.completionReason, 'error');
-  assert.equal(readExploreResult(result.messages), null);
-  assert.match(String(result.messages.at(-1)?.content ?? ''), /未使用自由文本或低质量兜底摘要/);
+  assert.equal(writes.length, 0);
 });

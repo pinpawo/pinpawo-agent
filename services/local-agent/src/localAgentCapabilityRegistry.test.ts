@@ -78,7 +78,9 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
     'available-toolkit',
     'unavailable-toolkit',
   ]);
-  assert.deepEqual(registry.getLocalToolkits().map((item) => item.name), ['available-toolkit']);
+  assert.deepEqual(registry.getLocalToolkits().map((item) => item.name), [
+    'available-toolkit',
+  ]);
   assert.deepEqual(registry.getLocalCapabilityDefinitions().map((item) => item.name), [
     'available-local-cap',
     'unavailable-local-cap',

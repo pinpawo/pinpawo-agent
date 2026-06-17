@@ -90,7 +90,7 @@ export const config = {
   hasuraJwt,
   apiConnected: missingOrPlaceholderApiConfig.length === 0,
   apiSetupMessage: missingOrPlaceholderApiConfig.length > 0
-    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable hosted app, relay, heartbeat, scheduled posts, and Hasura-backed context.`
+    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable the hosted app, chat relay, and Hasura-backed context.`
     : '',
 
   llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
@@ -111,13 +111,7 @@ export const config = {
     return [...new Set([...fromEnv, ...fromStored])];
   },
 
-  mediaCrawlerDir: get('MEDIACRAWLER_DIR', 'mediacrawler_dir'),
-  xhsCookie: get('XHS_COOKIE', 'xhs_cookie'),
-
   pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
-  heartbeatIntervalSeconds: Number(process.env.HEARTBEAT_INTERVAL_SECONDS ?? 900),
-  postIntervalHours: Number(process.env.POST_INTERVAL_HOURS ?? 6),
-  trendRefreshCooldownSeconds: Number(process.env.TREND_REFRESH_COOLDOWN_SECONDS ?? 900),
 
   localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
 };

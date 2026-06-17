@@ -1,5 +1,4 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
 import { interrupt } from '@langchain/langgraph';
 import type { AgentActor, AgentModels } from '../../types/agent';
@@ -447,15 +446,4 @@ export async function resolveToolkitResources(
     tools,
     instructions,
   };
-}
-
-export function readLatestToolArtifact(messages: BaseMessage[]): unknown | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (ToolMessage.isInstance(msg) && msg.artifact !== undefined) {
-      return msg.artifact;
-    }
-  }
-
-  return null;
 }

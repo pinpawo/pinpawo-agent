@@ -837,6 +837,10 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   conversion 中，但不应再作为主路径命令。
 - vertical cursor movement 当前需要 engine 使用 layout 的 row lookup helper，
   这是可以接受的单向依赖；layout 不应反向依赖 engine state。
+- repeated vertical cursor movement 需要 engine 维护 `preferredColumn`。第一次
+  up/down 从 layout cursor column 捕获目标列；后续 up/down 或 shift-up/down 复用该列，
+  让 cursor 穿过短行后能回到原视觉列。horizontal movement、line movement、text edit、
+  undo/redo restore 等非垂直编辑应清理这个 transient state。
 - `renderModel.ts` 可以在 layout/cursor metrics 稳定后拆出。拆出后，
   layout 只暴露 rows、cursor metrics 和 offset/column 映射；显示状态继续收进
   view model，而不是回到 `Composer`。
@@ -865,6 +869,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - controller 应有纯 `buildTextAreaControllerState` builder，把 value、cursorOffset、
   layout/cursor metrics、composer props 聚成一个可测试的 host state。hook 只负责
   绑定 dispatch callback。
+- controller/apply boundary 必须透传 engine-owned transient state，例如
+  `editHistory` 和 `preferredColumn`。否则 undo/redo 或 repeated vertical movement 会在
+  React hook 边界丢失；host 可以清理这些字段，但不应默认裁掉它们。
 - history / selection 之前还应让 controller 暴露 layout/cursor metrics，例如
   `cursor.isAtFirstVisualRow` / `cursor.isAtLastVisualRow`。这一步只提供 host 可消费的
   结构 contract，不改变上下键行为；后续 history policy 再决定如何使用这些 metrics。
@@ -909,6 +916,10 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - undo/redo key routing 属于 canonical-to-command boundary：Ctrl+Z 映射为
   `edit.undo`，Ctrl+Y 和 Ctrl+Shift+Z 映射为 `edit.redo`，再由 `toTextAreaCommand`
   接到 engine `undo`/`redo` commands。这个 PR 不应改变 Ctrl+A/select-all 语义。
+- preferred-column state 属于 textarea engine/model：vertical cursor/selection movement
+  记录目标 visual column，layout 仍只提供 row/column measurement 和 offset lookup。
+  controller 和 reducer 应透传 `preferredColumn`；host-level draft replacement、submit、
+  review resume、prompt history navigation 清理它。
 - optional external editor flow。
 - command palette / autocomplete target-bound routing。
 
@@ -1089,9 +1100,14 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - canonical input 把 Ctrl+Y / Ctrl+Shift+Z 映射为 `edit.redo`。
    - `toTextAreaCommand` 把 edit undo/redo events 接到已有 engine commands。
    - 暂不改变 Ctrl+A/select-all 语义。
-27. `codex/tui-textarea-history-selection`
+27. `codex/tui-textarea-preferred-column`
+   - `TextAreaModel` 使用 `preferredColumn` 保留 repeated vertical movement 的目标列。
+   - up/down 和 shift-up/down 穿过短行后仍回到原视觉列。
+   - controller/reducer 透传 engine-owned `editHistory` / `preferredColumn`，host-level
+     replacement 清理 transient state。
+28. `codex/tui-textarea-history-selection`
    - select-all key binding，以及 history/selection/undo 交互细节。
-28. `codex/tui-opentui-spike`
+29. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

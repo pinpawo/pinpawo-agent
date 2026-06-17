@@ -666,6 +666,18 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - busy、approval、resume、composer mode 的 routing 全部有单测。
 - `TuiApp` 不再直接判断 raw key。
 
+实施反馈：
+
+- `inputRouter.ts` 可以先承接 owner 解析和 command 路由：
+  `CanonicalInputEvent + TuiInputRouteContext -> TuiInputCommand`。
+- `keymap.ts` 可以退化为兼容 barrel，继续 re-export 旧的
+  `resolveTuiKeyAction` / `TuiKeyAction` 名称，避免一次性修改所有调用方。
+- owner 优先级需要显式测试：`unready -> resumePicker -> approval -> busy -> composer`。
+  这比在 `TuiApp` 或 `keymap` 中靠 if/else 顺序隐式表达更稳。
+- 当前 router 仍返回旧的 broad command union；下一步可以把命令进一步拆成
+  `textarea command`、`app command`、`approval command`、`resume command`，
+  让 `TuiApp` 的 switch target 更接近本节的目标。
+
 ### Phase 4: Promote textarea engine and layout
 
 把 `textareaModel.ts` 拆为：

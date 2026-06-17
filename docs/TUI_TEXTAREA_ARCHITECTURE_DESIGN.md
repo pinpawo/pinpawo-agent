@@ -765,6 +765,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - 可编辑事件应只走 `{ target: 'textarea', command }`。旧的 dotted command，
   尤其 `composer.edit`，只能保留在 compatibility conversion 中，不应继续出现在
   主 `TuiInputCommand` union。
+- prompt history 应作为 composer/router target 表达，例如
+  `{ target: 'composerHistory', action: 'previous' | 'next' }`。textarea 只提供
+  visual boundary；router 负责把 boundary 和 history availability 合成路由决策。
 - `TuiApp` 接入 routed command 后，仍会承担具体副作用执行：
   exit、interrupt、submit review、resume session、textarea edit。后续若继续缩小
   `TuiApp`，应抽 handler/controller，而不是把副作用塞回 router。
@@ -841,6 +844,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 在结构稳定后补能力：
 
 - prompt history previous/next 只在 visual top/bottom 触发。
+- history routing 可以先落成纯 `composerHistoryRouting` helper：只有 textarea 位于
+  visual boundary 且 prompt history 对应方向可用时，router 才输出 composer history
+  command。prompt history state 和实际替换 input draft 应作为后续 PR 单独实现。
 - selection state。
 - undo/redo。
 - optional external editor flow。
@@ -979,9 +985,15 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 17. `codex/tui-textarea-history-boundary`
    - controller 从 visual cursor metrics 派生 `historyBoundary`。
    - 只新增 host 可消费的结构信号，不接入上下键或 prompt history 行为。
-18. `codex/tui-textarea-history-selection`
+18. `codex/tui-composer-history-routing`
+   - 新增 `composerHistoryRouting` 纯 helper。
+   - router 只有在 visual boundary 和 history availability 都满足时才输出
+     `composerHistory` command。
+   - `TuiApp` 先接入 boundary 上下文，但保持 history availability disabled，不改变当前
+     上下键行为。
+19. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-19. `codex/tui-opentui-spike`
+20. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

@@ -35,7 +35,8 @@ export function formatOperationProgress(event: LocalAgentOperationEvent) {
 export function formatOperationResult(event: LocalAgentOperationEvent) {
   const label = event.operation.title ?? event.operation.kind;
   if (event.phase === 'failed') {
-    return `${label}：${TUI_TEXT.operationFailed}${event.operation.summary ? ` · ${shorten(event.operation.summary, 80)}` : ''}`;
+    const detail = formatOperationDetail(event, 80);
+    return `${label}：${TUI_TEXT.operationFailed}${detail ? ` · ${detail}` : ''}`;
   }
   if (event.phase === 'interrupted') {
     return `${label}：${TUI_TEXT.operationInterrupted}`;
@@ -131,9 +132,13 @@ function buildBusyPhaseLabel(pending: PendingUiState, now: number) {
 
 function formatOperationDetail(event: LocalAgentOperationEvent, max = 60) {
   const pieces = [
-    event.operation.target,
-    event.operation.summary,
-    formatDetails(event.operation.details),
+    event.operation.output?.target ?? event.operation.target,
+    event.operation.output?.summary ?? event.operation.summary,
+    formatDetails(event.operation.output?.details ?? event.operation.details),
+    formatList('warnings', event.operation.output?.warnings),
+    formatList('errors', event.operation.output?.errors),
+    formatMetrics(event.operation.output?.metrics),
+    formatDuration(event.operation.output?.durationMs),
   ].filter((item): item is string => Boolean(item));
   return pieces.length > 0 ? shorten(pieces.join(' · '), max) : '';
 }
@@ -146,6 +151,22 @@ function formatDetails(details: Record<string, unknown> | undefined) {
       return [`${key}=${String(value)}`];
     })
     .join(' · ');
+}
+
+function formatList(label: string, values: string[] | undefined) {
+  if (!values || values.length === 0) return '';
+  return `${label}=${values.map((value) => shorten(value, 40)).join(', ')}`;
+}
+
+function formatMetrics(metrics: Record<string, number> | undefined) {
+  if (!metrics) return '';
+  return Object.entries(metrics)
+    .map(([key, value]) => `${key}=${value.toString()}`)
+    .join(' · ');
+}
+
+function formatDuration(durationMs: number | undefined) {
+  return durationMs === undefined ? '' : `duration=${formatElapsed(0, durationMs)}`;
 }
 
 function formatSubagentTextBody(text: string) {

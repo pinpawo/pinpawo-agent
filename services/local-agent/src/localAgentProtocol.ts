@@ -1,6 +1,7 @@
 import { isReviewSpecValue, type ReviewSpec } from '@pinpawo/pet-agent';
 import type {
   LocalAgentEvent,
+  LocalAgentOperationOutputSummary,
   LocalAgentOperationPhase,
   LocalAgentOperationRaw,
 } from './events/localAgentEvent';
@@ -125,6 +126,31 @@ function readStringArray(record: Record<string, unknown>, key: string) {
     : null;
 }
 
+function readNumberRecord(record: Record<string, unknown>, key: string) {
+  const value = readRecord(record, key);
+  if (!value) return null;
+  const entries = Object.entries(value).filter(([, item]) => typeof item === 'number' && Number.isFinite(item));
+  return entries.length > 0 ? Object.fromEntries(entries) as Record<string, number> : null;
+}
+
+function readOperationOutputSummary(
+  operation: Record<string, unknown>,
+): LocalAgentOperationOutputSummary | undefined {
+  const output = readRecord(operation, 'output');
+  if (!output) return undefined;
+  return {
+    status: readOptionalString(output, 'status'),
+    target: readOptionalString(output, 'target'),
+    summary: readOptionalString(output, 'summary'),
+    details: readRecord(output, 'details') ?? undefined,
+    logs: readStringArray(output, 'logs') ?? undefined,
+    warnings: readStringArray(output, 'warnings') ?? undefined,
+    errors: readStringArray(output, 'errors') ?? undefined,
+    metrics: readNumberRecord(output, 'metrics') ?? undefined,
+    durationMs: readOptionalNumber(output, 'durationMs'),
+  };
+}
+
 function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
   const allowed = new Set(allowedKeys);
   return Object.keys(record).every((key) => allowed.has(key));
@@ -237,6 +263,7 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
         target: readOptionalString(operation, 'target'),
         summary: readOptionalString(operation, 'summary'),
         details: readRecord(operation, 'details') ?? undefined,
+        output: readOperationOutputSummary(operation),
         ...(normalizedProvider && sourceName
           ? {
               source: {

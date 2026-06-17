@@ -3,6 +3,7 @@ import type {
 } from '@pinpawo/pet-agent';
 import type {
   LocalAgentOperationInternalEvent,
+  LocalAgentOperationOutputSummary,
   LocalAgentOperationPhase,
 } from './localAgentEvent';
 import {
@@ -46,6 +47,62 @@ function mergeSummary(
   };
 }
 
+function mergeOutputSummary(
+  current: LocalAgentOperationOutputSummary,
+  next: LocalAgentOperationOutputSummary | null | undefined,
+): LocalAgentOperationOutputSummary {
+  if (!next) return current;
+  const logs = [
+    ...(current.logs ?? []),
+    ...(next.logs ?? []),
+  ];
+  const warnings = [
+    ...(current.warnings ?? []),
+    ...(next.warnings ?? []),
+  ];
+  const errors = [
+    ...(current.errors ?? []),
+    ...(next.errors ?? []),
+  ];
+  return {
+    ...current,
+    ...next,
+    details: current.details || next.details
+      ? {
+          ...current.details,
+          ...next.details,
+        }
+      : undefined,
+    metrics: current.metrics || next.metrics
+      ? {
+          ...current.metrics,
+          ...next.metrics,
+      }
+      : undefined,
+    ...(logs.length > 0 ? { logs } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
+    ...(errors.length > 0 ? { errors } : {}),
+  };
+}
+
+function outputFromSummary(
+  summary: OperationSummary,
+): LocalAgentOperationOutputSummary {
+  return mergeOutputSummary(
+    {
+      ...(summary.target ? { target: summary.target } : {}),
+      ...(summary.summary ? { summary: summary.summary } : {}),
+      ...(summary.details ? { details: summary.details } : {}),
+    },
+    summary.output,
+  );
+}
+
+function statusForPhase(phase: LocalAgentOperationPhase): LocalAgentOperationOutputSummary['status'] {
+  if (phase === 'started' || phase === 'updated') return 'running';
+  return phase;
+}
+
 function operationKindFromSource(
   source: NonNullable<SubagentToolOperationMetadata['source']> | undefined,
   fallbackToolName: string,
@@ -72,16 +129,21 @@ export function normalizeToolStreamEvent(
       }
     : registry.resolveToolOperation(payload.name);
   const output = payload.output !== undefined ? payload.output : payload.data;
+  const phase = readToolPhase(payload.event);
   const summary = [
     metadata?.summarizeInput?.(payload.input),
     metadata?.summarizeOutput?.(output),
     metadata?.summarizeError?.(payload.error),
   ].reduce(mergeSummary, {});
+  const outputSummary = {
+    ...outputFromSummary(summary),
+    status: statusForPhase(phase),
+  };
 
   return {
     type: 'operation',
     requestId,
-    phase: readToolPhase(payload.event),
+    phase,
     operation: {
       id: payload.toolCallId,
       kind: operationKindFromSource(metadata?.source, payload.name),
@@ -89,6 +151,7 @@ export function normalizeToolStreamEvent(
       target: summary.target,
       summary: summary.summary,
       details: summary.details,
+      output: outputSummary,
       source: {
         provider: metadata?.source.provider ?? 'runtime',
         name: metadata?.source.name ?? 'runtime',

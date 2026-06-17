@@ -69,6 +69,19 @@ export type ToolOperationSummary = {
   target?: string;
   summary?: string;
   details?: Record<string, unknown>;
+  output?: ToolOperationSummaryOutput;
+};
+
+export type ToolOperationSummaryOutput = {
+  status?: 'running' | 'completed' | 'failed' | 'interrupted' | 'warning' | string;
+  target?: string;
+  summary?: string;
+  details?: Record<string, unknown>;
+  logs?: string[];
+  warnings?: string[];
+  errors?: string[];
+  metrics?: Record<string, number>;
+  durationMs?: number;
 };
 
 export type ToolOperationMetadata = {

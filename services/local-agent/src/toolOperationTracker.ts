@@ -15,6 +15,7 @@ type ActiveTrackedOperation = {
   id: string;
   name: string;
   event: LocalAgentOperationInternalEvent;
+  startedAt: number;
 };
 
 type TerminalPhase = Extract<LocalAgentOperationPhase, 'completed' | 'failed' | 'interrupted'>;
@@ -42,23 +43,36 @@ export class ToolOperationTracker {
       ...payload,
       toolCallId: id,
     }, this.operationRegistry);
-    this.track(event, payload.name, id);
-    return event;
+    const trackedEvent = this.addTerminalDuration(event, id);
+    this.track(trackedEvent, payload.name, id);
+    return trackedEvent;
   }
 
   finishActive(phase: TerminalPhase, error?: unknown): LocalAgentOperationInternalEvent[] {
     const active = [...this.activeById.values()];
     this.activeById.clear();
     this.activeIdsByName.clear();
-    return active.map((item) => ({
-      ...item.event,
-      phase,
-      raw: {
-        input: item.event.raw?.input,
-        output: phase === 'completed' ? item.event.raw?.output : undefined,
-        error: phase === 'failed' ? error : undefined,
-      },
-    }));
+    const finishedAt = Date.now();
+    return active.map((item) => {
+      const durationMs = Math.max(0, finishedAt - item.startedAt);
+      return {
+        ...item.event,
+        phase,
+        operation: {
+          ...item.event.operation,
+          output: {
+            ...item.event.operation.output,
+            status: phase,
+            durationMs,
+          },
+        },
+        raw: {
+          input: item.event.raw?.input,
+          output: phase === 'completed' ? item.event.raw?.output : undefined,
+          error: phase === 'failed' ? error : undefined,
+        },
+      };
+    });
   }
 
   private resolveOperationId(payload: StreamToolsPayload) {
@@ -74,9 +88,30 @@ export class ToolOperationTracker {
     return `tool-${this.sequence}`;
   }
 
+  private addTerminalDuration(
+    event: LocalAgentOperationInternalEvent,
+    id: string,
+  ): LocalAgentOperationInternalEvent {
+    if (event.phase !== 'completed' && event.phase !== 'failed' && event.phase !== 'interrupted') {
+      return event;
+    }
+    const active = this.activeById.get(id);
+    if (!active) return event;
+    return {
+      ...event,
+      operation: {
+        ...event.operation,
+        output: {
+          ...event.operation.output,
+          durationMs: Math.max(0, Date.now() - active.startedAt),
+        },
+      },
+    };
+  }
+
   private track(event: LocalAgentOperationInternalEvent, name: string, id: string) {
     if (event.phase === 'started') {
-      this.activeById.set(id, { id, name, event });
+      this.activeById.set(id, { id, name, event, startedAt: Date.now() });
       const ids = this.activeIdsByName.get(name) ?? [];
       this.activeIdsByName.set(name, [...ids, id]);
       return;
@@ -86,7 +121,7 @@ export class ToolOperationTracker {
       if (active) {
         this.activeById.set(id, { ...active, event });
       } else {
-        this.activeById.set(id, { id, name, event });
+        this.activeById.set(id, { id, name, event, startedAt: Date.now() });
       }
       const ids = this.activeIdsByName.get(name) ?? [];
       if (!ids.includes(id)) {

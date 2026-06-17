@@ -69,6 +69,26 @@ test('formats completed and failed operation summaries from event fields', () =>
     }),
     '执行命令：失败 · exit 1',
   );
+
+  assert.equal(
+    formatOperationResult({
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        kind: 'bash.run_shell',
+        title: '执行命令',
+        output: {
+          target: 'npm test',
+          summary: 'exit 0',
+          warnings: ['used cached deps'],
+          metrics: { outputBytes: 42 },
+          durationMs: 1250,
+        },
+      },
+    }),
+    '执行命令：npm test · exit 0 · warnings=used cached deps · outputBytes=42 · duration=1s',
+  );
 });
 
 test('formats subagent text into readable paragraphs', () => {

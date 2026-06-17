@@ -66,6 +66,7 @@ export type LocalAgentOperationEvent = {
     target?: string;
     summary?: string;
     details?: Record<string, unknown>;
+    output?: LocalAgentOperationOutputSummary;
     source?: {
       provider: 'toolkit' | 'toolset' | 'runtime';
       name: string;
@@ -79,6 +80,18 @@ export type LocalAgentOperationEvent = {
    * to remote app channels — remote UI must rely on operation.summary/details.
    */
   raw?: LocalAgentOperationRaw;
+};
+
+export type LocalAgentOperationOutputSummary = {
+  status?: 'running' | 'completed' | 'failed' | 'interrupted' | 'warning' | string;
+  target?: string;
+  summary?: string;
+  details?: Record<string, unknown>;
+  logs?: string[];
+  warnings?: string[];
+  errors?: string[];
+  metrics?: Record<string, number>;
+  durationMs?: number;
 };
 
 /**

@@ -69,6 +69,37 @@ test('formats completed and failed operation summaries from event fields', () =>
     }),
     '执行命令：失败 · exit 1',
   );
+
+  // Completed result keeps the target inherited from the start event.
+  assert.equal(
+    formatOperationResult({
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        kind: 'bash.view_file_chunk',
+        title: '看片段',
+        target: 'README.md',
+        details: { startLine: 1, endLine: 50 },
+      },
+    }),
+    '看片段：README.md · startLine=1 · endLine=50',
+  );
+
+  // Failed result surfaces the target too, not just the error summary.
+  assert.equal(
+    formatOperationResult({
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'failed',
+      operation: {
+        kind: 'browser.browser_open',
+        title: '打开网页',
+        target: 'https://example.com',
+      },
+    }),
+    '打开网页：失败 · https://example.com',
+  );
 });
 
 test('formats subagent text into readable paragraphs', () => {

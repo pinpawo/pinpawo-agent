@@ -194,7 +194,9 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
       .map((item) => item.event?.operation)
       .filter(Boolean)
       .map((operation) => [operation?.kind, operation?.target]),
-    [['local-toolkit.read_file', 'README.md'], ['local-toolkit.read_file', undefined]],
+    // The completed event inherits the start event's target even though
+    // read_file only describes itself via summarizeInput.
+    [['local-toolkit.read_file', 'README.md'], ['local-toolkit.read_file', 'README.md']],
   );
 });
 

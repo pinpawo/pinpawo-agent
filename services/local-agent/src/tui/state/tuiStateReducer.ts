@@ -302,6 +302,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: action.cursorOffset ?? action.value.length,
           selection: undefined,
           editHistory: undefined,
+          preferredColumn: undefined,
           history: resetComposerHistoryNavigation(state.input.history),
         },
       };
@@ -315,6 +316,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: action.value.cursorOffset,
           selection: action.value.selection,
           editHistory: action.value.editHistory,
+          preferredColumn: action.value.preferredColumn,
           history: resetComposerHistoryNavigation(state.input.history),
         },
       };
@@ -330,6 +332,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
             cursorOffset: result.value.length,
             selection: undefined,
             editHistory: undefined,
+            preferredColumn: undefined,
             history: result.history,
           },
         };
@@ -354,6 +357,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: 0,
           selection: undefined,
           editHistory: undefined,
+          preferredColumn: undefined,
           history: recordComposerHistoryEntry(state.input.history, action.userText),
         },
         runRoute: {
@@ -399,6 +403,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: 0,
           selection: undefined,
           editHistory: undefined,
+          preferredColumn: undefined,
           history: resetComposerHistoryNavigation(state.input.history),
         },
         runRoute: {

@@ -701,6 +701,19 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - layout tests 覆盖 multiline、soft wrap、wide char。
 - `Composer` 不再调用编辑函数，只消费 render model。
 
+实施反馈：
+
+- Phase 4 可以先拆出 `textarea/engine.ts` 与 `textarea/layout.ts`，
+  保留 `textareaModel.ts` 作为兼容 barrel。这样生产代码可以改为直接导入
+  engine/layout，新旧测试仍能覆盖兼容路径。
+- vertical cursor movement 当前需要 engine 使用 layout 的 row lookup helper，
+  这是可以接受的单向依赖；layout 不应反向依赖 engine state。
+- `renderModel.ts` 可以后续再拆。当前 `renderTextAreaRows` 仍在 layout 中，
+  `Composer` 直接消费 layout 输出。
+- 当前 layout 仍使用 JS string length 和 slice，因此 soft wrap 已独立测试，
+  但 CJK/emoji display width 还没有真正解决；wide char 支持应作为后续
+  layout-focused PR，而不是混入 engine 拆分 PR。
+
 ### Phase 5: History, selection, undo, external editor
 
 在结构稳定后补能力：

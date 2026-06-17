@@ -17,7 +17,10 @@ import {
   normalizeTextAreaSelection,
   type TextAreaSelection,
 } from './selection';
-import { segmentTextAreaText } from './textSegments';
+import {
+  findNextTextAreaSegmentRange,
+  findPreviousTextAreaSegmentRange,
+} from './textSegments';
 
 const MAX_TEXTAREA_EDIT_HISTORY_ITEMS = 100;
 
@@ -113,14 +116,14 @@ export function applyTextAreaCommand(
       if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
       if (cursorOffset === 0) return createTextAreaModel(text, cursorOffset, undefined, state.editHistory);
       {
-        const range = findPreviousGraphemeRange(text, cursorOffset);
+        const range = findPreviousTextAreaSegmentRange(text, cursorOffset);
         return replaceRange(state, range.start, range.end, '', range.start);
       }
     case 'deleteForward':
       if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
       if (cursorOffset === text.length) return createTextAreaModel(text, cursorOffset, undefined, state.editHistory);
       {
-        const range = findNextGraphemeRange(text, cursorOffset);
+        const range = findNextTextAreaSegmentRange(text, cursorOffset);
         return replaceRange(state, range.start, range.end, '', range.start);
       }
     case 'deleteWordBackward': {
@@ -350,35 +353,11 @@ function findPreviousWordStart(text: string, cursorOffset: number) {
 }
 
 function findPreviousGraphemeStart(text: string, cursorOffset: number) {
-  return findPreviousGraphemeRange(text, cursorOffset).start;
+  return findPreviousTextAreaSegmentRange(text, cursorOffset).start;
 }
 
 function findNextGraphemeEnd(text: string, cursorOffset: number) {
-  return findNextGraphemeRange(text, cursorOffset).end;
-}
-
-function findPreviousGraphemeRange(text: string, cursorOffset: number) {
-  const boundedOffset = clampCursor(cursorOffset, text);
-  let previousRange = { start: 0, end: 0 };
-
-  for (const segment of segmentTextAreaText(text)) {
-    const range = { start: segment.start, end: segment.end };
-    if (boundedOffset <= segment.start) return previousRange;
-    if (boundedOffset <= segment.end) return range;
-    previousRange = range;
-  }
-
-  return previousRange;
-}
-
-function findNextGraphemeRange(text: string, cursorOffset: number) {
-  const boundedOffset = clampCursor(cursorOffset, text);
-
-  for (const segment of segmentTextAreaText(text)) {
-    if (boundedOffset < segment.end) return { start: segment.start, end: segment.end };
-  }
-
-  return { start: text.length, end: text.length };
+  return findNextTextAreaSegmentRange(text, cursorOffset).end;
 }
 
 function clampCursor(cursorOffset: number, text: string) {

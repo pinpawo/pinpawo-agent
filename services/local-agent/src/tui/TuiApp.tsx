@@ -11,9 +11,9 @@ import { ResumePicker } from './components/ResumePicker';
 import {
   createInitialTuiInputBufferState,
   normalizeTuiInputEvent,
-  resolveTuiKeyAction,
   toCanonicalInputEvent,
 } from './input/keymap';
+import { resolveTuiInputAction } from './input/inputRouter';
 import { applyTextAreaInputEvent } from './input/textareaModel';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
@@ -201,7 +201,7 @@ export function TuiApp(props: { actorId: string }) {
       return;
     }
     const inputEvent = toCanonicalInputEvent(normalized.event);
-    const action = resolveTuiKeyAction(inputEvent, {
+    const action = resolveTuiInputAction(inputEvent, {
       ready,
       busy,
       hasPendingApproval: Boolean(pendingApproval),

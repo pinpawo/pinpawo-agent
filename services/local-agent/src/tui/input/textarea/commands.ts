@@ -15,6 +15,12 @@ export type TextAreaCommand =
   | { type: 'moveDown' }
   | { type: 'moveLineStart' }
   | { type: 'moveLineEnd' }
+  | { type: 'selectLeft' }
+  | { type: 'selectRight' }
+  | { type: 'selectUp' }
+  | { type: 'selectDown' }
+  | { type: 'selectLineStart' }
+  | { type: 'selectLineEnd' }
   | { type: 'selectAll' };
 
 export function toTextAreaCommand(event: CanonicalInputEvent): TextAreaCommand | null {

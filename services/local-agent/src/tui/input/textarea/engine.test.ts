@@ -86,6 +86,60 @@ test('textarea engine can select all text without routing a key binding', () => 
   );
 });
 
+test('textarea engine extends selection horizontally and clears collapsed selections', () => {
+  let state = applyTextAreaCommand({ type: 'selectRight' }, { text: 'hello', cursorOffset: 1 });
+  assert.deepEqual(state, {
+    text: 'hello',
+    cursorOffset: 2,
+    selection: { anchorOffset: 1, focusOffset: 2 },
+  });
+
+  state = applyTextAreaCommand({ type: 'selectLeft' }, state);
+  assert.deepEqual(state, { text: 'hello', cursorOffset: 1 });
+});
+
+test('textarea engine extends selection vertically using layout rows', () => {
+  const text = 'abcdef\ngh';
+
+  assert.deepEqual(
+    applyTextAreaCommand({ type: 'selectDown' }, { text, cursorOffset: 1 }, { width: 3 }),
+    {
+      text,
+      cursorOffset: 4,
+      selection: { anchorOffset: 1, focusOffset: 4 },
+    },
+  );
+  assert.deepEqual(
+    applyTextAreaCommand(
+      { type: 'selectUp' },
+      { text, cursorOffset: 4, selection: { anchorOffset: 1, focusOffset: 4 } },
+      { width: 3 },
+    ),
+    { text, cursorOffset: 1 },
+  );
+});
+
+test('textarea engine extends selection to logical line boundaries', () => {
+  const text = 'one\ntwo three';
+
+  assert.deepEqual(
+    applyTextAreaCommand({ type: 'selectLineStart' }, { text, cursorOffset: 8 }),
+    {
+      text,
+      cursorOffset: 4,
+      selection: { anchorOffset: 8, focusOffset: 4 },
+    },
+  );
+  assert.deepEqual(
+    applyTextAreaCommand({ type: 'selectLineEnd' }, { text, cursorOffset: 8 }),
+    {
+      text,
+      cursorOffset: 13,
+      selection: { anchorOffset: 8, focusOffset: 13 },
+    },
+  );
+});
+
 test('textarea engine uses layout rows for vertical cursor movement', () => {
   const text = 'abcdef\ngh';
 

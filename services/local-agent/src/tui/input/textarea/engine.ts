@@ -112,6 +112,18 @@ export function applyTextAreaCommand(
       return createTextAreaModel(text, findLogicalLineStart(text, cursorOffset));
     case 'moveLineEnd':
       return createTextAreaModel(text, findLogicalLineEnd(text, cursorOffset));
+    case 'selectLeft':
+      return selectToOffset(text, state, cursorOffset - 1);
+    case 'selectRight':
+      return selectToOffset(text, state, cursorOffset + 1);
+    case 'selectUp':
+      return selectToOffset(text, state, moveCursorVertically(text, cursorOffset, width, -1));
+    case 'selectDown':
+      return selectToOffset(text, state, moveCursorVertically(text, cursorOffset, width, 1));
+    case 'selectLineStart':
+      return selectToOffset(text, state, findLogicalLineStart(text, cursorOffset));
+    case 'selectLineEnd':
+      return selectToOffset(text, state, findLogicalLineEnd(text, cursorOffset));
     case 'newline':
       if (selectionRange) return replaceRange(text, selectionRange.start, selectionRange.end, '\n', selectionRange.start + 1);
       return replaceRange(text, cursorOffset, cursorOffset, '\n', cursorOffset + 1);
@@ -129,6 +141,21 @@ function replaceRange(
 ): TextAreaModel {
   const nextText = text.slice(0, start) + replacement + text.slice(end);
   return createTextAreaModel(nextText, cursorOffset);
+}
+
+function selectToOffset(
+  text: string,
+  state: TextAreaModel,
+  focusOffset: number,
+): TextAreaModel {
+  const boundedFocusOffset = clampCursor(focusOffset, text);
+  const anchorOffset = state.selection
+    ? clampCursor(state.selection.anchorOffset, text)
+    : clampCursor(state.cursorOffset, text);
+  return createTextAreaModel(text, boundedFocusOffset, {
+    anchorOffset,
+    focusOffset: boundedFocusOffset,
+  });
 }
 
 function moveCursorVertically(

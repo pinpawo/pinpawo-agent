@@ -75,6 +75,23 @@ Delete、Backspace、Shift+Enter、多行粘贴、中文输入法等操作很重
   -> 最后按测试补齐行为
 ```
 
+### 2.3 结构优先的判断标准
+
+后续 textarea 工作不按“修哪个操作”组织，而按“哪个边界不清楚”组织。每个
+input bug 先定位到一层：
+
+- terminal decoder：原始 bytes / escape sequence 是否被完整识别。
+- canonical mapper：raw key 是否被归一成稳定语义事件。
+- input router：当前 owner / focus 是否把事件交给正确目标。
+- textarea engine：文本、cursor、selection、history state 是否正确变化。
+- textarea layout/render：offset、visual row/column、display width、cursor rendering
+  是否正确。
+- host integration：submit、approval、history、busy interrupt 等业务副作用是否只在
+  host 层发生。
+
+因此 Delete、Shift+Enter、paste、中文宽字符、emoji、history up/down 都不是独立架构。
+它们是验收用例。真正的架构单位是上面的层和层之间的 contract。
+
 ## 3. opencode TUI 的可借鉴结构
 
 opencode 参考文件：
@@ -473,7 +490,8 @@ export type TextareaCommand =
 
 - 根据 text、cursor、terminal width 生成 render model。
 - 处理 logical line、visual line、cursor row/column。
-- 后续接入 grapheme/width-aware 计算。
+- 处理 grapheme / display-width aware wrapping 和 cursor placement。
+- 提供 offset <-> visual row/column 的映射接口，避免 engine 自己理解终端宽度。
 
 建议类型：
 
@@ -495,7 +513,9 @@ export type TextareaRenderRow = {
 };
 ```
 
-注意：当前 `wrapTextAreaRows` 使用 `line.length` 切分，长期不够。中文和 emoji 需要按 display width 切分。候选方案：
+注意：layout 层可以继续保存 JS UTF-16 offset，便于和现有 string state 兼容；但它
+必须在自己的边界内把 offset 映射成 terminal visual cell。中文和 emoji 需要按
+display width 切分。候选方案：
 
 - 使用 `Intl.Segmenter` 做 grapheme segmentation，再用 width helper 计算 display width。
 - 引入稳定的 `string-width` 类库。
@@ -710,9 +730,13 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   这是可以接受的单向依赖；layout 不应反向依赖 engine state。
 - `renderModel.ts` 可以后续再拆。当前 `renderTextAreaRows` 仍在 layout 中，
   `Composer` 直接消费 layout 输出。
-- 当前 layout 仍使用 JS string length 和 slice，因此 soft wrap 已独立测试，
-  但 CJK/emoji display width 还没有真正解决；wide char 支持应作为后续
-  layout-focused PR，而不是混入 engine 拆分 PR。
+- wide char / emoji 支持应作为 layout-focused PR 推进，而不是混入 engine 拆分 PR。
+  实施后验证了一个结构判断：engine 可以保留 offset 状态，但 vertical movement
+  应通过 layout 提供的 visual-column helper 完成。
+- display-width support 可以使用 `Intl.Segmenter` + `string-width` 落在 layout 内部。
+  row 的 `start/end` 仍保持 JS offset，render/cursor 逻辑负责保护 grapheme 不被拆开。
+- 这类改动的评估重点不是“中文 case 是否单独补丁”，而是 layout 是否成为唯一理解
+  terminal visual cell 的层。
 
 ### Phase 5: History, selection, undo, external editor
 
@@ -818,11 +842,14 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - 抽出纯 textarea engine。
    - `textareaModel.ts` 变成兼容 facade 或删除。
 5. `codex/tui-textarea-layout`
-   - 独立 layout/render model。
-   - 引入 width-aware wrapping。
-6. `codex/tui-textarea-history-selection`
+   - 独立 layout 边界，保留兼容 render rows。
+   - 先覆盖 multiline / soft-wrap，不混入 display-width 风险。
+6. `codex/tui-textarea-display-width`
+   - 让 layout 负责 grapheme segmentation、display width、offset/visual column 映射。
+   - engine 只消费 layout 暴露的 visual-column helper。
+7. `codex/tui-textarea-history-selection`
    - 上下历史边界、selection、undo/redo。
-7. `codex/tui-opentui-spike`
+8. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

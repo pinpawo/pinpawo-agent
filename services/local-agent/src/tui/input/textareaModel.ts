@@ -5,7 +5,9 @@ export {
   type TextAreaModel,
 } from './textarea/engine';
 export {
-  renderTextAreaRows,
   wrapTextAreaRows,
-  type TextAreaRenderRow,
 } from './textarea/layout';
+export {
+  renderTextAreaRows,
+  type TextAreaRenderRow,
+} from './textarea/renderModel';

@@ -363,6 +363,12 @@ export type CanonicalInputEvent =
   | { type: 'cursor.down' }
   | { type: 'cursor.line.start' }
   | { type: 'cursor.line.end' }
+  | { type: 'selection.left' }
+  | { type: 'selection.right' }
+  | { type: 'selection.up' }
+  | { type: 'selection.down' }
+  | { type: 'selection.line.start' }
+  | { type: 'selection.line.end' }
   | { type: 'submit' }
   | { type: 'newline' }
   | { type: 'escape' }
@@ -378,6 +384,7 @@ export type CanonicalInputEvent =
 key.delete     -> text.delete.forward
 ctrl+w         -> text.delete.word.backward
 shift+return   -> newline
+shift+up       -> selection.up
 "\r"           -> submit
 ```
 
@@ -484,6 +491,12 @@ export type TextareaCommand =
   | { type: 'moveDown'; layout: TextareaLayout }
   | { type: 'moveLineStart' }
   | { type: 'moveLineEnd' }
+  | { type: 'selectLeft' }
+  | { type: 'selectRight' }
+  | { type: 'selectUp' }
+  | { type: 'selectDown' }
+  | { type: 'selectLineStart' }
+  | { type: 'selectLineEnd' }
   | { type: 'selectAll' };
 ```
 
@@ -864,6 +877,11 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - selection movement 应先作为 textarea engine command 落地：`selectLeft/Right/Up/Down`
   和 `selectLineStart/End` 复用既有 cursor/layout helper，保持 selection anchor 并移动
   focus。Shift+Arrow key binding 属于后续 router/canonical 接入，不应混进 engine PR。
+- selection key routing 属于 canonical-to-command boundary：Shift+Arrow 和
+  Shift+Home/End 先归一为 `selection.*` canonical events，再由 `toTextAreaCommand`
+  映射到 selection movement commands。router 只决定 owner/target，不能把 selection
+  up/down 误交给 prompt history routing。Ctrl+A/select-all 是否覆盖 line-start 语义仍需
+  单独决策，不应混进 Shift+Arrow PR。
 - undo/redo。
 - optional external editor flow。
 - command palette / autocomplete target-bound routing。
@@ -1030,9 +1048,14 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - 新增纯 textarea selection movement commands。
    - selection movement 复用 cursor movement/layout helper，保持 anchor 并移动 focus。
    - 暂不接 canonical/router key binding。
-24. `codex/tui-textarea-history-selection`
-   - Shift+Arrow、select-all key binding、undo/redo。
-25. `codex/tui-opentui-spike`
+24. `codex/tui-selection-key-routing`
+   - canonical input 把 Shift+Arrow、Shift+Home/End 映射为 `selection.*` events。
+   - `toTextAreaCommand` 把 selection events 接到已有 selection movement commands。
+   - router 确保 selection up/down 仍进入 textarea，不触发 prompt history navigation。
+   - 暂不改变 Ctrl+A/select-all 语义。
+25. `codex/tui-textarea-history-selection`
+   - select-all key binding、undo/redo，以及 history/selection 交互细节。
+26. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

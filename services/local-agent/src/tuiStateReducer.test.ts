@@ -121,6 +121,36 @@ test('tuiStateReducer records composer prompt history only for run starts', () =
   assert.deepEqual(state.input.history.entries, ['hello']);
 });
 
+test('tuiStateReducer navigates composer prompt history and restores draft', () => {
+  let state = initialState();
+
+  state = startRun(state, 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-2',
+    kind: 'chat',
+    userText: 'second',
+    now: 2000,
+    userCell: { id: 'req-2:user' },
+    statusMessage: '等待回复',
+  });
+  state = tuiStateReducer(state, { type: 'input.set', value: 'draft' });
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'previous' });
+  assert.equal(state.input.text, 'second');
+  assert.equal(state.input.cursorOffset, 'second'.length);
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'previous' });
+  assert.equal(state.input.text, 'hello');
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'next' });
+  assert.equal(state.input.text, 'second');
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'next' });
+  assert.equal(state.input.text, 'draft');
+  assert.equal(state.input.history.selectedIndex, null);
+});
+
 test('tuiStateReducer infers usage context window from runtime when missing', () => {
   let state = startRun(initialState(), 'req-1');
   state = tuiStateReducer(state, {

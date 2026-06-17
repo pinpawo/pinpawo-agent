@@ -20,11 +20,17 @@ export type TextAreaComposerProps = {
   model: TextAreaViewModel;
 };
 
+export type TextAreaHistoryBoundary = {
+  previous: boolean;
+  next: boolean;
+};
+
 export type TextAreaControllerState = {
   value: string;
   cursorOffset: number;
   layout: TextAreaLayout;
   cursor: TextAreaLayout['cursor'];
+  historyBoundary: TextAreaHistoryBoundary;
   composerProps: TextAreaComposerProps;
 };
 
@@ -79,7 +85,15 @@ export function buildTextAreaControllerState(
     cursorOffset: input.cursorOffset,
     layout,
     cursor: layout.cursor,
+    historyBoundary: resolveTextAreaHistoryBoundary(layout),
     composerProps: buildTextAreaComposerProps(input, options),
+  };
+}
+
+export function resolveTextAreaHistoryBoundary(layout: TextAreaLayout): TextAreaHistoryBoundary {
+  return {
+    previous: layout.cursor.isAtFirstVisualRow,
+    next: layout.cursor.isAtLastVisualRow,
   };
 }
 

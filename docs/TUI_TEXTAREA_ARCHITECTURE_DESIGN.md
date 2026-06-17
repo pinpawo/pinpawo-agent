@@ -899,7 +899,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   `input.apply` 继续表示用户编辑，并会退出 history selection。
 - selection state 应先落在 textarea engine/model 内：`TextAreaModel` 可携带可选 selection，
   `textarea/selection.ts` 负责 normalized range，engine 负责选区替换/删除，controller 和
-  reducer 只透传或清理 selection。selection highlight 是后续 PR。
+  reducer 只透传或清理 selection。normalized range 应扩展到完整 grapheme 边界，避免
+  stale/external selection 在替换或删除时拆开 emoji 或组合字符。selection highlight 是
+  后续 PR。
 - selection display 属于 render/view boundary：`renderModel` 可以在有 selection 时产出
   grapheme-safe `segments`，`viewModel` 透传这些 segments，`TextAreaView` 用 Ink inverse
   渲染 selected/cursor segment。没有 selection 时继续使用旧的 `before/cursor/after`
@@ -1120,9 +1122,13 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - canonical input 把 Ctrl+A 映射为 `edit.select.all`，不再伪装成 `cursor.line.start`。
    - `toTextAreaCommand` 把 `edit.select.all` 接到已有 engine `selectAll` command。
    - router 继续只负责 owner/target，不新增 Ctrl+A special case。
-30. `codex/tui-textarea-history-selection`
+30. `codex/tui-selection-grapheme-ranges`
+   - `textarea/selection.ts` 把 partial grapheme selection 扩展为完整 grapheme range。
+   - 保留 selection 方向，engine 继续只消费 normalized selection range。
+   - 防止 stale/external selection 在 replace/delete 时切坏 emoji 或组合字符。
+31. `codex/tui-textarea-history-selection`
    - history/selection/undo 交互细节。
-31. `codex/tui-opentui-spike`
+32. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

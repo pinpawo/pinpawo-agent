@@ -14,6 +14,18 @@ export function TextAreaView(props: { model: TextAreaViewModel }) {
 function TextAreaViewLine(props: { row: TextAreaViewRow }) {
   const { row } = props;
 
+  if (row.segments?.length) {
+    return (
+      <Text dimColor={row.dim}>
+        {row.segments.map((segment, index) => (
+          <Text key={index} inverse={segment.cursor || segment.selected}>
+            {segment.text}
+          </Text>
+        ))}
+      </Text>
+    );
+  }
+
   if (row.cursor === null) {
     return <Text dimColor={row.dim}>{row.before || ' '}</Text>;
   }

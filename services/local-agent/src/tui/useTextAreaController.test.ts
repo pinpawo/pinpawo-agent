@@ -47,6 +47,28 @@ test('buildTextAreaComposerProps keeps focus and placeholder display in view mod
   );
 });
 
+test('buildTextAreaComposerProps includes selection render segments', () => {
+  assert.deepEqual(
+    buildTextAreaComposerProps(
+      { text: 'abcdef', cursorOffset: 6, selection: { anchorOffset: 1, focusOffset: 5 } },
+      { focused: true, placeholder: '输入消息', width: 3 },
+    ).model.rows.map((row) => row.segments),
+    [
+      [
+        { text: 'a', selected: false, cursor: false },
+        { text: 'b', selected: true, cursor: false },
+        { text: 'c', selected: true, cursor: false },
+      ],
+      [
+        { text: 'd', selected: true, cursor: false },
+        { text: 'e', selected: true, cursor: false },
+        { text: 'f', selected: false, cursor: false },
+        { text: ' ', selected: false, cursor: true },
+      ],
+    ],
+  );
+});
+
 test('buildTextAreaControllerState composes host state from textarea input', () => {
   assert.deepEqual(
     buildTextAreaControllerState(

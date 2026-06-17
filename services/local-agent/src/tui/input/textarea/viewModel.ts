@@ -1,5 +1,9 @@
 import { wrapTextAreaRows } from './layout';
-import { renderTextAreaRows } from './renderModel';
+import {
+  renderTextAreaRows,
+  type TextAreaRenderSegment,
+} from './renderModel';
+import type { TextAreaSelection } from './selection';
 import { segmentTextAreaText } from './textSegments';
 
 export type TextAreaViewRow = {
@@ -8,6 +12,7 @@ export type TextAreaViewRow = {
   after: string;
   dim: boolean;
   dimAfterCursor: boolean;
+  segments?: TextAreaRenderSegment[];
 };
 
 export type TextAreaViewModel = {
@@ -20,6 +25,7 @@ export function buildTextAreaViewModel(options: {
   placeholder?: string;
   focused?: boolean;
   width?: number;
+  selection?: TextAreaSelection;
 }): TextAreaViewModel {
   const text = options.text;
   const placeholder = options.placeholder ?? '';
@@ -43,12 +49,17 @@ export function buildTextAreaViewModel(options: {
   }
 
   return {
-    rows: renderTextAreaRows({ text, cursorOffset: options.cursorOffset }, width).map((row) => ({
+    rows: renderTextAreaRows({
+      text,
+      cursorOffset: options.cursorOffset,
+      selection: options.selection,
+    }, width).map((row) => ({
       before: row.before,
       cursor: row.cursor,
       after: row.after,
       dim: false,
       dimAfterCursor: false,
+      ...(row.segments ? { segments: row.segments } : {}),
     })),
   };
 }

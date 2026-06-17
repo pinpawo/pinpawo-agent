@@ -111,6 +111,7 @@ export function buildTextAreaComposerProps(
     model: buildTextAreaViewModel({
       text: input.text,
       cursorOffset: input.cursorOffset,
+      selection: input.selection,
       placeholder: options.placeholder,
       focused: options.focused,
       width: options.width,

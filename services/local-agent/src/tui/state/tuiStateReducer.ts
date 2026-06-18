@@ -75,6 +75,15 @@ function updateSession(
   };
 }
 
+function clearTextAreaTransientInputState(input: TuiState['input']): TuiState['input'] {
+  return {
+    ...input,
+    selection: undefined,
+    editHistory: undefined,
+    preferredColumn: undefined,
+  };
+}
+
 function removeRunRoute(state: TuiState, requestId: string) {
   const { [requestId]: _removed, ...runRoute } = state.runRoute;
   return runRoute;
@@ -296,15 +305,12 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     case 'input.set':
       return {
         ...state,
-        input: {
+        input: clearTextAreaTransientInputState({
           ...state.input,
           text: action.value,
           cursorOffset: action.cursorOffset ?? action.value.length,
-          selection: undefined,
-          editHistory: undefined,
-          preferredColumn: undefined,
           history: resetComposerHistoryNavigation(state.input.history),
-        },
+        }),
       };
 
     case 'input.apply':
@@ -326,15 +332,12 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         const result = navigateComposerHistory(state.input.history, state.input.text, action.direction);
         return {
           ...state,
-          input: {
+          input: clearTextAreaTransientInputState({
             ...state.input,
             text: result.value,
             cursorOffset: result.value.length,
-            selection: undefined,
-            editHistory: undefined,
-            preferredColumn: undefined,
             history: result.history,
-          },
+          }),
         };
       }
 
@@ -351,15 +354,12 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.connection,
           message: action.statusMessage,
         },
-        input: {
+        input: clearTextAreaTransientInputState({
           ...state.input,
           text: '',
           cursorOffset: 0,
-          selection: undefined,
-          editHistory: undefined,
-          preferredColumn: undefined,
           history: recordComposerHistoryEntry(state.input.history, action.userText),
-        },
+        }),
         runRoute: {
           ...state.runRoute,
           [action.requestId]: sessionId,
@@ -397,15 +397,12 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.connection,
           message: action.statusMessage,
         },
-        input: {
+        input: clearTextAreaTransientInputState({
           ...state.input,
           text: '',
           cursorOffset: 0,
-          selection: undefined,
-          editHistory: undefined,
-          preferredColumn: undefined,
           history: resetComposerHistoryNavigation(state.input.history),
-        },
+        }),
         runRoute: {
           ...state.runRoute,
           [action.requestId]: sessionId,

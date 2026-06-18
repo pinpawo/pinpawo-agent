@@ -14,7 +14,10 @@ import {
 import type { TextAreaCommand } from './input/textarea/commands';
 import type { TuiAction, TuiState } from './state/tuiState';
 
-type TextAreaInputState = Pick<TuiState['input'], 'text' | 'cursorOffset'>;
+type TextAreaInputState = Pick<
+  TuiState['input'],
+  'text' | 'cursorOffset' | 'selection' | 'editHistory' | 'preferredColumn'
+>;
 
 export type TextAreaComposerProps = {
   model: TextAreaViewModel;
@@ -28,6 +31,7 @@ export type TextAreaHistoryBoundary = {
 export type TextAreaControllerState = {
   value: string;
   cursorOffset: number;
+  selection?: TextAreaModel['selection'];
   layout: TextAreaLayout;
   cursor: TextAreaLayout['cursor'];
   historyBoundary: TextAreaHistoryBoundary;
@@ -83,6 +87,7 @@ export function buildTextAreaControllerState(
   return {
     value: input.text,
     cursorOffset: input.cursorOffset,
+    ...(input.selection ? { selection: input.selection } : {}),
     layout,
     cursor: layout.cursor,
     historyBoundary: resolveTextAreaHistoryBoundary(layout),
@@ -109,6 +114,7 @@ export function buildTextAreaComposerProps(
     model: buildTextAreaViewModel({
       text: input.text,
       cursorOffset: input.cursorOffset,
+      selection: input.selection,
       placeholder: options.placeholder,
       focused: options.focused,
       width: options.width,
@@ -124,6 +130,9 @@ export function applyTextAreaControllerCommand(
   return applyTextAreaCommand(command, {
     text: input.text,
     cursorOffset: input.cursorOffset,
+    ...(input.selection ? { selection: input.selection } : {}),
+    ...(input.editHistory ? { editHistory: input.editHistory } : {}),
+    ...(input.preferredColumn !== undefined ? { preferredColumn: input.preferredColumn } : {}),
   }, { width });
 }
 

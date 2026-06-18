@@ -14,7 +14,16 @@ export type TextAreaCommand =
   | { type: 'moveUp' }
   | { type: 'moveDown' }
   | { type: 'moveLineStart' }
-  | { type: 'moveLineEnd' };
+  | { type: 'moveLineEnd' }
+  | { type: 'selectLeft' }
+  | { type: 'selectRight' }
+  | { type: 'selectUp' }
+  | { type: 'selectDown' }
+  | { type: 'selectLineStart' }
+  | { type: 'selectLineEnd' }
+  | { type: 'selectAll' }
+  | { type: 'undo' }
+  | { type: 'redo' };
 
 export function toTextAreaCommand(event: CanonicalInputEvent): TextAreaCommand | null {
   switch (event.type) {
@@ -32,6 +41,10 @@ export function toTextAreaCommand(event: CanonicalInputEvent): TextAreaCommand |
       return { type: 'deleteToLineStart' };
     case 'text.delete.to.line.end':
       return { type: 'deleteToLineEnd' };
+    case 'edit.undo':
+      return { type: 'undo' };
+    case 'edit.redo':
+      return { type: 'redo' };
     case 'cursor.left':
       return { type: 'moveLeft' };
     case 'cursor.right':
@@ -44,6 +57,18 @@ export function toTextAreaCommand(event: CanonicalInputEvent): TextAreaCommand |
       return { type: 'moveLineStart' };
     case 'cursor.line.end':
       return { type: 'moveLineEnd' };
+    case 'selection.left':
+      return { type: 'selectLeft' };
+    case 'selection.right':
+      return { type: 'selectRight' };
+    case 'selection.up':
+      return { type: 'selectUp' };
+    case 'selection.down':
+      return { type: 'selectDown' };
+    case 'selection.line.start':
+      return { type: 'selectLineStart' };
+    case 'selection.line.end':
+      return { type: 'selectLineEnd' };
     case 'newline':
       return { type: 'newline' };
     default:

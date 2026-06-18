@@ -71,6 +71,60 @@ test('toCanonicalInputEvent maps edit and cursor keys', () => {
   );
 });
 
+test('toCanonicalInputEvent maps shifted cursor keys to selection events', () => {
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '', key: { leftArrow: true, shift: true } }),
+    { type: 'selection.left' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '', key: { rightArrow: true, shift: true } }),
+    { type: 'selection.right' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '', key: { upArrow: true, shift: true } }),
+    { type: 'selection.up' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '', key: { downArrow: true, shift: true } }),
+    { type: 'selection.down' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '', key: { home: true, shift: true } }),
+    { type: 'selection.line.start' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '', key: { end: true, shift: true } }),
+    { type: 'selection.line.end' },
+  );
+});
+
+test('toCanonicalInputEvent maps raw shifted cursor sequences to selection events', () => {
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '\x1b[1;2D', key: {} }),
+    { type: 'selection.left' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '[1;2C', key: {} }),
+    { type: 'selection.right' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '\x1b[1;2A', key: {} }),
+    { type: 'selection.up' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '[1;2B', key: {} }),
+    { type: 'selection.down' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '\x1b[1;2H', key: {} }),
+    { type: 'selection.line.start' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '[8;2~', key: {} }),
+    { type: 'selection.line.end' },
+  );
+});
+
 test('toCanonicalInputEvent maps supported control keys', () => {
   assert.deepEqual(
     toCanonicalInputEvent({ input: 'c', key: { ctrl: true } }),
@@ -89,6 +143,22 @@ test('toCanonicalInputEvent maps supported control keys', () => {
     { type: 'text.delete.word.backward' },
   );
   assert.deepEqual(
+    toCanonicalInputEvent({ input: 'z', key: { ctrl: true } }),
+    { type: 'edit.undo' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: 'z', key: { ctrl: true, shift: true } }),
+    { type: 'edit.redo' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: 'Z', key: { ctrl: true } }),
+    { type: 'edit.redo' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: 'y', key: { ctrl: true } }),
+    { type: 'edit.redo' },
+  );
+  assert.deepEqual(
     toCanonicalInputEvent({ input: 'x', key: { ctrl: true } }),
     { type: 'noop' },
   );
@@ -96,7 +166,7 @@ test('toCanonicalInputEvent maps supported control keys', () => {
 
 test('toCanonicalInputEvent preserves unknown terminal controls as unknown controls', () => {
   assert.deepEqual(
-    toCanonicalInputEvent({ input: '\x1b[1;2A', key: {} }),
-    { type: 'unknown.control', raw: '\x1b[1;2A' },
+    toCanonicalInputEvent({ input: '\x1b[1;3A', key: {} }),
+    { type: 'unknown.control', raw: '\x1b[1;3A' },
   );
 });

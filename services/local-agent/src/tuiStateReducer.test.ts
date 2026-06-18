@@ -83,6 +83,90 @@ test('tuiStateReducer uses completed message text for final assistant history', 
   ]);
 });
 
+test('tuiStateReducer records composer prompt history only for run starts', () => {
+  let state = initialState();
+
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-1',
+    kind: 'chat',
+    userText: ' hello ',
+    now: 1000,
+    userCell: { id: 'req-1:user' },
+    statusMessage: '等待回复',
+  });
+  assert.deepEqual(state.input.history.entries, ['hello']);
+  assert.equal(state.input.text, '');
+  assert.equal(state.input.cursorOffset, 0);
+
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-2',
+    kind: 'chat',
+    userText: 'hello',
+    now: 2000,
+    userCell: { id: 'req-2:user' },
+    statusMessage: '等待回复',
+  });
+  assert.deepEqual(state.input.history.entries, ['hello']);
+
+  state = tuiStateReducer(state, {
+    type: 'review.response.resume',
+    requestId: 'req-2',
+    message: 'approval text',
+    now: 3000,
+    userCell: { id: 'req-2:review' },
+    statusMessage: '继续执行',
+  });
+  assert.deepEqual(state.input.history.entries, ['hello']);
+});
+
+test('tuiStateReducer navigates composer prompt history and restores draft', () => {
+  let state = initialState();
+
+  state = startRun(state, 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-2',
+    kind: 'chat',
+    userText: 'second',
+    now: 2000,
+    userCell: { id: 'req-2:user' },
+    statusMessage: '等待回复',
+  });
+  state = tuiStateReducer(state, { type: 'input.set', value: 'draft' });
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'previous' });
+  assert.equal(state.input.text, 'second');
+  assert.equal(state.input.cursorOffset, 'second'.length);
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'previous' });
+  assert.equal(state.input.text, 'hello');
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'next' });
+  assert.equal(state.input.text, 'second');
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'next' });
+  assert.equal(state.input.text, 'draft');
+  assert.equal(state.input.history.selectedIndex, null);
+});
+
+test('tuiStateReducer preserves engine selection and clears it on direct input changes', () => {
+  let state = tuiStateReducer(initialState(), {
+    type: 'input.apply',
+    value: {
+      text: 'hello',
+      cursorOffset: 5,
+      selection: { anchorOffset: 1, focusOffset: 4 },
+    },
+  });
+
+  assert.deepEqual(state.input.selection, { anchorOffset: 1, focusOffset: 4 });
+
+  state = tuiStateReducer(state, { type: 'input.set', value: 'draft' });
+  assert.equal(state.input.selection, undefined);
+});
+
 test('tuiStateReducer infers usage context window from runtime when missing', () => {
   let state = startRun(initialState(), 'req-1');
   state = tuiStateReducer(state, {

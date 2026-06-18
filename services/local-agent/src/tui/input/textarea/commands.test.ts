@@ -16,6 +16,8 @@ test('toTextAreaCommand maps canonical text events to textarea commands', () => 
   assert.deepEqual(toTextAreaCommand({ type: 'text.delete.word.backward' }), { type: 'deleteWordBackward' });
   assert.deepEqual(toTextAreaCommand({ type: 'text.delete.to.line.start' }), { type: 'deleteToLineStart' });
   assert.deepEqual(toTextAreaCommand({ type: 'text.delete.to.line.end' }), { type: 'deleteToLineEnd' });
+  assert.deepEqual(toTextAreaCommand({ type: 'edit.undo' }), { type: 'undo' });
+  assert.deepEqual(toTextAreaCommand({ type: 'edit.redo' }), { type: 'redo' });
 });
 
 test('toTextAreaCommand maps canonical cursor events to textarea commands', () => {
@@ -26,6 +28,15 @@ test('toTextAreaCommand maps canonical cursor events to textarea commands', () =
   assert.deepEqual(toTextAreaCommand({ type: 'cursor.line.start' }), { type: 'moveLineStart' });
   assert.deepEqual(toTextAreaCommand({ type: 'cursor.line.end' }), { type: 'moveLineEnd' });
   assert.deepEqual(toTextAreaCommand({ type: 'newline' }), { type: 'newline' });
+});
+
+test('toTextAreaCommand maps canonical selection events to textarea commands', () => {
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.left' }), { type: 'selectLeft' });
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.right' }), { type: 'selectRight' });
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.up' }), { type: 'selectUp' });
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.down' }), { type: 'selectDown' });
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.line.start' }), { type: 'selectLineStart' });
+  assert.deepEqual(toTextAreaCommand({ type: 'selection.line.end' }), { type: 'selectLineEnd' });
 });
 
 test('toTextAreaCommand ignores app-level canonical events', () => {

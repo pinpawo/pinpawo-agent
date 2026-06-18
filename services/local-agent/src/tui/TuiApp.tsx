@@ -13,6 +13,7 @@ import {
   normalizeTuiInputEvent,
   toCanonicalInputEvent,
 } from './input/keymap';
+import { getComposerHistoryAvailability } from './input/composerHistory';
 import { resolveTuiInputAction } from './input/inputRouter';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
@@ -215,6 +216,10 @@ export function TuiApp(props: { actorId: string }) {
       busy,
       hasPendingApproval: Boolean(pendingApproval),
       hasResumePicker: resumePickerOpen,
+      composerHistory: {
+        boundary: textArea.historyBoundary,
+        available: getComposerHistoryAvailability(tuiState.input.history),
+      },
     });
 
     switch (action.target) {
@@ -285,6 +290,10 @@ export function TuiApp(props: { actorId: string }) {
           submitCurrentInput();
           return;
         }
+        return;
+
+      case 'composerHistory':
+        dispatch({ type: 'input.history.navigate', direction: action.action });
         return;
 
       case 'textarea':

@@ -16,6 +16,30 @@ test('textarea view model renders focused text rows', () => {
   );
 });
 
+test('textarea view model includes selection render segments when selected', () => {
+  assert.deepEqual(
+    buildTextAreaViewModel({
+      text: 'abcdef',
+      cursorOffset: 6,
+      selection: { anchorOffset: 1, focusOffset: 5 },
+      width: 3,
+    }).rows.map((row) => row.segments),
+    [
+      [
+        { text: 'a', selected: false, cursor: false },
+        { text: 'b', selected: true, cursor: false },
+        { text: 'c', selected: true, cursor: false },
+      ],
+      [
+        { text: 'd', selected: true, cursor: false },
+        { text: 'e', selected: true, cursor: false },
+        { text: 'f', selected: false, cursor: false },
+        { text: ' ', selected: false, cursor: true },
+      ],
+    ],
+  );
+});
+
 test('textarea view model renders focused placeholder cursor row', () => {
   assert.deepEqual(
     buildTextAreaViewModel({

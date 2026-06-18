@@ -47,6 +47,28 @@ test('buildTextAreaComposerProps keeps focus and placeholder display in view mod
   );
 });
 
+test('buildTextAreaComposerProps includes selection render segments', () => {
+  assert.deepEqual(
+    buildTextAreaComposerProps(
+      { text: 'abcdef', cursorOffset: 6, selection: { anchorOffset: 1, focusOffset: 5 } },
+      { focused: true, placeholder: '输入消息', width: 3 },
+    ).model.rows.map((row) => row.segments),
+    [
+      [
+        { text: 'a', selected: false, cursor: false },
+        { text: 'b', selected: true, cursor: false },
+        { text: 'c', selected: true, cursor: false },
+      ],
+      [
+        { text: 'd', selected: true, cursor: false },
+        { text: 'e', selected: true, cursor: false },
+        { text: 'f', selected: false, cursor: false },
+        { text: ' ', selected: false, cursor: true },
+      ],
+    ],
+  );
+});
+
 test('buildTextAreaControllerState composes host state from textarea input', () => {
   assert.deepEqual(
     buildTextAreaControllerState(
@@ -114,7 +136,46 @@ test('applyTextAreaControllerCommand applies textarea command with host width', 
       { type: 'moveDown' },
       3,
     ),
-    { text: 'abcdef', cursorOffset: 4 },
+    { text: 'abcdef', cursorOffset: 4, preferredColumn: 1 },
+  );
+  assert.deepEqual(
+    withoutEditHistory(applyTextAreaControllerCommand(
+      { text: 'hello', cursorOffset: 5, selection: { anchorOffset: 1, focusOffset: 4 } },
+      { type: 'insert', text: 'i' },
+      10,
+    )),
+    { text: 'hio', cursorOffset: 2 },
+  );
+});
+
+test('applyTextAreaControllerCommand preserves engine-owned textarea state', () => {
+  assert.deepEqual(
+    applyTextAreaControllerCommand(
+      {
+        text: 'hi!',
+        cursorOffset: 3,
+        editHistory: { undo: [{ text: 'hi', cursorOffset: 2 }], redo: [] },
+      },
+      { type: 'undo' },
+      10,
+    ),
+    {
+      text: 'hi',
+      cursorOffset: 2,
+      editHistory: {
+        undo: [],
+        redo: [{ text: 'hi!', cursorOffset: 3 }],
+      },
+    },
+  );
+
+  assert.deepEqual(
+    applyTextAreaControllerCommand(
+      { text: 'abcd\nx\nabcd', cursorOffset: 6, preferredColumn: 3 },
+      { type: 'moveDown' },
+      10,
+    ),
+    { text: 'abcd\nx\nabcd', cursorOffset: 10, preferredColumn: 3 },
   );
 });
 
@@ -140,3 +201,8 @@ test('measureTextAreaControllerLayout exposes visual cursor boundaries', () => {
     },
   );
 });
+
+function withoutEditHistory<T extends { editHistory?: unknown }>(state: T): Omit<T, 'editHistory'> {
+  const { editHistory: _editHistory, ...rest } = state;
+  return rest;
+}

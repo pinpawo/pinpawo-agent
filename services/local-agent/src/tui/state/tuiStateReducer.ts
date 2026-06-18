@@ -7,6 +7,11 @@ import {
   formatSystemNoticeEvent,
   getOperationKey,
 } from '../render/eventText';
+import {
+  navigateComposerHistory,
+  recordComposerHistoryEntry,
+  resetComposerHistoryNavigation,
+} from '../input/composerHistory';
 import { TUI_TEXT } from '../render/text';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
 import type {
@@ -295,6 +300,10 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.input,
           text: action.value,
           cursorOffset: action.cursorOffset ?? action.value.length,
+          selection: undefined,
+          editHistory: undefined,
+          preferredColumn: undefined,
+          history: resetComposerHistoryNavigation(state.input.history),
         },
       };
 
@@ -305,8 +314,29 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.input,
           text: action.value.text,
           cursorOffset: action.value.cursorOffset,
+          selection: action.value.selection,
+          editHistory: action.value.editHistory,
+          preferredColumn: action.value.preferredColumn,
+          history: resetComposerHistoryNavigation(state.input.history),
         },
       };
+
+    case 'input.history.navigate':
+      {
+        const result = navigateComposerHistory(state.input.history, state.input.text, action.direction);
+        return {
+          ...state,
+          input: {
+            ...state.input,
+            text: result.value,
+            cursorOffset: result.value.length,
+            selection: undefined,
+            editHistory: undefined,
+            preferredColumn: undefined,
+            history: result.history,
+          },
+        };
+      }
 
     case 'history.append':
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) =>
@@ -325,6 +355,10 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.input,
           text: '',
           cursorOffset: 0,
+          selection: undefined,
+          editHistory: undefined,
+          preferredColumn: undefined,
+          history: recordComposerHistoryEntry(state.input.history, action.userText),
         },
         runRoute: {
           ...state.runRoute,
@@ -367,6 +401,10 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.input,
           text: '',
           cursorOffset: 0,
+          selection: undefined,
+          editHistory: undefined,
+          preferredColumn: undefined,
+          history: resetComposerHistoryNavigation(state.input.history),
         },
         runRoute: {
           ...state.runRoute,

@@ -1,5 +1,10 @@
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
+import {
+  createComposerHistoryState,
+  type ComposerHistoryDirection,
+  type ComposerHistoryState,
+} from '../input/composerHistory';
 import type { TextAreaModel } from '../input/textarea/engine';
 import { TUI_TEXT } from '../render/text';
 
@@ -27,6 +32,7 @@ export type TuiState = {
   runRoute: Record<RunId, SessionId>;
   input: TextAreaModel & {
     focused: boolean;
+    history: ComposerHistoryState;
   };
 };
 
@@ -140,6 +146,10 @@ export type TuiAction =
       value: TextAreaModel;
     }
   | {
+      type: 'input.history.navigate';
+      direction: ComposerHistoryDirection;
+    }
+  | {
       type: 'history.append';
       sessionId?: SessionId;
       cell: HistoryCellDraft;
@@ -228,6 +238,7 @@ export function createInitialTuiState(defaultSession: SessionModel): TuiState {
       text: '',
       cursorOffset: 0,
       focused: true,
+      history: createComposerHistoryState(),
     },
   };
 }

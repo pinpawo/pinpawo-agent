@@ -109,8 +109,46 @@ test('resolveTuiInputCommand routes busy and composer commands', () => {
     { target: 'textarea', command: { type: 'newline' } },
   );
   assert.deepEqual(
+    resolveTuiInputCommand({ type: 'edit.undo' }, { type: 'composer' }),
+    { target: 'textarea', command: { type: 'undo' } },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'edit.redo' }, { type: 'composer' }),
+    { target: 'textarea', command: { type: 'redo' } },
+  );
+  assert.deepEqual(
     resolveTuiInputCommand({ type: 'cursor.down' }, { type: 'composer' }),
     { target: 'textarea', command: { type: 'moveDown' } },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'selection.down' }, { type: 'composer' }),
+    { target: 'textarea', command: { type: 'selectDown' } },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand(
+      { type: 'cursor.up' },
+      { type: 'composer' },
+      {
+        composerHistory: {
+          boundary: { previous: true, next: true },
+          available: { previous: false, next: true },
+        },
+      },
+    ),
+    { target: 'textarea', command: { type: 'moveUp' } },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand(
+      { type: 'selection.up' },
+      { type: 'composer' },
+      {
+        composerHistory: {
+          boundary: { previous: true, next: true },
+          available: { previous: true, next: true },
+        },
+      },
+    ),
+    { target: 'textarea', command: { type: 'selectUp' } },
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'tab', shift: true }, { type: 'composer' }),
@@ -118,10 +156,56 @@ test('resolveTuiInputCommand routes busy and composer commands', () => {
   );
 });
 
+test('resolveTuiInputCommand routes composer history only at textarea boundaries', () => {
+  assert.deepEqual(
+    resolveTuiInputCommand(
+      { type: 'cursor.up' },
+      { type: 'composer' },
+      {
+        composerHistory: {
+          boundary: { previous: true, next: true },
+          available: { previous: true, next: false },
+        },
+      },
+    ),
+    { target: 'composerHistory', action: 'previous' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand(
+      { type: 'cursor.down' },
+      { type: 'composer' },
+      {
+        composerHistory: {
+          boundary: { previous: true, next: true },
+          available: { previous: false, next: true },
+        },
+      },
+    ),
+    { target: 'composerHistory', action: 'next' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand(
+      { type: 'cursor.up' },
+      { type: 'composer' },
+      {
+        composerHistory: {
+          boundary: { previous: false, next: true },
+          available: { previous: true, next: true },
+        },
+      },
+    ),
+    { target: 'textarea', command: { type: 'moveUp' } },
+  );
+});
+
 test('legacy input command conversion keeps keymap compatibility shape', () => {
   assert.deepEqual(
     toLegacyTuiInputCommand({ target: 'textarea', command: { type: 'deleteForward' } }),
     { type: 'composer.edit' },
+  );
+  assert.deepEqual(
+    toLegacyTuiInputCommand({ target: 'composerHistory', action: 'previous' }),
+    { type: 'composer.history.previous' },
   );
   assert.deepEqual(
     resolveLegacyTuiInputAction(

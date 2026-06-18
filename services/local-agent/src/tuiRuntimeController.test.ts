@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { TuiRuntimeController } from './tui/TuiRuntimeController';
+import { createComposerHistoryState } from './tui/input/composerHistory';
 import type { TuiAction, TuiState } from './tui/state/tuiState';
 
 function pendingReviewState(): TuiState {
@@ -8,7 +9,7 @@ function pendingReviewState(): TuiState {
     connection: { status: 'ready', message: 'ready' },
     focusedSessionId: 'sess-1',
     runRoute: { 'req-1': 'sess-1' },
-    input: { text: '', cursorOffset: 0, focused: true },
+    input: { text: '', cursorOffset: 0, focused: true, history: createComposerHistoryState() },
     sessions: {
       'sess-1': {
         id: 'sess-1',

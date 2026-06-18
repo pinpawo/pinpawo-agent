@@ -1,5 +1,9 @@
 import type { CanonicalInputEvent } from './canonicalInput';
 import {
+  resolveComposerHistoryRoute,
+  type ComposerHistoryRouteState,
+} from './composerHistoryRouting';
+import {
   toTextAreaCommand,
   type TextAreaCommand,
 } from './textarea/commands';
@@ -9,6 +13,11 @@ export type TuiInputRouteContext = {
   busy: boolean;
   hasPendingApproval: boolean;
   hasResumePicker: boolean;
+  composerHistory?: ComposerHistoryRouteState | null;
+};
+
+export type TuiInputRouterState = {
+  composerHistory?: ComposerHistoryRouteState | null;
 };
 
 export type TuiInputOwner =
@@ -23,6 +32,7 @@ export type TuiInputCommand =
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'composer'; action: 'submit' | 'clear' }
+  | { target: 'composerHistory'; action: 'previous' | 'next' }
   | { target: 'textarea'; command: TextAreaCommand }
   | { target: 'none' };
 
@@ -38,6 +48,8 @@ export type TuiLegacyInputCommand =
   | { type: 'resume.dismiss' }
   | { type: 'composer.submit' }
   | { type: 'composer.clear' }
+  | { type: 'composer.history.previous' }
+  | { type: 'composer.history.next' }
   | { type: 'composer.edit' }
   | { type: 'none' };
 
@@ -49,7 +61,9 @@ export function resolveTuiInputAction(
     return { target: 'global', action: 'ctrl_c' };
   }
 
-  return resolveTuiInputCommand(event, resolveTuiInputOwner(context));
+  return resolveTuiInputCommand(event, resolveTuiInputOwner(context), {
+    composerHistory: context.composerHistory,
+  });
 }
 
 export function resolveLegacyTuiInputAction(
@@ -70,6 +84,7 @@ export function resolveTuiInputOwner(context: TuiInputRouteContext): TuiInputOwn
 export function resolveTuiInputCommand(
   event: CanonicalInputEvent,
   owner: TuiInputOwner,
+  routerState: TuiInputRouterState = {},
 ): TuiInputCommand {
   const isReturn = event.type === 'submit';
   const isControlSequence = event.type === 'unknown.control';
@@ -100,6 +115,10 @@ export function resolveTuiInputCommand(
       return { target: 'none' };
 
     case 'composer':
+      {
+        const historyRoute = resolveComposerHistoryRoute(event, routerState.composerHistory);
+        if (historyRoute) return { target: 'composerHistory', action: historyRoute };
+      }
       if (event.type === 'escape') return { target: 'composer', action: 'clear' };
       if (isReturn) return { target: 'composer', action: 'submit' };
       if (event.type === 'tab') return { target: 'none' };
@@ -119,6 +138,8 @@ export function toLegacyTuiInputCommand(command: TuiInputCommand): TuiLegacyInpu
       return { type: `resume.${command.action}` };
     case 'composer':
       return { type: `composer.${command.action}` };
+    case 'composerHistory':
+      return { type: `composer.history.${command.action}` };
     case 'textarea':
       return { type: 'composer.edit' };
     case 'none':

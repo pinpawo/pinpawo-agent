@@ -44,3 +44,40 @@ test('textarea render model renders cursor on full grapheme clusters', () => {
     [{ before: '🙂', cursor: 'a', after: '' }],
   );
 });
+
+test('textarea render model marks selected grapheme segments', () => {
+  assert.deepEqual(
+    renderTextAreaRows({
+      text: 'abcdef',
+      cursorOffset: 6,
+      selection: { anchorOffset: 1, focusOffset: 5 },
+    }, 3).map((row) => row.segments),
+    [
+      [
+        { text: 'a', selected: false, cursor: false },
+        { text: 'b', selected: true, cursor: false },
+        { text: 'c', selected: true, cursor: false },
+      ],
+      [
+        { text: 'd', selected: true, cursor: false },
+        { text: 'e', selected: true, cursor: false },
+        { text: 'f', selected: false, cursor: false },
+        { text: ' ', selected: false, cursor: true },
+      ],
+    ],
+  );
+});
+
+test('textarea render model keeps selection on grapheme boundaries', () => {
+  assert.deepEqual(
+    renderTextAreaRows({
+      text: '🙂a',
+      cursorOffset: 2,
+      selection: { anchorOffset: 0, focusOffset: 2 },
+    }, 3).map((row) => row.segments),
+    [[
+      { text: '🙂', selected: true, cursor: false },
+      { text: 'a', selected: false, cursor: true },
+    ]],
+  );
+});

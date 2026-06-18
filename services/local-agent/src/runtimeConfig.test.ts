@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { buildLocalAgentRuntimeConfig, resolveUserDir } from './runtimeConfig';
+import { buildLocalAgentRuntimeConfig, resolveDefaultWorkdir, resolveUserDir } from './runtimeConfig';
 
 test('resolveUserDir expands home and resolves relative paths from process cwd', () => {
   assert.equal(resolveUserDir('~'), homedir());
@@ -25,4 +25,19 @@ test('buildLocalAgentRuntimeConfig scopes runtime state under workdir .pinpawo',
     tuiSessionPath: '/tmp/pinpawo-workdir/.pinpawo/tui-sessions.json',
     capabilityArtifactRoot: '/tmp/pinpawo-workdir/.pinpawo/capability-artifacts',
   });
+});
+
+test('resolveDefaultWorkdir prefers env, then stored config, then process cwd', () => {
+  assert.equal(
+    resolveDefaultWorkdir({ PINPAWO_WORKDIR: '/tmp/from-env' }, { workdir: '/tmp/from-stored' }),
+    '/tmp/from-env',
+  );
+  assert.equal(
+    resolveDefaultWorkdir({}, { workdir: '/tmp/from-stored' }),
+    '/tmp/from-stored',
+  );
+  assert.equal(
+    resolveDefaultWorkdir({}, {}),
+    process.cwd(),
+  );
 });

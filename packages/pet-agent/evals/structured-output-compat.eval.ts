@@ -84,9 +84,12 @@ const EVAL_CASES: EvalCase[] = [
     schema: orchestrationDecisionSchema,
     prompt: [
       '根据用户请求生成一个 orchestration decision JSON。',
+      '必须严格使用字段 action、answer、question、task、context_summary。',
+      '不要输出 delegate_capability 作为字段名；如果要委派 explore，必须输出 "action": "delegate_capability.explore"。',
       '用户请求：请检查当前项目为什么 typecheck 失败，并修复问题。',
       '可选 capability：explore。',
       '应选择 delegate_capability.explore，并给出明确 task 和 context_summary。',
+      '正确示例：{"action":"delegate_capability.explore","answer":null,"question":null,"task":"检查 typecheck 失败原因并修复。","context_summary":"用户要求定位并修复当前项目 typecheck 失败。"}',
     ].join('\n'),
   },
   {
@@ -157,6 +160,10 @@ function supportsJsonSchemaStructuredOutput(model: string): boolean {
   return versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
 }
 
+function needsAliyunKimiFunctionCallingCompat(model: string, isAliyunCompatibleEndpoint: boolean): boolean {
+  return isAliyunCompatibleEndpoint && supportsJsonSchemaStructuredOutput(model);
+}
+
 function supportsJsonModeStructuredOutput(model: string): boolean {
   return model.includes('deepseek')
     || model.includes('qwen')
@@ -170,6 +177,9 @@ function inferProductionStructuredOutputMethod(model: string, baseUrl: string): 
   const isAliyunCompatibleEndpoint = normalizedBaseUrl.includes('dashscope.aliyuncs.com')
     || normalizedBaseUrl.includes('maas.aliyuncs.com');
 
+  if (needsAliyunKimiFunctionCallingCompat(normalizedModel, isAliyunCompatibleEndpoint)) {
+    return 'functionCalling';
+  }
   if (supportsJsonSchemaStructuredOutput(normalizedModel)) return 'jsonSchema';
   if (supportsJsonModeStructuredOutput(normalizedModel) || isAliyunCompatibleEndpoint) return 'jsonMode';
   return undefined;

@@ -107,6 +107,12 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
     apiKey: 'test-key',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'kimi-k2.6',
+  }), { method: 'functionCalling' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://platform.kimi.com/v1',
+    model: 'kimi-k2.6',
   }), { method: 'jsonSchema' });
 
   assert.deepEqual(buildDecisionStructuredOutput({

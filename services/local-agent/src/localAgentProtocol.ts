@@ -65,6 +65,9 @@ export type LocalAgentControlServerMessage =
       reply: string;
       finalDispatchId?: string;
       reason?: string;
+      runId?: string;
+      conversationId?: string;
+      idempotencyKey?: string;
     }
   | { type: 'studio_error'; requestId: string; message: string };
 
@@ -362,6 +365,9 @@ function parseLocalAgentServerRecord(record: Record<string, unknown>): LocalAgen
       reply,
       finalDispatchId: readOptionalString(record, 'finalDispatchId'),
       reason: readOptionalString(record, 'reason'),
+      runId: readOptionalString(record, 'runId'),
+      conversationId: readOptionalString(record, 'conversationId'),
+      idempotencyKey: readOptionalString(record, 'idempotencyKey'),
     };
   }
   return null;

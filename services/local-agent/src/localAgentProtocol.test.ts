@@ -209,6 +209,32 @@ test('parseLocalAgentServerMessage keeps usage on message.completed event when v
   );
 });
 
+test('parseLocalAgentServerMessage accepts studio_response with scheduler metadata', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'studio_response',
+      requestId: 'req-1',
+      outcome: 'done',
+      reply: 'all done',
+      finalDispatchId: 'dispatch-1',
+      runId: 'run-1',
+      conversationId: 'conv-1',
+      idempotencyKey: 'studio:conv-1:run:run-1',
+    })),
+    {
+      type: 'studio_response',
+      requestId: 'req-1',
+      outcome: 'done',
+      reply: 'all done',
+      finalDispatchId: 'dispatch-1',
+      reason: undefined,
+      runId: 'run-1',
+      conversationId: 'conv-1',
+      idempotencyKey: 'studio:conv-1:run:run-1',
+    },
+  );
+});
+
 test('parseLocalAgentServerMessage accepts subagent message delta events', () => {
   assert.deepEqual(
     parseLocalAgentServerMessage(JSON.stringify({

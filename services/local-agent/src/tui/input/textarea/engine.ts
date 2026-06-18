@@ -1,12 +1,4 @@
-import {
-  toCanonicalInputEvent,
-  type CanonicalInputEvent,
-} from '../canonicalInput';
-import type { TuiKeyInput } from '../keyInput';
-import {
-  toTextAreaCommand,
-  type TextAreaCommand,
-} from './commands';
+import type { TextAreaCommand } from './commands';
 import {
   findTextAreaOffsetAtVisualColumn,
   measureTextAreaLayout,
@@ -60,33 +52,6 @@ export function createTextAreaModel(
     ...(nextEditHistory ? { editHistory: nextEditHistory } : {}),
     ...(nextPreferredColumn !== undefined ? { preferredColumn: nextPreferredColumn } : {}),
   };
-}
-
-export function applyTextAreaInput(
-  input: string,
-  key: TuiKeyInput,
-  state: TextAreaModel,
-  options: { width?: number } = {},
-): TextAreaModel {
-  return applyTextAreaInputEvent(toCanonicalInputEvent({ input, key }), state, options);
-}
-
-export function applyTextAreaInputEvent(
-  event: CanonicalInputEvent,
-  state: TextAreaModel,
-  options: { width?: number } = {},
-): TextAreaModel {
-  const command = toTextAreaCommand(event);
-  if (!command) {
-    return createTextAreaModel(
-      state.text,
-      state.cursorOffset,
-      state.selection,
-      state.editHistory,
-      state.preferredColumn,
-    );
-  }
-  return applyTextAreaCommand(command, state, options);
 }
 
 export function applyTextAreaCommand(

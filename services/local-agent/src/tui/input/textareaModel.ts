@@ -1,7 +1,5 @@
 export {
   applyTextAreaCommand,
-  applyTextAreaInput,
-  applyTextAreaInputEvent,
   createTextAreaModel,
   type TextAreaModel,
 } from './textarea/engine';

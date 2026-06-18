@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ToolMessage } from '@langchain/core/messages';
-import { buildLocalChatAgentInput } from './agentChannel';
+import { buildDecisionStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
 import type { AgentContext } from './contextLoader';
 import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
 
@@ -72,6 +72,26 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
   );
 });
 
+test('buildDecisionStructuredOutput uses function calling for models with weak json schema support', () => {
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://api.deepseek.com',
+    model: 'deepseek-v4-pro',
+  }), { method: 'functionCalling' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen3.7-plus',
+  }), { method: 'functionCalling' });
+
+  assert.equal(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://example.test/v1',
+    model: 'gpt-4o',
+  }), undefined);
+});
+
 test('buildLocalChatAgentInput passes model structured output strategy to explore', async () => {
   const setup = buildLocalChatAgentInput({
     context: createContext(),
@@ -129,4 +149,3 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
     method: 'functionCalling',
   });
 });
-

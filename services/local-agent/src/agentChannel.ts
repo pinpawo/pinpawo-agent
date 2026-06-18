@@ -171,7 +171,8 @@ function appendCapability(
 }
 
 export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): OrchestratorConfig['decisionStructuredOutput'] {
-  return llmConfig.model.includes('deepseek')
+  const model = llmConfig.model.toLowerCase();
+  return model.includes('deepseek') || model.includes('qwen')
     ? { method: 'functionCalling' }
     : undefined;
 }

@@ -222,6 +222,53 @@ test('resolveTuiInputCommand routes file mention popup commands before composer 
   );
 });
 
+test('resolveTuiInputCommand routes command palette commands before composer editing', () => {
+  assert.deepEqual(
+    resolveTuiInputOwner({
+      ready: true,
+      busy: false,
+      hasPendingApproval: false,
+      hasResumePicker: false,
+      hasCommandPalette: true,
+    }),
+    { type: 'commandPalette' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.up' }, { type: 'commandPalette' }),
+    { target: 'commandPalette', action: 'previous' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.down' }, { type: 'commandPalette' }),
+    { target: 'commandPalette', action: 'next' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'tab', shift: false }, { type: 'commandPalette' }),
+    { target: 'commandPalette', action: 'accept' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'submit' }, { type: 'commandPalette' }),
+    { target: 'composer', action: 'submit' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'text.insert', text: 'n' }, { type: 'commandPalette' }),
+    { target: 'textarea', command: { type: 'insert', text: 'n' } },
+  );
+});
+
+test('resolveTuiInputOwner prefers command palette over file mention when both are open', () => {
+  assert.deepEqual(
+    resolveTuiInputOwner({
+      ready: true,
+      busy: false,
+      hasPendingApproval: false,
+      hasResumePicker: false,
+      hasCommandPalette: true,
+      hasFileMention: true,
+    }),
+    { type: 'commandPalette' },
+  );
+});
+
 test('resolveTuiInputCommand routes composer history only at textarea boundaries', () => {
   assert.deepEqual(
     resolveTuiInputCommand(
@@ -272,6 +319,10 @@ test('legacy input command conversion keeps keymap compatibility shape', () => {
   assert.deepEqual(
     toLegacyTuiInputCommand({ target: 'composerHistory', action: 'previous' }),
     { type: 'composer.history.previous' },
+  );
+  assert.deepEqual(
+    toLegacyTuiInputCommand({ target: 'commandPalette', action: 'accept' }),
+    { type: 'commandPalette.accept' },
   );
   assert.deepEqual(
     toLegacyTuiInputCommand({ target: 'fileMention', action: 'accept' }),

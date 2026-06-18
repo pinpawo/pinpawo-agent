@@ -87,7 +87,10 @@
    - 本 PR 变更：`inputRouter.ts` 让 `{ type: 'approval'; freeTextActive }` 真正参与路由；approval 回复为空时 ↑↓ 切换选项，已有自由文本时 ↑↓ / Shift+↑↓ 归 textarea 编辑，Enter 仍提交当前 approval。
    - 验收目标：approval 自由文本的进入/退出策略由 router contract 固化；清空回复后回到选项导航，有回复时可编辑多行/选择文本，不再和 approval option navigation 抢焦点。
 
-3. **command popup / command palette**（Phase 5）——未实现。
+3. **command popup / command palette**（Phase 5）
+   - 状态：PR `codex/tui-textarea-command-palette` 本地处理中。
+   - 本 PR 变更：基于 `commandRegistry.ts` 派生 slash command popup；`/` 和命令前缀展示候选，↑↓ 选择，Tab 补全命令，Enter 保持提交当前 composer 内容。
+   - 验收目标：命令候选不复制第二套列表；popup 只在 composer slash 前缀活跃时出现，不抢 approval/resume/busy owner；输入路由对 popup 导航、补全和普通 textarea 编辑有测试覆盖。
 
 4. **file mention / 路径搜索**（#191 提到的高阶输入能力）
    - 状态：PR `codex/tui-textarea-file-mention` 本地处理中。

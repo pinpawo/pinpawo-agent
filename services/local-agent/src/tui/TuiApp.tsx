@@ -3,6 +3,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import { config } from '../config';
 import { ApprovalPanel } from './components/ApprovalPanel';
+import { CommandPalette } from './components/CommandPalette';
 import { Composer } from './components/Composer';
 import { FileMentionPopup } from './components/FileMentionPopup';
 import { MessageBlock } from './components/MessageBlock';
@@ -15,6 +16,11 @@ import {
   toCanonicalInputEvent,
 } from './input/keymap';
 import { getComposerHistoryAvailability } from './input/composerHistory';
+import {
+  buildCommandPaletteModel,
+  completeCommandPaletteInput,
+  moveCommandPaletteSelection,
+} from './input/commandPalette';
 import {
   buildFileMentionModel,
   completeFileMentionInput,
@@ -70,6 +76,7 @@ export function TuiApp(props: { actorId: string }) {
   }));
   const [studioMode, setStudioMode] = useState(false);
   const [approvalIndex, setApprovalIndex] = useState(0);
+  const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
 
   const stateRef = useRef<TuiState>(tuiState);
@@ -163,6 +170,14 @@ export function TuiApp(props: { actorId: string }) {
     dispatch,
   });
   const inputValue = textArea.value;
+  const commandPalette = useMemo(() => (
+    inputFocused && !pendingApproval
+      ? buildCommandPaletteModel({
+          text: inputValue,
+          cursorOffset: textArea.cursorOffset,
+        }, commandPaletteIndex)
+      : buildCommandPaletteModel({ text: '', cursorOffset: 0 })
+  ), [commandPaletteIndex, inputFocused, inputValue, pendingApproval, textArea.cursorOffset]);
   const fileMentionRoot = focusedSession?.runtime.cwd ?? config.workdir;
   const fileMention = useMemo(() => (
     inputFocused && !pendingApproval
@@ -174,6 +189,7 @@ export function TuiApp(props: { actorId: string }) {
   ), [fileMentionIndex, fileMentionRoot, inputFocused, inputValue, pendingApproval, textArea.cursorOffset]);
 
   useEffect(() => {
+    setCommandPaletteIndex(0);
     setFileMentionIndex(0);
   }, [inputValue, textArea.cursorOffset]);
 
@@ -237,6 +253,7 @@ export function TuiApp(props: { actorId: string }) {
       hasPendingApproval: Boolean(pendingApproval),
       approvalFreeTextActive: Boolean(pendingApproval && inputValue.trim()),
       hasResumePicker: resumePickerOpen,
+      hasCommandPalette: commandPalette.open,
       hasFileMention: fileMention.open,
       composerHistory: {
         boundary: textArea.historyBoundary,
@@ -302,6 +319,41 @@ export function TuiApp(props: { actorId: string }) {
         }
         closeResumePicker();
         return;
+
+      case 'commandPalette':
+        if (action.action === 'previous') {
+          if (!commandPalette.open) return;
+          const { query, items } = commandPalette;
+          setCommandPaletteIndex((current) => moveCommandPaletteSelection({
+            open: true,
+            query,
+            items,
+            selectedIndex: current,
+          }, -1));
+          return;
+        }
+        if (action.action === 'next') {
+          if (!commandPalette.open) return;
+          const { query, items } = commandPalette;
+          setCommandPaletteIndex((current) => moveCommandPaletteSelection({
+            open: true,
+            query,
+            items,
+            selectedIndex: current,
+          }, 1));
+          return;
+        }
+        {
+          const completion = completeCommandPaletteInput(commandPalette);
+          if (completion) {
+            dispatch({
+              type: 'input.set',
+              value: completion.text,
+              cursorOffset: completion.cursorOffset,
+            });
+          }
+          return;
+        }
 
       case 'fileMention':
         if (action.action === 'previous') {
@@ -432,6 +484,9 @@ export function TuiApp(props: { actorId: string }) {
           {focusedSession ? <RuntimeInfoLine runtime={focusedSession.runtime} /> : null}
           {focusedSession?.tokenUsage ? <TokenUsageLine tokenUsage={focusedSession.tokenUsage} /> : null}
         </>
+      ) : null}
+      {commandPalette.open ? (
+        <CommandPalette model={commandPalette} width={contentWidth} />
       ) : null}
       {fileMention.open ? (
         <FileMentionPopup model={fileMention} width={contentWidth} />

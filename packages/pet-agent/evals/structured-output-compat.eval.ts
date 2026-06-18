@@ -160,10 +160,6 @@ function supportsJsonSchemaStructuredOutput(model: string): boolean {
   return versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
 }
 
-function needsAliyunKimiFunctionCallingCompat(model: string, isAliyunCompatibleEndpoint: boolean): boolean {
-  return isAliyunCompatibleEndpoint && supportsJsonSchemaStructuredOutput(model);
-}
-
 function supportsJsonModeStructuredOutput(model: string): boolean {
   return model.includes('deepseek')
     || model.includes('qwen')
@@ -177,9 +173,6 @@ function inferProductionStructuredOutputMethod(model: string, baseUrl: string): 
   const isAliyunCompatibleEndpoint = normalizedBaseUrl.includes('dashscope.aliyuncs.com')
     || normalizedBaseUrl.includes('maas.aliyuncs.com');
 
-  if (needsAliyunKimiFunctionCallingCompat(normalizedModel, isAliyunCompatibleEndpoint)) {
-    return 'functionCalling';
-  }
   if (supportsJsonSchemaStructuredOutput(normalizedModel)) return 'jsonSchema';
   if (supportsJsonModeStructuredOutput(normalizedModel) || isAliyunCompatibleEndpoint) return 'jsonMode';
   return undefined;

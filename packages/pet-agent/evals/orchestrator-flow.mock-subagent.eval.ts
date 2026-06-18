@@ -195,9 +195,6 @@ function normalizeStructuredOutputMethod(value: string | undefined): Orchestrati
 
 function inferDefaultStructuredOutputMethod(model: string): OrchestrationDecisionStructuredOutputConfig['method'] {
   const normalized = model.toLowerCase();
-  if (needsAliyunKimiFunctionCallingCompat(normalized, isAliyunCompatibleBaseUrl(LLM_BASE_URL))) {
-    return 'functionCalling';
-  }
   if (supportsJsonSchemaStructuredOutput(normalized)) return 'jsonSchema';
   if (supportsJsonModeStructuredOutput(normalized) || isAliyunCompatibleBaseUrl(LLM_BASE_URL)) return 'jsonMode';
   return undefined;
@@ -216,10 +213,6 @@ function versionAtLeast(model: string, pattern: RegExp, minMajor: number, minMin
 
 function supportsJsonSchemaStructuredOutput(model: string): boolean {
   return versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
-}
-
-function needsAliyunKimiFunctionCallingCompat(model: string, isAliyunCompatibleEndpoint: boolean): boolean {
-  return isAliyunCompatibleEndpoint && supportsJsonSchemaStructuredOutput(model);
 }
 
 function supportsJsonModeStructuredOutput(model: string): boolean {

@@ -190,10 +190,6 @@ function supportsOfficialJsonSchemaModel(model: string): boolean {
   return versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
 }
 
-function needsAliyunKimiFunctionCallingCompat(model: string, isAliyunCompatibleEndpoint: boolean): boolean {
-  return isAliyunCompatibleEndpoint && supportsOfficialJsonSchemaModel(model);
-}
-
 function hasOfficialJsonModeModel(model: string): boolean {
   return model.includes('deepseek')
     || model.includes('qwen')
@@ -213,10 +209,6 @@ export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): Orches
         },
       }
     : {};
-
-  if (needsAliyunKimiFunctionCallingCompat(model, isAliyunCompatibleEndpoint)) {
-    return { method: 'functionCalling', ...autoRepair };
-  }
 
   if (supportsOfficialJsonSchemaModel(model)) {
     return { method: 'jsonSchema', ...autoRepair };

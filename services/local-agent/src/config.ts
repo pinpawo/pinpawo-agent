@@ -48,8 +48,22 @@ export function resolveNumberConfigValue(envVal: string | undefined, storedVal: 
     : undefined;
 }
 
+function resolveBooleanConfigValue(envVal: string | undefined, storedVal: unknown): boolean | undefined {
+  const raw = envVal?.trim()
+    ? envVal.trim().toLowerCase()
+    : (typeof storedVal === 'boolean' ? String(storedVal) : '');
+  if (!raw) return undefined;
+  if (['1', 'true', 'yes', 'y', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(raw)) return false;
+  return undefined;
+}
+
 function getNumber(envKey: string, storedKey: keyof typeof stored): number | undefined {
   return resolveNumberConfigValue(process.env[envKey], stored[storedKey]);
+}
+
+function getBoolean(envKey: string, storedKey: keyof typeof stored): boolean | undefined {
+  return resolveBooleanConfigValue(process.env[envKey], stored[storedKey]);
 }
 
 function required(envKey: string, storedKey: keyof typeof stored, label: string): string {
@@ -93,6 +107,14 @@ export const config = {
     getNumber('LLM_CONTEXT_WINDOW_TOKENS', 'llm_context_window_tokens')
     ?? inferLlmContextWindowTokens(get('LLM_MODEL', 'llm_model') || 'deepseek-v4-pro')
     ?? 32000,
+  structuredOutputAutoRepair: getBoolean(
+    'LLM_STRUCTURED_OUTPUT_AUTO_REPAIR',
+    'structured_output_auto_repair',
+  ) ?? false,
+  structuredOutputRepairMaxRetries: getNumber(
+    'LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES',
+    'structured_output_repair_max_retries',
+  ),
 
   workdir: get('PINPAWO_WORKDIR', 'workdir') || homedir(),
   browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',

@@ -7,7 +7,7 @@
  * deterministic fake chat model that returns the example's subagent_response.
  *
  * Run:
- *   LLM_BASE_URL=... LLM_MODEL=... DECISION_STRUCTURED_OUTPUT_METHOD=functionCalling \
+ *   LLM_BASE_URL=... LLM_MODEL=... DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode \
  *     npx tsx evals/orchestrator-flow.mock-subagent.eval.ts
  */
 import { evaluate } from 'langsmith/evaluation';
@@ -195,8 +195,37 @@ function normalizeStructuredOutputMethod(value: string | undefined): Orchestrati
 
 function inferDefaultStructuredOutputMethod(model: string): OrchestrationDecisionStructuredOutputConfig['method'] {
   const normalized = model.toLowerCase();
-  if (normalized.includes('deepseek')) return 'functionCalling';
+  if (supportsJsonSchemaStructuredOutput(normalized)) return 'jsonSchema';
+  if (supportsJsonModeStructuredOutput(normalized) || isAliyunCompatibleBaseUrl(LLM_BASE_URL)) return 'jsonMode';
   return undefined;
+}
+
+function versionAtLeast(model: string, pattern: RegExp, minMajor: number, minMinor: number): boolean {
+  const rawVersion = model.match(pattern)?.[1];
+  if (!rawVersion) return false;
+  const [majorRaw, minorRaw = '0'] = rawVersion.split('.');
+  const major = Number(majorRaw);
+  const minor = Number(minorRaw);
+  return Number.isFinite(major)
+    && Number.isFinite(minor)
+    && (major > minMajor || (major === minMajor && minor >= minMinor));
+}
+
+function supportsJsonSchemaStructuredOutput(model: string): boolean {
+  return versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
+}
+
+function supportsJsonModeStructuredOutput(model: string): boolean {
+  return model.includes('deepseek')
+    || model.includes('qwen')
+    || model.includes('glm')
+    || model.includes('minimax');
+}
+
+function isAliyunCompatibleBaseUrl(baseUrl: string): boolean {
+  const normalized = baseUrl.toLowerCase();
+  return normalized.includes('dashscope.aliyuncs.com')
+    || normalized.includes('maas.aliyuncs.com');
 }
 
 const DECISION_STRUCTURED_OUTPUT_METHOD = normalizeStructuredOutputMethod(
@@ -213,13 +242,22 @@ if (!LLM_API_KEY) {
 }
 
 function buildModelKwargs(model: string) {
-  if (model.includes('qwen') || model.includes('glm')) {
+  const normalizedModel = model.toLowerCase();
+  if (
+    normalizedModel.includes('qwen')
+    || normalizedModel.includes('glm')
+    || normalizedModel.includes('minimax')
+  ) {
     return { extra_body: { enable_thinking: false } };
   }
-  if (model.includes('deepseek')) {
+  if (normalizedModel.includes('deepseek')) {
     return { thinking: { type: 'disabled' } };
   }
   return undefined;
+}
+
+function requiresStreaming(model: string): boolean {
+  return model.toLowerCase().includes('glm-4.5');
 }
 
 function messageHasLaneMeta(message: unknown): boolean {
@@ -317,6 +355,7 @@ function buildModels(subagent: ProbeSubagentModel): AgentModels {
     temperature: 0.3,
     timeout: 180_000,
     apiKey: LLM_API_KEY,
+    streaming: requiresStreaming(LLM_MODEL),
     modelKwargs: buildModelKwargs(LLM_MODEL),
     configuration: {
       baseURL: LLM_BASE_URL,

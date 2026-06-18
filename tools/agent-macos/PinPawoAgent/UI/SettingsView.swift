@@ -300,7 +300,7 @@ private struct LLMSettingsPane: View {
     Config.shared.update {
       $0.llmApiKey = key
       $0.llmBaseUrl = baseUrl.isEmpty ? "https://dashscope.aliyuncs.com/compatible-mode/v1" : baseUrl
-      $0.llmModel   = model.isEmpty ? "qwen-plus" : model
+      $0.llmModel   = model.isEmpty ? "qwen3.5-plus" : model
       let normalizedWorkdir = cleanWorkdir(workdir)
       $0.workdir    = normalizedWorkdir.isEmpty ? nil : normalizedWorkdir
       $0.subagentThinking = subagentThinking

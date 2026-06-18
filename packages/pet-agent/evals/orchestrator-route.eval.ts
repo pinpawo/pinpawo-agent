@@ -66,8 +66,37 @@ function normalizeStructuredOutputMethod(value: string | undefined): Orchestrati
 
 function inferDefaultStructuredOutputMethod(model: string): OrchestrationDecisionStructuredOutputConfig['method'] {
   const normalized = model.toLowerCase();
-  if (normalized.includes('deepseek')) return 'functionCalling';
+  if (supportsJsonSchemaStructuredOutput(normalized)) return 'jsonSchema';
+  if (supportsJsonModeStructuredOutput(normalized) || isAliyunCompatibleBaseUrl(LLM_BASE_URL)) return 'jsonMode';
   return undefined;
+}
+
+function versionAtLeast(model: string, pattern: RegExp, minMajor: number, minMinor: number): boolean {
+  const rawVersion = model.match(pattern)?.[1];
+  if (!rawVersion) return false;
+  const [majorRaw, minorRaw = '0'] = rawVersion.split('.');
+  const major = Number(majorRaw);
+  const minor = Number(minorRaw);
+  return Number.isFinite(major)
+    && Number.isFinite(minor)
+    && (major > minMajor || (major === minMajor && minor >= minMinor));
+}
+
+function supportsJsonSchemaStructuredOutput(model: string): boolean {
+  return versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
+}
+
+function supportsJsonModeStructuredOutput(model: string): boolean {
+  return model.includes('deepseek')
+    || model.includes('qwen')
+    || model.includes('glm')
+    || model.includes('minimax');
+}
+
+function isAliyunCompatibleBaseUrl(baseUrl: string): boolean {
+  const normalized = baseUrl.toLowerCase();
+  return normalized.includes('dashscope.aliyuncs.com')
+    || normalized.includes('maas.aliyuncs.com');
 }
 
 const DECISION_STRUCTURED_OUTPUT_METHOD = normalizeStructuredOutputMethod(
@@ -98,9 +127,14 @@ if (!LLM_API_KEY) {
 }
 
 function buildEvalModels(): AgentModels {
-  const modelKwargs = LLM_MODEL.includes('qwen') || LLM_MODEL.includes('glm')
+  const normalizedModel = LLM_MODEL.toLowerCase();
+  const modelKwargs = (
+    normalizedModel.includes('qwen')
+    || normalizedModel.includes('glm')
+    || normalizedModel.includes('minimax')
+  )
     ? { extra_body: { enable_thinking: false } }
-    : LLM_MODEL.includes('deepseek')
+    : normalizedModel.includes('deepseek')
       ? { thinking: { type: 'disabled' } }
       : undefined;
   const model = new ChatOpenAI({
@@ -108,6 +142,7 @@ function buildEvalModels(): AgentModels {
     temperature: 0.3, // lower for more deterministic eval
     timeout: 180_000,
     apiKey: LLM_API_KEY,
+    streaming: normalizedModel.includes('glm-4.5'),
     modelKwargs,
     configuration: {
       baseURL: LLM_BASE_URL,

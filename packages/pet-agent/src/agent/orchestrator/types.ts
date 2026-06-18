@@ -7,6 +7,7 @@ import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent'
 import type { CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
+import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { OrchestrationDecision } from './schemas';
 
 export type MessageLane = 'general' | `capability:${string}`;
@@ -100,8 +101,9 @@ export type OrchestratorInvokeOptions = {
 
 export type OrchestrationDecisionStructuredOutputOptions = {
   name: string;
-  method?: 'functionCalling' | 'jsonMode' | 'jsonSchema';
+  method?: StructuredOutputMethod;
   strict?: boolean;
+  autoRepair?: StructuredOutputAutoRepairConfig;
 };
 
 export type OrchestrationDecisionStructuredOutputConfig = Omit<OrchestrationDecisionStructuredOutputOptions, 'name'>;

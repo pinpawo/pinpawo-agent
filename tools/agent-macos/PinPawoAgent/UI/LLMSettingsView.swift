@@ -5,7 +5,7 @@ struct LLMSettingsView: View {
 
   @State private var apiKey = ""
   @State private var baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-  @State private var model = "qwen-plus"
+  @State private var model = "qwen3.5-plus"
   @State private var errorMsg: String?
 
   var body: some View {
@@ -76,7 +76,7 @@ struct LLMSettingsView: View {
     Config.shared.update {
       $0.llmApiKey = key
       $0.llmBaseUrl = baseUrl.isEmpty ? "https://dashscope.aliyuncs.com/compatible-mode/v1" : baseUrl
-      $0.llmModel = model.isEmpty ? "qwen-plus" : model
+      $0.llmModel = model.isEmpty ? "qwen3.5-plus" : model
     }
     appState.advance()
   }

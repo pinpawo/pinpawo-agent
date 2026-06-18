@@ -85,7 +85,7 @@ struct AgentConfig: Codable {
     actorId         = try c.decodeIfPresent(String.self, forKey: .actorId)
     llmApiKey       = try c.decodeIfPresent(String.self, forKey: .llmApiKey)
     llmBaseUrl      = try c.decodeIfPresent(String.self, forKey: .llmBaseUrl)      ?? "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    llmModel        = try c.decodeIfPresent(String.self, forKey: .llmModel)        ?? "qwen-plus"
+    llmModel        = try c.decodeIfPresent(String.self, forKey: .llmModel)        ?? "qwen3.5-plus"
     agentDistPath   = try c.decodeIfPresent(String.self, forKey: .agentDistPath)
     browserBackend  = try c.decodeIfPresent(String.self, forKey: .browserBackend)
     workdir         = try c.decodeIfPresent(String.self, forKey: .workdir)
@@ -105,7 +105,7 @@ struct AgentConfig: Codable {
     actorId: nil,
     llmApiKey: nil,
     llmBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    llmModel: "qwen-plus",
+    llmModel: "qwen3.5-plus",
     agentDistPath: nil
   )
 }

@@ -1,6 +1,6 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import { clipForPrompt } from '@pinpawo/pet-agent';
+import { clipForPrompt, invokeStructuredOutput } from '@pinpawo/pet-agent';
 import type {
   AgentCapability,
   CapabilityArtifactSink,
@@ -176,34 +176,41 @@ async function ingestExploreKnowledge(params: {
     throw new Error('explore ingest has no new evidence');
   }
 
-  const model = params.model.withStructuredOutput(exploreKnowledgeIngestSchema, {
-    name: 'explore_knowledge_ingest',
-    ...(params.structuredOutput?.method ? { method: params.structuredOutput.method } : {}),
-    ...(typeof params.structuredOutput?.strict === 'boolean' ? { strict: params.structuredOutput.strict } : {}),
+  const result = await invokeStructuredOutput({
+    model: params.model,
+    schema: exploreKnowledgeIngestSchema,
+    options: {
+      name: 'explore_knowledge_ingest',
+      ...(params.structuredOutput?.method ? { method: params.structuredOutput.method } : {}),
+      ...(typeof params.structuredOutput?.strict === 'boolean' ? { strict: params.structuredOutput.strict } : {}),
+      ...(typeof params.structuredOutput?.autoRepair !== 'undefined'
+        ? { autoRepair: params.structuredOutput.autoRepair }
+        : {}),
+    },
+    messages: [
+      new SystemMessage([
+        '你是 explore capability 的知识 ingest 模块。',
+        '当探索的上下文接近预算上限时，你被调用来对较早的探索内容做一次完整总结，',
+        '使较早的原始工具输出可以从上下文中移除，只保留你的总结和最新若干条原文。',
+        '输入包括上一版 summary 和需要被总结的 evidence。你必须更新 summary，必要时修正旧结论。',
+        'summary 必须用 Markdown，包含：目标、已查看文件、关键知识点 / 概念、已确认事实、未确认 / 风险、下一步。',
+        'summary 要让下一轮 agent 不重复探索已看过的内容。',
+        'evidence 字段：为关键来源各给一条 { source, proves, value }：',
+        '- source：参考来源（文件路径、URL、issue/PR 编号、命令输出来源）。',
+        '- proves：该来源确认/证明了什么事实。',
+        '- value：它对当前推理或下一步的价值。',
+        '不要复制大段原始工具输出。',
+        '不要编造未查看过的文件、URL、issue、PR 或命令结果。',
+      ].join('\n')),
+      new HumanMessage([
+        '触发原因：context_pressure',
+        '上一版 summary：',
+        params.previousSummary ?? '[无]',
+        '需要总结的 evidence：',
+        evidence,
+      ].join('\n\n')),
+    ],
   });
-  const result = await model.invoke([
-    new SystemMessage([
-      '你是 explore capability 的知识 ingest 模块。',
-      '当探索的上下文接近预算上限时，你被调用来对较早的探索内容做一次完整总结，',
-      '使较早的原始工具输出可以从上下文中移除，只保留你的总结和最新若干条原文。',
-      '输入包括上一版 summary 和需要被总结的 evidence。你必须更新 summary，必要时修正旧结论。',
-      'summary 必须用 Markdown，包含：目标、已查看文件、关键知识点 / 概念、已确认事实、未确认 / 风险、下一步。',
-      'summary 要让下一轮 agent 不重复探索已看过的内容。',
-      'evidence 字段：为关键来源各给一条 { source, proves, value }：',
-      '- source：参考来源（文件路径、URL、issue/PR 编号、命令输出来源）。',
-      '- proves：该来源确认/证明了什么事实。',
-      '- value：它对当前推理或下一步的价值。',
-      '不要复制大段原始工具输出。',
-      '不要编造未查看过的文件、URL、issue、PR 或命令结果。',
-    ].join('\n')),
-    new HumanMessage([
-      '触发原因：context_pressure',
-      '上一版 summary：',
-      params.previousSummary ?? '[无]',
-      '需要总结的 evidence：',
-      evidence,
-    ].join('\n\n')),
-  ]);
   return {
     summary: result.summary.trim(),
     evidence: result.evidence ?? [],

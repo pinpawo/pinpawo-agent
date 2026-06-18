@@ -27,6 +27,10 @@ export type StoredConfig = {
    */
   /** Enable thinking/reasoning for subagent calls. Default: false. */
   subagent_thinking?: boolean;
+  /** Retry the same structured-output LLM call after parse/schema failure. Default: false. */
+  structured_output_auto_repair?: boolean;
+  /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */
+  structured_output_repair_max_retries?: number;
   capabilities?: Record<string, boolean>;
   /**
    * Additional directories to scan for user-defined capability plugins,

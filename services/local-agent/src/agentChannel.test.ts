@@ -72,24 +72,107 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
   );
 });
 
-test('buildDecisionStructuredOutput uses function calling for models with weak json schema support', () => {
+test('buildDecisionStructuredOutput selects structured output strategy by provider model family and version', () => {
   assert.deepEqual(buildDecisionStructuredOutput({
     apiKey: 'test-key',
     baseUrl: 'https://api.deepseek.com',
     model: 'deepseek-v4-pro',
-  }), { method: 'functionCalling' });
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen3.5-plus',
+  }), { method: 'jsonMode' });
 
   assert.deepEqual(buildDecisionStructuredOutput({
     apiKey: 'test-key',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen3.7-plus',
-  }), { method: 'functionCalling' });
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen3.7-max',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'glm-5',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'kimi-k2.6',
+  }), { method: 'jsonSchema' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'MiniMax-M2.6',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'stepfun/step-3.7-flash',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen2.5-turbo',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-plus',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'glm-4.5',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'kimi-k2.5',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'MiniMax-M2.5',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    model: 'provider-model-with-json-mode',
+  }), { method: 'jsonMode' });
 
   assert.equal(buildDecisionStructuredOutput({
     apiKey: 'test-key',
     baseUrl: 'https://example.test/v1',
     model: 'gpt-4o',
   }), undefined);
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen3.7-max',
+    structuredOutputAutoRepair: true,
+    structuredOutputRepairMaxRetries: 2,
+  }), {
+    method: 'jsonMode',
+    autoRepair: { maxRetries: 2 },
+  });
 });
 
 test('buildLocalChatAgentInput passes model structured output strategy to explore', async () => {
@@ -146,6 +229,6 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
   assert.match(String(rewritten?.[0]?.content ?? ''), /summary with viewed files/);
   assert.deepEqual(capturedOptions, {
     name: 'explore_knowledge_ingest',
-    method: 'functionCalling',
+    method: 'jsonMode',
   });
 });

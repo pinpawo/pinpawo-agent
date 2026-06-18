@@ -248,6 +248,9 @@ pinpawo-agent studio migrate --workdir /path/to/project
 
 默认不删除旧文件。
 
+当前 local-agent 已提供该迁移命令。默认跳过已有目标文件，传 `--force`
+时才覆盖目标 workdir 下的 Studio 配置、pets 配置和 wiki 目录。
+
 ## CLI 和服务启动
 
 `run` 命令新增：
@@ -367,6 +370,14 @@ studio_schedule
 - 用户不需要猜当前读取的是哪个 studio config。
 - 旧配置可复制到新工作区，不自动删除旧配置。
 
+当前实现：
+
+- TUI 从 local server `/runtime` 读取 effective workdir 和
+  `<workdir>/.pinpawo/studio.json` 路径并展示。
+- `setup --workdir <dir>` 检查该 workdir 下的 Studio 配置，缺失时提示迁移命令。
+- `studio migrate --workdir <dir> [--force]` 将旧 `~/.pinpawo` Studio 三件套复制到
+  `<workdir>/.pinpawo/`。
+
 ### Phase 5: API/Scheduler 工作区化
 
 目标：App/API scheduler 调用 Studio run 时也使用明确 workspace/runtime config。
@@ -381,6 +392,11 @@ studio_schedule
 
 - scheduler 不直接读全局 Studio 配置。
 - 不同 workspace 的 scheduled runs 互不污染 wiki、artifact、checkpoint。
+
+当前 repo 状态：`pinpawo-agent` 只包含 local-agent 和 shared pet-agent runtime，
+没有 App/API scheduler 服务代码。local-agent 已通过 `LocalAgentRuntimeConfig` 和
+`/runtime` 暴露 workdir-scoped 路径；API/Scheduler 落地时应复用同一 runtime config
+契约，而不是重新引入全局 `~/.pinpawo/studio.json` 读取。
 
 ## 测试计划
 

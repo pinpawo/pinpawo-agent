@@ -46,6 +46,10 @@ export type SessionModel = {
   runtime: {
     model?: string;
     cwd?: string;
+    stateRoot?: string;
+    studioConfigPath?: string;
+    petsDir?: string;
+    studioWikiBaseDir?: string;
     contextWindow?: number;
   };
   history: HistoryCellModel[];
@@ -119,7 +123,7 @@ export type TuiAction =
   | {
       type: 'session.set_runtime';
       sessionId?: SessionId;
-      runtime: Pick<SessionModel['runtime'], 'model' | 'cwd' | 'contextWindow'>;
+      runtime: Partial<SessionModel['runtime']>;
     }
   | {
       type: 'session.set_kind';

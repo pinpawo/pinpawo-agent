@@ -15,9 +15,9 @@ export function RuntimeInfoLine({ runtime }: { runtime: SessionModel['runtime'] 
       {TUI_TEXT.runtimeInfoLine(
         fallback(runtime.model),
         fallback(runtime.cwd),
+        fallback(runtime.studioConfigPath),
         runtime.contextWindow ? LOCALE_FORMATTER.format(runtime.contextWindow) : '未提供',
       )}
     </Text>
   );
 }
-

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
 import type { InitCommandOptions } from './commands/init';
+import type { StudioMigrateOptions } from './commands/studio';
 
 type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
@@ -13,7 +14,8 @@ type LocalAgentCliHandlers = {
   runTui?: (opts: { dryRun: boolean }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
-  runSetup?: () => Promise<void> | void;
+  runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
+  runStudioMigrate?: (opts: StudioMigrateOptions) => Promise<void> | void;
 };
 
 function readPackageVersion(): string {
@@ -68,9 +70,13 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
   program
     .command('setup')
     .description('Check local configuration and print guided setup steps')
-    .action(async () => {
+    .option('--workdir <directory>', 'workdir whose runtime state should be checked')
+    .action(async (options: { workdir?: string }) => {
+      const workdir = options.workdir?.trim()
+        ? resolveWorkdirOption(options.workdir)
+        : undefined;
       const runSetup = handlers.runSetup ?? (await import('./commands/setup')).runSetupGuide;
-      await runSetup();
+      await runSetup({ workdir });
     });
 
   program
@@ -118,7 +124,25 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
       await runDetect();
     });
 
+  program
+    .command('studio <action>')
+    .description('Manage workdir-scoped Studio runtime config')
+    .option('--workdir <directory>', 'target workdir', process.env.PINPAWO_WORKDIR ?? '~')
+    .option('--force', 'overwrite existing workdir-scoped Studio files')
+    .action(async (action: string, options: { workdir?: string; force?: boolean }) => {
+      if (action !== 'migrate') {
+        throw new Error(`Unknown studio command: ${action}`);
+      }
+      const runStudioMigrate = handlers.runStudioMigrate
+        ?? (await import('./commands/studio')).runStudioMigrate;
+      await runStudioMigrate({
+        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+        force: options.force ?? false,
+      });
+    });
+
   registerCapabilityCommand(program);
+
   return program;
 }
 

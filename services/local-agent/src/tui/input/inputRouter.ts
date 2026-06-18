@@ -14,6 +14,7 @@ export type TuiInputRouteContext = {
   hasPendingApproval: boolean;
   approvalFreeTextActive?: boolean;
   hasResumePicker: boolean;
+  hasCommandPalette?: boolean;
   hasFileMention?: boolean;
   composerHistory?: ComposerHistoryRouteState | null;
 };
@@ -27,6 +28,7 @@ export type TuiInputOwner =
   | { type: 'resumePicker' }
   | { type: 'approval'; freeTextActive: boolean }
   | { type: 'busy' }
+  | { type: 'commandPalette' }
   | { type: 'fileMention' }
   | { type: 'composer' };
 
@@ -34,6 +36,7 @@ export type TuiInputCommand =
   | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
+  | { target: 'commandPalette'; action: 'previous' | 'next' | 'accept' }
   | { target: 'fileMention'; action: 'previous' | 'next' | 'accept' }
   | { target: 'composer'; action: 'submit' | 'clear' }
   | { target: 'composerHistory'; action: 'previous' | 'next' }
@@ -50,6 +53,9 @@ export type TuiLegacyInputCommand =
   | { type: 'resume.next' }
   | { type: 'resume.submit' }
   | { type: 'resume.dismiss' }
+  | { type: 'commandPalette.previous' }
+  | { type: 'commandPalette.next' }
+  | { type: 'commandPalette.accept' }
   | { type: 'fileMention.previous' }
   | { type: 'fileMention.next' }
   | { type: 'fileMention.accept' }
@@ -87,6 +93,7 @@ export function resolveTuiInputOwner(context: TuiInputRouteContext): TuiInputOwn
     return { type: 'approval', freeTextActive: Boolean(context.approvalFreeTextActive) };
   }
   if (context.busy) return { type: 'busy' };
+  if (context.hasCommandPalette) return { type: 'commandPalette' };
   if (context.hasFileMention) return { type: 'fileMention' };
   return { type: 'composer' };
 }
@@ -116,6 +123,16 @@ export function resolveTuiInputCommand(
     case 'busy':
       if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
       return { target: 'none' };
+
+    case 'commandPalette':
+      if (event.type === 'cursor.up') return { target: 'commandPalette', action: 'previous' };
+      if (event.type === 'cursor.down') return { target: 'commandPalette', action: 'next' };
+      if (event.type === 'tab') return { target: 'commandPalette', action: 'accept' };
+      if (event.type === 'escape') return { target: 'composer', action: 'clear' };
+      if (isReturn) return { target: 'composer', action: 'submit' };
+      if (isControlSequence) return { target: 'none' };
+      if (event.type === 'noop') return { target: 'none' };
+      return routeTextAreaCommand(event);
 
     case 'fileMention':
       if (event.type === 'cursor.up') return { target: 'fileMention', action: 'previous' };
@@ -149,6 +166,8 @@ export function toLegacyTuiInputCommand(command: TuiInputCommand): TuiLegacyInpu
       return { type: `approval.${command.action}` };
     case 'resume':
       return { type: `resume.${command.action}` };
+    case 'commandPalette':
+      return { type: `commandPalette.${command.action}` };
     case 'fileMention':
       return { type: `fileMention.${command.action}` };
     case 'composer':

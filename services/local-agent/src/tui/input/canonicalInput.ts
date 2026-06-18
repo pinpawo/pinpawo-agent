@@ -54,6 +54,7 @@ export function toCanonicalInputEvent(
 
   if (isRawReturnInput(input)) return { type: 'submit' };
   if (isRawNewlineInput(input)) return { type: 'newline' };
+  if (input === '\b' || input === '\x7f') return { type: 'text.delete.backward' };
   if (isRawDeleteForwardInput(input)) return { type: 'text.delete.forward' };
   if (isRawShiftCursorInput(input, 'D')) return { type: 'selection.left' };
   if (isRawShiftCursorInput(input, 'C')) return { type: 'selection.right' };

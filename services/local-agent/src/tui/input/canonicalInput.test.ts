@@ -38,6 +38,14 @@ test('toCanonicalInputEvent maps submit and newline variants', () => {
 
 test('toCanonicalInputEvent maps edit and cursor keys', () => {
   assert.deepEqual(
+    toCanonicalInputEvent({ input: '\x7f', key: {} }),
+    { type: 'text.delete.backward' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '\b', key: {} }),
+    { type: 'text.delete.backward' },
+  );
+  assert.deepEqual(
     toCanonicalInputEvent({ input: '', key: { backspace: true } }),
     { type: 'text.delete.backward' },
   );

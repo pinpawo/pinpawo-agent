@@ -11,9 +11,10 @@ import { ResumePicker } from './components/ResumePicker';
 import {
   createInitialTuiInputBufferState,
   normalizeTuiInputEvent,
-  resolveTuiKeyAction,
+  toCanonicalInputEvent,
 } from './input/keymap';
-import { applyTextAreaInput } from './input/textareaModel';
+import { resolveTuiInputAction } from './input/inputRouter';
+import { applyTextAreaInputEvent } from './input/textareaModel';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
   buildActiveOperationLines,
@@ -199,94 +200,92 @@ export function TuiApp(props: { actorId: string }) {
     if (!normalized.event) {
       return;
     }
-    const normalizedInput = normalized.event.input;
-    const normalizedKey = normalized.event.key;
-    const action = resolveTuiKeyAction(normalizedInput, normalizedKey, {
+    const inputEvent = toCanonicalInputEvent(normalized.event);
+    const action = resolveTuiInputAction(inputEvent, {
       ready,
       busy,
       hasPendingApproval: Boolean(pendingApproval),
       hasResumePicker: resumePickerOpen,
     });
 
-    switch (action.type) {
-      case 'global.ctrl_c':
-        if (busy || pendingApproval) {
-          const nowMs = Date.now();
-          if (nowMs - lastInterruptAtRef.current < 1200) {
-            appendMessage('system', TUI_TEXT.secondCtrlCExit);
-            exit();
+    switch (action.target) {
+      case 'global':
+        if (action.action === 'ctrl_c') {
+          if (busy || pendingApproval) {
+            const nowMs = Date.now();
+            if (nowMs - lastInterruptAtRef.current < 1200) {
+              appendMessage('system', TUI_TEXT.secondCtrlCExit);
+              exit();
+              return;
+            }
+            if (runtimeController.requestInterrupt()) {
+              lastInterruptAtRef.current = nowMs;
+            }
+            appendMessage('system', TUI_TEXT.interruptRequested);
             return;
           }
-          if (runtimeController.requestInterrupt()) {
-            lastInterruptAtRef.current = nowMs;
-          }
-          appendMessage('system', TUI_TEXT.interruptRequested);
+          appendMessage('system', TUI_TEXT.exiting);
+          exit();
           return;
         }
-        appendMessage('system', TUI_TEXT.exiting);
-        exit();
-        return;
-
-      case 'global.interrupt':
         runtimeController.requestInterrupt();
         return;
 
-      case 'approval.previous':
-        setApprovalIndex((current) => Math.max(0, current - 1));
-        return;
-
-      case 'approval.next':
-        setApprovalIndex((current) => Math.max(0, Math.min(reviewOptions.length - 1, current + 1)));
-        return;
-
-      case 'approval.submit': {
-        const textInputOption = inputValue.trim()
-          ? reviewOptions.find((option) => option.input?.kind === 'text') ?? null
-          : null;
-        const option = textInputOption ?? reviewOptions[approvalIndex] ?? reviewOptions[0];
-        if (option) {
-          runtimeController.submitReviewResponse(option, inputValue);
+      case 'approval':
+        if (action.action === 'previous') {
+          setApprovalIndex((current) => Math.max(0, current - 1));
+          return;
         }
-        return;
-      }
+        if (action.action === 'next') {
+          setApprovalIndex((current) => Math.max(0, Math.min(reviewOptions.length - 1, current + 1)));
+          return;
+        }
+        {
+          const textInputOption = inputValue.trim()
+            ? reviewOptions.find((option) => option.input?.kind === 'text') ?? null
+            : null;
+          const option = textInputOption ?? reviewOptions[approvalIndex] ?? reviewOptions[0];
+          if (option) {
+            runtimeController.submitReviewResponse(option, inputValue);
+          }
+          return;
+        }
 
-      case 'resume.previous':
-        moveResumeSelection(-1);
-        return;
-
-      case 'resume.next':
-        moveResumeSelection(1);
-        return;
-
-      case 'resume.submit':
-        resumeSelectedSession();
-        return;
-
-      case 'resume.dismiss':
+      case 'resume':
+        if (action.action === 'previous') {
+          moveResumeSelection(-1);
+          return;
+        }
+        if (action.action === 'next') {
+          moveResumeSelection(1);
+          return;
+        }
+        if (action.action === 'submit') {
+          resumeSelectedSession();
+          return;
+        }
         closeResumePicker();
         return;
 
-      case 'composer.clear':
-        clearInputValue();
-        return;
-
-      case 'composer.submit':
-        submitCurrentInput();
-        return;
-
-      case 'composer.edit': {
-        const nextInput = applyTextAreaInput(normalizedInput, normalizedKey, {
-          text: inputValue,
-          cursorOffset: inputCursorOffset,
-        }, { width: Math.max(8, contentWidth - 4) });
-        dispatch({ type: 'input.apply', value: nextInput });
-        return;
-      }
+      case 'composer':
+        if (action.action === 'clear') {
+          clearInputValue();
+          return;
+        }
+        if (action.action === 'submit') {
+          submitCurrentInput();
+          return;
+        }
+        {
+          const nextInput = applyTextAreaInputEvent(inputEvent, {
+            text: inputValue,
+            cursorOffset: inputCursorOffset,
+          }, { width: Math.max(8, contentWidth - 4) });
+          dispatch({ type: 'input.apply', value: nextInput });
+          return;
+        }
 
       case 'none':
-        return;
-
-      default:
         return;
     }
   }, { isActive: true });

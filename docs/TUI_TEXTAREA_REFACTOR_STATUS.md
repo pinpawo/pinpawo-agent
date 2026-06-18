@@ -97,7 +97,10 @@
    - 本 PR 变更：composer 中输入 `@` 或 `@path/prefix` 时展示 root 内路径候选，↑↓ 选择，Tab 补全 `@path` mention；候选来自当前 runtime cwd（缺省 `config.workdir`），并限制在 root 内。
    - 验收目标：路径搜索不越过工作目录 root，不枚举 `.git` / `node_modules` 等大目录；popup 只在 composer mention token 活跃时出现，不抢 approval/resume/busy owner；输入路由和路径补全有测试覆盖。
 
-5. **optional external editor flow**（Phase 5，`$EDITOR`）——未实现。
+5. **optional external editor flow**（Phase 5，`$EDITOR`）
+   - 状态：PR `codex/tui-textarea-external-editor` 本地处理中。
+   - 本 PR 变更：新增 `/edit [文本]` 命令，使用 `$VISUAL` 或 `$EDITOR` 打开临时草稿文件，保存并退出后把内容回填 composer，不直接发送。
+   - 验收目标：外部编辑器流程可选、失败可恢复；没有配置 editor 时给出用户可见提示；编辑器命令解析、草稿读写和 `/edit` 提交流程有测试覆盖。
 
 6. **OpenTUI migration spike**（Phase 6）
    - 状态：PR `codex/tui-textarea-opentui-spike-decision` 本地处理中，决策为 **defer / no-op**。

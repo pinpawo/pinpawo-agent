@@ -5,6 +5,7 @@ export type TuiCommandName =
   | 'studio'
   | 'new'
   | 'export'
+  | 'edit'
   | 'resume';
 
 export type TuiCommandDefinition = {
@@ -68,6 +69,12 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/export [path]',
     description: '导出当前会话 transcript；默认写入启动目录，无扩展名 path 视为目录',
     helpText: '/export [path] 导出 transcript(默认当前目录)',
+  },
+  {
+    name: 'edit',
+    usage: '/edit [文本]',
+    description: '使用 $VISUAL 或 $EDITOR 编辑草稿，保存后回填输入框',
+    helpText: '/edit [文本] 外部编辑',
   },
   {
     name: 'resume',

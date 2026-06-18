@@ -13,6 +13,7 @@ type TuiCommandSubmitInput = {
   studioConversationIdRef: { current: string | null };
   setStudioMode: (value: boolean) => void;
   openResumePicker: () => void;
+  openExternalEditor?: (initialText: string) => void;
   exit: () => void;
   appendSystemMessage: (text: string) => void;
   clearInputValue: () => void;
@@ -52,6 +53,16 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
         const message = err instanceof Error ? err.message : String(err);
         options.appendSystemMessage(TUI_TEXT.exportFailed(message));
       });
+      return;
+    }
+
+    if (parsed.name === 'edit') {
+      options.clearInputValue();
+      if (!options.openExternalEditor) {
+        options.appendSystemMessage(TUI_TEXT.externalEditorUnavailable);
+        return;
+      }
+      options.openExternalEditor(parsed.args);
       return;
     }
 

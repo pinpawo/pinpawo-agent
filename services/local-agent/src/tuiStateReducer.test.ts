@@ -151,20 +151,49 @@ test('tuiStateReducer navigates composer prompt history and restores draft', () 
   assert.equal(state.input.history.selectedIndex, null);
 });
 
-test('tuiStateReducer preserves engine selection and clears it on direct input changes', () => {
+test('tuiStateReducer preserves engine textarea state and clears transient state on host changes', () => {
   let state = tuiStateReducer(initialState(), {
     type: 'input.apply',
     value: {
       text: 'hello',
       cursorOffset: 5,
       selection: { anchorOffset: 1, focusOffset: 4 },
+      editHistory: { undo: [{ text: 'he', cursorOffset: 2 }], redo: [] },
+      preferredColumn: 3,
     },
   });
 
   assert.deepEqual(state.input.selection, { anchorOffset: 1, focusOffset: 4 });
+  assert.deepEqual(state.input.editHistory, { undo: [{ text: 'he', cursorOffset: 2 }], redo: [] });
+  assert.equal(state.input.preferredColumn, 3);
 
   state = tuiStateReducer(state, { type: 'input.set', value: 'draft' });
   assert.equal(state.input.selection, undefined);
+  assert.equal(state.input.editHistory, undefined);
+  assert.equal(state.input.preferredColumn, undefined);
+
+  state = tuiStateReducer(state, {
+    type: 'input.apply',
+    value: {
+      text: 'second',
+      cursorOffset: 6,
+      selection: { anchorOffset: 0, focusOffset: 6 },
+      editHistory: { undo: [{ text: 'draft', cursorOffset: 5 }], redo: [] },
+      preferredColumn: 2,
+    },
+  });
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-transient',
+    kind: 'chat',
+    userText: 'second',
+    now: 1000,
+    userCell: { id: 'req-transient:user' },
+    statusMessage: '等待回复',
+  });
+  assert.equal(state.input.selection, undefined);
+  assert.equal(state.input.editHistory, undefined);
+  assert.equal(state.input.preferredColumn, undefined);
 });
 
 test('tuiStateReducer infers usage context window from runtime when missing', () => {

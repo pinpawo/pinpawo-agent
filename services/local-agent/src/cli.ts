@@ -127,7 +127,7 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
   program
     .command('studio <action>')
     .description('Manage workdir-scoped Studio runtime config')
-    .option('--workdir <directory>', 'target workdir', process.env.PINPAWO_WORKDIR ?? '~')
+    .option('--workdir <directory>', 'target workdir')
     .option('--force', 'overwrite existing workdir-scoped Studio files')
     .action(async (action: string, options: { workdir?: string; force?: boolean }) => {
       if (action !== 'migrate') {

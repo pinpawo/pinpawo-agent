@@ -99,3 +99,24 @@ test('local agent CLI passes studio migrate options to the handler', async () =>
     force: true,
   });
 });
+
+test('local agent CLI leaves studio migrate workdir undefined when omitted', async () => {
+  let received: unknown = null;
+  const program = createLocalAgentCli({
+    runStudioMigrate: (options) => {
+      received = options;
+    },
+  });
+
+  await program.parseAsync([
+    'node',
+    'pinpawo-agent',
+    'studio',
+    'migrate',
+  ]);
+
+  assert.deepEqual(received, {
+    workdir: undefined,
+    force: false,
+  });
+});

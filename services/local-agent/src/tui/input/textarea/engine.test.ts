@@ -2,8 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyTextAreaCommand,
-  applyTextAreaInput,
-  applyTextAreaInputEvent,
   createTextAreaModel,
 } from './engine';
 
@@ -283,27 +281,6 @@ test('textarea engine preserves visual column across wide character rows', () =>
   assert.deepEqual(
     applyTextAreaCommand({ type: 'moveUp' }, { text, cursorOffset: 3 }, { width: 3 }),
     { text, cursorOffset: 1, preferredColumn: 2 },
-  );
-});
-
-test('textarea engine keeps canonical event wrapper compatibility', () => {
-  assert.deepEqual(
-    withoutEditHistory(applyTextAreaInputEvent({ type: 'text.insert', text: 'x' }, { text: '', cursorOffset: 0 })),
-    { text: 'x', cursorOffset: 1 },
-  );
-  assert.deepEqual(
-    applyTextAreaInputEvent(
-      { type: 'submit' },
-      { text: 'xyz', cursorOffset: 1, selection: { anchorOffset: 0, focusOffset: 2 } },
-    ),
-    { text: 'xyz', cursorOffset: 1, selection: { anchorOffset: 0, focusOffset: 2 } },
-  );
-});
-
-test('textarea engine keeps raw input wrapper compatibility', () => {
-  assert.deepEqual(
-    withoutEditHistory(applyTextAreaInput('\x1b[3~', {}, { text: 'abc', cursorOffset: 1 })),
-    { text: 'ac', cursorOffset: 1 },
   );
 });
 

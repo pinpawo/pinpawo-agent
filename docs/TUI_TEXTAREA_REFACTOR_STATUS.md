@@ -13,7 +13,7 @@
 
 #149 设计的整套分层（terminal decoder → canonical → router → engine/layout/render/view → controller/host）**已在实现栈中真实落地并合入 main**，每个模块都带 `.test.ts`。实现栈 4 个 PR 已按 main → #187 → #193(原 #188) → #189 → #190 顺序合并完成，**合并后的 main：typecheck 通过、TUI 单测 76 个全过、local-agent 全量 359 个全过**。
 
-主要工作已不是"继续拆结构"，而是收尾：清理 legacy raw input wrapper、明确 approval free-text focus policy，以及补 command popup / file mention / 可选 external editor 等高阶能力。
+主要工作已不是"继续拆结构"，而是收尾：PR #195 清理 legacy raw input wrapper，后续继续明确 approval free-text focus policy，以及补 command popup / file mention / 可选 external editor 等高阶能力。
 
 ---
 
@@ -78,8 +78,9 @@
 以下是栈合并后仍待办的，按 #149 §1.1 与 Phase 5/6 整理：
 
 1. **清理 legacy raw input wrapper（收尾）**
-   - 现状：`tui/input/textareaModel.ts` 已退化为 compat barrel，re-export `textarea/*`；`engine.ts` 仍保留 `applyTextAreaInput` / `applyTextAreaInputEvent` 作为兼容入口。
-   - 待办：生产路径（`TuiApp`、`inputRouter`、新功能）只允许走 `applyTextAreaCommand`；将 raw wrapper 移出 engine 主边界或删除，仅测试/旧 facade 可临时保留。
+   - 状态：PR #195（`codex/tui-textarea-drop-raw-wrapper`）处理中。
+   - 本 PR 变更：删除 `applyTextAreaInput` / `applyTextAreaInputEvent` facade；`textareaModel.ts` 不再 re-export raw wrapper；测试改为显式覆盖 canonical mapper、textarea command mapper 和 `applyTextAreaCommand`。
+   - 验收目标：生产路径（`TuiApp`、`inputRouter`、新功能）只允许走 `applyTextAreaCommand`；raw terminal input 停留在 terminal decoder / canonical mapper 边界。
 
 2. **approval free-text focus policy（明确语义）**
    - 现状：`inputRouter.ts` 已建模 `{ type: 'approval'; freeTextActive }` owner，但只是一个透传 flag。
@@ -93,7 +94,7 @@
 
 6. **OpenTUI migration spike**（Phase 6）——条件性，当前无需启动。
 
-> 第 1、2 项是"重构收尾"，建议优先；3–5 项是新增能力，可按需排期；第 6 项保持观望。
+> 第 1 项由 PR #195 收尾；第 2 项建议作为下一 PR 优先处理；3–5 项是新增能力，可按需排期；第 6 项保持观望。
 
 ---
 

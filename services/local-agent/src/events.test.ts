@@ -234,6 +234,67 @@ test('browser operation metadata summarizes page output', () => {
   });
 });
 
+test('browser operation metadata parses JSON-string inputs for input summaries', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolkits: [createBrowserToolkit()],
+    },
+  } as never);
+
+  const started = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'browser_click',
+      toolCallId: 'call-1',
+      input: '{"selector":".login-btn"}',
+    },
+    registry,
+  );
+
+  assert.equal(started.operation.summary, '点击 .login-btn');
+
+  const startFromOpen = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'browser_open',
+      toolCallId: 'call-2',
+      input: '{"url":"https://example.com","headless":true}',
+    },
+    registry,
+  );
+
+  assert.equal(startFromOpen.operation.target, 'https://example.com');
+  assert.equal(startFromOpen.operation.summary, '打开网页');
+  assert.equal(startFromOpen.operation.details?.headless, true);
+});
+
+test('tool operation output summaries still receive raw output strings first', () => {
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'submit_plan',
+      toolCallId: 'call-1',
+      output: '{"taskCount":2}',
+      operation: {
+        title: '提交计划',
+        summarizeOutput: (output: unknown) => {
+          if (typeof output !== 'string') return null;
+          const parsed = JSON.parse(output) as { taskCount?: unknown };
+          return typeof parsed.taskCount === 'number'
+            ? { summary: `已接收 ${parsed.taskCount} 个任务` }
+            : null;
+        },
+      },
+    },
+    createOperationRegistry(),
+  );
+
+  assert.equal(event.operation.summary, '已接收 2 个任务');
+});
+
 test('browser type operation metadata does not expose typed text in display fields', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {

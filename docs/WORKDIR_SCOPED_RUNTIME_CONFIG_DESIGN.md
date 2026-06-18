@@ -282,11 +282,20 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 后续如果 API scheduler 要执行 Studio run：
 
 ```text
-studio_schedule
+ studio_schedule
   -> resolve owner/studio workdir or workspace root
   -> StudioRunService(runtimeConfig)
   -> invoke Studio turn
 ```
+
+本地协议建议返回至少三项字段，供 scheduler 做幂等与回放：
+
+- `runId`: 本次 Studio run 的唯一 id（对应 `requestId`）。
+- `conversationId`: 工作会话 id（默认同 `runId`，如客户端显式传入则沿用）。
+- `idempotencyKey`: `studio:{conversationId}:run:{runId}`。
+
+这样 scheduler 可以按 `idempotencyKey` 做唯一约束，避免同一 due-run 被重复触发时写入双份 wiki/产物；
+同时也能按 `conversationId` 聚合同一会话里多轮历史。
 
 约束：
 

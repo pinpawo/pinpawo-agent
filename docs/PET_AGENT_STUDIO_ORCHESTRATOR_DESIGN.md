@@ -586,7 +586,7 @@ Studio 客户端消息保持 `studio_request` 起手；server 端 agent run acti
 | `studio_request { requestId, userRequest }` | client → server | turn 起手 |
 | `event { requestId, event: { type: 'studio.progress', ... } }` | server → client | Studio 编排进度(turn_started / plan_set / dispatch_started 等) |
 | `event { requestId, event: { type: 'human_review.requested', ... } }` | server → client | Studio 内 pet HITL |
-| `studio_response { requestId, outcome, reply, finalDispatchId?, reason? }` | server → client | turn 终态 + 最终 reply |
+| `studio_response { requestId, outcome, reply, finalDispatchId?, reason?, runId?, conversationId?, idempotencyKey? }` | server → client | turn 终态 + 最终 reply，新增字段用于 scheduler 幂等链路 |
 | `studio_error { requestId, message }` | server → client | turn 失败 |
 
 ### humanReviewer 桥(local-agent 内部 wiring)

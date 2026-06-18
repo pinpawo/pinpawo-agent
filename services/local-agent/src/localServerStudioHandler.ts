@@ -114,6 +114,9 @@ export class LocalServerStudioHandler {
           outcome: 'done',
           reply: result.turn.outcome.reply,
           finalDispatchId: result.turn.outcome.finalDispatchId,
+          runId: result.runId,
+          conversationId: result.conversationId,
+          idempotencyKey: result.idempotencyKey,
         });
       } else {
         send({
@@ -122,6 +125,9 @@ export class LocalServerStudioHandler {
           outcome: 'stopped',
           reply: result.turn.outcome.reply,
           reason: result.turn.outcome.reason,
+          runId: result.runId,
+          conversationId: result.conversationId,
+          idempotencyKey: result.idempotencyKey,
         });
       }
     } catch (err) {

@@ -215,6 +215,7 @@ export function TuiApp(props: { actorId: string }) {
       ready,
       busy,
       hasPendingApproval: Boolean(pendingApproval),
+      approvalFreeTextActive: Boolean(pendingApproval && inputValue.trim()),
       hasResumePicker: resumePickerOpen,
       composerHistory: {
         boundary: textArea.historyBoundary,

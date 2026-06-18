@@ -80,10 +80,22 @@ test('resolveTuiInputCommand routes approval commands and free text edits', () =
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'cursor.down' }, activeFreeTextApprovalOwner),
-    { target: 'approval', action: 'next' },
+    { target: 'textarea', command: { type: 'moveDown' } },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'selection.up' }, activeFreeTextApprovalOwner),
+    { target: 'textarea', command: { type: 'selectUp' } },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'selection.down' }, activeFreeTextApprovalOwner),
+    { target: 'textarea', command: { type: 'selectDown' } },
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'submit' }, approvalOwner),
+    { target: 'approval', action: 'submit' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'submit' }, activeFreeTextApprovalOwner),
     { target: 'approval', action: 'submit' },
   );
   assert.deepEqual(

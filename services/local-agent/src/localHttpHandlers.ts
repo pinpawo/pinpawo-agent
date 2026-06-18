@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { existsSync } from 'node:fs';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
   getCachedCapabilityAvailability,
@@ -14,6 +15,7 @@ import { loadStoredConfig } from './storage';
 import { readAgentActivityHealthFields } from './operationActivityState';
 import { isAuthorizedLocalServerRequest } from './localServerAuth';
 import type { LocalServerDeps } from './localServerTypes';
+import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
 
 type LocalHttpHandlerOptions = {
   authToken: string;
@@ -68,6 +70,7 @@ export function handleLocalHttpRequest(
   }
 
   if (pathname === '/runtime') {
+    const studioConfigFields = readStudioConfigRuntimeFields(deps);
     writeJson(res, 200, {
       llm_model: deps.llmConfig.model,
       llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
@@ -78,6 +81,7 @@ export function handleLocalHttpRequest(
         pets_dir: deps.runtimeConfig.petsDir,
         studio_wiki_base_dir: deps.runtimeConfig.studioWikiBaseDir,
       } : {}),
+      ...studioConfigFields,
     });
     return true;
   }
@@ -142,6 +146,25 @@ export function handleLocalHttpRequest(
   }
 
   return false;
+}
+
+function readStudioConfigRuntimeFields(deps: LocalServerDeps) {
+  const preferredPath = deps.runtimeConfig?.studioConfigPath ?? DEFAULT_STUDIO_CONFIG_PATH;
+  if (existsSync(preferredPath)) {
+    return {
+      studio_config_source: deps.runtimeConfig ? 'workdir' : 'legacy_home',
+      studio_config_active_path: preferredPath,
+      legacy_studio_config_path: DEFAULT_STUDIO_CONFIG_PATH,
+    };
+  }
+
+  const legacyAvailable = preferredPath !== DEFAULT_STUDIO_CONFIG_PATH
+    && existsSync(DEFAULT_STUDIO_CONFIG_PATH);
+  return {
+    studio_config_source: legacyAvailable ? 'legacy_home' : 'missing',
+    studio_config_active_path: legacyAvailable ? DEFAULT_STUDIO_CONFIG_PATH : preferredPath,
+    legacy_studio_config_path: DEFAULT_STUDIO_CONFIG_PATH,
+  };
 }
 
 function writeJson(res: ServerResponse, statusCode: number, payload: unknown) {

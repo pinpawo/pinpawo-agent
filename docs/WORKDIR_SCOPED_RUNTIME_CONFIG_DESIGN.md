@@ -229,7 +229,8 @@ fallback: ~/.pinpawo/studio.json
 如果命中 fallback：
 
 - 打印 warning。
-- `/runtime` 或 `/health` 返回 `studio_config_source: "legacy_home"`。
+- `/runtime` 返回 `studio_config_source: "legacy_home"`，并给出
+  `studio_config_active_path`。
 - 后续提供迁移命令或 setup 提示。
 
 迁移命令可以后续补：
@@ -250,6 +251,9 @@ pinpawo-agent studio migrate --workdir /path/to/project
 
 当前 local-agent 已提供该迁移命令。默认跳过已有目标文件，传 `--force`
 时才覆盖目标 workdir 下的 Studio 配置、pets 配置和 wiki 目录。
+`/runtime` 也会返回 `studio_config_source`、`studio_config_active_path` 和
+`legacy_studio_config_path`，TUI runtime info 会显示实际使用的 Studio 配置路径
+及来源（工作区 / 旧全局 / 缺失）。
 
 ## CLI 和服务启动
 

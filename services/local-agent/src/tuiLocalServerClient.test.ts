@@ -49,6 +49,9 @@ test('parseLocalServerRuntime reads workdir-scoped runtime paths', () => {
     workdir: '/tmp/workspace',
     state_root: '/tmp/workspace/.pinpawo',
     studio_config_path: '/tmp/workspace/.pinpawo/studio.json',
+    studio_config_source: 'legacy_home',
+    studio_config_active_path: '/home/user/.pinpawo/studio.json',
+    legacy_studio_config_path: '/home/user/.pinpawo/studio.json',
     pets_dir: '/tmp/workspace/.pinpawo/pets',
     studio_wiki_base_dir: '/tmp/workspace/.pinpawo/studio-wiki',
   }), {
@@ -57,6 +60,9 @@ test('parseLocalServerRuntime reads workdir-scoped runtime paths', () => {
     cwd: '/tmp/workspace',
     stateRoot: '/tmp/workspace/.pinpawo',
     studioConfigPath: '/tmp/workspace/.pinpawo/studio.json',
+    studioConfigSource: 'legacy_home',
+    studioConfigActivePath: '/home/user/.pinpawo/studio.json',
+    legacyStudioConfigPath: '/home/user/.pinpawo/studio.json',
     petsDir: '/tmp/workspace/.pinpawo/pets',
     studioWikiBaseDir: '/tmp/workspace/.pinpawo/studio-wiki',
   });

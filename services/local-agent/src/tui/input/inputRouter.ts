@@ -104,14 +104,7 @@ export function resolveTuiInputCommand(
       return { target: 'none' };
 
     case 'approval':
-      if (event.type === 'cursor.up') return { target: 'approval', action: 'previous' };
-      if (event.type === 'cursor.down') return { target: 'approval', action: 'next' };
-      if (isReturn) return { target: 'approval', action: 'submit' };
-      if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
-      if (event.type === 'tab') return { target: 'none' };
-      if (isControlSequence) return { target: 'none' };
-      if (event.type === 'noop') return { target: 'none' };
-      return routeTextAreaCommand(event);
+      return routeApprovalInputCommand(event, owner);
 
     case 'busy':
       if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
@@ -153,4 +146,28 @@ export function toLegacyTuiInputCommand(command: TuiInputCommand): TuiLegacyInpu
 function routeTextAreaCommand(event: CanonicalInputEvent): TuiInputCommand {
   const command = toTextAreaCommand(event);
   return command ? { target: 'textarea', command } : { target: 'none' };
+}
+
+function routeApprovalInputCommand(
+  event: CanonicalInputEvent,
+  owner: Extract<TuiInputOwner, { type: 'approval' }>,
+): TuiInputCommand {
+  const optionNavigation = resolveApprovalOptionNavigation(event, owner);
+  if (optionNavigation) return { target: 'approval', action: optionNavigation };
+  if (event.type === 'submit') return { target: 'approval', action: 'submit' };
+  if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
+  if (event.type === 'tab') return { target: 'none' };
+  if (event.type === 'unknown.control') return { target: 'none' };
+  if (event.type === 'noop') return { target: 'none' };
+  return routeTextAreaCommand(event);
+}
+
+function resolveApprovalOptionNavigation(
+  event: CanonicalInputEvent,
+  owner: Extract<TuiInputOwner, { type: 'approval' }>,
+): 'previous' | 'next' | null {
+  void owner;
+  if (event.type === 'cursor.up') return 'previous';
+  if (event.type === 'cursor.down') return 'next';
+  return null;
 }

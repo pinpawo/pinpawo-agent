@@ -3,13 +3,23 @@ import type { AgentModels } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 
 function buildModelKwargs(model: string, thinking: boolean) {
-  if (model.includes('qwen') || model.includes('glm')) {
+  const normalizedModel = model.toLowerCase();
+  if (
+    normalizedModel.includes('qwen')
+    || normalizedModel.includes('glm')
+    || normalizedModel.includes('minimax')
+  ) {
     return { extra_body: { enable_thinking: thinking } };
   }
-  if (model.includes('deepseek')) {
+  if (normalizedModel.includes('deepseek')) {
     return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
   }
   return undefined;
+}
+
+function requiresStreaming(model: string): boolean {
+  const normalizedModel = model.toLowerCase();
+  return normalizedModel.includes('glm-4.5');
 }
 
 export function buildLocalAgentModels(llmConfig: AgentLlmConfig): AgentModels {
@@ -29,6 +39,7 @@ export function buildLocalAgentModels(llmConfig: AgentLlmConfig): AgentModels {
       timeout: llmConfig.timeoutMs ?? 45000,
       maxRetries: llmConfig.maxRetries ?? 2,
       apiKey: llmConfig.apiKey,
+      streaming: requiresStreaming(model),
       modelKwargs,
       configuration: {
         baseURL: llmConfig.baseUrl,

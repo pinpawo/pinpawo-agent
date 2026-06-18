@@ -108,8 +108,8 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
 
   // curator 用全局 models(不参与 pet 的 model 覆盖)
   const globalModels: AgentModels = buildLocalAgentModels(input.llmConfig);
-  // 复用 chat 路径的 decisionStructuredOutput 策略(deepseek 用 functionCalling 等),
-  // 避免某些 LLM 不支持 json_schema response_format 时 orchestrator decision 调用 400
+  // 复用 chat 路径的 decisionStructuredOutput 策略,避免某些 LLM
+  // 不支持 json_schema response_format 时 orchestrator decision 调用 400。
   const globalDecisionStructuredOutput = buildDecisionStructuredOutput(input.llmConfig);
   const capabilitiesByName = new Map(input.capabilities.map((c) => [c.name, c]));
 

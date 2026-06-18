@@ -4,6 +4,11 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import type { AgentModels } from '../../types/agent';
+import {
+  invokeStructuredOutput,
+  type StructuredOutputAutoRepairConfig,
+  type StructuredOutputMethod,
+} from '../../utils/structuredOutput';
 import type { StudioDispatchState } from './types';
 
 export type WikiCurateInput = {
@@ -196,8 +201,9 @@ export function fileReadPromptProvider(absPath: string): CuratorPromptProvider {
 }
 
 export type LLMWikiCuratorStructuredOutputConfig = {
-  method?: 'functionCalling' | 'jsonMode' | 'jsonSchema';
+  method?: StructuredOutputMethod;
   strict?: boolean;
+  autoRepair?: StructuredOutputAutoRepairConfig;
 };
 
 export type LLMWikiCuratorConfig = {
@@ -324,11 +330,6 @@ async function applyCuratorOutput(params: {
  */
 export function createLLMWikiCurator(config: LLMWikiCuratorConfig): WikiCurator {
   const promptProvider = config.promptProvider ?? defaultPromptProvider();
-  const model = config.models.act.withStructuredOutput(curatorOutputSchema, {
-    name: 'curate_wiki',
-    ...(config.structuredOutput?.method ? { method: config.structuredOutput.method } : {}),
-    ...(typeof config.structuredOutput?.strict === 'boolean' ? { strict: config.structuredOutput.strict } : {}),
-  });
 
   return {
     async curate({ wikiRoot, dispatch }) {
@@ -350,10 +351,22 @@ export function createLLMWikiCurator(config: LLMWikiCuratorConfig): WikiCurator 
       });
 
       const promptHead = (await promptProvider()).trim();
-      const result = (await model.invoke([
-        new SystemMessage(promptHead),
-        new HumanMessage(userMessage),
-      ])) as CuratorOutput;
+      const result = await invokeStructuredOutput({
+        model: config.models.act,
+        schema: curatorOutputSchema,
+        options: {
+          name: 'curate_wiki',
+          ...(config.structuredOutput?.method ? { method: config.structuredOutput.method } : {}),
+          ...(typeof config.structuredOutput?.strict === 'boolean' ? { strict: config.structuredOutput.strict } : {}),
+          ...(typeof config.structuredOutput?.autoRepair !== 'undefined'
+            ? { autoRepair: config.structuredOutput.autoRepair }
+            : {}),
+        },
+        messages: [
+          new SystemMessage(promptHead),
+          new HumanMessage(userMessage),
+        ],
+      }) as CuratorOutput;
 
       // 4. 应用更新
       const applied = await applyCuratorOutput({ wikiRoot, output: result });

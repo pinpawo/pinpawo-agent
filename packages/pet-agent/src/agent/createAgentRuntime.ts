@@ -28,7 +28,6 @@ import type {
   OrchestratorInvokeOptions,
   PendingDelegation,
   DecisionMode,
-  StructuredOrchestrationDecisionModel,
   ToolBindableChatModel,
   OrchestrationDecisionStructuredOutputConfig,
 } from './orchestrator/types';
@@ -45,6 +44,7 @@ import {
   capabilitySearchTool,
   readModelToolCalls,
 } from './orchestrator/capabilitySearch';
+import { invokeStructuredOutput } from '../utils/structuredOutput';
 import {
   buildCapabilityDiscoveryInput,
   buildCapabilityDiscoveryRequestContext,
@@ -665,24 +665,18 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     });
     let decision: OrchestrationDecision;
     try {
-      const decisionModel = config.models.act.withStructuredOutput(
-        decisionSchema,
-        buildOrchestrationDecisionStructuredOutputOptions(
+      decision = await invokeStructuredOutput({
+        model: config.models.act,
+        schema: decisionSchema,
+        options: buildOrchestrationDecisionStructuredOutputOptions(
           config.decisionStructuredOutput,
         ),
-      ) as StructuredOrchestrationDecisionModel;
-      const rawDecision = await decisionModel.invoke(
-        [
+        messages: [
           new SystemMessage(systemPrompt),
           decisionInputMessage,
         ],
         runnableConfig,
-      );
-      const parsedDecision = decisionSchema.safeParse(rawDecision);
-      if (!parsedDecision.success) {
-        throw new Error(`Invalid orchestration decision structured output: ${parsedDecision.error.message}`);
-      }
-      decision = parsedDecision.data as OrchestrationDecision;
+      }) as OrchestrationDecision;
     } catch (error) {
       console.warn('[pet-agent] invalid orchestration decision structured output:', {
         error: error instanceof Error ? error.message : String(error),

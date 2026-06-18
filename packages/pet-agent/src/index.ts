@@ -78,6 +78,16 @@ export {
   validateUniqueToolNames,
 } from './agent/createAgentRuntime';
 export {
+  inferStructuredOutputMethod,
+  invokeStructuredOutput,
+} from './utils/structuredOutput';
+export type {
+  StructuredOutputAutoRepairConfig,
+  StructuredOutputCapableModel,
+  StructuredOutputMethod,
+  StructuredOutputOptions,
+} from './utils/structuredOutput';
+export {
   extractCapabilityKeywords,
   searchCapabilities,
   splitCapabilitySearchTerms,

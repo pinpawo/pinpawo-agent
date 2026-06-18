@@ -7,7 +7,7 @@
  * deterministic fake chat model that returns the example's subagent_response.
  *
  * Run:
- *   LLM_BASE_URL=... LLM_MODEL=... DECISION_STRUCTURED_OUTPUT_METHOD=functionCalling \
+ *   LLM_BASE_URL=... LLM_MODEL=... DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode \
  *     npx tsx evals/orchestrator-flow.mock-subagent.eval.ts
  */
 import { evaluate } from 'langsmith/evaluation';
@@ -29,6 +29,7 @@ import {
 import type { AgentActor, AgentModels } from '../src/types/agent';
 import type { AgentCapability } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
+import { inferStructuredOutputMethod } from '../src/utils/structuredOutput';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
 
 const DATASET_NAME = 'orchestrator-flow-mock-subagent';
@@ -193,16 +194,10 @@ function normalizeStructuredOutputMethod(value: string | undefined): Orchestrati
   throw new Error(`Invalid DECISION_STRUCTURED_OUTPUT_METHOD: ${value}`);
 }
 
-function inferDefaultStructuredOutputMethod(model: string): OrchestrationDecisionStructuredOutputConfig['method'] {
-  const normalized = model.toLowerCase();
-  if (normalized.includes('deepseek')) return 'functionCalling';
-  return undefined;
-}
-
 const DECISION_STRUCTURED_OUTPUT_METHOD = normalizeStructuredOutputMethod(
   process.env.DECISION_STRUCTURED_OUTPUT_METHOD,
 )
-  ?? inferDefaultStructuredOutputMethod(LLM_MODEL);
+  ?? inferStructuredOutputMethod(LLM_MODEL, LLM_BASE_URL);
 const DECISION_STRUCTURED_OUTPUT = DECISION_STRUCTURED_OUTPUT_METHOD
   ? { method: DECISION_STRUCTURED_OUTPUT_METHOD } satisfies OrchestrationDecisionStructuredOutputConfig
   : undefined;
@@ -213,13 +208,22 @@ if (!LLM_API_KEY) {
 }
 
 function buildModelKwargs(model: string) {
-  if (model.includes('qwen') || model.includes('glm')) {
+  const normalizedModel = model.toLowerCase();
+  if (
+    normalizedModel.includes('qwen')
+    || normalizedModel.includes('glm')
+    || normalizedModel.includes('minimax')
+  ) {
     return { extra_body: { enable_thinking: false } };
   }
-  if (model.includes('deepseek')) {
+  if (normalizedModel.includes('deepseek')) {
     return { thinking: { type: 'disabled' } };
   }
   return undefined;
+}
+
+function requiresStreaming(model: string): boolean {
+  return model.toLowerCase().includes('glm-4.5');
 }
 
 function messageHasLaneMeta(message: unknown): boolean {
@@ -317,6 +321,7 @@ function buildModels(subagent: ProbeSubagentModel): AgentModels {
     temperature: 0.3,
     timeout: 180_000,
     apiKey: LLM_API_KEY,
+    streaming: requiresStreaming(LLM_MODEL),
     modelKwargs: buildModelKwargs(LLM_MODEL),
     configuration: {
       baseURL: LLM_BASE_URL,

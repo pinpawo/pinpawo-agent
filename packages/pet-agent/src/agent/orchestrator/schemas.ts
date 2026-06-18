@@ -93,17 +93,27 @@ export function buildOrchestrationDecisionStructuredOutputOptions(
     name: 'orchestration_decision',
     ...(config?.method ? { method: config.method } : {}),
     ...(typeof config?.strict === 'boolean' ? { strict: config.strict } : {}),
+    ...(typeof config?.autoRepair !== 'undefined' ? { autoRepair: config.autoRepair } : {}),
   };
 }
 
 export function buildOrchestrationDecisionOutputInstruction(): string {
   return [
     '输出一个结构化 orchestration decision。',
+    '必须返回一个 JSON object，字段名必须严格使用：action、answer、question、task、context_summary。',
+    '必须使用 action 字段表达下一步动作；不要输出 delegate_capability、delegate_general、finish 或 ask_user 作为字段名。',
     'action 取值：',
     '- finish：直接回应用户，无需委派。',
     '- ask_user：信息不足、用户意图不明确，或下一步具有破坏性、不可逆、敏感凭据、外部副作用，需要先向用户确认。',
     '- delegate_general：委派给通用工具执行器。',
     '- delegate_capability.<name>：委派给指定业务 capability。<name> 必须从当前候选里选。',
+    '字段语义：',
+    '- action 必填，且必须是上面的枚举值之一。',
+    '- answer 只在 action=finish 时填写；其他 action 为 null 或省略。',
+    '- question 只在 action=ask_user 时填写；其他 action 为 null 或省略。',
+    '- task 只在 delegate_general 或 delegate_capability.<name> 时填写明确任务；其他 action 为 null 或省略。',
+    '- context_summary 只在 delegate_general 或 delegate_capability.<name> 时填写必要上下文；其他 action 为 null 或省略。',
+    '正确示例：{"action":"delegate_capability.explore","answer":null,"question":null,"task":"调查当前项目 typecheck 失败原因并修复。","context_summary":"用户要求定位并修复 typecheck 失败。"}',
     '一旦决定 delegate_* 就直接交给执行器；运行期的工具级风险由具体工具自己拦截，无需在决策层重复表达。',
   ].join('\n');
 }

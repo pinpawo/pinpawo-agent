@@ -264,6 +264,53 @@ test('user intent decision exposes in-progress capability candidates independent
   assert.equal(decisionCallCount, 2);
 });
 
+test('decision structured output autoRepair reruns the same route LLM call after invalid shape', async () => {
+  const invokedMessages: unknown[] = [];
+  let invokeCount = 0;
+  let capturedOptions: unknown;
+  const model = {
+    withStructuredOutput: (_schema: unknown, options: unknown) => {
+      capturedOptions = options;
+      return {
+        invoke: async (messages: unknown[]) => {
+          invokeCount += 1;
+          invokedMessages.push(messages);
+          return invokeCount === 1
+            ? { action: 'not_allowed' }
+            : { action: 'finish', answer: 'done after retry' };
+        },
+      };
+    },
+  } as unknown as AgentModels['act'];
+
+  const graph = createOrchestratorGraph({
+    models: { act: model, observe: model },
+    actor: testActor,
+    decisionStructuredOutput: {
+      method: 'jsonMode',
+      autoRepair: true,
+    },
+  });
+  const input = buildOrchestratorTurnInput([new HumanMessage('hello')]);
+
+  const state = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'decision-auto-repair',
+      actor: testActor,
+      capabilities: [],
+      tools: [],
+    },
+  });
+
+  assert.equal(invokeCount, 2);
+  assert.equal(invokedMessages[0], invokedMessages[1]);
+  assert.deepEqual(capturedOptions, {
+    name: 'orchestration_decision',
+    method: 'jsonMode',
+  });
+  assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'done after retry');
+});
+
 test('forcedCapabilityNames pre-seeds capability candidates and skips capability discovery LLM call', async () => {
   let discoveryCalled = false;
   let decisionSystemPrompt = '';

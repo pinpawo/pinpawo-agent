@@ -7,6 +7,7 @@ import {
   type AgentToolkit,
   type CapabilityArtifactStore,
   type OrchestratorConfig,
+  inferStructuredOutputMethod,
 } from '@pinpawo/pet-agent';
 import { createCapabilityCreatorCapability } from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
@@ -171,9 +172,18 @@ function appendCapability(
 }
 
 export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): OrchestratorConfig['decisionStructuredOutput'] {
-  return llmConfig.model.includes('deepseek')
-    ? { method: 'functionCalling' }
-    : undefined;
+  const method = inferStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
+  if (!method) return undefined;
+
+  const autoRepair = llmConfig.structuredOutputAutoRepair
+    ? {
+        autoRepair: {
+          maxRetries: llmConfig.structuredOutputRepairMaxRetries ?? 1,
+        },
+      }
+    : {};
+
+  return { method, ...autoRepair };
 }
 
 export function buildLocalChatAgentInput(params: {

@@ -41,16 +41,18 @@ test('local agent CLI passes init options to the handler', async () => {
 });
 
 test('local agent CLI runs setup guide handler', async () => {
-  let called = false;
+  let received: unknown = null;
   const program = createLocalAgentCli({
-    runSetup: () => {
-      called = true;
+    runSetup: (options) => {
+      received = options;
     },
   });
 
-  await program.parseAsync(['node', 'pinpawo-agent', 'setup']);
+  await program.parseAsync(['node', 'pinpawo-agent', 'setup', '--workdir', '/tmp/pinpawo-setup-workdir']);
 
-  assert.equal(called, true);
+  assert.deepEqual(received, {
+    workdir: '/tmp/pinpawo-setup-workdir',
+  });
 });
 
 test('local agent CLI applies run workdir option before handler', async () => {
@@ -72,4 +74,28 @@ test('local agent CLI applies run workdir option before handler', async () => {
       process.env.PINPAWO_WORKDIR = previous;
     }
   }
+});
+
+test('local agent CLI passes studio migrate options to the handler', async () => {
+  let received: unknown = null;
+  const program = createLocalAgentCli({
+    runStudioMigrate: (options) => {
+      received = options;
+    },
+  });
+
+  await program.parseAsync([
+    'node',
+    'pinpawo-agent',
+    'studio',
+    'migrate',
+    '--workdir',
+    '/tmp/pinpawo-studio-workdir',
+    '--force',
+  ]);
+
+  assert.deepEqual(received, {
+    workdir: '/tmp/pinpawo-studio-workdir',
+    force: true,
+  });
 });

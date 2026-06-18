@@ -274,7 +274,15 @@ export class TuiRuntimeController {
     });
   }
 
-  private setRuntimeFromHealth(payload: { model?: string; contextWindow?: number; cwd?: string }) {
+  private setRuntimeFromHealth(payload: {
+    model?: string;
+    contextWindow?: number;
+    cwd?: string;
+    stateRoot?: string;
+    studioConfigPath?: string;
+    petsDir?: string;
+    studioWikiBaseDir?: string;
+  }) {
     const model = payload.model ?? config.llmModel;
     const cwd = payload.cwd ?? config.workdir;
 
@@ -288,6 +296,10 @@ export class TuiRuntimeController {
         ...(model ? { model } : {}),
         ...(payload.contextWindow !== undefined ? { contextWindow: payload.contextWindow } : {}),
         ...(cwd ? { cwd } : {}),
+        ...(payload.stateRoot ? { stateRoot: payload.stateRoot } : {}),
+        ...(payload.studioConfigPath ? { studioConfigPath: payload.studioConfigPath } : {}),
+        ...(payload.petsDir ? { petsDir: payload.petsDir } : {}),
+        ...(payload.studioWikiBaseDir ? { studioWikiBaseDir: payload.studioWikiBaseDir } : {}),
       },
     });
   }

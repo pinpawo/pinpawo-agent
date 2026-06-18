@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import { buildLocalAgentRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
 import type { StoredConfig } from './storage';
 import { configPath } from './storage';
+import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
 
 export type SetupCheckStatus = 'ok' | 'missing' | 'warning';
 
@@ -16,6 +18,8 @@ export type SetupCheck = {
 
 export type SetupGuide = {
   configPath: string;
+  workdir: string;
+  stateRoot: string;
   readyForLocalRun: boolean;
   checks: SetupCheck[];
   nextSteps: string[];
@@ -48,8 +52,17 @@ export function buildSetupGuide(options: {
   stored: StoredConfig;
   env?: EnvMap;
   configFilePath?: string;
+  workdir?: string;
+  runtimeConfig?: LocalAgentRuntimeConfig;
 }): SetupGuide {
   const env = options.env ?? process.env;
+  const runtimeConfig = options.runtimeConfig
+    ?? buildLocalAgentRuntimeConfig(
+      options.workdir
+      ?? env.PINPAWO_WORKDIR
+      ?? (typeof options.stored.workdir === 'string' ? options.stored.workdir : undefined)
+      ?? homedir(),
+    );
   const llmApiKey = readConfigValue(env, options.stored, 'LLM_API_KEY', 'llm_api_key');
   const apiValues = [
     ['API_BASE_URL', readConfigValue(env, options.stored, 'API_BASE_URL', 'api_base_url')],
@@ -109,10 +122,13 @@ export function buildSetupGuide(options: {
             ? 'Run "pinpawo-agent actor" to choose a pet actor.'
             : 'After hosted login, run "pinpawo-agent actor" to choose a pet actor.',
         },
+    buildStudioConfigCheck(runtimeConfig),
   ];
 
   return {
     configPath: options.configFilePath ?? configPath(),
+    workdir: runtimeConfig.workdir,
+    stateRoot: runtimeConfig.stateRoot,
     readyForLocalRun,
     checks,
     nextSteps: buildNextSteps(checks),
@@ -124,6 +140,8 @@ export function formatSetupGuide(guide: SetupGuide): string {
     'PinPawo Local Agent — Setup Guide',
     '',
     `Config file: ${guide.configPath}`,
+    `Workdir: ${guide.workdir}`,
+    `Runtime state: ${guide.stateRoot}`,
     `Local run: ${guide.readyForLocalRun ? 'ready' : 'blocked'}`,
     '',
     'Checks:',
@@ -139,6 +157,32 @@ export function formatSetupGuide(guide: SetupGuide): string {
   }
 
   return `${lines.join('\n')}\n`;
+}
+
+function buildStudioConfigCheck(runtimeConfig: LocalAgentRuntimeConfig): SetupCheck {
+  if (existsSync(runtimeConfig.studioConfigPath)) {
+    return {
+      id: 'studio-config',
+      label: 'Studio config',
+      status: 'ok',
+      detail: `Found ${runtimeConfig.studioConfigPath}.`,
+    };
+  }
+
+  const legacyAvailable = runtimeConfig.studioConfigPath !== DEFAULT_STUDIO_CONFIG_PATH
+    && existsSync(DEFAULT_STUDIO_CONFIG_PATH);
+
+  return {
+    id: 'studio-config',
+    label: 'Studio config',
+    status: 'warning',
+    detail: legacyAvailable
+      ? `No Studio config at ${runtimeConfig.studioConfigPath}. Legacy config exists at ${DEFAULT_STUDIO_CONFIG_PATH}.`
+      : `No Studio config at ${runtimeConfig.studioConfigPath}. Studio mode will stay disabled until this file exists.`,
+    nextStep: legacyAvailable
+      ? `Run "pinpawo-agent studio migrate --workdir ${runtimeConfig.workdir}" to copy legacy Studio config into this workdir.`
+      : `Create ${runtimeConfig.studioConfigPath} or run "pinpawo-agent studio migrate --workdir ${runtimeConfig.workdir}" after setting up legacy Studio config.`,
+  };
 }
 
 function buildNextSteps(checks: SetupCheck[]) {

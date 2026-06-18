@@ -14,7 +14,6 @@ import {
   toCanonicalInputEvent,
 } from './input/keymap';
 import { resolveTuiInputAction } from './input/inputRouter';
-import { applyTextAreaInputEvent } from './input/textareaModel';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
   buildActiveOperationLines,
@@ -37,6 +36,7 @@ import {
 } from './state/tuiStateReducer';
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { useResumePickerController } from './useResumePickerController';
+import { useTextAreaController } from './useTextAreaController';
 import type { TuiState } from './state/tuiState';
 import type { MessageRole } from './types';
 
@@ -81,8 +81,6 @@ export function TuiApp(props: { actorId: string }) {
   }), [props.actorId, localServerPort, dispatch, setNow]);
   const focusedSession = selectFocusedSession(tuiState);
   const messages = selectFocusedHistory(tuiState);
-  const inputValue = tuiState.input.text;
-  const inputCursorOffset = tuiState.input.cursorOffset;
   const ready = selectReady(tuiState);
   const busy = selectFocusedBusy(tuiState);
   const pendingUi = selectFocusedPendingUi(tuiState);
@@ -93,6 +91,8 @@ export function TuiApp(props: { actorId: string }) {
   const reviewOptions = pendingApproval?.review.options ?? [];
   const petName = focusedSession?.actor.label ?? TUI_TEXT.defaultPetName;
   const status = tuiState.connection.message;
+  const contentWidth = Math.max(20, terminalSize.columns - 4);
+  const textAreaWidth = Math.max(8, contentWidth - 4);
 
   useEffect(() => {
     stateRef.current = tuiState;
@@ -145,6 +145,17 @@ export function TuiApp(props: { actorId: string }) {
     runtimeController,
   });
 
+  // Input area focus: only when ready, not busy, and no modal panel.
+  const inputFocused = ready && !busy && !resumePickerOpen;
+  const textArea = useTextAreaController({
+    input: tuiState.input,
+    focused: inputFocused,
+    placeholder: pendingApproval ? TUI_TEXT.approvalFreeReplyPlaceholder : TUI_TEXT.inputPlaceholder,
+    width: textAreaWidth,
+    dispatch,
+  });
+  const inputValue = textArea.value;
+
   const submitCurrentInput = () => {
     submitCurrentInputFromController({
       inputValue,
@@ -155,7 +166,7 @@ export function TuiApp(props: { actorId: string }) {
       openResumePicker,
       exit,
       appendSystemMessage: (text) => appendMessage('system', text),
-      clearInputValue,
+      clearInputValue: textArea.clear,
       dispatch,
       runtimeController,
     });
@@ -191,8 +202,6 @@ export function TuiApp(props: { actorId: string }) {
     runtimeController.start();
     return () => runtimeController.dispose();
   }, [runtimeController]);
-
-  const contentWidth = Math.max(20, terminalSize.columns - 4);
 
   useInput((input, key) => {
     const normalized = normalizeTuiInputEvent(input, key, inputBufferRef.current);
@@ -269,21 +278,18 @@ export function TuiApp(props: { actorId: string }) {
 
       case 'composer':
         if (action.action === 'clear') {
-          clearInputValue();
+          textArea.clear();
           return;
         }
         if (action.action === 'submit') {
           submitCurrentInput();
           return;
         }
-        {
-          const nextInput = applyTextAreaInputEvent(inputEvent, {
-            text: inputValue,
-            cursorOffset: inputCursorOffset,
-          }, { width: Math.max(8, contentWidth - 4) });
-          dispatch({ type: 'input.apply', value: nextInput });
-          return;
-        }
+        return;
+
+      case 'textarea':
+        textArea.applyCommand(action.command);
+        return;
 
       case 'none':
         return;
@@ -295,9 +301,6 @@ export function TuiApp(props: { actorId: string }) {
     () => buildActiveOperationLines(activeOperations, now, contentWidth),
     [activeOperations, now, contentWidth],
   );
-
-  // Input area focus: only when ready, not busy, and no modal panel.
-  const inputFocused = ready && !busy && !resumePickerOpen;
 
   // Contextual help text
   const helpText = busy
@@ -369,11 +372,7 @@ export function TuiApp(props: { actorId: string }) {
           <>
             <Text color="cyan">{'> '}</Text>
             <Composer
-              value={inputValue}
-              cursorOffset={inputCursorOffset}
-              placeholder={pendingApproval ? TUI_TEXT.approvalFreeReplyPlaceholder : TUI_TEXT.inputPlaceholder}
-              focus={inputFocused}
-              width={Math.max(8, contentWidth - 4)}
+              {...textArea.composerProps}
             />
           </>
         )}

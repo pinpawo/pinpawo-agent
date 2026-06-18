@@ -75,7 +75,7 @@ test('resolveTuiInputCommand routes approval commands and free text edits', () =
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'text.insert', text: 'reason' }, { type: 'approval' }),
-    { target: 'composer', action: 'edit' },
+    { target: 'textarea', command: { type: 'insert', text: 'reason' } },
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'unknown.control', raw: '\x1b[1;2A' }, { type: 'approval' }),
@@ -102,7 +102,15 @@ test('resolveTuiInputCommand routes busy and composer commands', () => {
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'text.delete.forward' }, { type: 'composer' }),
-    { target: 'composer', action: 'edit' },
+    { target: 'textarea', command: { type: 'deleteForward' } },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'newline' }, { type: 'composer' }),
+    { target: 'textarea', command: { type: 'newline' } },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.down' }, { type: 'composer' }),
+    { target: 'textarea', command: { type: 'moveDown' } },
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'tab', shift: true }, { type: 'composer' }),
@@ -112,7 +120,7 @@ test('resolveTuiInputCommand routes busy and composer commands', () => {
 
 test('legacy input command conversion keeps keymap compatibility shape', () => {
   assert.deepEqual(
-    toLegacyTuiInputCommand({ target: 'composer', action: 'edit' }),
+    toLegacyTuiInputCommand({ target: 'textarea', command: { type: 'deleteForward' } }),
     { type: 'composer.edit' },
   );
   assert.deepEqual(

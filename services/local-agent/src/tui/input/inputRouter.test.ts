@@ -189,6 +189,39 @@ test('resolveTuiInputCommand routes busy and composer commands', () => {
   );
 });
 
+test('resolveTuiInputCommand routes file mention popup commands before composer editing', () => {
+  assert.deepEqual(
+    resolveTuiInputOwner({
+      ready: true,
+      busy: false,
+      hasPendingApproval: false,
+      hasResumePicker: false,
+      hasFileMention: true,
+    }),
+    { type: 'fileMention' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.up' }, { type: 'fileMention' }),
+    { target: 'fileMention', action: 'previous' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.down' }, { type: 'fileMention' }),
+    { target: 'fileMention', action: 'next' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'tab', shift: false }, { type: 'fileMention' }),
+    { target: 'fileMention', action: 'accept' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'submit' }, { type: 'fileMention' }),
+    { target: 'composer', action: 'submit' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'text.insert', text: 's' }, { type: 'fileMention' }),
+    { target: 'textarea', command: { type: 'insert', text: 's' } },
+  );
+});
+
 test('resolveTuiInputCommand routes composer history only at textarea boundaries', () => {
   assert.deepEqual(
     resolveTuiInputCommand(
@@ -239,6 +272,10 @@ test('legacy input command conversion keeps keymap compatibility shape', () => {
   assert.deepEqual(
     toLegacyTuiInputCommand({ target: 'composerHistory', action: 'previous' }),
     { type: 'composer.history.previous' },
+  );
+  assert.deepEqual(
+    toLegacyTuiInputCommand({ target: 'fileMention', action: 'accept' }),
+    { type: 'fileMention.accept' },
   );
   assert.deepEqual(
     resolveLegacyTuiInputAction(

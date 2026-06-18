@@ -14,6 +14,7 @@ export type TuiInputRouteContext = {
   hasPendingApproval: boolean;
   approvalFreeTextActive?: boolean;
   hasResumePicker: boolean;
+  hasFileMention?: boolean;
   composerHistory?: ComposerHistoryRouteState | null;
 };
 
@@ -26,12 +27,14 @@ export type TuiInputOwner =
   | { type: 'resumePicker' }
   | { type: 'approval'; freeTextActive: boolean }
   | { type: 'busy' }
+  | { type: 'fileMention' }
   | { type: 'composer' };
 
 export type TuiInputCommand =
   | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
+  | { target: 'fileMention'; action: 'previous' | 'next' | 'accept' }
   | { target: 'composer'; action: 'submit' | 'clear' }
   | { target: 'composerHistory'; action: 'previous' | 'next' }
   | { target: 'textarea'; command: TextAreaCommand }
@@ -47,6 +50,9 @@ export type TuiLegacyInputCommand =
   | { type: 'resume.next' }
   | { type: 'resume.submit' }
   | { type: 'resume.dismiss' }
+  | { type: 'fileMention.previous' }
+  | { type: 'fileMention.next' }
+  | { type: 'fileMention.accept' }
   | { type: 'composer.submit' }
   | { type: 'composer.clear' }
   | { type: 'composer.history.previous' }
@@ -81,6 +87,7 @@ export function resolveTuiInputOwner(context: TuiInputRouteContext): TuiInputOwn
     return { type: 'approval', freeTextActive: Boolean(context.approvalFreeTextActive) };
   }
   if (context.busy) return { type: 'busy' };
+  if (context.hasFileMention) return { type: 'fileMention' };
   return { type: 'composer' };
 }
 
@@ -110,6 +117,16 @@ export function resolveTuiInputCommand(
       if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
       return { target: 'none' };
 
+    case 'fileMention':
+      if (event.type === 'cursor.up') return { target: 'fileMention', action: 'previous' };
+      if (event.type === 'cursor.down') return { target: 'fileMention', action: 'next' };
+      if (event.type === 'tab') return { target: 'fileMention', action: 'accept' };
+      if (event.type === 'escape') return { target: 'composer', action: 'clear' };
+      if (isReturn) return { target: 'composer', action: 'submit' };
+      if (isControlSequence) return { target: 'none' };
+      if (event.type === 'noop') return { target: 'none' };
+      return routeTextAreaCommand(event);
+
     case 'composer':
       {
         const historyRoute = resolveComposerHistoryRoute(event, routerState.composerHistory);
@@ -132,6 +149,8 @@ export function toLegacyTuiInputCommand(command: TuiInputCommand): TuiLegacyInpu
       return { type: `approval.${command.action}` };
     case 'resume':
       return { type: `resume.${command.action}` };
+    case 'fileMention':
+      return { type: `fileMention.${command.action}` };
     case 'composer':
       return { type: `composer.${command.action}` };
     case 'composerHistory':

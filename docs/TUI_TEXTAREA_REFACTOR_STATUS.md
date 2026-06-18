@@ -89,7 +89,10 @@
 
 3. **command popup / command palette**（Phase 5）——未实现。
 
-4. **file mention / 路径搜索**（#191 提到的高阶输入能力）——未实现。
+4. **file mention / 路径搜索**（#191 提到的高阶输入能力）
+   - 状态：PR `codex/tui-textarea-file-mention` 本地处理中。
+   - 本 PR 变更：composer 中输入 `@` 或 `@path/prefix` 时展示 root 内路径候选，↑↓ 选择，Tab 补全 `@path` mention；候选来自当前 runtime cwd（缺省 `config.workdir`），并限制在 root 内。
+   - 验收目标：路径搜索不越过工作目录 root，不枚举 `.git` / `node_modules` 等大目录；popup 只在 composer mention token 活跃时出现，不抢 approval/resume/busy owner；输入路由和路径补全有测试覆盖。
 
 5. **optional external editor flow**（Phase 5，`$EDITOR`）——未实现。
 

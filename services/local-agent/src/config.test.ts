@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import test from 'node:test';
 
 const REQUIRED_ENV = {
@@ -36,4 +40,28 @@ test('isMissingOrGeneratedApiPlaceholder detects init scaffold values', async ()
   assert.equal(isMissingOrGeneratedApiPlaceholder('AGENT_TOKEN', 'your-agent-token-here'), true);
   assert.equal(isMissingOrGeneratedApiPlaceholder('HASURA_JWT', 'eyJ...'), true);
   assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', 'https://api.example.test'), false);
+});
+
+test('config workdir defaults to process cwd when env and stored config are absent', () => {
+  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  const output = execFileSync(process.execPath, [
+    '--import',
+    'tsx',
+    '-e',
+    [
+      'const { config } = await import("./services/local-agent/src/config.ts");',
+      'process.stdout.write(config.workdir);',
+    ].join('\n'),
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      HOME: home,
+      PINPAWO_WORKDIR: '',
+      LLM_API_KEY: 'llm-key',
+    },
+    encoding: 'utf8',
+  });
+
+  assert.equal(output, process.cwd());
 });

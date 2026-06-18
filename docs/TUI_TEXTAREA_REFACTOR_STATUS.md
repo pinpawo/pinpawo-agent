@@ -69,7 +69,7 @@
 | **3 抽 input router** | `resolveTuiKeyAction` → `CanonicalInputEvent + owner → RoutedCommand` | `tui/input/inputRouter.ts` + `commandRegistry.ts`；owner 含 unready/resumePicker/approval/busy/composer | ✅ 完成 |
 | **4 提升 engine + layout** | `textarea/{engine,layout,renderModel}.ts`，Composer 不再算渲染 | `tui/input/textarea/{engine,layout,renderModel,viewModel}.ts` + `Composer.tsx`/`TextAreaView.tsx` | ✅ 完成 |
 | **5 history / selection / undo / 高阶** | prompt history、selection、undo/redo、preferred column、external editor、command palette | history（`composerHistory*`）、selection（`textarea/selection.ts`）、undo/redo、preferred column、grapheme-aware（`textSegments.ts`）均已落地；**external editor 与 command palette 未做** | 🟡 部分完成 |
-| **6 OpenTUI migration spike** | `experiments/opentui-textarea/` prototype | 无（设计本就标注为"仅在 Ink 无法稳定处理 IME/宽字符/selection 时才考虑"） | ⬜ 条件性，未触发 |
+| **6 OpenTUI migration spike** | `experiments/opentui-textarea/` prototype | 无；当前 Ink 分层已覆盖已知 textarea 风险，未触发迁移条件 | ⏸️ 条件性 defer |
 
 ---
 
@@ -96,9 +96,14 @@
 
 5. **optional external editor flow**（Phase 5，`$EDITOR`）——未实现。
 
-6. **OpenTUI migration spike**（Phase 6）——条件性，当前无需启动。
+6. **OpenTUI migration spike**（Phase 6）
+   - 状态：PR `codex/tui-textarea-opentui-spike-decision` 本地处理中，决策为 **defer / no-op**。
+   - 决策依据：#149 明确短中期保留 Ink，并且实现栈已把 decoder / canonical / router / engine / layout / render / view / controller 边界落地；当前没有证据表明 Ink 在 IME、宽字符、selection、history、approval textarea 上仍存在无法通过该分层修复的问题。
+   - 触发条件：只有当后续 bug 证明 Ink 分层方案无法稳定处理 IME、宽字符、selection 或 approval textarea，且修复成本高于 prototype 成本时，才启动 `services/local-agent/experiments/opentui-textarea/`。
+   - 若触发：开独立 issue/PR，prototype 必须验证现有 TUI protocol 对接、中文输入、粘贴、selection、history、approval textarea，并给出迁移成本评估；不得直接替换生产 TUI。
+   - 验收目标：把“当前无需启动”从口头判断固化为可审计的 as-built 决策，避免为了完成清单而引入无触发依据的 OpenTUI 分叉。
 
-> 第 1 项由 PR #195 收尾；第 2 项建议作为下一 PR 优先处理；3–5 项是新增能力，可按需排期；第 6 项保持观望。
+> 第 1 项由 PR #195 收尾；第 2 项建议作为下一 PR 优先处理；3–5 项是新增能力，可按需排期；第 6 项由 PR `codex/tui-textarea-opentui-spike-decision` 固化 defer 决策。
 
 ---
 

@@ -83,8 +83,9 @@
    - 验收目标：生产路径（`TuiApp`、`inputRouter`、新功能）只允许走 `applyTextAreaCommand`；raw terminal input 停留在 terminal decoder / canonical mapper 边界。
 
 2. **approval free-text focus policy（明确语义）**
-   - 现状：`inputRouter.ts` 已建模 `{ type: 'approval'; freeTextActive }` owner，但只是一个透传 flag。
-   - 待办：明确 approval 自由文本输入的 focus 归属与进入/退出策略（何时把可编辑事件交给 approval textarea、何时回到 composer）。
+   - 状态：PR `codex/tui-textarea-approval-focus-policy` 处理中。
+   - 本 PR 变更：`inputRouter.ts` 让 `{ type: 'approval'; freeTextActive }` 真正参与路由；approval 回复为空时 ↑↓ 切换选项，已有自由文本时 ↑↓ / Shift+↑↓ 归 textarea 编辑，Enter 仍提交当前 approval。
+   - 验收目标：approval 自由文本的进入/退出策略由 router contract 固化；清空回复后回到选项导航，有回复时可编辑多行/选择文本，不再和 approval option navigation 抢焦点。
 
 3. **command popup / command palette**（Phase 5）——未实现。
 

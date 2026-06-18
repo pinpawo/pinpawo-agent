@@ -166,7 +166,7 @@ function resolveApprovalOptionNavigation(
   event: CanonicalInputEvent,
   owner: Extract<TuiInputOwner, { type: 'approval' }>,
 ): 'previous' | 'next' | null {
-  void owner;
+  if (owner.freeTextActive) return null;
   if (event.type === 'cursor.up') return 'previous';
   if (event.type === 'cursor.down') return 'next';
   return null;

@@ -10,7 +10,7 @@ export const TUI_TEXT = {
   inputBusy: '> 处理中…',
   inputPlaceholder: '输入消息',
   approvalFreeReplyPlaceholder: '输入回复，或按 ↑↓ 选择',
-  approvalHelp: '↑↓ 选择 · 输入回复 · Enter 确认 · Esc 取消',
+  approvalHelp: '空输入 ↑↓ 选择 · 输入回复后 ↑↓ 移动光标 · Enter 确认 · Esc 取消',
   approvalRespondRequiresInput: '请先输入回复内容。',
   approvalHeading: (petId?: string) => (petId ? `[${petId} 想问你]` : '需要确认'),
   approvalFallbackPrompt: '当前流程需要你的确认，请使用当前确认面板应答。',

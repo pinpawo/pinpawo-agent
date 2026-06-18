@@ -879,6 +879,10 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 - controller/apply boundary 必须透传 engine-owned transient state，例如
   `editHistory` 和 `preferredColumn`。否则 undo/redo 或 repeated vertical movement 会在
   React hook 边界丢失；host 可以清理这些字段，但不应默认裁掉它们。
+- reducer/host boundary 应集中定义 textarea transient reset contract：`input.apply`
+  透传 engine-owned `selection` / `editHistory` / `preferredColumn`，但 direct draft
+  replacement、prompt history navigation、submit、review resume 等 host-level
+  replacement 会清理这些 transient state。
 - history / selection 之前还应让 controller 暴露 layout/cursor metrics，例如
   `cursor.isAtFirstVisualRow` / `cursor.isAtLastVisualRow`。这一步只提供 host 可消费的
   结构 contract，不改变上下键行为；后续 history policy 再决定如何使用这些 metrics。
@@ -1133,9 +1137,14 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - `textSegments.ts` 提供 previous/next segment range 和 expand range helper。
    - engine 删除本地 grapheme range 扫描，selection 删除本地 range expansion。
    - 为共享基础层添加直接测试，避免只靠 engine/render 间接覆盖。
-32. `codex/tui-textarea-history-selection`
+32. `codex/tui-input-transient-reset-helper`
+   - reducer 集中清理 textarea transient state：`selection` / `editHistory` /
+     `preferredColumn`。
+   - `input.apply` 继续保留 engine-owned state；host-level replacement 清理 transient state。
+   - 测试覆盖 direct input 和 submit 对 transient state 的清理。
+33. `codex/tui-textarea-history-selection`
    - history/selection/undo 交互细节。
-33. `codex/tui-opentui-spike`
+34. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

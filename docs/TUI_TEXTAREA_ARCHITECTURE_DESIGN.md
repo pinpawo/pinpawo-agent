@@ -1,6 +1,6 @@
 # TUI Textarea Architecture Design
 
-> 状态：Draft v1
+> 状态：设计依据（过程/意图文档）。本文定义的分层与迁移计划，对应实现已于 2026-06-18 全部合入 main（PR #187 → #193 → #189 → #190）。本文保留"当初为什么这样设计、方向如何迭代"的视角，**不随实现演进改写**；当前 as-built 进度、各 PR 结局与剩余待办见 [`TUI_TEXTAREA_REFACTOR_STATUS.md`](./TUI_TEXTAREA_REFACTOR_STATUS.md)。
 > 日期：2026-06-18
 > 参考：opencode `packages/tui`，本地参考 commit `10b6672be1dae17267e85bffb1c14992a60c19c8`（`https://github.com/anomalyco/opencode/tree/10b6672be1dae17267e85bffb1c14992a60c19c8`）
 

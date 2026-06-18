@@ -10,6 +10,11 @@ export type TextAreaTextSegment = {
   end: number;
 };
 
+export type TextAreaTextRange = {
+  start: number;
+  end: number;
+};
+
 export function measureTextAreaSegmentWidth(text: string) {
   return Math.max(1, stringWidth(text));
 }
@@ -39,6 +44,61 @@ export function findTextAreaSegmentAtOffset(
   return null;
 }
 
+export function findPreviousTextAreaSegmentRange(
+  text: string,
+  cursorOffset: number,
+): TextAreaTextRange {
+  const boundedOffset = clampOffset(cursorOffset, text);
+  let previousRange = { start: 0, end: 0 };
+
+  for (const segment of segmentTextAreaText(text)) {
+    const range = { start: segment.start, end: segment.end };
+    if (boundedOffset <= segment.start) return previousRange;
+    if (boundedOffset <= segment.end) return range;
+    previousRange = range;
+  }
+
+  return previousRange;
+}
+
+export function findNextTextAreaSegmentRange(
+  text: string,
+  cursorOffset: number,
+): TextAreaTextRange {
+  const boundedOffset = clampOffset(cursorOffset, text);
+
+  for (const segment of segmentTextAreaText(text)) {
+    if (boundedOffset < segment.end) {
+      return { start: segment.start, end: segment.end };
+    }
+  }
+
+  return { start: text.length, end: text.length };
+}
+
+export function expandTextAreaRangeToSegmentBoundaries(
+  text: string,
+  start: number,
+  end: number,
+): TextAreaTextRange {
+  let nextStart = clampOffset(start, text);
+  let nextEnd = clampOffset(end, text);
+  if (nextStart > nextEnd) {
+    [nextStart, nextEnd] = [nextEnd, nextStart];
+  }
+
+  for (const segment of segmentTextAreaText(text)) {
+    if (nextStart > segment.start && nextStart < segment.end) {
+      nextStart = segment.start;
+    }
+    if (nextEnd > segment.start && nextEnd < segment.end) {
+      nextEnd = segment.end;
+    }
+  }
+
+  return { start: nextStart, end: nextEnd };
+}
+
 function readTextSegments(text: string): Array<{ text: string; index: number }> {
   if (textSegmenter) {
     return Array.from(textSegmenter.segment(text), (segment) => ({
@@ -54,4 +114,8 @@ function readTextSegments(text: string): Array<{ text: string; index: number }> 
     index += textSegment.length;
   }
   return segments;
+}
+
+function clampOffset(offset: number, text: string) {
+  return Math.max(0, Math.min(text.length, offset));
 }

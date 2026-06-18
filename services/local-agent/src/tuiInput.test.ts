@@ -313,7 +313,11 @@ test('applyTextAreaInput supports textarea delete and line movement operations',
   );
   assert.deepEqual(
     applyTextAreaInput('a', { ctrl: true }, { text: 'one\ntwo three', cursorOffset: 8 }),
-    { text: 'one\ntwo three', cursorOffset: 4 },
+    {
+      text: 'one\ntwo three',
+      cursorOffset: 13,
+      selection: { anchorOffset: 0, focusOffset: 13 },
+    },
   );
   assert.deepEqual(
     applyTextAreaInput('e', { ctrl: true }, { text: 'one\ntwo three', cursorOffset: 8 }),

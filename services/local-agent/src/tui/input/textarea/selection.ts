@@ -1,3 +1,5 @@
+import { expandTextAreaRangeToSegmentBoundaries } from './textSegments';
+
 export type TextAreaSelection = {
   anchorOffset: number;
   focusOffset: number;
@@ -16,7 +18,15 @@ export function normalizeTextAreaSelection(
   const anchorOffset = clampOffset(selection.anchorOffset, text);
   const focusOffset = clampOffset(selection.focusOffset, text);
   if (anchorOffset === focusOffset) return undefined;
-  return { anchorOffset, focusOffset };
+  const range = expandTextAreaRangeToSegmentBoundaries(
+    text,
+    Math.min(anchorOffset, focusOffset),
+    Math.max(anchorOffset, focusOffset),
+  );
+  if (range.start === range.end) return undefined;
+  return anchorOffset <= focusOffset
+    ? { anchorOffset: range.start, focusOffset: range.end }
+    : { anchorOffset: range.end, focusOffset: range.start };
 }
 
 export function getTextAreaSelectionRange(

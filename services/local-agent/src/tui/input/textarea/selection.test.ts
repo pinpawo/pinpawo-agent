@@ -19,6 +19,21 @@ test('normalizeTextAreaSelection clamps offsets and drops collapsed ranges', () 
   assert.equal(normalizeTextAreaSelection(null, 'hello'), undefined);
 });
 
+test('normalizeTextAreaSelection expands partial grapheme ranges', () => {
+  assert.deepEqual(
+    normalizeTextAreaSelection({ anchorOffset: 0, focusOffset: 1 }, '🙂a'),
+    { anchorOffset: 0, focusOffset: 2 },
+  );
+  assert.deepEqual(
+    normalizeTextAreaSelection({ anchorOffset: 1, focusOffset: 3 }, '🙂a'),
+    { anchorOffset: 0, focusOffset: 3 },
+  );
+  assert.deepEqual(
+    normalizeTextAreaSelection({ anchorOffset: 3, focusOffset: 1 }, '🙂a'),
+    { anchorOffset: 3, focusOffset: 0 },
+  );
+});
+
 test('getTextAreaSelectionRange returns ordered selected range', () => {
   assert.deepEqual(
     getTextAreaSelectionRange({ anchorOffset: 4, focusOffset: 1 }, 'hello'),

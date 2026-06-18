@@ -19,7 +19,17 @@ test('resolveTuiInputOwner applies TUI focus priority', () => {
   );
   assert.deepEqual(
     resolveTuiInputOwner({ ready: true, busy: true, hasPendingApproval: true, hasResumePicker: false }),
-    { type: 'approval' },
+    { type: 'approval', freeTextActive: false },
+  );
+  assert.deepEqual(
+    resolveTuiInputOwner({
+      ready: true,
+      busy: true,
+      hasPendingApproval: true,
+      approvalFreeTextActive: true,
+      hasResumePicker: false,
+    }),
+    { type: 'approval', freeTextActive: true },
   );
   assert.deepEqual(
     resolveTuiInputOwner({ ready: true, busy: true, hasPendingApproval: false, hasResumePicker: false }),
@@ -61,24 +71,31 @@ test('resolveTuiInputCommand routes resume picker commands', () => {
 });
 
 test('resolveTuiInputCommand routes approval commands and free text edits', () => {
+  const approvalOwner = { type: 'approval', freeTextActive: false } as const;
+  const activeFreeTextApprovalOwner = { type: 'approval', freeTextActive: true } as const;
+
   assert.deepEqual(
-    resolveTuiInputCommand({ type: 'cursor.up' }, { type: 'approval' }),
+    resolveTuiInputCommand({ type: 'cursor.up' }, approvalOwner),
     { target: 'approval', action: 'previous' },
   );
   assert.deepEqual(
-    resolveTuiInputCommand({ type: 'submit' }, { type: 'approval' }),
+    resolveTuiInputCommand({ type: 'cursor.down' }, activeFreeTextApprovalOwner),
+    { target: 'approval', action: 'next' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'submit' }, approvalOwner),
     { target: 'approval', action: 'submit' },
   );
   assert.deepEqual(
-    resolveTuiInputCommand({ type: 'escape' }, { type: 'approval' }),
+    resolveTuiInputCommand({ type: 'escape' }, approvalOwner),
     { target: 'global', action: 'interrupt' },
   );
   assert.deepEqual(
-    resolveTuiInputCommand({ type: 'text.insert', text: 'reason' }, { type: 'approval' }),
+    resolveTuiInputCommand({ type: 'text.insert', text: 'reason' }, approvalOwner),
     { target: 'textarea', command: { type: 'insert', text: 'reason' } },
   );
   assert.deepEqual(
-    resolveTuiInputCommand({ type: 'unknown.control', raw: '\x1b[1;2A' }, { type: 'approval' }),
+    resolveTuiInputCommand({ type: 'unknown.control', raw: '\x1b[1;2A' }, approvalOwner),
     { target: 'none' },
   );
 });
@@ -115,6 +132,10 @@ test('resolveTuiInputCommand routes busy and composer commands', () => {
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'edit.redo' }, { type: 'composer' }),
     { target: 'textarea', command: { type: 'redo' } },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'edit.select.all' }, { type: 'composer' }),
+    { target: 'textarea', command: { type: 'selectAll' } },
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'cursor.down' }, { type: 'composer' }),

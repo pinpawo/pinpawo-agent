@@ -17,6 +17,10 @@ import {
   normalizeTextAreaSelection,
   type TextAreaSelection,
 } from './selection';
+import {
+  findNextTextAreaSegmentRange,
+  findPreviousTextAreaSegmentRange,
+} from './textSegments';
 
 const MAX_TEXTAREA_EDIT_HISTORY_ITEMS = 100;
 
@@ -111,11 +115,17 @@ export function applyTextAreaCommand(
     case 'deleteBackward':
       if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
       if (cursorOffset === 0) return createTextAreaModel(text, cursorOffset, undefined, state.editHistory);
-      return replaceRange(state, cursorOffset - 1, cursorOffset, '', cursorOffset - 1);
+      {
+        const range = findPreviousTextAreaSegmentRange(text, cursorOffset);
+        return replaceRange(state, range.start, range.end, '', range.start);
+      }
     case 'deleteForward':
       if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
       if (cursorOffset === text.length) return createTextAreaModel(text, cursorOffset, undefined, state.editHistory);
-      return replaceRange(state, cursorOffset, cursorOffset + 1, '', cursorOffset);
+      {
+        const range = findNextTextAreaSegmentRange(text, cursorOffset);
+        return replaceRange(state, range.start, range.end, '', range.start);
+      }
     case 'deleteWordBackward': {
       if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
       const wordStart = findPreviousWordStart(text, cursorOffset);
@@ -130,9 +140,9 @@ export function applyTextAreaCommand(
       if (selectionRange) return replaceRange(state, selectionRange.start, selectionRange.end, '', selectionRange.start);
       return replaceRange(state, cursorOffset, findLogicalLineEnd(text, cursorOffset), '', cursorOffset);
     case 'moveLeft':
-      return createTextAreaModel(text, cursorOffset - 1, undefined, state.editHistory);
+      return createTextAreaModel(text, findPreviousGraphemeStart(text, cursorOffset), undefined, state.editHistory);
     case 'moveRight':
-      return createTextAreaModel(text, cursorOffset + 1, undefined, state.editHistory);
+      return createTextAreaModel(text, findNextGraphemeEnd(text, cursorOffset), undefined, state.editHistory);
     case 'moveUp':
       return moveCursorVertically(text, state, cursorOffset, width, -1);
     case 'moveDown':
@@ -142,9 +152,9 @@ export function applyTextAreaCommand(
     case 'moveLineEnd':
       return createTextAreaModel(text, findLogicalLineEnd(text, cursorOffset), undefined, state.editHistory);
     case 'selectLeft':
-      return selectToOffset(text, state, cursorOffset - 1);
+      return selectToOffset(text, state, findPreviousGraphemeStart(text, cursorOffset));
     case 'selectRight':
-      return selectToOffset(text, state, cursorOffset + 1);
+      return selectToOffset(text, state, findNextGraphemeEnd(text, cursorOffset));
     case 'selectUp':
       return selectVertically(text, state, cursorOffset, width, -1);
     case 'selectDown':
@@ -340,6 +350,14 @@ function findPreviousWordStart(text: string, cursorOffset: number) {
   while (start > 0 && /\s/.test(text[start - 1]!)) start -= 1;
   while (start > 0 && !/\s/.test(text[start - 1]!)) start -= 1;
   return start;
+}
+
+function findPreviousGraphemeStart(text: string, cursorOffset: number) {
+  return findPreviousTextAreaSegmentRange(text, cursorOffset).start;
+}
+
+function findNextGraphemeEnd(text: string, cursorOffset: number) {
+  return findNextTextAreaSegmentRange(text, cursorOffset).end;
 }
 
 function clampCursor(cursorOffset: number, text: string) {

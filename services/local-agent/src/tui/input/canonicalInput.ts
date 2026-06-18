@@ -12,6 +12,7 @@ export type CanonicalInputEvent =
   | { type: 'text.delete.to.line.end' }
   | { type: 'edit.undo' }
   | { type: 'edit.redo' }
+  | { type: 'edit.select.all' }
   | { type: 'cursor.left' }
   | { type: 'cursor.right' }
   | { type: 'cursor.up' }
@@ -85,7 +86,7 @@ function toCanonicalControlKey(
 
   switch (input) {
     case 'a':
-      return { type: 'cursor.line.start' };
+      return { type: 'edit.select.all' };
     case 'c':
       return { type: 'interrupt' };
     case 'e':

@@ -204,6 +204,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
         signal,
         onToolEvent,
         threadId: `studio:${config.studioId}:thread:${state.conversationId}:pet:${task.petId}:dispatch:${dispatch.id}`,
+        workdir: config.workdir,
       });
       dispatch.status = 'finished';
       dispatch.resultText = result.reply;
@@ -303,6 +304,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       signal: params.signal,
       onToolEvent: params.onToolEvent,
       threadId: `studio:${config.studioId}:thread:${params.conversationId}:planner`,
+      workdir: config.workdir,
       extraCapabilities: [planCapability],
       // 强制 planCapability 成为 userIntentDecision 候选,绕过 keyword 搜索 ——
       // 用户请求文本(例如"做一支秋日食材短视频")无法匹到 studio_plan 描述,

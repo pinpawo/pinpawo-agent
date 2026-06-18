@@ -82,6 +82,7 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
       capability: { name: 'user-capability' },
     }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getUserCapabilities'] extends () => infer T ? T : never,
     getCapabilityArtifactStore: () => ({}) as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getCapabilityArtifactStore'] extends () => infer T ? T : never,
+    getWorkdir: () => '/tmp/pinpawo-app-workdir',
     loadContext: async () => ({} as AgentContext),
     buildChatSetup: (params) => {
       buildInputs.push(params as unknown as Record<string, unknown>);

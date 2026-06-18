@@ -72,11 +72,13 @@ test('studio orchestrator dispatches planned tasks sequentially and finishes wit
   const wikiBaseDir = await makeWikiTempDir('studio-seq-');
   const briefs: string[] = [];
   const wikiRoots: (string | undefined)[] = [];
+  const workdirs: (string | undefined)[] = [];
 
   const orchestrator = createStudioOrchestrator({
     studioId: 'studio-1',
     ownerUserId: 'user-1',
     wikiBaseDir,
+    workdir: '/tmp/pinpawo-studio-workdir',
     plannerPetId: 'planner',
     agents: [
       runtime({
@@ -86,6 +88,7 @@ test('studio orchestrator dispatches planned tasks sequentially and finishes wit
         onInvoke: (input) => {
           briefs.push(input.brief);
           wikiRoots.push(input.wikiRoot);
+          workdirs.push(input.workdir);
         },
       }),
       runtime({
@@ -95,6 +98,7 @@ test('studio orchestrator dispatches planned tasks sequentially and finishes wit
         onInvoke: (input) => {
           briefs.push(input.brief);
           wikiRoots.push(input.wikiRoot);
+          workdirs.push(input.workdir);
         },
       }),
     ],
@@ -135,6 +139,7 @@ test('studio orchestrator dispatches planned tasks sequentially and finishes wit
     ['finished', 'finished'],
   );
   assert.deepEqual(briefs, ['写视频脚本结构', '评估尾音频需求,整合输出']);
+  assert.deepEqual(workdirs, ['/tmp/pinpawo-studio-workdir', '/tmp/pinpawo-studio-workdir']);
   // 所有 dispatch 都拿到 wikiRoot
   assert.equal(wikiRoots.length, 2);
   for (const root of wikiRoots) {

@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { isAbsolute, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { getLocalToolsWorkdir } from '../local/pathUtils';
 const execFileAsync = promisify(execFile);
 
 const nodeRequire = createRequire(import.meta.url);
@@ -268,7 +269,7 @@ function resolveUserDataDir(userDataDir: string): string {
   if (trimmed.startsWith('~/')) {
     return resolve(homedir(), trimmed.slice(2));
   }
-  return isAbsolute(trimmed) ? trimmed : resolve(config.workdir, trimmed);
+  return isAbsolute(trimmed) ? trimmed : resolve(getLocalToolsWorkdir(), trimmed);
 }
 
 function openSessionPath(opts: BrowserOpenOptions): string {

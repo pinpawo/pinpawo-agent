@@ -2,6 +2,16 @@ import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 import { config } from '../../config';
 
+let localToolsWorkdir = config.workdir;
+
+export function setLocalToolsWorkdir(workdir: string) {
+  localToolsWorkdir = workdir;
+}
+
+export function getLocalToolsWorkdir() {
+  return localToolsWorkdir;
+}
+
 export function resolveUserPath(path: string) {
   if (path === '~') {
     return homedir();
@@ -12,5 +22,5 @@ export function resolveUserPath(path: string) {
   if (isAbsolute(path)) {
     return path;
   }
-  return resolve(config.workdir, path);
+  return resolve(localToolsWorkdir, path);
 }

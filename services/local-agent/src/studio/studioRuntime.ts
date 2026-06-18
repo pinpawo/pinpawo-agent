@@ -18,7 +18,7 @@ import { buildLocalAgentModels } from '../agentModels';
 import type { AgentLlmConfig } from '../agentConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
 import { createExploreCapability } from '../capabilities/explore';
-import { loadPetLocalConfigs } from './petConfig';
+import { DEFAULT_PETS_DIR, loadPetLocalConfigs } from './petConfig';
 import {
   DEFAULT_STUDIO_CONFIG_PATH,
   loadStudioLocalConfig,
@@ -67,8 +67,12 @@ export type BuildStudioInput = {
   bridge: StudioBridgeContext;
   /** 可选覆盖:studio.json 路径 */
   studioConfigPath?: string;
+  /** 可选覆盖:pets 配置目录 */
+  petsDir?: string;
   /** 可选覆盖:wiki base 目录 */
   wikiBaseDir?: string;
+  /** 当前服务进程的 effective workdir */
+  workdir?: string;
 };
 
 export type BuildStudioResult = {
@@ -96,14 +100,32 @@ export type BuildStudioResult = {
  * - serverBinding                               → MVP 不消费(forward-compat)
  */
 export async function buildStudioForTurn(input: BuildStudioInput): Promise<BuildStudioResult> {
-  const studioConfigPath = input.studioConfigPath ?? DEFAULT_STUDIO_CONFIG_PATH;
-  const studio = await loadStudioLocalConfig(studioConfigPath);
+  const workdirStateRoot = input.workdir ? path.join(input.workdir, '.pinpawo') : null;
+  const preferredStudioConfigPath = input.studioConfigPath
+    ?? (workdirStateRoot ? path.join(workdirStateRoot, 'studio.json') : DEFAULT_STUDIO_CONFIG_PATH);
+  let studioConfigPath = preferredStudioConfigPath;
+  let studio = await loadStudioLocalConfig(studioConfigPath);
+  if (!studio && preferredStudioConfigPath !== DEFAULT_STUDIO_CONFIG_PATH) {
+    const legacyStudio = await loadStudioLocalConfig(DEFAULT_STUDIO_CONFIG_PATH);
+    if (legacyStudio) {
+      console.warn(
+        `[studio] using legacy Studio config at ${DEFAULT_STUDIO_CONFIG_PATH}; `
+        + `create ${preferredStudioConfigPath} to scope Studio config to the active workdir.`,
+      );
+      studioConfigPath = DEFAULT_STUDIO_CONFIG_PATH;
+      studio = legacyStudio;
+    }
+  }
   if (!studio) {
-    throw new StudioNotConfiguredError(studioConfigPath);
+    throw new StudioNotConfiguredError(preferredStudioConfigPath);
   }
   const studioConfigDir = path.dirname(studioConfigPath);
 
-  const pets = await loadPetLocalConfigs();
+  const petsDir = input.petsDir
+    ?? (studioConfigPath === DEFAULT_STUDIO_CONFIG_PATH
+      ? DEFAULT_PETS_DIR
+      : path.join(path.dirname(studioConfigPath), 'pets'));
+  const pets = await loadPetLocalConfigs(petsDir);
   const resolved = resolveStudio(studio, pets);
 
   // curator 用全局 models(不参与 pet 的 model 覆盖)
@@ -148,6 +170,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       toolkits: input.toolkits,
       contextWindowTokens: input.llmConfig.contextWindowTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,
+      workdir: input.workdir,
       humanReviewer: createWsHumanReviewer({
         send: input.bridge.send,
         requestId: input.bridge.requestId,
@@ -172,7 +195,9 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     ownerUserId: input.ownerUserId,
     plannerPetId: studio.plannerPetId,
     agents: petAgents,
-    wikiBaseDir: input.wikiBaseDir ?? DEFAULT_STUDIO_WIKI_BASE_DIR,
+    wikiBaseDir: input.wikiBaseDir
+      ?? (workdirStateRoot ? path.join(workdirStateRoot, 'studio-wiki') : DEFAULT_STUDIO_WIKI_BASE_DIR),
+    workdir: input.workdir,
     curator,
     ...(studio.maxIterationCount !== undefined ? { maxIterationCount: studio.maxIterationCount } : {}),
     ...(studio.maxRetryPerTask !== undefined ? { maxRetryPerTask: studio.maxRetryPerTask } : {}),

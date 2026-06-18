@@ -175,6 +175,17 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
   });
 });
 
+test('buildLocalChatAgentInput uses caller-provided workdir', () => {
+  const setup = buildLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    workdir: '/tmp/pinpawo-chat-workdir',
+  });
+
+  assert.equal(setup.input.workdir, '/tmp/pinpawo-chat-workdir');
+  assert.match(setup.input.runtimeEnvironment ?? '', /Agent 工作目录：\/tmp\/pinpawo-chat-workdir/);
+});
+
 test('buildLocalChatAgentInput passes model structured output strategy to explore', async () => {
   const setup = buildLocalChatAgentInput({
     context: createContext(),

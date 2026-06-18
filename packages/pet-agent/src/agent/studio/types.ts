@@ -206,6 +206,10 @@ export type StudioOrchestratorConfig = {
    */
   wikiBaseDir: string;
   /**
+   * Effective host workdir for Studio-dispatched pet invokes.
+   */
+  workdir?: string;
+  /**
    * 可选注入 curator。默认使用 skeleton curator(仅落档原文 + index 追加)。
    * production 建议传入 `createLLMWikiCurator({ models, promptProvider })`,
    * promptProvider 可用 `defaultPromptProvider()` / `fileReadPromptProvider(absPath)`

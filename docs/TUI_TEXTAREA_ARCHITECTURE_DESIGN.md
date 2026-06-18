@@ -448,7 +448,8 @@ export type AppInputCommand =
 
 当前实现已经让 approval owner 携带 `freeTextActive`，但暂不改变 approval `up/down`
 行为：即使已有 free-text draft，`up/down` 仍保持 option navigation。后续是否让
-active free text 抢占 cursor up/down 属于单独的 focus policy 决策。
+active free text 抢占 cursor up/down 属于单独的 focus policy 决策；该策略应集中落在
+approval routing helper，而不是散在 `TuiApp` 或主 router switch 中。
 
 ### 5.4 TextareaEngine
 
@@ -1150,9 +1151,13 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - input owner 将 approval 表达为 `{ type: 'approval', freeTextActive }`。
    - `TuiApp` 把当前 approval text draft 是否 active 传给 router context。
    - 暂不改变 approval `up/down` 选项导航策略。
-34. `codex/tui-textarea-history-selection`
+34. `codex/tui-approval-routing-helper`
+   - 把 approval-mode routing 提取到 `routeApprovalInputCommand`。
+   - 把 approval option navigation policy 集中到 helper，为后续 free-text focus 决策预留落点。
+   - 暂不改变 approval `up/down`、submit、escape 或 free-text editing 行为。
+35. `codex/tui-textarea-history-selection`
    - history/selection/undo 交互细节。
-35. `codex/tui-opentui-spike`
+36. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

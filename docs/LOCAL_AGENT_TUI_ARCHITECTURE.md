@@ -45,7 +45,7 @@ services/local-agent/src/commands/tui.tsx
   - `system.notice`
   - `error`
 - 支持 `interrupting` / `interrupted` / `studio_response` / `studio_error` 这些 session control message。
-- 有基础 input、slash commands、active operation line、system message、interrupt selector。
+- 有结构化 textarea input、slash commands、active operation line、system message、approval panel。
 
 当前重构入口：
 
@@ -54,7 +54,8 @@ services/local-agent/src/commands/tui.tsx
 - `tui/TuiRuntimeController.ts` 负责 websocket lifecycle、发送 client message、session/history 加载；本地 HTTP 访问由 `tui/tuiLocalServerClient.ts` 承担。
 - `/resume` picker 的 modal 状态、sessions 加载和恢复流程由 `tui/useResumePickerController.ts` 承担。
 - slash command 已收敛为 `tui/input/commandRegistry.ts`，统一承载 help metadata。
-- key handling 已收敛为 `tui/input/keymap.ts`，统一表达 global、composer、approval、resume picker 快捷键。
+- input handling 已拆为 `tui/input/terminalInput.ts`、`canonicalInput.ts`、`inputRouter.ts` 和 `textarea/` 子系统；`keymap.ts` 只保留兼容 re-export。
+- textarea 详细架构和验收矩阵见 `docs/TUI_TEXTAREA_ARCHITECTURE_DESIGN.md`。
 - message history、active operation、pending review、connection state 已收敛到 `tui/state/tuiStateReducer.ts`。
 - terminal render adapter 位于 `tui/render/`：`eventText.ts` 面向 `LocalAgentEvent` 展示字段，`messageText.ts` 处理 assistant Markdown 到终端可读文本的预处理，`text.ts` 集中 TUI 文案。
 
@@ -251,7 +252,21 @@ services/local-agent/src/
 
     input/
       commandRegistry.ts     # slash commands, help, enabled state
-      keymap.ts              # global/composer/approval key bindings
+      commandSubmit.ts       # slash/plain-text submit handling
+      terminalInput.ts       # Ink input + split terminal sequence decoding
+      canonicalInput.ts      # raw terminal/key events -> canonical input events
+      inputRouter.ts         # owner/focus based routing to app/modal/textarea commands
+      composerHistory.ts     # prompt history state
+      composerHistoryRouting.ts # visual-boundary-aware history routing
+      keymap.ts              # compatibility barrel for older imports
+      textarea/
+        commands.ts          # canonical input -> textarea command mapping
+        engine.ts            # pure textarea editing model
+        layout.ts            # terminal display-width layout and cursor metrics
+        renderModel.ts       # cursor/selection render rows
+        selection.ts         # selection normalization/ranges
+        textSegments.ts      # grapheme/display-width helpers
+        viewModel.ts         # placeholder/focus/selection view rows
 
     render/
       eventText.ts           # LocalAgentEvent / studio.progress -> terminal text props
@@ -261,7 +276,8 @@ services/local-agent/src/
     components/
       MessageHistory.tsx
       HistoryCell.tsx
-      Composer.tsx           # 含光标/快捷键(由现 SmartTextInput 演进)
+      Composer.tsx           # receives TextAreaViewModel and delegates to TextAreaView
+      TextAreaView.tsx       # Ink adapter for textarea view rows
       StatusLine.tsx
       ActiveOperations.tsx
       ApprovalPanel.tsx
@@ -272,7 +288,7 @@ services/local-agent/src/
 
 - **去掉 `state/selectors.ts`**：当前没有跨组件复用的派生状态，组件内 `useMemo` 就够；真出现重复再抽。
 - **`render/eventToActivity.ts` + `operationText.ts` + `studioText.ts` 合并为 `render/eventText.ts`**：当前事件文本映射规模仍适合单文件，拆成三个会碎片化。
-- **去掉 `input/composerModel.ts`**：在 multiline / paste / mention 都还不存在时拆 model/component 是为想象功能预留。先让 `Composer.tsx` 自带光标和快捷键，等真要做这些能力再拆 model。
+- **textarea 子系统独立成真实基础设施**：multiline、paste、selection、history、undo 和宽字符布局已经进入实现范围，`Composer.tsx` 不再自带编辑模型；编辑、布局、render/view model 的 contract 收敛在 `tui/input/textarea/`，详细设计见 `docs/TUI_TEXTAREA_ARCHITECTURE_DESIGN.md`。
 - **去掉 `session/historyAdapter.ts` 子目录**：history/session restore 目前通过 `TuiLocalServerClient` 访问本地 HTTP，归在 TUI client 边界内即可，不需要独立子系统。
 - **`copy.zh-CN.ts` → `text.ts` / `TUI_TEXT`**：当前只有中文一种，先做 single-locale TUI 文本入口；完整 i18n 的 locale lookup、fallback 和参数协议后续单独设计。
 
@@ -432,30 +448,38 @@ type TuiCommand = {
 
 ### 6.2 Keymap
 
-要解决的具体痛点：当前有三个并存的 `useInput`（全局、`SmartTextInput`、`InterruptSelector`），靠在每个里手写 `if (key.ctrl && input === 'c') return; // let parent handle`、`if (key.escape) return;` 这种**穿透 hack** 来协调谁吃哪个键。这很脆——加一个新区域或新快捷键，就要在多个 hook 里同步改穿透条件，漏一处就出现"按键被吞"或"被处理两次"。
+早期痛点是多个并存的 `useInput`（全局、`SmartTextInput`、`InterruptSelector`）靠穿透 hack 协调按键。当前实现已收敛为 `TuiApp` 中一个顶层 `useInput`：先通过 `terminalInput` 处理分段 escape sequence / paste，再映射成 `CanonicalInputEvent`，最后由 `inputRouter` 根据 owner/focus 路由。
 
-keymap 的目标是把按键**集中定义**，再由不同区域按当前 focus 解释：
+当前 owner/focus 路由：
 
 - global：`Ctrl+C` interrupt / exit，`Esc` clear / interrupt。
-- composer：Enter submit，方向键历史导航，左右移动，Ctrl+A/E/K/U/W。
-- approval：上下选择，Enter 确认，Esc 关闭选择器进入自由输入。
+- composer：Enter submit，方向键在视觉边界时可触发 prompt history，否则交给 textarea；文本编辑、selection、undo/redo 都进入 textarea command。
+- approval：上下选择 option，Enter 确认；文本输入复用 textarea command，提交时按 selected option 生成 canonical human review response。
+- resume picker：上下选择，Enter 恢复，Esc 关闭。
+- busy：只允许 interrupt/exit 类全局命令，普通编辑输入被忽略。
 
-落地方式建议是"单一 key 分发 + 当前 focus 区域"决定路由，取代分散在多个 `useInput` 里的穿透判断，让优先级和职责显式化。
+`tui/input/keymap.ts` 现在只是旧 import 的兼容 barrel。新增按键行为应优先落在 `terminalInput.ts`、`canonicalInput.ts`、`inputRouter.ts` 或 `textarea/commands.ts`，不要再把条件扩回组件层。
 
 ### 6.3 Composer
 
-Composer 是 terminal 输入系统的承载层。后续需要支持：
+Composer 是 textarea 的 UI adapter，不再拥有编辑算法或 key routing。当前边界是：
+
+- `useTextAreaController` 组合 `TuiState.input`、focus、placeholder、terminal width 和 dispatch。
+- `textarea/engine.ts` 维护纯编辑状态：text、cursor、selection、edit history、preferred column。
+- `textarea/layout.ts` 负责 display-width layout 和 cursor metrics。
+- `textarea/renderModel.ts` / `viewModel.ts` 负责 cursor、selection、placeholder 和 focus 显示状态。
+- `Composer.tsx` 只接收 `TextAreaViewModel`，并委托 `TextAreaView` 做 Ink 渲染。
+
+后续仍需要支持：
 
 - command popup。
-- 输入历史。
-- paste burst。
 - 多行输入。
 - file mention / path search。
-- approval 自由回复。
+- approval free-text focus policy（例如是否让 active free text 抢占 up/down）。
 
 ## 7. Approval / HITL
 
-当前 `InterruptSelector` 能完成基础选择。后续 `ApprovalPanel` 作为更完整的 HITL 组件，承载这些能力：
+当前 `ApprovalPanel` 承载 HITL 展示和选项选择，approval free text 复用同一套 textarea input。该组件面向这些能力继续演进：
 
 - 展示 request prompt。
 - 展示结构化 action requests。
@@ -586,18 +610,19 @@ LocalAgentEvent
 
 状态：已完成。slash command registry、keymap、composer、resume picker key routing 已落地，并有 unit tests 覆盖 command parse/help、keymap 和 composer editing。
 
-目标：把输入系统产品化，并用单一 key 分发取代多个 `useInput` 的穿透 hack（见 §6.2）。
+目标：把输入系统产品化，并用单一 key 分发取代多个 `useInput` 的穿透 hack（见 §6.2）。当前实现已进一步把 textarea 拆成 terminal decoder、canonical event、router、engine、layout、render model、view model 和 controller；细节见 `docs/TUI_TEXTAREA_ARCHITECTURE_DESIGN.md`。
 
 工作项：
 
 - 新增 command registry，`/help` 从 registry 生成。
-- 新增 keymap，按当前 focus 区域路由按键。
-- 把 `SmartTextInput` 升级为 `Composer.tsx`（自带光标和快捷键，暂不拆独立 model）。
+- 新增 terminal input decoder / canonical input / input router，按当前 owner/focus 路由按键。
+- 把 `SmartTextInput` 升级为 `Composer.tsx` + `TextAreaView`，编辑模型收敛到 `tui/input/textarea/`。
 
 验收：
 
 - 命令 parse 有 unit tests。
-- keymap 保持现有快捷键语义，无"按键被吞 / 被处理两次"。
+- terminal decoder、canonical mapper、router、textarea engine/layout/view model 有独立 unit tests。
+- 单一输入入口保持现有快捷键语义，无"按键被吞 / 被处理两次"。
 
 ### 阶段 3：render adapter 收敛 + ApprovalPanel
 

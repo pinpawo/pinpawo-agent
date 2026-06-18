@@ -12,6 +12,7 @@ export type TuiInputRouteContext = {
   ready: boolean;
   busy: boolean;
   hasPendingApproval: boolean;
+  approvalFreeTextActive?: boolean;
   hasResumePicker: boolean;
   composerHistory?: ComposerHistoryRouteState | null;
 };
@@ -23,7 +24,7 @@ export type TuiInputRouterState = {
 export type TuiInputOwner =
   | { type: 'unready' }
   | { type: 'resumePicker' }
-  | { type: 'approval' }
+  | { type: 'approval'; freeTextActive: boolean }
   | { type: 'busy' }
   | { type: 'composer' };
 
@@ -76,7 +77,9 @@ export function resolveLegacyTuiInputAction(
 export function resolveTuiInputOwner(context: TuiInputRouteContext): TuiInputOwner {
   if (!context.ready) return { type: 'unready' };
   if (context.hasResumePicker) return { type: 'resumePicker' };
-  if (context.hasPendingApproval) return { type: 'approval' };
+  if (context.hasPendingApproval) {
+    return { type: 'approval', freeTextActive: Boolean(context.approvalFreeTextActive) };
+  }
   if (context.busy) return { type: 'busy' };
   return { type: 'composer' };
 }

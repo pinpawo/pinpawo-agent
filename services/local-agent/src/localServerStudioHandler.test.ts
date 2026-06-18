@@ -20,6 +20,14 @@ function createFakeWebSocket(sent: unknown[]) {
   } as unknown as WebSocket;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolveFn) => {
+    resolve = resolveFn;
+  });
+  return { promise, resolve };
+}
+
 function createInflightController() {
   return new InflightRequestController<WebSocket>({
     forceInterruptMs: 1,
@@ -141,6 +149,87 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
     reply: 'done reply',
     finalDispatchId: 'dispatch-1',
   });
+});
+
+test('LocalServerStudioHandler interrupts previous studio request on the same websocket', async () => {
+  const sent: unknown[] = [];
+  const ws = createFakeWebSocket(sent);
+  const firstStarted = deferred<void>();
+  const firstAborted = deferred<boolean>();
+  let invocationCount = 0;
+
+  const handler = new LocalServerStudioHandler({
+    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    inflightRequests: createInflightController(),
+    buildStudio: async () => ({
+      resolved: {} as BuildStudioResult['resolved'],
+      orchestrator: {
+        invoke: async (turn: {
+          onTurnEvent: (event: Record<string, unknown>) => void;
+          onToolEvent: (event: unknown) => void;
+          signal?: AbortSignal;
+        }) => {
+          invocationCount += 1;
+          if (invocationCount === 1) {
+            firstStarted.resolve();
+            turn.signal?.addEventListener('abort', () => {
+              firstAborted.resolve(turn.signal?.aborted ?? false);
+            }, { once: true });
+            await firstAborted.promise;
+            return {
+              outcome: {
+                outcome: 'done',
+                reply: 'first done',
+                finalDispatchId: 'dispatch-first',
+              },
+            };
+          }
+          return {
+            outcome: {
+              outcome: 'done',
+              reply: 'second done',
+              finalDispatchId: 'dispatch-second',
+            },
+          };
+        },
+      } as unknown as BuildStudioResult['orchestrator'],
+    }),
+  });
+
+  const firstRequest = handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-1',
+    userRequest: 'first',
+  }, createDeps());
+  await firstStarted.promise;
+
+  await handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-2',
+    userRequest: 'second',
+  }, createDeps());
+  await firstRequest;
+
+  assert.equal(invocationCount, 2);
+  assert.equal(await firstAborted.promise, true);
+
+  const types = sent.map((item) => (item as { type?: string }).type).filter(Boolean);
+  assert.equal(types.includes('interrupted'), true);
+
+  const errors = sent.filter((item): item is { type: 'studio_error'; requestId: string; message: string } => (
+    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_error')
+  ));
+  assert.deepEqual(errors, [{
+    type: 'studio_error',
+    requestId: 'studio-1',
+    message: 'aborted by client',
+  }]);
+
+  const studioResponses = sent.filter((item): item is { type: 'studio_response'; requestId: string } => (
+    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
+  ));
+  assert.equal(studioResponses.length, 1);
+  assert.equal(studioResponses[0]?.requestId, 'studio-2');
 });
 
 test('LocalServerStudioHandler maps missing studio config to studio_error', async () => {

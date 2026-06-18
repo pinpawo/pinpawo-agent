@@ -247,7 +247,7 @@ textarea 是 terminal client 内部交互层，不应改变：
 ```ts
 type TuiInputOwner =
   | { type: 'composer' }
-  | { type: 'approval'; freeText: boolean }
+  | { type: 'approval'; freeTextActive: boolean }
   | { type: 'resumePicker' }
   | { type: 'busy' };
 ```
@@ -417,7 +417,7 @@ services/local-agent/src/tui/input/inputRouter.ts
 ```ts
 export type InputOwner =
   | { type: 'composer' }
-  | { type: 'approval'; freeText: boolean }
+  | { type: 'approval'; freeTextActive: boolean }
   | { type: 'resumePicker' }
   | { type: 'busy' };
 
@@ -445,6 +445,10 @@ export type AppInputCommand =
 - `approval + text/newline/delete/cursor` -> textarea when freeText is possible
 - `composer + submit` -> app submit
 - `composer + text/newline/delete/cursor` -> textarea
+
+当前实现已经让 approval owner 携带 `freeTextActive`，但暂不改变 approval `up/down`
+行为：即使已有 free-text draft，`up/down` 仍保持 option navigation。后续是否让
+active free text 抢占 cursor up/down 属于单独的 focus policy 决策。
 
 ### 5.4 TextareaEngine
 
@@ -1142,9 +1146,13 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
      `preferredColumn`。
    - `input.apply` 继续保留 engine-owned state；host-level replacement 清理 transient state。
    - 测试覆盖 direct input 和 submit 对 transient state 的清理。
-33. `codex/tui-textarea-history-selection`
+33. `codex/tui-approval-free-text-owner`
+   - input owner 将 approval 表达为 `{ type: 'approval', freeTextActive }`。
+   - `TuiApp` 把当前 approval text draft 是否 active 传给 router context。
+   - 暂不改变 approval `up/down` 选项导航策略。
+34. `codex/tui-textarea-history-selection`
    - history/selection/undo 交互细节。
-34. `codex/tui-opentui-spike`
+35. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

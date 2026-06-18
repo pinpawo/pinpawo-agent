@@ -398,6 +398,23 @@ studio_schedule
 `/runtime` 暴露 workdir-scoped 路径；API/Scheduler 落地时应复用同一 runtime config
 契约，而不是重新引入全局 `~/.pinpawo/studio.json` 读取。
 
+当前 local-agent 可交付边界：
+
+- 新增 `StudioRunService`，输入显式包含 `LocalServerDeps.runtimeConfig`、`runId`、
+  `conversationId`、review bridge 和事件回调。
+- `LocalServerStudioHandler` 只保留 WebSocket、inflight 和 review routing 逻辑，
+  实际 Studio turn 交给 `StudioRunService`。
+- `StudioRunService` 使用 `runId` 作为 Studio `turnId`，并派生稳定
+  `studio:<conversationId>:run:<runId>` idempotency key，供未来 scheduler/job 表持久化使用。
+- 未来 App/API scheduler 接入时，应由 scheduler 解析 workspace/workdir 后构造
+  `LocalAgentRuntimeConfig`，再调用 `StudioRunService`；不要直接调用 `buildStudioForTurn()`。
+
+当前 repo 之外仍未完成：
+
+- scheduled Studio run 表需要记录 workspace id 或 workdir。
+- due-run claim、retry、去重和 idempotency key 持久化需要在 App/API scheduler 服务实现。
+- scheduler 侧 side effect 需要以 `runId` 和 idempotency key 做幂等保护。
+
 ## 测试计划
 
 单元测试：

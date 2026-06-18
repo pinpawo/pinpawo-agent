@@ -14,32 +14,30 @@ import {
 } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
-import {
-  buildStudioForTurn,
-  StudioNotConfiguredError,
-  type BuildStudioInput,
-  type BuildStudioResult,
-} from './studio/studioRuntime';
+import { StudioNotConfiguredError } from './studio/studioRuntime';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForLocalServerDeps } from './runtimeOperationRegistry';
+import { StudioRunService, type BuildStudioForTurn } from './studioRunService';
 
 type InflightRequest = InflightOperationRun;
-type BuildStudioForTurn = (input: BuildStudioInput) => Promise<BuildStudioResult>;
 
 export class LocalServerStudioHandler {
   private readonly reviewRouter: LocalServerStudioReviewRouter<WebSocket>;
   private readonly inflightRequests: InflightRequestController<WebSocket>;
-  private readonly buildStudio: BuildStudioForTurn;
+  private readonly studioRunService: StudioRunService;
 
   constructor(options: {
     reviewRouter: LocalServerStudioReviewRouter<WebSocket>;
     inflightRequests: InflightRequestController<WebSocket>;
+    studioRunService?: StudioRunService;
     buildStudio?: BuildStudioForTurn;
   }) {
     this.reviewRouter = options.reviewRouter;
     this.inflightRequests = options.inflightRequests;
-    this.buildStudio = options.buildStudio ?? buildStudioForTurn;
+    this.studioRunService = options.studioRunService ?? new StudioRunService({
+      buildStudio: options.buildStudio,
+    });
   }
 
   routeHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
@@ -83,29 +81,14 @@ export class LocalServerStudioHandler {
     };
 
     try {
-      const { orchestrator } = await this.buildStudio({
-        llmConfig: deps.llmConfig,
-        capabilities: [
-          ...(deps.localCapabilities ?? []),
-          ...(deps.userCapabilities ?? []).map((u) => u.capability),
-        ],
-        toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
-        ownerUserId: null, // Phase 2 MVP: 纯本地,无服务端 owner 绑定
-        bridge: { send, requestId, slot },
-        workdir: deps.runtimeConfig?.workdir ?? deps.workdir,
-        ...(deps.runtimeConfig ? {
-          studioConfigPath: deps.runtimeConfig.studioConfigPath,
-          petsDir: deps.runtimeConfig.petsDir,
-          wikiBaseDir: deps.runtimeConfig.studioWikiBaseDir,
-        } : {}),
-      });
-
-      const result = await orchestrator.invoke({
+      const result = await this.studioRunService.run({
+        deps,
+        runId: requestId,
         userRequest,
         conversationId,
-        turnId: requestId,
+        bridge: { send, requestId, slot },
         signal: controller.signal,
-        onTurnEvent: (event) => {
+        onProgress: (event) => {
           sendLocalAgentEvent(ws, {
             type: 'studio.progress',
             requestId,
@@ -124,21 +107,21 @@ export class LocalServerStudioHandler {
       }
 
       this.inflightRequests.finish(ws, inflight, 'completed');
-      if (result.outcome.outcome === 'done') {
+      if (result.turn.outcome.outcome === 'done') {
         send({
           type: 'studio_response',
           requestId,
           outcome: 'done',
-          reply: result.outcome.reply,
-          finalDispatchId: result.outcome.finalDispatchId,
+          reply: result.turn.outcome.reply,
+          finalDispatchId: result.turn.outcome.finalDispatchId,
         });
       } else {
         send({
           type: 'studio_response',
           requestId,
           outcome: 'stopped',
-          reply: result.outcome.reply,
-          reason: result.outcome.reason,
+          reply: result.turn.outcome.reply,
+          reason: result.turn.outcome.reason,
         });
       }
     } catch (err) {

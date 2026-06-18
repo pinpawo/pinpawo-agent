@@ -4,9 +4,8 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
-import { config } from '../../config';
 import { readRecord, readString } from '../operationMetadata';
-import { resolveUserPath } from './pathUtils';
+import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
 export function getBlockedShellReason(command: string) {
   const normalized = command.trim();
@@ -85,7 +84,7 @@ export function normalizeShellActionInput(input: unknown) {
   }
   const cwd = typeof record.cwd === 'string' && record.cwd.trim()
     ? resolveUserPath(record.cwd.trim())
-    : config.workdir;
+    : getLocalToolsWorkdir();
   return { command, cwd };
 }
 

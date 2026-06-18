@@ -58,6 +58,7 @@ export type LocalAgentAppChatHandlerOptions = {
   getLocalCapabilities: () => AgentCapability[];
   getUserCapabilities: () => LoadedUserCapability[];
   getCapabilityArtifactStore: () => CapabilityArtifactStore;
+  getWorkdir: () => string;
   loadContext?: LoadContext;
   runChat?: RunChatSession;
   buildChatSetup?: BuildChatSetup;
@@ -76,6 +77,7 @@ export class LocalAgentAppChatHandler {
   private readonly getLocalCapabilities: () => AgentCapability[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
   private readonly getCapabilityArtifactStore: () => CapabilityArtifactStore;
+  private readonly getWorkdir: () => string;
   private readonly loadContext: LoadContext;
   private readonly runChat: RunChatSession;
   private readonly buildChatSetup: BuildChatSetup;
@@ -97,6 +99,7 @@ export class LocalAgentAppChatHandler {
     this.getLocalCapabilities = options.getLocalCapabilities;
     this.getUserCapabilities = options.getUserCapabilities;
     this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
+    this.getWorkdir = options.getWorkdir;
     this.loadContext = options.loadContext ?? loadAgentContext;
     this.runChat = options.runChat ?? runChatSession;
     this.buildChatSetup = options.buildChatSetup ?? buildLocalChatAgentInput;
@@ -429,6 +432,7 @@ export class LocalAgentAppChatHandler {
       checkpoint: this.checkpoint,
       userCapabilities: this.getUserCapabilities(),
       capabilityArtifactStore: this.getCapabilityArtifactStore(),
+      workdir: this.getWorkdir(),
     });
   }
 

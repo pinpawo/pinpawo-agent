@@ -40,6 +40,17 @@ function createDeps(): LocalServerDeps {
       baseUrl: 'https://example.test/v1',
     } as unknown as LocalServerDeps['llmConfig'],
     workdir: '/tmp/pinpawo-test',
+    runtimeConfig: {
+      workdir: '/tmp/pinpawo-test',
+      stateRoot: '/tmp/pinpawo-test/.pinpawo',
+      studioConfigPath: '/tmp/pinpawo-test/.pinpawo/studio.json',
+      petsDir: '/tmp/pinpawo-test/.pinpawo/pets',
+      studioWikiBaseDir: '/tmp/pinpawo-test/.pinpawo/studio-wiki',
+      checkpointPath: '/tmp/pinpawo-test/.pinpawo/checkpoints.json',
+      tuiCheckpointPath: '/tmp/pinpawo-test/.pinpawo/checkpoints-tui.json',
+      tuiSessionPath: '/tmp/pinpawo-test/.pinpawo/tui-sessions.json',
+      capabilityArtifactRoot: '/tmp/pinpawo-test/.pinpawo/capability-artifacts',
+    },
     localToolkits: [{
       name: 'local-toolkit',
       description: 'local toolkit',
@@ -109,6 +120,10 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
   assert.deepEqual(buildInputs[0]?.capabilities.map((item) => item.name), ['browser', 'user-capability']);
   assert.deepEqual(buildInputs[0]?.toolkits?.map((item) => item.name), ['plugin-toolkit', 'local-toolkit']);
   assert.equal(buildInputs[0]?.bridge.requestId, 'studio-1');
+  assert.equal(buildInputs[0]?.workdir, '/tmp/pinpawo-test');
+  assert.equal(buildInputs[0]?.studioConfigPath, '/tmp/pinpawo-test/.pinpawo/studio.json');
+  assert.equal(buildInputs[0]?.petsDir, '/tmp/pinpawo-test/.pinpawo/pets');
+  assert.equal(buildInputs[0]?.wikiBaseDir, '/tmp/pinpawo-test/.pinpawo/studio-wiki');
 
   const eventMessages = sent.filter((item): item is { type: string; event?: { type?: string; phase?: string } } =>
     Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'event'),

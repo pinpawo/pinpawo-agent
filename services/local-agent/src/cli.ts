@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
@@ -33,6 +34,13 @@ function readErrorMessage(error: unknown): string {
 function readExitCode(error: unknown): number {
   const value = (error as { exitCode?: unknown } | null)?.exitCode;
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 1;
+}
+
+function resolveWorkdirOption(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed === '~') return homedir();
+  if (trimmed.startsWith('~/')) return resolve(homedir(), trimmed.slice(2));
+  return isAbsolute(trimmed) ? trimmed : resolve(process.cwd(), trimmed);
 }
 
 export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Command {
@@ -84,7 +92,11 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
   program
     .command('run')
     .description('Start the local agent service')
-    .action(async () => {
+    .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
+    .action(async (options: { workdir?: string }) => {
+      if (options.workdir?.trim()) {
+        process.env.PINPAWO_WORKDIR = resolveWorkdirOption(options.workdir);
+      }
       const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
       await runAgent();
     });

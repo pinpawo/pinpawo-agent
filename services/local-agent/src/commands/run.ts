@@ -3,10 +3,12 @@ import { startLocalServer } from '../localServer';
 import { config } from '../config';
 import { ensureActorSelected } from '../actorSelection';
 import { browserSession } from '../toolkits/browser';
+import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
 
 export async function runAgent() {
   await ensureActorSelected({ interactive: true });
-  const runtime = new LocalAgentRuntime();
+  const runtimeConfig = buildLocalAgentRuntimeConfig();
+  const runtime = new LocalAgentRuntime(runtimeConfig);
 
   let stopping = false;
   process.on('SIGINT', () => {
@@ -31,7 +33,8 @@ export async function runAgent() {
     actorId: runtime.getActorId(),
     actorName: runtime.getActorName() ?? undefined,
     llmConfig: runtime.getLlmConfig(),
-    workdir: config.workdir,
+    workdir: runtimeConfig.workdir,
+    runtimeConfig,
     localToolkitDefinitions: runtime.getLocalToolkitDefinitions(),
     localToolkits: runtime.getLocalToolkits(),
     pluginToolkits: runtime.getPluginToolkits(),

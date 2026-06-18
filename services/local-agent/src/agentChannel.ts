@@ -21,7 +21,6 @@ import { createPetProfileToolkit } from './toolkits/petProfile';
 import { buildLocalAgentModels } from './agentModels';
 import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
-import { config } from './config';
 import { buildLocalLlmConfig } from './llmConfig';
 import { agentStore } from './agentStore';
 import { loadStoredConfig } from './storage';
@@ -201,6 +200,8 @@ export function buildLocalChatAgentInput(params: {
   userCapabilities?: LoadedUserCapability[];
   /** Store handed to capabilities so they can deterministically persist result artifacts */
   capabilityArtifactStore?: CapabilityArtifactStore;
+  /** Effective agent workdir for prompt context and relative tool paths. */
+  workdir?: string;
 }): AgentChannelSetup {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
@@ -276,8 +277,8 @@ export function buildLocalChatAgentInput(params: {
       execution: {
         dryRun: params.dryRun,
       },
-      workdir: config.workdir,
-      runtimeEnvironment: buildRuntimeEnvironmentSummary(),
+      workdir: params.workdir,
+      runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir),
     },
     interfaceContext: buildLocalAgentInterfaceContext({
       threadId: params.threadId,

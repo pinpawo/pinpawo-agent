@@ -92,6 +92,12 @@ export class LocalServerStudioHandler {
         toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
         ownerUserId: null, // Phase 2 MVP: 纯本地,无服务端 owner 绑定
         bridge: { send, requestId, slot },
+        workdir: deps.runtimeConfig?.workdir ?? deps.workdir,
+        ...(deps.runtimeConfig ? {
+          studioConfigPath: deps.runtimeConfig.studioConfigPath,
+          petsDir: deps.runtimeConfig.petsDir,
+          wikiBaseDir: deps.runtimeConfig.studioWikiBaseDir,
+        } : {}),
       });
 
       const result = await orchestrator.invoke({

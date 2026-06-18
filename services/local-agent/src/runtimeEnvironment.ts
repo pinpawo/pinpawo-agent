@@ -20,8 +20,7 @@ function pathStatus(path: string): string {
   }
 }
 
-export function buildRuntimeEnvironmentSummary(): string {
-  const workdir = config.workdir;
+export function buildRuntimeEnvironmentSummary(workdir = config.workdir): string {
   const lines = [
     '[运行环境]',
     `- 操作系统：${type()} ${release()} (${platform()} ${arch()})`,

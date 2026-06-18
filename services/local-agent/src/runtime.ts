@@ -13,8 +13,6 @@ import type { AgentLlmConfig } from './agentConfig';
 import {
   buildLocalLlmConfig,
 } from './llmConfig';
-import { resolve } from 'node:path';
-import { homedir } from 'node:os';
 import { LocalAgentGraphService } from './agentGraphService';
 import { ensureActorSelected, loadSelectedActorName } from './actorSelection';
 import { loadStoredConfig, saveStoredConfig } from './storage';
@@ -26,25 +24,23 @@ import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
-import { defaultCapabilityArtifactRoot } from './capabilityArtifactStore';
+import { buildLocalAgentRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
+import { setLocalToolsWorkdir } from './toolkits/local/pathUtils';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
 const INTERRUPT_FORCE_REPLY_MS = 1800;
 
 export class LocalAgentRuntime {
+  private readonly runtimeConfig: LocalAgentRuntimeConfig;
   private stopRequested = false;
   private actorId: string | null = null;
   private actorName: string | null = null;
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginToolkits: AgentToolkit[] = [];
-  private readonly capabilityRegistry = new LocalAgentCapabilityRegistry({
-    capabilityArtifactRoot: defaultCapabilityArtifactRoot(config.workdir),
-  });
-  private readonly chatCheckpointer = new FileSaver(
-    resolve(homedir(), '.pinpawo', 'checkpoints.json'),
-  );
+  private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
+  private readonly chatCheckpointer: FileSaver;
   private readonly graphService = new LocalAgentGraphService();
   private appWsClient: LocalAgentAppWsClient | null = null;
   private readonly inflightRequests = new InflightRequestController<WebSocket>({
@@ -55,23 +51,38 @@ export class LocalAgentRuntime {
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
     logPrefix: 'local-agent',
   });
-  private readonly appChatHandler = new LocalAgentAppChatHandler({
-    graphService: this.graphService,
-    checkpoint: this.chatCheckpointer,
-    deleteThread: async (threadId) => {
-      await this.chatCheckpointer.deleteThread(threadId);
-      await this.capabilityRegistry.deleteThreadArtifacts(threadId);
-    },
-    inflightRequests: this.inflightRequests,
-    isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
-    getActorId: () => this.getActorId(),
-    getLlmConfig: () => this.llmConfig,
-    getPluginToolkits: () => this.pluginToolkits,
-    getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
-    getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
-    getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
-    getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
-  });
+  private readonly appChatHandler: LocalAgentAppChatHandler;
+
+  constructor(runtimeConfig: LocalAgentRuntimeConfig = buildLocalAgentRuntimeConfig()) {
+    this.runtimeConfig = runtimeConfig;
+    setLocalToolsWorkdir(runtimeConfig.workdir);
+    this.capabilityRegistry = new LocalAgentCapabilityRegistry({
+      capabilityArtifactRoot: runtimeConfig.capabilityArtifactRoot,
+    });
+    this.chatCheckpointer = new FileSaver(runtimeConfig.checkpointPath);
+    this.appChatHandler = new LocalAgentAppChatHandler({
+      graphService: this.graphService,
+      checkpoint: this.chatCheckpointer,
+      deleteThread: async (threadId) => {
+        await this.chatCheckpointer.deleteThread(threadId);
+        await this.capabilityRegistry.deleteThreadArtifacts(threadId);
+      },
+      inflightRequests: this.inflightRequests,
+      isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
+      getActorId: () => this.getActorId(),
+      getLlmConfig: () => this.llmConfig,
+      getPluginToolkits: () => this.pluginToolkits,
+      getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
+      getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
+      getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
+      getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
+      getWorkdir: () => this.runtimeConfig.workdir,
+    });
+  }
+
+  getRuntimeConfig(): LocalAgentRuntimeConfig {
+    return this.runtimeConfig;
+  }
 
   async init() {
     const { plugins, toolkits } = await loadPlugins();

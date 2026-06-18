@@ -72,6 +72,12 @@ export function handleLocalHttpRequest(
       llm_model: deps.llmConfig.model,
       llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
       workdir: deps.workdir,
+      ...(deps.runtimeConfig ? {
+        state_root: deps.runtimeConfig.stateRoot,
+        studio_config_path: deps.runtimeConfig.studioConfigPath,
+        pets_dir: deps.runtimeConfig.petsDir,
+        studio_wiki_base_dir: deps.runtimeConfig.studioWikiBaseDir,
+      } : {}),
     });
     return true;
   }

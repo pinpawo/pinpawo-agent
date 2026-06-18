@@ -28,6 +28,7 @@
 ## 非目标
 
 - 不在这一轮引入多 workdir 同进程并发运行。第一阶段按“一个 local-agent 服务进程绑定一个 effective workdir”处理。
+- 本地 WebSocket 上的 Studio 调度现在是**单会话单飞行**：同一个连接连续发起新的 `studio_request` 时会中断上一次未完成任务，不会并行执行多个 Studio turn。
 - 不改变 `@pinpawo/pet-agent` 的核心 agent 接口。`workdir` 继续作为 host 传入 runtime 的配置项。
 - 不把全局登录态、浏览器 session、插件安装目录全部迁入 workdir。它们可以后续单独评估。
 - 不解决 Studio 同一 conversation 并发写 wiki 的问题。该问题由 Studio run/concurrency 设计单独处理。

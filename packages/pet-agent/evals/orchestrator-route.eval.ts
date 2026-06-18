@@ -27,6 +27,7 @@ import {
 import type { AgentActor, AgentModels } from '../src/types/agent';
 import type { AgentCapability } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
+import { inferStructuredOutputMethod } from '../src/utils/structuredOutput';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
 import { MemorySaver } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
@@ -64,45 +65,10 @@ function normalizeStructuredOutputMethod(value: string | undefined): Orchestrati
   );
 }
 
-function inferDefaultStructuredOutputMethod(model: string): OrchestrationDecisionStructuredOutputConfig['method'] {
-  const normalized = model.toLowerCase();
-  if (supportsJsonSchemaStructuredOutput(normalized)) return 'jsonSchema';
-  if (supportsJsonModeStructuredOutput(normalized) || isAliyunCompatibleBaseUrl(LLM_BASE_URL)) return 'jsonMode';
-  return undefined;
-}
-
-function versionAtLeast(model: string, pattern: RegExp, minMajor: number, minMinor: number): boolean {
-  const rawVersion = model.match(pattern)?.[1];
-  if (!rawVersion) return false;
-  const [majorRaw, minorRaw = '0'] = rawVersion.split('.');
-  const major = Number(majorRaw);
-  const minor = Number(minorRaw);
-  return Number.isFinite(major)
-    && Number.isFinite(minor)
-    && (major > minMajor || (major === minMajor && minor >= minMinor));
-}
-
-function supportsJsonSchemaStructuredOutput(model: string): boolean {
-  return versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
-}
-
-function supportsJsonModeStructuredOutput(model: string): boolean {
-  return model.includes('deepseek')
-    || model.includes('qwen')
-    || model.includes('glm')
-    || model.includes('minimax');
-}
-
-function isAliyunCompatibleBaseUrl(baseUrl: string): boolean {
-  const normalized = baseUrl.toLowerCase();
-  return normalized.includes('dashscope.aliyuncs.com')
-    || normalized.includes('maas.aliyuncs.com');
-}
-
 const DECISION_STRUCTURED_OUTPUT_METHOD = normalizeStructuredOutputMethod(
   process.env.DECISION_STRUCTURED_OUTPUT_METHOD,
 )
-  ?? inferDefaultStructuredOutputMethod(LLM_MODEL);
+  ?? inferStructuredOutputMethod(LLM_MODEL, LLM_BASE_URL);
 const DECISION_STRUCTURED_OUTPUT_STRICT = (() => {
   const raw = process.env.DECISION_STRUCTURED_OUTPUT_STRICT;
   const normalized = raw?.trim().toLowerCase();

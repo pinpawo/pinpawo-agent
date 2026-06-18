@@ -78,6 +78,7 @@ export {
   validateUniqueToolNames,
 } from './agent/createAgentRuntime';
 export {
+  inferStructuredOutputMethod,
   invokeStructuredOutput,
 } from './utils/structuredOutput';
 export type {

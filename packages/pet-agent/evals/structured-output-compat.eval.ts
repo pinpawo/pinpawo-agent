@@ -26,8 +26,10 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
-
-type StructuredOutputMethod = 'functionCalling' | 'jsonMode' | 'jsonSchema';
+import {
+  inferStructuredOutputMethod,
+  type StructuredOutputMethod,
+} from '../src/utils/structuredOutput';
 
 type EvalCase = {
   id: string;
@@ -143,39 +145,6 @@ function parseMethods(value: string | undefined): StructuredOutputMethod[] {
       'Use functionCalling, jsonMode, jsonSchema, or auto.',
     );
   });
-}
-
-function versionAtLeast(model: string, pattern: RegExp, minMajor: number, minMinor: number): boolean {
-  const rawVersion = model.match(pattern)?.[1];
-  if (!rawVersion) return false;
-  const [majorRaw, minorRaw = '0'] = rawVersion.split('.');
-  const major = Number(majorRaw);
-  const minor = Number(minorRaw);
-  return Number.isFinite(major)
-    && Number.isFinite(minor)
-    && (major > minMajor || (major === minMajor && minor >= minMinor));
-}
-
-function supportsJsonSchemaStructuredOutput(model: string): boolean {
-  return versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
-}
-
-function supportsJsonModeStructuredOutput(model: string): boolean {
-  return model.includes('deepseek')
-    || model.includes('qwen')
-    || model.includes('glm')
-    || model.includes('minimax');
-}
-
-function inferProductionStructuredOutputMethod(model: string, baseUrl: string): StructuredOutputMethod | undefined {
-  const normalizedModel = model.toLowerCase();
-  const normalizedBaseUrl = baseUrl.toLowerCase();
-  const isAliyunCompatibleEndpoint = normalizedBaseUrl.includes('dashscope.aliyuncs.com')
-    || normalizedBaseUrl.includes('maas.aliyuncs.com');
-
-  if (supportsJsonSchemaStructuredOutput(normalizedModel)) return 'jsonSchema';
-  if (supportsJsonModeStructuredOutput(normalizedModel) || isAliyunCompatibleEndpoint) return 'jsonMode';
-  return undefined;
 }
 
 function parseOptionalBoolean(name: string): boolean | undefined {
@@ -394,7 +363,7 @@ async function main() {
   if (autoMethods) {
     console.log('Methods: auto');
     console.log(`Auto methods: ${modelList.map((model) => {
-      const method = inferProductionStructuredOutputMethod(model, baseUrl);
+      const method = inferStructuredOutputMethod(model, baseUrl);
       return `${model}=${method ?? 'default'}`;
     }).join(', ')}`);
   } else {
@@ -407,7 +376,7 @@ async function main() {
   const results: EvalResult[] = [];
   for (const model of modelList) {
     const modelMethods = autoMethods
-      ? [inferProductionStructuredOutputMethod(model, baseUrl)]
+      ? [inferStructuredOutputMethod(model, baseUrl)]
       : methods;
     for (const method of modelMethods) {
       if (!method) {

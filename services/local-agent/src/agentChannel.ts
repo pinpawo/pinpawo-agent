@@ -7,6 +7,7 @@ import {
   type AgentToolkit,
   type CapabilityArtifactStore,
   type OrchestratorConfig,
+  inferStructuredOutputMethod,
 } from '@pinpawo/pet-agent';
 import { createCapabilityCreatorCapability } from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
@@ -170,38 +171,10 @@ function appendCapability(
   capabilities.push(capability);
 }
 
-function versionAtLeast(
-  model: string,
-  pattern: RegExp,
-  minMajor: number,
-  minMinor: number,
-): boolean {
-  const match = model.match(pattern);
-  const rawVersion = match?.[1];
-  if (!rawVersion) return false;
-  const [majorRaw, minorRaw = '0'] = rawVersion.split('.');
-  const major = Number(majorRaw);
-  const minor = Number(minorRaw);
-  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false;
-  return major > minMajor || (major === minMajor && minor >= minMinor);
-}
-
-function supportsOfficialJsonSchemaModel(model: string): boolean {
-  return versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
-}
-
-function hasOfficialJsonModeModel(model: string): boolean {
-  return model.includes('deepseek')
-    || model.includes('qwen')
-    || model.includes('glm')
-    || model.includes('minimax');
-}
-
 export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): OrchestratorConfig['decisionStructuredOutput'] {
-  const model = llmConfig.model.toLowerCase();
-  const baseUrl = llmConfig.baseUrl.toLowerCase();
-  const isAliyunCompatibleEndpoint = baseUrl.includes('dashscope.aliyuncs.com')
-    || baseUrl.includes('maas.aliyuncs.com');
+  const method = inferStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
+  if (!method) return undefined;
+
   const autoRepair = llmConfig.structuredOutputAutoRepair
     ? {
         autoRepair: {
@@ -210,15 +183,7 @@ export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): Orches
       }
     : {};
 
-  if (supportsOfficialJsonSchemaModel(model)) {
-    return { method: 'jsonSchema', ...autoRepair };
-  }
-
-  if (hasOfficialJsonModeModel(model) || isAliyunCompatibleEndpoint) {
-    return { method: 'jsonMode', ...autoRepair };
-  }
-
-  return undefined;
+  return { method, ...autoRepair };
 }
 
 export function buildLocalChatAgentInput(params: {

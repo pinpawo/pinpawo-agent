@@ -7,6 +7,8 @@ export const TUI_TEXT = {
   emptyHistory: (petName: string) => `和 ${petName} 聊天吧。`,
   helpIdle: '/new 新会话 · /resume 恢复 · /help 帮助 · /quit 退出',
   helpBusy: 'Ctrl+C 打断 · 再按一次退出',
+  fileMentionTitle: '文件',
+  fileMentionEmpty: '没有匹配路径',
   inputBusy: '> 处理中…',
   inputPlaceholder: '输入消息',
   approvalFreeReplyPlaceholder: '输入回复，或按 ↑↓ 选择',

@@ -4,6 +4,7 @@ import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import { config } from '../config';
 import { ApprovalPanel } from './components/ApprovalPanel';
 import { Composer } from './components/Composer';
+import { FileMentionPopup } from './components/FileMentionPopup';
 import { MessageBlock } from './components/MessageBlock';
 import { RuntimeInfoLine } from './components/RuntimeInfoLine';
 import { TokenUsageLine } from './components/TokenUsageLine';
@@ -14,6 +15,11 @@ import {
   toCanonicalInputEvent,
 } from './input/keymap';
 import { getComposerHistoryAvailability } from './input/composerHistory';
+import {
+  buildFileMentionModel,
+  completeFileMentionInput,
+  moveFileMentionSelection,
+} from './input/fileMention';
 import { resolveTuiInputAction } from './input/inputRouter';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import {
@@ -64,6 +70,7 @@ export function TuiApp(props: { actorId: string }) {
   }));
   const [studioMode, setStudioMode] = useState(false);
   const [approvalIndex, setApprovalIndex] = useState(0);
+  const [fileMentionIndex, setFileMentionIndex] = useState(0);
 
   const stateRef = useRef<TuiState>(tuiState);
   const inputBufferRef = useRef(createInitialTuiInputBufferState());
@@ -156,6 +163,19 @@ export function TuiApp(props: { actorId: string }) {
     dispatch,
   });
   const inputValue = textArea.value;
+  const fileMentionRoot = focusedSession?.runtime.cwd ?? config.workdir;
+  const fileMention = useMemo(() => (
+    inputFocused && !pendingApproval
+      ? buildFileMentionModel({
+          text: inputValue,
+          cursorOffset: textArea.cursorOffset,
+        }, fileMentionRoot, fileMentionIndex)
+      : buildFileMentionModel({ text: '', cursorOffset: 0 }, fileMentionRoot)
+  ), [fileMentionIndex, fileMentionRoot, inputFocused, inputValue, pendingApproval, textArea.cursorOffset]);
+
+  useEffect(() => {
+    setFileMentionIndex(0);
+  }, [inputValue, textArea.cursorOffset]);
 
   const submitCurrentInput = () => {
     submitCurrentInputFromController({
@@ -217,6 +237,7 @@ export function TuiApp(props: { actorId: string }) {
       hasPendingApproval: Boolean(pendingApproval),
       approvalFreeTextActive: Boolean(pendingApproval && inputValue.trim()),
       hasResumePicker: resumePickerOpen,
+      hasFileMention: fileMention.open,
       composerHistory: {
         boundary: textArea.historyBoundary,
         available: getComposerHistoryAvailability(tuiState.input.history),
@@ -281,6 +302,48 @@ export function TuiApp(props: { actorId: string }) {
         }
         closeResumePicker();
         return;
+
+      case 'fileMention':
+        if (action.action === 'previous') {
+          if (!fileMention.open) return;
+          const { query, replacementStart, replacementEnd, items } = fileMention;
+          setFileMentionIndex((current) => moveFileMentionSelection({
+            open: true,
+            query,
+            replacementStart,
+            replacementEnd,
+            items,
+            selectedIndex: current,
+          }, -1));
+          return;
+        }
+        if (action.action === 'next') {
+          if (!fileMention.open) return;
+          const { query, replacementStart, replacementEnd, items } = fileMention;
+          setFileMentionIndex((current) => moveFileMentionSelection({
+            open: true,
+            query,
+            replacementStart,
+            replacementEnd,
+            items,
+            selectedIndex: current,
+          }, 1));
+          return;
+        }
+        {
+          const completion = completeFileMentionInput({
+            text: inputValue,
+            cursorOffset: textArea.cursorOffset,
+          }, fileMention);
+          if (completion) {
+            dispatch({
+              type: 'input.set',
+              value: completion.text,
+              cursorOffset: completion.cursorOffset,
+            });
+          }
+          return;
+        }
 
       case 'composer':
         if (action.action === 'clear') {
@@ -369,6 +432,9 @@ export function TuiApp(props: { actorId: string }) {
           {focusedSession ? <RuntimeInfoLine runtime={focusedSession.runtime} /> : null}
           {focusedSession?.tokenUsage ? <TokenUsageLine tokenUsage={focusedSession.tokenUsage} /> : null}
         </>
+      ) : null}
+      {fileMention.open ? (
+        <FileMentionPopup model={fileMention} width={contentWidth} />
       ) : null}
       <Box
         borderStyle="round"

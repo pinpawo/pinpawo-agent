@@ -861,6 +861,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   delete/backspace 也应消费同一套 `textSegments` 边界。engine 可以继续保存 JS offset，
   但不应再用 `cursorOffset +/- 1` 自己猜可编辑字符边界；word movement/deletion 可作为
   后续独立 refinement。
+- `textSegments.ts` 应拥有可复用的 segment range helper，例如 previous/next segment
+  range 和 expand range to segment boundaries。engine、selection、render/layout 不应各自
+  重复扫描 grapheme segments。
 - `Composer` 不应继续承担 placeholder、focus dim、cursor row rendering 等显示状态判断。
   这些状态应收进 `textarea/viewModel.ts`，再由 `TextAreaView` 做 Ink 适配。这样
   `Composer` 只是 host/component 边界，textarea 的显示 contract 可以独立测试。
@@ -1126,9 +1129,13 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
    - `textarea/selection.ts` 把 partial grapheme selection 扩展为完整 grapheme range。
    - 保留 selection 方向，engine 继续只消费 normalized selection range。
    - 防止 stale/external selection 在 replace/delete 时切坏 emoji 或组合字符。
-31. `codex/tui-textarea-history-selection`
+31. `codex/tui-text-segment-range-helpers`
+   - `textSegments.ts` 提供 previous/next segment range 和 expand range helper。
+   - engine 删除本地 grapheme range 扫描，selection 删除本地 range expansion。
+   - 为共享基础层添加直接测试，避免只靠 engine/render 间接覆盖。
+32. `codex/tui-textarea-history-selection`
    - history/selection/undo 交互细节。
-32. `codex/tui-opentui-spike`
+33. `codex/tui-opentui-spike`
    - 可选 spike，不阻塞 Ink 路线。
 
 ## 12. Open Questions

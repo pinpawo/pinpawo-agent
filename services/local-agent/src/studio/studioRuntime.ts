@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { homedir } from 'node:os';
 import {
   createLLMWikiCurator,
   createPetAgentRuntime,
@@ -18,6 +17,7 @@ import { buildLocalAgentModels } from '../agentModels';
 import type { AgentLlmConfig } from '../agentConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
 import { createExploreCapability } from '../capabilities/explore';
+import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
 import { DEFAULT_PETS_DIR, loadPetLocalConfigs } from './petConfig';
 import {
   DEFAULT_STUDIO_CONFIG_PATH,
@@ -30,8 +30,6 @@ import {
   createWsHumanReviewer,
   type PendingReviewSlot,
 } from './studioBridge';
-
-const DEFAULT_STUDIO_WIKI_BASE_DIR = path.join(homedir(), '.pinpawo', 'studio-wiki');
 
 /**
  * 没有 ~/.pinpawo/studio.json 时抛此错。
@@ -100,9 +98,10 @@ export type BuildStudioResult = {
  * - serverBinding                               → MVP 不消费(forward-compat)
  */
 export async function buildStudioForTurn(input: BuildStudioInput): Promise<BuildStudioResult> {
-  const workdirStateRoot = input.workdir ? path.join(input.workdir, '.pinpawo') : null;
+  const effectiveWorkdir = input.workdir ?? buildLocalAgentRuntimeConfig().workdir;
+  const workdirStateRoot = path.join(effectiveWorkdir, '.pinpawo');
   const preferredStudioConfigPath = input.studioConfigPath
-    ?? (workdirStateRoot ? path.join(workdirStateRoot, 'studio.json') : DEFAULT_STUDIO_CONFIG_PATH);
+    ?? path.join(workdirStateRoot, 'studio.json');
   let studioConfigPath = preferredStudioConfigPath;
   let studio = await loadStudioLocalConfig(studioConfigPath);
   if (!studio && preferredStudioConfigPath !== DEFAULT_STUDIO_CONFIG_PATH) {
@@ -170,7 +169,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       toolkits: input.toolkits,
       contextWindowTokens: input.llmConfig.contextWindowTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,
-      workdir: input.workdir,
+      workdir: effectiveWorkdir,
       humanReviewer: createWsHumanReviewer({
         send: input.bridge.send,
         requestId: input.bridge.requestId,
@@ -196,8 +195,8 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     plannerPetId: studio.plannerPetId,
     agents: petAgents,
     wikiBaseDir: input.wikiBaseDir
-      ?? (workdirStateRoot ? path.join(workdirStateRoot, 'studio-wiki') : DEFAULT_STUDIO_WIKI_BASE_DIR),
-    workdir: input.workdir,
+      ?? path.join(workdirStateRoot, 'studio-wiki'),
+    workdir: effectiveWorkdir,
     curator,
     ...(studio.maxIterationCount !== undefined ? { maxIterationCount: studio.maxIterationCount } : {}),
     ...(studio.maxRetryPerTask !== undefined ? { maxRetryPerTask: studio.maxRetryPerTask } : {}),

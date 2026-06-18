@@ -93,7 +93,8 @@ CLI --workdir
 > homedir()
 ```
 
-建议默认优先 `process.cwd()`，因为用户通常是在项目目录中启动 local agent。若担心兼容性，可以第一阶段继续保留 `homedir()` 默认，但在文档和 CLI 输出中鼓励显式传 `--workdir`。
+默认优先 `process.cwd()`，因为用户通常是在项目目录中启动 local agent。
+只有在没有可用 cwd 的极端情况下才回落到 `homedir()`。
 
 解析规则：
 

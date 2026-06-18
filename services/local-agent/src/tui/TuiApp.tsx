@@ -16,6 +16,7 @@ import {
   toCanonicalInputEvent,
 } from './input/keymap';
 import { getComposerHistoryAvailability } from './input/composerHistory';
+import { editTextWithExternalEditor } from './input/externalEditor';
 import {
   buildCommandPaletteModel,
   completeCommandPaletteInput,
@@ -77,6 +78,7 @@ export function TuiApp(props: { actorId: string }) {
   const [studioMode, setStudioMode] = useState(false);
   const [approvalIndex, setApprovalIndex] = useState(0);
   const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
+  const [externalEditorOpen, setExternalEditorOpen] = useState(false);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
 
   const stateRef = useRef<TuiState>(tuiState);
@@ -161,7 +163,7 @@ export function TuiApp(props: { actorId: string }) {
   });
 
   // Input area focus: only when ready, not busy, and no modal panel.
-  const inputFocused = ready && !busy && !resumePickerOpen;
+  const inputFocused = ready && !busy && !resumePickerOpen && !externalEditorOpen;
   const textArea = useTextAreaController({
     input: tuiState.input,
     focused: inputFocused,
@@ -193,6 +195,29 @@ export function TuiApp(props: { actorId: string }) {
     setFileMentionIndex(0);
   }, [inputValue, textArea.cursorOffset]);
 
+  const openExternalEditor = (initialText: string) => {
+    if (externalEditorOpen) return;
+    setExternalEditorOpen(true);
+    appendMessage('system', TUI_TEXT.externalEditorOpening);
+    void editTextWithExternalEditor({
+      initialText,
+      cwd: focusedSession?.runtime.cwd ?? config.workdir,
+    }).then((text) => {
+      const value = text.replace(/\r\n/g, '\n').replace(/\n$/, '');
+      if (!value) {
+        appendMessage('system', TUI_TEXT.externalEditorEmpty);
+        return;
+      }
+      dispatch({ type: 'input.set', value, cursorOffset: value.length });
+      appendMessage('system', TUI_TEXT.externalEditorLoaded);
+    }).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      appendMessage('system', TUI_TEXT.externalEditorFailed(message));
+    }).finally(() => {
+      setExternalEditorOpen(false);
+    });
+  };
+
   const submitCurrentInput = () => {
     submitCurrentInputFromController({
       inputValue,
@@ -201,6 +226,7 @@ export function TuiApp(props: { actorId: string }) {
       studioConversationIdRef,
       setStudioMode,
       openResumePicker,
+      openExternalEditor,
       exit,
       appendSystemMessage: (text) => appendMessage('system', text),
       clearInputValue: textArea.clear,
@@ -241,6 +267,9 @@ export function TuiApp(props: { actorId: string }) {
   }, [runtimeController]);
 
   useInput((input, key) => {
+    if (externalEditorOpen) {
+      return;
+    }
     const normalized = normalizeTuiInputEvent(input, key, inputBufferRef.current);
     inputBufferRef.current = normalized.state;
     if (!normalized.event) {
@@ -430,6 +459,8 @@ export function TuiApp(props: { actorId: string }) {
   // Contextual help text
   const helpText = busy
     ? TUI_TEXT.helpBusy
+    : externalEditorOpen
+      ? ''
     : pendingApproval
       ? '' // help is shown inside ApprovalPanel
       : resumePickerOpen

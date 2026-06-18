@@ -116,7 +116,7 @@ export const config = {
     'structured_output_repair_max_retries',
   ),
 
-  workdir: get('PINPAWO_WORKDIR', 'workdir') || homedir(),
+  workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
   browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
 
   /** Extra capability plugin directories beyond ~/.pinpawo/capabilities/ */

@@ -27,6 +27,7 @@ type TuiRuntimeControllerOptions = {
   getState: () => TuiState;
   resetTimelineView: () => void;
   setNow: (now: number) => void;
+  onServerMode?: (mode: 'chat' | 'studio') => void;
 };
 
 function sleep(ms: number) {
@@ -280,6 +281,7 @@ export class TuiRuntimeController {
     model?: string;
     contextWindow?: number;
     cwd?: string;
+    serverMode?: 'chat' | 'studio';
     stateRoot?: string;
     studioConfigPath?: string;
     studioConfigSource?: string;
@@ -290,6 +292,10 @@ export class TuiRuntimeController {
   }) {
     const model = payload.model ?? config.llmModel;
     const cwd = payload.cwd ?? config.workdir;
+
+    if (payload.serverMode) {
+      this.options.onServerMode?.(payload.serverMode);
+    }
 
     if (!model && !cwd && !payload.contextWindow) {
       return;

@@ -20,6 +20,7 @@ export type LocalServerRuntimeSnapshot = {
   model?: string;
   contextWindow?: number;
   cwd?: string;
+  serverMode?: 'chat' | 'studio';
   stateRoot?: string;
   studioConfigPath?: string;
   studioDueRunsPath?: string;
@@ -218,6 +219,7 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
       : null;
   const rawModel = pickString(record, ['llm_model', 'llmModel', 'model']);
   const rawWorkdir = pickString(record, ['workdir', 'workDir', 'cwd', 'work_dir']);
+  const rawServerMode = pickString(record, ['server_mode', 'serverMode', 'mode']);
   const rawStateRoot = pickString(record, ['state_root', 'stateRoot']);
   const rawStudioConfigPath = pickString(record, ['studio_config_path', 'studioConfigPath']);
   const rawStudioDueRunsPath = pickString(record, ['studio_due_runs_path', 'studioDueRunsPath']);
@@ -243,6 +245,7 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
     model: rawModel ?? nestedModel,
     contextWindow: parsePositiveInteger(rawContextWindow) ?? nestedContextWindow,
     cwd: rawWorkdir ?? pickString(nested ?? {}, ['workdir', 'cwd']),
+    serverMode: rawServerMode === 'studio' ? 'studio' : rawServerMode === 'chat' ? 'chat' : undefined,
     stateRoot: rawStateRoot,
     studioConfigPath: rawStudioConfigPath,
     studioDueRunsPath: rawStudioDueRunsPath,

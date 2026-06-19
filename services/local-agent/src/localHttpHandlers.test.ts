@@ -173,6 +173,7 @@ test('handleLocalHttpRequest exposes workdir Studio config source on runtime end
       contextWindowTokens: 32000,
     },
     workdir,
+    mode: 'studio',
     runtimeConfig: {
       workdir,
       stateRoot,
@@ -199,6 +200,7 @@ test('handleLocalHttpRequest exposes workdir Studio config source on runtime end
     llm_model: 'test-model',
     llm_context_window_tokens: 32000,
     workdir,
+    server_mode: 'studio',
     state_root: stateRoot,
     studio_config_path: studioConfigPath,
     studio_due_runs_path: join(stateRoot, 'studio-due-runs.json'),

@@ -4,13 +4,16 @@ import { config } from '../config';
 import { ensureActorSelected } from '../actorSelection';
 import { browserSession } from '../toolkits/browser';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
+import type { LocalServerMode } from '../localServerTypes';
 
 export type RunAgentOptions = {
   workdir?: string;
+  mode?: LocalServerMode;
 };
 
 export async function runAgent(options: RunAgentOptions = {}) {
   await ensureActorSelected({ interactive: true });
+  const mode = options.mode ?? 'chat';
   const runtimeConfig = buildLocalAgentRuntimeConfig(options.workdir);
   const runtime = new LocalAgentRuntime(runtimeConfig);
 
@@ -38,6 +41,7 @@ export async function runAgent(options: RunAgentOptions = {}) {
     actorName: runtime.getActorName() ?? undefined,
     llmConfig: runtime.getLlmConfig(),
     workdir: runtimeConfig.workdir,
+    mode,
     runtimeConfig,
     localToolkitDefinitions: runtime.getLocalToolkitDefinitions(),
     localToolkits: runtime.getLocalToolkits(),
@@ -51,6 +55,7 @@ export async function runAgent(options: RunAgentOptions = {}) {
   });
 
   try {
+    console.log(`[local-agent] server mode: ${mode}`);
     await runtime.runForever({ skipInit: true });
   } finally {
     await browserSession.close().catch((error) => {

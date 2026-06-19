@@ -36,6 +36,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
       ...deps,
       runtimeConfig: effectiveRuntimeConfig,
     };
+    const mode = deps.mode ?? 'chat';
     const chatGraphService = new LocalAgentGraphService();
     const tuiSessions = new LocalServerTuiSessionService({
       graphService: chatGraphService,
@@ -115,6 +116,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
 
     server.listen(port, '127.0.0.1', () => {
       console.log(`[local-server] listening on ws://127.0.0.1:${port}`);
+      console.log(`[local-server] mode=${mode}`);
       console.log('[local-server] local HTTP/WS auth enabled');
       resolve();
     });

@@ -76,6 +76,7 @@ export function handleLocalHttpRequest(
       llm_model: deps.llmConfig.model,
       llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
       workdir: deps.workdir,
+      server_mode: deps.mode ?? 'chat',
       ...(deps.runtimeConfig ? {
         state_root: deps.runtimeConfig.stateRoot,
         studio_config_path: deps.runtimeConfig.studioConfigPath,

@@ -74,7 +74,7 @@ export function TuiApp(props: { actorId: string }) {
     columns: stdout.columns ?? 80,
     rows: stdout.rows ?? 24,
   }));
-  const [studioMode, setStudioMode] = useState(false);
+  const [serverMode, setServerMode] = useState<'chat' | 'studio'>('chat');
   const [approvalIndex, setApprovalIndex] = useState(0);
   const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
   const [externalEditorOpen, setExternalEditorOpen] = useState(false);
@@ -87,7 +87,6 @@ export function TuiApp(props: { actorId: string }) {
   // Studio 模式持续期间共用一个 conversationId,这样 wiki 跨 turn 累积、
   // pet runtime 的 thread namespace 也保持一致
   const studioConversationIdRef = useRef<string | null>(null);
-  const studioModeRef = useRef(false);
   const resetTimelineView = useCallback(() => {
     stdout.write(CLEAR_SCREEN);
     setTimelineRenderEpoch((current) => current + 1);
@@ -99,6 +98,13 @@ export function TuiApp(props: { actorId: string }) {
     getState: () => stateRef.current,
     resetTimelineView,
     setNow,
+    onServerMode: (mode) => {
+      setServerMode(mode);
+      if (mode === 'studio') {
+        studioConversationIdRef.current ??= randomUUID();
+      }
+      dispatch({ type: 'session.set_kind', kind: mode });
+    },
   }), [props.actorId, localServerPort, dispatch, resetTimelineView, setNow]);
   const focusedSession = selectFocusedSession(tuiState);
   const timeline = selectFocusedTimeline(tuiState);
@@ -145,10 +151,8 @@ export function TuiApp(props: { actorId: string }) {
     dispatch({ type: 'input.set', value: '', cursorOffset: 0 });
   };
 
-  const resetStudioMode = () => {
-    studioModeRef.current = false;
+  const resetStudioConversation = () => {
     studioConversationIdRef.current = null;
-    setStudioMode(false);
   };
 
   const {
@@ -164,7 +168,8 @@ export function TuiApp(props: { actorId: string }) {
     appendSystemMessage: (text) => appendMessage('system', text),
     clearInputValue,
     dispatch,
-    resetStudioMode,
+    resetStudioConversation,
+    serverMode,
     resetTimelineView,
     runtimeController,
   });
@@ -229,9 +234,8 @@ export function TuiApp(props: { actorId: string }) {
     submitCurrentInputFromController({
       inputValue,
       focusedSession,
-      studioModeRef,
+      serverMode,
       studioConversationIdRef,
-      setStudioMode,
       openResumePicker,
       openExternalEditor,
       exit,

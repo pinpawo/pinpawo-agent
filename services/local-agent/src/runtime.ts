@@ -115,6 +115,7 @@ export class LocalAgentRuntime {
       actorName: this.actorName ?? undefined,
       llmConfig: this.getLlmConfig(),
       workdir: this.runtimeConfig.workdir,
+      mode: 'chat',
       runtimeConfig: this.runtimeConfig,
       studioDueRunScheduler: this.studioDueRunScheduler,
       localToolkitDefinitions: this.getLocalToolkitDefinitions(),

@@ -63,6 +63,28 @@ function createController(state: TuiState) {
   return { controller, actions, sent, get resetCount() { return resetCount; } };
 }
 
+test('TuiRuntimeController notifies app when runtime reports studio server mode', () => {
+  const state = pendingReviewState();
+  const modes: string[] = [];
+  const controller = new TuiRuntimeController({
+    actorId: 'pet-1',
+    localServerPort: 0,
+    dispatch: () => {},
+    getState: () => state,
+    setNow: () => {},
+    onServerMode: (mode) => modes.push(mode),
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (controller as any).setRuntimeFromHealth({
+    model: 'test-model',
+    cwd: '/tmp/workspace',
+    serverMode: 'studio',
+  });
+
+  assert.deepEqual(modes, ['studio']);
+});
+
 test('TuiRuntimeController submits canonical review responses without legacy resume extras', () => {
   const { controller, actions, sent } = createController(pendingReviewState());
 

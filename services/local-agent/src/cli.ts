@@ -6,11 +6,12 @@ import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
 import type { InitCommandOptions } from './commands/init';
 import type { StudioMigrateOptions } from './commands/studio';
+import type { LocalServerMode } from './localServerTypes';
 
 type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
-  runAgent?: (opts: { workdir?: string }) => Promise<void> | void;
+  runAgent?: (opts: { workdir?: string; mode: LocalServerMode }) => Promise<void> | void;
   runTui?: (opts: { dryRun: boolean }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
@@ -43,6 +44,12 @@ function resolveWorkdirOption(input: string): string {
   if (trimmed === '~') return homedir();
   if (trimmed.startsWith('~/')) return resolve(homedir(), trimmed.slice(2));
   return isAbsolute(trimmed) ? trimmed : resolve(process.cwd(), trimmed);
+}
+
+function resolveServerModeOption(input: string | undefined): LocalServerMode {
+  const value = input?.trim() || 'chat';
+  if (value === 'chat' || value === 'studio') return value;
+  throw new Error(`Invalid server mode: ${value}. Expected "chat" or "studio".`);
 }
 
 export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Command {
@@ -99,10 +106,25 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .command('run')
     .description('Start the local agent service')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
-    .action(async (options: { workdir?: string }) => {
+    .option('--mode <mode>', 'server mode: chat or studio', 'chat')
+    .action(async (options: { workdir?: string; mode?: string }) => {
       const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
       await runAgent({
         workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+        mode: resolveServerModeOption(options.mode),
+      });
+    });
+
+  program
+    .command('server')
+    .description('Start the local agent server')
+    .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
+    .option('--mode <mode>', 'server mode: chat or studio', 'chat')
+    .action(async (options: { workdir?: string; mode?: string }) => {
+      const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
+      await runAgent({
+        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+        mode: resolveServerModeOption(options.mode),
       });
     });
 

@@ -39,7 +39,7 @@ export type TuiInputCommand =
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'globalReviewPolicy'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
-  | { target: 'commandPalette'; action: 'previous' | 'next' | 'accept' }
+  | { target: 'commandPalette'; action: 'previous' | 'next' | 'accept' | 'submit' }
   | { target: 'fileMention'; action: 'previous' | 'next' | 'accept' }
   | { target: 'composer'; action: 'submit' | 'clear' }
   | { target: 'composerHistory'; action: 'previous' | 'next' }
@@ -63,6 +63,7 @@ export type TuiLegacyInputCommand =
   | { type: 'commandPalette.previous' }
   | { type: 'commandPalette.next' }
   | { type: 'commandPalette.accept' }
+  | { type: 'commandPalette.submit' }
   | { type: 'fileMention.previous' }
   | { type: 'fileMention.next' }
   | { type: 'fileMention.accept' }
@@ -144,7 +145,7 @@ export function resolveTuiInputCommand(
       if (event.type === 'cursor.down') return { target: 'commandPalette', action: 'next' };
       if (event.type === 'tab') return { target: 'commandPalette', action: 'accept' };
       if (event.type === 'escape') return { target: 'composer', action: 'clear' };
-      if (isReturn) return { target: 'composer', action: 'submit' };
+      if (isReturn) return { target: 'commandPalette', action: 'submit' };
       if (isControlSequence) return { target: 'none' };
       if (event.type === 'noop') return { target: 'none' };
       return routeTextAreaCommand(event);

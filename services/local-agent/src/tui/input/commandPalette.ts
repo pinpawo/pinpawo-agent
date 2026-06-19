@@ -66,6 +66,19 @@ export function completeCommandPaletteInput(
   };
 }
 
+export function submitCommandPaletteInput(
+  model: CommandPaletteModel,
+): CommandPaletteInput | null {
+  if (!model.open) return null;
+  const command = model.items[model.selectedIndex];
+  if (!command) return null;
+  const text = `/${command.name}`;
+  return {
+    text,
+    cursorOffset: text.length,
+  };
+}
+
 function resolveCommandPaletteQuery(input: CommandPaletteInput): string | null {
   if (input.cursorOffset !== input.text.length) return null;
   if (!input.text.startsWith('/')) return null;

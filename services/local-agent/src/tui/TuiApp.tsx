@@ -7,12 +7,11 @@ import { loadStoredConfig, saveStoredConfig } from '../storage';
 import { AgentTimeline } from './components/AgentTimeline';
 import { AgentTimelineItem } from './components/AgentTimelineItem';
 import { ApprovalPanel } from './components/ApprovalPanel';
+import { BottomStatusLine } from './components/BottomStatusLine';
 import { CommandPalette } from './components/CommandPalette';
 import { Composer } from './components/Composer';
 import { FileMentionPopup } from './components/FileMentionPopup';
 import { GlobalReviewPolicyPicker } from './components/GlobalReviewPolicyPicker';
-import { RuntimeInfoLine } from './components/RuntimeInfoLine';
-import { TokenUsageLine } from './components/TokenUsageLine';
 import { ResumePicker } from './components/ResumePicker';
 import {
   createInitialTuiInputBufferState,
@@ -25,6 +24,7 @@ import {
   buildCommandPaletteModel,
   completeCommandPaletteInput,
   moveCommandPaletteSelection,
+  submitCommandPaletteInput,
 } from './input/commandPalette';
 import {
   buildFileMentionModel,
@@ -276,9 +276,9 @@ export function TuiApp(props: { actorId: string }) {
     }
   };
 
-  const submitCurrentInput = () => {
+  const submitInputValue = (value: string) => {
     submitCurrentInputFromController({
-      inputValue,
+      inputValue: value,
       focusedSession,
       studioModeRef,
       studioConversationIdRef,
@@ -292,6 +292,10 @@ export function TuiApp(props: { actorId: string }) {
       dispatch,
       runtimeController,
     });
+  };
+
+  const submitCurrentInput = () => {
+    submitInputValue(inputValue);
   };
 
   useEffect(() => {
@@ -450,6 +454,15 @@ export function TuiApp(props: { actorId: string }) {
           return;
         }
         {
+          if (action.action === 'submit') {
+            const submission = submitCommandPaletteInput(commandPalette);
+            if (submission) {
+              submitInputValue(submission.text);
+              return;
+            }
+            submitCurrentInput();
+            return;
+          }
           const completion = completeCommandPaletteInput(commandPalette);
           if (completion) {
             dispatch({
@@ -528,19 +541,9 @@ export function TuiApp(props: { actorId: string }) {
   }, { isActive: true });
 
   const spinnerFrame = SPINNER_FRAMES[animationFrame];
-
-  // Contextual help text
-  const helpText = busy
-    ? TUI_TEXT.helpBusy
-    : externalEditorOpen
-      ? ''
-    : pendingApproval
-      ? '' // help is shown inside ApprovalPanel
-      : resumePickerOpen
-        ? ''
-        : globalReviewPolicyPickerOpen
-          ? ''
-        : TUI_TEXT.helpIdle;
+  const activityStatus = pendingUi
+    ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeOperations)
+    : status;
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -584,13 +587,7 @@ export function TuiApp(props: { actorId: string }) {
       ) : null}
       {!pendingApproval ? (
         <>
-          <Text dimColor>
-            {pendingUi
-              ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeOperations)
-              : status}
-          </Text>
-          {focusedSession ? <RuntimeInfoLine runtime={focusedSession.runtime} /> : null}
-          {focusedSession?.tokenUsage ? <TokenUsageLine tokenUsage={focusedSession.tokenUsage} /> : null}
+          <Text dimColor>{activityStatus}</Text>
         </>
       ) : null}
       {commandPalette.open ? (
@@ -616,7 +613,12 @@ export function TuiApp(props: { actorId: string }) {
           </>
         )}
       </Box>
-      {helpText ? <Text dimColor>{helpText}</Text> : null}
+      <BottomStatusLine
+        status={activityStatus}
+        session={focusedSession}
+        globalReviewPolicyMode={globalReviewPolicyMode}
+        width={contentWidth}
+      />
     </Box>
   );
 }

@@ -4,6 +4,7 @@ import {
   buildCommandPaletteModel,
   completeCommandPaletteInput,
   moveCommandPaletteSelection,
+  submitCommandPaletteInput,
 } from './commandPalette';
 
 test('buildCommandPaletteModel opens for slash command prefixes', () => {
@@ -56,5 +57,19 @@ test('command palette selection clamps and completes selected commands', () => {
   assert.deepEqual(completeCommandPaletteInput(edit), {
     text: '/edit ',
     cursorOffset: '/edit '.length,
+  });
+});
+
+test('command palette submit runs the selected command without requiring tab completion', () => {
+  const policy = buildCommandPaletteModel({ text: '/po', cursorOffset: 3 });
+  assert.deepEqual(submitCommandPaletteInput(policy), {
+    text: '/policy',
+    cursorOffset: '/policy'.length,
+  });
+
+  const studio = buildCommandPaletteModel({ text: '/st', cursorOffset: 3 });
+  assert.deepEqual(submitCommandPaletteInput(studio), {
+    text: '/studio',
+    cursorOffset: '/studio'.length,
   });
 });

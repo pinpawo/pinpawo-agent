@@ -31,3 +31,7 @@ export function findGlobalReviewPolicyPickerIndex(mode: BuiltinGlobalReviewPolic
   const index = GLOBAL_REVIEW_POLICY_PICKER_OPTIONS.findIndex((option) => option.mode === mode);
   return index >= 0 ? index : 0;
 }
+
+export function formatGlobalReviewPolicyMode(mode: BuiltinGlobalReviewPolicyMode) {
+  return GLOBAL_REVIEW_POLICY_PICKER_OPTIONS.find((option) => option.mode === mode)?.label ?? mode;
+}

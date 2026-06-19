@@ -47,6 +47,7 @@ export class LocalServerStudioHandler {
   private readonly studioRunService: StudioRunService;
   private readonly studioDueRunScheduler?: LocalStudioDueRunScheduler;
   private readonly studioRequestQueue = new WeakMap<WebSocket, Promise<unknown>>();
+  private readonly studioConnectionState = new WeakMap<WebSocket, { closed: boolean }>();
 
   constructor(options: {
     reviewRouter: LocalServerStudioReviewRouter<WebSocket>;
@@ -69,6 +70,16 @@ export class LocalServerStudioHandler {
 
   rejectDisconnected(ws: WebSocket) {
     this.reviewRouter.rejectAndDelete(ws, new Error('ws disconnected'));
+    this.markStudioConnectionClosed(ws);
+  }
+
+  private markStudioConnectionClosed(ws: WebSocket) {
+    const state = this.studioConnectionState.get(ws);
+    if (state) {
+      state.closed = true;
+      return;
+    }
+    this.studioConnectionState.set(ws, { closed: true });
   }
 
   async handleStudioRequest(
@@ -230,8 +241,15 @@ export class LocalServerStudioHandler {
     ws: WebSocket,
     run: () => Promise<T>,
   ): Promise<T> {
+    const state = this.studioConnectionState.get(ws) ?? { closed: false };
+    this.studioConnectionState.set(ws, state);
     const previous = this.studioRequestQueue.get(ws) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(() => run());
+    const current = previous.catch(() => undefined).then(async () => {
+      if (state.closed) {
+        return undefined as unknown as T;
+      }
+      return run();
+    });
     this.studioRequestQueue.set(ws, current.then(() => undefined, () => undefined));
     return current;
   }

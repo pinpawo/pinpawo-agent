@@ -236,6 +236,71 @@ test('LocalServerStudioHandler serializes studio requests per websocket', async 
   assert.equal(studioResponses[1]?.requestId, 'studio-2');
 });
 
+test('LocalServerStudioHandler discards queued studio requests after websocket disconnect', async () => {
+  const sent: unknown[] = [];
+  const ws = createFakeWebSocket(sent);
+  const firstStarted = deferred<void>();
+  const firstContinue = deferred<void>();
+  const invocationEvents: string[] = [];
+  const handler = new LocalServerStudioHandler({
+    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    inflightRequests: createInflightController(),
+    buildStudio: async () => ({
+      resolved: {} as BuildStudioResult['resolved'],
+      orchestrator: {
+        invoke: async () => {
+          if (invocationEvents.length === 0) {
+            invocationEvents.push('first');
+            firstStarted.resolve();
+            await firstContinue.promise;
+            return {
+              outcome: {
+                outcome: 'done',
+                reply: 'first done',
+                finalDispatchId: 'dispatch-first',
+              },
+            };
+          }
+          invocationEvents.push('second');
+          return {
+            outcome: {
+              outcome: 'done',
+              reply: 'second done',
+              finalDispatchId: 'dispatch-second',
+            },
+          };
+        },
+      } as unknown as BuildStudioResult['orchestrator'],
+    }),
+  });
+
+  const firstRequest = handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-1',
+    userRequest: 'first',
+  }, createDeps());
+  await firstStarted.promise;
+
+  const secondRequest = handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-2',
+    userRequest: 'second',
+  }, createDeps());
+
+  handler.rejectDisconnected(ws);
+  firstContinue.resolve();
+
+  await Promise.all([firstRequest, secondRequest]);
+
+  assert.deepEqual(invocationEvents, ['first']);
+
+  const studioResponses = sent.filter((item): item is { type: 'studio_response'; requestId: string } => (
+    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
+  ));
+  assert.equal(studioResponses.length, 1);
+  assert.equal(studioResponses[0]?.requestId, 'studio-1');
+});
+
 test('LocalServerStudioHandler maps missing studio config to studio_error', async () => {
   const sent: unknown[] = [];
   const ws = createFakeWebSocket(sent);

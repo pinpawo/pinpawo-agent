@@ -141,6 +141,15 @@ claim token 规则：
 - 不能把 scheduler 逻辑放在 `@pinpawo/pet-agent` 的纯 agent 层；
 - workdir 未通过 runtimeConfig 透传前，不要在 scheduler 侧直接读用户目录下的 `studio.json`。
 
+## 当前交付（2026-06-19）
+
+- 已把 `StudioDueRunRecord` 与事件流扩展为支持 `runAt`。
+- `StudioDueRunStore` 接口补齐持久化能力（`clear`/`restore`）。
+- `InMemoryStudioDueRunStore` 支持按 `workdir` 过滤 claim。
+- `fail` 支持 `retryAfterMs`，`retry` 按 `runAt` 生效。
+- 新增文件持久化实现 `FileStudioDueRunStore`（启动恢复、文件锁、原子更新）。
+- 新增对应单测，覆盖重启恢复、跨实例重试窗口。
+
 ## 下一次变更建议清单
 
 1. 用 `dueRunScheduler.ts` 补齐持久化接口类型（`StudioDueRunStore`）；

@@ -27,6 +27,14 @@
    - 在 `@pinpawo/pet-agent` 内新增 `StudioDueRun*` 契约（`StudioDueRunRecord`、状态机、重试策略接口）。
    - 用于后续 API/scheduler 的幂等、并发领取和重试判定。
 
+## 当前交付（2026-06-19）
+
+- `workdir` 体系已经对齐到启动时 runtimeConfig（chat + studio 同步透传）。
+- normal chat 与 pet runtime 已经能按启动 `workdir` 读取 prompt、工具和运行参数。
+- studio runtime 已使用 `runtimeConfig` 托起 `studio.json` / `pets` / `wiki` 的 workdir 版本。
+- due-run 层新增了 `runAt` 与 `workdir` 过滤 claim 的接口语义。
+- 新增文件级持久化 store 作为 scheduler 过渡实现（可用于多进程同目录竞争场景）。
+
 ## 回答你提到的并发问题
 
 - App 端当前实现不是“纯单例”阻塞式：`InflightRequestController` 的策略仍是**同连接串行化 + 新请求打断旧请求**（chat 和 studio 共用控制器）。

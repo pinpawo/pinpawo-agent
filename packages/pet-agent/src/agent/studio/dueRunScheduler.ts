@@ -36,14 +36,47 @@ export type StudioDueRunClaim = {
   token: string;
 };
 
+export type StudioDueRunClaimFilter = {
+  workdir?: string | string[];
+};
+
 export type StudioDueRunStoreOptions = {
   now?: () => string;
   retryDelayMs?: number;
 };
 
+export type StudioDueRunStore = {
+  clear(): void;
+  submit(input: StudioDueRunStoreInput): StudioDueRunRecord;
+  restore(rows: StudioDueRunRecord[]): void;
+  getByRunId(runId: string): StudioDueRunRecord | null;
+  getByIdempotencyKey(idempotencyKey: string): StudioDueRunRecord | null;
+  list(): StudioDueRunRecord[];
+  listTrace(): StudioDueRunStoreTrace[];
+  claim(
+    ownerUserId: string | null,
+    filter?: StudioDueRunClaimFilter,
+  ): StudioDueRunClaim | null;
+  start(claim: StudioDueRunClaim): StudioDueRunRecord;
+  succeed(
+    claim: StudioDueRunClaim,
+    payload: { finalDispatchId?: string; reply?: string },
+  ): StudioDueRunRecord;
+  fail(
+    claim: StudioDueRunClaim,
+    payload: {
+      errorCode?: string;
+      errorDetail?: string;
+      retryAfterMs?: number;
+    },
+  ): StudioDueRunRecord;
+  cancel(claim: StudioDueRunClaim): StudioDueRunRecord;
+  retry(claim: StudioDueRunClaim): StudioDueRunRecord;
+};
+
 const BASE_CLAIM_TOKEN = 'studio-due-run-claim';
 
-export class InMemoryStudioDueRunStore {
+export class InMemoryStudioDueRunStore implements StudioDueRunStore {
   private readonly rows = new Map<string, StudioDueRunRecord>();
   private readonly now: () => string;
   private readonly retryDelayMs: number;
@@ -74,6 +107,25 @@ export class InMemoryStudioDueRunStore {
 
     this.rows.set(identity.idempotencyKey, row);
     return row;
+  }
+
+  clear(): void {
+    this.rows.clear();
+  }
+
+  restore(rows: StudioDueRunRecord[]): void {
+    this.clear();
+    for (const row of rows) {
+      const identity = row.identity ?? buildStudioRunIdentity({
+        runId: row.runId,
+        conversationId: row.conversationId,
+      });
+      const restored: StudioDueRunRecord = {
+        ...row,
+        identity,
+      };
+      this.rows.set(identity.idempotencyKey, restored);
+    }
   }
 
   getByRunId(runId: string): StudioDueRunRecord | null {
@@ -110,9 +162,10 @@ export class InMemoryStudioDueRunStore {
     }));
   }
 
-  claim(ownerUserId: string | null): StudioDueRunClaim | null {
+  claim(ownerUserId: string | null, filter: StudioDueRunClaimFilter = {}): StudioDueRunClaim | null {
     const now = this.now();
-    const candidate = this.list().find((row) => this.canBeClaimed(row));
+    const candidate = this.list()
+      .find((row) => this.canBeClaimed(row, now, filter));
     if (!candidate) {
       return null;
     }
@@ -148,15 +201,38 @@ export class InMemoryStudioDueRunStore {
     );
   }
 
-  fail(claim: StudioDueRunClaim, payload: { errorCode?: string; errorDetail?: string }): StudioDueRunRecord {
-    return this.applyWithClaim(
-      claim,
+  fail(
+    claim: StudioDueRunClaim,
+    payload: {
+      errorCode?: string;
+      errorDetail?: string;
+      retryAfterMs?: number;
+    },
+  ): StudioDueRunRecord {
+    const row = this.getByIdempotencyKey(claim.run.identity.idempotencyKey);
+    if (!row) {
+      throw new Error(`studio due run not found for failing: ${claim.run.runId}`);
+    }
+    if (this.buildClaimToken(row) !== claim.token) {
+      throw new Error(`studio due run claim token mismatch for failing: ${claim.run.runId}`);
+    }
+
+    const now = this.now();
+    const retryAfterMs = payload.retryAfterMs ?? this.retryDelayMs;
+    const nowAt = Date.parse(now);
+    const runAt = retryAfterMs <= 0 || Number.isNaN(nowAt)
+      ? undefined
+      : new Date(nowAt + retryAfterMs).toISOString();
+
+    return this.apply(
+      row,
       {
         type: 'fail',
         errorCode: payload.errorCode,
         errorDetail: payload.errorDetail,
+        runAt,
       },
-      'failing',
+      { now, ownerUserId: row.ownerUserId },
     );
   }
 
@@ -169,6 +245,7 @@ export class InMemoryStudioDueRunStore {
     if (!row) {
       throw new Error(`studio due run not found for retrying: ${claim.run.runId}`);
     }
+
     const now = this.now();
     if (!this.canRetryAt(row, now)) {
       throw new Error(`studio due run not ready for retry: ${claim.run.runId}`);
@@ -177,23 +254,46 @@ export class InMemoryStudioDueRunStore {
     return this.applyWithClaim(claim, { type: 'retry' }, 'retrying');
   }
 
-  private canBeClaimed(row: StudioDueRunRecord): boolean {
-    return row.status === 'pending';
+  private canBeClaimed(
+    row: StudioDueRunRecord,
+    now: string,
+    filter: StudioDueRunClaimFilter,
+  ): boolean {
+    if (row.status !== 'pending') {
+      return false;
+    }
+
+    const runAt = row.runAt ? Date.parse(row.runAt) : NaN;
+    const nowAt = Date.parse(now);
+    if (!Number.isNaN(runAt) && !Number.isNaN(nowAt) && nowAt < runAt) {
+      return false;
+    }
+
+    if (filter.workdir) {
+      const allowedWorkdirs = Array.isArray(filter.workdir)
+        ? filter.workdir
+        : [filter.workdir];
+      if (!allowedWorkdirs.includes(row.workdir)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private canRetryAt(row: StudioDueRunRecord, now: string): boolean {
     if (!canRetry(row)) {
       return false;
     }
-    if (this.retryDelayMs <= 0) {
-      return true;
-    }
-    const updatedAt = Date.parse(row.updatedAt);
+
+    const runAt = row.runAt ? Date.parse(row.runAt) : NaN;
     const nowAt = Date.parse(now);
-    if (Number.isNaN(updatedAt) || Number.isNaN(nowAt)) {
+
+    if (Number.isNaN(runAt) || Number.isNaN(nowAt)) {
       return true;
     }
-    return nowAt - updatedAt >= this.retryDelayMs;
+
+    return nowAt >= runAt;
   }
 
   private buildClaimToken(row: StudioDueRunRecord) {

@@ -22,10 +22,13 @@ export {
 export {
   InMemoryStudioDueRunStore,
   type StudioDueRunClaim,
+  type StudioDueRunClaimFilter,
   type StudioDueRunStoreInput,
+  type StudioDueRunStore,
   type StudioDueRunStoreOptions,
   type StudioDueRunStoreTrace,
 } from './dueRunScheduler';
+export { FileStudioDueRunStore } from './fileDueRunStore';
 export type {
   CuratorPromptProvider,
   LLMWikiCuratorConfig,

@@ -164,12 +164,13 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
         if (!pending) {
           return { reply: readReply(result) };
         }
-        if (!config.humanReviewer) {
+        const humanReviewer = input.humanReviewer ?? config.humanReviewer;
+        if (!humanReviewer) {
           throw new Error(
             `Pet agent "${config.actor.petId}" hit HITL interrupt but no humanReviewer configured`,
           );
         }
-        const response = await config.humanReviewer(pending);
+        const response = await humanReviewer(pending);
         graphInput = new Command({ resume: response });
       }
     } finally {

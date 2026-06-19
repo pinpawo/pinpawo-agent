@@ -57,6 +57,11 @@ export type PetAgentRuntimeInvokeInput = {
   workdir?: string;
   runtimeEnvironment?: string;
   onToolEvent?: SubagentToolEventHandler;
+  /**
+   * 本次 invoke 的 HITL 应答桥。优先级高于 runtime 构造时配置的
+   * humanReviewer,用于长期复用 pet runtime 但按请求/连接路由 HITL。
+   */
+  humanReviewer?: HumanReviewer;
   toolkits?: AgentToolkit[];
   /**
    * 调用方在本次 invoke 临时注入的 capability(例如 Studio 给 planner agent 的
@@ -181,6 +186,11 @@ export type StudioSubmitRequestInput = {
    * Studio 自身不消费内容,只把工具事件转给 UI 渲染。
    */
   onToolEvent?: SubagentToolEventHandler;
+  /**
+   * 按 petId 为本次 Studio run 解析 HITL 应答桥。Studio host 可长期复用
+   * pet runtime,但每次 request 仍使用当前 ws/request scoped reviewer。
+   */
+  humanReviewerForPet?: (petId: string) => HumanReviewer | undefined;
   /**
    * Studio 编排级事件回调,供控制面状态显示(状态栏 / 徽章 / 进度环)订阅。
    * 与 `onToolEvent` 是两条独立的流:onToolEvent 来自 pet runtime 内部 tool 节点

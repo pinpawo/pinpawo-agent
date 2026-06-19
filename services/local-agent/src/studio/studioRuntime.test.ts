@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { buildStudioForTurn } from './studioRuntime';
-import { createPendingReviewSlot } from './studioBridge';
 import type { AgentLlmConfig } from '../agentConfig';
 async function mkTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -47,17 +46,13 @@ test('buildStudioForTurn defaults Studio paths from effective runtime workdir', 
       llmConfig,
       capabilities: [],
       ownerUserId: null,
-      bridge: {
-        send: () => {},
-        requestId: 'req-1',
-        slot: createPendingReviewSlot(),
-      },
     });
 
     assert.equal(result.resolved.studio.studioId, 'studio-runtime-default');
     assert.deepEqual(result.resolved.agents.map((agent) => agent.petId), ['planner']);
 
     assert.equal(result.resolved.planner.petId, 'planner');
+    assert.equal(result.workdir, workdir);
   } finally {
     if (previousWorkdir === undefined) {
       delete process.env.PINPAWO_WORKDIR;
@@ -120,15 +115,11 @@ test('buildStudioForTurn prefers explicit workdir over env default', async () =>
       capabilities: [],
       ownerUserId: null,
       workdir: explicitWorkdir,
-      bridge: {
-        send: () => {},
-        requestId: 'req-2',
-        slot: createPendingReviewSlot(),
-      },
     });
 
     assert.equal(result.resolved.studio.studioId, 'studio-runtime-explicit');
     assert.deepEqual(result.resolved.agents.map((agent) => agent.petId), ['planner-explicit']);
+    assert.equal(result.workdir, explicitWorkdir);
   } finally {
     if (previousWorkdir === undefined) {
       delete process.env.PINPAWO_WORKDIR;

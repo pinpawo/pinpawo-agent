@@ -96,6 +96,7 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
       buildInputs.push(input);
       return {
         resolved: {} as BuildStudioResult['resolved'],
+        workdir: '/tmp/pinpawo-test',
         orchestrator: {
           submitRequest: async (turn: {
             onTurnEvent: (event: Record<string, unknown>) => void;
@@ -134,7 +135,6 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
   assert.equal(buildInputs.length, 1);
   assert.deepEqual(buildInputs[0]?.capabilities.map((item) => item.name), ['browser', 'user-capability']);
   assert.deepEqual(buildInputs[0]?.toolkits?.map((item) => item.name), ['plugin-toolkit', 'local-toolkit']);
-  assert.equal(buildInputs[0]?.bridge.requestId, 'studio-1');
   assert.equal(buildInputs[0]?.workdir, '/tmp/pinpawo-test');
   assert.equal(buildInputs[0]?.studioConfigPath, '/tmp/pinpawo-test/.pinpawo/studio.json');
   assert.equal(buildInputs[0]?.petsDir, '/tmp/pinpawo-test/.pinpawo/pets');
@@ -173,6 +173,7 @@ test('LocalServerStudioHandler serializes studio requests per websocket', async 
     inflightRequests: createInflightController(),
     buildStudio: async () => ({
       resolved: {} as BuildStudioResult['resolved'],
+      workdir: '/tmp/pinpawo-test',
       orchestrator: {
         submitRequest: async () => {
           if (invocationEvents.length === 0) {
@@ -256,6 +257,7 @@ test('LocalServerStudioHandler discards queued studio requests after websocket d
     inflightRequests: createInflightController(),
     buildStudio: async () => ({
       resolved: {} as BuildStudioResult['resolved'],
+      workdir: '/tmp/pinpawo-test',
       orchestrator: {
         submitRequest: async () => {
           if (invocationEvents.length === 0) {
@@ -336,7 +338,7 @@ test('LocalServerStudioHandler maps missing studio config to studio_error', asyn
   assert.deepEqual(sent, [{
     type: 'studio_error',
     requestId: 'studio-2',
-    message: 'Studio 未配置:No Studio config found at /tmp/studio.json. Create one to enable /studio.',
+    message: 'Studio 未配置:No Studio config found at /tmp/studio.json. Create one to enable Studio mode.',
   }]);
 });
 
@@ -351,6 +353,7 @@ test('LocalServerStudioHandler fills runId and conversationId defaults', async (
       buildInputs.push(input);
       return {
         resolved: {} as BuildStudioResult['resolved'],
+        workdir: '/tmp/pinpawo-test',
         orchestrator: {
           submitRequest: async () => ({ runId: 'studio-default', status: 'accepted' }),
           waitForRun: async () => ({

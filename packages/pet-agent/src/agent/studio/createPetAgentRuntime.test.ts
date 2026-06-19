@@ -160,6 +160,35 @@ test('humanReviewer: missing reviewer + interrupt → invoke throws', async () =
   );
 });
 
+test('humanReviewer: invoke-scoped reviewer handles interrupt without constructor reviewer', async () => {
+  const requests: HumanReviewerRequest[] = [];
+  const { graph } = makeStubGraph([
+    { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
+    { messages: [new AIMessage('invoke-scoped approved')] },
+  ]);
+
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+  });
+
+  const result = await runtime.invoke({
+    brief: 'go',
+    humanReviewer: async (req) => {
+      requests.push(req);
+      return {
+        reviewId: req.review.id,
+        selectedOptionId: 'approve',
+      };
+    },
+  });
+
+  assert.equal(result.reply, 'invoke-scoped approved');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]?.review.id, 'review-direct');
+});
+
 test('humanReviewer: resume call passes canonical response Command', async () => {
   const { graph, calls } = makeStubGraph([
     { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },

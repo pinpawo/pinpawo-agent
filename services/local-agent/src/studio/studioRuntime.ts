@@ -29,7 +29,6 @@ import {
 } from './studioConfig';
 import {
   buildPetActorFromLocalConfig,
-  createWsHumanReviewer,
   type PendingReviewSlot,
 } from './studioBridge';
 
@@ -39,14 +38,14 @@ import {
  */
 export class StudioNotConfiguredError extends Error {
   constructor(public readonly configPath: string) {
-    super(`No Studio config found at ${configPath}. Create one to enable /studio.`);
+    super(`No Studio config found at ${configPath}. Create one to enable Studio mode.`);
     this.name = 'StudioNotConfiguredError';
   }
 }
 
 /**
- * 装配时绑定到本次 ws 的 humanReviewer 桥所需的所有上下文。
- * 三件套总是一起出现,所以打包成一个子对象。
+ * request-scoped Studio HITL bridge context. It is consumed when submitting a
+ * Studio run, not when constructing long-lived pet runtimes.
  */
 export type StudioBridgeContext = {
   send: (msg: unknown) => void;
@@ -63,8 +62,6 @@ export type BuildStudioInput = {
   toolkits?: AgentToolkit[];
   /** 当前 local-agent 进程的 owner user id;无服务端绑定时为 null */
   ownerUserId: string | null;
-  /** ws 桥三件套:供 humanReviewer 绑定到本次 turn 的 ws 连接 */
-  bridge: StudioBridgeContext;
   /** 可选覆盖:studio.json 路径 */
   studioConfigPath?: string;
   /** 可选覆盖:pets 配置目录 */
@@ -78,6 +75,7 @@ export type BuildStudioInput = {
 export type BuildStudioResult = {
   orchestrator: StudioOrchestrator;
   resolved: ResolvedStudio;
+  workdir: string;
 };
 
 const runQueueStoresByPath = new Map<string, StudioRunQueueStore>();
@@ -98,11 +96,8 @@ function getWorkdirRunQueueStore(filePath: string): {
 }
 
 /**
- * 加载本地 Studio 配置 + Pet 配置,逐 pet 构造 PetAgentRuntime(humanReviewer 桥到
- * 当前 ws),最终装出 StudioOrchestrator(curator 注入 promptProvider)。
- *
- * 每次 /studio turn 调用一次,fresh build,不 cache。Pet runtime 构造很轻,且
- * 不 cache 让配置改动即生效。
+ * 加载本地 Studio 配置 + Pet 配置,逐 pet 构造可长期复用的 PetAgentRuntime,
+ * 最终装出 StudioOrchestrator(curator 注入 promptProvider)。
  *
  * - studio.json 不存在 → 抛 StudioNotConfiguredError(handler 自己决定如何提示)
  * - pet config 引用的 capability 不在全局池中 → 抛错(配置错误,启动失败)
@@ -189,12 +184,6 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       contextWindowTokens: input.llmConfig.contextWindowTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,
       workdir: effectiveWorkdir,
-      humanReviewer: createWsHumanReviewer({
-        send: input.bridge.send,
-        requestId: input.bridge.requestId,
-        petId: petConfig.petId,
-        slot: input.bridge.slot,
-      }),
     });
   });
 
@@ -225,5 +214,5 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     ...(studio.maxRetryPerTask !== undefined ? { maxRetryPerTask: studio.maxRetryPerTask } : {}),
   });
 
-  return { orchestrator, resolved };
+  return { orchestrator, resolved, workdir: effectiveWorkdir };
 }

@@ -299,7 +299,20 @@ Expected result:
 - Users choose mode at server startup.
 - TUI no longer has in-session chat/studio switching.
 
-### Iteration 3: Create StudioRuntimeHost At Startup
+### Iteration 3: Decouple Request-bound Review Bridge
+
+Deliver:
+
+- Move `humanReviewer` binding from pet runtime construction to pet invoke context.
+- Keep pet runtime reusable across requests.
+- Studio host passes request/connection scoped reviewer into each planner/worker invoke.
+
+Expected result:
+
+- Startup-created pet runtimes are safe across many TUI requests.
+- HITL routing remains request-scoped.
+
+### Iteration 4: Create StudioRuntimeHost At Startup
 
 Deliver:
 
@@ -313,19 +326,6 @@ Expected result:
 
 - one process/workdir/studio has one long-lived Studio runtime host.
 - queue recovery cannot double-drive live runs inside the same process.
-
-### Iteration 4: Decouple Request-bound Review Bridge
-
-Deliver:
-
-- Move `humanReviewer` binding from pet runtime construction to pet invoke context.
-- Keep pet runtime reusable across requests.
-- Studio host passes request/connection scoped reviewer into each planner/worker invoke.
-
-Expected result:
-
-- Startup-created pet runtimes are safe across many TUI requests.
-- HITL routing remains request-scoped.
 
 ### Iteration 5: Pet Lease And Busy State
 

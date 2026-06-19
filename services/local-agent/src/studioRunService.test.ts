@@ -45,6 +45,7 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
     userRequest: string;
     conversationId?: string;
     turnId?: string;
+    hasHumanReviewerForPet: boolean;
   }> = [];
   const progressEvents: unknown[] = [];
   const toolEvents: unknown[] = [];
@@ -54,6 +55,7 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
       let result: StudioTurnResult | null = null;
       return {
         resolved: {} as BuildStudioResult['resolved'],
+        workdir: input.workdir ?? '/tmp/workspace',
         orchestrator: {
           submitRequest: async (turn: {
             userRequest: string;
@@ -61,11 +63,13 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
             turnId?: string;
             onTurnEvent?: (event: unknown) => void;
             onToolEvent?: (event: unknown) => void;
+            humanReviewerForPet?: (petId: string) => unknown;
           }) => {
             invokeInputs.push({
               userRequest: turn.userRequest,
               conversationId: turn.conversationId,
               turnId: turn.turnId,
+              hasHumanReviewerForPet: typeof turn.humanReviewerForPet === 'function',
             });
             turn.onTurnEvent?.({ type: 'turn_started' });
             turn.onToolEvent?.({ event: 'on_tool_start', name: 'read_file' });
@@ -124,6 +128,7 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
     userRequest: 'plan this',
     conversationId: 'conversation-1',
     turnId: 'run-1',
+    hasHumanReviewerForPet: true,
   }]);
   assert.deepEqual(progressEvents, [{ type: 'turn_started' }]);
   assert.deepEqual(toolEvents, [{ event: 'on_tool_start', name: 'read_file' }]);
@@ -140,6 +145,7 @@ test('StudioRunService falls back to deps.workdir when runtimeConfig is absent',
       let result: StudioTurnResult | null = null;
       return {
         resolved: {} as BuildStudioResult['resolved'],
+        workdir: input.workdir ?? '/tmp/legacy-workdir',
         orchestrator: {
           submitRequest: async (turn: {
             userRequest: string;

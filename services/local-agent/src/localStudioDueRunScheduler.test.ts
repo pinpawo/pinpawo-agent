@@ -41,6 +41,7 @@ function createStudioRunService(onRunStart?: () => void): StudioRunService {
     onRunStart?.();
     return {
       resolved: {} as BuildStudioResult['resolved'],
+      workdir: _input.workdir ?? '/tmp/pinpawo-test',
       orchestrator: {
         submitRequest: async (turn: {
           onTurnEvent?: (event: { type: string }) => void;

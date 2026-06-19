@@ -24,19 +24,30 @@ import { LocalServerChatHandler } from './localServerChatHandler';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import {
+  buildStudioInputFromDeps,
+  createStudioRuntimeHost,
+  StudioRunService,
+} from './studioRunService';
 
 export type { LocalServerDeps };
 
 const INTERRUPT_FORCE_REPLY_MS = 1800;
 
-export function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
+export async function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
+  const effectiveRuntimeConfig = deps.runtimeConfig ?? buildLocalAgentRuntimeConfig(deps.workdir);
+  const depsWithRuntime = deps.runtimeConfig ? deps : {
+    ...deps,
+    runtimeConfig: effectiveRuntimeConfig,
+  };
+  const mode = deps.mode ?? 'chat';
+  const studioRunService = mode === 'studio'
+    ? new StudioRunService({
+        runtimeHost: await createStudioRuntimeHost(buildStudioInputFromDeps(depsWithRuntime)),
+      })
+    : undefined;
+
   return new Promise((resolve, reject) => {
-    const effectiveRuntimeConfig = deps.runtimeConfig ?? buildLocalAgentRuntimeConfig(deps.workdir);
-    const depsWithRuntime = deps.runtimeConfig ? deps : {
-      ...deps,
-      runtimeConfig: effectiveRuntimeConfig,
-    };
-    const mode = deps.mode ?? 'chat';
     const chatGraphService = new LocalAgentGraphService();
     const tuiSessions = new LocalServerTuiSessionService({
       graphService: chatGraphService,
@@ -48,6 +59,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
         store: new FileStudioDueRunStore({
           filePath: effectiveRuntimeConfig.studioDueRunsPath,
         }),
+        ...(studioRunService ? { studioRunService } : {}),
         filterWorkdir: effectiveRuntimeConfig.workdir,
       });
     const inflightRequests = new InflightRequestController<WebSocket>({
@@ -66,6 +78,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
     const studioHandler = new LocalServerStudioHandler({
       reviewRouter: studioReviewRouter,
       inflightRequests,
+      ...(studioRunService ? { studioRunService } : {}),
       ...(studioDueRunScheduler ? { studioDueRunScheduler } : {}),
     });
     const authToken = ensureLocalServerAuthToken();

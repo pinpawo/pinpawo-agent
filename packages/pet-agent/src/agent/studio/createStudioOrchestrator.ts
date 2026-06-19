@@ -6,6 +6,7 @@ import type { SubagentToolEventHandler } from '../../types/subagent';
 import { createPlanCapability } from './planCapability';
 import type { StudioPlanPetListItem } from './planCapability';
 import type {
+  HumanReviewer,
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
   StudioOrchestrator,
@@ -197,6 +198,7 @@ type StudioRunRecord = {
   signal?: AbortSignal;
   abortController: AbortController;
   onToolEvent?: SubagentToolEventHandler;
+  humanReviewerForPet?: (petId: string) => HumanReviewer | undefined;
   emit: (event: StudioTurnEvent) => void;
   state: StudioRunInternalState;
   taskResults: Map<number, string>;
@@ -348,6 +350,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     userRequest: string;
     signal?: AbortSignal;
     onToolEvent?: SubagentToolEventHandler;
+    humanReviewerForPet?: (petId: string) => HumanReviewer | undefined;
     onTurnEvent?: StudioTurnEventHandler;
     status: StudioRunStatus;
     createdAt: string;
@@ -364,6 +367,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       signal: params.signal,
       abortController: createRunAbortController(params.signal),
       onToolEvent: params.onToolEvent,
+      humanReviewerForPet: params.humanReviewerForPet,
       emit: makeEmitter(params.onTurnEvent),
       state: {
         turnId: params.turnId,
@@ -391,6 +395,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     dispatchId: string,
     signal: AbortSignal | undefined,
     onToolEvent: SubagentToolEventHandler | undefined,
+    humanReviewerForPet: ((petId: string) => HumanReviewer | undefined) | undefined,
     emit: (event: StudioTurnEvent) => void,
   ): Promise<StudioWorkerRunResult> {
     if (!state.taskBatch) {
@@ -457,6 +462,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
         wikiRoot: state.wikiRoot,
         signal,
         onToolEvent,
+        humanReviewer: humanReviewerForPet?.(task.petId),
         threadId: `studio:${config.studioId}:thread:${state.conversationId}:pet:${task.petId}:dispatch:${dispatchId}`,
         workdir: config.workdir,
       });
@@ -492,6 +498,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     wikiRoot: string;
     signal?: AbortSignal;
     onToolEvent?: SubagentToolEventHandler;
+    humanReviewerForPet?: (petId: string) => HumanReviewer | undefined;
     conversationId: string;
   }): Promise<{ taskBatch: StudioQueuedTaskBatch | null; plannerReply: string | null }> {
     const planner = petRegistry.getRuntime(config.plannerPetId);
@@ -518,6 +525,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       wikiRoot: params.wikiRoot,
       signal: params.signal,
       onToolEvent: params.onToolEvent,
+      humanReviewer: params.humanReviewerForPet?.(config.plannerPetId),
       threadId: `studio:${config.studioId}:thread:${params.conversationId}:planner`,
       workdir: config.workdir,
       extraCapabilities: [planCapability],
@@ -694,6 +702,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
         wikiRoot: record.state.wikiRoot,
         signal: record.signal,
         onToolEvent: record.onToolEvent,
+        humanReviewerForPet: record.humanReviewerForPet,
         conversationId: record.conversationId,
       });
 
@@ -782,6 +791,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       item.petRunId,
       record.signal,
       record.onToolEvent,
+      record.humanReviewerForPet,
       (event) => emitRunEvent(record, event),
     ).then(async (workerRun) => {
       item.errorMessage = workerRun.errorMessage;
@@ -896,6 +906,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       userRequest: input.userRequest,
       signal: abortController.signal,
       onToolEvent: input.onToolEvent,
+      humanReviewerForPet: input.humanReviewerForPet,
       onTurnEvent: input.onTurnEvent,
       status: 'planning',
       createdAt,

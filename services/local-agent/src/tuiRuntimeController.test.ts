@@ -23,9 +23,6 @@ function pendingReviewState(): TuiState {
           requestId: 'req-1',
           phase: 'waiting_human',
           timelineEntryIds: [],
-          assistantDraft: '',
-          subagentDraft: '',
-          activeOperations: [],
           pendingReview: {
             requestId: 'req-1',
             review: {

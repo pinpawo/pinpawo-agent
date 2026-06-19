@@ -1,11 +1,7 @@
 import {
   formatSubagentMessage,
-  formatOperationProgress,
-  formatOperationResult,
-  formatOperationStart,
   formatStudioProgressEvent,
   formatSystemNoticeEvent,
-  getOperationKey,
 } from '../render/eventText';
 import {
   navigateComposerHistory,
@@ -28,7 +24,6 @@ import {
 } from '../timeline/agentTimeline';
 import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
 import type {
-  ActiveOperationModel,
   ActiveRunModel,
   HistoryCellDraft,
   HistoryCellMeta,
@@ -137,6 +132,16 @@ function findStreamingAssistantIndex(timeline: AgentTimelineEntry[], requestId: 
   return -1;
 }
 
+function findLatestAssistantTimelineText(session: SessionModel, requestId: string) {
+  for (let index = session.timeline.length - 1; index >= 0; index -= 1) {
+    const entry = session.timeline[index];
+    if (entry.type === 'message' && entry.requestId === requestId && entry.role === 'assistant') {
+      return entry.text.trim();
+    }
+  }
+  return '';
+}
+
 function appendAssistantTimelineDelta(
   session: SessionModel,
   requestId: string,
@@ -241,6 +246,40 @@ function upsertOperationTimelineEntry(
   };
 }
 
+const SUBAGENT_OUTPUT_PREFIX = '[subagent]\n';
+
+function readSubagentTimelineText(session: SessionModel, entryId: string) {
+  const entry = session.timeline.find((item) => item.id === entryId);
+  if (!entry || entry.type !== 'notice') return '';
+  return entry.text.startsWith(SUBAGENT_OUTPUT_PREFIX)
+    ? entry.text.slice(SUBAGENT_OUTPUT_PREFIX.length)
+    : entry.text;
+}
+
+function appendSubagentTimelineDelta(
+  session: SessionModel,
+  requestId: string,
+  token: string,
+): { session: SessionModel; entryId?: string } {
+  const id = `${requestId}:subagent-output`;
+  const text = readSubagentTimelineText(session, id) + token;
+  const formatted = formatSubagentMessage(text);
+  if (!formatted) return { session };
+  const entry: AgentTimelineEntry = {
+    id,
+    type: 'notice',
+    requestId,
+    text: formatted,
+  };
+  return {
+    session: {
+      ...session,
+      timeline: appendOrUpdateTimelineEntry(session.timeline, entry),
+    },
+    entryId: entry.id,
+  };
+}
+
 function appendReviewTimelineEntry(
   session: SessionModel,
   requestId: string,
@@ -332,14 +371,10 @@ function finishRun(
     if (!sessionToUpdate.activeRun || sessionToUpdate.activeRun.requestId !== requestId) {
       return sessionToUpdate;
     }
-    const subagentMessage = formatSubagentMessage(sessionToUpdate.activeRun.subagentDraft);
     return appendHistory({
       ...sessionToUpdate,
       activeRun: null,
     }, [
-      ...(subagentMessage
-        ? [historyDraft('system', subagentMessage, undefined, `${requestId}:subagent-output`)]
-        : []),
       ...history,
     ], options);
   });
@@ -432,16 +467,6 @@ function activeRunToPendingApproval(run: ActiveRunModel | null) {
         ...(run.pendingReview.petId ? { petId: run.pendingReview.petId } : {}),
       }
     : null;
-}
-
-function updateOperation(
-  activeRun: ActiveRunModel,
-  operation: ActiveOperationModel,
-) {
-  return [
-    ...activeRun.activeOperations.filter((item) => item.key !== operation.key),
-    operation,
-  ];
 }
 
 function historyDraft(
@@ -586,9 +611,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           requestId: action.requestId,
           phase: 'thinking',
           timelineEntryIds: [`history:${userDraft.id}`],
-          assistantDraft: '',
-          subagentDraft: '',
-          activeOperations: [],
           startedAt: action.now,
           charCount: 0,
         },
@@ -632,15 +654,11 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
             ? addTimelineEntryId(clearPendingReview({
                 ...session.activeRun,
                 phase: 'thinking',
-                assistantDraft: '',
               }), `history:${userDraft.id}`)
             : {
                 requestId: action.requestId,
                 phase: 'thinking',
                 timelineEntryIds: [`history:${userDraft.id}`],
-                assistantDraft: '',
-                subagentDraft: '',
-                activeOperations: [],
                 startedAt: action.now,
                 charCount: 0,
               },
@@ -685,9 +703,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       }
 
       if (event.type === 'operation') {
-        const operationKey = getOperationKey(event);
         if (event.phase === 'started') {
-          const summary = formatOperationStart(event);
           return updateSession(state, sessionId, (currentSession) => {
             const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
             return {
@@ -696,20 +712,12 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
                 ? addTimelineEntryId({
                     ...sessionWithTimeline.activeRun,
                     phase: 'using_tool',
-                    activeOperations: updateOperation(sessionWithTimeline.activeRun, {
-                      key: operationKey,
-                      kind: event.operation.kind,
-                      title: summary.label,
-                      detail: summary.detail,
-                      startedAt: action.now,
-                    }),
                   }, entry.id)
                 : sessionWithTimeline.activeRun,
             };
           });
         }
         if (event.phase === 'updated') {
-          const progress = formatOperationProgress(event);
           return updateSession(state, sessionId, (currentSession) => {
             const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
             return {
@@ -718,11 +726,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
                 ? addTimelineEntryId({
                     ...sessionWithTimeline.activeRun,
                     phase: 'using_tool',
-                    activeOperations: sessionWithTimeline.activeRun.activeOperations.map((operation) => (
-                      operation.key === operationKey
-                        ? { ...operation, detail: progress || operation.detail }
-                        : operation
-                    )),
                   }, entry.id)
                 : sessionWithTimeline.activeRun,
             };
@@ -730,26 +733,14 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         }
         return updateSession(state, sessionId, (currentSession) => {
           const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
-          const legacyOperationDraft = historyDraft(
-            'system',
-            formatOperationResult(event),
-            action.historyCell,
-            `${event.requestId}:operation:${operationKey}`,
-          );
-          return appendHistory({
+          return {
             ...sessionWithTimeline,
             activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
               ? addTimelineEntryId({
                   ...sessionWithTimeline.activeRun,
-                  activeOperations: sessionWithTimeline.activeRun.activeOperations
-                    .filter((operation) => operation.key !== operationKey),
                 }, entry.id)
               : sessionWithTimeline.activeRun,
-          }, [
-            legacyOperationDraft,
-          ], {
-            skipTimelineIds: new Set([legacyOperationDraft.id]),
-          });
+          };
         });
       }
 
@@ -768,7 +759,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
               ? addTimelineEntryId({
                   ...sessionWithTimeline.activeRun,
                   phase: 'streaming',
-                  assistantDraft: sessionWithTimeline.activeRun.assistantDraft + token,
                   charCount: sessionWithTimeline.activeRun.charCount + token.length,
                 }, entryId)
               : sessionWithTimeline.activeRun,
@@ -779,19 +769,28 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (event.type === 'subagent.message.delta') {
         const token = event.text;
         if (!token) return state;
-        return updateSession(state, sessionId, (currentSession) => ({
-          ...currentSession,
-          activeRun: currentSession.activeRun?.requestId === event.requestId
-            ? {
-                ...currentSession.activeRun,
-                phase: currentSession.activeRun.phase === 'waiting_human'
-                  ? currentSession.activeRun.phase
-                  : 'streaming',
-                subagentDraft: currentSession.activeRun.subagentDraft + token,
-                charCount: currentSession.activeRun.charCount + token.length,
-              }
-            : currentSession.activeRun,
-        }));
+        return updateSession(state, sessionId, (currentSession) => {
+          const { session: sessionWithTimeline, entryId } = appendSubagentTimelineDelta(
+            currentSession,
+            event.requestId,
+            token,
+          );
+          return {
+            ...sessionWithTimeline,
+            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
+              ? {
+                  ...sessionWithTimeline.activeRun,
+                  phase: sessionWithTimeline.activeRun.phase === 'waiting_human'
+                    ? sessionWithTimeline.activeRun.phase
+                    : 'streaming',
+                  timelineEntryIds: entryId && !sessionWithTimeline.activeRun.timelineEntryIds.includes(entryId)
+                    ? [...sessionWithTimeline.activeRun.timelineEntryIds, entryId]
+                    : sessionWithTimeline.activeRun.timelineEntryIds,
+                  charCount: sessionWithTimeline.activeRun.charCount + token.length,
+                }
+              : sessionWithTimeline.activeRun,
+          };
+        });
       }
 
       if (event.type === 'human_review.requested') {
@@ -814,8 +813,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
               ? addTimelineEntryId({
                   ...sessionWithTimeline.activeRun,
                   phase: 'waiting_human',
-                  assistantDraft: '',
-                  activeOperations: [],
                   charCount: 0,
                   pendingReview: {
                     requestId: event.requestId,
@@ -840,8 +837,8 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
       if (event.type === 'message.completed') {
         const reply = event.text.trim();
-        const finalText = reply || activeRun.assistantDraft.trim() || '...';
-        const assistantDraft = historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`);
+        const finalText = reply || findLatestAssistantTimelineText(session, event.requestId) || '...';
+        const assistantHistoryDraft = historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`);
         const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
           const { session: sessionWithTimeline, entryId } = finalizeAssistantTimelineEntry(
             currentSession,
@@ -856,10 +853,10 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           };
         });
         return finishRun(stateWithTimeline, event.requestId, TUI_TEXT.statusReady, finalText
-          ? [assistantDraft]
+          ? [assistantHistoryDraft]
           : [],
           event.usage ?? null,
-          { skipTimelineIds: new Set([assistantDraft.id]) },
+          { skipTimelineIds: new Set([assistantHistoryDraft.id]) },
         );
       }
 
@@ -950,10 +947,6 @@ export function selectFocusedActiveOperations(state: TuiState) {
   return session?.activeRun
     ? selectActiveOperationsFromTimeline(session.timeline, session.activeRun.requestId)
     : [];
-}
-
-export function selectFocusedSubagentDraft(state: TuiState) {
-  return selectFocusedActiveRun(state)?.subagentDraft ?? '';
 }
 
 export function selectFocusedPendingApproval(state: TuiState) {

@@ -7,7 +7,6 @@ import {
   selectFocusedActiveRun,
   selectFocusedBusy,
   selectFocusedPendingApproval,
-  selectFocusedSubagentDraft,
   selectFocusedTimeline,
   tuiStateReducer,
 } from './tui/state/tuiStateReducer';
@@ -35,23 +34,9 @@ function startRun(state: TuiState, requestId = 'req-1', sessionId?: string) {
   });
 }
 
-function withoutLegacyActiveOperations(state: TuiState): TuiState {
-  const sessionId = state.focusedSessionId;
-  const session = sessionId ? state.sessions[sessionId] : null;
-  if (!session?.activeRun || !sessionId) return state;
-  return {
-    ...state,
-    sessions: {
-      ...state.sessions,
-      [sessionId]: {
-        ...session,
-        activeRun: {
-          ...session.activeRun,
-          activeOperations: [],
-        },
-      },
-    },
-  };
+function timelineMessageText(state: TuiState, sessionId: string, entryId: string) {
+  const entry = state.sessions[sessionId]?.timeline.find((entry) => entry.id === entryId);
+  return entry?.type === 'message' ? entry.text : undefined;
 }
 
 test('tuiStateReducer uses completed message text for final assistant history', () => {
@@ -79,9 +64,12 @@ test('tuiStateReducer uses completed message text for final assistant history', 
   });
 
   const activeRun = selectFocusedActiveRun(state);
-  assert.equal(activeRun?.assistantDraft, '我先检查一下仓库状态。检查完毕，下面汇总。');
   assert.equal(activeRun?.phase, 'streaming');
-  assert.equal(activeRun?.charCount, activeRun?.assistantDraft.length);
+  assert.equal(activeRun?.charCount, '我先检查一下仓库状态。检查完毕，下面汇总。'.length);
+  assert.equal(
+    timelineMessageText(state, 'chat:pet', 'req-1:assistant:0'),
+    '我先检查一下仓库状态。检查完毕，下面汇总。',
+  );
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -259,7 +247,7 @@ test('tuiStateReducer infers usage context window from runtime when missing', ()
   assert.equal(session.runtime.contextWindow, 1024);
 });
 
-test('tuiStateReducer falls back to assistant draft when completed text is empty', () => {
+test('tuiStateReducer falls back to assistant timeline text when completed text is empty', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -293,7 +281,7 @@ test('tuiStateReducer falls back to assistant draft when completed text is empty
   ]);
 });
 
-test('tuiStateReducer displays subagent deltas during run and preserves them in history', () => {
+test('tuiStateReducer displays subagent deltas in timeline without legacy draft state', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -315,9 +303,14 @@ test('tuiStateReducer displays subagent deltas during run and preserves them in 
     now: 1200,
   });
 
-  assert.equal(selectFocusedSubagentDraft(state), '先检查文件，再整理结果。');
   assert.equal(selectFocusedActiveRun(state)?.phase, 'streaming');
   assert.equal(selectFocusedActiveRun(state)?.charCount, '先检查文件，再整理结果。'.length);
+  assert.deepEqual(selectFocusedTimeline(state).at(-1), {
+    id: 'req-1:subagent-output',
+    type: 'notice',
+    requestId: 'req-1',
+    text: '[subagent]\n先检查文件，再整理结果。',
+  });
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -333,9 +326,9 @@ test('tuiStateReducer displays subagent deltas during run and preserves them in 
 
   assert.deepEqual(state.sessions['chat:pet']?.history.map((item) => [item.kind, item.text]), [
     ['user', 'hello'],
-    ['system', '[subagent]\n先检查文件，再整理结果。'],
     ['assistant', '最终答复'],
   ]);
+  assert.equal(state.sessions['chat:pet']?.timeline.some((entry) => entry.id === 'req-1:subagent-output'), true);
 });
 
 test('tuiStateReducer stores usage on completed message', () => {
@@ -426,10 +419,10 @@ test('tuiStateReducer drops late or unknown requestId events', () => {
   });
 
   assert.equal(next, state);
-  assert.equal(selectFocusedActiveRun(next)?.assistantDraft, '');
+  assert.equal(selectFocusedTimeline(next).some((entry) => entry.type === 'message' && entry.role === 'assistant'), false);
 });
 
-test('tuiStateReducer keeps two requestIds from mixing assistant drafts', () => {
+test('tuiStateReducer keeps two requestIds from mixing assistant timeline entries', () => {
   let state = initialState('s1');
   state = {
     ...state,
@@ -462,11 +455,11 @@ test('tuiStateReducer keeps two requestIds from mixing assistant drafts', () => 
     now: 1100,
   });
 
-  assert.equal(state.sessions.s1?.activeRun?.assistantDraft, 'A');
-  assert.equal(state.sessions.s2?.activeRun?.assistantDraft, 'B');
+  assert.equal(timelineMessageText(state, 's1', 'req-a:assistant:0'), 'A');
+  assert.equal(timelineMessageText(state, 's2', 'req-b:assistant:0'), 'B');
 });
 
-test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => {
+test('tuiStateReducer tracks operation lifecycle in timeline without terminal history rows', () => {
   let state = startRun(initialState(), 'req-1');
   const started: LocalAgentOperationEvent = {
     type: 'operation',
@@ -488,11 +481,10 @@ test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => 
 
   let activeRun = selectFocusedActiveRun(state);
   assert.equal(activeRun?.phase, 'using_tool');
-  assert.deepEqual(activeRun?.activeOperations.map((operation) => operation.key), ['tool-1']);
   assert.deepEqual(activeRun?.timelineEntryIds, ['history:req-1:user', 'req-1:operation:tool-1']);
   assert.equal(selectFocusedTimeline(state).at(-1)?.id, 'req-1:operation:tool-1');
   assert.equal(selectFocusedTimeline(state).at(-1)?.type, 'operation');
-  assert.deepEqual(selectFocusedActiveOperations(withoutLegacyActiveOperations(state)), [{
+  assert.deepEqual(selectFocusedActiveOperations(state), [{
     name: 'tool-1',
     label: 'Shell',
     detail: 'npm test',
@@ -513,7 +505,12 @@ test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => 
   });
 
   activeRun = selectFocusedActiveRun(state);
-  assert.equal(activeRun?.activeOperations[0]?.detail, 'npm test · running');
+  assert.deepEqual(selectFocusedActiveOperations(state), [{
+    name: 'tool-1',
+    label: 'Shell',
+    detail: 'npm test · running',
+    startedAt: 1200,
+  }]);
   const updatedTimelineEntry = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:operation:tool-1');
   assert.equal(updatedTimelineEntry?.type === 'operation' ? updatedTimelineEntry.summary : undefined, 'running');
 
@@ -532,9 +529,10 @@ test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => 
   });
 
   activeRun = selectFocusedActiveRun(state);
-  assert.equal(activeRun?.activeOperations.length, 0);
-  assert.equal(state.sessions['chat:pet']?.history.at(-1)?.kind, 'system');
-  assert.equal(state.sessions['chat:pet']?.history.at(-1)?.text, 'Shell：npm test · ok');
+  assert.deepEqual(selectFocusedActiveOperations(state), []);
+  assert.deepEqual(state.sessions['chat:pet']?.history.map((entry) => [entry.kind, entry.text]), [
+    ['user', 'hello'],
+  ]);
   assert.equal(selectFocusedTimeline(state).filter((entry) => entry.id === 'req-1:operation:tool-1').length, 1);
   const completedTimelineEntry = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:operation:tool-1');
   assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.phase : undefined, 'completed');

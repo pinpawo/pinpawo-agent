@@ -21,6 +21,7 @@
    - `LocalAgentRuntime` 在组装 `LocalServerDeps` 时透传 `runtimeConfig`。
    - `StudioRunService` 使用 `runtimeConfig?.workdir` 组装 `BuildStudioInput`，从而加载当前 workdir 下的 `studio.json`、pets 与 wiki。
    - 普通 `LocalServer` 与 App 路径共享同一套 `LocalServerDeps`，保持一致。
+   - 普通 `chat` 运行链路也沿用当前 `workdir`：`LocalAgentAppChatHandler` 通过 `buildLocalChatAgentInput` 注入 `workdir`，并在 tests/contract 中校验。
 
 4. 运行身份与调度契约
    - 在 `@pinpawo/pet-agent` 内新增 `StudioDueRun*` 契约（`StudioDueRunRecord`、状态机、重试策略接口）。
@@ -56,4 +57,3 @@
 - `local-server` 的 WebSocket 测试里有对 `127.0.0.1` 监听权限的环境依赖失败（EPERM），CI/沙箱需允许运行网络监听。
 - App 侧 studio review 与 chat review 路由顺序一旦调整需补单测（已补），避免误分发。
 - scheduler 表必须与本地/服务端回放一致，否则会出现“回包回到旧 workdir”的错配。
-

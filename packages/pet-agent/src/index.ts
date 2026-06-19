@@ -193,12 +193,17 @@ export {
   buildStudioDueRunRecord,
   canRetry,
   isTerminalStudioDueRunStatus,
+  InMemoryStudioDueRunStore,
 } from './agent/studio/index';
 export type {
   CreatePlanCapabilityOptions,
   StudioDueRunEvent,
   StudioDueRunRecord,
   StudioDueRunStatus,
+  StudioDueRunClaim,
+  StudioDueRunStoreInput,
+  StudioDueRunStoreOptions,
+  StudioDueRunStoreTrace,
   CuratorPromptProvider,
   ExecuteAction,
   HumanReviewer,

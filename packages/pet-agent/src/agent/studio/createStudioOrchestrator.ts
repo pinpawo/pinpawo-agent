@@ -12,8 +12,8 @@ import type {
   StudioOrchestrator,
   StudioOrchestratorConfig,
   StudioOrchestratorInvokeInput,
-  StudioTask,
   StudioTaskPlan,
+  StudioTaskRuntimeState,
   StudioTurnEvent,
   StudioTurnEventHandler,
   StudioTurnOutcome,
@@ -55,7 +55,7 @@ function buildWikiRoot(baseDir: string, conversationId: string): string {
 
 function findNextPendingIndex(state: StudioTurnState): number {
   if (!state.plan) return -1;
-  return state.plan.tasks.findIndex((task) => task.status === 'pending');
+  return state.taskStates.findIndex((task) => task.status === 'pending');
 }
 
 /**
@@ -83,6 +83,23 @@ function decideExecuteAction(state: StudioTurnState): ExecuteAction {
     return { type: 'finish', finalDispatchId: satisfiedDispatches[satisfiedDispatches.length - 1].id };
   }
   return { type: 'stop', reason: 'plan 全部 task 失败,无可作交付的产出' };
+}
+
+function normalizePlan(plan: StudioTaskPlan): StudioTaskPlan {
+  return {
+    tasks: plan.tasks.map((task) => ({
+      petId: task.petId,
+      goal: task.goal,
+      acceptanceCriteria: task.acceptanceCriteria ?? [],
+    })),
+  };
+}
+
+function buildInitialTaskStates(plan: StudioTaskPlan): StudioTaskRuntimeState[] {
+  return plan.tasks.map(() => ({
+    status: 'pending',
+    retryCount: 0,
+  }));
 }
 
 /**
@@ -146,13 +163,17 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       throw new Error('runDispatch called without a plan');
     }
     const task = state.plan.tasks[action.taskIndex];
+    const taskState = state.taskStates[action.taskIndex];
     if (!task) {
       throw new Error(`task at index ${action.taskIndex} not found in plan`);
     }
+    if (!taskState) {
+      throw new Error(`task runtime state at index ${action.taskIndex} not found`);
+    }
     const taskIndex = action.taskIndex;
 
-    function changeTaskStatus(nextStatus: StudioTask['status']): void {
-      task.status = nextStatus;
+    function changeTaskStatus(nextStatus: StudioTaskRuntimeState['status']): void {
+      taskState.status = nextStatus;
       emit({ type: 'task_status_changed', taskIndex, status: nextStatus });
     }
 
@@ -214,8 +235,8 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       dispatch.status = 'finished';
       dispatch.errorMessage = error instanceof Error ? error.message : String(error);
       dispatch.finishedAt = new Date().toISOString();
-      task.retryCount += 1;
-      if (task.retryCount >= maxRetryPerTask) {
+      taskState.retryCount += 1;
+      if (taskState.retryCount >= maxRetryPerTask) {
         changeTaskStatus('failed');
       }
     }
@@ -271,13 +292,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
   }): Promise<{ plan: StudioTaskPlan | null; plannerReply: string | null }> {
     if (params.explicit) {
       return {
-        plan: {
-          tasks: params.explicit.tasks.map<StudioTask>((task) => ({
-            ...task,
-            status: task.status ?? 'pending',
-            retryCount: task.retryCount ?? 0,
-          })),
-        },
+        plan: normalizePlan(params.explicit),
         plannerReply: null,
       };
     }
@@ -346,6 +361,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
           conversationId,
           userRequest: input.userRequest,
           plan: null,
+          taskStates: [],
           dispatches: [],
           wikiRoot,
           iterationCount: 0,
@@ -366,6 +382,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       conversationId,
       userRequest: input.userRequest,
       plan,
+      taskStates: buildInitialTaskStates(plan),
       dispatches: [],
       wikiRoot,
       iterationCount: 0,

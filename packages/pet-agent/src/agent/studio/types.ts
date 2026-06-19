@@ -103,12 +103,15 @@ export type StudioTask = {
   petId: string;
   goal: string;
   acceptanceCriteria: string[];
-  status: StudioTaskStatus;
-  retryCount: number;
 };
 
 export type StudioTaskPlan = {
-  tasks: StudioTask[]; // 顺序即执行顺序;index 即 task 身份
+  tasks: StudioTask[]; // 顺序即调用计划;index 即 task 身份
+};
+
+export type StudioTaskRuntimeState = {
+  status: StudioTaskStatus;
+  retryCount: number;
 };
 
 export type StudioDispatchStatus = 'running' | 'finished' | 'cancelled';
@@ -131,6 +134,7 @@ export type StudioTurnState = {
   conversationId: string;
   userRequest: string;
   plan: StudioTaskPlan | null;
+  taskStates: StudioTaskRuntimeState[];
   dispatches: StudioDispatchState[];
   wikiRoot: string;
   iterationCount: number;

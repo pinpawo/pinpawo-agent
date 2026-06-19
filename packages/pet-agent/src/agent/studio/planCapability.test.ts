@@ -38,9 +38,8 @@ test('submit_plan tool captures tasks via onSubmit, in submission order', async 
   assert.ok(plan, 'onSubmit should be called');
   assert.equal(plan!.tasks.length, 2);
   assert.deepEqual(plan!.tasks.map((t) => t.petId), ['script', 'audio']);
-  // 默认值
-  assert.equal(plan!.tasks[0].status, 'pending');
-  assert.equal(plan!.tasks[0].retryCount, 0);
+  assert.equal('status' in plan!.tasks[0], false);
+  assert.equal('retryCount' in plan!.tasks[0], false);
   assert.deepEqual(plan!.tasks[0].acceptanceCriteria, []);
 });
 

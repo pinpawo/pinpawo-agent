@@ -38,7 +38,7 @@ StudioOrchestrator (planner agent + execute state machine + wiki_curator)
        look up 下一个 pending task → dispatch
                                       → pet.invoke({ brief, wikiRoot, signal })
                                       → wiki_curator 整理本棒 raw source
-                                      → 写回 task.status
+                                      → 写回 task runtime state
                                       → 回到 execute
        所有 task satisfied         → finish(finalDispatchId = 末棒 dispatch)
        否则(有 failed / 上限)    → stop
@@ -127,7 +127,7 @@ execute(确定性状态机) → action:
                          → invoke pet 并传入 brief + wikiRoot
                          → 收到 pet 返回文本
                          → wiki_curator 整理 raw source
-                         → 写回 task.status
+                         → 写回 task runtime state
                          → execute(loop)
   全部 satisfied        → finish → END(turn_finished, finalDispatchId)
   否则(failed / 上限) → stop  → END(turn_finished, outcome: stopped)
@@ -175,19 +175,23 @@ type StudioTurnState = {
   conversationId: string;        // wiki 目录命名空间
   userRequest: string;
   plan: StudioTaskPlan | null;
+  taskStates: StudioTaskRuntimeState[];
   dispatches: StudioDispatchState[];
   wikiRoot: string;              // 当前 conversation 的 wiki 目录绝对路径
   iterationCount: number;
 };
 
 type StudioTaskPlan = {
-  tasks: StudioTask[];           // 顺序即执行顺序;数组下标即 task 身份
+  tasks: StudioTask[];           // 顺序即调用计划;数组下标即 task 身份
 };
 
 type StudioTask = {
   petId: string;
   goal: string;
   acceptanceCriteria: string[];
+};
+
+type StudioTaskRuntimeState = {
   status: 'pending' | 'satisfied' | 'failed';
   retryCount: number;
 };
@@ -209,7 +213,8 @@ type StudioDispatchState = {
 - 没有 `envelopes` 字段——pet 输出文本直接落在对应 `StudioDispatchState.resultText`,interaction log 派生自 dispatches。
 - 没有 `requirementState`——是否需要澄清由 planner agent 在自己的 reasoning 中判断,必要时通过 HITL 直接向用户提问。
 - 没有 `awaiting_input` 状态——pet 内部的 HITL 不穿透到 Studio,Studio 视角下 dispatch 就是 `running` 直到 result 返回。
-- `dispatches` 主要用于 trace / UI 状态显示;判断 task 是否完成看 `task.status`。
+- `plan` 是调用计划,不承载运行状态;`status/retryCount` 属于 `taskStates`。
+- `dispatches` 主要用于 trace / UI 状态显示;判断 task 是否完成看 `taskStates[taskIndex].status`。
 
 ### Planner Agent
 
@@ -246,11 +251,11 @@ execute 是一个确定性规则,不走 LLM:
 
 ```ts
 function decideExecuteAction(state): ExecuteAction {
-  const i = state.plan.tasks.findIndex((t) => t.status === 'pending');
+  const i = state.taskStates.findIndex((t) => t.status === 'pending');
   if (i >= 0) {
     return { type: 'dispatch', taskIndex: i, brief: composeBrief(state.plan.tasks[i], state) };
   }
-  const allSatisfied = state.plan.tasks.every((t) => t.status === 'satisfied');
+  const allSatisfied = state.taskStates.every((t) => t.status === 'satisfied');
   if (allSatisfied) return { type: 'finish', finalDispatchId: lastDispatchId(state) };
   return { type: 'stop', reason: 'unresolvable plan tasks' };
 }
@@ -285,7 +290,7 @@ planner 不输出 ExecuteAction,planner 通过 `studio.plan` capability 的 tool
 
 某棒 result 是否可作为末位交付,**隐式发生在 execute 状态机的固定规则中**:
 
-- 把 dispatch 完成后写回 task status:成功(pet 正常返回文本)→ satisfied;失败且达 `maxRetryPerTask` → failed;失败但未达上限 → 仍 pending,下一轮 execute 会再次 dispatch 同一 taskIndex(retryCount 由 dispatcher 自动 ++)。
+- 把 dispatch 完成后写回 `taskStates[taskIndex]`:成功(pet 正常返回文本)→ satisfied;失败且达 `maxRetryPerTask` → failed;失败但未达上限 → 仍 pending,下一轮 execute 会再次 dispatch 同一 taskIndex(retryCount 由 dispatcher 自动 ++)。
 - 全部 task 都 satisfied → `finish { finalDispatchId }`(末棒 dispatch)。
 - 有 task failed 且无可作交付的 result → `stop`。
 
@@ -341,7 +346,7 @@ execute(plan 存在)
       等待 Promise resolve,拿到 pet:A 的返回文本
       (过程中 pet 内部 HITL 对 Studio 不可见)
       wiki_curator 读返回文本,整理进 wiki
-      写回 task.status = satisfied / failed
+      写回 taskStates[taskIndex].status = satisfied / failed
   → 回到 execute
 
 execute 下一轮
@@ -516,7 +521,7 @@ orchestrator 对外推送一条 **turn state stream**,供控制面状态显示�
 type StudioTurnEvent =
   | { type: 'turn_started';        turnId: string; userRequest: string }
   | { type: 'plan_set';            plan: StudioTaskPlan }
-  | { type: 'task_status_changed'; taskIndex: number; status: StudioTask['status'] }
+  | { type: 'task_status_changed'; taskIndex: number; status: StudioTaskRuntimeState['status'] }
   | { type: 'dispatch_started';    dispatchId: string; taskIndex: number; petId: string }
   | { type: 'dispatch_finished';   dispatchId: string;
                                    status: 'finished' | 'cancelled';
@@ -665,7 +670,7 @@ execute → dispatch(taskIndex=0, brief)
   trend_video_script pet
     返回脚本结构文本(含 scriptOutline 路径引用)
   wiki_curator: 把 scriptOutline 整理进 topics/script-structure.md
-  plan.tasks[0].status = satisfied
+  taskStates[0].status = satisfied
 
 execute → dispatch(taskIndex=1, brief)
   video_tail_audio pet
@@ -673,7 +678,7 @@ execute → dispatch(taskIndex=1, brief)
     自主 wiki_read.cat('topics/script-structure.md') 拉详情
     加工并整合,产出含音频建议的完整 pet 返回结果
   wiki_curator: 把 audio 产出整理进 topics/audio-strategy.md, 更新 index
-  plan.tasks[1].status = satisfied
+  taskStates[1].status = satisfied
 
 execute → 全部 satisfied → finish { finalDispatchId = taskIndex=1 的 dispatch }
   UI 渲染 audio pet 的 pet 返回结果 到主对话面板

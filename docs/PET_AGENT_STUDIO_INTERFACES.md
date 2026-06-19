@@ -227,10 +227,10 @@ studio:{studioId}:thread:{conversationId}:pet:{petId}:dispatch:{dispatchId}
 pet 抛 error 或 timeout:
   → invoke() Promise rejects
   → Studio 的 execute 状态机下一轮看到 error,
-    据 task.retryCount 决定 retry(对同 taskIndex 再 dispatch)/ finish(若有可作交付的产出)/ stop。
+    据 taskStates[taskIndex].retryCount 决定 retry(对同 taskIndex 再 dispatch)/ finish(若有可作交付的产出)/ stop。
 ```
 
-retry 由 Studio 调度(execute 状态机再次输出 dispatch 同 taskIndex,dispatcher 自动 `retryCount++`),pet runtime 自身不负责 retry。
+retry 由 Studio 调度(execute 状态机再次输出 dispatch 同 taskIndex,dispatcher 自动更新 runtime state 的 `retryCount`),pet runtime 自身不负责 retry。
 
 ## MVP 范围
 

@@ -56,6 +56,7 @@ export type {
   StudioOrchestratorInvokeInput,
   StudioTask,
   StudioTaskPlan,
+  StudioTaskRuntimeState,
   StudioTaskStatus,
   StudioTurnEvent,
   StudioTurnEventHandler,

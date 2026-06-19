@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
 import { defineToolset } from '../../types/toolkit';
 import type { AgentToolset, NamedStructuredTool, ToolkitOperationMetadata } from '../../types/toolkit';
-import type { StudioTask, StudioTaskPlan } from './types';
+import type { StudioTaskPlan } from './types';
 
 /**
  * Studio 提供给 planner agent 的系统能力。
@@ -103,12 +103,10 @@ function createPlanToolset(options: Pick<CreatePlanCapabilityOptions, 'onSubmit'
     async (input: SubmitPlanInput) => {
       const { tasks } = input;
       const plan: StudioTaskPlan = {
-        tasks: tasks.map((task): StudioTask => ({
+        tasks: tasks.map((task) => ({
           petId: task.petId,
           goal: task.goal,
           acceptanceCriteria: task.acceptanceCriteria ?? [],
-          status: 'pending',
-          retryCount: 0,
         })),
       };
       options.onSubmit(plan);

@@ -114,15 +114,11 @@ test('studio orchestrator dispatches planned tasks sequentially and finishes wit
           petId: 'script',
           goal: '写视频脚本结构',
           acceptanceCriteria: [],
-          status: 'pending',
-          retryCount: 0,
         },
         {
           petId: 'audio',
           goal: '评估尾音频需求,整合输出',
           acceptanceCriteria: [],
-          status: 'pending',
-          retryCount: 0,
         },
       ],
     },
@@ -137,6 +133,10 @@ test('studio orchestrator dispatches planned tasks sequentially and finishes wit
   assert.deepEqual(
     result.state.dispatches.map((d) => d.status),
     ['finished', 'finished'],
+  );
+  assert.deepEqual(
+    result.state.taskStates.map((task) => task.status),
+    ['satisfied', 'satisfied'],
   );
   assert.deepEqual(briefs, ['写视频脚本结构', '评估尾音频需求,整合输出']);
   assert.deepEqual(workdirs, ['/tmp/pinpawo-studio-workdir', '/tmp/pinpawo-studio-workdir']);
@@ -180,8 +180,6 @@ test('studio orchestrator emits onTurnEvent lifecycle for happy path', async () 
           petId: 'script',
           goal: '写脚本结构',
           acceptanceCriteria: [],
-          status: 'pending',
-          retryCount: 0,
         },
       ],
     },
@@ -276,8 +274,6 @@ test('studio orchestrator透传 onToolEvent to dispatched pet runtime', async ()
           petId: 'script',
           goal: '写脚本结构',
           acceptanceCriteria: [],
-          status: 'pending',
-          retryCount: 0,
         },
       ],
     },
@@ -308,8 +304,6 @@ test('wiki curator writes per-dispatch source file and updates index', async () 
           petId: 'script',
           goal: '写视频脚本结构',
           acceptanceCriteria: [],
-          status: 'pending',
-          retryCount: 0,
         },
       ],
     },
@@ -364,15 +358,15 @@ test('studio orchestrator surfaces failed pet as task failed and stops when no r
           petId: 'broken',
           goal: '不可能完成的任务',
           acceptanceCriteria: [],
-          status: 'pending',
-          retryCount: 0,
         },
       ],
     },
   });
 
   assert.equal(result.outcome.outcome, 'stopped');
-  assert.equal(result.state.plan?.tasks[0].status, 'failed');
+  assert.equal(result.state.plan?.tasks[0].petId, 'broken');
+  assert.equal(result.state.taskStates[0].status, 'failed');
+  assert.equal(result.state.taskStates[0].retryCount, 1);
 });
 
 test('studio invokes planner agent when no explicit plan, captures submitted plan and dispatches it', async () => {
@@ -477,8 +471,6 @@ test('studio uses injected curator instead of skeleton default', async () => {
           petId: 'worker',
           goal: '工作',
           acceptanceCriteria: [],
-          status: 'pending',
-          retryCount: 0,
         },
       ],
     },
@@ -556,8 +548,6 @@ test('pet agent thread id is namespaced per dispatch', async () => {
           petId: 'script',
           goal: '走一棒',
           acceptanceCriteria: [],
-          status: 'pending',
-          retryCount: 0,
         },
       ],
     },

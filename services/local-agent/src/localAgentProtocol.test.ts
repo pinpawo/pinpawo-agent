@@ -133,6 +133,34 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
 });
 
+test('parseLocalAgentClientMessage accepts runtime config updates for built-in review policy modes', () => {
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'runtime_config.update',
+      globalReviewPolicyMode: 'auto_authorization',
+    })),
+    {
+      type: 'runtime_config.update',
+      globalReviewPolicyMode: 'auto_authorization',
+    },
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'runtime_config.update',
+      globalReviewPolicyMode: 'custom',
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'runtime_config.update',
+      globalReviewPolicyMode: 'full_access',
+      extra: true,
+    })),
+    null,
+  );
+});
+
 test('parseLocalAgentServerMessage rejects legacy server messages by default', () => {
   assert.equal(
     parseLocalAgentServerMessage(JSON.stringify({

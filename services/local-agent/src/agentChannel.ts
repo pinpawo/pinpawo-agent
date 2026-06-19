@@ -1,6 +1,7 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
+  GLOBAL_REVIEW_POLICY_MODE,
   type AgentCapability,
   type AgentActor,
   type AgentInvokeInput,
@@ -279,6 +280,10 @@ export function buildLocalChatAgentInput(params: {
       },
       workdir: params.workdir,
       runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir),
+      globalReviewPolicy: {
+        mode: llmConfig.globalReviewPolicyMode ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+        ...(decisionStructuredOutput ? { structuredOutput: decisionStructuredOutput } : {}),
+      },
     },
     interfaceContext: buildLocalAgentInterfaceContext({
       threadId: params.threadId,

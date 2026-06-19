@@ -1,6 +1,7 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { HumanMessage } from '@langchain/core/messages';
 import {
+  GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isHumanReviewInterruptPayload,
   isOrchestratorInternalAiStreamNode,
   type ReviewSpec,
@@ -93,6 +94,26 @@ function readRuntimeEventData(event: SubagentToolEvent): Record<string, unknown>
 }
 
 function formatToolAuthorizationNotice(event: SubagentToolEvent): string | null {
+  if (
+    event.event === 'on_runtime_event'
+    && event.name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED
+  ) {
+    const data = readRuntimeEventData(event);
+    const toolName = typeof data?.toolName === 'string' ? data.toolName : null;
+    return toolName
+      ? `已自动授权 ${toolName} 操作。`
+      : '已自动授权工具操作。';
+  }
+  if (
+    event.event === 'on_runtime_event'
+    && event.name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED
+  ) {
+    const data = readRuntimeEventData(event);
+    const toolName = typeof data?.toolName === 'string' ? data.toolName : null;
+    return toolName
+      ? `已根据全局策略授权 ${toolName} 操作。`
+      : '已根据全局策略授权工具操作。';
+  }
   if (event.event !== 'on_runtime_event' || event.name !== 'tool_authorization_recorded') {
     return null;
   }

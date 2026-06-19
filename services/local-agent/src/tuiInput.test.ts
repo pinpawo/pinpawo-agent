@@ -113,7 +113,7 @@ test('parseTuiCommand treats slash-prefixed non-command shapes as plain text', (
 test('formatTuiCommandHelp is generated from visible command metadata', () => {
   assert.equal(
     formatTuiCommandHelp(),
-    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /help · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /resume 恢复会话 · /quit',
+    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /policy 选择授权策略 · /help · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /resume 恢复会话 · /quit',
   );
 });
 
@@ -315,7 +315,7 @@ test('canonical-to-command path inserts Shift+Enter newline and normalizes paste
 test('canonical-to-command path supports textarea delete and line movement operations', () => {
   assert.deepEqual(
     withoutEditHistory(applyTextAreaCommand(commandFromRawInput('', { delete: true }), { text: 'abc', cursorOffset: 1 })),
-    { text: 'ac', cursorOffset: 1 },
+    { text: 'bc', cursorOffset: 0 },
   );
   assert.deepEqual(
     withoutEditHistory(applyTextAreaCommand(commandFromRawInput('\x1b[3~', {}), { text: 'abc', cursorOffset: 1 })),

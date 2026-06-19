@@ -197,12 +197,51 @@ private struct ActorSettingsPane: View {
 
 // MARK: - LLM Pane
 
+private enum GlobalReviewPolicyOption: String, CaseIterable, Identifiable {
+  case requireAuthorization = "require_authorization"
+  case autoAuthorization = "auto_authorization"
+  case fullAccess = "full_access"
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .requireAuthorization: return "需要授权"
+    case .autoAuthorization: return "自动授权"
+    case .fullAccess: return "完全访问"
+    }
+  }
+
+  var detail: String {
+    switch self {
+    case .requireAuthorization: return "需要 review 的操作都会等待你确认。"
+    case .autoAuthorization: return "先由 LLM 做安全判断；安全时自动授权，不确定时询问你。"
+    case .fullAccess: return "跳过 review，直接执行工具请求。"
+    }
+  }
+
+  static func from(_ raw: String?) -> GlobalReviewPolicyOption {
+    guard let raw else { return .requireAuthorization }
+    switch raw {
+    case "ask", "manual", "require", "require-review", "require-authorization", "require-approval", "authorization-required", "custom":
+      return .requireAuthorization
+    case "auto", "auto-review", "auto-authorization", "auto-authorize", "automatic-authorization", "automatic", "auto-approve":
+      return .autoAuthorization
+    case "full-access", "always-allow", "allow-all", "unrestricted", "trusted":
+      return .fullAccess
+    default:
+      return GlobalReviewPolicyOption(rawValue: raw) ?? .requireAuthorization
+    }
+  }
+}
+
 private struct LLMSettingsPane: View {
   @State private var apiKey = ""
   @State private var baseUrl = ""
   @State private var model = ""
   @State private var workdir = ""
   @State private var subagentThinking = false
+  @State private var globalReviewPolicy: GlobalReviewPolicyOption = .requireAuthorization
   @State private var savedFlash = false
   @State private var errorMsg: String?
 
@@ -224,6 +263,24 @@ private struct LLMSettingsPane: View {
         Text("推理设置")
       } footer: {
         Text("关闭后子任务（subagent）调用不使用模型的思考/推理模式，可降低延迟和成本。重启 Agent 生效。")
+      }
+
+      Section {
+        Picker("全局访问策略", selection: $globalReviewPolicy) {
+          ForEach(GlobalReviewPolicyOption.allCases) { option in
+            Text(option.title).tag(option)
+          }
+        }
+        .pickerStyle(.segmented)
+
+        Text(globalReviewPolicy.detail)
+          .font(.caption)
+          .foregroundColor(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      } header: {
+        Text("授权设置")
+      } footer: {
+        Text("控制文件写入、命令执行等需要 review 的操作。重启 Agent 生效。")
       }
 
       Section {
@@ -290,6 +347,7 @@ private struct LLMSettingsPane: View {
       model   = c.llmModel
       workdir = cleanWorkdir(c.workdir ?? "")
       subagentThinking = c.subagentThinking ?? false
+      globalReviewPolicy = .from(c.globalReviewPolicy)
     }
   }
 
@@ -304,6 +362,7 @@ private struct LLMSettingsPane: View {
       let normalizedWorkdir = cleanWorkdir(workdir)
       $0.workdir    = normalizedWorkdir.isEmpty ? nil : normalizedWorkdir
       $0.subagentThinking = subagentThinking
+      $0.globalReviewPolicy = globalReviewPolicy.rawValue
     }
     savedFlash = true
     Task { try? await Task.sleep(for: .seconds(2)); savedFlash = false }

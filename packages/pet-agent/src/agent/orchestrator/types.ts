@@ -7,6 +7,7 @@ import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent'
 import type { CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
+import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { OrchestrationDecision } from './schemas';
 
@@ -90,6 +91,7 @@ export type OrchestratorInvokeOptions = {
   runtimeEnvironment?: string;
   onToolEvent?: SubagentToolEventHandler;
   reviewCapabilities?: ToolkitReviewCapabilities;
+  globalReviewPolicy?: GlobalReviewPolicy;
   /**
    * 强制以"已发现候选"形态登记的 capability 名字列表。`prepare` 节点会
    * 据此 pre-seed `capabilitySearchState`,跳过 capability discovery/search。

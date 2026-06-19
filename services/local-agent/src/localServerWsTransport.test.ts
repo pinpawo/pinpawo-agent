@@ -39,6 +39,9 @@ test('local websocket transport dispatches typed client messages and pong', asyn
     onNewSession: (_ws, message) => {
       seen.push(`new:${message.userId ?? ''}`);
     },
+    onRuntimeConfigUpdate: (_ws, message) => {
+      seen.push(`policy:${message.globalReviewPolicyMode}`);
+    },
     onClose: () => {
       seen.push('close');
     },
@@ -59,6 +62,10 @@ test('local websocket transport dispatches typed client messages and pong', asyn
   }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'interrupt_request', requestId: 'chat-1' }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'new_session', userId: 'user-1' }), handlers);
+  dispatchLocalServerWebSocketMessage(ws, JSON.stringify({
+    type: 'runtime_config.update',
+    globalReviewPolicyMode: 'auto_authorization',
+  }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({
     type: 'chat_request',
     requestId: 'chat-old',
@@ -86,6 +93,7 @@ test('local websocket transport dispatches typed client messages and pong', asyn
       'review:review-1:review-spec-1:approve',
       'interrupt:chat-1',
       'new:user-1',
+      'policy:auto_authorization',
     ]);
     assert.deepEqual(warnings, [
       '[local-server] ignored malformed client message type=chat_request requestId=chat-old',
@@ -150,6 +158,7 @@ function createHandlers(): LocalServerWsHandlers {
     onHumanReviewResponse: () => undefined,
     onInterruptRequest: () => undefined,
     onNewSession: () => undefined,
+    onRuntimeConfigUpdate: () => undefined,
     onClose: () => undefined,
     log: () => undefined,
   };

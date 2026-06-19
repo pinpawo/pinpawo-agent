@@ -3,6 +3,7 @@ import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution } from '../types/agent';
 import type { SubagentToolEventHandler } from '../types/subagent';
 import type { AgentToolkit } from '../types/toolkit';
+import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
 import { buildOrchestratorTurnInput, type OrchestratorGraph } from './createAgentRuntime';
 
 export type AgentInvokeInput = {
@@ -18,6 +19,7 @@ export type AgentInvokeInput = {
   /** Runtime environment summary injected into system prompts. Must not contain secrets. */
   runtimeEnvironment?: string;
   onToolEvent?: SubagentToolEventHandler;
+  globalReviewPolicy?: GlobalReviewPolicy;
 };
 
 export type AgentRunResult = {
@@ -43,6 +45,7 @@ export async function runAgent(
   if (input.workdir) configurable.workdir = input.workdir;
   if (input.runtimeEnvironment) configurable.runtimeEnvironment = input.runtimeEnvironment;
   if (input.onToolEvent) configurable.onToolEvent = input.onToolEvent;
+  if (input.globalReviewPolicy) configurable.globalReviewPolicy = input.globalReviewPolicy;
 
   const result = await graph.invoke(
     buildOrchestratorTurnInput(input.messages),

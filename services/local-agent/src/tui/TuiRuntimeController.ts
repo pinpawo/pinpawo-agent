@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ReviewOption } from '@pinpawo/pet-agent';
+import type { BuiltinGlobalReviewPolicyMode, ReviewOption } from '@pinpawo/pet-agent';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { config } from '../config';
@@ -264,6 +264,11 @@ export class TuiRuntimeController {
     }
   }
 
+  updateRuntimeConfig(params: { globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode }) {
+    config.globalReviewPolicyMode = params.globalReviewPolicyMode;
+    return this.sendRuntimeConfigUpdate();
+  }
+
   appendSystemMessage(text: string) {
     this.options.dispatch({
       type: 'history.append',
@@ -469,6 +474,7 @@ export class TuiRuntimeController {
       status: 'ready',
       message: TUI_TEXT.statusReady,
     });
+    this.sendRuntimeConfigUpdate();
   }
 
   private handleWebSocketClose() {
@@ -533,5 +539,15 @@ export class TuiRuntimeController {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
+  }
+
+  private sendRuntimeConfigUpdate() {
+    if (!this.wsClient.isConnected()) {
+      return false;
+    }
+    return Boolean(this.wsClient.send({
+      type: 'runtime_config.update',
+      globalReviewPolicyMode: config.globalReviewPolicyMode,
+    }));
   }
 }

@@ -8,6 +8,7 @@ import type {
   ToolAuthorizationMatcher,
 } from '../agent/orchestrator/review/reviewSpec';
 import type { ToolAuthorizationRecord } from '../agent/orchestrator/review/reviewAuthorizations';
+import type { GlobalReviewPolicy } from '../agent/orchestrator/review/globalReviewPolicy';
 import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { CapabilityAvailabilityConfig } from './capability';
 import type { CapabilityArtifactRef } from './artifact';
@@ -24,6 +25,7 @@ export type ToolkitContext = {
   turnId?: string | null;
   execution?: AgentExecution;
   reviewCapabilities?: ToolkitReviewCapabilities;
+  globalReviewPolicy?: GlobalReviewPolicy;
   toolAuthorizations?: ToolAuthorizationRecord[];
   recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;
   recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;

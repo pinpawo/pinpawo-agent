@@ -21,6 +21,13 @@ import type {
   ReviewSpec,
   HumanReviewInterruptPayload,
 } from './review/reviewSpec';
+import {
+  GLOBAL_REVIEW_POLICY_MODE,
+  GLOBAL_REVIEW_POLICY_RESOLUTION,
+  GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
+  resolveGlobalReviewPolicy,
+  type GlobalReviewPolicyResolution,
+} from './review/globalReviewPolicy';
 import type { MessageLane } from './types';
 
 export function buildDelegationHandoffInstruction(params: {
@@ -185,6 +192,48 @@ function buildCancelledToolResult(params: {
   });
 }
 
+function reviewCapabilitiesForGlobalPolicy(ctx: ToolkitContext) {
+  const mode = ctx.globalReviewPolicy?.mode ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
+  if (
+    mode !== GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
+    && mode !== GLOBAL_REVIEW_POLICY_MODE.CUSTOM
+  ) {
+    return ctx.reviewCapabilities;
+  }
+  const current = ctx.reviewCapabilities ?? {
+    humanReview: false,
+    sessionAuthorization: false,
+  };
+  return {
+    ...current,
+    humanReview: true,
+  };
+}
+
+function runtimeCanCollectHumanReview(ctx: ToolkitContext) {
+  return ctx.reviewCapabilities?.humanReview !== false;
+}
+
+function buildHumanReviewUnavailableReason(resolution: GlobalReviewPolicyResolution | null) {
+  if (
+    resolution?.type === GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION
+    && resolution.reason
+  ) {
+    return `${resolution.reason} Human review is unavailable in this runtime.`;
+  }
+  return 'Human review is required for this tool call, but this runtime cannot collect a human decision.';
+}
+
+function globalReviewPolicyAuthorizedEventName(mode: string | undefined) {
+  if (mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION) {
+    return GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED;
+  }
+  if (mode === GLOBAL_REVIEW_POLICY_MODE.CUSTOM) {
+    return GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED;
+  }
+  return null;
+}
+
 function isToolkitReviewBlock(value: unknown): value is { type: 'block'; reason: string } {
   return Boolean(
     value
@@ -332,14 +381,19 @@ function wrapToolkitTool(
   if (!reviewPolicy) {
     return toolItem;
   }
+  if (ctx.globalReviewPolicy?.mode === GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS) {
+    return toolItem;
+  }
 
   return tool(
     async (input: unknown, runtime: ToolRuntime) => {
       let currentInput = input;
+      const canCollectHumanReview = runtimeCanCollectHumanReview(ctx);
 
       while (true) {
         const reviewSpec = await reviewPolicy.request({
           ...ctx,
+          reviewCapabilities: reviewCapabilitiesForGlobalPolicy(ctx),
           toolkitName: toolkit.name,
           toolName: toolItem.name,
           input: currentInput,
@@ -354,6 +408,46 @@ function wrapToolkitTool(
             toolName: toolItem.name,
             toolkitName: toolkit.name,
             reason: reviewSpec.reason,
+            input: currentInput,
+          });
+        }
+
+        const policyResolution = await resolveGlobalReviewPolicy({
+          policy: ctx.globalReviewPolicy,
+          models: ctx.models,
+          actor: ctx.actor,
+          messages: ctx.messages,
+          toolkitName: toolkit.name,
+          toolName: toolItem.name,
+          input: currentInput,
+          operation,
+          review: reviewSpec,
+        });
+
+        if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
+          const policyMode = ctx.globalReviewPolicy?.mode;
+          const eventName = globalReviewPolicyAuthorizedEventName(policyMode);
+          if (eventName) {
+            await ctx.emitRuntimeEvent?.({
+              event: 'on_runtime_event',
+              name: eventName,
+              data: {
+                toolName: toolItem.name,
+                toolkitName: toolkit.name,
+                policyMode,
+                reason: policyResolution.reason,
+                ...(policyResolution.confidence ? { confidence: policyResolution.confidence } : {}),
+              },
+            });
+          }
+          return toolItem.invoke(currentInput as never, runtime as never);
+        }
+
+        if (!canCollectHumanReview) {
+          return buildCancelledToolResult({
+            toolName: toolItem.name,
+            toolkitName: toolkit.name,
+            reason: buildHumanReviewUnavailableReason(policyResolution),
             input: currentInput,
           });
         }

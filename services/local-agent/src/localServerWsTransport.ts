@@ -13,6 +13,7 @@ import {
   type HumanReviewResponseMessage,
   type InterruptRequestMessage,
   type NewSessionMessage,
+  type RuntimeConfigUpdateMessage,
   type StudioRequestMessage,
 } from './localAgentProtocol';
 
@@ -26,6 +27,7 @@ export type LocalServerWsHandlers = {
   onHumanReviewResponse: (ws: WebSocket, message: HumanReviewResponseMessage) => MaybePromise<void>;
   onInterruptRequest: (ws: WebSocket, message: InterruptRequestMessage) => MaybePromise<void>;
   onNewSession: (ws: WebSocket, message: NewSessionMessage) => MaybePromise<void>;
+  onRuntimeConfigUpdate: (ws: WebSocket, message: RuntimeConfigUpdateMessage) => MaybePromise<void>;
   onClose: (ws: WebSocket) => MaybePromise<void>;
   log?: (message: string) => void;
   logError?: LogError;
@@ -100,6 +102,8 @@ export function dispatchLocalServerWebSocketMessage(
       runHandler('handleInterruptRequest', () => handlers.onInterruptRequest(ws, msg), logError);
     } else if (msg.type === 'new_session') {
       runHandler('handleNewSession', () => handlers.onNewSession(ws, msg), logError);
+    } else if (msg.type === 'runtime_config.update') {
+      runHandler('handleRuntimeConfigUpdate', () => handlers.onRuntimeConfigUpdate(ws, msg), logError);
     } else if (msg.type === 'ping') {
       sendLocalAgentMessage(ws, { type: 'pong' });
     }

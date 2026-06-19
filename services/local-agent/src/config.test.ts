@@ -5,6 +5,10 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
+const CONFIG_IMPORT_PATH = process.cwd().endsWith('services/local-agent')
+  ? './src/config.ts'
+  : './services/local-agent/src/config.ts';
+
 const REQUIRED_ENV = {
   API_BASE_URL: 'https://example.test',
   HASURA_ENDPOINT: 'https://example.test/v1/graphql',
@@ -49,7 +53,7 @@ test('config workdir defaults to process cwd when env and stored config are abse
     'tsx',
     '-e',
     [
-      'const { config } = await import("./src/config.ts");',
+      `const { config } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
       'process.stdout.write(config.workdir);',
     ].join('\n'),
   ], {

@@ -5,6 +5,10 @@ import { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
 import { inferLlmContextWindowTokens } from './llmContextWindow';
 import { findLlmModelPresetByKey, inferLlmModelPreset } from './llmModelPresets';
 import { loadStoredConfig } from './storage';
+import {
+  GLOBAL_REVIEW_POLICY_MODE,
+  type BuiltinGlobalReviewPolicyMode,
+} from '@pinpawo/pet-agent';
 
 export { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
 
@@ -65,6 +69,56 @@ function getNumber(envKey: string, storedKey: keyof typeof stored): number | und
 
 function getBoolean(envKey: string, storedKey: keyof typeof stored): boolean | undefined {
   return resolveBooleanConfigValue(process.env[envKey], stored[storedKey]);
+}
+
+function resolveGlobalReviewPolicyMode(raw: string | undefined): BuiltinGlobalReviewPolicyMode | undefined {
+  const normalized = raw?.trim().toLowerCase().replace(/_/g, '-');
+  if (!normalized) return undefined;
+  if ([
+    'require-authorization',
+    'require-approval',
+    'authorization-required',
+    'ask',
+    'manual',
+    'always-ask',
+    'require',
+    'require-review',
+  ].includes(normalized)) {
+    return GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
+  }
+  if ([
+    'auto-authorization',
+    'auto-authorize',
+    'automatic-authorization',
+    'auto',
+    'automatic',
+    'auto-approve',
+    'auto-review',
+  ].includes(normalized)) {
+    return GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION;
+  }
+  if ([
+    'full-access',
+    'always-allow',
+    'allow-all',
+    'unrestricted',
+    'trusted',
+  ].includes(normalized)) {
+    return GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS;
+  }
+  return undefined;
+}
+
+function getGlobalReviewPolicyMode(): BuiltinGlobalReviewPolicyMode {
+  return resolveGlobalReviewPolicyMode(process.env.PINPAWO_GLOBAL_REVIEW_POLICY)
+    ?? resolveGlobalReviewPolicyMode(process.env.PINPAWO_REVIEW_POLICY_STRATEGY)
+    ?? resolveGlobalReviewPolicyMode(typeof stored.global_review_policy === 'string'
+      ? stored.global_review_policy
+      : undefined)
+    ?? resolveGlobalReviewPolicyMode(typeof stored.review_policy_strategy === 'string'
+      ? stored.review_policy_strategy
+      : undefined)
+    ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
 }
 
 function required(envKey: string, storedKey: keyof typeof stored, label: string): string {
@@ -143,6 +197,7 @@ export const config = {
     'LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES',
     'structured_output_repair_max_retries',
   ),
+  globalReviewPolicyMode: getGlobalReviewPolicyMode(),
 
   workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
   browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',

@@ -246,3 +246,24 @@ export type StudioTurnEvent =
       outcome: 'done' | 'stopped';
       finalDispatchId?: string;
     };
+
+export type StudioRunIdentity = {
+  /** 本次 Studio run 的请求 id，通常与 caller 侧 requestId/runId 对齐。 */
+  runId: string;
+  /** 会话级聚合 id。默认 fallback 到 runId。 */
+  conversationId: string;
+  /** 用于调度去重。格式: `studio:{conversationId}:run:{runId}`。 */
+  idempotencyKey: string;
+};
+
+export function buildStudioRunIdentity(input: {
+  runId: string;
+  conversationId?: string;
+}): StudioRunIdentity {
+  const conversationId = input.conversationId ?? input.runId;
+  return {
+    runId: input.runId,
+    conversationId,
+    idempotencyKey: `studio:${conversationId}:run:${input.runId}`,
+  };
+}

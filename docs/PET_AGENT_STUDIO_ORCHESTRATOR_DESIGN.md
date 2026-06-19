@@ -642,6 +642,16 @@ capability 在 pet 内部运作;跨 capability 与跨 pet 的衔接由 `StudioOr
 
 当某个 capability 完成本职后发现需要其它能力补足,在 result.summary 中以缺口说明的形式标出,Studio 在 reason 阶段读取后决定是否派发下一棒 pet 并撰写新的 brief。
 
+### 幂等约定（跨进程可共享）
+
+`runId`/`conversationId` 与 `idempotencyKey` 的派生约定由 `@pinpawo/pet-agent` 的
+`buildStudioRunIdentity({ runId, conversationId? })` 提供：
+
+- `conversationId = request.conversationId ?? runId`
+- `idempotencyKey = studio:{conversationId}:run:{runId}`
+
+`local-agent` 的 `StudioRunService` 与将来的 App/API scheduler 都应直接复用该函数，避免约定漂移。
+
 视频脚本场景示例:
 
 ```text

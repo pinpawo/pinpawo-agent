@@ -421,6 +421,10 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
   实际 Studio turn 交给 `StudioRunService`。
 - `StudioRunService` 使用 `runId` 作为 Studio `turnId`，并派生稳定
   `studio:<conversationId>:run:<runId>` idempotency key，供未来 scheduler/job 表持久化使用。
+
+- 这套派生逻辑在 `@pinpawo/pet-agent` 中集中为
+  `buildStudioRunIdentity({ runId, conversationId? })`，App/API 与 local-agent
+  scheduler 接入时应复用该共享 helper，避免重复实现。
 - 未来 App/API scheduler 接入时，应由 scheduler 解析 workspace/workdir 后构造
   `LocalAgentRuntimeConfig`，再调用 `StudioRunService`；不要直接调用 `buildStudioForTurn()`。
 

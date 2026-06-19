@@ -259,6 +259,12 @@ export type StudioOrchestratorConfig = {
    */
   runQueueStore?: import('./runQueueStore').StudioRunQueueStore;
   /**
+   * 是否在 orchestrator 创建时从 runQueueStore 恢复 open runs。
+   * 默认 true。local-agent 这类 per-turn fresh orchestrator 的宿主应在同一
+   * process/workdir 内只允许一次恢复,避免多个 live orchestrator 双重驱动同一 run。
+   */
+  restoreOpenRuns?: boolean;
+  /**
    * 单 turn 内 dispatch 累计上限(兜底)。
    */
   maxIterationCount?: number;

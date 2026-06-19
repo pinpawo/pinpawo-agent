@@ -296,7 +296,7 @@ function buildTerminalOutcomeIfReady(record: StudioRunRecord, tasks: StudioQueue
     return null;
   }
   const finalTask = tasks
-    .filter((task) => task.status === 'done' && task.petRunId && record.taskResults.has(task.taskIndex))
+    .filter((task) => task.status === 'done' && task.petRunId)
     .at(-1);
   if (finalTask?.petRunId) {
     return {
@@ -949,7 +949,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
   }
 
   function restoreOpenRunsFromStore(): void {
-    if (!runQueueStore) {
+    if (!runQueueStore || config.restoreOpenRuns === false) {
       return;
     }
     const recovered = runQueueStore.recoverOpenRuns();
@@ -981,6 +981,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
           failRun(record, error);
         });
       }
+      finishTaskIfRunTerminal(record);
     }
     scheduleQueue();
   }

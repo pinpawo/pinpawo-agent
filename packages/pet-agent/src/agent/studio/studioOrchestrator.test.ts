@@ -1404,6 +1404,104 @@ test('studio orchestrator restores queued tasks from run queue store without rer
   assert.equal(runQueueStore.get('run-store-restore')?.status, 'done');
 });
 
+test('studio orchestrator can skip store recovery for per-turn fresh hosts', async () => {
+  const wikiBaseDir = await makeWikiTempDir('studio-run-store-no-restore-');
+  const runQueueStore = new InMemoryStudioRunQueueStore();
+  runQueueStore.save({
+    runId: 'run-store-no-restore',
+    conversationId: 'conv-store-no-restore',
+    userRequest: 'must not be restored',
+    status: 'running',
+    createdAt: '2026-06-20T00:00:00.000Z',
+    updatedAt: '2026-06-20T00:00:01.000Z',
+    tasks: [
+      {
+        runId: 'run-store-no-restore',
+        conversationId: 'conv-store-no-restore',
+        taskIndex: 0,
+        petId: 'worker',
+        brief: 'do not dispatch',
+        acceptanceCriteria: [],
+        deps: [],
+        status: 'queued',
+        enqueuedAt: '2026-06-20T00:00:01.000Z',
+      },
+    ],
+  });
+
+  let workerInvocations = 0;
+  const orchestrator = createStudioOrchestrator({
+    studioId: 'studio-1',
+    ownerUserId: 'user-1',
+    plannerPetId: 'planner',
+    agents: [
+      plannerRuntime(),
+      runtime({
+        petId: 'worker',
+        name: 'Worker',
+        reply: 'should not run',
+        onInvoke: () => {
+          workerInvocations += 1;
+        },
+      }),
+    ],
+    wikiBaseDir,
+    runQueueStore,
+    restoreOpenRuns: false,
+  });
+
+  assert.equal(orchestrator.getRun('run-store-no-restore'), null);
+  assert.equal(workerInvocations, 0);
+});
+
+test('studio orchestrator finalizes recovered open run when all tasks are already terminal', async () => {
+  const wikiBaseDir = await makeWikiTempDir('studio-run-store-terminal-');
+  const runQueueStore = new InMemoryStudioRunQueueStore();
+  runQueueStore.save({
+    runId: 'run-store-terminal',
+    conversationId: 'conv-store-terminal',
+    userRequest: 'already complete',
+    status: 'running',
+    createdAt: '2026-06-20T00:00:00.000Z',
+    updatedAt: '2026-06-20T00:00:01.000Z',
+    tasks: [
+      {
+        runId: 'run-store-terminal',
+        conversationId: 'conv-store-terminal',
+        taskIndex: 0,
+        petId: 'worker',
+        brief: 'already done',
+        acceptanceCriteria: [],
+        deps: [],
+        status: 'done',
+        petRunId: 'pet-run-restored',
+        enqueuedAt: '2026-06-20T00:00:01.000Z',
+        startedAt: '2026-06-20T00:00:02.000Z',
+        finishedAt: '2026-06-20T00:00:03.000Z',
+      },
+    ],
+  });
+
+  const orchestrator = createStudioOrchestrator({
+    studioId: 'studio-1',
+    ownerUserId: 'user-1',
+    plannerPetId: 'planner',
+    agents: [
+      plannerRuntime(),
+      runtime({ petId: 'worker', name: 'Worker', reply: 'should not run' }),
+    ],
+    wikiBaseDir,
+    runQueueStore,
+  });
+
+  const result = await orchestrator.waitForRun('run-store-terminal');
+
+  assert.equal(result.outcome.outcome, 'done');
+  assert.equal(result.outcome.finalPetRunId, 'pet-run-restored');
+  assert.equal(result.outcome.reply, '');
+  assert.equal(runQueueStore.get('run-store-terminal')?.status, 'done');
+});
+
 test('studio cancelRun aborts planning and prevents tasks from being queued afterwards', async () => {
   const wikiBaseDir = await makeWikiTempDir('studio-cancel-api-');
   let releasePlanner!: () => void;

@@ -12,6 +12,7 @@ import {
   type CuratorPromptProvider,
   type PetAgentRuntime,
   type StudioOrchestrator,
+  type StudioRunQueueStore,
 } from '@pinpawo/pet-agent';
 
 import { buildLocalAgentModels } from '../agentModels';
@@ -78,6 +79,23 @@ export type BuildStudioResult = {
   orchestrator: StudioOrchestrator;
   resolved: ResolvedStudio;
 };
+
+const runQueueStoresByPath = new Map<string, StudioRunQueueStore>();
+const restoredRunQueuePaths = new Set<string>();
+
+function getWorkdirRunQueueStore(filePath: string): {
+  store: StudioRunQueueStore;
+  shouldRestore: boolean;
+} {
+  let store = runQueueStoresByPath.get(filePath);
+  if (!store) {
+    store = new FileStudioRunQueueStore({ filePath });
+    runQueueStoresByPath.set(filePath, store);
+  }
+  const shouldRestore = !restoredRunQueuePaths.has(filePath);
+  restoredRunQueuePaths.add(filePath);
+  return { store, shouldRestore };
+}
 
 /**
  * 加载本地 Studio 配置 + Pet 配置,逐 pet 构造 PetAgentRuntime(humanReviewer 桥到
@@ -189,6 +207,8 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     promptProvider,
     structuredOutput: globalDecisionStructuredOutput,
   });
+  const runQueueStorePath = path.join(workdirStateRoot, 'studio-run-queue.json');
+  const runQueue = getWorkdirRunQueueStore(runQueueStorePath);
 
   const orchestrator = createStudioOrchestrator({
     studioId: studio.studioId,
@@ -198,9 +218,8 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     wikiBaseDir: input.wikiBaseDir
       ?? path.join(workdirStateRoot, 'studio-wiki'),
     workdir: effectiveWorkdir,
-    runQueueStore: new FileStudioRunQueueStore({
-      filePath: path.join(workdirStateRoot, 'studio-run-queue.json'),
-    }),
+    runQueueStore: runQueue.store,
+    restoreOpenRuns: runQueue.shouldRestore,
     curator,
     ...(studio.maxIterationCount !== undefined ? { maxIterationCount: studio.maxIterationCount } : {}),
     ...(studio.maxRetryPerTask !== undefined ? { maxRetryPerTask: studio.maxRetryPerTask } : {}),

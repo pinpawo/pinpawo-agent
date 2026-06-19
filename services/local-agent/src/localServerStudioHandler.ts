@@ -5,39 +5,61 @@ import {
   type HumanReviewResponseMessage,
   type StudioRequestMessage,
 } from './localAgentProtocol';
-import {
-  type StreamToolsPayload,
-} from './agentStreamEvents';
+import type { StreamToolsPayload } from './agentStreamEvents';
 import {
   configureInflightOperationRegistry,
   type InflightOperationRun,
 } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
+import {
+  LocalStudioDueRunCompletion,
+  LocalStudioDueRunScheduler,
+} from './localStudioDueRunScheduler';
 import { StudioNotConfiguredError } from './studio/studioRuntime';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForLocalServerDeps } from './runtimeOperationRegistry';
-import { StudioRunService, type BuildStudioForTurn } from './studioRunService';
+import {
+  StudioRunService,
+  type BuildStudioForTurn,
+  type StudioRunServiceResult,
+} from './studioRunService';
+import type { SubagentToolEvent, StudioTurnEvent } from '@pinpawo/pet-agent';
 
 type InflightRequest = InflightOperationRun;
+type StudioHandleResult = StudioRunServiceResult | LocalStudioDueRunCompletion;
+
+type StudioHandleCompletion = {
+  runId: string;
+  conversationId: string;
+  idempotencyKey: string;
+  workdir: string;
+  outcome: 'done' | 'stopped';
+  reply: string;
+  finalDispatchId?: string;
+  reason?: string;
+};
 
 export class LocalServerStudioHandler {
   private readonly reviewRouter: LocalServerStudioReviewRouter<WebSocket>;
   private readonly inflightRequests: InflightRequestController<WebSocket>;
   private readonly studioRunService: StudioRunService;
+  private readonly studioDueRunScheduler?: LocalStudioDueRunScheduler;
 
   constructor(options: {
     reviewRouter: LocalServerStudioReviewRouter<WebSocket>;
     inflightRequests: InflightRequestController<WebSocket>;
     studioRunService?: StudioRunService;
     buildStudio?: BuildStudioForTurn;
+    studioDueRunScheduler?: LocalStudioDueRunScheduler;
   }) {
     this.reviewRouter = options.reviewRouter;
     this.inflightRequests = options.inflightRequests;
     this.studioRunService = options.studioRunService ?? new StudioRunService({
       buildStudio: options.buildStudio,
     });
+    this.studioDueRunScheduler = options.studioDueRunScheduler;
   }
 
   routeHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
@@ -81,25 +103,61 @@ export class LocalServerStudioHandler {
       sendLocalAgentMessage(ws, envelope as Parameters<typeof sendLocalAgentMessage>[1]);
     };
 
-    try {
-      const result = await this.studioRunService.run({
-        deps,
-        runId,
-        userRequest,
-        conversationId,
-        bridge: { send, requestId, slot },
-        signal: controller.signal,
-        onProgress: (event) => {
-          sendLocalAgentEvent(ws, {
-            type: 'studio.progress',
-            requestId,
-            event,
-          });
-        },
-        onToolEvent: (event) => {
-          this.sendStreamToolOperationEvent(ws, inflight, event as StreamToolsPayload);
-        },
+    const onProgress = (event: StudioTurnEvent) => {
+      sendLocalAgentEvent(ws, {
+        type: 'studio.progress',
+        requestId,
+        event,
       });
+    };
+
+    const onToolEvent = (payload: SubagentToolEvent) => {
+      if (payload.event === 'on_runtime_event') {
+        return;
+      }
+      this.sendStreamToolOperationEvent(ws, inflight, {
+        event: payload.event,
+        name: payload.name,
+        toolCallId: payload.toolCallId,
+        ...(payload.event === 'on_tool_start' ? { input: payload.input } : {}),
+        ...(payload.event === 'on_tool_event' ? { data: payload.data } : {}),
+        ...(payload.event === 'on_tool_end' ? { output: payload.output } : {}),
+        ...(payload.event === 'on_tool_error' ? { error: payload.error } : {}),
+        operation: payload.operation,
+      } as StreamToolsPayload);
+    };
+
+    try {
+      const result: StudioHandleResult = await (this.studioDueRunScheduler
+        ? this.studioDueRunScheduler.submit({
+          deps,
+          requestId,
+          runId,
+          conversationId,
+          userRequest,
+          send,
+          onProgress,
+          onToolEvent: (payload) => {
+            if (payload.event === 'on_runtime_event') {
+              return;
+            }
+            onToolEvent(payload);
+          },
+          slot,
+          signal: controller.signal,
+        })
+        : this.studioRunService.run({
+          deps,
+          runId,
+          userRequest,
+          conversationId,
+          bridge: { send, requestId, slot },
+          signal: controller.signal,
+          onProgress,
+          onToolEvent,
+        }));
+
+      const completion = this.toCompletion(result);
 
       if (controller.signal.aborted) {
         this.inflightRequests.finish(ws, inflight, 'interrupted');
@@ -108,29 +166,29 @@ export class LocalServerStudioHandler {
       }
 
       this.inflightRequests.finish(ws, inflight, 'completed');
-      if (result.turn.outcome.outcome === 'done') {
+      if (completion.outcome === 'done') {
         send({
           type: 'studio_response',
           requestId,
           outcome: 'done',
-          reply: result.turn.outcome.reply,
-          finalDispatchId: result.turn.outcome.finalDispatchId,
-          workdir: result.workdir,
-          runId: result.runId,
-          conversationId: result.conversationId,
-          idempotencyKey: result.idempotencyKey,
+          reply: completion.reply,
+          ...(completion.finalDispatchId ? { finalDispatchId: completion.finalDispatchId } : {}),
+          workdir: completion.workdir,
+          runId: completion.runId,
+          conversationId: completion.conversationId,
+          idempotencyKey: completion.idempotencyKey,
         });
       } else {
         send({
           type: 'studio_response',
           requestId,
           outcome: 'stopped',
-          reply: result.turn.outcome.reply,
-          reason: result.turn.outcome.reason,
-          workdir: result.workdir,
-          runId: result.runId,
-          conversationId: result.conversationId,
-          idempotencyKey: result.idempotencyKey,
+          reply: completion.reply,
+          reason: completion.reason,
+          workdir: completion.workdir,
+          runId: completion.runId,
+          conversationId: completion.conversationId,
+          idempotencyKey: completion.idempotencyKey,
         });
       }
     } catch (err) {
@@ -158,6 +216,24 @@ export class LocalServerStudioHandler {
       }
       this.inflightRequests.clear(ws, inflight);
     }
+  }
+
+  private toCompletion(result: StudioHandleResult): StudioHandleCompletion {
+    if ('turn' in result) {
+      return {
+        runId: result.runId,
+        conversationId: result.conversationId,
+        idempotencyKey: result.idempotencyKey,
+        workdir: result.workdir,
+        outcome: result.turn.outcome.outcome,
+        reply: result.turn.outcome.reply,
+        ...(result.turn.outcome.outcome === 'done'
+          ? { finalDispatchId: result.turn.outcome.finalDispatchId }
+          : { reason: result.turn.outcome.reason }),
+      };
+    }
+
+    return result;
   }
 
   private sendStreamToolOperationEvent(

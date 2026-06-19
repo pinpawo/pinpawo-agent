@@ -1,0 +1,387 @@
+import { setTimeout as sleep } from 'node:timers/promises';
+import type {
+  StudioTurnEvent,
+  StudioTurnResult,
+  SubagentToolEvent,
+} from '@pinpawo/pet-agent';
+import {
+  isTerminalStudioDueRunStatus,
+  type StudioDueRunRecord,
+  type StudioDueRunStore,
+  type StudioDueRunStoreTrace,
+  type StudioDueRunClaim,
+} from '@pinpawo/pet-agent';
+import type { PendingReviewSlot } from './studio/studioBridge';
+import type { LocalServerDeps } from './localServerTypes';
+import { StudioRunService } from './studioRunService';
+
+export type LocalStudioDueRunCompletion = {
+  runId: string;
+  conversationId: string;
+  idempotencyKey: string;
+  workdir: string;
+  outcome: 'done' | 'stopped';
+  reply: string;
+  finalDispatchId?: string;
+  reason?: string;
+};
+
+export type LocalStudioDueRunSubmitOptions = {
+  deps: LocalServerDeps;
+  requestId: string;
+  runId: string;
+  userRequest: string;
+  conversationId?: string;
+  send: (envelope: unknown) => void;
+  onProgress: (event: StudioTurnEvent) => void;
+  onToolEvent: (event: SubagentToolEvent) => void;
+  slot: PendingReviewSlot;
+  ownerUserId?: string | null;
+  signal?: AbortSignal;
+};
+
+type Waiter = LocalStudioDueRunSubmitOptions & {
+  idempotencyKey: string;
+  resolve: (result: LocalStudioDueRunCompletion) => void;
+  reject: (error: unknown) => void;
+  settled: boolean;
+};
+
+type LocalStudioDueRunSchedulerOptions = {
+  store: StudioDueRunStore;
+  studioRunService?: StudioRunService;
+  filterWorkdir?: string | string[];
+  ownerUserId?: string | null;
+  pollIntervalMs?: number;
+  defaultFinalDispatchId?: string;
+};
+
+export class LocalStudioDueRunScheduler {
+  private readonly studioRunService: StudioRunService;
+  private readonly studioDueRuns: StudioDueRunStore;
+  private readonly filterWorkdir?: string | string[];
+  private readonly ownerUserId: string | null;
+  private readonly pollIntervalMs: number;
+  private readonly defaultFinalDispatchId: string | undefined;
+  private readonly waitersByKey = new Map<string, Set<Waiter>>();
+  private readonly claimRunning = new Set<string>();
+  private stopSignal = new AbortController();
+  private loopStarted = false;
+
+  constructor(options: LocalStudioDueRunSchedulerOptions) {
+    this.studioRunService = options.studioRunService ?? new StudioRunService();
+    this.studioDueRuns = options.store;
+    this.filterWorkdir = options.filterWorkdir;
+    this.ownerUserId = options.ownerUserId ?? null;
+    this.pollIntervalMs = options.pollIntervalMs ?? 200;
+    this.defaultFinalDispatchId = options.defaultFinalDispatchId;
+  }
+
+  async submit(input: LocalStudioDueRunSubmitOptions): Promise<LocalStudioDueRunCompletion> {
+    const workdir = input.deps.runtimeConfig?.workdir ?? input.deps.workdir;
+    const row = this.studioDueRuns.submit({
+      runId: input.runId,
+      conversationId: input.conversationId,
+      workdir,
+      ownerUserId: input.ownerUserId ?? null,
+      userRequest: input.userRequest,
+    });
+
+    if (isTerminalStudioDueRunStatus(row.status)) {
+      return this.toCompletionFromTerminalRow(row);
+    }
+
+    this.ensureLoopRunning();
+
+    const result = await new Promise<LocalStudioDueRunCompletion>((resolve, reject) => {
+      const waiter: Waiter = {
+        ...input,
+        idempotencyKey: row.identity.idempotencyKey,
+        resolve,
+        reject,
+        settled: false,
+      };
+
+      this.addWaiter(waiter);
+
+      if (input.signal) {
+        if (input.signal.aborted) {
+          this.settleWaiter(waiter, 'reject', new DOMException('aborted', 'AbortError'));
+          return;
+        }
+        const abort = () => {
+          this.settleWaiter(waiter, 'reject', new DOMException('aborted', 'AbortError'));
+        };
+        input.signal.addEventListener('abort', abort, { once: true });
+      }
+    });
+
+    return result;
+  }
+
+  stop() {
+    this.stopSignal.abort();
+  }
+
+  async trace(): Promise<StudioDueRunStoreTrace[]> {
+    return this.studioDueRuns.listTrace();
+  }
+
+  private ensureLoopRunning() {
+    if (this.loopStarted) {
+      return;
+    }
+    this.loopStarted = true;
+    this.runLoop().catch((error) => {
+      console.error('[local-studio-scheduler] loop crashed:', error instanceof Error ? error.message : error);
+      this.loopStarted = false;
+    });
+  }
+
+  private async runLoop() {
+    while (!this.stopSignal.signal.aborted) {
+      const claim = this.studioDueRuns.claim(this.ownerUserId, this.filterWorkdir ? {
+        workdir: this.filterWorkdir,
+      } : undefined);
+
+      if (!claim) {
+        await sleep(this.pollIntervalMs, this.stopSignal.signal).catch(() => undefined);
+        continue;
+      }
+
+      if (this.claimRunning.has(claim.run.identity.idempotencyKey)) {
+        continue;
+      }
+      this.claimRunning.add(claim.run.identity.idempotencyKey);
+      await this.execute(claim).finally(() => {
+        this.claimRunning.delete(claim.run.identity.idempotencyKey);
+      });
+    }
+  }
+
+  private async execute(claim: StudioDueRunClaim) {
+    const idempotencyKey = claim.run.identity.idempotencyKey;
+    const waiters = this.getWaiters(idempotencyKey);
+    const activeWaiters = waiters.filter((waiter) => !waiter.settled);
+
+    if (activeWaiters.length === 0) {
+      try {
+        this.studioDueRuns.cancel(claim);
+      } catch (error) {
+        console.warn('[local-studio-scheduler] cancel due no active waiters failed:', error);
+      }
+      return;
+    }
+
+    const owner = activeWaiters[0];
+    if (!owner) {
+      return;
+    }
+
+    const executionSignal = activeWaiters.length === 1 ? owner.signal : undefined;
+
+    let running;
+    try {
+      running = this.studioDueRuns.start(claim);
+    } catch (error) {
+      this.notifyFailure(idempotencyKey, error);
+      return;
+    }
+
+    const onProgress = (event: StudioTurnEvent) => {
+      this.broadcastProgress(idempotencyKey, event);
+    };
+    const onToolEvent = (event: SubagentToolEvent) => {
+      this.broadcastToolEvent(idempotencyKey, event);
+    };
+    const onSend = (envelope: unknown) => {
+      this.broadcastSend(idempotencyKey, envelope);
+    };
+
+    try {
+      const result = await this.studioRunService.run({
+        deps: owner.deps,
+        runId: running.runId,
+        userRequest: running.userRequest,
+        conversationId: running.conversationId,
+        ownerUserId: owner.ownerUserId ?? running.ownerUserId,
+        signal: executionSignal,
+        bridge: {
+          send: onSend,
+          requestId: owner.requestId,
+          slot: owner.slot,
+        },
+        onProgress,
+        onToolEvent,
+      });
+      const completed = this.studioDueRuns.succeed(claim, {
+        finalDispatchId: result.turn.outcome.outcome === 'done'
+          ? result.turn.outcome.finalDispatchId
+          : this.defaultFinalDispatchId,
+        reply: result.turn.outcome.reply,
+      });
+      const completion = this.toCompletionFromResult(completed, result.turn.outcome);
+      this.notifySuccess(idempotencyKey, completion);
+    } catch (error) {
+      const errorCode = error instanceof Error ? error.name : 'STUDIO_ERROR';
+      const errorDetail = error instanceof Error ? error.message : String(error);
+      try {
+        const failed = this.studioDueRuns.fail(claim, { errorCode, errorDetail });
+        const reason = failed.errorDetail ?? failed.errorCode ?? 'studio run failed';
+        this.notifyFailure(idempotencyKey, new Error(reason));
+      } catch (storeError) {
+        this.notifyFailure(
+          idempotencyKey,
+          storeError instanceof Error ? storeError : new Error(String(storeError)),
+        );
+      }
+    }
+  }
+
+  private addWaiter(waiter: Waiter) {
+    const waiters = this.waitersByKey.get(waiter.idempotencyKey);
+    if (!waiters) {
+      this.waitersByKey.set(waiter.idempotencyKey, new Set([waiter]));
+      return;
+    }
+    waiters.add(waiter);
+  }
+
+  private getWaiters(idempotencyKey: string) {
+    const waiters = this.waitersByKey.get(idempotencyKey);
+    if (!waiters) {
+      return [];
+    }
+    return Array.from(waiters);
+  }
+
+  private removeWaiter(idempotencyKey: string, waiter: Waiter) {
+    const waiters = this.waitersByKey.get(idempotencyKey);
+    if (!waiters) {
+      return;
+    }
+    waiters.delete(waiter);
+    if (waiters.size === 0) {
+      this.waitersByKey.delete(idempotencyKey);
+    }
+  }
+
+  private settleWaiter(
+    waiter: Waiter,
+    callback: 'resolve' | 'reject',
+    value: LocalStudioDueRunCompletion | unknown,
+  ) {
+    if (waiter.settled) {
+      return;
+    }
+    waiter.settled = true;
+    this.removeWaiter(waiter.idempotencyKey, waiter);
+
+    if (callback === 'resolve') {
+      waiter.resolve(value as LocalStudioDueRunCompletion);
+      return;
+    }
+    waiter.reject(value);
+  }
+
+  private settleWaiters(idempotencyKey: string, callback: 'resolve' | 'reject', value: LocalStudioDueRunCompletion | unknown) {
+    const waiters = this.getWaiters(idempotencyKey);
+    for (const waiter of waiters) {
+      this.settleWaiter(waiter, callback, value);
+    }
+  }
+
+  private notifySuccess(idempotencyKey: string, completion: LocalStudioDueRunCompletion) {
+    this.settleWaiters(idempotencyKey, 'resolve', completion);
+  }
+
+  private notifyFailure(idempotencyKey: string, error: unknown) {
+    this.settleWaiters(idempotencyKey, 'reject', error);
+  }
+
+  private broadcastProgress(idempotencyKey: string, event: StudioTurnEvent) {
+    const waiters = this.getWaiters(idempotencyKey);
+    for (const waiter of waiters) {
+      if (waiter.settled) {
+        continue;
+      }
+      waiter.onProgress(event);
+    }
+  }
+
+  private broadcastToolEvent(idempotencyKey: string, event: SubagentToolEvent) {
+    if (event.event === 'on_runtime_event') {
+      return;
+    }
+    const waiters = this.getWaiters(idempotencyKey);
+    for (const waiter of waiters) {
+      if (waiter.settled) {
+        continue;
+      }
+      waiter.onToolEvent(event);
+    }
+  }
+
+  private broadcastSend(idempotencyKey: string, envelope: unknown) {
+    const waiters = this.getWaiters(idempotencyKey);
+    for (const waiter of waiters) {
+      if (waiter.settled) {
+        continue;
+      }
+      waiter.send(envelope);
+    }
+  }
+
+  private toCompletionFromResult(
+    row: StudioDueRunRecord,
+    turnOutcome: StudioTurnResult['outcome'],
+  ): LocalStudioDueRunCompletion {
+    if (turnOutcome.outcome === 'done') {
+      return {
+        runId: row.runId,
+        conversationId: row.conversationId,
+        idempotencyKey: row.identity.idempotencyKey,
+        workdir: row.workdir,
+        outcome: 'done',
+        reply: turnOutcome.reply,
+        finalDispatchId: turnOutcome.finalDispatchId,
+      };
+    }
+
+    return {
+      runId: row.runId,
+      conversationId: row.conversationId,
+      idempotencyKey: row.identity.idempotencyKey,
+      workdir: row.workdir,
+      outcome: 'stopped',
+      reply: turnOutcome.reply,
+      reason: turnOutcome.reason,
+    };
+  }
+
+  private toCompletionFromTerminalRow(row: StudioDueRunRecord): LocalStudioDueRunCompletion {
+    if (row.status === 'success') {
+      return {
+        runId: row.runId,
+        conversationId: row.conversationId,
+        idempotencyKey: row.identity.idempotencyKey,
+        workdir: row.workdir,
+        outcome: 'done',
+        reply: row.reply ?? '',
+        finalDispatchId: row.finalDispatchId,
+      };
+    }
+
+    const reason = row.errorDetail ?? row.errorCode ?? `studio run finished with status ${row.status}`;
+    return {
+      runId: row.runId,
+      conversationId: row.conversationId,
+      idempotencyKey: row.identity.idempotencyKey,
+      workdir: row.workdir,
+      outcome: 'stopped',
+      reply: row.reply ?? '',
+      reason,
+    };
+  }
+
+}

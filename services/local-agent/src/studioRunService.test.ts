@@ -126,6 +126,65 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
   assert.equal(result.turn.outcome.outcome, 'done');
 });
 
+test('StudioRunService falls back to deps.workdir when runtimeConfig is absent', async () => {
+  const buildInputs: BuildStudioInput[] = [];
+  const service = new StudioRunService({
+    buildStudio: async (input) => {
+      buildInputs.push(input);
+      return {
+        resolved: {} as BuildStudioResult['resolved'],
+        orchestrator: {
+          invoke: async (turn: {
+            userRequest: string;
+            conversationId?: string;
+            turnId?: string;
+            onTurnEvent?: (event: unknown) => void;
+            onToolEvent?: (event: unknown) => void;
+          }) => {
+            turn.onTurnEvent?.({ type: 'turn_started' });
+            turn.onToolEvent?.({ event: 'on_tool_start', name: 'read_file' });
+            return {
+              turnId: turn.turnId ?? 'run-legacy',
+              state: {},
+              outcome: {
+                outcome: 'done',
+                reply: 'legacy reply',
+                finalDispatchId: 'dispatch-legacy',
+              },
+              studio: {},
+            } as StudioTurnResult;
+          },
+        } as unknown as BuildStudioResult['orchestrator'],
+      };
+    },
+  });
+
+  const deps = createDeps();
+  const result = await service.run({
+    deps: {
+      ...deps,
+      runtimeConfig: undefined,
+    },
+    runId: 'run-2',
+    userRequest: 'legacy plan this',
+    ownerUserId: 'user-legacy',
+    bridge: {
+      send: () => undefined,
+      requestId: 'run-2',
+      slot: { current: null },
+    },
+  });
+
+  assert.equal(buildInputs.length, 1);
+  assert.equal(buildInputs[0]?.workdir, '/tmp/legacy-workdir');
+  assert.equal(buildInputs[0]?.studioConfigPath, undefined);
+  assert.equal(buildInputs[0]?.petsDir, undefined);
+  assert.equal(buildInputs[0]?.wikiBaseDir, undefined);
+  assert.equal(result.idempotencyKey, 'studio:run-2:run:run-2');
+  assert.equal(result.workdir, '/tmp/legacy-workdir');
+  assert.equal(result.turn.outcome.outcome, 'done');
+});
+
 test('buildStudioRunIdentity is scoped by conversation and run', () => {
   const identity = buildStudioRunIdentity({ conversationId: 'conv-a', runId: 'run-a' });
   assert.equal(identity.conversationId, 'conv-a');

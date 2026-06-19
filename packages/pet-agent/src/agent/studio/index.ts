@@ -19,6 +19,13 @@ export {
   canRetry,
   isTerminalStudioDueRunStatus,
 } from './dueRunContract';
+export {
+  InMemoryStudioDueRunStore,
+  type StudioDueRunClaim,
+  type StudioDueRunStoreInput,
+  type StudioDueRunStoreOptions,
+  type StudioDueRunStoreTrace,
+} from './dueRunScheduler';
 export type {
   CuratorPromptProvider,
   LLMWikiCuratorConfig,

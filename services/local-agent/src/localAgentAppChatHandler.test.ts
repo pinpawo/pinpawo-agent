@@ -179,6 +179,7 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
   assert.equal(buildInputs[0]?.userMessage, 'hello');
   assert.equal(buildInputs[0]?.threadId, 'petbot:chat:pet:pet-a:user:user-1');
   assert.equal(buildInputs[0]?.interfaceKind, 'app-chat');
+  assert.equal(buildInputs[0]?.workdir, '/tmp/pinpawo-app-workdir');
   assert.deepEqual((buildInputs[0]?.toolkits as Array<{ name?: string }>).map((toolkit) => toolkit.name), [
     'plugin-toolkit',
     'local-toolkit',

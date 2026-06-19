@@ -62,9 +62,6 @@ export type ActiveRunModel = {
   requestId: RunId;
   phase: 'thinking' | 'using_tool' | 'streaming' | 'waiting_human' | 'interrupting';
   timelineEntryIds: string[];
-  assistantDraft: string;
-  subagentDraft: string;
-  activeOperations: ActiveOperationModel[];
   pendingReview?: ApprovalRequestModel;
   startedAt: number;
   charCount: number;
@@ -83,14 +80,6 @@ export type HistoryCellModel = {
   kind: 'user' | 'assistant' | 'system';
   text: string;
   timestamp?: string;
-};
-
-export type ActiveOperationModel = {
-  key: string;
-  kind: string;
-  title: string;
-  detail: string;
-  startedAt: number;
 };
 
 export type ApprovalRequestModel = {

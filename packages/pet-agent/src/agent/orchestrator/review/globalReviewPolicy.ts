@@ -83,6 +83,13 @@ const AUTO_REVIEW_DECISION_SCHEMA = z.object({
   confidence: z.enum(['low', 'medium', 'high']).optional(),
 });
 
+const AUTO_REVIEW_SYSTEM_PROMPT = [
+  'You are a conservative security gate.',
+  'You only decide whether a proposed tool call may be automatically authorized.',
+  'When uncertain, require human authorization.',
+  'Return the decision as a JSON object matching the structured output schema.',
+].join(' ');
+
 const DEFAULT_AUTO_REVIEW_REASON = 'Auto authorization did not approve this tool call.';
 const MAX_PROMPT_CHARS = 8_000;
 const MAX_FIELD_CHARS = 2_000;
@@ -188,7 +195,7 @@ async function resolveAutoAuthorization(
           : undefined),
       },
       messages: [
-        new SystemMessage('You are a conservative security gate. You only decide whether a proposed tool call may be automatically authorized. When uncertain, require human authorization.'),
+        new SystemMessage(AUTO_REVIEW_SYSTEM_PROMPT),
         new HumanMessage(buildAutoReviewPrompt(options)),
       ],
     });

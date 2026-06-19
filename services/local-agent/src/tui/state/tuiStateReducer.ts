@@ -26,6 +26,7 @@ import {
   type AgentOperationEntry,
   type AgentTimelineEntry,
 } from '../timeline/agentTimeline';
+import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
 import type {
   ActiveOperationModel,
   ActiveRunModel,
@@ -414,15 +415,6 @@ function activeRunToPendingUi(run: ActiveRunModel | null) {
         : 'thinking' as const,
     charCount: run.charCount,
   };
-}
-
-function activeRunToActiveOperations(run: ActiveRunModel | null) {
-  return run?.activeOperations.map((operation) => ({
-    name: operation.key,
-    label: operation.title,
-    detail: operation.detail,
-    startedAt: operation.startedAt,
-  })) ?? [];
 }
 
 function clearPendingReview(run: ActiveRunModel): ActiveRunModel {
@@ -954,7 +946,10 @@ export function selectFocusedPendingUi(state: TuiState) {
 }
 
 export function selectFocusedActiveOperations(state: TuiState) {
-  return activeRunToActiveOperations(selectFocusedActiveRun(state));
+  const session = selectFocusedSession(state);
+  return session?.activeRun
+    ? selectActiveOperationsFromTimeline(session.timeline, session.activeRun.requestId)
+    : [];
 }
 
 export function selectFocusedSubagentDraft(state: TuiState) {

@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
+import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { config } from '../config';
+import { AgentTimeline } from './components/AgentTimeline';
 import { ApprovalPanel } from './components/ApprovalPanel';
 import { CommandPalette } from './components/CommandPalette';
 import { Composer } from './components/Composer';
 import { FileMentionPopup } from './components/FileMentionPopup';
-import { MessageBlock } from './components/MessageBlock';
 import { RuntimeInfoLine } from './components/RuntimeInfoLine';
 import { TokenUsageLine } from './components/TokenUsageLine';
 import { ResumePicker } from './components/ResumePicker';
@@ -29,22 +29,17 @@ import {
 } from './input/fileMention';
 import { resolveTuiInputAction } from './input/inputRouter';
 import { submitCurrentInputFromController } from './input/commandSubmit';
-import {
-  buildActiveOperationLines,
-  buildBusyStatusLine,
-  formatSubagentMessage,
-} from './render/eventText';
+import { buildBusyStatusLine } from './render/eventText';
 import { formatNow } from './render/terminalText';
 import { TUI_TEXT } from './render/text';
 import { createInitialTuiState, createSession } from './state/tuiState';
 import {
   selectFocusedActiveOperations,
   selectFocusedBusy,
-  selectFocusedHistory,
   selectFocusedPendingApproval,
   selectFocusedPendingUi,
   selectFocusedSession,
-  selectFocusedSubagentDraft,
+  selectFocusedTimeline,
   selectReady,
   tuiStateReducer,
 } from './state/tuiStateReducer';
@@ -97,13 +92,11 @@ export function TuiApp(props: { actorId: string }) {
     setNow,
   }), [props.actorId, localServerPort, dispatch, setNow]);
   const focusedSession = selectFocusedSession(tuiState);
-  const messages = selectFocusedHistory(tuiState);
+  const timeline = selectFocusedTimeline(tuiState);
   const ready = selectReady(tuiState);
   const busy = selectFocusedBusy(tuiState);
   const pendingUi = selectFocusedPendingUi(tuiState);
   const activeOperations = selectFocusedActiveOperations(tuiState);
-  const subagentDraft = selectFocusedSubagentDraft(tuiState);
-  const subagentMessage = formatSubagentMessage(subagentDraft);
   const pendingApproval = selectFocusedPendingApproval(tuiState);
   const reviewOptions = pendingApproval?.review.options ?? [];
   const petName = focusedSession?.actor.label ?? TUI_TEXT.defaultPetName;
@@ -451,10 +444,6 @@ export function TuiApp(props: { actorId: string }) {
   }, { isActive: true });
 
   const spinnerFrame = SPINNER_FRAMES[animationFrame];
-  const activeOperationLines = useMemo(
-    () => buildActiveOperationLines(activeOperations, now, contentWidth),
-    [activeOperations, now, contentWidth],
-  );
 
   // Contextual help text
   const helpText = busy
@@ -469,26 +458,7 @@ export function TuiApp(props: { actorId: string }) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {messages.length === 0 ? <Text dimColor>{TUI_TEXT.emptyHistory(petName)}</Text> : null}
-      <Static items={messages}>
-        {(entry) => <MessageBlock key={entry.id} entry={entry} petName={petName} width={contentWidth} />}
-      </Static>
-      {activeOperationLines.length > 0 ? (
-        <Box flexDirection="column" marginTop={1}>
-          {activeOperationLines.map((line) => (
-            <Text key={line.id} color="blue" dimColor>
-              {line.text}
-            </Text>
-          ))}
-        </Box>
-      ) : null}
-      {subagentMessage ? (
-        <MessageBlock
-          entry={{ kind: 'system', text: subagentMessage }}
-          petName={petName}
-          width={contentWidth}
-        />
-      ) : null}
+      <AgentTimeline entries={timeline} petName={petName} width={contentWidth} now={now} />
       {resumePickerOpen ? (
         <ResumePicker
           sessions={resumePicker.sessions}

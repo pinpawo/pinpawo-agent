@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { LocalAgentOperationEvent } from './events/localAgentEvent';
 import { createInitialTuiState, createSession, type TuiState } from './tui/state/tuiState';
 import {
+  selectFocusedActiveOperations,
   selectFocusedActiveRun,
   selectFocusedBusy,
   selectFocusedPendingApproval,
@@ -32,6 +33,25 @@ function startRun(state: TuiState, requestId = 'req-1', sessionId?: string) {
     userCell: { id: `${requestId}:user`, timestamp: '10:00:00' },
     statusMessage: '等待回复',
   });
+}
+
+function withoutLegacyActiveOperations(state: TuiState): TuiState {
+  const sessionId = state.focusedSessionId;
+  const session = sessionId ? state.sessions[sessionId] : null;
+  if (!session?.activeRun || !sessionId) return state;
+  return {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      [sessionId]: {
+        ...session,
+        activeRun: {
+          ...session.activeRun,
+          activeOperations: [],
+        },
+      },
+    },
+  };
 }
 
 test('tuiStateReducer uses completed message text for final assistant history', () => {
@@ -472,6 +492,12 @@ test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => 
   assert.deepEqual(activeRun?.timelineEntryIds, ['history:req-1:user', 'req-1:operation:tool-1']);
   assert.equal(selectFocusedTimeline(state).at(-1)?.id, 'req-1:operation:tool-1');
   assert.equal(selectFocusedTimeline(state).at(-1)?.type, 'operation');
+  assert.deepEqual(selectFocusedActiveOperations(withoutLegacyActiveOperations(state)), [{
+    name: 'tool-1',
+    label: 'Shell',
+    detail: 'npm test',
+    startedAt: 1200,
+  }]);
 
   state = tuiStateReducer(state, {
     type: 'event.received',

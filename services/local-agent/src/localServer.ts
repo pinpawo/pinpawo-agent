@@ -84,8 +84,28 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
     });
 
     attachLocalServerWebSocketTransport(server, {
-      onChatRequest: (ws, msg) => chatHandler.handleChatRequest(ws, msg, depsWithRuntime),
-      onStudioRequest: (ws, msg) => studioHandler.handleStudioRequest(ws, msg, depsWithRuntime),
+      onChatRequest: (ws, msg) => {
+        if (mode === 'studio') {
+          sendLocalAgentEvent(ws, {
+            type: 'error',
+            requestId: msg.requestId,
+            message: 'chat mode is not enabled',
+          }, { includeRaw: true });
+          return;
+        }
+        return chatHandler.handleChatRequest(ws, msg, depsWithRuntime);
+      },
+      onStudioRequest: (ws, msg) => {
+        if (mode === 'chat') {
+          sendLocalAgentMessage(ws, {
+            type: 'studio_error',
+            requestId: msg.requestId,
+            message: 'studio mode is not enabled',
+          });
+          return;
+        }
+        return studioHandler.handleStudioRequest(ws, msg, depsWithRuntime);
+      },
       onHumanReviewResponse: (ws, msg) => {
         if (studioHandler.routeHumanReviewResponse(ws, msg)) {
           return;

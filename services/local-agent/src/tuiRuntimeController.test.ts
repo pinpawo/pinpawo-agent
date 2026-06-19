@@ -71,6 +71,7 @@ test('TuiRuntimeController notifies app when runtime reports studio server mode'
     localServerPort: 0,
     dispatch: () => {},
     getState: () => state,
+    resetTimelineView: () => {},
     setNow: () => {},
     onServerMode: (mode) => modes.push(mode),
   });

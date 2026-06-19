@@ -6,20 +6,23 @@ import type { TuiAction } from '../state/tuiState';
 function createSubmitHarness(overrides: {
   inputValue?: string;
   openExternalEditor?: (initialText: string) => void;
+  serverMode?: 'chat' | 'studio';
+  studioConversationIdRef?: { current: string | null };
 } = {}) {
   const messages: string[] = [];
   const actions: TuiAction[] = [];
   const sent: string[] = [];
+  const studioConversationIdRef = overrides.studioConversationIdRef ?? { current: null };
   return {
     messages,
     actions,
     sent,
+    studioConversationIdRef,
     submit: () => submitCurrentInputFromController({
       inputValue: overrides.inputValue ?? '',
       focusedSession: null,
-      studioModeRef: { current: false },
-      studioConversationIdRef: { current: null },
-      setStudioMode: () => {},
+      serverMode: overrides.serverMode ?? 'chat',
+      studioConversationIdRef,
       openResumePicker: () => {},
       openExternalEditor: overrides.openExternalEditor,
       exit: () => {},
@@ -29,8 +32,8 @@ function createSubmitHarness(overrides: {
       runtimeController: {
         isConnected: () => true,
         isBusy: () => false,
-        sendStudioRequest: () => {
-          sent.push('studio');
+        sendStudioRequest: (_request, conversationId) => {
+          sent.push(`studio:${conversationId ?? ''}`);
           return true;
         },
         sendChatRequest: () => {
@@ -63,6 +66,34 @@ test('submitCurrentInputFromController opens external editor for /edit', () => {
   assert.equal(initialText, 'hello world');
   assert.deepEqual(harness.sent, ['clear']);
   assert.deepEqual(harness.messages, []);
+});
+
+test('submitCurrentInputFromController sends text as studio request in studio server mode', () => {
+  const conversation = { current: 'conv-1' };
+  const harness = createSubmitHarness({
+    inputValue: 'plan this',
+    serverMode: 'studio',
+    studioConversationIdRef: conversation,
+  });
+
+  harness.submit();
+
+  assert.deepEqual(harness.sent, ['studio:conv-1']);
+});
+
+test('submitCurrentInputFromController resets studio conversation on /new in studio server mode', () => {
+  const conversation = { current: 'conv-old' };
+  const harness = createSubmitHarness({
+    inputValue: '/new',
+    serverMode: 'studio',
+    studioConversationIdRef: conversation,
+  });
+
+  harness.submit();
+
+  assert.deepEqual(harness.sent, ['new']);
+  assert.notEqual(harness.studioConversationIdRef.current, 'conv-old');
+  assert.equal(harness.actions.some((action) => action.type === 'session.set_kind' && action.kind === 'studio'), true);
 });
 
 test('submitCurrentInputFromController reports missing external editor hook', () => {

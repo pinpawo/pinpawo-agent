@@ -16,7 +16,8 @@ type ResumePickerControllerOptions = {
   clearInputValue: () => void;
   dispatch: (action: TuiAction) => void;
   resetTimelineView: () => void;
-  resetStudioMode: () => void;
+  resetStudioConversation: () => void;
+  serverMode: 'chat' | 'studio';
   runtimeController: Pick<TuiRuntimeController, 'listResumeSessions' | 'resumeSession'>;
 };
 
@@ -86,7 +87,7 @@ export function useResumePickerController(options: ResumePickerControllerOptions
     }));
     void options.runtimeController.resumeSession(selected.id).then(({ session, history }) => {
       if (resumeRequestIdRef.current !== requestId) return;
-      options.resetStudioMode();
+      options.resetStudioConversation();
       options.resetTimelineView();
       options.dispatch({
         type: 'session.clear',
@@ -94,7 +95,7 @@ export function useResumePickerController(options: ResumePickerControllerOptions
       });
       options.dispatch({
         type: 'session.set_kind',
-        kind: 'chat',
+        kind: options.serverMode,
       });
       options.dispatch({
         type: 'session.replace_history',

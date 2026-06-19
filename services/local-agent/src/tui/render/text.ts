@@ -25,11 +25,6 @@ export const TUI_TEXT = {
   approvalApproveExecution: '批准执行',
   approvalContinue: '继续',
   approvalStopHere: '停在这里',
-  studioExited: '已退出 Studio 模式',
-  studioExitedToChat: '已退出 Studio 模式，回到单 pet chat',
-  studioNotActive: '当前不在 Studio 模式',
-  studioModeEntered: (conversationId: string) =>
-    `已进入 Studio 模式 (conversation=${conversationId.slice(0, 8)})。后续输入都属于此会话，输入 /chat 或 /studio 退出。`,
   disconnectedCannotSend: '未连接，无法发送',
   busyCannotSend: '当前任务仍在进行中，按 Ctrl+C 或 Esc 打断',
   waitingForReply: '等待回复',

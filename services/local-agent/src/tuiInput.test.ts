@@ -49,11 +49,6 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
     args: '',
   });
 
-  const studio = parseTuiCommand('/studio build a poster');
-  assert.equal(studio.type, 'command');
-  assert.equal(studio.type === 'command' ? studio.name : null, 'studio');
-  assert.equal(studio.type === 'command' ? studio.args : null, 'build a poster');
-
   const exit = parseTuiCommand('/exit');
   assert.equal(exit.type, 'command');
   assert.equal(exit.type === 'command' ? exit.name : null, 'quit');
@@ -77,6 +72,12 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
     raw: '/studiox',
     name: 'studiox',
     args: '',
+  });
+  assert.deepEqual(parseTuiCommand('/studio build a poster'), {
+    type: 'unknown',
+    raw: '/studio build a poster',
+    name: 'studio',
+    args: 'build a poster',
   });
 });
 
@@ -113,7 +114,7 @@ test('parseTuiCommand treats slash-prefixed non-command shapes as plain text', (
 test('formatTuiCommandHelp is generated from visible command metadata', () => {
   assert.equal(
     formatTuiCommandHelp(),
-    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /help · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /resume 恢复会话 · /quit',
+    '/new 新会话 · /help · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /resume 恢复会话 · /quit',
   );
 });
 

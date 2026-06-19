@@ -9,9 +9,8 @@ import type { TuiRuntimeController } from '../TuiRuntimeController';
 type TuiCommandSubmitInput = {
   inputValue: string;
   focusedSession: SessionModel | null;
-  studioModeRef: { current: boolean };
+  serverMode: 'chat' | 'studio';
   studioConversationIdRef: { current: string | null };
-  setStudioMode: (value: boolean) => void;
   openResumePicker: () => void;
   openExternalEditor?: (initialText: string) => void;
   exit: () => void;
@@ -20,6 +19,11 @@ type TuiCommandSubmitInput = {
   dispatch: (action: TuiAction) => void;
   runtimeController: Pick<TuiRuntimeController, 'isConnected' | 'isBusy' | 'sendStudioRequest' | 'sendChatRequest' | 'startNewSession' | 'submitReviewResponse'>;
 };
+
+function ensureStudioConversationId(ref: { current: string | null }): string {
+  ref.current ??= randomUUID();
+  return ref.current;
+}
 
 export function submitCurrentInputFromController(options: TuiCommandSubmitInput) {
   const parsed = parseTuiCommand(options.inputValue);
@@ -71,60 +75,11 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
       return;
     }
 
-    if (parsed.name === 'chat') {
-      if (options.studioModeRef.current) {
-        options.studioModeRef.current = false;
-        options.studioConversationIdRef.current = null;
-        options.setStudioMode(false);
-        options.dispatch({ type: 'session.set_kind', kind: 'chat' });
-        options.appendSystemMessage(TUI_TEXT.studioExitedToChat);
-      } else {
-        options.appendSystemMessage(TUI_TEXT.studioNotActive);
-      }
-      options.clearInputValue();
-      return;
-    }
-
-    if (parsed.name === 'studio') {
-      const userRequest = parsed.args;
-      if (!userRequest && options.studioModeRef.current) {
-        // toggle 退出
-        options.studioModeRef.current = false;
-        options.studioConversationIdRef.current = null;
-        options.setStudioMode(false);
-        options.dispatch({ type: 'session.set_kind', kind: 'chat' });
-        options.appendSystemMessage(TUI_TEXT.studioExited);
-        options.clearInputValue();
-        return;
-      }
-      if (!options.runtimeController.isConnected()) {
-        options.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
-        return;
-      }
-      if (options.runtimeController.isBusy()) {
-        options.appendSystemMessage(TUI_TEXT.busyCannotSend);
-        return;
-      }
-      // 进入 Studio 模式(若不在)
-      if (!options.studioModeRef.current) {
-        options.studioModeRef.current = true;
-        options.studioConversationIdRef.current = randomUUID();
-        options.setStudioMode(true);
-        options.dispatch({ type: 'session.set_kind', kind: 'studio' });
-        options.appendSystemMessage(
-          TUI_TEXT.studioModeEntered(options.studioConversationIdRef.current),
-        );
-      }
-      if (!userRequest) {
-        // 仅 toggle 进入，没首条输入
-        options.clearInputValue();
-        return;
-      }
-      options.runtimeController.sendStudioRequest(userRequest, options.studioConversationIdRef.current);
-      return;
-    }
-
     if (parsed.name === 'new') {
+      if (options.serverMode === 'studio') {
+        options.studioConversationIdRef.current = randomUUID();
+        options.dispatch({ type: 'session.set_kind', kind: 'studio' });
+      }
       options.runtimeController.startNewSession();
       return;
     }
@@ -141,9 +96,8 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
   const text = parsed.text;
   // Free text is never a human-review resume. Review responses are sent only
   // through the approval panel's canonical human_review_response message.
-  // Studio 模式下:普通文本走 studio_request(沿用同一 conversationId)
-  if (options.studioModeRef.current) {
-    options.runtimeController.sendStudioRequest(text, options.studioConversationIdRef.current);
+  if (options.serverMode === 'studio') {
+    options.runtimeController.sendStudioRequest(text, ensureStudioConversationId(options.studioConversationIdRef));
     return;
   }
 

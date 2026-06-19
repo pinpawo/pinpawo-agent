@@ -1,8 +1,6 @@
 export type TuiCommandName =
   | 'help'
   | 'quit'
-  | 'chat'
-  | 'studio'
   | 'new'
   | 'export'
   | 'edit'
@@ -44,18 +42,6 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/new',
     description: '创建新会话',
     helpText: '/new 新会话',
-  },
-  {
-    name: 'studio',
-    usage: '/studio [任务]',
-    description: '进入 Studio 模式或提交 Studio 任务',
-    helpText: '/studio [任务] 进入 Studio 模式',
-  },
-  {
-    name: 'chat',
-    usage: '/chat',
-    description: '退出 Studio 模式',
-    helpText: '/chat 退出 Studio',
   },
   {
     name: 'help',

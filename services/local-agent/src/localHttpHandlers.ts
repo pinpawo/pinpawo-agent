@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { existsSync } from 'node:fs';
-import type { StudioDueRunStatus } from '@pinpawo/pet-agent';
+import type { StudioDueRunStatus, StudioDueRunStoreTrace } from '@pinpawo/pet-agent';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
   getCachedCapabilityAvailability,
@@ -89,32 +89,57 @@ export function handleLocalHttpRequest(
   }
 
   if (pathname === '/studio_due_runs') {
-    if (!deps.studioDueRunScheduler) {
+    const scheduler = deps.studioDueRunScheduler;
+    if (!scheduler) {
       writeJson(res, 404, { error: 'studio_due_runs unavailable' });
       return true;
     }
 
     const status = parseStudioDueRunStatus(url.searchParams.get('status'));
     const limit = parsePositiveInteger(url.searchParams.get('limit'));
+    const includeMetrics = shouldIncludeStudioDueRunMetrics(url.searchParams);
 
     if (url.searchParams.get('limit') !== null && limit === undefined) {
       writeJson(res, 400, { error: 'invalid limit' });
       return true;
     }
 
-    deps.studioDueRunScheduler.trace().then((trace) => {
+    const respondWithTrace = (trace: StudioDueRunStoreTrace[]) => {
       const next = (status ? trace.filter((row) => row.status === status) : trace)
         .slice(0, limit ?? trace.length);
-      writeJson(res, 200, {
+      const payload = {
         workdir: deps.runtimeConfig?.workdir ?? deps.workdir,
         studio_due_runs_path: deps.runtimeConfig?.studioDueRunsPath,
         studio_due_runs: next,
+      };
+      return payload;
+    };
+
+    if (includeMetrics) {
+      Promise.all([scheduler.trace(), scheduler.metrics()])
+        .then(([trace, metrics]) => {
+          writeJson(res, 200, {
+            ...respondWithTrace(trace),
+            studio_due_run_metrics: metrics,
+          });
+        })
+        .catch((err) => {
+          writeJson(res, 500, {
+            error: err instanceof Error ? err.message : 'studio_due_runs trace failed',
+          });
+        });
+      return true;
+    }
+
+    scheduler.trace()
+      .then((trace) => {
+        writeJson(res, 200, respondWithTrace(trace));
+      })
+      .catch((err) => {
+        writeJson(res, 500, {
+          error: err instanceof Error ? err.message : 'studio_due_runs trace failed',
+        });
       });
-    }).catch((err) => {
-      writeJson(res, 500, {
-        error: err instanceof Error ? err.message : 'studio_due_runs trace failed',
-      });
-    });
     return true;
   }
 
@@ -219,6 +244,16 @@ function parseStudioDueRunStatus(value: string | null): StudioDueRunStatus | nul
     return normalized;
   }
   return null;
+}
+
+function shouldIncludeStudioDueRunMetrics(searchParams: URLSearchParams): boolean {
+  const include = searchParams.get('include')?.toLowerCase()?.trim();
+  if (include === 'metrics' || include === 'all') {
+    return true;
+  }
+
+  const metrics = searchParams.get('metrics');
+  return metrics === '1' || metrics === 'true';
 }
 
 function parsePositiveInteger(value: string | null): number | undefined {

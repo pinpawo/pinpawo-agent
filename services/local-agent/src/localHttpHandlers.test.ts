@@ -80,7 +80,7 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
     }),
   }), true);
 
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(resumeRes.statusCode, 200);
   assert.deepEqual(JSON.parse(resumeRes.body), {
     session: { id: 'pet-a:one', title: 'first' },
@@ -255,7 +255,7 @@ test('handleLocalHttpRequest serves studio due-runs trace when scheduler is avai
     },
   }), true);
 
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), {
     workdir,
@@ -345,7 +345,7 @@ test('handleLocalHttpRequest filters studio due-runs trace by status and limit',
     },
   }), true);
 
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), {
     workdir,
@@ -387,7 +387,7 @@ test('handleLocalHttpRequest rejects invalid studio_due_runs limit', async () =>
     },
   }), true);
 
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(res.statusCode, 400);
   assert.deepEqual(JSON.parse(res.body), {
     error: 'invalid limit',
@@ -414,4 +414,87 @@ test('handleLocalHttpRequest returns 404 when studio due-runs scheduler is unava
 
   assert.equal(res.statusCode, 404);
   assert.deepEqual(JSON.parse(res.body), { error: 'studio_due_runs unavailable' });
+});
+
+test('handleLocalHttpRequest returns due-run metrics when include=metrics', async () => {
+  const workdir = await fs.mkdtemp(join(tmpdir(), 'pinpawo-runtime-'));
+  const stateRoot = join(workdir, '.pinpawo');
+  const scheduler = {
+    trace: async () => [{
+      runId: 'run-1',
+      conversationId: 'conv-1',
+      idempotencyKey: 'studio:conv-1:run:run-1',
+      status: 'success',
+      attempt: 1,
+      ownerUserId: null,
+      finalDispatchId: 'dispatch-1',
+      workdir,
+      createdAt: '2026-06-19T00:00:00.000Z',
+      claimedAt: '2026-06-19T00:00:01.000Z',
+      completedAt: '2026-06-19T00:00:02.000Z',
+    }],
+    metrics: async () => ({
+      statusCounts: {
+        pending: 0,
+        claimed: 0,
+        running: 0,
+        success: 1,
+        failed: 0,
+        canceled: 0,
+      },
+      totalRows: 1,
+      totalAttempts: 1,
+      retriedRows: 0,
+      retriedAttempts: 0,
+      queueWaitMs: {
+        count: 1,
+        averageMs: 1000,
+        minMs: 1000,
+        maxMs: 1000,
+      },
+      runDurationMs: {
+        count: 1,
+        averageMs: 1000,
+        minMs: 1000,
+        maxMs: 1000,
+      },
+      failureCodeCounts: {},
+    }),
+  } as unknown as LocalServerDeps['studioDueRunScheduler'];
+
+  const res = makeRes();
+  assert.equal(handleLocalHttpRequest(makeReq('/studio_due_runs?include=metrics', 'Bearer secret'), res, {
+    actorId: 'pet-a',
+    llmConfig: {
+      model: 'test-model',
+      contextWindowTokens: 32000,
+    },
+    workdir,
+    runtimeConfig: {
+      workdir,
+      stateRoot,
+      studioConfigPath: join(stateRoot, 'studio.json'),
+      studioDueRunsPath: join(stateRoot, 'studio-due-runs.json'),
+      petsDir: join(stateRoot, 'pets'),
+      studioWikiBaseDir: join(stateRoot, 'studio-wiki'),
+      checkpointPath: join(stateRoot, 'checkpoints.json'),
+      tuiCheckpointPath: join(stateRoot, 'checkpoints-tui.json'),
+      tuiSessionPath: join(stateRoot, 'tui-sessions.json'),
+      capabilityArtifactRoot: join(stateRoot, 'capability-artifacts'),
+    },
+    studioDueRunScheduler: scheduler,
+  } as LocalServerDeps, {
+    authToken: 'secret',
+    loadHistory: async () => [],
+    listSessions: async () => [],
+    resumeSession: async () => {
+      throw new Error('not called');
+    },
+  }), true);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(res.statusCode, 200);
+  const payload = JSON.parse(res.body);
+  assert.equal(payload.studio_due_runs.length, 1);
+  assert.equal(payload.studio_due_run_metrics.totalRows, 1);
 });

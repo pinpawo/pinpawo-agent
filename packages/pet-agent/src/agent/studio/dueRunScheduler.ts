@@ -24,6 +24,7 @@ export type StudioDueRunStoreTrace = {
   workdir: string;
   status: StudioDueRunStatus;
   attempt: number;
+  createdAt: string;
   claimedAt?: string;
   completedAt?: string;
   ownerUserId: string | null;
@@ -155,6 +156,7 @@ export class InMemoryStudioDueRunStore implements StudioDueRunStore {
       workdir: row.workdir,
       status: row.status,
       attempt: row.attempt,
+      createdAt: row.createdAt,
       claimedAt: row.claimedAt,
       completedAt: row.completedAt,
       ownerUserId: row.ownerUserId,

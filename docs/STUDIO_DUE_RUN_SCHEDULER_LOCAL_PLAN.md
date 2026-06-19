@@ -21,7 +21,11 @@
 - 修复关键竞态：`submit()` 需要在启动轮询循环前先注册 waiter，避免行内立即 claim 时拿不到 waiter 导致任务被 `cancel`，从而造成提交挂起。
 - `/runtime` 现已返回 `studio_due_runs_path`；
   增加 `/studio_due_runs` 端点返回本地 due-run trace（含 `workdir` 与 `trace` 列表）以便观测。
-- `/studio_due_runs` 支持按 `status` 与 `limit` 查询参数做轻量过滤。
+  - `/studio_due_runs` 支持按 `status` 与 `limit` 查询参数做轻量过滤。
+
+ - 通过 `/studio_due_runs?include=metrics` 补充可观测字段：
+   - claim 等待耗时（平均/最小/最大）、执行耗时（平均/最小/最大）、
+   - `status` 分布、失败码分布、重试次数统计。
 
 ## 3. 当前行为约束（已上线）
 
@@ -32,9 +36,9 @@
 ## 4. 下一步（v2，按优先级）
 
 1. **持久化与可观测性**
-   - 将 `InMemoryStudioDueRunStore` 与本地配置 store 对齐成可恢复状态（文件化/数据库化）。
-   - 暴露 claim 失败、重试、取消、任务耗时指标。
-   - 继续完善 trace：按 `status/attempt` 聚合报警阈值、失败归因日志字段。
+    - 将 `InMemoryStudioDueRunStore` 与本地配置 store 对齐成可恢复状态（文件化/数据库化）。
+    - 暴露 claim 等待时延、任务执行耗时、失败码、重试次数指标（已在 `/studio_due_runs?include=metrics` 对外提供）。
+    - 继续完善 trace：按 `status/attempt` 聚合报警阈值、失败归因日志字段。
 2. **多 workdir 的服务侧一致性**
     - 明确 `runtimeConfig` 在 scheduler 创建、执行、错误回放中的透传链路。
     - 与 `runtime` 接口统一 `workdir` 字段来源，避免并发时读取源路径漂移。

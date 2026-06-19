@@ -40,6 +40,24 @@ export type LocalStudioDueRunSubmitOptions = {
   signal?: AbortSignal;
 };
 
+export type LocalStudioDueRunTimingStats = {
+  count: number;
+  averageMs?: number;
+  minMs?: number;
+  maxMs?: number;
+};
+
+export type LocalStudioDueRunMetrics = {
+  statusCounts: Record<string, number>;
+  totalRows: number;
+  totalAttempts: number;
+  retriedRows: number;
+  retriedAttempts: number;
+  queueWaitMs: LocalStudioDueRunTimingStats;
+  runDurationMs: LocalStudioDueRunTimingStats;
+  failureCodeCounts: Record<string, number>;
+};
+
 type Waiter = LocalStudioDueRunSubmitOptions & {
   idempotencyKey: string;
   resolve: (result: LocalStudioDueRunCompletion) => void;
@@ -146,26 +164,12 @@ export class LocalStudioDueRunScheduler {
   }
 
   async trace(): Promise<StudioDueRunStoreTrace[]> {
-    return this.studioDueRuns.list().flatMap((row) => {
-      if (!this.matchesWorkdirFilter(row.workdir)) {
-        return [];
-      }
+    return this.studioDueRuns.listTrace().filter((row) => this.matchesWorkdirFilter(row.workdir));
+  }
 
-      return {
-        runId: row.runId,
-        conversationId: row.conversationId,
-        idempotencyKey: row.identity.idempotencyKey,
-        workdir: row.workdir,
-        status: row.status,
-        attempt: row.attempt,
-        claimedAt: row.claimedAt,
-        completedAt: row.completedAt,
-        ownerUserId: row.ownerUserId,
-        errorCode: row.errorCode,
-        errorDetail: row.errorDetail,
-        finalDispatchId: row.finalDispatchId,
-      };
-    });
+  async metrics(): Promise<LocalStudioDueRunMetrics> {
+    const trace = await this.trace();
+    return this.computeMetrics(trace);
   }
 
   private normalizeWorkdirFilter(
@@ -354,6 +358,108 @@ export class LocalStudioDueRunScheduler {
 
   private notifyFailure(idempotencyKey: string, error: unknown) {
     this.settleWaiters(idempotencyKey, 'reject', error);
+  }
+
+  private computeMetrics(trace: StudioDueRunStoreTrace[]): LocalStudioDueRunMetrics {
+    const statusCounts: Record<string, number> = {
+      pending: 0,
+      claimed: 0,
+      running: 0,
+      success: 0,
+      failed: 0,
+      canceled: 0,
+    };
+
+    let queueWaitTotalMs = 0;
+    let queueWaitCount = 0;
+    let queueWaitMinMs: number | undefined;
+    let queueWaitMaxMs: number | undefined;
+
+    let runDurationTotalMs = 0;
+    let runDurationCount = 0;
+    let runDurationMinMs: number | undefined;
+    let runDurationMaxMs: number | undefined;
+
+    let totalAttempts = 0;
+    let retriedRows = 0;
+    let retriedAttempts = 0;
+
+    const failureCodeCounts: Record<string, number> = {};
+
+    for (const row of trace) {
+      statusCounts[row.status] = (statusCounts[row.status] ?? 0) + 1;
+
+      totalAttempts += row.attempt;
+      if (row.attempt > 1) {
+        retriedRows += 1;
+        retriedAttempts += row.attempt - 1;
+      }
+
+      const queueWaitMs = this.safeDurationMs(row.createdAt, row.claimedAt);
+      if (queueWaitMs !== null) {
+        queueWaitTotalMs += queueWaitMs;
+        queueWaitCount += 1;
+        queueWaitMinMs = queueWaitMinMs === undefined
+          ? queueWaitMs
+          : Math.min(queueWaitMinMs, queueWaitMs);
+        queueWaitMaxMs = queueWaitMaxMs === undefined
+          ? queueWaitMs
+          : Math.max(queueWaitMaxMs, queueWaitMs);
+      }
+
+      const runDurationMs = this.safeDurationMs(row.claimedAt, row.completedAt);
+      if (runDurationMs !== null) {
+        runDurationTotalMs += runDurationMs;
+        runDurationCount += 1;
+        runDurationMinMs = runDurationMinMs === undefined
+          ? runDurationMs
+          : Math.min(runDurationMinMs, runDurationMs);
+        runDurationMaxMs = runDurationMaxMs === undefined
+          ? runDurationMs
+          : Math.max(runDurationMaxMs, runDurationMs);
+      }
+
+      if (row.errorCode) {
+        failureCodeCounts[row.errorCode] = (failureCodeCounts[row.errorCode] ?? 0) + 1;
+      }
+    }
+
+    return {
+      statusCounts,
+      totalRows: trace.length,
+      totalAttempts,
+      retriedRows,
+      retriedAttempts,
+      queueWaitMs: {
+        count: queueWaitCount,
+        ...(queueWaitCount > 0 ? {
+          averageMs: Math.round(queueWaitTotalMs / queueWaitCount),
+          minMs: queueWaitMinMs,
+          maxMs: queueWaitMaxMs,
+        } : {}),
+      },
+      runDurationMs: {
+        count: runDurationCount,
+        ...(runDurationCount > 0 ? {
+          averageMs: Math.round(runDurationTotalMs / runDurationCount),
+          minMs: runDurationMinMs,
+          maxMs: runDurationMaxMs,
+        } : {}),
+      },
+      failureCodeCounts,
+    };
+  }
+
+  private safeDurationMs(start: string | undefined, end: string | undefined): number | null {
+    if (!start || !end) {
+      return null;
+    }
+    const startAt = Date.parse(start);
+    const endAt = Date.parse(end);
+    if (Number.isNaN(startAt) || Number.isNaN(endAt) || endAt < startAt) {
+      return null;
+    }
+    return endAt - startAt;
   }
 
   private broadcastProgress(idempotencyKey: string, event: StudioTurnEvent) {

@@ -49,7 +49,7 @@ test('config workdir defaults to process cwd when env and stored config are abse
     'tsx',
     '-e',
     [
-      'const { config } = await import("./services/local-agent/src/config.ts");',
+      'const { config } = await import("./src/config.ts");',
       'process.stdout.write(config.workdir);',
     ].join('\n'),
   ], {

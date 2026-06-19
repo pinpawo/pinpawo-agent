@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { WebSocket } from 'ws';
 import {
   sendLocalAgentEvent,
@@ -20,6 +21,14 @@ function createFakeWebSocket(sent: unknown[]) {
   } as unknown as WebSocket;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolveFn) => {
+    resolve = resolveFn;
+  });
+  return { promise, resolve };
+}
+
 function createInflightController() {
   return new InflightRequestController<WebSocket>({
     forceInterruptMs: 1,
@@ -33,17 +42,18 @@ function createDeps(): LocalServerDeps {
   return {
     actorId: 'pet-a',
     actorName: 'Pet A',
+    workdir: '/tmp/pinpawo-test',
     llmConfig: {
       provider: 'openai',
       model: 'test-model',
       apiKey: 'test-key',
       baseUrl: 'https://example.test/v1',
     } as unknown as LocalServerDeps['llmConfig'],
-    workdir: '/tmp/pinpawo-test',
     runtimeConfig: {
       workdir: '/tmp/pinpawo-test',
       stateRoot: '/tmp/pinpawo-test/.pinpawo',
       studioConfigPath: '/tmp/pinpawo-test/.pinpawo/studio.json',
+      studioDueRunsPath: '/tmp/pinpawo-test/.pinpawo/studio-due-runs.json',
       petsDir: '/tmp/pinpawo-test/.pinpawo/pets',
       studioWikiBaseDir: '/tmp/pinpawo-test/.pinpawo/studio-wiki',
       checkpointPath: '/tmp/pinpawo-test/.pinpawo/checkpoints.json',
@@ -54,10 +64,10 @@ function createDeps(): LocalServerDeps {
     localToolkits: [{
       name: 'local-toolkit',
       description: 'local toolkit',
-        operations: {
-          read_file: {
-            title: '读文件',
-            summarizeInput: (input: unknown) => {
+      operations: {
+        read_file: {
+          title: '读文件',
+          summarizeInput: (input: unknown) => {
             const path = input && typeof input === 'object' && 'path' in input
               ? (input as { path?: unknown }).path
               : null;
@@ -87,7 +97,7 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
       return {
         resolved: {} as BuildStudioResult['resolved'],
         orchestrator: {
-          invoke: async (turn: {
+          submitRequest: async (turn: {
             onTurnEvent: (event: Record<string, unknown>) => void;
             onToolEvent: (event: unknown) => void;
           }) => {
@@ -97,11 +107,14 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
               name: 'read_file',
               input: { path: 'README.md' },
             });
+            return { runId: 'run-100', status: 'accepted' };
+          },
+          waitForRun: async () => {
             return {
               outcome: {
                 outcome: 'done',
                 reply: 'done reply',
-                finalDispatchId: 'dispatch-1',
+                finalPetRunId: 'pet-run-1',
               },
             };
           },
@@ -113,6 +126,8 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
   await handler.handleStudioRequest(ws, {
     type: 'studio_request',
     requestId: 'studio-1',
+    runId: 'run-100',
+    conversationId: 'conv-100',
     userRequest: 'plan this',
   }, createDeps());
 
@@ -139,8 +154,166 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
     requestId: 'studio-1',
     outcome: 'done',
     reply: 'done reply',
-    finalDispatchId: 'dispatch-1',
+    finalPetRunId: 'pet-run-1',
+    workdir: '/tmp/pinpawo-test',
+    runId: 'run-100',
+    conversationId: 'conv-100',
+    idempotencyKey: 'studio:conv-100:run:run-100',
   });
+});
+
+test('LocalServerStudioHandler serializes studio requests per websocket', async () => {
+  const sent: unknown[] = [];
+  const ws = createFakeWebSocket(sent);
+  const firstStarted = deferred<void>();
+  const firstContinue = deferred<void>();
+  const invocationEvents: string[] = [];
+  const handler = new LocalServerStudioHandler({
+    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    inflightRequests: createInflightController(),
+    buildStudio: async () => ({
+      resolved: {} as BuildStudioResult['resolved'],
+      orchestrator: {
+        submitRequest: async () => {
+          if (invocationEvents.length === 0) {
+            invocationEvents.push('first');
+            firstStarted.resolve();
+            return { runId: 'first-run', status: 'accepted' };
+          }
+          invocationEvents.push('second');
+          return { runId: 'second-run', status: 'accepted' };
+        },
+        waitForRun: async (runId: string) => {
+          if (runId === 'first-run') {
+            await firstContinue.promise;
+            return {
+              outcome: {
+                outcome: 'done',
+                reply: 'first done',
+                finalPetRunId: 'pet-run-first',
+              },
+            };
+          }
+          return {
+              outcome: {
+                outcome: 'done',
+                reply: 'second done',
+                finalPetRunId: 'pet-run-second',
+              },
+          };
+        },
+      } as unknown as BuildStudioResult['orchestrator'],
+    }),
+  });
+
+  const firstRequest = handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-1',
+    userRequest: 'first',
+  }, createDeps());
+  await firstStarted.promise;
+
+  const secondRequest = handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-2',
+    userRequest: 'second',
+  }, createDeps());
+
+  await sleep(10);
+  assert.equal(invocationEvents.length, 1);
+  assert.equal(invocationEvents[0], 'first');
+
+  firstContinue.resolve();
+  await Promise.all([firstRequest, secondRequest]);
+
+  assert.equal(invocationEvents.length, 2);
+  assert.deepEqual(invocationEvents, ['first', 'second']);
+
+  const types = sent.map((item) => (item as { type?: string }).type).filter(Boolean);
+  assert.equal(types.includes('interrupted'), false);
+
+  const errors = sent.filter((item): item is { type: 'studio_error'; requestId: string; message: string } => (
+    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_error')
+  ));
+  assert.deepEqual(errors, []);
+
+  const studioResponses = sent.filter((item): item is { type: 'studio_response'; requestId: string } => (
+    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
+  ));
+  assert.equal(studioResponses.length, 2);
+  assert.equal(studioResponses[0]?.requestId, 'studio-1');
+  assert.equal(studioResponses[1]?.requestId, 'studio-2');
+});
+
+test('LocalServerStudioHandler discards queued studio requests after websocket disconnect', async () => {
+  const sent: unknown[] = [];
+  const ws = createFakeWebSocket(sent);
+  const firstStarted = deferred<void>();
+  const firstContinue = deferred<void>();
+  const invocationEvents: string[] = [];
+  const handler = new LocalServerStudioHandler({
+    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    inflightRequests: createInflightController(),
+    buildStudio: async () => ({
+      resolved: {} as BuildStudioResult['resolved'],
+      orchestrator: {
+        submitRequest: async () => {
+          if (invocationEvents.length === 0) {
+            invocationEvents.push('first');
+            firstStarted.resolve();
+            return { runId: 'first-run', status: 'accepted' };
+          }
+          invocationEvents.push('second');
+          return { runId: 'second-run', status: 'accepted' };
+        },
+        waitForRun: async (runId: string) => {
+          if (runId === 'first-run') {
+            await firstContinue.promise;
+            return {
+              outcome: {
+                outcome: 'done',
+                reply: 'first done',
+                finalPetRunId: 'pet-run-first',
+              },
+            };
+          }
+          return {
+              outcome: {
+                outcome: 'done',
+                reply: 'second done',
+                finalPetRunId: 'pet-run-second',
+              },
+          };
+        },
+      } as unknown as BuildStudioResult['orchestrator'],
+    }),
+  });
+
+  const firstRequest = handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-1',
+    userRequest: 'first',
+  }, createDeps());
+  await firstStarted.promise;
+
+  const secondRequest = handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-2',
+    userRequest: 'second',
+  }, createDeps());
+
+  handler.rejectDisconnected(ws);
+  firstContinue.resolve();
+
+  await Promise.all([firstRequest, secondRequest]);
+
+  assert.deepEqual(invocationEvents, ['first']);
+
+  const studioResponses = sent.filter((item): item is { type: 'studio_response'; requestId: string } => (
+    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
+  ));
+  assert.equal(studioResponses.length, 1);
+  assert.equal(studioResponses[0]?.requestId, 'studio-1');
 });
 
 test('LocalServerStudioHandler maps missing studio config to studio_error', async () => {
@@ -165,4 +338,51 @@ test('LocalServerStudioHandler maps missing studio config to studio_error', asyn
     requestId: 'studio-2',
     message: 'Studio 未配置:No Studio config found at /tmp/studio.json. Create one to enable /studio.',
   }]);
+});
+
+test('LocalServerStudioHandler fills runId and conversationId defaults', async () => {
+  const sent: unknown[] = [];
+  const ws = createFakeWebSocket(sent);
+  const buildInputs: BuildStudioInput[] = [];
+  const handler = new LocalServerStudioHandler({
+    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    inflightRequests: createInflightController(),
+    buildStudio: async (input) => {
+      buildInputs.push(input);
+      return {
+        resolved: {} as BuildStudioResult['resolved'],
+        orchestrator: {
+          submitRequest: async () => ({ runId: 'studio-default', status: 'accepted' }),
+          waitForRun: async () => ({
+            outcome: {
+              outcome: 'done',
+              reply: 'done reply',
+              finalPetRunId: 'pet-run-default',
+            },
+          }),
+        } as unknown as BuildStudioResult['orchestrator'],
+      };
+    },
+  });
+
+  await handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-default',
+    userRequest: 'plan default ids',
+  }, createDeps());
+
+  const response = sent.find((item): item is {
+    type: 'studio_response';
+    requestId: string;
+    runId?: string;
+    conversationId?: string;
+    finalPetRunId: string;
+  } => (
+    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
+  ));
+  assert.ok(response);
+  assert.equal(response.requestId, 'studio-default');
+  assert.equal(response.runId, 'studio-default');
+  assert.equal(response.conversationId, 'studio-default');
+  assert.equal(response.finalPetRunId, 'pet-run-default');
 });

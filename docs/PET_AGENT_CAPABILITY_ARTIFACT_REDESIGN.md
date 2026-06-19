@@ -25,6 +25,33 @@ The orchestrator only consumes `CapabilityArtifactRef[]`. It does not parse
 capability-specific messages, inspect private tool artifacts, or scan message
 metadata for artifact registration.
 
+### Announce vs artifacts
+
+The completed subagent announce remains the natural-language result handoff to
+the parent agent. The parent / `delegation_outcome` reads the current announce
+text to decide whether the user goal is satisfied and how to answer. That current
+announce must not be replaced by a bounded preview during handoff.
+
+Artifacts are for payloads that should not live inline in the parent prompt:
+large structured JSON, long reports, generated media, PDFs, bundles, and
+cross-turn reusable material. The artifact ref carries a short preview for
+routing and UI, while the full payload stays in the artifact store.
+
+The two channels are complementary:
+
+- announce: user-facing conclusion, key findings, status, and references to any
+  artifacts created in the run;
+- artifact: durable by-reference payload, optionally schema-validated when
+  `kind: "result"`;
+- orchestrator: reads the current announce text and bounded artifact refs by
+  default; it does not read artifact full content unless a later delegated
+  capability/tool explicitly does so.
+
+If the final user answer depends on details inside a large artifact, the
+subagent should either include the needed conclusion in announce or the parent
+should delegate an explicit artifact-reading step. The runtime should not expect
+artifact previews to reconstruct an omitted announce result.
+
 `CapabilityArtifactStore` is injected through `OrchestratorConfig.capabilityArtifactStore`,
 which `capabilityNode` forwards onto each capability's `CapabilityContext.artifactStore`.
 The store stays a port — pet-agent core depends only on the interface, never on a
@@ -59,8 +86,32 @@ nothing needs the model to read its own just-written artifact back —
   `artifactRefs` array that becomes `SubagentResult.artifacts`.
 - `CapabilityContext.artifactStore` is the store a capability uses to write bytes.
 - `state.capabilityArtifacts` is the only cross-turn artifact state channel.
-- `capabilityResult` is removed. Structured result consumers read the latest
-  `kind: "result"` artifact and parse it with their schema.
+- `capabilityResult` is removed. Structured result consumers select a matching
+  `kind: "result"` artifact ref by scope/schema and parse it with their schema.
+
+### Multiple result artifacts
+
+`state.capabilityArtifacts` is an index of refs, not a singleton result slot. A
+single graph run may contain several `kind: "result"` artifacts because multiple
+capabilities ran, one capability ran more than once, or one run intentionally
+produced several structured outputs.
+
+Consumers must select a result with explicit scope:
+
+- `capabilityId` for "the result from this capability";
+- `delegationId` / `turnId` for "the result from this specific run";
+- `schema.name` + `schema.version` for "the result with this contract";
+- `metadata.role` or another small metadata field when one capability writes
+  several result artifacts with different meanings.
+
+"Latest" is only meaningful after applying such a selector. There is no global
+"latest result" contract across all capabilities.
+
+When one capability execution has one logical structured outcome, prefer writing
+one aggregate `kind: "result"` artifact whose JSON may contain arrays or nested
+objects. Write multiple `kind: "result"` artifacts only when the outputs have
+different contracts or independent consumers; tag them with distinct schema or
+metadata so host code can select deterministically.
 
 `CapabilityArtifactStore` is a single replaceable service port. A runtime uses
 one adapter at a time, such as the local file adapter or a future S3/OSS

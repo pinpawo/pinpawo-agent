@@ -26,17 +26,14 @@ export function formatStudioProgressEvent(event: LocalAgentStudioProgressEvent):
     case 'turn_started':
     case 'turn_finished':
       return null;
-    case 'plan_set': {
-      const plan = payload.plan && typeof payload.plan === 'object'
-        ? payload.plan as Record<string, unknown>
-        : null;
-      const tasks = plan && Array.isArray(plan.tasks) ? plan.tasks : [];
-      return TUI_TEXT.studioProgressPlanSet(tasks.length);
+    case 'tasks_queued': {
+      const taskCount = typeof payload.taskCount === 'number' ? payload.taskCount : 0;
+      return TUI_TEXT.studioProgressTasksQueued(taskCount);
     }
-    case 'dispatch_started': {
+    case 'task_started': {
       const petId = typeof payload.petId === 'string' ? payload.petId : '?';
       const taskIndex = typeof payload.taskIndex === 'number' ? payload.taskIndex : '?';
-      return TUI_TEXT.studioProgressDispatchStarted(taskIndex, petId);
+      return TUI_TEXT.studioProgressTaskStarted(taskIndex, petId);
     }
     case 'task_status_changed': {
       const taskIndex = typeof payload.taskIndex === 'number' ? payload.taskIndex : '?';
@@ -47,10 +44,10 @@ export function formatStudioProgressEvent(event: LocalAgentStudioProgressEvent):
       const changed = Array.isArray(payload.changedPaths) ? payload.changedPaths : [];
       return TUI_TEXT.studioProgressWikiUpdated(changed.length);
     }
-    case 'dispatch_finished': {
-      const dispatchId = typeof payload.dispatchId === 'string' ? payload.dispatchId : '?';
+    case 'task_finished': {
+      const petRunId = typeof payload.petRunId === 'string' ? payload.petRunId : '?';
       const status = typeof payload.status === 'string' ? payload.status : '?';
-      return TUI_TEXT.studioProgressDispatchFinished(dispatchId, status);
+      return TUI_TEXT.studioProgressTaskFinished(petRunId, status);
     }
     default:
       return TUI_TEXT.studioProgressUnknown(type);

@@ -38,15 +38,31 @@ test('toCanonicalInputEvent maps submit and newline variants', () => {
 
 test('toCanonicalInputEvent maps edit and cursor keys', () => {
   assert.deepEqual(
-    toCanonicalInputEvent({ input: '', key: { backspace: true } }),
+    toCanonicalInputEvent({ input: '\x7f', key: {} }),
     { type: 'text.delete.backward' },
   );
   assert.deepEqual(
+    toCanonicalInputEvent({ input: '\b', key: {} }),
+    { type: 'text.delete.backward' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '', key: { backspace: true } }),
+    { type: 'text.delete.backward' },
+  );
+  // Ink reports the Backspace key as `key.delete` with empty input, so a bare
+  // `key.delete` must map to backward delete (the common case).
+  assert.deepEqual(
     toCanonicalInputEvent({ input: '', key: { delete: true } }),
+    { type: 'text.delete.backward' },
+  );
+  // The forward-delete key arrives as a raw \x1b[3~ sequence and stays forward,
+  // even if Ink also flags it as `key.delete`.
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '\x1b[3~', key: {} }),
     { type: 'text.delete.forward' },
   );
   assert.deepEqual(
-    toCanonicalInputEvent({ input: '\x1b[3~', key: {} }),
+    toCanonicalInputEvent({ input: '\x1b[3~', key: { delete: true } }),
     { type: 'text.delete.forward' },
   );
   assert.deepEqual(

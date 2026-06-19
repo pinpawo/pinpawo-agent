@@ -75,9 +75,54 @@ test('readToolAuthorizationMatcher accepts only declared matcher structures', ()
     readToolAuthorizationMatcher({ type: 'exact_args', value: { path: 'README.md' } }),
     { type: 'exact_args', value: { path: 'README.md' } },
   );
+  assert.deepEqual(
+    readToolAuthorizationMatcher({ type: 'url_domain', value: { origin: 'HTTPS://Example.test:443/a' } }),
+    { type: 'url_domain', value: { origin: 'https://example.test' } },
+  );
   assert.equal(readToolAuthorizationMatcher({ type: 'shell_pattern', value: '   ' }), null);
   assert.equal(readToolAuthorizationMatcher({ type: 'path_glob', value: '*.ts' }), null);
   assert.equal(readToolAuthorizationMatcher({ type: 'exact_args', value: ['README.md'] }), null);
+  assert.equal(readToolAuthorizationMatcher({ type: 'url_domain', value: { origin: 'not a url' } }), null);
+});
+
+test('url domain authorizations match the same URL origin only', () => {
+  const authorizations = [authorizeToolAction({
+    toolName: 'browser_open',
+    matcher: { type: 'url_domain', value: { origin: 'https://example.test' } },
+  })];
+
+  assert.equal(
+    isToolActionAuthorized({
+      authorizations,
+      toolName: 'browser_open',
+      args: { url: 'https://example.test/a', headless: true },
+    }),
+    true,
+  );
+  assert.equal(
+    isToolActionAuthorized({
+      authorizations,
+      toolName: 'browser_open',
+      args: { url: 'https://example.test/b', headless: false },
+    }),
+    true,
+  );
+  assert.equal(
+    isToolActionAuthorized({
+      authorizations,
+      toolName: 'browser_open',
+      args: { url: 'http://example.test/a', headless: true },
+    }),
+    false,
+  );
+  assert.equal(
+    isToolActionAuthorized({
+      authorizations,
+      toolName: 'browser_open_with_session',
+      args: { url: 'https://example.test/a', session: 'work' },
+    }),
+    false,
+  );
 });
 
 test('applyReviewEffects rejects policy hooks that return undeclared matcher structures', async () => {

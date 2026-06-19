@@ -28,6 +28,8 @@ export type StudioRequestMessage = {
   type: 'studio_request';
   requestId: string;
   userRequest: string;
+  /** 可选:显式覆盖 runId，供外部调度器维持同一次 Studio 运行的幂等主键 */
+  runId?: string;
   /** 可选:overrides 默认的 conversation 命名,影响 wiki 子目录 */
   conversationId?: string;
 };
@@ -63,8 +65,12 @@ export type LocalAgentControlServerMessage =
       requestId: string;
       outcome: 'done' | 'stopped';
       reply: string;
-      finalDispatchId?: string;
+      finalPetRunId?: string;
       reason?: string;
+      workdir?: string;
+      runId?: string;
+      conversationId?: string;
+      idempotencyKey?: string;
     }
   | { type: 'studio_error'; requestId: string; message: string };
 
@@ -324,11 +330,17 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
     const requestId = readString(record, 'requestId');
     const userRequest = readString(record, 'userRequest');
     if (!requestId || userRequest == null) return null;
+    if ('runId' in record && typeof record.runId !== 'string') return null;
+    if ('conversationId' in record && typeof record.conversationId !== 'string') return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'runId', 'userRequest', 'conversationId'])) {
+      return null;
+    }
     return {
       type,
       requestId,
       userRequest,
       conversationId: readOptionalString(record, 'conversationId'),
+      runId: readOptionalString(record, 'runId'),
     };
   }
   return null;
@@ -360,8 +372,12 @@ function parseLocalAgentServerRecord(record: Record<string, unknown>): LocalAgen
       requestId,
       outcome,
       reply,
-      finalDispatchId: readOptionalString(record, 'finalDispatchId'),
+      finalPetRunId: readOptionalString(record, 'finalPetRunId'),
       reason: readOptionalString(record, 'reason'),
+      workdir: readOptionalString(record, 'workdir'),
+      runId: readOptionalString(record, 'runId'),
+      conversationId: readOptionalString(record, 'conversationId'),
+      idempotencyKey: readOptionalString(record, 'idempotencyKey'),
     };
   }
   return null;

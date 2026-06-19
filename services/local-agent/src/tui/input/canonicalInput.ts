@@ -47,6 +47,13 @@ export function toCanonicalInputEvent(
   if (key.home) return key.shift ? { type: 'selection.line.start' } : { type: 'cursor.line.start' };
   if (key.end) return key.shift ? { type: 'selection.line.end' } : { type: 'cursor.line.end' };
   if (key.backspace) return { type: 'text.delete.backward' };
+  // Ink parses the Backspace key (\x7f) as `key.delete` with an empty input
+  // (see ink/build/parse-keypress.js + hooks/use-input.js), so a bare
+  // `key.delete` means Backspace, not the forward-delete key. The real
+  // forward-delete key arrives as a raw `\x1b[3~` sequence handled below.
+  if (key.delete && !isRawDeleteForwardInput(input)) {
+    return { type: 'text.delete.backward' };
+  }
   if (key.delete) return { type: 'text.delete.forward' };
   if (key.escape) return { type: 'escape' };
   if (key.tab) return { type: 'tab', shift: Boolean(key.shift) };
@@ -54,6 +61,7 @@ export function toCanonicalInputEvent(
 
   if (isRawReturnInput(input)) return { type: 'submit' };
   if (isRawNewlineInput(input)) return { type: 'newline' };
+  if (input === '\b' || input === '\x7f') return { type: 'text.delete.backward' };
   if (isRawDeleteForwardInput(input)) return { type: 'text.delete.forward' };
   if (isRawShiftCursorInput(input, 'D')) return { type: 'selection.left' };
   if (isRawShiftCursorInput(input, 'C')) return { type: 'selection.right' };

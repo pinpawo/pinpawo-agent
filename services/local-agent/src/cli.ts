@@ -10,7 +10,7 @@ import type { StudioMigrateOptions } from './commands/studio';
 type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
-  runAgent?: () => Promise<void> | void;
+  runAgent?: (opts: { workdir?: string }) => Promise<void> | void;
   runTui?: (opts: { dryRun: boolean }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
@@ -100,11 +100,10 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .description('Start the local agent service')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
     .action(async (options: { workdir?: string }) => {
-      if (options.workdir?.trim()) {
-        process.env.PINPAWO_WORKDIR = resolveWorkdirOption(options.workdir);
-      }
       const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
-      await runAgent();
+      await runAgent({
+        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+      });
     });
 
   program

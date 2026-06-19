@@ -3,6 +3,10 @@
 > 状态：Draft v1
 > 日期：2026-06-16
 > 关联：`PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md`、`CONTEXT_GOVERNANCE_REFACTOR.md`、`EXPLORE_KNOWLEDGE_INGEST_DESIGN.md`
+> 后续对齐：当前实现以
+> `PET_AGENT_CAPABILITY_ARTIFACT_REDESIGN.md` 为准。本文保留为设计背景；
+> 其中“模型调用 artifact toolkit 写入”和“orchestrator 读取 artifact 全文”
+> 的早期方案已被 deterministic capability write + bounded ref preview 取代。
 
 ## 1. 背景
 
@@ -265,9 +269,14 @@ orchestrator prompt 默认只注入 artifact 的 bounded view：
 - 不把 artifact 完整内容拼进 prompt。
 - preview 超预算时裁剪，而不是读取文件内容压缩。
 
-## 11. 读取工具
+## 11. 历史方案：读取工具（已废弃）
 
-v1 提供通用 artifact 工具，给 capability subagent 按需召回。
+这一节保留为早期方案背景。当前实现以
+`PET_AGENT_CAPABILITY_ARTIFACT_REDESIGN.md` 为准：没有通用
+`capability_artifact` toolkit；artifact 写入由 capability 代码确定性完成，
+orchestrator 默认只消费 bounded ref preview。
+
+早期 v1 曾计划提供通用 artifact 工具，给 capability subagent 按需召回。
 
 artifact 读写能力是普通 toolkit，而不是 orchestrator 的内建能力。推荐通过 capability runtime 的 `uses: ['capability_artifact']` 装配到需要它的 subagent 上：
 
@@ -323,7 +332,10 @@ capability_artifact_search({
 
 - `resultSchema` 定义 `kind: 'result'`、`mimeType: 'application/json'` 的 artifact payload。
 - schema 校验成功后，payload 持久化为 JSON artifact。
-- host 需要结构化结果时，从 `state.capabilityArtifacts` 找最新 `kind: 'result'` ref，再通过 artifact store 读取并用调用方 schema parse。
+- host 需要结构化结果时，从 `state.capabilityArtifacts` 按
+  `capabilityId` / `delegationId` / `turnId` / `schema` / `metadata`
+  选择匹配的 `kind: 'result'` ref，再通过 artifact store 读取并用调用方
+  schema parse；不存在跨所有 capability 的全局 latest result。
 
 也就是说，`resultSchema` 不被废弃；废弃的是“把 capability 的跨边界产出等同于一个小型 in-state JSON”的假设。
 
@@ -466,7 +478,9 @@ v1 不需要复杂 GC。只要确保 session 删除时不会留下无限增长�
 - route prompt 对 artifact refs 有预算裁剪。
 - `read` 工具 obey `maxBytes`。
 - 删除 thread/session 时 artifact 目录被清理。
-- host structured result 调用从最新 `kind: 'result'` artifact ref 读取内容并按调用方 schema parse。
+- host structured result 调用按 capability/delegation/turn/schema/metadata
+  selector 选择匹配的 `kind: 'result'` artifact ref，读取内容并按调用方
+  schema parse。
 
 ## 20. 未决问题
 

@@ -214,7 +214,11 @@ test('resolveTuiInputCommand routes file mention popup commands before composer 
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'submit' }, { type: 'fileMention' }),
-    { target: 'composer', action: 'submit' },
+    { target: 'fileMention', action: 'accept' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'text.delete.backward' }, { type: 'fileMention' }),
+    { target: 'textarea', command: { type: 'deleteBackward' } },
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'text.insert', text: 's' }, { type: 'fileMention' }),

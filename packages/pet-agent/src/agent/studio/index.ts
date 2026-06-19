@@ -12,6 +12,29 @@ export {
   defaultPromptProvider,
   fileReadPromptProvider,
 } from './wikiCurator';
+export { buildStudioRunIdentity } from './types';
+export {
+  applyStudioDueRunEvent,
+  buildStudioDueRunRecord,
+  canRetry,
+  isTerminalStudioDueRunStatus,
+} from './dueRunContract';
+export {
+  InMemoryStudioDueRunStore,
+  type StudioDueRunClaim,
+  type StudioDueRunClaimFilter,
+  type StudioDueRunStoreInput,
+  type StudioDueRunStore,
+  type StudioDueRunStoreOptions,
+  type StudioDueRunStoreTrace,
+} from './dueRunScheduler';
+export { FileStudioDueRunStore } from './fileDueRunStore';
+export {
+  FileStudioRunQueueStore,
+  InMemoryStudioRunQueueStore,
+  type StudioRunQueueStore,
+  type StudioRunQueueStoreRecoveryOptions,
+} from './runQueueStore';
 export type {
   CuratorPromptProvider,
   LLMWikiCuratorConfig,
@@ -20,24 +43,32 @@ export type {
   WikiCurator,
 } from './wikiCurator';
 export type {
-  ExecuteAction,
+  StudioDueRunEvent,
+  StudioDueRunRecord,
+  StudioDueRunStatus,
+} from './dueRunContract';
+export type {
   HumanReviewer,
   HumanReviewerRequest,
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
-  StudioDispatchState,
-  StudioDispatchStatus,
   StudioOrchestrator,
   StudioOrchestratorConfig,
-  StudioOrchestratorInvokeInput,
-  StudioTask,
-  StudioTaskPlan,
+  StudioQueueItem,
+  StudioRun,
+  StudioRunEvent,
+  StudioRunEventHandler,
+  StudioRunSnapshot,
+  StudioRunStatus,
+  StudioSubmitRequestInput,
+  StudioSubmitRequestResult,
+  StudioTaskQueueItem,
   StudioTaskStatus,
   StudioTurnEvent,
   StudioTurnEventHandler,
   StudioTurnOutcome,
   StudioTurnResult,
-  StudioTurnState,
+  StudioRunIdentity,
 } from './types';

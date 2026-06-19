@@ -8,6 +8,7 @@ import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
 import type { LocalServerDeps } from './localServerTypes';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import {
   createTuiSession,
   ensureActiveTuiSession,
@@ -85,10 +86,11 @@ export class LocalServerTuiSessionService {
     checkpointer?: TuiSessionCheckpointer;
     graphService?: TuiSessionGraphService;
     loadContext?: typeof loadAgentContext;
+    runtimeConfig?: LocalAgentRuntimeConfig;
     sessionStatePath?: string;
     checkpointPath?: string;
   } = {}) {
-    const runtimeConfig = buildLocalAgentRuntimeConfig();
+    const runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
     const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
     this.state = options.state ?? loadTuiSessionState(sessionStatePath);
     this.saveState = options.saveState ?? ((state) => saveTuiSessionState(state, sessionStatePath));

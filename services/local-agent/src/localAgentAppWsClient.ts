@@ -8,6 +8,7 @@ import {
   type HumanReviewResponseMessage,
   type InterruptRequestMessage,
   type NewSessionMessage,
+  type StudioRequestMessage,
 } from './localAgentProtocol';
 
 type MaybePromise<T> = T | Promise<T>;
@@ -17,6 +18,7 @@ type LogWarn = (message: string, error?: unknown) => void;
 
 export type LocalAgentAppWsClientHandlers = {
   onChatRequest: (ws: WebSocket, message: ChatRequestMessage) => MaybePromise<void>;
+  onStudioRequest: (ws: WebSocket, message: StudioRequestMessage) => MaybePromise<void>;
   onNewSession: (ws: WebSocket, message: NewSessionMessage) => MaybePromise<void>;
   onInterruptRequest: (ws: WebSocket, message: InterruptRequestMessage) => MaybePromise<void>;
   onHumanReviewResponse: (ws: WebSocket, message: HumanReviewResponseMessage) => MaybePromise<void>;
@@ -94,6 +96,8 @@ export function dispatchLocalAgentAppWebSocketMessage(
 
     if (msg.type === 'chat_request') {
       runHandler('handleChatRequest', () => handlers.onChatRequest(ws, msg), logError);
+    } else if (msg.type === 'studio_request') {
+      runHandler('handleStudioRequest', () => handlers.onStudioRequest(ws, msg), logError);
     } else if (msg.type === 'new_session') {
       runHandler('handleNewSession', () => handlers.onNewSession(ws, msg), logError);
     } else if (msg.type === 'interrupt_request') {

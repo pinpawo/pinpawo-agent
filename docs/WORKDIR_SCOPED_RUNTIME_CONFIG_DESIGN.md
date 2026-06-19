@@ -25,9 +25,23 @@
 - 支持平滑迁移旧的 `~/.pinpawo/studio.json` 和 `~/.pinpawo/pets/`。
 - 设计可迭代，每一阶段都能独立验证和回滚。
 
+## 迭代推进（当前）
+
+- 已完成：
+  - 本地协议 `studio_request` 支持 `runId` / `conversationId` 扩展，返回也回传 `runId`、`conversationId`、`idempotencyKey`、`workdir`。
+  - `LocalServerStudioHandler` 将 `runId` 透传到 `StudioRunService`，并以会话 id 派生 trace。
+  - `@pinpawo/pet-agent` 新增 `StudioDueRun*` 契约（构建、状态机、重试判断）及导出，供 App/API scheduler 落地时复用。
+  - 常规路径层面：普通 chat/pet 与 Studio 已通过现有 `LocalAgentRuntimeConfig` 在同一 workdir 作用域内组装（包含 prompt、工具、artifact、checkpoint 与 studio assets）。
+
+- 下一步：
+  - 在 API/scheduler 服务层落地 `studio_due_runs` 持久表，使用 `idempotencyKey` 做去重和并发领取（`pending -> claimed -> running -> success/failed`）。
+  - 为 scheduler 增加重试策略与 `workdir` 映射、告警可观测指标（claim 延迟、失败原因、重试次数）。
+  - 将 `/runtime` 与 App 客户端展示中的运行来源（legacy_home/workdir-scoped）与 scheduler trace 打通，形成可追溯链路。
+
 ## 非目标
 
 - 不在这一轮引入多 workdir 同进程并发运行。第一阶段按“一个 local-agent 服务进程绑定一个 effective workdir”处理。
+- 本地 WebSocket 上的 Studio 调度现在是**同会话串行化**：同一个连接连续发起新的 `studio_request` 会按队列顺序逐个执行，不会并行执行多个 Studio turn。
 - 不改变 `@pinpawo/pet-agent` 的核心 agent 接口。`workdir` 继续作为 host 传入 runtime 的配置项。
 - 不把全局登录态、浏览器 session、插件安装目录全部迁入 workdir。它们可以后续单独评估。
 - 不解决 Studio 同一 conversation 并发写 wiki 的问题。该问题由 Studio run/concurrency 设计单独处理。
@@ -281,17 +295,69 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 后续如果 API scheduler 要执行 Studio run：
 
 ```text
-studio_schedule
+ studio_schedule
   -> resolve owner/studio workdir or workspace root
   -> StudioRunService(runtimeConfig)
   -> invoke Studio turn
 ```
+
+本地协议建议返回至少三项字段，供 scheduler 做幂等与回放：
+
+- `runId`: 本次 Studio run 的唯一 id（对应 `requestId`）。
+- `conversationId`: 工作会话 id（默认同 `runId`，如客户端显式传入则沿用）。
+- `idempotencyKey`: `studio:{conversationId}:run:{runId}`。
+- `workdir`: 本次 run 使用的运行时工作目录（`runtimeConfig.workdir`）。
+
+这样 scheduler 可以按 `idempotencyKey` 做唯一约束，避免同一 due-run 被重复触发时写入双份 wiki/产物；
+同时也能按 `conversationId` 聚合同一会话里多轮历史，并以 `workdir` 做路径归属与回放审计。
 
 约束：
 
 - scheduler 不直接读 `studio.json`。
 - scheduler 不直接调用 pet runtime 或 capability。
 - scheduler 只创建 due run 并交给 StudioRunService。
+
+### Scheduler V1 交付协议（推荐）
+
+为避免并发写入冲突，建议 scheduler 在服务端把 `studio_request` 作为**外部任务**处理，按以下规则落地：
+
+- 数据建模：
+  - `studio_due_runs`（或已有任务表的扩展）至少包含：
+    - `idempotency_key`（唯一索引）：`studio:{conversationId}:run:{runId}`
+    - `run_id`
+    - `conversation_id`
+    - `workdir`
+    - `status`: `pending | claimed | running | success | failed | canceled`
+    - `attempt`（重试计数）
+    - `error_code` / `error_detail`
+    - `request_payload`（含 `userRequest`、`conversationId`、`ownerUserId`）
+    - `result`（可选：`finalDispatchId`、`reply`、`created_at`）
+    - `updated_at`（处理窗口）
+- 触发入库：
+  - 每次外部发起都先写一条 `status=pending` 记录。
+  - `idempotency_key` 冲突时，返回已有任务行并复用现有 `run_id`，不重复入列。
+- 领取执行：
+  - worker 每轮 `select ... where status='pending' order by created_at for update skip locked` 领取一条；
+  - 领取时 `status=claimed`, `attempt + 1`，`claimed_at` 打点，避免多实例双执行。
+- 执行路径：
+  - 只允许 `claimed`→`running`→`finished` 的状态机，任何失败走 `failed` 并可重试。
+  - 每次回调 `local-agent` 时透传：
+    - `runtimeConfig`: `{workdir,studioConfigPath,petsDir,studioWikiBaseDir,...}`
+    - `runId`
+    - `conversationId`
+    - `ownerUserId`
+- 重试规则：
+  - 对于 `failed` 且 `attempt < retryLimit` 的行，可在 `run_at` 回退后自动重试（scheduler 自持久化）。
+  - 重试前再次校验 `workdir` 目录是否可用；不可用则标记失败并暂停该 workdir 的后续运行。
+- 幂等约束：
+  - `idempotency_key` 决定是否复用任务，不以 user message 文案做主键。
+  - `runId` 继续做任务执行 trace 的主键，`conversationId` 做会话聚合。
+
+### 需要避免的 anti-pattern
+
+- scheduler 直接读 `~/.pinpawo/studio.json` 作为运行时来源。
+- 同一 `conversationId` 并发投递多个 `studio_request` 且不做 `FOR UPDATE SKIP LOCKED`。
+- 仅在内存里保留“是否有在跑中”标记，导致进程重启后重跑重复任务。
 
 ## 迭代计划
 
@@ -411,6 +477,10 @@ studio_schedule
   实际 Studio turn 交给 `StudioRunService`。
 - `StudioRunService` 使用 `runId` 作为 Studio `turnId`，并派生稳定
   `studio:<conversationId>:run:<runId>` idempotency key，供未来 scheduler/job 表持久化使用。
+
+- 这套派生逻辑在 `@pinpawo/pet-agent` 中集中为
+  `buildStudioRunIdentity({ runId, conversationId? })`，App/API 与 local-agent
+  scheduler 接入时应复用该共享 helper，避免重复实现。
 - 未来 App/API scheduler 接入时，应由 scheduler 解析 workspace/workdir 后构造
   `LocalAgentRuntimeConfig`，再调用 `StudioRunService`；不要直接调用 `buildStudioForTurn()`。
 
@@ -447,6 +517,18 @@ studio_schedule
 - checkpoint 迁移会影响历史会话可见性。迁移期应允许读取旧 checkpoint 或明确提示“这是新的工作区会话”。
 - capability/plugin 安装目录先不跟 workdir 迁移，避免用户在不同项目重复安装同一 capability。
 - 浏览器 session 先保留全局，避免同站点登录态被工作区切分。若后续需要项目级浏览器 session，再单独加 `browserSessionRoot`。
+
+### 下一步可交付
+
+- 优先级 1：连接级收敛
+  - 在断连场景明确队列内待执行的 `studio_request` 处理策略（默认快速失败）。
+  - 增加本地集成测试：断连后不会继续执行尚未开始的排队请求。
+- 优先级 2：可观测性
+  - `/runtime` 暴露 `studio_config_source`、`studio_config_active_path`、`legacy_studio_config_path`。
+  - 记录 `studio_request` 入队/出队时延与 `interrupted`、`failed` 明细。
+- 优先级 3：Scheduler 落地前置
+  - 在 App/API 侧约定 `studio_due_runs` 的 `idempotencyKey` 唯一键与重试行为。
+  - 使用 `workdir` 做任务路由分层，避免不同工作区交叉执行 side effect。
 
 ## 推荐决策
 

@@ -6,6 +6,7 @@ import {
   buildCapabilityDiscoveryRequestContext,
   buildDelegationOutcomeDecisionInput,
   buildPreparedRequestContext,
+  buildSubagentAnnounceContext,
 } from './prompts';
 
 function recentMessages(count: number) {
@@ -94,4 +95,23 @@ test('loop-internal router input stays focused on current turn announce context'
 
   assert.doesNotMatch(input, /压缩任务上下文/);
   assert.match(input, /subagent announce/);
+});
+
+test('completed subagent announce context includes the full current result text', () => {
+  const longResult = [
+    '# Vibe Coding 模型排行榜',
+    'A'.repeat(1400),
+    'END_OF_FULL_RANKING_MARKER',
+  ].join('\n\n');
+  const context = buildSubagentAnnounceContext({
+    lane: 'general',
+    delegationId: 'task-1',
+    task: '整理排行榜',
+    announce: 'completed',
+    text: longResult,
+  }, 'natural');
+
+  assert.match(context ?? '', /返回内容/);
+  assert.match(context ?? '', /# Vibe Coding 模型排行榜/);
+  assert.match(context ?? '', /END_OF_FULL_RANKING_MARKER/);
 });

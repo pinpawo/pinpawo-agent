@@ -5,9 +5,13 @@ import { ensureActorSelected } from '../actorSelection';
 import { browserSession } from '../toolkits/browser';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
 
-export async function runAgent() {
+export type RunAgentOptions = {
+  workdir?: string;
+};
+
+export async function runAgent(options: RunAgentOptions = {}) {
   await ensureActorSelected({ interactive: true });
-  const runtimeConfig = buildLocalAgentRuntimeConfig();
+  const runtimeConfig = buildLocalAgentRuntimeConfig(options.workdir);
   const runtime = new LocalAgentRuntime(runtimeConfig);
 
   let stopping = false;

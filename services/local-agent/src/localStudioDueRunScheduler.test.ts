@@ -156,10 +156,33 @@ test('LocalStudioDueRunScheduler applies workdir claim filter and does not execu
 
   abortB.abort();
   const firstResult = await first;
-  await assert.rejects(() => second, /aborted|AbortError/i);
+  await assert.rejects(() => second, /NotAllowedError|outside scheduler scope|aborted|AbortError/i);
   assert.equal(firstResult.runId, 'run-a');
   assert.deepEqual(runCalls, ['started']);
   scheduler.stop();
+});
+
+test('LocalStudioDueRunScheduler.submit rejects requests with non-matching workdir scope', async () => {
+  const scheduler = new LocalStudioDueRunScheduler({
+    store: new InMemoryStudioDueRunStore(),
+    studioRunService: createStudioRunService(),
+    filterWorkdir: '/tmp/wd-scope',
+    pollIntervalMs: 10,
+  });
+  const depsWrongScope = createDeps('/tmp/wd-other');
+  const slot = { current: null };
+
+  await assert.rejects(() => scheduler.submit({
+    deps: depsWrongScope,
+    requestId: 'request-scope',
+    runId: 'run-scope',
+    conversationId: 'conv-scope',
+    userRequest: 'bad scope',
+    onProgress: () => undefined,
+    onToolEvent: () => undefined,
+    send: () => undefined,
+    slot,
+  }), /outside scheduler scope|NotAllowedError/i);
 });
 
 test('LocalStudioDueRunScheduler.stop rejects pending waiters', async () => {
@@ -184,4 +207,50 @@ test('LocalStudioDueRunScheduler.stop rejects pending waiters', async () => {
 
   scheduler.stop();
   await assert.rejects(() => pending, /aborted|AbortError/i);
+});
+
+test('LocalStudioDueRunScheduler.submit rejects immediately after stop', async () => {
+  const scheduler = new LocalStudioDueRunScheduler({
+    store: new InMemoryStudioDueRunStore(),
+    studioRunService: createStudioRunService(),
+  });
+  scheduler.stop();
+
+  const deps = createDeps('/tmp/wd-post-stop');
+  const slot = { current: null };
+  await assert.rejects(() => scheduler.submit({
+    deps,
+    requestId: 'request-post-stop',
+    runId: 'run-post-stop',
+    userRequest: 'stopped',
+    onProgress: () => undefined,
+    onToolEvent: () => undefined,
+    send: () => undefined,
+    slot,
+  }), /aborted|AbortError/i);
+});
+
+test('LocalStudioDueRunScheduler.trace filters entries by configured workdir', async () => {
+  const store = new InMemoryStudioDueRunStore();
+  store.submit({
+    runId: 'run-a',
+    conversationId: 'conv-a',
+    workdir: '/tmp/wd-a',
+    userRequest: 'run in a',
+  });
+  store.submit({
+    runId: 'run-b',
+    conversationId: 'conv-b',
+    workdir: '/tmp/wd-b',
+    userRequest: 'run in b',
+  });
+
+  const scheduler = new LocalStudioDueRunScheduler({
+    store,
+    studioRunService: createStudioRunService(),
+    filterWorkdir: ['/tmp/wd-a'],
+  });
+  const trace = await scheduler.trace();
+
+  assert.deepEqual(trace.map((entry) => entry.runId), ['run-a']);
 });

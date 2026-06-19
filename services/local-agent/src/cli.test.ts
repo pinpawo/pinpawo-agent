@@ -56,24 +56,15 @@ test('local agent CLI runs setup guide handler', async () => {
 });
 
 test('local agent CLI applies run workdir option before handler', async () => {
-  const previous = process.env.PINPAWO_WORKDIR;
   let received: string | undefined;
   const program = createLocalAgentCli({
-    runAgent: () => {
-      received = process.env.PINPAWO_WORKDIR;
+    runAgent: (options) => {
+      received = options.workdir;
     },
   });
 
-  try {
-    await program.parseAsync(['node', 'pinpawo-agent', 'run', '--workdir', '/tmp/pinpawo-workdir']);
-    assert.equal(received, '/tmp/pinpawo-workdir');
-  } finally {
-    if (previous === undefined) {
-      delete process.env.PINPAWO_WORKDIR;
-    } else {
-      process.env.PINPAWO_WORKDIR = previous;
-    }
-  }
+  await program.parseAsync(['node', 'pinpawo-agent', 'run', '--workdir', '/tmp/pinpawo-workdir']);
+  assert.equal(received, '/tmp/pinpawo-workdir');
 });
 
 test('local agent CLI passes studio migrate options to the handler', async () => {

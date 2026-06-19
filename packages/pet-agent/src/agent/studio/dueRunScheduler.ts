@@ -21,6 +21,7 @@ export type StudioDueRunStoreTrace = {
   runId: string;
   conversationId: string;
   idempotencyKey: string;
+  workdir: string;
   status: StudioDueRunStatus;
   attempt: number;
   claimedAt?: string;
@@ -151,6 +152,7 @@ export class InMemoryStudioDueRunStore implements StudioDueRunStore {
       runId: row.runId,
       conversationId: row.conversationId,
       idempotencyKey: row.identity.idempotencyKey,
+      workdir: row.workdir,
       status: row.status,
       attempt: row.attempt,
       claimedAt: row.claimedAt,

@@ -14,6 +14,7 @@ export type StoredConfig = {
   actor_id?: string;
   actor_name?: string;
   llm_api_key?: string;
+  llm_model_preset?: string;
   llm_base_url?: string;
   llm_model?: string;
   llm_observe_model?: string;

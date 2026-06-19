@@ -107,6 +107,24 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
     apiKey: 'test-key',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'kimi-k2.6',
+  }), { method: 'jsonMode' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://api.moonshot.ai/v1',
+    model: 'kimi-k2.6',
+  }), { method: 'jsonSchema' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-5.5',
+  }), { method: 'jsonSchema' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
+    baseUrl: 'https://example-gemini-compatible.test/v1',
+    model: 'gemini-3.5-flash',
   }), { method: 'jsonSchema' });
 
   assert.deepEqual(buildDecisionStructuredOutput({

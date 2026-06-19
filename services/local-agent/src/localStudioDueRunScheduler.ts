@@ -91,8 +91,6 @@ export class LocalStudioDueRunScheduler {
       return this.toCompletionFromTerminalRow(row);
     }
 
-    this.ensureLoopRunning();
-
     const result = await new Promise<LocalStudioDueRunCompletion>((resolve, reject) => {
       const waiter: Waiter = {
         ...input,
@@ -114,6 +112,8 @@ export class LocalStudioDueRunScheduler {
         };
         input.signal.addEventListener('abort', abort, { once: true });
       }
+
+      this.ensureLoopRunning();
     });
 
     return result;

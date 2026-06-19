@@ -5,7 +5,7 @@ export const TUI_TEXT = {
   unknownStage: '未知阶段',
   growthValue: (value: number) => `成长值 ${value}`,
   emptyHistory: (petName: string) => `和 ${petName} 聊天吧。`,
-  helpIdle: '/new 新会话 · /resume 恢复 · /help 帮助 · /quit 退出',
+  helpIdle: '/new 新会话 · /policy 授权 · /resume 恢复 · /help 帮助 · /quit 退出',
   helpBusy: 'Ctrl+C 打断 · 再按一次退出',
   commandPaletteTitle: '命令',
   commandPaletteEmpty: '没有匹配命令',
@@ -72,6 +72,14 @@ export const TUI_TEXT = {
   resumePickerTitle: '可恢复会话',
   resumePickerHelp: '↑↓ 选择 · Enter 恢复 · Esc 取消',
   resumeActiveBadge: '当前',
+  globalReviewPolicyPickerTitle: '全局访问策略',
+  globalReviewPolicyPickerHelp: '↑↓ 选择 · Enter 保存 · Esc 取消',
+  globalReviewPolicyCurrentBadge: '当前',
+  globalReviewPolicySaved: (label: string, synced: boolean) =>
+    synced
+      ? `全局访问策略已切换为：${label}`
+      : `全局访问策略已保存为：${label}。本地服务连接后会同步。`,
+  globalReviewPolicySaveFailed: (message: string) => `保存全局访问策略失败：${message}`,
   secondCtrlCExit: '收到第二次 Ctrl+C，立即退出 TUI。',
   interruptRequested: '已发送打断请求。再次按 Ctrl+C 可直接退出 TUI。',
   exiting: '正在退出 TUI。',

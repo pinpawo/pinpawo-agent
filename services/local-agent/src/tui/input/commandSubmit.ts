@@ -13,6 +13,7 @@ type TuiCommandSubmitInput = {
   studioConversationIdRef: { current: string | null };
   setStudioMode: (value: boolean) => void;
   openResumePicker: () => void;
+  openGlobalReviewPolicyPicker: () => void;
   openExternalEditor?: (initialText: string) => void;
   exit: () => void;
   appendSystemMessage: (text: string) => void;
@@ -68,6 +69,12 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
 
     if (parsed.name === 'resume') {
       options.openResumePicker();
+      return;
+    }
+
+    if (parsed.name === 'policy') {
+      options.openGlobalReviewPolicyPicker();
+      options.clearInputValue();
       return;
     }
 

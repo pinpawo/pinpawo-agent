@@ -142,6 +142,21 @@ export type {
   HitlPresetOptions,
   ReviewUnavailableBehavior,
 } from './agent/orchestrator/review/reviewPolicies';
+export type {
+  ResolveGlobalReviewPolicyOptions,
+  BuiltinGlobalReviewPolicyMode,
+  GlobalReviewPolicy,
+  GlobalReviewPolicyContext,
+  GlobalReviewPolicyMode,
+  GlobalReviewPolicyResolver,
+  GlobalReviewPolicyResolution,
+  GlobalReviewPolicyStructuredOutputConfig,
+} from './agent/orchestrator/review/globalReviewPolicy';
+export {
+  GLOBAL_REVIEW_POLICY_MODE,
+  GLOBAL_REVIEW_POLICY_RESOLUTION,
+  GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
+} from './agent/orchestrator/review/globalReviewPolicy';
 export {
   buildReviewSpec,
   isHumanReviewInterruptPayload,

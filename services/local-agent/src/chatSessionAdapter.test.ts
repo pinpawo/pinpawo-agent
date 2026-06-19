@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import {
+  GLOBAL_REVIEW_POLICY_MODE,
+  GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
+} from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { LocalAgentEvent } from './events/localAgentEvent';
 import type { LocalAgentGraphService } from './agentGraphService';
@@ -116,6 +120,22 @@ test('runChatSession maps authorization runtime events to system notices', async
     async *stream(streamSetup: AgentChannelSetup) {
       streamSetup.input.onToolEvent?.({
         event: 'on_runtime_event',
+        name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED,
+        data: {
+          toolName: 'write_file',
+          policyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
+        },
+      });
+      streamSetup.input.onToolEvent?.({
+        event: 'on_runtime_event',
+        name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED,
+        data: {
+          toolName: 'custom_tool',
+          policyMode: GLOBAL_REVIEW_POLICY_MODE.CUSTOM,
+        },
+      });
+      streamSetup.input.onToolEvent?.({
+        event: 'on_runtime_event',
         name: 'tool_authorization_recorded',
         data: {
           authorizations: [{
@@ -156,11 +176,15 @@ test('runChatSession maps authorization runtime events to system notices', async
 
   assert.deepEqual(result, { status: 'completed', reply: 'done' });
   assert.deepEqual(emittedTools, []);
-  const notice = emittedEvents.find((event) => event.type === 'system.notice');
-  assert.equal(notice?.requestId, 'req-1');
-  assert.equal(
-    notice?.type === 'system.notice' ? notice.message : '',
-    '已授权当前会话中的 run_shell 操作。',
+  assert.deepEqual(
+    emittedEvents
+      .filter((event) => event.type === 'system.notice')
+      .map((event) => event.message),
+    [
+      '已自动授权 write_file 操作。',
+      '已根据全局策略授权 custom_tool 操作。',
+      '已授权当前会话中的 run_shell 操作。',
+    ],
   );
 });
 

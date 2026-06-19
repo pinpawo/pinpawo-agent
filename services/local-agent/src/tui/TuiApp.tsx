@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
+import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import { config } from '../config';
+import { loadStoredConfig, saveStoredConfig } from '../storage';
 import { AgentTimeline } from './components/AgentTimeline';
 import { AgentTimelineItem } from './components/AgentTimelineItem';
 import { ApprovalPanel } from './components/ApprovalPanel';
+import { BottomStatusLine } from './components/BottomStatusLine';
 import { CommandPalette } from './components/CommandPalette';
 import { Composer } from './components/Composer';
 import { FileMentionPopup } from './components/FileMentionPopup';
-import { RuntimeInfoLine } from './components/RuntimeInfoLine';
-import { TokenUsageLine } from './components/TokenUsageLine';
+import { GlobalReviewPolicyPicker } from './components/GlobalReviewPolicyPicker';
 import { ResumePicker } from './components/ResumePicker';
 import {
   createInitialTuiInputBufferState,
@@ -22,6 +24,7 @@ import {
   buildCommandPaletteModel,
   completeCommandPaletteInput,
   moveCommandPaletteSelection,
+  submitCommandPaletteInput,
 } from './input/commandPalette';
 import {
   buildFileMentionModel,
@@ -48,6 +51,10 @@ import { splitTimelineForStaticRender } from './timeline/agentTimelineSelectors'
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { useResumePickerController } from './useResumePickerController';
 import { useTextAreaController } from './useTextAreaController';
+import {
+  GLOBAL_REVIEW_POLICY_PICKER_OPTIONS,
+  findGlobalReviewPolicyPickerIndex,
+} from './globalReviewPolicyPicker';
 import type { TuiState } from './state/tuiState';
 import type { MessageRole } from './types';
 
@@ -79,6 +86,13 @@ export function TuiApp(props: { actorId: string }) {
   const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
   const [externalEditorOpen, setExternalEditorOpen] = useState(false);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
+  const [globalReviewPolicyMode, setGlobalReviewPolicyMode] = useState<BuiltinGlobalReviewPolicyMode>(
+    () => config.globalReviewPolicyMode,
+  );
+  const [globalReviewPolicyPickerOpen, setGlobalReviewPolicyPickerOpen] = useState(false);
+  const [globalReviewPolicyIndex, setGlobalReviewPolicyIndex] = useState(
+    () => findGlobalReviewPolicyPickerIndex(config.globalReviewPolicyMode),
+  );
 
   const stateRef = useRef<TuiState>(tuiState);
   const inputBufferRef = useRef(createInitialTuiInputBufferState());
@@ -126,6 +140,12 @@ export function TuiApp(props: { actorId: string }) {
   }, [pendingApproval?.requestId]);
 
   useEffect(() => {
+    if (globalReviewPolicyPickerOpen && (busy || pendingApproval)) {
+      setGlobalReviewPolicyPickerOpen(false);
+    }
+  }, [busy, globalReviewPolicyPickerOpen, pendingApproval?.requestId]);
+
+  useEffect(() => {
     setApprovalIndex((current) => Math.min(current, Math.max(0, reviewOptions.length - 1)));
   }, [reviewOptions.length]);
 
@@ -170,7 +190,11 @@ export function TuiApp(props: { actorId: string }) {
   });
 
   // Input area focus: only when ready, not busy, and no modal panel.
-  const inputFocused = ready && !busy && !resumePickerOpen && !externalEditorOpen;
+  const inputFocused = ready
+    && !busy
+    && !resumePickerOpen
+    && !globalReviewPolicyPickerOpen
+    && !externalEditorOpen;
   const textArea = useTextAreaController({
     input: tuiState.input,
     focused: inputFocused,
@@ -225,14 +249,42 @@ export function TuiApp(props: { actorId: string }) {
     });
   };
 
-  const submitCurrentInput = () => {
+  const openGlobalReviewPolicyPicker = () => {
+    setGlobalReviewPolicyIndex(findGlobalReviewPolicyPickerIndex(globalReviewPolicyMode));
+    setGlobalReviewPolicyPickerOpen(true);
+  };
+
+  const applyGlobalReviewPolicySelection = () => {
+    const option = GLOBAL_REVIEW_POLICY_PICKER_OPTIONS[globalReviewPolicyIndex];
+    if (!option) return;
+    try {
+      saveStoredConfig({
+        ...loadStoredConfig(),
+        global_review_policy: option.mode,
+      });
+      config.globalReviewPolicyMode = option.mode;
+      setGlobalReviewPolicyMode(option.mode);
+      const synced = runtimeController.updateRuntimeConfig({
+        globalReviewPolicyMode: option.mode,
+      });
+      appendMessage('system', TUI_TEXT.globalReviewPolicySaved(option.label, synced));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      appendMessage('system', TUI_TEXT.globalReviewPolicySaveFailed(message));
+    } finally {
+      setGlobalReviewPolicyPickerOpen(false);
+    }
+  };
+
+  const submitInputValue = (value: string) => {
     submitCurrentInputFromController({
-      inputValue,
+      inputValue: value,
       focusedSession,
       studioModeRef,
       studioConversationIdRef,
       setStudioMode,
       openResumePicker,
+      openGlobalReviewPolicyPicker,
       openExternalEditor,
       exit,
       appendSystemMessage: (text) => appendMessage('system', text),
@@ -240,6 +292,10 @@ export function TuiApp(props: { actorId: string }) {
       dispatch,
       runtimeController,
     });
+  };
+
+  const submitCurrentInput = () => {
+    submitInputValue(inputValue);
   };
 
   useEffect(() => {
@@ -289,6 +345,7 @@ export function TuiApp(props: { actorId: string }) {
       hasPendingApproval: Boolean(pendingApproval),
       approvalFreeTextActive: Boolean(pendingApproval && inputValue.trim()),
       hasResumePicker: resumePickerOpen,
+      hasGlobalReviewPolicyPicker: globalReviewPolicyPickerOpen,
       hasCommandPalette: commandPalette.open,
       hasFileMention: fileMention.open,
       composerHistory: {
@@ -356,6 +413,23 @@ export function TuiApp(props: { actorId: string }) {
         closeResumePicker();
         return;
 
+      case 'globalReviewPolicy':
+        if (action.action === 'previous') {
+          setGlobalReviewPolicyIndex((current) => Math.max(0, current - 1));
+          return;
+        }
+        if (action.action === 'next') {
+          setGlobalReviewPolicyIndex((current) =>
+            Math.max(0, Math.min(GLOBAL_REVIEW_POLICY_PICKER_OPTIONS.length - 1, current + 1)));
+          return;
+        }
+        if (action.action === 'submit') {
+          applyGlobalReviewPolicySelection();
+          return;
+        }
+        setGlobalReviewPolicyPickerOpen(false);
+        return;
+
       case 'commandPalette':
         if (action.action === 'previous') {
           if (!commandPalette.open) return;
@@ -380,6 +454,15 @@ export function TuiApp(props: { actorId: string }) {
           return;
         }
         {
+          if (action.action === 'submit') {
+            const submission = submitCommandPaletteInput(commandPalette);
+            if (submission) {
+              submitInputValue(submission.text);
+              return;
+            }
+            submitCurrentInput();
+            return;
+          }
           const completion = completeCommandPaletteInput(commandPalette);
           if (completion) {
             dispatch({
@@ -458,17 +541,9 @@ export function TuiApp(props: { actorId: string }) {
   }, { isActive: true });
 
   const spinnerFrame = SPINNER_FRAMES[animationFrame];
-
-  // Contextual help text
-  const helpText = busy
-    ? TUI_TEXT.helpBusy
-    : externalEditorOpen
-      ? ''
-    : pendingApproval
-      ? '' // help is shown inside ApprovalPanel
-      : resumePickerOpen
-        ? ''
-        : TUI_TEXT.helpIdle;
+  const activityStatus = pendingUi
+    ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeOperations)
+    : status;
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -495,6 +570,13 @@ export function TuiApp(props: { actorId: string }) {
           width={contentWidth}
         />
       ) : null}
+      {globalReviewPolicyPickerOpen ? (
+        <GlobalReviewPolicyPicker
+          currentMode={globalReviewPolicyMode}
+          selectedIndex={globalReviewPolicyIndex}
+          width={contentWidth}
+        />
+      ) : null}
       {pendingApproval ? (
         <ApprovalPanel
           review={pendingApproval.review}
@@ -505,13 +587,7 @@ export function TuiApp(props: { actorId: string }) {
       ) : null}
       {!pendingApproval ? (
         <>
-          <Text dimColor>
-            {pendingUi
-              ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeOperations)
-              : status}
-          </Text>
-          {focusedSession ? <RuntimeInfoLine runtime={focusedSession.runtime} /> : null}
-          {focusedSession?.tokenUsage ? <TokenUsageLine tokenUsage={focusedSession.tokenUsage} /> : null}
+          <Text dimColor>{activityStatus}</Text>
         </>
       ) : null}
       {commandPalette.open ? (
@@ -537,7 +613,12 @@ export function TuiApp(props: { actorId: string }) {
           </>
         )}
       </Box>
-      {helpText ? <Text dimColor>{helpText}</Text> : null}
+      <BottomStatusLine
+        status={activityStatus}
+        session={focusedSession}
+        globalReviewPolicyMode={globalReviewPolicyMode}
+        width={contentWidth}
+      />
     </Box>
   );
 }

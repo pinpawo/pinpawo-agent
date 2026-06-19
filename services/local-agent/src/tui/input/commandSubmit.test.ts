@@ -14,6 +14,7 @@ function createSubmitHarness(overrides: {
     messages,
     actions,
     sent,
+    policyOpened: () => sent.includes('policy'),
     submit: () => submitCurrentInputFromController({
       inputValue: overrides.inputValue ?? '',
       focusedSession: null,
@@ -21,6 +22,7 @@ function createSubmitHarness(overrides: {
       studioConversationIdRef: { current: null },
       setStudioMode: () => {},
       openResumePicker: () => {},
+      openGlobalReviewPolicyPicker: () => sent.push('policy'),
       openExternalEditor: overrides.openExternalEditor,
       exit: () => {},
       appendSystemMessage: (text) => messages.push(text),
@@ -63,6 +65,15 @@ test('submitCurrentInputFromController opens external editor for /edit', () => {
   assert.equal(initialText, 'hello world');
   assert.deepEqual(harness.sent, ['clear']);
   assert.deepEqual(harness.messages, []);
+});
+
+test('submitCurrentInputFromController opens global review policy picker for /policy', () => {
+  const harness = createSubmitHarness({ inputValue: '/policy' });
+
+  harness.submit();
+
+  assert.equal(harness.policyOpened(), true);
+  assert.deepEqual(harness.sent, ['policy', 'clear']);
 });
 
 test('submitCurrentInputFromController reports missing external editor hook', () => {

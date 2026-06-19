@@ -10,6 +10,10 @@ import {
   setLocalToolsWorkdir,
 } from './pathUtils';
 
+const PATH_UTILS_IMPORT_PATH = process.cwd().endsWith('services/local-agent')
+  ? './src/toolkits/local/pathUtils.ts'
+  : './services/local-agent/src/toolkits/local/pathUtils.ts';
+
 test('local path utils resolve relative paths from the local tools workdir', () => {
   const previous = getLocalToolsWorkdir();
   try {
@@ -28,7 +32,7 @@ test('local path utils can load without full config/LLM requirements', () => {
     'tsx',
     '-e',
     [
-      'const mod = await import("./src/toolkits/local/pathUtils.ts");',
+      `const mod = await import(${JSON.stringify(PATH_UTILS_IMPORT_PATH)});`,
       'process.stdout.write(mod.getLocalToolsWorkdir());',
     ].join('\n'),
   ], {

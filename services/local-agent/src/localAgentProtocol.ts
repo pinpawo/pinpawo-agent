@@ -1,4 +1,9 @@
-import { isReviewSpecValue, type ReviewSpec } from '@pinpawo/pet-agent';
+import {
+  GLOBAL_REVIEW_POLICY_MODE,
+  isReviewSpecValue,
+  type BuiltinGlobalReviewPolicyMode,
+  type ReviewSpec,
+} from '@pinpawo/pet-agent';
 import type {
   LocalAgentEvent,
   LocalAgentOperationPhase,
@@ -24,6 +29,11 @@ export type NewSessionMessage = {
   userId?: string;
 };
 
+export type RuntimeConfigUpdateMessage = {
+  type: 'runtime_config.update';
+  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+};
+
 export type StudioRequestMessage = {
   type: 'studio_request';
   requestId: string;
@@ -46,6 +56,7 @@ export type LocalAgentClientMessage =
   | ChatRequestMessage
   | InterruptRequestMessage
   | NewSessionMessage
+  | RuntimeConfigUpdateMessage
   | StudioRequestMessage
   | HumanReviewResponseMessage
   | { type: 'ping' };
@@ -139,6 +150,21 @@ function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly stri
 function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpec | null {
   const review = readRecord(record, key);
   return isReviewSpecValue(review) ? review : null;
+}
+
+function readBuiltinGlobalReviewPolicyMode(
+  record: Record<string, unknown>,
+  key: string,
+): BuiltinGlobalReviewPolicyMode | null {
+  const value = readString(record, key);
+  if (
+    value === GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION
+    || value === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
+    || value === GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS
+  ) {
+    return value;
+  }
+  return null;
 }
 
 export function readLocalAgentClientMessageEnvelope(raw: unknown): LocalAgentClientMessageEnvelope | null {
@@ -325,6 +351,11 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
       petId: readOptionalString(record, 'petId'),
       userId: readOptionalString(record, 'userId'),
     };
+  }
+  if (type === 'runtime_config.update') {
+    if (!hasOnlyKeys(record, ['type', 'globalReviewPolicyMode'])) return null;
+    const globalReviewPolicyMode = readBuiltinGlobalReviewPolicyMode(record, 'globalReviewPolicyMode');
+    return globalReviewPolicyMode ? { type, globalReviewPolicyMode } : null;
   }
   if (type === 'studio_request') {
     const requestId = readString(record, 'requestId');

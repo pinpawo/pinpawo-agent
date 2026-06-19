@@ -65,6 +65,34 @@ test('buildAgentOperationDisplayLines keeps running and terminal phases distinct
   assert.match(failed, /找不到元素/);
 });
 
+test('buildAgentOperationDisplayLines renders browser active completed and failed states', () => {
+  const running = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'started',
+    title: '点击页面',
+    target: 'text=登录',
+    summary: '点击 text=登录',
+    details: { selector: 'text=登录' },
+  }), 3500, 120).map((line) => line.text).join('\n');
+  const completed = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'completed',
+    title: '打开网页',
+    target: 'https://example.com/',
+    summary: '页面：Example Domain',
+    details: { title: 'Example Domain', url: 'https://example.com/' },
+  }), 3500, 120).map((line) => line.text).join('\n');
+  const failed = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'failed',
+    title: '等待页面',
+    target: '#result',
+    summary: 'No active browser page. Use browser_open first.',
+    details: { selector: '#result', timeoutMs: 5000 },
+  }), 3500, 120).map((line) => line.text).join('\n');
+
+  assert.match(running, /点击页面 · 2s · text=登录 · 点击 text=登录/);
+  assert.match(completed, /打开网页 · https:\/\/example\.com\/ · 页面：Example Domain/);
+  assert.match(failed, /等待页面 · 失败 · #result · No active browser page/);
+});
+
 test('buildAgentReviewText renders review status without treating it as a message', () => {
   assert.equal(buildAgentReviewText(reviewEntry('waiting')), '等待你的决定');
   assert.equal(buildAgentReviewText(reviewEntry('answered')), '确认已提交');

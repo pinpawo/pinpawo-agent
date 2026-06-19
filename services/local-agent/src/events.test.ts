@@ -246,11 +246,11 @@ test('browser type operation metadata does not expose typed text in display fiel
     {
       event: 'on_tool_start',
       name: 'browser_type',
-      input: {
+      input: JSON.stringify({
         selector: '#password',
         text: 'super-secret-token',
         submit: true,
-      },
+      }),
     },
     registry,
   );
@@ -264,6 +264,63 @@ test('browser type operation metadata does not expose typed text in display fiel
     textLength: 'super-secret-token'.length,
   });
   assert.equal(JSON.stringify(event.operation).includes('super-secret-token'), false);
+});
+
+test('browser operation metadata accepts JSON string input and raw string output', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolkits: [createBrowserToolkit()],
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'browser_wait',
+      toolCallId: 'call-1',
+      input: JSON.stringify({
+        selector: '#result',
+        timeoutMs: 5000,
+      }),
+      output: '页面稳定，结果已出现',
+    },
+    registry,
+  );
+
+  assert.equal(event.operation.kind, 'browser.browser_wait');
+  assert.equal(event.operation.title, '等待页面');
+  assert.equal(event.operation.target, '#result');
+  assert.equal(event.operation.summary, '页面稳定，结果已出现');
+  assert.deepEqual(event.operation.details, {
+    selector: '#result',
+    timeoutMs: 5000,
+  });
+});
+
+test('browser operation metadata summarizes failed events without raw payload display', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolkits: [createBrowserToolkit()],
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_error',
+      name: 'browser_click',
+      toolCallId: 'call-1',
+      input: JSON.stringify({ selector: 'text=登录' }),
+      error: new Error('No active browser page. Use browser_open first.'),
+    },
+    registry,
+  );
+
+  assert.equal(event.phase, 'failed');
+  assert.equal(event.operation.target, 'text=登录');
+  assert.equal(event.operation.summary, 'No active browser page. Use browser_open first.');
+  assert.deepEqual(event.operation.details, { selector: 'text=登录' });
 });
 
 test('createOperationRegistryForAgentSetup reads operation metadata from setup toolkits', () => {

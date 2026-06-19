@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { StudioTurnResult } from '@pinpawo/pet-agent';
+import { buildStudioRunIdentity, type StudioTurnResult } from '@pinpawo/pet-agent';
 import type { BuildStudioInput, BuildStudioResult } from './studio/studioRuntime';
 import type { LocalServerDeps } from './localServerTypes';
 import {
-  buildStudioRunIdempotencyKey,
   StudioRunService,
 } from './studioRunService';
 
@@ -126,9 +125,12 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
   assert.equal(result.turn.outcome.outcome, 'done');
 });
 
-test('buildStudioRunIdempotencyKey is scoped by conversation and run', () => {
+test('buildStudioRunIdentity is scoped by conversation and run', () => {
+  const identity = buildStudioRunIdentity({ conversationId: 'conv-a', runId: 'run-a' });
+  assert.equal(identity.conversationId, 'conv-a');
+  assert.equal(identity.runId, 'run-a');
   assert.equal(
-    buildStudioRunIdempotencyKey({ conversationId: 'conv-a', runId: 'run-a' }),
+    identity.idempotencyKey,
     'studio:conv-a:run:run-a',
   );
 });

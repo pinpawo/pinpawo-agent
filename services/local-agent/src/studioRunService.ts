@@ -1,3 +1,7 @@
+import {
+  buildStudioRunIdentity,
+  type StudioRunIdentity,
+} from '@pinpawo/pet-agent';
 import type {
   StudioTurnEvent,
   StudioTurnResult,
@@ -41,12 +45,14 @@ export class StudioRunService {
 
   async run(request: StudioRunServiceRequest): Promise<StudioRunServiceResult> {
     const { deps, runId, userRequest } = request;
-    const conversationId = request.conversationId ?? runId;
-    const idempotencyKey = buildStudioRunIdempotencyKey({ runId, conversationId });
+    const identity: StudioRunIdentity = buildStudioRunIdentity({
+      runId,
+      conversationId: request.conversationId,
+    });
     const { orchestrator } = await this.buildStudio(buildStudioInputFromDeps(request));
     const turn = await orchestrator.invoke({
       userRequest,
-      conversationId,
+      conversationId: identity.conversationId,
       turnId: runId,
       signal: request.signal,
       onTurnEvent: request.onProgress,
@@ -54,19 +60,12 @@ export class StudioRunService {
     });
 
     return {
-      runId,
-      conversationId,
-      idempotencyKey,
+      runId: identity.runId,
+      conversationId: identity.conversationId,
+      idempotencyKey: identity.idempotencyKey,
       turn,
     };
   }
-}
-
-export function buildStudioRunIdempotencyKey(input: {
-  runId: string;
-  conversationId: string;
-}) {
-  return `studio:${input.conversationId}:run:${input.runId}`;
 }
 
 function buildStudioInputFromDeps(request: StudioRunServiceRequest): BuildStudioInput {

@@ -12,6 +12,7 @@ export {
   defaultPromptProvider,
   fileReadPromptProvider,
 } from './wikiCurator';
+export { buildStudioRunIdentity } from './types';
 export type {
   CuratorPromptProvider,
   LLMWikiCuratorConfig,
@@ -40,4 +41,5 @@ export type {
   StudioTurnOutcome,
   StudioTurnResult,
   StudioTurnState,
+  StudioRunIdentity,
 } from './types';

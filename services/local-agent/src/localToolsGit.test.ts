@@ -71,7 +71,7 @@ test('loadCoreLocalTools keeps git tools available for toolkit composition', asy
   assert.equal(tools.some((item) => item.name === 'git_commit'), true);
 });
 
-test('createGitToolkit exposes a dedicated git capability surface', () => {
+test('createGitToolkit exposes a dedicated git capability surface', async () => {
   const toolkit = createGitToolkit();
   assert.equal(toolkit.name, 'git');
   assert.equal(Array.isArray(toolkit.tools), true);
@@ -84,4 +84,22 @@ test('createGitToolkit exposes a dedicated git capability surface', () => {
   assert.equal(toolkit.operations?.git_commit?.title, '创建 git commit');
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_add), true);
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_commit), true);
+
+  const review = await toolkit.policy?.toolReview?.git_commit?.request({
+    models: {} as never,
+    actor: {} as never,
+    messages: [],
+    toolkitName: 'git',
+    toolName: 'git_commit',
+    input: { cwd: '/repo', message: 'test: commit' },
+    operation: toolkit.operations?.git_commit,
+    reviewCapabilities: {
+      humanReview: true,
+      sessionAuthorization: true,
+    },
+  });
+  assert.deepEqual(
+    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
+    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
+  );
 });

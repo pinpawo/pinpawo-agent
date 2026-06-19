@@ -87,7 +87,7 @@ test('bash toolkit reviews write_file with preset policy', async (t) => {
   assert.match(review && 'schemaVersion' in review ? review.view.body : '', /afterPreview/);
   assert.deepEqual(
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
-    ['approve', 'reject', 'respond'],
+    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
   );
 });
 

@@ -4,27 +4,47 @@ import path from 'node:path';
 import type { StudioAgent, StudioContext } from '../../types/studio';
 import type { SubagentToolEventHandler } from '../../types/subagent';
 import { createPlanCapability } from './planCapability';
+import type { StudioPlanPetListItem } from './planCapability';
 import type {
-  ExecuteAction,
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
-  StudioDispatchState,
   StudioOrchestrator,
   StudioOrchestratorConfig,
-  StudioOrchestratorInvokeInput,
-  StudioTaskPlan,
-  StudioTaskRuntimeState,
+  StudioQueueItem,
+  StudioRunSnapshot,
+  StudioRunEvent,
+  StudioRunEventHandler,
+  StudioRunStatus,
+  StudioSubmitRequestInput,
+  StudioSubmitRequestResult,
+  StudioTaskDependencyInput,
+  StudioTaskStatus,
   StudioTurnEvent,
   StudioTurnEventHandler,
   StudioTurnOutcome,
   StudioTurnResult,
-  StudioTurnState,
 } from './types';
 import { createSkeletonWikiCurator, ensureWikiSkeleton } from './wikiCurator';
 import type { WikiCurator } from './wikiCurator';
 
 const DEFAULT_MAX_ITERATION_COUNT = 32;
 const DEFAULT_MAX_RETRY_PER_TASK = 2;
+
+type StudioQueuedTaskInput = {
+  petId: string;
+  goal: string;
+  acceptanceCriteria: string[];
+  deps?: StudioTaskDependencyInput[];
+};
+
+type StudioQueuedTaskBatch = {
+  tasks: StudioQueuedTaskInput[];
+};
+
+type QueuedTaskRuntimeState = {
+  status: StudioTaskStatus;
+  retryCount: number;
+};
 
 function toStudioAgent(descriptor: PetAgentRuntimeDescriptor): StudioAgent {
   return {
@@ -42,6 +62,15 @@ function toStudioAgent(descriptor: PetAgentRuntimeDescriptor): StudioAgent {
   };
 }
 
+function toPlanPetListItem(descriptor: PetAgentRuntimeDescriptor): StudioPlanPetListItem {
+  return {
+    petId: descriptor.petId,
+    role: descriptor.role ?? null,
+    serviceSummary: descriptor.serviceSummary ?? null,
+    status: descriptor.status,
+  };
+}
+
 function isDispatchable(descriptor: PetAgentRuntimeDescriptor): boolean {
   return (
     descriptor.startupMode !== 'disabled'
@@ -49,57 +78,95 @@ function isDispatchable(descriptor: PetAgentRuntimeDescriptor): boolean {
   );
 }
 
+function createStudioPetRegistry(agents: PetAgentRuntime[]): {
+  getRuntime: (petId: string) => PetAgentRuntime | undefined;
+  listDescriptors: () => PetAgentRuntimeDescriptor[];
+  listPlanningPets: () => StudioPlanPetListItem[];
+  isDispatchable: (petId: string) => boolean;
+} {
+  const agentsByPetId = new Map<string, PetAgentRuntime>();
+  for (const agent of agents) {
+    const descriptor = agent.descriptor();
+    if (agentsByPetId.has(descriptor.petId)) {
+      throw new Error(`Duplicate pet agent id in studio: ${descriptor.petId}`);
+    }
+    agentsByPetId.set(descriptor.petId, agent);
+  }
+
+  function getRuntime(petId: string): PetAgentRuntime | undefined {
+    return agentsByPetId.get(petId);
+  }
+
+  function listDescriptors(): PetAgentRuntimeDescriptor[] {
+    return agents.map((agent) => agent.descriptor());
+  }
+
+  function listPlanningPets(): StudioPlanPetListItem[] {
+    return listDescriptors().map(toPlanPetListItem);
+  }
+
+  function isRuntimeDispatchable(petId: string): boolean {
+    const agent = getRuntime(petId);
+    return agent ? isDispatchable(agent.descriptor()) : false;
+  }
+
+  return {
+    getRuntime,
+    listDescriptors,
+    listPlanningPets,
+    isDispatchable: isRuntimeDispatchable,
+  };
+}
+
 function buildWikiRoot(baseDir: string, conversationId: string): string {
   return path.resolve(baseDir, 'conv', conversationId, 'wiki');
 }
 
-function findNextPendingIndex(state: StudioTurnState): number {
-  if (!state.plan) return -1;
-  return state.taskStates.findIndex((task) => task.status === 'pending');
-}
-
-/**
- * 内部状态机:基于当前 state 决定下一个 ExecuteAction。
- * 不引入 LLM,纯规则:
- * - 有 pending task → dispatch(by index)
- * - 所有 task 处理完 + 有 satisfied dispatch → finish
- * - 否则 → stop
- *
- * task 的身份是 plan.tasks 数组下标——稳定、唯一、由数据结构保证。
- */
-function decideExecuteAction(state: StudioTurnState): ExecuteAction {
-  if (!state.plan) {
-    return { type: 'stop', reason: 'no plan' };
-  }
-  const pendingIndex = findNextPendingIndex(state);
-  if (pendingIndex >= 0) {
-    const task = state.plan.tasks[pendingIndex];
-    return { type: 'dispatch', taskIndex: pendingIndex, brief: task.goal };
-  }
-  const satisfiedDispatches = state.dispatches.filter(
-    (dispatch) => dispatch.status === 'finished' && dispatch.resultText,
-  );
-  if (satisfiedDispatches.length > 0) {
-    return { type: 'finish', finalDispatchId: satisfiedDispatches[satisfiedDispatches.length - 1].id };
-  }
-  return { type: 'stop', reason: 'plan 全部 task 失败,无可作交付的产出' };
-}
-
-function normalizePlan(plan: StudioTaskPlan): StudioTaskPlan {
+function normalizeQueuedTaskBatch(batch: StudioQueuedTaskBatch): StudioQueuedTaskBatch {
   return {
-    tasks: plan.tasks.map((task) => ({
+    tasks: batch.tasks.map((task) => ({
       petId: task.petId,
       goal: task.goal,
       acceptanceCriteria: task.acceptanceCriteria ?? [],
+      deps: task.deps ?? [],
     })),
   };
 }
 
-function buildInitialTaskStates(plan: StudioTaskPlan): StudioTaskRuntimeState[] {
-  return plan.tasks.map(() => ({
+function buildInitialTaskStates(batch: StudioQueuedTaskBatch): QueuedTaskRuntimeState[] {
+  return batch.tasks.map(() => ({
     status: 'pending',
     retryCount: 0,
   }));
+}
+
+function buildTaskStatesFromSnapshot(tasks: StudioQueueItem[]): QueuedTaskRuntimeState[] {
+  return tasks
+    .sort((a, b) => a.taskIndex - b.taskIndex)
+    .map((task) => ({
+      status: task.status === 'done'
+        ? 'satisfied'
+        : task.status === 'queued'
+          ? 'pending'
+          : 'failed',
+      retryCount: task.status === 'failed' ? DEFAULT_MAX_RETRY_PER_TASK : 0,
+    }));
+}
+
+function buildTaskBatchFromSnapshot(tasks: StudioQueueItem[]): StudioQueuedTaskBatch | null {
+  if (tasks.length === 0) {
+    return null;
+  }
+  return {
+    tasks: tasks
+      .sort((a, b) => a.taskIndex - b.taskIndex)
+      .map((task) => ({
+        petId: task.petId,
+        goal: task.brief,
+        acceptanceCriteria: task.acceptanceCriteria,
+        deps: task.deps.map((taskIndex) => ({ taskIndex })),
+      })),
+  };
 }
 
 /**
@@ -121,26 +188,147 @@ function makeEmitter(handler: StudioTurnEventHandler | undefined): (event: Studi
   };
 }
 
+type StudioRunRecord = {
+  turnId: string;
+  conversationId: string;
+  userRequest: string;
+  signal?: AbortSignal;
+  abortController: AbortController;
+  onToolEvent?: SubagentToolEventHandler;
+  emit: (event: StudioTurnEvent) => void;
+  state: StudioRunInternalState;
+  taskResults: Map<number, string>;
+  status: StudioRunStatus;
+  createdAt: string;
+  updatedAt: string;
+  outcome: StudioTurnOutcome | null;
+  resultPromise: Promise<StudioTurnResult>;
+  resolve: (result: StudioTurnResult) => void;
+  reject: (error: unknown) => void;
+};
+
+type StudioRunInternalState = {
+  turnId: string;
+  conversationId: string;
+  userRequest: string;
+  taskBatch: StudioQueuedTaskBatch | null;
+  taskStates: QueuedTaskRuntimeState[];
+  wikiRoot: string;
+  iterationCount: number;
+};
+
+type StudioWorkerHandoffInput = {
+  taskIndex: number;
+  brief: string;
+};
+
+type StudioWorkerRunResult = {
+  petRunId: string;
+  status: 'finished' | 'cancelled';
+  resultText?: string;
+  errorMessage?: string;
+  finishedAt?: string;
+};
+
+function createDeferredTurnResult(): {
+  resultPromise: Promise<StudioTurnResult>;
+  resolve: (result: StudioTurnResult) => void;
+  reject: (error: unknown) => void;
+} {
+  let resolveRun!: (result: StudioTurnResult) => void;
+  let rejectRun!: (error: unknown) => void;
+  const resultPromise = new Promise<StudioTurnResult>((resolve, reject) => {
+    resolveRun = resolve;
+    rejectRun = reject;
+  });
+  resultPromise.catch(() => {});
+  return {
+    resultPromise,
+    resolve: resolveRun,
+    reject: rejectRun,
+  };
+}
+
+function createRunAbortController(externalSignal: AbortSignal | undefined): AbortController {
+  const controller = new AbortController();
+  if (!externalSignal) {
+    return controller;
+  }
+  if (externalSignal.aborted) {
+    controller.abort(externalSignal.reason);
+    return controller;
+  }
+  externalSignal.addEventListener('abort', () => {
+    controller.abort(externalSignal.reason);
+  }, { once: true });
+  return controller;
+}
+
+function runStatusForOutcome(outcome: StudioTurnOutcome): StudioRunStatus {
+  if (outcome.outcome === 'done') {
+    return 'done';
+  }
+  return outcome.reason === 'aborted by signal' ? 'cancelled' : 'failed';
+}
+
+function toStudioRun(record: StudioRunRecord, tasks: StudioQueueItem[]): StudioRunSnapshot {
+  const doneTasks = tasks.filter((task) => task.status === 'done' && task.petRunId);
+  const finalTask = doneTasks[doneTasks.length - 1];
+  return {
+    runId: record.turnId,
+    conversationId: record.conversationId,
+    userRequest: record.userRequest,
+    status: record.status,
+    finalTaskIndex: finalTask?.taskIndex,
+    finalPetRunId: finalTask?.petRunId,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    tasks,
+  };
+}
+
+function buildTerminalOutcomeIfReady(record: StudioRunRecord, tasks: StudioQueueItem[]): StudioTurnOutcome | null {
+  if (!record.state.taskBatch) {
+    return null;
+  }
+  const hasOpenTask = tasks.some((task) => task.status === 'queued' || task.status === 'running');
+  if (hasOpenTask) {
+    return null;
+  }
+  const finalTask = tasks
+    .filter((task) => task.status === 'done' && task.petRunId && record.taskResults.has(task.taskIndex))
+    .at(-1);
+  if (finalTask?.petRunId) {
+    return {
+      outcome: 'done',
+      finalTaskIndex: finalTask.taskIndex,
+      finalPetRunId: finalTask.petRunId,
+      reply: record.taskResults.get(finalTask.taskIndex) ?? '',
+    };
+  }
+  return {
+    outcome: 'stopped',
+    reason: 'all queued tasks failed, no deliverable output',
+    reply: '',
+  };
+}
+
 
 export function createStudioOrchestrator(config: StudioOrchestratorConfig): StudioOrchestrator {
-  const agentsByPetId = new Map<string, PetAgentRuntime>();
-  for (const agent of config.agents) {
-    const descriptor = agent.descriptor();
-    if (agentsByPetId.has(descriptor.petId)) {
-      throw new Error(`Duplicate pet agent id in studio: ${descriptor.petId}`);
-    }
-    agentsByPetId.set(descriptor.petId, agent);
-  }
-
-  // plannerPetId 在用 planner 流程时必须解析到一个注册的 agent。延迟到
-  // invoke 时校验,允许 caller 在测试 / debug 路径下传入显式 plan 跳过 planner。
+  const petRegistry = createStudioPetRegistry(config.agents);
 
   const maxIterationCount = config.maxIterationCount ?? DEFAULT_MAX_ITERATION_COUNT;
   const maxRetryPerTask = config.maxRetryPerTask ?? DEFAULT_MAX_RETRY_PER_TASK;
   const curator: WikiCurator = config.curator ?? createSkeletonWikiCurator();
+  const runQueueStore = config.runQueueStore;
+  const queue: StudioQueueItem[] = [];
+  const runs = new Map<string, StudioRunRecord>();
+  const runEventHandlers = new Set<StudioRunEventHandler>();
+  const activePets = new Set<string>();
+  let scheduling = false;
 
   function listAgents(): PetAgentRuntimeDescriptor[] {
-    return config.agents.map((agent) => agent.descriptor());
+    return petRegistry.listDescriptors();
   }
 
   function context(): StudioContext {
@@ -152,70 +340,113 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     };
   }
 
+  function createRunRecord(params: {
+    turnId: string;
+    conversationId: string;
+    userRequest: string;
+    signal?: AbortSignal;
+    onToolEvent?: SubagentToolEventHandler;
+    onTurnEvent?: StudioTurnEventHandler;
+    status: StudioRunStatus;
+    createdAt: string;
+    updatedAt: string;
+    taskBatch?: StudioQueuedTaskBatch | null;
+    taskStates?: QueuedTaskRuntimeState[];
+    iterationCount?: number;
+  }): StudioRunRecord {
+    const deferred = createDeferredTurnResult();
+    return {
+      turnId: params.turnId,
+      conversationId: params.conversationId,
+      userRequest: params.userRequest,
+      signal: params.signal,
+      abortController: createRunAbortController(params.signal),
+      onToolEvent: params.onToolEvent,
+      emit: makeEmitter(params.onTurnEvent),
+      state: {
+        turnId: params.turnId,
+        conversationId: params.conversationId,
+        userRequest: params.userRequest,
+        taskBatch: params.taskBatch ?? null,
+        taskStates: params.taskStates ?? [],
+        wikiRoot: buildWikiRoot(config.wikiBaseDir, params.conversationId),
+        iterationCount: params.iterationCount ?? 0,
+      },
+      taskResults: new Map(),
+      status: params.status,
+      createdAt: params.createdAt,
+      updatedAt: params.updatedAt,
+      outcome: null,
+      resultPromise: deferred.resultPromise,
+      resolve: deferred.resolve,
+      reject: deferred.reject,
+    };
+  }
+
   async function runDispatch(
-    state: StudioTurnState,
-    action: Extract<ExecuteAction, { type: 'dispatch' }>,
+    state: StudioRunInternalState,
+    action: StudioWorkerHandoffInput,
+    dispatchId: string,
     signal: AbortSignal | undefined,
     onToolEvent: SubagentToolEventHandler | undefined,
     emit: (event: StudioTurnEvent) => void,
-  ): Promise<StudioDispatchState> {
-    if (!state.plan) {
-      throw new Error('runDispatch called without a plan');
+  ): Promise<StudioWorkerRunResult> {
+    if (!state.taskBatch) {
+      throw new Error('worker handoff called without queued task batch');
     }
-    const task = state.plan.tasks[action.taskIndex];
+    const task = state.taskBatch.tasks[action.taskIndex];
     const taskState = state.taskStates[action.taskIndex];
     if (!task) {
-      throw new Error(`task at index ${action.taskIndex} not found in plan`);
+      throw new Error(`task at index ${action.taskIndex} not found in queued task batch`);
     }
     if (!taskState) {
       throw new Error(`task runtime state at index ${action.taskIndex} not found`);
     }
     const taskIndex = action.taskIndex;
 
-    function changeTaskStatus(nextStatus: StudioTaskRuntimeState['status']): void {
+    function changeTaskStatus(nextStatus: QueuedTaskRuntimeState['status']): void {
       taskState.status = nextStatus;
       emit({ type: 'task_status_changed', taskIndex, status: nextStatus });
     }
 
-    const agent = agentsByPetId.get(task.petId);
-    const dispatch: StudioDispatchState = {
-      id: randomUUID().slice(0, 8),
-      taskIndex,
-      petId: task.petId,
-      status: 'running',
-      brief: action.brief,
-      startedAt: new Date().toISOString(),
+    const agent = petRegistry.getRuntime(task.petId);
+    const workerRun: StudioWorkerRunResult = {
+      petRunId: dispatchId,
+      status: 'finished',
     };
-    state.dispatches.push(dispatch);
-    emit({ type: 'dispatch_started', dispatchId: dispatch.id, taskIndex, petId: task.petId });
+    emit({ type: 'task_started', taskIndex, petId: task.petId, petRunId: dispatchId });
 
     if (!agent) {
-      dispatch.status = 'cancelled';
-      dispatch.errorMessage = `agent_not_found:${task.petId}`;
-      dispatch.finishedAt = new Date().toISOString();
+      workerRun.status = 'cancelled';
+      workerRun.errorMessage = `agent_not_found:${task.petId}`;
+      workerRun.finishedAt = new Date().toISOString();
       changeTaskStatus('failed');
       emit({
-        type: 'dispatch_finished',
-        dispatchId: dispatch.id,
+        type: 'task_finished',
+        taskIndex,
+        petId: task.petId,
+        petRunId: dispatchId,
         status: 'cancelled',
-        errorMessage: dispatch.errorMessage,
+        errorMessage: workerRun.errorMessage,
       });
-      return dispatch;
+      return workerRun;
     }
 
     const descriptor = agent.descriptor();
-    if (!isDispatchable(descriptor)) {
-      dispatch.status = 'cancelled';
-      dispatch.errorMessage = `agent_not_dispatchable:${descriptor.status}`;
-      dispatch.finishedAt = new Date().toISOString();
+    if (!petRegistry.isDispatchable(task.petId)) {
+      workerRun.status = 'cancelled';
+      workerRun.errorMessage = `agent_not_dispatchable:${descriptor.status}`;
+      workerRun.finishedAt = new Date().toISOString();
       changeTaskStatus('failed');
       emit({
-        type: 'dispatch_finished',
-        dispatchId: dispatch.id,
+        type: 'task_finished',
+        taskIndex,
+        petId: task.petId,
+        petRunId: dispatchId,
         status: 'cancelled',
-        errorMessage: dispatch.errorMessage,
+        errorMessage: workerRun.errorMessage,
       });
-      return dispatch;
+      return workerRun;
     }
 
     try {
@@ -224,93 +455,60 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
         wikiRoot: state.wikiRoot,
         signal,
         onToolEvent,
-        threadId: `studio:${config.studioId}:thread:${state.conversationId}:pet:${task.petId}:dispatch:${dispatch.id}`,
+        threadId: `studio:${config.studioId}:thread:${state.conversationId}:pet:${task.petId}:dispatch:${dispatchId}`,
         workdir: config.workdir,
       });
-      dispatch.status = 'finished';
-      dispatch.resultText = result.reply;
-      dispatch.finishedAt = new Date().toISOString();
+      workerRun.status = 'finished';
+      workerRun.resultText = result.reply;
+      workerRun.finishedAt = new Date().toISOString();
       changeTaskStatus('satisfied');
     } catch (error) {
-      dispatch.status = 'finished';
-      dispatch.errorMessage = error instanceof Error ? error.message : String(error);
-      dispatch.finishedAt = new Date().toISOString();
+      workerRun.status = 'finished';
+      workerRun.errorMessage = error instanceof Error ? error.message : String(error);
+      workerRun.finishedAt = new Date().toISOString();
       taskState.retryCount += 1;
       if (taskState.retryCount >= maxRetryPerTask) {
         changeTaskStatus('failed');
       }
     }
 
-    try {
-      const curateResult = await curator.curate({ wikiRoot: state.wikiRoot, dispatch });
-      if (curateResult.changedPaths.length > 0) {
-        emit({ type: 'wiki_updated', changedPaths: curateResult.changedPaths });
-      }
-    } catch (curatorError) {
-      dispatch.errorMessage = dispatch.errorMessage
-        ?? `wiki_curator_failed:${(curatorError as Error).message}`;
-    }
-
     emit({
-      type: 'dispatch_finished',
-      dispatchId: dispatch.id,
-      status: dispatch.status === 'finished' ? 'finished' : 'cancelled',
-      resultText: dispatch.resultText,
-      errorMessage: dispatch.errorMessage,
+      type: 'task_finished',
+      taskIndex,
+      petId: task.petId,
+      petRunId: dispatchId,
+      status: workerRun.status,
+      resultText: workerRun.resultText,
+      errorMessage: workerRun.errorMessage,
     });
 
-    return dispatch;
+    return workerRun;
   }
 
-  function buildOutcome(state: StudioTurnState, action: ExecuteAction): StudioTurnOutcome {
-    if (action.type === 'finish') {
-      const dispatch = state.dispatches.find((d) => d.id === action.finalDispatchId);
-      return {
-        outcome: 'done',
-        finalDispatchId: action.finalDispatchId,
-        reply: dispatch?.resultText ?? '',
-      };
-    }
-    if (action.type === 'stop') {
-      const lastFinished = state.dispatches.filter((d) => d.status === 'finished' && d.resultText).pop();
-      return {
-        outcome: 'stopped',
-        reason: action.reason,
-        reply: lastFinished?.resultText ?? `(stopped: ${action.reason})`,
-      };
-    }
-    return { outcome: 'stopped', reason: 'unexpected execute action', reply: '' };
-  }
-
-  async function obtainPlan(params: {
+  async function obtainTaskBatch(params: {
     userRequest: string;
-    explicit: StudioTaskPlan | undefined;
     wikiRoot: string;
     signal?: AbortSignal;
     onToolEvent?: SubagentToolEventHandler;
     conversationId: string;
-  }): Promise<{ plan: StudioTaskPlan | null; plannerReply: string | null }> {
-    if (params.explicit) {
-      return {
-        plan: normalizePlan(params.explicit),
-        plannerReply: null,
-      };
-    }
-
-    const planner = agentsByPetId.get(config.plannerPetId);
+  }): Promise<{ taskBatch: StudioQueuedTaskBatch | null; plannerReply: string | null }> {
+    const planner = petRegistry.getRuntime(config.plannerPetId);
     if (!planner) {
       throw new Error(`plannerPetId "${config.plannerPetId}" not found in registered agents`);
     }
-    let capturedPlan: StudioTaskPlan | null = null;
+    let capturedTaskBatch: StudioQueuedTaskBatch | null = null;
     const planCapability = createPlanCapability({
-      onSubmit: (plan) => {
-        capturedPlan = plan;
+      enqueueTasks: (tasks) => {
+        capturedTaskBatch = normalizeQueuedTaskBatch({
+          tasks: tasks.map((task) => ({
+            petId: task.petId,
+            goal: task.brief,
+            acceptanceCriteria: task.acceptanceCriteria ?? [],
+            deps: task.deps ?? [],
+          })),
+        });
       },
-      availableAgents: listAgents().map((descriptor) => ({
-        petId: descriptor.petId,
-        role: descriptor.role ?? null,
-        serviceSummary: descriptor.serviceSummary ?? null,
-      })),
+      listPets: petRegistry.listPlanningPets,
     });
 
     const result = await planner.invoke({
@@ -324,119 +522,478 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       // 强制 planCapability 成为 userIntentDecision 候选,绕过 keyword 搜索 ——
       // 用户请求文本(例如"做一支秋日食材短视频")无法匹到 studio_plan 描述,
       // 不强制注入就会被错误地 delegate 到 general lane,planner 永远不会
-      // 调 submit_plan。
+      // 调 enqueue_tasks。
       forcedCapabilityNames: [planCapability.name],
     });
 
-    return { plan: capturedPlan, plannerReply: result.reply };
+    return { taskBatch: capturedTaskBatch, plannerReply: result.reply };
   }
 
-  async function invoke(input: StudioOrchestratorInvokeInput): Promise<StudioTurnResult> {
+  function setRunStatus(record: StudioRunRecord, status: StudioRunStatus): void {
+    record.status = status;
+    record.updatedAt = new Date().toISOString();
+  }
+
+  function readRunSnapshot(record: StudioRunRecord): StudioRunSnapshot {
+    const tasks = queue
+      .filter((item) => item.runId === record.turnId)
+      .map((item) => ({ ...item }));
+    return toStudioRun(record, tasks);
+  }
+
+  function saveRunSnapshot(record: StudioRunRecord): void {
+    runQueueStore?.save(readRunSnapshot(record));
+  }
+
+  function emitRunEvent(record: StudioRunRecord, event: StudioTurnEvent): void {
+    record.emit(event);
+    saveRunSnapshot(record);
+    const runEvent: StudioRunEvent = event.type === 'wiki_updated'
+      ? {
+          type: 'wiki_changed',
+          runId: record.turnId,
+          conversationId: record.conversationId,
+          changedPaths: event.changedPaths,
+          occurredAt: new Date().toISOString(),
+        }
+      : {
+          type: 'run_changed',
+          runId: record.turnId,
+          conversationId: record.conversationId,
+          status: record.status,
+          snapshot: readRunSnapshot(record),
+          reason: event.type === 'turn_finished' && event.outcome === 'stopped'
+            ? 'stopped'
+            : undefined,
+          occurredAt: new Date().toISOString(),
+        };
+    for (const handler of runEventHandlers) {
+      try {
+        const ret = handler(runEvent);
+        if (ret && typeof (ret as Promise<void>).catch === 'function') {
+          (ret as Promise<void>).catch(() => {});
+        }
+      } catch {
+        // event subscribers must not affect runner progress
+      }
+    }
+  }
+
+  function completeRun(record: StudioRunRecord, outcome: StudioTurnOutcome): void {
+    if (record.outcome) {
+      return;
+    }
+    record.outcome = outcome;
+    setRunStatus(record, runStatusForOutcome(outcome));
+    saveRunSnapshot(record);
+    emitRunEvent(record, {
+      type: 'turn_finished',
+      outcome: outcome.outcome,
+      ...(outcome.outcome === 'done' ? { finalPetRunId: outcome.finalPetRunId } : {}),
+    });
+    const snapshot = readRunSnapshot(record);
+    record.resolve({
+      turnId: record.turnId,
+      snapshot,
+      outcome,
+      studio: context(),
+    });
+  }
+
+  function failRun(record: StudioRunRecord, error: unknown): void {
+    if (record.outcome) {
+      return;
+    }
+    if (record.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      completeRun(record, {
+        outcome: 'stopped',
+        reason: 'aborted by signal',
+        reply: '',
+      });
+      return;
+    }
+    record.outcome = {
+      outcome: 'stopped',
+      reason: error instanceof Error ? error.message : String(error),
+      reply: '',
+    };
+    setRunStatus(record, 'failed');
+    saveRunSnapshot(record);
+    emitRunEvent(record, {
+      type: 'turn_finished',
+      outcome: 'stopped',
+    });
+    record.reject(error);
+  }
+
+  function normalizeDepsForTask(batch: StudioQueuedTaskBatch, taskIndex: number): number[] {
+    const task = batch.tasks[taskIndex];
+    const deps = task.deps ?? [];
+    const normalized = new Set<number>();
+    for (const dep of deps) {
+      const depIndex = dep === 'previous' ? taskIndex - 1 : dep.taskIndex;
+      if (depIndex < 0 || depIndex >= taskIndex) {
+        throw new Error(`invalid task dependency for task ${taskIndex}: ${JSON.stringify(dep)}`);
+      }
+      normalized.add(depIndex);
+    }
+    return [...normalized].sort((a, b) => a - b);
+  }
+
+  function enqueueTaskBatch(record: StudioRunRecord, batch: StudioQueuedTaskBatch): void {
+    record.state.taskBatch = batch;
+    record.state.taskStates = buildInitialTaskStates(batch);
+    saveRunSnapshot(record);
+
+    if (batch.tasks.length === 0) {
+      completeRun(record, {
+        outcome: 'stopped',
+        reason: 'planner submitted empty task batch',
+        reply: '(stopped: planner submitted empty task batch)',
+      });
+      return;
+    }
+
+    for (const [taskIndex, task] of batch.tasks.entries()) {
+      queue.push({
+        runId: record.turnId,
+        conversationId: record.conversationId,
+        taskIndex,
+        petId: task.petId,
+        brief: task.goal,
+        acceptanceCriteria: task.acceptanceCriteria,
+        deps: normalizeDepsForTask(batch, taskIndex),
+        status: 'queued',
+        enqueuedAt: new Date().toISOString(),
+      });
+    }
+    setRunStatus(record, 'running');
+    saveRunSnapshot(record);
+    emitRunEvent(record, { type: 'tasks_queued', taskCount: batch.tasks.length });
+    scheduleQueue();
+  }
+
+  async function startPlanning(record: StudioRunRecord): Promise<void> {
+    try {
+      emitRunEvent(record, { type: 'turn_started', turnId: record.turnId, userRequest: record.userRequest });
+      setRunStatus(record, 'planning');
+      saveRunSnapshot(record);
+      if (record.signal?.aborted) {
+        completeRun(record, {
+          outcome: 'stopped',
+          reason: 'aborted by signal',
+          reply: '',
+        });
+        return;
+      }
+
+      const { taskBatch, plannerReply } = await obtainTaskBatch({
+        userRequest: record.userRequest,
+        wikiRoot: record.state.wikiRoot,
+        signal: record.signal,
+        onToolEvent: record.onToolEvent,
+        conversationId: record.conversationId,
+      });
+
+      if (record.outcome) {
+        return;
+      }
+
+      if (!taskBatch) {
+        const reason = plannerReply
+          ? `planner did not enqueue tasks: ${plannerReply}`
+          : 'planner did not enqueue tasks';
+        completeRun(record, {
+          outcome: 'stopped',
+          reason,
+          reply: plannerReply ?? `(stopped: ${reason})`,
+        });
+        return;
+      }
+
+      enqueueTaskBatch(record, taskBatch);
+    } catch (error) {
+      failRun(record, error);
+    }
+  }
+
+  function dependenciesDone(item: StudioQueueItem): boolean {
+    const record = runs.get(item.runId);
+    if (!record) {
+      return false;
+    }
+    return item.deps.every((depIndex) => {
+      const dep = queue.find((candidate) => (
+        candidate.runId === item.runId
+        && candidate.taskIndex === depIndex
+      ));
+      return dep?.status === 'done';
+    });
+  }
+
+  function finishTaskIfRunTerminal(record: StudioRunRecord): void {
+    const tasks = queue.filter((item) => item.runId === record.turnId);
+    const terminalOutcome = buildTerminalOutcomeIfReady(record, tasks);
+    if (terminalOutcome) {
+      completeRun(record, terminalOutcome);
+    }
+  }
+
+  function dispatchQueuedTask(item: StudioQueueItem, record: StudioRunRecord): void {
+    const taskState = record.state.taskStates[item.taskIndex];
+    if (!taskState || taskState.status !== 'pending') {
+      return;
+    }
+    if (record.signal?.aborted) {
+      item.status = 'cancelled';
+      item.finishedAt = new Date().toISOString();
+      saveRunSnapshot(record);
+      completeRun(record, {
+        outcome: 'stopped',
+        reason: 'aborted by signal',
+        reply: '',
+      });
+      return;
+    }
+    if (record.state.iterationCount >= maxIterationCount) {
+      item.status = 'failed';
+      item.finishedAt = new Date().toISOString();
+      saveRunSnapshot(record);
+      completeRun(record, {
+        outcome: 'stopped',
+        reason: `max iteration count ${maxIterationCount} reached`,
+        reply: '',
+      });
+      return;
+    }
+
+    item.status = 'running';
+    item.startedAt = new Date().toISOString();
+    item.petRunId = randomUUID().slice(0, 8);
+    activePets.add(item.petId);
+    record.state.iterationCount += 1;
+    saveRunSnapshot(record);
+
+    void runDispatch(
+      record.state,
+      { taskIndex: item.taskIndex, brief: item.brief },
+      item.petRunId,
+      record.signal,
+      record.onToolEvent,
+      (event) => emitRunEvent(record, event),
+    ).then(async (workerRun) => {
+      item.errorMessage = workerRun.errorMessage;
+      item.finishedAt = workerRun.finishedAt ?? new Date().toISOString();
+      const resultText = workerRun.resultText;
+      if (record.signal?.aborted) {
+        item.status = 'cancelled';
+        completeRun(record, {
+          outcome: 'stopped',
+          reason: 'aborted by signal',
+          reply: workerRun.resultText ?? '',
+        });
+      } else if (taskState.status === 'pending') {
+        item.status = 'queued';
+        item.startedAt = undefined;
+      } else if (taskState.status === 'satisfied') {
+        item.status = 'done';
+        if (typeof resultText === 'string') {
+          record.taskResults.set(item.taskIndex, resultText);
+        }
+      } else {
+        item.status = 'failed';
+      }
+      saveRunSnapshot(record);
+
+      if (item.status === 'done' || item.status === 'failed') {
+        try {
+          const curateResult = await curator.curate({
+            wikiRoot: record.state.wikiRoot,
+            task: {
+              ...item,
+              resultText,
+            },
+          });
+          if (curateResult.changedPaths.length > 0) {
+            emitRunEvent(record, { type: 'wiki_updated', changedPaths: curateResult.changedPaths });
+          }
+        } catch (curatorError) {
+          item.errorMessage = item.errorMessage
+            ?? `wiki_curator_failed:${(curatorError as Error).message}`;
+          saveRunSnapshot(record);
+        }
+      }
+
+      activePets.delete(item.petId);
+      finishTaskIfRunTerminal(record);
+      scheduleQueue();
+    }).catch((error) => {
+      activePets.delete(item.petId);
+      item.status = 'failed';
+      item.errorMessage = error instanceof Error ? error.message : String(error);
+      item.finishedAt = new Date().toISOString();
+      saveRunSnapshot(record);
+      failRun(record, error);
+      scheduleQueue();
+    });
+  }
+
+  function scheduleQueue(): void {
+    if (scheduling) {
+      return;
+    }
+    scheduling = true;
+    try {
+      while (true) {
+        const item = queue.find((candidate) => candidate.status === 'queued');
+        if (!item) {
+          return;
+        }
+        const record = runs.get(item.runId);
+        if (!record || record.outcome) {
+          item.status = 'cancelled';
+          item.finishedAt = new Date().toISOString();
+          if (record) {
+            saveRunSnapshot(record);
+          }
+          continue;
+        }
+        if (!dependenciesDone(item)) {
+          return;
+        }
+        if (!petRegistry.isDispatchable(item.petId) || activePets.has(item.petId)) {
+          setRunStatus(record, 'blocked');
+          saveRunSnapshot(record);
+          return;
+        }
+        if (record.status === 'blocked') {
+          setRunStatus(record, 'running');
+          saveRunSnapshot(record);
+        }
+        dispatchQueuedTask(item, record);
+      }
+    } finally {
+      scheduling = false;
+    }
+  }
+
+  async function submitRequest(input: StudioSubmitRequestInput): Promise<StudioSubmitRequestResult> {
     const turnId = input.turnId ?? randomUUID();
     const conversationId = input.conversationId ?? turnId;
     const wikiRoot = buildWikiRoot(config.wikiBaseDir, conversationId);
     await ensureWikiSkeleton(wikiRoot);
+    const abortController = createRunAbortController(input.signal);
 
-    const emit = makeEmitter(input.onTurnEvent);
-    emit({ type: 'turn_started', turnId, userRequest: input.userRequest });
-
-    const { plan, plannerReply } = await obtainPlan({
+    const createdAt = new Date().toISOString();
+    const record = createRunRecord({
+      turnId,
+      conversationId,
       userRequest: input.userRequest,
-      explicit: input.plan,
-      wikiRoot,
-      signal: input.signal,
+      signal: abortController.signal,
       onToolEvent: input.onToolEvent,
-      conversationId,
+      onTurnEvent: input.onTurnEvent,
+      status: 'planning',
+      createdAt,
+      updatedAt: createdAt,
     });
+    runs.set(turnId, record);
+    void startPlanning(record);
 
-    if (!plan) {
-      const reason = plannerReply
-        ? `planner did not submit a plan: ${plannerReply}`
-        : 'planner did not submit a plan';
-      emit({ type: 'turn_finished', outcome: 'stopped' });
-      return {
-        turnId,
-        state: {
-          turnId,
-          conversationId,
-          userRequest: input.userRequest,
-          plan: null,
-          taskStates: [],
-          dispatches: [],
-          wikiRoot,
-          iterationCount: 0,
-        },
-        outcome: {
-          outcome: 'stopped',
-          reason,
-          reply: plannerReply ?? `(stopped: ${reason})`,
-        },
-        studio: context(),
-      };
+    return { runId: turnId, status: 'accepted' };
+  }
+
+  function getRun(runId: string): StudioRunSnapshot | null {
+    const record = runs.get(runId);
+    if (!record) {
+      return null;
     }
+    return readRunSnapshot(record);
+  }
 
-    emit({ type: 'plan_set', plan });
-
-    const state: StudioTurnState = {
-      turnId,
-      conversationId,
-      userRequest: input.userRequest,
-      plan,
-      taskStates: buildInitialTaskStates(plan),
-      dispatches: [],
-      wikiRoot,
-      iterationCount: 0,
-    };
-
-    let outcome: StudioTurnOutcome | null = null;
-
-    while (state.iterationCount < maxIterationCount) {
-      state.iterationCount += 1;
-
-      const action = decideExecuteAction(state);
-
-      if (action.type === 'finish' || action.type === 'stop') {
-        outcome = buildOutcome(state, action);
-        break;
-      }
-
-      const dispatch = await runDispatch(state, action, input.signal, input.onToolEvent, emit);
-
-      if (input.signal?.aborted) {
-        outcome = {
-          outcome: 'stopped',
-          reason: 'aborted by signal',
-          reply: dispatch.resultText ?? '',
-        };
-        break;
-      }
-    }
-
-    if (!outcome) {
-      outcome = {
-        outcome: 'stopped',
-        reason: `max iteration count ${maxIterationCount} reached`,
-        reply: '',
-      };
-    }
-
-    emit({
-      type: 'turn_finished',
-      outcome: outcome.outcome,
-      ...(outcome.outcome === 'done' ? { finalDispatchId: outcome.finalDispatchId } : {}),
-    });
-
-    return {
-      turnId,
-      state,
-      outcome,
-      studio: context(),
+  function subscribe(handler: StudioRunEventHandler): () => void {
+    runEventHandlers.add(handler);
+    return () => {
+      runEventHandlers.delete(handler);
     };
   }
+
+  async function cancelRun(runId: string): Promise<void> {
+    const record = runs.get(runId);
+    if (!record) {
+      throw new Error(`studio run "${runId}" was not registered`);
+    }
+    if (record.outcome) {
+      return;
+    }
+    record.abortController.abort(new Error('cancelled by caller'));
+    const cancelledAt = new Date().toISOString();
+    for (const item of queue) {
+      if (item.runId === runId && item.status === 'queued') {
+        item.status = 'cancelled';
+        item.finishedAt = cancelledAt;
+      }
+    }
+    completeRun(record, {
+      outcome: 'stopped',
+      reason: 'aborted by signal',
+      reply: '',
+    });
+  }
+
+  async function waitForRun(runId: string): Promise<StudioTurnResult> {
+    const record = runs.get(runId);
+    if (!record) {
+      throw new Error(`studio run "${runId}" was not registered`);
+    }
+    return await record.resultPromise;
+  }
+
+  function restoreOpenRunsFromStore(): void {
+    if (!runQueueStore) {
+      return;
+    }
+    const recovered = runQueueStore.recoverOpenRuns();
+    for (const snapshot of recovered) {
+      if (runs.has(snapshot.runId)) {
+        continue;
+      }
+      const tasks = snapshot.tasks.map((task) => ({ ...task }));
+      const taskBatch = buildTaskBatchFromSnapshot(tasks);
+      const record = createRunRecord({
+        turnId: snapshot.runId,
+        conversationId: snapshot.conversationId,
+        userRequest: snapshot.userRequest,
+        status: snapshot.status,
+        createdAt: snapshot.createdAt,
+        updatedAt: snapshot.updatedAt,
+        taskBatch,
+        taskStates: buildTaskStatesFromSnapshot(tasks),
+        iterationCount: tasks.filter((task) => task.status !== 'queued').length,
+      });
+      runs.set(snapshot.runId, record);
+      queue.push(...tasks);
+      saveRunSnapshot(record);
+      if (snapshot.status === 'planning' && tasks.length === 0) {
+        void (async () => {
+          await ensureWikiSkeleton(record.state.wikiRoot);
+          await startPlanning(record);
+        })().catch((error) => {
+          failRun(record, error);
+        });
+      }
+    }
+    scheduleQueue();
+  }
+
+  restoreOpenRunsFromStore();
 
   return {
     context,
     listAgents,
-    invoke,
+    submitRequest,
+    subscribe,
+    cancelRun,
+    getRun,
+    waitForRun,
   };
 }

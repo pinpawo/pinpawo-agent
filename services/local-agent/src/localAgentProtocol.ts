@@ -65,7 +65,7 @@ export type LocalAgentControlServerMessage =
       requestId: string;
       outcome: 'done' | 'stopped';
       reply: string;
-      finalDispatchId?: string;
+      finalPetRunId?: string;
       reason?: string;
       workdir?: string;
       runId?: string;
@@ -372,7 +372,7 @@ function parseLocalAgentServerRecord(record: Record<string, unknown>): LocalAgen
       requestId,
       outcome,
       reply,
-      finalDispatchId: readOptionalString(record, 'finalDispatchId'),
+      finalPetRunId: readOptionalString(record, 'finalPetRunId'),
       reason: readOptionalString(record, 'reason'),
       workdir: readOptionalString(record, 'workdir'),
       runId: readOptionalString(record, 'runId'),

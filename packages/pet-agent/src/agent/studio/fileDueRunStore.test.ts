@@ -95,3 +95,31 @@ test('file-backed store respects retryDelayMs across reopened instances', async 
   assert.equal(next?.run.status, 'claimed');
   assert.equal(next?.run.attempt, 2);
 });
+
+test('file-backed store backfills finalPetRunId from legacy finalDispatchId rows', async () => {
+  const root = await mkTempDir('studio-due-run-file-legacy-');
+  const storePath = path.join(root, 'studio-due-runs.json');
+  await fs.writeFile(storePath, JSON.stringify({
+    rows: [
+      {
+        runId: 'run-legacy',
+        conversationId: 'conv-legacy',
+        workdir: '/tmp/wd-legacy',
+        userRequest: 'legacy',
+        ownerUserId: null,
+        status: 'success',
+        attempt: 1,
+        createdAt: '2026-06-19T00:00:00.000Z',
+        updatedAt: '2026-06-19T00:00:01.000Z',
+        finalDispatchId: 'legacy-dispatch',
+        reply: 'done',
+      },
+    ],
+  }), 'utf8');
+
+  const store = new FileStudioDueRunStore({ filePath: storePath });
+  const row = store.getByRunId('run-legacy');
+  assert.equal(row?.finalPetRunId, 'legacy-dispatch');
+  assert.equal(row?.finalDispatchId, 'legacy-dispatch');
+  assert.equal(store.listTrace()[0]?.finalPetRunId, 'legacy-dispatch');
+});

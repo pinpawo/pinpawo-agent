@@ -52,7 +52,7 @@ export class StudioRunService {
       conversationId: request.conversationId,
     });
     const { orchestrator } = await this.buildStudio(buildStudioInputFromDeps(request));
-    const turn = await orchestrator.invoke({
+    const accepted = await orchestrator.submitRequest({
       userRequest,
       conversationId: identity.conversationId,
       turnId: runId,
@@ -60,6 +60,7 @@ export class StudioRunService {
       onTurnEvent: request.onProgress,
       onToolEvent: request.onToolEvent,
     });
+    const turn = await orchestrator.waitForRun(accepted.runId);
 
     return {
       runId: identity.runId,

@@ -97,7 +97,7 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
       return {
         resolved: {} as BuildStudioResult['resolved'],
         orchestrator: {
-          invoke: async (turn: {
+          submitRequest: async (turn: {
             onTurnEvent: (event: Record<string, unknown>) => void;
             onToolEvent: (event: unknown) => void;
           }) => {
@@ -107,11 +107,14 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
               name: 'read_file',
               input: { path: 'README.md' },
             });
+            return { runId: 'run-100', status: 'accepted' };
+          },
+          waitForRun: async () => {
             return {
               outcome: {
                 outcome: 'done',
                 reply: 'done reply',
-                finalDispatchId: 'dispatch-1',
+                finalPetRunId: 'pet-run-1',
               },
             };
           },
@@ -151,7 +154,7 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
     requestId: 'studio-1',
     outcome: 'done',
     reply: 'done reply',
-    finalDispatchId: 'dispatch-1',
+    finalPetRunId: 'pet-run-1',
     workdir: '/tmp/pinpawo-test',
     runId: 'run-100',
     conversationId: 'conv-100',
@@ -171,26 +174,32 @@ test('LocalServerStudioHandler serializes studio requests per websocket', async 
     buildStudio: async () => ({
       resolved: {} as BuildStudioResult['resolved'],
       orchestrator: {
-        invoke: async () => {
+        submitRequest: async () => {
           if (invocationEvents.length === 0) {
             invocationEvents.push('first');
             firstStarted.resolve();
+            return { runId: 'first-run', status: 'accepted' };
+          }
+          invocationEvents.push('second');
+          return { runId: 'second-run', status: 'accepted' };
+        },
+        waitForRun: async (runId: string) => {
+          if (runId === 'first-run') {
             await firstContinue.promise;
             return {
               outcome: {
                 outcome: 'done',
                 reply: 'first done',
-                finalDispatchId: 'dispatch-first',
+                finalPetRunId: 'pet-run-first',
               },
             };
           }
-          invocationEvents.push('second');
           return {
-            outcome: {
-              outcome: 'done',
-              reply: 'second done',
-              finalDispatchId: 'dispatch-second',
-            },
+              outcome: {
+                outcome: 'done',
+                reply: 'second done',
+                finalPetRunId: 'pet-run-second',
+              },
           };
         },
       } as unknown as BuildStudioResult['orchestrator'],
@@ -248,26 +257,32 @@ test('LocalServerStudioHandler discards queued studio requests after websocket d
     buildStudio: async () => ({
       resolved: {} as BuildStudioResult['resolved'],
       orchestrator: {
-        invoke: async () => {
+        submitRequest: async () => {
           if (invocationEvents.length === 0) {
             invocationEvents.push('first');
             firstStarted.resolve();
+            return { runId: 'first-run', status: 'accepted' };
+          }
+          invocationEvents.push('second');
+          return { runId: 'second-run', status: 'accepted' };
+        },
+        waitForRun: async (runId: string) => {
+          if (runId === 'first-run') {
             await firstContinue.promise;
             return {
               outcome: {
                 outcome: 'done',
                 reply: 'first done',
-                finalDispatchId: 'dispatch-first',
+                finalPetRunId: 'pet-run-first',
               },
             };
           }
-          invocationEvents.push('second');
           return {
-            outcome: {
-              outcome: 'done',
-              reply: 'second done',
-              finalDispatchId: 'dispatch-second',
-            },
+              outcome: {
+                outcome: 'done',
+                reply: 'second done',
+                finalPetRunId: 'pet-run-second',
+              },
           };
         },
       } as unknown as BuildStudioResult['orchestrator'],
@@ -337,11 +352,12 @@ test('LocalServerStudioHandler fills runId and conversationId defaults', async (
       return {
         resolved: {} as BuildStudioResult['resolved'],
         orchestrator: {
-          invoke: async () => ({
+          submitRequest: async () => ({ runId: 'studio-default', status: 'accepted' }),
+          waitForRun: async () => ({
             outcome: {
               outcome: 'done',
               reply: 'done reply',
-              finalDispatchId: 'dispatch-default',
+              finalPetRunId: 'pet-run-default',
             },
           }),
         } as unknown as BuildStudioResult['orchestrator'],
@@ -355,12 +371,18 @@ test('LocalServerStudioHandler fills runId and conversationId defaults', async (
     userRequest: 'plan default ids',
   }, createDeps());
 
-  const response = sent.find((item): item is { type: 'studio_response'; requestId: string; runId?: string; conversationId?: string; finalDispatchId: string; } => (
+  const response = sent.find((item): item is {
+    type: 'studio_response';
+    requestId: string;
+    runId?: string;
+    conversationId?: string;
+    finalPetRunId: string;
+  } => (
     Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
   ));
   assert.ok(response);
   assert.equal(response.requestId, 'studio-default');
   assert.equal(response.runId, 'studio-default');
   assert.equal(response.conversationId, 'studio-default');
-  assert.equal(response.finalDispatchId, 'dispatch-default');
+  assert.equal(response.finalPetRunId, 'pet-run-default');
 });

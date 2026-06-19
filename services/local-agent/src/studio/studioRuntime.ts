@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {
   createLLMWikiCurator,
+  FileStudioRunQueueStore,
   createPetAgentRuntime,
   createStudioOrchestrator,
   defaultPromptProvider,
@@ -197,6 +198,9 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
     wikiBaseDir: input.wikiBaseDir
       ?? path.join(workdirStateRoot, 'studio-wiki'),
     workdir: effectiveWorkdir,
+    runQueueStore: new FileStudioRunQueueStore({
+      filePath: path.join(workdirStateRoot, 'studio-run-queue.json'),
+    }),
     curator,
     ...(studio.maxIterationCount !== undefined ? { maxIterationCount: studio.maxIterationCount } : {}),
     ...(studio.maxRetryPerTask !== undefined ? { maxRetryPerTask: studio.maxRetryPerTask } : {}),

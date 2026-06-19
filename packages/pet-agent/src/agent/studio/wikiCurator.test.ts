@@ -13,20 +13,25 @@ import {
   ensureWikiSkeleton,
   fileReadPromptProvider,
 } from './wikiCurator';
-import type { StudioDispatchState } from './types';
+import type { StudioWikiTaskSource } from './wikiCurator';
 
 async function makeWikiTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-function sampleDispatch(overrides: Partial<StudioDispatchState> = {}): StudioDispatchState {
+function sampleTask(overrides: Partial<StudioWikiTaskSource> = {}): StudioWikiTaskSource {
   return {
-    id: 'd1',
+    runId: 'run-1',
+    conversationId: 'conv-1',
     taskIndex: 0,
     petId: 'script',
-    status: 'finished',
+    acceptanceCriteria: [],
+    deps: [],
+    status: 'done',
+    petRunId: 'd1',
     brief: '写视频脚本结构',
     resultText: '已完成脚本结构,3 段式,每段 30 秒。',
+    enqueuedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
     finishedAt: new Date().toISOString(),
     ...overrides,
@@ -38,7 +43,7 @@ test('skeleton curator writes source file and appends index', async () => {
   const curator = createSkeletonWikiCurator();
   const result = await curator.curate({
     wikiRoot,
-    dispatch: sampleDispatch(),
+    task: sampleTask(),
   });
 
   assert.ok(result.changedPaths.some((p) => p.includes('sources/')));
@@ -49,6 +54,7 @@ test('skeleton curator writes source file and appends index', async () => {
     'utf8',
   );
   assert.match(source, /已完成脚本结构/);
+  assert.match(source, /petRunId: d1/);
   const index = await fs.readFile(path.join(wikiRoot, 'index.md'), 'utf8');
   assert.match(index, /d1/);
 });
@@ -88,7 +94,7 @@ test('LLM curator passes wiki snapshot to model and applies structured output', 
 
   const result = await curator.curate({
     wikiRoot,
-    dispatch: sampleDispatch(),
+    task: sampleTask(),
   });
 
   // System prompt 是默认 curator prompt
@@ -145,7 +151,7 @@ test('LLM curator uses caller-provided promptProvider override', async () => {
     promptProvider: () => customPrompt,
   });
 
-  await curator.curate({ wikiRoot, dispatch: sampleDispatch() });
+  await curator.curate({ wikiRoot, task: sampleTask() });
   assert.equal(capturedSystemPrompt.trim(), customPrompt.trim());
 });
 
@@ -168,7 +174,7 @@ test('LLM curator forwards structured output options to model', async () => {
     structuredOutput: { method: 'functionCalling', strict: false },
   });
 
-  await curator.curate({ wikiRoot, dispatch: sampleDispatch() });
+  await curator.curate({ wikiRoot, task: sampleTask() });
 
   assert.deepEqual(capturedOptions, {
     name: 'curate_wiki',
@@ -196,8 +202,8 @@ test('LLM curator calls promptProvider on each curate invocation', async () => {
     },
   });
 
-  await curator.curate({ wikiRoot, dispatch: sampleDispatch() });
-  await curator.curate({ wikiRoot, dispatch: sampleDispatch({ id: 'd2' }) });
+  await curator.curate({ wikiRoot, task: sampleTask() });
+  await curator.curate({ wikiRoot, task: sampleTask({ petRunId: 'd2' }) });
   assert.equal(providerCalls, 2, 'provider should be invoked each curate call');
 });
 
@@ -240,7 +246,7 @@ test('LLM curator rejects unsafe topic file names', async () => {
   } as unknown as BaseChatModel;
 
   const curator = createLLMWikiCurator({ models: { act: fakeModel } });
-  await curator.curate({ wikiRoot, dispatch: sampleDispatch() });
+  await curator.curate({ wikiRoot, task: sampleTask() });
 
   // 只有 legit.md 被写入
   const entries = await fs.readdir(path.join(wikiRoot, 'topics'));

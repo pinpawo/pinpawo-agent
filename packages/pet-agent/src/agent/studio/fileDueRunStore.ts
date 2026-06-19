@@ -129,7 +129,7 @@ export class FileStudioDueRunStore implements StudioDueRunStore {
 
   succeed(
     claim: StudioDueRunClaim,
-    payload: { finalDispatchId?: string; reply?: string },
+    payload: { finalPetRunId?: string; reply?: string },
   ): StudioDueRunRecord {
     return this.withLock(() => {
       this.syncFromDisk();
@@ -320,6 +320,11 @@ export class FileStudioDueRunStore implements StudioDueRunStore {
       ...(typeof row.runAt === 'string' ? { runAt: row.runAt } : {}),
       ...(typeof row.errorCode === 'string' ? { errorCode: row.errorCode } : {}),
       ...(typeof row.errorDetail === 'string' ? { errorDetail: row.errorDetail } : {}),
+      ...(typeof row.finalPetRunId === 'string'
+        ? { finalPetRunId: row.finalPetRunId }
+        : typeof row.finalDispatchId === 'string'
+          ? { finalPetRunId: row.finalDispatchId }
+          : {}),
       ...(typeof row.finalDispatchId === 'string' ? { finalDispatchId: row.finalDispatchId } : {}),
       ...(typeof row.reply === 'string' ? { reply: row.reply } : {}),
       ...(typeof row.claimedAt === 'string' ? { claimedAt: row.claimedAt } : {}),

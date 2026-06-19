@@ -30,7 +30,7 @@ export type StudioDueRunStoreTrace = {
   ownerUserId: string | null;
   errorCode?: string;
   errorDetail?: string;
-  finalDispatchId?: string;
+  finalPetRunId?: string;
 };
 
 export type StudioDueRunClaim = {
@@ -62,7 +62,7 @@ export type StudioDueRunStore = {
   start(claim: StudioDueRunClaim): StudioDueRunRecord;
   succeed(
     claim: StudioDueRunClaim,
-    payload: { finalDispatchId?: string; reply?: string },
+    payload: { finalPetRunId?: string; reply?: string },
   ): StudioDueRunRecord;
   fail(
     claim: StudioDueRunClaim,
@@ -162,7 +162,7 @@ export class InMemoryStudioDueRunStore implements StudioDueRunStore {
       ownerUserId: row.ownerUserId,
       errorCode: row.errorCode,
       errorDetail: row.errorDetail,
-      finalDispatchId: row.finalDispatchId,
+      finalPetRunId: row.finalPetRunId,
     }));
   }
 
@@ -192,13 +192,13 @@ export class InMemoryStudioDueRunStore implements StudioDueRunStore {
 
   succeed(
     claim: StudioDueRunClaim,
-    payload: { finalDispatchId?: string; reply?: string },
+    payload: { finalPetRunId?: string; reply?: string },
   ): StudioDueRunRecord {
     return this.applyWithClaim(
       claim,
       {
         type: 'succeed',
-        finalDispatchId: payload.finalDispatchId,
+        finalPetRunId: payload.finalPetRunId,
         reply: payload.reply,
       },
       'succeeding',

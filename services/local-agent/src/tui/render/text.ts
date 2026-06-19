@@ -101,13 +101,13 @@ export const TUI_TEXT = {
   operationFailed: '失败',
   operationInterrupted: '已中断',
   operationCompleted: '已完成',
-  studioProgressPlanSet: (taskCount: number) => `[studio] plan 设定：${taskCount} 项`,
-  studioProgressDispatchStarted: (taskIndex: string | number, petId: string) =>
-    `[studio] dispatch[#${taskIndex}] → pet:${petId}`,
+  studioProgressTasksQueued: (taskCount: number) => `[studio] tasks queued：${taskCount} 项`,
+  studioProgressTaskStarted: (taskIndex: string | number, petId: string) =>
+    `[studio] task[#${taskIndex}] → pet:${petId}`,
   studioProgressTaskStatusChanged: (taskIndex: string | number, status: string) =>
     `[studio] task[#${taskIndex}] → ${status}`,
   studioProgressWikiUpdated: (changedCount: number) => `[studio] wiki 更新 ${changedCount} 项`,
-  studioProgressDispatchFinished: (dispatchId: string, status: string) =>
-    `[studio] dispatch ${dispatchId} → ${status}`,
+  studioProgressTaskFinished: (petRunId: string, status: string) =>
+    `[studio] pet run ${petRunId} → ${status}`,
   studioProgressUnknown: (type: string) => `[studio] event: ${type}`,
 } as const;

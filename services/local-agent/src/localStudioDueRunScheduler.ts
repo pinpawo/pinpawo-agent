@@ -22,7 +22,7 @@ export type LocalStudioDueRunCompletion = {
   workdir: string;
   outcome: 'done' | 'stopped';
   reply: string;
-  finalDispatchId?: string;
+  finalPetRunId?: string;
   reason?: string;
 };
 
@@ -72,7 +72,7 @@ type LocalStudioDueRunSchedulerOptions = {
   filterWorkdir?: string | string[];
   ownerUserId?: string | null;
   pollIntervalMs?: number;
-  defaultFinalDispatchId?: string;
+  defaultFinalPetRunId?: string;
 };
 
 export class LocalStudioDueRunScheduler {
@@ -81,7 +81,7 @@ export class LocalStudioDueRunScheduler {
   private readonly filterWorkdir?: string | string[];
   private readonly ownerUserId: string | null;
   private readonly pollIntervalMs: number;
-  private readonly defaultFinalDispatchId: string | undefined;
+  private readonly defaultFinalPetRunId: string | undefined;
   private readonly waitersByKey = new Map<string, Set<Waiter>>();
   private readonly claimRunning = new Set<string>();
   private stopSignal = new AbortController();
@@ -96,7 +96,7 @@ export class LocalStudioDueRunScheduler {
     this.filterWorkdirList = this.normalizeWorkdirFilter(this.filterWorkdir);
     this.ownerUserId = options.ownerUserId ?? null;
     this.pollIntervalMs = options.pollIntervalMs ?? 200;
-    this.defaultFinalDispatchId = options.defaultFinalDispatchId;
+    this.defaultFinalPetRunId = options.defaultFinalPetRunId;
   }
 
   async submit(input: LocalStudioDueRunSubmitOptions): Promise<LocalStudioDueRunCompletion> {
@@ -273,9 +273,9 @@ export class LocalStudioDueRunScheduler {
         onToolEvent,
       });
       const completed = this.studioDueRuns.succeed(claim, {
-        finalDispatchId: result.turn.outcome.outcome === 'done'
-          ? result.turn.outcome.finalDispatchId
-          : this.defaultFinalDispatchId,
+        finalPetRunId: result.turn.outcome.outcome === 'done'
+          ? result.turn.outcome.finalPetRunId
+          : this.defaultFinalPetRunId,
         reply: result.turn.outcome.reply,
       });
       const completion = this.toCompletionFromResult(completed, result.turn.outcome);
@@ -507,7 +507,7 @@ export class LocalStudioDueRunScheduler {
         workdir: row.workdir,
         outcome: 'done',
         reply: turnOutcome.reply,
-        finalDispatchId: turnOutcome.finalDispatchId,
+        finalPetRunId: turnOutcome.finalPetRunId ?? row.finalPetRunId ?? row.finalDispatchId,
       };
     }
 
@@ -531,7 +531,7 @@ export class LocalStudioDueRunScheduler {
         workdir: row.workdir,
         outcome: 'done',
         reply: row.reply ?? '',
-        finalDispatchId: row.finalDispatchId,
+        finalPetRunId: row.finalPetRunId ?? row.finalDispatchId,
       };
     }
 

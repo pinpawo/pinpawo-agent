@@ -37,7 +37,7 @@ type StudioHandleCompletion = {
   workdir: string;
   outcome: 'done' | 'stopped';
   reply: string;
-  finalDispatchId?: string;
+  finalPetRunId?: string;
   reason?: string;
 };
 
@@ -191,7 +191,7 @@ export class LocalServerStudioHandler {
           requestId,
           outcome: 'done',
           reply: completion.reply,
-          ...(completion.finalDispatchId ? { finalDispatchId: completion.finalDispatchId } : {}),
+          ...(completion.finalPetRunId ? { finalPetRunId: completion.finalPetRunId } : {}),
           workdir: completion.workdir,
           runId: completion.runId,
           conversationId: completion.conversationId,
@@ -264,7 +264,9 @@ export class LocalServerStudioHandler {
         outcome: result.turn.outcome.outcome,
         reply: result.turn.outcome.reply,
         ...(result.turn.outcome.outcome === 'done'
-          ? { finalDispatchId: result.turn.outcome.finalDispatchId }
+          ? {
+              finalPetRunId: result.turn.outcome.finalPetRunId,
+            }
           : { reason: result.turn.outcome.reason }),
       };
     }

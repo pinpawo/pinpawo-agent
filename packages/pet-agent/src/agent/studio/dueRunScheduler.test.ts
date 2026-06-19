@@ -51,13 +51,17 @@ test('claim/start/succeed moves through pending -> claimed -> running -> success
   assert.equal(running.status, 'running');
 
   const done = store.succeed({ run: running, token: claim.token }, {
-    finalDispatchId: 'dispatch-1',
+    finalPetRunId: 'pet-run-1',
     reply: 'ok',
   });
   assert.equal(done.status, 'success');
-  assert.equal(done.finalDispatchId, 'dispatch-1');
+  assert.equal(done.finalPetRunId, 'pet-run-1');
+  assert.equal(done.finalDispatchId, undefined);
   assert.equal(done.reply, 'ok');
   assert.equal(done.completedAt, '2026-06-19T00:00:02.000Z');
+
+  const trace = store.listTrace();
+  assert.equal(trace[0]?.finalPetRunId, 'pet-run-1');
 });
 
 test('failed rows can retry after failed transition', () => {

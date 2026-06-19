@@ -53,11 +53,12 @@ test('buildStudioDueRunRecord/cancel transitions follow claim→start→success 
 
   const done = applyStudioDueRunEvent(running, {
     type: 'succeed',
-    finalDispatchId: 'dispatch-1',
+    finalPetRunId: 'pet-run-1',
     reply: 'done',
   }, '2026-06-19T00:00:03.000Z');
   assert.equal(done.status, 'success');
-  assert.equal(done.finalDispatchId, 'dispatch-1');
+  assert.equal(done.finalPetRunId, 'pet-run-1');
+  assert.equal(done.finalDispatchId, undefined);
   assert.equal(done.reply, 'done');
   assert.equal(done.completedAt, '2026-06-19T00:00:03.000Z');
   assert.equal(isTerminalStudioDueRunStatus(done.status), true);
@@ -98,7 +99,7 @@ test('invalid transition throws', () => {
   });
 
   assert.throws(
-    () => applyStudioDueRunEvent(row, { type: 'succeed', finalDispatchId: 'dispatch-1' }),
+    () => applyStudioDueRunEvent(row, { type: 'succeed', finalPetRunId: 'pet-run-1' }),
     /invalid due-run status transition/,
   );
 });

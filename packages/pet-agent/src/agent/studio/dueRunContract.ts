@@ -14,6 +14,7 @@ export type StudioDueRunRecord = {
   runAt?: string;
   errorCode?: string;
   errorDetail?: string;
+  finalPetRunId?: string;
   finalDispatchId?: string;
   reply?: string;
   createdAt: string;
@@ -25,7 +26,7 @@ export type StudioDueRunRecord = {
 export type StudioDueRunEvent =
   | { type: 'claim' }
   | { type: 'start' }
-  | { type: 'succeed'; finalDispatchId?: string; reply?: string }
+  | { type: 'succeed'; finalPetRunId?: string; reply?: string }
   | {
       type: 'fail';
       errorCode?: string;
@@ -61,7 +62,7 @@ export function buildStudioDueRunRecord(input: {
   ownerUserId?: string | null;
   userRequest: string;
   now?: string;
-}): Omit<StudioDueRunRecord, 'status' | 'attempt' | 'createdAt' | 'updatedAt' | 'errorCode' | 'errorDetail' | 'finalDispatchId' | 'reply' | 'claimedAt' | 'completedAt'> &
+}): Omit<StudioDueRunRecord, 'status' | 'attempt' | 'createdAt' | 'updatedAt' | 'errorCode' | 'errorDetail' | 'finalPetRunId' | 'finalDispatchId' | 'reply' | 'claimedAt' | 'completedAt'> &
   Pick<StudioDueRunRecord, 'status' | 'attempt' | 'createdAt' | 'updatedAt'> {
   const now = input.now ?? new Date().toISOString();
   const identity = buildStudioRunIdentity({
@@ -114,7 +115,8 @@ export function applyStudioDueRunEvent(
     return {
       ...next,
       status: 'success',
-      finalDispatchId: event.finalDispatchId,
+      finalPetRunId: event.finalPetRunId,
+      finalDispatchId: undefined,
       reply: event.reply,
       completedAt: timestamp,
       errorCode: undefined,
@@ -139,6 +141,7 @@ export function applyStudioDueRunEvent(
       runAt: undefined,
       errorCode: undefined,
       errorDetail: undefined,
+      finalPetRunId: undefined,
       finalDispatchId: undefined,
       reply: undefined,
     };

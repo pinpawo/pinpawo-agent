@@ -29,6 +29,12 @@ export {
   type StudioDueRunStoreTrace,
 } from './dueRunScheduler';
 export { FileStudioDueRunStore } from './fileDueRunStore';
+export {
+  FileStudioRunQueueStore,
+  InMemoryStudioRunQueueStore,
+  type StudioRunQueueStore,
+  type StudioRunQueueStoreRecoveryOptions,
+} from './runQueueStore';
 export type {
   CuratorPromptProvider,
   LLMWikiCuratorConfig,
@@ -42,26 +48,27 @@ export type {
   StudioDueRunStatus,
 } from './dueRunContract';
 export type {
-  ExecuteAction,
   HumanReviewer,
   HumanReviewerRequest,
   PetAgentRuntime,
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
-  StudioDispatchState,
-  StudioDispatchStatus,
   StudioOrchestrator,
   StudioOrchestratorConfig,
-  StudioOrchestratorInvokeInput,
-  StudioTask,
-  StudioTaskPlan,
-  StudioTaskRuntimeState,
+  StudioQueueItem,
+  StudioRun,
+  StudioRunEvent,
+  StudioRunEventHandler,
+  StudioRunSnapshot,
+  StudioRunStatus,
+  StudioSubmitRequestInput,
+  StudioSubmitRequestResult,
+  StudioTaskQueueItem,
   StudioTaskStatus,
   StudioTurnEvent,
   StudioTurnEventHandler,
   StudioTurnOutcome,
   StudioTurnResult,
-  StudioTurnState,
   StudioRunIdentity,
 } from './types';

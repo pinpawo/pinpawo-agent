@@ -123,12 +123,13 @@ test('formats studio progress events from typed local-agent events', () => {
       type: 'studio.progress',
       requestId: 'req-1',
       event: {
-        type: 'dispatch_started',
+        type: 'task_started',
         petId: 'planner',
         taskIndex: 2,
+        petRunId: 'pet-run-1',
       },
     }),
-    '[studio] dispatch[#2] → pet:planner',
+    '[studio] task[#2] → pet:planner',
   );
 });
 

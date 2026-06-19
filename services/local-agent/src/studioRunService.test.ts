@@ -51,10 +51,11 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
   const service = new StudioRunService({
     buildStudio: async (input) => {
       buildInputs.push(input);
+      let result: StudioTurnResult | null = null;
       return {
         resolved: {} as BuildStudioResult['resolved'],
         orchestrator: {
-          invoke: async (turn: {
+          submitRequest: async (turn: {
             userRequest: string;
             conversationId?: string;
             turnId?: string;
@@ -68,16 +69,20 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
             });
             turn.onTurnEvent?.({ type: 'turn_started' });
             turn.onToolEvent?.({ event: 'on_tool_start', name: 'read_file' });
-            return {
+            result = {
               turnId: turn.turnId ?? 'run-1',
-              state: {},
               outcome: {
                 outcome: 'done',
                 reply: 'done reply',
-                finalDispatchId: 'dispatch-1',
+                finalPetRunId: 'pet-run-1',
               },
               studio: {},
             } as StudioTurnResult;
+            return { runId: turn.turnId ?? 'run-1', status: 'accepted' };
+          },
+          waitForRun: async () => {
+            assert.ok(result, 'submitRequest should run before waitForRun');
+            return result;
           },
         } as unknown as BuildStudioResult['orchestrator'],
       };
@@ -132,10 +137,11 @@ test('StudioRunService falls back to deps.workdir when runtimeConfig is absent',
   const service = new StudioRunService({
     buildStudio: async (input) => {
       buildInputs.push(input);
+      let result: StudioTurnResult | null = null;
       return {
         resolved: {} as BuildStudioResult['resolved'],
         orchestrator: {
-          invoke: async (turn: {
+          submitRequest: async (turn: {
             userRequest: string;
             conversationId?: string;
             turnId?: string;
@@ -144,16 +150,20 @@ test('StudioRunService falls back to deps.workdir when runtimeConfig is absent',
           }) => {
             turn.onTurnEvent?.({ type: 'turn_started' });
             turn.onToolEvent?.({ event: 'on_tool_start', name: 'read_file' });
-            return {
+            result = {
               turnId: turn.turnId ?? 'run-legacy',
-              state: {},
               outcome: {
                 outcome: 'done',
                 reply: 'legacy reply',
-                finalDispatchId: 'dispatch-legacy',
+                finalPetRunId: 'pet-run-legacy',
               },
               studio: {},
             } as StudioTurnResult;
+            return { runId: turn.turnId ?? 'run-legacy', status: 'accepted' };
+          },
+          waitForRun: async () => {
+            assert.ok(result, 'submitRequest should run before waitForRun');
+            return result;
           },
         } as unknown as BuildStudioResult['orchestrator'],
       };

@@ -42,20 +42,22 @@ function createStudioRunService(onRunStart?: () => void): StudioRunService {
     return {
       resolved: {} as BuildStudioResult['resolved'],
       orchestrator: {
-        invoke: async (turn: {
+        submitRequest: async (turn: {
           onTurnEvent?: (event: { type: string }) => void;
           onToolEvent?: (event: unknown) => void;
           conversationId?: string;
           turnId?: string;
         }) => {
           turn.onTurnEvent?.({ type: 'turn_started' });
+          return { runId: turn.turnId ?? 'run', status: 'accepted' };
+        },
+        waitForRun: async (runId: string) => {
           return {
-            turnId: turn.turnId ?? 'run',
-            state: {},
+            turnId: runId,
             outcome: {
               outcome: 'done',
               reply: 'done',
-              finalDispatchId: 'dispatch-1',
+              finalPetRunId: 'pet-run-1',
             },
             studio: {} as StudioTurnResult['studio'],
           } as StudioTurnResult;
@@ -110,7 +112,7 @@ test('LocalStudioDueRunScheduler deduplicates concurrent submissions for same id
   assert.equal(first.idempotencyKey, third.idempotencyKey);
   assert.equal(runServiceCalls, 1);
   assert.equal(first.workdir, '/tmp/wd-dedup');
-  assert.equal(first.finalDispatchId, 'dispatch-1');
+  assert.equal(first.finalPetRunId, 'pet-run-1');
   scheduler.stop();
 });
 
@@ -279,7 +281,7 @@ test('LocalStudioDueRunScheduler.metrics summarizes queue latency, run duration,
   assert.ok(claimA);
   store.start(claimA);
   store.succeed(claimA, {
-    finalDispatchId: 'dispatch-a',
+    finalPetRunId: 'pet-run-a',
     reply: 'ok',
   });
 

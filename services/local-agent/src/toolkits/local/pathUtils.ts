@@ -1,8 +1,8 @@
 import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
-import { config } from '../../config';
+import { resolveDefaultWorkdir } from '../../runtimeConfig';
 
-let localToolsWorkdir = config.workdir;
+let localToolsWorkdir = resolveDefaultWorkdir();
 
 export function setLocalToolsWorkdir(workdir: string) {
   localToolsWorkdir = workdir;

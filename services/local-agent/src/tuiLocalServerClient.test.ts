@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   parseHistoryMessages,
+  parseLocalServerRuntime,
   parseResumeSessionSummary,
   TuiLocalServerClient,
 } from './tui/tuiLocalServerClient';
@@ -39,6 +40,32 @@ test('parseResumeSessionSummary validates resume session payloads', () => {
     active: true,
   });
   assert.equal(parseResumeSessionSummary({ id: 'missing-title' }), null);
+});
+
+test('parseLocalServerRuntime reads workdir-scoped runtime paths', () => {
+  assert.deepEqual(parseLocalServerRuntime({
+    llm_model: 'deepseek-v4-pro',
+    llm_context_window_tokens: '64000',
+    workdir: '/tmp/workspace',
+    state_root: '/tmp/workspace/.pinpawo',
+    studio_config_path: '/tmp/workspace/.pinpawo/studio.json',
+    studio_config_source: 'legacy_home',
+    studio_config_active_path: '/home/user/.pinpawo/studio.json',
+    legacy_studio_config_path: '/home/user/.pinpawo/studio.json',
+    pets_dir: '/tmp/workspace/.pinpawo/pets',
+    studio_wiki_base_dir: '/tmp/workspace/.pinpawo/studio-wiki',
+  }), {
+    model: 'deepseek-v4-pro',
+    contextWindow: 64000,
+    cwd: '/tmp/workspace',
+    stateRoot: '/tmp/workspace/.pinpawo',
+    studioConfigPath: '/tmp/workspace/.pinpawo/studio.json',
+    studioConfigSource: 'legacy_home',
+    studioConfigActivePath: '/home/user/.pinpawo/studio.json',
+    legacyStudioConfigPath: '/home/user/.pinpawo/studio.json',
+    petsDir: '/tmp/workspace/.pinpawo/pets',
+    studioWikiBaseDir: '/tmp/workspace/.pinpawo/studio-wiki',
+  });
 });
 
 test('TuiLocalServerClient reads sessions, resume payloads, history, and health', async () => {

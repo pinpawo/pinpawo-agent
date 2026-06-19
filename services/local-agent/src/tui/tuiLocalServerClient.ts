@@ -20,6 +20,13 @@ export type LocalServerRuntimeSnapshot = {
   model?: string;
   contextWindow?: number;
   cwd?: string;
+  stateRoot?: string;
+  studioConfigPath?: string;
+  studioConfigSource?: string;
+  studioConfigActivePath?: string;
+  legacyStudioConfigPath?: string;
+  petsDir?: string;
+  studioWikiBaseDir?: string;
 };
 
 export class TuiLocalServerClient {
@@ -210,6 +217,13 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
       : null;
   const rawModel = pickString(record, ['llm_model', 'llmModel', 'model']);
   const rawWorkdir = pickString(record, ['workdir', 'workDir', 'cwd', 'work_dir']);
+  const rawStateRoot = pickString(record, ['state_root', 'stateRoot']);
+  const rawStudioConfigPath = pickString(record, ['studio_config_path', 'studioConfigPath']);
+  const rawStudioConfigSource = pickString(record, ['studio_config_source', 'studioConfigSource']);
+  const rawStudioConfigActivePath = pickString(record, ['studio_config_active_path', 'studioConfigActivePath']);
+  const rawLegacyStudioConfigPath = pickString(record, ['legacy_studio_config_path', 'legacyStudioConfigPath']);
+  const rawPetsDir = pickString(record, ['pets_dir', 'petsDir']);
+  const rawStudioWikiBaseDir = pickString(record, ['studio_wiki_base_dir', 'studioWikiBaseDir']);
   const rawContextWindow =
     pickString(record, ['llm_context_window_tokens', 'llmContextWindowTokens', 'contextWindow', 'context_window_tokens'])
     ?? record.llm_context_window_tokens
@@ -227,5 +241,12 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
     model: rawModel ?? nestedModel,
     contextWindow: parsePositiveInteger(rawContextWindow) ?? nestedContextWindow,
     cwd: rawWorkdir ?? pickString(nested ?? {}, ['workdir', 'cwd']),
+    stateRoot: rawStateRoot,
+    studioConfigPath: rawStudioConfigPath,
+    studioConfigSource: rawStudioConfigSource,
+    studioConfigActivePath: rawStudioConfigActivePath,
+    legacyStudioConfigPath: rawLegacyStudioConfigPath,
+    petsDir: rawPetsDir,
+    studioWikiBaseDir: rawStudioWikiBaseDir,
   };
 }

@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
-import { config } from './config';
+import { loadStoredConfig, type StoredConfig } from './storage';
 
 export type LocalAgentRuntimeConfig = {
   workdir: string;
@@ -22,7 +22,17 @@ export function resolveUserDir(input: string): string {
   return isAbsolute(trimmed) ? trimmed : resolve(process.cwd(), trimmed);
 }
 
-export function buildLocalAgentRuntimeConfig(workdir = config.workdir): LocalAgentRuntimeConfig {
+export function resolveDefaultWorkdir(
+  env: Record<string, string | undefined> = process.env,
+  stored: Pick<StoredConfig, 'workdir'> = loadStoredConfig(),
+): string {
+  return env.PINPAWO_WORKDIR?.trim()
+    || (typeof stored.workdir === 'string' ? stored.workdir.trim() : '')
+    || process.cwd()
+    || homedir();
+}
+
+export function buildLocalAgentRuntimeConfig(workdir = resolveDefaultWorkdir()): LocalAgentRuntimeConfig {
   const resolvedWorkdir = resolveUserDir(workdir || homedir());
   const stateRoot = resolve(resolvedWorkdir, '.pinpawo');
   return {

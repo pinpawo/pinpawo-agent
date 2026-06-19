@@ -93,7 +93,8 @@ CLI --workdir
 > homedir()
 ```
 
-建议默认优先 `process.cwd()`，因为用户通常是在项目目录中启动 local agent。若担心兼容性，可以第一阶段继续保留 `homedir()` 默认，但在文档和 CLI 输出中鼓励显式传 `--workdir`。
+默认优先 `process.cwd()`，因为用户通常是在项目目录中启动 local agent。
+只有在没有可用 cwd 的极端情况下才回落到 `homedir()`。
 
 解析规则：
 
@@ -229,7 +230,8 @@ fallback: ~/.pinpawo/studio.json
 如果命中 fallback：
 
 - 打印 warning。
-- `/runtime` 或 `/health` 返回 `studio_config_source: "legacy_home"`。
+- `/runtime` 返回 `studio_config_source: "legacy_home"`，并给出
+  `studio_config_active_path`。
 - 后续提供迁移命令或 setup 提示。
 
 迁移命令可以后续补：
@@ -247,6 +249,12 @@ pinpawo-agent studio migrate --workdir /path/to/project
 ```
 
 默认不删除旧文件。
+
+当前 local-agent 已提供该迁移命令。默认跳过已有目标文件，传 `--force`
+时才覆盖目标 workdir 下的 Studio 配置、pets 配置和 wiki 目录。
+`/runtime` 也会返回 `studio_config_source`、`studio_config_active_path` 和
+`legacy_studio_config_path`，TUI runtime info 会显示实际使用的 Studio 配置路径
+及来源（工作区 / 旧全局 / 缺失）。
 
 ## CLI 和服务启动
 
@@ -367,6 +375,14 @@ studio_schedule
 - 用户不需要猜当前读取的是哪个 studio config。
 - 旧配置可复制到新工作区，不自动删除旧配置。
 
+当前实现：
+
+- TUI 从 local server `/runtime` 读取 effective workdir 和
+  `<workdir>/.pinpawo/studio.json` 路径并展示。
+- `setup --workdir <dir>` 检查该 workdir 下的 Studio 配置，缺失时提示迁移命令。
+- `studio migrate --workdir <dir> [--force]` 将旧 `~/.pinpawo` Studio 三件套复制到
+  `<workdir>/.pinpawo/`。
+
 ### Phase 5: API/Scheduler 工作区化
 
 目标：App/API scheduler 调用 Studio run 时也使用明确 workspace/runtime config。
@@ -381,6 +397,28 @@ studio_schedule
 
 - scheduler 不直接读全局 Studio 配置。
 - 不同 workspace 的 scheduled runs 互不污染 wiki、artifact、checkpoint。
+
+当前 repo 状态：`pinpawo-agent` 只包含 local-agent 和 shared pet-agent runtime，
+没有 App/API scheduler 服务代码。local-agent 已通过 `LocalAgentRuntimeConfig` 和
+`/runtime` 暴露 workdir-scoped 路径；API/Scheduler 落地时应复用同一 runtime config
+契约，而不是重新引入全局 `~/.pinpawo/studio.json` 读取。
+
+当前 local-agent 可交付边界：
+
+- 新增 `StudioRunService`，输入显式包含 `LocalServerDeps.runtimeConfig`、`runId`、
+  `conversationId`、review bridge 和事件回调。
+- `LocalServerStudioHandler` 只保留 WebSocket、inflight 和 review routing 逻辑，
+  实际 Studio turn 交给 `StudioRunService`。
+- `StudioRunService` 使用 `runId` 作为 Studio `turnId`，并派生稳定
+  `studio:<conversationId>:run:<runId>` idempotency key，供未来 scheduler/job 表持久化使用。
+- 未来 App/API scheduler 接入时，应由 scheduler 解析 workspace/workdir 后构造
+  `LocalAgentRuntimeConfig`，再调用 `StudioRunService`；不要直接调用 `buildStudioForTurn()`。
+
+当前 repo 之外仍未完成：
+
+- scheduled Studio run 表需要记录 workspace id 或 workdir。
+- due-run claim、retry、去重和 idempotency key 持久化需要在 App/API scheduler 服务实现。
+- scheduler 侧 side effect 需要以 `runId` 和 idempotency key 做幂等保护。
 
 ## 测试计划
 

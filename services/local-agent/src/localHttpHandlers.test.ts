@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import type { LocalServerDeps } from './localServerTypes';
@@ -153,4 +156,54 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
   assert.equal(payload.agent_run_phase, 'using_tool');
 
   clearAgentRunActivity('req-1');
+});
+
+test('handleLocalHttpRequest exposes workdir Studio config source on runtime endpoint', async () => {
+  const workdir = await fs.mkdtemp(join(tmpdir(), 'pinpawo-runtime-'));
+  const stateRoot = join(workdir, '.pinpawo');
+  const studioConfigPath = join(stateRoot, 'studio.json');
+  await fs.mkdir(stateRoot, { recursive: true });
+  await fs.writeFile(studioConfigPath, '{}', 'utf8');
+
+  const res = makeRes();
+  assert.equal(handleLocalHttpRequest(makeReq('/runtime', 'Bearer secret'), res, {
+    actorId: 'pet-a',
+    llmConfig: {
+      model: 'test-model',
+      contextWindowTokens: 32000,
+    },
+    workdir,
+    runtimeConfig: {
+      workdir,
+      stateRoot,
+      studioConfigPath,
+      petsDir: join(stateRoot, 'pets'),
+      studioWikiBaseDir: join(stateRoot, 'studio-wiki'),
+      checkpointPath: join(stateRoot, 'checkpoints.json'),
+      tuiCheckpointPath: join(stateRoot, 'checkpoints-tui.json'),
+      tuiSessionPath: join(stateRoot, 'tui-sessions.json'),
+      capabilityArtifactRoot: join(stateRoot, 'capability-artifacts'),
+    },
+  } as LocalServerDeps, {
+    authToken: 'secret',
+    loadHistory: async () => [],
+    listSessions: async () => [],
+    resumeSession: async () => {
+      throw new Error('not called');
+    },
+  }), true);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(res.body), {
+    llm_model: 'test-model',
+    llm_context_window_tokens: 32000,
+    workdir,
+    state_root: stateRoot,
+    studio_config_path: studioConfigPath,
+    pets_dir: join(stateRoot, 'pets'),
+    studio_wiki_base_dir: join(stateRoot, 'studio-wiki'),
+    studio_config_source: 'workdir',
+    studio_config_active_path: studioConfigPath,
+    legacy_studio_config_path: join(homedir(), '.pinpawo', 'studio.json'),
+  });
 });

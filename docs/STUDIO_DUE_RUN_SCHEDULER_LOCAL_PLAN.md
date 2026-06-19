@@ -41,9 +41,10 @@
     - 修复 `workdir` 不在 scheduler scope 时的防悬挂行为：`submit` 阶段进行 scope 校验，不允许进入等待循环。
     - 将服务启动 `run --workdir` 改为显式参数注入 runtimeConfig，不依赖 `PINPAWO_WORKDIR` 全局副作用；
       同时让 `startLocalServer` 在缺省 `runtimeConfig` 时按 `deps.workdir` 构造运行配置，避免 chat/pet/studio 混用默认工作目录。
+    - 同一 WebSocket 连接内的 `studio_request` 使用单连接串行队列：后续请求等待前一请求完成，再按到达顺序执行，避免并发共享同一连接 slot/review 上下文。
 3. **跨连接并发策略**
-   - 明确是否允许同一连接并行提交多个 studio 请求；
-   - 若允许，定义队列或合并策略（如 conversation 粒度、priority、老请求是否可中断）。
+    - 明确是否允许同一连接并行提交多个 studio 请求；
+    - 若允许，定义队列或合并策略（如 conversation 粒度、priority、老请求是否可中断）。
 4. **安全与恢复**
    - `signal` 中止后的 waiter 残留监听清理。
    - 针对 `stop()` 之后的短时间内新提交行为，给出更明确返回策略（`aborted` 或 `already stopped`）。

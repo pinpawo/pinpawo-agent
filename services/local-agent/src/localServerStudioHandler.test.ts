@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { WebSocket } from 'ws';
 import {
   sendLocalAgentEvent,
@@ -158,31 +159,23 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
   });
 });
 
-test('LocalServerStudioHandler interrupts previous studio request on the same websocket', async () => {
+test('LocalServerStudioHandler serializes studio requests per websocket', async () => {
   const sent: unknown[] = [];
   const ws = createFakeWebSocket(sent);
   const firstStarted = deferred<void>();
-  const firstAborted = deferred<boolean>();
-  let invocationCount = 0;
-
+  const firstContinue = deferred<void>();
+  const invocationEvents: string[] = [];
   const handler = new LocalServerStudioHandler({
     reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
     inflightRequests: createInflightController(),
     buildStudio: async () => ({
       resolved: {} as BuildStudioResult['resolved'],
       orchestrator: {
-        invoke: async (turn: {
-          onTurnEvent: (event: Record<string, unknown>) => void;
-          onToolEvent: (event: unknown) => void;
-          signal?: AbortSignal;
-        }) => {
-          invocationCount += 1;
-          if (invocationCount === 1) {
+        invoke: async () => {
+          if (invocationEvents.length === 0) {
+            invocationEvents.push('first');
             firstStarted.resolve();
-            turn.signal?.addEventListener('abort', () => {
-              firstAborted.resolve(turn.signal?.aborted ?? false);
-            }, { once: true });
-            await firstAborted.promise;
+            await firstContinue.promise;
             return {
               outcome: {
                 outcome: 'done',
@@ -191,6 +184,7 @@ test('LocalServerStudioHandler interrupts previous studio request on the same we
               },
             };
           }
+          invocationEvents.push('second');
           return {
             outcome: {
               outcome: 'done',
@@ -210,33 +204,36 @@ test('LocalServerStudioHandler interrupts previous studio request on the same we
   }, createDeps());
   await firstStarted.promise;
 
-  await handler.handleStudioRequest(ws, {
+  const secondRequest = handler.handleStudioRequest(ws, {
     type: 'studio_request',
     requestId: 'studio-2',
     userRequest: 'second',
   }, createDeps());
-  await firstRequest;
 
-  assert.equal(invocationCount, 2);
-  assert.equal(await firstAborted.promise, true);
+  await sleep(10);
+  assert.equal(invocationEvents.length, 1);
+  assert.equal(invocationEvents[0], 'first');
+
+  firstContinue.resolve();
+  await Promise.all([firstRequest, secondRequest]);
+
+  assert.equal(invocationEvents.length, 2);
+  assert.deepEqual(invocationEvents, ['first', 'second']);
 
   const types = sent.map((item) => (item as { type?: string }).type).filter(Boolean);
-  assert.equal(types.includes('interrupted'), true);
+  assert.equal(types.includes('interrupted'), false);
 
   const errors = sent.filter((item): item is { type: 'studio_error'; requestId: string; message: string } => (
     Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_error')
   ));
-  assert.deepEqual(errors, [{
-    type: 'studio_error',
-    requestId: 'studio-1',
-    message: 'aborted by client',
-  }]);
+  assert.deepEqual(errors, []);
 
   const studioResponses = sent.filter((item): item is { type: 'studio_response'; requestId: string } => (
     Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
   ));
-  assert.equal(studioResponses.length, 1);
-  assert.equal(studioResponses[0]?.requestId, 'studio-2');
+  assert.equal(studioResponses.length, 2);
+  assert.equal(studioResponses[0]?.requestId, 'studio-1');
+  assert.equal(studioResponses[1]?.requestId, 'studio-2');
 });
 
 test('LocalServerStudioHandler maps missing studio config to studio_error', async () => {

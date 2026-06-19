@@ -46,6 +46,7 @@ export class LocalServerStudioHandler {
   private readonly inflightRequests: InflightRequestController<WebSocket>;
   private readonly studioRunService: StudioRunService;
   private readonly studioDueRunScheduler?: LocalStudioDueRunScheduler;
+  private readonly studioRequestQueue = new WeakMap<WebSocket, Promise<unknown>>();
 
   constructor(options: {
     reviewRouter: LocalServerStudioReviewRouter<WebSocket>;
@@ -75,6 +76,14 @@ export class LocalServerStudioHandler {
     msg: StudioRequestMessage,
     deps: LocalServerDeps,
   ) {
+    return this.withQueuedStudioRequest(ws, () => this.handleStudioRequestInternal(ws, msg, deps));
+  }
+
+  private async handleStudioRequestInternal(
+    ws: WebSocket,
+    msg: StudioRequestMessage,
+    deps: LocalServerDeps,
+  ) {
     const { requestId, userRequest, runId: explicitRunId } = msg;
     const runId = explicitRunId?.trim() ? explicitRunId : requestId;
     const conversationId = msg.conversationId ?? runId;
@@ -83,8 +92,7 @@ export class LocalServerStudioHandler {
 
     // 取消已有 inflight(避免跟 chat 重叠)
     const inflight = this.inflightRequests.start(ws, requestId, {
-      interruptPrevious: true,
-      notifyPrevious: true,
+      interruptPrevious: false,
     });
     const { controller } = inflight;
     configureInflightOperationRegistry(
@@ -216,6 +224,16 @@ export class LocalServerStudioHandler {
       }
       this.inflightRequests.clear(ws, inflight);
     }
+  }
+
+  private withQueuedStudioRequest<T>(
+    ws: WebSocket,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.studioRequestQueue.get(ws) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(() => run());
+    this.studioRequestQueue.set(ws, current.then(() => undefined, () => undefined));
+    return current;
   }
 
   private toCompletion(result: StudioHandleResult): StudioHandleCompletion {

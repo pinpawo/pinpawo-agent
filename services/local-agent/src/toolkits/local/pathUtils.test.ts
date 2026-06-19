@@ -28,7 +28,7 @@ test('local path utils can load without full config/LLM requirements', () => {
     'tsx',
     '-e',
     [
-      'const mod = await import("./services/local-agent/src/toolkits/local/pathUtils.ts");',
+      'const mod = await import("./src/toolkits/local/pathUtils.ts");',
       'process.stdout.write(mod.getLocalToolsWorkdir());',
     ].join('\n'),
   ], {

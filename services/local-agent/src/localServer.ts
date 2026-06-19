@@ -7,6 +7,7 @@
  */
 import { createServer } from 'node:http';
 import { WebSocket } from 'ws';
+import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
 import { LocalAgentGraphService } from './agentGraphService';
 import {
   sendLocalAgentEvent,
@@ -14,6 +15,7 @@ import {
 } from './localAgentProtocol';
 import { InflightRequestController } from './inflightRequestController';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
+import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
@@ -21,6 +23,7 @@ import { ensureLocalServerAuthToken } from './localServerAuth';
 import { LocalServerChatHandler } from './localServerChatHandler';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
 import type { LocalServerDeps } from './localServerTypes';
+import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 
 export type { LocalServerDeps };
 
@@ -28,15 +31,24 @@ const INTERRUPT_FORCE_REPLY_MS = 1800;
 
 export function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
   return new Promise((resolve, reject) => {
+    const effectiveRuntimeConfig = deps.runtimeConfig ?? buildLocalAgentRuntimeConfig(deps.workdir);
+    const depsWithRuntime = deps.runtimeConfig ? deps : {
+      ...deps,
+      runtimeConfig: effectiveRuntimeConfig,
+    };
     const chatGraphService = new LocalAgentGraphService();
     const tuiSessions = new LocalServerTuiSessionService({
       graphService: chatGraphService,
-      ...(deps.runtimeConfig ? {
-        checkpointPath: deps.runtimeConfig.tuiCheckpointPath,
-        sessionStatePath: deps.runtimeConfig.tuiSessionPath,
-      } : {}),
+      runtimeConfig: effectiveRuntimeConfig,
     });
     const studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
+    const studioDueRunScheduler = deps.studioDueRunScheduler
+      ?? new LocalStudioDueRunScheduler({
+        store: new FileStudioDueRunStore({
+          filePath: effectiveRuntimeConfig.studioDueRunsPath,
+        }),
+        filterWorkdir: effectiveRuntimeConfig.workdir,
+      });
     const inflightRequests = new InflightRequestController<WebSocket>({
       forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
       // Local TUI / companion: trusted transport — forward raw input/output so
@@ -53,14 +65,15 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
     const studioHandler = new LocalServerStudioHandler({
       reviewRouter: studioReviewRouter,
       inflightRequests,
+      ...(studioDueRunScheduler ? { studioDueRunScheduler } : {}),
     });
     const authToken = ensureLocalServerAuthToken();
     const server = createServer((req, res) => {
-      const handled = handleLocalHttpRequest(req, res, deps, {
+      const handled = handleLocalHttpRequest(req, res, depsWithRuntime, {
         authToken,
-        loadHistory: () => tuiSessions.loadHistory(deps),
-        listSessions: () => tuiSessions.listSessions(deps),
-        resumeSession: (sessionId) => tuiSessions.resumeSession(deps, sessionId),
+        loadHistory: () => tuiSessions.loadHistory(depsWithRuntime),
+        listSessions: () => tuiSessions.listSessions(depsWithRuntime),
+        resumeSession: (sessionId) => tuiSessions.resumeSession(depsWithRuntime, sessionId),
       });
       if (handled) {
         return;
@@ -70,16 +83,16 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
     });
 
     attachLocalServerWebSocketTransport(server, {
-      onChatRequest: (ws, msg) => chatHandler.handleChatRequest(ws, msg, deps),
-      onStudioRequest: (ws, msg) => studioHandler.handleStudioRequest(ws, msg, deps),
+      onChatRequest: (ws, msg) => chatHandler.handleChatRequest(ws, msg, depsWithRuntime),
+      onStudioRequest: (ws, msg) => studioHandler.handleStudioRequest(ws, msg, depsWithRuntime),
       onHumanReviewResponse: (ws, msg) => {
         if (studioHandler.routeHumanReviewResponse(ws, msg)) {
           return;
         }
-        return chatHandler.handleHumanReviewResponse(ws, msg, deps);
+        return chatHandler.handleHumanReviewResponse(ws, msg, depsWithRuntime);
       },
       onInterruptRequest: async (ws, msg) => {
-        if (await chatHandler.handleInterruptRequest(ws, msg, deps)) {
+        if (await chatHandler.handleInterruptRequest(ws, msg, depsWithRuntime)) {
           return;
         }
         const inflight = inflightRequests.interrupt(ws, { requestId: msg.requestId });

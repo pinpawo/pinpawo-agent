@@ -39,6 +39,9 @@ function createHandlers(events: string[] = []): LocalAgentAppWsClientHandlers {
     onHumanReviewResponse: async (_ws, message) => {
       events.push(`review:${message.requestId}:${message.reviewId}:${message.selectedOptionId}`);
     },
+    onStudioRequest: async (_ws, message) => {
+      events.push(`studio:${message.requestId}:${message.userRequest}`);
+    },
     onClose: async () => {
       events.push('close');
     },
@@ -76,6 +79,11 @@ test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', 
     selectedOptionId: 'approve',
   }), handlers);
   dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
+    type: 'studio_request',
+    requestId: 'studio-1',
+    userRequest: 'plan this',
+  }), handlers);
+  dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
     type: 'human_review_response',
     requestId: 'req-1',
     reviewId: 'review-1',
@@ -92,6 +100,7 @@ test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', 
     'new:user-1',
     'interrupt:req-1',
     'review:req-1:review-1:approve',
+    'studio:studio-1:plan this',
   ]);
   assert.deepEqual(warnings, [
     '[local-agent] ignored malformed app client message type=human_review_response requestId=req-1',

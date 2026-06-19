@@ -182,7 +182,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
   },
 ];
 
-const STRUCTURED_OUTPUT_ENDPOINT_RULES: readonly Array<{
+const STRUCTURED_OUTPUT_ENDPOINT_RULES: ReadonlyArray<{
   method: StructuredOutputMethod;
   baseUrlIncludes: readonly string[];
 }> = [
@@ -192,7 +192,7 @@ const STRUCTURED_OUTPUT_ENDPOINT_RULES: readonly Array<{
   },
 ];
 
-const STRUCTURED_OUTPUT_FALLBACK_MODEL_RULES: readonly Array<{
+const STRUCTURED_OUTPUT_FALLBACK_MODEL_RULES: ReadonlyArray<{
   method: StructuredOutputMethod;
   contains: readonly string[];
 }> = [

@@ -6,6 +6,7 @@ export type LocalAgentRuntimeConfig = {
   workdir: string;
   stateRoot: string;
   studioConfigPath: string;
+  studioDueRunsPath: string;
   petsDir: string;
   studioWikiBaseDir: string;
   checkpointPath: string;
@@ -39,6 +40,7 @@ export function buildLocalAgentRuntimeConfig(workdir = resolveDefaultWorkdir()):
     workdir: resolvedWorkdir,
     stateRoot,
     studioConfigPath: resolve(stateRoot, 'studio.json'),
+    studioDueRunsPath: resolve(stateRoot, 'studio-due-runs.json'),
     petsDir: resolve(stateRoot, 'pets'),
     studioWikiBaseDir: resolve(stateRoot, 'studio-wiki'),
     checkpointPath: resolve(stateRoot, 'checkpoints.json'),

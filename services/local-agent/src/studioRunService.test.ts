@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { StudioTurnResult } from '@pinpawo/pet-agent';
+import { buildStudioRunIdentity, type StudioTurnResult } from '@pinpawo/pet-agent';
 import type { BuildStudioInput, BuildStudioResult } from './studio/studioRuntime';
 import type { LocalServerDeps } from './localServerTypes';
 import {
-  buildStudioRunIdempotencyKey,
   StudioRunService,
 } from './studioRunService';
 
@@ -22,6 +21,7 @@ function createDeps(): LocalServerDeps {
       workdir: '/tmp/workspace',
       stateRoot: '/tmp/workspace/.pinpawo',
       studioConfigPath: '/tmp/workspace/.pinpawo/studio.json',
+      studioDueRunsPath: '/tmp/workspace/.pinpawo/studio-due-runs.json',
       petsDir: '/tmp/workspace/.pinpawo/pets',
       studioWikiBaseDir: '/tmp/workspace/.pinpawo/studio-wiki',
       checkpointPath: '/tmp/workspace/.pinpawo/checkpoints.json',
@@ -51,10 +51,11 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
   const service = new StudioRunService({
     buildStudio: async (input) => {
       buildInputs.push(input);
+      let result: StudioTurnResult | null = null;
       return {
         resolved: {} as BuildStudioResult['resolved'],
         orchestrator: {
-          invoke: async (turn: {
+          submitRequest: async (turn: {
             userRequest: string;
             conversationId?: string;
             turnId?: string;
@@ -68,16 +69,20 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
             });
             turn.onTurnEvent?.({ type: 'turn_started' });
             turn.onToolEvent?.({ event: 'on_tool_start', name: 'read_file' });
-            return {
+            result = {
               turnId: turn.turnId ?? 'run-1',
-              state: {},
               outcome: {
                 outcome: 'done',
                 reply: 'done reply',
-                finalDispatchId: 'dispatch-1',
+                finalPetRunId: 'pet-run-1',
               },
               studio: {},
             } as StudioTurnResult;
+            return { runId: turn.turnId ?? 'run-1', status: 'accepted' };
+          },
+          waitForRun: async () => {
+            assert.ok(result, 'submitRequest should run before waitForRun');
+            return result;
           },
         } as unknown as BuildStudioResult['orchestrator'],
       };
@@ -123,12 +128,80 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
   assert.deepEqual(progressEvents, [{ type: 'turn_started' }]);
   assert.deepEqual(toolEvents, [{ event: 'on_tool_start', name: 'read_file' }]);
   assert.equal(result.idempotencyKey, 'studio:conversation-1:run:run-1');
+  assert.equal(result.workdir, '/tmp/workspace');
   assert.equal(result.turn.outcome.outcome, 'done');
 });
 
-test('buildStudioRunIdempotencyKey is scoped by conversation and run', () => {
+test('StudioRunService falls back to deps.workdir when runtimeConfig is absent', async () => {
+  const buildInputs: BuildStudioInput[] = [];
+  const service = new StudioRunService({
+    buildStudio: async (input) => {
+      buildInputs.push(input);
+      let result: StudioTurnResult | null = null;
+      return {
+        resolved: {} as BuildStudioResult['resolved'],
+        orchestrator: {
+          submitRequest: async (turn: {
+            userRequest: string;
+            conversationId?: string;
+            turnId?: string;
+            onTurnEvent?: (event: unknown) => void;
+            onToolEvent?: (event: unknown) => void;
+          }) => {
+            turn.onTurnEvent?.({ type: 'turn_started' });
+            turn.onToolEvent?.({ event: 'on_tool_start', name: 'read_file' });
+            result = {
+              turnId: turn.turnId ?? 'run-legacy',
+              outcome: {
+                outcome: 'done',
+                reply: 'legacy reply',
+                finalPetRunId: 'pet-run-legacy',
+              },
+              studio: {},
+            } as StudioTurnResult;
+            return { runId: turn.turnId ?? 'run-legacy', status: 'accepted' };
+          },
+          waitForRun: async () => {
+            assert.ok(result, 'submitRequest should run before waitForRun');
+            return result;
+          },
+        } as unknown as BuildStudioResult['orchestrator'],
+      };
+    },
+  });
+
+  const deps = createDeps();
+  const result = await service.run({
+    deps: {
+      ...deps,
+      runtimeConfig: undefined,
+    },
+    runId: 'run-2',
+    userRequest: 'legacy plan this',
+    ownerUserId: 'user-legacy',
+    bridge: {
+      send: () => undefined,
+      requestId: 'run-2',
+      slot: { current: null },
+    },
+  });
+
+  assert.equal(buildInputs.length, 1);
+  assert.equal(buildInputs[0]?.workdir, '/tmp/legacy-workdir');
+  assert.equal(buildInputs[0]?.studioConfigPath, undefined);
+  assert.equal(buildInputs[0]?.petsDir, undefined);
+  assert.equal(buildInputs[0]?.wikiBaseDir, undefined);
+  assert.equal(result.idempotencyKey, 'studio:run-2:run:run-2');
+  assert.equal(result.workdir, '/tmp/legacy-workdir');
+  assert.equal(result.turn.outcome.outcome, 'done');
+});
+
+test('buildStudioRunIdentity is scoped by conversation and run', () => {
+  const identity = buildStudioRunIdentity({ conversationId: 'conv-a', runId: 'run-a' });
+  assert.equal(identity.conversationId, 'conv-a');
+  assert.equal(identity.runId, 'run-a');
   assert.equal(
-    buildStudioRunIdempotencyKey({ conversationId: 'conv-a', runId: 'run-a' }),
+    identity.idempotencyKey,
     'studio:conv-a:run:run-a',
   );
 });

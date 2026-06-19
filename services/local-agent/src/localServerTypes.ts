@@ -1,4 +1,5 @@
 import type { AgentCapability, AgentToolkit, CapabilityArtifactStore } from '@pinpawo/pet-agent';
+import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
@@ -9,6 +10,7 @@ export type LocalServerDeps = {
   llmConfig: AgentLlmConfig;
   workdir: string;
   runtimeConfig?: LocalAgentRuntimeConfig;
+  studioDueRunScheduler?: LocalStudioDueRunScheduler;
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];
   pluginToolkits?: AgentToolkit[];

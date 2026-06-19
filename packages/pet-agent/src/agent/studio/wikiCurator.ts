@@ -9,11 +9,15 @@ import {
   type StructuredOutputAutoRepairConfig,
   type StructuredOutputMethod,
 } from '../../utils/structuredOutput';
-import type { StudioDispatchState } from './types';
+import type { StudioTaskQueueItem } from './types';
+
+export type StudioWikiTaskSource = StudioTaskQueueItem & {
+  resultText?: string;
+};
 
 export type WikiCurateInput = {
   wikiRoot: string;
-  dispatch: StudioDispatchState;
+  task: StudioWikiTaskSource;
 };
 
 export type WikiCurateResult = {
@@ -21,7 +25,7 @@ export type WikiCurateResult = {
 };
 
 /**
- * Curator 接口:接收一次 dispatch 输入,产出 wiki 更新。
+ * Curator 接口:接收一次 worker task completion 输入,产出 wiki 更新。
  *
  * - skeleton 实现:仅做原始素材落档 + index 追加。
  * - LLM 实现:用 LLM 整理 raw source → topic markdown + 重写 index。
@@ -63,33 +67,34 @@ export async function ensureWikiSkeleton(wikiRoot: string): Promise<void> {
       '- `topics/`:主题化整理(curator 整理后产物)。',
       '- `notes/`:跨主题笔记。',
       '',
-      '## 最近 dispatch',
+      '## 最近 task',
       '',
     ].join('\n') + '\n',
   );
 }
 
-async function writeSourceFile(wikiRoot: string, dispatch: StudioDispatchState): Promise<string> {
-  const sourceFile = path.join(wikiRoot, 'sources', `${dispatch.id}-${dispatch.petId}.md`);
+async function writeSourceFile(wikiRoot: string, task: StudioWikiTaskSource): Promise<string> {
+  const petRunId = task.petRunId ?? `task-${task.taskIndex}`;
+  const sourceFile = path.join(wikiRoot, 'sources', `${petRunId}-${task.petId}.md`);
   const sourceBody = [
     '---',
-    `dispatchId: ${dispatch.id}`,
-    `petId: ${dispatch.petId}`,
-    `taskIndex: ${dispatch.taskIndex}`,
-    `status: ${dispatch.status}`,
-    `startedAt: ${dispatch.startedAt}`,
-    dispatch.finishedAt ? `finishedAt: ${dispatch.finishedAt}` : null,
+    `petRunId: ${petRunId}`,
+    `petId: ${task.petId}`,
+    `taskIndex: ${task.taskIndex}`,
+    `status: ${task.status}`,
+    task.startedAt ? `startedAt: ${task.startedAt}` : null,
+    task.finishedAt ? `finishedAt: ${task.finishedAt}` : null,
     '---',
     '',
-    `# Dispatch ${dispatch.id} (pet: ${dispatch.petId})`,
+    `# Task ${task.taskIndex} (pet: ${task.petId})`,
     '',
     '## Brief',
     '',
-    dispatch.brief,
+    task.brief,
     '',
     '## Pet Reply',
     '',
-    dispatch.resultText ?? dispatch.errorMessage ?? '(no output)',
+    task.resultText ?? task.errorMessage ?? '(no output)',
     '',
   ]
     .filter((line) => line !== null)
@@ -101,25 +106,26 @@ async function writeSourceFile(wikiRoot: string, dispatch: StudioDispatchState):
 /* ─────────────── Skeleton implementation ─────────────── */
 
 /**
- * Skeleton curator:把 dispatch 输出原文落档,简单追加到 index。
+ * Skeleton curator:把 task 输出原文落档,简单追加到 index。
  * 不做 LLM 整理。适合测试或不需要 wiki 智能整理的场景。
  */
 export function createSkeletonWikiCurator(): WikiCurator {
   return {
-    async curate({ wikiRoot, dispatch }) {
+    async curate({ wikiRoot, task }) {
       await ensureWikiSkeleton(wikiRoot);
       const changed: string[] = [];
 
-      const sourceRel = await writeSourceFile(wikiRoot, dispatch);
+      const sourceRel = await writeSourceFile(wikiRoot, task);
       changed.push(sourceRel);
 
+      const petRunId = task.petRunId ?? `task-${task.taskIndex}`;
       const indexFile = path.join(wikiRoot, 'index.md');
       const indexAppend = [
         '',
-        `### ${dispatch.id} — ${dispatch.petId}`,
-        `- taskIndex: ${dispatch.taskIndex}`,
-        `- status: ${dispatch.status}`,
-        `- source: sources/${dispatch.id}-${dispatch.petId}.md`,
+        `### ${petRunId} — ${task.petId}`,
+        `- taskIndex: ${task.taskIndex}`,
+        `- status: ${task.status}`,
+        `- source: sources/${petRunId}-${task.petId}.md`,
         '',
       ].join('\n');
       await fs.appendFile(indexFile, indexAppend, 'utf8');
@@ -134,11 +140,11 @@ export function createSkeletonWikiCurator(): WikiCurator {
 
 export const DEFAULT_CURATOR_PROMPT = [
   '你是 Studio 多 pet agent 协作的知识库管理员(curator)。',
-  '每次有 pet 完成 dispatch 后,你都会被调用一次,把这一棒的产出整理进共享知识库 wiki/。',
+  '每次有 worker task 完成后,你都会被调用一次,把这一棒的产出整理进共享知识库 wiki/。',
   '',
   '你的职责:',
   '1. 阅读当前 wiki 的 index.md 与现有 topics 列表,理解知识库当前的组织方式。',
-  '2. 阅读本次 dispatch 的 brief 与 pet 返回文本。',
+  '2. 阅读本次 task 的 brief 与 pet 返回文本。',
   '3. 决定如何把新信息整理进 wiki:',
   '   - 若内容能补充到已有主题 → 输出该主题的更新版本(完整覆盖)。',
   '   - 若是新主题 → 创建新的 topic 文件。',
@@ -148,7 +154,7 @@ export const DEFAULT_CURATOR_PROMPT = [
   '写作风格参考 Karpathy 个人笔记的 wiki 风格:简洁、按主题组织、重点突出、',
   '便于后续读者(下一棒 pet)快速定位需要的内容。',
   '',
-  '原始 dispatch 素材会由系统单独写入 sources/{dispatchId}-{petId}.md(你不需要管),',
+  '原始 task 素材会由系统单独写入 sources/{petRunId}-{petId}.md(你不需要管),',
   '你只负责输出 topics 与 index 的整理结果。',
 ].join('\n');
 
@@ -245,11 +251,11 @@ async function readWikiSnapshot(wikiRoot: string): Promise<{
 }
 
 function buildCuratorUserMessage(params: {
-  dispatch: StudioDispatchState;
+  task: StudioWikiTaskSource;
   indexContent: string;
   topics: Array<{ fileName: string; content: string }>;
 }): string {
-  const { dispatch, indexContent, topics } = params;
+  const { task, indexContent, topics } = params;
   const topicsBlock = topics.length === 0
     ? '(无)'
     : topics
@@ -257,20 +263,20 @@ function buildCuratorUserMessage(params: {
         .join('\n\n');
 
   return [
-    '## 本次 dispatch',
+    '## 本次 task',
     '',
-    `- dispatchId: ${dispatch.id}`,
-    `- petId: ${dispatch.petId}`,
-    `- taskIndex: ${dispatch.taskIndex}`,
-    `- status: ${dispatch.status}`,
+    `- petRunId: ${task.petRunId ?? `task-${task.taskIndex}`}`,
+    `- petId: ${task.petId}`,
+    `- taskIndex: ${task.taskIndex}`,
+    `- status: ${task.status}`,
     '',
     '### Brief',
     '',
-    dispatch.brief,
+    task.brief,
     '',
     '### Pet Reply',
     '',
-    dispatch.resultText ?? dispatch.errorMessage ?? '(no output)',
+    task.resultText ?? task.errorMessage ?? '(no output)',
     '',
     '## 当前 wiki 快照',
     '',
@@ -323,7 +329,7 @@ async function applyCuratorOutput(params: {
  *
  * 流程:
  * 1. 读 wiki 当前快照(index.md + topics/)
- * 2. 给 LLM 看当前快照 + 本次 dispatch 输出
+ * 2. 给 LLM 看当前快照 + 本次 task 输出
  * 3. LLM 通过 structured output 返回 { topicUpdates, indexContent }
  * 4. 把 topicUpdates 写到 topics/, 用 indexContent 覆写 index.md
  * 5. 原始素材(sources/) 由本函数顺手存档(与 skeleton 一致)
@@ -332,12 +338,12 @@ export function createLLMWikiCurator(config: LLMWikiCuratorConfig): WikiCurator 
   const promptProvider = config.promptProvider ?? defaultPromptProvider();
 
   return {
-    async curate({ wikiRoot, dispatch }) {
+    async curate({ wikiRoot, task }) {
       await ensureWikiSkeleton(wikiRoot);
       const changed: string[] = [];
 
       // 1. 落档原始素材
-      const sourceRel = await writeSourceFile(wikiRoot, dispatch);
+      const sourceRel = await writeSourceFile(wikiRoot, task);
       changed.push(sourceRel);
 
       // 2. 读当前 wiki 快照
@@ -345,7 +351,7 @@ export function createLLMWikiCurator(config: LLMWikiCuratorConfig): WikiCurator 
 
       // 3. LLM 调用
       const userMessage = buildCuratorUserMessage({
-        dispatch,
+        task,
         indexContent: snapshot.indexContent,
         topics: snapshot.topics,
       });

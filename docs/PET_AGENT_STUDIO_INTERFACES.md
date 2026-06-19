@@ -1,5 +1,7 @@
 # Pet Agent Studio Interfaces
 
+> Status: interface background. The current Studio rewrite keeps worker invocation simple but does not preserve the old Studio runtime model; use `docs/STUDIO_RUN_CONTROLLER_DESIGN.md` as the canonical Studio boundary.
+
 本文档描述 Studio 与 pet 之间(以及 pet 与 UI 之间)的接口边界。Studio 内部的循环、wiki 维护、turn state event 等是编排实现细节,见 `docs/PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN.md`;整体架构理念见 `docs/PET_AGENT_STUDIO_ARCHITECTURE_OVERVIEW.md`。
 
 ## Boundaries
@@ -7,7 +9,7 @@
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │  StudioOrchestrator                                          │
-│   planner agent invoke → execute 状态机 → wiki_curator       │
+│   planner agent invoke → queue runner → wiki_curator       │
 │   维护 plan / turn state / wiki                              │
 └──────────────────────────────────────────────────────────────┘
         │ Boundary 1: 函数调用(本文档主要内容)
@@ -52,7 +54,7 @@ interface PetAgentRuntime {
 
 要点:
 
-- **核心输入只有两件:任务文本 + wiki 根目录**。pet 自己的 capability/tool 配置、HITL 桥(`humanReviewer`)在 runtime 构造时已确定,不通过 invoke 传。
+- **普通 worker 的核心输入只有两件:任务文本 + wiki 根目录**。pet 自己的 capability/tool 配置、HITL 桥(`humanReviewer`)在 runtime 构造时已确定,不通过 invoke 传。planner 是例外:Studio 会在 planner invoke 时临时注入 `studio_plan` capability;该 capability 暴露 `list_pets` / `submit_plan` 工具,但不改变 worker invoke 契约。
 - **返回是一段文本**。文本中可以引用文件路径(`/…/cover.jpg`),curator 会解析并整理。
 - **没有 envelope 结构**。Studio↔pet 是函数调用,不需要为协议层包装。
 - **HITL 与工具事件走 pet runtime 自己的 UI callback 桥(边界 2、3)**,不通过 invoke 返回值;Studio 视角下,invoke 一直 pending 直到 pet 最终 resolve `{ reply }`(或抛错/取消)。
@@ -211,6 +213,15 @@ pet 输出文本可包含对文件路径的引用,例如:
 - Studio 在 fan-in 处 `Promise.all([...])` 等所有 pet 返回。
 - 调度上的变化由 Studio 承担,**本文档定义的接口不需要变化**。
 
+## Queue Before Worker
+
+计划任务先作为 Studio queue item 存在,再由 runner 逐项消费:
+
+- planner 产出的是有序调用计划;queue 状态由 Studio runtime 维护。
+- Studio 请求可以非阻塞返回 accepted/runId,后台 runner 按 FIFO 和完成状态继续推进。
+- 兼容同步入口 `invoke()` 只是 `enqueue()` + `waitForRun()`。
+- queue runner 消费到某一项时,仍然只做一次普通 `PetAgentRuntime.invoke(...)`;worker 调用契约不因此变复杂。
+
 ## Thread / Checkpoint Namespace
 
 pet runtime 内部用 LangGraph checkpointer 保存执行状态(支持 HITL interrupt + resume)。namespace 约定:
@@ -226,11 +237,11 @@ studio:{studioId}:thread:{conversationId}:pet:{petId}:dispatch:{dispatchId}
 ```text
 pet 抛 error 或 timeout:
   → invoke() Promise rejects
-  → Studio 的 execute 状态机下一轮看到 error,
-    据 task.retryCount 决定 retry(对同 taskIndex 再 dispatch)/ finish(若有可作交付的产出)/ stop。
+  → Studio 的 queue runner下一轮看到 error,
+    据 taskStates[taskIndex].retryCount 决定 retry(对同 taskIndex 再 dispatch)/ finish(若有可作交付的产出)/ stop。
 ```
 
-retry 由 Studio 调度(execute 状态机再次输出 dispatch 同 taskIndex,dispatcher 自动 `retryCount++`),pet runtime 自身不负责 retry。
+retry 由 Studio 调度(queue runner 再次输出 dispatch 同 taskIndex,dispatcher 自动更新 runtime state 的 `retryCount`),pet runtime 自身不负责 retry。
 
 ## MVP 范围
 

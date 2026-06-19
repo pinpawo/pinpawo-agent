@@ -2,6 +2,8 @@
 
 本文是 Studio 重做后的 canonical 设计。旧的 Studio orchestration 设计只作为历史参考,不再要求兼容。
 
+Server 启动模式和长期 `StudioRuntimeHost` 生命周期见 `docs/STUDIO_SERVER_MODE_RUNTIME_DESIGN.md`。
+
 核心约定:
 
 - Studio 管理 pets、task queue、worker invoke、planner 入口和 wiki 产出。

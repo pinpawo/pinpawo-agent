@@ -13,7 +13,19 @@ import {
   resetComposerHistoryNavigation,
 } from '../input/composerHistory';
 import { TUI_TEXT } from '../render/text';
-import type { LocalAgentEvent } from '../../events/localAgentEvent';
+import type {
+  LocalAgentEvent,
+  LocalAgentOperationEvent,
+} from '../../events/localAgentEvent';
+import {
+  operationTimelineEntryFromEvent,
+  timelineEntriesFromHistory,
+  timelineEntryFromHistoryCell,
+  timelineEntryIdFromOperationEvent,
+  type AgentMessageEntry,
+  type AgentOperationEntry,
+  type AgentTimelineEntry,
+} from '../timeline/agentTimeline';
 import type {
   ActiveOperationModel,
   ActiveRunModel,
@@ -43,14 +55,223 @@ function toHistoryCell(draft: HistoryCellDraft): HistoryCellModel {
   };
 }
 
-function appendHistory(session: SessionModel, drafts: HistoryCellDraft[]) {
+type AppendHistoryOptions = {
+  skipTimelineIds?: Set<string>;
+};
+
+function appendHistory(
+  session: SessionModel,
+  drafts: HistoryCellDraft[],
+  options: AppendHistoryOptions = {},
+) {
   if (drafts.length === 0) return session;
+  const cells = drafts.map(toHistoryCell);
+  const timelineCells = cells
+    .filter((cell) => !options.skipTimelineIds?.has(cell.id))
+    .map(timelineEntryFromHistoryCell);
   return {
     ...session,
     history: trimHistory([
       ...session.history,
-      ...drafts.map(toHistoryCell),
+      ...cells,
     ]),
+    timeline: [
+      ...session.timeline,
+      ...timelineCells,
+    ],
+  };
+}
+
+function replaceHistory(session: SessionModel, history: HistoryCellModel[]) {
+  const nextHistory = trimHistory(history);
+  return {
+    ...session,
+    history: nextHistory,
+    timeline: timelineEntriesFromHistory(nextHistory),
+  };
+}
+
+function addTimelineEntryId(activeRun: ActiveRunModel, entryId: string): ActiveRunModel {
+  return activeRun.timelineEntryIds.includes(entryId)
+    ? activeRun
+    : {
+        ...activeRun,
+        timelineEntryIds: [...activeRun.timelineEntryIds, entryId],
+      };
+}
+
+function appendOrUpdateTimelineEntry(
+  timeline: AgentTimelineEntry[],
+  entry: AgentTimelineEntry,
+) {
+  const index = timeline.findIndex((item) => item.id === entry.id);
+  if (index < 0) {
+    return [...timeline, entry];
+  }
+  return [
+    ...timeline.slice(0, index),
+    entry,
+    ...timeline.slice(index + 1),
+  ];
+}
+
+function countTimelineMessagesForRequest(
+  timeline: AgentTimelineEntry[],
+  requestId: string,
+  role: AgentMessageEntry['role'],
+) {
+  return timeline.filter((entry) =>
+    entry.type === 'message'
+      && entry.requestId === requestId
+      && entry.role === role).length;
+}
+
+function findStreamingAssistantIndex(timeline: AgentTimelineEntry[], requestId: string) {
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const entry = timeline[index];
+    if (entry.type === 'message' && entry.requestId === requestId && entry.role === 'assistant') {
+      return entry.status === 'streaming' ? index : -1;
+    }
+  }
+  return -1;
+}
+
+function appendAssistantTimelineDelta(
+  session: SessionModel,
+  requestId: string,
+  token: string,
+): { session: SessionModel; entryId: string } {
+  const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
+  if (streamingIndex >= 0) {
+    const current = session.timeline[streamingIndex] as AgentMessageEntry;
+    const entry: AgentMessageEntry = {
+      ...current,
+      text: current.text + token,
+    };
+    return {
+      session: {
+        ...session,
+        timeline: [
+          ...session.timeline.slice(0, streamingIndex),
+          entry,
+          ...session.timeline.slice(streamingIndex + 1),
+        ],
+      },
+      entryId: entry.id,
+    };
+  }
+
+  const entry: AgentMessageEntry = {
+    id: `${requestId}:assistant:${countTimelineMessagesForRequest(session.timeline, requestId, 'assistant')}`,
+    type: 'message',
+    role: 'assistant',
+    requestId,
+    text: token,
+    status: 'streaming',
+  };
+  return {
+    session: {
+      ...session,
+      timeline: [...session.timeline, entry],
+    },
+    entryId: entry.id,
+  };
+}
+
+function finalizeAssistantTimelineEntry(
+  session: SessionModel,
+  requestId: string,
+  text: string,
+): { session: SessionModel; entryId?: string } {
+  if (!text) return { session };
+  const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
+  if (streamingIndex >= 0) {
+    const current = session.timeline[streamingIndex] as AgentMessageEntry;
+    const entry: AgentMessageEntry = {
+      ...current,
+      text,
+      status: 'completed',
+    };
+    return {
+      session: {
+        ...session,
+        timeline: [
+          ...session.timeline.slice(0, streamingIndex),
+          entry,
+          ...session.timeline.slice(streamingIndex + 1),
+        ],
+      },
+      entryId: entry.id,
+    };
+  }
+
+  const entry: AgentMessageEntry = {
+    id: `${requestId}:assistant:${countTimelineMessagesForRequest(session.timeline, requestId, 'assistant')}`,
+    type: 'message',
+    role: 'assistant',
+    requestId,
+    text,
+    status: 'completed',
+  };
+  return {
+    session: {
+      ...session,
+      timeline: [...session.timeline, entry],
+    },
+    entryId: entry.id,
+  };
+}
+
+function upsertOperationTimelineEntry(
+  session: SessionModel,
+  event: LocalAgentOperationEvent,
+  now: number,
+): { session: SessionModel; entry: AgentOperationEntry } {
+  const id = timelineEntryIdFromOperationEvent(event);
+  const previous = session.timeline.find((entry): entry is AgentOperationEntry =>
+    entry.type === 'operation' && entry.id === id);
+  const entry = operationTimelineEntryFromEvent(event, now, previous);
+  return {
+    session: {
+      ...session,
+      timeline: appendOrUpdateTimelineEntry(session.timeline, entry),
+    },
+    entry,
+  };
+}
+
+function appendReviewTimelineEntry(
+  session: SessionModel,
+  requestId: string,
+  reviewId: string,
+) {
+  const entry: AgentTimelineEntry = {
+    id: `${requestId}:review:${reviewId}`,
+    type: 'review',
+    requestId,
+    reviewId,
+    status: 'waiting',
+  };
+  return {
+    session: {
+      ...session,
+      timeline: appendOrUpdateTimelineEntry(session.timeline, entry),
+    },
+    entry,
+  };
+}
+
+function markReviewTimelineEntries(
+  session: SessionModel,
+  requestId: string,
+  status: 'answered' | 'interrupted',
+) {
+  return {
+    ...session,
+    timeline: session.timeline.map((entry) =>
+      entry.type === 'review' && entry.requestId === requestId && entry.status === 'waiting'
+        ? { ...entry, status }
+        : entry),
   };
 }
 
@@ -101,6 +322,7 @@ function finishRun(
   statusMessage: string,
   history: HistoryCellDraft[] = [],
   tokenUsage?: TokenUsageModel | null,
+  options: AppendHistoryOptions = {},
 ) {
   const sessionId = state.runRoute[requestId];
   if (!sessionId) return state;
@@ -118,7 +340,7 @@ function finishRun(
         ? [historyDraft('system', subagentMessage, undefined, `${requestId}:subagent-output`)]
         : []),
       ...history,
-    ]);
+    ], options);
   });
 
   const stateWithRouteRemoved = {
@@ -278,8 +500,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
     case 'session.replace_history':
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) => ({
-        ...session,
-        history: trimHistory(action.history),
+        ...replaceHistory(session, action.history),
         tokenUsage: null,
       }));
 
@@ -294,6 +515,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         }, sessionId, (session) => ({
           ...session,
           history: [],
+          timeline: [],
           activeRun: null,
           tokenUsage: null,
         }));
@@ -348,6 +570,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     case 'run.start': {
       const sessionId = resolveSessionId(state, action.sessionId);
       if (!sessionId) return state;
+      const userDraft = historyDraft('user', action.userText, action.userCell, `${action.requestId}:user`);
       return updateSession({
         ...state,
         connection: {
@@ -370,6 +593,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         activeRun: {
           requestId: action.requestId,
           phase: 'thinking',
+          timelineEntryIds: [`history:${userDraft.id}`],
           assistantDraft: '',
           subagentDraft: '',
           activeOperations: [],
@@ -378,7 +602,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         },
         tokenUsage: null,
       }, [
-        historyDraft('user', action.userText, action.userCell, `${action.requestId}:user`),
+        userDraft,
       ]));
     }
 
@@ -391,6 +615,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       // to creating one keyed by the same requestId.
       const sessionId = state.runRoute[action.requestId] ?? state.focusedSessionId;
       if (!sessionId) return state;
+      const userDraft = historyDraft('user', action.message, action.userCell, `${action.requestId}:review-response`);
       return updateSession({
         ...state,
         connection: {
@@ -407,26 +632,30 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.runRoute,
           [action.requestId]: sessionId,
         },
-      }, sessionId, (session) => appendHistory({
-        ...session,
-        activeRun: session.activeRun?.requestId === action.requestId
-          ? clearPendingReview({
-              ...session.activeRun,
-              phase: 'thinking',
-              assistantDraft: '',
-            })
-          : {
-              requestId: action.requestId,
-              phase: 'thinking',
-              assistantDraft: '',
-              subagentDraft: '',
-              activeOperations: [],
-              startedAt: action.now,
-              charCount: 0,
-            },
-      }, [
-        historyDraft('user', action.message, action.userCell, `${action.requestId}:review-response`),
-      ]));
+      }, sessionId, (session) => {
+        const sessionWithReviewAnswered = markReviewTimelineEntries(session, action.requestId, 'answered');
+        return appendHistory({
+          ...sessionWithReviewAnswered,
+          activeRun: session.activeRun?.requestId === action.requestId
+            ? addTimelineEntryId(clearPendingReview({
+                ...session.activeRun,
+                phase: 'thinking',
+                assistantDraft: '',
+              }), `history:${userDraft.id}`)
+            : {
+                requestId: action.requestId,
+                phase: 'thinking',
+                timelineEntryIds: [`history:${userDraft.id}`],
+                assistantDraft: '',
+                subagentDraft: '',
+                activeOperations: [],
+                startedAt: action.now,
+                charCount: 0,
+              },
+        }, [
+          userDraft,
+        ]);
+      });
     }
 
     case 'run.interrupting':
@@ -441,7 +670,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         },
       }, sessionId, (session) => session.activeRun?.requestId === action.requestId
         ? {
-            ...session,
+            ...markReviewTimelineEntries(session, action.requestId, 'interrupted'),
             activeRun: {
               ...clearPendingReview(session.activeRun),
               phase: 'interrupting',
@@ -467,68 +696,92 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         const operationKey = getOperationKey(event);
         if (event.phase === 'started') {
           const summary = formatOperationStart(event);
-          return updateSession(state, sessionId, (currentSession) => ({
-            ...currentSession,
-            activeRun: currentSession.activeRun?.requestId === event.requestId
-              ? {
-                  ...currentSession.activeRun,
-                  phase: 'using_tool',
-                  activeOperations: updateOperation(currentSession.activeRun, {
-                    key: operationKey,
-                    kind: event.operation.kind,
-                    title: summary.label,
-                    detail: summary.detail,
-                    startedAt: action.now,
-                  }),
-                }
-              : currentSession.activeRun,
-          }));
+          return updateSession(state, sessionId, (currentSession) => {
+            const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
+            return {
+              ...sessionWithTimeline,
+              activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
+                ? addTimelineEntryId({
+                    ...sessionWithTimeline.activeRun,
+                    phase: 'using_tool',
+                    activeOperations: updateOperation(sessionWithTimeline.activeRun, {
+                      key: operationKey,
+                      kind: event.operation.kind,
+                      title: summary.label,
+                      detail: summary.detail,
+                      startedAt: action.now,
+                    }),
+                  }, entry.id)
+                : sessionWithTimeline.activeRun,
+            };
+          });
         }
         if (event.phase === 'updated') {
           const progress = formatOperationProgress(event);
-          return updateSession(state, sessionId, (currentSession) => ({
-            ...currentSession,
-            activeRun: currentSession.activeRun?.requestId === event.requestId
-              ? {
-                  ...currentSession.activeRun,
-                  phase: 'using_tool',
-                  activeOperations: currentSession.activeRun.activeOperations.map((operation) => (
-                    operation.key === operationKey
-                      ? { ...operation, detail: progress || operation.detail }
-                      : operation
-                  )),
-                }
-              : currentSession.activeRun,
-          }));
+          return updateSession(state, sessionId, (currentSession) => {
+            const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
+            return {
+              ...sessionWithTimeline,
+              activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
+                ? addTimelineEntryId({
+                    ...sessionWithTimeline.activeRun,
+                    phase: 'using_tool',
+                    activeOperations: sessionWithTimeline.activeRun.activeOperations.map((operation) => (
+                      operation.key === operationKey
+                        ? { ...operation, detail: progress || operation.detail }
+                        : operation
+                    )),
+                  }, entry.id)
+                : sessionWithTimeline.activeRun,
+            };
+          });
         }
-        return updateSession(state, sessionId, (currentSession) => appendHistory({
-          ...currentSession,
-          activeRun: currentSession.activeRun?.requestId === event.requestId
-            ? {
-                ...currentSession.activeRun,
-                activeOperations: currentSession.activeRun.activeOperations
-                  .filter((operation) => operation.key !== operationKey),
-              }
-            : currentSession.activeRun,
-        }, [
-          historyDraft('system', formatOperationResult(event), action.historyCell, `${event.requestId}:operation:${operationKey}`),
-        ]));
+        return updateSession(state, sessionId, (currentSession) => {
+          const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
+          const legacyOperationDraft = historyDraft(
+            'system',
+            formatOperationResult(event),
+            action.historyCell,
+            `${event.requestId}:operation:${operationKey}`,
+          );
+          return appendHistory({
+            ...sessionWithTimeline,
+            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
+              ? addTimelineEntryId({
+                  ...sessionWithTimeline.activeRun,
+                  activeOperations: sessionWithTimeline.activeRun.activeOperations
+                    .filter((operation) => operation.key !== operationKey),
+                }, entry.id)
+              : sessionWithTimeline.activeRun,
+          }, [
+            legacyOperationDraft,
+          ], {
+            skipTimelineIds: new Set([legacyOperationDraft.id]),
+          });
+        });
       }
 
       if (event.type === 'message.delta') {
         const token = event.text;
         if (!token) return state;
-        return updateSession(state, sessionId, (currentSession) => ({
-          ...currentSession,
-          activeRun: currentSession.activeRun?.requestId === event.requestId
-            ? {
-                ...currentSession.activeRun,
-                phase: 'streaming',
-                assistantDraft: currentSession.activeRun.assistantDraft + token,
-                charCount: currentSession.activeRun.charCount + token.length,
-              }
-            : currentSession.activeRun,
-        }));
+        return updateSession(state, sessionId, (currentSession) => {
+          const { session: sessionWithTimeline, entryId } = appendAssistantTimelineDelta(
+            currentSession,
+            event.requestId,
+            token,
+          );
+          return {
+            ...sessionWithTimeline,
+            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
+              ? addTimelineEntryId({
+                  ...sessionWithTimeline.activeRun,
+                  phase: 'streaming',
+                  assistantDraft: sessionWithTimeline.activeRun.assistantDraft + token,
+                  charCount: sessionWithTimeline.activeRun.charCount + token.length,
+                }, entryId)
+              : sessionWithTimeline.activeRun,
+          };
+        });
       }
 
       if (event.type === 'subagent.message.delta') {
@@ -557,23 +810,30 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
             ...state.connection,
             message: TUI_TEXT.approvalWaiting(petId),
           },
-        }, sessionId, (currentSession) => ({
-          ...currentSession,
-          activeRun: currentSession.activeRun?.requestId === event.requestId
-            ? {
-                ...currentSession.activeRun,
-                phase: 'waiting_human',
-                assistantDraft: '',
-                activeOperations: [],
-                charCount: 0,
-                pendingReview: {
-                  requestId: event.requestId,
-                  review: event.review,
-                  ...(petId ? { petId } : {}),
-                },
-              }
-            : currentSession.activeRun,
-        }));
+        }, sessionId, (currentSession) => {
+          const { session: sessionWithTimeline, entry } = appendReviewTimelineEntry(
+            currentSession,
+            event.requestId,
+            event.review.id,
+          );
+          return {
+            ...sessionWithTimeline,
+            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
+              ? addTimelineEntryId({
+                  ...sessionWithTimeline.activeRun,
+                  phase: 'waiting_human',
+                  assistantDraft: '',
+                  activeOperations: [],
+                  charCount: 0,
+                  pendingReview: {
+                    requestId: event.requestId,
+                    review: event.review,
+                    ...(petId ? { petId } : {}),
+                  },
+                }, entry.id)
+              : sessionWithTimeline.activeRun,
+          };
+        });
       }
 
       if (event.type === 'system.notice') {
@@ -589,10 +849,25 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (event.type === 'message.completed') {
         const reply = event.text.trim();
         const finalText = reply || activeRun.assistantDraft.trim() || '...';
-        return finishRun(state, event.requestId, TUI_TEXT.statusReady, finalText
-          ? [historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`)]
+        const assistantDraft = historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`);
+        const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
+          const { session: sessionWithTimeline, entryId } = finalizeAssistantTimelineEntry(
+            currentSession,
+            event.requestId,
+            finalText,
+          );
+          return {
+            ...sessionWithTimeline,
+            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId && entryId
+              ? addTimelineEntryId(sessionWithTimeline.activeRun, entryId)
+              : sessionWithTimeline.activeRun,
+          };
+        });
+        return finishRun(stateWithTimeline, event.requestId, TUI_TEXT.statusReady, finalText
+          ? [assistantDraft]
           : [],
           event.usage ?? null,
+          { skipTimelineIds: new Set([assistantDraft.id]) },
         );
       }
 
@@ -659,6 +934,10 @@ export function selectFocusedSession(state: TuiState) {
 
 export function selectFocusedHistory(state: TuiState) {
   return selectFocusedSession(state)?.history ?? [];
+}
+
+export function selectFocusedTimeline(state: TuiState) {
+  return selectFocusedSession(state)?.timeline ?? [];
 }
 
 export function selectFocusedActiveRun(state: TuiState) {

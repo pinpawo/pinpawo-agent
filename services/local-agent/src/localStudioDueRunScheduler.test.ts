@@ -254,3 +254,81 @@ test('LocalStudioDueRunScheduler.trace filters entries by configured workdir', a
 
   assert.deepEqual(trace.map((entry) => entry.runId), ['run-a']);
 });
+
+test('LocalStudioDueRunScheduler.metrics summarizes queue latency, run duration, failures, and retries', async () => {
+  const baseTime = Date.parse('2026-06-19T00:00:00.000Z');
+  let tick = 0;
+  const now = () => new Date(baseTime + tick++ * 1000).toISOString();
+  const store = new InMemoryStudioDueRunStore({ now });
+
+  const runService = createStudioRunService();
+  const scheduler = new LocalStudioDueRunScheduler({
+    store,
+    studioRunService: runService,
+  });
+
+  const rowA = store.submit({
+    runId: 'run-success',
+    conversationId: 'conv-success',
+    workdir: '/tmp/wd-metrics',
+    userRequest: 'success run',
+    now: now(),
+  });
+
+  const claimA = store.claim(null);
+  assert.ok(claimA);
+  store.start(claimA);
+  store.succeed(claimA, {
+    finalDispatchId: 'dispatch-a',
+    reply: 'ok',
+  });
+
+  const rowB = store.submit({
+    runId: 'run-failed',
+    conversationId: 'conv-failed',
+    workdir: '/tmp/wd-metrics',
+    userRequest: 'failed run',
+    now: now(),
+  });
+  assert.equal(rowB.runId, 'run-failed');
+
+  const claimB1 = store.claim(null);
+  assert.ok(claimB1);
+  store.start(claimB1);
+  const failed = store.fail(claimB1, {
+    errorCode: 'E_TEST',
+    errorDetail: 'intentional',
+  });
+
+  store.retry(claimB1);
+  const claimB2 = store.claim(null);
+  assert.ok(claimB2);
+  store.start(claimB2);
+  store.fail(claimB2, {
+    errorCode: 'E_TEST',
+    errorDetail: 'still failing',
+  });
+
+  const metrics = await scheduler.metrics();
+
+  assert.equal(metrics.totalRows, 2);
+  assert.equal(metrics.totalAttempts, 3);
+  assert.equal(metrics.retriedRows, 1);
+  assert.equal(metrics.retriedAttempts, 1);
+  assert.equal(metrics.statusCounts.success, 1);
+  assert.equal(metrics.statusCounts.failed, 1);
+  assert.equal(metrics.statusCounts.pending, 0);
+  assert.equal(metrics.failureCodeCounts.E_TEST, 1);
+
+  assert.equal(metrics.queueWaitMs.count, 2);
+  assert.equal(metrics.queueWaitMs.minMs, 1000);
+  assert.equal(metrics.queueWaitMs.maxMs, 6000);
+  assert.equal(metrics.queueWaitMs.averageMs, 3500);
+
+  assert.equal(metrics.runDurationMs.count, 1);
+  assert.equal(metrics.runDurationMs.minMs, 2000);
+  assert.equal(metrics.runDurationMs.maxMs, 2000);
+  assert.equal(metrics.runDurationMs.averageMs, 2000);
+
+  scheduler.stop();
+});

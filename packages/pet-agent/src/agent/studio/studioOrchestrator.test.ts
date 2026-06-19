@@ -1582,3 +1582,58 @@ test('studio cancelRun aborts planning and prevents tasks from being queued afte
   assert.deepEqual(orchestrator.getRun('run-cancel-api')?.tasks, []);
   assert.equal(workerInvoked, false);
 });
+
+test('studio cancelRun marks running task cancelled in the immediate snapshot', async () => {
+  const wikiBaseDir = await makeWikiTempDir('studio-cancel-running-');
+  let releaseWorker!: () => void;
+  let markWorkerStarted!: () => void;
+  const workerStarted = new Promise<void>((resolve) => {
+    markWorkerStarted = resolve;
+  });
+  const workerGate = new Promise<void>((resolve) => {
+    releaseWorker = resolve;
+  });
+
+  const orchestrator = createStudioOrchestrator({
+    studioId: 'studio-1',
+    ownerUserId: 'user-1',
+    wikiBaseDir,
+    plannerPetId: 'planner',
+    agents: [
+      plannerRuntime(),
+      runtime({
+        petId: 'worker',
+        name: 'Worker',
+        reply: 'finished after cancel',
+        onInvoke: async () => {
+          markWorkerStarted();
+          await workerGate;
+        },
+      }),
+    ],
+  });
+
+  await submitWithPlannerStub(orchestrator, {
+    userRequest: 'cancel running worker',
+    turnId: 'run-cancel-running',
+    conversationId: 'conv-cancel-running',
+    plan: {
+      tasks: [
+        { petId: 'worker', goal: 'hold until cancelled', acceptanceCriteria: [] },
+      ],
+    },
+  });
+  await workerStarted;
+  assert.equal(orchestrator.getRun('run-cancel-running')?.tasks[0]?.status, 'running');
+
+  await orchestrator.cancelRun('run-cancel-running');
+
+  const cancelledSnapshot = orchestrator.getRun('run-cancel-running');
+  assert.equal(cancelledSnapshot?.status, 'cancelled');
+  assert.equal(cancelledSnapshot?.tasks[0]?.status, 'cancelled');
+
+  releaseWorker();
+  const result = await orchestrator.waitForRun('run-cancel-running');
+  assert.equal(result.outcome.outcome, 'stopped');
+  assert.equal(orchestrator.getRun('run-cancel-running')?.tasks[0]?.status, 'cancelled');
+});

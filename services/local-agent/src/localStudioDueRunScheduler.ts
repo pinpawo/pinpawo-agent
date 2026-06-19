@@ -507,6 +507,7 @@ export class LocalStudioDueRunScheduler {
         workdir: row.workdir,
         outcome: 'done',
         reply: turnOutcome.reply,
+        // Legacy rows used finalDispatchId before Studio standardized on finalPetRunId.
         finalPetRunId: turnOutcome.finalPetRunId ?? row.finalPetRunId ?? row.finalDispatchId,
       };
     }
@@ -531,6 +532,7 @@ export class LocalStudioDueRunScheduler {
         workdir: row.workdir,
         outcome: 'done',
         reply: row.reply ?? '',
+        // Keep reading finalDispatchId only as a legacy row migration fallback.
         finalPetRunId: row.finalPetRunId ?? row.finalDispatchId,
       };
     }

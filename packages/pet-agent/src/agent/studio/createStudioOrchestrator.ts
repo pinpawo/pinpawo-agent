@@ -144,6 +144,8 @@ function buildTaskStatesFromSnapshot(tasks: StudioQueueItem[]): QueuedTaskRuntim
   return tasks
     .sort((a, b) => a.taskIndex - b.taskIndex)
     .map((task) => ({
+      // FileStudioRunQueueStore normalizes recovered running tasks to failed.
+      // Treat any other terminal persisted status as failed here as a defensive fallback.
       status: task.status === 'done'
         ? 'satisfied'
         : task.status === 'queued'
@@ -862,6 +864,9 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
           return;
         }
         if (!petRegistry.isDispatchable(item.petId) || activePets.has(item.petId)) {
+          // Current iteration keeps strict global FIFO: a blocked head item stops this
+          // scheduling pass even if later runs have ready work. Task completion or a new
+          // enqueue triggers another pass; cross-run fairness is a later scheduler concern.
           setRunStatus(record, 'blocked');
           saveRunSnapshot(record);
           return;
@@ -928,7 +933,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     record.abortController.abort(new Error('cancelled by caller'));
     const cancelledAt = new Date().toISOString();
     for (const item of queue) {
-      if (item.runId === runId && item.status === 'queued') {
+      if (item.runId === runId && (item.status === 'queued' || item.status === 'running')) {
         item.status = 'cancelled';
         item.finishedAt = cancelledAt;
       }

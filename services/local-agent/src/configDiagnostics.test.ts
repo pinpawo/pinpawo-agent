@@ -88,6 +88,7 @@ function runtimeConfigFor(workdir: string): LocalAgentRuntimeConfig {
     workdir,
     stateRoot,
     studioConfigPath: join(stateRoot, 'studio.json'),
+    studioDueRunsPath: join(stateRoot, 'studio-due-runs.json'),
     petsDir: join(stateRoot, 'pets'),
     studioWikiBaseDir: join(stateRoot, 'studio-wiki'),
     checkpointPath: join(stateRoot, 'checkpoints.json'),

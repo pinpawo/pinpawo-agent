@@ -21,6 +21,7 @@ function createDeps(): LocalServerDeps {
       workdir: '/tmp/workspace',
       stateRoot: '/tmp/workspace/.pinpawo',
       studioConfigPath: '/tmp/workspace/.pinpawo/studio.json',
+      studioDueRunsPath: '/tmp/workspace/.pinpawo/studio-due-runs.json',
       petsDir: '/tmp/workspace/.pinpawo/pets',
       studioWikiBaseDir: '/tmp/workspace/.pinpawo/studio-wiki',
       checkpointPath: '/tmp/workspace/.pinpawo/checkpoints.json',

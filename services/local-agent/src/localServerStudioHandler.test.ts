@@ -41,17 +41,18 @@ function createDeps(): LocalServerDeps {
   return {
     actorId: 'pet-a',
     actorName: 'Pet A',
+    workdir: '/tmp/pinpawo-test',
     llmConfig: {
       provider: 'openai',
       model: 'test-model',
       apiKey: 'test-key',
       baseUrl: 'https://example.test/v1',
     } as unknown as LocalServerDeps['llmConfig'],
-    workdir: '/tmp/pinpawo-test',
     runtimeConfig: {
       workdir: '/tmp/pinpawo-test',
       stateRoot: '/tmp/pinpawo-test/.pinpawo',
       studioConfigPath: '/tmp/pinpawo-test/.pinpawo/studio.json',
+      studioDueRunsPath: '/tmp/pinpawo-test/.pinpawo/studio-due-runs.json',
       petsDir: '/tmp/pinpawo-test/.pinpawo/pets',
       studioWikiBaseDir: '/tmp/pinpawo-test/.pinpawo/studio-wiki',
       checkpointPath: '/tmp/pinpawo-test/.pinpawo/checkpoints.json',
@@ -62,10 +63,10 @@ function createDeps(): LocalServerDeps {
     localToolkits: [{
       name: 'local-toolkit',
       description: 'local toolkit',
-        operations: {
-          read_file: {
-            title: '读文件',
-            summarizeInput: (input: unknown) => {
+      operations: {
+        read_file: {
+          title: '读文件',
+          summarizeInput: (input: unknown) => {
             const path = input && typeof input === 'object' && 'path' in input
               ? (input as { path?: unknown }).path
               : null;

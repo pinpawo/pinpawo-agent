@@ -7,6 +7,7 @@
  */
 import { createServer } from 'node:http';
 import { WebSocket } from 'ws';
+import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
 import { LocalAgentGraphService } from './agentGraphService';
 import {
   sendLocalAgentEvent,
@@ -14,6 +15,7 @@ import {
 } from './localAgentProtocol';
 import { InflightRequestController } from './inflightRequestController';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
+import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
@@ -37,6 +39,15 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
       } : {}),
     });
     const studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
+    const studioDueRunScheduler = deps.studioDueRunScheduler
+      ?? (deps.runtimeConfig
+      ? new LocalStudioDueRunScheduler({
+          store: new FileStudioDueRunStore({
+            filePath: deps.runtimeConfig.studioDueRunsPath,
+          }),
+          filterWorkdir: deps.runtimeConfig.workdir,
+        })
+      : undefined);
     const inflightRequests = new InflightRequestController<WebSocket>({
       forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
       // Local TUI / companion: trusted transport — forward raw input/output so
@@ -53,6 +64,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
     const studioHandler = new LocalServerStudioHandler({
       reviewRouter: studioReviewRouter,
       inflightRequests,
+      ...(studioDueRunScheduler ? { studioDueRunScheduler } : {}),
     });
     const authToken = ensureLocalServerAuthToken();
     const server = createServer((req, res) => {

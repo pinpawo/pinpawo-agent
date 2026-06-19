@@ -108,6 +108,17 @@ export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniq
 const GENERAL_SUBAGENT_MAX_ITERATIONS = 16;
 const CAPABILITY_SUBAGENT_MAX_ITERATIONS = 8;
 
+function fallbackDelegationOutcomeReply(params: {
+  kind: 'user_intent' | 'delegation_outcome';
+  latestTurnAnnounce: ReturnType<typeof readLatestAnnounce>;
+}): string | null {
+  if (params.kind !== 'delegation_outcome') return null;
+  const announceText = params.latestTurnAnnounce?.announce === 'completed'
+    ? params.latestTurnAnnounce.text?.trim() || null
+    : null;
+  return announceText;
+}
+
 function generalLaneToolkits(toolkits: AgentToolkit[]) {
   return toolkits.filter((toolkitItem) => toolkitItem.exposure?.general !== false);
 }
@@ -701,7 +712,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
     const finalReply = decisionMode === 'finish'
       ? actionKind === 'finish'
-        ? readDecisionText(decision.answer) ?? '当前决策选择直接回复，但没有生成可展示的回复内容。'
+        ? readDecisionText(decision.answer)
+          ?? fallbackDelegationOutcomeReply({ kind, latestTurnAnnounce })
+          ?? '当前决策选择直接回复，但没有生成可展示的回复内容。'
         : actionKind === 'ask_user'
           ? readDecisionText(decision.question) ?? '我需要你再补充一点信息，才能继续推进。'
           : actionKind === 'delegate_general' && generalTools.length === 0

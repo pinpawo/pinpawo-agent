@@ -402,7 +402,7 @@ test('delegation outcome decision receives subagent announce as explicit input a
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
         decisionInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-        return { action: 'finish', answer: 'done' };
+        return { action: 'finish', answer: '已基于完整 subagent 结果回复用户。' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -411,7 +411,12 @@ test('delegation outcome decision receives subagent announce as explicit input a
     models: { act: model, observe: model },
     actor: testActor,
   });
-  const currentAnnounce = new AIMessage('文件读取完成，lint 已通过。');
+  const currentAnnounceText = [
+    '文件读取完成，lint 已通过。',
+    'A'.repeat(1400),
+    'END_OF_FULL_SUBAGENT_RESULT',
+  ].join('\n\n');
+  const currentAnnounce = new AIMessage(currentAnnounceText);
   const input = buildOrchestratorTurnInput([
     new HumanMessage('读取文件并运行 lint'),
     currentAnnounce,
@@ -428,10 +433,10 @@ test('delegation outcome decision receives subagent announce as explicit input a
     lane: 'general',
     task: '读取文件并运行 lint',
     status: 'completed',
-    resultPreview: '文件读取完成，lint 已通过。',
+    resultPreview: currentAnnounceText,
   }];
 
-  await graph.invoke(input, {
+  const result = await graph.invoke(input, {
     configurable: {
       thread_id: 'test-delegation-outcome',
       actor: testActor,
@@ -443,6 +448,57 @@ test('delegation outcome decision receives subagent announce as explicit input a
   assert.equal(discoveryCalled, false);
   assert.match(decisionInput, /subagent announce/);
   assert.match(decisionInput, /文件读取完成，lint 已通过/);
+  assert.match(decisionInput, /END_OF_FULL_SUBAGENT_RESULT/);
+  assert.equal(result.messages.at(-1)?.content, '已基于完整 subagent 结果回复用户。');
+});
+
+test('delegation outcome finish falls back to completed announce only when answer is omitted', async () => {
+  const routeModel = {
+    bindTools: () => ({
+      invoke: async () => {
+        throw new Error('capability discovery should be skipped for current-turn announce');
+      },
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => ({ action: 'finish', answer: null }),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: { act: routeModel },
+    actor: testActor,
+  });
+  const input = buildOrchestratorTurnInput([
+    new HumanMessage('帮我列一个目前 vibecoding 的模型排行榜。'),
+  ]);
+  const announceText = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
+  const announceMessage = new AIMessage(announceText);
+  setPinpetMeta(announceMessage, {
+    lane: 'general',
+    turnId: input.turnId,
+    announce: 'completed',
+    delegationId: 'task-1',
+    task: '搜索并整理 vibecoding 模型排行榜。',
+  });
+  input.messages.push(announceMessage);
+  input.turnDelegations = [{
+    id: 'task-1',
+    lane: 'general',
+    task: '搜索并整理 vibecoding 模型排行榜。',
+    status: 'completed',
+    resultPreview: announceText,
+  }];
+
+  const result = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'delegation-outcome-leak-fallback',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [],
+    },
+  });
+  const finalMessageText = String(result.messages.at(-1)?.content ?? '');
+
+  assert.equal(finalMessageText, announceText);
 });
 
 test('limit-reached progress announce lets model choose the same capability delegation', async () => {

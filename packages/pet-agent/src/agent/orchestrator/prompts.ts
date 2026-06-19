@@ -20,7 +20,7 @@ const MAX_RECENT_CAPABILITY_ARTIFACTS = 6;
 
 export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[] | undefined): string {
   if (!artifacts || artifacts.length === 0) return '';
-  const lines = ['当前会话 capability artifacts（仅短引用；需要细节时交给对应 capability 用 artifact 工具读取）：'];
+  const lines = ['当前会话 capability artifacts（仅短引用；需要细节时交给对应 capability/host 按 ref 读取）：'];
   for (const artifact of artifacts.slice(-MAX_RECENT_CAPABILITY_ARTIFACTS)) {
     lines.push(`- [${artifact.kind}] ${clipForPrompt(artifact.title ?? artifact.id, 120)}`);
     lines.push(`  capability: ${artifact.capabilityId}; uri: ${artifact.uri}`);
@@ -291,6 +291,18 @@ function buildCapabilityDecisionInstructions(capabilityDecisionState: Capability
   return [];
 }
 
+function indentPromptBlock(text: string): string {
+  return text.split('\n').map((line) => `  ${line}`).join('\n');
+}
+
+function formatSubagentAnnounceText(item: SubagentAnnounce): string | null {
+  if (!item.text) return null;
+  return [
+    '- 返回内容：',
+    indentPromptBlock(item.text.trim()),
+  ].join('\n');
+}
+
 export function buildSubagentAnnounceContext(
   item: SubagentAnnounce | null,
   completionReason?: SubagentCompletionReason | null,
@@ -303,7 +315,7 @@ export function buildSubagentAnnounceContext(
     `- 状态：${describeAnnounceKind(item.announce)}`,
     completionReason ? `- 停止原因：${completionReason}` : null,
     item.task ? `- 委派任务：${clipForPrompt(item.task, 180)}` : null,
-    item.text ? `- 返回摘要：${clipForPrompt(item.text, 320)}` : null,
+    formatSubagentAnnounceText(item),
   ].filter(Boolean);
   return lines.join('\n');
 }

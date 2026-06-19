@@ -304,6 +304,48 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 - scheduler 不直接调用 pet runtime 或 capability。
 - scheduler 只创建 due run 并交给 StudioRunService。
 
+### Scheduler V1 交付协议（推荐）
+
+为避免并发写入冲突，建议 scheduler 在服务端把 `studio_request` 作为**外部任务**处理，按以下规则落地：
+
+- 数据建模：
+  - `studio_due_runs`（或已有任务表的扩展）至少包含：
+    - `idempotency_key`（唯一索引）：`studio:{conversationId}:run:{runId}`
+    - `run_id`
+    - `conversation_id`
+    - `workdir`
+    - `status`: `pending | claimed | running | success | failed | canceled`
+    - `attempt`（重试计数）
+    - `error_code` / `error_detail`
+    - `request_payload`（含 `userRequest`、`conversationId`、`ownerUserId`）
+    - `result`（可选：`finalDispatchId`、`reply`、`created_at`）
+    - `updated_at`（处理窗口）
+- 触发入库：
+  - 每次外部发起都先写一条 `status=pending` 记录。
+  - `idempotency_key` 冲突时，返回已有任务行并复用现有 `run_id`，不重复入列。
+- 领取执行：
+  - worker 每轮 `select ... where status='pending' order by created_at for update skip locked` 领取一条；
+  - 领取时 `status=claimed`, `attempt + 1`，`claimed_at` 打点，避免多实例双执行。
+- 执行路径：
+  - 只允许 `claimed`→`running`→`finished` 的状态机，任何失败走 `failed` 并可重试。
+  - 每次回调 `local-agent` 时透传：
+    - `runtimeConfig`: `{workdir,studioConfigPath,petsDir,studioWikiBaseDir,...}`
+    - `runId`
+    - `conversationId`
+    - `ownerUserId`
+- 重试规则：
+  - 对于 `failed` 且 `attempt < retryLimit` 的行，可在 `run_at` 回退后自动重试（scheduler 自持久化）。
+  - 重试前再次校验 `workdir` 目录是否可用；不可用则标记失败并暂停该 workdir 的后续运行。
+- 幂等约束：
+  - `idempotency_key` 决定是否复用任务，不以 user message 文案做主键。
+  - `runId` 继续做任务执行 trace 的主键，`conversationId` 做会话聚合。
+
+### 需要避免的 anti-pattern
+
+- scheduler 直接读 `~/.pinpawo/studio.json` 作为运行时来源。
+- 同一 `conversationId` 并发投递多个 `studio_request` 且不做 `FOR UPDATE SKIP LOCKED`。
+- 仅在内存里保留“是否有在跑中”标记，导致进程重启后重跑重复任务。
+
 ## 迭代计划
 
 ### Phase 0: 文档和审计

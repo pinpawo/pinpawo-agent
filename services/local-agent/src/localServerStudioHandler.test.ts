@@ -148,6 +148,7 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
     outcome: 'done',
     reply: 'done reply',
     finalDispatchId: 'dispatch-1',
+    workdir: '/tmp/pinpawo-test',
     runId: 'studio-1',
     conversationId: 'studio-1',
     idempotencyKey: 'studio:studio-1:run:studio-1',

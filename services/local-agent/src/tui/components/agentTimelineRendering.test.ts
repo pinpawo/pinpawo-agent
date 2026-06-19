@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import React, { Children } from 'react';
+import React, { Children, isValidElement } from 'react';
+import stringWidth from 'string-width';
 import { AgentTimeline } from './AgentTimeline';
+import { AgentTimelineItem } from './AgentTimelineItem';
+import { AgentMessageItem } from './AgentMessageItem';
 import {
   buildAgentOperationDisplayLines,
   buildAgentReviewText,
@@ -34,7 +37,7 @@ test('buildAgentOperationDisplayLines preserves operation lifecycle text without
   assert.doesNotMatch(text, /secret raw/);
 });
 
-test('buildAgentOperationDisplayLines wraps long operation text to the requested width', () => {
+test('buildAgentOperationDisplayLines keeps operation text to one clipped status line', () => {
   const lines = buildAgentOperationDisplayLines(operationEntry({
     phase: 'started',
     title: 'open',
@@ -42,8 +45,9 @@ test('buildAgentOperationDisplayLines wraps long operation text to the requested
     summary: 'loading dashboard',
   }), 3500, 16);
 
-  assert.ok(lines.length > 1);
-  assert.ok(lines.every((line) => line.text.length <= 16));
+  assert.equal(lines.length, 1);
+  assert.ok(stringWidth(lines[0]!.text) <= 16);
+  assert.match(lines[0]!.text, /（开始）$/);
 });
 
 test('buildAgentOperationDisplayLines keeps running and terminal phases distinct', () => {
@@ -59,7 +63,7 @@ test('buildAgentOperationDisplayLines keeps running and terminal phases distinct
     summary: '找不到元素',
   }), 3500, 120).map((line) => line.text).join('\n');
 
-  assert.match(running, /2s/);
+  assert.match(running, /进行中 2s/);
   assert.doesNotMatch(running, /失败/);
   assert.match(failed, /失败/);
   assert.match(failed, /找不到元素/);
@@ -88,9 +92,18 @@ test('buildAgentOperationDisplayLines renders browser active completed and faile
     details: { selector: '#result', timeoutMs: 5000 },
   }), 3500, 120).map((line) => line.text).join('\n');
 
-  assert.match(running, /点击页面 · 2s · text=登录 · 点击 text=登录/);
-  assert.match(completed, /打开网页 · https:\/\/example\.com\/ · 页面：Example Domain/);
-  assert.match(failed, /等待页面 · 失败 · #result · No active browser page/);
+  assert.equal(
+    running,
+    '点击 text=登录 · text=登录 · selector=text=登录 · 点击页面（开始）',
+  );
+  assert.match(
+    completed,
+    /^页面：Example Domain · https:\/\/example\.com\/ · title=Example Domain · url=https:\/\/example\.com\/ · 打开网页（完成）$/,
+  );
+  assert.match(
+    failed,
+    /^No active browser page\. Use browser_open first\. · #result · selector=#result · timeoutMs=5000 · 等待页面（失败）$/,
+  );
 });
 
 test('buildAgentReviewText renders review status without treating it as a message', () => {
@@ -102,6 +115,7 @@ test('buildAgentReviewText renders review status without treating it as a messag
 test('AgentTimeline preserves assistant and operation entry order', () => {
   const entries: AgentTimelineEntry[] = [
     messageEntry('assistant-before-tool', '正在打开页面'),
+    subagentMessageEntry('req-1:subagent-output', '先检查文件'),
     operationEntry({
       id: 'req-1:operation:open',
       operationKey: 'open',
@@ -123,9 +137,28 @@ test('AgentTimeline preserves assistant and operation entry order', () => {
 
   assert.deepEqual(children.map((child) => child.props.entry.id), [
     'assistant-before-tool',
+    'req-1:subagent-output',
     'req-1:operation:open',
     'assistant-after-tool',
   ]);
+});
+
+test('AgentTimelineItem renders subagent messages through AgentMessageItem', () => {
+  const entry = subagentMessageEntry('req-1:subagent-output', '先检查文件');
+  const element = AgentTimelineItem({
+    entry,
+    petName: '小派',
+    width: 80,
+    now: 3000,
+  });
+
+  assert.ok(isValidElement(element));
+  assert.equal(element.type, AgentMessageItem);
+  assert.deepEqual(element.props, {
+    entry,
+    petName: '小派',
+    width: 80,
+  });
 });
 
 function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEntry {
@@ -140,6 +173,17 @@ function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEnt
     startedAt: 1000,
     updatedAt: 1000,
     ...params,
+  };
+}
+
+function subagentMessageEntry(id: string, text: string): AgentMessageEntry {
+  return {
+    id,
+    type: 'message',
+    role: 'subagent',
+    requestId: 'req-1',
+    text,
+    status: 'streaming',
   };
 }
 

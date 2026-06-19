@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Box, Text, useApp, useInput, useStdout } from 'ink';
+import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import { config } from '../config';
 import { AgentTimeline } from './components/AgentTimeline';
+import { AgentTimelineItem } from './components/AgentTimelineItem';
 import { ApprovalPanel } from './components/ApprovalPanel';
 import { CommandPalette } from './components/CommandPalette';
 import { Composer } from './components/Composer';
@@ -43,6 +44,7 @@ import {
   selectReady,
   tuiStateReducer,
 } from './state/tuiStateReducer';
+import { splitTimelineForStaticRender } from './timeline/agentTimelineSelectors';
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { useResumePickerController } from './useResumePickerController';
 import { useTextAreaController } from './useTextAreaController';
@@ -93,6 +95,10 @@ export function TuiApp(props: { actorId: string }) {
   }), [props.actorId, localServerPort, dispatch, setNow]);
   const focusedSession = selectFocusedSession(tuiState);
   const timeline = selectFocusedTimeline(tuiState);
+  const { staticEntries: staticTimeline, dynamicEntries: dynamicTimeline } = useMemo(
+    () => splitTimelineForStaticRender(timeline),
+    [timeline],
+  );
   const ready = selectReady(tuiState);
   const busy = selectFocusedBusy(tuiState);
   const pendingUi = selectFocusedPendingUi(tuiState);
@@ -458,7 +464,21 @@ export function TuiApp(props: { actorId: string }) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <AgentTimeline entries={timeline} petName={petName} width={contentWidth} now={now} />
+      {timeline.length === 0 ? <Text dimColor>{TUI_TEXT.emptyHistory(petName)}</Text> : null}
+      <Static items={staticTimeline}>
+        {(entry) => (
+          <AgentTimelineItem
+            key={entry.id}
+            entry={entry}
+            petName={petName}
+            now={now}
+            width={contentWidth}
+          />
+        )}
+      </Static>
+      {dynamicTimeline.length > 0 ? (
+        <AgentTimeline entries={dynamicTimeline} petName={petName} width={contentWidth} now={now} />
+      ) : null}
       {resumePickerOpen ? (
         <ResumePicker
           sessions={resumePicker.sessions}

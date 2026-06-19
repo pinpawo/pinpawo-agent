@@ -15,7 +15,7 @@ export function formatSystemNoticeEvent(event: LocalAgentSystemNoticeEvent): str
 
 export function formatSubagentMessage(text: string): string | null {
   const content = formatSubagentTextBody(text);
-  return content ? TUI_TEXT.subagentOutput(content) : null;
+  return content || null;
 }
 
 export function formatStudioProgressEvent(event: LocalAgentStudioProgressEvent): string | null {

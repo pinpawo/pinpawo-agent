@@ -40,6 +40,38 @@ export function findTimelineOperationEntry(
     entry.id === operationId || entry.operationKey === operationId) ?? null;
 }
 
+export function splitTimelineForStaticRender(entries: AgentTimelineEntry[]): {
+  staticEntries: AgentTimelineEntry[];
+  dynamicEntries: AgentTimelineEntry[];
+} {
+  const firstDynamicIndex = entries.findIndex((entry) => !isSettledTimelineEntry(entry));
+  if (firstDynamicIndex < 0) {
+    return {
+      staticEntries: entries,
+      dynamicEntries: [],
+    };
+  }
+  return {
+    staticEntries: entries.slice(0, firstDynamicIndex),
+    dynamicEntries: entries.slice(firstDynamicIndex),
+  };
+}
+
+function isSettledTimelineEntry(entry: AgentTimelineEntry) {
+  switch (entry.type) {
+    case 'message':
+      return entry.status === 'completed';
+    case 'operation':
+      return !isRunningOperationPhase(entry.phase);
+    case 'review':
+      return entry.status !== 'waiting';
+    case 'notice':
+    case 'error':
+    case 'studio.progress':
+      return true;
+  }
+}
+
 function formatOperationTimelineDetail(entry: AgentOperationEntry) {
   const details = formatDetails(entry.details);
   return [entry.target, entry.summary, details]

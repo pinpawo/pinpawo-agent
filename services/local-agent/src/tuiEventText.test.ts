@@ -8,17 +8,13 @@ import {
 } from './tui/render/eventText';
 
 test('formats subagent text into readable paragraphs', () => {
-  assert.equal(
-    formatSubagentMessage(
-      '我先打开页面。现在搜索结果出来了，我会查看第一个帖子。然后继续收集评论。最后汇总。'.repeat(2),
-    )?.startsWith('[subagent]\n'),
-    true,
-  );
+  const formatted = formatSubagentMessage(
+    '我先打开页面。现在搜索结果出来了，我会查看第一个帖子。然后继续收集评论。最后汇总。'.repeat(2),
+  ) ?? '';
+  assert.equal(formatted.includes('subagent'), false);
   assert.match(
-    formatSubagentMessage(
-      '我先打开页面。现在搜索结果出来了，我会查看第一个帖子。然后继续收集评论。最后汇总。'.repeat(2),
-    ) ?? '',
-    /\n.+\n.+/,
+    formatted,
+    /.+\n.+/,
   );
 });
 

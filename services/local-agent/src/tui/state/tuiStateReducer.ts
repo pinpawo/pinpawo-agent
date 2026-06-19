@@ -246,14 +246,9 @@ function upsertOperationTimelineEntry(
   };
 }
 
-const SUBAGENT_OUTPUT_PREFIX = '[subagent]\n';
-
 function readSubagentTimelineText(session: SessionModel, entryId: string) {
   const entry = session.timeline.find((item) => item.id === entryId);
-  if (!entry || entry.type !== 'notice') return '';
-  return entry.text.startsWith(SUBAGENT_OUTPUT_PREFIX)
-    ? entry.text.slice(SUBAGENT_OUTPUT_PREFIX.length)
-    : entry.text;
+  return entry?.type === 'message' && entry.role === 'subagent' ? entry.text : '';
 }
 
 function appendSubagentTimelineDelta(
@@ -265,11 +260,13 @@ function appendSubagentTimelineDelta(
   const text = readSubagentTimelineText(session, id) + token;
   const formatted = formatSubagentMessage(text);
   if (!formatted) return { session };
-  const entry: AgentTimelineEntry = {
+  const entry: AgentMessageEntry = {
     id,
-    type: 'notice',
+    type: 'message',
+    role: 'subagent',
     requestId,
-    text: formatted,
+    text,
+    status: 'streaming',
   };
   return {
     session: {
@@ -277,6 +274,16 @@ function appendSubagentTimelineDelta(
       timeline: appendOrUpdateTimelineEntry(session.timeline, entry),
     },
     entryId: entry.id,
+  };
+}
+
+function finalizeSubagentTimelineEntries(session: SessionModel, requestId: string) {
+  return {
+    ...session,
+    timeline: session.timeline.map((entry) =>
+      entry.type === 'message' && entry.role === 'subagent' && entry.requestId === requestId
+        ? { ...entry, status: 'completed' as const }
+        : entry),
   };
 }
 
@@ -371,8 +378,9 @@ function finishRun(
     if (!sessionToUpdate.activeRun || sessionToUpdate.activeRun.requestId !== requestId) {
       return sessionToUpdate;
     }
+    const finalizedSession = finalizeSubagentTimelineEntries(sessionToUpdate, requestId);
     return appendHistory({
-      ...sessionToUpdate,
+      ...finalizedSession,
       activeRun: null,
     }, [
       ...history,

@@ -194,7 +194,7 @@ export type AgentTimelineEntry =
 export type AgentMessageEntry = {
   id: string;
   type: 'message';
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'subagent';
   requestId?: string;
   text: string;
   status: 'completed' | 'streaming';
@@ -208,6 +208,7 @@ export type AgentMessageEntry = {
 - streaming assistant 不再单独放在 `activeRun.assistantDraft`。
 - assistant 在 tool call 前后的输出可以拆成多个 assistant segments。
 - `message.completed` 用来 finalize 当前 assistant segment，或者在没有 delta 时创建 completed segment。
+- subagent model text 是 `role: 'subagent'` 的 message segment，不是 `system`/`notice` 文本，也不新增 subagent 专用 item component。
 
 #### Operation entry
 
@@ -369,6 +370,8 @@ operation: 打开网页 https://...
 assistant: 页面打开了
 ```
 
+`subagent.message.delta` 与 `message.delta` 同属 message timeline：它创建或更新 `AgentMessageEntry(role: 'subagent')`，由 `AgentMessageItem` 按 subagent 样式渲染。不要再把 subagent output 编码进 `system` cell 或 `notice` entry。
+
 ### 5.3 operation started/updated/completed/failed
 
 当前行为：
@@ -466,18 +469,17 @@ type AgentOperationItemProps = {
 
 展示建议：
 
-- `started/updated`: 显示动词、elapsed、target、短 summary。
-- `completed`: 显示动词、target、result summary。
-- `failed`: 显示失败状态、target、error summary。
-- `interrupted`: 显示中断状态、target。
+- 一个 operation lifecycle 对应一个 `AgentOperationItem`，`started/updated/completed/failed/interrupted` 都更新同一个 item。
+- 单行显示，正文以 `summary` 为主，必要时补 `target/details/title`，状态作为行尾后缀。
+- 宽度不足时截断正文，但保留状态后缀；不要把 start/update/completed 展示成多条日志。
 
 browser 示例：
 
 ```txt
-打开网页 · 2s · https://example.com
-打开网页 · https://example.com · 页面：Example Domain
-点击页面 · .login-btn · 页面：Dashboard
-输入文本 · #password · submit=true · textLength=12
+打开 https://example.com（开始）
+页面：Example Domain · https://example.com（完成）
+点击 .login-btn · 页面：Dashboard（进行中 2s）
+No active browser page · #result（失败）
 ```
 
 ### 6.3 Busy status line

@@ -11,8 +11,10 @@ import {
   findTimelineOperationEntry,
   selectActiveOperationsFromTimeline,
   selectRunningOperationEntries,
+  splitTimelineForStaticRender,
 } from './agentTimelineSelectors';
 import { buildOperationPresentation, getOperationPresentationKey } from './operationPresentation';
+import type { AgentTimelineEntry } from './agentTimeline';
 
 test('timelineEntriesFromHistory maps legacy history cells to stable timeline entries', () => {
   const entries = timelineEntriesFromHistory([
@@ -162,6 +164,68 @@ test('timeline selectors derive active operations from running operation entries
     }],
   );
   assert.equal(findTimelineOperationEntry(entries, 'call-done')?.phase, 'completed');
+});
+
+test('splitTimelineForStaticRender keeps only the settled prefix static', () => {
+  const userEntry: AgentTimelineEntry = {
+    id: 'req-1:user',
+    type: 'message',
+    role: 'user',
+    requestId: 'req-1',
+    text: 'hello',
+    status: 'completed',
+  };
+  const subagentEntry: AgentTimelineEntry = {
+    id: 'req-1:subagent-output',
+    type: 'message',
+    role: 'subagent',
+    requestId: 'req-1',
+    text: 'working',
+    status: 'streaming',
+  };
+  const operationEntry = operationTimelineEntryFromEvent(operationEvent({
+    phase: 'completed',
+    target: 'README.md',
+    summary: 'read',
+  }), 1200);
+  const assistantEntry: AgentTimelineEntry = {
+    id: 'req-1:assistant',
+    type: 'message',
+    role: 'assistant',
+    requestId: 'req-1',
+    text: 'done',
+    status: 'completed',
+  };
+
+  assert.deepEqual(
+    splitTimelineForStaticRender([
+      userEntry,
+      subagentEntry,
+      operationEntry,
+      assistantEntry,
+    ]),
+    {
+      staticEntries: [userEntry],
+      dynamicEntries: [subagentEntry, operationEntry, assistantEntry],
+    },
+  );
+
+  const completedSubagent = {
+    ...subagentEntry,
+    status: 'completed' as const,
+  };
+  assert.deepEqual(
+    splitTimelineForStaticRender([
+      userEntry,
+      completedSubagent,
+      operationEntry,
+      assistantEntry,
+    ]),
+    {
+      staticEntries: [userEntry, completedSubagent, operationEntry, assistantEntry],
+      dynamicEntries: [],
+    },
+  );
 });
 
 function operationEvent(params: {

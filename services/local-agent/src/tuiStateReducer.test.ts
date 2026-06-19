@@ -7,6 +7,7 @@ import {
   selectFocusedBusy,
   selectFocusedPendingApproval,
   selectFocusedSubagentDraft,
+  selectFocusedTimeline,
   tuiStateReducer,
 } from './tui/state/tuiStateReducer';
 
@@ -80,6 +81,14 @@ test('tuiStateReducer uses completed message text for final assistant history', 
   assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
     ['user', 'hello'],
     ['assistant', '最终回答只应该使用 completed 的内容。'],
+  ]);
+  assert.deepEqual(session.timeline.map((entry) => (
+    entry.type === 'message'
+      ? [entry.type, entry.role, entry.status, entry.text]
+      : [entry.type]
+  )), [
+    ['message', 'user', 'completed', 'hello'],
+    ['message', 'assistant', 'completed', '最终回答只应该使用 completed 的内容。'],
   ]);
 });
 
@@ -460,6 +469,9 @@ test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => 
   let activeRun = selectFocusedActiveRun(state);
   assert.equal(activeRun?.phase, 'using_tool');
   assert.deepEqual(activeRun?.activeOperations.map((operation) => operation.key), ['tool-1']);
+  assert.deepEqual(activeRun?.timelineEntryIds, ['history:req-1:user', 'req-1:operation:tool-1']);
+  assert.equal(selectFocusedTimeline(state).at(-1)?.id, 'req-1:operation:tool-1');
+  assert.equal(selectFocusedTimeline(state).at(-1)?.type, 'operation');
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -476,6 +488,8 @@ test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => 
 
   activeRun = selectFocusedActiveRun(state);
   assert.equal(activeRun?.activeOperations[0]?.detail, 'npm test · running');
+  const updatedTimelineEntry = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:operation:tool-1');
+  assert.equal(updatedTimelineEntry?.type === 'operation' ? updatedTimelineEntry.summary : undefined, 'running');
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -495,6 +509,11 @@ test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => 
   assert.equal(activeRun?.activeOperations.length, 0);
   assert.equal(state.sessions['chat:pet']?.history.at(-1)?.kind, 'system');
   assert.equal(state.sessions['chat:pet']?.history.at(-1)?.text, 'Shell：npm test · ok');
+  assert.equal(selectFocusedTimeline(state).filter((entry) => entry.id === 'req-1:operation:tool-1').length, 1);
+  const completedTimelineEntry = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:operation:tool-1');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.phase : undefined, 'completed');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.summary : undefined, 'ok');
+  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'history:op-complete'), false);
 });
 
 test('tuiStateReducer handles human review and interrupt state', () => {
@@ -529,6 +548,13 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     petId: 'pet-a',
   });
   assert.equal(state.connection.message, '等待你的决定(pet-a)');
+  assert.deepEqual(selectFocusedTimeline(state).at(-1), {
+    id: 'req-1:review:review-1',
+    type: 'review',
+    requestId: 'req-1',
+    reviewId: 'review-1',
+    status: 'waiting',
+  });
 
   const activeRunBefore = selectFocusedActiveRun(state);
   state = tuiStateReducer(state, {
@@ -546,6 +572,15 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.equal(selectFocusedActiveRun(state)?.requestId, 'req-1');
   assert.equal(selectFocusedActiveRun(state)?.startedAt, activeRunBefore?.startedAt);
   assert.equal(selectFocusedPendingApproval(state), null);
+  const answeredReview = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:review:review-1');
+  assert.equal(answeredReview?.type === 'review' ? answeredReview.status : undefined, 'answered');
+  assert.deepEqual(selectFocusedTimeline(state).at(-1), {
+    id: 'history:review-response',
+    type: 'message',
+    role: 'user',
+    text: '批准',
+    status: 'completed',
+  });
 
   state = tuiStateReducer(state, {
     type: 'run.interrupting',

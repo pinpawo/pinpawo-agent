@@ -17,10 +17,12 @@ function pendingReviewState(): TuiState {
         actor: { label: 'Pet', summary: 'summary' },
         runtime: {},
         history: [],
+        timeline: [],
         tokenUsage: null,
         activeRun: {
           requestId: 'req-1',
           phase: 'waiting_human',
+          timelineEntryIds: [],
           assistantDraft: '',
           subagentDraft: '',
           activeOperations: [],

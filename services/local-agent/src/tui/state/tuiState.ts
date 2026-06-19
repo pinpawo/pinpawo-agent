@@ -1,6 +1,10 @@
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
 import {
+  timelineEntriesFromHistory,
+  type AgentTimelineEntry,
+} from '../timeline/agentTimeline';
+import {
   createComposerHistoryState,
   type ComposerHistoryDirection,
   type ComposerHistoryState,
@@ -49,6 +53,7 @@ export type SessionModel = {
     contextWindow?: number;
   };
   history: HistoryCellModel[];
+  timeline: AgentTimelineEntry[];
   activeRun: ActiveRunModel | null;
   tokenUsage: TokenUsageModel | null;
 };
@@ -56,6 +61,7 @@ export type SessionModel = {
 export type ActiveRunModel = {
   requestId: RunId;
   phase: 'thinking' | 'using_tool' | 'streaming' | 'waiting_human' | 'interrupting';
+  timelineEntryIds: string[];
   assistantDraft: string;
   subagentDraft: string;
   activeOperations: ActiveOperationModel[];
@@ -249,6 +255,7 @@ export function createSession(params: {
   actor?: Partial<SessionModel['actor']>;
   history?: HistoryCellModel[];
 }): SessionModel {
+  const history = params.history ?? [];
   return {
     id: params.id,
     kind: params.kind ?? 'chat',
@@ -257,7 +264,8 @@ export function createSession(params: {
       summary: params.actor?.summary ?? TUI_TEXT.defaultPetSummary,
     },
     runtime: {},
-    history: params.history ?? [],
+    history,
+    timeline: timelineEntriesFromHistory(history),
     activeRun: null,
     tokenUsage: null,
   };

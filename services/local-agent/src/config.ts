@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
 import { inferLlmContextWindowTokens } from './llmContextWindow';
+import { findLlmModelPresetByKey, inferLlmModelPreset } from './llmModelPresets';
 import { loadStoredConfig } from './storage';
 
 export { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
@@ -90,6 +91,35 @@ const missingOrPlaceholderApiConfig = apiCredentialValues
   .filter(([key, value]) => isMissingOrGeneratedApiPlaceholder(key, value))
   .map(([key]) => key);
 
+const llmPresetKey = optional('LLM_MODEL_PRESET', 'llm_model_preset');
+const selectedLlmPreset = findLlmModelPresetByKey(llmPresetKey);
+const envPresetRequested = Boolean(process.env.LLM_MODEL_PRESET?.trim());
+const envModelRequested = Boolean(process.env.LLM_MODEL?.trim());
+const llmModelFromConfig = process.env.LLM_MODEL
+  || (!envPresetRequested ? (typeof stored.llm_model === 'string' ? stored.llm_model : '') : '');
+const llmBaseUrlFromConfig = process.env.LLM_BASE_URL
+  || (!envPresetRequested ? (typeof stored.llm_base_url === 'string' ? stored.llm_base_url : '') : '');
+const llmModel = llmModelFromConfig || selectedLlmPreset?.model || 'deepseek-v4-pro';
+const inferredModelPreset = inferLlmModelPreset(llmModel);
+const effectiveLlmPreset = selectedLlmPreset ?? inferredModelPreset;
+const llmBaseUrlRaw = llmBaseUrlFromConfig
+  || effectiveLlmPreset?.baseUrl
+  || (llmPresetKey ? '' : 'https://api.deepseek.com');
+if (!llmBaseUrlRaw) {
+  throw new Error(
+    `Missing: LLM_BASE_URL\nPreset "${llmPresetKey}" requires an OpenAI-compatible gateway URL.`
+  );
+}
+const llmBaseUrl = llmBaseUrlRaw.replace(/\/$/, '');
+const llmStoredContextWindow = envPresetRequested || envModelRequested
+  ? undefined
+  : stored.llm_context_window_tokens;
+const llmContextWindowTokens =
+  resolveNumberConfigValue(process.env.LLM_CONTEXT_WINDOW_TOKENS, llmStoredContextWindow)
+  ?? effectiveLlmPreset?.contextWindowTokens
+  ?? inferLlmContextWindowTokens(llmModel)
+  ?? 32000;
+
 export const config = {
   apiBaseUrl,
   hasuraEndpoint,
@@ -101,12 +131,10 @@ export const config = {
     : '',
 
   llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
-  llmBaseUrl: get('LLM_BASE_URL', 'llm_base_url') || 'https://api.deepseek.com',
-  llmModel: get('LLM_MODEL', 'llm_model') || 'deepseek-v4-pro',
-  llmContextWindowTokens:
-    getNumber('LLM_CONTEXT_WINDOW_TOKENS', 'llm_context_window_tokens')
-    ?? inferLlmContextWindowTokens(get('LLM_MODEL', 'llm_model') || 'deepseek-v4-pro')
-    ?? 32000,
+  llmModelPreset: effectiveLlmPreset?.key ?? '',
+  llmBaseUrl,
+  llmModel,
+  llmContextWindowTokens,
   structuredOutputAutoRepair: getBoolean(
     'LLM_STRUCTURED_OUTPUT_AUTO_REPAIR',
     'structured_output_auto_repair',

@@ -7,7 +7,6 @@ import {
   type AgentToolkit,
   type CapabilityArtifactStore,
   type OrchestratorConfig,
-  inferStructuredOutputMethod,
 } from '@pinpawo/pet-agent';
 import { createCapabilityCreatorCapability } from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
@@ -31,6 +30,7 @@ import {
   type LocalAgentInterfaceContext,
   type LocalAgentInterfaceKind,
 } from './chatInterface';
+import { inferLlmStructuredOutputMethod } from './llmModelPresets';
 
 function buildActor(context: AgentContext) {
   return {
@@ -171,7 +171,7 @@ function appendCapability(
 }
 
 export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): OrchestratorConfig['decisionStructuredOutput'] {
-  const method = inferStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
+  const method = inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
   if (!method) return undefined;
 
   const autoRepair = llmConfig.structuredOutputAutoRepair

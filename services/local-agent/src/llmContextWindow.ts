@@ -1,3 +1,5 @@
+import { inferLlmModelPreset } from './llmModelPresets';
+
 function normalizeModelName(model: string) {
   return model.trim().toLowerCase().replace(/^models\//, '').replace(/^[^/]+\//, '');
 }
@@ -12,6 +14,24 @@ export function inferLlmContextWindowTokens(model: string | null | undefined): n
 
   if (
     startsWithAny(normalized, [
+      'gpt-5.5-mini',
+      'gpt-5.5-nano',
+      'gpt-5.4-mini',
+      'gpt-5.4-nano',
+      'gpt-5.3-mini',
+      'gpt-5.3-nano',
+      'gpt-5-mini',
+      'gpt-5-nano',
+    ])
+  ) {
+    return 400_000;
+  }
+
+  const preset = inferLlmModelPreset(normalized);
+  if (preset?.contextWindowTokens) return preset.contextWindowTokens;
+
+  if (
+    startsWithAny(normalized, [
       'deepseek-v4-pro',
       'deepseek-v4-flash',
       'deepseek-chat',
@@ -23,6 +43,16 @@ export function inferLlmContextWindowTokens(model: string | null | undefined): n
 
   if (startsWithAny(normalized, ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano'])) {
     return 1_047_576;
+  }
+
+  if (
+    startsWithAny(normalized, [
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.3',
+    ])
+  ) {
+    return 1_000_000;
   }
 
   if (
@@ -53,6 +83,10 @@ export function inferLlmContextWindowTokens(model: string | null | undefined): n
     return 8_192;
   }
 
+  if (normalized.includes('claude-sonnet-4.6') || normalized.includes('claude-sonnet-4-6')) {
+    return 1_000_000;
+  }
+
   if (normalized.includes('claude-sonnet-4.5') || normalized.includes('claude-sonnet-4')) {
     return 1_000_000;
   }
@@ -61,8 +95,24 @@ export function inferLlmContextWindowTokens(model: string | null | undefined): n
     return 200_000;
   }
 
-  if (startsWithAny(normalized, ['gemini-3-', 'gemini-2.5-', 'gemini-2.0-'])) {
+  if (startsWithAny(normalized, ['gemini-3.', 'gemini-3-', 'gemini-2.5-', 'gemini-2.0-'])) {
     return 1_048_576;
+  }
+
+  if (startsWithAny(normalized, ['glm-5.2'])) {
+    return 1_000_000;
+  }
+
+  if (startsWithAny(normalized, ['glm-5.1', 'glm-5'])) {
+    return 200_000;
+  }
+
+  if (startsWithAny(normalized, ['kimi-k2.7', 'kimi-k2.6', 'kimi-k2.5', 'kimi-k2'])) {
+    return 256_000;
+  }
+
+  if (startsWithAny(normalized, ['minimax-m2.7', 'minimax-m2.6', 'minimax-m2'])) {
+    return 192_000;
   }
 
   if (normalized.startsWith('gemini-1.5-pro')) {
@@ -78,6 +128,8 @@ export function inferLlmContextWindowTokens(model: string | null | undefined): n
       'qwen3.5-plus',
       'qwen3.5-flash',
       'qwen3.5-turbo',
+      'qwen3.7-',
+      'qwen3.6-',
       'qwen2.5-turbo',
       'qwen-turbo-latest',
       'qwen3-coder',
@@ -86,12 +138,12 @@ export function inferLlmContextWindowTokens(model: string | null | undefined): n
       'qwen2.5',
     ])
   ) {
-    if (normalized.startsWith('qwen3.5-')) {
-      return 1_000_000;
-    }
-
     if (normalized.includes('qwen3-coder')) {
       return 256_000;
+    }
+
+    if (normalized.startsWith('qwen3.7-') || normalized.startsWith('qwen3.6-') || normalized.startsWith('qwen3.5-')) {
+      return 1_000_000;
     }
 
     if (normalized.includes('qwen2.5-turbo') || /(?:^|[-_])1m(?:[-_]|$)/.test(normalized)) {

@@ -44,8 +44,23 @@ function versionAtLeast(model: string, pattern: RegExp, minMajor: number, minMin
     && (major > minMajor || (major === minMajor && minor >= minMinor));
 }
 
+function normalizeModelName(model: string) {
+  return model.trim().toLowerCase().replace(/^models\//, '').replace(/^[^/]+\//, '');
+}
+
+function isGpt53OrNewer(model: string): boolean {
+  const minor = model.match(/^gpt[-_]?5[.-](\d+)/)?.[1];
+  return Number(minor) >= 3;
+}
+
+function isGemini3OrNewer(model: string): boolean {
+  return model.startsWith('gemini-3.') || model.startsWith('gemini-3-');
+}
+
 function supportsJsonSchemaStructuredOutput(model: string): boolean {
-  return versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
+  return isGpt53OrNewer(model)
+    || isGemini3OrNewer(model)
+    || versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
 }
 
 function supportsJsonModeStructuredOutput(model: string): boolean {
@@ -64,18 +79,23 @@ function isAliyunCompatibleBaseUrl(baseUrl: string): boolean {
 /**
  * Pick the structured-output method documented by the upstream model vendor.
  *
- * Kimi 2.6+ supports json_schema; GLM/DeepSeek/Qwen/MiniMax (and unknown models
- * served via an Aliyun-compatible endpoint) use json_mode. Everything else
- * returns undefined so the LangChain default (function calling) applies.
+ * GPT-5.3+, Gemini 3+, and direct Kimi 2.6+ use json_schema. GLM/DeepSeek/
+ * Qwen/MiniMax use json_mode, and Aliyun-compatible endpoints are treated as
+ * json_mode unless the model is a first-party GPT/Gemini json_schema family.
+ * Everything else returns undefined so the LangChain default applies.
  *
  * This is the single source of truth for the selection strategy — the local
  * agent and the structured-output evals all derive from it so the smoke eval
  * cannot silently drift from production behaviour.
  */
 export function inferStructuredOutputMethod(model: string, baseUrl: string): StructuredOutputMethod | undefined {
-  const normalizedModel = model.toLowerCase();
+  const normalizedModel = normalizeModelName(model);
+  const isAliyun = isAliyunCompatibleBaseUrl(baseUrl);
+  if (isAliyun && !isGpt53OrNewer(normalizedModel) && !isGemini3OrNewer(normalizedModel)) {
+    return 'jsonMode';
+  }
   if (supportsJsonSchemaStructuredOutput(normalizedModel)) return 'jsonSchema';
-  if (supportsJsonModeStructuredOutput(normalizedModel) || isAliyunCompatibleBaseUrl(baseUrl)) return 'jsonMode';
+  if (supportsJsonModeStructuredOutput(normalizedModel) || isAliyun) return 'jsonMode';
   return undefined;
 }
 

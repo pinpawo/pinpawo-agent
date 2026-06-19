@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { inferLlmContextWindowTokens } from '../llmContextWindow';
+import { findLlmModelPresetByKey, listLlmModelPresets } from '../llmModelPresets';
 import { loadStoredConfig, saveStoredConfig, configPath } from '../storage';
 
 type AuthResponse = {
@@ -28,6 +29,19 @@ function formatContextWindow(value: number | undefined): string {
   return typeof value === 'number'
     ? new Intl.NumberFormat('zh-CN').format(value)
     : '手动填写';
+}
+
+function formatPresetChoices(): string {
+  return listLlmModelPresets()
+    .map((preset) => {
+      const context = formatContextWindow(preset.contextWindowTokens);
+      const maxOutput = preset.maxOutputTokens
+        ? `, max output ${formatContextWindow(preset.maxOutputTokens)}`
+        : '';
+      const method = preset.structuredOutputMethod ?? 'default';
+      return `  - ${preset.key}: ${preset.label} (${preset.model}, context ${context}${maxOutput}, structured ${method})`;
+    })
+    .join('\n');
 }
 
 function fail(message: string): never {
@@ -108,12 +122,32 @@ export async function runLogin() {
 
     // LLM configuration
     console.log('\nLLM Configuration (OpenAI-compatible API):');
+    console.log('Available presets:');
+    console.log(formatPresetChoices());
+
     const defaultLlmKey = stored.llm_api_key ?? process.env.LLM_API_KEY ?? '';
-    const defaultLlmBase = stored.llm_base_url ?? process.env.LLM_BASE_URL ?? 'https://api.deepseek.com';
-    const defaultLlmModel = stored.llm_model ?? process.env.LLM_MODEL ?? 'deepseek-v4-pro';
-    const defaultLlmContextWindow =
-      stored.llm_context_window_tokens
+    const defaultPresetKey = process.env.LLM_MODEL_PRESET ?? stored.llm_model_preset ?? '';
+
+    let llmPresetKey = await prompt(
+      rl,
+      `LLM Preset${defaultPresetKey ? ` [${defaultPresetKey}]` : ' [manual]'}: `,
+    );
+    if (!llmPresetKey && defaultPresetKey) llmPresetKey = defaultPresetKey;
+    if (llmPresetKey.toLowerCase() === 'manual') llmPresetKey = '';
+    const selectedPreset = llmPresetKey ? findLlmModelPresetByKey(llmPresetKey) : undefined;
+    if (llmPresetKey && !selectedPreset) {
+      fail(`Unknown LLM preset "${llmPresetKey}". Use one of: ${listLlmModelPresets().map((item) => item.key).join(', ')}`);
+    }
+
+    const defaultLlmBase = selectedPreset
+      ? (selectedPreset.baseUrl ?? '')
+      : (stored.llm_base_url ?? process.env.LLM_BASE_URL ?? 'https://api.deepseek.com');
+    const defaultLlmModel = selectedPreset
+      ? selectedPreset.model
+      : (stored.llm_model ?? process.env.LLM_MODEL ?? 'deepseek-v4-pro');
+    const defaultLlmContextWindow = selectedPreset?.contextWindowTokens
       ?? parsePositiveInteger(process.env.LLM_CONTEXT_WINDOW_TOKENS)
+      ?? stored.llm_context_window_tokens
       ?? inferLlmContextWindowTokens(defaultLlmModel);
 
     let llmApiKey = await prompt(rl, `LLM API Key${defaultLlmKey ? ' [already set, press Enter to keep]' : ''}: `);
@@ -122,8 +156,16 @@ export async function runLogin() {
       fail('LLM API Key is required.');
     }
 
-    let llmBaseUrl = await prompt(rl, `LLM Base URL [${defaultLlmBase}]: `);
+    let llmBaseUrl = await prompt(
+      rl,
+      defaultLlmBase
+        ? `LLM Base URL [${defaultLlmBase}]: `
+        : 'LLM Base URL (OpenAI-compatible gateway, required): ',
+    );
     if (!llmBaseUrl) llmBaseUrl = defaultLlmBase;
+    if (!llmBaseUrl) {
+      fail('LLM Base URL is required for this preset. Use an OpenAI-compatible gateway URL.');
+    }
 
     let llmModel = await prompt(rl, `LLM Model [${defaultLlmModel}]: `);
     if (!llmModel) llmModel = defaultLlmModel;
@@ -157,6 +199,7 @@ export async function runLogin() {
       user_id: authRes.user.id,
       nickname: authRes.user.nickname,
       llm_api_key: llmApiKey,
+      llm_model_preset: selectedPreset?.key,
       llm_base_url: llmBaseUrl,
       llm_model: llmModel,
       llm_context_window_tokens: parsedContextWindow,

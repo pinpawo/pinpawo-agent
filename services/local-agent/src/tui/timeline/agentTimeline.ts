@@ -16,7 +16,7 @@ export type AgentTimelineEntry =
 export type AgentMessageEntry = {
   id: string;
   type: 'message';
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'subagent';
   requestId?: string;
   text: string;
   status: 'completed' | 'streaming';

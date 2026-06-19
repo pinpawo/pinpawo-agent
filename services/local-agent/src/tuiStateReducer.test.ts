@@ -307,9 +307,11 @@ test('tuiStateReducer displays subagent deltas in timeline without legacy draft 
   assert.equal(selectFocusedActiveRun(state)?.charCount, '先检查文件，再整理结果。'.length);
   assert.deepEqual(selectFocusedTimeline(state).at(-1), {
     id: 'req-1:subagent-output',
-    type: 'notice',
+    type: 'message',
+    role: 'subagent',
     requestId: 'req-1',
-    text: '[subagent]\n先检查文件，再整理结果。',
+    text: '先检查文件，再整理结果。',
+    status: 'streaming',
   });
 
   state = tuiStateReducer(state, {
@@ -328,7 +330,11 @@ test('tuiStateReducer displays subagent deltas in timeline without legacy draft 
     ['user', 'hello'],
     ['assistant', '最终答复'],
   ]);
-  assert.equal(state.sessions['chat:pet']?.timeline.some((entry) => entry.id === 'req-1:subagent-output'), true);
+  const subagentEntry = state.sessions['chat:pet']?.timeline.find((entry) => entry.id === 'req-1:subagent-output');
+  assert.equal(subagentEntry?.type, 'message');
+  assert.equal(subagentEntry?.type === 'message' && subagentEntry.role === 'subagent'
+    ? subagentEntry.status
+    : null, 'completed');
 });
 
 test('tuiStateReducer stores usage on completed message', () => {

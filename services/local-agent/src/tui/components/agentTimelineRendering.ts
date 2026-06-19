@@ -1,5 +1,6 @@
+import stringWidth from 'string-width';
 import { TUI_TEXT } from '../render/text';
-import { formatElapsed, wrapLine } from '../render/terminalText';
+import { formatElapsed, truncateLine } from '../render/terminalText';
 import type {
   AgentOperationEntry,
   AgentReviewEntry,
@@ -15,10 +16,10 @@ export function buildAgentOperationDisplayLines(
   now: number,
   width: number,
 ): TimelineTextLine[] {
-  return wrapLine(buildAgentOperationText(entry, now), width).map((text, index) => ({
-    id: `${entry.id}:line:${index}`,
-    text,
-  }));
+  return [{
+    id: `${entry.id}:line`,
+    text: buildAgentOperationText(entry, now, width),
+  }];
 }
 
 export function buildAgentReviewText(entry: AgentReviewEntry) {
@@ -32,25 +33,39 @@ export function buildAgentReviewText(entry: AgentReviewEntry) {
   }
 }
 
-function buildAgentOperationText(entry: AgentOperationEntry, now: number) {
-  const detail = buildOperationDetail(entry);
-  if (entry.phase === 'failed') {
-    return joinParts([entry.title, TUI_TEXT.operationFailed, detail]);
-  }
-  if (entry.phase === 'interrupted') {
-    return joinParts([entry.title, TUI_TEXT.operationInterrupted, detail]);
-  }
-  if (entry.phase === 'completed') {
-    return joinParts([entry.title, detail || TUI_TEXT.operationCompleted]);
-  }
-  return joinParts([entry.title, formatElapsed(entry.startedAt, now), detail]);
+function buildAgentOperationText(entry: AgentOperationEntry, now: number, width: number) {
+  const status = buildOperationStatus(entry, now);
+  const suffix = `（${status}）`;
+  const body = buildOperationBody(entry);
+  const line = `${body}${suffix}`;
+  if (stringWidth(line) <= width) return line;
+
+  const suffixWidth = stringWidth(suffix);
+  if (suffixWidth >= width) return truncateLine(suffix, width);
+  return `${truncateLine(body, width - suffixWidth)}${suffix}`;
 }
 
-function buildOperationDetail(entry: AgentOperationEntry) {
-  return joinParts([
-    entry.target,
+function buildOperationStatus(entry: AgentOperationEntry, now: number) {
+  switch (entry.phase) {
+    case 'started':
+      return TUI_TEXT.operationStarted;
+    case 'updated':
+      return `${TUI_TEXT.operationRunning} ${formatElapsed(entry.startedAt, now)}`;
+    case 'completed':
+      return TUI_TEXT.operationCompleted;
+    case 'failed':
+      return TUI_TEXT.operationFailed;
+    case 'interrupted':
+      return TUI_TEXT.operationInterrupted;
+  }
+}
+
+function buildOperationBody(entry: AgentOperationEntry) {
+  return joinUniqueParts([
     entry.summary,
+    entry.target,
     formatDetails(entry.details),
+    entry.title,
   ]);
 }
 
@@ -64,6 +79,12 @@ function formatDetails(details: Record<string, unknown> | undefined) {
     .join(' · ');
 }
 
-function joinParts(parts: Array<string | undefined>) {
-  return parts.filter((part): part is string => Boolean(part)).join(' · ');
+function joinUniqueParts(parts: Array<string | undefined>) {
+  const seen = new Set<string>();
+  return parts.flatMap((part) => {
+    const text = part?.trim();
+    if (!text || seen.has(text)) return [];
+    seen.add(text);
+    return [text];
+  }).join(' · ');
 }

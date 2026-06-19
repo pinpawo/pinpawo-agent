@@ -25,6 +25,7 @@ type TuiRuntimeControllerOptions = {
   localServerPort: number;
   dispatch: (action: TuiAction) => void;
   getState: () => TuiState;
+  resetTimelineView: () => void;
   setNow: (now: number) => void;
 };
 
@@ -248,6 +249,7 @@ export class TuiRuntimeController {
 
   startNewSession() {
     this.clearInterruptTimeout();
+    this.options.resetTimelineView();
     this.options.dispatch({
       type: 'input.set',
       value: '',

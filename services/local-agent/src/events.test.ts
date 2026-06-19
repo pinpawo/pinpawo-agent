@@ -199,6 +199,31 @@ test('createBrowserToolkit exposes browser operation metadata', () => {
   assert.equal(toolkit.policy?.toolReview?.browser_wait, undefined);
 });
 
+test('browser open review policy offers session authorization', async () => {
+  const toolkit = createBrowserToolkit();
+  const policy = toolkit.policy?.toolReview?.browser_open;
+  assert.ok(policy);
+
+  const review = await policy.request({
+    models: {} as never,
+    actor: {} as never,
+    messages: [],
+    toolkitName: 'browser',
+    toolName: 'browser_open',
+    input: { url: 'https://example.test', headless: true },
+    operation: toolkit.operations?.browser_open,
+    reviewCapabilities: {
+      humanReview: true,
+      sessionAuthorization: true,
+    },
+  });
+
+  assert.deepEqual(
+    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
+    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
+  );
+});
+
 test('browser operation metadata summarizes page output', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {

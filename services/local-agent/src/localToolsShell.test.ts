@@ -50,6 +50,10 @@ test('shell review policy reviews configured command execution', async () => {
     },
   });
   assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '执行命令');
+  assert.deepEqual(
+    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
+    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
+  );
 });
 
 test('normalizeShellActionInput trims commands and expands home cwd', () => {

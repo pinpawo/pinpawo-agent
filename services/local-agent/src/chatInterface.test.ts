@@ -33,7 +33,7 @@ test('buildLocalAgentInterfaceContext derives capabilities from explicit kind', 
       threadId: 'petbot:chat:pet:pet-1:user:user-1',
       capabilities: {
         humanReview: true,
-        sessionAuthorization: false,
+        sessionAuthorization: true,
       },
     },
   );

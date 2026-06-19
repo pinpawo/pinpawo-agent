@@ -13,6 +13,7 @@ import {
   type HumanReviewResponseMessage,
   type InterruptRequestMessage,
   type NewSessionMessage,
+  type StudioRequestMessage,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
 import type { StreamToolsPayload } from './agentStreamEvents';
@@ -36,6 +37,8 @@ type AppChatRunSource =
   | { type: 'chat_request' }
   | { type: 'human_review_response'; reviewId: string; selectedOptionId: string }
   | { type: 'interrupt_request'; reviewId: string; selectedOptionId: string };
+type RunStudioRequest = (ws: WebSocket, message: StudioRequestMessage) => Promise<void>;
+type RouteStudioReviewResponse = (ws: WebSocket, message: HumanReviewResponseMessage) => boolean;
 type PendingReviewRoute = {
   userId: string;
   reviewId: string;
@@ -59,6 +62,10 @@ export type LocalAgentAppChatHandlerOptions = {
   getUserCapabilities: () => LoadedUserCapability[];
   getCapabilityArtifactStore: () => CapabilityArtifactStore;
   getWorkdir: () => string;
+  getActorName: () => string | null;
+  runStudioRequest: RunStudioRequest;
+  routeStudioHumanReviewResponse: RouteStudioReviewResponse;
+  rejectStudioPendingReview: (ws: WebSocket) => void;
   loadContext?: LoadContext;
   runChat?: RunChatSession;
   buildChatSetup?: BuildChatSetup;
@@ -78,6 +85,10 @@ export class LocalAgentAppChatHandler {
   private readonly getUserCapabilities: () => LoadedUserCapability[];
   private readonly getCapabilityArtifactStore: () => CapabilityArtifactStore;
   private readonly getWorkdir: () => string;
+  private readonly getActorName: () => string | null;
+  private readonly runStudioRequest: RunStudioRequest;
+  private readonly routeStudioHumanReviewResponse: RouteStudioReviewResponse;
+  private readonly rejectStudioPendingReview: (ws: WebSocket) => void;
   private readonly loadContext: LoadContext;
   private readonly runChat: RunChatSession;
   private readonly buildChatSetup: BuildChatSetup;
@@ -100,6 +111,10 @@ export class LocalAgentAppChatHandler {
     this.getUserCapabilities = options.getUserCapabilities;
     this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
     this.getWorkdir = options.getWorkdir;
+    this.getActorName = options.getActorName;
+    this.runStudioRequest = options.runStudioRequest;
+    this.routeStudioHumanReviewResponse = options.routeStudioHumanReviewResponse;
+    this.rejectStudioPendingReview = options.rejectStudioPendingReview;
     this.loadContext = options.loadContext ?? loadAgentContext;
     this.runChat = options.runChat ?? runChatSession;
     this.buildChatSetup = options.buildChatSetup ?? buildLocalChatAgentInput;
@@ -125,6 +140,9 @@ export class LocalAgentAppChatHandler {
   }
 
   async handleHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
+    if (this.routeStudioHumanReviewResponse(ws, msg)) {
+      return;
+    }
     if (!this.canUseSocket(ws)) {
       return;
     }
@@ -165,7 +183,15 @@ export class LocalAgentAppChatHandler {
   }
 
   handleClose(ws: WebSocket) {
+    this.rejectStudioPendingReview(ws);
     this.inflightRequests.abortAndClear(ws);
+  }
+
+  async handleStudioRequest(ws: WebSocket, msg: StudioRequestMessage) {
+    if (!this.canUseSocket(ws)) {
+      return;
+    }
+    await this.runStudioRequest(ws, msg);
   }
 
   async handleChatRequest(ws: WebSocket, msg: ChatRequestMessage) {

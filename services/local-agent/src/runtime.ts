@@ -26,6 +26,9 @@ import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
 import { buildLocalAgentRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
 import { setLocalToolsWorkdir } from './toolkits/local/pathUtils';
+import { LocalServerStudioHandler } from './localServerStudioHandler';
+import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
+import type { LocalServerDeps } from './localServerTypes';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
@@ -42,7 +45,6 @@ export class LocalAgentRuntime {
   private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
   private readonly chatCheckpointer: FileSaver;
   private readonly graphService = new LocalAgentGraphService();
-  private appWsClient: LocalAgentAppWsClient | null = null;
   private readonly inflightRequests = new InflightRequestController<WebSocket>({
     forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
     // Hosted app WS relay: do NOT include raw — keeps payloads small and
@@ -51,6 +53,12 @@ export class LocalAgentRuntime {
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
     logPrefix: 'local-agent',
   });
+  private readonly studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
+  private readonly studioHandler = new LocalServerStudioHandler({
+    reviewRouter: this.studioReviewRouter,
+    inflightRequests: this.inflightRequests,
+  });
+  private appWsClient: LocalAgentAppWsClient | null = null;
   private readonly appChatHandler: LocalAgentAppChatHandler;
 
   constructor(runtimeConfig: LocalAgentRuntimeConfig = buildLocalAgentRuntimeConfig()) {
@@ -77,7 +85,34 @@ export class LocalAgentRuntime {
       getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
       getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
       getWorkdir: () => this.runtimeConfig.workdir,
+      getActorName: () => this.actorName,
+      runStudioRequest: async (ws, message) => {
+        await this.studioHandler.handleStudioRequest(ws, message, this.buildLocalServerDeps());
+      },
+      routeStudioHumanReviewResponse: (ws, msg) => this.studioHandler.routeHumanReviewResponse(ws, msg),
+      rejectStudioPendingReview: (ws) => {
+        this.studioReviewRouter.rejectAndDelete(ws, new Error('app websocket closed'));
+      },
     });
+  }
+
+  private buildLocalServerDeps(): LocalServerDeps {
+    return {
+      actorId: this.getActorId(),
+      actorName: this.actorName ?? undefined,
+      llmConfig: this.getLlmConfig(),
+      workdir: this.runtimeConfig.workdir,
+      runtimeConfig: this.runtimeConfig,
+      localToolkitDefinitions: this.getLocalToolkitDefinitions(),
+      localToolkits: this.getLocalToolkits(),
+      pluginToolkits: this.getPluginToolkits(),
+      localCapabilityDefinitions: this.getLocalCapabilityDefinitions(),
+      localCapabilities: this.getLocalCapabilities(),
+      userCapabilityDefinitions: this.getUserCapabilityDefinitions(),
+      userCapabilities: this.getUserCapabilities(),
+      capabilityArtifactStore: this.capabilityRegistry.getCapabilityArtifactStore(),
+      rescanUserCapabilities: () => this.rescanUserCapabilities(),
+    };
   }
 
   getRuntimeConfig(): LocalAgentRuntimeConfig {
@@ -204,6 +239,7 @@ export class LocalAgentRuntime {
       pingIntervalMs: WS_PING_INTERVAL_MS,
       handlers: {
         onChatRequest: (ws, msg) => this.appChatHandler.handleChatRequest(ws, msg),
+        onStudioRequest: (ws, msg) => this.appChatHandler.handleStudioRequest(ws, msg),
         onNewSession: (_ws, msg) => this.appChatHandler.handleNewSession(msg),
         onInterruptRequest: (ws, msg) => this.appChatHandler.handleInterruptRequest(ws, msg),
         onHumanReviewResponse: (ws, msg) => this.appChatHandler.handleHumanReviewResponse(ws, msg),

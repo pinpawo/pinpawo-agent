@@ -48,32 +48,75 @@ function normalizeModelName(model: string) {
   return model.trim().toLowerCase().replace(/^models\//, '').replace(/^[^/]+\//, '');
 }
 
-function isGpt53OrNewer(model: string): boolean {
-  const minor = model.match(/^gpt[-_]?5[.-](\d+)/)?.[1];
-  return Number(minor) >= 3;
+type StructuredOutputModelRule = {
+  method: StructuredOutputMethod;
+  contains?: readonly string[];
+  prefixes?: readonly string[];
+  minVersion?: {
+    pattern: RegExp;
+    major: number;
+    minor: number;
+  };
+};
+
+type StructuredOutputEndpointRule = {
+  method: StructuredOutputMethod;
+  baseUrlIncludes: readonly string[];
+};
+
+const STRUCTURED_OUTPUT_ENDPOINT_RULES: readonly StructuredOutputEndpointRule[] = [
+  {
+    method: 'jsonMode',
+    baseUrlIncludes: ['dashscope.aliyuncs.com', 'maas.aliyuncs.com'],
+  },
+];
+
+const STRUCTURED_OUTPUT_MODEL_RULES: readonly StructuredOutputModelRule[] = [
+  {
+    method: 'jsonSchema',
+    prefixes: ['gpt-5.3', 'gpt-5.4', 'gpt-5.5', 'gemini-3.', 'gemini-3-'],
+  },
+  {
+    method: 'jsonSchema',
+    minVersion: {
+      pattern: /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/,
+      major: 2,
+      minor: 6,
+    },
+  },
+  {
+    method: 'jsonMode',
+    contains: ['deepseek', 'qwen', 'glm', 'minimax'],
+  },
+];
+
+function findEndpointStructuredOutputMethod(baseUrl: string): StructuredOutputMethod | undefined {
+  const normalizedBaseUrl = baseUrl.toLowerCase();
+  return STRUCTURED_OUTPUT_ENDPOINT_RULES.find((rule) =>
+    rule.baseUrlIncludes.some((marker) => normalizedBaseUrl.includes(marker)),
+  )?.method;
 }
 
-function isGemini3OrNewer(model: string): boolean {
-  return model.startsWith('gemini-3.') || model.startsWith('gemini-3-');
+function matchesStructuredOutputModelRule(model: string, rule: StructuredOutputModelRule): boolean {
+  return Boolean(
+    rule.prefixes?.some((prefix) => model.startsWith(prefix))
+    || rule.contains?.some((fragment) => model.includes(fragment))
+    || (
+      rule.minVersion
+      && versionAtLeast(
+        model,
+        rule.minVersion.pattern,
+        rule.minVersion.major,
+        rule.minVersion.minor,
+      )
+    ),
+  );
 }
 
-function supportsJsonSchemaStructuredOutput(model: string): boolean {
-  return isGpt53OrNewer(model)
-    || isGemini3OrNewer(model)
-    || versionAtLeast(model, /kimi(?:[-_]?k)?[-_]?(\d+(?:\.\d+)?)/, 2, 6);
-}
-
-function supportsJsonModeStructuredOutput(model: string): boolean {
-  return model.includes('deepseek')
-    || model.includes('qwen')
-    || model.includes('glm')
-    || model.includes('minimax');
-}
-
-function isAliyunCompatibleBaseUrl(baseUrl: string): boolean {
-  const normalized = baseUrl.toLowerCase();
-  return normalized.includes('dashscope.aliyuncs.com')
-    || normalized.includes('maas.aliyuncs.com');
+function findModelStructuredOutputMethod(model: string): StructuredOutputMethod | undefined {
+  return STRUCTURED_OUTPUT_MODEL_RULES.find((rule) =>
+    matchesStructuredOutputModelRule(model, rule),
+  )?.method;
 }
 
 /**
@@ -90,13 +133,8 @@ function isAliyunCompatibleBaseUrl(baseUrl: string): boolean {
  */
 export function inferStructuredOutputMethod(model: string, baseUrl: string): StructuredOutputMethod | undefined {
   const normalizedModel = normalizeModelName(model);
-  const isAliyun = isAliyunCompatibleBaseUrl(baseUrl);
-  if (isAliyun && !isGpt53OrNewer(normalizedModel) && !isGemini3OrNewer(normalizedModel)) {
-    return 'jsonMode';
-  }
-  if (supportsJsonSchemaStructuredOutput(normalizedModel)) return 'jsonSchema';
-  if (supportsJsonModeStructuredOutput(normalizedModel) || isAliyun) return 'jsonMode';
-  return undefined;
+  return findEndpointStructuredOutputMethod(baseUrl)
+    ?? findModelStructuredOutputMethod(normalizedModel);
 }
 
 function resolveAutoRepairMaxRetries(autoRepair: StructuredOutputAutoRepairConfig | undefined): number {

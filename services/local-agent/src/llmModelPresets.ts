@@ -182,6 +182,26 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
   },
 ];
 
+const STRUCTURED_OUTPUT_ENDPOINT_RULES: readonly Array<{
+  method: StructuredOutputMethod;
+  baseUrlIncludes: readonly string[];
+}> = [
+  {
+    method: 'jsonMode',
+    baseUrlIncludes: ['dashscope.aliyuncs.com', 'maas.aliyuncs.com'],
+  },
+];
+
+const STRUCTURED_OUTPUT_FALLBACK_MODEL_RULES: readonly Array<{
+  method: StructuredOutputMethod;
+  contains: readonly string[];
+}> = [
+  {
+    method: 'jsonMode',
+    contains: ['deepseek', 'qwen', 'glm', 'minimax'],
+  },
+];
+
 function normalizeModelName(model: string) {
   return model.trim().toLowerCase().replace(/^models\//, '').replace(/^[^/]+\//, '');
 }
@@ -220,26 +240,17 @@ export function inferLlmStructuredOutputMethod(
 ): StructuredOutputMethod | undefined {
   const preset = inferLlmModelPreset(model);
   const normalizedBaseUrl = baseUrl.toLowerCase();
-  if (normalizedBaseUrl.includes('dashscope.aliyuncs.com') || normalizedBaseUrl.includes('maas.aliyuncs.com')) {
-    if (preset?.provider === 'openai' || preset?.provider === 'google') {
-      return preset.structuredOutputMethod;
-    }
-    return 'jsonMode';
-  }
+  const endpointMethod = STRUCTURED_OUTPUT_ENDPOINT_RULES.find((rule) =>
+    rule.baseUrlIncludes.some((marker) => normalizedBaseUrl.includes(marker)),
+  )?.method;
+  if (endpointMethod) return endpointMethod;
 
   if (preset?.structuredOutputMethod) return preset.structuredOutputMethod;
 
   const normalizedModel = normalizeModelName(model);
-  if (
-    normalizedModel.includes('deepseek')
-    || normalizedModel.includes('qwen')
-    || normalizedModel.includes('glm')
-    || normalizedModel.includes('minimax')
-  ) {
-    return 'jsonMode';
-  }
-
-  return undefined;
+  return STRUCTURED_OUTPUT_FALLBACK_MODEL_RULES.find((rule) =>
+    rule.contains.some((fragment) => normalizedModel.includes(fragment)),
+  )?.method;
 }
 
 export function buildLlmModelKwargs(model: string, thinking: boolean): Record<string, unknown> | undefined {

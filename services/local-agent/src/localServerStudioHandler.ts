@@ -53,8 +53,9 @@ export class LocalServerStudioHandler {
     msg: StudioRequestMessage,
     deps: LocalServerDeps,
   ) {
-    const { requestId, userRequest } = msg;
-    const conversationId = msg.conversationId ?? requestId;
+    const { requestId, userRequest, runId: explicitRunId } = msg;
+    const runId = explicitRunId?.trim() ? explicitRunId : requestId;
+    const conversationId = msg.conversationId ?? runId;
 
     console.log(`[local-server] studio_request requestId=${requestId} userRequest="${userRequest.slice(0, 80)}"`);
 
@@ -83,7 +84,7 @@ export class LocalServerStudioHandler {
     try {
       const result = await this.studioRunService.run({
         deps,
-        runId: requestId,
+        runId,
         userRequest,
         conversationId,
         bridge: { send, requestId, slot },

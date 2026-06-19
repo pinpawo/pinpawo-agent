@@ -121,6 +121,8 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
   await handler.handleStudioRequest(ws, {
     type: 'studio_request',
     requestId: 'studio-1',
+    runId: 'run-100',
+    conversationId: 'conv-100',
     userRequest: 'plan this',
   }, createDeps());
 
@@ -149,9 +151,9 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
     reply: 'done reply',
     finalDispatchId: 'dispatch-1',
     workdir: '/tmp/pinpawo-test',
-    runId: 'studio-1',
-    conversationId: 'studio-1',
-    idempotencyKey: 'studio:studio-1:run:studio-1',
+    runId: 'run-100',
+    conversationId: 'conv-100',
+    idempotencyKey: 'studio:conv-100:run:run-100',
   });
 });
 

@@ -37,6 +37,42 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
   );
 });
 
+test('parseLocalAgentClientMessage accepts studio_request with explicit runId', () => {
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'studio_request',
+      requestId: 'studio-1',
+      runId: 'run-100',
+      conversationId: 'conv-100',
+      userRequest: '做一份季度简报',
+    })), {
+      type: 'studio_request',
+      requestId: 'studio-1',
+      runId: 'run-100',
+      conversationId: 'conv-100',
+      userRequest: '做一份季度简报',
+    },
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'studio_request',
+      requestId: 'studio-1',
+      runId: 1,
+      userRequest: 'bad runId',
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'studio_request',
+      requestId: 'studio-1',
+      userRequest: 'bad extra',
+      extra: 'unsupported',
+    })),
+    null,
+  );
+});
+
 test('parseLocalAgentClientMessage accepts canonical human review response fields', () => {
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({

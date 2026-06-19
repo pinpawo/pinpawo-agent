@@ -583,7 +583,7 @@ Studio 客户端消息保持 `studio_request` 起手；server 端 agent run acti
 
 | 消息 | 方向 | 用途 |
 |------|------|------|
-| `studio_request { requestId, userRequest }` | client → server | turn 起手 |
+| `studio_request { requestId, userRequest, runId?, conversationId? }` | client → server | turn 起手；`runId` 与 `conversationId` 可显式指定以便外部 scheduler 幂等、并发控制 |
 | `event { requestId, event: { type: 'studio.progress', ... } }` | server → client | Studio 编排进度(turn_started / plan_set / dispatch_started 等) |
 | `event { requestId, event: { type: 'human_review.requested', ... } }` | server → client | Studio 内 pet HITL |
 | `studio_response { requestId, outcome, reply, finalDispatchId?, reason?, runId?, conversationId?, idempotencyKey?, workdir? }` | server → client | turn 终态 + 最终 reply；新增字段用于 scheduler 幂等链路和 workspace trace 归属 |

@@ -83,6 +83,10 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
     }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getUserCapabilities'] extends () => infer T ? T : never,
     getCapabilityArtifactStore: () => ({}) as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getCapabilityArtifactStore'] extends () => infer T ? T : never,
     getWorkdir: () => '/tmp/pinpawo-app-workdir',
+    getActorName: () => 'Test Actor',
+    runStudioRequest: async () => undefined,
+    routeStudioHumanReviewResponse: () => false,
+    rejectStudioPendingReview: () => undefined,
     loadContext: async () => ({} as AgentContext),
     buildChatSetup: (params) => {
       buildInputs.push(params as unknown as Record<string, unknown>);
@@ -326,4 +330,54 @@ test('LocalAgentAppChatHandler interrupts pending human review with canonical re
       },
     },
   ]);
+});
+
+test('LocalAgentAppChatHandler routes human review responses to studio router first', async () => {
+  let studioRouted = false;
+  const runRequests: unknown[] = [];
+  const { handler, ws } = createHandler({
+    runStudioRequest: async () => undefined,
+    routeStudioHumanReviewResponse: () => {
+      studioRouted = true;
+      return true;
+    },
+    runChat: async (options) => {
+      runRequests.push(options.request);
+      return { status: 'completed', reply: 'chat continued' };
+    },
+  });
+
+  await handler.handleHumanReviewResponse(ws, {
+    type: 'human_review_response',
+    requestId: 'req-studio',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
+  });
+
+  assert.equal(studioRouted, true);
+  assert.deepEqual(runRequests, []);
+});
+
+test('LocalAgentAppChatHandler forwards studio requests to runtime handler', async () => {
+  let handled = false;
+  const { handler, ws } = createHandler({
+    runStudioRequest: async (_ws, message) => {
+      handled = true;
+      assert.equal(_ws, ws);
+      assert.equal(message.requestId, 'studio-1');
+      assert.equal(message.userRequest, 'plan this task');
+      assert.equal(message.runId, 'run-1');
+      assert.equal(message.conversationId, 'conv-1');
+    },
+  });
+
+  await handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-1',
+    userRequest: 'plan this task',
+    runId: 'run-1',
+    conversationId: 'conv-1',
+  });
+
+  assert.equal(handled, true);
 });

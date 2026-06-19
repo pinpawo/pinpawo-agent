@@ -25,6 +25,19 @@
 - 支持平滑迁移旧的 `~/.pinpawo/studio.json` 和 `~/.pinpawo/pets/`。
 - 设计可迭代，每一阶段都能独立验证和回滚。
 
+## 迭代推进（当前）
+
+- 已完成：
+  - 本地协议 `studio_request` 支持 `runId` / `conversationId` 扩展，返回也回传 `runId`、`conversationId`、`idempotencyKey`、`workdir`。
+  - `LocalServerStudioHandler` 将 `runId` 透传到 `StudioRunService`，并以会话 id 派生 trace。
+  - `@pinpawo/pet-agent` 新增 `StudioDueRun*` 契约（构建、状态机、重试判断）及导出，供 App/API scheduler 落地时复用。
+  - 常规路径层面：普通 chat/pet 与 Studio 已通过现有 `LocalAgentRuntimeConfig` 在同一 workdir 作用域内组装（包含 prompt、工具、artifact、checkpoint 与 studio assets）。
+
+- 下一步：
+  - 在 API/scheduler 服务层落地 `studio_due_runs` 持久表，使用 `idempotencyKey` 做去重和并发领取（`pending -> claimed -> running -> success/failed`）。
+  - 为 scheduler 增加重试策略与 `workdir` 映射、告警可观测指标（claim 延迟、失败原因、重试次数）。
+  - 将 `/runtime` 与 App 客户端展示中的运行来源（legacy_home/workdir-scoped）与 scheduler trace 打通，形成可追溯链路。
+
 ## 非目标
 
 - 不在这一轮引入多 workdir 同进程并发运行。第一阶段按“一个 local-agent 服务进程绑定一个 effective workdir”处理。

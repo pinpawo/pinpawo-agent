@@ -189,9 +189,16 @@ export {
   defaultPromptProvider,
   ensureWikiSkeleton,
   fileReadPromptProvider,
+  applyStudioDueRunEvent,
+  buildStudioDueRunRecord,
+  canRetry,
+  isTerminalStudioDueRunStatus,
 } from './agent/studio/index';
 export type {
   CreatePlanCapabilityOptions,
+  StudioDueRunEvent,
+  StudioDueRunRecord,
+  StudioDueRunStatus,
   CuratorPromptProvider,
   ExecuteAction,
   HumanReviewer,

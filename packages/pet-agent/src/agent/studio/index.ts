@@ -13,6 +13,12 @@ export {
   fileReadPromptProvider,
 } from './wikiCurator';
 export { buildStudioRunIdentity } from './types';
+export {
+  applyStudioDueRunEvent,
+  buildStudioDueRunRecord,
+  canRetry,
+  isTerminalStudioDueRunStatus,
+} from './dueRunContract';
 export type {
   CuratorPromptProvider,
   LLMWikiCuratorConfig,
@@ -20,6 +26,11 @@ export type {
   WikiCurateResult,
   WikiCurator,
 } from './wikiCurator';
+export type {
+  StudioDueRunEvent,
+  StudioDueRunRecord,
+  StudioDueRunStatus,
+} from './dueRunContract';
 export type {
   ExecuteAction,
   HumanReviewer,

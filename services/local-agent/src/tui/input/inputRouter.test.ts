@@ -18,7 +18,27 @@ test('resolveTuiInputOwner applies TUI focus priority', () => {
     { type: 'resumePicker' },
   );
   assert.deepEqual(
+    resolveTuiInputOwner({
+      ready: true,
+      busy: true,
+      hasPendingApproval: false,
+      hasResumePicker: false,
+      hasGlobalReviewPolicyPicker: true,
+    }),
+    { type: 'globalReviewPolicyPicker' },
+  );
+  assert.deepEqual(
     resolveTuiInputOwner({ ready: true, busy: true, hasPendingApproval: true, hasResumePicker: false }),
+    { type: 'approval', freeTextActive: false },
+  );
+  assert.deepEqual(
+    resolveTuiInputOwner({
+      ready: true,
+      busy: false,
+      hasPendingApproval: true,
+      hasResumePicker: false,
+      hasGlobalReviewPolicyPicker: true,
+    }),
     { type: 'approval', freeTextActive: false },
   );
   assert.deepEqual(
@@ -67,6 +87,25 @@ test('resolveTuiInputCommand routes resume picker commands', () => {
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'escape' }, { type: 'resumePicker' }),
     { target: 'resume', action: 'dismiss' },
+  );
+});
+
+test('resolveTuiInputCommand routes global review policy picker commands', () => {
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.up' }, { type: 'globalReviewPolicyPicker' }),
+    { target: 'globalReviewPolicy', action: 'previous' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.down' }, { type: 'globalReviewPolicyPicker' }),
+    { target: 'globalReviewPolicy', action: 'next' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'submit' }, { type: 'globalReviewPolicyPicker' }),
+    { target: 'globalReviewPolicy', action: 'submit' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'escape' }, { type: 'globalReviewPolicyPicker' }),
+    { target: 'globalReviewPolicy', action: 'dismiss' },
   );
 });
 

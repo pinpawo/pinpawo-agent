@@ -13,7 +13,7 @@ test('buildCommandPaletteModel opens for slash command prefixes', () => {
   assert.equal(model.query, '');
   assert.deepEqual(
     model.items.map((command) => command.name),
-    ['new', 'studio', 'chat', 'help', 'export', 'edit', 'resume', 'quit'],
+    ['new', 'studio', 'chat', 'policy', 'help', 'export', 'edit', 'resume', 'quit'],
   );
 });
 

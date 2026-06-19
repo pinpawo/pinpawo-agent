@@ -68,6 +68,13 @@ import {
   type ToolAuthorizationRecord,
 } from './orchestrator/review/reviewAuthorizations';
 import {
+  GLOBAL_REVIEW_POLICY_MODE,
+  type GlobalReviewPolicy,
+  type GlobalReviewPolicyMode,
+  type GlobalReviewPolicyResolver,
+  type GlobalReviewPolicyStructuredOutputConfig,
+} from './orchestrator/review/globalReviewPolicy';
+import {
   reuseOrAppendTurnDelegation,
   updateTurnDelegationResult,
 } from './orchestrator/delegations';
@@ -155,11 +162,74 @@ function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOp
     runtimeEnvironment: cfg.runtimeEnvironment as string | undefined,
     onToolEvent: cfg.onToolEvent as SubagentToolEventHandler | undefined,
     reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
+    globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),
     forcedCapabilityNames: Array.isArray((cfg as { forcedCapabilityNames?: unknown }).forcedCapabilityNames)
       ? (cfg as { forcedCapabilityNames: unknown[] }).forcedCapabilityNames.filter(
           (name): name is string => typeof name === 'string' && name.length > 0,
         )
       : undefined,
+  };
+}
+
+function readGlobalReviewPolicyMode(value: unknown): GlobalReviewPolicyMode | null {
+  if (
+    value === GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION
+    || value === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
+    || value === GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS
+    || value === GLOBAL_REVIEW_POLICY_MODE.CUSTOM
+  ) {
+    return value;
+  }
+  if (value === 'ask') {
+    return GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
+  }
+  if (value === 'auto') {
+    return GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION;
+  }
+  return null;
+}
+
+function warnBareCustomGlobalReviewPolicy() {
+  console.warn(
+    '[pet-agent] custom global review policy requires a resolver; falling back to require_authorization.',
+  );
+}
+
+function readGlobalReviewPolicy(value: unknown): GlobalReviewPolicy | undefined {
+  const directMode = readGlobalReviewPolicyMode(value);
+  if (directMode) {
+    if (directMode === GLOBAL_REVIEW_POLICY_MODE.CUSTOM) {
+      warnBareCustomGlobalReviewPolicy();
+      return undefined;
+    }
+    return { mode: directMode };
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const mode = readGlobalReviewPolicyMode(record.mode);
+  if (!mode) {
+    return undefined;
+  }
+  if (mode === GLOBAL_REVIEW_POLICY_MODE.CUSTOM) {
+    if (typeof record.resolve !== 'function') {
+      warnBareCustomGlobalReviewPolicy();
+      return undefined;
+    }
+    return {
+      mode,
+      resolve: record.resolve as GlobalReviewPolicyResolver,
+    };
+  }
+  const structuredOutput = record.structuredOutput
+    && typeof record.structuredOutput === 'object'
+    && !Array.isArray(record.structuredOutput)
+    ? record.structuredOutput as GlobalReviewPolicyStructuredOutputConfig
+    : undefined;
+  return {
+    mode,
+    ...(structuredOutput ? { structuredOutput } : {}),
   };
 }
 
@@ -433,6 +503,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       workdir,
       runtimeEnvironment,
       reviewCapabilities,
+      globalReviewPolicy,
       forcedCapabilityNames,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
@@ -444,6 +515,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       messages: state.messages,
       execution,
       reviewCapabilities,
+      globalReviewPolicy,
       toolAuthorizations: state.toolAuthorizations,
     }, { includeInstructions: false });
     const generalTools = generalToolkitResources.tools;
@@ -526,6 +598,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       workdir,
       runtimeEnvironment,
       reviewCapabilities,
+      globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const maxIter = maxIterations ?? 5;
@@ -581,6 +654,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       messages: state.messages,
       execution,
       reviewCapabilities,
+      globalReviewPolicy,
       toolAuthorizations: state.toolAuthorizations,
     }, { includeInstructions: false });
     const generalTools = generalToolkitResources.tools;
@@ -781,6 +855,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       workdir,
       runtimeEnvironment,
       reviewCapabilities,
+      globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = capabilityLaneToolkits(toolkits ?? []);
@@ -825,6 +900,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       turnId: state.turnId,
       execution,
       reviewCapabilities,
+      globalReviewPolicy,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
       recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
@@ -931,7 +1007,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   // Node: general — reads tools from configurable
   async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { toolkits, execution, workdir, runtimeEnvironment, onToolEvent, reviewCapabilities } = getInvokeOptions(runnableConfig);
+    const { toolkits, execution, workdir, runtimeEnvironment, onToolEvent, reviewCapabilities, globalReviewPolicy } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
@@ -943,6 +1019,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       threadId: readThreadId(runnableConfig),
       execution,
       reviewCapabilities,
+      globalReviewPolicy,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
       emitRuntimeEvent: onToolEvent,

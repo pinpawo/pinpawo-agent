@@ -193,6 +193,29 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
   });
 });
 
+test('buildLocalChatAgentInput passes global review policy mode to graph input', () => {
+  const setup = buildLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    llmConfig: {
+      apiKey: 'test-key',
+      baseUrl: 'https://api.deepseek.com',
+      model: 'deepseek-v4-pro',
+      globalReviewPolicyMode: 'auto_authorization',
+      structuredOutputAutoRepair: true,
+      structuredOutputRepairMaxRetries: 2,
+    },
+  });
+
+  assert.deepEqual(setup.input.globalReviewPolicy, {
+    mode: 'auto_authorization',
+    structuredOutput: {
+      method: 'jsonMode',
+      autoRepair: { maxRetries: 2 },
+    },
+  });
+});
+
 test('buildLocalChatAgentInput uses caller-provided workdir', () => {
   const setup = buildLocalChatAgentInput({
     context: createContext(),

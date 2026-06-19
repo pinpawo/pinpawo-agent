@@ -1,3 +1,5 @@
+import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
+
 export type AgentLlmConfig = {
   apiKey: string;
   baseUrl: string;
@@ -14,4 +16,6 @@ export type AgentLlmConfig = {
   structuredOutputAutoRepair?: boolean;
   /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */
   structuredOutputRepairMaxRetries?: number;
+  /** Global handling for tool calls that request review. Default: require_authorization. */
+  globalReviewPolicyMode?: BuiltinGlobalReviewPolicyMode;
 };

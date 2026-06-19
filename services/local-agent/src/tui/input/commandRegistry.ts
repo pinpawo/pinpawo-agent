@@ -4,6 +4,7 @@ export type TuiCommandName =
   | 'chat'
   | 'studio'
   | 'new'
+  | 'policy'
   | 'export'
   | 'edit'
   | 'resume';
@@ -56,6 +57,13 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/chat',
     description: '退出 Studio 模式',
     helpText: '/chat 退出 Studio',
+  },
+  {
+    name: 'policy',
+    aliases: ['review-policy'],
+    usage: '/policy',
+    description: '选择全局访问策略',
+    helpText: '/policy 选择授权策略',
   },
   {
     name: 'help',

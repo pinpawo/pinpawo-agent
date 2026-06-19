@@ -16,6 +16,7 @@ export function buildLocalLlmConfig(overrides: Partial<AgentLlmConfig> = {}): Ag
     subagentThinking: stored.subagent_thinking ?? false,
     structuredOutputAutoRepair: config.structuredOutputAutoRepair,
     structuredOutputRepairMaxRetries: config.structuredOutputRepairMaxRetries,
+    globalReviewPolicyMode: config.globalReviewPolicyMode,
     ...overrides,
   };
 }

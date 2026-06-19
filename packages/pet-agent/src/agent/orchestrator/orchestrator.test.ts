@@ -25,6 +25,7 @@ import {
 } from './subagentHandoff';
 import { buildReviewSpec } from './review/reviewSpec';
 import { isToolActionAuthorized } from './review/reviewAuthorizations';
+import { ReviewPolicies } from './review/reviewPolicies';
 import {
   getMessageAnnounce,
   getMessageDelegationId,
@@ -1136,6 +1137,209 @@ test('toolkit review policy wraps tool calls without changing tool identity', as
   assert.equal(reviewCount, 1);
   assert.equal(callCount, 1);
   assert.equal(result, 'raw ok');
+});
+
+test('global review policy full_access bypasses toolkit review prompts', async () => {
+  let callCount = 0;
+  let reviewCount = 0;
+  const rawTool = tool(async () => {
+    callCount += 1;
+    return 'raw ok';
+  }, {
+    name: 'write_file',
+    description: 'write file',
+    schema: z.object({ path: z.string(), content: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [rawTool],
+    policy: {
+      toolReview: {
+        write_file: {
+          request: () => {
+            reviewCount += 1;
+            return ReviewPolicies.localMutation().request({
+              models: {} as AgentModels,
+              actor: testActor,
+              messages: [],
+              toolkitName: 'local',
+              toolName: 'write_file',
+              input: { path: 'notes.md', content: 'hello' },
+              reviewCapabilities: {
+                humanReview: true,
+                sessionAuthorization: false,
+              },
+            });
+          },
+        },
+      },
+    },
+  }];
+
+  const resources = await resolveToolkitResources(toolkits, ['local'], {
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: false,
+    },
+    globalReviewPolicy: { mode: 'full_access' },
+  });
+
+  const result = await resources.tools[0]?.invoke({ path: 'notes.md', content: 'hello' });
+  assert.equal(result, 'raw ok');
+  assert.equal(callCount, 1);
+  assert.equal(reviewCount, 0);
+});
+
+test('global review policy auto_authorization authorizes safe reviewed tool calls', async () => {
+  let callCount = 0;
+  let autoReviewCount = 0;
+  const runtimeEvents: unknown[] = [];
+  const rawTool = tool(async ({ path }: { path: string }) => {
+    callCount += 1;
+    return `wrote ${path}`;
+  }, {
+    name: 'write_file',
+    description: 'write file',
+    schema: z.object({ path: z.string(), content: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [rawTool],
+    policy: {
+      toolReview: {
+        write_file: ReviewPolicies.localMutation(),
+      },
+    },
+  }];
+  const autoModel = {
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        autoReviewCount += 1;
+        return {
+          decision: 'authorize',
+          reason: 'Small scoped file write requested by the user.',
+          confidence: 'high',
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+
+  const resources = await resolveToolkitResources(toolkits, ['local'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [new HumanMessage('write notes.md')],
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: false,
+    },
+    globalReviewPolicy: { mode: 'auto_authorization' },
+    emitRuntimeEvent: (event) => {
+      runtimeEvents.push(event);
+    },
+  });
+
+  const result = await resources.tools[0]?.invoke({ path: 'notes.md', content: 'hello' });
+  assert.equal(result, 'wrote notes.md');
+  assert.equal(callCount, 1);
+  assert.equal(autoReviewCount, 1);
+  assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
+});
+
+test('global review policy auto_authorization requires human authorization when unsure', async () => {
+  let callCount = 0;
+  const rawTool = tool(async () => {
+    callCount += 1;
+    return 'raw ok';
+  }, {
+    name: 'write_file',
+    description: 'write file',
+    schema: z.object({ path: z.string(), content: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [rawTool],
+    policy: {
+      toolReview: {
+        write_file: ReviewPolicies.localMutation(),
+      },
+    },
+  }];
+  const autoModel = {
+    withStructuredOutput: () => ({
+      invoke: async () => ({
+        decision: 'require_authorization',
+        reason: 'The write looks too broad.',
+      }),
+    }),
+  } as unknown as AgentModels['act'];
+
+  const resources = await resolveToolkitResources(toolkits, ['local'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [new HumanMessage('rewrite the project')],
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: false,
+    },
+    globalReviewPolicy: { mode: 'auto_authorization' },
+  });
+
+  const result = await resources.tools[0]?.invoke({ path: 'src/index.ts', content: 'new content' });
+  const parsed = JSON.parse(String(result)) as { cancelled?: boolean; reason?: string };
+  assert.equal(callCount, 0);
+  assert.equal(parsed.cancelled, true);
+  assert.match(parsed.reason ?? '', /too broad/);
+});
+
+test('global review policy custom resolver can authorize reviewed tool calls', async () => {
+  let callCount = 0;
+  let customReviewTitle: string | null = null;
+  const rawTool = tool(async () => {
+    callCount += 1;
+    return 'raw ok';
+  }, {
+    name: 'write_file',
+    description: 'write file',
+    schema: z.object({ path: z.string(), content: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [rawTool],
+    policy: {
+      toolReview: {
+        write_file: ReviewPolicies.localMutation(),
+      },
+    },
+  }];
+
+  const resources = await resolveToolkitResources(toolkits, ['local'], {
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: false,
+    },
+    globalReviewPolicy: {
+      mode: 'custom',
+      resolve: (ctx) => {
+        customReviewTitle = ctx.review.view.title ?? null;
+        return { type: 'authorize', reason: 'custom policy allowed it' };
+      },
+    },
+  });
+
+  const result = await resources.tools[0]?.invoke({ path: 'notes.md', content: 'hello' });
+  assert.equal(result, 'raw ok');
+  assert.equal(callCount, 1);
+  assert.equal(customReviewTitle, 'write_file');
 });
 
 test('toolkit review policy records authorization through orchestrator runtime topology', async () => {

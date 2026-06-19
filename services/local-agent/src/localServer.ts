@@ -104,6 +104,13 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
         tuiSessions.createNewSession(deps.actorId);
         console.log(`[local-server] new session created for pet ${deps.actorId}`);
       },
+      onRuntimeConfigUpdate: (_ws, msg) => {
+        deps.llmConfig = {
+          ...deps.llmConfig,
+          globalReviewPolicyMode: msg.globalReviewPolicyMode,
+        };
+        console.log(`[local-server] global review policy set to ${msg.globalReviewPolicyMode}`);
+      },
       onClose: (ws) => {
         inflightRequests.abortAndClear(ws);
         studioHandler.rejectDisconnected(ws);

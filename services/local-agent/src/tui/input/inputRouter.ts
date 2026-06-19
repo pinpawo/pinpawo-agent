@@ -14,6 +14,7 @@ export type TuiInputRouteContext = {
   hasPendingApproval: boolean;
   approvalFreeTextActive?: boolean;
   hasResumePicker: boolean;
+  hasGlobalReviewPolicyPicker?: boolean;
   hasCommandPalette?: boolean;
   hasFileMention?: boolean;
   composerHistory?: ComposerHistoryRouteState | null;
@@ -26,6 +27,7 @@ export type TuiInputRouterState = {
 export type TuiInputOwner =
   | { type: 'unready' }
   | { type: 'resumePicker' }
+  | { type: 'globalReviewPolicyPicker' }
   | { type: 'approval'; freeTextActive: boolean }
   | { type: 'busy' }
   | { type: 'commandPalette' }
@@ -36,6 +38,7 @@ export type TuiInputCommand =
   | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
+  | { target: 'globalReviewPolicy'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'commandPalette'; action: 'previous' | 'next' | 'accept' }
   | { target: 'fileMention'; action: 'previous' | 'next' | 'accept' }
   | { target: 'composer'; action: 'submit' | 'clear' }
@@ -53,6 +56,10 @@ export type TuiLegacyInputCommand =
   | { type: 'resume.next' }
   | { type: 'resume.submit' }
   | { type: 'resume.dismiss' }
+  | { type: 'globalReviewPolicy.previous' }
+  | { type: 'globalReviewPolicy.next' }
+  | { type: 'globalReviewPolicy.submit' }
+  | { type: 'globalReviewPolicy.dismiss' }
   | { type: 'commandPalette.previous' }
   | { type: 'commandPalette.next' }
   | { type: 'commandPalette.accept' }
@@ -92,6 +99,7 @@ export function resolveTuiInputOwner(context: TuiInputRouteContext): TuiInputOwn
   if (context.hasPendingApproval) {
     return { type: 'approval', freeTextActive: Boolean(context.approvalFreeTextActive) };
   }
+  if (context.hasGlobalReviewPolicyPicker) return { type: 'globalReviewPolicyPicker' };
   if (context.busy) return { type: 'busy' };
   if (context.hasCommandPalette) return { type: 'commandPalette' };
   if (context.hasFileMention) return { type: 'fileMention' };
@@ -115,6 +123,13 @@ export function resolveTuiInputCommand(
       if (event.type === 'cursor.down') return { target: 'resume', action: 'next' };
       if (isReturn) return { target: 'resume', action: 'submit' };
       if (event.type === 'escape') return { target: 'resume', action: 'dismiss' };
+      return { target: 'none' };
+
+    case 'globalReviewPolicyPicker':
+      if (event.type === 'cursor.up') return { target: 'globalReviewPolicy', action: 'previous' };
+      if (event.type === 'cursor.down') return { target: 'globalReviewPolicy', action: 'next' };
+      if (isReturn) return { target: 'globalReviewPolicy', action: 'submit' };
+      if (event.type === 'escape') return { target: 'globalReviewPolicy', action: 'dismiss' };
       return { target: 'none' };
 
     case 'approval':
@@ -165,6 +180,8 @@ export function toLegacyTuiInputCommand(command: TuiInputCommand): TuiLegacyInpu
       return { type: `approval.${command.action}` };
     case 'resume':
       return { type: `resume.${command.action}` };
+    case 'globalReviewPolicy':
+      return { type: `globalReviewPolicy.${command.action}` };
     case 'commandPalette':
       return { type: `commandPalette.${command.action}` };
     case 'fileMention':

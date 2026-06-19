@@ -8,6 +8,7 @@ import test from 'node:test';
 import { HumanMessage } from '@langchain/core/messages';
 import {
   createOrchestratorGraph,
+  selectCapabilityResultArtifact,
   type AgentActor,
   type OrchestratorStateType,
 } from '@pinpawo/pet-agent';
@@ -21,7 +22,6 @@ import { buildLocalAgentModels } from '../src/agentModels';
 import type { AgentLlmConfig } from '../src/agentConfig';
 import { loadStoredConfig } from '../src/storage';
 import { FileCapabilityArtifactStore } from '../src/capabilityArtifactStore';
-import { createCapabilityArtifactToolkit } from '../src/toolkits/capabilityArtifact';
 import { createPetProfileTool } from '../src/toolkits/petProfile';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -174,7 +174,7 @@ test('live chat smoke: route to daily_post and persist a post result', { timeout
     }),
   ];
   const artifactStore = new FileCapabilityArtifactStore(await mkdtemp(resolve(tmpdir(), 'pinpawo-live-artifacts-')));
-  const graph = createOrchestratorGraph({ models });
+  const graph = createOrchestratorGraph({ models, capabilityArtifactStore: artifactStore });
   const state = await graph.invoke(
     {
       messages: [
@@ -190,13 +190,15 @@ test('live chat smoke: route to daily_post and persist a post result', { timeout
         thread_id: 'live-daily-post',
         actor,
         capabilities,
-        toolkits: [createCapabilityArtifactToolkit(artifactStore)],
       },
     },
   ) as OrchestratorStateType;
 
-  const latestResultRef = [...state.capabilityArtifacts].reverse().find((ref) => ref.kind === 'result');
-  const resultContent = latestResultRef ? (await artifactStore.readArtifact({ uri: latestResultRef.uri })).content : null;
+  const resultRef = selectCapabilityResultArtifact(state.capabilityArtifacts, {
+    capabilityId: 'daily_post',
+    schemaName: 'DailyPostResult',
+  });
+  const resultContent = resultRef ? (await artifactStore.readArtifact({ uri: resultRef.uri })).content : null;
   const dailyPostResult = resultContent
     ? dailyPostResultSchema.safeParse(JSON.parse(resultContent) as unknown)
     : null;

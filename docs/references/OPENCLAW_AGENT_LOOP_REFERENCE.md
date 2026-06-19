@@ -60,6 +60,12 @@ stats:   { duration, tokenUsage(input/output/total), cost }
 - 没有 `needs_more` / `blocked` / `ask_user` 等 LLM 自评估字段
 - 没有单独的 summary 字段——父 agent 直接读 result 文本理解发生了什么
 - 父 agent 收到 announce 后，在自己的 tool loop 里决定下一步
+- 当前刚返回的 announce 是父 agent 做下一步判断的输入，不能在 handoff
+  时再替换成短 preview；preview 只适合历史记录、UI 任务跟踪或 artifact
+  refs。
+- 如果结果本体是长结构化数据、长报告或二进制产物，sub-agent 应先把本体
+  写成 artifact，再在 result/announce 中给出足够父 agent 回复用户的自然语
+  言结论和 artifact 引用。
 
 ### 3.3 Announce 跳过
 

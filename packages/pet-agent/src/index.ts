@@ -92,6 +92,16 @@ export {
   searchCapabilities,
   splitCapabilitySearchTerms,
 } from './agent/orchestrator/capabilitySearch';
+export {
+  filterCapabilityArtifacts,
+  matchesCapabilityArtifact,
+  mergeCapabilityArtifactRefs,
+  selectCapabilityResultArtifact,
+  selectLatestCapabilityArtifact,
+} from './agent/orchestrator/capabilityArtifacts';
+export type {
+  CapabilityArtifactSelector,
+} from './agent/orchestrator/capabilityArtifacts';
 export type {
   OrchestratorConfig,
   OrchestratorInvokeOptions,

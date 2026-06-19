@@ -1,6 +1,7 @@
 import type {
   SubagentToolOperationMetadata,
 } from '@pinpawo/pet-agent';
+import { readJsonRecord } from '@pinpawo/pet-agent';
 import type {
   LocalAgentOperationInternalEvent,
   LocalAgentOperationPhase,
@@ -46,6 +47,29 @@ function mergeSummary(
   };
 }
 
+function summarizeInput(
+  summarize: ((input: unknown) => OperationSummary | null) | undefined,
+  input: unknown,
+): OperationSummary | null | undefined {
+  if (!summarize) return undefined;
+  const record = typeof input === 'string' ? readJsonRecord(input) : null;
+  if (record) {
+    return summarize(record) ?? summarize(input);
+  }
+  return summarize(input);
+}
+
+function summarizeOutput(
+  summarize: ((output: unknown) => OperationSummary | null) | undefined,
+  output: unknown,
+): OperationSummary | null | undefined {
+  if (!summarize) return undefined;
+  const summary = summarize(output);
+  if (summary) return summary;
+  const record = typeof output === 'string' ? readJsonRecord(output) : null;
+  return record ? summarize(record) : summary;
+}
+
 function operationKindFromSource(
   source: NonNullable<SubagentToolOperationMetadata['source']> | undefined,
   fallbackToolName: string,
@@ -70,11 +94,11 @@ export function normalizeToolStreamEvent(
           toolName: payload.name,
         },
       }
-    : registry.resolveToolOperation(payload.name);
+      : registry.resolveToolOperation(payload.name);
   const output = payload.output !== undefined ? payload.output : payload.data;
   const summary = [
-    metadata?.summarizeInput?.(payload.input),
-    metadata?.summarizeOutput?.(output),
+    summarizeInput(metadata?.summarizeInput, payload.input),
+    summarizeOutput(metadata?.summarizeOutput, output),
     metadata?.summarizeError?.(payload.error),
   ].reduce(mergeSummary, {});
 

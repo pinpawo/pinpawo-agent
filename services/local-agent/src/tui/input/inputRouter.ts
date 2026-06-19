@@ -137,9 +137,8 @@ export function resolveTuiInputCommand(
     case 'fileMention':
       if (event.type === 'cursor.up') return { target: 'fileMention', action: 'previous' };
       if (event.type === 'cursor.down') return { target: 'fileMention', action: 'next' };
-      if (event.type === 'tab') return { target: 'fileMention', action: 'accept' };
+      if (event.type === 'tab' || isReturn) return { target: 'fileMention', action: 'accept' };
       if (event.type === 'escape') return { target: 'composer', action: 'clear' };
-      if (isReturn) return { target: 'composer', action: 'submit' };
       if (isControlSequence) return { target: 'none' };
       if (event.type === 'noop') return { target: 'none' };
       return routeTextAreaCommand(event);

@@ -446,10 +446,10 @@ export type AppInputCommand =
 - `composer + submit` -> app submit
 - `composer + text/newline/delete/cursor` -> textarea
 
-当前实现已经让 approval owner 携带 `freeTextActive`，但暂不改变 approval `up/down`
-行为：即使已有 free-text draft，`up/down` 仍保持 option navigation。后续是否让
-active free text 抢占 cursor up/down 属于单独的 focus policy 决策；该策略应集中落在
-approval routing helper，而不是散在 `TuiApp` 或主 router switch 中。
+当前 as-built 实现已经让 approval owner 携带 `freeTextActive`，并由 PR #197 固化
+focus policy：free-text draft 为空时 `up/down` 保持 option navigation；已有 free-text
+draft 时，`up/down` / `shift-up/down` 归 textarea 编辑。该策略集中落在 approval
+routing helper，而不是散在 `TuiApp` 或主 router switch 中。
 
 ### 5.4 TextareaEngine
 
@@ -940,8 +940,9 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
   记录目标 visual column，layout 仍只提供 row/column measurement 和 offset lookup。
   controller 和 reducer 应透传 `preferredColumn`；host-level draft replacement、submit、
   review resume、prompt history navigation 清理它。
-- optional external editor flow。
-- command palette / autocomplete target-bound routing。
+- optional external editor flow（已由 PR #199 落地）。
+- command palette / autocomplete target-bound routing（command palette 已由 PR #198 落地；
+  file mention autocomplete 已由 PR #201 落地）。
 
 ### Phase 6: OpenTUI migration spike
 
@@ -1150,11 +1151,11 @@ engine 维护 offset。layout 负责 offset 到 visual row/column 的映射。�
 33. `codex/tui-approval-free-text-owner`
    - input owner 将 approval 表达为 `{ type: 'approval', freeTextActive }`。
    - `TuiApp` 把当前 approval text draft 是否 active 传给 router context。
-   - 暂不改变 approval `up/down` 选项导航策略。
+   - 历史执行点：该 PR 只引入 owner shape；最终 focus policy 已由 PR #197 收尾。
 34. `codex/tui-approval-routing-helper`
    - 把 approval-mode routing 提取到 `routeApprovalInputCommand`。
    - 把 approval option navigation policy 集中到 helper，为后续 free-text focus 决策预留落点。
-   - 暂不改变 approval `up/down`、submit、escape 或 free-text editing 行为。
+   - 历史执行点：该 PR 只抽出 helper 和策略落点；最终 focus policy 已由 PR #197 收尾。
 35. `codex/tui-textarea-history-selection`
    - history/selection/undo 交互细节。
 36. `codex/tui-opentui-spike`

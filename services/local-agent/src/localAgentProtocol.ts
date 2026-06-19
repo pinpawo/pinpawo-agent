@@ -65,6 +65,7 @@ export type LocalAgentControlServerMessage =
       reply: string;
       finalDispatchId?: string;
       reason?: string;
+      workdir?: string;
       runId?: string;
       conversationId?: string;
       idempotencyKey?: string;
@@ -365,6 +366,7 @@ function parseLocalAgentServerRecord(record: Record<string, unknown>): LocalAgen
       reply,
       finalDispatchId: readOptionalString(record, 'finalDispatchId'),
       reason: readOptionalString(record, 'reason'),
+      workdir: readOptionalString(record, 'workdir'),
       runId: readOptionalString(record, 'runId'),
       conversationId: readOptionalString(record, 'conversationId'),
       idempotencyKey: readOptionalString(record, 'idempotencyKey'),

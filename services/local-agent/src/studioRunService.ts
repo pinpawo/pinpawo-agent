@@ -33,6 +33,7 @@ export type StudioRunServiceResult = {
   runId: string;
   conversationId: string;
   idempotencyKey: string;
+  workdir: string;
   turn: StudioTurnResult;
 };
 
@@ -45,6 +46,7 @@ export class StudioRunService {
 
   async run(request: StudioRunServiceRequest): Promise<StudioRunServiceResult> {
     const { deps, runId, userRequest } = request;
+    const effectiveWorkdir = deps.runtimeConfig?.workdir ?? deps.workdir;
     const identity: StudioRunIdentity = buildStudioRunIdentity({
       runId,
       conversationId: request.conversationId,
@@ -63,6 +65,7 @@ export class StudioRunService {
       runId: identity.runId,
       conversationId: identity.conversationId,
       idempotencyKey: identity.idempotencyKey,
+      workdir: effectiveWorkdir,
       turn,
     };
   }

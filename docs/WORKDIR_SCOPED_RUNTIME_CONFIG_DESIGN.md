@@ -293,9 +293,10 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 - `runId`: 本次 Studio run 的唯一 id（对应 `requestId`）。
 - `conversationId`: 工作会话 id（默认同 `runId`，如客户端显式传入则沿用）。
 - `idempotencyKey`: `studio:{conversationId}:run:{runId}`。
+- `workdir`: 本次 run 使用的运行时工作目录（`runtimeConfig.workdir`）。
 
 这样 scheduler 可以按 `idempotencyKey` 做唯一约束，避免同一 due-run 被重复触发时写入双份 wiki/产物；
-同时也能按 `conversationId` 聚合同一会话里多轮历史。
+同时也能按 `conversationId` 聚合同一会话里多轮历史，并以 `workdir` 做路径归属与回放审计。
 
 约束：
 

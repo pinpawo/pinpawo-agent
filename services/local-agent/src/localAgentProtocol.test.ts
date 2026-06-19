@@ -228,6 +228,35 @@ test('parseLocalAgentServerMessage accepts studio_response with scheduler metada
       reply: 'all done',
       finalDispatchId: 'dispatch-1',
       reason: undefined,
+      workdir: undefined,
+      runId: 'run-1',
+      conversationId: 'conv-1',
+      idempotencyKey: 'studio:conv-1:run:run-1',
+    },
+  );
+});
+
+test('parseLocalAgentServerMessage accepts studio_response with workdir metadata', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'studio_response',
+      requestId: 'req-1',
+      outcome: 'done',
+      reply: 'all done',
+      finalDispatchId: 'dispatch-1',
+      runId: 'run-1',
+      conversationId: 'conv-1',
+      workdir: '/tmp/project/.pinpawo',
+      idempotencyKey: 'studio:conv-1:run:run-1',
+    })),
+    {
+      type: 'studio_response',
+      requestId: 'req-1',
+      outcome: 'done',
+      reply: 'all done',
+      finalDispatchId: 'dispatch-1',
+      reason: undefined,
+      workdir: '/tmp/project/.pinpawo',
       runId: 'run-1',
       conversationId: 'conv-1',
       idempotencyKey: 'studio:conv-1:run:run-1',

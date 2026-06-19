@@ -122,6 +122,7 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
   assert.deepEqual(progressEvents, [{ type: 'turn_started' }]);
   assert.deepEqual(toolEvents, [{ event: 'on_tool_start', name: 'read_file' }]);
   assert.equal(result.idempotencyKey, 'studio:conversation-1:run:run-1');
+  assert.equal(result.workdir, '/tmp/workspace');
   assert.equal(result.turn.outcome.outcome, 'done');
 });
 

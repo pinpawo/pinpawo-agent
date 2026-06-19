@@ -194,6 +194,7 @@ export {
   canRetry,
   isTerminalStudioDueRunStatus,
   InMemoryStudioDueRunStore,
+  FileStudioDueRunStore,
 } from './agent/studio/index';
 export type {
   CreatePlanCapabilityOptions,
@@ -201,8 +202,10 @@ export type {
   StudioDueRunRecord,
   StudioDueRunStatus,
   StudioDueRunClaim,
+  StudioDueRunClaimFilter,
   StudioDueRunStoreInput,
   StudioDueRunStoreOptions,
+  StudioDueRunStore,
   StudioDueRunStoreTrace,
   CuratorPromptProvider,
   ExecuteAction,

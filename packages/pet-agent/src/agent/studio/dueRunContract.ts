@@ -11,6 +11,7 @@ export type StudioDueRunRecord = {
   attempt: number;
   ownerUserId: string | null;
   userRequest: string;
+  runAt?: string;
   errorCode?: string;
   errorDetail?: string;
   finalDispatchId?: string;
@@ -25,7 +26,12 @@ export type StudioDueRunEvent =
   | { type: 'claim' }
   | { type: 'start' }
   | { type: 'succeed'; finalDispatchId?: string; reply?: string }
-  | { type: 'fail'; errorCode?: string; errorDetail?: string }
+  | {
+      type: 'fail';
+      errorCode?: string;
+      errorDetail?: string;
+      runAt?: string;
+    }
   | { type: 'retry' }
   | { type: 'cancel' };
 
@@ -122,6 +128,7 @@ export function applyStudioDueRunEvent(
       status: 'failed',
       errorCode: event.errorCode,
       errorDetail: event.errorDetail,
+      runAt: event.runAt,
     };
   }
   if (event.type === 'retry') {
@@ -129,6 +136,7 @@ export function applyStudioDueRunEvent(
     return {
       ...next,
       status: 'pending',
+      runAt: undefined,
       errorCode: undefined,
       errorDetail: undefined,
       finalDispatchId: undefined,
@@ -146,4 +154,3 @@ export function applyStudioDueRunEvent(
 export function canRetry(row: StudioDueRunRecord): boolean {
   return row.status === 'failed';
 }
-

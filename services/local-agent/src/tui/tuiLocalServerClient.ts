@@ -22,6 +22,7 @@ export type LocalServerRuntimeSnapshot = {
   cwd?: string;
   stateRoot?: string;
   studioConfigPath?: string;
+  studioDueRunsPath?: string;
   studioConfigSource?: string;
   studioConfigActivePath?: string;
   legacyStudioConfigPath?: string;
@@ -219,6 +220,7 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
   const rawWorkdir = pickString(record, ['workdir', 'workDir', 'cwd', 'work_dir']);
   const rawStateRoot = pickString(record, ['state_root', 'stateRoot']);
   const rawStudioConfigPath = pickString(record, ['studio_config_path', 'studioConfigPath']);
+  const rawStudioDueRunsPath = pickString(record, ['studio_due_runs_path', 'studioDueRunsPath']);
   const rawStudioConfigSource = pickString(record, ['studio_config_source', 'studioConfigSource']);
   const rawStudioConfigActivePath = pickString(record, ['studio_config_active_path', 'studioConfigActivePath']);
   const rawLegacyStudioConfigPath = pickString(record, ['legacy_studio_config_path', 'legacyStudioConfigPath']);
@@ -243,6 +245,7 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
     cwd: rawWorkdir ?? pickString(nested ?? {}, ['workdir', 'cwd']),
     stateRoot: rawStateRoot,
     studioConfigPath: rawStudioConfigPath,
+    studioDueRunsPath: rawStudioDueRunsPath,
     studioConfigSource: rawStudioConfigSource,
     studioConfigActivePath: rawStudioConfigActivePath,
     legacyStudioConfigPath: rawLegacyStudioConfigPath,

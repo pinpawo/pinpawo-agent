@@ -262,3 +262,43 @@ test('LocalServerStudioHandler maps missing studio config to studio_error', asyn
     message: 'Studio 未配置:No Studio config found at /tmp/studio.json. Create one to enable /studio.',
   }]);
 });
+
+test('LocalServerStudioHandler fills runId and conversationId defaults', async () => {
+  const sent: unknown[] = [];
+  const ws = createFakeWebSocket(sent);
+  const buildInputs: BuildStudioInput[] = [];
+  const handler = new LocalServerStudioHandler({
+    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    inflightRequests: createInflightController(),
+    buildStudio: async (input) => {
+      buildInputs.push(input);
+      return {
+        resolved: {} as BuildStudioResult['resolved'],
+        orchestrator: {
+          invoke: async () => ({
+            outcome: {
+              outcome: 'done',
+              reply: 'done reply',
+              finalDispatchId: 'dispatch-default',
+            },
+          }),
+        } as unknown as BuildStudioResult['orchestrator'],
+      };
+    },
+  });
+
+  await handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-default',
+    userRequest: 'plan default ids',
+  }, createDeps());
+
+  const response = sent.find((item): item is { type: 'studio_response'; requestId: string; runId?: string; conversationId?: string; finalDispatchId: string; } => (
+    Boolean(item && typeof item === 'object' && (item as { type: string }).type === 'studio_response')
+  ));
+  assert.ok(response);
+  assert.equal(response.requestId, 'studio-default');
+  assert.equal(response.runId, 'studio-default');
+  assert.equal(response.conversationId, 'studio-default');
+  assert.equal(response.finalDispatchId, 'dispatch-default');
+});

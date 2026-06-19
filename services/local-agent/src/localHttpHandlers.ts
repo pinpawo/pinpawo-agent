@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { existsSync } from 'node:fs';
+import type { StudioDueRunStatus } from '@pinpawo/pet-agent';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
   getCachedCapabilityAvailability,
@@ -78,10 +79,41 @@ export function handleLocalHttpRequest(
       ...(deps.runtimeConfig ? {
         state_root: deps.runtimeConfig.stateRoot,
         studio_config_path: deps.runtimeConfig.studioConfigPath,
+        studio_due_runs_path: deps.runtimeConfig.studioDueRunsPath,
         pets_dir: deps.runtimeConfig.petsDir,
         studio_wiki_base_dir: deps.runtimeConfig.studioWikiBaseDir,
       } : {}),
       ...studioConfigFields,
+    });
+    return true;
+  }
+
+  if (pathname === '/studio_due_runs') {
+    if (!deps.studioDueRunScheduler) {
+      writeJson(res, 404, { error: 'studio_due_runs unavailable' });
+      return true;
+    }
+
+    const status = parseStudioDueRunStatus(url.searchParams.get('status'));
+    const limit = parsePositiveInteger(url.searchParams.get('limit'));
+
+    if (url.searchParams.get('limit') !== null && limit === undefined) {
+      writeJson(res, 400, { error: 'invalid limit' });
+      return true;
+    }
+
+    deps.studioDueRunScheduler.trace().then((trace) => {
+      const next = (status ? trace.filter((row) => row.status === status) : trace)
+        .slice(0, limit ?? trace.length);
+      writeJson(res, 200, {
+        workdir: deps.runtimeConfig?.workdir ?? deps.workdir,
+        studio_due_runs_path: deps.runtimeConfig?.studioDueRunsPath,
+        studio_due_runs: next,
+      });
+    }).catch((err) => {
+      writeJson(res, 500, {
+        error: err instanceof Error ? err.message : 'studio_due_runs trace failed',
+      });
     });
     return true;
   }
@@ -170,6 +202,34 @@ function readStudioConfigRuntimeFields(deps: LocalServerDeps) {
 function writeJson(res: ServerResponse, statusCode: number, payload: unknown) {
   res.writeHead(statusCode, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(payload));
+}
+
+function parseStudioDueRunStatus(value: string | null): StudioDueRunStatus | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'pending'
+    || normalized === 'claimed'
+    || normalized === 'running'
+    || normalized === 'success'
+    || normalized === 'failed'
+    || normalized === 'canceled'
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function parsePositiveInteger(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value.trim());
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function replaceLocalCapability(

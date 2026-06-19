@@ -45,6 +45,7 @@ type Waiter = LocalStudioDueRunSubmitOptions & {
   resolve: (result: LocalStudioDueRunCompletion) => void;
   reject: (error: unknown) => void;
   settled: boolean;
+  abortHandler?: () => void;
 };
 
 type LocalStudioDueRunSchedulerOptions = {
@@ -68,17 +69,31 @@ export class LocalStudioDueRunScheduler {
   private stopSignal = new AbortController();
   private loopStarted = false;
 
+  private readonly filterWorkdirList: string[] | null;
+
   constructor(options: LocalStudioDueRunSchedulerOptions) {
     this.studioRunService = options.studioRunService ?? new StudioRunService();
     this.studioDueRuns = options.store;
     this.filterWorkdir = options.filterWorkdir;
+    this.filterWorkdirList = this.normalizeWorkdirFilter(this.filterWorkdir);
     this.ownerUserId = options.ownerUserId ?? null;
     this.pollIntervalMs = options.pollIntervalMs ?? 200;
     this.defaultFinalDispatchId = options.defaultFinalDispatchId;
   }
 
   async submit(input: LocalStudioDueRunSubmitOptions): Promise<LocalStudioDueRunCompletion> {
+    if (this.stopSignal.signal.aborted) {
+      throw new DOMException('scheduler stopped', 'AbortError');
+    }
+
     const workdir = input.deps.runtimeConfig?.workdir ?? input.deps.workdir;
+    if (!this.matchesWorkdirFilter(workdir)) {
+      throw new DOMException(
+        `studio request workdir ${workdir} is outside scheduler scope`,
+        'NotAllowedError',
+      );
+    }
+
     const row = this.studioDueRuns.submit({
       runId: input.runId,
       conversationId: input.conversationId,
@@ -110,6 +125,7 @@ export class LocalStudioDueRunScheduler {
         const abort = () => {
           this.settleWaiter(waiter, 'reject', new DOMException('aborted', 'AbortError'));
         };
+        waiter.abortHandler = abort;
         input.signal.addEventListener('abort', abort, { once: true });
       }
 
@@ -130,7 +146,39 @@ export class LocalStudioDueRunScheduler {
   }
 
   async trace(): Promise<StudioDueRunStoreTrace[]> {
-    return this.studioDueRuns.listTrace();
+    return this.studioDueRuns.list().flatMap((row) => {
+      if (!this.matchesWorkdirFilter(row.workdir)) {
+        return [];
+      }
+
+      return {
+        runId: row.runId,
+        conversationId: row.conversationId,
+        idempotencyKey: row.identity.idempotencyKey,
+        workdir: row.workdir,
+        status: row.status,
+        attempt: row.attempt,
+        claimedAt: row.claimedAt,
+        completedAt: row.completedAt,
+        ownerUserId: row.ownerUserId,
+        errorCode: row.errorCode,
+        errorDetail: row.errorDetail,
+        finalDispatchId: row.finalDispatchId,
+      };
+    });
+  }
+
+  private normalizeWorkdirFilter(
+    filter: string | string[] | undefined,
+  ): string[] | null {
+    if (!filter) return null;
+    const next = Array.isArray(filter) ? filter : [filter];
+    const normalized = next.filter(Boolean);
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  private matchesWorkdirFilter(workdir: string) {
+    return !this.filterWorkdirList || this.filterWorkdirList.includes(workdir);
   }
 
   private ensureLoopRunning() {
@@ -281,6 +329,9 @@ export class LocalStudioDueRunScheduler {
       return;
     }
     waiter.settled = true;
+    if (waiter.signal && waiter.abortHandler) {
+      waiter.signal.removeEventListener('abort', waiter.abortHandler);
+    }
     this.removeWaiter(waiter.idempotencyKey, waiter);
 
     if (callback === 'resolve') {

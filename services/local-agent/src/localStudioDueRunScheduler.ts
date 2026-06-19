@@ -121,6 +121,12 @@ export class LocalStudioDueRunScheduler {
 
   stop() {
     this.stopSignal.abort();
+    for (const waiters of this.waitersByKey.values()) {
+      for (const waiter of Array.from(waiters)) {
+        this.settleWaiter(waiter, 'reject', new DOMException('aborted', 'AbortError'));
+      }
+    }
+    this.waitersByKey.clear();
   }
 
   async trace(): Promise<StudioDueRunStoreTrace[]> {

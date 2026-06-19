@@ -13,7 +13,7 @@ import {
 } from './reviewSpec';
 
 export type ReviewUnavailableBehavior = 'block' | 'allow';
-export type AuthorizationMode = 'none' | 'exact_args';
+export type AuthorizationMode = 'none' | 'exact_args' | 'url_domain';
 
 export type HitlPresetOptions = {
   authorization?: AuthorizationMode;
@@ -83,6 +83,7 @@ function buildReviewTitle(ctx: ToolkitToolReviewContext) {
 
 export function buildStandardReviewOptions(params: {
   authorizeMatcher?: ToolAuthorizationMatcherTemplate;
+  authorizeDescription?: string;
 } = {}): ReviewOption[] {
   return [
     {
@@ -94,7 +95,8 @@ export function buildStandardReviewOptions(params: {
     ...(params.authorizeMatcher ? [{
       id: 'approve-and-authorize-thread',
       label: 'Approve and authorize',
-      description: 'Approve this action and authorize exact matching arguments in this thread.',
+      description: params.authorizeDescription
+        ?? 'Approve this action and authorize exact matching arguments in this thread.',
       decision: { type: 'approve' as const },
       effects: [{
         type: 'graph.authorize_tool_action' as const,
@@ -131,6 +133,41 @@ function buildExactArgsMatcher(ctx: { input: unknown }): ToolAuthorizationMatche
   };
 }
 
+function normalizeUrlOrigin(value: unknown) {
+  if (typeof value !== 'string') return '';
+  try {
+    const origin = new URL(value).origin;
+    return origin === 'null' ? '' : origin;
+  } catch {
+    return '';
+  }
+}
+
+function buildUrlDomainMatcher(ctx: { input: unknown }): ToolAuthorizationMatcher | null {
+  const input = inputToRecord(ctx.input);
+  const origin = normalizeUrlOrigin(input.url);
+  return origin
+    ? { type: 'url_domain', value: { origin } }
+    : null;
+}
+
+function buildAuthorizationMatcher(mode: AuthorizationMode, ctx: { input: unknown }) {
+  if (mode === 'exact_args') {
+    return buildExactArgsMatcher(ctx);
+  }
+  if (mode === 'url_domain') {
+    return buildUrlDomainMatcher(ctx);
+  }
+  return null;
+}
+
+function authorizationDescription(matcher: ToolAuthorizationMatcher) {
+  if (matcher.type === 'url_domain') {
+    return 'Approve this action and authorize the same URL domain in this thread.';
+  }
+  return 'Approve this action and authorize exact matching arguments in this thread.';
+}
+
 function blockReview(ctx: ToolkitToolReviewContext): ToolkitToolReviewBlock {
   return {
     type: 'block',
@@ -153,9 +190,7 @@ function createPresetPolicy(options: PresetOptions): ToolkitToolReviewPolicy {
         sessionAuthorization: false,
       };
 
-      const matcher = authorization === 'exact_args'
-        ? buildExactArgsMatcher(ctx)
-        : null;
+      const matcher = buildAuthorizationMatcher(authorization, ctx);
 
       if (matcher && capabilities.sessionAuthorization) {
         const args = matcher.type === 'exact_args' ? matcher.value : inputToRecord(ctx.input);
@@ -184,13 +219,12 @@ function createPresetPolicy(options: PresetOptions): ToolkitToolReviewPolicy {
           authorizeMatcher: matcher && capabilities.sessionAuthorization
             ? { type: 'policy_hook' }
             : undefined,
+          authorizeDescription: matcher ? authorizationDescription(matcher) : undefined,
         }),
       });
     },
     buildAuthorizationMatcher: (ctx) =>
-      authorization === 'exact_args'
-        ? buildExactArgsMatcher(ctx)
-        : null,
+      buildAuthorizationMatcher(authorization, ctx),
   };
 }
 

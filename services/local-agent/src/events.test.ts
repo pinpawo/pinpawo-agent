@@ -222,6 +222,27 @@ test('browser open review policy offers session authorization', async () => {
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
     ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
   );
+
+  assert.deepEqual(
+    await policy.buildAuthorizationMatcher?.({
+      toolkitName: 'browser',
+      toolName: 'browser_open',
+      input: { url: 'https://Example.test/path', headless: true },
+      operation: toolkit.operations?.browser_open,
+      pendingAction: {
+        actionId: 'call-1',
+        toolName: 'browser_open',
+        args: { url: 'https://Example.test/path', headless: true },
+      },
+      effect: {
+        type: 'graph.authorize_tool_action',
+        scope: 'thread',
+        actionRef: { type: 'pending_action' },
+        matcher: { type: 'policy_hook' },
+      },
+    }),
+    { type: 'url_domain', value: { origin: 'https://example.test' } },
+  );
 });
 
 test('browser operation metadata summarizes page output', () => {

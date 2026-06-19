@@ -30,11 +30,13 @@ export type ReviewActionRef =
 export type ToolAuthorizationMatcherTemplate =
   | { type: 'policy_hook' }
   | { type: 'shell_pattern'; source: 'args.command' }
-  | { type: 'exact_args'; source: 'action.args' };
+  | { type: 'exact_args'; source: 'action.args' }
+  | { type: 'url_domain'; source: 'args.url' };
 
 export type ToolAuthorizationMatcher =
   | { type: 'exact_args'; value: Record<string, unknown> }
-  | { type: 'shell_pattern'; value: string };
+  | { type: 'shell_pattern'; value: string }
+  | { type: 'url_domain'; value: { origin: string } };
 
 export type ReviewEffect =
   | {
@@ -148,6 +150,10 @@ function isToolAuthorizationMatcherTemplateValue(
   if (record.type === 'exact_args') {
     return hasOnlyKeys(record, ['type', 'source'])
       && record.source === 'action.args';
+  }
+  if (record.type === 'url_domain') {
+    return hasOnlyKeys(record, ['type', 'source'])
+      && record.source === 'args.url';
   }
   return false;
 }

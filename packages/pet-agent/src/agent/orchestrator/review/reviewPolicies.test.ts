@@ -85,6 +85,52 @@ test('presets can opt into exact args authorization', async () => {
   assert.equal(review, null);
 });
 
+test('externalAccess can opt into URL domain authorization', async () => {
+  const policy = ReviewPolicies.externalAccess({ authorization: 'url_domain' });
+  const matcher = await policy.buildAuthorizationMatcher?.(matcherContext({
+    toolName: 'browser_open',
+    input: { url: 'https://Example.test/a', headless: true },
+    pendingAction: {
+      actionId: 'call-1',
+      toolName: 'browser_open',
+      args: { url: 'https://Example.test/a', headless: true },
+    },
+  }));
+  assert.deepEqual(matcher, {
+    type: 'url_domain',
+    value: { origin: 'https://example.test' },
+  });
+
+  const review = await policy.request(reviewContext({
+    toolName: 'browser_open',
+    input: { url: 'https://example.test/b', headless: false },
+    toolAuthorizations: [authorizeToolAction({
+      toolName: 'browser_open',
+      matcher: matcher!,
+      now: () => new Date('2026-06-15T00:00:00.000Z'),
+    })],
+  }));
+
+  assert.equal(review, null);
+});
+
+test('URL domain authorization option uses domain-specific description', async () => {
+  const policy = ReviewPolicies.externalAccess({ authorization: 'url_domain' });
+
+  const review = await policy.request(reviewContext({
+    toolName: 'browser_open',
+    input: { url: 'https://example.test/a', headless: true },
+  }));
+
+  const authorizeOption = review && 'schemaVersion' in review
+    ? review.options.find((option) => option.id === 'approve-and-authorize-thread')
+    : null;
+  assert.equal(
+    authorizeOption?.description,
+    'Approve this action and authorize the same URL domain in this thread.',
+  );
+});
+
 test('commandExecution requires HITL once configured', async () => {
   const policy = ReviewPolicies.commandExecution();
 

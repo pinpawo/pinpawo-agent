@@ -258,8 +258,8 @@ function appendSubagentTimelineDelta(
 ): { session: SessionModel; entryId?: string } {
   const id = `${requestId}:subagent-output`;
   const text = readSubagentTimelineText(session, id) + token;
-  const formatted = formatSubagentMessage(text);
-  if (!formatted) return { session };
+  const hasContent = Boolean(formatSubagentMessage(text));
+  if (!hasContent) return { session };
   const entry: AgentMessageEntry = {
     id,
     type: 'message',

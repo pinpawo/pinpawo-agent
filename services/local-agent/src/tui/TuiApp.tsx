@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import { config } from '../config';
 import { AgentTimeline } from './components/AgentTimeline';
@@ -52,6 +52,7 @@ import type { TuiState } from './state/tuiState';
 import type { MessageRole } from './types';
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
+const CLEAR_SCREEN = '\x1B[2J\x1B[3J\x1B[H';
 
 // ---------------------------------------------------------------------------
 // Main TUI application
@@ -68,6 +69,7 @@ export function TuiApp(props: { actorId: string }) {
   );
   const [animationFrame, setAnimationFrame] = useState(0);
   const [now, setNow] = useState(() => Date.now());
+  const [timelineRenderEpoch, setTimelineRenderEpoch] = useState(0);
   const [terminalSize, setTerminalSize] = useState(() => ({
     columns: stdout.columns ?? 80,
     rows: stdout.rows ?? 24,
@@ -86,13 +88,18 @@ export function TuiApp(props: { actorId: string }) {
   // pet runtime 的 thread namespace 也保持一致
   const studioConversationIdRef = useRef<string | null>(null);
   const studioModeRef = useRef(false);
+  const resetTimelineView = useCallback(() => {
+    stdout.write(CLEAR_SCREEN);
+    setTimelineRenderEpoch((current) => current + 1);
+  }, [stdout]);
   const runtimeController = useMemo(() => new TuiRuntimeController({
     actorId: props.actorId,
     localServerPort,
     dispatch,
     getState: () => stateRef.current,
+    resetTimelineView,
     setNow,
-  }), [props.actorId, localServerPort, dispatch, setNow]);
+  }), [props.actorId, localServerPort, dispatch, resetTimelineView, setNow]);
   const focusedSession = selectFocusedSession(tuiState);
   const timeline = selectFocusedTimeline(tuiState);
   const { staticEntries: staticTimeline, dynamicEntries: dynamicTimeline } = useMemo(
@@ -158,6 +165,7 @@ export function TuiApp(props: { actorId: string }) {
     clearInputValue,
     dispatch,
     resetStudioMode,
+    resetTimelineView,
     runtimeController,
   });
 
@@ -465,7 +473,7 @@ export function TuiApp(props: { actorId: string }) {
   return (
     <Box flexDirection="column" paddingX={1}>
       {timeline.length === 0 ? <Text dimColor>{TUI_TEXT.emptyHistory(petName)}</Text> : null}
-      <Static items={staticTimeline}>
+      <Static key={timelineRenderEpoch} items={staticTimeline}>
         {(entry) => (
           <AgentTimelineItem
             key={entry.id}

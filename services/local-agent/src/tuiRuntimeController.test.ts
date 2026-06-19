@@ -43,11 +43,15 @@ function pendingReviewState(): TuiState {
 function createController(state: TuiState) {
   const actions: TuiAction[] = [];
   const sent: unknown[] = [];
+  let resetCount = 0;
   const controller = new TuiRuntimeController({
     actorId: 'pet-1',
     localServerPort: 0,
     dispatch: (action) => actions.push(action),
     getState: () => state,
+    resetTimelineView: () => {
+      resetCount += 1;
+    },
     setNow: () => {},
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,7 +60,7 @@ function createController(state: TuiState) {
     send: (message: unknown) => sent.push(message),
     disconnect: () => {},
   };
-  return { controller, actions, sent };
+  return { controller, actions, sent, get resetCount() { return resetCount; } };
 }
 
 test('TuiRuntimeController submits canonical review responses without legacy resume extras', () => {
@@ -110,4 +114,17 @@ test('TuiRuntimeController interrupts pending human review instead of dismissing
     requestId: 'req-1',
     statusMessage: '正在打断',
   });
+});
+
+test('TuiRuntimeController resets static timeline view for new sessions', () => {
+  const harness = createController(pendingReviewState());
+
+  harness.controller.startNewSession();
+
+  assert.equal(harness.resetCount, 1);
+  assert.deepEqual(harness.actions.slice(0, 2), [
+    { type: 'input.set', value: '' },
+    { type: 'session.clear', statusMessage: '已创建新会话' },
+  ]);
+  assert.deepEqual(harness.sent, [{ type: 'new_session' }]);
 });

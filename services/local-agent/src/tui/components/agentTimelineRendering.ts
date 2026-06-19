@@ -38,9 +38,9 @@ function buildAgentOperationText(entry: AgentOperationEntry, now: number, width:
   const suffix = `（${status}）`;
   const body = buildOperationBody(entry);
   const line = `${body}${suffix}`;
-  if (stringDisplayWidth(line) <= width) return line;
+  if (stringWidth(line) <= width) return line;
 
-  const suffixWidth = stringDisplayWidth(suffix);
+  const suffixWidth = stringWidth(suffix);
   if (suffixWidth >= width) return truncateLine(suffix, width);
   return `${truncateLine(body, width - suffixWidth)}${suffix}`;
 }
@@ -87,8 +87,4 @@ function joinUniqueParts(parts: Array<string | undefined>) {
     seen.add(text);
     return [text];
   }).join(' · ');
-}
-
-function stringDisplayWidth(text: string) {
-  return stringWidth(text);
 }

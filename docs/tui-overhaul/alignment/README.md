@@ -18,6 +18,7 @@ If a PR deviates from `docs/TUI_OVERHAUL_DESIGN.md`, update that PR's alignment 
 
 The alignment document should be updated for:
 
+- contract artifact changes;
 - data model changes;
 - reducer/action/selector ownership changes;
 - snapshot or reconnect behavior changes;

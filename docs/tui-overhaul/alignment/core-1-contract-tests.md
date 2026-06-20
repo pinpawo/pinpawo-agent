@@ -11,6 +11,14 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 - pending review, runtime, studio progress, connection, token usage, and active run are state, not timeline messages.
 - No `transcript`, message-only view, or `transcriptSnapshot` second message log.
 
+## Contract Artifact
+
+- Code contract: `services/local-agent/src/tui/contracts/tuiCoreContract.ts`.
+- Contract version: `TUI_CORE_CONTRACT_VERSION = 1`.
+- Target snapshot action: `session.snapshot.loaded`.
+- Contract tests: `services/local-agent/src/tui/contracts/tuiCoreContract.test.ts`.
+- Runtime target tests import the contract action constant instead of duplicating the action string.
+
 ## Expected Changes
 
 - Add tests for completed events when active pointers are missing.
@@ -45,6 +53,7 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 ## Merge Checklist
 
 - [x] Tests encode target behavior without broad implementation rewrites.
+- [x] CORE-1 has an explicit code contract artifact.
 - [x] No new transcript/message-only model is introduced.
 - [x] Any intentionally failing or skipped test is explained in this document.
 - [x] PR references tracking issue #232.

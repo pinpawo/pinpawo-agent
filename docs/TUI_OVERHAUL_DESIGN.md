@@ -736,18 +736,28 @@ flowchart TD
 
 ### 7.3 推荐 PR 切分
 
-建议按下面顺序开 PR，减少冲突和回滚成本：
+不要把所有任务排成一个线性队列。核心状态重构和 UI 边界整理应该分 track 管理。
 
-1. `PR-A`：测试基线。只加失败/目标测试，不改实现。
-2. `PR-B`：StatusBar + ScreenModel。低风险 UI 边界整理，可和 `PR-A` 并行。
-3. `PR-C`：Timeline 权威化。移除 live `history` 双写，把 `/history` / checkpoint / WS event 收敛到 `AgentTimelineMessage[]`。
-4. `PR-D`：Run Registry。用 `runs[runId] + session.activeRunId` 替代 `activeRun + runRoute`。
-5. `PR-E`：Snapshot Adapter。定义并接入 `session.snapshot.loaded`，但先不扩大 UI 行为。
-6. `PR-F`：Reconnect Reconciliation。重连、startup、resume 全走 snapshot 对账，修复 missed completed / pending review。
-7. `PR-G`：Input/UI State 收敛。modal、studio mode、composer owner 收进 UI reducer。
-8. `PR-H`：清理。删除 `history` / `transcript` / `transcriptSnapshot` / `skipTimelineIds` 相关残留 selector、helper、测试 fixture。
+核心阻塞链按下面顺序合并：
 
-如果人手并行，`PR-A`、`PR-B`、`P7` 可以同时做；`PR-C` 和 `PR-D` 可以同时开发，但最好按顺序合并并及时 rebase。
+1. `CORE-1`：契约和测试基线。冻结 `timeline == backend checkpoint messages`，补失败/目标测试，不做大规模 runtime 迁移。
+2. `CORE-2`：Timeline 权威化。移除 live `history` 双写，把 `/history` / checkpoint / WS event 收敛到 `AgentTimelineMessage[]`。
+3. `CORE-3`：Run Registry。用 `runs[runId] + session.activeRunId` 替代 `activeRun + runRoute`。
+4. `CORE-4`：Snapshot Adapter。定义并接入 `session.snapshot.loaded`，snapshot 合并 `timeline + runs + state`。
+5. `CORE-5`：Reconnect Reconciliation。重连、startup、resume 全走 snapshot 对账，修复 missed completed / pending review。
+6. `CORE-6`：清理。删除 `history` / `transcript` / `transcriptSnapshot` / `skipTimelineIds` 相关残留 selector、helper、测试 fixture。
+
+可以并行的 UI / contract track：
+
+| Track | PR | 内容 | 何时可合 |
+| --- | --- | --- | --- |
+| `UI` | `UI-1` | StatusBar Model | 设计 PR 合入后即可 |
+| `UI` | `UI-2` | ScreenModel + layout regions | `UI-1` 后更稳，也可独立 |
+| `UI` | `UI-3` | Input owner + Studio/Chat mode | `UI-2` 后 |
+| `UI` | `UI-4` | Static/Dynamic timeline viewport 简化 | `CORE-2 + UI-2` 后 |
+| `CONTRACT` | `CONTRACT-1` | Server snapshot contract 草案 | `CORE-1` 后，可早于实现 |
+
+`UI-*` 不应该插进 `CORE-*` 的顺序里。它们可以并行开发，但实现 PR 描述里要明确依赖哪个 core contract，避免 UI 层提前固化旧的 `history/activeRun/runRoute` 模型。
 
 ## 8. 测试矩阵
 

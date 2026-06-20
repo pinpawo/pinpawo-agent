@@ -128,3 +128,82 @@ test('TuiRuntimeController resets static timeline view for new sessions', () => 
   ]);
   assert.deepEqual(harness.sent, [{ type: 'new_session' }]);
 });
+
+test.skip('contract: reconnect reconciles server-completed runs through session snapshot', async () => {
+  const harness = createController(pendingReviewState());
+  let connected = false;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    isHealthy: async () => true,
+    readRuntime: async () => null,
+    readHistory: async () => [{
+      id: 'assistant-final',
+      kind: 'assistant',
+      text: 'final answer from checkpoint',
+    }],
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).wsClient = {
+    hasSocket: () => false,
+    isConnected: () => false,
+    connect: () => {
+      connected = true;
+    },
+    disconnect: () => {},
+    send: () => {},
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (harness.controller as any).reconnect();
+
+  assert.equal(connected, true);
+  assert.equal(harness.actions.some((action) => String(action.type) === 'session.snapshot.loaded'), true);
+  assert.equal(harness.actions.some((action) => action.type === 'session.replace_history'), false);
+});
+
+test.skip('contract: reconnect restores pending review through session snapshot', async () => {
+  const harness = createController(pendingReviewState());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    isHealthy: async () => true,
+    readRuntime: async () => null,
+    readHistory: async () => [],
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).wsClient = {
+    hasSocket: () => false,
+    isConnected: () => false,
+    connect: () => {},
+    disconnect: () => {},
+    send: () => {},
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (harness.controller as any).reconnect();
+
+  assert.equal(harness.actions.some((action) => String(action.type) === 'session.snapshot.loaded'), true);
+  assert.equal(
+    harness.actions.some((action) => JSON.stringify(action).includes('"pendingReview"')),
+    true,
+  );
+});
+
+test.skip('contract: resume session reconciles through session snapshot', async () => {
+  const harness = createController(pendingReviewState());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    resumeSession: async () => ({
+      source: 'resume',
+      session: { id: 'chat:one', title: 'One', active: true },
+      timeline: [{ id: 'assistant-final', role: 'assistant', text: 'welcome back' }],
+      runs: [],
+    }),
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (harness.controller as any).resumeSession('chat:one');
+
+  assert.equal(harness.actions.some((action) => String(action.type) === 'session.snapshot.loaded'), true);
+  assert.equal(harness.actions.some((action) => action.type === 'session.clear'), false);
+  assert.equal(harness.actions.some((action) => action.type === 'session.replace_history'), false);
+});

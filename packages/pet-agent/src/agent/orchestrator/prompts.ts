@@ -227,27 +227,6 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   ].filter((line) => line !== null).join('\n');
 }
 
-/**
- * Supplementary context for the answer node: the FULL (un-clipped) text of
- * recent subagent announces. Decision nodes only ever see clipped digests of
- * these; the answer node must see the originals so it can reproduce prior
- * results faithfully instead of re-fabricating them.
- */
-export function buildAnswerAnnounceContext(announces: SubagentAnnounce[]): string | null {
-  if (announces.length === 0) return null;
-  const lines = ['之前执行器/子任务返回的完整结果（请以下面的原文为准，不要改写或编造数据）：'];
-  for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
-    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}${item.lane}（${describeAnnounceKind(item.announce)}）`);
-    if (item.task) {
-      lines.push(`  委派任务：${clipForPrompt(item.task, 180)}`);
-    }
-    if (item.text) {
-      lines.push('  返回内容：', indentPromptBlock(item.text.trim()));
-    }
-  }
-  return lines.join('\n');
-}
-
 export function buildAnswerSystemPrompt(params: {
   actor: AgentActor;
   workdir?: string;

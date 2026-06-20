@@ -137,6 +137,31 @@ export function mainConversationMessages(messages: BaseMessage[]): BaseMessage[]
 export const routeMessages = mainConversationMessages;
 
 /**
+ * Build the message list for the final answer node.
+ *
+ * Unlike decision nodes (which see the user-facing conversation only), the
+ * answer node must reproduce prior subagent results faithfully. The completed
+ * announce is the authoritative copy of a subagent's result that the lane
+ * cleanup deliberately preserves (laneMessagesForStateUpdate removes the
+ * intermediate transcript and keeps only the completed announce), so we keep it
+ * in place rather than filtering it out and re-injecting a digest.
+ *
+ * Kept: unlaned main-conversation messages + every completed announce, in their
+ * original order. Dropped: progress announces, intermediate lane transcripts,
+ * and orchestrator-internal lane messages (e.g. capability_search calls).
+ *
+ * A completed announce is guaranteed not to carry tool calls (tagNewLaneMessages
+ * only marks a tool-call-free AI message as completed), so it is safe to feed to
+ * the model without breaking tool-call/tool-result pairing.
+ */
+export function answerConversationMessages(messages: BaseMessage[]): BaseMessage[] {
+  return messages.filter((message) => {
+    if (!getMessageLane(message)) return true;
+    return getMessageAnnounce(message) === 'completed';
+  });
+}
+
+/**
  * Tag new messages from subagent result and select an announce message.
  *
  * Announce kind is determined by completionReason + message content:

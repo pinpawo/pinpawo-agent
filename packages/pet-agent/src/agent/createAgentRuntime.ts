@@ -53,7 +53,6 @@ import {
   buildDecisionTargetsContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
-  buildAnswerAnnounceContext,
   buildAnswerSystemPrompt,
   buildPreparedRequestContext,
   buildSubagentAnnounceContext,
@@ -82,6 +81,7 @@ import {
   updateTurnDelegationResult,
 } from './orchestrator/delegations';
 import {
+  answerConversationMessages,
   getMessageLane,
   getMessageTurnId,
   laneMessages,
@@ -849,22 +849,22 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   }
 
   // Node: answer — the dedicated final-reply node. The decision nodes only route
-  // here; this node synthesizes the user-facing reply from the FULL main
-  // conversation (not the clipped decision digest), so prior subagent results
-  // are reproduced faithfully instead of being re-fabricated.
+  // here; this node synthesizes the user-facing reply from the FULL conversation
+  // (not the clipped decision digest), so prior subagent results are reproduced
+  // faithfully instead of being re-fabricated.
   async function answerNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const { workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    // Full user-facing conversation (lane-tagged subagent transcripts excluded by
-    // mainConversationMessages) plus the un-clipped text of recent announces, so
-    // prior subagent results are reproduced faithfully rather than re-fabricated.
-    const history = mainMessagesWithoutCompaction(state.messages);
-    const announceContext = buildAnswerAnnounceContext(readRecentAnnounces(state.messages));
+    // Main conversation plus the preserved completed announces (the authoritative
+    // copies of prior subagent results), in their original order — see
+    // answerConversationMessages. We keep them in place rather than filtering
+    // announces out and re-injecting a separate digest.
+    const history = answerConversationMessages(state.messages)
+      .filter((message) => !isContextCompactionMessage(message));
     const response = await config.models.act.invoke(
       [
         new SystemMessage(buildAnswerSystemPrompt({ actor, workdir, runtimeEnvironment })),
         ...history,
-        ...(announceContext ? [new SystemMessage(announceContext)] : []),
       ],
       runnableConfig,
     );

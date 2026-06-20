@@ -27,6 +27,7 @@ import { buildReviewSpec } from './review/reviewSpec';
 import { isToolActionAuthorized } from './review/reviewAuthorizations';
 import { ReviewPolicies } from './review/reviewPolicies';
 import {
+  answerConversationMessages,
   getMessageAnnounce,
   getMessageDelegationId,
   laneMessages,
@@ -2003,6 +2004,33 @@ test('lane tagging hides subagent messages from route and records completed anno
     announce: 'completed',
     text: '已查到热门动态。',
   });
+});
+
+test('answerConversationMessages keeps completed announces but drops progress and orchestrator lane messages', () => {
+  const userAsk = new HumanMessage('帮我查一下小红书动态');
+  const completed = new AIMessage('已查到热门动态：A、B、C。');
+  setPinpetMeta(completed, { lane: 'general', turnId: 't1', announce: 'completed', delegationId: 'd1', task: '查动态' });
+  const progress = new AIMessage('正在抓取第 2 页…');
+  setPinpetMeta(progress, { lane: 'general', turnId: 't1', announce: 'progress', delegationId: 'd2', task: '查更多' });
+  const orchestratorInternal = new AIMessage('capability_search 调用');
+  setPinpetMeta(orchestratorInternal, { lane: 'orchestrator', turnId: 't1' });
+  const reply = new AIMessage('好的，结果如上。');
+
+  const messages = [userAsk, completed, progress, orchestratorInternal, reply];
+  const view = answerConversationMessages(messages);
+
+  // Completed announce is the preserved authoritative result -> kept, in place.
+  // Progress + orchestrator-internal lane messages -> dropped. Unlaned -> kept.
+  assert.deepEqual(view.map((m) => m.content), [
+    '帮我查一下小红书动态',
+    '已查到热门动态：A、B、C。',
+    '好的，结果如上。',
+  ]);
+  // The decision-node view still hides the announce, by contrast.
+  assert.deepEqual(mainConversationMessages(messages).map((m) => m.content), [
+    '帮我查一下小红书动态',
+    '好的，结果如上。',
+  ]);
 });
 
 test('lane tagging marks limit-reached result as progress', () => {

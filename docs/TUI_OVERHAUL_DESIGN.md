@@ -107,15 +107,19 @@ HTTP /history
 - 退出重进后，server checkpoint 里的最终消息又可以通过 `/history` 恢复。
 - operation、review、subagent、studio progress 等结构化 timeline 信息在恢复路径中无法完整还原。
 
-### 3.2 `history` 与 `timeline` 双写
+### 3.2 `history` 不应并行于 `timeline`
 
 当前 `appendHistory` 会同时写 `history` 和 `timeline`。部分实时事件直接写 `timeline`，最终 assistant 又写 `history`，再用 `skipTimelineIds` 避免重复 entry。
 
+概念上这不成立：TUI 里应该只有一个对话事实，也就是 `timeline`。`history`、server checkpoint、启动恢复、当前运行中的 WS event，都只是构造或修正 `timeline` 的数据来源。
+
 这个模型的问题：
 
-- UI 需要猜测某个 entry 应该来自 history 还是实时事件。
+- UI 需要猜测某个 entry 应该来自 history 还是实时事件，而不是只消费同一个 timeline。
 - transcript/export 和 timeline rendering 的权威来源不一致。
 - 调试时很难判断“消息没显示”是 history 没写、timeline 没写、还是 Static/Dynamic 分区没渲染。
+
+目标模型中可以保留 `source` / `provenance` 元信息，例如 `snapshot`、`live-event`、`local-input`，但这些只是 timeline entry 的来源标记，不应该形成一套和 timeline 并行的状态树。
 
 ### 3.3 `activeRun` 承担了过多语义
 
@@ -130,6 +134,12 @@ HTTP /history
 
 实时事件处理还要求所有 event 必须匹配当前 focused session 的 `activeRun.requestId`。
 
+这里的问题不只是字段太多，命名也会误导理解：
+
+- `activeRun` 听起来像完整 run 实体，但很多时候它只是 focused session 的当前 run 指针。
+- `runRoute` 听起来像路由表，但它又承担 requestId 到 session 的生命周期关联。
+- 两者都围绕 requestId，但没有一个清晰的 owner 来表达 request、run、session、timeline 之间的关系。
+
 这个约束过强：terminal event，例如 `message.completed`、`error`、`interrupted`，理论上应该能完成或修正 run 状态；但当前实现中只要 `activeRun` 已经不存在，就会被丢弃。
 
 ### 3.4 `runRoute` 是易失路由，不是 run registry
@@ -143,9 +153,22 @@ HTTP /history
 - 这个 request 是否是 reconnect 前已经开始的 run？
 - terminal event 到达时是否应该补写 timeline？
 
+目标关系应更直接：
+
+```txt
+requestId == runId
+run.sessionId -> 归属 session
+run.timelineEntryIds -> run 影响了哪些 timeline entry
+session.activeRunId -> 当前 session 的 active 指针，可为空
+```
+
+也就是说，事件路由应该从 run registry 派生；不应该同时维护一个 `runRoute` 和一个带完整语义的 `activeRun`。
+
 ### 3.5 reconnect 缺少 reconciliation
 
 TUI 初始化时读取 `/history`，但 WS 重连后只恢复连接和 runtime config，没有重新拉取 session snapshot。
+
+`connect` / `disconnect` 本身只表示数据通道是否可用，不应该成为另一套数据恢复模型。断线期间错过的内容、当前 timeline、pending review、active run、runtime 状态，都应该通过同一个 session snapshot 对账回来。
 
 因此如果断线期间 server 完成了 run，TUI 不会自动补齐：
 
@@ -354,18 +377,22 @@ type TuiScreenModel = {
 
 目标：启动、重连、resume 都走同一套 `session.snapshot.loaded` action。
 
-建议新增 server snapshot 概念：
+建议新增 server snapshot 概念。snapshot 是恢复当前 TUI 事实的权威输入，核心产物是 `timeline`，而不是一份和 timeline 并行的 `history`：
 
 ```ts
 type TuiSessionSnapshot = {
   session: ResumeSessionSummary;
-  transcript: TranscriptMessage[];
+  timeline: AgentTimelineSnapshotEntry[];
+  transcript?: TranscriptMessage[];
+  runs: TuiRunSnapshot[];
+  activeRunId?: RunId;
   pendingReview?: ApprovalRequestModel;
   runtime?: RuntimeModel;
-  activeRun?: TuiRunSnapshot;
   tokenUsage?: TokenUsageModel;
 };
 ```
+
+其中 `transcript` 只能作为 server checkpoint / export 的输入，不能成为 TUI rendering 的第二个 source of truth。启动恢复、WS 重连、resume 都应该把 snapshot 合并进同一套 `session + runs + timeline + ui` 状态。
 
 客户端动作：
 
@@ -381,7 +408,7 @@ type TuiSessionSnapshot = {
 
 ### 5.2 用 run registry 替代单一 `activeRun`
 
-目标：`requestId` 的状态由 `runs[requestId]` 管理，focused session 只引用当前 active run。
+目标：`requestId` 的状态由 `runs[requestId]` 管理，focused session 只保存当前 active run 指针。
 
 建议：
 
@@ -391,6 +418,12 @@ type TuiSessionModel = {
   timeline: AgentTimelineEntry[];
 };
 ```
+
+命名上应区分实体和指针：
+
+- `runs[runId]` 是 run 实体，包含 sessionId、status、phase、pendingReview、timelineEntryIds。
+- `session.activeRunId` 是 session 上的 active 指针。
+- 不再保留独立的 `runRoute`；事件路由通过 `runs[runId].sessionId` 得到。
 
 事件处理：
 
@@ -407,13 +440,14 @@ type TuiSessionModel = {
 
 ### 5.3 让 timeline 成为唯一展示日志
 
-目标：TUI rendering 只读 timeline；transcript/export 从 timeline 或 server transcript 派生。
+目标：TUI rendering 只读 timeline。历史恢复、实时事件、本地输入、server checkpoint 都只是 timeline 的来源。
 
 建议：
 
 - `AgentTimelineEntry` 保留结构化语义。
-- `TranscriptMessage` 只用于 server checkpoint transcript 和 export。
-- `history` 字段从 live session state 中移除，或者改名为 `transcript` 并明确不是 UI source。
+- `TranscriptMessage` 只用于 server checkpoint transcript 和 export，不能驱动 TUI rendering。
+- `history` 字段从 live session state 中移除，或者改名为 `transcriptSnapshot` 并明确不是 UI source。
+- 如需调试来源，在 timeline entry 上保留轻量 `source` / `provenance`，例如 `snapshot`、`live-event`、`local-input`。
 
 写入规则：
 
@@ -435,7 +469,7 @@ error              -> append error entry + terminalize run
 
 ### 5.4 重做 reconciliation 策略
 
-目标：所有可能丢事件的地方都有明确对账。
+目标：所有可能丢事件的地方都通过同一个 session snapshot 对账。`connect` / `disconnect` 只表达数据通道是否可用，不表达数据事实本身。
 
 对账触发：
 
@@ -448,7 +482,8 @@ error              -> append error entry + terminalize run
 对账内容：
 
 - active session id。
-- transcript/timeline snapshot。
+- timeline snapshot。
+- transcript snapshot，如果 export 或 checkpoint 需要。
 - pending review。
 - runtime。
 - token usage。
@@ -621,14 +656,17 @@ raw terminal input
 
 ### Phase 4：Timeline 权威化
 
-- 减少或移除 live `history` 双写。
+- 移除 live `history` 和 `timeline` 双写。
+- 将 `/history`、实时 WS event、本地 submit 都收敛为 timeline 输入来源。
 - `skipTimelineIds` 退出。
-- transcript/export 改从 timeline 或明确的 transcript model 派生。
+- transcript/export 改从 timeline 或明确的 `transcriptSnapshot` 派生。
 
 ### Phase 5：Snapshot / Reconciliation
 
 - server 增加或复用 snapshot endpoint。
-- startup/reconnect/resume 统一 action。
+- snapshot 返回当前 timeline、runs、pending review、runtime、usage 等完整 TUI 状态。
+- startup/reconnect/resume 统一走 `session.snapshot.loaded`。
+- reconnect 只作为 snapshot 对账触发器，不拥有独立恢复逻辑。
 - pending review 恢复。
 
 ### Phase 6：Input/UI State 收敛

@@ -105,21 +105,23 @@ HTTP /history
 
 - 实时事件可以因为 `runRoute` 或 `activeRun` 缺失被丢弃。
 - 退出重进后，server checkpoint 里的最终消息又可以通过 `/history` 恢复。
-- operation、review、subagent、studio progress 等结构化 timeline 信息在恢复路径中无法完整还原。
+- pending review、runtime、studio progress 等状态信息在恢复路径中无法完整还原。
 
 ### 3.2 `history` 不应并行于 `timeline`
 
 当前 `appendHistory` 会同时写 `history` 和 `timeline`。部分实时事件直接写 `timeline`，最终 assistant 又写 `history`，再用 `skipTimelineIds` 避免重复 entry。
 
-概念上这不成立：TUI 里应该只有一个对话事实，也就是 `timeline`。`history`、server checkpoint、启动恢复、当前运行中的 WS event，都只是构造或修正 `timeline` 的数据来源。
+概念上这不成立：TUI 里应该只有一个对话事实，也就是 `timeline`。更准确地说，`timeline` 就是后端 checkpoint 中的 messages 在 TUI 中的表达，承载用户交互相关内容，例如 user message、assistant streaming/final message、tool operation message。
+
+`history`、server checkpoint、启动恢复、当前运行中的 WS event，都只是构造或修正 `timeline` 的数据来源。
 
 这个模型的问题：
 
 - UI 需要猜测某个 entry 应该来自 history 还是实时事件，而不是只消费同一个 timeline。
-- transcript/export 和 timeline rendering 的权威来源不一致。
+- checkpoint、export 和 timeline rendering 的权威来源不一致。
 - 调试时很难判断“消息没显示”是 history 没写、timeline 没写、还是 Static/Dynamic 分区没渲染。
 
-目标模型中可以保留 `source` / `provenance` 元信息，例如 `snapshot`、`live-event`、`local-input`，但这些只是 timeline entry 的来源标记，不应该形成一套和 timeline 并行的状态树。
+目标模型中可以保留 `source` / `provenance` 元信息，例如 `snapshot`、`live-event`、`local-input`，但这些只是 timeline message 的来源标记，不应该形成一套和 timeline 并行的状态树。
 
 ### 3.3 `activeRun` 承担了过多语义
 
@@ -289,8 +291,7 @@ type TuiSessionModel = {
   kind: 'chat' | 'studio';
   actor: ActorModel;
   runtime: RuntimeModel;
-  timeline: AgentTimelineEntry[];
-  transcript: TranscriptMessage[];
+  timeline: AgentTimelineMessage[];
   tokenUsage: TokenUsageModel | null;
 };
 
@@ -377,12 +378,17 @@ type TuiScreenModel = {
 
 目标：启动、重连、resume 都走同一套 `session.snapshot.loaded` action。
 
-建议新增 server snapshot 概念。snapshot 是恢复当前 TUI 事实的权威输入，核心产物是 `timeline`，而不是一份和 timeline 并行的 `history`：
+建议新增 server snapshot 概念。snapshot 是恢复当前 TUI 事实的权威输入，核心产物分两类：
+
+- `timeline`：后端 checkpoint messages，也就是用户交互相关消息。
+- `state`：pending review、runtime、active run、token usage、connection 等状态。
+
+它不是一份 timeline 再加一份并行的 `history` / `transcript`：
 
 ```ts
 type TuiSessionSnapshot = {
   session: ResumeSessionSummary;
-  timeline: AgentTimelineSnapshotEntry[];
+  timeline: AgentTimelineMessage[];
   runs: TuiRunSnapshot[];
   activeRunId?: RunId;
   pendingReview?: ApprovalRequestModel;
@@ -393,15 +399,7 @@ type TuiSessionSnapshot = {
 
 启动恢复、WS 重连、resume 都应该把 snapshot 合并进同一套 `session + runs + timeline + ui` 状态。
 
-`transcript` 不应该和 `timeline` 并列出现在 TUI snapshot 事实模型里。它应该被理解为 timeline 的 message-only 投影：
-
-```ts
-type TranscriptMessage = PickMessageEntries<AgentTimelineEntry>;
-```
-
-它只保留 user / assistant / system 等文本消息，不包含 operation、review、tool progress、studio progress、状态 notice 等 TUI 结构化 entry。
-
-如果 server 现阶段只有旧的 `/history` 或 transcript checkpoint，应该在 adapter 层先把它转换成 `timeline`，再进入 `session.snapshot.loaded` reducer。export 或模型上下文需要 transcript 时，也应该通过 selector 从 timeline 派生，而不是在 TUI live state 里维护第二份 transcript。
+`timeline` 本身就是 checkpoint messages，不需要再引入 `transcript` 作为中间视图。server 如果现阶段提供的是 `/history`，也应该把它当作 checkpoint messages 的读取入口，在 adapter 层转成同一种 `AgentTimelineMessage[]` 后再进入 `session.snapshot.loaded` reducer。
 
 客户端动作：
 
@@ -447,17 +445,17 @@ type TuiSessionModel = {
 - stale event 可以基于 run terminal state 明确忽略，而不是因为状态缺失静默丢弃。
 - active operation、pending approval、busy state 都从 run registry 派生。
 
-### 5.3 让 timeline 成为唯一展示日志
+### 5.3 让 timeline 成为唯一消息日志
 
-目标：TUI rendering 只读 timeline。历史恢复、实时事件、本地输入、server checkpoint 都只是 timeline 的来源。
+目标：TUI 中用户交互相关内容只读 timeline。历史恢复、实时事件、本地输入、server checkpoint 都只是 timeline messages 的来源。
 
 建议：
 
-- `AgentTimelineEntry` 保留结构化语义。
-- `TranscriptMessage` 是从 `AgentTimelineEntry` 派生出来的 message-only 视图，不能驱动 TUI rendering。
-- `history` 字段从 live session state 中移除。旧 `/history` 输入在 adapter 层转成 timeline。
-- export / model context 如需 transcript，通过 selector 从 timeline 派生。
-- 如需调试来源，在 timeline entry 上保留轻量 `source` / `provenance`，例如 `snapshot`、`live-event`、`local-input`。
+- `AgentTimelineMessage` 对齐后端 checkpoint messages。
+- timeline 覆盖 user message、assistant streaming/final message、tool operation message。
+- `history` 字段从 live session state 中移除。旧 `/history` 输入在 adapter 层转成 timeline messages。
+- 不再引入 `transcript` / message-only view；timeline 本身就是 messages。
+- 如需调试来源，在 timeline message 上保留轻量 `source` / `provenance`，例如 `snapshot`、`live-event`、`local-input`。
 
 写入规则：
 
@@ -465,17 +463,18 @@ type TuiSessionModel = {
 user submit        -> append message entry(role=user)
 message.delta      -> append/update assistant streaming entry
 message.completed  -> finalize assistant entry
-operation event    -> upsert operation entry
-human review       -> append/update review entry
-system notice      -> append notice entry
-error              -> append error entry + terminalize run
+tool operation     -> append/update tool operation message
+review event       -> update pendingReview state, not timeline
+runtime event      -> update runtime state, not timeline
+studio progress    -> update studio/run state, not timeline
+error              -> terminalize run + update error state; append timeline only if server checkpoint has an error message
 ```
 
 验收标准：
 
 - 不再需要 `skipTimelineIds`。
 - final assistant 不再同时写 history 和 timeline。
-- transcript export 结果与 timeline 中 user/assistant 消息一致。
+- checkpoint messages、实时流式消息、恢复后的 timeline 使用同一种 message model。
 
 ### 5.4 重做 reconciliation 策略
 
@@ -493,7 +492,6 @@ error              -> append error entry + terminalize run
 
 - active session id。
 - timeline snapshot。
-- transcript snapshot，如果 export 或 checkpoint 需要。
 - pending review。
 - runtime。
 - token usage。
@@ -667,9 +665,9 @@ raw terminal input
 ### Phase 4：Timeline 权威化
 
 - 移除 live `history` 和 `timeline` 双写。
-- 将 `/history`、实时 WS event、本地 submit 都收敛为 timeline 输入来源。
+- 将 `/history`、checkpoint messages、实时 WS event、本地 submit 都收敛为 timeline message 输入来源。
 - `skipTimelineIds` 退出。
-- transcript/export 改从 timeline 或明确的 `transcriptSnapshot` 派生。
+- 不再引入 `transcriptSnapshot`。
 
 ### Phase 5：Snapshot / Reconciliation
 
@@ -715,7 +713,7 @@ raw terminal input
 ## 9. 开放问题
 
 1. server snapshot 是否应该新增 `/tui/snapshot`，还是扩展现有 `/history` / `/runtime` / pending review 接口？
-2. timeline snapshot 是否需要持久化 operation/review/subagent，还是只保证 transcript + pending review？
+2. timeline message model 是否可以直接复用后端 checkpoint message 类型，还是需要一层 TUI render adapter？
 3. token usage 应该来自 `message.completed.usage`，还是独立 runtime usage endpoint？
 4. Studio progress 在恢复路径中是否需要完整可见，还是只保留最终 studio response？
 5. 状态栏字段在 80 列以下的优先级是否固定为：activity > mode > connection > context > model > cwd > policy？

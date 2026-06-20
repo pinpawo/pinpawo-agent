@@ -13,6 +13,35 @@ export type AgentTimelineEntry =
   | AgentErrorEntry
   | AgentStudioProgressEntry;
 
+export type AgentTimelineMessage =
+  | AgentUserTimelineMessage
+  | AgentAssistantTimelineMessage
+  | AgentToolTimelineMessage;
+
+export type AgentUserTimelineMessage = {
+  id: string;
+  type: 'message';
+  role: 'user';
+  requestId?: string;
+  text: string;
+  status: 'completed';
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type AgentAssistantTimelineMessage = {
+  id: string;
+  type: 'message';
+  role: 'assistant';
+  requestId?: string;
+  text: string;
+  status: 'completed' | 'streaming';
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type AgentToolTimelineMessage = AgentOperationEntry;
+
 export type AgentMessageEntry = {
   id: string;
   type: 'message';
@@ -72,6 +101,16 @@ export function timelineEntryIdFromHistoryCell(cell: Pick<HistoryCellModel, 'id'
   return `history:${cell.id}`;
 }
 
+export function isAgentTimelineMessage(entry: AgentTimelineEntry): entry is AgentTimelineMessage {
+  if (entry.type === 'operation') return true;
+  return entry.type === 'message'
+    && (entry.role === 'user' || entry.role === 'assistant');
+}
+
+export function timelineMessagesFromEntries(entries: AgentTimelineEntry[]): AgentTimelineMessage[] {
+  return entries.filter(isAgentTimelineMessage);
+}
+
 export function timelineEntryFromHistoryCell(cell: HistoryCellModel): AgentTimelineEntry {
   if (cell.kind === 'system') {
     return {
@@ -91,8 +130,20 @@ export function timelineEntryFromHistoryCell(cell: HistoryCellModel): AgentTimel
   };
 }
 
+export function timelineMessageFromHistoryCell(cell: HistoryCellModel): AgentTimelineMessage | null {
+  const entry = timelineEntryFromHistoryCell(cell);
+  return isAgentTimelineMessage(entry) ? entry : null;
+}
+
 export function timelineEntriesFromHistory(history: HistoryCellModel[]): AgentTimelineEntry[] {
   return history.map(timelineEntryFromHistoryCell);
+}
+
+export function timelineMessagesFromHistory(history: HistoryCellModel[]): AgentTimelineMessage[] {
+  return history.flatMap((cell) => {
+    const message = timelineMessageFromHistoryCell(cell);
+    return message ? [message] : [];
+  });
 }
 
 export function timelineEntryIdFromOperationEvent(event: LocalAgentOperationEvent) {

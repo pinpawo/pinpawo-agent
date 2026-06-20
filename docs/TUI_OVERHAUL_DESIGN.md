@@ -383,7 +383,6 @@ type TuiScreenModel = {
 type TuiSessionSnapshot = {
   session: ResumeSessionSummary;
   timeline: AgentTimelineSnapshotEntry[];
-  transcript?: TranscriptMessage[];
   runs: TuiRunSnapshot[];
   activeRunId?: RunId;
   pendingReview?: ApprovalRequestModel;
@@ -392,7 +391,17 @@ type TuiSessionSnapshot = {
 };
 ```
 
-其中 `transcript` 只能作为 server checkpoint / export 的输入，不能成为 TUI rendering 的第二个 source of truth。启动恢复、WS 重连、resume 都应该把 snapshot 合并进同一套 `session + runs + timeline + ui` 状态。
+启动恢复、WS 重连、resume 都应该把 snapshot 合并进同一套 `session + runs + timeline + ui` 状态。
+
+`transcript` 不应该和 `timeline` 并列出现在 TUI snapshot 事实模型里。它应该被理解为 timeline 的 message-only 投影：
+
+```ts
+type TranscriptMessage = PickMessageEntries<AgentTimelineEntry>;
+```
+
+它只保留 user / assistant / system 等文本消息，不包含 operation、review、tool progress、studio progress、状态 notice 等 TUI 结构化 entry。
+
+如果 server 现阶段只有旧的 `/history` 或 transcript checkpoint，应该在 adapter 层先把它转换成 `timeline`，再进入 `session.snapshot.loaded` reducer。export 或模型上下文需要 transcript 时，也应该通过 selector 从 timeline 派生，而不是在 TUI live state 里维护第二份 transcript。
 
 客户端动作：
 
@@ -445,8 +454,9 @@ type TuiSessionModel = {
 建议：
 
 - `AgentTimelineEntry` 保留结构化语义。
-- `TranscriptMessage` 只用于 server checkpoint transcript 和 export，不能驱动 TUI rendering。
-- `history` 字段从 live session state 中移除，或者改名为 `transcriptSnapshot` 并明确不是 UI source。
+- `TranscriptMessage` 是从 `AgentTimelineEntry` 派生出来的 message-only 视图，不能驱动 TUI rendering。
+- `history` 字段从 live session state 中移除。旧 `/history` 输入在 adapter 层转成 timeline。
+- export / model context 如需 transcript，通过 selector 从 timeline 派生。
 - 如需调试来源，在 timeline entry 上保留轻量 `source` / `provenance`，例如 `snapshot`、`live-event`、`local-input`。
 
 写入规则：

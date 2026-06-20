@@ -31,6 +31,30 @@ export const TUI_CORE_CONTRACT_RULES = [
   'transcript and transcriptSnapshot must not be introduced as second message logs',
 ] as const;
 
+export const TUI_CORE_DEFERRED_CONTRACT_GAPS = [
+  {
+    id: 'reconnect-server-completed-run',
+    currentArea: 'TuiRuntimeController.reconnect',
+    targetAction: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    currentLegacyActions: ['session.replace_history'],
+    followUp: ['CORE-4 Snapshot Adapter', 'CORE-5 Reconnect Reconciliation'],
+  },
+  {
+    id: 'reconnect-pending-review',
+    currentArea: 'TuiRuntimeController.reconnect',
+    targetAction: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    currentLegacyActions: [],
+    followUp: ['CORE-4 Snapshot Adapter', 'CORE-5 Reconnect Reconciliation'],
+  },
+  {
+    id: 'resume-session-snapshot',
+    currentArea: 'TuiRuntimeController.resumeSession',
+    targetAction: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    currentLegacyActions: ['session.clear', 'session.replace_history'],
+    followUp: ['CORE-4 Snapshot Adapter', 'CORE-5 Reconnect Reconciliation'],
+  },
+] as const;
+
 export type TuiCoreTimelineSource = 'checkpoint' | 'live-event' | 'local-input';
 
 export type TuiCoreMessageTimelineEntry = {

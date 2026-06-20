@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   TUI_CORE_CONTRACT_RULES,
   TUI_CORE_CONTRACT_VERSION,
+  TUI_CORE_DEFERRED_CONTRACT_GAPS,
   TUI_CORE_FORBIDDEN_SECONDARY_LOGS,
   TUI_CORE_STATE_OWNERS,
   TUI_CORE_TARGET_ACTIONS,
@@ -63,4 +64,26 @@ test('TUI CORE-1 snapshot action carries the target session model shape', () => 
 
   assert.equal(action.snapshot.timeline[0]?.type, 'message');
   assert.equal(action.snapshot.runs[0]?.phase, 'completed');
+});
+
+test('TUI CORE-1 tracks deferred runtime snapshot migrations without skipped tests', () => {
+  assert.deepEqual(TUI_CORE_DEFERRED_CONTRACT_GAPS.map((gap) => gap.id), [
+    'reconnect-server-completed-run',
+    'reconnect-pending-review',
+    'resume-session-snapshot',
+  ]);
+
+  for (const gap of TUI_CORE_DEFERRED_CONTRACT_GAPS) {
+    assert.equal(gap.targetAction, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
+    assert.equal(gap.followUp.some((item) => item.startsWith('CORE-4')), true);
+    assert.equal(gap.followUp.some((item) => item.startsWith('CORE-5')), true);
+  }
+
+  assert.deepEqual(
+    TUI_CORE_DEFERRED_CONTRACT_GAPS
+      .flatMap((gap) => [...gap.currentLegacyActions])
+      .filter((action) => action === 'session.clear' || action === 'session.replace_history')
+      .sort(),
+    ['session.clear', 'session.replace_history', 'session.replace_history'],
+  );
 });

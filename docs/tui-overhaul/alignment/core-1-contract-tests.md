@@ -17,7 +17,8 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 - Contract version: `TUI_CORE_CONTRACT_VERSION = 1`.
 - Target snapshot action: `session.snapshot.loaded`.
 - Contract tests: `services/local-agent/src/tui/contracts/tuiCoreContract.test.ts`.
-- Runtime target tests import the contract action constant instead of duplicating the action string.
+- Deferred reconnect/resume migrations are listed in `TUI_CORE_DEFERRED_CONTRACT_GAPS`.
+- Runtime target tests are not left as `test.skip`; deferred behavior is executable as contract metadata until CORE-4/CORE-5 implement it.
 
 ## Expected Changes
 
@@ -44,6 +45,7 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 | 2026-06-20 | resume session reconciliation | `/resume` should reconcile through `session.snapshot.loaded` instead of dispatching legacy clear/replace-history actions | current resume flow still returns legacy history and lets the picker dispatch `session.clear` + `session.replace_history`; target test is skipped | resume snapshot payload/action are not defined yet | defer implementation | CORE-4 Snapshot Adapter / CORE-5 Reconnect Reconciliation | deferred |
 | 2026-06-20 | resume/new route cleanup | clearing the current session should remove `runRoute` entries owned by that session | no deviation for current model; coverage added | route cleanup remains necessary until run registry replaces `runRoute` | keep existing behavior for CORE-1 | CORE-3 removes `runRoute` entirely | accepted |
 | 2026-06-20 | pending review resume fallback | resume can recover a focused-session route when the route map is missing | no deviation for current model; coverage added | this protects current HITL resume behavior until snapshot recovery owns it | keep existing behavior for CORE-1 | CORE-5 restores pending review through snapshot | accepted |
+| 2026-06-21 | deferred runtime snapshot target tests | reconnect/resume target behavior should be represented without skipped tests | previous PR state used `test.skip` for reconnect/resume snapshot targets | skipped tests do not provide CI-visible protection | replace skipped tests with executable `TUI_CORE_DEFERRED_CONTRACT_GAPS` assertions | CORE-4 Snapshot Adapter / CORE-5 Reconnect Reconciliation | accepted |
 
 ## Open Questions
 
@@ -54,6 +56,7 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 
 - [x] Tests encode target behavior without broad implementation rewrites.
 - [x] CORE-1 has an explicit code contract artifact.
+- [x] Deferred reconnect/resume targets are executable contract metadata, not skipped tests.
 - [x] No new transcript/message-only model is introduced.
 - [x] Any intentionally failing or skipped test is explained in this document.
 - [x] PR references tracking issue #232.

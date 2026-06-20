@@ -18,11 +18,13 @@ If a PR deviates from `docs/TUI_OVERHAUL_DESIGN.md`, update that PR's alignment 
 
 The alignment document should be updated for:
 
+- contract artifact changes;
 - data model changes;
 - reducer/action/selector ownership changes;
 - snapshot or reconnect behavior changes;
 - UI state ownership changes;
 - any temporary compatibility path;
+- any intentionally failing, skipped, or target-only test added to document future behavior;
 - any decision to keep old `history`, `transcript`, `transcriptSnapshot`, `activeRun`, `runRoute`, or `skipTimelineIds` behavior longer than planned.
 
 ## Non-Negotiable Constraints

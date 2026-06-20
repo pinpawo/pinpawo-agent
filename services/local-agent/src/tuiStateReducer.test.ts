@@ -410,6 +410,27 @@ test('tuiStateReducer clears session token usage when replacing or clearing hist
   assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
 });
 
+test('tuiStateReducer clears run routes for the cleared session', () => {
+  let state = initialState('chat:pet');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:other': createSession({ id: 'chat:other' }),
+    },
+  };
+  state = startRun(state, 'req-main');
+  state = startRun(state, 'req-other', 'chat:other');
+
+  state = tuiStateReducer(state, {
+    type: 'session.clear',
+  });
+
+  assert.equal(state.runRoute['req-main'], undefined);
+  assert.equal(state.runRoute['req-other'], 'chat:other');
+  assert.equal(state.sessions['chat:pet']?.history.length, 0);
+});
+
 test('tuiStateReducer drops late or unknown requestId events', () => {
   const state = startRun(initialState(), 'req-1');
 
@@ -647,6 +668,45 @@ test('tuiStateReducer clears pending review when interrupting human review', () 
 
   assert.equal(selectFocusedActiveRun(state)?.phase, 'interrupting');
   assert.equal(selectFocusedPendingApproval(state), null);
+});
+
+test('tuiStateReducer review.response.resume falls back to focused session when route is missing', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'human_review.requested',
+      requestId: 'req-1',
+      review: {
+        id: 'review-1',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Approve?' },
+        options: [],
+      },
+      actor: { petId: 'pet-a' },
+    },
+    now: 1200,
+  });
+
+  state = {
+    ...state,
+    runRoute: {},
+  };
+
+  state = tuiStateReducer(state, {
+    type: 'review.response.resume',
+    requestId: 'req-1',
+    message: '批准',
+    now: 1300,
+    userCell: { id: 'review-response' },
+    statusMessage: '提交确认',
+  });
+
+  const answeredReview = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:review:review-1');
+  assert.equal(answeredReview?.type === 'review' ? answeredReview.status : undefined, 'answered');
+  assert.equal(state.runRoute['req-1'], 'chat:pet');
+  assert.equal(selectFocusedPendingApproval(state), null);
+  assert.equal(selectFocusedActiveRun(state)?.phase, 'thinking');
 });
 
 test('tuiStateReducer accepts canonical human review specs without legacy payload', () => {

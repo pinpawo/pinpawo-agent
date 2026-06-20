@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HumanMessage } from '@langchain/core/messages';
 import {
+  buildAnswerAnnounceContext,
   buildCapabilityArtifactContext,
   buildCapabilityDiscoveryRequestContext,
   buildDelegationOutcomeDecisionInput,
@@ -114,4 +115,30 @@ test('completed subagent announce context includes the full current result text'
   assert.match(context ?? '', /返回内容/);
   assert.match(context ?? '', /# Vibe Coding 模型排行榜/);
   assert.match(context ?? '', /END_OF_FULL_RANKING_MARKER/);
+});
+
+test('answer announce context reproduces announce text un-clipped for the answer node', () => {
+  const longResult = [
+    '## GPT-5.3-Spark vs GPT-5.5',
+    'A'.repeat(1400),
+    'END_OF_FULL_ANSWER_MARKER',
+  ].join('\n\n');
+  const context = buildAnswerAnnounceContext([
+    {
+      lane: 'capability:explore',
+      delegationId: 'task-1',
+      task: '对比两个模型的评测分数',
+      announce: 'completed',
+      text: longResult,
+    },
+  ]);
+
+  // The whole point of the answer node is to see the original text, not a digest:
+  // the 220-char clip used by decision-node digests must NOT apply here.
+  assert.ok((context ?? '').includes('A'.repeat(1400)), 'announce body must not be clipped');
+  assert.match(context ?? '', /END_OF_FULL_ANSWER_MARKER/);
+});
+
+test('answer announce context is null when there are no announces', () => {
+  assert.equal(buildAnswerAnnounceContext([]), null);
 });

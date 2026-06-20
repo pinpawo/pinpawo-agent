@@ -23,6 +23,7 @@ import {
 import type {
   CapabilityCandidate,
   CapabilityDecisionState,
+  FinalReplyRoute,
   MessageLane,
   OrchestratorConfig,
   OrchestratorInvokeOptions,
@@ -52,6 +53,8 @@ import {
   buildDecisionTargetsContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
+  buildAnswerAnnounceContext,
+  buildAnswerSystemPrompt,
   buildPreparedRequestContext,
   buildSubagentAnnounceContext,
   buildTurnDelegationContext,
@@ -101,7 +104,7 @@ import {
   selectCapabilityTools,
 } from './orchestrator/subagentHandoff';
 import { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
-import { clipForPrompt, formatDelegationStatus } from './orchestrator/utils';
+import { clipForPrompt, formatDelegationStatus, readMessageText } from './orchestrator/utils';
 
 export type {
   OrchestratorConfig,
@@ -114,17 +117,6 @@ export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniq
 
 const GENERAL_SUBAGENT_MAX_ITERATIONS = 16;
 const CAPABILITY_SUBAGENT_MAX_ITERATIONS = 8;
-
-function fallbackDelegationOutcomeReply(params: {
-  kind: 'user_intent' | 'delegation_outcome';
-  latestTurnAnnounce: ReturnType<typeof readLatestAnnounce>;
-}): string | null {
-  if (params.kind !== 'delegation_outcome') return null;
-  const announceText = params.latestTurnAnnounce?.announce === 'completed'
-    ? params.latestTurnAnnounce.text?.trim() || null
-    : null;
-  return announceText;
-}
 
 function generalLaneToolkits(toolkits: AgentToolkit[]) {
   return toolkits.filter((toolkitItem) => toolkitItem.exposure?.general !== false);
@@ -635,6 +627,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         return {
           messages: [new AIMessage(`已停止，共执行 ${state.iterationCount} 轮。如需继续请告诉我。`)],
           pendingDelegation: null,
+          pendingFinalReply: 'inline' as FinalReplyRoute,
         };
       } else {
         state = {
@@ -784,11 +777,13 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
           ? 'capability'
           : 'finish';
 
-    const finalReply = decisionMode === 'finish'
+    // On a finish-bucket decision we no longer synthesize the user-facing reply
+    // here. A real `finish` routes to the dedicated answer node (which reads the
+    // full conversation); `ask_user` and the degenerate-delegate fallbacks emit
+    // a fixed inline message and end the turn.
+    const inlineReply = decisionMode === 'finish'
       ? actionKind === 'finish'
-        ? readDecisionText(decision.answer)
-          ?? fallbackDelegationOutcomeReply({ kind, latestTurnAnnounce })
-          ?? '当前决策选择直接回复，但没有生成可展示的回复内容。'
+        ? null
         : actionKind === 'ask_user'
           ? readDecisionText(decision.question) ?? '我需要你再补充一点信息，才能继续推进。'
           : actionKind === 'delegate_general' && generalTools.length === 0
@@ -799,6 +794,13 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
                 ? '当前决策选择继续委派，但没有提供明确任务。'
                 : '当前决策已结束，但没有生成可展示的回复。'
       : null;
+
+    const pendingFinalReply: FinalReplyRoute =
+      decisionMode !== 'finish'
+        ? null
+        : inlineReply
+          ? 'inline'
+          : 'answer';
 
     const delegationLane: MessageLane | null = decisionMode === 'general'
       ? 'general'
@@ -824,9 +826,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     return {
       messages: [
         ...iterationLimitMessages,
-        ...(decisionMode === 'finish' && finalReply ? [new AIMessage(finalReply)] : []),
+        ...(inlineReply ? [new AIMessage(inlineReply)] : []),
       ],
       pendingDelegation: nextDelegationState.pendingDelegation,
+      pendingFinalReply,
       ...(resetIterationCount ? { iterationCount: 0 } : {}),
       ...(kind === 'delegation_outcome'
         ? {
@@ -843,6 +846,32 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   async function delegationOutcomeDecision(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     return runOrchestrationDecision('delegation_outcome', state, runnableConfig);
+  }
+
+  // Node: answer — the dedicated final-reply node. The decision nodes only route
+  // here; this node synthesizes the user-facing reply from the FULL main
+  // conversation (not the clipped decision digest), so prior subagent results
+  // are reproduced faithfully instead of being re-fabricated.
+  async function answerNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
+    const { workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
+    const actor = resolveActor(config, runnableConfig);
+    // Full user-facing conversation (lane-tagged subagent transcripts excluded by
+    // mainConversationMessages) plus the un-clipped text of recent announces, so
+    // prior subagent results are reproduced faithfully rather than re-fabricated.
+    const history = mainMessagesWithoutCompaction(state.messages);
+    const announceContext = buildAnswerAnnounceContext(readRecentAnnounces(state.messages));
+    const response = await config.models.act.invoke(
+      [
+        new SystemMessage(buildAnswerSystemPrompt({ actor, workdir, runtimeEnvironment })),
+        ...history,
+        ...(announceContext ? [new SystemMessage(announceContext)] : []),
+      ],
+      runnableConfig,
+    );
+    if (!readMessageText(response).trim()) {
+      return { messages: [new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。')] };
+    }
+    return { messages: [response] };
   }
 
   // Node: capability — reads capabilities, tools, execution from configurable
@@ -1130,7 +1159,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const decisionMode = decisionModeFromPendingDelegation(state.pendingDelegation);
     if (decisionMode === 'capability') return 'capability';
     if (decisionMode === 'general') return 'general';
-    return 'end';
+    // finish bucket: route a real finish to the answer node; inline replies
+    // (ask_user / degenerate fallback / stop) already emitted their message.
+    return state.pendingFinalReply === 'answer' ? 'answer' : 'end';
   }
 
   const graph = new StateGraph(OrchestratorState)
@@ -1140,6 +1171,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('capabilitySearch', new ToolNode([capabilitySearchTool]))
     .addNode('userIntentDecision', userIntentDecision)
     .addNode('delegationOutcomeDecision', delegationOutcomeDecision)
+    .addNode('answer', answerNode)
     .addNode('capability', capabilityNode)
     .addNode('general', generalNode)
     .addEdge(START, 'prepare')
@@ -1154,14 +1186,17 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     })
     .addConditionalEdges('userIntentDecision', afterDecision, {
       end: END,
+      answer: 'answer',
       capability: 'capability',
       general: 'general',
     })
     .addConditionalEdges('delegationOutcomeDecision', afterDecision, {
       end: END,
+      answer: 'answer',
       capability: 'capability',
       general: 'general',
     })
+    .addEdge('answer', END)
     .addEdge('capabilitySearch', 'userIntentDecision')
     .addEdge('capability', 'delegationOutcomeDecision')
     .addEdge('general', 'delegationOutcomeDecision');

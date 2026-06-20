@@ -3,6 +3,7 @@ import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import type {
   CapabilitySearchState,
+  FinalReplyRoute,
   MessageLane,
   PendingDelegation,
   TurnDelegation,
@@ -20,6 +21,13 @@ export const OrchestratorState = Annotation.Root({
     default: () => [],
   }),
   pendingDelegation: Annotation<PendingDelegation | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
+  // Transient routing signal set by the decision nodes so afterDecision can
+  // distinguish a `finish` that must route to the answer node from an
+  // `ask_user`/inline reply that already emitted its message and ends the turn.
+  pendingFinalReply: Annotation<FinalReplyRoute>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -54,6 +62,7 @@ export type OrchestratorStateType = typeof OrchestratorState.State;
 export type OrchestratorTurnState = Pick<
   OrchestratorStateType,
   | 'pendingDelegation'
+  | 'pendingFinalReply'
   | 'capabilitySearchState'
   | 'turnDelegations'
   | 'iterationCount'
@@ -71,6 +80,7 @@ export function buildEmptyCapabilitySearchState(): CapabilitySearchState {
 export function buildTurnStateReset(): OrchestratorTurnState {
   return {
     pendingDelegation: null,
+    pendingFinalReply: null,
     capabilitySearchState: buildEmptyCapabilitySearchState(),
     turnDelegations: [],
     iterationCount: 0,

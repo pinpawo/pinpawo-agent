@@ -54,6 +54,17 @@ export type SubagentAnnounce = {
 };
 
 export type DecisionMode = 'finish' | 'general' | 'capability';
+
+/**
+ * How a `finish`-bucket decision should be turned into a user-facing reply.
+ * - 'answer': route to the dedicated answer node, which reads the full
+ *   conversation and synthesizes the reply.
+ * - 'inline': the decision node already emitted a fixed reply (ask_user
+ *   question or a degenerate-fallback string); the turn ends without the
+ *   answer node.
+ * - null: not a finish-bucket decision (delegation in progress).
+ */
+export type FinalReplyRoute = 'answer' | 'inline' | null;
 export type CapabilityDecisionState = 'unavailable' | 'search_available' | 'candidates_available' | 'search_exhausted';
 
 export type ToolBindableChatModel = AgentModels['act'] & {

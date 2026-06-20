@@ -184,8 +184,8 @@ export function buildUserIntentDecisionSystemPrompt(params: {
     '判断重点：理解用户当前想完成什么，决定是否需要外部执行器。',
     '',
     '决策原则：',
-    '- 如果当前输入足以直接回应用户，选择 finish。',
-    '- 如果用户询问已有上下文、最近任务状态或之前结果，且请求上下文足以回答，选择 finish。',
+    '- 如果当前输入足以直接回应用户（无需委派执行器），选择 finish；最终回复由后续回复节点基于完整对话历史生成，你不要在这里撰写回复内容。',
+    '- 如果用户询问已有上下文、最近任务状态或之前结果，选择 finish 交给回复节点回答；不要在决策层凭印象复述或编造之前的结果。',
     '- 如果下一步任务匹配某个 delegate_capability.<name> 候选，选择该候选；capability 优先于 general。即使缺少主题、平台、时长等执行参数，也应把澄清交给 capability 内部处理，除非用户目标本身无法判断或涉及真实风险。',
     '- 如果没有明确匹配的 capability，且信息不足、用户意图不明确，或下一步具有破坏性、不可逆、涉及敏感凭据、外部真实副作用，选择 ask_user 先向用户确认。',
     ...capabilityInstructions.map((line) => `- ${line}`),
@@ -215,7 +215,7 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
     '判断重点：读取输入中的 subagent announce，判断用户当前轮目标是否已经满足。',
     '',
     '决策原则：',
-    '- 如果 subagent announce 已经满足用户当前轮目标，选择 finish。',
+    '- 如果 subagent announce 已经满足用户当前轮目标，选择 finish；最终回复由后续回复节点基于完整对话历史（含 subagent 返回内容）生成，你不要在这里撰写回复内容。',
     '- 如果 subagent announce 只是阶段性进展，判断还缺什么；需要执行器继续时再委派。',
     '- 如果 subagent 因迭代上限、上下文限制或阶段性停止而返回 progress，但用户目标仍明确且不需要用户补充信息，优先继续委派给同一类执行器；不要仅因为 progress 就 ask_user。',
     '- 如果用户原始请求仍有明确未完成目标，选择一个最明确的下一步。',
@@ -224,6 +224,47 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
     '- 一旦决定 delegate_*，就交给执行器；运行期的工具级风险（rm -rf、git push --force 等）由具体工具自己拦截，不需要在决策层重复表达。',
     '',
     params.outputInstruction,
+  ].filter((line) => line !== null).join('\n');
+}
+
+/**
+ * Supplementary context for the answer node: the FULL (un-clipped) text of
+ * recent subagent announces. Decision nodes only ever see clipped digests of
+ * these; the answer node must see the originals so it can reproduce prior
+ * results faithfully instead of re-fabricating them.
+ */
+export function buildAnswerAnnounceContext(announces: SubagentAnnounce[]): string | null {
+  if (announces.length === 0) return null;
+  const lines = ['之前执行器/子任务返回的完整结果（请以下面的原文为准，不要改写或编造数据）：'];
+  for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
+    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}${item.lane}（${describeAnnounceKind(item.announce)}）`);
+    if (item.task) {
+      lines.push(`  委派任务：${clipForPrompt(item.task, 180)}`);
+    }
+    if (item.text) {
+      lines.push('  返回内容：', indentPromptBlock(item.text.trim()));
+    }
+  }
+  return lines.join('\n');
+}
+
+export function buildAnswerSystemPrompt(params: {
+  actor: AgentActor;
+  workdir?: string;
+  runtimeEnvironment?: string;
+}): string {
+  return [
+    ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
+    '',
+    '你是 orchestrator 的最终回复节点。orchestrator 已经判断当前轮无需再委派执行器，现在由你直接回复用户。',
+    '你能看到完整的对话历史（包括之前 subagent/执行器返回的完整内容）。',
+    '',
+    '回复原则：',
+    '- 基于完整对话历史，对用户当前请求给出忠实、连贯、直接可用的回复。',
+    '- 严禁编造历史中没有出现的数据、数字、来源或结论；如需引用之前的结果，以对话历史中的原文为准，不要凭记忆改写。',
+    '- 如果用户是在要求复述、重发或继续之前的结果，就从历史中找到对应内容如实呈现，不要重新生成一份与之前不一致的版本。',
+    '- 如果历史中确实缺少回答所需的信息，如实说明缺什么，不要用先验知识填补。',
+    '- 直接输出给用户看的回复正文，不要输出 JSON、动作字段或决策说明。',
   ].filter((line) => line !== null).join('\n');
 }
 

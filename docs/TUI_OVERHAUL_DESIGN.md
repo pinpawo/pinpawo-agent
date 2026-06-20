@@ -454,7 +454,7 @@ type TuiSessionModel = {
 - `AgentTimelineMessage` 对齐后端 checkpoint messages。
 - timeline 覆盖 user message、assistant streaming/final message、tool operation message。
 - `history` 字段从 live session state 中移除。旧 `/history` 输入在 adapter 层转成 timeline messages。
-- 不再引入 `transcript` / message-only view；timeline 本身就是 messages。
+- 重构必须去掉 `transcript` / message-only view / `transcriptSnapshot` 这类中间模型；timeline 本身就是 messages。
 - 如需调试来源，在 timeline message 上保留轻量 `source` / `provenance`，例如 `snapshot`、`live-event`、`local-input`。
 
 写入规则：
@@ -474,6 +474,7 @@ error              -> terminalize run + update error state; append timeline only
 
 - 不再需要 `skipTimelineIds`。
 - final assistant 不再同时写 history 和 timeline。
+- live state 中不存在 `history` / `transcript` / `transcriptSnapshot` 等第二份消息日志。
 - checkpoint messages、实时流式消息、恢复后的 timeline 使用同一种 message model。
 
 ### 5.4 重做 reconciliation 策略
@@ -667,7 +668,7 @@ raw terminal input
 - 移除 live `history` 和 `timeline` 双写。
 - 将 `/history`、checkpoint messages、实时 WS event、本地 submit 都收敛为 timeline message 输入来源。
 - `skipTimelineIds` 退出。
-- 不再引入 `transcriptSnapshot`。
+- 删除 `transcript` / message-only view / `transcriptSnapshot` 相关中间模型和 selector。
 
 ### Phase 5：Snapshot / Reconciliation
 

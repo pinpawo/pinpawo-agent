@@ -100,41 +100,6 @@ test('tuiStateReducer uses completed message text for final assistant history', 
   ]);
 });
 
-test.skip('contract: completed event terminalizes when active run pointer is missing', () => {
-  let state = startRun(initialState(), 'req-1');
-  state = {
-    ...state,
-    sessions: {
-      ...state.sessions,
-      'chat:pet': {
-        ...state.sessions['chat:pet']!,
-        activeRun: null,
-      },
-    },
-  };
-
-  state = tuiStateReducer(state, {
-    type: 'event.received',
-    event: {
-      type: 'message.completed',
-      requestId: 'req-1',
-      role: 'assistant',
-      text: '重连后也能收尾',
-    },
-    now: 1200,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
-  });
-
-  const session = state.sessions['chat:pet']!;
-  assert.equal(session.activeRun, null);
-  assert.equal(state.runRoute['req-1'], undefined);
-  assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
-    ['user', 'hello'],
-    ['assistant', '重连后也能收尾'],
-  ]);
-  assert.equal(timelineMessageText(state, 'chat:pet', 'req-1:assistant:0'), '重连后也能收尾');
-});
-
 test('tuiStateReducer records composer prompt history only for run starts', () => {
   let state = initialState();
 

@@ -55,6 +55,16 @@ export const TUI_CORE_DEFERRED_CONTRACT_GAPS = [
   },
 ] as const;
 
+export const TUI_CORE_DEFERRED_REDUCER_GAPS = [
+  {
+    id: 'completed-event-missing-active-pointer',
+    currentArea: 'tuiStateReducer event.received(message.completed)',
+    target: 'terminal events update runs[requestId] even when session.activeRun is missing',
+    currentLegacyPaths: ['session.activeRun pointer gate', 'runRoute fallback'],
+    followUp: ['CORE-3 Run Registry', 'CORE-5 Reconnect Reconciliation'],
+  },
+] as const;
+
 export type TuiCoreTimelineSource = 'checkpoint' | 'live-event' | 'local-input';
 
 export type TuiCoreMessageTimelineEntry = {

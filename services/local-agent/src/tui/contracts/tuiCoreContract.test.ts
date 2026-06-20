@@ -4,6 +4,7 @@ import {
   TUI_CORE_CONTRACT_RULES,
   TUI_CORE_CONTRACT_VERSION,
   TUI_CORE_DEFERRED_CONTRACT_GAPS,
+  TUI_CORE_DEFERRED_REDUCER_GAPS,
   TUI_CORE_FORBIDDEN_SECONDARY_LOGS,
   TUI_CORE_STATE_OWNERS,
   TUI_CORE_TARGET_ACTIONS,
@@ -64,6 +65,18 @@ test('TUI CORE-1 snapshot action carries the target session model shape', () => 
 
   assert.equal(action.snapshot.timeline[0]?.type, 'message');
   assert.equal(action.snapshot.runs[0]?.phase, 'completed');
+});
+
+test('TUI CORE-1 tracks deferred reducer terminalization gaps without skipped tests', () => {
+  assert.deepEqual(TUI_CORE_DEFERRED_REDUCER_GAPS.map((gap) => gap.id), [
+    'completed-event-missing-active-pointer',
+  ]);
+
+  const [gap] = TUI_CORE_DEFERRED_REDUCER_GAPS;
+  assert.equal(gap?.currentArea, 'tuiStateReducer event.received(message.completed)');
+  assert.equal(gap?.currentLegacyPaths.includes('session.activeRun pointer gate'), true);
+  assert.equal(gap?.followUp.some((item) => item.startsWith('CORE-3')), true);
+  assert.equal(gap?.followUp.some((item) => item.startsWith('CORE-5')), true);
 });
 
 test('TUI CORE-1 tracks deferred runtime snapshot migrations without skipped tests', () => {

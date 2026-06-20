@@ -855,12 +855,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   async function answerNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const { workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    // Main conversation plus the preserved completed announces (the authoritative
-    // copies of prior subagent results), in their original order — see
-    // answerConversationMessages. We keep them in place rather than filtering
-    // announces out and re-injecting a separate digest.
-    const history = answerConversationMessages(state.messages)
-      .filter((message) => !isContextCompactionMessage(message));
+    // Main conversation plus the preserved announces (the authoritative copies of
+    // prior subagent results) and any context-compaction summaries, in their
+    // original order — see answerConversationMessages. After compaction the
+    // summary may be the only surviving record of older results, so the answer
+    // node must see it to faithfully re-show "previous results".
+    const history = answerConversationMessages(state.messages);
     const response = await config.models.act.invoke(
       [
         new SystemMessage(buildAnswerSystemPrompt({ actor, workdir, runtimeEnvironment })),

@@ -146,19 +146,28 @@ export const routeMessages = mainConversationMessages;
  * intermediate transcript and keeps only the completed announce), so we keep it
  * in place rather than filtering it out and re-injecting a digest.
  *
- * Kept: unlaned main-conversation messages + every completed announce, in their
- * original order. Dropped: progress announces, intermediate lane transcripts,
- * and orchestrator-internal lane messages (e.g. capability_search calls).
+ * Kept: unlaned main-conversation messages + every announce (completed AND
+ * progress), in their original order. Dropped: intermediate lane transcripts and
+ * orchestrator-internal lane messages (e.g. capability_search calls) — i.e. lane
+ * messages without an announce tag.
  *
- * A completed announce is guaranteed not to carry tool calls (tagNewLaneMessages
- * only marks a tool-call-free AI message as completed), so it is safe to feed to
- * the model without breaking tool-call/tool-result pairing.
+ * Progress announces are kept so that, after a limit_reached/progress turn, a
+ * user asking "how far did it get?" still reaches the answer node with the
+ * progress content (the decision view surfaces these via recent announces, so
+ * the answer view must not be blind to them). The intermediate transcript that
+ * is not yet cleaned up for an in-progress lane is still dropped here.
+ *
+ * Announce messages never carry tool calls (tagNewLaneMessages only marks a
+ * tool-call-free AI/tool message as an announce). A progress announce can be a
+ * tool message, though, and we drop the intermediate transcript it depended on,
+ * so the result is run through toolProtocolSafeMessages to drop any orphaned
+ * tool message rather than sending an invalid tool-result without its call.
  */
 export function answerConversationMessages(messages: BaseMessage[]): BaseMessage[] {
-  return messages.filter((message) => {
+  return toolProtocolSafeMessages(messages.filter((message) => {
     if (!getMessageLane(message)) return true;
-    return getMessageAnnounce(message) === 'completed';
-  });
+    return getMessageAnnounce(message) !== null;
+  }));
 }
 
 /**

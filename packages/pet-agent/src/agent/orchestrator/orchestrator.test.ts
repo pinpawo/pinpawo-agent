@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool } from '@langchain/core/tools';
 import { Command, isCommand, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
@@ -38,6 +38,7 @@ import {
   tagNewLaneMessages,
 } from './messageLanes';
 import { reuseOrAppendTurnDelegation, updateTurnDelegationResult } from './delegations';
+import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
 import type { TurnDelegation } from './types';
 
 function capability(name: string, description: string): AgentCapability {
@@ -470,6 +471,46 @@ test('delegation outcome decision receives subagent announce as explicit input a
   // so it can reproduce prior results faithfully instead of re-fabricating them.
   assert.match(answerInput, /END_OF_FULL_SUBAGENT_RESULT/);
   assert.ok(answerInput.includes('A'.repeat(1400)), 'answer node must see the un-clipped announce body');
+});
+
+test('answer node still sees compacted older results when the user asks to re-show them', async () => {
+  let answerInput = '';
+  const model = {
+    invoke: async (messages: unknown[]) => {
+      answerInput = (messages as Array<{ content?: unknown }>)
+        .map((m) => String(m?.content ?? ''))
+        .join('\n');
+      return new AIMessage('answered');
+    },
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+    withStructuredOutput: () => ({ invoke: async () => ({ action: 'finish' }) }),
+  } as unknown as AgentModels['act'];
+
+  const graph = createOrchestratorGraph({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+  // After compaction the older result survives only as the summary system message.
+  const summary = new SystemMessage('压缩摘要：之前 explore 调研得到 SWE-bench Verified GPT-5.5 88.7%。COMPACTED_RESULT_MARKER');
+  summary.name = CONTEXT_COMPACTION_MESSAGE_NAME;
+  const input = buildOrchestratorTurnInput([
+    summary,
+    new HumanMessage('把之前的调研结果再发一下'),
+  ]);
+
+  const result = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'answer-sees-compaction-summary',
+      actor: testActor,
+      capabilities: [],
+      tools: [],
+    },
+  });
+
+  assert.equal(result.messages.at(-1)?.content, 'answered');
+  // The answer node must see the compaction summary — otherwise it is blind to
+  // the only surviving record of the older result and would re-fabricate it.
+  assert.match(answerInput, /COMPACTED_RESULT_MARKER/);
 });
 
 test('delegation outcome finish lets the answer node reproduce the completed announce from full history', async () => {
@@ -2006,27 +2047,31 @@ test('lane tagging hides subagent messages from route and records completed anno
   });
 });
 
-test('answerConversationMessages keeps completed announces but drops progress and orchestrator lane messages', () => {
+test('answerConversationMessages keeps completed and progress announces but drops transcript and orchestrator lane messages', () => {
   const userAsk = new HumanMessage('帮我查一下小红书动态');
   const completed = new AIMessage('已查到热门动态：A、B、C。');
   setPinpetMeta(completed, { lane: 'general', turnId: 't1', announce: 'completed', delegationId: 'd1', task: '查动态' });
-  const progress = new AIMessage('正在抓取第 2 页…');
+  const progress = new AIMessage('已抓到第 1 页，正在抓第 2 页…');
   setPinpetMeta(progress, { lane: 'general', turnId: 't1', announce: 'progress', delegationId: 'd2', task: '查更多' });
+  const intermediate = new AIMessage('（中间步骤，无 announce tag）');
+  setPinpetMeta(intermediate, { lane: 'general', turnId: 't1', delegationId: 'd2' });
   const orchestratorInternal = new AIMessage('capability_search 调用');
   setPinpetMeta(orchestratorInternal, { lane: 'orchestrator', turnId: 't1' });
   const reply = new AIMessage('好的，结果如上。');
 
-  const messages = [userAsk, completed, progress, orchestratorInternal, reply];
+  const messages = [userAsk, completed, progress, intermediate, orchestratorInternal, reply];
   const view = answerConversationMessages(messages);
 
-  // Completed announce is the preserved authoritative result -> kept, in place.
-  // Progress + orchestrator-internal lane messages -> dropped. Unlaned -> kept.
+  // Both completed and progress announces are kept (so "how far did it get?"
+  // after a progress turn still reaches the answer node). The intermediate
+  // transcript and orchestrator-internal lane messages are dropped. Unlaned kept.
   assert.deepEqual(view.map((m) => m.content), [
     '帮我查一下小红书动态',
     '已查到热门动态：A、B、C。',
+    '已抓到第 1 页，正在抓第 2 页…',
     '好的，结果如上。',
   ]);
-  // The decision-node view still hides the announce, by contrast.
+  // The decision-node view still hides every lane message, by contrast.
   assert.deepEqual(mainConversationMessages(messages).map((m) => m.content), [
     '帮我查一下小红书动态',
     '好的，结果如上。',

@@ -685,7 +685,71 @@ raw terminal input
 - input owner 纯函数化。
 - `TuiApp` 收敛成 thin shell。
 
-## 7. 测试矩阵
+## 7. 任务拆分与依赖关系
+
+### 7.1 阻塞主链
+
+真正阻塞后续重构的是状态契约，不是 UI 细节：
+
+```mermaid
+flowchart TD
+  T0["T0: 冻结 timeline/message/state 契约"]
+  T1["T1: 失败测试基线"]
+  T2["T2: Timeline 权威化"]
+  T3["T3: Run Registry"]
+  T4["T4: Snapshot 接口/adapter"]
+  T5["T5: Reconnect Reconciliation"]
+  T6["T6: 删除 history/transcript/skipTimelineIds 死代码"]
+
+  T0 --> T2
+  T0 --> T3
+  T0 --> T4
+  T1 --> T2
+  T1 --> T3
+  T2 --> T5
+  T3 --> T5
+  T4 --> T5
+  T5 --> T6
+```
+
+阻塞说明：
+
+- `T0` 必须先落：明确 `timeline == backend checkpoint messages`，pending review、runtime、usage、studio progress 都是状态；不得引入 `transcript` / message-only view。
+- `T1` 不改变实现，但应该先落测试，避免后续重构只能靠手动 TUI 观察。
+- `T2` 和 `T3` 是核心状态改造。两者都依赖 `T0`，且都会碰 reducer / action / selector，概念上可并行，合并上建议串行。
+- `T5` 必须等 `T2 + T3 + T4`，否则 reconnect 只能继续补丁式处理，不能统一对账。
+- `T6` 只能在 `T2/T5` 后做，避免提前删掉现有恢复路径导致 TUI 断档。
+
+### 7.2 可并行任务
+
+这些任务可以和阻塞主链并行推进：
+
+| 任务 | 内容 | 依赖 | 并行风险 |
+| --- | --- | --- | --- |
+| `P1` StatusBar Model | `BottomStatusLine` 改成结构化 `StatusBarModel` 渲染 | 无强依赖 | 低，主要改 UI component |
+| `P2` ScreenModel | 引入 `buildTuiScreenModel`，让 `TuiApp` 消费展示模型 | 无强依赖 | 中，会碰 `TuiApp` selectors |
+| `P3` Layout 分区 | 固化 timeline / overlay / composer / status bar 分区 | `P2` 最好先落 | 中，可能和输入改造冲突 |
+| `P4` 输入 owner 梳理 | modal、picker、external editor、composer owner 收敛 | `P2` 后更稳 | 中高，会碰 `TuiApp` 和输入 router |
+| `P5` Studio/Chat mode | `ui.studio.mode` 统一，避免 ref/state/session 三份状态 | `P2` 后更稳 | 中 |
+| `P6` Static/Dynamic timeline 简化 | 降低 timeline viewport 分区复杂度 | `T2` + `P2` | 中，依赖 timeline message model |
+| `P7` Server snapshot 草案 | 定义 `/tui/snapshot` 或复用 endpoint 的返回 shape | `T0` | 低到中，先做 contract 不接 reducer |
+
+### 7.3 推荐 PR 切分
+
+建议按下面顺序开 PR，减少冲突和回滚成本：
+
+1. `PR-A`：测试基线。只加失败/目标测试，不改实现。
+2. `PR-B`：StatusBar + ScreenModel。低风险 UI 边界整理，可和 `PR-A` 并行。
+3. `PR-C`：Timeline 权威化。移除 live `history` 双写，把 `/history` / checkpoint / WS event 收敛到 `AgentTimelineMessage[]`。
+4. `PR-D`：Run Registry。用 `runs[runId] + session.activeRunId` 替代 `activeRun + runRoute`。
+5. `PR-E`：Snapshot Adapter。定义并接入 `session.snapshot.loaded`，但先不扩大 UI 行为。
+6. `PR-F`：Reconnect Reconciliation。重连、startup、resume 全走 snapshot 对账，修复 missed completed / pending review。
+7. `PR-G`：Input/UI State 收敛。modal、studio mode、composer owner 收进 UI reducer。
+8. `PR-H`：清理。删除 `history` / `transcript` / `transcriptSnapshot` / `skipTimelineIds` 相关残留 selector、helper、测试 fixture。
+
+如果人手并行，`PR-A`、`PR-B`、`P7` 可以同时做；`PR-C` 和 `PR-D` 可以同时开发，但最好按顺序合并并及时 rebase。
+
+## 8. 测试矩阵
 
 最低测试覆盖：
 
@@ -702,7 +766,7 @@ raw terminal input
 | /studio -> /chat -> /resume | mode、session kind、status bar 一致 |
 | 窄屏状态栏 | 按 priority 截断，不破坏 CJK 宽度 |
 
-## 8. 非目标
+## 9. 非目标
 
 本轮不处理：
 
@@ -711,7 +775,7 @@ raw terminal input
 - 改 `LocalAgentEvent` 的公共语义，除非 snapshot/reconciliation 明确需要扩展。
 - 做移动 app UI。
 
-## 9. 开放问题
+## 10. 开放问题
 
 1. server snapshot 是否应该新增 `/tui/snapshot`，还是扩展现有 `/history` / `/runtime` / pending review 接口？
 2. timeline message model 是否可以直接复用后端 checkpoint message 类型，还是需要一层 TUI render adapter？
@@ -719,7 +783,7 @@ raw terminal input
 4. Studio progress 在恢复路径中是否需要完整可见，还是只保留最终 studio response？
 5. 状态栏字段在 80 列以下的优先级是否固定为：activity > mode > connection > context > model > cwd > policy？
 
-## 10. 一句话原则
+## 11. 一句话原则
 
 后续 TUI 代码改造应遵守：
 

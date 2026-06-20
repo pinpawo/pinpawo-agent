@@ -28,8 +28,11 @@ import { isToolActionAuthorized } from './review/reviewAuthorizations';
 import { ReviewPolicies } from './review/reviewPolicies';
 import {
   answerConversationMessages,
+  buildSubagentHandoff,
   getMessageAnnounce,
   getMessageDelegationId,
+  getMessageHandoffSource,
+  getMessageLane,
   laneMessages,
   laneMessagesForStateUpdate,
   mainConversationMessages,
@@ -37,6 +40,7 @@ import {
   setPinpetMeta,
   tagNewLaneMessages,
 } from './messageLanes';
+import { RemoveMessage } from '@langchain/core/messages';
 import { reuseOrAppendTurnDelegation, updateTurnDelegationResult } from './delegations';
 import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
 import type { TurnDelegation } from './types';
@@ -2017,6 +2021,54 @@ test('iteration limit review accepts canonical respond resume as replanning feed
   assert.equal(resumed.__interrupt__, undefined);
   assert.equal(resumed.iterationCount, 0);
   assert.match(decisionInput, /继续，但只做摘要。/);
+});
+
+test('buildSubagentHandoff copies the announce into main and wipes the whole delegation lane', () => {
+  const userAsk = new HumanMessage('帮我查一下小红书动态');
+  const intermediate = new AIMessage('正在抓取页面…');
+  intermediate.id = 'm-intermediate';
+  setPinpetMeta(intermediate, { lane: 'capability:explore', turnId: 't1', delegationId: 'd1' });
+  const announce = new AIMessage('已查到热门动态：A、B、C。FULL_ANNOUNCE_MARKER');
+  announce.id = 'm-announce';
+  setPinpetMeta(announce, { lane: 'capability:explore', turnId: 't1', delegationId: 'd1', announce: 'completed', task: '查动态' });
+  // A different delegation in the same lane must be untouched.
+  const otherDelegation = new AIMessage('另一个委派的中间消息');
+  otherDelegation.id = 'm-other';
+  setPinpetMeta(otherDelegation, { lane: 'capability:explore', turnId: 't1', delegationId: 'd2' });
+
+  const messages = [userAsk, intermediate, announce, otherDelegation];
+  const update = buildSubagentHandoff({ messages, lane: 'capability:explore', turnId: 't1', delegationId: 'd1' });
+  assert.ok(update, 'handoff update should be produced for a completed delegation');
+
+  const removed = update.filter((m) => m instanceof RemoveMessage).map((m) => m.id);
+  // d1's announce + intermediate are removed; d2 and the user message are not.
+  assert.deepEqual(new Set(removed), new Set(['m-intermediate', 'm-announce']));
+
+  const copies = update.filter((m) => !(m instanceof RemoveMessage));
+  assert.equal(copies.length, 1);
+  const copy = copies[0];
+  // The copy carries the full announce text, lives in main (no lane), and keeps
+  // only minimal provenance.
+  assert.match(String(copy.content), /FULL_ANNOUNCE_MARKER/);
+  assert.equal(getMessageLane(copy), null);
+  assert.deepEqual(getMessageHandoffSource(copy), {
+    handoffFrom: 'capability:explore',
+    delegationId: 'd1',
+    task: '查动态',
+  });
+});
+
+test('buildSubagentHandoff returns null when the delegation has no announce text', () => {
+  const intermediate = new AIMessage('只有中间步骤，没有结论');
+  intermediate.id = 'm1';
+  setPinpetMeta(intermediate, { lane: 'general', turnId: 't1', delegationId: 'd1' });
+  const update = buildSubagentHandoff({
+    messages: [new HumanMessage('做点事'), intermediate],
+    lane: 'general',
+    turnId: 't1',
+    delegationId: 'd1',
+  });
+  assert.equal(update, null);
 });
 
 test('lane tagging hides subagent messages from route and records completed announce', () => {

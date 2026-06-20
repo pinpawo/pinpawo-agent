@@ -1,4 +1,4 @@
-import { RemoveMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
 import type { AnnounceKind, MessageLane, PinpetMessageLane, SubagentAnnounce, SubagentCompletionReason } from './types';
 import { messageHasToolCalls, readMessageToolCallIds, readToolResultCallId } from '../../utils/messages';
@@ -267,6 +267,83 @@ export function laneMessagesForStateUpdate(params: {
   return [
     ...removeMessages,
     completedAnnounce,
+  ];
+}
+
+/**
+ * Source metadata stamped on a handed-off announce copy in the main queue.
+ * Minimal set: which executor/capability delivered it, for which delegation/task.
+ */
+export type HandoffSource = {
+  handoffFrom: MessageLane;
+  delegationId: string;
+  task: string | null;
+};
+
+export function getMessageHandoffSource(message: BaseMessage): HandoffSource | null {
+  const meta = getPinpetMeta(message);
+  const handoffFrom = meta.handoffFrom;
+  if (typeof handoffFrom !== 'string') return null;
+  return {
+    handoffFrom: handoffFrom as MessageLane,
+    delegationId: typeof meta.delegationId === 'string' ? meta.delegationId : '',
+    task: typeof meta.task === 'string' ? meta.task : null,
+  };
+}
+
+/**
+ * Build the state-message update for handing a completed subagent delegation
+ * back to the main conversation queue.
+ *
+ * This replaces laneMessagesForStateUpdate's "prune in place" approach: instead
+ * of leaving the lane-tagged announce mixed into main, we COPY the announce text
+ * into a fresh main-queue message (a first-class main message, not lane-tagged)
+ * and WIPE the entire delegation's lane (original announce + intermediate
+ * transcript). See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
+ *
+ * Returns the messages array update: RemoveMessage entries for every lane
+ * message of this lane+turnId+delegationId, followed by the main-queue copy.
+ * Returns null (no update) when no announce text can be located for the
+ * delegation — caller should fall back to leaving state untouched.
+ */
+export function buildSubagentHandoff(params: {
+  messages: BaseMessage[];
+  lane: MessageLane;
+  turnId: string;
+  delegationId: string;
+}): BaseMessage[] | null {
+  const announceMessage = readLatestAnnounceMessage(params.messages, {
+    turnId: params.turnId,
+    delegationId: params.delegationId,
+  });
+  const announceText = announceMessage ? readMessageText(announceMessage) : '';
+  if (!announceText.trim()) return null;
+
+  const task = announceMessage ? getMessageDelegatedTask(announceMessage) : null;
+
+  const removeMessages = params.messages.flatMap((message) => {
+    if (getMessageLane(message) !== params.lane) return [];
+    if (getMessageTurnId(message) !== params.turnId) return [];
+    if (getMessageDelegationId(message) !== params.delegationId) return [];
+    // Legacy checkpointed lane messages may predate message ids; LangGraph
+    // RemoveMessage cannot target them, so those old messages are left as
+    // residual history instead of risking an invalid delete.
+    if (!message.id) return [];
+    return [new RemoveMessage({ id: message.id }) as BaseMessage];
+  });
+
+  // The copy is a first-class main message (no lane), carrying only minimal
+  // provenance so the main agent knows which executor produced it for which task.
+  const handoffCopy = new AIMessage(announceText);
+  setPinpetMeta(handoffCopy, {
+    handoffFrom: params.lane,
+    delegationId: params.delegationId,
+    task,
+  });
+
+  return [
+    ...removeMessages,
+    handoffCopy,
   ];
 }
 

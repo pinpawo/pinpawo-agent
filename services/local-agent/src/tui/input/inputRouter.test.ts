@@ -290,7 +290,7 @@ test('resolveTuiInputCommand routes command palette commands before composer edi
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'submit' }, { type: 'commandPalette' }),
-    { target: 'composer', action: 'submit' },
+    { target: 'commandPalette', action: 'submit' },
   );
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'text.insert', text: 'n' }, { type: 'commandPalette' }),

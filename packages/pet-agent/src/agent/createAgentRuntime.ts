@@ -82,6 +82,7 @@ import {
 } from './orchestrator/delegations';
 import {
   answerConversationMessages,
+  buildSubagentHandoff,
   getMessageLane,
   getMessageTurnId,
   laneMessages,
@@ -823,9 +824,34 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : null;
     const nextDelegationState = reuseOrAppendTurnDelegation(state.turnDelegations, pendingDelegation);
 
+    // Handoff (D1): on a delegation-outcome decision, the subagent delegation we
+    // just came back from is handed off to the main queue when it is complete and
+    // this decision is not continuing it (i.e. the next pending delegation does
+    // not reuse the same delegationId). When handed off, copy its announce into
+    // the main queue and wipe its lane. This is independent of `action`: finishing
+    // A while delegating B still hands off A. An incomplete (progress) delegation
+    // is never handed off — its lane is kept for a later continuation.
+    //
+    // NOTE: completion is currently read from the announce tag; Task #3 moves the
+    // completion judgment to the orchestrator and this source will change.
+    const handoffMessages =
+      kind === 'delegation_outcome'
+      && latestTurnAnnounce?.lane
+      && latestTurnAnnounce.delegationId
+      && latestTurnAnnounce.announce === 'completed'
+      && nextDelegationState.pendingDelegation?.id !== latestTurnAnnounce.delegationId
+        ? buildSubagentHandoff({
+            messages: state.messages,
+            lane: latestTurnAnnounce.lane,
+            turnId: state.turnId,
+            delegationId: latestTurnAnnounce.delegationId,
+          }) ?? []
+        : [];
+
     return {
       messages: [
         ...iterationLimitMessages,
+        ...handoffMessages,
         ...(inlineReply ? [new AIMessage(inlineReply)] : []),
       ],
       pendingDelegation: nextDelegationState.pendingDelegation,

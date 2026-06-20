@@ -1197,6 +1197,7 @@ test('global review policy full_access bypasses toolkit review prompts', async (
 test('global review policy auto_authorization authorizes safe reviewed tool calls', async () => {
   let callCount = 0;
   let autoReviewCount = 0;
+  let autoReviewMessages: unknown;
   const runtimeEvents: unknown[] = [];
   const rawTool = tool(async ({ path }: { path: string }) => {
     callCount += 1;
@@ -1218,8 +1219,9 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   }];
   const autoModel = {
     withStructuredOutput: () => ({
-      invoke: async () => {
+      invoke: async (messages: unknown) => {
         autoReviewCount += 1;
+        autoReviewMessages = messages;
         return {
           decision: 'authorize',
           reason: 'Small scoped file write requested by the user.',
@@ -1247,6 +1249,8 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.equal(result, 'wrote notes.md');
   assert.equal(callCount, 1);
   assert.equal(autoReviewCount, 1);
+  const systemPrompt = (autoReviewMessages as Array<{ content?: unknown }>)[0]?.content;
+  assert.match(String(systemPrompt), /JSON object/);
   assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
 });
 

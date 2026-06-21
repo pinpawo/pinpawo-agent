@@ -4,6 +4,8 @@ import {
   readLocalServerAuthToken,
 } from '../localServerAuth';
 import type { HistoryCellModel } from './state/tuiState';
+import type { TuiCoreSessionSnapshot } from './contracts/tuiCoreContract';
+import { buildTuiSessionSnapshotFromHistory } from './snapshot/tuiSessionSnapshot';
 import type { ResumeSessionSummary } from './types';
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 1500;
@@ -57,6 +59,22 @@ export class TuiLocalServerClient {
     return parseHistoryMessages(payload.messages);
   }
 
+  async readSessionSnapshot(params: {
+    sessionId: string;
+    kind: TuiCoreSessionSnapshot['kind'];
+  }): Promise<TuiCoreSessionSnapshot> {
+    const [history, runtime] = await Promise.all([
+      this.readHistory().catch(() => []),
+      this.readRuntime().catch(() => null),
+    ]);
+    return buildTuiSessionSnapshotFromHistory({
+      sessionId: params.sessionId,
+      kind: params.kind,
+      history,
+      runtime,
+    });
+  }
+
   async readRuntime(timeoutMs = DEFAULT_HEALTH_TIMEOUT_MS): Promise<LocalServerRuntimeSnapshot | null> {
     try {
       const res = await this.fetchWithTimeout(this.url('/runtime'), timeoutMs);
@@ -84,6 +102,7 @@ export class TuiLocalServerClient {
   async resumeSession(sessionId: string): Promise<{
     session: ResumeSessionSummary;
     history: HistoryCellModel[];
+    snapshot: TuiCoreSessionSnapshot;
   }> {
     const res = await this.fetchAuth(
       this.url(`/sessions/resume?sessionId=${encodeURIComponent(sessionId)}`),
@@ -99,9 +118,15 @@ export class TuiLocalServerClient {
     if (!session) {
       throw new Error('invalid resume session payload');
     }
+    const history = parseHistoryMessages(payload.messages);
     return {
       session,
-      history: parseHistoryMessages(payload.messages),
+      history,
+      snapshot: buildTuiSessionSnapshotFromHistory({
+        sessionId: session.id,
+        kind: 'chat',
+        history,
+      }),
     };
   }
 

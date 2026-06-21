@@ -22,6 +22,15 @@ import {
   type AgentOperationEntry,
   type AgentTimelineEntry,
 } from '../timeline/agentTimeline';
+import {
+  TUI_CORE_TARGET_ACTIONS,
+  type TuiCoreRunSnapshot,
+  type TuiCoreSessionSnapshot,
+} from '../contracts/tuiCoreContract';
+import {
+  agentTimelineEntriesFromSnapshot,
+  historyFromSnapshotTimeline,
+} from '../snapshot/tuiSessionSnapshot';
 import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
 import type {
   ActiveRunModel,
@@ -477,6 +486,108 @@ function activeRunToPendingApproval(run: ActiveRunModel | null) {
     : null;
 }
 
+function isTerminalSnapshotRun(run: TuiCoreRunSnapshot) {
+  return run.phase === 'completed' || run.phase === 'failed' || run.phase === 'interrupted';
+}
+
+function activeRunPhaseFromSnapshot(run: TuiCoreRunSnapshot): ActiveRunModel['phase'] | null {
+  if (isTerminalSnapshotRun(run)) return null;
+  if (run.phase === 'using_tool' || run.phase === 'streaming' || run.phase === 'waiting_human' || run.phase === 'interrupting') {
+    return run.phase;
+  }
+  return 'thinking';
+}
+
+function countSnapshotAssistantChars(snapshot: TuiCoreSessionSnapshot, requestId: string) {
+  return snapshot.timeline.reduce((count, entry) => (
+    entry.type === 'message' && entry.role === 'assistant' && entry.requestId === requestId
+      ? count + entry.text.length
+      : count
+  ), 0);
+}
+
+function activeRunFromSnapshot(
+  snapshot: TuiCoreSessionSnapshot,
+  existingSession: SessionModel | undefined,
+): ActiveRunModel | null {
+  const activeRunId = snapshot.activeRunId
+    ?? snapshot.runs.find((run) => !isTerminalSnapshotRun(run))?.requestId;
+  if (!activeRunId) return null;
+  const run = snapshot.runs.find((item) => item.requestId === activeRunId);
+  if (!run) return null;
+  const phase = activeRunPhaseFromSnapshot(run);
+  if (!phase) return null;
+  const existingActiveRun = existingSession?.activeRun?.requestId === run.requestId
+    ? existingSession.activeRun
+    : null;
+  return {
+    requestId: run.requestId,
+    phase,
+    timelineEntryIds: run.timelineEntryIds,
+    startedAt: run.startedAt ?? existingActiveRun?.startedAt ?? 0,
+    charCount: countSnapshotAssistantChars(snapshot, run.requestId),
+    ...(run.pendingReview?.status === 'waiting' && existingActiveRun?.pendingReview
+      ? { pendingReview: existingActiveRun.pendingReview }
+      : {}),
+  };
+}
+
+function applySessionSnapshot(
+  state: TuiState,
+  action: Extract<TuiAction, { type: typeof TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded }>,
+) {
+  const snapshot = action.snapshot;
+  const sessionId = snapshot.sessionId;
+  const existingSession = state.sessions[sessionId];
+  const focusedSession = state.focusedSessionId ? state.sessions[state.focusedSessionId] : undefined;
+  const baseSession = existingSession ?? focusedSession;
+  const history = trimHistory(historyFromSnapshotTimeline(snapshot.timeline));
+  const timeline = agentTimelineEntriesFromSnapshot(snapshot.timeline);
+  const sessionIdsToClear = new Set<SessionId>([sessionId]);
+  if (action.source === 'resume' && state.focusedSessionId) {
+    sessionIdsToClear.add(state.focusedSessionId);
+  }
+  const snapshotRunIds = new Set(snapshot.runs.map((run) => run.requestId));
+  const preservedRunRoute = Object.fromEntries(
+    Object.entries(state.runRoute).filter(([requestId, routedSessionId]) =>
+      !sessionIdsToClear.has(routedSessionId) && !snapshotRunIds.has(requestId)),
+  );
+  const snapshotRunRoute = Object.fromEntries(
+    snapshot.runs
+      .filter((run) => !isTerminalSnapshotRun(run))
+      .map((run) => [run.requestId, run.sessionId || sessionId]),
+  );
+  const nextSession: SessionModel = {
+    id: sessionId,
+    kind: snapshot.kind,
+    actor: baseSession?.actor ?? {
+      label: TUI_TEXT.defaultPetName,
+      summary: TUI_TEXT.defaultPetSummary,
+    },
+    runtime: {
+      ...(baseSession?.runtime ?? {}),
+      ...(snapshot.runtime ?? {}),
+    },
+    history,
+    timeline,
+    activeRun: activeRunFromSnapshot(snapshot, existingSession),
+    tokenUsage: snapshot.tokenUsage ?? null,
+  };
+
+  return {
+    ...state,
+    focusedSessionId: sessionId,
+    sessions: {
+      ...state.sessions,
+      [sessionId]: nextSession,
+    },
+    runRoute: {
+      ...preservedRunRoute,
+      ...snapshotRunRoute,
+    },
+  };
+}
+
 function historyDraft(
   kind: HistoryCellModel['kind'],
   text: string,
@@ -493,6 +604,9 @@ function historyDraft(
 
 export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
   switch (action.type) {
+    case TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded:
+      return applySessionSnapshot(state, action);
+
     case 'connection.set':
       return {
         ...state,

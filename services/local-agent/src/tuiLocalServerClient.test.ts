@@ -84,6 +84,7 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
       return jsonResponse({
         messages: [
           { role: 'user', text: 'restored' },
+          { role: 'system', text: 'notice' },
           { role: 'tool', text: 'not visible' },
         ],
       });
@@ -122,19 +123,30 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
   });
 
   assert.equal(await client.isHealthy(), true);
-  assert.deepEqual((await client.readHistory()).map((item) => item.text), ['restored']);
+  assert.deepEqual((await client.readHistory()).map((item) => item.text), ['restored', 'notice']);
+  const snapshot = await client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'chat' });
+  assert.deepEqual(snapshot.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
+    ['message', 'restored'],
+  ]);
   assert.deepEqual((await client.listResumeSessions()).map((item) => item.id), ['chat:one']);
   const resumed = await client.resumeSession('chat:one');
 
   assert.equal(resumed.session.active, true);
   assert.deepEqual(resumed.history.map((item) => item.text), ['welcome back']);
+  assert.deepEqual(resumed.snapshot.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
+    ['message', 'welcome back'],
+  ]);
   assert.deepEqual(seenUrls, [
     'http://127.0.0.1:3210/health',
     'http://127.0.0.1:3210/history',
+    'http://127.0.0.1:3210/history',
+    'http://127.0.0.1:3210/runtime',
     'http://127.0.0.1:3210/sessions',
     'http://127.0.0.1:3210/sessions/resume?sessionId=chat%3Aone',
   ]);
   assert.deepEqual(seenAuth, [
+    'Bearer secret',
+    'Bearer secret',
     'Bearer secret',
     'Bearer secret',
     'Bearer secret',

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { TUI_CORE_TARGET_ACTIONS } from './contracts/tuiCoreContract';
 import { TUI_TEXT } from './render/text';
 import type { TuiAction } from './state/tuiState';
 import type { TuiRuntimeController } from './TuiRuntimeController';
@@ -84,21 +85,14 @@ export function useResumePickerController(options: ResumePickerControllerOptions
       sessions: current.sessions,
       selectedIndex: current.selectedIndex,
     }));
-    void options.runtimeController.resumeSession(selected.id).then(({ session, history }) => {
+    void options.runtimeController.resumeSession(selected.id).then(({ session, snapshot }) => {
       if (resumeRequestIdRef.current !== requestId) return;
       options.resetStudioMode();
       options.resetTimelineView();
       options.dispatch({
-        type: 'session.clear',
-        statusMessage: TUI_TEXT.resumeSucceeded(session.title),
-      });
-      options.dispatch({
-        type: 'session.set_kind',
-        kind: 'chat',
-      });
-      options.dispatch({
-        type: 'session.replace_history',
-        history,
+        type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+        source: 'resume',
+        snapshot,
       });
       options.dispatch({
         type: 'input.set',

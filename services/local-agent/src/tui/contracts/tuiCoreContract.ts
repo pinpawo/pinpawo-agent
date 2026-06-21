@@ -128,6 +128,12 @@ export type TuiCoreRuntimeSnapshot = {
   model?: string;
   cwd?: string;
   stateRoot?: string;
+  studioConfigPath?: string;
+  studioConfigSource?: string;
+  studioConfigActivePath?: string;
+  legacyStudioConfigPath?: string;
+  petsDir?: string;
+  studioWikiBaseDir?: string;
   contextWindow?: number;
 };
 

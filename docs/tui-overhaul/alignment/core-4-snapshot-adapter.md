@@ -24,7 +24,7 @@ Introduce the `session.snapshot.loaded` reducer path and adapt existing startup/
 - Add or consume a first-class server snapshot endpoint.
 - Restore pending review panels from server-provided review specs.
 - Route reconnect through `session.snapshot.loaded`.
-- Remove legacy `session.replace_history` once all callsites migrate.
+- Remove legacy `session.replace_history` once all callsites migrate. Completed in CORE-6.
 - Remove `runRoute` after CORE-3 runtime migration makes `TuiState.runs` authoritative.
 
 ## Alignment Log

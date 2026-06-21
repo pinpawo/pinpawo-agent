@@ -18,7 +18,7 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 - Target snapshot action: `session.snapshot.loaded`.
 - Contract tests: `services/local-agent/src/tui/contracts/tuiCoreContract.test.ts`.
 - Deferred reconnect migrations were tracked in `TUI_CORE_DEFERRED_CONTRACT_GAPS` until CORE-5.
-- Runtime target tests are not left as `test.skip`; CORE-5 clears the remaining reconnect and terminalization metadata gaps.
+- Runtime target tests are not left as `test.skip`; CORE-5 clears the remaining reconnect and terminalization metadata gaps, and CORE-6 removes the now-empty metadata constants.
 
 ## Expected Changes
 
@@ -45,13 +45,13 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 | 2026-06-20 | resume session reconciliation | `/resume` should reconcile through `session.snapshot.loaded` instead of dispatching legacy clear/replace-history actions | current resume flow still returns legacy history and lets the picker dispatch `session.clear` + `session.replace_history`; gap is tracked by executable contract metadata | resume snapshot payload/action are not defined yet | defer implementation | CORE-4 Snapshot Adapter / CORE-5 Reconnect Reconciliation | deferred |
 | 2026-06-20 | resume/new route cleanup | clearing the current session should remove `runRoute` entries owned by that session | no deviation for current model; coverage added | route cleanup remains necessary until run registry replaces `runRoute` | keep existing behavior for CORE-1 | CORE-3 removes `runRoute` entirely | accepted |
 | 2026-06-20 | pending review resume fallback | resume can recover a focused-session route when the route map is missing | no deviation for current model; coverage added | this protects current HITL resume behavior until snapshot recovery owns it | keep existing behavior for CORE-1 | CORE-5 restores pending review through snapshot | accepted |
-| 2026-06-21 | deferred runtime snapshot target tests | reconnect/resume target behavior should be represented without skipped tests | previous PR state used `test.skip` for reconnect/resume snapshot targets | skipped tests do not provide CI-visible protection | replace skipped tests with executable `TUI_CORE_DEFERRED_CONTRACT_GAPS` assertions | CORE-4 Snapshot Adapter / CORE-5 Reconnect Reconciliation | accepted |
-| 2026-06-21 | deferred reducer terminalization target | missing-active-pointer terminalization should be represented without skipped tests | previous PR state used `test.skip` for the reducer target | skipped tests do not provide CI-visible protection | replace skipped test with executable `TUI_CORE_DEFERRED_REDUCER_GAPS` assertions | CORE-3 Run Registry / CORE-5 Reconnect Reconciliation | accepted |
+| 2026-06-21 | deferred runtime snapshot target tests | reconnect/resume target behavior should be represented without skipped tests | previous PR state used `test.skip` for reconnect/resume snapshot targets | skipped tests do not provide CI-visible protection | replace skipped tests with executable metadata until CORE-5 closes the gap | CORE-6 removes the empty constants | accepted |
+| 2026-06-21 | deferred reducer terminalization target | missing-active-pointer terminalization should be represented without skipped tests | previous PR state used `test.skip` for the reducer target | skipped tests do not provide CI-visible protection | replace skipped test with executable metadata until CORE-5 closes the gap | CORE-6 removes the empty constants | accepted |
 
 ## Open Questions
 
 - Which existing fixture best represents backend checkpoint messages?
-- What follow-up cleanup should remove the now-empty deferred metadata constants?
+- Which follow-up removes remaining legacy compatibility state after CORE-6?
 
 ## Merge Checklist
 

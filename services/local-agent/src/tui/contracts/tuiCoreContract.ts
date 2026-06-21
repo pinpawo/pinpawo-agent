@@ -33,10 +33,6 @@ export const TUI_CORE_CONTRACT_RULES = [
   'transcript and transcriptSnapshot must not be introduced as second message logs',
 ] as const;
 
-export const TUI_CORE_DEFERRED_CONTRACT_GAPS = [] as const;
-
-export const TUI_CORE_DEFERRED_REDUCER_GAPS = [] as const;
-
 export type TuiCoreTimelineSource = 'checkpoint' | 'live-event' | 'local-input';
 
 export type TuiCoreMessageTimelineEntry = {

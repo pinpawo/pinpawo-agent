@@ -15,7 +15,6 @@ import type {
 } from '../../events/localAgentEvent';
 import {
   operationTimelineEntryFromEvent,
-  timelineEntriesFromHistory,
   timelineEntryFromHistoryCell,
   timelineEntryIdFromOperationEvent,
   type AgentMessageEntry,
@@ -60,20 +59,13 @@ function toHistoryCell(draft: HistoryCellDraft): HistoryCellModel {
   };
 }
 
-type AppendHistoryOptions = {
-  skipTimelineIds?: Set<string>;
-};
-
 function appendHistory(
   session: SessionModel,
   drafts: HistoryCellDraft[],
-  options: AppendHistoryOptions = {},
 ) {
   if (drafts.length === 0) return session;
   const cells = drafts.map(toHistoryCell);
-  const timelineCells = cells
-    .filter((cell) => !options.skipTimelineIds?.has(cell.id))
-    .map(timelineEntryFromHistoryCell);
+  const timelineCells = cells.map(timelineEntryFromHistoryCell);
   return {
     ...session,
     history: trimHistory([
@@ -87,12 +79,18 @@ function appendHistory(
   };
 }
 
-function replaceHistory(session: SessionModel, history: HistoryCellModel[]) {
-  const nextHistory = trimHistory(history);
+function appendHistoryOnly(
+  session: SessionModel,
+  drafts: HistoryCellDraft[],
+) {
+  if (drafts.length === 0) return session;
+  const cells = drafts.map(toHistoryCell);
   return {
     ...session,
-    history: nextHistory,
-    timeline: timelineEntriesFromHistory(nextHistory),
+    history: trimHistory([
+      ...session.history,
+      ...cells,
+    ]),
   };
 }
 
@@ -378,7 +376,6 @@ function finishRun(
   statusMessage: string,
   history: HistoryCellDraft[] = [],
   tokenUsage?: TokenUsageModel | null,
-  options: AppendHistoryOptions = {},
 ) {
   const sessionId = state.runRoute[requestId];
   if (!sessionId) return state;
@@ -399,7 +396,7 @@ function finishRun(
       activeRun: sameActiveRun ? null : sessionToUpdate.activeRun,
     }, [
       ...history,
-    ], options);
+    ]);
   });
 
   const stateWithRouteRemoved = {
@@ -660,12 +657,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) => ({
         ...session,
         kind: action.kind,
-      }));
-
-    case 'session.replace_history':
-      return updateSession(state, resolveSessionId(state, action.sessionId), (session) => ({
-        ...replaceHistory(session, action.history),
-        tokenUsage: null,
       }));
 
     case 'session.clear':
@@ -1008,12 +999,11 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
               : sessionWithTimeline.activeRun,
           };
         });
-        return finishRun(stateWithTimeline, event.requestId, TUI_TEXT.statusReady, finalText
-          ? [assistantHistoryDraft]
-          : [],
-          event.usage ?? null,
-          { skipTimelineIds: new Set([assistantHistoryDraft.id]) },
-        );
+        const stateWithHistory = finalText
+          ? updateSession(stateWithTimeline, sessionId, (currentSession) =>
+              appendHistoryOnly(currentSession, [assistantHistoryDraft]))
+          : stateWithTimeline;
+        return finishRun(stateWithHistory, event.requestId, TUI_TEXT.statusReady, [], event.usage ?? null);
       }
 
       if (event.type === 'studio.progress') {

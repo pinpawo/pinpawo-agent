@@ -3,8 +3,6 @@ import test from 'node:test';
 import {
   TUI_CORE_CONTRACT_RULES,
   TUI_CORE_CONTRACT_VERSION,
-  TUI_CORE_DEFERRED_CONTRACT_GAPS,
-  TUI_CORE_DEFERRED_REDUCER_GAPS,
   TUI_CORE_FORBIDDEN_SECONDARY_LOGS,
   TUI_CORE_STATE_OWNERS,
   TUI_CORE_TARGET_ACTIONS,
@@ -65,12 +63,4 @@ test('TUI CORE-1 snapshot action carries the target session model shape', () => 
 
   assert.equal(action.snapshot.timeline[0]?.type, 'message');
   assert.equal(action.snapshot.runs[0]?.phase, 'completed');
-});
-
-test('TUI CORE-1 tracks deferred reducer terminalization gaps without skipped tests', () => {
-  assert.deepEqual([...TUI_CORE_DEFERRED_REDUCER_GAPS], []);
-});
-
-test('TUI CORE-1 tracks deferred runtime snapshot migrations without skipped tests', () => {
-  assert.deepEqual([...TUI_CORE_DEFERRED_CONTRACT_GAPS], []);
 });

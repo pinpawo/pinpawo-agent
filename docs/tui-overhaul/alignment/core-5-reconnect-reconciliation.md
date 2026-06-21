@@ -18,12 +18,12 @@ Route reconnect through the same `session.snapshot.loaded` reconciliation path a
 - Route `TuiRuntimeController.reconnect()` through `session.snapshot.loaded` before opening a new websocket.
 - Restore pending approval panels from snapshot runs.
 - Finalize `message.completed` events when `runRoute` exists but `activeRun` is already missing.
-- Clear `TUI_CORE_DEFERRED_CONTRACT_GAPS` and `TUI_CORE_DEFERRED_REDUCER_GAPS`.
+- Clear deferred contract and reducer gap metadata.
 
 ## Deferred Changes
 
-- Delete now-empty deferred metadata constants during CORE-6 cleanup.
-- Remove legacy `history` and `runRoute` once CORE-6 deletes the compatibility paths.
+- Delete now-empty deferred metadata constants during CORE-6 cleanup. Completed in CORE-6.
+- Remove legacy `history` and `runRoute` in follow-up cleanup once the remaining compatibility paths are replaced.
 - Extend snapshots with richer operation/run timestamps if the server later persists them.
 
 ## Alignment Log

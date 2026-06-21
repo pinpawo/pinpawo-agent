@@ -1,6 +1,6 @@
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { TUI_TEXT } from './render/text';
-import type { HistoryCellMeta, TuiAction } from './state/tuiState';
+import type { MessageCellMeta, TuiAction } from './state/tuiState';
 
 export type TuiServerMessageActionResult = {
   actions: TuiAction[];
@@ -9,7 +9,7 @@ export type TuiServerMessageActionResult = {
 
 export type TuiServerMessageActionOptions = {
   now: number;
-  makeHistoryCell: () => HistoryCellMeta;
+  makeMessageCell: () => MessageCellMeta;
 };
 
 export function buildTuiActionsFromServerMessage(
@@ -27,7 +27,7 @@ export function buildTuiActionsFromServerMessage(
         type: 'event.received',
         event: message.event,
         now: options.now,
-        historyCell: options.makeHistoryCell(),
+        messageCell: options.makeMessageCell(),
       }],
     };
   }
@@ -49,7 +49,7 @@ export function buildTuiActionsFromServerMessage(
       actions: [{
         type: 'server.interrupted',
         requestId: message.requestId,
-        historyCell: options.makeHistoryCell(),
+        messageCell: options.makeMessageCell(),
         statusMessage: TUI_TEXT.interruptedStatus,
       }],
     };
@@ -64,8 +64,8 @@ export function buildTuiActionsFromServerMessage(
         outcome: message.outcome,
         reply: message.reply,
         reason: message.reason,
-        historyCell: options.makeHistoryCell(),
-        stoppedReasonCell: options.makeHistoryCell(),
+        messageCell: options.makeMessageCell(),
+        stoppedReasonCell: options.makeMessageCell(),
         statusMessage: TUI_TEXT.statusReady,
       }],
     };
@@ -77,7 +77,7 @@ export function buildTuiActionsFromServerMessage(
       type: 'server.studio_error',
       requestId: message.requestId,
       message: message.message,
-      historyCell: options.makeHistoryCell(),
+      messageCell: options.makeMessageCell(),
       statusMessage: TUI_TEXT.studioErrorRecovered,
     }],
   };

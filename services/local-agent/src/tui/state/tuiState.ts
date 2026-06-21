@@ -10,7 +10,7 @@ import {
 import type { TextAreaModel } from '../input/textarea/engine';
 import { TUI_TEXT } from '../render/text';
 
-export const MAX_TUI_HISTORY_ITEMS = 240;
+export const MAX_TUI_NOTICE_ITEMS = 120;
 
 export type RunId = string;
 export type SessionId = string;
@@ -58,6 +58,7 @@ export type SessionModel = {
     contextWindow?: number;
   };
   timeline: AgentTimelineEntry[];
+  notices: SessionNoticeModel[];
   activeRunId: RunId | null;
   tokenUsage: TokenUsageModel | null;
 };
@@ -84,9 +85,15 @@ export type TokenUsageModel = {
   updatedAt?: string;
 };
 
-export type HistoryCellModel = {
+export type MessageCellModel = {
   id: string;
   kind: 'user' | 'assistant' | 'system';
+  text: string;
+  timestamp?: string;
+};
+
+export type SessionNoticeModel = {
+  id: string;
   text: string;
   timestamp?: string;
 };
@@ -97,14 +104,14 @@ export type ApprovalRequestModel = {
   petId?: string;
 };
 
-export type HistoryCellDraft = {
+export type MessageCellDraft = {
   id: string;
-  kind: HistoryCellModel['kind'];
+  kind: MessageCellModel['kind'];
   text: string;
   timestamp?: string;
 };
 
-export type HistoryCellMeta = {
+export type MessageCellMeta = {
   id: string;
   timestamp?: string;
 };
@@ -150,9 +157,9 @@ export type TuiAction =
       direction: ComposerHistoryDirection;
     }
   | {
-      type: 'history.append';
+      type: 'message.append';
       sessionId?: SessionId;
-      cell: HistoryCellDraft;
+      cell: MessageCellDraft;
     }
   | {
       type: 'run.start';
@@ -161,7 +168,7 @@ export type TuiAction =
       kind: SessionModel['kind'];
       userText: string;
       now: number;
-      userCell: HistoryCellMeta;
+      userCell: MessageCellMeta;
       statusMessage: string;
     }
   | {
@@ -174,7 +181,7 @@ export type TuiAction =
       requestId: RunId;
       message: string;
       now: number;
-      userCell: HistoryCellMeta;
+      userCell: MessageCellMeta;
       statusMessage: string;
     }
   | {
@@ -186,13 +193,13 @@ export type TuiAction =
       type: 'run.finish';
       requestId: RunId;
       statusMessage: string;
-      history?: HistoryCellDraft[];
+      messages?: MessageCellDraft[];
     }
   | {
       type: 'event.received';
       event: LocalAgentEvent;
       now: number;
-      historyCell?: HistoryCellMeta;
+      messageCell?: MessageCellMeta;
     }
   | {
       type: 'server.interrupting';
@@ -202,7 +209,7 @@ export type TuiAction =
   | {
       type: 'server.interrupted';
       requestId: RunId;
-      historyCell: HistoryCellMeta;
+      messageCell: MessageCellMeta;
       statusMessage: string;
     }
   | {
@@ -211,15 +218,15 @@ export type TuiAction =
       outcome: 'done' | 'stopped';
       reply: string;
       reason?: string;
-      historyCell: HistoryCellMeta;
-      stoppedReasonCell?: HistoryCellMeta;
+      messageCell: MessageCellMeta;
+      stoppedReasonCell?: MessageCellMeta;
       statusMessage: string;
     }
   | {
       type: 'server.studio_error';
       requestId: RunId;
       message: string;
-      historyCell: HistoryCellMeta;
+      messageCell: MessageCellMeta;
       statusMessage: string;
     };
 
@@ -248,6 +255,7 @@ export function createSession(params: {
   kind?: SessionModel['kind'];
   actor?: Partial<SessionModel['actor']>;
   timeline?: AgentTimelineEntry[];
+  notices?: SessionNoticeModel[];
 }): SessionModel {
   return {
     id: params.id,
@@ -258,6 +266,7 @@ export function createSession(params: {
     },
     runtime: {},
     timeline: params.timeline ?? [],
+    notices: params.notices ?? [],
     activeRunId: null,
     tokenUsage: null,
   };

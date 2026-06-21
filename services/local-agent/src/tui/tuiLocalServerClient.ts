@@ -4,7 +4,7 @@ import {
   buildLocalServerAuthHeaders,
   readLocalServerAuthToken,
 } from '../localServerAuth';
-import type { HistoryCellModel } from './state/tuiState';
+import type { MessageCellModel } from './state/tuiState';
 import type { TuiCoreSessionSnapshot } from './contracts/tuiCoreContract';
 import { buildTuiSessionSnapshotFromMessages } from './snapshot/tuiSessionSnapshot';
 import type { ResumeSessionSummary } from './types';
@@ -57,7 +57,7 @@ export class TuiLocalServerClient {
     }
   }
 
-  async readHistory(): Promise<HistoryCellModel[]> {
+  async readHistory(): Promise<MessageCellModel[]> {
     const res = await this.fetchAuth(this.url('/history'));
     if (!res.ok) {
       throw new LocalServerHttpError(res.status);
@@ -304,7 +304,7 @@ function normalizeHeaders(headers: RequestInit['headers']): Record<string, strin
 
 export function parseHistoryMessages(
   messages: Array<{ role?: string; text?: string }> | undefined,
-): HistoryCellModel[] {
+): MessageCellModel[] {
   return Array.isArray(messages)
     ? messages.flatMap((item) => {
         if (
@@ -316,7 +316,7 @@ export function parseHistoryMessages(
             id: randomUUID(),
             kind: item.role,
             text: item.text,
-          } satisfies HistoryCellModel];
+          } satisfies MessageCellModel];
         }
         return [];
       })

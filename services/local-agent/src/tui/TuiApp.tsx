@@ -12,6 +12,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { Composer } from './components/Composer';
 import { FileMentionPopup } from './components/FileMentionPopup';
 import { GlobalReviewPolicyPicker } from './components/GlobalReviewPolicyPicker';
+import { MessageBlock } from './components/MessageBlock';
 import { ResumePicker } from './components/ResumePicker';
 import {
   createInitialTuiInputBufferState,
@@ -40,6 +41,7 @@ import { createInitialTuiState, createSession } from './state/tuiState';
 import {
   selectFocusedActiveOperations,
   selectFocusedBusy,
+  selectFocusedNotices,
   selectFocusedPendingApproval,
   selectFocusedPendingUi,
   selectFocusedSession,
@@ -116,6 +118,7 @@ export function TuiApp(props: { actorId: string }) {
   }), [props.actorId, localServerPort, dispatch, resetTimelineView, setNow]);
   const focusedSession = selectFocusedSession(tuiState);
   const timeline = selectFocusedTimeline(tuiState);
+  const notices = selectFocusedNotices(tuiState);
   const { staticEntries: staticTimeline, dynamicEntries: dynamicTimeline } = useMemo(
     () => splitTimelineForStaticRender(timeline),
     [timeline],
@@ -151,7 +154,7 @@ export function TuiApp(props: { actorId: string }) {
 
   const appendMessage = (role: MessageRole, text: string) => {
     dispatch({
-      type: 'history.append',
+      type: 'message.append',
       cell: {
         id: randomUUID(),
         kind: role,
@@ -547,7 +550,7 @@ export function TuiApp(props: { actorId: string }) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {timeline.length === 0 ? <Text dimColor>{TUI_TEXT.emptyHistory(petName)}</Text> : null}
+      {timeline.length === 0 && notices.length === 0 ? <Text dimColor>{TUI_TEXT.emptyHistory(petName)}</Text> : null}
       <Static key={timelineRenderEpoch} items={staticTimeline}>
         {(entry) => (
           <AgentTimelineItem
@@ -562,6 +565,18 @@ export function TuiApp(props: { actorId: string }) {
       {dynamicTimeline.length > 0 ? (
         <AgentTimeline entries={dynamicTimeline} petName={petName} width={contentWidth} now={now} />
       ) : null}
+      {notices.map((notice) => (
+        <MessageBlock
+          key={notice.id}
+          entry={{
+            kind: 'system',
+            timestamp: notice.timestamp,
+            text: notice.text,
+          }}
+          petName={petName}
+          width={contentWidth}
+        />
+      ))}
       {resumePickerOpen ? (
         <ResumePicker
           sessions={resumePicker.sessions}

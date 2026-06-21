@@ -15,7 +15,7 @@ import type {
 } from '../../events/localAgentEvent';
 import {
   operationTimelineEntryFromEvent,
-  timelineEntryFromHistoryCell,
+  timelineEntryFromMessageCell,
   timelineEntryIdFromOperationEvent,
   type AgentMessageEntry,
   type AgentOperationEntry,
@@ -30,11 +30,13 @@ import {
   agentTimelineEntriesFromSnapshot,
 } from '../snapshot/tuiSessionSnapshot';
 import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
+import { MAX_TUI_NOTICE_ITEMS } from './tuiState';
 import type {
   ActiveRunModel,
-  HistoryCellDraft,
-  HistoryCellMeta,
-  HistoryCellModel,
+  MessageCellDraft,
+  MessageCellMeta,
+  MessageCellModel,
+  SessionNoticeModel,
   SessionId,
   SessionModel,
   TuiAction,
@@ -43,7 +45,7 @@ import type {
   TuiState,
 } from './tuiState';
 
-function toHistoryCell(draft: HistoryCellDraft): HistoryCellModel {
+function toMessageCell(draft: MessageCellDraft): MessageCellModel {
   return {
     id: draft.id,
     kind: draft.kind,
@@ -52,20 +54,41 @@ function toHistoryCell(draft: HistoryCellDraft): HistoryCellModel {
   };
 }
 
-function appendTimelineFromHistory(
+function appendMessageCells(
   session: SessionModel,
-  drafts: HistoryCellDraft[],
+  drafts: MessageCellDraft[],
 ) {
   if (drafts.length === 0) return session;
-  const cells = drafts.map(toHistoryCell);
-  const timelineCells = cells.map(timelineEntryFromHistoryCell);
+  const cells = drafts.map(toMessageCell);
+  const timelineCells = cells.flatMap((cell) => {
+    const entry = timelineEntryFromMessageCell(cell);
+    return entry ? [entry] : [];
+  });
+  const notices = cells.flatMap((cell): SessionNoticeModel[] =>
+    cell.kind === 'system'
+      ? [{
+          id: cell.id,
+          text: cell.text,
+          ...(cell.timestamp ? { timestamp: cell.timestamp } : {}),
+        }]
+      : []);
   return {
     ...session,
     timeline: [
       ...session.timeline,
       ...timelineCells,
     ],
+    notices: trimNotices([
+      ...session.notices,
+      ...notices,
+    ]),
   };
+}
+
+function trimNotices(notices: SessionNoticeModel[]) {
+  return notices.length > MAX_TUI_NOTICE_ITEMS
+    ? notices.slice(notices.length - MAX_TUI_NOTICE_ITEMS)
+    : notices;
 }
 
 function addTimelineEntryId<T extends ActiveRunModel>(activeRun: T, entryId: string): T {
@@ -268,41 +291,6 @@ function finalizeSubagentTimelineEntries(session: SessionModel, requestId: strin
   };
 }
 
-function appendReviewTimelineEntry(
-  session: SessionModel,
-  requestId: string,
-  reviewId: string,
-) {
-  const entry: AgentTimelineEntry = {
-    id: `${requestId}:review:${reviewId}`,
-    type: 'review',
-    requestId,
-    reviewId,
-    status: 'waiting',
-  };
-  return {
-    session: {
-      ...session,
-      timeline: appendOrUpdateTimelineEntry(session.timeline, entry),
-    },
-    entry,
-  };
-}
-
-function markReviewTimelineEntries(
-  session: SessionModel,
-  requestId: string,
-  status: 'answered' | 'interrupted',
-) {
-  return {
-    ...session,
-    timeline: session.timeline.map((entry) =>
-      entry.type === 'review' && entry.requestId === requestId && entry.status === 'waiting'
-        ? { ...entry, status }
-        : entry),
-  };
-}
-
 function resolveSessionId(state: TuiState, sessionId?: SessionId) {
   return sessionId ?? state.focusedSessionId;
 }
@@ -380,7 +368,7 @@ function finishRun(
   state: TuiState,
   requestId: string,
   statusMessage: string,
-  history: HistoryCellDraft[] = [],
+  messages: MessageCellDraft[] = [],
   tokenUsage?: TokenUsageModel | null,
 ) {
   const run = state.runs[requestId];
@@ -392,11 +380,11 @@ function finishRun(
     const finalizedSession = sessionToUpdate.activeRunId === requestId
       ? finalizeSubagentTimelineEntries(sessionToUpdate, requestId)
       : sessionToUpdate;
-    return appendTimelineFromHistory({
+    return appendMessageCells({
       ...finalizedSession,
       activeRunId: sessionToUpdate.activeRunId === requestId ? null : sessionToUpdate.activeRunId,
     }, [
-      ...history,
+      ...messages,
     ]);
   });
 
@@ -591,6 +579,7 @@ function applySessionSnapshot(
       ...(snapshot.runtime ?? {}),
     },
     timeline,
+    notices: action.source === 'reconnect' ? existingSession?.notices ?? [] : [],
     activeRunId,
     tokenUsage: snapshot.tokenUsage
       ?? (action.source === 'reconnect' ? existingSession?.tokenUsage ?? null : null),
@@ -610,12 +599,12 @@ function applySessionSnapshot(
   };
 }
 
-function historyDraft(
-  kind: HistoryCellModel['kind'],
+function messageDraft(
+  kind: MessageCellModel['kind'],
   text: string,
-  meta: HistoryCellMeta | undefined,
+  meta: MessageCellMeta | undefined,
   fallbackId: string,
-): HistoryCellDraft {
+): MessageCellDraft {
   return {
     id: meta?.id ?? fallbackId,
     kind,
@@ -670,6 +659,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         }, sessionId, (session) => ({
           ...session,
           timeline: [],
+          notices: [],
           activeRunId: null,
           tokenUsage: null,
         }));
@@ -717,14 +707,14 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         };
       }
 
-    case 'history.append':
+    case 'message.append':
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) =>
-        appendTimelineFromHistory(session, [action.cell]));
+        appendMessageCells(session, [action.cell]));
 
     case 'run.start': {
       const sessionId = resolveSessionId(state, action.sessionId);
       if (!sessionId) return state;
-      const userDraft = historyDraft('user', action.userText, action.userCell, `${action.requestId}:user`);
+      const userDraft = messageDraft('user', action.userText, action.userCell, `${action.requestId}:user`);
       return updateSession({
         ...state,
         connection: {
@@ -744,12 +734,12 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
             sessionId,
             kind: action.kind,
             phase: 'thinking',
-            timelineEntryIds: [`history:${userDraft.id}`],
+            timelineEntryIds: [`message:${userDraft.id}`],
             startedAt: action.now,
             charCount: 0,
           },
         },
-      }, sessionId, (session) => appendTimelineFromHistory({
+      }, sessionId, (session) => appendMessageCells({
         ...session,
         kind: action.kind,
         activeRunId: action.requestId,
@@ -763,18 +753,18 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       const existingRun = state.runs[action.requestId];
       const sessionId = existingRun?.sessionId ?? state.focusedSessionId;
       if (!sessionId) return state;
-      const userDraft = historyDraft('user', action.message, action.userCell, `${action.requestId}:review-response`);
+      const userDraft = messageDraft('user', action.message, action.userCell, `${action.requestId}:review-response`);
       const nextRun: TuiRunModel = existingRun
         ? addTimelineEntryId(clearPendingReview({
             ...existingRun,
             phase: 'thinking',
-          }), `history:${userDraft.id}`)
+          }), `message:${userDraft.id}`)
         : {
             requestId: action.requestId,
             sessionId,
             kind: state.sessions[sessionId]?.kind ?? 'chat',
             phase: 'thinking',
-            timelineEntryIds: [`history:${userDraft.id}`],
+            timelineEntryIds: [`message:${userDraft.id}`],
             startedAt: action.now,
             charCount: 0,
           };
@@ -795,9 +785,8 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           [action.requestId]: nextRun,
         },
       }, sessionId, (session) => {
-        const sessionWithReviewAnswered = markReviewTimelineEntries(session, action.requestId, 'answered');
-        return appendTimelineFromHistory({
-          ...sessionWithReviewAnswered,
+        return appendMessageCells({
+          ...session,
           activeRunId: action.requestId,
         }, [
           userDraft,
@@ -821,11 +810,11 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...stateWithRun.connection,
           message: action.statusMessage,
         },
-      }, run.sessionId, (session) => markReviewTimelineEntries(session, action.requestId, 'interrupted'));
+      }, run.sessionId, (session) => session);
     }
 
     case 'run.finish':
-      return finishRun(state, action.requestId, action.statusMessage, action.history);
+      return finishRun(state, action.requestId, action.statusMessage, action.messages);
 
     case 'event.received': {
       const event = action.event;
@@ -903,43 +892,31 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
       if (event.type === 'human_review.requested') {
         const petId = event.actor?.petId || undefined;
-        let reviewEntryId: string | null = null;
-        const stateWithTimeline = updateSession({
+        const stateWithReview = updateSession({
           ...state,
           connection: {
             ...state.connection,
             message: TUI_TEXT.approvalWaiting(petId),
           },
-        }, sessionId, (currentSession) => {
-          const { session: sessionWithTimeline, entry } = appendReviewTimelineEntry(
-            currentSession,
-            event.requestId,
-            event.review.id,
-          );
-          reviewEntryId = entry.id;
-          return sessionWithTimeline;
-        });
-        return reviewEntryId
-          ? updateRun(stateWithTimeline, event.requestId, (currentRun) =>
-              addTimelineEntryId({
-                ...currentRun,
-                phase: 'waiting_human',
-                charCount: 0,
-                pendingReview: {
-                  requestId: event.requestId,
-                  review: event.review,
-                  ...(petId ? { petId } : {}),
-                },
-              }, reviewEntryId!))
-          : stateWithTimeline;
+        }, sessionId, (currentSession) => currentSession);
+        return updateRun(stateWithReview, event.requestId, (currentRun) => ({
+          ...currentRun,
+          phase: 'waiting_human',
+          charCount: 0,
+          pendingReview: {
+            requestId: event.requestId,
+            review: event.review,
+            ...(petId ? { petId } : {}),
+          },
+        }));
       }
 
       if (event.type === 'system.notice') {
         const notice = formatSystemNoticeEvent(event);
         return notice
           ? updateSession(state, sessionId, (currentSession) =>
-              appendTimelineFromHistory(currentSession, [
-                historyDraft('system', notice, action.historyCell, `${event.requestId}:notice`),
+              appendMessageCells(currentSession, [
+                messageDraft('system', notice, action.messageCell, `${event.requestId}:notice`),
               ]))
           : state;
       }
@@ -962,8 +939,8 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         const line = formatStudioProgressEvent(event);
         return line
           ? updateSession(state, sessionId, (currentSession) =>
-              appendTimelineFromHistory(currentSession, [
-                historyDraft('system', line, action.historyCell, `${event.requestId}:studio-progress`),
+              appendMessageCells(currentSession, [
+                messageDraft('system', line, action.messageCell, `${event.requestId}:studio-progress`),
               ]))
           : state;
       }
@@ -971,7 +948,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (event.type === 'error') {
         const message = event.message || 'internal error';
         return finishRun(state, event.requestId, TUI_TEXT.statusErrorRecovered, [
-          historyDraft('system', TUI_TEXT.errorLine(message), action.historyCell, `${event.requestId}:event-error`),
+          messageDraft('system', TUI_TEXT.errorLine(message), action.messageCell, `${event.requestId}:event-error`),
         ]);
       }
 
@@ -980,34 +957,34 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
     case 'server.interrupted':
       return finishRun(state, action.requestId, action.statusMessage, [
-        historyDraft('assistant', TUI_TEXT.interrupted, action.historyCell, `${action.requestId}:interrupted`),
+        messageDraft('assistant', TUI_TEXT.interrupted, action.messageCell, `${action.requestId}:interrupted`),
       ]);
 
     case 'server.studio_response': {
-      const history: HistoryCellDraft[] = [
+      const messages: MessageCellDraft[] = [
         action.reply.trim()
-          ? historyDraft('assistant', action.reply.trim(), action.historyCell, `${action.requestId}:studio-response`)
-          : historyDraft(
+          ? messageDraft('assistant', action.reply.trim(), action.messageCell, `${action.requestId}:studio-response`)
+          : messageDraft(
               'system',
               TUI_TEXT.studioEmptyTurn(action.outcome),
-              action.historyCell,
+              action.messageCell,
               `${action.requestId}:studio-empty`,
             ),
       ];
       if (action.outcome === 'stopped' && action.reason) {
-        history.push(historyDraft(
+        messages.push(messageDraft(
           'system',
           TUI_TEXT.studioStoppedReason(action.reason),
           action.stoppedReasonCell,
           `${action.requestId}:studio-stopped`,
         ));
       }
-      return finishRun(state, action.requestId, action.statusMessage, history);
+      return finishRun(state, action.requestId, action.statusMessage, messages);
     }
 
     case 'server.studio_error':
       return finishRun(state, action.requestId, action.statusMessage, [
-        historyDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.historyCell, `${action.requestId}:studio-error`),
+        messageDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.messageCell, `${action.requestId}:studio-error`),
       ]);
 
     default:
@@ -1021,6 +998,10 @@ export function selectFocusedSession(state: TuiState) {
 
 export function selectFocusedTimeline(state: TuiState) {
   return selectFocusedSession(state)?.timeline ?? [];
+}
+
+export function selectFocusedNotices(state: TuiState) {
+  return selectFocusedSession(state)?.notices ?? [];
 }
 
 export function selectFocusedActiveRun(state: TuiState) {

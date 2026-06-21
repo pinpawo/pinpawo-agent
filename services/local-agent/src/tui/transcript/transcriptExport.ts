@@ -1,10 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentTimelineEntry } from '../timeline/agentTimeline';
+import type { AgentMessageEntry } from '../timeline/agentTimeline';
 import type { SessionModel } from '../state/tuiState';
 
-type TranscriptTimelineEntry = Extract<AgentTimelineEntry, { type: 'message' | 'notice' | 'error' | 'studio.progress' }>;
+type TranscriptTimelineEntry = AgentMessageEntry & { role: 'user' | 'assistant' };
 
 export type TranscriptExportResult = {
   filePath: string;
@@ -79,11 +79,8 @@ export function formatTranscriptMarkdown(session: SessionModel, exportedAt: Date
   return lines.join('\n');
 }
 
-function isTranscriptTimelineEntry(entry: AgentTimelineEntry): entry is TranscriptTimelineEntry {
-  return entry.type === 'message' && (entry.role === 'user' || entry.role === 'assistant')
-    || entry.type === 'notice'
-    || entry.type === 'error'
-    || entry.type === 'studio.progress';
+function isTranscriptTimelineEntry(entry: SessionModel['timeline'][number]): entry is TranscriptTimelineEntry {
+  return entry.type === 'message' && (entry.role === 'user' || entry.role === 'assistant');
 }
 
 function formatTranscriptEntry(entry: TranscriptTimelineEntry) {
@@ -99,10 +96,7 @@ function formatTranscriptEntry(entry: TranscriptTimelineEntry) {
 }
 
 function formatRole(entry: TranscriptTimelineEntry) {
-  if (entry.type === 'message') {
-    return entry.role === 'assistant' ? 'Assistant' : 'User';
-  }
-  return 'System';
+  return entry.role === 'assistant' ? 'Assistant' : 'User';
 }
 
 function defaultTranscriptFileName(sessionId: string, now: Date) {

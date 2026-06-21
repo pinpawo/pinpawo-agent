@@ -37,6 +37,7 @@ function pendingReviewState(): TuiState {
         actor: { label: 'Pet', summary: 'summary' },
         runtime: {},
         timeline: [],
+        notices: [],
         tokenUsage: null,
         activeRunId: 'req-1',
       },
@@ -100,7 +101,7 @@ test('TuiRuntimeController blocks empty required review input', () => {
 
   assert.equal(submitted, false);
   assert.deepEqual(sent, []);
-  assert.equal(actions.some((action) => action.type === 'history.append'), true);
+  assert.equal(actions.some((action) => action.type === 'message.append'), true);
 });
 
 test('TuiRuntimeController interrupts pending human review instead of dismissing it locally', () => {
@@ -146,7 +147,7 @@ test('TuiRuntimeController restores a reconnect snapshot before opening websocke
         sessionId: 'sess-1',
         kind: 'chat',
         timeline: [{
-          id: 'history:user-1',
+          id: 'message:user-1',
           type: 'message',
           role: 'user',
           text: 'hello',

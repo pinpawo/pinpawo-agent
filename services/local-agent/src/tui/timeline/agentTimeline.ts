@@ -1,5 +1,5 @@
 import type { LocalAgentOperationEvent, LocalAgentOperationPhase } from '../../events/localAgentEvent';
-import type { HistoryCellModel } from '../state/tuiState';
+import type { MessageCellModel } from '../state/tuiState';
 import {
   buildOperationPresentation,
   type OperationPresentation,
@@ -7,11 +7,7 @@ import {
 
 export type AgentTimelineEntry =
   | AgentMessageEntry
-  | AgentOperationEntry
-  | AgentReviewEntry
-  | AgentNoticeEntry
-  | AgentErrorEntry
-  | AgentStudioProgressEntry;
+  | AgentOperationEntry;
 
 export type AgentTimelineMessage =
   | AgentUserTimelineMessage
@@ -63,42 +59,8 @@ export type AgentOperationEntry = OperationPresentation & {
   completedAt?: number;
 };
 
-export type AgentReviewEntry = {
-  id: string;
-  type: 'review';
-  requestId: string;
-  reviewId: string;
-  status: 'waiting' | 'answered' | 'interrupted';
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-export type AgentNoticeEntry = {
-  id: string;
-  type: 'notice';
-  requestId?: string;
-  text: string;
-  createdAt?: string;
-};
-
-export type AgentErrorEntry = {
-  id: string;
-  type: 'error';
-  requestId?: string;
-  text: string;
-  createdAt?: string;
-};
-
-export type AgentStudioProgressEntry = {
-  id: string;
-  type: 'studio.progress';
-  requestId: string;
-  text: string;
-  createdAt?: string;
-};
-
-export function timelineEntryIdFromHistoryCell(cell: Pick<HistoryCellModel, 'id'>) {
-  return `history:${cell.id}`;
+export function timelineEntryIdFromMessageCell(cell: Pick<MessageCellModel, 'id'>) {
+  return `message:${cell.id}`;
 }
 
 export function isAgentTimelineMessage(entry: AgentTimelineEntry): entry is AgentTimelineMessage {
@@ -111,17 +73,10 @@ export function timelineMessagesFromEntries(entries: AgentTimelineEntry[]): Agen
   return entries.filter(isAgentTimelineMessage);
 }
 
-export function timelineEntryFromHistoryCell(cell: HistoryCellModel): AgentTimelineEntry {
-  if (cell.kind === 'system') {
-    return {
-      id: timelineEntryIdFromHistoryCell(cell),
-      type: 'notice',
-      text: cell.text,
-      ...(cell.timestamp ? { createdAt: cell.timestamp } : {}),
-    };
-  }
+export function timelineEntryFromMessageCell(cell: MessageCellModel): AgentTimelineEntry | null {
+  if (cell.kind === 'system') return null;
   return {
-    id: timelineEntryIdFromHistoryCell(cell),
+    id: timelineEntryIdFromMessageCell(cell),
     type: 'message',
     role: cell.kind,
     text: cell.text,

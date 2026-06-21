@@ -7,6 +7,7 @@ import {
   selectFocusedActiveOperations,
   selectFocusedActiveRun,
   selectFocusedBusy,
+  selectFocusedNotices,
   selectFocusedPendingApproval,
   selectFocusedTimeline,
   tuiStateReducer,
@@ -43,13 +44,10 @@ function timelineMessageText(state: TuiState, sessionId: string, entryId: string
 function transcriptTimeline(state: TuiState, sessionId = 'chat:pet') {
   return state.sessions[sessionId]?.timeline
     .filter((entry) =>
-      ((entry.type === 'message' && (entry.role === 'user' || entry.role === 'assistant'))
-      || entry.type === 'notice'
-      || entry.type === 'error'
-      || entry.type === 'studio.progress'))
+      entry.type === 'message' && (entry.role === 'user' || entry.role === 'assistant'))
     .map((entry) => [
       entry.type === 'message' ? entry.role : 'system',
-      'text' in entry ? entry.text : '',
+      entry.type === 'message' ? entry.text : '',
     ]) ?? [];
 }
 
@@ -96,7 +94,7 @@ test('tuiStateReducer uses completed message text for final assistant history', 
       text: '最终回答只应该使用 completed 的内容。',
     },
     now: 1300,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
@@ -133,7 +131,7 @@ test('tuiStateReducer finalizes completed messages from run registry', () => {
       },
     },
     now: 1300,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
@@ -284,7 +282,7 @@ test('tuiStateReducer infers usage context window from runtime when missing', ()
       usage,
     },
     now: 1300,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
@@ -319,7 +317,7 @@ test('tuiStateReducer falls back to assistant timeline text when completed text 
       text: '   ',
     },
     now: 1200,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
@@ -372,7 +370,7 @@ test('tuiStateReducer displays subagent deltas in timeline without legacy draft 
       text: '最终答复',
     },
     now: 1300,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   assert.deepEqual(transcriptTimeline(state), [
@@ -405,7 +403,7 @@ test('tuiStateReducer stores usage on completed message', () => {
       usage,
     },
     now: 1300,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
@@ -484,7 +482,7 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
       kind: 'chat',
       timeline: [
         {
-          id: 'history:user-1',
+          id: 'message:user-1',
           type: 'message',
           role: 'user',
           text: 'hello',
@@ -493,7 +491,7 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
           requestId: 'req-1',
         },
         {
-          id: 'history:assistant-1',
+          id: 'message:assistant-1',
           type: 'message',
           role: 'assistant',
           text: 'hi',
@@ -507,7 +505,7 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
         sessionId: 'chat:pet',
         kind: 'chat',
         phase: 'streaming',
-        timelineEntryIds: ['history:user-1'],
+        timelineEntryIds: ['message:user-1'],
         startedAt: 1000,
       }],
       activeRunId: 'req-1',
@@ -530,8 +528,8 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
     ['assistant', 'hi'],
   ]);
   assert.deepEqual(session.timeline.map((entry) => [entry.id, entry.type]), [
-    ['history:user-1', 'message'],
-    ['history:assistant-1', 'message'],
+    ['message:user-1', 'message'],
+    ['message:assistant-1', 'message'],
   ]);
   assert.equal(session.runtime.model, 'new-model');
   assert.equal(session.runtime.cwd, '/old');
@@ -607,7 +605,7 @@ test('tuiStateReducer restores pending approval from authoritative session snaps
       kind: 'chat',
       timeline: [
         {
-          id: 'history:user-1',
+          id: 'message:user-1',
           type: 'message',
           role: 'user',
           text: 'needs approval',
@@ -621,7 +619,7 @@ test('tuiStateReducer restores pending approval from authoritative session snaps
         sessionId: 'chat:pet',
         kind: 'chat',
         phase: 'waiting_human',
-        timelineEntryIds: ['history:user-1'],
+        timelineEntryIds: ['message:user-1'],
         startedAt: 1000,
         pendingReview: {
           requestId: 'req-review',
@@ -747,7 +745,7 @@ test('tuiStateReducer tracks operation lifecycle in timeline without terminal hi
 
   let activeRun = selectFocusedActiveRun(state);
   assert.equal(activeRun?.phase, 'using_tool');
-  assert.deepEqual(activeRun?.timelineEntryIds, ['history:req-1:user', 'req-1:operation:tool-1']);
+  assert.deepEqual(activeRun?.timelineEntryIds, ['message:req-1:user', 'req-1:operation:tool-1']);
   assert.equal(selectFocusedTimeline(state).at(-1)?.id, 'req-1:operation:tool-1');
   assert.equal(selectFocusedTimeline(state).at(-1)?.type, 'operation');
   assert.deepEqual(selectFocusedActiveOperations(state), [{
@@ -791,7 +789,7 @@ test('tuiStateReducer tracks operation lifecycle in timeline without terminal hi
       },
     },
     now: 1400,
-    historyCell: { id: 'op-complete' },
+    messageCell: { id: 'op-complete' },
   });
 
   activeRun = selectFocusedActiveRun(state);
@@ -803,7 +801,7 @@ test('tuiStateReducer tracks operation lifecycle in timeline without terminal hi
   const completedTimelineEntry = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:operation:tool-1');
   assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.phase : undefined, 'completed');
   assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.summary : undefined, 'ok');
-  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'history:op-complete'), false);
+  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'message:op-complete'), false);
 });
 
 test('tuiStateReducer handles human review and interrupt state', () => {
@@ -838,13 +836,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     petId: 'pet-a',
   });
   assert.equal(state.connection.message, '等待你的决定(pet-a)');
-  assert.deepEqual(selectFocusedTimeline(state).at(-1), {
-    id: 'req-1:review:review-1',
-    type: 'review',
-    requestId: 'req-1',
-    reviewId: 'review-1',
-    status: 'waiting',
-  });
+  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'req-1:review:review-1'), false);
 
   const activeRunBefore = selectFocusedActiveRun(state);
   state = tuiStateReducer(state, {
@@ -862,10 +854,8 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.equal(selectFocusedActiveRun(state)?.requestId, 'req-1');
   assert.equal(selectFocusedActiveRun(state)?.startedAt, activeRunBefore?.startedAt);
   assert.equal(selectFocusedPendingApproval(state), null);
-  const answeredReview = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:review:review-1');
-  assert.equal(answeredReview?.type === 'review' ? answeredReview.status : undefined, 'answered');
   assert.deepEqual(selectFocusedTimeline(state).at(-1), {
-    id: 'history:review-response',
+    id: 'message:review-response',
     type: 'message',
     role: 'user',
     text: '批准',
@@ -936,8 +926,6 @@ test('tuiStateReducer review.response.resume falls back to focused session when 
     statusMessage: '提交确认',
   });
 
-  const answeredReview = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:review:review-1');
-  assert.equal(answeredReview?.type === 'review' ? answeredReview.status : undefined, 'answered');
   assert.equal(state.runs['req-1']?.sessionId, 'chat:pet');
   assert.equal(selectFocusedPendingApproval(state), null);
   assert.equal(selectFocusedActiveRun(state)?.phase, 'thinking');
@@ -998,12 +986,12 @@ test('tuiStateReducer finishes error and studio control messages', () => {
       message: 'boom',
     },
     now: 1200,
-    historyCell: { id: 'chat-error' },
+    messageCell: { id: 'chat-error' },
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
   assert.equal(state.connection.message, '出错，已恢复输入');
-  assert.equal(transcriptTimeline(state).at(-1)?.[1], '出错：boom');
+  assert.equal(selectFocusedNotices(state).at(-1)?.text, '出错：boom');
 
   state = startRun(state, 'studio-req');
   state = tuiStateReducer(state, {
@@ -1012,13 +1000,13 @@ test('tuiStateReducer finishes error and studio control messages', () => {
     outcome: 'stopped',
     reply: '',
     reason: 'done enough',
-    historyCell: { id: 'studio-empty' },
+    messageCell: { id: 'studio-empty' },
     stoppedReasonCell: { id: 'studio-stopped' },
     statusMessage: '就绪',
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
-  assert.deepEqual(transcriptTimeline(state).slice(-2).map((item) => item[1]), [
+  assert.deepEqual(selectFocusedNotices(state).slice(-2).map((item) => item.text), [
     '[studio] turn stopped (无最终输出)',
     '[studio] stopped: done enough',
   ]);
@@ -1028,11 +1016,11 @@ test('tuiStateReducer finishes error and studio control messages', () => {
     type: 'server.studio_error',
     requestId: 'studio-error',
     message: 'planner failed',
-    historyCell: { id: 'studio-error-cell' },
+    messageCell: { id: 'studio-error-cell' },
     statusMessage: 'Studio 出错，已恢复输入',
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
   assert.equal(state.connection.message, 'Studio 出错，已恢复输入');
-  assert.equal(transcriptTimeline(state).at(-1)?.[1], '[studio 出错] planner failed');
+  assert.equal(selectFocusedNotices(state).at(-1)?.text, '[studio 出错] planner failed');
 });

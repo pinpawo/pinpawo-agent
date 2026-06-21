@@ -7,12 +7,10 @@ import { AgentTimelineItem } from './AgentTimelineItem';
 import { AgentMessageItem } from './AgentMessageItem';
 import {
   buildAgentOperationDisplayLines,
-  buildAgentReviewText,
 } from './agentTimelineRendering';
 import type {
   AgentMessageEntry,
   AgentOperationEntry,
-  AgentReviewEntry,
   AgentTimelineEntry,
 } from '../timeline/agentTimeline';
 
@@ -106,12 +104,6 @@ test('buildAgentOperationDisplayLines renders browser active completed and faile
   );
 });
 
-test('buildAgentReviewText renders review status without treating it as a message', () => {
-  assert.equal(buildAgentReviewText(reviewEntry('waiting')), '等待你的决定');
-  assert.equal(buildAgentReviewText(reviewEntry('answered')), '确认已提交');
-  assert.equal(buildAgentReviewText(reviewEntry('interrupted')), '确认已中断');
-});
-
 test('AgentTimeline preserves assistant and operation entry order', () => {
   const entries: AgentTimelineEntry[] = [
     messageEntry('assistant-before-tool', '正在打开页面'),
@@ -195,15 +187,5 @@ function messageEntry(id: string, text: string): AgentMessageEntry {
     requestId: 'req-1',
     text,
     status: 'completed',
-  };
-}
-
-function reviewEntry(status: AgentReviewEntry['status']): AgentReviewEntry {
-  return {
-    id: `req-1:review:${status}`,
-    type: 'review',
-    requestId: 'req-1',
-    reviewId: 'review-1',
-    status,
   };
 }

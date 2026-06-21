@@ -63,12 +63,6 @@ function isSettledTimelineEntry(entry: AgentTimelineEntry) {
       return entry.status === 'completed';
     case 'operation':
       return !isRunningOperationPhase(entry.phase);
-    case 'review':
-      return entry.status !== 'waiting';
-    case 'notice':
-    case 'error':
-    case 'studio.progress':
-      return true;
   }
 }
 

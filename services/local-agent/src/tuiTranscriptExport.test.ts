@@ -19,8 +19,8 @@ test('formatTranscriptMarkdown writes session metadata and messages', () => {
     timeline: [
       { id: 'u1', type: 'message', role: 'user', text: 'hello', status: 'completed', createdAt: '09:00:00' },
       { id: 'a1', type: 'message', role: 'assistant', text: 'hi', status: 'completed', createdAt: '09:00:01' },
-      { id: 's1', type: 'notice', text: 'tool ok' },
     ],
+    notices: [{ id: 's1', text: 'tool ok' }],
   });
 
   assert.equal(formatTranscriptMarkdown(session, FIXED_NOW), [
@@ -40,10 +40,6 @@ test('formatTranscriptMarkdown writes session metadata and messages', () => {
     '### Assistant · 09:00:01',
     '',
     'hi',
-    '',
-    '### System',
-    '',
-    'tool ok',
     '',
   ].join('\n'));
 });

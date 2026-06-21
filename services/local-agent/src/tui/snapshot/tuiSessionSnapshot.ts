@@ -5,12 +5,12 @@ import type {
   TuiCoreTimelineEntry,
 } from '../contracts/tuiCoreContract';
 import {
-  timelineEntryIdFromHistoryCell,
+  timelineEntryIdFromMessageCell,
   type AgentOperationEntry,
   type AgentTimelineEntry,
 } from '../timeline/agentTimeline';
 import type {
-  HistoryCellModel,
+  MessageCellModel,
   SessionModel,
   TokenUsageModel,
 } from '../state/tuiState';
@@ -18,7 +18,7 @@ import type {
 type BuildSnapshotFromMessagesParams = {
   sessionId: string;
   kind: TuiCoreSessionSnapshot['kind'];
-  messages: HistoryCellModel[];
+  messages: MessageCellModel[];
   runtime?: Partial<SessionModel['runtime']> | null;
   tokenUsage?: TokenUsageModel | null;
 };
@@ -36,11 +36,11 @@ export function buildTuiSessionSnapshotFromMessages(
   };
 }
 
-export function timelineSnapshotFromMessages(messages: HistoryCellModel[]): TuiCoreTimelineEntry[] {
+export function timelineSnapshotFromMessages(messages: MessageCellModel[]): TuiCoreTimelineEntry[] {
   return messages.flatMap((cell) => {
     if (cell.kind !== 'user' && cell.kind !== 'assistant') return [];
     return [{
-      id: timelineEntryIdFromHistoryCell(cell),
+      id: timelineEntryIdFromMessageCell(cell),
       type: 'message',
       role: cell.kind,
       text: cell.text,

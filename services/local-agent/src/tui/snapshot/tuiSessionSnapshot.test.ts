@@ -25,8 +25,8 @@ test('CORE-4 snapshot adapter converts server messages into checkpoint timeline 
 
   assert.equal(snapshot.sessionId, 'chat:pet');
   assert.deepEqual(snapshot.timeline.map((entry) => [entry.id, entry.type, entry.source]), [
-    ['history:user-1', 'message', 'checkpoint'],
-    ['history:assistant-1', 'message', 'checkpoint'],
+    ['message:user-1', 'message', 'checkpoint'],
+    ['message:assistant-1', 'message', 'checkpoint'],
   ]);
   assert.deepEqual(snapshot.timeline.map((entry) => [entry.type === 'message' ? entry.role : '', entry.type === 'message' ? entry.text : '']), [
     ['user', 'hello'],
@@ -62,7 +62,7 @@ test('CORE-4 snapshot adapter projects snapshot timeline into current UI timelin
   ]);
 
   assert.deepEqual(entries.map((entry) => [entry.id, entry.type]), [
-    ['history:user-1', 'message'],
+    ['message:user-1', 'message'],
     ['req-1:operation:tool', 'operation'],
   ]);
   assert.equal(entries[1]?.type === 'operation' ? entries[1].title : undefined, 'Run tool');

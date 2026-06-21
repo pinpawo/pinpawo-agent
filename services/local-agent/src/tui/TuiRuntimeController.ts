@@ -42,7 +42,7 @@ function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) 
   return pieces.join(' · ');
 }
 
-function makeHistoryMeta() {
+function makeMessageMeta() {
   return {
     id: randomUUID(),
     timestamp: formatNow(),
@@ -120,7 +120,7 @@ export class TuiRuntimeController {
       kind: 'chat',
       userText: message,
       now,
-      userCell: makeHistoryMeta(),
+      userCell: makeMessageMeta(),
       statusMessage: TUI_TEXT.waitingForReply,
     });
 
@@ -151,7 +151,7 @@ export class TuiRuntimeController {
       kind: 'studio',
       userText: TUI_TEXT.studioUserMessage(userRequest),
       now,
-      userCell: makeHistoryMeta(),
+      userCell: makeMessageMeta(),
       statusMessage: TUI_TEXT.studioRunning,
     });
     this.wsClient.send({
@@ -196,7 +196,7 @@ export class TuiRuntimeController {
       requestId,
       message: decision,
       now,
-      userCell: makeHistoryMeta(),
+      userCell: makeMessageMeta(),
       statusMessage: TUI_TEXT.reviewSubmitting,
     });
 
@@ -238,8 +238,8 @@ export class TuiRuntimeController {
         type: 'run.finish',
         requestId: interruptRequestId,
         statusMessage: TUI_TEXT.interruptRequestedStatus,
-        history: [{
-          ...makeHistoryMeta(),
+        messages: [{
+          ...makeMessageMeta(),
           kind: 'system',
           text: TUI_TEXT.interruptRequestedLocalRelease,
         }],
@@ -272,7 +272,7 @@ export class TuiRuntimeController {
 
   appendSystemMessage(text: string) {
     this.options.dispatch({
-      type: 'history.append',
+      type: 'message.append',
       cell: {
         id: randomUUID(),
         kind: 'system',
@@ -521,7 +521,7 @@ export class TuiRuntimeController {
   private handleServerMessage(msg: LocalAgentServerMessage) {
     const result = buildTuiActionsFromServerMessage(msg, {
       now: Date.now(),
-      makeHistoryCell: makeHistoryMeta,
+      makeMessageCell: makeMessageMeta,
     });
     if (result.clearInterrupt) {
       this.clearInterruptTimeout();

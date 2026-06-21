@@ -51,7 +51,7 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 ## Open Questions
 
 - Which existing fixture best represents backend checkpoint messages?
-- Which render owners should take non-checkpoint visual timeline entries after CORE-7?
+- Should subagent streaming output remain a timeline message role, or move into a dedicated activity stream during UI layout work?
 
 ## Merge Checklist
 

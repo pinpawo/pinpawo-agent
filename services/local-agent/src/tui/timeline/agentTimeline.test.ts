@@ -4,7 +4,7 @@ import type { LocalAgentOperationEvent } from '../../events/localAgentEvent';
 import {
   isAgentTimelineMessage,
   operationTimelineEntryFromEvent,
-  timelineEntryFromHistoryCell,
+  timelineEntryFromMessageCell,
   timelineEntryIdFromOperationEvent,
   timelineMessagesFromEntries,
 } from './agentTimeline';
@@ -17,18 +17,14 @@ import {
 import { buildOperationPresentation, getOperationPresentationKey } from './operationPresentation';
 import type { AgentTimelineEntry } from './agentTimeline';
 
-test('timelineEntryFromHistoryCell keeps system history typed as notice', () => {
-  assert.deepEqual(
-    timelineEntryFromHistoryCell({
+test('timelineEntryFromMessageCell excludes system history from checkpoint timeline', () => {
+  assert.equal(
+    timelineEntryFromMessageCell({
       id: 'operation-1',
       kind: 'system',
       text: '执行命令：npm test',
     }),
-    {
-      id: 'history:operation-1',
-      type: 'notice',
-      text: '执行命令：npm test',
-    },
+    null,
   );
 });
 
@@ -248,24 +244,6 @@ test('CORE-2 timeline messages include only checkpoint-backed message and operat
       text: 'internal progress',
       status: 'streaming',
     },
-    {
-      id: 'review-1',
-      type: 'review',
-      requestId: 'req-1',
-      reviewId: 'approval-1',
-      status: 'waiting',
-    },
-    {
-      id: 'notice-1',
-      type: 'notice',
-      text: 'connected',
-    },
-    {
-      id: 'studio-1',
-      type: 'studio.progress',
-      requestId: 'req-1',
-      text: 'writing file',
-    },
   ];
 
   assert.deepEqual(timelineMessagesFromEntries(entries).map((entry) => entry.id), [
@@ -274,7 +252,4 @@ test('CORE-2 timeline messages include only checkpoint-backed message and operat
     operationEntry.id,
   ]);
   assert.equal(isAgentTimelineMessage(entries[3]!), false);
-  assert.equal(isAgentTimelineMessage(entries[4]!), false);
-  assert.equal(isAgentTimelineMessage(entries[5]!), false);
-  assert.equal(isAgentTimelineMessage(entries[6]!), false);
 });

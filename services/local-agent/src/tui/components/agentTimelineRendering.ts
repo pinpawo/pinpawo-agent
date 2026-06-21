@@ -3,7 +3,6 @@ import { TUI_TEXT } from '../render/text';
 import { formatElapsed, truncateLine } from '../render/terminalText';
 import type {
   AgentOperationEntry,
-  AgentReviewEntry,
 } from '../timeline/agentTimeline';
 
 export type TimelineTextLine = {
@@ -20,17 +19,6 @@ export function buildAgentOperationDisplayLines(
     id: `${entry.id}:line`,
     text: buildAgentOperationText(entry, now, width),
   }];
-}
-
-export function buildAgentReviewText(entry: AgentReviewEntry) {
-  switch (entry.status) {
-    case 'answered':
-      return '确认已提交';
-    case 'interrupted':
-      return '确认已中断';
-    case 'waiting':
-      return TUI_TEXT.approvalWaiting();
-  }
 }
 
 function buildAgentOperationText(entry: AgentOperationEntry, now: number, width: number) {

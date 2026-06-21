@@ -215,7 +215,7 @@ function operationEvent(params: {
   };
 }
 
-test('CORE-2 timeline messages include only checkpoint-backed message and operation entries', () => {
+test('timeline messages include only checkpoint-backed message and operation entries', () => {
   const operationEntry = operationTimelineEntryFromEvent(operationEvent({
     phase: 'started',
     target: 'pwd',

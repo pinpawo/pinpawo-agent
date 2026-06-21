@@ -6,7 +6,7 @@ import {
   timelineSnapshotFromMessages,
 } from './tuiSessionSnapshot';
 
-test('CORE-4 snapshot adapter converts server messages into checkpoint timeline messages', () => {
+test('snapshot adapter converts server messages into checkpoint timeline messages', () => {
   const snapshot = buildTuiSessionSnapshotFromMessages({
     sessionId: 'chat:pet',
     kind: 'chat',
@@ -40,7 +40,7 @@ test('CORE-4 snapshot adapter converts server messages into checkpoint timeline 
   });
 });
 
-test('CORE-4 snapshot adapter projects snapshot timeline into current UI timeline entries', () => {
+test('snapshot adapter projects snapshot timeline into current UI timeline entries', () => {
   const timeline = timelineSnapshotFromMessages([
     { id: 'user-1', kind: 'user', text: 'hello' },
   ]);

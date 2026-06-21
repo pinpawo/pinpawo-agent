@@ -36,6 +36,7 @@ import type {
   MessageCellDraft,
   MessageCellMeta,
   MessageCellModel,
+  RunId,
   SessionNoticeModel,
   SessionId,
   SessionModel,
@@ -517,10 +518,13 @@ function runFromSnapshot(
   };
 }
 
-function activeRunIdFromSnapshot(snapshot: TuiCoreSessionSnapshot) {
+function activeRunIdFromSnapshot(
+  snapshot: TuiCoreSessionSnapshot,
+  snapshotRuns: Record<RunId, TuiRunModel>,
+) {
   const activeRunId = snapshot.activeRunId
     ?? snapshot.runs.find((run) => !isTerminalSnapshotRun(run))?.requestId;
-  return activeRunId ?? null;
+  return activeRunId && snapshotRuns[activeRunId] ? activeRunId : null;
 }
 
 function pendingReviewFromSnapshotRun(
@@ -566,7 +570,7 @@ function applySessionSnapshot(
     const nextRun = runFromSnapshot(snapshot, run, state.runs[run.requestId]);
     return nextRun ? [[run.requestId, nextRun]] : [];
   }));
-  const activeRunId = activeRunIdFromSnapshot(snapshot);
+  const activeRunId = activeRunIdFromSnapshot(snapshot, snapshotRuns);
   const nextSession: SessionModel = {
     id: sessionId,
     kind: snapshot.kind,

@@ -17,7 +17,7 @@ import {
 import { buildOperationPresentation, getOperationPresentationKey } from './operationPresentation';
 import type { AgentTimelineEntry } from './agentTimeline';
 
-test('timelineEntryFromMessageCell excludes system history from checkpoint timeline', () => {
+test('timelineEntryFromMessageCell excludes system message cells from checkpoint timeline', () => {
   assert.equal(
     timelineEntryFromMessageCell({
       id: 'operation-1',

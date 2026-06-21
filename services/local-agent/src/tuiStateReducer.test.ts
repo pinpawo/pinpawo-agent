@@ -51,7 +51,7 @@ function transcriptTimeline(state: TuiState, sessionId = 'chat:pet') {
     ]) ?? [];
 }
 
-test('tuiStateReducer uses completed message text for final assistant history', () => {
+test('tuiStateReducer uses completed message text for final assistant timeline entry', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -546,6 +546,51 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
   assert.equal(state.runs['other-req']?.sessionId, 'chat:other');
 });
 
+test('tuiStateReducer clears snapshot activeRunId when the run is terminal', () => {
+  const state = tuiStateReducer(initialState('chat:pet'), {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [
+        {
+          id: 'message:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'hello',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-done',
+        },
+        {
+          id: 'message:assistant-1',
+          type: 'message',
+          role: 'assistant',
+          text: 'done',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-done',
+        },
+      ],
+      runs: [{
+        requestId: 'req-done',
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        phase: 'completed',
+        timelineEntryIds: ['message:user-1', 'message:assistant-1'],
+        startedAt: 1000,
+        finishedAt: 2000,
+      }],
+      activeRunId: 'req-done',
+    },
+  });
+
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+  assert.equal(state.runs['req-done'], undefined);
+  assert.equal(selectFocusedActiveRun(state), null);
+});
+
 test('tuiStateReducer preserves reconnect token usage when snapshot omits usage', () => {
   let state = initialState('chat:pet');
   state = {
@@ -723,7 +768,7 @@ test('tuiStateReducer keeps two requestIds from mixing assistant timeline entrie
   assert.equal(timelineMessageText(state, 's2', 'req-b:assistant:0'), 'B');
 });
 
-test('tuiStateReducer tracks operation lifecycle in timeline without terminal history rows', () => {
+test('tuiStateReducer tracks operation lifecycle in timeline without terminal message rows', () => {
   let state = startRun(initialState(), 'req-1');
   const started: LocalAgentOperationEvent = {
     type: 'operation',

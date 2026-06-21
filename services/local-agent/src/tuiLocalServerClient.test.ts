@@ -154,6 +154,27 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
   ]);
 });
 
+test('TuiLocalServerClient does not synthesize snapshots when history restore fails', async () => {
+  const client = new TuiLocalServerClient({
+    port: 3210,
+    fetchImpl: (async (url: RequestInfo | URL) => {
+      const href = String(url);
+      if (href.endsWith('/history')) {
+        return new Response('{}', { status: 503 });
+      }
+      if (href.endsWith('/runtime')) {
+        return jsonResponse({ model: 'gpt-test' });
+      }
+      return jsonResponse({});
+    }) as typeof fetch,
+  });
+
+  await assert.rejects(
+    () => client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'chat' }),
+    /HTTP 503/,
+  );
+});
+
 test('TuiLocalServerClient treats health errors as unhealthy', async () => {
   const client = new TuiLocalServerClient({
     port: 3210,

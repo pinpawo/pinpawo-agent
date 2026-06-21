@@ -52,7 +52,9 @@ export class TuiLocalServerClient {
 
   async readHistory(): Promise<HistoryCellModel[]> {
     const res = await this.fetchAuth(this.url('/history'));
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
     const payload = await res.json() as {
       messages?: Array<{ role?: string; text?: string }>;
     };
@@ -64,7 +66,7 @@ export class TuiLocalServerClient {
     kind: TuiCoreSessionSnapshot['kind'];
   }): Promise<TuiCoreSessionSnapshot> {
     const [history, runtime] = await Promise.all([
-      this.readHistory().catch(() => []),
+      this.readHistory(),
       this.readRuntime().catch(() => null),
     ]);
     return buildTuiSessionSnapshotFromHistory({

@@ -96,6 +96,7 @@ export type SessionNoticeModel = {
   id: string;
   text: string;
   timestamp?: string;
+  afterTimelineEntryId?: string;
 };
 
 export type ApprovalRequestModel = {

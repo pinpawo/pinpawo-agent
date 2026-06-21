@@ -9,9 +9,11 @@ import {
   timelineMessagesFromEntries,
 } from './agentTimeline';
 import {
+  buildTimelineDisplayEntries,
   findTimelineOperationEntry,
   selectActiveOperationsFromTimeline,
   selectRunningOperationEntries,
+  splitTimelineDisplayForStaticRender,
   splitTimelineForStaticRender,
 } from './agentTimelineSelectors';
 import { buildOperationPresentation, getOperationPresentationKey } from './operationPresentation';
@@ -179,6 +181,63 @@ test('splitTimelineForStaticRender keeps only the settled prefix static', () => 
       dynamicEntries: [],
     },
   );
+});
+
+test('timeline display entries render notices after their anchored timeline entry', () => {
+  const timeline: AgentTimelineEntry[] = [
+    {
+      id: 'message:user-1',
+      type: 'message',
+      role: 'user',
+      text: 'hello',
+      status: 'completed',
+    },
+    {
+      id: 'req-1:operation:tool',
+      type: 'operation',
+      requestId: 'req-1',
+      operationKey: 'tool',
+      kind: 'tool',
+      title: 'Tool',
+      phase: 'completed',
+      startedAt: 1000,
+      updatedAt: 1100,
+    },
+    {
+      id: 'req-1:assistant:0',
+      type: 'message',
+      role: 'assistant',
+      text: 'done',
+      status: 'streaming',
+    },
+  ];
+  const displayEntries = buildTimelineDisplayEntries(timeline, [
+    { id: 'notice-1', text: 'after user', afterTimelineEntryId: 'message:user-1' },
+    { id: 'notice-2', text: 'after operation', afterTimelineEntryId: 'req-1:operation:tool' },
+    { id: 'notice-3', text: 'fallback' },
+  ]);
+
+  assert.deepEqual(displayEntries.map((entry) => entry.id), [
+    'message:user-1',
+    'notice-1',
+    'req-1:operation:tool',
+    'notice-2',
+    'req-1:assistant:0',
+    'notice-3',
+  ]);
+
+  const { dynamicEntries } = splitTimelineForStaticRender(timeline);
+  const displaySplit = splitTimelineDisplayForStaticRender(displayEntries, dynamicEntries);
+  assert.deepEqual(displaySplit.staticEntries.map((entry) => entry.id), [
+    'message:user-1',
+    'notice-1',
+    'req-1:operation:tool',
+    'notice-2',
+  ]);
+  assert.deepEqual(displaySplit.dynamicEntries.map((entry) => entry.id), [
+    'req-1:assistant:0',
+    'notice-3',
+  ]);
 });
 
 function operationEvent(params: {

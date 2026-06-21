@@ -61,28 +61,31 @@ function appendMessageCells(
 ) {
   if (drafts.length === 0) return session;
   const cells = drafts.map(toMessageCell);
-  const timelineCells = cells.flatMap((cell) => {
+  const timeline = [...session.timeline];
+  const notices = [...session.notices];
+  let afterTimelineEntryId = timeline.at(-1)?.id;
+
+  for (const cell of cells) {
     const entry = timelineEntryFromMessageCell(cell);
-    return entry ? [entry] : [];
-  });
-  const notices = cells.flatMap((cell): SessionNoticeModel[] =>
-    cell.kind === 'system'
-      ? [{
-          id: cell.id,
-          text: cell.text,
-          ...(cell.timestamp ? { timestamp: cell.timestamp } : {}),
-        }]
-      : []);
+    if (entry) {
+      timeline.push(entry);
+      afterTimelineEntryId = entry.id;
+      continue;
+    }
+    if (cell.kind === 'system') {
+      notices.push({
+        ...(afterTimelineEntryId ? { afterTimelineEntryId } : {}),
+        id: cell.id,
+        text: cell.text,
+        ...(cell.timestamp ? { timestamp: cell.timestamp } : {}),
+      });
+    }
+  }
+
   return {
     ...session,
-    timeline: [
-      ...session.timeline,
-      ...timelineCells,
-    ],
-    notices: trimNotices([
-      ...session.notices,
-      ...notices,
-    ]),
+    timeline,
+    notices: trimNotices(notices),
   };
 }
 
@@ -589,13 +592,25 @@ function applySessionSnapshot(
       ?? (action.source === 'reconnect' ? existingSession?.tokenUsage ?? null : null),
   };
 
+  const nextSessions = {
+    ...state.sessions,
+    [sessionId]: nextSession,
+  };
+  for (const clearedSessionId of sessionIdsToClear) {
+    if (clearedSessionId === sessionId) continue;
+    const clearedSession = nextSessions[clearedSessionId];
+    if (clearedSession?.activeRunId) {
+      nextSessions[clearedSessionId] = {
+        ...clearedSession,
+        activeRunId: null,
+      };
+    }
+  }
+
   return {
     ...state,
     focusedSessionId: sessionId,
-    sessions: {
-      ...state.sessions,
-      [sessionId]: nextSession,
-    },
+    sessions: nextSessions,
     runs: {
       ...preservedRuns,
       ...snapshotRuns,
@@ -808,13 +823,13 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         kind: currentRun.kind,
         phase: 'interrupting',
       }));
-      return updateSession({
+      return {
         ...stateWithRun,
         connection: {
           ...stateWithRun.connection,
           message: action.statusMessage,
         },
-      }, run.sessionId, (session) => session);
+      };
     }
 
     case 'run.finish':
@@ -896,13 +911,13 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
       if (event.type === 'human_review.requested') {
         const petId = event.actor?.petId || undefined;
-        const stateWithReview = updateSession({
+        const stateWithReview = {
           ...state,
           connection: {
             ...state.connection,
             message: TUI_TEXT.approvalWaiting(petId),
           },
-        }, sessionId, (currentSession) => currentSession);
+        };
         return updateRun(stateWithReview, event.requestId, (currentRun) => ({
           ...currentRun,
           phase: 'waiting_human',

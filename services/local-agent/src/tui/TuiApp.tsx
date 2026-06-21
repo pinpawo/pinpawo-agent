@@ -4,7 +4,6 @@ import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import { config } from '../config';
 import { loadStoredConfig, saveStoredConfig } from '../storage';
-import { AgentTimeline } from './components/AgentTimeline';
 import { AgentTimelineItem } from './components/AgentTimelineItem';
 import { ApprovalPanel } from './components/ApprovalPanel';
 import { BottomStatusLine } from './components/BottomStatusLine';
@@ -49,7 +48,12 @@ import {
   selectReady,
   tuiStateReducer,
 } from './state/tuiStateReducer';
-import { splitTimelineForStaticRender } from './timeline/agentTimelineSelectors';
+import {
+  buildTimelineDisplayEntries,
+  splitTimelineDisplayForStaticRender,
+  splitTimelineForStaticRender,
+  type AgentTimelineDisplayEntry,
+} from './timeline/agentTimelineSelectors';
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { useResumePickerController } from './useResumePickerController';
 import { useTextAreaController } from './useTextAreaController';
@@ -62,6 +66,40 @@ import type { MessageRole } from './types';
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
 const CLEAR_SCREEN = '\x1B[2J\x1B[3J\x1B[H';
+
+function renderTimelineDisplayEntry(
+  displayEntry: AgentTimelineDisplayEntry,
+  props: {
+    petName: string;
+    now: number;
+    width: number;
+  },
+) {
+  if (displayEntry.type === 'notice') {
+    const notice = displayEntry.notice;
+    return (
+      <MessageBlock
+        key={displayEntry.id}
+        entry={{
+          kind: 'system',
+          timestamp: notice.timestamp,
+          text: notice.text,
+        }}
+        petName={props.petName}
+        width={props.width}
+      />
+    );
+  }
+  return (
+    <AgentTimelineItem
+      key={displayEntry.id}
+      entry={displayEntry.entry}
+      petName={props.petName}
+      now={props.now}
+      width={props.width}
+    />
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Main TUI application
@@ -119,9 +157,17 @@ export function TuiApp(props: { actorId: string }) {
   const focusedSession = selectFocusedSession(tuiState);
   const timeline = selectFocusedTimeline(tuiState);
   const notices = selectFocusedNotices(tuiState);
-  const { staticEntries: staticTimeline, dynamicEntries: dynamicTimeline } = useMemo(
+  const { dynamicEntries: dynamicTimeline } = useMemo(
     () => splitTimelineForStaticRender(timeline),
     [timeline],
+  );
+  const displayEntries = useMemo(
+    () => buildTimelineDisplayEntries(timeline, notices),
+    [timeline, notices],
+  );
+  const { staticEntries: staticDisplayEntries, dynamicEntries: dynamicDisplayEntries } = useMemo(
+    () => splitTimelineDisplayForStaticRender(displayEntries, dynamicTimeline),
+    [displayEntries, dynamicTimeline],
   );
   const ready = selectReady(tuiState);
   const busy = selectFocusedBusy(tuiState);
@@ -550,33 +596,19 @@ export function TuiApp(props: { actorId: string }) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {timeline.length === 0 && notices.length === 0 ? <Text dimColor>{TUI_TEXT.emptyHistory(petName)}</Text> : null}
-      <Static key={timelineRenderEpoch} items={staticTimeline}>
-        {(entry) => (
-          <AgentTimelineItem
-            key={entry.id}
-            entry={entry}
-            petName={petName}
-            now={now}
-            width={contentWidth}
-          />
-        )}
+      {displayEntries.length === 0 ? <Text dimColor>{TUI_TEXT.emptyHistory(petName)}</Text> : null}
+      <Static key={timelineRenderEpoch} items={staticDisplayEntries}>
+        {(entry) => renderTimelineDisplayEntry(entry, {
+          petName,
+          now,
+          width: contentWidth,
+        })}
       </Static>
-      {dynamicTimeline.length > 0 ? (
-        <AgentTimeline entries={dynamicTimeline} petName={petName} width={contentWidth} now={now} />
-      ) : null}
-      {notices.map((notice) => (
-        <MessageBlock
-          key={notice.id}
-          entry={{
-            kind: 'system',
-            timestamp: notice.timestamp,
-            text: notice.text,
-          }}
-          petName={petName}
-          width={contentWidth}
-        />
-      ))}
+      {dynamicDisplayEntries.map((entry) => renderTimelineDisplayEntry(entry, {
+        petName,
+        now,
+        width: contentWidth,
+      }))}
       {resumePickerOpen ? (
         <ResumePicker
           sessions={resumePicker.sessions}

@@ -1,3 +1,4 @@
+import type { SessionNoticeModel } from '../state/tuiState';
 import type { ActiveOperation } from '../types';
 import {
   isRunningOperationPhase,
@@ -54,6 +55,75 @@ export function splitTimelineForStaticRender(entries: AgentTimelineEntry[]): {
   return {
     staticEntries: entries.slice(0, firstDynamicIndex),
     dynamicEntries: entries.slice(firstDynamicIndex),
+  };
+}
+
+export type AgentTimelineDisplayEntry =
+  | { type: 'timeline'; id: string; entry: AgentTimelineEntry }
+  | { type: 'notice'; id: string; notice: SessionNoticeModel };
+
+export function buildTimelineDisplayEntries(
+  entries: AgentTimelineEntry[],
+  notices: SessionNoticeModel[],
+): AgentTimelineDisplayEntry[] {
+  const noticesByAnchor = new Map<string, SessionNoticeModel[]>();
+  const unanchoredNotices: SessionNoticeModel[] = [];
+  for (const notice of notices) {
+    if (notice.afterTimelineEntryId) {
+      const group = noticesByAnchor.get(notice.afterTimelineEntryId) ?? [];
+      group.push(notice);
+      noticesByAnchor.set(notice.afterTimelineEntryId, group);
+    } else {
+      unanchoredNotices.push(notice);
+    }
+  }
+
+  const displayEntries: AgentTimelineDisplayEntry[] = [];
+  const renderedNoticeIds = new Set<string>();
+  for (const entry of entries) {
+    displayEntries.push({ type: 'timeline', id: entry.id, entry });
+    for (const notice of noticesByAnchor.get(entry.id) ?? []) {
+      renderedNoticeIds.add(notice.id);
+      displayEntries.push({ type: 'notice', id: notice.id, notice });
+    }
+  }
+
+  for (const notice of notices) {
+    if (!renderedNoticeIds.has(notice.id) && !unanchoredNotices.includes(notice)) {
+      unanchoredNotices.push(notice);
+    }
+  }
+  for (const notice of unanchoredNotices) {
+    displayEntries.push({ type: 'notice', id: notice.id, notice });
+  }
+  return displayEntries;
+}
+
+export function splitTimelineDisplayForStaticRender(
+  displayEntries: AgentTimelineDisplayEntry[],
+  dynamicEntries: AgentTimelineEntry[],
+): {
+  staticEntries: AgentTimelineDisplayEntry[];
+  dynamicEntries: AgentTimelineDisplayEntry[];
+} {
+  const firstDynamicId = dynamicEntries[0]?.id;
+  if (!firstDynamicId) {
+    return {
+      staticEntries: displayEntries,
+      dynamicEntries: [],
+    };
+  }
+  const firstDynamicIndex = displayEntries.findIndex((entry) =>
+    entry.type === 'timeline' && entry.entry.id === firstDynamicId);
+  if (firstDynamicIndex < 0) {
+    return {
+      staticEntries: displayEntries,
+      dynamicEntries: [],
+    };
+  }
+  return {
+    staticEntries: displayEntries.slice(0, firstDynamicIndex),
+    dynamicEntries: displayEntries.slice(firstDynamicIndex),
   };
 }
 

@@ -591,6 +591,34 @@ test('tuiStateReducer clears snapshot activeRunId when the run is terminal', () 
   assert.equal(selectFocusedActiveRun(state), null);
 });
 
+test('tuiStateReducer clears the previous focused session activeRunId on resume snapshots', () => {
+  let state = startRun(initialState('chat:old'), 'old-req');
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'resume',
+    snapshot: {
+      sessionId: 'chat:new',
+      kind: 'chat',
+      timeline: [
+        {
+          id: 'message:user-new',
+          type: 'message',
+          role: 'user',
+          text: 'resumed',
+          status: 'completed',
+          source: 'checkpoint',
+        },
+      ],
+      runs: [],
+    },
+  });
+
+  assert.equal(state.focusedSessionId, 'chat:new');
+  assert.equal(state.runs['old-req'], undefined);
+  assert.equal(state.sessions['chat:old']?.activeRunId, null);
+});
+
 test('tuiStateReducer preserves reconnect token usage when snapshot omits usage', () => {
   let state = initialState('chat:pet');
   state = {
@@ -1037,6 +1065,7 @@ test('tuiStateReducer finishes error and studio control messages', () => {
   assert.equal(selectFocusedActiveRun(state), null);
   assert.equal(state.connection.message, '出错，已恢复输入');
   assert.equal(selectFocusedNotices(state).at(-1)?.text, '出错：boom');
+  assert.equal(selectFocusedNotices(state).at(-1)?.afterTimelineEntryId, 'message:chat-req:user');
 
   state = startRun(state, 'studio-req');
   state = tuiStateReducer(state, {
@@ -1055,6 +1084,10 @@ test('tuiStateReducer finishes error and studio control messages', () => {
     '[studio] turn stopped (无最终输出)',
     '[studio] stopped: done enough',
   ]);
+  assert.deepEqual(selectFocusedNotices(state).slice(-2).map((item) => item.afterTimelineEntryId), [
+    'message:studio-req:user',
+    'message:studio-req:user',
+  ]);
 
   state = startRun(state, 'studio-error');
   state = tuiStateReducer(state, {
@@ -1068,4 +1101,5 @@ test('tuiStateReducer finishes error and studio control messages', () => {
   assert.equal(selectFocusedActiveRun(state), null);
   assert.equal(state.connection.message, 'Studio 出错，已恢复输入');
   assert.equal(selectFocusedNotices(state).at(-1)?.text, '[studio 出错] planner failed');
+  assert.equal(selectFocusedNotices(state).at(-1)?.afterTimelineEntryId, 'message:studio-error:user');
 });

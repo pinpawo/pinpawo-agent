@@ -15,29 +15,29 @@ import type {
   TokenUsageModel,
 } from '../state/tuiState';
 
-type BuildSnapshotFromHistoryParams = {
+type BuildSnapshotFromMessagesParams = {
   sessionId: string;
   kind: TuiCoreSessionSnapshot['kind'];
-  history: HistoryCellModel[];
+  messages: HistoryCellModel[];
   runtime?: Partial<SessionModel['runtime']> | null;
   tokenUsage?: TokenUsageModel | null;
 };
 
-export function buildTuiSessionSnapshotFromHistory(
-  params: BuildSnapshotFromHistoryParams,
+export function buildTuiSessionSnapshotFromMessages(
+  params: BuildSnapshotFromMessagesParams,
 ): TuiCoreSessionSnapshot {
   return {
     sessionId: params.sessionId,
     kind: params.kind,
-    timeline: timelineSnapshotFromHistory(params.history),
+    timeline: timelineSnapshotFromMessages(params.messages),
     runs: [],
     ...(params.runtime ? { runtime: normalizeRuntimeSnapshot(params.runtime) } : {}),
     ...(params.tokenUsage ? { tokenUsage: params.tokenUsage } : {}),
   };
 }
 
-export function timelineSnapshotFromHistory(history: HistoryCellModel[]): TuiCoreTimelineEntry[] {
-  return history.flatMap((cell) => {
+export function timelineSnapshotFromMessages(messages: HistoryCellModel[]): TuiCoreTimelineEntry[] {
+  return messages.flatMap((cell) => {
     if (cell.kind !== 'user' && cell.kind !== 'assistant') return [];
     return [{
       id: timelineEntryIdFromHistoryCell(cell),
@@ -48,18 +48,6 @@ export function timelineSnapshotFromHistory(history: HistoryCellModel[]): TuiCor
       source: 'checkpoint',
       ...(cell.timestamp ? { createdAt: cell.timestamp } : {}),
     } satisfies TuiCoreTimelineEntry];
-  });
-}
-
-export function historyFromSnapshotTimeline(timeline: TuiCoreTimelineEntry[]): HistoryCellModel[] {
-  return timeline.flatMap((entry) => {
-    if (entry.type !== 'message') return [];
-    return [{
-      id: entry.id,
-      kind: entry.role,
-      text: entry.text,
-      ...(entry.createdAt ? { timestamp: entry.createdAt } : {}),
-    } satisfies HistoryCellModel];
   });
 }
 

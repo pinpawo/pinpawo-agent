@@ -18,30 +18,6 @@ export const TUI_CORE3_RUN_TERMINAL_EVENTS = [
   'interrupted',
 ] as const;
 
-export const TUI_CORE3_DEFERRED_RUN_REGISTRY_GAPS = [
-  {
-    id: 'run-registry-routing-migration',
-    currentArea: 'tuiState + reducer',
-    target: 'route events via runs[requestId].sessionId',
-    currentLegacyPaths: ['runRoute lookup', 'session.activeRun pointer only'],
-    followUp: ['CORE-7 legacy mirror removal'],
-  },
-  {
-    id: 'run-route-removal',
-    currentArea: 'global TuiState model',
-    target: 'replace TuiState.runRoute',
-    currentLegacyPaths: ['tuiState.runRoute'],
-    followUp: ['CORE-7 legacy mirror removal'],
-  },
-  {
-    id: 'active-run-entity-migration',
-    currentArea: 'session state model',
-    target: 'introduce TuiState.runs + SessionModel.activeRunId',
-    currentLegacyPaths: ['SessionModel.activeRun as full run entity'],
-    followUp: ['CORE-7 legacy mirror removal'],
-  },
-] as const;
-
 export type TuiCore3RunPhase = (typeof TUI_CORE3_RUN_PHASES)[number];
 export type TuiCore3RunTerminalPhase = (typeof TUI_CORE3_RUN_TERMINAL_EVENTS)[number];
 

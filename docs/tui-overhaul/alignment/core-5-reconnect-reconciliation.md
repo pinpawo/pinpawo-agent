@@ -8,7 +8,7 @@ Route reconnect through the same `session.snapshot.loaded` reconciliation path a
 
 - Reconnect is a snapshot reconciliation trigger, not an independent recovery path.
 - Server snapshot is the source for checkpoint messages and pending review state.
-- `message.completed` should not be dropped while `runRoute` still identifies the owning session.
+- `message.completed` should not be dropped when the focused active pointer is missing.
 - Completed CORE-5 gaps should be removed from deferred contract metadata.
 
 ## Implemented In This Slice
@@ -17,13 +17,13 @@ Route reconnect through the same `session.snapshot.loaded` reconciliation path a
 - Add TUI client parsing for server snapshot payloads, including pending review `ReviewSpec`.
 - Route `TuiRuntimeController.reconnect()` through `session.snapshot.loaded` before opening a new websocket.
 - Restore pending approval panels from snapshot runs.
-- Finalize `message.completed` events when `runRoute` exists but `activeRun` is already missing.
+- Finalize `message.completed` events when the owning run route is still recoverable.
 - Clear deferred contract and reducer gap metadata.
 
 ## Deferred Changes
 
 - Delete now-empty deferred metadata constants during CORE-6 cleanup. Completed in CORE-6.
-- Remove legacy `history` and `runRoute` in follow-up cleanup once the remaining compatibility paths are replaced.
+- Remove legacy `history` and `runRoute` in follow-up cleanup once the remaining compatibility paths are replaced. Completed in CORE-7.
 - Extend snapshots with richer operation/run timestamps if the server later persists them.
 
 ## Alignment Log
@@ -40,6 +40,6 @@ Route reconnect through the same `session.snapshot.loaded` reconciliation path a
 
 - [x] Reconnect dispatches `session.snapshot.loaded` before websocket connect.
 - [x] Snapshot can restore pending approval `ReviewSpec`.
-- [x] Missing-active `message.completed` finalizes via `runRoute`.
+- [x] Missing-active `message.completed` finalizes through run ownership.
 - [x] Deferred CORE metadata no longer lists completed CORE-5 gaps.
 - [x] PR references tracking issue #232.

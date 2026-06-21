@@ -28,7 +28,6 @@ import {
 } from '../contracts/tuiCoreContract';
 import {
   agentTimelineEntriesFromSnapshot,
-  historyFromSnapshotTimeline,
 } from '../snapshot/tuiSessionSnapshot';
 import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
 import type {
@@ -43,13 +42,6 @@ import type {
   TokenUsageModel,
   TuiState,
 } from './tuiState';
-import { MAX_TUI_HISTORY_ITEMS } from './tuiState';
-
-function trimHistory(history: HistoryCellModel[]) {
-  return history.length > MAX_TUI_HISTORY_ITEMS
-    ? history.slice(history.length - MAX_TUI_HISTORY_ITEMS)
-    : history;
-}
 
 function toHistoryCell(draft: HistoryCellDraft): HistoryCellModel {
   return {
@@ -60,7 +52,7 @@ function toHistoryCell(draft: HistoryCellDraft): HistoryCellModel {
   };
 }
 
-function appendHistory(
+function appendTimelineFromHistory(
   session: SessionModel,
   drafts: HistoryCellDraft[],
 ) {
@@ -69,10 +61,6 @@ function appendHistory(
   const timelineCells = cells.map(timelineEntryFromHistoryCell);
   return {
     ...session,
-    history: trimHistory([
-      ...session.history,
-      ...cells,
-    ]),
     timeline: [
       ...session.timeline,
       ...timelineCells,
@@ -80,22 +68,7 @@ function appendHistory(
   };
 }
 
-function appendHistoryOnly(
-  session: SessionModel,
-  drafts: HistoryCellDraft[],
-) {
-  if (drafts.length === 0) return session;
-  const cells = drafts.map(toHistoryCell);
-  return {
-    ...session,
-    history: trimHistory([
-      ...session.history,
-      ...cells,
-    ]),
-  };
-}
-
-function addTimelineEntryId(activeRun: ActiveRunModel, entryId: string): ActiveRunModel {
+function addTimelineEntryId<T extends ActiveRunModel>(activeRun: T, entryId: string): T {
   return activeRun.timelineEntryIds.includes(entryId)
     ? activeRun
     : {
@@ -351,59 +324,6 @@ function updateSession(
   };
 }
 
-function reconcileRunRegistry(state: TuiState): TuiState {
-  const runs: Record<string, TuiRunModel> = {};
-  let sessionsChanged = false;
-  const sessions = Object.fromEntries(Object.entries(state.sessions).map(([sessionId, session]) => {
-    const activeRunId = session.activeRun?.requestId ?? null;
-    if (session.activeRun) {
-      runs[session.activeRun.requestId] = {
-        ...session.activeRun,
-        sessionId,
-        kind: session.kind,
-      };
-    }
-    if (session.activeRunId === activeRunId) {
-      return [sessionId, session];
-    }
-    sessionsChanged = true;
-    return [sessionId, {
-      ...session,
-      activeRunId,
-    }];
-  }));
-
-  if (!sessionsChanged && sameRunRegistry(state.runs, runs)) {
-    return state;
-  }
-
-  return {
-    ...state,
-    sessions: sessionsChanged ? sessions : state.sessions,
-    runs,
-  };
-}
-
-function sameRunRegistry(a: Record<string, TuiRunModel>, b: Record<string, TuiRunModel>) {
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every((key) => {
-    const left = a[key];
-    const right = b[key];
-    return Boolean(left && right)
-      && left.sessionId === right.sessionId
-      && left.kind === right.kind
-      && left.requestId === right.requestId
-      && left.phase === right.phase
-      && left.startedAt === right.startedAt
-      && left.charCount === right.charCount
-      && left.pendingReview === right.pendingReview
-      && left.timelineEntryIds.length === right.timelineEntryIds.length
-      && left.timelineEntryIds.every((entryId, index) => entryId === right.timelineEntryIds[index]);
-  });
-}
-
 function clearTextAreaTransientInputState(input: TuiState['input']): TuiState['input'] {
   return {
     ...input,
@@ -413,15 +333,47 @@ function clearTextAreaTransientInputState(input: TuiState['input']): TuiState['i
   };
 }
 
-function removeRunRoute(state: TuiState, requestId: string) {
-  const { [requestId]: _removed, ...runRoute } = state.runRoute;
-  return runRoute;
+function updateRun(
+  state: TuiState,
+  requestId: string,
+  updater: (run: TuiRunModel) => TuiRunModel,
+) {
+  const run = state.runs[requestId];
+  if (!run) return state;
+  return {
+    ...state,
+    runs: {
+      ...state.runs,
+      [requestId]: updater(run),
+    },
+  };
 }
 
-function removeSessionRunRoutes(state: TuiState, sessionId: SessionId) {
-  return Object.fromEntries(
-    Object.entries(state.runRoute).filter(([, routedSessionId]) => routedSessionId !== sessionId),
+function removeRun(state: TuiState, requestId: string) {
+  const run = state.runs[requestId];
+  if (!run) return state;
+  const { [requestId]: _removed, ...runs } = state.runs;
+  const session = state.sessions[run.sessionId];
+  return {
+    ...state,
+    runs,
+    sessions: session
+      ? {
+          ...state.sessions,
+          [run.sessionId]: {
+            ...session,
+            activeRunId: session.activeRunId === requestId ? null : session.activeRunId,
+          },
+        }
+      : state.sessions,
+  };
+}
+
+function removeSessionRuns(state: TuiState, sessionId: SessionId) {
+  const runs = Object.fromEntries(
+    Object.entries(state.runs).filter(([, run]) => run.sessionId !== sessionId),
   );
+  return { ...state, runs };
 }
 
 function finishRun(
@@ -431,23 +383,18 @@ function finishRun(
   history: HistoryCellDraft[] = [],
   tokenUsage?: TokenUsageModel | null,
 ) {
-  const sessionId = state.runRoute[requestId];
-  if (!sessionId) return state;
+  const run = state.runs[requestId];
+  if (!run) return state;
+  const sessionId = run.sessionId;
   const session = state.sessions[sessionId];
-  if (!session || (session.activeRun && session.activeRun.requestId !== requestId)) {
-    return state;
-  }
+  if (!session) return state;
   const nextState = updateSession(state, sessionId, (sessionToUpdate) => {
-    const sameActiveRun = sessionToUpdate.activeRun?.requestId === requestId;
-    if (sessionToUpdate.activeRun && !sameActiveRun) {
-      return sessionToUpdate;
-    }
-    const finalizedSession = sameActiveRun
+    const finalizedSession = sessionToUpdate.activeRunId === requestId
       ? finalizeSubagentTimelineEntries(sessionToUpdate, requestId)
       : sessionToUpdate;
-    return appendHistory({
+    return appendTimelineFromHistory({
       ...finalizedSession,
-      activeRun: sameActiveRun ? null : sessionToUpdate.activeRun,
+      activeRunId: sessionToUpdate.activeRunId === requestId ? null : sessionToUpdate.activeRunId,
     }, [
       ...history,
     ]);
@@ -459,22 +406,22 @@ function finishRun(
       ...nextState.connection,
       message: statusMessage,
     },
-    runRoute: removeRunRoute(nextState, requestId),
   };
+  const stateWithRunRemoved = removeRun(stateWithRouteRemoved, requestId);
 
   if (tokenUsage === undefined) {
-    return stateWithRouteRemoved;
+    return stateWithRunRemoved;
   }
 
   if (tokenUsage === null) {
-    const sessionToClear = stateWithRouteRemoved.sessions[sessionId];
+    const sessionToClear = stateWithRunRemoved.sessions[sessionId];
     if (!sessionToClear) {
-      return stateWithRouteRemoved;
+      return stateWithRunRemoved;
     }
     return {
-      ...stateWithRouteRemoved,
+      ...stateWithRunRemoved,
       sessions: {
-        ...stateWithRouteRemoved.sessions,
+        ...stateWithRunRemoved.sessions,
         [sessionId]: {
           ...sessionToClear,
           tokenUsage: null,
@@ -483,13 +430,13 @@ function finishRun(
     };
   }
 
-  const runtimeContextWindow = stateWithRouteRemoved.sessions[sessionId]?.runtime.contextWindow;
+  const runtimeContextWindow = stateWithRunRemoved.sessions[sessionId]?.runtime.contextWindow;
   const nextTokenUsage: TokenUsageModel = tokenUsage.contextWindow === undefined && runtimeContextWindow !== undefined
     ? { ...tokenUsage, contextWindow: runtimeContextWindow }
     : tokenUsage;
   const stateWithRuntimeUpdated = nextTokenUsage.contextWindow === undefined
-    ? stateWithRouteRemoved
-    : updateSession(stateWithRouteRemoved, sessionId, (sessionToUpdate) => ({
+    ? stateWithRunRemoved
+    : updateSession(stateWithRunRemoved, sessionId, (sessionToUpdate) => ({
       ...sessionToUpdate,
       runtime: {
         ...sessionToUpdate.runtime,
@@ -513,7 +460,7 @@ function finishRun(
     };
 }
 
-function activeRunToPendingUi(run: ActiveRunModel | null) {
+function activeRunToPendingUi(run: TuiRunModel | null) {
   if (!run || run.phase === 'waiting_human') return null;
   return {
     startedAt: run.startedAt,
@@ -526,14 +473,14 @@ function activeRunToPendingUi(run: ActiveRunModel | null) {
   };
 }
 
-function clearPendingReview(run: ActiveRunModel): ActiveRunModel {
+function clearPendingReview<T extends ActiveRunModel>(run: T): T {
   if (!run.pendingReview) return run;
   const { pendingReview, ...rest } = run;
   void pendingReview;
-  return rest;
+  return rest as T;
 }
 
-function activeRunToPendingApproval(run: ActiveRunModel | null) {
+function activeRunToPendingApproval(run: TuiRunModel | null) {
   return run?.pendingReview
     ? {
         requestId: run.pendingReview.requestId,
@@ -563,34 +510,35 @@ function countSnapshotAssistantChars(snapshot: TuiCoreSessionSnapshot, requestId
   ), 0);
 }
 
-function activeRunFromSnapshot(
+function runFromSnapshot(
   snapshot: TuiCoreSessionSnapshot,
-  existingSession: SessionModel | undefined,
-): ActiveRunModel | null {
-  const activeRunId = snapshot.activeRunId
-    ?? snapshot.runs.find((run) => !isTerminalSnapshotRun(run))?.requestId;
-  if (!activeRunId) return null;
-  const run = snapshot.runs.find((item) => item.requestId === activeRunId);
-  if (!run) return null;
+  run: TuiCoreRunSnapshot,
+  existingRun: TuiRunModel | undefined,
+): TuiRunModel | null {
   const phase = activeRunPhaseFromSnapshot(run);
   if (!phase) return null;
-  const existingActiveRun = existingSession?.activeRun?.requestId === run.requestId
-    ? existingSession.activeRun
-    : null;
   return {
     requestId: run.requestId,
+    sessionId: run.sessionId || snapshot.sessionId,
+    kind: run.kind,
     phase,
     timelineEntryIds: run.timelineEntryIds,
-    startedAt: run.startedAt ?? existingActiveRun?.startedAt ?? 0,
+    startedAt: run.startedAt ?? existingRun?.startedAt ?? 0,
     charCount: countSnapshotAssistantChars(snapshot, run.requestId),
-    ...pendingReviewFromSnapshotRun(run, existingActiveRun),
+    ...pendingReviewFromSnapshotRun(run, existingRun ?? null),
   };
+}
+
+function activeRunIdFromSnapshot(snapshot: TuiCoreSessionSnapshot) {
+  const activeRunId = snapshot.activeRunId
+    ?? snapshot.runs.find((run) => !isTerminalSnapshotRun(run))?.requestId;
+  return activeRunId ?? null;
 }
 
 function pendingReviewFromSnapshotRun(
   run: TuiCoreRunSnapshot,
-  existingActiveRun: ActiveRunModel | null,
-): Pick<ActiveRunModel, 'pendingReview'> | Record<string, never> {
+  existingRun: TuiRunModel | null,
+): Pick<TuiRunModel, 'pendingReview'> | Record<string, never> {
   const pendingReview = run.pendingReview;
   if (pendingReview?.status !== 'waiting') return {};
   if (pendingReview.review) {
@@ -602,8 +550,8 @@ function pendingReviewFromSnapshotRun(
       },
     };
   }
-  return existingActiveRun?.pendingReview
-    ? { pendingReview: existingActiveRun.pendingReview }
+  return existingRun?.pendingReview
+    ? { pendingReview: existingRun.pendingReview }
     : {};
 }
 
@@ -616,23 +564,21 @@ function applySessionSnapshot(
   const existingSession = state.sessions[sessionId];
   const focusedSession = state.focusedSessionId ? state.sessions[state.focusedSessionId] : undefined;
   const baseSession = existingSession ?? focusedSession;
-  const history = trimHistory(historyFromSnapshotTimeline(snapshot.timeline));
   const timeline = agentTimelineEntriesFromSnapshot(snapshot.timeline);
   const sessionIdsToClear = new Set<SessionId>([sessionId]);
   if (action.source === 'resume' && state.focusedSessionId) {
     sessionIdsToClear.add(state.focusedSessionId);
   }
   const snapshotRunIds = new Set(snapshot.runs.map((run) => run.requestId));
-  const preservedRunRoute = Object.fromEntries(
-    Object.entries(state.runRoute).filter(([requestId, routedSessionId]) =>
-      !sessionIdsToClear.has(routedSessionId) && !snapshotRunIds.has(requestId)),
+  const preservedRuns = Object.fromEntries(
+    Object.entries(state.runs).filter(([requestId, run]) =>
+      !sessionIdsToClear.has(run.sessionId) && !snapshotRunIds.has(requestId)),
   );
-  const snapshotRunRoute = Object.fromEntries(
-    snapshot.runs
-      .filter((run) => !isTerminalSnapshotRun(run))
-      .map((run) => [run.requestId, run.sessionId || sessionId]),
-  );
-  const activeRun = activeRunFromSnapshot(snapshot, existingSession);
+  const snapshotRuns = Object.fromEntries(snapshot.runs.flatMap((run) => {
+    const nextRun = runFromSnapshot(snapshot, run, state.runs[run.requestId]);
+    return nextRun ? [[run.requestId, nextRun]] : [];
+  }));
+  const activeRunId = activeRunIdFromSnapshot(snapshot);
   const nextSession: SessionModel = {
     id: sessionId,
     kind: snapshot.kind,
@@ -644,10 +590,8 @@ function applySessionSnapshot(
       ...(baseSession?.runtime ?? {}),
       ...(snapshot.runtime ?? {}),
     },
-    history,
     timeline,
-    activeRunId: activeRun?.requestId ?? null,
-    activeRun,
+    activeRunId,
     tokenUsage: snapshot.tokenUsage
       ?? (action.source === 'reconnect' ? existingSession?.tokenUsage ?? null : null),
   };
@@ -659,9 +603,9 @@ function applySessionSnapshot(
       ...state.sessions,
       [sessionId]: nextSession,
     },
-    runRoute: {
-      ...preservedRunRoute,
-      ...snapshotRunRoute,
+    runs: {
+      ...preservedRuns,
+      ...snapshotRuns,
     },
   };
 }
@@ -681,10 +625,6 @@ function historyDraft(
 }
 
 export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
-  return reconcileRunRegistry(reduceTuiState(state, action));
-}
-
-function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
   switch (action.type) {
     case TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded:
       return applySessionSnapshot(state, action);
@@ -729,13 +669,12 @@ function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
             : state.connection,
         }, sessionId, (session) => ({
           ...session,
-          history: [],
           timeline: [],
-          activeRun: null,
+          activeRunId: null,
           tokenUsage: null,
         }));
         return sessionId
-          ? { ...nextState, runRoute: removeSessionRunRoutes(nextState, sessionId) }
+          ? removeSessionRuns(nextState, sessionId)
           : nextState;
       }
 
@@ -780,7 +719,7 @@ function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
 
     case 'history.append':
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) =>
-        appendHistory(session, [action.cell]));
+        appendTimelineFromHistory(session, [action.cell]));
 
     case 'run.start': {
       const sessionId = resolveSessionId(state, action.sessionId);
@@ -798,20 +737,22 @@ function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: 0,
           history: recordComposerHistoryEntry(state.input.history, action.userText),
         }),
-        runRoute: {
-          ...state.runRoute,
-          [action.requestId]: sessionId,
+        runs: {
+          ...state.runs,
+          [action.requestId]: {
+            requestId: action.requestId,
+            sessionId,
+            kind: action.kind,
+            phase: 'thinking',
+            timelineEntryIds: [`history:${userDraft.id}`],
+            startedAt: action.now,
+            charCount: 0,
+          },
         },
-      }, sessionId, (session) => appendHistory({
+      }, sessionId, (session) => appendTimelineFromHistory({
         ...session,
         kind: action.kind,
-        activeRun: {
-          requestId: action.requestId,
-          phase: 'thinking',
-          timelineEntryIds: [`history:${userDraft.id}`],
-          startedAt: action.now,
-          charCount: 0,
-        },
+        activeRunId: action.requestId,
         tokenUsage: null,
       }, [
         userDraft,
@@ -819,15 +760,24 @@ function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
     }
 
     case 'review.response.resume': {
-      // Server resumes the same LangGraph run from its checkpoint, so we
-      // preserve the existing activeRun (and its startedAt) — only the phase
-      // flips from waiting_human back to thinking, and the pending approval
-      // is cleared. If for some reason there is no existing activeRun (e.g.
-      // a stale review handed out before this controller loaded), fall back
-      // to creating one keyed by the same requestId.
-      const sessionId = state.runRoute[action.requestId] ?? state.focusedSessionId;
+      const existingRun = state.runs[action.requestId];
+      const sessionId = existingRun?.sessionId ?? state.focusedSessionId;
       if (!sessionId) return state;
       const userDraft = historyDraft('user', action.message, action.userCell, `${action.requestId}:review-response`);
+      const nextRun: TuiRunModel = existingRun
+        ? addTimelineEntryId(clearPendingReview({
+            ...existingRun,
+            phase: 'thinking',
+          }), `history:${userDraft.id}`)
+        : {
+            requestId: action.requestId,
+            sessionId,
+            kind: state.sessions[sessionId]?.kind ?? 'chat',
+            phase: 'thinking',
+            timelineEntryIds: [`history:${userDraft.id}`],
+            startedAt: action.now,
+            charCount: 0,
+          };
       return updateSession({
         ...state,
         connection: {
@@ -840,26 +790,15 @@ function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: 0,
           history: resetComposerHistoryNavigation(state.input.history),
         }),
-        runRoute: {
-          ...state.runRoute,
-          [action.requestId]: sessionId,
+        runs: {
+          ...state.runs,
+          [action.requestId]: nextRun,
         },
       }, sessionId, (session) => {
         const sessionWithReviewAnswered = markReviewTimelineEntries(session, action.requestId, 'answered');
-        return appendHistory({
+        return appendTimelineFromHistory({
           ...sessionWithReviewAnswered,
-          activeRun: session.activeRun?.requestId === action.requestId
-            ? addTimelineEntryId(clearPendingReview({
-                ...session.activeRun,
-                phase: 'thinking',
-              }), `history:${userDraft.id}`)
-            : {
-                requestId: action.requestId,
-                phase: 'thinking',
-                timelineEntryIds: [`history:${userDraft.id}`],
-                startedAt: action.now,
-                charCount: 0,
-              },
+          activeRunId: action.requestId,
         }, [
           userDraft,
         ]);
@@ -868,23 +807,21 @@ function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
 
     case 'run.interrupting':
     case 'server.interrupting': {
-      const sessionId = state.runRoute[action.requestId];
-      if (!sessionId) return state;
+      const run = state.runs[action.requestId];
+      if (!run) return state;
+      const stateWithRun = updateRun(state, action.requestId, (currentRun) => ({
+        ...clearPendingReview(currentRun),
+        sessionId: currentRun.sessionId,
+        kind: currentRun.kind,
+        phase: 'interrupting',
+      }));
       return updateSession({
-        ...state,
+        ...stateWithRun,
         connection: {
-          ...state.connection,
+          ...stateWithRun.connection,
           message: action.statusMessage,
         },
-      }, sessionId, (session) => session.activeRun?.requestId === action.requestId
-        ? {
-            ...markReviewTimelineEntries(session, action.requestId, 'interrupted'),
-            activeRun: {
-              ...clearPendingReview(session.activeRun),
-              phase: 'interrupting',
-            },
-          }
-        : session);
+      }, run.sessionId, (session) => markReviewTimelineEntries(session, action.requestId, 'interrupted'));
     }
 
     case 'run.finish':
@@ -892,117 +829,82 @@ function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
 
     case 'event.received': {
       const event = action.event;
-      const sessionId = state.runRoute[event.requestId];
-      if (!sessionId) return state;
+      const run = state.runs[event.requestId];
+      if (!run) return state;
+      const sessionId = run.sessionId;
       const session = state.sessions[sessionId];
-      const activeRun = session?.activeRun;
       if (!session) {
-        return state;
-      }
-      if (!activeRun || activeRun.requestId !== event.requestId) {
-        if (event.type !== 'message.completed' || activeRun) {
-          return state;
-        }
-      }
-
-      if (event.type !== 'message.completed' && (!activeRun || activeRun.requestId !== event.requestId)) {
         return state;
       }
 
       if (event.type === 'operation') {
-        if (event.phase === 'started') {
-          return updateSession(state, sessionId, (currentSession) => {
-            const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
-            return {
-              ...sessionWithTimeline,
-              activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-                ? addTimelineEntryId({
-                    ...sessionWithTimeline.activeRun,
-                    phase: 'using_tool',
-                  }, entry.id)
-                : sessionWithTimeline.activeRun,
-            };
-          });
-        }
-        if (event.phase === 'updated') {
-          return updateSession(state, sessionId, (currentSession) => {
-            const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
-            return {
-              ...sessionWithTimeline,
-              activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-                ? addTimelineEntryId({
-                    ...sessionWithTimeline.activeRun,
-                    phase: 'using_tool',
-                  }, entry.id)
-                : sessionWithTimeline.activeRun,
-            };
-          });
-        }
-        return updateSession(state, sessionId, (currentSession) => {
+        let operationEntryId: string | null = null;
+        const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
           const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
-          return {
-            ...sessionWithTimeline,
-            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-              ? addTimelineEntryId({
-                  ...sessionWithTimeline.activeRun,
-                }, entry.id)
-              : sessionWithTimeline.activeRun,
-          };
+          operationEntryId = entry.id;
+          return sessionWithTimeline;
         });
+        return operationEntryId
+          ? updateRun(stateWithTimeline, event.requestId, (currentRun) =>
+              addTimelineEntryId({
+                ...currentRun,
+                phase: event.phase === 'started' || event.phase === 'updated'
+                  ? 'using_tool'
+                  : currentRun.phase,
+              }, operationEntryId!))
+          : stateWithTimeline;
       }
 
       if (event.type === 'message.delta') {
         const token = event.text;
         if (!token) return state;
-        return updateSession(state, sessionId, (currentSession) => {
+        let assistantEntryId: string | null = null;
+        const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
           const { session: sessionWithTimeline, entryId } = appendAssistantTimelineDelta(
             currentSession,
             event.requestId,
             token,
           );
-          return {
-            ...sessionWithTimeline,
-            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-              ? addTimelineEntryId({
-                  ...sessionWithTimeline.activeRun,
-                  phase: 'streaming',
-                  charCount: sessionWithTimeline.activeRun.charCount + token.length,
-                }, entryId)
-              : sessionWithTimeline.activeRun,
-          };
+          assistantEntryId = entryId;
+          return sessionWithTimeline;
         });
+        return assistantEntryId
+          ? updateRun(stateWithTimeline, event.requestId, (currentRun) =>
+              addTimelineEntryId({
+                ...currentRun,
+                phase: 'streaming',
+                charCount: currentRun.charCount + token.length,
+              }, assistantEntryId!))
+          : stateWithTimeline;
       }
 
       if (event.type === 'subagent.message.delta') {
         const token = event.text;
         if (!token) return state;
-        return updateSession(state, sessionId, (currentSession) => {
+        let subagentEntryId: string | undefined;
+        const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
           const { session: sessionWithTimeline, entryId } = appendSubagentTimelineDelta(
             currentSession,
             event.requestId,
             token,
           );
-          return {
-            ...sessionWithTimeline,
-            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-              ? {
-                  ...sessionWithTimeline.activeRun,
-                  phase: sessionWithTimeline.activeRun.phase === 'waiting_human'
-                    ? sessionWithTimeline.activeRun.phase
-                    : 'streaming',
-                  timelineEntryIds: entryId && !sessionWithTimeline.activeRun.timelineEntryIds.includes(entryId)
-                    ? [...sessionWithTimeline.activeRun.timelineEntryIds, entryId]
-                    : sessionWithTimeline.activeRun.timelineEntryIds,
-                  charCount: sessionWithTimeline.activeRun.charCount + token.length,
-                }
-              : sessionWithTimeline.activeRun,
-          };
+          subagentEntryId = entryId;
+          return sessionWithTimeline;
         });
+        return updateRun(stateWithTimeline, event.requestId, (currentRun) => ({
+          ...currentRun,
+          phase: currentRun.phase === 'waiting_human' ? currentRun.phase : 'streaming',
+          timelineEntryIds: subagentEntryId && !currentRun.timelineEntryIds.includes(subagentEntryId)
+            ? [...currentRun.timelineEntryIds, subagentEntryId]
+            : currentRun.timelineEntryIds,
+          charCount: currentRun.charCount + token.length,
+        }));
       }
 
       if (event.type === 'human_review.requested') {
         const petId = event.actor?.petId || undefined;
-        return updateSession({
+        let reviewEntryId: string | null = null;
+        const stateWithTimeline = updateSession({
           ...state,
           connection: {
             ...state.connection,
@@ -1014,29 +916,29 @@ function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
             event.requestId,
             event.review.id,
           );
-          return {
-            ...sessionWithTimeline,
-            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-              ? addTimelineEntryId({
-                  ...sessionWithTimeline.activeRun,
-                  phase: 'waiting_human',
-                  charCount: 0,
-                  pendingReview: {
-                    requestId: event.requestId,
-                    review: event.review,
-                    ...(petId ? { petId } : {}),
-                  },
-                }, entry.id)
-              : sessionWithTimeline.activeRun,
-          };
+          reviewEntryId = entry.id;
+          return sessionWithTimeline;
         });
+        return reviewEntryId
+          ? updateRun(stateWithTimeline, event.requestId, (currentRun) =>
+              addTimelineEntryId({
+                ...currentRun,
+                phase: 'waiting_human',
+                charCount: 0,
+                pendingReview: {
+                  requestId: event.requestId,
+                  review: event.review,
+                  ...(petId ? { petId } : {}),
+                },
+              }, reviewEntryId!))
+          : stateWithTimeline;
       }
 
       if (event.type === 'system.notice') {
         const notice = formatSystemNoticeEvent(event);
         return notice
           ? updateSession(state, sessionId, (currentSession) =>
-              appendHistory(currentSession, [
+              appendTimelineFromHistory(currentSession, [
                 historyDraft('system', notice, action.historyCell, `${event.requestId}:notice`),
               ]))
           : state;
@@ -1045,32 +947,22 @@ function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
       if (event.type === 'message.completed') {
         const reply = event.text.trim();
         const finalText = reply || findLatestAssistantTimelineText(session, event.requestId) || '...';
-        const assistantHistoryDraft = historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`);
         const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
-          const { session: sessionWithTimeline, entryId } = finalizeAssistantTimelineEntry(
+          const { session: sessionWithTimeline } = finalizeAssistantTimelineEntry(
             currentSession,
             event.requestId,
             finalText,
           );
-          return {
-            ...sessionWithTimeline,
-            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId && entryId
-              ? addTimelineEntryId(sessionWithTimeline.activeRun, entryId)
-              : sessionWithTimeline.activeRun,
-          };
+          return sessionWithTimeline;
         });
-        const stateWithHistory = finalText
-          ? updateSession(stateWithTimeline, sessionId, (currentSession) =>
-              appendHistoryOnly(currentSession, [assistantHistoryDraft]))
-          : stateWithTimeline;
-        return finishRun(stateWithHistory, event.requestId, TUI_TEXT.statusReady, [], event.usage ?? null);
+        return finishRun(stateWithTimeline, event.requestId, TUI_TEXT.statusReady, [], event.usage ?? null);
       }
 
       if (event.type === 'studio.progress') {
         const line = formatStudioProgressEvent(event);
         return line
           ? updateSession(state, sessionId, (currentSession) =>
-              appendHistory(currentSession, [
+              appendTimelineFromHistory(currentSession, [
                 historyDraft('system', line, action.historyCell, `${event.requestId}:studio-progress`),
               ]))
           : state;
@@ -1127,10 +1019,6 @@ export function selectFocusedSession(state: TuiState) {
   return state.focusedSessionId ? state.sessions[state.focusedSessionId] ?? null : null;
 }
 
-export function selectFocusedHistory(state: TuiState) {
-  return selectFocusedSession(state)?.history ?? [];
-}
-
 export function selectFocusedTimeline(state: TuiState) {
   return selectFocusedSession(state)?.timeline ?? [];
 }
@@ -1138,16 +1026,7 @@ export function selectFocusedTimeline(state: TuiState) {
 export function selectFocusedActiveRun(state: TuiState) {
   const session = selectFocusedSession(state);
   if (!session) return null;
-  if (session.activeRunId && state.runs[session.activeRunId]) {
-    return state.runs[session.activeRunId];
-  }
-  return session.activeRun
-    ? {
-        ...session.activeRun,
-        sessionId: session.id,
-        kind: session.kind,
-      }
-    : null;
+  return session.activeRunId ? state.runs[session.activeRunId] ?? null : null;
 }
 
 export function selectFocusedBusy(state: TuiState) {

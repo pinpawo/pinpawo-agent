@@ -2,16 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   agentTimelineEntriesFromSnapshot,
-  buildTuiSessionSnapshotFromHistory,
-  historyFromSnapshotTimeline,
-  timelineSnapshotFromHistory,
+  buildTuiSessionSnapshotFromMessages,
+  timelineSnapshotFromMessages,
 } from './tuiSessionSnapshot';
 
-test('CORE-4 snapshot adapter converts legacy history into checkpoint timeline messages', () => {
-  const snapshot = buildTuiSessionSnapshotFromHistory({
+test('CORE-4 snapshot adapter converts server messages into checkpoint timeline messages', () => {
+  const snapshot = buildTuiSessionSnapshotFromMessages({
     sessionId: 'chat:pet',
     kind: 'chat',
-    history: [
+    messages: [
       { id: 'user-1', kind: 'user', text: 'hello', timestamp: '10:00:00' },
       { id: 'system-1', kind: 'system', text: 'connected' },
       { id: 'assistant-1', kind: 'assistant', text: 'hi' },
@@ -29,7 +28,7 @@ test('CORE-4 snapshot adapter converts legacy history into checkpoint timeline m
     ['history:user-1', 'message', 'checkpoint'],
     ['history:assistant-1', 'message', 'checkpoint'],
   ]);
-  assert.deepEqual(historyFromSnapshotTimeline(snapshot.timeline).map((cell) => [cell.kind, cell.text]), [
+  assert.deepEqual(snapshot.timeline.map((entry) => [entry.type === 'message' ? entry.role : '', entry.type === 'message' ? entry.text : '']), [
     ['user', 'hello'],
     ['assistant', 'hi'],
   ]);
@@ -42,7 +41,7 @@ test('CORE-4 snapshot adapter converts legacy history into checkpoint timeline m
 });
 
 test('CORE-4 snapshot adapter projects snapshot timeline into current UI timeline entries', () => {
-  const timeline = timelineSnapshotFromHistory([
+  const timeline = timelineSnapshotFromMessages([
     { id: 'user-1', kind: 'user', text: 'hello' },
   ]);
   const entries = agentTimelineEntriesFromSnapshot([

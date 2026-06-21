@@ -6,7 +6,7 @@ import {
 } from '../localServerAuth';
 import type { HistoryCellModel } from './state/tuiState';
 import type { TuiCoreSessionSnapshot } from './contracts/tuiCoreContract';
-import { buildTuiSessionSnapshotFromHistory } from './snapshot/tuiSessionSnapshot';
+import { buildTuiSessionSnapshotFromMessages } from './snapshot/tuiSessionSnapshot';
 import type { ResumeSessionSummary } from './types';
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 1500;
@@ -88,11 +88,11 @@ export class TuiLocalServerClient {
         runtime,
       });
     }
-    const history = await this.readHistory();
-    return buildTuiSessionSnapshotFromHistory({
+    const messages = await this.readHistory();
+    return buildTuiSessionSnapshotFromMessages({
       sessionId: params.sessionId,
       kind: params.kind,
-      history,
+      messages,
       runtime,
     });
   }
@@ -131,7 +131,6 @@ export class TuiLocalServerClient {
 
   async resumeSession(sessionId: string): Promise<{
     session: ResumeSessionSummary;
-    history: HistoryCellModel[];
     snapshot: TuiCoreSessionSnapshot;
   }> {
     const res = await this.fetchAuth(
@@ -148,14 +147,13 @@ export class TuiLocalServerClient {
     if (!session) {
       throw new Error('invalid resume session payload');
     }
-    const history = parseHistoryMessages(payload.messages);
+    const messages = parseHistoryMessages(payload.messages);
     return {
       session,
-      history,
-      snapshot: buildTuiSessionSnapshotFromHistory({
+      snapshot: buildTuiSessionSnapshotFromMessages({
         sessionId: session.id,
         kind: 'chat',
-        history,
+        messages,
       }),
     };
   }
@@ -217,11 +215,11 @@ function buildSessionSnapshotFromServerPayload(
   const session = parseSnapshotSession(payload.session);
   const sessionId = session?.id ?? options.fallbackSessionId;
   const kind = session?.kind ?? options.fallbackKind;
-  const history = parseHistoryMessages(payload.messages);
-  const snapshot = buildTuiSessionSnapshotFromHistory({
+  const messages = parseHistoryMessages(payload.messages);
+  const snapshot = buildTuiSessionSnapshotFromMessages({
     sessionId,
     kind,
-    history,
+    messages,
     runtime: options.runtime,
   });
   const pendingReview = parsePendingReviewSnapshot(payload.pendingReview);

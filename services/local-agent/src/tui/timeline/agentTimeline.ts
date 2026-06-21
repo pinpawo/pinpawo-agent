@@ -130,10 +130,6 @@ export function timelineEntryFromHistoryCell(cell: HistoryCellModel): AgentTimel
   };
 }
 
-export function timelineEntriesFromHistory(history: HistoryCellModel[]): AgentTimelineEntry[] {
-  return history.map(timelineEntryFromHistoryCell);
-}
-
 export function timelineEntryIdFromOperationEvent(event: LocalAgentOperationEvent) {
   return `${event.requestId}:operation:${buildOperationPresentation(event).operationKey}`;
 }

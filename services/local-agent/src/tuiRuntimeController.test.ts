@@ -29,7 +29,6 @@ function pendingReviewState(): TuiState {
         charCount: 0,
       },
     },
-    runRoute: { 'req-1': 'sess-1' },
     input: { text: '', cursorOffset: 0, focused: true, history: createComposerHistoryState() },
     sessions: {
       'sess-1': {
@@ -37,26 +36,9 @@ function pendingReviewState(): TuiState {
         kind: 'chat',
         actor: { label: 'Pet', summary: 'summary' },
         runtime: {},
-        history: [],
         timeline: [],
         tokenUsage: null,
         activeRunId: 'req-1',
-        activeRun: {
-          requestId: 'req-1',
-          phase: 'waiting_human',
-          timelineEntryIds: [],
-          pendingReview: {
-            requestId: 'req-1',
-            review: {
-              id: 'review-1',
-              schemaVersion: 1,
-              view: { kind: 'plain', body: 'Need review' },
-              options: [],
-            },
-          },
-          startedAt: 1,
-          charCount: 0,
-        },
       },
     },
   };

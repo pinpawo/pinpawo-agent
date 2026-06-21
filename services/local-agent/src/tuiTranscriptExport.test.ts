@@ -16,10 +16,10 @@ test('formatTranscriptMarkdown writes session metadata and messages', () => {
   const session = createSession({
     id: 'chat:pet-a',
     actor: { label: 'Momo' },
-    history: [
-      { id: 'u1', kind: 'user', text: 'hello', timestamp: '09:00:00' },
-      { id: 'a1', kind: 'assistant', text: 'hi', timestamp: '09:00:01' },
-      { id: 's1', kind: 'system', text: 'tool ok' },
+    timeline: [
+      { id: 'u1', type: 'message', role: 'user', text: 'hello', status: 'completed', createdAt: '09:00:00' },
+      { id: 'a1', type: 'message', role: 'assistant', text: 'hi', status: 'completed', createdAt: '09:00:01' },
+      { id: 's1', type: 'notice', text: 'tool ok' },
     ],
   });
 
@@ -100,8 +100,8 @@ test('exportSessionTranscript creates parent directories and writes markdown', a
   const session = createSession({
     id: 'chat:pet-a',
     actor: { label: 'Momo' },
-    history: [
-      { id: 'u1', kind: 'user', text: 'hello' },
+    timeline: [
+      { id: 'u1', type: 'message', role: 'user', text: 'hello', status: 'completed' },
     ],
   });
 

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   TUI_CORE3_CONTRACT_VERSION,
-  TUI_CORE3_DEFERRED_RUN_REGISTRY_GAPS,
   TUI_CORE3_RUN_PHASES,
   TUI_CORE3_RUN_TERMINAL_EVENTS,
   isRunTerminal,
@@ -56,17 +55,4 @@ test('CORE-3 run registry contract is explicit and deterministic', () => {
   assert.equal(isRunTerminal('streaming'), false);
   assert.equal(state.sessions['sess-1']?.activeRunId, 'req-2');
   assert.equal(state.runs['req-2']?.pendingReview?.status, 'waiting');
-});
-
-test('CORE-3 defers legacy-path migration to later slices', () => {
-  assert.deepEqual(TUI_CORE3_DEFERRED_RUN_REGISTRY_GAPS.map((gap) => gap.id), [
-    'run-registry-routing-migration',
-    'run-route-removal',
-    'active-run-entity-migration',
-  ]);
-
-  for (const gap of TUI_CORE3_DEFERRED_RUN_REGISTRY_GAPS) {
-    assert.equal(gap.currentLegacyPaths.length >= 1, true);
-    assert.equal(gap.followUp.includes('CORE-7 legacy mirror removal'), true);
-  }
 });

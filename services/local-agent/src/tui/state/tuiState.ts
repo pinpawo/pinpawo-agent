@@ -1,10 +1,7 @@
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
 import type { TuiCoreSessionSnapshotLoadedAction } from '../contracts/tuiCoreContract';
-import {
-  timelineEntriesFromHistory,
-  type AgentTimelineEntry,
-} from '../timeline/agentTimeline';
+import type { AgentTimelineEntry } from '../timeline/agentTimeline';
 import {
   createComposerHistoryState,
   type ComposerHistoryDirection,
@@ -35,7 +32,6 @@ export type TuiState = {
   sessions: Record<SessionId, SessionModel>;
   focusedSessionId: SessionId | null;
   runs: Record<RunId, TuiRunModel>;
-  runRoute: Record<RunId, SessionId>;
   input: TextAreaModel & {
     focused: boolean;
     history: ComposerHistoryState;
@@ -61,10 +57,8 @@ export type SessionModel = {
     studioWikiBaseDir?: string;
     contextWindow?: number;
   };
-  history: HistoryCellModel[];
   timeline: AgentTimelineEntry[];
   activeRunId: RunId | null;
-  activeRun: ActiveRunModel | null;
   tokenUsage: TokenUsageModel | null;
 };
 
@@ -240,7 +234,6 @@ export function createInitialTuiState(defaultSession: SessionModel): TuiState {
     },
     focusedSessionId: defaultSession.id,
     runs: {},
-    runRoute: {},
     input: {
       text: '',
       cursorOffset: 0,
@@ -254,9 +247,8 @@ export function createSession(params: {
   id: SessionId;
   kind?: SessionModel['kind'];
   actor?: Partial<SessionModel['actor']>;
-  history?: HistoryCellModel[];
+  timeline?: AgentTimelineEntry[];
 }): SessionModel {
-  const history = params.history ?? [];
   return {
     id: params.id,
     kind: params.kind ?? 'chat',
@@ -265,10 +257,8 @@ export function createSession(params: {
       summary: params.actor?.summary ?? TUI_TEXT.defaultPetSummary,
     },
     runtime: {},
-    history,
-    timeline: timelineEntriesFromHistory(history),
+    timeline: params.timeline ?? [],
     activeRunId: null,
-    activeRun: null,
     tokenUsage: null,
   };
 }

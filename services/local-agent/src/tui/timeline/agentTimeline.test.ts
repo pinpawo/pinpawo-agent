@@ -4,7 +4,6 @@ import type { LocalAgentOperationEvent } from '../../events/localAgentEvent';
 import {
   isAgentTimelineMessage,
   operationTimelineEntryFromEvent,
-  timelineEntriesFromHistory,
   timelineEntryFromHistoryCell,
   timelineEntryIdFromOperationEvent,
   timelineMessagesFromEntries,
@@ -17,50 +16,6 @@ import {
 } from './agentTimelineSelectors';
 import { buildOperationPresentation, getOperationPresentationKey } from './operationPresentation';
 import type { AgentTimelineEntry } from './agentTimeline';
-
-test('timelineEntriesFromHistory maps legacy history cells to stable timeline entries', () => {
-  const entries = timelineEntriesFromHistory([
-    {
-      id: 'user-1',
-      kind: 'user',
-      text: '打开 example.com',
-      timestamp: '2026-06-19T00:00:00.000Z',
-    },
-    {
-      id: 'assistant-1',
-      kind: 'assistant',
-      text: '我来打开页面',
-    },
-    {
-      id: 'system-1',
-      kind: 'system',
-      text: '打开网页：https://example.com',
-    },
-  ]);
-
-  assert.deepEqual(entries, [
-    {
-      id: 'history:user-1',
-      type: 'message',
-      role: 'user',
-      text: '打开 example.com',
-      status: 'completed',
-      createdAt: '2026-06-19T00:00:00.000Z',
-    },
-    {
-      id: 'history:assistant-1',
-      type: 'message',
-      role: 'assistant',
-      text: '我来打开页面',
-      status: 'completed',
-    },
-    {
-      id: 'history:system-1',
-      type: 'notice',
-      text: '打开网页：https://example.com',
-    },
-  ]);
-});
 
 test('timelineEntryFromHistoryCell keeps system history typed as notice', () => {
   assert.deepEqual(

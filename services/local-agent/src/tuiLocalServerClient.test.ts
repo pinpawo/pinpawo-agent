@@ -156,7 +156,6 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
   const resumed = await client.resumeSession('chat:one');
 
   assert.equal(resumed.session.active, true);
-  assert.deepEqual(resumed.history.map((item) => item.text), ['welcome back']);
   assert.deepEqual(resumed.snapshot.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
     ['message', 'welcome back'],
   ]);

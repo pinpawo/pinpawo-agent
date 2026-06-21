@@ -17,7 +17,7 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 - Contract version: `TUI_CORE_CONTRACT_VERSION = 1`.
 - Target snapshot action: `session.snapshot.loaded`.
 - Contract tests: `services/local-agent/src/tui/contracts/tuiCoreContract.test.ts`.
-- Deferred reconnect/resume migrations are listed in `TUI_CORE_DEFERRED_CONTRACT_GAPS`.
+- Deferred reconnect migrations are listed in `TUI_CORE_DEFERRED_CONTRACT_GAPS`.
 - Runtime target tests are not left as `test.skip`; deferred behavior is executable as contract metadata until CORE-4/CORE-5 implement it.
 
 ## Expected Changes

@@ -83,20 +83,18 @@ test('TUI CORE-1 tracks deferred runtime snapshot migrations without skipped tes
   assert.deepEqual(TUI_CORE_DEFERRED_CONTRACT_GAPS.map((gap) => gap.id), [
     'reconnect-server-completed-run',
     'reconnect-pending-review',
-    'resume-session-snapshot',
   ]);
 
   for (const gap of TUI_CORE_DEFERRED_CONTRACT_GAPS) {
     assert.equal(gap.targetAction, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
-    assert.equal(gap.followUp.some((item) => item.startsWith('CORE-4')), true);
     assert.equal(gap.followUp.some((item) => item.startsWith('CORE-5')), true);
   }
 
   assert.deepEqual(
     TUI_CORE_DEFERRED_CONTRACT_GAPS
-      .flatMap((gap) => [...gap.currentLegacyActions])
+      .flatMap((gap) => [...gap.currentLegacyActions] as string[])
       .filter((action) => action === 'session.clear' || action === 'session.replace_history')
       .sort(),
-    ['session.clear', 'session.replace_history', 'session.replace_history'],
+    ['session.replace_history'],
   );
 });

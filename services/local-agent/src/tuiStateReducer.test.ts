@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import { TUI_CORE_TARGET_ACTIONS } from './tui/contracts/tuiCoreContract';
 import { createInitialTuiState, createSession, type TuiState } from './tui/state/tuiState';
 import {
   selectFocusedActiveOperations,
@@ -408,6 +409,101 @@ test('tuiStateReducer clears session token usage when replacing or clearing hist
   });
 
   assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
+});
+
+test('tuiStateReducer loads authoritative session snapshots', () => {
+  let state = initialState('chat:pet');
+  state = {
+    ...state,
+    runRoute: {
+      'old-req': 'chat:pet',
+      'other-req': 'chat:other',
+    },
+    sessions: {
+      ...state.sessions,
+      'chat:other': createSession({ id: 'chat:other' }),
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        runtime: { model: 'old-model', cwd: '/old' },
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        },
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'startup',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [
+        {
+          id: 'history:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'hello',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-1',
+        },
+        {
+          id: 'history:assistant-1',
+          type: 'message',
+          role: 'assistant',
+          text: 'hi',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-1',
+        },
+      ],
+      runs: [{
+        requestId: 'req-1',
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        phase: 'streaming',
+        timelineEntryIds: ['history:user-1'],
+        startedAt: 1000,
+      }],
+      activeRunId: 'req-1',
+      runtime: {
+        model: 'new-model',
+        contextWindow: 1000,
+      },
+      tokenUsage: {
+        inputTokens: 20,
+        outputTokens: 10,
+        totalTokens: 30,
+      },
+    },
+  });
+
+  const session = state.sessions['chat:pet']!;
+  assert.equal(state.focusedSessionId, 'chat:pet');
+  assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
+    ['user', 'hello'],
+    ['assistant', 'hi'],
+  ]);
+  assert.deepEqual(session.timeline.map((entry) => [entry.id, entry.type]), [
+    ['history:user-1', 'message'],
+    ['history:assistant-1', 'message'],
+  ]);
+  assert.equal(session.runtime.model, 'new-model');
+  assert.equal(session.runtime.cwd, '/old');
+  assert.equal(session.runtime.contextWindow, 1000);
+  assert.deepEqual(session.tokenUsage, {
+    inputTokens: 20,
+    outputTokens: 10,
+    totalTokens: 30,
+  });
+  assert.equal(session.activeRun?.requestId, 'req-1');
+  assert.equal(session.activeRun?.phase, 'streaming');
+  assert.equal(state.runRoute['req-1'], 'chat:pet');
+  assert.equal(state.runRoute['old-req'], undefined);
+  assert.equal(state.runRoute['other-req'], 'chat:other');
 });
 
 test('tuiStateReducer clears run routes for the cleared session', () => {

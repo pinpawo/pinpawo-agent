@@ -8,6 +8,7 @@ import { formatNow } from './render/terminalText';
 import { TuiLocalServerClient } from './tuiLocalServerClient';
 import { TuiLocalWebSocketClient } from './tuiLocalWebSocketClient';
 import { buildTuiActionsFromServerMessage } from './tuiServerMessageActions';
+import { TUI_CORE_TARGET_ACTIONS } from './contracts/tuiCoreContract';
 import {
   selectFocusedActiveRun,
   selectFocusedBusy,
@@ -342,7 +343,7 @@ export class TuiRuntimeController {
     const connected = await this.waitForLocalServer();
     if (this.disposed || !connected) return;
 
-    await this.restoreHistory();
+    await this.restoreStartupSnapshot();
     if (this.disposed) return;
 
     this.connectWebSocket();
@@ -388,17 +389,19 @@ export class TuiRuntimeController {
     return false;
   }
 
-  private async restoreHistory() {
+  private async restoreStartupSnapshot() {
     try {
-      const restored = await this.localServerClient.readHistory();
-      if (restored.length > 0) {
-        this.options.dispatch({
-          type: 'session.replace_history',
-          history: restored,
-        });
-      }
+      const state = this.options.getState();
+      const sessionId = state.focusedSessionId ?? 'chat:default';
+      const kind = state.sessions[sessionId]?.kind ?? 'chat';
+      const snapshot = await this.localServerClient.readSessionSnapshot({ sessionId, kind });
+      this.options.dispatch({
+        type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+        source: 'startup',
+        snapshot,
+      });
     } catch {
-      // history restore is best-effort
+      // snapshot restore is best-effort
     }
   }
 

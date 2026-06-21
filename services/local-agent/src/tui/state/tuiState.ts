@@ -1,5 +1,6 @@
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
+import type { TuiCoreSessionSnapshotLoadedAction } from '../contracts/tuiCoreContract';
 import {
   timelineEntriesFromHistory,
   type AgentTimelineEntry,
@@ -108,6 +109,7 @@ export type HistoryCellMeta = {
 };
 
 export type TuiAction =
+  | TuiCoreSessionSnapshotLoadedAction
   | {
       type: 'connection.set';
       status: TuiConnectionStatus;

@@ -37,21 +37,14 @@ export const TUI_CORE_DEFERRED_CONTRACT_GAPS = [
     currentArea: 'TuiRuntimeController.reconnect',
     targetAction: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
     currentLegacyActions: ['session.replace_history'],
-    followUp: ['CORE-4 Snapshot Adapter', 'CORE-5 Reconnect Reconciliation'],
+    followUp: ['CORE-5 Reconnect Reconciliation'],
   },
   {
     id: 'reconnect-pending-review',
     currentArea: 'TuiRuntimeController.reconnect',
     targetAction: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
     currentLegacyActions: [],
-    followUp: ['CORE-4 Snapshot Adapter', 'CORE-5 Reconnect Reconciliation'],
-  },
-  {
-    id: 'resume-session-snapshot',
-    currentArea: 'TuiRuntimeController.resumeSession',
-    targetAction: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
-    currentLegacyActions: ['session.clear', 'session.replace_history'],
-    followUp: ['CORE-4 Snapshot Adapter', 'CORE-5 Reconnect Reconciliation'],
+    followUp: ['CORE-5 Reconnect Reconciliation'],
   },
 ] as const;
 
@@ -128,6 +121,12 @@ export type TuiCoreRuntimeSnapshot = {
   model?: string;
   cwd?: string;
   stateRoot?: string;
+  studioConfigPath?: string;
+  studioConfigSource?: string;
+  studioConfigActivePath?: string;
+  legacyStudioConfigPath?: string;
+  petsDir?: string;
+  studioWikiBaseDir?: string;
   contextWindow?: number;
 };
 

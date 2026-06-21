@@ -347,7 +347,12 @@ test('CORE-2 history import maps only user and assistant cells into timeline mes
     },
   ]);
 
-  assert.deepEqual(messages.map((entry) => [entry.id, entry.type, entry.role, entry.text]), [
+  assert.deepEqual(messages.map((entry) => [
+    entry.id,
+    entry.type,
+    entry.type === 'message' ? entry.role : '',
+    entry.type === 'message' ? entry.text : '',
+  ]), [
     ['history:user-cell', 'message', 'user', 'hello'],
     ['history:assistant-cell', 'message', 'assistant', 'hi'],
   ]);

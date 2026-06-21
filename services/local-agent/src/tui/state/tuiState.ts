@@ -34,6 +34,7 @@ export type TuiState = {
   connection: TuiConnectionState;
   sessions: Record<SessionId, SessionModel>;
   focusedSessionId: SessionId | null;
+  runs: Record<RunId, TuiRunModel>;
   runRoute: Record<RunId, SessionId>;
   input: TextAreaModel & {
     focused: boolean;
@@ -62,6 +63,7 @@ export type SessionModel = {
   };
   history: HistoryCellModel[];
   timeline: AgentTimelineEntry[];
+  activeRunId: RunId | null;
   activeRun: ActiveRunModel | null;
   tokenUsage: TokenUsageModel | null;
 };
@@ -73,6 +75,11 @@ export type ActiveRunModel = {
   pendingReview?: ApprovalRequestModel;
   startedAt: number;
   charCount: number;
+};
+
+export type TuiRunModel = ActiveRunModel & {
+  sessionId: SessionId;
+  kind: SessionModel['kind'];
 };
 
 export type TokenUsageModel = {
@@ -232,6 +239,7 @@ export function createInitialTuiState(defaultSession: SessionModel): TuiState {
       [defaultSession.id]: defaultSession,
     },
     focusedSessionId: defaultSession.id,
+    runs: {},
     runRoute: {},
     input: {
       text: '',
@@ -259,6 +267,7 @@ export function createSession(params: {
     runtime: {},
     history,
     timeline: timelineEntriesFromHistory(history),
+    activeRunId: null,
     activeRun: null,
     tokenUsage: null,
   };

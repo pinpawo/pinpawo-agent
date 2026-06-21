@@ -67,6 +67,6 @@ test('CORE-3 defers legacy-path migration to later slices', () => {
 
   for (const gap of TUI_CORE3_DEFERRED_RUN_REGISTRY_GAPS) {
     assert.equal(gap.currentLegacyPaths.length >= 1, true);
-    assert.equal(gap.followUp.includes('CORE-3 migration slice'), true);
+    assert.equal(gap.followUp.includes('CORE-7 legacy mirror removal'), true);
   }
 });

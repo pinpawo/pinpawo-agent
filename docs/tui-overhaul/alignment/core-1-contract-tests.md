@@ -8,7 +8,7 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 
 - `timeline == backend checkpoint messages`.
 - Timeline contains user message, assistant streaming/final message, and tool operation message.
-- pending review, runtime, studio progress, connection, token usage, and active run are state, not timeline messages.
+- pending review, runtime, studio progress, connection, token usage, runs, and active run are state, not timeline messages.
 - No `transcript`, message-only view, or `transcriptSnapshot` second message log.
 
 ## Contract Artifact

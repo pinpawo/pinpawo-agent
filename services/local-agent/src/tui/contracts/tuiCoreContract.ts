@@ -15,6 +15,7 @@ export const TUI_CORE_STATE_OWNERS = [
   'activeRun',
   'connection',
   'pendingReview',
+  'runs',
   'runtime',
   'studioProgress',
   'tokenUsage',

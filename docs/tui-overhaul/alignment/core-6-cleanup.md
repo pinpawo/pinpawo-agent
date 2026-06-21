@@ -25,7 +25,7 @@ This PR is intentionally conservative: it deletes paths that no longer have runt
 ## Deferred Changes
 
 - Remove `SessionModel.history` after transcript export and remaining compatibility reads are migrated.
-- Replace `activeRun` and `runRoute` naming/model with a clearer run registry in a focused PR.
+- Replace `activeRun` and `runRoute` naming/model with a clearer run registry in a focused PR. CORE-7 introduces the registry and keeps legacy mirrors temporarily.
 - Replace remaining compatibility timeline entry kinds once render state has dedicated owners.
 
 ## Alignment Log
@@ -43,5 +43,5 @@ This PR is intentionally conservative: it deletes paths that no longer have runt
 - [x] `session.replace_history` is removed from reducer actions.
 - [x] `skipTimelineIds` is removed from reducer completion flow.
 - [x] No new transcript/message-only model is introduced.
-- [ ] `SessionModel.history` removal is explicitly deferred.
+- [x] `SessionModel.history` removal is explicitly deferred.
 - [x] PR references tracking issue #232.

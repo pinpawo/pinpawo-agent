@@ -9,6 +9,26 @@ function pendingReviewState(): TuiState {
   return {
     connection: { status: 'ready', message: 'ready' },
     focusedSessionId: 'sess-1',
+    runs: {
+      'req-1': {
+        requestId: 'req-1',
+        sessionId: 'sess-1',
+        kind: 'chat',
+        phase: 'waiting_human',
+        timelineEntryIds: [],
+        pendingReview: {
+          requestId: 'req-1',
+          review: {
+            id: 'review-1',
+            schemaVersion: 1,
+            view: { kind: 'plain', body: 'Need review' },
+            options: [],
+          },
+        },
+        startedAt: 1,
+        charCount: 0,
+      },
+    },
     runRoute: { 'req-1': 'sess-1' },
     input: { text: '', cursorOffset: 0, focused: true, history: createComposerHistoryState() },
     sessions: {
@@ -20,6 +40,7 @@ function pendingReviewState(): TuiState {
         history: [],
         timeline: [],
         tokenUsage: null,
+        activeRunId: 'req-1',
         activeRun: {
           requestId: 'req-1',
           phase: 'waiting_human',

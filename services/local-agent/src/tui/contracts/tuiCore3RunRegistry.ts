@@ -24,21 +24,21 @@ export const TUI_CORE3_DEFERRED_RUN_REGISTRY_GAPS = [
     currentArea: 'tuiState + reducer',
     target: 'route events via runs[requestId].sessionId',
     currentLegacyPaths: ['runRoute lookup', 'session.activeRun pointer only'],
-    followUp: ['CORE-3 migration slice'],
+    followUp: ['CORE-7 legacy mirror removal'],
   },
   {
     id: 'run-route-removal',
     currentArea: 'global TuiState model',
     target: 'replace TuiState.runRoute',
     currentLegacyPaths: ['tuiState.runRoute'],
-    followUp: ['CORE-3 migration slice'],
+    followUp: ['CORE-7 legacy mirror removal'],
   },
   {
     id: 'active-run-entity-migration',
     currentArea: 'session state model',
     target: 'introduce TuiState.runs + SessionModel.activeRunId',
     currentLegacyPaths: ['SessionModel.activeRun as full run entity'],
-    followUp: ['CORE-3 migration slice'],
+    followUp: ['CORE-7 legacy mirror removal'],
   },
 ] as const;
 

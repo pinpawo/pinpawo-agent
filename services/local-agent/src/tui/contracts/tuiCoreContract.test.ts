@@ -17,6 +17,7 @@ test('TUI CORE-1 contract freezes timeline and snapshot ownership', () => {
     'activeRun',
     'connection',
     'pendingReview',
+    'runs',
     'runtime',
     'studioProgress',
     'tokenUsage',

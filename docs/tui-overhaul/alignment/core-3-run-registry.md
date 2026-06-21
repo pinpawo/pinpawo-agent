@@ -23,7 +23,7 @@ This is the first CORE-3 slice. It defines the target run registry contract and 
 
 ## Deferred CORE-3 Changes
 
-- Migrate `TuiState` from `runRoute` to run registry ownership.
+- Migrate `TuiState` from `runRoute` to run registry ownership. CORE-7 introduces the runtime registry and keeps legacy mirrors temporarily.
 - Remove `SessionModel.activeRun` as full run semantics holder.
 - Migrate `tuiStateReducer` event routing from session active pointer to `runs[requestId].sessionId`.
 - Remove legacy runRoute cleanup logic once registry is authoritative.
@@ -41,6 +41,7 @@ This is the first CORE-3 slice. It defines the target run registry contract and 
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-06-21 | run registry migration | `TuiState.runs[runId] + SessionModel.activeRunId` should replace `activeRun + runRoute` for routing and terminalization | reducer/controller still route by `runRoute` and use `SessionModel.activeRun` | run migration is a large reducer refactor that depends on CORE-2 and CORE-4 follow-up | keep runtime model unchanged for this slice; add contract and gap registry | CORE-3 full implementation slice after baseline contract land | deferred |
 | 2026-06-21 | pending review derivation | pending approval state should be derivable from run registry or an explicit state map | earlier contract used only `pendingReviewId`, which loses waiting/answered/interrupted status | CORE-1 snapshot already carries pending review status on run snapshots | align CORE-3 run model with the CORE-1 pending review shape | CORE-5 snapshot reconciliation consumes the aligned shape | accepted |
+| 2026-06-21 | runtime run registry | selectors and runtime state should have a concrete `runs[runId]` source | legacy `activeRun` and `runRoute` still exist as mirrors | removing both fields in the same slice would mix reducer migration with UI/export cleanup | CORE-7 reconciles `TuiState.runs` and `SessionModel.activeRunId` after every reducer action | delete legacy mirrors after UI callsites no longer need them | accepted |
 
 ## Open Questions
 
@@ -50,7 +51,9 @@ This is the first CORE-3 slice. It defines the target run registry contract and 
 
 - [ ] `activeRun` no longer stores full run entity semantics.
 - [ ] `runRoute` is removed or has a documented removal follow-up.
-- [ ] Terminal events do not silently drop because the active pointer is missing.
+- [x] Terminal events do not silently drop because the active pointer is missing.
+- [x] `TuiState.runs` exists as a concrete runtime registry.
+- [x] `SessionModel.activeRunId` exists as the session active pointer.
 - [x] PR references tracking issue #232.
 
 This checklist is milestone-level. This PR only establishes model/contract foundations; implementation migration is follow-up.

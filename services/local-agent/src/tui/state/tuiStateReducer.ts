@@ -39,6 +39,7 @@ import type {
   SessionId,
   SessionModel,
   TuiAction,
+  TuiRunModel,
   TokenUsageModel,
   TuiState,
 } from './tuiState';
@@ -350,6 +351,59 @@ function updateSession(
   };
 }
 
+function reconcileRunRegistry(state: TuiState): TuiState {
+  const runs: Record<string, TuiRunModel> = {};
+  let sessionsChanged = false;
+  const sessions = Object.fromEntries(Object.entries(state.sessions).map(([sessionId, session]) => {
+    const activeRunId = session.activeRun?.requestId ?? null;
+    if (session.activeRun) {
+      runs[session.activeRun.requestId] = {
+        ...session.activeRun,
+        sessionId,
+        kind: session.kind,
+      };
+    }
+    if (session.activeRunId === activeRunId) {
+      return [sessionId, session];
+    }
+    sessionsChanged = true;
+    return [sessionId, {
+      ...session,
+      activeRunId,
+    }];
+  }));
+
+  if (!sessionsChanged && sameRunRegistry(state.runs, runs)) {
+    return state;
+  }
+
+  return {
+    ...state,
+    sessions: sessionsChanged ? sessions : state.sessions,
+    runs,
+  };
+}
+
+function sameRunRegistry(a: Record<string, TuiRunModel>, b: Record<string, TuiRunModel>) {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => {
+    const left = a[key];
+    const right = b[key];
+    return Boolean(left && right)
+      && left.sessionId === right.sessionId
+      && left.kind === right.kind
+      && left.requestId === right.requestId
+      && left.phase === right.phase
+      && left.startedAt === right.startedAt
+      && left.charCount === right.charCount
+      && left.pendingReview === right.pendingReview
+      && left.timelineEntryIds.length === right.timelineEntryIds.length
+      && left.timelineEntryIds.every((entryId, index) => entryId === right.timelineEntryIds[index]);
+  });
+}
+
 function clearTextAreaTransientInputState(input: TuiState['input']): TuiState['input'] {
   return {
     ...input,
@@ -578,6 +632,7 @@ function applySessionSnapshot(
       .filter((run) => !isTerminalSnapshotRun(run))
       .map((run) => [run.requestId, run.sessionId || sessionId]),
   );
+  const activeRun = activeRunFromSnapshot(snapshot, existingSession);
   const nextSession: SessionModel = {
     id: sessionId,
     kind: snapshot.kind,
@@ -591,7 +646,8 @@ function applySessionSnapshot(
     },
     history,
     timeline,
-    activeRun: activeRunFromSnapshot(snapshot, existingSession),
+    activeRunId: activeRun?.requestId ?? null,
+    activeRun,
     tokenUsage: snapshot.tokenUsage
       ?? (action.source === 'reconnect' ? existingSession?.tokenUsage ?? null : null),
   };
@@ -625,6 +681,10 @@ function historyDraft(
 }
 
 export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
+  return reconcileRunRegistry(reduceTuiState(state, action));
+}
+
+function reduceTuiState(state: TuiState, action: TuiAction): TuiState {
   switch (action.type) {
     case TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded:
       return applySessionSnapshot(state, action);
@@ -1076,7 +1136,18 @@ export function selectFocusedTimeline(state: TuiState) {
 }
 
 export function selectFocusedActiveRun(state: TuiState) {
-  return selectFocusedSession(state)?.activeRun ?? null;
+  const session = selectFocusedSession(state);
+  if (!session) return null;
+  if (session.activeRunId && state.runs[session.activeRunId]) {
+    return state.runs[session.activeRunId];
+  }
+  return session.activeRun
+    ? {
+        ...session.activeRun,
+        sessionId: session.id,
+        kind: session.kind,
+      }
+    : null;
 }
 
 export function selectFocusedBusy(state: TuiState) {
@@ -1090,8 +1161,9 @@ export function selectFocusedPendingUi(state: TuiState) {
 
 export function selectFocusedActiveOperations(state: TuiState) {
   const session = selectFocusedSession(state);
-  return session?.activeRun
-    ? selectActiveOperationsFromTimeline(session.timeline, session.activeRun.requestId)
+  const activeRun = selectFocusedActiveRun(state);
+  return session && activeRun
+    ? selectActiveOperationsFromTimeline(session.timeline, activeRun.requestId)
     : [];
 }
 

@@ -66,6 +66,8 @@ test('tuiStateReducer uses completed message text for final assistant history', 
 
   const activeRun = selectFocusedActiveRun(state);
   assert.equal(activeRun?.phase, 'streaming');
+  assert.equal(activeRun?.sessionId, 'chat:pet');
+  assert.equal(activeRun?.kind, 'chat');
   assert.equal(activeRun?.charCount, '我先检查一下仓库状态。检查完毕，下面汇总。'.length);
   assert.equal(
     timelineMessageText(state, 'chat:pet', 'req-1:assistant:0'),
@@ -86,6 +88,8 @@ test('tuiStateReducer uses completed message text for final assistant history', 
 
   const session = state.sessions['chat:pet']!;
   assert.equal(session.activeRun, null);
+  assert.equal(session.activeRunId, null);
+  assert.equal(state.runs['req-1'], undefined);
   assert.equal(state.runRoute['req-1'], undefined);
   assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
     ['user', 'hello'],
@@ -522,6 +526,9 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
   });
   assert.equal(session.activeRun?.requestId, 'req-1');
   assert.equal(session.activeRun?.phase, 'streaming');
+  assert.equal(session.activeRunId, 'req-1');
+  assert.equal(state.runs['req-1']?.sessionId, 'chat:pet');
+  assert.equal(state.runs['req-1']?.phase, 'streaming');
   assert.equal(state.runRoute['req-1'], 'chat:pet');
   assert.equal(state.runRoute['old-req'], undefined);
   assert.equal(state.runRoute['other-req'], 'chat:other');
@@ -622,6 +629,8 @@ test('tuiStateReducer restores pending approval from authoritative session snaps
 
   const pending = selectFocusedPendingApproval(state);
   assert.equal(state.sessions['chat:pet']?.activeRun?.phase, 'waiting_human');
+  assert.equal(state.sessions['chat:pet']?.activeRunId, 'req-review');
+  assert.equal(state.runs['req-review']?.pendingReview?.review.id, 'review-1');
   assert.equal(state.runRoute['req-review'], 'chat:pet');
   assert.equal(pending?.requestId, 'req-review');
   assert.equal(pending?.review.id, 'review-1');
@@ -644,6 +653,8 @@ test('tuiStateReducer clears run routes for the cleared session', () => {
     type: 'session.clear',
   });
 
+  assert.equal(state.runs['req-main'], undefined);
+  assert.equal(state.runs['req-other']?.sessionId, 'chat:other');
   assert.equal(state.runRoute['req-main'], undefined);
   assert.equal(state.runRoute['req-other'], 'chat:other');
   assert.equal(state.sessions['chat:pet']?.history.length, 0);

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import {
   buildLocalServerAuthHeaders,
   readLocalServerAuthToken,
@@ -11,6 +12,12 @@ import type { ResumeSessionSummary } from './types';
 const DEFAULT_HEALTH_TIMEOUT_MS = 1500;
 
 type FetchLike = typeof fetch;
+
+class LocalServerHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`);
+  }
+}
 
 type TuiLocalServerClientOptions = {
   port: number;
@@ -53,7 +60,7 @@ export class TuiLocalServerClient {
   async readHistory(): Promise<HistoryCellModel[]> {
     const res = await this.fetchAuth(this.url('/history'));
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+      throw new LocalServerHttpError(res.status);
     }
     const payload = await res.json() as {
       messages?: Array<{ role?: string; text?: string }>;
@@ -65,16 +72,37 @@ export class TuiLocalServerClient {
     sessionId: string;
     kind: TuiCoreSessionSnapshot['kind'];
   }): Promise<TuiCoreSessionSnapshot> {
-    const [history, runtime] = await Promise.all([
-      this.readHistory(),
+    const [serverSnapshot, runtime] = await Promise.all([
+      this.readServerSnapshot().catch((err) => {
+        if (err instanceof LocalServerHttpError && err.status === 404) {
+          return null;
+        }
+        throw err;
+      }),
       this.readRuntime().catch(() => null),
     ]);
+    if (serverSnapshot) {
+      return buildSessionSnapshotFromServerPayload(serverSnapshot, {
+        fallbackSessionId: params.sessionId,
+        fallbackKind: params.kind,
+        runtime,
+      });
+    }
+    const history = await this.readHistory();
     return buildTuiSessionSnapshotFromHistory({
       sessionId: params.sessionId,
       kind: params.kind,
       history,
       runtime,
     });
+  }
+
+  private async readServerSnapshot(): Promise<LocalServerSnapshotPayload> {
+    const res = await this.fetchAuth(this.url('/snapshot'));
+    if (!res.ok) {
+      throw new LocalServerHttpError(res.status);
+    }
+    return await res.json() as LocalServerSnapshotPayload;
   }
 
   async readRuntime(timeoutMs = DEFAULT_HEALTH_TIMEOUT_MS): Promise<LocalServerRuntimeSnapshot | null> {
@@ -157,6 +185,112 @@ export class TuiLocalServerClient {
       },
     });
   }
+}
+
+type LocalServerSnapshotPayload = {
+  session?: unknown;
+  messages?: Array<{ role?: string; text?: string }>;
+  pendingReview?: unknown;
+};
+
+type ParsedSnapshotSession = {
+  id: string;
+  kind?: TuiCoreSessionSnapshot['kind'];
+};
+
+type ParsedPendingReview = {
+  requestId: string;
+  reviewId: string;
+  sessionId?: string;
+  review: ReviewSpec;
+  petId?: string;
+};
+
+function buildSessionSnapshotFromServerPayload(
+  payload: LocalServerSnapshotPayload,
+  options: {
+    fallbackSessionId: string;
+    fallbackKind: TuiCoreSessionSnapshot['kind'];
+    runtime?: LocalServerRuntimeSnapshot | null;
+  },
+): TuiCoreSessionSnapshot {
+  const session = parseSnapshotSession(payload.session);
+  const sessionId = session?.id ?? options.fallbackSessionId;
+  const kind = session?.kind ?? options.fallbackKind;
+  const history = parseHistoryMessages(payload.messages);
+  const snapshot = buildTuiSessionSnapshotFromHistory({
+    sessionId,
+    kind,
+    history,
+    runtime: options.runtime,
+  });
+  const pendingReview = parsePendingReviewSnapshot(payload.pendingReview);
+  if (!pendingReview) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    runs: [{
+      requestId: pendingReview.requestId,
+      sessionId: pendingReview.sessionId ?? sessionId,
+      kind,
+      phase: 'waiting_human',
+      timelineEntryIds: snapshot.timeline.map((entry) => entry.id),
+      pendingReview: {
+        requestId: pendingReview.requestId,
+        reviewId: pendingReview.reviewId,
+        status: 'waiting',
+        review: pendingReview.review,
+        ...(pendingReview.petId ? { petId: pendingReview.petId } : {}),
+      },
+    }],
+    activeRunId: pendingReview.requestId,
+    pendingReviewId: pendingReview.reviewId,
+  };
+}
+
+function parseSnapshotSession(value: unknown): ParsedSnapshotSession | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== 'string') return null;
+  const kind = record.kind === 'chat' || record.kind === 'studio'
+    ? record.kind
+    : undefined;
+  return {
+    id: record.id,
+    ...(kind ? { kind } : {}),
+  };
+}
+
+function parsePendingReviewSnapshot(value: unknown): ParsedPendingReview | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const review = record.review;
+  if (
+    typeof record.requestId !== 'string'
+    || typeof record.reviewId !== 'string'
+    || !review
+    || typeof review !== 'object'
+    || Array.isArray(review)
+    || typeof (review as Record<string, unknown>).id !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    requestId: record.requestId,
+    reviewId: record.reviewId,
+    ...(typeof record.sessionId === 'string' ? { sessionId: record.sessionId } : {}),
+    review: review as ReviewSpec,
+    ...(readPendingReviewPetId(record) ? { petId: readPendingReviewPetId(record) } : {}),
+  };
+}
+
+function readPendingReviewPetId(record: Record<string, unknown>) {
+  if (typeof record.petId === 'string') return record.petId;
+  const actor = record.actor;
+  if (!actor || typeof actor !== 'object' || Array.isArray(actor)) return undefined;
+  const petId = (actor as Record<string, unknown>).petId;
+  return typeof petId === 'string' ? petId : undefined;
 }
 
 function normalizeHeaders(headers: RequestInit['headers']): Record<string, string> {

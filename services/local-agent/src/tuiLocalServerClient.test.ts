@@ -89,6 +89,27 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
         ],
       });
     }
+    if (url.endsWith('/snapshot')) {
+      return jsonResponse({
+        session: { id: 'chat:pet', kind: 'chat', active: true },
+        messages: [
+          { role: 'user', text: 'restored from snapshot' },
+          { role: 'system', text: 'snapshot notice' },
+        ],
+        pendingReview: {
+          requestId: 'req-review',
+          reviewId: 'review-1',
+          sessionId: 'chat:pet',
+          actor: { petId: 'pet-a' },
+          review: {
+            id: 'review-1',
+            schemaVersion: 1,
+            view: { kind: 'plain', body: 'Approve?' },
+            options: [],
+          },
+        },
+      });
+    }
     if (url.endsWith('/sessions')) {
       return jsonResponse({
         sessions: [
@@ -126,8 +147,11 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
   assert.deepEqual((await client.readHistory()).map((item) => item.text), ['restored', 'notice']);
   const snapshot = await client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'chat' });
   assert.deepEqual(snapshot.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
-    ['message', 'restored'],
+    ['message', 'restored from snapshot'],
   ]);
+  assert.equal(snapshot.activeRunId, 'req-review');
+  assert.equal(snapshot.runs[0]?.pendingReview?.review?.id, 'review-1');
+  assert.equal(snapshot.runs[0]?.pendingReview?.petId, 'pet-a');
   assert.deepEqual((await client.listResumeSessions()).map((item) => item.id), ['chat:one']);
   const resumed = await client.resumeSession('chat:one');
 
@@ -139,7 +163,7 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
   assert.deepEqual(seenUrls, [
     'http://127.0.0.1:3210/health',
     'http://127.0.0.1:3210/history',
-    'http://127.0.0.1:3210/history',
+    'http://127.0.0.1:3210/snapshot',
     'http://127.0.0.1:3210/runtime',
     'http://127.0.0.1:3210/sessions',
     'http://127.0.0.1:3210/sessions/resume?sessionId=chat%3Aone',
@@ -161,6 +185,9 @@ test('TuiLocalServerClient does not synthesize snapshots when history restore fa
       const href = String(url);
       if (href.endsWith('/history')) {
         return new Response('{}', { status: 503 });
+      }
+      if (href.endsWith('/snapshot')) {
+        return new Response('{}', { status: 404 });
       }
       if (href.endsWith('/runtime')) {
         return jsonResponse({ model: 'gpt-test' });

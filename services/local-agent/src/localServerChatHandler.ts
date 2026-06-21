@@ -41,6 +41,14 @@ type PendingReviewRoute = {
   actor?: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['actor'];
 };
 
+export type PendingReviewSnapshot = {
+  requestId: string;
+  reviewId: string;
+  sessionId?: string;
+  review: ReviewSpec;
+  actor?: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['actor'];
+};
+
 const MAX_CONSUMED_PENDING_REVIEW_REQUEST_IDS = 1000;
 
 export function isToolProtocolHistoryError(value: unknown): boolean {
@@ -164,6 +172,39 @@ export class LocalServerChatHandler {
       if (!oldest) break;
       this.consumedPendingReviewRequestIds.delete(oldest);
     }
+  }
+
+  async readPendingReviewSnapshot(deps: LocalServerDeps): Promise<PendingReviewSnapshot | null> {
+    const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
+    for (const [requestId, route] of this.pendingReviewRoutes) {
+      if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
+        continue;
+      }
+      return {
+        requestId,
+        reviewId: route.reviewId,
+        ...(route.sessionId ? { sessionId: route.sessionId } : {}),
+        review: route.review,
+        ...(route.actor ? { actor: route.actor } : {}),
+      };
+    }
+
+    const pending = await this.tuiSessions.readActivePendingReview(deps);
+    if (!pending) {
+      return null;
+    }
+    const requestId = `snapshot:${pending.sessionId}:${pending.review.id}`;
+    const route = this.buildPendingReviewRoute({
+      review: pending.review,
+      sessionId: pending.sessionId,
+    });
+    this.pendingReviewRoutes.set(requestId, route);
+    return {
+      requestId,
+      reviewId: route.reviewId,
+      sessionId: pending.sessionId,
+      review: route.review,
+    };
   }
 
   private sendClosedReviewError(ws: WebSocket, requestId: string) {

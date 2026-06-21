@@ -21,6 +21,7 @@ import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
 type LocalHttpHandlerOptions = {
   authToken: string;
   loadHistory: () => Promise<Array<{ role: string; text: string }>>;
+  loadSnapshot?: () => Promise<Record<string, unknown>>;
   listSessions: () => Promise<Array<Record<string, unknown>>>;
   resumeSession: (sessionId: string) => Promise<{
     session: Record<string, unknown>;
@@ -170,6 +171,21 @@ export function handleLocalHttpRequest(
     }).catch((err) => {
       writeJson(res, 500, {
         error: err instanceof Error ? err.message : 'history load failed',
+      });
+    });
+    return true;
+  }
+
+  if (pathname === '/snapshot') {
+    if (!options.loadSnapshot) {
+      writeJson(res, 404, { error: 'snapshot unavailable' });
+      return true;
+    }
+    options.loadSnapshot().then((snapshot) => {
+      writeJson(res, 200, snapshot);
+    }).catch((err) => {
+      writeJson(res, 500, {
+        error: err instanceof Error ? err.message : 'snapshot load failed',
       });
     });
     return true;

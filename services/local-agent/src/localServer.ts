@@ -72,6 +72,19 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
       const handled = handleLocalHttpRequest(req, res, depsWithRuntime, {
         authToken,
         loadHistory: () => tuiSessions.loadHistory(depsWithRuntime),
+        loadSnapshot: async () => {
+          const messages = await tuiSessions.loadHistory(depsWithRuntime);
+          const pendingReview = await chatHandler.readPendingReviewSnapshot(depsWithRuntime);
+          return {
+            session: {
+              id: tuiSessions.getActiveSessionId(depsWithRuntime.actorId),
+              kind: 'chat',
+              active: true,
+            },
+            messages,
+            ...(pendingReview ? { pendingReview } : {}),
+          };
+        },
         listSessions: () => tuiSessions.listSessions(depsWithRuntime),
         resumeSession: (sessionId) => tuiSessions.resumeSession(depsWithRuntime, sessionId),
       });

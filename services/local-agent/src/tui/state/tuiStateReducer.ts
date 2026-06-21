@@ -383,14 +383,20 @@ function finishRun(
   const sessionId = state.runRoute[requestId];
   if (!sessionId) return state;
   const session = state.sessions[sessionId];
+  if (!session || (session.activeRun && session.activeRun.requestId !== requestId)) {
+    return state;
+  }
   const nextState = updateSession(state, sessionId, (sessionToUpdate) => {
-    if (!sessionToUpdate.activeRun || sessionToUpdate.activeRun.requestId !== requestId) {
+    const sameActiveRun = sessionToUpdate.activeRun?.requestId === requestId;
+    if (sessionToUpdate.activeRun && !sameActiveRun) {
       return sessionToUpdate;
     }
-    const finalizedSession = finalizeSubagentTimelineEntries(sessionToUpdate, requestId);
+    const finalizedSession = sameActiveRun
+      ? finalizeSubagentTimelineEntries(sessionToUpdate, requestId)
+      : sessionToUpdate;
     return appendHistory({
       ...finalizedSession,
-      activeRun: null,
+      activeRun: sameActiveRun ? null : sessionToUpdate.activeRun,
     }, [
       ...history,
     ], options);
@@ -526,10 +532,28 @@ function activeRunFromSnapshot(
     timelineEntryIds: run.timelineEntryIds,
     startedAt: run.startedAt ?? existingActiveRun?.startedAt ?? 0,
     charCount: countSnapshotAssistantChars(snapshot, run.requestId),
-    ...(run.pendingReview?.status === 'waiting' && existingActiveRun?.pendingReview
-      ? { pendingReview: existingActiveRun.pendingReview }
-      : {}),
+    ...pendingReviewFromSnapshotRun(run, existingActiveRun),
   };
+}
+
+function pendingReviewFromSnapshotRun(
+  run: TuiCoreRunSnapshot,
+  existingActiveRun: ActiveRunModel | null,
+): Pick<ActiveRunModel, 'pendingReview'> | Record<string, never> {
+  const pendingReview = run.pendingReview;
+  if (pendingReview?.status !== 'waiting') return {};
+  if (pendingReview.review) {
+    return {
+      pendingReview: {
+        requestId: pendingReview.requestId,
+        review: pendingReview.review,
+        ...(pendingReview.petId ? { petId: pendingReview.petId } : {}),
+      },
+    };
+  }
+  return existingActiveRun?.pendingReview
+    ? { pendingReview: existingActiveRun.pendingReview }
+    : {};
 }
 
 function applySessionSnapshot(
@@ -820,7 +844,16 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (!sessionId) return state;
       const session = state.sessions[sessionId];
       const activeRun = session?.activeRun;
-      if (!session || !activeRun || activeRun.requestId !== event.requestId) {
+      if (!session) {
+        return state;
+      }
+      if (!activeRun || activeRun.requestId !== event.requestId) {
+        if (event.type !== 'message.completed' || activeRun) {
+          return state;
+        }
+      }
+
+      if (event.type !== 'message.completed' && (!activeRun || activeRun.requestId !== event.requestId)) {
         return state;
       }
 

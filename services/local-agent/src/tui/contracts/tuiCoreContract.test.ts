@@ -68,33 +68,9 @@ test('TUI CORE-1 snapshot action carries the target session model shape', () => 
 });
 
 test('TUI CORE-1 tracks deferred reducer terminalization gaps without skipped tests', () => {
-  assert.deepEqual(TUI_CORE_DEFERRED_REDUCER_GAPS.map((gap) => gap.id), [
-    'completed-event-missing-active-pointer',
-  ]);
-
-  const [gap] = TUI_CORE_DEFERRED_REDUCER_GAPS;
-  assert.equal(gap?.currentArea, 'tuiStateReducer event.received(message.completed)');
-  assert.equal(gap?.currentLegacyPaths.includes('session.activeRun pointer gate'), true);
-  assert.equal(gap?.followUp.some((item) => item.startsWith('CORE-3')), true);
-  assert.equal(gap?.followUp.some((item) => item.startsWith('CORE-5')), true);
+  assert.deepEqual([...TUI_CORE_DEFERRED_REDUCER_GAPS], []);
 });
 
 test('TUI CORE-1 tracks deferred runtime snapshot migrations without skipped tests', () => {
-  assert.deepEqual(TUI_CORE_DEFERRED_CONTRACT_GAPS.map((gap) => gap.id), [
-    'reconnect-server-completed-run',
-    'reconnect-pending-review',
-  ]);
-
-  for (const gap of TUI_CORE_DEFERRED_CONTRACT_GAPS) {
-    assert.equal(gap.targetAction, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
-    assert.equal(gap.followUp.some((item) => item.startsWith('CORE-5')), true);
-  }
-
-  assert.deepEqual(
-    TUI_CORE_DEFERRED_CONTRACT_GAPS
-      .flatMap((gap) => [...gap.currentLegacyActions] as string[])
-      .filter((action) => action === 'session.clear' || action === 'session.replace_history')
-      .sort(),
-    ['session.replace_history'],
-  );
+  assert.deepEqual([...TUI_CORE_DEFERRED_CONTRACT_GAPS], []);
 });

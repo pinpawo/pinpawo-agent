@@ -10,7 +10,7 @@ import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import { defineToolset, type AgentToolkit } from '../../types/toolkit';
 import { runAgent } from '../runAgent';
-import { buildOrchestratorTurnInput, createOrchestratorGraph } from '../createAgentRuntime';
+import { buildOrchestratorRunInput, createOrchestratorGraph } from '../createAgentRuntime';
 import {
   capabilitySearchTool,
   searchCapabilities,
@@ -40,9 +40,9 @@ import {
   tagNewLaneMessages,
 } from './messageLanes';
 import { RemoveMessage } from '@langchain/core/messages';
-import { reuseOrAppendTurnDelegation, updateTurnDelegationResult } from './delegations';
+import { reuseOrAppendRunDelegation, updateRunDelegationResult } from './delegations';
 import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
-import type { TurnDelegation } from './types';
+import type { RunDelegation } from './types';
 
 function capability(name: string, description: string): AgentCapability {
   return {
@@ -124,7 +124,7 @@ test('capability search tool returns a state update command with candidates', as
 
   assert.equal(isCommand(result), true);
   const command = result as unknown as Command<unknown, {
-    capabilitySearchState: {
+    runCapabilitySearchState: {
       query: string | null;
       attempted: boolean;
       candidates: { name: string }[];
@@ -132,16 +132,16 @@ test('capability search tool returns a state update command with candidates', as
     messages: { tool_call_id: string }[];
   }>;
   const update = command.update as {
-    capabilitySearchState: {
+    runCapabilitySearchState: {
       query: string | null;
       attempted: boolean;
       candidates: { name: string }[];
     };
     messages: { tool_call_id: string }[];
   };
-  assert.equal(update.capabilitySearchState.query, '宠物发帖|小红书日常');
-  assert.equal(update.capabilitySearchState.attempted, true);
-  assert.equal(update.capabilitySearchState.candidates[0]?.name, 'daily_post');
+  assert.equal(update.runCapabilitySearchState.query, '宠物发帖|小红书日常');
+  assert.equal(update.runCapabilitySearchState.attempted, true);
+  assert.equal(update.runCapabilitySearchState.candidates[0]?.name, 'daily_post');
   assert.equal(update.messages[0]?.tool_call_id, 'call-1');
   assert.deepEqual(splitCapabilitySearchTerms('宠物发帖|宠物 发帖'), ['宠物发帖', '宠物 发帖', '宠物', '发帖']);
 });
@@ -168,12 +168,12 @@ test('capability discovery receives compact task status context', async () => {
   const previousAnnounce = new AIMessage('已确认目标目录，打包因超时停止。');
   setPinpetMeta(previousAnnounce, {
     lane: 'general',
-    turnId: 'prev-turn',
+    runId: 'prev-turn',
     isAnnounce: true,
     delegationId: 'task-prev',
     task: '归档 Downloads',
   });
-  const input = buildOrchestratorTurnInput([
+  const input = buildOrchestratorRunInput([
     new HumanMessage('打开 Gmail 登录页面'),
     new AIMessage('Gmail 登录页面已经打开了。'),
     previousAnnounce,
@@ -244,12 +244,12 @@ test('user intent decision exposes in-progress capability candidates independent
   const previousAnnounce = new AIMessage('(no matches)');
   setPinpetMeta(previousAnnounce, {
     lane: 'capability:explore',
-    turnId: 'prev-turn',
+    runId: 'prev-turn',
     isAnnounce: true,
     delegationId: 'task-prev',
     task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
   });
-  const input = buildOrchestratorTurnInput([
+  const input = buildOrchestratorRunInput([
     new HumanMessage('帮我调查 pet-app 里的 capability 注册链路。'),
     previousAnnounce,
     new HumanMessage('现在状态如何？'),
@@ -299,7 +299,7 @@ test('decision structured output autoRepair reruns the same route LLM call after
       autoRepair: true,
     },
   });
-  const input = buildOrchestratorTurnInput([new HumanMessage('hello')]);
+  const input = buildOrchestratorRunInput([new HumanMessage('hello')]);
 
   const state = await graph.invoke(input, {
     configurable: {
@@ -344,7 +344,7 @@ test('forcedCapabilityNames pre-seeds capability candidates and skips capability
     models: { act: model, observe: model },
     actor: testActor,
   });
-  const input = buildOrchestratorTurnInput([new HumanMessage('做一支讲秋日食材的短视频')]);
+  const input = buildOrchestratorRunInput([new HumanMessage('做一支讲秋日食材的短视频')]);
 
   await graph.invoke(input, {
     configurable: {
@@ -385,7 +385,7 @@ test('without forcedCapabilityNames the discovery path runs as before (no-regres
     models: { act: model, observe: model },
     actor: testActor,
   });
-  const input = buildOrchestratorTurnInput([new HumanMessage('做一支讲秋日食材的短视频')]);
+  const input = buildOrchestratorRunInput([new HumanMessage('做一支讲秋日食材的短视频')]);
 
   await graph.invoke(input, {
     configurable: {
@@ -431,19 +431,19 @@ test('a prior subagent announce reaches the decision as context and the answer n
     'END_OF_FULL_SUBAGENT_RESULT',
   ].join('\n\n');
   const currentAnnounce = new AIMessage(currentAnnounceText);
-  const input = buildOrchestratorTurnInput([
+  const input = buildOrchestratorRunInput([
     new HumanMessage('读取文件并运行 lint'),
     currentAnnounce,
   ]);
   setPinpetMeta(currentAnnounce, {
     lane: 'general',
-    turnId: input.turnId,
+    runId: input.runId,
     isAnnounce: true,
     completionReason: 'natural',
     delegationId: 'task-1',
     task: '读取文件并运行 lint',
   });
-  input.turnDelegations = [{
+  input.runDelegations = [{
     id: 'task-1',
     lane: 'general',
     task: '读取文件并运行 lint',
@@ -492,7 +492,7 @@ test('answer node still sees compacted older results when the user asks to re-sh
   // After compaction the older result survives only as the summary system message.
   const summary = new SystemMessage('压缩摘要：之前 explore 调研得到 SWE-bench Verified GPT-5.5 88.7%。COMPACTED_RESULT_MARKER');
   summary.name = CONTEXT_COMPACTION_MESSAGE_NAME;
-  const input = buildOrchestratorTurnInput([
+  const input = buildOrchestratorRunInput([
     summary,
     new HumanMessage('把之前的调研结果再发一下'),
   ]);
@@ -536,20 +536,20 @@ test('delegation outcome finish lets the answer node reproduce the completed ann
     models: { act: routeModel },
     actor: testActor,
   });
-  const input = buildOrchestratorTurnInput([
+  const input = buildOrchestratorRunInput([
     new HumanMessage('帮我列一个目前 vibecoding 的模型排行榜。'),
   ]);
   const announceText = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
   const announceMessage = new AIMessage(announceText);
   setPinpetMeta(announceMessage, {
     lane: 'general',
-    turnId: input.turnId,
+    runId: input.runId,
     isAnnounce: true,
     delegationId: 'task-1',
     task: '搜索并整理 vibecoding 模型排行榜。',
   });
   input.messages.push(announceMessage);
-  input.turnDelegations = [{
+  input.runDelegations = [{
     id: 'task-1',
     lane: 'general',
     task: '搜索并整理 vibecoding 模型排行榜。',
@@ -590,7 +590,7 @@ test('finish decision emits no reply itself and routes to the dedicated answer n
     models: { act: model, observe: model },
     actor: testActor,
   });
-  const input = buildOrchestratorTurnInput([new HumanMessage('你好')]);
+  const input = buildOrchestratorRunInput([new HumanMessage('你好')]);
   const state = await graph.invoke(input, {
     configurable: {
       thread_id: 'finish-routes-to-answer',
@@ -623,7 +623,7 @@ test('ask_user decision replies inline and skips the answer node', async () => {
     models: { act: model, observe: model },
     actor: testActor,
   });
-  const input = buildOrchestratorTurnInput([new HumanMessage('帮我做个对比')]);
+  const input = buildOrchestratorRunInput([new HumanMessage('帮我做个对比')]);
   const state = await graph.invoke(input, {
     configurable: {
       thread_id: 'ask-user-inline',
@@ -679,18 +679,18 @@ test('limit-reached progress announce lets model choose the same capability dele
     },
     actor: testActor,
   });
-  const input = buildOrchestratorTurnInput([new HumanMessage('继续')]);
+  const input = buildOrchestratorRunInput([new HumanMessage('继续')]);
   const progressAnnounce = new AIMessage('(no matches)');
   setPinpetMeta(progressAnnounce, {
     lane: 'capability:inspect_repo',
-    turnId: input.turnId,
+    runId: input.runId,
     isAnnounce: true,
     completionReason: 'limit_reached',
     delegationId: 'task-limit',
     task: '调查仓库 capability 注册链路。',
   });
   input.messages.push(progressAnnounce);
-  input.turnDelegations = [{
+  input.runDelegations = [{
     id: 'task-limit',
     lane: 'capability:inspect_repo',
     task: '调查仓库 capability 注册链路。',
@@ -827,7 +827,7 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
     actor: testActor,
   });
 
-  await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('inspect')]), {
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
     configurable: {
       thread_id: 'available-toolkits-runtime',
       actor: testActor,
@@ -897,7 +897,7 @@ test('toolkit exposure can hide tools from the general lane', async () => {
     actor: testActor,
   });
 
-  await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('inspect')]), {
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
     configurable: {
       thread_id: 'general-toolkit-exposure',
       actor: testActor,
@@ -1012,7 +1012,7 @@ test('capability artifact refs recorded by subagent tools are merged into state'
           threadId: ctx.threadId ?? 'missing-thread',
           capabilityId: ctx.capabilityId ?? 'missing-capability',
           delegationId: ctx.delegationId ?? 'missing-delegation',
-          turnId: ctx.turnId ?? 'missing-turn',
+          runId: ctx.runId ?? 'missing-turn',
           kind: 'report' as const,
           mimeType: 'text/markdown',
           uri: `capability-artifact://thread/${encodeURIComponent(ctx.threadId ?? '')}/artifact/1`,
@@ -1050,7 +1050,7 @@ test('capability artifact refs recorded by subagent tools are merged into state'
     actor: testActor,
   });
 
-  const state = await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('explore issue')]), {
+  const state = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('explore issue')]), {
     configurable: {
       thread_id: 'artifact-thread',
       actor: testActor,
@@ -1060,10 +1060,10 @@ test('capability artifact refs recorded by subagent tools are merged into state'
     },
   });
 
-  assert.equal(state.capabilityArtifacts.length, 1);
-  assert.equal(state.capabilityArtifacts[0]?.title, 'Issue exploration');
-  assert.equal(state.capabilityArtifacts[0]?.threadId, 'artifact-thread');
-  assert.equal(state.capabilityArtifacts[0]?.capabilityId, 'explore');
+  assert.equal(state.sessionCapabilityArtifacts.length, 1);
+  assert.equal(state.sessionCapabilityArtifacts[0]?.title, 'Issue exploration');
+  assert.equal(state.sessionCapabilityArtifacts[0]?.threadId, 'artifact-thread');
+  assert.equal(state.sessionCapabilityArtifacts[0]?.capabilityId, 'explore');
 });
 
 test('capability result artifacts are represented only as refs in state', async () => {
@@ -1098,7 +1098,7 @@ test('capability result artifacts are represented only as refs in state', async 
           threadId: ctx.threadId ?? 'missing-thread',
           capabilityId: ctx.capabilityId ?? 'missing-capability',
           delegationId: ctx.delegationId ?? 'missing-delegation',
-          turnId: ctx.turnId ?? 'missing-turn',
+          runId: ctx.runId ?? 'missing-turn',
           kind: 'result' as const,
           mimeType: 'application/json',
           uri: `capability-artifact://thread/${encodeURIComponent(ctx.threadId ?? '')}/artifact/result-1`,
@@ -1135,7 +1135,7 @@ test('capability result artifacts are represented only as refs in state', async 
     actor: testActor,
   });
 
-  const state = await graph.invoke(buildOrchestratorTurnInput([new HumanMessage('post')]), {
+  const state = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('post')]), {
     configurable: {
       thread_id: 'result-artifact-thread',
       actor: testActor,
@@ -1145,8 +1145,8 @@ test('capability result artifacts are represented only as refs in state', async 
     },
   });
 
-  assert.equal(state.capabilityArtifacts[0]?.kind, 'result');
-  assert.equal(state.capabilityArtifacts[0]?.schema?.name, 'daily_post.result');
+  assert.equal(state.sessionCapabilityArtifacts[0]?.kind, 'result');
+  assert.equal(state.sessionCapabilityArtifacts[0]?.schema?.name, 'daily_post.result');
 });
 
 test('runAgent omits empty toolkit configurable arrays', async () => {
@@ -1590,7 +1590,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
       },
     },
   };
-  const input = buildOrchestratorTurnInput([new HumanMessage('run git status')]);
+  const input = buildOrchestratorRunInput([new HumanMessage('run git status')]);
 
   const interrupted = await graph.invoke(input, config) as {
     __interrupt__?: Array<{ value?: unknown }>;
@@ -1609,11 +1609,11 @@ test('toolkit review policy records authorization through orchestrator runtime t
     },
   }), config) as {
     __interrupt__?: unknown;
-    toolAuthorizations: Array<{ toolName: string; matcher: unknown; createdAt: string }>;
+    sessionToolAuthorizations: Array<{ toolName: string; matcher: unknown; createdAt: string }>;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
-  assert.deepEqual(finalState.toolAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
+  assert.deepEqual(finalState.sessionToolAuthorizations.map(({ createdAt: _createdAt, ...item }) => item), [{
     toolName: 'run_shell',
     matcher: { type: 'shell_pattern', value: 'git status' },
   }]);
@@ -1721,7 +1721,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   };
 
   const interrupted = await graph.invoke(
-    buildOrchestratorTurnInput([new HumanMessage('run git status')]),
+    buildOrchestratorRunInput([new HumanMessage('run git status')]),
     config,
   ) as {
     __interrupt__?: Array<{ value?: unknown }>;
@@ -1740,20 +1740,23 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   }), config) as {
     __interrupt__?: unknown;
     messages: Array<AIMessage | HumanMessage | ToolMessage>;
-    turnId: string;
+    runId: string;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
-  // The delegation is incomplete (not handed off), so its announce and lane
-  // transcript are kept in place for a later continuation.
-  const announce = readLatestAnnounce(finalState.messages, { turnId: finalState.turnId });
-  assert.ok(announce?.delegationId);
-  assert.ok(
-    laneMessages(finalState.messages, 'general', finalState.turnId, announce.delegationId)
-      .some((message) => message.content === 'ran git status'),
-  );
+  // After the resumed tool approval, the outcome decision finishes the task.
+  // The result is handed off into the main queue and the lane transcript is
+  // cleared, so continuation state is no longer inferred from a stale announce.
+  const handoffCopy = mainConversationMessages(finalState.messages)
+    .find((message) => message.content === 'ran git status');
+  assert.ok(handoffCopy);
+  const handoffSource = getMessageHandoffSource(handoffCopy);
+  assert.equal(handoffSource?.handoffFrom, 'general');
+  assert.ok(handoffSource?.delegationId);
+  assert.equal(handoffSource?.task, 'run shell');
+  assert.equal(readLatestAnnounce(finalState.messages, { runId: finalState.runId }), null);
 });
 
 test('iteration limit review emits canonical ReviewSpec interrupt payload', async () => {
@@ -1762,8 +1765,8 @@ test('iteration limit review emits canonical ReviewSpec interrupt payload', asyn
     actor: testActor,
     checkpoint: new MemorySaver(),
   });
-  const input = buildOrchestratorTurnInput([new HumanMessage('继续处理')]);
-  input.iterationCount = 1;
+  const input = buildOrchestratorRunInput([new HumanMessage('继续处理')]);
+  input.runIterationCount = 1;
 
   const result = await graph.invoke(input, {
     configurable: {
@@ -1785,7 +1788,7 @@ test('iteration limit review emits canonical ReviewSpec interrupt payload', asyn
   } | undefined;
 
   assert.equal(payload?.kind, 'review');
-  assert.equal(payload?.review?.id, `iteration-limit:${input.turnId}:1:1`);
+  assert.equal(payload?.review?.id, `iteration-limit:${input.runId}:1:1`);
   assert.equal(payload?.review?.schemaVersion, 1);
   assert.deepEqual(payload?.review?.options?.map((option) => option.id), ['approve', 'reject', 'respond']);
   assert.equal(payload?.pendingAction, undefined);
@@ -1799,12 +1802,12 @@ test('iteration limit review id is scoped to the turn id', async () => {
     actor: testActor,
     checkpoint: new MemorySaver(),
   });
-  const inputA = buildOrchestratorTurnInput([new HumanMessage('继续处理')]);
-  const inputB = buildOrchestratorTurnInput([new HumanMessage('继续处理')]);
-  inputA.turnId = 'turn-a';
-  inputB.turnId = 'turn-b';
-  inputA.iterationCount = 1;
-  inputB.iterationCount = 1;
+  const inputA = buildOrchestratorRunInput([new HumanMessage('继续处理')]);
+  const inputB = buildOrchestratorRunInput([new HumanMessage('继续处理')]);
+  inputA.runId = 'turn-a';
+  inputB.runId = 'turn-b';
+  inputA.runIterationCount = 1;
+  inputB.runIterationCount = 1;
 
   const readInterruptedReviewId = async (
     input: typeof inputA,
@@ -1848,8 +1851,8 @@ test('iteration limit review accepts canonical approve resume', async () => {
     actor: testActor,
     checkpoint: new MemorySaver(),
   });
-  const input = buildOrchestratorTurnInput([new HumanMessage('继续处理')]);
-  input.iterationCount = 1;
+  const input = buildOrchestratorRunInput([new HumanMessage('继续处理')]);
+  input.runIterationCount = 1;
   const config = {
     configurable: {
       thread_id: 'iteration-limit-canonical-approve',
@@ -1875,11 +1878,11 @@ test('iteration limit review accepts canonical approve resume', async () => {
     },
   }), config) as {
     __interrupt__?: unknown;
-    iterationCount?: number;
+    runIterationCount?: number;
   };
 
   assert.equal(Array.isArray(resumed.__interrupt__) ? resumed.__interrupt__.length : 0, 0);
-  assert.equal(resumed.iterationCount, 0);
+  assert.equal(resumed.runIterationCount, 0);
 });
 
 test('iteration limit approve can resume an in-progress capability lane', async () => {
@@ -1911,18 +1914,18 @@ test('iteration limit approve can resume an in-progress capability lane', async 
   const previousAnnounce = new AIMessage('已定位到部分 registry 文件，但还没有完成完整调用链路调查。');
   setPinpetMeta(previousAnnounce, {
     lane: 'capability:explore',
-    turnId: 'previous-turn',
+    runId: 'previous-turn',
     isAnnounce: true,
     completionReason: 'limit_reached',
     delegationId: 'previous-progress-1',
     task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
   });
-  const input = buildOrchestratorTurnInput([
+  const input = buildOrchestratorRunInput([
     new HumanMessage('帮我调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。'),
     previousAnnounce,
     new HumanMessage('继续'),
   ]);
-  input.iterationCount = 1;
+  input.runIterationCount = 1;
   const config = {
     configurable: {
       thread_id: 'iteration-limit-capability-resume',
@@ -1951,15 +1954,15 @@ test('iteration limit approve can resume an in-progress capability lane', async 
     interruptBefore: ['capability'],
   }) as {
     __interrupt__?: unknown;
-    iterationCount?: number;
-    pendingDelegation?: { lane?: string; task?: string } | null;
+    runIterationCount?: number;
+    runPendingDelegation?: { lane?: string; task?: string } | null;
   };
 
   assert.equal(Array.isArray(resumed.__interrupt__) ? resumed.__interrupt__.length : 0, 0);
-  assert.equal(resumed.iterationCount, 0);
+  assert.equal(resumed.runIterationCount, 0);
   assert.equal(schemaAllowsExplore, true);
-  assert.equal(resumed.pendingDelegation?.lane, 'capability:explore');
-  assert.match(resumed.pendingDelegation?.task ?? '', /继续调查/);
+  assert.equal(resumed.runPendingDelegation?.lane, 'capability:explore');
+  assert.match(resumed.runPendingDelegation?.task ?? '', /继续调查/);
 });
 
 test('iteration limit review accepts canonical respond resume as replanning feedback', async () => {
@@ -1980,8 +1983,8 @@ test('iteration limit review accepts canonical respond resume as replanning feed
     actor: testActor,
     checkpoint: new MemorySaver(),
   });
-  const input = buildOrchestratorTurnInput([new HumanMessage('继续处理')]);
-  input.iterationCount = 1;
+  const input = buildOrchestratorRunInput([new HumanMessage('继续处理')]);
+  input.runIterationCount = 1;
   const config = {
     configurable: {
       thread_id: 'iteration-limit-canonical-respond',
@@ -2008,11 +2011,11 @@ test('iteration limit review accepts canonical respond resume as replanning feed
     },
   }), config) as {
     __interrupt__?: unknown;
-    iterationCount?: number;
+    runIterationCount?: number;
   };
 
   assert.equal(resumed.__interrupt__, undefined);
-  assert.equal(resumed.iterationCount, 0);
+  assert.equal(resumed.runIterationCount, 0);
   assert.match(decisionInput, /继续，但只做摘要。/);
 });
 
@@ -2020,17 +2023,17 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   const userAsk = new HumanMessage('帮我查一下小红书动态');
   const intermediate = new AIMessage('正在抓取页面…');
   intermediate.id = 'm-intermediate';
-  setPinpetMeta(intermediate, { lane: 'capability:explore', turnId: 't1', delegationId: 'd1' });
+  setPinpetMeta(intermediate, { lane: 'capability:explore', runId: 't1', delegationId: 'd1' });
   const announce = new AIMessage('已查到热门动态：A、B、C。FULL_ANNOUNCE_MARKER');
   announce.id = 'm-announce';
-  setPinpetMeta(announce, { lane: 'capability:explore', turnId: 't1', delegationId: 'd1', isAnnounce: true, task: '查动态' });
+  setPinpetMeta(announce, { lane: 'capability:explore', runId: 't1', delegationId: 'd1', isAnnounce: true, task: '查动态' });
   // A different delegation in the same lane must be untouched.
   const otherDelegation = new AIMessage('另一个委派的中间消息');
   otherDelegation.id = 'm-other';
-  setPinpetMeta(otherDelegation, { lane: 'capability:explore', turnId: 't1', delegationId: 'd2' });
+  setPinpetMeta(otherDelegation, { lane: 'capability:explore', runId: 't1', delegationId: 'd2' });
 
   const messages = [userAsk, intermediate, announce, otherDelegation];
-  const update = buildSubagentHandoff({ messages, lane: 'capability:explore', turnId: 't1', delegationId: 'd1' });
+  const update = buildSubagentHandoff({ messages, lane: 'capability:explore', runId: 't1', delegationId: 'd1' });
   assert.ok(update, 'handoff update should be produced for a completed delegation');
 
   const removed = update.filter((m) => m instanceof RemoveMessage).map((m) => m.id);
@@ -2054,11 +2057,11 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
 test('buildSubagentHandoff returns null when the delegation has no announce text', () => {
   const intermediate = new AIMessage('只有中间步骤，没有结论');
   intermediate.id = 'm1';
-  setPinpetMeta(intermediate, { lane: 'general', turnId: 't1', delegationId: 'd1' });
+  setPinpetMeta(intermediate, { lane: 'general', runId: 't1', delegationId: 'd1' });
   const update = buildSubagentHandoff({
     messages: [new HumanMessage('做点事'), intermediate],
     lane: 'general',
-    turnId: 't1',
+    runId: 't1',
     delegationId: 'd1',
   });
   assert.equal(update, null);
@@ -2137,7 +2140,7 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   const handoff = buildSubagentHandoff({
     messages: stateWithLane,
     lane: 'general',
-    turnId: 'turn-1',
+    runId: 'turn-1',
     delegationId: 'task-complete',
   });
   assert.ok(handoff);
@@ -2215,7 +2218,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   const handoff = buildSubagentHandoff({
     messages: stateBeforeHandoff,
     lane: 'general',
-    turnId: 'turn-1',
+    runId: 'turn-1',
     delegationId: 'task-resume',
   });
   assert.ok(handoff);
@@ -2272,7 +2275,7 @@ test('lane messages sanitize legacy checkpoint history with dangling tool calls'
     content: '准备移动。',
     tool_calls: [{ id: 'call-legacy', name: 'move_path', args: { source: 'a', destination: 'b' } }],
   });
-  setPinpetMeta(danglingToolCall, { lane: 'general', turnId: 'turn-1', delegationId: 'task-legacy' });
+  setPinpetMeta(danglingToolCall, { lane: 'general', runId: 'turn-1', delegationId: 'task-legacy' });
 
   assert.deepEqual(laneMessages([human, danglingToolCall], 'general', 'turn-1', 'task-legacy').map((message) => message.content), [
     '继续归档',
@@ -2314,7 +2317,7 @@ test('lane messages scope to delegation: new task starts clean, reused id carrie
 test('lane messages exclude legacy lane history without per-message delegationId', () => {
   const human = new HumanMessage('继续');
   const legacyLaneMessage = new AIMessage('旧版本写入的 lane 消息。');
-  setPinpetMeta(legacyLaneMessage, { lane: 'general', turnId: 'turn-1' });
+  setPinpetMeta(legacyLaneMessage, { lane: 'general', runId: 'turn-1' });
 
   assert.deepEqual(laneMessages([human, legacyLaneMessage], 'general', 'turn-1', 'task-1').map((message) => message.content), [
     '继续',
@@ -2322,7 +2325,7 @@ test('lane messages exclude legacy lane history without per-message delegationId
 });
 
 test('delegation helpers reuse progress delegation and update result', () => {
-  const delegations: TurnDelegation[] = [
+  const delegations: RunDelegation[] = [
     {
       id: 'task-1',
       lane: 'general',
@@ -2332,20 +2335,20 @@ test('delegation helpers reuse progress delegation and update result', () => {
     },
   ];
 
-  const reused = reuseOrAppendTurnDelegation(delegations, {
+  const reused = reuseOrAppendRunDelegation(delegations, {
     id: 'task-2',
     lane: 'general',
     task: '继续读取文件并运行 lint',
     contextSummary: '继续完成用户当前请求。',
   });
 
-  assert.equal(reused.pendingDelegation?.id, 'task-1');
-  assert.equal(reused.pendingDelegation?.task, '继续读取文件并运行 lint');
-  assert.equal(reused.turnDelegations.length, 1);
-  assert.equal(reused.turnDelegations[0].task, '继续读取文件并运行 lint');
-  assert.equal(reused.turnDelegations[0].status, 'pending');
+  assert.equal(reused.runPendingDelegation?.id, 'task-1');
+  assert.equal(reused.runPendingDelegation?.task, '继续读取文件并运行 lint');
+  assert.equal(reused.runDelegations.length, 1);
+  assert.equal(reused.runDelegations[0].task, '继续读取文件并运行 lint');
+  assert.equal(reused.runDelegations[0].status, 'pending');
 
-  const completed = updateTurnDelegationResult(reused.turnDelegations, 'task-1', {
+  const completed = updateRunDelegationResult(reused.runDelegations, 'task-1', {
     status: 'completed',
     resultPreview: '任务完成',
   });

@@ -17,7 +17,7 @@ export type DelegationStatus = 'pending' | 'progress' | 'completed';
 export type AnnounceKind = 'completed' | 'progress';
 export type { SubagentCompletionReason };
 
-export type TurnDelegation = {
+export type RunDelegation = {
   id: string;
   lane: MessageLane;
   task: string;
@@ -25,11 +25,21 @@ export type TurnDelegation = {
   resultPreview: string | null;
 };
 
-export type PendingDelegation = {
+export type RunPendingDelegation = {
   id: string;
   lane: MessageLane;
   task: string;
   contextSummary: string | null;
+};
+
+export type TaskActiveDelegation = {
+  id: string;
+  lane: MessageLane;
+  task: string;
+  contextSummary: string | null;
+  transcriptRunId: string;
+  status: 'pending' | 'awaiting_decision';
+  resultPreview: string | null;
 };
 
 export type CapabilityCandidate = {
@@ -39,7 +49,7 @@ export type CapabilityCandidate = {
   matchedTerms: string[];
 };
 
-export type CapabilitySearchState = {
+export type RunCapabilitySearchState = {
   query: string | null;
   attempted: boolean;
   candidates: CapabilityCandidate[];
@@ -63,7 +73,7 @@ export type DecisionMode = 'finish' | 'general' | 'capability';
  *   answer node.
  * - null: not a finish-bucket decision (delegation in progress).
  */
-export type FinalReplyRoute = 'answer' | 'inline' | null;
+export type RunFinalReplyRoute = 'answer' | 'inline' | null;
 export type CapabilityDecisionState = 'unavailable' | 'search_available' | 'candidates_available' | 'search_exhausted';
 
 export type ToolBindableChatModel = AgentModels['act'] & {
@@ -104,7 +114,7 @@ export type OrchestratorInvokeOptions = {
   globalReviewPolicy?: GlobalReviewPolicy;
   /**
    * 强制以"已发现候选"形态登记的 capability 名字列表。`prepare` 节点会
-   * 据此 pre-seed `capabilitySearchState`,跳过 capability discovery/search。
+   * 据此 pre-seed `runCapabilitySearchState`,跳过 capability discovery/search。
    * 仅由 Studio 等明确知道需要哪个 capability 的调用方注入;通用 pet agent
    * 不传 → 0 行为变化。
    */

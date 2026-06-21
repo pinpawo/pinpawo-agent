@@ -18,7 +18,7 @@ export type CapabilityArtifactRef = {
   threadId: string;
   capabilityId: string;
   delegationId: string;
-  turnId: string;
+  runId: string;
   kind: CapabilityArtifactKind;
   mimeType: string;
   uri: string;
@@ -47,7 +47,7 @@ export type CapabilityArtifactWriteInput = {
   threadId: string;
   capabilityId: string;
   delegationId: string;
-  turnId: string;
+  runId: string;
   artifact: CapabilityArtifactWritePayload;
 };
 

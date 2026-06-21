@@ -3,6 +3,7 @@
 > 状态：调研 / 已与作者口头对齐设计模型，**未动代码**。
 > 归属：独立 PR（不在 answer-node PR #233 内；#233 按现状合并）。
 > 触发：#233 review 的 P2 #1/#2，连带暴露 `completionReason → announce` 的语义偏离；进一步重新框定为 handoff 边界问题。
+> 状态生命周期命名与 task/run 拆分见 `docs/PET_AGENT_STATE_LIFECYCLE_REFACTOR.md`。本文只描述 announce/handoff 语义。
 
 ## 1. 问题的本质：两条独立的 message queue，handoff 边界模糊
 
@@ -55,7 +56,7 @@ handoff 动作（在 delegationOutcomeDecision 写回 state 的同一步内做�
 **D1 — handoff 的“完成”信号 = decision 的 `action` 本身，不新增 schema 字段、不读 completionReason。**
 - decision 的 `action` 就是它的判定：`finish`=工作完成、收尾交付；`ask_user`=没完成、等用户；`delegate_*`=没完成、继续推进。
 - 因此 **handoff 触发 = `actionKind === 'finish'`**。这是“判定权在 orchestrator”的正解：runtime 不再拿 `completionReason==='natural'` 自己推断完成（那只是把 stop reason 当判定，是要消灭的 lossy 映射的同一个病）。
-- **“完成 A 同时委派 B” → 只在 finish 那一刻 handoff。** 这一轮若 `action=delegate.B`，属于“继续”，A 的结果留在 lane 作为后续上下文，不 handoff；等到最终 `action=finish` 时，把**所有**还留在 lane、已产出 announce 的 delegation 一次性 handoff 进 main（遍历 `turnDelegations`，不只是最后一个）。
+- **单线 delegation 下，handoff 当前 `taskActiveDelegation`。** 这一轮若 `action=delegate_*`，属于“继续”，active delegation 的结果留在 lane 作为后续上下文，不 handoff；等到最终 `action=finish` 时，把当前 `taskActiveDelegation` handoff 进 main。早期草案里“遍历 `runDelegations`”的做法不再作为控制流来源；`runDelegations` 只能做本 run 的 prompt/debug 摘要。
 - `completionReason` 仅作为线索喂进 decision 输入（见 D4），不参与 runtime 的 handoff 判定。
 
 **D2 — 溯源 metadata：最小集。**
@@ -66,7 +67,7 @@ handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 只带：
 不带 `lane`（或显式 `lane` 缺省 = main 一等公民），不带 `announce`/`completionReason`（那些是旧判定语义，handoff 后不再需要）。
 
 **D3 — 清空 lane 的粒度：只清该 delegationId。**
-按 `lane + turnId + delegationId` 三者匹配清空（与现有 `laneMessagesForStateUpdate` 的匹配维度一致），不波及同 lane 其它 delegation。原 announce + 该 delegation 的全部中间 transcript 一起 `RemoveMessage`。
+按 `lane + transcriptRunId + delegationId` 三者匹配清空（实现初期可以继续复用现有 `runId` 参数名，但调用方必须传 `taskActiveDelegation.transcriptRunId`），不波及同 lane 其它 delegation。原 announce + 该 delegation 的全部中间 transcript 一起 `RemoveMessage`。
 
 **D4 — completionReason 退回纯 stop reason。**
 `createSubagent.ts` 仍返回 `natural | limit_reached`，作为 decision 的**判断线索**（喂进 decision 输入），但**不再被映射成消息上的 completed/progress tag**。
@@ -98,14 +99,14 @@ handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 只带：
 | `answerConversationMessages`（#233 新增） | 去 lane 里捞 completed+progress announce | 不再需要；answer 直接读 main queue |
 | `buildSubagentAnnounceContext`（prompts.ts:326） | 给 decision 喂 `状态：completed/progress`（先入为主） | 去掉“状态”，只喂 announce 文本 + completionReason 线索，让 decision 真正判 |
 | `delegationOutcomeDecision` | 读已写死的 tag，做“追认” | 真正判定 completed/继续/ask，并触发 handoff |
-| `createAgentRuntime.ts:675`、`delegations.ts:39` | 依赖 announce/turnDelegation 的 progress 状态 | 需改判据来源（progress 概念仍在，但来源是 orchestrator 判定，不是 subagent 自标） |
+| `createAgentRuntime.ts:675`、`delegations.ts:39` | 依赖 announce/turnDelegation 的 progress 状态 | 需改判据来源：未完成 delegation 由 `taskActiveDelegation` 表示；`runDelegations` 只保留本 run 摘要 |
 
 ## 6. 实现步骤（建议顺序，便于小步验证）
 
 1. **新增 handoff 构造**（messageLanes 或新文件）：给定 existingMessages + 完成的 delegation 标识，产出 `[RemoveMessage(该 delegationId 的所有 lane 消息...), 新的 main announce 副本(带 D2 metadata)]`。这是纯函数，先单测。
-2. **decision 写回接入 handoff**：在 `delegationOutcomeDecision` 的 state 写回处，对“本轮判定为完成（D1：该 delegationId 不再续跑）”的 delegation 执行步骤 1 的构造，并入 `messages` 更新。
-3. **turnDelegations.status 来源改为 orchestrator 判定**：`status: 'completed'|'progress'` 不再来自 subagent 自标的 announce，而来自 decision 是否 handoff。`delegations.ts:39`（续跑复用判 progress）、`createAgentRuntime.ts:675`（取 in-progress lane 喂 discovery）改读这个来源。
-4. **拆掉 lossy 映射**：`tagNewLaneMessages` 不再写 completed/progress；只保留归属标记（lane/turnId/delegationId）+ 标出“哪条是 announce 文本”的中性标记。`laneMessagesForStateUpdate` 删除（被 handoff 取代）。
+2. **decision 写回接入 handoff**：在 `delegationOutcomeDecision` 的 state 写回处，对“本轮判定为完成（D1：active delegation 不再续跑）”的 delegation 执行步骤 1 的构造，并入 `messages` 更新。
+3. **未完成 delegation 来源改为 task state**：新增 `taskActiveDelegation`，`status: 'awaiting_decision'` 表示 subagent 已返回、等待 orchestrator 判断。`runDelegations.status` 不再承担跨 run 生命周期职责。
+4. **拆掉 lossy 映射**：`tagNewLaneMessages` 不再写 completed/progress；只保留归属标记（lane/runId/delegationId）+ 标出“哪条是 announce 文本”的中性标记。`laneMessagesForStateUpdate` 删除（被 handoff 取代）。
 5. **decision 输入去“状态”**：`buildSubagentAnnounceContext` 去掉 `状态：completed/progress` 行，保留 announce 文本 + `停止原因：completionReason`。
 6. **answer 取数化简**：删 `answerConversationMessages`，answer node 改读 `mainMessagesWithoutCompaction`（D5）。
 7. 清理随之失效的导出/类型（`AnnounceKind` 是否还需要、`readRecentAnnounces` 是否仍被 discovery 用到等），按编译错误收口。

@@ -8,11 +8,11 @@ import type {
   CapabilityDecisionState,
   SubagentAnnounce,
   SubagentCompletionReason,
-  TurnDelegation,
+  RunDelegation,
 } from './types';
 import { clipForPrompt, formatDelegationStatus, readMessageText } from './utils';
 
-const MAX_DECISION_TURN_DELEGATIONS = 6;
+const MAX_DECISION_RUN_DELEGATIONS = 6;
 const MAX_RECENT_MAIN_MESSAGES = 6;
 const MAX_RECENT_ANNOUNCE_CONTEXT = 5;
 const MAX_CONTEXT_SUMMARIES = 2;
@@ -31,12 +31,12 @@ export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[
   return lines.join('\n');
 }
 
-export function buildTurnDelegationContext(turnDelegations: TurnDelegation[]): string {
-  if (turnDelegations.length === 0) {
+export function buildRunDelegationContext(runDelegations: RunDelegation[]): string {
+  if (runDelegations.length === 0) {
     return '当前轮任务跟踪：\n- 暂无已委派任务。';
   }
 
-  const visibleDelegations = turnDelegations.slice(-MAX_DECISION_TURN_DELEGATIONS);
+  const visibleDelegations = runDelegations.slice(-MAX_DECISION_RUN_DELEGATIONS);
   const lines = [
     '当前轮任务跟踪（仅保留本轮近期任务）',
     visibleDelegations.some((delegation) => delegation.status !== 'completed')

@@ -42,8 +42,8 @@ export const capabilitySearchTool = tool(
     return new Command({
       update: {
         messages: [toolMessage],
-        pendingDelegation: null,
-        capabilitySearchState: {
+        runPendingDelegation: null,
+        runCapabilitySearchState: {
           query: searchQuery || null,
           attempted: true,
           candidates,

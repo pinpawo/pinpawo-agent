@@ -4,7 +4,7 @@ import type { AgentActor, AgentExecution } from '../types/agent';
 import type { SubagentToolEventHandler } from '../types/subagent';
 import type { AgentToolkit } from '../types/toolkit';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
-import { buildOrchestratorTurnInput, type OrchestratorGraph } from './createAgentRuntime';
+import { buildOrchestratorRunInput, type OrchestratorGraph } from './createAgentRuntime';
 
 export type AgentInvokeInput = {
   messages: BaseMessage[];
@@ -48,7 +48,7 @@ export async function runAgent(
   if (input.globalReviewPolicy) configurable.globalReviewPolicy = input.globalReviewPolicy;
 
   const result = await graph.invoke(
-    buildOrchestratorTurnInput(input.messages),
+    buildOrchestratorRunInput(input.messages),
     {
       signal: input.signal,
       configurable: Object.keys(configurable).length > 0 ? configurable : undefined,

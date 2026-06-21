@@ -88,6 +88,55 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
   });
 });
 
+test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
+  const deps = {} as LocalServerDeps;
+  const snapshotRes = makeRes();
+
+  assert.equal(handleLocalHttpRequest(makeReq('/snapshot', 'Bearer secret'), snapshotRes, deps, {
+    authToken: 'secret',
+    loadHistory: async () => {
+      throw new Error('not called');
+    },
+    loadSnapshot: async () => ({
+      session: { id: 'chat:pet-a', kind: 'chat', active: true },
+      messages: [{ role: 'user', text: 'hello' }],
+      pendingReview: {
+        requestId: 'req-review',
+        reviewId: 'review-1',
+        sessionId: 'chat:pet-a',
+        review: {
+          id: 'review-1',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [],
+        },
+      },
+    }),
+    listSessions: async () => [],
+    resumeSession: async () => {
+      throw new Error('not called');
+    },
+  }), true);
+
+  await Promise.resolve();
+  assert.equal(snapshotRes.statusCode, 200);
+  assert.deepEqual(JSON.parse(snapshotRes.body), {
+    session: { id: 'chat:pet-a', kind: 'chat', active: true },
+    messages: [{ role: 'user', text: 'hello' }],
+    pendingReview: {
+      requestId: 'req-review',
+      reviewId: 'review-1',
+      sessionId: 'chat:pet-a',
+      review: {
+        id: 'review-1',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Approve?' },
+        options: [],
+      },
+    },
+  });
+});
+
 test('handleLocalHttpRequest rejects requests without a valid local token', async () => {
   const deps = {} as LocalServerDeps;
   const options = {

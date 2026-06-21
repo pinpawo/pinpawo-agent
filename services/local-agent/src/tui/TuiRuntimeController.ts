@@ -343,7 +343,7 @@ export class TuiRuntimeController {
     const connected = await this.waitForLocalServer();
     if (this.disposed || !connected) return;
 
-    await this.restoreStartupSnapshot();
+    await this.restoreSessionSnapshot('startup');
     if (this.disposed) return;
 
     this.connectWebSocket();
@@ -389,7 +389,7 @@ export class TuiRuntimeController {
     return false;
   }
 
-  private async restoreStartupSnapshot() {
+  private async restoreSessionSnapshot(source: 'startup' | 'reconnect') {
     try {
       const state = this.options.getState();
       const sessionId = state.focusedSessionId ?? 'chat:default';
@@ -397,10 +397,13 @@ export class TuiRuntimeController {
       const snapshot = await this.localServerClient.readSessionSnapshot({ sessionId, kind });
       this.options.dispatch({
         type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
-        source: 'startup',
+        source,
         snapshot,
       });
-    } catch {
+    } catch (err) {
+      if (source === 'reconnect') {
+        throw err;
+      }
       // snapshot restore is best-effort
     }
   }
@@ -461,8 +464,10 @@ export class TuiRuntimeController {
       return;
     }
 
-    await this.fetchLocalRuntime();
+    await this.restoreSessionSnapshot('reconnect');
+    if (this.disposed || this.wsClient.hasSocket()) return;
 
+    this.options.resetTimelineView();
     this.connectWebSocket();
   }
 

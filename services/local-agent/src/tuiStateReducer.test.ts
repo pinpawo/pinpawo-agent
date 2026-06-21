@@ -101,6 +101,49 @@ test('tuiStateReducer uses completed message text for final assistant history', 
   ]);
 });
 
+test('tuiStateReducer finalizes completed messages when activeRun is missing but route exists', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        activeRun: null,
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'missed final reply',
+      usage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        totalTokens: 3,
+      },
+    },
+    now: 1300,
+    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  const session = state.sessions['chat:pet']!;
+  assert.equal(state.runRoute['req-1'], undefined);
+  assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
+    ['user', 'hello'],
+    ['assistant', 'missed final reply'],
+  ]);
+  assert.deepEqual(session.tokenUsage, {
+    inputTokens: 1,
+    outputTokens: 2,
+    totalTokens: 3,
+  });
+});
+
 test('tuiStateReducer records composer prompt history only for run starts', () => {
   let state = initialState();
 
@@ -504,6 +547,107 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
   assert.equal(state.runRoute['req-1'], 'chat:pet');
   assert.equal(state.runRoute['old-req'], undefined);
   assert.equal(state.runRoute['other-req'], 'chat:other');
+});
+
+test('tuiStateReducer preserves reconnect token usage when snapshot omits usage', () => {
+  let state = initialState('chat:pet');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        },
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [],
+      runs: [],
+    },
+  });
+
+  assert.deepEqual(state.sessions['chat:pet']?.tokenUsage, {
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+  });
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'startup',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [],
+      runs: [],
+    },
+  });
+
+  assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
+});
+
+test('tuiStateReducer restores pending approval from authoritative session snapshots', () => {
+  let state = initialState('chat:pet');
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [
+        {
+          id: 'history:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'needs approval',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-review',
+        },
+      ],
+      runs: [{
+        requestId: 'req-review',
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        phase: 'waiting_human',
+        timelineEntryIds: ['history:user-1'],
+        startedAt: 1000,
+        pendingReview: {
+          requestId: 'req-review',
+          reviewId: 'review-1',
+          status: 'waiting',
+          petId: 'pet-a',
+          review: {
+            id: 'review-1',
+            schemaVersion: 1,
+            view: { kind: 'plain', body: 'Approve?' },
+            options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+          },
+        },
+      }],
+      activeRunId: 'req-review',
+      pendingReviewId: 'review-1',
+    },
+  });
+
+  const pending = selectFocusedPendingApproval(state);
+  assert.equal(state.sessions['chat:pet']?.activeRun?.phase, 'waiting_human');
+  assert.equal(state.runRoute['req-review'], 'chat:pet');
+  assert.equal(pending?.requestId, 'req-review');
+  assert.equal(pending?.review.id, 'review-1');
+  assert.equal(pending?.petId, 'pet-a');
 });
 
 test('tuiStateReducer clears run routes for the cleared session', () => {

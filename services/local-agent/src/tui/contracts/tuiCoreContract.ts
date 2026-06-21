@@ -1,3 +1,5 @@
+import type { ReviewSpec } from '@pinpawo/pet-agent';
+
 export const TUI_CORE_CONTRACT_VERSION = 1 as const;
 
 export const TUI_CORE_TARGET_ACTIONS = {
@@ -31,32 +33,9 @@ export const TUI_CORE_CONTRACT_RULES = [
   'transcript and transcriptSnapshot must not be introduced as second message logs',
 ] as const;
 
-export const TUI_CORE_DEFERRED_CONTRACT_GAPS = [
-  {
-    id: 'reconnect-server-completed-run',
-    currentArea: 'TuiRuntimeController.reconnect',
-    targetAction: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
-    currentLegacyActions: ['session.replace_history'],
-    followUp: ['CORE-5 Reconnect Reconciliation'],
-  },
-  {
-    id: 'reconnect-pending-review',
-    currentArea: 'TuiRuntimeController.reconnect',
-    targetAction: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
-    currentLegacyActions: [],
-    followUp: ['CORE-5 Reconnect Reconciliation'],
-  },
-] as const;
+export const TUI_CORE_DEFERRED_CONTRACT_GAPS = [] as const;
 
-export const TUI_CORE_DEFERRED_REDUCER_GAPS = [
-  {
-    id: 'completed-event-missing-active-pointer',
-    currentArea: 'tuiStateReducer event.received(message.completed)',
-    target: 'terminal events update runs[requestId] even when session.activeRun is missing',
-    currentLegacyPaths: ['session.activeRun pointer gate', 'runRoute fallback'],
-    followUp: ['CORE-3 Run Registry', 'CORE-5 Reconnect Reconciliation'],
-  },
-] as const;
+export const TUI_CORE_DEFERRED_REDUCER_GAPS = [] as const;
 
 export type TuiCoreTimelineSource = 'checkpoint' | 'live-event' | 'local-input';
 
@@ -94,6 +73,8 @@ export type TuiCorePendingReview = {
   requestId: string;
   reviewId: string;
   status: 'waiting' | 'answered' | 'interrupted';
+  review?: ReviewSpec;
+  petId?: string;
 };
 
 export type TuiCoreRunSnapshot = {

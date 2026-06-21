@@ -228,6 +228,55 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
   });
 });
 
+test('readPendingReviewSnapshot exposes routeable pending review request ids', async () => {
+  const review = {
+    id: 'review-current',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      readActivePendingReview: async () => ({
+        sessionId: 'sess-active',
+        review,
+      }),
+    } as never,
+    inflightRequests: new InflightRequestController({
+      forceInterruptMs: 1000,
+      emitOperation: () => {},
+      sendControl: () => {},
+    }),
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).recordPendingReviewRoute({
+    type: 'human_review.requested',
+    requestId: 'req-existing',
+    review,
+    actor: { petId: 'pet-a' },
+  }, { actorId: 'pet-1' });
+
+  assert.deepEqual(await handler.readPendingReviewSnapshot({ actorId: 'pet-1' } as never), {
+    requestId: 'req-existing',
+    reviewId: 'review-current',
+    sessionId: 'sess-active',
+    review,
+    actor: { petId: 'pet-a' },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).pendingReviewRoutes.clear();
+  assert.deepEqual(await handler.readPendingReviewSnapshot({ actorId: 'pet-1' } as never), {
+    requestId: 'snapshot:sess-active:review-current',
+    reviewId: 'review-current',
+    sessionId: 'sess-active',
+    review,
+  });
+});
+
 test('handleInterruptRequest resumes pending review with canonical reject option', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];

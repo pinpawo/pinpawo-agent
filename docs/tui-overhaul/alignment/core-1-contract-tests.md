@@ -17,8 +17,8 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 - Contract version: `TUI_CORE_CONTRACT_VERSION = 1`.
 - Target snapshot action: `session.snapshot.loaded`.
 - Contract tests: `services/local-agent/src/tui/contracts/tuiCoreContract.test.ts`.
-- Deferred reconnect migrations are listed in `TUI_CORE_DEFERRED_CONTRACT_GAPS`.
-- Runtime target tests are not left as `test.skip`; deferred behavior is executable as contract metadata until CORE-4/CORE-5 implement it.
+- Deferred reconnect migrations were tracked in `TUI_CORE_DEFERRED_CONTRACT_GAPS` until CORE-5.
+- Runtime target tests are not left as `test.skip`; CORE-5 clears the remaining reconnect and terminalization metadata gaps.
 
 ## Expected Changes
 
@@ -51,13 +51,13 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 ## Open Questions
 
 - Which existing fixture best represents backend checkpoint messages?
-- Which deferred gap should become the first executable runtime behavior test in CORE-4/CORE-5?
+- What follow-up cleanup should remove the now-empty deferred metadata constants?
 
 ## Merge Checklist
 
 - [x] Tests encode target behavior without broad implementation rewrites.
 - [x] CORE-1 has an explicit code contract artifact.
-- [x] Deferred reconnect/resume targets are executable contract metadata, not skipped tests.
+- [x] Deferred reconnect/resume targets are executable contract metadata, not skipped tests; CORE-5 clears the remaining entries.
 - [x] No new transcript/message-only model is introduced.
 - [x] Any intentionally failing or skipped test is explained in this document.
 - [x] PR references tracking issue #232.

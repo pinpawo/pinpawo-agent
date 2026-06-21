@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { TuiRuntimeController } from './tui/TuiRuntimeController';
+import { TUI_CORE_TARGET_ACTIONS } from './tui/contracts/tuiCoreContract';
 import { createComposerHistoryState } from './tui/input/composerHistory';
 import type { TuiAction, TuiState } from './tui/state/tuiState';
 
@@ -127,4 +128,53 @@ test('TuiRuntimeController resets static timeline view for new sessions', () => 
     { type: 'session.clear', statusMessage: '已创建新会话' },
   ]);
   assert.deepEqual(harness.sent, [{ type: 'new_session' }]);
+});
+
+test('TuiRuntimeController restores a reconnect snapshot before opening websocket', async () => {
+  const state = pendingReviewState();
+  const harness = createController(state);
+  const events: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    isHealthy: async () => true,
+    readSessionSnapshot: async () => {
+      events.push('snapshot');
+      return {
+        sessionId: 'sess-1',
+        kind: 'chat',
+        timeline: [{
+          id: 'history:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'hello',
+          status: 'completed',
+          source: 'checkpoint',
+        }],
+        runs: [],
+      };
+    },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).wsClient = {
+    hasSocket: () => false,
+    isConnected: () => false,
+    connect: () => {
+      events.push('connect');
+    },
+    send: (message: unknown) => harness.sent.push(message),
+    disconnect: () => {},
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (harness.controller as any).reconnect();
+
+  assert.deepEqual(events, ['snapshot', 'connect']);
+  assert.equal(harness.resetCount, 1);
+  assert.equal(harness.actions[0]?.type, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
+  assert.equal(
+    harness.actions[0]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
+      ? harness.actions[0].source
+      : undefined,
+    'reconnect',
+  );
 });

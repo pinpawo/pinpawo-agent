@@ -1,4 +1,4 @@
-import type { AnnounceKind, DelegationStatus } from './types';
+import type { DelegationStatus } from './types';
 
 export function clipForPrompt(text: string, maxLength = 180): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
@@ -30,10 +30,4 @@ export function formatDelegationStatus(status: DelegationStatus): string {
   if (status === 'completed') return '已完成';
   if (status === 'progress') return '进行中';
   return '待执行';
-}
-
-export function describeAnnounceKind(kind: AnnounceKind): string {
-  return kind === 'completed'
-    ? 'completed：subagent 已完成它被委派的任务'
-    : 'progress：subagent 只返回了阶段性结果，还不能视为任务完成';
 }

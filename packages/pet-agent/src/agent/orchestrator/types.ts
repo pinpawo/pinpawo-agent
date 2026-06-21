@@ -49,7 +49,6 @@ export type SubagentAnnounce = {
   lane: MessageLane;
   delegationId: string | null;
   task: string | null;
-  announce: AnnounceKind;
   text: string | null;
 };
 

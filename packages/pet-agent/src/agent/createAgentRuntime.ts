@@ -81,13 +81,12 @@ import {
   updateTurnDelegationResult,
 } from './orchestrator/delegations';
 import {
-  answerConversationMessages,
   buildSubagentHandoff,
   getMessageLane,
   getMessageTurnId,
   laneMessages,
-  laneMessagesForStateUpdate,
   mainConversationMessages,
+  readInFlightAnnounceLanes,
   readLatestHumanRequest,
   readLatestAnnounce,
   readLatestAnnounceCompletionReason,
@@ -669,12 +668,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       capabilityArtifacts: state.capabilityArtifacts,
     });
     const isUserIntentDecision = kind === 'user_intent';
+    // In-progress lanes are those that still have an announce sitting in a lane:
+    // completed delegations are handed off (their lane is wiped), so any announce
+    // still lane-tagged is by definition unfinished. This persists across turns
+    // (turnDelegations is reset each turn; the lane announce is not).
     const inProgressCapabilityCandidates = buildCapabilityCandidatesFromLanes(
       capabilityList,
       isUserIntentDecision
-        ? recentAnnounces
-          .filter((announce) => announce.announce === 'progress')
-          .map((announce) => announce.lane)
+        ? readInFlightAnnounceLanes(state.messages)
         : [latestTurnAnnounce?.lane],
     );
     const decisionCapabilityCandidates = isUserIntentDecision
@@ -824,29 +825,42 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : null;
     const nextDelegationState = reuseOrAppendTurnDelegation(state.turnDelegations, pendingDelegation);
 
-    // Handoff (D1): on a delegation-outcome decision, the subagent delegation we
-    // just came back from is handed off to the main queue when it is complete and
-    // this decision is not continuing it (i.e. the next pending delegation does
-    // not reuse the same delegationId). When handed off, copy its announce into
-    // the main queue and wipe its lane. This is independent of `action`: finishing
-    // A while delegating B still hands off A. An incomplete (progress) delegation
-    // is never handed off — its lane is kept for a later continuation.
+    // Handoff (D1): the orchestrator's `action` IS its completion judgment.
+    // `finish` means "the work is done, wrap up" — that is the moment to hand the
+    // accumulated subagent results to the main queue. `ask_user` / `delegate`
+    // mean "not done" (awaiting the user / continuing), so nothing is handed off
+    // and the lanes are kept. There is no separate completion signal: we do not
+    // read completionReason here (it is only a hint shown to the decision LLM).
     //
-    // NOTE: completion is currently read from the announce tag; Task #3 moves the
-    // completion judgment to the orchestrator and this source will change.
-    const handoffMessages =
-      kind === 'delegation_outcome'
-      && latestTurnAnnounce?.lane
-      && latestTurnAnnounce.delegationId
-      && latestTurnAnnounce.announce === 'completed'
-      && nextDelegationState.pendingDelegation?.id !== latestTurnAnnounce.delegationId
-        ? buildSubagentHandoff({
-            messages: state.messages,
-            lane: latestTurnAnnounce.lane,
-            turnId: state.turnId,
-            delegationId: latestTurnAnnounce.delegationId,
-          }) ?? []
-        : [];
+    // On finish we hand off EVERY delegation that still has a lane with an
+    // announce — not just the one we just returned from — because A may have
+    // completed, then B was delegated and completed, and only now does the
+    // orchestrator finish (see "完成 A 同时委派 B → 只在 finish 那一刻 handoff").
+    const handingOff = kind === 'delegation_outcome' && actionKind === 'finish';
+    const handoffMessages: BaseMessage[] = [];
+    const handedOffDelegationIds = new Set<string>();
+    if (handingOff) {
+      for (const delegation of nextDelegationState.turnDelegations) {
+        if (handedOffDelegationIds.has(delegation.id)) continue;
+        const messages = buildSubagentHandoff({
+          messages: state.messages,
+          lane: delegation.lane,
+          turnId: state.turnId,
+          delegationId: delegation.id,
+        });
+        if (!messages) continue;
+        handoffMessages.push(...messages);
+        handedOffDelegationIds.add(delegation.id);
+      }
+    }
+
+    // A handed-off delegation is, by the orchestrator's judgment, complete.
+    const finalTurnDelegations = handedOffDelegationIds.size > 0
+      ? nextDelegationState.turnDelegations.map((delegation) =>
+          handedOffDelegationIds.has(delegation.id)
+            ? { ...delegation, status: 'completed' as const }
+            : delegation)
+      : nextDelegationState.turnDelegations;
 
     return {
       messages: [
@@ -862,7 +876,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
             capabilitySearchState: buildEmptyCapabilitySearchState(),
           }
         : {}),
-      turnDelegations: nextDelegationState.turnDelegations,
+      turnDelegations: finalTurnDelegations,
     };
   }
 
@@ -881,12 +895,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   async function answerNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const { workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    // Main conversation plus the preserved announces (the authoritative copies of
-    // prior subagent results) and any context-compaction summaries, in their
-    // original order — see answerConversationMessages. After compaction the
-    // summary may be the only surviving record of older results, so the answer
-    // node must see it to faithfully re-show "previous results".
-    const history = answerConversationMessages(state.messages);
+    // The full main conversation queue. Subagent results already live here as
+    // handoff copies (first-class, lane-free), so the answer node just reads main
+    // — no need to dig announces out of lanes. Context-compaction summaries are
+    // kept (mainConversationMessages only drops lane-tagged messages), since after
+    // compaction a summary may be the only surviving record of older results.
+    const history = mainConversationMessages(state.messages);
     const response = await config.models.act.invoke(
       [
         new SystemMessage(buildAnswerSystemPrompt({ actor, workdir, runtimeEnvironment })),
@@ -1034,23 +1048,21 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       },
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: pendingDelegation.id });
+    // The subagent node only records that the delegation ran (status 'progress');
+    // whether it is complete is the orchestrator's call at delegationOutcomeDecision,
+    // which upgrades the status to 'completed' when it hands off. The raw lane
+    // messages are kept in place — handoff (or a later continuation) cleans them up.
     const updatedTurnDelegations = updateTurnDelegationResult(
       state.turnDelegations,
       pendingDelegation.id,
       {
-        status: delegationAnnounce?.announce ?? (result.completionReason === 'natural' ? 'completed' : 'progress'),
+        status: 'progress',
         resultPreview: delegationAnnounce?.text ?? null,
       },
     );
 
     return {
-      messages: laneMessagesForStateUpdate({
-        existingMessages: state.messages,
-        outputMessages: laneOutputMessages,
-        lane,
-        turnId: state.turnId,
-        delegationId: pendingDelegation.id,
-      }),
+      messages: laneOutputMessages,
       capabilityArtifacts: result.artifacts,
       capabilitySearchState: buildEmptyCapabilitySearchState(),
       turnDelegations: updatedTurnDelegations,
@@ -1136,36 +1148,25 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     );
     const delegationAnnounce = readLatestAnnounce(outputMessages, { delegationId: pendingDelegation.id });
 
+    // See capabilityNode: status is 'progress' until the orchestrator judges it
+    // complete at delegationOutcomeDecision; raw lane messages are kept in place.
     const updatedTurnDelegations = updateTurnDelegationResult(
       state.turnDelegations,
       pendingDelegation.id,
       {
-        status: delegationAnnounce?.announce ?? (result.completionReason === 'natural' ? 'completed' : 'progress'),
+        status: 'progress',
         resultPreview: delegationAnnounce?.text ?? null,
       },
     );
 
     return {
-      messages: laneMessagesForStateUpdate({
-        existingMessages: state.messages,
-        outputMessages,
-        lane,
-        turnId: state.turnId,
-        delegationId: pendingDelegation.id,
-      }),
+      messages: outputMessages,
       capabilitySearchState: buildEmptyCapabilitySearchState(),
       turnDelegations: updatedTurnDelegations,
       pendingDelegation: null,
       iterationCount: state.iterationCount + 1,
       toolAuthorizations: authorizationRecorder.recorded,
     };
-  }
-
-  // Conditional edge
-  function afterPrepare(state: OrchestratorStateType) {
-    return readLatestAnnounce(state.messages, { turnId: state.turnId })
-      ? 'delegationOutcomeDecision'
-      : 'capabilityDiscovery';
   }
 
   function afterCapabilityDiscovery(state: OrchestratorStateType) {
@@ -1202,10 +1203,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('general', generalNode)
     .addEdge(START, 'prepare')
     .addEdge('prepare', 'compactContext')
-    .addConditionalEdges('compactContext', afterPrepare, {
-      capabilityDiscovery: 'capabilityDiscovery',
-      delegationOutcomeDecision: 'delegationOutcomeDecision',
-    })
+    // A new turn always re-evaluates intent via capabilityDiscovery → decision.
+    // delegationOutcomeDecision is reached only from a subagent node's edge within
+    // a single invoke; it is never entered from the turn entrypoint. (We do not
+    // route based on announce presence — announce is context for the LLM, not a
+    // control-flow signal. See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.)
+    .addEdge('compactContext', 'capabilityDiscovery')
     .addConditionalEdges('capabilityDiscovery', afterCapabilityDiscovery, {
       capabilitySearch: 'capabilitySearch',
       userIntentDecision: 'userIntentDecision',

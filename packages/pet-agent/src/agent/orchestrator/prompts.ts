@@ -10,7 +10,7 @@ import type {
   SubagentCompletionReason,
   TurnDelegation,
 } from './types';
-import { clipForPrompt, describeAnnounceKind, formatDelegationStatus, readMessageText } from './utils';
+import { clipForPrompt, formatDelegationStatus, readMessageText } from './utils';
 
 const MAX_DECISION_TURN_DELEGATIONS = 6;
 const MAX_RECENT_MAIN_MESSAGES = 6;
@@ -122,7 +122,7 @@ export function buildRecentSubagentAnnounceContext(announces: SubagentAnnounce[]
 
   const lines = ['最近 subagent announce（用于理解“之前/刚刚/继续/完成了吗”等指代）：'];
   for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
-    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}${item.lane}，${describeAnnounceKind(item.announce)}`);
+    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}${item.lane}`);
     if (item.task) {
       lines.push(`  委派任务：${clipForPrompt(item.task, 140)}`);
     }
@@ -141,7 +141,7 @@ export function buildCapabilityDiscoveryTaskContext(announces: SubagentAnnounce[
 
   const lines = ['近期任务状态（只用于理解当前请求是否承接已有任务；不要把旧任务目标当成当前搜索目标）：'];
   for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
-    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}执行器：${item.lane}；完成进度：${item.announce}`);
+    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}执行器：${item.lane}`);
     if (item.task) {
       lines.push(`  任务目标：${clipForPrompt(item.task, 120)}`);
     }
@@ -328,11 +328,13 @@ export function buildSubagentAnnounceContext(
   completionReason?: SubagentCompletionReason | null,
 ): string | null {
   if (!item) return null;
+  // No completed/progress verdict here: the orchestrator judges completion from
+  // the announce text + stop reason. Feeding a pre-baked "状态" would bias it into
+  // rubber-stamping. See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
   const lines = [
     'subagent announce：',
     item.delegationId ? `- 任务标识：${item.delegationId}` : null,
     `- 执行器：${item.lane}`,
-    `- 状态：${describeAnnounceKind(item.announce)}`,
     completionReason ? `- 停止原因：${completionReason}` : null,
     item.task ? `- 委派任务：${clipForPrompt(item.task, 180)}` : null,
     formatSubagentAnnounceText(item),

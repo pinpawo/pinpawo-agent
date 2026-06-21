@@ -3,7 +3,7 @@ import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
-  getMessageAnnounce,
+  getMessageIsAnnounce,
   getMessageDelegatedTask,
   getMessageDelegationId,
   getMessageLane,
@@ -94,14 +94,12 @@ function formatMainMessageForSummary(message: BaseMessage): string | null {
 function formatLaneAnnounceForSummary(message: BaseMessage): string | null {
   const lane = getMessageLane(message);
   if (!lane || lane === 'orchestrator') return null;
-  const announce = getMessageAnnounce(message);
-  if (!announce) return null;
+  if (!getMessageIsAnnounce(message)) return null;
   const text = readMessageText(message);
 
   return [
     `### 任务执行记录 (${[
       `lane=${lane}`,
-      `status=${announce}`,
       getMessageTurnId(message) ? `turn=${getMessageTurnId(message)}` : null,
       getMessageDelegationId(message) ? `delegation=${getMessageDelegationId(message)}` : null,
     ].filter(Boolean).join(', ')})`,

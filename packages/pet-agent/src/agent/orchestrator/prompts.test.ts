@@ -107,7 +107,6 @@ test('completed subagent announce context includes the full current result text'
     lane: 'general',
     delegationId: 'task-1',
     task: '整理排行榜',
-    announce: 'completed',
     text: longResult,
   }, 'natural');
 

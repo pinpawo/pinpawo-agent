@@ -52,11 +52,11 @@ handoff 动作（在 delegationOutcomeDecision 写回 state 的同一步内做�
 
 > 这些是与作者对齐后定下的、直接决定实现形状的点。实现时按此执行，不再重新讨论。
 
-**D1 — handoff 的“完成”信号 = decision 本来就在做的判断，不新增 schema 字段。**
-- `delegationOutcomeDecision` 当前已经读到 announce 文本 + completionReason（线索），并据此输出 `action`。
-- 判定逻辑沿用现有 `action`：subagent 跑完一轮后回到 `delegationOutcomeDecision`，如果这一步**不再对同一个 lane 续跑该 delegation**（即 `pendingDelegation` 不再指向同一个 delegationId / 同一 lane 的继续），就视为“这个 subagent 的这次委派完成了”→ 触发 handoff。
-- 反之，若 decision 决定**续跑同一 delegationId**（`reuseOrAppendTurnDelegation` 复用），则是 progress 续跑 → 不 handoff。
-- 因此 handoff **不绑定 `action==='finish'`**：完成 A 后即使本轮立刻 `delegate` B，A 也要 handoff（A 的 lane 不再被续跑）。判据是“这个 delegationId 在本轮决策后是否仍 in-flight”，不是“本轮是否 finish”。
+**D1 — handoff 的“完成”信号 = decision 的 `action` 本身，不新增 schema 字段、不读 completionReason。**
+- decision 的 `action` 就是它的判定：`finish`=工作完成、收尾交付；`ask_user`=没完成、等用户；`delegate_*`=没完成、继续推进。
+- 因此 **handoff 触发 = `actionKind === 'finish'`**。这是“判定权在 orchestrator”的正解：runtime 不再拿 `completionReason==='natural'` 自己推断完成（那只是把 stop reason 当判定，是要消灭的 lossy 映射的同一个病）。
+- **“完成 A 同时委派 B” → 只在 finish 那一刻 handoff。** 这一轮若 `action=delegate.B`，属于“继续”，A 的结果留在 lane 作为后续上下文，不 handoff；等到最终 `action=finish` 时，把**所有**还留在 lane、已产出 announce 的 delegation 一次性 handoff 进 main（遍历 `turnDelegations`，不只是最后一个）。
+- `completionReason` 仅作为线索喂进 decision 输入（见 D4），不参与 runtime 的 handoff 判定。
 
 **D2 — 溯源 metadata：最小集。**
 handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 只带：

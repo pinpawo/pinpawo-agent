@@ -27,16 +27,15 @@ import { buildReviewSpec } from './review/reviewSpec';
 import { isToolActionAuthorized } from './review/reviewAuthorizations';
 import { ReviewPolicies } from './review/reviewPolicies';
 import {
-  answerConversationMessages,
   buildSubagentHandoff,
-  getMessageAnnounce,
   getMessageDelegationId,
   getMessageHandoffSource,
+  getMessageIsAnnounce,
   getMessageLane,
   laneMessages,
-  laneMessagesForStateUpdate,
   mainConversationMessages,
   readLatestAnnounce,
+  readRecentAnnounces,
   setPinpetMeta,
   tagNewLaneMessages,
 } from './messageLanes';
@@ -170,7 +169,7 @@ test('capability discovery receives compact task status context', async () => {
   setPinpetMeta(previousAnnounce, {
     lane: 'general',
     turnId: 'prev-turn',
-    announce: 'progress',
+    isAnnounce: true,
     delegationId: 'task-prev',
     task: '归档 Downloads',
   });
@@ -192,7 +191,7 @@ test('capability discovery receives compact task status context', async () => {
 
   assert.match(discoveryInput, /当前用户请求：之前的任务完成的怎么样了？/);
   assert.match(discoveryInput, /近期任务状态/);
-  assert.match(discoveryInput, /执行器：general；完成进度：progress/);
+  assert.match(discoveryInput, /执行器：general/);
   assert.match(discoveryInput, /任务目标：归档 Downloads/);
   assert.doesNotMatch(discoveryInput, /最近 subagent announce/);
   assert.doesNotMatch(discoveryInput, /打包因超时停止/);
@@ -246,7 +245,7 @@ test('user intent decision exposes in-progress capability candidates independent
   setPinpetMeta(previousAnnounce, {
     lane: 'capability:explore',
     turnId: 'prev-turn',
-    announce: 'progress',
+    isAnnounce: true,
     delegationId: 'task-prev',
     task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
   });
@@ -255,7 +254,6 @@ test('user intent decision exposes in-progress capability candidates independent
     previousAnnounce,
     new HumanMessage('现在状态如何？'),
   ]);
-
   await graph.invoke(input, {
     configurable: {
       thread_id: 'test-in-progress-capability-candidate',
@@ -268,7 +266,7 @@ test('user intent decision exposes in-progress capability candidates independent
   assert.equal(schemaAllowsExplore, true);
   assert.match(decisionSystemPrompt, /delegate_capability\.explore/);
   assert.match(decisionInput, /当前用户请求：现在状态如何？/);
-  assert.match(decisionInput, /capability:explore，progress/);
+  assert.match(decisionInput, /capability:explore/);
   assert.match(decisionInput, /调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
   assert.equal(decisionCallCount, 2);
 });
@@ -402,8 +400,7 @@ test('without forcedCapabilityNames the discovery path runs as before (no-regres
   assert.equal(discoveryCalled, true, 'discovery LLM call must run when no forced names provided');
 });
 
-test('delegation outcome decision receives subagent announce as explicit input and skips discovery', async () => {
-  let discoveryCalled = false;
+test('a prior subagent announce reaches the decision as context and the answer node un-clipped', async () => {
   let decisionInput = '';
   let answerInput = '';
   const model = {
@@ -414,10 +411,7 @@ test('delegation outcome decision receives subagent announce as explicit input a
       return new AIMessage('answered');
     },
     bindTools: () => ({
-      invoke: async () => {
-        discoveryCalled = true;
-        return new AIMessage('');
-      },
+      invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
@@ -444,7 +438,8 @@ test('delegation outcome decision receives subagent announce as explicit input a
   setPinpetMeta(currentAnnounce, {
     lane: 'general',
     turnId: input.turnId,
-    announce: 'completed',
+    isAnnounce: true,
+    completionReason: 'natural',
     delegationId: 'task-1',
     task: '读取文件并运行 lint',
   });
@@ -452,7 +447,7 @@ test('delegation outcome decision receives subagent announce as explicit input a
     id: 'task-1',
     lane: 'general',
     task: '读取文件并运行 lint',
-    status: 'completed',
+    status: 'progress',
     resultPreview: currentAnnounceText,
   }];
 
@@ -465,8 +460,8 @@ test('delegation outcome decision receives subagent announce as explicit input a
     },
   });
 
-  assert.equal(discoveryCalled, false);
-  assert.match(decisionInput, /subagent announce/);
+  // A new turn re-evaluates intent (discovery may run); the decision still sees
+  // the prior announce as context via recent announces.
   assert.match(decisionInput, /文件读取完成，lint 已通过/);
   assert.match(decisionInput, /END_OF_FULL_SUBAGENT_RESULT/);
   // The dedicated answer node generates the final reply...
@@ -531,9 +526,7 @@ test('delegation outcome finish lets the answer node reproduce the completed ann
       return new AIMessage(echoed);
     },
     bindTools: () => ({
-      invoke: async () => {
-        throw new Error('capability discovery should be skipped for current-turn announce');
-      },
+      invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
       invoke: async () => ({ action: 'finish' }),
@@ -551,7 +544,7 @@ test('delegation outcome finish lets the answer node reproduce the completed ann
   setPinpetMeta(announceMessage, {
     lane: 'general',
     turnId: input.turnId,
-    announce: 'completed',
+    isAnnounce: true,
     delegationId: 'task-1',
     task: '搜索并整理 vibecoding 模型排行榜。',
   });
@@ -648,20 +641,18 @@ test('limit-reached progress announce lets model choose the same capability dele
   let capabilityRunCount = 0;
   let decisionCallCount = 0;
   let decisionSystemPrompt = '';
-  let decisionInput = '';
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
-      invoke: async () => {
-        throw new Error('capability discovery should be skipped for current-turn announce');
-      },
+      // A new turn re-evaluates intent via capabilityDiscovery; with the
+      // in-progress capability already seeded as a candidate, no search is needed.
+      invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
         decisionCallCount += 1;
         if (decisionCallCount === 1) {
           decisionSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
-          decisionInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
           return {
             action: 'delegate_capability.inspect_repo',
             task: '继续调查仓库 capability 注册链路。',
@@ -693,7 +684,7 @@ test('limit-reached progress announce lets model choose the same capability dele
   setPinpetMeta(progressAnnounce, {
     lane: 'capability:inspect_repo',
     turnId: input.turnId,
-    announce: 'progress',
+    isAnnounce: true,
     completionReason: 'limit_reached',
     delegationId: 'task-limit',
     task: '调查仓库 capability 注册链路。',
@@ -718,8 +709,9 @@ test('limit-reached progress announce lets model choose the same capability dele
 
   assert.equal(capabilityRunCount, 1);
   assert.equal(decisionCallCount, 2);
+  // The in-progress inspect_repo lane is offered as a candidate to the new-turn
+  // decision, so the model can re-delegate the same capability to continue it.
   assert.match(decisionSystemPrompt, /delegate_capability\.inspect_repo/);
-  assert.match(decisionInput, /停止原因：limit_reached/);
 });
 
 test('toolkits compose tools and instructions for capability runtimes', async () => {
@@ -1754,8 +1746,9 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
+  // The delegation is incomplete (not handed off), so its announce and lane
+  // transcript are kept in place for a later continuation.
   const announce = readLatestAnnounce(finalState.messages, { turnId: finalState.turnId });
-  assert.equal(announce?.announce, 'progress');
   assert.ok(announce?.delegationId);
   assert.ok(
     laneMessages(finalState.messages, 'general', finalState.turnId, announce.delegationId)
@@ -1919,7 +1912,7 @@ test('iteration limit approve can resume an in-progress capability lane', async 
   setPinpetMeta(previousAnnounce, {
     lane: 'capability:explore',
     turnId: 'previous-turn',
-    announce: 'progress',
+    isAnnounce: true,
     completionReason: 'limit_reached',
     delegationId: 'previous-progress-1',
     task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
@@ -2030,7 +2023,7 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   setPinpetMeta(intermediate, { lane: 'capability:explore', turnId: 't1', delegationId: 'd1' });
   const announce = new AIMessage('已查到热门动态：A、B、C。FULL_ANNOUNCE_MARKER');
   announce.id = 'm-announce';
-  setPinpetMeta(announce, { lane: 'capability:explore', turnId: 't1', delegationId: 'd1', announce: 'completed', task: '查动态' });
+  setPinpetMeta(announce, { lane: 'capability:explore', turnId: 't1', delegationId: 'd1', isAnnounce: true, task: '查动态' });
   // A different delegation in the same lane must be untouched.
   const otherDelegation = new AIMessage('另一个委派的中间消息');
   otherDelegation.id = 'm-other';
@@ -2083,7 +2076,8 @@ test('lane tagging hides subagent messages from route and records completed anno
   });
 
   assert.equal(tagged.length, 1);
-  assert.equal(getMessageAnnounce(messages[1]), 'completed');
+  // The deliverable message is marked as the announce (neutral, no verdict).
+  assert.equal(getMessageIsAnnounce(messages[1]), true);
   assert.equal(getMessageDelegationId(messages[1]), 'task-1');
   assert.deepEqual(mainConversationMessages(messages).map((message) => message.content), ['帮我查一下小红书动态']);
   assert.deepEqual(laneMessages(messages, 'general', 'turn-1', 'task-1').map((message) => message.content), [
@@ -2094,64 +2088,33 @@ test('lane tagging hides subagent messages from route and records completed anno
     lane: 'general',
     delegationId: 'task-1',
     task: '查小红书动态',
-    announce: 'completed',
     text: '已查到热门动态。',
   });
 });
 
-test('answerConversationMessages keeps completed and progress announces but drops transcript and orchestrator lane messages', () => {
-  const userAsk = new HumanMessage('帮我查一下小红书动态');
-  const completed = new AIMessage('已查到热门动态：A、B、C。');
-  setPinpetMeta(completed, { lane: 'general', turnId: 't1', announce: 'completed', delegationId: 'd1', task: '查动态' });
-  const progress = new AIMessage('已抓到第 1 页，正在抓第 2 页…');
-  setPinpetMeta(progress, { lane: 'general', turnId: 't1', announce: 'progress', delegationId: 'd2', task: '查更多' });
-  const intermediate = new AIMessage('（中间步骤，无 announce tag）');
-  setPinpetMeta(intermediate, { lane: 'general', turnId: 't1', delegationId: 'd2' });
-  const orchestratorInternal = new AIMessage('capability_search 调用');
-  setPinpetMeta(orchestratorInternal, { lane: 'orchestrator', turnId: 't1' });
-  const reply = new AIMessage('好的，结果如上。');
-
-  const messages = [userAsk, completed, progress, intermediate, orchestratorInternal, reply];
-  const view = answerConversationMessages(messages);
-
-  // Both completed and progress announces are kept (so "how far did it get?"
-  // after a progress turn still reaches the answer node). The intermediate
-  // transcript and orchestrator-internal lane messages are dropped. Unlaned kept.
-  assert.deepEqual(view.map((m) => m.content), [
-    '帮我查一下小红书动态',
-    '已查到热门动态：A、B、C。',
-    '已抓到第 1 页，正在抓第 2 页…',
-    '好的，结果如上。',
-  ]);
-  // The decision-node view still hides every lane message, by contrast.
-  assert.deepEqual(mainConversationMessages(messages).map((m) => m.content), [
-    '帮我查一下小红书动态',
-    '好的，结果如上。',
-  ]);
-});
-
-test('lane tagging marks limit-reached result as progress', () => {
+test('lane tagging marks the deliverable as the announce regardless of stop reason', () => {
   const messages = [
     new HumanMessage('读取文件并运行 lint'),
     new AIMessage('文件读取完成，lint 还没跑。'),
   ];
 
+  // limit_reached is just a stop reason now; the deliverable is still marked as
+  // the announce (no completed/progress verdict at tag time).
   tagNewLaneMessages(messages, 1, 'general', 'turn-1', 'limit_reached', {
     delegationId: 'task-2',
     task: '读取文件并运行 lint',
   });
 
-  assert.equal(getMessageAnnounce(messages[1]), 'progress');
+  assert.equal(getMessageIsAnnounce(messages[1]), true);
   assert.deepEqual(readLatestAnnounce(messages, { delegationId: 'task-2' }), {
     lane: 'general',
     delegationId: 'task-2',
     task: '读取文件并运行 lint',
-    announce: 'progress',
     text: '文件读取完成，lint 还没跑。',
   });
 });
 
-test('completed lane state update keeps only the announce from the current run', () => {
+test('handoff copies the announce into main and wipes the lane transcript', () => {
   const human = new HumanMessage('检查项目并汇报');
   const toolCall = new AIMessage({
     content: '先读取 package.json。',
@@ -2169,24 +2132,46 @@ test('completed lane state update keeps only the announce from the current run',
     delegationId: 'task-complete',
     task: '检查项目并汇报',
   });
-  const update = laneMessagesForStateUpdate({
-    existingMessages: [human],
-    outputMessages: tagged,
+  const stateWithLane = messagesStateReducer([human], tagged);
+
+  const handoff = buildSubagentHandoff({
+    messages: stateWithLane,
     lane: 'general',
     turnId: 'turn-1',
     delegationId: 'task-complete',
   });
-  const stateMessages = messagesStateReducer([human], update);
+  assert.ok(handoff);
+  const stateMessages = messagesStateReducer(stateWithLane, handoff);
 
+  // The lane transcript is gone; only the user message and a main-queue copy of
+  // the announce remain.
   assert.deepEqual(stateMessages.map((message) => message.content), [
     '检查项目并汇报',
     '检查完成，测试脚本是 node --test。',
   ]);
-  assert.equal(getMessageAnnounce(stateMessages[1]), 'completed');
-  assert.equal(getMessageDelegationId(stateMessages[1]), 'task-complete');
+  // The copy is a first-class main message (no lane) with handoff provenance.
+  assert.equal(getMessageLane(stateMessages[1]), null);
+  assert.deepEqual(getMessageHandoffSource(stateMessages[1]), {
+    handoffFrom: 'general',
+    delegationId: 'task-complete',
+    task: '检查项目并汇报',
+  });
+  // No lane-tagged messages for this delegation remain.
+  assert.equal(stateMessages.filter((m) => getMessageLane(m) === 'general').length, 0);
+
+  // readRecentAnnounces must still recall the announce after handoff — it now
+  // lives in the main queue as a handed-off copy, not in the (wiped) lane.
+  const recalled = readRecentAnnounces(stateMessages);
+  assert.equal(recalled.length, 1);
+  assert.deepEqual(recalled[0], {
+    lane: 'general',
+    delegationId: 'task-complete',
+    task: '检查项目并汇报',
+    text: '检查完成，测试脚本是 node --test。',
+  });
 });
 
-test('completed continuation removes old progress transcript for the same delegation', () => {
+test('handoff after a resumed delegation wipes the whole delegation lane including old progress', () => {
   const human = new HumanMessage('处理所有分片');
   const oldToolCall = new AIMessage({
     content: '处理第一个分片。',
@@ -2198,6 +2183,7 @@ test('completed continuation removes old progress transcript for the same delega
   });
   const oldProgress = new AIMessage('已处理第一个分片，尚未完成。');
   const previousRun = [human, oldToolCall, oldToolResult, oldProgress];
+  // First (interrupted) run keeps its whole lane in place — no handoff yet.
   const previousUpdate = tagNewLaneMessages(previousRun, 1, 'general', 'turn-1', 'limit_reached', {
     delegationId: 'task-resume',
     task: '处理所有分片',
@@ -2205,6 +2191,7 @@ test('completed continuation removes old progress transcript for the same delega
   const stateWithProgress = messagesStateReducer([human], previousUpdate);
   assert.equal(laneMessages(stateWithProgress, 'general', 'turn-1', 'task-resume').length, 4);
 
+  // Continuation (same delegationId) completes naturally.
   const finalNote = new AIMessage('继续处理剩余分片。');
   const completedAnnounce = new AIMessage('全部分片已处理完成，共 120 条。');
   const continuationOutput = [
@@ -2223,26 +2210,24 @@ test('completed continuation removes old progress transcript for the same delega
       task: '处理所有分片',
     },
   );
-  const foldedUpdate = laneMessagesForStateUpdate({
-    existingMessages: stateWithProgress,
-    outputMessages: taggedContinuation,
+  const stateBeforeHandoff = messagesStateReducer(stateWithProgress, taggedContinuation);
+
+  const handoff = buildSubagentHandoff({
+    messages: stateBeforeHandoff,
     lane: 'general',
     turnId: 'turn-1',
     delegationId: 'task-resume',
   });
-  const finalState = messagesStateReducer(stateWithProgress, foldedUpdate);
+  assert.ok(handoff);
+  const finalState = messagesStateReducer(stateBeforeHandoff, handoff);
 
-  assert.deepEqual(laneMessages(finalState, 'general', 'turn-1', 'task-resume').map((message) => message.content), [
+  // The entire delegation lane (old progress + continuation transcript) is gone;
+  // only the user message and the main-queue copy of the final announce remain.
+  assert.equal(finalState.filter((m) => getMessageLane(m) === 'general').length, 0);
+  assert.deepEqual(mainConversationMessages(finalState).map((m) => m.content), [
     '处理所有分片',
     '全部分片已处理完成，共 120 条。',
   ]);
-  assert.deepEqual(readLatestAnnounce(finalState, { delegationId: 'task-resume' }), {
-    lane: 'general',
-    delegationId: 'task-resume',
-    task: '处理所有分片',
-    announce: 'completed',
-    text: '全部分片已处理完成，共 120 条。',
-  });
 });
 
 test('lane messages drop unanswered tool calls from interrupted subagent history', () => {
@@ -2272,12 +2257,11 @@ test('lane messages drop unanswered tool calls from interrupted subagent history
     '先检查目标目录。',
     '{"ok":true}',
   ]);
-  assert.equal(getMessageAnnounce(toolResult), 'progress');
+  assert.equal(getMessageIsAnnounce(toolResult), true);
   assert.deepEqual(readLatestAnnounce(stateMessages, { delegationId: 'task-3' }), {
     lane: 'general',
     delegationId: 'task-3',
     task: '归档 Downloads',
-    announce: 'progress',
     text: '{"ok":true}',
   });
 });

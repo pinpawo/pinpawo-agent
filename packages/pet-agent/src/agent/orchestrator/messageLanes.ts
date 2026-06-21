@@ -30,6 +30,20 @@ export function getMessageAnnounce(message: BaseMessage): AnnounceKind | null {
   return announce === 'completed' || announce === 'progress' ? announce : null;
 }
 
+/**
+ * Neutral marker for "this lane message carries the subagent's deliverable text".
+ * Replaces the completed/progress announce tag: it says WHICH message is the
+ * announce, without judging whether the task is complete (that judgment now lives
+ * with the orchestrator / handoff). See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
+ */
+export function setMessageIsAnnounce(message: BaseMessage) {
+  setPinpetMeta(message, { isAnnounce: true });
+}
+
+export function getMessageIsAnnounce(message: BaseMessage): boolean {
+  return getPinpetMeta(message).isAnnounce === true;
+}
+
 export function getMessageCompletionReason(message: BaseMessage): SubagentCompletionReason | null {
   const completionReason = getPinpetMeta(message).completionReason;
   return typeof completionReason === 'string' ? completionReason as SubagentCompletionReason : null;
@@ -136,46 +150,16 @@ export function mainConversationMessages(messages: BaseMessage[]): BaseMessage[]
 
 export const routeMessages = mainConversationMessages;
 
-/**
- * Build the message list for the final answer node.
- *
- * Unlike decision nodes (which see the user-facing conversation only), the
- * answer node must reproduce prior subagent results faithfully. The completed
- * announce is the authoritative copy of a subagent's result that the lane
- * cleanup deliberately preserves (laneMessagesForStateUpdate removes the
- * intermediate transcript and keeps only the completed announce), so we keep it
- * in place rather than filtering it out and re-injecting a digest.
- *
- * Kept: unlaned main-conversation messages + every announce (completed AND
- * progress), in their original order. Dropped: intermediate lane transcripts and
- * orchestrator-internal lane messages (e.g. capability_search calls) — i.e. lane
- * messages without an announce tag.
- *
- * Progress announces are kept so that, after a limit_reached/progress turn, a
- * user asking "how far did it get?" still reaches the answer node with the
- * progress content (the decision view surfaces these via recent announces, so
- * the answer view must not be blind to them). The intermediate transcript that
- * is not yet cleaned up for an in-progress lane is still dropped here.
- *
- * Announce messages never carry tool calls (tagNewLaneMessages only marks a
- * tool-call-free AI/tool message as an announce). A progress announce can be a
- * tool message, though, and we drop the intermediate transcript it depended on,
- * so the result is run through toolProtocolSafeMessages to drop any orphaned
- * tool message rather than sending an invalid tool-result without its call.
- */
-export function answerConversationMessages(messages: BaseMessage[]): BaseMessage[] {
-  return toolProtocolSafeMessages(messages.filter((message) => {
-    if (!getMessageLane(message)) return true;
-    return getMessageAnnounce(message) !== null;
-  }));
-}
 
 /**
- * Tag new messages from subagent result and select an announce message.
+ * Tag new messages from a subagent result: stamp lane/turnId/delegationId on each,
+ * and mark which message is the announce (the deliverable text). It does NOT judge
+ * completed/progress — that judgment is the orchestrator's (see handoff). The
+ * completionReason is attached to the announce message as a stop-reason hint for
+ * the decision node.
  *
- * Announce kind is determined by completionReason + message content:
- * - natural + last AI with text -> completed
- * - otherwise, last AI/tool with text -> progress
+ * Announce selection: prefer the last tool-call-free AI message with text (the
+ * natural deliverable); fall back to the last AI/tool message with text.
  */
 export function tagNewLaneMessages(
   messages: BaseMessage[],
@@ -195,27 +179,20 @@ export function tagNewLaneMessages(
     setPinpetMeta(message, { lane, turnId, delegationId: reportMeta?.delegationId ?? null });
   }
 
-  // Find the last AI message with text content.
-  let lastAiIndex = -1;
+  // Find the announce message: prefer the last tool-call-free AI message with
+  // text; fall back to the last AI/tool message with text.
+  let announceIndex = -1;
   for (let i = nextMessages.length - 1; i >= 0; i--) {
     if (
       nextMessages[i]._getType() === 'ai'
       && !messageHasToolCalls(nextMessages[i])
       && readMessageText(nextMessages[i])
     ) {
-      lastAiIndex = i;
+      announceIndex = i;
       break;
     }
   }
-
-  if (lastAiIndex >= 0 && completionReason === 'natural') {
-    setMessageAnnounce(nextMessages[lastAiIndex], 'completed');
-    setPinpetMeta(nextMessages[lastAiIndex], {
-      delegationId: reportMeta?.delegationId ?? null,
-      task: reportMeta?.task ?? null,
-      completionReason,
-    });
-  } else {
+  if (announceIndex < 0) {
     for (let i = nextMessages.length - 1; i >= 0; i--) {
       const type = nextMessages[i]._getType();
       if (
@@ -223,51 +200,22 @@ export function tagNewLaneMessages(
         && !messageHasToolCalls(nextMessages[i])
         && readMessageText(nextMessages[i])
       ) {
-        setMessageAnnounce(nextMessages[i], 'progress');
-        setPinpetMeta(nextMessages[i], {
-          delegationId: reportMeta?.delegationId ?? null,
-          task: reportMeta?.task ?? null,
-          completionReason,
-        });
+        announceIndex = i;
         break;
       }
     }
   }
 
-  return toolProtocolSafeMessages(nextMessages);
-}
-
-export function laneMessagesForStateUpdate(params: {
-  existingMessages: BaseMessage[];
-  outputMessages: BaseMessage[];
-  lane: MessageLane;
-  turnId: string;
-  delegationId: string;
-}): BaseMessage[] {
-  const completedAnnounce = readLatestAnnounceMessage(params.outputMessages, {
-    turnId: params.turnId,
-    delegationId: params.delegationId,
-  });
-  if (!completedAnnounce || getMessageAnnounce(completedAnnounce) !== 'completed') {
-    return params.outputMessages;
+  if (announceIndex >= 0) {
+    setMessageIsAnnounce(nextMessages[announceIndex]);
+    setPinpetMeta(nextMessages[announceIndex], {
+      delegationId: reportMeta?.delegationId ?? null,
+      task: reportMeta?.task ?? null,
+      completionReason,
+    });
   }
 
-  const announceId = ensureMessageId(completedAnnounce);
-  const removeMessages = params.existingMessages.flatMap((message) => {
-    if (getMessageLane(message) !== params.lane) return [];
-    if (getMessageTurnId(message) !== params.turnId) return [];
-    if (getMessageDelegationId(message) !== params.delegationId) return [];
-    // Legacy checkpointed lane messages may predate message ids; LangGraph
-    // RemoveMessage cannot target them, so those old messages are accepted as
-    // residual history instead of risking an invalid delete.
-    if (!message.id || message.id === announceId) return [];
-    return [new RemoveMessage({ id: message.id }) as BaseMessage];
-  });
-
-  return [
-    ...removeMessages,
-    completedAnnounce,
-  ];
+  return toolProtocolSafeMessages(nextMessages);
 }
 
 /**
@@ -362,15 +310,32 @@ function isDelegationLane(messageLane: PinpetMessageLane | null): messageLane is
 }
 
 function readTaggedAnnounce(message: BaseMessage): SubagentAnnounce | null {
-  const kind = getMessageAnnounce(message);
-  if (!kind) return null;
+  if (!getMessageIsAnnounce(message)) return null;
   const lane = getMessageLane(message);
   if (!isDelegationLane(lane)) return null;
   return {
     lane,
     delegationId: getMessageDelegationId(message),
     task: getMessageDelegatedTask(message),
-    announce: kind,
+    text: readMessageText(message) || null,
+  };
+}
+
+/**
+ * Read an announce from either an in-flight lane-tagged announce (still in its
+ * lane) OR a handed-off copy that now lives in the main queue. After handoff the
+ * lane announce is gone, so callers that want "the recent announces" must also
+ * recall them from the main-queue copies (provenance via handoffFrom).
+ */
+function readAnnounceFromAnyMessage(message: BaseMessage): SubagentAnnounce | null {
+  const tagged = readTaggedAnnounce(message);
+  if (tagged) return tagged;
+  const handoff = getMessageHandoffSource(message);
+  if (!handoff || !isDelegationLane(handoff.handoffFrom)) return null;
+  return {
+    lane: handoff.handoffFrom,
+    delegationId: handoff.delegationId || null,
+    task: handoff.task,
     text: readMessageText(message) || null,
   };
 }
@@ -404,13 +369,38 @@ export function readLatestAnnounceCompletionReason(
   return message ? getMessageCompletionReason(message) : null;
 }
 
+/**
+ * Lanes that still have an in-flight (lane-tagged) announce — i.e. delegations
+ * that ran but have NOT been handed off (completed delegations get handed off and
+ * their lane wiped, so a lane announce that survives is by definition unfinished).
+ * Used to offer "continue this in-progress capability" candidates; persists across
+ * turns because the lane announce lives in messages, unlike turnDelegations.
+ */
+export function readInFlightAnnounceLanes(messages: BaseMessage[]): Array<MessageLane | undefined> {
+  const lanes: MessageLane[] = [];
+  const seen = new Set<string>();
+  for (const message of messages) {
+    if (!getMessageIsAnnounce(message)) continue;
+    const lane = getMessageLane(message);
+    if (!isDelegationLane(lane)) continue;
+    if (seen.has(lane)) continue;
+    seen.add(lane);
+    lanes.push(lane);
+  }
+  return lanes;
+}
+
 export function readRecentAnnounces(messages: BaseMessage[], limit = 5): SubagentAnnounce[] {
   const announces: SubagentAnnounce[] = [];
   const seen = new Set<string>();
 
+  // Recall announces from BOTH still-in-flight lane announces and handed-off
+  // copies in the main queue, so "recent announces" survives handoff (which wipes
+  // the lane). Dedupe by delegationId so a lane announce and its later main copy
+  // count once.
   for (let i = messages.length - 1; i >= 0 && announces.length < limit; i--) {
     const message = messages[i];
-    const announce = readTaggedAnnounce(message);
+    const announce = readAnnounceFromAnyMessage(message);
     if (!announce) continue;
     const key = announce.delegationId
       ?? `${announce.lane}:${getMessageTurnId(message) ?? 'unknown'}:${i}`;

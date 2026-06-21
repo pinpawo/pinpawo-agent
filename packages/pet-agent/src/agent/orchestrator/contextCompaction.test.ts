@@ -178,7 +178,7 @@ test('orchestrator context compaction summarizes lane announces without subagent
   setPinpetMeta(announce, {
     lane: 'general',
     turnId: 'turn-1',
-    announce: 'completed',
+    isAnnounce: true,
     delegationId: 'task-1',
     task: '整理素材',
   });

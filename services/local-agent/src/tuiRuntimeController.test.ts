@@ -169,6 +169,7 @@ test('TuiRuntimeController restores a reconnect snapshot before opening websocke
   await (harness.controller as any).reconnect();
 
   assert.deepEqual(events, ['snapshot', 'connect']);
+  assert.equal(harness.resetCount, 1);
   assert.equal(harness.actions[0]?.type, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
   assert.equal(
     harness.actions[0]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded

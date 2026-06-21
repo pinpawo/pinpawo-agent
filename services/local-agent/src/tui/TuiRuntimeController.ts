@@ -467,6 +467,7 @@ export class TuiRuntimeController {
     await this.restoreSessionSnapshot('reconnect');
     if (this.disposed || this.wsClient.hasSocket()) return;
 
+    this.options.resetTimelineView();
     this.connectWebSocket();
   }
 

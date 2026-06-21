@@ -595,7 +595,8 @@ function applySessionSnapshot(
     history,
     timeline,
     activeRun: activeRunFromSnapshot(snapshot, existingSession),
-    tokenUsage: snapshot.tokenUsage ?? null,
+    tokenUsage: snapshot.tokenUsage
+      ?? (action.source === 'reconnect' ? existingSession?.tokenUsage ?? null : null),
   };
 
   return {

@@ -130,20 +130,8 @@ export function timelineEntryFromHistoryCell(cell: HistoryCellModel): AgentTimel
   };
 }
 
-export function timelineMessageFromHistoryCell(cell: HistoryCellModel): AgentTimelineMessage | null {
-  const entry = timelineEntryFromHistoryCell(cell);
-  return isAgentTimelineMessage(entry) ? entry : null;
-}
-
 export function timelineEntriesFromHistory(history: HistoryCellModel[]): AgentTimelineEntry[] {
   return history.map(timelineEntryFromHistoryCell);
-}
-
-export function timelineMessagesFromHistory(history: HistoryCellModel[]): AgentTimelineMessage[] {
-  return history.flatMap((cell) => {
-    const message = timelineMessageFromHistoryCell(cell);
-    return message ? [message] : [];
-  });
 }
 
 export function timelineEntryIdFromOperationEvent(event: LocalAgentOperationEvent) {

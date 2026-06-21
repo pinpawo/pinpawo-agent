@@ -408,7 +408,7 @@ test('tuiStateReducer stores usage on completed message', () => {
   assert.deepEqual(session.tokenUsage, usage);
 });
 
-test('tuiStateReducer clears session token usage when replacing or clearing history', () => {
+test('tuiStateReducer clears session token usage when clearing session state', () => {
   let state = initialState();
   state = {
     ...state,
@@ -420,28 +420,6 @@ test('tuiStateReducer clears session token usage when replacing or clearing hist
           inputTokens: 100,
           outputTokens: 50,
           totalTokens: 150,
-        },
-      },
-    },
-  };
-
-  state = tuiStateReducer(state, {
-    type: 'session.replace_history',
-    history: [{ id: 'restored', kind: 'assistant', text: 'restored' }],
-  });
-
-  assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
-
-  state = {
-    ...state,
-    sessions: {
-      ...state.sessions,
-      'chat:pet': {
-        ...state.sessions['chat:pet']!,
-        tokenUsage: {
-          inputTokens: 10,
-          outputTokens: 5,
-          totalTokens: 15,
         },
       },
     },

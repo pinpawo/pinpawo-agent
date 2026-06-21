@@ -131,11 +131,6 @@ export type TuiAction =
       kind: SessionModel['kind'];
     }
   | {
-      type: 'session.replace_history';
-      sessionId?: SessionId;
-      history: HistoryCellModel[];
-    }
-  | {
       type: 'session.clear';
       sessionId?: SessionId;
       statusMessage?: string;

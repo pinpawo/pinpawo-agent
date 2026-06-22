@@ -86,8 +86,14 @@ test('tuiStateReducer updates mode and external editor owner state', () => {
   assert.equal(state.ui.externalEditorOpen, true);
 });
 
-test('tuiStateReducer uses completed message text for final assistant timeline entry', () => {
+test('tuiStateReducer handles streaming chat completion with token usage', () => {
   let state = startRun(initialState(), 'req-1');
+  const usage = {
+    inputTokens: 50,
+    outputTokens: 20,
+    totalTokens: 70,
+    contextWindow: 100,
+  };
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -127,6 +133,7 @@ test('tuiStateReducer uses completed message text for final assistant timeline e
       requestId: 'req-1',
       role: 'assistant',
       text: '最终回答只应该使用 completed 的内容。',
+      usage,
     },
     now: 1300,
     messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
@@ -135,6 +142,7 @@ test('tuiStateReducer uses completed message text for final assistant timeline e
   const session = state.sessions['chat:pet']!;
   assert.equal(session.activeRunId, null);
   assert.equal(state.runs['req-1'], undefined);
+  assert.deepEqual(session.tokenUsage, usage);
   assert.deepEqual(transcriptTimeline(state), [
     ['user', 'hello'],
     ['assistant', '最终回答只应该使用 completed 的内容。'],

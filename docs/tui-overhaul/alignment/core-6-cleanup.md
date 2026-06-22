@@ -20,6 +20,7 @@ This PR was intentionally conservative: it deleted paths that no longer had runt
 - Remove legacy `session.replace_history` action and reducer path.
 - Remove the `skipTimelineIds` reducer option.
 - Final assistant completion now updates timeline first.
+- Cover normal streaming completion, finalization, and token usage in one reducer path.
 - Remove the legacy history-to-message-only helper.
 
 ## Deferred Changes
@@ -36,12 +37,14 @@ This PR was intentionally conservative: it deleted paths that no longer had runt
 | 2026-06-21 | `session.replace_history` | restore should reconcile snapshots through `session.snapshot.loaded` | legacy action remained after CORE-4/5 migrated callsites | action no longer has runtime callers | delete action, reducer case, and tests | none | accepted |
 | 2026-06-21 | final assistant completion | completed assistant output should appear in timeline exactly once | reducer had `skipTimelineIds` to avoid duplicate timeline writes through history mirroring | CORE-5 now finalizes timeline directly | remove skip option in CORE-6 and delete history compatibility in CORE-7 | none | accepted |
 | 2026-06-21 | deferred metadata constants | executable metadata should describe real deferred gaps | constants were empty after CORE-5 | empty constants added noise and invited stale contract checks | remove constants and tests | use alignment docs for future deviations | accepted |
+| 2026-06-23 | streaming completion coverage | Normal chat streaming completion should show deltas, finalize from `message.completed`, and sync token usage. | Existing reducer tests covered completed text preference and usage storage in separate cases, but not the full matrix row in one path. | The main design lists this as a minimum test matrix scenario. | Extend the reducer streaming-completion test to include completed-event usage and assert session token usage after run finalization. | none | accepted |
 
 ## Merge Checklist
 
 - [x] Empty deferred metadata constants are removed.
 - [x] `session.replace_history` is removed from reducer actions.
 - [x] `skipTimelineIds` is removed from reducer completion flow.
+- [x] Normal streaming completion with token usage is covered in one reducer path.
 - [x] No new transcript/message-only model is introduced.
 - [x] `SessionModel.history` removal is completed in CORE-7.
 - [x] PR references tracking issue #232.

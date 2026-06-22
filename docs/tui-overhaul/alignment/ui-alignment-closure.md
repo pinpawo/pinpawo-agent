@@ -14,6 +14,7 @@ Close the remaining UI alignment gaps after UI-1 through UI-4 landed on `main`.
 
 - Add an explicit overlay model that selects the highest-priority active overlay.
 - Render overlays through one `OverlayLayer` component in `TuiApp` instead of a repeated conditional chain.
+- Cover `OverlayLayer` as the single active overlay render slot.
 - Pass the active overlay owner into `StatusBarModel`.
 - Pass the reducer-owned submit mode into `StatusBarModel`.
 - Split activity and connection status in `StatusBarModel`.
@@ -37,6 +38,7 @@ Close the remaining UI alignment gaps after UI-1 through UI-4 landed on `main`.
 | 2026-06-23 | StatusBar tones | Segment tone should be visible in the rendered status bar. | `StatusSegment.tone` existed in the model, but `BottomStatusLine` rendered the entire line as dim text; retrying and failed connection states were also easy to classify the same way. | Warning, danger, success, and info states are part of the structured status model and make busy/retry/disconnected states clearer. | Format visible status parts with segment tone metadata and render each part with the matching Ink color while preserving existing text truncation behavior; classify pending retry/reconnect as warning and disconnected/unavailable/failure as danger. | None. | Done |
 | 2026-06-23 | StatusBar width coverage | 80-column, 120-column, and CJK cwd status bars should not overflow terminal display width. | Existing tests covered narrow truncation and CJK truncation, but did not directly assert the 80/120-column acceptance cases from the main design. | The formatter uses terminal display width, so acceptance tests should verify display width rather than string length. | Add direct 80/120-column assertions, including a 120-column case where the CJK cwd segment is actually visible. | None. | Done |
 | 2026-06-23 | OverlayLayer | Layout renders one highest-priority overlay slot. | Picker lifecycle state remains in existing hooks. | Resume and policy pickers already have focused lifecycle controllers; moving them would broaden the PR beyond UI closure. | Add a pure `TuiOverlayModel` plus an `OverlayLayer` component that owns overlay rendering while preserving existing controllers. | None. | Done |
+| 2026-06-23 | OverlayLayer render boundary | `OverlayLayer` should render only the current overlay component. | Existing tests proved overlay model priority but did not directly exercise the component boundary. | The design asks for one active overlay slot, so the render component should be covered separately from model selection. | Add a pure React element test for null and each overlay type returned by `OverlayLayer`. | None. | Done |
 | 2026-06-23 | Overlay region shape | Overlay region should model overlay layout, not activity status. | Previous screen model left `pendingApproval` and `activityStatus` inside `regions.overlay` after overlay rendering moved elsewhere. | Activity belongs to the status bar; pending approval remains top-level domain state and overlay model input. | Keep `regions.overlay` layout-only with width. | None. | Done |
 | 2026-06-23 | Timeline viewport | Screen model owns static/dynamic boundary semantics. | Terminal scroll reset is still host-controlled. | Existing Ink `Static` reset is tied to explicit screen clearing; changing it risks duplicate terminal output. | Expose `renderKey`, `staticBoundaryKey`, and `scrollStrategy` from the screen model without changing terminal behavior. | None. | Done |
 
@@ -52,5 +54,6 @@ None.
 - [x] Status bar renders segment tones.
 - [x] Status bar 80/120-column and CJK cwd display width behavior is covered.
 - [x] `TuiApp` renders overlays through a single overlay layer.
+- [x] `OverlayLayer` renders only the current active overlay component.
 - [x] Overlay priority is covered by unit tests.
 - [x] Timeline viewport boundary metadata is covered by unit tests.

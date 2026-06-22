@@ -1,3 +1,4 @@
+import React from 'react';
 import { ApprovalPanel } from './ApprovalPanel';
 import { CommandPalette } from './CommandPalette';
 import { FileMentionPopup } from './FileMentionPopup';

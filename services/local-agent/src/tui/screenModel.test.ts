@@ -32,7 +32,8 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
   assert.equal(model.busy, false);
   assert.equal(model.regions.timeline.width, 96);
   assert.equal(model.regions.composer.textAreaWidth, 92);
-  assert.equal(model.regions.statusBar.status, '就绪');
+  assert.equal(model.regions.statusBar.activityStatus, null);
+  assert.equal(model.regions.statusBar.connectionStatus, '就绪');
   assert.equal(model.regions.timeline.renderKey, '3');
   assert.equal(model.regions.timeline.staticBoundaryKey, 'm1');
   assert.equal(model.regions.timeline.scrollStrategy, 'preserveStaticOutputUntilHostReset');
@@ -42,7 +43,7 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
 
 test('buildTuiScreenModel marks composer and status state while busy', () => {
   const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
-  state.connection = { status: 'ready', message: '就绪' };
+  state.connection = { status: 'ready', message: '正在思考' };
   state.runs.run1 = {
     requestId: 'run1',
     sessionId: 'chat:pet',
@@ -67,7 +68,24 @@ test('buildTuiScreenModel marks composer and status state while busy', () => {
   assert.equal(model.regions.composer.borderColor, 'yellow');
   assert.equal(model.regions.composer.width, 26);
   assert.equal(model.regions.overlay.width, 26);
-  assert.match(model.regions.statusBar.status, /正在思考|仍在处理中/);
+  assert.match(model.regions.statusBar.activityStatus ?? '', /正在思考|仍在处理中/);
+  assert.equal(model.regions.statusBar.connectionStatus, '就绪');
+});
+
+test('buildTuiScreenModel preserves recovered ready connection messages', () => {
+  const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
+  state.connection = { status: 'ready', message: '出错，已恢复输入' };
+
+  const model = buildTuiScreenModel({
+    state,
+    terminalColumns: 80,
+    now: 2500,
+    animationFrame: 0,
+    timelineRenderEpoch: 0,
+  });
+
+  assert.equal(model.regions.statusBar.activityStatus, null);
+  assert.equal(model.regions.statusBar.connectionStatus, '出错，已恢复输入');
 });
 
 test('buildTuiScreenModel keeps approval status visible while composer accepts reply text', () => {
@@ -107,7 +125,8 @@ test('buildTuiScreenModel keeps approval status visible while composer accepts r
   assert.equal(model.regions.composer.focused, true);
   assert.equal(model.regions.composer.borderColor, 'yellow');
   assert.equal(model.regions.composer.marginTop, 0);
-  assert.equal(model.regions.statusBar.status, '等待你的决定(pet-1)');
+  assert.equal(model.regions.statusBar.activityStatus, '等待你的决定(pet-1)');
+  assert.equal(model.regions.statusBar.connectionStatus, '就绪');
 });
 
 test('buildTuiScreenModel keeps timeline viewport ids stable across resize', () => {

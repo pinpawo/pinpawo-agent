@@ -25,7 +25,7 @@ test('buildStatusBarModel derives explicit prioritized segments', () => {
   };
 
   const model = buildStatusBarModel({
-    status: '就绪',
+    connectionStatus: '就绪',
     mode: 'studio',
     session,
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
@@ -34,7 +34,7 @@ test('buildStatusBarModel derives explicit prioritized segments', () => {
   assert.deepEqual(
     model.segments.map((segment) => [segment.id, segment.label, segment.value, segment.priority]),
     [
-      ['status', undefined, '就绪', 100],
+      ['connection', undefined, '就绪', 100],
       ['mode', undefined, 'Studio', 90],
       ['policy', '授权', '需要授权', 80],
       ['model', '模型', 'gpt-test', 50],
@@ -47,7 +47,7 @@ test('buildStatusBarModel derives explicit prioritized segments', () => {
 test('formatStatusBarText keeps high-priority segments first under narrow widths', () => {
   const model: StatusBarModel = {
     segments: [
-      segment('status', '连接断开，10s 后重连', 100),
+      segment('connection', '连接断开，10s 后重连', 100),
       segment('mode', 'Chat', 90),
       segment('policy', '批准执行', 80, '授权'),
       segment('model', 'very-long-model-name', 50, '模型'),
@@ -62,7 +62,7 @@ test('formatStatusBarText keeps high-priority segments first under narrow widths
 
 test('buildStatusBarModel includes current overlay owner when present', () => {
   const model = buildStatusBarModel({
-    status: '就绪',
+    connectionStatus: '就绪',
     mode: 'chat',
     session: createSession({ id: 'chat:pet' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
@@ -72,7 +72,7 @@ test('buildStatusBarModel includes current overlay owner when present', () => {
   assert.deepEqual(
     model.segments.map((segment) => [segment.id, segment.label, segment.value, segment.priority]),
     [
-      ['status', undefined, '就绪', 100],
+      ['connection', undefined, '就绪', 100],
       ['mode', undefined, 'Chat', 90],
       ['overlay', '浮层', 'Approval', 85],
       ['policy', '授权', '自动授权', 80],
@@ -85,7 +85,7 @@ test('buildStatusBarModel includes current overlay owner when present', () => {
 
 test('buildStatusBarModel follows reducer-owned submit mode over session kind', () => {
   const model = buildStatusBarModel({
-    status: '就绪',
+    connectionStatus: '就绪',
     mode: 'studio',
     session: createSession({ id: 'chat:pet', kind: 'chat' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
@@ -94,10 +94,34 @@ test('buildStatusBarModel follows reducer-owned submit mode over session kind', 
   assert.equal(model.segments.find((segment) => segment.id === 'mode')?.value, 'Studio');
 });
 
+test('buildStatusBarModel keeps activity and connection as separate segments', () => {
+  const model = buildStatusBarModel({
+    activityStatus: '正在思考 · 2s',
+    connectionStatus: '连接断开，10s 后重连',
+    mode: 'chat',
+    session: createSession({ id: 'chat:pet' }),
+    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+  });
+
+  assert.deepEqual(
+    model.segments.slice(0, 3).map((segment) => [segment.id, segment.label, segment.value, segment.priority]),
+    [
+      ['activity', undefined, '正在思考 · 2s', 100],
+      ['connection', '连接', '连接断开，10s 后重连', 95],
+      ['mode', undefined, 'Chat', 90],
+    ],
+  );
+  assert.equal(
+    formatStatusBarText(model, 80),
+    '正在思考 · 2s · 连接:连接断开，10s 后重连 · Chat · 授权:需要授权 · 模型:未提供',
+  );
+  assert.equal(formatStatusBarText(model, 34), '正在思考 · 2s · 连接:连接断开，10…');
+});
+
 test('formatStatusBarText truncates by display width for CJK text', () => {
   const model: StatusBarModel = {
     segments: [
-      segment('status', '正在思考', 100),
+      segment('activity', '正在思考', 100),
       segment('mode', 'Studio', 90),
       segment('cwd', '/tmp/含中文目录/工作区', 20, '目录'),
     ],

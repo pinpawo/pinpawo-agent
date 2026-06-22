@@ -612,12 +612,20 @@ export function TuiApp(props: { actorId: string }) {
   }, { isActive: true });
 
   const statusBarModel = useMemo(() => buildStatusBarModel({
-    status: screenModel.regions.statusBar.status,
+    activityStatus: screenModel.regions.statusBar.activityStatus,
+    connectionStatus: screenModel.regions.statusBar.connectionStatus,
     mode: uiMode,
     session: focusedSession,
     globalReviewPolicyMode,
     overlayOwner: overlayModel.ownerLabel,
-  }), [focusedSession, globalReviewPolicyMode, overlayModel.ownerLabel, screenModel.regions.statusBar.status, uiMode]);
+  }), [
+    focusedSession,
+    globalReviewPolicyMode,
+    overlayModel.ownerLabel,
+    screenModel.regions.statusBar.activityStatus,
+    screenModel.regions.statusBar.connectionStatus,
+    uiMode,
+  ]);
 
   return (
     <Box flexDirection="column" paddingX={1}>

@@ -5,6 +5,7 @@ import type { SessionModel, TuiInteractionMode } from './state/tuiState';
 
 const LOCALE_FORMATTER = new Intl.NumberFormat('zh-CN');
 const STATUS_SEPARATOR = ' · ';
+const TRUNCATE_IN_PLACE_PRIORITY = 95;
 
 export type StatusSegmentTone = 'muted' | 'info' | 'success' | 'warning' | 'danger';
 export type StatusSegmentTruncation = 'preserve' | 'truncate';
@@ -23,7 +24,8 @@ export type StatusBarModel = {
 };
 
 export function buildStatusBarModel(input: {
-  status: string;
+  activityStatus?: string | null;
+  connectionStatus: string;
   mode: TuiInteractionMode;
   session: SessionModel | null;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
@@ -32,11 +34,19 @@ export function buildStatusBarModel(input: {
   const runtime = input.session?.runtime;
   return {
     segments: [
-      {
-        id: 'status',
-        value: input.status,
+      ...(input.activityStatus ? [{
+        id: 'activity',
+        value: input.activityStatus,
         priority: 100,
-        tone: statusTone(input.status),
+        tone: statusTone(input.activityStatus),
+        truncation: 'truncate' as const,
+      }] : []),
+      {
+        id: 'connection',
+        ...(input.activityStatus ? { label: '连接' } : {}),
+        value: input.connectionStatus,
+        priority: input.activityStatus ? 95 : 100,
+        tone: statusTone(input.connectionStatus),
         truncation: 'truncate',
       },
       {
@@ -106,6 +116,12 @@ export function formatStatusBarText(model: StatusBarModel, width: number) {
     const rendered = renderSegments(orderedSegments, selected);
     if (measureFits(rendered, maxWidth)) continue;
     if (selected.size === 1) continue;
+    if (
+      candidate.segment.truncation === 'truncate'
+      && candidate.segment.priority >= TRUNCATE_IN_PLACE_PRIORITY
+    ) {
+      continue;
+    }
     selected.delete(candidate.segment.id);
   }
 

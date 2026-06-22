@@ -26,6 +26,7 @@ export function buildStatusBarModel(input: {
   status: string;
   session: SessionModel | null;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  overlayOwner?: string | null;
 }): StatusBarModel {
   const runtime = input.session?.runtime;
   return {
@@ -44,6 +45,14 @@ export function buildStatusBarModel(input: {
         tone: input.session?.kind === 'studio' ? 'info' : 'muted',
         truncation: 'preserve',
       },
+      ...(input.overlayOwner ? [{
+        id: 'overlay',
+        label: '浮层',
+        value: input.overlayOwner,
+        priority: 85,
+        tone: 'info' as const,
+        truncation: 'preserve' as const,
+      }] : []),
       {
         id: 'policy',
         label: '授权',

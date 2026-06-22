@@ -37,6 +37,8 @@ export type TuiScreenModel = {
       staticEntries: AgentTimelineDisplayEntry[];
       dynamicEntries: AgentTimelineDisplayEntry[];
       renderEpoch: number;
+      staticBoundaryKey: string;
+      scrollStrategy: 'preserveStaticOutputUntilHostReset';
       width: number;
       emptyText: string;
     };
@@ -99,6 +101,8 @@ export function buildTuiScreenModel(input: {
         staticEntries: timelineViewport.staticEntries,
         dynamicEntries: timelineViewport.dynamicEntries,
         renderEpoch: input.timelineRenderEpoch,
+        staticBoundaryKey: formatViewportBoundaryKey(timelineViewport.staticEntries),
+        scrollStrategy: 'preserveStaticOutputUntilHostReset',
         width: contentWidth,
         emptyText: TUI_TEXT.emptyHistory(petName),
       },
@@ -121,4 +125,8 @@ export function buildTuiScreenModel(input: {
       },
     },
   };
+}
+
+function formatViewportBoundaryKey(entries: AgentTimelineDisplayEntry[]) {
+  return entries.map((entry) => entry.id).join('\u001F');
 }

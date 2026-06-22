@@ -59,6 +59,28 @@ test('formatStatusBarText keeps high-priority segments first under narrow widths
   assert.equal(formatStatusBarText(model, 12), '连接断开，1…');
 });
 
+test('buildStatusBarModel includes current overlay owner when present', () => {
+  const model = buildStatusBarModel({
+    status: '就绪',
+    session: createSession({ id: 'chat:pet' }),
+    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
+    overlayOwner: 'Approval',
+  });
+
+  assert.deepEqual(
+    model.segments.map((segment) => [segment.id, segment.label, segment.value, segment.priority]),
+    [
+      ['status', undefined, '就绪', 100],
+      ['mode', undefined, 'Chat', 90],
+      ['overlay', '浮层', 'Approval', 85],
+      ['policy', '授权', '自动授权', 80],
+      ['model', '模型', '未提供', 50],
+      ['context', '上下文', '未提供', 40],
+      ['cwd', '目录', '未提供', 20],
+    ],
+  );
+});
+
 test('formatStatusBarText truncates by display width for CJK text', () => {
   const model: StatusBarModel = {
     segments: [

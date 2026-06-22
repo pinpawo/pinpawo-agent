@@ -34,6 +34,8 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
   assert.equal(model.regions.composer.textAreaWidth, 92);
   assert.equal(model.regions.statusBar.status, '就绪');
   assert.equal(model.regions.timeline.renderEpoch, 3);
+  assert.equal(model.regions.timeline.staticBoundaryKey, 'm1');
+  assert.equal(model.regions.timeline.scrollStrategy, 'preserveStaticOutputUntilHostReset');
   assert.deepEqual(model.regions.timeline.staticEntries.map((entry) => entry.id), ['m1']);
   assert.deepEqual(model.regions.timeline.dynamicEntries.map((entry) => entry.id), ['m2']);
 });
@@ -122,6 +124,42 @@ test('buildTuiScreenModel keeps timeline viewport ids stable across resize', () 
     narrow.regions.timeline.dynamicEntries.map((entry) => entry.id),
     wide.regions.timeline.dynamicEntries.map((entry) => entry.id),
   );
+});
+
+test('buildTuiScreenModel moves completed entries across the viewport boundary once', () => {
+  const state = createInitialTuiState(createSession({
+    id: 'chat:pet',
+    timeline: [
+      message('m1', 'user', 'hello', 'completed'),
+      message('m2', 'assistant', 'working', 'streaming'),
+    ],
+  }));
+  const streaming = buildTuiScreenModel({
+    state,
+    terminalColumns: 80,
+    now: 1000,
+    animationFrame: 0,
+    timelineRenderEpoch: 1,
+  });
+
+  state.sessions['chat:pet'].timeline = [
+    message('m1', 'user', 'hello', 'completed'),
+    message('m2', 'assistant', 'done', 'completed'),
+  ];
+  const completed = buildTuiScreenModel({
+    state,
+    terminalColumns: 80,
+    now: 1000,
+    animationFrame: 0,
+    timelineRenderEpoch: 1,
+  });
+
+  assert.deepEqual(streaming.regions.timeline.staticEntries.map((entry) => entry.id), ['m1']);
+  assert.deepEqual(streaming.regions.timeline.dynamicEntries.map((entry) => entry.id), ['m2']);
+  assert.deepEqual(completed.regions.timeline.entries.map((entry) => entry.id), ['m1', 'm2']);
+  assert.deepEqual(completed.regions.timeline.staticEntries.map((entry) => entry.id), ['m1', 'm2']);
+  assert.deepEqual(completed.regions.timeline.dynamicEntries.map((entry) => entry.id), []);
+  assert.equal(completed.regions.timeline.staticBoundaryKey, 'm1\u001Fm2');
 });
 
 function message(

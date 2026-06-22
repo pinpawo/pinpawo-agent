@@ -1,0 +1,44 @@
+# UI-4: Timeline Viewport Simplification
+
+## Scope
+
+Reduce Static/Dynamic timeline viewport complexity after the timeline message model is stable.
+
+## Design Baseline
+
+- Timeline viewport renders `AgentTimelineMessage[]` plus derived UI state.
+- Static/Dynamic split should be a rendering concern, not a second state model.
+- Resize behavior should not lose, duplicate, or reorder timeline messages.
+- This PR depends on CORE-2 and UI-2 being stable.
+
+## Expected Changes
+
+- Simplify static/dynamic timeline selectors or rendering boundaries.
+- Preserve streaming and completed message rendering.
+- Stabilize resize behavior.
+- Remove obsolete split-specific duplicate avoidance if timeline authority made it unnecessary.
+
+## Out Of Scope
+
+- Defining the timeline message model.
+- Replacing run registry.
+- Snapshot reconciliation.
+- Status bar or input owner work.
+
+## Alignment Log
+
+| Date | Area | Expected Design | Deviation | Reason | Decision | Follow-up | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-06-22 | Timeline viewport | Static/dynamic split is derived directly from display entries and remains a render concern. | None | UI-2 introduced a screen model boundary, so viewport derivation can live behind it. | Added `buildTimelineViewportModel`, removed the raw timeline split from `buildTuiScreenModel`, and covered resize-stable ids. | None. | Done |
+
+## Open Questions
+
+- Which viewport behavior must remain for active streaming entries?
+  - Current decision: the first unsettled display entry starts the dynamic suffix; notices before it stay static, streaming activities/messages and following entries stay dynamic.
+
+## Merge Checklist
+
+- [x] Resize does not duplicate or drop messages.
+- [x] Streaming and completed messages remain stable.
+- [x] Static/Dynamic split is only a render implementation detail.
+- [x] PR references tracking issue #232.

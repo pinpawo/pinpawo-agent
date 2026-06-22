@@ -626,7 +626,7 @@ raw terminal input
 
 建议：
 
-- `splitTimelineForStaticRender` 不在 `TuiApp` 中直接调用。
+- `buildTimelineViewportModel` 统一派生 display entries 与 static/dynamic viewport。
 - screen model 输出 static/dynamic。
 - entry 从 streaming -> completed 时，由 screen model 负责处理 epoch/scroll 策略。
 

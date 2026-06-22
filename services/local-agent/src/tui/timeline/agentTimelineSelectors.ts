@@ -41,27 +41,28 @@ export function findTimelineOperationEntry(
     entry.id === operationId || entry.operationKey === operationId) ?? null;
 }
 
-export function splitTimelineForStaticRender(entries: AgentTimelineEntry[]): {
-  staticEntries: AgentTimelineEntry[];
-  dynamicEntries: AgentTimelineEntry[];
-} {
-  const firstDynamicIndex = entries.findIndex((entry) => !isSettledTimelineEntry(entry));
-  if (firstDynamicIndex < 0) {
-    return {
-      staticEntries: entries,
-      dynamicEntries: [],
-    };
-  }
-  return {
-    staticEntries: entries.slice(0, firstDynamicIndex),
-    dynamicEntries: entries.slice(firstDynamicIndex),
-  };
-}
-
 export type AgentTimelineDisplayEntry =
   | { type: 'timeline'; id: string; entry: AgentTimelineEntry }
   | { type: 'notice'; id: string; notice: SessionNoticeModel }
   | { type: 'activity'; id: string; activity: SessionActivityModel };
+
+export type AgentTimelineViewportModel = {
+  entries: AgentTimelineDisplayEntry[];
+  staticEntries: AgentTimelineDisplayEntry[];
+  dynamicEntries: AgentTimelineDisplayEntry[];
+};
+
+export function buildTimelineViewportModel(
+  entries: AgentTimelineEntry[],
+  notices: SessionNoticeModel[],
+  activities: SessionActivityModel[] = [],
+): AgentTimelineViewportModel {
+  const displayEntries = buildTimelineDisplayEntries(entries, notices, activities);
+  return {
+    entries: displayEntries,
+    ...splitTimelineDisplayForViewport(displayEntries),
+  };
+}
 
 export function buildTimelineDisplayEntries(
   entries: AgentTimelineEntry[],
@@ -70,7 +71,6 @@ export function buildTimelineDisplayEntries(
 ): AgentTimelineDisplayEntry[] {
   const entriesByAnchor = new Map<string, AgentTimelineDisplayEntry[]>();
   const unanchoredEntries: AgentTimelineDisplayEntry[] = [];
-  const renderedIds = new Set<string>();
   const addDisplayEntry = (
     entry: AgentTimelineDisplayEntry,
     afterTimelineEntryId: string | undefined,
@@ -101,7 +101,6 @@ export function buildTimelineDisplayEntries(
   for (const entry of entries) {
     displayEntries.push({ type: 'timeline', id: entry.id, entry });
     for (const displayEntry of entriesByAnchor.get(entry.id) ?? []) {
-      renderedIds.add(displayEntry.id);
       displayEntries.push(displayEntry);
     }
   }
@@ -111,32 +110,20 @@ export function buildTimelineDisplayEntries(
       continue;
     }
     for (const displayEntry of anchoredEntries) {
-      if (!renderedIds.has(displayEntry.id)) {
-        unanchoredEntries.push(displayEntry);
-      }
+      unanchoredEntries.push(displayEntry);
     }
   }
   displayEntries.push(...unanchoredEntries);
   return displayEntries;
 }
 
-export function splitTimelineDisplayForStaticRender(
+export function splitTimelineDisplayForViewport(
   displayEntries: AgentTimelineDisplayEntry[],
-  dynamicEntries: AgentTimelineEntry[],
 ): {
   staticEntries: AgentTimelineDisplayEntry[];
   dynamicEntries: AgentTimelineDisplayEntry[];
 } {
-  const dynamicIds = new Set(dynamicEntries.map((entry) => entry.id));
-  const firstDynamicIndex = displayEntries.findIndex((entry) => {
-    if (entry.type === 'timeline') {
-      return dynamicIds.has(entry.entry.id);
-    }
-    if (entry.type === 'activity') {
-      return entry.activity.status === 'streaming';
-    }
-    return false;
-  });
+  const firstDynamicIndex = displayEntries.findIndex((entry) => !isSettledDisplayEntry(entry));
   if (firstDynamicIndex < 0) {
     return {
       staticEntries: displayEntries,
@@ -147,6 +134,17 @@ export function splitTimelineDisplayForStaticRender(
     staticEntries: displayEntries.slice(0, firstDynamicIndex),
     dynamicEntries: displayEntries.slice(firstDynamicIndex),
   };
+}
+
+function isSettledDisplayEntry(entry: AgentTimelineDisplayEntry) {
+  switch (entry.type) {
+    case 'timeline':
+      return isSettledTimelineEntry(entry.entry);
+    case 'activity':
+      return entry.activity.status === 'completed';
+    case 'notice':
+      return true;
+  }
 }
 
 function isSettledTimelineEntry(entry: AgentTimelineEntry) {

@@ -21,6 +21,7 @@ Close the remaining UI alignment gaps after UI-1 through UI-4 landed on `main`.
 - Render status segment tones instead of dimming the full status line.
 - Cover status bar 80-column, 120-column, and CJK cwd display-width behavior.
 - Expose timeline static boundary metadata and the static render key from `buildTuiScreenModel`.
+- Cover operation running/completed viewport boundary behavior.
 
 ## Out Of Scope
 
@@ -41,6 +42,7 @@ Close the remaining UI alignment gaps after UI-1 through UI-4 landed on `main`.
 | 2026-06-23 | OverlayLayer render boundary | `OverlayLayer` should render only the current overlay component. | Existing tests proved overlay model priority but did not directly exercise the component boundary. | The design asks for one active overlay slot, so the render component should be covered separately from model selection. | Add a pure React element test for null and each overlay type returned by `OverlayLayer`. | None. | Done |
 | 2026-06-23 | Overlay region shape | Overlay region should model overlay layout, not activity status. | Previous screen model left `pendingApproval` and `activityStatus` inside `regions.overlay` after overlay rendering moved elsewhere. | Activity belongs to the status bar; pending approval remains top-level domain state and overlay model input. | Keep `regions.overlay` layout-only with width. | None. | Done |
 | 2026-06-23 | Timeline viewport | Screen model owns static/dynamic boundary semantics. | Terminal scroll reset is still host-controlled. | Existing Ink `Static` reset is tied to explicit screen clearing; changing it risks duplicate terminal output. | Expose `renderKey`, `staticBoundaryKey`, and `scrollStrategy` from the screen model without changing terminal behavior. | None. | Done |
+| 2026-06-23 | Timeline operation boundary | Operation running/completed conversion should stay stable across the screen model viewport boundary. | Existing tests covered message streaming/completed boundary movement and operation id stability separately, but not operation viewport movement directly. | Main design lists operation running/completed stability as a timeline viewport acceptance case. | Add a screen model test for a running operation moving from dynamic to static after completion without changing display ids. | None. | Done |
 
 ## Open Questions
 
@@ -57,3 +59,4 @@ None.
 - [x] `OverlayLayer` renders only the current active overlay component.
 - [x] Overlay priority is covered by unit tests.
 - [x] Timeline viewport boundary metadata is covered by unit tests.
+- [x] Operation running/completed viewport boundary behavior is covered by unit tests.

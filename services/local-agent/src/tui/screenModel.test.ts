@@ -221,6 +221,43 @@ test('buildTuiScreenModel moves completed entries across the viewport boundary o
   assert.equal(completed.regions.timeline.staticBoundaryKey, 'm1\u001Fm2');
 });
 
+test('buildTuiScreenModel keeps operation viewport boundary stable across completion', () => {
+  const state = createInitialTuiState(createSession({
+    id: 'chat:pet',
+    timeline: [
+      message('m1', 'user', 'hello', 'completed'),
+      operation('op1', 'started'),
+    ],
+  }));
+  const running = buildTuiScreenModel({
+    state,
+    terminalColumns: 80,
+    now: 1000,
+    animationFrame: 0,
+    timelineRenderEpoch: 1,
+  });
+
+  state.sessions['chat:pet'].timeline = [
+    message('m1', 'user', 'hello', 'completed'),
+    operation('op1', 'completed'),
+  ];
+  const completed = buildTuiScreenModel({
+    state,
+    terminalColumns: 80,
+    now: 1000,
+    animationFrame: 0,
+    timelineRenderEpoch: 1,
+  });
+
+  assert.deepEqual(running.regions.timeline.entries.map((entry) => entry.id), ['m1', 'op1']);
+  assert.deepEqual(running.regions.timeline.staticEntries.map((entry) => entry.id), ['m1']);
+  assert.deepEqual(running.regions.timeline.dynamicEntries.map((entry) => entry.id), ['op1']);
+  assert.deepEqual(completed.regions.timeline.entries.map((entry) => entry.id), ['m1', 'op1']);
+  assert.deepEqual(completed.regions.timeline.staticEntries.map((entry) => entry.id), ['m1', 'op1']);
+  assert.deepEqual(completed.regions.timeline.dynamicEntries.map((entry) => entry.id), []);
+  assert.equal(completed.regions.timeline.staticBoundaryKey, 'm1\u001Fop1');
+});
+
 function message(
   id: string,
   role: 'user' | 'assistant',
@@ -234,5 +271,23 @@ function message(
     requestId: 'run1',
     text,
     status,
+  };
+}
+
+function operation(
+  id: string,
+  phase: 'started' | 'completed',
+): AgentTimelineEntry {
+  return {
+    id,
+    type: 'operation',
+    requestId: 'run1',
+    operationKey: id,
+    kind: 'tool',
+    title: 'Tool',
+    phase,
+    startedAt: 1000,
+    updatedAt: phase === 'completed' ? 2000 : 1000,
+    ...(phase === 'completed' ? { completedAt: 2000 } : {}),
   };
 }

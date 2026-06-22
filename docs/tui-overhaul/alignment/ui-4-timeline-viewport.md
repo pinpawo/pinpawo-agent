@@ -15,6 +15,7 @@ Reduce Static/Dynamic timeline viewport complexity after the timeline message mo
 
 - Simplify static/dynamic timeline selectors or rendering boundaries.
 - Preserve streaming and completed message rendering.
+- Preserve running and completed operation rendering.
 - Stabilize resize behavior.
 - Remove obsolete split-specific duplicate avoidance if timeline authority made it unnecessary.
 
@@ -30,6 +31,7 @@ Reduce Static/Dynamic timeline viewport complexity after the timeline message mo
 | Date | Area | Expected Design | Deviation | Reason | Decision | Follow-up | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-06-22 | Timeline viewport | Static/dynamic split is derived directly from display entries and remains a render concern. | None | UI-2 introduced a screen model boundary, so viewport derivation can live behind it. | Added `buildTimelineViewportModel`, removed the raw timeline split from `buildTuiScreenModel`, and covered resize-stable ids. | None. | Done |
+| 2026-06-23 | Operation viewport transition | Operation running/completed conversion should be stable across the static/dynamic boundary. | Existing tests covered operation id stability and message streaming/completed boundary movement, but did not directly cover operation boundary movement in the screen model. | Main design lists operation running/completed stability as a viewport acceptance case. | Add a screen model test for a running operation moving from dynamic to static after completion without changing display ids. | None. | Done |
 
 ## Open Questions
 
@@ -40,5 +42,6 @@ Reduce Static/Dynamic timeline viewport complexity after the timeline message mo
 
 - [x] Resize does not duplicate or drop messages.
 - [x] Streaming and completed messages remain stable.
+- [x] Running and completed operations remain stable.
 - [x] Static/Dynamic split is only a render implementation detail.
 - [x] PR references tracking issue #232.

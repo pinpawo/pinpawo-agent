@@ -6,6 +6,7 @@ import { createInitialTuiState, createSession, type TuiState } from './tui/state
 import {
   selectFocusedActiveOperations,
   selectFocusedActiveRun,
+  selectFocusedActivities,
   selectFocusedBusy,
   selectFocusedNotices,
   selectFocusedPendingApproval,
@@ -328,7 +329,7 @@ test('tuiStateReducer falls back to assistant timeline text when completed text 
   ]);
 });
 
-test('tuiStateReducer displays subagent deltas in timeline without legacy draft state', () => {
+test('tuiStateReducer displays subagent deltas as session activity outside checkpoint timeline', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -352,14 +353,15 @@ test('tuiStateReducer displays subagent deltas in timeline without legacy draft 
 
   assert.equal(selectFocusedActiveRun(state)?.phase, 'streaming');
   assert.equal(selectFocusedActiveRun(state)?.charCount, '先检查文件，再整理结果。'.length);
-  assert.deepEqual(selectFocusedTimeline(state).at(-1), {
+  assert.deepEqual(selectFocusedActivities(state).at(-1), {
     id: 'req-1:subagent-output',
-    type: 'message',
-    role: 'subagent',
+    type: 'subagent.message',
     requestId: 'req-1',
     text: '先检查文件，再整理结果。',
     status: 'streaming',
+    afterTimelineEntryId: 'message:req-1:user',
   });
+  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'req-1:subagent-output'), false);
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -377,11 +379,8 @@ test('tuiStateReducer displays subagent deltas in timeline without legacy draft 
     ['user', 'hello'],
     ['assistant', '最终答复'],
   ]);
-  const subagentEntry = state.sessions['chat:pet']?.timeline.find((entry) => entry.id === 'req-1:subagent-output');
-  assert.equal(subagentEntry?.type, 'message');
-  assert.equal(subagentEntry?.type === 'message' && subagentEntry.role === 'subagent'
-    ? subagentEntry.status
-    : null, 'completed');
+  const subagentActivity = state.sessions['chat:pet']?.activities.find((entry) => entry.id === 'req-1:subagent-output');
+  assert.equal(subagentActivity?.status, 'completed');
 });
 
 test('tuiStateReducer stores usage on completed message', () => {
@@ -665,6 +664,47 @@ test('tuiStateReducer preserves reconnect token usage when snapshot omits usage'
   });
 
   assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
+});
+
+test('tuiStateReducer drops reconnect notices with stale timeline anchors', () => {
+  let state = initialState('chat:pet');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        notices: [
+          { id: 'notice-kept', text: 'keep', afterTimelineEntryId: 'message:user-1' },
+          { id: 'notice-stale', text: 'drop', afterTimelineEntryId: 'message:old' },
+          { id: 'notice-unanchored', text: 'keep too' },
+        ],
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [{
+        id: 'message:user-1',
+        type: 'message',
+        role: 'user',
+        text: 'hello',
+        status: 'completed',
+        source: 'checkpoint',
+      }],
+      runs: [],
+    },
+  });
+
+  assert.deepEqual(state.sessions['chat:pet']?.notices.map((notice) => notice.id), [
+    'notice-kept',
+    'notice-unanchored',
+  ]);
 });
 
 test('tuiStateReducer restores pending approval from authoritative session snapshots', () => {

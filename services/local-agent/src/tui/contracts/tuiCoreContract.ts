@@ -18,6 +18,7 @@ export const TUI_CORE_STATE_OWNERS = [
   'runs',
   'runtime',
   'studioProgress',
+  'subagentActivity',
   'tokenUsage',
 ] as const;
 
@@ -29,7 +30,7 @@ export const TUI_CORE_FORBIDDEN_SECONDARY_LOGS = [
 export const TUI_CORE_CONTRACT_RULES = [
   'timeline is the TUI projection of backend checkpoint messages',
   'timeline entries are limited to user messages, assistant messages, and tool operations',
-  'pending review, runtime, studio progress, connection, token usage, and active run are state, not timeline messages',
+  'pending review, runtime, studio progress, subagent activity, connection, token usage, and active run are state, not timeline messages',
   'session snapshots are reconciled through session.snapshot.loaded',
   'transcript and transcriptSnapshot must not be introduced as second message logs',
 ] as const;

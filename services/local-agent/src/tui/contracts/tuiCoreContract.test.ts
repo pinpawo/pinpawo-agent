@@ -20,6 +20,7 @@ test('TUI core contract freezes timeline and snapshot ownership', () => {
     'runs',
     'runtime',
     'studioProgress',
+    'subagentActivity',
     'tokenUsage',
   ]);
   assert.deepEqual([...TUI_CORE_FORBIDDEN_SECONDARY_LOGS], [

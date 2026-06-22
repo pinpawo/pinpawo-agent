@@ -24,6 +24,7 @@ export type ActiveOperation = {
 
 export type ResumeSessionSummary = {
   id: string;
+  kind?: 'chat' | 'studio';
   title: string;
   messageCount: number;
   createdAt: string;

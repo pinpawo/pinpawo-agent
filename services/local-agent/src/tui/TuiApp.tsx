@@ -13,6 +13,7 @@ import { FileMentionPopup } from './components/FileMentionPopup';
 import { GlobalReviewPolicyPicker } from './components/GlobalReviewPolicyPicker';
 import { MessageBlock } from './components/MessageBlock';
 import { ResumePicker } from './components/ResumePicker';
+import { SubagentActivityItem } from './components/SubagentActivityItem';
 import {
   createInitialTuiInputBufferState,
   normalizeTuiInputEvent,
@@ -39,6 +40,7 @@ import { TUI_TEXT } from './render/text';
 import { createInitialTuiState, createSession } from './state/tuiState';
 import {
   selectFocusedActiveOperations,
+  selectFocusedActivities,
   selectFocusedBusy,
   selectFocusedNotices,
   selectFocusedPendingApproval,
@@ -86,6 +88,15 @@ function renderTimelineDisplayEntry(
           text: notice.text,
         }}
         petName={props.petName}
+        width={props.width}
+      />
+    );
+  }
+  if (displayEntry.type === 'activity') {
+    return (
+      <SubagentActivityItem
+        key={displayEntry.id}
+        activity={displayEntry.activity}
         width={props.width}
       />
     );
@@ -157,13 +168,14 @@ export function TuiApp(props: { actorId: string }) {
   const focusedSession = selectFocusedSession(tuiState);
   const timeline = selectFocusedTimeline(tuiState);
   const notices = selectFocusedNotices(tuiState);
+  const activities = selectFocusedActivities(tuiState);
   const { dynamicEntries: dynamicTimeline } = useMemo(
     () => splitTimelineForStaticRender(timeline),
     [timeline],
   );
   const displayEntries = useMemo(
-    () => buildTimelineDisplayEntries(timeline, notices),
-    [timeline, notices],
+    () => buildTimelineDisplayEntries(timeline, notices, activities),
+    [timeline, notices, activities],
   );
   const { staticEntries: staticDisplayEntries, dynamicEntries: dynamicDisplayEntries } = useMemo(
     () => splitTimelineDisplayForStaticRender(displayEntries, dynamicTimeline),

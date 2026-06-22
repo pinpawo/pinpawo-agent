@@ -3,8 +3,7 @@ import test from 'node:test';
 import React, { Children, isValidElement } from 'react';
 import stringWidth from 'string-width';
 import { AgentTimeline } from './AgentTimeline';
-import { AgentTimelineItem } from './AgentTimelineItem';
-import { AgentMessageItem } from './AgentMessageItem';
+import { SubagentActivityItem } from './SubagentActivityItem';
 import {
   buildAgentOperationDisplayLines,
 } from './agentTimelineRendering';
@@ -13,6 +12,7 @@ import type {
   AgentOperationEntry,
   AgentTimelineEntry,
 } from '../timeline/agentTimeline';
+import type { SessionActivityModel } from '../state/tuiState';
 
 test('buildAgentOperationDisplayLines preserves operation lifecycle text without reading raw payloads', () => {
   const entry = operationEntry({
@@ -107,7 +107,6 @@ test('buildAgentOperationDisplayLines renders browser active completed and faile
 test('AgentTimeline preserves assistant and operation entry order', () => {
   const entries: AgentTimelineEntry[] = [
     messageEntry('assistant-before-tool', '正在打开页面'),
-    subagentMessageEntry('req-1:subagent-output', '先检查文件'),
     operationEntry({
       id: 'req-1:operation:open',
       operationKey: 'open',
@@ -129,28 +128,19 @@ test('AgentTimeline preserves assistant and operation entry order', () => {
 
   assert.deepEqual(children.map((child) => child.props.entry.id), [
     'assistant-before-tool',
-    'req-1:subagent-output',
     'req-1:operation:open',
     'assistant-after-tool',
   ]);
 });
 
-test('AgentTimelineItem renders subagent messages through AgentMessageItem', () => {
-  const entry = subagentMessageEntry('req-1:subagent-output', '先检查文件');
-  const element = AgentTimelineItem({
-    entry,
-    petName: '小派',
+test('SubagentActivityItem renders subagent activity outside timeline entries', () => {
+  const activity = subagentActivity('req-1:subagent-output', '先检查文件');
+  const element = SubagentActivityItem({
+    activity,
     width: 80,
-    now: 3000,
   });
 
   assert.ok(isValidElement(element));
-  assert.equal(element.type, AgentMessageItem);
-  assert.deepEqual(element.props, {
-    entry,
-    petName: '小派',
-    width: 80,
-  });
 });
 
 function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEntry {
@@ -168,11 +158,10 @@ function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEnt
   };
 }
 
-function subagentMessageEntry(id: string, text: string): AgentMessageEntry {
+function subagentActivity(id: string, text: string): SessionActivityModel {
   return {
     id,
-    type: 'message',
-    role: 'subagent',
+    type: 'subagent.message',
     requestId: 'req-1',
     text,
     status: 'streaming',

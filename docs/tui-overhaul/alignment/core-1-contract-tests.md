@@ -51,7 +51,7 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 ## Open Questions
 
 - Which existing fixture best represents backend checkpoint messages?
-- Should subagent streaming output remain a timeline message role, or move into a dedicated activity stream during UI layout work?
+- Subagent streaming output moved to `SessionModel.activities` in CORE-7; it is rendered through display selectors, not stored in checkpoint timeline.
 
 ## Merge Checklist
 

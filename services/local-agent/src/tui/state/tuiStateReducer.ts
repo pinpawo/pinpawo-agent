@@ -30,13 +30,14 @@ import {
   agentTimelineEntriesFromSnapshot,
 } from '../snapshot/tuiSessionSnapshot';
 import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
-import { MAX_TUI_NOTICE_ITEMS } from './tuiState';
+import { MAX_TUI_ACTIVITY_ITEMS, MAX_TUI_NOTICE_ITEMS } from './tuiState';
 import type {
   ActiveRunModel,
   MessageCellDraft,
   MessageCellMeta,
   MessageCellModel,
   RunId,
+  SessionActivityModel,
   SessionNoticeModel,
   SessionId,
   SessionModel,
@@ -93,6 +94,12 @@ function trimNotices(notices: SessionNoticeModel[]) {
   return notices.length > MAX_TUI_NOTICE_ITEMS
     ? notices.slice(notices.length - MAX_TUI_NOTICE_ITEMS)
     : notices;
+}
+
+function trimActivities(activities: SessionActivityModel[]) {
+  return activities.length > MAX_TUI_ACTIVITY_ITEMS
+    ? activities.slice(activities.length - MAX_TUI_ACTIVITY_ITEMS)
+    : activities;
 }
 
 function addTimelineEntryId<T extends ActiveRunModel>(activeRun: T, entryId: string): T {
@@ -254,44 +261,65 @@ function upsertOperationTimelineEntry(
   };
 }
 
-function readSubagentTimelineText(session: SessionModel, entryId: string) {
-  const entry = session.timeline.find((item) => item.id === entryId);
-  return entry?.type === 'message' && entry.role === 'subagent' ? entry.text : '';
+function appendOrUpdateActivity(
+  activities: SessionActivityModel[],
+  activity: SessionActivityModel,
+) {
+  const index = activities.findIndex((item) => item.id === activity.id);
+  if (index < 0) {
+    return trimActivities([...activities, activity]);
+  }
+  return trimActivities([
+    ...activities.slice(0, index),
+    activity,
+    ...activities.slice(index + 1),
+  ]);
 }
 
-function appendSubagentTimelineDelta(
+function readSubagentActivityText(session: SessionModel, activityId: string) {
+  const activity = session.activities.find((item) => item.id === activityId);
+  return activity?.type === 'subagent.message' ? activity.text : '';
+}
+
+function appendSubagentActivityDelta(
   session: SessionModel,
   requestId: string,
   token: string,
 ): { session: SessionModel; entryId?: string } {
   const id = `${requestId}:subagent-output`;
-  const text = readSubagentTimelineText(session, id) + token;
+  const previous = session.activities.find((item) => item.id === id);
+  const text = readSubagentActivityText(session, id) + token;
   const hasContent = Boolean(formatSubagentMessage(text));
   if (!hasContent) return { session };
-  const entry: AgentMessageEntry = {
+  const activity: SessionActivityModel = {
     id,
-    type: 'message',
-    role: 'subagent',
+    type: 'subagent.message',
     requestId,
     text,
     status: 'streaming',
+    ...(previous?.timestamp ? { timestamp: previous.timestamp } : {}),
+    ...(previous?.afterTimelineEntryId
+      ? { afterTimelineEntryId: previous.afterTimelineEntryId }
+      : session.timeline.at(-1)?.id
+        ? { afterTimelineEntryId: session.timeline.at(-1)?.id }
+        : {}),
   };
   return {
     session: {
       ...session,
-      timeline: appendOrUpdateTimelineEntry(session.timeline, entry),
+      activities: appendOrUpdateActivity(session.activities, activity),
     },
-    entryId: entry.id,
+    entryId: activity.id,
   };
 }
 
-function finalizeSubagentTimelineEntries(session: SessionModel, requestId: string) {
+function finalizeSubagentActivities(session: SessionModel, requestId: string) {
   return {
     ...session,
-    timeline: session.timeline.map((entry) =>
-      entry.type === 'message' && entry.role === 'subagent' && entry.requestId === requestId
-        ? { ...entry, status: 'completed' as const }
-        : entry),
+    activities: session.activities.map((activity) =>
+      activity.requestId === requestId
+        ? { ...activity, status: 'completed' as const }
+        : activity),
   };
 }
 
@@ -382,7 +410,7 @@ function finishRun(
   if (!session) return state;
   const nextState = updateSession(state, sessionId, (sessionToUpdate) => {
     const finalizedSession = sessionToUpdate.activeRunId === requestId
-      ? finalizeSubagentTimelineEntries(sessionToUpdate, requestId)
+      ? finalizeSubagentActivities(sessionToUpdate, requestId)
       : sessionToUpdate;
     return appendMessageCells({
       ...finalizedSession,
@@ -550,6 +578,15 @@ function pendingReviewFromSnapshotRun(
     : {};
 }
 
+function filterReconnectNotices(
+  notices: SessionNoticeModel[],
+  timeline: AgentTimelineEntry[],
+) {
+  const timelineIds = new Set(timeline.map((entry) => entry.id));
+  return trimNotices(notices.filter((notice) =>
+    !notice.afterTimelineEntryId || timelineIds.has(notice.afterTimelineEntryId)));
+}
+
 function applySessionSnapshot(
   state: TuiState,
   action: Extract<TuiAction, { type: typeof TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded }>,
@@ -586,7 +623,10 @@ function applySessionSnapshot(
       ...(snapshot.runtime ?? {}),
     },
     timeline,
-    notices: action.source === 'reconnect' ? existingSession?.notices ?? [] : [],
+    notices: action.source === 'reconnect'
+      ? filterReconnectNotices(existingSession?.notices ?? [], timeline)
+      : [],
+    activities: [],
     activeRunId,
     tokenUsage: snapshot.tokenUsage
       ?? (action.source === 'reconnect' ? existingSession?.tokenUsage ?? null : null),
@@ -679,6 +719,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...session,
           timeline: [],
           notices: [],
+          activities: [],
           activeRunId: null,
           tokenUsage: null,
         }));
@@ -889,22 +930,17 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (event.type === 'subagent.message.delta') {
         const token = event.text;
         if (!token) return state;
-        let subagentEntryId: string | undefined;
-        const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
-          const { session: sessionWithTimeline, entryId } = appendSubagentTimelineDelta(
+        const stateWithActivity = updateSession(state, sessionId, (currentSession) => {
+          const { session: sessionWithActivity } = appendSubagentActivityDelta(
             currentSession,
             event.requestId,
             token,
           );
-          subagentEntryId = entryId;
-          return sessionWithTimeline;
+          return sessionWithActivity;
         });
-        return updateRun(stateWithTimeline, event.requestId, (currentRun) => ({
+        return updateRun(stateWithActivity, event.requestId, (currentRun) => ({
           ...currentRun,
           phase: currentRun.phase === 'waiting_human' ? currentRun.phase : 'streaming',
-          timelineEntryIds: subagentEntryId && !currentRun.timelineEntryIds.includes(subagentEntryId)
-            ? [...currentRun.timelineEntryIds, subagentEntryId]
-            : currentRun.timelineEntryIds,
           charCount: currentRun.charCount + token.length,
         }));
       }
@@ -1021,6 +1057,10 @@ export function selectFocusedTimeline(state: TuiState) {
 
 export function selectFocusedNotices(state: TuiState) {
   return selectFocusedSession(state)?.notices ?? [];
+}
+
+export function selectFocusedActivities(state: TuiState) {
+  return selectFocusedSession(state)?.activities ?? [];
 }
 
 export function selectFocusedActiveRun(state: TuiState) {

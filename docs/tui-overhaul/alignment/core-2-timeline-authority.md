@@ -38,7 +38,7 @@ This PR is the first CORE-2 slice. It does not complete the full timeline author
 
 | Date | Area | Expected Design | Deviation | Reason | Decision | Follow-up | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-06-21 | timeline message model | reducer/session timeline should eventually store only authoritative message and operation entries | initial UI still stored `AgentTimelineEntry[]` including review/notice/error/studio.progress compatibility entries | removing all compatibility entries at once would mix CORE-2 with UI and snapshot work | CORE-7 removes non-checkpoint visual entries from timeline and stores system feedback in notices | subagent activity ownership remains for UI layout work | accepted |
+| 2026-06-21 | timeline message model | reducer/session timeline should eventually store only authoritative message and operation entries | initial UI still stored `AgentTimelineEntry[]` including review/notice/error/studio.progress compatibility entries | removing all compatibility entries at once would mix CORE-2 with UI and snapshot work | CORE-7 removes non-checkpoint visual entries from timeline, stores system feedback in notices, and stores subagent output in activities | none | accepted |
 | 2026-06-21 | history import | `/history` should become timeline message input, not a second live log | CORE-2 kept `HistoryCellModel` and `session.replace_history` as temporary compatibility | CORE-2 branch started with the model boundary before storage replacement | CORE-4/5 move restore paths to `session.snapshot.loaded`; CORE-6 deletes `session.replace_history`; CORE-7 renames internal message cell/action concepts | `/history` remains a server compatibility endpoint only | accepted |
 | 2026-06-21 | PR slice naming | PR title and checklist should not imply full CORE-2 completion | this slice only adds the authoritative message boundary | complete storage migration needs callsite changes across reducer, restore, and render paths | label this PR as the CORE-2 boundary/foundation slice | follow-up CORE-2 PR removes live `history` / `timeline` double writes | accepted |
 | 2026-06-21 | message-only history helper | helper projected legacy history into a message-only timeline view | the target model has no separate message-only log | CORE-6 keeps the actual timeline helper and removes the history-to-message-only helper | no standalone transcript/message-only view remains | none | accepted |
@@ -47,7 +47,7 @@ This PR is the first CORE-2 slice. It does not complete the full timeline author
 ## Open Questions
 
 - Can the TUI reuse backend checkpoint message types directly, or is a render adapter required after `history` is removed?
-- Should `subagent` output become a tool operation detail or a separate state surface?
+- Subagent output uses a separate `SessionModel.activities` state surface as of CORE-7.
 - Which server payload will become the first checkpoint-native timeline source before CORE-4 snapshot?
 
 ## Merge Checklist

@@ -38,6 +38,7 @@ function pendingReviewState(): TuiState {
         runtime: {},
         timeline: [],
         notices: [],
+        activities: [],
         tokenUsage: null,
         activeRunId: 'req-1',
       },

@@ -41,7 +41,7 @@ export type AgentToolTimelineMessage = AgentOperationEntry;
 export type AgentMessageEntry = {
   id: string;
   type: 'message';
-  role: 'user' | 'assistant' | 'subagent';
+  role: 'user' | 'assistant';
   requestId?: string;
   text: string;
   status: 'completed' | 'streaming';
@@ -64,9 +64,7 @@ export function timelineEntryIdFromMessageCell(cell: Pick<MessageCellModel, 'id'
 }
 
 export function isAgentTimelineMessage(entry: AgentTimelineEntry): entry is AgentTimelineMessage {
-  if (entry.type === 'operation') return true;
-  return entry.type === 'message'
-    && (entry.role === 'user' || entry.role === 'assistant');
+  return entry.type === 'operation' || entry.type === 'message';
 }
 
 export function timelineMessagesFromEntries(entries: AgentTimelineEntry[]): AgentTimelineMessage[] {

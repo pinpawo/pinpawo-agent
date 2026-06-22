@@ -1,4 +1,4 @@
-import type { SessionNoticeModel } from '../state/tuiState';
+import type { SessionActivityModel, SessionNoticeModel } from '../state/tuiState';
 import type { ActiveOperation } from '../types';
 import {
   isRunningOperationPhase,
@@ -60,42 +60,63 @@ export function splitTimelineForStaticRender(entries: AgentTimelineEntry[]): {
 
 export type AgentTimelineDisplayEntry =
   | { type: 'timeline'; id: string; entry: AgentTimelineEntry }
-  | { type: 'notice'; id: string; notice: SessionNoticeModel };
+  | { type: 'notice'; id: string; notice: SessionNoticeModel }
+  | { type: 'activity'; id: string; activity: SessionActivityModel };
 
 export function buildTimelineDisplayEntries(
   entries: AgentTimelineEntry[],
   notices: SessionNoticeModel[],
+  activities: SessionActivityModel[] = [],
 ): AgentTimelineDisplayEntry[] {
-  const noticesByAnchor = new Map<string, SessionNoticeModel[]>();
-  const unanchoredNotices: SessionNoticeModel[] = [];
-  for (const notice of notices) {
-    if (notice.afterTimelineEntryId) {
-      const group = noticesByAnchor.get(notice.afterTimelineEntryId) ?? [];
-      group.push(notice);
-      noticesByAnchor.set(notice.afterTimelineEntryId, group);
+  const entriesByAnchor = new Map<string, AgentTimelineDisplayEntry[]>();
+  const unanchoredEntries: AgentTimelineDisplayEntry[] = [];
+  const renderedIds = new Set<string>();
+  const addDisplayEntry = (
+    entry: AgentTimelineDisplayEntry,
+    afterTimelineEntryId: string | undefined,
+  ) => {
+    if (afterTimelineEntryId) {
+      const group = entriesByAnchor.get(afterTimelineEntryId) ?? [];
+      group.push(entry);
+      entriesByAnchor.set(afterTimelineEntryId, group);
     } else {
-      unanchoredNotices.push(notice);
+      unanchoredEntries.push(entry);
     }
+  };
+
+  for (const notice of notices) {
+    addDisplayEntry(
+      { type: 'notice', id: notice.id, notice },
+      notice.afterTimelineEntryId,
+    );
+  }
+  for (const activity of activities) {
+    addDisplayEntry(
+      { type: 'activity', id: activity.id, activity },
+      activity.afterTimelineEntryId,
+    );
   }
 
   const displayEntries: AgentTimelineDisplayEntry[] = [];
-  const renderedNoticeIds = new Set<string>();
   for (const entry of entries) {
     displayEntries.push({ type: 'timeline', id: entry.id, entry });
-    for (const notice of noticesByAnchor.get(entry.id) ?? []) {
-      renderedNoticeIds.add(notice.id);
-      displayEntries.push({ type: 'notice', id: notice.id, notice });
+    for (const displayEntry of entriesByAnchor.get(entry.id) ?? []) {
+      renderedIds.add(displayEntry.id);
+      displayEntries.push(displayEntry);
     }
   }
 
-  for (const notice of notices) {
-    if (!renderedNoticeIds.has(notice.id) && !unanchoredNotices.includes(notice)) {
-      unanchoredNotices.push(notice);
+  for (const [anchorId, anchoredEntries] of entriesByAnchor) {
+    if (entries.some((entry) => entry.id === anchorId)) {
+      continue;
+    }
+    for (const displayEntry of anchoredEntries) {
+      if (!renderedIds.has(displayEntry.id)) {
+        unanchoredEntries.push(displayEntry);
+      }
     }
   }
-  for (const notice of unanchoredNotices) {
-    displayEntries.push({ type: 'notice', id: notice.id, notice });
-  }
+  displayEntries.push(...unanchoredEntries);
   return displayEntries;
 }
 
@@ -106,15 +127,16 @@ export function splitTimelineDisplayForStaticRender(
   staticEntries: AgentTimelineDisplayEntry[];
   dynamicEntries: AgentTimelineDisplayEntry[];
 } {
-  const firstDynamicId = dynamicEntries[0]?.id;
-  if (!firstDynamicId) {
-    return {
-      staticEntries: displayEntries,
-      dynamicEntries: [],
-    };
-  }
-  const firstDynamicIndex = displayEntries.findIndex((entry) =>
-    entry.type === 'timeline' && entry.entry.id === firstDynamicId);
+  const dynamicIds = new Set(dynamicEntries.map((entry) => entry.id));
+  const firstDynamicIndex = displayEntries.findIndex((entry) => {
+    if (entry.type === 'timeline') {
+      return dynamicIds.has(entry.entry.id);
+    }
+    if (entry.type === 'activity') {
+      return entry.activity.status === 'streaming';
+    }
+    return false;
+  });
   if (firstDynamicIndex < 0) {
     return {
       staticEntries: displayEntries,

@@ -15,6 +15,7 @@ Route reconnect through the same `session.snapshot.loaded` reconciliation path a
 
 - Add local `/snapshot` HTTP endpoint for active TUI session messages and pending review route state.
 - Add TUI client parsing for server snapshot payloads, including pending review `ReviewSpec`.
+- Return native `TuiCoreSessionSnapshot` payloads from `/snapshot` and resume in CORE-7; keep client fallback for old local payloads.
 - Route `TuiRuntimeController.reconnect()` through `session.snapshot.loaded` before opening a new websocket.
 - Restore pending approval panels from snapshot runs.
 - Finalize `message.completed` events when the owning run route is still recoverable.
@@ -30,7 +31,7 @@ Route reconnect through the same `session.snapshot.loaded` reconciliation path a
 
 | Date | Area | Expected Design | Deviation | Reason | Decision | Follow-up | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-06-21 | snapshot endpoint shape | server should eventually return full `TuiCoreSessionSnapshot` directly | `/snapshot` returns local server payload and the TUI client adapts it | avoids importing TUI reducer contracts into local server handlers | keep adapter boundary in TUI client | CORE-6 cleanup or server contract PR | accepted |
+| 2026-06-21 | snapshot endpoint shape | server should eventually return full `TuiCoreSessionSnapshot` directly | CORE-5 initially returned a local server payload and the TUI client adapted it | reduced coupling while reconnect behavior was landing | CORE-7 now returns native `TuiCoreSessionSnapshot` from `/snapshot` and resume; client keeps old-payload fallback only for compatibility | none | accepted |
 | 2026-06-21 | pending review request id | pending review snapshot needs a routeable request id | checkpoint fallback cannot recover the original UI request id | local server can resume checkpoint with a stable synthetic request id | use existing route id when present; otherwise use `snapshot:<sessionId>:<reviewId>` | none | accepted |
 | 2026-06-21 | reconnect failure policy | reconnect should not open websocket against stale TUI state after snapshot failure | reconnect now retries if snapshot load fails | otherwise completed/review state can remain stale | fail reconnect attempt and schedule retry | none | accepted |
 | 2026-06-21 | static timeline reset | reconnect snapshot replacement should rebuild Ink static output | initial CORE-5 implementation reconciled state without clearing static render rows | Ink `Static` keeps previous output until timeline render epoch changes | reset timeline view after successful reconnect snapshot | none | accepted |

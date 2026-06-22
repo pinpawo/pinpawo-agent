@@ -34,29 +34,15 @@ import {
 } from './input/fileMention';
 import { resolveTuiInputAction } from './input/inputRouter';
 import { submitCurrentInputFromController } from './input/commandSubmit';
-import { buildBusyStatusLine } from './render/eventText';
 import { formatNow } from './render/terminalText';
 import { TUI_TEXT } from './render/text';
+import { buildTuiScreenModel } from './screenModel';
 import { buildStatusBarModel } from './statusBarModel';
 import { createInitialTuiState, createSession } from './state/tuiState';
 import {
-  selectFocusedActiveOperations,
-  selectFocusedActivities,
-  selectFocusedBusy,
-  selectFocusedNotices,
-  selectFocusedPendingApproval,
-  selectFocusedPendingUi,
-  selectFocusedSession,
-  selectFocusedTimeline,
-  selectReady,
   tuiStateReducer,
 } from './state/tuiStateReducer';
-import {
-  buildTimelineDisplayEntries,
-  splitTimelineDisplayForStaticRender,
-  splitTimelineForStaticRender,
-  type AgentTimelineDisplayEntry,
-} from './timeline/agentTimelineSelectors';
+import type { AgentTimelineDisplayEntry } from './timeline/agentTimelineSelectors';
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { useResumePickerController } from './useResumePickerController';
 import { useTextAreaController } from './useTextAreaController';
@@ -166,32 +152,20 @@ export function TuiApp(props: { actorId: string }) {
     resetTimelineView,
     setNow,
   }), [props.actorId, localServerPort, dispatch, resetTimelineView, setNow]);
-  const focusedSession = selectFocusedSession(tuiState);
-  const timeline = selectFocusedTimeline(tuiState);
-  const notices = selectFocusedNotices(tuiState);
-  const activities = selectFocusedActivities(tuiState);
-  const { dynamicEntries: dynamicTimeline } = useMemo(
-    () => splitTimelineForStaticRender(timeline),
-    [timeline],
-  );
-  const displayEntries = useMemo(
-    () => buildTimelineDisplayEntries(timeline, notices, activities),
-    [timeline, notices, activities],
-  );
-  const { staticEntries: staticDisplayEntries, dynamicEntries: dynamicDisplayEntries } = useMemo(
-    () => splitTimelineDisplayForStaticRender(displayEntries, dynamicTimeline),
-    [displayEntries, dynamicTimeline],
-  );
-  const ready = selectReady(tuiState);
-  const busy = selectFocusedBusy(tuiState);
-  const pendingUi = selectFocusedPendingUi(tuiState);
-  const activeOperations = selectFocusedActiveOperations(tuiState);
-  const pendingApproval = selectFocusedPendingApproval(tuiState);
+  const screenModel = useMemo(() => buildTuiScreenModel({
+    state: tuiState,
+    terminalColumns: terminalSize.columns,
+    now,
+    animationFrame,
+    timelineRenderEpoch,
+  }), [animationFrame, now, terminalSize.columns, timelineRenderEpoch, tuiState]);
+  const focusedSession = screenModel.session;
+  const ready = screenModel.ready;
+  const busy = screenModel.busy;
+  const pendingApproval = screenModel.pendingApproval;
+  const contentWidth = screenModel.regions.timeline.width;
+  const textAreaWidth = screenModel.regions.composer.textAreaWidth;
   const reviewOptions = pendingApproval?.review.options ?? [];
-  const petName = focusedSession?.actor.label ?? TUI_TEXT.defaultPetName;
-  const status = tuiState.connection.message;
-  const contentWidth = Math.max(20, terminalSize.columns - 4);
-  const textAreaWidth = Math.max(8, contentWidth - 4);
 
   useEffect(() => {
     stateRef.current = tuiState;
@@ -602,28 +576,26 @@ export function TuiApp(props: { actorId: string }) {
     }
   }, { isActive: true });
 
-  const spinnerFrame = SPINNER_FRAMES[animationFrame];
-  const activityStatus = pendingUi
-    ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeOperations)
-    : status;
   const statusBarModel = useMemo(() => buildStatusBarModel({
-    status: activityStatus,
+    status: screenModel.regions.statusBar.status,
     session: focusedSession,
     globalReviewPolicyMode,
-  }), [activityStatus, focusedSession, globalReviewPolicyMode]);
+  }), [focusedSession, globalReviewPolicyMode, screenModel.regions.statusBar.status]);
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {displayEntries.length === 0 ? <Text dimColor>{TUI_TEXT.emptyHistory(petName)}</Text> : null}
-      <Static key={timelineRenderEpoch} items={staticDisplayEntries}>
+      {screenModel.regions.timeline.entries.length === 0 ? (
+        <Text dimColor>{screenModel.regions.timeline.emptyText}</Text>
+      ) : null}
+      <Static key={screenModel.regions.timeline.renderEpoch} items={screenModel.regions.timeline.staticEntries}>
         {(entry) => renderTimelineDisplayEntry(entry, {
-          petName,
+          petName: screenModel.petName,
           now,
           width: contentWidth,
         })}
       </Static>
-      {dynamicDisplayEntries.map((entry) => renderTimelineDisplayEntry(entry, {
-        petName,
+      {screenModel.regions.timeline.dynamicEntries.map((entry) => renderTimelineDisplayEntry(entry, {
+        petName: screenModel.petName,
         now,
         width: contentWidth,
       }))}
@@ -658,9 +630,9 @@ export function TuiApp(props: { actorId: string }) {
       ) : null}
       <Box
         borderStyle="round"
-        borderColor={busy ? 'yellow' : pendingApproval ? 'yellow' : 'gray'}
+        borderColor={screenModel.regions.composer.borderColor}
         paddingX={1}
-        marginTop={pendingApproval ? 0 : 1}
+        marginTop={screenModel.regions.composer.marginTop}
       >
         {busy ? (
           <Text dimColor>{TUI_TEXT.inputBusy}</Text>
@@ -675,7 +647,7 @@ export function TuiApp(props: { actorId: string }) {
       </Box>
       <BottomStatusLine
         model={statusBarModel}
-        width={contentWidth}
+        width={screenModel.regions.statusBar.width}
       />
     </Box>
   );

@@ -149,28 +149,29 @@ test('formatStatusBarParts preserves segment tones for rendering', () => {
   assert.equal(narrowParts.at(-1)?.tone, 'warning');
 });
 
-test('formatStatusBarParts distinguishes reconnecting and disconnected tones', () => {
-  const reconnecting = buildStatusBarModel({
-    connectionStatus: '连接断开，10s 后重连 1/5',
-    mode: 'chat',
-    session: createSession({ id: 'chat:pet' }),
-    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
-  });
-  const disconnected = buildStatusBarModel({
-    connectionStatus: '未连接',
-    mode: 'chat',
-    session: createSession({ id: 'chat:pet' }),
-    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
-  });
+test('formatStatusBarParts distinguishes retrying and failed connection tones', () => {
+  const cases = [
+    ['连接断开，10s 后重连 1/5', 'warning'],
+    ['本地服务暂不可用，5s 后重试 2/5', 'warning'],
+    ['连接断开，重连失败', 'danger'],
+    ['初始化失败：bad config', 'danger'],
+    ['未连接', 'danger'],
+  ] as const;
 
-  assert.equal(
-    formatStatusBarParts(reconnecting, 80).find((part) => part.segmentId === 'connection')?.tone,
-    'warning',
-  );
-  assert.equal(
-    formatStatusBarParts(disconnected, 80).find((part) => part.segmentId === 'connection')?.tone,
-    'danger',
-  );
+  for (const [connectionStatus, expectedTone] of cases) {
+    const model = buildStatusBarModel({
+      connectionStatus,
+      mode: 'chat',
+      session: createSession({ id: 'chat:pet' }),
+      globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+    });
+
+    assert.equal(
+      formatStatusBarParts(model, 80).find((part) => part.segmentId === 'connection')?.tone,
+      expectedTone,
+      connectionStatus,
+    );
+  }
 });
 
 test('formatStatusBarText truncates by display width for CJK text', () => {

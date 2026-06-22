@@ -248,7 +248,7 @@ function formatInteractionMode(mode: TuiInteractionMode) {
 }
 
 function statusTone(status: string): StatusSegmentTone {
-  if (/打断|等待|处理中|调用|思考|回复|初始化|连接本地服务|重试|重连/.test(status)) {
+  if (/打断|等待|处理中|调用|思考|回复|初始化中|连接本地服务|后重试|后重连/.test(status)) {
     return 'warning';
   }
   if (/错|失败|断开|不可用|无法连接|未连接/.test(status)) return 'danger';

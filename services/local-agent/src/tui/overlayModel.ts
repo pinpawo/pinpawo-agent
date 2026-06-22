@@ -13,6 +13,7 @@ export type TuiOverlayOwner =
 
 export type TuiOverlayModel = {
   current: TuiOverlay | null;
+  owner: TuiOverlayOwner | null;
   ownerLabel: string | null;
   width: number;
 };
@@ -71,6 +72,7 @@ export function buildTuiOverlayModel(input: {
   const current = resolveCurrentOverlay(input);
   return {
     current,
+    owner: current?.type ?? null,
     ownerLabel: current?.label ?? null,
     width: input.width,
   };

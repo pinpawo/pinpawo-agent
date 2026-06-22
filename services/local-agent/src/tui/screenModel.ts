@@ -36,7 +36,7 @@ export type TuiScreenModel = {
       entries: AgentTimelineDisplayEntry[];
       staticEntries: AgentTimelineDisplayEntry[];
       dynamicEntries: AgentTimelineDisplayEntry[];
-      renderEpoch: number;
+      renderKey: string;
       staticBoundaryKey: string;
       scrollStrategy: 'preserveStaticOutputUntilHostReset';
       width: number;
@@ -100,7 +100,7 @@ export function buildTuiScreenModel(input: {
         entries: timelineViewport.entries,
         staticEntries: timelineViewport.staticEntries,
         dynamicEntries: timelineViewport.dynamicEntries,
-        renderEpoch: input.timelineRenderEpoch,
+        renderKey: formatViewportRenderKey(input.timelineRenderEpoch),
         staticBoundaryKey: formatViewportBoundaryKey(timelineViewport.staticEntries),
         scrollStrategy: 'preserveStaticOutputUntilHostReset',
         width: contentWidth,
@@ -125,6 +125,10 @@ export function buildTuiScreenModel(input: {
       },
     },
   };
+}
+
+function formatViewportRenderKey(epoch: number) {
+  return String(epoch);
 }
 
 function formatViewportBoundaryKey(entries: AgentTimelineDisplayEntry[]) {

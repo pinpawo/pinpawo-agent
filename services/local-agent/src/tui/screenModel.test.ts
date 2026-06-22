@@ -33,7 +33,7 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
   assert.equal(model.regions.timeline.width, 96);
   assert.equal(model.regions.composer.textAreaWidth, 92);
   assert.equal(model.regions.statusBar.status, '就绪');
-  assert.equal(model.regions.timeline.renderEpoch, 3);
+  assert.equal(model.regions.timeline.renderKey, '3');
   assert.equal(model.regions.timeline.staticBoundaryKey, 'm1');
   assert.equal(model.regions.timeline.scrollStrategy, 'preserveStaticOutputUntilHostReset');
   assert.deepEqual(model.regions.timeline.staticEntries.map((entry) => entry.id), ['m1']);

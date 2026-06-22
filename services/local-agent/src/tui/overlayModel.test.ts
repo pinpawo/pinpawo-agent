@@ -55,6 +55,7 @@ test('buildTuiOverlayModel selects the highest-priority active overlay', () => {
   });
 
   assert.equal(model.current?.type, 'resumePicker');
+  assert.equal(model.owner, 'resumePicker');
   assert.equal(model.ownerLabel, 'Resume');
 });
 
@@ -73,6 +74,7 @@ test('buildTuiOverlayModel keeps command palette above file mention', () => {
   });
 
   assert.equal(model.current?.type, 'commandPalette');
+  assert.equal(model.owner, 'commandPalette');
   assert.equal(model.ownerLabel, 'Command');
 });
 
@@ -91,6 +93,7 @@ test('buildTuiOverlayModel returns no owner when all overlays are closed', () =>
   });
 
   assert.equal(model.current, null);
+  assert.equal(model.owner, null);
   assert.equal(model.ownerLabel, null);
 });
 

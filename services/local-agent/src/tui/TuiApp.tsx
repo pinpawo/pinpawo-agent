@@ -665,7 +665,7 @@ export function TuiApp(props: { actorId: string }) {
       {screenModel.regions.timeline.entries.length === 0 ? (
         <Text dimColor>{screenModel.regions.timeline.emptyText}</Text>
       ) : null}
-      <Static key={screenModel.regions.timeline.renderEpoch} items={screenModel.regions.timeline.staticEntries}>
+      <Static key={screenModel.regions.timeline.renderKey} items={screenModel.regions.timeline.staticEntries}>
         {(entry) => renderTimelineDisplayEntry(entry, {
           petName: screenModel.petName,
           now,

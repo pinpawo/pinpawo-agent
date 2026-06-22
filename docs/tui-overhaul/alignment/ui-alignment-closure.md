@@ -15,7 +15,7 @@ Close the remaining UI alignment gaps after UI-1 through UI-4 landed on `main`.
 - Add an explicit overlay model that selects the highest-priority active overlay.
 - Render overlays through one layer in `TuiApp` instead of a repeated conditional chain.
 - Pass the active overlay owner into `StatusBarModel`.
-- Expose timeline static boundary metadata from `buildTuiScreenModel`.
+- Expose timeline static boundary metadata and the static render key from `buildTuiScreenModel`.
 
 ## Out Of Scope
 
@@ -29,7 +29,7 @@ Close the remaining UI alignment gaps after UI-1 through UI-4 landed on `main`.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-06-23 | StatusBar overlay owner | Status bar shows the current overlay owner. | None | Overlay owner is now derived from the overlay model and rendered as a status segment. | Add `overlayOwner` to `StatusBarModel` input. | None. | Done |
 | 2026-06-23 | OverlayLayer | Layout renders one highest-priority overlay slot. | Picker lifecycle state remains in existing hooks. | Resume and policy pickers already have focused lifecycle controllers; moving them would broaden the PR beyond UI closure. | Add a pure `TuiOverlayModel` that owns priority and render props while preserving existing controllers. | None. | Done |
-| 2026-06-23 | Timeline viewport | Screen model owns static/dynamic boundary semantics. | Terminal scroll reset is still host-controlled. | Existing Ink `Static` reset is tied to explicit screen clearing; changing it risks duplicate terminal output. | Expose `staticBoundaryKey` and `scrollStrategy` from the screen model without changing terminal behavior. | None. | Done |
+| 2026-06-23 | Timeline viewport | Screen model owns static/dynamic boundary semantics. | Terminal scroll reset is still host-controlled. | Existing Ink `Static` reset is tied to explicit screen clearing; changing it risks duplicate terminal output. | Expose `renderKey`, `staticBoundaryKey`, and `scrollStrategy` from the screen model without changing terminal behavior. | None. | Done |
 
 ## Open Questions
 

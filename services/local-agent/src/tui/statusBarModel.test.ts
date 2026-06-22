@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GLOBAL_REVIEW_POLICY_MODE } from '@pinpawo/pet-agent';
+import stringWidth from 'string-width';
 import {
   buildStatusBarModel,
   formatStatusBarParts,
@@ -187,6 +188,49 @@ test('formatStatusBarText truncates by display width for CJK text', () => {
   assert.equal(formatStatusBarText(model, 7), '正在思…');
 });
 
+test('formatStatusBarText stays within 80 and 120 columns with CJK cwd', () => {
+  const activeSession = createSession({ id: 'chat:pet' });
+  activeSession.runtime = {
+    model: 'gpt-非常长的模型名称-2026-预览版',
+    cwd: '/Users/mac/开发/碰碰我/含中文目录/工作区',
+    contextWindow: 128000,
+  };
+  activeSession.tokenUsage = {
+    inputTokens: 20000,
+    outputTokens: 3000,
+    totalTokens: 23000,
+  };
+  const activeModel = buildStatusBarModel({
+    activityStatus: '正在调用能力或工具 · 12s',
+    connectionStatus: '连接断开，10s 后重连 1/5',
+    mode: 'studio',
+    session: activeSession,
+    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+    overlayOwner: 'Approval',
+  });
+
+  for (const width of [80, 120]) {
+    assertDisplayWidthAtMost(formatStatusBarText(activeModel, width), width);
+  }
+
+  const cwdSession = createSession({ id: 'chat:pet' });
+  cwdSession.runtime = {
+    model: 'gpt-test',
+    cwd: '/Users/mac/开发/碰碰我/含中文目录/工作区',
+  };
+  const cwdModel = buildStatusBarModel({
+    connectionStatus: '就绪',
+    mode: 'chat',
+    session: cwdSession,
+    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+  });
+
+  assertDisplayWidthAtMost(formatStatusBarText(cwdModel, 80), 80);
+  const wideText = formatStatusBarText(cwdModel, 120);
+  assert.ok(wideText.includes('目录:/Users/mac/开发/碰碰我/含中文目录/工作区'));
+  assertDisplayWidthAtMost(wideText, 120);
+});
+
 function segment(id: string, value: string, priority: number, label?: string) {
   return {
     id,
@@ -195,4 +239,11 @@ function segment(id: string, value: string, priority: number, label?: string) {
     ...(label ? { label } : {}),
     truncation: 'truncate' as const,
   };
+}
+
+function assertDisplayWidthAtMost(text: string, width: number) {
+  assert.ok(
+    stringWidth(text) <= width,
+    `expected display width <= ${width}, got ${stringWidth(text)} for ${text}`,
+  );
 }

@@ -634,7 +634,7 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
   assert.equal(state.runs['other-req']?.sessionId, 'chat:other');
 });
 
-test('tuiStateReducer clears snapshot activeRunId when the run is terminal', () => {
+test('tuiStateReducer restores completed reconnect output and clears terminal activeRunId', () => {
   const state = tuiStateReducer(initialState('chat:pet'), {
     type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
     source: 'reconnect',
@@ -677,6 +677,14 @@ test('tuiStateReducer clears snapshot activeRunId when the run is terminal', () 
   assert.equal(state.sessions['chat:pet']?.activeRunId, null);
   assert.equal(state.runs['req-done'], undefined);
   assert.equal(selectFocusedActiveRun(state), null);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'done'],
+  ]);
+  assert.deepEqual(state.sessions['chat:pet']?.timeline.map((entry) => entry.id), [
+    'message:user-1',
+    'message:assistant-1',
+  ]);
 });
 
 test('tuiStateReducer resumes a session from snapshot while clearing previous run state', () => {

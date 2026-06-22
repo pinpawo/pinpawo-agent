@@ -40,7 +40,7 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
   assert.deepEqual(model.regions.timeline.dynamicEntries.map((entry) => entry.id), ['m2']);
 });
 
-test('buildTuiScreenModel marks composer and overlay state while busy', () => {
+test('buildTuiScreenModel marks composer and status state while busy', () => {
   const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
   state.connection = { status: 'ready', message: '就绪' };
   state.runs.run1 = {
@@ -66,8 +66,48 @@ test('buildTuiScreenModel marks composer and overlay state while busy', () => {
   assert.equal(model.regions.composer.focused, false);
   assert.equal(model.regions.composer.borderColor, 'yellow');
   assert.equal(model.regions.composer.width, 26);
-  assert.match(model.regions.overlay.activityStatus, /正在思考|仍在处理中/);
-  assert.equal(model.regions.statusBar.status, model.regions.overlay.activityStatus);
+  assert.equal(model.regions.overlay.width, 26);
+  assert.match(model.regions.statusBar.status, /正在思考|仍在处理中/);
+});
+
+test('buildTuiScreenModel keeps approval status visible while composer accepts reply text', () => {
+  const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
+  state.connection = { status: 'ready', message: '等待你的决定(pet-1)' };
+  state.runs.run1 = {
+    requestId: 'run1',
+    sessionId: 'chat:pet',
+    kind: 'chat',
+    phase: 'waiting_human',
+    timelineEntryIds: [],
+    pendingReview: {
+      requestId: 'run1',
+      petId: 'pet-1',
+      review: {
+        id: 'review-1',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Need review' },
+        options: [],
+      },
+    },
+    startedAt: 0,
+    charCount: 0,
+  };
+  state.sessions['chat:pet'].activeRunId = 'run1';
+
+  const model = buildTuiScreenModel({
+    state,
+    terminalColumns: 80,
+    now: 2500,
+    animationFrame: 0,
+    timelineRenderEpoch: 0,
+  });
+
+  assert.equal(model.busy, false);
+  assert.equal(model.pendingApproval?.requestId, 'run1');
+  assert.equal(model.regions.composer.focused, true);
+  assert.equal(model.regions.composer.borderColor, 'yellow');
+  assert.equal(model.regions.composer.marginTop, 0);
+  assert.equal(model.regions.statusBar.status, '等待你的决定(pet-1)');
 });
 
 test('buildTuiScreenModel keeps timeline viewport ids stable across resize', () => {

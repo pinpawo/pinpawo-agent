@@ -26,6 +26,7 @@ test('buildStatusBarModel derives explicit prioritized segments', () => {
 
   const model = buildStatusBarModel({
     status: '就绪',
+    mode: 'studio',
     session,
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
@@ -62,6 +63,7 @@ test('formatStatusBarText keeps high-priority segments first under narrow widths
 test('buildStatusBarModel includes current overlay owner when present', () => {
   const model = buildStatusBarModel({
     status: '就绪',
+    mode: 'chat',
     session: createSession({ id: 'chat:pet' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
     overlayOwner: 'Approval',
@@ -79,6 +81,17 @@ test('buildStatusBarModel includes current overlay owner when present', () => {
       ['cwd', '目录', '未提供', 20],
     ],
   );
+});
+
+test('buildStatusBarModel follows reducer-owned submit mode over session kind', () => {
+  const model = buildStatusBarModel({
+    status: '就绪',
+    mode: 'studio',
+    session: createSession({ id: 'chat:pet', kind: 'chat' }),
+    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+  });
+
+  assert.equal(model.segments.find((segment) => segment.id === 'mode')?.value, 'Studio');
 });
 
 test('formatStatusBarText truncates by display width for CJK text', () => {

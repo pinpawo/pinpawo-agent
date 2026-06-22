@@ -5,14 +5,10 @@ import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import { config } from '../config';
 import { loadStoredConfig, saveStoredConfig } from '../storage';
 import { AgentTimelineItem } from './components/AgentTimelineItem';
-import { ApprovalPanel } from './components/ApprovalPanel';
 import { BottomStatusLine } from './components/BottomStatusLine';
-import { CommandPalette } from './components/CommandPalette';
 import { Composer } from './components/Composer';
-import { FileMentionPopup } from './components/FileMentionPopup';
-import { GlobalReviewPolicyPicker } from './components/GlobalReviewPolicyPicker';
 import { MessageBlock } from './components/MessageBlock';
-import { ResumePicker } from './components/ResumePicker';
+import { OverlayLayer } from './components/OverlayLayer';
 import { SubagentActivityItem } from './components/SubagentActivityItem';
 import {
   createInitialTuiInputBufferState,
@@ -32,7 +28,7 @@ import {
   completeFileMentionInput,
   moveFileMentionSelection,
 } from './input/fileMention';
-import { buildTuiOverlayModel, type TuiOverlayModel } from './overlayModel';
+import { buildTuiOverlayModel } from './overlayModel';
 import { resolveTuiInputAction } from './input/inputRouter';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import { formatNow } from './render/terminalText';
@@ -98,44 +94,6 @@ function renderTimelineDisplayEntry(
       width={props.width}
     />
   );
-}
-
-function renderOverlayLayer(model: TuiOverlayModel) {
-  const overlay = model.current;
-  if (!overlay) return null;
-
-  switch (overlay.type) {
-    case 'resumePicker':
-      return (
-        <ResumePicker
-          sessions={overlay.sessions}
-          selectedIndex={overlay.selectedIndex}
-          loading={overlay.loading}
-          width={model.width}
-        />
-      );
-    case 'approval':
-      return (
-        <ApprovalPanel
-          review={overlay.request.review}
-          petId={overlay.request.petId}
-          width={model.width}
-          selectedIndex={overlay.selectedIndex}
-        />
-      );
-    case 'globalReviewPolicyPicker':
-      return (
-        <GlobalReviewPolicyPicker
-          currentMode={overlay.currentMode}
-          selectedIndex={overlay.selectedIndex}
-          width={model.width}
-        />
-      );
-    case 'commandPalette':
-      return <CommandPalette model={overlay.model} width={model.width} />;
-    case 'fileMention':
-      return <FileMentionPopup model={overlay.model} width={model.width} />;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -655,10 +613,11 @@ export function TuiApp(props: { actorId: string }) {
 
   const statusBarModel = useMemo(() => buildStatusBarModel({
     status: screenModel.regions.statusBar.status,
+    mode: uiMode,
     session: focusedSession,
     globalReviewPolicyMode,
     overlayOwner: overlayModel.ownerLabel,
-  }), [focusedSession, globalReviewPolicyMode, overlayModel.ownerLabel, screenModel.regions.statusBar.status]);
+  }), [focusedSession, globalReviewPolicyMode, overlayModel.ownerLabel, screenModel.regions.statusBar.status, uiMode]);
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -677,7 +636,7 @@ export function TuiApp(props: { actorId: string }) {
         now,
         width: contentWidth,
       }))}
-      {renderOverlayLayer(overlayModel)}
+      <OverlayLayer model={overlayModel} />
       <Box
         borderStyle="round"
         borderColor={screenModel.regions.composer.borderColor}

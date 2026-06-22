@@ -43,8 +43,6 @@ export type TuiScreenModel = {
       emptyText: string;
     };
     overlay: {
-      pendingApproval: ApprovalRequestModel | null;
-      activityStatus: string;
       width: number;
     };
     composer: {
@@ -107,8 +105,6 @@ export function buildTuiScreenModel(input: {
         emptyText: TUI_TEXT.emptyHistory(petName),
       },
       overlay: {
-        pendingApproval,
-        activityStatus,
         width: contentWidth,
       },
       composer: {

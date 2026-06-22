@@ -1,7 +1,7 @@
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import { formatGlobalReviewPolicyMode } from './globalReviewPolicyPicker';
 import { truncateLine } from './render/terminalText';
-import type { SessionModel } from './state/tuiState';
+import type { SessionModel, TuiInteractionMode } from './state/tuiState';
 
 const LOCALE_FORMATTER = new Intl.NumberFormat('zh-CN');
 const STATUS_SEPARATOR = ' · ';
@@ -24,6 +24,7 @@ export type StatusBarModel = {
 
 export function buildStatusBarModel(input: {
   status: string;
+  mode: TuiInteractionMode;
   session: SessionModel | null;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   overlayOwner?: string | null;
@@ -40,9 +41,9 @@ export function buildStatusBarModel(input: {
       },
       {
         id: 'mode',
-        value: input.session?.kind === 'studio' ? 'Studio' : 'Chat',
+        value: formatInteractionMode(input.mode),
         priority: 90,
-        tone: input.session?.kind === 'studio' ? 'info' : 'muted',
+        tone: input.mode === 'studio' ? 'info' : 'muted',
         truncation: 'preserve',
       },
       ...(input.overlayOwner ? [{
@@ -130,6 +131,10 @@ function measureFits(text: string, width: number) {
 
 function formatSegment(segment: StatusSegment) {
   return segment.label ? `${segment.label}:${segment.value}` : segment.value;
+}
+
+function formatInteractionMode(mode: TuiInteractionMode) {
+  return mode === 'studio' ? 'Studio' : 'Chat';
 }
 
 function statusTone(status: string): StatusSegmentTone {

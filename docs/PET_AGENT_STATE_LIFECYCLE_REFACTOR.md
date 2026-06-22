@@ -53,9 +53,9 @@ Type names should follow the same rule:
 | Current type | Target type |
 |---|---|
 | `RunDelegation` | `RunDelegation` |
-| `RunPendingDelegation` | `RunRunPendingDelegation` |
-| `RunFinalReplyRoute` | `RunRunFinalReplyRoute` |
-| `RunCapabilitySearchState` | `RunRunCapabilitySearchState` |
+| `RunPendingDelegation` | `RunPendingDelegation` |
+| `RunFinalReplyRoute` | `RunFinalReplyRoute` |
+| `RunCapabilitySearchState` | `RunCapabilitySearchState` |
 | none | `TaskActiveDelegation` |
 
 ## 3. Current state audit
@@ -94,7 +94,7 @@ Related derived helpers:
 |---|---|---|
 | `readInFlightAnnounceLanes(messages)` | Derives unfinished delegation candidates from lane-tagged announces. | Stop using it for control flow. It can remain as a context recall helper only if needed. |
 | `laneMessages(messages, lane, runId, delegationId)` | Reads a delegation transcript using current `runId`. | Use `taskActiveDelegation.transcriptRunId` for an active task, or eventually narrow by `delegationId` if we remove turn/run transcript scoping. |
-| `buildSubagentHandoff({ lane, runId, delegationId })` | Handoffs by lane + current turn id + delegation id. | Handoff by `taskActiveDelegation.lane`, `taskActiveDelegation.transcriptRunId`, and `taskActiveDelegation.id`. |
+| `buildSubagentHandoff({ lane, runId, delegationId })` | Handoffs by lane + current run id + delegation id. | Handoff by `taskActiveDelegation.lane`, `taskActiveDelegation.transcriptRunId`, and `taskActiveDelegation.id`. |
 
 ## 4. Target state shape
 
@@ -109,7 +109,7 @@ type TaskActiveDelegation = {
   resultPreview: string | null;
 };
 
-type RunRunPendingDelegation = {
+type RunPendingDelegation = {
   id: string;
   lane: MessageLane;
   task: string;
@@ -148,15 +148,15 @@ const OrchestratorState = Annotation.Root({
   }),
 
   // run lifecycle.
-  runPendingDelegation: Annotation<RunRunPendingDelegation | null>({
+  runPendingDelegation: Annotation<RunPendingDelegation | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  runPendingFinalReply: Annotation<RunRunFinalReplyRoute>({
+  runPendingFinalReply: Annotation<RunFinalReplyRoute>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  runCapabilitySearchState: Annotation<RunRunCapabilitySearchState>({
+  runCapabilitySearchState: Annotation<RunCapabilitySearchState>({
     reducer: (_prev, next) => next,
     default: buildEmptyRunCapabilitySearchState,
   }),

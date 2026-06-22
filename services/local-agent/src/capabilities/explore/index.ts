@@ -108,7 +108,7 @@ function readLatestExploreSummary(messages: BaseMessage[]): string | null {
  * Persist a context-pressure ingest as a single report artifact: the markdown
  * summary as content, the structured evidence ({source, proves, value}[]) in
  * metadata. Recorded into state via the subagent's artifact sink so the ref is
- * visible across turns (avoids re-exploring; redesign §14). No-op when the
+   * visible across runs (avoids re-exploring; redesign §14). No-op when the
  * store, sink, or threadId is unavailable (tests / degraded runtimes / explore
  * surfaces without a store such as studio).
  */
@@ -117,7 +117,7 @@ async function recordExploreIngestArtifact(
   sink: CapabilityArtifactSink | undefined,
   ingest: ExploreKnowledgeIngest,
 ): Promise<void> {
-  if (!store || !sink?.recordCapabilityArtifact || !sink.threadId || !sink.delegationId || !sink.turnId) {
+  if (!store || !sink?.recordCapabilityArtifact || !sink.threadId || !sink.delegationId || !sink.runId) {
     return;
   }
   const normalized = ingest.summary.trim();
@@ -125,7 +125,7 @@ async function recordExploreIngestArtifact(
     threadId: sink.threadId,
     capabilityId: 'explore',
     delegationId: sink.delegationId,
-    turnId: sink.turnId,
+    runId: sink.runId,
     artifact: {
       kind: 'report',
       mimeType: 'text/markdown',

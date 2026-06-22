@@ -42,7 +42,7 @@ import {
 import { RemoveMessage } from '@langchain/core/messages';
 import { reuseOrAppendRunDelegation, updateRunDelegationResult } from './delegations';
 import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
-import type { RunDelegation } from './types';
+import type { RunDelegation, TaskActiveDelegation } from './types';
 
 function capability(name: string, description: string): AgentCapability {
   return {
@@ -2065,6 +2065,87 @@ test('buildSubagentHandoff returns null when the delegation has no announce text
     delegationId: 'd1',
   });
   assert.equal(update, null);
+});
+
+test('different-lane outcome decision keeps active delegation when handoff cannot be built', async () => {
+  let toolRunCount = 0;
+  const rawTool = tool(async () => {
+    toolRunCount += 1;
+    return 'ran';
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({}),
+  });
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => ({
+        action: 'delegate_general',
+        task: '改用 general 继续调查。',
+        context_summary: '尝试切换执行器。',
+      }),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+  });
+  const activeDelegation: TaskActiveDelegation = {
+    id: 'active-1',
+    lane: 'capability:explore',
+    task: '当前 explore 任务',
+    contextSummary: '已有任务仍待判断。',
+    transcriptRunId: 'run-active',
+    status: 'awaiting_decision',
+    resultPreview: null,
+  };
+  const input = {
+    ...buildOrchestratorRunInput([
+      new HumanMessage('继续'),
+      // No announce message for active-1: buildSubagentHandoff must return null.
+      new AIMessage('只有中间步骤，没有可交接结果。'),
+    ]),
+    taskActiveDelegation: activeDelegation,
+  };
+  input.runDelegations = [{
+    id: 'active-1',
+    lane: 'capability:explore',
+    task: '当前 explore 任务',
+    status: 'progress',
+    resultPreview: null,
+  }];
+
+  const state = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'different-lane-replacement-blocked',
+      actor: testActor,
+      capabilities: [capability('explore', '探索 capability。')],
+      toolkits: [{
+        name: 'local',
+        description: 'local tools',
+        tools: [rawTool],
+      }],
+    },
+  }) as {
+    messages: Array<AIMessage | HumanMessage>;
+    runPendingDelegation: unknown;
+    taskActiveDelegation: TaskActiveDelegation | null;
+    runDelegations: RunDelegation[];
+  };
+
+  assert.equal(toolRunCount, 0);
+  assert.equal(state.runPendingDelegation, null);
+  assert.equal(state.taskActiveDelegation?.id, 'active-1');
+  assert.equal(state.taskActiveDelegation?.lane, 'capability:explore');
+  assert.deepEqual(state.runDelegations.map((item) => item.id), ['active-1']);
+  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /暂不能切换到新的执行器/);
 });
 
 test('lane tagging hides subagent messages from route and records completed announce', () => {

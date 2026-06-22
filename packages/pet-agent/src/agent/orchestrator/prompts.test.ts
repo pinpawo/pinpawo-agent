@@ -85,10 +85,10 @@ test('capability discovery request context also receives compaction summaries', 
   assert.match(requestContext, /当前任务是修复 context compaction/);
 });
 
-test('loop-internal router input stays focused on current turn announce context', () => {
+test('loop-internal router input stays focused on current run announce context', () => {
   const input = buildDelegationOutcomeDecisionInput({
     latestUserRequest: '继续推进',
-    turnDelegationContext: '当前轮任务跟踪：\n- 所有已委派任务均为 completed。',
+    runDelegationContext: '当前 run 任务跟踪：\n- 所有已委派任务均为 completed。',
     subagentAnnounceContext: 'subagent announce：\n- 状态：completed',
     capabilityArtifacts: [],
   });

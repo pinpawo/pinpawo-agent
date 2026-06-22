@@ -378,7 +378,7 @@ export function readLatestAnnounceCompletionReason(
  * that ran but have NOT been handed off (completed delegations get handed off and
  * their lane wiped, so a lane announce that survives is by definition unfinished).
  * Used to offer "continue this in-progress capability" candidates; persists across
- * turns because the lane announce lives in messages, unlike turnDelegations.
+ * runs because the lane announce lives in messages, unlike runDelegations.
  */
 export function readInFlightAnnounceLanes(messages: BaseMessage[]): Array<MessageLane | undefined> {
   const lanes: MessageLane[] = [];

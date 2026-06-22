@@ -33,12 +33,12 @@ export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[
 
 export function buildRunDelegationContext(runDelegations: RunDelegation[]): string {
   if (runDelegations.length === 0) {
-    return '当前轮任务跟踪：\n- 暂无已委派任务。';
+    return '当前 run 任务跟踪：\n- 暂无已委派任务。';
   }
 
   const visibleDelegations = runDelegations.slice(-MAX_DECISION_RUN_DELEGATIONS);
   const lines = [
-    '当前轮任务跟踪（仅保留本轮近期任务）',
+    '当前 run 任务跟踪（仅保留本 run 近期任务）',
     visibleDelegations.some((delegation) => delegation.status !== 'completed')
       ? '- 存在尚未 completed 的委派任务。'
       : '- 所有已委派任务均为 completed。',
@@ -163,7 +163,7 @@ function buildDecisionConfigLines(actor: AgentActor, workdir?: string, runtimeEn
 
 export function buildUserIntentDecisionSystemPrompt(params: {
   actor: AgentActor;
-  turnDelegationContext: string;
+  runDelegationContext: string;
   targetsContext: string;
   capabilityDecisionState: CapabilityDecisionState;
   outputInstruction: string;
@@ -176,7 +176,7 @@ export function buildUserIntentDecisionSystemPrompt(params: {
     '',
     '你是 orchestrator 的用户意图判断节点，只决定下一步，不亲自执行可委派目标里的能力。',
     '',
-    params.turnDelegationContext,
+    params.runDelegationContext,
     '',
     params.targetsContext,
     '',
@@ -212,10 +212,10 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
     params.targetsContext,
     '',
     '当前阶段：subagent 返回后的结果判断。',
-    '判断重点：读取输入中的 subagent announce，判断用户当前轮目标是否已经满足。',
+    '判断重点：读取输入中的 subagent announce，判断用户当前 run 目标是否已经满足。',
     '',
     '决策原则：',
-    '- 如果 subagent announce 已经满足用户当前轮目标，选择 finish；最终回复由后续回复节点基于完整对话历史（含 subagent 返回内容）生成，你不要在这里撰写回复内容。',
+    '- 如果 subagent announce 已经满足用户当前 run 目标，选择 finish；最终回复由后续回复节点基于完整对话历史（含 subagent 返回内容）生成，你不要在这里撰写回复内容。',
     '- 如果 subagent announce 只是阶段性进展，判断还缺什么；需要执行器继续时再委派。',
     '- 如果 subagent 因迭代上限、上下文限制或阶段性停止而返回 progress，但用户目标仍明确且不需要用户补充信息，优先继续委派给同一类执行器；不要仅因为 progress 就 ask_user。',
     '- 如果用户原始请求仍有明确未完成目标，选择一个最明确的下一步。',
@@ -235,7 +235,7 @@ export function buildAnswerSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的最终回复节点。orchestrator 已经判断当前轮无需再委派执行器，现在由你直接回复用户。',
+    '你是 orchestrator 的最终回复节点。orchestrator 已经判断当前 run 无需再委派执行器，现在由你直接回复用户。',
     '你能看到完整的对话历史（包括之前 subagent/执行器返回的完整内容）。',
     '',
     '回复原则：',
@@ -249,7 +249,7 @@ export function buildAnswerSystemPrompt(params: {
 
 export function buildCapabilityDiscoverySystemPrompt(params: {
   actor: AgentActor;
-  turnDelegationContext: string;
+  runDelegationContext: string;
   generalTools: StructuredTool[];
   workdir?: string;
   runtimeEnvironment?: string;
@@ -274,7 +274,7 @@ export function buildCapabilityDiscoverySystemPrompt(params: {
     '你是 capability discovery，只判断是否需要先搜索业务 capability 候选。',
     '不要做最终路由决策，不要回答用户，也不要委派执行器。',
     '',
-    params.turnDelegationContext,
+    params.runDelegationContext,
     '',
     ...generalToolLines,
     '',
@@ -305,7 +305,7 @@ function buildCapabilityDecisionInstructions(capabilityDecisionState: Capability
   }
   if (capabilityDecisionState === 'search_exhausted') {
     return [
-      '已搜索但没有找到匹配的 delegate_capability.<name> 候选；本轮不再尝试该路径。',
+      '已搜索但没有找到匹配的 delegate_capability.<name> 候选；本 run 不再尝试该路径。',
     ];
   }
   return [];
@@ -483,7 +483,7 @@ export function buildCapabilityDiscoveryInput(params: {
 
 export function buildDelegationOutcomeDecisionInput(params: {
   latestUserRequest: string | null;
-  turnDelegationContext: string;
+  runDelegationContext: string;
   subagentAnnounceContext: string | null;
   capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
@@ -495,10 +495,10 @@ export function buildDelegationOutcomeDecisionInput(params: {
     '',
     params.subagentAnnounceContext ?? 'subagent announce：无',
     '',
-    params.turnDelegationContext,
+    params.runDelegationContext,
     artifactContext ? '' : null,
     artifactContext,
     '',
-    '请根据以上 subagent announce 和任务跟踪，判断当前轮下一步。',
+    '请根据以上 subagent announce 和任务跟踪，判断当前 run 下一步。',
   ].join('\n');
 }

@@ -253,7 +253,7 @@ function readToolkitReviewCapabilities(value: unknown): ToolkitReviewCapabilitie
  * `canSearchCapabilities` 会因为 candidates 非空 / attempted=true 而短路,
  * 整段 capability discovery + search 不再触发。
  *
- * 未传或为空数组 → 返回 null,prepare 走默认 turn reset 路径(0 行为变化)。
+ * 未传或为空数组 → 返回 null,prepare 走默认 run reset 路径(0 行为变化)。
  */
 function buildForcedRunCapabilitySearchState(
   forcedNames: string[] | undefined,
@@ -340,8 +340,14 @@ function resolveDelegationTranscriptRunId(
 function readLegacyTaskActiveDelegation(
   state: OrchestratorStateType,
 ): TaskActiveDelegation | null {
-  const delegation = state.runDelegations.find((item) =>
-    item.status === 'progress' || item.status === 'completed');
+  let delegation = null as OrchestratorStateType['runDelegations'][number] | null;
+  for (let index = state.runDelegations.length - 1; index >= 0; index -= 1) {
+    const item = state.runDelegations[index];
+    if (item.status === 'progress' || item.status === 'completed') {
+      delegation = item;
+      break;
+    }
+  }
   if (!delegation) return null;
   return {
     id: delegation.id,
@@ -559,7 +565,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
     // 强制候选注入:命中时直接把 forced capability 登记为已发现候选并短路
     // 后续 LLM 发现 + 工具搜索流程。仅当 runCapabilitySearchState 还未填充时生效,
-    // 保证多 turn 内只在 turn 开始时注入一次。未传 forcedCapabilityNames 走老路径。
+    // 保证同一 run 内只在 run 开始时注入一次。未传 forcedCapabilityNames 走老路径。
     if (
       !state.runCapabilitySearchState.attempted
       && state.runCapabilitySearchState.candidates.length === 0
@@ -591,7 +597,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       [
         new SystemMessage(buildCapabilityDiscoverySystemPrompt({
           actor,
-          turnDelegationContext: buildRunDelegationContext(state.runDelegations),
+          runDelegationContext: buildRunDelegationContext(state.runDelegations),
           generalTools,
           workdir,
           runtimeEnvironment,
@@ -753,7 +759,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const systemPrompt = isUserIntentDecision
       ? buildUserIntentDecisionSystemPrompt({
         actor,
-        turnDelegationContext: runDelegationContext,
+        runDelegationContext: runDelegationContext,
         targetsContext: decisionTargetsContext,
         capabilityDecisionState,
         outputInstruction,
@@ -782,7 +788,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       }))
       : new HumanMessage(buildDelegationOutcomeDecisionInput({
         latestUserRequest: latestHumanRequest,
-        turnDelegationContext: runDelegationContext,
+        runDelegationContext: runDelegationContext,
         subagentAnnounceContext: buildSubagentAnnounceContext(
           activeDelegationAnnounce,
           activeDelegation
@@ -908,6 +914,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         handedOffDelegationIds.add(activeDelegation.id);
       }
     }
+    const replacementBlocked = replacingActiveDelegation
+      && activeDelegation !== null
+      && !handedOffDelegationIds.has(activeDelegation.id);
+    const blockedReplacementMessage = replacementBlocked
+      ? new AIMessage('当前委派任务还没有可交接的结果，暂不能切换到新的执行器。请先继续当前委派，或明确说明要放弃它。')
+      : null;
 
     // A handed-off delegation is, by the orchestrator's judgment, complete.
     const finalRunDelegations = handedOffDelegationIds.size > 0
@@ -917,29 +929,34 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
             : delegation)
       : nextDelegationState.runDelegations;
 
-    const nextTaskActiveDelegation =
-      handingOff
-        ? null
-        : runPendingDelegation
-          ? activeDelegation && activeDelegation.id === runPendingDelegation.id
-            ? {
-                ...activeDelegation,
-                task: runPendingDelegation.task,
-                contextSummary: runPendingDelegation.contextSummary,
-                status: 'pending' as const,
-                resultPreview: null,
-              }
-            : createTaskActiveDelegation(runPendingDelegation, state.runId)
-          : activeDelegation;
+    let nextTaskActiveDelegation: TaskActiveDelegation | null;
+    if (replacementBlocked) {
+      nextTaskActiveDelegation = activeDelegation;
+    } else if (handingOff) {
+      nextTaskActiveDelegation = null;
+    } else if (runPendingDelegation) {
+      nextTaskActiveDelegation = activeDelegation && activeDelegation.id === runPendingDelegation.id
+        ? {
+            ...activeDelegation,
+            task: runPendingDelegation.task,
+            contextSummary: runPendingDelegation.contextSummary,
+            status: 'pending' as const,
+            resultPreview: null,
+          }
+        : createTaskActiveDelegation(runPendingDelegation, state.runId);
+    } else {
+      nextTaskActiveDelegation = activeDelegation;
+    }
 
     return {
       messages: [
         ...iterationLimitMessages,
         ...handoffMessages,
+        ...(blockedReplacementMessage ? [blockedReplacementMessage] : []),
         ...(inlineReply ? [new AIMessage(inlineReply)] : []),
       ],
-      runPendingDelegation: nextDelegationState.runPendingDelegation,
-      runPendingFinalReply,
+      runPendingDelegation: replacementBlocked ? null : nextDelegationState.runPendingDelegation,
+      runPendingFinalReply: replacementBlocked ? 'inline' : runPendingFinalReply,
       taskActiveDelegation: nextTaskActiveDelegation,
       ...(resetIterationCount ? { runIterationCount: 0 } : {}),
       ...(kind === 'delegation_outcome'
@@ -947,7 +964,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
             runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
           }
         : {}),
-      runDelegations: finalRunDelegations,
+      runDelegations: replacementBlocked ? state.runDelegations : finalRunDelegations,
     };
   }
 

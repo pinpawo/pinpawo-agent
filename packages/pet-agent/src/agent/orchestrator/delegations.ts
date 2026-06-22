@@ -55,7 +55,7 @@ export function reuseOrAppendRunDelegation(
     };
   }
 
-  const turnDelegation: RunDelegation = {
+  const runDelegation: RunDelegation = {
     id: nextDelegation.id,
     lane: nextDelegation.lane,
     task: nextDelegation.task,
@@ -64,7 +64,7 @@ export function reuseOrAppendRunDelegation(
   };
 
   return {
-    runDelegations: [...runDelegations, turnDelegation],
+    runDelegations: [...runDelegations, runDelegation],
     runPendingDelegation: nextDelegation,
   };
 }

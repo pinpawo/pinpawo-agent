@@ -69,7 +69,7 @@ export type DecisionMode = 'finish' | 'general' | 'capability';
  * - 'answer': route to the dedicated answer node, which reads the full
  *   conversation and synthesizes the reply.
  * - 'inline': the decision node already emitted a fixed reply (ask_user
- *   question or a degenerate-fallback string); the turn ends without the
+ *   question or a degenerate-fallback string); the run ends without the
  *   answer node.
  * - null: not a finish-bucket decision (delegation in progress).
  */

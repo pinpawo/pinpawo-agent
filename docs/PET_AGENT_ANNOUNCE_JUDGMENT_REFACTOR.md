@@ -99,12 +99,12 @@ handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 只带：
 | `answerConversationMessages`（#233 新增） | 去 lane 里捞 completed+progress announce | 不再需要；answer 直接读 main queue |
 | `buildSubagentAnnounceContext`（prompts.ts:326） | 给 decision 喂 `状态：completed/progress`（先入为主） | 去掉“状态”，只喂 announce 文本 + completionReason 线索，让 decision 真正判 |
 | `delegationOutcomeDecision` | 读已写死的 tag，做“追认” | 真正判定 completed/继续/ask，并触发 handoff |
-| `createAgentRuntime.ts:675`、`delegations.ts:39` | 依赖 announce/turnDelegation 的 progress 状态 | 需改判据来源：未完成 delegation 由 `taskActiveDelegation` 表示；`runDelegations` 只保留本 run 摘要 |
+| `createAgentRuntime.ts:675`、`delegations.ts:39` | 依赖 announce/runDelegations 的 progress 状态 | 需改判据来源：未完成 delegation 由 `taskActiveDelegation` 表示；`runDelegations` 只保留本 run 摘要 |
 
 ## 6. 实现步骤（建议顺序，便于小步验证）
 
 1. **新增 handoff 构造**（messageLanes 或新文件）：给定 existingMessages + 完成的 delegation 标识，产出 `[RemoveMessage(该 delegationId 的所有 lane 消息...), 新的 main announce 副本(带 D2 metadata)]`。这是纯函数，先单测。
-2. **decision 写回接入 handoff**：在 `delegationOutcomeDecision` 的 state 写回处，对“本轮判定为完成（D1：active delegation 不再续跑）”的 delegation 执行步骤 1 的构造，并入 `messages` 更新。
+2. **decision 写回接入 handoff**：在 `delegationOutcomeDecision` 的 state 写回处，对“本 run 判定为完成（D1：active delegation 不再续跑）”的 delegation 执行步骤 1 的构造，并入 `messages` 更新。
 3. **未完成 delegation 来源改为 task state**：新增 `taskActiveDelegation`，`status: 'awaiting_decision'` 表示 subagent 已返回、等待 orchestrator 判断。`runDelegations.status` 不再承担跨 run 生命周期职责。
 4. **拆掉 lossy 映射**：`tagNewLaneMessages` 不再写 completed/progress；只保留归属标记（lane/runId/delegationId）+ 标出“哪条是 announce 文本”的中性标记。`laneMessagesForStateUpdate` 删除（被 handoff 取代）。
 5. **decision 输入去“状态”**：`buildSubagentAnnounceContext` 去掉 `状态：completed/progress` 行，保留 announce 文本 + `停止原因：completionReason`。

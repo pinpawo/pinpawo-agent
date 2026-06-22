@@ -17,9 +17,7 @@ import type {
   TuiState,
 } from './state/tuiState';
 import {
-  buildTimelineDisplayEntries,
-  splitTimelineDisplayForStaticRender,
-  splitTimelineForStaticRender,
+  buildTimelineViewportModel,
   type AgentTimelineDisplayEntry,
 } from './timeline/agentTimelineSelectors';
 import type { ActiveOperation } from './types';
@@ -80,9 +78,7 @@ export function buildTuiScreenModel(input: {
   const pendingApproval = selectFocusedPendingApproval(input.state);
   const contentWidth = Math.max(20, input.terminalColumns - 4);
   const textAreaWidth = Math.max(8, contentWidth - 4);
-  const { dynamicEntries: dynamicTimeline } = splitTimelineForStaticRender(timeline);
-  const entries = buildTimelineDisplayEntries(timeline, notices, activities);
-  const { staticEntries, dynamicEntries } = splitTimelineDisplayForStaticRender(entries, dynamicTimeline);
+  const timelineViewport = buildTimelineViewportModel(timeline, notices, activities);
   const petName = session?.actor.label ?? TUI_TEXT.defaultPetName;
   const spinnerFrame = SPINNER_FRAMES[input.animationFrame % SPINNER_FRAMES.length] ?? SPINNER_FRAMES[0];
   const activityStatus = pendingUi
@@ -99,9 +95,9 @@ export function buildTuiScreenModel(input: {
     activeOperations,
     regions: {
       timeline: {
-        entries,
-        staticEntries,
-        dynamicEntries,
+        entries: timelineViewport.entries,
+        staticEntries: timelineViewport.staticEntries,
+        dynamicEntries: timelineViewport.dynamicEntries,
         renderEpoch: input.timelineRenderEpoch,
         width: contentWidth,
         emptyText: TUI_TEXT.emptyHistory(petName),

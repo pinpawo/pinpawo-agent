@@ -68,6 +68,62 @@ test('buildTuiScreenModel marks composer and overlay state while busy', () => {
   assert.equal(model.regions.statusBar.status, model.regions.overlay.activityStatus);
 });
 
+test('buildTuiScreenModel keeps timeline viewport ids stable across resize', () => {
+  const state = createInitialTuiState(createSession({
+    id: 'chat:pet',
+    timeline: [
+      message('m1', 'user', 'hello', 'completed'),
+      message('m2', 'assistant', 'done', 'completed'),
+      message('m3', 'assistant', 'working', 'streaming'),
+    ],
+    notices: [
+      { id: 'notice-1', text: 'after m1', afterTimelineEntryId: 'm1' },
+    ],
+    activities: [
+      {
+        id: 'activity-1',
+        type: 'subagent.message',
+        requestId: 'run1',
+        text: 'delegate',
+        status: 'streaming',
+        afterTimelineEntryId: 'm2',
+      },
+    ],
+  }));
+
+  const narrow = buildTuiScreenModel({
+    state,
+    terminalColumns: 40,
+    now: 1000,
+    animationFrame: 0,
+    timelineRenderEpoch: 1,
+  });
+  const wide = buildTuiScreenModel({
+    state,
+    terminalColumns: 140,
+    now: 1000,
+    animationFrame: 0,
+    timelineRenderEpoch: 2,
+  });
+
+  assert.deepEqual(
+    narrow.regions.timeline.entries.map((entry) => entry.id),
+    wide.regions.timeline.entries.map((entry) => entry.id),
+  );
+  assert.deepEqual(
+    narrow.regions.timeline.staticEntries.map((entry) => entry.id),
+    ['m1', 'notice-1', 'm2'],
+  );
+  assert.deepEqual(
+    narrow.regions.timeline.dynamicEntries.map((entry) => entry.id),
+    ['activity-1', 'm3'],
+  );
+  assert.deepEqual(
+    narrow.regions.timeline.dynamicEntries.map((entry) => entry.id),
+    wide.regions.timeline.dynamicEntries.map((entry) => entry.id),
+  );
+});
+
 function message(
   id: string,
   role: 'user' | 'assistant',

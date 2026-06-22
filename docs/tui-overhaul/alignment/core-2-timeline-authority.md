@@ -47,7 +47,7 @@ This PR is the first CORE-2 slice. It does not complete the full timeline author
 
 ## Open Questions
 
-- Can the TUI reuse backend checkpoint message types directly, or is a render adapter required once server contracts settle?
+None for this PR. TUI uses `TuiCoreSessionSnapshot` / `TuiCoreTimelineEntry` as its stable render adapter boundary.
 
 ## Resolved Notes
 

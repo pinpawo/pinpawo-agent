@@ -34,8 +34,7 @@ Convert the bottom status bar to render a structured status model instead of ad 
 
 ## Open Questions
 
-- Which status segments should remain visible first under 80 columns?
-  - Current decision: connection/activity status, mode, and policy are prioritized before model, context, and cwd.
+None for this PR. Connection/activity status, mode, and policy are prioritized before model, context, and cwd under narrow widths.
 
 ## Merge Checklist
 

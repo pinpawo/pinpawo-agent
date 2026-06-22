@@ -35,8 +35,7 @@ Consolidate input ownership, modal ownership, and Studio/Chat mode state into th
 
 ## Open Questions
 
-- Should external editor lifecycle live fully in UI reducer, or remain partly in runtime controller state?
-  - Current decision: open/closed owner lives in reducer; async editor execution remains in `TuiApp`.
+None for this PR. External editor open/closed owner state lives in the reducer; async editor execution remains in `TuiApp`.
 
 ## Merge Checklist
 

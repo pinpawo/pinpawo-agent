@@ -35,8 +35,7 @@ Reduce Static/Dynamic timeline viewport complexity after the timeline message mo
 
 ## Open Questions
 
-- Which viewport behavior must remain for active streaming entries?
-  - Current decision: the first unsettled display entry starts the dynamic suffix; notices before it stay static, streaming activities/messages and following entries stay dynamic.
+None for this PR. The first unsettled display entry starts the dynamic suffix; notices before it stay static, and streaming activities/messages plus following entries stay dynamic.
 
 ## Merge Checklist
 

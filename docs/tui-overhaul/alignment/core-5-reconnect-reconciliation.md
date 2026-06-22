@@ -18,6 +18,7 @@ Route reconnect through the same `session.snapshot.loaded` reconciliation path a
 - Return native `TuiCoreSessionSnapshot` payloads from `/snapshot` and resume in CORE-7; keep client fallback for old local payloads.
 - Route `TuiRuntimeController.reconnect()` through `session.snapshot.loaded` before opening a new websocket.
 - Restore pending approval panels from snapshot runs.
+- Trigger snapshot reconciliation after server-reported stale/closed review errors.
 - Cover reconnect snapshots restoring completed server output while clearing terminal active runs.
 - Finalize `message.completed` events when the owning run route is still recoverable.
 - Cover missing-active-pointer `message.completed` terminalization directly in reducer tests.
@@ -42,11 +43,13 @@ Route reconnect through the same `session.snapshot.loaded` reconciliation path a
 | 2026-06-23 | interrupt timeout coverage | Interrupt timeout should release local input without letting late terminal events duplicate old output. | Server-side interrupt timeout was covered, but the TUI controller local-release path and reducer behavior after local release were not directly covered. | Main design lists interrupt timeout in the minimum test matrix. | Add a controller test for timeout-driven `run.finish` and a reducer test proving late completed events for the released request are ignored. | none | accepted |
 | 2026-06-23 | missing active pointer coverage | `message.completed` should finalize through run ownership even when `SessionModel.activeRunId` has already been cleared. | Existing docs/checklist stated the behavior, but reducer coverage did not explicitly clear the session active pointer before dispatching the completed event. | Main design lists this as a minimum test matrix scenario. | Add a reducer test that keeps the run in `TuiState.runs`, clears `activeRunId`, and verifies completed output terminalizes from the run registry. | none | accepted |
 | 2026-06-23 | reconnect completed output coverage | Reconnect snapshots should restore final assistant output after the server completed while WS was unavailable. | Existing terminal snapshot test cleared active run state but did not directly assert the restored user/assistant checkpoint timeline. | Main design lists server completion during WS disconnect as a minimum test matrix scenario. | Extend the reconnect terminal snapshot test to assert the final checkpoint timeline ids/text as well as terminal active-run cleanup. | none | accepted |
+| 2026-06-23 | stale review reconciliation | Server-reported stale or closed reviews should trigger snapshot reconciliation. | Review failures were sent as plain `error` events, so the TUI finished the local run but did not reload authoritative pending-review state. | Main design lists stale/closed review responses as reconciliation triggers, and the TUI needs a structured reason instead of matching localized text. | Add review-specific error codes and make the TUI controller restore a snapshot/reset the timeline view after those coded errors. | none | accepted |
 
 ## Merge Checklist
 
 - [x] Reconnect dispatches `session.snapshot.loaded` before websocket connect.
 - [x] Snapshot can restore pending approval `ReviewSpec`.
+- [x] Stale/closed review errors trigger snapshot reconciliation.
 - [x] Reconnect snapshot restores completed server output from checkpoint timeline.
 - [x] Missing-active `message.completed` finalizes through run ownership.
 - [x] Missing-active `message.completed` is covered by direct reducer test.

@@ -109,8 +109,14 @@ export type LocalAgentSystemNoticeEvent = {
   message: string;
 };
 
+export type LocalAgentErrorCode =
+  | 'review_closed'
+  | 'review_stale'
+  | 'review_wrong_session';
+
 export type LocalAgentErrorEvent = {
   type: 'error';
   requestId: string;
   message: string;
+  code?: LocalAgentErrorCode;
 };

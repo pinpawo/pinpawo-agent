@@ -228,3 +228,54 @@ test('TuiRuntimeController restores a reconnect snapshot before opening websocke
     'reconnect',
   );
 });
+
+test('TuiRuntimeController reconciles snapshots after stale review errors', async () => {
+  const harness = createController(pendingReviewState());
+  const events: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    readSessionSnapshot: async () => {
+      events.push('snapshot');
+      return {
+        sessionId: 'sess-1',
+        kind: 'chat',
+        timeline: [{
+          id: 'message:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'hello',
+          status: 'completed',
+          source: 'checkpoint',
+        }],
+        runs: [],
+      };
+    },
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).handleServerMessage({
+    type: 'event',
+    requestId: 'req-1',
+    event: {
+      type: 'error',
+      requestId: 'req-1',
+      message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
+      code: 'review_stale',
+    },
+  });
+
+  await new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
+  assert.deepEqual(events, ['snapshot']);
+  assert.equal(harness.resetCount, 1);
+  assert.equal(harness.actions[0]?.type, 'event.received');
+  assert.equal(harness.actions[1]?.type, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
+  assert.equal(
+    harness.actions[1]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
+      ? harness.actions[1].source
+      : undefined,
+    'reconnect',
+  );
+});

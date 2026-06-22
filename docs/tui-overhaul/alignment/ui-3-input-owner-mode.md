@@ -31,6 +31,7 @@ Consolidate input ownership, modal ownership, and Studio/Chat mode state into th
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-06-22 | Studio/chat mode | One reducer-owned source controls Studio mode and conversation id. | Resume picker remains hook-owned. | Picker loading/selection is controller lifecycle state; moving it would expand UI-3 too far. | Added reducer-owned `ui.mode`, `ui.studioConversationId`, and `ui.externalEditorOpen`; `/studio`, `/chat`, `/resume`, and `/new` clear mode coherently. | A later UI cleanup can move picker indices/open flags if desired. | Done |
 | 2026-06-22 | Input owner routing | Input routing goes through one owner state machine, including external editor ownership. | Picker lifecycle data remains local/hook-owned; owner routing is centralized. | Moving async picker loading state into the reducer is orthogonal to command routing and would broaden this PR. | Added external editor to `TuiInputOwner` and routed terminal input through `resolveTuiInputOwner` instead of a TuiApp early return. | None for this PR. | Done |
+| 2026-06-23 | Resume UI owner cleanup | Resume should clear stale reducer-owned UI owner state before the new snapshot becomes authoritative. | `session.snapshot.loaded` for resume relied on command/picker callers to reset Studio mode and did not clear the external-editor owner in the reducer path itself. | Main design lists resume as a route/run/UI/modal cleanup scenario, so the reducer path should be self-contained. | Clear `ui.mode`, `ui.studioConversationId`, and `ui.externalEditorOpen` in the resume snapshot reducer path. | None. | Done |
 
 ## Open Questions
 
@@ -42,5 +43,6 @@ Consolidate input ownership, modal ownership, and Studio/Chat mode state into th
 - [x] One authoritative owner exists for composer/modal/picker mode.
 - [x] `/studio` and `/chat` mode transitions are deterministic.
 - [x] Resume/new clears stale UI owner state.
+- [x] Resume snapshot clears stale reducer-owned UI owner state.
 - [x] External editor input ownership routes through the input owner state machine.
 - [x] PR references tracking issue #232.

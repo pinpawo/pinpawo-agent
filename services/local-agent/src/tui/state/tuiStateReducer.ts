@@ -649,6 +649,13 @@ function applySessionSnapshot(
 
   return {
     ...state,
+    ui: action.source === 'resume'
+      ? {
+          mode: 'chat' as const,
+          studioConversationId: null,
+          externalEditorOpen: false,
+        }
+      : state.ui,
     focusedSessionId: sessionId,
     sessions: nextSessions,
     runs: {

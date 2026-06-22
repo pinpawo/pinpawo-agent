@@ -646,6 +646,14 @@ test('tuiStateReducer clears snapshot activeRunId when the run is terminal', () 
 
 test('tuiStateReducer resumes a session from snapshot while clearing previous run state', () => {
   let state = startRun(initialState('chat:old'), 'old-req');
+  state = {
+    ...state,
+    ui: {
+      mode: 'studio',
+      studioConversationId: 'conversation-1',
+      externalEditorOpen: true,
+    },
+  };
 
   state = tuiStateReducer(state, {
     type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
@@ -670,6 +678,11 @@ test('tuiStateReducer resumes a session from snapshot while clearing previous ru
   assert.equal(state.focusedSessionId, 'chat:new');
   assert.equal(state.runs['old-req'], undefined);
   assert.equal(state.sessions['chat:old']?.activeRunId, null);
+  assert.deepEqual(state.ui, {
+    mode: 'chat',
+    studioConversationId: null,
+    externalEditorOpen: false,
+  });
   assert.equal(state.sessions['chat:new']?.kind, 'studio');
   assert.deepEqual(transcriptTimeline(state, 'chat:new'), [
     ['user', 'resumed'],

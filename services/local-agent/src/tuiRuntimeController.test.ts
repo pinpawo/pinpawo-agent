@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { TuiRuntimeController } from './tui/TuiRuntimeController';
 import { TUI_CORE_TARGET_ACTIONS } from './tui/contracts/tuiCoreContract';
 import { createComposerHistoryState } from './tui/input/composerHistory';
@@ -46,6 +46,23 @@ function pendingReviewState(): TuiState {
         activities: [],
         tokenUsage: null,
         activeRunId: 'req-1',
+      },
+    },
+  };
+}
+
+function busyRunState(): TuiState {
+  return {
+    ...pendingReviewState(),
+    runs: {
+      'req-1': {
+        requestId: 'req-1',
+        sessionId: 'sess-1',
+        kind: 'chat',
+        phase: 'thinking',
+        timelineEntryIds: [],
+        startedAt: 1,
+        charCount: 0,
       },
     },
   };
@@ -125,6 +142,29 @@ test('TuiRuntimeController interrupts pending human review instead of dismissing
     requestId: 'req-1',
     statusMessage: '正在打断',
   });
+});
+
+test('TuiRuntimeController releases input locally after interrupt timeout', () => {
+  mock.timers.enable({ apis: ['setTimeout'], now: 0 });
+  try {
+    const { controller, actions } = createController(busyRunState());
+
+    const submitted = controller.requestInterrupt();
+    mock.timers.tick(1800);
+
+    assert.equal(submitted, true);
+    const finish = actions.find((action) => action.type === 'run.finish');
+    assert.equal(finish?.type, 'run.finish');
+    if (finish?.type !== 'run.finish') return;
+    assert.equal(finish.requestId, 'req-1');
+    assert.equal(finish.statusMessage, '已请求打断');
+    assert.deepEqual(
+      finish.messages?.map((message) => [message.kind, message.text]),
+      [['system', '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。']],
+    );
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test('TuiRuntimeController resets static timeline view for new sessions', () => {

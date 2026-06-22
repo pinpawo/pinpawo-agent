@@ -845,6 +845,39 @@ test('tuiStateReducer drops late or unknown requestId events', () => {
   assert.equal(selectFocusedTimeline(next).some((entry) => entry.type === 'message' && entry.role === 'assistant'), false);
 });
 
+test('tuiStateReducer ignores late terminal events after local interrupt release', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'run.finish',
+    requestId: 'req-1',
+    statusMessage: '已请求打断',
+    messages: [{
+      id: 'local-release',
+      kind: 'system',
+      text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+    }],
+  });
+
+  const next = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'late final answer',
+    },
+    now: 1200,
+  });
+
+  assert.equal(next, state);
+  assert.equal(selectFocusedActiveRun(next), null);
+  assert.equal(timelineMessageText(next, 'chat:pet', 'req-1:assistant:0'), undefined);
+  assert.deepEqual(transcriptTimeline(next), [['user', 'hello']]);
+  assert.deepEqual(selectFocusedNotices(next).map((notice) => notice.text), [
+    '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+  ]);
+});
+
 test('tuiStateReducer keeps two requestIds from mixing assistant timeline entries', () => {
   let state = initialState('s1');
   state = {

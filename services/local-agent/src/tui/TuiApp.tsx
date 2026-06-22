@@ -37,6 +37,7 @@ import { submitCurrentInputFromController } from './input/commandSubmit';
 import { buildBusyStatusLine } from './render/eventText';
 import { formatNow } from './render/terminalText';
 import { TUI_TEXT } from './render/text';
+import { buildStatusBarModel } from './statusBarModel';
 import { createInitialTuiState, createSession } from './state/tuiState';
 import {
   selectFocusedActiveOperations,
@@ -605,6 +606,11 @@ export function TuiApp(props: { actorId: string }) {
   const activityStatus = pendingUi
     ? buildBusyStatusLine(pendingUi, now, spinnerFrame, activeOperations)
     : status;
+  const statusBarModel = useMemo(() => buildStatusBarModel({
+    status: activityStatus,
+    session: focusedSession,
+    globalReviewPolicyMode,
+  }), [activityStatus, focusedSession, globalReviewPolicyMode]);
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -644,11 +650,6 @@ export function TuiApp(props: { actorId: string }) {
           selectedIndex={approvalIndex}
         />
       ) : null}
-      {!pendingApproval ? (
-        <>
-          <Text dimColor>{activityStatus}</Text>
-        </>
-      ) : null}
       {commandPalette.open ? (
         <CommandPalette model={commandPalette} width={contentWidth} />
       ) : null}
@@ -673,9 +674,7 @@ export function TuiApp(props: { actorId: string }) {
         )}
       </Box>
       <BottomStatusLine
-        status={activityStatus}
-        session={focusedSession}
-        globalReviewPolicyMode={globalReviewPolicyMode}
+        model={statusBarModel}
         width={contentWidth}
       />
     </Box>

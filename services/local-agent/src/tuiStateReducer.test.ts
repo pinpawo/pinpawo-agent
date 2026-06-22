@@ -52,6 +52,40 @@ function transcriptTimeline(state: TuiState, sessionId = 'chat:pet') {
     ]) ?? [];
 }
 
+test('tuiStateReducer initializes reducer-owned UI owner state', () => {
+  const state = initialState();
+
+  assert.deepEqual(state.ui, {
+    mode: 'chat',
+    studioConversationId: null,
+    externalEditorOpen: false,
+  });
+});
+
+test('tuiStateReducer updates mode and external editor owner state', () => {
+  let state = initialState();
+
+  state = tuiStateReducer(state, {
+    type: 'ui.mode.set',
+    mode: 'studio',
+    studioConversationId: 'conversation-1',
+  });
+  state = tuiStateReducer(state, {
+    type: 'ui.external_editor.set_open',
+    open: true,
+  });
+
+  assert.equal(state.ui.mode, 'studio');
+  assert.equal(state.ui.studioConversationId, 'conversation-1');
+  assert.equal(state.ui.externalEditorOpen, true);
+
+  state = tuiStateReducer(state, { type: 'ui.mode.reset' });
+
+  assert.equal(state.ui.mode, 'chat');
+  assert.equal(state.ui.studioConversationId, null);
+  assert.equal(state.ui.externalEditorOpen, true);
+});
+
 test('tuiStateReducer uses completed message text for final assistant timeline entry', () => {
   let state = startRun(initialState(), 'req-1');
 
@@ -414,10 +448,16 @@ test('tuiStateReducer clears session token usage when clearing session state', (
   let state = initialState();
   state = {
     ...state,
+    ui: {
+      mode: 'studio',
+      studioConversationId: 'conversation-1',
+      externalEditorOpen: true,
+    },
     sessions: {
       ...state.sessions,
       'chat:pet': {
         ...state.sessions['chat:pet']!,
+        kind: 'studio',
         tokenUsage: {
           inputTokens: 100,
           outputTokens: 50,
@@ -432,6 +472,12 @@ test('tuiStateReducer clears session token usage when clearing session state', (
   });
 
   assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
+  assert.equal(state.sessions['chat:pet']?.kind, 'chat');
+  assert.deepEqual(state.ui, {
+    mode: 'chat',
+    studioConversationId: null,
+    externalEditorOpen: false,
+  });
 });
 
 test('tuiStateReducer loads authoritative session snapshots', () => {

@@ -17,6 +17,7 @@ export type TuiInputRouteContext = {
   hasGlobalReviewPolicyPicker?: boolean;
   hasCommandPalette?: boolean;
   hasFileMention?: boolean;
+  hasExternalEditor?: boolean;
   composerHistory?: ComposerHistoryRouteState | null;
 };
 
@@ -25,6 +26,7 @@ export type TuiInputRouterState = {
 };
 
 export type TuiInputOwner =
+  | { type: 'externalEditor' }
   | { type: 'unready' }
   | { type: 'resumePicker' }
   | { type: 'globalReviewPolicyPicker' }
@@ -78,11 +80,12 @@ export function resolveTuiInputAction(
   event: CanonicalInputEvent,
   context: TuiInputRouteContext,
 ): TuiInputCommand {
-  if (event.type === 'interrupt') {
+  const owner = resolveTuiInputOwner(context);
+  if (event.type === 'interrupt' && owner.type !== 'externalEditor') {
     return { target: 'global', action: 'ctrl_c' };
   }
 
-  return resolveTuiInputCommand(event, resolveTuiInputOwner(context), {
+  return resolveTuiInputCommand(event, owner, {
     composerHistory: context.composerHistory,
   });
 }
@@ -95,6 +98,7 @@ export function resolveLegacyTuiInputAction(
 }
 
 export function resolveTuiInputOwner(context: TuiInputRouteContext): TuiInputOwner {
+  if (context.hasExternalEditor) return { type: 'externalEditor' };
   if (!context.ready) return { type: 'unready' };
   if (context.hasResumePicker) return { type: 'resumePicker' };
   if (context.hasPendingApproval) {
@@ -116,6 +120,9 @@ export function resolveTuiInputCommand(
   const isControlSequence = event.type === 'unknown.control';
 
   switch (owner.type) {
+    case 'externalEditor':
+      return { target: 'none' };
+
     case 'unready':
       return { target: 'none' };
 

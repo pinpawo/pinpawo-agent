@@ -10,6 +10,16 @@ import {
 
 test('resolveTuiInputOwner applies TUI focus priority', () => {
   assert.deepEqual(
+    resolveTuiInputOwner({
+      ready: false,
+      busy: false,
+      hasPendingApproval: false,
+      hasResumePicker: false,
+      hasExternalEditor: true,
+    }),
+    { type: 'externalEditor' },
+  );
+  assert.deepEqual(
     resolveTuiInputOwner({ ready: false, busy: true, hasPendingApproval: true, hasResumePicker: true }),
     { type: 'unready' },
   );
@@ -58,6 +68,26 @@ test('resolveTuiInputOwner applies TUI focus priority', () => {
   assert.deepEqual(
     resolveTuiInputOwner({ ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'composer' },
+  );
+});
+
+test('resolveTuiInputAction leaves external editor input owned by the editor', () => {
+  assert.deepEqual(
+    resolveTuiInputAction(
+      { type: 'interrupt' },
+      {
+        ready: true,
+        busy: true,
+        hasPendingApproval: true,
+        hasResumePicker: true,
+        hasExternalEditor: true,
+      },
+    ),
+    { target: 'none' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'text.insert', text: 'x' }, { type: 'externalEditor' }),
+    { target: 'none' },
   );
 });
 

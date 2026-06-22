@@ -17,7 +17,7 @@ import type { ZodType } from 'zod';
  * latest schema-valid `ToolMessage.artifact` (tools using
  * `responseFormat: 'content_and_artifact'`); we find it and write it through the
  * capability's own store, then record the ref via the pet-agent sink so it
- * reaches `state.capabilityArtifacts`.
+   * reaches `state.sessionCapabilityArtifacts`.
  *
  * The store is supplied by the capability (a host concern, reached by closure),
  * the sink by pet-agent (`ctx.recordCapabilityArtifact`). No-op when either is
@@ -49,7 +49,7 @@ export async function recordLatestToolResultArtifact(
       threadId: ctx.threadId,
       capabilityId: ctx.capabilityId,
       delegationId: ctx.delegationId,
-      turnId: ctx.turnId,
+      runId: ctx.runId,
       artifact: {
         kind: 'result',
         mimeType: 'application/json',

@@ -35,14 +35,14 @@ export type CapabilityInstructionContext = CapabilityContext;
  * §26: the store reaches capabilities by closure, not via OrchestratorConfig).
  * pet-agent supplies the identifiers needed to address a write, and the
  * `recordCapabilityArtifact` sink that attaches the returned ref to the subagent
- * result so it reaches `state.capabilityArtifacts`.
+ * result so it reaches `state.sessionCapabilityArtifacts`.
  */
 export type CapabilityMiddlewareContext = {
   recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
   threadId?: string | null;
   capabilityId: string;
   delegationId: string;
-  turnId: string;
+  runId: string;
 };
 
 export type CapabilityMiddleware = {

@@ -13,7 +13,7 @@ import type {
   PetAgentStatus,
 } from '../../types/studio';
 import {
-  buildOrchestratorTurnInput,
+  buildOrchestratorRunInput,
   createOrchestratorGraph,
   type OrchestratorConfig,
   type OrchestratorGraph,
@@ -157,7 +157,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     const previousStatus = status;
     status = 'active';
     try {
-      let graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorTurnInput(messages);
+      let graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(messages);
       while (true) {
         const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
         const pending = readPendingInterrupt(result);

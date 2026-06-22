@@ -21,7 +21,7 @@ test('FileCapabilityArtifactStore writes, lists, and reads text artifacts', asyn
     threadId: 'thread-1',
     capabilityId: 'explore',
     delegationId: 'delegation-1',
-    turnId: 'turn-1',
+    runId: 'run-1',
     artifact: {
       kind: 'report',
       mimeType: 'text/markdown',
@@ -53,7 +53,7 @@ test('FileCapabilityArtifactStore is idempotent for retried writes', async () =>
     threadId: 'thread-1',
     capabilityId: 'explore',
     delegationId: 'delegation-1',
-    turnId: 'turn-1',
+    runId: 'run-1',
     artifact: {
       kind: 'result' as const,
       mimeType: 'application/json',
@@ -76,7 +76,7 @@ test('FileCapabilityArtifactStore writes inline binary content and does not expo
     threadId: 'thread-1',
     capabilityId: 'image',
     delegationId: 'delegation-1',
-    turnId: 'turn-1',
+    runId: 'run-1',
     artifact: {
       kind: 'image',
       mimeType: 'image/png',
@@ -101,7 +101,7 @@ test('FileCapabilityArtifactStore stores externalUri refs without copying bytes'
     threadId: 'thread-1',
     capabilityId: 'image',
     delegationId: 'delegation-1',
-    turnId: 'turn-1',
+    runId: 'run-1',
     artifact: {
       kind: 'image',
       mimeType: 'image/png',
@@ -126,7 +126,7 @@ test('FileCapabilityArtifactStore reads text maxBytes without splitting UTF-8 ch
     threadId: 'thread-1',
     capabilityId: 'explore',
     delegationId: 'delegation-1',
-    turnId: 'turn-1',
+    runId: 'run-1',
     artifact: {
       kind: 'report',
       mimeType: 'text/plain',
@@ -147,7 +147,7 @@ test('FileCapabilityArtifactStore deletes all artifacts for a thread', async () 
     threadId: 'thread-1',
     capabilityId: 'explore',
     delegationId: 'delegation-1',
-    turnId: 'turn-1',
+    runId: 'run-1',
     artifact: {
       kind: 'report',
       mimeType: 'text/plain',

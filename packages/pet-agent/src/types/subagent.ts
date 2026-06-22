@@ -56,7 +56,7 @@ export type SubagentToolEventHandler = (event: SubagentToolEvent) => void | Prom
 
 /**
  * Lets a subagent persist a capability artifact from inside the loop and have
- * the ref reach `state.capabilityArtifacts`. `recordCapabilityArtifact` is the
+ * the ref reach `state.sessionCapabilityArtifacts`. `recordCapabilityArtifact` is the
  * sink supplied by the orchestrator (it pushes into the shared artifacts array
  * that becomes `SubagentResult.artifacts`); the ids address a write. A
  * capability holds its own `CapabilityArtifactStore` by closure for the bytes;
@@ -71,7 +71,7 @@ export type CapabilityArtifactSink = {
   recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
   threadId?: string | null;
   delegationId?: string;
-  turnId?: string;
+  runId?: string;
 };
 
 export type ContextPolicyContext = {

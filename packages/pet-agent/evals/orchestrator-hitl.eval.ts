@@ -21,7 +21,7 @@ import {
 } from '../src/index';
 import type { AgentActor, AgentModels } from '../src/types/agent';
 import type { AgentCapability } from '../src/types/capability';
-import type { RouteDecision } from '../src/agent/orchestrator/schemas';
+import type { OrchestrationDecision as RouteDecision } from '../src/agent/orchestrator/schemas';
 import { defineToolkit } from '../src/types/toolkit';
 
 const DATASET_NAME = 'orchestrator-hitl';
@@ -185,11 +185,13 @@ function resolveCapabilityList(pack: unknown): AgentCapability[] {
 function buildDeterministicModels(decisions: RouteDecision[]): AgentModels {
   let index = 0;
   const routeModel = {
+    // The dedicated answer node calls model.invoke() directly when a decision
+    // resolves to `finish`; return a deterministic reply for those cases.
+    invoke: async () => new AIMessage('done'),
     withStructuredOutput: () => ({
       invoke: async () => {
         const decision = decisions[index] ?? decisions.at(-1) ?? {
           action: 'finish',
-          answer: 'done',
         };
         index += 1;
         return decision;

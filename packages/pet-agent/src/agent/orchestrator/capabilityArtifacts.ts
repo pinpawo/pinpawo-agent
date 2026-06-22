@@ -4,6 +4,7 @@ export type CapabilityArtifactSelector = {
   kind?: CapabilityArtifactKind;
   capabilityId?: string;
   delegationId?: string;
+  runId?: string;
   turnId?: string;
   schemaName?: string;
   schemaVersion?: number;
@@ -39,7 +40,7 @@ export function matchesCapabilityArtifact(
   return (!selector.kind || artifact.kind === selector.kind)
     && (!selector.capabilityId || artifact.capabilityId === selector.capabilityId)
     && (!selector.delegationId || artifact.delegationId === selector.delegationId)
-    && (!selector.turnId || artifact.turnId === selector.turnId)
+    && (!(selector.runId ?? selector.turnId) || artifact.runId === (selector.runId ?? selector.turnId))
     && (!selector.schemaName || artifact.schema?.name === selector.schemaName)
     && (typeof selector.schemaVersion !== 'number' || artifact.schema?.version === selector.schemaVersion)
     && metadataMatches(artifact, selector.metadata);
@@ -74,6 +75,7 @@ function hasExplicitResultScope(selector: CapabilityArtifactSelector): boolean {
   return Boolean(
     selector.capabilityId
       || selector.delegationId
+      || selector.runId
       || selector.turnId
       || selector.schemaName
       || (selector.metadata && Object.keys(selector.metadata).length > 0),
@@ -86,7 +88,7 @@ export function selectCapabilityResultArtifact(
 ): CapabilityArtifactRef | null {
   if (!hasExplicitResultScope(selector)) {
     throw new Error(
-      'selectCapabilityResultArtifact requires capabilityId, delegationId, turnId, schemaName, or metadata; there is no global latest result.',
+    'selectCapabilityResultArtifact requires capabilityId, delegationId, runId, schemaName, or metadata; there is no global latest result.',
     );
   }
   return selectLatestCapabilityArtifact(artifacts, { ...selector, kind: 'result' });

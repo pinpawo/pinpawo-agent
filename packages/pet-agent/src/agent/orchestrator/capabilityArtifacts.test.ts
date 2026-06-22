@@ -13,7 +13,7 @@ function ref(overrides: Partial<CapabilityArtifactRef> & { id: string }): Capabi
     threadId: 'thread-1',
     capabilityId: 'daily_post',
     delegationId: 'delegation-1',
-    turnId: 'turn-1',
+    runId: 'turn-1',
     kind: 'result',
     mimeType: 'application/json',
     uri: `capability-artifact://thread/thread-1/delegation/delegation-1/artifact/${id}`,

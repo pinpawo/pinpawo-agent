@@ -57,7 +57,7 @@ test('orchestrator context compaction trigger ignores lane transcript noise', as
     });
     setPinpetMeta(toolResult, {
       lane: 'general',
-      turnId: 'turn-1',
+      runId: 'turn-1',
       delegationId: 'task-noise',
     });
     messages.push(toolResult);
@@ -168,7 +168,7 @@ test('orchestrator context compaction summarizes lane announces without subagent
   const subagentDetail = new AIMessage(`subagent verbose detail ${'z'.repeat(3200)}`);
   setPinpetMeta(subagentDetail, {
     lane: 'general',
-    turnId: 'turn-1',
+    runId: 'turn-1',
     delegationId: 'task-1',
     task: '整理素材',
   });
@@ -177,15 +177,15 @@ test('orchestrator context compaction summarizes lane announces without subagent
   const announce = new AIMessage('素材已经整理完成，输出了 result.md。');
   setPinpetMeta(announce, {
     lane: 'general',
-    turnId: 'turn-1',
-    announce: 'completed',
+    runId: 'turn-1',
+    isAnnounce: true,
     delegationId: 'task-1',
     task: '整理素材',
   });
   messages.push(announce);
 
   const orchestratorMessage = new AIMessage('内部路由决策，不应进入摘要。');
-  setPinpetMeta(orchestratorMessage, { lane: 'orchestrator', turnId: 'turn-1' });
+  setPinpetMeta(orchestratorMessage, { lane: 'orchestrator', runId: 'turn-1' });
   messages.push(orchestratorMessage);
 
   messages.push(new HumanMessage('最后保留的用户消息'));

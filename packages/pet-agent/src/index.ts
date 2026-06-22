@@ -70,6 +70,7 @@ export type {
 export { defineToolkit, defineToolset, hasToolOperationMetadata } from './types/toolkit';
 
 export {
+  buildOrchestratorRunInput,
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
   isOrchestratorInternalAiStreamNode,

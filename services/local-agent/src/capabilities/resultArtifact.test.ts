@@ -22,7 +22,7 @@ function fakeStore(writes: CapabilityArtifactWriteInput[]): CapabilityArtifactSt
         threadId: input.threadId,
         capabilityId: input.capabilityId,
         delegationId: input.delegationId,
-        turnId: input.turnId,
+        runId: input.runId,
         kind: input.artifact.kind,
         mimeType: input.artifact.mimeType,
         uri: `capability-artifact://thread/${input.threadId}/delegation/${input.delegationId}/artifact/${writes.length}`,
@@ -45,7 +45,7 @@ function ctx(recorded: CapabilityArtifactRef[]): CapabilityMiddlewareContext {
     threadId: 'thread-1',
     capabilityId: 'daily_post',
     delegationId: 'dg_1',
-    turnId: 'turn_1',
+    runId: 'run_1',
   };
 }
 

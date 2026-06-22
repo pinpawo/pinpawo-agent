@@ -34,7 +34,7 @@ test('request contexts include bounded capability artifact refs', () => {
       threadId: 'thread-1',
       capabilityId: 'explore',
       delegationId: 'delegation-1',
-      turnId: 'turn-1',
+      runId: 'turn-1',
       kind: 'report',
       mimeType: 'text/markdown',
       uri: 'capability-artifact://thread/thread-1/delegation/delegation-1/artifact/artifact-1',
@@ -58,7 +58,7 @@ test('request contexts include bounded capability artifact refs', () => {
       threadId: 'thread-1',
       capabilityId: 'explore',
       delegationId: 'delegation-1',
-      turnId: 'turn-1',
+      runId: 'turn-1',
       kind: 'report',
       mimeType: 'text/markdown',
       uri: 'capability-artifact://thread/thread-1/delegation/delegation-1/artifact/artifact-1',
@@ -85,10 +85,10 @@ test('capability discovery request context also receives compaction summaries', 
   assert.match(requestContext, /当前任务是修复 context compaction/);
 });
 
-test('loop-internal router input stays focused on current turn announce context', () => {
+test('loop-internal router input stays focused on current run announce context', () => {
   const input = buildDelegationOutcomeDecisionInput({
     latestUserRequest: '继续推进',
-    turnDelegationContext: '当前轮任务跟踪：\n- 所有已委派任务均为 completed。',
+    runDelegationContext: '当前 run 任务跟踪：\n- 所有已委派任务均为 completed。',
     subagentAnnounceContext: 'subagent announce：\n- 状态：completed',
     capabilityArtifacts: [],
   });
@@ -107,7 +107,6 @@ test('completed subagent announce context includes the full current result text'
     lane: 'general',
     delegationId: 'task-1',
     task: '整理排行榜',
-    announce: 'completed',
     text: longResult,
   }, 'natural');
 

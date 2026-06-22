@@ -8,11 +8,11 @@ import type {
   CapabilityDecisionState,
   SubagentAnnounce,
   SubagentCompletionReason,
-  TurnDelegation,
+  RunDelegation,
 } from './types';
-import { clipForPrompt, describeAnnounceKind, formatDelegationStatus, readMessageText } from './utils';
+import { clipForPrompt, formatDelegationStatus, readMessageText } from './utils';
 
-const MAX_DECISION_TURN_DELEGATIONS = 6;
+const MAX_DECISION_RUN_DELEGATIONS = 6;
 const MAX_RECENT_MAIN_MESSAGES = 6;
 const MAX_RECENT_ANNOUNCE_CONTEXT = 5;
 const MAX_CONTEXT_SUMMARIES = 2;
@@ -31,14 +31,14 @@ export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[
   return lines.join('\n');
 }
 
-export function buildTurnDelegationContext(turnDelegations: TurnDelegation[]): string {
-  if (turnDelegations.length === 0) {
-    return '当前轮任务跟踪：\n- 暂无已委派任务。';
+export function buildRunDelegationContext(runDelegations: RunDelegation[]): string {
+  if (runDelegations.length === 0) {
+    return '当前 run 任务跟踪：\n- 暂无已委派任务。';
   }
 
-  const visibleDelegations = turnDelegations.slice(-MAX_DECISION_TURN_DELEGATIONS);
+  const visibleDelegations = runDelegations.slice(-MAX_DECISION_RUN_DELEGATIONS);
   const lines = [
-    '当前轮任务跟踪（仅保留本轮近期任务）',
+    '当前 run 任务跟踪（仅保留本 run 近期任务）',
     visibleDelegations.some((delegation) => delegation.status !== 'completed')
       ? '- 存在尚未 completed 的委派任务。'
       : '- 所有已委派任务均为 completed。',
@@ -122,7 +122,7 @@ export function buildRecentSubagentAnnounceContext(announces: SubagentAnnounce[]
 
   const lines = ['最近 subagent announce（用于理解“之前/刚刚/继续/完成了吗”等指代）：'];
   for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
-    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}${item.lane}，${describeAnnounceKind(item.announce)}`);
+    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}${item.lane}`);
     if (item.task) {
       lines.push(`  委派任务：${clipForPrompt(item.task, 140)}`);
     }
@@ -141,7 +141,7 @@ export function buildCapabilityDiscoveryTaskContext(announces: SubagentAnnounce[
 
   const lines = ['近期任务状态（只用于理解当前请求是否承接已有任务；不要把旧任务目标当成当前搜索目标）：'];
   for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
-    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}执行器：${item.lane}；完成进度：${item.announce}`);
+    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}执行器：${item.lane}`);
     if (item.task) {
       lines.push(`  任务目标：${clipForPrompt(item.task, 120)}`);
     }
@@ -163,7 +163,7 @@ function buildDecisionConfigLines(actor: AgentActor, workdir?: string, runtimeEn
 
 export function buildUserIntentDecisionSystemPrompt(params: {
   actor: AgentActor;
-  turnDelegationContext: string;
+  runDelegationContext: string;
   targetsContext: string;
   capabilityDecisionState: CapabilityDecisionState;
   outputInstruction: string;
@@ -176,7 +176,7 @@ export function buildUserIntentDecisionSystemPrompt(params: {
     '',
     '你是 orchestrator 的用户意图判断节点，只决定下一步，不亲自执行可委派目标里的能力。',
     '',
-    params.turnDelegationContext,
+    params.runDelegationContext,
     '',
     params.targetsContext,
     '',
@@ -184,8 +184,8 @@ export function buildUserIntentDecisionSystemPrompt(params: {
     '判断重点：理解用户当前想完成什么，决定是否需要外部执行器。',
     '',
     '决策原则：',
-    '- 如果当前输入足以直接回应用户，选择 finish。',
-    '- 如果用户询问已有上下文、最近任务状态或之前结果，且请求上下文足以回答，选择 finish。',
+    '- 如果当前输入足以直接回应用户（无需委派执行器），选择 finish；最终回复由后续回复节点基于完整对话历史生成，你不要在这里撰写回复内容。',
+    '- 如果用户询问已有上下文、最近任务状态或之前结果，选择 finish 交给回复节点回答；不要在决策层凭印象复述或编造之前的结果。',
     '- 如果下一步任务匹配某个 delegate_capability.<name> 候选，选择该候选；capability 优先于 general。即使缺少主题、平台、时长等执行参数，也应把澄清交给 capability 内部处理，除非用户目标本身无法判断或涉及真实风险。',
     '- 如果没有明确匹配的 capability，且信息不足、用户意图不明确，或下一步具有破坏性、不可逆、涉及敏感凭据、外部真实副作用，选择 ask_user 先向用户确认。',
     ...capabilityInstructions.map((line) => `- ${line}`),
@@ -212,10 +212,10 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
     params.targetsContext,
     '',
     '当前阶段：subagent 返回后的结果判断。',
-    '判断重点：读取输入中的 subagent announce，判断用户当前轮目标是否已经满足。',
+    '判断重点：读取输入中的 subagent announce，判断用户当前 run 目标是否已经满足。',
     '',
     '决策原则：',
-    '- 如果 subagent announce 已经满足用户当前轮目标，选择 finish。',
+    '- 如果 subagent announce 已经满足用户当前 run 目标，选择 finish；最终回复由后续回复节点基于完整对话历史（含 subagent 返回内容）生成，你不要在这里撰写回复内容。',
     '- 如果 subagent announce 只是阶段性进展，判断还缺什么；需要执行器继续时再委派。',
     '- 如果 subagent 因迭代上限、上下文限制或阶段性停止而返回 progress，但用户目标仍明确且不需要用户补充信息，优先继续委派给同一类执行器；不要仅因为 progress 就 ask_user。',
     '- 如果用户原始请求仍有明确未完成目标，选择一个最明确的下一步。',
@@ -227,9 +227,29 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   ].filter((line) => line !== null).join('\n');
 }
 
+export function buildAnswerSystemPrompt(params: {
+  actor: AgentActor;
+  workdir?: string;
+  runtimeEnvironment?: string;
+}): string {
+  return [
+    ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
+    '',
+    '你是 orchestrator 的最终回复节点。orchestrator 已经判断当前 run 无需再委派执行器，现在由你直接回复用户。',
+    '你能看到完整的对话历史（包括之前 subagent/执行器返回的完整内容）。',
+    '',
+    '回复原则：',
+    '- 基于完整对话历史，对用户当前请求给出忠实、连贯、直接可用的回复。',
+    '- 严禁编造历史中没有出现的数据、数字、来源或结论；如需引用之前的结果，以对话历史中的原文为准，不要凭记忆改写。',
+    '- 如果用户是在要求复述、重发或继续之前的结果，就从历史中找到对应内容如实呈现，不要重新生成一份与之前不一致的版本。',
+    '- 如果历史中确实缺少回答所需的信息，如实说明缺什么，不要用先验知识填补。',
+    '- 直接输出给用户看的回复正文，不要输出 JSON、动作字段或决策说明。',
+  ].filter((line) => line !== null).join('\n');
+}
+
 export function buildCapabilityDiscoverySystemPrompt(params: {
   actor: AgentActor;
-  turnDelegationContext: string;
+  runDelegationContext: string;
   generalTools: StructuredTool[];
   workdir?: string;
   runtimeEnvironment?: string;
@@ -254,7 +274,7 @@ export function buildCapabilityDiscoverySystemPrompt(params: {
     '你是 capability discovery，只判断是否需要先搜索业务 capability 候选。',
     '不要做最终路由决策，不要回答用户，也不要委派执行器。',
     '',
-    params.turnDelegationContext,
+    params.runDelegationContext,
     '',
     ...generalToolLines,
     '',
@@ -285,7 +305,7 @@ function buildCapabilityDecisionInstructions(capabilityDecisionState: Capability
   }
   if (capabilityDecisionState === 'search_exhausted') {
     return [
-      '已搜索但没有找到匹配的 delegate_capability.<name> 候选；本轮不再尝试该路径。',
+      '已搜索但没有找到匹配的 delegate_capability.<name> 候选；本 run 不再尝试该路径。',
     ];
   }
   return [];
@@ -308,11 +328,13 @@ export function buildSubagentAnnounceContext(
   completionReason?: SubagentCompletionReason | null,
 ): string | null {
   if (!item) return null;
+  // No completed/progress verdict here: the orchestrator judges completion from
+  // the announce text + stop reason. Feeding a pre-baked "状态" would bias it into
+  // rubber-stamping. See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
   const lines = [
     'subagent announce：',
     item.delegationId ? `- 任务标识：${item.delegationId}` : null,
     `- 执行器：${item.lane}`,
-    `- 状态：${describeAnnounceKind(item.announce)}`,
     completionReason ? `- 停止原因：${completionReason}` : null,
     item.task ? `- 委派任务：${clipForPrompt(item.task, 180)}` : null,
     formatSubagentAnnounceText(item),
@@ -461,7 +483,7 @@ export function buildCapabilityDiscoveryInput(params: {
 
 export function buildDelegationOutcomeDecisionInput(params: {
   latestUserRequest: string | null;
-  turnDelegationContext: string;
+  runDelegationContext: string;
   subagentAnnounceContext: string | null;
   capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
@@ -473,10 +495,10 @@ export function buildDelegationOutcomeDecisionInput(params: {
     '',
     params.subagentAnnounceContext ?? 'subagent announce：无',
     '',
-    params.turnDelegationContext,
+    params.runDelegationContext,
     artifactContext ? '' : null,
     artifactContext,
     '',
-    '请根据以上 subagent announce 和任务跟踪，判断当前轮下一步。',
+    '请根据以上 subagent announce 和任务跟踪，判断当前 run 下一步。',
   ].join('\n');
 }

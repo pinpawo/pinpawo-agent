@@ -3,6 +3,7 @@ import test from 'node:test';
 import { GLOBAL_REVIEW_POLICY_MODE } from '@pinpawo/pet-agent';
 import {
   buildStatusBarModel,
+  formatStatusBarParts,
   formatStatusBarText,
   type StatusBarModel,
 } from './statusBarModel';
@@ -116,6 +117,36 @@ test('buildStatusBarModel keeps activity and connection as separate segments', (
     '正在思考 · 2s · 连接:连接断开，10s 后重连 · Chat · 授权:需要授权 · 模型:未提供',
   );
   assert.equal(formatStatusBarText(model, 34), '正在思考 · 2s · 连接:连接断开，10…');
+});
+
+test('formatStatusBarParts preserves segment tones for rendering', () => {
+  const model = buildStatusBarModel({
+    activityStatus: '正在思考 · 2s',
+    connectionStatus: '未连接',
+    mode: 'chat',
+    session: createSession({ id: 'chat:pet' }),
+    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+  });
+
+  const parts = formatStatusBarParts(model, 80);
+
+  assert.equal(parts.map((part) => part.text).join(''), formatStatusBarText(model, 80));
+  assert.deepEqual(
+    parts
+      .filter((part) => !part.separator)
+      .slice(0, 3)
+      .map((part) => [part.segmentId, part.tone]),
+    [
+      ['activity', 'warning'],
+      ['connection', 'danger'],
+      ['mode', 'muted'],
+    ],
+  );
+  assert.ok(parts.filter((part) => part.separator).every((part) => part.tone === 'muted'));
+
+  const narrowParts = formatStatusBarParts(model, 7);
+  assert.equal(narrowParts.map((part) => part.text).join(''), formatStatusBarText(model, 7));
+  assert.equal(narrowParts.at(-1)?.tone, 'warning');
 });
 
 test('formatStatusBarText truncates by display width for CJK text', () => {

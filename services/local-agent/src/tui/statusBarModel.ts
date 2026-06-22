@@ -1,4 +1,5 @@
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
+import stringWidth from 'string-width';
 import { formatGlobalReviewPolicyMode } from './globalReviewPolicyPicker';
 import { truncateLine } from './render/terminalText';
 import type { SessionModel, TuiInteractionMode } from './state/tuiState';
@@ -21,6 +22,13 @@ export type StatusSegment = {
 
 export type StatusBarModel = {
   segments: StatusSegment[];
+};
+
+export type FormattedStatusBarPart = {
+  text: string;
+  tone: StatusSegmentTone;
+  segmentId?: string;
+  separator?: boolean;
 };
 
 export function buildStatusBarModel(input: {
@@ -101,13 +109,17 @@ export function buildStatusBarModel(input: {
 }
 
 export function formatStatusBarText(model: StatusBarModel, width: number) {
+  return formatStatusBarParts(model, width).map((part) => part.text).join('');
+}
+
+export function formatStatusBarParts(model: StatusBarModel, width: number): FormattedStatusBarPart[] {
   const maxWidth = Math.max(0, width);
-  if (maxWidth === 0) return '';
+  if (maxWidth === 0) return [];
 
   const orderedSegments = model.segments
     .map((segment, order) => ({ segment, order }))
     .filter(({ segment }) => Boolean(segment.value.trim()));
-  if (orderedSegments.length === 0) return '';
+  if (orderedSegments.length === 0) return [];
 
   const selected = new Set<string>();
   for (const candidate of [...orderedSegments].sort((a, b) =>
@@ -125,10 +137,10 @@ export function formatStatusBarText(model: StatusBarModel, width: number) {
     selected.delete(candidate.segment.id);
   }
 
-  const rendered = renderSegments(orderedSegments, selected);
-  if (rendered) return truncateLine(rendered, maxWidth);
+  const parts = buildStatusBarParts(orderedSegments, selected);
+  if (parts.length > 0) return truncateStatusBarParts(parts, maxWidth);
 
-  return truncateLine(formatSegment(orderedSegments[0].segment), maxWidth);
+  return truncateStatusBarParts([partForSegment(orderedSegments[0].segment)], maxWidth);
 }
 
 function renderSegments(
@@ -139,6 +151,88 @@ function renderSegments(
     .filter(({ segment }) => selected.has(segment.id))
     .map(({ segment }) => formatSegment(segment))
     .join(STATUS_SEPARATOR);
+}
+
+function buildStatusBarParts(
+  orderedSegments: Array<{ segment: StatusSegment; order: number }>,
+  selected: Set<string>,
+) {
+  const parts: FormattedStatusBarPart[] = [];
+  for (const { segment } of orderedSegments) {
+    if (!selected.has(segment.id)) continue;
+    if (parts.length > 0) {
+      parts.push({
+        text: STATUS_SEPARATOR,
+        tone: 'muted',
+        separator: true,
+      });
+    }
+    parts.push(partForSegment(segment));
+  }
+  return parts;
+}
+
+function partForSegment(segment: StatusSegment): FormattedStatusBarPart {
+  return {
+    text: formatSegment(segment),
+    tone: segment.tone ?? 'muted',
+    segmentId: segment.id,
+  };
+}
+
+function truncateStatusBarParts(
+  parts: FormattedStatusBarPart[],
+  width: number,
+): FormattedStatusBarPart[] {
+  const text = parts.map((part) => part.text).join('');
+  if (truncateLine(text, width) === text) return parts;
+  if (width <= 0) return [];
+  if (width <= 1) {
+    return [{ text: '…', tone: firstSegmentTone(parts) }];
+  }
+
+  const targetWidth = width - 1;
+  const clipped: FormattedStatusBarPart[] = [];
+  let currentWidth = 0;
+  for (const part of parts) {
+    let textPart = '';
+    for (const char of Array.from(part.text)) {
+      const charWidth = Math.max(1, stringWidth(char));
+      if (currentWidth + charWidth > targetWidth) break;
+      textPart += char;
+      currentWidth += charWidth;
+    }
+    if (textPart) {
+      clipped.push({ ...part, text: textPart });
+    }
+    if (currentWidth >= targetWidth) break;
+  }
+
+  trimStatusPartSuffix(clipped);
+  const lastPart = clipped.at(-1);
+  if (!lastPart) {
+    return [{ text: '…', tone: firstSegmentTone(parts) }];
+  }
+  lastPart.text = `${lastPart.text}…`;
+  return clipped;
+}
+
+function trimStatusPartSuffix(parts: FormattedStatusBarPart[]) {
+  while (parts.length > 0) {
+    const lastPart = parts[parts.length - 1];
+    if (!lastPart) return;
+    const trimmed = lastPart.text.trimEnd().replace(/[ ·:：-]+$/, '');
+    if (trimmed === lastPart.text) return;
+    if (trimmed) {
+      lastPart.text = trimmed;
+      continue;
+    }
+    parts.pop();
+  }
+}
+
+function firstSegmentTone(parts: FormattedStatusBarPart[]) {
+  return parts.find((part) => !part.separator)?.tone ?? 'muted';
 }
 
 function measureFits(text: string, width: number) {
@@ -154,8 +248,10 @@ function formatInteractionMode(mode: TuiInteractionMode) {
 }
 
 function statusTone(status: string): StatusSegmentTone {
-  if (/错|失败|断开|不可用/.test(status)) return 'danger';
-  if (/打断|等待|处理中|调用|思考|回复/.test(status)) return 'warning';
+  if (/错|失败|断开|不可用|无法连接|未连接/.test(status)) return 'danger';
+  if (/打断|等待|处理中|调用|思考|回复|初始化|连接本地服务|重试|重连/.test(status)) {
+    return 'warning';
+  }
   if (/就绪|已连接/.test(status)) return 'success';
   return 'muted';
 }

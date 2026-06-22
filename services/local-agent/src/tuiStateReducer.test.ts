@@ -190,6 +190,41 @@ test('tuiStateReducer finalizes completed messages from run registry', () => {
   });
 });
 
+test('tuiStateReducer finalizes completed messages when the active pointer is missing', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        activeRunId: null,
+      },
+    },
+  };
+
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'completed after pointer cleanup',
+    },
+    now: 1300,
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  assert.equal(state.runs['req-1'], undefined);
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'completed after pointer cleanup'],
+  ]);
+});
+
 test('tuiStateReducer records composer prompt history only for run starts', () => {
   let state = initialState();
 

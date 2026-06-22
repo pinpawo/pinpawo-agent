@@ -39,6 +39,7 @@ Introduce the `session.snapshot.loaded` reducer path and adapt existing startup/
 | 2026-06-21 | deferred contract gaps | completed CORE-4 resume migration should not remain listed as deferred | initial implementation left `resume-session-snapshot` in deferred contract metadata | contract list was not updated after implementation | remove resume gap; keep reconnect gaps for CORE-5 | CORE-5 Reconnect Reconciliation | accepted |
 | 2026-06-21 | startup history failure | failed history restore should not be treated as authoritative empty checkpoint | initial adapter caught history failures and produced an empty snapshot | best-effort startup restore must be no-op on read failure | make history restore failure reject `readSessionSnapshot` | none | accepted |
 | 2026-06-23 | resume snapshot coverage | Resume should clear stale route/run/UI state and load timeline from snapshot. | Existing tests proved resume used `session.snapshot.loaded` and cleared previous run state, but did not directly assert UI owner cleanup, resumed session kind, and snapshot timeline in the same reducer path; the reducer also relied on callers to clear stale Studio/external-editor UI state. | Main design lists resume session as a minimum test matrix scenario. | Make the resume snapshot reducer path clear reducer-owned UI owner state and assert prior run cleanup, server-provided session kind, and resumed timeline ids/text from snapshot. | none | accepted |
+| 2026-06-23 | malformed snapshot payload | Invalid `/snapshot` responses should not become authoritative empty checkpoints. | The client tried the old payload adapter after a native snapshot parse failure, and an unrecognized payload could synthesize an empty snapshot. | Reconnect/startup reconciliation must fail or retry when snapshot state is malformed; only recognized old payloads should use the compatibility adapter. | Require old snapshot payloads to contain `messages` or a valid pending review before legacy adaptation, otherwise reject the snapshot read. | none | accepted |
 
 ## Merge Checklist
 
@@ -47,5 +48,6 @@ Introduce the `session.snapshot.loaded` reducer path and adapt existing startup/
 - [x] Resume restore dispatches `session.snapshot.loaded`.
 - [x] Resume snapshot reducer path covers stale run cleanup, UI owner cleanup, and snapshot timeline replacement.
 - [x] Snapshot adapter excludes system/history notices from checkpoint timeline messages.
+- [x] Malformed `/snapshot` payloads are rejected instead of synthesized as empty snapshots.
 - [x] Reconnect behavior is implemented through CORE-5 snapshot reconciliation.
 - [x] PR references tracking issue #232.

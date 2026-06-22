@@ -460,6 +460,52 @@ test('tuiStateReducer displays subagent deltas as session activity outside check
   assert.equal(subagentActivity?.status, 'completed');
 });
 
+test('tuiStateReducer keeps notice and studio progress events outside checkpoint timeline', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'system.notice',
+      requestId: 'req-1',
+      message: '授权已更新',
+    },
+    now: 1100,
+    messageCell: { id: 'notice-1', timestamp: '10:00:01' },
+  });
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'studio.progress',
+      requestId: 'req-1',
+      event: {
+        type: 'tasks_queued',
+        taskCount: 2,
+      },
+    },
+    now: 1200,
+    messageCell: { id: 'studio-progress-1', timestamp: '10:00:02' },
+  });
+
+  assert.deepEqual(selectFocusedNotices(state).slice(-2), [
+    {
+      id: 'notice-1',
+      text: '授权已更新',
+      timestamp: '10:00:01',
+      afterTimelineEntryId: 'message:req-1:user',
+    },
+    {
+      id: 'studio-progress-1',
+      text: '[studio] tasks queued：2 项',
+      timestamp: '10:00:02',
+      afterTimelineEntryId: 'message:req-1:user',
+    },
+  ]);
+  assert.deepEqual(selectFocusedTimeline(state).map((entry) => entry.id), ['message:req-1:user']);
+  assert.deepEqual(transcriptTimeline(state), [['user', 'hello']]);
+});
+
 test('tuiStateReducer stores usage on completed message', () => {
   let state = startRun(initialState(), 'req-1');
   const usage = {

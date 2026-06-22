@@ -248,10 +248,10 @@ function formatInteractionMode(mode: TuiInteractionMode) {
 }
 
 function statusTone(status: string): StatusSegmentTone {
-  if (/错|失败|断开|不可用|无法连接|未连接/.test(status)) return 'danger';
   if (/打断|等待|处理中|调用|思考|回复|初始化|连接本地服务|重试|重连/.test(status)) {
     return 'warning';
   }
+  if (/错|失败|断开|不可用|无法连接|未连接/.test(status)) return 'danger';
   if (/就绪|已连接/.test(status)) return 'success';
   return 'muted';
 }

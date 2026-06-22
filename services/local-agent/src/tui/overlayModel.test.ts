@@ -78,6 +78,44 @@ test('buildTuiOverlayModel keeps command palette above file mention', () => {
   assert.equal(model.ownerLabel, 'Command');
 });
 
+test('buildTuiOverlayModel keeps approval above policy and inline popups', () => {
+  const model = buildTuiOverlayModel({
+    width: 80,
+    resumePicker: { open: false, sessions: [], selectedIndex: 0, loading: false },
+    approval: { request: approvalRequest(), selectedIndex: 0 },
+    globalReviewPolicyPicker: {
+      open: true,
+      currentMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+      selectedIndex: 0,
+    },
+    commandPalette: buildCommandPaletteModel({ text: '/', cursorOffset: 1 }),
+    fileMention: OPEN_FILE_MENTION,
+  });
+
+  assert.equal(model.current?.type, 'approval');
+  assert.equal(model.owner, 'approval');
+  assert.equal(model.ownerLabel, 'Approval');
+});
+
+test('buildTuiOverlayModel keeps policy picker above inline popups', () => {
+  const model = buildTuiOverlayModel({
+    width: 80,
+    resumePicker: { open: false, sessions: [], selectedIndex: 0, loading: false },
+    approval: { request: null, selectedIndex: 0 },
+    globalReviewPolicyPicker: {
+      open: true,
+      currentMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+      selectedIndex: 0,
+    },
+    commandPalette: buildCommandPaletteModel({ text: '/', cursorOffset: 1 }),
+    fileMention: OPEN_FILE_MENTION,
+  });
+
+  assert.equal(model.current?.type, 'globalReviewPolicyPicker');
+  assert.equal(model.owner, 'globalReviewPolicyPicker');
+  assert.equal(model.ownerLabel, 'Policy');
+});
+
 test('buildTuiOverlayModel returns no owner when all overlays are closed', () => {
   const model = buildTuiOverlayModel({
     width: 80,

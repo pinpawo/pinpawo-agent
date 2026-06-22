@@ -149,6 +149,30 @@ test('formatStatusBarParts preserves segment tones for rendering', () => {
   assert.equal(narrowParts.at(-1)?.tone, 'warning');
 });
 
+test('formatStatusBarParts distinguishes reconnecting and disconnected tones', () => {
+  const reconnecting = buildStatusBarModel({
+    connectionStatus: '连接断开，10s 后重连 1/5',
+    mode: 'chat',
+    session: createSession({ id: 'chat:pet' }),
+    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+  });
+  const disconnected = buildStatusBarModel({
+    connectionStatus: '未连接',
+    mode: 'chat',
+    session: createSession({ id: 'chat:pet' }),
+    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+  });
+
+  assert.equal(
+    formatStatusBarParts(reconnecting, 80).find((part) => part.segmentId === 'connection')?.tone,
+    'warning',
+  );
+  assert.equal(
+    formatStatusBarParts(disconnected, 80).find((part) => part.segmentId === 'connection')?.tone,
+    'danger',
+  );
+});
+
 test('formatStatusBarText truncates by display width for CJK text', () => {
   const model: StatusBarModel = {
     segments: [

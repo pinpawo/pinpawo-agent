@@ -18,6 +18,7 @@ Introduce the `session.snapshot.loaded` reducer path and adapt existing startup/
 - Convert resume restore from `session.clear + session.replace_history` to `session.snapshot.loaded`.
 - Add reducer support for merging snapshot timeline, runtime, token usage, and active run metadata.
 - Add tests for adapter projection, local client snapshots, and reducer snapshot loading.
+- Cover resume snapshot state replacement, including prior run cleanup and server-provided session kind.
 
 ## Completed Later In CORE-5/CORE-7
 
@@ -37,12 +38,14 @@ Introduce the `session.snapshot.loaded` reducer path and adapt existing startup/
 | 2026-06-21 | resume session kind | resumed snapshot should carry server-provided session kind | CORE-4 resume payload did not expose kind, and old resume path always restored chat | legacy endpoint lacked enough metadata | CORE-7 resume returns a native snapshot with server-provided kind; client keeps chat fallback only for old payloads | none | accepted |
 | 2026-06-21 | deferred contract gaps | completed CORE-4 resume migration should not remain listed as deferred | initial implementation left `resume-session-snapshot` in deferred contract metadata | contract list was not updated after implementation | remove resume gap; keep reconnect gaps for CORE-5 | CORE-5 Reconnect Reconciliation | accepted |
 | 2026-06-21 | startup history failure | failed history restore should not be treated as authoritative empty checkpoint | initial adapter caught history failures and produced an empty snapshot | best-effort startup restore must be no-op on read failure | make history restore failure reject `readSessionSnapshot` | none | accepted |
+| 2026-06-23 | resume snapshot coverage | Resume should clear stale route/run/UI state and load timeline from snapshot. | Existing tests proved resume used `session.snapshot.loaded` and cleared previous run state, but did not directly assert resumed session kind and snapshot timeline in the same reducer path. | Main design lists resume session as a minimum test matrix scenario. | Extend the resume reducer test to assert prior run cleanup, server-provided session kind, and resumed timeline ids/text from snapshot. | none | accepted |
 
 ## Merge Checklist
 
 - [x] `session.snapshot.loaded` action is handled by the reducer.
 - [x] Startup restore dispatches `session.snapshot.loaded`.
 - [x] Resume restore dispatches `session.snapshot.loaded`.
+- [x] Resume snapshot reducer path covers stale run cleanup and snapshot timeline replacement.
 - [x] Snapshot adapter excludes system/history notices from checkpoint timeline messages.
 - [x] Reconnect behavior is implemented through CORE-5 snapshot reconciliation.
 - [x] PR references tracking issue #232.

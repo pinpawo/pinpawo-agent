@@ -644,7 +644,7 @@ test('tuiStateReducer clears snapshot activeRunId when the run is terminal', () 
   assert.equal(selectFocusedActiveRun(state), null);
 });
 
-test('tuiStateReducer clears the previous focused session activeRunId on resume snapshots', () => {
+test('tuiStateReducer resumes a session from snapshot while clearing previous run state', () => {
   let state = startRun(initialState('chat:old'), 'old-req');
 
   state = tuiStateReducer(state, {
@@ -652,7 +652,7 @@ test('tuiStateReducer clears the previous focused session activeRunId on resume 
     source: 'resume',
     snapshot: {
       sessionId: 'chat:new',
-      kind: 'chat',
+      kind: 'studio',
       timeline: [
         {
           id: 'message:user-new',
@@ -670,6 +670,13 @@ test('tuiStateReducer clears the previous focused session activeRunId on resume 
   assert.equal(state.focusedSessionId, 'chat:new');
   assert.equal(state.runs['old-req'], undefined);
   assert.equal(state.sessions['chat:old']?.activeRunId, null);
+  assert.equal(state.sessions['chat:new']?.kind, 'studio');
+  assert.deepEqual(transcriptTimeline(state, 'chat:new'), [
+    ['user', 'resumed'],
+  ]);
+  assert.deepEqual(state.sessions['chat:new']?.timeline.map((entry) => entry.id), [
+    'message:user-new',
+  ]);
 });
 
 test('tuiStateReducer preserves reconnect token usage when snapshot omits usage', () => {

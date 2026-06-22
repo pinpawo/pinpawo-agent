@@ -4,9 +4,14 @@ import {
   buildLocalServerAuthHeaders,
   readLocalServerAuthToken,
 } from '../localServerAuth';
-import type { HistoryCellModel } from './state/tuiState';
-import type { TuiCoreSessionSnapshot } from './contracts/tuiCoreContract';
-import { buildTuiSessionSnapshotFromHistory } from './snapshot/tuiSessionSnapshot';
+import type { MessageCellModel } from './state/tuiState';
+import type {
+  TuiCoreOperationTimelineEntry,
+  TuiCoreRunSnapshot,
+  TuiCoreSessionSnapshot,
+  TuiCoreTimelineEntry,
+} from './contracts/tuiCoreContract';
+import { buildTuiSessionSnapshotFromMessages } from './snapshot/tuiSessionSnapshot';
 import type { ResumeSessionSummary } from './types';
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 1500;
@@ -57,7 +62,7 @@ export class TuiLocalServerClient {
     }
   }
 
-  async readHistory(): Promise<HistoryCellModel[]> {
+  async readHistory(): Promise<MessageCellModel[]> {
     const res = await this.fetchAuth(this.url('/history'));
     if (!res.ok) {
       throw new LocalServerHttpError(res.status);
@@ -82,22 +87,26 @@ export class TuiLocalServerClient {
       this.readRuntime().catch(() => null),
     ]);
     if (serverSnapshot) {
-      return buildSessionSnapshotFromServerPayload(serverSnapshot, {
+      const nativeSnapshot = parseTuiCoreSessionSnapshot(serverSnapshot);
+      if (nativeSnapshot) {
+        return mergeSnapshotRuntime(nativeSnapshot, runtime);
+      }
+      return buildSessionSnapshotFromServerPayload(serverSnapshot as LocalServerSnapshotPayload, {
         fallbackSessionId: params.sessionId,
         fallbackKind: params.kind,
         runtime,
       });
     }
-    const history = await this.readHistory();
-    return buildTuiSessionSnapshotFromHistory({
+    const messages = await this.readHistory();
+    return buildTuiSessionSnapshotFromMessages({
       sessionId: params.sessionId,
       kind: params.kind,
-      history,
+      messages,
       runtime,
     });
   }
 
-  private async readServerSnapshot(): Promise<LocalServerSnapshotPayload> {
+  private async readServerSnapshot(): Promise<unknown> {
     const res = await this.fetchAuth(this.url('/snapshot'));
     if (!res.ok) {
       throw new LocalServerHttpError(res.status);
@@ -131,7 +140,6 @@ export class TuiLocalServerClient {
 
   async resumeSession(sessionId: string): Promise<{
     session: ResumeSessionSummary;
-    history: HistoryCellModel[];
     snapshot: TuiCoreSessionSnapshot;
   }> {
     const res = await this.fetchAuth(
@@ -143,19 +151,20 @@ export class TuiLocalServerClient {
     const payload = await res.json() as {
       session?: unknown;
       messages?: Array<{ role?: string; text?: string }>;
+      snapshot?: unknown;
     };
     const session = parseResumeSessionSummary(payload.session);
     if (!session) {
       throw new Error('invalid resume session payload');
     }
-    const history = parseHistoryMessages(payload.messages);
+    const messages = parseHistoryMessages(payload.messages);
+    const nativeSnapshot = parseTuiCoreSessionSnapshot(payload.snapshot);
     return {
       session,
-      history,
-      snapshot: buildTuiSessionSnapshotFromHistory({
+      snapshot: nativeSnapshot ?? buildTuiSessionSnapshotFromMessages({
         sessionId: session.id,
-        kind: 'chat',
-        history,
+        kind: session.kind ?? parseSnapshotSession(payload.session)?.kind ?? 'chat',
+        messages,
       }),
     };
   }
@@ -217,11 +226,11 @@ function buildSessionSnapshotFromServerPayload(
   const session = parseSnapshotSession(payload.session);
   const sessionId = session?.id ?? options.fallbackSessionId;
   const kind = session?.kind ?? options.fallbackKind;
-  const history = parseHistoryMessages(payload.messages);
-  const snapshot = buildTuiSessionSnapshotFromHistory({
+  const messages = parseHistoryMessages(payload.messages);
+  const snapshot = buildTuiSessionSnapshotFromMessages({
     sessionId,
     kind,
-    history,
+    messages,
     runtime: options.runtime,
   });
   const pendingReview = parsePendingReviewSnapshot(payload.pendingReview);
@@ -246,6 +255,139 @@ function buildSessionSnapshotFromServerPayload(
     }],
     activeRunId: pendingReview.requestId,
     pendingReviewId: pendingReview.reviewId,
+  };
+}
+
+function mergeSnapshotRuntime(
+  snapshot: TuiCoreSessionSnapshot,
+  runtime: LocalServerRuntimeSnapshot | null,
+): TuiCoreSessionSnapshot {
+  if (!runtime) return snapshot;
+  return {
+    ...snapshot,
+    runtime: {
+      ...runtime,
+      ...(snapshot.runtime ?? {}),
+    },
+  };
+}
+
+function parseTuiCoreSessionSnapshot(value: unknown): TuiCoreSessionSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.sessionId !== 'string'
+    || !isSessionKind(record.kind)
+    || !Array.isArray(record.timeline)
+    || !Array.isArray(record.runs)
+  ) {
+    return null;
+  }
+  const timeline = record.timeline.flatMap((entry) => {
+    const parsed = parseTuiCoreTimelineEntry(entry);
+    return parsed ? [parsed] : [];
+  });
+  const runs = record.runs.flatMap((run) => {
+    const parsed = parseTuiCoreRunSnapshot(run);
+    return parsed ? [parsed] : [];
+  });
+  if (timeline.length !== record.timeline.length || runs.length !== record.runs.length) {
+    return null;
+  }
+  return {
+    sessionId: record.sessionId,
+    kind: record.kind,
+    timeline,
+    runs,
+    ...(typeof record.activeRunId === 'string' ? { activeRunId: record.activeRunId } : {}),
+    ...(typeof record.pendingReviewId === 'string' ? { pendingReviewId: record.pendingReviewId } : {}),
+    ...(isRecord(record.runtime) ? { runtime: record.runtime as TuiCoreSessionSnapshot['runtime'] } : {}),
+    ...(isTokenUsageSnapshot(record.tokenUsage) ? { tokenUsage: record.tokenUsage } : {}),
+  };
+}
+
+function parseTuiCoreTimelineEntry(value: unknown): TuiCoreTimelineEntry | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || !isTimelineSource(value.source)) {
+    return null;
+  }
+  if (value.type === 'message') {
+    if (
+      (value.role !== 'user' && value.role !== 'assistant')
+      || typeof value.text !== 'string'
+      || (value.status !== 'streaming' && value.status !== 'completed')
+    ) {
+      return null;
+    }
+    return {
+      id: value.id,
+      type: 'message',
+      role: value.role,
+      text: value.text,
+      status: value.status,
+      source: value.source,
+      ...(typeof value.requestId === 'string' ? { requestId: value.requestId } : {}),
+      ...(typeof value.createdAt === 'string' ? { createdAt: value.createdAt } : {}),
+      ...(typeof value.updatedAt === 'string' ? { updatedAt: value.updatedAt } : {}),
+    };
+  }
+  if (value.type === 'operation') {
+    if (
+      typeof value.requestId !== 'string'
+      || typeof value.operationKey !== 'string'
+      || !isOperationPhase(value.phase)
+    ) {
+      return null;
+    }
+    return {
+      id: value.id,
+      type: 'operation',
+      requestId: value.requestId,
+      operationKey: value.operationKey,
+      phase: value.phase,
+      source: value.source,
+      ...(typeof value.title === 'string' ? { title: value.title } : {}),
+      ...(typeof value.summary === 'string' ? { summary: value.summary } : {}),
+      ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
+      ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
+      ...(typeof value.completedAt === 'number' ? { completedAt: value.completedAt } : {}),
+    } satisfies TuiCoreOperationTimelineEntry;
+  }
+  return null;
+}
+
+function parseTuiCoreRunSnapshot(value: unknown): TuiCoreRunSnapshot | null {
+  if (
+    !isRecord(value)
+    || typeof value.requestId !== 'string'
+    || typeof value.sessionId !== 'string'
+    || !isSessionKind(value.kind)
+    || !isRunPhase(value.phase)
+    || !Array.isArray(value.timelineEntryIds)
+    || !value.timelineEntryIds.every((item) => typeof item === 'string')
+  ) {
+    return null;
+  }
+  const pendingReview = isRecord(value.pendingReview) && typeof value.pendingReview.requestId === 'string'
+    && typeof value.pendingReview.reviewId === 'string'
+    && isPendingReviewStatus(value.pendingReview.status)
+    ? {
+        requestId: value.pendingReview.requestId,
+        reviewId: value.pendingReview.reviewId,
+        status: value.pendingReview.status,
+        ...(isRecord(value.pendingReview.review) ? { review: value.pendingReview.review as ReviewSpec } : {}),
+        ...(typeof value.pendingReview.petId === 'string' ? { petId: value.pendingReview.petId } : {}),
+      }
+    : undefined;
+  return {
+    requestId: value.requestId,
+    sessionId: value.sessionId,
+    kind: value.kind,
+    phase: value.phase,
+    timelineEntryIds: value.timelineEntryIds,
+    ...(pendingReview ? { pendingReview } : {}),
+    ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
+    ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
+    ...(typeof value.finishedAt === 'number' ? { finishedAt: value.finishedAt } : {}),
   };
 }
 
@@ -306,7 +448,7 @@ function normalizeHeaders(headers: RequestInit['headers']): Record<string, strin
 
 export function parseHistoryMessages(
   messages: Array<{ role?: string; text?: string }> | undefined,
-): HistoryCellModel[] {
+): MessageCellModel[] {
   return Array.isArray(messages)
     ? messages.flatMap((item) => {
         if (
@@ -318,7 +460,7 @@ export function parseHistoryMessages(
             id: randomUUID(),
             kind: item.role,
             text: item.text,
-          } satisfies HistoryCellModel];
+          } satisfies MessageCellModel];
         }
         return [];
       })
@@ -338,6 +480,7 @@ export function parseResumeSessionSummary(value: unknown): ResumeSessionSummary 
   }
   return {
     id: record.id,
+    ...(isSessionKind(record.kind) ? { kind: record.kind } : {}),
     title: record.title,
     messageCount: typeof record.messageCount === 'number' ? record.messageCount : 0,
     createdAt: record.createdAt,
@@ -413,4 +556,47 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
     petsDir: rawPetsDir,
     studioWikiBaseDir: rawStudioWikiBaseDir,
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isSessionKind(value: unknown): value is TuiCoreSessionSnapshot['kind'] {
+  return value === 'chat' || value === 'studio';
+}
+
+function isTimelineSource(value: unknown): value is TuiCoreTimelineEntry['source'] {
+  return value === 'checkpoint' || value === 'live-event' || value === 'local-input';
+}
+
+function isOperationPhase(value: unknown): value is TuiCoreOperationTimelineEntry['phase'] {
+  return value === 'started'
+    || value === 'updated'
+    || value === 'completed'
+    || value === 'failed'
+    || value === 'interrupted';
+}
+
+function isRunPhase(value: unknown): value is TuiCoreRunSnapshot['phase'] {
+  return value === 'starting'
+    || value === 'thinking'
+    || value === 'using_tool'
+    || value === 'streaming'
+    || value === 'waiting_human'
+    || value === 'interrupting'
+    || value === 'completed'
+    || value === 'failed'
+    || value === 'interrupted';
+}
+
+function isPendingReviewStatus(value: unknown): value is NonNullable<TuiCoreRunSnapshot['pendingReview']>['status'] {
+  return value === 'waiting' || value === 'answered' || value === 'interrupted';
+}
+
+function isTokenUsageSnapshot(value: unknown): value is TuiCoreSessionSnapshot['tokenUsage'] {
+  return isRecord(value)
+    && typeof value.inputTokens === 'number'
+    && typeof value.outputTokens === 'number'
+    && typeof value.totalTokens === 'number';
 }

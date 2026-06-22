@@ -9,7 +9,26 @@ function pendingReviewState(): TuiState {
   return {
     connection: { status: 'ready', message: 'ready' },
     focusedSessionId: 'sess-1',
-    runRoute: { 'req-1': 'sess-1' },
+    runs: {
+      'req-1': {
+        requestId: 'req-1',
+        sessionId: 'sess-1',
+        kind: 'chat',
+        phase: 'waiting_human',
+        timelineEntryIds: [],
+        pendingReview: {
+          requestId: 'req-1',
+          review: {
+            id: 'review-1',
+            schemaVersion: 1,
+            view: { kind: 'plain', body: 'Need review' },
+            options: [],
+          },
+        },
+        startedAt: 1,
+        charCount: 0,
+      },
+    },
     input: { text: '', cursorOffset: 0, focused: true, history: createComposerHistoryState() },
     sessions: {
       'sess-1': {
@@ -17,25 +36,11 @@ function pendingReviewState(): TuiState {
         kind: 'chat',
         actor: { label: 'Pet', summary: 'summary' },
         runtime: {},
-        history: [],
         timeline: [],
+        notices: [],
+        activities: [],
         tokenUsage: null,
-        activeRun: {
-          requestId: 'req-1',
-          phase: 'waiting_human',
-          timelineEntryIds: [],
-          pendingReview: {
-            requestId: 'req-1',
-            review: {
-              id: 'review-1',
-              schemaVersion: 1,
-              view: { kind: 'plain', body: 'Need review' },
-              options: [],
-            },
-          },
-          startedAt: 1,
-          charCount: 0,
-        },
+        activeRunId: 'req-1',
       },
     },
   };
@@ -97,7 +102,7 @@ test('TuiRuntimeController blocks empty required review input', () => {
 
   assert.equal(submitted, false);
   assert.deepEqual(sent, []);
-  assert.equal(actions.some((action) => action.type === 'history.append'), true);
+  assert.equal(actions.some((action) => action.type === 'message.append'), true);
 });
 
 test('TuiRuntimeController interrupts pending human review instead of dismissing it locally', () => {
@@ -143,7 +148,7 @@ test('TuiRuntimeController restores a reconnect snapshot before opening websocke
         sessionId: 'sess-1',
         kind: 'chat',
         timeline: [{
-          id: 'history:user-1',
+          id: 'message:user-1',
           type: 'message',
           role: 'user',
           text: 'hello',

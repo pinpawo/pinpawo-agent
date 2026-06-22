@@ -1,10 +1,7 @@
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
 import type { TuiCoreSessionSnapshotLoadedAction } from '../contracts/tuiCoreContract';
-import {
-  timelineEntriesFromHistory,
-  type AgentTimelineEntry,
-} from '../timeline/agentTimeline';
+import type { AgentTimelineEntry } from '../timeline/agentTimeline';
 import {
   createComposerHistoryState,
   type ComposerHistoryDirection,
@@ -13,7 +10,8 @@ import {
 import type { TextAreaModel } from '../input/textarea/engine';
 import { TUI_TEXT } from '../render/text';
 
-export const MAX_TUI_HISTORY_ITEMS = 240;
+export const MAX_TUI_NOTICE_ITEMS = 120;
+export const MAX_TUI_ACTIVITY_ITEMS = 80;
 
 export type RunId = string;
 export type SessionId = string;
@@ -34,7 +32,7 @@ export type TuiState = {
   connection: TuiConnectionState;
   sessions: Record<SessionId, SessionModel>;
   focusedSessionId: SessionId | null;
-  runRoute: Record<RunId, SessionId>;
+  runs: Record<RunId, TuiRunModel>;
   input: TextAreaModel & {
     focused: boolean;
     history: ComposerHistoryState;
@@ -60,9 +58,10 @@ export type SessionModel = {
     studioWikiBaseDir?: string;
     contextWindow?: number;
   };
-  history: HistoryCellModel[];
   timeline: AgentTimelineEntry[];
-  activeRun: ActiveRunModel | null;
+  notices: SessionNoticeModel[];
+  activities: SessionActivityModel[];
+  activeRunId: RunId | null;
   tokenUsage: TokenUsageModel | null;
 };
 
@@ -75,6 +74,11 @@ export type ActiveRunModel = {
   charCount: number;
 };
 
+export type TuiRunModel = ActiveRunModel & {
+  sessionId: SessionId;
+  kind: SessionModel['kind'];
+};
+
 export type TokenUsageModel = {
   inputTokens: number;
   outputTokens: number;
@@ -83,11 +87,28 @@ export type TokenUsageModel = {
   updatedAt?: string;
 };
 
-export type HistoryCellModel = {
+export type MessageCellModel = {
   id: string;
   kind: 'user' | 'assistant' | 'system';
   text: string;
   timestamp?: string;
+};
+
+export type SessionNoticeModel = {
+  id: string;
+  text: string;
+  timestamp?: string;
+  afterTimelineEntryId?: string;
+};
+
+export type SessionActivityModel = {
+  id: string;
+  type: 'subagent.message';
+  requestId: RunId;
+  text: string;
+  status: 'streaming' | 'completed';
+  timestamp?: string;
+  afterTimelineEntryId?: string;
 };
 
 export type ApprovalRequestModel = {
@@ -96,14 +117,14 @@ export type ApprovalRequestModel = {
   petId?: string;
 };
 
-export type HistoryCellDraft = {
+export type MessageCellDraft = {
   id: string;
-  kind: HistoryCellModel['kind'];
+  kind: MessageCellModel['kind'];
   text: string;
   timestamp?: string;
 };
 
-export type HistoryCellMeta = {
+export type MessageCellMeta = {
   id: string;
   timestamp?: string;
 };
@@ -149,9 +170,9 @@ export type TuiAction =
       direction: ComposerHistoryDirection;
     }
   | {
-      type: 'history.append';
+      type: 'message.append';
       sessionId?: SessionId;
-      cell: HistoryCellDraft;
+      cell: MessageCellDraft;
     }
   | {
       type: 'run.start';
@@ -160,7 +181,7 @@ export type TuiAction =
       kind: SessionModel['kind'];
       userText: string;
       now: number;
-      userCell: HistoryCellMeta;
+      userCell: MessageCellMeta;
       statusMessage: string;
     }
   | {
@@ -173,7 +194,7 @@ export type TuiAction =
       requestId: RunId;
       message: string;
       now: number;
-      userCell: HistoryCellMeta;
+      userCell: MessageCellMeta;
       statusMessage: string;
     }
   | {
@@ -185,13 +206,13 @@ export type TuiAction =
       type: 'run.finish';
       requestId: RunId;
       statusMessage: string;
-      history?: HistoryCellDraft[];
+      messages?: MessageCellDraft[];
     }
   | {
       type: 'event.received';
       event: LocalAgentEvent;
       now: number;
-      historyCell?: HistoryCellMeta;
+      messageCell?: MessageCellMeta;
     }
   | {
       type: 'server.interrupting';
@@ -201,7 +222,7 @@ export type TuiAction =
   | {
       type: 'server.interrupted';
       requestId: RunId;
-      historyCell: HistoryCellMeta;
+      messageCell: MessageCellMeta;
       statusMessage: string;
     }
   | {
@@ -210,15 +231,15 @@ export type TuiAction =
       outcome: 'done' | 'stopped';
       reply: string;
       reason?: string;
-      historyCell: HistoryCellMeta;
-      stoppedReasonCell?: HistoryCellMeta;
+      messageCell: MessageCellMeta;
+      stoppedReasonCell?: MessageCellMeta;
       statusMessage: string;
     }
   | {
       type: 'server.studio_error';
       requestId: RunId;
       message: string;
-      historyCell: HistoryCellMeta;
+      messageCell: MessageCellMeta;
       statusMessage: string;
     };
 
@@ -232,7 +253,7 @@ export function createInitialTuiState(defaultSession: SessionModel): TuiState {
       [defaultSession.id]: defaultSession,
     },
     focusedSessionId: defaultSession.id,
-    runRoute: {},
+    runs: {},
     input: {
       text: '',
       cursorOffset: 0,
@@ -246,9 +267,10 @@ export function createSession(params: {
   id: SessionId;
   kind?: SessionModel['kind'];
   actor?: Partial<SessionModel['actor']>;
-  history?: HistoryCellModel[];
+  timeline?: AgentTimelineEntry[];
+  notices?: SessionNoticeModel[];
+  activities?: SessionActivityModel[];
 }): SessionModel {
-  const history = params.history ?? [];
   return {
     id: params.id,
     kind: params.kind ?? 'chat',
@@ -257,9 +279,10 @@ export function createSession(params: {
       summary: params.actor?.summary ?? TUI_TEXT.defaultPetSummary,
     },
     runtime: {},
-    history,
-    timeline: timelineEntriesFromHistory(history),
-    activeRun: null,
+    timeline: params.timeline ?? [],
+    notices: params.notices ?? [],
+    activities: params.activities ?? [],
+    activeRunId: null,
     tokenUsage: null,
   };
 }

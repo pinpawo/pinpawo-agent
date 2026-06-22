@@ -15,7 +15,7 @@ import type {
 } from '../../events/localAgentEvent';
 import {
   operationTimelineEntryFromEvent,
-  timelineEntryFromHistoryCell,
+  timelineEntryFromMessageCell,
   timelineEntryIdFromOperationEvent,
   type AgentMessageEntry,
   type AgentOperationEntry,
@@ -28,29 +28,26 @@ import {
 } from '../contracts/tuiCoreContract';
 import {
   agentTimelineEntriesFromSnapshot,
-  historyFromSnapshotTimeline,
 } from '../snapshot/tuiSessionSnapshot';
 import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
+import { MAX_TUI_ACTIVITY_ITEMS, MAX_TUI_NOTICE_ITEMS } from './tuiState';
 import type {
   ActiveRunModel,
-  HistoryCellDraft,
-  HistoryCellMeta,
-  HistoryCellModel,
+  MessageCellDraft,
+  MessageCellMeta,
+  MessageCellModel,
+  RunId,
+  SessionActivityModel,
+  SessionNoticeModel,
   SessionId,
   SessionModel,
   TuiAction,
+  TuiRunModel,
   TokenUsageModel,
   TuiState,
 } from './tuiState';
-import { MAX_TUI_HISTORY_ITEMS } from './tuiState';
 
-function trimHistory(history: HistoryCellModel[]) {
-  return history.length > MAX_TUI_HISTORY_ITEMS
-    ? history.slice(history.length - MAX_TUI_HISTORY_ITEMS)
-    : history;
-}
-
-function toHistoryCell(draft: HistoryCellDraft): HistoryCellModel {
+function toMessageCell(draft: MessageCellDraft): MessageCellModel {
   return {
     id: draft.id,
     kind: draft.kind,
@@ -59,42 +56,53 @@ function toHistoryCell(draft: HistoryCellDraft): HistoryCellModel {
   };
 }
 
-function appendHistory(
+function appendMessageCells(
   session: SessionModel,
-  drafts: HistoryCellDraft[],
+  drafts: MessageCellDraft[],
 ) {
   if (drafts.length === 0) return session;
-  const cells = drafts.map(toHistoryCell);
-  const timelineCells = cells.map(timelineEntryFromHistoryCell);
+  const cells = drafts.map(toMessageCell);
+  const timeline = [...session.timeline];
+  const notices = [...session.notices];
+  let afterTimelineEntryId = timeline.at(-1)?.id;
+
+  for (const cell of cells) {
+    const entry = timelineEntryFromMessageCell(cell);
+    if (entry) {
+      timeline.push(entry);
+      afterTimelineEntryId = entry.id;
+      continue;
+    }
+    if (cell.kind === 'system') {
+      notices.push({
+        ...(afterTimelineEntryId ? { afterTimelineEntryId } : {}),
+        id: cell.id,
+        text: cell.text,
+        ...(cell.timestamp ? { timestamp: cell.timestamp } : {}),
+      });
+    }
+  }
+
   return {
     ...session,
-    history: trimHistory([
-      ...session.history,
-      ...cells,
-    ]),
-    timeline: [
-      ...session.timeline,
-      ...timelineCells,
-    ],
+    timeline,
+    notices: trimNotices(notices),
   };
 }
 
-function appendHistoryOnly(
-  session: SessionModel,
-  drafts: HistoryCellDraft[],
-) {
-  if (drafts.length === 0) return session;
-  const cells = drafts.map(toHistoryCell);
-  return {
-    ...session,
-    history: trimHistory([
-      ...session.history,
-      ...cells,
-    ]),
-  };
+function trimNotices(notices: SessionNoticeModel[]) {
+  return notices.length > MAX_TUI_NOTICE_ITEMS
+    ? notices.slice(notices.length - MAX_TUI_NOTICE_ITEMS)
+    : notices;
 }
 
-function addTimelineEntryId(activeRun: ActiveRunModel, entryId: string): ActiveRunModel {
+function trimActivities(activities: SessionActivityModel[]) {
+  return activities.length > MAX_TUI_ACTIVITY_ITEMS
+    ? activities.slice(activities.length - MAX_TUI_ACTIVITY_ITEMS)
+    : activities;
+}
+
+function addTimelineEntryId<T extends ActiveRunModel>(activeRun: T, entryId: string): T {
   return activeRun.timelineEntryIds.includes(entryId)
     ? activeRun
     : {
@@ -253,79 +261,65 @@ function upsertOperationTimelineEntry(
   };
 }
 
-function readSubagentTimelineText(session: SessionModel, entryId: string) {
-  const entry = session.timeline.find((item) => item.id === entryId);
-  return entry?.type === 'message' && entry.role === 'subagent' ? entry.text : '';
+function appendOrUpdateActivity(
+  activities: SessionActivityModel[],
+  activity: SessionActivityModel,
+) {
+  const index = activities.findIndex((item) => item.id === activity.id);
+  if (index < 0) {
+    return trimActivities([...activities, activity]);
+  }
+  return trimActivities([
+    ...activities.slice(0, index),
+    activity,
+    ...activities.slice(index + 1),
+  ]);
 }
 
-function appendSubagentTimelineDelta(
+function readSubagentActivityText(session: SessionModel, activityId: string) {
+  const activity = session.activities.find((item) => item.id === activityId);
+  return activity?.type === 'subagent.message' ? activity.text : '';
+}
+
+function appendSubagentActivityDelta(
   session: SessionModel,
   requestId: string,
   token: string,
 ): { session: SessionModel; entryId?: string } {
   const id = `${requestId}:subagent-output`;
-  const text = readSubagentTimelineText(session, id) + token;
+  const previous = session.activities.find((item) => item.id === id);
+  const text = readSubagentActivityText(session, id) + token;
   const hasContent = Boolean(formatSubagentMessage(text));
   if (!hasContent) return { session };
-  const entry: AgentMessageEntry = {
+  const activity: SessionActivityModel = {
     id,
-    type: 'message',
-    role: 'subagent',
+    type: 'subagent.message',
     requestId,
     text,
     status: 'streaming',
+    ...(previous?.timestamp ? { timestamp: previous.timestamp } : {}),
+    ...(previous?.afterTimelineEntryId
+      ? { afterTimelineEntryId: previous.afterTimelineEntryId }
+      : session.timeline.at(-1)?.id
+        ? { afterTimelineEntryId: session.timeline.at(-1)?.id }
+        : {}),
   };
   return {
     session: {
       ...session,
-      timeline: appendOrUpdateTimelineEntry(session.timeline, entry),
+      activities: appendOrUpdateActivity(session.activities, activity),
     },
-    entryId: entry.id,
+    entryId: activity.id,
   };
 }
 
-function finalizeSubagentTimelineEntries(session: SessionModel, requestId: string) {
+function finalizeSubagentActivities(session: SessionModel, requestId: string) {
   return {
     ...session,
-    timeline: session.timeline.map((entry) =>
-      entry.type === 'message' && entry.role === 'subagent' && entry.requestId === requestId
-        ? { ...entry, status: 'completed' as const }
-        : entry),
-  };
-}
-
-function appendReviewTimelineEntry(
-  session: SessionModel,
-  requestId: string,
-  reviewId: string,
-) {
-  const entry: AgentTimelineEntry = {
-    id: `${requestId}:review:${reviewId}`,
-    type: 'review',
-    requestId,
-    reviewId,
-    status: 'waiting',
-  };
-  return {
-    session: {
-      ...session,
-      timeline: appendOrUpdateTimelineEntry(session.timeline, entry),
-    },
-    entry,
-  };
-}
-
-function markReviewTimelineEntries(
-  session: SessionModel,
-  requestId: string,
-  status: 'answered' | 'interrupted',
-) {
-  return {
-    ...session,
-    timeline: session.timeline.map((entry) =>
-      entry.type === 'review' && entry.requestId === requestId && entry.status === 'waiting'
-        ? { ...entry, status }
-        : entry),
+    activities: session.activities.map((activity) =>
+      activity.requestId === requestId
+        ? { ...activity, status: 'completed' as const }
+        : activity),
   };
 }
 
@@ -359,43 +353,70 @@ function clearTextAreaTransientInputState(input: TuiState['input']): TuiState['i
   };
 }
 
-function removeRunRoute(state: TuiState, requestId: string) {
-  const { [requestId]: _removed, ...runRoute } = state.runRoute;
-  return runRoute;
+function updateRun(
+  state: TuiState,
+  requestId: string,
+  updater: (run: TuiRunModel) => TuiRunModel,
+) {
+  const run = state.runs[requestId];
+  if (!run) return state;
+  return {
+    ...state,
+    runs: {
+      ...state.runs,
+      [requestId]: updater(run),
+    },
+  };
 }
 
-function removeSessionRunRoutes(state: TuiState, sessionId: SessionId) {
-  return Object.fromEntries(
-    Object.entries(state.runRoute).filter(([, routedSessionId]) => routedSessionId !== sessionId),
+function removeRun(state: TuiState, requestId: string) {
+  const run = state.runs[requestId];
+  if (!run) return state;
+  const { [requestId]: _removed, ...runs } = state.runs;
+  const session = state.sessions[run.sessionId];
+  return {
+    ...state,
+    runs,
+    sessions: session
+      ? {
+          ...state.sessions,
+          [run.sessionId]: {
+            ...session,
+            activeRunId: session.activeRunId === requestId ? null : session.activeRunId,
+          },
+        }
+      : state.sessions,
+  };
+}
+
+function removeSessionRuns(state: TuiState, sessionId: SessionId) {
+  const runs = Object.fromEntries(
+    Object.entries(state.runs).filter(([, run]) => run.sessionId !== sessionId),
   );
+  return { ...state, runs };
 }
 
 function finishRun(
   state: TuiState,
   requestId: string,
   statusMessage: string,
-  history: HistoryCellDraft[] = [],
+  messages: MessageCellDraft[] = [],
   tokenUsage?: TokenUsageModel | null,
 ) {
-  const sessionId = state.runRoute[requestId];
-  if (!sessionId) return state;
+  const run = state.runs[requestId];
+  if (!run) return state;
+  const sessionId = run.sessionId;
   const session = state.sessions[sessionId];
-  if (!session || (session.activeRun && session.activeRun.requestId !== requestId)) {
-    return state;
-  }
+  if (!session) return state;
   const nextState = updateSession(state, sessionId, (sessionToUpdate) => {
-    const sameActiveRun = sessionToUpdate.activeRun?.requestId === requestId;
-    if (sessionToUpdate.activeRun && !sameActiveRun) {
-      return sessionToUpdate;
-    }
-    const finalizedSession = sameActiveRun
-      ? finalizeSubagentTimelineEntries(sessionToUpdate, requestId)
+    const finalizedSession = sessionToUpdate.activeRunId === requestId
+      ? finalizeSubagentActivities(sessionToUpdate, requestId)
       : sessionToUpdate;
-    return appendHistory({
+    return appendMessageCells({
       ...finalizedSession,
-      activeRun: sameActiveRun ? null : sessionToUpdate.activeRun,
+      activeRunId: sessionToUpdate.activeRunId === requestId ? null : sessionToUpdate.activeRunId,
     }, [
-      ...history,
+      ...messages,
     ]);
   });
 
@@ -405,22 +426,22 @@ function finishRun(
       ...nextState.connection,
       message: statusMessage,
     },
-    runRoute: removeRunRoute(nextState, requestId),
   };
+  const stateWithRunRemoved = removeRun(stateWithRouteRemoved, requestId);
 
   if (tokenUsage === undefined) {
-    return stateWithRouteRemoved;
+    return stateWithRunRemoved;
   }
 
   if (tokenUsage === null) {
-    const sessionToClear = stateWithRouteRemoved.sessions[sessionId];
+    const sessionToClear = stateWithRunRemoved.sessions[sessionId];
     if (!sessionToClear) {
-      return stateWithRouteRemoved;
+      return stateWithRunRemoved;
     }
     return {
-      ...stateWithRouteRemoved,
+      ...stateWithRunRemoved,
       sessions: {
-        ...stateWithRouteRemoved.sessions,
+        ...stateWithRunRemoved.sessions,
         [sessionId]: {
           ...sessionToClear,
           tokenUsage: null,
@@ -429,13 +450,13 @@ function finishRun(
     };
   }
 
-  const runtimeContextWindow = stateWithRouteRemoved.sessions[sessionId]?.runtime.contextWindow;
+  const runtimeContextWindow = stateWithRunRemoved.sessions[sessionId]?.runtime.contextWindow;
   const nextTokenUsage: TokenUsageModel = tokenUsage.contextWindow === undefined && runtimeContextWindow !== undefined
     ? { ...tokenUsage, contextWindow: runtimeContextWindow }
     : tokenUsage;
   const stateWithRuntimeUpdated = nextTokenUsage.contextWindow === undefined
-    ? stateWithRouteRemoved
-    : updateSession(stateWithRouteRemoved, sessionId, (sessionToUpdate) => ({
+    ? stateWithRunRemoved
+    : updateSession(stateWithRunRemoved, sessionId, (sessionToUpdate) => ({
       ...sessionToUpdate,
       runtime: {
         ...sessionToUpdate.runtime,
@@ -459,7 +480,7 @@ function finishRun(
     };
 }
 
-function activeRunToPendingUi(run: ActiveRunModel | null) {
+function activeRunToPendingUi(run: TuiRunModel | null) {
   if (!run || run.phase === 'waiting_human') return null;
   return {
     startedAt: run.startedAt,
@@ -472,14 +493,14 @@ function activeRunToPendingUi(run: ActiveRunModel | null) {
   };
 }
 
-function clearPendingReview(run: ActiveRunModel): ActiveRunModel {
+function clearPendingReview<T extends ActiveRunModel>(run: T): T {
   if (!run.pendingReview) return run;
   const { pendingReview, ...rest } = run;
   void pendingReview;
-  return rest;
+  return rest as T;
 }
 
-function activeRunToPendingApproval(run: ActiveRunModel | null) {
+function activeRunToPendingApproval(run: TuiRunModel | null) {
   return run?.pendingReview
     ? {
         requestId: run.pendingReview.requestId,
@@ -509,34 +530,38 @@ function countSnapshotAssistantChars(snapshot: TuiCoreSessionSnapshot, requestId
   ), 0);
 }
 
-function activeRunFromSnapshot(
+function runFromSnapshot(
   snapshot: TuiCoreSessionSnapshot,
-  existingSession: SessionModel | undefined,
-): ActiveRunModel | null {
-  const activeRunId = snapshot.activeRunId
-    ?? snapshot.runs.find((run) => !isTerminalSnapshotRun(run))?.requestId;
-  if (!activeRunId) return null;
-  const run = snapshot.runs.find((item) => item.requestId === activeRunId);
-  if (!run) return null;
+  run: TuiCoreRunSnapshot,
+  existingRun: TuiRunModel | undefined,
+): TuiRunModel | null {
   const phase = activeRunPhaseFromSnapshot(run);
   if (!phase) return null;
-  const existingActiveRun = existingSession?.activeRun?.requestId === run.requestId
-    ? existingSession.activeRun
-    : null;
   return {
     requestId: run.requestId,
+    sessionId: run.sessionId || snapshot.sessionId,
+    kind: run.kind,
     phase,
     timelineEntryIds: run.timelineEntryIds,
-    startedAt: run.startedAt ?? existingActiveRun?.startedAt ?? 0,
+    startedAt: run.startedAt ?? existingRun?.startedAt ?? 0,
     charCount: countSnapshotAssistantChars(snapshot, run.requestId),
-    ...pendingReviewFromSnapshotRun(run, existingActiveRun),
+    ...pendingReviewFromSnapshotRun(run, existingRun ?? null),
   };
+}
+
+function activeRunIdFromSnapshot(
+  snapshot: TuiCoreSessionSnapshot,
+  snapshotRuns: Record<RunId, TuiRunModel>,
+) {
+  const activeRunId = snapshot.activeRunId
+    ?? snapshot.runs.find((run) => !isTerminalSnapshotRun(run))?.requestId;
+  return activeRunId && snapshotRuns[activeRunId] ? activeRunId : null;
 }
 
 function pendingReviewFromSnapshotRun(
   run: TuiCoreRunSnapshot,
-  existingActiveRun: ActiveRunModel | null,
-): Pick<ActiveRunModel, 'pendingReview'> | Record<string, never> {
+  existingRun: TuiRunModel | null,
+): Pick<TuiRunModel, 'pendingReview'> | Record<string, never> {
   const pendingReview = run.pendingReview;
   if (pendingReview?.status !== 'waiting') return {};
   if (pendingReview.review) {
@@ -548,9 +573,18 @@ function pendingReviewFromSnapshotRun(
       },
     };
   }
-  return existingActiveRun?.pendingReview
-    ? { pendingReview: existingActiveRun.pendingReview }
+  return existingRun?.pendingReview
+    ? { pendingReview: existingRun.pendingReview }
     : {};
+}
+
+function filterReconnectNotices(
+  notices: SessionNoticeModel[],
+  timeline: AgentTimelineEntry[],
+) {
+  const timelineIds = new Set(timeline.map((entry) => entry.id));
+  return trimNotices(notices.filter((notice) =>
+    !notice.afterTimelineEntryId || timelineIds.has(notice.afterTimelineEntryId)));
 }
 
 function applySessionSnapshot(
@@ -562,22 +596,21 @@ function applySessionSnapshot(
   const existingSession = state.sessions[sessionId];
   const focusedSession = state.focusedSessionId ? state.sessions[state.focusedSessionId] : undefined;
   const baseSession = existingSession ?? focusedSession;
-  const history = trimHistory(historyFromSnapshotTimeline(snapshot.timeline));
   const timeline = agentTimelineEntriesFromSnapshot(snapshot.timeline);
   const sessionIdsToClear = new Set<SessionId>([sessionId]);
   if (action.source === 'resume' && state.focusedSessionId) {
     sessionIdsToClear.add(state.focusedSessionId);
   }
   const snapshotRunIds = new Set(snapshot.runs.map((run) => run.requestId));
-  const preservedRunRoute = Object.fromEntries(
-    Object.entries(state.runRoute).filter(([requestId, routedSessionId]) =>
-      !sessionIdsToClear.has(routedSessionId) && !snapshotRunIds.has(requestId)),
+  const preservedRuns = Object.fromEntries(
+    Object.entries(state.runs).filter(([requestId, run]) =>
+      !sessionIdsToClear.has(run.sessionId) && !snapshotRunIds.has(requestId)),
   );
-  const snapshotRunRoute = Object.fromEntries(
-    snapshot.runs
-      .filter((run) => !isTerminalSnapshotRun(run))
-      .map((run) => [run.requestId, run.sessionId || sessionId]),
-  );
+  const snapshotRuns = Object.fromEntries(snapshot.runs.flatMap((run) => {
+    const nextRun = runFromSnapshot(snapshot, run, state.runs[run.requestId]);
+    return nextRun ? [[run.requestId, nextRun]] : [];
+  }));
+  const activeRunId = activeRunIdFromSnapshot(snapshot, snapshotRuns);
   const nextSession: SessionModel = {
     id: sessionId,
     kind: snapshot.kind,
@@ -589,33 +622,48 @@ function applySessionSnapshot(
       ...(baseSession?.runtime ?? {}),
       ...(snapshot.runtime ?? {}),
     },
-    history,
     timeline,
-    activeRun: activeRunFromSnapshot(snapshot, existingSession),
+    notices: action.source === 'reconnect'
+      ? filterReconnectNotices(existingSession?.notices ?? [], timeline)
+      : [],
+    activities: [],
+    activeRunId,
     tokenUsage: snapshot.tokenUsage
       ?? (action.source === 'reconnect' ? existingSession?.tokenUsage ?? null : null),
   };
 
+  const nextSessions = {
+    ...state.sessions,
+    [sessionId]: nextSession,
+  };
+  for (const clearedSessionId of sessionIdsToClear) {
+    if (clearedSessionId === sessionId) continue;
+    const clearedSession = nextSessions[clearedSessionId];
+    if (clearedSession?.activeRunId) {
+      nextSessions[clearedSessionId] = {
+        ...clearedSession,
+        activeRunId: null,
+      };
+    }
+  }
+
   return {
     ...state,
     focusedSessionId: sessionId,
-    sessions: {
-      ...state.sessions,
-      [sessionId]: nextSession,
-    },
-    runRoute: {
-      ...preservedRunRoute,
-      ...snapshotRunRoute,
+    sessions: nextSessions,
+    runs: {
+      ...preservedRuns,
+      ...snapshotRuns,
     },
   };
 }
 
-function historyDraft(
-  kind: HistoryCellModel['kind'],
+function messageDraft(
+  kind: MessageCellModel['kind'],
   text: string,
-  meta: HistoryCellMeta | undefined,
+  meta: MessageCellMeta | undefined,
   fallbackId: string,
-): HistoryCellDraft {
+): MessageCellDraft {
   return {
     id: meta?.id ?? fallbackId,
     kind,
@@ -669,13 +717,14 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
             : state.connection,
         }, sessionId, (session) => ({
           ...session,
-          history: [],
           timeline: [],
-          activeRun: null,
+          notices: [],
+          activities: [],
+          activeRunId: null,
           tokenUsage: null,
         }));
         return sessionId
-          ? { ...nextState, runRoute: removeSessionRunRoutes(nextState, sessionId) }
+          ? removeSessionRuns(nextState, sessionId)
           : nextState;
       }
 
@@ -718,14 +767,14 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         };
       }
 
-    case 'history.append':
+    case 'message.append':
       return updateSession(state, resolveSessionId(state, action.sessionId), (session) =>
-        appendHistory(session, [action.cell]));
+        appendMessageCells(session, [action.cell]));
 
     case 'run.start': {
       const sessionId = resolveSessionId(state, action.sessionId);
       if (!sessionId) return state;
-      const userDraft = historyDraft('user', action.userText, action.userCell, `${action.requestId}:user`);
+      const userDraft = messageDraft('user', action.userText, action.userCell, `${action.requestId}:user`);
       return updateSession({
         ...state,
         connection: {
@@ -738,20 +787,22 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: 0,
           history: recordComposerHistoryEntry(state.input.history, action.userText),
         }),
-        runRoute: {
-          ...state.runRoute,
-          [action.requestId]: sessionId,
+        runs: {
+          ...state.runs,
+          [action.requestId]: {
+            requestId: action.requestId,
+            sessionId,
+            kind: action.kind,
+            phase: 'thinking',
+            timelineEntryIds: [`message:${userDraft.id}`],
+            startedAt: action.now,
+            charCount: 0,
+          },
         },
-      }, sessionId, (session) => appendHistory({
+      }, sessionId, (session) => appendMessageCells({
         ...session,
         kind: action.kind,
-        activeRun: {
-          requestId: action.requestId,
-          phase: 'thinking',
-          timelineEntryIds: [`history:${userDraft.id}`],
-          startedAt: action.now,
-          charCount: 0,
-        },
+        activeRunId: action.requestId,
         tokenUsage: null,
       }, [
         userDraft,
@@ -759,15 +810,24 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     }
 
     case 'review.response.resume': {
-      // Server resumes the same LangGraph run from its checkpoint, so we
-      // preserve the existing activeRun (and its startedAt) — only the phase
-      // flips from waiting_human back to thinking, and the pending approval
-      // is cleared. If for some reason there is no existing activeRun (e.g.
-      // a stale review handed out before this controller loaded), fall back
-      // to creating one keyed by the same requestId.
-      const sessionId = state.runRoute[action.requestId] ?? state.focusedSessionId;
+      const existingRun = state.runs[action.requestId];
+      const sessionId = existingRun?.sessionId ?? state.focusedSessionId;
       if (!sessionId) return state;
-      const userDraft = historyDraft('user', action.message, action.userCell, `${action.requestId}:review-response`);
+      const userDraft = messageDraft('user', action.message, action.userCell, `${action.requestId}:review-response`);
+      const nextRun: TuiRunModel = existingRun
+        ? addTimelineEntryId(clearPendingReview({
+            ...existingRun,
+            phase: 'thinking',
+          }), `message:${userDraft.id}`)
+        : {
+            requestId: action.requestId,
+            sessionId,
+            kind: state.sessions[sessionId]?.kind ?? 'chat',
+            phase: 'thinking',
+            timelineEntryIds: [`message:${userDraft.id}`],
+            startedAt: action.now,
+            charCount: 0,
+          };
       return updateSession({
         ...state,
         connection: {
@@ -780,26 +840,14 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: 0,
           history: resetComposerHistoryNavigation(state.input.history),
         }),
-        runRoute: {
-          ...state.runRoute,
-          [action.requestId]: sessionId,
+        runs: {
+          ...state.runs,
+          [action.requestId]: nextRun,
         },
       }, sessionId, (session) => {
-        const sessionWithReviewAnswered = markReviewTimelineEntries(session, action.requestId, 'answered');
-        return appendHistory({
-          ...sessionWithReviewAnswered,
-          activeRun: session.activeRun?.requestId === action.requestId
-            ? addTimelineEntryId(clearPendingReview({
-                ...session.activeRun,
-                phase: 'thinking',
-              }), `history:${userDraft.id}`)
-            : {
-                requestId: action.requestId,
-                phase: 'thinking',
-                timelineEntryIds: [`history:${userDraft.id}`],
-                startedAt: action.now,
-                charCount: 0,
-              },
+        return appendMessageCells({
+          ...session,
+          activeRunId: action.requestId,
         }, [
           userDraft,
         ]);
@@ -808,176 +856,122 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
     case 'run.interrupting':
     case 'server.interrupting': {
-      const sessionId = state.runRoute[action.requestId];
-      if (!sessionId) return state;
-      return updateSession({
-        ...state,
+      const run = state.runs[action.requestId];
+      if (!run) return state;
+      const stateWithRun = updateRun(state, action.requestId, (currentRun) => ({
+        ...clearPendingReview(currentRun),
+        sessionId: currentRun.sessionId,
+        kind: currentRun.kind,
+        phase: 'interrupting',
+      }));
+      return {
+        ...stateWithRun,
         connection: {
-          ...state.connection,
+          ...stateWithRun.connection,
           message: action.statusMessage,
         },
-      }, sessionId, (session) => session.activeRun?.requestId === action.requestId
-        ? {
-            ...markReviewTimelineEntries(session, action.requestId, 'interrupted'),
-            activeRun: {
-              ...clearPendingReview(session.activeRun),
-              phase: 'interrupting',
-            },
-          }
-        : session);
+      };
     }
 
     case 'run.finish':
-      return finishRun(state, action.requestId, action.statusMessage, action.history);
+      return finishRun(state, action.requestId, action.statusMessage, action.messages);
 
     case 'event.received': {
       const event = action.event;
-      const sessionId = state.runRoute[event.requestId];
-      if (!sessionId) return state;
+      const run = state.runs[event.requestId];
+      if (!run) return state;
+      const sessionId = run.sessionId;
       const session = state.sessions[sessionId];
-      const activeRun = session?.activeRun;
       if (!session) {
-        return state;
-      }
-      if (!activeRun || activeRun.requestId !== event.requestId) {
-        if (event.type !== 'message.completed' || activeRun) {
-          return state;
-        }
-      }
-
-      if (event.type !== 'message.completed' && (!activeRun || activeRun.requestId !== event.requestId)) {
         return state;
       }
 
       if (event.type === 'operation') {
-        if (event.phase === 'started') {
-          return updateSession(state, sessionId, (currentSession) => {
-            const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
-            return {
-              ...sessionWithTimeline,
-              activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-                ? addTimelineEntryId({
-                    ...sessionWithTimeline.activeRun,
-                    phase: 'using_tool',
-                  }, entry.id)
-                : sessionWithTimeline.activeRun,
-            };
-          });
-        }
-        if (event.phase === 'updated') {
-          return updateSession(state, sessionId, (currentSession) => {
-            const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
-            return {
-              ...sessionWithTimeline,
-              activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-                ? addTimelineEntryId({
-                    ...sessionWithTimeline.activeRun,
-                    phase: 'using_tool',
-                  }, entry.id)
-                : sessionWithTimeline.activeRun,
-            };
-          });
-        }
-        return updateSession(state, sessionId, (currentSession) => {
+        let operationEntryId: string | null = null;
+        const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
           const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
-          return {
-            ...sessionWithTimeline,
-            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-              ? addTimelineEntryId({
-                  ...sessionWithTimeline.activeRun,
-                }, entry.id)
-              : sessionWithTimeline.activeRun,
-          };
+          operationEntryId = entry.id;
+          return sessionWithTimeline;
         });
+        return operationEntryId
+          ? updateRun(stateWithTimeline, event.requestId, (currentRun) =>
+              addTimelineEntryId({
+                ...currentRun,
+                phase: event.phase === 'started' || event.phase === 'updated'
+                  ? 'using_tool'
+                  : currentRun.phase,
+              }, operationEntryId!))
+          : stateWithTimeline;
       }
 
       if (event.type === 'message.delta') {
         const token = event.text;
         if (!token) return state;
-        return updateSession(state, sessionId, (currentSession) => {
+        let assistantEntryId: string | null = null;
+        const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
           const { session: sessionWithTimeline, entryId } = appendAssistantTimelineDelta(
             currentSession,
             event.requestId,
             token,
           );
-          return {
-            ...sessionWithTimeline,
-            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-              ? addTimelineEntryId({
-                  ...sessionWithTimeline.activeRun,
-                  phase: 'streaming',
-                  charCount: sessionWithTimeline.activeRun.charCount + token.length,
-                }, entryId)
-              : sessionWithTimeline.activeRun,
-          };
+          assistantEntryId = entryId;
+          return sessionWithTimeline;
         });
+        return assistantEntryId
+          ? updateRun(stateWithTimeline, event.requestId, (currentRun) =>
+              addTimelineEntryId({
+                ...currentRun,
+                phase: 'streaming',
+                charCount: currentRun.charCount + token.length,
+              }, assistantEntryId!))
+          : stateWithTimeline;
       }
 
       if (event.type === 'subagent.message.delta') {
         const token = event.text;
         if (!token) return state;
-        return updateSession(state, sessionId, (currentSession) => {
-          const { session: sessionWithTimeline, entryId } = appendSubagentTimelineDelta(
+        const stateWithActivity = updateSession(state, sessionId, (currentSession) => {
+          const { session: sessionWithActivity } = appendSubagentActivityDelta(
             currentSession,
             event.requestId,
             token,
           );
-          return {
-            ...sessionWithTimeline,
-            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-              ? {
-                  ...sessionWithTimeline.activeRun,
-                  phase: sessionWithTimeline.activeRun.phase === 'waiting_human'
-                    ? sessionWithTimeline.activeRun.phase
-                    : 'streaming',
-                  timelineEntryIds: entryId && !sessionWithTimeline.activeRun.timelineEntryIds.includes(entryId)
-                    ? [...sessionWithTimeline.activeRun.timelineEntryIds, entryId]
-                    : sessionWithTimeline.activeRun.timelineEntryIds,
-                  charCount: sessionWithTimeline.activeRun.charCount + token.length,
-                }
-              : sessionWithTimeline.activeRun,
-          };
+          return sessionWithActivity;
         });
+        return updateRun(stateWithActivity, event.requestId, (currentRun) => ({
+          ...currentRun,
+          phase: currentRun.phase === 'waiting_human' ? currentRun.phase : 'streaming',
+          charCount: currentRun.charCount + token.length,
+        }));
       }
 
       if (event.type === 'human_review.requested') {
         const petId = event.actor?.petId || undefined;
-        return updateSession({
+        const stateWithReview = {
           ...state,
           connection: {
             ...state.connection,
             message: TUI_TEXT.approvalWaiting(petId),
           },
-        }, sessionId, (currentSession) => {
-          const { session: sessionWithTimeline, entry } = appendReviewTimelineEntry(
-            currentSession,
-            event.requestId,
-            event.review.id,
-          );
-          return {
-            ...sessionWithTimeline,
-            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId
-              ? addTimelineEntryId({
-                  ...sessionWithTimeline.activeRun,
-                  phase: 'waiting_human',
-                  charCount: 0,
-                  pendingReview: {
-                    requestId: event.requestId,
-                    review: event.review,
-                    ...(petId ? { petId } : {}),
-                  },
-                }, entry.id)
-              : sessionWithTimeline.activeRun,
-          };
-        });
+        };
+        return updateRun(stateWithReview, event.requestId, (currentRun) => ({
+          ...currentRun,
+          phase: 'waiting_human',
+          charCount: 0,
+          pendingReview: {
+            requestId: event.requestId,
+            review: event.review,
+            ...(petId ? { petId } : {}),
+          },
+        }));
       }
 
       if (event.type === 'system.notice') {
         const notice = formatSystemNoticeEvent(event);
         return notice
           ? updateSession(state, sessionId, (currentSession) =>
-              appendHistory(currentSession, [
-                historyDraft('system', notice, action.historyCell, `${event.requestId}:notice`),
+              appendMessageCells(currentSession, [
+                messageDraft('system', notice, action.messageCell, `${event.requestId}:notice`),
               ]))
           : state;
       }
@@ -985,33 +979,23 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (event.type === 'message.completed') {
         const reply = event.text.trim();
         const finalText = reply || findLatestAssistantTimelineText(session, event.requestId) || '...';
-        const assistantHistoryDraft = historyDraft('assistant', finalText, action.historyCell, `${event.requestId}:assistant`);
         const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
-          const { session: sessionWithTimeline, entryId } = finalizeAssistantTimelineEntry(
+          const { session: sessionWithTimeline } = finalizeAssistantTimelineEntry(
             currentSession,
             event.requestId,
             finalText,
           );
-          return {
-            ...sessionWithTimeline,
-            activeRun: sessionWithTimeline.activeRun?.requestId === event.requestId && entryId
-              ? addTimelineEntryId(sessionWithTimeline.activeRun, entryId)
-              : sessionWithTimeline.activeRun,
-          };
+          return sessionWithTimeline;
         });
-        const stateWithHistory = finalText
-          ? updateSession(stateWithTimeline, sessionId, (currentSession) =>
-              appendHistoryOnly(currentSession, [assistantHistoryDraft]))
-          : stateWithTimeline;
-        return finishRun(stateWithHistory, event.requestId, TUI_TEXT.statusReady, [], event.usage ?? null);
+        return finishRun(stateWithTimeline, event.requestId, TUI_TEXT.statusReady, [], event.usage ?? null);
       }
 
       if (event.type === 'studio.progress') {
         const line = formatStudioProgressEvent(event);
         return line
           ? updateSession(state, sessionId, (currentSession) =>
-              appendHistory(currentSession, [
-                historyDraft('system', line, action.historyCell, `${event.requestId}:studio-progress`),
+              appendMessageCells(currentSession, [
+                messageDraft('system', line, action.messageCell, `${event.requestId}:studio-progress`),
               ]))
           : state;
       }
@@ -1019,7 +1003,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (event.type === 'error') {
         const message = event.message || 'internal error';
         return finishRun(state, event.requestId, TUI_TEXT.statusErrorRecovered, [
-          historyDraft('system', TUI_TEXT.errorLine(message), action.historyCell, `${event.requestId}:event-error`),
+          messageDraft('system', TUI_TEXT.errorLine(message), action.messageCell, `${event.requestId}:event-error`),
         ]);
       }
 
@@ -1028,34 +1012,34 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
     case 'server.interrupted':
       return finishRun(state, action.requestId, action.statusMessage, [
-        historyDraft('assistant', TUI_TEXT.interrupted, action.historyCell, `${action.requestId}:interrupted`),
+        messageDraft('assistant', TUI_TEXT.interrupted, action.messageCell, `${action.requestId}:interrupted`),
       ]);
 
     case 'server.studio_response': {
-      const history: HistoryCellDraft[] = [
+      const messages: MessageCellDraft[] = [
         action.reply.trim()
-          ? historyDraft('assistant', action.reply.trim(), action.historyCell, `${action.requestId}:studio-response`)
-          : historyDraft(
+          ? messageDraft('assistant', action.reply.trim(), action.messageCell, `${action.requestId}:studio-response`)
+          : messageDraft(
               'system',
               TUI_TEXT.studioEmptyTurn(action.outcome),
-              action.historyCell,
+              action.messageCell,
               `${action.requestId}:studio-empty`,
             ),
       ];
       if (action.outcome === 'stopped' && action.reason) {
-        history.push(historyDraft(
+        messages.push(messageDraft(
           'system',
           TUI_TEXT.studioStoppedReason(action.reason),
           action.stoppedReasonCell,
           `${action.requestId}:studio-stopped`,
         ));
       }
-      return finishRun(state, action.requestId, action.statusMessage, history);
+      return finishRun(state, action.requestId, action.statusMessage, messages);
     }
 
     case 'server.studio_error':
       return finishRun(state, action.requestId, action.statusMessage, [
-        historyDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.historyCell, `${action.requestId}:studio-error`),
+        messageDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.messageCell, `${action.requestId}:studio-error`),
       ]);
 
     default:
@@ -1067,16 +1051,22 @@ export function selectFocusedSession(state: TuiState) {
   return state.focusedSessionId ? state.sessions[state.focusedSessionId] ?? null : null;
 }
 
-export function selectFocusedHistory(state: TuiState) {
-  return selectFocusedSession(state)?.history ?? [];
-}
-
 export function selectFocusedTimeline(state: TuiState) {
   return selectFocusedSession(state)?.timeline ?? [];
 }
 
+export function selectFocusedNotices(state: TuiState) {
+  return selectFocusedSession(state)?.notices ?? [];
+}
+
+export function selectFocusedActivities(state: TuiState) {
+  return selectFocusedSession(state)?.activities ?? [];
+}
+
 export function selectFocusedActiveRun(state: TuiState) {
-  return selectFocusedSession(state)?.activeRun ?? null;
+  const session = selectFocusedSession(state);
+  if (!session) return null;
+  return session.activeRunId ? state.runs[session.activeRunId] ?? null : null;
 }
 
 export function selectFocusedBusy(state: TuiState) {
@@ -1090,8 +1080,9 @@ export function selectFocusedPendingUi(state: TuiState) {
 
 export function selectFocusedActiveOperations(state: TuiState) {
   const session = selectFocusedSession(state);
-  return session?.activeRun
-    ? selectActiveOperationsFromTimeline(session.timeline, session.activeRun.requestId)
+  const activeRun = selectFocusedActiveRun(state);
+  return session && activeRun
+    ? selectActiveOperationsFromTimeline(session.timeline, activeRun.requestId)
     : [];
 }
 

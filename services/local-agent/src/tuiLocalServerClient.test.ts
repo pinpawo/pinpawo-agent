@@ -26,6 +26,7 @@ test('parseHistoryMessages keeps visible chat transcript messages only', () => {
 test('parseResumeSessionSummary validates resume session payloads', () => {
   assert.deepEqual(parseResumeSessionSummary({
     id: 'chat:pet-a',
+    kind: 'chat',
     title: 'Pet chat',
     messageCount: 3,
     createdAt: '2026-06-03T00:00:00.000Z',
@@ -33,6 +34,7 @@ test('parseResumeSessionSummary validates resume session payloads', () => {
     active: true,
   }), {
     id: 'chat:pet-a',
+    kind: 'chat',
     title: 'Pet chat',
     messageCount: 3,
     createdAt: '2026-06-03T00:00:00.000Z',
@@ -91,23 +93,38 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
     }
     if (url.endsWith('/snapshot')) {
       return jsonResponse({
-        session: { id: 'chat:pet', kind: 'chat', active: true },
-        messages: [
-          { role: 'user', text: 'restored from snapshot' },
-          { role: 'system', text: 'snapshot notice' },
-        ],
-        pendingReview: {
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        timeline: [{
+          id: 'message:0:user',
+          type: 'message',
+          role: 'user',
+          text: 'restored from snapshot',
+          status: 'completed',
+          source: 'checkpoint',
           requestId: 'req-review',
-          reviewId: 'review-1',
+        }],
+        runs: [{
+          requestId: 'req-review',
           sessionId: 'chat:pet',
-          actor: { petId: 'pet-a' },
-          review: {
-            id: 'review-1',
-            schemaVersion: 1,
-            view: { kind: 'plain', body: 'Approve?' },
-            options: [],
+          kind: 'chat',
+          phase: 'waiting_human',
+          timelineEntryIds: ['message:0:user'],
+          pendingReview: {
+            requestId: 'req-review',
+            reviewId: 'review-1',
+            status: 'waiting',
+            petId: 'pet-a',
+            review: {
+              id: 'review-1',
+              schemaVersion: 1,
+              view: { kind: 'plain', body: 'Approve?' },
+              options: [],
+            },
           },
-        },
+        }],
+        activeRunId: 'req-review',
+        pendingReviewId: 'review-1',
       });
     }
     if (url.endsWith('/sessions')) {
@@ -127,12 +144,26 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
       return jsonResponse({
         session: {
           id: 'chat:one',
+          kind: 'studio',
           title: 'One',
           createdAt: '2026-06-03T00:00:00.000Z',
           updatedAt: '2026-06-03T00:01:00.000Z',
           active: true,
         },
         messages: [{ role: 'assistant', text: 'welcome back' }],
+        snapshot: {
+          sessionId: 'chat:one',
+          kind: 'studio',
+          timeline: [{
+            id: 'message:0:assistant',
+            type: 'message',
+            role: 'assistant',
+            text: 'welcome back',
+            status: 'completed',
+            source: 'checkpoint',
+          }],
+          runs: [],
+        },
       });
     }
     return new Response('{}', { status: 404 });
@@ -156,7 +187,8 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
   const resumed = await client.resumeSession('chat:one');
 
   assert.equal(resumed.session.active, true);
-  assert.deepEqual(resumed.history.map((item) => item.text), ['welcome back']);
+  assert.equal(resumed.session.kind, 'studio');
+  assert.equal(resumed.snapshot.kind, 'studio');
   assert.deepEqual(resumed.snapshot.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
     ['message', 'welcome back'],
   ]);

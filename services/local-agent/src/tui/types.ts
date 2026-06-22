@@ -1,11 +1,11 @@
 import type {
   ApprovalRequestModel,
-  HistoryCellModel,
+  MessageCellModel,
 } from './state/tuiState';
 
-export type MessageRole = HistoryCellModel['kind'];
+export type MessageRole = MessageCellModel['kind'];
 
-export type MessageEntry = HistoryCellModel;
+export type MessageEntry = MessageCellModel;
 
 export type PendingUiState = {
   startedAt: number;
@@ -24,6 +24,7 @@ export type ActiveOperation = {
 
 export type ResumeSessionSummary = {
   id: string;
+  kind?: 'chat' | 'studio';
   title: string;
   messageCount: number;
   createdAt: string;

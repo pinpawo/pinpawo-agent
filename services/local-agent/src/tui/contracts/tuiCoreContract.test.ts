@@ -10,15 +10,17 @@ import {
   type TuiCoreSessionSnapshotLoadedAction,
 } from './tuiCoreContract';
 
-test('TUI CORE-1 contract freezes timeline and snapshot ownership', () => {
+test('TUI core contract freezes timeline and snapshot ownership', () => {
   assert.equal(TUI_CORE_CONTRACT_VERSION, 1);
   assert.deepEqual([...TUI_CORE_TIMELINE_ENTRY_TYPES], ['message', 'operation']);
   assert.deepEqual([...TUI_CORE_STATE_OWNERS], [
     'activeRun',
     'connection',
     'pendingReview',
+    'runs',
     'runtime',
     'studioProgress',
+    'subagentActivity',
     'tokenUsage',
   ]);
   assert.deepEqual([...TUI_CORE_FORBIDDEN_SECONDARY_LOGS], [
@@ -29,7 +31,7 @@ test('TUI CORE-1 contract freezes timeline and snapshot ownership', () => {
   assert.equal(TUI_CORE_CONTRACT_RULES.length, 5);
 });
 
-test('TUI CORE-1 snapshot action carries the target session model shape', () => {
+test('TUI snapshot action carries the target session model shape', () => {
   const action: TuiCoreSessionSnapshotLoadedAction = {
     type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
     source: 'reconnect',

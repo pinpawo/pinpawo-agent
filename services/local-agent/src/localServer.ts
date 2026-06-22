@@ -22,6 +22,7 @@ import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
 import { ensureLocalServerAuthToken } from './localServerAuth';
 import { LocalServerChatHandler } from './localServerChatHandler';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
+import { buildLocalServerTuiSnapshot } from './localServerTuiSnapshot';
 import type { LocalServerDeps } from './localServerTypes';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 
@@ -75,18 +76,34 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
         loadSnapshot: async () => {
           const messages = await tuiSessions.loadHistory(depsWithRuntime);
           const pendingReview = await chatHandler.readPendingReviewSnapshot(depsWithRuntime);
-          return {
-            session: {
-              id: tuiSessions.getActiveSessionId(depsWithRuntime.actorId),
-              kind: 'chat',
-              active: true,
-            },
+          const sessionId = tuiSessions.getActiveSessionId(depsWithRuntime.actorId);
+          return buildLocalServerTuiSnapshot({
+            sessionId,
+            kind: 'chat',
             messages,
-            ...(pendingReview ? { pendingReview } : {}),
-          };
+            deps: depsWithRuntime,
+            pendingReview,
+          });
         },
         listSessions: () => tuiSessions.listSessions(depsWithRuntime),
-        resumeSession: (sessionId) => tuiSessions.resumeSession(depsWithRuntime, sessionId),
+        resumeSession: async (sessionId) => {
+          const result = await tuiSessions.resumeSession(depsWithRuntime, sessionId);
+          const pendingReview = await chatHandler.readPendingReviewSnapshot(depsWithRuntime);
+          return {
+            session: {
+              ...result.session,
+              kind: 'chat',
+            },
+            messages: result.messages,
+            snapshot: buildLocalServerTuiSnapshot({
+              sessionId: result.session.id,
+              kind: 'chat',
+              messages: result.messages,
+              deps: depsWithRuntime,
+              pendingReview,
+            }),
+          };
+        },
       });
       if (handled) {
         return;

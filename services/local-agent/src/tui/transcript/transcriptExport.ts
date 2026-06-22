@@ -1,7 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { HistoryCellModel, SessionModel } from '../state/tuiState';
+import type { AgentMessageEntry } from '../timeline/agentTimeline';
+import type { SessionModel } from '../state/tuiState';
+
+type TranscriptTimelineEntry = AgentMessageEntry & { role: 'user' | 'assistant' };
 
 export type TranscriptExportResult = {
   filePath: string;
@@ -64,39 +67,36 @@ export function formatTranscriptMarkdown(session: SessionModel, exportedAt: Date
     '',
   ];
 
-  if (session.history.length === 0) {
+  const transcriptEntries = session.timeline.filter(isTranscriptTimelineEntry);
+  if (transcriptEntries.length === 0) {
     lines.push('_No messages in this session._', '');
     return lines.join('\n');
   }
 
-  for (const cell of session.history) {
-    lines.push(...formatHistoryCell(cell), '');
+  for (const entry of transcriptEntries) {
+    lines.push(...formatTranscriptEntry(entry), '');
   }
   return lines.join('\n');
 }
 
-function formatHistoryCell(cell: HistoryCellModel) {
-  const title = cell.timestamp
-    ? `### ${formatRole(cell.kind)} · ${cell.timestamp}`
-    : `### ${formatRole(cell.kind)}`;
+function isTranscriptTimelineEntry(entry: SessionModel['timeline'][number]): entry is TranscriptTimelineEntry {
+  return entry.type === 'message' && (entry.role === 'user' || entry.role === 'assistant');
+}
+
+function formatTranscriptEntry(entry: TranscriptTimelineEntry) {
+  const createdAt = 'createdAt' in entry ? entry.createdAt : undefined;
+  const title = createdAt
+    ? `### ${formatRole(entry)} · ${createdAt}`
+    : `### ${formatRole(entry)}`;
   return [
     title,
     '',
-    cell.text.trim() || '_empty_',
+    entry.text.trim() || '_empty_',
   ];
 }
 
-function formatRole(kind: HistoryCellModel['kind']) {
-  switch (kind) {
-    case 'user':
-      return 'User';
-    case 'assistant':
-      return 'Assistant';
-    case 'system':
-      return 'System';
-    default:
-      return kind;
-  }
+function formatRole(entry: TranscriptTimelineEntry) {
+  return entry.role === 'assistant' ? 'Assistant' : 'User';
 }
 
 function defaultTranscriptFileName(sessionId: string, now: Date) {

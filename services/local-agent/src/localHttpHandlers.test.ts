@@ -98,19 +98,17 @@ test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
       throw new Error('not called');
     },
     loadSnapshot: async () => ({
-      session: { id: 'chat:pet-a', kind: 'chat', active: true },
-      messages: [{ role: 'user', text: 'hello' }],
-      pendingReview: {
-        requestId: 'req-review',
-        reviewId: 'review-1',
-        sessionId: 'chat:pet-a',
-        review: {
-          id: 'review-1',
-          schemaVersion: 1,
-          view: { kind: 'plain', body: 'Approve?' },
-          options: [],
-        },
-      },
+      sessionId: 'chat:pet-a',
+      kind: 'chat',
+      timeline: [{
+        id: 'message:0:user',
+        type: 'message',
+        role: 'user',
+        text: 'hello',
+        status: 'completed',
+        source: 'checkpoint',
+      }],
+      runs: [],
     }),
     listSessions: async () => [],
     resumeSession: async () => {
@@ -121,19 +119,17 @@ test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
   await Promise.resolve();
   assert.equal(snapshotRes.statusCode, 200);
   assert.deepEqual(JSON.parse(snapshotRes.body), {
-    session: { id: 'chat:pet-a', kind: 'chat', active: true },
-    messages: [{ role: 'user', text: 'hello' }],
-    pendingReview: {
-      requestId: 'req-review',
-      reviewId: 'review-1',
-      sessionId: 'chat:pet-a',
-      review: {
-        id: 'review-1',
-        schemaVersion: 1,
-        view: { kind: 'plain', body: 'Approve?' },
-        options: [],
-      },
-    },
+    sessionId: 'chat:pet-a',
+    kind: 'chat',
+    timeline: [{
+      id: 'message:0:user',
+      type: 'message',
+      role: 'user',
+      text: 'hello',
+      status: 'completed',
+      source: 'checkpoint',
+    }],
+    runs: [],
   });
 });
 

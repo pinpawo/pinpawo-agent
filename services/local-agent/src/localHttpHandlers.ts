@@ -21,11 +21,12 @@ import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
 type LocalHttpHandlerOptions = {
   authToken: string;
   loadHistory: () => Promise<Array<{ role: string; text: string }>>;
-  loadSnapshot?: () => Promise<Record<string, unknown>>;
+  loadSnapshot?: () => Promise<unknown>;
   listSessions: () => Promise<Array<Record<string, unknown>>>;
   resumeSession: (sessionId: string) => Promise<{
     session: Record<string, unknown>;
     messages: Array<{ role: string; text: string }>;
+    snapshot?: unknown;
   }>;
 };
 

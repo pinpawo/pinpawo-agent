@@ -9,7 +9,7 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 - `timeline == backend checkpoint messages`.
 - Timeline contains user message, assistant streaming/final message, and tool operation message.
 - pending review, runtime, studio progress, connection, token usage, runs, and active run are state, not timeline messages.
-- No `transcript`, message-only view, or `transcriptSnapshot` second message log.
+- No `SessionModel.history`, message-only view, `transcript`, or `transcriptSnapshot` second message log.
 
 ## Contract Artifact
 
@@ -47,6 +47,7 @@ Freeze the TUI message/state contract and add behavior tests that describe the t
 | 2026-06-20 | pending review resume fallback | resume can recover a focused-session route when the route map is missing | no deviation for current model; coverage added | this protects current HITL resume behavior until snapshot recovery owns it | keep existing behavior for CORE-1 | CORE-5 restores pending review through snapshot | accepted |
 | 2026-06-21 | deferred runtime snapshot target tests | reconnect/resume target behavior should be represented without skipped tests | previous PR state used `test.skip` for reconnect/resume snapshot targets | skipped tests do not provide CI-visible protection | replace skipped tests with executable metadata until CORE-5 closes the gap | CORE-6 removes the empty constants | accepted |
 | 2026-06-21 | deferred reducer terminalization target | missing-active-pointer terminalization should be represented without skipped tests | previous PR state used `test.skip` for the reducer target | skipped tests do not provide CI-visible protection | replace skipped test with executable metadata until CORE-5 closes the gap | CORE-6 removes the empty constants | accepted |
+| 2026-06-23 | secondary log contract coverage | The code contract should freeze all forbidden second message-log surfaces. | The runtime had removed `SessionModel.history` and message-only views, but `TUI_CORE_FORBIDDEN_SECONDARY_LOGS` only listed `transcript` and `transcriptSnapshot`. | Main design and CORE-2/CORE-7 require `SessionModel.history` and message-only views to stay out of live TUI state as well. | Add `session.history` and `messageOnlyView` to the executable forbidden secondary-log contract. | none | accepted |
 
 ## Open Questions
 
@@ -57,6 +58,6 @@ None for this PR. Native `TuiCoreSessionSnapshot` timeline entries now represent
 - [x] Tests encode target behavior without broad implementation rewrites.
 - [x] CORE-1 has an explicit code contract artifact.
 - [x] Deferred reconnect/resume targets are executable contract metadata, not skipped tests; CORE-5 clears the remaining entries.
-- [x] No new transcript/message-only model is introduced.
+- [x] No new session history/transcript/message-only model is introduced.
 - [x] Any intentionally failing or skipped test is explained in this document.
 - [x] PR references tracking issue #232.

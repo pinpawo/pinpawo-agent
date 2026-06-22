@@ -10,8 +10,8 @@ import type { AgentToolkit, ToolkitReviewCapabilities } from '../types/toolkit';
 import { randomUUID } from 'node:crypto';
 import { createSubagent } from '../subagent/createSubagent';
 import {
-  buildEmptyCapabilitySearchState,
-  buildTurnStateReset,
+  buildEmptyRunCapabilitySearchState,
+  buildRunStateReset,
   OrchestratorState,
   type OrchestratorStateType,
 } from './orchestrator/state';
@@ -23,14 +23,15 @@ import {
 import type {
   CapabilityCandidate,
   CapabilityDecisionState,
-  FinalReplyRoute,
+  RunFinalReplyRoute,
   MessageLane,
   OrchestratorConfig,
   OrchestratorInvokeOptions,
-  PendingDelegation,
+  RunPendingDelegation,
   DecisionMode,
   ToolBindableChatModel,
   OrchestrationDecisionStructuredOutputConfig,
+  TaskActiveDelegation,
 } from './orchestrator/types';
 import {
   buildOrchestrationDecisionSchema,
@@ -56,7 +57,7 @@ import {
   buildAnswerSystemPrompt,
   buildPreparedRequestContext,
   buildSubagentAnnounceContext,
-  buildTurnDelegationContext,
+  buildRunDelegationContext,
   buildUserIntentDecisionInput,
   buildUserIntentDecisionSystemPrompt,
 } from './orchestrator/prompts';
@@ -77,8 +78,8 @@ import {
   type GlobalReviewPolicyStructuredOutputConfig,
 } from './orchestrator/review/globalReviewPolicy';
 import {
-  reuseOrAppendTurnDelegation,
-  updateTurnDelegationResult,
+  reuseOrAppendRunDelegation,
+  updateRunDelegationResult,
 } from './orchestrator/delegations';
 import {
   buildSubagentHandoff,
@@ -112,7 +113,7 @@ export type {
   OrchestratorStateType,
   OrchestrationDecisionStructuredOutputConfig,
 };
-export { buildOrchestratorTurnInput } from './orchestrator/state';
+export { buildOrchestratorRunInput, buildOrchestratorTurnInput } from './orchestrator/state';
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
 
 const GENERAL_SUBAGENT_MAX_ITERATIONS = 16;
@@ -252,12 +253,12 @@ function readToolkitReviewCapabilities(value: unknown): ToolkitReviewCapabilitie
  * `canSearchCapabilities` 会因为 candidates 非空 / attempted=true 而短路,
  * 整段 capability discovery + search 不再触发。
  *
- * 未传或为空数组 → 返回 null,prepare 走默认 turn reset 路径(0 行为变化)。
+ * 未传或为空数组 → 返回 null,prepare 走默认 run reset 路径(0 行为变化)。
  */
-function buildForcedCapabilitySearchState(
+function buildForcedRunCapabilitySearchState(
   forcedNames: string[] | undefined,
   capabilityList: AgentCapability[],
-): { capabilitySearchState: CapabilitySearchStateForReset } | null {
+): { runCapabilitySearchState: RunCapabilitySearchStateForReset } | null {
   if (!forcedNames || forcedNames.length === 0) return null;
   const candidates: CapabilityCandidate[] = [];
   const seen = new Set<string>();
@@ -275,7 +276,7 @@ function buildForcedCapabilitySearchState(
   }
   if (candidates.length === 0) return null;
   return {
-    capabilitySearchState: {
+    runCapabilitySearchState: {
       query: null,
       attempted: true,
       candidates,
@@ -283,7 +284,7 @@ function buildForcedCapabilitySearchState(
   };
 }
 
-type CapabilitySearchStateForReset = ReturnType<typeof buildEmptyCapabilitySearchState>;
+type RunCapabilitySearchStateForReset = ReturnType<typeof buildEmptyRunCapabilitySearchState>;
 
 function canSearchCapabilities(
   model: AgentModels['act'],
@@ -291,8 +292,8 @@ function canSearchCapabilities(
   capabilities: AgentCapability[],
 ): model is ToolBindableChatModel {
   return capabilities.length > 0
-    && !state.capabilitySearchState.attempted
-    && state.capabilitySearchState.candidates.length === 0
+    && !state.runCapabilitySearchState.attempted
+    && state.runCapabilitySearchState.candidates.length === 0
     && typeof (model as ToolBindableChatModel).bindTools === 'function';
 }
 
@@ -307,9 +308,56 @@ function resolveCapabilityDecisionState(params: {
   return 'unavailable';
 }
 
-function decisionModeFromPendingDelegation(pending: PendingDelegation | null): DecisionMode {
+function decisionModeFromRunPendingDelegation(pending: RunPendingDelegation | null): DecisionMode {
   if (!pending) return 'finish';
   return pending.lane === 'general' ? 'general' : 'capability';
+}
+
+function createTaskActiveDelegation(
+  delegation: RunPendingDelegation,
+  runId: string,
+): TaskActiveDelegation {
+  return {
+    id: delegation.id,
+    lane: delegation.lane,
+    task: delegation.task,
+    contextSummary: delegation.contextSummary,
+    transcriptRunId: runId,
+    status: 'pending',
+    resultPreview: null,
+  };
+}
+
+function resolveDelegationTranscriptRunId(
+  state: OrchestratorStateType,
+  delegation: RunPendingDelegation,
+) {
+  return state.taskActiveDelegation?.id === delegation.id
+    ? state.taskActiveDelegation.transcriptRunId
+    : state.runId;
+}
+
+function readLegacyTaskActiveDelegation(
+  state: OrchestratorStateType,
+): TaskActiveDelegation | null {
+  let delegation = null as OrchestratorStateType['runDelegations'][number] | null;
+  for (let index = state.runDelegations.length - 1; index >= 0; index -= 1) {
+    const item = state.runDelegations[index];
+    if (item.status === 'progress' || item.status === 'completed') {
+      delegation = item;
+      break;
+    }
+  }
+  if (!delegation) return null;
+  return {
+    id: delegation.id,
+    lane: delegation.lane,
+    task: delegation.task,
+    contextSummary: null,
+    transcriptRunId: state.runId,
+    status: 'awaiting_decision',
+    resultPreview: delegation.resultPreview,
+  };
 }
 
 function readCapabilityNameFromLane(lane: MessageLane): string | null {
@@ -368,16 +416,16 @@ function resolveActor(config: OrchestratorConfig, runnableConfig?: RunnableConfi
 }
 
 function buildIterationLimitReviewPayload(params: {
-  turnId: string;
-  iterationCount: number;
+  runId: string;
+  runIterationCount: number;
   maxIterations: number;
   delegationSummary: string;
 }): HumanReviewInterruptPayload {
-  const body = `已执行 ${params.iterationCount} 轮循环（上限 ${params.maxIterations}），当前任务状态：\n${params.delegationSummary}\n\n是否批准继续执行？`;
+  const body = `已执行 ${params.runIterationCount} 轮循环（上限 ${params.maxIterations}），当前任务状态：\n${params.delegationSummary}\n\n是否批准继续执行？`;
   return {
     kind: 'review',
     review: buildReviewSpec({
-      id: `iteration-limit:${params.turnId}:${params.iterationCount}:${params.maxIterations}`,
+      id: `iteration-limit:${params.runId}:${params.runIterationCount}:${params.maxIterations}`,
       view: {
         kind: 'plain',
         title: 'Iteration limit reached',
@@ -464,10 +512,10 @@ function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {
 
 export function createOrchestratorGraph(config: OrchestratorConfig) {
   async function prepare(state: OrchestratorStateType) {
-    if (state.turnId) {
+    if (state.runId) {
       return {};
     }
-    return buildTurnStateReset();
+    return buildRunStateReset();
   }
 
   async function compactContext(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
@@ -508,7 +556,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       execution,
       reviewCapabilities,
       globalReviewPolicy,
-      toolAuthorizations: state.toolAuthorizations,
+      toolAuthorizations: state.sessionToolAuthorizations,
     }, { includeInstructions: false });
     const generalTools = generalToolkitResources.tools;
     validateUniqueToolNames(generalTools);
@@ -516,13 +564,13 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     validateUniqueCapabilityNames(capabilityList);
 
     // 强制候选注入:命中时直接把 forced capability 登记为已发现候选并短路
-    // 后续 LLM 发现 + 工具搜索流程。仅当 capabilitySearchState 还未填充时生效,
-    // 保证多 turn 内只在 turn 开始时注入一次。未传 forcedCapabilityNames 走老路径。
+    // 后续 LLM 发现 + 工具搜索流程。仅当 runCapabilitySearchState 还未填充时生效,
+    // 保证同一 run 内只在 run 开始时注入一次。未传 forcedCapabilityNames 走老路径。
     if (
-      !state.capabilitySearchState.attempted
-      && state.capabilitySearchState.candidates.length === 0
+      !state.runCapabilitySearchState.attempted
+      && state.runCapabilitySearchState.candidates.length === 0
     ) {
-      const forcedSeed = buildForcedCapabilitySearchState(forcedCapabilityNames, capabilityList);
+      const forcedSeed = buildForcedRunCapabilitySearchState(forcedCapabilityNames, capabilityList);
       if (forcedSeed) {
         return forcedSeed;
       }
@@ -536,7 +584,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       recentMessages: mainMessagesWithoutCompaction(state.messages),
       recentAnnounces,
       contextSummaries: readContextCompactionSummaries(state.messages),
-      capabilityArtifacts: state.capabilityArtifacts,
+      capabilityArtifacts: state.sessionCapabilityArtifacts,
     });
     const searchAvailable = canSearchCapabilities(decisionBaseModel, state, capabilityList);
 
@@ -549,7 +597,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       [
         new SystemMessage(buildCapabilityDiscoverySystemPrompt({
           actor,
-          turnDelegationContext: buildTurnDelegationContext(state.turnDelegations),
+          runDelegationContext: buildRunDelegationContext(state.runDelegations),
           generalTools,
           workdir,
           runtimeEnvironment,
@@ -569,11 +617,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     if (capabilitySearchCalls.length > 1) {
       throw new Error('capability discovery emitted multiple capability_search tool calls');
     }
-    setPinpetMeta(response, { lane: 'orchestrator', turnId: state.turnId });
+    setPinpetMeta(response, { lane: 'orchestrator', runId: state.runId });
 
     return {
       messages: [response],
-      pendingDelegation: null,
+      runPendingDelegation: null,
     };
   }
 
@@ -597,13 +645,13 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     let iterationLimitMessages: BaseMessage[] = [];
     let resetIterationCount = false;
 
-    if (state.iterationCount >= maxIter) {
-      const delegationSummary = state.turnDelegations
+    if (state.runIterationCount >= maxIter) {
+      const delegationSummary = state.runDelegations
         .map((d) => `[${d.id}] ${d.lane} — ${formatDelegationStatus(d.status)}: ${clipForPrompt(d.task, 80)}`)
         .join('\n') || '无委派记录';
       const reviewPayload = buildIterationLimitReviewPayload({
-        turnId: state.turnId,
-        iterationCount: state.iterationCount,
+        runId: state.runId,
+        runIterationCount: state.runIterationCount,
         maxIterations: maxIter,
         delegationSummary,
       });
@@ -619,21 +667,21 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         state = {
           ...state,
           messages: [...state.messages, ...iterationLimitMessages],
-          iterationCount: 0,
-          pendingDelegation: null,
+          runIterationCount: 0,
+          runPendingDelegation: null,
         };
         resetIterationCount = true;
       } else if (decision.type !== 'approve') {
         return {
-          messages: [new AIMessage(`已停止，共执行 ${state.iterationCount} 轮。如需继续请告诉我。`)],
-          pendingDelegation: null,
-          pendingFinalReply: 'inline' as FinalReplyRoute,
+          messages: [new AIMessage(`已停止，共执行 ${state.runIterationCount} 轮。如需继续请告诉我。`)],
+          runPendingDelegation: null,
+          runPendingFinalReply: 'inline' as RunFinalReplyRoute,
         };
       } else {
         state = {
           ...state,
-          iterationCount: 0,
-          pendingDelegation: null,
+          runIterationCount: 0,
+          runPendingDelegation: null,
         };
         resetIterationCount = true;
       }
@@ -648,7 +696,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       execution,
       reviewCapabilities,
       globalReviewPolicy,
-      toolAuthorizations: state.toolAuthorizations,
+      toolAuthorizations: state.sessionToolAuthorizations,
     }, { includeInstructions: false });
     const generalTools = generalToolkitResources.tools;
     validateUniqueToolNames(generalTools);
@@ -659,30 +707,38 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const recentMainMessages = mainMessagesWithoutCompaction(state.messages);
     const contextSummaries = readContextCompactionSummaries(state.messages);
     const recentAnnounces = readRecentAnnounces(state.messages);
-    const latestTurnAnnounce = readLatestAnnounce(state.messages, { turnId: state.turnId });
+    const activeDelegation = state.taskActiveDelegation
+      ?? (kind === 'delegation_outcome' ? readLegacyTaskActiveDelegation(state) : null);
+    const activeDelegationAnnounce = activeDelegation
+      ? readLatestAnnounce(state.messages, {
+          runId: activeDelegation.transcriptRunId,
+          delegationId: activeDelegation.id,
+        })
+      : null;
     const requestContext = buildPreparedRequestContext({
       latestUserRequest: latestHumanRequest,
       recentMessages: recentMainMessages,
       recentAnnounces,
       contextSummaries,
-      capabilityArtifacts: state.capabilityArtifacts,
+      capabilityArtifacts: state.sessionCapabilityArtifacts,
     });
     const isUserIntentDecision = kind === 'user_intent';
-    // In-progress lanes are those that still have an announce sitting in a lane:
-    // completed delegations are handed off (their lane is wiped), so any announce
-    // still lane-tagged is by definition unfinished. This persists across turns
-    // (turnDelegations is reset each turn; the lane announce is not).
+    // Unfinished delegation lifecycle is explicit task state. Lane announces are
+    // transcript storage and context, not normal control-flow authority.
     const inProgressCapabilityCandidates = buildCapabilityCandidatesFromLanes(
       capabilityList,
       isUserIntentDecision
-        ? readInFlightAnnounceLanes(state.messages)
-        : [latestTurnAnnounce?.lane],
+        ? [
+            activeDelegation?.lane,
+            ...(state.taskActiveDelegation ? [] : readInFlightAnnounceLanes(state.messages)),
+          ]
+        : [activeDelegationAnnounce?.lane ?? activeDelegation?.lane],
     );
     const decisionCapabilityCandidates = isUserIntentDecision
-      ? mergeCapabilityCandidates(state.capabilitySearchState.candidates, inProgressCapabilityCandidates)
+      ? mergeCapabilityCandidates(state.runCapabilitySearchState.candidates, inProgressCapabilityCandidates)
       : inProgressCapabilityCandidates;
-    const decisionCapabilitySearchAttempted = isUserIntentDecision && state.capabilitySearchState.attempted;
-    const decisionCapabilitySearchQuery = isUserIntentDecision ? state.capabilitySearchState.query : null;
+    const decisionCapabilitySearchAttempted = isUserIntentDecision && state.runCapabilitySearchState.attempted;
+    const decisionCapabilitySearchQuery = isUserIntentDecision ? state.runCapabilitySearchState.query : null;
     const searchAvailable = isUserIntentDecision
       && canSearchCapabilities(config.models.act, state, capabilityList);
     const capabilityDecisionState = resolveCapabilityDecisionState({
@@ -690,7 +746,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       capabilityCandidates: decisionCapabilityCandidates,
       capabilitySearchAttempted: decisionCapabilitySearchAttempted,
     });
-    const turnDelegationContext = buildTurnDelegationContext(state.turnDelegations);
+    const runDelegationContext = buildRunDelegationContext(state.runDelegations);
     const decisionTargetsContext = buildDecisionTargetsContext({
       generalTools,
       capabilityCandidates: decisionCapabilityCandidates,
@@ -703,7 +759,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const systemPrompt = isUserIntentDecision
       ? buildUserIntentDecisionSystemPrompt({
         actor,
-        turnDelegationContext,
+        runDelegationContext: runDelegationContext,
         targetsContext: decisionTargetsContext,
         capabilityDecisionState,
         outputInstruction,
@@ -732,12 +788,17 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       }))
       : new HumanMessage(buildDelegationOutcomeDecisionInput({
         latestUserRequest: latestHumanRequest,
-        turnDelegationContext,
+        runDelegationContext: runDelegationContext,
         subagentAnnounceContext: buildSubagentAnnounceContext(
-          latestTurnAnnounce,
-          readLatestAnnounceCompletionReason(state.messages, { turnId: state.turnId }),
+          activeDelegationAnnounce,
+          activeDelegation
+            ? readLatestAnnounceCompletionReason(state.messages, {
+                runId: activeDelegation.transcriptRunId,
+                delegationId: activeDelegation.id,
+              })
+            : null,
         ),
-        capabilityArtifacts: state.capabilityArtifacts,
+        capabilityArtifacts: state.sessionCapabilityArtifacts,
       }));
 
     const decisionSchema = buildOrchestrationDecisionSchema({
@@ -797,7 +858,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
                 : '当前决策已结束，但没有生成可展示的回复。'
       : null;
 
-    const pendingFinalReply: FinalReplyRoute =
+    const runPendingFinalReply: RunFinalReplyRoute =
       decisionMode !== 'finish'
         ? null
         : inlineReply
@@ -815,15 +876,17 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const delegationContextSummary = decisionMode !== 'finish'
       ? decisionContextSummary ?? '继续完成用户当前请求。'
       : null;
-    const pendingDelegation: PendingDelegation | null = delegationLane && delegationTask
+    const runPendingDelegation: RunPendingDelegation | null = delegationLane && delegationTask
       ? {
-          id: randomUUID().slice(0, 8),
+          id: activeDelegation && activeDelegation.lane === delegationLane
+            ? activeDelegation.id
+            : randomUUID().slice(0, 8),
           lane: delegationLane,
           task: delegationTask,
           contextSummary: delegationContextSummary,
         }
       : null;
-    const nextDelegationState = reuseOrAppendTurnDelegation(state.turnDelegations, pendingDelegation);
+    const nextDelegationState = reuseOrAppendRunDelegation(state.runDelegations, runPendingDelegation);
 
     // Handoff (D1): the orchestrator's `action` IS its completion judgment.
     // `finish` means "the work is done, wrap up" — that is the moment to hand the
@@ -832,51 +895,76 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     // and the lanes are kept. There is no separate completion signal: we do not
     // read completionReason here (it is only a hint shown to the decision LLM).
     //
-    // On finish we hand off EVERY delegation that still has a lane with an
-    // announce — not just the one we just returned from — because A may have
-    // completed, then B was delegated and completed, and only now does the
-    // orchestrator finish (see "完成 A 同时委派 B → 只在 finish 那一刻 handoff").
+    // Single-line delegation handoff is driven by taskActiveDelegation. run
+    // summaries are not the source of truth for unfinished task lifecycle.
+    const replacingActiveDelegation = kind === 'delegation_outcome'
+      && Boolean(activeDelegation && runPendingDelegation && activeDelegation.id !== runPendingDelegation.id);
     const handingOff = kind === 'delegation_outcome' && actionKind === 'finish';
     const handoffMessages: BaseMessage[] = [];
     const handedOffDelegationIds = new Set<string>();
-    if (handingOff) {
-      for (const delegation of nextDelegationState.turnDelegations) {
-        if (handedOffDelegationIds.has(delegation.id)) continue;
-        const messages = buildSubagentHandoff({
-          messages: state.messages,
-          lane: delegation.lane,
-          turnId: state.turnId,
-          delegationId: delegation.id,
-        });
-        if (!messages) continue;
+    if ((handingOff || replacingActiveDelegation) && activeDelegation) {
+      const messages = buildSubagentHandoff({
+        messages: state.messages,
+        lane: activeDelegation.lane,
+        runId: activeDelegation.transcriptRunId,
+        delegationId: activeDelegation.id,
+      });
+      if (messages) {
         handoffMessages.push(...messages);
-        handedOffDelegationIds.add(delegation.id);
+        handedOffDelegationIds.add(activeDelegation.id);
       }
     }
+    const replacementBlocked = replacingActiveDelegation
+      && activeDelegation !== null
+      && !handedOffDelegationIds.has(activeDelegation.id);
+    const blockedReplacementMessage = replacementBlocked
+      ? new AIMessage('当前委派任务还没有可交接的结果，暂不能切换到新的执行器。请先继续当前委派，或明确说明要放弃它。')
+      : null;
 
     // A handed-off delegation is, by the orchestrator's judgment, complete.
-    const finalTurnDelegations = handedOffDelegationIds.size > 0
-      ? nextDelegationState.turnDelegations.map((delegation) =>
+    const finalRunDelegations = handedOffDelegationIds.size > 0
+      ? nextDelegationState.runDelegations.map((delegation) =>
           handedOffDelegationIds.has(delegation.id)
             ? { ...delegation, status: 'completed' as const }
             : delegation)
-      : nextDelegationState.turnDelegations;
+      : nextDelegationState.runDelegations;
+
+    let nextTaskActiveDelegation: TaskActiveDelegation | null;
+    if (replacementBlocked) {
+      nextTaskActiveDelegation = activeDelegation;
+    } else if (handingOff) {
+      nextTaskActiveDelegation = null;
+    } else if (runPendingDelegation) {
+      nextTaskActiveDelegation = activeDelegation && activeDelegation.id === runPendingDelegation.id
+        ? {
+            ...activeDelegation,
+            task: runPendingDelegation.task,
+            contextSummary: runPendingDelegation.contextSummary,
+            status: 'pending' as const,
+            resultPreview: null,
+          }
+        : createTaskActiveDelegation(runPendingDelegation, state.runId);
+    } else {
+      nextTaskActiveDelegation = activeDelegation;
+    }
 
     return {
       messages: [
         ...iterationLimitMessages,
         ...handoffMessages,
+        ...(blockedReplacementMessage ? [blockedReplacementMessage] : []),
         ...(inlineReply ? [new AIMessage(inlineReply)] : []),
       ],
-      pendingDelegation: nextDelegationState.pendingDelegation,
-      pendingFinalReply,
-      ...(resetIterationCount ? { iterationCount: 0 } : {}),
+      runPendingDelegation: replacementBlocked ? null : nextDelegationState.runPendingDelegation,
+      runPendingFinalReply: replacementBlocked ? 'inline' : runPendingFinalReply,
+      taskActiveDelegation: nextTaskActiveDelegation,
+      ...(resetIterationCount ? { runIterationCount: 0 } : {}),
       ...(kind === 'delegation_outcome'
         ? {
-            capabilitySearchState: buildEmptyCapabilitySearchState(),
+            runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
           }
         : {}),
-      turnDelegations: finalTurnDelegations,
+      runDelegations: replacementBlocked ? state.runDelegations : finalRunDelegations,
     };
   }
 
@@ -929,17 +1017,18 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = capabilityLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
-    const pendingDelegation = state.pendingDelegation;
-    if (!pendingDelegation) {
+    const runPendingDelegation = state.runPendingDelegation;
+    if (!runPendingDelegation) {
       return {};
     }
-    const capabilityName = readCapabilityNameFromLane(pendingDelegation.lane);
+    const capabilityName = readCapabilityNameFromLane(runPendingDelegation.lane);
     const capability = capabilities?.find((c) => c.name === capabilityName);
     if (!capability) {
       return {};
     }
     const lane: MessageLane = `capability:${capability.name}`;
-    const scopedMessages = laneMessages(state.messages, lane, state.turnId, pendingDelegation.id);
+    const transcriptRunId = resolveDelegationTranscriptRunId(state, runPendingDelegation);
+    const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runPendingDelegation.id);
     const threadId = readThreadId(runnableConfig);
 
     const availableToolkits = toolkitList.map(({ name, description }) => ({
@@ -956,7 +1045,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       artifactStore: config.capabilityArtifactStore,
     });
 
-    const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);
+    const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
     const artifactRefs: CapabilityArtifactRef[] = [];
     const toolkitContext = {
       models: config.models,
@@ -965,8 +1054,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       threadId,
       capabilityId: capability.name,
       resultSchema: capability.resultSchema,
-      delegationId: pendingDelegation.id,
-      turnId: state.turnId,
+      delegationId: runPendingDelegation.id,
+      runId: transcriptRunId,
       execution,
       reviewCapabilities,
       globalReviewPolicy,
@@ -987,8 +1076,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const middleware = runtime.middleware;
     const handoffInstruction = buildDelegationHandoffInstruction({
       lane,
-      task: pendingDelegation.task,
-      contextSummary: pendingDelegation.contextSummary,
+      task: runPendingDelegation.task,
+      contextSummary: runPendingDelegation.contextSummary,
       workdir: workdir ?? null,
     });
 
@@ -1010,8 +1099,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
           artifactRefs.push(ref);
         },
         threadId,
-        delegationId: pendingDelegation.id,
-        turnId: state.turnId,
+        delegationId: runPendingDelegation.id,
+        runId: transcriptRunId,
       },
       onToolEvent,
     };
@@ -1031,8 +1120,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         },
         threadId,
         capabilityId: capability.name,
-        delegationId: pendingDelegation.id,
-        turnId: state.turnId,
+        delegationId: runPendingDelegation.id,
+        runId: transcriptRunId,
       });
     }
 
@@ -1040,21 +1129,21 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       result.messages,
       subagentInput.messages.length,
       lane,
-      state.turnId,
+      transcriptRunId,
       result.completionReason,
       {
-        delegationId: pendingDelegation.id,
-        task: pendingDelegation.task,
+        delegationId: runPendingDelegation.id,
+        task: runPendingDelegation.task,
       },
     );
-    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: pendingDelegation.id });
+    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runPendingDelegation.id });
     // The subagent node only records that the delegation ran (status 'progress');
     // whether it is complete is the orchestrator's call at delegationOutcomeDecision,
     // which upgrades the status to 'completed' when it hands off. The raw lane
     // messages are kept in place — handoff (or a later continuation) cleans them up.
-    const updatedTurnDelegations = updateTurnDelegationResult(
-      state.turnDelegations,
-      pendingDelegation.id,
+    const updatedRunDelegations = updateRunDelegationResult(
+      state.runDelegations,
+      runPendingDelegation.id,
       {
         status: 'progress',
         resultPreview: delegationAnnounce?.text ?? null,
@@ -1063,12 +1152,17 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
     return {
       messages: laneOutputMessages,
-      capabilityArtifacts: result.artifacts,
-      capabilitySearchState: buildEmptyCapabilitySearchState(),
-      turnDelegations: updatedTurnDelegations,
-      pendingDelegation: null,
-      iterationCount: state.iterationCount + 1,
-      toolAuthorizations: authorizationRecorder.recorded,
+      sessionCapabilityArtifacts: result.artifacts,
+      runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+      runDelegations: updatedRunDelegations,
+      runPendingDelegation: null,
+      taskActiveDelegation: {
+        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runPendingDelegation, transcriptRunId)),
+        status: 'awaiting_decision' as const,
+        resultPreview: delegationAnnounce?.text ?? null,
+      },
+      runIterationCount: state.runIterationCount + 1,
+      sessionToolAuthorizations: authorizationRecorder.recorded,
     };
   }
 
@@ -1078,7 +1172,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
-    const authorizationRecorder = createToolAuthorizationRecorder(state.toolAuthorizations);
+    const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
     const toolkitResources = await resolveToolkitResources(toolkitList, undefined, {
       models: config.models,
       actor,
@@ -1099,15 +1193,16 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     }
 
     const lane: MessageLane = 'general';
-    const pendingDelegation = state.pendingDelegation;
-    if (!pendingDelegation || pendingDelegation.lane !== 'general') {
+    const runPendingDelegation = state.runPendingDelegation;
+    if (!runPendingDelegation || runPendingDelegation.lane !== 'general') {
       return {};
     }
-    const scopedMessages = laneMessages(state.messages, lane, state.turnId, pendingDelegation.id);
+    const transcriptRunId = resolveDelegationTranscriptRunId(state, runPendingDelegation);
+    const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runPendingDelegation.id);
     const handoffInstruction = buildDelegationHandoffInstruction({
       lane,
-      task: pendingDelegation.task,
-      contextSummary: pendingDelegation.contextSummary,
+      task: runPendingDelegation.task,
+      contextSummary: runPendingDelegation.contextSummary,
       workdir: workdir ?? null,
     });
     const instructions = [
@@ -1139,20 +1234,20 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       result.messages,
       subagentMessages.length,
       lane,
-      state.turnId,
+      transcriptRunId,
       result.completionReason,
       {
-        delegationId: pendingDelegation.id,
-        task: pendingDelegation.task,
+        delegationId: runPendingDelegation.id,
+        task: runPendingDelegation.task,
       },
     );
-    const delegationAnnounce = readLatestAnnounce(outputMessages, { delegationId: pendingDelegation.id });
+    const delegationAnnounce = readLatestAnnounce(outputMessages, { delegationId: runPendingDelegation.id });
 
     // See capabilityNode: status is 'progress' until the orchestrator judges it
     // complete at delegationOutcomeDecision; raw lane messages are kept in place.
-    const updatedTurnDelegations = updateTurnDelegationResult(
-      state.turnDelegations,
-      pendingDelegation.id,
+    const updatedRunDelegations = updateRunDelegationResult(
+      state.runDelegations,
+      runPendingDelegation.id,
       {
         status: 'progress',
         resultPreview: delegationAnnounce?.text ?? null,
@@ -1161,11 +1256,16 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
     return {
       messages: outputMessages,
-      capabilitySearchState: buildEmptyCapabilitySearchState(),
-      turnDelegations: updatedTurnDelegations,
-      pendingDelegation: null,
-      iterationCount: state.iterationCount + 1,
-      toolAuthorizations: authorizationRecorder.recorded,
+      runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+      runDelegations: updatedRunDelegations,
+      runPendingDelegation: null,
+      taskActiveDelegation: {
+        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runPendingDelegation, transcriptRunId)),
+        status: 'awaiting_decision' as const,
+        resultPreview: delegationAnnounce?.text ?? null,
+      },
+      runIterationCount: state.runIterationCount + 1,
+      sessionToolAuthorizations: authorizationRecorder.recorded,
     };
   }
 
@@ -1174,7 +1274,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     if (
       latestMessage?._getType() === 'ai'
       && getMessageLane(latestMessage) === 'orchestrator'
-      && getMessageTurnId(latestMessage) === state.turnId
+      && getMessageTurnId(latestMessage) === state.runId
       && readModelToolCalls(latestMessage as AIMessage).some((call) => call.name === CAPABILITY_SEARCH_TOOL_NAME)
     ) {
       return 'capabilitySearch';
@@ -1182,13 +1282,23 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     return 'userIntentDecision';
   }
 
+  function afterContextPrep(state: OrchestratorStateType) {
+    if (state.taskActiveDelegation?.status === 'awaiting_decision') {
+      return 'delegationOutcomeDecision';
+    }
+    if (!state.taskActiveDelegation && readLegacyTaskActiveDelegation(state)) {
+      return 'delegationOutcomeDecision';
+    }
+    return 'capabilityDiscovery';
+  }
+
   function afterDecision(state: OrchestratorStateType) {
-    const decisionMode = decisionModeFromPendingDelegation(state.pendingDelegation);
+    const decisionMode = decisionModeFromRunPendingDelegation(state.runPendingDelegation);
     if (decisionMode === 'capability') return 'capability';
     if (decisionMode === 'general') return 'general';
     // finish bucket: route a real finish to the answer node; inline replies
     // (ask_user / degenerate fallback / stop) already emitted their message.
-    return state.pendingFinalReply === 'answer' ? 'answer' : 'end';
+    return state.runPendingFinalReply === 'answer' ? 'answer' : 'end';
   }
 
   const graph = new StateGraph(OrchestratorState)
@@ -1203,12 +1313,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('general', generalNode)
     .addEdge(START, 'prepare')
     .addEdge('prepare', 'compactContext')
-    // A new turn always re-evaluates intent via capabilityDiscovery → decision.
-    // delegationOutcomeDecision is reached only from a subagent node's edge within
-    // a single invoke; it is never entered from the turn entrypoint. (We do not
-    // route based on announce presence — announce is context for the LLM, not a
-    // control-flow signal. See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.)
-    .addEdge('compactContext', 'capabilityDiscovery')
+    // Run entry uses explicit task lifecycle state. Lane announces remain
+    // transcript/context storage and are not the normal control-flow signal.
+    .addConditionalEdges('compactContext', afterContextPrep, {
+      delegationOutcomeDecision: 'delegationOutcomeDecision',
+      capabilityDiscovery: 'capabilityDiscovery',
+    })
     .addConditionalEdges('capabilityDiscovery', afterCapabilityDiscovery, {
       capabilitySearch: 'capabilitySearch',
       userIntentDecision: 'userIntentDecision',

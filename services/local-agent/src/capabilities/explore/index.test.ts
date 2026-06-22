@@ -266,7 +266,7 @@ test('explore context-pressure ingest persists a summary+evidence report artifac
       recordCapabilityArtifact: (ref) => { recorded.push(ref); },
       threadId: 'thread-1',
       delegationId: 'dg_1',
-      turnId: 'turn_1',
+      runId: 'run_1',
     },
   });
 

@@ -29,13 +29,15 @@ export const DEFAULT_CAPABILITY_ARTIFACT_ROOT = defaultCapabilityArtifactRoot();
 
 type StoredArtifactRef = CapabilityArtifactRef & {
   relativePath?: string;
+  turnId?: string;
 };
 
 type ArtifactManifest = {
   version: 1;
   threadId: string;
   delegationId: string;
-  turnId: string;
+  runId: string;
+  turnId?: string;
   capabilityId: string;
   createdAt: string;
   artifacts: StoredArtifactRef[];
@@ -108,7 +110,16 @@ function readManifest(path: string): ArtifactManifest | null {
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
     if (!parsed || typeof parsed !== 'object') return null;
     const record = parsed as ArtifactManifest;
-    return Array.isArray(record.artifacts) ? record : null;
+    if (!Array.isArray(record.artifacts)) return null;
+    const runId = record.runId ?? record.turnId ?? '';
+    return {
+      ...record,
+      runId,
+      artifacts: record.artifacts.map((artifact) => ({
+        ...artifact,
+        runId: artifact.runId ?? artifact.turnId ?? runId,
+      })),
+    };
   } catch {
     return null;
   }
@@ -209,7 +220,7 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
     const id = sha256(stableJson({
       capabilityId: input.capabilityId,
       delegationId: input.delegationId,
-      turnId: input.turnId,
+      runId: input.runId,
       kind: input.artifact.kind,
       mimeType: input.artifact.mimeType,
       title: input.artifact.title,
@@ -227,7 +238,7 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
         threadId: input.threadId,
         capabilityId: input.capabilityId,
         delegationId: input.delegationId,
-        turnId: input.turnId,
+        runId: input.runId,
         kind: input.artifact.kind,
         mimeType: input.artifact.mimeType,
         uri,
@@ -271,7 +282,7 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
           version: 1,
           threadId: first.threadId,
           delegationId: first.delegationId,
-          turnId: first.turnId,
+          runId: first.runId,
           capabilityId: first.capabilityId,
           createdAt: now,
           artifacts: [],

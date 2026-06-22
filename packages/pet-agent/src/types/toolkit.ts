@@ -22,7 +22,7 @@ export type ToolkitContext = {
   capabilityId?: string | null;
   resultSchema?: ZodType;
   delegationId?: string | null;
-  turnId?: string | null;
+  runId?: string | null;
   execution?: AgentExecution;
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { GLOBAL_REVIEW_POLICY_MODE } from '@pinpawo/pet-agent';
 import { buildCommandPaletteModel } from './input/commandPalette';
 import type { FileMentionModel } from './input/fileMention';
+import { resolveTuiInputOwner } from './input/inputRouter';
 import { buildTuiOverlayModel } from './overlayModel';
 import type { ApprovalRequestModel } from './state/tuiState';
 
@@ -116,6 +117,115 @@ test('buildTuiOverlayModel keeps policy picker above inline popups', () => {
   assert.equal(model.ownerLabel, 'Policy');
 });
 
+test('buildTuiOverlayModel visible owner priority stays aligned with input owner routing', () => {
+  const cases = [
+    {
+      name: 'resume',
+      expectedOwner: 'resumePicker',
+      overlay: overlayInput({
+        resumePicker: { open: true, sessions: [], selectedIndex: 0, loading: false },
+        approval: { request: approvalRequest(), selectedIndex: 0 },
+        globalReviewPolicyPicker: {
+          open: true,
+          currentMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+          selectedIndex: 0,
+        },
+        commandPalette: buildCommandPaletteModel({ text: '/', cursorOffset: 1 }),
+        fileMention: OPEN_FILE_MENTION,
+      }),
+      input: {
+        ready: true,
+        busy: false,
+        hasPendingApproval: true,
+        hasResumePicker: true,
+        hasGlobalReviewPolicyPicker: true,
+        hasCommandPalette: true,
+        hasFileMention: true,
+      },
+    },
+    {
+      name: 'approval',
+      expectedOwner: 'approval',
+      overlay: overlayInput({
+        approval: { request: approvalRequest(), selectedIndex: 0 },
+        globalReviewPolicyPicker: {
+          open: true,
+          currentMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+          selectedIndex: 0,
+        },
+        commandPalette: buildCommandPaletteModel({ text: '/', cursorOffset: 1 }),
+        fileMention: OPEN_FILE_MENTION,
+      }),
+      input: {
+        ready: true,
+        busy: false,
+        hasPendingApproval: true,
+        hasResumePicker: false,
+        hasGlobalReviewPolicyPicker: true,
+        hasCommandPalette: true,
+        hasFileMention: true,
+      },
+    },
+    {
+      name: 'policy',
+      expectedOwner: 'globalReviewPolicyPicker',
+      overlay: overlayInput({
+        globalReviewPolicyPicker: {
+          open: true,
+          currentMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+          selectedIndex: 0,
+        },
+        commandPalette: buildCommandPaletteModel({ text: '/', cursorOffset: 1 }),
+        fileMention: OPEN_FILE_MENTION,
+      }),
+      input: {
+        ready: true,
+        busy: false,
+        hasPendingApproval: false,
+        hasResumePicker: false,
+        hasGlobalReviewPolicyPicker: true,
+        hasCommandPalette: true,
+        hasFileMention: true,
+      },
+    },
+    {
+      name: 'command',
+      expectedOwner: 'commandPalette',
+      overlay: overlayInput({
+        commandPalette: buildCommandPaletteModel({ text: '/', cursorOffset: 1 }),
+        fileMention: OPEN_FILE_MENTION,
+      }),
+      input: {
+        ready: true,
+        busy: false,
+        hasPendingApproval: false,
+        hasResumePicker: false,
+        hasCommandPalette: true,
+        hasFileMention: true,
+      },
+    },
+    {
+      name: 'file',
+      expectedOwner: 'fileMention',
+      overlay: overlayInput({
+        fileMention: OPEN_FILE_MENTION,
+      }),
+      input: {
+        ready: true,
+        busy: false,
+        hasPendingApproval: false,
+        hasResumePicker: false,
+        hasFileMention: true,
+      },
+    },
+  ] as const;
+
+  for (const { name, expectedOwner, overlay, input } of cases) {
+    assert.equal(buildTuiOverlayModel(overlay).owner, expectedOwner, name);
+    assert.equal(resolveTuiInputOwner(input).type, expectedOwner, name);
+  }
+});
+
 test('buildTuiOverlayModel returns no owner when all overlays are closed', () => {
   const model = buildTuiOverlayModel({
     width: 80,
@@ -134,6 +244,24 @@ test('buildTuiOverlayModel returns no owner when all overlays are closed', () =>
   assert.equal(model.owner, null);
   assert.equal(model.ownerLabel, null);
 });
+
+function overlayInput(
+  overrides: Partial<Parameters<typeof buildTuiOverlayModel>[0]> = {},
+): Parameters<typeof buildTuiOverlayModel>[0] {
+  return {
+    width: 80,
+    resumePicker: { open: false, sessions: [], selectedIndex: 0, loading: false },
+    approval: { request: null, selectedIndex: 0 },
+    globalReviewPolicyPicker: {
+      open: false,
+      currentMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+      selectedIndex: 0,
+    },
+    commandPalette: buildCommandPaletteModel({ text: '', cursorOffset: 0 }),
+    fileMention: CLOSED_FILE_MENTION,
+    ...overrides,
+  };
+}
 
 function approvalRequest(): ApprovalRequestModel {
   return {

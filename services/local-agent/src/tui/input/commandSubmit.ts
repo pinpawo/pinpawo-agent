@@ -2,16 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { exportSessionTranscript } from '../transcript/transcriptExport';
 import { formatTuiCommandHelp, parseTuiCommand } from './commandRegistry';
 import { TUI_TEXT } from '../render/text';
-import type { TuiAction } from '../state/tuiState';
+import type { TuiAction, TuiInteractionMode } from '../state/tuiState';
 import type { SessionModel } from '../state/tuiState';
 import type { TuiRuntimeController } from '../TuiRuntimeController';
 
 type TuiCommandSubmitInput = {
   inputValue: string;
   focusedSession: SessionModel | null;
-  studioModeRef: { current: boolean };
-  studioConversationIdRef: { current: string | null };
-  setStudioMode: (value: boolean) => void;
+  mode: TuiInteractionMode;
+  studioConversationId: string | null;
+  enterStudioMode: (conversationId: string) => void;
+  exitStudioMode: () => void;
   openResumePicker: () => void;
   openGlobalReviewPolicyPicker: () => void;
   openExternalEditor?: (initialText: string) => void;
@@ -68,7 +69,10 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
     }
 
     if (parsed.name === 'resume') {
+      options.exitStudioMode();
+      options.dispatch({ type: 'session.set_kind', kind: 'chat' });
       options.openResumePicker();
+      options.clearInputValue();
       return;
     }
 
@@ -79,10 +83,8 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
     }
 
     if (parsed.name === 'chat') {
-      if (options.studioModeRef.current) {
-        options.studioModeRef.current = false;
-        options.studioConversationIdRef.current = null;
-        options.setStudioMode(false);
+      if (options.mode === 'studio') {
+        options.exitStudioMode();
         options.dispatch({ type: 'session.set_kind', kind: 'chat' });
         options.appendSystemMessage(TUI_TEXT.studioExitedToChat);
       } else {
@@ -94,11 +96,9 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
 
     if (parsed.name === 'studio') {
       const userRequest = parsed.args;
-      if (!userRequest && options.studioModeRef.current) {
+      if (!userRequest && options.mode === 'studio') {
         // toggle 退出
-        options.studioModeRef.current = false;
-        options.studioConversationIdRef.current = null;
-        options.setStudioMode(false);
+        options.exitStudioMode();
         options.dispatch({ type: 'session.set_kind', kind: 'chat' });
         options.appendSystemMessage(TUI_TEXT.studioExited);
         options.clearInputValue();
@@ -113,13 +113,13 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
         return;
       }
       // 进入 Studio 模式(若不在)
-      if (!options.studioModeRef.current) {
-        options.studioModeRef.current = true;
-        options.studioConversationIdRef.current = randomUUID();
-        options.setStudioMode(true);
+      let studioConversationId = options.studioConversationId;
+      if (options.mode !== 'studio' || !studioConversationId) {
+        studioConversationId = randomUUID();
+        options.enterStudioMode(studioConversationId);
         options.dispatch({ type: 'session.set_kind', kind: 'studio' });
         options.appendSystemMessage(
-          TUI_TEXT.studioModeEntered(options.studioConversationIdRef.current),
+          TUI_TEXT.studioModeEntered(studioConversationId),
         );
       }
       if (!userRequest) {
@@ -127,11 +127,12 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
         options.clearInputValue();
         return;
       }
-      options.runtimeController.sendStudioRequest(userRequest, options.studioConversationIdRef.current);
+      options.runtimeController.sendStudioRequest(userRequest, studioConversationId);
       return;
     }
 
     if (parsed.name === 'new') {
+      options.exitStudioMode();
       options.runtimeController.startNewSession();
       return;
     }
@@ -149,8 +150,12 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
   // Free text is never a human-review resume. Review responses are sent only
   // through the approval panel's canonical human_review_response message.
   // Studio 模式下:普通文本走 studio_request(沿用同一 conversationId)
-  if (options.studioModeRef.current) {
-    options.runtimeController.sendStudioRequest(text, options.studioConversationIdRef.current);
+  if (options.mode === 'studio') {
+    const studioConversationId = options.studioConversationId ?? randomUUID();
+    if (!options.studioConversationId) {
+      options.enterStudioMode(studioConversationId);
+    }
+    options.runtimeController.sendStudioRequest(text, studioConversationId);
     return;
   }
 

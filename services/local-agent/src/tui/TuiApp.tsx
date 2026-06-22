@@ -119,10 +119,8 @@ export function TuiApp(props: { actorId: string }) {
     columns: stdout.columns ?? 80,
     rows: stdout.rows ?? 24,
   }));
-  const [studioMode, setStudioMode] = useState(false);
   const [approvalIndex, setApprovalIndex] = useState(0);
   const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
-  const [externalEditorOpen, setExternalEditorOpen] = useState(false);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
   const [globalReviewPolicyMode, setGlobalReviewPolicyMode] = useState<BuiltinGlobalReviewPolicyMode>(
     () => config.globalReviewPolicyMode,
@@ -136,10 +134,6 @@ export function TuiApp(props: { actorId: string }) {
   const inputBufferRef = useRef(createInitialTuiInputBufferState());
   const lastInterruptAtRef = useRef(0);
   const localServerPort = config.localServerPort;
-  // Studio 模式持续期间共用一个 conversationId,这样 wiki 跨 turn 累积、
-  // pet runtime 的 thread namespace 也保持一致
-  const studioConversationIdRef = useRef<string | null>(null);
-  const studioModeRef = useRef(false);
   const resetTimelineView = useCallback(() => {
     stdout.write(CLEAR_SCREEN);
     setTimelineRenderEpoch((current) => current + 1);
@@ -166,6 +160,8 @@ export function TuiApp(props: { actorId: string }) {
   const contentWidth = screenModel.regions.timeline.width;
   const textAreaWidth = screenModel.regions.composer.textAreaWidth;
   const reviewOptions = pendingApproval?.review.options ?? [];
+  const uiMode = tuiState.ui.mode;
+  const externalEditorOpen = tuiState.ui.externalEditorOpen;
 
   useEffect(() => {
     stateRef.current = tuiState;
@@ -202,9 +198,19 @@ export function TuiApp(props: { actorId: string }) {
   };
 
   const resetStudioMode = () => {
-    studioModeRef.current = false;
-    studioConversationIdRef.current = null;
-    setStudioMode(false);
+    dispatch({ type: 'ui.mode.reset' });
+  };
+
+  const enterStudioMode = (conversationId: string) => {
+    dispatch({
+      type: 'ui.mode.set',
+      mode: 'studio',
+      studioConversationId: conversationId,
+    });
+  };
+
+  const exitStudioMode = () => {
+    dispatch({ type: 'ui.mode.reset' });
   };
 
   const {
@@ -264,7 +270,7 @@ export function TuiApp(props: { actorId: string }) {
 
   const openExternalEditor = (initialText: string) => {
     if (externalEditorOpen) return;
-    setExternalEditorOpen(true);
+    dispatch({ type: 'ui.external_editor.set_open', open: true });
     appendMessage('system', TUI_TEXT.externalEditorOpening);
     void editTextWithExternalEditor({
       initialText,
@@ -281,7 +287,7 @@ export function TuiApp(props: { actorId: string }) {
       const message = err instanceof Error ? err.message : String(err);
       appendMessage('system', TUI_TEXT.externalEditorFailed(message));
     }).finally(() => {
-      setExternalEditorOpen(false);
+      dispatch({ type: 'ui.external_editor.set_open', open: false });
     });
   };
 
@@ -316,9 +322,10 @@ export function TuiApp(props: { actorId: string }) {
     submitCurrentInputFromController({
       inputValue: value,
       focusedSession,
-      studioModeRef,
-      studioConversationIdRef,
-      setStudioMode,
+      mode: uiMode,
+      studioConversationId: tuiState.ui.studioConversationId,
+      enterStudioMode,
+      exitStudioMode,
       openResumePicker,
       openGlobalReviewPolicyPicker,
       openExternalEditor,
@@ -366,9 +373,6 @@ export function TuiApp(props: { actorId: string }) {
   }, [runtimeController]);
 
   useInput((input, key) => {
-    if (externalEditorOpen) {
-      return;
-    }
     const normalized = normalizeTuiInputEvent(input, key, inputBufferRef.current);
     inputBufferRef.current = normalized.state;
     if (!normalized.event) {
@@ -384,6 +388,7 @@ export function TuiApp(props: { actorId: string }) {
       hasGlobalReviewPolicyPicker: globalReviewPolicyPickerOpen,
       hasCommandPalette: commandPalette.open,
       hasFileMention: fileMention.open,
+      hasExternalEditor: externalEditorOpen,
       composerHistory: {
         boundary: textArea.historyBoundary,
         available: getComposerHistoryAvailability(tuiState.input.history),

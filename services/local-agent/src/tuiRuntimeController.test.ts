@@ -9,6 +9,11 @@ function pendingReviewState(): TuiState {
   return {
     connection: { status: 'ready', message: 'ready' },
     focusedSessionId: 'sess-1',
+    ui: {
+      mode: 'chat',
+      studioConversationId: null,
+      externalEditorOpen: false,
+    },
     runs: {
       'req-1': {
         requestId: 'req-1',

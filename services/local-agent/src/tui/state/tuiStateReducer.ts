@@ -712,11 +712,18 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         const sessionId = resolveSessionId(state, action.sessionId);
         const nextState = updateSession({
           ...state,
+          ui: {
+            ...state.ui,
+            mode: 'chat',
+            studioConversationId: null,
+            externalEditorOpen: false,
+          },
           connection: action.statusMessage
             ? { ...state.connection, message: action.statusMessage }
             : state.connection,
         }, sessionId, (session) => ({
           ...session,
+          kind: 'chat',
           timeline: [],
           notices: [],
           activities: [],
@@ -727,6 +734,35 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ? removeSessionRuns(nextState, sessionId)
           : nextState;
       }
+
+    case 'ui.mode.set':
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          mode: action.mode,
+          studioConversationId: action.mode === 'studio' ? action.studioConversationId ?? state.ui.studioConversationId : null,
+        },
+      };
+
+    case 'ui.mode.reset':
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          mode: 'chat',
+          studioConversationId: null,
+        },
+      };
+
+    case 'ui.external_editor.set_open':
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          externalEditorOpen: action.open,
+        },
+      };
 
     case 'input.set':
       return {

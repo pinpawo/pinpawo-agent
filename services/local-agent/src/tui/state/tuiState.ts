@@ -33,10 +33,19 @@ export type TuiState = {
   sessions: Record<SessionId, SessionModel>;
   focusedSessionId: SessionId | null;
   runs: Record<RunId, TuiRunModel>;
+  ui: TuiUiState;
   input: TextAreaModel & {
     focused: boolean;
     history: ComposerHistoryState;
   };
+};
+
+export type TuiInteractionMode = 'chat' | 'studio';
+
+export type TuiUiState = {
+  mode: TuiInteractionMode;
+  studioConversationId: string | null;
+  externalEditorOpen: boolean;
 };
 
 export type SessionModel = {
@@ -157,6 +166,18 @@ export type TuiAction =
       statusMessage?: string;
     }
   | {
+      type: 'ui.mode.set';
+      mode: TuiInteractionMode;
+      studioConversationId?: string | null;
+    }
+  | {
+      type: 'ui.mode.reset';
+    }
+  | {
+      type: 'ui.external_editor.set_open';
+      open: boolean;
+    }
+  | {
       type: 'input.set';
       value: string;
       cursorOffset?: number;
@@ -254,6 +275,11 @@ export function createInitialTuiState(defaultSession: SessionModel): TuiState {
     },
     focusedSessionId: defaultSession.id,
     runs: {},
+    ui: {
+      mode: 'chat',
+      studioConversationId: null,
+      externalEditorOpen: false,
+    },
     input: {
       text: '',
       cursorOffset: 0,

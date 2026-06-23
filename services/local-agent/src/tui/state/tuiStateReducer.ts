@@ -329,16 +329,30 @@ function readSubagentActivityText(session: SessionModel, activityId: string) {
   return activity?.type === 'subagent.message' ? activity.text : '';
 }
 
+function hasTimelineEntry(session: SessionModel, entryId: string) {
+  return session.timeline.some((entry) => entry.id === entryId);
+}
+
+function isUsableActivityAnchor(session: SessionModel, entryId: string | undefined) {
+  if (!entryId) return false;
+  return hasTimelineEntry(session, entryId);
+}
+
 function appendSubagentActivityDelta(
   session: SessionModel,
   requestId: string,
   token: string,
+  turnAnchorId: string | undefined,
 ): { session: SessionModel; entryId?: string } {
   const id = `${requestId}:subagent-output`;
   const previous = session.activities.find((item) => item.id === id);
   const text = readSubagentActivityText(session, id) + token;
   const hasContent = Boolean(formatSubagentMessage(text));
   if (!hasContent) return { session };
+  const previousAnchor = previous?.afterTimelineEntryId;
+  const anchorId = isUsableActivityAnchor(session, previousAnchor)
+    ? previousAnchor
+    : turnAnchorId;
   const activity: SessionActivityModel = {
     id,
     type: 'subagent.message',
@@ -346,11 +360,7 @@ function appendSubagentActivityDelta(
     text,
     status: 'streaming',
     ...(previous?.timestamp ? { timestamp: previous.timestamp } : {}),
-    ...(previous?.afterTimelineEntryId
-      ? { afterTimelineEntryId: previous.afterTimelineEntryId }
-      : session.timeline.at(-1)?.id
-        ? { afterTimelineEntryId: session.timeline.at(-1)?.id }
-        : {}),
+    ...(anchorId ? { afterTimelineEntryId: anchorId } : {}),
   };
   return {
     session: {
@@ -1105,6 +1115,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
             currentSession,
             event.requestId,
             token,
+            run.timelineEntryIds[0],
           );
           return sessionWithActivity;
         });

@@ -13,6 +13,7 @@ import {
   selectFocusedTimeline,
   tuiStateReducer,
 } from './tui/state/tuiStateReducer';
+import { buildTimelineDisplayEntries } from './tui/timeline/agentTimelineSelectors';
 
 function initialState(sessionId = 'chat:pet') {
   return createInitialTuiState(createSession({
@@ -501,6 +502,41 @@ test('tuiStateReducer displays subagent deltas as session activity outside check
   ]);
   const subagentActivity = state.sessions['chat:pet']?.activities.find((entry) => entry.id === 'req-1:subagent-output');
   assert.equal(subagentActivity?.status, 'completed');
+});
+
+test('tuiStateReducer anchors subagent activity to the turn even after assistant streaming starts', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.delta',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '主答复草稿',
+    },
+    now: 1100,
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'subagent.message.delta',
+      requestId: 'req-1',
+      text: 'subagent announce',
+    },
+    now: 1200,
+  });
+
+  const activities = selectFocusedActivities(state);
+  assert.equal(activities.at(-1)?.afterTimelineEntryId, 'message:req-1:user');
+  assert.deepEqual(
+    buildTimelineDisplayEntries(selectFocusedTimeline(state), [], activities).map((entry) => entry.id),
+    [
+      'message:req-1:user',
+      'req-1:subagent-output',
+      'req-1:assistant:0',
+    ],
+  );
 });
 
 test('tuiStateReducer keeps notice and studio progress events outside checkpoint timeline', () => {

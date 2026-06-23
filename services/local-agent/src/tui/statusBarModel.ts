@@ -6,7 +6,6 @@ import type { SessionModel, TuiInteractionMode } from './state/tuiState';
 
 const LOCALE_FORMATTER = new Intl.NumberFormat('zh-CN');
 const STATUS_SEPARATOR = ' · ';
-const TRUNCATE_IN_PLACE_PRIORITY = 95;
 
 export type StatusSegmentTone = 'muted' | 'info' | 'success' | 'warning' | 'danger';
 export type StatusSegmentTruncation = 'preserve' | 'truncate';
@@ -81,6 +80,14 @@ export function buildStatusBarModel(input: {
         truncation: 'preserve',
       },
       {
+        id: 'cwd',
+        label: '目录',
+        value: fallback(runtime?.cwd),
+        priority: 60,
+        tone: 'muted',
+        truncation: 'truncate',
+      },
+      {
         id: 'model',
         label: '模型',
         value: fallback(runtime?.model),
@@ -95,14 +102,6 @@ export function buildStatusBarModel(input: {
         priority: 40,
         tone: 'muted',
         truncation: 'preserve',
-      },
-      {
-        id: 'cwd',
-        label: '目录',
-        value: fallback(runtime?.cwd),
-        priority: 20,
-        tone: 'muted',
-        truncation: 'truncate',
       },
     ],
   };
@@ -130,7 +129,7 @@ export function formatStatusBarParts(model: StatusBarModel, width: number): Form
     if (selected.size === 1) continue;
     if (
       candidate.segment.truncation === 'truncate'
-      && candidate.segment.priority >= TRUNCATE_IN_PLACE_PRIORITY
+      && segmentContributesWhenTruncated(orderedSegments, selected, candidate.segment.id, maxWidth)
     ) {
       continue;
     }
@@ -170,6 +169,16 @@ function buildStatusBarParts(
     parts.push(partForSegment(segment));
   }
   return parts;
+}
+
+function segmentContributesWhenTruncated(
+  orderedSegments: Array<{ segment: StatusSegment; order: number }>,
+  selected: Set<string>,
+  segmentId: string,
+  width: number,
+) {
+  return truncateStatusBarParts(buildStatusBarParts(orderedSegments, selected), width)
+    .some((part) => part.segmentId === segmentId);
 }
 
 function partForSegment(segment: StatusSegment): FormattedStatusBarPart {

@@ -39,25 +39,28 @@ test('buildStatusBarModel derives explicit prioritized segments', () => {
       ['connection', undefined, '就绪', 100],
       ['mode', undefined, 'Studio', 90],
       ['policy', '授权', '需要授权', 80],
+      ['cwd', '目录', '/Users/mac/project', 60],
       ['model', '模型', 'gpt-test', 50],
       ['context', '上下文', '1,500/128,000 (1.2%)', 40],
-      ['cwd', '目录', '/Users/mac/project', 20],
     ],
   );
 });
 
-test('formatStatusBarText keeps high-priority segments first under narrow widths', () => {
+test('formatStatusBarText keeps cwd visible at normal widths without displacing higher-priority state', () => {
   const model: StatusBarModel = {
     segments: [
       segment('connection', '连接断开，10s 后重连', 100),
       segment('mode', 'Chat', 90),
       segment('policy', '批准执行', 80, '授权'),
+      segment('cwd', '/Users/mac/Develop/pinpawo-agent', 60, '目录'),
       segment('model', 'very-long-model-name', 50, '模型'),
-      segment('cwd', '/Users/mac/Develop/pinpawo-agent', 20, '目录'),
     ],
   };
 
-  assert.equal(formatStatusBarText(model, 80), '连接断开，10s 后重连 · Chat · 授权:批准执行 · 模型:very-long-model-name');
+  const normal = formatStatusBarText(model, 80);
+  assert.equal(normal, '连接断开，10s 后重连 · Chat · 授权:批准执行 · 目录:/Users/mac/Develop/pinpawo-a…');
+  assert.equal(normal.includes('模型:'), false);
+  assertDisplayWidthAtMost(normal, 80);
   assert.equal(formatStatusBarText(model, 32), '连接断开，10s 后重连 · Chat');
   assert.equal(formatStatusBarText(model, 12), '连接断开，1…');
 });
@@ -78,9 +81,9 @@ test('buildStatusBarModel includes current overlay owner when present', () => {
       ['mode', undefined, 'Chat', 90],
       ['overlay', '浮层', 'Approval', 85],
       ['policy', '授权', '自动授权', 80],
+      ['cwd', '目录', '未提供', 60],
       ['model', '模型', '未提供', 50],
       ['context', '上下文', '未提供', 40],
-      ['cwd', '目录', '未提供', 20],
     ],
   );
 });
@@ -120,10 +123,10 @@ test('buildStatusBarModel keeps activity and connection as separate segments', (
       ['mode', undefined, 'Chat', 90],
     ],
   );
-  assert.equal(
-    formatStatusBarText(model, 80),
-    '正在思考 · 2s · 连接:连接断开，10s 后重连 · Chat · 授权:需要授权 · 模型:未提供',
-  );
+  const normal = formatStatusBarText(model, 80);
+  assert.equal(normal, '正在思考 · 2s · 连接:连接断开，10s 后重连 · Chat · 授权:需要授权 · 目录:未提供');
+  assert.equal(normal.includes('模型:'), false);
+  assertDisplayWidthAtMost(normal, 80);
   assert.equal(formatStatusBarText(model, 34), '正在思考 · 2s · 连接:连接断开，10…');
 });
 

@@ -9,6 +9,10 @@ import { SubagentActivityItem } from './SubagentActivityItem';
 import {
   buildAgentOperationDisplayLines,
 } from './agentTimelineRendering';
+import {
+  agentTimelineEntriesFromSnapshot,
+  buildTuiSessionSnapshotFromMessages,
+} from '../snapshot/tuiSessionSnapshot';
 import type {
   AgentMessageEntry,
   AgentOperationEntry,
@@ -149,6 +153,36 @@ test('MessageBlock renders assistant content through markdown', () => {
 
   assert.ok(markdown);
   assert.equal(markdown.props.children, '| A | B |\n| - | - |\n| **one** | `two` |');
+});
+
+test('history snapshot assistant messages render through markdown', () => {
+  const snapshot = buildTuiSessionSnapshotFromMessages({
+    sessionId: 'chat:pet',
+    kind: 'chat',
+    messages: [
+      {
+        id: 'assistant-history',
+        kind: 'assistant',
+        text: '**历史回答**\n\n- 第一项\n- 第二项',
+      },
+    ],
+  });
+  const [entry] = agentTimelineEntriesFromSnapshot(snapshot.timeline);
+  assert.equal(entry?.type, 'message');
+  assert.equal(entry?.type === 'message' ? entry.role : undefined, 'assistant');
+
+  const element = MessageBlock({
+    entry: {
+      kind: entry.role,
+      text: entry.text,
+    },
+    petName: '小派',
+    width: 80,
+  });
+  const markdown = findElementByType(element, Markdown);
+
+  assert.ok(markdown);
+  assert.equal(markdown.props.children, '**历史回答**\n\n- 第一项\n- 第二项');
 });
 
 test('SubagentActivityItem renders subagent activity outside timeline entries', () => {

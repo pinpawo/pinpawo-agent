@@ -27,12 +27,11 @@ export function buildRuntimeEnvironmentSummary(workdir = config.workdir): string
     `- 主机名：${hostname()}`,
     `- CPU：${cpus().length} cores`,
     `- Node.js：${process.version}`,
-    `- Agent 工作目录：${workdir} (${pathStatus(workdir)})`,
-    `- 进程 cwd：${process.cwd()} (${pathStatus(process.cwd())})`,
+    `- 工作目录：${workdir} (${pathStatus(workdir)})`,
     `- 用户主目录：${homedir()}`,
     process.env.SHELL ? `- Shell：${process.env.SHELL}` : null,
     `- Browser backend：${config.browserBackend}`,
-    '- 相对路径默认相对于 Agent 工作目录。',
+    '- 相对路径默认相对于工作目录。',
     '- 以上信息只描述本地运行环境，不包含密钥、Token 或完整环境变量。',
   ].filter((line): line is string => Boolean(line));
   return lines.join('\n');

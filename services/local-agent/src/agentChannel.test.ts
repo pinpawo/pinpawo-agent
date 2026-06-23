@@ -224,7 +224,8 @@ test('buildLocalChatAgentInput uses caller-provided workdir', () => {
   });
 
   assert.equal(setup.input.workdir, '/tmp/pinpawo-chat-workdir');
-  assert.match(setup.input.runtimeEnvironment ?? '', /Agent 工作目录：\/tmp\/pinpawo-chat-workdir/);
+  assert.match(setup.input.runtimeEnvironment ?? '', /工作目录：\/tmp\/pinpawo-chat-workdir/);
+  assert.doesNotMatch(setup.input.runtimeEnvironment ?? '', /进程 cwd/);
 });
 
 test('buildLocalChatAgentInput passes model structured output strategy to explore', async () => {

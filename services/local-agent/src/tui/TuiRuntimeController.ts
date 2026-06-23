@@ -29,6 +29,7 @@ const REVIEW_RECONCILIATION_ERROR_CODES = new Set([
 type TuiRuntimeControllerOptions = {
   actorId: string;
   localServerPort: number;
+  workdir?: string;
   dispatch: (action: TuiAction) => void;
   getState: () => TuiState;
   resetTimelineView: () => void;
@@ -306,7 +307,7 @@ export class TuiRuntimeController {
     studioWikiBaseDir?: string;
   }) {
     const model = payload.model ?? config.llmModel;
-    const cwd = payload.cwd ?? config.workdir;
+    const cwd = payload.cwd ?? this.options.workdir ?? config.workdir;
 
     if (!model && !cwd && !payload.contextWindow) {
       return;

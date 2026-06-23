@@ -1,5 +1,4 @@
 import stringWidth from 'string-width';
-import { diffLines, type Change } from 'diff';
 import { TUI_TEXT } from '../render/text';
 import { formatElapsed, truncateLine } from '../render/terminalText';
 import type {
@@ -14,7 +13,7 @@ export type TimelineTextLine = {
 
 type TimelineTextLineDraft = Omit<TimelineTextLine, 'id'>;
 
-const OPERATION_DIFF_DETAIL_KEYS = new Set([
+const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
   'after',
   'afterPreview',
   'before',
@@ -32,11 +31,11 @@ export function buildAgentOperationDisplayLines(
     id: `${entry.id}:line`,
     text: buildAgentOperationText(entry, now, width),
   }];
-  const diffLines = buildOperationDiffLines(entry, width);
-  diffLines.forEach((line, index) => {
+  const payloadLines = buildOperationPayloadLines(entry, width);
+  payloadLines.forEach((line, index) => {
     lines.push({
       ...line,
-      id: `${entry.id}:diff:${index.toString()}`,
+      id: `${entry.id}:payload:${index.toString()}`,
     });
   });
   return lines;
@@ -82,68 +81,22 @@ function formatDetails(details: Record<string, unknown> | undefined) {
   if (!details) return '';
   return Object.entries(details)
     .flatMap(([key, value]) => {
-      if (OPERATION_DIFF_DETAIL_KEYS.has(key)) return [];
+      if (OPERATION_PAYLOAD_DETAIL_KEYS.has(key)) return [];
       if (value === undefined || value === null || value === '') return [];
       return [`${key}=${String(value)}`];
     })
     .join(' · ');
 }
 
-function buildOperationDiffLines(entry: AgentOperationEntry, width: number): TimelineTextLineDraft[] {
-  const details = entry.details;
-  if (!details) return [];
-
-  const patch = readDetailString(details, 'patch');
-  if (patch) {
-    return buildPatchDiffLines(patch, entry.target, width);
-  }
-
-  const before = readDetailString(details, 'before');
-  const after = readAfterContent(details, before);
-  if (before === undefined && after === undefined) {
-    return [];
-  }
-  return buildBeforeAfterDiffLines(before ?? '', after ?? '', entry.target, width);
-}
-
-function readAfterContent(details: Record<string, unknown>, before: string | undefined) {
-  const after = readDetailString(details, 'after');
-  if (after !== undefined) return after;
-
-  const afterPreview = readDetailString(details, 'afterPreview');
-  if (afterPreview === undefined) return undefined;
-  if (readDetailBoolean(details, 'append') && before !== undefined) {
-    return `${before}${afterPreview}`;
-  }
-  return afterPreview;
+function buildOperationPayloadLines(entry: AgentOperationEntry, width: number): TimelineTextLineDraft[] {
+  if (!isApplyPatchOperation(entry)) return [];
+  const patch = readApplyPatchPayload(entry);
+  return patch ? buildPatchDiffLines(patch, entry.target, width) : [];
 }
 
 function readDetailString(details: Record<string, unknown>, key: string) {
   const value = details[key];
   return typeof value === 'string' ? value : undefined;
-}
-
-function readDetailBoolean(details: Record<string, unknown>, key: string) {
-  const value = details[key];
-  return typeof value === 'boolean' ? value : false;
-}
-
-function buildBeforeAfterDiffLines(
-  before: string,
-  after: string,
-  target: string | undefined,
-  width: number,
-): TimelineTextLineDraft[] {
-  if (before === after) return [];
-
-  const changedLines = diffLines(before, after)
-    .flatMap((part) => diffPartLines(part, width));
-  if (changedLines.length === 0) return [];
-
-  return limitDiffLines([
-    diffMetaLine(target ? `diff ${target}` : 'diff', width),
-    ...changedLines,
-  ], width);
 }
 
 function buildPatchDiffLines(
@@ -179,20 +132,6 @@ function patchLineTone(line: string): TimelineTextLineDraft['tone'] {
   return 'muted';
 }
 
-function diffPartLines(part: Change, width: number): TimelineTextLineDraft[] {
-  if (!part.added && !part.removed) return [];
-  const prefix = part.added ? '+' : '-';
-  const tone = part.added ? 'added' : 'removed';
-  return splitDiffValueLines(part.value)
-    .map((line) => diffLine(prefix, line, tone, width));
-}
-
-function splitDiffValueLines(value: string) {
-  const lines = value.replace(/\r\n/g, '\n').split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  return lines;
-}
-
 function diffMetaLine(text: string, width: number): TimelineTextLineDraft {
   return {
     text: truncateLine(`  ${text}`, width),
@@ -222,6 +161,35 @@ function limitDiffLines(lines: TimelineTextLineDraft[], width: number): Timeline
     tone: 'muted',
   });
   return visibleLines;
+}
+
+function isApplyPatchOperation(entry: AgentOperationEntry) {
+  return entry.source?.toolName === 'apply_patch'
+    || entry.kind.endsWith('.apply_patch')
+    || entry.kind === 'apply_patch';
+}
+
+function readApplyPatchPayload(entry: AgentOperationEntry) {
+  return readPatchFromRawInput(entry.raw?.input)
+    ?? (entry.details ? readDetailString(entry.details, 'patch') : undefined);
+}
+
+function readPatchFromRawInput(input: unknown): string | undefined {
+  if (input && typeof input === 'object' && 'patch' in input) {
+    const patch = (input as { patch?: unknown }).patch;
+    return typeof patch === 'string' ? patch : undefined;
+  }
+  if (typeof input !== 'string') return undefined;
+  try {
+    const parsed = JSON.parse(input) as unknown;
+    if (parsed && typeof parsed === 'object' && 'patch' in parsed) {
+      const patch = (parsed as { patch?: unknown }).patch;
+      return typeof patch === 'string' ? patch : undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 function joinUniqueParts(parts: Array<string | undefined>) {

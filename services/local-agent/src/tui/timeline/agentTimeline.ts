@@ -1,4 +1,8 @@
-import type { LocalAgentOperationEvent, LocalAgentOperationPhase } from '../../events/localAgentEvent';
+import type {
+  LocalAgentOperationEvent,
+  LocalAgentOperationPhase,
+  LocalAgentOperationRaw,
+} from '../../events/localAgentEvent';
 import type { MessageCellModel } from '../state/tuiState';
 import {
   buildOperationPresentation,
@@ -57,6 +61,7 @@ export type AgentOperationEntry = OperationPresentation & {
   startedAt: number;
   updatedAt: number;
   completedAt?: number;
+  raw?: LocalAgentOperationRaw;
 };
 
 export function timelineEntryIdFromMessageCell(cell: Pick<MessageCellModel, 'id'>) {
@@ -106,6 +111,7 @@ export function operationTimelineEntryFromEvent(
     startedAt: previous?.startedAt ?? now,
     updatedAt: now,
     ...(isTerminalOperationPhase(event.phase) ? { completedAt: now } : {}),
+    ...rawField(mergeOperationRaw(previous?.raw, event.raw)),
   };
 }
 
@@ -133,6 +139,30 @@ function mergeOperationDetails(
   if (!previous) return next;
   if (!next) return previous;
   return { ...previous, ...next };
+}
+
+function mergeOperationRaw(
+  previous: LocalAgentOperationRaw | undefined,
+  next: LocalAgentOperationRaw | undefined,
+) {
+  if (!previous) return next;
+  if (!next) return previous;
+  return {
+    ...previous,
+    ...definedRawFields(next),
+  };
+}
+
+function rawField(raw: LocalAgentOperationRaw | undefined) {
+  return raw ? { raw } : {};
+}
+
+function definedRawFields(raw: LocalAgentOperationRaw) {
+  return {
+    ...(raw.input !== undefined ? { input: raw.input } : {}),
+    ...(raw.output !== undefined ? { output: raw.output } : {}),
+    ...(raw.error !== undefined ? { error: raw.error } : {}),
+  };
 }
 
 export function isTerminalOperationPhase(

@@ -114,6 +114,33 @@ test('operation timeline terminal events merge completed details with previous d
   });
 });
 
+test('operation timeline terminal events keep raw input for payload renderers', () => {
+  const started = operationEvent({
+    phase: 'started',
+    target: 'README.md',
+    summary: 'update',
+    raw: {
+      input: { patch: '*** Begin Patch\n*** Update File: README.md\n-old\n+new\n*** End Patch' },
+    },
+  });
+  const completed = operationEvent({
+    phase: 'completed',
+    target: 'README.md',
+    summary: 'update',
+    raw: {
+      output: '{"ok":true}',
+    },
+  });
+
+  const startedEntry = operationTimelineEntryFromEvent(started, 1000);
+  const completedEntry = operationTimelineEntryFromEvent(completed, 2500, startedEntry);
+
+  assert.deepEqual(completedEntry.raw, {
+    input: { patch: '*** Begin Patch\n*** Update File: README.md\n-old\n+new\n*** End Patch' },
+    output: '{"ok":true}',
+  });
+});
+
 test('operation presentation derives stable keys from operation event fields', () => {
   const event = operationEvent({
     id: null,
@@ -177,6 +204,25 @@ test('timeline selectors derive active operations from running operation entries
     }],
   );
   assert.equal(findTimelineOperationEntry(entries, 'call-done')?.phase, 'completed');
+});
+
+test('timeline active operation detail keeps payload fields out of status summaries', () => {
+  const running = operationTimelineEntryFromEvent(operationEvent({
+    phase: 'started',
+    target: 'README.md',
+    summary: 'update',
+    details: {
+      patch: '*** Begin Patch\n-old\n+new\n*** End Patch',
+      mode: 'patch',
+    },
+  }), 1000);
+
+  assert.deepEqual(selectActiveOperationsFromTimeline([running], 'req-1'), [{
+    name: 'call-browser',
+    label: '打开网页',
+    detail: 'README.md · update · mode=patch',
+    startedAt: 1000,
+  }]);
 });
 
 test('splitTimelineDisplayForViewport keeps only the settled display prefix static', () => {
@@ -351,6 +397,7 @@ function operationEvent(params: {
   summary?: string;
   details?: Record<string, unknown> | null;
   source?: LocalAgentOperationEvent['operation']['source'] | null;
+  raw?: LocalAgentOperationEvent['raw'];
 }): LocalAgentOperationEvent {
   const eventId = params.id === null ? undefined : params.id ?? 'call-browser';
   const callId = params.callId ?? eventId ?? 'call-browser';
@@ -375,7 +422,7 @@ function operationEvent(params: {
       ...(params.details !== null ? { details: params.details ?? { headless: true } } : {}),
       ...(source ? { source } : {}),
     },
-    raw: {
+    raw: params.raw ?? {
       input: '{"url":"should-not-be-read"}',
     },
   };

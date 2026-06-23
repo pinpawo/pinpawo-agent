@@ -20,7 +20,7 @@ import type {
 } from '../timeline/agentTimeline';
 import type { SessionActivityModel } from '../state/tuiState';
 
-test('buildAgentOperationDisplayLines preserves operation lifecycle text without reading raw payloads', () => {
+test('buildAgentOperationDisplayLines preserves generic operation text without reading raw payloads', () => {
   const entry = operationEntry({
     phase: 'completed',
     title: '打开网页',
@@ -73,7 +73,7 @@ test('buildAgentOperationDisplayLines keeps running and terminal phases distinct
   assert.match(failed, /找不到元素/);
 });
 
-test('buildAgentOperationDisplayLines renders file edits as operation diff lines', () => {
+test('buildAgentOperationDisplayLines keeps write_file payloads out of the summary line', () => {
   const lines = buildAgentOperationDisplayLines(operationEntry({
     phase: 'completed',
     kind: 'local.write_file',
@@ -87,19 +87,46 @@ test('buildAgentOperationDisplayLines renders file edits as operation diff lines
     },
   }), 3500, 80);
 
-  assert.equal(lines.length, 4);
+  assert.equal(lines.length, 1);
   assert.match(lines[0]!.text, /mode=write/);
   assert.doesNotMatch(lines[0]!.text, /before=/);
   assert.doesNotMatch(lines[0]!.text, /after=/);
-  assert.equal(lines[1]!.tone, 'muted');
-  assert.equal(lines[2]!.tone, 'removed');
-  assert.equal(lines[2]!.text, '  -const value = 1;');
-  assert.equal(lines[3]!.tone, 'added');
-  assert.equal(lines[3]!.text, '  +const value = 2;');
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
 });
 
-test('buildAgentOperationDisplayLines renders apply_patch payloads on operation lines', () => {
+test('buildAgentOperationDisplayLines renders apply_patch raw input on operation lines', () => {
+  const lines = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'started',
+    kind: 'local.apply_patch',
+    title: '应用补丁',
+    target: 'src/example.ts',
+    summary: 'update',
+    raw: {
+      input: {
+        patch: [
+          '*** Begin Patch',
+          '*** Update File: src/example.ts',
+          '@@',
+          '-const value = 1;',
+          '+const value = 2;',
+          '*** End Patch',
+        ].join('\n'),
+      },
+    },
+    details: {
+      patch: '*** Begin Patch\n*** Update File: truncated.ts\n-details\n+details\n*** End Patch',
+    },
+  }), 3500, 80);
+
+  assert.match(lines[0]!.text, /update/);
+  assert.doesNotMatch(lines[0]!.text, /patch=/);
+  assert.ok(lines.some((line) => line.text === '  -const value = 1;' && line.tone === 'removed'));
+  assert.ok(lines.some((line) => line.text === '  +const value = 2;' && line.tone === 'added'));
+  assert.ok(lines.every((line) => !line.text.includes('details')));
+  assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
+});
+
+test('buildAgentOperationDisplayLines falls back to apply_patch details without raw input', () => {
   const lines = buildAgentOperationDisplayLines(operationEntry({
     phase: 'started',
     kind: 'local.apply_patch',

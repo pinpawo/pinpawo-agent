@@ -52,6 +52,7 @@ function toMessageCell(draft: MessageCellDraft): MessageCellModel {
     id: draft.id,
     kind: draft.kind,
     text: draft.text,
+    ...(draft.requestId ? { requestId: draft.requestId } : {}),
     ...(draft.timestamp ? { timestamp: draft.timestamp } : {}),
   };
 }
@@ -155,6 +156,19 @@ function findLatestAssistantTimelineText(session: SessionModel, requestId: strin
     }
   }
   return '';
+}
+
+function findSessionIdForTimelineRequest(state: TuiState, requestId: string): SessionId | null {
+  for (const [sessionId, session] of Object.entries(state.sessions)) {
+    if (session.timeline.some((entry) => entry.requestId === requestId)) {
+      return sessionId;
+    }
+  }
+  return null;
+}
+
+function hasLocalInterruptReleaseNotice(session: SessionModel) {
+  return session.notices.some((notice) => notice.text === TUI_TEXT.interruptRequestedLocalRelease);
 }
 
 function appendAssistantTimelineDelta(
@@ -480,6 +494,79 @@ function finishRun(
     };
 }
 
+function completeMessageWithoutRun(
+  state: TuiState,
+  sessionId: SessionId,
+  event: Extract<LocalAgentEvent, { type: 'message.completed' }>,
+) {
+  const session = state.sessions[sessionId];
+  if (!session || hasLocalInterruptReleaseNotice(session)) return state;
+  const reply = event.text.trim();
+  const finalText = reply || findLatestAssistantTimelineText(session, event.requestId) || '...';
+  const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
+    const { session: sessionWithTimeline } = finalizeAssistantTimelineEntry(
+      currentSession,
+      event.requestId,
+      finalText,
+    );
+    return sessionWithTimeline;
+  });
+  const nextSession = stateWithTimeline.sessions[sessionId];
+  if (!nextSession) return stateWithTimeline;
+  const tokenUsage = event.usage
+    ? event.usage.contextWindow === undefined && nextSession.runtime.contextWindow !== undefined
+      ? { ...event.usage, contextWindow: nextSession.runtime.contextWindow }
+      : event.usage
+    : undefined;
+  return {
+    ...stateWithTimeline,
+    connection: {
+      ...stateWithTimeline.connection,
+      message: TUI_TEXT.statusReady,
+    },
+    sessions: tokenUsage
+      ? {
+          ...stateWithTimeline.sessions,
+          [sessionId]: {
+            ...nextSession,
+            tokenUsage,
+            runtime: tokenUsage.contextWindow === undefined
+              ? nextSession.runtime
+              : {
+                  ...nextSession.runtime,
+                  contextWindow: tokenUsage.contextWindow,
+                },
+          },
+        }
+      : stateWithTimeline.sessions,
+  };
+}
+
+function completeMessageEvent(
+  state: TuiState,
+  event: Extract<LocalAgentEvent, { type: 'message.completed' }>,
+) {
+  const run = state.runs[event.requestId];
+  if (!run) {
+    const sessionId = findSessionIdForTimelineRequest(state, event.requestId);
+    return sessionId ? completeMessageWithoutRun(state, sessionId, event) : state;
+  }
+  const sessionId = run.sessionId;
+  const session = state.sessions[sessionId];
+  if (!session) return state;
+  const reply = event.text.trim();
+  const finalText = reply || findLatestAssistantTimelineText(session, event.requestId) || '...';
+  const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
+    const { session: sessionWithTimeline } = finalizeAssistantTimelineEntry(
+      currentSession,
+      event.requestId,
+      finalText,
+    );
+    return sessionWithTimeline;
+  });
+  return finishRun(stateWithTimeline, event.requestId, TUI_TEXT.statusReady, [], event.usage ?? null);
+}
+
 function activeRunToPendingUi(run: TuiRunModel | null) {
   if (!run || run.phase === 'waiting_human') return null;
   return {
@@ -670,11 +757,13 @@ function messageDraft(
   text: string,
   meta: MessageCellMeta | undefined,
   fallbackId: string,
+  requestId?: RunId,
 ): MessageCellDraft {
   return {
     id: meta?.id ?? fallbackId,
     kind,
     text,
+    ...(requestId ? { requestId } : {}),
     ...(meta?.timestamp ? { timestamp: meta.timestamp } : {}),
   };
 }
@@ -817,7 +906,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     case 'run.start': {
       const sessionId = resolveSessionId(state, action.sessionId);
       if (!sessionId) return state;
-      const userDraft = messageDraft('user', action.userText, action.userCell, `${action.requestId}:user`);
+      const userDraft = messageDraft('user', action.userText, action.userCell, `${action.requestId}:user`, action.requestId);
       return updateSession({
         ...state,
         connection: {
@@ -856,7 +945,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       const existingRun = state.runs[action.requestId];
       const sessionId = existingRun?.sessionId ?? state.focusedSessionId;
       if (!sessionId) return state;
-      const userDraft = messageDraft('user', action.message, action.userCell, `${action.requestId}:review-response`);
+      const userDraft = messageDraft('user', action.message, action.userCell, `${action.requestId}:review-response`, action.requestId);
       const nextRun: TuiRunModel = existingRun
         ? addTimelineEntryId(clearPendingReview({
             ...existingRun,
@@ -921,6 +1010,9 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
     case 'event.received': {
       const event = action.event;
+      if (event.type === 'message.completed') {
+        return completeMessageEvent(state, event);
+      }
       const run = state.runs[event.requestId];
       if (!run) return state;
       const sessionId = run.sessionId;
@@ -1017,20 +1109,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
                 messageDraft('system', notice, action.messageCell, `${event.requestId}:notice`),
               ]))
           : state;
-      }
-
-      if (event.type === 'message.completed') {
-        const reply = event.text.trim();
-        const finalText = reply || findLatestAssistantTimelineText(session, event.requestId) || '...';
-        const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
-          const { session: sessionWithTimeline } = finalizeAssistantTimelineEntry(
-            currentSession,
-            event.requestId,
-            finalText,
-          );
-          return sessionWithTimeline;
-        });
-        return finishRun(stateWithTimeline, event.requestId, TUI_TEXT.statusReady, [], event.usage ?? null);
       }
 
       if (event.type === 'studio.progress') {

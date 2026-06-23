@@ -46,6 +46,7 @@ export function timelineSnapshotFromMessages(messages: MessageCellModel[]): TuiC
       text: cell.text,
       status: 'completed',
       source: 'checkpoint',
+      ...(cell.requestId ? { requestId: cell.requestId } : {}),
       ...(cell.timestamp ? { createdAt: cell.timestamp } : {}),
     } satisfies TuiCoreTimelineEntry];
   });

@@ -225,6 +225,49 @@ test('tuiStateReducer finalizes completed messages when the active pointer is mi
   ]);
 });
 
+test('tuiStateReducer recovers completed messages from timeline ownership when run registry is missing', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = {
+    ...state,
+    runs: {},
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        activeRunId: null,
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'final answer recovered from completed event',
+      usage: {
+        inputTokens: 4,
+        outputTokens: 5,
+        totalTokens: 9,
+      },
+    },
+    now: 1300,
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'final answer recovered from completed event'],
+  ]);
+  assert.deepEqual(state.sessions['chat:pet']?.tokenUsage, {
+    inputTokens: 4,
+    outputTokens: 5,
+    totalTokens: 9,
+  });
+});
+
 test('tuiStateReducer records composer prompt history only for run starts', () => {
   let state = initialState();
 
@@ -1113,6 +1156,47 @@ test('tuiStateReducer tracks operation lifecycle in timeline without terminal me
   assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'message:op-complete'), false);
 });
 
+test('tuiStateReducer keeps operation display fields when completed event is sparse', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'started',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+        title: 'Shell',
+        target: 'npm test',
+        summary: '执行测试',
+        details: { cwd: '/repo' },
+      },
+    },
+    now: 1200,
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+      },
+    },
+    now: 1400,
+  });
+
+  const completedTimelineEntry = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:operation:tool-1');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.phase : undefined, 'completed');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.title : undefined, 'Shell');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.target : undefined, 'npm test');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.summary : undefined, '执行测试');
+  assert.deepEqual(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.details : undefined, { cwd: '/repo' });
+});
+
 test('tuiStateReducer handles human review and interrupt state', () => {
   let state = startRun(initialState(), 'req-1');
 
@@ -1167,6 +1251,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     id: 'message:review-response',
     type: 'message',
     role: 'user',
+    requestId: 'req-1',
     text: '批准',
     status: 'completed',
   });

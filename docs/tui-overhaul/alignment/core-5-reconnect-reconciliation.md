@@ -44,6 +44,7 @@ Route reconnect through the same `session.snapshot.loaded` reconciliation path a
 | 2026-06-23 | missing active pointer coverage | `message.completed` should finalize through run ownership even when `SessionModel.activeRunId` has already been cleared. | Existing docs/checklist stated the behavior, but reducer coverage did not explicitly clear the session active pointer before dispatching the completed event. | Main design lists this as a minimum test matrix scenario. | Add a reducer test that keeps the run in `TuiState.runs`, clears `activeRunId`, and verifies completed output terminalizes from the run registry. | none | accepted |
 | 2026-06-23 | reconnect completed output coverage | Reconnect snapshots should restore final assistant output after the server completed while WS was unavailable. | Existing terminal snapshot test cleared active run state but did not directly assert the restored user/assistant checkpoint timeline. | Main design lists server completion during WS disconnect as a minimum test matrix scenario. | Extend the reconnect terminal snapshot test to assert the final checkpoint timeline ids/text as well as terminal active-run cleanup. | none | accepted |
 | 2026-06-23 | stale review reconciliation | Server-reported stale or closed reviews should trigger snapshot reconciliation. | Review failures were sent as plain `error` events, so the TUI finished the local run but did not reload authoritative pending-review state. | Main design lists stale/closed review responses as reconciliation triggers, and the TUI needs a structured reason instead of matching localized text. | Add review-specific error codes and make the TUI controller restore a snapshot/reset the timeline view after those coded errors. | none | accepted |
+| 2026-06-23 | missing run completed recovery | `message.completed` should still render the final answer when the request is recoverable from timeline ownership. | A completed event could be dropped after the run registry entry had already been removed, even though the current session timeline still contained the request's user/operation entries. | The main design requires terminal events to update or close the owning run/session instead of silently losing the final assistant output; local interrupt release remains an explicit ignore case. | Recover the owning session from timeline request ids when the run is missing, finalize the assistant message there, and keep the interrupt-timeout late-response guard. | none | accepted |
 
 ## Merge Checklist
 
@@ -53,6 +54,7 @@ Route reconnect through the same `session.snapshot.loaded` reconciliation path a
 - [x] Reconnect snapshot restores completed server output from checkpoint timeline.
 - [x] Missing-active `message.completed` finalizes through run ownership.
 - [x] Missing-active `message.completed` is covered by direct reducer test.
+- [x] Missing-run `message.completed` can recover from timeline ownership without breaking interrupt-timeout ignore behavior.
 - [x] Interrupt timeout local release and late terminal event behavior are covered.
 - [x] Deferred CORE metadata no longer lists completed CORE-5 gaps.
 - [x] PR references tracking issue #232.

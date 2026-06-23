@@ -45,6 +45,7 @@ This PR is the first CORE-2 slice. It does not complete the full timeline author
 | 2026-06-21 | `skipTimelineIds` cleanup | final assistant completion should update timeline exactly once | CORE-2 left a skip option to avoid duplicate writes from history mirroring | CORE-5 finalized assistant messages through timeline directly | CORE-6 removes `skipTimelineIds`; CORE-7 removes the remaining history mirror | none | accepted |
 | 2026-06-23 | milestone checklist state | CORE-2 checklist should reflect the completed mainline cleanup after CORE-7. | The checklist still showed one live session log and no message-only model as open items. | CORE-7 removed `SessionModel.history`, keeps composer input history outside session messages, and transcript export now reads `SessionModel.timeline`. | Mark the full-milestone checklist items complete while preserving the earlier slice scope notes. | none | accepted |
 | 2026-06-23 | non-checkpoint event coverage | `notice` and `studio.progress` events should stay out of authoritative timeline messages. | The runtime routed system cells into `SessionModel.notices`, but reducer coverage did not dispatch `system.notice` and `studio.progress` directly. | The design and checklist explicitly name notice/studio progress as non-checkpoint timeline exclusions. | Add reducer regression coverage for both event types and assert the checkpoint timeline/transcript remain message-only. | none | accepted |
+| 2026-06-23 | operation terminal display | Completed operation events should update status without erasing the operation's existing display content. | Sparse terminal operation events could rebuild the timeline entry from only the terminal payload, causing the line to collapse to generic start/complete text. | Operation timeline entries are authoritative operation messages; lifecycle status should not replace the operation target/summary/details already shown for that entry. | Merge operation lifecycle events so missing terminal fields inherit the previous title, target, summary, details, and source while still marking the phase completed/failed/interrupted. | none | accepted |
 
 ## Open Questions
 
@@ -61,6 +62,7 @@ This checklist tracks the full CORE-2 milestone. Checked items are completed by 
 
 - [x] CORE-2 alignment document exists.
 - [x] Authoritative timeline message/operation boundary exists.
+- [x] Sparse terminal operation events preserve previous operation display fields.
 - [x] Non-message UI state entries are excluded from authoritative timeline messages.
 - [x] Live session state has one message log.
 - [x] No new session history/transcript/message-only model is introduced.

@@ -77,6 +77,7 @@ export function timelineEntryFromMessageCell(cell: MessageCellModel): AgentTimel
     id: timelineEntryIdFromMessageCell(cell),
     type: 'message',
     role: cell.kind,
+    ...(cell.requestId ? { requestId: cell.requestId } : {}),
     text: cell.text,
     status: 'completed',
     ...(cell.timestamp ? { createdAt: cell.timestamp } : {}),
@@ -93,8 +94,11 @@ export function operationTimelineEntryFromEvent(
   previous?: AgentOperationEntry,
 ): AgentOperationEntry {
   const presentation = buildOperationPresentation(event);
+  const mergedPresentation = previous
+    ? mergeOperationPresentation(event, presentation, previous)
+    : presentation;
   return {
-    ...presentation,
+    ...mergedPresentation,
     id: previous?.id ?? timelineEntryIdFromOperationEvent(event),
     type: 'operation',
     requestId: event.requestId,
@@ -102,6 +106,21 @@ export function operationTimelineEntryFromEvent(
     startedAt: previous?.startedAt ?? now,
     updatedAt: now,
     ...(isTerminalOperationPhase(event.phase) ? { completedAt: now } : {}),
+  };
+}
+
+function mergeOperationPresentation(
+  event: LocalAgentOperationEvent,
+  presentation: OperationPresentation,
+  previous: AgentOperationEntry,
+): OperationPresentation {
+  return {
+    ...presentation,
+    title: event.operation.title !== undefined ? presentation.title : previous.title,
+    target: event.operation.target !== undefined ? presentation.target : previous.target,
+    summary: event.operation.summary !== undefined ? presentation.summary : previous.summary,
+    details: event.operation.details !== undefined ? presentation.details : previous.details,
+    source: event.operation.source !== undefined ? presentation.source : previous.source,
   };
 }
 

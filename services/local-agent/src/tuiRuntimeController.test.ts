@@ -91,6 +91,30 @@ function createController(state: TuiState) {
   return { controller, actions, sent, get resetCount() { return resetCount; } };
 }
 
+test('TuiRuntimeController uses configured workdir when runtime payload omits cwd', () => {
+  const actions: TuiAction[] = [];
+  const controller = new TuiRuntimeController({
+    actorId: 'pet-1',
+    localServerPort: 0,
+    workdir: '/tmp/pinpawo-tui-workdir',
+    dispatch: (action) => actions.push(action),
+    getState: () => pendingReviewState(),
+    resetTimelineView: () => {},
+    setNow: () => {},
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (controller as any).setRuntimeFromHealth({ model: 'test-model' });
+
+  assert.deepEqual(actions, [{
+    type: 'session.set_runtime',
+    runtime: {
+      model: 'test-model',
+      cwd: '/tmp/pinpawo-tui-workdir',
+    },
+  }]);
+});
+
 test('TuiRuntimeController submits canonical review responses without legacy resume extras', () => {
   const { controller, actions, sent } = createController(pendingReviewState());
 

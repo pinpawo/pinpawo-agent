@@ -3,16 +3,16 @@ import test from 'node:test';
 import { createLocalAgentCli } from './cli';
 
 test('local agent CLI passes tui options to the handler', async () => {
-  let received: { dryRun: boolean } | null = null;
+  let received: { dryRun: boolean; workdir?: string } | null = null;
   const program = createLocalAgentCli({
     runTui: (options) => {
       received = options;
     },
   });
 
-  await program.parseAsync(['node', 'pinpawo-agent', 'tui', '--dry-run']);
+  await program.parseAsync(['node', 'pinpawo-agent', 'tui', '--dry-run', '--workdir', '/tmp/pinpawo-tui-workdir']);
 
-  assert.deepEqual(received, { dryRun: true });
+  assert.deepEqual(received, { dryRun: true, workdir: '/tmp/pinpawo-tui-workdir' });
 });
 
 test('local agent CLI passes init options to the handler', async () => {

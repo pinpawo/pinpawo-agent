@@ -3,15 +3,19 @@ import { startLocalServer } from '../localServer';
 import { config } from '../config';
 import { ensureActorSelected } from '../actorSelection';
 import { browserSession } from '../toolkits/browser';
-import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
+import { applyRuntimeWorkdir } from '../runtimeWorkdir';
 
 export type RunAgentOptions = {
   workdir?: string;
 };
 
+export function buildRunAgentRuntimeConfig(options: RunAgentOptions = {}) {
+  return applyRuntimeWorkdir(options.workdir);
+}
+
 export async function runAgent(options: RunAgentOptions = {}) {
   await ensureActorSelected({ interactive: true });
-  const runtimeConfig = buildLocalAgentRuntimeConfig(options.workdir);
+  const runtimeConfig = buildRunAgentRuntimeConfig(options);
   const runtime = new LocalAgentRuntime(runtimeConfig);
 
   let stopping = false;

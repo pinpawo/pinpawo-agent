@@ -100,7 +100,7 @@ function renderTimelineDisplayEntry(
 // Main TUI application
 // ---------------------------------------------------------------------------
 
-export function TuiApp(props: { actorId: string }) {
+export function TuiApp(props: { actorId: string; workdir?: string }) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const defaultSessionId = useMemo(() => `chat:${props.actorId}`, [props.actorId]);
@@ -131,6 +131,7 @@ export function TuiApp(props: { actorId: string }) {
   const inputBufferRef = useRef(createInitialTuiInputBufferState());
   const lastInterruptAtRef = useRef(0);
   const localServerPort = config.localServerPort;
+  const workdir = props.workdir ?? config.workdir;
   const resetTimelineView = useCallback(() => {
     stdout.write(CLEAR_SCREEN);
     setTimelineRenderEpoch((current) => current + 1);
@@ -142,7 +143,8 @@ export function TuiApp(props: { actorId: string }) {
     getState: () => stateRef.current,
     resetTimelineView,
     setNow,
-  }), [props.actorId, localServerPort, dispatch, resetTimelineView, setNow]);
+    workdir,
+  }), [props.actorId, localServerPort, dispatch, resetTimelineView, setNow, workdir]);
   const screenModel = useMemo(() => buildTuiScreenModel({
     state: tuiState,
     terminalColumns: terminalSize.columns,
@@ -250,7 +252,7 @@ export function TuiApp(props: { actorId: string }) {
         }, commandPaletteIndex)
       : buildCommandPaletteModel({ text: '', cursorOffset: 0 })
   ), [commandPaletteIndex, inputFocused, inputValue, pendingApproval, textArea.cursorOffset]);
-  const fileMentionRoot = focusedSession?.runtime.cwd ?? config.workdir;
+  const fileMentionRoot = focusedSession?.runtime.cwd ?? workdir;
   const fileMention = useMemo(() => (
     inputFocused && !pendingApproval
       ? buildFileMentionModel({
@@ -304,7 +306,7 @@ export function TuiApp(props: { actorId: string }) {
     appendMessage('system', TUI_TEXT.externalEditorOpening);
     void editTextWithExternalEditor({
       initialText,
-      cwd: focusedSession?.runtime.cwd ?? config.workdir,
+      cwd: focusedSession?.runtime.cwd ?? workdir,
     }).then((text) => {
       const value = text.replace(/\r\n/g, '\n').replace(/\n$/, '');
       if (!value) {

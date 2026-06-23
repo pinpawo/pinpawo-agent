@@ -11,7 +11,7 @@ type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
   runAgent?: (opts: { workdir?: string }) => Promise<void> | void;
-  runTui?: (opts: { dryRun: boolean }) => Promise<void> | void;
+  runTui?: (opts: { dryRun: boolean; workdir?: string }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
   runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
@@ -110,9 +110,13 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .command('tui')
     .description('Start the interactive terminal UI')
     .option('--dry-run', 'run without writing generated post changes')
-    .action(async (options: { dryRun?: boolean }) => {
+    .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
+    .action(async (options: { dryRun?: boolean; workdir?: string }) => {
       const runTui = handlers.runTui ?? (await import('./commands/tui')).runTui;
-      await runTui({ dryRun: options.dryRun ?? false });
+      await runTui({
+        dryRun: options.dryRun ?? false,
+        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+      });
     });
 
   program

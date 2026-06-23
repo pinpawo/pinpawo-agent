@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import Markdown from '@inkkit/ink-markdown';
 import React, { Children, isValidElement } from 'react';
 import stringWidth from 'string-width';
 import { AgentTimeline } from './AgentTimeline';
+import { MessageBlock } from './MessageBlock';
 import { SubagentActivityItem } from './SubagentActivityItem';
 import {
   buildAgentOperationDisplayLines,
@@ -133,6 +135,22 @@ test('AgentTimeline preserves assistant and operation entry order', () => {
   ]);
 });
 
+test('MessageBlock renders assistant content through markdown', () => {
+  const element = MessageBlock({
+    entry: {
+      kind: 'assistant',
+      text: '| A | B |\n| - | - |\n| **one** | `two` |',
+    },
+    petName: '小派',
+    width: 80,
+  });
+
+  const markdown = findElementByType(element, Markdown);
+
+  assert.ok(markdown);
+  assert.equal(markdown.props.children, '| A | B |\n| - | - |\n| **one** | `two` |');
+});
+
 test('SubagentActivityItem renders subagent activity outside timeline entries', () => {
   const activity = subagentActivity('req-1:subagent-output', '先检查文件');
   const element = SubagentActivityItem({
@@ -142,6 +160,23 @@ test('SubagentActivityItem renders subagent activity outside timeline entries', 
 
   assert.ok(isValidElement(element));
 });
+
+function findElementByType(
+  node: React.ReactNode,
+  type: React.ElementType,
+): React.ReactElement<{ children?: React.ReactNode }> | null {
+  if (!isValidElement(node)) return null;
+  if (node.type === type) {
+    return node as React.ReactElement<{ children?: React.ReactNode }>;
+  }
+
+  const children = Children.toArray((node.props as { children?: React.ReactNode }).children);
+  for (const child of children) {
+    const match = findElementByType(child, type);
+    if (match) return match;
+  }
+  return null;
+}
 
 function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEntry {
   return {

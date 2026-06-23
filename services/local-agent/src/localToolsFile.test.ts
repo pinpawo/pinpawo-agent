@@ -334,6 +334,11 @@ test('parsePatch parses anchors, moves, and end-of-file markers', () => {
   assert.equal(update.chunks[0]?.anchor, 'function main()');
   assert.deepEqual(update.chunks[0]?.oldLines, ['context', 'old']);
   assert.deepEqual(update.chunks[0]?.newLines, ['context', 'new']);
+  assert.deepEqual(update.chunks[0]?.lines, [
+    { kind: 'context', text: 'context' },
+    { kind: 'removed', text: 'old' },
+    { kind: 'added', text: 'new' },
+  ]);
   assert.equal(update.chunks[0]?.isEndOfFile, true);
 });
 

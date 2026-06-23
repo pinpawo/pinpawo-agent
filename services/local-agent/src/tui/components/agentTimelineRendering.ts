@@ -1,4 +1,10 @@
 import stringWidth from 'string-width';
+import {
+  parsePatch,
+  type PatchChunk,
+  type PatchChunkLine,
+  type PatchOperation,
+} from '../../toolkits/local/applyPatch';
 import { TUI_TEXT } from '../render/text';
 import { formatElapsed, truncateLine } from '../render/terminalText';
 import type {
@@ -104,10 +110,7 @@ function buildPatchDiffLines(
   target: string | undefined,
   width: number,
 ): TimelineTextLineDraft[] {
-  const patchLines = patch
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .flatMap((line) => patchPreviewLine(line, width));
+  const patchLines = buildParsedPatchLines(patch, width) ?? buildRawPatchLines(patch, width);
   if (patchLines.length === 0) return [];
   return limitDiffLines([
     diffMetaLine(target ? `patch ${target}` : 'patch', width),
@@ -115,7 +118,48 @@ function buildPatchDiffLines(
   ], width);
 }
 
-function patchPreviewLine(line: string, width: number): TimelineTextLineDraft[] {
+function buildParsedPatchLines(patch: string, width: number): TimelineTextLineDraft[] | null {
+  try {
+    return parsePatch(patch).flatMap((operation) => patchOperationLines(operation, width));
+  } catch {
+    return null;
+  }
+}
+
+function patchOperationLines(operation: PatchOperation, width: number): TimelineTextLineDraft[] {
+  switch (operation.type) {
+    case 'add':
+      return [
+        diffMetaLine(`*** Add File: ${operation.path}`, width),
+        ...splitPatchContentLines(operation.content).map((line) => diffLine('+', line, 'added', width)),
+      ];
+    case 'delete':
+      return [diffMetaLine(`*** Delete File: ${operation.path}`, width)];
+    case 'update':
+      return [
+        diffMetaLine(`*** Update File: ${operation.path}`, width),
+        ...(operation.moveTo ? [diffMetaLine(`*** Move to: ${operation.moveTo}`, width)] : []),
+        ...operation.chunks.flatMap((chunk) => patchChunkLines(chunk, width)),
+      ];
+  }
+}
+
+function patchChunkLines(chunk: PatchChunk, width: number): TimelineTextLineDraft[] {
+  return [
+    diffMetaLine(chunk.anchor ? `@@ ${chunk.anchor}` : '@@', width),
+    ...chunk.lines.map((line) => patchChunkLine(line, width)),
+    ...(chunk.isEndOfFile ? [diffMetaLine('*** End of File', width)] : []),
+  ];
+}
+
+function buildRawPatchLines(patch: string, width: number): TimelineTextLineDraft[] {
+  return patch
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .flatMap((line) => rawPatchLine(line, width));
+}
+
+function rawPatchLine(line: string, width: number): TimelineTextLineDraft[] {
   const trimmed = line.trimEnd();
   if (!trimmed || trimmed === '*** Begin Patch' || trimmed === '*** End Patch') {
     return [];
@@ -130,6 +174,27 @@ function patchLineTone(line: string): TimelineTextLineDraft['tone'] {
   if (line.startsWith('+')) return 'added';
   if (line.startsWith('-')) return 'removed';
   return 'muted';
+}
+
+function splitPatchContentLines(content: string) {
+  if (!content) return [''];
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  return lines;
+}
+
+function patchChunkLine(line: PatchChunkLine, width: number): TimelineTextLineDraft {
+  switch (line.kind) {
+    case 'added':
+      return diffLine('+', line.text, 'added', width);
+    case 'removed':
+      return diffLine('-', line.text, 'removed', width);
+    case 'context':
+      return {
+        text: truncateLine(`   ${line.text}`, width),
+        tone: 'muted',
+      };
+  }
 }
 
 function diffMetaLine(text: string, width: number): TimelineTextLineDraft {

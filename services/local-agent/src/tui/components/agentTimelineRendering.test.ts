@@ -152,6 +152,50 @@ test('buildAgentOperationDisplayLines falls back to apply_patch details without 
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
 });
 
+test('buildAgentOperationDisplayLines renders apply_patch through parsed patch operations', () => {
+  const lines = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'started',
+    kind: 'local.apply_patch',
+    title: '应用补丁',
+    target: 'src/app.ts',
+    summary: 'update',
+    raw: {
+      input: {
+        patch: [
+          '*** Begin Patch',
+          '*** Add File: src/new.ts',
+          '+export const fresh = true;',
+          '*** Update File: src/app.ts',
+          '*** Move to: src/main.ts',
+          '@@ function main()',
+          ' const before = true;',
+          '-return before;',
+          '+return fresh;',
+          ' const middle = true;',
+          '-return middle;',
+          '+return final;',
+          '*** End of File',
+          '*** Delete File: src/old.ts',
+          '*** End Patch',
+        ].join('\n'),
+      },
+    },
+  }), 3500, 100);
+
+  assert.ok(lines.some((line) => line.text === '  *** Add File: src/new.ts' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '  +export const fresh = true;' && line.tone === 'added'));
+  assert.ok(lines.some((line) => line.text === '  *** Move to: src/main.ts' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '  @@ function main()' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '   const before = true;' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '  -return before;' && line.tone === 'removed'));
+  assert.ok(lines.some((line) => line.text === '  +return fresh;' && line.tone === 'added'));
+  assert.ok(lines.some((line) => line.text === '   const middle = true;' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '  -return middle;' && line.tone === 'removed'));
+  assert.ok(lines.some((line) => line.text === '  +return final;' && line.tone === 'added'));
+  assert.ok(lines.some((line) => line.text === '  *** Delete File: src/old.ts' && line.tone === 'muted'));
+  assert.ok(lines.every((line) => stringWidth(line.text) <= 100));
+});
+
 test('buildAgentOperationDisplayLines renders browser active completed and failed states', () => {
   const running = buildAgentOperationDisplayLines(operationEntry({
     phase: 'started',

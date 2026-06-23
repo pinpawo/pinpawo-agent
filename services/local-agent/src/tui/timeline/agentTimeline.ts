@@ -119,9 +119,20 @@ function mergeOperationPresentation(
     title: event.operation.title !== undefined ? presentation.title : previous.title,
     target: event.operation.target !== undefined ? presentation.target : previous.target,
     summary: event.operation.summary !== undefined ? presentation.summary : previous.summary,
-    details: event.operation.details !== undefined ? presentation.details : previous.details,
+    details: event.operation.details !== undefined
+      ? mergeOperationDetails(previous.details, presentation.details)
+      : previous.details,
     source: event.operation.source !== undefined ? presentation.source : previous.source,
   };
+}
+
+function mergeOperationDetails(
+  previous: Record<string, unknown> | undefined,
+  next: Record<string, unknown> | undefined,
+) {
+  if (!previous) return next;
+  if (!next) return previous;
+  return { ...previous, ...next };
 }
 
 export function isTerminalOperationPhase(

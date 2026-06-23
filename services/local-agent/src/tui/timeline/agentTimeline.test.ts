@@ -83,6 +83,37 @@ test('operation timeline terminal events preserve previous display fields when p
   assert.deepEqual(completedEntry.details, { cwd: '/repo' });
 });
 
+test('operation timeline terminal events merge completed details with previous details', () => {
+  const started = operationEvent({
+    phase: 'started',
+    target: 'README.md',
+    summary: 'write',
+    details: {
+      before: 'old',
+      afterPreview: 'new',
+    },
+  });
+  const completed = operationEvent({
+    phase: 'completed',
+    target: 'README.md',
+    summary: 'write',
+    details: {
+      after: 'new',
+      mode: 'write',
+    },
+  });
+
+  const startedEntry = operationTimelineEntryFromEvent(started, 1000);
+  const completedEntry = operationTimelineEntryFromEvent(completed, 2500, startedEntry);
+
+  assert.deepEqual(completedEntry.details, {
+    before: 'old',
+    afterPreview: 'new',
+    after: 'new',
+    mode: 'write',
+  });
+});
+
 test('operation presentation derives stable keys from operation event fields', () => {
   const event = operationEvent({
     id: null,

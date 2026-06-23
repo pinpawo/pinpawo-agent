@@ -1,6 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { buildAgentOperationDisplayLines } from './agentTimelineRendering';
+import {
+  buildAgentOperationDisplayLines,
+  type TimelineTextLine,
+} from './agentTimelineRendering';
 import type { AgentOperationEntry } from '../timeline/agentTimeline';
 
 export function AgentOperationItem(props: {
@@ -20,10 +23,24 @@ export function AgentOperationItem(props: {
   return (
     <Box flexDirection="column" marginBottom={1}>
       {lines.map((line) => (
-        <Text key={line.id} color={color} dimColor>
+        <Text key={line.id} {...lineToneProps(line, color)}>
           {line.text}
         </Text>
       ))}
     </Box>
   );
+}
+
+function lineToneProps(line: TimelineTextLine, fallbackColor: string) {
+  switch (line.tone) {
+    case 'added':
+      return { color: 'green' as const };
+    case 'removed':
+      return { color: 'red' as const };
+    case 'muted':
+      return { dimColor: true };
+    case 'default':
+    case undefined:
+      return { color: fallbackColor, dimColor: true };
+  }
 }

@@ -1,4 +1,5 @@
 import stringWidth from 'string-width';
+import { diffLines, type Change } from 'diff';
 import { TUI_TEXT } from '../render/text';
 import { formatElapsed, truncateLine } from '../render/terminalText';
 import type {
@@ -135,15 +136,13 @@ function buildBeforeAfterDiffLines(
 ): TimelineTextLineDraft[] {
   if (before === after) return [];
 
-  const beforeLines = splitContentLines(before);
-  const afterLines = splitContentLines(after);
-  const [removed, added] = changedLineRanges(beforeLines, afterLines);
-  if (removed.length === 0 && added.length === 0) return [];
+  const changedLines = diffLines(before, after)
+    .flatMap((part) => diffPartLines(part, width));
+  if (changedLines.length === 0) return [];
 
   return limitDiffLines([
     diffMetaLine(target ? `diff ${target}` : 'diff', width),
-    ...removed.map((line) => diffLine('-', line, 'removed', width)),
-    ...added.map((line) => diffLine('+', line, 'added', width)),
+    ...changedLines,
   ], width);
 }
 
@@ -180,37 +179,18 @@ function patchLineTone(line: string): TimelineTextLineDraft['tone'] {
   return 'muted';
 }
 
-function splitContentLines(content: string) {
-  const lines = content.replace(/\r\n/g, '\n').split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  return lines;
+function diffPartLines(part: Change, width: number): TimelineTextLineDraft[] {
+  if (!part.added && !part.removed) return [];
+  const prefix = part.added ? '+' : '-';
+  const tone = part.added ? 'added' : 'removed';
+  return splitDiffValueLines(part.value)
+    .map((line) => diffLine(prefix, line, tone, width));
 }
 
-function changedLineRanges(before: string[], after: string[]): [string[], string[]] {
-  let prefix = 0;
-  while (
-    prefix < before.length
-    && prefix < after.length
-    && before[prefix] === after[prefix]
-  ) {
-    prefix += 1;
-  }
-
-  let beforeSuffix = before.length - 1;
-  let afterSuffix = after.length - 1;
-  while (
-    beforeSuffix >= prefix
-    && afterSuffix >= prefix
-    && before[beforeSuffix] === after[afterSuffix]
-  ) {
-    beforeSuffix -= 1;
-    afterSuffix -= 1;
-  }
-
-  return [
-    before.slice(prefix, beforeSuffix + 1),
-    after.slice(prefix, afterSuffix + 1),
-  ];
+function splitDiffValueLines(value: string) {
+  const lines = value.replace(/\r\n/g, '\n').split('\n');
+  if (lines.at(-1) === '') lines.pop();
+  return lines;
 }
 
 function diffMetaLine(text: string, width: number): TimelineTextLineDraft {

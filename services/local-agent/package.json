@@ -39,6 +39,7 @@
     "@pinpawo/pet-agent": "*",
     "@tavily/core": "^0.7.1",
     "commander": "^12.1.0",
+    "diff": "^9.0.0",
     "ink": "^6.8.0",
     "ink-text-input": "^6.0.0",
     "openai": "^4.77.0",

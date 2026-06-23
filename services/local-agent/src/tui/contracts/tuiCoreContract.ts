@@ -23,6 +23,8 @@ export const TUI_CORE_STATE_OWNERS = [
 ] as const;
 
 export const TUI_CORE_FORBIDDEN_SECONDARY_LOGS = [
+  'session.history',
+  'messageOnlyView',
   'transcript',
   'transcriptSnapshot',
 ] as const;
@@ -32,7 +34,7 @@ export const TUI_CORE_CONTRACT_RULES = [
   'timeline entries are limited to user messages, assistant messages, and tool operations',
   'pending review, runtime, studio progress, subagent activity, connection, token usage, and active run are state, not timeline messages',
   'session snapshots are reconciled through session.snapshot.loaded',
-  'transcript and transcriptSnapshot must not be introduced as second message logs',
+  'session.history, message-only views, transcript, and transcriptSnapshot must not be introduced as second message logs',
 ] as const;
 
 export type TuiCoreTimelineSource = 'checkpoint' | 'live-event' | 'local-input';

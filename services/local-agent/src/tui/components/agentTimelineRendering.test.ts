@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import Markdown from '@inkkit/ink-markdown';
 import React, { Children, isValidElement } from 'react';
 import stringWidth from 'string-width';
 import { AgentTimeline } from './AgentTimeline';
+import { MessageBlock } from './MessageBlock';
 import { SubagentActivityItem } from './SubagentActivityItem';
 import {
   buildAgentOperationDisplayLines,
 } from './agentTimelineRendering';
+import {
+  agentTimelineEntriesFromSnapshot,
+  buildTuiSessionSnapshotFromMessages,
+} from '../snapshot/tuiSessionSnapshot';
 import type {
   AgentMessageEntry,
   AgentOperationEntry,
@@ -14,7 +20,7 @@ import type {
 } from '../timeline/agentTimeline';
 import type { SessionActivityModel } from '../state/tuiState';
 
-test('buildAgentOperationDisplayLines preserves operation lifecycle text without reading raw payloads', () => {
+test('buildAgentOperationDisplayLines preserves generic operation text without reading raw payloads', () => {
   const entry = operationEntry({
     phase: 'completed',
     title: '打开网页',
@@ -65,6 +71,129 @@ test('buildAgentOperationDisplayLines keeps running and terminal phases distinct
   assert.doesNotMatch(running, /失败/);
   assert.match(failed, /失败/);
   assert.match(failed, /找不到元素/);
+});
+
+test('buildAgentOperationDisplayLines keeps write_file payloads out of the summary line', () => {
+  const lines = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'completed',
+    kind: 'local.write_file',
+    title: '写文件',
+    target: 'src/example.ts',
+    summary: 'write',
+    details: {
+      before: 'const value = 1;\nconsole.log(value);\n',
+      after: 'const value = 2;\nconsole.log(value);\n',
+      mode: 'write',
+    },
+  }), 3500, 80);
+
+  assert.equal(lines.length, 1);
+  assert.match(lines[0]!.text, /mode=write/);
+  assert.doesNotMatch(lines[0]!.text, /before=/);
+  assert.doesNotMatch(lines[0]!.text, /after=/);
+  assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
+});
+
+test('buildAgentOperationDisplayLines renders apply_patch raw input on operation lines', () => {
+  const lines = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'started',
+    kind: 'local.apply_patch',
+    title: '应用补丁',
+    target: 'src/example.ts',
+    summary: 'update',
+    raw: {
+      input: {
+        patch: [
+          '*** Begin Patch',
+          '*** Update File: src/example.ts',
+          '@@',
+          '-const value = 1;',
+          '+const value = 2;',
+          '*** End Patch',
+        ].join('\n'),
+      },
+    },
+    details: {
+      patch: '*** Begin Patch\n*** Update File: truncated.ts\n-details\n+details\n*** End Patch',
+    },
+  }), 3500, 80);
+
+  assert.match(lines[0]!.text, /update/);
+  assert.doesNotMatch(lines[0]!.text, /patch=/);
+  assert.ok(lines.some((line) => line.text === '  -const value = 1;' && line.tone === 'removed'));
+  assert.ok(lines.some((line) => line.text === '  +const value = 2;' && line.tone === 'added'));
+  assert.ok(lines.every((line) => !line.text.includes('details')));
+  assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
+});
+
+test('buildAgentOperationDisplayLines falls back to apply_patch details without raw input', () => {
+  const lines = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'started',
+    kind: 'local.apply_patch',
+    title: '应用补丁',
+    target: 'src/example.ts',
+    summary: 'update',
+    details: {
+      patch: [
+        '*** Begin Patch',
+        '*** Update File: src/example.ts',
+        '@@',
+        '-const value = 1;',
+        '+const value = 2;',
+        '*** End Patch',
+      ].join('\n'),
+    },
+  }), 3500, 80);
+
+  assert.match(lines[0]!.text, /update/);
+  assert.doesNotMatch(lines[0]!.text, /patch=/);
+  assert.ok(lines.some((line) => line.text === '  -const value = 1;' && line.tone === 'removed'));
+  assert.ok(lines.some((line) => line.text === '  +const value = 2;' && line.tone === 'added'));
+  assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
+});
+
+test('buildAgentOperationDisplayLines renders apply_patch through parsed patch operations', () => {
+  const lines = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'started',
+    kind: 'local.apply_patch',
+    title: '应用补丁',
+    target: 'src/app.ts',
+    summary: 'update',
+    raw: {
+      input: {
+        patch: [
+          '*** Begin Patch',
+          '*** Add File: src/new.ts',
+          '+export const fresh = true;',
+          '*** Update File: src/app.ts',
+          '*** Move to: src/main.ts',
+          '@@ function main()',
+          ' const before = true;',
+          '-return before;',
+          '+return fresh;',
+          ' const middle = true;',
+          '-return middle;',
+          '+return final;',
+          '*** End of File',
+          '*** Delete File: src/old.ts',
+          '*** End Patch',
+        ].join('\n'),
+      },
+    },
+  }), 3500, 100);
+
+  assert.ok(lines.some((line) => line.text === '  *** Add File: src/new.ts' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '  +export const fresh = true;' && line.tone === 'added'));
+  assert.ok(lines.some((line) => line.text === '  *** Move to: src/main.ts' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '  @@ function main()' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '   const before = true;' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '  -return before;' && line.tone === 'removed'));
+  assert.ok(lines.some((line) => line.text === '  +return fresh;' && line.tone === 'added'));
+  assert.ok(lines.some((line) => line.text === '   const middle = true;' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '  -return middle;' && line.tone === 'removed'));
+  assert.ok(lines.some((line) => line.text === '  +return final;' && line.tone === 'added'));
+  assert.ok(lines.some((line) => line.text === '  *** Delete File: src/old.ts' && line.tone === 'muted'));
+  assert.ok(lines.every((line) => stringWidth(line.text) <= 100));
 });
 
 test('buildAgentOperationDisplayLines renders browser active completed and failed states', () => {
@@ -133,6 +262,52 @@ test('AgentTimeline preserves assistant and operation entry order', () => {
   ]);
 });
 
+test('MessageBlock renders assistant content through markdown', () => {
+  const element = MessageBlock({
+    entry: {
+      kind: 'assistant',
+      text: '| A | B |\n| - | - |\n| **one** | `two` |',
+    },
+    petName: '小派',
+    width: 80,
+  });
+
+  const markdown = findElementByType(element, Markdown);
+
+  assert.ok(markdown);
+  assert.equal(markdown.props.children, '| A | B |\n| - | - |\n| **one** | `two` |');
+});
+
+test('history snapshot assistant messages render through markdown', () => {
+  const snapshot = buildTuiSessionSnapshotFromMessages({
+    sessionId: 'chat:pet',
+    kind: 'chat',
+    messages: [
+      {
+        id: 'assistant-history',
+        kind: 'assistant',
+        text: '**历史回答**\n\n- 第一项\n- 第二项',
+      },
+    ],
+  });
+  const [entry] = agentTimelineEntriesFromSnapshot(snapshot.timeline);
+  assert.equal(entry?.type, 'message');
+  assert.equal(entry?.type === 'message' ? entry.role : undefined, 'assistant');
+
+  const element = MessageBlock({
+    entry: {
+      kind: entry.role,
+      text: entry.text,
+    },
+    petName: '小派',
+    width: 80,
+  });
+  const markdown = findElementByType(element, Markdown);
+
+  assert.ok(markdown);
+  assert.equal(markdown.props.children, '**历史回答**\n\n- 第一项\n- 第二项');
+});
+
 test('SubagentActivityItem renders subagent activity outside timeline entries', () => {
   const activity = subagentActivity('req-1:subagent-output', '先检查文件');
   const element = SubagentActivityItem({
@@ -142,6 +317,23 @@ test('SubagentActivityItem renders subagent activity outside timeline entries', 
 
   assert.ok(isValidElement(element));
 });
+
+function findElementByType(
+  node: React.ReactNode,
+  type: React.ElementType,
+): React.ReactElement<{ children?: React.ReactNode }> | null {
+  if (!isValidElement(node)) return null;
+  if (node.type === type) {
+    return node as React.ReactElement<{ children?: React.ReactNode }>;
+  }
+
+  const children = Children.toArray((node.props as { children?: React.ReactNode }).children);
+  for (const child of children) {
+    const match = findElementByType(child, type);
+    if (match) return match;
+  }
+  return null;
+}
 
 function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEntry {
   return {

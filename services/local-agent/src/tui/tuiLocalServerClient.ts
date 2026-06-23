@@ -91,11 +91,15 @@ export class TuiLocalServerClient {
       if (nativeSnapshot) {
         return mergeSnapshotRuntime(nativeSnapshot, runtime);
       }
-      return buildSessionSnapshotFromServerPayload(serverSnapshot as LocalServerSnapshotPayload, {
+      const legacySnapshot = buildSessionSnapshotFromServerPayload(serverSnapshot as LocalServerSnapshotPayload, {
         fallbackSessionId: params.sessionId,
         fallbackKind: params.kind,
         runtime,
       });
+      if (legacySnapshot) {
+        return legacySnapshot;
+      }
+      throw new Error('invalid local server snapshot payload');
     }
     const messages = await this.readHistory();
     return buildTuiSessionSnapshotFromMessages({
@@ -222,10 +226,14 @@ function buildSessionSnapshotFromServerPayload(
     fallbackKind: TuiCoreSessionSnapshot['kind'];
     runtime?: LocalServerRuntimeSnapshot | null;
   },
-): TuiCoreSessionSnapshot {
+): TuiCoreSessionSnapshot | null {
   const session = parseSnapshotSession(payload.session);
   const sessionId = session?.id ?? options.fallbackSessionId;
   const kind = session?.kind ?? options.fallbackKind;
+  const pendingReview = parsePendingReviewSnapshot(payload.pendingReview);
+  if (!Array.isArray(payload.messages) && !pendingReview) {
+    return null;
+  }
   const messages = parseHistoryMessages(payload.messages);
   const snapshot = buildTuiSessionSnapshotFromMessages({
     sessionId,
@@ -233,7 +241,6 @@ function buildSessionSnapshotFromServerPayload(
     messages,
     runtime: options.runtime,
   });
-  const pendingReview = parsePendingReviewSnapshot(payload.pendingReview);
   if (!pendingReview) {
     return snapshot;
   }

@@ -71,11 +71,15 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
 
   assert.equal(handleChatCalls.length, 0);
   assert.equal(sentEvents.length, 1);
-  const event = sentEvents[0] as { type: string; event?: { type: string; requestId: string; message: string } };
+  const event = sentEvents[0] as {
+    type: string;
+    event?: { type: string; requestId: string; message: string; code?: string };
+  };
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.equal(event.event?.requestId, 'req-1');
   assert.match(event.event?.message ?? '', /过期/);
+  assert.equal(event.event?.code, 'review_stale');
 });
 
 test('handleHumanReviewResponse consumes matching canonical review route once', async () => {
@@ -147,10 +151,11 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     selectedOptionId: 'approve',
   });
   assert.equal(sentEvents.length, 1, 'second response should be rejected after route is consumed');
-  const event = sentEvents[0] as { type: string; event?: { type: string; message: string } };
+  const event = sentEvents[0] as { type: string; event?: { type: string; message: string; code?: string } };
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
+  assert.equal(event.event?.code, 'review_closed');
 
   const interruptHandled = await handler.handleInterruptRequest(
     fakeWs,
@@ -374,10 +379,11 @@ test('handleInterruptRequest resumes pending review with canonical reject option
 
   assert.equal(handleChatCalls.length, 1, 'pending review route should be consumed by interrupt');
   assert.equal(sentEvents.length, 1);
-  const event = sentEvents[0] as { type: string; event?: { type: string; message: string } };
+  const event = sentEvents[0] as { type: string; event?: { type: string; message: string; code?: string } };
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
+  assert.equal(event.event?.code, 'review_closed');
 });
 
 test('handleInterruptRequest recovers missing route from active checkpoint review', async () => {
@@ -657,10 +663,11 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
 
   assert.equal(handleChatCalls.length, 0);
   assert.equal(sentEvents.length, 1);
-  const event = sentEvents[0] as { type: string; event?: { type: string; message: string } };
+  const event = sentEvents[0] as { type: string; event?: { type: string; message: string; code?: string } };
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.match(event.event?.message ?? '', /发起该 review 的会话/);
+  assert.equal(event.event?.code, 'review_wrong_session');
 });
 
 test('handleHumanReviewResponse forwards effect-bearing options without local authorization side effects', async () => {

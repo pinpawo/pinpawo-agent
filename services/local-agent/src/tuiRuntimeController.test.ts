@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { TuiRuntimeController } from './tui/TuiRuntimeController';
 import { TUI_CORE_TARGET_ACTIONS } from './tui/contracts/tuiCoreContract';
 import { createComposerHistoryState } from './tui/input/composerHistory';
@@ -46,6 +46,23 @@ function pendingReviewState(): TuiState {
         activities: [],
         tokenUsage: null,
         activeRunId: 'req-1',
+      },
+    },
+  };
+}
+
+function busyRunState(): TuiState {
+  return {
+    ...pendingReviewState(),
+    runs: {
+      'req-1': {
+        requestId: 'req-1',
+        sessionId: 'sess-1',
+        kind: 'chat',
+        phase: 'thinking',
+        timelineEntryIds: [],
+        startedAt: 1,
+        charCount: 0,
       },
     },
   };
@@ -127,6 +144,29 @@ test('TuiRuntimeController interrupts pending human review instead of dismissing
   });
 });
 
+test('TuiRuntimeController releases input locally after interrupt timeout', () => {
+  mock.timers.enable({ apis: ['setTimeout'], now: 0 });
+  try {
+    const { controller, actions } = createController(busyRunState());
+
+    const submitted = controller.requestInterrupt();
+    mock.timers.tick(1800);
+
+    assert.equal(submitted, true);
+    const finish = actions.find((action) => action.type === 'run.finish');
+    assert.equal(finish?.type, 'run.finish');
+    if (finish?.type !== 'run.finish') return;
+    assert.equal(finish.requestId, 'req-1');
+    assert.equal(finish.statusMessage, '已请求打断');
+    assert.deepEqual(
+      finish.messages?.map((message) => [message.kind, message.text]),
+      [['system', '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。']],
+    );
+  } finally {
+    mock.timers.reset();
+  }
+});
+
 test('TuiRuntimeController resets static timeline view for new sessions', () => {
   const harness = createController(pendingReviewState());
 
@@ -184,6 +224,57 @@ test('TuiRuntimeController restores a reconnect snapshot before opening websocke
   assert.equal(
     harness.actions[0]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
       ? harness.actions[0].source
+      : undefined,
+    'reconnect',
+  );
+});
+
+test('TuiRuntimeController reconciles snapshots after stale review errors', async () => {
+  const harness = createController(pendingReviewState());
+  const events: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    readSessionSnapshot: async () => {
+      events.push('snapshot');
+      return {
+        sessionId: 'sess-1',
+        kind: 'chat',
+        timeline: [{
+          id: 'message:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'hello',
+          status: 'completed',
+          source: 'checkpoint',
+        }],
+        runs: [],
+      };
+    },
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).handleServerMessage({
+    type: 'event',
+    requestId: 'req-1',
+    event: {
+      type: 'error',
+      requestId: 'req-1',
+      message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
+      code: 'review_stale',
+    },
+  });
+
+  await new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
+  assert.deepEqual(events, ['snapshot']);
+  assert.equal(harness.resetCount, 1);
+  assert.equal(harness.actions[0]?.type, 'event.received');
+  assert.equal(harness.actions[1]?.type, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
+  assert.equal(
+    harness.actions[1]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
+      ? harness.actions[1].source
       : undefined,
     'reconnect',
   );

@@ -5,14 +5,10 @@ import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import { config } from '../config';
 import { loadStoredConfig, saveStoredConfig } from '../storage';
 import { AgentTimelineItem } from './components/AgentTimelineItem';
-import { ApprovalPanel } from './components/ApprovalPanel';
 import { BottomStatusLine } from './components/BottomStatusLine';
-import { CommandPalette } from './components/CommandPalette';
 import { Composer } from './components/Composer';
-import { FileMentionPopup } from './components/FileMentionPopup';
-import { GlobalReviewPolicyPicker } from './components/GlobalReviewPolicyPicker';
 import { MessageBlock } from './components/MessageBlock';
-import { ResumePicker } from './components/ResumePicker';
+import { OverlayLayer } from './components/OverlayLayer';
 import { SubagentActivityItem } from './components/SubagentActivityItem';
 import {
   createInitialTuiInputBufferState,
@@ -32,6 +28,7 @@ import {
   completeFileMentionInput,
   moveFileMentionSelection,
 } from './input/fileMention';
+import { buildTuiOverlayModel } from './overlayModel';
 import { resolveTuiInputAction } from './input/inputRouter';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import { formatNow } from './render/terminalText';
@@ -262,6 +259,39 @@ export function TuiApp(props: { actorId: string }) {
         }, fileMentionRoot, fileMentionIndex)
       : buildFileMentionModel({ text: '', cursorOffset: 0 }, fileMentionRoot)
   ), [fileMentionIndex, fileMentionRoot, inputFocused, inputValue, pendingApproval, textArea.cursorOffset]);
+  const overlayModel = useMemo(() => buildTuiOverlayModel({
+    width: screenModel.regions.overlay.width,
+    resumePicker: {
+      open: resumePickerOpen,
+      sessions: resumePicker.sessions,
+      selectedIndex: resumePicker.selectedIndex,
+      loading: resumePicker.status === 'loading',
+    },
+    approval: {
+      request: pendingApproval,
+      selectedIndex: approvalIndex,
+    },
+    globalReviewPolicyPicker: {
+      open: globalReviewPolicyPickerOpen,
+      currentMode: globalReviewPolicyMode,
+      selectedIndex: globalReviewPolicyIndex,
+    },
+    commandPalette,
+    fileMention,
+  }), [
+    approvalIndex,
+    commandPalette,
+    fileMention,
+    globalReviewPolicyIndex,
+    globalReviewPolicyMode,
+    globalReviewPolicyPickerOpen,
+    pendingApproval,
+    resumePicker.sessions,
+    resumePicker.selectedIndex,
+    resumePicker.status,
+    resumePickerOpen,
+    screenModel.regions.overlay.width,
+  ]);
 
   useEffect(() => {
     setCommandPaletteIndex(0);
@@ -582,17 +612,27 @@ export function TuiApp(props: { actorId: string }) {
   }, { isActive: true });
 
   const statusBarModel = useMemo(() => buildStatusBarModel({
-    status: screenModel.regions.statusBar.status,
+    activityStatus: screenModel.regions.statusBar.activityStatus,
+    connectionStatus: screenModel.regions.statusBar.connectionStatus,
+    mode: uiMode,
     session: focusedSession,
     globalReviewPolicyMode,
-  }), [focusedSession, globalReviewPolicyMode, screenModel.regions.statusBar.status]);
+    overlayOwner: overlayModel.ownerLabel,
+  }), [
+    focusedSession,
+    globalReviewPolicyMode,
+    overlayModel.ownerLabel,
+    screenModel.regions.statusBar.activityStatus,
+    screenModel.regions.statusBar.connectionStatus,
+    uiMode,
+  ]);
 
   return (
     <Box flexDirection="column" paddingX={1}>
       {screenModel.regions.timeline.entries.length === 0 ? (
         <Text dimColor>{screenModel.regions.timeline.emptyText}</Text>
       ) : null}
-      <Static key={screenModel.regions.timeline.renderEpoch} items={screenModel.regions.timeline.staticEntries}>
+      <Static key={screenModel.regions.timeline.renderKey} items={screenModel.regions.timeline.staticEntries}>
         {(entry) => renderTimelineDisplayEntry(entry, {
           petName: screenModel.petName,
           now,
@@ -604,35 +644,7 @@ export function TuiApp(props: { actorId: string }) {
         now,
         width: contentWidth,
       }))}
-      {resumePickerOpen ? (
-        <ResumePicker
-          sessions={resumePicker.sessions}
-          selectedIndex={resumePicker.selectedIndex}
-          loading={resumePicker.status === 'loading'}
-          width={contentWidth}
-        />
-      ) : null}
-      {globalReviewPolicyPickerOpen ? (
-        <GlobalReviewPolicyPicker
-          currentMode={globalReviewPolicyMode}
-          selectedIndex={globalReviewPolicyIndex}
-          width={contentWidth}
-        />
-      ) : null}
-      {pendingApproval ? (
-        <ApprovalPanel
-          review={pendingApproval.review}
-          petId={pendingApproval.petId}
-          width={contentWidth}
-          selectedIndex={approvalIndex}
-        />
-      ) : null}
-      {commandPalette.open ? (
-        <CommandPalette model={commandPalette} width={contentWidth} />
-      ) : null}
-      {fileMention.open ? (
-        <FileMentionPopup model={fileMention} width={contentWidth} />
-      ) : null}
+      <OverlayLayer model={overlayModel} />
       <Box
         borderStyle="round"
         borderColor={screenModel.regions.composer.borderColor}

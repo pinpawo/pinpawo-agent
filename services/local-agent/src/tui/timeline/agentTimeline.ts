@@ -1,4 +1,8 @@
-import type { LocalAgentOperationEvent, LocalAgentOperationPhase } from '../../events/localAgentEvent';
+import type {
+  LocalAgentOperationEvent,
+  LocalAgentOperationPhase,
+  LocalAgentOperationRaw,
+} from '../../events/localAgentEvent';
 import type { MessageCellModel } from '../state/tuiState';
 import {
   buildOperationPresentation,
@@ -57,6 +61,7 @@ export type AgentOperationEntry = OperationPresentation & {
   startedAt: number;
   updatedAt: number;
   completedAt?: number;
+  raw?: LocalAgentOperationRaw;
 };
 
 export function timelineEntryIdFromMessageCell(cell: Pick<MessageCellModel, 'id'>) {
@@ -77,6 +82,7 @@ export function timelineEntryFromMessageCell(cell: MessageCellModel): AgentTimel
     id: timelineEntryIdFromMessageCell(cell),
     type: 'message',
     role: cell.kind,
+    ...(cell.requestId ? { requestId: cell.requestId } : {}),
     text: cell.text,
     status: 'completed',
     ...(cell.timestamp ? { createdAt: cell.timestamp } : {}),
@@ -93,8 +99,11 @@ export function operationTimelineEntryFromEvent(
   previous?: AgentOperationEntry,
 ): AgentOperationEntry {
   const presentation = buildOperationPresentation(event);
+  const mergedPresentation = previous
+    ? mergeOperationPresentation(event, presentation, previous)
+    : presentation;
   return {
-    ...presentation,
+    ...mergedPresentation,
     id: previous?.id ?? timelineEntryIdFromOperationEvent(event),
     type: 'operation',
     requestId: event.requestId,
@@ -102,6 +111,57 @@ export function operationTimelineEntryFromEvent(
     startedAt: previous?.startedAt ?? now,
     updatedAt: now,
     ...(isTerminalOperationPhase(event.phase) ? { completedAt: now } : {}),
+    ...rawField(mergeOperationRaw(previous?.raw, event.raw)),
+  };
+}
+
+function mergeOperationPresentation(
+  event: LocalAgentOperationEvent,
+  presentation: OperationPresentation,
+  previous: AgentOperationEntry,
+): OperationPresentation {
+  return {
+    ...presentation,
+    title: event.operation.title !== undefined ? presentation.title : previous.title,
+    target: event.operation.target !== undefined ? presentation.target : previous.target,
+    summary: event.operation.summary !== undefined ? presentation.summary : previous.summary,
+    details: event.operation.details !== undefined
+      ? mergeOperationDetails(previous.details, presentation.details)
+      : previous.details,
+    source: event.operation.source !== undefined ? presentation.source : previous.source,
+  };
+}
+
+function mergeOperationDetails(
+  previous: Record<string, unknown> | undefined,
+  next: Record<string, unknown> | undefined,
+) {
+  if (!previous) return next;
+  if (!next) return previous;
+  return { ...previous, ...next };
+}
+
+function mergeOperationRaw(
+  previous: LocalAgentOperationRaw | undefined,
+  next: LocalAgentOperationRaw | undefined,
+) {
+  if (!previous) return next;
+  if (!next) return previous;
+  return {
+    ...previous,
+    ...definedRawFields(next),
+  };
+}
+
+function rawField(raw: LocalAgentOperationRaw | undefined) {
+  return raw ? { raw } : {};
+}
+
+function definedRawFields(raw: LocalAgentOperationRaw) {
+  return {
+    ...(raw.input !== undefined ? { input: raw.input } : {}),
+    ...(raw.output !== undefined ? { output: raw.output } : {}),
+    ...(raw.error !== undefined ? { error: raw.error } : {}),
   };
 }
 

@@ -45,7 +45,7 @@ CORE-3 defines the target run registry contract and callsite migration checklist
 
 ## Open Questions
 
-- Should the backend eventually expose a distinct run id, or should TUI continue treating `RunId` as request-id compatible?
+None for this PR. TUI continues treating `RunId` as request-id compatible until a future backend contract exposes a distinct persisted run id.
 
 ## Merge Checklist
 

@@ -33,8 +33,14 @@ export interface PatchChunk {
   anchor: string | null;
   oldLines: string[];
   newLines: string[];
+  lines: PatchChunkLine[];
   isEndOfFile: boolean;
 }
+
+export type PatchChunkLine =
+  | { kind: 'context'; text: string }
+  | { kind: 'removed'; text: string }
+  | { kind: 'added'; text: string };
 
 export type PatchOperation =
   | { type: 'add'; path: string; content: string }
@@ -135,6 +141,7 @@ export function parsePatch(patchText: string): PatchOperation[] {
       let anchor: string | null = null;
       let oldLines: string[] = [];
       let newLines: string[] = [];
+      let chunkLines: PatchChunkLine[] = [];
       let sawDiffLines = false;
       let isEndOfFile = false;
 
@@ -145,10 +152,11 @@ export function parsePatch(patchText: string): PatchOperation[] {
           }
           return;
         }
-        chunks.push({ anchor, oldLines, newLines, isEndOfFile });
+        chunks.push({ anchor, oldLines, newLines, lines: chunkLines, isEndOfFile });
         anchor = null;
         oldLines = [];
         newLines = [];
+        chunkLines = [];
         sawDiffLines = false;
         isEndOfFile = false;
       };
@@ -172,15 +180,20 @@ export function parsePatch(patchText: string): PatchOperation[] {
           continue;
         }
         if (bodyLine.startsWith('+')) {
-          newLines.push(bodyLine.slice(1));
+          const text = bodyLine.slice(1);
+          newLines.push(text);
+          chunkLines.push({ kind: 'added', text });
           sawDiffLines = true;
         } else if (bodyLine.startsWith('-')) {
-          oldLines.push(bodyLine.slice(1));
+          const text = bodyLine.slice(1);
+          oldLines.push(text);
+          chunkLines.push({ kind: 'removed', text });
           sawDiffLines = true;
         } else if (bodyLine.startsWith(' ') || bodyTrimmed === '') {
           const context = bodyLine.startsWith(' ') ? bodyLine.slice(1) : '';
           oldLines.push(context);
           newLines.push(context);
+          chunkLines.push({ kind: 'context', text: context });
           sawDiffLines = true;
         } else {
           parseError(index, `Update File lines must start with " ", "+", "-" or "@@", got: ${bodyLine.slice(0, 40)}`);

@@ -6,6 +6,14 @@ import {
   type AgentTimelineEntry,
 } from './agentTimeline';
 
+const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
+  'after',
+  'afterPreview',
+  'before',
+  'files',
+  'patch',
+]);
+
 export function selectOperationTimelineEntries(
   entries: AgentTimelineEntry[],
 ): AgentOperationEntry[] {
@@ -167,6 +175,7 @@ function formatDetails(details: Record<string, unknown> | undefined) {
   if (!details) return '';
   return Object.entries(details)
     .flatMap(([key, value]) => {
+      if (OPERATION_PAYLOAD_DETAIL_KEYS.has(key)) return [];
       if (value === undefined || value === null || value === '') return [];
       return [`${key}=${String(value)}`];
     })

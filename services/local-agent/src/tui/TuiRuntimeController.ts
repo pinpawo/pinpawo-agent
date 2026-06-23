@@ -20,6 +20,11 @@ const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
 const LOCAL_SERVER_RECONNECT_RETRIES = 5;
 const LOCAL_SERVER_RECONNECT_DELAY_MS = 2000;
+const REVIEW_RECONCILIATION_ERROR_CODES = new Set([
+  'review_closed',
+  'review_stale',
+  'review_wrong_session',
+]);
 
 type TuiRuntimeControllerOptions = {
   actorId: string;
@@ -47,6 +52,12 @@ function makeMessageMeta() {
     id: randomUUID(),
     timestamp: formatNow(),
   };
+}
+
+function shouldReconcileSnapshotAfterMessage(message: LocalAgentServerMessage) {
+  return message.type === 'event'
+    && message.event.type === 'error'
+    && Boolean(message.event.code && REVIEW_RECONCILIATION_ERROR_CODES.has(message.event.code));
 }
 
 export class TuiRuntimeController {
@@ -471,6 +482,19 @@ export class TuiRuntimeController {
     this.connectWebSocket();
   }
 
+  private async reconcileSnapshotAfterReviewError() {
+    try {
+      await this.restoreSessionSnapshot('reconnect');
+      if (!this.disposed) {
+        this.options.resetTimelineView();
+      }
+    } catch (err) {
+      if (this.disposed) return;
+      const message = err instanceof Error ? err.message : String(err);
+      this.appendSystemMessage(TUI_TEXT.reconnectFailed(message));
+    }
+  }
+
   private handleWebSocketOpen() {
     if (this.disposed) {
       this.wsClient.disconnect();
@@ -528,6 +552,9 @@ export class TuiRuntimeController {
     }
     for (const action of result.actions) {
       this.options.dispatch(action);
+    }
+    if (shouldReconcileSnapshotAfterMessage(msg)) {
+      void this.reconcileSnapshotAfterReviewError();
     }
   }
 

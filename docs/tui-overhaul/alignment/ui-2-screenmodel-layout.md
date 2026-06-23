@@ -33,8 +33,7 @@ Introduce a screen model boundary and stabilize TUI layout regions.
 
 ## Open Questions
 
-- Which existing local `TuiApp` state can move safely without touching input routing?
-  - Current decision: only layout-derived state moved in UI-2; modal/input owner state remains for UI-3.
+None for this PR. UI-2 moved layout-derived state only; modal/input owner state is handled by UI-3.
 
 ## Merge Checklist
 

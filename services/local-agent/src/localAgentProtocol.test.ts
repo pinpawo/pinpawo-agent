@@ -273,6 +273,31 @@ test('parseLocalAgentServerMessage keeps usage on message.completed event when v
   );
 });
 
+test('parseLocalAgentServerMessage keeps review reconciliation error code', () => {
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'error',
+        requestId: 'req-1',
+        message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
+        code: 'review_closed',
+      },
+    })),
+    {
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'error',
+        requestId: 'req-1',
+        message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
+        code: 'review_closed',
+      },
+    },
+  );
+});
+
 test('parseLocalAgentServerMessage accepts studio_response with scheduler metadata', () => {
   assert.deepEqual(
     parseLocalAgentServerMessage(JSON.stringify({

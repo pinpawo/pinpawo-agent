@@ -5,6 +5,7 @@ import {
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import type {
+  LocalAgentErrorCode,
   LocalAgentEvent,
   LocalAgentOperationPhase,
   LocalAgentOperationRaw,
@@ -302,7 +303,27 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
   }
   if (type === 'system.notice' || type === 'error') {
     const message = readString(record, 'message');
-    return message == null ? null : { type, requestId, message };
+    const code = type === 'error' ? readLocalAgentErrorCode(record) : null;
+    return message == null
+      ? null
+      : {
+          type,
+          requestId,
+          message,
+          ...(code ? { code } : {}),
+        };
+  }
+  return null;
+}
+
+function readLocalAgentErrorCode(record: Record<string, unknown>): LocalAgentErrorCode | null {
+  const code = readOptionalString(record, 'code');
+  if (
+    code === 'review_closed'
+    || code === 'review_stale'
+    || code === 'review_wrong_session'
+  ) {
+    return code;
   }
   return null;
 }

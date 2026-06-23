@@ -86,8 +86,14 @@ test('tuiStateReducer updates mode and external editor owner state', () => {
   assert.equal(state.ui.externalEditorOpen, true);
 });
 
-test('tuiStateReducer uses completed message text for final assistant timeline entry', () => {
+test('tuiStateReducer handles streaming chat completion with token usage', () => {
   let state = startRun(initialState(), 'req-1');
+  const usage = {
+    inputTokens: 50,
+    outputTokens: 20,
+    totalTokens: 70,
+    contextWindow: 100,
+  };
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -127,6 +133,7 @@ test('tuiStateReducer uses completed message text for final assistant timeline e
       requestId: 'req-1',
       role: 'assistant',
       text: '最终回答只应该使用 completed 的内容。',
+      usage,
     },
     now: 1300,
     messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
@@ -135,6 +142,7 @@ test('tuiStateReducer uses completed message text for final assistant timeline e
   const session = state.sessions['chat:pet']!;
   assert.equal(session.activeRunId, null);
   assert.equal(state.runs['req-1'], undefined);
+  assert.deepEqual(session.tokenUsage, usage);
   assert.deepEqual(transcriptTimeline(state), [
     ['user', 'hello'],
     ['assistant', '最终回答只应该使用 completed 的内容。'],
@@ -179,6 +187,84 @@ test('tuiStateReducer finalizes completed messages from run registry', () => {
     inputTokens: 1,
     outputTokens: 2,
     totalTokens: 3,
+  });
+});
+
+test('tuiStateReducer finalizes completed messages when the active pointer is missing', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        activeRunId: null,
+      },
+    },
+  };
+
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'completed after pointer cleanup',
+    },
+    now: 1300,
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  assert.equal(state.runs['req-1'], undefined);
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'completed after pointer cleanup'],
+  ]);
+});
+
+test('tuiStateReducer recovers completed messages from timeline ownership when run registry is missing', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = {
+    ...state,
+    runs: {},
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        activeRunId: null,
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'final answer recovered from completed event',
+      usage: {
+        inputTokens: 4,
+        outputTokens: 5,
+        totalTokens: 9,
+      },
+    },
+    now: 1300,
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'final answer recovered from completed event'],
+  ]);
+  assert.deepEqual(state.sessions['chat:pet']?.tokenUsage, {
+    inputTokens: 4,
+    outputTokens: 5,
+    totalTokens: 9,
   });
 });
 
@@ -417,6 +503,52 @@ test('tuiStateReducer displays subagent deltas as session activity outside check
   assert.equal(subagentActivity?.status, 'completed');
 });
 
+test('tuiStateReducer keeps notice and studio progress events outside checkpoint timeline', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'system.notice',
+      requestId: 'req-1',
+      message: '授权已更新',
+    },
+    now: 1100,
+    messageCell: { id: 'notice-1', timestamp: '10:00:01' },
+  });
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'studio.progress',
+      requestId: 'req-1',
+      event: {
+        type: 'tasks_queued',
+        taskCount: 2,
+      },
+    },
+    now: 1200,
+    messageCell: { id: 'studio-progress-1', timestamp: '10:00:02' },
+  });
+
+  assert.deepEqual(selectFocusedNotices(state).slice(-2), [
+    {
+      id: 'notice-1',
+      text: '授权已更新',
+      timestamp: '10:00:01',
+      afterTimelineEntryId: 'message:req-1:user',
+    },
+    {
+      id: 'studio-progress-1',
+      text: '[studio] tasks queued：2 项',
+      timestamp: '10:00:02',
+      afterTimelineEntryId: 'message:req-1:user',
+    },
+  ]);
+  assert.deepEqual(selectFocusedTimeline(state).map((entry) => entry.id), ['message:req-1:user']);
+  assert.deepEqual(transcriptTimeline(state), [['user', 'hello']]);
+});
+
 test('tuiStateReducer stores usage on completed message', () => {
   let state = startRun(initialState(), 'req-1');
   const usage = {
@@ -591,7 +723,7 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
   assert.equal(state.runs['other-req']?.sessionId, 'chat:other');
 });
 
-test('tuiStateReducer clears snapshot activeRunId when the run is terminal', () => {
+test('tuiStateReducer restores completed reconnect output and clears terminal activeRunId', () => {
   const state = tuiStateReducer(initialState('chat:pet'), {
     type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
     source: 'reconnect',
@@ -634,17 +766,33 @@ test('tuiStateReducer clears snapshot activeRunId when the run is terminal', () 
   assert.equal(state.sessions['chat:pet']?.activeRunId, null);
   assert.equal(state.runs['req-done'], undefined);
   assert.equal(selectFocusedActiveRun(state), null);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'done'],
+  ]);
+  assert.deepEqual(state.sessions['chat:pet']?.timeline.map((entry) => entry.id), [
+    'message:user-1',
+    'message:assistant-1',
+  ]);
 });
 
-test('tuiStateReducer clears the previous focused session activeRunId on resume snapshots', () => {
+test('tuiStateReducer resumes a session from snapshot while clearing previous run state', () => {
   let state = startRun(initialState('chat:old'), 'old-req');
+  state = {
+    ...state,
+    ui: {
+      mode: 'studio',
+      studioConversationId: 'conversation-1',
+      externalEditorOpen: true,
+    },
+  };
 
   state = tuiStateReducer(state, {
     type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
     source: 'resume',
     snapshot: {
       sessionId: 'chat:new',
-      kind: 'chat',
+      kind: 'studio',
       timeline: [
         {
           id: 'message:user-new',
@@ -662,6 +810,18 @@ test('tuiStateReducer clears the previous focused session activeRunId on resume 
   assert.equal(state.focusedSessionId, 'chat:new');
   assert.equal(state.runs['old-req'], undefined);
   assert.equal(state.sessions['chat:old']?.activeRunId, null);
+  assert.deepEqual(state.ui, {
+    mode: 'chat',
+    studioConversationId: null,
+    externalEditorOpen: false,
+  });
+  assert.equal(state.sessions['chat:new']?.kind, 'studio');
+  assert.deepEqual(transcriptTimeline(state, 'chat:new'), [
+    ['user', 'resumed'],
+  ]);
+  assert.deepEqual(state.sessions['chat:new']?.timeline.map((entry) => entry.id), [
+    'message:user-new',
+  ]);
 });
 
 test('tuiStateReducer preserves reconnect token usage when snapshot omits usage', () => {
@@ -845,6 +1005,39 @@ test('tuiStateReducer drops late or unknown requestId events', () => {
   assert.equal(selectFocusedTimeline(next).some((entry) => entry.type === 'message' && entry.role === 'assistant'), false);
 });
 
+test('tuiStateReducer ignores late terminal events after local interrupt release', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'run.finish',
+    requestId: 'req-1',
+    statusMessage: '已请求打断',
+    messages: [{
+      id: 'local-release',
+      kind: 'system',
+      text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+    }],
+  });
+
+  const next = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'late final answer',
+    },
+    now: 1200,
+  });
+
+  assert.equal(next, state);
+  assert.equal(selectFocusedActiveRun(next), null);
+  assert.equal(timelineMessageText(next, 'chat:pet', 'req-1:assistant:0'), undefined);
+  assert.deepEqual(transcriptTimeline(next), [['user', 'hello']]);
+  assert.deepEqual(selectFocusedNotices(next).map((notice) => notice.text), [
+    '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+  ]);
+});
+
 test('tuiStateReducer keeps two requestIds from mixing assistant timeline entries', () => {
   let state = initialState('s1');
   state = {
@@ -963,6 +1156,47 @@ test('tuiStateReducer tracks operation lifecycle in timeline without terminal me
   assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'message:op-complete'), false);
 });
 
+test('tuiStateReducer keeps operation display fields when completed event is sparse', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'started',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+        title: 'Shell',
+        target: 'npm test',
+        summary: '执行测试',
+        details: { cwd: '/repo' },
+      },
+    },
+    now: 1200,
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+      },
+    },
+    now: 1400,
+  });
+
+  const completedTimelineEntry = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:operation:tool-1');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.phase : undefined, 'completed');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.title : undefined, 'Shell');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.target : undefined, 'npm test');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.summary : undefined, '执行测试');
+  assert.deepEqual(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.details : undefined, { cwd: '/repo' });
+});
+
 test('tuiStateReducer handles human review and interrupt state', () => {
   let state = startRun(initialState(), 'req-1');
 
@@ -1017,6 +1251,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     id: 'message:review-response',
     type: 'message',
     role: 'user',
+    requestId: 'req-1',
     text: '批准',
     status: 'completed',
   });

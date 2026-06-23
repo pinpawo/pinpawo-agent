@@ -100,6 +100,7 @@ export type MessageCellModel = {
   id: string;
   kind: 'user' | 'assistant' | 'system';
   text: string;
+  requestId?: RunId;
   timestamp?: string;
 };
 
@@ -130,6 +131,7 @@ export type MessageCellDraft = {
   id: string;
   kind: MessageCellModel['kind'];
   text: string;
+  requestId?: RunId;
   timestamp?: string;
 };
 

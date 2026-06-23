@@ -234,6 +234,85 @@ test('TuiLocalServerClient does not synthesize snapshots when history restore fa
   );
 });
 
+test('TuiLocalServerClient adapts recognized legacy snapshot payloads at the compatibility boundary', async () => {
+  const client = new TuiLocalServerClient({
+    port: 3210,
+    fetchImpl: (async (url: RequestInfo | URL) => {
+      const href = String(url);
+      if (href.endsWith('/snapshot')) {
+        return jsonResponse({
+          session: { id: 'chat:legacy', kind: 'chat' },
+          messages: [
+            { role: 'user', text: 'legacy prompt' },
+            { role: 'assistant', text: 'legacy answer' },
+          ],
+          pendingReview: {
+            requestId: 'req-review',
+            reviewId: 'review-1',
+            actor: { petId: 'pet-a' },
+            review: {
+              id: 'review-1',
+              schemaVersion: 1,
+              view: { kind: 'plain', body: 'Approve?' },
+              options: [],
+            },
+          },
+        });
+      }
+      if (href.endsWith('/runtime')) {
+        return jsonResponse({ model: 'gpt-test' });
+      }
+      return jsonResponse({});
+    }) as typeof fetch,
+  });
+
+  const snapshot = await client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'studio' });
+
+  assert.equal(snapshot.sessionId, 'chat:legacy');
+  assert.equal(snapshot.kind, 'chat');
+  assert.deepEqual(snapshot.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
+    ['message', 'legacy prompt'],
+    ['message', 'legacy answer'],
+  ]);
+  assert.equal(snapshot.activeRunId, 'req-review');
+  assert.equal(snapshot.runs[0]?.pendingReview?.review?.id, 'review-1');
+  assert.equal(snapshot.runs[0]?.pendingReview?.petId, 'pet-a');
+});
+
+test('TuiLocalServerClient rejects malformed snapshot payloads instead of synthesizing empty snapshots', async () => {
+  const seenUrls: string[] = [];
+  const client = new TuiLocalServerClient({
+    port: 3210,
+    fetchImpl: (async (url: RequestInfo | URL) => {
+      const href = String(url);
+      seenUrls.push(href);
+      if (href.endsWith('/snapshot')) {
+        return jsonResponse({
+          sessionId: 'chat:pet',
+          kind: 'chat',
+          timeline: 'not-a-timeline',
+          runs: [],
+        });
+      }
+      if (href.endsWith('/runtime')) {
+        return jsonResponse({ model: 'gpt-test' });
+      }
+      if (href.endsWith('/history')) {
+        return jsonResponse({
+          messages: [{ role: 'assistant', text: 'should not be used' }],
+        });
+      }
+      return jsonResponse({});
+    }) as typeof fetch,
+  });
+
+  await assert.rejects(
+    () => client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'chat' }),
+    /invalid local server snapshot payload/,
+  );
+  assert.equal(seenUrls.includes('http://127.0.0.1:3210/history'), false);
+});
+
 test('TuiLocalServerClient treats health errors as unhealthy', async () => {
   const client = new TuiLocalServerClient({
     port: 3210,

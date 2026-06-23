@@ -1,3 +1,4 @@
+import React from 'react';
 import { Box, Text } from 'ink';
 import Markdown from '@inkkit/ink-markdown';
 import { normalizeAssistantMessageMarkdown } from '../render/messageText';

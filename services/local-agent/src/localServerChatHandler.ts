@@ -212,6 +212,7 @@ export class LocalServerChatHandler {
       type: 'error',
       requestId,
       message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
+      code: 'review_closed',
     });
   }
 
@@ -385,6 +386,7 @@ export class LocalServerChatHandler {
         type: 'error',
         requestId: msg.requestId,
         message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
+        code: 'review_stale',
       });
       return;
     }
@@ -400,6 +402,7 @@ export class LocalServerChatHandler {
         type: 'error',
         requestId: msg.requestId,
         message: '请回到发起该 review 的会话再应答。',
+        code: 'review_wrong_session',
       });
       return;
     }
@@ -445,6 +448,7 @@ export class LocalServerChatHandler {
         type: 'error',
         requestId: msg.requestId,
         message: '请回到发起该 review 的会话再打断。',
+        code: 'review_wrong_session',
       });
       return true;
     }

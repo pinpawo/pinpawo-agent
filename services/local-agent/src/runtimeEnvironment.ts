@@ -2,6 +2,11 @@ import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { arch, cpus, homedir, hostname, platform, release, type } from 'node:os';
 import { config } from './config';
 
+export type RuntimeEnvironmentSummaryOptions = {
+  sessionStartedAt?: string;
+  timezone?: string;
+};
+
 function pathStatus(path: string): string {
   if (!path) return 'not configured';
   try {
@@ -20,13 +25,24 @@ function pathStatus(path: string): string {
   }
 }
 
-export function buildRuntimeEnvironmentSummary(workdir = config.workdir): string {
+function resolveTimezone(timezone?: string): string {
+  if (timezone?.trim()) return timezone.trim();
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';
+}
+
+export function buildRuntimeEnvironmentSummary(
+  workdir = config.workdir,
+  options: RuntimeEnvironmentSummaryOptions = {},
+): string {
+  const sessionStartedAt = options.sessionStartedAt?.trim();
   const lines = [
     '[运行环境]',
     `- 操作系统：${type()} ${release()} (${platform()} ${arch()})`,
     `- 主机名：${hostname()}`,
     `- CPU：${cpus().length} cores`,
     `- Node.js：${process.version}`,
+    sessionStartedAt ? `- 会话开始时间：${sessionStartedAt}` : null,
+    sessionStartedAt ? `- 时区：${resolveTimezone(options.timezone)}` : null,
     `- 工作目录：${workdir} (${pathStatus(workdir)})`,
     `- 用户主目录：${homedir()}`,
     process.env.SHELL ? `- Shell：${process.env.SHELL}` : null,

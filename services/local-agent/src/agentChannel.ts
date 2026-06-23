@@ -203,6 +203,10 @@ export function buildLocalChatAgentInput(params: {
   capabilityArtifactStore?: CapabilityArtifactStore;
   /** Effective agent workdir for prompt context and relative tool paths. */
   workdir?: string;
+  /** Fixed session/thread start timestamp used as a stable relative-time anchor. */
+  sessionStartedAt?: string;
+  /** IANA timezone name for interpreting relative dates in this session. */
+  timezone?: string;
 }): AgentChannelSetup {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
@@ -279,7 +283,10 @@ export function buildLocalChatAgentInput(params: {
         dryRun: params.dryRun,
       },
       workdir: params.workdir,
-      runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir),
+      runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir, {
+        sessionStartedAt: params.sessionStartedAt,
+        timezone: params.timezone,
+      }),
       globalReviewPolicy: {
         mode: llmConfig.globalReviewPolicyMode ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
         ...(decisionStructuredOutput ? { structuredOutput: decisionStructuredOutput } : {}),

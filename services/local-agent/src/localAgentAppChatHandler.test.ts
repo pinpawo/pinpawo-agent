@@ -206,6 +206,27 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
   );
 });
 
+test('LocalAgentAppChatHandler keeps app chat session start time stable per user thread', async () => {
+  const { handler, ws, buildInputs } = createHandler();
+
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-1',
+    message: 'hello',
+    userId: 'user-1',
+  });
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-2',
+    message: 'again',
+    userId: 'user-1',
+  });
+
+  assert.equal(buildInputs.length, 2);
+  assert.equal(typeof buildInputs[0]?.sessionStartedAt, 'string');
+  assert.equal(buildInputs[1]?.sessionStartedAt, buildInputs[0]?.sessionStartedAt);
+});
+
 test('LocalAgentAppChatHandler resumes canonical human review responses through cached route', async () => {
   const runRequests: unknown[] = [];
   const review = {

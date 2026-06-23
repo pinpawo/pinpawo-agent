@@ -138,6 +138,9 @@ export class LocalServerTuiSessionService {
     ctx: Awaited<ReturnType<typeof loadAgentContext>>,
     threadId = this.getChatThreadId(deps.actorId),
   ) {
+    const session = Object.values(this.state.sessions)
+      .find((candidate) => candidate.threadId === threadId)
+      ?? this.getActiveSession(deps.actorId);
     return buildLocalChatAgentInput({
       context: ctx,
       userMessage: '',
@@ -151,6 +154,7 @@ export class LocalServerTuiSessionService {
       userCapabilities: deps.userCapabilities,
       capabilityArtifactStore: deps.capabilityArtifactStore,
       workdir: deps.workdir,
+      sessionStartedAt: session.createdAt,
     });
   }
 

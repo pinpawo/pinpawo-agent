@@ -95,6 +95,7 @@ export class LocalAgentAppChatHandler {
   private readonly pendingReviewRoutes = new Map<string, PendingReviewRoute>();
   private readonly consumedPendingReviewRequestIds = new Set<string>();
   private readonly activePendingReviewRequestIds = new Set<string>();
+  private readonly sessionStartedAtByThreadId = new Map<string, string>();
   private sessionResetPromise: Promise<void> = Promise.resolve();
 
   constructor(options: LocalAgentAppChatHandlerOptions) {
@@ -368,6 +369,7 @@ export class LocalAgentAppChatHandler {
 
     const threadId = this.getChatThreadId(userId);
     await this.deleteThread(threadId);
+    this.sessionStartedAtByThreadId.delete(threadId);
     this.clearPendingReviewRoutesForUser(userId);
     console.log(`[local-agent] new session created threadId=${threadId}`);
   }
@@ -446,24 +448,34 @@ export class LocalAgentAppChatHandler {
   }
 
   private buildSetup(ctx: AgentContext, userMessage: string, userId: string): AgentChannelSetup {
+    const threadId = this.getChatThreadId(userId);
     return this.buildChatSetup({
       context: ctx,
       userMessage,
       llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
       toolkits: [...this.getPluginToolkits(), ...this.getLocalToolkits()],
       extraCapabilities: this.getLocalCapabilities(),
-      threadId: this.getChatThreadId(userId),
+      threadId,
       interfaceKind: 'app-chat',
       dryRun: false,
       checkpoint: this.checkpoint,
       userCapabilities: this.getUserCapabilities(),
       capabilityArtifactStore: this.getCapabilityArtifactStore(),
       workdir: this.getWorkdir(),
+      sessionStartedAt: this.getSessionStartedAt(threadId),
     });
   }
 
   private getChatThreadId(userId: string) {
     return buildAppChatThreadId({ petId: this.getActorId(), userId });
+  }
+
+  private getSessionStartedAt(threadId: string) {
+    const existing = this.sessionStartedAtByThreadId.get(threadId);
+    if (existing) return existing;
+    const sessionStartedAt = new Date().toISOString();
+    this.sessionStartedAtByThreadId.set(threadId, sessionStartedAt);
+    return sessionStartedAt;
   }
 
   private canUseSocket(ws: WebSocket) {

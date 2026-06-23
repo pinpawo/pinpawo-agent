@@ -228,6 +228,22 @@ test('buildLocalChatAgentInput uses caller-provided workdir', () => {
   assert.doesNotMatch(setup.input.runtimeEnvironment ?? '', /进程 cwd/);
 });
 
+test('buildLocalChatAgentInput uses caller-provided stable session time', () => {
+  const params = {
+    context: createContext(),
+    userMessage: 'hello',
+    workdir: '/tmp/pinpawo-chat-workdir',
+    sessionStartedAt: '2026-06-23T10:30:00+08:00',
+    timezone: 'Asia/Shanghai',
+  };
+  const first = buildLocalChatAgentInput(params);
+  const second = buildLocalChatAgentInput(params);
+
+  assert.equal(first.input.runtimeEnvironment, second.input.runtimeEnvironment);
+  assert.match(first.input.runtimeEnvironment ?? '', /会话开始时间：2026-06-23T10:30:00\+08:00/);
+  assert.match(first.input.runtimeEnvironment ?? '', /时区：Asia\/Shanghai/);
+});
+
 test('buildLocalChatAgentInput passes model structured output strategy to explore', async () => {
   const setup = buildLocalChatAgentInput({
     context: createContext(),

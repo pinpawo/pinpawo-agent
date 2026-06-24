@@ -74,10 +74,25 @@ export {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
   isOrchestratorInternalAiStreamNode,
+  streamOrchestratorGraphWithTokenUsage,
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,
   validateUniqueToolNames,
 } from './agent/createAgentRuntime';
+export {
+  isTokenUsageSnapshot,
+  parseTokenUsageSnapshot,
+  readLlmResultTokenUsage,
+} from './agent/tokenUsage';
+export type {
+  OrchestratorTokenUsageStream,
+} from './agent/createAgentRuntime';
+export type {
+  ProviderTokenUsage,
+  TokenUsageScope,
+  TokenUsageSnapshot,
+  TokenUsageSource,
+} from './agent/tokenUsage';
 export {
   inferStructuredOutputMethod,
   invokeStructuredOutput,

@@ -509,7 +509,10 @@ function finishRun(
   }
 
   const runtimeContextWindow = stateWithRunRemoved.sessions[sessionId]?.runtime.contextWindow;
-  const nextTokenUsage: TokenUsageModel = tokenUsage.contextWindow === undefined && runtimeContextWindow !== undefined
+  const shouldInferContextWindow = tokenUsage.scope !== 'run'
+    && tokenUsage.contextWindow === undefined
+    && runtimeContextWindow !== undefined;
+  const nextTokenUsage: TokenUsageModel = shouldInferContextWindow
     ? { ...tokenUsage, contextWindow: runtimeContextWindow }
     : tokenUsage;
   const stateWithRuntimeUpdated = nextTokenUsage.contextWindow === undefined
@@ -546,7 +549,10 @@ function applyRecoveredTerminalUsage(
   if (!tokenUsage) return state;
   const session = state.sessions[sessionId];
   if (!session) return state;
-  const nextTokenUsage = tokenUsage.contextWindow === undefined && session.runtime.contextWindow !== undefined
+  const shouldInferContextWindow = tokenUsage.scope !== 'run'
+    && tokenUsage.contextWindow === undefined
+    && session.runtime.contextWindow !== undefined;
+  const nextTokenUsage = shouldInferContextWindow
     ? { ...tokenUsage, contextWindow: session.runtime.contextWindow }
     : tokenUsage;
   return {

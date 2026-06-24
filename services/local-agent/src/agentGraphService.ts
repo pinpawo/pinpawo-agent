@@ -3,8 +3,10 @@ import {
   createOrchestratorGraph,
   isHumanReviewInterruptPayload,
   runAgent,
+  streamOrchestratorGraphWithTokenUsage,
   type AgentRunResult,
   type OrchestratorGraph,
+  type OrchestratorTokenUsageStream,
   type OrchestratorStateType,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
@@ -47,6 +49,8 @@ export type LocalAgentGraphThreadState = {
   pendingHumanReview: LocalAgentGraphPendingHumanReview | null;
   hasPendingContinuation: boolean;
 };
+
+export type LocalAgentGraphStream = OrchestratorTokenUsageStream;
 
 function readSnapshotMessages(snapshot: unknown): BaseMessage[] {
   const values = (snapshot as { values?: { messages?: unknown } } | null)?.values;
@@ -111,9 +115,13 @@ export class LocalAgentGraphService {
     return runAgent(this.getGraph(setup), setup.input);
   }
 
-  async *stream(setup: AgentChannelSetup, inputOverride?: unknown): AsyncGenerator<unknown> {
+  stream(
+    setup: AgentChannelSetup,
+    inputOverride?: unknown,
+  ): LocalAgentGraphStream {
     const graph = this.getGraph(setup);
-    const stream = await graph.stream(
+    return streamOrchestratorGraphWithTokenUsage(
+      graph,
       inputOverride ?? buildOrchestratorTurnInput(setup.input.messages),
       {
         signal: setup.input.signal,
@@ -121,9 +129,6 @@ export class LocalAgentGraphService {
         streamMode: ['messages', 'values'],
       },
     );
-    for await (const chunk of stream as AsyncIterable<unknown>) {
-      yield chunk;
-    }
   }
 
   async invokeState(setup: AgentChannelSetup, inputOverride?: unknown): Promise<OrchestratorStateType> {

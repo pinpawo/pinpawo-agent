@@ -1,5 +1,5 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
-import type { RunnableConfig } from '@langchain/core/runnables';
+import { mergeConfigs, type RunnableConfig } from '@langchain/core/runnables';
 import { StateGraph, START, END, interrupt } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import type { AgentCapability } from '../types/capability';
@@ -15,6 +15,7 @@ import {
   OrchestratorState,
   type OrchestratorStateType,
 } from './orchestrator/state';
+import { LlmTokenUsageAccumulator, type TokenUsageSnapshot } from './tokenUsage';
 import {
   compactOrchestratorMessages,
   isContextCompactionMessage,
@@ -1346,3 +1347,28 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 }
 
 export type OrchestratorGraph = ReturnType<typeof createOrchestratorGraph>;
+
+export type OrchestratorTokenUsageStream = AsyncIterable<unknown> & {
+  readTokenUsage: (contextWindow?: number) => TokenUsageSnapshot | null;
+};
+
+export function streamOrchestratorGraphWithTokenUsage(
+  graph: OrchestratorGraph,
+  input: Parameters<OrchestratorGraph['stream']>[0],
+  options?: Parameters<OrchestratorGraph['stream']>[1],
+): OrchestratorTokenUsageStream {
+  const tokenUsage = new LlmTokenUsageAccumulator();
+  const stream = (async function* streamWithTokenUsage() {
+    const trackedOptions = mergeConfigs(
+      options as RunnableConfig | undefined,
+      { callbacks: [tokenUsage.callbackHandler] },
+    ) as Parameters<OrchestratorGraph['stream']>[1];
+    const innerStream = await graph.stream(input, trackedOptions);
+    for await (const chunk of innerStream as AsyncIterable<unknown>) {
+      yield chunk;
+    }
+  })();
+  return Object.assign(stream, {
+    readTokenUsage: (contextWindow?: number) => tokenUsage.readUsage(contextWindow),
+  });
+}

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import { isTokenUsageSnapshot, type ReviewSpec } from '@pinpawo/pet-agent';
 import {
   buildLocalServerAuthHeaders,
   readLocalServerAuthToken,
@@ -599,11 +599,4 @@ function isRunPhase(value: unknown): value is TuiCoreRunSnapshot['phase'] {
 
 function isPendingReviewStatus(value: unknown): value is NonNullable<TuiCoreRunSnapshot['pendingReview']>['status'] {
   return value === 'waiting' || value === 'answered' || value === 'interrupted';
-}
-
-function isTokenUsageSnapshot(value: unknown): value is TuiCoreSessionSnapshot['tokenUsage'] {
-  return isRecord(value)
-    && typeof value.inputTokens === 'number'
-    && typeof value.outputTokens === 'number'
-    && typeof value.totalTokens === 'number';
 }

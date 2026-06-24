@@ -1,4 +1,4 @@
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
 
 export type LocalAgentEvent =
   | LocalAgentMessageDeltaEvent
@@ -28,13 +28,7 @@ export type LocalAgentMessageCompletedEvent = {
   requestId: string;
   role: 'assistant';
   text: string;
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    contextWindow?: number;
-    updatedAt?: string;
-  };
+  usage?: TokenUsageSnapshot;
   metadata?: {
     mood?: string | null;
     topic?: string | null;

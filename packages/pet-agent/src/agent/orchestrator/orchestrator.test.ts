@@ -605,39 +605,6 @@ test('finish decision emits no reply itself and routes to the dedicated answer n
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'final reply from answer node');
 });
 
-test('ask_user decision replies inline and skips the answer node', async () => {
-  let answerCalled = false;
-  const model = {
-    invoke: async () => {
-      answerCalled = true;
-      return new AIMessage('should not be used');
-    },
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'ask_user', question: '你想对比哪两个模型？' }),
-    }),
-  } as unknown as AgentModels['act'];
-
-  const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
-    actor: testActor,
-  });
-  const input = buildOrchestratorRunInput([new HumanMessage('帮我做个对比')]);
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'ask-user-inline',
-      actor: testActor,
-      capabilities: [],
-      tools: [],
-    },
-  });
-
-  assert.equal(answerCalled, false, 'ask_user must not invoke the answer node');
-  assert.equal(mainConversationMessages(state.messages).at(-1)?.content, '你想对比哪两个模型？');
-});
-
 test('limit-reached progress announce lets model choose the same capability delegation', async () => {
   let capabilityRunCount = 0;
   let decisionCallCount = 0;

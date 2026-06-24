@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCapabilityActionName,
+  buildOrchestrationDecisionOutputInstruction,
   buildOrchestrationDecisionSchema,
   parseAction,
 } from './schemas';
@@ -50,6 +51,26 @@ test('schema enum allows static actions when no candidates', () => {
   // legacy enum values are gone
   assert.equal(schema.safeParse({ action: 'human_review' }).success, false);
   assert.equal(schema.safeParse({ action: 'delegate_capability' }).success, false);
+});
+
+test('schema can exclude ask_user for user intent decisions', () => {
+  const schema = buildOrchestrationDecisionSchema({
+    capabilityCandidates: [{ name: 'browser' }],
+    includeAskUser: false,
+  });
+
+  assert.equal(schema.safeParse({ action: 'finish' }).success, true);
+  assert.equal(schema.safeParse({ action: 'delegate_general', task: 't' }).success, true);
+  assert.equal(schema.safeParse({ action: 'delegate_capability.browser', task: 't' }).success, true);
+  assert.equal(schema.safeParse({ action: 'ask_user', question: '补充什么？' }).success, false);
+});
+
+test('output instruction omits ask_user when disabled', () => {
+  const instruction = buildOrchestrationDecisionOutputInstruction({ includeAskUser: false });
+
+  assert.doesNotMatch(instruction, /ask_user/);
+  assert.match(instruction, /需要直接向用户补充、澄清、确认/);
+  assert.match(instruction, /question 本阶段不使用/);
 });
 
 test('schema strips legacy fields like capability/needs_human_review', () => {

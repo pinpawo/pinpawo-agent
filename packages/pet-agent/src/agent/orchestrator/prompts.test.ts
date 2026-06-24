@@ -11,6 +11,7 @@ import {
   buildPreparedRequestContext,
   buildSubagentAnnounceContext,
   buildUserIntentDecisionInput,
+  buildUserIntentDecisionSystemPrompt,
 } from './prompts';
 
 function recentMessages(count: number) {
@@ -105,6 +106,23 @@ test('user intent decision input wraps context as xml-ish blocks', () => {
   assert.match(input, /<user_request>/);
   assert.match(input, /<!\[CDATA\[\n继续推进\n\s+\]\]>/);
   assert.match(input, /<instruction>请根据以上上下文判断当前用户请求的下一步。<\/instruction>/);
+});
+
+test('user intent prompt routes clarification through finish instead of ask_user', () => {
+  const prompt = buildUserIntentDecisionSystemPrompt({
+    actor: testActor,
+    runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
+    targetsContext: '<decision_targets></decision_targets>',
+    capabilityDecisionState: 'unavailable',
+    outputInstruction: [
+      'action 取值：',
+      '- finish：无需委派，或需要直接向用户补充、澄清、确认。',
+      '- delegate_general：委派给通用工具执行器。',
+    ].join('\n'),
+  });
+
+  assert.match(prompt, /选择 finish 交给回复节点处理/);
+  assert.doesNotMatch(prompt, /ask_user/);
 });
 
 test('capability discovery request context also receives compaction summaries', () => {

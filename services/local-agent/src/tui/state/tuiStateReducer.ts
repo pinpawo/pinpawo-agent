@@ -209,6 +209,7 @@ function appendAssistantTimelineDelta(
   session: SessionModel,
   requestId: string,
   token: string,
+  timestamp?: string,
 ): { session: SessionModel; entryId: string } {
   const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
   if (streamingIndex >= 0) {
@@ -216,6 +217,7 @@ function appendAssistantTimelineDelta(
     const entry: AgentMessageEntry = {
       ...current,
       text: current.text + token,
+      ...(timestamp ? { updatedAt: timestamp } : {}),
     };
     return {
       session: {
@@ -237,6 +239,7 @@ function appendAssistantTimelineDelta(
     requestId,
     text: token,
     status: 'streaming',
+    ...(timestamp ? { createdAt: timestamp } : {}),
   };
   return {
     session: {
@@ -251,6 +254,7 @@ function finalizeAssistantTimelineEntry(
   session: SessionModel,
   requestId: string,
   text: string,
+  timestamp?: string,
 ): { session: SessionModel; entryId?: string } {
   if (!text) return { session };
   const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
@@ -260,6 +264,7 @@ function finalizeAssistantTimelineEntry(
       ...current,
       text,
       status: 'completed',
+      ...(timestamp ? { updatedAt: timestamp } : {}),
     };
     return {
       session: {
@@ -281,6 +286,7 @@ function finalizeAssistantTimelineEntry(
     requestId,
     text,
     status: 'completed',
+    ...(timestamp ? { createdAt: timestamp } : {}),
   };
   return {
     session: {
@@ -291,19 +297,43 @@ function finalizeAssistantTimelineEntry(
   };
 }
 
+function settleStreamingAssistantTimelineEntry(
+  session: SessionModel,
+  requestId: string,
+): SessionModel {
+  const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
+  if (streamingIndex < 0) return session;
+  const current = session.timeline[streamingIndex] as AgentMessageEntry;
+  const entry: AgentMessageEntry = {
+    ...current,
+    status: 'completed',
+  };
+  return {
+    ...session,
+    timeline: [
+      ...session.timeline.slice(0, streamingIndex),
+      entry,
+      ...session.timeline.slice(streamingIndex + 1),
+    ],
+  };
+}
+
 function upsertOperationTimelineEntry(
   session: SessionModel,
   event: LocalAgentOperationEvent,
   now: number,
 ): { session: SessionModel; entry: AgentOperationEntry } {
+  const sessionWithSettledAssistant = event.phase === 'started'
+    ? settleStreamingAssistantTimelineEntry(session, event.requestId)
+    : session;
   const id = timelineEntryIdFromOperationEvent(event);
-  const previous = session.timeline.find((entry): entry is AgentOperationEntry =>
+  const previous = sessionWithSettledAssistant.timeline.find((entry): entry is AgentOperationEntry =>
     entry.type === 'operation' && entry.id === id);
   const entry = operationTimelineEntryFromEvent(event, now, previous);
   return {
     session: {
-      ...session,
-      timeline: appendOrUpdateTimelineEntry(session.timeline, entry),
+      ...sessionWithSettledAssistant,
+      timeline: appendOrUpdateTimelineEntry(sessionWithSettledAssistant.timeline, entry),
     },
     entry,
   };
@@ -590,6 +620,7 @@ function finishRecoveredTimelineRequest(
 function applyAssistantMessageEvent(
   state: TuiState,
   event: Extract<LocalAgentEvent, { type: 'message.delta' | 'message.completed' }>,
+  messageCell?: MessageCellMeta,
 ) {
   if (event.type === 'message.delta') {
     const token = event.text;
@@ -602,6 +633,7 @@ function applyAssistantMessageEvent(
         currentSession,
         event.requestId,
         token,
+        messageCell?.timestamp,
       );
       assistantEntryId = entryId;
       return sessionWithTimeline;
@@ -633,6 +665,7 @@ function applyAssistantMessageEvent(
       currentSession,
       event.requestId,
       finalText,
+      messageCell?.timestamp,
     );
     return sessionWithTimeline;
   });
@@ -1085,7 +1118,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     case 'event.received': {
       const event = action.event;
       if (event.type === 'message.delta' || event.type === 'message.completed') {
-        return applyAssistantMessageEvent(state, event);
+        return applyAssistantMessageEvent(state, event, action.messageCell);
       }
       const run = state.runs[event.requestId];
       if (!run) return state;

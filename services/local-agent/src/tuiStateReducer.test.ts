@@ -105,6 +105,7 @@ test('tuiStateReducer handles streaming chat completion with token usage', () =>
       text: '我先检查一下仓库状态。',
     },
     now: 1100,
+    messageCell: { id: 'assistant-delta-1', timestamp: '10:00:01' },
   });
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -115,6 +116,7 @@ test('tuiStateReducer handles streaming chat completion with token usage', () =>
       text: '检查完毕，下面汇总。',
     },
     now: 1200,
+    messageCell: { id: 'assistant-delta-2', timestamp: '10:00:02' },
   });
 
   const activeRun = selectFocusedActiveRun(state);
@@ -137,13 +139,20 @@ test('tuiStateReducer handles streaming chat completion with token usage', () =>
       usage,
     },
     now: 1300,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:03' },
   });
 
   const session = state.sessions['chat:pet']!;
   assert.equal(session.activeRunId, null);
   assert.equal(state.runs['req-1'], undefined);
   assert.deepEqual(session.tokenUsage, usage);
+  assert.deepEqual(session.timeline.map((entry) => (
+    entry.type === 'message' && entry.role === 'assistant'
+      ? [entry.createdAt, entry.updatedAt]
+      : []
+  )).filter((item) => item.length > 0), [
+    ['10:00:01', '10:00:03'],
+  ]);
   assert.deepEqual(transcriptTimeline(state), [
     ['user', 'hello'],
     ['assistant', '最终回答只应该使用 completed 的内容。'],
@@ -1190,6 +1199,83 @@ test('tuiStateReducer tracks operation lifecycle in timeline without terminal me
   assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.phase : undefined, 'completed');
   assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.summary : undefined, 'ok');
   assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'message:op-complete'), false);
+});
+
+test('tuiStateReducer keeps final assistant output after operations', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.delta',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '我先看一下文件。',
+    },
+    now: 1100,
+    messageCell: { id: 'assistant-delta-1', timestamp: '10:00:01' },
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'started',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+        title: 'Shell',
+        target: 'python3 sort_demo.py --dataset random',
+      },
+    },
+    now: 1200,
+    messageCell: { id: 'operation-started', timestamp: '10:00:02' },
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+        title: 'Shell',
+        target: 'python3 sort_demo.py --dataset random',
+        summary: '完成',
+      },
+    },
+    now: 1300,
+    messageCell: { id: 'operation-completed', timestamp: '10:00:03' },
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '文件检查完了，这是结果。',
+    },
+    now: 1400,
+    messageCell: { id: 'assistant-1', timestamp: '10:00:04' },
+  });
+
+  assert.deepEqual(selectFocusedTimeline(state).map((entry) => entry.id), [
+    'message:req-1:user',
+    'req-1:assistant:0',
+    'req-1:operation:tool-1',
+    'req-1:assistant:1',
+  ]);
+  assert.deepEqual(selectFocusedTimeline(state).map((entry) => (
+    entry.type === 'message'
+      ? [entry.type, entry.role, entry.status, entry.createdAt, entry.updatedAt, entry.text]
+      : [entry.type, entry.phase, entry.summary]
+  )), [
+    ['message', 'user', 'completed', '10:00:00', undefined, 'hello'],
+    ['message', 'assistant', 'completed', '10:00:01', undefined, '我先看一下文件。'],
+    ['operation', 'completed', '完成'],
+    ['message', 'assistant', 'completed', '10:00:04', undefined, '文件检查完了，这是结果。'],
+  ]);
 });
 
 test('tuiStateReducer keeps operation display fields when completed event is sparse', () => {

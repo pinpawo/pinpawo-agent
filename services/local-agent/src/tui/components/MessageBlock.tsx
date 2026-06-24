@@ -29,12 +29,12 @@ export function MessageBlock(props: {
     const label = `${timestamp} 你`;
     return (
       <Box flexDirection="column" marginBottom={1}>
-        <Text color="cyan" bold>{label}</Text>
+        <Text color="green" bold>{label}</Text>
         <Box marginLeft={1}>
-          <Text color="cyan" dimColor>&gt; </Text>
+          <Text color="green" dimColor>&gt; </Text>
           <Box flexDirection="column" width={contentWidth}>
             {props.entry.text.split('\n').map((line, index) => (
-              <Text key={`${props.entry.timestamp ?? 'user'}-${index}`} color="cyan">
+              <Text key={`${props.entry.timestamp ?? 'user'}-${index}`} color="green">
                 {line || ' '}
               </Text>
             ))}

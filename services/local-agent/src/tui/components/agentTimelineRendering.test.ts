@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import Markdown from '@inkkit/ink-markdown';
+import { Text } from 'ink';
 import React, { Children, isValidElement } from 'react';
 import stringWidth from 'string-width';
 import { AgentTimeline } from './AgentTimeline';
@@ -288,6 +289,30 @@ test('AgentTimeline preserves assistant and operation entry order', () => {
   ]);
 });
 
+test('MessageBlock renders user messages in green', () => {
+  const element = MessageBlock({
+    entry: {
+      kind: 'user',
+      timestamp: '10:00:00',
+      text: '请更新 timeline 颜色',
+    },
+    petName: '小派',
+    width: 80,
+  });
+
+  const textNodes = findElementsByType(element, Text);
+
+  assert.ok(textNodes.some((node) =>
+    node.props.children === '[10:00:00] 你' && node.props.color === 'green'
+  ));
+  assert.ok(textNodes.some((node) =>
+    node.props.children === '> ' && node.props.color === 'green' && node.props.dimColor
+  ));
+  assert.ok(textNodes.some((node) =>
+    node.props.children === '请更新 timeline 颜色' && node.props.color === 'green'
+  ));
+});
+
 test('MessageBlock renders assistant content through markdown', () => {
   const element = MessageBlock({
     entry: {
@@ -359,6 +384,21 @@ function findElementByType(
     if (match) return match;
   }
   return null;
+}
+
+function findElementsByType(
+  node: React.ReactNode,
+  type: React.ElementType,
+): Array<React.ReactElement<Record<string, unknown>>> {
+  if (!isValidElement(node)) return [];
+  const matches = node.type === type
+    ? [node as React.ReactElement<Record<string, unknown>>]
+    : [];
+  const children = Children.toArray((node.props as { children?: React.ReactNode }).children);
+  return [
+    ...matches,
+    ...children.flatMap((child) => findElementsByType(child, type)),
+  ];
 }
 
 function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEntry {

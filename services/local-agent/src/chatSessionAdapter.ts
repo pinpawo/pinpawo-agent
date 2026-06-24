@@ -21,25 +21,8 @@ import {
 import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
-const CHARS_PER_TOKEN = 4;
 const STALE_RESUME_MESSAGE = '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。';
 const PENDING_REVIEW_TEXT_NOTICE = '当前有待确认的 review，请先通过确认面板应答；这条文本没有作为新消息发送。';
-
-function estimateTextTokens(text: string) {
-  return Math.max(0, Math.ceil(text.length / CHARS_PER_TOKEN));
-}
-
-function estimateMessageTokens(message: BaseMessage) {
-  const content = readFinalMessageText(message);
-  const metadata = message.additional_kwargs && Object.keys(message.additional_kwargs).length > 0
-    ? JSON.stringify(message.additional_kwargs)
-    : '';
-  return estimateTextTokens(`${message._getType()}\n${content}\n${metadata}`);
-}
-
-function estimateMessagesTokens(messages: BaseMessage[]) {
-  return messages.reduce((total, message) => total + estimateMessageTokens(message), 0);
-}
 
 export type ChatSessionResult =
   | { status: 'completed'; reply: string }
@@ -213,8 +196,10 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
+  let streamRun: ReturnType<LocalAgentGraphService['stream']> | null = null;
   try {
-    for await (const chunk of graphService.stream(setup, graphInput)) {
+    streamRun = graphService.stream(setup, graphInput);
+    for await (const chunk of streamRun) {
       if (!isCurrent()) {
         finishInterrupted();
         return { status: 'interrupted' };
@@ -305,26 +290,14 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     : '';
   const checkpointFinalReply = readFinalMessageText(finalThreadState.messages.at(-1) ?? {});
   const finalReply = streamedFinalReply || checkpointFinalReply;
-  const finalTokens = estimateMessagesTokens(finalThreadState.messages);
-  const inputTokens = estimateMessagesTokens([
-    ...initialThreadState.messages,
-    ...setup.input.messages,
-  ]);
-  const outputTokens = Math.max(0, finalTokens - inputTokens);
   const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
-  const finalUsage = {
-    inputTokens,
-    outputTokens,
-    totalTokens: finalTokens,
-    contextWindow,
-    updatedAt: new Date().toISOString(),
-  };
+  const finalUsage = streamRun?.readTokenUsage?.(contextWindow) ?? null;
   emitEvent({
     type: 'message.completed',
     requestId,
     role: 'assistant',
     text: finalReply,
-    usage: finalUsage,
+    ...(finalUsage ? { usage: finalUsage } : {}),
     metadata: {
       mood: null,
       topic: null,

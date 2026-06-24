@@ -1,4 +1,4 @@
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
 
 export const TUI_CORE_CONTRACT_VERSION = 1 as const;
 
@@ -111,13 +111,7 @@ export type TuiCoreRuntimeSnapshot = {
   contextWindow?: number;
 };
 
-export type TuiCoreTokenUsageSnapshot = {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  contextWindow?: number;
-  updatedAt?: string;
-};
+export type TuiCoreTokenUsageSnapshot = TokenUsageSnapshot;
 
 export type TuiCoreSessionSnapshot = {
   sessionId: string;

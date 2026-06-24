@@ -94,11 +94,22 @@ export const TUI_TEXT = {
   statusErrorRecovered: '出错，已恢复输入',
   runtimeInfoLine: (model: string, cwd: string, studioConfigPath: string, studioConfigSource: string, contextWindow: string) =>
     `模型: ${model} · 工作目录: ${cwd} · Studio 配置: ${studioConfigPath} (${studioConfigSource}) · 上下文窗口上限: ${contextWindow}`,
-  tokenUsageLine: (inputTokens: string, outputTokens: string, totalTokens: string, contextWindow: string | null, ratio: string | null) => (
-    ratio
-      ? `Token 用量：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens} (${ratio}，上下文上限 ${contextWindow})`
-      : `Token 用量：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens}`
-  ),
+  tokenUsageLine: (
+    inputTokens: string,
+    outputTokens: string,
+    totalTokens: string,
+    contextWindow: string | null,
+    ratio: string | null,
+    source: 'provider' | undefined,
+    scope: 'run' | undefined,
+  ) => {
+    const label = source === 'provider' ? 'API Token 用量' : 'Token 用量';
+    const scopeLabel = scope === 'run' ? '本轮累计' : null;
+    const prefix = scopeLabel ? `${label}（${scopeLabel}）` : label;
+    return ratio
+      ? `${prefix}：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens} (${ratio}，上下文上限 ${contextWindow})`
+      : `${prefix}：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens}`;
+  },
   interrupted: '[interrupted]',
   errorLine: (message: string) => `出错：${message}`,
   studioEmptyTurn: (outcome: 'done' | 'stopped') => `[studio] turn ${outcome} (无最终输出)`,

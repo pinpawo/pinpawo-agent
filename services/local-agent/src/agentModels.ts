@@ -21,6 +21,7 @@ export function buildLocalAgentModels(llmConfig: AgentLlmConfig): AgentModels {
       maxRetries: llmConfig.maxRetries ?? 2,
       apiKey: llmConfig.apiKey,
       streaming: requiresLlmStreaming(model),
+      streamUsage: true,
       modelKwargs,
       configuration: {
         baseURL: llmConfig.baseUrl,

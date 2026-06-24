@@ -1,4 +1,4 @@
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
 import type { TuiCoreSessionSnapshotLoadedAction } from '../contracts/tuiCoreContract';
 import type { AgentTimelineEntry } from '../timeline/agentTimeline';
@@ -88,13 +88,7 @@ export type TuiRunModel = ActiveRunModel & {
   kind: SessionModel['kind'];
 };
 
-export type TokenUsageModel = {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  contextWindow?: number;
-  updatedAt?: string;
-};
+export type TokenUsageModel = TokenUsageSnapshot;
 
 export type MessageCellModel = {
   id: string;

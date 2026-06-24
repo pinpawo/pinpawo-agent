@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
@@ -10,16 +10,6 @@ import type { LocalAgentEvent } from './events/localAgentEvent';
 import type { LocalAgentGraphService } from './agentGraphService';
 import { runChatSession } from './chatSessionAdapter';
 import { readFinalMessageText, type StreamToolsPayload } from './agentStreamEvents';
-
-function estimateTestTokens(messages: BaseMessage[]) {
-  return messages.reduce((total, message) => {
-    const content = readFinalMessageText(message);
-    const metadata = message.additional_kwargs && Object.keys(message.additional_kwargs).length > 0
-      ? JSON.stringify(message.additional_kwargs)
-      : '';
-    return total + Math.max(0, Math.ceil(`${message._getType()}\n${content}\n${metadata}`.length / 4));
-  }, 0);
-}
 
 test('runChatSession uses onToolEvent as the only operation source', async () => {
   const emittedTools: StreamToolsPayload[] = [];
@@ -618,7 +608,7 @@ test('runChatSession does not map pending review free text to review response', 
   );
 });
 
-test('runChatSession emits token usage in completed event', async () => {
+test('runChatSession omits token usage when provider usage is unavailable', async () => {
   const emittedEvents: unknown[] = [];
   const promptMessages = [
     new HumanMessage('历史问题'),
@@ -691,9 +681,90 @@ test('runChatSession emits token usage in completed event', async () => {
     .find((message): message is LocalAgentEvent => message.type === 'message.completed') ?? null;
   assert.equal(completed?.type, 'message.completed');
   assert.equal(completed?.role, 'assistant');
-  assert.equal(completed.usage?.contextWindow, 32000);
-  assert.equal(completed.usage?.inputTokens, estimateTestTokens([...snapshotMessages, ...promptMessages]));
-  assert.equal(completed.usage?.totalTokens, estimateTestTokens(finalMessages));
-  assert.equal(typeof completed.usage?.outputTokens, 'number');
-  assert.equal(completed.usage?.outputTokens >= 0, true);
+  assert.equal(completed.usage, undefined);
+});
+
+test('runChatSession emits provider token usage exposed by graph stream', async () => {
+  const emittedEvents: unknown[] = [];
+  const promptMessages = [
+    new HumanMessage('你是谁？'),
+  ];
+  const finalMessages = [
+    ...promptMessages,
+    new AIMessage('这里是回执。'),
+  ];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {
+      contextWindowTokens: 64000,
+    },
+    input: {
+      messages: promptMessages,
+    },
+  } as unknown as AgentChannelSetup;
+
+  let readThreadStateCalls = 0;
+  const graphService = {
+    async readThreadState() {
+      readThreadStateCalls += 1;
+      return {
+        messages: readThreadStateCalls === 1 ? [] : finalMessages,
+        pendingHumanReview: null,
+        hasPendingContinuation: false,
+      };
+    },
+    stream() {
+      const stream = (async function* () {
+        yield [
+          'values',
+          {
+            messages: finalMessages,
+          },
+        ];
+      })();
+      return Object.assign(stream, {
+        readTokenUsage: (contextWindow?: number) => ({
+          inputTokens: 123,
+          outputTokens: 45,
+          totalTokens: 168,
+          ...(contextWindow !== undefined ? { contextWindow } : {}),
+          updatedAt: new Date().toISOString(),
+          source: 'provider' as const,
+          scope: 'run' as const,
+        }),
+      });
+    },
+  };
+
+  await runChatSession({
+    request: {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: '你是谁？',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  const completed = (emittedEvents as LocalAgentEvent[])
+    .find((message): message is LocalAgentEvent => message.type === 'message.completed') ?? null;
+  assert.equal(completed?.type, 'message.completed');
+  assert.deepEqual(completed.usage, {
+    inputTokens: 123,
+    outputTokens: 45,
+    totalTokens: 168,
+    contextWindow: 64000,
+    updatedAt: completed.usage?.updatedAt,
+    source: 'provider',
+    scope: 'run',
+  });
+  assert.equal(typeof completed.usage?.updatedAt, 'string');
 });

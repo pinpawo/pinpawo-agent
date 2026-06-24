@@ -273,6 +273,9 @@ function fallback(value: string | undefined) {
 function formatContext(session: SessionModel | null) {
   const usage = session?.tokenUsage;
   const contextWindow = usage?.contextWindow ?? session?.runtime.contextWindow;
+  if (usage?.scope === 'run') {
+    return `${formatCount(usage.totalTokens)} tokens/run`;
+  }
   if (usage && contextWindow) {
     return `${formatCount(usage.totalTokens)}/${formatCount(contextWindow)} (${formatRatio(usage.totalTokens, contextWindow)})`;
   }

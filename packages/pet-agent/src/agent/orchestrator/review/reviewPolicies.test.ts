@@ -57,9 +57,11 @@ test('localMutation builds ReviewSpec from operation metadata', async () => {
 
   const review = await policy.request(reviewContext());
 
-  assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '写文件');
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', /Target: \/repo\/notes\.md/);
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', /createDirs/);
+  const view = review && 'schemaVersion' in review ? review.view : null;
+  assert.ok(view && view.kind === 'plain');
+  assert.equal(view.title, '写文件');
+  assert.match(view.body, /Target: \/repo\/notes\.md/);
+  assert.match(view.body, /createDirs/);
   assert.deepEqual(
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
     ['approve', 'reject', 'respond'],

@@ -288,6 +288,27 @@ export interface UpdateResult {
   chunks: AppliedChunk[];
 }
 
+function buildReplacementLines(chunk: PatchChunk, matchedLines: string[]) {
+  let oldOffset = 0;
+  const replacement: string[] = [];
+
+  for (const line of chunk.lines) {
+    if (line.kind === 'added') {
+      replacement.push(line.text);
+      continue;
+    }
+    if (line.kind === 'removed') {
+      oldOffset += 1;
+      continue;
+    }
+
+    replacement.push(matchedLines[oldOffset] ?? line.text);
+    oldOffset += 1;
+  }
+
+  return replacement;
+}
+
 export function applyChunksToContent(path: string, original: string, chunks: PatchChunk[]): UpdateResult {
   const fileLines = original.split('\n');
   let cursor = 0;
@@ -342,14 +363,16 @@ export function applyChunksToContent(path: string, original: string, chunks: Pat
       );
     }
 
-    fileLines.splice(match.index, chunk.oldLines.length, ...chunk.newLines);
+    const matchedLines = fileLines.slice(match.index, match.index + chunk.oldLines.length);
+    const replacementLines = buildReplacementLines(chunk, matchedLines);
+    fileLines.splice(match.index, chunk.oldLines.length, ...replacementLines);
     applied.push({
       startLine: match.index + 1,
-      removed: chunk.oldLines,
-      added: chunk.newLines,
+      removed: matchedLines,
+      added: replacementLines,
       fuzz: match.fuzz,
     });
-    cursor = match.index + chunk.newLines.length;
+    cursor = match.index + replacementLines.length;
   }
 
   return { content: fileLines.join('\n'), chunks: applied };

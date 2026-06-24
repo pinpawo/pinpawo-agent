@@ -82,9 +82,11 @@ test('bash toolkit reviews write_file with preset policy', async (t) => {
   const policy = reviewPolicyFor('write_file');
 
   const review = await policy.request(reviewContext('write_file', input));
-  assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '写文件');
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', /afterPreview/);
+  const view = review && 'schemaVersion' in review ? review.view : null;
+  assert.ok(view && view.kind === 'plain');
+  assert.equal(view.title, '写文件');
+  assert.match(view.body, new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(view.body, /afterPreview/);
   assert.deepEqual(
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
     ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
@@ -107,9 +109,11 @@ test('bash toolkit reviews apply_patch with resolved file paths', async (t) => {
   const policy = reviewPolicyFor('apply_patch');
 
   const review = await policy.request(reviewContext('apply_patch', input));
-  assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '应用补丁');
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', /patch/);
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const view = review && 'schemaVersion' in review ? review.view : null;
+  assert.ok(view && view.kind === 'diff');
+  assert.equal(view.title, '应用补丁');
+  assert.match(view.patch, /\*\*\* Update File/);
+  assert.match(view.target ?? '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
 test('bash toolkit reviews local path mutations with presets', () => {
@@ -219,7 +223,46 @@ test('apply_patch tolerates whitespace drift in context lines', async (t) => {
   assert.equal(result.ok, true);
   const files = result.files as Array<Record<string, unknown>>;
   assert.equal(files[0]?.fuzz, 'ignore-whitespace');
-  assert.equal(readFileSync(filePath, 'utf-8'), 'alpha\nBETA\ngamma\n');
+  assert.equal(readFileSync(filePath, 'utf-8'), 'alpha   \nBETA\ngamma\n');
+});
+
+test('apply_patch preserves original indentation on fuzzy-matched context lines', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'config.py');
+  writeFileSync(filePath, [
+    '@dataclass(frozen=True)',
+    'class AppConfig:',
+    '    profile: str',
+    '    region_id: str',
+    '    product: str',
+    '',
+  ].join('\n'), 'utf-8');
+
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      ' @dataclass(frozen=True)',
+      ' class AppConfig:',
+      '-   profile: str',
+      '+    profile: str = "dev"',
+      '    region_id: str',
+      '    product: str',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, true);
+  const files = result.files as Array<Record<string, unknown>>;
+  assert.equal(files[0]?.fuzz, 'ignore-whitespace');
+  assert.equal(readFileSync(filePath, 'utf-8'), [
+    '@dataclass(frozen=True)',
+    'class AppConfig:',
+    '    profile: str = "dev"',
+    '    region_id: str',
+    '    product: str',
+    '',
+  ].join('\n'));
 });
 
 test('apply_patch handles add, delete, and move in one patch', async (t) => {

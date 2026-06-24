@@ -1,13 +1,47 @@
 import { Box, Text } from 'ink';
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewSpec, ReviewView } from '@pinpawo/pet-agent';
 import { TUI_TEXT } from '../render/text';
 import { wrapLine } from '../render/terminalText';
+import {
+  buildApplyPatchDisplayLines,
+  patchToneToInkProps,
+  type PatchDisplayLine,
+} from './applyPatchDisplay';
 
-function formatReviewView(review: ReviewSpec) {
-  return [
-    review.view.title,
-    review.view.body,
-  ].filter((line): line is string => Boolean(line && line.trim())).join('\n');
+type ApprovalContentLine = {
+  text: string;
+  tone?: PatchDisplayLine['tone'];
+};
+
+function buildReviewContentLines(view: ReviewView, width: number): ApprovalContentLine[] {
+  if (view.kind === 'diff') {
+    const intro = [view.title, view.summary].filter(isNonEmpty).join('\n');
+    const introLines = wrapTextBlock(intro, width);
+    return [
+      ...introLines,
+      ...(introLines.length > 0 ? [{ text: '' }] : []),
+      ...buildApplyPatchDisplayLines({
+        patch: view.patch,
+        target: view.target,
+        width,
+        maxLines: 40,
+      }),
+    ];
+  }
+
+  const text = [view.title, view.body].filter(isNonEmpty).join('\n');
+  return wrapTextBlock(text, width);
+}
+
+function isNonEmpty(line: string | undefined): line is string {
+  return Boolean(line && line.trim());
+}
+
+function wrapTextBlock(text: string, width: number): ApprovalContentLine[] {
+  return text
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .flatMap((line) => wrapLine(line, width).map((wrapped) => ({ text: wrapped })));
 }
 
 export function ApprovalPanel(props: {
@@ -17,7 +51,8 @@ export function ApprovalPanel(props: {
   selectedIndex: number;
 }) {
   const options = props.review.options;
-  const promptLines = wrapLine(formatReviewView(props.review), props.width - 4);
+  const contentWidth = props.width - 4;
+  const promptLines = buildReviewContentLines(props.review.view, contentWidth);
   const selectedIndex = Math.max(0, Math.min(options.length - 1, props.selectedIndex));
 
   return (
@@ -33,7 +68,9 @@ export function ApprovalPanel(props: {
         {TUI_TEXT.approvalHeading(props.petId)}
       </Text>
       {promptLines.map((line, i) => (
-        <Text key={`p-${i}`}>{line}</Text>
+        <Text key={`p-${i}`} {...patchToneToInkProps(line.tone)}>
+          {line.text || ' '}
+        </Text>
       ))}
       <Text>{' '}</Text>
       {options.map((opt, i) => (

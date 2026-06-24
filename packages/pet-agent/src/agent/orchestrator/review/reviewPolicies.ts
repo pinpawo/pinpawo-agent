@@ -8,6 +8,7 @@ import { isToolActionAuthorized } from './reviewAuthorizations';
 import {
   buildReviewSpec,
   type ReviewOption,
+  type ReviewView,
   type ToolAuthorizationMatcher,
   type ToolAuthorizationMatcherTemplate,
 } from './reviewSpec';
@@ -63,8 +64,7 @@ function formatInput(input: unknown) {
   }
 }
 
-function buildReviewBody(ctx: ToolkitToolReviewContext) {
-  const summary = readOperationSummary(ctx);
+function buildReviewBody(ctx: ToolkitToolReviewContext, summary: ToolOperationSummary | null) {
   const details = formatDetails(summary?.details);
   const lines = [
     summary?.summary ? `Summary: ${summary.summary}` : null,
@@ -75,6 +75,33 @@ function buildReviewBody(ctx: ToolkitToolReviewContext) {
   return lines.length > 0
     ? lines.join('\n\n')
     : `Input:\n${formatInput(ctx.input)}`;
+}
+
+function readPatchDetail(summary: ToolOperationSummary | null): string | null {
+  const patch = summary?.details?.patch;
+  return typeof patch === 'string' && patch.trim() ? patch : null;
+}
+
+function buildReviewView(
+  ctx: ToolkitToolReviewContext,
+  summary: ToolOperationSummary | null,
+): ReviewView {
+  const title = buildReviewTitle(ctx);
+  const patch = readPatchDetail(summary);
+  if (patch) {
+    return {
+      kind: 'diff',
+      title,
+      patch,
+      ...(summary?.target ? { target: summary.target } : {}),
+      ...(summary?.summary ? { summary: summary.summary } : {}),
+    };
+  }
+  return {
+    kind: 'plain',
+    title,
+    body: buildReviewBody(ctx, summary),
+  };
 }
 
 function buildReviewTitle(ctx: ToolkitToolReviewContext) {
@@ -209,12 +236,9 @@ function createPresetPolicy(options: PresetOptions): ToolkitToolReviewPolicy {
           : null;
       }
 
+      const summary = readOperationSummary(ctx);
       return buildReviewSpec({
-        view: {
-          kind: 'plain',
-          title: buildReviewTitle(ctx),
-          body: buildReviewBody(ctx),
-        },
+        view: buildReviewView(ctx, summary),
         options: buildStandardReviewOptions({
           authorizeMatcher: matcher && capabilities.sessionAuthorization
             ? { type: 'policy_hook' }

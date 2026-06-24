@@ -179,9 +179,11 @@ export {
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
 } from './agent/orchestrator/review/globalReviewPolicy';
 export {
+  appendReviewViewMessage,
   buildReviewSpec,
   isHumanReviewInterruptPayload,
   isReviewSpecValue,
+  reviewViewToText,
 } from './agent/orchestrator/review/reviewSpec';
 export type {
   BuildReviewSpecParams,

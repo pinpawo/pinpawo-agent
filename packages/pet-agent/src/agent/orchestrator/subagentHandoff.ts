@@ -15,6 +15,10 @@ import {
   resolveHumanReviewResume,
   ReviewResponseResolutionError,
 } from './review/reviewResponseResolver';
+import {
+  appendReviewViewMessage,
+  reviewViewToText,
+} from './review/reviewSpec';
 import type {
   PendingReviewAction,
   ReviewResponseResolution,
@@ -260,7 +264,7 @@ function inputToActionArgs(input: unknown): Record<string, unknown> {
 function formatReviewPrompt(review: ReviewSpec) {
   return [
     review.view.title,
-    review.view.body,
+    reviewViewToText(review.view),
   ].filter((item): item is string => Boolean(item && item.trim())).join('\n');
 }
 
@@ -311,10 +315,7 @@ function buildInvalidDecisionRequest(payload: HumanReviewInterruptPayload): Huma
     error: 'invalid_decision',
     review: {
       ...payload.review,
-      view: {
-        ...payload.review.view,
-        body: `${payload.review.view.body}\n\n${message}`,
-      },
+      view: appendReviewViewMessage(payload.review.view, message),
     },
   };
 }

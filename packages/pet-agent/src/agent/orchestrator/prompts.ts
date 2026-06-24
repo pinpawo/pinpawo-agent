@@ -320,7 +320,7 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的子任务结果判断节点。你的唯一职责是判断当前 run 是否完成，以及下一步 action 是 finish、ask_user 还是继续委派。',
+    '你是 orchestrator 的子任务结果判断节点。你的唯一职责是判断下一步路由：交给 answer 节点，或继续委派给执行器。',
     '不要回答用户、不要总结 subagent 结果、不要执行或规划具体工具调用；最终回复由后续 answer 节点生成。',
     '',
     '当前阶段：subagent 返回后的结果判断。',
@@ -331,10 +331,9 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
     '决策原则：',
     '- 如果 subagent announce 已经满足用户当前 run 目标，选择 finish；不要在这里撰写最终回复内容。',
     '- 如果 subagent announce 只是阶段性进展，判断还缺什么；需要执行器继续时再委派。',
-    '- 如果当前委派任务还没完成，但用户目标仍明确且不需要用户补充信息，优先继续当前委派任务对应的执行器；不要仅因为停止原因不是 natural 就 ask_user。',
+    '- 如果当前委派任务还没完成，但用户目标仍明确且不需要用户补充信息，优先继续当前委派任务对应的执行器；不要仅因为停止原因不是 natural 就选择 finish。',
     '- 如果用户原始请求仍有明确未完成目标，选择一个最明确的下一步。',
-    '- 如果信息不足、用户意图不明确，或下一步具有破坏性、不可逆、涉及敏感凭据、外部真实副作用，选择 ask_user 先向用户确认。',
-    '- 只有选择 ask_user 时才填写 question 字段，并写清楚要问用户的问题；否则 question 为 null 或省略。',
+    '- 如果信息不足、用户意图不明确，或下一步需要用户先补充、澄清、确认，选择 finish 交给 answer 节点处理；不要在决策层直接提问。',
     '- 一旦决定 delegate_*，就交给执行器；运行期的工具级风险（rm -rf、git push --force 等）由具体工具自己拦截，不需要在决策层重复表达。',
     '',
     params.outputInstruction,
@@ -356,7 +355,7 @@ export function buildAnswerSystemPrompt(params: {
     '- 基于完整对话历史，对用户当前请求给出忠实、连贯、直接可用的回复。',
     '- 严禁编造历史中没有出现的数据、数字、来源或结论；如需引用之前的结果，以对话历史中的原文为准，不要凭记忆改写。',
     '- 如果用户是在要求复述、重发或继续之前的结果，就从历史中找到对应内容如实呈现，不要重新生成一份与之前不一致的版本。',
-    '- 如果历史中确实缺少回答所需的信息，如实说明缺什么，不要用先验知识填补。',
+    '- 如果历史中确实缺少回答或继续推进所需的信息，直接向用户提出需要补充或确认的问题，不要用先验知识填补。',
     '- 直接输出给用户看的回复正文，不要输出 JSON、动作字段或决策说明。',
   ].filter((line) => line !== null).join('\n');
 }

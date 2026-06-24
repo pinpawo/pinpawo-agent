@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HumanMessage } from '@langchain/core/messages';
 import {
+  buildAnswerSystemPrompt,
   buildCapabilityArtifactContext,
   buildCapabilityDiscoveryRequestContext,
   buildDelegationOutcomeCurrentTaskContext,
@@ -158,8 +159,18 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
 
   assert.doesNotMatch(prompt, /可继续委派目标/);
   assert.doesNotMatch(prompt, /run_shell/);
+  assert.doesNotMatch(prompt, /ask_user/);
   assert.match(prompt, /不接收、不需要、也不应该依赖具体工具列表/);
   assert.match(prompt, /唯一职责/);
+});
+
+test('answer prompt owns clarification questions', () => {
+  const prompt = buildAnswerSystemPrompt({
+    actor: testActor,
+  });
+
+  assert.match(prompt, /直接向用户提出需要补充或确认的问题/);
+  assert.match(prompt, /不要输出 JSON、动作字段/);
 });
 
 test('delegation outcome input carries current task context separately', () => {

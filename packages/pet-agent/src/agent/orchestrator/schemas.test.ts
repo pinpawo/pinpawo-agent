@@ -44,15 +44,16 @@ test('schema enum excludes capabilities not in candidates', () => {
 
 test('schema enum allows static actions when no candidates', () => {
   const schema = buildOrchestrationDecisionSchema({ capabilityCandidates: [] });
-  for (const action of ['finish', 'ask_user', 'delegate_general']) {
+  for (const action of ['finish', 'delegate_general']) {
     assert.equal(schema.safeParse({ action }).success, true, `should accept ${action}`);
   }
   // legacy enum values are gone
+  assert.equal(schema.safeParse({ action: 'ask_user' }).success, false);
   assert.equal(schema.safeParse({ action: 'human_review' }).success, false);
   assert.equal(schema.safeParse({ action: 'delegate_capability' }).success, false);
 });
 
-test('schema strips legacy fields like capability/needs_human_review', () => {
+test('schema strips legacy fields like question/capability/needs_human_review', () => {
   // schema currently strips unknowns silently (z.object default). The point is
   // these fields are gone — verify they don't appear on parsed output.
   const schema = buildOrchestrationDecisionSchema({
@@ -62,11 +63,13 @@ test('schema strips legacy fields like capability/needs_human_review', () => {
     action: 'delegate_capability.browser',
     task: 't',
     context_summary: 'c',
+    question: 'legacy ask text',
     capability: 'browser',          // legacy field — should be ignored, not break
     needs_human_review: true,        // not in schema anymore
   });
   assert.equal(parsed.success, true);
   if (parsed.success) {
+    assert.equal('question' in parsed.data, false);
     assert.equal('capability' in parsed.data, false);
     assert.equal('needs_human_review' in parsed.data, false);
   }
@@ -82,7 +85,7 @@ test('parseAction splits delegate_capability.<name>', () => {
     capabilityName: null,
   });
   assert.deepEqual(parseAction('finish'), { kind: 'finish', capabilityName: null });
-  assert.deepEqual(parseAction('ask_user'), { kind: 'ask_user', capabilityName: null });
+  assert.deepEqual(parseAction('ask_user'), { kind: 'finish', capabilityName: null });
 });
 
 test('parseAction handles capability names containing dots in payload as a single suffix', () => {

@@ -52,8 +52,10 @@ import {
   buildCapabilityDiscoveryRequestContext,
   buildCapabilityDiscoverySystemPrompt,
   buildDecisionTargetsContext,
+  buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
+  buildDelegationOutcomeOtherTasksContext,
   buildAnswerSystemPrompt,
   buildPreparedRequestContext,
   buildSubagentAnnounceContext,
@@ -309,7 +311,7 @@ function resolveCapabilityDecisionState(params: {
 }
 
 function decisionModeFromRunPendingDelegation(pending: RunPendingDelegation | null): DecisionMode {
-  if (!pending) return 'finish';
+  if (!pending) return 'answer';
   return pending.lane === 'general' ? 'general' : 'capability';
 }
 
@@ -768,14 +770,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       })
       : buildDelegationOutcomeDecisionSystemPrompt({
         actor,
-        targetsContext: buildDecisionTargetsContext({
-          generalTools,
-          capabilityCandidates: decisionCapabilityCandidates,
-          capabilitySearchAttempted: false,
-          capabilitySearchAvailable: false,
-          capabilitySearchQuery: null,
-          capabilityRegistryAvailable: capabilityList.length > 0,
-        }),
         outputInstruction,
         workdir,
         runtimeEnvironment,
@@ -788,7 +782,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       }))
       : new HumanMessage(buildDelegationOutcomeDecisionInput({
         latestUserRequest: latestHumanRequest,
-        runDelegationContext: runDelegationContext,
+        currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
         subagentAnnounceContext: buildSubagentAnnounceContext(
           activeDelegationAnnounce,
           activeDelegation
@@ -797,6 +791,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
                 delegationId: activeDelegation.id,
               })
             : null,
+        ),
+        otherTasksContext: buildDelegationOutcomeOtherTasksContext(
+          state.runDelegations,
+          activeDelegation?.id ?? null,
         ),
         capabilityArtifacts: state.sessionCapabilityArtifacts,
       }));
@@ -838,28 +836,25 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         ? 'general'
         : actionKind === 'delegate_capability' && activeCapability && decisionTask
           ? 'capability'
-          : 'finish';
+          : 'answer';
 
-    // On a finish-bucket decision we no longer synthesize the user-facing reply
-    // here. A real `finish` routes to the dedicated answer node (which reads the
-    // full conversation); `ask_user` and the degenerate-delegate fallbacks emit
-    // a fixed inline message and end the turn.
-    const inlineReply = decisionMode === 'finish'
-      ? actionKind === 'finish'
+    // Decision nodes only route. An `answer` decision routes to the dedicated answer
+    // node; degenerate delegate fallbacks still emit fixed inline errors because
+    // there is no valid next node to run.
+    const inlineReply = decisionMode === 'answer'
+      ? actionKind === 'answer'
         ? null
-        : actionKind === 'ask_user'
-          ? readDecisionText(decision.question) ?? '我需要你再补充一点信息，才能继续推进。'
-          : actionKind === 'delegate_general' && generalTools.length === 0
-            ? '我现在没有可用的通用工具执行器，无法继续完成这一步。'
-            : actionKind === 'delegate_capability' && !activeCapability
-              ? `当前没有可用的 capability「${requestedCapability ?? ''}」，无法继续完成这一步。`
-              : !decisionTask
-                ? '当前决策选择继续委派，但没有提供明确任务。'
-                : '当前决策已结束，但没有生成可展示的回复。'
+        : actionKind === 'delegate_general' && generalTools.length === 0
+          ? '我现在没有可用的通用工具执行器，无法继续完成这一步。'
+          : actionKind === 'delegate_capability' && !activeCapability
+            ? `当前没有可用的 capability「${requestedCapability ?? ''}」，无法继续完成这一步。`
+            : !decisionTask
+              ? '当前决策选择继续委派，但没有提供明确任务。'
+              : '当前决策已结束，但没有生成可展示的回复。'
       : null;
 
     const runPendingFinalReply: RunFinalReplyRoute =
-      decisionMode !== 'finish'
+      decisionMode !== 'answer'
         ? null
         : inlineReply
           ? 'inline'
@@ -870,10 +865,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : activeCapability
         ? `capability:${activeCapability}`
         : null;
-    const delegationTask = decisionMode !== 'finish'
+    const delegationTask = decisionMode !== 'answer'
       ? decisionTask ?? readLatestHumanRequest(state.messages) ?? '继续完成用户当前请求'
       : null;
-    const delegationContextSummary = decisionMode !== 'finish'
+    const delegationContextSummary = decisionMode !== 'answer'
       ? decisionContextSummary ?? '继续完成用户当前请求。'
       : null;
     const runPendingDelegation: RunPendingDelegation | null = delegationLane && delegationTask
@@ -888,18 +883,16 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : null;
     const nextDelegationState = reuseOrAppendRunDelegation(state.runDelegations, runPendingDelegation);
 
-    // Handoff (D1): the orchestrator's `action` IS its completion judgment.
-    // `finish` means "the work is done, wrap up" — that is the moment to hand the
-    // accumulated subagent results to the main queue. `ask_user` / `delegate`
-    // mean "not done" (awaiting the user / continuing), so nothing is handed off
-    // and the lanes are kept. There is no separate completion signal: we do not
-    // read completionReason here (it is only a hint shown to the decision LLM).
+    // Handoff (D1): when delegation outcome routes to answer, copy the current
+    // subagent announce into the main queue before answerNode runs. The decision
+    // node still only routes; answerNode owns all user-facing wording, including
+    // asking for missing information when needed.
     //
     // Single-line delegation handoff is driven by taskActiveDelegation. run
     // summaries are not the source of truth for unfinished task lifecycle.
     const replacingActiveDelegation = kind === 'delegation_outcome'
       && Boolean(activeDelegation && runPendingDelegation && activeDelegation.id !== runPendingDelegation.id);
-    const handingOff = kind === 'delegation_outcome' && actionKind === 'finish';
+    const handingOff = kind === 'delegation_outcome' && actionKind === 'answer';
     const handoffMessages: BaseMessage[] = [];
     const handedOffDelegationIds = new Set<string>();
     if ((handingOff || replacingActiveDelegation) && activeDelegation) {
@@ -1296,8 +1289,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const decisionMode = decisionModeFromRunPendingDelegation(state.runPendingDelegation);
     if (decisionMode === 'capability') return 'capability';
     if (decisionMode === 'general') return 'general';
-    // finish bucket: route a real finish to the answer node; inline replies
-    // (ask_user / degenerate fallback / stop) already emitted their message.
+    // answer bucket: route a real answer decision to the answer node; inline fallback
+    // errors already emitted their message.
     return state.runPendingFinalReply === 'answer' ? 'answer' : 'end';
   }
 

@@ -26,8 +26,8 @@ export const OrchestratorState = Annotation.Root({
     default: () => null,
   }),
   // Transient routing signal set by the decision nodes so afterDecision can
-  // distinguish a `finish` that must route to the answer node from an
-  // `ask_user`/inline reply that already emitted its message and ends the turn.
+  // distinguish an `answer` route that must run the answer node from an
+  // inline fallback reply that already emitted its message and ends the turn.
   runPendingFinalReply: Annotation<RunFinalReplyRoute>({
     reducer: (_prev, next) => next,
     default: () => null,

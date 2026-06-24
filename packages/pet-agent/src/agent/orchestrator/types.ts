@@ -62,16 +62,15 @@ export type SubagentAnnounce = {
   text: string | null;
 };
 
-export type DecisionMode = 'finish' | 'general' | 'capability';
+export type DecisionMode = 'answer' | 'general' | 'capability';
 
 /**
- * How a `finish`-bucket decision should be turned into a user-facing reply.
+ * How an `answer`-bucket decision should be turned into a user-facing reply.
  * - 'answer': route to the dedicated answer node, which reads the full
  *   conversation and synthesizes the reply.
- * - 'inline': the decision node already emitted a fixed reply (ask_user
- *   question or a degenerate-fallback string); the run ends without the
- *   answer node.
- * - null: not a finish-bucket decision (delegation in progress).
+ * - 'inline': a degenerate fallback or stop path already emitted a fixed reply;
+ *   the run ends without the answer node.
+ * - null: not an answer-bucket decision (delegation in progress).
  */
 export type RunFinalReplyRoute = 'answer' | 'inline' | null;
 export type CapabilityDecisionState = 'unavailable' | 'search_available' | 'candidates_available' | 'search_exhausted';

@@ -219,7 +219,46 @@ test('apply_patch tolerates whitespace drift in context lines', async (t) => {
   assert.equal(result.ok, true);
   const files = result.files as Array<Record<string, unknown>>;
   assert.equal(files[0]?.fuzz, 'ignore-whitespace');
-  assert.equal(readFileSync(filePath, 'utf-8'), 'alpha\nBETA\ngamma\n');
+  assert.equal(readFileSync(filePath, 'utf-8'), 'alpha   \nBETA\ngamma\n');
+});
+
+test('apply_patch preserves original indentation on fuzzy-matched context lines', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'config.py');
+  writeFileSync(filePath, [
+    '@dataclass(frozen=True)',
+    'class AppConfig:',
+    '    profile: str',
+    '    region_id: str',
+    '    product: str',
+    '',
+  ].join('\n'), 'utf-8');
+
+  const result = readJsonOutput(await applyPatchTool.invoke({
+    patch: [
+      '*** Begin Patch',
+      `*** Update File: ${filePath}`,
+      ' @dataclass(frozen=True)',
+      ' class AppConfig:',
+      '-   profile: str',
+      '+    profile: str = "dev"',
+      '    region_id: str',
+      '    product: str',
+      '*** End Patch',
+    ].join('\n'),
+  }));
+
+  assert.equal(result.ok, true);
+  const files = result.files as Array<Record<string, unknown>>;
+  assert.equal(files[0]?.fuzz, 'ignore-whitespace');
+  assert.equal(readFileSync(filePath, 'utf-8'), [
+    '@dataclass(frozen=True)',
+    'class AppConfig:',
+    '    profile: str = "dev"',
+    '    region_id: str',
+    '    product: str',
+    '',
+  ].join('\n'));
 });
 
 test('apply_patch handles add, delete, and move in one patch', async (t) => {

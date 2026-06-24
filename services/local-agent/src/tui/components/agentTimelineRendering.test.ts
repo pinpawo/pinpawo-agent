@@ -196,6 +196,32 @@ test('buildAgentOperationDisplayLines renders apply_patch through parsed patch o
   assert.ok(lines.every((line) => stringWidth(line.text) <= 100));
 });
 
+test('buildAgentOperationDisplayLines labels malformed apply_patch as raw patch text', () => {
+  const lines = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'interrupted',
+    kind: 'local.apply_patch',
+    title: '应用补丁',
+    target: '/tmp/example.py',
+    summary: 'update',
+    raw: {
+      input: {
+        patch: [
+          '*** Begin Patch',
+          '*** Update File: /tmp/example.py',
+          '@dataclass(frozen=True)',
+          ' class AppConfig:',
+          '*** End Patch',
+        ].join('\n'),
+      },
+    },
+  }), 3500, 100);
+
+  assert.ok(lines.some((line) => line.text === '  patch /tmp/example.py (raw; parse failed)' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '  *** Update File: /tmp/example.py' && line.tone === 'muted'));
+  assert.ok(lines.some((line) => line.text === '  @dataclass(frozen=True)' && line.tone === 'muted'));
+  assert.ok(lines.every((line) => stringWidth(line.text) <= 100));
+});
+
 test('buildAgentOperationDisplayLines renders browser active completed and failed states', () => {
   const running = buildAgentOperationDisplayLines(operationEntry({
     phase: 'started',

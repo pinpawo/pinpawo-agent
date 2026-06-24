@@ -6,6 +6,7 @@
 
 - `docs/PET_AGENT_STUDIO_INTERFACES.md` —— Studio ↔ Agent 接口契约(invoke 签名、wiki middleware、HITL 边界等)。
 - `docs/PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN.md` —— StudioOrchestrator 运行时设计。
+- `docs/PET_AGENT_CAPABILITY_ARTIFACT_STORE_DESIGN.md` —— capability artifacts 的持久化 store 设计。
 
 ## TL;DR
 
@@ -36,6 +37,11 @@
      └ notes/                     (跨主题笔记)
    pet 通过 wiki_read toolkit(ls/cat/grep/find)自主检索。
 
+─────────────── 产物层(Capability Artifact Store)───────────────
+   {AGENT_HOME}/studio/{sid}/conv/{cid}/artifacts/
+     └ {artifactId}/...           (capability 产物本体或外部引用)
+   capability 完成时 sink,pet/Studio/UI 只传 ArtifactRef。
+
 ─────────────── 工人层(Capability / Subagent:pet 内部能力)──────
    每个 Pet 内部各自跑自己的 capability subgraph,具体执行工具调用。
 ```
@@ -59,6 +65,7 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 |---|---|---|
 | Studio | 编排撰稿 + 路由调度 + wiki 维护 | **planner agent invoke + execute 状态机 + wiki_curator** |
 | Studio Whiteboard | 共享知识库 | 文件系统目录 + curator-managed wiki |
+| Capability Artifact Store | durable 产物存储 | artifact refs + filesystem/backend store |
 | Pet Agent | 数据加工者 | ReAct + LangGraph + wiki_read toolkit |
 | Capability / Subagent | pet 内部能力 | ReAct + LangGraph |
 
@@ -84,8 +91,8 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 - **planner agent**:由 `plannerPetId` 指定的普通 pet runtime。turn 起始时 Studio 把它当成第一棒 invoke,临时注入 `studio.plan` capability。planner 内部自由 reason、必要时 HITL 提问、最终通过 `submit_plan` tool 提交 task 列表。Studio 拿到 plan 后不再调用 planner。
 - **execute state machine**:plan 存在后的确定性循环。规则固定:下一个 pending task → `dispatch`(撰写 brief);全部 satisfied → `finish`(标定末棒);否则 → `stop`。**不耗 LLM**。`ExecuteAction = dispatch | finish | stop`(3 个 type),zod 校验。
 - **wiki_curator 节点**:每次 pet 返回 返回文本 后运行,把 raw source 整理进 wiki 文件(新增 topics、合并主题、更新 index)。实现可注入(默认 skeleton,production 用 LLM curator)。
-- **可读取的范围**:pet registry、plan、turn state、wiki index 与按需的 wiki 文件、上一棒 result summary、必要时读 artifact 内容。
-- **边界**:capability、tool、底层 API 由 pet 调用;wiki 文件写入由 curator 节点承担;用户最终答复由末位 pet 的 返回文本 提供。
+- **可读取的范围**:pet registry、plan、turn state、wiki index 与按需的 wiki 文件、上一棒 result summary、artifact refs,必要时按 ref 读 artifact 内容。
+- **边界**:capability、tool、底层 API 由 pet 调用;capability artifacts 由 capability/pet runtime sink 到 artifact store;wiki 文件写入由 curator 节点承担;用户最终答复由末位 pet 的 返回文本 提供。
 - **设计立场**:execute 不自我修正大方向——若 plan 不再合理,优先 `finish`(交付当前可作产出)或 `stop`,把方向决策交还用户在 follow-up turn 解决。
 
 `finish` action 标定 `finalDispatchId`,Studio 通过两条独立的事件流告知 UI:
@@ -99,7 +106,7 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 
 - **是什么**:单 pet ReAct agent,复用现有 single-pet orchestrator graph。**实际加工产出的角色**。
 - **角色定位**:每次 dispatch 接收 Studio 撰写的 brief 与 wikiRoot,自主访问 wiki 检索所需上下文,在自己的 capability 集合内完成加工,输出 返回文本。
-- **输入**:Studio 撰写的 brief(自然语言任务说明字符串)+ wikiRoot + 必要 artifact + 自己绑定的 capability / tool 配置 + Studio 模式下默认装备的 `wiki_read` toolkit。
+- **输入**:Studio 撰写的 brief(自然语言任务说明字符串)+ wikiRoot + 必要 artifact refs + 自己绑定的 capability / tool 配置 + Studio 模式下默认装备的 `wiki_read` toolkit。
 - **可用 action**:在 capability / tool 集合上 reason,通过 invoke 返回最终文本;过程中通过 `onToolEvent` callback 透出工具事件,撞到 HITL interrupt 时调构造时注入的 `humanReviewer` 桥拿决策(详见 INTERFACES 文档)。
 - **检索自主权**:pet 自己决定怎么用 wiki(`ls` 看总览、`cat` 拉详情、`grep` 搜关键词),Studio 不指定具体文件。
 - **隔离性**:pet 只感知本次 dispatch 收到的 brief 与 wiki 文件内容。是否存在其他 pet、自己是否在协作链中、是否是末棒——都由 Studio 编排,pet 视角下每次调用形态一致(brief + wikiRoot 永远是核心入口)。
@@ -110,6 +117,7 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 - **角色定位**:pet 内部的专项工人,负责一项明确的技能。
 - **输入**:本次 capability invocation 收到的输入、自己 declarative 声明的工具集。
 - **输出**:结构化执行结果或缺口说明。
+- **产物**:需要跨 lane / dispatch / UI 保留的结果 sink 到 capability artifact store,subagent lane messages 只保留运行现场。
 - **隔离性**:只感知本次 invocation 的输入。所属 pet、所属 Studio、其它 capability 的运行情况均不在其视野内。
 
 ## 同一个循环骨架,不同的 reason 对象
@@ -123,7 +131,7 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 | act 输出 | StudioTaskPlan / ExecuteAction / wiki 文件更新 | `capability_call` / `tool_call` / 工具事件 / 返回文本 / 错误 | `tool_call` |
 | 终止条件 | execute 输出 finish/stop 或 planner 未提交 plan | task done 或正常 return | capability done 或 error |
 | 上层看到的输出 | 末位 pet 的返回文本 | invoke 返回字符串 / question 事件 / error | capability result 对象 |
-| 产出形态 | 编排决策 + 撰写好的 brief + wiki 文件 | 返回文本(可含文件路径引用) | capability result |
+| 产出形态 | 编排决策 + 撰写好的 brief + wiki 文件 | 返回文本 + ArtifactRef[] | capability result + ArtifactRef[] |
 
 上下文规模:
 
@@ -191,7 +199,7 @@ execute 状态机本身不维护 reasoning context,只看 task 列表与 dispatc
 
 Pet 通过 wiki_read 自主拉取所需 wiki 文件,reason prompt 大小由 pet 自己控制(它知道要做什么、需要哪些资料)。
 
-pet 返回文本保存在对应 dispatch state 中,作为 turn 内 dispatch 历史的一部分;wiki 是 curator 派生出的独立知识层,以文件形态存在。pet 主要通过 wiki 获取上下文,不读 dispatch 历史。
+pet 返回文本和 ArtifactRef[] 保存在对应 dispatch state 中,作为 turn 内 dispatch 历史的一部分;wiki 是 curator 派生出的独立知识层,以文件形态存在;artifact store 是 durable 产物层。pet 主要通过 wiki 获取上下文,必要时按 artifact ref 读取产物内容,不读 dispatch 历史。
 
 每层 prompt 都保持有限大小;Studio 两个 LLM 调用各自聚焦(planner 关心计划质量、curator 关心知识整理),execute 状态机零 token,任一调用都比单一大 reason 更聚焦,token 成本由此可控。
 
@@ -282,10 +290,11 @@ execute → dispatch(taskIndex=0, brief = "流水线第 1 棒。写美食探店 
       Capability 内 ReAct 若干轮,产出 scriptOutline
     返回文本:
       summary: "已完成脚本结构,缺口标记:尾音频未定"
-      artifacts: { scriptOutline }
+      artifacts: [{ artifactId: "...", title: "scriptOutline" }]
 
   wiki_curator
     新增 topics/script-structure.md
+    写入 scriptOutline artifact ref 与摘要
     更新 index.md
     写 sources/{dispatchId}-script.md(原始素材摘录)
   task t1.status = satisfied
@@ -300,10 +309,11 @@ execute → dispatch(taskIndex=1, brief = "流水线第 2 棒。前面已完成�
     capability_call(video_tail_audio, {...})
     返回文本:
       summary: "已整合脚本结构,给出尾音频策略与口播节奏"
-      artifacts: { finalDeliverable }
+      artifacts: [{ artifactId: "...", title: "finalDeliverable" }]
 
   wiki_curator
     更新 topics/audio-strategy.md
+    写入 finalDeliverable artifact ref 与摘要
     刷新 index.md
     写 sources/{dispatchId}-audio.md
   task t2.status = satisfied
@@ -397,7 +407,7 @@ Studio → Agents → Subagents 是**编排撰稿层 + 共享知识层 + 数据�
 已经在 `packages/pet-agent/src/agent/studio/` 落地的部件:
 
 - **composer**:`createStudioOrchestrator` 拼起 planner agent invoke + execute 状态机 + wiki_curator(详见 ORCHESTRATOR_DESIGN)。
-- **接口契约**:`PetAgentRuntime.invoke({ brief, wikiRoot, signal, onToolEvent? })` + wiki middleware + `humanReviewer` 桥(详见 INTERFACES)。
+- **接口契约**:`PetAgentRuntime.invoke({ brief, wikiRoot, artifactRefs, signal, onToolEvent? })` + wiki middleware + artifact refs + `humanReviewer` 桥(详见 INTERFACES)。
 - **Studio Whiteboard 文件目录**:`{AGENT_HOME}/studio/{sid}/conv/{cid}/wiki/`,curator 维护,pet 通过 `wiki_read` toolkit 访问。
 - **两条独立事件流**:`onTurnEvent`(Studio→控制面)与 `onToolEvent`(pet→pet 面板),各自驱动各自的 UI 区域。
 

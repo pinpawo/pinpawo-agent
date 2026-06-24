@@ -1,6 +1,6 @@
 # Pet Agent Studio Interfaces
 
-本文档描述 Studio 与 pet 之间(以及 pet 与 UI 之间)的接口边界。Studio 内部的循环、wiki 维护、turn state event 等是编排实现细节,见 `docs/PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN.md`;整体架构理念见 `docs/PET_AGENT_STUDIO_ARCHITECTURE_OVERVIEW.md`。
+本文档描述 Studio 与 pet 之间(以及 pet 与 UI 之间)的接口边界。Studio 内部的循环、wiki 维护、turn state event 等是编排实现细节,见 `docs/PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN.md`;整体架构理念见 `docs/PET_AGENT_STUDIO_ARCHITECTURE_OVERVIEW.md`;capability artifacts 的 durable store 见 `docs/PET_AGENT_CAPABILITY_ARTIFACT_STORE_DESIGN.md`。
 
 ## Boundaries
 
@@ -11,8 +11,8 @@
 │   维护 plan / turn state / wiki                              │
 └──────────────────────────────────────────────────────────────┘
         │ Boundary 1: 函数调用(本文档主要内容)
-        │ PetAgentRuntime.invoke({ brief, wikiRoot, signal, onToolEvent? })
-        │  → Promise<{ reply }>
+        │ PetAgentRuntime.invoke({ brief, wikiRoot, artifactRefs, signal, onToolEvent? })
+        │  → Promise<{ reply, artifacts? }>
         ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  PetAgentRuntime (LangGraph)                                 │
@@ -37,13 +37,17 @@ pet 是一个普通的异步函数。Studio 派发一棒任务等价于调用一
 type PetInvokeArgs = {
   brief:         string;             // Studio 撰写的任务文本(自然语言)
   wikiRoot?:     string;             // 共享知识库目录的绝对路径
+  artifactRefs?: CapabilityArtifactRef[]; // 上游产物引用,本体按需读取
   signal?:       AbortSignal;        // Studio 取消信号
   threadId?:     string;             // checkpoint namespace,见下文
   onToolEvent?:  SubagentToolEventHandler;  // 边界 2,见下文
-  // 其他运行时透传字段:execution / workdir / extraCapabilities
+  // 其他运行时透传字段:execution / workdir / extraCapabilities / artifactStore
 };
 
-type PetInvokeResult = { reply: string };  // pet 最终返回的文本(可含文件路径引用)
+type PetInvokeResult = {
+  reply: string;                         // pet 最终返回的文本(可引用 artifact)
+  artifacts?: CapabilityArtifactRef[];   // 本次 invoke 产出的 durable artifacts
+};
 
 interface PetAgentRuntime {
   invoke(args: PetInvokeArgs): Promise<PetInvokeResult>;
@@ -52,10 +56,12 @@ interface PetAgentRuntime {
 
 要点:
 
-- **核心输入只有两件:任务文本 + wiki 根目录**。pet 自己的 capability/tool 配置、HITL 桥(`humanReviewer`)在 runtime 构造时已确定,不通过 invoke 传。
-- **返回是一段文本**。文本中可以引用文件路径(`/…/cover.jpg`),curator 会解析并整理。
+- **核心输入是任务文本 + wiki 根目录 + 可选 artifact refs**。pet 自己的 capability/tool 配置、HITL 桥(`humanReviewer`)在 runtime 构造时已确定,不通过 invoke 传。
+- **返回是文本 + artifact refs**。文本用于用户/下一棒自然阅读,artifact refs 指向 capability artifact store 中的 durable 产物。
 - **没有 envelope 结构**。Studio↔pet 是函数调用,不需要为协议层包装。
-- **HITL 与工具事件走 pet runtime 自己的 UI callback 桥(边界 2、3)**,不通过 invoke 返回值;Studio 视角下,invoke 一直 pending 直到 pet 最终 resolve `{ reply }`(或抛错/取消)。
+- **HITL 与工具事件走 pet runtime 自己的 UI callback 桥(边界 2、3)**,不通过 invoke 返回值;Studio 视角下,invoke 一直 pending 直到 pet 最终 resolve `{ reply, artifacts? }`(或抛错/取消)。
+
+`artifactRefs` / `artifacts` 只传引用,不传 artifact 本体。大型 Markdown、JSON、图片、音频、视频或外部对象都通过 store 按 ref 读取。这样 completed lane messages 可以折叠/删除,不会影响产物读取。
 
 ## Wiki Middleware
 
@@ -103,6 +109,33 @@ type WikiReadToolkit = {
 - 命令白名单:`ls / cat / grep / find / head / tail`。
 - read-only:不开放写、cd、删除。
 - 多模态 pet 可加 `attach(path)` 扩展,把图/音频以多模态输入注入 LLM(由扩展名 / 文件内容决定类型)。
+
+## Artifact Store Boundary
+
+capability 产物不保存在 wiki,也不依赖 `ToolMessage.artifact` 长期存在。Studio / pet runtime 应提供 capability artifact sink,让 capability 在完成时写入 store 并拿回 `CapabilityArtifactRef`。
+
+```ts
+type CapabilityArtifactRef = {
+  artifactId: string;
+  kind: 'markdown' | 'json' | 'file' | 'image' | 'audio' | 'video' | 'external_ref' | 'manifest';
+  title: string;
+  summary?: string;
+  mimeType?: string;
+  uri?: string;
+  createdAt: string;
+  dispatchId?: string;
+  petId?: string;
+  capabilityName?: string;
+};
+```
+
+边界规则:
+
+- capability/subagent 运行中可以用 `ToolMessage.artifact` 作为临时结构化回执,但完成后需要 sink 到 artifact store。
+- `PetInvokeResult.artifacts` 只携带 refs。
+- `StudioDispatchState.artifacts` 保存 refs,供 UI、curator 和后续 pet 使用。
+- wiki_curator 可以把 refs 和摘要写进 wiki,但不复制大型 artifact 本体。
+- artifact 读取应通过 host 提供的 artifact read tool/API,权限按 studio/conversation/dispatch scope 校验。
 
 ## Boundary 2: Tool Event Callback (`onToolEvent`)
 
@@ -190,16 +223,16 @@ pet runtime 内部应在 LLM 调用 / tool 调用 / interrupt 等位置定期检
 
 ## Multimedia Outputs
 
-pet 输出文本可包含对文件路径的引用,例如:
+pet 输出文本可包含对 artifact ref 或文件路径的引用,例如:
 
 ```text
 我已生成视频封面,保存在 /tmp/pet-output/cover-001.jpg。
 建议尺寸 1920x1080,风格暖色调美食。
 ```
 
-或采用约定标记(如 `@file:/tmp/...`)。curator 解析 pet 返回的文本,识别文件路径,把文件搬到 wiki 目录内,在对应 topic markdown 中以自然语言描述。
+或采用约定标记(如 `@artifact:<artifactId>` / `@file:/tmp/...`)。推荐路径是:capability 先把文件 sink 到 artifact store,pet 返回文本引用 artifact ref;curator 读取 refs,在对应 topic markdown 中以自然语言描述。
 
-**类型 / 尺寸 / 风格等语义信息全部在文本里自然表达**,不引入结构化字段。curator 的整理逻辑由 curator prompt 自定义,见 orchestrator 文档。
+**类型 / 尺寸 / 风格等语义信息可以在文本与 artifact metadata 中同时表达**。curator 的整理逻辑由 curator prompt 自定义,见 orchestrator 文档。
 
 ## Future: 并行 Dispatch
 
@@ -243,7 +276,7 @@ retry 由 Studio 调度(execute 状态机再次输出 dispatch 同 taskIndex,dis
 
 ## Open Questions
 
-- 多媒体路径引用用约定标记还是纯自然语言识别?(curator prompt 可控)
+- 多媒体 artifact ref / legacy 文件路径引用用约定标记还是纯自然语言识别?(curator prompt 可控)
 - chat 层(目前用 ws stream + `__interrupt__` 直推客户端)是否最终也迁移到统一构造 pet runtime + 注入 humanReviewer 的模式?这是一个相对大的内务清理,见 [LangGraph 多 agent HITL 调研结论](#) 中提到的"a 的外壳 + b 的内核"思路。
 - **tool event 是否升级为可靠的结构化源,`operation` 从它直接产生?** 现状:local-agent 运行链路已经从结构化源 `StreamToolsPayload` 直接产出 `operation`(`ToolOperationTracker -> buildToolOperationEvent`),TUI 本地路径和 app-facing WS 都不再双发旧运行态消息；chat 顶层 stream 也不再订阅 `tools` mode，operation 只从 `onToolEvent` 边界进入。pet-agent subagent 层会规范缺失的 `toolCallId`，并在自然完成、limit reached、异常时关闭仍 active 的 tool event。
   - `operation` 的质量上限取决于结构化源 `StreamToolsPayload`；subagent/local-agent 已补 stable id 和 terminal closure，底层 LangChain 原始事件仍可能存在顺序不确定。

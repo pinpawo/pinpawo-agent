@@ -11,6 +11,10 @@ import type { LocalAgentGraphService } from './agentGraphService';
 import { runChatSession } from './chatSessionAdapter';
 import { readFinalMessageText, type StreamToolsPayload } from './agentStreamEvents';
 
+function graphStream(chunks: AsyncIterable<unknown>) {
+  return chunks;
+}
+
 test('runChatSession uses onToolEvent as the only operation source', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: unknown[] = [];
@@ -26,28 +30,30 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    async *stream(streamSetup: AgentChannelSetup) {
-      yield [
-        'tools',
-        {
+    stream(streamSetup: AgentChannelSetup) {
+      return graphStream((async function* () {
+        yield [
+          'tools',
+          {
+            event: 'on_tool_start',
+            name: 'stream-source',
+            toolCallId: 'stream-call',
+            input: { source: 'stream' },
+          },
+        ];
+        streamSetup.input.onToolEvent?.({
           event: 'on_tool_start',
-          name: 'stream-source',
-          toolCallId: 'stream-call',
-          input: { source: 'stream' },
-        },
-      ];
-      streamSetup.input.onToolEvent?.({
-        event: 'on_tool_start',
-        name: 'callback-source',
-        toolCallId: 'callback-call',
-        input: { source: 'callback' },
-      });
-      yield [
-        'values',
-        {
-          messages: [new AIMessage('done')],
-        },
-      ];
+          name: 'callback-source',
+          toolCallId: 'callback-call',
+          input: { source: 'callback' },
+        });
+        yield [
+          'values',
+          {
+            messages: [new AIMessage('done')],
+          },
+        ];
+      })());
     },
   };
 
@@ -116,7 +122,9 @@ test('runChatSession falls back to checkpoint final message when stream values o
         hasPendingContinuation: false,
       };
     },
-    async *stream() {},
+    stream() {
+      return graphStream((async function* () {})());
+    },
   };
 
   const result = await runChatSession({
@@ -161,40 +169,42 @@ test('runChatSession maps authorization runtime events to system notices', async
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    async *stream(streamSetup: AgentChannelSetup) {
-      streamSetup.input.onToolEvent?.({
-        event: 'on_runtime_event',
-        name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED,
-        data: {
-          toolName: 'write_file',
-          policyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
-        },
-      });
-      streamSetup.input.onToolEvent?.({
-        event: 'on_runtime_event',
-        name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED,
-        data: {
-          toolName: 'custom_tool',
-          policyMode: GLOBAL_REVIEW_POLICY_MODE.CUSTOM,
-        },
-      });
-      streamSetup.input.onToolEvent?.({
-        event: 'on_runtime_event',
-        name: 'tool_authorization_recorded',
-        data: {
-          authorizations: [{
-            toolName: 'run_shell',
-            matcher: { type: 'shell_pattern', value: 'git status' },
-            createdAt: '2026-01-01T00:00:00.000Z',
-          }],
-        },
-      });
-      yield [
-        'values',
-        {
-          messages: [new AIMessage('done')],
-        },
-      ];
+    stream(streamSetup: AgentChannelSetup) {
+      return graphStream((async function* () {
+        streamSetup.input.onToolEvent?.({
+          event: 'on_runtime_event',
+          name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED,
+          data: {
+            toolName: 'write_file',
+            policyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
+          },
+        });
+        streamSetup.input.onToolEvent?.({
+          event: 'on_runtime_event',
+          name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED,
+          data: {
+            toolName: 'custom_tool',
+            policyMode: GLOBAL_REVIEW_POLICY_MODE.CUSTOM,
+          },
+        });
+        streamSetup.input.onToolEvent?.({
+          event: 'on_runtime_event',
+          name: 'tool_authorization_recorded',
+          data: {
+            authorizations: [{
+              toolName: 'run_shell',
+              matcher: { type: 'shell_pattern', value: 'git status' },
+              createdAt: '2026-01-01T00:00:00.000Z',
+            }],
+          },
+        });
+        yield [
+          'values',
+          {
+            messages: [new AIMessage('done')],
+          },
+        ];
+      })());
     },
   };
 
@@ -247,18 +257,20 @@ test('runChatSession forwards subagent model text runtime events as subagent del
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    async *stream(streamSetup: AgentChannelSetup) {
-      streamSetup.input.onToolEvent?.({
-        event: 'on_runtime_event',
-        name: 'subagent_message_delta',
-        data: { text: '正在整理' },
-      });
-      yield [
-        'values',
-        {
-          messages: [new AIMessage('done')],
-        },
-      ];
+    stream(streamSetup: AgentChannelSetup) {
+      return graphStream((async function* () {
+        streamSetup.input.onToolEvent?.({
+          event: 'on_runtime_event',
+          name: 'subagent_message_delta',
+          data: { text: '正在整理' },
+        });
+        yield [
+          'values',
+          {
+            messages: [new AIMessage('done')],
+          },
+        ];
+      })());
     },
   };
 
@@ -321,24 +333,26 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    async *stream() {
-      yield [
-        'values',
-        {
-          __interrupt__: [{
-            value: {
-              kind: 'review',
-              review,
-              pendingAction: {
-                actionId: 'call-1',
-                toolName: 'run_shell',
-                args: { command: 'git status', cwd: '/repo' },
-                description: 'Run git status?',
+    stream() {
+      return graphStream((async function* () {
+        yield [
+          'values',
+          {
+            __interrupt__: [{
+              value: {
+                kind: 'review',
+                review,
+                pendingAction: {
+                  actionId: 'call-1',
+                  toolName: 'run_shell',
+                  args: { command: 'git status', cwd: '/repo' },
+                  description: 'Run git status?',
+                },
               },
-            },
-          }],
-        },
-      ];
+            }],
+          },
+        ];
+      })());
     },
   };
 
@@ -390,14 +404,16 @@ test('runChatSession resumes explicit response after state update clears interru
     buildResumeCommand(value: unknown) {
       return { kind: 'resume-command', value };
     },
-    async *stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
-      streamInputs.push(inputOverride);
-      yield [
-        'values',
-        {
-          messages: finalMessages,
-        },
-      ];
+    stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
+      return graphStream((async function* () {
+        streamInputs.push(inputOverride);
+        yield [
+          'values',
+          {
+            messages: finalMessages,
+          },
+        ];
+      })());
     },
   };
 
@@ -450,15 +466,17 @@ test('runChatSession allows a user message after an aborted non-review run leave
         ? { messages: [], pendingHumanReview: null, hasPendingContinuation: true }
         : { messages: finalMessages, pendingHumanReview: null, hasPendingContinuation: false };
     },
-    async *stream(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
-      streamInputs.push(inputOverride);
-      assert.equal(readFinalMessageText(streamSetup.input.messages.at(-1) ?? {}), 'new request');
-      yield [
-        'values',
-        {
-          messages: finalMessages,
-        },
-      ];
+    stream(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
+      return graphStream((async function* () {
+        streamInputs.push(inputOverride);
+        assert.equal(readFinalMessageText(streamSetup.input.messages.at(-1) ?? {}), 'new request');
+        yield [
+          'values',
+          {
+            messages: finalMessages,
+          },
+        ];
+      })());
     },
   };
 
@@ -503,7 +521,7 @@ test('runChatSession rejects stale resume with user-facing message', async () =>
     buildResumeCommand() {
       throw new Error('should not build resume command');
     },
-    async *stream() {
+    stream() {
       throw new Error('should not stream');
     },
   };
@@ -564,14 +582,16 @@ test('runChatSession does not map pending review free text to review response', 
     buildResumeCommand(value: unknown) {
       throw new Error(`should not build resume command: ${String(value)}`);
     },
-    async *stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
-      streamInputs.push(inputOverride);
-      yield [
-        'values',
-        {
-          messages: finalMessages,
-        },
-      ];
+    stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
+      return graphStream((async function* () {
+        streamInputs.push(inputOverride);
+        yield [
+          'values',
+          {
+            messages: finalMessages,
+          },
+        ];
+      })());
     },
   };
 
@@ -641,20 +661,22 @@ test('runChatSession omits token usage when provider usage is unavailable', asyn
         hasPendingContinuation: false,
       };
     },
-    async *stream(streamSetup: AgentChannelSetup) {
-      yield [
-        'messages',
-        [
-          new AIMessage('你好，'),
-          { node: 'assistant' },
-        ],
-      ];
-      yield [
-        'values',
-        {
-          messages: finalMessages,
-        },
-      ];
+    stream(streamSetup: AgentChannelSetup) {
+      return graphStream((async function* () {
+        yield [
+          'messages',
+          [
+            new AIMessage('你好，'),
+            { node: 'assistant' },
+          ],
+        ];
+        yield [
+          'values',
+          {
+            messages: finalMessages,
+          },
+        ];
+      })());
     },
   };
 
@@ -684,14 +706,37 @@ test('runChatSession omits token usage when provider usage is unavailable', asyn
   assert.equal(completed.usage, undefined);
 });
 
-test('runChatSession emits provider token usage exposed by graph stream', async () => {
+test('runChatSession emits provider token usage from new state messages', async () => {
   const emittedEvents: unknown[] = [];
+  const historicalReply = new AIMessage({
+    content: '历史回答。',
+    usage_metadata: {
+      input_tokens: 900,
+      output_tokens: 100,
+      total_tokens: 1000,
+    },
+  });
+  historicalReply.id = 'history-ai-1';
   const promptMessages = [
     new HumanMessage('你是谁？'),
   ];
+  const finalReply = new AIMessage({
+    content: '这里是回执。',
+    usage_metadata: {
+      input_tokens: 123,
+      output_tokens: 45,
+      total_tokens: 168,
+    },
+  });
+  finalReply.id = 'reply-ai-1';
+  const initialMessages = [
+    new HumanMessage('之前的问题'),
+    historicalReply,
+  ];
   const finalMessages = [
+    ...initialMessages,
     ...promptMessages,
-    new AIMessage('这里是回执。'),
+    finalReply,
   ];
   const setup = {
     graphKey: 'test',
@@ -708,31 +753,20 @@ test('runChatSession emits provider token usage exposed by graph stream', async 
     async readThreadState() {
       readThreadStateCalls += 1;
       return {
-        messages: readThreadStateCalls === 1 ? [] : finalMessages,
+        messages: readThreadStateCalls === 1 ? initialMessages : finalMessages,
         pendingHumanReview: null,
         hasPendingContinuation: false,
       };
     },
     stream() {
-      const stream = (async function* () {
+      return graphStream((async function* () {
         yield [
           'values',
           {
             messages: finalMessages,
           },
         ];
-      })();
-      return Object.assign(stream, {
-        readTokenUsage: (contextWindow?: number) => ({
-          inputTokens: 123,
-          outputTokens: 45,
-          totalTokens: 168,
-          ...(contextWindow !== undefined ? { contextWindow } : {}),
-          updatedAt: new Date().toISOString(),
-          source: 'provider' as const,
-          scope: 'run' as const,
-        }),
-      });
+      })());
     },
   };
 

@@ -7,9 +7,9 @@ import {
 } from '@pinpawo/pet-agent';
 import type {
   LocalAgentErrorCode,
-  LocalAgentEvent,
   LocalAgentOperationPhase,
   LocalAgentOperationRaw,
+  LocalAgentRuntimeEvent,
 } from './events/localAgentEvent';
 
 export type ChatRequestMessage = {
@@ -63,11 +63,17 @@ export type LocalAgentClientMessage =
   | HumanReviewResponseMessage
   | { type: 'ping' };
 
-export type LocalAgentEventMessage = {
+export type LocalAgentRuntimeEventEnvelope = {
   type: 'event';
   requestId: string;
-  event: LocalAgentEvent;
+  event: LocalAgentRuntimeEvent;
 };
+
+/**
+ * @deprecated Use `LocalAgentRuntimeEventEnvelope` for websocket event
+ * envelopes. The runtime event itself lives at `event`.
+ */
+export type LocalAgentEventMessage = LocalAgentRuntimeEventEnvelope;
 
 export type LocalAgentControlServerMessage =
   | { type: 'pong' }
@@ -132,13 +138,6 @@ function readRecord(record: Record<string, unknown>, key: string) {
     : null;
 }
 
-function readStringArray(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  return Array.isArray(value) && value.every((item) => typeof item === 'string')
-    ? value
-    : null;
-}
-
 function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly string[]) {
   const allowed = new Set(allowedKeys);
   return Object.keys(record).every((key) => allowed.has(key));
@@ -187,7 +186,7 @@ function readRawOperationPayload(
   return Object.keys(result).length > 0 ? result : null;
 }
 
-function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent | null {
+function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentRuntimeEvent | null {
   const type = readString(record, 'type');
   const requestId = readString(record, 'requestId');
   if (!type || !requestId) return null;
@@ -207,8 +206,6 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     const role = readString(record, 'role');
     const text = readString(record, 'text');
     if (role !== 'assistant' || text == null) return null;
-    const metadata = readRecord(record, 'metadata');
-    const tags = metadata ? readStringArray(metadata, 'tags') : null;
     const usage = parseTokenUsageSnapshot(record.usage);
     return {
       type,
@@ -216,15 +213,6 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
       ...(usage ? { usage } : {}),
       role,
       text,
-      ...(metadata
-        ? {
-            metadata: {
-              mood: readOptionalString(metadata, 'mood') ?? null,
-              topic: readOptionalString(metadata, 'topic') ?? null,
-              ...(tags ? { tags } : {}),
-            },
-          }
-        : {}),
     };
   }
   if (type === 'operation') {
@@ -447,7 +435,7 @@ export type SendLocalAgentEventOptions = {
 
 export function sendLocalAgentEvent(
   ws: WsLike,
-  event: LocalAgentEvent,
+  event: LocalAgentRuntimeEvent,
   options: SendLocalAgentEventOptions = {},
 ) {
   if (ws.readyState !== WS_OPEN) {
@@ -462,7 +450,7 @@ export function sendLocalAgentEvent(
   return true;
 }
 
-function stripRawFromEvent(event: LocalAgentEvent): LocalAgentEvent {
+function stripRawFromEvent(event: LocalAgentRuntimeEvent): LocalAgentRuntimeEvent {
   if (event.type !== 'operation' || event.raw === undefined) {
     return event;
   }

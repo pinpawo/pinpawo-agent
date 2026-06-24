@@ -571,7 +571,6 @@ test('sendLocalAgentEvent strips operation.raw by default (remote-safe)', () => 
     requestId: 'req-1',
     role: 'assistant',
     text: 'done',
-    metadata: { mood: null, topic: null, tags: [] },
   }), true);
   const internalOperationEvent: LocalAgentOperationInternalEvent = {
     type: 'operation',
@@ -606,7 +605,6 @@ test('sendLocalAgentEvent strips operation.raw by default (remote-safe)', () => 
         requestId: 'req-1',
         role: 'assistant',
         text: 'done',
-        metadata: { mood: null, topic: null, tags: [] },
       },
     },
     {

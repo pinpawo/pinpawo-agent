@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AgentActor, AgentModels } from '../../../types/agent';
 import type { StructuredOutputOptions } from '../../../utils/structuredOutput';
 import { invokeStructuredOutput } from '../../../utils/structuredOutput';
+import { reviewViewToText } from './reviewSpec';
 import type { ReviewSpec } from './reviewSpec';
 
 export const GLOBAL_REVIEW_POLICY_MODE = {
@@ -164,7 +165,7 @@ function buildAutoReviewPrompt(options: ResolveGlobalReviewPolicyOptions) {
     summary?.details ? `Operation details:\n${safeJson(summary.details)}` : null,
     '',
     `Review title: ${options.review.view.title ?? options.toolName}`,
-    `Review body:\n${clipText(options.review.view.body, MAX_FIELD_CHARS)}`,
+    `Review body:\n${clipText(reviewViewToText(options.review.view), MAX_FIELD_CHARS)}`,
     '',
     `Tool input:\n${safeJson(options.input)}`,
     '',

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { isValidElement } from 'react';
 import { ApprovalPanel } from './ApprovalPanel';
 
-test('ApprovalPanel renders apply_patch review details as patch preview', () => {
+test('ApprovalPanel renders a diff review through the patch preview', () => {
   const patch = [
     '*** Begin Patch',
     '*** Update File: src/example.ts',
@@ -12,24 +12,16 @@ test('ApprovalPanel renders apply_patch review details as patch preview', () => 
     '+const value = 2;',
     '*** End Patch',
   ].join('\n');
-  const details = {
-    files: [{ path: 'src/example.ts', type: 'update' }],
-    patch,
-  };
   const element = ApprovalPanel({
     review: {
       id: 'review-1',
       schemaVersion: 1,
       view: {
-        kind: 'plain',
+        kind: 'diff',
         title: '应用补丁',
-        body: [
-          'Summary: update',
-          '',
-          'Target: src/example.ts',
-          '',
-          `Details:\n${JSON.stringify(details, null, 2)}`,
-        ].join('\n'),
+        summary: 'update',
+        target: 'src/example.ts',
+        patch,
       },
       options: [],
     },
@@ -38,8 +30,7 @@ test('ApprovalPanel renders apply_patch review details as patch preview', () => 
   });
 
   const text = collectText(element).join('\n');
-  assert.match(text, /Summary: update/);
-  assert.match(text, /Target: src\/example\.ts/);
+  assert.match(text, /update/);
   assert.match(text, /  patch src\/example\.ts/);
   assert.match(text, /  -const value = 1;/);
   assert.match(text, /  \+const value = 2;/);

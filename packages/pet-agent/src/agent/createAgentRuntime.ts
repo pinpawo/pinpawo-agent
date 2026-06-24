@@ -65,7 +65,11 @@ import {
   resolveHumanReviewResume,
   ReviewResponseResolutionError,
 } from './orchestrator/review/reviewResponseResolver';
-import { buildReviewSpec, type HumanReviewInterruptPayload } from './orchestrator/review/reviewSpec';
+import {
+  appendReviewViewMessage,
+  buildReviewSpec,
+  type HumanReviewInterruptPayload,
+} from './orchestrator/review/reviewSpec';
 import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
@@ -470,10 +474,7 @@ function buildInvalidIterationLimitReviewPayload(
     error: 'invalid_decision',
     review: {
       ...payload.review,
-      view: {
-        ...payload.review.view,
-        body: `${payload.review.view.body}\n\n${message}`,
-      },
+      view: appendReviewViewMessage(payload.review.view, message),
     },
   };
 }

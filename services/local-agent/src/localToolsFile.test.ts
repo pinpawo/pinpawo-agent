@@ -82,9 +82,11 @@ test('bash toolkit reviews write_file with preset policy', async (t) => {
   const policy = reviewPolicyFor('write_file');
 
   const review = await policy.request(reviewContext('write_file', input));
-  assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '写文件');
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', /afterPreview/);
+  const view = review && 'schemaVersion' in review ? review.view : null;
+  assert.ok(view && view.kind === 'plain');
+  assert.equal(view.title, '写文件');
+  assert.match(view.body, new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(view.body, /afterPreview/);
   assert.deepEqual(
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
     ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
@@ -107,9 +109,11 @@ test('bash toolkit reviews apply_patch with resolved file paths', async (t) => {
   const policy = reviewPolicyFor('apply_patch');
 
   const review = await policy.request(reviewContext('apply_patch', input));
-  assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '应用补丁');
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', /patch/);
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const view = review && 'schemaVersion' in review ? review.view : null;
+  assert.ok(view && view.kind === 'diff');
+  assert.equal(view.title, '应用补丁');
+  assert.match(view.patch, /\*\*\* Update File/);
+  assert.match(view.target ?? '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
 test('bash toolkit reviews local path mutations with presets', () => {

@@ -6,10 +6,38 @@ import {
 } from '../../toolkits/local/applyPatch';
 import { truncateLine } from '../render/terminalText';
 
+export type PatchDisplayTone = 'default' | 'muted' | 'added' | 'removed';
+
 export type PatchDisplayLine = {
   text: string;
-  tone?: 'default' | 'muted' | 'added' | 'removed';
+  tone?: PatchDisplayTone;
 };
+
+export type InkTextToneProps = {
+  color?: string;
+  dimColor?: boolean;
+};
+
+/**
+ * Maps a patch display tone to ink <Text> props. `defaultProps` is returned for
+ * the `default`/undefined tone so callers can supply their own fallback color.
+ */
+export function patchToneToInkProps(
+  tone: PatchDisplayTone | undefined,
+  defaultProps: InkTextToneProps = {},
+): InkTextToneProps {
+  switch (tone) {
+    case 'added':
+      return { color: 'green' };
+    case 'removed':
+      return { color: 'red' };
+    case 'muted':
+      return { dimColor: true };
+    case 'default':
+    case undefined:
+      return defaultProps;
+  }
+}
 
 const DEFAULT_MAX_PATCH_LINES = 24;
 

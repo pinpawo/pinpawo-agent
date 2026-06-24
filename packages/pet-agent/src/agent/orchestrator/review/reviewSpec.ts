@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 export type ReviewView =
   | { kind: 'plain'; title?: string; body: string }
-  | { kind: 'markdown'; title?: string; body: string };
+  | { kind: 'markdown'; title?: string; body: string }
+  | { kind: 'diff'; title?: string; patch: string; target?: string; summary?: string };
 
 export type ReviewOptionInput =
   | {
@@ -96,10 +97,49 @@ function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly stri
 
 function isReviewViewValue(value: unknown): value is ReviewView {
   const record = readRecordValue(value);
-  if (!record || !hasOnlyKeys(record, ['kind', 'title', 'body'])) return false;
-  return (record.kind === 'plain' || record.kind === 'markdown')
-    && typeof record.body === 'string'
-    && (record.title === undefined || typeof record.title === 'string');
+  if (!record) return false;
+  const hasValidTitle = record.title === undefined || typeof record.title === 'string';
+  if (record.kind === 'plain' || record.kind === 'markdown') {
+    return hasOnlyKeys(record, ['kind', 'title', 'body'])
+      && typeof record.body === 'string'
+      && hasValidTitle;
+  }
+  if (record.kind === 'diff') {
+    return hasOnlyKeys(record, ['kind', 'title', 'patch', 'target', 'summary'])
+      && typeof record.patch === 'string'
+      && hasValidTitle
+      && (record.target === undefined || typeof record.target === 'string')
+      && (record.summary === undefined || typeof record.summary === 'string');
+  }
+  return false;
+}
+
+/**
+ * Returns a human-readable text rendering of a review view, for consumers that
+ * only need the textual content (LLM review prompts, reject-message appends).
+ * The `diff` variant has no `body`, so it is flattened to its summary + patch.
+ */
+export function reviewViewToText(view: ReviewView): string {
+  if (view.kind === 'diff') {
+    return [
+      view.summary ? `Summary: ${view.summary}` : null,
+      view.target ? `Target: ${view.target}` : null,
+      view.patch,
+    ].filter((line): line is string => Boolean(line)).join('\n\n');
+  }
+  return view.body;
+}
+
+/** Appends a trailing message to a review view's textual content. */
+export function appendReviewViewMessage(view: ReviewView, message: string): ReviewView {
+  if (view.kind === 'diff') {
+    return {
+      kind: 'plain',
+      ...(view.title ? { title: view.title } : {}),
+      body: `${reviewViewToText(view)}\n\n${message}`,
+    };
+  }
+  return { ...view, body: `${view.body}\n\n${message}` };
 }
 
 function isReviewOptionInputValue(value: unknown): value is ReviewOptionInput {

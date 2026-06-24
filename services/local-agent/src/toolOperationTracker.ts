@@ -38,10 +38,11 @@ export class ToolOperationTracker {
 
   accept(payload: StreamToolsPayload): LocalAgentOperationInternalEvent {
     const id = this.resolveOperationId(payload);
-    const event = buildToolOperationEvent(this.requestId, {
+    const built = buildToolOperationEvent(this.requestId, {
       ...payload,
       toolCallId: id,
     }, this.operationRegistry);
+    const event = this.inheritStartedSummary(built, id);
     this.track(event, payload.name, id);
     return event;
   }
@@ -59,6 +60,33 @@ export class ToolOperationTracker {
         error: phase === 'failed' ? error : undefined,
       },
     }));
+  }
+
+  /**
+   * `on_tool_end` / `on_tool_error` recompute the operation summary from the
+   * terminal payload alone, so tools that only describe themselves via
+   * `summarizeInput` (e.g. view_file_chunk, http_fetch) lose their `target` /
+   * `details` on the result event — the history line collapses to just the
+   * title. Backfill those descriptive fields from the still-tracked start/update
+   * event so the completed line keeps showing which file/url was touched.
+   */
+  private inheritStartedSummary(
+    event: LocalAgentOperationInternalEvent,
+    id: string,
+  ): LocalAgentOperationInternalEvent {
+    if (event.phase === 'started') return event;
+    const previous = this.activeById.get(id)?.event.operation;
+    if (!previous) return event;
+    const { target, summary, details } = event.operation;
+    return {
+      ...event,
+      operation: {
+        ...event.operation,
+        target: target ?? previous.target,
+        summary: summary ?? previous.summary,
+        details: details ?? previous.details,
+      },
+    };
   }
 
   private resolveOperationId(payload: StreamToolsPayload) {

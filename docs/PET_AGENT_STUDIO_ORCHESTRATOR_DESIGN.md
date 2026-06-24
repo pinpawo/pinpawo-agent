@@ -1,12 +1,14 @@
 # Pet Agent Studio Orchestrator Design
 
+> Status: legacy design. The Studio runtime is being redesigned without compatibility requirements; use `docs/STUDIO_RUN_CONTROLLER_DESIGN.md` as the canonical design and `docs/STUDIO_RUN_CONTROLLER_ITERATION_PLAN.md` as the iteration plan.
+
 ## Goal
 
 `packages/pet-agent` 需要支持一个 Studio 内并行存在多个 pet agent runtime。每个 pet agent 有自己的身份、角色、capability 集合和运行状态。`StudioOrchestrator` 是流水线的 show-runner,职责是编排撰稿、维护共享知识、决定路由与终止。
 
 架构整体心智模型见 `docs/PET_AGENT_STUDIO_ARCHITECTURE_OVERVIEW.md`。核心立场:
 
-- `StudioOrchestrator` 承担编排:plan 决策(整体推进)、execute 决策(下一棒派单与撰稿)、wiki 维护(把 pet 产出整理为可共享的知识库)、终止标定。
+- `StudioOrchestrator` 承担编排:planner 调用、request/task queue 推进、worker 派发、wiki 维护(把 pet 产出整理为可共享的知识库)、终止标定。
 - `PetAgentRuntime` 承担数据加工:每次 dispatch 接收 Studio 撰写的 brief,自主访问 Studio Whiteboard(文件系统形态的 wiki)获取所需上下文,在自己的 capability 集合内完成本棒加工,产出 pet 返回结果。
 - **Studio Whiteboard** 是 per-conversation 持久的文件系统目录,curator 节点负责维护内容,pet 通过 wiki_read toolkit 自主检索。
 - **Capability Artifact Store** 是 per-conversation durable 产物层,capability 完成时 sink 产物,Studio / UI / 后续 pet 通过 artifact refs 读取。
@@ -24,33 +26,33 @@ local-agent
   -> register standby runtimes in StudioOrchestrator
   -> wait for user turns
 
-StudioOrchestrator (planner agent + execute state machine + wiki_curator)
-  -> initialize turn state (turnId, userRequest, empty plan)
+StudioOrchestrator (PetRegistry + WorkQueue/Runner + WikiCurator)
+  -> enqueue(userRequest) → request item 入队 → accepted/runId
 
-  -> obtainPlan:
+  -> runner consumes request item:
        caller 显式传入 plan → 直接使用
        否则 → invoke 配置的 plannerPetId 对应的 pet,
-              临时注入 `studio.plan` capability,
+              临时注入 `studio_plan` capability,
               planner 自己理解需求 / 必要时 HITL 提问 / 产出 plan
-              若 planner 未提交 plan → turn 标记 stopped
-       plan 一旦确定不再回炉
+              若 planner 未提交 plan → run 标记 stopped
+       plan.tasks 展开为 task items 入队
 
   -> execute state machine(deterministic,非 LLM):
        look up 下一个 pending task → dispatch
-                                      → pet.invoke({ brief, wikiRoot, artifactRefs, signal })
-                                      → 收到 pet 返回文本 + artifact refs
-                                      → wiki_curator 整理本棒 raw source
-                                      → 写回 task.status
-                                      → 回到 execute
+                                        → pet.invoke({ brief, wikiRoot, artifactRefs, signal })
+                                        → 收到 pet 返回文本 + artifact refs
+                                        → wiki_curator 整理本棒 raw source
+                                        → 写回 taskStates[taskIndex].status
+                                        → 回到 execute
        所有 task satisfied         → finish(finalDispatchId = 末棒 dispatch)
        否则(有 failed / 上限)    → stop
 ```
 
 关键:
 
-- **planner 是 agent,不是 graph 节点**——它是一个普通 pet runtime,通过 `studio.plan` capability(以 tool 形式)提交 plan。其内部 reasoning、HITL 提问全部通过该 pet 自己的 UI 通道完成,Studio 不感知。
-- **execute 是确定性状态机**,不是 LLM 节点。"下一个 pending task → dispatch / 全部 satisfied → finish / 否则 stop"是固定规则。
-- **MVP 严格顺序 dispatch**:每次 execute 最多输出一个 `dispatch`,等 pet 返回 + curator 整理完再进入下一轮。
+- **planner 是 agent,不是 graph 节点**——它是一个普通 pet runtime,通过 `studio_plan` capability(以 tool 形式)提交 plan。其内部 reasoning、HITL 提问全部通过该 pet 自己的 UI 通道完成,Studio 不感知。
+- **runner 是确定性规则**,不是 LLM 节点。"queue head → request/task handler / 全部 satisfied → finish / 否则 stop"是固定规则。
+- **MVP 严格 FIFO dispatch**:每次 runner 消费一个 task item,等 pet 返回 + curator 整理完再进入下一项。
 - **方向不再回炉**:plan 一旦确定就执行到底,不在 turn 内自我修正。遇到不能推进的情况选 `finish`(若有可作交付)或 `stop`,把方向决策留给下一 turn。
 
 ## UI Role Boundary
@@ -92,10 +94,10 @@ UI 主显示是 **pet agent 面板**。Studio 呈现为**控制面状态显示**
 
 ### StudioOrchestrator
 
-Studio 级 **composer + scheduler + curator**。当前实现是 in-process 编排函数(无独立 LangGraph 图层),由三件事拼成:
+Studio 级 **run controller**。当前实现是 in-process 编排函数(无独立 LangGraph 图层),由三件事拼成:
 
-- **planner agent 调用**(`obtainPlan`):在 turn 起始向配置的 `plannerPetId` pet 派一棒,临时注入 `studio.plan` capability。planner 自己理解需求、必要时 HITL 提问,通过 capability tool 提交 plan。
-- **execute state machine**:plan 确定后按顺序遍历 task,每棒派发完成后写回 status,整体逻辑确定(不再过 LLM)。
+- **planner agent 调用**(`obtainPlan`):在 turn 起始向配置的 `plannerPetId` pet 派一棒,临时注入 `studio_plan` capability。planner 自己理解需求、必要时 HITL 提问,通过 capability tool 提交 plan。
+- **WorkQueue / runner**:user request 与 plan task 都作为 FIFO queue item 推进。request item 调 planner;task item 调 worker。runner 负责 retry、cancel、terminal 判断,整体逻辑确定(不再过 LLM)。
 - **wiki_curator 节点**:每次 pet 返回结果后运行,把 raw source 整理进 Studio Whiteboard。可注入(默认 skeleton curator,production 用 LLM curator)。
 
 orchestrator 同时:
@@ -106,53 +108,55 @@ orchestrator 同时:
 - 推送 **turn state stream**(驱动控制面状态显示)。
 - turn 终止时标定 `finalDispatchId`,UI 把对应 pet 返回结果 渲染到主对话面板。
 
-设计立场:**Studio 不在 turn 内自我修正大方向**。execute 只输出 dispatch / finish / stop——遇到无法直接推进的情况,优先 finish(把当前可作交付的输出标定)或 stop(异常退出),而不是回到 planner 重判。方向决策由用户在下一 turn 通过 follow-up 给出(per-conversation wiki 保留全部上下文,跨 turn 衔接自然)。
+设计立场:**Studio 不在 turn 内自我修正大方向**。runner 只负责排队、派发、重试和收尾——遇到无法直接推进的情况,优先 finish(把当前可作交付的输出标定)或 stop(异常退出),而不是回到 planner 重判。方向决策由用户在下一 turn 通过 follow-up 给出(per-conversation wiki 保留全部上下文,跨 turn 衔接自然)。
 
 边界:capability、tool、底层 API 由 pet 承担;capability artifacts 由 capability/pet runtime sink 到 artifact store;wiki 内容由 curator 节点编辑;用户最终答复由末位 pet 的 pet 返回结果 提供,Studio 在终止时标定 `finalDispatchId`。
 
-第一版聚焦显式 dispatch plan 与默认主 agent 路径。MVP 严格顺序 dispatch,Promise.all 并行作为 Phase 后续。
+当前 MVP 严格 FIFO 顺序 dispatch,Promise.all 并行作为 Phase 后续。
 
 ## StudioOrchestrator Runtime
 
-orchestrator 的 turn 执行由 **obtainPlan + execute state machine + wiki_curator** 拼成。其中只有 planner agent 和 wiki_curator 是 LLM 调用,execute state machine 是确定性规则。
+orchestrator 的 turn 执行由 **request queue item + task queue items + wiki_curator** 拼成。其中只有 planner agent 和 wiki_curator 是 LLM 调用,queue runner 是确定性规则。
 
 ### Routing
 
 ```text
-entry → obtainPlan
-          caller 显式 plan       → 用之
-          否则 invoke plannerPet → planner 通过 studio.plan capability 提交 plan
-                                    若未提交 → END(turn_finished, outcome: stopped)
+enqueue(userRequest) → request item 入队 → accepted/runId
 
-execute(确定性状态机) → action:
-  下一个 pending task  → dispatch
-                         → invoke pet 并传入 brief + wikiRoot
-                         → 收到 pet 返回文本
-                         → wiki_curator 整理 raw source
-                         → 写回 task.status
-                         → execute(loop)
-  全部 satisfied        → finish → END(turn_finished, finalDispatchId)
-  否则(failed / 上限) → stop  → END(turn_finished, outcome: stopped)
+runner 消费 request item:
+  caller 显式 plan       → 用之
+  否则 invoke plannerPet → planner 通过 studio_plan capability 提交 plan
+                            若未提交 → END(turn_finished, outcome: stopped)
+  plan.tasks 展开为 task items 入队
+
+runner 消费 task item:
+  task pending 且 pet 可派发 → invoke pet 并传入 brief + wikiRoot
+                              → 收到 pet 返回文本
+                              → wiki_curator 整理 raw source
+                              → 写回 task runtime state
+  worker throw 且未达 retry  → 同 task item 重新入队
+  全部 satisfied             → finish → END(turn_finished, finalDispatchId)
+  否则(failed / 上限)      → stop  → END(turn_finished, outcome: stopped)
 ```
 
 观察:
 
-- **obtainPlan 只在 turn 起始执行一次**。planner 自身可能多次 LLM 调用 + HITL 提问,但对 Studio 是一次原子的 `pet.invoke`。
-- **execute 是常驻循环**,大多数 iter 走它,逻辑确定,无 LLM 推理。
-- **execute 不回到 obtainPlan**;若 plan 不再合理,选 `finish`(交付现有产出)或 `stop`。
+- **request item 只规划一次**。planner 自身可能多次 LLM 调用 + HITL 提问,但对 Studio 是一次原子的 `pet.invoke`。
+- **runner 是常驻循环**,大多数 iter 走 task item,逻辑确定,无 LLM 推理。
+- **runner 不回到 request item 重新规划**;若 plan 不再合理,选 `finish`(交付现有产出)或 `stop`。
 - wiki_curator 与 execute 顺序衔接,职责完全正交。
 
 ### 三个执行单元的职责
 
 | 单元 | 类型 | 关心什么 | 主要输入 |
 |---|---|---|---|
-| planner agent | pet runtime invoke | 理解需求、必要时 HITL、产出 plan | userRequest + 注入的 `studio.plan` capability |
-| execute state machine | 确定性规则 | 推进 plan、决定收尾 | 当前 turn 的 task 列表与 dispatch 历史 |
+| planner agent | pet runtime invoke | 理解需求、必要时 HITL、产出 plan | userRequest + 注入的 `studio_plan` capability(`list_pets` / `submit_plan`) |
+| queue runner | 确定性规则 | 推进 plan、决定收尾 | queue head、task 状态与 dispatch 历史 |
 | wiki_curator | LLM 节点(可注入) | 把新 raw source 整理进 wiki | 新 pet 返回结果 + 现有 wiki 文件状态 + 用户可维护的 curator prompt |
 
-只有 planner agent 与 wiki_curator 走 LLM(各自一段独立 trace);execute 不耗 LLM 调用。
+只有 planner agent 与 wiki_curator 走 LLM(各自一段独立 trace);queue runner 不耗 LLM 调用。
 
-循环在 obtainPlan 失败 / execute 输出 `finish` / `stop` / 达到 `maxIterationCount` 时结束。
+循环在 request item 规划失败 / runner 输出 `finish` / `stop` / 达到 `maxIterationCount` 时结束。
 
 ### Runtime Inputs
 
@@ -165,7 +169,7 @@ execute(确定性状态机) → action:
 - 当前用户会话的近期上下文。
 - 当前 Studio turn 的 dispatch 历史(interaction log)和 dispatch state。
 
-这些信息只给 `StudioOrchestrator` 使用，不透传给具体 pet agent。
+这些信息先由 `StudioOrchestrator` 持有。普通 worker invoke 不透传整份 Studio context;planner 也不预先接收派生出的 planning snapshot。planner 需要了解 Studio pets 时,通过 `studio_plan` capability 内部的 `list_pets` 工具按需读取。
 
 ### Turn State
 
@@ -178,6 +182,7 @@ type StudioTurnState = {
   conversationId: string;        // wiki 目录命名空间
   userRequest: string;
   plan: StudioTaskPlan | null;
+  taskStates: StudioTaskRuntimeState[];
   dispatches: StudioDispatchState[];
   wikiRoot: string;              // 当前 conversation 的 wiki 目录绝对路径
   artifactRoot: string;          // 当前 conversation 的 artifact store 根目录或 store scope
@@ -185,13 +190,16 @@ type StudioTurnState = {
 };
 
 type StudioTaskPlan = {
-  tasks: StudioTask[];           // 顺序即执行顺序;数组下标即 task 身份
+  tasks: StudioTask[];           // 顺序即调用计划;数组下标即 task 身份
 };
 
 type StudioTask = {
   petId: string;
   goal: string;
   acceptanceCriteria: string[];
+};
+
+type StudioTaskRuntimeState = {
   status: 'pending' | 'satisfied' | 'failed';
   retryCount: number;
 };
@@ -214,9 +222,9 @@ type StudioDispatchState = {
 - 没有 `envelopes` 字段——pet 输出文本直接落在对应 `StudioDispatchState.resultText`,interaction log 派生自 dispatches。
 - 没有 `requirementState`——是否需要澄清由 planner agent 在自己的 reasoning 中判断,必要时通过 HITL 直接向用户提问。
 - 没有 `awaiting_input` 状态——pet 内部的 HITL 不穿透到 Studio,Studio 视角下 dispatch 就是 `running` 直到 result 返回。
-- `dispatches` 主要用于 trace / UI 状态显示;判断 task 是否完成看 `task.status`。
+- `dispatches` 主要用于 trace / UI 状态显示;判断 task 是否完成看 `taskStates[taskIndex].status`。
 - `artifacts` 只保存 refs,artifact 本体在 capability artifact store。dispatch state 不复制大型产物内容。
-
+- `plan` 是调用计划,不承载运行状态;`status/retryCount` 属于 `taskStates`。
 ### Planner Agent
 
 Planner 不是 graph 节点,而是 **一个普通的 pet agent**,由 `StudioOrchestratorConfig.plannerPetId` 指定。turn 起始(且 caller 未显式给出 plan)时,Studio 把它当成第一棒调用:
@@ -228,14 +236,22 @@ StudioOrchestrator.obtainPlan(userRequest):
     brief: userRequest,           // 用户原始请求作为 planner 的 brief
     extraCapabilities: [createPlanCapability({
       onSubmit: (submitted) => { plan = submitted },
+      listPets: () => listAgents(),
     })],
   })
   return plan          // tool 调用通过闭包写回;若 planner 没调 → plan 为 null,turn stopped
 ```
 
-`studio.plan` capability 给 planner 一个 `submit_plan(tasks: StudioTask[])` 工具。planner 自己:
+`studio_plan` capability 给 planner 两个窄工具:
+
+- `list_pets()`:读取当前 Studio pets 的 `petId` / `role` / `serviceSummary` / `status` 等可规划信息。
+- `submit_plan(tasks: StudioTask[])`:提交本次 run 的有序 task 列表。
+
+planner 自己:
 
 - 理解用户需求,必要时拉 wiki 看历史。
+- 需要选择 worker 时调 `list_pets`,读取 Studio 当前 pet 职责与状态。
+- 优先把 task 分派给职责匹配且状态可派发的 worker pet。
 - 缺信息时通过 pet 自己的 HITL 桥(`humanReviewer`)向用户提问 —— 走 INTERFACES 文档的 Boundary 3,Studio 不感知。
 - 信息齐备后调 `submit_plan`,把任务列表(顺序即执行顺序)提交。
 - 若该请求超出 Studio 范畴,planner 自行选择不调用 `submit_plan` 并以自然语言解释 —— Studio 收到空 plan,turn 标记 stopped。
@@ -246,31 +262,27 @@ StudioOrchestrator.obtainPlan(userRequest):
 - planner 的 HITL 与普通 pet 同构,不需要 Studio 引入 ask_user 状态机。
 - planner 可以被替换:不同的 Studio 可以指定不同 plannerPetId,获得不同的 planning 行为。
 
-### Execute State Machine
+边界上要保持清楚:planner 不是 Studio 的执行 orchestrator。它只根据用户意图和 `list_pets` 读到的当前 pet 视图提交一份调用计划;计划提交后,排队、派发、重试、收尾都属于 Studio 的确定性运行层。
 
-execute 是一个确定性规则,不走 LLM:
+### Queue Runner
+
+queue runner 是一个确定性规则,不走 LLM。当前实现用 request item 和 task item 作为推进单位:
 
 ```ts
-function decideExecuteAction(state): ExecuteAction {
-  const i = state.plan.tasks.findIndex((t) => t.status === 'pending');
-  if (i >= 0) {
-    return { type: 'dispatch', taskIndex: i, brief: composeBrief(state.plan.tasks[i], state) };
-  }
-  const allSatisfied = state.plan.tasks.every((t) => t.status === 'satisfied');
-  if (allSatisfied) return { type: 'finish', finalDispatchId: lastDispatchId(state) };
-  return { type: 'stop', reason: 'unresolvable plan tasks' };
-}
+type StudioQueueItem =
+  | { kind: 'request'; runId: string; conversationId: string; userRequest: string }
+  | { kind: 'task'; runId: string; conversationId: string; taskIndex: number; petId: string; goal: string };
 ```
 
-task 的身份是 `plan.tasks` 数组下标。这是天然唯一、由数据结构保证的——planner 不需要(也不应)生成 task id;`ExecuteAction.dispatch` 直接带 `taskIndex`,dispatcher 用 `state.plan.tasks[taskIndex]` 直接拿到对应任务,没有 lookup-by-id 的歧义空间。
+task 的身份是 `plan.tasks` 数组下标。这是天然唯一、由数据结构保证的——planner 不需要(也不应)生成 task id;task queue item 直接带 `taskIndex`,runner 用 `state.plan.tasks[taskIndex]` 直接拿到对应任务,没有 lookup-by-id 的歧义空间。
 
-brief 由 `composeBrief` 按 task `goal` / `acceptanceCriteria` + 上一棒 pet 返回概况组合,**不过 LLM**。MVP 用模板拼装即可;Phase 3 若需要 brief 个性化再考虑改成 planner 的二次调用。
+brief 第一版直接使用 task `goal`。如果后续需要更丰富的 brief,仍应由 runner 用确定性模板按 `goal` / `acceptanceCriteria` + wiki 事实组合,**不过 LLM**;不回到 planner 二次规划。
 
-execute 关心"按 plan 推进到底"——**不自我修正大方向**。若发现 plan 不再合理,选 `finish`(交付当前可用产出)或 `stop`(若无可交付),把方向决策留给用户在 follow-up turn 解决。
+queue runner 关心"按 plan 推进到底"——**不自我修正大方向**。若发现 plan 不再合理,选 `finish`(交付当前可用产出)或 `stop`(若无可交付),把方向决策留给用户在 follow-up turn 解决。
 
-### ExecuteAction 集合
+### Internal ExecuteAction
 
-execute state machine 输出一个 discriminated union:
+`ExecuteAction` 保留为内部状态机文档类型,表达 task item handler 的三类动作:
 
 ```ts
 type ExecuteAction =
@@ -285,13 +297,13 @@ type ExecuteAction =
 - `finish`:turn 终止信号,标定 `finalDispatchId`,UI 渲染对应 dispatch 的 pet 返回文本到主对话面板。
 - `stop`:无法继续(retry 耗尽 / pet 不可用 / plan 有 failed task 且无可交付),turn_finished outcome 为 stopped。
 
-planner 不输出 ExecuteAction,planner 通过 `studio.plan` capability 的 tool 直接提交 `StudioTaskPlan`(见上一节)。
+planner 不输出 ExecuteAction,planner 通过 `studio_plan` capability 的 tool 直接提交 `StudioTaskPlan`(见上一节)。
 
 ### 验收的判断方式
 
-某棒 result 是否可作为末位交付,**隐式发生在 execute 状态机的固定规则中**:
+某棒 result 是否可作为末位交付,**隐式发生在 queue runner 的固定规则中**:
 
-- 把 dispatch 完成后写回 task status:成功(pet 正常返回文本)→ satisfied;失败且达 `maxRetryPerTask` → failed;失败但未达上限 → 仍 pending,下一轮 execute 会再次 dispatch 同一 taskIndex(retryCount 由 dispatcher 自动 ++)。
+- 把 dispatch 完成后写回 `taskStates[taskIndex]`:成功(pet 正常返回文本)→ satisfied;失败且达 `maxRetryPerTask` → failed;失败但未达上限 → 仍 pending,runner 会把同一 task item 重新入队(retryCount 由 dispatcher 自动 ++)。
 - 全部 task 都 satisfied → `finish { finalDispatchId }`(末棒 dispatch)。
 - 有 task failed 且无可作交付的 result → `stop`。
 
@@ -301,7 +313,7 @@ planner 不输出 ExecuteAction,planner 通过 `studio.plan` capability 的 tool
 
 ### Dispatch Brief
 
-execute state machine 在产出 `dispatch` action 时同时撰写 brief(`composeBrief(task, state)`)。它是一段**自然语言任务说明**(string),包含本棒在流水线中的位置、任务目标(取自 `task.goal` / `task.acceptanceCriteria`)、上一棒产出的叙述性概况、以及关键约束。MVP 用模板拼装,不过 LLM。
+task item 在 dispatch 时携带 brief。它是一段**自然语言任务说明**(string),包含本棒任务目标(取自 `task.goal` / `task.acceptanceCriteria`)以及关键约束。MVP 直接使用 task goal,后续如需补充上游概况,也应由 runner 用模板拼装,不过 LLM。
 
 dispatcher 收到 brief 后,把 brief + wikiRoot + artifact refs + signal 传给 `PetAgentRuntime.invoke(...)`。wiki middleware 在 invoke 时自动读取 `{wikiRoot}/index.md` 并粘进 system prompt(详见 INTERFACES 文档)。pet 视角下,每次 dispatch 收到的输入形态一致:一段任务文本 + 一份 wiki 索引(自然语言形式)+ 必要产物引用。
 
@@ -347,7 +359,7 @@ execute(plan 存在)
       等待 Promise resolve,拿到 pet:A 的返回文本 + artifact refs
       (过程中 pet 内部 HITL 对 Studio 不可见)
       wiki_curator 读返回文本 + artifact refs,整理进 wiki
-      写回 task.status = satisfied / failed
+      写回 taskStates[taskIndex].status = satisfied / failed
   → 回到 execute
 
 execute 下一轮
@@ -368,9 +380,20 @@ execute 末轮
 - pet 内部的 HITL(planner 与普通 pet 都一样)通过 pet runtime 自己的 UI 通道(INTERFACES Boundary 2/3)处理,Studio 视角下 invoke Promise 一直 pending 直到 pet 返回文本。
 - MVP 严格顺序:execute 每轮输出一个 dispatch,等 invoke 完成 + curator 整理完后再进入下一轮 execute。
 
+#### Queue-Oriented Runner
+
+当前实现把 `plan.tasks` 视为 queue 的输入,而不是直接等同于运行状态:
+
+- planner 仍只提交有序 task 列表;不生成 task runtime 状态,也不决定 worker 调用细节。
+- Studio 接收 plan 后把 task 入队。queue head 是"下一步做什么"的唯一来源,不另设 cursor。
+- Studio 请求可以非阻塞:`enqueue()` 创建 run 并放入 request item 后返回 accepted/runId;后台 runner 继续消费 request/task queue。
+- worker 前的一层只做具体运行控制:该排队就排队,该执行就执行,按完成情况推进下一项。
+- worker invocation 仍保持简单抽象:`PetAgentRuntime.invoke({ brief, wikiRoot, signal, ... })`;队列层不关心 worker 内部如何完成任务。
+- `invoke()` 保留为同步兼容入口,内部等价于 `enqueue()` + `waitForRun()`。
+
 ### Finalization
 
-流水线结束时,execute 状态机输出 `finish` action,标定 `finalDispatchId`——指明哪个 dispatch 的 pet 返回文本作为用户答复来源:
+流水线结束时,queue runner 输出 `finish` action,标定 `finalDispatchId`——指明哪个 dispatch 的 pet 返回文本作为用户答复来源:
 
 ```text
 execute → finish { finalDispatchId, reason }
@@ -440,7 +463,7 @@ Studio Whiteboard 是一个**文件系统目录**形态的共享知识库,由 wi
 
 ### Wiki Curator 节点
 
-curator 是独立的 LLM 节点(实现可注入),执行时机为**每次 pet 返回 pet 返回结果 之后**、回到 execute 状态机之前:
+curator 是独立的 LLM 节点(实现可注入),执行时机为**每次 pet 返回 pet 返回结果 之后**、回到 queue runner 之前:
 
 ```text
 trigger:    pet 产出 pet 返回结果 后
@@ -540,15 +563,25 @@ Capability Artifact Store 是与 Studio Whiteboard 并列的 durable 产物层�
 - 发现 curator 写错可以手工编辑 markdown 修正,下一棒 pet 看到的就是修正后的版本。
 - wiki 目录可以纳入 git diff / 归档,便于复盘与跨会话对比。
 
-## Turn State Stream
+## Run API And Turn State Stream
 
-orchestrator 对外推送一条 **turn state stream**,供控制面状态显示订阅。Caller 在 `StudioOrchestrator.invoke()` 时传入 `onTurnEvent` callback,Studio 在编排关键节点同步调用它:
+orchestrator 对外提供 run-level API:
+
+```ts
+orchestrator.enqueue(input)       // accepted/runId
+orchestrator.getRun(runId)        // snapshot
+orchestrator.waitForRun(runId)    // terminal StudioTurnResult
+orchestrator.subscribeEvents(fn)  // run-level event stream
+orchestrator.invoke(input)        // enqueue + waitForRun compatibility wrapper
+```
+
+orchestrator 同时推送一条 **turn state stream**,供控制面状态显示订阅。Caller 可以在 `enqueue()` / `invoke()` input 里传入 `onTurnEvent`,也可以用 `subscribeEvents()` 订阅 `{ runId, conversationId, event }` 形态的 run-level wrapper。Studio 在编排关键节点同步触发事件:
 
 ```ts
 type StudioTurnEvent =
   | { type: 'turn_started';        turnId: string; userRequest: string }
   | { type: 'plan_set';            plan: StudioTaskPlan }
-  | { type: 'task_status_changed'; taskIndex: number; status: StudioTask['status'] }
+  | { type: 'task_status_changed'; taskIndex: number; status: StudioTaskRuntimeState['status'] }
   | { type: 'dispatch_started';    dispatchId: string; taskIndex: number; petId: string }
   | { type: 'dispatch_finished';   dispatchId: string;
                                    status: 'finished' | 'cancelled';
@@ -616,10 +649,10 @@ Studio 客户端消息保持 `studio_request` 起手；server 端 agent run acti
 
 | 消息 | 方向 | 用途 |
 |------|------|------|
-| `studio_request { requestId, userRequest }` | client → server | turn 起手 |
+| `studio_request { requestId, userRequest, runId?, conversationId? }` | client → server | turn 起手；`runId` 与 `conversationId` 可显式指定以便外部 scheduler 幂等、并发控制 |
 | `event { requestId, event: { type: 'studio.progress', ... } }` | server → client | Studio 编排进度(turn_started / plan_set / dispatch_started 等) |
 | `event { requestId, event: { type: 'human_review.requested', ... } }` | server → client | Studio 内 pet HITL |
-| `studio_response { requestId, outcome, reply, finalDispatchId?, reason? }` | server → client | turn 终态 + 最终 reply |
+| `studio_response { requestId, outcome, reply, finalDispatchId?, reason?, runId?, conversationId?, idempotencyKey?, workdir? }` | server → client | turn 终态 + 最终 reply；新增字段用于 scheduler 幂等链路和 workspace trace 归属 |
 | `studio_error { requestId, message }` | server → client | turn 失败 |
 
 ### humanReviewer 桥(local-agent 内部 wiring)
@@ -675,12 +708,22 @@ capability 在 pet 内部运作;跨 capability 与跨 pet 的衔接由 `StudioOr
 
 当某个 capability 完成本职后发现需要其它能力补足,在 result.summary 中以缺口说明的形式标出,Studio 在 reason 阶段读取后决定是否派发下一棒 pet 并撰写新的 brief。
 
+### 幂等约定（跨进程可共享）
+
+`runId`/`conversationId` 与 `idempotencyKey` 的派生约定由 `@pinpawo/pet-agent` 的
+`buildStudioRunIdentity({ runId, conversationId? })` 提供：
+
+- `conversationId = request.conversationId ?? runId`
+- `idempotencyKey = studio:{conversationId}:run:{runId}`
+
+`local-agent` 的 `StudioRunService` 与将来的 App/API scheduler 都应直接复用该函数，避免约定漂移。
+
 视频脚本场景示例:
 
 ```text
 obtainPlan
   invoke planner pet(userRequest = "做一支讲秋日食材的短视频")
-  planner 通过 studio.plan capability 提交(顺序即执行顺序,数组下标即 task 身份):
+  planner 通过 studio_plan capability 提交(顺序即执行顺序,数组下标即 task 身份):
     [ { petId: trend_video_script, goal: "搭脚本结构",        ... },   # taskIndex = 0
       { petId: video_tail_audio,   goal: "补尾音频 + 整合",   ... } ]  # taskIndex = 1
 
@@ -688,7 +731,7 @@ execute → dispatch(taskIndex=0, brief)
   trend_video_script pet
     返回脚本结构文本 + scriptOutline artifact ref
   wiki_curator: 把 scriptOutline ref 与摘要整理进 topics/script-structure.md
-  plan.tasks[0].status = satisfied
+  taskStates[0].status = satisfied
 
 execute → dispatch(taskIndex=1, brief)
   video_tail_audio pet
@@ -697,7 +740,7 @@ execute → dispatch(taskIndex=1, brief)
     必要时按 artifact ref 读取 scriptOutline 本体
     加工并整合,产出含音频建议的完整 pet 返回结果 + finalDeliverable artifact ref
   wiki_curator: 把 audio 产出整理进 topics/audio-strategy.md, 更新 index
-  plan.tasks[1].status = satisfied
+  taskStates[1].status = satisfied
 
 execute → 全部 satisfied → finish { finalDispatchId = taskIndex=1 的 dispatch }
   UI 渲染 audio pet 的 pet 返回结果 到主对话面板
@@ -713,7 +756,7 @@ execute → 全部 satisfied → finish { finalDispatchId = taskIndex=1 的 disp
 studio turn run
   → obtainPlan
       → pet agent run: planner pet
-          → capability run: studio.plan(submit_plan tool call)
+          → capability run: studio_plan(submit_plan tool call)
   → execute step          (ExecuteAction: dispatch + brief)  // 确定性,无 LLM
   → pet agent run: script pet
       → capability run: trend_video_script
@@ -727,7 +770,7 @@ studio turn run
   → finish(标定 finalDispatchId)
 ```
 
-LLM 调用集中在两处:**planner pet agent run** 和 **wiki_curator run**(每棒一次)。execute 状态机本身不耗 LLM,只产出 action 决定下一步。这种结构让 trace 清晰、planner 行为可单独 eval、curator 提示词可独立 tune。turn 结束时由 `finish` 的 `finalDispatchId` 指明用户答复来源。
+LLM 调用集中在两处:**planner pet agent run** 和 **wiki_curator run**(每棒一次)。queue runner 本身不耗 LLM,只产出 action 决定下一步。这种结构让 trace 清晰、planner 行为可单独 eval、curator 提示词可独立 tune。turn 结束时由 `finish` 的 `finalDispatchId` 指明用户答复来源。
 
 这样可以避免多 pet 协作时 route、capability discovery 和具体执行日志混在一起。
 
@@ -738,7 +781,7 @@ LLM 调用集中在两处:**planner pet agent run** 和 **wiki_curator run**(每
 - 增加 `StudioContext`、`PetAgentRuntime`、`StudioOrchestrator` 类型和 skeleton。
 - 实现 `PetAgentRuntime.invoke({ brief, wiki, artifactRefs, signal })` 签名与 wiki middleware(详见 INTERFACES 文档)。
 - 实现 wiki middleware:读 `{wikiRoot}/index.md` → 粘进 system prompt + 绑定 wiki_read toolkit。
-- 实现 obtainPlan(planner agent + studio.plan capability)+ execute 状态机 + wiki_curator,执行单元拼成一个 turn 编排函数。`ExecuteAction` 由 zod 校验。
+- 实现 obtainPlan(planner agent + studio_plan capability)+ queue runner + wiki_curator,执行单元拼成一个 turn 编排函数。`ExecuteAction` 由 zod 校验。
 - 实现 Studio Whiteboard 文件目录与 wiki_curator 节点(curator prompt 用默认值)。
 - 实现 wiki_read toolkit,在 Studio 模式下由 wiki middleware 装备到 pet。
 - pet runtime 透传 `onToolEvent` callback(Boundary 2),HITL 通过构造时注入的 `humanReviewer` 桥(Boundary 3)消化(详见 INTERFACES 文档)。

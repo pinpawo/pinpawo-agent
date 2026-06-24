@@ -55,9 +55,9 @@ export function createBrowserToolkit(): AgentToolkit {
     operations: browserOperationMetadata,
     policy: {
       toolReview: {
-        browser_open: ReviewPolicies.externalAccess(),
-        browser_open_with_session: ReviewPolicies.externalAccess(),
-        browser_open_with_profile: ReviewPolicies.externalAccess(),
+        browser_open: ReviewPolicies.externalAccess({ authorization: 'url_domain' }),
+        browser_open_with_session: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+        browser_open_with_profile: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
       },
     },
   };

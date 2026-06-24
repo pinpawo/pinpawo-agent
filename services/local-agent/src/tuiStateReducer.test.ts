@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import { TUI_CORE_TARGET_ACTIONS } from './tui/contracts/tuiCoreContract';
 import { createInitialTuiState, createSession, type TuiState } from './tui/state/tuiState';
 import {
+  selectFocusedActiveOperations,
   selectFocusedActiveRun,
+  selectFocusedActivities,
   selectFocusedBusy,
+  selectFocusedNotices,
   selectFocusedPendingApproval,
-  selectFocusedSubagentDraft,
+  selectFocusedTimeline,
   tuiStateReducer,
 } from './tui/state/tuiStateReducer';
+import { buildTimelineDisplayEntries } from './tui/timeline/agentTimelineSelectors';
 
 function initialState(sessionId = 'chat:pet') {
   return createInitialTuiState(createSession({
@@ -33,8 +38,63 @@ function startRun(state: TuiState, requestId = 'req-1', sessionId?: string) {
   });
 }
 
-test('tuiStateReducer uses completed message text for final assistant history', () => {
+function timelineMessageText(state: TuiState, sessionId: string, entryId: string) {
+  const entry = state.sessions[sessionId]?.timeline.find((entry) => entry.id === entryId);
+  return entry?.type === 'message' ? entry.text : undefined;
+}
+
+function transcriptTimeline(state: TuiState, sessionId = 'chat:pet') {
+  return state.sessions[sessionId]?.timeline
+    .filter((entry) =>
+      entry.type === 'message' && (entry.role === 'user' || entry.role === 'assistant'))
+    .map((entry) => [
+      entry.type === 'message' ? entry.role : 'system',
+      entry.type === 'message' ? entry.text : '',
+    ]) ?? [];
+}
+
+test('tuiStateReducer initializes reducer-owned UI owner state', () => {
+  const state = initialState();
+
+  assert.deepEqual(state.ui, {
+    mode: 'chat',
+    studioConversationId: null,
+    externalEditorOpen: false,
+  });
+});
+
+test('tuiStateReducer updates mode and external editor owner state', () => {
+  let state = initialState();
+
+  state = tuiStateReducer(state, {
+    type: 'ui.mode.set',
+    mode: 'studio',
+    studioConversationId: 'conversation-1',
+  });
+  state = tuiStateReducer(state, {
+    type: 'ui.external_editor.set_open',
+    open: true,
+  });
+
+  assert.equal(state.ui.mode, 'studio');
+  assert.equal(state.ui.studioConversationId, 'conversation-1');
+  assert.equal(state.ui.externalEditorOpen, true);
+
+  state = tuiStateReducer(state, { type: 'ui.mode.reset' });
+
+  assert.equal(state.ui.mode, 'chat');
+  assert.equal(state.ui.studioConversationId, null);
+  assert.equal(state.ui.externalEditorOpen, true);
+});
+
+test('tuiStateReducer handles streaming chat completion with token usage', () => {
   let state = startRun(initialState(), 'req-1');
+  const usage = {
+    inputTokens: 50,
+    outputTokens: 20,
+    totalTokens: 70,
+    contextWindow: 100,
+  };
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -58,9 +118,14 @@ test('tuiStateReducer uses completed message text for final assistant history', 
   });
 
   const activeRun = selectFocusedActiveRun(state);
-  assert.equal(activeRun?.assistantDraft, '我先检查一下仓库状态。检查完毕，下面汇总。');
   assert.equal(activeRun?.phase, 'streaming');
-  assert.equal(activeRun?.charCount, activeRun?.assistantDraft.length);
+  assert.equal(activeRun?.sessionId, 'chat:pet');
+  assert.equal(activeRun?.kind, 'chat');
+  assert.equal(activeRun?.charCount, '我先检查一下仓库状态。检查完毕，下面汇总。'.length);
+  assert.equal(
+    timelineMessageText(state, 'chat:pet', 'req-1:assistant:0'),
+    '我先检查一下仓库状态。检查完毕，下面汇总。',
+  );
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -69,18 +134,252 @@ test('tuiStateReducer uses completed message text for final assistant history', 
       requestId: 'req-1',
       role: 'assistant',
       text: '最终回答只应该使用 completed 的内容。',
+      usage,
     },
     now: 1300,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
-  assert.equal(session.activeRun, null);
-  assert.equal(state.runRoute['req-1'], undefined);
-  assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
+  assert.equal(session.activeRunId, null);
+  assert.equal(state.runs['req-1'], undefined);
+  assert.deepEqual(session.tokenUsage, usage);
+  assert.deepEqual(transcriptTimeline(state), [
     ['user', 'hello'],
     ['assistant', '最终回答只应该使用 completed 的内容。'],
   ]);
+  assert.deepEqual(session.timeline.map((entry) => (
+    entry.type === 'message'
+      ? [entry.type, entry.role, entry.status, entry.text]
+      : [entry.type]
+  )), [
+    ['message', 'user', 'completed', 'hello'],
+    ['message', 'assistant', 'completed', '最终回答只应该使用 completed 的内容。'],
+  ]);
+});
+
+test('tuiStateReducer finalizes completed messages from run registry', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'missed final reply',
+      usage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        totalTokens: 3,
+      },
+    },
+    now: 1300,
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  const session = state.sessions['chat:pet']!;
+  assert.equal(state.runs['req-1'], undefined);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'missed final reply'],
+  ]);
+  assert.deepEqual(session.tokenUsage, {
+    inputTokens: 1,
+    outputTokens: 2,
+    totalTokens: 3,
+  });
+});
+
+test('tuiStateReducer finalizes completed messages when the active pointer is missing', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        activeRunId: null,
+      },
+    },
+  };
+
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'completed after pointer cleanup',
+    },
+    now: 1300,
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  assert.equal(state.runs['req-1'], undefined);
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'completed after pointer cleanup'],
+  ]);
+});
+
+test('tuiStateReducer recovers completed messages from timeline ownership when run registry is missing', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = {
+    ...state,
+    runs: {},
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        activeRunId: null,
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'final answer recovered from completed event',
+      usage: {
+        inputTokens: 4,
+        outputTokens: 5,
+        totalTokens: 9,
+      },
+    },
+    now: 1300,
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
+  });
+
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'final answer recovered from completed event'],
+  ]);
+  assert.deepEqual(state.sessions['chat:pet']?.tokenUsage, {
+    inputTokens: 4,
+    outputTokens: 5,
+    totalTokens: 9,
+  });
+});
+
+test('tuiStateReducer records composer prompt history only for run starts', () => {
+  let state = initialState();
+
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-1',
+    kind: 'chat',
+    userText: ' hello ',
+    now: 1000,
+    userCell: { id: 'req-1:user' },
+    statusMessage: '等待回复',
+  });
+  assert.deepEqual(state.input.history.entries, ['hello']);
+  assert.equal(state.input.text, '');
+  assert.equal(state.input.cursorOffset, 0);
+
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-2',
+    kind: 'chat',
+    userText: 'hello',
+    now: 2000,
+    userCell: { id: 'req-2:user' },
+    statusMessage: '等待回复',
+  });
+  assert.deepEqual(state.input.history.entries, ['hello']);
+
+  state = tuiStateReducer(state, {
+    type: 'review.response.resume',
+    requestId: 'req-2',
+    message: 'approval text',
+    now: 3000,
+    userCell: { id: 'req-2:review' },
+    statusMessage: '继续执行',
+  });
+  assert.deepEqual(state.input.history.entries, ['hello']);
+});
+
+test('tuiStateReducer navigates composer prompt history and restores draft', () => {
+  let state = initialState();
+
+  state = startRun(state, 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-2',
+    kind: 'chat',
+    userText: 'second',
+    now: 2000,
+    userCell: { id: 'req-2:user' },
+    statusMessage: '等待回复',
+  });
+  state = tuiStateReducer(state, { type: 'input.set', value: 'draft' });
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'previous' });
+  assert.equal(state.input.text, 'second');
+  assert.equal(state.input.cursorOffset, 'second'.length);
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'previous' });
+  assert.equal(state.input.text, 'hello');
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'next' });
+  assert.equal(state.input.text, 'second');
+
+  state = tuiStateReducer(state, { type: 'input.history.navigate', direction: 'next' });
+  assert.equal(state.input.text, 'draft');
+  assert.equal(state.input.history.selectedIndex, null);
+});
+
+test('tuiStateReducer preserves engine textarea state and clears transient state on host changes', () => {
+  let state = tuiStateReducer(initialState(), {
+    type: 'input.apply',
+    value: {
+      text: 'hello',
+      cursorOffset: 5,
+      selection: { anchorOffset: 1, focusOffset: 4 },
+      editHistory: { undo: [{ text: 'he', cursorOffset: 2 }], redo: [] },
+      preferredColumn: 3,
+    },
+  });
+
+  assert.deepEqual(state.input.selection, { anchorOffset: 1, focusOffset: 4 });
+  assert.deepEqual(state.input.editHistory, { undo: [{ text: 'he', cursorOffset: 2 }], redo: [] });
+  assert.equal(state.input.preferredColumn, 3);
+
+  state = tuiStateReducer(state, { type: 'input.set', value: 'draft' });
+  assert.equal(state.input.selection, undefined);
+  assert.equal(state.input.editHistory, undefined);
+  assert.equal(state.input.preferredColumn, undefined);
+
+  state = tuiStateReducer(state, {
+    type: 'input.apply',
+    value: {
+      text: 'second',
+      cursorOffset: 6,
+      selection: { anchorOffset: 0, focusOffset: 6 },
+      editHistory: { undo: [{ text: 'draft', cursorOffset: 5 }], redo: [] },
+      preferredColumn: 2,
+    },
+  });
+  state = tuiStateReducer(state, {
+    type: 'run.start',
+    requestId: 'req-transient',
+    kind: 'chat',
+    userText: 'second',
+    now: 1000,
+    userCell: { id: 'req-transient:user' },
+    statusMessage: '等待回复',
+  });
+  assert.equal(state.input.selection, undefined);
+  assert.equal(state.input.editHistory, undefined);
+  assert.equal(state.input.preferredColumn, undefined);
 });
 
 test('tuiStateReducer infers usage context window from runtime when missing', () => {
@@ -105,11 +404,11 @@ test('tuiStateReducer infers usage context window from runtime when missing', ()
       usage,
     },
     now: 1300,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
-  assert.equal(session.activeRun, null);
+  assert.equal(session.activeRunId, null);
   assert.deepEqual(session.tokenUsage, {
     ...usage,
     contextWindow: 1024,
@@ -117,7 +416,7 @@ test('tuiStateReducer infers usage context window from runtime when missing', ()
   assert.equal(session.runtime.contextWindow, 1024);
 });
 
-test('tuiStateReducer falls back to assistant draft when completed text is empty', () => {
+test('tuiStateReducer falls back to assistant timeline text when completed text is empty', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -140,18 +439,18 @@ test('tuiStateReducer falls back to assistant draft when completed text is empty
       text: '   ',
     },
     now: 1200,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
-  assert.equal(session.activeRun, null);
-  assert.deepEqual(session.history.map((item) => [item.kind, item.text]), [
+  assert.equal(session.activeRunId, null);
+  assert.deepEqual(transcriptTimeline(state), [
     ['user', 'hello'],
     ['assistant', '你好'],
   ]);
 });
 
-test('tuiStateReducer displays subagent deltas during run and preserves them in history', () => {
+test('tuiStateReducer displays subagent deltas as session activity outside checkpoint timeline', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -173,9 +472,17 @@ test('tuiStateReducer displays subagent deltas during run and preserves them in 
     now: 1200,
   });
 
-  assert.equal(selectFocusedSubagentDraft(state), '先检查文件，再整理结果。');
   assert.equal(selectFocusedActiveRun(state)?.phase, 'streaming');
   assert.equal(selectFocusedActiveRun(state)?.charCount, '先检查文件，再整理结果。'.length);
+  assert.deepEqual(selectFocusedActivities(state).at(-1), {
+    id: 'req-1:subagent-output',
+    type: 'subagent.message',
+    requestId: 'req-1',
+    text: '先检查文件，再整理结果。',
+    status: 'streaming',
+    afterTimelineEntryId: 'message:req-1:user',
+  });
+  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'req-1:subagent-output'), false);
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -186,14 +493,96 @@ test('tuiStateReducer displays subagent deltas during run and preserves them in 
       text: '最终答复',
     },
     now: 1300,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
-  assert.deepEqual(state.sessions['chat:pet']?.history.map((item) => [item.kind, item.text]), [
+  assert.deepEqual(transcriptTimeline(state), [
     ['user', 'hello'],
-    ['system', '[subagent]\n先检查文件，再整理结果。'],
     ['assistant', '最终答复'],
   ]);
+  const subagentActivity = state.sessions['chat:pet']?.activities.find((entry) => entry.id === 'req-1:subagent-output');
+  assert.equal(subagentActivity?.status, 'completed');
+});
+
+test('tuiStateReducer anchors subagent activity to the turn even after assistant streaming starts', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.delta',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '主答复草稿',
+    },
+    now: 1100,
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'subagent.message.delta',
+      requestId: 'req-1',
+      text: 'subagent announce',
+    },
+    now: 1200,
+  });
+
+  const activities = selectFocusedActivities(state);
+  assert.equal(activities.at(-1)?.afterTimelineEntryId, 'message:req-1:user');
+  assert.deepEqual(
+    buildTimelineDisplayEntries(selectFocusedTimeline(state), [], activities).map((entry) => entry.id),
+    [
+      'message:req-1:user',
+      'req-1:subagent-output',
+      'req-1:assistant:0',
+    ],
+  );
+});
+
+test('tuiStateReducer keeps notice and studio progress events outside checkpoint timeline', () => {
+  let state = startRun(initialState(), 'req-1');
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'system.notice',
+      requestId: 'req-1',
+      message: '授权已更新',
+    },
+    now: 1100,
+    messageCell: { id: 'notice-1', timestamp: '10:00:01' },
+  });
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'studio.progress',
+      requestId: 'req-1',
+      event: {
+        type: 'tasks_queued',
+        taskCount: 2,
+      },
+    },
+    now: 1200,
+    messageCell: { id: 'studio-progress-1', timestamp: '10:00:02' },
+  });
+
+  assert.deepEqual(selectFocusedNotices(state).slice(-2), [
+    {
+      id: 'notice-1',
+      text: '授权已更新',
+      timestamp: '10:00:01',
+      afterTimelineEntryId: 'message:req-1:user',
+    },
+    {
+      id: 'studio-progress-1',
+      text: '[studio] tasks queued：2 项',
+      timestamp: '10:00:02',
+      afterTimelineEntryId: 'message:req-1:user',
+    },
+  ]);
+  assert.deepEqual(selectFocusedTimeline(state).map((entry) => entry.id), ['message:req-1:user']);
+  assert.deepEqual(transcriptTimeline(state), [['user', 'hello']]);
 });
 
 test('tuiStateReducer stores usage on completed message', () => {
@@ -215,22 +604,28 @@ test('tuiStateReducer stores usage on completed message', () => {
       usage,
     },
     now: 1300,
-    historyCell: { id: 'assistant-1', timestamp: '10:00:01' },
+    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
-  assert.equal(session.activeRun, null);
+  assert.equal(session.activeRunId, null);
   assert.deepEqual(session.tokenUsage, usage);
 });
 
-test('tuiStateReducer clears session token usage when replacing or clearing history', () => {
+test('tuiStateReducer clears session token usage when clearing session state', () => {
   let state = initialState();
   state = {
     ...state,
+    ui: {
+      mode: 'studio',
+      studioConversationId: 'conversation-1',
+      externalEditorOpen: true,
+    },
     sessions: {
       ...state.sessions,
       'chat:pet': {
         ...state.sessions['chat:pet']!,
+        kind: 'studio',
         tokenUsage: {
           inputTokens: 100,
           outputTokens: 50,
@@ -241,12 +636,232 @@ test('tuiStateReducer clears session token usage when replacing or clearing hist
   };
 
   state = tuiStateReducer(state, {
-    type: 'session.replace_history',
-    history: [{ id: 'restored', kind: 'assistant', text: 'restored' }],
+    type: 'session.clear',
   });
 
   assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
+  assert.equal(state.sessions['chat:pet']?.kind, 'chat');
+  assert.deepEqual(state.ui, {
+    mode: 'chat',
+    studioConversationId: null,
+    externalEditorOpen: false,
+  });
+});
 
+test('tuiStateReducer loads authoritative session snapshots', () => {
+  let state = initialState('chat:pet');
+  state = {
+    ...state,
+    runs: {
+      'old-req': {
+        requestId: 'old-req',
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        phase: 'thinking',
+        timelineEntryIds: [],
+        startedAt: 1,
+        charCount: 0,
+      },
+      'other-req': {
+        requestId: 'other-req',
+        sessionId: 'chat:other',
+        kind: 'chat',
+        phase: 'thinking',
+        timelineEntryIds: [],
+        startedAt: 1,
+        charCount: 0,
+      },
+    },
+    sessions: {
+      ...state.sessions,
+      'chat:other': createSession({ id: 'chat:other' }),
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        runtime: { model: 'old-model', cwd: '/old' },
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        },
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'startup',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [
+        {
+          id: 'message:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'hello',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-1',
+        },
+        {
+          id: 'message:assistant-1',
+          type: 'message',
+          role: 'assistant',
+          text: 'hi',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-1',
+        },
+      ],
+      runs: [{
+        requestId: 'req-1',
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        phase: 'streaming',
+        timelineEntryIds: ['message:user-1'],
+        startedAt: 1000,
+      }],
+      activeRunId: 'req-1',
+      runtime: {
+        model: 'new-model',
+        contextWindow: 1000,
+      },
+      tokenUsage: {
+        inputTokens: 20,
+        outputTokens: 10,
+        totalTokens: 30,
+      },
+    },
+  });
+
+  const session = state.sessions['chat:pet']!;
+  assert.equal(state.focusedSessionId, 'chat:pet');
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'hi'],
+  ]);
+  assert.deepEqual(session.timeline.map((entry) => [entry.id, entry.type]), [
+    ['message:user-1', 'message'],
+    ['message:assistant-1', 'message'],
+  ]);
+  assert.equal(session.runtime.model, 'new-model');
+  assert.equal(session.runtime.cwd, '/old');
+  assert.equal(session.runtime.contextWindow, 1000);
+  assert.deepEqual(session.tokenUsage, {
+    inputTokens: 20,
+    outputTokens: 10,
+    totalTokens: 30,
+  });
+  assert.equal(session.activeRunId, 'req-1');
+  assert.equal(state.runs['req-1']?.sessionId, 'chat:pet');
+  assert.equal(state.runs['req-1']?.phase, 'streaming');
+  assert.equal(state.runs['old-req'], undefined);
+  assert.equal(state.runs['other-req']?.sessionId, 'chat:other');
+});
+
+test('tuiStateReducer restores completed reconnect output and clears terminal activeRunId', () => {
+  const state = tuiStateReducer(initialState('chat:pet'), {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [
+        {
+          id: 'message:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'hello',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-done',
+        },
+        {
+          id: 'message:assistant-1',
+          type: 'message',
+          role: 'assistant',
+          text: 'done',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-done',
+        },
+      ],
+      runs: [{
+        requestId: 'req-done',
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        phase: 'completed',
+        timelineEntryIds: ['message:user-1', 'message:assistant-1'],
+        startedAt: 1000,
+        finishedAt: 2000,
+      }],
+      activeRunId: 'req-done',
+    },
+  });
+
+  assert.equal(state.sessions['chat:pet']?.activeRunId, null);
+  assert.equal(state.runs['req-done'], undefined);
+  assert.equal(selectFocusedActiveRun(state), null);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+    ['assistant', 'done'],
+  ]);
+  assert.deepEqual(state.sessions['chat:pet']?.timeline.map((entry) => entry.id), [
+    'message:user-1',
+    'message:assistant-1',
+  ]);
+});
+
+test('tuiStateReducer resumes a session from snapshot while clearing previous run state', () => {
+  let state = startRun(initialState('chat:old'), 'old-req');
+  state = {
+    ...state,
+    ui: {
+      mode: 'studio',
+      studioConversationId: 'conversation-1',
+      externalEditorOpen: true,
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'resume',
+    snapshot: {
+      sessionId: 'chat:new',
+      kind: 'studio',
+      timeline: [
+        {
+          id: 'message:user-new',
+          type: 'message',
+          role: 'user',
+          text: 'resumed',
+          status: 'completed',
+          source: 'checkpoint',
+        },
+      ],
+      runs: [],
+    },
+  });
+
+  assert.equal(state.focusedSessionId, 'chat:new');
+  assert.equal(state.runs['old-req'], undefined);
+  assert.equal(state.sessions['chat:old']?.activeRunId, null);
+  assert.deepEqual(state.ui, {
+    mode: 'chat',
+    studioConversationId: null,
+    externalEditorOpen: false,
+  });
+  assert.equal(state.sessions['chat:new']?.kind, 'studio');
+  assert.deepEqual(transcriptTimeline(state, 'chat:new'), [
+    ['user', 'resumed'],
+  ]);
+  assert.deepEqual(state.sessions['chat:new']?.timeline.map((entry) => entry.id), [
+    'message:user-new',
+  ]);
+});
+
+test('tuiStateReducer preserves reconnect token usage when snapshot omits usage', () => {
+  let state = initialState('chat:pet');
   state = {
     ...state,
     sessions: {
@@ -263,10 +878,149 @@ test('tuiStateReducer clears session token usage when replacing or clearing hist
   };
 
   state = tuiStateReducer(state, {
-    type: 'session.clear',
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [],
+      runs: [],
+    },
+  });
+
+  assert.deepEqual(state.sessions['chat:pet']?.tokenUsage, {
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+  });
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'startup',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [],
+      runs: [],
+    },
   });
 
   assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
+});
+
+test('tuiStateReducer drops reconnect notices with stale timeline anchors', () => {
+  let state = initialState('chat:pet');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        notices: [
+          { id: 'notice-kept', text: 'keep', afterTimelineEntryId: 'message:user-1' },
+          { id: 'notice-stale', text: 'drop', afterTimelineEntryId: 'message:old' },
+          { id: 'notice-unanchored', text: 'keep too' },
+        ],
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [{
+        id: 'message:user-1',
+        type: 'message',
+        role: 'user',
+        text: 'hello',
+        status: 'completed',
+        source: 'checkpoint',
+      }],
+      runs: [],
+    },
+  });
+
+  assert.deepEqual(state.sessions['chat:pet']?.notices.map((notice) => notice.id), [
+    'notice-kept',
+    'notice-unanchored',
+  ]);
+});
+
+test('tuiStateReducer restores pending approval from authoritative session snapshots', () => {
+  let state = initialState('chat:pet');
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [
+        {
+          id: 'message:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'needs approval',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-review',
+        },
+      ],
+      runs: [{
+        requestId: 'req-review',
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        phase: 'waiting_human',
+        timelineEntryIds: ['message:user-1'],
+        startedAt: 1000,
+        pendingReview: {
+          requestId: 'req-review',
+          reviewId: 'review-1',
+          status: 'waiting',
+          petId: 'pet-a',
+          review: {
+            id: 'review-1',
+            schemaVersion: 1,
+            view: { kind: 'plain', body: 'Approve?' },
+            options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+          },
+        },
+      }],
+      activeRunId: 'req-review',
+      pendingReviewId: 'review-1',
+    },
+  });
+
+  const pending = selectFocusedPendingApproval(state);
+  assert.equal(state.sessions['chat:pet']?.activeRunId, 'req-review');
+  assert.equal(state.runs['req-review']?.pendingReview?.review.id, 'review-1');
+  assert.equal(pending?.requestId, 'req-review');
+  assert.equal(pending?.review.id, 'review-1');
+  assert.equal(pending?.petId, 'pet-a');
+});
+
+test('tuiStateReducer clears runs for the cleared session', () => {
+  let state = initialState('chat:pet');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:other': createSession({ id: 'chat:other' }),
+    },
+  };
+  state = startRun(state, 'req-main');
+  state = startRun(state, 'req-other', 'chat:other');
+
+  state = tuiStateReducer(state, {
+    type: 'session.clear',
+  });
+
+  assert.equal(state.runs['req-main'], undefined);
+  assert.equal(state.runs['req-other']?.sessionId, 'chat:other');
+  assert.equal(state.sessions['chat:pet']?.timeline.length, 0);
 });
 
 test('tuiStateReducer drops late or unknown requestId events', () => {
@@ -284,10 +1038,43 @@ test('tuiStateReducer drops late or unknown requestId events', () => {
   });
 
   assert.equal(next, state);
-  assert.equal(selectFocusedActiveRun(next)?.assistantDraft, '');
+  assert.equal(selectFocusedTimeline(next).some((entry) => entry.type === 'message' && entry.role === 'assistant'), false);
 });
 
-test('tuiStateReducer keeps two requestIds from mixing assistant drafts', () => {
+test('tuiStateReducer ignores late terminal events after local interrupt release', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'run.finish',
+    requestId: 'req-1',
+    statusMessage: '已请求打断',
+    messages: [{
+      id: 'local-release',
+      kind: 'system',
+      text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+    }],
+  });
+
+  const next = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'late final answer',
+    },
+    now: 1200,
+  });
+
+  assert.equal(next, state);
+  assert.equal(selectFocusedActiveRun(next), null);
+  assert.equal(timelineMessageText(next, 'chat:pet', 'req-1:assistant:0'), undefined);
+  assert.deepEqual(transcriptTimeline(next), [['user', 'hello']]);
+  assert.deepEqual(selectFocusedNotices(next).map((notice) => notice.text), [
+    '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+  ]);
+});
+
+test('tuiStateReducer keeps two requestIds from mixing assistant timeline entries', () => {
   let state = initialState('s1');
   state = {
     ...state,
@@ -320,11 +1107,11 @@ test('tuiStateReducer keeps two requestIds from mixing assistant drafts', () => 
     now: 1100,
   });
 
-  assert.equal(state.sessions.s1?.activeRun?.assistantDraft, 'A');
-  assert.equal(state.sessions.s2?.activeRun?.assistantDraft, 'B');
+  assert.equal(timelineMessageText(state, 's1', 'req-a:assistant:0'), 'A');
+  assert.equal(timelineMessageText(state, 's2', 'req-b:assistant:0'), 'B');
 });
 
-test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => {
+test('tuiStateReducer tracks operation lifecycle in timeline without terminal message rows', () => {
   let state = startRun(initialState(), 'req-1');
   const started: LocalAgentOperationEvent = {
     type: 'operation',
@@ -346,7 +1133,15 @@ test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => 
 
   let activeRun = selectFocusedActiveRun(state);
   assert.equal(activeRun?.phase, 'using_tool');
-  assert.deepEqual(activeRun?.activeOperations.map((operation) => operation.key), ['tool-1']);
+  assert.deepEqual(activeRun?.timelineEntryIds, ['message:req-1:user', 'req-1:operation:tool-1']);
+  assert.equal(selectFocusedTimeline(state).at(-1)?.id, 'req-1:operation:tool-1');
+  assert.equal(selectFocusedTimeline(state).at(-1)?.type, 'operation');
+  assert.deepEqual(selectFocusedActiveOperations(state), [{
+    name: 'tool-1',
+    label: 'Shell',
+    detail: 'npm test',
+    startedAt: 1200,
+  }]);
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -362,7 +1157,14 @@ test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => 
   });
 
   activeRun = selectFocusedActiveRun(state);
-  assert.equal(activeRun?.activeOperations[0]?.detail, 'npm test · running');
+  assert.deepEqual(selectFocusedActiveOperations(state), [{
+    name: 'tool-1',
+    label: 'Shell',
+    detail: 'npm test · running',
+    startedAt: 1200,
+  }]);
+  const updatedTimelineEntry = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:operation:tool-1');
+  assert.equal(updatedTimelineEntry?.type === 'operation' ? updatedTimelineEntry.summary : undefined, 'running');
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -375,13 +1177,60 @@ test('tuiStateReducer tracks operation lifecycle and terminal summaries', () => 
       },
     },
     now: 1400,
-    historyCell: { id: 'op-complete' },
+    messageCell: { id: 'op-complete' },
   });
 
   activeRun = selectFocusedActiveRun(state);
-  assert.equal(activeRun?.activeOperations.length, 0);
-  assert.equal(state.sessions['chat:pet']?.history.at(-1)?.kind, 'system');
-  assert.equal(state.sessions['chat:pet']?.history.at(-1)?.text, 'Shell：npm test · ok');
+  assert.deepEqual(selectFocusedActiveOperations(state), []);
+  assert.deepEqual(transcriptTimeline(state), [
+    ['user', 'hello'],
+  ]);
+  assert.equal(selectFocusedTimeline(state).filter((entry) => entry.id === 'req-1:operation:tool-1').length, 1);
+  const completedTimelineEntry = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:operation:tool-1');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.phase : undefined, 'completed');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.summary : undefined, 'ok');
+  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'message:op-complete'), false);
+});
+
+test('tuiStateReducer keeps operation display fields when completed event is sparse', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'started',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+        title: 'Shell',
+        target: 'npm test',
+        summary: '执行测试',
+        details: { cwd: '/repo' },
+      },
+    },
+    now: 1200,
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+      },
+    },
+    now: 1400,
+  });
+
+  const completedTimelineEntry = selectFocusedTimeline(state).find((entry) => entry.id === 'req-1:operation:tool-1');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.phase : undefined, 'completed');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.title : undefined, 'Shell');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.target : undefined, 'npm test');
+  assert.equal(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.summary : undefined, '执行测试');
+  assert.deepEqual(completedTimelineEntry?.type === 'operation' ? completedTimelineEntry.details : undefined, { cwd: '/repo' });
 });
 
 test('tuiStateReducer handles human review and interrupt state', () => {
@@ -416,6 +1265,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     petId: 'pet-a',
   });
   assert.equal(state.connection.message, '等待你的决定(pet-a)');
+  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'req-1:review:review-1'), false);
 
   const activeRunBefore = selectFocusedActiveRun(state);
   state = tuiStateReducer(state, {
@@ -433,6 +1283,14 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.equal(selectFocusedActiveRun(state)?.requestId, 'req-1');
   assert.equal(selectFocusedActiveRun(state)?.startedAt, activeRunBefore?.startedAt);
   assert.equal(selectFocusedPendingApproval(state), null);
+  assert.deepEqual(selectFocusedTimeline(state).at(-1), {
+    id: 'message:review-response',
+    type: 'message',
+    role: 'user',
+    requestId: 'req-1',
+    text: '批准',
+    status: 'completed',
+  });
 
   state = tuiStateReducer(state, {
     type: 'run.interrupting',
@@ -469,6 +1327,38 @@ test('tuiStateReducer clears pending review when interrupting human review', () 
 
   assert.equal(selectFocusedActiveRun(state)?.phase, 'interrupting');
   assert.equal(selectFocusedPendingApproval(state), null);
+});
+
+test('tuiStateReducer review.response.resume falls back to focused session when route is missing', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'human_review.requested',
+      requestId: 'req-1',
+      review: {
+        id: 'review-1',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Approve?' },
+        options: [],
+      },
+      actor: { petId: 'pet-a' },
+    },
+    now: 1200,
+  });
+
+  state = tuiStateReducer(state, {
+    type: 'review.response.resume',
+    requestId: 'req-1',
+    message: '批准',
+    now: 1300,
+    userCell: { id: 'review-response' },
+    statusMessage: '提交确认',
+  });
+
+  assert.equal(state.runs['req-1']?.sessionId, 'chat:pet');
+  assert.equal(selectFocusedPendingApproval(state), null);
+  assert.equal(selectFocusedActiveRun(state)?.phase, 'thinking');
 });
 
 test('tuiStateReducer accepts canonical human review specs without legacy payload', () => {
@@ -526,12 +1416,13 @@ test('tuiStateReducer finishes error and studio control messages', () => {
       message: 'boom',
     },
     now: 1200,
-    historyCell: { id: 'chat-error' },
+    messageCell: { id: 'chat-error' },
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
   assert.equal(state.connection.message, '出错，已恢复输入');
-  assert.equal(state.sessions['chat:pet']?.history.at(-1)?.text, '出错：boom');
+  assert.equal(selectFocusedNotices(state).at(-1)?.text, '出错：boom');
+  assert.equal(selectFocusedNotices(state).at(-1)?.afterTimelineEntryId, 'message:chat-req:user');
 
   state = startRun(state, 'studio-req');
   state = tuiStateReducer(state, {
@@ -540,15 +1431,19 @@ test('tuiStateReducer finishes error and studio control messages', () => {
     outcome: 'stopped',
     reply: '',
     reason: 'done enough',
-    historyCell: { id: 'studio-empty' },
+    messageCell: { id: 'studio-empty' },
     stoppedReasonCell: { id: 'studio-stopped' },
     statusMessage: '就绪',
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
-  assert.deepEqual(state.sessions['chat:pet']?.history.slice(-2).map((item) => item.text), [
+  assert.deepEqual(selectFocusedNotices(state).slice(-2).map((item) => item.text), [
     '[studio] turn stopped (无最终输出)',
     '[studio] stopped: done enough',
+  ]);
+  assert.deepEqual(selectFocusedNotices(state).slice(-2).map((item) => item.afterTimelineEntryId), [
+    'message:studio-req:user',
+    'message:studio-req:user',
   ]);
 
   state = startRun(state, 'studio-error');
@@ -556,11 +1451,12 @@ test('tuiStateReducer finishes error and studio control messages', () => {
     type: 'server.studio_error',
     requestId: 'studio-error',
     message: 'planner failed',
-    historyCell: { id: 'studio-error-cell' },
+    messageCell: { id: 'studio-error-cell' },
     statusMessage: 'Studio 出错，已恢复输入',
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
   assert.equal(state.connection.message, 'Studio 出错，已恢复输入');
-  assert.equal(state.sessions['chat:pet']?.history.at(-1)?.text, '[studio 出错] planner failed');
+  assert.equal(selectFocusedNotices(state).at(-1)?.text, '[studio 出错] planner failed');
+  assert.equal(selectFocusedNotices(state).at(-1)?.afterTimelineEntryId, 'message:studio-error:user');
 });

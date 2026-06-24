@@ -5,12 +5,16 @@ export const TUI_TEXT = {
   unknownStage: '未知阶段',
   growthValue: (value: number) => `成长值 ${value}`,
   emptyHistory: (petName: string) => `和 ${petName} 聊天吧。`,
-  helpIdle: '/new 新会话 · /resume 恢复 · /help 帮助 · /quit 退出',
+  helpIdle: '/new 新会话 · /policy 授权 · /resume 恢复 · /help 帮助 · /quit 退出',
   helpBusy: 'Ctrl+C 打断 · 再按一次退出',
+  commandPaletteTitle: '命令',
+  commandPaletteEmpty: '没有匹配命令',
+  fileMentionTitle: '文件',
+  fileMentionEmpty: '没有匹配路径',
   inputBusy: '> 处理中…',
   inputPlaceholder: '输入消息',
   approvalFreeReplyPlaceholder: '输入回复，或按 ↑↓ 选择',
-  approvalHelp: '↑↓ 选择 · 输入回复 · Enter 确认 · Esc 取消',
+  approvalHelp: '空输入 ↑↓ 选择 · 输入回复后 ↑↓ 移动光标 · Enter 确认 · Esc 取消',
   approvalRespondRequiresInput: '请先输入回复内容。',
   approvalHeading: (petId?: string) => (petId ? `[${petId} 想问你]` : '需要确认'),
   approvalFallbackPrompt: '当前流程需要你的确认，请使用当前确认面板应答。',
@@ -56,6 +60,11 @@ export const TUI_TEXT = {
   exportNoSession: '当前没有可导出的会话。',
   exportSucceeded: (filePath: string) => `已导出 transcript：${filePath}`,
   exportFailed: (message: string) => `导出 transcript 失败：${message}`,
+  externalEditorUnavailable: '未配置 $VISUAL 或 $EDITOR，无法打开外部编辑器。',
+  externalEditorOpening: '正在打开外部编辑器…保存并退出后会回填输入框。',
+  externalEditorLoaded: '已从外部编辑器载入草稿。',
+  externalEditorEmpty: '外部编辑器未留下内容。',
+  externalEditorFailed: (message: string) => `外部编辑器失败：${message}`,
   resumeLoading: '正在加载可恢复会话…',
   resumeEmpty: '暂无可恢复会话。',
   resumeFailed: (message: string) => `加载可恢复会话失败：${message}`,
@@ -63,6 +72,14 @@ export const TUI_TEXT = {
   resumePickerTitle: '可恢复会话',
   resumePickerHelp: '↑↓ 选择 · Enter 恢复 · Esc 取消',
   resumeActiveBadge: '当前',
+  globalReviewPolicyPickerTitle: '全局访问策略',
+  globalReviewPolicyPickerHelp: '↑↓ 选择 · Enter 保存 · Esc 取消',
+  globalReviewPolicyCurrentBadge: '当前',
+  globalReviewPolicySaved: (label: string, synced: boolean) =>
+    synced
+      ? `全局访问策略已切换为：${label}`
+      : `全局访问策略已保存为：${label}。本地服务连接后会同步。`,
+  globalReviewPolicySaveFailed: (message: string) => `保存全局访问策略失败：${message}`,
   secondCtrlCExit: '收到第二次 Ctrl+C，立即退出 TUI。',
   interruptRequested: '已发送打断请求。再次按 Ctrl+C 可直接退出 TUI。',
   exiting: '正在退出 TUI。',
@@ -75,29 +92,42 @@ export const TUI_TEXT = {
   statusInitializing: '初始化中',
   statusReady: '就绪',
   statusErrorRecovered: '出错，已恢复输入',
-  runtimeInfoLine: (model: string, cwd: string, contextWindow: string) => `模型: ${model} · 工作目录: ${cwd} · 上下文窗口上限: ${contextWindow}`,
-  tokenUsageLine: (inputTokens: string, outputTokens: string, totalTokens: string, contextWindow: string | null, ratio: string | null) => (
-    ratio
-      ? `Token 用量：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens} (${ratio}，上下文上限 ${contextWindow})`
-      : `Token 用量：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens}`
-  ),
+  runtimeInfoLine: (model: string, cwd: string, studioConfigPath: string, studioConfigSource: string, contextWindow: string) =>
+    `模型: ${model} · 工作目录: ${cwd} · Studio 配置: ${studioConfigPath} (${studioConfigSource}) · 上下文窗口上限: ${contextWindow}`,
+  tokenUsageLine: (
+    inputTokens: string,
+    outputTokens: string,
+    totalTokens: string,
+    contextWindow: string | null,
+    ratio: string | null,
+    source: 'provider' | undefined,
+    scope: 'run' | undefined,
+  ) => {
+    const label = source === 'provider' ? 'API Token 用量' : 'Token 用量';
+    const scopeLabel = scope === 'run' ? '本轮累计' : null;
+    const prefix = scopeLabel ? `${label}（${scopeLabel}）` : label;
+    return ratio
+      ? `${prefix}：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens} (${ratio}，上下文上限 ${contextWindow})`
+      : `${prefix}：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens}`;
+  },
   interrupted: '[interrupted]',
   errorLine: (message: string) => `出错：${message}`,
   studioEmptyTurn: (outcome: 'done' | 'stopped') => `[studio] turn ${outcome} (无最终输出)`,
   studioStoppedReason: (reason: string) => `[studio] stopped: ${reason}`,
   studioErrorLine: (message: string) => `[studio 出错] ${message}`,
   studioErrorRecovered: 'Studio 出错，已恢复输入',
-  subagentOutput: (text: string) => `[subagent]\n${text}`,
+  operationStarted: '开始',
+  operationRunning: '进行中',
   operationFailed: '失败',
-  operationInterrupted: '已中断',
-  operationCompleted: '已完成',
-  studioProgressPlanSet: (taskCount: number) => `[studio] plan 设定：${taskCount} 项`,
-  studioProgressDispatchStarted: (taskIndex: string | number, petId: string) =>
-    `[studio] dispatch[#${taskIndex}] → pet:${petId}`,
+  operationInterrupted: '中断',
+  operationCompleted: '完成',
+  studioProgressTasksQueued: (taskCount: number) => `[studio] tasks queued：${taskCount} 项`,
+  studioProgressTaskStarted: (taskIndex: string | number, petId: string) =>
+    `[studio] task[#${taskIndex}] → pet:${petId}`,
   studioProgressTaskStatusChanged: (taskIndex: string | number, status: string) =>
     `[studio] task[#${taskIndex}] → ${status}`,
   studioProgressWikiUpdated: (changedCount: number) => `[studio] wiki 更新 ${changedCount} 项`,
-  studioProgressDispatchFinished: (dispatchId: string, status: string) =>
-    `[studio] dispatch ${dispatchId} → ${status}`,
+  studioProgressTaskFinished: (petRunId: string, status: string) =>
+    `[studio] pet run ${petRunId} → ${status}`,
   studioProgressUnknown: (type: string) => `[studio] event: ${type}`,
 } as const;

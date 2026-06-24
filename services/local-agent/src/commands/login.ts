@@ -1,8 +1,7 @@
 import { createInterface } from 'node:readline/promises';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import { inferLlmContextWindowTokens } from '../llmContextWindow';
+import { findLlmModelPresetByKey, listLlmModelPresets } from '../llmModelPresets';
 import { loadStoredConfig, saveStoredConfig, configPath } from '../storage';
 
 type AuthResponse = {
@@ -20,19 +19,6 @@ async function prompt(rl: ReturnType<typeof createInterface>, question: string):
   return (await rl.question(question)).trim();
 }
 
-function maskSecret(value: string): string {
-  if (!value) return '';
-  if (value.length <= 12) return `${value.slice(0, 4)}...`;
-  return `${value.slice(0, 8)}...${value.slice(-4)}`;
-}
-
-function normalizeOptionalInput(input: string): string | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  if (trimmed === '-' || trimmed.toLowerCase() === 'clear') return '';
-  return trimmed;
-}
-
 function parsePositiveInteger(value: string | undefined): number | null {
   if (!value) return null;
   const parsed = Number(value.trim());
@@ -45,12 +31,21 @@ function formatContextWindow(value: number | undefined): string {
     : '手动填写';
 }
 
-function fail(message: string): never {
-  throw new Error(message);
+function formatPresetChoices(): string {
+  return listLlmModelPresets()
+    .map((preset) => {
+      const context = formatContextWindow(preset.contextWindowTokens);
+      const maxOutput = preset.maxOutputTokens
+        ? `, max output ${formatContextWindow(preset.maxOutputTokens)}`
+        : '';
+      const method = preset.structuredOutputMethod ?? 'default';
+      return `  - ${preset.key}: ${preset.label} (${preset.model}, context ${context}${maxOutput}, structured ${method})`;
+    })
+    .join('\n');
 }
 
-function isValidMediaCrawlerDir(dir: string): boolean {
-  return existsSync(resolve(dir, 'main.py'));
+function fail(message: string): never {
+  throw new Error(message);
 }
 
 async function apiPost<T>(url: string, body: unknown, authToken?: string): Promise<T> {
@@ -127,12 +122,32 @@ export async function runLogin() {
 
     // LLM configuration
     console.log('\nLLM Configuration (OpenAI-compatible API):');
+    console.log('Available presets:');
+    console.log(formatPresetChoices());
+
     const defaultLlmKey = stored.llm_api_key ?? process.env.LLM_API_KEY ?? '';
-    const defaultLlmBase = stored.llm_base_url ?? process.env.LLM_BASE_URL ?? 'https://api.deepseek.com';
-    const defaultLlmModel = stored.llm_model ?? process.env.LLM_MODEL ?? 'deepseek-v4-pro';
-    const defaultLlmContextWindow =
-      stored.llm_context_window_tokens
+    const defaultPresetKey = process.env.LLM_MODEL_PRESET ?? stored.llm_model_preset ?? '';
+
+    let llmPresetKey = await prompt(
+      rl,
+      `LLM Preset${defaultPresetKey ? ` [${defaultPresetKey}]` : ' [manual]'}: `,
+    );
+    if (!llmPresetKey && defaultPresetKey) llmPresetKey = defaultPresetKey;
+    if (llmPresetKey.toLowerCase() === 'manual') llmPresetKey = '';
+    const selectedPreset = llmPresetKey ? findLlmModelPresetByKey(llmPresetKey) : undefined;
+    if (llmPresetKey && !selectedPreset) {
+      fail(`Unknown LLM preset "${llmPresetKey}". Use one of: ${listLlmModelPresets().map((item) => item.key).join(', ')}`);
+    }
+
+    const defaultLlmBase = selectedPreset
+      ? (selectedPreset.baseUrl ?? '')
+      : (stored.llm_base_url ?? process.env.LLM_BASE_URL ?? 'https://api.deepseek.com');
+    const defaultLlmModel = selectedPreset
+      ? selectedPreset.model
+      : (stored.llm_model ?? process.env.LLM_MODEL ?? 'deepseek-v4-pro');
+    const defaultLlmContextWindow = selectedPreset?.contextWindowTokens
       ?? parsePositiveInteger(process.env.LLM_CONTEXT_WINDOW_TOKENS)
+      ?? stored.llm_context_window_tokens
       ?? inferLlmContextWindowTokens(defaultLlmModel);
 
     let llmApiKey = await prompt(rl, `LLM API Key${defaultLlmKey ? ' [already set, press Enter to keep]' : ''}: `);
@@ -141,8 +156,16 @@ export async function runLogin() {
       fail('LLM API Key is required.');
     }
 
-    let llmBaseUrl = await prompt(rl, `LLM Base URL [${defaultLlmBase}]: `);
+    let llmBaseUrl = await prompt(
+      rl,
+      defaultLlmBase
+        ? `LLM Base URL [${defaultLlmBase}]: `
+        : 'LLM Base URL (OpenAI-compatible gateway, required): ',
+    );
     if (!llmBaseUrl) llmBaseUrl = defaultLlmBase;
+    if (!llmBaseUrl) {
+      fail('LLM Base URL is required for this preset. Use an OpenAI-compatible gateway URL.');
+    }
 
     let llmModel = await prompt(rl, `LLM Model [${defaultLlmModel}]: `);
     if (!llmModel) llmModel = defaultLlmModel;
@@ -166,42 +189,6 @@ export async function runLogin() {
       fail('LLM Context Window Tokens must be a positive integer.');
     }
 
-    // MediaCrawler configuration (optional)
-    console.log('\nMediaCrawler Configuration (optional):');
-    const defaultCrawlerDir = stored.mediacrawler_dir ?? process.env.MEDIACRAWLER_DIR ?? '';
-    const defaultXhsCookie = stored.xhs_cookie ?? process.env.XHS_COOKIE ?? '';
-
-    console.log('Press Enter to keep existing value. Enter "-" to clear an existing value.');
-
-    let mediaCrawlerDir = defaultCrawlerDir;
-    const mediaCrawlerDirInput = normalizeOptionalInput(
-      await prompt(
-        rl,
-        `MediaCrawler directory${defaultCrawlerDir ? ` [${defaultCrawlerDir}]` : ' (e.g. /Users/you/MediaCrawler)'}: `
-      )
-    );
-    if (mediaCrawlerDirInput !== null) {
-      mediaCrawlerDir = mediaCrawlerDirInput;
-    }
-    if (mediaCrawlerDir && !isValidMediaCrawlerDir(mediaCrawlerDir)) {
-      fail(`MediaCrawler directory is invalid: ${mediaCrawlerDir}\nExpected to find main.py in that directory.`);
-    }
-
-    let xhsCookie = defaultXhsCookie;
-    if (mediaCrawlerDir) {
-      const cookieLabel = defaultXhsCookie
-        ? ` [configured: ${maskSecret(defaultXhsCookie)}]`
-        : ' (web_session=...)';
-      const xhsCookieInput = normalizeOptionalInput(
-        await prompt(rl, `XHS Cookie${cookieLabel}: `)
-      );
-      if (xhsCookieInput !== null) {
-        xhsCookie = xhsCookieInput;
-      }
-    } else if (defaultXhsCookie) {
-      console.log('Skipping XHS Cookie because MediaCrawler directory is empty.');
-    }
-
     // Save config
     const nextConfig = {
       ...stored,
@@ -212,22 +199,15 @@ export async function runLogin() {
       user_id: authRes.user.id,
       nickname: authRes.user.nickname,
       llm_api_key: llmApiKey,
+      llm_model_preset: selectedPreset?.key,
       llm_base_url: llmBaseUrl,
       llm_model: llmModel,
       llm_context_window_tokens: parsedContextWindow,
-      mediacrawler_dir: mediaCrawlerDir || undefined,
-      xhs_cookie: xhsCookie || undefined,
     };
     saveStoredConfig(nextConfig);
 
     console.log(`\nConfig saved to: ${configPath()}`);
     console.log(`LLM: ${llmModel} @ ${llmBaseUrl}`);
-    if (mediaCrawlerDir) {
-      console.log(`MediaCrawler: ${mediaCrawlerDir}`);
-      console.log(`XHS Cookie: ${xhsCookie ? `configured (${maskSecret(xhsCookie)})` : 'not set; QR code login will be used'}`);
-    } else {
-      console.log('MediaCrawler: disabled');
-    }
     console.log('Run "pinpawo-agent actor" to choose an actor, then "pinpawo-agent run" to start the agent.\n');
   } finally {
     rl.close();

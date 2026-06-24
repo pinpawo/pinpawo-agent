@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import type { AgentCapability, AgentToolkit, ReviewSpec } from '@pinpawo/pet-agent';
+import type { AgentCapability, AgentToolkit, CapabilityArtifactStore, ReviewSpec } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput, type AgentChannelSetup } from './agentChannel';
 import { loadAgentContext, type AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
@@ -13,6 +13,7 @@ import {
   type HumanReviewResponseMessage,
   type InterruptRequestMessage,
   type NewSessionMessage,
+  type StudioRequestMessage,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
 import type { StreamToolsPayload } from './agentStreamEvents';
@@ -36,6 +37,8 @@ type AppChatRunSource =
   | { type: 'chat_request' }
   | { type: 'human_review_response'; reviewId: string; selectedOptionId: string }
   | { type: 'interrupt_request'; reviewId: string; selectedOptionId: string };
+type RunStudioRequest = (ws: WebSocket, message: StudioRequestMessage) => Promise<void>;
+type RouteStudioReviewResponse = (ws: WebSocket, message: HumanReviewResponseMessage) => boolean;
 type PendingReviewRoute = {
   userId: string;
   reviewId: string;
@@ -57,6 +60,12 @@ export type LocalAgentAppChatHandlerOptions = {
   getLocalToolkits: () => AgentToolkit[];
   getLocalCapabilities: () => AgentCapability[];
   getUserCapabilities: () => LoadedUserCapability[];
+  getCapabilityArtifactStore: () => CapabilityArtifactStore;
+  getWorkdir: () => string;
+  getActorName: () => string | null;
+  runStudioRequest: RunStudioRequest;
+  routeStudioHumanReviewResponse: RouteStudioReviewResponse;
+  rejectStudioPendingReview: (ws: WebSocket) => void;
   loadContext?: LoadContext;
   runChat?: RunChatSession;
   buildChatSetup?: BuildChatSetup;
@@ -74,12 +83,19 @@ export class LocalAgentAppChatHandler {
   private readonly getLocalToolkits: () => AgentToolkit[];
   private readonly getLocalCapabilities: () => AgentCapability[];
   private readonly getUserCapabilities: () => LoadedUserCapability[];
+  private readonly getCapabilityArtifactStore: () => CapabilityArtifactStore;
+  private readonly getWorkdir: () => string;
+  private readonly getActorName: () => string | null;
+  private readonly runStudioRequest: RunStudioRequest;
+  private readonly routeStudioHumanReviewResponse: RouteStudioReviewResponse;
+  private readonly rejectStudioPendingReview: (ws: WebSocket) => void;
   private readonly loadContext: LoadContext;
   private readonly runChat: RunChatSession;
   private readonly buildChatSetup: BuildChatSetup;
   private readonly pendingReviewRoutes = new Map<string, PendingReviewRoute>();
   private readonly consumedPendingReviewRequestIds = new Set<string>();
   private readonly activePendingReviewRequestIds = new Set<string>();
+  private readonly sessionStartedAtByThreadId = new Map<string, string>();
   private sessionResetPromise: Promise<void> = Promise.resolve();
 
   constructor(options: LocalAgentAppChatHandlerOptions) {
@@ -94,6 +110,12 @@ export class LocalAgentAppChatHandler {
     this.getLocalToolkits = options.getLocalToolkits;
     this.getLocalCapabilities = options.getLocalCapabilities;
     this.getUserCapabilities = options.getUserCapabilities;
+    this.getCapabilityArtifactStore = options.getCapabilityArtifactStore;
+    this.getWorkdir = options.getWorkdir;
+    this.getActorName = options.getActorName;
+    this.runStudioRequest = options.runStudioRequest;
+    this.routeStudioHumanReviewResponse = options.routeStudioHumanReviewResponse;
+    this.rejectStudioPendingReview = options.rejectStudioPendingReview;
     this.loadContext = options.loadContext ?? loadAgentContext;
     this.runChat = options.runChat ?? runChatSession;
     this.buildChatSetup = options.buildChatSetup ?? buildLocalChatAgentInput;
@@ -119,6 +141,9 @@ export class LocalAgentAppChatHandler {
   }
 
   async handleHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
+    if (this.routeStudioHumanReviewResponse(ws, msg)) {
+      return;
+    }
     if (!this.canUseSocket(ws)) {
       return;
     }
@@ -159,7 +184,15 @@ export class LocalAgentAppChatHandler {
   }
 
   handleClose(ws: WebSocket) {
+    this.rejectStudioPendingReview(ws);
     this.inflightRequests.abortAndClear(ws);
+  }
+
+  async handleStudioRequest(ws: WebSocket, msg: StudioRequestMessage) {
+    if (!this.canUseSocket(ws)) {
+      return;
+    }
+    await this.runStudioRequest(ws, msg);
   }
 
   async handleChatRequest(ws: WebSocket, msg: ChatRequestMessage) {
@@ -336,6 +369,7 @@ export class LocalAgentAppChatHandler {
 
     const threadId = this.getChatThreadId(userId);
     await this.deleteThread(threadId);
+    this.sessionStartedAtByThreadId.delete(threadId);
     this.clearPendingReviewRoutesForUser(userId);
     console.log(`[local-agent] new session created threadId=${threadId}`);
   }
@@ -414,22 +448,34 @@ export class LocalAgentAppChatHandler {
   }
 
   private buildSetup(ctx: AgentContext, userMessage: string, userId: string): AgentChannelSetup {
+    const threadId = this.getChatThreadId(userId);
     return this.buildChatSetup({
       context: ctx,
       userMessage,
       llmConfig: this.getLlmConfig() ?? buildLocalLlmConfig(),
       toolkits: [...this.getPluginToolkits(), ...this.getLocalToolkits()],
       extraCapabilities: this.getLocalCapabilities(),
-      threadId: this.getChatThreadId(userId),
+      threadId,
       interfaceKind: 'app-chat',
       dryRun: false,
       checkpoint: this.checkpoint,
       userCapabilities: this.getUserCapabilities(),
+      capabilityArtifactStore: this.getCapabilityArtifactStore(),
+      workdir: this.getWorkdir(),
+      sessionStartedAt: this.getSessionStartedAt(threadId),
     });
   }
 
   private getChatThreadId(userId: string) {
     return buildAppChatThreadId({ petId: this.getActorId(), userId });
+  }
+
+  private getSessionStartedAt(threadId: string) {
+    const existing = this.sessionStartedAtByThreadId.get(threadId);
+    if (existing) return existing;
+    const sessionStartedAt = new Date().toISOString();
+    this.sessionStartedAtByThreadId.set(threadId, sessionStartedAt);
+    return sessionStartedAt;
   }
 
   private canUseSocket(ws: WebSocket) {

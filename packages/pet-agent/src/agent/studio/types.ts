@@ -99,77 +99,85 @@ export type PetAgentRuntime = {
 
 export type StudioTaskStatus = 'pending' | 'satisfied' | 'failed';
 
-export type StudioTask = {
+export type StudioTaskDependencyInput = 'previous' | { taskIndex: number };
+
+export type StudioPlannerTaskInput = {
   petId: string;
-  goal: string;
-  acceptanceCriteria: string[];
-  status: StudioTaskStatus;
-  retryCount: number;
+  brief: string;
+  acceptanceCriteria?: string[];
+  deps?: StudioTaskDependencyInput[];
 };
 
-export type StudioTaskPlan = {
-  tasks: StudioTask[]; // 顺序即执行顺序;index 即 task 身份
+/* ─────────────── Studio run queue model ─────────────── */
+
+export type StudioRunStatus =
+  | 'planning'
+  | 'running'
+  | 'blocked'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+export type StudioRun = {
+  runId: string;
+  conversationId: string;
+  userRequest: string;
+  status: StudioRunStatus;
+  finalTaskIndex?: number;
+  finalPetRunId?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
-export type StudioDispatchStatus = 'running' | 'finished' | 'cancelled';
+export type StudioRunSnapshot = StudioRun & {
+  tasks: StudioTaskQueueItem[];
+};
 
-export type StudioDispatchState = {
-  id: string;
-  /** 对应 plan.tasks 中的下标 */
+export type StudioTaskQueueItem = {
+  runId: string;
+  conversationId: string;
   taskIndex: number;
   petId: string;
-  status: StudioDispatchStatus;
   brief: string;
-  resultText?: string;
+  acceptanceCriteria: string[];
+  deps: number[];
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  petRunId?: string;
   errorMessage?: string;
-  startedAt: string;
+  enqueuedAt: string;
+  startedAt?: string;
   finishedAt?: string;
 };
 
-export type StudioTurnState = {
-  turnId: string;
-  conversationId: string;
-  userRequest: string;
-  plan: StudioTaskPlan | null;
-  dispatches: StudioDispatchState[];
-  wikiRoot: string;
-  iterationCount: number;
-};
-
-/* ─────────────── Execute action(留作内部状态机文档) ─────────────── */
-
-export type ExecuteAction =
-  | { type: 'dispatch'; taskIndex: number; brief: string }
-  | { type: 'finish'; finalDispatchId: string }
-  | { type: 'stop'; reason: string };
+export type StudioQueueItem = StudioTaskQueueItem;
 
 /* ─────────────── Turn outcome (return shape) ─────────────── */
 
 export type StudioTurnOutcome =
-  | { outcome: 'done'; finalDispatchId: string; reply: string }
+  | {
+      outcome: 'done';
+      finalTaskIndex?: number;
+      finalPetRunId?: string;
+      reply: string;
+    }
   | { outcome: 'stopped'; reason: string; reply: string };
 
 export type StudioTurnResult = {
   turnId: string;
-  state: StudioTurnState;
+  snapshot: StudioRunSnapshot;
   outcome: StudioTurnOutcome;
   studio: StudioContext;
 };
 
 /* ─────────────── Orchestrator entrypoints ─────────────── */
 
-/**
- * 显式 plan 入口(Phase 1 skeleton 使用)。后续 LLM-driven planner 落地后,
- * 这条入口仍保留作为调试/测试用。
- */
-export type StudioOrchestratorInvokeInput = {
+export type StudioSubmitRequestInput = {
   userRequest: string;
-  plan?: StudioTaskPlan;
   turnId?: string;
   conversationId?: string;
   signal?: AbortSignal;
   /**
-   * 透传给每次 `pet.invoke()`(planner 与 dispatch pet 都会收到)。
+   * 透传给每次 `pet.invoke()`(planner 与 worker pet 都会收到)。
    * Studio 自身不消费内容,只把工具事件转给 UI 渲染。
    */
   onToolEvent?: SubagentToolEventHandler;
@@ -183,10 +191,39 @@ export type StudioOrchestratorInvokeInput = {
 
 export type StudioTurnEventHandler = (event: StudioTurnEvent) => void | Promise<void>;
 
+export type StudioRunEvent =
+  | {
+      type: 'run_changed';
+      runId: string;
+      conversationId: string;
+      status: StudioRunStatus;
+      snapshot: StudioRunSnapshot;
+      reason?: string;
+      occurredAt: string;
+    }
+  | {
+      type: 'wiki_changed';
+      runId: string;
+      conversationId: string;
+      changedPaths: string[];
+      occurredAt: string;
+    };
+
+export type StudioRunEventHandler = (event: StudioRunEvent) => void | Promise<void>;
+
+export type StudioSubmitRequestResult = {
+  runId: string;
+  status: 'accepted';
+};
+
 export type StudioOrchestrator = {
   context: () => StudioContext;
   listAgents: () => PetAgentRuntimeDescriptor[];
-  invoke: (input: StudioOrchestratorInvokeInput) => Promise<StudioTurnResult>;
+  submitRequest: (input: StudioSubmitRequestInput) => Promise<StudioSubmitRequestResult>;
+  subscribe: (handler: StudioRunEventHandler) => () => void;
+  cancelRun: (runId: string) => Promise<void>;
+  getRun: (runId: string) => StudioRunSnapshot | null;
+  waitForRun: (runId: string) => Promise<StudioTurnResult>;
 };
 
 export type StudioOrchestratorConfig = {
@@ -197,7 +234,7 @@ export type StudioOrchestratorConfig = {
   /**
    * 必填:指定哪个 agent 担任 planner。
    * Studio 在 turn 起始用 userRequest invoke 该 agent,并向它注入 `studio_plan`
-   * capability。planner agent 通过这个 capability 提交结构化 plan。
+   * capability。planner agent 通过这个 capability 提交有序 task items。
    */
   plannerPetId: string;
   /**
@@ -206,12 +243,27 @@ export type StudioOrchestratorConfig = {
    */
   wikiBaseDir: string;
   /**
+   * Effective host workdir for Studio-dispatched pet invokes.
+   */
+  workdir?: string;
+  /**
    * 可选注入 curator。默认使用 skeleton curator(仅落档原文 + index 追加)。
    * production 建议传入 `createLLMWikiCurator({ models, promptProvider })`,
    * promptProvider 可用 `defaultPromptProvider()` / `fileReadPromptProvider(absPath)`
    * 预设,或传任意 `() => string | Promise<string>` 自定义来源。
    */
   curator?: import('./wikiCurator').WikiCurator;
+  /**
+   * 可选注入 Studio run/queue store。提供后 orchestrator 会保存 run snapshot,
+   * 并在创建时恢复开放 run。due-run scheduler store 不应复用为这个 store。
+   */
+  runQueueStore?: import('./runQueueStore').StudioRunQueueStore;
+  /**
+   * 是否在 orchestrator 创建时从 runQueueStore 恢复 open runs。
+   * 默认 true。local-agent 这类 per-turn fresh orchestrator 的宿主应在同一
+   * process/workdir 内只允许一次恢复,避免多个 live orchestrator 双重驱动同一 run。
+   */
+  restoreOpenRuns?: boolean;
   /**
    * 单 turn 内 dispatch 累计上限(兜底)。
    */
@@ -226,12 +278,14 @@ export type StudioOrchestratorConfig = {
 
 export type StudioTurnEvent =
   | { type: 'turn_started'; turnId: string; userRequest: string }
-  | { type: 'plan_set'; plan: StudioTaskPlan }
+  | { type: 'tasks_queued'; taskCount: number }
   | { type: 'task_status_changed'; taskIndex: number; status: StudioTaskStatus }
-  | { type: 'dispatch_started'; dispatchId: string; taskIndex: number; petId: string }
+  | { type: 'task_started'; taskIndex: number; petId: string; petRunId: string }
   | {
-      type: 'dispatch_finished';
-      dispatchId: string;
+      type: 'task_finished';
+      taskIndex: number;
+      petId: string;
+      petRunId: string;
       status: 'finished' | 'cancelled';
       resultText?: string;
       errorMessage?: string;
@@ -240,5 +294,26 @@ export type StudioTurnEvent =
   | {
       type: 'turn_finished';
       outcome: 'done' | 'stopped';
-      finalDispatchId?: string;
+      finalPetRunId?: string;
     };
+
+export type StudioRunIdentity = {
+  /** 本次 Studio run 的请求 id，通常与 caller 侧 requestId/runId 对齐。 */
+  runId: string;
+  /** 会话级聚合 id。默认 fallback 到 runId。 */
+  conversationId: string;
+  /** 用于调度去重。格式: `studio:{conversationId}:run:{runId}`。 */
+  idempotencyKey: string;
+};
+
+export function buildStudioRunIdentity(input: {
+  runId: string;
+  conversationId?: string;
+}): StudioRunIdentity {
+  const conversationId = input.conversationId ?? input.runId;
+  return {
+    runId: input.runId,
+    conversationId,
+    idempotencyKey: `studio:${conversationId}:run:${input.runId}`,
+  };
+}

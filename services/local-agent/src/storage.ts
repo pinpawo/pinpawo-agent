@@ -14,12 +14,11 @@ export type StoredConfig = {
   actor_id?: string;
   actor_name?: string;
   llm_api_key?: string;
+  llm_model_preset?: string;
   llm_base_url?: string;
   llm_model?: string;
   llm_observe_model?: string;
   llm_context_window_tokens?: number;
-  mediacrawler_dir?: string;
-  xhs_cookie?: string;
   workdir?: string;
   browser_backend?: string;
   /**
@@ -29,6 +28,14 @@ export type StoredConfig = {
    */
   /** Enable thinking/reasoning for subagent calls. Default: false. */
   subagent_thinking?: boolean;
+  /** Retry the same structured-output LLM call after parse/schema failure. Default: false. */
+  structured_output_auto_repair?: boolean;
+  /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */
+  structured_output_repair_max_retries?: number;
+  /** Built-in global review policy mode: require_authorization, auto_authorization, or full_access. */
+  global_review_policy?: string;
+  /** Deprecated legacy key; use global_review_policy. */
+  review_policy_strategy?: string;
   capabilities?: Record<string, boolean>;
   /**
    * Additional directories to scan for user-defined capability plugins,

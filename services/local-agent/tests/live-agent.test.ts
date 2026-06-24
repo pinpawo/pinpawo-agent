@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { HumanMessage } from '@langchain/core/messages';
 import {
   createOrchestratorGraph,
+  selectCapabilityResultArtifact,
   type AgentActor,
   type OrchestratorStateType,
 } from '@pinpawo/pet-agent';
@@ -18,6 +21,7 @@ import {
 import { buildLocalAgentModels } from '../src/agentModels';
 import type { AgentLlmConfig } from '../src/agentConfig';
 import { loadStoredConfig } from '../src/storage';
+import { FileCapabilityArtifactStore } from '../src/capabilityArtifactStore';
 import { createPetProfileTool } from '../src/toolkits/petProfile';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -152,7 +156,7 @@ test('live chat smoke: use shared pet profile tool', { timeout: 120_000 }, async
     ? (state.messages.at(-1)!.content as string).trim()
     : '';
   assert.ok(reply.length > 0, 'reply should not be empty');
-  assert.equal(state.capabilityResult, null, 'no capability should produce a result');
+  assert.equal(state.capabilityArtifacts.length, 0, 'no capability should produce artifacts');
 });
 
 test('live chat smoke: route to daily_post and persist a post result', { timeout: 180_000 }, async () => {
@@ -169,7 +173,8 @@ test('live chat smoke: route to daily_post and persist a post result', { timeout
       },
     }),
   ];
-  const graph = createOrchestratorGraph({ models });
+  const artifactStore = new FileCapabilityArtifactStore(await mkdtemp(resolve(tmpdir(), 'pinpawo-live-artifacts-')));
+  const graph = createOrchestratorGraph({ models, capabilityArtifactStore: artifactStore });
   const state = await graph.invoke(
     {
       messages: [
@@ -181,12 +186,21 @@ test('live chat smoke: route to daily_post and persist a post result', { timeout
       ],
     },
     {
-      configurable: { actor, capabilities },
+      configurable: {
+        thread_id: 'live-daily-post',
+        actor,
+        capabilities,
+      },
     },
   ) as OrchestratorStateType;
 
-  const dailyPostResult = state.capabilityResult
-    ? dailyPostResultSchema.safeParse(state.capabilityResult)
+  const resultRef = selectCapabilityResultArtifact(state.capabilityArtifacts, {
+    capabilityId: 'daily_post',
+    schemaName: 'DailyPostResult',
+  });
+  const resultContent = resultRef ? (await artifactStore.readArtifact({ uri: resultRef.uri })).content : null;
+  const dailyPostResult = resultContent
+    ? dailyPostResultSchema.safeParse(JSON.parse(resultContent) as unknown)
     : null;
   assert.ok(dailyPostResult?.success, 'daily_post result should be parseable');
   assert.equal(dailyPostResult?.data?.status, 'created');

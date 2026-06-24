@@ -2,7 +2,7 @@
 /**
  * LangSmith evaluation: orchestrator route decision
  *
- * Tests whether the orchestrator correctly decides to finish vs. delegate.
+ * Tests whether the orchestrator correctly decides to answer vs. delegate.
  * Uses the dataset created by `dataset.ts`.
  *
  * Required env vars:
@@ -27,6 +27,7 @@ import {
 import type { AgentActor, AgentModels } from '../src/types/agent';
 import type { AgentCapability } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
+import { inferStructuredOutputMethod } from '../src/utils/structuredOutput';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
 import { MemorySaver } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
@@ -64,16 +65,10 @@ function normalizeStructuredOutputMethod(value: string | undefined): Orchestrati
   );
 }
 
-function inferDefaultStructuredOutputMethod(model: string): OrchestrationDecisionStructuredOutputConfig['method'] {
-  const normalized = model.toLowerCase();
-  if (normalized.includes('deepseek')) return 'functionCalling';
-  return undefined;
-}
-
 const DECISION_STRUCTURED_OUTPUT_METHOD = normalizeStructuredOutputMethod(
   process.env.DECISION_STRUCTURED_OUTPUT_METHOD,
 )
-  ?? inferDefaultStructuredOutputMethod(LLM_MODEL);
+  ?? inferStructuredOutputMethod(LLM_MODEL, LLM_BASE_URL);
 const DECISION_STRUCTURED_OUTPUT_STRICT = (() => {
   const raw = process.env.DECISION_STRUCTURED_OUTPUT_STRICT;
   const normalized = raw?.trim().toLowerCase();
@@ -98,9 +93,14 @@ if (!LLM_API_KEY) {
 }
 
 function buildEvalModels(): AgentModels {
-  const modelKwargs = LLM_MODEL.includes('qwen') || LLM_MODEL.includes('glm')
+  const normalizedModel = LLM_MODEL.toLowerCase();
+  const modelKwargs = (
+    normalizedModel.includes('qwen')
+    || normalizedModel.includes('glm')
+    || normalizedModel.includes('minimax')
+  )
     ? { extra_body: { enable_thinking: false } }
-    : LLM_MODEL.includes('deepseek')
+    : normalizedModel.includes('deepseek')
       ? { thinking: { type: 'disabled' } }
       : undefined;
   const model = new ChatOpenAI({
@@ -108,6 +108,7 @@ function buildEvalModels(): AgentModels {
     temperature: 0.3, // lower for more deterministic eval
     timeout: 180_000,
     apiKey: LLM_API_KEY,
+    streaming: normalizedModel.includes('glm-4.5'),
     modelKwargs,
     configuration: {
       baseURL: LLM_BASE_URL,
@@ -358,7 +359,7 @@ function routeModeFromResult(result: Record<string, unknown>): string {
   const lane = pendingDelegation?.lane;
   if (lane === 'general') return 'general';
   if (typeof lane === 'string' && lane.startsWith('capability:')) return 'capability';
-  return 'finish';
+  return 'answer';
 }
 
 function activeCapabilityFromResult(result: Record<string, unknown>): string | null {
@@ -392,7 +393,7 @@ function latestAnnounceFromResult(result: Record<string, unknown>) {
 
 function extractResult(result: Record<string, unknown>, capabilityList: AgentCapability[]): Record<string, unknown> {
   const routeMode = routeModeFromResult(result);
-  const finalRoute = routeMode === 'finish' ? 'finish' : 'delegate';
+  const finalRoute = routeMode === 'answer' ? 'answer' : 'delegate';
   const latestAnnounce = latestAnnounceFromResult(result);
   const messages = result.messages as { content?: unknown; _getType?: () => string }[] | undefined;
   const lastMsg = messages?.at(-1);
@@ -445,12 +446,12 @@ function finishBias({
 }) {
   const actual = outputs?.route as string;
   const expected = referenceOutputs?.expected_route as string;
-  // 1 = correctly handled finish cases, 0 = should have finished but delegated
-  if (expected === 'finish' && actual !== 'finish') {
+  // 1 = correctly handled answer cases, 0 = should have answered but delegated
+  if (expected === 'answer' && actual !== 'answer') {
     return {
       key: 'finish_correct',
       score: 0,
-      comment: 'Should have finished but delegated instead',
+      comment: 'Should have answered but delegated instead',
     };
   }
   return {
@@ -468,12 +469,12 @@ function delegateBias({
 }) {
   const actual = outputs?.route as string;
   const expected = referenceOutputs?.expected_route as string;
-  // 1 = correctly handled delegate cases, 0 = should have delegated but finished
+  // 1 = correctly handled delegate cases, 0 = should have delegated but answered
   if (expected === 'delegate' && actual !== 'delegate') {
     return {
       key: 'delegate_correct',
       score: 0,
-      comment: 'Should have delegated but finished instead',
+      comment: 'Should have delegated but answered instead',
     };
   }
   return {

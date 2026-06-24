@@ -7,14 +7,13 @@ import {
   type AgentCapability,
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
+import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
 import { collectPluginHooks, loadPlugins } from './pluginLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
 import type { AgentLlmConfig } from './agentConfig';
 import {
   buildLocalLlmConfig,
 } from './llmConfig';
-import { resolve } from 'node:path';
-import { homedir } from 'node:os';
 import { LocalAgentGraphService } from './agentGraphService';
 import { ensureActorSelected, loadSelectedActorName } from './actorSelection';
 import { loadStoredConfig, saveStoredConfig } from './storage';
@@ -25,26 +24,31 @@ import {
 import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppWsClient } from './localAgentAppWsClient';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
-import { LocalAgentScheduledJob } from './localAgentScheduledJob';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
+import { buildLocalAgentRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
+import { setLocalToolsWorkdir } from './toolkits/local/pathUtils';
+import { LocalServerStudioHandler } from './localServerStudioHandler';
+import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
+import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
+import type { LocalServerDeps } from './localServerTypes';
 
 const WS_RECONNECT_DELAY_MS = 10000;
 const WS_PING_INTERVAL_MS = 30000;
 const INTERRUPT_FORCE_REPLY_MS = 1800;
 
 export class LocalAgentRuntime {
+  private readonly runtimeConfig: LocalAgentRuntimeConfig;
   private stopRequested = false;
   private actorId: string | null = null;
   private actorName: string | null = null;
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
   private pluginToolkits: AgentToolkit[] = [];
-  private readonly capabilityRegistry = new LocalAgentCapabilityRegistry();
-  private readonly chatCheckpointer = new FileSaver(
-    resolve(homedir(), '.pinpawo', 'checkpoints.json'),
-  );
+  private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
+  private readonly chatCheckpointer: FileSaver;
+  private readonly studioDueRunStore: FileStudioDueRunStore;
+  private readonly studioDueRunScheduler: LocalStudioDueRunScheduler;
   private readonly graphService = new LocalAgentGraphService();
-  private appWsClient: LocalAgentAppWsClient | null = null;
   private readonly inflightRequests = new InflightRequestController<WebSocket>({
     forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
     // Hosted app WS relay: do NOT include raw — keeps payloads small and
@@ -53,27 +57,81 @@ export class LocalAgentRuntime {
     sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
     logPrefix: 'local-agent',
   });
-  private readonly appChatHandler = new LocalAgentAppChatHandler({
-    graphService: this.graphService,
-    checkpoint: this.chatCheckpointer,
-    deleteThread: (threadId) => this.chatCheckpointer.deleteThread(threadId),
-    inflightRequests: this.inflightRequests,
-    isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
-    getActorId: () => this.getActorId(),
-    getLlmConfig: () => this.llmConfig,
-    getPluginToolkits: () => this.pluginToolkits,
-    getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
-    getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
-    getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
-  });
-  private readonly scheduledJob = new LocalAgentScheduledJob({
-    graphService: this.graphService,
-    getActorId: () => this.getActorId(),
-    getLlmConfig: () => this.llmConfig,
-    getHooks: () => this.hooks,
-    getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
-    getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
-  });
+  private readonly studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
+  private readonly studioHandler: LocalServerStudioHandler;
+  private appWsClient: LocalAgentAppWsClient | null = null;
+  private readonly appChatHandler: LocalAgentAppChatHandler;
+
+  constructor(runtimeConfig: LocalAgentRuntimeConfig = buildLocalAgentRuntimeConfig()) {
+    this.runtimeConfig = runtimeConfig;
+    setLocalToolsWorkdir(runtimeConfig.workdir);
+    this.capabilityRegistry = new LocalAgentCapabilityRegistry({
+      capabilityArtifactRoot: runtimeConfig.capabilityArtifactRoot,
+    });
+    this.studioDueRunStore = new FileStudioDueRunStore({
+      filePath: runtimeConfig.studioDueRunsPath,
+    });
+    this.studioDueRunScheduler = new LocalStudioDueRunScheduler({
+      store: this.studioDueRunStore,
+      filterWorkdir: runtimeConfig.workdir,
+    });
+    this.studioHandler = new LocalServerStudioHandler({
+      reviewRouter: this.studioReviewRouter,
+      inflightRequests: this.inflightRequests,
+      studioDueRunScheduler: this.studioDueRunScheduler,
+    });
+    this.chatCheckpointer = new FileSaver(runtimeConfig.checkpointPath);
+    this.appChatHandler = new LocalAgentAppChatHandler({
+      graphService: this.graphService,
+      checkpoint: this.chatCheckpointer,
+      deleteThread: async (threadId) => {
+        await this.chatCheckpointer.deleteThread(threadId);
+        await this.capabilityRegistry.deleteThreadArtifacts(threadId);
+      },
+      inflightRequests: this.inflightRequests,
+      isCurrentSocket: (ws) => this.appWsClient?.isCurrentSocket(ws) ?? false,
+      getActorId: () => this.getActorId(),
+      getLlmConfig: () => this.llmConfig,
+      getPluginToolkits: () => this.pluginToolkits,
+      getLocalToolkits: () => this.capabilityRegistry.getLocalToolkits(),
+      getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
+      getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
+      getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
+      getWorkdir: () => this.runtimeConfig.workdir,
+      getActorName: () => this.actorName,
+      runStudioRequest: async (ws, message) => {
+        await this.studioHandler.handleStudioRequest(ws, message, this.buildLocalServerDeps());
+      },
+      routeStudioHumanReviewResponse: (ws, msg) => this.studioHandler.routeHumanReviewResponse(ws, msg),
+      rejectStudioPendingReview: (ws) => {
+        this.studioReviewRouter.rejectAndDelete(ws, new Error('app websocket closed'));
+      },
+    });
+  }
+
+  private buildLocalServerDeps(): LocalServerDeps {
+    return {
+      actorId: this.getActorId(),
+      actorName: this.actorName ?? undefined,
+      llmConfig: this.getLlmConfig(),
+      workdir: this.runtimeConfig.workdir,
+      runtimeConfig: this.runtimeConfig,
+      studioDueRunScheduler: this.studioDueRunScheduler,
+      localToolkitDefinitions: this.getLocalToolkitDefinitions(),
+      localToolkits: this.getLocalToolkits(),
+      pluginToolkits: this.getPluginToolkits(),
+      localCapabilityDefinitions: this.getLocalCapabilityDefinitions(),
+      localCapabilities: this.getLocalCapabilities(),
+      userCapabilityDefinitions: this.getUserCapabilityDefinitions(),
+      userCapabilities: this.getUserCapabilities(),
+      capabilityArtifactStore: this.capabilityRegistry.getCapabilityArtifactStore(),
+      rescanUserCapabilities: () => this.rescanUserCapabilities(),
+    };
+  }
+
+  getRuntimeConfig(): LocalAgentRuntimeConfig {
+    return this.runtimeConfig;
+  }
 
   async init() {
     const { plugins, toolkits } = await loadPlugins();
@@ -95,6 +153,7 @@ export class LocalAgentRuntime {
 
   requestStop() {
     this.stopRequested = true;
+    this.studioDueRunScheduler.stop();
     this.disconnectWs();
   }
 
@@ -118,6 +177,10 @@ export class LocalAgentRuntime {
     return this.capabilityRegistry.getLocalCapabilities();
   }
 
+  getCapabilityArtifactStore() {
+    return this.capabilityRegistry.getCapabilityArtifactStore();
+  }
+
   getLocalCapabilityDefinitions(): AgentCapability[] {
     return this.capabilityRegistry.getLocalCapabilityDefinitions();
   }
@@ -137,10 +200,6 @@ export class LocalAgentRuntime {
     return this.capabilityRegistry.rescanUserCapabilities();
   }
 
-  getStats() {
-    return this.scheduledJob.getStats();
-  }
-
   getActorId(): string {
     if (!this.actorId) {
       throw new Error('Local agent actorId is not initialized');
@@ -156,7 +215,7 @@ export class LocalAgentRuntime {
     if (!opts?.skipInit) {
       await this.init();
     }
-    console.log(`[local-agent] started — poll every ${config.pollIntervalSeconds}s, post every ${config.postIntervalHours}h`);
+    console.log('[local-agent] started — local server + chat relay');
 
     if (config.apiConnected) {
       // Connect WebSocket for app ↔ local agent chat relay.
@@ -165,16 +224,8 @@ export class LocalAgentRuntime {
       console.log(`[local-agent] ${config.apiSetupMessage}`);
     }
 
+    // Keep the process alive for the local server + WebSocket relay until stop.
     while (!this.stopRequested) {
-      try {
-        if (config.apiConnected) {
-          await this.scheduledJob.tick();
-        }
-      } catch (err) {
-        console.error('[local-agent] tick error:', err instanceof Error ? err.message : err);
-      }
-
-      if (this.stopRequested) break;
       await sleep(config.pollIntervalSeconds * 1000);
     }
 
@@ -203,6 +254,7 @@ export class LocalAgentRuntime {
       pingIntervalMs: WS_PING_INTERVAL_MS,
       handlers: {
         onChatRequest: (ws, msg) => this.appChatHandler.handleChatRequest(ws, msg),
+        onStudioRequest: (ws, msg) => this.appChatHandler.handleStudioRequest(ws, msg),
         onNewSession: (_ws, msg) => this.appChatHandler.handleNewSession(msg),
         onInterruptRequest: (ws, msg) => this.appChatHandler.handleInterruptRequest(ws, msg),
         onHumanReviewResponse: (ws, msg) => this.appChatHandler.handleHumanReviewResponse(ws, msg),

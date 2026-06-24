@@ -4,6 +4,7 @@ import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { SubagentInput, SubagentResult } from './subagent';
 import type { SubagentContextPolicy } from './subagent';
 import type { AgentToolset } from './toolkit';
+import type { CapabilityArtifactRef, CapabilityArtifactStore } from './artifact';
 
 export type CapabilityContext = {
   models: AgentModels;
@@ -14,13 +15,42 @@ export type CapabilityContext = {
     name: string;
     description: string;
   }>;
+  /**
+   * Artifact store (port) the runtime injects so a capability can persist its
+   * own artifacts by closure (afterRun / context-pressure ingest). Undefined on
+   * surfaces without a store; capabilities skip writes when absent.
+   */
+  artifactStore?: CapabilityArtifactStore;
 };
 
 export type CapabilityInstructionContext = CapabilityContext;
 
+/**
+ * Context handed to `afterRun` so a capability can deterministically persist
+ * artifacts (e.g. a structured result) in code, rather than relying on the
+ * model to call a write tool inside the subagent loop.
+ *
+ * The capability supplies its own `CapabilityArtifactStore` (it is a host
+ * concern that pet-agent core does not own — see CAPABILITY_ARTIFACT_REDESIGN
+ * §26: the store reaches capabilities by closure, not via OrchestratorConfig).
+ * pet-agent supplies the identifiers needed to address a write, and the
+ * `recordCapabilityArtifact` sink that attaches the returned ref to the subagent
+ * result so it reaches `state.sessionCapabilityArtifacts`.
+ */
+export type CapabilityMiddlewareContext = {
+  recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
+  threadId?: string | null;
+  capabilityId: string;
+  delegationId: string;
+  runId: string;
+};
+
 export type CapabilityMiddleware = {
   beforeRun?: (input: SubagentInput) => SubagentInput | Promise<SubagentInput>;
-  afterRun?: (result: SubagentResult) => SubagentResult | Promise<SubagentResult>;
+  afterRun?: (
+    result: SubagentResult,
+    ctx: CapabilityMiddlewareContext,
+  ) => SubagentResult | Promise<SubagentResult>;
 };
 
 export type CapabilityRuntime = {
@@ -37,7 +67,6 @@ export type CapabilityRuntime = {
   contextPolicy?: SubagentContextPolicy;
   instructions?: string[] | ((ctx: CapabilityInstructionContext) => string[] | Promise<string[]>);
   middleware?: CapabilityMiddleware;
-  readResult?: (messages: BaseMessage[]) => unknown | null;
 };
 
 export type CapabilityAvailability = {

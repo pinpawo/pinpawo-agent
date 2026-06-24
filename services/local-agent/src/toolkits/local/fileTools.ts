@@ -481,7 +481,7 @@ export const validateStructuredFileTool = tool(
   },
   {
     name: 'validate_structured_file',
-    description: '验证结构化文件内容。当前支持 JSON 语法检查，以及 capability_manifest 这类 schema 校验。适合在 write_file / update_file / apply_file_patch 之后单独执行验证。',
+    description: '验证结构化文件内容。当前支持 JSON 语法检查，以及 capability_manifest 这类 schema 校验。适合在 write_file / apply_patch 之后单独执行验证。',
     schema: z.object({
       path: z.string().describe('要验证的文件路径'),
       format: z.enum(['auto', 'json']).optional().describe('结构格式；默认 auto，目前实际支持 json'),

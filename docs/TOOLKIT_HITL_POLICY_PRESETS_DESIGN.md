@@ -247,14 +247,14 @@ local toolkit 使用 preset 配置表达默认 HITL：
 
 ```ts
 toolReview: {
-  write_file: ReviewPolicies.localMutation(),
-  apply_patch: ReviewPolicies.localMutation(),
-  move_path: ReviewPolicies.localMutation(),
-  copy_path: ReviewPolicies.localMutation(),
-  mkdir_path: ReviewPolicies.localMutation(),
-  http_fetch: ReviewPolicies.externalAccess(),
-  download_file: ReviewPolicies.externalAccess(),
-  run_shell: ReviewPolicies.commandExecution(),
+  write_file: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+  apply_patch: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+  move_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+  copy_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+  mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+  http_fetch: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+  download_file: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+  run_shell: ReviewPolicies.commandExecution({ authorization: 'exact_args' }),
 }
 ```
 
@@ -262,8 +262,8 @@ git toolkit：
 
 ```ts
 toolReview: {
-  git_add: ReviewPolicies.localMutation(),
-  git_commit: ReviewPolicies.localMutation(),
+  git_add: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+  git_commit: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
 }
 ```
 
@@ -271,9 +271,9 @@ browser toolkit：
 
 ```ts
 toolReview: {
-  browser_open: ReviewPolicies.externalAccess(),
-  browser_open_with_session: ReviewPolicies.externalAccess(),
-  browser_open_with_profile: ReviewPolicies.externalAccess(),
+  browser_open: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+  browser_open_with_session: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+  browser_open_with_profile: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
 }
 ```
 

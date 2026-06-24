@@ -1,16 +1,7 @@
 import { ChatOpenAI } from '@langchain/openai';
 import type { AgentModels } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
-
-function buildModelKwargs(model: string, thinking: boolean) {
-  if (model.includes('qwen') || model.includes('glm')) {
-    return { extra_body: { enable_thinking: thinking } };
-  }
-  if (model.includes('deepseek')) {
-    return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
-  }
-  return undefined;
-}
+import { buildLlmModelKwargs, requiresLlmStreaming } from './llmModelPresets';
 
 export function buildLocalAgentModels(llmConfig: AgentLlmConfig): AgentModels {
   const subagentThinking = llmConfig.subagentThinking ?? false;
@@ -21,7 +12,7 @@ export function buildLocalAgentModels(llmConfig: AgentLlmConfig): AgentModels {
       : llmConfig.model;
 
     const thinking = role === 'subagent' ? subagentThinking : false;
-    const modelKwargs = buildModelKwargs(model, thinking);
+    const modelKwargs = buildLlmModelKwargs(model, thinking);
 
     return new ChatOpenAI({
       model,
@@ -29,6 +20,8 @@ export function buildLocalAgentModels(llmConfig: AgentLlmConfig): AgentModels {
       timeout: llmConfig.timeoutMs ?? 45000,
       maxRetries: llmConfig.maxRetries ?? 2,
       apiKey: llmConfig.apiKey,
+      streaming: requiresLlmStreaming(model),
+      streamUsage: true,
       modelKwargs,
       configuration: {
         baseURL: llmConfig.baseUrl,

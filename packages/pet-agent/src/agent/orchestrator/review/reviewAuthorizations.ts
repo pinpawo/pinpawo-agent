@@ -67,6 +67,11 @@ export function readToolAuthorizationMatcher(value: unknown): ToolAuthorizationM
     return args ? { type: 'exact_args', value: { ...args } } : null;
   }
 
+  if (record.type === 'url_domain') {
+    const domain = readUrlDomainValue(record.value);
+    return domain ? { type: 'url_domain', value: domain } : null;
+  }
+
   return null;
 }
 
@@ -91,6 +96,27 @@ function readShellCommand(args: Record<string, unknown>) {
   return typeof command === 'string' ? normalizeShellPattern(command) : '';
 }
 
+function normalizeUrlOrigin(value: unknown) {
+  if (typeof value !== 'string') return '';
+  try {
+    const origin = new URL(value).origin;
+    return origin === 'null' ? '' : origin;
+  } catch {
+    return '';
+  }
+}
+
+function readUrlDomainValue(value: unknown) {
+  const record = readRecord(value);
+  if (!record) return null;
+  const origin = normalizeUrlOrigin(record.origin);
+  return origin ? { origin } : null;
+}
+
+function readUrlOrigin(args: Record<string, unknown>) {
+  return normalizeUrlOrigin(args.url);
+}
+
 function stableJson(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return JSON.stringify(value);
@@ -111,9 +137,13 @@ function toolAuthorizationKey(rule: ToolAuthorizationRecord) {
   if (!matcher) {
     return null;
   }
-  return matcher.type === 'shell_pattern'
-    ? `${rule.toolName}:shell_pattern:${matcher.value}`
-    : `${rule.toolName}:exact_args:${stableJson(matcher.value)}`;
+  if (matcher.type === 'shell_pattern') {
+    return `${rule.toolName}:shell_pattern:${matcher.value}`;
+  }
+  if (matcher.type === 'url_domain') {
+    return `${rule.toolName}:url_domain:${matcher.value.origin}`;
+  }
+  return `${rule.toolName}:exact_args:${stableJson(matcher.value)}`;
 }
 
 function matchesAuthorizationRule(rule: ToolAuthorizationRecord, params: {
@@ -134,6 +164,11 @@ function matchesAuthorizationRule(rule: ToolAuthorizationRecord, params: {
       return wildcardToRegExp(pattern).test(command);
     }
     return false;
+  }
+
+  if (rule.matcher.type === 'url_domain') {
+    const origin = readUrlOrigin(params.args);
+    return Boolean(origin) && origin === rule.matcher.value.origin;
   }
 
   return stableJson(rule.matcher.value) === stableJson(params.args);
@@ -229,6 +264,17 @@ async function buildMatcherFromTemplate(params: {
 
   if (params.matcher.type === 'exact_args') {
     return { type: 'exact_args', value: { ...params.pendingAction.args } };
+  }
+
+  if (params.matcher.type === 'url_domain') {
+    const origin = readUrlOrigin(params.pendingAction.args);
+    if (!origin) {
+      throw new ReviewEffectApplicationError(
+        'invalid_matcher_source',
+        'Cannot build URL domain authorization matcher without args.url.',
+      );
+    }
+    return { type: 'url_domain', value: { origin } };
   }
 
   const policyRef = findReviewPolicy(params.toolkits, params.pendingAction.toolName);

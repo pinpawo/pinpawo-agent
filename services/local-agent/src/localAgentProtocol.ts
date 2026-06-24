@@ -1,8 +1,15 @@
-import { isReviewSpecValue, type ReviewSpec } from '@pinpawo/pet-agent';
+import {
+  GLOBAL_REVIEW_POLICY_MODE,
+  parseTokenUsageSnapshot,
+  isReviewSpecValue,
+  type BuiltinGlobalReviewPolicyMode,
+  type ReviewSpec,
+} from '@pinpawo/pet-agent';
 import type {
-  LocalAgentEvent,
+  LocalAgentErrorCode,
   LocalAgentOperationPhase,
   LocalAgentOperationRaw,
+  LocalAgentRuntimeEvent,
 } from './events/localAgentEvent';
 
 export type ChatRequestMessage = {
@@ -24,10 +31,17 @@ export type NewSessionMessage = {
   userId?: string;
 };
 
+export type RuntimeConfigUpdateMessage = {
+  type: 'runtime_config.update';
+  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+};
+
 export type StudioRequestMessage = {
   type: 'studio_request';
   requestId: string;
   userRequest: string;
+  /** 可选:显式覆盖 runId，供外部调度器维持同一次 Studio 运行的幂等主键 */
+  runId?: string;
   /** 可选:overrides 默认的 conversation 命名,影响 wiki 子目录 */
   conversationId?: string;
 };
@@ -44,15 +58,22 @@ export type LocalAgentClientMessage =
   | ChatRequestMessage
   | InterruptRequestMessage
   | NewSessionMessage
+  | RuntimeConfigUpdateMessage
   | StudioRequestMessage
   | HumanReviewResponseMessage
   | { type: 'ping' };
 
-export type LocalAgentEventMessage = {
+export type LocalAgentRuntimeEventEnvelope = {
   type: 'event';
   requestId: string;
-  event: LocalAgentEvent;
+  event: LocalAgentRuntimeEvent;
 };
+
+/**
+ * @deprecated Use `LocalAgentRuntimeEventEnvelope` for websocket event
+ * envelopes. The runtime event itself lives at `event`.
+ */
+export type LocalAgentEventMessage = LocalAgentRuntimeEventEnvelope;
 
 export type LocalAgentControlServerMessage =
   | { type: 'pong' }
@@ -63,8 +84,12 @@ export type LocalAgentControlServerMessage =
       requestId: string;
       outcome: 'done' | 'stopped';
       reply: string;
-      finalDispatchId?: string;
+      finalPetRunId?: string;
       reason?: string;
+      workdir?: string;
+      runId?: string;
+      conversationId?: string;
+      idempotencyKey?: string;
     }
   | { type: 'studio_error'; requestId: string; message: string };
 
@@ -106,22 +131,10 @@ function readOptionalString(record: Record<string, unknown>, key: string) {
   return typeof value === 'string' ? value : undefined;
 }
 
-function readOptionalNumber(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
 function readRecord(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
-    : null;
-}
-
-function readStringArray(record: Record<string, unknown>, key: string) {
-  const value = record[key];
-  return Array.isArray(value) && value.every((item) => typeof item === 'string')
-    ? value
     : null;
 }
 
@@ -133,6 +146,21 @@ function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly stri
 function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpec | null {
   const review = readRecord(record, key);
   return isReviewSpecValue(review) ? review : null;
+}
+
+function readBuiltinGlobalReviewPolicyMode(
+  record: Record<string, unknown>,
+  key: string,
+): BuiltinGlobalReviewPolicyMode | null {
+  const value = readString(record, key);
+  if (
+    value === GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION
+    || value === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
+    || value === GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS
+  ) {
+    return value;
+  }
+  return null;
 }
 
 export function readLocalAgentClientMessageEnvelope(raw: unknown): LocalAgentClientMessageEnvelope | null {
@@ -158,7 +186,7 @@ function readRawOperationPayload(
   return Object.keys(result).length > 0 ? result : null;
 }
 
-function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent | null {
+function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentRuntimeEvent | null {
   const type = readString(record, 'type');
   const requestId = readString(record, 'requestId');
   if (!type || !requestId) return null;
@@ -178,40 +206,13 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
     const role = readString(record, 'role');
     const text = readString(record, 'text');
     if (role !== 'assistant' || text == null) return null;
-    const metadata = readRecord(record, 'metadata');
-    const tags = metadata ? readStringArray(metadata, 'tags') : null;
-    const usageRecord = readRecord(record, 'usage');
-    const inputTokens = usageRecord ? readOptionalNumber(usageRecord, 'inputTokens') : undefined;
-    const outputTokens = usageRecord ? readOptionalNumber(usageRecord, 'outputTokens') : undefined;
-    const totalTokens = usageRecord ? readOptionalNumber(usageRecord, 'totalTokens') : undefined;
-    const contextWindow = usageRecord ? readOptionalNumber(usageRecord, 'contextWindow') : undefined;
-    const updatedAt = usageRecord ? readOptionalString(usageRecord, 'updatedAt') : undefined;
-    const usage = inputTokens !== undefined
-      && outputTokens !== undefined
-      && totalTokens !== undefined
-      ? {
-          inputTokens,
-          outputTokens,
-          totalTokens,
-          ...(contextWindow !== undefined ? { contextWindow } : {}),
-          ...(updatedAt !== undefined ? { updatedAt } : {}),
-        }
-      : undefined;
+    const usage = parseTokenUsageSnapshot(record.usage);
     return {
       type,
       requestId,
       ...(usage ? { usage } : {}),
       role,
       text,
-      ...(metadata
-        ? {
-            metadata: {
-              mood: readOptionalString(metadata, 'mood') ?? null,
-              topic: readOptionalString(metadata, 'topic') ?? null,
-              ...(tags ? { tags } : {}),
-            },
-          }
-        : {}),
     };
   }
   if (type === 'operation') {
@@ -270,7 +271,27 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentEvent |
   }
   if (type === 'system.notice' || type === 'error') {
     const message = readString(record, 'message');
-    return message == null ? null : { type, requestId, message };
+    const code = type === 'error' ? readLocalAgentErrorCode(record) : null;
+    return message == null
+      ? null
+      : {
+          type,
+          requestId,
+          message,
+          ...(code ? { code } : {}),
+        };
+  }
+  return null;
+}
+
+function readLocalAgentErrorCode(record: Record<string, unknown>): LocalAgentErrorCode | null {
+  const code = readOptionalString(record, 'code');
+  if (
+    code === 'review_closed'
+    || code === 'review_stale'
+    || code === 'review_wrong_session'
+  ) {
+    return code;
   }
   return null;
 }
@@ -320,15 +341,26 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
       userId: readOptionalString(record, 'userId'),
     };
   }
+  if (type === 'runtime_config.update') {
+    if (!hasOnlyKeys(record, ['type', 'globalReviewPolicyMode'])) return null;
+    const globalReviewPolicyMode = readBuiltinGlobalReviewPolicyMode(record, 'globalReviewPolicyMode');
+    return globalReviewPolicyMode ? { type, globalReviewPolicyMode } : null;
+  }
   if (type === 'studio_request') {
     const requestId = readString(record, 'requestId');
     const userRequest = readString(record, 'userRequest');
     if (!requestId || userRequest == null) return null;
+    if ('runId' in record && typeof record.runId !== 'string') return null;
+    if ('conversationId' in record && typeof record.conversationId !== 'string') return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'runId', 'userRequest', 'conversationId'])) {
+      return null;
+    }
     return {
       type,
       requestId,
       userRequest,
       conversationId: readOptionalString(record, 'conversationId'),
+      runId: readOptionalString(record, 'runId'),
     };
   }
   return null;
@@ -360,8 +392,12 @@ function parseLocalAgentServerRecord(record: Record<string, unknown>): LocalAgen
       requestId,
       outcome,
       reply,
-      finalDispatchId: readOptionalString(record, 'finalDispatchId'),
+      finalPetRunId: readOptionalString(record, 'finalPetRunId'),
       reason: readOptionalString(record, 'reason'),
+      workdir: readOptionalString(record, 'workdir'),
+      runId: readOptionalString(record, 'runId'),
+      conversationId: readOptionalString(record, 'conversationId'),
+      idempotencyKey: readOptionalString(record, 'idempotencyKey'),
     };
   }
   return null;
@@ -399,7 +435,7 @@ export type SendLocalAgentEventOptions = {
 
 export function sendLocalAgentEvent(
   ws: WsLike,
-  event: LocalAgentEvent,
+  event: LocalAgentRuntimeEvent,
   options: SendLocalAgentEventOptions = {},
 ) {
   if (ws.readyState !== WS_OPEN) {
@@ -414,7 +450,7 @@ export function sendLocalAgentEvent(
   return true;
 }
 
-function stripRawFromEvent(event: LocalAgentEvent): LocalAgentEvent {
+function stripRawFromEvent(event: LocalAgentRuntimeEvent): LocalAgentRuntimeEvent {
   if (event.type !== 'operation' || event.raw === undefined) {
     return event;
   }

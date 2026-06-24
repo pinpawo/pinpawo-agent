@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildTuiActionsFromServerMessage } from './tui/tuiServerMessageActions';
 
-function historyCells() {
+function messageCells() {
   let index = 0;
   return () => {
     index += 1;
@@ -17,7 +17,7 @@ test('buildTuiActionsFromServerMessage ignores pong messages', () => {
   assert.deepEqual(
     buildTuiActionsFromServerMessage({ type: 'pong' }, {
       now: 1000,
-      makeHistoryCell: historyCells(),
+      makeMessageCell: messageCells(),
     }),
     { actions: [], clearInterrupt: false },
   );
@@ -38,7 +38,7 @@ test('buildTuiActionsFromServerMessage maps local-agent events to event.received
   assert.deepEqual(
     buildTuiActionsFromServerMessage(message, {
       now: 1000,
-      makeHistoryCell: historyCells(),
+      makeMessageCell: messageCells(),
     }),
     {
       clearInterrupt: true,
@@ -46,7 +46,7 @@ test('buildTuiActionsFromServerMessage maps local-agent events to event.received
         type: 'event.received',
         event: message.event,
         now: 1000,
-        historyCell: {
+        messageCell: {
           id: 'cell-1',
           timestamp: '10:00:01',
         },
@@ -67,7 +67,7 @@ test('buildTuiActionsFromServerMessage keeps streaming event interrupts intact',
     },
   }, {
     now: 1000,
-    makeHistoryCell: historyCells(),
+    makeMessageCell: messageCells(),
   });
 
   assert.equal(result.clearInterrupt, false);
@@ -82,7 +82,7 @@ test('buildTuiActionsFromServerMessage maps control messages to TUI actions', ()
       message: 'interrupting',
     }, {
       now: 1000,
-      makeHistoryCell: historyCells(),
+      makeMessageCell: messageCells(),
     }),
     {
       clearInterrupt: false,
@@ -101,14 +101,14 @@ test('buildTuiActionsFromServerMessage maps control messages to TUI actions', ()
       message: 'interrupted',
     }, {
       now: 1000,
-      makeHistoryCell: historyCells(),
+      makeMessageCell: messageCells(),
     }),
     {
       clearInterrupt: true,
       actions: [{
         type: 'server.interrupted',
         requestId: 'req-1',
-        historyCell: {
+        messageCell: {
           id: 'cell-1',
           timestamp: '10:00:01',
         },
@@ -128,7 +128,7 @@ test('buildTuiActionsFromServerMessage maps studio control messages', () => {
       reason: 'done enough',
     }, {
       now: 1000,
-      makeHistoryCell: historyCells(),
+      makeMessageCell: messageCells(),
     }),
     {
       clearInterrupt: true,
@@ -138,7 +138,7 @@ test('buildTuiActionsFromServerMessage maps studio control messages', () => {
         outcome: 'stopped',
         reply: '',
         reason: 'done enough',
-        historyCell: {
+        messageCell: {
           id: 'cell-1',
           timestamp: '10:00:01',
         },
@@ -158,7 +158,7 @@ test('buildTuiActionsFromServerMessage maps studio control messages', () => {
       message: 'planner failed',
     }, {
       now: 1000,
-      makeHistoryCell: historyCells(),
+      makeMessageCell: messageCells(),
     }),
     {
       clearInterrupt: true,
@@ -166,7 +166,7 @@ test('buildTuiActionsFromServerMessage maps studio control messages', () => {
         type: 'server.studio_error',
         requestId: 'studio-2',
         message: 'planner failed',
-        historyCell: {
+        messageCell: {
           id: 'cell-1',
           timestamp: '10:00:01',
         },

@@ -1,17 +1,21 @@
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
 import type { InitCommandOptions } from './commands/init';
+import type { StudioMigrateOptions } from './commands/studio';
 
 type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
-  runAgent?: () => Promise<void> | void;
-  runTui?: (opts: { dryRun: boolean }) => Promise<void> | void;
+  runAgent?: (opts: { workdir?: string }) => Promise<void> | void;
+  runTui?: (opts: { dryRun: boolean; workdir?: string }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
+  runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
+  runStudioMigrate?: (opts: StudioMigrateOptions) => Promise<void> | void;
 };
 
 function readPackageVersion(): string {
@@ -32,6 +36,13 @@ function readErrorMessage(error: unknown): string {
 function readExitCode(error: unknown): number {
   const value = (error as { exitCode?: unknown } | null)?.exitCode;
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 1;
+}
+
+function resolveWorkdirOption(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed === '~') return homedir();
+  if (trimmed.startsWith('~/')) return resolve(homedir(), trimmed.slice(2));
+  return isAbsolute(trimmed) ? trimmed : resolve(process.cwd(), trimmed);
 }
 
 export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Command {
@@ -57,6 +68,18 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     });
 
   program
+    .command('setup')
+    .description('Check local configuration and print guided setup steps')
+    .option('--workdir <directory>', 'workdir whose runtime state should be checked')
+    .action(async (options: { workdir?: string }) => {
+      const workdir = options.workdir?.trim()
+        ? resolveWorkdirOption(options.workdir)
+        : undefined;
+      const runSetup = handlers.runSetup ?? (await import('./commands/setup')).runSetupGuide;
+      await runSetup({ workdir });
+    });
+
+  program
     .command('login')
     .description('Sign in and write local agent configuration')
     .action(async () => {
@@ -75,18 +98,25 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
   program
     .command('run')
     .description('Start the local agent service')
-    .action(async () => {
+    .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
+    .action(async (options: { workdir?: string }) => {
       const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
-      await runAgent();
+      await runAgent({
+        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+      });
     });
 
   program
     .command('tui')
     .description('Start the interactive terminal UI')
     .option('--dry-run', 'run without writing generated post changes')
-    .action(async (options: { dryRun?: boolean }) => {
+    .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
+    .action(async (options: { dryRun?: boolean; workdir?: string }) => {
       const runTui = handlers.runTui ?? (await import('./commands/tui')).runTui;
-      await runTui({ dryRun: options.dryRun ?? false });
+      await runTui({
+        dryRun: options.dryRun ?? false,
+        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+      });
     });
 
   program
@@ -97,7 +127,25 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
       await runDetect();
     });
 
+  program
+    .command('studio <action>')
+    .description('Manage workdir-scoped Studio runtime config')
+    .option('--workdir <directory>', 'target workdir')
+    .option('--force', 'overwrite existing workdir-scoped Studio files')
+    .action(async (action: string, options: { workdir?: string; force?: boolean }) => {
+      if (action !== 'migrate') {
+        throw new Error(`Unknown studio command: ${action}`);
+      }
+      const runStudioMigrate = handlers.runStudioMigrate
+        ?? (await import('./commands/studio')).runStudioMigrate;
+      await runStudioMigrate({
+        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+        force: options.force ?? false,
+      });
+    });
+
   registerCapabilityCommand(program);
+
   return program;
 }
 

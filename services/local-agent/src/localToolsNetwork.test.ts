@@ -67,6 +67,10 @@ test('bash toolkit external access policy reviews configured network calls', asy
     operation: toolkit.operations?.http_fetch,
   });
   assert.equal(getReview && 'schemaVersion' in getReview ? getReview.view.title : null, '请求网页');
+  assert.deepEqual(
+    getReview && 'schemaVersion' in getReview ? getReview.options.map((option) => option.id) : [],
+    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
+  );
 
   const postReview = await httpPolicy.request({
     ...baseContext,
@@ -83,4 +87,8 @@ test('bash toolkit external access policy reviews configured network calls', asy
     operation: toolkit.operations?.download_file,
   });
   assert.equal(downloadReview && 'schemaVersion' in downloadReview ? downloadReview.view.title : null, '下载文件');
+  assert.deepEqual(
+    downloadReview && 'schemaVersion' in downloadReview ? downloadReview.options.map((option) => option.id) : [],
+    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
+  );
 });

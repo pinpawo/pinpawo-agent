@@ -4,7 +4,7 @@
  *
  * Each example represents a scenario the orchestrator route node must handle.
  * `inputs` contains the conversation messages and context.
- * `outputs.expected_route` is the correct decision: 'finish' or 'delegate'.
+ * `outputs.expected_route` is the correct decision: 'answer' or 'delegate'.
  *
  * Run: npx tsx evals/dataset.ts
  */
@@ -12,7 +12,7 @@ import { Client } from 'langsmith';
 
 const DATASET_NAME = 'orchestrator-route-decision';
 const DATASET_DESCRIPTION =
-  'Evaluates whether the orchestrator correctly decides to finish (reply to user) vs. delegate (call subagent).';
+  'Evaluates whether the orchestrator correctly decides to answer (reply to user) vs. delegate (call subagent).';
 
 type Example = {
   name: string;
@@ -36,8 +36,8 @@ type Example = {
     capability_candidates?: string[];
   };
   outputs: {
-    expected_route: 'finish' | 'delegate';
-    expected_mode?: 'finish' | 'general' | 'capability';
+    expected_route: 'answer' | 'delegate';
+    expected_mode?: 'answer' | 'general' | 'capability';
     expected_phase?: 'initial_request' | 'after_subagent';
     expected_capability_state?: 'unavailable' | 'search_available' | 'candidates_available' | 'search_exhausted';
     expected_active_capability?: string | null;
@@ -50,13 +50,13 @@ type Example = {
 };
 
 const examples: Example[] = [
-  // ── Should finish: simple questions ──
+  // ── Should answer: simple questions ──
   {
     name: 'greeting',
     inputs: { user_message: '你好' },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'initial_request',
       reason: 'Simple greeting — no tool needed, reply directly.',
     },
@@ -65,8 +65,8 @@ const examples: Example[] = [
     name: 'chitchat',
     inputs: { user_message: '今天想聊点轻松的，你陪我说会儿话吧' },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'initial_request',
       reason: 'Casual chat — no delegated capability is needed.',
     },
@@ -75,8 +75,8 @@ const examples: Example[] = [
     name: 'opinion-question',
     inputs: { user_message: '你觉得猫和狗哪个更可爱？' },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'initial_request',
       reason: 'Subjective question — no tool execution needed.',
     },
@@ -85,8 +85,8 @@ const examples: Example[] = [
     name: 'self-introduction',
     inputs: { user_message: '你是谁？介绍一下你自己' },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'initial_request',
       reason: 'Self-introduction — orchestrator knows its own identity.',
     },
@@ -95,14 +95,14 @@ const examples: Example[] = [
     name: 'simple-knowledge',
     inputs: { user_message: '地球到月球有多远？' },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'initial_request',
       reason: 'General knowledge question — no tool needed.',
     },
   },
 
-  // ── Should finish: result already available ──
+  // ── Should answer: result already available ──
   {
     name: 'result-already-sufficient',
     inputs: {
@@ -112,10 +112,10 @@ const examples: Example[] = [
       ],
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
-      reason: 'Search results already returned by subagent — should summarize and finish.',
+      reason: 'Search results already returned by subagent — should summarize and answer.',
     },
   },
   {
@@ -127,8 +127,8 @@ const examples: Example[] = [
       ],
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       reason: 'Task fully completed — present result, do not add unnecessary verification.',
     },
@@ -145,8 +145,8 @@ const examples: Example[] = [
       ],
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       reason: 'Browser subagent already completed the requested observation — route should not repeat the same browser task.',
     },
@@ -165,8 +165,8 @@ const examples: Example[] = [
       capability_candidates: ['daily_post'],
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_capability_state: 'unavailable',
       expected_capability_candidates_empty: true,
@@ -242,13 +242,13 @@ const examples: Example[] = [
     },
   },
 
-  // ── Edge cases: should finish despite seeming complex ──
+  // ── Edge cases: should answer despite seeming complex ──
   {
     name: 'explain-concept',
     inputs: { user_message: '解释一下什么是 React hooks 的闭包陷阱' },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'initial_request',
       reason: 'Knowledge explanation — no tools needed despite being a technical topic.',
     },
@@ -262,8 +262,8 @@ const examples: Example[] = [
       ],
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       reason:
         'Component created successfully. Should not auto-add tests, storybook, or barrel exports unless asked.',
@@ -303,7 +303,7 @@ const examples: Example[] = [
     },
   },
   {
-    name: 'two-task-both-complete-finish',
+    name: 'two-task-both-complete-answer',
     inputs: {
       user_message: '帮我读取 package.json 的依赖列表，然后运行 npm test',
       completed_tasks: [
@@ -316,10 +316,10 @@ const examples: Example[] = [
       ],
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
-      reason: 'Both explicit tasks have completed, so route should synthesize the result and finish.',
+      reason: 'Both explicit tasks have completed, so route should synthesize the result and answer.',
     },
   },
   {
@@ -399,8 +399,8 @@ const examples: Example[] = [
       capability_pack: 'pet_content',
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'initial_request',
       expected_capability_state: 'search_exhausted',
       expected_active_capability: null,

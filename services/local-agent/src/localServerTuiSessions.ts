@@ -1,5 +1,3 @@
-import { homedir } from 'node:os';
-import { resolve } from 'node:path';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { ReviewSpec } from '@pinpawo/pet-agent';
@@ -9,6 +7,8 @@ import { readFinalMessageText } from './agentStreamEvents';
 import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
 import type { LocalServerDeps } from './localServerTypes';
+import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import {
   createTuiSession,
   ensureActiveTuiSession,
@@ -86,11 +86,16 @@ export class LocalServerTuiSessionService {
     checkpointer?: TuiSessionCheckpointer;
     graphService?: TuiSessionGraphService;
     loadContext?: typeof loadAgentContext;
+    runtimeConfig?: LocalAgentRuntimeConfig;
+    sessionStatePath?: string;
+    checkpointPath?: string;
   } = {}) {
-    this.state = options.state ?? loadTuiSessionState();
-    this.saveState = options.saveState ?? saveTuiSessionState;
+    const runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
+    const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
+    this.state = options.state ?? loadTuiSessionState(sessionStatePath);
+    this.saveState = options.saveState ?? ((state) => saveTuiSessionState(state, sessionStatePath));
     this.checkpointer = options.checkpointer ?? new FileSaver(
-      resolve(homedir(), '.pinpawo', 'checkpoints-tui.json'),
+      options.checkpointPath ?? runtimeConfig.tuiCheckpointPath,
     );
     this.graphService = options.graphService ?? new LocalAgentGraphService();
     this.loadContext = options.loadContext ?? loadAgentContext;
@@ -133,6 +138,9 @@ export class LocalServerTuiSessionService {
     ctx: Awaited<ReturnType<typeof loadAgentContext>>,
     threadId = this.getChatThreadId(deps.actorId),
   ) {
+    const session = Object.values(this.state.sessions)
+      .find((candidate) => candidate.threadId === threadId)
+      ?? this.getActiveSession(deps.actorId);
     return buildLocalChatAgentInput({
       context: ctx,
       userMessage: '',
@@ -144,6 +152,9 @@ export class LocalServerTuiSessionService {
       dryRun: false,
       checkpoint: this.checkpointer,
       userCapabilities: deps.userCapabilities,
+      capabilityArtifactStore: deps.capabilityArtifactStore,
+      workdir: deps.workdir,
+      sessionStartedAt: session.createdAt,
     });
   }
 

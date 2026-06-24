@@ -131,7 +131,11 @@ if (!LLM_API_KEY) {
 
 function buildModel() {
   const normalizedModel = LLM_MODEL.toLowerCase();
-  const modelKwargs = normalizedModel.includes('qwen') || normalizedModel.includes('glm')
+  const modelKwargs = (
+    normalizedModel.includes('qwen')
+    || normalizedModel.includes('glm')
+    || normalizedModel.includes('minimax')
+  )
     ? { extra_body: { enable_thinking: false } }
     : normalizedModel.includes('deepseek')
       ? { thinking: { type: 'disabled' } }
@@ -142,6 +146,7 @@ function buildModel() {
     temperature: 0.2,
     timeout: 180_000,
     apiKey: LLM_API_KEY,
+    streaming: normalizedModel.includes('glm-4.5'),
     modelKwargs,
     configuration: {
       baseURL: LLM_BASE_URL,

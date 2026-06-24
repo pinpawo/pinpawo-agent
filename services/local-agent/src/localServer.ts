@@ -7,6 +7,7 @@
  */
 import { createServer } from 'node:http';
 import { WebSocket } from 'ws';
+import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
 import { LocalAgentGraphService } from './agentGraphService';
 import {
   sendLocalAgentEvent,
@@ -14,50 +15,95 @@ import {
 } from './localAgentProtocol';
 import { InflightRequestController } from './inflightRequestController';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
+import { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
 import { ensureLocalServerAuthToken } from './localServerAuth';
 import { LocalServerChatHandler } from './localServerChatHandler';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
-import type { AgentStats, LocalServerDeps } from './localServerTypes';
+import { buildLocalServerTuiSnapshot } from './localServerTuiSnapshot';
+import type { LocalServerDeps } from './localServerTypes';
+import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 
-export type { AgentStats, LocalServerDeps };
+export type { LocalServerDeps };
 
-const chatGraphService = new LocalAgentGraphService();
-const tuiSessions = new LocalServerTuiSessionService({ graphService: chatGraphService });
-
-const studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
 const INTERRUPT_FORCE_REPLY_MS = 1800;
-
-const inflightRequests = new InflightRequestController<WebSocket>({
-  forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
-  // Local TUI / companion: trusted transport — forward raw input/output so
-  // the UI can render diffs, expand payloads, etc.
-  emitOperation: (ws, event) => sendLocalAgentEvent(ws, event, { includeRaw: true }),
-  sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
-  logPrefix: 'local-server',
-});
-
-const chatHandler = new LocalServerChatHandler({
-  graphService: chatGraphService,
-  tuiSessions,
-  inflightRequests,
-});
-const studioHandler = new LocalServerStudioHandler({
-  reviewRouter: studioReviewRouter,
-  inflightRequests,
-});
 
 export function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
   return new Promise((resolve, reject) => {
+    const effectiveRuntimeConfig = deps.runtimeConfig ?? buildLocalAgentRuntimeConfig(deps.workdir);
+    const depsWithRuntime = deps.runtimeConfig ? deps : {
+      ...deps,
+      runtimeConfig: effectiveRuntimeConfig,
+    };
+    const chatGraphService = new LocalAgentGraphService();
+    const tuiSessions = new LocalServerTuiSessionService({
+      graphService: chatGraphService,
+      runtimeConfig: effectiveRuntimeConfig,
+    });
+    const studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
+    const studioDueRunScheduler = deps.studioDueRunScheduler
+      ?? new LocalStudioDueRunScheduler({
+        store: new FileStudioDueRunStore({
+          filePath: effectiveRuntimeConfig.studioDueRunsPath,
+        }),
+        filterWorkdir: effectiveRuntimeConfig.workdir,
+      });
+    const inflightRequests = new InflightRequestController<WebSocket>({
+      forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
+      // Local TUI / companion: trusted transport — forward raw input/output so
+      // the UI can render diffs, expand payloads, etc.
+      emitOperation: (ws, event) => sendLocalAgentEvent(ws, event, { includeRaw: true }),
+      sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
+      logPrefix: 'local-server',
+    });
+    const chatHandler = new LocalServerChatHandler({
+      graphService: chatGraphService,
+      tuiSessions,
+      inflightRequests,
+    });
+    const studioHandler = new LocalServerStudioHandler({
+      reviewRouter: studioReviewRouter,
+      inflightRequests,
+      ...(studioDueRunScheduler ? { studioDueRunScheduler } : {}),
+    });
     const authToken = ensureLocalServerAuthToken();
     const server = createServer((req, res) => {
-      const handled = handleLocalHttpRequest(req, res, deps, {
+      const handled = handleLocalHttpRequest(req, res, depsWithRuntime, {
         authToken,
-        loadHistory: () => tuiSessions.loadHistory(deps),
-        listSessions: () => tuiSessions.listSessions(deps),
-        resumeSession: (sessionId) => tuiSessions.resumeSession(deps, sessionId),
+        loadHistory: () => tuiSessions.loadHistory(depsWithRuntime),
+        loadSnapshot: async () => {
+          const messages = await tuiSessions.loadHistory(depsWithRuntime);
+          const pendingReview = await chatHandler.readPendingReviewSnapshot(depsWithRuntime);
+          const sessionId = tuiSessions.getActiveSessionId(depsWithRuntime.actorId);
+          return buildLocalServerTuiSnapshot({
+            sessionId,
+            kind: 'chat',
+            messages,
+            deps: depsWithRuntime,
+            pendingReview,
+          });
+        },
+        listSessions: () => tuiSessions.listSessions(depsWithRuntime),
+        resumeSession: async (sessionId) => {
+          const result = await tuiSessions.resumeSession(depsWithRuntime, sessionId);
+          const pendingReview = await chatHandler.readPendingReviewSnapshot(depsWithRuntime);
+          return {
+            session: {
+              ...result.session,
+              kind: 'chat',
+            },
+            messages: result.messages,
+            snapshot: buildLocalServerTuiSnapshot({
+              sessionId: result.session.id,
+              kind: 'chat',
+              messages: result.messages,
+              deps: depsWithRuntime,
+              pendingReview,
+            }),
+          };
+        },
       });
       if (handled) {
         return;
@@ -67,16 +113,16 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
     });
 
     attachLocalServerWebSocketTransport(server, {
-      onChatRequest: (ws, msg) => chatHandler.handleChatRequest(ws, msg, deps),
-      onStudioRequest: (ws, msg) => studioHandler.handleStudioRequest(ws, msg, deps),
+      onChatRequest: (ws, msg) => chatHandler.handleChatRequest(ws, msg, depsWithRuntime),
+      onStudioRequest: (ws, msg) => studioHandler.handleStudioRequest(ws, msg, depsWithRuntime),
       onHumanReviewResponse: (ws, msg) => {
         if (studioHandler.routeHumanReviewResponse(ws, msg)) {
           return;
         }
-        return chatHandler.handleHumanReviewResponse(ws, msg, deps);
+        return chatHandler.handleHumanReviewResponse(ws, msg, depsWithRuntime);
       },
       onInterruptRequest: async (ws, msg) => {
-        if (await chatHandler.handleInterruptRequest(ws, msg, deps)) {
+        if (await chatHandler.handleInterruptRequest(ws, msg, depsWithRuntime)) {
           return;
         }
         const inflight = inflightRequests.interrupt(ws, { requestId: msg.requestId });
@@ -87,6 +133,13 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
       onNewSession: () => {
         tuiSessions.createNewSession(deps.actorId);
         console.log(`[local-server] new session created for pet ${deps.actorId}`);
+      },
+      onRuntimeConfigUpdate: (_ws, msg) => {
+        deps.llmConfig = {
+          ...deps.llmConfig,
+          globalReviewPolicyMode: msg.globalReviewPolicyMode,
+        };
+        console.log(`[local-server] global review policy set to ${msg.globalReviewPolicyMode}`);
       },
       onClose: (ws) => {
         inflightRequests.abortAndClear(ws);

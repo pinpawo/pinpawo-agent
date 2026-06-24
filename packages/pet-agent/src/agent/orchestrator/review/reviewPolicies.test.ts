@@ -57,9 +57,11 @@ test('localMutation builds ReviewSpec from operation metadata', async () => {
 
   const review = await policy.request(reviewContext());
 
-  assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '写文件');
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', /Target: \/repo\/notes\.md/);
-  assert.match(review && 'schemaVersion' in review ? review.view.body : '', /createDirs/);
+  const view = review && 'schemaVersion' in review ? review.view : null;
+  assert.ok(view && view.kind === 'plain');
+  assert.equal(view.title, '写文件');
+  assert.match(view.body, /Target: \/repo\/notes\.md/);
+  assert.match(view.body, /createDirs/);
   assert.deepEqual(
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
     ['approve', 'reject', 'respond'],
@@ -83,6 +85,52 @@ test('presets can opt into exact args authorization', async () => {
   }));
 
   assert.equal(review, null);
+});
+
+test('externalAccess can opt into URL domain authorization', async () => {
+  const policy = ReviewPolicies.externalAccess({ authorization: 'url_domain' });
+  const matcher = await policy.buildAuthorizationMatcher?.(matcherContext({
+    toolName: 'browser_open',
+    input: { url: 'https://Example.test/a', headless: true },
+    pendingAction: {
+      actionId: 'call-1',
+      toolName: 'browser_open',
+      args: { url: 'https://Example.test/a', headless: true },
+    },
+  }));
+  assert.deepEqual(matcher, {
+    type: 'url_domain',
+    value: { origin: 'https://example.test' },
+  });
+
+  const review = await policy.request(reviewContext({
+    toolName: 'browser_open',
+    input: { url: 'https://example.test/b', headless: false },
+    toolAuthorizations: [authorizeToolAction({
+      toolName: 'browser_open',
+      matcher: matcher!,
+      now: () => new Date('2026-06-15T00:00:00.000Z'),
+    })],
+  }));
+
+  assert.equal(review, null);
+});
+
+test('URL domain authorization option uses domain-specific description', async () => {
+  const policy = ReviewPolicies.externalAccess({ authorization: 'url_domain' });
+
+  const review = await policy.request(reviewContext({
+    toolName: 'browser_open',
+    input: { url: 'https://example.test/a', headless: true },
+  }));
+
+  const authorizeOption = review && 'schemaVersion' in review
+    ? review.options.find((option) => option.id === 'approve-and-authorize-thread')
+    : null;
+  assert.equal(
+    authorizeOption?.description,
+    'Approve this action and authorize the same URL domain in this thread.',
+  );
 });
 
 test('commandExecution requires HITL once configured', async () => {

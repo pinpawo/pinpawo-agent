@@ -1,3 +1,5 @@
+import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
+
 export type AgentLlmConfig = {
   apiKey: string;
   baseUrl: string;
@@ -10,4 +12,10 @@ export type AgentLlmConfig = {
   verbose?: boolean;
   /** Enable thinking/reasoning for subagent calls. Default: false. */
   subagentThinking?: boolean;
+  /** Retry the same structured-output LLM call after parse/schema failure. Default: false. */
+  structuredOutputAutoRepair?: boolean;
+  /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */
+  structuredOutputRepairMaxRetries?: number;
+  /** Global handling for tool calls that request review. Default: require_authorization. */
+  globalReviewPolicyMode?: BuiltinGlobalReviewPolicyMode;
 };

@@ -5,6 +5,15 @@ export type {
 } from './types/agent';
 
 export type {
+  CapabilityArtifactKind,
+  CapabilityArtifactRef,
+  CapabilityArtifactSchemaRef,
+  CapabilityArtifactStore,
+  CapabilityArtifactWriteInput,
+  CapabilityArtifactWritePayload,
+} from './types/artifact';
+
+export type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
   PetAgentStatus,
@@ -19,10 +28,12 @@ export type {
   CapabilityContext,
   CapabilityInstructionContext,
   CapabilityMiddleware,
+  CapabilityMiddlewareContext,
   CapabilityRuntime,
 } from './types/capability';
 
 export type {
+  CapabilityArtifactSink,
   ContextPolicyContext,
   SubagentInput,
   SubagentContextPolicy,
@@ -59,18 +70,59 @@ export type {
 export { defineToolkit, defineToolset, hasToolOperationMetadata } from './types/toolkit';
 
 export {
+  buildOrchestratorRunInput,
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
   isOrchestratorInternalAiStreamNode,
+  streamOrchestratorGraph,
+  streamOrchestratorGraphWithTokenUsage,
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,
   validateUniqueToolNames,
 } from './agent/createAgentRuntime';
 export {
+  createTokenUsageSnapshot,
+  isTokenUsageSnapshot,
+  parseTokenUsageSnapshot,
+  readLlmResultTokenUsage,
+  readMessageTokenUsage,
+  readMessagesTokenUsage,
+} from './agent/tokenUsage';
+export type {
+  OrchestratorGraphStream,
+  OrchestratorTokenUsageStream,
+} from './agent/createAgentRuntime';
+export type {
+  ProviderTokenUsage,
+  TokenUsageScope,
+  TokenUsageSnapshot,
+  TokenUsageSource,
+} from './agent/tokenUsage';
+export {
+  inferStructuredOutputMethod,
+  invokeStructuredOutput,
+} from './utils/structuredOutput';
+export type {
+  StructuredOutputAutoRepairConfig,
+  StructuredOutputCapableModel,
+  StructuredOutputMethod,
+  StructuredOutputOptions,
+} from './utils/structuredOutput';
+export {
   extractCapabilityKeywords,
   searchCapabilities,
   splitCapabilitySearchTerms,
 } from './agent/orchestrator/capabilitySearch';
+export {
+  filterCapabilityArtifacts,
+  matchesCapabilityArtifact,
+  mergeCapabilityArtifactRefs,
+  selectCapabilityResultArtifact,
+  selectLatestCapabilityArtifact,
+} from './agent/orchestrator/capabilityArtifacts';
+export type {
+  CapabilityArtifactSelector,
+} from './agent/orchestrator/capabilityArtifacts';
 export type {
   OrchestratorConfig,
   OrchestratorInvokeOptions,
@@ -111,10 +163,27 @@ export type {
   HitlPresetOptions,
   ReviewUnavailableBehavior,
 } from './agent/orchestrator/review/reviewPolicies';
+export type {
+  ResolveGlobalReviewPolicyOptions,
+  BuiltinGlobalReviewPolicyMode,
+  GlobalReviewPolicy,
+  GlobalReviewPolicyContext,
+  GlobalReviewPolicyMode,
+  GlobalReviewPolicyResolver,
+  GlobalReviewPolicyResolution,
+  GlobalReviewPolicyStructuredOutputConfig,
+} from './agent/orchestrator/review/globalReviewPolicy';
 export {
+  GLOBAL_REVIEW_POLICY_MODE,
+  GLOBAL_REVIEW_POLICY_RESOLUTION,
+  GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
+} from './agent/orchestrator/review/globalReviewPolicy';
+export {
+  appendReviewViewMessage,
   buildReviewSpec,
   isHumanReviewInterruptPayload,
   isReviewSpecValue,
+  reviewViewToText,
 } from './agent/orchestrator/review/reviewSpec';
 export type {
   BuildReviewSpecParams,
@@ -152,10 +221,10 @@ export {
   readStringArray,
   resultStatusSummary,
 } from './utils/operationMetadata';
-export { readLatestToolArtifact } from './agent/orchestrator/subagentHandoff';
 export { runAgent } from './agent/runAgent';
 export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
 export { createSubagent } from './subagent/createSubagent';
+export { clipForPrompt } from './agent/orchestrator/utils';
 export {
   createLLMWikiCurator,
   createPetAgentRuntime,
@@ -163,15 +232,32 @@ export {
   createSkeletonWikiCurator,
   createStudioOrchestrator,
   createWikiReadToolkit,
+  buildStudioRunIdentity,
   DEFAULT_CURATOR_PROMPT,
   defaultPromptProvider,
   ensureWikiSkeleton,
   fileReadPromptProvider,
+  applyStudioDueRunEvent,
+  buildStudioDueRunRecord,
+  canRetry,
+  isTerminalStudioDueRunStatus,
+  InMemoryStudioDueRunStore,
+  FileStudioDueRunStore,
+  InMemoryStudioRunQueueStore,
+  FileStudioRunQueueStore,
 } from './agent/studio/index';
 export type {
   CreatePlanCapabilityOptions,
+  StudioDueRunEvent,
+  StudioDueRunRecord,
+  StudioDueRunStatus,
+  StudioDueRunClaim,
+  StudioDueRunClaimFilter,
+  StudioDueRunStoreInput,
+  StudioDueRunStoreOptions,
+  StudioDueRunStore,
+  StudioDueRunStoreTrace,
   CuratorPromptProvider,
-  ExecuteAction,
   HumanReviewer,
   HumanReviewerRequest,
   LLMWikiCuratorConfig,
@@ -180,19 +266,25 @@ export type {
   PetAgentRuntimeDescriptor,
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
-  StudioDispatchState,
-  StudioDispatchStatus,
   StudioOrchestrator,
   StudioOrchestratorConfig,
-  StudioOrchestratorInvokeInput,
-  StudioTask,
-  StudioTaskPlan,
+  StudioQueueItem,
+  StudioRun,
+  StudioRunEvent,
+  StudioRunEventHandler,
+  StudioRunSnapshot,
+  StudioRunStatus,
+  StudioSubmitRequestInput,
+  StudioSubmitRequestResult,
+  StudioTaskQueueItem,
   StudioTaskStatus,
   StudioTurnEvent,
   StudioTurnEventHandler,
   StudioTurnOutcome,
   StudioTurnResult,
-  StudioTurnState,
+  StudioRunIdentity,
+  StudioRunQueueStore,
+  StudioRunQueueStoreRecoveryOptions,
   WikiCurateInput,
   WikiCurateResult,
   WikiCurator,

@@ -5,7 +5,12 @@ import {
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
 } from './review/reviewResponseResolver';
-import { isHumanReviewInterruptPayload, isReviewSpecValue } from './review/reviewSpec';
+import {
+  appendReviewViewMessage,
+  isHumanReviewInterruptPayload,
+  isReviewSpecValue,
+  reviewViewToText,
+} from './review/reviewSpec';
 import type { ReviewResolutionContext } from './review/reviewSpec';
 
 function samplePendingReview(): ReviewResolutionContext {
@@ -93,6 +98,50 @@ test('review spec guards accept canonical values only', () => {
     ...reviewSpec,
     extra: true,
   }), false);
+});
+
+test('review spec guards accept a diff view and reject malformed ones', () => {
+  const reviewSpec = samplePendingReview().reviewSpec;
+  const diffView = {
+    kind: 'diff' as const,
+    title: '应用补丁',
+    summary: 'update',
+    target: 'src/example.ts',
+    patch: '*** Begin Patch\n*** End Patch',
+  };
+
+  assert.equal(isReviewSpecValue({ ...reviewSpec, view: diffView }), true);
+  // diff view without the required patch string is rejected.
+  assert.equal(isReviewSpecValue({
+    ...reviewSpec,
+    view: { kind: 'diff', title: 'x' },
+  }), false);
+  // unknown keys are rejected like the other view variants.
+  assert.equal(isReviewSpecValue({
+    ...reviewSpec,
+    view: { ...diffView, body: 'should not be here' },
+  }), false);
+});
+
+test('reviewViewToText flattens a diff view and appendReviewViewMessage degrades to plain', () => {
+  const diffView = {
+    kind: 'diff' as const,
+    title: '应用补丁',
+    summary: 'update',
+    target: 'src/example.ts',
+    patch: '*** Begin Patch\n*** End Patch',
+  };
+
+  const text = reviewViewToText(diffView);
+  assert.match(text, /Summary: update/);
+  assert.match(text, /Target: src\/example\.ts/);
+  assert.match(text, /\*\*\* Begin Patch/);
+
+  const appended = appendReviewViewMessage(diffView, '请确认');
+  assert.equal(appended.kind, 'plain');
+  assert.match((appended as { body: string }).body, /\*\*\* Begin Patch/);
+  assert.match((appended as { body: string }).body, /请确认$/);
+  assert.equal(appended.title, '应用补丁');
 });
 
 test('resolveHumanReviewResponse resolves approve option and declared effects', () => {

@@ -40,8 +40,10 @@ HASURA_JWT=eyJ...
 
 # LLM (OpenAI-compatible)
 LLM_API_KEY=sk-xxx
+# Presets: gpt-5, claude-sonnet, qwen, minimax, glm, kimi, deepseek, gemini.
+LLM_MODEL_PRESET=qwen
 LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_MODEL=qwen3.5-plus
+LLM_MODEL=qwen3.7-max
 # Optional. Fill this for custom models when automatic inference is not enough.
 LLM_CONTEXT_WINDOW_TOKENS=
 
@@ -49,10 +51,6 @@ LLM_CONTEXT_WINDOW_TOKENS=
 PINPAWO_WORKDIR=${homedir()}
 PINPAWO_BROWSER_BACKEND=auto
 LOCAL_SERVER_PORT=3210
-
-# MediaCrawler (optional)
-MEDIACRAWLER_DIR=
-XHS_COOKIE=
 `;
 }
 

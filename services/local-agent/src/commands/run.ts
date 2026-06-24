@@ -3,10 +3,20 @@ import { startLocalServer } from '../localServer';
 import { config } from '../config';
 import { ensureActorSelected } from '../actorSelection';
 import { browserSession } from '../toolkits/browser';
+import { applyRuntimeWorkdir } from '../runtimeWorkdir';
 
-export async function runAgent() {
+export type RunAgentOptions = {
+  workdir?: string;
+};
+
+export function buildRunAgentRuntimeConfig(options: RunAgentOptions = {}) {
+  return applyRuntimeWorkdir(options.workdir);
+}
+
+export async function runAgent(options: RunAgentOptions = {}) {
   await ensureActorSelected({ interactive: true });
-  const runtime = new LocalAgentRuntime();
+  const runtimeConfig = buildRunAgentRuntimeConfig(options);
+  const runtime = new LocalAgentRuntime(runtimeConfig);
 
   let stopping = false;
   process.on('SIGINT', () => {
@@ -31,7 +41,8 @@ export async function runAgent() {
     actorId: runtime.getActorId(),
     actorName: runtime.getActorName() ?? undefined,
     llmConfig: runtime.getLlmConfig(),
-    workdir: config.workdir,
+    workdir: runtimeConfig.workdir,
+    runtimeConfig,
     localToolkitDefinitions: runtime.getLocalToolkitDefinitions(),
     localToolkits: runtime.getLocalToolkits(),
     pluginToolkits: runtime.getPluginToolkits(),
@@ -39,8 +50,8 @@ export async function runAgent() {
     localCapabilities: runtime.getLocalCapabilities(),
     userCapabilityDefinitions: runtime.getUserCapabilityDefinitions(),
     userCapabilities: runtime.getUserCapabilities(),
+    capabilityArtifactStore: runtime.getCapabilityArtifactStore(),
     rescanUserCapabilities: () => runtime.rescanUserCapabilities(),
-    getStats: () => runtime.getStats(),
   });
 
   try {

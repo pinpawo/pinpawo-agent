@@ -81,6 +81,12 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
       meta: { id: 'user-cap' },
       capability: { name: 'user-capability' },
     }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getUserCapabilities'] extends () => infer T ? T : never,
+    getCapabilityArtifactStore: () => ({}) as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getCapabilityArtifactStore'] extends () => infer T ? T : never,
+    getWorkdir: () => '/tmp/pinpawo-app-workdir',
+    getActorName: () => 'Test Actor',
+    runStudioRequest: async () => undefined,
+    routeStudioHumanReviewResponse: () => false,
+    rejectStudioPendingReview: () => undefined,
     loadContext: async () => ({} as AgentContext),
     buildChatSetup: (params) => {
       buildInputs.push(params as unknown as Record<string, unknown>);
@@ -156,7 +162,6 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
         requestId: 'req-1',
         role: 'assistant',
         text: 'done reply',
-        metadata: { mood: null, topic: null, tags: [] },
       });
       return { status: 'completed', reply: 'done reply' };
     },
@@ -173,6 +178,7 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
   assert.equal(buildInputs[0]?.userMessage, 'hello');
   assert.equal(buildInputs[0]?.threadId, 'petbot:chat:pet:pet-a:user:user-1');
   assert.equal(buildInputs[0]?.interfaceKind, 'app-chat');
+  assert.equal(buildInputs[0]?.workdir, '/tmp/pinpawo-app-workdir');
   assert.deepEqual((buildInputs[0]?.toolkits as Array<{ name?: string }>).map((toolkit) => toolkit.name), [
     'plugin-toolkit',
     'local-toolkit',
@@ -193,8 +199,31 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
       .map((item) => item.event?.operation)
       .filter(Boolean)
       .map((operation) => [operation?.kind, operation?.target]),
-    [['local-toolkit.read_file', 'README.md'], ['local-toolkit.read_file', undefined]],
+    // The completed event inherits the start event's target even though
+    // read_file only describes itself via summarizeInput.
+    [['local-toolkit.read_file', 'README.md'], ['local-toolkit.read_file', 'README.md']],
   );
+});
+
+test('LocalAgentAppChatHandler keeps app chat session start time stable per user thread', async () => {
+  const { handler, ws, buildInputs } = createHandler();
+
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-1',
+    message: 'hello',
+    userId: 'user-1',
+  });
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-2',
+    message: 'again',
+    userId: 'user-1',
+  });
+
+  assert.equal(buildInputs.length, 2);
+  assert.equal(typeof buildInputs[0]?.sessionStartedAt, 'string');
+  assert.equal(buildInputs[1]?.sessionStartedAt, buildInputs[0]?.sessionStartedAt);
 });
 
 test('LocalAgentAppChatHandler resumes canonical human review responses through cached route', async () => {
@@ -322,4 +351,54 @@ test('LocalAgentAppChatHandler interrupts pending human review with canonical re
       },
     },
   ]);
+});
+
+test('LocalAgentAppChatHandler routes human review responses to studio router first', async () => {
+  let studioRouted = false;
+  const runRequests: unknown[] = [];
+  const { handler, ws } = createHandler({
+    runStudioRequest: async () => undefined,
+    routeStudioHumanReviewResponse: () => {
+      studioRouted = true;
+      return true;
+    },
+    runChat: async (options) => {
+      runRequests.push(options.request);
+      return { status: 'completed', reply: 'chat continued' };
+    },
+  });
+
+  await handler.handleHumanReviewResponse(ws, {
+    type: 'human_review_response',
+    requestId: 'req-studio',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
+  });
+
+  assert.equal(studioRouted, true);
+  assert.deepEqual(runRequests, []);
+});
+
+test('LocalAgentAppChatHandler forwards studio requests to runtime handler', async () => {
+  let handled = false;
+  const { handler, ws } = createHandler({
+    runStudioRequest: async (_ws, message) => {
+      handled = true;
+      assert.equal(_ws, ws);
+      assert.equal(message.requestId, 'studio-1');
+      assert.equal(message.userRequest, 'plan this task');
+      assert.equal(message.runId, 'run-1');
+      assert.equal(message.conversationId, 'conv-1');
+    },
+  });
+
+  await handler.handleStudioRequest(ws, {
+    type: 'studio_request',
+    requestId: 'studio-1',
+    userRequest: 'plan this task',
+    runId: 'run-1',
+    conversationId: 'conv-1',
+  });
+
+  assert.equal(handled, true);
 });

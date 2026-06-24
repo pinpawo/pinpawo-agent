@@ -1,14 +1,23 @@
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
 
-export type LocalAgentEvent =
-  | LocalAgentMessageDeltaEvent
+export type LocalAgentRuntimeEvent =
+  | LocalAgentAssistantMessageEvent
   | LocalAgentSubagentMessageDeltaEvent
-  | LocalAgentMessageCompletedEvent
   | LocalAgentOperationEvent
   | LocalAgentHumanReviewRequestedEvent
   | LocalAgentStudioProgressEvent
   | LocalAgentSystemNoticeEvent
   | LocalAgentErrorEvent;
+
+/**
+ * @deprecated Use `LocalAgentRuntimeEvent` when modeling local-agent runtime
+ * facts. The wire envelope is defined separately in `localAgentProtocol.ts`.
+ */
+export type LocalAgentEvent = LocalAgentRuntimeEvent;
+
+export type LocalAgentAssistantMessageEvent =
+  | LocalAgentMessageDeltaEvent
+  | LocalAgentMessageCompletedEvent;
 
 export type LocalAgentMessageDeltaEvent = {
   type: 'message.delta';
@@ -28,18 +37,7 @@ export type LocalAgentMessageCompletedEvent = {
   requestId: string;
   role: 'assistant';
   text: string;
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    contextWindow?: number;
-    updatedAt?: string;
-  };
-  metadata?: {
-    mood?: string | null;
-    topic?: string | null;
-    tags?: string[];
-  };
+  usage?: TokenUsageSnapshot;
 };
 
 export type LocalAgentOperationPhase =
@@ -109,8 +107,14 @@ export type LocalAgentSystemNoticeEvent = {
   message: string;
 };
 
+export type LocalAgentErrorCode =
+  | 'review_closed'
+  | 'review_stale'
+  | 'review_wrong_session';
+
 export type LocalAgentErrorEvent = {
   type: 'error';
   requestId: string;
   message: string;
+  code?: LocalAgentErrorCode;
 };

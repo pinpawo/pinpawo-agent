@@ -1,88 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  buildActiveOperationLines,
   buildBusyStatusLine,
-  formatOperationResult,
-  formatOperationStart,
   formatStudioProgressEvent,
   formatSubagentMessage,
   formatSystemNoticeEvent,
-  getOperationKey,
 } from './tui/render/eventText';
-import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
-
-test('formats operation events without reading legacy tool input/output', () => {
-  const event: LocalAgentOperationInternalEvent = {
-    type: 'operation',
-    requestId: 'req-1',
-    phase: 'started',
-    operation: {
-      id: 'call-1',
-      kind: 'bash.read_file',
-      title: '读文件',
-      target: '/tmp/example.md',
-      source: {
-        provider: 'toolkit',
-        name: 'bash',
-        toolName: 'read_file',
-        callId: 'call-1',
-      },
-    },
-    raw: {
-      input: '{"path":"should-not-be-rendered"}',
-    },
-  };
-
-  assert.equal(getOperationKey(event), 'call-1');
-  assert.deepEqual(formatOperationStart(event), {
-    label: '读文件',
-    detail: '/tmp/example.md',
-  });
-});
-
-test('formats completed and failed operation summaries from event fields', () => {
-  assert.equal(
-    formatOperationResult({
-      type: 'operation',
-      requestId: 'req-1',
-      phase: 'completed',
-      operation: {
-        kind: 'bash.run_shell',
-        title: '执行命令',
-        summary: 'git status --short',
-      },
-    }),
-    '执行命令：git status --short',
-  );
-
-  assert.equal(
-    formatOperationResult({
-      type: 'operation',
-      requestId: 'req-1',
-      phase: 'failed',
-      operation: {
-        kind: 'bash.run_shell',
-        title: '执行命令',
-        summary: 'exit 1',
-      },
-    }),
-    '执行命令：失败 · exit 1',
-  );
-});
 
 test('formats subagent text into readable paragraphs', () => {
-  assert.equal(
-    formatSubagentMessage(
-      '我先打开页面。现在搜索结果出来了，我会查看第一个帖子。然后继续收集评论。最后汇总。'.repeat(2),
-    )?.startsWith('[subagent]\n'),
-    true,
-  );
+  const formatted = formatSubagentMessage(
+    '我先打开页面。现在搜索结果出来了，我会查看第一个帖子。然后继续收集评论。最后汇总。'.repeat(2),
+  ) ?? '';
+  assert.equal(formatted.includes('subagent'), false);
   assert.match(
-    formatSubagentMessage(
-      '我先打开页面。现在搜索结果出来了，我会查看第一个帖子。然后继续收集评论。最后汇总。'.repeat(2),
-    ) ?? '',
-    /\n.+\n.+/,
+    formatted,
+    /.+\n.+/,
   );
 });
 
@@ -92,12 +24,13 @@ test('formats studio progress events from typed local-agent events', () => {
       type: 'studio.progress',
       requestId: 'req-1',
       event: {
-        type: 'dispatch_started',
+        type: 'task_started',
         petId: 'planner',
         taskIndex: 2,
+        petRunId: 'pet-run-1',
       },
     }),
-    '[studio] dispatch[#2] → pet:planner',
+    '[studio] task[#2] → pet:planner',
   );
 });
 
@@ -112,19 +45,14 @@ test('formats status and active operation lines from render adapter props', () =
     '- 正在思考 · 1s · 8 字',
   );
 
-  assert.deepEqual(
-    buildActiveOperationLines([
-      {
-        name: 'tool-1',
-        label: '读文件',
-        detail: '/tmp/example.md',
-        startedAt: 1000,
-      },
-    ], 3500, 80),
-    [{
-      id: 'operation-tool-1-0-0',
-      text: '读文件 · 2s · /tmp/example.md',
-    }],
+  assert.equal(
+    buildBusyStatusLine(
+      { phase: 'thinking', startedAt: 1000, charCount: 0 },
+      3500,
+      '|',
+      [{ name: 'tool-1', label: '读文件', detail: '/tmp/example.md', startedAt: 1000 }],
+    ),
+    '| 正在思考 · 2s · tool-1',
   );
 });
 

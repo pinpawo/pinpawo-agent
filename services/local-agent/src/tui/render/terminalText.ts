@@ -38,3 +38,20 @@ export function wrapLine(line: string, width: number) {
   }
   return wrapped;
 }
+
+export function truncateLine(line: string, width: number) {
+  if (width <= 0) return '';
+  if (stringWidth(line) <= width) return line;
+  if (width <= 1) return '…';
+
+  const targetWidth = width - 1;
+  let result = '';
+  let resultWidth = 0;
+  for (const char of Array.from(line)) {
+    const charWidth = Math.max(1, stringWidth(char));
+    if (resultWidth + charWidth > targetWidth) break;
+    result += char;
+    resultWidth += charWidth;
+  }
+  return `${result.trimEnd().replace(/[ ·:：-]+$/, '')}…`;
+}

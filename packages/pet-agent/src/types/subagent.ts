@@ -3,6 +3,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import type { CapabilityArtifactRef } from './artifact';
 import type { ToolOperationMetadata } from './toolkit';
 
 export type SubagentToolOperationMetadata = ToolOperationMetadata & {
@@ -53,11 +54,32 @@ export type SubagentToolEvent = SubagentToolLifecycleEvent | SubagentRuntimeEven
 
 export type SubagentToolEventHandler = (event: SubagentToolEvent) => void | Promise<void>;
 
+/**
+ * Lets a subagent persist a capability artifact from inside the loop and have
+ * the ref reach `state.sessionCapabilityArtifacts`. `recordCapabilityArtifact` is the
+ * sink supplied by the orchestrator (it pushes into the shared artifacts array
+ * that becomes `SubagentResult.artifacts`); the ids address a write. A
+ * capability holds its own `CapabilityArtifactStore` by closure for the bytes;
+ * this only carries what the subagent loop cannot otherwise see.
+ *
+ * This is the single artifact-sink shape shared by every layer that can persist
+ * an artifact — the contextPolicy hook (here), the afterRun middleware
+ * (`CapabilityMiddlewareContext`), and toolkit tools (`ToolkitContext`) all
+ * expose the same `recordCapabilityArtifact` + addressing ids.
+ */
+export type CapabilityArtifactSink = {
+  recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
+  threadId?: string | null;
+  delegationId?: string;
+  runId?: string;
+};
+
 export type ContextPolicyContext = {
   estimateMessagesTokens: (messages: BaseMessage[]) => number;
   iterationCount: number;
   operations: Record<string, SubagentToolOperationMetadata>;
   contextWindowTokens?: number;
+  artifactSink?: CapabilityArtifactSink;
 };
 
 export type SubagentContextPolicy = {
@@ -85,6 +107,8 @@ export type SubagentInput = {
   checkpoint?: BaseCheckpointSaver;
   runnableConfig?: RunnableConfig;
   signal?: AbortSignal;
+  artifacts?: CapabilityArtifactRef[];
+  artifactSink?: CapabilityArtifactSink;
   onToolEvent?: SubagentToolEventHandler;
 };
 
@@ -92,5 +116,6 @@ export type SubagentCompletionReason = 'natural' | 'limit_reached' | 'error';
 
 export type SubagentResult = {
   messages: BaseMessage[];
+  artifacts: CapabilityArtifactRef[];
   completionReason: SubagentCompletionReason;
 };

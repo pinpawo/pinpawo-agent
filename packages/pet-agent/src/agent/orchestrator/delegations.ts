@@ -1,20 +1,20 @@
 import type {
   MessageLane,
-  PendingDelegation,
-  TurnDelegation,
+  RunPendingDelegation,
+  RunDelegation,
 } from './types';
 import { clipForPrompt } from './utils';
 
-export function updateTurnDelegationResult(
-  turnDelegations: TurnDelegation[],
+export function updateRunDelegationResult(
+  runDelegations: RunDelegation[],
   delegationId: string | null,
   params: {
-    status: TurnDelegation['status'];
+    status: RunDelegation['status'];
     resultPreview: string | null;
   },
-): TurnDelegation[] {
-  if (!delegationId) return turnDelegations;
-  return turnDelegations.map((delegation) => delegation.id === delegationId
+): RunDelegation[] {
+  if (!delegationId) return runDelegations;
+  return runDelegations.map((delegation) => delegation.id === delegationId
     ? {
         ...delegation,
         status: params.status,
@@ -23,24 +23,24 @@ export function updateTurnDelegationResult(
     : delegation);
 }
 
-export function reuseOrAppendTurnDelegation(
-  turnDelegations: TurnDelegation[],
-  nextDelegation: PendingDelegation | null,
+export function reuseOrAppendRunDelegation(
+  runDelegations: RunDelegation[],
+  nextDelegation: RunPendingDelegation | null,
 ) {
   if (!nextDelegation) {
     return {
-      turnDelegations,
-      pendingDelegation: null as PendingDelegation | null,
+      runDelegations,
+      runPendingDelegation: null as RunPendingDelegation | null,
     };
   }
 
   // If the same lane already has a delegation in progress, always reuse it.
-  const inProgress = turnDelegations.find((delegation) =>
+  const inProgress = runDelegations.find((delegation) =>
     delegation.lane === nextDelegation.lane && delegation.status === 'progress',
   );
   if (inProgress) {
     return {
-      turnDelegations: turnDelegations.map((delegation) => delegation.id === inProgress.id
+      runDelegations: runDelegations.map((delegation) => delegation.id === inProgress.id
         ? {
             ...delegation,
             task: nextDelegation.task,
@@ -48,14 +48,14 @@ export function reuseOrAppendTurnDelegation(
             resultPreview: null,
           }
         : delegation),
-      pendingDelegation: {
+      runPendingDelegation: {
         ...nextDelegation,
         id: inProgress.id,
       },
     };
   }
 
-  const turnDelegation: TurnDelegation = {
+  const runDelegation: RunDelegation = {
     id: nextDelegation.id,
     lane: nextDelegation.lane,
     task: nextDelegation.task,
@@ -64,7 +64,7 @@ export function reuseOrAppendTurnDelegation(
   };
 
   return {
-    turnDelegations: [...turnDelegations, turnDelegation],
-    pendingDelegation: nextDelegation,
+    runDelegations: [...runDelegations, runDelegation],
+    runPendingDelegation: nextDelegation,
   };
 }

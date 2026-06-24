@@ -7,7 +7,7 @@
  * deterministic fake chat model that returns the example's subagent_response.
  *
  * Run:
- *   LLM_BASE_URL=... LLM_MODEL=... DECISION_STRUCTURED_OUTPUT_METHOD=functionCalling \
+ *   LLM_BASE_URL=... LLM_MODEL=... DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode \
  *     npx tsx evals/orchestrator-flow.mock-subagent.eval.ts
  */
 import { evaluate } from 'langsmith/evaluation';
@@ -29,6 +29,7 @@ import {
 import type { AgentActor, AgentModels } from '../src/types/agent';
 import type { AgentCapability } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
+import { inferStructuredOutputMethod } from '../src/utils/structuredOutput';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
 
 const DATASET_NAME = 'orchestrator-flow-mock-subagent';
@@ -41,11 +42,11 @@ const examples = [
       subagent_response: '已读取 src/index.ts，文件导出了 createApp 和 startServer 两个入口函数。',
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
-      reason: 'Route should delegate file reading once, consume completed announce, then finish.',
+      reason: 'Route should delegate file reading once, consume completed announce, then answer.',
     },
   },
   {
@@ -56,12 +57,12 @@ const examples = [
       subagent_response: '已打开小红书探索页并提取到热门内容：宠物日常、春季出游、家居收纳、穿搭分享。可以基于这些方向继续选题。',
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
       expected_latest_announce_lane: 'capability:browser',
-      reason: 'A completed browser announce should be enough for route to finish, not re-delegate.',
+      reason: 'A completed browser announce should be enough for route to answer, not re-delegate.',
     },
   },
   {
@@ -72,11 +73,11 @@ const examples = [
       subagent_response: '已打开小红书发现页并提取到今日热门动态：科技 AI 内容、穿搭分享、春季出游和家居收纳等方向。',
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
-      reason: 'A completed lookup should finish even if capability discovery found a daily_post candidate from keyword overlap.',
+      reason: 'A completed lookup should answer even if capability discovery found a daily_post candidate from keyword overlap.',
     },
   },
   {
@@ -86,11 +87,11 @@ const examples = [
       subagent_response: '已将所有 var 声明改成 const，并运行 lint 检查；lint 通过，退出码 0。',
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
-      reason: 'When the subagent completed both requested actions, route should finish.',
+      reason: 'When the subagent completed both requested actions, route should answer.',
     },
   },
   {
@@ -103,8 +104,8 @@ const examples = [
       ],
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
       expected_delegation_count: 2,
@@ -121,8 +122,8 @@ const examples = [
       subagent_final_response: '已处理完 data/items.csv 的全部分片，共 120 条记录，没有失败项。',
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
       expected_delegation_count: 1,
@@ -142,15 +143,15 @@ const examples = [
       auto_resume_iteration_limit: true,
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
       expected_latest_announce_lane: 'capability:explore',
       expected_delegation_count: 1,
       expected_carryover_seen: true,
       expected_iteration_limit_interrupt_count: 2,
-      reason: 'Capability progress caused by subagent limit plus orchestrator iteration-limit resume should continue the same capability lane, then finish.',
+      reason: 'Capability progress caused by subagent limit plus orchestrator iteration-limit resume should continue the same capability lane, then answer.',
     },
   },
   {
@@ -162,11 +163,11 @@ const examples = [
       subagent_response: '已生成小白今天的小红书日常草稿，主题是春日晒太阳，并附带标题、正文和标签。',
     },
     outputs: {
-      expected_route: 'finish',
-      expected_mode: 'finish',
+      expected_route: 'answer',
+      expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
-      reason: 'Route should delegate to the candidate capability once, then finish from its completed announce.',
+      reason: 'Route should delegate to the candidate capability once, then answer from its completed announce.',
     },
   },
 ];
@@ -193,16 +194,10 @@ function normalizeStructuredOutputMethod(value: string | undefined): Orchestrati
   throw new Error(`Invalid DECISION_STRUCTURED_OUTPUT_METHOD: ${value}`);
 }
 
-function inferDefaultStructuredOutputMethod(model: string): OrchestrationDecisionStructuredOutputConfig['method'] {
-  const normalized = model.toLowerCase();
-  if (normalized.includes('deepseek')) return 'functionCalling';
-  return undefined;
-}
-
 const DECISION_STRUCTURED_OUTPUT_METHOD = normalizeStructuredOutputMethod(
   process.env.DECISION_STRUCTURED_OUTPUT_METHOD,
 )
-  ?? inferDefaultStructuredOutputMethod(LLM_MODEL);
+  ?? inferStructuredOutputMethod(LLM_MODEL, LLM_BASE_URL);
 const DECISION_STRUCTURED_OUTPUT = DECISION_STRUCTURED_OUTPUT_METHOD
   ? { method: DECISION_STRUCTURED_OUTPUT_METHOD } satisfies OrchestrationDecisionStructuredOutputConfig
   : undefined;
@@ -213,13 +208,22 @@ if (!LLM_API_KEY) {
 }
 
 function buildModelKwargs(model: string) {
-  if (model.includes('qwen') || model.includes('glm')) {
+  const normalizedModel = model.toLowerCase();
+  if (
+    normalizedModel.includes('qwen')
+    || normalizedModel.includes('glm')
+    || normalizedModel.includes('minimax')
+  ) {
     return { extra_body: { enable_thinking: false } };
   }
-  if (model.includes('deepseek')) {
+  if (normalizedModel.includes('deepseek')) {
     return { thinking: { type: 'disabled' } };
   }
   return undefined;
+}
+
+function requiresStreaming(model: string): boolean {
+  return model.toLowerCase().includes('glm-4.5');
 }
 
 function messageHasLaneMeta(message: unknown): boolean {
@@ -281,7 +285,7 @@ function buildTextScriptSubagent(responses: string[]) {
  * over. First run exhausts the subagent recursion limit (limit_reached);
  * the continuation run finishes naturally only if carryover happened.
  * Calls process_next_chunk so the progress preview clearly says "unfinished",
- * otherwise the route model can legitimately finish from the preview alone.
+ * otherwise the route model can legitimately answer from the preview alone.
  */
 function buildCarryoverProbeSubagent(finalResponse: string) {
   let toolCallCounter = 0;
@@ -317,6 +321,7 @@ function buildModels(subagent: ProbeSubagentModel): AgentModels {
     temperature: 0.3,
     timeout: 180_000,
     apiKey: LLM_API_KEY,
+    streaming: requiresStreaming(LLM_MODEL),
     modelKwargs: buildModelKwargs(LLM_MODEL),
     configuration: {
       baseURL: LLM_BASE_URL,
@@ -525,8 +530,8 @@ function extractResult(
     ? 'general'
     : typeof lane === 'string' && lane.startsWith('capability:')
       ? 'capability'
-      : 'finish';
-  const finalRoute = routeMode === 'finish' ? 'finish' : 'delegate';
+      : 'answer';
+  const finalRoute = routeMode === 'answer' ? 'answer' : 'delegate';
   const messages = Array.isArray(result.messages) ? result.messages : [];
   const visibleMessages = messages.filter((message) => {
     const pinpawo = message?.additional_kwargs?.pinpawo;

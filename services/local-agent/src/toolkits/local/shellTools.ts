@@ -4,9 +4,8 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
-import { config } from '../../config';
 import { readRecord, readString } from '../operationMetadata';
-import { resolveUserPath } from './pathUtils';
+import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
 export function getBlockedShellReason(command: string) {
   const normalized = command.trim();
@@ -85,7 +84,7 @@ export function normalizeShellActionInput(input: unknown) {
   }
   const cwd = typeof record.cwd === 'string' && record.cwd.trim()
     ? resolveUserPath(record.cwd.trim())
-    : config.workdir;
+    : getLocalToolsWorkdir();
   return { command, cwd };
 }
 
@@ -95,6 +94,33 @@ const DEFAULT_SHELL_TIMEOUT_SECONDS = 60;
 const MAX_SHELL_TIMEOUT_SECONDS = 600;
 const SHELL_MAX_BUFFER_BYTES = 4 * 1024 * 1024;
 const SHELL_OUTPUT_LIMIT_CHARS = 20_000;
+
+function resolveCurrentTimezone(timezone?: string) {
+  const trimmed = timezone?.trim();
+  return trimmed || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+export function buildCurrentTimeSnapshot(now = new Date(), timezone?: string) {
+  const resolvedTimezone = resolveCurrentTimezone(timezone);
+  const localTime = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: resolvedTimezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(now);
+
+  return {
+    iso: now.toISOString(),
+    timezone: resolvedTimezone,
+    localTime,
+    unixMs: now.getTime(),
+    unixSeconds: Math.floor(now.getTime() / 1000),
+  };
+}
 
 export function truncateShellOutput(output: string, limit = SHELL_OUTPUT_LIMIT_CHARS) {
   if (output.length <= limit) {
@@ -113,6 +139,23 @@ function resolveShellTimeoutMs(timeoutSeconds: number | undefined) {
   );
   return seconds * 1000;
 }
+
+export const getCurrentTimeTool = tool(
+  async (input: { timezone?: string } = {}) => {
+    try {
+      return JSON.stringify(buildCurrentTimeSnapshot(new Date(), input.timezone), null, 2);
+    } catch (err) {
+      return `Error: ${err instanceof Error ? err.message : err}`;
+    }
+  },
+  {
+    name: 'get_current_time',
+    description: '查询当前系统时间。回答“现在”“今天”“昨天”等相对时间问题时优先使用本工具，不要用 run_shell 包装 date 命令。默认返回本机时区下的时间，也可传 IANA timezone（例如 Asia/Shanghai）指定时区。',
+    schema: z.object({
+      timezone: z.string().optional().describe('可选 IANA 时区名，例如 Asia/Shanghai；省略时使用本机默认时区'),
+    }),
+  },
+);
 
 export const runShellTool = tool(
   async (input: { command: string; cwd?: string; timeoutSeconds?: number }) => {
@@ -178,6 +221,15 @@ export const runShellTool = tool(
 );
 
 export const shellOperationMetadata: Record<string, ToolkitOperationMetadata> = {
+  get_current_time: {
+    title: '查询时间',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'timezone'),
+      };
+    },
+  },
   run_shell: {
     title: '执行命令',
     summarizeInput: (input) => {

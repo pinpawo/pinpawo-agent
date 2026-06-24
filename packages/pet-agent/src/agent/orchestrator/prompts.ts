@@ -1,29 +1,44 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentActor } from '../../types/agent';
+import type { CapabilityArtifactRef } from '../../types/artifact';
 import { CAPABILITY_SEARCH_TOOL_NAME } from './capabilitySearch';
 import type {
   CapabilityCandidate,
   CapabilityDecisionState,
   SubagentAnnounce,
   SubagentCompletionReason,
-  TurnDelegation,
+  RunDelegation,
 } from './types';
-import { clipForPrompt, describeAnnounceKind, formatDelegationStatus, readMessageText } from './utils';
+import { clipForPrompt, formatDelegationStatus, readMessageText } from './utils';
 
-const MAX_DECISION_TURN_DELEGATIONS = 6;
+const MAX_DECISION_RUN_DELEGATIONS = 6;
 const MAX_RECENT_MAIN_MESSAGES = 6;
 const MAX_RECENT_ANNOUNCE_CONTEXT = 5;
 const MAX_CONTEXT_SUMMARIES = 2;
+const MAX_RECENT_CAPABILITY_ARTIFACTS = 6;
 
-export function buildTurnDelegationContext(turnDelegations: TurnDelegation[]): string {
-  if (turnDelegations.length === 0) {
-    return '当前轮任务跟踪：\n- 暂无已委派任务。';
+export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[] | undefined): string {
+  if (!artifacts || artifacts.length === 0) return '';
+  const lines = ['当前会话 capability artifacts（仅短引用；需要细节时交给对应 capability/host 按 ref 读取）：'];
+  for (const artifact of artifacts.slice(-MAX_RECENT_CAPABILITY_ARTIFACTS)) {
+    lines.push(`- [${artifact.kind}] ${clipForPrompt(artifact.title ?? artifact.id, 120)}`);
+    lines.push(`  capability: ${artifact.capabilityId}; uri: ${artifact.uri}`);
+    if (artifact.preview) {
+      lines.push(`  preview: ${clipForPrompt(artifact.preview, 240)}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+export function buildRunDelegationContext(runDelegations: RunDelegation[]): string {
+  if (runDelegations.length === 0) {
+    return '当前 run 任务跟踪：\n- 暂无已委派任务。';
   }
 
-  const visibleDelegations = turnDelegations.slice(-MAX_DECISION_TURN_DELEGATIONS);
+  const visibleDelegations = runDelegations.slice(-MAX_DECISION_RUN_DELEGATIONS);
   const lines = [
-    '当前轮任务跟踪（仅保留本轮近期任务）',
+    '当前 run 任务跟踪（仅保留本 run 近期任务）',
     visibleDelegations.some((delegation) => delegation.status !== 'completed')
       ? '- 存在尚未 completed 的委派任务。'
       : '- 所有已委派任务均为 completed。',
@@ -100,6 +115,96 @@ export function buildDecisionTargetsContext(params: {
 
 export const buildRouteTargetsContext = buildDecisionTargetsContext;
 
+function xmlTextBlock(tag: string, text: string, attrs = ''): string {
+  const safeText = text.replaceAll(']]>', ']]]]><![CDATA[>');
+  return [
+    `<${tag}${attrs}>`,
+    '<![CDATA[',
+    safeText,
+    ']]>',
+    `</${tag}>`,
+  ].join('\n');
+}
+
+function indentXmlBlock(block: string, spaces: number): string {
+  const prefix = ' '.repeat(spaces);
+  let inCdata = false;
+  return block.split('\n').map((line) => {
+    if (line.trim() === '<![CDATA[') {
+      inCdata = true;
+      return `${prefix}${line}`;
+    }
+    if (line.trim() === ']]>') {
+      inCdata = false;
+      return `${prefix}${line}`;
+    }
+    return inCdata ? line : `${prefix}${line}`;
+  }).join('\n');
+}
+
+function buildDelegationContinuationAction(lane: string): string | null {
+  if (lane === 'general') return 'delegate_general';
+  if (lane.startsWith('capability:')) {
+    const capabilityName = lane.slice('capability:'.length);
+    return capabilityName ? `delegate_capability.${capabilityName}` : null;
+  }
+  return null;
+}
+
+export function buildDelegationOutcomeCurrentTaskContext(task: {
+  id: string;
+  lane: string;
+  task: string;
+  contextSummary: string | null;
+} | null): string | null {
+  if (!task) return null;
+  const continuationAction = buildDelegationContinuationAction(task.lane);
+  const lines = [
+    '<current_delegation>',
+    `  <delegation_id>${task.id}</delegation_id>`,
+    `  <lane>${task.lane}</lane>`,
+    continuationAction ? `  <continuation_action>${continuationAction}</continuation_action>` : null,
+    indentXmlBlock(xmlTextBlock('task', clipForPrompt(task.task, 240)), 2),
+  ].filter((line): line is string => Boolean(line));
+  if (task.contextSummary) {
+    lines.push(indentXmlBlock(xmlTextBlock('context_summary', clipForPrompt(task.contextSummary, 320)), 2));
+  }
+  lines.push('</current_delegation>');
+  return lines.join('\n');
+}
+
+export function buildDelegationOutcomeOtherTasksContext(
+  runDelegations: RunDelegation[],
+  activeDelegationId: string | null,
+): string {
+  const otherDelegations = activeDelegationId
+    ? runDelegations.filter((delegation) => delegation.id !== activeDelegationId)
+    : runDelegations;
+  if (otherDelegations.length === 0) {
+    return [
+      '<other_delegations>',
+      '  <none>true</none>',
+      '</other_delegations>',
+    ].join('\n');
+  }
+
+  const visibleDelegations = otherDelegations.slice(-MAX_DECISION_RUN_DELEGATIONS);
+  const lines = ['<other_delegations>'];
+  for (const delegation of visibleDelegations) {
+    lines.push('  <delegation>');
+    lines.push(`    <delegation_id>${delegation.id}</delegation_id>`);
+    lines.push(`    <lane>${delegation.lane}</lane>`);
+    lines.push(`    <status>${formatDelegationStatus(delegation.status)}</status>`);
+    lines.push(indentXmlBlock(xmlTextBlock('task', clipForPrompt(delegation.task, 160)), 4));
+    if (delegation.resultPreview) {
+      lines.push(indentXmlBlock(xmlTextBlock('result_preview', clipForPrompt(delegation.resultPreview, 220)), 4));
+    }
+    lines.push('  </delegation>');
+  }
+  lines.push('</other_delegations>');
+  return lines.join('\n');
+}
+
 export function buildRecentSubagentAnnounceContext(announces: SubagentAnnounce[]): string {
   if (announces.length === 0) {
     return '';
@@ -107,7 +212,7 @@ export function buildRecentSubagentAnnounceContext(announces: SubagentAnnounce[]
 
   const lines = ['最近 subagent announce（用于理解“之前/刚刚/继续/完成了吗”等指代）：'];
   for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
-    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}${item.lane}，${describeAnnounceKind(item.announce)}`);
+    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}${item.lane}`);
     if (item.task) {
       lines.push(`  委派任务：${clipForPrompt(item.task, 140)}`);
     }
@@ -119,6 +224,30 @@ export function buildRecentSubagentAnnounceContext(announces: SubagentAnnounce[]
   return lines.join('\n');
 }
 
+function buildRecentSubagentAnnounceXmlContext(announces: SubagentAnnounce[]): string | null {
+  if (announces.length === 0) {
+    return null;
+  }
+
+  const lines = ['<recent_subagent_announces purpose="coreference">'];
+  for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
+    lines.push('  <announce>');
+    if (item.delegationId) {
+      lines.push(`    <delegation_id>${item.delegationId}</delegation_id>`);
+    }
+    lines.push(`    <lane>${item.lane}</lane>`);
+    if (item.task) {
+      lines.push(indentXmlBlock(xmlTextBlock('task', clipForPrompt(item.task, 140)), 4));
+    }
+    if (item.text) {
+      lines.push(indentXmlBlock(xmlTextBlock('summary', clipForPrompt(item.text, 220)), 4));
+    }
+    lines.push('  </announce>');
+  }
+  lines.push('</recent_subagent_announces>');
+  return lines.join('\n');
+}
+
 export function buildCapabilityDiscoveryTaskContext(announces: SubagentAnnounce[]): string {
   if (announces.length === 0) {
     return '';
@@ -126,7 +255,7 @@ export function buildCapabilityDiscoveryTaskContext(announces: SubagentAnnounce[
 
   const lines = ['近期任务状态（只用于理解当前请求是否承接已有任务；不要把旧任务目标当成当前搜索目标）：'];
   for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
-    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}执行器：${item.lane}；完成进度：${item.announce}`);
+    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}执行器：${item.lane}`);
     if (item.task) {
       lines.push(`  任务目标：${clipForPrompt(item.task, 120)}`);
     }
@@ -148,7 +277,7 @@ function buildDecisionConfigLines(actor: AgentActor, workdir?: string, runtimeEn
 
 export function buildUserIntentDecisionSystemPrompt(params: {
   actor: AgentActor;
-  turnDelegationContext: string;
+  runDelegationContext: string;
   targetsContext: string;
   capabilityDecisionState: CapabilityDecisionState;
   outputInstruction: string;
@@ -161,7 +290,7 @@ export function buildUserIntentDecisionSystemPrompt(params: {
     '',
     '你是 orchestrator 的用户意图判断节点，只决定下一步，不亲自执行可委派目标里的能力。',
     '',
-    params.turnDelegationContext,
+    params.runDelegationContext,
     '',
     params.targetsContext,
     '',
@@ -169,10 +298,10 @@ export function buildUserIntentDecisionSystemPrompt(params: {
     '判断重点：理解用户当前想完成什么，决定是否需要外部执行器。',
     '',
     '决策原则：',
-    '- 如果当前输入足以直接回应用户，选择 finish。',
-    '- 如果用户询问已有上下文、最近任务状态或之前结果，且请求上下文足以回答，选择 finish。',
+    '- 如果当前输入足以直接回应用户（无需委派执行器），选择 answer；最终回复由后续回复节点基于完整对话历史生成，你不要在这里撰写回复内容。',
+    '- 如果用户询问已有上下文、最近任务状态或之前结果，选择 answer 交给回复节点回答；不要在决策层凭印象复述或编造之前的结果。',
+    '- 如果用户目标本身无法判断，或需要向用户补充、澄清、确认，选择 answer 交给回复节点处理；不要在决策层直接提问。',
     '- 如果下一步任务匹配某个 delegate_capability.<name> 候选，选择该候选；capability 优先于 general。即使缺少主题、平台、时长等执行参数，也应把澄清交给 capability 内部处理，除非用户目标本身无法判断或涉及真实风险。',
-    '- 如果没有明确匹配的 capability，且信息不足、用户意图不明确，或下一步具有破坏性、不可逆、涉及敏感凭据、外部真实副作用，选择 ask_user 先向用户确认。',
     ...capabilityInstructions.map((line) => `- ${line}`),
     '- 当所有候选都不匹配，且需要 general 的工具能力才能继续时，选择 delegate_general。',
     '- 一旦决定 delegate_*，就交给执行器；运行期的工具级风险（rm -rf、git push --force 等）由具体工具自己拦截，不需要在决策层重复表达。',
@@ -184,7 +313,6 @@ export function buildUserIntentDecisionSystemPrompt(params: {
 
 export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   actor: AgentActor;
-  targetsContext: string;
   outputInstruction: string;
   workdir?: string;
   runtimeEnvironment?: string;
@@ -192,29 +320,49 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的子任务结果判断节点，只根据明确输入判断下一步，不亲自执行可委派目标里的能力。',
-    '',
-    params.targetsContext,
+    '你是 orchestrator 的子任务结果判断节点。你的唯一职责是判断下一步路由：交给 answer 节点，或继续委派给执行器。',
+    '不要回答用户、不要总结 subagent 结果、不要执行或规划具体工具调用；最终回复由后续 answer 节点生成。',
     '',
     '当前阶段：subagent 返回后的结果判断。',
-    '判断重点：读取输入中的 subagent announce，判断用户当前轮目标是否已经满足。',
+    '判断重点：读取输入中的 subagent announce 原文，结合用户原始请求和当前 run 任务跟踪，判断用户当前 run 目标是否已经满足。',
+    'run 任务跟踪只用于理解委派链路；完成与否以当前 subagent announce 是否覆盖用户目标为准。',
+    '可选 action 由结构化输出 schema 限定；本节点不接收、不需要、也不应该依赖具体工具列表。',
     '',
     '决策原则：',
-    '- 如果 subagent announce 已经满足用户当前轮目标，选择 finish。',
+    '- 如果 subagent announce 已经满足用户当前 run 目标，选择 answer；不要在这里撰写最终回复内容。',
     '- 如果 subagent announce 只是阶段性进展，判断还缺什么；需要执行器继续时再委派。',
-    '- 如果 subagent 因迭代上限、上下文限制或阶段性停止而返回 progress，但用户目标仍明确且不需要用户补充信息，优先继续委派给同一类执行器；不要仅因为 progress 就 ask_user。',
+    '- 如果当前委派任务还没完成，但用户目标仍明确且不需要用户补充信息，优先继续当前委派任务对应的执行器；不要仅因为停止原因不是 natural 就选择 answer。',
     '- 如果用户原始请求仍有明确未完成目标，选择一个最明确的下一步。',
-    '- 如果信息不足、用户意图不明确，或下一步具有破坏性、不可逆、涉及敏感凭据、外部真实副作用，选择 ask_user 先向用户确认。',
-    '- 如果下一步需要 general 的工具能力，选择 delegate_general。',
+    '- 如果信息不足、用户意图不明确，或下一步需要用户先补充、澄清、确认，选择 answer 交给 answer 节点处理；不要在决策层直接提问。',
     '- 一旦决定 delegate_*，就交给执行器；运行期的工具级风险（rm -rf、git push --force 等）由具体工具自己拦截，不需要在决策层重复表达。',
     '',
     params.outputInstruction,
   ].filter((line) => line !== null).join('\n');
 }
 
+export function buildAnswerSystemPrompt(params: {
+  actor: AgentActor;
+  workdir?: string;
+  runtimeEnvironment?: string;
+}): string {
+  return [
+    ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
+    '',
+    '你是 orchestrator 的最终回复节点。orchestrator 已经判断当前 run 无需再委派执行器，现在由你直接回复用户。',
+    '你能看到完整的对话历史（包括之前 subagent/执行器返回的完整内容）。',
+    '',
+    '回复原则：',
+    '- 基于完整对话历史，对用户当前请求给出忠实、连贯、直接可用的回复。',
+    '- 严禁编造历史中没有出现的数据、数字、来源或结论；如需引用之前的结果，以对话历史中的原文为准，不要凭记忆改写。',
+    '- 如果用户是在要求复述、重发或继续之前的结果，就从历史中找到对应内容如实呈现，不要重新生成一份与之前不一致的版本。',
+    '- 如果历史中确实缺少回答或继续推进所需的信息，直接向用户提出需要补充或确认的问题，不要用先验知识填补。',
+    '- 直接输出给用户看的回复正文，不要输出 JSON、动作字段或决策说明。',
+  ].filter((line) => line !== null).join('\n');
+}
+
 export function buildCapabilityDiscoverySystemPrompt(params: {
   actor: AgentActor;
-  turnDelegationContext: string;
+  runDelegationContext: string;
   generalTools: StructuredTool[];
   workdir?: string;
   runtimeEnvironment?: string;
@@ -239,7 +387,7 @@ export function buildCapabilityDiscoverySystemPrompt(params: {
     '你是 capability discovery，只判断是否需要先搜索业务 capability 候选。',
     '不要做最终路由决策，不要回答用户，也不要委派执行器。',
     '',
-    params.turnDelegationContext,
+    params.runDelegationContext,
     '',
     ...generalToolLines,
     '',
@@ -270,10 +418,15 @@ function buildCapabilityDecisionInstructions(capabilityDecisionState: Capability
   }
   if (capabilityDecisionState === 'search_exhausted') {
     return [
-      '已搜索但没有找到匹配的 delegate_capability.<name> 候选；本轮不再尝试该路径。',
+      '已搜索但没有找到匹配的 delegate_capability.<name> 候选；本 run 不再尝试该路径。',
     ];
   }
   return [];
+}
+
+function formatSubagentAnnounceText(item: SubagentAnnounce): string | null {
+  if (!item.text) return null;
+  return xmlTextBlock('result', item.text.trim(), ' format="markdown" role="data"');
 }
 
 export function buildSubagentAnnounceContext(
@@ -281,14 +434,17 @@ export function buildSubagentAnnounceContext(
   completionReason?: SubagentCompletionReason | null,
 ): string | null {
   if (!item) return null;
+  // No completed/progress verdict here: the orchestrator judges completion from
+  // the announce text + stop reason. Feeding a pre-baked "状态" would bias it into
+  // rubber-stamping. See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
+  const resultBlock = formatSubagentAnnounceText(item);
   const lines = [
-    'subagent announce：',
-    item.delegationId ? `- 任务标识：${item.delegationId}` : null,
-    `- 执行器：${item.lane}`,
-    `- 状态：${describeAnnounceKind(item.announce)}`,
-    completionReason ? `- 停止原因：${completionReason}` : null,
-    item.task ? `- 委派任务：${clipForPrompt(item.task, 180)}` : null,
-    item.text ? `- 返回摘要：${clipForPrompt(item.text, 320)}` : null,
+    '<subagent_announce>',
+    item.delegationId ? `  <delegation_id>${item.delegationId}</delegation_id>` : null,
+    `  <lane>${item.lane}</lane>`,
+    completionReason ? `  <stop_reason>${completionReason}</stop_reason>` : null,
+    resultBlock ? indentXmlBlock(resultBlock, 2) : null,
+    '</subagent_announce>',
   ].filter(Boolean);
   return lines.join('\n');
 }
@@ -316,35 +472,67 @@ function buildCompactionSummaryContext(contextSummaries: string[] | undefined): 
   ].join('\n');
 }
 
+function buildCompactionSummaryXmlContext(contextSummaries: string[] | undefined): string | null {
+  const visibleSummaries = (contextSummaries ?? [])
+    .slice(-MAX_CONTEXT_SUMMARIES)
+    .map((summary) => clipForPrompt(summary, 1200))
+    .filter(Boolean);
+  if (visibleSummaries.length === 0) {
+    return null;
+  }
+
+  const lines = ['<context_summaries source="compaction" role="context">'];
+  visibleSummaries.forEach((summary, index) => {
+    lines.push(indentXmlBlock(xmlTextBlock('summary', summary, ` index="${(index + 1).toString()}"`), 2));
+  });
+  lines.push('</context_summaries>');
+  return lines.join('\n');
+}
+
+function buildRecentMessagesXmlContext(messages: BaseMessage[]): string | null {
+  const entries = messages
+    .slice(-MAX_RECENT_MAIN_MESSAGES)
+    .map((message) => {
+      const text = readMessageText(message);
+      if (!text) return null;
+      return {
+        role: messageRoleLabel(message),
+        text: clipForPrompt(text, 220),
+      };
+    })
+    .filter((entry): entry is { role: string; text: string } => Boolean(entry));
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const lines = ['<recent_messages purpose="coreference">'];
+  for (const entry of entries) {
+    lines.push('  <message>');
+    lines.push(`    <role>${entry.role}</role>`);
+    lines.push(indentXmlBlock(xmlTextBlock('text', entry.text), 4));
+    lines.push('  </message>');
+  }
+  lines.push('</recent_messages>');
+  return lines.join('\n');
+}
+
 export function buildUserIntentDecisionInput(params: {
   latestUserRequest: string | null;
   recentMessages: BaseMessage[];
   requestContext?: string | null;
 }): string {
-  if (params.requestContext) {
-    return [
-      params.requestContext,
-      '',
-      '请根据以上上下文判断当前用户请求的下一步。',
-    ].join('\n');
-  }
-
-  const recentLines = params.recentMessages
-    .slice(-MAX_RECENT_MAIN_MESSAGES)
-    .map((message) => {
-      const text = readMessageText(message);
-      return text ? `- ${messageRoleLabel(message)}：${clipForPrompt(text, 220)}` : null;
-    })
-    .filter((line): line is string => Boolean(line));
-
+  const context = params.requestContext ?? buildPreparedRequestContext({
+    latestUserRequest: params.latestUserRequest,
+    recentMessages: params.recentMessages,
+    recentAnnounces: [],
+  });
   return [
-    params.latestUserRequest
-      ? `当前用户请求：${clipForPrompt(params.latestUserRequest, 420)}`
-      : '当前用户请求：未提供',
-    recentLines.length > 0 ? '' : null,
-    recentLines.length > 0 ? '近期对话上下文（只用于消解指代，不要续写这些内容）：' : null,
-    ...recentLines,
-  ].filter((line) => line !== null).join('\n');
+    '<user_intent_decision_input>',
+    indentXmlBlock(context, 2),
+    '  <instruction>请根据以上上下文判断当前用户请求的下一步。</instruction>',
+    '</user_intent_decision_input>',
+  ].join('\n');
 }
 
 export function buildPreparedRequestContext(params: {
@@ -352,28 +540,23 @@ export function buildPreparedRequestContext(params: {
   recentMessages: BaseMessage[];
   recentAnnounces: SubagentAnnounce[];
   contextSummaries?: string[];
+  capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
-  const recentLines = params.recentMessages
-    .slice(-MAX_RECENT_MAIN_MESSAGES)
-    .map((message) => {
-      const text = readMessageText(message);
-      return text ? `- ${messageRoleLabel(message)}：${clipForPrompt(text, 220)}` : null;
-    })
-    .filter((line): line is string => Boolean(line));
-
-  const compactionSummaryContext = buildCompactionSummaryContext(params.contextSummaries);
+  const compactionSummaryContext = buildCompactionSummaryXmlContext(params.contextSummaries);
+  const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
+  const recentAnnouncesContext = buildRecentSubagentAnnounceXmlContext(params.recentAnnounces);
+  const recentMessagesContext = buildRecentMessagesXmlContext(params.recentMessages);
 
   return [
+    '<user_intent_context>',
     params.latestUserRequest
-      ? `当前用户请求：${clipForPrompt(params.latestUserRequest, 420)}`
-      : '当前用户请求：未提供',
-    compactionSummaryContext ? '' : null,
-    compactionSummaryContext,
-    params.recentAnnounces.length > 0 ? '' : null,
-    params.recentAnnounces.length > 0 ? buildRecentSubagentAnnounceContext(params.recentAnnounces) : null,
-    recentLines.length > 0 ? '' : null,
-    recentLines.length > 0 ? '近期对话上下文（只用于消解指代，不要续写这些内容）：' : null,
-    ...recentLines,
+      ? indentXmlBlock(xmlTextBlock('user_request', clipForPrompt(params.latestUserRequest, 420)), 2)
+      : '  <user_request missing="true" />',
+    compactionSummaryContext ? indentXmlBlock(compactionSummaryContext, 2) : null,
+    artifactContext ? indentXmlBlock(xmlTextBlock('capability_artifacts', artifactContext), 2) : null,
+    recentAnnouncesContext ? indentXmlBlock(recentAnnouncesContext, 2) : null,
+    recentMessagesContext ? indentXmlBlock(recentMessagesContext, 2) : null,
+    '</user_intent_context>',
   ].filter((line) => line !== null).join('\n');
 }
 
@@ -382,6 +565,7 @@ export function buildCapabilityDiscoveryRequestContext(params: {
   recentMessages: BaseMessage[];
   recentAnnounces: SubagentAnnounce[];
   contextSummaries?: string[];
+  capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
   const recentLines = params.recentMessages
     .slice(-MAX_RECENT_MAIN_MESSAGES)
@@ -392,6 +576,7 @@ export function buildCapabilityDiscoveryRequestContext(params: {
     .filter((line): line is string => Boolean(line));
 
   const compactionSummaryContext = buildCompactionSummaryContext(params.contextSummaries);
+  const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
 
   return [
     params.latestUserRequest
@@ -399,6 +584,8 @@ export function buildCapabilityDiscoveryRequestContext(params: {
       : '当前用户请求：未提供',
     compactionSummaryContext ? '' : null,
     compactionSummaryContext,
+    artifactContext ? '' : null,
+    artifactContext,
     params.recentAnnounces.length > 0 ? '' : null,
     params.recentAnnounces.length > 0 ? buildCapabilityDiscoveryTaskContext(params.recentAnnounces) : null,
     recentLines.length > 0 ? '' : null,
@@ -426,18 +613,30 @@ export function buildCapabilityDiscoveryInput(params: {
 
 export function buildDelegationOutcomeDecisionInput(params: {
   latestUserRequest: string | null;
-  turnDelegationContext: string;
+  currentTaskContext: string | null;
   subagentAnnounceContext: string | null;
+  otherTasksContext?: string | null;
+  capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
+  const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
   return [
+    '<delegation_outcome_input>',
     params.latestUserRequest
-      ? `用户原始请求：${clipForPrompt(params.latestUserRequest, 420)}`
-      : '用户原始请求：未提供',
-    '',
-    params.subagentAnnounceContext ?? 'subagent announce：无',
-    '',
-    params.turnDelegationContext,
-    '',
-    '请根据以上 subagent announce 和任务跟踪，判断当前轮下一步。',
-  ].join('\n');
+      ? indentXmlBlock(xmlTextBlock('user_request', clipForPrompt(params.latestUserRequest, 420)), 2)
+      : '  <user_request missing="true" />',
+    params.currentTaskContext
+      ? indentXmlBlock(params.currentTaskContext, 2)
+      : '  <current_delegation missing="true" />',
+    params.subagentAnnounceContext
+      ? indentXmlBlock(params.subagentAnnounceContext, 2)
+      : '  <subagent_announce missing="true" />',
+    params.otherTasksContext
+      ? indentXmlBlock(params.otherTasksContext, 2)
+      : null,
+    artifactContext
+      ? indentXmlBlock(xmlTextBlock('capability_artifacts', artifactContext), 2)
+      : null,
+    '  <instruction>请根据当前委派任务、subagent announce 和用户原始请求，判断当前 run 下一步。</instruction>',
+    '</delegation_outcome_input>',
+  ].filter((line) => line !== null).join('\n');
 }

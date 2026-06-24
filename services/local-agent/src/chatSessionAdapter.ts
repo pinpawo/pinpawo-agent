@@ -1,8 +1,11 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { HumanMessage } from '@langchain/core/messages';
 import {
+  createTokenUsageSnapshot,
+  GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isHumanReviewInterruptPayload,
   isOrchestratorInternalAiStreamNode,
+  readMessagesTokenUsage,
   type ReviewSpec,
   type SubagentToolEvent,
   type SubagentToolLifecycleEvent,
@@ -20,25 +23,8 @@ import {
 import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
-const CHARS_PER_TOKEN = 4;
 const STALE_RESUME_MESSAGE = '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。';
 const PENDING_REVIEW_TEXT_NOTICE = '当前有待确认的 review，请先通过确认面板应答；这条文本没有作为新消息发送。';
-
-function estimateTextTokens(text: string) {
-  return Math.max(0, Math.ceil(text.length / CHARS_PER_TOKEN));
-}
-
-function estimateMessageTokens(message: BaseMessage) {
-  const content = readFinalMessageText(message);
-  const metadata = message.additional_kwargs && Object.keys(message.additional_kwargs).length > 0
-    ? JSON.stringify(message.additional_kwargs)
-    : '';
-  return estimateTextTokens(`${message._getType()}\n${content}\n${metadata}`);
-}
-
-function estimateMessagesTokens(messages: BaseMessage[]) {
-  return messages.reduce((total, message) => total + estimateMessageTokens(message), 0);
-}
 
 export type ChatSessionResult =
   | { status: 'completed'; reply: string }
@@ -93,6 +79,26 @@ function readRuntimeEventData(event: SubagentToolEvent): Record<string, unknown>
 }
 
 function formatToolAuthorizationNotice(event: SubagentToolEvent): string | null {
+  if (
+    event.event === 'on_runtime_event'
+    && event.name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED
+  ) {
+    const data = readRuntimeEventData(event);
+    const toolName = typeof data?.toolName === 'string' ? data.toolName : null;
+    return toolName
+      ? `已自动授权 ${toolName} 操作。`
+      : '已自动授权工具操作。';
+  }
+  if (
+    event.event === 'on_runtime_event'
+    && event.name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED
+  ) {
+    const data = readRuntimeEventData(event);
+    const toolName = typeof data?.toolName === 'string' ? data.toolName : null;
+    return toolName
+      ? `已根据全局策略授权 ${toolName} 操作。`
+      : '已根据全局策略授权工具操作。';
+  }
   if (event.event !== 'on_runtime_event' || event.name !== 'tool_authorization_recorded') {
     return null;
   }
@@ -120,6 +126,71 @@ function readSubagentMessageDelta(event: SubagentToolEvent): string | null {
   const data = readRuntimeEventData(event);
   const text = data && typeof data.text === 'string' ? data.text : null;
   return text && text.length > 0 ? text : null;
+}
+
+function readMessageId(message: BaseMessage): string | null {
+  return typeof message.id === 'string' && message.id.trim() ? message.id : null;
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    return String(value);
+  }
+}
+
+function messageFingerprint(message: BaseMessage): string {
+  return safeJson([
+    message._getType(),
+    message.name ?? null,
+    message.content,
+  ]);
+}
+
+function buildInitialMessageIndex(messages: BaseMessage[]) {
+  const ids = new Set<string>();
+  const fingerprints = new Map<string, number>();
+  for (const message of messages) {
+    const id = readMessageId(message);
+    if (id) {
+      ids.add(id);
+      continue;
+    }
+    const fingerprint = messageFingerprint(message);
+    fingerprints.set(fingerprint, (fingerprints.get(fingerprint) ?? 0) + 1);
+  }
+  return { ids, fingerprints };
+}
+
+function readRunMessages(initialMessages: BaseMessage[], finalMessages: BaseMessage[]) {
+  const initial = buildInitialMessageIndex(initialMessages);
+  return finalMessages.filter((message) => {
+    const id = readMessageId(message);
+    if (id) {
+      return !initial.ids.has(id);
+    }
+
+    const fingerprint = messageFingerprint(message);
+    const count = initial.fingerprints.get(fingerprint) ?? 0;
+    if (count > 0) {
+      initial.fingerprints.set(fingerprint, count - 1);
+      return false;
+    }
+    return true;
+  });
+}
+
+function readRunTokenUsage(params: {
+  initialMessages: BaseMessage[];
+  finalMessages: BaseMessage[];
+  contextWindow: number;
+}) {
+  const runMessages = readRunMessages(params.initialMessages, params.finalMessages);
+  return createTokenUsageSnapshot(
+    readMessagesTokenUsage(runMessages),
+    params.contextWindow,
+  );
 }
 
 export async function runChatSession(options: ChatSessionAdapterOptions): Promise<ChatSessionResult> {
@@ -193,7 +264,8 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
   try {
-    for await (const chunk of graphService.stream(setup, graphInput)) {
+    const streamRun = graphService.stream(setup, graphInput);
+    for await (const chunk of streamRun) {
       if (!isCurrent()) {
         finishInterrupted();
         return { status: 'interrupted' };
@@ -279,34 +351,23 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     return { status: 'waiting_human' };
   }
 
-  const finalReply = finalMessages.length > 0
+  const streamedFinalReply = finalMessages.length > 0
     ? readFinalMessageText(finalMessages.at(-1) ?? {})
     : '';
-  const finalTokens = estimateMessagesTokens(finalThreadState.messages);
-  const inputTokens = estimateMessagesTokens([
-    ...initialThreadState.messages,
-    ...setup.input.messages,
-  ]);
-  const outputTokens = Math.max(0, finalTokens - inputTokens);
+  const checkpointFinalReply = readFinalMessageText(finalThreadState.messages.at(-1) ?? {});
+  const finalReply = streamedFinalReply || checkpointFinalReply;
   const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
-  const finalUsage = {
-    inputTokens,
-    outputTokens,
-    totalTokens: finalTokens,
+  const finalUsage = readRunTokenUsage({
+    initialMessages: initialThreadState.messages,
+    finalMessages: finalThreadState.messages.length > 0 ? finalThreadState.messages : finalMessages,
     contextWindow,
-    updatedAt: new Date().toISOString(),
-  };
+  });
   emitEvent({
     type: 'message.completed',
     requestId,
     role: 'assistant',
     text: finalReply,
-    usage: finalUsage,
-    metadata: {
-      mood: null,
-      topic: null,
-      tags: [],
-    },
+    ...(finalUsage ? { usage: finalUsage } : {}),
   });
   clearAgentRunActivity(requestId);
 

@@ -1,21 +1,16 @@
-import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
+import type { AgentCapability, AgentToolkit, CapabilityArtifactStore } from '@pinpawo/pet-agent';
+import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
-
-export type AgentStats = {
-  startedAt: string;
-  totalRuns: number;
-  successfulRuns: number;
-  failedRuns: number;
-  lastRunAt: string | null;
-  lastRunOk: boolean | null;
-};
+import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 
 export type LocalServerDeps = {
   actorId: string;
   actorName?: string;
   llmConfig: AgentLlmConfig;
   workdir: string;
+  runtimeConfig?: LocalAgentRuntimeConfig;
+  studioDueRunScheduler?: LocalStudioDueRunScheduler;
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];
   pluginToolkits?: AgentToolkit[];
@@ -23,9 +18,9 @@ export type LocalServerDeps = {
   localCapabilities?: AgentCapability[];
   userCapabilityDefinitions?: LoadedUserCapability[];
   userCapabilities?: LoadedUserCapability[];
+  capabilityArtifactStore?: CapabilityArtifactStore;
   rescanUserCapabilities?: () => Promise<{
     userCapabilityDefinitions: LoadedUserCapability[];
     userCapabilities: LoadedUserCapability[];
   }>;
-  getStats: () => AgentStats;
 };

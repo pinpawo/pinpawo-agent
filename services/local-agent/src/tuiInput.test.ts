@@ -9,14 +9,32 @@ import {
   createInitialTuiInputBufferState,
   normalizeTuiInputEvent,
   resolveTuiKeyAction,
+  toCanonicalInputEvent,
+  type TuiKeyContext,
   type TuiKeyInput,
 } from './tui/input/keymap';
 import {
-  applyTextAreaInput,
+  applyTextAreaCommand,
   renderTextAreaRows,
+  toTextAreaCommand,
   wrapTextAreaRows,
   type TextAreaModel,
 } from './tui/input/textareaModel';
+import type { TextAreaCommand } from './tui/input/textareaModel';
+
+function resolveRawTuiKeyAction(
+  input: string,
+  key: TuiKeyInput,
+  context: TuiKeyContext,
+) {
+  return resolveTuiKeyAction(toCanonicalInputEvent({ input, key }), context);
+}
+
+function commandFromRawInput(input: string, key: TuiKeyInput): TextAreaCommand {
+  const command = toTextAreaCommand(toCanonicalInputEvent({ input, key }));
+  assert.notEqual(command, null);
+  return command!;
+}
 
 test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
   assert.deepEqual(parseTuiCommand('hello'), {
@@ -48,6 +66,11 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
   const resumeCommand = parseTuiCommand('/resume');
   assert.equal(resumeCommand.type, 'command');
   assert.equal(resumeCommand.type === 'command' ? resumeCommand.name : null, 'resume');
+
+  const editCommand = parseTuiCommand('/edit draft text');
+  assert.equal(editCommand.type, 'command');
+  assert.equal(editCommand.type === 'command' ? editCommand.name : null, 'edit');
+  assert.equal(editCommand.type === 'command' ? editCommand.args : null, 'draft text');
 
   assert.deepEqual(parseTuiCommand('/studiox'), {
     type: 'unknown',
@@ -90,53 +113,53 @@ test('parseTuiCommand treats slash-prefixed non-command shapes as plain text', (
 test('formatTuiCommandHelp is generated from visible command metadata', () => {
   assert.equal(
     formatTuiCommandHelp(),
-    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /help · /export [path] 导出 transcript(默认当前目录) · /resume 恢复会话 · /quit',
+    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /policy 选择授权策略 · /help · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /resume 恢复会话 · /quit',
   );
 });
 
 test('resolveTuiKeyAction routes global, approval, busy, and composer keys', () => {
   assert.deepEqual(
-    resolveTuiKeyAction('c', { ctrl: true }, { ready: false, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('c', { ctrl: true }, { ready: false, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'global.ctrl_c' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
     { type: 'approval.previous' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
     { type: 'approval.submit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('x', {}, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
+    resolveRawTuiKeyAction('x', {}, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
     { type: 'composer.edit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false }),
     { type: 'global.interrupt' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: true, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { escape: true }, { ready: true, busy: true, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'global.interrupt' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { escape: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'composer.clear' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'composer.submit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('', { upArrow: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'composer.edit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { downArrow: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: true }),
+    resolveRawTuiKeyAction('', { downArrow: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: true }),
     { type: 'resume.next' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: true }),
+    resolveRawTuiKeyAction('', { return: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: true }),
     { type: 'resume.submit' },
   );
 });
@@ -152,15 +175,15 @@ test('resolveTuiKeyAction treats raw return input as submit', () => {
 
   for (const input of rawReturnInputs) {
     assert.deepEqual(
-      resolveTuiKeyAction(input, {}, readyContext),
+      resolveRawTuiKeyAction(input, {}, readyContext),
       { type: 'composer.submit' },
     );
     assert.deepEqual(
-      resolveTuiKeyAction(input, {}, { ...readyContext, hasPendingApproval: true }),
+      resolveRawTuiKeyAction(input, {}, { ...readyContext, hasPendingApproval: true }),
       { type: 'approval.submit' },
     );
     assert.deepEqual(
-      resolveTuiKeyAction(input, {}, { ...readyContext, hasResumePicker: true }),
+      resolveRawTuiKeyAction(input, {}, { ...readyContext, hasResumePicker: true }),
       { type: 'resume.submit' },
     );
   }
@@ -175,31 +198,59 @@ test('resolveTuiKeyAction treats Shift+Enter as composer edit newline', () => {
   };
 
   assert.deepEqual(
-    resolveTuiKeyAction('', { return: true, shift: true }, readyContext),
+    resolveRawTuiKeyAction('', { return: true, shift: true }, readyContext),
     { type: 'composer.edit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('\x1b[13;2u', {}, readyContext),
+    resolveRawTuiKeyAction('\x1b[13;2u', {}, readyContext),
     { type: 'composer.edit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('[27;2;13~', {}, readyContext),
+    resolveRawTuiKeyAction('[27;2;13~', {}, readyContext),
     { type: 'composer.edit' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('\x1b[13;2u', {}, { ...readyContext, hasPendingApproval: true }),
+    resolveRawTuiKeyAction('\x1b[13;2u', {}, { ...readyContext, hasPendingApproval: true }),
     { type: 'composer.edit' },
   );
 });
 
 test('resolveTuiKeyAction ignores unrelated terminal control sequences', () => {
   assert.deepEqual(
-    resolveTuiKeyAction('\x1b[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('\x1b[1;3A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'none' },
   );
   assert.deepEqual(
-    resolveTuiKeyAction('[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    resolveRawTuiKeyAction('[1;3A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
     { type: 'none' },
+  );
+});
+
+test('resolveTuiKeyAction treats Shift+Arrow as composer selection edit', () => {
+  assert.deepEqual(
+    resolveRawTuiKeyAction('\x1b[1;2A', {}, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    { type: 'composer.edit' },
+  );
+  assert.deepEqual(
+    resolveRawTuiKeyAction('', { leftArrow: true, shift: true }, { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
+    { type: 'composer.edit' },
+  );
+});
+
+test('resolveTuiKeyAction treats undo and redo controls as composer edits', () => {
+  const readyContext = { ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false };
+
+  assert.deepEqual(
+    resolveRawTuiKeyAction('z', { ctrl: true }, readyContext),
+    { type: 'composer.edit' },
+  );
+  assert.deepEqual(
+    resolveRawTuiKeyAction('z', { ctrl: true, shift: true }, readyContext),
+    { type: 'composer.edit' },
+  );
+  assert.deepEqual(
+    resolveRawTuiKeyAction('y', { ctrl: true }, readyContext),
+    { type: 'composer.edit' },
   );
 });
 
@@ -217,90 +268,118 @@ test('normalizeTuiInputEvent buffers split terminal control sequences', () => {
   assert.deepEqual(normalized.event, { input: 'x', key: {} });
 });
 
-test('applyTextAreaInput keeps cursor editing behavior in pure input reducer', () => {
+test('applyTextAreaCommand keeps cursor editing behavior in pure input reducer', () => {
   let state: TextAreaModel = { text: 'helo', cursorOffset: 2 };
-  state = applyTextAreaInput('l', {}, state);
-  assert.deepEqual(state, { text: 'hello', cursorOffset: 3 });
+  state = applyTextAreaCommand({ type: 'insert', text: 'l' }, state);
+  assert.deepEqual(withoutEditHistory(state), { text: 'hello', cursorOffset: 3 });
 
-  state = applyTextAreaInput('', { leftArrow: true }, state);
-  assert.deepEqual(state, { text: 'hello', cursorOffset: 2 });
+  state = applyTextAreaCommand({ type: 'moveLeft' }, state);
+  assert.deepEqual(withoutEditHistory(state), { text: 'hello', cursorOffset: 2 });
 
-  state = applyTextAreaInput('', { backspace: true }, state);
-  assert.deepEqual(state, { text: 'hllo', cursorOffset: 1 });
+  state = applyTextAreaCommand({ type: 'deleteBackward' }, state);
+  assert.deepEqual(withoutEditHistory(state), { text: 'hllo', cursorOffset: 1 });
 
-  state = applyTextAreaInput('e', { ctrl: true }, state);
-  assert.deepEqual(state, { text: 'hllo', cursorOffset: 4 });
-
-  state = applyTextAreaInput('', { ctrl: true } as TuiKeyInput, state);
-  assert.deepEqual(state, { text: 'hllo', cursorOffset: 4 });
+  state = applyTextAreaCommand({ type: 'moveLineEnd' }, state);
+  assert.deepEqual(withoutEditHistory(state), { text: 'hllo', cursorOffset: 4 });
 
   state = { text: 'run shell command', cursorOffset: 'run shell'.length };
-  assert.deepEqual(applyTextAreaInput('w', { ctrl: true }, state), {
+  assert.deepEqual(withoutEditHistory(applyTextAreaCommand({ type: 'deleteWordBackward' }, state)), {
     text: 'run  command',
     cursorOffset: 4,
   });
 });
 
-test('applyTextAreaInput inserts Shift+Enter newline and normalizes pasted multiline text', () => {
+test('canonical-to-command path inserts Shift+Enter newline and normalizes pasted multiline text', () => {
   assert.deepEqual(
-    applyTextAreaInput('', { return: true, shift: true }, { text: 'hello', cursorOffset: 5 }),
+    withoutEditHistory(applyTextAreaCommand(commandFromRawInput('', { return: true, shift: true }), { text: 'hello', cursorOffset: 5 })),
     { text: 'hello\n', cursorOffset: 6 },
   );
   assert.deepEqual(
-    applyTextAreaInput('\x1b[13;2u', {}, { text: 'hello', cursorOffset: 5 }),
+    withoutEditHistory(applyTextAreaCommand(commandFromRawInput('\x1b[13;2u', {}), { text: 'hello', cursorOffset: 5 })),
     { text: 'hello\n', cursorOffset: 6 },
   );
   assert.deepEqual(
-    applyTextAreaInput('[27;2;13~', {}, { text: 'hello', cursorOffset: 5 }),
+    withoutEditHistory(applyTextAreaCommand(commandFromRawInput('[27;2;13~', {}), { text: 'hello', cursorOffset: 5 })),
     { text: 'hello\n', cursorOffset: 6 },
   );
   assert.deepEqual(
-    applyTextAreaInput('a\r\nb\rc', {}, { text: '', cursorOffset: 0 }),
+    withoutEditHistory(applyTextAreaCommand(commandFromRawInput('a\r\nb\rc', {}), { text: '', cursorOffset: 0 })),
     { text: 'a\nb\nc', cursorOffset: 5 },
   );
   assert.deepEqual(
-    applyTextAreaInput('\x1b[200~a\r\nb\x1b[201~', {}, { text: '', cursorOffset: 0 }),
+    withoutEditHistory(applyTextAreaCommand(commandFromRawInput('\x1b[200~a\r\nb\x1b[201~', {}), { text: '', cursorOffset: 0 })),
     { text: 'a\nb', cursorOffset: 3 },
   );
 });
 
-test('applyTextAreaInput supports textarea delete and line movement operations', () => {
+test('canonical-to-command path supports textarea delete and line movement operations', () => {
   assert.deepEqual(
-    applyTextAreaInput('', { delete: true }, { text: 'abc', cursorOffset: 1 }),
+    withoutEditHistory(applyTextAreaCommand(commandFromRawInput('', { delete: true }), { text: 'abc', cursorOffset: 1 })),
+    { text: 'bc', cursorOffset: 0 },
+  );
+  assert.deepEqual(
+    withoutEditHistory(applyTextAreaCommand(commandFromRawInput('\x1b[3~', {}), { text: 'abc', cursorOffset: 1 })),
     { text: 'ac', cursorOffset: 1 },
   );
   assert.deepEqual(
-    applyTextAreaInput('a', { ctrl: true }, { text: 'one\ntwo three', cursorOffset: 8 }),
-    { text: 'one\ntwo three', cursorOffset: 4 },
+    applyTextAreaCommand({ type: 'selectAll' }, { text: 'one\ntwo three', cursorOffset: 8 }),
+    {
+      text: 'one\ntwo three',
+      cursorOffset: 13,
+      selection: { anchorOffset: 0, focusOffset: 13 },
+    },
   );
   assert.deepEqual(
-    applyTextAreaInput('e', { ctrl: true }, { text: 'one\ntwo three', cursorOffset: 8 }),
+    applyTextAreaCommand({ type: 'moveLineEnd' }, { text: 'one\ntwo three', cursorOffset: 8 }),
     { text: 'one\ntwo three', cursorOffset: 13 },
   );
   assert.deepEqual(
-    applyTextAreaInput('', { home: true }, { text: 'one\ntwo three', cursorOffset: 8 }),
+    applyTextAreaCommand({ type: 'moveLineStart' }, { text: 'one\ntwo three', cursorOffset: 8 }),
     { text: 'one\ntwo three', cursorOffset: 4 },
   );
   assert.deepEqual(
-    applyTextAreaInput('', { end: true }, { text: 'one\ntwo three', cursorOffset: 8 }),
+    applyTextAreaCommand({ type: 'moveLineEnd' }, { text: 'one\ntwo three', cursorOffset: 8 }),
     { text: 'one\ntwo three', cursorOffset: 13 },
   );
 });
 
-test('applyTextAreaInput moves cursor across wrapped and multiline rows', () => {
+test('applyTextAreaCommand supports undo and redo controls', () => {
+  let state = applyTextAreaCommand({ type: 'insert', text: '!' }, { text: 'hi', cursorOffset: 2 });
+  state = applyTextAreaCommand({ type: 'undo' }, state);
+  assert.deepEqual(state, {
+    text: 'hi',
+    cursorOffset: 2,
+    editHistory: {
+      undo: [],
+      redo: [{ text: 'hi!', cursorOffset: 3 }],
+    },
+  });
+
+  state = applyTextAreaCommand({ type: 'redo' }, state);
+  assert.deepEqual(state, {
+    text: 'hi!',
+    cursorOffset: 3,
+    editHistory: {
+      undo: [{ text: 'hi', cursorOffset: 2 }],
+      redo: [],
+    },
+  });
+});
+
+test('applyTextAreaCommand moves cursor across wrapped and multiline rows', () => {
   const text = 'abcdef\ngh';
 
   assert.deepEqual(
-    applyTextAreaInput('', { upArrow: true }, { text, cursorOffset: 4 }, { width: 3 }),
-    { text, cursorOffset: 1 },
+    applyTextAreaCommand({ type: 'moveUp' }, { text, cursorOffset: 4 }, { width: 3 }),
+    { text, cursorOffset: 1, preferredColumn: 1 },
   );
   assert.deepEqual(
-    applyTextAreaInput('', { downArrow: true }, { text, cursorOffset: 1 }, { width: 3 }),
-    { text, cursorOffset: 4 },
+    applyTextAreaCommand({ type: 'moveDown' }, { text, cursorOffset: 1 }, { width: 3 }),
+    { text, cursorOffset: 4, preferredColumn: 1 },
   );
   assert.deepEqual(
-    applyTextAreaInput('', { downArrow: true }, { text, cursorOffset: 5 }, { width: 3 }),
-    { text, cursorOffset: 9 },
+    applyTextAreaCommand({ type: 'moveDown' }, { text, cursorOffset: 5 }, { width: 3 }),
+    { text, cursorOffset: 9, preferredColumn: 2 },
   );
 });
 
@@ -325,3 +404,8 @@ test('textarea render rows preserve long pasted text and place cursor in wrapped
     ],
   );
 });
+
+function withoutEditHistory<T extends { editHistory?: unknown }>(state: T): Omit<T, 'editHistory'> {
+  const { editHistory: _editHistory, ...rest } = state;
+  return rest;
+}

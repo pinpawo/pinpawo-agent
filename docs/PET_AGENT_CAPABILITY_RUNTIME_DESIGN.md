@@ -2,6 +2,9 @@
 
 > 状态：Draft v3
 > 日期：2026-03-30
+> 2026-06-19 对齐：结构化 capability result 已迁移为
+> `CapabilityArtifactRef` / `kind: "result"` artifact；subagent completed
+> announce 是返回给父 agent 的自然语言 handoff 结果，不是短 preview。
 
 ## 1. 文档目标
 
@@ -128,7 +131,9 @@ type AgentCapability = {
 - `name`：唯一标识
 - `description`：描述该能力做什么，供 orchestrator 判断何时调用
 - `createRuntime`：在 subagent 创建时调用，生成 toolsets / tools fallback + instructions
-- `resultSchema`：可选，定义该 capability 的结构化结果 schema
+- `resultSchema`：可选，定义该 capability 的 `kind: "result"` JSON artifact
+  payload schema。schema 约束的是结构化 artifact 内容，不替代 subagent
+  announce。
 
 ### 4.2 CapabilityContext
 
@@ -174,9 +179,15 @@ type CapabilityMiddleware = {
 
 ### 4.4 capability result schema
 
-- `resultSchema` 用于声明该 capability 的结构化结果形状
-- orchestrator 在 subagent 执行完成后，会尝试从 tool 输出中解析该 schema
-- 解析成功的结果会被写入 graph state 的 `capabilityResult`
+- `resultSchema` 用于声明该 capability 的结构化 `kind: "result"` artifact
+  payload 形状
+- capability 在 `afterRun` 或 context-pressure ingest 中通过
+  `CapabilityArtifactStore.writeArtifact(...)` 写入结果 artifact，并通过
+  `recordCapabilityArtifact(ref)` 把 ref 交回 orchestrator
+- 解析/校验成功的结果不再写入 `capabilityResult` 字段；orchestrator state
+  只保存 `CapabilityArtifactRef`
+- subagent 的 completed announce 仍是父 agent 当前轮判断和回复用户的自然语
+  言结果；结构化 result artifact 是给程序/host/后续能力按需读取的通道
 
 ## 5. subagent 接口
 
@@ -196,8 +207,9 @@ type SubagentInput = {
 };
 
 type SubagentResult = {
-  reply: string;
   messages: BaseMessage[];
+  artifacts: CapabilityArtifactRef[];
+  completionReason: 'natural' | 'limit_reached' | 'error';
 };
 ```
 
@@ -216,7 +228,9 @@ subagent 不跨调用保留状态。
 - checkpoint 只属于 orchestrator graph，不进入 subagent
 - `threadId` 只用于 orchestrator graph 的 checkpoint 作用域
 - subagent 不暴露 `onEvent` 这类框架事件接口
-- subagent 的稳定输出只有 `reply / messages`
+- subagent 的稳定输出是 `messages / artifacts / completionReason`。completed
+  announce 由返回消息中的最后结果文本标记出来，作为父 agent 的 handoff
+  结果；`artifacts` 只携带 refs，不携带大 payload。
 
 ## 6. orchestrator 的结构
 
@@ -261,9 +275,9 @@ const OrchestratorState = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  capabilityResult: Annotation<Record<string, unknown> | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
+  capabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
+    reducer: (prev, next) => mergeCapabilityArtifactRefs(prev, next),
+    default: () => [],
   }),
 });
 ```
@@ -274,7 +288,8 @@ const OrchestratorState = Annotation.Root({
 - `directReply`：route 节点直接生成的自由文本回复
 - `capabilityTask`：交给 capability 的明确任务
 - `capabilityContextSummary`：交给 capability 的简短上下文摘要
-- `capabilityResult`：最近一次 capability 执行解析出的结构化结果
+- `capabilityArtifacts`：capability 执行写入的 artifact refs；结构化 result
+  也是 `kind: "result"` ref
 
 静态配置（models，以及可选的 actor）通过闭包持有。tools、capabilities 通过每次 invoke 的 configurable 输入提供，不放在 state 中。
 
@@ -365,24 +380,48 @@ createDailyPostCapability({
 
 ### 8.1 result 的语义
 
-result 是 capability 在一次执行中对 host 的结构化产出。
+result 是 capability 在一次执行中对 host 的结构化产出。当前实现中，result
+是 `kind: "result"` 的 capability artifact，而不是 graph state 里的内联
+`capabilityResult` JSON。
 
 它的消费者是 host（channel / graph service / scheduler），不是其他 capability。
+父 agent/`delegation_outcome` 的自然语言判断仍读取 subagent completed
+announce；只有需要结构化数据或大 payload 时才读取 result artifact。
 
 ### 8.2 result 的生命周期
 
 1. capability 声明 `resultSchema`
-2. subagent 执行过程中产生 tool output
-3. orchestrator 在 capability 节点结束时尝试解析 `resultSchema`
-4. 解析成功的结果写入最终 graph state 的 `capabilityResult`
-5. host 在 graph invoke 完成后读取 `capabilityResult`
+2. subagent 执行过程中产生 tool output / 模型结论
+3. capability 代码在折叠前校验 payload，并写入 `kind: "result"` artifact
+4. 写入成功后返回 `CapabilityArtifactRef`，经 artifact sink 进入
+   `SubagentResult.artifacts`
+5. orchestrator 将 ref 合入最终 graph state 的 `capabilityArtifacts`
+6. host 在 graph invoke 完成后从 `capabilityArtifacts` 找到目标 ref，再通过
+   artifact store 读取和 parse
+
+### 8.2.1 多个 result 的选择规则
+
+`capabilityArtifacts` 是全局 ref 索引，不是单个 result 槽。一次 graph
+invoke 里可以有多个 `kind: "result"` artifact：不同 capability 各自写入、
+同一 capability 多次委派、或一个 capability 写入多个结构化产物。
+
+host 读取结构化结果时必须带选择范围，例如：
+
+- 按 `capabilityId` 选择某个 capability 的 result
+- 按 `delegationId` / `turnId` 选择某次执行的 result
+- 按 `schema.name` / `schema.version` 选择某个 contract 的 result
+- 当一个 capability 写多个 result 时，按 `metadata.role` 等小字段区分语义
+
+只有在这些 selector 缩小范围之后，才可以取其中最新的一个。不存在跨所有
+capability 的“全局 latest result”语义。
 
 ### 8.3 result 的来源约束
 
-- `capabilityResult` 只代表最近一次 capability 执行成功解析出的结果
+- `kind: "result"` artifact ref 代表一次 capability 执行成功写入的结构化结果
 - 它属于 graph invoke 的最终 state，而不是 `runAgent` 的标准返回值
 - chat 场景通常只消费 `reply / messages`
-- task / scheduler 场景如果需要结构化结果，应通过 graph service 读取最终 state
+- task / scheduler 场景如果需要结构化结果，应通过 graph service 读取最终
+  state 中的 `capabilityArtifacts`，再读取对应 artifact 内容
 
 ## 9. graph 构建与运行入口
 
@@ -431,7 +470,7 @@ type AgentRunResult = {
 };
 ```
 
-capability results 不经过 `runAgent` 返回值。需要结构化结果时，应读取最终 graph state 中的 `capabilityResult`。
+capability results 不经过 `runAgent` 返回值。需要结构化结果时，应读取最终 graph state 中的 `capabilityArtifacts`，再通过 artifact store 读取对应 `kind: "result"` artifact。
 
 actor 规则：
 

@@ -199,6 +199,52 @@ test('createBrowserToolkit exposes browser operation metadata', () => {
   assert.equal(toolkit.policy?.toolReview?.browser_wait, undefined);
 });
 
+test('browser open review policy offers session authorization', async () => {
+  const toolkit = createBrowserToolkit();
+  const policy = toolkit.policy?.toolReview?.browser_open;
+  assert.ok(policy);
+
+  const review = await policy.request({
+    models: {} as never,
+    actor: {} as never,
+    messages: [],
+    toolkitName: 'browser',
+    toolName: 'browser_open',
+    input: { url: 'https://example.test', headless: true },
+    operation: toolkit.operations?.browser_open,
+    reviewCapabilities: {
+      humanReview: true,
+      sessionAuthorization: true,
+    },
+  });
+
+  assert.deepEqual(
+    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
+    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
+  );
+
+  assert.deepEqual(
+    await policy.buildAuthorizationMatcher?.({
+      toolkitName: 'browser',
+      toolName: 'browser_open',
+      input: { url: 'https://Example.test/path', headless: true },
+      operation: toolkit.operations?.browser_open,
+      pendingAction: {
+        actionId: 'call-1',
+        toolName: 'browser_open',
+        args: { url: 'https://Example.test/path', headless: true },
+      },
+      effect: {
+        type: 'graph.authorize_tool_action',
+        scope: 'thread',
+        actionRef: { type: 'pending_action' },
+        matcher: { type: 'policy_hook' },
+      },
+    }),
+    { type: 'url_domain', value: { origin: 'https://example.test' } },
+  );
+});
+
 test('browser operation metadata summarizes page output', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
@@ -234,6 +280,67 @@ test('browser operation metadata summarizes page output', () => {
   });
 });
 
+test('browser operation metadata parses JSON-string inputs for input summaries', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolkits: [createBrowserToolkit()],
+    },
+  } as never);
+
+  const started = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'browser_click',
+      toolCallId: 'call-1',
+      input: '{"selector":".login-btn"}',
+    },
+    registry,
+  );
+
+  assert.equal(started.operation.summary, '点击 .login-btn');
+
+  const startFromOpen = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_start',
+      name: 'browser_open',
+      toolCallId: 'call-2',
+      input: '{"url":"https://example.com","headless":true}',
+    },
+    registry,
+  );
+
+  assert.equal(startFromOpen.operation.target, 'https://example.com');
+  assert.equal(startFromOpen.operation.summary, '打开网页');
+  assert.equal(startFromOpen.operation.details?.headless, true);
+});
+
+test('tool operation output summaries still receive raw output strings first', () => {
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'submit_plan',
+      toolCallId: 'call-1',
+      output: '{"taskCount":2}',
+      operation: {
+        title: '提交计划',
+        summarizeOutput: (output: unknown) => {
+          if (typeof output !== 'string') return null;
+          const parsed = JSON.parse(output) as { taskCount?: unknown };
+          return typeof parsed.taskCount === 'number'
+            ? { summary: `已接收 ${parsed.taskCount} 个任务` }
+            : null;
+        },
+      },
+    },
+    createOperationRegistry(),
+  );
+
+  assert.equal(event.operation.summary, '已接收 2 个任务');
+});
+
 test('browser type operation metadata does not expose typed text in display fields', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
@@ -246,11 +353,11 @@ test('browser type operation metadata does not expose typed text in display fiel
     {
       event: 'on_tool_start',
       name: 'browser_type',
-      input: {
+      input: JSON.stringify({
         selector: '#password',
         text: 'super-secret-token',
         submit: true,
-      },
+      }),
     },
     registry,
   );
@@ -264,6 +371,63 @@ test('browser type operation metadata does not expose typed text in display fiel
     textLength: 'super-secret-token'.length,
   });
   assert.equal(JSON.stringify(event.operation).includes('super-secret-token'), false);
+});
+
+test('browser operation metadata accepts JSON string input and raw string output', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolkits: [createBrowserToolkit()],
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'browser_wait',
+      toolCallId: 'call-1',
+      input: JSON.stringify({
+        selector: '#result',
+        timeoutMs: 5000,
+      }),
+      output: '页面稳定，结果已出现',
+    },
+    registry,
+  );
+
+  assert.equal(event.operation.kind, 'browser.browser_wait');
+  assert.equal(event.operation.title, '等待页面');
+  assert.equal(event.operation.target, '#result');
+  assert.equal(event.operation.summary, '页面稳定，结果已出现');
+  assert.deepEqual(event.operation.details, {
+    selector: '#result',
+    timeoutMs: 5000,
+  });
+});
+
+test('browser operation metadata summarizes failed events without raw payload display', () => {
+  const registry = createOperationRegistryForAgentSetup({
+    input: {
+      toolkits: [createBrowserToolkit()],
+    },
+  } as never);
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_error',
+      name: 'browser_click',
+      toolCallId: 'call-1',
+      input: JSON.stringify({ selector: 'text=登录' }),
+      error: new Error('No active browser page. Use browser_open first.'),
+    },
+    registry,
+  );
+
+  assert.equal(event.phase, 'failed');
+  assert.equal(event.operation.target, 'text=登录');
+  assert.equal(event.operation.summary, 'No active browser page. Use browser_open first.');
+  assert.deepEqual(event.operation.details, { selector: 'text=登录' });
 });
 
 test('createOperationRegistryForAgentSetup reads operation metadata from setup toolkits', () => {

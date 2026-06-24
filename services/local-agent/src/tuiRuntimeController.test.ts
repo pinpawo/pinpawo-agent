@@ -1,40 +1,68 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { TuiRuntimeController } from './tui/TuiRuntimeController';
+import { TUI_CORE_TARGET_ACTIONS } from './tui/contracts/tuiCoreContract';
+import { createComposerHistoryState } from './tui/input/composerHistory';
 import type { TuiAction, TuiState } from './tui/state/tuiState';
 
 function pendingReviewState(): TuiState {
   return {
     connection: { status: 'ready', message: 'ready' },
     focusedSessionId: 'sess-1',
-    runRoute: { 'req-1': 'sess-1' },
-    input: { text: '', cursorOffset: 0, focused: true },
+    ui: {
+      mode: 'chat',
+      studioConversationId: null,
+      externalEditorOpen: false,
+    },
+    runs: {
+      'req-1': {
+        requestId: 'req-1',
+        sessionId: 'sess-1',
+        kind: 'chat',
+        phase: 'waiting_human',
+        timelineEntryIds: [],
+        pendingReview: {
+          requestId: 'req-1',
+          review: {
+            id: 'review-1',
+            schemaVersion: 1,
+            view: { kind: 'plain', body: 'Need review' },
+            options: [],
+          },
+        },
+        startedAt: 1,
+        charCount: 0,
+      },
+    },
+    input: { text: '', cursorOffset: 0, focused: true, history: createComposerHistoryState() },
     sessions: {
       'sess-1': {
         id: 'sess-1',
         kind: 'chat',
         actor: { label: 'Pet', summary: 'summary' },
         runtime: {},
-        history: [],
+        timeline: [],
+        notices: [],
+        activities: [],
         tokenUsage: null,
-        activeRun: {
-          requestId: 'req-1',
-          phase: 'waiting_human',
-          assistantDraft: '',
-          subagentDraft: '',
-          activeOperations: [],
-          pendingReview: {
-            requestId: 'req-1',
-            review: {
-              id: 'review-1',
-              schemaVersion: 1,
-              view: { kind: 'plain', body: 'Need review' },
-              options: [],
-            },
-          },
-          startedAt: 1,
-          charCount: 0,
-        },
+        activeRunId: 'req-1',
+      },
+    },
+  };
+}
+
+function busyRunState(): TuiState {
+  return {
+    ...pendingReviewState(),
+    runs: {
+      'req-1': {
+        requestId: 'req-1',
+        sessionId: 'sess-1',
+        kind: 'chat',
+        phase: 'thinking',
+        timelineEntryIds: [],
+        startedAt: 1,
+        charCount: 0,
       },
     },
   };
@@ -43,11 +71,15 @@ function pendingReviewState(): TuiState {
 function createController(state: TuiState) {
   const actions: TuiAction[] = [];
   const sent: unknown[] = [];
+  let resetCount = 0;
   const controller = new TuiRuntimeController({
     actorId: 'pet-1',
     localServerPort: 0,
     dispatch: (action) => actions.push(action),
     getState: () => state,
+    resetTimelineView: () => {
+      resetCount += 1;
+    },
     setNow: () => {},
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,8 +88,32 @@ function createController(state: TuiState) {
     send: (message: unknown) => sent.push(message),
     disconnect: () => {},
   };
-  return { controller, actions, sent };
+  return { controller, actions, sent, get resetCount() { return resetCount; } };
 }
+
+test('TuiRuntimeController uses configured workdir when runtime payload omits cwd', () => {
+  const actions: TuiAction[] = [];
+  const controller = new TuiRuntimeController({
+    actorId: 'pet-1',
+    localServerPort: 0,
+    workdir: '/tmp/pinpawo-tui-workdir',
+    dispatch: (action) => actions.push(action),
+    getState: () => pendingReviewState(),
+    resetTimelineView: () => {},
+    setNow: () => {},
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (controller as any).setRuntimeFromHealth({ model: 'test-model' });
+
+  assert.deepEqual(actions, [{
+    type: 'session.set_runtime',
+    runtime: {
+      model: 'test-model',
+      cwd: '/tmp/pinpawo-tui-workdir',
+    },
+  }]);
+});
 
 test('TuiRuntimeController submits canonical review responses without legacy resume extras', () => {
   const { controller, actions, sent } = createController(pendingReviewState());
@@ -92,7 +148,7 @@ test('TuiRuntimeController blocks empty required review input', () => {
 
   assert.equal(submitted, false);
   assert.deepEqual(sent, []);
-  assert.equal(actions.some((action) => action.type === 'history.append'), true);
+  assert.equal(actions.some((action) => action.type === 'message.append'), true);
 });
 
 test('TuiRuntimeController interrupts pending human review instead of dismissing it locally', () => {
@@ -110,4 +166,140 @@ test('TuiRuntimeController interrupts pending human review instead of dismissing
     requestId: 'req-1',
     statusMessage: '正在打断',
   });
+});
+
+test('TuiRuntimeController releases input locally after interrupt timeout', () => {
+  mock.timers.enable({ apis: ['setTimeout'], now: 0 });
+  try {
+    const { controller, actions } = createController(busyRunState());
+
+    const submitted = controller.requestInterrupt();
+    mock.timers.tick(1800);
+
+    assert.equal(submitted, true);
+    const finish = actions.find((action) => action.type === 'run.finish');
+    assert.equal(finish?.type, 'run.finish');
+    if (finish?.type !== 'run.finish') return;
+    assert.equal(finish.requestId, 'req-1');
+    assert.equal(finish.statusMessage, '已请求打断');
+    assert.deepEqual(
+      finish.messages?.map((message) => [message.kind, message.text]),
+      [['system', '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。']],
+    );
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('TuiRuntimeController resets static timeline view for new sessions', () => {
+  const harness = createController(pendingReviewState());
+
+  harness.controller.startNewSession();
+
+  assert.equal(harness.resetCount, 1);
+  assert.deepEqual(harness.actions.slice(0, 2), [
+    { type: 'input.set', value: '' },
+    { type: 'session.clear', statusMessage: '已创建新会话' },
+  ]);
+  assert.deepEqual(harness.sent, [{ type: 'new_session' }]);
+});
+
+test('TuiRuntimeController restores a reconnect snapshot before opening websocket', async () => {
+  const state = pendingReviewState();
+  const harness = createController(state);
+  const events: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    isHealthy: async () => true,
+    readSessionSnapshot: async () => {
+      events.push('snapshot');
+      return {
+        sessionId: 'sess-1',
+        kind: 'chat',
+        timeline: [{
+          id: 'message:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'hello',
+          status: 'completed',
+          source: 'checkpoint',
+        }],
+        runs: [],
+      };
+    },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).wsClient = {
+    hasSocket: () => false,
+    isConnected: () => false,
+    connect: () => {
+      events.push('connect');
+    },
+    send: (message: unknown) => harness.sent.push(message),
+    disconnect: () => {},
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (harness.controller as any).reconnect();
+
+  assert.deepEqual(events, ['snapshot', 'connect']);
+  assert.equal(harness.resetCount, 1);
+  assert.equal(harness.actions[0]?.type, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
+  assert.equal(
+    harness.actions[0]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
+      ? harness.actions[0].source
+      : undefined,
+    'reconnect',
+  );
+});
+
+test('TuiRuntimeController reconciles snapshots after stale review errors', async () => {
+  const harness = createController(pendingReviewState());
+  const events: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    readSessionSnapshot: async () => {
+      events.push('snapshot');
+      return {
+        sessionId: 'sess-1',
+        kind: 'chat',
+        timeline: [{
+          id: 'message:user-1',
+          type: 'message',
+          role: 'user',
+          text: 'hello',
+          status: 'completed',
+          source: 'checkpoint',
+        }],
+        runs: [],
+      };
+    },
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).handleServerMessage({
+    type: 'event',
+    requestId: 'req-1',
+    event: {
+      type: 'error',
+      requestId: 'req-1',
+      message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
+      code: 'review_stale',
+    },
+  });
+
+  await new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
+  assert.deepEqual(events, ['snapshot']);
+  assert.equal(harness.resetCount, 1);
+  assert.equal(harness.actions[0]?.type, 'event.received');
+  assert.equal(harness.actions[1]?.type, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
+  assert.equal(
+    harness.actions[1]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
+      ? harness.actions[1].source
+      : undefined,
+    'reconnect',
+  );
 });

@@ -1,5 +1,7 @@
 # Pet Agent Studio Architecture Overview
 
+> Status: historical overview. The current Studio rewrite is defined by `docs/STUDIO_RUN_CONTROLLER_DESIGN.md`; this document is background context only and should not be used as the source of truth for Studio runtime internals.
+
 本文档是 Studio → Agents → Subagents 三层架构的理念性总览,定位在两份具体设计文档之上,回答**为什么这个结构站得住脚、以什么为代价换来了什么**。
 
 具体协议见:
@@ -15,7 +17,7 @@
 ```text
 ─────────────── 编排层(Studio:show-runner)───────────────────────
               Studio (StudioOrchestrator)
-              ├ planner agent      : 调指定 pet,通过 studio.plan capability 提交 plan
+              ├ planner agent      : 调指定 pet,通过 studio_plan capability 提交 plan
               ├ execute state mach : 顺序遍历 plan,产出 dispatch / finish / stop(确定性)
               ├ wiki_curator       : 把 pet 产出整理进 Studio Whiteboard
               └ 终止时标定末位 pet,该 pet 的 返回文本 即为用户答复
@@ -48,7 +50,7 @@
 
 **Studio 是 show-runner / 编剧统筹**:
 
-- **planner agent** 像项目主编,turn 起始时被调一棒,自己理解需求、必要时向用户问、产出 plan。它本身是一个普通 pet agent,通过临时注入的 `studio.plan` capability 提交计划。
+- **planner agent** 像项目主编,turn 起始时被调一棒,自己理解需求、必要时向用户问,并通过 `studio_plan` capability 的 `list_pets` 工具查看 pet 职责与状态后产出 plan。它本身是一个普通 pet agent,通过同一个 capability 的 `submit_plan` 工具提交计划。
 - **execute state machine** 像派单编辑,按 plan 顺序撰写 brief 派单,完成时收尾。是**确定性规则**,不耗 LLM。
 - **wiki_curator** 像知识整理员,把每棒 pet 的产出整理进 wiki 文件,供后续 pet 检索。
 
@@ -63,7 +65,7 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 
 | 层 | 角色 | 实现形态 |
 |---|---|---|
-| Studio | 编排撰稿 + 路由调度 + wiki 维护 | **planner agent invoke + execute 状态机 + wiki_curator** |
+| Studio | 编排撰稿 + 路由调度 + wiki 维护 | **planner agent invoke + queue runner + wiki_curator** |
 | Studio Whiteboard | 共享知识库 | 文件系统目录 + curator-managed wiki |
 | Capability Artifact Store | durable 产物存储 | artifact refs + filesystem/backend store |
 | Pet Agent | 数据加工者 | ReAct + LangGraph + wiki_read toolkit |
@@ -88,7 +90,7 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 ### 第一层:Studio(StudioOrchestrator)—— 编排撰稿
 
 - **是什么**:Studio 级 show-runner,由三件事拼成:planner agent invocation + execute state machine + wiki_curator 节点。
-- **planner agent**:由 `plannerPetId` 指定的普通 pet runtime。turn 起始时 Studio 把它当成第一棒 invoke,临时注入 `studio.plan` capability。planner 内部自由 reason、必要时 HITL 提问、最终通过 `submit_plan` tool 提交 task 列表。Studio 拿到 plan 后不再调用 planner。
+- **planner agent**:由 `plannerPetId` 指定的普通 pet runtime。turn 起始时 Studio 把它当成第一棒 invoke,临时注入 `studio_plan` capability。该 capability 暴露 `list_pets` / `submit_plan` 两个窄工具:planner 内部自由 reason、必要时 HITL 提问,按需读取 pet 列表,最终提交 task 列表。Studio 拿到 plan 后不再调用 planner。
 - **execute state machine**:plan 存在后的确定性循环。规则固定:下一个 pending task → `dispatch`(撰写 brief);全部 satisfied → `finish`(标定末棒);否则 → `stop`。**不耗 LLM**。`ExecuteAction = dispatch | finish | stop`(3 个 type),zod 校验。
 - **wiki_curator 节点**:每次 pet 返回 返回文本 后运行,把 raw source 整理进 wiki 文件(新增 topics、合并主题、更新 index)。实现可注入(默认 skeleton,production 用 LLM curator)。
 - **可读取的范围**:pet registry、plan、turn state、wiki index 与按需的 wiki 文件、上一棒 result summary、artifact refs,必要时按 ref 读 artifact 内容。
@@ -126,7 +128,7 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 
 | 维度 | Studio | Pet | Capability |
 |---|---|---|---|
-| 节点构成 | planner agent invoke + execute 状态机 + wiki_curator | 单 ReAct(可访问 wiki_read) | 单 ReAct |
+| 节点构成 | planner agent invoke + queue runner + wiki_curator | 单 ReAct(可访问 wiki_read) | 单 ReAct |
 | reason 关心什么 | (planner)计划生成 / (curator)知识整理;execute 不耗 LLM | 选 capability,组织本棒加工 | 选 tool,执行本步 |
 | act 输出 | StudioTaskPlan / ExecuteAction / wiki 文件更新 | `capability_call` / `tool_call` / 工具事件 / 返回文本 / 错误 | `tool_call` |
 | 终止条件 | execute 输出 finish/stop 或 planner 未提交 plan | task done 或正常 return | capability done 或 error |
@@ -136,9 +138,9 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 上下文规模:
 
 - Pet 与 Capability 的 reason 在自己的工作上下文里思考,通常加载完整工作记忆 + 选择性 wiki 内容。
-- Studio 两个 LLM 调用各自上下文聚焦:planner 关心 userRequest + wiki index(决定 plan),curator 关心新 result + 现有 wiki(决定整理动作);execute 状态机不耗 LLM。
+- Studio 两个 LLM 调用各自上下文聚焦:planner 关心 userRequest + wiki index,并可通过 `list_pets` 按需读取 pet 职责与状态(决定 plan);curator 关心新 result + 现有 wiki(决定整理动作);queue runner 不耗 LLM。
 
-第二层 ReAct 已经成立(single-pet orchestrator 在跑),第三层是同模式更细一层(capability 内部本来就这么做)。第一层是同骨架的编排:planner 本身就是一个第二层 pet(享受同样的 ReAct + capability/tool 基础设施),只是上面套了一个确定性 execute 状态机 + curator——继承了 LangGraph supervisor pattern + show-runner 的职责切分 + Claude Code 工作目录的知识共享心智。
+第二层 ReAct 已经成立(single-pet orchestrator 在跑),第三层是同模式更细一层(capability 内部本来就这么做)。第一层是同骨架的编排:planner 本身就是一个第二层 pet(享受同样的 ReAct + capability/tool 基础设施),只是上面套了一个确定性 queue runner + curator——继承了 LangGraph supervisor pattern + show-runner 的职责切分 + Claude Code 工作目录的知识共享心智。
 
 ## 不变量(Invariants)
 
@@ -181,7 +183,7 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 ### I5. 上下文逐层收窄,wiki 作为共享知识层
 
 ```text
-planner agent: userRequest + wiki index(自身是普通 pet,享受 ReAct + wiki_read)
+planner agent: userRequest + wiki index + studio_plan 工具(list_pets / submit_plan)
 execute step : 不耗 LLM——纯规则,看 plan task 列表 + dispatch 历史
 wiki_curator : 新 返回文本 + 现有 wiki 文件 + curator prompt
        ↓ 撰写好的 brief(自然语言任务说明,由模板拼装)+ wikiRoot 注入
@@ -192,16 +194,16 @@ Capability reason: capability 自身输入
 
 Studio 两个 LLM 调用上下文都是**选择性**的:
 
-- planner 看 userRequest 与 wiki index(走 pet 自己的 reasoning 路径),不堆砌历史。
+- planner 看 userRequest 与 wiki index,并按需调 `list_pets` 读取 pet 职责与状态(走 pet 自己的 reasoning 路径),不堆砌历史。
 - curator 只读新 result + 现有 wiki,做增量整理。
 
-execute 状态机本身不维护 reasoning context,只看 task 列表与 dispatch 历史这两份结构化数据,撰写下一棒 brief 时按模板拼装(交给 wiki + pet 自主检索),不堆砌内容。
+queue runner 本身不维护 reasoning context,只看 task 列表与 dispatch 历史这两份结构化数据,撰写下一棒 brief 时按模板拼装(交给 wiki + pet 自主检索),不堆砌内容。
 
 Pet 通过 wiki_read 自主拉取所需 wiki 文件,reason prompt 大小由 pet 自己控制(它知道要做什么、需要哪些资料)。
 
 pet 返回文本和 ArtifactRef[] 保存在对应 dispatch state 中,作为 turn 内 dispatch 历史的一部分;wiki 是 curator 派生出的独立知识层,以文件形态存在;artifact store 是 durable 产物层。pet 主要通过 wiki 获取上下文,必要时按 artifact ref 读取产物内容,不读 dispatch 历史。
 
-每层 prompt 都保持有限大小;Studio 两个 LLM 调用各自聚焦(planner 关心计划质量、curator 关心知识整理),execute 状态机零 token,任一调用都比单一大 reason 更聚焦,token 成本由此可控。
+每层 prompt 都保持有限大小;Studio 两个 LLM 调用各自聚焦(planner 关心计划质量、curator 关心知识整理),queue runner 零 token,任一调用都比单一大 reason 更聚焦,token 成本由此可控。
 
 ## 为什么这套不变量能"组合成立" —— 概念性证明
 
@@ -329,7 +331,7 @@ UI: pet:audio 的 返回文本 渲染到主对话面板
 - **每棒 pet 的产出由 curator 整理进 wiki**——后续 pet 通过 wiki_read 直接访问,Studio 不在 brief 里重复打包内容。
 - **末位 pet(audio)的 返回文本 = 用户最终答复**——UI 直接渲染。
 - **pet:audio 与 pet:script 互相不感知**——但用户感受是一个连贯的协作,因为 wiki 把上游产出沉淀成可检索的知识。
-- **planner agent 只在 turn 起始被调一次**——execute 状态机是常驻循环节点;遇到无法推进时优先 `finish`(交付)或 `stop`(放弃),不自动回 planner。
+- **planner agent 只在 turn 起始被调一次**——queue runner 是常驻循环节点;遇到无法推进时优先 `finish`(交付)或 `stop`(放弃),不自动回 planner。
 - **HITL 完全在 pet 内部**——Studio 视角下 dispatch 一直处于 running 直到 result 抵达。
 - **capability 出错局部消化**——pet 可 retry / 改用其它 capability / 通过 invoke 抛出 error。
 
@@ -349,12 +351,12 @@ UI: pet:audio 的 返回文本 渲染到主对话面板
 
 ### 付出
 
-- **跨层 hop 的 latency**:每棒包含 pet 处理 + wiki_curator 一次 LLM;turn 起始还有 planner agent 一次完整 invoke。execute 状态机本身不耗 LLM,但整体延迟仍比单体 agent 高(可被并发/缓存缓解)。
-- **Studio prompt 工程**:planner agent 的 system prompt + `studio.plan` capability prompt + curator prompt 三处各自需要维护;curator prompt 还要支持用户自定义。
+- **跨层 hop 的 latency**:每棒包含 pet 处理 + wiki_curator 一次 LLM;turn 起始还有 planner agent 一次完整 invoke。queue runner 本身不耗 LLM,但整体延迟仍比单体 agent 高(可被并发/缓存缓解)。
+- **Studio prompt 工程**:planner agent 的 system prompt + `studio_plan` capability prompt + curator prompt 三处各自需要维护;curator prompt 还要支持用户自定义。
 - **wiki 维护成本**:每棒 pet 完成后 curator 都要跑一次 LLM 整理;文件 IO 与目录管理。
-- **eval 工作量分层**:planner eval 计划质量,curator eval 知识整理质量,pet eval 数据加工质量。execute 状态机不需要 LLM eval,只需要状态机单元测试。
+- **eval 工作量分层**:planner eval 计划质量,curator eval 知识整理质量,pet eval 数据加工质量。queue runner 不需要 LLM eval,只需要状态机单元测试。
 
-这些代价是**线性可预测的**,不是指数发散的。MVP 阶段聚焦 planner agent + execute 状态机 + curator + Pet ReAct,capability 层复用现有 single-pet 实现。
+这些代价是**线性可预测的**,不是指数发散的。MVP 阶段聚焦 planner agent + queue runner + curator + Pet ReAct,capability 层复用现有 single-pet 实现。
 
 值得指出的收益:
 
@@ -394,7 +396,7 @@ UI: pet:audio 的 返回文本 渲染到主对话面板
 Studio → Agents → Subagents 是**编排撰稿层 + 共享知识层 + 数据加工层**的递归组合:
 
 - 加工层(Pet + Capability)沿用已验证的 ReAct 模式。
-- 编排层(Studio)拼成三件事:planner agent invoke(planner 是普通 pet,通过 `studio.plan` capability 提交计划)+ 确定性 execute 状态机 + wiki_curator 节点。
+- 编排层(Studio)拼成三件事:planner agent invoke(planner 是普通 pet,通过 `studio_plan` capability 的 `list_pets` / `submit_plan` 工具读取 pet 视图并提交计划)+ 确定性 queue runner + wiki_curator 节点。
 - 共享知识层(Studio Whiteboard)是文件系统目录,curator 维护、pet 自主检索。
 
 可行性建立在已经存在的事实之上:
@@ -419,4 +421,4 @@ Studio → Agents → Subagents 是**编排撰稿层 + 共享知识层 + 数据�
 - **Studio 维护 wiki,不在 brief 里堆内容**——brief 只讲情境与任务,pet 通过 wiki 自主检索所需上下文。
 - **wiki 是文件系统**——天然可观察、可手工纠错、可归档复盘。
 
-这是工程,不是研究。planner-as-agent + 确定性 execute + 文件化 wiki 把成本、归属、调试心智都收敛到清晰的边界内。
+这是工程,不是研究。planner-as-agent + 确定性 queue runner + 文件化 wiki 把成本、归属、调试心智都收敛到清晰的边界内。

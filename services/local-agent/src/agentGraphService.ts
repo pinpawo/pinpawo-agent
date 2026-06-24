@@ -3,14 +3,15 @@ import {
   createOrchestratorGraph,
   isHumanReviewInterruptPayload,
   runAgent,
+  streamOrchestratorGraph,
   type AgentRunResult,
+  type OrchestratorGraphStream,
   type OrchestratorGraph,
   type OrchestratorStateType,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
-import type { ZodType } from 'zod';
 import type { AgentChannelSetup } from './agentChannel';
 import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
 
@@ -29,6 +30,7 @@ function buildConfigurable(setup: AgentChannelSetup) {
   if (setup.input.workdir) configurable.workdir = setup.input.workdir;
   if (setup.input.runtimeEnvironment) configurable.runtimeEnvironment = setup.input.runtimeEnvironment;
   if (setup.input.onToolEvent) configurable.onToolEvent = setup.input.onToolEvent;
+  if (setup.input.globalReviewPolicy) configurable.globalReviewPolicy = setup.input.globalReviewPolicy;
   if (setup.interfaceContext?.kind) {
     configurable[LOCAL_AGENT_INTERFACE_CONFIG_KEY] = setup.interfaceContext;
     configurable.reviewCapabilities = setup.interfaceContext.capabilities;
@@ -47,6 +49,8 @@ export type LocalAgentGraphThreadState = {
   pendingHumanReview: LocalAgentGraphPendingHumanReview | null;
   hasPendingContinuation: boolean;
 };
+
+export type LocalAgentGraphStream = OrchestratorGraphStream;
 
 function readSnapshotMessages(snapshot: unknown): BaseMessage[] {
   const values = (snapshot as { values?: { messages?: unknown } } | null)?.values;
@@ -111,9 +115,13 @@ export class LocalAgentGraphService {
     return runAgent(this.getGraph(setup), setup.input);
   }
 
-  async *stream(setup: AgentChannelSetup, inputOverride?: unknown): AsyncGenerator<unknown> {
+  stream(
+    setup: AgentChannelSetup,
+    inputOverride?: unknown,
+  ): LocalAgentGraphStream {
     const graph = this.getGraph(setup);
-    const stream = await graph.stream(
+    return streamOrchestratorGraph(
+      graph,
       inputOverride ?? buildOrchestratorTurnInput(setup.input.messages),
       {
         signal: setup.input.signal,
@@ -121,9 +129,6 @@ export class LocalAgentGraphService {
         streamMode: ['messages', 'values'],
       },
     );
-    for await (const chunk of stream as AsyncIterable<unknown>) {
-      yield chunk;
-    }
   }
 
   async invokeState(setup: AgentChannelSetup, inputOverride?: unknown): Promise<OrchestratorStateType> {
@@ -177,20 +182,5 @@ export class LocalAgentGraphService {
     return new Command({
       resume,
     });
-  }
-
-  async invokeStructuredResult<T extends Record<string, unknown>>(
-    setup: AgentChannelSetup,
-    schema: ZodType<T>,
-  ): Promise<{ state: OrchestratorStateType; result: T | null }> {
-    const state = await this.invokeState(setup);
-    const parsed = state.capabilityResult
-      ? schema.safeParse(state.capabilityResult)
-      : null;
-
-    return {
-      state,
-      result: parsed?.success ? parsed.data : null,
-    };
   }
 }

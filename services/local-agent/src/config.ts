@@ -1,8 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
 import { inferLlmContextWindowTokens } from './llmContextWindow';
+import { findLlmModelPresetByKey, inferLlmModelPreset } from './llmModelPresets';
 import { loadStoredConfig } from './storage';
+import {
+  GLOBAL_REVIEW_POLICY_MODE,
+  type BuiltinGlobalReviewPolicyMode,
+} from '@pinpawo/pet-agent';
+
+export { isMissingOrGeneratedApiPlaceholder } from './configDiagnostics';
 
 function parseDotEnv(content: string) {
   for (const line of content.split('\n')) {
@@ -45,8 +53,72 @@ export function resolveNumberConfigValue(envVal: string | undefined, storedVal: 
     : undefined;
 }
 
+function resolveBooleanConfigValue(envVal: string | undefined, storedVal: unknown): boolean | undefined {
+  const raw = envVal?.trim()
+    ? envVal.trim().toLowerCase()
+    : (typeof storedVal === 'boolean' ? String(storedVal) : '');
+  if (!raw) return undefined;
+  if (['1', 'true', 'yes', 'y', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(raw)) return false;
+  return undefined;
+}
+
 function getNumber(envKey: string, storedKey: keyof typeof stored): number | undefined {
   return resolveNumberConfigValue(process.env[envKey], stored[storedKey]);
+}
+
+function getBoolean(envKey: string, storedKey: keyof typeof stored): boolean | undefined {
+  return resolveBooleanConfigValue(process.env[envKey], stored[storedKey]);
+}
+
+function resolveGlobalReviewPolicyMode(raw: string | undefined): BuiltinGlobalReviewPolicyMode | undefined {
+  const normalized = raw?.trim().toLowerCase().replace(/_/g, '-');
+  if (!normalized) return undefined;
+  if ([
+    'require-authorization',
+    'require-approval',
+    'authorization-required',
+    'ask',
+    'manual',
+    'always-ask',
+    'require',
+    'require-review',
+  ].includes(normalized)) {
+    return GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
+  }
+  if ([
+    'auto-authorization',
+    'auto-authorize',
+    'automatic-authorization',
+    'auto',
+    'automatic',
+    'auto-approve',
+    'auto-review',
+  ].includes(normalized)) {
+    return GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION;
+  }
+  if ([
+    'full-access',
+    'always-allow',
+    'allow-all',
+    'unrestricted',
+    'trusted',
+  ].includes(normalized)) {
+    return GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS;
+  }
+  return undefined;
+}
+
+function getGlobalReviewPolicyMode(): BuiltinGlobalReviewPolicyMode {
+  return resolveGlobalReviewPolicyMode(process.env.PINPAWO_GLOBAL_REVIEW_POLICY)
+    ?? resolveGlobalReviewPolicyMode(process.env.PINPAWO_REVIEW_POLICY_STRATEGY)
+    ?? resolveGlobalReviewPolicyMode(typeof stored.global_review_policy === 'string'
+      ? stored.global_review_policy
+      : undefined)
+    ?? resolveGlobalReviewPolicyMode(typeof stored.review_policy_strategy === 'string'
+      ? stored.review_policy_strategy
+      : undefined)
+    ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
 }
 
 function required(envKey: string, storedKey: keyof typeof stored, label: string): string {
@@ -57,16 +129,6 @@ function required(envKey: string, storedKey: keyof typeof stored, label: string)
     );
   }
   return val;
-}
-
-export function isMissingOrGeneratedApiPlaceholder(envKey: string, value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) return true;
-  if (envKey === 'API_BASE_URL') return /your-api\.example\.com/i.test(trimmed);
-  if (envKey === 'HASURA_ENDPOINT') return /your-hasura\.example\.com/i.test(trimmed);
-  if (envKey === 'AGENT_TOKEN') return /^your-agent-token-here$/i.test(trimmed);
-  if (envKey === 'HASURA_JWT') return trimmed === 'eyJ...' || /^your-hasura-jwt/i.test(trimmed);
-  return false;
 }
 
 const apiBaseUrl = optional('API_BASE_URL', 'api_base_url').replace(/\/$/, '');
@@ -83,6 +145,35 @@ const missingOrPlaceholderApiConfig = apiCredentialValues
   .filter(([key, value]) => isMissingOrGeneratedApiPlaceholder(key, value))
   .map(([key]) => key);
 
+const llmPresetKey = optional('LLM_MODEL_PRESET', 'llm_model_preset');
+const selectedLlmPreset = findLlmModelPresetByKey(llmPresetKey);
+const envPresetRequested = Boolean(process.env.LLM_MODEL_PRESET?.trim());
+const envModelRequested = Boolean(process.env.LLM_MODEL?.trim());
+const llmModelFromConfig = process.env.LLM_MODEL
+  || (!envPresetRequested ? (typeof stored.llm_model === 'string' ? stored.llm_model : '') : '');
+const llmBaseUrlFromConfig = process.env.LLM_BASE_URL
+  || (!envPresetRequested ? (typeof stored.llm_base_url === 'string' ? stored.llm_base_url : '') : '');
+const llmModel = llmModelFromConfig || selectedLlmPreset?.model || 'deepseek-v4-pro';
+const inferredModelPreset = inferLlmModelPreset(llmModel);
+const effectiveLlmPreset = selectedLlmPreset ?? inferredModelPreset;
+const llmBaseUrlRaw = llmBaseUrlFromConfig
+  || effectiveLlmPreset?.baseUrl
+  || (llmPresetKey ? '' : 'https://api.deepseek.com');
+if (!llmBaseUrlRaw) {
+  throw new Error(
+    `Missing: LLM_BASE_URL\nPreset "${llmPresetKey}" requires an OpenAI-compatible gateway URL.`
+  );
+}
+const llmBaseUrl = llmBaseUrlRaw.replace(/\/$/, '');
+const llmStoredContextWindow = envPresetRequested || envModelRequested
+  ? undefined
+  : stored.llm_context_window_tokens;
+const llmContextWindowTokens =
+  resolveNumberConfigValue(process.env.LLM_CONTEXT_WINDOW_TOKENS, llmStoredContextWindow)
+  ?? effectiveLlmPreset?.contextWindowTokens
+  ?? inferLlmContextWindowTokens(llmModel)
+  ?? 32000;
+
 export const config = {
   apiBaseUrl,
   hasuraEndpoint,
@@ -90,18 +181,25 @@ export const config = {
   hasuraJwt,
   apiConnected: missingOrPlaceholderApiConfig.length === 0,
   apiSetupMessage: missingOrPlaceholderApiConfig.length > 0
-    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable hosted app, relay, heartbeat, scheduled posts, and Hasura-backed context.`
+    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable the hosted app, chat relay, and Hasura-backed context.`
     : '',
 
   llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
-  llmBaseUrl: get('LLM_BASE_URL', 'llm_base_url') || 'https://api.deepseek.com',
-  llmModel: get('LLM_MODEL', 'llm_model') || 'deepseek-v4-pro',
-  llmContextWindowTokens:
-    getNumber('LLM_CONTEXT_WINDOW_TOKENS', 'llm_context_window_tokens')
-    ?? inferLlmContextWindowTokens(get('LLM_MODEL', 'llm_model') || 'deepseek-v4-pro')
-    ?? 32000,
+  llmModelPreset: effectiveLlmPreset?.key ?? '',
+  llmBaseUrl,
+  llmModel,
+  llmContextWindowTokens,
+  structuredOutputAutoRepair: getBoolean(
+    'LLM_STRUCTURED_OUTPUT_AUTO_REPAIR',
+    'structured_output_auto_repair',
+  ) ?? false,
+  structuredOutputRepairMaxRetries: getNumber(
+    'LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES',
+    'structured_output_repair_max_retries',
+  ),
+  globalReviewPolicyMode: getGlobalReviewPolicyMode(),
 
-  workdir: get('PINPAWO_WORKDIR', 'workdir') || homedir(),
+  workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
   browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
 
   /** Extra capability plugin directories beyond ~/.pinpawo/capabilities/ */
@@ -111,13 +209,7 @@ export const config = {
     return [...new Set([...fromEnv, ...fromStored])];
   },
 
-  mediaCrawlerDir: get('MEDIACRAWLER_DIR', 'mediacrawler_dir'),
-  xhsCookie: get('XHS_COOKIE', 'xhs_cookie'),
-
   pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
-  heartbeatIntervalSeconds: Number(process.env.HEARTBEAT_INTERVAL_SECONDS ?? 900),
-  postIntervalHours: Number(process.env.POST_INTERVAL_HOURS ?? 6),
-  trendRefreshCooldownSeconds: Number(process.env.TREND_REFRESH_COOLDOWN_SECONDS ?? 900),
 
   localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
 };

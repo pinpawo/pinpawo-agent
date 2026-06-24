@@ -6,10 +6,9 @@ import {
   type ToolOperationMetadataMapFor,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
-import { config } from '../../config';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
-import { resolveUserPath } from './pathUtils';
+import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
 const MAX_GIT_OUTPUT_CHARS = 12_000;
 const execFileAsync = promisify(execFile);
@@ -49,7 +48,7 @@ function formatGitResult(result: GitCommandResult) {
 }
 
 export async function runGit(args: string[], cwd?: string) {
-  const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : config.workdir;
+  const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
   try {
     const result = await execFileAsync('git', args, {
       cwd: repo,

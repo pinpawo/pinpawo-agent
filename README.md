@@ -112,6 +112,7 @@ Install the local agent globally:
 npm install -g pinpawo-local-agent
 pinpawo-agent init
 pinpawo-agent login
+pinpawo-agent setup
 pinpawo-agent capability validate ~/.pinpawo/capabilities/hello-pinpawo
 pinpawo-agent tui
 ```

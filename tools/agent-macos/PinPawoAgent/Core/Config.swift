@@ -15,6 +15,7 @@ struct AgentConfig: Codable {
   var agentDistPath: String?   // override for dev: path to dist/index.js
   var browserBackend: String?  // nil/"auto" | "playwright" | "agent-browser"
   var workdir: String?         // agent working directory for relative paths; nil = homedir
+  var globalReviewPolicy: String? // nil/"require_authorization" | "auto_authorization" | "full_access"
   /// Per-capability enabled/disabled overrides.  Absent key = defaultEnabled from manifest.
   var capabilities: [String: Bool]?
   /// Enable thinking/reasoning for subagent calls. Default: false.
@@ -37,9 +38,14 @@ struct AgentConfig: Codable {
     case agentDistPath = "agent_dist_path"
     case browserBackend = "browser_backend"
     case workdir
+    case globalReviewPolicy = "global_review_policy"
     case subagentThinking = "subagent_thinking"
     case capabilities
     case capabilityDirs = "capability_dirs"
+  }
+
+  enum LegacyCodingKeys: String, CodingKey {
+    case reviewPolicyStrategy = "review_policy_strategy"
   }
 
   init(
@@ -48,6 +54,7 @@ struct AgentConfig: Codable {
     userId: String?, nickname: String?, actorId: String?,
     llmApiKey: String?, llmBaseUrl: String, llmModel: String,
     agentDistPath: String? = nil, browserBackend: String? = nil, workdir: String? = nil,
+    globalReviewPolicy: String? = nil,
     subagentThinking: Bool? = nil,
     capabilities: [String: Bool]? = nil,
     capabilityDirs: [String]? = nil,
@@ -66,6 +73,7 @@ struct AgentConfig: Codable {
     self.agentDistPath = agentDistPath
     self.browserBackend = browserBackend
     self.workdir = workdir
+    self.globalReviewPolicy = globalReviewPolicy
     self.subagentThinking = subagentThinking
     self.capabilities = capabilities
     self.capabilityDirs = capabilityDirs
@@ -76,6 +84,7 @@ struct AgentConfig: Codable {
   // even when the JSON was written by an older version or the TypeScript agent.
   init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
+    let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
     apiBaseUrl      = try c.decodeIfPresent(String.self, forKey: .apiBaseUrl)      ?? "https://a.ai.hughub.cn"
     hasuraEndpoint  = try c.decodeIfPresent(String.self, forKey: .hasuraEndpoint)  ?? ""
     agentToken      = try c.decodeIfPresent(String.self, forKey: .agentToken)
@@ -85,10 +94,12 @@ struct AgentConfig: Codable {
     actorId         = try c.decodeIfPresent(String.self, forKey: .actorId)
     llmApiKey       = try c.decodeIfPresent(String.self, forKey: .llmApiKey)
     llmBaseUrl      = try c.decodeIfPresent(String.self, forKey: .llmBaseUrl)      ?? "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    llmModel        = try c.decodeIfPresent(String.self, forKey: .llmModel)        ?? "qwen-plus"
+    llmModel        = try c.decodeIfPresent(String.self, forKey: .llmModel)        ?? "qwen3.5-plus"
     agentDistPath   = try c.decodeIfPresent(String.self, forKey: .agentDistPath)
     browserBackend  = try c.decodeIfPresent(String.self, forKey: .browserBackend)
     workdir         = try c.decodeIfPresent(String.self, forKey: .workdir)
+    globalReviewPolicy = try c.decodeIfPresent(String.self, forKey: .globalReviewPolicy)
+      ?? legacy.decodeIfPresent(String.self, forKey: .reviewPolicyStrategy)
     subagentThinking = try c.decodeIfPresent(Bool.self, forKey: .subagentThinking)
     capabilities    = try c.decodeIfPresent([String: Bool].self, forKey: .capabilities)
     capabilityDirs  = try c.decodeIfPresent([String].self, forKey: .capabilityDirs)
@@ -105,7 +116,7 @@ struct AgentConfig: Codable {
     actorId: nil,
     llmApiKey: nil,
     llmBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    llmModel: "qwen-plus",
+    llmModel: "qwen3.5-plus",
     agentDistPath: nil
   )
 }

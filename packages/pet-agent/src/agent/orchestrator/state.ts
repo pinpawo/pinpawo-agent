@@ -2,11 +2,15 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import type {
-  CapabilitySearchState,
+  RunCapabilitySearchState,
+  RunFinalReplyRoute,
   MessageLane,
-  PendingDelegation,
-  TurnDelegation,
+  RunPendingDelegation,
+  RunDelegation,
+  TaskActiveDelegation,
 } from './types';
+import type { CapabilityArtifactRef } from '../../types/artifact';
+import { mergeCapabilityArtifactRefs } from './capabilityArtifacts';
 import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
@@ -17,31 +21,42 @@ export const OrchestratorState = Annotation.Root({
     reducer: messagesStateReducer,
     default: () => [],
   }),
-  pendingDelegation: Annotation<PendingDelegation | null>({
+  runPendingDelegation: Annotation<RunPendingDelegation | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  capabilityResult: Annotation<Record<string, unknown> | null>({
+  // Transient routing signal set by the decision nodes so afterDecision can
+  // distinguish an `answer` route that must run the answer node from an
+  // inline fallback reply that already emitted its message and ends the turn.
+  runPendingFinalReply: Annotation<RunFinalReplyRoute>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  capabilitySearchState: Annotation<CapabilitySearchState>({
-    reducer: (_prev, next) => next,
-    default: buildEmptyCapabilitySearchState,
+  sessionCapabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
+    reducer: (prev, next) => mergeCapabilityArtifactRefs(prev, next),
+    default: () => [],
   }),
-  turnDelegations: Annotation<TurnDelegation[]>({
+  taskActiveDelegation: Annotation<TaskActiveDelegation | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
+  runCapabilitySearchState: Annotation<RunCapabilitySearchState>({
+    reducer: (_prev, next) => next,
+    default: buildEmptyRunCapabilitySearchState,
+  }),
+  runDelegations: Annotation<RunDelegation[]>({
     reducer: (_prev, next) => next,
     default: () => [],
   }),
-  iterationCount: Annotation<number>({
+  runIterationCount: Annotation<number>({
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
-  turnId: Annotation<string>({
+  runId: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
   }),
-  toolAuthorizations: Annotation<ToolAuthorizationRecord[]>({
+  sessionToolAuthorizations: Annotation<ToolAuthorizationRecord[]>({
     reducer: (prev, next) => mergeToolAuthorizations(prev, next),
     default: () => [],
   }),
@@ -49,17 +64,17 @@ export const OrchestratorState = Annotation.Root({
 
 export type OrchestratorStateType = typeof OrchestratorState.State;
 
-export type OrchestratorTurnState = Pick<
+export type OrchestratorRunState = Pick<
   OrchestratorStateType,
-  | 'pendingDelegation'
-  | 'capabilityResult'
-  | 'capabilitySearchState'
-  | 'turnDelegations'
-  | 'iterationCount'
-  | 'turnId'
+  | 'runPendingDelegation'
+  | 'runPendingFinalReply'
+  | 'runCapabilitySearchState'
+  | 'runDelegations'
+  | 'runIterationCount'
+  | 'runId'
 >;
 
-export function buildEmptyCapabilitySearchState(): CapabilitySearchState {
+export function buildEmptyRunCapabilitySearchState(): RunCapabilitySearchState {
   return {
     query: null,
     attempted: false,
@@ -67,22 +82,27 @@ export function buildEmptyCapabilitySearchState(): CapabilitySearchState {
   };
 }
 
-export function buildTurnStateReset(): OrchestratorTurnState {
+export function buildRunStateReset(): OrchestratorRunState {
   return {
-    pendingDelegation: null,
-    capabilityResult: null,
-    capabilitySearchState: buildEmptyCapabilitySearchState(),
-    turnDelegations: [],
-    iterationCount: 0,
-    turnId: randomUUID().slice(0, 8),
+    runPendingDelegation: null,
+    runPendingFinalReply: null,
+    runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+    runDelegations: [],
+    runIterationCount: 0,
+    runId: randomUUID().slice(0, 8),
   };
 }
 
-export function buildOrchestratorTurnInput(messages: BaseMessage[]) {
+export function buildOrchestratorRunInput(messages: BaseMessage[]) {
   return {
     messages,
-    ...buildTurnStateReset(),
+    ...buildRunStateReset(),
   };
 }
+
+/** @deprecated Use buildRunStateReset. Kept temporarily for external callers. */
+export const buildTurnStateReset = buildRunStateReset;
+/** @deprecated Use buildOrchestratorRunInput. Kept temporarily for external callers. */
+export const buildOrchestratorTurnInput = buildOrchestratorRunInput;
 
 export type { MessageLane };

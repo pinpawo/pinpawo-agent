@@ -4,8 +4,11 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
+import type { CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
+import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
+import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { OrchestrationDecision } from './schemas';
 
 export type MessageLane = 'general' | `capability:${string}`;
@@ -14,7 +17,7 @@ export type DelegationStatus = 'pending' | 'progress' | 'completed';
 export type AnnounceKind = 'completed' | 'progress';
 export type { SubagentCompletionReason };
 
-export type TurnDelegation = {
+export type RunDelegation = {
   id: string;
   lane: MessageLane;
   task: string;
@@ -22,11 +25,21 @@ export type TurnDelegation = {
   resultPreview: string | null;
 };
 
-export type PendingDelegation = {
+export type RunPendingDelegation = {
   id: string;
   lane: MessageLane;
   task: string;
   contextSummary: string | null;
+};
+
+export type TaskActiveDelegation = {
+  id: string;
+  lane: MessageLane;
+  task: string;
+  contextSummary: string | null;
+  transcriptRunId: string;
+  status: 'pending' | 'awaiting_decision';
+  resultPreview: string | null;
 };
 
 export type CapabilityCandidate = {
@@ -36,7 +49,7 @@ export type CapabilityCandidate = {
   matchedTerms: string[];
 };
 
-export type CapabilitySearchState = {
+export type RunCapabilitySearchState = {
   query: string | null;
   attempted: boolean;
   candidates: CapabilityCandidate[];
@@ -46,11 +59,20 @@ export type SubagentAnnounce = {
   lane: MessageLane;
   delegationId: string | null;
   task: string | null;
-  announce: AnnounceKind;
   text: string | null;
 };
 
-export type DecisionMode = 'finish' | 'general' | 'capability';
+export type DecisionMode = 'answer' | 'general' | 'capability';
+
+/**
+ * How an `answer`-bucket decision should be turned into a user-facing reply.
+ * - 'answer': route to the dedicated answer node, which reads the full
+ *   conversation and synthesizes the reply.
+ * - 'inline': a degenerate fallback or stop path already emitted a fixed reply;
+ *   the run ends without the answer node.
+ * - null: not an answer-bucket decision (delegation in progress).
+ */
+export type RunFinalReplyRoute = 'answer' | 'inline' | null;
 export type CapabilityDecisionState = 'unavailable' | 'search_available' | 'candidates_available' | 'search_exhausted';
 
 export type ToolBindableChatModel = AgentModels['act'] & {
@@ -69,6 +91,13 @@ export type OrchestratorConfig = {
   checkpoint?: BaseCheckpointSaver;
   decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
+  /**
+   * Artifact store (a port; the host supplies the concrete adapter). Injected
+   * into each capability's `CapabilityContext` so capabilities can persist
+   * artifacts without the host threading the store through every capability
+   * factory. Optional — surfaces without a store (e.g. tests, studio) skip writes.
+   */
+  capabilityArtifactStore?: CapabilityArtifactStore;
 };
 
 export type OrchestratorInvokeOptions = {
@@ -81,9 +110,10 @@ export type OrchestratorInvokeOptions = {
   runtimeEnvironment?: string;
   onToolEvent?: SubagentToolEventHandler;
   reviewCapabilities?: ToolkitReviewCapabilities;
+  globalReviewPolicy?: GlobalReviewPolicy;
   /**
    * 强制以"已发现候选"形态登记的 capability 名字列表。`prepare` 节点会
-   * 据此 pre-seed `capabilitySearchState`,跳过 capability discovery/search。
+   * 据此 pre-seed `runCapabilitySearchState`,跳过 capability discovery/search。
    * 仅由 Studio 等明确知道需要哪个 capability 的调用方注入;通用 pet agent
    * 不传 → 0 行为变化。
    */
@@ -92,8 +122,9 @@ export type OrchestratorInvokeOptions = {
 
 export type OrchestrationDecisionStructuredOutputOptions = {
   name: string;
-  method?: 'functionCalling' | 'jsonMode' | 'jsonSchema';
+  method?: StructuredOutputMethod;
   strict?: boolean;
+  autoRepair?: StructuredOutputAutoRepairConfig;
 };
 
 export type OrchestrationDecisionStructuredOutputConfig = Omit<OrchestrationDecisionStructuredOutputOptions, 'name'>;

@@ -1,20 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import {
+  GLOBAL_REVIEW_POLICY_MODE,
+  GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
+} from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { LocalAgentEvent } from './events/localAgentEvent';
 import type { LocalAgentGraphService } from './agentGraphService';
 import { runChatSession } from './chatSessionAdapter';
 import { readFinalMessageText, type StreamToolsPayload } from './agentStreamEvents';
 
-function estimateTestTokens(messages: BaseMessage[]) {
-  return messages.reduce((total, message) => {
-    const content = readFinalMessageText(message);
-    const metadata = message.additional_kwargs && Object.keys(message.additional_kwargs).length > 0
-      ? JSON.stringify(message.additional_kwargs)
-      : '';
-    return total + Math.max(0, Math.ceil(`${message._getType()}\n${content}\n${metadata}`.length / 4));
-  }, 0);
+function graphStream(chunks: AsyncIterable<unknown>) {
+  return chunks;
 }
 
 test('runChatSession uses onToolEvent as the only operation source', async () => {
@@ -32,28 +30,30 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    async *stream(streamSetup: AgentChannelSetup) {
-      yield [
-        'tools',
-        {
+    stream(streamSetup: AgentChannelSetup) {
+      return graphStream((async function* () {
+        yield [
+          'tools',
+          {
+            event: 'on_tool_start',
+            name: 'stream-source',
+            toolCallId: 'stream-call',
+            input: { source: 'stream' },
+          },
+        ];
+        streamSetup.input.onToolEvent?.({
           event: 'on_tool_start',
-          name: 'stream-source',
-          toolCallId: 'stream-call',
-          input: { source: 'stream' },
-        },
-      ];
-      streamSetup.input.onToolEvent?.({
-        event: 'on_tool_start',
-        name: 'callback-source',
-        toolCallId: 'callback-call',
-        input: { source: 'callback' },
-      });
-      yield [
-        'values',
-        {
-          messages: [new AIMessage('done')],
-        },
-      ];
+          name: 'callback-source',
+          toolCallId: 'callback-call',
+          input: { source: 'callback' },
+        });
+        yield [
+          'values',
+          {
+            messages: [new AIMessage('done')],
+          },
+        ];
+      })());
     },
   };
 
@@ -98,6 +98,62 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
   );
 });
 
+test('runChatSession falls back to checkpoint final message when stream values omit messages', async () => {
+  const emittedEvents: LocalAgentEvent[] = [];
+  const finalMessages = [
+    new HumanMessage('hello'),
+    new AIMessage('checkpoint answer'),
+  ];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+
+  let readThreadStateCalls = 0;
+  const graphService = {
+    async readThreadState() {
+      readThreadStateCalls += 1;
+      return {
+        messages: readThreadStateCalls === 1 ? [] : finalMessages,
+        pendingHumanReview: null,
+        hasPendingContinuation: false,
+      };
+    },
+    stream() {
+      return graphStream((async function* () {})());
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'checkpoint answer' });
+  assert.equal(readThreadStateCalls, 2);
+  const completed = emittedEvents.find(
+    (event): event is Extract<LocalAgentEvent, { type: 'message.completed' }> =>
+      event.type === 'message.completed',
+  ) ?? null;
+  assert.equal(completed?.text, 'checkpoint answer');
+});
+
 test('runChatSession maps authorization runtime events to system notices', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: LocalAgentEvent[] = [];
@@ -113,24 +169,42 @@ test('runChatSession maps authorization runtime events to system notices', async
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    async *stream(streamSetup: AgentChannelSetup) {
-      streamSetup.input.onToolEvent?.({
-        event: 'on_runtime_event',
-        name: 'tool_authorization_recorded',
-        data: {
-          authorizations: [{
-            toolName: 'run_shell',
-            matcher: { type: 'shell_pattern', value: 'git status' },
-            createdAt: '2026-01-01T00:00:00.000Z',
-          }],
-        },
-      });
-      yield [
-        'values',
-        {
-          messages: [new AIMessage('done')],
-        },
-      ];
+    stream(streamSetup: AgentChannelSetup) {
+      return graphStream((async function* () {
+        streamSetup.input.onToolEvent?.({
+          event: 'on_runtime_event',
+          name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED,
+          data: {
+            toolName: 'write_file',
+            policyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
+          },
+        });
+        streamSetup.input.onToolEvent?.({
+          event: 'on_runtime_event',
+          name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED,
+          data: {
+            toolName: 'custom_tool',
+            policyMode: GLOBAL_REVIEW_POLICY_MODE.CUSTOM,
+          },
+        });
+        streamSetup.input.onToolEvent?.({
+          event: 'on_runtime_event',
+          name: 'tool_authorization_recorded',
+          data: {
+            authorizations: [{
+              toolName: 'run_shell',
+              matcher: { type: 'shell_pattern', value: 'git status' },
+              createdAt: '2026-01-01T00:00:00.000Z',
+            }],
+          },
+        });
+        yield [
+          'values',
+          {
+            messages: [new AIMessage('done')],
+          },
+        ];
+      })());
     },
   };
 
@@ -156,11 +230,15 @@ test('runChatSession maps authorization runtime events to system notices', async
 
   assert.deepEqual(result, { status: 'completed', reply: 'done' });
   assert.deepEqual(emittedTools, []);
-  const notice = emittedEvents.find((event) => event.type === 'system.notice');
-  assert.equal(notice?.requestId, 'req-1');
-  assert.equal(
-    notice?.type === 'system.notice' ? notice.message : '',
-    '已授权当前会话中的 run_shell 操作。',
+  assert.deepEqual(
+    emittedEvents
+      .filter((event) => event.type === 'system.notice')
+      .map((event) => event.message),
+    [
+      '已自动授权 write_file 操作。',
+      '已根据全局策略授权 custom_tool 操作。',
+      '已授权当前会话中的 run_shell 操作。',
+    ],
   );
 });
 
@@ -179,18 +257,20 @@ test('runChatSession forwards subagent model text runtime events as subagent del
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    async *stream(streamSetup: AgentChannelSetup) {
-      streamSetup.input.onToolEvent?.({
-        event: 'on_runtime_event',
-        name: 'subagent_message_delta',
-        data: { text: '正在整理' },
-      });
-      yield [
-        'values',
-        {
-          messages: [new AIMessage('done')],
-        },
-      ];
+    stream(streamSetup: AgentChannelSetup) {
+      return graphStream((async function* () {
+        streamSetup.input.onToolEvent?.({
+          event: 'on_runtime_event',
+          name: 'subagent_message_delta',
+          data: { text: '正在整理' },
+        });
+        yield [
+          'values',
+          {
+            messages: [new AIMessage('done')],
+          },
+        ];
+      })());
     },
   };
 
@@ -253,24 +333,26 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    async *stream() {
-      yield [
-        'values',
-        {
-          __interrupt__: [{
-            value: {
-              kind: 'review',
-              review,
-              pendingAction: {
-                actionId: 'call-1',
-                toolName: 'run_shell',
-                args: { command: 'git status', cwd: '/repo' },
-                description: 'Run git status?',
+    stream() {
+      return graphStream((async function* () {
+        yield [
+          'values',
+          {
+            __interrupt__: [{
+              value: {
+                kind: 'review',
+                review,
+                pendingAction: {
+                  actionId: 'call-1',
+                  toolName: 'run_shell',
+                  args: { command: 'git status', cwd: '/repo' },
+                  description: 'Run git status?',
+                },
               },
-            },
-          }],
-        },
-      ];
+            }],
+          },
+        ];
+      })());
     },
   };
 
@@ -322,14 +404,16 @@ test('runChatSession resumes explicit response after state update clears interru
     buildResumeCommand(value: unknown) {
       return { kind: 'resume-command', value };
     },
-    async *stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
-      streamInputs.push(inputOverride);
-      yield [
-        'values',
-        {
-          messages: finalMessages,
-        },
-      ];
+    stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
+      return graphStream((async function* () {
+        streamInputs.push(inputOverride);
+        yield [
+          'values',
+          {
+            messages: finalMessages,
+          },
+        ];
+      })());
     },
   };
 
@@ -382,15 +466,17 @@ test('runChatSession allows a user message after an aborted non-review run leave
         ? { messages: [], pendingHumanReview: null, hasPendingContinuation: true }
         : { messages: finalMessages, pendingHumanReview: null, hasPendingContinuation: false };
     },
-    async *stream(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
-      streamInputs.push(inputOverride);
-      assert.equal(readFinalMessageText(streamSetup.input.messages.at(-1) ?? {}), 'new request');
-      yield [
-        'values',
-        {
-          messages: finalMessages,
-        },
-      ];
+    stream(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
+      return graphStream((async function* () {
+        streamInputs.push(inputOverride);
+        assert.equal(readFinalMessageText(streamSetup.input.messages.at(-1) ?? {}), 'new request');
+        yield [
+          'values',
+          {
+            messages: finalMessages,
+          },
+        ];
+      })());
     },
   };
 
@@ -435,7 +521,7 @@ test('runChatSession rejects stale resume with user-facing message', async () =>
     buildResumeCommand() {
       throw new Error('should not build resume command');
     },
-    async *stream() {
+    stream() {
       throw new Error('should not stream');
     },
   };
@@ -496,14 +582,16 @@ test('runChatSession does not map pending review free text to review response', 
     buildResumeCommand(value: unknown) {
       throw new Error(`should not build resume command: ${String(value)}`);
     },
-    async *stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
-      streamInputs.push(inputOverride);
-      yield [
-        'values',
-        {
-          messages: finalMessages,
-        },
-      ];
+    stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
+      return graphStream((async function* () {
+        streamInputs.push(inputOverride);
+        yield [
+          'values',
+          {
+            messages: finalMessages,
+          },
+        ];
+      })());
     },
   };
 
@@ -540,7 +628,7 @@ test('runChatSession does not map pending review free text to review response', 
   );
 });
 
-test('runChatSession emits token usage in completed event', async () => {
+test('runChatSession omits token usage when provider usage is unavailable', async () => {
   const emittedEvents: unknown[] = [];
   const promptMessages = [
     new HumanMessage('历史问题'),
@@ -573,20 +661,22 @@ test('runChatSession emits token usage in completed event', async () => {
         hasPendingContinuation: false,
       };
     },
-    async *stream(streamSetup: AgentChannelSetup) {
-      yield [
-        'messages',
-        [
-          new AIMessage('你好，'),
-          { node: 'assistant' },
-        ],
-      ];
-      yield [
-        'values',
-        {
-          messages: finalMessages,
-        },
-      ];
+    stream(streamSetup: AgentChannelSetup) {
+      return graphStream((async function* () {
+        yield [
+          'messages',
+          [
+            new AIMessage('你好，'),
+            { node: 'assistant' },
+          ],
+        ];
+        yield [
+          'values',
+          {
+            messages: finalMessages,
+          },
+        ];
+      })());
     },
   };
 
@@ -613,9 +703,102 @@ test('runChatSession emits token usage in completed event', async () => {
     .find((message): message is LocalAgentEvent => message.type === 'message.completed') ?? null;
   assert.equal(completed?.type, 'message.completed');
   assert.equal(completed?.role, 'assistant');
-  assert.equal(completed.usage?.contextWindow, 32000);
-  assert.equal(completed.usage?.inputTokens, estimateTestTokens([...snapshotMessages, ...promptMessages]));
-  assert.equal(completed.usage?.totalTokens, estimateTestTokens(finalMessages));
-  assert.equal(typeof completed.usage?.outputTokens, 'number');
-  assert.equal(completed.usage?.outputTokens >= 0, true);
+  assert.equal(completed.usage, undefined);
+});
+
+test('runChatSession emits provider token usage from new state messages', async () => {
+  const emittedEvents: unknown[] = [];
+  const historicalReply = new AIMessage({
+    content: '历史回答。',
+    usage_metadata: {
+      input_tokens: 900,
+      output_tokens: 100,
+      total_tokens: 1000,
+    },
+  });
+  historicalReply.id = 'history-ai-1';
+  const promptMessages = [
+    new HumanMessage('你是谁？'),
+  ];
+  const finalReply = new AIMessage({
+    content: '这里是回执。',
+    usage_metadata: {
+      input_tokens: 123,
+      output_tokens: 45,
+      total_tokens: 168,
+    },
+  });
+  finalReply.id = 'reply-ai-1';
+  const initialMessages = [
+    new HumanMessage('之前的问题'),
+    historicalReply,
+  ];
+  const finalMessages = [
+    ...initialMessages,
+    ...promptMessages,
+    finalReply,
+  ];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {
+      contextWindowTokens: 64000,
+    },
+    input: {
+      messages: promptMessages,
+    },
+  } as unknown as AgentChannelSetup;
+
+  let readThreadStateCalls = 0;
+  const graphService = {
+    async readThreadState() {
+      readThreadStateCalls += 1;
+      return {
+        messages: readThreadStateCalls === 1 ? initialMessages : finalMessages,
+        pendingHumanReview: null,
+        hasPendingContinuation: false,
+      };
+    },
+    stream() {
+      return graphStream((async function* () {
+        yield [
+          'values',
+          {
+            messages: finalMessages,
+          },
+        ];
+      })());
+    },
+  };
+
+  await runChatSession({
+    request: {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: '你是谁？',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  const completed = (emittedEvents as LocalAgentEvent[])
+    .find((message): message is LocalAgentEvent => message.type === 'message.completed') ?? null;
+  assert.equal(completed?.type, 'message.completed');
+  assert.deepEqual(completed.usage, {
+    inputTokens: 123,
+    outputTokens: 45,
+    totalTokens: 168,
+    contextWindow: 64000,
+    updatedAt: completed.usage?.updatedAt,
+    source: 'provider',
+    scope: 'run',
+  });
+  assert.equal(typeof completed.usage?.updatedAt, 'string');
 });

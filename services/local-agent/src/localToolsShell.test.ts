@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { homedir } from 'node:os';
 import test from 'node:test';
 import {
+  buildCurrentTimeSnapshot,
+  getCurrentTimeTool,
   getBlockedShellReason,
   getShellConfirmationRisk,
   hasBlockedOutputRedirection,
@@ -10,6 +12,46 @@ import {
   truncateShellOutput,
 } from './toolkits/local/shellTools';
 import { createBashToolkit } from './toolkits/local';
+
+test('get_current_time returns current time details for a requested timezone', async () => {
+  assert.deepEqual(
+    buildCurrentTimeSnapshot(new Date('2026-06-23T02:30:00.000Z'), 'Asia/Shanghai'),
+    {
+      iso: '2026-06-23T02:30:00.000Z',
+      timezone: 'Asia/Shanghai',
+      localTime: '2026-06-23 10:30:00',
+      unixMs: 1782181800000,
+      unixSeconds: 1782181800,
+    },
+  );
+
+  const parsed = JSON.parse(String(await getCurrentTimeTool.invoke({
+    timezone: 'Asia/Shanghai',
+  }))) as {
+    iso?: string;
+    timezone?: string;
+    localTime?: string;
+    unixMs?: number;
+    unixSeconds?: number;
+  };
+  assert.equal(parsed.timezone, 'Asia/Shanghai');
+  assert.equal(typeof parsed.iso, 'string');
+  assert.equal(typeof parsed.localTime, 'string');
+  assert.equal(typeof parsed.unixMs, 'number');
+  assert.equal(typeof parsed.unixSeconds, 'number');
+});
+
+test('bash toolkit exposes get_current_time without command review', () => {
+  const toolkit = createBashToolkit();
+
+  assert.equal(Array.isArray(toolkit.tools), true);
+  assert.equal(
+    Array.isArray(toolkit.tools) && toolkit.tools.some((item) => item.name === 'get_current_time'),
+    true,
+  );
+  assert.ok(toolkit.operations?.get_current_time);
+  assert.equal(toolkit.policy?.toolReview?.get_current_time, undefined);
+});
 
 test('shell policy blocks output redirection write commands', () => {
   assert.equal(hasBlockedOutputRedirection('echo ok > out.txt'), true);
@@ -50,6 +92,10 @@ test('shell review policy reviews configured command execution', async () => {
     },
   });
   assert.equal(review && 'schemaVersion' in review ? review.view.title : null, '执行命令');
+  assert.deepEqual(
+    review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
+    ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
+  );
 });
 
 test('normalizeShellActionInput trims commands and expands home cwd', () => {

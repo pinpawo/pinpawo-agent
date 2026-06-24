@@ -26,7 +26,7 @@ const TUI_CAPABILITIES: LocalAgentInterfaceCapabilities = {
 
 const APP_CHAT_CAPABILITIES: LocalAgentInterfaceCapabilities = {
   humanReview: true,
-  sessionAuthorization: false,
+  sessionAuthorization: true,
 };
 
 export function buildTuiChatThreadId(params: { petId: string; sessionSuffix: string }) {

@@ -1,19 +1,19 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
+  GLOBAL_REVIEW_POLICY_MODE,
   type AgentCapability,
   type AgentActor,
   type AgentInvokeInput,
   type AgentToolkit,
+  type CapabilityArtifactStore,
   type OrchestratorConfig,
 } from '@pinpawo/pet-agent';
 import { createCapabilityCreatorCapability } from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
 import {
-  buildDailyPostTaskMessage,
   createDailyPostCapability,
   type DailyImagePlan,
-  type DailyPostCapabilityOptions,
   type DailyPostPayload,
   type TrendPromptItem,
 } from './capabilities/dailyPost';
@@ -21,8 +21,6 @@ import { createPetProfileToolkit } from './toolkits/petProfile';
 import { buildLocalAgentModels } from './agentModels';
 import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
-import { config } from './config';
-import type { CrawlerLogFn } from './crawler';
 import { buildLocalLlmConfig } from './llmConfig';
 import { agentStore } from './agentStore';
 import { loadStoredConfig } from './storage';
@@ -33,6 +31,7 @@ import {
   type LocalAgentInterfaceContext,
   type LocalAgentInterfaceKind,
 } from './chatInterface';
+import { inferLlmStructuredOutputMethod } from './llmModelPresets';
 
 function buildActor(context: AgentContext) {
   return {
@@ -95,13 +94,6 @@ function toRecentDaily(items: AgentContext['context']['recentDaily']) {
     tags: item.tags ?? null,
     createdAt: item.created_at,
   }));
-}
-
-function buildAvoidTopics(items: AgentContext['context']['recentDaily']): string[] {
-  return items
-    .slice(0, 5)
-    .map((item) => item.topic)
-    .filter((topic): topic is string => Boolean(topic));
 }
 
 function saveDailyPost(params: {
@@ -180,9 +172,18 @@ function appendCapability(
 }
 
 export function buildDecisionStructuredOutput(llmConfig: AgentLlmConfig): OrchestratorConfig['decisionStructuredOutput'] {
-  return llmConfig.model.includes('deepseek')
-    ? { method: 'functionCalling' }
-    : undefined;
+  const method = inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
+  if (!method) return undefined;
+
+  const autoRepair = llmConfig.structuredOutputAutoRepair
+    ? {
+        autoRepair: {
+          maxRetries: llmConfig.structuredOutputRepairMaxRetries ?? 1,
+        },
+      }
+    : {};
+
+  return { method, ...autoRepair };
 }
 
 export function buildLocalChatAgentInput(params: {
@@ -193,12 +194,19 @@ export function buildLocalChatAgentInput(params: {
   threadId?: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
   dryRun?: boolean;
-  logger?: CrawlerLogFn;
   checkpoint?: BaseCheckpointSaver;
   /** Host-provided capabilities implemented by local-agent services */
   extraCapabilities?: AgentCapability[];
   /** User-defined capability plugins loaded by capabilityLoader */
   userCapabilities?: LoadedUserCapability[];
+  /** Store handed to capabilities so they can deterministically persist result artifacts */
+  capabilityArtifactStore?: CapabilityArtifactStore;
+  /** Effective agent workdir for prompt context and relative tool paths. */
+  workdir?: string;
+  /** Fixed session/thread start timestamp used as a stable relative-time anchor. */
+  sessionStartedAt?: string;
+  /** IANA timezone name for interpreting relative dates in this session. */
+  timezone?: string;
 }): AgentChannelSetup {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
@@ -261,6 +269,7 @@ export function buildLocalChatAgentInput(params: {
       checkpoint: params.checkpoint,
       decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
+      capabilityArtifactStore: params.capabilityArtifactStore,
     },
     input: {
       messages: [
@@ -273,111 +282,19 @@ export function buildLocalChatAgentInput(params: {
       execution: {
         dryRun: params.dryRun,
       },
-      workdir: config.workdir,
-      runtimeEnvironment: buildRuntimeEnvironmentSummary(),
+      workdir: params.workdir,
+      runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir, {
+        sessionStartedAt: params.sessionStartedAt,
+        timezone: params.timezone,
+      }),
+      globalReviewPolicy: {
+        mode: llmConfig.globalReviewPolicyMode ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+        ...(decisionStructuredOutput ? { structuredOutput: decisionStructuredOutput } : {}),
+      },
     },
     interfaceContext: buildLocalAgentInterfaceContext({
       threadId: params.threadId,
       kind: params.interfaceKind ?? null,
     }),
-  };
-}
-
-export function buildLocalScheduledAgentInput(params: {
-  context: AgentContext;
-  llmConfig?: AgentLlmConfig;
-  dryRun?: boolean;
-  toolkits?: AgentToolkit[];
-  dailyPost?: Partial<
-    Pick<
-      DailyPostCapabilityOptions,
-      'savePost' | 'markUsed' | 'markSkipped' | 'requestImageProcessing'
-    >
-  >;
-  /** User-defined capability plugins loaded by capabilityLoader */
-  userCapabilities?: LoadedUserCapability[];
-}): AgentChannelSetup {
-  const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
-  const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
-  const actor = buildActor(params.context);
-  const trendItems = toTrendPromptItems(params.context.context.trendItems);
-  const recentDaily = toRecentDaily(params.context.context.recentDaily);
-  const avoidTopics = buildAvoidTopics(params.context.context.recentDaily);
-  const sharedToolkits = [
-    createPetProfileToolkit({
-      actor,
-      profileText: params.context.context.petMemoryText,
-    }),
-  ];
-
-  const capabilities: AgentCapability[] = [];
-
-  if (isCapabilityEnabled('explore')) {
-    appendCapability(capabilities, createExploreCapability({
-      structuredOutput: decisionStructuredOutput,
-    }));
-  }
-
-  if (isCapabilityEnabled('daily_post')) {
-    appendCapability(capabilities, createDailyPostCapability({
-      recentDaily,
-      trendItems,
-      savePost: params.dailyPost?.savePost ?? saveDailyPost,
-      markUsed:
-        params.dailyPost?.markUsed ??
-        ((trendItemId: string, extra?: { sourcePostId?: string }) =>
-          agentStore.upsertImpression(actor.petId, trendItemId, 'used', extra)),
-      markSkipped:
-        params.dailyPost?.markSkipped ??
-        ((trendItemId: string, reason: string) =>
-          agentStore.upsertImpression(actor.petId, trendItemId, 'skipped', { reason })),
-      requestImageProcessing:
-        params.dailyPost?.requestImageProcessing ??
-        (({ postId }) => agentStore.requestImageProcessing(postId)),
-    }));
-  }
-
-  // Append user-defined capabilities
-  for (const { meta, capability } of params.userCapabilities ?? []) {
-    if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
-  }
-
-  return {
-    graphKey: buildGraphKey([
-      'local',
-      'scheduled',
-      actor.petId,
-      llmConfig.model,
-      llmConfig.observeModel ?? llmConfig.model,
-      String(llmConfig.contextWindowTokens ?? 32000),
-      'memory',
-    ]),
-    graphConfig: {
-      models: buildLocalAgentModels(llmConfig),
-      actor,
-      decisionStructuredOutput,
-      contextWindowTokens: llmConfig.contextWindowTokens,
-    },
-    input: {
-      messages: [
-        new HumanMessage(
-          buildDailyPostTaskMessage({
-            actor,
-            petMemoryText: params.context.context.petMemoryText,
-            recentDaily,
-            trendItems,
-            avoidTopics,
-            today: params.context.context.today,
-          }),
-        ),
-      ],
-      capabilities,
-      toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
-      execution: {
-        dryRun: params.dryRun,
-      },
-      workdir: config.workdir,
-      runtimeEnvironment: buildRuntimeEnvironmentSummary(),
-    },
   };
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ReviewOption } from '@pinpawo/pet-agent';
+import type { BuiltinGlobalReviewPolicyMode, ReviewOption } from '@pinpawo/pet-agent';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { config } from '../config';
@@ -8,6 +8,7 @@ import { formatNow } from './render/terminalText';
 import { TuiLocalServerClient } from './tuiLocalServerClient';
 import { TuiLocalWebSocketClient } from './tuiLocalWebSocketClient';
 import { buildTuiActionsFromServerMessage } from './tuiServerMessageActions';
+import { TUI_CORE_TARGET_ACTIONS } from './contracts/tuiCoreContract';
 import {
   selectFocusedActiveRun,
   selectFocusedBusy,
@@ -19,12 +20,19 @@ const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
 const LOCAL_SERVER_RECONNECT_RETRIES = 5;
 const LOCAL_SERVER_RECONNECT_DELAY_MS = 2000;
+const REVIEW_RECONCILIATION_ERROR_CODES = new Set([
+  'review_closed',
+  'review_stale',
+  'review_wrong_session',
+]);
 
 type TuiRuntimeControllerOptions = {
   actorId: string;
   localServerPort: number;
+  workdir?: string;
   dispatch: (action: TuiAction) => void;
   getState: () => TuiState;
+  resetTimelineView: () => void;
   setNow: (now: number) => void;
 };
 
@@ -40,11 +48,17 @@ function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) 
   return pieces.join(' · ');
 }
 
-function makeHistoryMeta() {
+function makeMessageMeta() {
   return {
     id: randomUUID(),
     timestamp: formatNow(),
   };
+}
+
+function shouldReconcileSnapshotAfterMessage(message: LocalAgentServerMessage) {
+  return message.type === 'event'
+    && message.event.type === 'error'
+    && Boolean(message.event.code && REVIEW_RECONCILIATION_ERROR_CODES.has(message.event.code));
 }
 
 export class TuiRuntimeController {
@@ -118,7 +132,7 @@ export class TuiRuntimeController {
       kind: 'chat',
       userText: message,
       now,
-      userCell: makeHistoryMeta(),
+      userCell: makeMessageMeta(),
       statusMessage: TUI_TEXT.waitingForReply,
     });
 
@@ -149,7 +163,7 @@ export class TuiRuntimeController {
       kind: 'studio',
       userText: TUI_TEXT.studioUserMessage(userRequest),
       now,
-      userCell: makeHistoryMeta(),
+      userCell: makeMessageMeta(),
       statusMessage: TUI_TEXT.studioRunning,
     });
     this.wsClient.send({
@@ -194,7 +208,7 @@ export class TuiRuntimeController {
       requestId,
       message: decision,
       now,
-      userCell: makeHistoryMeta(),
+      userCell: makeMessageMeta(),
       statusMessage: TUI_TEXT.reviewSubmitting,
     });
 
@@ -236,8 +250,8 @@ export class TuiRuntimeController {
         type: 'run.finish',
         requestId: interruptRequestId,
         statusMessage: TUI_TEXT.interruptRequestedStatus,
-        history: [{
-          ...makeHistoryMeta(),
+        messages: [{
+          ...makeMessageMeta(),
           kind: 'system',
           text: TUI_TEXT.interruptRequestedLocalRelease,
         }],
@@ -248,6 +262,7 @@ export class TuiRuntimeController {
 
   startNewSession() {
     this.clearInterruptTimeout();
+    this.options.resetTimelineView();
     this.options.dispatch({
       type: 'input.set',
       value: '',
@@ -262,9 +277,14 @@ export class TuiRuntimeController {
     }
   }
 
+  updateRuntimeConfig(params: { globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode }) {
+    config.globalReviewPolicyMode = params.globalReviewPolicyMode;
+    return this.sendRuntimeConfigUpdate();
+  }
+
   appendSystemMessage(text: string) {
     this.options.dispatch({
-      type: 'history.append',
+      type: 'message.append',
       cell: {
         id: randomUUID(),
         kind: 'system',
@@ -274,9 +294,20 @@ export class TuiRuntimeController {
     });
   }
 
-  private setRuntimeFromHealth(payload: { model?: string; contextWindow?: number; cwd?: string }) {
+  private setRuntimeFromHealth(payload: {
+    model?: string;
+    contextWindow?: number;
+    cwd?: string;
+    stateRoot?: string;
+    studioConfigPath?: string;
+    studioConfigSource?: string;
+    studioConfigActivePath?: string;
+    legacyStudioConfigPath?: string;
+    petsDir?: string;
+    studioWikiBaseDir?: string;
+  }) {
     const model = payload.model ?? config.llmModel;
-    const cwd = payload.cwd ?? config.workdir;
+    const cwd = payload.cwd ?? this.options.workdir ?? config.workdir;
 
     if (!model && !cwd && !payload.contextWindow) {
       return;
@@ -288,6 +319,13 @@ export class TuiRuntimeController {
         ...(model ? { model } : {}),
         ...(payload.contextWindow !== undefined ? { contextWindow: payload.contextWindow } : {}),
         ...(cwd ? { cwd } : {}),
+        ...(payload.stateRoot ? { stateRoot: payload.stateRoot } : {}),
+        ...(payload.studioConfigPath ? { studioConfigPath: payload.studioConfigPath } : {}),
+        ...(payload.studioConfigSource ? { studioConfigSource: payload.studioConfigSource } : {}),
+        ...(payload.studioConfigActivePath ? { studioConfigActivePath: payload.studioConfigActivePath } : {}),
+        ...(payload.legacyStudioConfigPath ? { legacyStudioConfigPath: payload.legacyStudioConfigPath } : {}),
+        ...(payload.petsDir ? { petsDir: payload.petsDir } : {}),
+        ...(payload.studioWikiBaseDir ? { studioWikiBaseDir: payload.studioWikiBaseDir } : {}),
       },
     });
   }
@@ -317,7 +355,7 @@ export class TuiRuntimeController {
     const connected = await this.waitForLocalServer();
     if (this.disposed || !connected) return;
 
-    await this.restoreHistory();
+    await this.restoreSessionSnapshot('startup');
     if (this.disposed) return;
 
     this.connectWebSocket();
@@ -363,17 +401,22 @@ export class TuiRuntimeController {
     return false;
   }
 
-  private async restoreHistory() {
+  private async restoreSessionSnapshot(source: 'startup' | 'reconnect') {
     try {
-      const restored = await this.localServerClient.readHistory();
-      if (restored.length > 0) {
-        this.options.dispatch({
-          type: 'session.replace_history',
-          history: restored,
-        });
+      const state = this.options.getState();
+      const sessionId = state.focusedSessionId ?? 'chat:default';
+      const kind = state.sessions[sessionId]?.kind ?? 'chat';
+      const snapshot = await this.localServerClient.readSessionSnapshot({ sessionId, kind });
+      this.options.dispatch({
+        type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+        source,
+        snapshot,
+      });
+    } catch (err) {
+      if (source === 'reconnect') {
+        throw err;
       }
-    } catch {
-      // history restore is best-effort
+      // snapshot restore is best-effort
     }
   }
 
@@ -433,9 +476,24 @@ export class TuiRuntimeController {
       return;
     }
 
-    await this.fetchLocalRuntime();
+    await this.restoreSessionSnapshot('reconnect');
+    if (this.disposed || this.wsClient.hasSocket()) return;
 
+    this.options.resetTimelineView();
     this.connectWebSocket();
+  }
+
+  private async reconcileSnapshotAfterReviewError() {
+    try {
+      await this.restoreSessionSnapshot('reconnect');
+      if (!this.disposed) {
+        this.options.resetTimelineView();
+      }
+    } catch (err) {
+      if (this.disposed) return;
+      const message = err instanceof Error ? err.message : String(err);
+      this.appendSystemMessage(TUI_TEXT.reconnectFailed(message));
+    }
   }
 
   private handleWebSocketOpen() {
@@ -449,6 +507,7 @@ export class TuiRuntimeController {
       status: 'ready',
       message: TUI_TEXT.statusReady,
     });
+    this.sendRuntimeConfigUpdate();
   }
 
   private handleWebSocketClose() {
@@ -487,13 +546,16 @@ export class TuiRuntimeController {
   private handleServerMessage(msg: LocalAgentServerMessage) {
     const result = buildTuiActionsFromServerMessage(msg, {
       now: Date.now(),
-      makeHistoryCell: makeHistoryMeta,
+      makeMessageCell: makeMessageMeta,
     });
     if (result.clearInterrupt) {
       this.clearInterruptTimeout();
     }
     for (const action of result.actions) {
       this.options.dispatch(action);
+    }
+    if (shouldReconcileSnapshotAfterMessage(msg)) {
+      void this.reconcileSnapshotAfterReviewError();
     }
   }
 
@@ -513,5 +575,15 @@ export class TuiRuntimeController {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
+  }
+
+  private sendRuntimeConfigUpdate() {
+    if (!this.wsClient.isConnected()) {
+      return false;
+    }
+    return Boolean(this.wsClient.send({
+      type: 'runtime_config.update',
+      globalReviewPolicyMode: config.globalReviewPolicyMode,
+    }));
   }
 }

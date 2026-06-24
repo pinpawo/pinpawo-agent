@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { existsSync } from 'node:fs';
+import type { StudioDueRunStatus, StudioDueRunStoreTrace } from '@pinpawo/pet-agent';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
   getCachedCapabilityAvailability,
@@ -14,14 +16,17 @@ import { loadStoredConfig } from './storage';
 import { readAgentActivityHealthFields } from './operationActivityState';
 import { isAuthorizedLocalServerRequest } from './localServerAuth';
 import type { LocalServerDeps } from './localServerTypes';
+import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
 
 type LocalHttpHandlerOptions = {
   authToken: string;
   loadHistory: () => Promise<Array<{ role: string; text: string }>>;
+  loadSnapshot?: () => Promise<unknown>;
   listSessions: () => Promise<Array<Record<string, unknown>>>;
   resumeSession: (sessionId: string) => Promise<{
     session: Record<string, unknown>;
     messages: Array<{ role: string; text: string }>;
+    snapshot?: unknown;
   }>;
 };
 
@@ -45,7 +50,6 @@ export function handleLocalHttpRequest(
         status: 'ok',
         actor_id: deps.actorId,
         actor_name: deps.actorName,
-        ...deps.getStats(),
         ...readBrowserHealthFields(),
         ...readAgentActivityHealthFields(),
       });
@@ -69,11 +73,75 @@ export function handleLocalHttpRequest(
   }
 
   if (pathname === '/runtime') {
+    const studioConfigFields = readStudioConfigRuntimeFields(deps);
     writeJson(res, 200, {
       llm_model: deps.llmConfig.model,
       llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
       workdir: deps.workdir,
+      ...(deps.runtimeConfig ? {
+        state_root: deps.runtimeConfig.stateRoot,
+        studio_config_path: deps.runtimeConfig.studioConfigPath,
+        studio_due_runs_path: deps.runtimeConfig.studioDueRunsPath,
+        pets_dir: deps.runtimeConfig.petsDir,
+        studio_wiki_base_dir: deps.runtimeConfig.studioWikiBaseDir,
+      } : {}),
+      ...studioConfigFields,
     });
+    return true;
+  }
+
+  if (pathname === '/studio_due_runs') {
+    const scheduler = deps.studioDueRunScheduler;
+    if (!scheduler) {
+      writeJson(res, 404, { error: 'studio_due_runs unavailable' });
+      return true;
+    }
+
+    const status = parseStudioDueRunStatus(url.searchParams.get('status'));
+    const limit = parsePositiveInteger(url.searchParams.get('limit'));
+    const includeMetrics = shouldIncludeStudioDueRunMetrics(url.searchParams);
+
+    if (url.searchParams.get('limit') !== null && limit === undefined) {
+      writeJson(res, 400, { error: 'invalid limit' });
+      return true;
+    }
+
+    const respondWithTrace = (trace: StudioDueRunStoreTrace[]) => {
+      const next = (status ? trace.filter((row) => row.status === status) : trace)
+        .slice(0, limit ?? trace.length);
+      const payload = {
+        workdir: deps.runtimeConfig?.workdir ?? deps.workdir,
+        studio_due_runs_path: deps.runtimeConfig?.studioDueRunsPath,
+        studio_due_runs: next,
+      };
+      return payload;
+    };
+
+    if (includeMetrics) {
+      Promise.all([scheduler.trace(), scheduler.metrics()])
+        .then(([trace, metrics]) => {
+          writeJson(res, 200, {
+            ...respondWithTrace(trace),
+            studio_due_run_metrics: metrics,
+          });
+        })
+        .catch((err) => {
+          writeJson(res, 500, {
+            error: err instanceof Error ? err.message : 'studio_due_runs trace failed',
+          });
+        });
+      return true;
+    }
+
+    scheduler.trace()
+      .then((trace) => {
+        writeJson(res, 200, respondWithTrace(trace));
+      })
+      .catch((err) => {
+        writeJson(res, 500, {
+          error: err instanceof Error ? err.message : 'studio_due_runs trace failed',
+        });
+      });
     return true;
   }
 
@@ -109,6 +177,21 @@ export function handleLocalHttpRequest(
     return true;
   }
 
+  if (pathname === '/snapshot') {
+    if (!options.loadSnapshot) {
+      writeJson(res, 404, { error: 'snapshot unavailable' });
+      return true;
+    }
+    options.loadSnapshot().then((snapshot) => {
+      writeJson(res, 200, snapshot);
+    }).catch((err) => {
+      writeJson(res, 500, {
+        error: err instanceof Error ? err.message : 'snapshot load failed',
+      });
+    });
+    return true;
+  }
+
   if (pathname === '/sessions') {
     options.listSessions().then((sessions) => {
       writeJson(res, 200, { sessions });
@@ -139,9 +222,66 @@ export function handleLocalHttpRequest(
   return false;
 }
 
+function readStudioConfigRuntimeFields(deps: LocalServerDeps) {
+  const preferredPath = deps.runtimeConfig?.studioConfigPath ?? DEFAULT_STUDIO_CONFIG_PATH;
+  if (existsSync(preferredPath)) {
+    return {
+      studio_config_source: deps.runtimeConfig ? 'workdir' : 'legacy_home',
+      studio_config_active_path: preferredPath,
+      legacy_studio_config_path: DEFAULT_STUDIO_CONFIG_PATH,
+    };
+  }
+
+  const legacyAvailable = preferredPath !== DEFAULT_STUDIO_CONFIG_PATH
+    && existsSync(DEFAULT_STUDIO_CONFIG_PATH);
+  return {
+    studio_config_source: legacyAvailable ? 'legacy_home' : 'missing',
+    studio_config_active_path: legacyAvailable ? DEFAULT_STUDIO_CONFIG_PATH : preferredPath,
+    legacy_studio_config_path: DEFAULT_STUDIO_CONFIG_PATH,
+  };
+}
+
 function writeJson(res: ServerResponse, statusCode: number, payload: unknown) {
   res.writeHead(statusCode, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(payload));
+}
+
+function parseStudioDueRunStatus(value: string | null): StudioDueRunStatus | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'pending'
+    || normalized === 'claimed'
+    || normalized === 'running'
+    || normalized === 'success'
+    || normalized === 'failed'
+    || normalized === 'canceled'
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function shouldIncludeStudioDueRunMetrics(searchParams: URLSearchParams): boolean {
+  const include = searchParams.get('include')?.toLowerCase()?.trim();
+  if (include === 'metrics' || include === 'all') {
+    return true;
+  }
+
+  const metrics = searchParams.get('metrics');
+  return metrics === '1' || metrics === 'true';
+}
+
+function parsePositiveInteger(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value.trim());
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function replaceLocalCapability(

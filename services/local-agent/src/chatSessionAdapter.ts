@@ -300,9 +300,11 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     return { status: 'waiting_human' };
   }
 
-  const finalReply = finalMessages.length > 0
+  const streamedFinalReply = finalMessages.length > 0
     ? readFinalMessageText(finalMessages.at(-1) ?? {})
     : '';
+  const checkpointFinalReply = readFinalMessageText(finalThreadState.messages.at(-1) ?? {});
+  const finalReply = streamedFinalReply || checkpointFinalReply;
   const finalTokens = estimateMessagesTokens(finalThreadState.messages);
   const inputTokens = estimateMessagesTokens([
     ...initialThreadState.messages,

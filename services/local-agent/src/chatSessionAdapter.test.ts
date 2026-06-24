@@ -102,6 +102,60 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
   );
 });
 
+test('runChatSession falls back to checkpoint final message when stream values omit messages', async () => {
+  const emittedEvents: LocalAgentEvent[] = [];
+  const finalMessages = [
+    new HumanMessage('hello'),
+    new AIMessage('checkpoint answer'),
+  ];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+
+  let readThreadStateCalls = 0;
+  const graphService = {
+    async readThreadState() {
+      readThreadStateCalls += 1;
+      return {
+        messages: readThreadStateCalls === 1 ? [] : finalMessages,
+        pendingHumanReview: null,
+        hasPendingContinuation: false,
+      };
+    },
+    async *stream() {},
+  };
+
+  const result = await runChatSession({
+    request: {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'checkpoint answer' });
+  assert.equal(readThreadStateCalls, 2);
+  const completed = emittedEvents.find(
+    (event): event is Extract<LocalAgentEvent, { type: 'message.completed' }> =>
+      event.type === 'message.completed',
+  ) ?? null;
+  assert.equal(completed?.text, 'checkpoint answer');
+});
+
 test('runChatSession maps authorization runtime events to system notices', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: LocalAgentEvent[] = [];

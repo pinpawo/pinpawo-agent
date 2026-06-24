@@ -265,6 +265,7 @@ test('user intent decision exposes in-progress capability candidates independent
 
   assert.equal(schemaAllowsExplore, true);
   assert.match(decisionSystemPrompt, /delegate_capability\.explore/);
+  assert.doesNotMatch(decisionSystemPrompt, /ask_user/);
   assert.match(decisionInput, /<user_intent_decision_input>/);
   assert.match(decisionInput, /<user_request>\n\s+<!\[CDATA\[\n现在状态如何？\n\s+\]\]>\n\s+<\/user_request>/);
   assert.match(decisionInput, /capability:explore/);

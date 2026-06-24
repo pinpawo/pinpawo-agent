@@ -23,7 +23,6 @@ export type OrchestrationDecision = {
 
 export type OrchestrationDecisionSchemaParams = {
   capabilityCandidates: ReadonlyArray<{ name: string }>;
-  includeAskUser?: boolean;
 };
 
 export function buildCapabilityActionName(capabilityName: string): CapabilityActionName {
@@ -62,11 +61,8 @@ export function buildOrchestrationDecisionSchema(params: OrchestrationDecisionSc
     seen.add(candidate.name);
   }
 
-  const staticActionKinds = params.includeAskUser === false
-    ? STATIC_ACTION_KINDS.filter((action) => action !== 'ask_user')
-    : [...STATIC_ACTION_KINDS];
   const actionValues = [
-    ...staticActionKinds,
+    ...STATIC_ACTION_KINDS,
     ...params.capabilityCandidates.map((c) => buildCapabilityActionName(c.name)),
   ] as [string, ...string[]];
 
@@ -75,9 +71,7 @@ export function buildOrchestrationDecisionSchema(params: OrchestrationDecisionSc
       '下一步动作。delegate_capability.<name> 表示委派给指定业务 capability 对应的 lane。',
     ),
     question: z.string().nullable().optional().describe(
-      params.includeAskUser === false
-        ? '本阶段不使用；需要向用户补充、澄清或确认时选择 finish，由后续回复节点生成问题。'
-        : 'action=ask_user 时需要用户补充、澄清或事先确认的问题；其他 action 为 null 或省略。',
+      '需要用户补充、澄清或事先确认的问题；不需要时为 null 或省略。',
     ),
     task: z.string().nullable().optional().describe(
       'action=delegate_general 或 delegate_capability.<name> 时交给执行器的明确任务；其他 action 为 null 或省略。',
@@ -99,36 +93,23 @@ export function buildOrchestrationDecisionStructuredOutputOptions(
   };
 }
 
-export function buildOrchestrationDecisionOutputInstruction(params: {
-  includeAskUser?: boolean;
-} = {}): string {
-  const includeAskUser = params.includeAskUser !== false;
-  const disallowedFieldNames = includeAskUser
-    ? 'delegate_capability、delegate_general、finish 或 ask_user'
-    : 'delegate_capability、delegate_general 或 finish';
+export function buildOrchestrationDecisionOutputInstruction(): string {
   return [
     '输出一个结构化 orchestration decision。',
     '必须返回一个 JSON object，字段名必须严格使用：action、question、task、context_summary。',
-    `必须使用 action 字段表达下一步动作；不要输出 ${disallowedFieldNames} 作为字段名。`,
+    '必须使用 action 字段表达下一步动作；不要输出 delegate_capability、delegate_general 或 finish 作为字段名。',
     'action 取值：',
-    includeAskUser
-      ? '- finish：无需委派，交给后续回复节点基于完整对话历史回复用户；你只需选择 finish，不要在这里撰写最终回复内容。'
-      : '- finish：无需委派，或需要直接向用户补充、澄清、确认；交给后续回复节点基于完整对话历史回复用户，你只需选择 finish。',
-    includeAskUser
-      ? '- ask_user：信息不足、用户意图不明确，或下一步具有破坏性、不可逆、敏感凭据、外部副作用，需要先向用户确认。'
-      : null,
+    '- finish：无需委派，交给后续回复节点基于完整对话历史回复用户；你只需选择 finish，不要在这里撰写最终回复内容。',
     '- delegate_general：委派给通用工具执行器。',
     '- delegate_capability.<name>：委派给指定业务 capability。<name> 必须从当前候选里选。',
     '字段语义：',
     '- action 必填，且必须是上面的枚举值之一。',
-    includeAskUser
-      ? '- question 只在 action=ask_user 时填写；其他 action 为 null 或省略。'
-      : '- question 本阶段不使用；填 null 或省略。',
+    '- question 默认填 null 或省略；只有上层 prompt 明确要求向用户确认时才填写。',
     '- task 只在 delegate_general 或 delegate_capability.<name> 时填写明确任务；其他 action 为 null 或省略。',
     '- context_summary 只在 delegate_general 或 delegate_capability.<name> 时填写必要上下文；其他 action 为 null 或省略。',
     '正确示例：{"action":"delegate_capability.explore","question":null,"task":"调查当前项目 typecheck 失败原因并修复。","context_summary":"用户要求定位并修复 typecheck 失败。"}',
     '一旦决定 delegate_* 就直接交给执行器；运行期的工具级风险由具体工具自己拦截，无需在决策层重复表达。',
-  ].filter((line) => line !== null).join('\n');
+  ].join('\n');
 }
 
 export function readDecisionText(value: string | null | undefined): string | null {

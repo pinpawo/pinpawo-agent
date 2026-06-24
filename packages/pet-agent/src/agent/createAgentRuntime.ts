@@ -757,9 +757,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       capabilitySearchQuery: decisionCapabilitySearchQuery,
       capabilityRegistryAvailable: capabilityList.length > 0,
     });
-    const outputInstruction = buildOrchestrationDecisionOutputInstruction({
-      includeAskUser: !isUserIntentDecision,
-    });
+    const outputInstruction = buildOrchestrationDecisionOutputInstruction();
     const systemPrompt = isUserIntentDecision
       ? buildUserIntentDecisionSystemPrompt({
         actor,
@@ -803,7 +801,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
     const decisionSchema = buildOrchestrationDecisionSchema({
       capabilityCandidates: decisionCapabilityCandidates,
-      includeAskUser: !isUserIntentDecision,
     });
     let decision: OrchestrationDecision;
     try {

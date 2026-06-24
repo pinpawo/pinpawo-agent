@@ -334,6 +334,7 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
     '- 如果当前委派任务还没完成，但用户目标仍明确且不需要用户补充信息，优先继续当前委派任务对应的执行器；不要仅因为停止原因不是 natural 就 ask_user。',
     '- 如果用户原始请求仍有明确未完成目标，选择一个最明确的下一步。',
     '- 如果信息不足、用户意图不明确，或下一步具有破坏性、不可逆、涉及敏感凭据、外部真实副作用，选择 ask_user 先向用户确认。',
+    '- 只有选择 ask_user 时才填写 question 字段，并写清楚要问用户的问题；否则 question 为 null 或省略。',
     '- 一旦决定 delegate_*，就交给执行器；运行期的工具级风险（rm -rf、git push --force 等）由具体工具自己拦截，不需要在决策层重复表达。',
     '',
     params.outputInstruction,

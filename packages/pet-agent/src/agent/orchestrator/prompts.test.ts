@@ -10,6 +10,7 @@ import {
   buildDelegationOutcomeOtherTasksContext,
   buildPreparedRequestContext,
   buildSubagentAnnounceContext,
+  buildUserIntentDecisionInput,
 } from './prompts';
 
 function recentMessages(count: number) {
@@ -33,8 +34,10 @@ test('start-loop router request context includes compaction summaries outside re
     contextSummaries: ['更早任务摘要：已完成删除旧 pet-bot，PR 已打开，待修 router context。'],
   });
 
-  assert.match(requestContext, /压缩任务上下文/);
+  assert.match(requestContext, /<user_intent_context>/);
+  assert.match(requestContext, /<context_summaries source="compaction" role="context">/);
   assert.match(requestContext, /更早任务摘要：已完成删除旧 pet-bot/);
+  assert.match(requestContext, /<recent_messages purpose="coreference">/);
   assert.match(requestContext, /recent-7/);
   assert.doesNotMatch(requestContext, /recent-0/);
 });
@@ -81,8 +84,27 @@ test('request contexts include bounded capability artifact refs', () => {
     }],
   });
 
+  assert.match(requestContext, /<capability_artifacts>/);
   assert.match(requestContext, /当前会话 capability artifacts/);
   assert.match(requestContext, /继续刚才的探索/);
+});
+
+test('user intent decision input wraps context as xml-ish blocks', () => {
+  const input = buildUserIntentDecisionInput({
+    latestUserRequest: '继续推进',
+    recentMessages: recentMessages(1),
+    requestContext: buildPreparedRequestContext({
+      latestUserRequest: '继续推进',
+      recentMessages: recentMessages(1),
+      recentAnnounces: [],
+    }),
+  });
+
+  assert.match(input, /<user_intent_decision_input>/);
+  assert.match(input, /<user_intent_context>/);
+  assert.match(input, /<user_request>/);
+  assert.match(input, /<!\[CDATA\[\n继续推进\n\s+\]\]>/);
+  assert.match(input, /<instruction>请根据以上上下文判断当前用户请求的下一步。<\/instruction>/);
 });
 
 test('capability discovery request context also receives compaction summaries', () => {

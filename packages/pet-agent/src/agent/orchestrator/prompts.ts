@@ -130,11 +130,11 @@ function indentXmlBlock(block: string, spaces: number): string {
   const prefix = ' '.repeat(spaces);
   let inCdata = false;
   return block.split('\n').map((line) => {
-    if (line === '<![CDATA[') {
+    if (line.trim() === '<![CDATA[') {
       inCdata = true;
       return `${prefix}${line}`;
     }
-    if (line === ']]>') {
+    if (line.trim() === ']]>') {
       inCdata = false;
       return `${prefix}${line}`;
     }
@@ -221,6 +221,30 @@ export function buildRecentSubagentAnnounceContext(announces: SubagentAnnounce[]
     }
   }
 
+  return lines.join('\n');
+}
+
+function buildRecentSubagentAnnounceXmlContext(announces: SubagentAnnounce[]): string | null {
+  if (announces.length === 0) {
+    return null;
+  }
+
+  const lines = ['<recent_subagent_announces purpose="coreference">'];
+  for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
+    lines.push('  <announce>');
+    if (item.delegationId) {
+      lines.push(`    <delegation_id>${item.delegationId}</delegation_id>`);
+    }
+    lines.push(`    <lane>${item.lane}</lane>`);
+    if (item.task) {
+      lines.push(indentXmlBlock(xmlTextBlock('task', clipForPrompt(item.task, 140)), 4));
+    }
+    if (item.text) {
+      lines.push(indentXmlBlock(xmlTextBlock('summary', clipForPrompt(item.text, 220)), 4));
+    }
+    lines.push('  </announce>');
+  }
+  lines.push('</recent_subagent_announces>');
   return lines.join('\n');
 }
 
@@ -448,35 +472,67 @@ function buildCompactionSummaryContext(contextSummaries: string[] | undefined): 
   ].join('\n');
 }
 
+function buildCompactionSummaryXmlContext(contextSummaries: string[] | undefined): string | null {
+  const visibleSummaries = (contextSummaries ?? [])
+    .slice(-MAX_CONTEXT_SUMMARIES)
+    .map((summary) => clipForPrompt(summary, 1200))
+    .filter(Boolean);
+  if (visibleSummaries.length === 0) {
+    return null;
+  }
+
+  const lines = ['<context_summaries source="compaction" role="context">'];
+  visibleSummaries.forEach((summary, index) => {
+    lines.push(indentXmlBlock(xmlTextBlock('summary', summary, ` index="${(index + 1).toString()}"`), 2));
+  });
+  lines.push('</context_summaries>');
+  return lines.join('\n');
+}
+
+function buildRecentMessagesXmlContext(messages: BaseMessage[]): string | null {
+  const entries = messages
+    .slice(-MAX_RECENT_MAIN_MESSAGES)
+    .map((message) => {
+      const text = readMessageText(message);
+      if (!text) return null;
+      return {
+        role: messageRoleLabel(message),
+        text: clipForPrompt(text, 220),
+      };
+    })
+    .filter((entry): entry is { role: string; text: string } => Boolean(entry));
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const lines = ['<recent_messages purpose="coreference">'];
+  for (const entry of entries) {
+    lines.push('  <message>');
+    lines.push(`    <role>${entry.role}</role>`);
+    lines.push(indentXmlBlock(xmlTextBlock('text', entry.text), 4));
+    lines.push('  </message>');
+  }
+  lines.push('</recent_messages>');
+  return lines.join('\n');
+}
+
 export function buildUserIntentDecisionInput(params: {
   latestUserRequest: string | null;
   recentMessages: BaseMessage[];
   requestContext?: string | null;
 }): string {
-  if (params.requestContext) {
-    return [
-      params.requestContext,
-      '',
-      '请根据以上上下文判断当前用户请求的下一步。',
-    ].join('\n');
-  }
-
-  const recentLines = params.recentMessages
-    .slice(-MAX_RECENT_MAIN_MESSAGES)
-    .map((message) => {
-      const text = readMessageText(message);
-      return text ? `- ${messageRoleLabel(message)}：${clipForPrompt(text, 220)}` : null;
-    })
-    .filter((line): line is string => Boolean(line));
-
+  const context = params.requestContext ?? buildPreparedRequestContext({
+    latestUserRequest: params.latestUserRequest,
+    recentMessages: params.recentMessages,
+    recentAnnounces: [],
+  });
   return [
-    params.latestUserRequest
-      ? `当前用户请求：${clipForPrompt(params.latestUserRequest, 420)}`
-      : '当前用户请求：未提供',
-    recentLines.length > 0 ? '' : null,
-    recentLines.length > 0 ? '近期对话上下文（只用于消解指代，不要续写这些内容）：' : null,
-    ...recentLines,
-  ].filter((line) => line !== null).join('\n');
+    '<user_intent_decision_input>',
+    indentXmlBlock(context, 2),
+    '  <instruction>请根据以上上下文判断当前用户请求的下一步。</instruction>',
+    '</user_intent_decision_input>',
+  ].join('\n');
 }
 
 export function buildPreparedRequestContext(params: {
@@ -486,30 +542,21 @@ export function buildPreparedRequestContext(params: {
   contextSummaries?: string[];
   capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
-  const recentLines = params.recentMessages
-    .slice(-MAX_RECENT_MAIN_MESSAGES)
-    .map((message) => {
-      const text = readMessageText(message);
-      return text ? `- ${messageRoleLabel(message)}：${clipForPrompt(text, 220)}` : null;
-    })
-    .filter((line): line is string => Boolean(line));
-
-  const compactionSummaryContext = buildCompactionSummaryContext(params.contextSummaries);
+  const compactionSummaryContext = buildCompactionSummaryXmlContext(params.contextSummaries);
   const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
+  const recentAnnouncesContext = buildRecentSubagentAnnounceXmlContext(params.recentAnnounces);
+  const recentMessagesContext = buildRecentMessagesXmlContext(params.recentMessages);
 
   return [
+    '<user_intent_context>',
     params.latestUserRequest
-      ? `当前用户请求：${clipForPrompt(params.latestUserRequest, 420)}`
-      : '当前用户请求：未提供',
-    compactionSummaryContext ? '' : null,
-    compactionSummaryContext,
-    artifactContext ? '' : null,
-    artifactContext,
-    params.recentAnnounces.length > 0 ? '' : null,
-    params.recentAnnounces.length > 0 ? buildRecentSubagentAnnounceContext(params.recentAnnounces) : null,
-    recentLines.length > 0 ? '' : null,
-    recentLines.length > 0 ? '近期对话上下文（只用于消解指代，不要续写这些内容）：' : null,
-    ...recentLines,
+      ? indentXmlBlock(xmlTextBlock('user_request', clipForPrompt(params.latestUserRequest, 420)), 2)
+      : '  <user_request missing="true" />',
+    compactionSummaryContext ? indentXmlBlock(compactionSummaryContext, 2) : null,
+    artifactContext ? indentXmlBlock(xmlTextBlock('capability_artifacts', artifactContext), 2) : null,
+    recentAnnouncesContext ? indentXmlBlock(recentAnnouncesContext, 2) : null,
+    recentMessagesContext ? indentXmlBlock(recentMessagesContext, 2) : null,
+    '</user_intent_context>',
   ].filter((line) => line !== null).join('\n');
 }
 

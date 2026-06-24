@@ -265,7 +265,8 @@ test('user intent decision exposes in-progress capability candidates independent
 
   assert.equal(schemaAllowsExplore, true);
   assert.match(decisionSystemPrompt, /delegate_capability\.explore/);
-  assert.match(decisionInput, /当前用户请求：现在状态如何？/);
+  assert.match(decisionInput, /<user_intent_decision_input>/);
+  assert.match(decisionInput, /<user_request>\n\s+<!\[CDATA\[\n现在状态如何？\n\s+\]\]>\n\s+<\/user_request>/);
   assert.match(decisionInput, /capability:explore/);
   assert.match(decisionInput, /调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
   assert.equal(decisionCallCount, 2);

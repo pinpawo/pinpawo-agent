@@ -162,7 +162,6 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
         requestId: 'req-1',
         role: 'assistant',
         text: 'done reply',
-        metadata: { mood: null, topic: null, tags: [] },
       });
       return { status: 'completed', reply: 'done reply' };
     },

@@ -1,9 +1,11 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { HumanMessage } from '@langchain/core/messages';
 import {
+  createTokenUsageSnapshot,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isHumanReviewInterruptPayload,
   isOrchestratorInternalAiStreamNode,
+  readMessagesTokenUsage,
   type ReviewSpec,
   type SubagentToolEvent,
   type SubagentToolLifecycleEvent,
@@ -126,6 +128,71 @@ function readSubagentMessageDelta(event: SubagentToolEvent): string | null {
   return text && text.length > 0 ? text : null;
 }
 
+function readMessageId(message: BaseMessage): string | null {
+  return typeof message.id === 'string' && message.id.trim() ? message.id : null;
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    return String(value);
+  }
+}
+
+function messageFingerprint(message: BaseMessage): string {
+  return safeJson([
+    message._getType(),
+    message.name ?? null,
+    message.content,
+  ]);
+}
+
+function buildInitialMessageIndex(messages: BaseMessage[]) {
+  const ids = new Set<string>();
+  const fingerprints = new Map<string, number>();
+  for (const message of messages) {
+    const id = readMessageId(message);
+    if (id) {
+      ids.add(id);
+      continue;
+    }
+    const fingerprint = messageFingerprint(message);
+    fingerprints.set(fingerprint, (fingerprints.get(fingerprint) ?? 0) + 1);
+  }
+  return { ids, fingerprints };
+}
+
+function readRunMessages(initialMessages: BaseMessage[], finalMessages: BaseMessage[]) {
+  const initial = buildInitialMessageIndex(initialMessages);
+  return finalMessages.filter((message) => {
+    const id = readMessageId(message);
+    if (id) {
+      return !initial.ids.has(id);
+    }
+
+    const fingerprint = messageFingerprint(message);
+    const count = initial.fingerprints.get(fingerprint) ?? 0;
+    if (count > 0) {
+      initial.fingerprints.set(fingerprint, count - 1);
+      return false;
+    }
+    return true;
+  });
+}
+
+function readRunTokenUsage(params: {
+  initialMessages: BaseMessage[];
+  finalMessages: BaseMessage[];
+  contextWindow: number;
+}) {
+  const runMessages = readRunMessages(params.initialMessages, params.finalMessages);
+  return createTokenUsageSnapshot(
+    readMessagesTokenUsage(runMessages),
+    params.contextWindow,
+  );
+}
+
 export async function runChatSession(options: ChatSessionAdapterOptions): Promise<ChatSessionResult> {
   const { request, setup, graphService, isCurrent, finishInterrupted, emitEvent, emitToolEvent } = options;
   const { requestId } = request;
@@ -196,9 +263,8 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
-  let streamRun: ReturnType<LocalAgentGraphService['stream']> | null = null;
   try {
-    streamRun = graphService.stream(setup, graphInput);
+    const streamRun = graphService.stream(setup, graphInput);
     for await (const chunk of streamRun) {
       if (!isCurrent()) {
         finishInterrupted();
@@ -291,18 +357,17 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   const checkpointFinalReply = readFinalMessageText(finalThreadState.messages.at(-1) ?? {});
   const finalReply = streamedFinalReply || checkpointFinalReply;
   const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
-  const finalUsage = streamRun?.readTokenUsage?.(contextWindow) ?? null;
+  const finalUsage = readRunTokenUsage({
+    initialMessages: initialThreadState.messages,
+    finalMessages: finalThreadState.messages.length > 0 ? finalThreadState.messages : finalMessages,
+    contextWindow,
+  });
   emitEvent({
     type: 'message.completed',
     requestId,
     role: 'assistant',
     text: finalReply,
     ...(finalUsage ? { usage: finalUsage } : {}),
-    metadata: {
-      mood: null,
-      topic: null,
-      tags: [],
-    },
   });
   clearAgentRunActivity(requestId);
 

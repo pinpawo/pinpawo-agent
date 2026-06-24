@@ -1,5 +1,3 @@
-import type { CallbackHandlerMethods } from '@langchain/core/callbacks/base';
-import type { BaseMessage } from '@langchain/core/messages';
 import type { LLMResult } from '@langchain/core/outputs';
 
 export type TokenUsageSource = 'provider';
@@ -132,6 +130,10 @@ function readUsageFromMessage(message: unknown): ProviderTokenUsage | null {
   return responseMetadata ? readUsageFromRecord(responseMetadata) : null;
 }
 
+export function readMessageTokenUsage(message: unknown): ProviderTokenUsage | null {
+  return readUsageFromMessage(message);
+}
+
 function readUsageFromGeneration(generation: unknown): ProviderTokenUsage | null {
   if (!isRecord(generation)) {
     return null;
@@ -181,43 +183,32 @@ function addProviderUsage(
   };
 }
 
-export class LlmTokenUsageAccumulator {
-  private usage: ProviderTokenUsage | null = null;
-  private readonly completedRunIds = new Set<string>();
+export function readMessagesTokenUsage(messages: Iterable<unknown>): ProviderTokenUsage | null {
+  let aggregate: ProviderTokenUsage | null = null;
+  for (const message of messages) {
+    const usage = readMessageTokenUsage(message);
+    if (!usage) {
+      continue;
+    }
+    aggregate = addProviderUsage(aggregate, usage);
+  }
+  return aggregate;
+}
 
-  readonly callbackHandler: CallbackHandlerMethods = {
-    handleLLMEnd: (output, runId) => {
-      if (this.completedRunIds.has(runId)) {
-        return;
-      }
-      const usage = readLlmResultTokenUsage(output);
-      if (!usage) {
-        return;
-      }
-      this.completedRunIds.add(runId);
-      this.usage = addProviderUsage(this.usage, usage);
-    },
+export function createTokenUsageSnapshot(
+  usage: ProviderTokenUsage | null,
+  contextWindow?: number,
+): TokenUsageSnapshot | null {
+  if (!usage) {
+    return null;
+  }
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    updatedAt: new Date().toISOString(),
+    source: 'provider',
+    scope: 'run',
   };
-
-  addMessageUsage(message: BaseMessage) {
-    const usage = readUsageFromMessage(message);
-    if (usage) {
-      this.usage = addProviderUsage(this.usage, usage);
-    }
-  }
-
-  readUsage(contextWindow?: number): TokenUsageSnapshot | null {
-    if (!this.usage) {
-      return null;
-    }
-    return {
-      inputTokens: this.usage.inputTokens,
-      outputTokens: this.usage.outputTokens,
-      totalTokens: this.usage.totalTokens,
-      ...(contextWindow !== undefined ? { contextWindow } : {}),
-      updatedAt: new Date().toISOString(),
-      source: 'provider',
-      scope: 'run',
-    };
-  }
 }

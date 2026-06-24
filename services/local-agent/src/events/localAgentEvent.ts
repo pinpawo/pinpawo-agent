@@ -1,14 +1,23 @@
 import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
 
-export type LocalAgentEvent =
-  | LocalAgentMessageDeltaEvent
+export type LocalAgentRuntimeEvent =
+  | LocalAgentAssistantMessageEvent
   | LocalAgentSubagentMessageDeltaEvent
-  | LocalAgentMessageCompletedEvent
   | LocalAgentOperationEvent
   | LocalAgentHumanReviewRequestedEvent
   | LocalAgentStudioProgressEvent
   | LocalAgentSystemNoticeEvent
   | LocalAgentErrorEvent;
+
+/**
+ * @deprecated Use `LocalAgentRuntimeEvent` when modeling local-agent runtime
+ * facts. The wire envelope is defined separately in `localAgentProtocol.ts`.
+ */
+export type LocalAgentEvent = LocalAgentRuntimeEvent;
+
+export type LocalAgentAssistantMessageEvent =
+  | LocalAgentMessageDeltaEvent
+  | LocalAgentMessageCompletedEvent;
 
 export type LocalAgentMessageDeltaEvent = {
   type: 'message.delta';
@@ -29,11 +38,6 @@ export type LocalAgentMessageCompletedEvent = {
   role: 'assistant';
   text: string;
   usage?: TokenUsageSnapshot;
-  metadata?: {
-    mood?: string | null;
-    topic?: string | null;
-    tags?: string[];
-  };
 };
 
 export type LocalAgentOperationPhase =

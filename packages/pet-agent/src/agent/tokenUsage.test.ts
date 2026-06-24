@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { AIMessage } from '@langchain/core/messages';
 import type { LLMResult } from '@langchain/core/outputs';
 import {
-  streamOrchestratorGraphWithTokenUsage,
+  streamOrchestratorGraph,
   type OrchestratorGraph,
 } from './createAgentRuntime';
 import {
+  createTokenUsageSnapshot,
   isTokenUsageSnapshot,
   parseTokenUsageSnapshot,
   readLlmResultTokenUsage,
+  readMessageTokenUsage,
+  readMessagesTokenUsage,
 } from './tokenUsage';
 
 test('readLlmResultTokenUsage reads OpenAI llmOutput token usage', () => {
@@ -90,51 +94,84 @@ test('parseTokenUsageSnapshot rejects incomplete token usage snapshots', () => {
   }), false);
 });
 
-test('streamOrchestratorGraphWithTokenUsage tracks provider usage through graph callbacks', async () => {
-  type TestCallback = {
-    handleLLMEnd?: (output: LLMResult, runId: string) => unknown;
-  };
+test('readMessageTokenUsage reads AIMessage usage metadata', () => {
+  const message = new AIMessage({
+    content: 'ok',
+    usage_metadata: {
+      input_tokens: 12,
+      output_tokens: 5,
+      total_tokens: 17,
+    },
+  });
 
-  let callbackWasAttached = false;
+  assert.deepEqual(readMessageTokenUsage(message), {
+    inputTokens: 12,
+    outputTokens: 5,
+    totalTokens: 17,
+  });
+});
+
+test('readMessagesTokenUsage aggregates provider usage from messages', () => {
+  const messages = [
+    new AIMessage({
+      content: 'one',
+      usage_metadata: {
+        input_tokens: 10,
+        output_tokens: 2,
+        total_tokens: 12,
+      },
+    }),
+    new AIMessage('no usage'),
+    new AIMessage({
+      content: 'two',
+      response_metadata: {
+        tokenUsage: {
+          promptTokens: 3,
+          completionTokens: 4,
+          totalTokens: 7,
+        },
+      },
+    }),
+  ];
+
+  const usage = readMessagesTokenUsage(messages);
+  assert.deepEqual(usage, {
+    inputTokens: 13,
+    outputTokens: 6,
+    totalTokens: 19,
+  });
+  const snapshot = createTokenUsageSnapshot(usage, 64000);
+  assert.deepEqual(snapshot, {
+    inputTokens: 13,
+    outputTokens: 6,
+    totalTokens: 19,
+    contextWindow: 64000,
+    updatedAt: snapshot?.updatedAt,
+    source: 'provider',
+    scope: 'run',
+  });
+  assert.equal(typeof snapshot?.updatedAt, 'string');
+});
+
+test('streamOrchestratorGraph streams graph chunks without injecting callbacks', async () => {
+  let receivedOptions: unknown = null;
   const graph = {
     stream: async (_input: unknown, options?: unknown) => {
-      const callbacks = (options as { callbacks?: TestCallback[] } | undefined)?.callbacks ?? [];
-      callbackWasAttached = callbacks.length > 0;
-      await callbacks[0]?.handleLLMEnd?.({
-        generations: [],
-        llmOutput: {
-          tokenUsage: {
-            promptTokens: 123,
-            completionTokens: 45,
-            totalTokens: 168,
-          },
-        },
-      } as LLMResult, 'llm-run-1');
+      receivedOptions = options;
       return (async function* () {
         yield ['values', { messages: [] }];
       })();
     },
   } as unknown as OrchestratorGraph;
 
-  const stream = streamOrchestratorGraphWithTokenUsage(graph, {}, {});
+  const stream = streamOrchestratorGraph(graph, {}, { configurable: { thread_id: 'thread-1' } });
   const chunks: unknown[] = [];
   for await (const chunk of stream) {
     chunks.push(chunk);
   }
 
-  assert.equal(callbackWasAttached, true);
+  assert.deepEqual(receivedOptions, { configurable: { thread_id: 'thread-1' } });
   assert.deepEqual(chunks, [
     ['values', { messages: [] }],
   ]);
-  const usage = stream.readTokenUsage(64000);
-  assert.deepEqual(usage, {
-    inputTokens: 123,
-    outputTokens: 45,
-    totalTokens: 168,
-    contextWindow: 64000,
-    updatedAt: usage?.updatedAt,
-    source: 'provider',
-    scope: 'run',
-  });
-  assert.equal(typeof usage?.updatedAt, 'string');
 });

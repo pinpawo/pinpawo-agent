@@ -3,10 +3,10 @@ import {
   createOrchestratorGraph,
   isHumanReviewInterruptPayload,
   runAgent,
-  streamOrchestratorGraphWithTokenUsage,
+  streamOrchestratorGraph,
   type AgentRunResult,
+  type OrchestratorGraphStream,
   type OrchestratorGraph,
-  type OrchestratorTokenUsageStream,
   type OrchestratorStateType,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
@@ -50,7 +50,7 @@ export type LocalAgentGraphThreadState = {
   hasPendingContinuation: boolean;
 };
 
-export type LocalAgentGraphStream = OrchestratorTokenUsageStream;
+export type LocalAgentGraphStream = OrchestratorGraphStream;
 
 function readSnapshotMessages(snapshot: unknown): BaseMessage[] {
   const values = (snapshot as { values?: { messages?: unknown } } | null)?.values;
@@ -120,7 +120,7 @@ export class LocalAgentGraphService {
     inputOverride?: unknown,
   ): LocalAgentGraphStream {
     const graph = this.getGraph(setup);
-    return streamOrchestratorGraphWithTokenUsage(
+    return streamOrchestratorGraph(
       graph,
       inputOverride ?? buildOrchestratorTurnInput(setup.input.messages),
       {

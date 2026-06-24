@@ -44,10 +44,11 @@ test('schema enum excludes capabilities not in candidates', () => {
 
 test('schema enum allows static actions when no candidates', () => {
   const schema = buildOrchestrationDecisionSchema({ capabilityCandidates: [] });
-  for (const action of ['finish', 'delegate_general']) {
+  for (const action of ['answer', 'delegate_general']) {
     assert.equal(schema.safeParse({ action }).success, true, `should accept ${action}`);
   }
   // legacy enum values are gone
+  assert.equal(schema.safeParse({ action: 'finish' }).success, false);
   assert.equal(schema.safeParse({ action: 'ask_user' }).success, false);
   assert.equal(schema.safeParse({ action: 'human_review' }).success, false);
   assert.equal(schema.safeParse({ action: 'delegate_capability' }).success, false);
@@ -84,8 +85,9 @@ test('parseAction splits delegate_capability.<name>', () => {
     kind: 'delegate_general',
     capabilityName: null,
   });
-  assert.deepEqual(parseAction('finish'), { kind: 'finish', capabilityName: null });
-  assert.deepEqual(parseAction('ask_user'), { kind: 'finish', capabilityName: null });
+  assert.deepEqual(parseAction('answer'), { kind: 'answer', capabilityName: null });
+  assert.deepEqual(parseAction('finish'), { kind: 'answer', capabilityName: null });
+  assert.deepEqual(parseAction('ask_user'), { kind: 'answer', capabilityName: null });
 });
 
 test('parseAction handles capability names containing dots in payload as a single suffix', () => {

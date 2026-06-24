@@ -129,7 +129,7 @@ const examples = [
     outputs: {
       expected_initial_interrupted: true,
       expected_initial_kind: 'review',
-      expected_after_resume_mode: 'finish',
+      expected_after_resume_mode: 'answer',
       expected_reply_includes: '已停止',
       reason: 'Reject must stop the loop with a user-facing stop message and no pending delegation.',
     },
@@ -159,7 +159,7 @@ const mockTools = [
 ];
 
 // getInvokeOptions only reads `toolkits`; a bare `tools` key is ignored and
-// delegate_general would be forced to finish without any general tools.
+// delegate_general would be forced to answer without any general tools.
 const mockToolkit = defineToolkit({
   name: 'eval_general',
   description: 'Mock general tools for HITL evaluation.',
@@ -186,12 +186,12 @@ function buildDeterministicModels(decisions: RouteDecision[]): AgentModels {
   let index = 0;
   const routeModel = {
     // The dedicated answer node calls model.invoke() directly when a decision
-    // resolves to `finish`; return a deterministic reply for those cases.
+    // resolves to `answer`; return a deterministic reply for those cases.
     invoke: async () => new AIMessage('done'),
     withStructuredOutput: () => ({
       invoke: async () => {
         const decision = decisions[index] ?? decisions.at(-1) ?? {
-          action: 'finish',
+          action: 'answer',
         };
         index += 1;
         return decision;
@@ -260,7 +260,7 @@ function routeModeFromResult(result: Record<string, unknown>): string {
   const lane = pending?.lane;
   if (lane === 'general') return 'general';
   if (typeof lane === 'string' && lane.startsWith('capability:')) return 'capability';
-  return 'finish';
+  return 'answer';
 }
 
 function pendingLaneFromResult(result: Record<string, unknown>): string | null {

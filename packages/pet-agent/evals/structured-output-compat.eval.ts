@@ -55,7 +55,7 @@ const DEFAULT_MODEL = 'qwen3.5-plus';
 const DEFAULT_METHODS: StructuredOutputMethod[] = ['functionCalling', 'jsonMode', 'jsonSchema'];
 
 const orchestrationDecisionSchema = z.object({
-  action: z.enum(['finish', 'delegate_general', 'delegate_capability.explore']),
+  action: z.enum(['answer', 'delegate_general', 'delegate_capability.explore']),
   task: z.string().nullable().optional(),
   context_summary: z.string().nullable().optional(),
 });

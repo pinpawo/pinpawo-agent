@@ -109,7 +109,7 @@ test('user intent decision input wraps context as xml-ish blocks', () => {
   assert.match(input, /<instruction>请根据以上上下文判断当前用户请求的下一步。<\/instruction>/);
 });
 
-test('user intent prompt routes clarification through finish instead of ask_user', () => {
+test('user intent prompt routes clarification through answer instead of ask_user', () => {
   const prompt = buildUserIntentDecisionSystemPrompt({
     actor: testActor,
     runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
@@ -117,12 +117,12 @@ test('user intent prompt routes clarification through finish instead of ask_user
     capabilityDecisionState: 'unavailable',
     outputInstruction: [
       'action 取值：',
-      '- finish：无需委派，或需要直接向用户补充、澄清、确认。',
+      '- answer：无需委派，或需要直接向用户补充、澄清、确认。',
       '- delegate_general：委派给通用工具执行器。',
     ].join('\n'),
   });
 
-  assert.match(prompt, /选择 finish 交给回复节点处理/);
+  assert.match(prompt, /选择 answer 交给回复节点处理/);
   assert.doesNotMatch(prompt, /ask_user/);
 });
 

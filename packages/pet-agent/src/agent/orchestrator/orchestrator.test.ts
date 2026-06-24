@@ -157,7 +157,7 @@ test('capability discovery receives compact task status context', async () => {
       },
     }),
     withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'finish' }),
+      invoke: async () => ({ action: 'answer' }),
     }),
   } as unknown as AgentModels['act'];
 
@@ -213,7 +213,7 @@ test('user intent decision exposes in-progress capability candidates independent
       invoke: async (messages: unknown[]) => {
         decisionCallCount += 1;
         if (decisionCallCount > 1) {
-          return { action: 'finish' };
+          return { action: 'answer' };
         }
         schemaAllowsExplore = Boolean(
           (schema as { safeParse?: (value: unknown) => { success: boolean } }).safeParse?.({
@@ -287,7 +287,7 @@ test('decision structured output autoRepair reruns the same route LLM call after
           invokedMessages.push(messages);
           return invokeCount === 1
             ? { action: 'not_allowed' }
-            : { action: 'finish' };
+            : { action: 'answer' };
         },
       };
     },
@@ -318,14 +318,14 @@ test('decision structured output autoRepair reruns the same route LLM call after
     name: 'orchestration_decision',
     method: 'jsonMode',
   });
-  // After the retry resolves to finish, the dedicated answer node produces the reply.
+  // After the retry resolves to answer, the dedicated answer node produces the reply.
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'answered');
 });
 
 test('forcedCapabilityNames pre-seeds capability candidates and skips capability discovery LLM call', async () => {
   let discoveryCalled = false;
   let decisionSystemPrompt = '';
-  const decisionPayload: Record<string, unknown> = { action: 'finish' };
+  const decisionPayload: Record<string, unknown> = { action: 'answer' };
   const model = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -374,12 +374,12 @@ test('without forcedCapabilityNames the discovery path runs as before (no-regres
     bindTools: () => ({
       invoke: async () => {
         discoveryCalled = true;
-        // 不发起 capability_search tool_call,让 graph 走完;后续 userIntentDecision 直接 finish。
+        // 不发起 capability_search tool_call,让 graph 走完;后续 userIntentDecision 直接 answer。
         return new AIMessage('');
       },
     }),
     withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'finish' }),
+      invoke: async () => ({ action: 'answer' }),
     }),
   } as unknown as AgentModels['act'];
 
@@ -418,7 +418,7 @@ test('a prior subagent announce reaches the decision as context and the answer n
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
         decisionInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-        return { action: 'finish' };
+        return { action: 'answer' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -484,7 +484,7 @@ test('answer node still sees compacted older results when the user asks to re-sh
       return new AIMessage('answered');
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({ invoke: async () => ({ action: 'finish' }) }),
+    withStructuredOutput: () => ({ invoke: async () => ({ action: 'answer' }) }),
   } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
@@ -514,7 +514,7 @@ test('answer node still sees compacted older results when the user asks to re-sh
   assert.match(answerInput, /COMPACTED_RESULT_MARKER/);
 });
 
-test('delegation outcome finish lets the answer node reproduce the completed announce from full history', async () => {
+test('delegation outcome answer lets the answer node reproduce the completed announce from full history', async () => {
   // The answer node sees the full conversation (including the completed announce)
   // and is responsible for reproducing it; the decision node no longer carries
   // any reply text. Here the answer mock echoes the announce it finds in history.
@@ -531,7 +531,7 @@ test('delegation outcome finish lets the answer node reproduce the completed ann
       invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'finish' }),
+      invoke: async () => ({ action: 'answer' }),
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -572,7 +572,7 @@ test('delegation outcome finish lets the answer node reproduce the completed ann
   assert.equal(finalMessageText, announceText);
 });
 
-test('finish decision emits no reply itself and routes to the dedicated answer node', async () => {
+test('answer decision emits no reply itself and routes to the dedicated answer node', async () => {
   let answerCalled = false;
   const model = {
     invoke: async () => {
@@ -584,7 +584,7 @@ test('finish decision emits no reply itself and routes to the dedicated answer n
     }),
     withStructuredOutput: () => ({
       // Decision returns only the action; no answer text is carried here.
-      invoke: async () => ({ action: 'finish' }),
+      invoke: async () => ({ action: 'answer' }),
     }),
   } as unknown as AgentModels['act'];
 
@@ -595,14 +595,14 @@ test('finish decision emits no reply itself and routes to the dedicated answer n
   const input = buildOrchestratorRunInput([new HumanMessage('你好')]);
   const state = await graph.invoke(input, {
     configurable: {
-      thread_id: 'finish-routes-to-answer',
+      thread_id: 'answer-routes-to-answer',
       actor: testActor,
       capabilities: [],
       tools: [],
     },
   });
 
-  assert.equal(answerCalled, true, 'a finish decision must route to the answer node');
+  assert.equal(answerCalled, true, 'an answer decision must route to the answer node');
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'final reply from answer node');
 });
 
@@ -637,7 +637,7 @@ test('limit-reached progress announce lets model choose the same capability dele
             context_summary: '上一轮因迭代上限停止，任务仍未完成。',
           };
         }
-        return { action: 'finish' };
+        return { action: 'answer' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -778,7 +778,7 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
               context_summary: null,
             }
           : {
-              action: 'finish',
+              action: 'answer',
             };
       },
     }),
@@ -854,7 +854,7 @@ test('toolkit exposure can hide tools from the general lane', async () => {
               context_summary: null,
             }
           : {
-              action: 'finish',
+              action: 'answer',
             };
       },
     }),
@@ -976,7 +976,7 @@ test('capability artifact refs recorded by subagent tools are merged into state'
               context_summary: null,
             }
           : {
-              action: 'finish',
+              action: 'answer',
             };
       },
     }),
@@ -1062,7 +1062,7 @@ test('capability result artifacts are represented only as refs in state', async 
               context_summary: null,
             }
           : {
-              action: 'finish',
+              action: 'answer',
             };
       },
     }),
@@ -1529,7 +1529,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
               context_summary: null,
             }
           : {
-              action: 'finish',
+              action: 'answer',
             };
       },
     }),
@@ -1666,7 +1666,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
               context_summary: null,
             }
           : {
-              action: 'finish',
+              action: 'answer',
             };
       },
     }),
@@ -1821,7 +1821,7 @@ test('iteration limit review accepts canonical approve resume', async () => {
     invoke: async () => new AIMessage('answered'),
     withStructuredOutput: () => ({
       invoke: async () => ({
-        action: 'finish',
+        action: 'answer',
       }),
     }),
   } as unknown as AgentModels['act'];
@@ -1952,7 +1952,7 @@ test('iteration limit review accepts canonical respond resume as replanning feed
       invoke: async (messages: Array<{ content?: unknown }>) => {
         decisionInput = String(messages.at(-1)?.content ?? '');
         return {
-          action: 'finish',
+          action: 'answer',
         };
       },
     }),

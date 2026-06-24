@@ -8,7 +8,7 @@ import type {
  * Static action kinds — values that don't depend on the current capability set.
  * `delegate_capability.<name>` values are appended at schema-build time.
  */
-const STATIC_ACTION_KINDS = ['finish', 'delegate_general'] as const;
+const STATIC_ACTION_KINDS = ['answer', 'delegate_general'] as const;
 const CAPABILITY_ACTION_PREFIX = 'delegate_capability.' as const;
 
 export type CapabilityActionName = `${typeof CAPABILITY_ACTION_PREFIX}${string}`;
@@ -29,7 +29,7 @@ export function buildCapabilityActionName(capabilityName: string): CapabilityAct
 }
 
 export function parseAction(action: string): {
-  kind: 'finish' | 'delegate_general' | 'delegate_capability';
+  kind: 'answer' | 'delegate_general' | 'delegate_capability';
   capabilityName: string | null;
 } {
   if (action.startsWith(CAPABILITY_ACTION_PREFIX)) {
@@ -38,11 +38,11 @@ export function parseAction(action: string): {
       capabilityName: action.slice(CAPABILITY_ACTION_PREFIX.length) || null,
     };
   }
-  if (action === 'finish' || action === 'delegate_general') {
+  if (action === 'answer' || action === 'delegate_general') {
     return { kind: action, capabilityName: null };
   }
-  // Unknown action; surfaced upstream by schema rejection. Default to finish for safety.
-  return { kind: 'finish', capabilityName: null };
+  // Unknown action; surfaced upstream by schema rejection. Default to answer for safety.
+  return { kind: 'answer', capabilityName: null };
 }
 
 export function buildOrchestrationDecisionSchema(params: OrchestrationDecisionSchemaParams) {
@@ -93,9 +93,9 @@ export function buildOrchestrationDecisionOutputInstruction(): string {
   return [
     '输出一个结构化 orchestration decision。',
     '必须返回一个 JSON object，字段名必须严格使用：action、task、context_summary。',
-    '必须使用 action 字段表达下一步动作；不要输出 delegate_capability、delegate_general 或 finish 作为字段名。',
+    '必须使用 action 字段表达下一步动作；不要输出 delegate_capability、delegate_general 或 answer 作为字段名。',
     'action 取值：',
-    '- finish：无需继续委派，交给后续 answer 节点基于完整对话历史回复用户；你只需选择 finish，不要在这里撰写最终回复内容。',
+    '- answer：无需继续委派，交给后续 answer 节点基于完整对话历史回复用户；你只需选择 answer，不要在这里撰写最终回复内容。',
     '- delegate_general：委派给通用工具执行器。',
     '- delegate_capability.<name>：委派给指定业务 capability。<name> 必须从当前候选里选。',
     '字段语义：',

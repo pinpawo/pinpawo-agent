@@ -2,7 +2,7 @@
 /**
  * LangSmith evaluation: orchestrator route decision
  *
- * Tests whether the orchestrator correctly decides to finish vs. delegate.
+ * Tests whether the orchestrator correctly decides to answer vs. delegate.
  * Uses the dataset created by `dataset.ts`.
  *
  * Required env vars:
@@ -359,7 +359,7 @@ function routeModeFromResult(result: Record<string, unknown>): string {
   const lane = pendingDelegation?.lane;
   if (lane === 'general') return 'general';
   if (typeof lane === 'string' && lane.startsWith('capability:')) return 'capability';
-  return 'finish';
+  return 'answer';
 }
 
 function activeCapabilityFromResult(result: Record<string, unknown>): string | null {
@@ -393,7 +393,7 @@ function latestAnnounceFromResult(result: Record<string, unknown>) {
 
 function extractResult(result: Record<string, unknown>, capabilityList: AgentCapability[]): Record<string, unknown> {
   const routeMode = routeModeFromResult(result);
-  const finalRoute = routeMode === 'finish' ? 'finish' : 'delegate';
+  const finalRoute = routeMode === 'answer' ? 'answer' : 'delegate';
   const latestAnnounce = latestAnnounceFromResult(result);
   const messages = result.messages as { content?: unknown; _getType?: () => string }[] | undefined;
   const lastMsg = messages?.at(-1);
@@ -446,12 +446,12 @@ function finishBias({
 }) {
   const actual = outputs?.route as string;
   const expected = referenceOutputs?.expected_route as string;
-  // 1 = correctly handled finish cases, 0 = should have finished but delegated
-  if (expected === 'finish' && actual !== 'finish') {
+  // 1 = correctly handled answer cases, 0 = should have answered but delegated
+  if (expected === 'answer' && actual !== 'answer') {
     return {
       key: 'finish_correct',
       score: 0,
-      comment: 'Should have finished but delegated instead',
+      comment: 'Should have answered but delegated instead',
     };
   }
   return {
@@ -469,12 +469,12 @@ function delegateBias({
 }) {
   const actual = outputs?.route as string;
   const expected = referenceOutputs?.expected_route as string;
-  // 1 = correctly handled delegate cases, 0 = should have delegated but finished
+  // 1 = correctly handled delegate cases, 0 = should have delegated but answered
   if (expected === 'delegate' && actual !== 'delegate') {
     return {
       key: 'delegate_correct',
       score: 0,
-      comment: 'Should have delegated but finished instead',
+      comment: 'Should have delegated but answered instead',
     };
   }
   return {

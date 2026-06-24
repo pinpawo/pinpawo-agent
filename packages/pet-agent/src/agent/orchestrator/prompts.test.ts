@@ -4,7 +4,10 @@ import { HumanMessage } from '@langchain/core/messages';
 import {
   buildCapabilityArtifactContext,
   buildCapabilityDiscoveryRequestContext,
+  buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
+  buildDelegationOutcomeDecisionSystemPrompt,
+  buildDelegationOutcomeOtherTasksContext,
   buildPreparedRequestContext,
   buildSubagentAnnounceContext,
 } from './prompts';
@@ -12,6 +15,15 @@ import {
 function recentMessages(count: number) {
   return Array.from({ length: count }, (_, index) => new HumanMessage(`recent-${index}`));
 }
+
+const testActor = {
+  petId: 'pet-1',
+  userId: 'user-1',
+  name: '小白',
+  personality: '友好',
+  stage: 'adult',
+  species: 'cat',
+};
 
 test('start-loop router request context includes compaction summaries outside recent message window', () => {
   const requestContext = buildPreparedRequestContext({
@@ -88,13 +100,57 @@ test('capability discovery request context also receives compaction summaries', 
 test('loop-internal router input stays focused on current run announce context', () => {
   const input = buildDelegationOutcomeDecisionInput({
     latestUserRequest: '继续推进',
-    runDelegationContext: '当前 run 任务跟踪：\n- 所有已委派任务均为 completed。',
-    subagentAnnounceContext: 'subagent announce：\n- 状态：completed',
+    currentTaskContext: '<current_delegation>\n  <delegation_id>task-1</delegation_id>\n</current_delegation>',
+    subagentAnnounceContext: '<subagent_announce>\n  <result>completed</result>\n</subagent_announce>',
+    otherTasksContext: '<other_delegations>\n  <none>true</none>\n</other_delegations>',
     capabilityArtifacts: [],
   });
 
   assert.doesNotMatch(input, /压缩任务上下文/);
-  assert.match(input, /subagent announce/);
+  assert.match(input, /<subagent_announce>/);
+});
+
+test('delegation outcome prompt does not depend on concrete tool context', () => {
+  const prompt = buildDelegationOutcomeDecisionSystemPrompt({
+    actor: testActor,
+    outputInstruction: '输出 JSON。',
+  });
+
+  assert.doesNotMatch(prompt, /可继续委派目标/);
+  assert.doesNotMatch(prompt, /run_shell/);
+  assert.match(prompt, /不接收、不需要、也不应该依赖具体工具列表/);
+  assert.match(prompt, /唯一职责/);
+});
+
+test('delegation outcome input carries current task context separately', () => {
+  const currentTaskContext = buildDelegationOutcomeCurrentTaskContext({
+    id: 'task-1',
+    lane: 'general',
+    task: '修复 lint',
+    contextSummary: '用户要求处理代码质量。',
+  });
+  const otherTasksContext = buildDelegationOutcomeOtherTasksContext([
+    {
+      id: 'task-1',
+      lane: 'general',
+      task: '修复 lint',
+      status: 'progress',
+      resultPreview: null,
+    },
+    {
+      id: 'task-0',
+      lane: 'capability:explore',
+      task: '调查失败原因',
+      status: 'completed',
+      resultPreview: '已定位到 lint 配置。',
+    },
+  ], 'task-1');
+
+  assert.match(currentTaskContext ?? '', /<current_delegation>/);
+  assert.match(currentTaskContext ?? '', /<task>\n\s+<!\[CDATA\[\n修复 lint\n\s+\]\]>\n\s+<\/task>/);
+  assert.match(currentTaskContext ?? '', /<continuation_action>delegate_general<\/continuation_action>/);
+  assert.match(otherTasksContext, /<delegation_id>task-0<\/delegation_id>/);
+  assert.doesNotMatch(otherTasksContext, /<!\[CDATA\[\n修复 lint\n\s+\]\]>/);
 });
 
 test('completed subagent announce context includes the full current result text', () => {
@@ -110,7 +166,46 @@ test('completed subagent announce context includes the full current result text'
     text: longResult,
   }, 'natural');
 
-  assert.match(context ?? '', /返回内容/);
+  assert.match(context ?? '', /<result format="markdown" role="data">/);
   assert.match(context ?? '', /# Vibe Coding 模型排行榜/);
   assert.match(context ?? '', /END_OF_FULL_RANKING_MARKER/);
+});
+
+test('subagent announce wraps markdown result as an xml-ish data block', () => {
+  const context = buildSubagentAnnounceContext({
+    lane: 'general',
+    delegationId: 'task-1',
+    task: '修复 lint',
+    text: '# 结果\n\n- 已修复 lint\n- 已验证',
+  }, 'natural') ?? '';
+
+  assert.match(context, /<subagent_announce>/);
+  assert.match(context, /<result format="markdown" role="data">/);
+  assert.match(context, /<!\[CDATA\[/);
+  assert.match(context, /# 结果/);
+  assert.match(context, /<\/result>/);
+  assert.doesNotMatch(context, /委派任务/);
+});
+
+test('delegation outcome input does not duplicate the active task in announce context', () => {
+  const currentTaskContext = buildDelegationOutcomeCurrentTaskContext({
+    id: 'task-1',
+    lane: 'general',
+    task: '修复 lint',
+    contextSummary: null,
+  });
+  const input = buildDelegationOutcomeDecisionInput({
+    latestUserRequest: '请处理代码质量',
+    currentTaskContext,
+    subagentAnnounceContext: buildSubagentAnnounceContext({
+      lane: 'general',
+      delegationId: 'task-1',
+      task: '修复 lint',
+      text: '已完成验证。',
+    }, 'natural'),
+    otherTasksContext: buildDelegationOutcomeOtherTasksContext([], 'task-1'),
+    capabilityArtifacts: [],
+  });
+
+  assert.equal((input.match(/修复 lint/g) ?? []).length, 1);
 });

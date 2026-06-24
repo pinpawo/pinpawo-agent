@@ -641,6 +641,7 @@ test('limit-reached progress announce lets model choose the same capability dele
   let capabilityRunCount = 0;
   let decisionCallCount = 0;
   let decisionSystemPrompt = '';
+  let decisionInput = '';
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -652,7 +653,15 @@ test('limit-reached progress announce lets model choose the same capability dele
       invoke: async (messages: unknown[]) => {
         decisionCallCount += 1;
         if (decisionCallCount === 1) {
-          decisionSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
+          assert.equal(messages.length, 2);
+          const [systemMessage, inputMessage] = messages as Array<{
+            _getType?: () => string;
+            content?: unknown;
+          }>;
+          assert.equal(systemMessage?._getType?.(), 'system');
+          assert.equal(inputMessage?._getType?.(), 'human');
+          decisionSystemPrompt = String(systemMessage.content ?? '');
+          decisionInput = String(inputMessage.content ?? '');
           return {
             action: 'delegate_capability.inspect_repo',
             task: '继续调查仓库 capability 注册链路。',
@@ -709,9 +718,10 @@ test('limit-reached progress announce lets model choose the same capability dele
 
   assert.equal(capabilityRunCount, 1);
   assert.equal(decisionCallCount, 2);
-  // The in-progress inspect_repo lane is offered as a candidate to the new-turn
-  // decision, so the model can re-delegate the same capability to continue it.
-  assert.match(decisionSystemPrompt, /delegate_capability\.inspect_repo/);
+  // The active task context carries the continuation action; the system prompt
+  // stays free of tool/candidate target expansion.
+  assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.inspect_repo/);
+  assert.match(decisionInput, /<continuation_action>delegate_capability\.inspect_repo<\/continuation_action>/);
 });
 
 test('toolkits compose tools and instructions for capability runtimes', async () => {

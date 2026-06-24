@@ -52,8 +52,10 @@ import {
   buildCapabilityDiscoveryRequestContext,
   buildCapabilityDiscoverySystemPrompt,
   buildDecisionTargetsContext,
+  buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
+  buildDelegationOutcomeOtherTasksContext,
   buildAnswerSystemPrompt,
   buildPreparedRequestContext,
   buildSubagentAnnounceContext,
@@ -768,14 +770,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       })
       : buildDelegationOutcomeDecisionSystemPrompt({
         actor,
-        targetsContext: buildDecisionTargetsContext({
-          generalTools,
-          capabilityCandidates: decisionCapabilityCandidates,
-          capabilitySearchAttempted: false,
-          capabilitySearchAvailable: false,
-          capabilitySearchQuery: null,
-          capabilityRegistryAvailable: capabilityList.length > 0,
-        }),
         outputInstruction,
         workdir,
         runtimeEnvironment,
@@ -788,7 +782,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       }))
       : new HumanMessage(buildDelegationOutcomeDecisionInput({
         latestUserRequest: latestHumanRequest,
-        runDelegationContext: runDelegationContext,
+        currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
         subagentAnnounceContext: buildSubagentAnnounceContext(
           activeDelegationAnnounce,
           activeDelegation
@@ -797,6 +791,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
                 delegationId: activeDelegation.id,
               })
             : null,
+        ),
+        otherTasksContext: buildDelegationOutcomeOtherTasksContext(
+          state.runDelegations,
+          activeDelegation?.id ?? null,
         ),
         capabilityArtifacts: state.sessionCapabilityArtifacts,
       }));

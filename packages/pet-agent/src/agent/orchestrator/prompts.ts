@@ -115,6 +115,96 @@ export function buildDecisionTargetsContext(params: {
 
 export const buildRouteTargetsContext = buildDecisionTargetsContext;
 
+function xmlTextBlock(tag: string, text: string, attrs = ''): string {
+  const safeText = text.replaceAll(']]>', ']]]]><![CDATA[>');
+  return [
+    `<${tag}${attrs}>`,
+    '<![CDATA[',
+    safeText,
+    ']]>',
+    `</${tag}>`,
+  ].join('\n');
+}
+
+function indentXmlBlock(block: string, spaces: number): string {
+  const prefix = ' '.repeat(spaces);
+  let inCdata = false;
+  return block.split('\n').map((line) => {
+    if (line === '<![CDATA[') {
+      inCdata = true;
+      return `${prefix}${line}`;
+    }
+    if (line === ']]>') {
+      inCdata = false;
+      return `${prefix}${line}`;
+    }
+    return inCdata ? line : `${prefix}${line}`;
+  }).join('\n');
+}
+
+function buildDelegationContinuationAction(lane: string): string | null {
+  if (lane === 'general') return 'delegate_general';
+  if (lane.startsWith('capability:')) {
+    const capabilityName = lane.slice('capability:'.length);
+    return capabilityName ? `delegate_capability.${capabilityName}` : null;
+  }
+  return null;
+}
+
+export function buildDelegationOutcomeCurrentTaskContext(task: {
+  id: string;
+  lane: string;
+  task: string;
+  contextSummary: string | null;
+} | null): string | null {
+  if (!task) return null;
+  const continuationAction = buildDelegationContinuationAction(task.lane);
+  const lines = [
+    '<current_delegation>',
+    `  <delegation_id>${task.id}</delegation_id>`,
+    `  <lane>${task.lane}</lane>`,
+    continuationAction ? `  <continuation_action>${continuationAction}</continuation_action>` : null,
+    indentXmlBlock(xmlTextBlock('task', clipForPrompt(task.task, 240)), 2),
+  ].filter((line): line is string => Boolean(line));
+  if (task.contextSummary) {
+    lines.push(indentXmlBlock(xmlTextBlock('context_summary', clipForPrompt(task.contextSummary, 320)), 2));
+  }
+  lines.push('</current_delegation>');
+  return lines.join('\n');
+}
+
+export function buildDelegationOutcomeOtherTasksContext(
+  runDelegations: RunDelegation[],
+  activeDelegationId: string | null,
+): string {
+  const otherDelegations = activeDelegationId
+    ? runDelegations.filter((delegation) => delegation.id !== activeDelegationId)
+    : runDelegations;
+  if (otherDelegations.length === 0) {
+    return [
+      '<other_delegations>',
+      '  <none>true</none>',
+      '</other_delegations>',
+    ].join('\n');
+  }
+
+  const visibleDelegations = otherDelegations.slice(-MAX_DECISION_RUN_DELEGATIONS);
+  const lines = ['<other_delegations>'];
+  for (const delegation of visibleDelegations) {
+    lines.push('  <delegation>');
+    lines.push(`    <delegation_id>${delegation.id}</delegation_id>`);
+    lines.push(`    <lane>${delegation.lane}</lane>`);
+    lines.push(`    <status>${formatDelegationStatus(delegation.status)}</status>`);
+    lines.push(indentXmlBlock(xmlTextBlock('task', clipForPrompt(delegation.task, 160)), 4));
+    if (delegation.resultPreview) {
+      lines.push(indentXmlBlock(xmlTextBlock('result_preview', clipForPrompt(delegation.resultPreview, 220)), 4));
+    }
+    lines.push('  </delegation>');
+  }
+  lines.push('</other_delegations>');
+  return lines.join('\n');
+}
+
 export function buildRecentSubagentAnnounceContext(announces: SubagentAnnounce[]): string {
   if (announces.length === 0) {
     return '';
@@ -199,7 +289,6 @@ export function buildUserIntentDecisionSystemPrompt(params: {
 
 export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   actor: AgentActor;
-  targetsContext: string;
   outputInstruction: string;
   workdir?: string;
   runtimeEnvironment?: string;
@@ -207,20 +296,20 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的子任务结果判断节点，只根据明确输入判断下一步，不亲自执行可委派目标里的能力。',
-    '',
-    params.targetsContext,
+    '你是 orchestrator 的子任务结果判断节点。你的唯一职责是判断当前 run 是否完成，以及下一步 action 是 finish、ask_user 还是继续委派。',
+    '不要回答用户、不要总结 subagent 结果、不要执行或规划具体工具调用；最终回复由后续 answer 节点生成。',
     '',
     '当前阶段：subagent 返回后的结果判断。',
-    '判断重点：读取输入中的 subagent announce，判断用户当前 run 目标是否已经满足。',
+    '判断重点：读取输入中的 subagent announce 原文，结合用户原始请求和当前 run 任务跟踪，判断用户当前 run 目标是否已经满足。',
+    'run 任务跟踪只用于理解委派链路；完成与否以当前 subagent announce 是否覆盖用户目标为准。',
+    '可选 action 由结构化输出 schema 限定；本节点不接收、不需要、也不应该依赖具体工具列表。',
     '',
     '决策原则：',
-    '- 如果 subagent announce 已经满足用户当前 run 目标，选择 finish；最终回复由后续回复节点基于完整对话历史（含 subagent 返回内容）生成，你不要在这里撰写回复内容。',
+    '- 如果 subagent announce 已经满足用户当前 run 目标，选择 finish；不要在这里撰写最终回复内容。',
     '- 如果 subagent announce 只是阶段性进展，判断还缺什么；需要执行器继续时再委派。',
-    '- 如果 subagent 因迭代上限、上下文限制或阶段性停止而返回 progress，但用户目标仍明确且不需要用户补充信息，优先继续委派给同一类执行器；不要仅因为 progress 就 ask_user。',
+    '- 如果当前委派任务还没完成，但用户目标仍明确且不需要用户补充信息，优先继续当前委派任务对应的执行器；不要仅因为停止原因不是 natural 就 ask_user。',
     '- 如果用户原始请求仍有明确未完成目标，选择一个最明确的下一步。',
     '- 如果信息不足、用户意图不明确，或下一步具有破坏性、不可逆、涉及敏感凭据、外部真实副作用，选择 ask_user 先向用户确认。',
-    '- 如果下一步需要 general 的工具能力，选择 delegate_general。',
     '- 一旦决定 delegate_*，就交给执行器；运行期的工具级风险（rm -rf、git push --force 等）由具体工具自己拦截，不需要在决策层重复表达。',
     '',
     params.outputInstruction,
@@ -311,16 +400,9 @@ function buildCapabilityDecisionInstructions(capabilityDecisionState: Capability
   return [];
 }
 
-function indentPromptBlock(text: string): string {
-  return text.split('\n').map((line) => `  ${line}`).join('\n');
-}
-
 function formatSubagentAnnounceText(item: SubagentAnnounce): string | null {
   if (!item.text) return null;
-  return [
-    '- 返回内容：',
-    indentPromptBlock(item.text.trim()),
-  ].join('\n');
+  return xmlTextBlock('result', item.text.trim(), ' format="markdown" role="data"');
 }
 
 export function buildSubagentAnnounceContext(
@@ -331,13 +413,14 @@ export function buildSubagentAnnounceContext(
   // No completed/progress verdict here: the orchestrator judges completion from
   // the announce text + stop reason. Feeding a pre-baked "状态" would bias it into
   // rubber-stamping. See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
+  const resultBlock = formatSubagentAnnounceText(item);
   const lines = [
-    'subagent announce：',
-    item.delegationId ? `- 任务标识：${item.delegationId}` : null,
-    `- 执行器：${item.lane}`,
-    completionReason ? `- 停止原因：${completionReason}` : null,
-    item.task ? `- 委派任务：${clipForPrompt(item.task, 180)}` : null,
-    formatSubagentAnnounceText(item),
+    '<subagent_announce>',
+    item.delegationId ? `  <delegation_id>${item.delegationId}</delegation_id>` : null,
+    `  <lane>${item.lane}</lane>`,
+    completionReason ? `  <stop_reason>${completionReason}</stop_reason>` : null,
+    resultBlock ? indentXmlBlock(resultBlock, 2) : null,
+    '</subagent_announce>',
   ].filter(Boolean);
   return lines.join('\n');
 }
@@ -483,22 +566,30 @@ export function buildCapabilityDiscoveryInput(params: {
 
 export function buildDelegationOutcomeDecisionInput(params: {
   latestUserRequest: string | null;
-  runDelegationContext: string;
+  currentTaskContext: string | null;
   subagentAnnounceContext: string | null;
+  otherTasksContext?: string | null;
   capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
   const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
   return [
+    '<delegation_outcome_input>',
     params.latestUserRequest
-      ? `用户原始请求：${clipForPrompt(params.latestUserRequest, 420)}`
-      : '用户原始请求：未提供',
-    '',
-    params.subagentAnnounceContext ?? 'subagent announce：无',
-    '',
-    params.runDelegationContext,
-    artifactContext ? '' : null,
-    artifactContext,
-    '',
-    '请根据以上 subagent announce 和任务跟踪，判断当前 run 下一步。',
-  ].join('\n');
+      ? indentXmlBlock(xmlTextBlock('user_request', clipForPrompt(params.latestUserRequest, 420)), 2)
+      : '  <user_request missing="true" />',
+    params.currentTaskContext
+      ? indentXmlBlock(params.currentTaskContext, 2)
+      : '  <current_delegation missing="true" />',
+    params.subagentAnnounceContext
+      ? indentXmlBlock(params.subagentAnnounceContext, 2)
+      : '  <subagent_announce missing="true" />',
+    params.otherTasksContext
+      ? indentXmlBlock(params.otherTasksContext, 2)
+      : null,
+    artifactContext
+      ? indentXmlBlock(xmlTextBlock('capability_artifacts', artifactContext), 2)
+      : null,
+    '  <instruction>请根据当前委派任务、subagent announce 和用户原始请求，判断当前 run 下一步。</instruction>',
+    '</delegation_outcome_input>',
+  ].filter((line) => line !== null).join('\n');
 }

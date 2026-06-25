@@ -23,25 +23,28 @@ import type {
 } from '../timeline/agentTimeline';
 import type { SessionActivityModel } from '../state/tuiState';
 
-test('buildAgentOperationDisplayLines preserves generic operation text without reading raw payloads', () => {
+test('buildAgentOperationDisplayLines renders the header as toolName(args) and shows raw output under ⎿', () => {
   const entry = operationEntry({
     phase: 'completed',
     title: '打开网页',
     target: 'https://example.com',
     summary: '页面：Example Domain',
     details: { status: 200 },
+    source: { provider: 'toolkit', name: 'browser', toolName: '打开网页' },
   }) as AgentOperationEntry & { raw: { output: string } };
-  entry.raw = { output: 'secret raw browser payload' };
+  entry.raw = { output: 'Example Domain loaded' };
 
-  const text = buildAgentOperationDisplayLines(entry, 2500, 120)
-    .map((line) => line.text)
-    .join('\n');
+  const lines = buildAgentOperationDisplayLines(entry, 2500, 120);
+  const header = lines[0]!.text;
 
-  assert.match(text, /打开网页/);
-  assert.match(text, /https:\/\/example\.com/);
-  assert.match(text, /页面：Example Domain/);
-  assert.match(text, /status=200/);
-  assert.doesNotMatch(text, /secret raw/);
+  // Header is `toolName(arg summary)（status）`.
+  assert.match(header, /^打开网页\(/);
+  assert.match(header, /https:\/\/example\.com/);
+  assert.match(header, /页面：Example Domain/);
+  assert.match(header, /status=200/);
+  assert.match(header, /（完成）$/);
+  // Raw output now renders on a trailing ⎿ line.
+  assert.ok(lines.some((line) => line.text.includes('⎿') && line.text.includes('Example Domain loaded')));
 });
 
 test('buildAgentOperationDisplayLines keeps operation text to one clipped status line', () => {
@@ -248,18 +251,55 @@ test('buildAgentOperationDisplayLines renders browser active completed and faile
     details: { selector: '#result', timeoutMs: 5000 },
   }), 3500, 120).map((line) => line.text).join('\n');
 
+  // Header reads `toolLabel(args…)（status）`; without a source, the label
+  // falls back to the operation title.
   assert.equal(
     running,
-    '点击 text=登录 · text=登录 · selector=text=登录 · 点击页面（开始）',
+    '点击页面(text=登录 · 点击 text=登录 · selector=text=登录)（开始）',
   );
   assert.match(
     completed,
-    /^页面：Example Domain · https:\/\/example\.com\/ · title=Example Domain · url=https:\/\/example\.com\/ · 打开网页（完成）$/,
+    /^打开网页\(https:\/\/example\.com\/ · 页面：Example Domain · title=Example Domain · url=https:\/\/example\.com\/\)（完成）$/,
   );
   assert.match(
     failed,
-    /^No active browser page\. Use browser_open first\. · #result · selector=#result · timeoutMs=5000 · 等待页面（失败）$/,
+    /^等待页面\(#result · No active browser page\. Use browser_open first\. · selector=#result · timeoutMs=5000\)（失败）$/,
   );
+});
+
+test('buildAgentOperationDisplayLines collapses long output and surfaces errors', () => {
+  const longOutput = Array.from({ length: 10 }, (_, i) => `line ${(i + 1).toString()}`).join('\n');
+  const completed = buildAgentOperationDisplayLines({
+    ...operationEntry({ phase: 'completed', title: 'run_shell', summary: 'ls' }),
+    raw: { output: longOutput },
+  }, 3500, 120);
+  const failed = buildAgentOperationDisplayLines({
+    ...operationEntry({ phase: 'failed', title: 'run_shell', summary: 'cat missing' }),
+    raw: { error: 'No such file or directory' },
+  }, 3500, 120);
+
+  const outputLines = completed.filter((line) => line.id.includes(':output:'));
+  // Capped at OPERATION_OUTPUT_MAX_LINES (6) plus a "+N lines" footer.
+  assert.equal(outputLines.length, 7);
+  assert.match(outputLines[0]!.text, /⎿ line 1$/);
+  assert.match(outputLines.at(-1)!.text, /… \+4 lines$/);
+  assert.ok(outputLines.slice(0, -1).every((line) => line.tone === 'muted'));
+
+  const failedOutput = failed.filter((line) => line.id.includes(':output:'));
+  assert.ok(failedOutput.some((line) =>
+    line.text.includes('No such file or directory') && line.tone === 'removed'));
+});
+
+test('buildAgentOperationDisplayLines uses source.toolName for the header label', () => {
+  const lines = buildAgentOperationDisplayLines(operationEntry({
+    phase: 'completed',
+    kind: 'local.apply_patch',
+    title: '应用补丁',
+    target: 'src/app.ts',
+    source: { provider: 'toolkit', name: 'apply_patch', toolName: 'apply_patch' },
+  }), 3500, 120);
+
+  assert.match(lines[0]!.text, /^apply_patch\(src\/app\.ts\)（完成）$/);
 });
 
 test('buildAgentOperationDisplayLines tags the header line with the phase for the status dot', () => {

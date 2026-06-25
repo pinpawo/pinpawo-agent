@@ -12,11 +12,6 @@ import {
 function summaryMessage(summary: string) {
   return new AIMessage({
     content: ['Explore summary:', '', summary].join('\n'),
-    additional_kwargs: {
-      pinpawo: {
-        exploreSummary: summary,
-      },
-    },
   });
 }
 
@@ -77,13 +72,11 @@ test('explore capability filters default toolkits to host-available toolkits', a
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /上下文足够时会保留完整工具输出/);
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /已查看文件列表/);
   assert.equal(typeof runtime.contextPolicy?.rewriteAsync, 'function');
-  // Explore no longer persists on finalize via afterRun; summarization is
-  // context-pressure-driven only (issue #137 follow-up).
-  assert.equal(runtime.middleware, undefined);
+  assert.equal(typeof runtime.middleware?.afterRun, 'function');
   assert.equal(capability.resultSchema, exploreResultSchema);
 });
 
-test('explore result reads latest capability-private ingested summary as completed by default', () => {
+test('explore result reads latest summary from Explore summary marker', () => {
   const summary = 'final summary with evidence\n\n已查看文件：services/local-agent/src/capabilities/explore/index.ts';
 
   assert.deepEqual(readExploreResult([
@@ -171,8 +164,10 @@ test('explore context policy ingests and compresses older raw tool output only u
   assert.match(capturedHuman, /触发原因：context_pressure/);
   assert.match(capturedHuman, /old raw 1/);
   assert.match(String(rewritten[0]?.content ?? ''), /^\[explore raw tool output evicted after ingest\]/);
-  assert.match(String(rewritten[1]?.content ?? ''), /Explore summary:/);
-  assert.match(String(rewritten[1]?.content ?? ''), /已确认 context pressure/);
+  assert.match(String(rewritten[1]?.content ?? ''), /^\[explore raw tool output evicted after ingest\]/);
+  assert.equal(rewritten.length, 5);
+  assert.match(String(rewritten[4]?.content ?? ''), /Explore summary:/);
+  assert.match(String(rewritten[4]?.content ?? ''), /已确认 context pressure/);
   assert.match(String(rewritten[2]?.content ?? ''), /^recent raw 3/);
   assert.match(String(rewritten[3]?.content ?? ''), /^recent raw 4/);
   assert.deepEqual(readExploreResult(rewritten)?.summary, summary);
@@ -232,7 +227,7 @@ test('explore ingest failure under context pressure keeps raw outputs instead of
   assert.deepEqual(rewritten, input);
 });
 
-test('explore context-pressure ingest persists a summary+evidence report artifact via the sink', async () => {
+test('explore context-pressure summarizes old tool output and defers report persistence to afterRun', async () => {
   const summary = '已确认重复探索的原因\n\n已查看文件：services/local-agent/src/capabilities/explore/index.ts';
   const writes: Array<Record<string, unknown>> = [];
   const recorded: unknown[] = [];
@@ -253,7 +248,7 @@ test('explore context-pressure ingest persists a summary+evidence report artifac
   } as unknown as BaseChatModel;
   const runtime = await createRuntime(model, { artifactStore: store });
 
-  await runtime.contextPolicy?.rewriteAsync?.([
+  const rewritten = await runtime.contextPolicy?.rewriteAsync?.([
     toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
@@ -269,6 +264,28 @@ test('explore context-pressure ingest persists a summary+evidence report artifac
       runId: 'run_1',
     },
   });
+
+  assert.equal(writes.length, 0);
+
+  const rewrittenSummary = rewritten ? readExploreResult(rewritten) : null;
+  assert.ok(rewrittenSummary);
+
+  await runtime.middleware?.afterRun?.(
+    {
+      messages: rewritten ?? [],
+      artifacts: [],
+      completionReason: 'natural' as const,
+    },
+    {
+      recordCapabilityArtifact: (ref) => {
+        recorded.push(ref);
+      },
+      threadId: 'thread-1',
+      delegationId: 'dg_1',
+      runId: 'run_1',
+      capabilityId: 'explore',
+    },
+  );
 
   assert.equal(writes.length, 1);
   const artifact = writes[0]?.artifact as Record<string, unknown>;
@@ -288,7 +305,7 @@ test('explore context-pressure ingest is a no-op write when no artifact sink is 
   } as unknown as NonNullable<CapabilityContext['artifactStore']>;
   const runtime = await createRuntime(fakeSummaryModel(summary), { artifactStore: store });
 
-  await runtime.contextPolicy?.rewriteAsync?.([
+  const rewritten = await runtime.contextPolicy?.rewriteAsync?.([
     toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
@@ -301,4 +318,225 @@ test('explore context-pressure ingest is a no-op write when no artifact sink is 
   });
 
   assert.equal(writes.length, 0);
+  assert.equal(rewritten?.length, 4);
+
+  await runtime.middleware?.afterRun?.({
+    messages: rewritten ?? [],
+    artifacts: [],
+    completionReason: 'natural' as const,
+  }, {
+    threadId: 'thread-no-sink-no-callback',
+    capabilityId: 'explore',
+    delegationId: 'dg-no-sink-no-callback',
+    runId: 'run-no-sink-no-callback',
+  });
+
+  assert.equal(writes.length, 0);
+});
+
+test('explore skips finalize artifact when previous ingest failure marker exists', async () => {
+  let captured = 0;
+  const store = {
+    writeArtifact: async () => {
+      captured += 1;
+      return { id: 'nope', uri: 'u', kind: 'report' } as const;
+    },
+  } as unknown as NonNullable<CapabilityContext['artifactStore']>;
+  const runtime = await createRuntime(fakeSummaryModel('should_not_be_called'), { artifactStore: store });
+  const failureMessage = new AIMessage('临时汇总失败');
+  failureMessage.additional_kwargs = {
+    pinpawo: {
+      exploreIngestFailed: true,
+    },
+  };
+
+  await runtime.middleware?.afterRun?.(
+    {
+      messages: [failureMessage],
+      artifacts: [],
+      completionReason: 'error' as const,
+    },
+    {
+      recordCapabilityArtifact: () => {},
+      threadId: 'thread-no-op',
+      capabilityId: 'explore',
+      delegationId: 'dg-no-op',
+      runId: 'run-no-op',
+    },
+  );
+
+  assert.equal(captured, 0);
+});
+
+test('explore stores final summary report artifact on finalize via afterRun', async () => {
+  const summary = '最终总结：探索到关键路径和风险边界。已查看文件：services/local-agent/src/capabilities/explore/index.ts';
+  const writes: Array<{ summary: string; evidence?: unknown[] }> = [];
+  const recorded: unknown[] = [];
+  const store = {
+    writeArtifact: async (input: { artifact: { content?: string; metadata?: { evidence?: unknown[] } } }) => {
+      writes.push({
+        summary: String(input.artifact?.content ?? ''),
+        evidence: input.artifact?.metadata?.evidence as unknown[] | undefined,
+      });
+      return {
+        id: 'final-1',
+        uri: 'capability-artifact://thread-final/dg-final/run-final',
+        kind: 'report' as const,
+        threadId: 'thread-final',
+        capabilityId: 'explore',
+        delegationId: 'dg-final',
+        runId: 'run-final',
+        mimeType: 'text/markdown',
+        preview: '',
+        sizeBytes: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      };
+    },
+  } as unknown as NonNullable<CapabilityContext['artifactStore']>;
+
+  const runtime = await createRuntime(fakeSummaryModel(summary), { artifactStore: store });
+  const result = {
+    messages: [summaryMessage(summary)],
+    artifacts: [],
+    completionReason: 'natural' as const,
+  };
+
+  const afterRun = runtime.middleware?.afterRun;
+  assert.equal(typeof afterRun, 'function');
+
+  const resultReturned = await afterRun?.(result, {
+    recordCapabilityArtifact: (ref) => {
+      recorded.push(ref);
+    },
+    threadId: 'thread-final',
+    capabilityId: 'explore',
+    delegationId: 'dg-final',
+    runId: 'run-final',
+  });
+
+  assert.deepEqual(resultReturned, result);
+  assert.equal(writes.length, 1);
+  assert.match(writes[0]?.summary ?? '', /最终总结：探索到关键路径和风险边界/);
+  assert.deepEqual(writes[0]?.evidence, []);
+  assert.equal(recorded.length, 1);
+});
+
+test('explore generates final summary artifact when no exploreSummary marker exists', async () => {
+  const summary = '最终归纳：基于对话结尾生成的结构化总结。';
+  const writes: Array<{ summary: string; evidence?: unknown[] }> = [];
+  const store = {
+    writeArtifact: async (input: { artifact: { content?: string; metadata?: { evidence?: unknown[] } } }) => {
+      writes.push({
+        summary: String(input.artifact?.content ?? ''),
+        evidence: input.artifact?.metadata?.evidence as unknown[] | undefined,
+      });
+      return {
+        id: 'final-2',
+        uri: 'capability-artifact://thread-final-no-marker/dg-final-no-marker/run-final-no-marker',
+        kind: 'report' as const,
+        threadId: 'thread-final-no-marker',
+        capabilityId: 'explore',
+        delegationId: 'dg-final-no-marker',
+        runId: 'run-final-no-marker',
+        mimeType: 'text/markdown',
+        preview: '',
+        sizeBytes: 0,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      };
+    },
+  } as unknown as NonNullable<CapabilityContext['artifactStore']>;
+
+  let capturedHuman = '';
+  const runtime = await createRuntime(fakeSummaryModel(summary, ({ messages }) => {
+    capturedHuman = String(messages.at(-1)?.content ?? '');
+  }), { artifactStore: store });
+
+  const result = {
+    messages: [new AIMessage('最终我认为关键风险是数据库连接抖动，下一步先定位连接池参数与重试策略。')],
+    artifacts: [],
+    completionReason: 'natural' as const,
+  };
+
+  const afterRun = runtime.middleware?.afterRun;
+  assert.equal(typeof afterRun, 'function');
+
+  await afterRun?.(result, {
+    recordCapabilityArtifact: () => {},
+    threadId: 'thread-final-no-marker',
+    capabilityId: 'explore',
+    delegationId: 'dg-final-no-marker',
+    runId: 'run-final-no-marker',
+  });
+
+  assert.match(capturedHuman, /触发原因：finalize/);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0]?.summary, summary);
+  assert.equal(Array.isArray(writes[0]?.evidence), true);
+});
+
+test('explore writes at most once per run even when context-pressure summaries are generated', async () => {
+  const summary = '压缩后的总结：仅保留关键证据和来源，避免重复。';
+  const writes: Array<Record<string, unknown>> = [];
+  const store = {
+    writeArtifact: async (input: unknown) => {
+      writes.push(input as Record<string, unknown>);
+      return {
+        id: `run-summary-${writes.length}`,
+        uri: `capability-artifact://thread-1/dg-1/run-1/${writes.length}`,
+        kind: 'report' as const,
+        threadId: 'thread-1',
+        capabilityId: 'explore',
+        delegationId: 'dg-1',
+        runId: 'run-1',
+        mimeType: 'text/markdown',
+        sizeBytes: 10,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      } as Record<string, unknown>;
+    },
+  } as unknown as NonNullable<CapabilityContext['artifactStore']>;
+  const model = {
+    withStructuredOutput: () => ({
+      invoke: async () => ({
+        summary,
+        evidence: [{ source: 'explore/index.ts', proves: '压缩触发', value: '减少 context 使用量' }],
+      }),
+    }),
+  } as unknown as BaseChatModel;
+  const runtime = await createRuntime(model, { artifactStore: store });
+
+  const rewritten = await runtime.contextPolicy?.rewriteAsync?.([
+    toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
+    toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
+    toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
+  ], {
+    estimateMessagesTokens: () => 30_000,
+    iterationCount: 2,
+    operations: {},
+    contextWindowTokens: 32_000,
+    artifactSink: {
+      recordCapabilityArtifact: () => {},
+      threadId: 'thread-1',
+      delegationId: 'dg-1',
+      runId: 'run-1',
+    },
+  });
+
+  assert.ok(Array.isArray(rewritten));
+  assert.equal(writes.length, 0);
+
+  const afterRun = runtime.middleware?.afterRun;
+  assert.equal(typeof afterRun, 'function');
+  await afterRun?.({
+    messages: rewritten ?? [],
+    artifacts: [],
+    completionReason: 'natural' as const,
+  }, {
+    recordCapabilityArtifact: () => {},
+    threadId: 'thread-1',
+    capabilityId: 'explore',
+    delegationId: 'dg-1',
+    runId: 'run-1',
+  });
+
+  assert.equal(writes.length, 1);
 });

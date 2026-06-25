@@ -1,12 +1,14 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { clipForPrompt, invokeStructuredOutput } from '@pinpawo/pet-agent';
 import type {
   AgentCapability,
   CapabilityArtifactSink,
   CapabilityArtifactStore,
   ContextPolicyContext,
+  CapabilityMiddlewareContext,
   OrchestrationDecisionStructuredOutputConfig,
+  SubagentResult,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 
@@ -33,6 +35,11 @@ export const exploreResultSchema = z.object({
   nextSteps: z.array(z.string().min(1)),
 });
 
+type PendingExploreArtifact = {
+  summary: string;
+  evidence: ExploreEvidenceItem[];
+};
+
 const exploreEvidenceItemSchema = z.object({
   source: z.string().min(1),
   proves: z.string().min(1),
@@ -53,7 +60,11 @@ const EXPLORE_COMPRESS_KEEP_RECENT_TOOL_RESULTS = 2;
 const EXPLORE_COMPRESS_MIN_TOOL_CHARS = 800;
 const EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS = 18_000;
 const EXPLORE_SUMMARY_MESSAGE_MAX_CHARS = 2_000;
+const EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS = 18_000;
 const EXPLORE_RAW_EVICTED = '[explore raw tool output evicted after ingest]';
+const EXPLORE_SUMMARY_MESSAGE_PREFIX = 'Explore summary:';
+
+type ExploreIngestReason = 'context_pressure' | 'finalize';
 
 function readMessageText(message: { content?: unknown }): string {
   const content = message.content;
@@ -89,9 +100,41 @@ function mergePinpawoMetadata(
   };
 }
 
+function extractExploreSummaryFromContent(content: string): string | null {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const markerWithDoubleNewline = `${EXPLORE_SUMMARY_MESSAGE_PREFIX}\n\n`;
+  let markerIndex = normalized.lastIndexOf(`\n${markerWithDoubleNewline}`);
+  if (markerIndex >= 0) {
+    return normalized.slice(markerIndex + markerWithDoubleNewline.length + 1).trim() || null;
+  }
+
+  markerIndex = normalized.lastIndexOf(markerWithDoubleNewline);
+  if (markerIndex >= 0) {
+    return normalized.slice(markerIndex + markerWithDoubleNewline.length).trim() || null;
+  }
+
+  return null;
+}
+
+function createExploreSummaryMessage(summary: string): AIMessage {
+  return new AIMessage(`${EXPLORE_SUMMARY_MESSAGE_PREFIX}\n\n${summary.trim()}`);
+}
+
+function withExploreSummaryMessage(messages: BaseMessage[], summary: string): BaseMessage[] {
+  const trimmed = summary.trim();
+  if (!trimmed) {
+    return messages;
+  }
+  return [...messages, createExploreSummaryMessage(trimmed)];
+}
+
 function readExploreSummary(message: BaseMessage): string | null {
-  const summary = readPinpawoMetadata(message)?.exploreSummary;
-  return typeof summary === 'string' && summary.trim() ? summary.trim() : null;
+  const content = readMessageText(message);
+  if (!content.trim()) {
+    return null;
+  }
+
+  return extractExploreSummaryFromContent(content);
 }
 
 function readLatestExploreSummary(messages: BaseMessage[]): string | null {
@@ -104,13 +147,24 @@ function readLatestExploreSummary(messages: BaseMessage[]): string | null {
   return null;
 }
 
+function hasExploreIngestFailure(messages: BaseMessage[]): boolean {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const metadata = readPinpawoMetadata(messages[index]);
+    if (readExploreSummary(messages[index]) !== null) {
+      return false;
+    }
+    if (metadata?.exploreIngestFailed === true) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
- * Persist a context-pressure ingest as a single report artifact: the markdown
- * summary as content, the structured evidence ({source, proves, value}[]) in
- * metadata. Recorded into state via the subagent's artifact sink so the ref is
-   * visible across runs (avoids re-exploring; redesign §14). No-op when the
- * store, sink, or threadId is unavailable (tests / degraded runtimes / explore
- * surfaces without a store such as studio).
+ * Persist the latest explore summary as a report artifact: markdown summary as
+ * content, structured evidence ({source, proves, value}[]) in metadata.
+ * Record into state via the subagent's artifact sink so the ref is visible
+ * across runs. No-op when the store/sink/thread context is unavailable.
  */
 async function recordExploreIngestArtifact(
   store: CapabilityArtifactStore | undefined,
@@ -121,6 +175,7 @@ async function recordExploreIngestArtifact(
     return;
   }
   const normalized = ingest.summary.trim();
+  if (!normalized) return;
   const ref = await store.writeArtifact({
     threadId: sink.threadId,
     capabilityId: 'explore',
@@ -170,6 +225,7 @@ async function ingestExploreKnowledge(params: {
   structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   previousSummary: string | null;
   evidence: string;
+  reason: ExploreIngestReason;
 }): Promise<ExploreKnowledgeIngest> {
   const evidence = clipForPrompt(params.evidence, EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS);
   if (!evidence.trim()) {
@@ -190,8 +246,8 @@ async function ingestExploreKnowledge(params: {
     messages: [
       new SystemMessage([
         '你是 explore capability 的知识 ingest 模块。',
-        '当探索的上下文接近预算上限时，你被调用来对较早的探索内容做一次完整总结，',
-        '使较早的原始工具输出可以从上下文中移除，只保留你的总结和最新若干条原文。',
+        '当探索内容接近上下文预算上限或对话完成时，你会被调用来对关键来源做一次完整总结，',
+        '使较早原始工具输出可以从上下文中移除，只保留你的总结和最新若干条原文。',
         '输入包括上一版 summary 和需要被总结的 evidence。你必须更新 summary，必要时修正旧结论。',
         'summary 必须用 Markdown，包含：目标、已查看文件、关键知识点 / 概念、已确认事实、未确认 / 风险、下一步。',
         'summary 要让下一轮 agent 不重复探索已看过的内容。',
@@ -203,7 +259,7 @@ async function ingestExploreKnowledge(params: {
         '不要编造未查看过的文件、URL、issue、PR 或命令结果。',
       ].join('\n')),
       new HumanMessage([
-        '触发原因：context_pressure',
+        `触发原因：${params.reason}`,
         '上一版 summary：',
         params.previousSummary ?? '[无]',
         '需要总结的 evidence：',
@@ -302,22 +358,78 @@ function buildContextPressureEvidence(messages: BaseMessage[], toolIndexes: numb
   };
 }
 
+function collectAnyToolResultIndexes(messages: BaseMessage[]): number[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .filter((item): item is { message: ToolMessage; index: number } => ToolMessage.isInstance(item.message))
+    .map((item) => item.index);
+}
+
+function buildFinalExploreEvidence(messages: BaseMessage[]): string {
+  const finalIndexes = new Set<number>(collectAnyToolResultIndexes(messages));
+  const latestAssistantIndex = [...messages.entries()]
+    .reverse()
+    .find(([index, message]) => !ToolMessage.isInstance(message) && message._getType() === 'ai' && readMessageText(message))?.[0];
+
+  if (latestAssistantIndex !== undefined) {
+    finalIndexes.add(latestAssistantIndex);
+  }
+
+  if (finalIndexes.size === 0) {
+    return '';
+  }
+
+  const lines: string[] = [];
+  let totalLength = 0;
+
+  for (const [index, message] of messages.entries()) {
+    if (!finalIndexes.has(index)) continue;
+    const text = readMessageText(message);
+    if (!text) continue;
+
+    const entry = [
+      ToolMessage.isInstance(message)
+        ? `[tool_result] ${typeof message.name === 'string' ? message.name : 'tool'}`
+        : `[${message._getType()}] #${index}`,
+      clipForPrompt(text, EXPLORE_SUMMARY_MESSAGE_MAX_CHARS),
+    ].join('\n');
+    totalLength += entry.length;
+    if (totalLength > EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS) break;
+    lines.push(entry);
+  }
+
+  return lines.length > 0 ? `[finalize]\n${lines.join('\n\n')}` : '';
+}
+
+async function buildFinalExploreIngest(params: {
+  model: BaseChatModel;
+  structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
+  previousSummary: string | null;
+  resultMessages: BaseMessage[];
+}): Promise<ExploreKnowledgeIngest | null> {
+  const evidence = buildFinalExploreEvidence(params.resultMessages);
+  if (!evidence) return null;
+
+  return ingestExploreKnowledge({
+    model: params.model,
+    structuredOutput: params.structuredOutput,
+    previousSummary: params.previousSummary,
+    evidence,
+    reason: 'finalize',
+  });
+}
+
 function replaceCompressedToolOutputs(
   messages: BaseMessage[],
   toolIndexes: number[],
-  summary: string,
 ): BaseMessage[] {
   if (toolIndexes.length === 0) return messages;
-  const summaryIndex = toolIndexes[toolIndexes.length - 1];
   const selected = new Set(toolIndexes);
   return messages.map((message, index) => {
     if (!selected.has(index) || !ToolMessage.isInstance(message)) return message;
-    const content = index === summaryIndex
-      ? `${EXPLORE_RAW_EVICTED}\n\nExplore summary:\n\n${summary.trim()}`
-      : `${EXPLORE_RAW_EVICTED}\nSee the later compressed explore summary for findings.`;
+    const content = `${EXPLORE_RAW_EVICTED}\nSee the later compressed explore summary for findings.`;
     return replaceToolMessageContent(message, content, {
       exploreRawEvicted: true,
-      ...(index === summaryIndex ? { exploreSummary: summary.trim() } : {}),
     });
   });
 }
@@ -335,6 +447,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       const ingestModel = context.models.observe ?? context.models.subagent ?? context.models.act;
       const artifactStore = context.artifactStore;
       let currentSummary = readLatestExploreSummary(context.messages);
+      let pendingArtifact: PendingExploreArtifact | null = null;
       const rewriteUnderContextPressure = async (
         messages: BaseMessage[],
         ctx: ContextPolicyContext,
@@ -351,24 +464,23 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
         if (!evidence.trim() || coveredIndexes.length === 0) {
           return messages;
         }
-        // Summarizing + persisting must never crash the explore run: an ingest
-        // model error (rate limit, timeout, structured-output parse failure) or a
-        // store write failure under context pressure should degrade to "keep the
-        // raw outputs this round", not abort the whole turn (review finding #1).
         try {
           const ingest = await ingestExploreKnowledge({
             model: ingestModel,
             structuredOutput: options.structuredOutput,
             previousSummary: currentSummary,
             evidence,
+            reason: 'context_pressure',
           });
-          // Persist the summary + structured evidence as a report artifact so the
-          // earlier raw outputs can be dropped from context yet remain recallable.
-          // Record + evict before advancing currentSummary so a persistence
-          // failure leaves summary/context consistent (review finding #2).
-          await recordExploreIngestArtifact(artifactStore, ctx.artifactSink, ingest);
-          // Only evict the outputs the summarizer actually saw (finding #3).
-          const rewritten = replaceCompressedToolOutputs(messages, coveredIndexes, ingest.summary);
+          pendingArtifact = {
+            summary: ingest.summary,
+            evidence: ingest.evidence,
+          };
+          // Only evict outputs the summarizer actually saw (finding #3).
+          const rewritten = withExploreSummaryMessage(
+            replaceCompressedToolOutputs(messages, coveredIndexes),
+            ingest.summary,
+          );
           currentSummary = ingest.summary;
           return rewritten;
         } catch (error) {
@@ -380,8 +492,66 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
           return messages;
         }
       };
+
+      const middleware: {
+        afterRun: (result: SubagentResult, middlewareCtx: CapabilityMiddlewareContext) => Promise<SubagentResult>;
+      } = {
+        afterRun: async (result, middlewareCtx) => {
+          const messagesFromMetadata = result.messages;
+          const summaryFromMetadata = readLatestExploreSummary(messagesFromMetadata);
+          let ingest: ExploreKnowledgeIngest | null = null;
+          let nextMessages = messagesFromMetadata;
+
+          if (hasExploreIngestFailure(result.messages)) {
+            return result;
+          }
+
+          if (pendingArtifact) {
+            ingest = pendingArtifact;
+          } else if (summaryFromMetadata) {
+            ingest = { summary: summaryFromMetadata, evidence: [] };
+          } else {
+            ingest = await buildFinalExploreIngest({
+              model: ingestModel,
+              structuredOutput: options.structuredOutput,
+              previousSummary: currentSummary,
+              resultMessages: messagesFromMetadata,
+            }).catch(() => null);
+          }
+
+          if (!ingest) {
+            return result;
+          }
+
+          nextMessages = summaryFromMetadata
+            ? messagesFromMetadata
+            : withExploreSummaryMessage(messagesFromMetadata, ingest.summary);
+
+          try {
+            await recordExploreIngestArtifact(
+              artifactStore,
+              {
+                recordCapabilityArtifact: middlewareCtx.recordCapabilityArtifact,
+                threadId: middlewareCtx.threadId,
+                delegationId: middlewareCtx.delegationId,
+                runId: middlewareCtx.runId,
+              },
+              ingest,
+            );
+          } catch (error) {
+            console.warn(
+              `[explore] finalize artifact persistence failed, continuing without crash: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+          return { ...result, messages: nextMessages };
+        },
+      };
+
       return {
         uses: DEFAULT_EXPLORE_TOOLKITS.filter((name) => available.has(name)),
+        middleware,
         contextPolicy: {
           rewriteAsync: rewriteUnderContextPressure,
         },

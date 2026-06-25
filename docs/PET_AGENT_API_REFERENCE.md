@@ -13,6 +13,10 @@
 7. [能力插件协议](PET_AGENT_API_PLUGIN_PROTOCOL.md)
 8. [错误与观察性](PET_AGENT_API_ERROR_HANDLING.md)
 
+## 运行机制专题（新流程）
+
+1. [Capability Artifact Pipeline（API 风格）](capability-artifact-pipeline/index.md)
+
 ## 相关设计文档（边界与流程）
 
 1. [PET_AGENT_STUDIO_INTERFACES](PET_AGENT_STUDIO_INTERFACES.md)

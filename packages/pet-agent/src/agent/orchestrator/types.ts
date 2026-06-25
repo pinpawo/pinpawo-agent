@@ -4,7 +4,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
-import type { CapabilityArtifactStore } from '../../types/artifact';
+import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
@@ -14,7 +14,6 @@ import type { OrchestrationDecision } from './schemas';
 export type MessageLane = 'general' | `capability:${string}`;
 export type PinpetMessageLane = MessageLane | 'orchestrator';
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
-export type AnnounceKind = 'completed' | 'progress';
 export type { SubagentCompletionReason };
 
 export type RunDelegation = {
@@ -60,6 +59,10 @@ export type SubagentAnnounce = {
   delegationId: string | null;
   task: string | null;
   text: string | null;
+  artifactRefs?: Pick<
+    CapabilityArtifactRef,
+    'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
+  >[];
 };
 
 export type DecisionMode = 'answer' | 'general' | 'capability';

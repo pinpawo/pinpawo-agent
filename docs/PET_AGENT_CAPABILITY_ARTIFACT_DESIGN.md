@@ -343,8 +343,10 @@ capability_artifact_search({
 
 `readResult(messages)` 的问题不是“从 messages 里读东西”本身，而是它把 capability 私有结果提取逻辑挂到了 pet-agent runtime 调用点：
 
-- dailyPost / capabilityCreator 从 `ToolMessage.artifact` 读。
-- explore 从 `additional_kwargs.pinpawo.exploreSummary` 读。
+- dailyPost / capabilityCreator 不再从消息里抓 `ToolMessage.artifact`。
+  它们在能力 `afterRun` 中直接持久化 `result` artifact，main agent 只消费 `CapabilityArtifactRef`。
+- explore 用 `AIMessage` 的 `Explore summary:` marker 为当前 run 提供可读摘要；持久化仍由
+  capability 侧在 `afterRun` 写 `report` artifact。
 - pet-agent runtime 需要知道每个 capability 的读取函数。
 - 结果提取发生在完整 lane transcript 上，容易让人误以为 main agent 可以理解 subagent 场景。
 

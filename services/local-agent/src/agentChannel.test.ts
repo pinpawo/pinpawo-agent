@@ -295,7 +295,8 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
     contextWindowTokens: 32_000,
   });
 
-  assert.match(String(rewritten?.[0]?.content ?? ''), /summary with viewed files/);
+  assert.equal(rewritten?.length, 4);
+  assert.match(String(rewritten?.[3]?.content ?? ''), /summary with viewed files/);
   assert.deepEqual(capturedOptions, {
     name: 'explore_knowledge_ingest',
     method: 'jsonMode',

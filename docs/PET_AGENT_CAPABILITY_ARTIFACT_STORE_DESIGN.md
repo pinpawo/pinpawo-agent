@@ -1,260 +1,168 @@
-# Pet Agent Capability Artifact Store Design
+# Capability Artifact Store 设计（文档版）
 
-本文档补齐 Studio / Pet / Capability 架构里的 **capability artifact store** 设计。
+本文档是 `Pet Agent` 体系里“产物持久化”层的单文件说明。  
+目标：把可复用的持久内容和执行时日志明确分离，避免把 `lane` 级临时消息当成可长期依赖的存储。
 
-它回答一个具体问题:capability / subagent 运行完成后产生的结构化产物放在哪里,以及为什么 completed lane messages 可以被删除而不丢产物。
+## 1. 结论先行
 
-相关文档:
+`capability artifact store` 负责的是**durable 产物引用 + 可读内容**，不是 LLM 的运行现场。  
+在当前代码中：
 
-- `docs/PET_AGENT_STUDIO_ARCHITECTURE_OVERVIEW.md` —— 三层架构心智模型。
-- `docs/PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN.md` —— Studio 编排、dispatch、wiki_curator。
-- `docs/PET_AGENT_STUDIO_INTERFACES.md` —— Studio ↔ Pet 调用边界。
-- `docs/CONTEXT_GOVERNANCE_REFACTOR.md` —— lane message 折叠 / 删除。
+- `CapabilityArtifactRef` 字段名是 `id`，不是 `artifactId`。
+- `PetAgentRuntime.invoke()` 只返回 `{ reply: string }`。
+- `capability artifact refs` 目前主要以内存状态（`state.sessionCapabilityArtifacts`）+ store ref 的方式在同/跨调用中使用；`ToolMessage.artifact` 仅作临时结构字段，非持久契约。
+- `finalPetRunId` 是 Studio 结果身份；`finalDispatchId` 仅作为兼容字段存在于少量旧持久化记录，不是新规范。
 
-## TL;DR
+## 2. 典型问题: 为什么 `lane` 不能当仓库
 
-**Capability artifacts 是 durable store 里的产物,不是 lane message,也不是 `ToolMessage.artifact`。**
+- `lane` 消息包含执行现场上下文、工具中间结果和 token 级噪音，生命周期通常与一次 run/turn 对齐；
+- `lane` 合并/压缩策略（`contextPolicy`）会主动裁剪，无法作为长期检索入口；
+- 任务完成后需要保留“跨 run 的可复用产物”时，必须靠 `CapabilityArtifactStore`。
 
-```text
-Capability / Subagent
-  -> 产生结构化产物
-  -> sink 到 CapabilityArtifactStore
-  -> 返回 ArtifactRef[]
+因此“可继续访问的产物”始终走 store；`lane` 只负责过程。
 
-PetAgentRuntime.invoke()
-  -> reply 文本引用 ArtifactRef
-  -> result.artifacts 携带 ArtifactRef[]
-
-StudioDispatchState
-  -> resultText
-  -> artifacts: ArtifactRef[]
-
-Studio / UI / 下一棒 pet
-  -> 通过 ArtifactRef 读取 store
-  -> wiki_curator 可把 artifact 摘要/引用整理进 wiki
-
-completed lane messages
-  -> 可以删除,因为运行现场不是产物存储
-```
-
-这条路径与 LangChain 的 `ToolMessage.artifact` 不是一回事。`ToolMessage.artifact` 只是工具调用结果里的临时结构化回执,可作为 capability 内部读取 result 的桥;真正需要长期保留、跨 dispatch 读取、UI 展示或后续 pet 消费的产物,必须 sink 到 artifact store。
-
-## Store 的职责
-
-CapabilityArtifactStore 负责存放 capability 运行产生的 durable artifacts:
-
-- 文本/Markdown/JSON 结构化结果,例如 explore report、script outline、final deliverable。
-- 文件资产,例如图片、音频、视频、PDF、压缩包。
-- 外部对象引用,例如服务端 postId、素材库 assetId、远程 URL。
-- 复合 manifest,例如一个 report 引用多个文件和数据表。
-
-Store 不负责:
-
-- 保存 subagent 全量消息流水。
-- 保存 tool lifecycle event。
-- 做 Studio wiki 的主题整理。
-- 替代 checkpoint / LangGraph state。
-- 替代业务数据库的最终业务对象。业务对象可以由 artifact 引用,但 artifact store 不应伪装成业务主表。
-
-## 与其他存储层的边界
-
-| 层 | 存什么 | 生命周期 | 谁写 | 谁读 |
-|---|---|---|---|---|
-| lane messages | subagent 运行现场、tool calls、临时 notes | 短生命周期;completed 后可折叠 | pet-agent runtime | 当前 delegation 续跑、debug trace |
-| capability artifact store | capability 产物与引用 | durable;按 conversation/dispatch/artifact 生命周期保留 | capability runtime / pet runtime sink | UI、Studio、后续 pet、curator |
-| Studio Whiteboard wiki | 协作知识摘要、主题笔记、source 摘录 | per-conversation 持久 | wiki_curator | pet 通过 wiki_read |
-| checkpoint store | graph 恢复状态、HITL pending state | thread/checkpoint 生命周期 | LangGraph | runtime resume |
-| app/backend store | 业务对象,如 post、积分、interaction | 产品生命周期 | 业务 API | app/backend |
-
-关键边界:
-
-- **artifact store 保存产物本体或引用**。
-- **wiki 保存对产物的可检索解释**。
-- **lane messages 保存运行过程**。
-
-因此,completed lane 清理时只清运行过程,不清 artifact store。
-
-## 核心类型
-
-建议的最小 contract:
+## 3. 数据模型（按当前代码）
 
 ```ts
 type CapabilityArtifactKind =
-  | 'markdown'
-  | 'json'
-  | 'file'
+  | 'result'
+  | 'report'
   | 'image'
-  | 'audio'
   | 'video'
-  | 'external_ref'
-  | 'manifest';
+  | 'audio'
+  | 'pdf'
+  | 'file'
+  | 'bundle';
 
 type CapabilityArtifactRef = {
-  artifactId: string;
+  id: string;               // 由写入端确定的稳定标识
+  threadId: string;
+  capabilityId: string;
+  delegationId: string;
+  runId: string;            // 也作为主追踪维度
   kind: CapabilityArtifactKind;
-  title: string;
-  summary?: string;
-  mimeType?: string;
-  uri?: string;              // file:// 不建议跨边界暴露;本地实现可用相对 store URI
+  mimeType: string;
+  uri: string;              // capability-artifact://thread/...
+  title?: string;
+  preview?: string;         // 对等于“head/摘要字段”的短文本
+  sizeBytes: number;
+  sha256?: string;
+  externalUri?: string;
   createdAt: string;
-  studioId?: string;
-  conversationId?: string;
-  turnId?: string;
-  dispatchId?: string;
-  petId?: string;
-  capabilityName?: string;
-  metadata?: Record<string, string | number | boolean | null>;
+  schema?: {
+    name: string;
+    version: number;
+  };
+  metadata?: Record<string, unknown>;
 };
 
-type CapabilityArtifactInput = {
-  kind: CapabilityArtifactKind;
-  title: string;
-  summary?: string;
-  content?: string | Uint8Array | Record<string, unknown>;
-  mimeType?: string;
-  sourceUri?: string;
-  metadata?: Record<string, string | number | boolean | null>;
+type CapabilityArtifactWriteInput = {
+  threadId: string;
+  capabilityId: string;
+  delegationId: string;
+  runId: string;
+  artifact: {
+    kind: CapabilityArtifactKind;
+    mimeType: string;
+    title?: string;
+    preview?: string;      // short head-like digest
+    schema?: { name: string; version: number };
+    metadata?: Record<string, unknown>;
+    content?: unknown;     // 与 externalUri 二选一
+    externalUri?: string;  // 与 content 二选一
+  };
 };
 
 type CapabilityArtifactStore = {
-  create(input: CapabilityArtifactInput, scope: CapabilityArtifactScope): Promise<CapabilityArtifactRef>;
-  read(ref: Pick<CapabilityArtifactRef, 'artifactId'>): Promise<CapabilityArtifactRecord>;
-  list(scope: Partial<CapabilityArtifactScope>): Promise<CapabilityArtifactRef[]>;
-};
-
-type CapabilityArtifactScope = {
-  studioId?: string;
-  conversationId?: string;
-  turnId?: string;
-  dispatchId?: string;
-  petId?: string;
-  capabilityName?: string;
+  writeArtifact(input: CapabilityArtifactWriteInput): Promise<CapabilityArtifactRef>;
+  readArtifact(input: { uri: string; maxBytes?: number; threadId?: string })
+    : Promise<{ ref: CapabilityArtifactRef; content: string | null }>;
+  listArtifacts(input: { threadId: string; capabilityId?: string; kind?: string; limit?: number })
+    : Promise<CapabilityArtifactRef[]>;
+  deleteThreadArtifacts(threadId: string): Promise<void>;
+  getDownloadUri(uri: string): Promise<string>;
+  writeArtifacts?(inputs: CapabilityArtifactWriteInput[]): Promise<CapabilityArtifactRef[]>;
 };
 ```
 
-`CapabilityArtifactRef` 是跨边界传递的稳定对象;artifact content 本体按需读取,不塞进 prompt、dispatch state 或 event stream。
+## 4. 架构价值（为什么要单独拿出一层）
 
-## 写入时机
+- **可复用性**：lane 可被裁剪/重写；store ref 不会随着 context compression 丢失关键资产。
+- **跨任务传递**：`state.sessionCapabilityArtifacts` 让后续 capability/pet 在同一 thread 下复用历史产物。
+- **恢复与幂等**：store 重放基于稳定 ref，支持重试、恢复和离线读取，不依赖当前上下文全部原文。
+- **安全与权限边界分离**：store 提供统一读取入口和命名空间约束，避免临时工具消息直接承载可共享内容。
 
-artifact sink 发生在 capability boundary,而不是 Studio wiki_curator。
+## 5. 分层边界
 
-推荐顺序:
+| 层 | 负责 | 边界 | 生命周期 |
+|---|---|---|---|
+| `lane messages` | 执行现场 | 主流程上下文、工具回执、announce | `run` 级，允许裁剪 |
+| `CapabilityArtifactStore` | 可长期读取产物 | 按 ref 读取内容 | `thread/delegation/run` 级 |
+| `Studio wiki` | 人类可读协作知识 | 组织 `index/topics/sources` | 会话级 |
+| `checkpoint` | 运行恢复 | 运行图状态/中间决策 | run/thread 级 |
 
-```text
-subagent run
-  -> capability middleware.afterRun / readResult
-  -> sink artifact store
-  -> produce CapabilityArtifactRef[]
-  -> tag completed announce
-  -> readResult returns summary + refs
-  -> laneMessagesForStateUpdate removes verbose lane messages
-```
+## 6. 典型写入链路（代码路径）
 
-对 `explore` 尤其重要:
+1. capability 运行时拿到 `CapabilityContext.artifactStore`（注入自 orchestrator 配置）。  
+2. 产物成型后调用 `store.writeArtifact(...)` 写入；返回 `CapabilityArtifactRef`。  
+3. 同时把 ref 回传给子图层：
+   - 通过 `CapabilityArtifactSink.recordCapabilityArtifact(ref)`（通常在 `afterRun` 执行）。  
+4. 该 ref 进入 `SubagentResult.artifacts`，再进入 `state.sessionCapabilityArtifacts`。  
+5. 后续 capability/pet 可在 prompt context 中看到短引用（`buildCapabilityArtifactContext`），需要细节再按 ref 到 store 读本体。
 
-- `explore` 的 raw tool output 可以很大,不应该长期保存在 lane messages。
-- `explore` final ingest 已经在 `afterRun` 生成 summary。
-- 在 completed announce 前,把 summary/evidence manifest sink 成 artifact。
-- completed lane 删除后,只保留 announce + result refs;artifact store 仍可读。
-
-## Pet / Studio 边界
-
-`PetAgentRuntime.invoke()` 的返回值应从纯文本扩展为文本 + artifact refs:
+### 示例（概念）
 
 ```ts
-type PetInvokeResult = {
-  reply: string;
-  artifacts?: CapabilityArtifactRef[];
-};
+const ref = await artifactStore.writeArtifact({
+  threadId,
+  capabilityId: 'explore',
+  delegationId,
+  runId,
+  artifact: {
+    kind: 'report',
+    mimeType: 'text/markdown',
+    title: 'Explore knowledge summary',
+    preview: '关键结论 + 风险点',
+    content: '# Summary ...',
+  },
+});
+await sink.recordCapabilityArtifact?.(ref);
 ```
 
-Studio dispatch state 也应保存 refs:
+## 7. 本地实现（FileCapabilityArtifactStore）
 
-```ts
-type StudioDispatchState = {
-  id: string;
-  taskIndex: number;
-  petId: string;
-  status: 'running' | 'finished' | 'cancelled';
-  resultText?: string;
-  artifacts?: CapabilityArtifactRef[];
-  errorMessage?: string;
-};
-```
+- 根路径：`{workdir}/.pinpawo/capability-artifacts`。
+- 目录结构：`threads/<threadId>/delegation/<delegationId>/`，内含 `manifest.json` 与内容文件。
+- URI 形态：`capability-artifact://thread/{threadId}/delegation/{delegationId}/artifact/{id}`（仅用于检索和鉴权映射，不要求客户端直接拼文件路径）。
 
-UI 最终渲染:
+当前行为：
+- `id`/`uri` 可幂等重放；
+- `content` 与 `externalUri` 二选一；
+- `getDownloadUri` 对外返回可访问地址（本地 `file://` 或外链原值）；
+- `deleteThreadArtifacts` 清理一个 `threadId` 下全部 artifact。
 
-```text
-turn_finished(finalDispatchId)
-  -> 读取 final dispatch resultText
-  -> 渲染 resultText
-  -> 根据 dispatch.artifacts 渲染附件/卡片/预览
-```
+## 8. 与 `ToolMessage.artifact` 的边界
 
-后续 pet 需要上游产物时,Studio 不把 artifact 本体塞进 brief。brief 只说明任务和上游产物存在;pet 可通过 wiki 看到 artifact 摘要/引用,必要时通过 artifact read tool 按 ref 读取内容。
+`ToolMessage.artifact` 不是 store 边界：它只适合把结构化片段挂到单次工具调用事件中。  
+任何“后续 run/跨任务可读”的内容必须落到 `CapabilityArtifactStore`。
 
-## 与 Wiki Curator 的关系
+## 9. 与 `head`/`summary` 的关系（给你刚才的疑问）
 
-wiki_curator 不拥有 artifact store,也不负责创建 capability artifact。它在 pet 返回后读取 `resultText + ArtifactRef[]`,把适合协作的内容整理进 wiki:
+- ref 没有 `head` 字段；有 `preview`。  
+- 你可以把 `preview` 视作 `head`（简短摘要）；
+- 如果外部协议要求强制 `head`，请在 adapter 层映射 `preview -> head`，但这不是 store 的原生字段。
 
-- 在 `topics/*.md` 中解释 artifact 是什么、由哪棒产生、什么时候该用。
-- 在 `sources/{dispatchId}-{petId}.md` 中记录 resultText 摘要和 artifact refs。
-- 对大型 artifact 只写 ref 和摘要,不复制本体。
+## 10. 典型查询约定
 
-这样 wiki 是“可检索知识层”,artifact store 是“产物持久层”。
+为了避免全量扫描，应尽量按以下维度筛选：
 
-## Store 实现建议
+- `threadId`（必需）
+- `delegationId`（同一 capability 调用）
+- `runId`（同一会话 run）
+- `capabilityId`（能力维度）
+- `kind`（result/report/image 等）
 
-MVP 可以用 filesystem-backed store:
+## 11. 兼容与迁移
 
-```text
-{AGENT_HOME}/studio/{studioId}/conv/{conversationId}/artifacts/
-  ├─ index.jsonl
-  └─ {artifactId}/
-      ├─ artifact.json      # metadata + ref
-      └─ content            # markdown/json/file bytes
-```
-
-本地实现要求:
-
-- `artifactId` 由 store 生成,不要由 LLM 生成。
-- 写入必须是原子操作:先写 tmp,再 rename。
-- `index.jsonl` 只作为 lookup/cache;单个 artifact 目录是权威记录。
-- 不在 artifact ref 中暴露绝对本机路径给 app/API;用 store-local uri 或 artifactId。
-
-服务端实现可以映射到对象存储 + 数据库:
-
-- blob/object storage 存 content。
-- 数据库表存 metadata、scope、权限、索引。
-- `artifactId` 是权限检查和读取的唯一入口。
-
-## 权限与安全
-
-- artifact 继承 scope 权限:conversation / studio / owner user。
-- 后续 pet 读取 artifact 需要通过 runtime 提供的 read 工具或 host API,不能直接读任意文件路径。
-- artifact store 不执行 artifact 内容里的指令;内容与邮件/网页/附件一样都是 untrusted data。
-- 删除 artifact 必须是显式维护动作;completed lane cleanup 不能级联删除 artifact。
-- 对外部 URL / file path artifact,store 应保存来源和创建者,UI 渲染时做安全提示。
-
-## 当前代码的迁移含义
-
-现有 `readLatestToolArtifact()` / `content_and_artifact` 模式可以继续作为 capability 内部的 result extraction helper,但不要把它当作 durable artifact store。
-
-迁移方向:
-
-1. 在 runtime context 中注入 `artifactStore` 或 `artifactSink`。
-2. capability `afterRun` / `readResult` 里把最终产物 sink 成 `CapabilityArtifactRef[]`。
-3. `capabilityResult` 扩展为携带 refs。
-4. `PetAgentRuntime.invoke()` 将 refs 合并进 `{ reply, artifacts }`。
-5. `StudioDispatchState` 与 `dispatch_finished` event 携带 refs。
-6. wiki_curator 使用 refs 写 wiki 摘要。
-
-这样 lane messages 的清理、explore context ingest、Studio finalization 三者不会互相踩边界。
-
-## Open Questions
-
-- artifact store 是 pet-agent core 提供接口、local-agent 提供实现,还是完全由 host 注入?
-- artifact read 是否作为 Studio 模式默认 toolkit 暴露给 pet?
-- artifact refs 是否需要版本号,支持同一 artifact 后续修订?
-- 大型二进制 artifact 是否需要异步上传状态(`pending` / `ready` / `failed`)?
-- app/backend 业务对象与 artifact store 的引用关系由谁维护?
+- `finalDispatchId` 在本仓库中仅保留为兼容读取字段（due-run/fallback 兼容层），不再作为规范主名词。
+- 如果看到文档里出现 `artifactId`、`finalDispatchId`、`invoke(...).artifacts`，均为过时表述；请以本页和实际类型定义为准。

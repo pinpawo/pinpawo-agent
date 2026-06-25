@@ -1,8 +1,42 @@
 import { AIMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
-import type { AnnounceKind, MessageLane, PinpetMessageLane, SubagentAnnounce, SubagentCompletionReason } from './types';
+import type { MessageLane, PinpetMessageLane, SubagentAnnounce, SubagentCompletionReason } from './types';
+import type { CapabilityArtifactKind, CapabilityArtifactRef } from '../../types/artifact';
 import { messageHasToolCalls, readMessageToolCallIds, readToolResultCallId } from '../../utils/messages';
-import { readMessageText } from './utils';
+import { clipForPrompt, readMessageText } from './utils';
+
+const MAX_HANDOFF_ARTIFACT_REFS = 5;
+const MAX_HANDOFF_ARTIFACT_URI_LENGTH = 220;
+const MAX_HANDOFF_ARTIFACT_TITLE_LENGTH = 120;
+const MAX_HANDOFF_ARTIFACT_PREVIEW_LENGTH = 180;
+
+function isArtifactKind(value: string): value is CapabilityArtifactKind {
+  return value === 'result'
+    || value === 'report'
+    || value === 'image'
+    || value === 'video'
+    || value === 'audio'
+    || value === 'pdf'
+    || value === 'file'
+    || value === 'bundle';
+}
+
+type HandOffFooterArtifactRef = Omit<
+  Pick<
+    CapabilityArtifactRef,
+    'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
+  >,
+  'kind'
+> & {
+  kind?: CapabilityArtifactKind;
+};
+type HandOffFooterArtifactRefWithKind = HandOffFooterArtifactRef & { kind: CapabilityArtifactKind };
+
+function hasArtifactFooterRefKind(
+  ref: HandOffFooterArtifactRef,
+): ref is HandOffFooterArtifactRefWithKind {
+  return Boolean(ref.kind && ref.uri && ref.capabilityId);
+}
 
 export function getMessageLane(message: BaseMessage): PinpetMessageLane | null {
   const pinpawo = message.additional_kwargs?.pinpawo;
@@ -25,11 +59,6 @@ export function setPinpetMeta(message: BaseMessage, patch: Record<string, unknow
   };
 }
 
-export function getMessageAnnounce(message: BaseMessage): AnnounceKind | null {
-  const announce = getPinpetMeta(message).announce;
-  return announce === 'completed' || announce === 'progress' ? announce : null;
-}
-
 /**
  * Neutral marker for "this lane message carries the subagent's deliverable text".
  * Replaces the completed/progress announce tag: it says WHICH message is the
@@ -47,10 +76,6 @@ export function getMessageIsAnnounce(message: BaseMessage): boolean {
 export function getMessageCompletionReason(message: BaseMessage): SubagentCompletionReason | null {
   const completionReason = getPinpetMeta(message).completionReason;
   return typeof completionReason === 'string' ? completionReason as SubagentCompletionReason : null;
-}
-
-export function setMessageAnnounce(message: BaseMessage, kind: AnnounceKind) {
-  setPinpetMeta(message, { announce: kind });
 }
 
 function ensureMessageId(message: BaseMessage): string {
@@ -74,8 +99,7 @@ export function getMessageTurnId(message: BaseMessage): string | null {
   const meta = getPinpetMeta(message);
   const runId = meta.runId;
   if (typeof runId === 'string') return runId;
-  const turnId = meta.turnId;
-  return typeof turnId === 'string' ? turnId : null;
+  return null;
 }
 
 export function toolProtocolSafeMessages(messages: BaseMessage[]) {
@@ -242,6 +266,154 @@ export function getMessageHandoffSource(message: BaseMessage): HandoffSource | n
   };
 }
 
+function parseFooterArtifactLineValue(line: string): { key: string; value: string } | null {
+  const separatorIndex = line.indexOf('=');
+  if (separatorIndex < 0) return null;
+  const key = line.slice(0, separatorIndex).trim();
+  const value = line.slice(separatorIndex + 1).trim();
+  if (!key || !value) return null;
+  return { key, value };
+}
+
+function applyFooterArtifactField(ref: HandOffFooterArtifactRef, key: string, value: string) {
+  if (key === 'kind') {
+    if (isArtifactKind(value)) {
+      ref.kind = value;
+    }
+    return;
+  }
+  if (key === 'capability' || key === 'capabilityId') {
+    ref.capabilityId = value;
+    return;
+  }
+  if (key === 'uri') {
+    ref.uri = value;
+    return;
+  }
+  if (key === 'title') {
+    ref.title = value;
+    return;
+  }
+  if (key === 'preview') {
+    ref.preview = value;
+    return;
+  }
+  if (key === 'mimeType' || key === 'mime') {
+    ref.mimeType = value;
+    return;
+  }
+  if (key === 'id') {
+    ref.id = value;
+    return;
+  }
+  if (key === 'runId') {
+    ref.runId = value;
+    return;
+  }
+  if (key === 'delegationId') {
+    ref.delegationId = value;
+  }
+}
+
+function parseHandoffArtifactFooter(text: string): {
+  text: string;
+  artifactRefs: HandOffFooterArtifactRefWithKind[];
+} {
+  const match = text.match(/\s*<artifacts>[\s\S]*?<\/artifacts>\s*$/);
+  if (!match || match.index === undefined) {
+    return { text, artifactRefs: [] };
+  }
+
+  const footer = match[0];
+  const artifactBody = footer
+    .replace(/^\s*<artifacts>/, '')
+    .replace(/<\/artifacts>\s*$/, '');
+
+  const artifactRefs: HandOffFooterArtifactRefWithKind[] = [];
+  let current: HandOffFooterArtifactRef | null = null;
+
+  for (const rawLine of artifactBody.split('\n')) {
+    const line = rawLine.trimEnd();
+    const normalized = line.trim();
+    if (!normalized) continue;
+
+    if (normalized.startsWith('- ')) {
+      if (current && hasArtifactFooterRefKind(current)) {
+        artifactRefs.push(current);
+      }
+      const nextCurrent: HandOffFooterArtifactRef = {
+        id: `${artifactRefs.length + 1}`,
+        kind: undefined,
+        mimeType: 'application/octet-stream',
+        uri: '',
+        title: undefined,
+        preview: undefined,
+        capabilityId: '',
+        delegationId: '',
+        runId: '',
+      };
+      const firstLine = parseFooterArtifactLineValue(normalized.slice(2));
+      if (firstLine) {
+        applyFooterArtifactField(nextCurrent, firstLine.key, firstLine.value);
+      }
+      current = nextCurrent;
+      continue;
+    }
+
+    if (!current) continue;
+    const parsed = parseFooterArtifactLineValue(normalized);
+    if (!parsed) continue;
+    applyFooterArtifactField(current, parsed.key, parsed.value);
+  }
+
+  if (current && hasArtifactFooterRefKind(current)) {
+    artifactRefs.push(current);
+  }
+
+  return {
+    text: text.slice(0, match.index).trimEnd(),
+    artifactRefs,
+  };
+}
+
+function serializeArtifactFooterRefs(refs: HandOffFooterArtifactRef[]) {
+  return refs
+    .map((ref) => {
+      const fields = [
+        `- kind=${clipForPrompt(ref.kind ?? 'unknown', 24)}`,
+        `  capability=${clipForPrompt(ref.capabilityId, 160)}`,
+        `  uri=${clipForPrompt(ref.uri, MAX_HANDOFF_ARTIFACT_URI_LENGTH)}`,
+        `  id=${ref.id}`,
+        `  runId=${ref.runId}`,
+        `  delegationId=${ref.delegationId}`,
+      ];
+      if (ref.mimeType) {
+        fields.push(`  mimeType=${clipForPrompt(ref.mimeType, 80)}`);
+      }
+      if (ref.title) {
+        fields.push(`  title=${clipForPrompt(ref.title, MAX_HANDOFF_ARTIFACT_TITLE_LENGTH)}`);
+      }
+      if (ref.preview) {
+        fields.push(`  preview=${clipForPrompt(ref.preview, MAX_HANDOFF_ARTIFACT_PREVIEW_LENGTH)}`);
+      }
+      return fields.filter(Boolean).join('\n');
+    })
+    .join('\n');
+}
+
+function formatHandoffArtifactRefsForMessage(
+  refs: Pick<
+    CapabilityArtifactRef,
+    'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
+  >[],
+) {
+  if (!refs.length) return '';
+  const lines = ['\n\n<artifacts>'];
+  lines.push(serializeArtifactFooterRefs(refs.slice(-MAX_HANDOFF_ARTIFACT_REFS)));
+  lines.push('</artifacts>');
+  return lines.join('\n');
+}
+
 /**
  * Build the state-message update for handing a completed subagent delegation
  * back to the main conversation queue.
@@ -262,6 +434,10 @@ export function buildSubagentHandoff(params: {
   lane: MessageLane;
   runId: string;
   delegationId: string;
+  artifactRefs?: Pick<
+    CapabilityArtifactRef,
+    'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
+  >[];
 }): BaseMessage[] | null {
   const announceMessage = readLatestAnnounceMessage(params.messages, {
     runId: params.runId,
@@ -271,6 +447,13 @@ export function buildSubagentHandoff(params: {
   if (!announceText.trim()) return null;
 
   const task = announceMessage ? getMessageDelegatedTask(announceMessage) : null;
+  const artifactRefFooter = params.artifactRefs && params.artifactRefs.length > 0
+    ? formatHandoffArtifactRefsForMessage(params.artifactRefs.map((ref) => ({
+      ...ref,
+      delegationId: params.delegationId,
+      runId: params.runId,
+    })))
+    : '';
 
   const removeMessages = params.messages.flatMap((message) => {
     if (getMessageLane(message) !== params.lane) return [];
@@ -285,7 +468,7 @@ export function buildSubagentHandoff(params: {
 
   // The copy is a first-class main message (no lane), carrying only minimal
   // provenance so the main agent knows which executor produced it for which task.
-  const handoffCopy = new AIMessage(announceText);
+  const handoffCopy = new AIMessage(`${announceText}${artifactRefFooter}`);
   setPinpetMeta(handoffCopy, {
     handoffFrom: params.lane,
     delegationId: params.delegationId,
@@ -335,21 +518,26 @@ function readAnnounceFromAnyMessage(message: BaseMessage): SubagentAnnounce | nu
   if (tagged) return tagged;
   const handoff = getMessageHandoffSource(message);
   if (!handoff || !isDelegationLane(handoff.handoffFrom)) return null;
-  return {
+  const parsed = parseHandoffArtifactFooter(readMessageText(message));
+  const announce: SubagentAnnounce = {
     lane: handoff.handoffFrom,
     delegationId: handoff.delegationId || null,
     task: handoff.task,
-    text: readMessageText(message) || null,
+    text: parsed.text || null,
   };
+  if (parsed.artifactRefs.length > 0) {
+    announce.artifactRefs = parsed.artifactRefs;
+  }
+  return announce;
 }
 
 function readLatestAnnounceMessage(
   messages: BaseMessage[],
-  options: { runId?: string | null; turnId?: string | null; delegationId?: string | null } = {},
+  options: { runId?: string | null; delegationId?: string | null } = {},
 ): BaseMessage | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    const runId = options.runId ?? options.turnId;
+    const runId = options.runId;
     if (runId && getMessageTurnId(message) !== runId) continue;
     if (options.delegationId && getMessageDelegationId(message) !== options.delegationId) continue;
     if (readTaggedAnnounce(message)) return message;
@@ -359,7 +547,7 @@ function readLatestAnnounceMessage(
 
 export function readLatestAnnounce(
   messages: BaseMessage[],
-  options: { runId?: string | null; turnId?: string | null; delegationId?: string | null } = {},
+  options: { runId?: string | null; delegationId?: string | null } = {},
 ): SubagentAnnounce | null {
   const message = readLatestAnnounceMessage(messages, options);
   return message ? readTaggedAnnounce(message) : null;
@@ -367,7 +555,7 @@ export function readLatestAnnounce(
 
 export function readLatestAnnounceCompletionReason(
   messages: BaseMessage[],
-  options: { runId?: string | null; turnId?: string | null; delegationId?: string | null } = {},
+  options: { runId?: string | null; delegationId?: string | null } = {},
 ): SubagentCompletionReason | null {
   const message = readLatestAnnounceMessage(messages, options);
   return message ? getMessageCompletionReason(message) : null;

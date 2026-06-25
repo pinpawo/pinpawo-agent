@@ -27,8 +27,8 @@
 ## 2. 观测建议
 
 1. 工具行为观测：消费 `onToolEvent` 并统一拼接执行日志。
-2. 编排状态观测：消费 `onTurnEvent`（turn_started/dispatch_started/dispatch_finished 等）。
-3. 能力行为观测：在能力层记录 `resultSchema` 与 `readResult` 产物，避免仅靠文本判断成功。
+2. 编排状态观测：消费 `onTurnEvent`（turn_started/tasks_queued/task_started/task_finished/turn_finished 等）。
+3. 能力行为观测：在能力层记录 `resultSchema` 与 `capabilityArtifacts`，避免仅靠文本判断成功。
 4. 中断排障：记录 `reviewId`、`selectedOptionId`、`pendingAction`。
 
 ## 3. 回复风格建议

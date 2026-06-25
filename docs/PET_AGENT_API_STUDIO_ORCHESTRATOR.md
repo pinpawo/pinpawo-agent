@@ -6,106 +6,133 @@
 createStudioOrchestrator(config: StudioOrchestratorConfig): StudioOrchestrator
 ```
 
-## 2. 核心类型
+## 2. 运行时类型（核心）
 
 ```ts
-type StudioOrchestratorConfig = {
-  studioId: string;
-  ownerUserId: string | null;
-  defaultPetId?: string | null;
-  agents: PetAgentRuntime[];
-  plannerPetId: string;
-  wikiBaseDir: string;
-  curator?: WikiCurator;
-  maxIterationCount?: number;
-  maxRetryPerTask?: number;
-};
-
 type StudioOrchestrator = {
   context: () => StudioContext;
   listAgents: () => PetAgentRuntimeDescriptor[];
-  invoke: (input: StudioOrchestratorInvokeInput) => Promise<StudioTurnResult>;
+  submitRequest: (input: StudioSubmitRequestInput) => Promise<StudioSubmitRequestResult>;
+  subscribe: (handler: StudioRunEventHandler) => () => void;
+  cancelRun: (runId: string) => Promise<void>;
+  getRun: (runId: string) => StudioRunSnapshot | null;
+  waitForRun: (runId: string) => Promise<StudioTurnResult>;
 };
 
-type StudioOrchestratorInvokeInput = {
+type StudioSubmitRequestInput = {
   userRequest: string;
-  plan?: StudioTaskPlan;
   turnId?: string;
   conversationId?: string;
   signal?: AbortSignal;
   onToolEvent?: SubagentToolEventHandler;
   onTurnEvent?: StudioTurnEventHandler;
 };
-```
 
-## 3. 执行结果
+type StudioSubmitRequestResult = {
+  runId: string;
+  status: 'accepted';
+};
 
-```ts
 type StudioTurnResult = {
   turnId: string;
-  state: StudioTurnState;
-  outcome: 
-    | { outcome: 'done'; finalDispatchId: string; reply: string }
-    | { outcome: 'stopped'; reason: string; reply: string };
+  snapshot: StudioRunSnapshot;
+  outcome: StudioTurnOutcome;
   studio: StudioContext;
 };
+
+type StudioTurnOutcome =
+  | {
+      outcome: 'done';
+      finalTaskIndex?: number;
+      finalPetRunId?: string;
+      reply: string;
+    }
+  | { outcome: 'stopped'; reason: string; reply: string };
 ```
 
-## 4. 关键状态结构
+`submitRequest` 是异步入列入口；`waitForRun` 阻塞等待该 run 的终态。
+
+## 3. 配置
 
 ```ts
-type StudioTask = {
-  petId: string;
-  goal: string;
-  acceptanceCriteria: string[];
-  status: 'pending' | 'satisfied' | 'failed';
-  retryCount: number;
-};
-
-type StudioDispatchState = {
-  id: string;
-  taskIndex: number;
-  petId: string;
-  status: 'running' | 'finished' | 'cancelled';
-  brief: string;
-  resultText?: string;
-  errorMessage?: string;
-  startedAt: string;
-  finishedAt?: string;
-};
-
-type StudioTurnState = {
-  turnId: string;
-  conversationId: string;
-  userRequest: string;
-  plan: StudioTaskPlan | null;
-  dispatches: StudioDispatchState[];
-  wikiRoot: string;
-  iterationCount: number;
+type StudioOrchestratorConfig = {
+  studioId: string;
+  ownerUserId: string | null;
+  agents: PetAgentRuntime[];
+  plannerPetId: string;
+  wikiBaseDir: string;
+  defaultPetId?: string | null;
+  curator?: WikiCurator;
+  runQueueStore?: import('./runQueueStore').StudioRunQueueStore;
+  restoreOpenRuns?: boolean;
+  workdir?: string;
+  maxIterationCount?: number;
+  maxRetryPerTask?: number;
 };
 ```
 
-## 5. 事件流
+要点:
+
+- 仍按 agent registry 创建可调度 pet 列表。
+- `plannerPetId` 指定的 pet 在 turn 起始负责 plan。
+- `restoreOpenRuns` 为 true 时会从 store 恢复未完成 run。
+
+## 4. 事件流
 
 ```ts
 type StudioTurnEvent =
   | { type: 'turn_started'; turnId: string; userRequest: string }
-  | { type: 'plan_set'; plan: StudioTaskPlan }
+  | { type: 'tasks_queued'; taskCount: number }
   | { type: 'task_status_changed'; taskIndex: number; status: StudioTaskStatus }
-  | { type: 'dispatch_started'; dispatchId: string; taskIndex: number; petId: string }
-  | { type: 'dispatch_finished'; dispatchId: string; status: 'finished' | 'cancelled'; resultText?: string; errorMessage?: string; }
+  | {
+      type: 'task_started';
+      taskIndex: number;
+      petId: string;
+      petRunId: string;
+    }
+  | {
+      type: 'task_finished';
+      taskIndex: number;
+      petId: string;
+      petRunId: string;
+      status: 'finished' | 'cancelled';
+      resultText?: string;
+      errorMessage?: string;
+    }
   | { type: 'wiki_updated'; changedPaths: string[] }
-  | { type: 'turn_finished'; outcome: StudioTurnOutcome };
+  | { type: 'turn_finished'; outcome: 'done' | 'stopped'; finalPetRunId?: string };
+
+type StudioRunEvent =
+  | {
+      type: 'run_changed';
+      runId: string;
+      conversationId: string;
+      status: StudioRunStatus;
+      snapshot: StudioRunSnapshot;
+      reason?: string;
+      occurredAt: string;
+    }
+  | {
+      type: 'wiki_changed';
+      runId: string;
+      conversationId: string;
+      changedPaths: string[];
+      occurredAt: string;
+    };
 ```
 
-### 5.1 约定
+- `onTurnEvent`：编排级低频事件，适合控制面。
+- `onToolEvent`：高频工具事件，适合 pet 面板。
+- `subscribe` 关注 run 级快照变更；`onTurnEvent` 关注状态机阶段。
 
-1. 编排内部默认是顺序调度（MVP）。
-2. 一次 `invoke` 可以带显式 `plan`，否则走 planner 生成 plan。
-3. `onToolEvent` 透传给每次 `pet.invoke()`，用于构建实时工具流。
-4. `onTurnEvent` 只表示编排级状态，不代替工具执行事件。
+## 5. 任务模型与完成身份
 
-## 6. 示例
+`StudioTaskQueueItem` 是 run queue 的执行单元，包含 `petRunId`。
+
+`StudioTurnOutcome.finalPetRunId` 是真正的完成身份（用于 trace 与重入）。
+`finalDispatchId` 为持久化兼容字段，只用于旧数据回填，不作为新文档核心术语。
+
+## 6. 使用示例
 
 ```ts
 const orchestrator = createStudioOrchestrator({
@@ -116,14 +143,18 @@ const orchestrator = createStudioOrchestrator({
   agents: [petA, petB],
 });
 
-const result = await orchestrator.invoke({
-  userRequest: '请把这次发布文案和视频脚本都补齐',
+const accepted = await orchestrator.submitRequest({
+  userRequest: '先产出文案，再补齐视频脚本。',
   onTurnEvent: (event) => ui.renderTurnEvent(event),
   onToolEvent: (event) => ui.renderToolEvent(event),
 });
+
+const result = await orchestrator.waitForRun(accepted.runId);
+console.log(result.outcome.finalPetRunId, result.outcome.reply);
 ```
 
-## 7. 设计关系
+## 7. 相关文档
 
-1. 编排状态机与边界规则见 [PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN](PET_AGENT_STUDIO_ORCHESTRATOR_DESIGN.md)
-2. 接口边界与数据形状见 [PET_AGENT_STUDIO_INTERFACES](PET_AGENT_STUDIO_INTERFACES.md)
+- `docs/PET_AGENT_STUDIO_INTERFACES.md`
+- `docs/PET_AGENT_CAPABILITY_ARTIFACT_STORE_DESIGN.md`
+- `packages/pet-agent/src/agent/studio/types.ts`

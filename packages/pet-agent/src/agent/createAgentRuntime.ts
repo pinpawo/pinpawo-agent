@@ -87,6 +87,7 @@ import {
   reuseOrAppendRunDelegation,
   updateRunDelegationResult,
 } from './orchestrator/delegations';
+import { filterCapabilityArtifacts } from './orchestrator/capabilityArtifacts';
 import {
   buildSubagentHandoff,
   getMessageLane,
@@ -145,6 +146,70 @@ const ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_SET = new Set<string>(
 
 export function isOrchestratorInternalAiStreamNode(node: string) {
   return ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_SET.has(node);
+}
+
+const MAX_HANDED_OFF_ANNOUNCE_ARTIFACT_REFS = 5;
+const ARTIFACT_KIND_PRIORITY: Record<string, number> = {
+  result: 0,
+  report: 1,
+  image: 2,
+  video: 3,
+  audio: 4,
+  pdf: 5,
+  file: 6,
+  bundle: 7,
+};
+
+type HandOffArtifactRef = Pick<
+  CapabilityArtifactRef,
+  'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
+>;
+
+function compareArtifactsForHandoff(a: CapabilityArtifactRef, b: CapabilityArtifactRef) {
+  const aPriority = ARTIFACT_KIND_PRIORITY[a.kind] ?? 99;
+  const bPriority = ARTIFACT_KIND_PRIORITY[b.kind] ?? 99;
+  if (aPriority !== bPriority) {
+    return aPriority - bPriority;
+  }
+  if (a.createdAt !== b.createdAt) {
+    return b.createdAt.localeCompare(a.createdAt);
+  }
+  return 0;
+}
+
+function buildHandoffArtifactRefs(
+  artifacts: CapabilityArtifactRef[],
+  params: { delegationId: string; runId: string; capabilityId?: string | null },
+): HandOffArtifactRef[] {
+  const filtered = filterCapabilityArtifacts(artifacts, {
+    delegationId: params.delegationId,
+    runId: params.runId,
+    ...(params.capabilityId ? { capabilityId: params.capabilityId } : {}),
+  });
+
+  const deduped: CapabilityArtifactRef[] = [];
+  const seen = new Set<string>();
+  for (const artifact of filtered) {
+    const key = `${artifact.id}:${artifact.uri}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(artifact);
+  }
+
+  return deduped
+    .sort(compareArtifactsForHandoff)
+    .slice(0, MAX_HANDED_OFF_ANNOUNCE_ARTIFACT_REFS)
+    .map((artifact) => ({
+      id: artifact.id,
+      kind: artifact.kind,
+      mimeType: artifact.mimeType,
+      uri: artifact.uri,
+      title: artifact.title,
+      preview: artifact.preview,
+      capabilityId: artifact.capabilityId,
+      delegationId: artifact.delegationId,
+      runId: artifact.runId,
+    }));
 }
 
 // --- Configurable helpers ---
@@ -712,11 +777,28 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const recentAnnounces = readRecentAnnounces(state.messages);
     const activeDelegation = state.taskActiveDelegation
       ?? (kind === 'delegation_outcome' ? readLegacyTaskActiveDelegation(state) : null);
+    const activeDelegationCapabilityId = activeDelegation
+      && activeDelegation.lane.startsWith('capability:')
+      ? activeDelegation.lane.slice('capability:'.length)
+      : null;
+    const activeDelegationArtifactRefs = activeDelegation
+      ? buildHandoffArtifactRefs(
+          state.sessionCapabilityArtifacts,
+          {
+            delegationId: activeDelegation.id,
+            runId: activeDelegation.transcriptRunId,
+            capabilityId: activeDelegationCapabilityId,
+          },
+        )
+      : [];
     const activeDelegationAnnounce = activeDelegation
       ? readLatestAnnounce(state.messages, {
           runId: activeDelegation.transcriptRunId,
           delegationId: activeDelegation.id,
         })
+      : null;
+    const activeDelegationAnnounceForDecision = activeDelegationAnnounce
+      ? { ...activeDelegationAnnounce, artifactRefs: activeDelegationArtifactRefs }
       : null;
     const requestContext = buildPreparedRequestContext({
       latestUserRequest: latestHumanRequest,
@@ -785,7 +867,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         latestUserRequest: latestHumanRequest,
         currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
         subagentAnnounceContext: buildSubagentAnnounceContext(
-          activeDelegationAnnounce,
+          activeDelegationAnnounceForDecision,
           activeDelegation
             ? readLatestAnnounceCompletionReason(state.messages, {
                 runId: activeDelegation.transcriptRunId,
@@ -902,6 +984,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         lane: activeDelegation.lane,
         runId: activeDelegation.transcriptRunId,
         delegationId: activeDelegation.id,
+        artifactRefs: activeDelegationArtifactRefs,
       });
       if (messages) {
         handoffMessages.push(...messages);

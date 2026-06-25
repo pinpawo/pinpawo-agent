@@ -24,6 +24,8 @@ type CapabilityContext = {
   messages: BaseMessage[];
   execution?: AgentExecution;
   availableToolkits?: ReadonlyArray<{ name: string; description: string }>;
+  /** Host-provided artifact persistence port, optional for deterministic writes. */
+  artifactStore?: CapabilityArtifactStore;
 };
 
 type CapabilityRuntime = {
@@ -33,9 +35,11 @@ type CapabilityRuntime = {
   instructions?: string[] | ((ctx: CapabilityInstructionContext) => string[] | Promise<string[]>);
   middleware?: {
     beforeRun?: (input: SubagentInput) => SubagentInput | Promise<SubagentInput>;
-    afterRun?: (result: SubagentResult) => SubagentResult | Promise<SubagentResult>;
+    afterRun?: (
+      result: SubagentResult,
+      ctx: CapabilityMiddlewareContext,
+    ) => SubagentResult | Promise<SubagentResult>;
   };
-  readResult?: (messages: BaseMessage[]) => unknown | null;
 };
 ```
 
@@ -43,7 +47,9 @@ type CapabilityRuntime = {
 
 1. `uses` 声明能力依赖 toolkit 名称，运行时自动注入对应工具集。
 2. `toolsets` 为能力私有工具，建议通过 `defineToolset` 静态定义，避免重复工具名。
-3. `middleware.afterRun` 常用于包装 capability 产物，不做持久化存储职责。
+3. `middleware.afterRun` 常用于在代码侧持久化 capability 产物（例如把结构化结果写入 artifact store），并把 ref 回传给 orchestrator。
+
+`artifactStore` 为可选依赖，能力需要容错处理未注入的场景（例如测试）。
 
 ## 3. Toolkit 定义
 
@@ -78,5 +84,6 @@ type AgentToolkit = {
 
 ## 5. 相关导出
 
-1. `readResult` 通道：`packages/pet-agent/src/index.ts` 导出的 `readLatestToolArtifact`
-2. 详见 `packages/pet-agent/src/types/capability.ts` 与 `packages/pet-agent/src/types/toolkit.ts`
+1. `CapabilityArtifactStore`、`CapabilityArtifactRef`、`CapabilityArtifactWriteInput`：见 `packages/pet-agent/src/types/artifact.ts`
+2. `CapabilityContext`、`CapabilityRuntime` 与 `CapabilityMiddleware`：见 `packages/pet-agent/src/types/capability.ts`
+3. toolkit 与 policy：见 `packages/pet-agent/src/types/toolkit.ts`

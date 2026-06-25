@@ -4,11 +4,13 @@ import Markdown from '@inkkit/ink-markdown';
 import { Text } from 'ink';
 import React, { Children, isValidElement } from 'react';
 import stringWidth from 'string-width';
+import { AgentOperationItem } from './AgentOperationItem';
 import { AgentTimeline } from './AgentTimeline';
 import { MessageBlock } from './MessageBlock';
 import { SubagentActivityItem } from './SubagentActivityItem';
 import {
   buildAgentOperationDisplayLines,
+  OPERATION_STATUS_DOT,
 } from './agentTimelineRendering';
 import {
   agentTimelineEntriesFromSnapshot,
@@ -258,6 +260,36 @@ test('buildAgentOperationDisplayLines renders browser active completed and faile
     failed,
     /^No active browser page\. Use browser_open first\. · #result · selector=#result · timeoutMs=5000 · 等待页面（失败）$/,
   );
+});
+
+test('buildAgentOperationDisplayLines tags the header line with the phase for the status dot', () => {
+  const completed = buildAgentOperationDisplayLines(operationEntry({ phase: 'completed' }), 3500, 120);
+  const failed = buildAgentOperationDisplayLines(operationEntry({ phase: 'failed' }), 3500, 120);
+
+  assert.equal(completed[0]!.statusDot, 'completed');
+  assert.equal(failed[0]!.statusDot, 'failed');
+  // Only the header line carries a status dot.
+  assert.ok(completed.slice(1).every((line) => line.statusDot === undefined));
+});
+
+test('AgentOperationItem renders a phase-colored status dot before the header', () => {
+  const dotFor = (phase: AgentOperationEntry['phase']) => {
+    const element = AgentOperationItem({
+      entry: operationEntry({ phase }),
+      now: 3000,
+      width: 120,
+    });
+    const dot = findElementsByType(element, Text)
+      .find((node) => node.props.children === OPERATION_STATUS_DOT);
+    return dot?.props;
+  };
+
+  assert.equal(dotFor('completed')?.color, 'green');
+  assert.equal(dotFor('failed')?.color, 'red');
+  assert.equal(dotFor('interrupted')?.color, 'yellow');
+  // Running/pending uses a dim (gray) dot with no explicit color.
+  assert.equal(dotFor('started')?.color, undefined);
+  assert.equal(dotFor('started')?.dimColor, true);
 });
 
 test('AgentTimeline preserves assistant and operation entry order', () => {

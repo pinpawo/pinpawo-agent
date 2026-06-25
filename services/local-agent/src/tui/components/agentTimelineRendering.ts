@@ -10,9 +10,19 @@ export type TimelineTextLine = {
   id: string;
   text: string;
   tone?: 'default' | 'muted' | 'added' | 'removed';
+  /**
+   * When set, the line is the operation's header and should render a leading
+   * status dot in this phase's color (gray=running, green=done, red=failed).
+   */
+  statusDot?: AgentOperationEntry['phase'];
 };
 
 type TimelineTextLineDraft = Omit<TimelineTextLine, 'id'>;
+
+/** Columns reserved for the leading status dot and its trailing space ("● "). */
+export const OPERATION_DOT_WIDTH = 2;
+
+export const OPERATION_STATUS_DOT = '●';
 
 const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
   'after',
@@ -29,7 +39,9 @@ export function buildAgentOperationDisplayLines(
 ): TimelineTextLine[] {
   const lines: TimelineTextLine[] = [{
     id: `${entry.id}:line`,
-    text: buildAgentOperationText(entry, now, width),
+    // Reserve two columns for the leading status dot ("● ").
+    text: buildAgentOperationText(entry, now, Math.max(0, width - OPERATION_DOT_WIDTH)),
+    statusDot: entry.phase,
   }];
   const payloadLines = buildOperationPayloadLines(entry, width);
   payloadLines.forEach((line, index) => {

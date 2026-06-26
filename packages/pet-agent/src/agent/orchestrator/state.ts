@@ -52,6 +52,10 @@ export const OrchestratorState = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
+  canHandoffActiveDelegation: Annotation<boolean>({
+    reducer: (_prev, next) => next,
+    default: () => true,
+  }),
   runId: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
@@ -71,6 +75,7 @@ export type OrchestratorRunState = Pick<
   | 'runCapabilitySearchState'
   | 'runDelegations'
   | 'runIterationCount'
+  | 'canHandoffActiveDelegation'
   | 'runId'
 >;
 
@@ -89,6 +94,7 @@ export function buildRunStateReset(): OrchestratorRunState {
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     runDelegations: [],
     runIterationCount: 0,
+    canHandoffActiveDelegation: true,
     runId: randomUUID().slice(0, 8),
   };
 }

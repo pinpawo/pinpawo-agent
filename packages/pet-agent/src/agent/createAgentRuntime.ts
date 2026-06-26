@@ -570,7 +570,27 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   }
 
   function afterIterationLimitGuard(state: OrchestratorStateType) {
-    return state.runPendingFinalReply === 'inline' ? 'end' : 'delegationOutcomeDecision';
+    return state.runPendingFinalReply === 'inline' ? 'end' : 'delegationOutcomeDecisionGuard';
+  }
+
+  function userIntentDecisionGuard() {
+    return { canHandoffActiveDelegation: true };
+  }
+
+  async function delegationOutcomeDecisionGuard(state: OrchestratorStateType) {
+    const activeDelegation = state.taskActiveDelegation ?? readLegacyTaskActiveDelegation(state);
+    if (!activeDelegation) {
+      return { canHandoffActiveDelegation: true };
+    }
+
+    const activeDelegationCompletionReason = readLatestAnnounceCompletionReason(state.messages, {
+      runId: activeDelegation.transcriptRunId,
+      delegationId: activeDelegation.id,
+    });
+
+    return {
+      canHandoffActiveDelegation: activeDelegationCompletionReason !== 'limit_reached',
+    };
   }
 
   async function capabilityDiscovery(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
@@ -667,9 +687,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     kind: 'user_intent' | 'delegation_outcome',
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
-    options?: {
-      canHandoffActiveDelegation?: boolean;
-    },
   ) {
     const {
       capabilities,
@@ -902,7 +919,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     // Single-line delegation handoff is driven by taskActiveDelegation. run
     // summaries are not the source of truth for unfinished task lifecycle.
     const canHandoffActiveDelegation = kind === 'delegation_outcome'
-      ? options?.canHandoffActiveDelegation ?? true
+      ? state.canHandoffActiveDelegation
       : true;
     const replacingActiveDelegation = kind === 'delegation_outcome'
       && Boolean(activeDelegation && runPendingDelegation && activeDelegation.id !== runPendingDelegation.id);
@@ -979,16 +996,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   }
 
   async function delegationOutcomeDecision(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const activeDelegation = state.taskActiveDelegation ?? readLegacyTaskActiveDelegation(state);
-    const activeDelegationCompletionReason = activeDelegation
-      ? readLatestAnnounceCompletionReason(state.messages, {
-          runId: activeDelegation.transcriptRunId,
-          delegationId: activeDelegation.id,
-        })
-      : null;
-    return runOrchestrationDecision('delegation_outcome', state, runnableConfig, {
-      canHandoffActiveDelegation: activeDelegationCompletionReason !== 'limit_reached',
-    });
+    return runOrchestrationDecision('delegation_outcome', state, runnableConfig);
   }
 
   // Node: answer — the dedicated final-reply node. The decision nodes only route
@@ -1294,7 +1302,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     ) {
       return 'capabilitySearch';
     }
-    return 'userIntentDecision';
+    return 'userIntentDecisionGuard';
   }
 
   function afterContextPrep(state: OrchestratorStateType) {
@@ -1321,6 +1329,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('compactContext', compactContext)
     .addNode('capabilityDiscovery', capabilityDiscovery)
     .addNode('capabilitySearch', new ToolNode([capabilitySearchTool]))
+    .addNode('userIntentDecisionGuard', userIntentDecisionGuard)
+    .addNode('delegationOutcomeDecisionGuard', delegationOutcomeDecisionGuard)
     .addNode('userIntentDecision', userIntentDecision)
     .addNode('delegationOutcomeIterationGuard', runIterationLimitGuard)
     .addNode('delegationOutcomeDecision', delegationOutcomeDecision)
@@ -1337,12 +1347,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     })
     .addConditionalEdges('capabilityDiscovery', afterCapabilityDiscovery, {
       capabilitySearch: 'capabilitySearch',
-      userIntentDecision: 'userIntentDecision',
+      userIntentDecisionGuard: 'userIntentDecisionGuard',
     })
+    .addEdge('userIntentDecisionGuard', 'userIntentDecision')
     .addConditionalEdges('delegationOutcomeIterationGuard', afterIterationLimitGuard, {
       end: END,
-      delegationOutcomeDecision: 'delegationOutcomeDecision',
+      delegationOutcomeDecisionGuard: 'delegationOutcomeDecisionGuard',
     })
+    .addEdge('delegationOutcomeDecisionGuard', 'delegationOutcomeDecision')
     .addConditionalEdges('userIntentDecision', afterDecision, {
       end: END,
       answer: 'answer',
@@ -1356,7 +1368,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       general: 'general',
     })
     .addEdge('answer', END)
-    .addEdge('capabilitySearch', 'userIntentDecision')
+    .addEdge('capabilitySearch', 'userIntentDecisionGuard')
     .addEdge('capability', 'delegationOutcomeDecision')
     .addEdge('general', 'delegationOutcomeDecision');
 

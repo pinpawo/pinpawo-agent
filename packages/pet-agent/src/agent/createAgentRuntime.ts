@@ -544,6 +544,35 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     };
   }
 
+  async function runIterationLimitGuard(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
+    const { maxRunIterations } = getInvokeOptions(runnableConfig);
+    const activeDelegation = state.taskActiveDelegation ?? readLegacyTaskActiveDelegation(state);
+    if (!activeDelegation) {
+      return { runPendingFinalReply: null };
+    }
+    const maxRunIterationLimit = maxRunIterations ?? orchestratorMaxIterations;
+    if (state.runIterationCount < maxRunIterationLimit) {
+      return { runPendingFinalReply: null };
+    }
+    return {
+      messages: [
+        new AIMessage(buildRunIterationLimitMessage(
+          activeDelegation,
+          maxRunIterationLimit,
+          state.runIterationCount,
+        )),
+      ],
+      runPendingDelegation: null,
+      runPendingFinalReply: 'inline',
+      taskActiveDelegation: activeDelegation,
+      runIterationCount: 0,
+    };
+  }
+
+  function afterIterationLimitGuard(state: OrchestratorStateType) {
+    return state.runPendingFinalReply === 'inline' ? 'end' : 'delegationOutcomeDecision';
+  }
+
   async function capabilityDiscovery(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
       capabilities,
@@ -647,7 +676,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       runtimeEnvironment,
       reviewCapabilities,
       globalReviewPolicy,
-      maxRunIterations,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
 
@@ -699,25 +727,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
           delegationId: activeDelegation.id,
         })
       : null;
-    const maxRunIterationLimit = maxRunIterations ?? orchestratorMaxIterations;
-    const runIterationLimitReached = kind === 'delegation_outcome'
-      && activeDelegation
-      && state.runIterationCount >= maxRunIterationLimit;
-    if (runIterationLimitReached) {
-      return {
-        messages: [
-          new AIMessage(buildRunIterationLimitMessage(
-            activeDelegation,
-            maxRunIterationLimit,
-            state.runIterationCount,
-          )),
-        ],
-        runPendingDelegation: null,
-        runPendingFinalReply: 'inline',
-        taskActiveDelegation: activeDelegation,
-        runIterationCount: 0,
-      };
-    }
     const activeDelegationAnnounceForDecision = activeDelegationAnnounce
       ? { ...activeDelegationAnnounce, artifactRefs: activeDelegationArtifactRefs }
       : null;
@@ -1276,10 +1285,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
   function afterContextPrep(state: OrchestratorStateType) {
     if (state.taskActiveDelegation?.status === 'awaiting_decision') {
-      return 'delegationOutcomeDecision';
+      return 'delegationOutcomeIterationGuard';
     }
     if (!state.taskActiveDelegation && readLegacyTaskActiveDelegation(state)) {
-      return 'delegationOutcomeDecision';
+      return 'delegationOutcomeIterationGuard';
     }
     return 'capabilityDiscovery';
   }
@@ -1299,6 +1308,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('capabilityDiscovery', capabilityDiscovery)
     .addNode('capabilitySearch', new ToolNode([capabilitySearchTool]))
     .addNode('userIntentDecision', userIntentDecision)
+    .addNode('delegationOutcomeIterationGuard', runIterationLimitGuard)
     .addNode('delegationOutcomeDecision', delegationOutcomeDecision)
     .addNode('answer', answerNode)
     .addNode('capability', capabilityNode)
@@ -1308,12 +1318,16 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     // Run entry uses explicit task lifecycle state. Lane announces remain
     // transcript/context storage and are not the normal control-flow signal.
     .addConditionalEdges('compactContext', afterContextPrep, {
-      delegationOutcomeDecision: 'delegationOutcomeDecision',
+      delegationOutcomeIterationGuard: 'delegationOutcomeIterationGuard',
       capabilityDiscovery: 'capabilityDiscovery',
     })
     .addConditionalEdges('capabilityDiscovery', afterCapabilityDiscovery, {
       capabilitySearch: 'capabilitySearch',
       userIntentDecision: 'userIntentDecision',
+    })
+    .addConditionalEdges('delegationOutcomeIterationGuard', afterIterationLimitGuard, {
+      end: END,
+      delegationOutcomeDecision: 'delegationOutcomeDecision',
     })
     .addConditionalEdges('userIntentDecision', afterDecision, {
       end: END,

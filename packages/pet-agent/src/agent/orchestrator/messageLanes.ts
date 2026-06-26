@@ -438,6 +438,7 @@ export function buildSubagentHandoff(params: {
   runId: string;
   delegationId: string;
   clearLane?: boolean;
+  includeCopy?: boolean;
   artifactRefs?: Pick<
     CapabilityArtifactRef,
     'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
@@ -460,6 +461,7 @@ export function buildSubagentHandoff(params: {
     : '';
 
   const clearLane = params.clearLane ?? true;
+  const includeCopy = params.includeCopy ?? true;
   const removeMessages = clearLane
     ? params.messages.flatMap((message) => {
       if (getMessageLane(message) !== params.lane) return [];
@@ -472,6 +474,10 @@ export function buildSubagentHandoff(params: {
       return [new RemoveMessage({ id: message.id }) as BaseMessage];
     })
     : [];
+
+  if (!includeCopy) {
+    return removeMessages;
+  }
 
   // The copy is a first-class main message (no lane), carrying only minimal
   // provenance so the main agent knows which executor produced it for which task.

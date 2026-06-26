@@ -716,9 +716,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const capabilityList = capabilities ?? [];
     validateUniqueCapabilityNames(capabilityList);
     const latestHumanRequest = readLatestHumanRequest(state.messages);
-    const recentMainMessages = mainMessagesWithoutCompaction(state.messages);
     const contextSummaries = readContextCompactionSummaries(state.messages);
-    const recentAnnounces = readRecentAnnounces(state.messages);
     const activeDelegation = state.taskActiveDelegation
       ?? (kind === 'delegation_outcome' ? readLegacyTaskActiveDelegation(state) : null);
     const activeDelegationCapabilityId = activeDelegation
@@ -735,6 +733,27 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
           },
         )
       : [];
+    const canHandoffActiveDelegation = kind === 'delegation_outcome'
+      ? state.canHandoffActiveDelegation
+      : true;
+    const preDecisionHandoffMessages =
+      kind === 'delegation_outcome'
+      && canHandoffActiveDelegation
+      && activeDelegation
+        ? buildSubagentHandoff({
+            messages: state.messages,
+            lane: activeDelegation.lane,
+            runId: activeDelegation.transcriptRunId,
+            delegationId: activeDelegation.id,
+            artifactRefs: activeDelegationArtifactRefs,
+            clearLane: false,
+          })
+        : null;
+    const decisionContextMessages = preDecisionHandoffMessages
+      ? [...state.messages, ...preDecisionHandoffMessages]
+      : state.messages;
+    const recentMainMessages = mainMessagesWithoutCompaction(decisionContextMessages);
+    const recentAnnounces = readRecentAnnounces(decisionContextMessages);
     const activeDelegationAnnounce = activeDelegation
       ? readLatestAnnounce(state.messages, {
           runId: activeDelegation.transcriptRunId,
@@ -920,29 +939,25 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     //
     // Single-line delegation handoff is driven by taskActiveDelegation. run
     // summaries are not the source of truth for unfinished task lifecycle.
-    const canHandoffActiveDelegation = kind === 'delegation_outcome'
-      ? state.canHandoffActiveDelegation
-      : true;
-    const isDelegateDecision =
-      actionKind === 'delegate_general' || actionKind === 'delegate_capability';
-    const shouldHandoffCurrentDelegation =
-      kind === 'delegation_outcome'
-      && canHandoffActiveDelegation
-      && activeDelegation
-      && (actionKind === 'answer' || isDelegateDecision);
-    const shouldClearLaneForHandoff = kind === 'delegation_outcome' && actionKind === 'answer';
     const replacingActiveDelegation = kind === 'delegation_outcome'
       && Boolean(activeDelegation && runPendingDelegation && activeDelegation.id !== runPendingDelegation.id);
     const handoffMessages: BaseMessage[] = [];
     const handedOffDelegationIds = new Set<string>();
-    if ((shouldHandoffCurrentDelegation || replacingActiveDelegation) && activeDelegation) {
+    if (preDecisionHandoffMessages) {
+      handoffMessages.push(...preDecisionHandoffMessages);
+    }
+    const shouldClearLaneForHandoff = kind === 'delegation_outcome'
+      && actionKind === 'answer'
+      && canHandoffActiveDelegation
+      && Boolean(activeDelegation);
+    if ((shouldClearLaneForHandoff || replacingActiveDelegation) && activeDelegation) {
       const messages = buildSubagentHandoff({
         messages: state.messages,
         lane: activeDelegation.lane,
         runId: activeDelegation.transcriptRunId,
         delegationId: activeDelegation.id,
-        artifactRefs: activeDelegationArtifactRefs,
         clearLane: shouldClearLaneForHandoff || replacingActiveDelegation,
+        includeCopy: false,
       });
       if (messages) {
         handoffMessages.push(...messages);
@@ -966,7 +981,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : nextDelegationState.runDelegations;
 
     let nextTaskActiveDelegation: TaskActiveDelegation | null;
-    const shouldClearTaskActiveDelegation = actionKind === 'answer' && shouldHandoffCurrentDelegation;
+    const shouldClearTaskActiveDelegation = shouldClearLaneForHandoff;
     if (replacementBlocked) {
       nextTaskActiveDelegation = activeDelegation;
     } else if (shouldClearTaskActiveDelegation) {

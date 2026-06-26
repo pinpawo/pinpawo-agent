@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool } from '@langchain/core/tools';
+import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { Command, isCommand, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
@@ -688,7 +689,7 @@ test('limit-reached progress announce lets model choose the same capability dele
   });
 
   assert.equal(capabilityRunCount, 1);
-  assert.equal(decisionCallCount, 2);
+  assert.equal(decisionCallCount, 1);
   // The active task context carries the continuation action; the system prompt
   // stays free of tool/candidate target expansion.
   assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.inspect_repo/);
@@ -2172,6 +2173,179 @@ test('delegation outcome continue decision can re-enter main and finalize handof
   // Final handoff on answer should clear lane transcript for finished continuation.
   assert.equal(laneMessages(state.messages, 'general', input.runId, activeDelegation.id)
     .filter((message) => getMessageIsAnnounce(message)).length === 0, true);
+});
+
+test('delegation outcome continuation path rechecks run iteration guard before next decision', async () => {
+  let routeCallCount = 0;
+  const routeModel = {
+    invoke: async () => new AIMessage(''),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return {
+          action: routeCallCount === 1 ? 'delegate_general' : 'answer',
+          task: '继续执行下一段。',
+          context_summary: '已经执行了一段进度。',
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeListChatModel({ responses: ['已完成一段子任务。'], sleep: 0 }),
+    },
+    actor: testActor,
+  });
+
+  const activeDelegation: TaskActiveDelegation = {
+    id: 'active-limit-inline',
+    lane: 'general',
+    task: '执行长流程任务',
+    contextSummary: '持续进行。',
+    transcriptRunId: 'run-continue-limit',
+    status: 'awaiting_decision',
+    resultPreview: '进度已完成前段。',
+  };
+  const inputBase = buildOrchestratorRunInput([new HumanMessage('继续执行任务')]);
+  activeDelegation.transcriptRunId = inputBase.runId;
+  const input = {
+    ...inputBase,
+    taskActiveDelegation: activeDelegation,
+    runDelegations: [{
+      id: activeDelegation.id,
+      lane: activeDelegation.lane,
+      task: activeDelegation.task,
+      status: 'progress',
+      resultPreview: activeDelegation.resultPreview,
+    }] as RunDelegation[],
+  };
+
+  const announce = new AIMessage('进度已完成前段。');
+  announce.id = 'm-limit-announce';
+  setPinpetMeta(announce, {
+    lane: 'general',
+    runId: input.runId,
+    delegationId: activeDelegation.id,
+    isAnnounce: true,
+    completionReason: 'natural',
+    task: activeDelegation.task,
+  });
+  input.messages.push(announce);
+
+  const state = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'delegation-outcome-to-iteration-guard',
+      actor: testActor,
+      capabilities: [],
+      maxRunIterations: 1,
+      toolkits: [{
+        name: 'local',
+        description: 'local tools',
+        tools: [mockTool('run_shell')],
+      }],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(routeCallCount, 1);
+  assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
+  assert.equal(state.runIterationCount, 0);
+  const finalText = String(state.messages.at(-1)?.content ?? '');
+  assert.match(finalText, /主流程循环已达到上限/);
+});
+
+test('delegation_outcome does not append duplicate handoff copies for unchanged announce', async () => {
+  let routeCallCount = 0;
+  const routeModel = {
+    invoke: async () => new AIMessage(''),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        if (routeCallCount === 1 || routeCallCount === 2) {
+          return {
+            action: 'delegate_general',
+            task: '继续执行后续步骤。',
+            context_summary: '任务仍未完成。',
+          };
+        }
+        return { action: 'answer' };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeListChatModel({
+        responses: ['进度更新：已完成一部分，继续保留。', '进度更新：已完成一部分，继续保留。'],
+        sleep: 0,
+      }),
+    },
+    actor: testActor,
+  });
+
+  const activeDelegation: TaskActiveDelegation = {
+    id: 'active-dup-copy',
+    lane: 'general',
+    task: '处理大型清单',
+    contextSummary: '尚未完成。',
+    transcriptRunId: 'run-dup-copy',
+    status: 'awaiting_decision',
+    resultPreview: '进度更新：已完成一部分，继续保留。',
+  };
+  const inputBase = buildOrchestratorRunInput([new HumanMessage('继续清单处理')]);
+  activeDelegation.transcriptRunId = inputBase.runId;
+  const input = {
+    ...inputBase,
+    taskActiveDelegation: activeDelegation,
+    runDelegations: [{
+      id: activeDelegation.id,
+      lane: activeDelegation.lane,
+      task: activeDelegation.task,
+      status: 'progress',
+      resultPreview: activeDelegation.resultPreview,
+    }] as RunDelegation[],
+  };
+  const initialAnnounce = new AIMessage('进度更新：已完成一部分，继续保留。');
+  initialAnnounce.id = 'm-dup-copy';
+  setPinpetMeta(initialAnnounce, {
+    lane: 'general',
+    runId: input.runId,
+    delegationId: activeDelegation.id,
+    isAnnounce: true,
+    completionReason: 'natural',
+    task: activeDelegation.task,
+  });
+  input.messages.push(initialAnnounce);
+
+  const state = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'delegation-outcome-no-duplicate-handoff',
+      actor: testActor,
+      capabilities: [],
+      maxRunIterations: 10,
+      toolkits: [{
+        name: 'local',
+        description: 'local tools',
+        tools: [mockTool('run_shell')],
+      }],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(routeCallCount, 3);
+  const handoffCopies = mainConversationMessages(state.messages)
+    .filter((message) => {
+      const source = getMessageHandoffSource(message);
+      return source?.delegationId === activeDelegation.id;
+    });
+  assert.equal(handoffCopies.length, 1);
 });
 
 test('lane tagging hides subagent messages from route and records completed announce', () => {

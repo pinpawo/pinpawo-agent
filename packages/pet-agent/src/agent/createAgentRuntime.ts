@@ -81,6 +81,7 @@ import {
 import { filterCapabilityArtifacts } from './orchestrator/capabilityArtifacts';
 import {
   buildSubagentHandoff,
+  getMessageHandoffSource,
   getMessageLane,
   getMessageTurnId,
   laneMessages,
@@ -202,6 +203,28 @@ function buildHandoffArtifactRefs(
       delegationId: artifact.delegationId,
       runId: artifact.runId,
     }));
+}
+
+function findLatestHandoffCopyForDelegation(
+  messages: BaseMessage[],
+  delegationId: string,
+  handoffFrom: MessageLane,
+): AIMessage | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || message._getType() !== 'ai') {
+      continue;
+    }
+    const source = getMessageHandoffSource(message);
+    if (!source) {
+      continue;
+    }
+    if (source.delegationId !== delegationId || source.handoffFrom !== handoffFrom) {
+      continue;
+    }
+    return message as AIMessage;
+  }
+  return null;
 }
 
 // --- Configurable helpers ---
@@ -740,14 +763,32 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       kind === 'delegation_outcome'
       && canHandoffActiveDelegation
       && activeDelegation
-        ? buildSubagentHandoff({
-            messages: state.messages,
-            lane: activeDelegation.lane,
-            runId: activeDelegation.transcriptRunId,
-            delegationId: activeDelegation.id,
-            artifactRefs: activeDelegationArtifactRefs,
-            clearLane: false,
-          })
+        ? (() => {
+            const proposedMessages = buildSubagentHandoff({
+              messages: state.messages,
+              lane: activeDelegation.lane,
+              runId: activeDelegation.transcriptRunId,
+              delegationId: activeDelegation.id,
+              artifactRefs: activeDelegationArtifactRefs,
+              clearLane: false,
+            });
+            if (!proposedMessages) return null;
+            const proposedCopy = proposedMessages.find(
+              (message): message is AIMessage => message._getType() === 'ai',
+            );
+            if (!proposedCopy) return proposedMessages;
+
+            const latestCopy = findLatestHandoffCopyForDelegation(
+              state.messages,
+              activeDelegation.id,
+              activeDelegation.lane,
+            );
+            if (!latestCopy) return proposedMessages;
+
+            return readMessageText(latestCopy) === readMessageText(proposedCopy)
+              ? null
+              : proposedMessages;
+          })()
         : null;
     const decisionContextMessages = preDecisionHandoffMessages
       ? [...state.messages, ...preDecisionHandoffMessages]
@@ -1396,8 +1437,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     })
     .addEdge('answer', END)
     .addEdge('capabilitySearch', 'userIntentDecisionGuard')
-    .addEdge('capability', 'delegationOutcomeDecision')
-    .addEdge('general', 'delegationOutcomeDecision');
+    .addEdge('capability', 'delegationOutcomeIterationGuard')
+    .addEdge('general', 'delegationOutcomeIterationGuard');
 
   return graph.compile({
     checkpointer: config.checkpoint,

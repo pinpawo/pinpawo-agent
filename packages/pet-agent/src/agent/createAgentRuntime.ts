@@ -1,6 +1,6 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { StateGraph, START, END, interrupt } from '@langchain/langgraph';
+import { StateGraph, START, END } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../types/agent';
@@ -47,12 +47,6 @@ import {
   readModelToolCalls,
 } from './orchestrator/capabilitySearch';
 import { invokeStructuredOutput } from '../utils/structuredOutput';
-import { resolveHumanReviewResume, ReviewResponseResolutionError } from './orchestrator/review/reviewResponseResolver';
-import {
-  appendReviewViewMessage,
-  buildReviewSpec,
-  type HumanReviewInterruptPayload,
-} from './orchestrator/review/reviewSpec';
 import {
   buildCapabilityDiscoveryInput,
   buildCapabilityDiscoveryRequestContext,
@@ -109,7 +103,7 @@ import {
   selectCapabilityTools,
 } from './orchestrator/subagentHandoff';
 import { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
-import { clipForPrompt, formatDelegationStatus, readMessageText } from './orchestrator/utils';
+import { readMessageText } from './orchestrator/utils';
 
 export type {
   OrchestratorConfig,
@@ -218,7 +212,6 @@ function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOp
     capabilities: (cfg.capabilities ?? []) as AgentCapability[],
     toolkits: (cfg.toolkits ?? []) as AgentToolkit[],
     execution: cfg.execution as AgentExecution | undefined,
-    maxIterations: cfg.maxIterations as number | undefined,
     workdir: cfg.workdir as string | undefined,
     runtimeEnvironment: cfg.runtimeEnvironment as string | undefined,
     onToolEvent: cfg.onToolEvent as SubagentToolEventHandler | undefined,
@@ -483,79 +476,6 @@ function resolveActor(config: OrchestratorConfig, runnableConfig?: RunnableConfi
   throw new Error('Missing actor in orchestrator config and invoke options');
 }
 
-function buildIterationLimitReviewPayload(params: {
-  runId: string;
-  runIterationCount: number;
-  maxIterations: number;
-  delegationSummary: string;
-}): HumanReviewInterruptPayload {
-  const body = `已执行 ${params.runIterationCount} 轮循环（上限 ${params.maxIterations}），当前任务状态：\n${params.delegationSummary}\n\n是否批准继续执行？`;
-  return {
-    kind: 'review',
-    review: buildReviewSpec({
-      id: `iteration-limit:${params.runId}:${params.runIterationCount}:${params.maxIterations}`,
-      view: {
-        kind: 'plain',
-        title: 'Iteration limit reached',
-        body,
-      },
-      options: [
-        {
-          id: 'approve',
-          label: 'Approve',
-          variant: 'primary',
-          decision: { type: 'approve' },
-        },
-        {
-          id: 'reject',
-          label: 'Reject',
-          variant: 'danger',
-          decision: { type: 'reject' },
-        },
-        {
-          id: 'respond',
-          label: 'Respond',
-          input: {
-            kind: 'text',
-            key: 'message',
-            required: true,
-            multiline: true,
-            placeholder: 'Tell the agent how to continue',
-          },
-          decision: { type: 'respond', messageInputKey: 'message' },
-        },
-      ],
-    }),
-  };
-}
-
-function buildInvalidIterationLimitReviewPayload(
-  payload: HumanReviewInterruptPayload,
-): HumanReviewInterruptPayload {
-  const message = '请选择批准继续、拒绝停止，或提供新的处理方向。';
-  return {
-    ...payload,
-    error: 'invalid_decision',
-    review: {
-      ...payload.review,
-      view: appendReviewViewMessage(payload.review.view, message),
-    },
-  };
-}
-
-function resolveIterationLimitReviewDecision(payload: HumanReviewInterruptPayload, resume: unknown) {
-  try {
-    return resolveHumanReviewResume({
-      reviewSpec: payload.review,
-    }, resume).decision;
-  } catch (error) {
-    if (!(error instanceof ReviewResponseResolutionError)) {
-      throw error;
-    }
-  }
-  return null;
-}
-
 function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {
   const active = mergeToolAuthorizations([], current);
   const recorded: ToolAuthorizationRecord[] = [];
@@ -699,58 +619,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       capabilities,
       toolkits,
       execution,
-      maxIterations,
       workdir,
       runtimeEnvironment,
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const maxIter = maxIterations ?? 5;
-    let iterationLimitMessages: BaseMessage[] = [];
-    let resetIterationCount = false;
-
-    if (state.runIterationCount >= maxIter) {
-      const delegationSummary = state.runDelegations
-        .map((d) => `[${d.id}] ${d.lane} — ${formatDelegationStatus(d.status)}: ${clipForPrompt(d.task, 80)}`)
-        .join('\n') || '无委派记录';
-      const reviewPayload = buildIterationLimitReviewPayload({
-        runId: state.runId,
-        runIterationCount: state.runIterationCount,
-        maxIterations: maxIter,
-        delegationSummary,
-      });
-      let decision = resolveIterationLimitReviewDecision(reviewPayload, interrupt(reviewPayload));
-      while (!decision) {
-        decision = resolveIterationLimitReviewDecision(
-          reviewPayload,
-          interrupt(buildInvalidIterationLimitReviewPayload(reviewPayload)),
-        );
-      }
-      if (decision.type === 'respond') {
-        iterationLimitMessages = [new HumanMessage(decision.message)];
-        state = {
-          ...state,
-          messages: [...state.messages, ...iterationLimitMessages],
-          runIterationCount: 0,
-          runPendingDelegation: null,
-        };
-        resetIterationCount = true;
-      } else if (decision.type !== 'approve') {
-        return {
-          messages: [new AIMessage(`已停止，共执行 ${state.runIterationCount} 轮。如需继续请告诉我。`)],
-          runPendingDelegation: null,
-          runPendingFinalReply: 'inline' as RunFinalReplyRoute,
-        };
-      } else {
-        state = {
-          ...state,
-          runIterationCount: 0,
-          runPendingDelegation: null,
-        };
-        resetIterationCount = true;
-      }
-    }
 
     const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
@@ -1024,7 +898,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
     return {
       messages: [
-        ...iterationLimitMessages,
         ...handoffMessages,
         ...(blockedReplacementMessage ? [blockedReplacementMessage] : []),
         ...(inlineReply ? [new AIMessage(inlineReply)] : []),
@@ -1032,7 +905,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       runPendingDelegation: replacementBlocked ? null : nextDelegationState.runPendingDelegation,
       runPendingFinalReply: replacementBlocked ? 'inline' : runPendingFinalReply,
       taskActiveDelegation: nextTaskActiveDelegation,
-      ...(resetIterationCount ? { runIterationCount: 0 } : {}),
       ...(kind === 'delegation_outcome'
         ? {
             runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),

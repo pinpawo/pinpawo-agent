@@ -186,7 +186,9 @@ export const routeMessages = mainConversationMessages;
  * the decision node.
  *
  * Announce selection: prefer the last tool-call-free AI message with text (the
- * natural deliverable); fall back to the last AI/tool message with text.
+ * natural deliverable). As a defensive fallback, allow the last AI/tool message
+ * with text as a best-effort deliverable; for limit_reached runs we avoid tool
+ * fallback because interrupted tool output is more likely to be protocol noise.
  */
 export function tagNewLaneMessages(
   messages: BaseMessage[],
@@ -219,7 +221,8 @@ export function tagNewLaneMessages(
       break;
     }
   }
-  if (announceIndex < 0) {
+  const allowFallbackToRawMessage = completionReason !== 'limit_reached';
+  if (announceIndex < 0 && allowFallbackToRawMessage) {
     for (let i = nextMessages.length - 1; i >= 0; i--) {
       const type = nextMessages[i]._getType();
       if (

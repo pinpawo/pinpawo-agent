@@ -47,6 +47,12 @@ import {
   readModelToolCalls,
 } from './orchestrator/capabilitySearch';
 import { invokeStructuredOutput } from '../utils/structuredOutput';
+import { resolveHumanReviewResume, ReviewResponseResolutionError } from './orchestrator/review/reviewResponseResolver';
+import {
+  appendReviewViewMessage,
+  buildReviewSpec,
+  type HumanReviewInterruptPayload,
+} from './orchestrator/review/reviewSpec';
 import {
   buildCapabilityDiscoveryInput,
   buildCapabilityDiscoveryRequestContext,
@@ -63,15 +69,6 @@ import {
   buildUserIntentDecisionInput,
   buildUserIntentDecisionSystemPrompt,
 } from './orchestrator/prompts';
-import {
-  resolveHumanReviewResume,
-  ReviewResponseResolutionError,
-} from './orchestrator/review/reviewResponseResolver';
-import {
-  appendReviewViewMessage,
-  buildReviewSpec,
-  type HumanReviewInterruptPayload,
-} from './orchestrator/review/reviewSpec';
 import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,

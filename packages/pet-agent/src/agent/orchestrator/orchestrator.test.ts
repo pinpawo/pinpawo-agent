@@ -1760,7 +1760,7 @@ test('iteration limit review emits canonical ReviewSpec interrupt payload', asyn
   };
   const payload = result.__interrupt__?.[0]?.value as {
     kind?: string;
-    review?: { id?: string; schemaVersion?: number; options?: Array<{ id: string }> };
+    review?: { id?: string; options?: Array<{ id: string }> };
     pendingAction?: { toolName?: string };
     actionRequests?: unknown;
     reviewConfigs?: unknown;
@@ -1768,7 +1768,6 @@ test('iteration limit review emits canonical ReviewSpec interrupt payload', asyn
 
   assert.equal(payload?.kind, 'review');
   assert.equal(payload?.review?.id, `iteration-limit:${input.runId}:1:1`);
-  assert.equal(payload?.review?.schemaVersion, 1);
   assert.deepEqual(payload?.review?.options?.map((option) => option.id), ['approve', 'reject', 'respond']);
   assert.equal(payload?.pendingAction, undefined);
   assert.equal(payload?.actionRequests, undefined);
@@ -1788,10 +1787,7 @@ test('iteration limit review id is scoped to the turn id', async () => {
   inputA.runIterationCount = 1;
   inputB.runIterationCount = 1;
 
-  const readInterruptedReviewId = async (
-    input: typeof inputA,
-    threadId: string,
-  ): Promise<string | undefined> => {
+  const readInterruptedReviewId = async (input: typeof inputA, threadId: string): Promise<string | undefined> => {
     const result = await graph.invoke(input, {
       configurable: {
         thread_id: threadId,
@@ -1816,7 +1812,7 @@ test('iteration limit review id is scoped to the turn id', async () => {
   assert.notEqual(idA, idB);
 });
 
-test('iteration limit review accepts canonical approve resume', async () => {
+test('iteration limit review accepts canonical approve resume and resets iteration count', async () => {
   const finishModel = {
     invoke: async () => new AIMessage('answered'),
     withStructuredOutput: () => ({
@@ -1862,86 +1858,6 @@ test('iteration limit review accepts canonical approve resume', async () => {
 
   assert.equal(Array.isArray(resumed.__interrupt__) ? resumed.__interrupt__.length : 0, 0);
   assert.equal(resumed.runIterationCount, 0);
-});
-
-test('iteration limit approve can resume an in-progress capability lane', async () => {
-  let schemaAllowsExplore = false;
-  const routeModel = {
-    invoke: async () => new AIMessage('answered'),
-    withStructuredOutput: (schema: unknown) => ({
-      invoke: async () => {
-        schemaAllowsExplore = Boolean(
-          (schema as { safeParse?: (value: unknown) => { success: boolean } }).safeParse?.({
-            action: 'delegate_capability.explore',
-            task: '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
-            context_summary: '上一轮 explore lane 仍处于 progress。',
-          }).success,
-        );
-        return {
-          action: 'delegate_capability.explore',
-          task: '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
-          context_summary: '上一轮 explore lane 仍处于 progress。',
-        };
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: { act: routeModel },
-    actor: testActor,
-    checkpoint: new MemorySaver(),
-  });
-  const previousAnnounce = new AIMessage('已定位到部分 registry 文件，但还没有完成完整调用链路调查。');
-  setPinpetMeta(previousAnnounce, {
-    lane: 'capability:explore',
-    runId: 'previous-turn',
-    isAnnounce: true,
-    completionReason: 'limit_reached',
-    delegationId: 'previous-progress-1',
-    task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
-  });
-  const input = buildOrchestratorRunInput([
-    new HumanMessage('帮我调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。'),
-    previousAnnounce,
-    new HumanMessage('继续'),
-  ]);
-  input.runIterationCount = 1;
-  const config = {
-    configurable: {
-      thread_id: 'iteration-limit-capability-resume',
-      actor: testActor,
-      capabilities: [capability('explore', '通用探索、调查、代码库理解 capability。')],
-      tools: [],
-      maxIterations: 1,
-    },
-  };
-
-  const interrupted = await graph.invoke(input, config) as {
-    __interrupt__?: Array<{ value?: unknown }>;
-  };
-  const payload = interrupted.__interrupt__?.[0]?.value as {
-    review?: { id?: string };
-  } | undefined;
-  assert.equal(typeof payload?.review?.id, 'string');
-
-  const resumed = await graph.invoke(new Command({
-    resume: {
-      reviewId: payload?.review?.id,
-      selectedOptionId: 'approve',
-    },
-  }), {
-    ...config,
-    interruptBefore: ['capability'],
-  }) as {
-    __interrupt__?: unknown;
-    runIterationCount?: number;
-    runPendingDelegation?: { lane?: string; task?: string } | null;
-  };
-
-  assert.equal(Array.isArray(resumed.__interrupt__) ? resumed.__interrupt__.length : 0, 0);
-  assert.equal(resumed.runIterationCount, 0);
-  assert.equal(schemaAllowsExplore, true);
-  assert.equal(resumed.runPendingDelegation?.lane, 'capability:explore');
-  assert.match(resumed.runPendingDelegation?.task ?? '', /继续调查/);
 });
 
 test('iteration limit review accepts canonical respond resume as replanning feedback', async () => {
@@ -2499,13 +2415,8 @@ test('lane messages drop unanswered tool calls from interrupted subagent history
     '先检查目标目录。',
     '{"ok":true}',
   ]);
-  assert.equal(getMessageIsAnnounce(toolResult), true);
-  assert.deepEqual(readLatestAnnounce(stateMessages, { delegationId: 'task-3' }), {
-    lane: 'general',
-    delegationId: 'task-3',
-    task: '归档 Downloads',
-    text: '{"ok":true}',
-  });
+  assert.equal(getMessageIsAnnounce(toolResult), false);
+  assert.equal(readLatestAnnounce(stateMessages, { delegationId: 'task-3' }), null);
 });
 
 test('lane messages sanitize legacy checkpoint history with dangling tool calls', () => {

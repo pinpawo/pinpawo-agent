@@ -43,6 +43,7 @@ import { RemoveMessage } from '@langchain/core/messages';
 import { reuseOrAppendRunDelegation, updateRunDelegationResult } from './delegations';
 import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
 import type { RunDelegation, TaskActiveDelegation } from './types';
+import type { OrchestratorStateType } from './state';
 
 function capability(name: string, description: string): AgentCapability {
   return {
@@ -2094,6 +2095,153 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
     task: '读取文件并运行 lint',
     text: '文件读取完成，lint 还没跑。',
   });
+});
+
+test('delegation outcome does not handoff a limit_reached announce', async () => {
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => ({ action: 'answer' }),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+    },
+    actor: testActor,
+  });
+  const baseInput = buildOrchestratorRunInput([new HumanMessage('继续')]);
+
+  const activeDelegation: TaskActiveDelegation = {
+    id: 'limit-active',
+    lane: 'general',
+    task: '继续探查 repo',
+    contextSummary: null,
+    transcriptRunId: baseInput.runId,
+    status: 'awaiting_decision',
+    resultPreview: '上一轮还没结束。',
+  };
+  const input = {
+    ...baseInput,
+    taskActiveDelegation: activeDelegation,
+    runDelegations: [{
+      id: activeDelegation.id,
+      lane: activeDelegation.lane,
+      task: activeDelegation.task,
+      status: 'progress' as const,
+      resultPreview: activeDelegation.resultPreview,
+    }],
+  };
+  const partialAnnounce = new AIMessage('已跑到一半，继续需要更多时间。');
+  setPinpetMeta(partialAnnounce, {
+    lane: 'general',
+    runId: input.runId,
+    delegationId: activeDelegation.id,
+    isAnnounce: true,
+    completionReason: 'limit_reached',
+    task: activeDelegation.task,
+  });
+
+  input.messages.push(partialAnnounce);
+
+  const state = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'limit-announce-no-handoff',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [{
+        name: 'local',
+        description: 'local tools',
+        tools: [mockTool('run_shell')],
+      }],
+  } }) as OrchestratorStateType;
+
+  const handoffMessages = mainConversationMessages(state.messages)
+    .filter((message) => getMessageHandoffSource(message)?.handoffFrom);
+  assert.equal(handoffMessages.length, 0);
+  assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
+  assert.equal(state.taskActiveDelegation?.status, 'awaiting_decision');
+  assert.equal(state.runDelegations.find((item) => item.id === activeDelegation.id)?.status, 'progress');
+  assert.equal(state.messages.filter((message) => getMessageLane(message) === 'general').length > 0, true);
+});
+
+test('delegation outcome uses a unified run-iteration guard before invoking decision', async () => {
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        assert.fail('delegation decision should not run after run-iteration limit');
+      },
+    }),
+  } as unknown as AgentModels['act'];
+
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+    },
+    actor: testActor,
+    maxRunIterations: 2,
+  });
+  const baseInput = buildOrchestratorRunInput([new HumanMessage('继续')]);
+  const input = {
+    ...baseInput,
+    taskActiveDelegation: null as TaskActiveDelegation | null,
+    runDelegations: [] as RunDelegation[],
+  };
+  input.runIterationCount = 2;
+  const activeDelegation: TaskActiveDelegation = {
+    id: 'limit-iter',
+    lane: 'general',
+    task: '持续执行大规模迁移',
+    contextSummary: '最近卡住',
+    transcriptRunId: baseInput.runId,
+    status: 'awaiting_decision',
+    resultPreview: '处理到一半。',
+  };
+  const partialAnnounce = new AIMessage('继续迁移，已完成 50%。');
+  setPinpetMeta(partialAnnounce, {
+    lane: 'general',
+    runId: input.runId,
+    delegationId: activeDelegation.id,
+    isAnnounce: true,
+    completionReason: 'natural',
+    task: activeDelegation.task,
+  });
+
+  input.messages.push(partialAnnounce);
+  input.taskActiveDelegation = activeDelegation;
+  input.runDelegations = [{
+    id: activeDelegation.id,
+    lane: activeDelegation.lane,
+    task: activeDelegation.task,
+    status: 'progress' as const,
+    resultPreview: activeDelegation.resultPreview,
+  }];
+
+  const state = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'unified-run-iteration-limit',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [{
+        name: 'local',
+        description: 'local tools',
+        tools: [mockTool('run_shell')],
+      }],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
+  assert.equal(state.runIterationCount, 0);
+  assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
 });
 
 test('handoff copies the announce into main and wipes the lane transcript', () => {

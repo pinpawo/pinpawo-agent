@@ -92,6 +92,11 @@ export type OrchestratorConfig = {
   models: AgentModels;
   actor?: AgentActor;
   checkpoint?: BaseCheckpointSaver;
+  /**
+   * Maximum number of orchestration iterations per active delegation lifecycle in one
+   * run. This is runtime guardrail only; it does not replace LLM decision logic.
+   */
+  maxRunIterations?: number;
   decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
   /**
@@ -113,6 +118,7 @@ export type OrchestratorInvokeOptions = {
   onToolEvent?: SubagentToolEventHandler;
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;
+  maxRunIterations?: number;
   /**
    * 强制以"已发现候选"形态登记的 capability 名字列表。`prepare` 节点会
    * 据此 pre-seed `runCapabilitySearchState`,跳过 capability discovery/search。

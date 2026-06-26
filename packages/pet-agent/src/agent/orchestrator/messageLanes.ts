@@ -427,8 +427,8 @@ function formatHandoffArtifactRefsForMessage(
  * and WIPE the entire delegation's lane (original announce + intermediate
  * transcript). See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
  *
- * Returns the messages array update: RemoveMessage entries for every lane
- * message of this lane+runId+delegationId, followed by the main-queue copy.
+ * Returns the messages array update: optionally removes lane messages for this
+ * lane+runId+delegationId, followed by the main-queue copy.
  * Returns null (no update) when no announce text can be located for the
  * delegation — caller should fall back to leaving state untouched.
  */
@@ -437,6 +437,7 @@ export function buildSubagentHandoff(params: {
   lane: MessageLane;
   runId: string;
   delegationId: string;
+  clearLane?: boolean;
   artifactRefs?: Pick<
     CapabilityArtifactRef,
     'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
@@ -458,16 +459,19 @@ export function buildSubagentHandoff(params: {
     })))
     : '';
 
-  const removeMessages = params.messages.flatMap((message) => {
-    if (getMessageLane(message) !== params.lane) return [];
-    if (getMessageTurnId(message) !== params.runId) return [];
-    if (getMessageDelegationId(message) !== params.delegationId) return [];
-    // Legacy checkpointed lane messages may predate message ids; LangGraph
-    // RemoveMessage cannot target them, so those old messages are left as
-    // residual history instead of risking an invalid delete.
-    if (!message.id) return [];
-    return [new RemoveMessage({ id: message.id }) as BaseMessage];
-  });
+  const clearLane = params.clearLane ?? true;
+  const removeMessages = clearLane
+    ? params.messages.flatMap((message) => {
+      if (getMessageLane(message) !== params.lane) return [];
+      if (getMessageTurnId(message) !== params.runId) return [];
+      if (getMessageDelegationId(message) !== params.delegationId) return [];
+      // Legacy checkpointed lane messages may predate message ids; LangGraph
+      // RemoveMessage cannot target them, so those old messages are left as
+      // residual history instead of risking an invalid delete.
+      if (!message.id) return [];
+      return [new RemoveMessage({ id: message.id }) as BaseMessage];
+    })
+    : [];
 
   // The copy is a first-class main message (no lane), carrying only minimal
   // provenance so the main agent knows which executor produced it for which task.

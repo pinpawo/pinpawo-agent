@@ -656,6 +656,7 @@ test('limit-reached progress announce lets model choose the same capability dele
       observe: routeModel,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
+    maxRunIterations: 1,
     actor: testActor,
   });
   const input = buildOrchestratorRunInput([new HumanMessage('继续')]);
@@ -1829,6 +1830,42 @@ test('buildSubagentHandoff carries announcement artifact refs', () => {
   });
 });
 
+test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () => {
+  const humanAsk = new HumanMessage('继续处理一些文件');
+  const intermediate = new AIMessage('准备处理中...');
+  intermediate.id = 'm-mid';
+  setPinpetMeta(intermediate, { lane: 'general', runId: 'run-5', delegationId: 'd-keep' });
+  const announce = new AIMessage('已完成部分，继续留痕。');
+  announce.id = 'm-announce-keep';
+  setPinpetMeta(announce, {
+    lane: 'general',
+    runId: 'run-5',
+    delegationId: 'd-keep',
+    isAnnounce: true,
+    task: '增量处理',
+  });
+
+  const update = buildSubagentHandoff({
+    messages: [humanAsk, intermediate, announce],
+    lane: 'general',
+    runId: 'run-5',
+    delegationId: 'd-keep',
+    clearLane: false,
+  });
+  assert.ok(update);
+  const removed = update.filter((m) => m instanceof RemoveMessage);
+  assert.equal(removed.length, 0);
+  const copy = update.find((m) => m instanceof AIMessage && m.id !== 'm-announce-keep') as AIMessage | undefined;
+  assert.ok(copy);
+  assert.match(String(copy.content), /已完成部分，继续留痕。/);
+  const source = getMessageHandoffSource(copy);
+  assert.deepEqual(source, {
+    handoffFrom: 'general',
+    delegationId: 'd-keep',
+    task: '增量处理',
+  });
+});
+
 test('readRecentAnnounces strips handoff artifact footer and preserves artifact refs', () => {
   const userAsk = new HumanMessage('请帮我做一次探索');
   const announce = new AIMessage('探索已完成，产出三条关键结论。');
@@ -2045,6 +2082,96 @@ test('different-lane outcome decision keeps active delegation when handoff canno
   assert.equal(state.taskActiveDelegation?.lane, 'capability:explore');
   assert.deepEqual(state.runDelegations.map((item) => item.id), ['active-1']);
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /暂不能切换到新的执行器/);
+});
+
+test('delegation outcome continue decision can re-enter main and finalize handoff', async () => {
+  const announceText = '已完成第一批抓取，接下来继续。';
+  let routeCallCount = 0;
+  const routeModel = {
+    invoke: async () => new AIMessage(''),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_general',
+              task: '继续处理剩余工作。',
+              context_summary: '保留当前发现并往下推进。',
+            }
+          : {
+              action: 'answer',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+  });
+  const activeDelegation: TaskActiveDelegation = {
+    id: 'active-continue',
+    lane: 'general',
+    task: '批量梳理仓库问题',
+    contextSummary: '已完成部分。',
+    transcriptRunId: 'run-continue',
+    status: 'awaiting_decision',
+    resultPreview: '已完成第一批抓取，剩余待查。',
+  };
+  const inputBase = buildOrchestratorRunInput([new HumanMessage('继续处理仓库')]);
+  activeDelegation.transcriptRunId = inputBase.runId;
+  const input = {
+    ...inputBase,
+    taskActiveDelegation: activeDelegation,
+  };
+  input.runDelegations = [{
+    id: activeDelegation.id,
+    lane: activeDelegation.lane,
+    task: activeDelegation.task,
+    status: 'progress',
+    resultPreview: activeDelegation.resultPreview,
+  }];
+
+  const previousAnnounce = new AIMessage(announceText);
+  previousAnnounce.id = 'm-prev-announce';
+  setPinpetMeta(previousAnnounce, {
+    lane: 'general',
+    runId: input.runId,
+    delegationId: activeDelegation.id,
+    isAnnounce: true,
+    completionReason: 'natural',
+    task: activeDelegation.task,
+  });
+  input.messages.push(previousAnnounce);
+
+  const state = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'delegation-continue-copy-preserve-lane',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [{
+        name: 'local',
+        description: 'local tools',
+        tools: [mockTool('run_shell')],
+      }],
+    },
+  }) as OrchestratorStateType;
+
+  const handoffSource = mainConversationMessages(state.messages)
+    .map((message) => getMessageHandoffSource(message))
+    .find((source) => source?.delegationId === activeDelegation.id);
+  assert.ok(handoffSource);
+  assert.equal(handoffSource.handoffFrom, 'general');
+  assert.equal(handoffSource.task, activeDelegation.task);
+  // Final handoff on answer should clear lane transcript for finished continuation.
+  assert.equal(laneMessages(state.messages, 'general', input.runId, activeDelegation.id)
+    .filter((message) => getMessageIsAnnounce(message)).length === 0, true);
 });
 
 test('lane tagging hides subagent messages from route and records completed announce', () => {

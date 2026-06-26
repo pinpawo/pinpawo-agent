@@ -911,28 +911,38 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : null;
     const nextDelegationState = reuseOrAppendRunDelegation(state.runDelegations, runPendingDelegation);
 
-    // Handoff (D1): when delegation outcome routes to answer, copy the current
-    // subagent announce into the main queue before answerNode runs. The decision
-    // node still only routes; answerNode owns all user-facing wording, including
-    // asking for missing information when needed.
+    // Handoff (D1): copy the active subagent announce into the main queue before
+    // the next decision branch runs.
+    // - answer decision: announce is final for this delegation (old lane transcript
+    //   can be cleared).
+    // - continue decision: preserve lane transcript for continuation while still
+    //   keeping the latest announce in main for better downstream judgment.
     //
     // Single-line delegation handoff is driven by taskActiveDelegation. run
     // summaries are not the source of truth for unfinished task lifecycle.
     const canHandoffActiveDelegation = kind === 'delegation_outcome'
       ? state.canHandoffActiveDelegation
       : true;
+    const isDelegateDecision =
+      actionKind === 'delegate_general' || actionKind === 'delegate_capability';
+    const shouldHandoffCurrentDelegation =
+      kind === 'delegation_outcome'
+      && canHandoffActiveDelegation
+      && activeDelegation
+      && (actionKind === 'answer' || isDelegateDecision);
+    const shouldClearLaneForHandoff = kind === 'delegation_outcome' && actionKind === 'answer';
     const replacingActiveDelegation = kind === 'delegation_outcome'
       && Boolean(activeDelegation && runPendingDelegation && activeDelegation.id !== runPendingDelegation.id);
-    const handingOff = kind === 'delegation_outcome' && actionKind === 'answer' && canHandoffActiveDelegation;
     const handoffMessages: BaseMessage[] = [];
     const handedOffDelegationIds = new Set<string>();
-    if ((handingOff || replacingActiveDelegation) && canHandoffActiveDelegation && activeDelegation) {
+    if ((shouldHandoffCurrentDelegation || replacingActiveDelegation) && activeDelegation) {
       const messages = buildSubagentHandoff({
         messages: state.messages,
         lane: activeDelegation.lane,
         runId: activeDelegation.transcriptRunId,
         delegationId: activeDelegation.id,
         artifactRefs: activeDelegationArtifactRefs,
+        clearLane: shouldClearLaneForHandoff || replacingActiveDelegation,
       });
       if (messages) {
         handoffMessages.push(...messages);
@@ -947,7 +957,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : null;
 
     // A handed-off delegation is, by the orchestrator's judgment, complete.
-    const finalRunDelegations = handedOffDelegationIds.size > 0
+    const shouldMarkDelegationComplete = actionKind === 'answer' || replacingActiveDelegation;
+    const finalRunDelegations = handedOffDelegationIds.size > 0 && shouldMarkDelegationComplete
       ? nextDelegationState.runDelegations.map((delegation) =>
           handedOffDelegationIds.has(delegation.id)
             ? { ...delegation, status: 'completed' as const }
@@ -955,9 +966,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : nextDelegationState.runDelegations;
 
     let nextTaskActiveDelegation: TaskActiveDelegation | null;
+    const shouldClearTaskActiveDelegation = actionKind === 'answer' && shouldHandoffCurrentDelegation;
     if (replacementBlocked) {
       nextTaskActiveDelegation = activeDelegation;
-    } else if (handingOff) {
+    } else if (shouldClearTaskActiveDelegation) {
       nextTaskActiveDelegation = null;
     } else if (runPendingDelegation) {
       nextTaskActiveDelegation = activeDelegation && activeDelegation.id === runPendingDelegation.id

@@ -667,6 +667,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     kind: 'user_intent' | 'delegation_outcome',
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
+    options?: {
+      canHandoffActiveDelegation?: boolean;
+    },
   ) {
     const {
       capabilities,
@@ -898,9 +901,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     //
     // Single-line delegation handoff is driven by taskActiveDelegation. run
     // summaries are not the source of truth for unfinished task lifecycle.
+    const canHandoffActiveDelegation = kind === 'delegation_outcome'
+      ? options?.canHandoffActiveDelegation ?? true
+      : true;
     const replacingActiveDelegation = kind === 'delegation_outcome'
       && Boolean(activeDelegation && runPendingDelegation && activeDelegation.id !== runPendingDelegation.id);
-    const canHandoffActiveDelegation = activeDelegationCompletionReason !== 'limit_reached';
     const handingOff = kind === 'delegation_outcome' && actionKind === 'answer' && canHandoffActiveDelegation;
     const handoffMessages: BaseMessage[] = [];
     const handedOffDelegationIds = new Set<string>();
@@ -974,7 +979,16 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   }
 
   async function delegationOutcomeDecision(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    return runOrchestrationDecision('delegation_outcome', state, runnableConfig);
+    const activeDelegation = state.taskActiveDelegation ?? readLegacyTaskActiveDelegation(state);
+    const activeDelegationCompletionReason = activeDelegation
+      ? readLatestAnnounceCompletionReason(state.messages, {
+          runId: activeDelegation.transcriptRunId,
+          delegationId: activeDelegation.id,
+        })
+      : null;
+    return runOrchestrationDecision('delegation_outcome', state, runnableConfig, {
+      canHandoffActiveDelegation: activeDelegationCompletionReason !== 'limit_reached',
+    });
   }
 
   // Node: answer — the dedicated final-reply node. The decision nodes only route

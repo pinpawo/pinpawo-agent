@@ -29,19 +29,38 @@ export type SubagentLoopGuardInput = {
   estimateMessagesTokens: (messages: BaseMessage[]) => number;
 };
 
+/**
+ * Closed value domain for why a loop guard stopped the subagent. Keep this in
+ * sync with the guards below; the marker reader only recognizes these values so a
+ * guard stop can never be confused with an unrelated `pinpawo` meta field.
+ */
+export type SubagentLoopGuardStopReason = 'repeated_input' | 'context_window_fuse';
+
+const LOOP_GUARD_STOP_REASONS: readonly SubagentLoopGuardStopReason[] = [
+  'repeated_input',
+  'context_window_fuse',
+];
+
 export type SubagentLoopGuardVerdict =
   | { block: false }
-  | { block: true; reason: string; notice: AIMessage };
+  | { block: true; reason: SubagentLoopGuardStopReason; notice: AIMessage };
 
 export type SubagentLoopGuard = {
   readonly name: string;
   evaluate(input: SubagentLoopGuardInput): SubagentLoopGuardVerdict;
 };
 
-const LOOP_GUARD_MARKER_KEY = 'subagentLoopGuardStop';
+/**
+ * Marker contract (see docs/SUBAGENT_LIMIT_FRAMEWORK_DESIGN.md §4.4):
+ * a guard stop notice is an AIMessage carrying
+ *   additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
+ * The key is namespaced under `pinpawo` and its value is restricted to the closed
+ * reason domain, so detection cannot collide with other pinpawo meta fields.
+ */
+export const LOOP_GUARD_MARKER_KEY = 'subagentLoopGuardStop' as const;
 
 /** Marks an AIMessage as the guard's graceful-stop notice so createSubagent can detect it. */
-function buildGuardStopNotice(reason: string, text: string): AIMessage {
+function buildGuardStopNotice(reason: SubagentLoopGuardStopReason, text: string): AIMessage {
   return new AIMessage({
     content: text,
     additional_kwargs: {
@@ -50,14 +69,28 @@ function buildGuardStopNotice(reason: string, text: string): AIMessage {
   });
 }
 
+function isLoopGuardStopReason(value: unknown): value is SubagentLoopGuardStopReason {
+  return typeof value === 'string'
+    && (LOOP_GUARD_STOP_REASONS as readonly string[]).includes(value);
+}
+
+/**
+ * Returns the typed stop reason if the message is a guard graceful-stop notice,
+ * else null. Only the closed reason domain is accepted, so an arbitrary
+ * `additional_kwargs.pinpawo` payload is never misread as a guard stop.
+ */
+export function readLoopGuardStopReason(message: BaseMessage): SubagentLoopGuardStopReason | null {
+  const pinpawo = (message as { additional_kwargs?: { pinpawo?: unknown } }).additional_kwargs?.pinpawo;
+  if (!pinpawo || typeof pinpawo !== 'object') {
+    return null;
+  }
+  const value = (pinpawo as Record<string, unknown>)[LOOP_GUARD_MARKER_KEY];
+  return isLoopGuardStopReason(value) ? value : null;
+}
+
 /** True if the message is a guard graceful-stop notice (set by a blocked guard). */
 export function isLoopGuardStopMessage(message: BaseMessage): boolean {
-  const pinpawo = (message as { additional_kwargs?: { pinpawo?: unknown } }).additional_kwargs?.pinpawo;
-  return Boolean(
-    pinpawo
-      && typeof pinpawo === 'object'
-      && typeof (pinpawo as Record<string, unknown>)[LOOP_GUARD_MARKER_KEY] === 'string',
-  );
+  return readLoopGuardStopReason(message) !== null;
 }
 
 /** True if any message in the list is a guard graceful-stop notice. */

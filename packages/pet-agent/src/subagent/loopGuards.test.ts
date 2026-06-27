@@ -7,7 +7,9 @@ import {
   createRepeatedInputGuard,
   createSubagentLoopGuardMiddleware,
   isLoopGuardStopMessage,
+  LOOP_GUARD_MARKER_KEY,
   messagesHaveLoopGuardStop,
+  readLoopGuardStopReason,
   type SubagentLoopGuardInput,
 } from './loopGuards';
 
@@ -119,4 +121,32 @@ test('marker helpers detect guard stop notices', () => {
     assert.ok(messagesHaveLoopGuardStop([new HumanMessage('x'), verdict.notice]));
   }
   assert.equal(messagesHaveLoopGuardStop([new HumanMessage('x'), new AIMessage('y')]), false);
+});
+
+test('marker contract: only the closed reason domain is recognized', () => {
+  // A guard stop notice round-trips to its typed reason.
+  const repeated = createRepeatedInputGuard(1).evaluate(input([new HumanMessage('x')]));
+  assert.equal(repeated.block, true);
+  if (repeated.block) {
+    assert.equal(readLoopGuardStopReason(repeated.notice), 'repeated_input');
+  }
+
+  // An unrelated pinpawo meta field on the same key namespace is NOT misread.
+  const otherMeta = new AIMessage({
+    content: 'hi',
+    additional_kwargs: { pinpawo: { lane: 'general', runId: 'r1' } },
+  });
+  assert.equal(readLoopGuardStopReason(otherMeta), null);
+  assert.equal(isLoopGuardStopMessage(otherMeta), false);
+
+  // The marker key carrying an out-of-domain value is rejected (not a guard stop).
+  const bogus = new AIMessage({
+    content: 'hi',
+    additional_kwargs: { pinpawo: { [LOOP_GUARD_MARKER_KEY]: 'something_else' } },
+  });
+  assert.equal(readLoopGuardStopReason(bogus), null);
+  assert.equal(isLoopGuardStopMessage(bogus), false);
+
+  // No pinpawo namespace at all.
+  assert.equal(readLoopGuardStopReason(new AIMessage('plain')), null);
 });

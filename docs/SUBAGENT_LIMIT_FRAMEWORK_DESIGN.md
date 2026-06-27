@@ -83,6 +83,18 @@ orchestrator 里 `runIterationLimitGuard` / `delegationOutcomeDecisionGuard` / `
 - **挂载位置**：subagent middleware 的 **`wrapModelCall`** position。关键：判据要看的是**真正提交给 LLM 的那组 messages**（`request.messages`），即**经过本轮 contextPolicy 压缩之后**的输入——`beforeModel` 看到的 `state.messages` 是只增的历史，永远不重复，抓不住打转；而压缩后的"实质输入"在空跑时会稳定成同一组，这才是有意义的"重复"信号。
 - **block 行为**：`wrapModelCall` 命中时**不调 handler**（不调模型），返回 `new Command({ goto: END, update: { messages: [notice] } })` 优雅结束（无 throw）。notice 带 stop marker，`createSubagent` 据此报 **completionReason='limit_reached'**，交回 orchestrator（`delegationOutcomeDecisionGuard` 已消费 limit_reached，回交链路现成）。
 
+#### 4.4.1 stop marker 契约（固定，防误判）
+
+guard 停止 notice 是一条 AIMessage，携带：
+
+```
+additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
+```
+
+- `LOOP_GUARD_MARKER_KEY = 'subagentLoopGuardStop'`（具名常量，导出）。
+- `SubagentLoopGuardStopReason` 是**封闭值域**：`'repeated_input' | 'context_window_fuse'`。
+- 读取侧 `readLoopGuardStopReason` / `isLoopGuardStopMessage` **只认这个封闭值域**——key 命名空间在 `pinpawo` 下，且值受限于上述枚举，因此与其他 `pinpawo.*` 元信息（如 `lane` / `runId`）**不会互相误判**。新增停止原因必须同时扩这个 union 与读取侧白名单（有单测固定该契约）。
+
 ### 4.5 复用清单（不新增多余概念）
 
 - **context fuse middleware** → 归为一个 Guard（token 硬阈值）。后续把 throw 改成走统一的 Guard block 路径（主动停）。

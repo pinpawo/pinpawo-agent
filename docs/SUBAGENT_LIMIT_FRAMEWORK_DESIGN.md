@@ -126,8 +126,11 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
 
 **后续 PR（独立）**：
 
-4. **P4 拉大迭代预算**：`maxIterations` → ~100，厘清与 `recursionLimit` 关系。
-5. **P5 orchestrator 迁移**：把 `runIterationLimitGuard` / `delegationOutcomeDecisionGuard` / `runOrchestrationDecision` 迁到新 Decision/Guard 抽象。
+4. **P4 拉大迭代预算**（✅ 已做）：`maxIterations` 统一 ~100，厘清与 `recursionLimit` 关系。
+5. **P5 orchestrator 迁移**（✅ 已做）：把 `runIterationLimitGuard` / `delegationOutcomeDecisionGuard` / `userIntentDecisionGuard` / 两个 Decision 迁到 orchestrator 域的 Guard/Decision 抽象。
+   - 落地形态：新增 `orchestrator/controlPrimitives.ts` 定义 `OrchestratorGuard` / `OrchestratorDecision` 契约 + `asGuardNode` / `asDecisionNode` 适配器（命名约定 → 类型契约）。
+   - **三个 Guard 的实现体真正搬出** `createAgentRuntime`，落到 `orchestrator/guards.ts`（`createOrchestratorGuards(deps)` 工厂 + 搬随的纯 helper `readLegacyTaskActiveDelegation` / `buildRunIterationLimitMessage`）。`getInvokeOptions` 因被运行时广泛复用而**注入**（不搬），保持 guards.ts 依赖轻、无循环。搬出后 Guard 可独立单测。
+   - `runOrchestrationDecision` 庞大且重度闭包依赖，**体留原处**，由两个 thin `OrchestratorDecision` 包装绑定 kind。subagent 的 `SubagentLoopGuard` 是另一域的契约，**不合并**。
 6. **P6 回看外层 recursionLimit**：#275 最终归宿。
 7. **P7 策略增强**：结论增量 / token 比 / review 防空跑作为 `SubagentLoopGuard` 的新实现接入。
 

@@ -106,9 +106,11 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
 
 ## 5. 迭代预算与 graph recursionLimit 的关系（第 2 点的厘清）
 
-- subagent 内部是 LangGraph ReAct agent，`recursionLimit` 是它的硬断路（[createSubagent.ts:231](../packages/pet-agent/src/subagent/createSubagent.ts#L231)，当前 `= maxIterations`，单位错位）。
+- subagent 内部是 LangGraph ReAct agent，`recursionLimit` 是它的硬断路（`createSubagent.ts`，`= maxIterations`）。
+- **单位实测（P4 / #281）**：`recursionLimit` 数的是 **graph super-step**，一次 ReAct 迭代（model→tool）≈ **2 个 super-step**。即 `maxIterations: N` 实际允许约 `N/2` 次模型调用。
+- **P4 决定**：保持 `maxIterations` = super-step 语义（不改字段语义，改动最小），**预算统一拉到 100**（general / capability / default 三档合一，`SUBAGENT_MAX_ITERATIONS = 100`，约 50 次模型调用）。
 - 预期停止点应是 **Guard 主动停**（重复输入 / token 阈值），不是 `recursionLimit`。后者退化为"真死循环"的最后断路。
-- 因为 Guard 主动停产出 `limit_reached`（不外抛 `GraphRecursionError`），**外层 orchestrator 的硬 `recursionLimit`（#279 A）大概率不再需要**——P4 验证后决定去留（#275 的最终归宿）。
+- 因为 Guard 主动停产出 `limit_reached`（不外抛 `GraphRecursionError`），**外层 orchestrator 的硬 `recursionLimit`（#279 A）大概率不再需要**——P6 验证后决定去留（#275 的最终归宿）。
 
 ## 6. 落地范围
 

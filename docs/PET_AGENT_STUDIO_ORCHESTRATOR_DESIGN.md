@@ -11,9 +11,10 @@
 - `StudioOrchestrator` 承担编排:planner 调用、request/task queue 推进、worker 派发、wiki 维护(把 pet 产出整理为可共享的知识库)、终止标定。
 - `PetAgentRuntime` 承担数据加工:每次 dispatch 接收 Studio 撰写的 brief,自主访问 Studio Whiteboard(文件系统形态的 wiki)获取所需上下文,在自己的 capability 集合内完成本棒加工,产出 pet 返回结果。
 - **Studio Whiteboard** 是 per-conversation 持久的文件系统目录,curator 节点负责维护内容,pet 通过 wiki_read toolkit 自主检索。
+- **Capability Artifact Store** 是 per-conversation durable 产物层,capability 完成时 sink 产物,Studio / UI / 后续 pet 通过 artifact refs 读取。
 - 终止时,Studio 输出 `finish` 标定 `finalDispatchId`,UI 把对应 pet 的 pet 返回结果 渲染为用户最终答复。
 
-Studio↔pet 的接口契约(invoke 签名、wiki middleware、HITL 边界等)见 `docs/PET_AGENT_STUDIO_INTERFACES.md`。
+Studio↔pet 的接口契约(invoke 签名、wiki middleware、HITL 边界等)见 `docs/PET_AGENT_STUDIO_INTERFACES.md`。Capability artifacts 的 durable store 见 `docs/PET_AGENT_CAPABILITY_ARTIFACT_STORE_DESIGN.md`。
 
 目标结构：
 
@@ -36,14 +37,15 @@ StudioOrchestrator (PetRegistry + WorkQueue/Runner + WikiCurator)
               若 planner 未提交 plan → run 标记 stopped
        plan.tasks 展开为 task items 入队
 
-  -> runner consumes task item(deterministic,非 LLM):
-       pending task → dispatch
-                      → pet.invoke({ brief, wikiRoot, signal })
-                      → wiki_curator 整理本棒 raw source
-                      → 写回 task runtime state
-       worker throw 且未达 retry 上限 → 同 task item 重新入队
-       所有 task satisfied          → finish(finalDispatchId = 末棒 dispatch)
-       否则(有 failed / 上限)     → stop
+  -> execute state machine(deterministic,非 LLM):
+       look up 下一个 pending task → dispatch
+                                        → pet.invoke({ brief, wikiRoot, artifactRefs, signal })
+                                        → 收到 pet 返回文本 + artifact refs
+                                        → wiki_curator 整理本棒 raw source
+                                        → 写回 taskStates[taskIndex].status
+                                        → 回到 execute
+       所有 task satisfied         → finish(finalDispatchId = 末棒 dispatch)
+       否则(有 failed / 上限)    → stop
 ```
 
 关键:
@@ -86,7 +88,7 @@ UI 主显示是 **pet agent 面板**。Studio 呈现为**控制面状态显示**
 - 不接收 `StudioContext`。
 - 不知道是否有其它 pet agent。
 - 不知道跨 agent 协作链路。
-- 只消费本次 dispatch 的 task、context summary、artifacts 和自身 capability/tool 配置。
+- 只消费本次 dispatch 的 task、context summary、artifact refs 和自身 capability/tool 配置。
 
 注意:`capabilityAvailability` 是 runtime 内部决定能否执行 / 是否 degrade 的信号,**不会注入到 pet 的模型上下文**。pet 模型只看到本次任务相关的输入。
 
@@ -101,15 +103,14 @@ Studio 级 **run controller**。当前实现是 in-process 编排函数(无独�
 orchestrator 同时:
 
 - 维护 pet agent registry。
-- 对外提供 `enqueue()` / `getRun()` / `waitForRun()` / `subscribeEvents()`;`invoke()` 仅作为 `enqueue + waitForRun` 兼容包装。
-- 派发任务以函数调用形式进行:`PetAgentRuntime.invoke({ brief, wikiRoot, signal })`,接口契约见 INTERFACES 文档。
+- 派发任务以函数调用形式进行:`PetAgentRuntime.invoke({ brief, wikiRoot, artifactRefs, signal })`,接口契约见 INTERFACES 文档。
 - 调用 `PetAgentRuntime`,按 `studio thread -> pet -> dispatch` 为每个 pet agent 分配独立 checkpoint namespace。
 - 推送 **turn state stream**(驱动控制面状态显示)。
 - turn 终止时标定 `finalDispatchId`,UI 把对应 pet 返回结果 渲染到主对话面板。
 
 设计立场:**Studio 不在 turn 内自我修正大方向**。runner 只负责排队、派发、重试和收尾——遇到无法直接推进的情况,优先 finish(把当前可作交付的输出标定)或 stop(异常退出),而不是回到 planner 重判。方向决策由用户在下一 turn 通过 follow-up 给出(per-conversation wiki 保留全部上下文,跨 turn 衔接自然)。
 
-边界:capability、tool、底层 API 由 pet 承担;wiki 内容由 curator 节点编辑;用户最终答复由末位 pet 的 pet 返回结果 提供,Studio 在终止时标定 `finalDispatchId`。
+边界:capability、tool、底层 API 由 pet 承担;capability artifacts 由 capability/pet runtime sink 到 artifact store;wiki 内容由 curator 节点编辑;用户最终答复由末位 pet 的 pet 返回结果 提供,Studio 在终止时标定 `finalDispatchId`。
 
 当前 MVP 严格 FIFO 顺序 dispatch,Promise.all 并行作为 Phase 后续。
 
@@ -175,6 +176,7 @@ runner 消费 task item:
 `StudioOrchestrator` 在每个 turn 中维护:
 
 ```ts
+// CapabilityArtifactRef 定义见 PET_AGENT_CAPABILITY_ARTIFACT_STORE_DESIGN.md
 type StudioTurnState = {
   turnId: string;
   conversationId: string;        // wiki 目录命名空间
@@ -183,6 +185,7 @@ type StudioTurnState = {
   taskStates: StudioTaskRuntimeState[];
   dispatches: StudioDispatchState[];
   wikiRoot: string;              // 当前 conversation 的 wiki 目录绝对路径
+  artifactRoot: string;          // 当前 conversation 的 artifact store 根目录或 store scope
   iterationCount: number;
 };
 
@@ -207,6 +210,7 @@ type StudioDispatchState = {
   petId: string;
   status: 'running' | 'finished' | 'cancelled';
   resultText?: string;           // finished 时 pet 的返回文本
+  artifacts?: CapabilityArtifactRef[]; // 本 dispatch 产出的 durable artifact refs
   errorMessage?: string;         // 失败时的错误描述
   startedAt: string;
   finishedAt?: string;
@@ -218,9 +222,9 @@ type StudioDispatchState = {
 - 没有 `envelopes` 字段——pet 输出文本直接落在对应 `StudioDispatchState.resultText`,interaction log 派生自 dispatches。
 - 没有 `requirementState`——是否需要澄清由 planner agent 在自己的 reasoning 中判断,必要时通过 HITL 直接向用户提问。
 - 没有 `awaiting_input` 状态——pet 内部的 HITL 不穿透到 Studio,Studio 视角下 dispatch 就是 `running` 直到 result 返回。
-- `plan` 是调用计划,不承载运行状态;`status/retryCount` 属于 `taskStates`。
 - `dispatches` 主要用于 trace / UI 状态显示;判断 task 是否完成看 `taskStates[taskIndex].status`。
-
+- `artifacts` 只保存 refs,artifact 本体在 capability artifact store。dispatch state 不复制大型产物内容。
+- `plan` 是调用计划,不承载运行状态;`status/retryCount` 属于 `taskStates`。
 ### Planner Agent
 
 Planner 不是 graph 节点,而是 **一个普通的 pet agent**,由 `StudioOrchestratorConfig.plannerPetId` 指定。turn 起始(且 caller 未显式给出 plan)时,Studio 把它当成第一棒调用:
@@ -289,7 +293,7 @@ type ExecuteAction =
 
 执行细节:
 
-- `dispatch`:runner 据 brief + 当前 wikiRoot 调用 `PetAgentRuntime.invoke(...)`(签名见 INTERFACES 文档),等待 invoke Promise resolve 拿到 pet 返回文本,然后由 wiki_curator 整理。完成后继续消费下一 queue item。pet 内部的 HITL `interrupt()` 对 Studio 不可见——Studio 视角下 dispatch 一直处于 `running`,直到 invoke Promise 完成。
+- `dispatch`:dispatcher 据 brief + 当前 wikiRoot + 需要的 artifact refs 调用 `PetAgentRuntime.invoke(...)`(签名见 INTERFACES 文档),等待 invoke Promise resolve 拿到 pet 返回文本与产物 refs,然后由 wiki_curator 整理。完成后回到 execute。pet 内部的 HITL `interrupt()` 对 Studio 不可见——Studio 视角下 dispatch 一直处于 `running`,直到 invoke Promise 完成。
 - `finish`:turn 终止信号,标定 `finalDispatchId`,UI 渲染对应 dispatch 的 pet 返回文本到主对话面板。
 - `stop`:无法继续(retry 耗尽 / pet 不可用 / plan 有 failed task 且无可交付),turn_finished outcome 为 stopped。
 
@@ -311,7 +315,7 @@ planner 不输出 ExecuteAction,planner 通过 `studio_plan` capability 的 tool
 
 task item 在 dispatch 时携带 brief。它是一段**自然语言任务说明**(string),包含本棒任务目标(取自 `task.goal` / `task.acceptanceCriteria`)以及关键约束。MVP 直接使用 task goal,后续如需补充上游概况,也应由 runner 用模板拼装,不过 LLM。
 
-dispatcher 收到 brief 后,把 brief + wikiRoot + signal 传给 `PetAgentRuntime.invoke(...)`。wiki middleware 在 invoke 时自动读取 `{wikiRoot}/index.md` 并粘进 system prompt(详见 INTERFACES 文档)。pet 视角下,每次 dispatch 收到的输入形态一致:一段任务文本 + 一份 wiki 索引(自然语言形式)。
+dispatcher 收到 brief 后,把 brief + wikiRoot + artifact refs + signal 传给 `PetAgentRuntime.invoke(...)`。wiki middleware 在 invoke 时自动读取 `{wikiRoot}/index.md` 并粘进 system prompt(详见 INTERFACES 文档)。pet 视角下,每次 dispatch 收到的输入形态一致:一段任务文本 + 一份 wiki 索引(自然语言形式)+ 必要产物引用。
 
 brief 撰写要点:
 
@@ -351,16 +355,16 @@ turn 起始
 
 execute(plan 存在)
   → 下一个 pending task → dispatch(task1, brief)
-      调用 PetAgentRuntime.invoke({ brief, wikiRoot, signal })
-      等待 Promise resolve,拿到 pet:A 的返回文本
+      调用 PetAgentRuntime.invoke({ brief, wikiRoot, artifactRefs, signal })
+      等待 Promise resolve,拿到 pet:A 的返回文本 + artifact refs
       (过程中 pet 内部 HITL 对 Studio 不可见)
-      wiki_curator 读返回文本,整理进 wiki
+      wiki_curator 读返回文本 + artifact refs,整理进 wiki
       写回 taskStates[taskIndex].status = satisfied / failed
   → 回到 execute
 
 execute 下一轮
   → 下一个 pending task → dispatch(task2, brief)
-      → pet:B 读 wiki 自主检索 → 返回文本 → wiki_curator
+      → pet:B 读 wiki 自主检索,必要时按 ref 读 artifact → 返回文本 + artifact refs → wiki_curator
   → 回到 execute
 
 execute 末轮
@@ -395,7 +399,7 @@ execute 末轮
 execute → finish { finalDispatchId, reason }
   -> turn state stream 推送 turn_finished(带 finalDispatchId)
   -> UI 读取该 dispatch 的 resultText
-  -> 渲染该文本与其中引用的 artifact 到主对话面板
+  -> 渲染该文本与该 dispatch 的 artifact refs 到主对话面板
 ```
 
 设计立场:
@@ -404,7 +408,7 @@ execute → finish { finalDispatchId, reason }
 - 如果产品场景需要"多个 pet 输出合体呈现",由末位 pet 在自己的返回文本中完成整合——它从 Studio 撰写的 brief 中获得上游说明并通过 wiki 自主检索,具备整合能力。Studio 把这种整合需求写进末棒 brief,而不是在末端再起一个聚合节点。
 - 中间 pet 的输出留存在它们各自的 pet 面板与 dispatches 历史中,供用户回看或 trace 审计使用。
 
-最终答复呈现在用户发起 turn 的主对话面板(方案 B)。UI 默认渲染返回文本与其中引用的 artifact,dispatch id、内部工具日志按需在调试视图中提供。
+最终答复呈现在用户发起 turn 的主对话面板(方案 B)。UI 默认渲染返回文本与对应 artifact refs,dispatch id、内部工具日志按需在调试视图中提供。
 
 ### HITL Boundary
 
@@ -428,7 +432,7 @@ MVP 限制(两个独立 budget):
 
 其他规则:
 
-- dispatch 由 `StudioOrchestrator` 创建,pet 通过 `invoke(brief, wiki, signal)` 接收任务(详见 INTERFACES 文档)。
+- dispatch 由 `StudioOrchestrator` 创建,pet 通过 `invoke(brief, wiki, artifactRefs, signal)` 接收任务(详见 INTERFACES 文档)。
 - pet agent 在自己的 dispatch 上下文内运作,Studio registry 由 orchestrator 维护。
 - dispatcher 执行 `StudioOrchestrator` 输出的 action,action 经 zod 校验。
 - 审批由用户在 pet 面板内裁决,Studio 不参与;后续可加规则驱动的 policy 层。
@@ -512,18 +516,44 @@ pet 自主决定检索路径——Studio 不在 brief 中指明具体文件,只�
 ### 与 dispatch / pet 返回的关系
 
 - pet 返回文本作为 dispatch 的输出,保存在 `StudioDispatchState.resultText`,供 curator 与 trace 使用。
+- capability 产物作为 artifact refs 保存在 `StudioDispatchState.artifacts`,产物本体由 capability artifact store 持有。
 - wiki 是 curator 派生出的**独立知识层**,文件内容由 curator 写。
-- wiki 中 `sources/{dispatchId}-{petId}.md` 是 curator 从 pet 返回文本摘录的副本,便于 pet 读取摘要。
+- wiki 中 `sources/{dispatchId}-{petId}.md` 是 curator 从 pet 返回文本与 artifact refs 摘录的副本,便于 pet 读取摘要和发现产物。
 - pet 不读 dispatches 历史,只通过 wiki_read toolkit 读 wiki。
 
 ### 多媒体资产
 
-pet 输出文本中可包含对文件路径的引用(详见 INTERFACES 文档的 Multimedia Outputs 一节)。curator 负责:
+pet 输出文本中可包含对 artifact ref 或文件路径的引用(详见 INTERFACES 文档的 Multimedia Outputs 一节)。推荐由 capability 先 sink 到 artifact store,pet 返回 refs。curator 负责:
 
-- 解析 pet 返回文本里的文件路径,把文件搬到 Studio 选定的 wiki 子目录(常见是 `assets/`,但协议层不强制 schema)。
-- 在对应 topic markdown 中以**自然语言**描述资产(用途、类型、尺寸、风格、来源 dispatch 等)。
+- 解析 pet 返回文本和 `dispatch.artifacts` 里的 artifact refs。
+- 在对应 topic markdown 中以**自然语言**描述资产(用途、类型、尺寸、风格、来源 dispatch、artifactId 等)。
+- 对 legacy 文件路径,可以把文件搬到 artifact store 后再写入 ref;wiki 不作为大型产物的权威存储。
 
 下一棒 pet 通过 wiki_read 读到 topic markdown,从描述中自然理解该资产是什么、在哪。需要多模态输入时,pet 装备 wiki_read 的 `attach(path)` 扩展即可。
+
+## Capability Artifact Store
+
+Capability Artifact Store 是与 Studio Whiteboard 并列的 durable 产物层。Whiteboard 负责“让后续 pet 可检索地理解产物”,Artifact Store 负责“保存产物本体或外部引用”。
+
+建议目录形态:
+
+```text
+{AGENT_HOME}/studio/{studioId}/conv/{conversationId}/artifacts/
+  ├─ index.jsonl
+  └─ {artifactId}/
+      ├─ artifact.json
+      └─ content
+```
+
+运行时规则:
+
+- capability/subagent 完成时把需要保留的产物 sink 到 store,拿回 `CapabilityArtifactRef`。
+- pet invoke 返回 `{ reply, artifacts }`,Studio dispatch state 保存 refs。
+- completed lane messages 可以删除,因为 artifact store 才是产物权威来源。
+- wiki_curator 在 pet 返回后把 refs 整理进 wiki,但不复制大型本体。
+- 后续 pet 通过 wiki 发现 refs,必要时通过 artifact read tool/API 读取内容。
+
+`ToolMessage.artifact` 仅是 capability 内部临时回执桥,不是 durable store。详细 contract 见 `docs/PET_AGENT_CAPABILITY_ARTIFACT_STORE_DESIGN.md`。
 
 ### 调试与审计
 
@@ -556,6 +586,7 @@ type StudioTurnEvent =
   | { type: 'dispatch_finished';   dispatchId: string;
                                    status: 'finished' | 'cancelled';
                                    resultText?: string;
+                                   artifacts?: CapabilityArtifactRef[];
                                    errorMessage?: string }
   | { type: 'wiki_updated';        changedPaths: string[] }
   | { type: 'turn_finished';       outcome: 'done' | 'stopped';
@@ -567,7 +598,7 @@ type StudioTurnEventHandler = (event: StudioTurnEvent) => void | Promise<void>;
 设计与运行时约定:
 
 - **粒度低、频率低**:每棒大约 3–4 个事件(`dispatch_started` / `task_status_changed` / 可选 `wiki_updated` / `dispatch_finished`),整 turn 起止两端各 1 个。控制面据此渲染状态栏、徽章、当前棒次、wiki 最近更新。
-- **dispatch_finished 携带 resultText**:控制面需要"末棒最终文本"做"点击展开"等场景,所以这个事件带上 pet 的返回文本(冗余但便利;`turn_finished` 不重复携带)。
+- **dispatch_finished 携带 resultText + artifact refs**:控制面需要"末棒最终文本"和产物卡片做"点击展开"等场景,所以这个事件带上 pet 的返回文本与 refs(冗余但便利;`turn_finished` 不重复携带)。
 - **handler 不阻塞编排**:Studio 不 await handler 的返回 promise,即便 handler 抛错或 promise reject,主流程也不受影响——控制面挂掉不应该让 turn 跟着挂。
 - **跟 pet 工具事件流是两条独立通道**:`onTurnEvent` 来自 Studio 自己(跨 pet、全局、低频),`onToolEvent` 来自 pet runtime 内部 tool 节点(单 pet 内部、高频)。一条供"控制面状态信号",一条供"pet 面板对话内容",各自独立订阅,UI 不需要做合流过滤。详见 INTERFACES 文档的 Boundary 2。
 
@@ -698,15 +729,16 @@ obtainPlan
 
 execute → dispatch(taskIndex=0, brief)
   trend_video_script pet
-    返回脚本结构文本(含 scriptOutline 路径引用)
-  wiki_curator: 把 scriptOutline 整理进 topics/script-structure.md
+    返回脚本结构文本 + scriptOutline artifact ref
+  wiki_curator: 把 scriptOutline ref 与摘要整理进 topics/script-structure.md
   taskStates[0].status = satisfied
 
 execute → dispatch(taskIndex=1, brief)
   video_tail_audio pet
     收到 Studio 撰写的 brief(含整合职责说明)
     自主 wiki_read.cat('topics/script-structure.md') 拉详情
-    加工并整合,产出含音频建议的完整 pet 返回结果
+    必要时按 artifact ref 读取 scriptOutline 本体
+    加工并整合,产出含音频建议的完整 pet 返回结果 + finalDeliverable artifact ref
   wiki_curator: 把 audio 产出整理进 topics/audio-strategy.md, 更新 index
   taskStates[1].status = satisfied
 
@@ -747,14 +779,14 @@ LLM 调用集中在两处:**planner pet agent run** 和 **wiki_curator run**(每
 ### Phase 1
 
 - 增加 `StudioContext`、`PetAgentRuntime`、`StudioOrchestrator` 类型和 skeleton。
-- 实现 `PetAgentRuntime.invoke({ brief, wiki, signal })` 签名与 wiki middleware(详见 INTERFACES 文档)。
+- 实现 `PetAgentRuntime.invoke({ brief, wiki, artifactRefs, signal })` 签名与 wiki middleware(详见 INTERFACES 文档)。
 - 实现 wiki middleware:读 `{wikiRoot}/index.md` → 粘进 system prompt + 绑定 wiki_read toolkit。
 - 实现 obtainPlan(planner agent + studio_plan capability)+ queue runner + wiki_curator,执行单元拼成一个 turn 编排函数。`ExecuteAction` 由 zod 校验。
 - 实现 Studio Whiteboard 文件目录与 wiki_curator 节点(curator prompt 用默认值)。
 - 实现 wiki_read toolkit,在 Studio 模式下由 wiki middleware 装备到 pet。
 - pet runtime 透传 `onToolEvent` callback(Boundary 2),HITL 通过构造时注入的 `humanReviewer` 桥(Boundary 3)消化(详见 INTERFACES 文档)。
 - 支持显式 plan 顺序派发多个 standby pet agent。
-- dispatch 结果保存在 `StudioDispatchState.resultText`。
+- dispatch 结果保存在 `StudioDispatchState.resultText`,artifact refs 保存在 `StudioDispatchState.artifacts`。
 - 默认路径仍派发给 `defaultPetId`。
 - turn state stream 接口与控制面状态显示的基础订阅。
 

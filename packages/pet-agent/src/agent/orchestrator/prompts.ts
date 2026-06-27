@@ -429,6 +429,26 @@ function formatSubagentAnnounceText(item: SubagentAnnounce): string | null {
   return xmlTextBlock('result', item.text.trim(), ' format="markdown" role="data"');
 }
 
+function formatSubagentAnnounceArtifactRefs(item: SubagentAnnounce): string | null {
+  if (!item.artifactRefs || item.artifactRefs.length === 0) return null;
+  const lines = ['  <artifacts>'];
+  for (const ref of item.artifactRefs) {
+    lines.push('    <artifact>');
+    lines.push(`      <uri>${clipForPrompt(ref.uri, 260)}</uri>`);
+    lines.push(`      <capability>${clipForPrompt(ref.capabilityId, 120)}</capability>`);
+    lines.push(`      <kind>${ref.kind}</kind>`);
+    if (ref.title) {
+      lines.push(`      <title>${clipForPrompt(ref.title, 140)}</title>`);
+    }
+    if (ref.preview) {
+      lines.push(indentXmlBlock(xmlTextBlock('preview', clipForPrompt(ref.preview, 180)), 6));
+    }
+    lines.push('    </artifact>');
+  }
+  lines.push('  </artifacts>');
+  return lines.join('\n');
+}
+
 export function buildSubagentAnnounceContext(
   item: SubagentAnnounce | null,
   completionReason?: SubagentCompletionReason | null,
@@ -444,6 +464,7 @@ export function buildSubagentAnnounceContext(
     `  <lane>${item.lane}</lane>`,
     completionReason ? `  <stop_reason>${completionReason}</stop_reason>` : null,
     resultBlock ? indentXmlBlock(resultBlock, 2) : null,
+    formatSubagentAnnounceArtifactRefs(item),
     '</subagent_announce>',
   ].filter(Boolean);
   return lines.join('\n');

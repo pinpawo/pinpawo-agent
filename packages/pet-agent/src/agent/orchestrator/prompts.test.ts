@@ -238,6 +238,60 @@ test('subagent announce wraps markdown result as an xml-ish data block', () => {
   assert.doesNotMatch(context, /委派任务/);
 });
 
+test('subagent announce context includes artifact refs for task ownership', () => {
+  const context = buildSubagentAnnounceContext({
+    lane: 'capability:explore',
+    delegationId: 'task-1',
+    task: '修复 lint',
+    artifactRefs: [
+      {
+        id: 'artifact-1',
+        kind: 'report',
+        mimeType: 'text/markdown',
+        uri: 'capability-artifact://thread/thread-1/artifact/report-1',
+        title: 'Issue explore report',
+        preview: '已确认关键文件和下一步。',
+        capabilityId: 'explore',
+        delegationId: 'task-1',
+        runId: 'run-1',
+      },
+    ],
+    text: '# 结果\n\n- 已完成',
+  }, 'natural') ?? '';
+
+  assert.match(context, /<artifacts>/);
+  assert.match(context, /<artifact>/);
+  assert.match(context, /Issue explore report/);
+  assert.match(context, /capability-artifact:\/\/thread\/thread-1/);
+});
+
+test('subagent announce context clips artifact summaries', () => {
+  const long = 'title-payload-'.repeat(80);
+  const context = buildSubagentAnnounceContext({
+    lane: 'capability:explore',
+    delegationId: 'task-1',
+    task: '整理 ranking',
+    artifactRefs: [
+      {
+        id: 'artifact-1',
+        kind: 'report',
+        mimeType: 'text/markdown',
+        uri: 'capability-artifact://thread/thread-1/artifact/' + `${'x'.repeat(400)}`,
+        title: long,
+        preview: long,
+        capabilityId: 'explore',
+        delegationId: 'task-1',
+        runId: 'run-1',
+      },
+    ],
+    text: '# 结果',
+  }) ?? '';
+
+  assert.match(context, /<artifacts>/);
+  assert.equal(context.includes(long), false);
+  assert.match(context, /…/);
+});
+
 test('delegation outcome input does not duplicate the active task in announce context', () => {
   const currentTaskContext = buildDelegationOutcomeCurrentTaskContext({
     id: 'task-1',

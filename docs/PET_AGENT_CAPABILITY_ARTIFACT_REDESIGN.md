@@ -13,7 +13,7 @@ write tool. A capability writes through the store it receives on its
 `CapabilityContext`, and the resulting ref reaches state via the artifact sink:
 
 ```text
-capability code (afterRun / context-pressure ingest)
+capability code (context-pressure candidate compute -> afterRun persistence)
   -> CapabilityArtifactStore.writeArtifact(...)   // store from CapabilityContext
   -> CapabilityArtifactRef
   -> recordCapabilityArtifact(ref)  (artifact sink)
@@ -167,11 +167,9 @@ Image and video generation tools should be self-contained producer tools.
 ## Schema Validation
 
 `AgentCapability.resultSchema` remains the schema for `kind: "result"` artifacts.
-The capability's own persistence code validates the payload before writing: the
-shared `recordLatestToolResultArtifact` helper runs `schema.safeParse` on the
-candidate tool artifact and only writes a `kind: "result"` artifact when it
-matches. There is no write tool, so validation lives at the single deterministic
-write site rather than at a model-facing boundary.
+The capability's own persistence code validates and writes payloads at its `afterRun`
+boundary. There is no write tool, so validation lives at the single deterministic write
+site in code rather than at a model-facing boundary.
 
 ## Capability Migration
 
@@ -183,19 +181,26 @@ instructing the model to call a write tool inside the loop:
   a `kind: "result"` artifact via `ctx.artifactStore`. No model-facing write tool
   and no write instruction — the persistence is unconditional code.
 - `capability_creator` does the same via `afterRun` (uses `['bash']`).
-- `explore` does **not** persist a result on finalize. See "Explore ingest" below.
+- `explore` persists through `afterRun` only: context-pressure ingest computes
+  a reusable `summary + evidence` payload, and `afterRun` writes that payload as a
+  `kind: "report"` artifact once per completed run. If no context-pressure
+  payload exists, `afterRun` performs a final lightweight re-ingest from the
+  final run evidence and still attempts one artifact write.
 
 ## Explore ingest
 
-Explore's summarization is **context-pressure-driven only**, not a per-run
-finalize step.
+Explore's summarization includes a **context-pressure** path for compression and a
+**finalize** path for durable run summaries.
 
-**Trigger.** Ingest runs only when the subagent loop reaches its context limit
-(`contextPolicy.rewriteAsync`). A run that finishes naturally without hitting the
-limit produces **no** summary artifact — the raw tool outputs are still in the
-model context, and the subagent reports its conclusion through its returned text
-/ announce. The orchestrator does not need a persisted artifact for small
-explorations.
+**Trigger.**
+
+- **Context-pressure ingest** still runs only when the loop reaches context
+  constraints (`contextPolicy.rewriteAsync`). It summarizes and evicts selected
+  tool outputs, and stores the summary candidate in-memory.
+- **Finalize persistence** runs once in `afterRun` after the subagent completes; if
+  context-pressure did not already produce a structured summary, it runs a final
+  re-ingest on the final result evidence and writes one `kind: "report"` artifact
+  with evidence metadata when the re-ingest succeeds.
 
 **What ingest does.** It is a *complete summary of what came before*, not a
 lossy in-place compression:
@@ -211,20 +216,20 @@ lossy in-place compression:
     reasoning. (Carried in the artifact's structured content / metadata; the
     markdown body holds the readable summary.)
 
-This removes the prior `finalize`-time ingest, the `buildFinalEvidence` final
-pass, and the per-run result/report write. `ExploreResult` (`status`, `summary`,
-`nextSteps`) is no longer persisted as a `kind: "result"` artifact on finalize.
+This uses a two-step (or single-step) flow:
+- context-pressure path: computes candidate summary in `rewriteUnderContextPressure`;
+- finalize path: computes final candidate in `afterRun` if context-pressure did not produce one.
+(`status`, `summary`, `nextSteps`) is still not persisted as a `kind: "result"`
+artifact; it is persisted as a `kind: "report"` artifact body (`content`) with
+optional evidence metadata.
 
 **Implemented shape.** `ingestExploreKnowledge` returns
-`{ summary, evidence: { source, proves, value }[] }`. `rewriteUnderContextPressure`
-is the single place that emits the explore artifact, via
+`{ summary, evidence: { source, proves, value }[] }`. `afterRun` writes the
+latest ingest payload via
 `recordExploreIngestArtifact(ctx.artifactStore, ctx.artifactSink, ingest)`
 (summary → markdown content, evidence → metadata).
 
-**Failure-safe.** Ingest runs inside the context-pressure rewrite, which has no
-graceful fallback layer above it. The rewrite wraps ingest + persist in
-try/catch: on any failure (model rate-limit/timeout, structured-output parse
-error, store write error) it logs and returns the messages unchanged — keep the
-raw outputs this round rather than aborting the whole explore turn. It records +
-evicts before advancing the running summary, and evicts only the tool outputs the
-summarizer actually saw (the char-budget-truncated tail is left intact).
+**Failure-safe.** Context-pressure rewrite keeps raw outputs on ingest failures
+(model rate-limit/timeout, structured-output parse error) and never aborts the turn.
+`afterRun` also catches finalize persistence/write errors; failed finalize writes are
+non-fatal and the run keeps returning normal completion state.

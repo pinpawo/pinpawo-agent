@@ -13,7 +13,7 @@ test('capability_creator declares read-heavy context policy', async () => {
   });
 });
 
-test('capability_creator persists its result deterministically via afterRun, not a model-driven write tool', async () => {
+test('capability_creator keeps artifact persistence out of model tool calls', async () => {
   const capability = createCapabilityCreatorCapability();
   const runtime = await capability.createRuntime({} as never);
 
@@ -21,5 +21,5 @@ test('capability_creator persists its result deterministically via afterRun, not
   assert.deepEqual(runtime.uses, ['bash']);
   assert.ok(Array.isArray(runtime.instructions));
   assert.ok(!runtime.instructions.some((line) => line.includes('capability_artifact_write')));
-  assert.equal(typeof runtime.middleware?.afterRun, 'function');
+  assert.equal(runtime.middleware?.afterRun, undefined);
 });

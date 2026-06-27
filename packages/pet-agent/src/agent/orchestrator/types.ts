@@ -4,7 +4,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
-import type { CapabilityArtifactStore } from '../../types/artifact';
+import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
@@ -14,7 +14,6 @@ import type { OrchestrationDecision } from './schemas';
 export type MessageLane = 'general' | `capability:${string}`;
 export type PinpetMessageLane = MessageLane | 'orchestrator';
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
-export type AnnounceKind = 'completed' | 'progress';
 export type { SubagentCompletionReason };
 
 export type RunDelegation = {
@@ -60,6 +59,10 @@ export type SubagentAnnounce = {
   delegationId: string | null;
   task: string | null;
   text: string | null;
+  artifactRefs?: Pick<
+    CapabilityArtifactRef,
+    'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
+  >[];
 };
 
 export type DecisionMode = 'answer' | 'general' | 'capability';
@@ -89,6 +92,11 @@ export type OrchestratorConfig = {
   models: AgentModels;
   actor?: AgentActor;
   checkpoint?: BaseCheckpointSaver;
+  /**
+   * Maximum number of orchestration iterations per active delegation lifecycle in one
+   * run. This is runtime guardrail only; it does not replace LLM decision logic.
+   */
+  maxRunIterations?: number;
   decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
   /**
@@ -104,13 +112,13 @@ export type OrchestratorInvokeOptions = {
   actor?: AgentActor;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
-  maxIterations?: number;
   execution?: AgentExecution;
   workdir?: string;
   runtimeEnvironment?: string;
   onToolEvent?: SubagentToolEventHandler;
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;
+  maxRunIterations?: number;
   /**
    * 强制以"已发现候选"形态登记的 capability 名字列表。`prepare` 节点会
    * 据此 pre-seed `runCapabilitySearchState`,跳过 capability discovery/search。

@@ -53,29 +53,34 @@ before next model call
   -> recent tool outputs remain raw
 ```
 
-Finalization also runs through explore's `afterRun` middleware. The final
-assistant note is ingested into the same private summary marker before the
-capability result is read.
+Finalization also runs through explore's `afterRun` middleware. When context-pressure
+ingest already produced an inline `Explore summary:` marker in a dedicated assistant
+message, that summary is persisted into artifact metadata as-is. Otherwise, final output is
+optionally re-ingested once by a lightweight finalizer and persisted as the run-level
+`kind: "report"` artifact (if the structured ingest succeeds).
 
 ## Failure Policy
 
-Knowledge ingest is the source of truth for `ExploreResult.summary`. If final
-ingest fails, explore returns `completionReason: 'error'`. If context-pressure
-ingest fails, the subagent stops instead of fabricating a summary.
+`ExploreResult.summary` is still read from structured summary markers only.
+If context-pressure ingest fails, the run keeps raw context and continues; if final
+re-ingest fails, no summary artifact is written and the run still returns.
 
-There is intentionally no fallback that converts the latest free-form assistant
-message into an explore result. A low-quality fallback summary can make resume
-continue from biased or fabricated state, which is worse than stopping.
+There is intentionally no direct parse-based fallback that turns latest free-form
+assistant text into result state. The final fallback is a structured re-ingest
+step that writes a best-effort `report` artifact while preserving strict error
+behavior for run state.
 
 ## Tool Output Policy
 
 Tool-result truncation is not the normal explore strategy. While the transcript
 is under budget, raw tool output stays visible to the exploration model. Once
 the transcript exceeds the compression budget, older large successful tool
-outputs may be rewritten as small readable summary text. The canonical summary
-is stored in `additional_kwargs.pinpawo.exploreSummary`, not recovered by parsing
-content markers. Recent tool outputs remain raw. Truncating old outputs is
-avoided for explore because partial raw output can create misleading evidence.
+outputs may be rewritten as small readable summary placeholders, and a dedicated
+`Explore summary:` assistant message is appended to the lane transcript.
+The canonical summary comes from this assistant message content (not from
+`additional_kwargs`) so downstream code can read it with a simple marker parser.
+Recent tool outputs remain raw. Truncating old outputs is avoided for explore
+because partial raw output can create misleading evidence.
 
 ## Reference Pattern
 

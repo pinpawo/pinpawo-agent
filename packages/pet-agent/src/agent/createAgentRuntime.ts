@@ -1,6 +1,6 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { StateGraph, START, END, interrupt } from '@langchain/langgraph';
+import { StateGraph, START, END } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../types/agent';
@@ -64,15 +64,6 @@ import {
   buildUserIntentDecisionSystemPrompt,
 } from './orchestrator/prompts';
 import {
-  resolveHumanReviewResume,
-  ReviewResponseResolutionError,
-} from './orchestrator/review/reviewResponseResolver';
-import {
-  appendReviewViewMessage,
-  buildReviewSpec,
-  type HumanReviewInterruptPayload,
-} from './orchestrator/review/reviewSpec';
-import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
 } from './orchestrator/review/reviewAuthorizations';
@@ -88,7 +79,12 @@ import {
   updateRunDelegationResult,
 } from './orchestrator/delegations';
 import {
+  buildHandoffArtifactRefs,
+  findLatestHandoffCopyForDelegation,
+} from './orchestrator/artifacts/handoff';
+import {
   buildSubagentHandoff,
+  getMessageHandoffSource,
   getMessageLane,
   getMessageTurnId,
   laneMessages,
@@ -111,7 +107,7 @@ import {
   selectCapabilityTools,
 } from './orchestrator/subagentHandoff';
 import { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
-import { clipForPrompt, formatDelegationStatus, readMessageText } from './orchestrator/utils';
+import { readMessageText } from './orchestrator/utils';
 
 export type {
   OrchestratorConfig,
@@ -124,6 +120,7 @@ export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniq
 
 const GENERAL_SUBAGENT_MAX_ITERATIONS = 16;
 const CAPABILITY_SUBAGENT_MAX_ITERATIONS = 8;
+const DEFAULT_ORCHESTRATOR_MAX_ITERATIONS = 25;
 
 function generalLaneToolkits(toolkits: AgentToolkit[]) {
   return toolkits.filter((toolkitItem) => toolkitItem.exposure?.general !== false);
@@ -156,16 +153,16 @@ function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOp
     capabilities: (cfg.capabilities ?? []) as AgentCapability[],
     toolkits: (cfg.toolkits ?? []) as AgentToolkit[],
     execution: cfg.execution as AgentExecution | undefined,
-    maxIterations: cfg.maxIterations as number | undefined,
     workdir: cfg.workdir as string | undefined,
     runtimeEnvironment: cfg.runtimeEnvironment as string | undefined,
     onToolEvent: cfg.onToolEvent as SubagentToolEventHandler | undefined,
     reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
     globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),
+    maxRunIterations: readRunIterationLimit(cfg.maxRunIterations),
     forcedCapabilityNames: Array.isArray((cfg as { forcedCapabilityNames?: unknown }).forcedCapabilityNames)
       ? (cfg as { forcedCapabilityNames: unknown[] }).forcedCapabilityNames.filter(
           (name): name is string => typeof name === 'string' && name.length > 0,
-        )
+      )
       : undefined,
   };
 }
@@ -334,6 +331,25 @@ function createTaskActiveDelegation(
   };
 }
 
+function readRunIterationLimit(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    return undefined;
+  }
+  return value;
+}
+
+function buildRunIterationLimitMessage(
+  delegation: TaskActiveDelegation,
+  limit: number,
+  count: number,
+): string {
+  return [
+    `主流程循环已达到上限：${count}/${limit}。`,
+    `当前仍保留委派任务“${delegation.task}”（${delegation.lane}）。`,
+    '该轮委派记录为待续跑状态，可继续提交下一轮任务让我接着推进。',
+  ].join('\n');
+}
+
 function resolveDelegationTranscriptRunId(
   state: OrchestratorStateType,
   delegation: RunPendingDelegation,
@@ -421,79 +437,6 @@ function resolveActor(config: OrchestratorConfig, runnableConfig?: RunnableConfi
   throw new Error('Missing actor in orchestrator config and invoke options');
 }
 
-function buildIterationLimitReviewPayload(params: {
-  runId: string;
-  runIterationCount: number;
-  maxIterations: number;
-  delegationSummary: string;
-}): HumanReviewInterruptPayload {
-  const body = `已执行 ${params.runIterationCount} 轮循环（上限 ${params.maxIterations}），当前任务状态：\n${params.delegationSummary}\n\n是否批准继续执行？`;
-  return {
-    kind: 'review',
-    review: buildReviewSpec({
-      id: `iteration-limit:${params.runId}:${params.runIterationCount}:${params.maxIterations}`,
-      view: {
-        kind: 'plain',
-        title: 'Iteration limit reached',
-        body,
-      },
-      options: [
-        {
-          id: 'approve',
-          label: 'Approve',
-          variant: 'primary',
-          decision: { type: 'approve' },
-        },
-        {
-          id: 'reject',
-          label: 'Reject',
-          variant: 'danger',
-          decision: { type: 'reject' },
-        },
-        {
-          id: 'respond',
-          label: 'Respond',
-          input: {
-            kind: 'text',
-            key: 'message',
-            required: true,
-            multiline: true,
-            placeholder: 'Tell the agent how to continue',
-          },
-          decision: { type: 'respond', messageInputKey: 'message' },
-        },
-      ],
-    }),
-  };
-}
-
-function buildInvalidIterationLimitReviewPayload(
-  payload: HumanReviewInterruptPayload,
-): HumanReviewInterruptPayload {
-  const message = '请选择批准继续、拒绝停止，或提供新的处理方向。';
-  return {
-    ...payload,
-    error: 'invalid_decision',
-    review: {
-      ...payload.review,
-      view: appendReviewViewMessage(payload.review.view, message),
-    },
-  };
-}
-
-function resolveIterationLimitReviewDecision(payload: HumanReviewInterruptPayload, resume: unknown) {
-  try {
-    return resolveHumanReviewResume({
-      reviewSpec: payload.review,
-    }, resume).decision;
-  } catch (error) {
-    if (!(error instanceof ReviewResponseResolutionError)) {
-      throw error;
-    }
-  }
-  return null;
-}
-
 function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {
   const active = mergeToolAuthorizations([], current);
   const recorded: ToolAuthorizationRecord[] = [];
@@ -514,6 +457,9 @@ function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {
 // --- Graph builder ---
 
 export function createOrchestratorGraph(config: OrchestratorConfig) {
+  const orchestratorMaxIterations = readRunIterationLimit(config.maxRunIterations)
+    ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
+
   async function prepare(state: OrchestratorStateType) {
     if (state.runId) {
       return {};
@@ -535,6 +481,55 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     }
     return {
       messages: result.messages,
+    };
+  }
+
+  async function runIterationLimitGuard(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
+    const { maxRunIterations } = getInvokeOptions(runnableConfig);
+    const activeDelegation = state.taskActiveDelegation ?? readLegacyTaskActiveDelegation(state);
+    if (!activeDelegation) {
+      return { runPendingFinalReply: null };
+    }
+    const maxRunIterationLimit = maxRunIterations ?? orchestratorMaxIterations;
+    if (state.runIterationCount < maxRunIterationLimit) {
+      return { runPendingFinalReply: null };
+    }
+    return {
+      messages: [
+        new AIMessage(buildRunIterationLimitMessage(
+          activeDelegation,
+          maxRunIterationLimit,
+          state.runIterationCount,
+        )),
+      ],
+      runPendingDelegation: null,
+      runPendingFinalReply: 'inline',
+      taskActiveDelegation: activeDelegation,
+      runIterationCount: 0,
+    };
+  }
+
+  function afterIterationLimitGuard(state: OrchestratorStateType) {
+    return state.runPendingFinalReply === 'inline' ? 'end' : 'delegationOutcomeDecisionGuard';
+  }
+
+  function userIntentDecisionGuard() {
+    return { canHandoffActiveDelegation: true };
+  }
+
+  async function delegationOutcomeDecisionGuard(state: OrchestratorStateType) {
+    const activeDelegation = state.taskActiveDelegation ?? readLegacyTaskActiveDelegation(state);
+    if (!activeDelegation) {
+      return { canHandoffActiveDelegation: true };
+    }
+
+    const activeDelegationCompletionReason = readLatestAnnounceCompletionReason(state.messages, {
+      runId: activeDelegation.transcriptRunId,
+      delegationId: activeDelegation.id,
+    });
+
+    return {
+      canHandoffActiveDelegation: activeDelegationCompletionReason !== 'limit_reached',
     };
   }
 
@@ -637,58 +632,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       capabilities,
       toolkits,
       execution,
-      maxIterations,
       workdir,
       runtimeEnvironment,
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const maxIter = maxIterations ?? 5;
-    let iterationLimitMessages: BaseMessage[] = [];
-    let resetIterationCount = false;
-
-    if (state.runIterationCount >= maxIter) {
-      const delegationSummary = state.runDelegations
-        .map((d) => `[${d.id}] ${d.lane} — ${formatDelegationStatus(d.status)}: ${clipForPrompt(d.task, 80)}`)
-        .join('\n') || '无委派记录';
-      const reviewPayload = buildIterationLimitReviewPayload({
-        runId: state.runId,
-        runIterationCount: state.runIterationCount,
-        maxIterations: maxIter,
-        delegationSummary,
-      });
-      let decision = resolveIterationLimitReviewDecision(reviewPayload, interrupt(reviewPayload));
-      while (!decision) {
-        decision = resolveIterationLimitReviewDecision(
-          reviewPayload,
-          interrupt(buildInvalidIterationLimitReviewPayload(reviewPayload)),
-        );
-      }
-      if (decision.type === 'respond') {
-        iterationLimitMessages = [new HumanMessage(decision.message)];
-        state = {
-          ...state,
-          messages: [...state.messages, ...iterationLimitMessages],
-          runIterationCount: 0,
-          runPendingDelegation: null,
-        };
-        resetIterationCount = true;
-      } else if (decision.type !== 'approve') {
-        return {
-          messages: [new AIMessage(`已停止，共执行 ${state.runIterationCount} 轮。如需继续请告诉我。`)],
-          runPendingDelegation: null,
-          runPendingFinalReply: 'inline' as RunFinalReplyRoute,
-        };
-      } else {
-        state = {
-          ...state,
-          runIterationCount: 0,
-          runPendingDelegation: null,
-        };
-        resetIterationCount = true;
-      }
-    }
 
     const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
@@ -707,16 +656,77 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const capabilityList = capabilities ?? [];
     validateUniqueCapabilityNames(capabilityList);
     const latestHumanRequest = readLatestHumanRequest(state.messages);
-    const recentMainMessages = mainMessagesWithoutCompaction(state.messages);
     const contextSummaries = readContextCompactionSummaries(state.messages);
-    const recentAnnounces = readRecentAnnounces(state.messages);
     const activeDelegation = state.taskActiveDelegation
       ?? (kind === 'delegation_outcome' ? readLegacyTaskActiveDelegation(state) : null);
+    const activeDelegationCapabilityId = activeDelegation
+      && activeDelegation.lane.startsWith('capability:')
+      ? activeDelegation.lane.slice('capability:'.length)
+      : null;
+    const activeDelegationArtifactRefs = activeDelegation
+      ? buildHandoffArtifactRefs(
+          state.sessionCapabilityArtifacts,
+          {
+            delegationId: activeDelegation.id,
+            runId: activeDelegation.transcriptRunId,
+            capabilityId: activeDelegationCapabilityId,
+          },
+        )
+      : [];
+    const canHandoffActiveDelegation = kind === 'delegation_outcome'
+      ? state.canHandoffActiveDelegation
+      : true;
+    const preDecisionHandoffMessages =
+      kind === 'delegation_outcome'
+      && canHandoffActiveDelegation
+      && activeDelegation
+        ? (() => {
+            const proposedMessages = buildSubagentHandoff({
+              messages: state.messages,
+              lane: activeDelegation.lane,
+              runId: activeDelegation.transcriptRunId,
+              delegationId: activeDelegation.id,
+              artifactRefs: activeDelegationArtifactRefs,
+              clearLane: false,
+            });
+            if (!proposedMessages) return null;
+            const proposedCopy = proposedMessages.find(
+              (message): message is AIMessage => message._getType() === 'ai',
+            );
+            if (!proposedCopy) return proposedMessages;
+
+            const latestCopy = findLatestHandoffCopyForDelegation(
+              state.messages,
+              activeDelegation.id,
+              activeDelegation.lane,
+              getMessageHandoffSource,
+            );
+            if (!latestCopy) return proposedMessages;
+
+            return readMessageText(latestCopy) === readMessageText(proposedCopy)
+              ? null
+              : proposedMessages;
+          })()
+        : null;
+    const decisionContextMessages = preDecisionHandoffMessages
+      ? [...state.messages, ...preDecisionHandoffMessages]
+      : state.messages;
+    const recentMainMessages = mainMessagesWithoutCompaction(decisionContextMessages);
+    const recentAnnounces = readRecentAnnounces(decisionContextMessages);
     const activeDelegationAnnounce = activeDelegation
       ? readLatestAnnounce(state.messages, {
           runId: activeDelegation.transcriptRunId,
           delegationId: activeDelegation.id,
         })
+      : null;
+    const activeDelegationCompletionReason = activeDelegation
+      ? readLatestAnnounceCompletionReason(state.messages, {
+          runId: activeDelegation.transcriptRunId,
+          delegationId: activeDelegation.id,
+        })
+      : null;
+    const activeDelegationAnnounceForDecision = activeDelegationAnnounce
+      ? { ...activeDelegationAnnounce, artifactRefs: activeDelegationArtifactRefs }
       : null;
     const requestContext = buildPreparedRequestContext({
       latestUserRequest: latestHumanRequest,
@@ -785,13 +795,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
         latestUserRequest: latestHumanRequest,
         currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
         subagentAnnounceContext: buildSubagentAnnounceContext(
-          activeDelegationAnnounce,
-          activeDelegation
-            ? readLatestAnnounceCompletionReason(state.messages, {
-                runId: activeDelegation.transcriptRunId,
-                delegationId: activeDelegation.id,
-              })
-            : null,
+          activeDelegationAnnounceForDecision,
+          activeDelegationCompletionReason,
         ),
         otherTasksContext: buildDelegationOutcomeOtherTasksContext(
           state.runDelegations,
@@ -884,24 +889,34 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : null;
     const nextDelegationState = reuseOrAppendRunDelegation(state.runDelegations, runPendingDelegation);
 
-    // Handoff (D1): when delegation outcome routes to answer, copy the current
-    // subagent announce into the main queue before answerNode runs. The decision
-    // node still only routes; answerNode owns all user-facing wording, including
-    // asking for missing information when needed.
+    // Handoff (D1): copy the active subagent announce into the main queue before
+    // the next decision branch runs.
+    // - answer decision: announce is final for this delegation (old lane transcript
+    //   can be cleared).
+    // - continue decision: preserve lane transcript for continuation while still
+    //   keeping the latest announce in main for better downstream judgment.
     //
     // Single-line delegation handoff is driven by taskActiveDelegation. run
     // summaries are not the source of truth for unfinished task lifecycle.
     const replacingActiveDelegation = kind === 'delegation_outcome'
       && Boolean(activeDelegation && runPendingDelegation && activeDelegation.id !== runPendingDelegation.id);
-    const handingOff = kind === 'delegation_outcome' && actionKind === 'answer';
     const handoffMessages: BaseMessage[] = [];
     const handedOffDelegationIds = new Set<string>();
-    if ((handingOff || replacingActiveDelegation) && activeDelegation) {
+    if (preDecisionHandoffMessages) {
+      handoffMessages.push(...preDecisionHandoffMessages);
+    }
+    const shouldClearLaneForHandoff = kind === 'delegation_outcome'
+      && actionKind === 'answer'
+      && canHandoffActiveDelegation
+      && Boolean(activeDelegation);
+    if ((shouldClearLaneForHandoff || replacingActiveDelegation) && activeDelegation) {
       const messages = buildSubagentHandoff({
         messages: state.messages,
         lane: activeDelegation.lane,
         runId: activeDelegation.transcriptRunId,
         delegationId: activeDelegation.id,
+        clearLane: shouldClearLaneForHandoff || replacingActiveDelegation,
+        includeCopy: false,
       });
       if (messages) {
         handoffMessages.push(...messages);
@@ -916,7 +931,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : null;
 
     // A handed-off delegation is, by the orchestrator's judgment, complete.
-    const finalRunDelegations = handedOffDelegationIds.size > 0
+    const shouldMarkDelegationComplete = actionKind === 'answer' || replacingActiveDelegation;
+    const finalRunDelegations = handedOffDelegationIds.size > 0 && shouldMarkDelegationComplete
       ? nextDelegationState.runDelegations.map((delegation) =>
           handedOffDelegationIds.has(delegation.id)
             ? { ...delegation, status: 'completed' as const }
@@ -924,9 +940,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       : nextDelegationState.runDelegations;
 
     let nextTaskActiveDelegation: TaskActiveDelegation | null;
+    const shouldClearTaskActiveDelegation = shouldClearLaneForHandoff;
     if (replacementBlocked) {
       nextTaskActiveDelegation = activeDelegation;
-    } else if (handingOff) {
+    } else if (shouldClearTaskActiveDelegation) {
       nextTaskActiveDelegation = null;
     } else if (runPendingDelegation) {
       nextTaskActiveDelegation = activeDelegation && activeDelegation.id === runPendingDelegation.id
@@ -944,7 +961,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
 
     return {
       messages: [
-        ...iterationLimitMessages,
         ...handoffMessages,
         ...(blockedReplacementMessage ? [blockedReplacementMessage] : []),
         ...(inlineReply ? [new AIMessage(inlineReply)] : []),
@@ -952,7 +968,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       runPendingDelegation: replacementBlocked ? null : nextDelegationState.runPendingDelegation,
       runPendingFinalReply: replacementBlocked ? 'inline' : runPendingFinalReply,
       taskActiveDelegation: nextTaskActiveDelegation,
-      ...(resetIterationCount ? { runIterationCount: 0 } : {}),
       ...(kind === 'delegation_outcome'
         ? {
             runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
@@ -1273,15 +1288,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     ) {
       return 'capabilitySearch';
     }
-    return 'userIntentDecision';
+    return 'userIntentDecisionGuard';
   }
 
   function afterContextPrep(state: OrchestratorStateType) {
     if (state.taskActiveDelegation?.status === 'awaiting_decision') {
-      return 'delegationOutcomeDecision';
+      return 'delegationOutcomeIterationGuard';
     }
     if (!state.taskActiveDelegation && readLegacyTaskActiveDelegation(state)) {
-      return 'delegationOutcomeDecision';
+      return 'delegationOutcomeIterationGuard';
     }
     return 'capabilityDiscovery';
   }
@@ -1300,7 +1315,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('compactContext', compactContext)
     .addNode('capabilityDiscovery', capabilityDiscovery)
     .addNode('capabilitySearch', new ToolNode([capabilitySearchTool]))
+    .addNode('userIntentDecisionGuard', userIntentDecisionGuard)
+    .addNode('delegationOutcomeDecisionGuard', delegationOutcomeDecisionGuard)
     .addNode('userIntentDecision', userIntentDecision)
+    .addNode('delegationOutcomeIterationGuard', runIterationLimitGuard)
     .addNode('delegationOutcomeDecision', delegationOutcomeDecision)
     .addNode('answer', answerNode)
     .addNode('capability', capabilityNode)
@@ -1310,13 +1328,19 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     // Run entry uses explicit task lifecycle state. Lane announces remain
     // transcript/context storage and are not the normal control-flow signal.
     .addConditionalEdges('compactContext', afterContextPrep, {
-      delegationOutcomeDecision: 'delegationOutcomeDecision',
+      delegationOutcomeIterationGuard: 'delegationOutcomeIterationGuard',
       capabilityDiscovery: 'capabilityDiscovery',
     })
     .addConditionalEdges('capabilityDiscovery', afterCapabilityDiscovery, {
       capabilitySearch: 'capabilitySearch',
-      userIntentDecision: 'userIntentDecision',
+      userIntentDecisionGuard: 'userIntentDecisionGuard',
     })
+    .addEdge('userIntentDecisionGuard', 'userIntentDecision')
+    .addConditionalEdges('delegationOutcomeIterationGuard', afterIterationLimitGuard, {
+      end: END,
+      delegationOutcomeDecisionGuard: 'delegationOutcomeDecisionGuard',
+    })
+    .addEdge('delegationOutcomeDecisionGuard', 'delegationOutcomeDecision')
     .addConditionalEdges('userIntentDecision', afterDecision, {
       end: END,
       answer: 'answer',
@@ -1330,9 +1354,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       general: 'general',
     })
     .addEdge('answer', END)
-    .addEdge('capabilitySearch', 'userIntentDecision')
-    .addEdge('capability', 'delegationOutcomeDecision')
-    .addEdge('general', 'delegationOutcomeDecision');
+    .addEdge('capabilitySearch', 'userIntentDecisionGuard')
+    .addEdge('capability', 'delegationOutcomeIterationGuard')
+    .addEdge('general', 'delegationOutcomeIterationGuard');
 
   return graph.compile({
     checkpointer: config.checkpoint,

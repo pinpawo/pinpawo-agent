@@ -1,6 +1,8 @@
 import { AIMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
-import type { AnnounceKind, MessageLane, PinpetMessageLane, SubagentAnnounce, SubagentCompletionReason } from './types';
+import type { MessageLane, PinpetMessageLane, SubagentAnnounce, SubagentCompletionReason } from './types';
+import type { CapabilityArtifactRef } from '../../types/artifact';
+import { parseHandoffArtifactFooter, formatHandoffArtifactRefsForMessage } from './artifacts/handoff';
 import { messageHasToolCalls, readMessageToolCallIds, readToolResultCallId } from '../../utils/messages';
 import { readMessageText } from './utils';
 
@@ -25,11 +27,6 @@ export function setPinpetMeta(message: BaseMessage, patch: Record<string, unknow
   };
 }
 
-export function getMessageAnnounce(message: BaseMessage): AnnounceKind | null {
-  const announce = getPinpetMeta(message).announce;
-  return announce === 'completed' || announce === 'progress' ? announce : null;
-}
-
 /**
  * Neutral marker for "this lane message carries the subagent's deliverable text".
  * Replaces the completed/progress announce tag: it says WHICH message is the
@@ -47,10 +44,6 @@ export function getMessageIsAnnounce(message: BaseMessage): boolean {
 export function getMessageCompletionReason(message: BaseMessage): SubagentCompletionReason | null {
   const completionReason = getPinpetMeta(message).completionReason;
   return typeof completionReason === 'string' ? completionReason as SubagentCompletionReason : null;
-}
-
-export function setMessageAnnounce(message: BaseMessage, kind: AnnounceKind) {
-  setPinpetMeta(message, { announce: kind });
 }
 
 function ensureMessageId(message: BaseMessage): string {
@@ -74,8 +67,7 @@ export function getMessageTurnId(message: BaseMessage): string | null {
   const meta = getPinpetMeta(message);
   const runId = meta.runId;
   if (typeof runId === 'string') return runId;
-  const turnId = meta.turnId;
-  return typeof turnId === 'string' ? turnId : null;
+  return null;
 }
 
 export function toolProtocolSafeMessages(messages: BaseMessage[]) {
@@ -162,7 +154,9 @@ export const routeMessages = mainConversationMessages;
  * the decision node.
  *
  * Announce selection: prefer the last tool-call-free AI message with text (the
- * natural deliverable); fall back to the last AI/tool message with text.
+ * natural deliverable). As a defensive fallback, allow the last AI/tool message
+ * with text as a best-effort deliverable; for limit_reached runs we avoid tool
+ * fallback because interrupted tool output is more likely to be protocol noise.
  */
 export function tagNewLaneMessages(
   messages: BaseMessage[],
@@ -195,7 +189,8 @@ export function tagNewLaneMessages(
       break;
     }
   }
-  if (announceIndex < 0) {
+  const allowFallbackToRawMessage = completionReason !== 'limit_reached';
+  if (announceIndex < 0 && allowFallbackToRawMessage) {
     for (let i = nextMessages.length - 1; i >= 0; i--) {
       const type = nextMessages[i]._getType();
       if (
@@ -252,8 +247,8 @@ export function getMessageHandoffSource(message: BaseMessage): HandoffSource | n
  * and WIPE the entire delegation's lane (original announce + intermediate
  * transcript). See docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md.
  *
- * Returns the messages array update: RemoveMessage entries for every lane
- * message of this lane+runId+delegationId, followed by the main-queue copy.
+ * Returns the messages array update: optionally removes lane messages for this
+ * lane+runId+delegationId, followed by the main-queue copy.
  * Returns null (no update) when no announce text can be located for the
  * delegation — caller should fall back to leaving state untouched.
  */
@@ -262,6 +257,12 @@ export function buildSubagentHandoff(params: {
   lane: MessageLane;
   runId: string;
   delegationId: string;
+  clearLane?: boolean;
+  includeCopy?: boolean;
+  artifactRefs?: Pick<
+    CapabilityArtifactRef,
+    'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
+  >[];
 }): BaseMessage[] | null {
   const announceMessage = readLatestAnnounceMessage(params.messages, {
     runId: params.runId,
@@ -271,21 +272,36 @@ export function buildSubagentHandoff(params: {
   if (!announceText.trim()) return null;
 
   const task = announceMessage ? getMessageDelegatedTask(announceMessage) : null;
+  const artifactRefFooter = params.artifactRefs && params.artifactRefs.length > 0
+    ? formatHandoffArtifactRefsForMessage(params.artifactRefs.map((ref) => ({
+      ...ref,
+      delegationId: params.delegationId,
+      runId: params.runId,
+    })))
+    : '';
 
-  const removeMessages = params.messages.flatMap((message) => {
-    if (getMessageLane(message) !== params.lane) return [];
-    if (getMessageTurnId(message) !== params.runId) return [];
-    if (getMessageDelegationId(message) !== params.delegationId) return [];
-    // Legacy checkpointed lane messages may predate message ids; LangGraph
-    // RemoveMessage cannot target them, so those old messages are left as
-    // residual history instead of risking an invalid delete.
-    if (!message.id) return [];
-    return [new RemoveMessage({ id: message.id }) as BaseMessage];
-  });
+  const clearLane = params.clearLane ?? true;
+  const includeCopy = params.includeCopy ?? true;
+  const removeMessages = clearLane
+    ? params.messages.flatMap((message) => {
+      if (getMessageLane(message) !== params.lane) return [];
+      if (getMessageTurnId(message) !== params.runId) return [];
+      if (getMessageDelegationId(message) !== params.delegationId) return [];
+      // Legacy checkpointed lane messages may predate message ids; LangGraph
+      // RemoveMessage cannot target them, so those old messages are left as
+      // residual history instead of risking an invalid delete.
+      if (!message.id) return [];
+      return [new RemoveMessage({ id: message.id }) as BaseMessage];
+    })
+    : [];
+
+  if (!includeCopy) {
+    return removeMessages;
+  }
 
   // The copy is a first-class main message (no lane), carrying only minimal
   // provenance so the main agent knows which executor produced it for which task.
-  const handoffCopy = new AIMessage(announceText);
+  const handoffCopy = new AIMessage(`${announceText}${artifactRefFooter}`);
   setPinpetMeta(handoffCopy, {
     handoffFrom: params.lane,
     delegationId: params.delegationId,
@@ -335,21 +351,26 @@ function readAnnounceFromAnyMessage(message: BaseMessage): SubagentAnnounce | nu
   if (tagged) return tagged;
   const handoff = getMessageHandoffSource(message);
   if (!handoff || !isDelegationLane(handoff.handoffFrom)) return null;
-  return {
+  const parsed = parseHandoffArtifactFooter(readMessageText(message));
+  const announce: SubagentAnnounce = {
     lane: handoff.handoffFrom,
     delegationId: handoff.delegationId || null,
     task: handoff.task,
-    text: readMessageText(message) || null,
+    text: parsed.text || null,
   };
+  if (parsed.artifactRefs.length > 0) {
+    announce.artifactRefs = parsed.artifactRefs;
+  }
+  return announce;
 }
 
 function readLatestAnnounceMessage(
   messages: BaseMessage[],
-  options: { runId?: string | null; turnId?: string | null; delegationId?: string | null } = {},
+  options: { runId?: string | null; delegationId?: string | null } = {},
 ): BaseMessage | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    const runId = options.runId ?? options.turnId;
+    const runId = options.runId;
     if (runId && getMessageTurnId(message) !== runId) continue;
     if (options.delegationId && getMessageDelegationId(message) !== options.delegationId) continue;
     if (readTaggedAnnounce(message)) return message;
@@ -359,7 +380,7 @@ function readLatestAnnounceMessage(
 
 export function readLatestAnnounce(
   messages: BaseMessage[],
-  options: { runId?: string | null; turnId?: string | null; delegationId?: string | null } = {},
+  options: { runId?: string | null; delegationId?: string | null } = {},
 ): SubagentAnnounce | null {
   const message = readLatestAnnounceMessage(messages, options);
   return message ? readTaggedAnnounce(message) : null;
@@ -367,7 +388,7 @@ export function readLatestAnnounce(
 
 export function readLatestAnnounceCompletionReason(
   messages: BaseMessage[],
-  options: { runId?: string | null; turnId?: string | null; delegationId?: string | null } = {},
+  options: { runId?: string | null; delegationId?: string | null } = {},
 ): SubagentCompletionReason | null {
   const message = readLatestAnnounceMessage(messages, options);
   return message ? getMessageCompletionReason(message) : null;

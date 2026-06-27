@@ -5,7 +5,6 @@ export type CapabilityArtifactSelector = {
   capabilityId?: string;
   delegationId?: string;
   runId?: string;
-  turnId?: string;
   schemaName?: string;
   schemaVersion?: number;
   metadata?: Record<string, unknown>;
@@ -40,7 +39,7 @@ export function matchesCapabilityArtifact(
   return (!selector.kind || artifact.kind === selector.kind)
     && (!selector.capabilityId || artifact.capabilityId === selector.capabilityId)
     && (!selector.delegationId || artifact.delegationId === selector.delegationId)
-    && (!(selector.runId ?? selector.turnId) || artifact.runId === (selector.runId ?? selector.turnId))
+    && (!selector.runId || artifact.runId === selector.runId)
     && (!selector.schemaName || artifact.schema?.name === selector.schemaName)
     && (typeof selector.schemaVersion !== 'number' || artifact.schema?.version === selector.schemaVersion)
     && metadataMatches(artifact, selector.metadata);
@@ -76,7 +75,6 @@ function hasExplicitResultScope(selector: CapabilityArtifactSelector): boolean {
     selector.capabilityId
       || selector.delegationId
       || selector.runId
-      || selector.turnId
       || selector.schemaName
       || (selector.metadata && Object.keys(selector.metadata).length > 0),
   );

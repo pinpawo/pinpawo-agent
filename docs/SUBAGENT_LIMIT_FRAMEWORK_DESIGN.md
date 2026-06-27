@@ -122,7 +122,7 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
 2. **P2 `RepeatedInputGuard`**：唯一最小实现——`messages` 指纹连续重复达阈值 → block，主动停产出 `completionReason='limit_reached'`，不抛错。
 3. **P3 fuse 归位**：把现有 context fuse 表达成同一 Guard 抽象下的一个 Guard（token 硬阈值），block 路径与 P2 统一（throw → 主动停）。
 
-**后续 PR（独立）**：
+**后续 PR（独立，跟踪于 #281）**：
 
 4. **P4 拉大迭代预算**：`maxIterations` → ~100，厘清与 `recursionLimit` 关系。
 5. **P5 orchestrator 迁移**：把 `runIterationLimitGuard` / `delegationOutcomeDecisionGuard` / `runOrchestrationDecision` 迁到新 Decision/Guard 抽象。

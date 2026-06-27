@@ -10,9 +10,26 @@ export type TimelineTextLine = {
   id: string;
   text: string;
   tone?: 'default' | 'muted' | 'added' | 'removed';
+  /**
+   * When set, the line is the operation's header and should render a leading
+   * status dot in this phase's color (gray=running, green=done, red=failed).
+   */
+  statusDot?: AgentOperationEntry['phase'];
 };
 
 type TimelineTextLineDraft = Omit<TimelineTextLine, 'id'>;
+
+/** Columns reserved for the leading status dot and its trailing space ("● "). */
+export const OPERATION_DOT_WIDTH = 2;
+
+export const OPERATION_STATUS_DOT = '●';
+
+/** Lead-in for the first output line under an operation, Claude-Code style. */
+export const OPERATION_OUTPUT_LEAD = '  ⎿ ';
+/** Indent for continuation output lines, aligned under the lead glyph. */
+export const OPERATION_OUTPUT_INDENT = '    ';
+/** Output lines shown before collapsing into a "+N lines" footer. */
+export const OPERATION_OUTPUT_MAX_LINES = 6;
 
 const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
   'after',
@@ -29,13 +46,22 @@ export function buildAgentOperationDisplayLines(
 ): TimelineTextLine[] {
   const lines: TimelineTextLine[] = [{
     id: `${entry.id}:line`,
-    text: buildAgentOperationText(entry, now, width),
+    // Reserve two columns for the leading status dot ("● ").
+    text: buildAgentOperationText(entry, now, Math.max(0, width - OPERATION_DOT_WIDTH)),
+    statusDot: entry.phase,
   }];
   const payloadLines = buildOperationPayloadLines(entry, width);
   payloadLines.forEach((line, index) => {
     lines.push({
       ...line,
       id: `${entry.id}:payload:${index.toString()}`,
+    });
+  });
+  const outputLines = buildOperationOutputLines(entry, width);
+  outputLines.forEach((line, index) => {
+    lines.push({
+      ...line,
+      id: `${entry.id}:output:${index.toString()}`,
     });
   });
   return lines;
@@ -69,12 +95,28 @@ function buildOperationStatus(entry: AgentOperationEntry, now: number) {
 }
 
 function buildOperationBody(entry: AgentOperationEntry) {
+  const label = operationToolLabel(entry);
+  const argument = operationArgument(entry);
+  return argument ? `${label}(${argument})` : label;
+}
+
+/** The tool name shown as the header label, e.g. `apply_patch` or `打开网页`. */
+function operationToolLabel(entry: AgentOperationEntry) {
+  return entry.source?.toolName?.trim()
+    || entry.source?.name?.trim()
+    || entry.title?.trim()
+    || entry.kind;
+}
+
+/** The parenthesized argument summary, e.g. the target path or a one-line summary. */
+function operationArgument(entry: AgentOperationEntry) {
+  const label = operationToolLabel(entry);
+  const detailText = formatDetails(entry.details);
   return joinUniqueParts([
-    entry.summary,
     entry.target,
-    formatDetails(entry.details),
-    entry.title,
-  ]);
+    entry.summary,
+    detailText,
+  ].filter((part) => part?.trim() !== label));
 }
 
 function formatDetails(details: Record<string, unknown> | undefined) {
@@ -92,6 +134,55 @@ function buildOperationPayloadLines(entry: AgentOperationEntry, width: number): 
   if (!isApplyPatchOperation(entry)) return [];
   const patch = readApplyPatchPayload(entry);
   return patch ? buildPatchDiffLines(patch, entry.target, width) : [];
+}
+
+/**
+ * Renders the tool's raw output (or error) as `⎿`-led, indented muted lines,
+ * collapsing long output to a "+N lines" footer. apply_patch keeps its diff
+ * rendering instead of dumping raw output.
+ */
+function buildOperationOutputLines(entry: AgentOperationEntry, width: number): TimelineTextLineDraft[] {
+  if (isApplyPatchOperation(entry)) return [];
+  const isError = entry.phase === 'failed';
+  const raw = isError ? (entry.raw?.error ?? entry.raw?.output) : entry.raw?.output;
+  const text = stringifyOutput(raw);
+  if (!text) return [];
+
+  const rawLines = text.replace(/\r\n/g, '\n').split('\n');
+  const lines = rawLines[rawLines.length - 1] === '' ? rawLines.slice(0, -1) : rawLines;
+  return buildOutputDisplayLines(lines, width, isError);
+}
+
+function buildOutputDisplayLines(
+  lines: string[],
+  width: number,
+  isError: boolean,
+): TimelineTextLineDraft[] {
+  const tone: TimelineTextLine['tone'] = isError ? 'removed' : 'muted';
+  const visible = lines.slice(0, OPERATION_OUTPUT_MAX_LINES);
+  const hidden = lines.length - visible.length;
+  const out = visible.map((line, index) => ({
+    text: truncateLine(`${index === 0 ? OPERATION_OUTPUT_LEAD : OPERATION_OUTPUT_INDENT}${line}`, width),
+    tone,
+  }));
+  if (hidden > 0) {
+    out.push({
+      text: truncateLine(`${OPERATION_OUTPUT_INDENT}… +${hidden.toString()} lines`, width),
+      tone: 'muted',
+    });
+  }
+  return out;
+}
+
+function stringifyOutput(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value, null, 2).trim();
+  } catch {
+    return '';
+  }
 }
 
 function readDetailString(details: Record<string, unknown>, key: string) {

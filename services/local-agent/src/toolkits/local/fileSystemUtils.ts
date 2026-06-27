@@ -14,7 +14,24 @@ export function wildcardToRegExp(pattern: string) {
   return new RegExp(`^${escaped.replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
 }
 
-export function walkFiles(rootPath: string, visit: (filePath: string) => boolean | void) {
+/**
+ * Directory names that file walks (grep_search / glob_search) must never descend
+ * into. `.pinpawo` is hardcoded on purpose: it holds the agent's own checkpoint /
+ * artifact storage, and recursively reading it back into context causes a
+ * self-reference blow-up (a single serialized checkpoint object is one ~493KB line
+ * of conversation JSON). See docs/ORCHESTRATOR_RECURSION_GUARD_DIAGNOSIS.md.
+ */
+export const DEFAULT_WALK_IGNORED_DIRS: ReadonlySet<string> = new Set([
+  '.pinpawo',
+  '.git',
+  'node_modules',
+]);
+
+export function walkFiles(
+  rootPath: string,
+  visit: (filePath: string) => boolean | void,
+  ignoredDirs: ReadonlySet<string> = DEFAULT_WALK_IGNORED_DIRS,
+) {
   const stack = [rootPath];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -24,7 +41,11 @@ export function walkFiles(rootPath: string, visit: (filePath: string) => boolean
     if (stat.isDirectory()) {
       const entries = readdirSync(current);
       for (let i = entries.length - 1; i >= 0; i -= 1) {
-        stack.push(resolve(current, entries[i] ?? ''));
+        const name = entries[i] ?? '';
+        if (ignoredDirs.has(name)) {
+          continue;
+        }
+        stack.push(resolve(current, name));
       }
       continue;
     }

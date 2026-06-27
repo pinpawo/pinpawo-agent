@@ -7,6 +7,22 @@ import { readRecord, readString } from '../operationMetadata';
 import { resolveUserPath } from './pathUtils';
 import { walkFiles, wildcardToRegExp } from './fileSystemUtils';
 
+// Byte-level guards for grep_search. Line count alone does not bound output: a
+// single matched line can be hundreds of KB (e.g. a minified bundle, a lockfile,
+// or — as seen in production — a serialized checkpoint JSON of ~493KB per line).
+// Without these, one grep_search returned 4.3M chars and blew up the context
+// window. See docs/ORCHESTRATOR_RECURSION_GUARD_DIAGNOSIS.md.
+const GREP_MAX_LINE_CHARS = 2_000;
+const GREP_MAX_TOTAL_CHARS = 50_000;
+
+function truncateMatchLine(line: string) {
+  if (line.length <= GREP_MAX_LINE_CHARS) {
+    return line;
+  }
+  const omitted = line.length - GREP_MAX_LINE_CHARS;
+  return `${line.slice(0, GREP_MAX_LINE_CHARS)} …[+${omitted.toString()} chars truncated]`;
+}
+
 export const globSearchTool = tool(
   async ({ path, pattern, limit }: { path?: string; pattern: string; limit?: number }) => {
     try {
@@ -53,6 +69,8 @@ export const grepSearchTool = tool(
       const maxResults = Math.max(1, Math.min(limit ?? 50, 200));
       const needle = caseSensitive ? query : query.toLowerCase();
       const results: string[] = [];
+      let totalChars = 0;
+      let truncatedByBytes = false;
 
       walkFiles(rootPath, (filePath) => {
         let content: string;
@@ -69,7 +87,15 @@ export const grepSearchTool = tool(
           if (!haystack.includes(needle)) {
             continue;
           }
-          results.push(`${filePath}:${i + 1}: ${line}`);
+          const entry = `${filePath}:${i + 1}: ${truncateMatchLine(line)}`;
+          // Stop on the total-bytes budget so a few huge matches can't blow up
+          // the context window even when the line count stays under maxResults.
+          if (totalChars + entry.length > GREP_MAX_TOTAL_CHARS) {
+            truncatedByBytes = true;
+            return false;
+          }
+          results.push(entry);
+          totalChars += entry.length + 1;
           if (results.length >= maxResults) {
             return false;
           }
@@ -78,7 +104,13 @@ export const grepSearchTool = tool(
         return results.length < maxResults;
       });
 
-      return results.length > 0 ? results.join('\n') : '(no matches)';
+      if (results.length === 0) {
+        return '(no matches)';
+      }
+      const body = results.join('\n');
+      return truncatedByBytes
+        ? `${body}\n[结果已达 ${GREP_MAX_TOTAL_CHARS.toString()} 字符上限并截断，请收窄 query 或 path]`
+        : body;
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }

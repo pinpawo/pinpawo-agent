@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { ToolMessage } from '@langchain/core/messages';
 import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
@@ -339,6 +340,86 @@ test('tool operation output summaries still receive raw output strings first', (
   );
 
   assert.equal(event.operation.summary, '已接收 2 个任务');
+});
+
+test('unwraps a live ToolMessage instance to its content string (no LangChain envelope)', () => {
+  // LangChain streamMode:'tools' emits on_tool_end with output set to the full
+  // ToolMessage instance; without unwrapping, raw.output is the serialized envelope.
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'http_fetch',
+      toolCallId: 'call-1',
+      output: new ToolMessage({
+        content: '{"title":"issue 269","state":"open"}',
+        tool_call_id: 'call-1',
+        name: 'http_fetch',
+      }),
+    },
+    createOperationRegistry(),
+  );
+
+  assert.equal(event.raw?.output, '{"title":"issue 269","state":"open"}');
+});
+
+test('unwraps a serialized ToolMessage ({lc,...,kwargs.content}) form', () => {
+  // The form seen in LangSmith traces / after checkpoint round-trips: not a live
+  // instance, content lives under kwargs.content.
+  const serialized = JSON.parse(JSON.stringify(new ToolMessage({
+    content: 'serialized body',
+    tool_call_id: 'call-1',
+    name: 'http_fetch',
+  })));
+
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    { event: 'on_tool_end', name: 'http_fetch', toolCallId: 'call-1', output: serialized },
+    createOperationRegistry(),
+  );
+
+  assert.equal(event.raw?.output, 'serialized body');
+});
+
+test('unwraps array-content ToolMessage output by concatenating text parts', () => {
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'http_fetch',
+      toolCallId: 'call-1',
+      output: new ToolMessage({
+        content: [
+          { type: 'text', text: 'hello ' },
+          { type: 'text', text: 'world' },
+        ],
+        tool_call_id: 'call-1',
+        name: 'http_fetch',
+      }),
+    },
+    createOperationRegistry(),
+  );
+
+  assert.equal(event.raw?.output, 'hello world');
+});
+
+test('leaves plain string and plain record tool outputs untouched', () => {
+  const stringEvent = normalizeToolStreamEvent(
+    'req-1',
+    { event: 'on_tool_end', name: 'run_shell', toolCallId: 'c1', output: 'plain' },
+    createOperationRegistry(),
+  );
+  assert.equal(stringEvent.raw?.output, 'plain');
+
+  // A tool that legitimately returns an object with a `content` key but is not a
+  // message must not be unwrapped.
+  const recordOutput = { content: 'not a message', other: 1 };
+  const recordEvent = normalizeToolStreamEvent(
+    'req-1',
+    { event: 'on_tool_end', name: 'custom', toolCallId: 'c2', output: recordOutput },
+    createOperationRegistry(),
+  );
+  assert.deepEqual(recordEvent.raw?.output, recordOutput);
 });
 
 test('browser type operation metadata does not expose typed text in display fields', () => {

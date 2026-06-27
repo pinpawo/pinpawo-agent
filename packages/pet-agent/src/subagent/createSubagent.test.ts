@@ -183,3 +183,30 @@ test('createSubagent ignores a stop marker that arrives in the input history', a
   // The final message is the fresh model answer, not the stale marker.
   assert.equal(readLoopGuardStopReason(result.messages.at(-1) as BaseMessage), null);
 });
+
+test('createSubagent default iteration budget is large (P4: unified ~100 super-steps)', async () => {
+  // A never-converging loop with no explicit maxIterations must run on the raised
+  // default budget (~100 super-steps ≈ ~50 model calls), not the old small value.
+  const noop = tool(async () => 'x', {
+    name: 'noop',
+    description: 'no-op',
+    schema: z.object({}),
+  });
+  const model = new NeverConvergingModel({});
+
+  const result = await createSubagent({
+    model: model as unknown as BaseChatModel,
+    tools: [noop],
+    instructions: [],
+    messages: [new HumanMessage('go')],
+    // no maxIterations -> default budget
+  });
+
+  assert.equal(result.completionReason, 'limit_reached');
+  // One ReAct iteration ≈ 2 super-steps, so a ~100 budget yields well above the
+  // old default of 12 (which would have stopped at ~6 model calls).
+  assert.ok(
+    model.callCount > 20,
+    `expected the raised default budget to allow many model calls, got ${model.callCount}`,
+  );
+});

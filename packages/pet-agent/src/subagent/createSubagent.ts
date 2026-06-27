@@ -20,7 +20,11 @@ import {
   type SubagentLoopGuard,
 } from './loopGuards';
 
-const DEFAULT_SUBAGENT_MAX_ITERATIONS = 12;
+// Fallback iteration budget when the caller does not pass maxIterations. Used as
+// the inner ReAct agent's LangGraph recursionLimit (graph super-steps; one
+// model→tool iteration is ~2 steps). With loop guards (#280) the expected stop is
+// a guard's graceful stop, so this is a generous last-resort breaker. See P4 / #281.
+const DEFAULT_SUBAGENT_MAX_ITERATIONS = 100;
 const DEFAULT_CONTEXT_FUSE_RATIO = 0.85;
 
 const SUBAGENT_GOVERNING_PROMPT = [
@@ -208,6 +212,9 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
       {
         ...input.runnableConfig,
         signal: input.signal,
+        // maxIterations is the budget in LangGraph super-steps (one model→tool
+        // iteration ≈ 2 steps). This is the last-resort breaker; loop guards are
+        // expected to stop the loop gracefully first.
         recursionLimit: maxIterations,
         streamMode: ['messages', 'values', 'tools'],
       },

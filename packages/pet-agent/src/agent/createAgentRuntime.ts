@@ -122,6 +122,37 @@ const GENERAL_SUBAGENT_MAX_ITERATIONS = 16;
 const CAPABILITY_SUBAGENT_MAX_ITERATIONS = 8;
 const DEFAULT_ORCHESTRATOR_MAX_ITERATIONS = 25;
 
+/**
+ * Approximate orchestrator node steps consumed per delegation round-trip. The
+ * soft guard (`runIterationLimitGuard`) counts *completed delegations* (+1 each),
+ * but LangGraph's `recursionLimit` counts *node super-steps*. One delegation walks
+ * roughly: decision → capability/general → iterationGuard → decisionGuard →
+ * decision (~4-5 steps). Used to derive a hard `recursionLimit` that sits above
+ * the soft limit so the soft guard's graceful "待续跑" path triggers first, with
+ * the hard limit as a last-resort breaker.
+ *
+ * IMPORTANT: keep this in sync with the graph topology in createOrchestratorGraph.
+ */
+const NODES_PER_DELEGATION = 5;
+
+/**
+ * Fixed node steps that run once per turn outside the delegation loop
+ * (prepare → compactContext → capabilityDiscovery → … → first decision), plus a
+ * safety margin so the hard breaker never beats the soft guard at the boundary.
+ */
+const ORCHESTRATOR_RECURSION_MARGIN = 10;
+
+/**
+ * Derive the hard LangGraph `recursionLimit` for the orchestrator graph from its
+ * soft per-run delegation limit. Pass the *effective* max run iterations
+ * (invoke-time override ?? config ?? default). The result is always strictly
+ * greater than the soft limit's node-step cost so the soft guard wins.
+ */
+export function resolveOrchestratorRecursionLimit(maxRunIterations?: number): number {
+  const softLimit = readRunIterationLimit(maxRunIterations) ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
+  return softLimit * NODES_PER_DELEGATION + ORCHESTRATOR_RECURSION_MARGIN;
+}
+
 function generalLaneToolkits(toolkits: AgentToolkit[]) {
   return toolkits.filter((toolkitItem) => toolkitItem.exposure?.general !== false);
 }

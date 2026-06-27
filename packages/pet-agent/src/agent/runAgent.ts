@@ -4,7 +4,11 @@ import type { AgentActor, AgentExecution } from '../types/agent';
 import type { SubagentToolEventHandler } from '../types/subagent';
 import type { AgentToolkit } from '../types/toolkit';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
-import { buildOrchestratorRunInput, type OrchestratorGraph } from './createAgentRuntime';
+import {
+  buildOrchestratorRunInput,
+  resolveOrchestratorRecursionLimit,
+  type OrchestratorGraph,
+} from './createAgentRuntime';
 
 export type AgentInvokeInput = {
   messages: BaseMessage[];
@@ -52,6 +56,9 @@ export async function runAgent(
     {
       signal: input.signal,
       configurable: Object.keys(configurable).length > 0 ? configurable : undefined,
+      // Hard breaker derived from the soft per-run delegation limit so the
+      // graph never silently runs to LangGraph's default 25-step limit.
+      recursionLimit: resolveOrchestratorRecursionLimit(),
     },
   );
 

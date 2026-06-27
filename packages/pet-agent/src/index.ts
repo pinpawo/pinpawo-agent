@@ -74,6 +74,7 @@ export {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
   isOrchestratorInternalAiStreamNode,
+  resolveOrchestratorRecursionLimit,
   streamOrchestratorGraph,
   streamOrchestratorGraphWithTokenUsage,
   validateUniqueCapabilityNames,
@@ -223,6 +224,7 @@ export {
 } from './utils/operationMetadata';
 export { runAgent } from './agent/runAgent';
 export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
+export { isGraphRecursionLimitError } from './utils/graphErrors';
 export { createSubagent } from './subagent/createSubagent';
 export { clipForPrompt } from './agent/orchestrator/utils';
 export {

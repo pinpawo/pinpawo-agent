@@ -212,6 +212,10 @@ guard 永远没机会触发。
 
 ### 修复 A：给编排图 stream/invoke 传显式 `recursionLimit`
 
+> ✅ 已实现（#275）：`resolveOrchestratorRecursionLimit(maxRunIterations)` 导出自
+> `createAgentRuntime`，由 `agentGraphService.stream/invokeState` 与 `runAgent` 调用；
+> `NODES_PER_DELEGATION = 5`、`ORCHESTRATOR_RECURSION_MARGIN = 10`。
+
 把编排图的硬上限与软上限对齐成"软先于硬触发"。当前软上限默认 25 次委派，每次委派 ~4–5
 个节点步，所以硬上限应至少 `maxRunIterations × 每委派节点步 + 余量`。
 
@@ -225,6 +229,10 @@ guard 永远没机会触发。
   `DEFAULT_ORCHESTRATOR_MAX_ITERATIONS`，并加注释说明它必须随图结构变化更新。
 
 ### 修复 B：编排图层兜 `GraphRecursionError`，降级为待续跑（推荐行为）
+
+> ✅ 已实现（#275）：`runChatSession` 的 stream try/catch 用共享的
+> `isGraphRecursionLimitError` 识别并降级为 `{status:'completed'}` + 待续跑文案；
+> 非 recursion 错误原样抛出。
 
 即便修复 A 让软 guard 先触发，硬 limit 仍应有兜底（防御异常路径，如节点循环 bug）。
 

@@ -11,6 +11,7 @@ import {
   buildContextPolicyStateUpdate,
   rewriteMessagesForContextPolicy,
 } from './contextPolicy';
+import { isGraphRecursionLimitError } from '../utils/graphErrors';
 
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 12;
 const DEFAULT_CONTEXT_FUSE_RATIO = 0.85;
@@ -258,12 +259,7 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
     };
   } catch (err) {
     const contextLimitReached = readContextLimitReachedError(err);
-    const isLimitReached = err instanceof Error
-      && (
-        (typeof (err as { lc_error_code?: unknown }).lc_error_code === 'string'
-          && (err as { lc_error_code?: string }).lc_error_code === 'GRAPH_RECURSION_LIMIT')
-        || /GRAPH_RECURSION_LIMIT|Recursion limit of \d+ reached/i.test(err.message)
-      );
+    const isLimitReached = isGraphRecursionLimitError(err);
 
     if (isLimitReached || contextLimitReached) {
       await finishToolEvents('failed', err);

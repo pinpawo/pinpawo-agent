@@ -628,6 +628,124 @@ test('runChatSession does not map pending review free text to review response', 
   );
 });
 
+test('runChatSession degrades a GraphRecursionError to a completed 待续跑 reply', async () => {
+  const emittedEvents: LocalAgentEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    stream() {
+      return graphStream((async function* () {
+        const error = new Error('Recursion limit of 135 reached without hitting a stop condition.');
+        (error as { lc_error_code?: string }).lc_error_code = 'GRAPH_RECURSION_LIMIT';
+        throw error;
+        // eslint-disable-next-line no-unreachable
+        yield ['values', { messages: [] }];
+      })());
+    },
+  };
+
+  const result = await runChatSession({
+    request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.match(result.status === 'completed' ? result.reply : '', /步数已达上限/);
+  const completed = emittedEvents.find(
+    (event): event is Extract<LocalAgentEvent, { type: 'message.completed' }> =>
+      event.type === 'message.completed',
+  ) ?? null;
+  assert.match(completed?.text ?? '', /步数已达上限/);
+});
+
+test('runChatSession keeps the streamed reply when GraphRecursionError fires mid-stream', async () => {
+  const emittedEvents: LocalAgentEvent[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    stream() {
+      return graphStream((async function* () {
+        yield ['messages', [new AIMessage('部分进度'), { node: 'answer' }]];
+        const error = new Error('GRAPH_RECURSION_LIMIT');
+        throw error;
+      })());
+    },
+  };
+
+  const result = await runChatSession({
+    request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: '部分进度' });
+});
+
+test('runChatSession rethrows non-recursion errors from the stream', async () => {
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    stream() {
+      return graphStream((async function* () {
+        throw new Error('some other failure');
+        // eslint-disable-next-line no-unreachable
+        yield ['values', { messages: [] }];
+      })());
+    },
+  };
+
+  await assert.rejects(
+    () => runChatSession({
+      request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
+      setup,
+      graphService: graphService as unknown as LocalAgentGraphService,
+      isCurrent: () => true,
+      finishInterrupted: () => {},
+      emitEvent: () => {},
+      emitToolEvent: () => {},
+    }),
+    /some other failure/,
+  );
+});
+
 test('runChatSession omits token usage when provider usage is unavailable', async () => {
   const emittedEvents: unknown[] = [];
   const promptMessages = [

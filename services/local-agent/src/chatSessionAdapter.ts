@@ -3,6 +3,7 @@ import { HumanMessage } from '@langchain/core/messages';
 import {
   createTokenUsageSnapshot,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
+  isGraphRecursionLimitError,
   isHumanReviewInterruptPayload,
   isOrchestratorInternalAiStreamNode,
   readMessagesTokenUsage,
@@ -24,6 +25,7 @@ import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivi
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
 const STALE_RESUME_MESSAGE = '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。';
+const RECURSION_LIMIT_NOTICE = '本轮处理步数已达上限，未能在一轮内完成。已保留当前进度，可继续提交下一步让我接着推进。';
 const PENDING_REVIEW_TEXT_NOTICE = '当前有待确认的 review，请先通过确认面板应答；这条文本没有作为新消息发送。';
 
 export type ChatSessionResult =
@@ -327,6 +329,25 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
         }
       }
     }
+  } catch (error) {
+    // The orchestrator graph's hard recursion breaker fired. This means the run
+    // did not converge within its step budget — semantically "this turn didn't
+    // finish". Degrade to the same graceful "待续跑" outcome as the soft guard
+    // instead of surfacing a raw GraphRecursionError as a chat error.
+    if (!isGraphRecursionLimitError(error)) {
+      throw error;
+    }
+    if (!isCurrent()) {
+      finishInterrupted();
+      return { status: 'interrupted' };
+    }
+    const reply = streamedReply.trim() || RECURSION_LIMIT_NOTICE;
+    if (!streamedReply.trim()) {
+      emitEvent({ type: 'message.delta', requestId, role: 'assistant', text: reply });
+    }
+    emitEvent({ type: 'message.completed', requestId, role: 'assistant', text: reply });
+    clearAgentRunActivity(requestId);
+    return { status: 'completed', reply };
   } finally {
     setup.input.onToolEvent = undefined;
   }

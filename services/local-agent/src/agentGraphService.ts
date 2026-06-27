@@ -2,6 +2,7 @@ import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
   isHumanReviewInterruptPayload,
+  resolveOrchestratorRecursionLimit,
   runAgent,
   streamOrchestratorGraph,
   type AgentRunResult,
@@ -126,6 +127,7 @@ export class LocalAgentGraphService {
       {
         signal: setup.input.signal,
         configurable: buildConfigurable(setup),
+        recursionLimit: resolveOrchestratorRecursionLimit(setup.graphConfig.maxRunIterations),
         streamMode: ['messages', 'values'],
       },
     );
@@ -138,6 +140,7 @@ export class LocalAgentGraphService {
       {
         signal: setup.input.signal,
         configurable: buildConfigurable(setup),
+        recursionLimit: resolveOrchestratorRecursionLimit(setup.graphConfig.maxRunIterations),
       },
     ) as OrchestratorStateType;
   }

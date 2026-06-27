@@ -1,11 +1,37 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import { createSubagent } from './createSubagent';
+import { LOOP_GUARD_MARKER_KEY, readLoopGuardStopReason } from './loopGuards';
+
+/**
+ * Minimal model that never converges: it keeps emitting a fresh tool call every
+ * turn. Paired with a contextPolicy that collapses the transcript back to a fixed
+ * list, the messages submitted to the model repeat across turns — the exact
+ * condition RepeatedInputGuard is meant to catch.
+ */
+class NeverConvergingModel extends BaseChatModel {
+  callCount = 0;
+  _llmType() {
+    return 'never-converging';
+  }
+  async _generate() {
+    this.callCount += 1;
+    const message = new AIMessage({
+      content: '',
+      tool_calls: [{ id: `call-${this.callCount}`, name: 'noop', args: {} }],
+    });
+    return { generations: [{ message, text: '' }] };
+  }
+  bindTools() {
+    return this;
+  }
+}
 
 test('createSubagent emits non-tool model text as runtime deltas', async () => {
   const events: unknown[] = [];
@@ -95,4 +121,65 @@ test('createSubagent contextPolicy rewrites persisted subagent transcript', asyn
   const toolMessages = result.messages.filter((message) => message._getType() === 'tool');
   assert.equal(toolMessages.length, 1);
   assert.equal(toolMessages[0]?.content, '[evicted: view_file_chunk src/a.ts -> 已读；需要时重新调用]');
+});
+
+test('createSubagent returns limit_reached when the repeated-input guard trips', async () => {
+  const noop = tool(async () => 'same', {
+    name: 'noop',
+    description: 'no-op',
+    schema: z.object({}),
+  });
+  const model = new NeverConvergingModel({});
+  // Collapse every turn back to the same fixed list so the model input repeats —
+  // the spinning-on-identical-input condition RepeatedInputGuard guards against.
+  const fixedTranscript: BaseMessage[] = [new HumanMessage('do the task')];
+
+  const result = await createSubagent({
+    model: model as unknown as BaseChatModel,
+    tools: [noop],
+    instructions: [],
+    messages: [new HumanMessage('do the task')],
+    maxIterations: 30,
+    contextPolicy: { rewrite: () => fixedTranscript },
+  });
+
+  // The guard stopped the loop well before the maxIterations breaker.
+  assert.equal(result.completionReason, 'limit_reached');
+  assert.ok(model.callCount < 30, `guard should stop early, got ${model.callCount} model calls`);
+
+  // The stop notice is present and carries the typed guard-stop reason.
+  const last = result.messages.at(-1);
+  assert.ok(last);
+  assert.equal(last?._getType(), 'ai');
+  assert.equal(readLoopGuardStopReason(last as BaseMessage), 'repeated_input');
+  assert.match(String(last?.content ?? ''), /原地打转/);
+
+  // The subagent transcript (the prior conversation) is preserved alongside the
+  // notice — the stop appends, it does not replace context.
+  assert.ok(
+    result.messages.length > 1,
+    'expected the conversation context to be kept alongside the stop notice',
+  );
+  assert.equal(result.messages[0]?._getType(), 'human');
+});
+
+test('createSubagent ignores a stop marker that arrives in the input history', async () => {
+  // A stop marker buried in incoming history (not produced by this run) must not
+  // be misread as our guard stop. The run completes naturally.
+  const staleStopNotice = new AIMessage({
+    content: '上一轮的停止说明',
+    additional_kwargs: { pinpawo: { [LOOP_GUARD_MARKER_KEY]: 'repeated_input' } },
+  });
+
+  const result = await createSubagent({
+    model: new FakeListChatModel({ responses: ['fresh answer'], sleep: 0 }),
+    tools: [],
+    instructions: [],
+    messages: [new HumanMessage('do the task'), staleStopNotice, new HumanMessage('继续')],
+    maxIterations: 4,
+  });
+
+  assert.equal(result.completionReason, 'natural');
+  // The final message is the fresh model answer, not the stale marker.
+  assert.equal(readLoopGuardStopReason(result.messages.at(-1) as BaseMessage), null);
 });

@@ -63,6 +63,31 @@ test('RepeatedInputGuard treats different tool-call content as distinct', () => 
   assert.equal(guard.evaluate(input(turn2)).block, false);
 });
 
+test('RepeatedInputGuard detects the same tool call across differing ids', () => {
+  const guard = createRepeatedInputGuard(3);
+  // Same tool name + args every turn, but a fresh tool-call id each time (the
+  // common real-world case). The fingerprint must normalize the id away so this
+  // is still detected as a repeat.
+  const turnWithId = (id: string) => [
+    new HumanMessage('task'),
+    new AIMessage({ content: '', tool_calls: [{ id, name: 'grep_search', args: { query: 'x' } }] }),
+  ];
+
+  assert.equal(guard.evaluate(input(turnWithId('call-1'))).block, false);
+  assert.equal(guard.evaluate(input(turnWithId('call-2'))).block, false);
+  assert.equal(guard.evaluate(input(turnWithId('call-3'))).block, true);
+});
+
+test('RepeatedInputGuard separates same tool name with different args', () => {
+  const guard = createRepeatedInputGuard(2);
+  const call = (query: string) => [
+    new AIMessage({ content: '', tool_calls: [{ id: 'c', name: 'grep_search', args: { query } }] }),
+  ];
+  assert.equal(guard.evaluate(input(call('a'))).block, false);
+  // different args -> not a repeat
+  assert.equal(guard.evaluate(input(call('b'))).block, false);
+});
+
 test('ContextWindowFuseGuard blocks when estimated tokens reach the limit', () => {
   const guard = createContextWindowFuseGuard(100);
   const below = guard.evaluate(input([new HumanMessage('x')], () => 50));

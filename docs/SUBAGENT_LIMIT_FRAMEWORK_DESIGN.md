@@ -78,7 +78,8 @@ orchestrator 里 `runIterationLimitGuard` / `delegationOutcomeDecisionGuard` / `
 需求方明确：**"防空跑"策略本身作为 interface 留出，现在只实现最基本的一个判断——`messages` 输入是否多次重复。**
 
 - **Guard 名**：`RepeatedInputGuard`（暂名）。
-- **判据（唯一且最小）**：subagent 喂给模型的 `messages`（或其指纹）是否**多次重复出现** → 是则判定打转，`block`。不做结论增量、token 比等复杂判据。
+- **判据（唯一且最小）**：subagent 喂给模型的 `messages`（其指纹）是否**连续重复达阈值** → 是则判定打转，`block`。不做结论增量、token 比等复杂判据。
+  - **指纹归一化**：tool-call 的 `id`、tool 结果的 `tool_call_id` 等**非语义字段**必须从指纹中剔除——否则模型每轮用不同 id 调同一个工具（同 name+args）会被误判为"非重复"，guard 漏检。指纹按 `tool name + 稳定排序的 args`（+ content）计算。
 - **接口形状**：`SubagentLoopGuard` interface，`RepeatedInputGuard` 是其一个实现；将来"结论增量 / token 比 / review 防空跑"都作为**同一 interface 的其他实现**接入，不改调用方。
 - **挂载位置**：subagent middleware 的 **`wrapModelCall`** position。关键：判据要看的是**真正提交给 LLM 的那组 messages**（`request.messages`），即**经过本轮 contextPolicy 压缩之后**的输入——`beforeModel` 看到的 `state.messages` 是只增的历史，永远不重复，抓不住打转；而压缩后的"实质输入"在空跑时会稳定成同一组，这才是有意义的"重复"信号。
 - **block 行为**：`wrapModelCall` 命中时**不调 handler**（不调模型），返回 `new Command({ goto: END, update: { messages: [notice] } })` 优雅结束（无 throw）。notice 带 stop marker，`createSubagent` 据此报 **completionReason='limit_reached'**，交回 orchestrator（`delegationOutcomeDecisionGuard` 已消费 limit_reached，回交链路现成）。
@@ -94,6 +95,7 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
 - `LOOP_GUARD_MARKER_KEY = 'subagentLoopGuardStop'`（具名常量，导出）。
 - `SubagentLoopGuardStopReason` 是**封闭值域**：`'repeated_input' | 'context_window_fuse'`。
 - 读取侧 `readLoopGuardStopReason` / `isLoopGuardStopMessage` **只认这个封闭值域**——key 命名空间在 `pinpawo` 下，且值受限于上述枚举，因此与其他 `pinpawo.*` 元信息（如 `lane` / `runId`）**不会互相误判**。新增停止原因必须同时扩这个 union 与读取侧白名单（有单测固定该契约）。
+- `createSubagent` 判断本次 run 是否 guard 停机时，**只看最后一条消息**（Command goto END 把 notice 追加为末条）——不扫整段历史，避免输入历史里恰好带同名 marker 时被误判。
 
 ### 4.5 复用清单（不新增多余概念）
 

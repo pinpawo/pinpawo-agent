@@ -1,7 +1,8 @@
-import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { createMiddleware } from 'langchain';
 import { Command, END } from '@langchain/langgraph';
 import { estimateMessagesTokens } from '../agent/orchestrator/contextCompaction';
+import { readMessageToolCalls } from '../utils/messages';
 
 /**
  * Subagent loop guards — the deterministic "should this loop keep calling the
@@ -98,18 +99,43 @@ export function messagesHaveLoopGuardStop(messages: BaseMessage[]): boolean {
   return messages.some(isLoopGuardStopMessage);
 }
 
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null';
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  const keys = Object.keys(value as Record<string, unknown>).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`).join(',')}}`;
+}
+
+function fingerprintMessage(message: BaseMessage): string {
+  const type = message.getType();
+  const content = typeof message.content === 'string'
+    ? message.content
+    : stableStringify(message.content);
+
+  // Normalize away non-semantic fields so a loop calling the same tool with the
+  // same args is detected as a repeat even when per-turn ids differ. AI tool
+  // calls are keyed by name+args (drop id); tool results drop tool_call_id and
+  // key on tool name + content.
+  const toolCalls = readMessageToolCalls(message);
+  if (toolCalls.length > 0) {
+    const calls = toolCalls
+      .map((call) => `${call.name}(${stableStringify(call.args)})`)
+      .join('|');
+    return `${type}:${content}:tc[${calls}]`;
+  }
+  if (ToolMessage.isInstance(message)) {
+    const name = typeof message.name === 'string' ? message.name : '';
+    return `tool:${name}:${content}`;
+  }
+  return `${type}:${content}`;
+}
+
 function fingerprintMessages(messages: BaseMessage[]): string {
-  // Cheap, allocation-light fingerprint: type + content text per message. Tool
-  // call shape is captured indirectly via the AI message content/structure.
-  return messages
-    .map((message) => {
-      const type = message.getType();
-      const content = typeof message.content === 'string'
-        ? message.content
-        : JSON.stringify(message.content);
-      return `${type}:${content}`;
-    })
-    .join('');
+  return messages.map(fingerprintMessage).join(' ');
 }
 
 /**

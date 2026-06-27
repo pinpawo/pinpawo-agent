@@ -16,7 +16,7 @@ import {
   createContextWindowFuseGuard,
   createRepeatedInputGuard,
   createSubagentLoopGuardMiddleware,
-  messagesHaveLoopGuardStop,
+  isLoopGuardStopMessage,
   type SubagentLoopGuard,
 } from './loopGuards';
 
@@ -231,10 +231,13 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
       latestMessages = readMessagesFromValuesChunk(chunk) ?? latestMessages;
     }
 
-    // A loop guard may have gracefully ended the agent (jumpTo: 'end') by
-    // appending a stop notice. That is a clean "limit reached" stop, not natural
-    // completion.
-    const stoppedByGuard = messagesHaveLoopGuardStop(latestMessages);
+    // A loop guard may have gracefully ended the agent by appending its stop
+    // notice as the FINAL message (via Command goto END). That is a clean "limit
+    // reached" stop, not natural completion. Check only the last message — a stop
+    // marker buried in the input history must not be misread as our stop, and
+    // contextPolicy may rewrite the list so an index-based slice is unreliable.
+    const lastMessage = latestMessages.at(-1);
+    const stoppedByGuard = lastMessage ? isLoopGuardStopMessage(lastMessage) : false;
     await finishToolEvents('completed');
     return {
       messages: latestMessages,

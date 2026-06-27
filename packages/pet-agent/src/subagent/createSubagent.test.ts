@@ -7,7 +7,7 @@ import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import { createSubagent } from './createSubagent';
-import { readLoopGuardStopReason } from './loopGuards';
+import { LOOP_GUARD_MARKER_KEY, readLoopGuardStopReason } from './loopGuards';
 
 /**
  * Minimal model that never converges: it keeps emitting a fresh tool call every
@@ -161,4 +161,25 @@ test('createSubagent returns limit_reached when the repeated-input guard trips',
     'expected the conversation context to be kept alongside the stop notice',
   );
   assert.equal(result.messages[0]?._getType(), 'human');
+});
+
+test('createSubagent ignores a stop marker that arrives in the input history', async () => {
+  // A stop marker buried in incoming history (not produced by this run) must not
+  // be misread as our guard stop. The run completes naturally.
+  const staleStopNotice = new AIMessage({
+    content: '上一轮的停止说明',
+    additional_kwargs: { pinpawo: { [LOOP_GUARD_MARKER_KEY]: 'repeated_input' } },
+  });
+
+  const result = await createSubagent({
+    model: new FakeListChatModel({ responses: ['fresh answer'], sleep: 0 }),
+    tools: [],
+    instructions: [],
+    messages: [new HumanMessage('do the task'), staleStopNotice, new HumanMessage('继续')],
+    maxIterations: 4,
+  });
+
+  assert.equal(result.completionReason, 'natural');
+  // The final message is the fresh model answer, not the stale marker.
+  assert.equal(readLoopGuardStopReason(result.messages.at(-1) as BaseMessage), null);
 });

@@ -130,15 +130,17 @@ export class GuardRegistry<
    *   registry.run('guard_name', { state, config, position })
    *
    * Current orchestrator example after migration:
-   *   registry.run('run_iteration_limit', {
+   *   const effect = await registry.run('run_iteration_limit', {
    *     state: orchestratorState,
    *     config: orchestratorGuardConfig,
    *     position: 'orchestrator.delegation_outcome_iteration',
    *   })
+   *   return applyOrchestratorGuardEffect(effect)
    *
    * `run` first verifies the guard is registered for `position`, then calls
    * `rule.check(input)`, then passes that result to `handler.handle(...)`.
-   * The returned value is the handler's effect for the caller's current position.
+   * The returned value is the handler's effect. Applying that effect is owned by
+   * the caller's domain layer, not by this generic registry.
    */
   run(
     name: string,

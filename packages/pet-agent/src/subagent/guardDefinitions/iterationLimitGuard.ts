@@ -1,10 +1,10 @@
+import { AIMessage } from '@langchain/core/messages';
 import {
   defineGuard,
   guardBlock,
   guardPass,
 } from '../../guards';
 import {
-  stopSubagentLoop,
   SUBAGENT_GUARD_NAME,
   SUBAGENT_GUARD_POSITION,
   type SubagentGuard,
@@ -37,10 +37,14 @@ export function createSubagentIterationLimitGuard(): SubagentGuard {
     },
     handler: {
       handle: ({ config, result }) => result.status === 'block'
-        ? stopSubagentLoop(buildSubagentIterationLimitNotice(
-          config.iterationCount,
-          config.maxIterations ?? config.iterationCount,
-        ))
+        ? {
+          messages: [
+            new AIMessage(buildSubagentIterationLimitNotice(
+              config.iterationCount,
+              config.maxIterations ?? config.iterationCount,
+            )),
+          ],
+        }
         : null,
     },
   });

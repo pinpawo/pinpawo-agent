@@ -28,55 +28,30 @@ export type SubagentState = {
   messages: BaseMessage[];
 };
 
+export type SubagentContextRewriteGuardConfig = {
+  evictToolResults?: SubagentContextPolicy['evictToolResults'];
+};
+
 export type SubagentGuardConfig = {
-  contextPolicy?: SubagentContextPolicy;
+  contextPolicy?: SubagentContextRewriteGuardConfig;
   contextWindowTokens?: number;
   iterationCount: number;
   maxIterations?: number;
   operations?: Record<string, SubagentToolOperationMetadata>;
 };
 
-export type SubagentGuardEffect =
-  | {
-      type: 'request_context_rewrite';
-      latestInputTokens: number;
-      triggerTokens: number;
-    }
-  | {
-      type: 'stop_loop';
-      reason: 'limit_reached';
-      notice: string;
-    };
+export type SubagentGuardUpdate = Partial<SubagentState>;
 
 export type SubagentGuard = Guard<
   SubagentState,
   SubagentGuardConfig,
   SubagentGuardPosition,
-  SubagentGuardEffect
+  SubagentGuardUpdate
 >;
 
 export type SubagentGuardRegistry = GuardRegistry<
   SubagentState,
   SubagentGuardConfig,
   SubagentGuardPosition,
-  SubagentGuardEffect
+  SubagentGuardUpdate
 >;
-
-export function requestContextRewrite(params: {
-  latestInputTokens: number;
-  triggerTokens: number;
-}): SubagentGuardEffect {
-  return {
-    type: 'request_context_rewrite',
-    latestInputTokens: params.latestInputTokens,
-    triggerTokens: params.triggerTokens,
-  };
-}
-
-export function stopSubagentLoop(notice: string): SubagentGuardEffect {
-  return {
-    type: 'stop_loop',
-    reason: 'limit_reached',
-    notice,
-  };
-}

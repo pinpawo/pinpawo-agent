@@ -37,58 +37,22 @@ export type OrchestratorGuardConfig = {
   runIterationLimit: number;
 };
 
-export type OrchestratorGuardEffect =
-  | {
-      type: 'request_context_compaction';
-      mainMessageCount: number;
-      keepMessages: number;
-      latestInputTokens: number;
-      triggerTokens: number;
-    }
-  | {
-      type: 'state_patch';
-      patch: OrchestratorStatePatch;
-    };
+export type OrchestratorGuardUpdate = OrchestratorStatePatch;
 
 export type OrchestratorGuard = Guard<
   OrchestratorStateType,
   OrchestratorGuardConfig,
   OrchestratorGuardPosition,
-  OrchestratorGuardEffect
+  OrchestratorGuardUpdate
 >;
 
 export type OrchestratorGuardRegistry = GuardRegistry<
   OrchestratorStateType,
   OrchestratorGuardConfig,
   OrchestratorGuardPosition,
-  OrchestratorGuardEffect
+  OrchestratorGuardUpdate
 >;
 
-export function statePatch(patch: OrchestratorStatePatch): OrchestratorGuardEffect {
-  return { type: 'state_patch', patch };
-}
-
-export function requestContextCompaction(params: {
-  mainMessageCount: number;
-  keepMessages: number;
-  latestInputTokens: number;
-  triggerTokens: number;
-}): OrchestratorGuardEffect {
-  return {
-    type: 'request_context_compaction',
-    mainMessageCount: params.mainMessageCount,
-    keepMessages: params.keepMessages,
-    latestInputTokens: params.latestInputTokens,
-    triggerTokens: params.triggerTokens,
-  };
-}
-
-export function applyOrchestratorGuardEffect(effect: OrchestratorGuardEffect | null): OrchestratorStatePatch {
-  if (effect === null) {
-    return {};
-  }
-  if (effect.type === 'state_patch') {
-    return effect.patch;
-  }
-  throw new Error(`Orchestrator guard effect is not a state patch: ${effect.type}`);
+export function statePatch(patch: OrchestratorStatePatch): OrchestratorGuardUpdate {
+  return patch;
 }

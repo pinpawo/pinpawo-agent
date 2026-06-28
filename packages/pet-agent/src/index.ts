@@ -48,13 +48,16 @@ export type {
 export type {
   Guard,
   GuardBlock,
+  GuardBlockHandler,
   GuardCheckResult,
   GuardCheckStatus,
   GuardHandler,
   GuardHandlerInput,
   GuardInput,
+  GuardOptions,
   GuardPass,
   GuardRule,
+  GuardRunResult,
 } from './guards';
 export {
   defineGuard,

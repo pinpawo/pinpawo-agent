@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage } from '@langchain/core/messages';
 import {
-  applyOrchestratorGuardEffect,
   createOrchestratorGuardRegistry,
   ORCHESTRATOR_GUARD_NAME,
   ORCHESTRATOR_GUARD_POSITION,
@@ -48,15 +47,16 @@ test('orchestrator guard registry exposes business guards by position', () => {
   );
 });
 
-test('user intent guard returns a handoff state patch effect', async () => {
+test('user intent guard returns a handoff state patch update', async () => {
   const registry = createOrchestratorGuardRegistry();
-  const effect = await registry.run(ORCHESTRATOR_GUARD_NAME.USER_INTENT_DECISION, {
+  const run = await registry.run(ORCHESTRATOR_GUARD_NAME.USER_INTENT_DECISION, {
     state: baseState(),
     config,
     position: ORCHESTRATOR_GUARD_POSITION.USER_INTENT_DECISION,
   });
 
-  assert.deepEqual(applyOrchestratorGuardEffect(effect), {
+  assert.equal(run.result.status, 'pass');
+  assert.deepEqual(run.update, {
     canHandoffActiveDelegation: true,
   });
 });
@@ -83,17 +83,18 @@ test('delegation outcome guard blocks handoff for a limit_reached active delegat
   });
   assert.equal(result.status, 'block');
 
-  const effect = await registry.run(ORCHESTRATOR_GUARD_NAME.DELEGATION_OUTCOME_DECISION, {
+  const run = await registry.run(ORCHESTRATOR_GUARD_NAME.DELEGATION_OUTCOME_DECISION, {
     state,
     config,
     position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
   });
-  assert.deepEqual(applyOrchestratorGuardEffect(effect), {
+  assert.equal(run.result.status, 'block');
+  assert.deepEqual(run.update, {
     canHandoffActiveDelegation: false,
   });
 });
 
-test('run iteration limit guard uses resolved config and returns an inline stop patch', async () => {
+test('run iteration limit guard uses resolved config and returns an inline stop update', async () => {
   const registry = createOrchestratorGuardRegistry();
   const state = baseState({
     taskActiveDelegation: activeDelegation,
@@ -107,13 +108,14 @@ test('run iteration limit guard uses resolved config and returns an inline stop 
   });
   assert.equal(result.status, 'block');
 
-  const effect = await registry.run(ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT, {
+  const run = await registry.run(ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT, {
     state,
     config: { runIterationLimit: 5 },
     position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION,
   });
-  const patch = applyOrchestratorGuardEffect(effect) as Record<string, unknown>;
+  const patch = run.update as Record<string, unknown>;
 
+  assert.equal(run.result.status, 'block');
   assert.equal(patch.runPendingFinalReply, 'inline');
   assert.equal(patch.runIterationCount, 0);
   assert.equal(patch.runPendingDelegation, null);

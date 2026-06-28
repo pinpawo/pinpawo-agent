@@ -1,38 +1,52 @@
 import { GuardRegistry } from '../../guards';
-import { createContextRewriteWatermarkGuard } from './contextRewriteWatermarkGuard';
+import {
+  createContextRewriteWatermarkGuard,
+  type ContextRewriteWatermarkGuardOptions,
+} from './contextRewriteWatermarkGuard';
 import { createSubagentIterationLimitGuard } from './iterationLimitGuard';
 import {
   type SubagentGuardConfig,
-  type SubagentGuardEffect,
   type SubagentGuardPosition,
   type SubagentGuardRegistry,
   type SubagentState,
+  type SubagentGuardUpdate,
 } from './types';
 
-export { createContextRewriteWatermarkGuard } from './contextRewriteWatermarkGuard';
+export {
+  createContextRewriteWatermarkGuard,
+  type ContextRewriteWatermarkGuardBlockHandler,
+  type ContextRewriteWatermarkGuardBlockInput,
+  type ContextRewriteWatermarkGuardOptions,
+} from './contextRewriteWatermarkGuard';
 export { createSubagentIterationLimitGuard } from './iterationLimitGuard';
 export {
-  requestContextRewrite,
-  stopSubagentLoop,
   SUBAGENT_GUARD_NAME,
   SUBAGENT_GUARD_POSITION,
   type SubagentGuard,
   type SubagentGuardConfig,
-  type SubagentGuardEffect,
   type SubagentGuardName,
   type SubagentGuardPosition,
   type SubagentGuardRegistry,
   type SubagentState,
+  type SubagentGuardUpdate,
 } from './types';
 
-export function createSubagentGuardRegistry(): SubagentGuardRegistry {
+export type SubagentGuardRegistryOptions = {
+  contextRewrite?: ContextRewriteWatermarkGuardOptions;
+};
+
+export function createSubagentGuardRegistry(
+  options: SubagentGuardRegistryOptions = {},
+): SubagentGuardRegistry {
   const registry = new GuardRegistry<
     SubagentState,
     SubagentGuardConfig,
     SubagentGuardPosition,
-    SubagentGuardEffect
+    SubagentGuardUpdate
   >();
-  registry.register(createContextRewriteWatermarkGuard());
+  if (options.contextRewrite) {
+    registry.register(createContextRewriteWatermarkGuard(options.contextRewrite));
+  }
   registry.register(createSubagentIterationLimitGuard());
   return registry;
 }

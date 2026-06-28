@@ -1,38 +1,41 @@
 import {
   defineGuard,
+  type GuardBlock,
+  type GuardBlockHandler,
+  type GuardOptions,
   guardBlock,
   guardPass,
 } from '../../guards';
 import { readLatestProviderInputTokens } from '../../agent/tokenUsage';
 import { buildContextPolicyTriggerTokens } from '../contextPolicy';
 import {
-  requestContextRewrite,
   SUBAGENT_GUARD_NAME,
   SUBAGENT_GUARD_POSITION,
   type SubagentGuard,
+  type SubagentGuardConfig,
+  type SubagentState,
+  type SubagentGuardUpdate,
 } from './types';
 
-type ContextRewriteTriggerDetails = {
-  latestInputTokens: number;
-  triggerTokens: number;
+export type ContextRewriteWatermarkGuardBlockInput = {
+  state: SubagentState;
+  config: SubagentGuardConfig;
+  result: GuardBlock;
 };
 
-function readTriggerDetails(details: unknown): ContextRewriteTriggerDetails | null {
-  if (!details || typeof details !== 'object') return null;
-  const record = details as Partial<ContextRewriteTriggerDetails>;
-  if (
-    typeof record.latestInputTokens !== 'number'
-    || typeof record.triggerTokens !== 'number'
-  ) {
-    return null;
-  }
-  return {
-    latestInputTokens: record.latestInputTokens,
-    triggerTokens: record.triggerTokens,
-  };
-}
+export type ContextRewriteWatermarkGuardBlockHandler = GuardBlockHandler<
+  ContextRewriteWatermarkGuardBlockInput,
+  SubagentGuardUpdate
+>;
 
-export function createContextRewriteWatermarkGuard(): SubagentGuard {
+export type ContextRewriteWatermarkGuardOptions = GuardOptions<
+  ContextRewriteWatermarkGuardBlockInput,
+  SubagentGuardUpdate
+>;
+
+export function createContextRewriteWatermarkGuard(
+  options: ContextRewriteWatermarkGuardOptions,
+): SubagentGuard {
   return defineGuard({
     name: SUBAGENT_GUARD_NAME.CONTEXT_REWRITE_WATERMARK,
     positions: [SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_POLICY],
@@ -43,12 +46,15 @@ export function createContextRewriteWatermarkGuard(): SubagentGuard {
           return guardPass();
         }
         const latestInputTokens = readLatestProviderInputTokens(state.messages);
-        const triggerTokens = buildContextPolicyTriggerTokens(evictPolicy, {
-          iterationCount: config.iterationCount,
-          operations: config.operations ?? {},
-          ...(config.contextWindowTokens ? { contextWindowTokens: config.contextWindowTokens } : {}),
-          ...(latestInputTokens !== null ? { latestProviderInputTokens: latestInputTokens } : {}),
-        });
+        const triggerTokens = buildContextPolicyTriggerTokens(
+          evictPolicy,
+          {
+            iterationCount: config.iterationCount,
+            operations: config.operations ?? {},
+            ...(config.contextWindowTokens ? { contextWindowTokens: config.contextWindowTokens } : {}),
+            ...(latestInputTokens !== null ? { latestProviderInputTokens: latestInputTokens } : {}),
+          },
+        );
 
         if (
           latestInputTokens === null
@@ -65,14 +71,11 @@ export function createContextRewriteWatermarkGuard(): SubagentGuard {
       },
     },
     handler: {
-      handle: ({ result }) => {
+      handle: ({ config, result, state }) => {
         if (result.status === 'pass') {
           return null;
         }
-        const details = readTriggerDetails(result.details);
-        return details
-          ? requestContextRewrite(details)
-          : null;
+        return options.onBlock({ state, config, result });
       },
     },
   });

@@ -41,21 +41,40 @@ export type GuardHandler<
   State,
   Config,
   Position extends string,
-  Effect,
+  Update,
 > = {
-  handle(input: GuardHandlerInput<State, Config, Position>): Effect | null | Promise<Effect | null>;
+  handle(input: GuardHandlerInput<State, Config, Position>): Update | null | Promise<Update | null>;
 };
 
 export type Guard<
   State,
   Config,
   Position extends string,
-  Effect,
+  Update,
 > = {
   readonly name: string;
   readonly positions: readonly Position[];
   readonly rule: GuardRule<State, Config, Position>;
-  readonly handler: GuardHandler<State, Config, Position, Effect>;
+  readonly handler: GuardHandler<State, Config, Position, Update>;
+};
+
+export type GuardRunResult<Update> = {
+  result: GuardCheckResult;
+  update: Update | null;
+};
+
+export type GuardBlockHandler<
+  BlockInput,
+  Update,
+> = (
+  input: BlockInput
+) => Update | null | Promise<Update | null>;
+
+export type GuardOptions<
+  BlockInput,
+  Update,
+> = {
+  onBlock: GuardBlockHandler<BlockInput, Update>;
 };
 
 export const GUARD_PASS: GuardPass = { status: 'pass' };
@@ -76,8 +95,8 @@ export function defineGuard<
   State,
   Config,
   Position extends string,
-  Effect,
->(guard: Guard<State, Config, Position, Effect>) {
+  Update,
+>(guard: Guard<State, Config, Position, Update>) {
   return guard;
 }
 
@@ -92,11 +111,11 @@ export class GuardRegistry<
   State,
   Config,
   Position extends string,
-  Effect,
+  Update,
 > {
-  private readonly guards = new Map<string, Guard<State, Config, Position, Effect>>();
+  private readonly guards = new Map<string, Guard<State, Config, Position, Update>>();
 
-  register(guard: Guard<State, Config, Position, Effect>): void {
+  register(guard: Guard<State, Config, Position, Update>): void {
     if (guard.positions.length === 0) {
       throw new Error(`Guard must declare at least one position: ${guard.name}`);
     }
@@ -106,14 +125,14 @@ export class GuardRegistry<
     this.guards.set(guard.name, guard);
   }
 
-  list(position?: Position): Guard<State, Config, Position, Effect>[] {
+  list(position?: Position): Guard<State, Config, Position, Update>[] {
     const guards = [...this.guards.values()];
     return position === undefined
       ? guards
       : guards.filter((guard) => guardAppliesToPosition(guard, position));
   }
 
-  get(name: string): Guard<State, Config, Position, Effect> | null {
+  get(name: string): Guard<State, Config, Position, Update> | null {
     return this.guards.get(name) ?? null;
   }
 
@@ -130,36 +149,38 @@ export class GuardRegistry<
    *   registry.run('guard_name', { state, config, position })
    *
    * Current orchestrator example after migration:
-   *   const effect = await registry.run('run_iteration_limit', {
+   *   const { result, update } = await registry.run('run_iteration_limit', {
    *     state: orchestratorState,
    *     config: orchestratorGuardConfig,
    *     position: 'orchestrator.delegation_outcome_iteration',
    *   })
-   *   return applyOrchestratorGuardEffect(effect)
+   *   // `result.status` tells the position whether the guard passed or blocked.
+   *   // `update` is the state patch produced by the guard handler, if any.
    *
    * `run` first verifies the guard is registered for `position`, then calls
    * `rule.check(input)`, then passes that result to `handler.handle(...)`.
-   * The returned value is the handler's effect, or null if there is no external
-   * interaction to apply. Applying effects is owned by the caller's domain layer,
-   * not by this generic registry.
+   * The handler returns the final state update for the caller's domain, or null
+   * if no update is needed. Async work such as compaction belongs inside the
+   * handler or a handler-owned executor.
    */
-  run(
+  async run(
     name: string,
     input: GuardInput<State, Config, Position>,
-  ): Effect | null | Promise<Effect | null> {
+  ): Promise<GuardRunResult<Update>> {
     const guard = this.requireApplicableGuard(name, input.position);
     const result = guard.rule.check(input);
-    return guard.handler.handle({
+    const update = await guard.handler.handle({
       ...input,
       guardName: guard.name,
       result,
     });
+    return { result, update };
   }
 
   private requireApplicableGuard(
     name: string,
     position: Position,
-  ): Guard<State, Config, Position, Effect> {
+  ): Guard<State, Config, Position, Update> {
     const guard = this.guards.get(name);
     if (!guard) {
       throw new Error(`Guard not registered: ${name}`);

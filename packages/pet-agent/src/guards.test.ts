@@ -10,10 +10,10 @@ import {
 type State = { count: number };
 type Config = { limit: number };
 type Position = 'before_decision' | 'after_decision';
-type Effect = { allowed: boolean; message?: string };
+type Update = { allowed: boolean; message?: string };
 
-test('guard registry runs rule then handler with explicit state/config/position input', () => {
-  const guard = defineGuard<State, Config, Position, Effect>({
+test('guard registry runs rule then handler with explicit state/config/position input', async () => {
+  const guard = defineGuard<State, Config, Position, Update>({
     name: 'count_limit',
     positions: ['before_decision'],
     rule: {
@@ -33,22 +33,22 @@ test('guard registry runs rule then handler with explicit state/config/position 
       },
     },
   });
-  const registry = new GuardRegistry<State, Config, Position, Effect>();
+  const registry = new GuardRegistry<State, Config, Position, Update>();
   registry.register(guard);
 
-  assert.deepEqual(
-    registry.run('count_limit', {
-      state: { count: 3 },
-      config: { limit: 2 },
-      position: 'before_decision',
-    }),
-    { allowed: false, message: 'limit_reached:3/2' },
-  );
+  const run = await registry.run('count_limit', {
+    state: { count: 3 },
+    config: { limit: 2 },
+    position: 'before_decision',
+  });
+
+  assert.equal(run.result.status, 'block');
+  assert.deepEqual(run.update, { allowed: false, message: 'limit_reached:3/2' });
 });
 
 test('guard registry enforces registered positions', () => {
-  const registry = new GuardRegistry<State, Config, Position, Effect>();
-  registry.register(defineGuard<State, Config, Position, Effect>({
+  const registry = new GuardRegistry<State, Config, Position, Update>();
+  registry.register(defineGuard<State, Config, Position, Update>({
     name: 'positioned',
     positions: ['before_decision'],
     rule: { check: () => guardPass() },

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage } from '@langchain/core/messages';
-import type { LLMResult } from '@langchain/core/outputs';
 import {
   streamOrchestratorGraph,
   type OrchestratorGraph,
@@ -10,55 +9,9 @@ import {
   createTokenUsageSnapshot,
   isTokenUsageSnapshot,
   parseTokenUsageSnapshot,
-  readLlmResultTokenUsage,
   readMessageTokenUsage,
   readMessagesTokenUsage,
 } from './tokenUsage';
-
-test('readLlmResultTokenUsage reads OpenAI llmOutput token usage', () => {
-  const usage = readLlmResultTokenUsage({
-    generations: [],
-    llmOutput: {
-      tokenUsage: {
-        promptTokens: 12,
-        completionTokens: 5,
-        totalTokens: 17,
-      },
-    },
-  } as LLMResult);
-
-  assert.deepEqual(usage, {
-    inputTokens: 12,
-    outputTokens: 5,
-    totalTokens: 17,
-  });
-});
-
-test('readLlmResultTokenUsage includes Anthropic top-level cache input tokens', () => {
-  const usage = readLlmResultTokenUsage({
-    generations: [
-      [
-        {
-          text: 'ok',
-          generationInfo: {
-            usage: {
-              input_tokens: 20,
-              cache_creation_input_tokens: 3,
-              cache_read_input_tokens: 7,
-              output_tokens: 11,
-            },
-          },
-        },
-      ],
-    ],
-  } as LLMResult);
-
-  assert.deepEqual(usage, {
-    inputTokens: 30,
-    outputTokens: 11,
-    totalTokens: 41,
-  });
-});
 
 test('parseTokenUsageSnapshot validates canonical token usage snapshots', () => {
   const usage = parseTokenUsageSnapshot({
@@ -111,6 +64,37 @@ test('readMessageTokenUsage reads AIMessage usage metadata', () => {
   });
 });
 
+test('readMessageTokenUsage reads camel-case usage metadata', () => {
+  const message = {
+    usageMetadata: {
+      inputTokens: 12,
+      outputTokens: 5,
+      totalTokens: 17,
+    },
+  };
+
+  assert.deepEqual(readMessageTokenUsage(message), {
+    inputTokens: 12,
+    outputTokens: 5,
+    totalTokens: 17,
+  });
+});
+
+test('readMessageTokenUsage ignores legacy tokenUsage aliases', () => {
+  const message = new AIMessage({
+    content: 'ok',
+    response_metadata: {
+      tokenUsage: {
+        promptTokens: 12,
+        completionTokens: 5,
+        totalTokens: 17,
+      },
+    },
+  });
+
+  assert.equal(readMessageTokenUsage(message), null);
+});
+
 test('readMessagesTokenUsage aggregates provider usage from messages', () => {
   const messages = [
     new AIMessage({
@@ -124,12 +108,10 @@ test('readMessagesTokenUsage aggregates provider usage from messages', () => {
     new AIMessage('no usage'),
     new AIMessage({
       content: 'two',
-      response_metadata: {
-        tokenUsage: {
-          promptTokens: 3,
-          completionTokens: 4,
-          totalTokens: 7,
-        },
+      usage_metadata: {
+        input_tokens: 3,
+        output_tokens: 4,
+        total_tokens: 7,
       },
     }),
   ];

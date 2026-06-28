@@ -4,7 +4,11 @@ import type { AgentActor, AgentExecution } from '../types/agent';
 import type { SubagentToolEventHandler } from '../types/subagent';
 import type { AgentToolkit } from '../types/toolkit';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
-import { buildOrchestratorRunInput, type OrchestratorGraph } from './createAgentRuntime';
+import {
+  buildOrchestratorRunInput,
+  ORCHESTRATOR_RECURSION_LIMIT,
+  type OrchestratorGraph,
+} from './createAgentRuntime';
 
 export type AgentInvokeInput = {
   messages: BaseMessage[];
@@ -52,6 +56,10 @@ export async function runAgent(
     {
       signal: input.signal,
       configurable: Object.keys(configurable).length > 0 ? configurable : undefined,
+      // Last-resort breaker for a runaway control loop; the soft run-iteration
+      // guard is the normal stop. Without this the graph would run to LangGraph's
+      // default 25-node limit, which the soft guard can never beat. #275/P6.
+      recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
     },
   );
 

@@ -16,6 +16,16 @@ import {
   type OrchestratorStateType,
 } from './orchestrator/state';
 import {
+  asDecisionNode,
+  asGuardNode,
+  type OrchestratorControlContext,
+  type OrchestratorDecision,
+} from './orchestrator/controlPrimitives';
+import {
+  createOrchestratorGuards,
+  readLegacyTaskActiveDelegation,
+} from './orchestrator/guards';
+import {
   compactOrchestratorMessages,
   isContextCompactionMessage,
   readContextCompactionSummaries,
@@ -345,18 +355,6 @@ function readRunIterationLimit(value: unknown): number | undefined {
   return value;
 }
 
-function buildRunIterationLimitMessage(
-  delegation: TaskActiveDelegation,
-  limit: number,
-  count: number,
-): string {
-  return [
-    `主流程循环已达到上限：${count}/${limit}。`,
-    `当前仍保留委派任务“${delegation.task}”（${delegation.lane}）。`,
-    '该轮委派记录为待续跑状态，可继续提交下一轮任务让我接着推进。',
-  ].join('\n');
-}
-
 function resolveDelegationTranscriptRunId(
   state: OrchestratorStateType,
   delegation: RunPendingDelegation,
@@ -364,29 +362,6 @@ function resolveDelegationTranscriptRunId(
   return state.taskActiveDelegation?.id === delegation.id
     ? state.taskActiveDelegation.transcriptRunId
     : state.runId;
-}
-
-function readLegacyTaskActiveDelegation(
-  state: OrchestratorStateType,
-): TaskActiveDelegation | null {
-  let delegation = null as OrchestratorStateType['runDelegations'][number] | null;
-  for (let index = state.runDelegations.length - 1; index >= 0; index -= 1) {
-    const item = state.runDelegations[index];
-    if (item.status === 'progress' || item.status === 'completed') {
-      delegation = item;
-      break;
-    }
-  }
-  if (!delegation) return null;
-  return {
-    id: delegation.id,
-    lane: delegation.lane,
-    task: delegation.task,
-    contextSummary: null,
-    transcriptRunId: state.runId,
-    status: 'awaiting_decision',
-    resultPreview: delegation.resultPreview,
-  };
 }
 
 function readCapabilityNameFromLane(lane: MessageLane): string | null {
@@ -467,6 +442,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const orchestratorMaxIterations = readRunIterationLimit(config.maxRunIterations)
     ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
 
+  // Shared control context handed to every Guard/Decision via the node adapters.
+  function buildControlContext(runnableConfig?: RunnableConfig): OrchestratorControlContext {
+    return { runnableConfig, orchestratorMaxIterations };
+  }
+
   async function prepare(state: OrchestratorStateType) {
     if (state.runId) {
       return {};
@@ -491,53 +471,17 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     };
   }
 
-  async function runIterationLimitGuard(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { maxRunIterations } = getInvokeOptions(runnableConfig);
-    const activeDelegation = state.taskActiveDelegation ?? readLegacyTaskActiveDelegation(state);
-    if (!activeDelegation) {
-      return { runPendingFinalReply: null };
-    }
-    const maxRunIterationLimit = maxRunIterations ?? orchestratorMaxIterations;
-    if (state.runIterationCount < maxRunIterationLimit) {
-      return { runPendingFinalReply: null };
-    }
-    return {
-      messages: [
-        new AIMessage(buildRunIterationLimitMessage(
-          activeDelegation,
-          maxRunIterationLimit,
-          state.runIterationCount,
-        )),
-      ],
-      runPendingDelegation: null,
-      runPendingFinalReply: 'inline',
-      taskActiveDelegation: activeDelegation,
-      runIterationCount: 0,
-    };
-  }
+  // Orchestrator Guards live in ./orchestrator/guards.ts as concrete
+  // OrchestratorGuard implementations; getInvokeOptions is injected (it is
+  // broadly used invoke-config parsing that stays in this module).
+  const {
+    userIntentDecisionGuard,
+    delegationOutcomeDecisionGuard,
+    runIterationLimitGuard,
+  } = createOrchestratorGuards({ getInvokeOptions });
 
   function afterIterationLimitGuard(state: OrchestratorStateType) {
     return state.runPendingFinalReply === 'inline' ? 'end' : 'delegationOutcomeDecisionGuard';
-  }
-
-  function userIntentDecisionGuard() {
-    return { canHandoffActiveDelegation: true };
-  }
-
-  async function delegationOutcomeDecisionGuard(state: OrchestratorStateType) {
-    const activeDelegation = state.taskActiveDelegation ?? readLegacyTaskActiveDelegation(state);
-    if (!activeDelegation) {
-      return { canHandoffActiveDelegation: true };
-    }
-
-    const activeDelegationCompletionReason = readLatestAnnounceCompletionReason(state.messages, {
-      runId: activeDelegation.transcriptRunId,
-      delegationId: activeDelegation.id,
-    });
-
-    return {
-      canHandoffActiveDelegation: activeDelegationCompletionReason !== 'limit_reached',
-    };
   }
 
   async function capabilityDiscovery(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
@@ -984,13 +928,16 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     };
   }
 
-  async function userIntentDecision(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    return runOrchestrationDecision('user_intent', state, runnableConfig);
-  }
+  // The two Decision nodes. runOrchestrationDecision holds the (large, closure-
+  // bound) body; these thin wrappers bind it to a decision kind and conform to the
+  // OrchestratorDecision contract (state, ctx) -> patch.
+  const userIntentDecision: OrchestratorDecision = (state, ctx) => {
+    return runOrchestrationDecision('user_intent', state, ctx.runnableConfig);
+  };
 
-  async function delegationOutcomeDecision(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    return runOrchestrationDecision('delegation_outcome', state, runnableConfig);
-  }
+  const delegationOutcomeDecision: OrchestratorDecision = (state, ctx) => {
+    return runOrchestrationDecision('delegation_outcome', state, ctx.runnableConfig);
+  };
 
   // Node: answer — the dedicated final-reply node. The decision nodes only route
   // here; this node synthesizes the user-facing reply from the FULL conversation
@@ -1322,11 +1269,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('compactContext', compactContext)
     .addNode('capabilityDiscovery', capabilityDiscovery)
     .addNode('capabilitySearch', new ToolNode([capabilitySearchTool]))
-    .addNode('userIntentDecisionGuard', userIntentDecisionGuard)
-    .addNode('delegationOutcomeDecisionGuard', delegationOutcomeDecisionGuard)
-    .addNode('userIntentDecision', userIntentDecision)
-    .addNode('delegationOutcomeIterationGuard', runIterationLimitGuard)
-    .addNode('delegationOutcomeDecision', delegationOutcomeDecision)
+    .addNode('userIntentDecisionGuard', asGuardNode(userIntentDecisionGuard, buildControlContext))
+    .addNode('delegationOutcomeDecisionGuard', asGuardNode(delegationOutcomeDecisionGuard, buildControlContext))
+    .addNode('userIntentDecision', asDecisionNode(userIntentDecision, buildControlContext))
+    .addNode('delegationOutcomeIterationGuard', asGuardNode(runIterationLimitGuard, buildControlContext))
+    .addNode('delegationOutcomeDecision', asDecisionNode(delegationOutcomeDecision, buildControlContext))
     .addNode('answer', answerNode)
     .addNode('capability', capabilityNode)
     .addNode('general', generalNode)

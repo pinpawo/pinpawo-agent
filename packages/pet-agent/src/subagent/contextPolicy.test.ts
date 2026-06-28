@@ -4,7 +4,6 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { SubagentContextPolicy, SubagentToolOperationMetadata } from '../types/subagent';
-import { estimateMessagesTokens } from '../agent/orchestrator/contextCompaction';
 import { rewriteMessagesForContextPolicy } from './contextPolicy';
 
 function toolCallMessage(id: string, name: string, args: Record<string, unknown>) {
@@ -25,7 +24,6 @@ function toolResult(id: string, content: string, fields: Partial<ToolMessage> = 
 
 function ctx(operations: Record<string, SubagentToolOperationMetadata>) {
   return {
-    estimateMessagesTokens,
     iterationCount: 1,
     operations,
   };
@@ -61,7 +59,6 @@ test('context policy evicts old large successful tool results only', () => {
   const policy: SubagentContextPolicy = {
     evictToolResults: {
       keepRecent: 1,
-      budgetTokens: 100,
       minSizeChars: 2000,
       keepFailures: true,
       perTool: {
@@ -96,7 +93,6 @@ test('context policy perTool keep and truncate override default eviction mode', 
   const rewritten = rewriteMessagesForContextPolicy(messages, {
     evictToolResults: {
       keepRecent: 0,
-      budgetTokens: 100,
       minSizeChars: 80,
       perTool: {
         view_file_chunk: 'keep',
@@ -126,7 +122,6 @@ test('context policy perTool evict overrides failure protections but not recency
   const rewritten = rewriteMessagesForContextPolicy(messages, {
     evictToolResults: {
       keepRecent: 1,
-      budgetTokens: 100,
       minSizeChars: 2000,
       keepFailures: true,
       perTool: {
@@ -139,7 +134,7 @@ test('context policy perTool evict overrides failure protections but not recency
   assert.equal(rewritten[4]?.content, messages[4]?.content);
 });
 
-test('context policy keeps recent tool results even when budget remains high', () => {
+test('context policy keeps recent tool results while evicting older matches', () => {
   const operations = {
     view_file_chunk: {},
   } satisfies Record<string, SubagentToolOperationMetadata>;
@@ -154,7 +149,6 @@ test('context policy keeps recent tool results even when budget remains high', (
   const rewritten = rewriteMessagesForContextPolicy(messages, {
     evictToolResults: {
       keepRecent: 1,
-      budgetTokens: 1,
       minSizeChars: 2000,
     },
   }, ctx(operations));
@@ -163,7 +157,7 @@ test('context policy keeps recent tool results even when budget remains high', (
   assert.equal(rewritten[4]?.content, messages[4]?.content);
 });
 
-test('context policy default truncate preserves older tool result prefixes while reducing budget', () => {
+test('context policy default truncate preserves older tool result prefixes while shortening content', () => {
   const operations = {
     view_file_chunk: {},
   } satisfies Record<string, SubagentToolOperationMetadata>;
@@ -179,7 +173,6 @@ test('context policy default truncate preserves older tool result prefixes while
     evictToolResults: {
       keepRecent: 1,
       defaultMode: 'truncate',
-      budgetTokens: 1,
       minSizeChars: 80,
     },
   }, ctx(operations));
@@ -190,7 +183,7 @@ test('context policy default truncate preserves older tool result prefixes while
   assert.equal(rewritten[4]?.content, messages[4]?.content);
 });
 
-test('context policy bounds thirty read-heavy tool results under budget while preserving recent floor', () => {
+test('context policy rewrites thirty read-heavy tool results while preserving recent floor', () => {
   const operations = {
     view_file_chunk: {
       summarizeInput: (input: unknown) => {
@@ -211,7 +204,6 @@ test('context policy bounds thirty read-heavy tool results under budget while pr
   const rewritten = rewriteMessagesForContextPolicy(messages, {
     evictToolResults: {
       keepRecent: 5,
-      budgetTokens: 4_000,
       minSizeChars: 2_000,
       keepFailures: true,
     },
@@ -230,7 +222,7 @@ test('context policy bounds thirty read-heavy tool results under budget while pr
     'file 28',
     'file 29',
   ]);
-  assert.ok(estimateMessagesTokens(rewritten) < estimateMessagesTokens(messages));
+  assert.ok(String(stubs[0]?.content ?? '').startsWith('[evicted:'));
 });
 
 test('context policy is a no-op when a capability does not declare one', () => {
@@ -258,7 +250,6 @@ test('context policy rewrite escape hatch', () => {
   const escapeHatch = rewriteMessagesForContextPolicy(messages, {
     evictToolResults: {
       keepRecent: 0,
-      budgetTokens: 100,
     },
     rewrite: () => [new HumanMessage('rewritten directly')],
   }, ctx({ grep_search: {} }));
@@ -279,14 +270,12 @@ test('context policy does not rewrite evicted stubs or truncated results again',
   const once = rewriteMessagesForContextPolicy(evictMessages, {
     evictToolResults: {
       keepRecent: 0,
-      budgetTokens: 1,
       minSizeChars: 1,
     },
   }, ctx(operations));
   const twice = rewriteMessagesForContextPolicy(once, {
     evictToolResults: {
       keepRecent: 0,
-      budgetTokens: 1,
       minSizeChars: 1,
     },
   }, ctx(operations));
@@ -302,7 +291,6 @@ test('context policy does not rewrite evicted stubs or truncated results again',
   const truncatedOnce = rewriteMessagesForContextPolicy(truncMessages, {
     evictToolResults: {
       keepRecent: 0,
-      budgetTokens: 1,
       minSizeChars: 3,
       perTool: { http_fetch: 'truncate' },
     },
@@ -310,7 +298,6 @@ test('context policy does not rewrite evicted stubs or truncated results again',
   const truncatedTwice = rewriteMessagesForContextPolicy(truncatedOnce, {
     evictToolResults: {
       keepRecent: 0,
-      budgetTokens: 1,
       minSizeChars: 3,
       perTool: { http_fetch: 'truncate' },
     },

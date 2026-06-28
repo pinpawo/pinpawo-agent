@@ -181,7 +181,7 @@ type CapabilityMiddleware = {
 
 - `resultSchema` 用于声明该 capability 的结构化 `kind: "result"` artifact
   payload 形状
-- capability 在 `afterRun` 或 context-pressure ingest 中通过
+- capability 在 `afterRun` 或 in-loop ingest 中通过
   `CapabilityArtifactStore.writeArtifact(...)` 写入结果 artifact，并通过
   `recordCapabilityArtifact(ref)` 把 ref 交回 orchestrator
 - 解析/校验成功的结果不再写入 `capabilityResult` 字段；orchestrator state

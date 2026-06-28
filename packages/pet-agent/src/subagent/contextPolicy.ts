@@ -6,7 +6,6 @@ import type {
   SubagentContextPolicy,
   SubagentToolOperationMetadata,
 } from '../types/subagent';
-import { estimateMessagesTokens } from '../agent/orchestrator/contextCompaction';
 import {
   readMessageToolCalls,
   readToolResultCallId,
@@ -29,7 +28,6 @@ type ToolResultCandidate = {
 
 type RewriteDecision = {
   mode: 'evict' | 'truncate';
-  respectBudget: boolean;
 };
 
 function collectToolCallInfo(messages: BaseMessage[]) {
@@ -159,18 +157,18 @@ function shouldRewriteCandidate(
   const minSizeChars = policy.minSizeChars ?? DEFAULT_MIN_SIZE_CHARS;
   if (perTool === 'truncate') {
     return candidate.content.length > minSizeChars
-      ? { mode: 'truncate', respectBudget: false }
+      ? { mode: 'truncate' }
       : null;
   }
   if (candidate.recentProtected) return null;
   if (perTool === 'evict') {
-    return { mode: 'evict', respectBudget: true };
+    return { mode: 'evict' };
   }
   if ((policy.keepFailures ?? true) && isToolFailure(candidate.message, candidate.content)) {
     return null;
   }
   if (candidate.content.length < minSizeChars) return null;
-  return { mode: policy.defaultMode ?? 'evict', respectBudget: true };
+  return { mode: policy.defaultMode ?? 'evict' };
 }
 
 function rewriteCandidate(
@@ -203,24 +201,14 @@ export function rewriteMessagesForContextPolicy(
   );
   const nextMessages = [...messages];
   let changed = false;
-  let currentTokens = ctx.estimateMessagesTokens(nextMessages);
 
   for (const candidate of candidates) {
     const decision = shouldRewriteCandidate(candidate, evictPolicy);
     if (!decision) continue;
-    if (decision.respectBudget && evictPolicy.budgetTokens !== undefined && currentTokens <= evictPolicy.budgetTokens) {
-      continue;
-    }
 
     const rewritten = rewriteCandidate(candidate, decision.mode, minSizeChars);
-    const beforeTokens = estimateMessagesTokens([nextMessages[candidate.index]]);
     nextMessages[candidate.index] = rewritten;
-    currentTokens += estimateMessagesTokens([rewritten]) - beforeTokens;
     changed = true;
-
-    if (evictPolicy.budgetTokens !== undefined && currentTokens <= evictPolicy.budgetTokens) {
-      break;
-    }
   }
 
   return changed ? nextMessages : messages;

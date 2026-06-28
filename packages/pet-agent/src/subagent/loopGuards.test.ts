@@ -3,7 +3,6 @@ import test from 'node:test';
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 import {
-  createContextWindowFuseGuard,
   createRepeatedInputGuard,
   createSubagentLoopGuardMiddleware,
   isLoopGuardStopMessage,
@@ -17,13 +16,11 @@ const SYS = new SystemMessage('sys');
 
 function input(
   messages: BaseMessage[],
-  estimate: (messages: BaseMessage[]) => number = () => 0,
 ): SubagentLoopGuardInput {
   return {
     systemMessage: SYS,
     messages,
     iterationCount: 1,
-    estimateMessagesTokens: estimate,
   };
 }
 
@@ -86,29 +83,6 @@ test('RepeatedInputGuard separates same tool name with different args', () => {
   assert.equal(guard.evaluate(input(call('a'))).block, false);
   // different args -> not a repeat
   assert.equal(guard.evaluate(input(call('b'))).block, false);
-});
-
-test('ContextWindowFuseGuard blocks when estimated tokens reach the limit', () => {
-  const guard = createContextWindowFuseGuard(100);
-  const below = guard.evaluate(input([new HumanMessage('x')], () => 50));
-  assert.equal(below.block, false);
-
-  const at = guard.evaluate(input([new HumanMessage('x')], () => 100));
-  assert.equal(at.block, true);
-  if (at.block) {
-    assert.equal(at.reason, 'context_window_fuse');
-    assert.match(String(at.notice.content), /上下文已接近模型窗口上限/);
-  }
-});
-
-test('ContextWindowFuseGuard includes the system message in the estimate', () => {
-  const seen: BaseMessage[][] = [];
-  const guard = createContextWindowFuseGuard(100);
-  guard.evaluate(input([new HumanMessage('x')], (messages) => {
-    seen.push(messages);
-    return 0;
-  }));
-  assert.equal(seen[0]?.[0], SYS);
 });
 
 test('middleware ends the agent with a Command when the same model input repeats', async () => {

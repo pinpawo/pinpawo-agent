@@ -289,10 +289,8 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
       name: 'view_file_chunk',
     }),
   ], {
-    estimateMessagesTokens: () => 30_000,
     iterationCount: 2,
     operations: {},
-    contextWindowTokens: 32_000,
   });
 
   assert.equal(rewritten?.length, 4);

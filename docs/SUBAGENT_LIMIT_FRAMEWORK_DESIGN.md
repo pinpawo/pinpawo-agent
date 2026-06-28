@@ -18,19 +18,19 @@
 
 ```
 外层：orchestrator 循环   decision → delegate → outcome decision → …（有 runIterationLimitGuard 软上限）
-内层：subagent  ReAct 循环  llm → tool → llm → …（有 maxIterations + context fuse）   ← 本设计聚焦这里
+内层：subagent  ReAct 循环  llm → tool → llm → …（有 maxIterations + repeated-input guard）   ← 本设计聚焦这里
 ```
 
 #270 炸的是内层。本设计**只重做内层 subagent 的极限模型**；外层是否还需要硬 `recursionLimit`，等内层做对后再回看（很可能不再需要，因为内层不再往上抛 `GraphRecursionError`）。
 
 ## 2. 极限模型（设计意图，来自需求方定调）
 
-**token 为主 + 大迭代预算 + review 防空跑 + 主动停。** 五条：
+**大迭代预算 + 输出收缩 + 防空跑 + 主动停。** 五条：
 
-1. **token 为主**：context/token 占用是主极限信号，不是 ReAct 轮次。
+1. **输出收缩**：旧的大工具输出通过 contextPolicy 收缩，不用本地 token 估算做极限信号。
 2. **迭代预算拉大（~100）**：不再用 8/12/16 这种小 `maxIterations` 早早掐断；给足空间让 subagent 真正完成多步任务。
-3. **大预算 ⇒ 必然撞 token 上限**：轮次这么大，跑着跑着 token 一定逼近上下文窗口。**这是预期内的正常事件，不是异常。**
-4. **撞 token guard 时先 review，防空跑**：不是一撞阈值就停。先**回看已有进展**，判断 subagent 是不是在原地打转 / 空跑：
+3. **大预算 ⇒ 必须治理大输出**：轮次这么大，工具输出必须能被收缩。**这是预期内的正常事件，不是异常。**
+4. **防空跑**：回看已有进展，判断 subagent 是不是在原地打转 / 空跑：
    - 有实质进展 → 压缩旧工具输出（evict/truncate）腾出空间，继续跑；
    - 在空跑（无新结论、反复同类调用）→ 主动停，别烧 token。
 5. **迭代预算到顶（100）⇒ 主动停**：最外圈预算用尽，subagent **主动停下**，产出"未跑完"结论交回 orchestrator。
@@ -41,11 +41,11 @@
 
 | 设计点 | 现有机制（代码） | 状态 | 缺口 |
 |---|---|---|---|
-| 1 token 为主 | `createContextWindowFuseMiddleware`（`wrapModelCall`，token ≥ 85%×窗口）| ✅ 信号有 | 行为是 **throw**，应改主动软着陆 |
+| 1 上下文体积 | 旧实现使用本地 token 估算 fuse | ❌ 已废弃 | 不再维护本地 token 估算；依赖工具输出裁剪、message-count compaction 和 provider 错误 |
 | 2 迭代预算拉大 | `DEFAULT_SUBAGENT_MAX_ITERATIONS=12`、general 16、capability 8，且**当作 `recursionLimit` 用**（[createSubagent.ts:231](../packages/pet-agent/src/subagent/createSubagent.ts#L231)）| ❌ 太小、单位错位 | 拉到 ~100；厘清"ReAct 轮次"与 graph `recursionLimit` 的关系 |
-| 3 必撞 token | fuse 必触发 | ✅ 符合预期 | — |
+| 3 大输出治理 | 旧的大工具输出必须收缩 | ✅ 符合预期 | 由 contextPolicy / 工具输出上限处理 |
 | 4 review 防空跑 | `contextPolicy`（evict/truncate 旧工具输出，[contextPolicy.ts](../packages/pet-agent/src/subagent/contextPolicy.ts)）| ⚠️ 只有**机械压缩**，无"是否空跑"判断 | **新增 progress/空跑判定**——本设计的真正新语义 |
-| 5 到顶主动停 | fuse throw → catch 转 `limit_reached`（[createSubagent.ts:259-281](../packages/pet-agent/src/subagent/createSubagent.ts#L259)）| ⚠️ 靠抛错实现 | 改为主动停 + 干净结论 |
+| 5 到顶主动停 | 旧 fuse throw → catch 转 `limit_reached` | ⚠️ 靠抛错实现 | 改为主动停 + 干净结论 |
 
 **真正缺的只有两点**：第 4 点的"空跑判定"（全新），第 5 点的"主动停而非抛错"（重构）。其余是参数与行为调整。
 
@@ -62,7 +62,7 @@ middleware(pos) → Guard
 
 ### 4.1 现状：只有命名约定，没有代码抽象
 
-orchestrator 里 `runIterationLimitGuard` / `delegationOutcomeDecisionGuard` / `runOrchestrationDecision` 都是 `createOrchestratorGraph` 闭包内的内联 async 函数，**靠函数名区分 Decision/Guard，没有共同类型/接口/签名**。subagent 侧更散（fuse throw、contextPolicy 压缩、catch limit_reached 各写各的）。
+orchestrator 里 `runIterationLimitGuard` / `delegationOutcomeDecisionGuard` / `runOrchestrationDecision` 都是 `createOrchestratorGraph` 闭包内的内联 async 函数，**靠函数名区分 Decision/Guard，没有共同类型/接口/签名**。subagent 侧更散（contextPolicy 压缩、catch limit_reached 各写各的）。
 
 ### 4.2 两个抽象的语义契约
 
@@ -78,9 +78,9 @@ orchestrator 里 `runIterationLimitGuard` / `delegationOutcomeDecisionGuard` / `
 需求方明确：**"防空跑"策略本身作为 interface 留出，现在只实现最基本的一个判断——`messages` 输入是否多次重复。**
 
 - **Guard 名**：`RepeatedInputGuard`（暂名）。
-- **判据（唯一且最小）**：subagent 喂给模型的 `messages`（其指纹）是否**连续重复达阈值** → 是则判定打转，`block`。不做结论增量、token 比等复杂判据。
+- **判据（唯一且最小）**：subagent 喂给模型的 `messages`（其指纹）是否**连续重复达阈值** → 是则判定打转，`block`。不做结论增量等复杂判据。
   - **指纹归一化**：tool-call 的 `id`、tool 结果的 `tool_call_id` 等**非语义字段**必须从指纹中剔除——否则模型每轮用不同 id 调同一个工具（同 name+args）会被误判为"非重复"，guard 漏检。指纹按 `tool name + 稳定排序的 args`（+ content）计算。
-- **接口形状**：`SubagentLoopGuard` interface，`RepeatedInputGuard` 是其一个实现；将来"结论增量 / token 比 / review 防空跑"都作为**同一 interface 的其他实现**接入，不改调用方。
+- **接口形状**：`SubagentLoopGuard` interface，`RepeatedInputGuard` 是其一个实现；将来"结论增量 / review 防空跑"都作为**同一 interface 的其他实现**接入，不改调用方。
 - **挂载位置**：subagent middleware 的 **`wrapModelCall`** position。关键：判据要看的是**真正提交给 LLM 的那组 messages**（`request.messages`），即**经过本轮 contextPolicy 压缩之后**的输入——`beforeModel` 看到的 `state.messages` 是只增的历史，永远不重复，抓不住打转；而压缩后的"实质输入"在空跑时会稳定成同一组，这才是有意义的"重复"信号。
 - **block 行为**：`wrapModelCall` 命中时**不调 handler**（不调模型），返回 `new Command({ goto: END, update: { messages: [notice] } })` 优雅结束（无 throw）。notice 带 stop marker，`createSubagent` 据此报 **completionReason='limit_reached'**，交回 orchestrator（`delegationOutcomeDecisionGuard` 已消费 limit_reached，回交链路现成）。
 
@@ -93,13 +93,13 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
 ```
 
 - `LOOP_GUARD_MARKER_KEY = 'subagentLoopGuardStop'`（具名常量，导出）。
-- `SubagentLoopGuardStopReason` 是**封闭值域**：`'repeated_input' | 'context_window_fuse'`。
+- `SubagentLoopGuardStopReason` 是**封闭值域**：`'repeated_input'`。
 - 读取侧 `readLoopGuardStopReason` / `isLoopGuardStopMessage` **只认这个封闭值域**——key 命名空间在 `pinpawo` 下，且值受限于上述枚举，因此与其他 `pinpawo.*` 元信息（如 `lane` / `runId`）**不会互相误判**。新增停止原因必须同时扩这个 union 与读取侧白名单（有单测固定该契约）。
 - `createSubagent` 判断本次 run 是否 guard 停机时，**只看最后一条消息**（Command goto END 把 notice 追加为末条）——不扫整段历史，避免输入历史里恰好带同名 marker 时被误判。
 
 ### 4.5 复用清单（不新增多余概念）
 
-- **context fuse middleware** → 归为一个 Guard（token 硬阈值）。后续把 throw 改成走统一的 Guard block 路径（主动停）。
+- **context fuse middleware** → 已废弃；不再用本地 token 估算做 Guard。
 - **contextPolicy（evict/truncate）** → 仍是压缩执行器，不是 Guard/Decision，保持原职。
 - **completionReason='limit_reached'** → 所有 Guard block 的统一结论载体。
 - **runIterationLimitGuard / delegationOutcomeDecisionGuard（orchestrator）** → 迁移到新 Guard 抽象的**示范对象**，但迁移本身**另开 PR**（见 §6 范围）。
@@ -109,7 +109,7 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
 - subagent 内部是 LangGraph ReAct agent，`recursionLimit` 是它的硬断路（`createSubagent.ts`，`= maxIterations`）。
 - **单位实测（P4 / #281）**：`recursionLimit` 数的是 **graph super-step**，一次 ReAct 迭代（model→tool）≈ **2 个 super-step**。即 `maxIterations: N` 实际允许约 `N/2` 次模型调用。
 - **P4 决定**：保持 `maxIterations` = super-step 语义（不改字段语义，改动最小），**预算统一拉到 100**（general / capability / default 三档合一，`SUBAGENT_MAX_ITERATIONS = 100`，约 50 次模型调用）。
-- 预期停止点应是 **Guard 主动停**（重复输入 / token 阈值），不是 `recursionLimit`。后者退化为"真死循环"的最后断路。
+- 预期停止点应是 **Guard 主动停**（重复输入），不是 `recursionLimit`。后者退化为"真死循环"的最后断路。
 - 因为 Guard 主动停产出 `limit_reached`（不外抛 `GraphRecursionError`），**外层 orchestrator 的硬 `recursionLimit`（#279 A）大概率不再需要**——P6 验证后决定去留（#275 的最终归宿）。
 
 ## 6. 落地范围
@@ -122,7 +122,7 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
 
 1. **P1 引入 Guard 代码抽象**：定义 `SubagentLoopGuard` interface + verdict 类型 + 一个把 Guard 挂到 middleware position（`beforeModel`）的适配器。
 2. **P2 `RepeatedInputGuard`**：唯一最小实现——`messages` 指纹连续重复达阈值 → block，主动停产出 `completionReason='limit_reached'`，不抛错。
-3. **P3 fuse 归位**：把现有 context fuse 表达成同一 Guard 抽象下的一个 Guard（token 硬阈值），block 路径与 P2 统一（throw → 主动停）。
+3. **P3 删除本地 token fuse**：不再把本地 token 估算表达成 Guard；输出体积靠 contextPolicy 和工具边界治理。
 
 **后续 PR（独立）**：
 
@@ -132,7 +132,7 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
    - **三个 Guard 的实现体真正搬出** `createAgentRuntime`，落到 `orchestrator/guards.ts`（`createOrchestratorGuards(deps)` 工厂 + 搬随的纯 helper `readLegacyTaskActiveDelegation` / `buildRunIterationLimitMessage`）。`getInvokeOptions` 因被运行时广泛复用而**注入**（不搬），保持 guards.ts 依赖轻、无循环。搬出后 Guard 可独立单测。
    - `runOrchestrationDecision` 庞大且重度闭包依赖，**体留原处**，由两个 thin `OrchestratorDecision` 包装绑定 kind。subagent 的 `SubagentLoopGuard` 是另一域的契约，**不合并**。
 6. **P6 回看外层 recursionLimit**：#275 最终归宿。
-7. **P7 策略增强**：结论增量 / token 比 / review 防空跑作为 `SubagentLoopGuard` 的新实现接入。
+7. **P7 策略增强**：结论增量 / review 防空跑作为 `SubagentLoopGuard` 的新实现接入。
 
 本 PR 聚焦 P1–P3：用最小的重复输入 Guard 把"打转"挡住，并把概念归置到 Decision/Guard 抽象。
 

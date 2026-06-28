@@ -69,7 +69,7 @@ test('explore capability filters default toolkits to host-available toolkits', a
   assert.deepEqual(runtime.uses, ['bash', 'browser']);
   assert.equal(Array.isArray(runtime.instructions), true);
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /只读取、检查、搜索、观察和总结上下文/);
-  assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /上下文足够时会保留完整工具输出/);
+  assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /运行中会保留最近的完整工具输出/);
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /已查看文件列表/);
   assert.equal(typeof runtime.contextPolicy?.rewriteAsync, 'function');
   assert.equal(typeof runtime.middleware?.afterRun, 'function');
@@ -115,7 +115,7 @@ test('explore result does not fall back to latest assistant text without ingest 
   ]), null);
 });
 
-test('explore context policy leaves raw tool output untouched while under budget', async () => {
+test('explore context policy leaves recent raw tool output untouched', async () => {
   let ingestCalls = 0;
   const runtime = await createRuntime(fakeSummaryModel('should not be used', () => {
     ingestCalls += 1;
@@ -125,10 +125,8 @@ test('explore context policy leaves raw tool output untouched while under budget
   ];
 
   const rewritten = await runtime.contextPolicy?.rewriteAsync?.(messages, {
-    estimateMessagesTokens: () => 1_000,
     iterationCount: 1,
     operations: {},
-    contextWindowTokens: 32_000,
   });
 
   assert.equal(rewritten, messages);
@@ -136,10 +134,10 @@ test('explore context policy leaves raw tool output untouched while under budget
   assert.match(String(rewritten?.[0]?.content ?? ''), /^raw file output/);
 });
 
-test('explore context policy ingests and compresses older raw tool output only under pressure', async () => {
+test('explore context policy ingests and compresses older raw tool output', async () => {
   let capturedHuman = '';
   const summary = [
-    '已确认 context pressure 时才需要摘要。',
+    '已确认旧工具输出需要摘要。',
     '已查看文件：services/local-agent/src/capabilities/explore/index.ts',
     '关键发现：最近两个工具输出仍保留原文。',
   ].join('\n');
@@ -154,20 +152,18 @@ test('explore context policy ingests and compresses older raw tool output only u
   ];
 
   const rewritten = await runtime.contextPolicy?.rewriteAsync?.(messages, {
-    estimateMessagesTokens: () => 30_000,
     iterationCount: 2,
     operations: {},
-    contextWindowTokens: 32_000,
   });
 
   assert.ok(rewritten);
-  assert.match(capturedHuman, /触发原因：context_pressure/);
+  assert.match(capturedHuman, /触发原因：old_tool_output/);
   assert.match(capturedHuman, /old raw 1/);
   assert.match(String(rewritten[0]?.content ?? ''), /^\[explore raw tool output evicted after ingest\]/);
   assert.match(String(rewritten[1]?.content ?? ''), /^\[explore raw tool output evicted after ingest\]/);
   assert.equal(rewritten.length, 5);
   assert.match(String(rewritten[4]?.content ?? ''), /Explore summary:/);
-  assert.match(String(rewritten[4]?.content ?? ''), /已确认 context pressure/);
+  assert.match(String(rewritten[4]?.content ?? ''), /已确认旧工具输出/);
   assert.match(String(rewritten[2]?.content ?? ''), /^recent raw 3/);
   assert.match(String(rewritten[3]?.content ?? ''), /^recent raw 4/);
   assert.deepEqual(readExploreResult(rewritten)?.summary, summary);
@@ -187,10 +183,8 @@ test('explore ingest forwards configured structured output method', async () => 
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
   ], {
-    estimateMessagesTokens: () => 30_000,
     iterationCount: 2,
     operations: {},
-    contextWindowTokens: 32_000,
   });
 
   assert.deepEqual(capturedOptions, {
@@ -200,7 +194,7 @@ test('explore ingest forwards configured structured output method', async () => 
   assert.deepEqual(readExploreResult(rewritten ?? [])?.summary, summary);
 });
 
-test('explore ingest failure under context pressure keeps raw outputs instead of crashing the run', async () => {
+test('explore ingest failure keeps raw outputs instead of crashing the run', async () => {
   const model = {
     withStructuredOutput: () => ({
       invoke: async () => {
@@ -219,15 +213,13 @@ test('explore ingest failure under context pressure keeps raw outputs instead of
   // An ingest model failure must degrade gracefully (review finding #1): the
   // rewrite returns the original messages unchanged — no throw, no eviction.
   const rewritten = await runtime.contextPolicy!.rewriteAsync!(input, {
-    estimateMessagesTokens: () => 30_000,
     iterationCount: 2,
     operations: {},
-    contextWindowTokens: 32_000,
   });
   assert.deepEqual(rewritten, input);
 });
 
-test('explore context-pressure summarizes old tool output and defers report persistence to afterRun', async () => {
+test('explore summarizes old tool output and defers report persistence to afterRun', async () => {
   const summary = '已确认重复探索的原因\n\n已查看文件：services/local-agent/src/capabilities/explore/index.ts';
   const writes: Array<Record<string, unknown>> = [];
   const recorded: unknown[] = [];
@@ -242,7 +234,7 @@ test('explore context-pressure summarizes old tool output and defers report pers
     withStructuredOutput: () => ({
       invoke: async () => ({
         summary,
-        evidence: [{ source: 'explore/index.ts', proves: 'ingest 只在 context 压力时触发', value: '避免重复探索' }],
+        evidence: [{ source: 'explore/index.ts', proves: 'ingest 会压缩旧工具输出', value: '避免重复探索' }],
       }),
     }),
   } as unknown as BaseChatModel;
@@ -253,10 +245,8 @@ test('explore context-pressure summarizes old tool output and defers report pers
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
   ], {
-    estimateMessagesTokens: () => 30_000,
     iterationCount: 2,
     operations: {},
-    contextWindowTokens: 32_000,
     artifactSink: {
       recordCapabilityArtifact: (ref) => { recorded.push(ref); },
       threadId: 'thread-1',
@@ -292,12 +282,12 @@ test('explore context-pressure summarizes old tool output and defers report pers
   assert.equal(artifact.kind, 'report');
   assert.equal(artifact.mimeType, 'text/markdown');
   assert.deepEqual((artifact.metadata as { evidence?: unknown })?.evidence, [
-    { source: 'explore/index.ts', proves: 'ingest 只在 context 压力时触发', value: '避免重复探索' },
+    { source: 'explore/index.ts', proves: 'ingest 会压缩旧工具输出', value: '避免重复探索' },
   ]);
   assert.equal(recorded.length, 1);
 });
 
-test('explore context-pressure ingest is a no-op write when no artifact sink is provided', async () => {
+test('explore ingest is a no-op write when no artifact sink is provided', async () => {
   const summary = '摘要\n\n已查看文件：a.ts';
   const writes: unknown[] = [];
   const store = {
@@ -310,10 +300,8 @@ test('explore context-pressure ingest is a no-op write when no artifact sink is 
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
   ], {
-    estimateMessagesTokens: () => 30_000,
     iterationCount: 2,
     operations: {},
-    contextWindowTokens: 32_000,
     // no artifactSink
   });
 
@@ -474,7 +462,7 @@ test('explore generates final summary artifact when no exploreSummary marker exi
   assert.equal(Array.isArray(writes[0]?.evidence), true);
 });
 
-test('explore writes at most once per run even when context-pressure summaries are generated', async () => {
+test('explore writes at most once per run even when old-output summaries are generated', async () => {
   const summary = '压缩后的总结：仅保留关键证据和来源，避免重复。';
   const writes: Array<Record<string, unknown>> = [];
   const store = {
@@ -498,7 +486,7 @@ test('explore writes at most once per run even when context-pressure summaries a
     withStructuredOutput: () => ({
       invoke: async () => ({
         summary,
-        evidence: [{ source: 'explore/index.ts', proves: '压缩触发', value: '减少 context 使用量' }],
+        evidence: [{ source: 'explore/index.ts', proves: '压缩触发', value: '减少原始输出占用' }],
       }),
     }),
   } as unknown as BaseChatModel;
@@ -509,10 +497,8 @@ test('explore writes at most once per run even when context-pressure summaries a
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
   ], {
-    estimateMessagesTokens: () => 30_000,
     iterationCount: 2,
     operations: {},
-    contextWindowTokens: 32_000,
     artifactSink: {
       recordCapabilityArtifact: () => {},
       threadId: 'thread-1',

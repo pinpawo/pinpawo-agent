@@ -6,14 +6,12 @@ import type {
 } from '../types/subagent';
 import { createAgent, createMiddleware } from 'langchain';
 import { SubagentToolEventTracker } from './toolEventTracker';
-import { estimateMessagesTokens } from '../agent/orchestrator/contextCompaction';
 import {
   buildContextPolicyStateUpdate,
   rewriteMessagesForContextPolicy,
 } from './contextPolicy';
 import { isGraphRecursionLimitError } from '../utils/graphErrors';
 import {
-  createContextWindowFuseGuard,
   createRepeatedInputGuard,
   createSubagentLoopGuardMiddleware,
   isLoopGuardStopMessage,
@@ -25,7 +23,6 @@ import {
 // model→tool iteration is ~2 steps). With loop guards (#280) the expected stop is
 // a guard's graceful stop, so this is a generous last-resort breaker. See P4 / #281.
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 100;
-const DEFAULT_CONTEXT_FUSE_RATIO = 0.85;
 
 const SUBAGENT_GOVERNING_PROMPT = [
   '你是任务执行器，负责精确完成分配给你的任务。',
@@ -94,27 +91,14 @@ function isSubagentToolLifecycleEvent(payload: unknown): payload is SubagentTool
   );
 }
 
-function buildContextFuseLimit(contextWindowTokens: number | undefined): number | null {
-  if (!contextWindowTokens || !Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
-    return null;
-  }
-  return Math.max(1, Math.floor(contextWindowTokens * DEFAULT_CONTEXT_FUSE_RATIO));
-}
-
 /**
  * Assemble the subagent loop guards (the hard pass/block predicates that stop the
- * ReAct loop). RepeatedInputGuard catches a loop spinning on identical input; the
- * context-window fuse catches token exhaustion. Both block by gracefully ending
- * the agent (see loopGuards.ts) so createSubagent reports `limit_reached` instead
- * of throwing.
+ * ReAct loop). RepeatedInputGuard catches a loop spinning on identical input and
+ * blocks by gracefully ending the agent (see loopGuards.ts) so createSubagent
+ * reports `limit_reached` instead of throwing.
  */
-function buildSubagentLoopGuards(contextWindowTokens: number | undefined): SubagentLoopGuard[] {
-  const guards: SubagentLoopGuard[] = [createRepeatedInputGuard()];
-  const fuseLimit = buildContextFuseLimit(contextWindowTokens);
-  if (fuseLimit) {
-    guards.push(createContextWindowFuseGuard(fuseLimit));
-  }
-  return guards;
+function buildSubagentLoopGuards(): SubagentLoopGuard[] {
+  return [createRepeatedInputGuard()];
 }
 
 function createContextPolicyMiddleware(input: SubagentInput) {
@@ -131,10 +115,8 @@ function createContextPolicyMiddleware(input: SubagentInput) {
         return undefined;
       }
       const context = {
-        estimateMessagesTokens,
         iterationCount,
         operations,
-        ...(input.contextWindowTokens ? { contextWindowTokens: input.contextWindowTokens } : {}),
         ...(input.artifactSink ? { artifactSink: input.artifactSink } : {}),
       };
       const rewritten = policy.rewriteAsync
@@ -153,12 +135,10 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
   ].filter((item): item is string => Boolean(item)).join('\n\n');
   const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
   const loopGuardMiddleware = createSubagentLoopGuardMiddleware(
-    buildSubagentLoopGuards(input.contextWindowTokens),
+    buildSubagentLoopGuards(),
     systemPrompt,
   );
   const contextPolicyMiddleware = createContextPolicyMiddleware(input);
-  // contextPolicy runs first (compress old tool output), then loop guards decide
-  // whether to stop — so the fuse guard sees the already-compressed footprint.
   const middleware = [
     contextPolicyMiddleware,
     loopGuardMiddleware,

@@ -8,7 +8,6 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   CONTEXT_COMPACTION_MESSAGE_NAME,
   compactOrchestratorMessages,
-  estimateMessagesTokens,
   isContextCompactionMessage,
   readContextCompactionSummaries,
 } from './contextCompaction';
@@ -27,7 +26,7 @@ function longMessage(index: number) {
   return new HumanMessage(`message-${index} ${'x'.repeat(3200)}`);
 }
 
-test('orchestrator context compaction stays idle below high-watermark threshold', async () => {
+test('orchestrator context compaction stays idle below message-count trigger', async () => {
   const messages = [
     new HumanMessage('hello'),
     new AIMessage('hi'),
@@ -36,7 +35,7 @@ test('orchestrator context compaction stays idle below high-watermark threshold'
   const result = await compactOrchestratorMessages({
     messages,
     model: fakeSummaryModel(),
-    options: { contextWindowTokens: 32000 },
+    options: { triggerMessageCount: 8 },
   });
 
   assert.equal(result.compacted, false);
@@ -68,26 +67,25 @@ test('orchestrator context compaction trigger ignores lane transcript noise', as
     model: fakeSummaryModel('should not run', () => {
       invoked = true;
     }),
-    options: { contextWindowTokens: 8000, keepMessages: 1 },
+    options: { keepMessages: 1, triggerMessageCount: 4 },
   });
 
   assert.equal(result.compacted, false);
   assert.equal(invoked, false);
-  assert.equal(result.estimatedTokens, estimateMessagesTokens(messages.slice(0, 2)));
+  assert.equal(result.mainMessageCount, 2);
 });
 
 test('orchestrator context compaction summarizes old messages and keeps recent suffix', async () => {
   const messages = Array.from({ length: 14 }, (_, index) => longMessage(index));
-  const estimatedTokens = estimateMessagesTokens(messages);
 
   const result = await compactOrchestratorMessages({
     messages,
     model: fakeSummaryModel('保留用户目标、已完成修改、未完成测试。'),
-    options: { contextWindowTokens: 8000, keepMessages: 4 },
+    options: { keepMessages: 4, triggerMessageCount: 12 },
   });
 
   assert.equal(result.compacted, true);
-  assert.equal(result.estimatedTokens, estimatedTokens);
+  assert.equal(result.mainMessageCount, 14);
   assert.equal(result.messages.length, 6);
   assert.ok(result.messages[1] instanceof SystemMessage);
   assert.equal(isContextCompactionMessage(result.messages[1]), true);
@@ -107,7 +105,7 @@ test('orchestrator context compaction forwards runnable config to summary model'
     model: fakeSummaryModel('summary with config', (_messages, config) => {
       seenConfig = config;
     }),
-    options: { contextWindowTokens: 8000, keepMessages: 4 },
+    options: { keepMessages: 4, triggerMessageCount: 12 },
     runnableConfig: {
       configurable: {
         requestId: 'request-1',
@@ -149,7 +147,7 @@ test('orchestrator context compaction falls back when summary model fails', asyn
     const result = await compactOrchestratorMessages({
       messages,
       model,
-      options: { contextWindowTokens: 8000, keepMessages: 4 },
+      options: { keepMessages: 4, triggerMessageCount: 12 },
     });
 
     assert.equal(result.compacted, true);
@@ -195,7 +193,7 @@ test('orchestrator context compaction summarizes lane announces without subagent
     model: fakeSummaryModel('lane-aware summary', (modelMessages) => {
       summaryRequest = String((modelMessages.at(-1) as { content?: unknown } | undefined)?.content ?? '');
     }),
-    options: { contextWindowTokens: 8000, keepMessages: 1 },
+    options: { keepMessages: 1, triggerMessageCount: 10 },
   });
 
   assert.equal(result.compacted, true);

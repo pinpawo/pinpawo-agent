@@ -2,7 +2,7 @@
 
 ## 目标
 
-在不丢失关键结论的前提下，在上下文压力下压缩 transcript，同时保留长期可读能力。
+在不丢失关键结论的前提下，压缩旧的原始 tool output，同时保留长期可读能力。
 
 ## 数据结构
 
@@ -15,10 +15,10 @@
 
 ## 两阶段触发
 
-### 1) Context-pressure 阶段（`rewriteUnderContextPressure`）
+### 1) 旧输出压缩阶段（`rewriteOldToolOutput`）
 
-- 条件：`estimateMessagesTokens(messages) > buildExploreCompressionBudget(ctx)`。
-- 找到可压缩的历史 tool 输出，提取证据摘要。
+- 条件：存在可压缩的历史 tool 输出（最近 N 条保留原文）。
+- 提取证据摘要。
 - 调用 `ingestExploreKnowledge()` 产出 `summary + evidence`。
   - 成功后：
   - 在消息流里追加 `Explore summary:` 标记与摘要正文。
@@ -30,7 +30,7 @@
 
 `SubagentResult` 收尾时，按优先级写 artifact：
 
-1. `pendingArtifact`（context-pressure 已生成）
+1. `pendingArtifact`（旧输出压缩阶段已生成）
 2. 从消息中读取已有 `Explore summary:` marker
 3. `buildFinalExploreIngest()` 重算一次最终摘要
 

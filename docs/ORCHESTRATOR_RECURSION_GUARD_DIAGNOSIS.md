@@ -2,7 +2,7 @@
 
 > 状态：诊断（未改代码）。复现自一次真实会话（thread `…2e773650`，workdir
 > `aisouls/manage`）：subagent 内 `grep_search` 触发
-> `SubagentContextLimitReachedError`（估算 1,268,999 token / 阈值 850,000），
+> 旧实现里的 `SubagentContextLimitReachedError`，
 > 随后编排图以 `GraphRecursionError: Recursion limit of 25 reached` 冒泡为 chat error。
 >
 > **第一性根因（LangSmith trace 实测）**：一次 `grep_search` 递归扫描 workdir 时**搜进了
@@ -17,7 +17,7 @@
 operation_started  kind=bash.grep_search
 Error in handler StreamToolsHandler, handleToolStart: TypeError [ERR_INVALID_STATE]: Invalid state: Controller is already closed   (×N)
 operation_failed   kind=bash.grep_search
-  error=SubagentContextLimitReachedError { estimatedTokens: 1268999, limitTokens: 850000 }
+  error=SubagentContextLimitReachedError { ...旧本地 token 估算字段... }
 Error in handler StreamMessagesHandler, handleChainEnd: ... Controller is already closed   (×N)
 [local-server] chat error: GraphRecursionError: Recursion limit of 25 reached without hitting a stop condition.
 ```
@@ -27,16 +27,16 @@ Error in handler StreamMessagesHandler, handleChainEnd: ... Controller is alread
 1. **`Controller is already closed`** —— 一串来自 LangChain stream handler 的 `TypeError`。
 2. **`GraphRecursionError: Recursion limit of 25`** —— 最终冒泡成 chat error 的那个。
 
-## 2. 根因一：Subagent 上下文失控 + fuse 触发后的 controller 噪音
+## 2. 根因一：Subagent 上下文失控 + 旧 fuse 触发后的 controller 噪音
 
-### 2.1 上下文为什么会爆到 1.26M token —— **一次 grep 搜进了 agent 自己的 checkpoint 目录**
+### 2.1 上下文为什么会爆炸 —— **一次 grep 搜进了 agent 自己的 checkpoint 目录**
 
 > 由 LangSmith trace `019f0881-fc49-...`（11.7MB，`thread_id` 与 `e2b3` 同一会话，
 > `ls_run_depth: 1`，即 depth-0 编排图里的子运行）逐条消息抽查**实测**得出。
 > 此节**修正了本文档早先"不是单次、是累积"的错误判断**。
 
 实测：该子运行的 `outputs.messages` 里有一条 **`grep_search` 的 ToolMessage，content =
-4,330,842 字符（≈ 4.3M chars / 1M+ token）**，外加 4 条各 ~183KB 的同名重复。把这条 4.3M
+4,330,842 字符**，外加 4 条各 ~183KB 的同名重复。把这条 4.3M
 的工具结果拆开看：
 
 - 一共 **50 行**（正好是 `grep_search` 默认 `limit ?? 50`，行数限制其实生效了）；
@@ -46,8 +46,8 @@ Error in handler StreamMessagesHandler, handleChainEnd: ... Controller is alread
 也就是说：grep 递归扫描 workdir 时，**扫进了 agent 自己的 checkpoint 存储目录
 `.pinpawo/checkpoints-tui/objects/`**。每个 object 文件是把一整条对话历史压成**一行**的
 序列化 JSON（`{"lc":1,"type":"constructor",…AIMessage…capability_search…}`）。50 行 ×
-每行几百 KB ≈ 4.3M 字符，**一次工具调用**就把它塞回了 subagent 上下文。叠加重放，估算 token
-冲到 1,268,999，fuse 触发。
+每行几百 KB ≈ 4.3M 字符，**一次工具调用**就把它塞回了 subagent 上下文。叠加重放后，旧 fuse
+触发。
 
 **这是一次自指爆炸（self-reference blow-up）：agent 把自己的"记忆"搜了回来当上下文，
 而读取这段上下文又写进新的 checkpoint，雪球。**
@@ -67,21 +67,15 @@ Error in handler StreamMessagesHandler, handleChainEnd: ... Controller is alread
    于是一定会扫进 `.pinpawo/checkpoints-tui/objects/`，把 agent 自己的序列化记忆当成
    "代码"搜回来。
 
-fuse 阈值 = `contextWindowTokens × 0.85`（`DEFAULT_CONTEXT_FUSE_RATIO`，
-[createSubagent.ts:16](../packages/pet-agent/src/subagent/createSubagent.ts#L16) /
-[:95](../packages/pet-agent/src/subagent/createSubagent.ts#L95)）。850,000 反推出
-`contextWindowTokens ≈ 1,000,000`。fuse **正确触发**了，它是受害者不是肇事者。
+旧 fuse **是受害者不是肇事者**；后续实现已移除本地 token 估算，真正的一阶修复是限制工具输出并避免搜进 `.pinpawo`。
 
 > 修正记录：本文档曾断言"单个工具边界控制得很好、1.26M 是几十次累积"。trace 实测推翻了
 > 这一点——**单次 grep_search 就返回了 4.3M 字符**，因为行数上限挡不住"单行 ~493KB 的
-> checkpoint JSON"，且遍历没排除 `.pinpawo`。这才是 token 爆炸的第一性原因。
+> checkpoint JSON"，且遍历没排除 `.pinpawo`。这才是上下文爆炸的第一性原因。
 
-### 2.2 fuse 正确触发了，`Controller is already closed` 是次生噪音
+### 2.2 旧 fuse 触发后，`Controller is already closed` 是次生噪音
 
-`createContextWindowFuseMiddleware.wrapModelCall` 在估算 token ≥ 阈值时
-抛 `SubagentContextLimitReachedError`
-（[createSubagent.ts:122](../packages/pet-agent/src/subagent/createSubagent.ts#L122)）。
-这是**预期且正确**的最后一道保险。
+旧实现会在本地估算达到阈值时抛 `SubagentContextLimitReachedError`。这是当时的最后一道保险，但后续实现不再维护本地 token 估算。
 
 抛错让 subagent 的 `agent.stream()` 提前结束，消费循环
 （[createSubagent.ts:235](../packages/pet-agent/src/subagent/createSubagent.ts#L235)）退出、
@@ -242,13 +236,13 @@ guard 永远没机会触发。
 > 备选（不推荐作为默认）：仍然失败，但转成带分类的错误，让 TUI 区分"上下文爆炸 vs
 > 节点循环"。可作为 B 的补充——在降级文案里带上分类标签，但仍走 completed 而非 error。
 
-### 修复 C：收敛 fuse 触发后的 `Controller is already closed` 噪音
+### 修复 C：旧 fuse 触发后的 `Controller is already closed` 噪音（已废弃）
 
-`SubagentContextLimitReachedError` 抛出后，subagent 流的拆解顺序不干净。
+`SubagentContextLimitReachedError` 抛出后，subagent 流的拆解顺序不干净。后续实现已删除本地
+token 估算 fuse，不再通过这个错误路径主动停机；当前代码不需要继续为 fuse teardown 写新逻辑。
 
-- 在 `createSubagent` catch 到 fuse 错误时，确保先停止 / 显式关闭流再让 handler 收尾，
-  或吞掉 teardown 阶段的 `ERR_INVALID_STATE` controller 错误（它们对正确性无影响）。
-- 这条优先级最低（纯日志噪音），但能让上面两个 fix 的日志干净、可读。
+若需要维护历史分支，可在 `createSubagent` catch 到旧 fuse 错误时先停止 / 显式关闭流再让
+handler 收尾，或吞掉 teardown 阶段的 `ERR_INVALID_STATE` controller 错误（它们对正确性无影响）。
 
 ### 修复 D2（纵深防御，独立跟进）：general lane 会话级工具输出淘汰
 
@@ -256,8 +250,8 @@ D0/D1 堵住了"单次巨型工具结果"。D2 是纵深防御：即便单次结
 
 general lane 委派不挂 `contextPolicy`
 （[createAgentRuntime.ts:1228](../packages/pet-agent/src/agent/createAgentRuntime.ts#L1228) 起），
-单条工具原始输出无法被逐条淘汰，多次累积只能等 fuse。长期应让 general lane 也具备工具原始
-输出淘汰能力（与 capability lane 对齐），把累积规模在到达 fuse 之前压下去。关联
+单条工具原始输出无法被逐条淘汰，多次累积只能等 provider/model 窗口错误或其它结构性裁剪兜底。
+长期应让 general lane 也具备工具原始输出淘汰能力（与 capability lane 对齐），把累积规模提前压下去。关联
 [[context-governance-core-invariant]]（"conclusions cross boundaries, transcripts
 don't"，L2 lane-merge → L1 subagent eviction）。
 
@@ -268,6 +262,6 @@ don't"，L2 lane-merge → L1 subagent eviction）。
 - 单测：构造一个会连续委派 > recursionLimit/NODES_PER_DELEGATION 次的假图，断言
   修复 A 后软 guard 先触发、修复 B 后即便硬 limit 触顶也返回 `completed` 而非抛错。
   参考现有 `eval:hitl -w pinpawo-local-agent`（驱动假图验证 structured-resume）。
-- 复现脚本：让 subagent 工具返回超阈值内容，断言 fuse 仍触发 `limit_reached`，
-  且修复 C 后无 `Controller is already closed`。
+- 复现脚本：让 subagent 工具返回超大内容，断言工具输出边界先截断 / 跳过 `.pinpawo`，不会依赖
+  本地 token fuse 才阻断。
 ```

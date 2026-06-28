@@ -75,10 +75,8 @@ export type CapabilityArtifactSink = {
 };
 
 export type ContextPolicyContext = {
-  estimateMessagesTokens: (messages: BaseMessage[]) => number;
   iterationCount: number;
   operations: Record<string, SubagentToolOperationMetadata>;
-  contextWindowTokens?: number;
   artifactSink?: CapabilityArtifactSink;
 };
 
@@ -86,7 +84,6 @@ export type SubagentContextPolicy = {
   evictToolResults?: {
     keepRecent: number;
     defaultMode?: 'evict' | 'truncate';
-    budgetTokens?: number;
     minSizeChars?: number;
     keepFailures?: boolean;
     perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
@@ -102,7 +99,6 @@ export type SubagentInput = {
   operations?: Record<string, SubagentToolOperationMetadata>;
   messages: BaseMessage[];
   maxIterations?: number;
-  contextWindowTokens?: number;
   contextPolicy?: SubagentContextPolicy;
   checkpoint?: BaseCheckpointSaver;
   runnableConfig?: RunnableConfig;

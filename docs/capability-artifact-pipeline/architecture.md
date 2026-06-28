@@ -32,7 +32,7 @@ subagent / capability 运行
   - 决策节点只注入简短 `ref` 到系统 prompt。
 
 - **能力侧（packages/local-agent/src/capabilities/*）**
-  - 自己决定何时写入 artifact（通常 context-pressure 或 `afterRun`）。
+  - 自己决定何时写入 artifact（通常 in-loop ingest 或 `afterRun`）。
   - 负责构造 `kind/mimeType/title/preview` 等元信息。
   - 通过 `artifactSink.recordCapabilityArtifact` 回传 ref。
 

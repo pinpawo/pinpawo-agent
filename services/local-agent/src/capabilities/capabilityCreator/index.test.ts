@@ -8,7 +8,6 @@ test('capability_creator declares read-heavy context policy', async () => {
 
   assert.deepEqual(runtime.contextPolicy?.evictToolResults, {
     keepRecent: 5,
-    budgetTokens: 24_000,
     keepFailures: true,
   });
 });

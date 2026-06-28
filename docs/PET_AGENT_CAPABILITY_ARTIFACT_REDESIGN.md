@@ -13,7 +13,7 @@ write tool. A capability writes through the store it receives on its
 `CapabilityContext`, and the resulting ref reaches state via the artifact sink:
 
 ```text
-capability code (context-pressure candidate compute -> afterRun persistence)
+capability code (in-loop ingest candidate compute -> afterRun persistence)
   -> CapabilityArtifactStore.writeArtifact(...)   // store from CapabilityContext
   -> CapabilityArtifactRef
   -> recordCapabilityArtifact(ref)  (artifact sink)
@@ -69,7 +69,7 @@ There is **no** `capability_artifact` toolkit (no `_write` / `_read` / `_list`
 tools handed to the model). It was removed: writes are deterministic in code, and
 nothing needs the model to read its own just-written artifact back —
 
-- under context pressure, ingest inlines the summary back into the model context
+- during old-output ingest, the summary is inlined back into the model context
   and the summary names its sources, so the subagent re-queries a source with
   `view_file` etc. rather than reading the artifact through a tool;
 - cross-turn "has this been explored before" is served by the artifact ref +
@@ -81,7 +81,7 @@ nothing needs the model to read its own just-written artifact back —
 - `SubagentResult.artifacts` carries refs produced during the subagent run.
 - `recordCapabilityArtifact(ref)` is the single artifact sink, exposed under that
   name on every layer that can persist: `CapabilityMiddlewareContext` (afterRun),
-  `CapabilityArtifactSink` on `ContextPolicyContext` (in-loop context-pressure),
+  `CapabilityArtifactSink` on `ContextPolicyContext` (in-loop old-output ingest),
   and `ToolkitContext` (if a toolkit ever needs it). All push into the same
   `artifactRefs` array that becomes `SubagentResult.artifacts`.
 - `CapabilityContext.artifactStore` is the store a capability uses to write bytes.
@@ -181,24 +181,24 @@ instructing the model to call a write tool inside the loop:
   a `kind: "result"` artifact via `ctx.artifactStore`. No model-facing write tool
   and no write instruction — the persistence is unconditional code.
 - `capability_creator` does the same via `afterRun` (uses `['bash']`).
-- `explore` persists through `afterRun` only: context-pressure ingest computes
+- `explore` persists through `afterRun` only: old-output ingest computes
   a reusable `summary + evidence` payload, and `afterRun` writes that payload as a
-  `kind: "report"` artifact once per completed run. If no context-pressure
+  `kind: "report"` artifact once per completed run. If no old-output ingest
   payload exists, `afterRun` performs a final lightweight re-ingest from the
   final run evidence and still attempts one artifact write.
 
 ## Explore ingest
 
-Explore's summarization includes a **context-pressure** path for compression and a
+Explore's summarization includes an **old-output ingest** path for compression and a
 **finalize** path for durable run summaries.
 
 **Trigger.**
 
-- **Context-pressure ingest** still runs only when the loop reaches context
-  constraints (`contextPolicy.rewriteAsync`). It summarizes and evicts selected
+- **Old-output ingest** runs from `contextPolicy.rewriteAsync` when older large
+  successful tool outputs are eligible. It summarizes and evicts selected
   tool outputs, and stores the summary candidate in-memory.
 - **Finalize persistence** runs once in `afterRun` after the subagent completes; if
-  context-pressure did not already produce a structured summary, it runs a final
+  old-output ingest did not already produce a structured summary, it runs a final
   re-ingest on the final result evidence and writes one `kind: "report"` artifact
   with evidence metadata when the re-ingest succeeds.
 
@@ -217,8 +217,8 @@ lossy in-place compression:
     markdown body holds the readable summary.)
 
 This uses a two-step (or single-step) flow:
-- context-pressure path: computes candidate summary in `rewriteUnderContextPressure`;
-- finalize path: computes final candidate in `afterRun` if context-pressure did not produce one.
+- old-output ingest path: computes candidate summary in `rewriteOldToolOutput`;
+- finalize path: computes final candidate in `afterRun` if old-output ingest did not produce one.
 (`status`, `summary`, `nextSteps`) is still not persisted as a `kind: "result"`
 artifact; it is persisted as a `kind: "report"` artifact body (`content`) with
 optional evidence metadata.
@@ -229,7 +229,7 @@ latest ingest payload via
 `recordExploreIngestArtifact(ctx.artifactStore, ctx.artifactSink, ingest)`
 (summary → markdown content, evidence → metadata).
 
-**Failure-safe.** Context-pressure rewrite keeps raw outputs on ingest failures
+**Failure-safe.** Old-output ingest keeps raw outputs on ingest failures
 (model rate-limit/timeout, structured-output parse error) and never aborts the turn.
 `afterRun` also catches finalize persistence/write errors; failed finalize writes are
 non-fatal and the run keeps returning normal completion state.

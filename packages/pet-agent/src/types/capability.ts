@@ -17,7 +17,7 @@ export type CapabilityContext = {
   }>;
   /**
    * Artifact store (port) the runtime injects so a capability can persist its
-   * own artifacts by closure (afterRun / context-pressure ingest). Undefined on
+   * own artifacts by closure (afterRun / in-loop ingest). Undefined on
    * surfaces without a store; capabilities skip writes when absent.
    */
   artifactStore?: CapabilityArtifactStore;

@@ -1,7 +1,6 @@
 import { AIMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { createMiddleware } from 'langchain';
 import { Command, END } from '@langchain/langgraph';
-import { estimateMessagesTokens } from '../agent/orchestrator/contextCompaction';
 import { readMessageToolCalls } from '../utils/messages';
 
 /**
@@ -14,8 +13,8 @@ import { readMessageToolCalls } from '../utils/messages';
  *
  * The strategy is an interface on purpose: `RepeatedInputGuard` is the minimal
  * implementation (detect the loop spinning on the same input). Future strategies
- * (conclusion-progress, token-vs-progress ratio, review-for-no-op) plug in as
- * additional `SubagentLoopGuard` implementations without touching callers.
+ * such as conclusion-progress or review-for-no-op plug in as additional
+ * `SubagentLoopGuard` implementations without touching callers.
  *
  * See docs/SUBAGENT_LIMIT_FRAMEWORK_DESIGN.md.
  */
@@ -27,7 +26,6 @@ export type SubagentLoopGuardInput = {
   messages: BaseMessage[];
   /** 1-based count of how many times the model is about to be called. */
   iterationCount: number;
-  estimateMessagesTokens: (messages: BaseMessage[]) => number;
 };
 
 /**
@@ -35,11 +33,10 @@ export type SubagentLoopGuardInput = {
  * sync with the guards below; the marker reader only recognizes these values so a
  * guard stop can never be confused with an unrelated `pinpawo` meta field.
  */
-export type SubagentLoopGuardStopReason = 'repeated_input' | 'context_window_fuse';
+export type SubagentLoopGuardStopReason = 'repeated_input';
 
 const LOOP_GUARD_STOP_REASONS: readonly SubagentLoopGuardStopReason[] = [
   'repeated_input',
-  'context_window_fuse',
 ];
 
 export type SubagentLoopGuardVerdict =
@@ -176,35 +173,6 @@ export function createRepeatedInputGuard(threshold = 3): SubagentLoopGuard {
 }
 
 /**
- * Blocks when the estimated token footprint of the next model call reaches the
- * context-window fuse threshold. Replaces the old throw-based fuse with a
- * graceful stop expressed through the same Guard abstraction.
- */
-export function createContextWindowFuseGuard(limitTokens: number): SubagentLoopGuard {
-  return {
-    name: 'ContextWindowFuseGuard',
-    evaluate({ systemMessage, messages, estimateMessagesTokens }) {
-      const estimatedTokens = estimateMessagesTokens([systemMessage, ...messages]);
-      if (estimatedTokens >= limitTokens) {
-        return {
-          block: true,
-          reason: 'context_window_fuse',
-          notice: buildGuardStopNotice(
-            'context_window_fuse',
-            [
-              '当前子任务的上下文已接近模型窗口上限，已暂停继续调用模型。',
-              `估算 token：${estimatedTokens}，保险丝阈值：${limitTokens}。`,
-              '请根据现有进度决定是否拆分任务、续跑或收窄范围。',
-            ].join('\n'),
-          ),
-        };
-      }
-      return { block: false };
-    },
-  };
-}
-
-/**
  * Position adapter: runs the given loop guards in the `wrapModelCall` middleware
  * position — i.e. on the exact messages about to be submitted to the model
  * (after contextPolicy compression), which is what "repeated input" means. On the
@@ -231,7 +199,6 @@ export function createSubagentLoopGuardMiddleware(
         systemMessage,
         messages: request.messages ?? [],
         iterationCount,
-        estimateMessagesTokens,
       };
       for (const guard of guards) {
         const verdict = guard.evaluate(input);

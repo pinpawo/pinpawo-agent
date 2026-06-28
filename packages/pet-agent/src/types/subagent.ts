@@ -3,6 +3,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import type { ProviderUsageWatermarkGuardVerdict } from '../agent/providerUsageWatermarkGuard';
 import type { CapabilityArtifactRef } from './artifact';
 import type { ToolOperationMetadata } from './toolkit';
 
@@ -79,6 +80,7 @@ export type ContextPolicyContext = {
   operations: Record<string, SubagentToolOperationMetadata>;
   latestProviderInputTokens?: number;
   contextWindowTokens?: number;
+  providerUsageWatermark?: ProviderUsageWatermarkGuardVerdict;
   artifactSink?: CapabilityArtifactSink;
 };
 

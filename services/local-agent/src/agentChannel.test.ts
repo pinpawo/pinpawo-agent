@@ -5,7 +5,7 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { ToolMessage } from '@langchain/core/messages';
 import { buildDecisionStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
 import type { AgentContext } from './contextLoader';
-import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
+import { evaluateProviderUsageWatermarkGuard, type AgentCapability, type AgentToolkit } from '@pinpawo/pet-agent';
 
 function createContext(): AgentContext {
   return {
@@ -293,6 +293,10 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
     operations: {},
     latestProviderInputTokens: 900,
     contextWindowTokens: 1000,
+    providerUsageWatermark: evaluateProviderUsageWatermarkGuard({
+      latestInputTokens: 900,
+      budgetTokens: 1000,
+    }),
   });
 
   assert.equal(rewritten?.length, 4);

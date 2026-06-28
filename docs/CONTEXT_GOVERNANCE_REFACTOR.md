@@ -55,7 +55,7 @@
 
 ### 配套修正
 
-`compactContext` 的触发改为读取 `mainConversationMessages` 中最近一次 provider 返回的
+`compactContext` 的触发交给 `ProviderUsageWatermarkGuard`：读取 `mainConversationMessages` 中最近一次 provider 返回的
 `usage_metadata.input_tokens`，与 `contextWindowTokens * triggerRatio` 比较。lane 噪音不参与触发；
 本地不再估算 messages token，存储体积是另一个度量，不混用。
 
@@ -71,12 +71,13 @@
 ### 4.1 上下文风险处理（所有能力，故障处理而非遗忘）
 
 不再在本地估算 messages token。上下文治理依赖 provider 实际返回的
-`usage_metadata.input_tokens` 作为 prompt 水位信号：turn 开始的主线 compaction 用最近主线 AIMessage
-的 input_tokens 与上下文窗口阈值比较；能力级 contextPolicy 在最近一次 subagent model call 的
-input_tokens 过阈值后，才对旧的大工具输出做 evict/truncate。真实窗口超限仍由 provider/model
+`usage_metadata.input_tokens` 作为 prompt 水位信号：`ProviderUsageWatermarkGuard` 统一判断水位是否过线；
+turn 开始的主线 compaction 与能力级 contextPolicy 都只消费 guard verdict。contextPolicy 本身只负责
+在 guard 触发后对旧的大工具输出做 evict/truncate。真实窗口超限仍由 provider/model
 返回错误；本地只保留不会伪装成 token 的结构性裁剪。
 
-实现位置：`contextCompaction.ts` 与 `contextPolicy.ts`。`createSubagent.ts` 只保留重复输入 guard。
+实现位置：`providerUsageWatermarkGuard.ts` 给出确定性水位 verdict；`contextCompaction.ts` / `contextPolicy.ts`
+执行 compact 或 rewrite；`createSubagent.ts` 负责把 guard verdict 注入 `ContextPolicyContext`。
 
 ### 4.2 contextPolicy（第四个 runtime 覆盖项，能力级）
 
@@ -100,16 +101,17 @@ contextPolicy?: {
   };
   rewrite?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[];
   // 逃生舱：完全自定义改写，声明后 evictToolResults 失效；
-  // ctx 提供迭代计数、operation metadata、latestProviderInputTokens、contextWindowTokens
+  // ctx 提供迭代计数、operation metadata、latestProviderInputTokens、contextWindowTokens、
+  // providerUsageWatermark guard verdict
 };
 ```
 
-触发条件：`latestProviderInputTokens >= floor((budgetTokens ?? contextWindowTokens) * compressionThresholdRatio)`。
+水位 guard 条件：`latestProviderInputTokens >= floor((budgetTokens ?? contextWindowTokens) * compressionThresholdRatio)`。
 `latestProviderInputTokens` 来自最近一次 provider model call 的 `usage_metadata.input_tokens`；因为 subagent
 messages 是累积发送的，这个值就是上一轮实际送进模型的 prompt footprint。没有 provider usage metadata
 时不触发压缩。
 
-规则合成优先级（高到低）：provider 水位触发 → `perTool` 覆盖 → `keepFailures` 保护 → `keepRecent` /
+规则合成优先级（高到低）：`ProviderUsageWatermarkGuard` 触发 → `perTool` 覆盖 → `keepFailures` 保护 → `keepRecent` /
 `minSizeChars` 体积规则。K 是地板（最近 K 次保留全文），旧的大体积可淘汰项从最老开始动手。
 
 **capability_creator 的预设值（作为本规范的第一个校验用例）**：
@@ -123,7 +125,7 @@ contextPolicy: {
 }
 ```
 
-**能力级淘汰规则**——淘汰判据不是"旧"，而是"provider usage 水位过阈值，且该能力声明了如何收缩旧工具结果"：
+**能力级淘汰规则**——淘汰判据不是"旧"，而是"`ProviderUsageWatermarkGuard` 水位过阈值，且该能力声明了如何收缩旧工具结果"：
 
 - **默认可淘汰**：声明了 `evictToolResults` 的能力中，旧的大体积成功工具输出可被替换为确定性存根：`[evicted: view_file_chunk src/foo.ts:1-200 → 已读；需要时重新调用]`。存根指纹优先复用 tool operation metadata 的 `summarizeInput`，但是否淘汰由 capability policy 决定。
 - **按工具覆盖**：如果某个工具在该能力里必须保留、必须淘汰或只适合截断，由能力配置 `perTool`。工具定义本身不声明可淘汰性，避免工具越多策略越散。

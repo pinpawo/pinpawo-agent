@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import type { CapabilityContext, OrchestrationDecisionStructuredOutputConfig } from '@pinpawo/pet-agent';
+import {
+  evaluateProviderUsageWatermarkGuard,
+  type CapabilityContext,
+  type OrchestrationDecisionStructuredOutputConfig,
+} from '@pinpawo/pet-agent';
 import {
   createExploreCapability,
   exploreResultSchema,
@@ -24,11 +28,16 @@ function toolResult(id: string, content: string) {
 }
 
 function contextPolicyCtx(inputTokens: number) {
+  const providerUsageWatermark = evaluateProviderUsageWatermarkGuard({
+    latestInputTokens: inputTokens,
+    budgetTokens: 1000,
+  });
   return {
     iterationCount: 2,
     operations: {},
     latestProviderInputTokens: inputTokens,
     contextWindowTokens: 1000,
+    providerUsageWatermark,
   };
 }
 

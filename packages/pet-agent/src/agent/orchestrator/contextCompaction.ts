@@ -12,10 +12,9 @@ import {
   toolProtocolSafeMessages,
 } from './messageLanes';
 import { clipForPrompt, readMessageText } from './utils';
-import { readLatestProviderInputTokens } from '../tokenUsage';
+import { evaluateProviderUsageWatermarkGuard } from '../providerUsageWatermarkGuard';
 
 const DEFAULT_KEEP_MESSAGES = 10;
-const DEFAULT_TRIGGER_RATIO = 0.75;
 const DEFAULT_SUMMARY_TRANSCRIPT_CHARS = 12000;
 export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';
 
@@ -54,22 +53,6 @@ export function readContextCompactionSummaries(messages: BaseMessage[], limit = 
 
 function selectMessagesToKeep(messages: BaseMessage[], keepMessages: number): BaseMessage[] {
   return toolProtocolSafeMessages(messages.slice(-Math.max(1, keepMessages)));
-}
-
-function buildTriggerTokens(params: {
-  contextWindowTokens?: number;
-  triggerRatio?: number;
-  triggerTokens?: number;
-}): number | null {
-  if (params.triggerTokens !== undefined) {
-    return Math.max(1, Math.floor(params.triggerTokens));
-  }
-  const contextWindowTokens = params.contextWindowTokens;
-  if (!contextWindowTokens || !Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
-    return null;
-  }
-  const ratio = params.triggerRatio ?? DEFAULT_TRIGGER_RATIO;
-  return Math.max(1, Math.floor(contextWindowTokens * ratio));
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
@@ -205,18 +188,17 @@ export async function compactOrchestratorMessages(params: {
   const keepMessages = params.options?.keepMessages ?? DEFAULT_KEEP_MESSAGES;
   const triggerMessages = mainConversationMessages(messages);
   const mainMessageCount = triggerMessages.length;
-  const latestInputTokens = readLatestProviderInputTokens(triggerMessages);
-  const triggerTokens = buildTriggerTokens({
-    contextWindowTokens: params.options?.contextWindowTokens,
-    triggerRatio: params.options?.triggerRatio,
+  const watermark = evaluateProviderUsageWatermarkGuard({
+    messages: triggerMessages,
+    budgetTokens: params.options?.contextWindowTokens,
+    thresholdRatio: params.options?.triggerRatio,
     triggerTokens: params.options?.triggerTokens,
   });
+  const { latestInputTokens, triggerTokens } = watermark;
 
   if (
     mainMessageCount <= keepMessages
-    || latestInputTokens === null
-    || triggerTokens === null
-    || latestInputTokens < triggerTokens
+    || !watermark.triggered
   ) {
     return { messages: [], compacted: false, mainMessageCount, latestInputTokens, triggerTokens };
   }

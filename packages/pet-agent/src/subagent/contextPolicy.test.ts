@@ -4,6 +4,7 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { SubagentContextPolicy, SubagentToolOperationMetadata } from '../types/subagent';
+import { evaluateProviderUsageWatermarkGuard } from '../agent/providerUsageWatermarkGuard';
 import { rewriteMessagesForContextPolicy } from './contextPolicy';
 
 function toolCallMessage(id: string, name: string, args: Record<string, unknown>) {
@@ -22,22 +23,22 @@ function toolResult(id: string, content: string, fields: Partial<ToolMessage> = 
   });
 }
 
-function ctx(operations: Record<string, SubagentToolOperationMetadata>) {
+function ctx(operations: Record<string, SubagentToolOperationMetadata>, inputTokens = 900) {
+  const providerUsageWatermark = evaluateProviderUsageWatermarkGuard({
+    latestInputTokens: inputTokens,
+    budgetTokens: 1000,
+  });
   return {
     iterationCount: 1,
     operations,
-    latestProviderInputTokens: 900,
+    latestProviderInputTokens: inputTokens,
     contextWindowTokens: 1000,
+    providerUsageWatermark,
   };
 }
 
 function lowWaterCtx(operations: Record<string, SubagentToolOperationMetadata>) {
-  return {
-    iterationCount: 1,
-    operations,
-    latestProviderInputTokens: 400,
-    contextWindowTokens: 1000,
-  };
+  return ctx(operations, 400);
 }
 
 test('context policy evicts old large successful tool results only', () => {
@@ -106,6 +107,31 @@ test('context policy stays idle below provider input-token trigger', () => {
       minSizeChars: 2000,
     },
   }, lowWaterCtx(operations));
+
+  assert.equal(rewritten, messages);
+});
+
+test('context policy requires a provider usage guard verdict before rewriting', () => {
+  const operations = {
+    view_file_chunk: {},
+  } satisfies Record<string, SubagentToolOperationMetadata>;
+  const messages: BaseMessage[] = [
+    new HumanMessage('inspect files'),
+    toolCallMessage('call-old', 'view_file_chunk', { path: 'src/a.ts' }),
+    toolResult('call-old', `old large file output\n${'x'.repeat(2600)}`),
+  ];
+
+  const rewritten = rewriteMessagesForContextPolicy(messages, {
+    evictToolResults: {
+      keepRecent: 0,
+      minSizeChars: 2000,
+    },
+  }, {
+    iterationCount: 1,
+    operations,
+    latestProviderInputTokens: 900,
+    contextWindowTokens: 1000,
+  });
 
   assert.equal(rewritten, messages);
 });

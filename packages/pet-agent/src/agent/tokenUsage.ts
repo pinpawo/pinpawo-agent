@@ -105,26 +105,13 @@ function normalizeProviderUsage(value: unknown): ProviderTokenUsage | null {
   };
 }
 
-function readUsageFromRecord(record: Record<string, unknown>): ProviderTokenUsage | null {
-  return normalizeProviderUsage(record)
-    ?? normalizeProviderUsage(readRecord(record, 'usage_metadata'))
-    ?? normalizeProviderUsage(readRecord(record, 'usageMetadata'))
-    ?? normalizeProviderUsage(readRecord(record, 'usage'));
-}
-
 function readUsageFromMessage(message: unknown): ProviderTokenUsage | null {
   if (!isRecord(message)) {
     return null;
   }
 
-  const directUsage = readUsageFromRecord(message);
-  if (directUsage) {
-    return directUsage;
-  }
-
-  const responseMetadata = readRecord(message, 'response_metadata')
-    ?? readRecord(message, 'responseMetadata');
-  return responseMetadata ? readUsageFromRecord(responseMetadata) : null;
+  return normalizeProviderUsage(readRecord(message, 'usage_metadata'))
+    ?? normalizeProviderUsage(readRecord(message, 'usageMetadata'));
 }
 
 export function readMessageTokenUsage(message: unknown): ProviderTokenUsage | null {

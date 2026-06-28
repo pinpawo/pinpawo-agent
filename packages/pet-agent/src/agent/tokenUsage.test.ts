@@ -80,21 +80,6 @@ test('readMessageTokenUsage reads camel-case usage metadata', () => {
   });
 });
 
-test('readMessageTokenUsage ignores legacy tokenUsage aliases', () => {
-  const message = new AIMessage({
-    content: 'ok',
-    response_metadata: {
-      tokenUsage: {
-        promptTokens: 12,
-        completionTokens: 5,
-        totalTokens: 17,
-      },
-    },
-  });
-
-  assert.equal(readMessageTokenUsage(message), null);
-});
-
 test('readMessagesTokenUsage aggregates provider usage from messages', () => {
   const messages = [
     new AIMessage({

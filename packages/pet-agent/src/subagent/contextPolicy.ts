@@ -6,7 +6,6 @@ import type {
   SubagentContextPolicy,
   SubagentToolOperationMetadata,
 } from '../types/subagent';
-import { estimateMessagesTokens } from '../agent/orchestrator/contextCompaction';
 import {
   readMessageToolCalls,
   readToolResultCallId,
@@ -15,6 +14,7 @@ import {
 import { readMessageText } from '../agent/orchestrator/utils';
 
 const DEFAULT_MIN_SIZE_CHARS = 2000;
+const DEFAULT_COMPRESSION_THRESHOLD_RATIO = 0.75;
 const CONTEXT_POLICY_MARKER_KEY = 'contextPolicyRewrite';
 
 type ToolResultCandidate = {
@@ -29,7 +29,6 @@ type ToolResultCandidate = {
 
 type RewriteDecision = {
   mode: 'evict' | 'truncate';
-  respectBudget: boolean;
 };
 
 function collectToolCallInfo(messages: BaseMessage[]) {
@@ -159,18 +158,18 @@ function shouldRewriteCandidate(
   const minSizeChars = policy.minSizeChars ?? DEFAULT_MIN_SIZE_CHARS;
   if (perTool === 'truncate') {
     return candidate.content.length > minSizeChars
-      ? { mode: 'truncate', respectBudget: false }
+      ? { mode: 'truncate' }
       : null;
   }
   if (candidate.recentProtected) return null;
   if (perTool === 'evict') {
-    return { mode: 'evict', respectBudget: true };
+    return { mode: 'evict' };
   }
   if ((policy.keepFailures ?? true) && isToolFailure(candidate.message, candidate.content)) {
     return null;
   }
   if (candidate.content.length < minSizeChars) return null;
-  return { mode: policy.defaultMode ?? 'evict', respectBudget: true };
+  return { mode: policy.defaultMode ?? 'evict' };
 }
 
 function rewriteCandidate(
@@ -184,6 +183,30 @@ function rewriteCandidate(
   return replaceToolMessageContent(candidate.message, buildDefaultStub(candidate), 'evicted');
 }
 
+function buildPolicyTriggerTokens(
+  policy: NonNullable<SubagentContextPolicy['evictToolResults']>,
+  ctx: ContextPolicyContext,
+): number | null {
+  const budgetTokens = policy.budgetTokens ?? ctx.contextWindowTokens;
+  if (!budgetTokens || !Number.isFinite(budgetTokens) || budgetTokens <= 0) {
+    return null;
+  }
+  const ratio = policy.compressionThresholdRatio ?? DEFAULT_COMPRESSION_THRESHOLD_RATIO;
+  return Math.max(1, Math.floor(budgetTokens * ratio));
+}
+
+function shouldApplyCompression(
+  policy: NonNullable<SubagentContextPolicy['evictToolResults']>,
+  ctx: ContextPolicyContext,
+): boolean {
+  const triggerTokens = buildPolicyTriggerTokens(policy, ctx);
+  const latestInputTokens = ctx.latestProviderInputTokens;
+  return triggerTokens !== null
+    && typeof latestInputTokens === 'number'
+    && Number.isFinite(latestInputTokens)
+    && latestInputTokens >= triggerTokens;
+}
+
 export function rewriteMessagesForContextPolicy(
   messages: BaseMessage[],
   policy: SubagentContextPolicy | undefined,
@@ -195,6 +218,7 @@ export function rewriteMessagesForContextPolicy(
   }
   const evictPolicy = policy.evictToolResults;
   if (!evictPolicy) return messages;
+  if (!shouldApplyCompression(evictPolicy, ctx)) return messages;
 
   const minSizeChars = evictPolicy.minSizeChars ?? DEFAULT_MIN_SIZE_CHARS;
   const candidates = markRecentProtected(
@@ -203,24 +227,14 @@ export function rewriteMessagesForContextPolicy(
   );
   const nextMessages = [...messages];
   let changed = false;
-  let currentTokens = ctx.estimateMessagesTokens(nextMessages);
 
   for (const candidate of candidates) {
     const decision = shouldRewriteCandidate(candidate, evictPolicy);
     if (!decision) continue;
-    if (decision.respectBudget && evictPolicy.budgetTokens !== undefined && currentTokens <= evictPolicy.budgetTokens) {
-      continue;
-    }
 
     const rewritten = rewriteCandidate(candidate, decision.mode, minSizeChars);
-    const beforeTokens = estimateMessagesTokens([nextMessages[candidate.index]]);
     nextMessages[candidate.index] = rewritten;
-    currentTokens += estimateMessagesTokens([rewritten]) - beforeTokens;
     changed = true;
-
-    if (evictPolicy.budgetTokens !== undefined && currentTokens <= evictPolicy.budgetTokens) {
-      break;
-    }
   }
 
   return changed ? nextMessages : messages;

@@ -1,5 +1,3 @@
-import type { LLMResult } from '@langchain/core/outputs';
-
 export type TokenUsageSource = 'provider';
 export type TokenUsageScope = 'run';
 
@@ -107,69 +105,28 @@ function normalizeProviderUsage(value: unknown): ProviderTokenUsage | null {
   };
 }
 
-function readUsageFromRecord(record: Record<string, unknown>): ProviderTokenUsage | null {
-  return normalizeProviderUsage(record)
-    ?? normalizeProviderUsage(readRecord(record, 'usage_metadata'))
-    ?? normalizeProviderUsage(readRecord(record, 'usageMetadata'))
-    ?? normalizeProviderUsage(readRecord(record, 'usage'))
-    ?? normalizeProviderUsage(readRecord(record, 'tokenUsage'));
-}
-
 function readUsageFromMessage(message: unknown): ProviderTokenUsage | null {
   if (!isRecord(message)) {
     return null;
   }
 
-  const directUsage = readUsageFromRecord(message);
-  if (directUsage) {
-    return directUsage;
-  }
-
-  const responseMetadata = readRecord(message, 'response_metadata')
-    ?? readRecord(message, 'responseMetadata');
-  return responseMetadata ? readUsageFromRecord(responseMetadata) : null;
+  return normalizeProviderUsage(readRecord(message, 'usage_metadata'))
+    ?? normalizeProviderUsage(readRecord(message, 'usageMetadata'));
 }
 
 export function readMessageTokenUsage(message: unknown): ProviderTokenUsage | null {
   return readUsageFromMessage(message);
 }
 
-function readUsageFromGeneration(generation: unknown): ProviderTokenUsage | null {
-  if (!isRecord(generation)) {
-    return null;
-  }
-
-  const messageUsage = readUsageFromMessage(generation.message);
-  if (messageUsage) {
-    return messageUsage;
-  }
-
-  const generationInfo = readRecord(generation, 'generationInfo')
-    ?? readRecord(generation, 'generation_info');
-  return generationInfo ? readUsageFromRecord(generationInfo) : null;
-}
-
-export function readLlmResultTokenUsage(output: LLMResult): ProviderTokenUsage | null {
-  const llmOutputUsage = readUsageFromRecord(output.llmOutput ?? {});
-  if (llmOutputUsage) {
-    return llmOutputUsage;
-  }
-
-  const generations = Array.isArray(output.generations) ? output.generations : [];
-  let aggregate: ProviderTokenUsage | null = null;
-  for (const group of generations) {
-    if (!Array.isArray(group)) {
-      continue;
-    }
-    for (const generation of group) {
-      const usage = readUsageFromGeneration(generation);
-      if (!usage) {
-        continue;
-      }
-      aggregate = addProviderUsage(aggregate, usage);
+export function readLatestProviderInputTokens(messages: Iterable<unknown>): number | null {
+  const items = Array.isArray(messages) ? messages : [...messages];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const usage = readMessageTokenUsage(items[index]);
+    if (usage) {
+      return usage.inputTokens;
     }
   }
-  return aggregate;
+  return null;
 }
 
 function addProviderUsage(

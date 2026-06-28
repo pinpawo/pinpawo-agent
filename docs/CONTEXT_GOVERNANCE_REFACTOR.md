@@ -11,7 +11,7 @@
 | 层 | 症状 | 状态 |
 |---|---|---|
 | L1 子代理模型窗口 | `createSubagent` 是裸循环，无淘汰；每轮重发全量历史，token O(n²)，高迭代任务顶穿窗口 | 待实现 |
-| L2 orchestrator state | lane 全量工具流水合入 `state.messages`；污染 compaction 触发估算；膨胀每个 checkpoint | #117 已做读取侧隔离；写侧折叠待实现 |
+| L2 orchestrator state | lane 全量工具流水合入 `state.messages`；污染 compaction 触发逻辑；膨胀每个 checkpoint | #117 已做读取侧隔离；写侧折叠待实现 |
 | L3 checkpoint 数量 | 每 super-step 全量快照，数量无界 | 不单独做——根因（全量快照）由 L4 内容寻址消除；#114 不合并 |
 | L4 落盘 | 单 thread 拼一个 JSON 字符串，撞 V8 字符串上限 | git 式内容寻址布局为终态方案，直接落地 |
 
@@ -30,7 +30,7 @@
 | 委派状态更新（completed/progress） | `packages/pet-agent/src/agent/orchestrator/delegations.ts` 的 `updateTurnDelegationResult` |
 | general/capability 节点（合入点） | `packages/pet-agent/src/agent/createAgentRuntime.ts` 的 `generalNode` / `capabilityNode` |
 | compaction（只在 turn 开始跑） | `packages/pet-agent/src/agent/orchestrator/contextCompaction.ts` |
-| 窗口估算设施 | `services/local-agent/src/llmContextWindow.ts`、`contextCompaction.ts` 的 `estimateMessagesTokens` |
+| 上下文窗口配置 | `services/local-agent/src/llmContextWindow.ts` |
 | checkpoint 落盘 | `services/local-agent/src/fileSaver.ts` |
 
 #117 已经落地的部分（不要重做）：`laneMessages` 按 lane+turnId+delegationId 三重过滤；`tagNewLaneMessages` 给每条 lane 消息盖 delegationId；续跑（progress/limit_reached 后 `reuseOrAppendTurnDelegation` 复用 delegationId）保留全量现场，新任务从零开始。注意 #117 只解决**读取侧泄漏**，state/checkpoint 的**体积**没有变小——这正是 L2 写侧折叠的活。
@@ -55,7 +55,9 @@
 
 ### 配套修正
 
-`compactContext` 的触发估算改为对 `mainConversationMessages` 计算（现在对全量 `state.messages` 估，保护的却只是主线 prompt）。存储体积是另一个度量，不混用。
+`compactContext` 的触发改为读取 `mainConversationMessages` 中最近一次 provider 返回的
+`usage_metadata.input_tokens`，与 `contextWindowTokens * triggerRatio` 比较。lane 噪音不参与触发；
+本地不再估算 messages token，存储体积是另一个度量，不混用。
 
 ### 测试点
 
@@ -64,13 +66,17 @@
 - HITL 回归：委派中途 review interrupt → resume 正常（子代理内部状态在 checkpointer 的子 namespace 里，不受 state.messages 折叠影响——用 `npm run eval:hitl` 验证这个假设）。
 - compaction 触发不再被 lane 噪音点燃（构造大量 lane 消息 + 少量主线消息，断言不触发）。
 
-## 4. L1：窗口保险丝（全局）+ contextPolicy（能力级）
+## 4. L1：上下文风险处理（全局）+ contextPolicy（能力级）
 
-### 4.1 保险丝（所有能力，故障处理而非遗忘）
+### 4.1 上下文风险处理（所有能力，故障处理而非遗忘）
 
-子代理每轮模型调用前估算 messages token（复用 `estimateMessagesTokens` / `llmContextWindow.ts` 的窗口信息）；超过阈值（建议窗口的 85%）时不再发起调用，以 `limit_reached` 体面收场（announce progress），而不是 API 硬报错或被静默截断。
+不再在本地估算 messages token。上下文治理依赖 provider 实际返回的
+`usage_metadata.input_tokens` 作为 prompt 水位信号：turn 开始的主线 compaction 用最近主线 AIMessage
+的 input_tokens 与上下文窗口阈值比较；能力级 contextPolicy 在最近一次 subagent model call 的
+input_tokens 过阈值后，才对旧的大工具输出做 evict/truncate。真实窗口超限仍由 provider/model
+返回错误；本地只保留不会伪装成 token 的结构性裁剪。
 
-实现位置：`createSubagent.ts`。优先尝试 langchain 1.x `createAgent` 的 middleware/pre-model hook 挂载；若 API 不支持，把 `createSubagent` 改成自持 ReAct 循环（该文件本来就薄，自持循环同时为 contextPolicy 铺路）。
+实现位置：`contextCompaction.ts` 与 `contextPolicy.ts`。`createSubagent.ts` 只保留重复输入 guard。
 
 ### 4.2 contextPolicy（第四个 runtime 覆盖项，能力级）
 
@@ -78,25 +84,33 @@
 
 同一个工具在不同能力里的上下文价值不同：一次 `grep_search` 在探索代码结构时可能只是可重跑的中间材料，在排错能力里也可能是关键证据。工具自身很难判断"旧结果是否可以被遗忘"；这个决策应由 capability/runtime 按任务场景声明。工具 metadata 只提供 `summarizeInput` / `summarizeOutput` 这类中性摘要能力，不承载淘汰策略。
 
-**能力级声明策略（capability 作者声明预算与窗口）**：
+**能力级声明策略（capability 作者声明收缩规则）**：
 
 ```ts
 // CapabilityRuntime 新增可选项；capabilityNode 透传进 SubagentInput
 contextPolicy?: {
   evictToolResults?: {
     keepRecent: number;          // 最近 K 次工具结果全文保留（recency 下限保护）
-    budgetTokens?: number;       // 目标预算：超出时从最老的可淘汰结果开始淘汰，直到回到预算内
+    budgetTokens?: number;       // 可选；默认使用当前 subagent 的 contextWindowTokens
+    compressionThresholdRatio?: number; // 可选；默认 0.75
     minSizeChars?: number;       // 小于该值不淘汰（默认 2000）
     keepFailures?: boolean;      // 默认 true：失败结果永不淘汰
     perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
     // 工具名级覆盖，优先级最高；'truncate' 保留头部 minSizeChars 字符
   };
   rewrite?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[];
-  // 逃生舱：完全自定义改写，声明后 evictToolResults 失效；ctx 提供窗口估算、迭代计数、operation metadata
+  // 逃生舱：完全自定义改写，声明后 evictToolResults 失效；
+  // ctx 提供迭代计数、operation metadata、latestProviderInputTokens、contextWindowTokens
 };
 ```
 
-规则合成优先级（高到低）：`perTool` 覆盖 → `keepFailures` 保护 → `keepRecent` / `minSizeChars` / `budgetTokens` 体积与预算规则。`budgetTokens` 与 `keepRecent` 的关系：K 是地板（最近 K 次无论预算如何都保留全文），预算是目标（超出时从最老的可淘汰项开始动手）。
+触发条件：`latestProviderInputTokens >= floor((budgetTokens ?? contextWindowTokens) * compressionThresholdRatio)`。
+`latestProviderInputTokens` 来自最近一次 provider model call 的 `usage_metadata.input_tokens`；因为 subagent
+messages 是累积发送的，这个值就是上一轮实际送进模型的 prompt footprint。没有 provider usage metadata
+时不触发压缩。
+
+规则合成优先级（高到低）：provider 水位触发 → `perTool` 覆盖 → `keepFailures` 保护 → `keepRecent` /
+`minSizeChars` 体积规则。K 是地板（最近 K 次保留全文），旧的大体积可淘汰项从最老开始动手。
 
 **capability_creator 的预设值（作为本规范的第一个校验用例）**：
 
@@ -104,13 +118,12 @@ contextPolicy?: {
 contextPolicy: {
   evictToolResults: {
     keepRecent: 5,
-    budgetTokens: 24_000,   // 配合便宜模型的窗口（qwen-flash/glm-air 档）
     keepFailures: true,
   },
 }
 ```
 
-**能力级淘汰规则**——淘汰判据不是"旧"，而是"该能力声明了如何收缩旧工具结果"：
+**能力级淘汰规则**——淘汰判据不是"旧"，而是"provider usage 水位过阈值，且该能力声明了如何收缩旧工具结果"：
 
 - **默认可淘汰**：声明了 `evictToolResults` 的能力中，旧的大体积成功工具输出可被替换为确定性存根：`[evicted: view_file_chunk src/foo.ts:1-200 → 已读；需要时重新调用]`。存根指纹优先复用 tool operation metadata 的 `summarizeInput`，但是否淘汰由 capability policy 决定。
 - **按工具覆盖**：如果某个工具在该能力里必须保留、必须淘汰或只适合截断，由能力配置 `perTool`。工具定义本身不声明可淘汰性，避免工具越多策略越散。
@@ -121,14 +134,14 @@ contextPolicy: {
 
 ### 管道
 
-`CapabilityRuntime` → `capabilityNode` → `SubagentInput`，与 #75 的 `model` / `maxIterations` 覆盖项同一条管道（三个一起加，types 改一次）。general lane 不声明 contextPolicy，保持全保留。tool operation metadata 随 `SubagentInput.operations` 进入淘汰器，仅用于生成稳定存根指纹，不决定是否淘汰。
+`CapabilityRuntime` → `capabilityNode` → `SubagentInput`，与 #75 的 `model` / `maxIterations` 覆盖项同一条管道（三个一起加，types 改一次）。`contextWindowTokens` 同时透传给 subagent，作为能力未指定 `budgetTokens` 时的默认 budget。general lane 不声明 contextPolicy，保持全保留。tool operation metadata 随 `SubagentInput.operations` 进入淘汰器，仅用于生成稳定存根指纹，不决定是否淘汰。
 
 ### 测试点
 
-- 淘汰规则单测：声明了 `contextPolicy` 的能力里，大的成功结果被存根化；小结果 / 失败 / AI 消息原样保留；K 地板与 budgetTokens 目标的相互作用正确；`perTool` 覆盖优先级最高。
+- 淘汰规则单测：声明了 `contextPolicy` 的能力里，大的成功结果被存根化；小结果 / 失败 / AI 消息原样保留；K 地板生效；`perTool` 覆盖优先级最高。
 - 缺省存根：用 `summarizeInput` 指纹兜底；没有摘要 metadata 时退回工具名 + 输入 JSON。
 - `rewrite` 逃生舱：声明后声明式规则不再生效。
-- 保险丝：构造超长 messages，断言以 limit_reached 收场而非抛错。
+- 重复输入 guard：构造重复 messages，断言以 limit_reached 收场而非抛错。
 - 不声明 contextPolicy 的能力：行为与现状逐字节一致。
 
 ## 5. L3：checkpoint 数量封顶（不做，直接上 L4）
@@ -166,8 +179,8 @@ checkpoint 链与 git commit 模型同构（parent 指针 / 不可变快照 / la
 ## 7. 实施顺序与验收
 
 ```
-① L2 completed 折叠 + compaction 估算修正   （#117 已铺好 delegationId 基础，立即可做）
-② L1 保险丝（全局）
+① L2 completed 折叠 + provider usage compaction  （#117 已铺好 delegationId 基础，立即可做）
+② L1 repeated-input guard（全局）
 ③ L1 contextPolicy 机制 + 类型管道           （与 #75 的 model/maxIterations 覆盖同批）
 ④ L4 git 式 FileSaver                        （取代 L3；带上 F1/F2 约束。与 ①②③ 并行无依赖）
 
@@ -176,12 +189,12 @@ L3 不单独做（见第 5 节）；#114 不合并。
 
 验收标准（按策略分别适用）：
 
-- 声明 evictToolResults 的能力：30 轮读密集运行 token 近似线性增长，32k 窗口内完成。
-- 全保留能力：接近窗口上限时以 limit_reached 体面收场（保险丝覆盖）。
+- 声明 evictToolResults 的能力：30 轮读密集运行不会无限保留旧的大工具输出。
+- 全保留能力：重复输入时以 limit_reached 体面收场（guard 覆盖）。
 - 已完成委派在 `state.messages` 中只剩 announce 一条（工具消息和中间 AI 笔记均已清除）；checkpoint 体积由会话长度决定，不再由工具调用量决定。
 - 同 turn 续跑（progress/limit_reached）拿到完整（L1 限界后的）现场；新任务从零开始（#117 已保证）。
 - HITL 委派中途 resume 回归通过（`eval:hitl`）。
-- compaction 不再被 lane 噪音触发。
+- compaction 不再被 lane 噪音触发，只由主线 provider `usage_metadata.input_tokens` 水位触发。
 
 ## 8. 明确不做（v1）
 

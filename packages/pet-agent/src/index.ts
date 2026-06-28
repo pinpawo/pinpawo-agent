@@ -86,7 +86,7 @@ export {
   createTokenUsageSnapshot,
   isTokenUsageSnapshot,
   parseTokenUsageSnapshot,
-  readLlmResultTokenUsage,
+  readLatestProviderInputTokens,
   readMessageTokenUsage,
   readMessagesTokenUsage,
 } from './agent/tokenUsage';

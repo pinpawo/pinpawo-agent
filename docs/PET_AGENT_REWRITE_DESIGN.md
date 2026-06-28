@@ -302,7 +302,7 @@ capability results 不经过 `runAgent` 返回值。
 当前模型中：
 
 - capability 通过 `resultSchema` 声明 `kind: "result"` artifact 的结构化 payload
-- capability 在执行完成或 context-pressure ingest 时写入 artifact，并把
+- capability 在执行完成或 in-loop ingest 时写入 artifact，并把
   `CapabilityArtifactRef` 交回 orchestrator
 - orchestrator 在 capability 执行完成后，把 refs 合入最终 graph state 的
   `capabilityArtifacts`

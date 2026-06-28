@@ -27,6 +27,8 @@ export type ExploreResult = {
 
 export type ExploreCapabilityOptions = {
   structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
+  compressionBudgetTokens?: number;
+  compressionThresholdRatio?: number;
 };
 
 export const exploreResultSchema = z.object({
@@ -54,17 +56,16 @@ const exploreKnowledgeIngestSchema = z.object({
 export type ExploreEvidenceItem = z.infer<typeof exploreEvidenceItemSchema>;
 export type ExploreKnowledgeIngest = z.infer<typeof exploreKnowledgeIngestSchema>;
 
-const EXPLORE_CONTEXT_COMPRESSION_RATIO = 0.75;
-const EXPLORE_FALLBACK_COMPRESSION_BUDGET_TOKENS = 24_000;
 const EXPLORE_COMPRESS_KEEP_RECENT_TOOL_RESULTS = 2;
 const EXPLORE_COMPRESS_MIN_TOOL_CHARS = 800;
+const EXPLORE_COMPRESSION_THRESHOLD_RATIO = 0.75;
 const EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS = 18_000;
 const EXPLORE_SUMMARY_MESSAGE_MAX_CHARS = 2_000;
 const EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS = 18_000;
 const EXPLORE_RAW_EVICTED = '[explore raw tool output evicted after ingest]';
 const EXPLORE_SUMMARY_MESSAGE_PREFIX = 'Explore summary:';
 
-type ExploreIngestReason = 'context_pressure' | 'finalize';
+type ExploreIngestReason = 'old_tool_output' | 'finalize';
 
 function readMessageText(message: { content?: unknown }): string {
   const content = message.content;
@@ -246,7 +247,7 @@ async function ingestExploreKnowledge(params: {
     messages: [
       new SystemMessage([
         '你是 explore capability 的知识 ingest 模块。',
-        '当探索内容接近上下文预算上限或对话完成时，你会被调用来对关键来源做一次完整总结，',
+        '当较早的大型工具输出需要压缩或对话完成时，你会被调用来对关键来源做一次完整总结，',
         '使较早原始工具输出可以从上下文中移除，只保留你的总结和最新若干条原文。',
         '输入包括上一版 summary 和需要被总结的 evidence。你必须更新 summary，必要时修正旧结论。',
         'summary 必须用 Markdown，包含：目标、已查看文件、关键知识点 / 概念、已确认事实、未确认 / 风险、下一步。',
@@ -294,16 +295,24 @@ function replaceToolMessageContent(
   });
 }
 
-function buildExploreCompressionBudget(ctx: ContextPolicyContext): number {
-  const contextWindowTokens = ctx.contextWindowTokens;
-  if (contextWindowTokens && Number.isFinite(contextWindowTokens) && contextWindowTokens > 0) {
-    return Math.max(1, Math.floor(contextWindowTokens * EXPLORE_CONTEXT_COMPRESSION_RATIO));
-  }
-  return EXPLORE_FALLBACK_COMPRESSION_BUDGET_TOKENS;
-}
-
 function isCompressedExploreToolOutput(message: ToolMessage) {
   return readPinpawoMetadata(message)?.exploreRawEvicted === true;
+}
+
+function shouldCompressExploreToolOutput(
+  ctx: ContextPolicyContext,
+  options: ExploreCapabilityOptions,
+): boolean {
+  const budgetTokens = options.compressionBudgetTokens ?? ctx.contextWindowTokens;
+  const latestInputTokens = ctx.latestProviderInputTokens;
+  if (!budgetTokens || !Number.isFinite(budgetTokens) || budgetTokens <= 0) {
+    return false;
+  }
+  if (typeof latestInputTokens !== 'number' || !Number.isFinite(latestInputTokens)) {
+    return false;
+  }
+  const thresholdRatio = options.compressionThresholdRatio ?? EXPLORE_COMPRESSION_THRESHOLD_RATIO;
+  return latestInputTokens >= Math.max(1, Math.floor(budgetTokens * thresholdRatio));
 }
 
 function collectCompressibleToolResultIndexes(messages: BaseMessage[]): number[] {
@@ -332,7 +341,7 @@ function collectCompressibleToolResultIndexes(messages: BaseMessage[]): number[]
  * never shown to the summarizer, so evicting them would lose findings silently
  * (review finding #3).
  */
-function buildContextPressureEvidence(messages: BaseMessage[], toolIndexes: number[]) {
+function buildOldToolOutputEvidence(messages: BaseMessage[], toolIndexes: number[]) {
   const selected = new Set(toolIndexes);
   const lines: string[] = [];
   const coveredIndexes: number[] = [];
@@ -353,7 +362,7 @@ function buildContextPressureEvidence(messages: BaseMessage[], toolIndexes: numb
   }
 
   return {
-    evidence: lines.length > 0 ? `[context_pressure]\n${lines.join('\n\n')}` : '',
+    evidence: lines.length > 0 ? `[old_tool_output]\n${lines.join('\n\n')}` : '',
     coveredIndexes,
   };
 }
@@ -448,19 +457,18 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       const artifactStore = context.artifactStore;
       let currentSummary = readLatestExploreSummary(context.messages);
       let pendingArtifact: PendingExploreArtifact | null = null;
-      const rewriteUnderContextPressure = async (
+      const rewriteOldToolOutput = async (
         messages: BaseMessage[],
         ctx: ContextPolicyContext,
       ): Promise<BaseMessage[]> => {
-        const budgetTokens = buildExploreCompressionBudget(ctx);
-        if (ctx.estimateMessagesTokens(messages) <= budgetTokens) {
+        if (!shouldCompressExploreToolOutput(ctx, options)) {
           return messages;
         }
         const toolIndexes = collectCompressibleToolResultIndexes(messages);
         if (toolIndexes.length === 0) {
           return messages;
         }
-        const { evidence, coveredIndexes } = buildContextPressureEvidence(messages, toolIndexes);
+        const { evidence, coveredIndexes } = buildOldToolOutputEvidence(messages, toolIndexes);
         if (!evidence.trim() || coveredIndexes.length === 0) {
           return messages;
         }
@@ -470,7 +478,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
             structuredOutput: options.structuredOutput,
             previousSummary: currentSummary,
             evidence,
-            reason: 'context_pressure',
+            reason: 'old_tool_output',
           });
           pendingArtifact = {
             summary: ingest.summary,
@@ -485,7 +493,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
           return rewritten;
         } catch (error) {
           console.warn(
-            `[explore] context-pressure ingest failed, keeping raw outputs this round: ${
+            `[explore] old-output ingest failed, keeping raw outputs this round: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
@@ -553,14 +561,14 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
         uses: DEFAULT_EXPLORE_TOOLKITS.filter((name) => available.has(name)),
         middleware,
         contextPolicy: {
-          rewriteAsync: rewriteUnderContextPressure,
+          rewriteAsync: rewriteOldToolOutput,
         },
         instructions: [
           '你是通用探索 capability。只读取、检查、搜索、观察和总结上下文。',
           '不要修改文件，不要提交、推送、删除、写入、发送消息、发布内容，或执行任何外部真实副作用。',
           '使用可用工具在执行过程中自行规划探索；createRuntime 阶段不做额外模型规划。',
           '优先先确认候选范围，再读取详细内容；避免无界浏览或无目的扫描。',
-          '上下文足够时会保留完整工具输出；只有接近上下文预算时，较早的大型工具输出才会被知识摘要替换并沉淀为知识 artifact。摘要会写明来源，需要细节时用 view_file 等工具按来源回查。',
+          '运行中会保留最近的完整工具输出；较早的大型工具输出会被知识摘要替换并沉淀为知识 artifact。摘要会写明来源，需要细节时用 view_file 等工具按来源回查。',
           '结论必须包含简洁探索摘要、已查看文件列表、关键发现、证据引用（文件路径、URL、issue/PR 编号或命令输出来源）和建议下一步。',
         ],
       };

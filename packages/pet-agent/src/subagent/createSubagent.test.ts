@@ -33,6 +33,17 @@ class NeverConvergingModel extends BaseChatModel {
   }
 }
 
+function usageMessage(content: string, inputTokens: number) {
+  return new AIMessage({
+    content,
+    usage_metadata: {
+      input_tokens: inputTokens,
+      output_tokens: 10,
+      total_tokens: inputTokens + 10,
+    },
+  });
+}
+
 test('createSubagent emits non-tool model text as runtime deltas', async () => {
   const events: unknown[] = [];
 
@@ -64,24 +75,6 @@ test('createSubagent emits non-tool model text as runtime deltas', async () => {
   assert.equal(deltas.map((event) => event.data.text).join(''), 'subagent result');
 });
 
-test('createSubagent returns limit_reached when context fuse trips before model call', async () => {
-  const result = await createSubagent({
-    model: new FakeListChatModel({
-      responses: ['this response should not be used'],
-      sleep: 0,
-    }),
-    tools: [],
-    instructions: [],
-    messages: [new HumanMessage(`do the task\n${'x'.repeat(2000)}`)],
-    maxIterations: 4,
-    contextWindowTokens: 256,
-  });
-
-  assert.equal(result.completionReason, 'limit_reached');
-  assert.equal(result.messages.at(-1)?._getType(), 'ai');
-  assert.match(String(result.messages.at(-1)?.content ?? ''), /上下文已接近模型窗口上限/);
-});
-
 test('createSubagent contextPolicy rewrites persisted subagent transcript', async () => {
   const readFile = tool(async () => `file output\n${'x'.repeat(2600)}`, {
     name: 'view_file_chunk',
@@ -109,11 +102,14 @@ test('createSubagent contextPolicy rewrites persisted subagent transcript', asyn
     contextPolicy: {
       evictToolResults: {
         keepRecent: 0,
-        budgetTokens: 100,
         minSizeChars: 2000,
       },
     },
-    messages: [new HumanMessage('read the file')],
+    contextWindowTokens: 1000,
+    messages: [
+      new HumanMessage('read the file'),
+      usageMessage('上一轮模型调用已经接近上下文触发线。', 900),
+    ],
     maxIterations: 8,
   });
 

@@ -12,39 +12,28 @@ import {
   toolProtocolSafeMessages,
 } from './messageLanes';
 import { clipForPrompt, readMessageText } from './utils';
+import { readLatestProviderInputTokens } from '../tokenUsage';
 
-const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
 const DEFAULT_KEEP_MESSAGES = 10;
-const CHARS_PER_TOKEN = 4;
+const DEFAULT_TRIGGER_RATIO = 0.75;
+const DEFAULT_SUMMARY_TRANSCRIPT_CHARS = 12000;
 export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';
 
 export type ContextCompactionOptions = {
   contextWindowTokens?: number;
   keepMessages?: number;
+  triggerRatio?: number;
+  triggerTokens?: number;
+  summaryTranscriptChars?: number;
 };
 
 export type ContextCompactionResult = {
   messages: BaseMessage[];
   compacted: boolean;
-  estimatedTokens: number;
-  triggerTokens: number;
+  mainMessageCount: number;
+  latestInputTokens: number | null;
+  triggerTokens: number | null;
 };
-
-function estimateTextTokens(text: string): number {
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
-}
-
-export function estimateMessageTokens(message: BaseMessage): number {
-  const text = readMessageText(message);
-  const metadata = message.additional_kwargs && Object.keys(message.additional_kwargs).length > 0
-    ? JSON.stringify(message.additional_kwargs)
-    : '';
-  return estimateTextTokens(`${message._getType()}\n${text}\n${metadata}`);
-}
-
-export function estimateMessagesTokens(messages: BaseMessage[]): number {
-  return messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
-}
 
 export function isContextCompactionMessage(message: BaseMessage): boolean {
   return message._getType() === 'system' && message.name === CONTEXT_COMPACTION_MESSAGE_NAME;
@@ -63,16 +52,24 @@ export function readContextCompactionSummaries(messages: BaseMessage[], limit = 
   return summaries;
 }
 
-function buildTriggerTokens(contextWindowTokens = DEFAULT_CONTEXT_WINDOW_TOKENS): number {
-  return Math.max(6000, Math.floor(contextWindowTokens * 0.75));
-}
-
-function buildSummarizationBudget(contextWindowTokens = DEFAULT_CONTEXT_WINDOW_TOKENS): number {
-  return Math.max(2000, Math.floor(contextWindowTokens * 0.35));
-}
-
 function selectMessagesToKeep(messages: BaseMessage[], keepMessages: number): BaseMessage[] {
   return toolProtocolSafeMessages(messages.slice(-Math.max(1, keepMessages)));
+}
+
+function buildTriggerTokens(params: {
+  contextWindowTokens?: number;
+  triggerRatio?: number;
+  triggerTokens?: number;
+}): number | null {
+  if (params.triggerTokens !== undefined) {
+    return Math.max(1, Math.floor(params.triggerTokens));
+  }
+  const contextWindowTokens = params.contextWindowTokens;
+  if (!contextWindowTokens || !Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
+    return null;
+  }
+  const ratio = params.triggerRatio ?? DEFAULT_TRIGGER_RATIO;
+  return Math.max(1, Math.floor(contextWindowTokens * ratio));
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
@@ -136,19 +133,18 @@ function buildNoisyFallbackSummary(messages: BaseMessage[]): string {
   ].join('\n');
 }
 
-function buildSummaryTranscript(messages: BaseMessage[], tokenBudget: number): string {
+function buildSummaryTranscript(messages: BaseMessage[], maxChars: number): string {
   const chunks = buildSummaryItems(messages);
   const selectedChunks: string[] = [];
-  let usedTokens = 0;
+  let usedChars = 0;
 
   for (let i = chunks.length - 1; i >= 0; i--) {
     const chunk = chunks[i];
-    const chunkTokens = estimateTextTokens(chunk);
-    if (selectedChunks.length > 0 && usedTokens + chunkTokens > tokenBudget) {
+    if (selectedChunks.length > 0 && usedChars + chunk.length > maxChars) {
       break;
     }
     selectedChunks.unshift(chunk);
-    usedTokens += chunkTokens;
+    usedChars += chunk.length;
   }
 
   return selectedChunks.join('\n\n');
@@ -170,12 +166,12 @@ function buildFallbackSummary(messages: BaseMessage[]): string {
 async function summarizeMessages(params: {
   model: BaseChatModel;
   messages: BaseMessage[];
-  contextWindowTokens?: number;
+  summaryTranscriptChars?: number;
   runnableConfig?: RunnableConfig;
 }): Promise<string> {
   const transcript = buildSummaryTranscript(
     params.messages,
-    buildSummarizationBudget(params.contextWindowTokens),
+    params.summaryTranscriptChars ?? DEFAULT_SUMMARY_TRANSCRIPT_CHARS,
   );
   if (!transcript.trim()) {
     return buildFallbackSummary(params.messages);
@@ -206,14 +202,23 @@ export async function compactOrchestratorMessages(params: {
   runnableConfig?: RunnableConfig;
 }): Promise<ContextCompactionResult> {
   const { messages, model } = params;
-  const contextWindowTokens = params.options?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   const keepMessages = params.options?.keepMessages ?? DEFAULT_KEEP_MESSAGES;
-  const triggerTokens = buildTriggerTokens(contextWindowTokens);
   const triggerMessages = mainConversationMessages(messages);
-  const estimatedTokens = estimateMessagesTokens(triggerMessages);
+  const mainMessageCount = triggerMessages.length;
+  const latestInputTokens = readLatestProviderInputTokens(triggerMessages);
+  const triggerTokens = buildTriggerTokens({
+    contextWindowTokens: params.options?.contextWindowTokens,
+    triggerRatio: params.options?.triggerRatio,
+    triggerTokens: params.options?.triggerTokens,
+  });
 
-  if (triggerMessages.length <= keepMessages || estimatedTokens < triggerTokens) {
-    return { messages: [], compacted: false, estimatedTokens, triggerTokens };
+  if (
+    mainMessageCount <= keepMessages
+    || latestInputTokens === null
+    || triggerTokens === null
+    || latestInputTokens < triggerTokens
+  ) {
+    return { messages: [], compacted: false, mainMessageCount, latestInputTokens, triggerTokens };
   }
 
   const keptMessages = selectMessagesToKeep(messages, keepMessages);
@@ -224,7 +229,7 @@ export async function compactOrchestratorMessages(params: {
     return !message.id || !keptIds.has(message.id);
   });
   if (messagesToSummarize.length === 0) {
-    return { messages: [], compacted: false, estimatedTokens, triggerTokens };
+    return { messages: [], compacted: false, mainMessageCount, latestInputTokens, triggerTokens };
   }
 
   let summary = '';
@@ -232,7 +237,7 @@ export async function compactOrchestratorMessages(params: {
     summary = await summarizeMessages({
       model,
       messages: messagesToSummarize,
-      contextWindowTokens,
+      summaryTranscriptChars: params.options?.summaryTranscriptChars,
       runnableConfig: params.runnableConfig,
     });
   } catch (error) {
@@ -247,7 +252,8 @@ export async function compactOrchestratorMessages(params: {
   summaryMessage.additional_kwargs = {
     pinpawo: {
       compaction: 'summary',
-      estimatedTokens,
+      mainMessageCount,
+      latestInputTokens,
       triggerTokens,
     },
   };
@@ -259,7 +265,8 @@ export async function compactOrchestratorMessages(params: {
       ...keptMessages,
     ] as BaseMessage[],
     compacted: true,
-    estimatedTokens,
+    mainMessageCount,
+    latestInputTokens,
     triggerTokens,
   };
 }

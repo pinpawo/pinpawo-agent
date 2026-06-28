@@ -132,7 +132,7 @@ export { ORCHESTRATOR_RECURSION_LIMIT } from './orchestrator/controlPrimitives';
 // Subagent iteration budget = the inner ReAct agent's LangGraph recursionLimit
 // (counted in graph super-steps; one model→tool iteration is ~2 steps). With the
 // loop guards (#280) the expected stop point is a guard's graceful stop
-// (repeated input / token fuse), so this budget is a generous last-resort breaker
+// (repeated input), so this budget is a generous last-resort breaker
 // for genuine runaway loops rather than the normal stopping condition. Unified
 // across lanes (P4 / #281). See docs/SUBAGENT_LIMIT_FRAMEWORK_DESIGN.md.
 const SUBAGENT_MAX_ITERATIONS = 100;

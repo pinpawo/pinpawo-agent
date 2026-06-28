@@ -17,7 +17,9 @@
 
 ### 1) 旧输出压缩阶段（`rewriteOldToolOutput`）
 
-- 条件：存在可压缩的历史 tool 输出（最近 N 条保留原文）。
+- 条件：最近一次 provider `usage_metadata.input_tokens` 达到压缩水位，且存在可压缩的历史 tool 输出（最近 N 条保留原文）。
+  - 水位：`latestProviderInputTokens >= floor((compressionBudgetTokens ?? contextWindowTokens) * compressionThresholdRatio)`。
+  - `compressionBudgetTokens` 未配置时，默认使用当前 subagent 所用模型的 `contextWindowTokens`。
 - 提取证据摘要。
 - 调用 `ingestExploreKnowledge()` 产出 `summary + evidence`。
   - 成功后：

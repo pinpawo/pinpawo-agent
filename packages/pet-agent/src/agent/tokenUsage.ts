@@ -118,6 +118,17 @@ export function readMessageTokenUsage(message: unknown): ProviderTokenUsage | nu
   return readUsageFromMessage(message);
 }
 
+export function readLatestProviderInputTokens(messages: Iterable<unknown>): number | null {
+  const items = Array.isArray(messages) ? messages : [...messages];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const usage = readMessageTokenUsage(items[index]);
+    if (usage) {
+      return usage.inputTokens;
+    }
+  }
+  return null;
+}
+
 function addProviderUsage(
   current: ProviderTokenUsage | null,
   next: ProviderTokenUsage,

@@ -9,6 +9,7 @@ import {
   createTokenUsageSnapshot,
   isTokenUsageSnapshot,
   parseTokenUsageSnapshot,
+  readLatestProviderInputTokens,
   readMessageTokenUsage,
   readMessagesTokenUsage,
 } from './tokenUsage';
@@ -118,6 +119,30 @@ test('readMessagesTokenUsage aggregates provider usage from messages', () => {
     scope: 'run',
   });
   assert.equal(typeof snapshot?.updatedAt, 'string');
+});
+
+test('readLatestProviderInputTokens reads the latest provider prompt footprint', () => {
+  const messages = [
+    new AIMessage({
+      content: 'one',
+      usage_metadata: {
+        input_tokens: 10,
+        output_tokens: 2,
+        total_tokens: 12,
+      },
+    }),
+    new AIMessage({
+      content: 'two',
+      usage_metadata: {
+        input_tokens: 30,
+        output_tokens: 4,
+        total_tokens: 34,
+      },
+    }),
+  ];
+
+  assert.equal(readLatestProviderInputTokens(messages), 30);
+  assert.equal(readLatestProviderInputTokens([new AIMessage('no usage')]), null);
 });
 
 test('streamOrchestratorGraph streams graph chunks without injecting callbacks', async () => {

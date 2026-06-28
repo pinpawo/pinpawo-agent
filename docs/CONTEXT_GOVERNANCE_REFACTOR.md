@@ -55,7 +55,9 @@
 
 ### 配套修正
 
-`compactContext` 的触发改为对 `mainConversationMessages` 做消息数量判断（lane 噪音不参与触发）。存储体积是另一个度量，不混用。
+`compactContext` 的触发改为读取 `mainConversationMessages` 中最近一次 provider 返回的
+`usage_metadata.input_tokens`，与 `contextWindowTokens * triggerRatio` 比较。lane 噪音不参与触发；
+本地不再估算 messages token，存储体积是另一个度量，不混用。
 
 ### 测试点
 
@@ -68,7 +70,11 @@
 
 ### 4.1 上下文风险处理（所有能力，故障处理而非遗忘）
 
-不再在本地估算 messages token。上下文治理依赖两类确定性收缩：turn 开始的主线 message-count compaction，以及能力级 contextPolicy 对旧的大工具输出做 evict/truncate。真实窗口超限仍由 provider/model 返回错误；本地只保留不会伪装成 token 的结构性裁剪。
+不再在本地估算 messages token。上下文治理依赖 provider 实际返回的
+`usage_metadata.input_tokens` 作为 prompt 水位信号：turn 开始的主线 compaction 用最近主线 AIMessage
+的 input_tokens 与上下文窗口阈值比较；能力级 contextPolicy 在最近一次 subagent model call 的
+input_tokens 过阈值后，才对旧的大工具输出做 evict/truncate。真实窗口超限仍由 provider/model
+返回错误；本地只保留不会伪装成 token 的结构性裁剪。
 
 实现位置：`contextCompaction.ts` 与 `contextPolicy.ts`。`createSubagent.ts` 只保留重复输入 guard。
 
@@ -85,17 +91,26 @@
 contextPolicy?: {
   evictToolResults?: {
     keepRecent: number;          // 最近 K 次工具结果全文保留（recency 下限保护）
+    budgetTokens?: number;       // 可选；默认使用当前 subagent 的 contextWindowTokens
+    compressionThresholdRatio?: number; // 可选；默认 0.75
     minSizeChars?: number;       // 小于该值不淘汰（默认 2000）
     keepFailures?: boolean;      // 默认 true：失败结果永不淘汰
     perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
     // 工具名级覆盖，优先级最高；'truncate' 保留头部 minSizeChars 字符
   };
   rewrite?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[];
-  // 逃生舱：完全自定义改写，声明后 evictToolResults 失效；ctx 提供迭代计数、operation metadata
+  // 逃生舱：完全自定义改写，声明后 evictToolResults 失效；
+  // ctx 提供迭代计数、operation metadata、latestProviderInputTokens、contextWindowTokens
 };
 ```
 
-规则合成优先级（高到低）：`perTool` 覆盖 → `keepFailures` 保护 → `keepRecent` / `minSizeChars` 体积规则。K 是地板（最近 K 次保留全文），旧的大体积可淘汰项从最老开始动手。
+触发条件：`latestProviderInputTokens >= floor((budgetTokens ?? contextWindowTokens) * compressionThresholdRatio)`。
+`latestProviderInputTokens` 来自最近一次 provider model call 的 `usage_metadata.input_tokens`；因为 subagent
+messages 是累积发送的，这个值就是上一轮实际送进模型的 prompt footprint。没有 provider usage metadata
+时不触发压缩。
+
+规则合成优先级（高到低）：provider 水位触发 → `perTool` 覆盖 → `keepFailures` 保护 → `keepRecent` /
+`minSizeChars` 体积规则。K 是地板（最近 K 次保留全文），旧的大体积可淘汰项从最老开始动手。
 
 **capability_creator 的预设值（作为本规范的第一个校验用例）**：
 
@@ -108,7 +123,7 @@ contextPolicy: {
 }
 ```
 
-**能力级淘汰规则**——淘汰判据不是"旧"，而是"该能力声明了如何收缩旧工具结果"：
+**能力级淘汰规则**——淘汰判据不是"旧"，而是"provider usage 水位过阈值，且该能力声明了如何收缩旧工具结果"：
 
 - **默认可淘汰**：声明了 `evictToolResults` 的能力中，旧的大体积成功工具输出可被替换为确定性存根：`[evicted: view_file_chunk src/foo.ts:1-200 → 已读；需要时重新调用]`。存根指纹优先复用 tool operation metadata 的 `summarizeInput`，但是否淘汰由 capability policy 决定。
 - **按工具覆盖**：如果某个工具在该能力里必须保留、必须淘汰或只适合截断，由能力配置 `perTool`。工具定义本身不声明可淘汰性，避免工具越多策略越散。
@@ -119,7 +134,7 @@ contextPolicy: {
 
 ### 管道
 
-`CapabilityRuntime` → `capabilityNode` → `SubagentInput`，与 #75 的 `model` / `maxIterations` 覆盖项同一条管道（三个一起加，types 改一次）。general lane 不声明 contextPolicy，保持全保留。tool operation metadata 随 `SubagentInput.operations` 进入淘汰器，仅用于生成稳定存根指纹，不决定是否淘汰。
+`CapabilityRuntime` → `capabilityNode` → `SubagentInput`，与 #75 的 `model` / `maxIterations` 覆盖项同一条管道（三个一起加，types 改一次）。`contextWindowTokens` 同时透传给 subagent，作为能力未指定 `budgetTokens` 时的默认 budget。general lane 不声明 contextPolicy，保持全保留。tool operation metadata 随 `SubagentInput.operations` 进入淘汰器，仅用于生成稳定存根指纹，不决定是否淘汰。
 
 ### 测试点
 
@@ -164,7 +179,7 @@ checkpoint 链与 git commit 模型同构（parent 指针 / 不可变快照 / la
 ## 7. 实施顺序与验收
 
 ```
-① L2 completed 折叠 + message-count compaction   （#117 已铺好 delegationId 基础，立即可做）
+① L2 completed 折叠 + provider usage compaction  （#117 已铺好 delegationId 基础，立即可做）
 ② L1 repeated-input guard（全局）
 ③ L1 contextPolicy 机制 + 类型管道           （与 #75 的 model/maxIterations 覆盖同批）
 ④ L4 git 式 FileSaver                        （取代 L3；带上 F1/F2 约束。与 ①②③ 并行无依赖）
@@ -179,7 +194,7 @@ L3 不单独做（见第 5 节）；#114 不合并。
 - 已完成委派在 `state.messages` 中只剩 announce 一条（工具消息和中间 AI 笔记均已清除）；checkpoint 体积由会话长度决定，不再由工具调用量决定。
 - 同 turn 续跑（progress/limit_reached）拿到完整（L1 限界后的）现场；新任务从零开始（#117 已保证）。
 - HITL 委派中途 resume 回归通过（`eval:hitl`）。
-- compaction 不再被 lane 噪音触发。
+- compaction 不再被 lane 噪音触发，只由主线 provider `usage_metadata.input_tokens` 水位触发。
 
 ## 8. 明确不做（v1）
 

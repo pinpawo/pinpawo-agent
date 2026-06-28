@@ -458,6 +458,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const result = await compactOrchestratorMessages({
       messages: state.messages,
       model: config.models.observe ?? config.models.act,
+      options: {
+        contextWindowTokens: config.contextWindowTokens,
+      },
       runnableConfig,
     });
     if (!result.compacted) {
@@ -1048,6 +1051,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       operations: collectCapabilityOperations(usedToolkitResources.toolkits, runtime),
       messages: scopedMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
+      contextWindowTokens: config.contextWindowTokens,
       contextPolicy: runtime.contextPolicy,
       checkpoint: config.checkpoint,
       runnableConfig,
@@ -1182,6 +1186,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       operations: collectGeneralOperations(toolkitResources.toolkits),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
+      contextWindowTokens: config.contextWindowTokens,
       checkpoint: config.checkpoint,
       runnableConfig,
       signal: runnableConfig?.signal,

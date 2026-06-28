@@ -33,6 +33,17 @@ class NeverConvergingModel extends BaseChatModel {
   }
 }
 
+function usageMessage(content: string, inputTokens: number) {
+  return new AIMessage({
+    content,
+    usage_metadata: {
+      input_tokens: inputTokens,
+      output_tokens: 10,
+      total_tokens: inputTokens + 10,
+    },
+  });
+}
+
 test('createSubagent emits non-tool model text as runtime deltas', async () => {
   const events: unknown[] = [];
 
@@ -94,7 +105,11 @@ test('createSubagent contextPolicy rewrites persisted subagent transcript', asyn
         minSizeChars: 2000,
       },
     },
-    messages: [new HumanMessage('read the file')],
+    contextWindowTokens: 1000,
+    messages: [
+      new HumanMessage('read the file'),
+      usageMessage('上一轮模型调用已经接近上下文触发线。', 900),
+    ],
     maxIterations: 8,
   });
 

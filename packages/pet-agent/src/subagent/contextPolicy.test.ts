@@ -26,6 +26,17 @@ function ctx(operations: Record<string, SubagentToolOperationMetadata>) {
   return {
     iterationCount: 1,
     operations,
+    latestProviderInputTokens: 900,
+    contextWindowTokens: 1000,
+  };
+}
+
+function lowWaterCtx(operations: Record<string, SubagentToolOperationMetadata>) {
+  return {
+    iterationCount: 1,
+    operations,
+    latestProviderInputTokens: 400,
+    contextWindowTokens: 1000,
   };
 }
 
@@ -75,6 +86,28 @@ test('context policy evicts old large successful tool results only', () => {
   assert.equal(rewritten[7]?.content, 'Error: no such file');
   assert.match(String(rewritten[9]?.content), /^unknown large output/);
   assert.match(String(rewritten[11]?.content), /^recent large output/);
+});
+
+test('context policy stays idle below provider input-token trigger', () => {
+  const operations = {
+    view_file_chunk: {},
+  } satisfies Record<string, SubagentToolOperationMetadata>;
+  const messages: BaseMessage[] = [
+    new HumanMessage('inspect files'),
+    toolCallMessage('call-old', 'view_file_chunk', { path: 'src/a.ts' }),
+    toolResult('call-old', `old large file output\n${'x'.repeat(2600)}`),
+    toolCallMessage('call-new', 'view_file_chunk', { path: 'src/b.ts' }),
+    toolResult('call-new', `new large file output\n${'y'.repeat(2600)}`),
+  ];
+
+  const rewritten = rewriteMessagesForContextPolicy(messages, {
+    evictToolResults: {
+      keepRecent: 0,
+      minSizeChars: 2000,
+    },
+  }, lowWaterCtx(operations));
+
+  assert.equal(rewritten, messages);
 });
 
 test('context policy perTool keep and truncate override default eviction mode', () => {

@@ -6,6 +6,7 @@ import type {
 } from '../types/subagent';
 import { createAgent, createMiddleware } from 'langchain';
 import { SubagentToolEventTracker } from './toolEventTracker';
+import { readLatestProviderInputTokens } from '../agent/tokenUsage';
 import {
   buildContextPolicyStateUpdate,
   rewriteMessagesForContextPolicy,
@@ -114,9 +115,12 @@ function createContextPolicyMiddleware(input: SubagentInput) {
       if (!Array.isArray(messages) || messages.length === 0) {
         return undefined;
       }
+      const latestProviderInputTokens = readLatestProviderInputTokens(messages as BaseMessage[]);
       const context = {
         iterationCount,
         operations,
+        ...(input.contextWindowTokens ? { contextWindowTokens: input.contextWindowTokens } : {}),
+        ...(latestProviderInputTokens !== null ? { latestProviderInputTokens } : {}),
         ...(input.artifactSink ? { artifactSink: input.artifactSink } : {}),
       };
       const rewritten = policy.rewriteAsync

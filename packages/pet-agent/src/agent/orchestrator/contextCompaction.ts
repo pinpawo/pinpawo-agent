@@ -12,15 +12,18 @@ import {
   toolProtocolSafeMessages,
 } from './messageLanes';
 import { clipForPrompt, readMessageText } from './utils';
+import { readLatestProviderInputTokens } from '../tokenUsage';
 
 const DEFAULT_KEEP_MESSAGES = 10;
-const DEFAULT_TRIGGER_MESSAGE_COUNT = 24;
+const DEFAULT_TRIGGER_RATIO = 0.75;
 const DEFAULT_SUMMARY_TRANSCRIPT_CHARS = 12000;
 export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';
 
 export type ContextCompactionOptions = {
+  contextWindowTokens?: number;
   keepMessages?: number;
-  triggerMessageCount?: number;
+  triggerRatio?: number;
+  triggerTokens?: number;
   summaryTranscriptChars?: number;
 };
 
@@ -28,7 +31,8 @@ export type ContextCompactionResult = {
   messages: BaseMessage[];
   compacted: boolean;
   mainMessageCount: number;
-  triggerMessageCount: number;
+  latestInputTokens: number | null;
+  triggerTokens: number | null;
 };
 
 export function isContextCompactionMessage(message: BaseMessage): boolean {
@@ -50,6 +54,22 @@ export function readContextCompactionSummaries(messages: BaseMessage[], limit = 
 
 function selectMessagesToKeep(messages: BaseMessage[], keepMessages: number): BaseMessage[] {
   return toolProtocolSafeMessages(messages.slice(-Math.max(1, keepMessages)));
+}
+
+function buildTriggerTokens(params: {
+  contextWindowTokens?: number;
+  triggerRatio?: number;
+  triggerTokens?: number;
+}): number | null {
+  if (params.triggerTokens !== undefined) {
+    return Math.max(1, Math.floor(params.triggerTokens));
+  }
+  const contextWindowTokens = params.contextWindowTokens;
+  if (!contextWindowTokens || !Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
+    return null;
+  }
+  const ratio = params.triggerRatio ?? DEFAULT_TRIGGER_RATIO;
+  return Math.max(1, Math.floor(contextWindowTokens * ratio));
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
@@ -183,15 +203,22 @@ export async function compactOrchestratorMessages(params: {
 }): Promise<ContextCompactionResult> {
   const { messages, model } = params;
   const keepMessages = params.options?.keepMessages ?? DEFAULT_KEEP_MESSAGES;
-  const triggerMessageCount = Math.max(
-    keepMessages + 1,
-    params.options?.triggerMessageCount ?? DEFAULT_TRIGGER_MESSAGE_COUNT,
-  );
   const triggerMessages = mainConversationMessages(messages);
   const mainMessageCount = triggerMessages.length;
+  const latestInputTokens = readLatestProviderInputTokens(triggerMessages);
+  const triggerTokens = buildTriggerTokens({
+    contextWindowTokens: params.options?.contextWindowTokens,
+    triggerRatio: params.options?.triggerRatio,
+    triggerTokens: params.options?.triggerTokens,
+  });
 
-  if (mainMessageCount < triggerMessageCount) {
-    return { messages: [], compacted: false, mainMessageCount, triggerMessageCount };
+  if (
+    mainMessageCount <= keepMessages
+    || latestInputTokens === null
+    || triggerTokens === null
+    || latestInputTokens < triggerTokens
+  ) {
+    return { messages: [], compacted: false, mainMessageCount, latestInputTokens, triggerTokens };
   }
 
   const keptMessages = selectMessagesToKeep(messages, keepMessages);
@@ -202,7 +229,7 @@ export async function compactOrchestratorMessages(params: {
     return !message.id || !keptIds.has(message.id);
   });
   if (messagesToSummarize.length === 0) {
-    return { messages: [], compacted: false, mainMessageCount, triggerMessageCount };
+    return { messages: [], compacted: false, mainMessageCount, latestInputTokens, triggerTokens };
   }
 
   let summary = '';
@@ -226,7 +253,8 @@ export async function compactOrchestratorMessages(params: {
     pinpawo: {
       compaction: 'summary',
       mainMessageCount,
-      triggerMessageCount,
+      latestInputTokens,
+      triggerTokens,
     },
   };
 
@@ -238,6 +266,7 @@ export async function compactOrchestratorMessages(params: {
     ] as BaseMessage[],
     compacted: true,
     mainMessageCount,
-    triggerMessageCount,
+    latestInputTokens,
+    triggerTokens,
   };
 }

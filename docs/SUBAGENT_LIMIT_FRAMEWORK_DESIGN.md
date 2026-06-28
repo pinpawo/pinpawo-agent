@@ -27,7 +27,7 @@
 
 **大迭代预算 + 输出收缩 + 防空跑 + 主动停。** 五条：
 
-1. **输出收缩**：旧的大工具输出通过 contextPolicy 收缩，不用本地 token 估算做极限信号。
+1. **输出收缩**：旧的大工具输出通过 contextPolicy 收缩，触发信号使用 provider 返回的 `usage_metadata.input_tokens`，不用本地 token 估算做极限信号。
 2. **迭代预算拉大（~100）**：不再用 8/12/16 这种小 `maxIterations` 早早掐断；给足空间让 subagent 真正完成多步任务。
 3. **大预算 ⇒ 必须治理大输出**：轮次这么大，工具输出必须能被收缩。**这是预期内的正常事件，不是异常。**
 4. **防空跑**：回看已有进展，判断 subagent 是不是在原地打转 / 空跑：
@@ -41,7 +41,7 @@
 
 | 设计点 | 现有机制（代码） | 状态 | 缺口 |
 |---|---|---|---|
-| 1 上下文体积 | 旧实现使用本地 token 估算 fuse | ❌ 已废弃 | 不再维护本地 token 估算；依赖工具输出裁剪、message-count compaction 和 provider 错误 |
+| 1 上下文体积 | 旧实现使用本地 token 估算 fuse | ✅ 已替换 | 不再维护本地 token 估算；主线 compact 和能力级工具输出收缩都使用 provider `usage_metadata.input_tokens` 水位，真实超限仍由 provider 错误兜底 |
 | 2 迭代预算拉大 | `DEFAULT_SUBAGENT_MAX_ITERATIONS=12`、general 16、capability 8，且**当作 `recursionLimit` 用**（[createSubagent.ts:231](../packages/pet-agent/src/subagent/createSubagent.ts#L231)）| ❌ 太小、单位错位 | 拉到 ~100；厘清"ReAct 轮次"与 graph `recursionLimit` 的关系 |
 | 3 大输出治理 | 旧的大工具输出必须收缩 | ✅ 符合预期 | 由 contextPolicy / 工具输出上限处理 |
 | 4 review 防空跑 | `contextPolicy`（evict/truncate 旧工具输出，[contextPolicy.ts](../packages/pet-agent/src/subagent/contextPolicy.ts)）| ⚠️ 只有**机械压缩**，无"是否空跑"判断 | **新增 progress/空跑判定**——本设计的真正新语义 |
@@ -100,7 +100,7 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
 ### 4.5 复用清单（不新增多余概念）
 
 - **context fuse middleware** → 已废弃；不再用本地 token 估算做 Guard。
-- **contextPolicy（evict/truncate）** → 仍是压缩执行器，不是 Guard/Decision，保持原职。
+- **contextPolicy（evict/truncate）** → 仍是压缩执行器，不是 Guard/Decision；只在最近一次 provider input_tokens 过 budget 阈值后执行。
 - **completionReason='limit_reached'** → 所有 Guard block 的统一结论载体。
 - **runIterationLimitGuard / delegationOutcomeDecisionGuard（orchestrator）** → 迁移到新 Guard 抽象的**示范对象**，但迁移本身**另开 PR**（见 §6 范围）。
 
@@ -122,7 +122,7 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
 
 1. **P1 引入 Guard 代码抽象**：定义 `SubagentLoopGuard` interface + verdict 类型 + 一个把 Guard 挂到 middleware position（`beforeModel`）的适配器。
 2. **P2 `RepeatedInputGuard`**：唯一最小实现——`messages` 指纹连续重复达阈值 → block，主动停产出 `completionReason='limit_reached'`，不抛错。
-3. **P3 删除本地 token fuse**：不再把本地 token 估算表达成 Guard；输出体积靠 contextPolicy 和工具边界治理。
+3. **P3 删除本地 token fuse**：不再把本地 token 估算表达成 Guard；输出体积靠 provider usage metadata 触发的 contextPolicy 和工具边界治理。
 
 **后续 PR（独立）**：
 

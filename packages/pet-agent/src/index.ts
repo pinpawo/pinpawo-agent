@@ -46,6 +46,26 @@ export type {
 } from './types/subagent';
 
 export type {
+  Guard,
+  GuardBlock,
+  GuardCheckResult,
+  GuardCheckStatus,
+  GuardHandler,
+  GuardHandlerInput,
+  GuardInput,
+  GuardPass,
+  GuardRule,
+} from './guards';
+export {
+  defineGuard,
+  GUARD_PASS,
+  guardAppliesToPosition,
+  guardBlock,
+  guardPass,
+  GuardRegistry,
+} from './guards';
+
+export type {
   AgentToolset,
   AgentToolkit,
   NamedStructuredTool,

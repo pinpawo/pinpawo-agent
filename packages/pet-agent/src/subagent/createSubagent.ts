@@ -6,7 +6,7 @@ import type {
 } from '../types/subagent';
 import { createAgent, createMiddleware } from 'langchain';
 import { SubagentToolEventTracker } from './toolEventTracker';
-import { evaluateProviderUsageWatermarkGuard } from '../agent/providerUsageWatermarkGuard';
+import { readLatestProviderInputTokens } from '../agent/tokenUsage';
 import {
   buildContextPolicyStateUpdate,
   rewriteMessagesForContextPolicy,
@@ -115,20 +115,12 @@ function createContextPolicyMiddleware(input: SubagentInput) {
       if (!Array.isArray(messages) || messages.length === 0) {
         return undefined;
       }
-      const evictPolicy = policy.evictToolResults;
-      const providerUsageWatermark = evaluateProviderUsageWatermarkGuard({
-        messages: messages as BaseMessage[],
-        budgetTokens: evictPolicy?.budgetTokens ?? input.contextWindowTokens,
-        thresholdRatio: evictPolicy?.compressionThresholdRatio,
-      });
+      const latestProviderInputTokens = readLatestProviderInputTokens(messages as BaseMessage[]);
       const context = {
         iterationCount,
         operations,
         ...(input.contextWindowTokens ? { contextWindowTokens: input.contextWindowTokens } : {}),
-        ...(providerUsageWatermark.latestInputTokens !== null
-          ? { latestProviderInputTokens: providerUsageWatermark.latestInputTokens }
-          : {}),
-        providerUsageWatermark,
+        ...(latestProviderInputTokens !== null ? { latestProviderInputTokens } : {}),
         ...(input.artifactSink ? { artifactSink: input.artifactSink } : {}),
       };
       const rewritten = policy.rewriteAsync

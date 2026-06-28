@@ -81,15 +81,6 @@ export {
   validateUniqueToolNames,
 } from './agent/createAgentRuntime';
 export {
-  buildProviderUsageWatermarkTriggerTokens,
-  DEFAULT_PROVIDER_USAGE_WATERMARK_RATIO,
-  evaluateProviderUsageWatermarkGuard,
-} from './agent/providerUsageWatermarkGuard';
-export type {
-  ProviderUsageWatermarkGuardInput,
-  ProviderUsageWatermarkGuardVerdict,
-} from './agent/providerUsageWatermarkGuard';
-export {
   createTokenUsageSnapshot,
   isTokenUsageSnapshot,
   parseTokenUsageSnapshot,

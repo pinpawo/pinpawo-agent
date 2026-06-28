@@ -48,7 +48,7 @@ threshold.
 
 ```text
 before next model call
-  -> ProviderUsageWatermarkGuard checks latest provider input_tokens against the budget threshold
+  -> contextPolicy checks latest provider input_tokens against the budget threshold
   -> contextPolicy finds older large successful tool results
   -> if none are eligible: leave raw tool output unchanged
   -> if eligible: explore calls ingest LLM with previous summary + older raw evidence

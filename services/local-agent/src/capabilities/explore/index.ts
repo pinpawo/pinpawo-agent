@@ -1,6 +1,6 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import { clipForPrompt, evaluateProviderUsageWatermarkGuard, invokeStructuredOutput } from '@pinpawo/pet-agent';
+import { clipForPrompt, invokeStructuredOutput } from '@pinpawo/pet-agent';
 import type {
   AgentCapability,
   CapabilityArtifactSink,
@@ -58,6 +58,7 @@ export type ExploreKnowledgeIngest = z.infer<typeof exploreKnowledgeIngestSchema
 
 const EXPLORE_COMPRESS_KEEP_RECENT_TOOL_RESULTS = 2;
 const EXPLORE_COMPRESS_MIN_TOOL_CHARS = 800;
+const EXPLORE_COMPRESSION_THRESHOLD_RATIO = 0.75;
 const EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS = 18_000;
 const EXPLORE_SUMMARY_MESSAGE_MAX_CHARS = 2_000;
 const EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS = 18_000;
@@ -302,18 +303,16 @@ function shouldCompressExploreToolOutput(
   ctx: ContextPolicyContext,
   options: ExploreCapabilityOptions,
 ): boolean {
-  if (
-    options.compressionBudgetTokens === undefined
-    && options.compressionThresholdRatio === undefined
-    && ctx.providerUsageWatermark
-  ) {
-    return ctx.providerUsageWatermark.triggered;
+  const budgetTokens = options.compressionBudgetTokens ?? ctx.contextWindowTokens;
+  const latestInputTokens = ctx.latestProviderInputTokens;
+  if (!budgetTokens || !Number.isFinite(budgetTokens) || budgetTokens <= 0) {
+    return false;
   }
-  return evaluateProviderUsageWatermarkGuard({
-    latestInputTokens: ctx.latestProviderInputTokens ?? ctx.providerUsageWatermark?.latestInputTokens ?? null,
-    budgetTokens: options.compressionBudgetTokens ?? ctx.contextWindowTokens,
-    thresholdRatio: options.compressionThresholdRatio,
-  }).triggered;
+  if (typeof latestInputTokens !== 'number' || !Number.isFinite(latestInputTokens)) {
+    return false;
+  }
+  const thresholdRatio = options.compressionThresholdRatio ?? EXPLORE_COMPRESSION_THRESHOLD_RATIO;
+  return latestInputTokens >= Math.max(1, Math.floor(budgetTokens * thresholdRatio));
 }
 
 function collectCompressibleToolResultIndexes(messages: BaseMessage[]): number[] {

@@ -127,6 +127,7 @@ export type {
 };
 export { buildOrchestratorRunInput, buildOrchestratorTurnInput } from './orchestrator/state';
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
+export { ORCHESTRATOR_RECURSION_LIMIT } from './orchestrator/controlPrimitives';
 
 // Subagent iteration budget = the inner ReAct agent's LangGraph recursionLimit
 // (counted in graph super-steps; one model→tool iteration is ~2 steps). With the
@@ -137,7 +138,7 @@ export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniq
 const SUBAGENT_MAX_ITERATIONS = 100;
 const GENERAL_SUBAGENT_MAX_ITERATIONS = SUBAGENT_MAX_ITERATIONS;
 const CAPABILITY_SUBAGENT_MAX_ITERATIONS = SUBAGENT_MAX_ITERATIONS;
-const DEFAULT_ORCHESTRATOR_MAX_ITERATIONS = 25;
+export const DEFAULT_ORCHESTRATOR_MAX_ITERATIONS = 25;
 
 function generalLaneToolkits(toolkits: AgentToolkit[]) {
   return toolkits.filter((toolkitItem) => toolkitItem.exposure?.general !== false);

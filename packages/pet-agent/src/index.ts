@@ -73,7 +73,9 @@ export {
   buildOrchestratorRunInput,
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
+  DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
   isOrchestratorInternalAiStreamNode,
+  ORCHESTRATOR_RECURSION_LIMIT,
   streamOrchestratorGraph,
   streamOrchestratorGraphWithTokenUsage,
   validateUniqueCapabilityNames,
@@ -224,6 +226,7 @@ export {
 export { runAgent } from './agent/runAgent';
 export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
 export { createSubagent } from './subagent/createSubagent';
+export { isGraphRecursionLimitError } from './utils/graphErrors';
 export { clipForPrompt } from './agent/orchestrator/utils';
 export {
   createLLMWikiCurator,

@@ -4,6 +4,7 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   asDecisionNode,
   asGuardNode,
+  ORCHESTRATOR_RECURSION_LIMIT,
   type OrchestratorControlContext,
   type OrchestratorDecision,
   type OrchestratorGuard,
@@ -57,4 +58,14 @@ test('a guard reading orchestratorMaxIterations from ctx (not closure) works', a
 
   const atLimit = asGuardNode(guard, () => ({ orchestratorMaxIterations: 3 }));
   assert.deepEqual(await atLimit(STATE), { runPendingFinalReply: 'inline' });
+});
+
+test('ORCHESTRATOR_RECURSION_LIMIT comfortably exceeds a healthy run', () => {
+  // The hard breaker is a flat last-resort value, not derived. It must sit well
+  // above what a healthy run consumes: the soft guard's default 25 delegations,
+  // each walking a handful of graph nodes (~100 nodes total). 200 leaves headroom.
+  assert.ok(
+    ORCHESTRATOR_RECURSION_LIMIT > 100,
+    `recursion limit ${ORCHESTRATOR_RECURSION_LIMIT} must exceed a healthy run's node count`,
+  );
 });

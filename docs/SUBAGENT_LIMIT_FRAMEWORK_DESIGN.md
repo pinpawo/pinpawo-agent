@@ -110,7 +110,10 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
 - **单位实测（P4 / #281）**：`recursionLimit` 数的是 **graph super-step**，一次 ReAct 迭代（model→tool）≈ **2 个 super-step**。即 `maxIterations: N` 实际允许约 `N/2` 次模型调用。
 - **P4 决定**：保持 `maxIterations` = super-step 语义（不改字段语义，改动最小），**预算统一拉到 100**（general / capability / default 三档合一，`SUBAGENT_MAX_ITERATIONS = 100`，约 50 次模型调用）。
 - 预期停止点应是 **Guard 主动停**（重复输入 / token 阈值），不是 `recursionLimit`。后者退化为"真死循环"的最后断路。
-- 因为 Guard 主动停产出 `limit_reached`（不外抛 `GraphRecursionError`），**外层 orchestrator 的硬 `recursionLimit`（#279 A）大概率不再需要**——P6 验证后决定去留（#275 的最终归宿）。
+- 因为 Guard 主动停产出 `limit_reached`（不外抛 `GraphRecursionError`），内层不再向外抛 recursion。
+- **P6 结论（#275 最终归宿）**：外层 orchestrator 的硬 `recursionLimit` **仍保留**——它兜的是 orchestrator 自身的失控循环（decision 反复 delegate），与内层无关。验证发现 main 上外层**从未显式传 `recursionLimit`**（#279 未合并），一直跑在 LangGraph 默认 25 个**节点步**；而软 `runIterationLimitGuard` 数的是委派数（默认 25），单位不同、永远追不上。
+  - 修复（保留但修对）：**不做换算**（#279 的 `NODES_PER_DELEGATION` 这类"一委派几节点"的常量本质是猜，删掉）。直接给一个**固定大值** `ORCHESTRATOR_RECURSION_LIMIT = 200`：它只是失控断路器，**预期停点是软 guard**（每委派检查 `runIterationCount`，优雅停 + 保留待续跑状态）。软 guard 默认 25 委派、健康跑约 100 个节点，200 余量充足。应用于 `agentGraphService.stream/invokeState` 与 `runAgent`。
+  - `chatSessionAdapter` 捕获 `GraphRecursionError` → 降级为待续跑完成回复（保留已流式文本），非 recursion 错误原样抛。
 
 ## 6. 落地范围
 
@@ -131,7 +134,7 @@ additional_kwargs.pinpawo[LOOP_GUARD_MARKER_KEY] = <SubagentLoopGuardStopReason>
    - 落地形态：新增 `orchestrator/controlPrimitives.ts` 定义 `OrchestratorGuard` / `OrchestratorDecision` 契约 + `asGuardNode` / `asDecisionNode` 适配器（命名约定 → 类型契约）。
    - **三个 Guard 的实现体真正搬出** `createAgentRuntime`，落到 `orchestrator/guards.ts`（`createOrchestratorGuards(deps)` 工厂 + 搬随的纯 helper `readLegacyTaskActiveDelegation` / `buildRunIterationLimitMessage`）。`getInvokeOptions` 因被运行时广泛复用而**注入**（不搬），保持 guards.ts 依赖轻、无循环。搬出后 Guard 可独立单测。
    - `runOrchestrationDecision` 庞大且重度闭包依赖，**体留原处**，由两个 thin `OrchestratorDecision` 包装绑定 kind。subagent 的 `SubagentLoopGuard` 是另一域的契约，**不合并**。
-6. **P6 回看外层 recursionLimit**：#275 最终归宿。
+6. **P6 回看外层 recursionLimit**（✅ 已做，#275 最终归宿）：外层硬 limit **保留但修对**——用固定大值 `ORCHESTRATOR_RECURSION_LIMIT = 200`（软 guard 才是预期停点，硬 limit 只兜底，不做换算）+ `chatSessionAdapter` 捕获 `GraphRecursionError` 降级为待续跑。详见 §5。
 7. **P7 策略增强**：结论增量 / token 比 / review 防空跑作为 `SubagentLoopGuard` 的新实现接入。
 
 本 PR 聚焦 P1–P3：用最小的重复输入 Guard 把"打转"挡住，并把概念归置到 Decision/Guard 抽象。

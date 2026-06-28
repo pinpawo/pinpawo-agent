@@ -43,7 +43,7 @@ export type GuardHandler<
   Position extends string,
   Effect,
 > = {
-  handle(input: GuardHandlerInput<State, Config, Position>): Effect | Promise<Effect>;
+  handle(input: GuardHandlerInput<State, Config, Position>): Effect | null | Promise<Effect | null>;
 };
 
 export type Guard<
@@ -139,13 +139,14 @@ export class GuardRegistry<
    *
    * `run` first verifies the guard is registered for `position`, then calls
    * `rule.check(input)`, then passes that result to `handler.handle(...)`.
-   * The returned value is the handler's effect. Applying that effect is owned by
-   * the caller's domain layer, not by this generic registry.
+   * The returned value is the handler's effect, or null if there is no external
+   * interaction to apply. Applying effects is owned by the caller's domain layer,
+   * not by this generic registry.
    */
   run(
     name: string,
     input: GuardInput<State, Config, Position>,
-  ): Effect | Promise<Effect> {
+  ): Effect | null | Promise<Effect | null> {
     const guard = this.requireApplicableGuard(name, input.position);
     const result = guard.rule.check(input);
     return guard.handler.handle({

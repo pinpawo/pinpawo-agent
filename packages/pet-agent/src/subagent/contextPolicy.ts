@@ -183,7 +183,7 @@ function rewriteCandidate(
   return replaceToolMessageContent(candidate.message, buildDefaultStub(candidate), 'evicted');
 }
 
-function buildPolicyTriggerTokens(
+export function buildContextPolicyTriggerTokens(
   policy: NonNullable<SubagentContextPolicy['evictToolResults']>,
   ctx: ContextPolicyContext,
 ): number | null {
@@ -199,7 +199,7 @@ function shouldApplyCompression(
   policy: NonNullable<SubagentContextPolicy['evictToolResults']>,
   ctx: ContextPolicyContext,
 ): boolean {
-  const triggerTokens = buildPolicyTriggerTokens(policy, ctx);
+  const triggerTokens = buildContextPolicyTriggerTokens(policy, ctx);
   const latestInputTokens = ctx.latestProviderInputTokens;
   return triggerTokens !== null
     && typeof latestInputTokens === 'number'

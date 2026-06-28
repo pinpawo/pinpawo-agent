@@ -56,7 +56,7 @@ function selectMessagesToKeep(messages: BaseMessage[], keepMessages: number): Ba
   return toolProtocolSafeMessages(messages.slice(-Math.max(1, keepMessages)));
 }
 
-function buildTriggerTokens(params: {
+export function buildContextCompactionTriggerTokens(params: {
   contextWindowTokens?: number;
   triggerRatio?: number;
   triggerTokens?: number;
@@ -206,7 +206,7 @@ export async function compactOrchestratorMessages(params: {
   const triggerMessages = mainConversationMessages(messages);
   const mainMessageCount = triggerMessages.length;
   const latestInputTokens = readLatestProviderInputTokens(triggerMessages);
-  const triggerTokens = buildTriggerTokens({
+  const triggerTokens = buildContextCompactionTriggerTokens({
     contextWindowTokens: params.options?.contextWindowTokens,
     triggerRatio: params.options?.triggerRatio,
     triggerTokens: params.options?.triggerTokens,

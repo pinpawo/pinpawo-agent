@@ -1,4 +1,5 @@
 import { GuardRegistry } from '../../../guards';
+import { createContextCompactionWatermarkGuard } from './contextCompactionWatermarkGuard';
 import { createDelegationOutcomeDecisionGuard } from './delegationOutcomeDecisionGuard';
 import { createRunIterationLimitGuard } from './runIterationLimitGuard';
 import type { OrchestratorStateType } from '../state';
@@ -21,6 +22,7 @@ export {
   type OrchestratorGuardPosition,
   type OrchestratorGuardRegistry,
 } from './types';
+export { createContextCompactionWatermarkGuard } from './contextCompactionWatermarkGuard';
 export { createDelegationOutcomeDecisionGuard } from './delegationOutcomeDecisionGuard';
 export { createRunIterationLimitGuard } from './runIterationLimitGuard';
 export { createUserIntentDecisionGuard } from './userIntentDecisionGuard';
@@ -32,6 +34,7 @@ export function createOrchestratorGuardRegistry(): OrchestratorGuardRegistry {
     OrchestratorGuardPosition,
     OrchestratorGuardEffect
   >();
+  registry.register(createContextCompactionWatermarkGuard());
   registry.register(createUserIntentDecisionGuard());
   registry.register(createDelegationOutcomeDecisionGuard());
   registry.register(createRunIterationLimitGuard());

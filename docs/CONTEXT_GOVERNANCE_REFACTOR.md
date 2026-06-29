@@ -63,7 +63,7 @@
 
 - 当次完成：合入 state 的消息只有 announce 一条。
 - 续跑链：progress → 续跑（同 delegationId，transcript 完整）→ completed → 除 announce 外的旧消息全部被 RemoveMessage 清除。
-- HITL 回归：委派中途 review interrupt → resume 正常（子代理内部状态在 checkpointer 的子 namespace 里，不受 state.messages 折叠影响——用 `npm run eval:hitl` 验证这个假设）。
+- HITL 回归：委派中途 review interrupt → resume 正常（子代理内部状态在 checkpointer 的子 namespace 里，不受 state.messages 折叠影响——用 `npm run eval:hitl -w pinpawo-local-agent` 验证这个假设）。
 - compaction 触发不再被 lane 噪音点燃（构造大量 lane 消息 + 少量主线消息，断言不触发）。
 
 ## 4. L1：上下文风险处理（全局 + 子代理改写）
@@ -160,7 +160,7 @@ L3 不单独做（见第 5 节）；#114 不合并。
 - 全保留能力：未启用上下文改写处理时保持全量上下文；guard 行为以 [Guard Registry Design](./GUARD_REGISTRY_DESIGN.md) 为准。
 - 已完成委派在 `state.messages` 中只剩 announce 一条（工具消息和中间 AI 笔记均已清除）；checkpoint 体积由会话长度决定，不再由工具调用量决定。
 - 同 turn 续跑（progress/limit_reached）拿到完整（L1 限界后的）现场；新任务从零开始（#117 已保证）。
-- HITL 委派中途 resume 回归通过（`eval:hitl`）。
+- HITL 委派中途 resume 回归通过（`npm run eval:hitl -w pinpawo-local-agent`）。
 - compaction 不再被 lane 噪音触发，只由主线 provider `usage_metadata.input_tokens` 水位触发。
 
 ## 8. 明确不做（v1）

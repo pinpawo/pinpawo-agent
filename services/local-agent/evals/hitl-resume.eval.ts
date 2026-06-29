@@ -2,10 +2,11 @@
 /**
  * LangSmith evaluation: local-agent HITL resume flow (#20 cleanup).
  *
- * The pet-agent eval (orchestrator-hitl) only covers the orchestrator's own
- * interrupt path. This eval covers the *local-agent* HITL seam — the layer
- * that translates a structured human_review.requested event into a typed
- * resume, including the #20 cleanup items:
+ * This eval covers the *local-agent* HITL seam — the layer that translates a
+ * structured human_review.requested event into a typed resume. The old
+ * pet-agent orchestrator HITL eval was removed because orchestrator iteration
+ * limits are now handled as guard state patches, not LangGraph interrupts.
+ * This local-agent eval still covers the #20 cleanup items:
  *
  *   1. ReviewSpec option effect → runtime authorization state (no text-channel
  *      magic strings, no client-submitted authorization extras).

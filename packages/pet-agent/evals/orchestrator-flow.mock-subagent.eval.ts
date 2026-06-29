@@ -465,7 +465,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     : [];
 
   if (capabilityCandidateNames.length > 0) {
-    turnInput.capabilitySearchState = {
+    turnInput.runCapabilitySearchState = {
       query: 'eval',
       attempted: true,
       candidates: capabilityCandidateNames.flatMap((name) => {
@@ -522,8 +522,8 @@ function extractResult(
   subagentModel: ProbeSubagentModel,
   iterationLimitInterruptCount: number,
 ): Record<string, unknown> {
-  const pendingDelegation = result.pendingDelegation && typeof result.pendingDelegation === 'object'
-    ? result.pendingDelegation as Record<string, unknown>
+  const pendingDelegation = result.runPendingDelegation && typeof result.runPendingDelegation === 'object'
+    ? result.runPendingDelegation as Record<string, unknown>
     : null;
   const lane = pendingDelegation?.lane;
   const routeMode = lane === 'general'
@@ -540,9 +540,13 @@ function extractResult(
   const lastMsg = visibleMessages.at(-1);
   const latestAnnounce = readLatestAnnounce(
     messages,
-    { turnId: typeof result.turnId === 'string' ? result.turnId : null },
+    { runId: typeof result.runId === 'string' ? result.runId : null },
   );
-  const turnDelegations = Array.isArray(result.turnDelegations) ? result.turnDelegations : [];
+  const runDelegations = Array.isArray(result.runDelegations) ? result.runDelegations : [];
+  const observedRunDelegations = runDelegations.filter((delegation) =>
+    delegation?.status === 'progress' || delegation?.status === 'completed'
+  );
+  const latestObservedDelegation = observedRunDelegations.at(-1);
 
   // Lane-scoping probes over invocation-time snapshots (see ProbeSubagentModel):
   // - transcript_leak: a previous task's reply text showed up in a later
@@ -561,12 +565,12 @@ function extractResult(
   return {
     route: finalRoute,
     mode: routeMode,
-    phase: latestAnnounce ? 'after_subagent' : 'initial_request',
+    phase: latestAnnounce || observedRunDelegations.length > 0 ? 'after_subagent' : 'initial_request',
     reply: typeof lastMsg?.content === 'string' ? lastMsg.content : '',
-    delegation_count: turnDelegations.length,
-    delegation_statuses: turnDelegations.map((item) => item.status),
-    latest_announce_kind: latestAnnounce?.announce ?? null,
-    latest_announce_lane: latestAnnounce?.lane ?? null,
+    delegation_count: runDelegations.length,
+    delegation_statuses: runDelegations.map((item) => item.status),
+    latest_announce_kind: latestObservedDelegation?.status ?? null,
+    latest_announce_lane: latestAnnounce?.lane ?? latestObservedDelegation?.lane ?? null,
     subagent_invocation_count: invocationStats.length,
     transcript_leak: transcriptLeak,
     carryover_seen: carryoverSeen,

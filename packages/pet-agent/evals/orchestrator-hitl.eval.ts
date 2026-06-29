@@ -254,8 +254,8 @@ function readReviewOptionDecisions(payload: Record<string, unknown> | null): str
 }
 
 function routeModeFromResult(result: Record<string, unknown>): string {
-  const pending = result.pendingDelegation && typeof result.pendingDelegation === 'object'
-    ? result.pendingDelegation as Record<string, unknown>
+  const pending = result.runPendingDelegation && typeof result.runPendingDelegation === 'object'
+    ? result.runPendingDelegation as Record<string, unknown>
     : null;
   const lane = pending?.lane;
   if (lane === 'general') return 'general';
@@ -264,15 +264,15 @@ function routeModeFromResult(result: Record<string, unknown>): string {
 }
 
 function pendingLaneFromResult(result: Record<string, unknown>): string | null {
-  const pending = result.pendingDelegation && typeof result.pendingDelegation === 'object'
-    ? result.pendingDelegation as Record<string, unknown>
+  const pending = result.runPendingDelegation && typeof result.runPendingDelegation === 'object'
+    ? result.runPendingDelegation as Record<string, unknown>
     : null;
   return typeof pending?.lane === 'string' ? pending.lane : null;
 }
 
 function pendingTaskFromResult(result: Record<string, unknown>): string | null {
-  const pending = result.pendingDelegation && typeof result.pendingDelegation === 'object'
-    ? result.pendingDelegation as Record<string, unknown>
+  const pending = result.runPendingDelegation && typeof result.runPendingDelegation === 'object'
+    ? result.runPendingDelegation as Record<string, unknown>
     : null;
   return typeof pending?.task === 'string' ? pending.task : null;
 }
@@ -307,8 +307,8 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
           additional_kwargs: {
             pinpawo: {
               lane: progressLane,
-              turnId: 'previous-turn',
-              announce: 'progress',
+              runId: 'previous-turn',
+              isAnnounce: true,
               delegationId: 'previous-progress-1',
               task: String(inputs.progress_task ?? inputs.previous_user_message ?? inputs.user_message ?? ''),
               ...(typeof inputs.progress_completion_reason === 'string'
@@ -323,7 +323,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
         new HumanMessage(String(inputs.user_message ?? '')),
       ]);
   if (typeof inputs.iteration_count === 'number') {
-    turnInput.iterationCount = inputs.iteration_count;
+    turnInput.runIterationCount = inputs.iteration_count;
   }
 
   const configurable = {

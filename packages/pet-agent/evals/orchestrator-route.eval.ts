@@ -243,8 +243,8 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
           additional_kwargs: {
             pinpawo: {
               lane: resumeProgressLane,
-              turnId: 'previous-turn',
-              announce: 'progress',
+              runId: 'previous-turn',
+              isAnnounce: true,
               delegationId: 'resume-progress-1',
               task: String(inputs.resume_progress_task ?? inputs.resume_original_user_message ?? userMessage),
               ...(typeof inputs.resume_progress_completion_reason === 'string'
@@ -266,7 +266,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     ? inputs.progress_results.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : [];
   if (completedResults.length > 0) {
-    turnInput.turnDelegations = completedResults.map((text, index) => ({
+    turnInput.runDelegations = completedResults.map((text, index) => ({
       id: `eval-${index + 1}`,
       lane: 'general',
       task: completedTasks[index] ?? userMessage,
@@ -279,18 +279,19 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
         additional_kwargs: {
           pinpawo: {
             lane: 'general',
-            turnId: turnInput.turnId,
-            announce: 'completed',
+            runId: turnInput.runId,
+            isAnnounce: true,
             delegationId: `eval-${index + 1}`,
             task: completedTasks[index] ?? userMessage,
+            completionReason: 'natural',
           },
         },
       })),
     );
   }
   if (progressResults.length > 0) {
-    const offset = turnInput.turnDelegations.length;
-    turnInput.turnDelegations.push(
+    const offset = turnInput.runDelegations.length;
+    turnInput.runDelegations.push(
       ...progressResults.map((text, index) => ({
         id: `eval-${offset + index + 1}`,
         lane: 'general',
@@ -305,10 +306,11 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
         additional_kwargs: {
           pinpawo: {
             lane: 'general',
-            turnId: turnInput.turnId,
-            announce: 'progress',
+            runId: turnInput.runId,
+            isAnnounce: true,
             delegationId: `eval-${offset + index + 1}`,
             task: userMessage,
+            completionReason: 'limit_reached',
           },
         },
       })),
@@ -318,7 +320,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     ? inputs.capability_candidates.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : [];
   if (capabilityCandidateNames.length > 0) {
-    turnInput.capabilitySearchState = {
+    turnInput.runCapabilitySearchState = {
       query: 'eval',
       attempted: true,
       candidates: capabilityCandidateNames.flatMap((name) => {
@@ -349,8 +351,8 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
 }
 
 function readPendingDelegation(result: Record<string, unknown>): Record<string, unknown> | null {
-  return result.pendingDelegation && typeof result.pendingDelegation === 'object'
-    ? result.pendingDelegation as Record<string, unknown>
+  return result.runPendingDelegation && typeof result.runPendingDelegation === 'object'
+    ? result.runPendingDelegation as Record<string, unknown>
     : null;
 }
 
@@ -370,25 +372,35 @@ function activeCapabilityFromResult(result: Record<string, unknown>): string | n
 }
 
 function capabilitySearchFromResult(result: Record<string, unknown>) {
-  return result.capabilitySearchState && typeof result.capabilitySearchState === 'object'
-    ? result.capabilitySearchState as Record<string, unknown>
+  return result.runCapabilitySearchState && typeof result.runCapabilitySearchState === 'object'
+    ? result.runCapabilitySearchState as Record<string, unknown>
     : {};
+}
+
+function hasCurrentSubagentObservation(result: Record<string, unknown>): boolean {
+  if (latestAnnounceFromResult(result)) return true;
+  const runDelegations = Array.isArray(result.runDelegations) ? result.runDelegations : [];
+  return runDelegations.some((delegation) => {
+    if (!delegation || typeof delegation !== 'object') return false;
+    const status = (delegation as Record<string, unknown>).status;
+    return status === 'progress' || status === 'completed';
+  });
 }
 
 function capabilityStateFromResult(result: Record<string, unknown>, capabilityList: AgentCapability[]): string {
   const search = capabilitySearchFromResult(result);
   const candidates = Array.isArray(search.candidates) ? search.candidates : [];
+  if (hasCurrentSubagentObservation(result)) return 'unavailable';
   if (candidates.length > 0) return 'candidates_available';
   if (search.attempted === true) return 'search_exhausted';
-  if (latestAnnounceFromResult(result)) return 'unavailable';
   if (capabilityList.length > 0) return 'search_available';
   return 'unavailable';
 }
 
 function latestAnnounceFromResult(result: Record<string, unknown>) {
   const messages = Array.isArray(result.messages) ? result.messages : [];
-  const turnId = typeof result.turnId === 'string' ? result.turnId : null;
-  return readLatestAnnounce(messages, { turnId });
+  const runId = typeof result.runId === 'string' ? result.runId : null;
+  return readLatestAnnounce(messages, { runId });
 }
 
 function extractResult(result: Record<string, unknown>, capabilityList: AgentCapability[]): Record<string, unknown> {
@@ -408,7 +420,7 @@ function extractResult(result: Record<string, unknown>, capabilityList: AgentCap
   return {
     route: finalRoute,
     mode: routeMode,
-    phase: latestAnnounce ? 'after_subagent' : 'initial_request',
+    phase: latestAnnounce || hasCurrentSubagentObservation(result) ? 'after_subagent' : 'initial_request',
     capability_state: capabilityStateFromResult(result, capabilityList),
     active_capability: activeCapabilityFromResult(result),
     capability_search_query: capabilitySearchState.query,

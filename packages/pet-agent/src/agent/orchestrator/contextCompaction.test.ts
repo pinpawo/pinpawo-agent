@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
-import { ToolMessage } from '@langchain/core/messages/tool';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
@@ -37,7 +36,7 @@ function usageMessage(content: string, inputTokens: number) {
   });
 }
 
-test('orchestrator context compaction stays idle below provider input-token trigger', async () => {
+test('orchestrator context compaction is a no-op when there is nothing outside the kept suffix', async () => {
   const messages = [
     new HumanMessage('hello'),
     usageMessage('hi', 400),
@@ -46,44 +45,10 @@ test('orchestrator context compaction stays idle below provider input-token trig
   const result = await compactOrchestratorMessages({
     messages,
     model: fakeSummaryModel(),
-    options: { contextWindowTokens: 1000 },
   });
 
   assert.equal(result.compacted, false);
   assert.deepEqual(result.messages, []);
-});
-
-test('orchestrator context compaction trigger ignores lane transcript noise', async () => {
-  let invoked = false;
-  const messages: BaseMessage[] = [
-    new HumanMessage('用户只发了一个很短的请求。'),
-    usageMessage('主线回复也很短。', 400),
-  ];
-
-  for (let index = 0; index < 20; index++) {
-    const toolResult = new ToolMessage({
-      content: `lane-noise-${index} ${'x'.repeat(3200)}`,
-      tool_call_id: `call-${index}`,
-    });
-    setPinpetMeta(toolResult, {
-      lane: 'general',
-      runId: 'turn-1',
-      delegationId: 'task-noise',
-    });
-    messages.push(toolResult);
-  }
-
-  const result = await compactOrchestratorMessages({
-    messages,
-    model: fakeSummaryModel('should not run', () => {
-      invoked = true;
-    }),
-    options: { keepMessages: 1, contextWindowTokens: 1000 },
-  });
-
-  assert.equal(result.compacted, false);
-  assert.equal(invoked, false);
-  assert.equal(result.mainMessageCount, 2);
 });
 
 test('orchestrator context compaction summarizes old messages and keeps recent suffix', async () => {
@@ -93,13 +58,11 @@ test('orchestrator context compaction summarizes old messages and keeps recent s
   const result = await compactOrchestratorMessages({
     messages,
     model: fakeSummaryModel('保留用户目标、已完成修改、未完成测试。'),
-    options: { keepMessages: 4, contextWindowTokens: 1000 },
+    options: { keepMessages: 4 },
   });
 
   assert.equal(result.compacted, true);
   assert.equal(result.mainMessageCount, 15);
-  assert.equal(result.latestInputTokens, 900);
-  assert.equal(result.triggerTokens, 750);
   assert.equal(result.messages.length, 6);
   assert.ok(result.messages[1] instanceof SystemMessage);
   assert.equal(isContextCompactionMessage(result.messages[1]), true);
@@ -120,7 +83,7 @@ test('orchestrator context compaction forwards runnable config to summary model'
     model: fakeSummaryModel('summary with config', (_messages, config) => {
       seenConfig = config;
     }),
-    options: { keepMessages: 4, contextWindowTokens: 1000 },
+    options: { keepMessages: 4 },
     runnableConfig: {
       configurable: {
         requestId: 'request-1',
@@ -163,7 +126,7 @@ test('orchestrator context compaction falls back when summary model fails', asyn
     const result = await compactOrchestratorMessages({
       messages,
       model,
-      options: { keepMessages: 4, contextWindowTokens: 1000 },
+      options: { keepMessages: 4 },
     });
 
     assert.equal(result.compacted, true);
@@ -210,7 +173,7 @@ test('orchestrator context compaction summarizes lane announces without subagent
     model: fakeSummaryModel('lane-aware summary', (modelMessages) => {
       summaryRequest = String((modelMessages.at(-1) as { content?: unknown } | undefined)?.content ?? '');
     }),
-    options: { keepMessages: 1, contextWindowTokens: 1000 },
+    options: { keepMessages: 1 },
   });
 
   assert.equal(result.compacted, true);

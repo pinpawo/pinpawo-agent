@@ -81,8 +81,8 @@ nothing needs the model to read its own just-written artifact back —
 - `SubagentResult.artifacts` carries refs produced during the subagent run.
 - `recordCapabilityArtifact(ref)` is the single artifact sink, exposed under that
   name on every layer that can persist: `CapabilityMiddlewareContext` (afterRun),
-  `CapabilityArtifactSink` on `ContextPolicyContext` (in-loop old-output ingest),
-  and `ToolkitContext` (if a toolkit ever needs it). All push into the same
+  the in-loop context rewrite path (old-output ingest), and `ToolkitContext`
+  (if a toolkit ever needs it). All push into the same
   `artifactRefs` array that becomes `SubagentResult.artifacts`.
 - `CapabilityContext.artifactStore` is the store a capability uses to write bytes.
 - `state.capabilityArtifacts` is the only cross-turn artifact state channel.
@@ -194,8 +194,8 @@ Explore's summarization includes an **old-output ingest** path for compression a
 
 **Trigger.**
 
-- **Old-output ingest** runs from `contextPolicy.rewriteAsync` when older large
-  successful tool outputs are eligible. It summarizes and evicts selected
+- **Old-output ingest** runs from the in-loop context rewrite handler when older
+  large successful tool outputs are eligible. It summarizes and evicts selected
   tool outputs, and stores the summary candidate in-memory.
 - **Finalize persistence** runs once in `afterRun` after the subagent completes; if
   old-output ingest did not already produce a structured summary, it runs a final

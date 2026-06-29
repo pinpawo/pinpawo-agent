@@ -23,11 +23,10 @@ function toolResult(id: string, content: string) {
   });
 }
 
-function contextPolicyCtx(inputTokens: number) {
+function contextPolicyCtx() {
   return {
     iterationCount: 2,
     operations: {},
-    latestProviderInputTokens: inputTokens,
     contextWindowTokens: 1000,
   };
 }
@@ -133,7 +132,7 @@ test('explore context policy leaves recent raw tool output untouched', async () 
     toolResult('call-1', `raw file output\n${'x'.repeat(2000)}`),
   ];
 
-  const rewritten = await runtime.contextPolicy?.rewriteAsync?.(messages, contextPolicyCtx(400));
+  const rewritten = await runtime.contextPolicy?.rewriteAsync?.(messages, contextPolicyCtx());
 
   assert.equal(rewritten, messages);
   assert.equal(ingestCalls, 0);
@@ -157,7 +156,7 @@ test('explore context policy ingests and compresses older raw tool output', asyn
     toolResult('call-4', `recent raw 4\n${'w'.repeat(1200)}`),
   ];
 
-  const rewritten = await runtime.contextPolicy?.rewriteAsync?.(messages, contextPolicyCtx(900));
+  const rewritten = await runtime.contextPolicy?.rewriteAsync?.(messages, contextPolicyCtx());
 
   assert.ok(rewritten);
   assert.match(capturedHuman, /触发原因：old_tool_output/);
@@ -185,7 +184,7 @@ test('explore ingest forwards configured structured output method', async () => 
     toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
-  ], contextPolicyCtx(900));
+  ], contextPolicyCtx());
 
   assert.deepEqual(capturedOptions, {
     name: 'explore_knowledge_ingest',
@@ -212,7 +211,7 @@ test('explore ingest failure keeps raw outputs instead of crashing the run', asy
   ];
   // An ingest model failure must degrade gracefully (review finding #1): the
   // rewrite returns the original messages unchanged — no throw, no eviction.
-  const rewritten = await runtime.contextPolicy!.rewriteAsync!(input, contextPolicyCtx(900));
+  const rewritten = await runtime.contextPolicy!.rewriteAsync!(input, contextPolicyCtx());
   assert.deepEqual(rewritten, input);
 });
 
@@ -242,7 +241,7 @@ test('explore summarizes old tool output and defers report persistence to afterR
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
   ], {
-    ...contextPolicyCtx(900),
+    ...contextPolicyCtx(),
     artifactSink: {
       recordCapabilityArtifact: (ref) => { recorded.push(ref); },
       threadId: 'thread-1',
@@ -296,7 +295,7 @@ test('explore ingest is a no-op write when no artifact sink is provided', async 
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
   ], {
-    ...contextPolicyCtx(900),
+    ...contextPolicyCtx(),
     // no artifactSink
   });
 
@@ -492,7 +491,7 @@ test('explore writes at most once per run even when old-output summaries are gen
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
   ], {
-    ...contextPolicyCtx(900),
+    ...contextPolicyCtx(),
     artifactSink: {
       recordCapabilityArtifact: () => {},
       threadId: 'thread-1',

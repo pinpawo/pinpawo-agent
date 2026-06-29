@@ -157,7 +157,7 @@ tui/timeline/agentTimelineSelectors.ts
 - toolkit/toolset `ToolOperationMetadata`
 - local-agent `LocalAgentOperationEvent`
 - TUI operation item rendering
-- context policy / review policy 中对 operation summary 的安全使用
+- context rewrite / review policy 中对 operation summary 的安全使用
 
 二者关系：
 

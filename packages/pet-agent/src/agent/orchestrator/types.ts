@@ -100,6 +100,11 @@ export type OrchestratorConfig = {
   decisionStructuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   contextWindowTokens?: number;
   /**
+   * Context window for subagent model calls. Defaults to `contextWindowTokens`
+   * when subagents use the same model/window as the main orchestrator.
+   */
+  subagentContextWindowTokens?: number;
+  /**
    * Artifact store (a port; the host supplies the concrete adapter). Injected
    * into each capability's `CapabilityContext` so capabilities can persist
    * artifacts without the host threading the store through every capability

@@ -7,7 +7,7 @@
 允许用它放置的只是**运行时元数据**，例如：
 
 - lane/delegation/run 标识
-- context-policy 压缩 marker（`contextPolicyRewrite`）
+- context rewrite 压缩 marker
 - explore 的重试/压缩标记（`exploreRawEvicted` / `exploreIngestFailed`）
 
 它们只影响当前/当前 turn 的行为。
@@ -30,4 +30,3 @@
 - 仍可在文档里看到旧有概念（如 `finalDispatchId`）时，新的标准是以 `CapabilityArtifactRef` 与 `sessionCapabilityArtifacts` 为准。
 - `summary/head` 属于内容层描述，不是 ref 的固有字段。
 - 若已有实现仍在解析历史 marker，请使用明确迁移计划，而不是并行保留多个源头。
-

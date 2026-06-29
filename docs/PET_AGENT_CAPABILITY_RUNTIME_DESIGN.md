@@ -167,7 +167,7 @@ runtime 是 subagent 的配置：它使用哪些 toolkit、带哪些 capability-
 
 ```typescript
 type CapabilityMiddleware = {
-  beforeRun?: (input: SubagentInput) => SubagentInput | Promise<SubagentInput>;
+  beforeRun?: (input: SubagentRunInput) => SubagentRunInput | Promise<SubagentRunInput>;
   afterRun?: (result: SubagentResult) => SubagentResult | Promise<SubagentResult>;
 };
 ```
@@ -199,11 +199,14 @@ subagent 在 orchestrator 需要执行某个 capability 时动态创建：
 
 ```typescript
 // 概念性接口
-type SubagentInput = {
-  model: BaseChatModel;
-  tools: StructuredTool[];
+type SubagentInputState = {
   instructions: string[];
   messages: BaseMessage[];
+};
+
+type SubagentRunInput = SubagentInputState & {
+  model: BaseChatModel;
+  tools: StructuredTool[];
 };
 
 type SubagentResult = {

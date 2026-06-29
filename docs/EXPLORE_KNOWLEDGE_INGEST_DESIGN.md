@@ -43,13 +43,12 @@ the canonical continuation state is inside `summary`.
 The ingest logic is private to the `explore` capability. It is not triggered
 after every tool call. Recent tool results remain raw; older large successful
 tool results are eligible for ingest and replacement only after the latest
-provider `usage_metadata.input_tokens` crosses the explore compression budget
-threshold.
+provider `usage_metadata.input_tokens` crosses the shared context watermark.
 
 ```text
 before next model call
-  -> contextPolicy checks latest provider input_tokens against the budget threshold
-  -> contextPolicy finds older large successful tool results
+  -> subagent context rewrite guard checks latest provider input_tokens against the context watermark
+  -> rewrite handler finds older large successful tool results
   -> if none are eligible: leave raw tool output unchanged
   -> if eligible: explore calls ingest LLM with previous summary + older raw evidence
   -> older raw tool outputs are replaced with readable summary text plus structured metadata

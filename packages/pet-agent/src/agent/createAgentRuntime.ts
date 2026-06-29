@@ -2,29 +2,33 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langc
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
+import type { GuardRunOptions } from '../guards';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../types/agent';
 import type { CapabilityArtifactRef } from '../types/artifact';
-import type { SubagentInput, SubagentToolEventHandler } from '../types/subagent';
+import type { SubagentRunInput, SubagentToolEventHandler } from '../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../types/toolkit';
 import { randomUUID } from 'node:crypto';
 import { createSubagent } from '../subagent/createSubagent';
 import {
   buildEmptyRunCapabilitySearchState,
-  buildRunStateReset,
   OrchestratorState,
   type OrchestratorStateType,
 } from './orchestrator/state';
 import {
   asDecisionNode,
-  asGuardNode,
   type OrchestratorControlContext,
   type OrchestratorDecision,
+  type OrchestratorStatePatch,
 } from './orchestrator/controlPrimitives';
 import {
-  createOrchestratorGuards,
-  readLegacyTaskActiveDelegation,
-} from './orchestrator/guards';
+  createOrchestratorGuardRegistry,
+  ORCHESTRATOR_GUARD_NAME,
+  ORCHESTRATOR_GUARD_POSITION,
+  type OrchestratorGuardConfig,
+  type OrchestratorGuardName,
+  type OrchestratorGuardPosition,
+} from './orchestrator/guardDefinitions';
 import {
   compactOrchestratorMessages,
   isContextCompactionMessage,
@@ -129,12 +133,10 @@ export { buildOrchestratorRunInput, buildOrchestratorTurnInput } from './orchest
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
 export { ORCHESTRATOR_RECURSION_LIMIT } from './orchestrator/controlPrimitives';
 
-// Subagent iteration budget = the inner ReAct agent's LangGraph recursionLimit
-// (counted in graph super-steps; one model→tool iteration is ~2 steps). With the
-// loop guards (#280) the expected stop point is a guard's graceful stop
-// (repeated input), so this budget is a generous last-resort breaker
-// for genuine runaway loops rather than the normal stopping condition. Unified
-// across lanes (P4 / #281). See docs/SUBAGENT_LIMIT_FRAMEWORK_DESIGN.md.
+// Subagent iteration budget = soft model-call guard. createSubagent sets a high
+// LangGraph recursionLimit so the guard can stop gracefully before the
+// runtime breaker.
+// Unified across lanes (P4 / #281). See docs/GUARD_REGISTRY_DESIGN.md.
 const SUBAGENT_MAX_ITERATIONS = 100;
 const GENERAL_SUBAGENT_MAX_ITERATIONS = SUBAGENT_MAX_ITERATIONS;
 const CAPABILITY_SUBAGENT_MAX_ITERATIONS = SUBAGENT_MAX_ITERATIONS;
@@ -266,47 +268,6 @@ function readToolkitReviewCapabilities(value: unknown): ToolkitReviewCapabilitie
   };
 }
 
-/**
- * 把 `forcedCapabilityNames` 映射成 synthetic capabilitySearch candidates。
- *
- * 命中:在 `prepare` 阶段把同名 capability 直接登记为已发现候选(高分 +
- * matchedTerms=['forced']),并把 `attempted` 置为 true。下游
- * `canSearchCapabilities` 会因为 candidates 非空 / attempted=true 而短路,
- * 整段 capability discovery + search 不再触发。
- *
- * 未传或为空数组 → 返回 null,prepare 走默认 run reset 路径(0 行为变化)。
- */
-function buildForcedRunCapabilitySearchState(
-  forcedNames: string[] | undefined,
-  capabilityList: AgentCapability[],
-): { runCapabilitySearchState: RunCapabilitySearchStateForReset } | null {
-  if (!forcedNames || forcedNames.length === 0) return null;
-  const candidates: CapabilityCandidate[] = [];
-  const seen = new Set<string>();
-  for (const name of forcedNames) {
-    if (seen.has(name)) continue;
-    const capability = capabilityList.find((item) => item.name === name);
-    if (!capability) continue;
-    seen.add(name);
-    candidates.push({
-      name: capability.name,
-      description: capability.description,
-      score: Number.POSITIVE_INFINITY,
-      matchedTerms: ['forced'],
-    });
-  }
-  if (candidates.length === 0) return null;
-  return {
-    runCapabilitySearchState: {
-      query: null,
-      attempted: true,
-      candidates,
-    },
-  };
-}
-
-type RunCapabilitySearchStateForReset = ReturnType<typeof buildEmptyRunCapabilitySearchState>;
-
 function canSearchCapabilities(
   model: AgentModels['act'],
   state: OrchestratorStateType,
@@ -354,6 +315,41 @@ function readRunIterationLimit(value: unknown): number | undefined {
     return undefined;
   }
   return value;
+}
+
+function readSubagentContextWindowTokens(config: OrchestratorConfig): number | undefined {
+  return config.subagentContextWindowTokens ?? config.contextWindowTokens;
+}
+
+function recoverTaskActiveDelegationFromRunState(
+  state: OrchestratorStateType,
+): TaskActiveDelegation | null {
+  if (state.taskActiveDelegation || !state.runId) {
+    return null;
+  }
+  for (let index = state.runDelegations.length - 1; index >= 0; index -= 1) {
+    const delegation = state.runDelegations[index];
+    if (delegation.status !== 'progress' && delegation.status !== 'completed') {
+      continue;
+    }
+    const announce = readLatestAnnounce(state.messages, {
+      runId: state.runId,
+      delegationId: delegation.id,
+    });
+    if (!announce) {
+      continue;
+    }
+    return {
+      id: delegation.id,
+      lane: delegation.lane,
+      task: delegation.task,
+      contextSummary: null,
+      transcriptRunId: state.runId,
+      status: 'awaiting_decision',
+      resultPreview: delegation.resultPreview,
+    };
+  }
+  return null;
 }
 
 function resolveDelegationTranscriptRunId(
@@ -442,46 +438,119 @@ function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {
 export function createOrchestratorGraph(config: OrchestratorConfig) {
   const orchestratorMaxIterations = readRunIterationLimit(config.maxRunIterations)
     ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
+  const subagentContextWindowTokens = readSubagentContextWindowTokens(config);
+  type OrchestratorGuardRunOptions = GuardRunOptions<
+    OrchestratorStateType,
+    OrchestratorGuardConfig,
+    OrchestratorGuardPosition,
+    OrchestratorStatePatch
+  >;
 
   // Shared control context handed to every Guard/Decision via the node adapters.
   function buildControlContext(runnableConfig?: RunnableConfig): OrchestratorControlContext {
     return { runnableConfig, orchestratorMaxIterations };
   }
 
-  async function prepare(state: OrchestratorStateType) {
-    if (state.runId) {
-      return {};
-    }
-    return buildRunStateReset();
-  }
-
-  async function compactContext(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const result = await compactOrchestratorMessages({
-      messages: state.messages,
-      model: config.models.observe ?? config.models.act,
-      options: {
+  function buildGuardConfig(runnableConfig?: RunnableConfig): OrchestratorGuardConfig {
+    const invokeOptions = getInvokeOptions(runnableConfig);
+    return {
+      capabilities: invokeOptions.capabilities ?? [],
+      contextCompaction: {
         contextWindowTokens: config.contextWindowTokens,
       },
-      runnableConfig,
-    });
-    if (!result.compacted) {
-      return {};
-    }
-    return {
-      messages: result.messages,
+      forcedCapabilityNames: invokeOptions.forcedCapabilityNames,
+      runIterationLimit: invokeOptions.maxRunIterations ?? orchestratorMaxIterations,
     };
   }
 
-  // Orchestrator Guards live in ./orchestrator/guards.ts as concrete
-  // OrchestratorGuard implementations; getInvokeOptions is injected (it is
-  // broadly used invoke-config parsing that stays in this module).
-  const {
-    userIntentDecisionGuard,
-    delegationOutcomeDecisionGuard,
-    runIterationLimitGuard,
-  } = createOrchestratorGuards({ getInvokeOptions });
+  const orchestratorGuardRegistry = createOrchestratorGuardRegistry();
 
-  function afterIterationLimitGuard(state: OrchestratorStateType) {
+  async function runOrchestratorGuard(
+    name: OrchestratorGuardName,
+    position: OrchestratorGuardPosition,
+    state: OrchestratorStateType,
+    runnableConfig?: RunnableConfig,
+    runOptions?: OrchestratorGuardRunOptions,
+  ): Promise<OrchestratorStatePatch> {
+    const { update } = await orchestratorGuardRegistry.run(name, {
+      state,
+      config: buildGuardConfig(runnableConfig),
+      position,
+    }, runOptions);
+    return update ?? {};
+  }
+
+  async function prepare(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
+    const patch = await runOrchestratorGuard(
+      ORCHESTRATOR_GUARD_NAME.RUN_STATE_RESET,
+      ORCHESTRATOR_GUARD_POSITION.PREPARE,
+      state,
+      runnableConfig,
+    );
+    if ('runId' in patch) {
+      return patch;
+    }
+    const taskActiveDelegation = recoverTaskActiveDelegationFromRunState(state);
+    return taskActiveDelegation
+      ? { ...patch, taskActiveDelegation }
+      : patch;
+  }
+
+  async function compactContext(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
+    return runOrchestratorGuard(
+      ORCHESTRATOR_GUARD_NAME.CONTEXT_COMPACTION_WATERMARK,
+      ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
+      state,
+      runnableConfig,
+      {
+        onBlock: async ({ state: blockedState }) => {
+          const compacted = await compactOrchestratorMessages({
+            messages: blockedState.messages,
+            model: config.models.observe ?? config.models.act,
+            runnableConfig,
+          });
+          if (!compacted.compacted) {
+            return {};
+          }
+          return {
+            messages: compacted.messages,
+          };
+        },
+      },
+    );
+  }
+
+  function prepareUserIntentDecision(): OrchestratorStatePatch {
+    return {
+      canHandoffActiveDelegation: true,
+    };
+  }
+
+  async function delegationOutcomeDecisionGuardNode(
+    state: OrchestratorStateType,
+    runnableConfig?: RunnableConfig,
+  ) {
+    return runOrchestratorGuard(
+      ORCHESTRATOR_GUARD_NAME.DELEGATION_OUTCOME_DECISION,
+      ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
+      state,
+      runnableConfig,
+    );
+  }
+
+  async function delegationOutcomeIterationGuardNode(
+    state: OrchestratorStateType,
+    runnableConfig?: RunnableConfig,
+  ) {
+    return runOrchestratorGuard(
+      ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT,
+      ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION,
+      state,
+      runnableConfig,
+    );
+  }
+
+  function routeAfterDelegationOutcomeIterationGuard(state: OrchestratorStateType) {
     return state.runPendingFinalReply === 'inline' ? 'end' : 'delegationOutcomeDecisionGuard';
   }
 
@@ -494,7 +563,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       runtimeEnvironment,
       reviewCapabilities,
       globalReviewPolicy,
-      forcedCapabilityNames,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = generalLaneToolkits(toolkits ?? []);
@@ -513,17 +581,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const capabilityList = capabilities ?? [];
     validateUniqueCapabilityNames(capabilityList);
 
-    // 强制候选注入:命中时直接把 forced capability 登记为已发现候选并短路
-    // 后续 LLM 发现 + 工具搜索流程。仅当 runCapabilitySearchState 还未填充时生效,
-    // 保证同一 run 内只在 run 开始时注入一次。未传 forcedCapabilityNames 走老路径。
-    if (
-      !state.runCapabilitySearchState.attempted
-      && state.runCapabilitySearchState.candidates.length === 0
-    ) {
-      const forcedSeed = buildForcedRunCapabilitySearchState(forcedCapabilityNames, capabilityList);
-      if (forcedSeed) {
-        return forcedSeed;
-      }
+    const forcedSeedPatch = await runOrchestratorGuard(
+      ORCHESTRATOR_GUARD_NAME.FORCED_CAPABILITY_SEED,
+      ORCHESTRATOR_GUARD_POSITION.CAPABILITY_DISCOVERY,
+      state,
+      runnableConfig,
+    );
+    if (forcedSeedPatch.runCapabilitySearchState) {
+      return forcedSeedPatch;
     }
 
     const decisionBaseModel = config.models.act;
@@ -609,8 +674,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     validateUniqueCapabilityNames(capabilityList);
     const latestHumanRequest = readLatestHumanRequest(state.messages);
     const contextSummaries = readContextCompactionSummaries(state.messages);
-    const activeDelegation = state.taskActiveDelegation
-      ?? (kind === 'delegation_outcome' ? readLegacyTaskActiveDelegation(state) : null);
+    const activeDelegation = state.taskActiveDelegation;
     const activeDelegationCapabilityId = activeDelegation
       && activeDelegation.lane.startsWith('capability:')
       ? activeDelegation.lane.slice('capability:'.length)
@@ -983,12 +1047,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     validateUniqueToolkitNames(toolkitList);
     const runPendingDelegation = state.runPendingDelegation;
     if (!runPendingDelegation) {
-      return {};
+      throw new Error('Capability node cannot run without a pending capability delegation.');
     }
     const capabilityName = readCapabilityNameFromLane(runPendingDelegation.lane);
+    if (!capabilityName) {
+      throw new Error('Capability node received a non-capability delegation lane.');
+    }
     const capability = capabilities?.find((c) => c.name === capabilityName);
     if (!capability) {
-      return {};
+      throw new Error(`Capability node cannot resolve capability "${capabilityName}".`);
     }
     const lane: MessageLane = `capability:${capability.name}`;
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runPendingDelegation);
@@ -1045,14 +1112,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       workdir: workdir ?? null,
     });
 
-    let subagentInput: SubagentInput = {
+    let subagentInput: SubagentRunInput = {
       model: config.models.subagent ?? config.models.act,
       tools: selectCapabilityTools(runtime, usedToolkitResources.tools),
       instructions: [handoffInstruction, ...usedToolkitResources.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
       operations: collectCapabilityOperations(usedToolkitResources.toolkits, runtime),
       messages: scopedMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
-      contextWindowTokens: config.contextWindowTokens,
+      contextWindowTokens: subagentContextWindowTokens,
       contextPolicy: runtime.contextPolicy,
       checkpoint: config.checkpoint,
       runnableConfig,
@@ -1159,7 +1226,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     const lane: MessageLane = 'general';
     const runPendingDelegation = state.runPendingDelegation;
     if (!runPendingDelegation || runPendingDelegation.lane !== 'general') {
-      return {};
+      throw new Error('General node cannot run without a pending general delegation.');
     }
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runPendingDelegation);
     const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runPendingDelegation.id);
@@ -1187,7 +1254,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       operations: collectGeneralOperations(toolkitResources.toolkits),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
-      contextWindowTokens: config.contextWindowTokens,
+      contextWindowTokens: subagentContextWindowTokens,
       checkpoint: config.checkpoint,
       runnableConfig,
       signal: runnableConfig?.signal,
@@ -1243,14 +1310,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     ) {
       return 'capabilitySearch';
     }
-    return 'userIntentDecisionGuard';
+    return 'prepareUserIntentDecision';
   }
 
   function afterContextPrep(state: OrchestratorStateType) {
     if (state.taskActiveDelegation?.status === 'awaiting_decision') {
-      return 'delegationOutcomeIterationGuard';
-    }
-    if (!state.taskActiveDelegation && readLegacyTaskActiveDelegation(state)) {
       return 'delegationOutcomeIterationGuard';
     }
     return 'capabilityDiscovery';
@@ -1270,10 +1334,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('compactContext', compactContext)
     .addNode('capabilityDiscovery', capabilityDiscovery)
     .addNode('capabilitySearch', new ToolNode([capabilitySearchTool]))
-    .addNode('userIntentDecisionGuard', asGuardNode(userIntentDecisionGuard, buildControlContext))
-    .addNode('delegationOutcomeDecisionGuard', asGuardNode(delegationOutcomeDecisionGuard, buildControlContext))
+    .addNode('prepareUserIntentDecision', prepareUserIntentDecision)
+    .addNode('delegationOutcomeDecisionGuard', delegationOutcomeDecisionGuardNode)
     .addNode('userIntentDecision', asDecisionNode(userIntentDecision, buildControlContext))
-    .addNode('delegationOutcomeIterationGuard', asGuardNode(runIterationLimitGuard, buildControlContext))
+    .addNode('delegationOutcomeIterationGuard', delegationOutcomeIterationGuardNode)
     .addNode('delegationOutcomeDecision', asDecisionNode(delegationOutcomeDecision, buildControlContext))
     .addNode('answer', answerNode)
     .addNode('capability', capabilityNode)
@@ -1288,10 +1352,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     })
     .addConditionalEdges('capabilityDiscovery', afterCapabilityDiscovery, {
       capabilitySearch: 'capabilitySearch',
-      userIntentDecisionGuard: 'userIntentDecisionGuard',
+      prepareUserIntentDecision: 'prepareUserIntentDecision',
     })
-    .addEdge('userIntentDecisionGuard', 'userIntentDecision')
-    .addConditionalEdges('delegationOutcomeIterationGuard', afterIterationLimitGuard, {
+    .addEdge('prepareUserIntentDecision', 'userIntentDecision')
+    .addConditionalEdges('delegationOutcomeIterationGuard', routeAfterDelegationOutcomeIterationGuard, {
       end: END,
       delegationOutcomeDecisionGuard: 'delegationOutcomeDecisionGuard',
     })
@@ -1309,7 +1373,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       general: 'general',
     })
     .addEdge('answer', END)
-    .addEdge('capabilitySearch', 'userIntentDecisionGuard')
+    .addEdge('capabilitySearch', 'prepareUserIntentDecision')
     .addEdge('capability', 'delegationOutcomeIterationGuard')
     .addEdge('general', 'delegationOutcomeIterationGuard');
 

@@ -51,6 +51,7 @@ export type PetAgentRuntimeConfig = {
   checkpoint?: OrchestratorConfig['checkpoint'];
   decisionStructuredOutput?: OrchestratorConfig['decisionStructuredOutput'];
   contextWindowTokens?: OrchestratorConfig['contextWindowTokens'];
+  subagentContextWindowTokens?: OrchestratorConfig['subagentContextWindowTokens'];
 };
 
 function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
@@ -118,6 +119,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     checkpoint: config.checkpoint,
     decisionStructuredOutput: config.decisionStructuredOutput,
     contextWindowTokens: config.contextWindowTokens,
+    subagentContextWindowTokens: config.subagentContextWindowTokens,
   });
 
   function descriptor(): PetAgentRuntimeDescriptor {

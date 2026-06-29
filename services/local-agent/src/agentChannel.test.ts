@@ -291,7 +291,6 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
   ], {
     iterationCount: 2,
     operations: {},
-    latestProviderInputTokens: 900,
     contextWindowTokens: 1000,
   });
 

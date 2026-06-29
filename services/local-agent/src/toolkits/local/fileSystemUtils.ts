@@ -19,7 +19,8 @@ export function wildcardToRegExp(pattern: string) {
  * into. `.pinpawo` is hardcoded on purpose: it holds the agent's own checkpoint /
  * artifact storage, and recursively reading it back into context causes a
  * self-reference blow-up (a single serialized checkpoint object is one ~493KB line
- * of conversation JSON). See docs/ORCHESTRATOR_RECURSION_GUARD_DIAGNOSIS.md.
+ * of conversation JSON). See docs/GUARD_REGISTRY_DESIGN.md for current guard
+ * boundaries.
  */
 export const DEFAULT_WALK_IGNORED_DIRS: ReadonlySet<string> = new Set([
   '.pinpawo',

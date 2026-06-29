@@ -31,10 +31,9 @@ type CapabilityContext = {
 type CapabilityRuntime = {
   uses?: string[];
   toolsets?: AgentToolset[];
-  contextPolicy?: SubagentContextPolicy;
   instructions?: string[] | ((ctx: CapabilityInstructionContext) => string[] | Promise<string[]>);
   middleware?: {
-    beforeRun?: (input: SubagentInput) => SubagentInput | Promise<SubagentInput>;
+    beforeRun?: (input: SubagentRunInput) => SubagentRunInput | Promise<SubagentRunInput>;
     afterRun?: (
       result: SubagentResult,
       ctx: CapabilityMiddlewareContext,
@@ -48,6 +47,7 @@ type CapabilityRuntime = {
 1. `uses` 声明能力依赖 toolkit 名称，运行时自动注入对应工具集。
 2. `toolsets` 为能力私有工具，建议通过 `defineToolset` 静态定义，避免重复工具名。
 3. `middleware.afterRun` 常用于在代码侧持久化 capability 产物（例如把结构化结果写入 artifact store），并把 ref 回传给 orchestrator。
+4. `SubagentRunInput` 是一次 subagent run 的完整输入；`SubagentInputState` 才是进入 subagent graph 的 state 形状。
 
 `artifactStore` 为可选依赖，能力需要容错处理未注入的场景（例如测试）。
 

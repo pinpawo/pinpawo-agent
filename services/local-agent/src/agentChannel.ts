@@ -261,6 +261,7 @@ export function buildLocalChatAgentInput(params: {
       llmConfig.model,
       llmConfig.observeModel ?? llmConfig.model,
       String(llmConfig.contextWindowTokens ?? 32000),
+      String(llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens ?? 32000),
       params.checkpoint ? 'checkpoint' : 'memory',
     ]),
     graphConfig: {
@@ -269,6 +270,7 @@ export function buildLocalChatAgentInput(params: {
       checkpoint: params.checkpoint,
       decisionStructuredOutput,
       contextWindowTokens: llmConfig.contextWindowTokens,
+      subagentContextWindowTokens: llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens,
       capabilityArtifactStore: params.capabilityArtifactStore,
     },
     input: {

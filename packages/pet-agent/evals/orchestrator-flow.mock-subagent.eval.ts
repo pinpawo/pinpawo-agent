@@ -94,6 +94,10 @@ const examples = [
       reason: 'When the subagent completed both requested actions, route should answer.',
     },
   },
+  // Known issue: the current orchestrator reuses the same delegation id for a
+  // same-lane follow-up too aggressively. This keeps the multi-task boundary
+  // problem visible until the next multi-task delegation redesign decides when
+  // to continue a delegation vs. start a clean one.
   {
     name: 'two-tasks-second-subagent-starts-clean',
     inputs: {
@@ -111,7 +115,8 @@ const examples = [
       expected_delegation_count: 2,
       expected_transcript_leak: false,
       expected_carryover_seen: false,
-      reason: 'Two sequential tasks in one turn: the second delegation must start clean, without the first task transcript in its input.',
+      known_issue: 'multi_task_delegation_boundary_reuses_same_lane_delegation',
+      reason: 'Known issue for the next multi-task redesign: the second task should start clean, but same-lane delegation reuse currently carries the first task transcript.',
     },
   },
   {
@@ -465,7 +470,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     : [];
 
   if (capabilityCandidateNames.length > 0) {
-    turnInput.capabilitySearchState = {
+    turnInput.runCapabilitySearchState = {
       query: 'eval',
       attempted: true,
       candidates: capabilityCandidateNames.flatMap((name) => {
@@ -522,8 +527,8 @@ function extractResult(
   subagentModel: ProbeSubagentModel,
   iterationLimitInterruptCount: number,
 ): Record<string, unknown> {
-  const pendingDelegation = result.pendingDelegation && typeof result.pendingDelegation === 'object'
-    ? result.pendingDelegation as Record<string, unknown>
+  const pendingDelegation = result.runPendingDelegation && typeof result.runPendingDelegation === 'object'
+    ? result.runPendingDelegation as Record<string, unknown>
     : null;
   const lane = pendingDelegation?.lane;
   const routeMode = lane === 'general'
@@ -540,9 +545,13 @@ function extractResult(
   const lastMsg = visibleMessages.at(-1);
   const latestAnnounce = readLatestAnnounce(
     messages,
-    { turnId: typeof result.turnId === 'string' ? result.turnId : null },
+    { runId: typeof result.runId === 'string' ? result.runId : null },
   );
-  const turnDelegations = Array.isArray(result.turnDelegations) ? result.turnDelegations : [];
+  const runDelegations = Array.isArray(result.runDelegations) ? result.runDelegations : [];
+  const observedRunDelegations = runDelegations.filter((delegation) =>
+    delegation?.status === 'progress' || delegation?.status === 'completed'
+  );
+  const latestObservedDelegation = observedRunDelegations.at(-1);
 
   // Lane-scoping probes over invocation-time snapshots (see ProbeSubagentModel):
   // - transcript_leak: a previous task's reply text showed up in a later
@@ -561,12 +570,12 @@ function extractResult(
   return {
     route: finalRoute,
     mode: routeMode,
-    phase: latestAnnounce ? 'after_subagent' : 'initial_request',
+    phase: latestAnnounce || observedRunDelegations.length > 0 ? 'after_subagent' : 'initial_request',
     reply: typeof lastMsg?.content === 'string' ? lastMsg.content : '',
-    delegation_count: turnDelegations.length,
-    delegation_statuses: turnDelegations.map((item) => item.status),
-    latest_announce_kind: latestAnnounce?.announce ?? null,
-    latest_announce_lane: latestAnnounce?.lane ?? null,
+    delegation_count: runDelegations.length,
+    delegation_statuses: runDelegations.map((item) => item.status),
+    latest_announce_kind: latestObservedDelegation?.status ?? null,
+    latest_announce_lane: latestAnnounce?.lane ?? latestObservedDelegation?.lane ?? null,
     subagent_invocation_count: invocationStats.length,
     transcript_leak: transcriptLeak,
     carryover_seen: carryoverSeen,
@@ -679,7 +688,10 @@ async function main() {
   for (const row of rows) {
     const failedScores = row.evaluationResults.results.filter((item) => keys.includes(item.key) && item.score !== 1);
     if (failedScores.length === 0) continue;
-    console.log(`  - ${row.example.metadata?.name ?? row.example.id}: ${failedScores.map((item) => item.comment).join(' | ')}`);
+    const knownIssue = typeof row.example.outputs?.known_issue === 'string'
+      ? ` [KNOWN ISSUE: ${row.example.outputs.known_issue}]`
+      : '';
+    console.log(`  - ${row.example.metadata?.name ?? row.example.id}${knownIssue}: ${failedScores.map((item) => item.comment).join(' | ')}`);
   }
   console.log('View results in LangSmith dashboard.');
 }

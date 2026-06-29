@@ -1,82 +1,59 @@
 import {
   defineGuard,
-  type GuardBlock,
-  type GuardBlockHandler,
-  type GuardOptions,
   guardBlock,
   guardPass,
 } from '../../guards';
 import { readLatestProviderInputTokens } from '../../agent/tokenUsage';
-import { buildContextPolicyTriggerTokens } from '../contextPolicy';
 import {
   SUBAGENT_GUARD_NAME,
   SUBAGENT_GUARD_POSITION,
   type SubagentGuard,
   type SubagentGuardConfig,
+  type SubagentGuardPosition,
   type SubagentState,
   type SubagentGuardUpdate,
 } from './types';
 
-export type ContextRewriteWatermarkGuardBlockInput = {
-  state: SubagentState;
-  config: SubagentGuardConfig;
-  result: GuardBlock;
-};
+const CONTEXT_REWRITE_WATERMARK_RATIO = 0.75;
 
-export type ContextRewriteWatermarkGuardBlockHandler = GuardBlockHandler<
-  ContextRewriteWatermarkGuardBlockInput,
-  SubagentGuardUpdate
->;
-
-export type ContextRewriteWatermarkGuardOptions = GuardOptions<
-  ContextRewriteWatermarkGuardBlockInput,
-  SubagentGuardUpdate
->;
-
-export function createContextRewriteWatermarkGuard(
-  options: ContextRewriteWatermarkGuardOptions,
-): SubagentGuard {
-  return defineGuard({
+export function createContextRewriteWatermarkGuard(): SubagentGuard {
+  return defineGuard<
+    SubagentState,
+    SubagentGuardConfig,
+    SubagentGuardPosition,
+    SubagentGuardUpdate
+  >({
     name: SUBAGENT_GUARD_NAME.CONTEXT_REWRITE_WATERMARK,
     positions: [SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_POLICY],
     rule: {
-      check: ({ config, state }) => {
-        const evictPolicy = config.contextPolicy?.evictToolResults;
-        if (!evictPolicy) {
+      check: ({ state }) => {
+        const policy = state.contextPolicy;
+        if (!policy?.rewrite && !policy?.rewriteAsync && !policy?.evictToolResults) {
+          return guardPass();
+        }
+        if (!state.contextWindowTokens || !Number.isFinite(state.contextWindowTokens) || state.contextWindowTokens <= 0) {
           return guardPass();
         }
         const latestInputTokens = readLatestProviderInputTokens(state.messages);
-        const triggerTokens = buildContextPolicyTriggerTokens(
-          evictPolicy,
-          {
-            iterationCount: config.iterationCount,
-            operations: config.operations ?? {},
-            ...(config.contextWindowTokens ? { contextWindowTokens: config.contextWindowTokens } : {}),
-            ...(latestInputTokens !== null ? { latestProviderInputTokens: latestInputTokens } : {}),
-          },
-        );
+        const watermarkTokens = Math.max(1, Math.floor(
+          state.contextWindowTokens * CONTEXT_REWRITE_WATERMARK_RATIO,
+        ));
 
         if (
           latestInputTokens === null
-          || triggerTokens === null
-          || latestInputTokens < triggerTokens
+          || latestInputTokens < watermarkTokens
         ) {
           return guardPass();
         }
 
         return guardBlock('context_rewrite_required', {
           latestInputTokens,
-          triggerTokens,
+          watermarkTokens,
         });
       },
     },
     handler: {
-      handle: ({ config, result, state }) => {
-        if (result.status === 'pass') {
-          return null;
-        }
-        return options.onBlock({ state, config, result });
-      },
+      handle: () => null,
     },
   });
 }

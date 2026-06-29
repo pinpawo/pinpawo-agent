@@ -26,16 +26,6 @@ function ctx(operations: Record<string, SubagentToolOperationMetadata>) {
   return {
     iterationCount: 1,
     operations,
-    latestProviderInputTokens: 900,
-    contextWindowTokens: 1000,
-  };
-}
-
-function lowWaterCtx(operations: Record<string, SubagentToolOperationMetadata>) {
-  return {
-    iterationCount: 1,
-    operations,
-    latestProviderInputTokens: 400,
     contextWindowTokens: 1000,
   };
 }
@@ -88,7 +78,7 @@ test('context policy evicts old large successful tool results only', () => {
   assert.match(String(rewritten[11]?.content), /^recent large output/);
 });
 
-test('context policy stays idle below provider input-token trigger', () => {
+test('context policy executor does not own the provider input-token trigger', () => {
   const operations = {
     view_file_chunk: {},
   } satisfies Record<string, SubagentToolOperationMetadata>;
@@ -105,9 +95,10 @@ test('context policy stays idle below provider input-token trigger', () => {
       keepRecent: 0,
       minSizeChars: 2000,
     },
-  }, lowWaterCtx(operations));
+  }, ctx(operations));
 
-  assert.equal(rewritten, messages);
+  assert.match(String(rewritten[2]?.content), /^\[evicted:/);
+  assert.match(String(rewritten[4]?.content), /^\[evicted:/);
 });
 
 test('context policy perTool keep and truncate override default eviction mode', () => {

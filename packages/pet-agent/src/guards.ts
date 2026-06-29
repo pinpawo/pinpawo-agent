@@ -37,6 +37,15 @@ export type GuardHandlerInput<
   result: GuardCheckResult;
 };
 
+export type GuardBlockHandlerInput<
+  State,
+  Config,
+  Position extends string,
+> = GuardInput<State, Config, Position> & {
+  guardName: string;
+  result: GuardBlock;
+};
+
 export type GuardHandler<
   State,
   Config,
@@ -70,11 +79,13 @@ export type GuardBlockHandler<
   input: BlockInput
 ) => Update | null | Promise<Update | null>;
 
-export type GuardOptions<
-  BlockInput,
+export type GuardRunOptions<
+  State,
+  Config,
+  Position extends string,
   Update,
 > = {
-  onBlock: GuardBlockHandler<BlockInput, Update>;
+  onBlock?: GuardBlockHandler<GuardBlockHandlerInput<State, Config, Position>, Update>;
 };
 
 export const GUARD_PASS: GuardPass = { status: 'pass' };
@@ -146,7 +157,7 @@ export class GuardRegistry<
 
   /**
    * Usage:
-   *   registry.run('guard_name', { state, config, position })
+   *   registry.run('guard_name', { state, config, position }, { onBlock })
    *
    * Current orchestrator example after migration:
    *   const { result, update } = await registry.run('run_iteration_limit', {
@@ -158,22 +169,29 @@ export class GuardRegistry<
    *   // `update` is the state patch produced by the guard handler, if any.
    *
    * `run` first verifies the guard is registered for `position`, then calls
-   * `rule.check(input)`, then passes that result to `handler.handle(...)`.
-   * The handler returns the final state update for the caller's domain, or null
-   * if no update is needed. Async work such as compaction belongs inside the
-   * handler or a handler-owned executor.
+   * `rule.check(input)`. If the rule blocks and the caller supplied `onBlock`,
+   * that position-bound callback produces the update. Otherwise the guard's
+   * default handler handles the result. Async work such as compaction belongs in
+   * `onBlock` or in the guard's default handler, never in the rule.
    */
   async run(
     name: string,
     input: GuardInput<State, Config, Position>,
+    options: GuardRunOptions<State, Config, Position, Update> = {},
   ): Promise<GuardRunResult<Update>> {
     const guard = this.requireApplicableGuard(name, input.position);
     const result = guard.rule.check(input);
-    const update = await guard.handler.handle({
+    const handlerInput = {
       ...input,
       guardName: guard.name,
       result,
-    });
+    };
+    const update = result.status === 'block' && options.onBlock
+      ? await options.onBlock({
+        ...handlerInput,
+        result,
+      })
+      : await guard.handler.handle(handlerInput);
     return { result, update };
   }
 

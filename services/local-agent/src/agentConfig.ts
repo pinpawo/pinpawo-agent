@@ -6,6 +6,7 @@ export type AgentLlmConfig = {
   model: string;
   observeModel?: string;
   contextWindowTokens?: number;
+  subagentContextWindowTokens?: number;
   temperature?: number;
   timeoutMs?: number;
   maxRetries?: number;

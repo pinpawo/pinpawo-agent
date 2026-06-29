@@ -1,8 +1,5 @@
 import { GuardRegistry } from '../../guards';
-import {
-  createContextRewriteWatermarkGuard,
-  type ContextRewriteWatermarkGuardOptions,
-} from './contextRewriteWatermarkGuard';
+import { createContextRewriteWatermarkGuard } from './contextRewriteWatermarkGuard';
 import { createSubagentIterationLimitGuard } from './iterationLimitGuard';
 import {
   type SubagentGuardConfig,
@@ -14,9 +11,6 @@ import {
 
 export {
   createContextRewriteWatermarkGuard,
-  type ContextRewriteWatermarkGuardBlockHandler,
-  type ContextRewriteWatermarkGuardBlockInput,
-  type ContextRewriteWatermarkGuardOptions,
 } from './contextRewriteWatermarkGuard';
 export { createSubagentIterationLimitGuard } from './iterationLimitGuard';
 export {
@@ -31,22 +25,14 @@ export {
   type SubagentGuardUpdate,
 } from './types';
 
-export type SubagentGuardRegistryOptions = {
-  contextRewrite?: ContextRewriteWatermarkGuardOptions;
-};
-
-export function createSubagentGuardRegistry(
-  options: SubagentGuardRegistryOptions = {},
-): SubagentGuardRegistry {
+export function createSubagentGuardRegistry(): SubagentGuardRegistry {
   const registry = new GuardRegistry<
     SubagentState,
     SubagentGuardConfig,
     SubagentGuardPosition,
     SubagentGuardUpdate
   >();
-  if (options.contextRewrite) {
-    registry.register(createContextRewriteWatermarkGuard(options.contextRewrite));
-  }
+  registry.register(createContextRewriteWatermarkGuard());
   registry.register(createSubagentIterationLimitGuard());
   return registry;
 }

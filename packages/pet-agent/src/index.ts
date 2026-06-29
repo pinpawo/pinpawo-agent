@@ -35,9 +35,10 @@ export type {
 export type {
   CapabilityArtifactSink,
   ContextPolicyContext,
-  SubagentInput,
+  SubagentInputState,
   SubagentContextPolicy,
   SubagentResult,
+  SubagentRunInput,
   SubagentRuntimeEvent,
   SubagentToolEvent,
   SubagentToolEventHandler,
@@ -54,9 +55,9 @@ export type {
   GuardHandler,
   GuardHandlerInput,
   GuardInput,
-  GuardOptions,
   GuardPass,
   GuardRule,
+  GuardRunOptions,
   GuardRunResult,
 } from './guards';
 export {

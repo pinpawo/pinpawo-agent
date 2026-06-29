@@ -27,8 +27,6 @@ export type ExploreResult = {
 
 export type ExploreCapabilityOptions = {
   structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
-  compressionBudgetTokens?: number;
-  compressionThresholdRatio?: number;
 };
 
 export const exploreResultSchema = z.object({
@@ -58,7 +56,6 @@ export type ExploreKnowledgeIngest = z.infer<typeof exploreKnowledgeIngestSchema
 
 const EXPLORE_COMPRESS_KEEP_RECENT_TOOL_RESULTS = 2;
 const EXPLORE_COMPRESS_MIN_TOOL_CHARS = 800;
-const EXPLORE_COMPRESSION_THRESHOLD_RATIO = 0.75;
 const EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS = 18_000;
 const EXPLORE_SUMMARY_MESSAGE_MAX_CHARS = 2_000;
 const EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS = 18_000;
@@ -299,22 +296,6 @@ function isCompressedExploreToolOutput(message: ToolMessage) {
   return readPinpawoMetadata(message)?.exploreRawEvicted === true;
 }
 
-function shouldCompressExploreToolOutput(
-  ctx: ContextPolicyContext,
-  options: ExploreCapabilityOptions,
-): boolean {
-  const budgetTokens = options.compressionBudgetTokens ?? ctx.contextWindowTokens;
-  const latestInputTokens = ctx.latestProviderInputTokens;
-  if (!budgetTokens || !Number.isFinite(budgetTokens) || budgetTokens <= 0) {
-    return false;
-  }
-  if (typeof latestInputTokens !== 'number' || !Number.isFinite(latestInputTokens)) {
-    return false;
-  }
-  const thresholdRatio = options.compressionThresholdRatio ?? EXPLORE_COMPRESSION_THRESHOLD_RATIO;
-  return latestInputTokens >= Math.max(1, Math.floor(budgetTokens * thresholdRatio));
-}
-
 function collectCompressibleToolResultIndexes(messages: BaseMessage[]): number[] {
   const toolIndexes = messages
     .map((message, index) => ({ message, index }))
@@ -459,11 +440,8 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       let pendingArtifact: PendingExploreArtifact | null = null;
       const rewriteOldToolOutput = async (
         messages: BaseMessage[],
-        ctx: ContextPolicyContext,
+        _ctx: ContextPolicyContext,
       ): Promise<BaseMessage[]> => {
-        if (!shouldCompressExploreToolOutput(ctx, options)) {
-          return messages;
-        }
         const toolIndexes = collectCompressibleToolResultIndexes(messages);
         if (toolIndexes.length === 0) {
           return messages;

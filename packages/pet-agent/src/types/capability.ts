@@ -1,7 +1,7 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { ZodType } from 'zod';
 import type { AgentActor, AgentExecution, AgentModels } from './agent';
-import type { SubagentInput, SubagentResult } from './subagent';
+import type { SubagentResult, SubagentRunInput } from './subagent';
 import type { SubagentContextPolicy } from './subagent';
 import type { AgentToolset } from './toolkit';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from './artifact';
@@ -46,7 +46,7 @@ export type CapabilityMiddlewareContext = {
 };
 
 export type CapabilityMiddleware = {
-  beforeRun?: (input: SubagentInput) => SubagentInput | Promise<SubagentInput>;
+  beforeRun?: (input: SubagentRunInput) => SubagentRunInput | Promise<SubagentRunInput>;
   afterRun?: (
     result: SubagentResult,
     ctx: CapabilityMiddlewareContext,

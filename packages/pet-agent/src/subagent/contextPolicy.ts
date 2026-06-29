@@ -14,7 +14,6 @@ import {
 import { readMessageText } from '../agent/orchestrator/utils';
 
 const DEFAULT_MIN_SIZE_CHARS = 2000;
-const DEFAULT_COMPRESSION_THRESHOLD_RATIO = 0.75;
 const CONTEXT_POLICY_MARKER_KEY = 'contextPolicyRewrite';
 
 type ToolResultCandidate = {
@@ -183,30 +182,6 @@ function rewriteCandidate(
   return replaceToolMessageContent(candidate.message, buildDefaultStub(candidate), 'evicted');
 }
 
-export function buildContextPolicyTriggerTokens(
-  policy: NonNullable<SubagentContextPolicy['evictToolResults']>,
-  ctx: ContextPolicyContext,
-): number | null {
-  const budgetTokens = policy.budgetTokens ?? ctx.contextWindowTokens;
-  if (!budgetTokens || !Number.isFinite(budgetTokens) || budgetTokens <= 0) {
-    return null;
-  }
-  const ratio = policy.compressionThresholdRatio ?? DEFAULT_COMPRESSION_THRESHOLD_RATIO;
-  return Math.max(1, Math.floor(budgetTokens * ratio));
-}
-
-function shouldApplyCompression(
-  policy: NonNullable<SubagentContextPolicy['evictToolResults']>,
-  ctx: ContextPolicyContext,
-): boolean {
-  const triggerTokens = buildContextPolicyTriggerTokens(policy, ctx);
-  const latestInputTokens = ctx.latestProviderInputTokens;
-  return triggerTokens !== null
-    && typeof latestInputTokens === 'number'
-    && Number.isFinite(latestInputTokens)
-    && latestInputTokens >= triggerTokens;
-}
-
 export function rewriteMessagesForContextPolicy(
   messages: BaseMessage[],
   policy: SubagentContextPolicy | undefined,
@@ -218,7 +193,6 @@ export function rewriteMessagesForContextPolicy(
   }
   const evictPolicy = policy.evictToolResults;
   if (!evictPolicy) return messages;
-  if (!shouldApplyCompression(evictPolicy, ctx)) return messages;
 
   const minSizeChars = evictPolicy.minSizeChars ?? DEFAULT_MIN_SIZE_CHARS;
   const candidates = markRecentProtected(

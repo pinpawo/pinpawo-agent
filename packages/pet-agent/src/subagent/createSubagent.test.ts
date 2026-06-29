@@ -7,13 +7,14 @@ import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import { createSubagent } from './createSubagent';
-import { LOOP_GUARD_MARKER_KEY, readLoopGuardStopReason } from './loopGuards';
+import {
+  SUBAGENT_GUARD_STOP_MARKER_KEY,
+  readSubagentGuardStopReason,
+} from './guardStop';
 
 /**
  * Minimal model that never converges: it keeps emitting a fresh tool call every
- * turn. Paired with a contextPolicy that collapses the transcript back to a fixed
- * list, the messages submitted to the model repeat across turns — the exact
- * condition RepeatedInputGuard is meant to catch.
+ * turn, which exercises the subagent's graceful limit handling.
  */
 class NeverConvergingModel extends BaseChatModel {
   callCount = 0;
@@ -119,44 +120,36 @@ test('createSubagent contextPolicy rewrites persisted subagent transcript', asyn
   assert.equal(toolMessages[0]?.content, '[evicted: view_file_chunk src/a.ts -> 已读；需要时重新调用]');
 });
 
-test('createSubagent returns limit_reached when the repeated-input guard trips', async () => {
-  const noop = tool(async () => 'same', {
-    name: 'noop',
-    description: 'no-op',
-    schema: z.object({}),
-  });
-  const model = new NeverConvergingModel({});
-  // Collapse every turn back to the same fixed list so the model input repeats —
-  // the spinning-on-identical-input condition RepeatedInputGuard guards against.
-  const fixedTranscript: BaseMessage[] = [new HumanMessage('do the task')];
-
-  const result = await createSubagent({
-    model: model as unknown as BaseChatModel,
-    tools: [noop],
+test('createSubagent custom context rewrite runs only after watermark guard blocks', async () => {
+  const run = (inputTokens: number) => createSubagent({
+    model: new FakeListChatModel({
+      responses: ['subagent result'],
+      sleep: 0,
+    }),
+    tools: [],
     instructions: [],
-    messages: [new HumanMessage('do the task')],
-    maxIterations: 30,
-    contextPolicy: { rewrite: () => fixedTranscript },
+    contextPolicy: {
+      rewrite: () => [new HumanMessage('custom rewritten context')],
+    },
+    messages: [
+      new HumanMessage('do the task'),
+      usageMessage('previous provider usage', inputTokens),
+    ],
+    contextWindowTokens: 1000,
+    maxIterations: 4,
   });
 
-  // The guard stopped the loop well before the maxIterations breaker.
-  assert.equal(result.completionReason, 'limit_reached');
-  assert.ok(model.callCount < 30, `guard should stop early, got ${model.callCount} model calls`);
-
-  // The stop notice is present and carries the typed guard-stop reason.
-  const last = result.messages.at(-1);
-  assert.ok(last);
-  assert.equal(last?._getType(), 'ai');
-  assert.equal(readLoopGuardStopReason(last as BaseMessage), 'repeated_input');
-  assert.match(String(last?.content ?? ''), /原地打转/);
-
-  // The subagent transcript (the prior conversation) is preserved alongside the
-  // notice — the stop appends, it does not replace context.
-  assert.ok(
-    result.messages.length > 1,
-    'expected the conversation context to be kept alongside the stop notice',
+  const belowWatermark = await run(400);
+  assert.equal(
+    belowWatermark.messages.some((message) => message.content === 'custom rewritten context'),
+    false,
   );
-  assert.equal(result.messages[0]?._getType(), 'human');
+
+  const aboveWatermark = await run(900);
+  assert.equal(
+    aboveWatermark.messages.some((message) => message.content === 'custom rewritten context'),
+    true,
+  );
 });
 
 test('createSubagent ignores a stop marker that arrives in the input history', async () => {
@@ -164,7 +157,11 @@ test('createSubagent ignores a stop marker that arrives in the input history', a
   // be misread as our guard stop. The run completes naturally.
   const staleStopNotice = new AIMessage({
     content: '上一轮的停止说明',
-    additional_kwargs: { pinpawo: { [LOOP_GUARD_MARKER_KEY]: 'repeated_input' } },
+    additional_kwargs: {
+      pinpawo: {
+        [SUBAGENT_GUARD_STOP_MARKER_KEY]: 'subagent_iteration_limit_reached',
+      },
+    },
   });
 
   const result = await createSubagent({
@@ -177,12 +174,12 @@ test('createSubagent ignores a stop marker that arrives in the input history', a
 
   assert.equal(result.completionReason, 'natural');
   // The final message is the fresh model answer, not the stale marker.
-  assert.equal(readLoopGuardStopReason(result.messages.at(-1) as BaseMessage), null);
+  assert.equal(readSubagentGuardStopReason(result.messages.at(-1) as BaseMessage), null);
 });
 
-test('createSubagent default iteration budget is large (P4: unified ~100 super-steps)', async () => {
+test('createSubagent default iteration budget is a soft model-call guard', async () => {
   // A never-converging loop with no explicit maxIterations must run on the raised
-  // default budget (~100 super-steps ≈ ~50 model calls), not the old small value.
+  // default model-call budget, not the old small runtime breaker.
   const noop = tool(async () => 'x', {
     name: 'noop',
     description: 'no-op',
@@ -199,8 +196,6 @@ test('createSubagent default iteration budget is large (P4: unified ~100 super-s
   });
 
   assert.equal(result.completionReason, 'limit_reached');
-  // One ReAct iteration ≈ 2 super-steps, so a ~100 budget yields well above the
-  // old default of 12 (which would have stopped at ~6 model calls).
   assert.ok(
     model.callCount > 20,
     `expected the raised default budget to allow many model calls, got ${model.callCount}`,

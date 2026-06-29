@@ -1,12 +1,8 @@
-import type { BaseMessage } from '@langchain/core/messages';
 import {
   GuardRegistry,
   type Guard,
 } from '../../guards';
-import type {
-  SubagentContextPolicy,
-  SubagentToolOperationMetadata,
-} from '../../types/subagent';
+import type { SubagentInputState } from '../../types/subagent';
 
 export const SUBAGENT_GUARD_POSITION = {
   BEFORE_MODEL_CONTEXT_POLICY: 'subagent.before_model_context_policy',
@@ -24,23 +20,14 @@ export const SUBAGENT_GUARD_NAME = {
 export type SubagentGuardName =
   typeof SUBAGENT_GUARD_NAME[keyof typeof SUBAGENT_GUARD_NAME];
 
-export type SubagentState = {
-  messages: BaseMessage[];
-};
-
-export type SubagentContextRewriteGuardConfig = {
-  evictToolResults?: SubagentContextPolicy['evictToolResults'];
-};
-
-export type SubagentGuardConfig = {
-  contextPolicy?: SubagentContextRewriteGuardConfig;
-  contextWindowTokens?: number;
+export type SubagentState = Omit<SubagentInputState, 'maxIterations'> & {
   iterationCount: number;
-  maxIterations?: number;
-  operations?: Record<string, SubagentToolOperationMetadata>;
+  maxIterations: number;
 };
 
-export type SubagentGuardUpdate = Partial<SubagentState>;
+export type SubagentGuardConfig = Record<string, never>;
+
+export type SubagentGuardUpdate = Partial<Pick<SubagentState, 'messages'>>;
 
 export type SubagentGuard = Guard<
   SubagentState,

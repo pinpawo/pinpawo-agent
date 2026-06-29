@@ -1,18 +1,18 @@
-import { AIMessage } from '@langchain/core/messages';
 import {
   defineGuard,
   guardBlock,
   guardPass,
 } from '../../guards';
+import { buildSubagentGuardStopNotice } from '../guardStop';
 import {
   SUBAGENT_GUARD_NAME,
   SUBAGENT_GUARD_POSITION,
   type SubagentGuard,
 } from './types';
 
-function buildSubagentIterationLimitNotice(iterationCount: number, maxIterations: number): string {
+function buildSubagentIterationLimitNotice(attemptedIteration: number, maxIterations: number): string {
   return [
-    `Subagent loop reached its iteration limit: ${iterationCount}/${maxIterations}.`,
+    `Subagent loop reached its iteration limit: attempted ${attemptedIteration}, limit ${maxIterations}.`,
     'Stop the loop and report the current progress instead of waiting for LangGraph recursionLimit.',
   ].join('\n');
 }
@@ -22,26 +22,26 @@ export function createSubagentIterationLimitGuard(): SubagentGuard {
     name: SUBAGENT_GUARD_NAME.ITERATION_LIMIT,
     positions: [SUBAGENT_GUARD_POSITION.BEFORE_MODEL_ITERATION],
     rule: {
-      check: ({ config }) => {
-        const maxIterations = config.maxIterations;
+      check: ({ state }) => {
+        const maxIterations = state.maxIterations;
         if (!maxIterations || !Number.isFinite(maxIterations) || maxIterations <= 0) {
           return guardPass();
         }
-        return config.iterationCount >= maxIterations
+        return state.iterationCount > maxIterations
           ? guardBlock('subagent_iteration_limit_reached', {
-            iterationCount: config.iterationCount,
+            iterationCount: state.iterationCount,
             maxIterations,
           })
           : guardPass();
       },
     },
     handler: {
-      handle: ({ config, result }) => result.status === 'block'
+      handle: ({ result, state }) => result.status === 'block'
         ? {
           messages: [
-            new AIMessage(buildSubagentIterationLimitNotice(
-              config.iterationCount,
-              config.maxIterations ?? config.iterationCount,
+            buildSubagentGuardStopNotice('subagent_iteration_limit_reached', buildSubagentIterationLimitNotice(
+              state.iterationCount,
+              state.maxIterations ?? state.iterationCount,
             )),
           ],
         }

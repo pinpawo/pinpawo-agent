@@ -1,29 +1,46 @@
 import { type BaseMessage } from '@langchain/core/messages';
 import type {
-  SubagentInput,
+  SubagentInputState,
   SubagentResult,
+  SubagentRunInput,
   SubagentToolLifecycleEvent,
 } from '../types/subagent';
+import type {
+  GuardRunOptions,
+  GuardRunResult,
+} from '../guards';
 import { createAgent, createMiddleware } from 'langchain';
 import { SubagentToolEventTracker } from './toolEventTracker';
-import { readLatestProviderInputTokens } from '../agent/tokenUsage';
 import {
   buildContextPolicyStateUpdate,
   rewriteMessagesForContextPolicy,
 } from './contextPolicy';
 import { isGraphRecursionLimitError } from '../utils/graphErrors';
 import {
-  createRepeatedInputGuard,
-  createSubagentLoopGuardMiddleware,
-  isLoopGuardStopMessage,
-  type SubagentLoopGuard,
-} from './loopGuards';
+  createSubagentGuardRegistry,
+  SUBAGENT_GUARD_NAME,
+  SUBAGENT_GUARD_POSITION,
+  type SubagentGuardConfig,
+  type SubagentGuardName,
+  type SubagentGuardPosition,
+  type SubagentGuardUpdate,
+  type SubagentState,
+} from './guardDefinitions';
+import { isSubagentGuardStopMessage } from './guardStop';
+import { Command, END } from '@langchain/langgraph';
 
-// Fallback iteration budget when the caller does not pass maxIterations. Used as
-// the inner ReAct agent's LangGraph recursionLimit (graph super-steps; one
-// model→tool iteration is ~2 steps). With loop guards (#280) the expected stop is
-// a guard's graceful stop, so this is a generous last-resort breaker. See P4 / #281.
+// Fallback model-call budget when the caller does not pass maxIterations. The
+// subagent iteration guard should stop gracefully first; LangGraph recursionLimit
+// is a deliberately high last-resort breaker, not a normal control signal.
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 100;
+const SUBAGENT_HARD_RECURSION_LIMIT = 10_000;
+
+type SubagentGuardRunOptions = GuardRunOptions<
+  SubagentState,
+  SubagentGuardConfig,
+  SubagentGuardPosition,
+  SubagentGuardUpdate
+>;
 
 const SUBAGENT_GOVERNING_PROMPT = [
   '你是任务执行器，负责精确完成分配给你的任务。',
@@ -92,60 +109,136 @@ function isSubagentToolLifecycleEvent(payload: unknown): payload is SubagentTool
   );
 }
 
-/**
- * Assemble the subagent loop guards (the hard pass/block predicates that stop the
- * ReAct loop). RepeatedInputGuard catches a loop spinning on identical input and
- * blocks by gracefully ending the agent (see loopGuards.ts) so createSubagent
- * reports `limit_reached` instead of throwing.
- */
-function buildSubagentLoopGuards(): SubagentLoopGuard[] {
-  return [createRepeatedInputGuard()];
+function buildContextPolicyContext(
+  state: SubagentState,
+) {
+  return {
+    iterationCount: state.iterationCount,
+    operations: state.operations ?? {},
+    ...(state.contextWindowTokens ? { contextWindowTokens: state.contextWindowTokens } : {}),
+    ...(state.artifactSink ? { artifactSink: state.artifactSink } : {}),
+  };
 }
 
-function createContextPolicyMiddleware(input: SubagentInput) {
-  const policy = input.contextPolicy;
-  if (!policy) return null;
+function snapshotSubagentStateForMiddleware(
+  inputState: SubagentInputState,
+  messages: BaseMessage[],
+  iterationCount: number,
+  maxIterations: number,
+): SubagentState {
+  return {
+    ...inputState,
+    iterationCount,
+    maxIterations,
+    messages,
+  };
+}
+
+function createContextPolicyMiddleware(inputState: SubagentInputState, maxIterations: number) {
   let iterationCount = 0;
-  const operations = input.operations ?? {};
+  const registry = createSubagentGuardRegistry();
+  async function runSubagentGuard(
+    name: SubagentGuardName,
+    position: SubagentGuardPosition,
+    messages: BaseMessage[],
+    runOptions?: SubagentGuardRunOptions,
+  ): Promise<GuardRunResult<SubagentGuardUpdate>> {
+    const subagentState = snapshotSubagentStateForMiddleware(inputState, messages, iterationCount, maxIterations);
+    return registry.run(name, {
+      state: subagentState,
+      config: {},
+      position,
+    }, runOptions);
+  }
+
   return createMiddleware({
     name: 'SubagentContextPolicy',
     beforeModel: async (state) => {
       iterationCount += 1;
+      const policy = inputState.contextPolicy;
+      if (!policy) {
+        return undefined;
+      }
       const messages = state.messages;
       if (!Array.isArray(messages) || messages.length === 0) {
         return undefined;
       }
-      const latestProviderInputTokens = readLatestProviderInputTokens(messages as BaseMessage[]);
-      const context = {
-        iterationCount,
-        operations,
-        ...(input.contextWindowTokens ? { contextWindowTokens: input.contextWindowTokens } : {}),
-        ...(latestProviderInputTokens !== null ? { latestProviderInputTokens } : {}),
-        ...(input.artifactSink ? { artifactSink: input.artifactSink } : {}),
-      };
-      const rewritten = policy.rewriteAsync
-        ? await policy.rewriteAsync(messages as BaseMessage[], context)
-        : rewriteMessagesForContextPolicy(messages as BaseMessage[], policy, context);
-      return buildContextPolicyStateUpdate(messages as BaseMessage[], rewritten);
+      const baseMessages = messages as BaseMessage[];
+      const { update } = await runSubagentGuard(
+        SUBAGENT_GUARD_NAME.CONTEXT_REWRITE_WATERMARK,
+        SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_POLICY,
+        baseMessages,
+        {
+          onBlock: async ({ state }) => {
+            const context = buildContextPolicyContext(state);
+            const rewritten = policy.rewriteAsync
+              ? await policy.rewriteAsync(state.messages, context)
+              : rewriteMessagesForContextPolicy(state.messages, policy, context);
+            return buildContextPolicyStateUpdate(state.messages, rewritten) ?? null;
+          },
+        },
+      );
+      return update ?? undefined;
     },
   });
 }
 
-export async function createSubagent(input: SubagentInput): Promise<SubagentResult> {
+function createSubagentIterationGuardMiddleware(inputState: SubagentInputState, maxIterations: number) {
+  let iterationCount = 0;
+  const registry = createSubagentGuardRegistry();
+  async function runSubagentGuard(
+    name: SubagentGuardName,
+    position: SubagentGuardPosition,
+    messages: BaseMessage[],
+    runOptions?: SubagentGuardRunOptions,
+  ): Promise<GuardRunResult<SubagentGuardUpdate>> {
+    const subagentState = snapshotSubagentStateForMiddleware(inputState, messages, iterationCount, maxIterations);
+    return registry.run(name, {
+      state: subagentState,
+      config: {},
+      position,
+    }, runOptions);
+  }
+
+  return createMiddleware({
+    name: 'SubagentIterationGuard',
+    wrapModelCall: async (request, handler) => {
+      iterationCount += 1;
+      const { result, update } = await runSubagentGuard(
+        SUBAGENT_GUARD_NAME.ITERATION_LIMIT,
+        SUBAGENT_GUARD_POSITION.BEFORE_MODEL_ITERATION,
+        request.messages ?? [],
+      );
+      if (result.status === 'block') {
+        return new Command({ goto: END, update: update ?? {} });
+      }
+      return handler(request);
+    },
+  });
+}
+
+export async function createSubagent(input: SubagentRunInput): Promise<SubagentResult> {
+  const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
+  const inputState: SubagentInputState = {
+    instructions: input.instructions,
+    operations: input.operations,
+    messages: input.messages,
+    maxIterations: input.maxIterations,
+    contextWindowTokens: input.contextWindowTokens,
+    contextPolicy: input.contextPolicy,
+    artifacts: input.artifacts,
+    artifactSink: input.artifactSink,
+  };
   const systemPrompt = [
     SUBAGENT_GOVERNING_PROMPT,
-    input.contextPolicy ? CONTEXT_POLICY_GOVERNING_PROMPT : null,
-    ...input.instructions,
+    inputState.contextPolicy ? CONTEXT_POLICY_GOVERNING_PROMPT : null,
+    ...inputState.instructions,
   ].filter((item): item is string => Boolean(item)).join('\n\n');
-  const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
-  const loopGuardMiddleware = createSubagentLoopGuardMiddleware(
-    buildSubagentLoopGuards(),
-    systemPrompt,
-  );
-  const contextPolicyMiddleware = createContextPolicyMiddleware(input);
+  const contextPolicyMiddleware = createContextPolicyMiddleware(inputState, maxIterations);
+  const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(inputState, maxIterations);
   const middleware = [
     contextPolicyMiddleware,
-    loopGuardMiddleware,
+    iterationGuardMiddleware,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   const agent = createAgent({
@@ -156,10 +249,10 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
     ...(input.checkpoint ? { checkpointer: input.checkpoint } : {}),
   });
 
-  let latestMessages = input.messages;
+  let latestMessages = inputState.messages;
   const toolEvents = new SubagentToolEventTracker();
   const emitToolEvent = async (event: SubagentToolLifecycleEvent) => {
-    const operation = event.operation ?? input.operations?.[event.name];
+    const operation = event.operation ?? inputState.operations?.[event.name];
     await input.onToolEvent?.(toolEvents.accept(operation ? { ...event, operation } : event));
   };
   const finishToolEvents = async (outcome: 'completed' | 'failed', error?: unknown) => {
@@ -192,14 +285,13 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
 
   try {
     const stream = await agent.stream(
-      { messages: input.messages },
+      { messages: inputState.messages },
       {
         ...input.runnableConfig,
         signal: input.signal,
-        // maxIterations is the budget in LangGraph super-steps (one model→tool
-        // iteration ≈ 2 steps). This is the last-resort breaker; loop guards are
-        // expected to stop the loop gracefully first.
-        recursionLimit: maxIterations,
+        // Normal stopping is controlled by the subagent iteration guard.
+        // LangGraph recursionLimit stays intentionally high as a final breaker.
+        recursionLimit: SUBAGENT_HARD_RECURSION_LIMIT,
         streamMode: ['messages', 'values', 'tools'],
       },
     );
@@ -222,28 +314,28 @@ export async function createSubagent(input: SubagentInput): Promise<SubagentResu
       latestMessages = readMessagesFromValuesChunk(chunk) ?? latestMessages;
     }
 
-    // A loop guard may have gracefully ended the agent by appending its stop
+    // A guard may have gracefully ended the agent by appending its stop
     // notice as the FINAL message (via Command goto END). That is a clean "limit
     // reached" stop, not natural completion. Check only the last message — a stop
     // marker buried in the input history must not be misread as our stop, and
     // contextPolicy may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
-    const stoppedByGuard = lastMessage ? isLoopGuardStopMessage(lastMessage) : false;
+    const stoppedByGuard = lastMessage ? isSubagentGuardStopMessage(lastMessage) : false;
     await finishToolEvents('completed');
     return {
       messages: latestMessages,
-      artifacts: input.artifacts ?? [],
+      artifacts: inputState.artifacts ?? [],
       completionReason: stoppedByGuard ? 'limit_reached' : 'natural',
     };
   } catch (err) {
-    // The agent's hard recursion breaker (recursionLimit) fired. Loop guards are
-    // meant to stop before this, but keep it as a graceful last-resort: degrade
-    // to limit_reached instead of throwing through the orchestrator.
+    // The agent's hard recursion breaker (recursionLimit) fired. The iteration
+    // guard is meant to stop before this, but keep it as a graceful last-resort:
+    // degrade to limit_reached instead of throwing through the orchestrator.
     if (isGraphRecursionLimitError(err)) {
       await finishToolEvents('failed', err);
       return {
         messages: latestMessages,
-        artifacts: input.artifacts ?? [],
+        artifacts: inputState.artifacts ?? [],
         completionReason: 'limit_reached',
       };
     }

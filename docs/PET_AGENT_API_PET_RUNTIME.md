@@ -53,6 +53,7 @@ type PetAgentRuntimeConfig = {
   checkpoint?: OrchestratorConfig['checkpoint'];
   decisionStructuredOutput?: OrchestratorConfig['decisionStructuredOutput'];
   contextWindowTokens?: OrchestratorConfig['contextWindowTokens'];
+  subagentContextWindowTokens?: OrchestratorConfig['subagentContextWindowTokens'];
 };
 ```
 

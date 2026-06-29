@@ -63,7 +63,7 @@ export type SubagentToolEventHandler = (event: SubagentToolEvent) => void | Prom
  * this only carries what the subagent loop cannot otherwise see.
  *
  * This is the single artifact-sink shape shared by every layer that can persist
- * an artifact — the contextPolicy hook (here), the afterRun middleware
+ * an artifact — the in-loop context rewrite path, the afterRun middleware
  * (`CapabilityMiddlewareContext`), and toolkit tools (`ToolkitContext`) all
  * expose the same `recordCapabilityArtifact` + addressing ids.
  */
@@ -77,7 +77,6 @@ export type CapabilityArtifactSink = {
 export type ContextPolicyContext = {
   iterationCount: number;
   operations: Record<string, SubagentToolOperationMetadata>;
-  latestProviderInputTokens?: number;
   contextWindowTokens?: number;
   artifactSink?: CapabilityArtifactSink;
 };
@@ -86,8 +85,6 @@ export type SubagentContextPolicy = {
   evictToolResults?: {
     keepRecent: number;
     defaultMode?: 'evict' | 'truncate';
-    budgetTokens?: number;
-    compressionThresholdRatio?: number;
     minSizeChars?: number;
     keepFailures?: boolean;
     perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
@@ -96,20 +93,23 @@ export type SubagentContextPolicy = {
   rewriteAsync?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[] | Promise<BaseMessage[]>;
 };
 
-export type SubagentInput = {
-  model: BaseChatModel;
-  tools: StructuredTool[];
+export type SubagentInputState = {
   instructions: string[];
   operations?: Record<string, SubagentToolOperationMetadata>;
   messages: BaseMessage[];
   maxIterations?: number;
   contextWindowTokens?: number;
   contextPolicy?: SubagentContextPolicy;
+  artifacts?: CapabilityArtifactRef[];
+  artifactSink?: CapabilityArtifactSink;
+};
+
+export type SubagentRunInput = SubagentInputState & {
+  model: BaseChatModel;
+  tools: StructuredTool[];
   checkpoint?: BaseCheckpointSaver;
   runnableConfig?: RunnableConfig;
   signal?: AbortSignal;
-  artifacts?: CapabilityArtifactRef[];
-  artifactSink?: CapabilityArtifactSink;
   onToolEvent?: SubagentToolEventHandler;
 };
 

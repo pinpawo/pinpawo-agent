@@ -187,6 +187,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       capabilities: capsForThisPet,
       toolkits: input.toolkits,
       contextWindowTokens: input.llmConfig.contextWindowTokens,
+      subagentContextWindowTokens: input.llmConfig.subagentContextWindowTokens ?? input.llmConfig.contextWindowTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,
       workdir: effectiveWorkdir,
       humanReviewer: createWsHumanReviewer({

@@ -7,7 +7,7 @@
 ```text
 subagent / capability 运行
   ├─ capabilityRuntime 持有 `artifactStore`（持久化写入接口）
-  ├─ 在代码侧（contextPolicy/afterRun）产出 ArtifactRef
+  ├─ 在代码侧（context rewrite/afterRun）产出 ArtifactRef
   ├─ 通过 `recordCapabilityArtifact` 落到 `SubagentResult.artifacts`
   ├─ `capabilityNode` 合并到 `state.sessionCapabilityArtifacts`
   ├─ 委派结束时，`buildSubagentHandoff` 将当前 announce 复制到主队列
@@ -45,9 +45,9 @@ subagent / capability 运行
 
 1. `capability.createRuntime()` 时注入 `CapabilityContext.artifactStore`。
 2. `createSubagent()` 运行上下文收到 `artifactSink`（`threadId/delegationId/runId`）。
-3. `ContextPolicy.rewriteAsync`（如 explore）可在中间过程记录 `pending` 摘要。
+3. 子代理上下文改写 hook（如 explore）可在中间过程记录 `pending` 摘要。
 4. `capability.middleware.afterRun` 将最终 `Pending`/`final` 摘要写入 store。
-5. `SubagentInput.artifacts` 与 `artifactSink` 汇总的 refs 回传。
+5. Subagent graph state 的 `artifacts` 与 `artifactSink` 汇总的 refs 回传。
 6. `capabilityNode` 在 `sessionCapabilityArtifacts` 上使用 reducer 合并。
 
 ## 与旧路径的关系

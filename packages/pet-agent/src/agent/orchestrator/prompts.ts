@@ -240,7 +240,7 @@ function buildRecentSubagentAnnounceXmlContext(announces: SubagentAnnounce[]): s
       lines.push(indentXmlBlock(xmlTextBlock('task', clipForPrompt(item.task, 140)), 4));
     }
     if (item.text) {
-      lines.push(indentXmlBlock(xmlTextBlock('summary', clipForPrompt(item.text, 220)), 4));
+      lines.push(indentXmlBlock(xmlTextBlock('summary', item.text), 4));
     }
     lines.push('  </announce>');
   }

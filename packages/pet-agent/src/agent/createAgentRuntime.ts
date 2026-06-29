@@ -321,6 +321,37 @@ function readSubagentContextWindowTokens(config: OrchestratorConfig): number | u
   return config.subagentContextWindowTokens ?? config.contextWindowTokens;
 }
 
+function recoverTaskActiveDelegationFromRunState(
+  state: OrchestratorStateType,
+): TaskActiveDelegation | null {
+  if (state.taskActiveDelegation || !state.runId) {
+    return null;
+  }
+  for (let index = state.runDelegations.length - 1; index >= 0; index -= 1) {
+    const delegation = state.runDelegations[index];
+    if (delegation.status !== 'progress' && delegation.status !== 'completed') {
+      continue;
+    }
+    const announce = readLatestAnnounce(state.messages, {
+      runId: state.runId,
+      delegationId: delegation.id,
+    });
+    if (!announce) {
+      continue;
+    }
+    return {
+      id: delegation.id,
+      lane: delegation.lane,
+      task: delegation.task,
+      contextSummary: null,
+      transcriptRunId: state.runId,
+      status: 'awaiting_decision',
+      resultPreview: delegation.resultPreview,
+    };
+  }
+  return null;
+}
+
 function resolveDelegationTranscriptRunId(
   state: OrchestratorStateType,
   delegation: RunPendingDelegation,
@@ -450,12 +481,19 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   }
 
   async function prepare(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    return runOrchestratorGuard(
+    const patch = await runOrchestratorGuard(
       ORCHESTRATOR_GUARD_NAME.RUN_STATE_RESET,
       ORCHESTRATOR_GUARD_POSITION.PREPARE,
       state,
       runnableConfig,
     );
+    if ('runId' in patch) {
+      return patch;
+    }
+    const taskActiveDelegation = recoverTaskActiveDelegationFromRunState(state);
+    return taskActiveDelegation
+      ? { ...patch, taskActiveDelegation }
+      : patch;
   }
 
   async function compactContext(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {

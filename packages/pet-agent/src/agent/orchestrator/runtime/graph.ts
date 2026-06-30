@@ -2,10 +2,7 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langc
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
-import type { CapabilityArtifactRef } from '../../../types/artifact';
-import type { SubagentRunInput } from '../../../types/subagent';
 import { randomUUID } from 'node:crypto';
-import { createSubagent } from '../../../subagent/createSubagent';
 import {
   buildEmptyRunCapabilitySearchState,
   OrchestratorState,
@@ -54,7 +51,6 @@ import {
 } from '../prompts';
 import {
   reuseOrAppendRunDelegation,
-  updateRunDelegationResult,
 } from '../delegations';
 import {
   buildHandoffArtifactRefs,
@@ -63,26 +59,17 @@ import {
 import {
   buildSubagentHandoff,
   getMessageHandoffSource,
-  laneMessages,
   readInFlightAnnounceLanes,
   readLatestHumanRequest,
   readLatestAnnounce,
   readLatestAnnounceCompletionReason,
   readRecentAnnounces,
-  tagNewLaneMessages,
 } from '../messageLanes';
 import {
-  buildDelegationHandoffInstruction,
-  collectCapabilityOperations,
-  collectGeneralOperations,
-  collectToolkitOperations,
-  resolveInstructions,
   resolveToolkitResources,
-  selectCapabilityTools,
 } from '../subagentHandoff';
 import { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from '../validation';
 import { readMessageText } from '../utils';
-import { createToolAuthorizationRecorder } from './authorization';
 import {
   canSearchCapabilities,
   buildCapabilityCandidatesFromLanes,
@@ -92,21 +79,15 @@ import {
 } from './decisions/capabilityCandidates';
 import {
   createTaskActiveDelegation,
-  readCapabilityNameFromLane,
-  resolveDelegationTranscriptRunId,
 } from './decisions/delegationLifecycle';
 import {
-  CAPABILITY_SUBAGENT_MAX_ITERATIONS,
   DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
-  GENERAL_SUBAGENT_MAX_ITERATIONS,
 } from './constants';
 import {
-  capabilityLaneToolkits,
   generalLaneToolkits,
   getInvokeOptions,
   readRunIterationLimit,
   readSubagentContextWindowTokens,
-  readThreadId,
   resolveActor,
 } from './config';
 import {
@@ -117,7 +98,9 @@ import {
   prepareUserIntentDecision,
 } from './guards/nodes';
 import { createAnswerNode } from './nodes/answer';
+import { createCapabilityNode } from './nodes/capability';
 import { createCapabilityDiscoveryNode } from './nodes/capabilityDiscovery';
+import { createGeneralNode } from './nodes/general';
 import {
   createControlContextBuilder,
   createOrchestratorGuardRegistry,
@@ -516,276 +499,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   };
 
   const answerNode = createAnswerNode(config);
-
-  // Node: capability — reads capabilities, tools, execution from configurable
-  async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const {
-      capabilities,
-      toolkits,
-      execution,
-      onToolEvent,
-      workdir,
-      runtimeEnvironment,
-      reviewCapabilities,
-      globalReviewPolicy,
-    } = getInvokeOptions(runnableConfig);
-    const actor = resolveActor(config, runnableConfig);
-    const toolkitList = capabilityLaneToolkits(toolkits ?? []);
-    validateUniqueToolkitNames(toolkitList);
-    const runPendingDelegation = state.runPendingDelegation;
-    if (!runPendingDelegation) {
-      throw new Error('Capability node cannot run without a pending capability delegation.');
-    }
-    const capabilityName = readCapabilityNameFromLane(runPendingDelegation.lane);
-    if (!capabilityName) {
-      throw new Error('Capability node received a non-capability delegation lane.');
-    }
-    const capability = capabilities?.find((c) => c.name === capabilityName);
-    if (!capability) {
-      throw new Error(`Capability node cannot resolve capability "${capabilityName}".`);
-    }
-    const lane: MessageLane = `capability:${capability.name}`;
-    const transcriptRunId = resolveDelegationTranscriptRunId(state, runPendingDelegation);
-    const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runPendingDelegation.id);
-    const threadId = readThreadId(runnableConfig);
-
-    const availableToolkits = toolkitList.map(({ name, description }) => ({
-      name,
-      description,
-    }));
-
-    const runtime = await capability.createRuntime({
-      models: config.models,
-      actor,
-      messages: scopedMessages,
-      execution,
-      availableToolkits,
-      artifactStore: config.capabilityArtifactStore,
-    });
-
-    const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
-    const artifactRefs: CapabilityArtifactRef[] = [];
-    const toolkitContext = {
-      models: config.models,
-      actor,
-      messages: scopedMessages,
-      threadId,
-      capabilityId: capability.name,
-      resultSchema: capability.resultSchema,
-      delegationId: runPendingDelegation.id,
-      runId: transcriptRunId,
-      execution,
-      reviewCapabilities,
-      globalReviewPolicy,
-      toolAuthorizations: authorizationRecorder.active,
-      recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
-      recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
-        artifactRefs.push(ref);
-      },
-      emitRuntimeEvent: onToolEvent,
-    };
-    const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
-    const runtimeInstructions = await resolveInstructions(runtime, {
-      models: config.models,
-      actor,
-      messages: scopedMessages,
-      availableToolkits,
-    }, execution);
-    const middleware = runtime.middleware;
-    const handoffInstruction = buildDelegationHandoffInstruction({
-      lane,
-      task: runPendingDelegation.task,
-      contextSummary: runPendingDelegation.contextSummary,
-      workdir: workdir ?? null,
-    });
-
-    let subagentInput: SubagentRunInput = {
-      model: config.models.subagent ?? config.models.act,
-      tools: selectCapabilityTools(runtime, usedToolkitResources.tools),
-      instructions: [handoffInstruction, ...usedToolkitResources.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
-      operations: collectCapabilityOperations(usedToolkitResources.toolkits, runtime),
-      messages: scopedMessages,
-      maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
-      contextWindowTokens: subagentContextWindowTokens,
-      contextPolicy: runtime.contextPolicy,
-      checkpoint: config.checkpoint,
-      runnableConfig,
-      signal: runnableConfig?.signal,
-      artifacts: artifactRefs,
-      artifactSink: {
-        recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
-          artifactRefs.push(ref);
-        },
-        threadId,
-        delegationId: runPendingDelegation.id,
-        runId: transcriptRunId,
-      },
-      onToolEvent,
-    };
-    validateUniqueToolNames(subagentInput.tools);
-
-    if (middleware?.beforeRun) {
-      subagentInput = await middleware.beforeRun(subagentInput);
-      validateUniqueToolNames(subagentInput.tools);
-    }
-
-    let result = await createSubagent(subagentInput);
-
-    if (middleware?.afterRun) {
-      result = await middleware.afterRun(result, {
-        recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
-          artifactRefs.push(ref);
-        },
-        threadId,
-        capabilityId: capability.name,
-        delegationId: runPendingDelegation.id,
-        runId: transcriptRunId,
-      });
-    }
-
-    const laneOutputMessages = tagNewLaneMessages(
-      result.messages,
-      subagentInput.messages.length,
-      lane,
-      transcriptRunId,
-      result.completionReason,
-      {
-        delegationId: runPendingDelegation.id,
-        task: runPendingDelegation.task,
-      },
-    );
-    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runPendingDelegation.id });
-    // The subagent node only records that the delegation ran (status 'progress');
-    // whether it is complete is the orchestrator's call at delegationOutcomeDecision,
-    // which upgrades the status to 'completed' when it hands off. The raw lane
-    // messages are kept in place — handoff (or a later continuation) cleans them up.
-    const updatedRunDelegations = updateRunDelegationResult(
-      state.runDelegations,
-      runPendingDelegation.id,
-      {
-        status: 'progress',
-        resultPreview: delegationAnnounce?.text ?? null,
-      },
-    );
-
-    return {
-      messages: laneOutputMessages,
-      sessionCapabilityArtifacts: result.artifacts,
-      runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
-      runDelegations: updatedRunDelegations,
-      runPendingDelegation: null,
-      taskActiveDelegation: {
-        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runPendingDelegation, transcriptRunId)),
-        status: 'awaiting_decision' as const,
-        resultPreview: delegationAnnounce?.text ?? null,
-      },
-      runIterationCount: state.runIterationCount + 1,
-      sessionToolAuthorizations: authorizationRecorder.recorded,
-    };
-  }
-
-  // Node: general — reads tools from configurable
-  async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { toolkits, execution, workdir, runtimeEnvironment, onToolEvent, reviewCapabilities, globalReviewPolicy } = getInvokeOptions(runnableConfig);
-    const actor = resolveActor(config, runnableConfig);
-    const toolkitList = generalLaneToolkits(toolkits ?? []);
-    validateUniqueToolkitNames(toolkitList);
-    const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
-    const toolkitResources = await resolveToolkitResources(toolkitList, undefined, {
-      models: config.models,
-      actor,
-      messages: state.messages,
-      threadId: readThreadId(runnableConfig),
-      execution,
-      reviewCapabilities,
-      globalReviewPolicy,
-      toolAuthorizations: authorizationRecorder.active,
-      recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
-      emitRuntimeEvent: onToolEvent,
-    });
-    const toolList = [...toolkitResources.tools];
-    validateUniqueToolNames(toolList);
-
-    if (toolList.length === 0) {
-      throw new Error('General path selected without any available tools');
-    }
-
-    const lane: MessageLane = 'general';
-    const runPendingDelegation = state.runPendingDelegation;
-    if (!runPendingDelegation || runPendingDelegation.lane !== 'general') {
-      throw new Error('General node cannot run without a pending general delegation.');
-    }
-    const transcriptRunId = resolveDelegationTranscriptRunId(state, runPendingDelegation);
-    const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runPendingDelegation.id);
-    const handoffInstruction = buildDelegationHandoffInstruction({
-      lane,
-      task: runPendingDelegation.task,
-      contextSummary: runPendingDelegation.contextSummary,
-      workdir: workdir ?? null,
-    });
-    const instructions = [
-      '[配置]',
-      `角色：「${actor.name}」`,
-      workdir ? `工作目录：${workdir}` : null,
-      workdir ? '相对路径默认相对于工作目录；只有在工具显式指定其他目录时，才偏离这个目录。' : null,
-      runtimeEnvironment ? runtimeEnvironment : null,
-      '',
-      '使用可用工具完成任务，优先调用工具获取准确信息，再给出结果。',
-    ].filter((line) => line !== null) as string[];
-
-    const subagentMessages = scopedMessages;
-    const result = await createSubagent({
-      model: config.models.subagent ?? config.models.act,
-      tools: toolList,
-      instructions: [handoffInstruction, ...toolkitResources.instructions, ...instructions],
-      operations: collectGeneralOperations(toolkitResources.toolkits),
-      messages: subagentMessages,
-      maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
-      contextWindowTokens: subagentContextWindowTokens,
-      checkpoint: config.checkpoint,
-      runnableConfig,
-      signal: runnableConfig?.signal,
-      onToolEvent,
-    });
-
-    const outputMessages = tagNewLaneMessages(
-      result.messages,
-      subagentMessages.length,
-      lane,
-      transcriptRunId,
-      result.completionReason,
-      {
-        delegationId: runPendingDelegation.id,
-        task: runPendingDelegation.task,
-      },
-    );
-    const delegationAnnounce = readLatestAnnounce(outputMessages, { delegationId: runPendingDelegation.id });
-
-    // See capabilityNode: status is 'progress' until the orchestrator judges it
-    // complete at delegationOutcomeDecision; raw lane messages are kept in place.
-    const updatedRunDelegations = updateRunDelegationResult(
-      state.runDelegations,
-      runPendingDelegation.id,
-      {
-        status: 'progress',
-        resultPreview: delegationAnnounce?.text ?? null,
-      },
-    );
-
-    return {
-      messages: outputMessages,
-      runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
-      runDelegations: updatedRunDelegations,
-      runPendingDelegation: null,
-      taskActiveDelegation: {
-        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runPendingDelegation, transcriptRunId)),
-        status: 'awaiting_decision' as const,
-        resultPreview: delegationAnnounce?.text ?? null,
-      },
-      runIterationCount: state.runIterationCount + 1,
-      sessionToolAuthorizations: authorizationRecorder.recorded,
-    };
-  }
+  const capabilityNode = createCapabilityNode({ config, subagentContextWindowTokens });
+  const generalNode = createGeneralNode({ config, subagentContextWindowTokens });
 
   const graph = new StateGraph(OrchestratorState)
     .addNode('prepare', prepare)

@@ -55,10 +55,22 @@ function makeMessageMeta() {
   };
 }
 
-function shouldReconcileSnapshotAfterMessage(message: LocalAgentServerMessage) {
-  return message.type === 'event'
-    && message.event.type === 'error'
-    && Boolean(message.event.code && REVIEW_RECONCILIATION_ERROR_CODES.has(message.event.code));
+type SnapshotRestoreSource = 'startup' | 'reconnect' | 'reconcile';
+type SnapshotReconciliationSource = Exclude<SnapshotRestoreSource, 'startup'>;
+
+function getSnapshotReconciliationSource(
+  message: LocalAgentServerMessage,
+): SnapshotReconciliationSource | null {
+  if (message.type !== 'event') return null;
+  if (message.event.type === 'message.completed') return 'reconcile';
+  if (
+    message.event.type === 'error'
+    && message.event.code
+    && REVIEW_RECONCILIATION_ERROR_CODES.has(message.event.code)
+  ) {
+    return 'reconnect';
+  }
+  return null;
 }
 
 export class TuiRuntimeController {
@@ -401,22 +413,27 @@ export class TuiRuntimeController {
     return false;
   }
 
-  private async restoreSessionSnapshot(source: 'startup' | 'reconnect') {
+  private async restoreSessionSnapshot(source: SnapshotRestoreSource) {
     try {
       const state = this.options.getState();
       const sessionId = state.focusedSessionId ?? 'chat:default';
       const kind = state.sessions[sessionId]?.kind ?? 'chat';
       const snapshot = await this.localServerClient.readSessionSnapshot({ sessionId, kind });
+      if (source === 'reconcile' && selectFocusedBusy(this.options.getState())) {
+        return false;
+      }
       this.options.dispatch({
         type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
         source,
         snapshot,
       });
+      return true;
     } catch (err) {
       if (source === 'reconnect') {
         throw err;
       }
       // snapshot restore is best-effort
+      return false;
     }
   }
 
@@ -485,14 +502,21 @@ export class TuiRuntimeController {
 
   private async reconcileSnapshotAfterReviewError() {
     try {
-      await this.restoreSessionSnapshot('reconnect');
-      if (!this.disposed) {
+      const restored = await this.restoreSessionSnapshot('reconnect');
+      if (restored && !this.disposed) {
         this.options.resetTimelineView();
       }
     } catch (err) {
       if (this.disposed) return;
       const message = err instanceof Error ? err.message : String(err);
       this.appendSystemMessage(TUI_TEXT.reconnectFailed(message));
+    }
+  }
+
+  private async reconcileSnapshotAfterCompletedMessage() {
+    const restored = await this.restoreSessionSnapshot('reconcile');
+    if (restored && !this.disposed) {
+      this.options.resetTimelineView();
     }
   }
 
@@ -554,8 +578,12 @@ export class TuiRuntimeController {
     for (const action of result.actions) {
       this.options.dispatch(action);
     }
-    if (shouldReconcileSnapshotAfterMessage(msg)) {
+    const reconcileSource = getSnapshotReconciliationSource(msg);
+    if (reconcileSource === 'reconnect') {
       void this.reconcileSnapshotAfterReviewError();
+    }
+    if (reconcileSource === 'reconcile') {
+      void this.reconcileSnapshotAfterCompletedMessage();
     }
   }
 

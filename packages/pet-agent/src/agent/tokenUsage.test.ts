@@ -9,6 +9,7 @@ import {
   createTokenUsageSnapshot,
   isTokenUsageSnapshot,
   parseTokenUsageSnapshot,
+  checkProviderInputWatermark,
   readLatestProviderInputTokens,
   readMessageTokenUsage,
   readMessagesTokenUsage,
@@ -143,6 +144,20 @@ test('readLatestProviderInputTokens reads the latest provider prompt footprint',
 
   assert.equal(readLatestProviderInputTokens(messages), 30);
   assert.equal(readLatestProviderInputTokens([new AIMessage('no usage')]), null);
+});
+
+test('checkProviderInputWatermark compares latest input tokens to the context window ratio', () => {
+  assert.deepEqual(checkProviderInputWatermark(900, 1000), {
+    latestInputTokens: 900,
+    watermarkTokens: 750,
+  });
+  assert.deepEqual(checkProviderInputWatermark(750, 1000), {
+    latestInputTokens: 750,
+    watermarkTokens: 750,
+  });
+  assert.equal(checkProviderInputWatermark(749, 1000), null);
+  assert.equal(checkProviderInputWatermark(null, 1000), null);
+  assert.equal(checkProviderInputWatermark(900, undefined), null);
 });
 
 test('streamOrchestratorGraph streams graph chunks without injecting callbacks', async () => {

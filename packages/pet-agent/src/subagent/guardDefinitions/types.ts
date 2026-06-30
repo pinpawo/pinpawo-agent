@@ -25,7 +25,9 @@ export type SubagentState = Omit<SubagentInputState, 'maxIterations'> & {
   maxIterations: number;
 };
 
-export type SubagentGuardConfig = Record<string, never>;
+export type SubagentGuardConfig = {
+  contextWindowTokens?: number;
+};
 
 export type SubagentGuardUpdate = Partial<Pick<SubagentState, 'messages'>>;
 

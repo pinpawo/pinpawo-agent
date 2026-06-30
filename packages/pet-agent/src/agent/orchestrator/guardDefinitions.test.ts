@@ -82,8 +82,8 @@ test('context compaction watermark guard uses main conversation provider usage o
     state,
     config: {
       runIterationLimit: 25,
+      contextWindowTokens: 1000,
       contextCompaction: {
-        contextWindowTokens: 1000,
         keepMessages: 1,
       },
     },
@@ -108,8 +108,8 @@ test('context compaction watermark guard blocks when main provider usage crosses
     state,
     config: {
       runIterationLimit: 25,
+      contextWindowTokens: 1000,
       contextCompaction: {
-        contextWindowTokens: 1000,
         keepMessages: 1,
       },
     },

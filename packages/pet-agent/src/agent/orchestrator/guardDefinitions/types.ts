@@ -29,12 +29,12 @@ export type OrchestratorGuardName =
   typeof ORCHESTRATOR_GUARD_NAME[keyof typeof ORCHESTRATOR_GUARD_NAME];
 
 export type OrchestratorContextCompactionGuardConfig = {
-  contextWindowTokens?: number;
   keepMessages?: number;
 };
 
 export type OrchestratorGuardConfig = {
   capabilities?: AgentCapability[];
+  contextWindowTokens?: number;
   contextCompaction?: OrchestratorContextCompactionGuardConfig;
   forcedCapabilityNames?: string[];
   runIterationLimit: number;

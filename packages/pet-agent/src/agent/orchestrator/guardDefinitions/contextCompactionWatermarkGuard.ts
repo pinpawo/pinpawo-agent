@@ -3,7 +3,10 @@ import {
   guardBlock,
   guardPass,
 } from '../../../guards';
-import { readLatestProviderInputTokens } from '../../tokenUsage';
+import {
+  checkProviderInputWatermark,
+  readLatestProviderInputTokens,
+} from '../../tokenUsage';
 import { mainConversationMessages } from '../messageLanes';
 import type { OrchestratorStateType } from '../state';
 import {
@@ -16,7 +19,6 @@ import {
 } from './types';
 
 const DEFAULT_KEEP_MESSAGES = 10;
-const CONTEXT_COMPACTION_WATERMARK_RATIO = 0.75;
 
 export function createContextCompactionWatermarkGuard(): OrchestratorGuard {
   return defineGuard<
@@ -29,32 +31,24 @@ export function createContextCompactionWatermarkGuard(): OrchestratorGuard {
     positions: [ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION],
     rule: {
       check: ({ config, state }) => {
-        const compactionConfig = config.contextCompaction;
-        const keepMessages = compactionConfig?.keepMessages ?? DEFAULT_KEEP_MESSAGES;
+        const keepMessages = config.contextCompaction?.keepMessages ?? DEFAULT_KEEP_MESSAGES;
         const triggerMessages = mainConversationMessages(state.messages);
-        const mainMessageCount = triggerMessages.length;
-        const latestInputTokens = readLatestProviderInputTokens(triggerMessages);
-        const contextWindowTokens = compactionConfig?.contextWindowTokens;
-        if (!contextWindowTokens || !Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
+        if (triggerMessages.length <= keepMessages) {
           return guardPass();
         }
-        const watermarkTokens = Math.max(1, Math.floor(
-          contextWindowTokens * CONTEXT_COMPACTION_WATERMARK_RATIO,
-        ));
 
-        if (
-          mainMessageCount <= keepMessages
-          || latestInputTokens === null
-          || latestInputTokens < watermarkTokens
-        ) {
+        const watermark = checkProviderInputWatermark(
+          readLatestProviderInputTokens(triggerMessages),
+          config.contextWindowTokens,
+        );
+        if (!watermark) {
           return guardPass();
         }
 
         return guardBlock('context_compaction_required', {
-          mainMessageCount,
+          mainMessageCount: triggerMessages.length,
           keepMessages,
-          latestInputTokens,
-          watermarkTokens,
+          ...watermark,
         });
       },
     },

@@ -1,5 +1,8 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
-import type { GuardRunOptions } from '../../../../guards';
+import {
+  createGuardRunner,
+  type GuardRunOptions,
+} from '../../../../guards';
 import type {
   OrchestratorControlContext,
   OrchestratorStatePatch,
@@ -31,6 +34,11 @@ type OrchestratorGuardRunOptions = GuardRunOptions<
   OrchestratorStatePatch
 >;
 
+type OrchestratorNodeGuardRuntimeInput = {
+  state: OrchestratorStateType;
+  runnableConfig?: RunnableConfig;
+};
+
 export function createControlContextBuilder(orchestratorMaxIterations: number) {
   return function buildControlContext(runnableConfig?: RunnableConfig): OrchestratorControlContext {
     return { runnableConfig, orchestratorMaxIterations };
@@ -45,9 +53,7 @@ function buildGuardConfig(params: {
   const invokeOptions = getInvokeOptions(params.runnableConfig);
   return {
     capabilities: invokeOptions.capabilities ?? [],
-    contextCompaction: {
-      contextWindowTokens: params.config.contextWindowTokens,
-    },
+    contextWindowTokens: params.config.contextWindowTokens,
     forcedCapabilityNames: invokeOptions.forcedCapabilityNames,
     runIterationLimit: invokeOptions.maxRunIterations ?? params.orchestratorMaxIterations,
   };
@@ -58,6 +64,28 @@ export function createOrchestratorGuardRunner(params: {
   orchestratorMaxIterations: number;
   guardRegistry: OrchestratorGuardRegistry;
 }): OrchestratorGuardRunner {
+  const runGuard = createGuardRunner<
+    OrchestratorGuardName,
+    OrchestratorStateType,
+    OrchestratorGuardConfig,
+    OrchestratorGuardPosition,
+    OrchestratorStatePatch,
+    OrchestratorNodeGuardRuntimeInput
+  >({
+    registry: params.guardRegistry,
+    adapter: {
+      toGuardInput: (position, input) => ({
+        state: input.state,
+        config: buildGuardConfig({
+          config: params.config,
+          orchestratorMaxIterations: params.orchestratorMaxIterations,
+          runnableConfig: input.runnableConfig,
+        }),
+        position,
+      }),
+    },
+  });
+
   return async function runOrchestratorGuard(
     name,
     position,
@@ -65,15 +93,15 @@ export function createOrchestratorGuardRunner(params: {
     runnableConfig,
     runOptions,
   ) {
-    const { update } = await params.guardRegistry.run(name, {
-      state,
-      config: buildGuardConfig({
-        config: params.config,
-        orchestratorMaxIterations: params.orchestratorMaxIterations,
-        runnableConfig,
-      }),
+    const { update } = await runGuard(
+      name,
       position,
-    }, runOptions);
+      {
+        state,
+        runnableConfig,
+      },
+      runOptions,
+    );
     return update ?? {};
   };
 }

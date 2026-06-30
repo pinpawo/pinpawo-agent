@@ -88,6 +88,47 @@ export type GuardRunOptions<
   onBlock?: GuardBlockHandler<GuardBlockHandlerInput<State, Config, Position>, Update>;
 };
 
+export type GuardInputAdapter<
+  State,
+  Config,
+  Position extends string,
+  RuntimeInput,
+> = {
+  toGuardInput(position: Position, input: RuntimeInput): GuardInput<State, Config, Position>;
+};
+
+export type GuardRunner<
+  Name extends string,
+  State,
+  Config,
+  Position extends string,
+  Update,
+  RuntimeInput,
+> = (
+  name: Name,
+  position: Position,
+  input: RuntimeInput,
+  options?: GuardRunOptions<State, Config, Position, Update>,
+) => Promise<GuardRunResult<Update>>;
+
+export function createGuardRunner<
+  Name extends string,
+  State,
+  Config,
+  Position extends string,
+  Update,
+  RuntimeInput,
+>(params: {
+  registry: GuardRegistry<State, Config, Position, Update>;
+  adapter: GuardInputAdapter<State, Config, Position, RuntimeInput>;
+}): GuardRunner<Name, State, Config, Position, Update, RuntimeInput> {
+  return (name, position, input, options) => params.registry.run(
+    name,
+    params.adapter.toGuardInput(position, input),
+    options,
+  );
+}
+
 export const GUARD_PASS: GuardPass = { status: 'pass' };
 
 export function guardPass(): GuardPass {

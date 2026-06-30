@@ -17,6 +17,13 @@ export type ProviderTokenUsage = {
   totalTokens: number;
 };
 
+export const DEFAULT_PROVIDER_INPUT_WATERMARK_RATIO = 0.75;
+
+export type ProviderInputWatermark = {
+  latestInputTokens: number;
+  watermarkTokens: number;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
@@ -127,6 +134,26 @@ export function readLatestProviderInputTokens(messages: Iterable<unknown>): numb
     }
   }
   return null;
+}
+
+export function checkProviderInputWatermark(
+  latestInputTokens: number | null,
+  contextWindowTokens?: number,
+): ProviderInputWatermark | null {
+  if (
+    latestInputTokens === null
+    || !Number.isFinite(latestInputTokens)
+    || !contextWindowTokens
+    || !Number.isFinite(contextWindowTokens)
+    || contextWindowTokens <= 0
+  ) {
+    return null;
+  }
+
+  const watermarkTokens = contextWindowTokens * DEFAULT_PROVIDER_INPUT_WATERMARK_RATIO;
+  return latestInputTokens >= watermarkTokens
+    ? { latestInputTokens, watermarkTokens }
+    : null;
 }
 
 function addProviderUsage(

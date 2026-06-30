@@ -22,16 +22,18 @@ import {
   readSubagentContextWindowTokens,
 } from './config';
 import {
-  createCompactContextNode,
   createDelegationOutcomeDecisionGuardNode,
   createDelegationOutcomeIterationGuardNode,
-  createPrepareNode,
-  prepareUserIntentDecision,
 } from './guards/nodes';
 import { createAnswerNode } from './nodes/answer';
 import { createCapabilityNode } from './nodes/capability';
 import { createCapabilityDiscoveryNode } from './nodes/capabilityDiscovery';
 import { createGeneralNode } from './nodes/general';
+import {
+  createCompactContextNode,
+  createPrepareNode,
+  prepareUserIntentDecision,
+} from './nodes/prepare';
 import {
   createControlContextBuilder,
   createOrchestratorGuardRegistry,

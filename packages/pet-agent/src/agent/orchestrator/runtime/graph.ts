@@ -2,7 +2,6 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langc
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
-import type { GuardRunOptions } from '../../../guards';
 import type { AgentCapability } from '../../../types/capability';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type { SubagentRunInput } from '../../../types/subagent';
@@ -15,22 +14,13 @@ import {
 } from '../state';
 import {
   asDecisionNode,
-  type OrchestratorControlContext,
   type OrchestratorDecision,
-  type OrchestratorStatePatch,
 } from '../controlPrimitives';
 import {
-  createOrchestratorGuardRegistry,
   ORCHESTRATOR_GUARD_NAME,
   ORCHESTRATOR_GUARD_POSITION,
-  type OrchestratorGuardConfig,
-  type OrchestratorGuardName,
-  type OrchestratorGuardPosition,
 } from '../guardDefinitions';
-import {
-  compactOrchestratorMessages,
-  readContextCompactionSummaries,
-} from '../contextCompaction';
+import { readContextCompactionSummaries } from '../contextCompaction';
 import type {
   RunFinalReplyRoute,
   MessageLane,
@@ -81,8 +71,6 @@ import {
 import {
   buildSubagentHandoff,
   getMessageHandoffSource,
-  getMessageLane,
-  getMessageTurnId,
   laneMessages,
   mainConversationMessages,
   readInFlightAnnounceLanes,
@@ -114,9 +102,7 @@ import {
 } from './decisions/capabilityCandidates';
 import {
   createTaskActiveDelegation,
-  decisionModeFromRunPendingDelegation,
   readCapabilityNameFromLane,
-  recoverTaskActiveDelegationFromRunState,
   resolveDelegationTranscriptRunId,
 } from './decisions/delegationLifecycle';
 import {
@@ -133,6 +119,22 @@ import {
   readThreadId,
   resolveActor,
 } from './config';
+import {
+  createCompactContextNode,
+  createDelegationOutcomeDecisionGuardNode,
+  createDelegationOutcomeIterationGuardNode,
+  createPrepareNode,
+  prepareUserIntentDecision,
+} from './guards/nodes';
+import {
+  createControlContextBuilder,
+  createOrchestratorGuardRegistry,
+  createOrchestratorGuardRunner,
+} from './guards/runner';
+import { afterCapabilityDiscovery } from './routes/afterCapabilityDiscovery';
+import { afterContextPrep } from './routes/afterContextPrep';
+import { afterDecision } from './routes/afterDecision';
+import { afterDelegationOutcomeIterationGuard } from './routes/afterDelegationOutcomeIterationGuard';
 
 // --- Graph builder ---
 
@@ -140,120 +142,19 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const orchestratorMaxIterations = readRunIterationLimit(config.maxRunIterations)
     ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
   const subagentContextWindowTokens = readSubagentContextWindowTokens(config);
-  type OrchestratorGuardRunOptions = GuardRunOptions<
-    OrchestratorStateType,
-    OrchestratorGuardConfig,
-    OrchestratorGuardPosition,
-    OrchestratorStatePatch
-  >;
-
-  // Shared control context handed to every Guard/Decision via the node adapters.
-  function buildControlContext(runnableConfig?: RunnableConfig): OrchestratorControlContext {
-    return { runnableConfig, orchestratorMaxIterations };
-  }
-
-  function buildGuardConfig(runnableConfig?: RunnableConfig): OrchestratorGuardConfig {
-    const invokeOptions = getInvokeOptions(runnableConfig);
-    return {
-      capabilities: invokeOptions.capabilities ?? [],
-      contextCompaction: {
-        contextWindowTokens: config.contextWindowTokens,
-      },
-      forcedCapabilityNames: invokeOptions.forcedCapabilityNames,
-      runIterationLimit: invokeOptions.maxRunIterations ?? orchestratorMaxIterations,
-    };
-  }
-
   const orchestratorGuardRegistry = createOrchestratorGuardRegistry();
-
-  async function runOrchestratorGuard(
-    name: OrchestratorGuardName,
-    position: OrchestratorGuardPosition,
-    state: OrchestratorStateType,
-    runnableConfig?: RunnableConfig,
-    runOptions?: OrchestratorGuardRunOptions,
-  ): Promise<OrchestratorStatePatch> {
-    const { update } = await orchestratorGuardRegistry.run(name, {
-      state,
-      config: buildGuardConfig(runnableConfig),
-      position,
-    }, runOptions);
-    return update ?? {};
-  }
-
-  async function prepare(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const patch = await runOrchestratorGuard(
-      ORCHESTRATOR_GUARD_NAME.RUN_STATE_RESET,
-      ORCHESTRATOR_GUARD_POSITION.PREPARE,
-      state,
-      runnableConfig,
-    );
-    if ('runId' in patch) {
-      return patch;
-    }
-    const taskActiveDelegation = recoverTaskActiveDelegationFromRunState(state);
-    return taskActiveDelegation
-      ? { ...patch, taskActiveDelegation }
-      : patch;
-  }
-
-  async function compactContext(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    return runOrchestratorGuard(
-      ORCHESTRATOR_GUARD_NAME.CONTEXT_COMPACTION_WATERMARK,
-      ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
-      state,
-      runnableConfig,
-      {
-        onBlock: async ({ state: blockedState }) => {
-          const compacted = await compactOrchestratorMessages({
-            messages: blockedState.messages,
-            model: config.models.observe ?? config.models.act,
-            runnableConfig,
-          });
-          if (!compacted.compacted) {
-            return {};
-          }
-          return {
-            messages: compacted.messages,
-          };
-        },
-      },
-    );
-  }
-
-  function prepareUserIntentDecision(): OrchestratorStatePatch {
-    return {
-      canHandoffActiveDelegation: true,
-    };
-  }
-
-  async function delegationOutcomeDecisionGuardNode(
-    state: OrchestratorStateType,
-    runnableConfig?: RunnableConfig,
-  ) {
-    return runOrchestratorGuard(
-      ORCHESTRATOR_GUARD_NAME.DELEGATION_OUTCOME_DECISION,
-      ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
-      state,
-      runnableConfig,
-    );
-  }
-
-  async function delegationOutcomeIterationGuardNode(
-    state: OrchestratorStateType,
-    runnableConfig?: RunnableConfig,
-  ) {
-    return runOrchestratorGuard(
-      ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT,
-      ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION,
-      state,
-      runnableConfig,
-    );
-  }
-
-  function routeAfterDelegationOutcomeIterationGuard(state: OrchestratorStateType) {
-    return state.runPendingFinalReply === 'inline' ? 'end' : 'delegationOutcomeDecisionGuard';
-  }
+  const runOrchestratorGuard = createOrchestratorGuardRunner({
+    config,
+    orchestratorMaxIterations,
+    guardRegistry: orchestratorGuardRegistry,
+  });
+  const buildControlContext = createControlContextBuilder(orchestratorMaxIterations);
+  const prepare = createPrepareNode(runOrchestratorGuard);
+  const compactContext = createCompactContextNode({ config, runOrchestratorGuard });
+  const delegationOutcomeDecisionGuardNode =
+    createDelegationOutcomeDecisionGuardNode(runOrchestratorGuard);
+  const delegationOutcomeIterationGuardNode =
+    createDelegationOutcomeIterationGuardNode(runOrchestratorGuard);
 
   async function capabilityDiscovery(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
@@ -1003,35 +904,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     };
   }
 
-  function afterCapabilityDiscovery(state: OrchestratorStateType) {
-    const latestMessage = state.messages[state.messages.length - 1];
-    if (
-      latestMessage?._getType() === 'ai'
-      && getMessageLane(latestMessage) === 'orchestrator'
-      && getMessageTurnId(latestMessage) === state.runId
-      && readModelToolCalls(latestMessage as AIMessage).some((call) => call.name === CAPABILITY_SEARCH_TOOL_NAME)
-    ) {
-      return 'capabilitySearch';
-    }
-    return 'prepareUserIntentDecision';
-  }
-
-  function afterContextPrep(state: OrchestratorStateType) {
-    if (state.taskActiveDelegation?.status === 'awaiting_decision') {
-      return 'delegationOutcomeIterationGuard';
-    }
-    return 'capabilityDiscovery';
-  }
-
-  function afterDecision(state: OrchestratorStateType) {
-    const decisionMode = decisionModeFromRunPendingDelegation(state.runPendingDelegation);
-    if (decisionMode === 'capability') return 'capability';
-    if (decisionMode === 'general') return 'general';
-    // answer bucket: route a real answer decision to the answer node; inline fallback
-    // errors already emitted their message.
-    return state.runPendingFinalReply === 'answer' ? 'answer' : 'end';
-  }
-
   const graph = new StateGraph(OrchestratorState)
     .addNode('prepare', prepare)
     .addNode('compactContext', compactContext)
@@ -1058,7 +930,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       prepareUserIntentDecision: 'prepareUserIntentDecision',
     })
     .addEdge('prepareUserIntentDecision', 'userIntentDecision')
-    .addConditionalEdges('delegationOutcomeIterationGuard', routeAfterDelegationOutcomeIterationGuard, {
+    .addConditionalEdges('delegationOutcomeIterationGuard', afterDelegationOutcomeIterationGuard, {
       end: END,
       delegationOutcomeDecisionGuard: 'delegationOutcomeDecisionGuard',
     })

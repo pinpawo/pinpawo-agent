@@ -72,6 +72,11 @@ test('parseTuiCommand parses text, aliases, args, and unknown commands', () => {
   assert.equal(editCommand.type === 'command' ? editCommand.name : null, 'edit');
   assert.equal(editCommand.type === 'command' ? editCommand.args : null, 'draft text');
 
+  const timelineCommand = parseTuiCommand('/timeline process');
+  assert.equal(timelineCommand.type, 'command');
+  assert.equal(timelineCommand.type === 'command' ? timelineCommand.name : null, 'timeline');
+  assert.equal(timelineCommand.type === 'command' ? timelineCommand.args : null, 'process');
+
   assert.deepEqual(parseTuiCommand('/studiox'), {
     type: 'unknown',
     raw: '/studiox',
@@ -113,7 +118,7 @@ test('parseTuiCommand treats slash-prefixed non-command shapes as plain text', (
 test('formatTuiCommandHelp is generated from visible command metadata', () => {
   assert.equal(
     formatTuiCommandHelp(),
-    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /policy 选择授权策略 · /help · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /resume 恢复会话 · /quit',
+    '/new 新会话 · /studio [任务] 进入 Studio 模式 · /chat 退出 Studio · /policy 选择授权策略 · /help · /export [path] 导出 transcript(默认当前目录) · /edit [文本] 外部编辑 · /resume 恢复会话 · /timeline [snapshot|process] 切换视图 · /quit',
   );
 });
 

@@ -7,7 +7,8 @@ export type TuiCommandName =
   | 'policy'
   | 'export'
   | 'edit'
-  | 'resume';
+  | 'resume'
+  | 'timeline';
 
 export type TuiCommandDefinition = {
   name: TuiCommandName;
@@ -89,6 +90,13 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/resume',
     description: '打开可恢复会话选择器',
     helpText: '/resume 恢复会话',
+  },
+  {
+    name: 'timeline',
+    aliases: ['view'],
+    usage: '/timeline [snapshot|process]',
+    description: '切换对话或过程 timeline 视图',
+    helpText: '/timeline [snapshot|process] 切换视图',
   },
   {
     name: 'quit',

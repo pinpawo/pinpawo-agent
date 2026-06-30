@@ -3,6 +3,10 @@ import stringWidth from 'string-width';
 import { formatGlobalReviewPolicyMode } from './globalReviewPolicyPicker';
 import { truncateLine } from './render/terminalText';
 import type { SessionModel, TuiInteractionMode } from './state/tuiState';
+import {
+  formatTuiTimelineViewMode,
+  type TuiTimelineViewMode,
+} from './timeline/timelineView';
 
 const LOCALE_FORMATTER = new Intl.NumberFormat('zh-CN');
 const STATUS_SEPARATOR = ' · ';
@@ -34,6 +38,7 @@ export function buildStatusBarModel(input: {
   activityStatus?: string | null;
   connectionStatus: string;
   mode: TuiInteractionMode;
+  timelineViewMode?: TuiTimelineViewMode;
   session: SessionModel | null;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   overlayOwner?: string | null;
@@ -63,6 +68,14 @@ export function buildStatusBarModel(input: {
         tone: input.mode === 'studio' ? 'info' : 'muted',
         truncation: 'preserve',
       },
+      ...(input.timelineViewMode ? [{
+        id: 'timeline',
+        label: '视图',
+        value: formatTuiTimelineViewMode(input.timelineViewMode),
+        priority: 88,
+        tone: input.timelineViewMode === 'process' ? 'info' as const : 'muted' as const,
+        truncation: 'preserve' as const,
+      }] : []),
       ...(input.overlayOwner ? [{
         id: 'overlay',
         label: '浮层',

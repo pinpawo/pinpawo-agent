@@ -173,6 +173,18 @@ test('answer prompt owns clarification questions', () => {
   assert.match(prompt, /不要输出 JSON、动作字段/);
 });
 
+test('answer prompt explains node position and uses completed results', () => {
+  const prompt = buildAnswerSystemPrompt({
+    actor: testActor,
+  });
+
+  assert.match(prompt, /最终总结\/回复节点/);
+  assert.match(prompt, /根据下面 messages 列表的完整内容回复用户/);
+  assert.match(prompt, /常见进入原因/);
+  assert.match(prompt, /之前执行器\/subagent 的查询结果已经足够/);
+  assert.match(prompt, /把它们当作已经完成的查询结果使用/);
+});
+
 test('delegation outcome input carries current task context separately', () => {
   const currentTaskContext = buildDelegationOutcomeCurrentTaskContext({
     id: 'task-1',

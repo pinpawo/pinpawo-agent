@@ -4,6 +4,11 @@ import { formatTuiCommandHelp, parseTuiCommand } from './commandRegistry';
 import { TUI_TEXT } from '../render/text';
 import type { TuiAction, TuiInteractionMode } from '../state/tuiState';
 import type { SessionModel } from '../state/tuiState';
+import {
+  formatTuiTimelineViewMode,
+  parseTuiTimelineViewMode,
+  type TuiTimelineViewMode,
+} from '../timeline/timelineView';
 import type { TuiRuntimeController } from '../TuiRuntimeController';
 
 type TuiCommandSubmitInput = {
@@ -19,6 +24,7 @@ type TuiCommandSubmitInput = {
   exit: () => void;
   appendSystemMessage: (text: string) => void;
   clearInputValue: () => void;
+  setTimelineViewMode?: (mode: TuiTimelineViewMode) => boolean;
   dispatch: (action: TuiAction) => void;
   runtimeController: Pick<TuiRuntimeController, 'isConnected' | 'isBusy' | 'sendStudioRequest' | 'sendChatRequest' | 'startNewSession' | 'submitReviewResponse'>;
 };
@@ -73,6 +79,24 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
       options.dispatch({ type: 'session.set_kind', kind: 'chat' });
       options.openResumePicker();
       options.clearInputValue();
+      return;
+    }
+
+    if (parsed.name === 'timeline') {
+      options.clearInputValue();
+      const mode = parseTuiTimelineViewMode(parsed.args);
+      if (!mode) {
+        options.appendSystemMessage(TUI_TEXT.timelineViewUsage);
+        return;
+      }
+      if (!options.setTimelineViewMode) {
+        options.appendSystemMessage(TUI_TEXT.timelineViewUnavailable);
+        return;
+      }
+      const switched = options.setTimelineViewMode(mode);
+      options.appendSystemMessage(switched
+        ? TUI_TEXT.timelineViewChanged(formatTuiTimelineViewMode(mode))
+        : TUI_TEXT.timelineProcessUnavailable);
       return;
     }
 

@@ -2,22 +2,26 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { submitCurrentInputFromController } from './commandSubmit';
 import type { TuiAction } from '../state/tuiState';
+import type { TuiTimelineViewMode } from '../timeline/timelineView';
 
 function createSubmitHarness(overrides: {
   inputValue?: string;
   openExternalEditor?: (initialText: string) => void;
   mode?: 'chat' | 'studio';
   studioConversationId?: string | null;
+  setTimelineViewMode?: (mode: TuiTimelineViewMode) => boolean;
 } = {}) {
   const messages: string[] = [];
   const actions: TuiAction[] = [];
   const sent: string[] = [];
+  const timelineModes: TuiTimelineViewMode[] = [];
   let mode = overrides.mode ?? 'chat';
   let studioConversationId = overrides.studioConversationId ?? null;
   return {
     messages,
     actions,
     sent,
+    timelineModes,
     get mode() {
       return mode;
     },
@@ -41,6 +45,10 @@ function createSubmitHarness(overrides: {
       openResumePicker: () => sent.push('resume'),
       openGlobalReviewPolicyPicker: () => sent.push('policy'),
       openExternalEditor: overrides.openExternalEditor,
+      setTimelineViewMode: (mode) => {
+        timelineModes.push(mode);
+        return overrides.setTimelineViewMode?.(mode) ?? true;
+      },
       exit: () => {},
       appendSystemMessage: (text) => messages.push(text),
       clearInputValue: () => sent.push('clear'),
@@ -142,6 +150,29 @@ test('submitCurrentInputFromController opens global review policy picker for /po
 
   assert.equal(harness.policyOpened(), true);
   assert.deepEqual(harness.sent, ['policy', 'clear']);
+});
+
+test('submitCurrentInputFromController switches timeline views through /timeline', () => {
+  const harness = createSubmitHarness({ inputValue: '/timeline process' });
+
+  harness.submit();
+
+  assert.deepEqual(harness.timelineModes, ['process']);
+  assert.deepEqual(harness.sent, ['clear']);
+  assert.deepEqual(harness.messages, ['已切换 timeline 视图：过程']);
+});
+
+test('submitCurrentInputFromController reports unavailable process timeline', () => {
+  const harness = createSubmitHarness({
+    inputValue: '/timeline ops',
+    setTimelineViewMode: () => false,
+  });
+
+  harness.submit();
+
+  assert.deepEqual(harness.timelineModes, ['process']);
+  assert.deepEqual(harness.sent, ['clear']);
+  assert.deepEqual(harness.messages, ['暂无可查看的过程 timeline。']);
 });
 
 test('submitCurrentInputFromController reports missing external editor hook', () => {

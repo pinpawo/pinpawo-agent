@@ -88,6 +88,22 @@ test('buildStatusBarModel includes current overlay owner when present', () => {
   );
 });
 
+test('buildStatusBarModel includes timeline view mode when present', () => {
+  const model = buildStatusBarModel({
+    connectionStatus: '就绪',
+    mode: 'chat',
+    timelineViewMode: 'process',
+    session: createSession({ id: 'chat:pet' }),
+    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
+  });
+
+  const segment = model.segments.find((item) => item.id === 'timeline');
+  assert.deepEqual(
+    segment && [segment.label, segment.value, segment.priority, segment.tone],
+    ['视图', '过程', 88, 'info'],
+  );
+});
+
 test('buildStatusBarModel follows reducer-owned submit mode over session kind', () => {
   const studioSubmitModel = buildStatusBarModel({
     connectionStatus: '就绪',

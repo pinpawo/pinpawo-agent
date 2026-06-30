@@ -33,13 +33,17 @@ import { resolveTuiInputAction } from './input/inputRouter';
 import { submitCurrentInputFromController } from './input/commandSubmit';
 import { formatNow } from './render/terminalText';
 import { TUI_TEXT } from './render/text';
-import { buildTuiScreenModel } from './screenModel';
+import {
+  buildTuiScreenModel,
+  type TuiScreenModel,
+} from './screenModel';
 import { buildStatusBarModel } from './statusBarModel';
 import { createInitialTuiState, createSession } from './state/tuiState';
 import {
   tuiStateReducer,
 } from './state/tuiStateReducer';
 import type { AgentTimelineDisplayEntry } from './timeline/agentTimelineSelectors';
+import type { TuiTimelineViewMode } from './timeline/timelineView';
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { useResumePickerController } from './useResumePickerController';
 import { useTextAreaController } from './useTextAreaController';
@@ -96,6 +100,21 @@ function renderTimelineDisplayEntry(
   );
 }
 
+type TimelineDisplayRegion = Pick<
+  TuiScreenModel['regions']['timeline'],
+  'entries' | 'staticEntries' | 'dynamicEntries'
+>;
+
+function hasProcessTimelineContent(entries: AgentTimelineDisplayEntry[]) {
+  return entries.some((displayEntry) => {
+    if (displayEntry.type === 'activity') return true;
+    if (displayEntry.type !== 'timeline') return false;
+    const timelineEntry = displayEntry.entry;
+    if (timelineEntry.type === 'operation') return true;
+    return timelineEntry.type === 'message' && timelineEntry.status === 'streaming';
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Main TUI application
 // ---------------------------------------------------------------------------
@@ -112,6 +131,8 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const [animationFrame, setAnimationFrame] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const [timelineRenderEpoch, setTimelineRenderEpoch] = useState(0);
+  const [timelineViewMode, setTimelineViewMode] = useState<TuiTimelineViewMode>('snapshot');
+  const [processTimelineRegion, setProcessTimelineRegion] = useState<TimelineDisplayRegion | null>(null);
   const [terminalSize, setTerminalSize] = useState(() => ({
     columns: stdout.columns ?? 80,
     rows: stdout.rows ?? 24,
@@ -132,10 +153,22 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const lastInterruptAtRef = useRef(0);
   const localServerPort = config.localServerPort;
   const workdir = props.workdir ?? config.workdir;
-  const resetTimelineView = useCallback(() => {
+  const clearTimelineOutput = useCallback(() => {
     stdout.write(CLEAR_SCREEN);
     setTimelineRenderEpoch((current) => current + 1);
   }, [stdout]);
+  const switchTimelineViewMode = useCallback((
+    mode: TuiTimelineViewMode,
+    options: { clearOutput?: boolean } = {},
+  ) => {
+    setTimelineViewMode(mode);
+    if (options.clearOutput ?? true) {
+      clearTimelineOutput();
+    }
+  }, [clearTimelineOutput]);
+  const resetTimelineView = useCallback(() => {
+    switchTimelineViewMode('snapshot');
+  }, [switchTimelineViewMode]);
   const runtimeController = useMemo(() => new TuiRuntimeController({
     actorId: props.actorId,
     localServerPort,
@@ -161,10 +194,50 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const reviewOptions = pendingApproval?.review.options ?? [];
   const uiMode = tuiState.ui.mode;
   const externalEditorOpen = tuiState.ui.externalEditorOpen;
+  const focusedSessionId = focusedSession?.id ?? null;
+  const focusedTimelineEntryCount = focusedSession?.timeline.length ?? 0;
+  const currentTimelineRegion = screenModel.regions.timeline;
+  const currentTimelineHasProcessContent = hasProcessTimelineContent(currentTimelineRegion.entries);
+  const displayedTimelineRegion = timelineViewMode === 'process' && processTimelineRegion
+    ? processTimelineRegion
+    : currentTimelineRegion;
+  const displayedTimelineRenderKey = `${timelineViewMode}:${screenModel.regions.timeline.renderKey}`;
 
   useEffect(() => {
     stateRef.current = tuiState;
   }, [tuiState]);
+
+  useEffect(() => {
+    setProcessTimelineRegion(null);
+    switchTimelineViewMode('snapshot', { clearOutput: false });
+  }, [focusedSessionId, switchTimelineViewMode]);
+
+  useEffect(() => {
+    if (!busy && focusedTimelineEntryCount === 0) {
+      setProcessTimelineRegion(null);
+    }
+  }, [busy, focusedTimelineEntryCount]);
+
+  useEffect(() => {
+    if (busy && timelineViewMode !== 'process') {
+      switchTimelineViewMode('process');
+    }
+  }, [busy, switchTimelineViewMode, timelineViewMode]);
+
+  useEffect(() => {
+    if (!busy && !currentTimelineHasProcessContent) return;
+    setProcessTimelineRegion({
+      entries: currentTimelineRegion.entries,
+      staticEntries: currentTimelineRegion.staticEntries,
+      dynamicEntries: currentTimelineRegion.dynamicEntries,
+    });
+  }, [
+    busy,
+    currentTimelineHasProcessContent,
+    currentTimelineRegion.dynamicEntries,
+    currentTimelineRegion.entries,
+    currentTimelineRegion.staticEntries,
+  ]);
 
   useEffect(() => {
     setApprovalIndex(0);
@@ -361,6 +434,13 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
       openResumePicker,
       openGlobalReviewPolicyPicker,
       openExternalEditor,
+      setTimelineViewMode: (mode) => {
+        if (mode === 'process' && !processTimelineRegion) {
+          return false;
+        }
+        switchTimelineViewMode(mode);
+        return true;
+      },
       exit,
       appendSystemMessage: (text) => appendMessage('system', text),
       clearInputValue: textArea.clear,
@@ -617,6 +697,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     activityStatus: screenModel.regions.statusBar.activityStatus,
     connectionStatus: screenModel.regions.statusBar.connectionStatus,
     mode: uiMode,
+    timelineViewMode,
     session: focusedSession,
     globalReviewPolicyMode,
     overlayOwner: overlayModel.ownerLabel,
@@ -626,22 +707,23 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     overlayModel.ownerLabel,
     screenModel.regions.statusBar.activityStatus,
     screenModel.regions.statusBar.connectionStatus,
+    timelineViewMode,
     uiMode,
   ]);
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {screenModel.regions.timeline.entries.length === 0 ? (
+      {displayedTimelineRegion.entries.length === 0 ? (
         <Text dimColor>{screenModel.regions.timeline.emptyText}</Text>
       ) : null}
-      <Static key={screenModel.regions.timeline.renderKey} items={screenModel.regions.timeline.staticEntries}>
+      <Static key={displayedTimelineRenderKey} items={displayedTimelineRegion.staticEntries}>
         {(entry) => renderTimelineDisplayEntry(entry, {
           petName: screenModel.petName,
           now,
           width: contentWidth,
         })}
       </Static>
-      {screenModel.regions.timeline.dynamicEntries.map((entry) => renderTimelineDisplayEntry(entry, {
+      {displayedTimelineRegion.dynamicEntries.map((entry) => renderTimelineDisplayEntry(entry, {
         petName: screenModel.petName,
         now,
         width: contentWidth,

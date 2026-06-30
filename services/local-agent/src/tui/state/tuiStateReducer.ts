@@ -674,6 +674,166 @@ function applyAssistantMessageEvent(
     : finishRecoveredTimelineRequest(stateWithTimeline, owner.sessionId, event.usage);
 }
 
+type RunEventContext = {
+  run: TuiRunModel;
+  sessionId: SessionId;
+};
+
+function resolveRunEventContext(
+  state: TuiState,
+  event: Pick<LocalAgentEvent, 'requestId'>,
+): RunEventContext | null {
+  const run = state.runs[event.requestId];
+  if (!run) return null;
+  const sessionId = run.sessionId;
+  return state.sessions[sessionId] ? { run, sessionId } : null;
+}
+
+function applyOperationEvent(
+  state: TuiState,
+  event: Extract<LocalAgentEvent, { type: 'operation' }>,
+  now: number,
+) {
+  const context = resolveRunEventContext(state, event);
+  if (!context) return state;
+  let operationEntryId: string | null = null;
+  const stateWithTimeline = updateSession(state, context.sessionId, (currentSession) => {
+    const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, now);
+    operationEntryId = entry.id;
+    return sessionWithTimeline;
+  });
+  return operationEntryId
+    ? updateRun(stateWithTimeline, event.requestId, (currentRun) =>
+        addTimelineEntryId({
+          ...currentRun,
+          phase: event.phase === 'started' || event.phase === 'updated'
+            ? 'using_tool'
+            : currentRun.phase,
+        }, operationEntryId!))
+    : stateWithTimeline;
+}
+
+function applySubagentMessageDeltaEvent(
+  state: TuiState,
+  event: Extract<LocalAgentEvent, { type: 'subagent.message.delta' }>,
+) {
+  const token = event.text;
+  if (!token) return state;
+  const context = resolveRunEventContext(state, event);
+  if (!context) return state;
+  const stateWithActivity = updateSession(state, context.sessionId, (currentSession) => {
+    const { session: sessionWithActivity } = appendSubagentActivityDelta(
+      currentSession,
+      event.requestId,
+      token,
+      context.run.timelineEntryIds[0],
+    );
+    return sessionWithActivity;
+  });
+  return updateRun(stateWithActivity, event.requestId, (currentRun) => ({
+    ...currentRun,
+    phase: currentRun.phase === 'waiting_human' ? currentRun.phase : 'streaming',
+    charCount: currentRun.charCount + token.length,
+  }));
+}
+
+function applyHumanReviewRequestedEvent(
+  state: TuiState,
+  event: Extract<LocalAgentEvent, { type: 'human_review.requested' }>,
+) {
+  const context = resolveRunEventContext(state, event);
+  if (!context) return state;
+  const petId = event.actor?.petId || undefined;
+  const stateWithReview = {
+    ...state,
+    connection: {
+      ...state.connection,
+      message: TUI_TEXT.approvalWaiting(petId),
+    },
+  };
+  return updateRun(stateWithReview, event.requestId, (currentRun) => ({
+    ...currentRun,
+    phase: 'waiting_human',
+    charCount: 0,
+    pendingReview: {
+      requestId: event.requestId,
+      review: event.review,
+      ...(petId ? { petId } : {}),
+    },
+  }));
+}
+
+function applySystemNoticeEvent(
+  state: TuiState,
+  event: Extract<LocalAgentEvent, { type: 'system.notice' }>,
+  messageCell?: MessageCellMeta,
+) {
+  const context = resolveRunEventContext(state, event);
+  if (!context) return state;
+  const notice = formatSystemNoticeEvent(event);
+  return notice
+    ? updateSession(state, context.sessionId, (currentSession) =>
+        appendMessageCells(currentSession, [
+          messageDraft('system', notice, messageCell, `${event.requestId}:notice`),
+        ]))
+    : state;
+}
+
+function applyStudioProgressEvent(
+  state: TuiState,
+  event: Extract<LocalAgentEvent, { type: 'studio.progress' }>,
+  messageCell?: MessageCellMeta,
+) {
+  const context = resolveRunEventContext(state, event);
+  if (!context) return state;
+  const line = formatStudioProgressEvent(event);
+  return line
+    ? updateSession(state, context.sessionId, (currentSession) =>
+        appendMessageCells(currentSession, [
+          messageDraft('system', line, messageCell, `${event.requestId}:studio-progress`),
+        ]))
+    : state;
+}
+
+function applyRuntimeErrorEvent(
+  state: TuiState,
+  event: Extract<LocalAgentEvent, { type: 'error' }>,
+  messageCell?: MessageCellMeta,
+) {
+  const context = resolveRunEventContext(state, event);
+  if (!context) return state;
+  const message = event.message || 'internal error';
+  return finishRun(state, event.requestId, TUI_TEXT.statusErrorRecovered, [
+    messageDraft('system', TUI_TEXT.errorLine(message), messageCell, `${event.requestId}:event-error`),
+  ]);
+}
+
+function applyRuntimeEvent(
+  state: TuiState,
+  action: Extract<TuiAction, { type: 'event.received' }>,
+) {
+  const event = action.event;
+  switch (event.type) {
+    case 'message.delta':
+    case 'message.completed':
+      return applyAssistantMessageEvent(state, event, action.messageCell);
+    case 'operation':
+      return applyOperationEvent(state, event, action.now);
+    case 'subagent.message.delta':
+      return applySubagentMessageDeltaEvent(state, event);
+    case 'human_review.requested':
+      return applyHumanReviewRequestedEvent(state, event);
+    case 'system.notice':
+      return applySystemNoticeEvent(state, event, action.messageCell);
+    case 'studio.progress':
+      return applyStudioProgressEvent(state, event, action.messageCell);
+    case 'error':
+      return applyRuntimeErrorEvent(state, event, action.messageCell);
+    default:
+      return state;
+  }
+}
+
 function activeRunToPendingUi(run: TuiRunModel | null) {
   if (!run || run.phase === 'waiting_human') return null;
   return {
@@ -1115,106 +1275,8 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     case 'run.finish':
       return finishRun(state, action.requestId, action.statusMessage, action.messages);
 
-    case 'event.received': {
-      const event = action.event;
-      if (event.type === 'message.delta' || event.type === 'message.completed') {
-        return applyAssistantMessageEvent(state, event, action.messageCell);
-      }
-      const run = state.runs[event.requestId];
-      if (!run) return state;
-      const sessionId = run.sessionId;
-      const session = state.sessions[sessionId];
-      if (!session) {
-        return state;
-      }
-
-      if (event.type === 'operation') {
-        let operationEntryId: string | null = null;
-        const stateWithTimeline = updateSession(state, sessionId, (currentSession) => {
-          const { session: sessionWithTimeline, entry } = upsertOperationTimelineEntry(currentSession, event, action.now);
-          operationEntryId = entry.id;
-          return sessionWithTimeline;
-        });
-        return operationEntryId
-          ? updateRun(stateWithTimeline, event.requestId, (currentRun) =>
-              addTimelineEntryId({
-                ...currentRun,
-                phase: event.phase === 'started' || event.phase === 'updated'
-                  ? 'using_tool'
-                  : currentRun.phase,
-              }, operationEntryId!))
-          : stateWithTimeline;
-      }
-
-      if (event.type === 'subagent.message.delta') {
-        const token = event.text;
-        if (!token) return state;
-        const stateWithActivity = updateSession(state, sessionId, (currentSession) => {
-          const { session: sessionWithActivity } = appendSubagentActivityDelta(
-            currentSession,
-            event.requestId,
-            token,
-            run.timelineEntryIds[0],
-          );
-          return sessionWithActivity;
-        });
-        return updateRun(stateWithActivity, event.requestId, (currentRun) => ({
-          ...currentRun,
-          phase: currentRun.phase === 'waiting_human' ? currentRun.phase : 'streaming',
-          charCount: currentRun.charCount + token.length,
-        }));
-      }
-
-      if (event.type === 'human_review.requested') {
-        const petId = event.actor?.petId || undefined;
-        const stateWithReview = {
-          ...state,
-          connection: {
-            ...state.connection,
-            message: TUI_TEXT.approvalWaiting(petId),
-          },
-        };
-        return updateRun(stateWithReview, event.requestId, (currentRun) => ({
-          ...currentRun,
-          phase: 'waiting_human',
-          charCount: 0,
-          pendingReview: {
-            requestId: event.requestId,
-            review: event.review,
-            ...(petId ? { petId } : {}),
-          },
-        }));
-      }
-
-      if (event.type === 'system.notice') {
-        const notice = formatSystemNoticeEvent(event);
-        return notice
-          ? updateSession(state, sessionId, (currentSession) =>
-              appendMessageCells(currentSession, [
-                messageDraft('system', notice, action.messageCell, `${event.requestId}:notice`),
-              ]))
-          : state;
-      }
-
-      if (event.type === 'studio.progress') {
-        const line = formatStudioProgressEvent(event);
-        return line
-          ? updateSession(state, sessionId, (currentSession) =>
-              appendMessageCells(currentSession, [
-                messageDraft('system', line, action.messageCell, `${event.requestId}:studio-progress`),
-              ]))
-          : state;
-      }
-
-      if (event.type === 'error') {
-        const message = event.message || 'internal error';
-        return finishRun(state, event.requestId, TUI_TEXT.statusErrorRecovered, [
-          messageDraft('system', TUI_TEXT.errorLine(message), action.messageCell, `${event.requestId}:event-error`),
-        ]);
-      }
-
-      return state;
-    }
+    case 'event.received':
+      return applyRuntimeEvent(state, action);
 
     case 'server.interrupted':
       return finishRun(state, action.requestId, action.statusMessage, [

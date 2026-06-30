@@ -2,7 +2,6 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langc
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { StateGraph, START, END } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
-import type { AgentCapability } from '../../../types/capability';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type { SubagentRunInput } from '../../../types/subagent';
 import { randomUUID } from 'node:crypto';
@@ -27,7 +26,6 @@ import type {
   OrchestratorConfig,
   RunPendingDelegation,
   DecisionMode,
-  ToolBindableChatModel,
   TaskActiveDelegation,
 } from '../types';
 import {
@@ -39,21 +37,15 @@ import {
   type OrchestrationDecision,
 } from '../schemas';
 import {
-  CAPABILITY_SEARCH_TOOL_NAME,
   capabilitySearchTool,
-  readModelToolCalls,
 } from '../capabilitySearch';
 import { invokeStructuredOutput } from '../../../utils/structuredOutput';
 import {
-  buildCapabilityDiscoveryInput,
-  buildCapabilityDiscoveryRequestContext,
-  buildCapabilityDiscoverySystemPrompt,
   buildDecisionTargetsContext,
   buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
-  buildAnswerSystemPrompt,
   buildPreparedRequestContext,
   buildSubagentAnnounceContext,
   buildRunDelegationContext,
@@ -72,13 +64,11 @@ import {
   buildSubagentHandoff,
   getMessageHandoffSource,
   laneMessages,
-  mainConversationMessages,
   readInFlightAnnounceLanes,
   readLatestHumanRequest,
   readLatestAnnounce,
   readLatestAnnounceCompletionReason,
   readRecentAnnounces,
-  setPinpetMeta,
   tagNewLaneMessages,
 } from '../messageLanes';
 import {
@@ -126,6 +116,8 @@ import {
   createPrepareNode,
   prepareUserIntentDecision,
 } from './guards/nodes';
+import { createAnswerNode } from './nodes/answer';
+import { createCapabilityDiscoveryNode } from './nodes/capabilityDiscovery';
 import {
   createControlContextBuilder,
   createOrchestratorGuardRegistry,
@@ -155,92 +147,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     createDelegationOutcomeDecisionGuardNode(runOrchestratorGuard);
   const delegationOutcomeIterationGuardNode =
     createDelegationOutcomeIterationGuardNode(runOrchestratorGuard);
-
-  async function capabilityDiscovery(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const {
-      capabilities,
-      toolkits,
-      execution,
-      workdir,
-      runtimeEnvironment,
-      reviewCapabilities,
-      globalReviewPolicy,
-    } = getInvokeOptions(runnableConfig);
-    const actor = resolveActor(config, runnableConfig);
-    const toolkitList = generalLaneToolkits(toolkits ?? []);
-    validateUniqueToolkitNames(toolkitList);
-    const generalToolkitResources = await resolveToolkitResources(toolkitList, undefined, {
-      models: config.models,
-      actor,
-      messages: state.messages,
-      execution,
-      reviewCapabilities,
-      globalReviewPolicy,
-      toolAuthorizations: state.sessionToolAuthorizations,
-    }, { includeInstructions: false });
-    const generalTools = generalToolkitResources.tools;
-    validateUniqueToolNames(generalTools);
-    const capabilityList = capabilities ?? [];
-    validateUniqueCapabilityNames(capabilityList);
-
-    const forcedSeedPatch = await runOrchestratorGuard(
-      ORCHESTRATOR_GUARD_NAME.FORCED_CAPABILITY_SEED,
-      ORCHESTRATOR_GUARD_POSITION.CAPABILITY_DISCOVERY,
-      state,
-      runnableConfig,
-    );
-    if (forcedSeedPatch.runCapabilitySearchState) {
-      return forcedSeedPatch;
-    }
-
-    const decisionBaseModel = config.models.act;
-    const latestHumanRequest = readLatestHumanRequest(state.messages);
-    const recentAnnounces = readRecentAnnounces(state.messages);
-    const requestContext = buildCapabilityDiscoveryRequestContext({
-      latestUserRequest: latestHumanRequest,
-      recentMessages: mainMessagesWithoutCompaction(state.messages),
-      recentAnnounces,
-      contextSummaries: readContextCompactionSummaries(state.messages),
-      capabilityArtifacts: state.sessionCapabilityArtifacts,
-    });
-    const searchAvailable = canSearchCapabilities(decisionBaseModel, state, capabilityList);
-
-    if (!searchAvailable) {
-      return {};
-    }
-
-    const discoveryModel = (decisionBaseModel as ToolBindableChatModel).bindTools!([capabilitySearchTool], { parallel_tool_calls: false });
-    const response = await discoveryModel.invoke(
-      [
-        new SystemMessage(buildCapabilityDiscoverySystemPrompt({
-          actor,
-          runDelegationContext: buildRunDelegationContext(state.runDelegations),
-          generalTools,
-          workdir,
-          runtimeEnvironment,
-        })),
-        new HumanMessage(buildCapabilityDiscoveryInput({
-          latestUserRequest: latestHumanRequest,
-          requestContext,
-        })),
-      ],
-      runnableConfig,
-    );
-
-    const capabilitySearchCalls = readModelToolCalls(response).filter((call) => call.name === CAPABILITY_SEARCH_TOOL_NAME);
-    if (capabilitySearchCalls.length === 0) {
-      return {};
-    }
-    if (capabilitySearchCalls.length > 1) {
-      throw new Error('capability discovery emitted multiple capability_search tool calls');
-    }
-    setPinpetMeta(response, { lane: 'orchestrator', runId: state.runId });
-
-    return {
-      messages: [response],
-      runPendingDelegation: null,
-    };
-  }
+  const capabilityDiscovery = createCapabilityDiscoveryNode({ config, runOrchestratorGuard });
 
   async function runOrchestrationDecision(
     kind: 'user_intent' | 'delegation_outcome',
@@ -608,31 +515,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     return runOrchestrationDecision('delegation_outcome', state, ctx.runnableConfig);
   };
 
-  // Node: answer — the dedicated final-reply node. The decision nodes only route
-  // here; this node synthesizes the user-facing reply from the FULL conversation
-  // (not the clipped decision digest), so prior subagent results are reproduced
-  // faithfully instead of being re-fabricated.
-  async function answerNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { workdir, runtimeEnvironment } = getInvokeOptions(runnableConfig);
-    const actor = resolveActor(config, runnableConfig);
-    // The full main conversation queue. Subagent results already live here as
-    // handoff copies (first-class, lane-free), so the answer node just reads main
-    // — no need to dig announces out of lanes. Context-compaction summaries are
-    // kept (mainConversationMessages only drops lane-tagged messages), since after
-    // compaction a summary may be the only surviving record of older results.
-    const history = mainConversationMessages(state.messages);
-    const response = await config.models.act.invoke(
-      [
-        new SystemMessage(buildAnswerSystemPrompt({ actor, workdir, runtimeEnvironment })),
-        ...history,
-      ],
-      runnableConfig,
-    );
-    if (!readMessageText(response).trim()) {
-      return { messages: [new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。')] };
-    }
-    return { messages: [response] };
-  }
+  const answerNode = createAnswerNode(config);
 
   // Node: capability — reads capabilities, tools, execution from configurable
   async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {

@@ -917,6 +917,41 @@ test('tuiStateReducer preserves reconnect token usage when snapshot omits usage'
   assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
 });
 
+test('tuiStateReducer preserves reconcile token usage when snapshot omits usage', () => {
+  let state = initialState('chat:pet');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        },
+      },
+    },
+  };
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconcile',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [],
+      runs: [],
+    },
+  });
+
+  assert.deepEqual(state.sessions['chat:pet']?.tokenUsage, {
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+  });
+});
+
 test('tuiStateReducer drops reconnect notices with stale timeline anchors', () => {
   let state = initialState('chat:pet');
   state = {

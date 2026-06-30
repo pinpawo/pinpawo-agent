@@ -303,3 +303,60 @@ test('TuiRuntimeController reconciles snapshots after stale review errors', asyn
     'reconnect',
   );
 });
+
+test('TuiRuntimeController reconciles snapshots after completed messages', async () => {
+  const harness = createController(pendingReviewState());
+  const events: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    readSessionSnapshot: async () => {
+      events.push('snapshot');
+      return {
+        sessionId: 'sess-1',
+        kind: 'chat',
+        timeline: [{
+          id: 'message:assistant-1',
+          type: 'message',
+          role: 'assistant',
+          text: 'final',
+          status: 'completed',
+          source: 'checkpoint',
+          requestId: 'req-1',
+        }],
+        runs: [],
+      };
+    },
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).handleServerMessage({
+    type: 'event',
+    requestId: 'req-1',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'final',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+      },
+    },
+  });
+
+  await new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
+  assert.deepEqual(events, ['snapshot']);
+  assert.equal(harness.resetCount, 1);
+  assert.equal(harness.actions[0]?.type, 'event.received');
+  assert.equal(harness.actions[1]?.type, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
+  assert.equal(
+    harness.actions[1]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
+      ? harness.actions[1].source
+      : undefined,
+    'reconcile',
+  );
+});

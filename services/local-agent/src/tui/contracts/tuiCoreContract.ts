@@ -126,6 +126,6 @@ export type TuiCoreSessionSnapshot = {
 
 export type TuiCoreSessionSnapshotLoadedAction = {
   type: typeof TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded;
-  source: 'startup' | 'reconnect' | 'resume';
+  source: 'startup' | 'reconnect' | 'resume' | 'reconcile';
   snapshot: TuiCoreSessionSnapshot;
 };

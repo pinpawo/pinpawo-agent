@@ -956,6 +956,8 @@ function applySessionSnapshot(
   const focusedSession = state.focusedSessionId ? state.sessions[state.focusedSessionId] : undefined;
   const baseSession = existingSession ?? focusedSession;
   const timeline = agentTimelineEntriesFromSnapshot(snapshot.timeline);
+  const preservesTransientSnapshotState = action.source === 'reconnect'
+    || action.source === 'reconcile';
   const sessionIdsToClear = new Set<SessionId>([sessionId]);
   if (action.source === 'resume' && state.focusedSessionId) {
     sessionIdsToClear.add(state.focusedSessionId);
@@ -982,13 +984,13 @@ function applySessionSnapshot(
       ...(snapshot.runtime ?? {}),
     },
     timeline,
-    notices: action.source === 'reconnect'
+    notices: preservesTransientSnapshotState
       ? filterReconnectNotices(existingSession?.notices ?? [], timeline)
       : [],
     activities: [],
     activeRunId,
     tokenUsage: snapshot.tokenUsage
-      ?? (action.source === 'reconnect' ? existingSession?.tokenUsage ?? null : null),
+      ?? (preservesTransientSnapshotState ? existingSession?.tokenUsage ?? null : null),
   };
 
   const nextSessions = {

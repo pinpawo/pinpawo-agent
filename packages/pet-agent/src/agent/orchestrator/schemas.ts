@@ -64,10 +64,13 @@ export function buildOrchestrationDecisionSchema(params: OrchestrationDecisionSc
     ...STATIC_ACTION_KINDS,
     ...params.capabilityCandidates.map((c) => buildCapabilityActionName(c.name)),
   ] as [string, ...string[]];
+  const capabilityActionValues = params.capabilityCandidates.map((c) => buildCapabilityActionName(c.name));
 
   return z.object({
     action: z.enum(actionValues).describe(
-      '下一步动作。delegate_capability.<name> 表示委派给指定业务 capability 对应的 lane。',
+      capabilityActionValues.length > 0
+        ? `下一步动作。当前可选业务 capability action：${capabilityActionValues.join('、')}。`
+        : '下一步动作。当前没有可选业务 capability action。',
     ),
     task: z.string().nullable().optional().describe(
       'action=delegate_general 或 delegate_capability.<name> 时交给执行器的明确任务；其他 action 为 null 或省略。',
@@ -89,20 +92,36 @@ export function buildOrchestrationDecisionStructuredOutputOptions(
   };
 }
 
-export function buildOrchestrationDecisionOutputInstruction(): string {
+export function buildOrchestrationDecisionOutputInstruction(
+  params: OrchestrationDecisionSchemaParams = { capabilityCandidates: [] },
+): string {
+  const capabilityActionValues = params.capabilityCandidates.map((c) => buildCapabilityActionName(c.name));
+  const capabilityActionLines = capabilityActionValues.length > 0
+    ? [
+        `- delegate_capability.<name> action：只能选择当前候选中的 ${capabilityActionValues.join('、')}。`,
+      ]
+    : [
+        '- 当前没有 delegate_capability.<name> action 可选；不要输出任何 delegate_capability action。',
+      ];
+  const exampleAction = capabilityActionValues[0] ?? 'delegate_general';
+
   return [
     '输出一个结构化 orchestration decision。',
     '必须返回一个 JSON object，字段名必须严格使用：action、task、context_summary。',
     '必须使用 action 字段表达下一步动作；不要输出 delegate_capability、delegate_general 或 answer 作为字段名。',
     'action 取值：',
-    '- answer：无需继续委派，交给后续 answer 节点基于完整对话历史回复用户；你只需选择 answer，不要在这里撰写最终回复内容。',
-    '- delegate_general：委派给通用工具执行器。',
-    '- delegate_capability.<name>：委派给指定业务 capability。<name> 必须从当前候选里选。',
+    '- answer：无需继续 delegate，交给后续 answer 节点基于完整对话历史回复用户；你只需选择 answer，不要在这里撰写最终回复内容。',
+    '- delegate_general：delegate 给通用工具执行器。',
+    ...capabilityActionLines,
     '字段语义：',
     '- action 必填，且必须是上面的枚举值之一。',
     '- task 只在 delegate_general 或 delegate_capability.<name> 时填写明确任务；其他 action 为 null 或省略。',
     '- context_summary 只在 delegate_general 或 delegate_capability.<name> 时填写必要上下文；其他 action 为 null 或省略。',
-    '正确示例：{"action":"delegate_capability.explore","task":"调查当前项目 typecheck 失败原因并修复。","context_summary":"用户要求定位并修复 typecheck 失败。"}',
+    `正确示例：${JSON.stringify({
+      action: exampleAction,
+      task: '调查当前项目 typecheck 失败原因并修复。',
+      context_summary: '用户要求定位并修复 typecheck 失败。',
+    })}`,
     '一旦决定 delegate_* 就直接交给执行器；运行期的工具级风险由具体工具自己拦截，无需在决策层重复表达。',
   ].join('\n');
 }

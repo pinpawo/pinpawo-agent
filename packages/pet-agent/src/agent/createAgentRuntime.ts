@@ -784,7 +784,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       capabilitySearchQuery: decisionCapabilitySearchQuery,
       capabilityRegistryAvailable: capabilityList.length > 0,
     });
-    const outputInstruction = buildOrchestrationDecisionOutputInstruction();
+    const outputInstruction = buildOrchestrationDecisionOutputInstruction({
+      capabilityCandidates: decisionCapabilityCandidates,
+    });
     const systemPrompt = isUserIntentDecision
       ? buildUserIntentDecisionSystemPrompt({
         actor,
@@ -871,7 +873,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
           : actionKind === 'delegate_capability' && !activeCapability
             ? `当前没有可用的 capability「${requestedCapability ?? ''}」，无法继续完成这一步。`
             : !decisionTask
-              ? '当前决策选择继续委派，但没有提供明确任务。'
+              ? '当前决策选择继续 delegate，但没有提供明确任务。'
               : '当前决策已结束，但没有生成可展示的回复。'
       : null;
 
@@ -943,7 +945,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       && activeDelegation !== null
       && !handedOffDelegationIds.has(activeDelegation.id);
     const blockedReplacementMessage = replacementBlocked
-      ? new AIMessage('当前委派任务还没有可交接的结果，暂不能切换到新的执行器。请先继续当前委派，或明确说明要放弃它。')
+      ? new AIMessage('当前 delegated task 还没有可交接的结果，暂不能切换到新的执行器。请先继续当前 delegated task，或明确说明要放弃它。')
       : null;
 
     // A handed-off delegation is, by the orchestrator's judgment, complete.

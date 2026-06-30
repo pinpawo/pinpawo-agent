@@ -117,8 +117,8 @@ test('user intent prompt routes clarification through answer instead of ask_user
     capabilityDecisionState: 'unavailable',
     outputInstruction: [
       'action 取值：',
-      '- answer：无需委派，或需要直接向用户补充、澄清、确认。',
-      '- delegate_general：委派给通用工具执行器。',
+      '- answer：无需 delegate，或需要直接向用户补充、澄清、确认。',
+      '- delegate_general：delegate 给通用工具执行器。',
     ].join('\n'),
   });
 
@@ -157,7 +157,7 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
     outputInstruction: '输出 JSON。',
   });
 
-  assert.doesNotMatch(prompt, /可继续委派目标/);
+  assert.doesNotMatch(prompt, /Delegate targets/);
   assert.doesNotMatch(prompt, /run_shell/);
   assert.doesNotMatch(prompt, /ask_user/);
   assert.match(prompt, /不接收、不需要、也不应该依赖具体工具列表/);
@@ -235,7 +235,7 @@ test('subagent announce wraps markdown result as an xml-ish data block', () => {
   assert.match(context, /<!\[CDATA\[/);
   assert.match(context, /# 结果/);
   assert.match(context, /<\/result>/);
-  assert.doesNotMatch(context, /委派任务/);
+  assert.doesNotMatch(context, /delegated task：/);
 });
 
 test('subagent announce context includes artifact refs for task ownership', () => {

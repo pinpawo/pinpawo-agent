@@ -33,15 +33,15 @@ export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[
 
 export function buildRunDelegationContext(runDelegations: RunDelegation[]): string {
   if (runDelegations.length === 0) {
-    return '当前 run 任务跟踪：\n- 暂无已委派任务。';
+    return '当前 run 任务跟踪：\n- 暂无 delegated task。';
   }
 
   const visibleDelegations = runDelegations.slice(-MAX_DECISION_RUN_DELEGATIONS);
   const lines = [
     '当前 run 任务跟踪（仅保留本 run 近期任务）',
     visibleDelegations.some((delegation) => delegation.status !== 'completed')
-      ? '- 存在尚未 completed 的委派任务。'
-      : '- 所有已委派任务均为 completed。',
+      ? '- 存在尚未 completed 的 delegated task。'
+      : '- 所有 delegated task 均为 completed。',
   ];
 
   for (const delegation of visibleDelegations) {
@@ -75,8 +75,8 @@ export function buildDecisionTargetsContext(params: {
     capabilityRegistryAvailable,
   } = params;
   const lines = [
-    '可委派目标：',
-    '只根据下面的目标描述判断是否委派。',
+    'Delegate targets：',
+    '只根据下面的 target 描述判断是否 delegate。',
   ];
   if (generalTools.length > 0) {
     lines.push('', '通用工具执行器 general（可使用下列通用工具）：');
@@ -214,7 +214,7 @@ export function buildRecentSubagentAnnounceContext(announces: SubagentAnnounce[]
   for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
     lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}${item.lane}`);
     if (item.task) {
-      lines.push(`  委派任务：${clipForPrompt(item.task, 140)}`);
+      lines.push(`  delegated task：${clipForPrompt(item.task, 140)}`);
     }
     if (item.text) {
       lines.push(`  返回摘要：${clipForPrompt(item.text, 220)}`);
@@ -288,7 +288,7 @@ export function buildUserIntentDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的用户意图判断节点，只决定下一步，不亲自执行可委派目标里的能力。',
+    '你是 orchestrator 的用户意图判断节点，只决定下一步，不亲自执行 delegate targets 里的能力。',
     '',
     params.runDelegationContext,
     '',
@@ -298,10 +298,10 @@ export function buildUserIntentDecisionSystemPrompt(params: {
     '判断重点：理解用户当前想完成什么，决定是否需要外部执行器。',
     '',
     '决策原则：',
-    '- 如果当前输入足以直接回应用户（无需委派执行器），选择 answer；最终回复由后续回复节点基于完整对话历史生成，你不要在这里撰写回复内容。',
+    '- 如果当前输入足以直接回应用户（无需 delegate 给执行器），选择 answer；最终回复由后续回复节点基于完整对话历史生成，你不要在这里撰写回复内容。',
     '- 如果用户询问已有上下文、最近任务状态或之前结果，选择 answer 交给回复节点回答；不要在决策层凭印象复述或编造之前的结果。',
     '- 如果用户目标本身无法判断，或需要向用户补充、澄清、确认，选择 answer 交给回复节点处理；不要在决策层直接提问。',
-    '- 如果下一步任务匹配某个 delegate_capability.<name> 候选，选择该候选；capability 优先于 general。即使缺少主题、平台、时长等执行参数，也应把澄清交给 capability 内部处理，除非用户目标本身无法判断或涉及真实风险。',
+    `- ${buildCapabilityDelegationDecisionPrinciple(params.capabilityDecisionState)}`,
     ...capabilityInstructions.map((line) => `- ${line}`),
     '- 当所有候选都不匹配，且需要 general 的工具能力才能继续时，选择 delegate_general。',
     '- 一旦决定 delegate_*，就交给执行器；运行期的工具级风险（rm -rf、git push --force 等）由具体工具自己拦截，不需要在决策层重复表达。',
@@ -320,18 +320,18 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的子任务结果判断节点。你的唯一职责是判断下一步路由：交给 answer 节点，或继续委派给执行器。',
+    '你是 orchestrator 的子任务结果判断节点。你的唯一职责是判断下一步路由：交给 answer 节点，或继续 delegate 给执行器。',
     '不要回答用户、不要总结 subagent 结果、不要执行或规划具体工具调用；最终回复由后续 answer 节点生成。',
     '',
     '当前阶段：subagent 返回后的结果判断。',
     '判断重点：读取输入中的 subagent announce 原文，结合用户原始请求和当前 run 任务跟踪，判断用户当前 run 目标是否已经满足。',
-    'run 任务跟踪只用于理解委派链路；完成与否以当前 subagent announce 是否覆盖用户目标为准。',
+    'run 任务跟踪只用于理解 delegation 链路；完成与否以当前 subagent announce 是否覆盖用户目标为准。',
     '可选 action 由结构化输出 schema 限定；本节点不接收、不需要、也不应该依赖具体工具列表。',
     '',
     '决策原则：',
     '- 如果 subagent announce 已经满足用户当前 run 目标，选择 answer；不要在这里撰写最终回复内容。',
-    '- 如果 subagent announce 只是阶段性进展，判断还缺什么；需要执行器继续时再委派。',
-    '- 如果当前委派任务还没完成，但用户目标仍明确且不需要用户补充信息，优先继续当前委派任务对应的执行器；不要仅因为停止原因不是 natural 就选择 answer。',
+    '- 如果 subagent announce 只是阶段性进展，判断还缺什么；需要执行器继续时再 delegate。',
+    '- 如果当前 delegated task 还没完成，但用户目标仍明确且不需要用户补充信息，优先继续当前 delegated task 对应的执行器；不要仅因为停止原因不是 natural 就选择 answer。',
     '- 如果用户原始请求仍有明确未完成目标，选择一个最明确的下一步。',
     '- 如果信息不足、用户意图不明确，或下一步需要用户先补充、澄清、确认，选择 answer 交给 answer 节点处理；不要在决策层直接提问。',
     '- 一旦决定 delegate_*，就交给执行器；运行期的工具级风险（rm -rf、git push --force 等）由具体工具自己拦截，不需要在决策层重复表达。',
@@ -348,7 +348,7 @@ export function buildAnswerSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的最终回复节点。orchestrator 已经判断当前 run 无需再委派执行器，现在由你直接回复用户。',
+    '你是 orchestrator 的最终回复节点。orchestrator 已经判断当前 run 无需再 delegate 给执行器，现在由你直接回复用户。',
     '你能看到完整的对话历史（包括之前 subagent/执行器返回的完整内容）。',
     '',
     '回复原则：',
@@ -385,7 +385,7 @@ export function buildCapabilityDiscoverySystemPrompt(params: {
     ...configLines,
     '',
     '你是 capability discovery，只判断是否需要先搜索业务 capability 候选。',
-    '不要做最终路由决策，不要回答用户，也不要委派执行器。',
+    '不要做最终路由决策，不要回答用户，也不要 delegate 给执行器。',
     '',
     params.runDelegationContext,
     '',
@@ -409,7 +409,7 @@ export function buildUserRequestContext(userRequest: string | null): string | nu
 function buildCapabilityDecisionInstructions(capabilityDecisionState: CapabilityDecisionState): string[] {
   if (capabilityDecisionState === 'search_available') {
     return [
-      '当前 action 枚举里还没有 delegate_capability.<name> 选项；如果用户请求可能涉及业务 capability，先调用 capability_search 搜索候选。',
+      'capability discovery 未给本轮 decision schema 产出候选；当前 action 枚举里没有 delegate_capability.<name> option。',
     ];
   }
   if (capabilityDecisionState === 'candidates_available') {
@@ -418,10 +418,23 @@ function buildCapabilityDecisionInstructions(capabilityDecisionState: Capability
   }
   if (capabilityDecisionState === 'search_exhausted') {
     return [
-      '已搜索但没有找到匹配的 delegate_capability.<name> 候选；本 run 不再尝试该路径。',
+      '已搜索但没有找到匹配的业务 capability candidate；本 run 不再尝试该路径。',
     ];
   }
   return [];
+}
+
+function buildCapabilityDelegationDecisionPrinciple(capabilityDecisionState: CapabilityDecisionState): string {
+  if (capabilityDecisionState === 'candidates_available') {
+    return '如果下一步任务匹配某个业务 capability candidate，选择对应的 delegate_capability.<name>；delegate_capability 优先于 delegate_general。即使缺少主题、平台、时长等执行参数，也应把澄清交给 capability 内部处理，除非用户目标本身无法判断或涉及真实风险。';
+  }
+  if (capabilityDecisionState === 'search_exhausted') {
+    return '本 run 已搜索但没有可选业务 capability candidate；不要输出 delegate_capability.<name>。如果仍需要工具执行，选择 delegate_general。';
+  }
+  if (capabilityDecisionState === 'search_available') {
+    return '本 run 没有业务 capability candidate 进入当前 action schema；不要输出 delegate_capability.<name>。如果仍需要工具执行，选择 delegate_general。';
+  }
+  return '业务 capability 不可用；不要输出 delegate_capability.<name>。如果仍需要工具执行，选择 delegate_general。';
 }
 
 function formatSubagentAnnounceText(item: SubagentAnnounce): string | null {
@@ -657,7 +670,7 @@ export function buildDelegationOutcomeDecisionInput(params: {
     artifactContext
       ? indentXmlBlock(xmlTextBlock('capability_artifacts', artifactContext), 2)
       : null,
-    '  <instruction>请根据当前委派任务、subagent announce 和用户原始请求，判断当前 run 下一步。</instruction>',
+    '  <instruction>请根据当前 delegated task、subagent announce 和用户原始请求，判断当前 run 下一步。</instruction>',
     '</delegation_outcome_input>',
   ].filter((line) => line !== null).join('\n');
 }

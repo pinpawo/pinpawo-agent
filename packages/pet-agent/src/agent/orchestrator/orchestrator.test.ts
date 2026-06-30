@@ -324,6 +324,52 @@ test('decision structured output autoRepair reruns the same route LLM call after
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'answered');
 });
 
+test('user intent decision without candidates does not advertise capability actions', async () => {
+  let decisionSystemPrompt = '';
+  let schemaAllowsBrowser = false;
+  const model = {
+    invoke: async () => new AIMessage('done'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: (schema: unknown) => ({
+      invoke: async (messages: unknown[]) => {
+        schemaAllowsBrowser = Boolean(
+          (schema as { safeParse?: (value: unknown) => { success: boolean } }).safeParse?.({
+            action: 'delegate_capability.browser',
+            task: '打开网页',
+            context_summary: '用户需要浏览器。',
+          }).success,
+        );
+        decisionSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
+        return { action: 'answer' };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+
+  const graph = createOrchestratorGraph({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+
+  await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('继续'),
+  ]), {
+    configurable: {
+      thread_id: 'test-no-candidate-decision-prompt',
+      actor: testActor,
+      capabilities: [capability('browser', '浏览器 capability。')],
+      tools: [],
+    },
+  });
+
+  assert.equal(schemaAllowsBrowser, false);
+  assert.match(decisionSystemPrompt, /本 run 没有业务 capability candidate 进入当前 action schema/);
+  assert.match(decisionSystemPrompt, /如果仍需要工具执行，选择 delegate_general/);
+  assert.doesNotMatch(decisionSystemPrompt, /调用 capability_search/);
+  assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.browser/);
+});
+
 test('forcedCapabilityNames pre-seeds capability candidates and skips capability discovery LLM call', async () => {
   let discoveryCalled = false;
   let decisionSystemPrompt = '';
@@ -690,9 +736,10 @@ test('limit-reached progress announce lets model choose the same capability dele
 
   assert.equal(capabilityRunCount, 1);
   assert.equal(decisionCallCount, 1);
-  // The active task context carries the continuation action; the system prompt
-  // stays free of tool/candidate target expansion.
-  assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.inspect_repo/);
+  // The active task context carries the continuation action, and the output
+  // instruction mirrors the schema enum without expanding full target context.
+  assert.match(decisionSystemPrompt, /当前候选中的 delegate_capability\.inspect_repo/);
+  assert.doesNotMatch(decisionSystemPrompt, /业务 capability 候选/);
   assert.match(decisionInput, /<continuation_action>delegate_capability\.inspect_repo<\/continuation_action>/);
 });
 
@@ -1750,7 +1797,7 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   announce.id = 'm-announce';
   setPinpetMeta(announce, { lane: 'capability:explore', runId: 't1', delegationId: 'd1', isAnnounce: true, task: '查动态' });
   // A different delegation in the same lane must be untouched.
-  const otherDelegation = new AIMessage('另一个委派的中间消息');
+  const otherDelegation = new AIMessage('另一个 delegation 的中间消息');
   otherDelegation.id = 'm-other';
   setPinpetMeta(otherDelegation, { lane: 'capability:explore', runId: 't1', delegationId: 'd2' });
 

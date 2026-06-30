@@ -4,10 +4,8 @@ import { StateGraph, START, END } from '@langchain/langgraph';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import type { GuardRunOptions } from '../guards';
 import type { AgentCapability } from '../types/capability';
-import type { AgentActor, AgentExecution, AgentModels } from '../types/agent';
 import type { CapabilityArtifactRef } from '../types/artifact';
-import type { SubagentRunInput, SubagentToolEventHandler } from '../types/subagent';
-import type { AgentToolkit, ToolkitReviewCapabilities } from '../types/toolkit';
+import type { SubagentRunInput } from '../types/subagent';
 import { randomUUID } from 'node:crypto';
 import { createSubagent } from '../subagent/createSubagent';
 import {
@@ -31,12 +29,9 @@ import {
 } from './orchestrator/guardDefinitions';
 import {
   compactOrchestratorMessages,
-  isContextCompactionMessage,
   readContextCompactionSummaries,
 } from './orchestrator/contextCompaction';
 import type {
-  CapabilityCandidate,
-  CapabilityDecisionState,
   RunFinalReplyRoute,
   MessageLane,
   OrchestratorConfig,
@@ -78,17 +73,6 @@ import {
   buildUserIntentDecisionSystemPrompt,
 } from './orchestrator/prompts';
 import {
-  mergeToolAuthorizations,
-  type ToolAuthorizationRecord,
-} from './orchestrator/review/reviewAuthorizations';
-import {
-  GLOBAL_REVIEW_POLICY_MODE,
-  type GlobalReviewPolicy,
-  type GlobalReviewPolicyMode,
-  type GlobalReviewPolicyResolver,
-  type GlobalReviewPolicyStructuredOutputConfig,
-} from './orchestrator/review/globalReviewPolicy';
-import {
   reuseOrAppendRunDelegation,
   updateRunDelegationResult,
 } from './orchestrator/delegations';
@@ -122,6 +106,35 @@ import {
 } from './orchestrator/subagentHandoff';
 import { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
 import { readMessageText } from './orchestrator/utils';
+import { createToolAuthorizationRecorder } from './orchestrator/runtime/authorization';
+import {
+  canSearchCapabilities,
+  buildCapabilityCandidatesFromLanes,
+  mainMessagesWithoutCompaction,
+  mergeCapabilityCandidates,
+  resolveCapabilityDecisionState,
+} from './orchestrator/runtime/decisions/capabilityCandidates';
+import {
+  createTaskActiveDelegation,
+  decisionModeFromRunPendingDelegation,
+  readCapabilityNameFromLane,
+  recoverTaskActiveDelegationFromRunState,
+  resolveDelegationTranscriptRunId,
+} from './orchestrator/runtime/decisions/delegationLifecycle';
+import {
+  CAPABILITY_SUBAGENT_MAX_ITERATIONS,
+  DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
+  GENERAL_SUBAGENT_MAX_ITERATIONS,
+} from './orchestrator/runtime/constants';
+import {
+  capabilityLaneToolkits,
+  generalLaneToolkits,
+  getInvokeOptions,
+  readRunIterationLimit,
+  readSubagentContextWindowTokens,
+  readThreadId,
+  resolveActor,
+} from './orchestrator/runtime/config';
 
 export type {
   OrchestratorConfig,
@@ -132,306 +145,7 @@ export type {
 export { buildOrchestratorRunInput, buildOrchestratorTurnInput } from './orchestrator/state';
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames, validateUniqueToolNames } from './orchestrator/validation';
 export { ORCHESTRATOR_RECURSION_LIMIT } from './orchestrator/controlPrimitives';
-
-// Subagent iteration budget = soft model-call guard. createSubagent sets a high
-// LangGraph recursionLimit so the guard can stop gracefully before the
-// runtime breaker.
-// Unified across lanes (P4 / #281). See docs/GUARD_REGISTRY_DESIGN.md.
-const SUBAGENT_MAX_ITERATIONS = 100;
-const GENERAL_SUBAGENT_MAX_ITERATIONS = SUBAGENT_MAX_ITERATIONS;
-const CAPABILITY_SUBAGENT_MAX_ITERATIONS = SUBAGENT_MAX_ITERATIONS;
-export const DEFAULT_ORCHESTRATOR_MAX_ITERATIONS = 25;
-
-function generalLaneToolkits(toolkits: AgentToolkit[]) {
-  return toolkits.filter((toolkitItem) => toolkitItem.exposure?.general !== false);
-}
-
-function capabilityLaneToolkits(toolkits: AgentToolkit[]) {
-  return toolkits.filter((toolkitItem) => toolkitItem.exposure?.capability !== false);
-}
-
-const ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_NAMES = [
-  'capabilityDiscovery',
-  'userIntentDecision',
-  'delegationOutcomeDecision',
-] as const;
-
-const ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_SET = new Set<string>(
-  ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_NAMES,
-);
-
-export function isOrchestratorInternalAiStreamNode(node: string) {
-  return ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_SET.has(node);
-}
-
-// --- Configurable helpers ---
-
-function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOptions {
-  const cfg = runnableConfig?.configurable ?? {};
-  return {
-    actor: cfg.actor as AgentActor | undefined,
-    capabilities: (cfg.capabilities ?? []) as AgentCapability[],
-    toolkits: (cfg.toolkits ?? []) as AgentToolkit[],
-    execution: cfg.execution as AgentExecution | undefined,
-    workdir: cfg.workdir as string | undefined,
-    runtimeEnvironment: cfg.runtimeEnvironment as string | undefined,
-    onToolEvent: cfg.onToolEvent as SubagentToolEventHandler | undefined,
-    reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
-    globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),
-    maxRunIterations: readRunIterationLimit(cfg.maxRunIterations),
-    forcedCapabilityNames: Array.isArray((cfg as { forcedCapabilityNames?: unknown }).forcedCapabilityNames)
-      ? (cfg as { forcedCapabilityNames: unknown[] }).forcedCapabilityNames.filter(
-          (name): name is string => typeof name === 'string' && name.length > 0,
-      )
-      : undefined,
-  };
-}
-
-function readGlobalReviewPolicyMode(value: unknown): GlobalReviewPolicyMode | null {
-  if (
-    value === GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION
-    || value === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
-    || value === GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS
-    || value === GLOBAL_REVIEW_POLICY_MODE.CUSTOM
-  ) {
-    return value;
-  }
-  if (value === 'ask') {
-    return GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
-  }
-  if (value === 'auto') {
-    return GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION;
-  }
-  return null;
-}
-
-function warnBareCustomGlobalReviewPolicy() {
-  console.warn(
-    '[pet-agent] custom global review policy requires a resolver; falling back to require_authorization.',
-  );
-}
-
-function readGlobalReviewPolicy(value: unknown): GlobalReviewPolicy | undefined {
-  const directMode = readGlobalReviewPolicyMode(value);
-  if (directMode) {
-    if (directMode === GLOBAL_REVIEW_POLICY_MODE.CUSTOM) {
-      warnBareCustomGlobalReviewPolicy();
-      return undefined;
-    }
-    return { mode: directMode };
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  const mode = readGlobalReviewPolicyMode(record.mode);
-  if (!mode) {
-    return undefined;
-  }
-  if (mode === GLOBAL_REVIEW_POLICY_MODE.CUSTOM) {
-    if (typeof record.resolve !== 'function') {
-      warnBareCustomGlobalReviewPolicy();
-      return undefined;
-    }
-    return {
-      mode,
-      resolve: record.resolve as GlobalReviewPolicyResolver,
-    };
-  }
-  const structuredOutput = record.structuredOutput
-    && typeof record.structuredOutput === 'object'
-    && !Array.isArray(record.structuredOutput)
-    ? record.structuredOutput as GlobalReviewPolicyStructuredOutputConfig
-    : undefined;
-  return {
-    mode,
-    ...(structuredOutput ? { structuredOutput } : {}),
-  };
-}
-
-function readThreadId(runnableConfig?: RunnableConfig): string | null {
-  const value = runnableConfig?.configurable?.thread_id;
-  return typeof value === 'string' && value.trim() ? value : null;
-}
-
-function readToolkitReviewCapabilities(value: unknown): ToolkitReviewCapabilities | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (typeof record.humanReview !== 'boolean' || typeof record.sessionAuthorization !== 'boolean') {
-    return undefined;
-  }
-  return {
-    humanReview: record.humanReview,
-    sessionAuthorization: record.sessionAuthorization,
-  };
-}
-
-function canSearchCapabilities(
-  model: AgentModels['act'],
-  state: OrchestratorStateType,
-  capabilities: AgentCapability[],
-): model is ToolBindableChatModel {
-  return capabilities.length > 0
-    && !state.runCapabilitySearchState.attempted
-    && state.runCapabilitySearchState.candidates.length === 0
-    && typeof (model as ToolBindableChatModel).bindTools === 'function';
-}
-
-function resolveCapabilityDecisionState(params: {
-  canSearch: boolean;
-  capabilityCandidates: CapabilityCandidate[];
-  capabilitySearchAttempted: boolean;
-}): CapabilityDecisionState {
-  if (params.capabilityCandidates.length > 0) return 'candidates_available';
-  if (params.canSearch) return 'search_available';
-  if (params.capabilitySearchAttempted) return 'search_exhausted';
-  return 'unavailable';
-}
-
-function decisionModeFromRunPendingDelegation(pending: RunPendingDelegation | null): DecisionMode {
-  if (!pending) return 'answer';
-  return pending.lane === 'general' ? 'general' : 'capability';
-}
-
-function createTaskActiveDelegation(
-  delegation: RunPendingDelegation,
-  runId: string,
-): TaskActiveDelegation {
-  return {
-    id: delegation.id,
-    lane: delegation.lane,
-    task: delegation.task,
-    contextSummary: delegation.contextSummary,
-    transcriptRunId: runId,
-    status: 'pending',
-    resultPreview: null,
-  };
-}
-
-function readRunIterationLimit(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
-    return undefined;
-  }
-  return value;
-}
-
-function readSubagentContextWindowTokens(config: OrchestratorConfig): number | undefined {
-  return config.subagentContextWindowTokens ?? config.contextWindowTokens;
-}
-
-function recoverTaskActiveDelegationFromRunState(
-  state: OrchestratorStateType,
-): TaskActiveDelegation | null {
-  if (state.taskActiveDelegation || !state.runId) {
-    return null;
-  }
-  for (let index = state.runDelegations.length - 1; index >= 0; index -= 1) {
-    const delegation = state.runDelegations[index];
-    if (delegation.status !== 'progress' && delegation.status !== 'completed') {
-      continue;
-    }
-    const announce = readLatestAnnounce(state.messages, {
-      runId: state.runId,
-      delegationId: delegation.id,
-    });
-    if (!announce) {
-      continue;
-    }
-    return {
-      id: delegation.id,
-      lane: delegation.lane,
-      task: delegation.task,
-      contextSummary: null,
-      transcriptRunId: state.runId,
-      status: 'awaiting_decision',
-      resultPreview: delegation.resultPreview,
-    };
-  }
-  return null;
-}
-
-function resolveDelegationTranscriptRunId(
-  state: OrchestratorStateType,
-  delegation: RunPendingDelegation,
-) {
-  return state.taskActiveDelegation?.id === delegation.id
-    ? state.taskActiveDelegation.transcriptRunId
-    : state.runId;
-}
-
-function readCapabilityNameFromLane(lane: MessageLane): string | null {
-  return lane.startsWith('capability:') ? lane.slice('capability:'.length) : null;
-}
-
-function mainMessagesWithoutCompaction(messages: BaseMessage[]): BaseMessage[] {
-  return mainConversationMessages(messages).filter((message) => !isContextCompactionMessage(message));
-}
-
-function buildCapabilityCandidatesFromLanes(
-  capabilityList: AgentCapability[],
-  lanes: Array<MessageLane | null | undefined>,
-): CapabilityCandidate[] {
-  const candidates: CapabilityCandidate[] = [];
-  const seen = new Set<string>();
-  for (const lane of lanes) {
-    if (!lane) continue;
-    const capabilityName = readCapabilityNameFromLane(lane);
-    if (!capabilityName || seen.has(capabilityName)) continue;
-    const capability = capabilityList.find((item) => item.name === capabilityName);
-    if (!capability) continue;
-    seen.add(capabilityName);
-    candidates.push({
-      name: capability.name,
-      description: capability.description,
-      score: Number.POSITIVE_INFINITY,
-      matchedTerms: ['in_progress'],
-    });
-  }
-  return candidates;
-}
-
-function mergeCapabilityCandidates(...groups: CapabilityCandidate[][]): CapabilityCandidate[] {
-  const candidates: CapabilityCandidate[] = [];
-  const seen = new Set<string>();
-  for (const group of groups) {
-    for (const candidate of group) {
-      if (seen.has(candidate.name)) continue;
-      seen.add(candidate.name);
-      candidates.push(candidate);
-    }
-  }
-  return candidates;
-}
-
-function resolveActor(config: OrchestratorConfig, runnableConfig?: RunnableConfig): AgentActor {
-  const invokeActor = getInvokeOptions(runnableConfig).actor;
-  if (invokeActor) {
-    return invokeActor;
-  }
-  if (config.actor) {
-    return config.actor;
-  }
-  throw new Error('Missing actor in orchestrator config and invoke options');
-}
-
-function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {
-  const active = mergeToolAuthorizations([], current);
-  const recorded: ToolAuthorizationRecord[] = [];
-
-  return {
-    active,
-    recorded,
-    recordToolAuthorization: (authorization: ToolAuthorizationRecord) => {
-      const merged = mergeToolAuthorizations(active, [authorization]);
-      if (merged.length > active.length) {
-        recorded.push(authorization);
-      }
-      active.splice(0, active.length, ...merged);
-    },
-  };
-}
+export { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS, isOrchestratorInternalAiStreamNode } from './orchestrator/runtime/constants';
 
 // --- Graph builder ---
 

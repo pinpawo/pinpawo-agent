@@ -399,6 +399,11 @@ test('MessageBlock renders assistant content through markdown', () => {
 
   assert.ok(markdown);
   assert.equal(markdown.props.children, '| A | B |\n| - | - |\n| **one** | `two` |');
+  const markdownProps = markdown.props as {
+    children?: React.ReactNode;
+    showSectionPrefix?: boolean;
+  };
+  assert.equal(markdownProps.showSectionPrefix, false);
 });
 
 test('history snapshot assistant messages render through markdown', () => {

@@ -52,7 +52,9 @@ export function MessageBlock(props: {
       <Box marginLeft={1}>
         <Text color="green" dimColor>| </Text>
         <Box flexDirection="column" width={contentWidth}>
-          <Markdown>{normalizeAssistantMessageMarkdown(props.entry.text)}</Markdown>
+          <Markdown showSectionPrefix={false}>
+            {normalizeAssistantMessageMarkdown(props.entry.text)}
+          </Markdown>
         </Box>
       </Box>
     </Box>

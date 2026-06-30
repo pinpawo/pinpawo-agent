@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCapabilityActionName,
+  buildOrchestrationDecisionOutputInstruction,
   buildOrchestrationDecisionSchema,
   parseAction,
 } from './schemas';
@@ -101,4 +102,17 @@ test('parseAction handles capability names containing dots in payload as a singl
 
 test('buildCapabilityActionName composes the prefix correctly', () => {
   assert.equal(buildCapabilityActionName('browser'), 'delegate_capability.browser');
+});
+
+test('decision output instruction lists capability actions only when candidates exist', () => {
+  const withoutCandidates = buildOrchestrationDecisionOutputInstruction({
+    capabilityCandidates: [],
+  });
+  assert.match(withoutCandidates, /当前没有 delegate_capability\.<name> action 可选/);
+  assert.doesNotMatch(withoutCandidates, /delegate_capability\.browser/);
+
+  const withCandidates = buildOrchestrationDecisionOutputInstruction({
+    capabilityCandidates: [{ name: 'browser' }],
+  });
+  assert.match(withCandidates, /delegate_capability\.browser/);
 });

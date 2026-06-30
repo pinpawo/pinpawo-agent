@@ -19,8 +19,8 @@ function buildRunIterationLimitMessage(
 ): string {
   return [
     `主流程循环已达到上限：${count}/${limit}。`,
-    `当前仍保留委派任务“${delegation.task}”（${delegation.lane}）。`,
-    '该轮委派记录为待续跑状态，可继续提交下一轮任务让我接着推进。',
+    `当前仍保留 delegated task“${delegation.task}”（${delegation.lane}）。`,
+    '该轮 delegation record 为待续跑状态，可继续提交下一轮任务让我接着推进。',
   ].join('\n');
 }
 

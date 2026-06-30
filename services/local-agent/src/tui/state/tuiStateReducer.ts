@@ -441,7 +441,7 @@ function clearTextAreaTransientInputState(input: TuiState['input']): TuiState['i
   };
 }
 
-function updateRun(
+function updateExistingRun(
   state: TuiState,
   requestId: string,
   updater: (run: TuiRunModel) => TuiRunModel,
@@ -617,42 +617,46 @@ function finishRecoveredTimelineRequest(
   }, sessionId, tokenUsage);
 }
 
-function applyAssistantMessageEvent(
+function applyAssistantMessageDeltaEvent(
   state: TuiState,
-  event: Extract<LocalAgentEvent, { type: 'message.delta' | 'message.completed' }>,
+  event: Extract<LocalAgentEvent, { type: 'message.delta' }>,
   messageCell?: MessageCellMeta,
 ) {
-  if (event.type === 'message.delta') {
-    const token = event.text;
-    if (!token) return state;
-    const owner = resolveTimelineEventOwner(state, event.requestId);
-    if (!owner) return state;
-    let assistantEntryId: string | null = null;
-    const stateWithTimeline = updateSession(state, owner.sessionId, (currentSession) => {
-      const { session: sessionWithTimeline, entryId } = appendAssistantTimelineDelta(
-        currentSession,
-        event.requestId,
-        token,
-        messageCell?.timestamp,
-      );
-      assistantEntryId = entryId;
-      return sessionWithTimeline;
-    });
-    return assistantEntryId && owner.run
-      ? {
-          ...stateWithTimeline,
-          runs: {
-            ...stateWithTimeline.runs,
-            [event.requestId]: addTimelineEntryId({
-              ...owner.run,
-              phase: 'streaming',
-              charCount: owner.run.charCount + token.length,
-            }, assistantEntryId),
-          },
-        }
-      : stateWithTimeline;
-  }
+  const token = event.text;
+  if (!token) return state;
+  const owner = resolveTimelineEventOwner(state, event.requestId);
+  if (!owner) return state;
+  let assistantEntryId: string | null = null;
+  const stateWithTimeline = updateSession(state, owner.sessionId, (currentSession) => {
+    const { session: sessionWithTimeline, entryId } = appendAssistantTimelineDelta(
+      currentSession,
+      event.requestId,
+      token,
+      messageCell?.timestamp,
+    );
+    assistantEntryId = entryId;
+    return sessionWithTimeline;
+  });
+  return assistantEntryId && owner.run
+    ? {
+        ...stateWithTimeline,
+        runs: {
+          ...stateWithTimeline.runs,
+          [event.requestId]: addTimelineEntryId({
+            ...owner.run,
+            phase: 'streaming',
+            charCount: owner.run.charCount + token.length,
+          }, assistantEntryId),
+        },
+      }
+    : stateWithTimeline;
+}
 
+function applyAssistantMessageCompletedEvent(
+  state: TuiState,
+  event: Extract<LocalAgentEvent, { type: 'message.completed' }>,
+  messageCell?: MessageCellMeta,
+) {
   const owner = resolveTimelineEventOwner(state, event.requestId, { allowTimelineFallback: true });
   if (!owner) return state;
   const session = state.sessions[owner.sessionId];
@@ -703,7 +707,7 @@ function applyOperationEvent(
     return sessionWithTimeline;
   });
   return operationEntryId
-    ? updateRun(stateWithTimeline, event.requestId, (currentRun) =>
+    ? updateExistingRun(stateWithTimeline, event.requestId, (currentRun) =>
         addTimelineEntryId({
           ...currentRun,
           phase: event.phase === 'started' || event.phase === 'updated'
@@ -730,7 +734,7 @@ function applySubagentMessageDeltaEvent(
     );
     return sessionWithActivity;
   });
-  return updateRun(stateWithActivity, event.requestId, (currentRun) => ({
+  return updateExistingRun(stateWithActivity, event.requestId, (currentRun) => ({
     ...currentRun,
     phase: currentRun.phase === 'waiting_human' ? currentRun.phase : 'streaming',
     charCount: currentRun.charCount + token.length,
@@ -751,7 +755,7 @@ function applyHumanReviewRequestedEvent(
       message: TUI_TEXT.approvalWaiting(petId),
     },
   };
-  return updateRun(stateWithReview, event.requestId, (currentRun) => ({
+  return updateExistingRun(stateWithReview, event.requestId, (currentRun) => ({
     ...currentRun,
     phase: 'waiting_human',
     charCount: 0,
@@ -815,8 +819,9 @@ function applyRuntimeEvent(
   const event = action.event;
   switch (event.type) {
     case 'message.delta':
+      return applyAssistantMessageDeltaEvent(state, event, action.messageCell);
     case 'message.completed':
-      return applyAssistantMessageEvent(state, event, action.messageCell);
+      return applyAssistantMessageCompletedEvent(state, event, action.messageCell);
     case 'operation':
       return applyOperationEvent(state, event, action.now);
     case 'subagent.message.delta':
@@ -1257,7 +1262,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     case 'server.interrupting': {
       const run = state.runs[action.requestId];
       if (!run) return state;
-      const stateWithRun = updateRun(state, action.requestId, (currentRun) => ({
+      const stateWithRun = updateExistingRun(state, action.requestId, (currentRun) => ({
         ...clearPendingReview(currentRun),
         sessionId: currentRun.sessionId,
         kind: currentRun.kind,

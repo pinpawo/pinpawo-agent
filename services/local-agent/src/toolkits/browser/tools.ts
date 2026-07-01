@@ -184,7 +184,7 @@ const browserExtractTool = tool(
       '分块提取当前页面文本，返回 JSON：text、textLength、returnedTextLength、offset、textEndOffset、hasMore、nextOffset。\n' +
       '- 不给 selector 时读取 document.body/body 的全文分块，不需要从截断 snapshot 里猜 CSS selector。\n' +
       '- 给 selector 时读取该元素文本分块。\n' +
-      '- offset 默认 0；limit 默认 10000，最大 50000。hasMore=true 时继续用 nextOffset 读取下一块。',
+      '- offset 默认 0；limit 默认 50000，最大 100000。hasMore=true 时继续用 nextOffset 读取下一块。',
     schema: z.object({
       selector: z.string().optional().describe('可选的元素选择器'),
       offset: z
@@ -197,9 +197,9 @@ const browserExtractTool = tool(
         .number()
         .int()
         .positive()
-        .max(50000)
+        .max(100000)
         .optional()
-        .describe('本次最多返回多少字符，默认 10000，最大 50000'),
+        .describe('本次最多返回多少字符，默认 50000，最大 100000'),
     }),
   },
 );

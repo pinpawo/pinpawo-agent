@@ -5,7 +5,7 @@ import {
   buildBrowserSnapshotPayload,
 } from './session';
 
-test('browser snapshot payload exposes truncation metadata for long page text', () => {
+test('browser snapshot payload returns more than 10000 characters when within the preview cap', () => {
   const text = 'x'.repeat(10_050);
   const snapshot = buildBrowserSnapshotPayload({
     title: 'Long page',
@@ -16,14 +16,32 @@ test('browser snapshot payload exposes truncation metadata for long page text', 
   });
 
   assert.equal(snapshot.textLength, 10_050);
-  assert.equal(snapshot.returnedTextLength, 3_000);
-  assert.equal(snapshot.text.length, 3_000);
-  assert.equal(snapshot.truncated, true);
-  assert.equal(snapshot.hasMore, true);
-  assert.equal(snapshot.nextTextOffset, 3_000);
+  assert.equal(snapshot.returnedTextLength, 10_050);
+  assert.equal(snapshot.text.length, 10_050);
+  assert.equal(snapshot.textLimit, 50_000);
+  assert.equal(snapshot.truncated, false);
+  assert.equal(snapshot.hasMore, false);
+  assert.equal(snapshot.nextTextOffset, null);
   assert.equal(snapshot.interactiveCount, 3);
   assert.equal(snapshot.returnedInteractiveCount, 1);
   assert.equal(snapshot.interactiveTruncated, true);
+});
+
+test('browser snapshot payload exposes truncation metadata beyond the preview cap', () => {
+  const text = 'x'.repeat(50_050);
+  const snapshot = buildBrowserSnapshotPayload({
+    title: 'Very long page',
+    url: 'https://example.com/very-long',
+    text,
+    interactive: [],
+  });
+
+  assert.equal(snapshot.textLength, 50_050);
+  assert.equal(snapshot.returnedTextLength, 50_000);
+  assert.equal(snapshot.text.length, 50_000);
+  assert.equal(snapshot.truncated, true);
+  assert.equal(snapshot.hasMore, true);
+  assert.equal(snapshot.nextTextOffset, 50_000);
 });
 
 test('browser extract payload chunks full page text by offset and limit', () => {
@@ -57,24 +75,24 @@ test('browser extract payload chunks full page text by offset and limit', () => 
   assert.equal(second.nextOffset, null);
 });
 
-test('browser extract payload defaults to 10000 character chunks and validates limits', () => {
+test('browser extract payload defaults to 50000 character chunks and validates limits', () => {
   const payload = buildBrowserExtractPayload({
     title: 'Default chunk',
     url: 'https://example.com/default',
-    text: 'a'.repeat(10_001),
+    text: 'a'.repeat(50_001),
   });
 
-  assert.equal(payload.returnedTextLength, 10_000);
+  assert.equal(payload.returnedTextLength, 50_000);
   assert.equal(payload.hasMore, true);
-  assert.equal(payload.nextOffset, 10_000);
+  assert.equal(payload.nextOffset, 50_000);
 
   assert.throws(
     () => buildBrowserExtractPayload({
       title: 'Too much',
       url: 'https://example.com/too-much',
       text: 'abc',
-      limit: 50_001,
+      limit: 100_001,
     }),
-    /limit must be an integer between 1 and 50000/,
+    /limit must be an integer between 1 and 100000/,
   );
 });

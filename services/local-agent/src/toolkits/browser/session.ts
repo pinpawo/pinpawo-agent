@@ -29,10 +29,10 @@ type Page = import('playwright-core').Page;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const DEFAULT_TIMEOUT_MS = 15_000;
-const MAX_TEXT_LENGTH = 3_000;
+const MAX_TEXT_LENGTH = 50_000;
 const MAX_INTERACTIVE_ELEMENTS = 20;
-const DEFAULT_EXTRACT_TEXT_LIMIT = 10_000;
-const MAX_EXTRACT_TEXT_LIMIT = 50_000;
+const DEFAULT_EXTRACT_TEXT_LIMIT = 50_000;
+const MAX_EXTRACT_TEXT_LIMIT = 100_000;
 const DEFAULT_CHROME_EXECUTABLE_PATH =
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const SESSIONS_DIR = resolve(homedir(), '.pinpawo', 'sessions');

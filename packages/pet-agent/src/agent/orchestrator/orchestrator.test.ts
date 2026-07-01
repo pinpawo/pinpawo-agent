@@ -1819,6 +1819,7 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   // only minimal provenance.
   assert.match(String(copy.content), /FULL_ANNOUNCE_MARKER/);
   assert.equal(getMessageLane(copy), null);
+  assert.match(readMessageCreatedAtUtc(copy) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
   assert.deepEqual(getMessageHandoffSource(copy), {
     handoffFrom: 'capability:explore',
     delegationId: 'd1',

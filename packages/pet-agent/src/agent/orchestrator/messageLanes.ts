@@ -315,6 +315,7 @@ export function buildSubagentHandoff(params: {
   // The copy is a first-class main message (no lane), carrying only minimal
   // provenance so the main agent knows which executor produced it for which task.
   const handoffCopy = new AIMessage(`${announceText}${artifactRefFooter}`);
+  stampMessageCreatedAtUtc(handoffCopy);
   setPinpetMeta(handoffCopy, {
     handoffFrom: params.lane,
     delegationId: params.delegationId,

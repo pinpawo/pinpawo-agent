@@ -26,6 +26,7 @@ import {
   type TuiCoreRunSnapshot,
   type TuiCoreSessionSnapshot,
 } from '../contracts/tuiCoreContract';
+import { MAX_REASONABLE_ELAPSED_MS } from '../render/terminalText';
 import {
   agentTimelineEntriesFromSnapshot,
 } from '../snapshot/tuiSessionSnapshot';
@@ -889,10 +890,36 @@ function countSnapshotAssistantChars(snapshot: TuiCoreSessionSnapshot, requestId
   ), 0);
 }
 
+function normalizeSnapshotRunStartedAt(
+  startedAt: number | undefined,
+  existingRun: TuiRunModel | undefined,
+  now: number,
+) {
+  const normalizedStartedAt = normalizeSnapshotTimestamp(startedAt, now);
+  if (normalizedStartedAt !== null) return normalizedStartedAt;
+  const existingStartedAt = normalizeSnapshotTimestamp(existingRun?.startedAt, now);
+  return existingStartedAt ?? now;
+}
+
+function normalizeSnapshotTimestamp(value: number | undefined, now: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  const timestamp = shouldTreatAsEpochSeconds(value, now) ? value * 1000 : value;
+  if (timestamp > now) return null;
+  if (now - timestamp > MAX_REASONABLE_ELAPSED_MS) return null;
+  return timestamp;
+}
+
+function shouldTreatAsEpochSeconds(value: number, now: number) {
+  return now >= 1_000_000_000_000
+    && value >= 1_000_000_000
+    && value < 10_000_000_000;
+}
+
 function runFromSnapshot(
   snapshot: TuiCoreSessionSnapshot,
   run: TuiCoreRunSnapshot,
   existingRun: TuiRunModel | undefined,
+  now: number,
 ): TuiRunModel | null {
   const phase = activeRunPhaseFromSnapshot(run);
   if (!phase) return null;
@@ -902,7 +929,7 @@ function runFromSnapshot(
     kind: run.kind,
     phase,
     timelineEntryIds: run.timelineEntryIds,
-    startedAt: run.startedAt ?? existingRun?.startedAt ?? 0,
+    startedAt: normalizeSnapshotRunStartedAt(run.startedAt, existingRun, now),
     charCount: countSnapshotAssistantChars(snapshot, run.requestId),
     ...pendingReviewFromSnapshotRun(run, existingRun ?? null),
   };
@@ -951,6 +978,9 @@ function applySessionSnapshot(
   action: Extract<TuiAction, { type: typeof TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded }>,
 ) {
   const snapshot = action.snapshot;
+  const now = typeof action.now === 'number' && Number.isFinite(action.now)
+    ? action.now
+    : Date.now();
   const sessionId = snapshot.sessionId;
   const existingSession = state.sessions[sessionId];
   const focusedSession = state.focusedSessionId ? state.sessions[state.focusedSessionId] : undefined;
@@ -968,7 +998,7 @@ function applySessionSnapshot(
       !sessionIdsToClear.has(run.sessionId) && !snapshotRunIds.has(requestId)),
   );
   const snapshotRuns = Object.fromEntries(snapshot.runs.flatMap((run) => {
-    const nextRun = runFromSnapshot(snapshot, run, state.runs[run.requestId]);
+    const nextRun = runFromSnapshot(snapshot, run, state.runs[run.requestId], now);
     return nextRun ? [[run.requestId, nextRun]] : [];
   }));
   const activeRunId = activeRunIdFromSnapshot(snapshot, snapshotRuns);

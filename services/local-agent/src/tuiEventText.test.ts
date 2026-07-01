@@ -56,6 +56,18 @@ test('formats status and active operation lines from render adapter props', () =
   );
 });
 
+test('marks unreasonable elapsed time in status lines', () => {
+  assert.equal(
+    buildBusyStatusLine(
+      { phase: 'thinking', startedAt: 1_000, charCount: 146 },
+      1_783_000_000_000,
+      '-',
+      [],
+    ),
+    '- 正在思考 · 耗时异常 · 146 字',
+  );
+});
+
 test('formats system notice events without preserving empty notices', () => {
   assert.equal(
     formatSystemNoticeEvent({

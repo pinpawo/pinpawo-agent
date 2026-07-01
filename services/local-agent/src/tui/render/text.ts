@@ -88,6 +88,7 @@ export const TUI_TEXT = {
   busyPhaseThinking: '正在思考',
   busyPhaseUsingTools: '正在调用能力或工具',
   busyPhaseLongRunning: '仍在处理中',
+  elapsedUnavailable: '耗时异常',
   modelOutputChars: (count: number) => `${count} 字`,
   statusInitializing: '初始化中',
   statusReady: '就绪',

@@ -29,7 +29,6 @@
     "prepublishOnly": "npm run typecheck && npm run test:unit && npm run build"
   },
   "optionalDependencies": {
-    "agent-browser": "^0.25.3",
     "playwright-core": "^1.59.1"
   },
   "dependencies": {

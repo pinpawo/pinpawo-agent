@@ -75,9 +75,7 @@ struct StatusView: View {
         if let mode = h.browserMode {
           let label = mode == "playwright"
             ? "Playwright"
-            : mode == "agent-browser"
-              ? "Agent Browser"
-              : "未启用"
+            : "未启用"
           let detail = (h.browserDetail?.isEmpty == false && mode == "none")
             ? " · \(h.browserDetail!)"
             : ""

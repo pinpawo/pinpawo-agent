@@ -6,7 +6,6 @@ export async function runDetect() {
     chromePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     chromeAvailable: false,
     playwrightCorePath: null,
-    agentBrowserPath: null,
   }));
 
   process.stdout.write(JSON.stringify({ browser }) + '\n');

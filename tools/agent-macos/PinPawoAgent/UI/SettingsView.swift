@@ -393,17 +393,14 @@ private struct BrowserOptionStatus {
   let chromePath: String
   let chromeAvailable: Bool
   let playwrightCorePath: String?
-  let agentBrowserPath: String?
 
   var supportsPlaywright: Bool { playwrightCorePath != nil && chromeAvailable }
-  var supportsAgentBrowser: Bool { agentBrowserPath != nil }
-  var hasAnyExternalSupport: Bool { supportsPlaywright || supportsAgentBrowser }
+  var hasAnyExternalSupport: Bool { supportsPlaywright }
 
   static let fallback = BrowserOptionStatus(
     chromePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     chromeAvailable: false,
-    playwrightCorePath: nil,
-    agentBrowserPath: nil
+    playwrightCorePath: nil
   )
 
   /// Run `node dist/index.js detect` and parse the JSON output.
@@ -433,8 +430,7 @@ private struct BrowserOptionStatus {
     return BrowserOptionStatus(
       chromePath: parsed.browser.chromePath,
       chromeAvailable: parsed.browser.chromeAvailable,
-      playwrightCorePath: parsed.browser.playwrightCorePath,
-      agentBrowserPath: parsed.browser.agentBrowserPath
+      playwrightCorePath: parsed.browser.playwrightCorePath
     )
   }
 
@@ -486,7 +482,6 @@ private struct BrowserOptionStatus {
     let chromePath: String
     let chromeAvailable: Bool
     let playwrightCorePath: String?
-    let agentBrowserPath: String?
   }
 }
 
@@ -880,9 +875,6 @@ private struct BrowserConfigView: View {
           if browserSupport.supportsPlaywright {
             Text("Playwright + Chrome").tag("playwright")
           }
-          if browserSupport.supportsAgentBrowser {
-            Text("agent-browser").tag("agent-browser")
-          }
         }
         .pickerStyle(.automatic)
         .disabled(!browserSupport.hasAnyExternalSupport)
@@ -891,8 +883,6 @@ private struct BrowserConfigView: View {
           switch value {
           case "playwright" where browserSupport.supportsPlaywright:
             normalized = "playwright"
-          case "agent-browser" where browserSupport.supportsAgentBrowser:
-            normalized = "agent-browser"
           default:
             normalized = "auto"
           }
@@ -902,28 +892,18 @@ private struct BrowserConfigView: View {
 
         VStack(alignment: .leading, spacing: 4) {
           availabilityRow("Playwright + Chrome", available: browserSupport.supportsPlaywright)
-          availabilityRow("agent-browser", available: browserSupport.supportsAgentBrowser)
         }
         .font(.callout)
 
-        if !browserSupport.supportsPlaywright || !browserSupport.supportsAgentBrowser {
+        if !browserSupport.supportsPlaywright {
           Divider()
           VStack(alignment: .leading, spacing: 8) {
-            if !browserSupport.supportsPlaywright {
-              installGuideRow(
-                label: "安装 Playwright",
-                detail: FileManager.default.isExecutableFile(atPath: browserSupport.chromePath)
-                  ? "缺少 playwright-core" : "缺少 playwright-core 和 Chrome 浏览器",
-                command: "npm install -g playwright-core"
-              )
-            }
-            if !browserSupport.supportsAgentBrowser {
-              installGuideRow(
-                label: "安装 agent-browser",
-                detail: "未找到 agent-browser 可执行文件",
-                command: "npm install -g agent-browser"
-              )
-            }
+            installGuideRow(
+              label: "安装 Playwright",
+              detail: FileManager.default.isExecutableFile(atPath: browserSupport.chromePath)
+                ? "缺少 playwright-core" : "缺少 playwright-core 和 Chrome 浏览器",
+              command: "npm install -g playwright-core"
+            )
           }
         }
       } header: {
@@ -940,7 +920,7 @@ private struct BrowserConfigView: View {
           .help("重新检测")
         }
       } footer: {
-        Text("Playwright 需要系统 Chrome 和 playwright-core；agent-browser 需要外部可执行文件。安装后点击刷新重新检测，修改引擎后需重启 Agent 生效。")
+        Text("Playwright 需要系统 Chrome 和 playwright-core。安装后点击刷新重新检测，修改引擎后需重启 Agent 生效。")
       }
 
       // ── Session profiles ───────────────────────────────────────────
@@ -1024,7 +1004,7 @@ private struct BrowserConfigView: View {
         browserBackend = "auto"
         Config.shared.update { $0.browserBackend = nil }
       }
-      if browserBackend == "agent-browser" && !browserSupport.supportsAgentBrowser {
+      if browserBackend == "agent-browser" {
         browserBackend = "auto"
         Config.shared.update { $0.browserBackend = nil }
       }

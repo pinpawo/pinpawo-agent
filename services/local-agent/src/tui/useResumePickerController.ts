@@ -93,6 +93,7 @@ export function useResumePickerController(options: ResumePickerControllerOptions
         type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
         source: 'resume',
         snapshot,
+        now: Date.now(),
       });
       options.dispatch({
         type: 'input.set',

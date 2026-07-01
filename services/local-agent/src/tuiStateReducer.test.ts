@@ -768,6 +768,31 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
   assert.equal(state.runs['other-req']?.sessionId, 'chat:other');
 });
 
+test('tuiStateReducer normalizes active run startedAt from reconnect snapshots', () => {
+  const now = 1_719_999_999_000;
+  const state = tuiStateReducer(initialState('chat:pet'), {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconcile',
+    now,
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [],
+      runs: [{
+        requestId: 'req-1',
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        phase: 'streaming',
+        timelineEntryIds: [],
+        startedAt: 1_719_999_939,
+      }],
+      activeRunId: 'req-1',
+    },
+  });
+
+  assert.equal(selectFocusedActiveRun(state)?.startedAt, 1_719_999_939_000);
+});
+
 test('tuiStateReducer restores completed reconnect output and clears terminal activeRunId', () => {
   const state = tuiStateReducer(initialState('chat:pet'), {
     type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,

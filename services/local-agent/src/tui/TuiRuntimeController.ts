@@ -426,6 +426,7 @@ export class TuiRuntimeController {
         type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
         source,
         snapshot,
+        now: Date.now(),
       });
       return true;
     } catch (err) {

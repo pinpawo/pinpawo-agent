@@ -3,7 +3,7 @@ import type {
   LocalAgentStudioProgressEvent,
 } from '../../events/localAgentEvent';
 import { TUI_TEXT } from './text';
-import { formatElapsed } from './terminalText';
+import { elapsedMsSince, formatElapsed } from './terminalText';
 import type { ActiveOperation, PendingUiState } from '../types';
 
 const SUBAGENT_TEXT_LINE_CHARS = 64;
@@ -62,17 +62,19 @@ export function buildBusyStatusLine(
 ) {
   const phase = buildBusyPhaseLabel(pending, now);
   const elapsed = formatElapsed(pending.startedAt, now);
-  const detail = pending.charCount > 0 ? ` · ${TUI_TEXT.modelOutputChars(pending.charCount)}` : '';
-  const operations = activeOperations.length > 0
-    ? ` · ${activeOperations.map((operation) => operation.name).join(', ')}`
-    : '';
-  return `${spinnerFrame} ${phase} · ${elapsed}${detail}${operations}`;
+  const segments = [
+    phase,
+    elapsed ?? TUI_TEXT.elapsedUnavailable,
+    ...(pending.charCount > 0 ? [TUI_TEXT.modelOutputChars(pending.charCount)] : []),
+    ...(activeOperations.length > 0 ? [activeOperations.map((operation) => operation.name).join(', ')] : []),
+  ];
+  return `${spinnerFrame} ${segments.join(' · ')}`;
 }
 
 function buildBusyPhaseLabel(pending: PendingUiState, now: number) {
   if (pending.phase === 'interrupting') return TUI_TEXT.busyPhaseInterrupting;
   if (pending.phase === 'replying') return TUI_TEXT.busyPhaseReplying;
-  const elapsedMs = now - pending.startedAt;
+  const elapsedMs = elapsedMsSince(pending.startedAt, now) ?? 0;
   if (elapsedMs < 3000) return TUI_TEXT.busyPhaseThinking;
   if (elapsedMs < 10000) return TUI_TEXT.busyPhaseUsingTools;
   return TUI_TEXT.busyPhaseLongRunning;

@@ -1,5 +1,7 @@
 import stringWidth from 'string-width';
 
+export const MAX_REASONABLE_ELAPSED_MS = 24 * 60 * 60 * 1000;
+
 export function formatNow() {
   return new Date().toLocaleTimeString('zh-CN', {
     hour12: false,
@@ -10,10 +12,20 @@ export function formatNow() {
 }
 
 export function formatElapsed(startedAt: number, now: number) {
-  const totalSeconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const elapsedMs = elapsedMsSince(startedAt, now);
+  if (elapsedMs === null) return null;
+  const totalSeconds = Math.floor(elapsedMs / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+export function elapsedMsSince(startedAt: number, now: number) {
+  if (!Number.isFinite(startedAt) || !Number.isFinite(now)) return null;
+  const elapsedMs = now - startedAt;
+  if (elapsedMs < 0) return 0;
+  if (elapsedMs > MAX_REASONABLE_ELAPSED_MS) return null;
+  return elapsedMs;
 }
 
 export function wrapLine(line: string, width: number) {

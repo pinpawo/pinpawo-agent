@@ -83,8 +83,10 @@ function buildOperationStatus(entry: AgentOperationEntry, now: number) {
   switch (entry.phase) {
     case 'started':
       return TUI_TEXT.operationStarted;
-    case 'updated':
-      return `${TUI_TEXT.operationRunning} ${formatElapsed(entry.startedAt, now)}`;
+    case 'updated': {
+      const elapsed = formatElapsed(entry.startedAt, now);
+      return `${TUI_TEXT.operationRunning} ${elapsed ?? TUI_TEXT.elapsedUnavailable}`;
+    }
     case 'completed':
       return TUI_TEXT.operationCompleted;
     case 'failed':

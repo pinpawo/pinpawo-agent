@@ -1,3 +1,4 @@
+import React from 'react';
 import { Text } from 'ink';
 import { TUI_TEXT } from '../render/text';
 import type { SessionModel } from '../state/tuiState';

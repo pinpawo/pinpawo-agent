@@ -1,3 +1,4 @@
+import React from 'react';
 import { Box, Text } from 'ink';
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import { TUI_TEXT } from '../render/text';

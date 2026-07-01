@@ -31,14 +31,71 @@ function browserSnapshotSummary(output: unknown): ToolkitOperationSummary | null
   const title = readString(record, 'title');
   const url = readString(record, 'url');
   const text = readString(record, 'text');
+  const textLength = readNumber(record, 'textLength') ?? text?.length;
+  const returnedTextLength = readNumber(record, 'returnedTextLength') ?? text?.length;
+  const truncated = readBoolean(record, 'truncated');
+  const hasMore = readBoolean(record, 'hasMore');
+  const nextTextOffset = readNumber(record, 'nextTextOffset');
   if (!title && !url && !text) return null;
   return {
     target: url,
-    summary: title ? `页面：${title}` : text ? compactText(text) : undefined,
+    summary: title
+      ? `页面：${title}${truncated || hasMore ? '（文本已截断）' : ''}`
+      : text
+        ? compactText(text)
+        : undefined,
     details: {
       title,
       url,
-      textLength: text?.length,
+      textLength,
+      returnedTextLength,
+      truncated,
+      hasMore,
+      nextTextOffset,
+    },
+  };
+}
+
+function browserExtractInputSummary(input: unknown): ToolkitOperationSummary | null {
+  const record = readJsonRecord(input);
+  const selector = readString(record, 'selector');
+  const offset = readNumber(record, 'offset');
+  const limit = readNumber(record, 'limit');
+  return {
+    target: selector,
+    summary: selector ? `提取 ${selector}` : '提取页面文本',
+    details: {
+      selector,
+      offset,
+      limit,
+    },
+  };
+}
+
+function browserExtractOutputSummary(output: unknown): ToolkitOperationSummary | null {
+  const record = readJsonRecord(output);
+  if (!record) return rawStringOutputSummary(output);
+
+  const text = readString(record, 'text');
+  const textLength = readNumber(record, 'textLength') ?? text?.length;
+  const returnedTextLength = readNumber(record, 'returnedTextLength') ?? text?.length;
+  const hasMore = readBoolean(record, 'hasMore');
+  const nextOffset = readNumber(record, 'nextOffset');
+  const selector = readString(record, 'selector');
+
+  return {
+    target: selector,
+    summary: typeof returnedTextLength === 'number' && typeof textLength === 'number'
+      ? `提取文本 ${returnedTextLength}/${textLength} 字${hasMore ? '（还有更多）' : ''}`
+      : text
+        ? compactText(text)
+        : '提取页面文本',
+    details: {
+      selector,
+      textLength,
+      returnedTextLength,
+      hasMore,
+      nextOffset,
     },
   };
 }
@@ -195,8 +252,8 @@ export const browserOperationMetadata: Record<string, ToolkitOperationMetadata> 
   },
   browser_extract: {
     title: '提取页面文本',
-    summarizeInput: (input) => selectorInputSummary('提取', input),
-    summarizeOutput: rawStringOutputSummary,
+    summarizeInput: browserExtractInputSummary,
+    summarizeOutput: browserExtractOutputSummary,
     summarizeError: browserErrorSummary,
   },
   browser_close: {

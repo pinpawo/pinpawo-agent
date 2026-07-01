@@ -31,6 +31,8 @@ type Page = import('playwright-core').Page;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_TEXT_LENGTH = 3_000;
 const MAX_INTERACTIVE_ELEMENTS = 20;
+const DEFAULT_EXTRACT_TEXT_LIMIT = 10_000;
+const MAX_EXTRACT_TEXT_LIMIT = 50_000;
 const DEFAULT_CHROME_EXECUTABLE_PATH =
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const SESSIONS_DIR = resolve(homedir(), '.pinpawo', 'sessions');
@@ -38,6 +40,129 @@ const DEFAULT_SESSION = 'default';
 const SAFE_SESSION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+export interface BrowserExtractOptions {
+  selector?: string;
+  offset?: number;
+  limit?: number;
+}
+
+type TextWindow = {
+  offset: number;
+  limit: number;
+};
+
+type TextChunk = TextWindow & {
+  text: string;
+  textLength: number;
+  returnedTextLength: number;
+  textEndOffset: number;
+  truncated: boolean;
+  hasMore: boolean;
+  nextOffset: number | null;
+};
+
+function normalizeTextWindow(options: BrowserExtractOptions = {}): TextWindow {
+  const offset = options.offset ?? 0;
+  const limit = options.limit ?? DEFAULT_EXTRACT_TEXT_LIMIT;
+
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('browser_extract offset must be a non-negative integer');
+  }
+  if (!Number.isInteger(limit) || limit <= 0 || limit > MAX_EXTRACT_TEXT_LIMIT) {
+    throw new Error(`browser_extract limit must be an integer between 1 and ${MAX_EXTRACT_TEXT_LIMIT}`);
+  }
+
+  return { offset, limit };
+}
+
+export function buildBrowserTextChunk(
+  text: string,
+  options: BrowserExtractOptions = {},
+): TextChunk {
+  const { offset, limit } = normalizeTextWindow(options);
+  const safeOffset = Math.min(offset, text.length);
+  const textEndOffset = Math.min(safeOffset + limit, text.length);
+  const chunk = text.slice(safeOffset, textEndOffset);
+  const hasMore = textEndOffset < text.length;
+
+  return {
+    offset: safeOffset,
+    limit,
+    text: chunk,
+    textLength: text.length,
+    returnedTextLength: chunk.length,
+    textEndOffset,
+    truncated: safeOffset > 0 || hasMore,
+    hasMore,
+    nextOffset: hasMore ? textEndOffset : null,
+  };
+}
+
+function buildSnapshotTextFields(text: string) {
+  const chunk = buildBrowserTextChunk(text, { offset: 0, limit: MAX_TEXT_LENGTH });
+  return {
+    text: chunk.text,
+    textLength: chunk.textLength,
+    returnedTextLength: chunk.returnedTextLength,
+    textOffset: chunk.offset,
+    textEndOffset: chunk.textEndOffset,
+    textLimit: MAX_TEXT_LENGTH,
+    truncated: chunk.hasMore,
+    hasMore: chunk.hasMore,
+    nextTextOffset: chunk.nextOffset,
+  };
+}
+
+export function buildBrowserSnapshotPayload<TInteractive>(
+  input: {
+    title: string;
+    url: string;
+    text: string;
+    interactive: TInteractive[];
+    interactiveCount?: number;
+    textSource?: string;
+    tree?: string;
+    treeLength?: number;
+    textUnavailableReason?: string;
+  },
+) {
+  const interactiveCount = input.interactiveCount ?? input.interactive.length;
+  return {
+    title: input.title,
+    url: input.url,
+    ...buildSnapshotTextFields(input.text),
+    textSource: input.textSource,
+    textUnavailableReason: input.textUnavailableReason,
+    interactive: input.interactive,
+    interactiveCount,
+    returnedInteractiveCount: input.interactive.length,
+    interactiveTruncated: interactiveCount > input.interactive.length,
+    tree: input.tree,
+    treeLength: input.treeLength,
+  };
+}
+
+export function buildBrowserExtractPayload(
+  input: {
+    title: string;
+    url: string;
+    text: string;
+    selector?: string;
+    offset?: number;
+    limit?: number;
+    textSource?: string;
+  },
+) {
+  const chunk = buildBrowserTextChunk(input.text, input);
+  return {
+    title: input.title,
+    url: input.url,
+    selector: input.selector,
+    textSource: input.textSource,
+    ...chunk,
+  };
+}
 
 function sessionDir(name: string): string {
   const trimmed = name.trim();
@@ -280,6 +405,23 @@ function openSessionPath(opts: BrowserOpenOptions): string {
 
 // ── Playwright implementation ─────────────────────────────────────────────────
 
+type PlaywrightInteractiveSnapshot = {
+  index: number;
+  tag: string;
+  text: string;
+  type: string | null;
+  placeholder: string | null;
+  hint: string;
+};
+
+type PlaywrightSnapshotSource = {
+  title: string;
+  url: string;
+  text: string;
+  interactiveCount: number;
+  interactive: PlaywrightInteractiveSnapshot[];
+};
+
 class PlaywrightBrowserSession {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
@@ -340,7 +482,7 @@ class PlaywrightBrowserSession {
   }
 
   private async buildSnapshot(page: Page): Promise<string> {
-    const snapshot = await page.evaluate(`
+    const snapshot = await page.evaluate<PlaywrightSnapshotSource>(`
       (() => {
         const trim = (v, n) => v.length <= n ? v : v.slice(0, n) + '...';
         const hintFor = (el) => {
@@ -353,10 +495,11 @@ class PlaywrightBrowserSession {
           if (text) return 'text=' + trim(text, 48);
           return el.tagName.toLowerCase();
         };
-        const interactive = Array.from(
+        const interactiveElements = Array.from(
           document.querySelectorAll('a,button,input,textarea,select,[role="button"]')
         )
-          .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+          .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+        const interactive = interactiveElements
           .slice(0, ${MAX_INTERACTIVE_ELEMENTS})
           .map((el, i) => ({
             index: i + 1, tag: el.tagName.toLowerCase(),
@@ -365,13 +508,22 @@ class PlaywrightBrowserSession {
             hint: hintFor(el),
           }));
         return {
-          title: document.title, url: window.location.href,
-          text: trim((document.body?.innerText || '').trim(), ${MAX_TEXT_LENGTH}),
+          title: document.title,
+          url: window.location.href,
+          text: (document.body?.innerText || '').trim(),
+          interactiveCount: interactiveElements.length,
           interactive,
         };
       })()
     `);
-    return JSON.stringify(snapshot, null, 2);
+    return JSON.stringify(buildBrowserSnapshotPayload({
+      title: snapshot.title,
+      url: snapshot.url,
+      text: snapshot.text,
+      textSource: 'document.body.innerText',
+      interactive: snapshot.interactive,
+      interactiveCount: snapshot.interactiveCount,
+    }), null, 2);
   }
 
   async open(url: string, opts: BrowserOpenOptions = {}): Promise<string> {
@@ -417,10 +569,20 @@ class PlaywrightBrowserSession {
     return this.buildSnapshot(page);
   }
 
-  async extract(selector?: string): Promise<string> {
+  async extract(options: BrowserExtractOptions = {}): Promise<string> {
     const page = await this.requirePage();
-    if (!selector) return this.buildSnapshot(page);
-    return (await page.locator(selector).first().innerText({ timeout: DEFAULT_TIMEOUT_MS })).trim();
+    const text = options.selector
+      ? await page.locator(options.selector).first().innerText({ timeout: DEFAULT_TIMEOUT_MS })
+      : await page.evaluate<string>(`(document.body?.innerText || '').trim()`);
+    return JSON.stringify(buildBrowserExtractPayload({
+      title: await page.title(),
+      url: page.url(),
+      selector: options.selector,
+      text: text.trim(),
+      offset: options.offset,
+      limit: options.limit,
+      textSource: options.selector ? 'locator.innerText' : 'document.body.innerText',
+    }), null, 2);
   }
 
   async close(): Promise<string> {
@@ -547,13 +709,35 @@ class AgentBrowserSession {
     }
   }
 
+  private async readPageText(): Promise<{ text: string; unavailableReason?: string }> {
+    try {
+      return { text: await this.exec(['get', 'text', 'body']) };
+    } catch (err) {
+      return {
+        text: '',
+        unavailableReason: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
   private async buildSnapshot(): Promise<string> {
-    const [tree, url, title] = await Promise.all([
+    const [tree, url, title, pageText] = await Promise.all([
       this.exec(['snapshot']),
       this.exec(['get', 'url']),
       this.exec(['get', 'title']),
+      this.readPageText(),
     ]);
-    return JSON.stringify({ title, url, tree }, null, 2);
+    return JSON.stringify(buildBrowserSnapshotPayload({
+      title,
+      url,
+      text: pageText.text,
+      textSource: pageText.unavailableReason ? undefined : 'agent-browser get text body',
+      textUnavailableReason: pageText.unavailableReason,
+      interactive: [],
+      interactiveCount: 0,
+      tree,
+      treeLength: tree.length,
+    }), null, 2);
   }
 
   async open(url: string, opts: BrowserOpenOptions = {}): Promise<string> {
@@ -634,9 +818,21 @@ class AgentBrowserSession {
     return this.buildSnapshot();
   }
 
-  async extract(selector?: string): Promise<string> {
-    if (selector) return this.exec(['get', 'text', selector]);
-    return this.buildSnapshot();
+  async extract(options: BrowserExtractOptions = {}): Promise<string> {
+    const [title, url, text] = await Promise.all([
+      this.exec(['get', 'title']),
+      this.exec(['get', 'url']),
+      this.exec(['get', 'text', options.selector ?? 'body']),
+    ]);
+    return JSON.stringify(buildBrowserExtractPayload({
+      title,
+      url,
+      selector: options.selector,
+      text: text.trim(),
+      offset: options.offset,
+      limit: options.limit,
+      textSource: options.selector ? 'agent-browser get text selector' : 'agent-browser get text body',
+    }), null, 2);
   }
 
   async close(): Promise<string> {
@@ -692,7 +888,7 @@ export class BrowserSession {
   async wait(selector?: string, timeoutMs?: number) {
     return (await this.ensureImpl()).wait(selector, timeoutMs);
   }
-  async extract(selector?: string) { return (await this.ensureImpl()).extract(selector); }
+  async extract(options?: BrowserExtractOptions) { return (await this.ensureImpl()).extract(options); }
   async close() {
     const impl = this.impl ?? (this.initPromise ? await this.initPromise : null);
     if (!impl) return 'browser session closed';

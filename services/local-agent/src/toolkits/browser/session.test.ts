@@ -25,6 +25,10 @@ test('browser snapshot payload returns more than 10000 characters when within th
   assert.equal(snapshot.interactiveCount, 3);
   assert.equal(snapshot.returnedInteractiveCount, 1);
   assert.equal(snapshot.interactiveTruncated, true);
+  assert.ok(
+    Object.keys(snapshot).indexOf('interactive') < Object.keys(snapshot).indexOf('text'),
+    'interactive hints should appear before large text previews',
+  );
 });
 
 test('browser snapshot payload exposes truncation metadata beyond the preview cap', () => {

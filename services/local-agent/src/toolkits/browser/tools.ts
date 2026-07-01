@@ -117,12 +117,12 @@ const browserClickTool = tool(
   {
     name: 'browser_click',
     description:
-      '点击当前页面上的元素。selector 支持 CSS 选择器、text=... 形式，agent-browser 模式下也支持 @ref（如 @e1）。',
+      '点击当前页面上的元素。selector 支持 CSS 选择器或 text=... 形式。',
     schema: z.object({
       selector: z
         .string()
         .min(1)
-        .describe('元素选择器，例如 "#submit"、"text=登录" 或 agent-browser ref "@e2"'),
+        .describe('元素选择器，例如 "#submit" 或 "text=登录"'),
     }),
   },
 );

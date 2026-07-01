@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { config } from '../../config';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
@@ -122,8 +122,6 @@ export function buildBrowserSnapshotPayload<TInteractive>(
     interactive: TInteractive[];
     interactiveCount?: number;
     textSource?: string;
-    tree?: string;
-    treeLength?: number;
     textUnavailableReason?: string;
   },
 ) {
@@ -131,15 +129,13 @@ export function buildBrowserSnapshotPayload<TInteractive>(
   return {
     title: input.title,
     url: input.url,
-    ...buildSnapshotTextFields(input.text),
-    textSource: input.textSource,
-    textUnavailableReason: input.textUnavailableReason,
     interactive: input.interactive,
     interactiveCount,
     returnedInteractiveCount: input.interactive.length,
     interactiveTruncated: interactiveCount > input.interactive.length,
-    tree: input.tree,
-    treeLength: input.treeLength,
+    ...buildSnapshotTextFields(input.text),
+    textSource: input.textSource,
+    textUnavailableReason: input.textUnavailableReason,
   };
 }
 
@@ -189,9 +185,9 @@ function listSessionNames(): string[] {
 
 // ── Backend detection ─────────────────────────────────────────────────────────
 
-type BrowserBackend = 'playwright' | 'agent-browser';
+type BrowserBackend = 'playwright';
 export type BrowserStatus = {
-  mode: 'playwright' | 'agent-browser' | 'none';
+  mode: 'playwright' | 'none';
   detail: string;
   configured: string;
 };
@@ -203,6 +199,13 @@ async function detectBackend(): Promise<BrowserBackend> {
   const forced = fromEnv || fromConfig || 'auto';
 
   console.log(`[browser] detectBackend: env=${fromEnv ?? '(unset)'} config=${fromConfig} → forced=${forced}`);
+
+  if (forced === 'agent-browser') {
+    throw new Error(
+      'Browser backend "agent-browser" is no longer supported.\n' +
+        '  Set PINPAWO_BROWSER_BACKEND=auto or "playwright", and ensure playwright-core plus Google Chrome are installed.',
+    );
+  }
 
   if (forced === 'playwright') {
     if (!(await canUsePlaywright())) {
@@ -216,31 +219,12 @@ async function detectBackend(): Promise<BrowserBackend> {
     return 'playwright';
   }
 
-  if (forced === 'agent-browser') {
-    if (!(await canUseAgentBrowser())) {
-      throw new Error(
-        'Browser backend forced to "agent-browser" but the binary was not found.\n' +
-          '  Install an external agent-browser binary, then ensure it is in PATH or a standard install location.',
-      );
-    }
-    console.log('[browser] using agent-browser (forced)');
-    return 'agent-browser';
-  }
-
   // auto-detect
-  const persistedAgentBrowserSession = readPersistedSession();
-  if (persistedAgentBrowserSession && await canReuseAgentBrowserSession(persistedAgentBrowserSession)) {
-    console.log('[browser] using agent-browser (auto, existing session)');
-    return 'agent-browser';
-  }
   if (await canUsePlaywright()) { console.log('[browser] using playwright (auto)'); return 'playwright'; }
-  if (await canUseAgentBrowser()) { console.log('[browser] using agent-browser (auto)'); return 'agent-browser'; }
   throw new Error(
       'No browser backend available.\n' +
-      '  Option 1 — Playwright + Chrome:\n' +
-      '    npm install -g playwright-core\n' +
-      '  Option 2 — agent-browser (standalone):\n' +
-      '    install an external agent-browser binary and ensure it is in PATH',
+      '  Install external playwright-core (for example: npm install -g playwright-core)\n' +
+      '  Also ensure Google Chrome is installed.',
   );
 }
 
@@ -323,55 +307,6 @@ async function canUsePlaywright(): Promise<boolean> {
   return await loadPlaywrightCore() !== null && existsSync(execPath);
 }
 
-let _agentBrowserBinary: string | null | undefined;
-
-function resolveAgentBrowserCandidates(): string[] {
-  const home = homedir();
-  const candidates = [
-    resolve(process.execPath, '..', 'agent-browser'),
-    '/usr/local/bin/agent-browser',
-    '/opt/homebrew/bin/agent-browser',
-    `${home}/.npm-global/bin/agent-browser`,
-    `${home}/.local/bin/agent-browser`,
-  ];
-
-  const nvmDir = process.env.NVM_DIR || `${home}/.nvm`;
-  const nvmVersionsDir = resolve(nvmDir, 'versions', 'node');
-  try {
-    const nvmCandidates = readdirSync(nvmVersionsDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => resolve(nvmVersionsDir, d.name, 'bin', 'agent-browser'));
-    candidates.push(...nvmCandidates);
-  } catch {
-    // nvm not installed or no node versions — skip
-  }
-
-  try {
-    candidates.push(nodeRequire.resolve('agent-browser/bin/agent-browser.js'));
-  } catch {
-    // optional package dependency not installed or not resolvable from this bundle
-  }
-
-  return [...new Set(candidates)];
-}
-
-async function getAgentBrowserBinary(): Promise<string | null> {
-  if (_agentBrowserBinary !== undefined) return _agentBrowserBinary;
-
-  for (const p of resolveAgentBrowserCandidates()) {
-    if (existsSync(p)) { _agentBrowserBinary = p; return p; }
-  }
-
-  // Login shell PATH
-  const found = await execLoginShellLine('command -v agent-browser');
-  _agentBrowserBinary = found && existsSync(found) ? found : null;
-  return _agentBrowserBinary;
-}
-
-async function canUseAgentBrowser(): Promise<boolean> {
-  return await getAgentBrowserBinary() !== null;
-}
-
 // ── Open options ──────────────────────────────────────────────────────────────
 
 export interface BrowserOpenOptions {
@@ -439,7 +374,6 @@ class PlaywrightBrowserSession {
     }
 
     if (this.page) return this.page;
-    await closeAgentBrowserSession(sessionPath);
 
     const playwrightCore = await loadPlaywrightCore();
     if (!playwrightCore) {
@@ -596,258 +530,9 @@ class PlaywrightBrowserSession {
   listSessions(): string[] { return listSessionNames(); }
 }
 
-// ── agent-browser CLI implementation ──────────────────────────────────────────
-
-/** Path where we persist the active browser session so the next process can detect it. */
-const AGENT_BROWSER_STATE_FILE = resolve(homedir(), '.pinpawo', 'agent-browser-state.json');
-
-function readPersistedAgentBrowserState(): { sessionDir: string; headless: boolean | null } | null {
-  try {
-    const s = JSON.parse(readFileSync(AGENT_BROWSER_STATE_FILE, 'utf-8'));
-    const sessionDirValue = typeof s.sessionDir === 'string'
-      ? s.sessionDir
-      : typeof s.profileDir === 'string'
-        ? s.profileDir
-        : null;
-    if (!sessionDirValue) return null;
-    return {
-      sessionDir: sessionDirValue,
-      headless: typeof s.headless === 'boolean' ? s.headless : null,
-    };
-  } catch { return null; }
-}
-
-function readPersistedSession(): string | null {
-  return readPersistedAgentBrowserState()?.sessionDir ?? null;
-}
-
-function writePersistedSession(sessionPath: string, headless: boolean) {
-  try {
-    writeFileSync(AGENT_BROWSER_STATE_FILE, JSON.stringify({ sessionDir: sessionPath, headless }), 'utf-8');
-  } catch { /* best-effort */ }
-}
-
-function clearPersistedSession() {
-  try { unlinkSync(AGENT_BROWSER_STATE_FILE); } catch { /* ok */ }
-}
-
-function isNodeEntrypoint(path: string): boolean {
-  if (path.endsWith('.js') || path.endsWith('.mjs') || path.endsWith('.cjs')) {
-    return true;
-  }
-  try {
-    const prefix = readFileSync(path).subarray(0, 128).toString('utf8');
-    return prefix.startsWith('#!') && /\bnode\b/.test(prefix);
-  } catch {
-    return false;
-  }
-}
-
-function buildAgentBrowserCommand(binary: string, sessionPath: string, args: string[]) {
-  const runWithNode = isNodeEntrypoint(binary);
-  return {
-    command: runWithNode ? process.execPath : binary,
-    args: runWithNode
-      ? [binary, '--profile', sessionPath, ...args]
-      : ['--profile', sessionPath, ...args],
-  };
-}
-
-async function execAgentBrowser(binary: string, sessionPath: string, args: string[], timeoutMs = DEFAULT_TIMEOUT_MS) {
-  const { command, args: commandArgs } = buildAgentBrowserCommand(binary, sessionPath, args);
-  const { stdout } = await execFileAsync(command, commandArgs, { timeout: timeoutMs });
-  return stdout.trim();
-}
-
-async function canReuseAgentBrowserSession(sessionPath: string): Promise<boolean> {
-  const binary = await getAgentBrowserBinary();
-  if (!binary) return false;
-  return execAgentBrowser(binary, sessionPath, ['snapshot'], 5_000)
-    .then(() => true)
-    .catch(() => false);
-}
-
-async function closeAgentBrowserSession(sessionPath: string): Promise<void> {
-  const binary = await getAgentBrowserBinary();
-  if (!binary) return;
-  await execAgentBrowser(binary, sessionPath, ['close'], 5_000).catch(() => {});
-  if (readPersistedSession() === sessionPath) {
-    clearPersistedSession();
-  }
-}
-
-class AgentBrowserSession {
-  private activeSessionDir: string = sessionDir(DEFAULT_SESSION);
-  private activeHeadless = false;
-  private readonly runWithNode: boolean;
-  /** True once we've confirmed a daemon is live in this process run. */
-  private daemonConfirmed = false;
-
-  constructor(private readonly binary: string) {
-    this.runWithNode = isNodeEntrypoint(binary);
-  }
-
-  private sessionFlags(): string[] {
-    return ['--profile', this.activeSessionDir];
-  }
-
-  private async exec(args: string[], timeoutMs = DEFAULT_TIMEOUT_MS): Promise<string> {
-    const command = this.runWithNode ? process.execPath : this.binary;
-    const commandArgs = this.runWithNode
-      ? [this.binary, ...this.sessionFlags(), ...args]
-      : [...this.sessionFlags(), ...args];
-    try {
-      const { stdout } = await execFileAsync(
-        command,
-        commandArgs,
-        { timeout: timeoutMs },
-      );
-      return stdout.trim();
-    } catch (err: unknown) {
-      const e = err as { stderr?: string; message?: string };
-      throw new Error(e.stderr?.trim() || e.message || `agent-browser ${args[0]} failed`);
-    }
-  }
-
-  private async readPageText(): Promise<{ text: string; unavailableReason?: string }> {
-    try {
-      return { text: await this.exec(['get', 'text', 'body']) };
-    } catch (err) {
-      return {
-        text: '',
-        unavailableReason: err instanceof Error ? err.message : String(err),
-      };
-    }
-  }
-
-  private async buildSnapshot(): Promise<string> {
-    const [tree, url, title, pageText] = await Promise.all([
-      this.exec(['snapshot']),
-      this.exec(['get', 'url']),
-      this.exec(['get', 'title']),
-      this.readPageText(),
-    ]);
-    return JSON.stringify(buildBrowserSnapshotPayload({
-      title,
-      url,
-      text: pageText.text,
-      textSource: pageText.unavailableReason ? undefined : 'agent-browser get text body',
-      textUnavailableReason: pageText.unavailableReason,
-      interactive: [],
-      interactiveCount: 0,
-      tree,
-      treeLength: tree.length,
-    }), null, 2);
-  }
-
-  async open(url: string, opts: BrowserOpenOptions = {}): Promise<string> {
-    const newSessionDir = openSessionPath(opts);
-    const newHeadless = opts.headless === true;
-
-    if (!this.daemonConfirmed) {
-      // Check if a daemon from a previous process run is still alive and using
-      // the same browser session, so we can reuse it instead of restarting.
-      const persistedState = readPersistedAgentBrowserState();
-      if (persistedState?.sessionDir === newSessionDir) {
-        this.activeSessionDir = newSessionDir;
-        this.activeHeadless = persistedState.headless ?? newHeadless;
-        if (persistedState.headless === null || persistedState.headless === newHeadless) {
-          // Ping the daemon; if it responds we can reuse it.
-          const alive = await this.exec(['snapshot'], 5_000).then(() => true).catch(() => false);
-          if (alive) {
-            this.daemonConfirmed = true;
-          }
-        }
-      }
-      // Not confirmed — close any stale daemon and start fresh.
-      if (!this.daemonConfirmed) {
-        await this.exec(['close']).catch(() => {});
-        if (readPersistedSession() === this.activeSessionDir) {
-          clearPersistedSession();
-        }
-        this.activeSessionDir = newSessionDir;
-        this.activeHeadless = newHeadless;
-      }
-    } else if (newSessionDir !== this.activeSessionDir || newHeadless !== this.activeHeadless) {
-      // Browser session or headless-mode switch within the same process run.
-      await this.exec(['close']).catch(() => {});
-      if (readPersistedSession() === this.activeSessionDir) {
-        clearPersistedSession();
-      }
-      this.activeSessionDir = newSessionDir;
-      this.activeHeadless = newHeadless;
-    }
-
-    mkdirSync(this.activeSessionDir, { recursive: true });
-    const args = ['open', url];
-    if (newHeadless) args.push('--headless');
-    try {
-      await this.exec(args, 30_000);
-      this.daemonConfirmed = true;
-      this.activeHeadless = newHeadless;
-      writePersistedSession(this.activeSessionDir, this.activeHeadless);
-      return await this.buildSnapshot();
-    } catch (error) {
-      this.daemonConfirmed = false;
-      if (readPersistedSession() === this.activeSessionDir) {
-        clearPersistedSession();
-      }
-      throw error;
-    }
-  }
-
-  async snapshot(): Promise<string> { return this.buildSnapshot(); }
-
-  async click(selector: string): Promise<string> {
-    await this.exec(['click', selector]);
-    return this.buildSnapshot();
-  }
-
-  async type(selector: string, text: string, submit = false): Promise<string> {
-    await this.exec(['fill', selector, text]);
-    if (submit) await this.exec(['press', 'Enter']);
-    return this.buildSnapshot();
-  }
-
-  async wait(selector?: string, timeoutMs = 3_000): Promise<string> {
-    if (selector) {
-      await this.exec(['wait', selector], timeoutMs + 5_000);
-    } else {
-      await this.exec(['wait', String(timeoutMs)], timeoutMs + 5_000);
-    }
-    return this.buildSnapshot();
-  }
-
-  async extract(options: BrowserExtractOptions = {}): Promise<string> {
-    const [title, url, text] = await Promise.all([
-      this.exec(['get', 'title']),
-      this.exec(['get', 'url']),
-      this.exec(['get', 'text', options.selector ?? 'body']),
-    ]);
-    return JSON.stringify(buildBrowserExtractPayload({
-      title,
-      url,
-      selector: options.selector,
-      text: text.trim(),
-      offset: options.offset,
-      limit: options.limit,
-      textSource: options.selector ? 'agent-browser get text selector' : 'agent-browser get text body',
-    }), null, 2);
-  }
-
-  async close(): Promise<string> {
-    await this.exec(['close']).catch(() => {});
-    this.daemonConfirmed = false;
-    clearPersistedSession();
-    return 'browser session closed';
-  }
-
-  listSessions(): string[] { return listSessionNames(); }
-}
-
 // ── Facade ────────────────────────────────────────────────────────────────────
 
-type BrowserImpl = PlaywrightBrowserSession | AgentBrowserSession;
+type BrowserImpl = PlaywrightBrowserSession;
 
 export class BrowserSession {
   private impl: BrowserImpl | null = null;
@@ -856,17 +541,8 @@ export class BrowserSession {
   private ensureImpl(): Promise<BrowserImpl> {
     if (this.impl) return Promise.resolve(this.impl);
     if (!this.initPromise) {
-      this.initPromise = detectBackend().then(async (backend) => {
-        const agentBrowserBinary = backend === 'agent-browser'
-          ? await getAgentBrowserBinary()
-          : null;
-        if (backend === 'agent-browser' && !agentBrowserBinary) {
-          throw new Error('agent-browser backend selected but no binary was found');
-        }
-        this.impl =
-          backend === 'playwright'
-            ? new PlaywrightBrowserSession()
-            : new AgentBrowserSession(agentBrowserBinary!);
+      this.initPromise = detectBackend().then(() => {
+        this.impl = new PlaywrightBrowserSession();
         return this.impl;
       }).catch((error) => {
         this.initPromise = null;
@@ -924,31 +600,18 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
     };
   }
   if (configured === 'agent-browser') {
-    const binary = await getAgentBrowserBinary();
-    if (binary) return { mode: 'agent-browser', detail: binary, configured };
     return {
       mode: 'none',
-      detail: 'configured agent-browser but no external binary was found',
+      detail: 'configured agent-browser but that backend is no longer supported',
       configured,
     };
   }
 
   // auto-detect
-  const persistedAgentBrowserSession = readPersistedSession();
-  if (persistedAgentBrowserSession && await canReuseAgentBrowserSession(persistedAgentBrowserSession)) {
-    const binary = await getAgentBrowserBinary();
-    return {
-      mode: 'agent-browser',
-      detail: binary ? `${binary} (existing session)` : 'existing agent-browser session',
-      configured,
-    };
-  }
   if (await canUsePlaywright()) {
     return { mode: 'playwright', detail: chromeExecPath, configured };
   }
-  const binary = await getAgentBrowserBinary();
-  if (binary) return { mode: 'agent-browser', detail: binary, configured };
-  return { mode: 'none', detail: 'no external browser runtime available', configured };
+  return { mode: 'none', detail: `missing playwright-core or Chrome at ${chromeExecPath}`, configured };
 }
 
 // ── Full environment detection (for CLI `detect` command / Settings UI) ──────
@@ -957,7 +620,6 @@ export type BrowserEnvironment = {
   chromePath: string;
   chromeAvailable: boolean;
   playwrightCorePath: string | null;
-  agentBrowserPath: string | null;
 };
 
 export async function detectBrowserEnvironment(): Promise<BrowserEnvironment> {
@@ -971,6 +633,5 @@ export async function detectBrowserEnvironment(): Promise<BrowserEnvironment> {
     chromePath,
     chromeAvailable: existsSync(chromePath),
     playwrightCorePath: await resolvePlaywrightCorePath(),
-    agentBrowserPath: await getAgentBrowserBinary(),
   };
 }

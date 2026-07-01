@@ -13,7 +13,7 @@ struct AgentConfig: Codable {
   var llmBaseUrl: String
   var llmModel: String
   var agentDistPath: String?   // override for dev: path to dist/index.js
-  var browserBackend: String?  // nil/"auto" | "playwright" | "agent-browser"
+  var browserBackend: String?  // nil/"auto" | "playwright"
   var workdir: String?         // agent working directory for relative paths; nil = homedir
   var globalReviewPolicy: String? // nil/"require_authorization" | "auto_authorization" | "full_access"
   /// Per-capability enabled/disabled overrides.  Absent key = defaultEnabled from manifest.

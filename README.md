@@ -199,7 +199,7 @@ Common configuration keys:
 | `LLM_MODEL` | Default model used by the local agent. |
 | `LLM_CONTEXT_WINDOW_TOKENS` | Optional explicit context-window override for custom models. |
 | `PINPAWO_WORKDIR` | Default local working directory for tools that need one. |
-| `PINPAWO_BROWSER_BACKEND` | Browser backend mode; `auto` is the quick-start default. |
+| `PINPAWO_BROWSER_BACKEND` | Browser backend mode; `auto` is the quick-start default, `playwright` forces Playwright + Chrome. |
 | `LOCAL_SERVER_PORT` | Local HTTP/WebSocket server port. |
 | `MEDIACRAWLER_DIR` | Optional MediaCrawler checkout path. |
 | `XHS_COOKIE` | Optional Xiaohongshu cookie for crawler-backed workflows. |

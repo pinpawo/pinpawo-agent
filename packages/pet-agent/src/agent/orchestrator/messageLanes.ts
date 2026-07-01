@@ -27,6 +27,19 @@ export function setPinpetMeta(message: BaseMessage, patch: Record<string, unknow
   };
 }
 
+export function stampMessageCreatedAtUtc(
+  message: BaseMessage,
+  createdAt = new Date().toISOString(),
+) {
+  setPinpetMeta(message, { createdAt });
+  return message;
+}
+
+export function readMessageCreatedAtUtc(message: BaseMessage): string | null {
+  const createdAt = getPinpetMeta(message).createdAt;
+  return typeof createdAt === 'string' && createdAt.trim() ? createdAt : null;
+}
+
 /**
  * Neutral marker for "this lane message carries the subagent's deliverable text".
  * Replaces the completed/progress announce tag: it says WHICH message is the

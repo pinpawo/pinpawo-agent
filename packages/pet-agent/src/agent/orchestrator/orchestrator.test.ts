@@ -37,6 +37,7 @@ import {
   mainConversationMessages,
   readLatestAnnounce,
   readRecentAnnounces,
+  readMessageCreatedAtUtc,
   setPinpetMeta,
   tagNewLaneMessages,
 } from './messageLanes';
@@ -651,7 +652,9 @@ test('answer decision emits no reply itself and routes to the dedicated answer n
   });
 
   assert.equal(answerCalled, true, 'an answer decision must route to the answer node');
-  assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'final reply from answer node');
+  const finalMessage = mainConversationMessages(state.messages).at(-1);
+  assert.equal(finalMessage?.content, 'final reply from answer node');
+  assert.match(readMessageCreatedAtUtc(finalMessage!) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
 });
 
 test('limit-reached progress announce lets model choose the same capability delegation', async () => {

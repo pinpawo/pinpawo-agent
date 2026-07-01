@@ -47,6 +47,7 @@ import {
   readLatestAnnounceCompletionReason,
   readLatestHumanRequest,
   readRecentAnnounces,
+  stampMessageCreatedAtUtc,
 } from '../../messageLanes';
 import { resolveToolkitResources } from '../../subagentHandoff';
 import {
@@ -428,8 +429,9 @@ function buildDecisionResult(params: {
   const replacementBlocked = replacingActiveDelegation
     && activeDelegation !== null
     && !handedOffDelegationIds.has(activeDelegation.id);
+  const replacementBlockedText = '当前 delegated task 还没有可交接的结果，暂不能切换到新的执行器。请先继续当前 delegated task，或明确说明要放弃它。';
   const blockedReplacementMessage = replacementBlocked
-    ? new AIMessage('当前 delegated task 还没有可交接的结果，暂不能切换到新的执行器。请先继续当前 delegated task，或明确说明要放弃它。')
+    ? stampMessageCreatedAtUtc(new AIMessage(replacementBlockedText))
     : null;
 
   // A handed-off delegation is, by the orchestrator's judgment, complete.
@@ -465,7 +467,7 @@ function buildDecisionResult(params: {
     messages: [
       ...handoffMessages,
       ...(blockedReplacementMessage ? [blockedReplacementMessage] : []),
-      ...(inlineReply ? [new AIMessage(inlineReply)] : []),
+      ...(inlineReply ? [stampMessageCreatedAtUtc(new AIMessage(inlineReply))] : []),
     ],
     runPendingDelegation: replacementBlocked ? null : nextDelegationState.runPendingDelegation,
     runPendingFinalReply: replacementBlocked ? 'inline' : runPendingFinalReply,

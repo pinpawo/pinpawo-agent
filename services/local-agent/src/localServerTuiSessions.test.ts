@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { stampMessageCreatedAtUtc } from '@pinpawo/pet-agent';
 import test from 'node:test';
 import { createEmptyTuiSessionState } from './tuiSessionRegistry';
 import {
@@ -10,19 +11,27 @@ import {
 } from './localServerTuiSessions';
 
 test('readTuiHistoryMessages keeps visible user/assistant messages only', () => {
+  const userMessage = stampMessageCreatedAtUtc(
+    new HumanMessage(' hello '),
+    '2026-06-01T01:00:00.000Z',
+  );
+  const assistantMessage = stampMessageCreatedAtUtc(
+    new AIMessage('assistant reply'),
+    '2026-06-01T01:00:01.000Z',
+  );
   const messages = readTuiHistoryMessages([
     new SystemMessage('system'),
-    new HumanMessage(' hello '),
+    userMessage,
     new AIMessage({
       content: 'subagent hidden',
       additional_kwargs: { pinpawo: { lane: 'subagent' } },
     }),
-    new AIMessage('assistant reply'),
+    assistantMessage,
   ]);
 
   assert.deepEqual(messages, [
-    { role: 'user', text: 'hello' },
-    { role: 'assistant', text: 'assistant reply' },
+    { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
+    { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);
 });
 

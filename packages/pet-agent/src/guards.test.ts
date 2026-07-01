@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  createGuardRunner,
   defineGuard,
   guardBlock,
   guardPass,
   GuardRegistry,
+  type GuardRunnerAdapter,
 } from './guards';
 
 type State = { count: number };
@@ -97,4 +99,123 @@ test('guard registry enforces registered positions', () => {
     }),
     /not registered for position/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// createGuardRunner adapter factory tests
+// ---------------------------------------------------------------------------
+
+test('createGuardRunner delegates to adapter resolveGuardInput and applyResult', async () => {
+  const guard = defineGuard<State, Config, Position, Update>({
+    name: 'count_limit',
+    positions: ['before_decision'],
+    rule: {
+      check: ({ state, config }) => state.count >= config.limit
+        ? guardBlock('limit_reached')
+        : guardPass(),
+    },
+    handler: {
+      handle: () => ({ allowed: true }),
+    },
+  });
+  const registry = new GuardRegistry<State, Config, Position, Update>();
+  registry.register(guard);
+
+  const adapter: GuardRunnerAdapter<State, Config, Position, Update> = {
+    resolveGuardInput: ({ state, position }) => ({
+      state,
+      config: { limit: 2 },
+      position,
+    }),
+    applyResult: ({ result }) => result.update ?? { allowed: false },
+  };
+
+  const runGuard = createGuardRunner({ registry, adapter });
+
+  const { result, update } = await runGuard({
+    name: 'count_limit',
+    position: 'before_decision',
+    state: { count: 3 },
+  });
+
+  assert.equal(result.status, 'block');
+  assert.deepEqual(update, { allowed: true });
+});
+
+test('createGuardRunner passes onBlock callback through to registry.run', async () => {
+  const guard = defineGuard<State, Config, Position, Update>({
+    name: 'count_limit',
+    positions: ['before_decision'],
+    rule: {
+      check: ({ state, config }) => state.count >= config.limit
+        ? guardBlock('limit_reached')
+        : guardPass(),
+    },
+    handler: {
+      handle: () => ({ allowed: true }),
+    },
+  });
+  const registry = new GuardRegistry<State, Config, Position, Update>();
+  registry.register(guard);
+
+  const adapter: GuardRunnerAdapter<State, Config, Position, Update> = {
+    resolveGuardInput: ({ state, position }) => ({
+      state,
+      config: { limit: 2 },
+      position,
+    }),
+    applyResult: ({ result }) => result.update ?? { allowed: false },
+  };
+
+  const runGuard = createGuardRunner({ registry, adapter });
+
+  const { result, update } = await runGuard({
+    name: 'count_limit',
+    position: 'before_decision',
+    state: { count: 3 },
+    runOptions: {
+      onBlock: ({ guardName, result }) => ({
+        allowed: false,
+        message: `${guardName}:${result.reason}`,
+      }),
+    },
+  });
+
+  assert.equal(result.status, 'block');
+  assert.deepEqual(update, { allowed: false, message: 'count_limit:limit_reached' });
+});
+
+test('createGuardRunner returns null update when guard passes and handler returns null', async () => {
+  const guard = defineGuard<State, Config, Position, Update>({
+    name: 'count_limit',
+    positions: ['before_decision'],
+    rule: {
+      check: () => guardPass(),
+    },
+    handler: {
+      handle: () => null,
+    },
+  });
+  const registry = new GuardRegistry<State, Config, Position, Update>();
+  registry.register(guard);
+
+  const adapter: GuardRunnerAdapter<State, Config, Position, Update> = {
+    resolveGuardInput: ({ state, position }) => ({
+      state,
+      config: { limit: 1 },
+      position,
+    }),
+    applyResult: ({ result }) => result.update ?? null,
+  };
+
+  const runGuard = createGuardRunner({ registry, adapter });
+
+  const { result, update } = await runGuard({
+    name: 'count_limit',
+    position: 'before_decision',
+    state: { count: 0 },
+  });
+
+  assert.equal(result.status, 'pass');
+  assert.equal(update, null);
 });

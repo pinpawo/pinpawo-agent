@@ -1,5 +1,9 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
-import type { GuardRunOptions } from '../../../../guards';
+import {
+  createGuardRunner,
+  type GuardRunOptions,
+  type GuardRunnerAdapter,
+} from '../../../../guards';
 import type {
   OrchestratorControlContext,
   OrchestratorStatePatch,
@@ -9,12 +13,14 @@ import {
   type OrchestratorGuardConfig,
   type OrchestratorGuardName,
   type OrchestratorGuardPosition,
+  type OrchestratorGuardRegistry,
+  type OrchestratorGuardUpdate,
 } from '../../guardDefinitions';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { getInvokeOptions } from '../config';
 
-export type OrchestratorGuardRegistry = ReturnType<typeof createOrchestratorGuardRegistry>;
+export { createOrchestratorGuardRegistry };
 
 export type OrchestratorGuardRunner = (
   name: OrchestratorGuardName,
@@ -58,24 +64,41 @@ export function createOrchestratorGuardRunner(params: {
   orchestratorMaxIterations: number;
   guardRegistry: OrchestratorGuardRegistry;
 }): OrchestratorGuardRunner {
-  return async function runOrchestratorGuard(
-    name,
-    position,
-    state,
-    runnableConfig,
-    runOptions,
-  ) {
-    const { update } = await params.guardRegistry.run(name, {
+  const adapter: GuardRunnerAdapter<
+    OrchestratorStateType,
+    OrchestratorGuardConfig,
+    OrchestratorGuardPosition,
+    OrchestratorGuardUpdate
+  > = {
+    resolveGuardInput: ({ state, position }) => ({
       state,
       config: buildGuardConfig({
         config: params.config,
         orchestratorMaxIterations: params.orchestratorMaxIterations,
-        runnableConfig,
       }),
       position,
-    }, runOptions);
+    }),
+    applyResult: ({ result }) => result.update ?? {},
+  };
+
+  const runGuard = createGuardRunner({
+    registry: params.guardRegistry,
+    adapter,
+  });
+
+  return async function runOrchestratorGuard(
+    name,
+    position,
+    state,
+    _runnableConfig,
+    runOptions,
+  ) {
+    const { update } = await runGuard({
+      name,
+      position,
+      state,
+      runOptions,
+    });
     return update ?? {};
   };
 }
-
-export { createOrchestratorGuardRegistry };

@@ -156,24 +156,24 @@ export class GuardRegistry<
   }
 
   /**
-   * Usage:
-   *   registry.run('guard_name', { state, config, position }, { onBlock })
-   *
-   * Current orchestrator example after migration:
-   *   const { result, update } = await registry.run('run_iteration_limit', {
-   *     state: orchestratorState,
-   *     config: orchestratorGuardConfig,
-   *     position: 'orchestrator.delegation_outcome_iteration',
-   *   })
-   *   // `result.status` tells the position whether the guard passed or blocked.
-   *   // `update` is the state patch produced by the guard handler, if any.
-   *
-   * `run` first verifies the guard is registered for `position`, then calls
-   * `rule.check(input)`. If the rule blocks and the caller supplied `onBlock`,
-   * that position-bound callback produces the update. Otherwise the guard's
-   * default handler handles the result. Async work such as compaction belongs in
-   * `onBlock` or in the guard's default handler, never in the rule.
-   */
+    * Usage:
+    *   registry.run('guard_name', { state, config, position }, { onBlock })
+    *
+    * Current orchestrator example after migration:
+    *   const { result, update } = await registry.run('run_iteration_limit', {
+    *     state: orchestratorState,
+    *     config: orchestratorGuardConfig,
+    *     position: 'orchestrator.delegation_outcome_iteration',
+    *   })
+    *   // `result.status` tells the position whether the guard passed or blocked.
+    *   // `update` is the state patch produced by the guard handler, if any.
+    *
+    * `run` first verifies the guard is registered for `position`, then calls
+    * `rule.check(input)`. If the rule blocks and the caller supplied `onBlock`,
+    * that position-bound callback produces the update. Otherwise the guard's
+    * default handler handles the result. Async work such as compaction belongs in
+    * `onBlock` or in the guard's default handler, never in the rule.
+    */
   async run(
     name: string,
     input: GuardInput<State, Config, Position>,
@@ -208,4 +208,71 @@ export class GuardRegistry<
     }
     return guard;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Guard Runner Adapter Factory
+// ---------------------------------------------------------------------------
+
+/**
+ * An adapter bridges domain-specific input/output mapping to the shared
+ * `registry.run` call. The runner factory below uses the adapter to resolve
+ * trigger messages, build guard config, and apply the resulting update —
+ * so orchestrator nodes and subagent middleware share the same execution
+ * skeleton and only differ in their adapter implementation.
+ */
+export type GuardRunnerAdapter<State, Config, Position extends string, Update> = {
+  /**
+   * Build the guard input from the raw runtime state. This is where domain
+   * differences live: orchestrator extracts main-conversation messages,
+   * subagent snapshots hook-local messages + iterationCount, etc.
+   */
+  resolveGuardInput(params: {
+    state: State;
+    position: Position;
+  }): GuardInput<State, Config, Position>;
+
+  /**
+   * Transform the raw `registry.run` result into the domain update type.
+   * For most domains this is just `result.update ?? {}`, but some domains
+   * need to merge or normalise the patch.
+   */
+  applyResult(params: {
+    result: GuardRunResult<Update>;
+    state: State;
+    position: Position;
+  }): Update | null | Promise<Update | null>;
+};
+
+/**
+ * Create a reusable guard runner that wraps `registry.run` with an adapter.
+ *
+ * The returned function accepts a guard name, position, the raw runtime state,
+ * and optional `onBlock` callback. It delegates to the adapter for input
+ * resolution and result application, so the call site stays thin.
+ */
+export function createGuardRunner<State, Config, Position extends string, Update>(params: {
+  registry: GuardRegistry<State, Config, Position, Update>;
+  adapter: GuardRunnerAdapter<State, Config, Position, Update>;
+}): (args: {
+  name: string;
+  position: Position;
+  state: State;
+  runOptions?: GuardRunOptions<State, Config, Position, Update>;
+}) => Promise<{ result: GuardCheckResult; update: Update | null }> {
+  const { registry, adapter } = params;
+
+  return async function runGuard(args) {
+    const input = adapter.resolveGuardInput({
+      state: args.state,
+      position: args.position,
+    });
+    const raw = await registry.run(args.name, input, args.runOptions);
+    const update = await adapter.applyResult({
+      result: raw,
+      state: args.state,
+      position: args.position,
+    });
+    return { result: raw.result, update };
+  };
 }

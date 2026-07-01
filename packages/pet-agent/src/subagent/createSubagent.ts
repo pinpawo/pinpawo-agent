@@ -1,14 +1,11 @@
 import { type BaseMessage } from '@langchain/core/messages';
 import type {
+  ContextPolicyContext,
   SubagentInputState,
   SubagentResult,
   SubagentRunInput,
   SubagentToolLifecycleEvent,
 } from '../types/subagent';
-import type {
-  GuardRunOptions,
-  GuardRunResult,
-} from '../guards';
 import { createAgent, createMiddleware } from 'langchain';
 import { SubagentToolEventTracker } from './toolEventTracker';
 import {
@@ -17,15 +14,14 @@ import {
 } from './contextPolicy';
 import { isGraphRecursionLimitError } from '../utils/graphErrors';
 import {
-  createSubagentGuardRegistry,
   SUBAGENT_GUARD_NAME,
   SUBAGENT_GUARD_POSITION,
-  type SubagentGuardConfig,
-  type SubagentGuardName,
-  type SubagentGuardPosition,
-  type SubagentGuardUpdate,
   type SubagentState,
 } from './guardDefinitions';
+import {
+  createSubagentMiddlewareGuardRunner,
+  type SubagentMiddlewareGuardRunner,
+} from './middlewareGuardRunner';
 import { isSubagentGuardStopMessage } from './guardStop';
 import { Command, END } from '@langchain/langgraph';
 
@@ -34,13 +30,6 @@ import { Command, END } from '@langchain/langgraph';
 // is a deliberately high last-resort breaker, not a normal control signal.
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 100;
 const SUBAGENT_HARD_RECURSION_LIMIT = 10_000;
-
-type SubagentGuardRunOptions = GuardRunOptions<
-  SubagentState,
-  SubagentGuardConfig,
-  SubagentGuardPosition,
-  SubagentGuardUpdate
->;
 
 const SUBAGENT_GOVERNING_PROMPT = [
   '你是任务执行器，负责精确完成分配给你的任务。',
@@ -96,22 +85,20 @@ function isSubagentToolLifecycleEvent(payload: unknown): payload is SubagentTool
     : null;
   return Boolean(
     payload
-      && typeof payload === 'object'
-      && 'event' in payload
-      && 'name' in payload
-      && (
-        event === 'on_tool_start'
-        || event === 'on_tool_event'
-        || event === 'on_tool_end'
-        || event === 'on_tool_error'
-      )
-      && typeof (payload as { name?: unknown }).name === 'string',
+    && typeof payload === 'object'
+    && 'event' in payload
+    && 'name' in payload
+    && (
+      event === 'on_tool_start'
+      || event === 'on_tool_event'
+      || event === 'on_tool_end'
+      || event === 'on_tool_error'
+    )
+    && typeof (payload as { name?: unknown }).name === 'string',
   );
 }
 
-function buildContextPolicyContext(
-  state: SubagentState,
-) {
+function buildContextPolicyContext(state: SubagentState): ContextPolicyContext {
   return {
     iterationCount: state.iterationCount,
     operations: state.operations ?? {},
@@ -120,41 +107,15 @@ function buildContextPolicyContext(
   };
 }
 
-function snapshotSubagentStateForMiddleware(
+function createContextPolicyMiddleware(
   inputState: SubagentInputState,
-  messages: BaseMessage[],
-  iterationCount: number,
-  maxIterations: number,
-): SubagentState {
-  return {
-    ...inputState,
-    iterationCount,
-    maxIterations,
-    messages,
-  };
-}
-
-function createContextPolicyMiddleware(inputState: SubagentInputState, maxIterations: number) {
-  let iterationCount = 0;
-  const registry = createSubagentGuardRegistry();
-  async function runSubagentGuard(
-    name: SubagentGuardName,
-    position: SubagentGuardPosition,
-    messages: BaseMessage[],
-    runOptions?: SubagentGuardRunOptions,
-  ): Promise<GuardRunResult<SubagentGuardUpdate>> {
-    const subagentState = snapshotSubagentStateForMiddleware(inputState, messages, iterationCount, maxIterations);
-    return registry.run(name, {
-      state: subagentState,
-      config: {},
-      position,
-    }, runOptions);
-  }
-
+  guardRunner: SubagentMiddlewareGuardRunner,
+  sharedIteration: { count: number },
+) {
   return createMiddleware({
     name: 'SubagentContextPolicy',
     beforeModel: async (state) => {
-      iterationCount += 1;
+      sharedIteration.count += 1;
       const policy = inputState.contextPolicy;
       if (!policy) {
         return undefined;
@@ -164,51 +125,40 @@ function createContextPolicyMiddleware(inputState: SubagentInputState, maxIterat
         return undefined;
       }
       const baseMessages = messages as BaseMessage[];
-      const { update } = await runSubagentGuard(
-        SUBAGENT_GUARD_NAME.CONTEXT_REWRITE_WATERMARK,
-        SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_POLICY,
-        baseMessages,
-        {
-          onBlock: async ({ state }) => {
-            const context = buildContextPolicyContext(state);
-            const rewritten = policy.rewriteAsync
-              ? await policy.rewriteAsync(state.messages, context)
-              : rewriteMessagesForContextPolicy(state.messages, policy, context);
-            return buildContextPolicyStateUpdate(state.messages, rewritten) ?? null;
+      const { update } = await guardRunner({
+        name: SUBAGENT_GUARD_NAME.CONTEXT_REWRITE_WATERMARK,
+        position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_POLICY,
+        messages: baseMessages,
+        iterationCount: sharedIteration.count,
+        runOptions: {
+          onBlock: async ({ state: blockedState }: { state: SubagentState }) => {
+            const context = buildContextPolicyContext(blockedState);
+            const rewritten = policy!.rewriteAsync
+              ? await policy!.rewriteAsync(blockedState.messages, context)
+              : rewriteMessagesForContextPolicy(blockedState.messages, policy!, context);
+            return buildContextPolicyStateUpdate(blockedState.messages, rewritten) ?? null;
           },
         },
-      );
+      });
       return update ?? undefined;
     },
   });
 }
 
-function createSubagentIterationGuardMiddleware(inputState: SubagentInputState, maxIterations: number) {
-  let iterationCount = 0;
-  const registry = createSubagentGuardRegistry();
-  async function runSubagentGuard(
-    name: SubagentGuardName,
-    position: SubagentGuardPosition,
-    messages: BaseMessage[],
-    runOptions?: SubagentGuardRunOptions,
-  ): Promise<GuardRunResult<SubagentGuardUpdate>> {
-    const subagentState = snapshotSubagentStateForMiddleware(inputState, messages, iterationCount, maxIterations);
-    return registry.run(name, {
-      state: subagentState,
-      config: {},
-      position,
-    }, runOptions);
-  }
-
+function createSubagentIterationGuardMiddleware(
+  guardRunner: SubagentMiddlewareGuardRunner,
+  sharedIteration: { count: number },
+) {
   return createMiddleware({
     name: 'SubagentIterationGuard',
     wrapModelCall: async (request, handler) => {
-      iterationCount += 1;
-      const { result, update } = await runSubagentGuard(
-        SUBAGENT_GUARD_NAME.ITERATION_LIMIT,
-        SUBAGENT_GUARD_POSITION.BEFORE_MODEL_ITERATION,
-        request.messages ?? [],
-      );
+      sharedIteration.count += 1;
+      const { result, update } = await guardRunner({
+        name: SUBAGENT_GUARD_NAME.ITERATION_LIMIT,
+        position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_ITERATION,
+        messages: request.messages ?? [],
+        iterationCount: sharedIteration.count,
+      });
       if (result.status === 'block') {
         return new Command({ goto: END, update: update ?? {} });
       }
@@ -234,8 +184,30 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     inputState.contextPolicy ? CONTEXT_POLICY_GOVERNING_PROMPT : null,
     ...inputState.instructions,
   ].filter((item): item is string => Boolean(item)).join('\n\n');
-  const contextPolicyMiddleware = createContextPolicyMiddleware(inputState, maxIterations);
-  const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(inputState, maxIterations);
+
+  // Create a single shared guard runner (and underlying registry) for all
+  // subagent middleware. This fixes the previous issue where each middleware
+  // created its own registry instance, and where iterationCount was maintained
+  // independently per middleware.
+  const guardRunner = createSubagentMiddlewareGuardRunner({
+    inputState,
+    maxIterations,
+  });
+
+  // Shared iteration counter — both middleware read and increment the same
+  // counter, avoiding implicit dependence on LangChain middleware execution
+  // order.
+  const sharedIteration = { count: 0 };
+
+  const contextPolicyMiddleware = createContextPolicyMiddleware(
+    inputState,
+    guardRunner,
+    sharedIteration,
+  );
+  const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(
+    guardRunner,
+    sharedIteration,
+  );
   const middleware = [
     contextPolicyMiddleware,
     iterationGuardMiddleware,

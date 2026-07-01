@@ -1,6 +1,6 @@
 # Guard Registry Design
 
-> Status: canonical. Updated: 2026-06-29.
+> Status: canonical. Updated: 2026-07-01.
 
 This is the source of truth for guard design. Older limit/fuse/loop-guard design notes are deprecated and should point here.
 
@@ -31,7 +31,29 @@ The registry is created once per runtime/graph scope. Per-invocation data such a
 
 For subagents, `SubagentInputState` is the subagent graph/input state shape. `SubagentRunInput` is the full invocation input and adds runtime dependencies such as model, tools, checkpoint, runnable config, signal, and event callbacks. Do not split state fields back into a parallel guard config.
 
-Middleware guard execution is intentionally deferred from this node-guard migration. The current subagent middleware adapter snapshots `SubagentInputState` plus hook-local fields such as current messages and iteration count. A later middleware-guard design should decide whether those fields move into LangChain middleware `stateSchema`.
+## Runners And Adapters
+
+Both orchestrator and subagent use `createGuardRunner(registry, adapter)` from `guards.ts` to wrap `registry.run` with domain-specific input/output mapping.
+
+The adapter interface (`GuardRunnerAdapter`) has two methods:
+
+- `resolveGuardInput({ state, position })` — builds the `GuardInput` from raw runtime state. This is where domain differences live: orchestrator builds `OrchestratorGuardConfig` from `OrchestratorConfig` + `runnableConfig`; subagent snapshots hook-local `messages` + `iterationCount` into `SubagentState`.
+- `applyResult({ result, state, position })` — transforms the raw `registry.run` result into the domain update type.
+
+Orchestrator: `createOrchestratorGuardRunner` in `runtime/guards/runner.ts` creates the runner and binds it to the shared `OrchestratorGuardRegistry`. The registry is created once in `graph.ts` and injected into all guard nodes.
+
+Subagent: `createSubagentMiddlewareGuardRunner` in `subagent/middlewareGuardRunner.ts` creates the runner and binds it to the shared `SubagentGuardRegistry`. The runner is created once in `createSubagent` and shared by all middleware (context policy + iteration guard). A shared `iterationCount` counter is passed to both middleware so they see the same iteration number regardless of LangChain middleware execution order.
+
+## Subagent Middleware Contract
+
+Subagent guard execution happens inside LangChain middleware (`beforeModel` for context policy, `wrapModelCall` for iteration guard). The middleware guard runner snapshots `SubagentInputState` plus hook-local fields (current messages, shared iteration count) into a `SubagentState` before calling the guard registry.
+
+Rules:
+
+- The guard registry is created once per subagent runtime scope (in `createSubagent`), not per middleware.
+- `iterationCount` is a shared counter owned by `createSubagent`, not by individual middleware.
+- The `onBlock` callback for context rewrite executes the actual rewrite (sync or async) and returns the rewritten messages.
+- The iteration guard handler returns a marked stop notice; the middleware returns `Command({ goto: END })` to terminate the agent loop.
 
 ## Current Guards
 
@@ -47,6 +69,8 @@ The subagent flow uses guards for:
 
 - context rewrite watermark
 - subagent iteration limit
+
+Both watermark guards share the same threshold logic via `readProviderInputWatermark` in `tokenUsage.ts`. Both iteration limit guards use `>=` comparison (block when count reaches the limit).
 
 ## What Is Not A Guard
 
@@ -69,6 +93,7 @@ Token-triggered compaction and rewrite use provider usage metadata:
 
 - Orchestrator session compaction reads the latest main-conversation AI message input tokens.
 - Subagent context rewrite reads the latest provider input tokens from the subagent messages and compares them to the subagent run state's context window.
+- Both use `readProviderInputWatermark` with `DEFAULT_PROVIDER_INPUT_WATERMARK_RATIO = 0.75` and `Math.max(1, Math.floor(...))` for the watermark calculation.
 
 Local token estimation is not a normal control signal for guard decisions.
 

@@ -27,7 +27,7 @@ export function createSubagentIterationLimitGuard(): SubagentGuard {
         if (!maxIterations || !Number.isFinite(maxIterations) || maxIterations <= 0) {
           return guardPass();
         }
-        return state.iterationCount > maxIterations
+        return state.iterationCount >= maxIterations
           ? guardBlock('subagent_iteration_limit_reached', {
             iterationCount: state.iterationCount,
             maxIterations,

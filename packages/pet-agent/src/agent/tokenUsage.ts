@@ -129,6 +129,42 @@ export function readLatestProviderInputTokens(messages: Iterable<unknown>): numb
   return null;
 }
 
+/**
+ * The default ratio of `contextWindowTokens` at which a watermark guard
+ * should trigger compaction or context rewrite. Both orchestrator compaction
+ * and subagent context rewrite use this same threshold.
+ */
+export const DEFAULT_PROVIDER_INPUT_WATERMARK_RATIO = 0.75;
+
+/**
+ * Read the latest provider input-token count from `messages` and compare it
+ * against the watermark derived from `contextWindowTokens`.
+ *
+ * Returns `null` when the watermark is not reached (pass), or the watermark
+ * details when it is (block). Both orchestrator compaction and subagent
+ * context-rewrite guards share this logic.
+ */
+export function readProviderInputWatermark(params: {
+  messages: Iterable<unknown>;
+  contextWindowTokens: number | null | undefined;
+  ratio?: number;
+}): { latestInputTokens: number; watermarkTokens: number } | null {
+  const { messages, contextWindowTokens, ratio } = params;
+  if (!contextWindowTokens || !Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
+    return null;
+  }
+  const latestInputTokens = readLatestProviderInputTokens(messages);
+  if (latestInputTokens === null) {
+    return null;
+  }
+  const watermarkRatio = ratio ?? DEFAULT_PROVIDER_INPUT_WATERMARK_RATIO;
+  const watermarkTokens = Math.max(1, Math.floor(contextWindowTokens * watermarkRatio));
+  if (latestInputTokens < watermarkTokens) {
+    return null;
+  }
+  return { latestInputTokens, watermarkTokens };
+}
+
 function addProviderUsage(
   current: ProviderTokenUsage | null,
   next: ProviderTokenUsage,

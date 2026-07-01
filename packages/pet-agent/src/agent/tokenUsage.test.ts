@@ -12,6 +12,7 @@ import {
   readLatestProviderInputTokens,
   readMessageTokenUsage,
   readMessagesTokenUsage,
+  readProviderInputWatermark,
 } from './tokenUsage';
 
 test('parseTokenUsageSnapshot validates canonical token usage snapshots', () => {
@@ -166,4 +167,79 @@ test('streamOrchestratorGraph streams graph chunks without injecting callbacks',
   assert.deepEqual(chunks, [
     ['values', { messages: [] }],
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// readProviderInputWatermark tests
+// ---------------------------------------------------------------------------
+
+test('readProviderInputWatermark returns null when contextWindowTokens is invalid', () => {
+  const messages = [new AIMessage({
+    content: 'test',
+    usage_metadata: { input_tokens: 100, output_tokens: 10, total_tokens: 110 },
+  })];
+
+  assert.equal(readProviderInputWatermark({ messages, contextWindowTokens: null }), null);
+  assert.equal(readProviderInputWatermark({ messages, contextWindowTokens: undefined }), null);
+  assert.equal(readProviderInputWatermark({ messages, contextWindowTokens: 0 }), null);
+  assert.equal(readProviderInputWatermark({ messages, contextWindowTokens: -1 }), null);
+  assert.equal(readProviderInputWatermark({ messages, contextWindowTokens: NaN }), null);
+});
+
+test('readProviderInputWatermark returns null when no provider usage in messages', () => {
+  assert.equal(readProviderInputWatermark({
+    messages: [new AIMessage('no usage')],
+    contextWindowTokens: 1000,
+  }), null);
+});
+
+test('readProviderInputWatermark returns null when latest input tokens are below watermark', () => {
+  const messages = [new AIMessage({
+    content: 'below',
+    usage_metadata: { input_tokens: 400, output_tokens: 10, total_tokens: 410 },
+  })];
+
+  const result = readProviderInputWatermark({ messages, contextWindowTokens: 1000 });
+  assert.equal(result, null);
+});
+
+test('readProviderInputWatermark returns watermark details when latest input tokens reach the threshold', () => {
+  const messages = [new AIMessage({
+    content: 'above',
+    usage_metadata: { input_tokens: 900, output_tokens: 10, total_tokens: 910 },
+  })];
+
+  const result = readProviderInputWatermark({ messages, contextWindowTokens: 1000 });
+  assert.deepEqual(result, { latestInputTokens: 900, watermarkTokens: 750 });
+});
+
+test('readProviderInputWatermark uses the latest provider usage only', () => {
+  const messages = [
+    new AIMessage({
+      content: 'old',
+      usage_metadata: { input_tokens: 100, output_tokens: 10, total_tokens: 110 },
+    }),
+    new AIMessage({
+      content: 'latest',
+      usage_metadata: { input_tokens: 800, output_tokens: 10, total_tokens: 810 },
+    }),
+  ];
+
+  const result = readProviderInputWatermark({ messages, contextWindowTokens: 1000 });
+  assert.deepEqual(result, { latestInputTokens: 800, watermarkTokens: 750 });
+});
+
+test('readProviderInputWatermark supports custom ratio', () => {
+  const messages = [new AIMessage({
+    content: 'test',
+    usage_metadata: { input_tokens: 500, output_tokens: 10, total_tokens: 510 },
+  })];
+
+  // With ratio 0.5, watermark = 500, and 500 >= 500 -> block
+  const result = readProviderInputWatermark({ messages, contextWindowTokens: 1000, ratio: 0.5 });
+  assert.deepEqual(result, { latestInputTokens: 500, watermarkTokens: 500 });
+
+  // With ratio 0.6, watermark = 600, and 500 < 600 -> pass
+  const pass = readProviderInputWatermark({ messages, contextWindowTokens: 1000, ratio: 0.6 });
+  assert.equal(pass, null);
 });

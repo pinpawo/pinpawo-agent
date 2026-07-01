@@ -6,7 +6,7 @@ import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
-import { createSubagent } from './createSubagent';
+import { buildNestedSubagentStreamConfig, createSubagent } from './createSubagent';
 import {
   SUBAGENT_GUARD_STOP_MARKER_KEY,
   readSubagentGuardStopReason,
@@ -44,6 +44,27 @@ function usageMessage(content: string, inputTokens: number) {
     },
   });
 }
+
+test('buildNestedSubagentStreamConfig does not inherit parent callback run identity', () => {
+  const callbacks = [{
+    handleChainStart: async () => undefined,
+  }];
+  const config = buildNestedSubagentStreamConfig({
+    callbacks,
+    runId: 'parent-run',
+    configurable: { thread_id: 'thread-1' },
+    metadata: { source: 'parent' },
+    tags: ['parent-tag'],
+    maxConcurrency: 2,
+  });
+
+  assert.deepEqual(config, {
+    configurable: { thread_id: 'thread-1' },
+    metadata: { source: 'parent' },
+    tags: ['parent-tag'],
+    maxConcurrency: 2,
+  });
+});
 
 test('createSubagent emits non-tool model text as runtime deltas', async () => {
   const events: unknown[] = [];

@@ -10,6 +10,7 @@ import type {
   GuardRunResult,
 } from '../guards';
 import { createAgent, createMiddleware } from 'langchain';
+import type { RunnableConfig } from '@langchain/core/runnables';
 import { SubagentToolEventTracker } from './toolEventTracker';
 import {
   buildContextPolicyStateUpdate,
@@ -69,6 +70,15 @@ function readMessagesFromValuesChunk(chunk: unknown): BaseMessage[] | null {
     return (chunk as { messages: BaseMessage[] }).messages;
   }
   return null;
+}
+
+export function buildNestedSubagentStreamConfig(config: RunnableConfig | undefined): RunnableConfig {
+  const {
+    callbacks: _callbacks,
+    runId: _runId,
+    ...streamConfig
+  } = config ?? {};
+  return streamConfig;
 }
 
 function buildContextPolicyContext(
@@ -415,10 +425,11 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   };
 
   try {
+    const streamConfig = buildNestedSubagentStreamConfig(input.runnableConfig);
     const run = await agent.streamEvents(
       { messages: inputState.messages },
       {
-        ...input.runnableConfig,
+        ...streamConfig,
         version: 'v3',
         signal: input.signal,
         // Normal stopping is controlled by the subagent iteration guard.

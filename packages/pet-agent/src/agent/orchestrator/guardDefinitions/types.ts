@@ -1,10 +1,5 @@
-import {
-  GuardRegistry,
-  type Guard,
-} from '../../../guards';
 import type { AgentCapability } from '../../../types/capability';
 import type { OrchestratorStatePatch } from '../controlPrimitives';
-import type { OrchestratorStateType } from '../state';
 
 export const ORCHESTRATOR_GUARD_POSITION = {
   PREPARE: 'orchestrator.prepare',
@@ -28,34 +23,25 @@ export const ORCHESTRATOR_GUARD_NAME = {
 export type OrchestratorGuardName =
   typeof ORCHESTRATOR_GUARD_NAME[keyof typeof ORCHESTRATOR_GUARD_NAME];
 
-export type OrchestratorContextCompactionGuardConfig = {
+// Per-guard configs: each guard declares the minimal config it reads; the
+// position assembles it from OrchestratorConfig / invoke options.
+
+export type EmptyGuardConfig = Record<string, never>;
+
+export type ContextCompactionWatermarkGuardConfig = {
   contextWindowTokens?: number;
   keepMessages?: number;
 };
 
-export type OrchestratorGuardConfig = {
-  capabilities?: AgentCapability[];
-  contextCompaction?: OrchestratorContextCompactionGuardConfig;
+export type ForcedCapabilitySeedGuardConfig = {
   forcedCapabilityNames?: string[];
+  capabilities?: AgentCapability[];
+};
+
+export type RunIterationLimitGuardConfig = {
   runIterationLimit: number;
 };
 
-export type OrchestratorGuardUpdate = OrchestratorStatePatch;
-
-export type OrchestratorGuard = Guard<
-  OrchestratorStateType,
-  OrchestratorGuardConfig,
-  OrchestratorGuardPosition,
-  OrchestratorGuardUpdate
->;
-
-export type OrchestratorGuardRegistry = GuardRegistry<
-  OrchestratorStateType,
-  OrchestratorGuardConfig,
-  OrchestratorGuardPosition,
-  OrchestratorGuardUpdate
->;
-
-export function statePatch(patch: OrchestratorStatePatch): OrchestratorGuardUpdate {
+export function statePatch(patch: OrchestratorStatePatch): OrchestratorStatePatch {
   return patch;
 }

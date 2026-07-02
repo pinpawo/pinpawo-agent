@@ -1,46 +1,38 @@
-import { GuardRegistry } from '../../../guards';
-import { createContextCompactionWatermarkGuard } from './contextCompactionWatermarkGuard';
-import { createDelegationOutcomeDecisionGuard } from './delegationOutcomeDecisionGuard';
-import { createForcedCapabilitySeedGuard } from './forcedCapabilitySeedGuard';
-import { createRunIterationLimitGuard } from './runIterationLimitGuard';
-import { createRunStateResetGuard } from './runStateResetGuard';
-import type { OrchestratorStateType } from '../state';
-import {
-  type OrchestratorGuardConfig,
-  type OrchestratorGuardPosition,
-  type OrchestratorGuardRegistry,
-  type OrchestratorGuardUpdate,
-} from './types';
-
 export {
   ORCHESTRATOR_GUARD_NAME,
   ORCHESTRATOR_GUARD_POSITION,
-  type OrchestratorGuard,
-  type OrchestratorGuardConfig,
+  statePatch,
+  type ContextCompactionWatermarkGuardConfig,
+  type EmptyGuardConfig,
+  type ForcedCapabilitySeedGuardConfig,
   type OrchestratorGuardName,
   type OrchestratorGuardPosition,
-  type OrchestratorGuardRegistry,
-  type OrchestratorGuardUpdate,
+  type RunIterationLimitGuardConfig,
 } from './types';
 export {
-  createContextCompactionWatermarkGuard,
+  CONTEXT_COMPACTION_REQUIRED,
+  contextCompactionWatermarkGuard,
+  type ContextCompactionWatermarkGuardState,
 } from './contextCompactionWatermarkGuard';
-export { createDelegationOutcomeDecisionGuard } from './delegationOutcomeDecisionGuard';
-export { createForcedCapabilitySeedGuard } from './forcedCapabilitySeedGuard';
-export { createRunIterationLimitGuard } from './runIterationLimitGuard';
-export { createRunStateResetGuard } from './runStateResetGuard';
-
-export function createOrchestratorGuardRegistry(): OrchestratorGuardRegistry {
-  const registry = new GuardRegistry<
-    OrchestratorStateType,
-    OrchestratorGuardConfig,
-    OrchestratorGuardPosition,
-    OrchestratorGuardUpdate
-  >();
-  registry.register(createContextCompactionWatermarkGuard());
-  registry.register(createRunStateResetGuard());
-  registry.register(createForcedCapabilitySeedGuard());
-  registry.register(createDelegationOutcomeDecisionGuard());
-  registry.register(createRunIterationLimitGuard());
-  return registry;
-}
+export {
+  ACTIVE_DELEGATION_LIMIT_REACHED,
+  DELEGATION_HANDOFF_ALLOWED,
+  delegationOutcomeDecisionGuard,
+  type DelegationOutcomeDecisionGuardState,
+} from './delegationOutcomeDecisionGuard';
+export {
+  FORCED_CAPABILITY_SEED_REQUIRED,
+  forcedCapabilitySeedGuard,
+  type ForcedCapabilitySeedDetails,
+  type ForcedCapabilitySeedGuardState,
+} from './forcedCapabilitySeedGuard';
+export {
+  RUN_ITERATION_LIMIT_REACHED,
+  runIterationLimitGuard,
+  type RunIterationLimitGuardState,
+} from './runIterationLimitGuard';
+export {
+  RUN_STATE_RESET_REQUIRED,
+  runStateResetGuard,
+  type RunStateResetGuardState,
+} from './runStateResetGuard';

@@ -1,59 +1,41 @@
 import {
   defineGuard,
-  guardBlock,
-  guardPass,
+  guardMaintain,
+  guardProceed,
 } from '../../guards';
-import { readLatestProviderInputTokens } from '../../agent/tokenUsage';
+import {
+  checkProviderInputWatermark,
+  readLatestProviderInputTokens,
+} from '../../agent/tokenUsage';
 import {
   SUBAGENT_GUARD_NAME,
   SUBAGENT_GUARD_POSITION,
-  type SubagentGuard,
-  type SubagentGuardConfig,
+  type ContextRewriteWatermarkGuardConfig,
+  type ContextRewriteWatermarkGuardState,
   type SubagentGuardPosition,
-  type SubagentState,
-  type SubagentGuardUpdate,
 } from './types';
 
-const CONTEXT_REWRITE_WATERMARK_RATIO = 0.75;
+export const CONTEXT_REWRITE_REQUIRED = 'context_rewrite_required';
 
-export function createContextRewriteWatermarkGuard(): SubagentGuard {
-  return defineGuard<
-    SubagentState,
-    SubagentGuardConfig,
-    SubagentGuardPosition,
-    SubagentGuardUpdate
-  >({
-    name: SUBAGENT_GUARD_NAME.CONTEXT_REWRITE_WATERMARK,
-    positions: [SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_POLICY],
-    rule: {
-      check: ({ state }) => {
-        const policy = state.contextPolicy;
-        if (!policy?.rewrite && !policy?.rewriteAsync && !policy?.evictToolResults) {
-          return guardPass();
-        }
-        if (!state.contextWindowTokens || !Number.isFinite(state.contextWindowTokens) || state.contextWindowTokens <= 0) {
-          return guardPass();
-        }
-        const latestInputTokens = readLatestProviderInputTokens(state.messages);
-        const watermarkTokens = Math.max(1, Math.floor(
-          state.contextWindowTokens * CONTEXT_REWRITE_WATERMARK_RATIO,
-        ));
-
-        if (
-          latestInputTokens === null
-          || latestInputTokens < watermarkTokens
-        ) {
-          return guardPass();
-        }
-
-        return guardBlock('context_rewrite_required', {
-          latestInputTokens,
-          watermarkTokens,
-        });
-      },
-    },
-    handler: {
-      handle: () => null,
-    },
-  });
-}
+export const contextRewriteWatermarkGuard = defineGuard<
+  ContextRewriteWatermarkGuardState,
+  ContextRewriteWatermarkGuardConfig,
+  SubagentGuardPosition
+>({
+  name: SUBAGENT_GUARD_NAME.CONTEXT_REWRITE_WATERMARK,
+  positions: [SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_POLICY],
+  check: ({ config, state }) => {
+    const policy = state.contextPolicy;
+    if (!policy?.rewrite && !policy?.rewriteAsync && !policy?.evictToolResults) {
+      return guardProceed();
+    }
+    const watermark = checkProviderInputWatermark(
+      readLatestProviderInputTokens(state.messages),
+      config.contextWindowTokens,
+    );
+    if (!watermark) {
+      return guardProceed();
+    }
+    return guardMaintain(CONTEXT_REWRITE_REQUIRED, { ...watermark });
+  },
+});

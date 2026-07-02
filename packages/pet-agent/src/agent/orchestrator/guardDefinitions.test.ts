@@ -2,12 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
+import { evaluateGuard } from '../../guards';
 import {
-  createOrchestratorGuardRegistry,
-  ORCHESTRATOR_GUARD_NAME,
+  ACTIVE_DELEGATION_LIMIT_REACHED,
+  contextCompactionWatermarkGuard,
+  delegationOutcomeDecisionGuard,
+  forcedCapabilitySeedGuard,
   ORCHESTRATOR_GUARD_POSITION,
-  type OrchestratorGuardConfig,
+  RUN_STATE_RESET_REQUIRED,
+  runIterationLimitGuard,
+  runStateResetGuard,
+  type ForcedCapabilitySeedDetails,
 } from './guardDefinitions';
+import {
+  createDelegationOutcomeDecisionGuardNode,
+  createDelegationOutcomeIterationGuardNode,
+} from './runtime/guards/nodes';
 import { setPinpetMeta } from './messageLanes';
 import type { OrchestratorStateType } from './state';
 import type { TaskActiveDelegation } from './types';
@@ -34,9 +44,15 @@ function usageMessage(content: string, inputTokens: number) {
   });
 }
 
-const config: OrchestratorGuardConfig = {
-  runIterationLimit: 25,
-};
+function stubCapability(name: string, description: string) {
+  return {
+    name,
+    description,
+    createRuntime: () => {
+      throw new Error('not used in guard tests');
+    },
+  };
+}
 
 const activeDelegation: TaskActiveDelegation = {
   id: 'd1',
@@ -48,19 +64,24 @@ const activeDelegation: TaskActiveDelegation = {
   resultPreview: null,
 };
 
-test('orchestrator guard registry exposes business guards by position', () => {
-  const registry = createOrchestratorGuardRegistry();
+test('run state reset guard derives a reset only when the run id is missing', () => {
+  const proceed = evaluateGuard(runStateResetGuard, {
+    state: baseState(),
+    config: {},
+    position: ORCHESTRATOR_GUARD_POSITION.PREPARE,
+  });
+  assert.equal(proceed.kind, 'proceed');
 
-  assert.deepEqual(
-    registry
-      .list(ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION)
-      .map((guard) => guard.name),
-    [ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT],
-  );
+  const derive = evaluateGuard(runStateResetGuard, {
+    state: baseState({ runId: undefined }),
+    config: {},
+    position: ORCHESTRATOR_GUARD_POSITION.PREPARE,
+  });
+  assert.equal(derive.kind, 'derive');
+  assert.equal(derive.kind === 'derive' && derive.reason, RUN_STATE_RESET_REQUIRED);
 });
 
 test('context compaction watermark guard uses main conversation provider usage only', () => {
-  const registry = createOrchestratorGuardRegistry();
   const noisyToolResult = new ToolMessage({
     content: `lane noise ${'x'.repeat(3200)}`,
     tool_call_id: 'call-noise',
@@ -78,23 +99,19 @@ test('context compaction watermark guard uses main conversation provider usage o
     ],
   });
 
-  const result = registry.check(ORCHESTRATOR_GUARD_NAME.CONTEXT_COMPACTION_WATERMARK, {
+  const outcome = evaluateGuard(contextCompactionWatermarkGuard, {
     state,
     config: {
-      runIterationLimit: 25,
-      contextCompaction: {
-        contextWindowTokens: 1000,
-        keepMessages: 1,
-      },
+      contextWindowTokens: 1000,
+      keepMessages: 1,
     },
     position: ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
   });
 
-  assert.equal(result.status, 'pass');
+  assert.equal(outcome.kind, 'proceed');
 });
 
-test('context compaction watermark guard blocks when main provider usage crosses the unified watermark', () => {
-  const registry = createOrchestratorGuardRegistry();
+test('context compaction watermark guard maintains when main provider usage crosses the unified watermark', () => {
   const state = baseState({
     messages: [
       new HumanMessage('old request 1'),
@@ -104,20 +121,17 @@ test('context compaction watermark guard blocks when main provider usage crosses
     ],
   });
 
-  const result = registry.check(ORCHESTRATOR_GUARD_NAME.CONTEXT_COMPACTION_WATERMARK, {
+  const outcome = evaluateGuard(contextCompactionWatermarkGuard, {
     state,
     config: {
-      runIterationLimit: 25,
-      contextCompaction: {
-        contextWindowTokens: 1000,
-        keepMessages: 1,
-      },
+      contextWindowTokens: 1000,
+      keepMessages: 1,
     },
     position: ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
   });
 
-  assert.equal(result.status, 'block');
-  assert.deepEqual(result.details, {
+  assert.equal(outcome.kind, 'maintain');
+  assert.deepEqual(outcome.kind === 'maintain' && outcome.details, {
     mainMessageCount: 4,
     keepMessages: 1,
     latestInputTokens: 900,
@@ -125,8 +139,45 @@ test('context compaction watermark guard blocks when main provider usage crosses
   });
 });
 
-test('delegation outcome guard blocks handoff for a limit_reached active delegation', async () => {
-  const registry = createOrchestratorGuardRegistry();
+test('forced capability seed guard derives the seeded search state once', () => {
+  const outcome = evaluateGuard(forcedCapabilitySeedGuard, {
+    state: baseState({
+      runCapabilitySearchState: { query: null, attempted: false, candidates: [] },
+    }),
+    config: {
+      forcedCapabilityNames: ['weather', 'weather', 'missing'],
+      capabilities: [
+        stubCapability('weather', '查天气'),
+        stubCapability('other', '其他'),
+      ],
+    },
+    position: ORCHESTRATOR_GUARD_POSITION.CAPABILITY_DISCOVERY,
+  });
+
+  assert.equal(outcome.kind, 'derive');
+  const details = (outcome.kind === 'derive' && outcome.details) as ForcedCapabilitySeedDetails;
+  assert.deepEqual(details.seededCapabilityNames, ['weather']);
+  assert.equal(details.runCapabilitySearchState.attempted, true);
+  assert.equal(details.runCapabilitySearchState.candidates.length, 1);
+  assert.equal(details.runCapabilitySearchState.candidates[0]?.name, 'weather');
+});
+
+test('forced capability seed guard proceeds when a search was already attempted', () => {
+  const outcome = evaluateGuard(forcedCapabilitySeedGuard, {
+    state: baseState({
+      runCapabilitySearchState: { query: 'q', attempted: true, candidates: [] },
+    }),
+    config: {
+      forcedCapabilityNames: ['weather'],
+      capabilities: [stubCapability('weather', '查天气')],
+    },
+    position: ORCHESTRATOR_GUARD_POSITION.CAPABILITY_DISCOVERY,
+  });
+
+  assert.equal(outcome.kind, 'proceed');
+});
+
+test('delegation outcome guard derives handoff refusal for a limit_reached active delegation', async () => {
   const announce = new AIMessage('limit reached');
   setPinpetMeta(announce, {
     lane: 'general',
@@ -140,48 +191,50 @@ test('delegation outcome guard blocks handoff for a limit_reached active delegat
     messages: [announce],
   });
 
-  const result = registry.check(ORCHESTRATOR_GUARD_NAME.DELEGATION_OUTCOME_DECISION, {
+  const outcome = evaluateGuard(delegationOutcomeDecisionGuard, {
     state,
-    config,
+    config: {},
     position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
   });
-  assert.equal(result.status, 'block');
+  assert.equal(outcome.kind, 'derive');
+  assert.equal(outcome.kind === 'derive' && outcome.reason, ACTIVE_DELEGATION_LIMIT_REACHED);
 
-  const run = await registry.run(ORCHESTRATOR_GUARD_NAME.DELEGATION_OUTCOME_DECISION, {
-    state,
-    config,
-    position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
-  });
-  assert.equal(run.result.status, 'block');
-  assert.deepEqual(run.update, {
+  const node = createDelegationOutcomeDecisionGuardNode();
+  assert.deepEqual(await node(state), {
     canHandoffActiveDelegation: false,
+  });
+
+  const allowedNode = createDelegationOutcomeDecisionGuardNode();
+  assert.deepEqual(await allowedNode(baseState()), {
+    canHandoffActiveDelegation: true,
   });
 });
 
-test('run iteration limit guard uses resolved config and returns an inline stop update', async () => {
-  const registry = createOrchestratorGuardRegistry();
+test('run iteration limit guard stops at the resolved limit and the node returns an inline stop patch', async () => {
   const state = baseState({
     taskActiveDelegation: activeDelegation,
     runIterationCount: 5,
   });
 
-  const result = registry.check(ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT, {
+  const outcome = evaluateGuard(runIterationLimitGuard, {
     state,
     config: { runIterationLimit: 5 },
     position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION,
   });
-  assert.equal(result.status, 'block');
-
-  const run = await registry.run(ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT, {
-    state,
-    config: { runIterationLimit: 5 },
-    position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION,
+  assert.equal(outcome.kind, 'stop');
+  assert.deepEqual(outcome.kind === 'stop' && outcome.details, {
+    runIterationCount: 5,
+    runIterationLimit: 5,
   });
-  const patch = run.update as Record<string, unknown>;
 
-  assert.equal(run.result.status, 'block');
+  const node = createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations: 5 });
+  const patch = await node(state) as Record<string, unknown>;
+
   assert.equal(patch.runPendingFinalReply, 'inline');
   assert.equal(patch.runIterationCount, 0);
   assert.equal(patch.runPendingDelegation, null);
   assert.ok(Array.isArray(patch.messages) && patch.messages.length === 1);
+
+  const belowLimitNode = createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations: 25 });
+  assert.deepEqual(await belowLimitNode(state), { runPendingFinalReply: null });
 });

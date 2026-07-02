@@ -20,6 +20,20 @@ export function buildSubagentGuardStopNotice(
   });
 }
 
+/**
+ * Effect helper for the `subagent_iteration_limit` guard's stop outcome: the
+ * marked notice the middleware position appends before ending the run.
+ */
+export function buildSubagentIterationLimitStopNotice(
+  attemptedIteration: number,
+  maxIterations: number,
+): AIMessage {
+  return buildSubagentGuardStopNotice('subagent_iteration_limit_reached', [
+    `Subagent loop reached its iteration limit: attempted ${attemptedIteration}, limit ${maxIterations}.`,
+    'Stop the loop and report the current progress instead of waiting for LangGraph recursionLimit.',
+  ].join('\n'));
+}
+
 function isSubagentGuardStopReason(value: unknown): value is SubagentGuardStopReason {
   return typeof value === 'string'
     && (SUBAGENT_GUARD_STOP_REASONS as readonly string[]).includes(value);

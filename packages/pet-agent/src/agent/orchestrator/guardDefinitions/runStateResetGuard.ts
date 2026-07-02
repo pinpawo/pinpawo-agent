@@ -1,29 +1,28 @@
 import {
   defineGuard,
-  guardBlock,
-  guardPass,
+  guardDerive,
+  guardProceed,
 } from '../../../guards';
-import { buildRunStateReset } from '../state';
+import type { OrchestratorStateType } from '../state';
 import {
   ORCHESTRATOR_GUARD_NAME,
   ORCHESTRATOR_GUARD_POSITION,
-  statePatch,
-  type OrchestratorGuard,
+  type EmptyGuardConfig,
+  type OrchestratorGuardPosition,
 } from './types';
 
-export function createRunStateResetGuard(): OrchestratorGuard {
-  return defineGuard({
-    name: ORCHESTRATOR_GUARD_NAME.RUN_STATE_RESET,
-    positions: [ORCHESTRATOR_GUARD_POSITION.PREPARE],
-    rule: {
-      check: ({ state }) => state.runId
-        ? guardPass()
-        : guardBlock('run_state_reset_required'),
-    },
-    handler: {
-      handle: ({ result }) => result.status === 'block'
-        ? statePatch(buildRunStateReset())
-        : null,
-    },
-  });
-}
+export const RUN_STATE_RESET_REQUIRED = 'run_state_reset_required';
+
+export type RunStateResetGuardState = Pick<OrchestratorStateType, 'runId'>;
+
+export const runStateResetGuard = defineGuard<
+  RunStateResetGuardState,
+  EmptyGuardConfig,
+  OrchestratorGuardPosition
+>({
+  name: ORCHESTRATOR_GUARD_NAME.RUN_STATE_RESET,
+  positions: [ORCHESTRATOR_GUARD_POSITION.PREPARE],
+  check: ({ state }) => state.runId
+    ? guardProceed()
+    : guardDerive(RUN_STATE_RESET_REQUIRED),
+});

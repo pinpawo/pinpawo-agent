@@ -129,6 +129,40 @@ export function readLatestProviderInputTokens(messages: Iterable<unknown>): numb
   return null;
 }
 
+export const PROVIDER_INPUT_WATERMARK_RATIO = 0.75;
+
+export type ProviderInputWatermark = {
+  latestInputTokens: number;
+  watermarkTokens: number;
+};
+
+/**
+ * Shared decision helper for token-triggered maintenance guards (orchestrator
+ * context compaction, subagent context rewrite). Returns the crossed watermark
+ * evidence, or null when the watermark is not reached or not decidable (no
+ * provider usage, no context window).
+ */
+export function checkProviderInputWatermark(
+  latestInputTokens: number | null,
+  contextWindowTokens: number | undefined,
+): ProviderInputWatermark | null {
+  if (
+    latestInputTokens === null
+    || !Number.isFinite(latestInputTokens)
+    || !contextWindowTokens
+    || !Number.isFinite(contextWindowTokens)
+    || contextWindowTokens <= 0
+  ) {
+    return null;
+  }
+  const watermarkTokens = Math.max(1, Math.floor(
+    contextWindowTokens * PROVIDER_INPUT_WATERMARK_RATIO,
+  ));
+  return latestInputTokens >= watermarkTokens
+    ? { latestInputTokens, watermarkTokens }
+    : null;
+}
+
 function addProviderUsage(
   current: ProviderTokenUsage | null,
   next: ProviderTokenUsage,

@@ -1,8 +1,5 @@
-import {
-  GuardRegistry,
-  type Guard,
-} from '../../guards';
-import type { SubagentInputState } from '../../types/subagent';
+import type { BaseMessage } from '@langchain/core/messages';
+import type { SubagentContextPolicy } from '../../types/subagent';
 
 export const SUBAGENT_GUARD_POSITION = {
   BEFORE_MODEL_CONTEXT_POLICY: 'subagent.before_model_context_policy',
@@ -20,25 +17,21 @@ export const SUBAGENT_GUARD_NAME = {
 export type SubagentGuardName =
   typeof SUBAGENT_GUARD_NAME[keyof typeof SUBAGENT_GUARD_NAME];
 
-export type SubagentState = Omit<SubagentInputState, 'maxIterations'> & {
+// Guard rules declare the minimal input they read; middleware hooks pass their
+// hook-local values directly instead of snapshotting a synthetic full state.
+
+export type ContextRewriteWatermarkGuardState = {
+  messages: BaseMessage[];
+  contextPolicy?: SubagentContextPolicy;
+};
+
+export type ContextRewriteWatermarkGuardConfig = {
+  contextWindowTokens?: number;
+};
+
+export type SubagentIterationLimitGuardState = {
   iterationCount: number;
   maxIterations: number;
 };
 
-export type SubagentGuardConfig = Record<string, never>;
-
-export type SubagentGuardUpdate = Partial<Pick<SubagentState, 'messages'>>;
-
-export type SubagentGuard = Guard<
-  SubagentState,
-  SubagentGuardConfig,
-  SubagentGuardPosition,
-  SubagentGuardUpdate
->;
-
-export type SubagentGuardRegistry = GuardRegistry<
-  SubagentState,
-  SubagentGuardConfig,
-  SubagentGuardPosition,
-  SubagentGuardUpdate
->;
+export type EmptyGuardConfig = Record<string, never>;

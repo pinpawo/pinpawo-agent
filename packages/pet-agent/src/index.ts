@@ -48,25 +48,23 @@ export type {
 
 export type {
   Guard,
-  GuardBlock,
-  GuardBlockHandler,
-  GuardCheckResult,
-  GuardCheckStatus,
-  GuardHandler,
-  GuardHandlerInput,
+  GuardDerive,
+  GuardDetails,
   GuardInput,
-  GuardPass,
-  GuardRule,
-  GuardRunOptions,
-  GuardRunResult,
+  GuardMaintain,
+  GuardOutcome,
+  GuardProceed,
+  GuardStop,
 } from './guards';
 export {
   defineGuard,
-  GUARD_PASS,
+  evaluateGuard,
+  GUARD_PROCEED,
   guardAppliesToPosition,
-  guardBlock,
-  guardPass,
-  GuardRegistry,
+  guardDerive,
+  guardMaintain,
+  guardProceed,
+  guardStop,
 } from './guards';
 
 export type {

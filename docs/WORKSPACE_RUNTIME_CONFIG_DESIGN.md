@@ -240,13 +240,14 @@ Server/runtime responses should expose:
 1. Attach workspace metadata to `LocalAgentRuntimeConfig` while preserving existing `workdir` behavior.
 2. Expose workspace metadata in `/runtime` and TUI/app snapshots.
 3. Add a `WorkspaceRegistry` backed by `~/.pinpawo/workspaces.json`.
-4. Extend local protocol to accept `workspaceId` for chat and studio requests.
-5. Bind chat sessions/checkpoints to workspace id.
-6. Make Studio legacy config fallback opt-in or migration-only.
-7. Replace global local tool workdir with workspace-bound toolkit factories.
-8. Add App/Desktop UI for selecting, opening, and registering workspaces.
+4. Add a local workspace selector that updates the active runtime, TUI session store, checkpoints, Studio due-run store, and local tool workdir in the running local-agent process.
+5. Extend local protocol to accept `workspaceId` for chat and studio requests.
+6. Bind chat sessions/checkpoints to workspace id.
+7. Make Studio legacy config fallback opt-in or migration-only.
+8. Replace global local tool workdir with workspace-bound toolkit factories.
+9. Add App/Desktop UI for selecting, opening, and registering workspaces.
 
-The first selector implementation should be restart-scoped: it may set the selected workspace as the default `workdir` for the next local-agent/TUI launch, but it should not claim that the already-running runtime has hot-swapped workspace state. Hot switching requires workspace-bound local toolkits, scheduler scope, checkpoints, and chat/studio session identity first.
+The first selector implementation is a single-active-workspace hot switch: selecting a workspace updates the running local-agent process and persists the same workspace as the next launch default. It does not provide multi-workspace concurrency; fully workspace-bound toolkit instances and protocol-level `workspaceId` remain follow-up work.
 
 ## Validation
 

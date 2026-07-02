@@ -6,8 +6,11 @@
  * message types.
  */
 import { createServer } from 'node:http';
+import { realpathSync } from 'node:fs';
 import { WebSocket } from 'ws';
 import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
+import { config } from './config';
+import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import { LocalAgentGraphService } from './agentGraphService';
 import {
   sendLocalAgentEvent,
@@ -25,19 +28,35 @@ import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { buildLocalServerTuiSnapshot } from './localServerTuiSnapshot';
 import type { LocalServerDeps } from './localServerTypes';
 import { buildWorkspaceRuntimeConfig } from './runtimeConfig';
+import type { LocalAgentRuntimeConfig } from './runtimeConfig';
+import { setLocalToolsWorkdir } from './toolkits/local/pathUtils';
+import type { WorkspaceRegistryEntry } from './workspaceRegistry';
 
 export type { LocalServerDeps };
 
 const INTERRUPT_FORCE_REPLY_MS = 1800;
+
+function createStudioDueRunScheduler(runtimeConfig: LocalAgentRuntimeConfig) {
+  return new LocalStudioDueRunScheduler({
+    store: new FileStudioDueRunStore({
+      filePath: runtimeConfig.studioDueRunsPath,
+    }),
+    filterWorkdir: runtimeConfig.workdir,
+  });
+}
 
 export function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
   return new Promise((resolve, reject) => {
     const effectiveRuntimeConfig = deps.runtimeConfig ?? buildWorkspaceRuntimeConfig({
       workdir: deps.workdir,
     });
-    const depsWithRuntime = deps.runtimeConfig ? deps : {
+    let activeStudioDueRunScheduler = deps.studioDueRunScheduler
+      ?? createStudioDueRunScheduler(effectiveRuntimeConfig);
+    const depsWithRuntime: LocalServerDeps = {
       ...deps,
+      workdir: effectiveRuntimeConfig.workdir,
       runtimeConfig: effectiveRuntimeConfig,
+      studioDueRunScheduler: activeStudioDueRunScheduler,
     };
     const chatGraphService = new LocalAgentGraphService();
     const tuiSessions = new LocalServerTuiSessionService({
@@ -45,13 +64,39 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
       runtimeConfig: effectiveRuntimeConfig,
     });
     const studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
-    const studioDueRunScheduler = deps.studioDueRunScheduler
-      ?? new LocalStudioDueRunScheduler({
-        store: new FileStudioDueRunStore({
-          filePath: effectiveRuntimeConfig.studioDueRunsPath,
-        }),
-        filterWorkdir: effectiveRuntimeConfig.workdir,
+    const switchWorkspace = (workspace: WorkspaceRegistryEntry) => {
+      const runtimeConfig = buildWorkspaceRuntimeConfig({
+        workdir: realpathSync(workspace.rootPath),
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
       });
+      if (!deps.studioDueRunScheduler) {
+        activeStudioDueRunScheduler.stop();
+        activeStudioDueRunScheduler = createStudioDueRunScheduler(runtimeConfig);
+        depsWithRuntime.studioDueRunScheduler = activeStudioDueRunScheduler;
+      }
+      process.chdir(runtimeConfig.workdir);
+      config.workdir = runtimeConfig.workdir;
+      setLocalToolsWorkdir(runtimeConfig.workdir);
+      depsWithRuntime.workdir = runtimeConfig.workdir;
+      depsWithRuntime.runtimeConfig = runtimeConfig;
+      depsWithRuntime.capabilityArtifactStore = new FileCapabilityArtifactStore(
+        runtimeConfig.capabilityArtifactRoot,
+      );
+      tuiSessions.switchRuntimeConfig(runtimeConfig);
+      tuiSessions.getActiveSession(depsWithRuntime.actorId);
+      console.log(`[local-server] switched workspace to ${runtimeConfig.workdir}`);
+      return {
+        workspace: {
+          ...workspace,
+          name: runtimeConfig.workspace?.name ?? workspace.name,
+          rootPath: runtimeConfig.workdir,
+        },
+        runtimeConfig,
+        requiresRestart: false,
+      };
+    };
+    depsWithRuntime.switchWorkspace = deps.switchWorkspace ?? switchWorkspace;
     const inflightRequests = new InflightRequestController<WebSocket>({
       forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,
       // Local TUI / companion: trusted transport — forward raw input/output so
@@ -68,7 +113,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
     const studioHandler = new LocalServerStudioHandler({
       reviewRouter: studioReviewRouter,
       inflightRequests,
-      ...(studioDueRunScheduler ? { studioDueRunScheduler } : {}),
+      getStudioDueRunScheduler: () => depsWithRuntime.studioDueRunScheduler,
     });
     const authToken = ensureLocalServerAuthToken();
     const server = createServer((req, res) => {
@@ -133,14 +178,16 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
         }
       },
       onNewSession: () => {
-        tuiSessions.createNewSession(deps.actorId);
-        console.log(`[local-server] new session created for pet ${deps.actorId}`);
+        tuiSessions.createNewSession(depsWithRuntime.actorId);
+        console.log(`[local-server] new session created for pet ${depsWithRuntime.actorId}`);
       },
       onRuntimeConfigUpdate: (_ws, msg) => {
-        deps.llmConfig = {
-          ...deps.llmConfig,
+        const nextLlmConfig = {
+          ...depsWithRuntime.llmConfig,
           globalReviewPolicyMode: msg.globalReviewPolicyMode,
         };
+        deps.llmConfig = nextLlmConfig;
+        depsWithRuntime.llmConfig = nextLlmConfig;
         console.log(`[local-server] global review policy set to ${msg.globalReviewPolicyMode}`);
       },
       onClose: (ws) => {

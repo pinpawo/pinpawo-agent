@@ -8,6 +8,8 @@ import test from 'node:test';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import type { LocalServerDeps } from './localServerTypes';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
+import { buildWorkspaceRuntimeConfig } from './runtimeConfig';
+import type { WorkspaceRegistryEntry } from './workspaceRegistry';
 
 function makeReq(url: string, authorization?: string): IncomingMessage {
   return {
@@ -288,6 +290,15 @@ test('handleLocalHttpRequest lists active runtime workspace and can select it', 
     workdir,
     workspaceRegistryPath: registryPath,
     saveStoredConfig: () => {},
+    switchWorkspace: (workspace: WorkspaceRegistryEntry) => ({
+      workspace,
+      runtimeConfig: buildWorkspaceRuntimeConfig({
+        workdir: workspace.rootPath,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+      }),
+      requiresRestart: false,
+    }),
     runtimeConfig: {
       workdir,
       workspace: {
@@ -340,7 +351,10 @@ test('handleLocalHttpRequest lists active runtime workspace and can select it', 
   assert.equal(selectRes.statusCode, 200);
   const selectedPayload = JSON.parse(selectRes.body);
   assert.equal(selectedPayload.workspace.id, 'workspace-active');
-  assert.equal(selectedPayload.requires_restart, true);
+  assert.equal(selectedPayload.switched, true);
+  assert.equal(selectedPayload.requires_restart, false);
+  assert.equal(selectedPayload.runtime.workdir, workdir);
+  assert.equal(selectedPayload.runtime.workspace_id, 'workspace-active');
 });
 
 test('handleLocalHttpRequest serves studio due-runs trace when scheduler is available', async () => {

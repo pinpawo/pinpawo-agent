@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import test from 'node:test';
-import { createEmptyTuiSessionState } from './tuiSessionRegistry';
+import { createEmptyTuiSessionState, loadTuiSessionState } from './tuiSessionRegistry';
 import {
   LocalServerTuiSessionService,
   readTuiHistoryMessages,
   summarizeTuiHistoryMessages,
   type TuiSessionCheckpointer,
 } from './localServerTuiSessions';
+import { buildWorkspaceRuntimeConfig } from './runtimeConfig';
 
 test('readTuiHistoryMessages keeps visible user/assistant messages only', () => {
   const messages = readTuiHistoryMessages([
@@ -68,6 +72,21 @@ test('LocalServerTuiSessionService creates and resets active sessions', async ()
   assert.equal(state.sessions[second.id], undefined);
   assert.deepEqual(deletedThreads, [second.threadId]);
   assert.equal(saved.length >= 4, true);
+});
+
+test('LocalServerTuiSessionService switches to runtime-scoped session storage', () => {
+  const root = mkdtempSync(join(tmpdir(), 'pinpawo-tui-session-switch-'));
+  const firstRuntime = buildWorkspaceRuntimeConfig({ workdir: join(root, 'first') });
+  const secondRuntime = buildWorkspaceRuntimeConfig({ workdir: join(root, 'second') });
+  const service = new LocalServerTuiSessionService({ runtimeConfig: firstRuntime });
+
+  const first = service.getActiveSession('pet-a');
+  service.switchRuntimeConfig(secondRuntime);
+  const second = service.getActiveSession('pet-a');
+
+  assert.equal(loadTuiSessionState(firstRuntime.tuiSessionPath).activeSessionIds['pet-a'], first.id);
+  assert.equal(loadTuiSessionState(secondRuntime.tuiSessionPath).activeSessionIds['pet-a'], second.id);
+  assert.notEqual(first.threadId, second.threadId);
 });
 
 test('LocalServerTuiSessionService injects active session createdAt into runtime environment', () => {

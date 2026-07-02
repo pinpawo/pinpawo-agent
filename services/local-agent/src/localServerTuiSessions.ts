@@ -73,10 +73,30 @@ export function summarizeTuiHistoryMessages(
   };
 }
 
+function createSessionStateStore(options: {
+  runtimeConfig: LocalAgentRuntimeConfig;
+  state?: TuiSessionState;
+  saveState?: (state: TuiSessionState) => void;
+  sessionStatePath?: string;
+}) {
+  const sessionStatePath = options.sessionStatePath ?? options.runtimeConfig.tuiSessionPath;
+  return {
+    state: options.state ?? loadTuiSessionState(sessionStatePath),
+    saveState: options.saveState ?? ((state: TuiSessionState) => saveTuiSessionState(state, sessionStatePath)),
+  };
+}
+
+function createSessionCheckpointer(options: {
+  runtimeConfig: LocalAgentRuntimeConfig;
+  checkpointPath?: string;
+}) {
+  return new FileSaver(options.checkpointPath ?? options.runtimeConfig.tuiCheckpointPath);
+}
+
 export class LocalServerTuiSessionService {
-  private readonly state: TuiSessionState;
-  private readonly saveState: (state: TuiSessionState) => void;
-  private readonly checkpointer: TuiSessionCheckpointer;
+  private state: TuiSessionState;
+  private saveState: (state: TuiSessionState) => void;
+  private checkpointer: TuiSessionCheckpointer;
   private readonly graphService: TuiSessionGraphService;
   private readonly loadContext: typeof loadAgentContext;
 
@@ -91,14 +111,27 @@ export class LocalServerTuiSessionService {
     checkpointPath?: string;
   } = {}) {
     const runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
-    const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
-    this.state = options.state ?? loadTuiSessionState(sessionStatePath);
-    this.saveState = options.saveState ?? ((state) => saveTuiSessionState(state, sessionStatePath));
-    this.checkpointer = options.checkpointer ?? new FileSaver(
-      options.checkpointPath ?? runtimeConfig.tuiCheckpointPath,
-    );
+    const store = createSessionStateStore({
+      runtimeConfig,
+      state: options.state,
+      saveState: options.saveState,
+      sessionStatePath: options.sessionStatePath,
+    });
+    this.state = store.state;
+    this.saveState = store.saveState;
+    this.checkpointer = options.checkpointer ?? createSessionCheckpointer({
+      runtimeConfig,
+      checkpointPath: options.checkpointPath,
+    });
     this.graphService = options.graphService ?? new LocalAgentGraphService();
     this.loadContext = options.loadContext ?? loadAgentContext;
+  }
+
+  switchRuntimeConfig(runtimeConfig: LocalAgentRuntimeConfig) {
+    const store = createSessionStateStore({ runtimeConfig });
+    this.state = store.state;
+    this.saveState = store.saveState;
+    this.checkpointer = createSessionCheckpointer({ runtimeConfig });
   }
 
   getActiveSession(petId: string) {

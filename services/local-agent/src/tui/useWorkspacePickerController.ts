@@ -85,7 +85,9 @@ export function useWorkspacePickerController(options: WorkspacePickerControllerO
       if (workspaceRequestIdRef.current !== requestId) return;
       setWorkspacePicker({ status: 'closed', workspaces: [], selectedIndex: 0 });
       options.appendSystemMessage(
-        TUI_TEXT.workspaceSavedForRestart(result.workspace.name, result.workspace.rootPath),
+        result.requiresRestart
+          ? TUI_TEXT.workspaceSavedForRestart(result.workspace.name, result.workspace.rootPath)
+          : TUI_TEXT.workspaceSwitched(result.workspace.name, result.workspace.rootPath),
       );
     }).catch((err) => {
       if (workspaceRequestIdRef.current !== requestId) return;

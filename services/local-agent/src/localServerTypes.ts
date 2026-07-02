@@ -4,6 +4,13 @@ import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import type { StoredConfig } from './storage';
+import type { WorkspaceRegistryEntry } from './workspaceRegistry';
+
+export type LocalServerWorkspaceSwitchResult = {
+  workspace: WorkspaceRegistryEntry;
+  runtimeConfig: LocalAgentRuntimeConfig;
+  requiresRestart: boolean;
+};
 
 export type LocalServerDeps = {
   actorId: string;
@@ -13,6 +20,7 @@ export type LocalServerDeps = {
   runtimeConfig?: LocalAgentRuntimeConfig;
   workspaceRegistryPath?: string;
   saveStoredConfig?: (config: StoredConfig) => void;
+  switchWorkspace?: (workspace: WorkspaceRegistryEntry) => LocalServerWorkspaceSwitchResult;
   studioDueRunScheduler?: LocalStudioDueRunScheduler;
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];

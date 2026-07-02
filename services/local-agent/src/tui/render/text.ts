@@ -77,8 +77,10 @@ export const TUI_TEXT = {
   workspaceFailed: (message: string) => `加载 workspace 失败：${message}`,
   workspaceSelectFailed: (message: string) => `选择 workspace 失败：${message}`,
   workspacePickerTitle: 'Workspace',
-  workspacePickerHelp: '↑↓ 选择 · Enter 设为默认 · Esc 取消',
+  workspacePickerHelp: '↑↓ 选择 · Enter 切换 · Esc 取消',
   workspaceActiveBadge: '当前',
+  workspaceSwitched: (name: string, rootPath: string) =>
+    `已切换 workspace：${name} (${rootPath})。`,
   workspaceSavedForRestart: (name: string, rootPath: string) =>
     `默认 workspace 已切换为 ${name} (${rootPath})。请重启 local-agent/TUI 后生效。`,
   globalReviewPolicyPickerTitle: '全局访问策略',

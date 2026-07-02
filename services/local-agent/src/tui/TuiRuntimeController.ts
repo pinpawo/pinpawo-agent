@@ -9,6 +9,7 @@ import { TuiLocalServerClient } from './tuiLocalServerClient';
 import { TuiLocalWebSocketClient } from './tuiLocalWebSocketClient';
 import { buildTuiActionsFromServerMessage } from './tuiServerMessageActions';
 import { TUI_CORE_TARGET_ACTIONS } from './contracts/tuiCoreContract';
+import type { TuiCoreSessionSnapshotLoadedAction } from './contracts/tuiCoreContract';
 import {
   selectFocusedActiveRun,
   selectFocusedBusy,
@@ -55,8 +56,8 @@ function makeMessageMeta() {
   };
 }
 
-type SnapshotRestoreSource = 'startup' | 'reconnect' | 'reconcile';
-type SnapshotReconciliationSource = Exclude<SnapshotRestoreSource, 'startup'>;
+type SnapshotRestoreSource = TuiCoreSessionSnapshotLoadedAction['source'];
+type SnapshotReconciliationSource = 'reconnect' | 'reconcile';
 
 function getSnapshotReconciliationSource(
   message: LocalAgentServerMessage,
@@ -362,7 +363,23 @@ export class TuiRuntimeController {
   }
 
   async selectWorkspace(workspaceId: string) {
-    return this.localServerClient.selectWorkspace(workspaceId);
+    const result = await this.localServerClient.selectWorkspace(workspaceId);
+    if (!result.requiresRestart) {
+      if (result.runtime) {
+        this.setRuntimeFromHealth(result.runtime);
+      } else {
+        await this.fetchLocalRuntime();
+      }
+      const restored = await this.restoreSessionSnapshot('resume');
+      if (restored && !this.disposed) {
+        this.options.resetTimelineView();
+      }
+      this.options.dispatch({
+        type: 'input.set',
+        value: '',
+      });
+    }
+    return result;
   }
 
   private async initialize() {

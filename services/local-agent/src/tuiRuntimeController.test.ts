@@ -204,6 +204,61 @@ test('TuiRuntimeController resets static timeline view for new sessions', () => 
   assert.deepEqual(harness.sent, [{ type: 'new_session' }]);
 });
 
+test('TuiRuntimeController hot switches workspace and restores the active snapshot', async () => {
+  const harness = createController(pendingReviewState());
+  const events: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    selectWorkspace: async (workspaceId: string) => {
+      events.push(`select:${workspaceId}`);
+      return {
+        workspace: {
+          id: workspaceId,
+          name: 'Workspace A',
+          rootPath: '/tmp/workspace-a',
+          active: true,
+        },
+        switched: true,
+        requiresRestart: false,
+        runtime: {
+          cwd: '/tmp/workspace-a',
+          stateRoot: '/tmp/workspace-a/.pinpawo',
+        },
+      };
+    },
+    readSessionSnapshot: async () => {
+      events.push('snapshot');
+      return {
+        sessionId: 'workspace-session',
+        kind: 'chat',
+        runtime: {
+          cwd: '/tmp/workspace-a',
+          stateRoot: '/tmp/workspace-a/.pinpawo',
+        },
+        timeline: [],
+        runs: [],
+      };
+    },
+  };
+
+  const result = await harness.controller.selectWorkspace('workspace-a');
+
+  assert.equal(result.requiresRestart, false);
+  assert.deepEqual(events, ['select:workspace-a', 'snapshot']);
+  assert.equal(harness.resetCount, 1);
+  assert.deepEqual(harness.actions.map((action) => action.type), [
+    'session.set_runtime',
+    TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    'input.set',
+  ]);
+  assert.equal(
+    harness.actions[1]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
+      ? harness.actions[1].source
+      : undefined,
+    'resume',
+  );
+});
+
 test('TuiRuntimeController restores a reconnect snapshot before opening websocket', async () => {
   const state = pendingReviewState();
   const harness = createController(state);

@@ -46,7 +46,9 @@ export type LocalServerRuntimeSnapshot = {
 
 export type WorkspaceSelectionResult = {
   workspace: WorkspaceSummary;
+  switched: boolean;
   requiresRestart: boolean;
+  runtime?: LocalServerRuntimeSnapshot;
 };
 
 export class TuiLocalServerClient {
@@ -172,16 +174,21 @@ export class TuiLocalServerClient {
     }
     const payload = await res.json() as {
       workspace?: unknown;
+      switched?: unknown;
       requires_restart?: unknown;
       requiresRestart?: unknown;
+      runtime?: unknown;
     };
     const workspace = parseWorkspaceSummary(payload.workspace);
     if (!workspace) {
       throw new Error('invalid workspace selection payload');
     }
+    const runtime = parseLocalServerRuntime(payload.runtime);
     return {
       workspace,
+      switched: payload.switched === true,
       requiresRestart: payload.requires_restart === true || payload.requiresRestart === true,
+      ...(runtime ? { runtime } : {}),
     };
   }
 

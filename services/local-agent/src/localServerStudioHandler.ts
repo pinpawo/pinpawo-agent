@@ -45,7 +45,7 @@ export class LocalServerStudioHandler {
   private readonly reviewRouter: LocalServerStudioReviewRouter<WebSocket>;
   private readonly inflightRequests: InflightRequestController<WebSocket>;
   private readonly studioRunService: StudioRunService;
-  private readonly studioDueRunScheduler?: LocalStudioDueRunScheduler;
+  private readonly getStudioDueRunScheduler: () => LocalStudioDueRunScheduler | undefined;
   private readonly studioRequestQueue = new WeakMap<WebSocket, Promise<unknown>>();
   private readonly studioConnectionState = new WeakMap<WebSocket, { closed: boolean }>();
 
@@ -55,13 +55,15 @@ export class LocalServerStudioHandler {
     studioRunService?: StudioRunService;
     buildStudio?: BuildStudioForTurn;
     studioDueRunScheduler?: LocalStudioDueRunScheduler;
+    getStudioDueRunScheduler?: () => LocalStudioDueRunScheduler | undefined;
   }) {
     this.reviewRouter = options.reviewRouter;
     this.inflightRequests = options.inflightRequests;
     this.studioRunService = options.studioRunService ?? new StudioRunService({
       buildStudio: options.buildStudio,
     });
-    this.studioDueRunScheduler = options.studioDueRunScheduler;
+    this.getStudioDueRunScheduler = options.getStudioDueRunScheduler
+      ?? (() => options.studioDueRunScheduler);
   }
 
   routeHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
@@ -147,8 +149,9 @@ export class LocalServerStudioHandler {
     };
 
     try {
-      const result: StudioHandleResult = await (this.studioDueRunScheduler
-        ? this.studioDueRunScheduler.submit({
+      const studioDueRunScheduler = this.getStudioDueRunScheduler();
+      const result: StudioHandleResult = await (studioDueRunScheduler
+        ? studioDueRunScheduler.submit({
           deps,
           requestId,
           runId,

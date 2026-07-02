@@ -70,7 +70,7 @@ const COMMANDS: TuiCommandDefinition[] = [
     name: 'workspace',
     aliases: ['workspaces', 'ws'],
     usage: '/workspace',
-    description: '选择默认 workspace',
+    description: '切换 workspace',
     helpText: '/workspace 选择工作区',
   },
   {

@@ -79,26 +79,7 @@ export function handleLocalHttpRequest(
   }
 
   if (pathname === '/runtime') {
-    const studioConfigFields = readStudioConfigRuntimeFields(deps);
-    const effectiveWorkdir = deps.runtimeConfig?.workdir ?? deps.workdir;
-    writeJson(res, 200, {
-      llm_model: deps.llmConfig.model,
-      llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
-      workdir: effectiveWorkdir,
-      ...(deps.runtimeConfig?.workspace ? {
-        workspace_id: deps.runtimeConfig.workspace.id,
-        workspace_name: deps.runtimeConfig.workspace.name,
-        workspace_root: deps.runtimeConfig.workspace.rootPath,
-      } : {}),
-      ...(deps.runtimeConfig ? {
-        state_root: deps.runtimeConfig.stateRoot,
-        studio_config_path: deps.runtimeConfig.studioConfigPath,
-        studio_due_runs_path: deps.runtimeConfig.studioDueRunsPath,
-        pets_dir: deps.runtimeConfig.petsDir,
-        studio_wiki_base_dir: deps.runtimeConfig.studioWikiBaseDir,
-      } : {}),
-      ...studioConfigFields,
-    });
+    writeJson(res, 200, buildRuntimePayload(deps));
     return true;
   }
 
@@ -135,14 +116,23 @@ export function handleLocalHttpRequest(
         workspaceId,
         deps,
       });
+      const switchResult = deps.switchWorkspace?.(workspace);
       const saveConfig = deps.saveStoredConfig ?? saveStoredConfig;
       saveConfig({
         ...loadStoredConfig(),
-        workdir: workspace.rootPath,
+        workdir: switchResult?.runtimeConfig.workdir ?? workspace.rootPath,
       });
       writeJson(res, 200, {
-        workspace,
-        requires_restart: true,
+        workspace: switchResult?.workspace ?? workspace,
+        switched: Boolean(switchResult && !switchResult.requiresRestart),
+        requires_restart: switchResult?.requiresRestart ?? true,
+        runtime: switchResult
+          ? buildRuntimePayload({
+              ...deps,
+              workdir: switchResult.runtimeConfig.workdir,
+              runtimeConfig: switchResult.runtimeConfig,
+            })
+          : undefined,
       });
     }).catch((err) => {
       const status = err instanceof Error && err.message.startsWith('workspace not found:')
@@ -303,6 +293,29 @@ function readStudioConfigRuntimeFields(deps: LocalServerDeps) {
     studio_config_source: legacyAvailable ? 'legacy_home' : 'missing',
     studio_config_active_path: legacyAvailable ? DEFAULT_STUDIO_CONFIG_PATH : preferredPath,
     legacy_studio_config_path: DEFAULT_STUDIO_CONFIG_PATH,
+  };
+}
+
+function buildRuntimePayload(deps: LocalServerDeps) {
+  const studioConfigFields = readStudioConfigRuntimeFields(deps);
+  const effectiveWorkdir = deps.runtimeConfig?.workdir ?? deps.workdir;
+  return {
+    llm_model: deps.llmConfig.model,
+    llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
+    workdir: effectiveWorkdir,
+    ...(deps.runtimeConfig?.workspace ? {
+      workspace_id: deps.runtimeConfig.workspace.id,
+      workspace_name: deps.runtimeConfig.workspace.name,
+      workspace_root: deps.runtimeConfig.workspace.rootPath,
+    } : {}),
+    ...(deps.runtimeConfig ? {
+      state_root: deps.runtimeConfig.stateRoot,
+      studio_config_path: deps.runtimeConfig.studioConfigPath,
+      studio_due_runs_path: deps.runtimeConfig.studioDueRunsPath,
+      pets_dir: deps.runtimeConfig.petsDir,
+      studio_wiki_base_dir: deps.runtimeConfig.studioWikiBaseDir,
+    } : {}),
+    ...studioConfigFields,
   };
 }
 

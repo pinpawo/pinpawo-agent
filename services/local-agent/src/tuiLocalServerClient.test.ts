@@ -180,7 +180,17 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
           name: 'Workspace A',
           rootPath: '/tmp/workspace-a',
         },
-        requires_restart: true,
+        switched: true,
+        requires_restart: false,
+        runtime: {
+          workdir: '/tmp/workspace-a',
+          state_root: '/tmp/workspace-a/.pinpawo',
+          studio_config_path: '/tmp/workspace-a/.pinpawo/studio.json',
+          studio_due_runs_path: '/tmp/workspace-a/.pinpawo/studio-due-runs.json',
+          workspace_id: 'workspace-a',
+          workspace_name: 'Workspace A',
+          workspace_root: '/tmp/workspace-a',
+        },
       });
     }
     if (url.includes('/sessions/resume?sessionId=chat%3Aone')) {
@@ -230,7 +240,10 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
   assert.deepEqual((await client.listWorkspaces()).map((item) => item.id), ['workspace-a']);
   const workspaceSelection = await client.selectWorkspace('workspace-a');
   assert.equal(workspaceSelection.workspace.rootPath, '/tmp/workspace-a');
-  assert.equal(workspaceSelection.requiresRestart, true);
+  assert.equal(workspaceSelection.switched, true);
+  assert.equal(workspaceSelection.requiresRestart, false);
+  assert.equal(workspaceSelection.runtime?.cwd, '/tmp/workspace-a');
+  assert.equal(workspaceSelection.runtime?.stateRoot, '/tmp/workspace-a/.pinpawo');
   const resumed = await client.resumeSession('chat:one');
 
   assert.equal(resumed.session.active, true);

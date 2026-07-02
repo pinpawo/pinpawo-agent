@@ -255,19 +255,22 @@ Do not add either speculatively.
 
 ## Migration From The Previous Design
 
-Phased so each step lands green on its own:
+Landed in two commits (the original phase 1 and phase 3 were folded: the
+`pass`/`block` types and the outcome union could not coexist under the same
+names):
 
-1. **Speak the language (no behavior change).** Introduce `GuardOutcome`;
-   retype the 7 rules from `pass`/`block` to their verbs; switch call sites on
-   `outcome.kind`. Handlers' effect logic moves into the positions (or effect
-   helpers) verbatim. `forced_capability_seed` stops computing its seed state
-   twice (the rule puts it in `details`; the position applies it).
-2. **Emit records.** Add `evaluateGuard` with the `emit` hook; wire records
-   into the runtime event stream and LangSmith metadata.
-3. **Remove the machinery.** Delete `GuardRegistry`, `createGuardRunner`,
-   adapters, and the handler objects. `guardDefinitions/` keeps the name and
-   position enums, the rule functions, and their tests.
-4. **Registry revisit** only when capability-registered guards are scheduled.
+1. **Speak the language + remove the machinery (no behavior change).**
+   `GuardOutcome` replaces `pass`/`block`; the 7 rules are retyped to their
+   verbs; call sites switch on `outcome.kind`; handlers' effect logic moves
+   into the positions (or effect helpers) verbatim. `forced_capability_seed`
+   stops computing its seed state twice (the rule puts it in `details`; the
+   position applies it). `GuardRegistry` and the handler objects are deleted;
+   `guardDefinitions/` keeps the name and position enums, the rule values,
+   and their tests.
+2. **Emit records.** `evaluateGuard` gains the `emit` hook; orchestrator
+   positions emit `pinpawo_guard_decision` custom events, subagent middlewares
+   emit the `subagent_guard_decision` runtime event.
+3. **Registry revisit** only when capability-registered guards are scheduled.
 
 Relation to PR #304: the shared `checkProviderInputWatermark` helper and the
 `contextWindowTokens` config placement carry forward as-is; the runner/adapter

@@ -74,10 +74,11 @@ export function handleLocalHttpRequest(
 
   if (pathname === '/runtime') {
     const studioConfigFields = readStudioConfigRuntimeFields(deps);
+    const effectiveWorkdir = deps.runtimeConfig?.workdir ?? deps.workdir;
     writeJson(res, 200, {
       llm_model: deps.llmConfig.model,
       llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
-      workdir: deps.workdir,
+      workdir: effectiveWorkdir,
       ...(deps.runtimeConfig?.workspace ? {
         workspace_id: deps.runtimeConfig.workspace.id,
         workspace_name: deps.runtimeConfig.workspace.name,

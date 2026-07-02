@@ -217,7 +217,7 @@ test('handleLocalHttpRequest exposes workdir Studio config source on runtime end
       model: 'test-model',
       contextWindowTokens: 32000,
     },
-    workdir,
+    workdir: `${workdir}-legacy`,
     runtimeConfig: {
       workdir,
       workspace: {

@@ -1,6 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import { readMessageCreatedAtUtc, type ReviewSpec } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
@@ -24,6 +24,7 @@ import {
 export type TuiHistoryMessage = {
   role: string;
   text: string;
+  createdAt?: string;
 };
 
 export type ActivePendingReview = {
@@ -50,9 +51,11 @@ export function readTuiHistoryMessages(messages: BaseMessage[]): TuiHistoryMessa
     if (!text) {
       return [];
     }
+    const createdAt = readMessageCreatedAtUtc(message);
     return [{
       role: type === 'human' ? 'user' : 'assistant',
       text,
+      ...(createdAt ? { createdAt } : {}),
     }];
   });
 }

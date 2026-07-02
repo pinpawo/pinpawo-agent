@@ -7,6 +7,7 @@ import {
   isHumanReviewInterruptPayload,
   isOrchestratorInternalAiStreamNode,
   readMessagesTokenUsage,
+  stampMessageCreatedAtUtc,
   type ReviewSpec,
   type SubagentToolEvent,
   type SubagentToolLifecycleEvent,
@@ -233,7 +234,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   if (!isResumeRequest) {
     setup.input.messages = [
       ...setup.input.messages.slice(0, -1),
-      new HumanMessage(message),
+      stampMessageCreatedAtUtc(new HumanMessage(message)),
     ];
   }
 

@@ -27,6 +27,19 @@ export function setPinpetMeta(message: BaseMessage, patch: Record<string, unknow
   };
 }
 
+export function stampMessageCreatedAtUtc(
+  message: BaseMessage,
+  createdAt = new Date().toISOString(),
+) {
+  setPinpetMeta(message, { createdAt });
+  return message;
+}
+
+export function readMessageCreatedAtUtc(message: BaseMessage): string | null {
+  const createdAt = getPinpetMeta(message).createdAt;
+  return typeof createdAt === 'string' && createdAt.trim() ? createdAt : null;
+}
+
 /**
  * Neutral marker for "this lane message carries the subagent's deliverable text".
  * Replaces the completed/progress announce tag: it says WHICH message is the
@@ -302,6 +315,7 @@ export function buildSubagentHandoff(params: {
   // The copy is a first-class main message (no lane), carrying only minimal
   // provenance so the main agent knows which executor produced it for which task.
   const handoffCopy = new AIMessage(`${announceText}${artifactRefFooter}`);
+  stampMessageCreatedAtUtc(handoffCopy);
   setPinpetMeta(handoffCopy, {
     handoffFrom: params.lane,
     delegationId: params.delegationId,

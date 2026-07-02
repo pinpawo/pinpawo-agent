@@ -146,6 +146,10 @@ export {
   selectCapabilityResultArtifact,
   selectLatestCapabilityArtifact,
 } from './agent/orchestrator/capabilityArtifacts';
+export {
+  readMessageCreatedAtUtc,
+  stampMessageCreatedAtUtc,
+} from './agent/orchestrator/messageLanes';
 export type {
   CapabilityArtifactSelector,
 } from './agent/orchestrator/capabilityArtifacts';

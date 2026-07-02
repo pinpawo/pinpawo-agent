@@ -87,6 +87,7 @@ function timelineFromHistoryMessages(messages: TuiHistoryMessage[]): TuiCoreTime
       text,
       status: 'completed',
       source: 'checkpoint',
+      ...(message.createdAt ? { createdAt: message.createdAt } : {}),
     } satisfies TuiCoreTimelineEntry];
   });
 }

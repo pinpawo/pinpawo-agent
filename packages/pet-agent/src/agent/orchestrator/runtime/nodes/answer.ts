@@ -1,6 +1,6 @@
 import { AIMessage, SystemMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { mainConversationMessages } from '../../messageLanes';
+import { mainConversationMessages, stampMessageCreatedAtUtc } from '../../messageLanes';
 import { buildAnswerSystemPrompt } from '../../prompts';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -32,8 +32,11 @@ export function createAnswerNode(config: OrchestratorConfig) {
       runnableConfig,
     );
     if (!readMessageText(response).trim()) {
-      return { messages: [new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。')] };
+      const fallback = new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。');
+      return {
+        messages: [stampMessageCreatedAtUtc(fallback)],
+      };
     }
-    return { messages: [response] };
+    return { messages: [stampMessageCreatedAtUtc(response)] };
   };
 }

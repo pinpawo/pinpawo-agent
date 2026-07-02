@@ -11,6 +11,17 @@ export function formatNow() {
   });
 }
 
+export function formatMessageTimestamp(timestamp: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  return date.toLocaleTimeString('zh-CN', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 export function formatElapsed(startedAt: number, now: number) {
   const elapsedMs = elapsedMsSince(startedAt, now);
   if (elapsedMs === null) return null;

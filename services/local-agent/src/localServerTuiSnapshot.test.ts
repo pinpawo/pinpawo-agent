@@ -8,7 +8,7 @@ test('buildLocalServerTuiSnapshot returns native core snapshot shape', () => {
     sessionId: 'chat:pet-a',
     kind: 'chat',
     messages: [
-      { role: 'user', text: 'hello' },
+      { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
       { role: 'system', text: 'notice' },
       { role: 'assistant', text: 'hi' },
     ],
@@ -41,6 +41,10 @@ test('buildLocalServerTuiSnapshot returns native core snapshot shape', () => {
     ['message:0:user', 'message', 'user'],
     ['message:2:assistant', 'message', 'assistant'],
   ]);
+  assert.equal(
+    snapshot.timeline[0]?.type === 'message' ? snapshot.timeline[0].createdAt : undefined,
+    '2026-06-01T01:00:00.000Z',
+  );
   assert.equal(snapshot.activeRunId, 'req-review');
   assert.equal(snapshot.runs[0]?.pendingReview?.review?.id, 'review-1');
   assert.equal(snapshot.runs[0]?.pendingReview?.petId, 'pet-a');

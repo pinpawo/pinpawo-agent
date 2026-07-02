@@ -169,6 +169,8 @@ test('answer prompt owns clarification questions', () => {
     actor: testActor,
   });
 
+  assert.match(prompt, /最终总结、结论、关键依据/);
+  assert.match(prompt, /不要把紧邻的执行器\/subagent 结果原文整体复制一遍/);
   assert.match(prompt, /直接向用户提出需要补充或确认的问题/);
   assert.match(prompt, /不要输出 JSON、动作字段/);
 });

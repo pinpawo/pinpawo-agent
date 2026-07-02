@@ -1,5 +1,6 @@
 import React from 'react';
 import { MessageBlock } from './MessageBlock';
+import { formatMessageTimestamp } from '../render/terminalText';
 import type { AgentMessageEntry } from '../timeline/agentTimeline';
 
 export function AgentMessageItem(props: {
@@ -7,11 +8,12 @@ export function AgentMessageItem(props: {
   petName: string;
   width: number;
 }) {
+  const timestamp = props.entry.updatedAt ?? props.entry.createdAt;
   return (
     <MessageBlock
       entry={{
         kind: props.entry.role,
-        timestamp: props.entry.updatedAt ?? props.entry.createdAt,
+        timestamp: timestamp ? formatMessageTimestamp(timestamp) : undefined,
         text: props.entry.text,
       }}
       petName={props.petName}

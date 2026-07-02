@@ -98,6 +98,7 @@ export function createGeneralNode(params: {
       operations: collectGeneralOperations(toolkitResources.toolkits),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
+      middleware: toolkitResources.middleware,
       contextWindowTokens: subagentContextWindowTokens,
       checkpoint: config.checkpoint,
       runnableConfig,

@@ -385,6 +385,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   const contextPolicyMiddleware = createContextPolicyMiddleware(inputState, maxIterations);
   const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(inputState, maxIterations);
   const middleware = [
+    ...(input.middleware ?? []),
     contextPolicyMiddleware,
     iterationGuardMiddleware,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));

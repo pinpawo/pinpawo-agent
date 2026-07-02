@@ -2,6 +2,7 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import { createSubagent } from '../../../../subagent/createSubagent';
 import type { CapabilityArtifactRef } from '../../../../types/artifact';
 import type { SubagentRunInput } from '../../../../types/subagent';
+import type { ToolkitContext } from '../../../../types/toolkit';
 import {
   buildEmptyRunCapabilitySearchState,
   type OrchestratorStateType,
@@ -94,7 +95,7 @@ export function createCapabilityNode(params: {
 
     const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
     const artifactRefs: CapabilityArtifactRef[] = [];
-    const toolkitContext = {
+    const toolkitContext: ToolkitContext = {
       models: config.models,
       actor,
       messages: scopedMessages,
@@ -135,6 +136,7 @@ export function createCapabilityNode(params: {
       operations: collectCapabilityOperations(usedToolkitResources.toolkits, runtime),
       messages: scopedMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
+      middleware: usedToolkitResources.middleware,
       contextWindowTokens: subagentContextWindowTokens,
       contextPolicy: runtime.contextPolicy,
       checkpoint: config.checkpoint,

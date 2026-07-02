@@ -10,6 +10,7 @@ import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import { defineToolset, type AgentToolkit } from '../../types/toolkit';
+import { createSubagent } from '../../subagent/createSubagent';
 import { runAgent } from '../runAgent';
 import { buildOrchestratorRunInput, createOrchestratorGraph } from '../createAgentRuntime';
 import {
@@ -61,6 +62,34 @@ function mockTool(name: string) {
     description: `${name} tool`,
     schema: z.object({}),
   });
+}
+
+async function runReviewedToolkitCall(
+  resources: Awaited<ReturnType<typeof resolveToolkitResources>>,
+  toolCall: { id: string; name: string; args: Record<string, unknown> },
+) {
+  const result = await createSubagent({
+    model: new FakeToolCallingModel({
+      toolCalls: [[toolCall], []],
+    }),
+    tools: resources.tools,
+    middleware: resources.middleware,
+    instructions: [],
+    messages: [new HumanMessage('run reviewed tool')],
+    checkpoint: new MemorySaver(),
+    runnableConfig: {
+      configurable: {
+        thread_id: `reviewed-tool-${toolCall.id}`,
+      },
+    },
+  });
+  return result.messages;
+}
+
+function findToolMessage(messages: unknown[], toolCallId: string) {
+  return messages.find((message): message is ToolMessage =>
+    ToolMessage.isInstance(message)
+    && message.tool_call_id === toolCallId);
 }
 
 const testActor: AgentActor = {
@@ -1300,7 +1329,12 @@ test('toolkit review policy wraps tool calls without changing tool identity', as
   assert.equal(resources.tools[0]?.name, 'safe_tool');
   assert.equal(resources.tools[0]?.description, 'safe tool');
 
-  const result = await resources.tools[0]?.invoke({});
+  const messages = await runReviewedToolkitCall(resources, {
+    id: 'call-safe-tool',
+    name: 'safe_tool',
+    args: {},
+  });
+  const result = findToolMessage(messages, 'call-safe-tool')?.content;
   assert.equal(reviewCount, 1);
   assert.equal(callCount, 1);
   assert.equal(result, 'raw ok');
@@ -1412,7 +1446,12 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
     },
   });
 
-  const result = await resources.tools[0]?.invoke({ path: 'notes.md', content: 'hello' });
+  const messages = await runReviewedToolkitCall(resources, {
+    id: 'call-write-file',
+    name: 'write_file',
+    args: { path: 'notes.md', content: 'hello' },
+  });
+  const result = findToolMessage(messages, 'call-write-file')?.content;
   assert.equal(result, 'wrote notes.md');
   assert.equal(callCount, 1);
   assert.equal(autoReviewCount, 1);
@@ -1461,11 +1500,15 @@ test('global review policy auto_authorization requires human authorization when 
     globalReviewPolicy: { mode: 'auto_authorization' },
   });
 
-  const result = await resources.tools[0]?.invoke({ path: 'src/index.ts', content: 'new content' });
-  const parsed = JSON.parse(String(result)) as { cancelled?: boolean; reason?: string };
+  const messages = await runReviewedToolkitCall(resources, {
+    id: 'call-unsafe-write-file',
+    name: 'write_file',
+    args: { path: 'src/index.ts', content: 'new content' },
+  });
+  const result = findToolMessage(messages, 'call-unsafe-write-file');
   assert.equal(callCount, 0);
-  assert.equal(parsed.cancelled, true);
-  assert.match(parsed.reason ?? '', /too broad/);
+  assert.equal(result?.status, 'error');
+  assert.match(String(result?.content ?? ''), /too broad/);
 });
 
 test('global review policy custom resolver can authorize reviewed tool calls', async () => {
@@ -1507,7 +1550,12 @@ test('global review policy custom resolver can authorize reviewed tool calls', a
     },
   });
 
-  const result = await resources.tools[0]?.invoke({ path: 'notes.md', content: 'hello' });
+  const messages = await runReviewedToolkitCall(resources, {
+    id: 'call-custom-write-file',
+    name: 'write_file',
+    args: { path: 'notes.md', content: 'hello' },
+  });
+  const result = findToolMessage(messages, 'call-custom-write-file')?.content;
   assert.equal(result, 'raw ok');
   assert.equal(callCount, 1);
   assert.equal(customReviewTitle, 'write_file');

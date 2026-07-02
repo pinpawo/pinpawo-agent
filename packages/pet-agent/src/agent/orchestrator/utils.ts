@@ -28,6 +28,7 @@ export function readMessageText(message: { content?: unknown }): string {
 
 export function formatDelegationStatus(status: DelegationStatus): string {
   if (status === 'completed') return '已完成';
+  if (status === 'cancelled') return '已取消';
   if (status === 'progress') return '进行中';
   return '待执行';
 }

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { ToolMessage } from '@langchain/core/messages';
+import { buildHumanReviewRejectedToolResult } from '@pinpawo/pet-agent';
 import { buildToolOperationEvent } from './agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import { createOperationRegistry } from './events/operationRegistry';
@@ -361,6 +362,33 @@ test('unwraps a live ToolMessage instance to its content string (no LangChain en
   );
 
   assert.equal(event.raw?.output, '{"title":"issue 269","state":"open"}');
+});
+
+test('normalizes human review reject marker as an interrupted operation', () => {
+  const event = normalizeToolStreamEvent(
+    'req-1',
+    {
+      event: 'on_tool_end',
+      name: 'run_shell',
+      toolCallId: 'call-1',
+      input: { command: 'rm -rf /tmp/nope' },
+      output: new ToolMessage({
+        content: buildHumanReviewRejectedToolResult({
+          toolName: 'run_shell',
+          toolkitName: 'local',
+          reason: 'tool call rejected by user',
+          input: { command: 'rm -rf /tmp/nope' },
+        }),
+        tool_call_id: 'call-1',
+        name: 'run_shell',
+      }),
+    },
+    createOperationRegistry(),
+  );
+
+  assert.equal(event.phase, 'interrupted');
+  assert.equal(event.raw?.output, undefined);
+  assert.equal(event.raw?.error, 'tool call rejected by user');
 });
 
 test('unwraps a serialized ToolMessage ({lc,...,kwargs.content}) form', () => {

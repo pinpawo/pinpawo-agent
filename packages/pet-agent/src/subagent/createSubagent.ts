@@ -1,4 +1,4 @@
-import { type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type {
   SubagentInputState,
   SubagentResult,
@@ -30,6 +30,10 @@ import {
 } from './guardDefinitions';
 import { isSubagentGuardStopMessage } from './guardStop';
 import { Command, END, type ProtocolEvent } from '@langchain/langgraph';
+import {
+  HUMAN_REVIEW_REJECTED_STOP_MESSAGE,
+  readHumanReviewRejectedToolResult,
+} from '../agent/orchestrator/review/reviewStop';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -71,6 +75,57 @@ function readMessagesFromValuesChunk(chunk: unknown): BaseMessage[] | null {
     return (chunk as { messages: BaseMessage[] }).messages;
   }
   return null;
+}
+
+function messageContentToText(content: unknown): string | null {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+          return part.text;
+        }
+        return '';
+      })
+      .join('');
+  }
+  return null;
+}
+
+function readLatestHumanReviewRejectedToolResult(messages: BaseMessage[]) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message._getType() !== 'tool') continue;
+    const rejected = readHumanReviewRejectedToolResult(messageContentToText(message.content));
+    if (rejected) return rejected;
+  }
+  return null;
+}
+
+function createHumanReviewRejectedStopMiddleware(
+  inputMessageCount: number,
+  onRejected: () => void,
+) {
+  return createMiddleware({
+    name: 'SubagentHumanReviewRejectedStop',
+    wrapModelCall: async (request, handler) => {
+      const newMessages = (request.messages ?? []).slice(inputMessageCount);
+      const rejected = readLatestHumanReviewRejectedToolResult(newMessages);
+      if (!rejected) {
+        return handler(request);
+      }
+      onRejected();
+      return new Command({
+        goto: END,
+        update: {
+          messages: [new AIMessage(HUMAN_REVIEW_REJECTED_STOP_MESSAGE)],
+        },
+      });
+    },
+  });
 }
 
 export function buildNestedSubagentStreamConfig(config: RunnableConfig | undefined): RunnableConfig {
@@ -382,9 +437,17 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     inputState.contextPolicy ? CONTEXT_POLICY_GOVERNING_PROMPT : null,
     ...inputState.instructions,
   ].filter((item): item is string => Boolean(item)).join('\n\n');
+  let stoppedByHumanReviewReject = false;
   const contextPolicyMiddleware = createContextPolicyMiddleware(inputState, maxIterations);
+  const humanReviewRejectedStopMiddleware = createHumanReviewRejectedStopMiddleware(
+    inputState.messages.length,
+    () => {
+      stoppedByHumanReviewReject = true;
+    },
+  );
   const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(inputState, maxIterations);
   const middleware = [
+    humanReviewRejectedStopMiddleware,
     contextPolicyMiddleware,
     iterationGuardMiddleware,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
@@ -494,18 +557,23 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
       latestMessages = readMessagesFromValuesChunk(await run.output) ?? latestMessages;
     }, true);
 
-    // A guard may have gracefully ended the agent by appending its stop
-    // notice as the FINAL message (via Command goto END). That is a clean "limit
-    // reached" stop, not natural completion. Check only the last message — a stop
-    // marker buried in the input history must not be misread as our stop, and
-    // contextPolicy may rewrite the list so an index-based slice is unreliable.
+    // Stop markers buried in incoming history must not affect the new run.
+    // Human-review rejection is a Command(END) path, but createAgent still
+    // reaches the next model-call boundary; the middleware above intercepts it.
+    const newMessages = latestMessages.slice(inputState.messages.length);
+    if (!stoppedByHumanReviewReject && readLatestHumanReviewRejectedToolResult(newMessages)) {
+      stoppedByHumanReviewReject = true;
+      latestMessages = [...latestMessages, new AIMessage(HUMAN_REVIEW_REJECTED_STOP_MESSAGE)];
+    }
     const lastMessage = latestMessages.at(-1);
     const stoppedByGuard = lastMessage ? isSubagentGuardStopMessage(lastMessage) : false;
     await finishToolEvents('completed');
     return {
       messages: latestMessages,
       artifacts: inputState.artifacts ?? [],
-      completionReason: stoppedByGuard ? 'limit_reached' : 'natural',
+      completionReason: stoppedByHumanReviewReject
+        ? 'human_rejected'
+        : stoppedByGuard ? 'limit_reached' : 'natural',
     };
   } catch (err) {
     // The agent's hard recursion breaker (recursionLimit) fired. The iteration

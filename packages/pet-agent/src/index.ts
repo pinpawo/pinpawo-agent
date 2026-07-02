@@ -215,6 +215,16 @@ export {
   isReviewSpecValue,
   reviewViewToText,
 } from './agent/orchestrator/review/reviewSpec';
+export {
+  HUMAN_REVIEW_REJECTED_CONTROL_TYPE,
+  HUMAN_REVIEW_REJECTED_STOP_MESSAGE,
+  buildHumanReviewRejectedToolResult,
+  isHumanReviewRejectedToolResult,
+  readHumanReviewRejectedToolResult,
+} from './agent/orchestrator/review/reviewStop';
+export type {
+  HumanReviewRejectedToolResult,
+} from './agent/orchestrator/review/reviewStop';
 export type {
   BuildReviewSpecParams,
   PendingReviewAction,

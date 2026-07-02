@@ -7,6 +7,7 @@ import type {
   MessageLane,
   RunPendingDelegation,
   RunDelegation,
+  RunStopReason,
   TaskActiveDelegation,
 } from './types';
 import type { CapabilityArtifactRef } from '../../types/artifact';
@@ -29,6 +30,10 @@ export const OrchestratorState = Annotation.Root({
   // distinguish an `answer` route that must run the answer node from an
   // inline fallback reply that already emitted its message and ends the turn.
   runPendingFinalReply: Annotation<RunFinalReplyRoute>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
+  runStopReason: Annotation<RunStopReason | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -72,6 +77,7 @@ export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runPendingDelegation'
   | 'runPendingFinalReply'
+  | 'runStopReason'
   | 'runCapabilitySearchState'
   | 'runDelegations'
   | 'runIterationCount'
@@ -91,6 +97,7 @@ export function buildRunStateReset(): OrchestratorRunState {
   return {
     runPendingDelegation: null,
     runPendingFinalReply: null,
+    runStopReason: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     runDelegations: [],
     runIterationCount: 0,

@@ -113,7 +113,7 @@ export type SubagentRunInput = SubagentInputState & {
   onToolEvent?: SubagentToolEventHandler;
 };
 
-export type SubagentCompletionReason = 'natural' | 'limit_reached' | 'error';
+export type SubagentCompletionReason = 'natural' | 'limit_reached' | 'human_rejected' | 'error';
 
 export type SubagentResult = {
   messages: BaseMessage[];

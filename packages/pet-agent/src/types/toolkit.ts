@@ -30,6 +30,11 @@ export type ToolkitContext = {
   recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;
   recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
   emitRuntimeEvent?: (event: SubagentRuntimeEvent) => void | Promise<void>;
+  runControl?: {
+    humanReviewRejected?: {
+      reason: string;
+    };
+  };
 };
 
 export type ToolkitReviewCapabilities = {

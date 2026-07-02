@@ -2,7 +2,10 @@ import { isBaseMessage } from '@langchain/core/messages';
 import type {
   SubagentToolOperationMetadata,
 } from '@pinpawo/pet-agent';
-import { readJsonRecord } from '@pinpawo/pet-agent';
+import {
+  readHumanReviewRejectedToolResult,
+  readJsonRecord,
+} from '@pinpawo/pet-agent';
 import type {
   LocalAgentOperationInternalEvent,
   LocalAgentOperationPhase,
@@ -84,7 +87,11 @@ function unwrapToolMessageOutput(output: unknown): unknown {
   return output;
 }
 
-function readToolPhase(event: StreamToolsPayload['event']): LocalAgentOperationPhase {
+function readToolPhase(
+  event: StreamToolsPayload['event'],
+  options: { interrupted?: boolean } = {},
+): LocalAgentOperationPhase {
+  if (options.interrupted) return 'interrupted';
   if (event === 'on_tool_start') return 'started';
   if (event === 'on_tool_end') return 'completed';
   if (event === 'on_tool_error') return 'failed';
@@ -159,16 +166,19 @@ export function normalizeToolStreamEvent(
   const output = unwrapToolMessageOutput(
     payload.output !== undefined ? payload.output : payload.data,
   );
+  const rejectedToolResult = readHumanReviewRejectedToolResult(output);
+  const normalizedOutput = rejectedToolResult ? undefined : output;
+  const normalizedError = rejectedToolResult?.reason ?? payload.error;
   const summary = [
     summarizeInput(metadata?.summarizeInput, payload.input),
-    summarizeOutput(metadata?.summarizeOutput, output),
-    metadata?.summarizeError?.(payload.error),
+    summarizeOutput(metadata?.summarizeOutput, normalizedOutput),
+    metadata?.summarizeError?.(normalizedError),
   ].reduce(mergeSummary, {});
 
   return {
     type: 'operation',
     requestId,
-    phase: readToolPhase(payload.event),
+    phase: readToolPhase(payload.event, { interrupted: Boolean(rejectedToolResult) }),
     operation: {
       id: payload.toolCallId,
       kind: operationKindFromSource(metadata?.source, payload.name),
@@ -185,8 +195,8 @@ export function normalizeToolStreamEvent(
     },
     raw: {
       input: payload.input,
-      output,
-      error: payload.error,
+      output: normalizedOutput,
+      error: normalizedError,
     },
   };
 }

@@ -2,6 +2,7 @@ import type { OrchestratorStateType } from '../../state';
 import { decisionModeFromRunPendingDelegation } from '../decisions/delegationLifecycle';
 
 export function afterDecision(state: OrchestratorStateType) {
+  if (state.runStopReason) return 'end';
   const decisionMode = decisionModeFromRunPendingDelegation(state.runPendingDelegation);
   if (decisionMode === 'capability') return 'capability';
   if (decisionMode === 'general') return 'general';

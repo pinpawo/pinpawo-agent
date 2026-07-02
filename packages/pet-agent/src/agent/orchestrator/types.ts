@@ -13,7 +13,8 @@ import type { OrchestrationDecision } from './schemas';
 
 export type MessageLane = 'general' | `capability:${string}`;
 export type PinpetMessageLane = MessageLane | 'orchestrator';
-export type DelegationStatus = 'pending' | 'progress' | 'completed';
+export type DelegationStatus = 'pending' | 'progress' | 'completed' | 'cancelled';
+export type RunStopReason = 'human_review_rejected';
 export type { SubagentCompletionReason };
 
 export type RunDelegation = {

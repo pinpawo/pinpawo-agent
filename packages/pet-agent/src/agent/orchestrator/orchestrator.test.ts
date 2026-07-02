@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool } from '@langchain/core/tools';
@@ -25,6 +26,7 @@ import {
   selectCapabilityTools,
 } from './subagentHandoff';
 import { buildReviewSpec } from './review/reviewSpec';
+import { HUMAN_REVIEW_REJECTED_STOP_MESSAGE } from './review/reviewStop';
 import { isToolActionAuthorized } from './review/reviewAuthorizations';
 import { ReviewPolicies } from './review/reviewPolicies';
 import {
@@ -71,6 +73,34 @@ const testActor: AgentActor = {
   stage: 'adult',
   species: 'cat',
 };
+
+class RejectingReviewSubagentModel extends BaseChatModel {
+  callCount = 0;
+
+  _llmType() {
+    return 'rejecting-review-subagent';
+  }
+
+  async _generate() {
+    this.callCount += 1;
+    if (this.callCount === 1) {
+      const message = new AIMessage({
+        content: '',
+        tool_calls: [{
+          id: 'call-reject-1',
+          name: 'run_shell',
+          args: { command: 'rm -rf /tmp/nope' },
+        }],
+      });
+      return { generations: [{ message, text: '' }] };
+    }
+    return { generations: [{ message: new AIMessage('should not be called'), text: 'should not be called' }] };
+  }
+
+  bindTools() {
+    return this;
+  }
+}
 
 test('capability search ranks matching capability and keeps original query terms', () => {
   const results = searchCapabilities('宠物发帖|小红书日常', [
@@ -1789,6 +1819,133 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.ok(handoffSource?.delegationId);
   assert.equal(handoffSource?.task, 'run shell');
   assert.equal(readLatestAnnounce(finalState.messages, { runId: finalState.runId }), null);
+});
+
+test('toolkit review policy reject stops the run without another model decision', async () => {
+  let runCount = 0;
+  let reviewCount = 0;
+  const rawTool = tool(async ({ command }: { command: string }) => {
+    runCount += 1;
+    return `ran ${command}`;
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [rawTool],
+    policy: {
+      toolReview: {
+        run_shell: {
+          request: () => {
+            reviewCount += 1;
+            return buildReviewSpec({
+              view: { kind: 'plain', body: 'Approve shell once?' },
+              options: [
+                {
+                  id: 'approve',
+                  label: 'Approve',
+                  decision: { type: 'approve' },
+                },
+                {
+                  id: 'reject',
+                  label: 'Reject',
+                  decision: { type: 'reject' },
+                },
+              ],
+            });
+          },
+        },
+      },
+    },
+  }];
+
+  let routeCallCount = 0;
+  let answerInvokeCount = 0;
+  const routeModel = {
+    invoke: async () => {
+      answerInvokeCount += 1;
+      return new AIMessage('answered');
+    },
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        if (routeCallCount > 1) {
+          throw new Error('reject should not route to another decision');
+        }
+        return {
+          action: 'delegate_general',
+          task: 'run shell',
+          context_summary: null,
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new RejectingReviewSubagentModel({});
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: subagentModel,
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const config = {
+    configurable: {
+      thread_id: 'reject-review-stops-run',
+      actor: testActor,
+      capabilities: [],
+      toolkits,
+    },
+  };
+
+  const interrupted = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('run dangerous shell')]),
+    config,
+  ) as {
+    __interrupt__?: Array<{ value?: unknown }>;
+  };
+  const payload = interrupted.__interrupt__?.[0]?.value as {
+    review?: { id?: string };
+  } | undefined;
+  assert.equal(payload?.review?.id, 'tool-review:run_shell:call-reject-1');
+
+  const finalState = await graph.invoke(new Command({
+    resume: {
+      reviewId: payload?.review?.id,
+      selectedOptionId: 'reject',
+    },
+  }), config) as {
+    __interrupt__?: unknown;
+    messages: Array<AIMessage | HumanMessage | ToolMessage>;
+    runDelegations: RunDelegation[];
+    runPendingDelegation: unknown;
+    runPendingFinalReply: unknown;
+    runStopReason: unknown;
+    taskActiveDelegation: unknown;
+  };
+
+  assert.equal(finalState.__interrupt__, undefined);
+  assert.equal(reviewCount, 2);
+  assert.equal(runCount, 0);
+  assert.equal(subagentModel.callCount, 1);
+  assert.equal(routeCallCount, 1);
+  assert.equal(answerInvokeCount, 0);
+  assert.equal(finalState.runPendingDelegation, null);
+  assert.equal(finalState.runPendingFinalReply, null);
+  assert.equal(finalState.runStopReason, 'human_review_rejected');
+  assert.equal(finalState.taskActiveDelegation, null);
+  assert.equal(finalState.runDelegations[0]?.status, 'cancelled');
+  assert.equal(
+    mainConversationMessages(finalState.messages).at(-1)?.content,
+    HUMAN_REVIEW_REJECTED_STOP_MESSAGE,
+  );
 });
 
 test('buildSubagentHandoff copies the announce into main and wipes the whole delegation lane', () => {

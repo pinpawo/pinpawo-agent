@@ -1,3 +1,4 @@
+import { AIMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createSubagent } from '../../../../subagent/createSubagent';
 import {
@@ -8,6 +9,7 @@ import { updateRunDelegationResult } from '../../delegations';
 import {
   laneMessages,
   readLatestAnnounce,
+  stampMessageCreatedAtUtc,
   tagNewLaneMessages,
 } from '../../messageLanes';
 import {
@@ -15,6 +17,7 @@ import {
   collectGeneralOperations,
   resolveToolkitResources,
 } from '../../subagentHandoff';
+import { HUMAN_REVIEW_REJECTED_STOP_MESSAGE } from '../../review/reviewStop';
 import type {
   MessageLane,
   OrchestratorConfig,
@@ -48,6 +51,7 @@ export function createGeneralNode(params: {
     const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
     const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
+    const runControl: { humanReviewRejected?: { reason: string } } = {};
     const toolkitResources = await resolveToolkitResources(toolkitList, undefined, {
       models: config.models,
       actor,
@@ -59,6 +63,7 @@ export function createGeneralNode(params: {
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
       emitRuntimeEvent: onToolEvent,
+      runControl,
     });
     const toolList = [...toolkitResources.tools];
     validateUniqueToolNames(toolList);
@@ -117,6 +122,11 @@ export function createGeneralNode(params: {
       },
     );
     const delegationAnnounce = readLatestAnnounce(outputMessages, { delegationId: runPendingDelegation.id });
+    const stoppedByHumanReviewReject = result.completionReason === 'human_rejected'
+      || Boolean(runControl.humanReviewRejected);
+    const resultPreview = stoppedByHumanReviewReject
+      ? HUMAN_REVIEW_REJECTED_STOP_MESSAGE
+      : delegationAnnounce?.text ?? null;
 
     // See capabilityNode: status is 'progress' until the orchestrator judges it
     // complete at delegationOutcomeDecision; raw lane messages are kept in place.
@@ -124,10 +134,27 @@ export function createGeneralNode(params: {
       state.runDelegations,
       runPendingDelegation.id,
       {
-        status: 'progress',
-        resultPreview: delegationAnnounce?.text ?? null,
+        status: stoppedByHumanReviewReject ? 'cancelled' : 'progress',
+        resultPreview,
       },
     );
+
+    if (stoppedByHumanReviewReject) {
+      return {
+        messages: [
+          ...outputMessages,
+          stampMessageCreatedAtUtc(new AIMessage(HUMAN_REVIEW_REJECTED_STOP_MESSAGE)),
+        ],
+        runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+        runDelegations: updatedRunDelegations,
+        runPendingDelegation: null,
+        runPendingFinalReply: 'inline' as const,
+        runStopReason: 'human_review_rejected' as const,
+        taskActiveDelegation: null,
+        runIterationCount: state.runIterationCount + 1,
+        sessionToolAuthorizations: authorizationRecorder.recorded,
+      };
+    }
 
     return {
       messages: outputMessages,
@@ -137,7 +164,7 @@ export function createGeneralNode(params: {
       taskActiveDelegation: {
         ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runPendingDelegation, transcriptRunId)),
         status: 'awaiting_decision' as const,
-        resultPreview: delegationAnnounce?.text ?? null,
+        resultPreview,
       },
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: authorizationRecorder.recorded,

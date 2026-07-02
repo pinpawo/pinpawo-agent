@@ -1,6 +1,7 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
-import { interrupt } from '@langchain/langgraph';
+import { Command, END, interrupt } from '@langchain/langgraph';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { CapabilityRuntime } from '../../types/capability';
 import type { AgentExecution } from '../../types/agent';
@@ -19,6 +20,10 @@ import {
   appendReviewViewMessage,
   reviewViewToText,
 } from './review/reviewSpec';
+import {
+  HUMAN_REVIEW_REJECTED_STOP_MESSAGE,
+  buildHumanReviewRejectedToolResult,
+} from './review/reviewStop';
 import type {
   PendingReviewAction,
   ReviewResponseResolution,
@@ -487,9 +492,34 @@ function wrapToolkitTool(
           return toolItem.invoke(currentInput as never, runtime as never);
         }
 
-        const reason = reviewDecision.type === 'respond'
-          ? reviewDecision.message
-          : reviewDecision.message ?? 'tool call rejected by user';
+        if (reviewDecision.type === 'reject') {
+          const reason = reviewDecision.message ?? 'tool call rejected by user';
+          if (ctx.runControl) {
+            ctx.runControl.humanReviewRejected = { reason };
+          }
+          const toolCallId = readToolCallId(runtime);
+          const rejectedToolResult = buildHumanReviewRejectedToolResult({
+            toolName: toolItem.name,
+            toolkitName: toolkit.name,
+            reason,
+            input: currentInput,
+          });
+          return new Command({
+            goto: END,
+            update: {
+              messages: [
+                new ToolMessage({
+                  content: rejectedToolResult,
+                  tool_call_id: toolCallId,
+                  name: toolItem.name,
+                }),
+                new AIMessage(HUMAN_REVIEW_REJECTED_STOP_MESSAGE),
+              ],
+            },
+          });
+        }
+
+        const reason = reviewDecision.message;
         return buildCancelledToolResult({
           toolName: toolItem.name,
           toolkitName: toolkit.name,

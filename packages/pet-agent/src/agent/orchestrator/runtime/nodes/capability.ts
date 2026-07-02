@@ -1,3 +1,4 @@
+import { AIMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createSubagent } from '../../../../subagent/createSubagent';
 import type { CapabilityArtifactRef } from '../../../../types/artifact';
@@ -10,6 +11,7 @@ import { updateRunDelegationResult } from '../../delegations';
 import {
   laneMessages,
   readLatestAnnounce,
+  stampMessageCreatedAtUtc,
   tagNewLaneMessages,
 } from '../../messageLanes';
 import {
@@ -19,6 +21,7 @@ import {
   resolveToolkitResources,
   selectCapabilityTools,
 } from '../../subagentHandoff';
+import { HUMAN_REVIEW_REJECTED_STOP_MESSAGE } from '../../review/reviewStop';
 import type {
   MessageLane,
   OrchestratorConfig,
@@ -94,6 +97,7 @@ export function createCapabilityNode(params: {
 
     const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
     const artifactRefs: CapabilityArtifactRef[] = [];
+    const runControl: { humanReviewRejected?: { reason: string } } = {};
     const toolkitContext = {
       models: config.models,
       actor,
@@ -112,6 +116,7 @@ export function createCapabilityNode(params: {
         artifactRefs.push(ref);
       },
       emitRuntimeEvent: onToolEvent,
+      runControl,
     };
     const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
     const runtimeInstructions = await resolveInstructions(runtime, {
@@ -160,7 +165,7 @@ export function createCapabilityNode(params: {
 
     let result = await createSubagent(subagentInput);
 
-    if (middleware?.afterRun) {
+    if (result.completionReason !== 'human_rejected' && middleware?.afterRun) {
       result = await middleware.afterRun(result, {
         recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
           artifactRefs.push(ref);
@@ -184,6 +189,11 @@ export function createCapabilityNode(params: {
       },
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runPendingDelegation.id });
+    const stoppedByHumanReviewReject = result.completionReason === 'human_rejected'
+      || Boolean(runControl.humanReviewRejected);
+    const resultPreview = stoppedByHumanReviewReject
+      ? HUMAN_REVIEW_REJECTED_STOP_MESSAGE
+      : delegationAnnounce?.text ?? null;
     // The subagent node only records that the delegation ran (status 'progress');
     // whether it is complete is the orchestrator's call at delegationOutcomeDecision,
     // which upgrades the status to 'completed' when it hands off. The raw lane
@@ -192,10 +202,28 @@ export function createCapabilityNode(params: {
       state.runDelegations,
       runPendingDelegation.id,
       {
-        status: 'progress',
-        resultPreview: delegationAnnounce?.text ?? null,
+        status: stoppedByHumanReviewReject ? 'cancelled' : 'progress',
+        resultPreview,
       },
     );
+
+    if (stoppedByHumanReviewReject) {
+      return {
+        messages: [
+          ...laneOutputMessages,
+          stampMessageCreatedAtUtc(new AIMessage(HUMAN_REVIEW_REJECTED_STOP_MESSAGE)),
+        ],
+        sessionCapabilityArtifacts: result.artifacts,
+        runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+        runDelegations: updatedRunDelegations,
+        runPendingDelegation: null,
+        runPendingFinalReply: 'inline' as const,
+        runStopReason: 'human_review_rejected' as const,
+        taskActiveDelegation: null,
+        runIterationCount: state.runIterationCount + 1,
+        sessionToolAuthorizations: authorizationRecorder.recorded,
+      };
+    }
 
     return {
       messages: laneOutputMessages,
@@ -206,7 +234,7 @@ export function createCapabilityNode(params: {
       taskActiveDelegation: {
         ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runPendingDelegation, transcriptRunId)),
         status: 'awaiting_decision' as const,
-        resultPreview: delegationAnnounce?.text ?? null,
+        resultPreview,
       },
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: authorizationRecorder.recorded,

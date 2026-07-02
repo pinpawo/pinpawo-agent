@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { ToolMessage } from '@langchain/core/messages/tool';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { tool } from '@langchain/core/tools';
+import { Command, END } from '@langchain/langgraph';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
@@ -12,6 +14,10 @@ import {
   SUBAGENT_GUARD_STOP_MARKER_KEY,
   readSubagentGuardStopReason,
 } from './guardStop';
+import {
+  HUMAN_REVIEW_REJECTED_STOP_MESSAGE,
+  buildHumanReviewRejectedToolResult,
+} from '../agent/orchestrator/review/reviewStop';
 
 /**
  * Minimal model that never converges: it keeps emitting a fresh tool call every
@@ -29,6 +35,31 @@ class NeverConvergingModel extends BaseChatModel {
       tool_calls: [{ id: `call-${this.callCount}`, name: 'noop', args: {} }],
     });
     return { generations: [{ message, text: '' }] };
+  }
+  bindTools() {
+    return this;
+  }
+}
+
+class RejectingToolCallModel extends BaseChatModel {
+  callCount = 0;
+  _llmType() {
+    return 'rejecting-tool-call';
+  }
+  async _generate() {
+    this.callCount += 1;
+    if (this.callCount === 1) {
+      const message = new AIMessage({
+        content: '',
+        tool_calls: [{
+          id: 'call-reject',
+          name: 'run_shell',
+          args: { command: 'rm -rf /tmp/nope' },
+        }],
+      });
+      return { generations: [{ message, text: '' }] };
+    }
+    return { generations: [{ message: new AIMessage('should not be called'), text: 'should not be called' }] };
   }
   bindTools() {
     return this;
@@ -201,6 +232,48 @@ test('createSubagent emits tool lifecycle events through event streaming', async
   assert.equal(toolEvents[1]?.operation?.title, 'Read File');
 });
 
+test('createSubagent treats a human review reject Command as a stopped run', async () => {
+  let toolRuns = 0;
+  const model = new RejectingToolCallModel({});
+  const runShell = tool(async ({ command }) => {
+    toolRuns += 1;
+    return new Command({
+      goto: END,
+      update: {
+        messages: [
+          new ToolMessage({
+            content: buildHumanReviewRejectedToolResult({
+              toolName: 'run_shell',
+              toolkitName: 'local',
+              reason: 'tool call rejected by user',
+              input: { command },
+            }),
+            tool_call_id: 'call-reject',
+            name: 'run_shell',
+          }),
+        ],
+      },
+    });
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+
+  const result = await createSubagent({
+    model: model as unknown as BaseChatModel,
+    tools: [runShell],
+    instructions: [],
+    messages: [new HumanMessage('run shell')],
+    maxIterations: 4,
+  });
+
+  assert.equal(toolRuns, 1);
+  assert.equal(model.callCount, 1);
+  assert.equal(result.completionReason, 'human_rejected');
+  assert.equal(result.messages.at(-1)?.content, HUMAN_REVIEW_REJECTED_STOP_MESSAGE);
+});
+
 test('createSubagent preserves streamed tool progress from event streaming', async () => {
   const events: unknown[] = [];
   const search = tool(async function* ({ query }) {
@@ -346,6 +419,30 @@ test('createSubagent ignores a stop marker that arrives in the input history', a
   assert.equal(result.completionReason, 'natural');
   // The final message is the fresh model answer, not the stale marker.
   assert.equal(readSubagentGuardStopReason(result.messages.at(-1) as BaseMessage), null);
+});
+
+test('createSubagent ignores a human review reject marker that arrives in the input history', async () => {
+  const staleRejectResult = new ToolMessage({
+    content: buildHumanReviewRejectedToolResult({
+      toolName: 'run_shell',
+      toolkitName: 'local',
+      reason: 'previous run rejected',
+      input: { command: 'old command' },
+    }),
+    tool_call_id: 'call-old-reject',
+    name: 'run_shell',
+  });
+
+  const result = await createSubagent({
+    model: new FakeListChatModel({ responses: ['fresh answer'], sleep: 0 }),
+    tools: [],
+    instructions: [],
+    messages: [new HumanMessage('old task'), staleRejectResult, new HumanMessage('new task')],
+    maxIterations: 4,
+  });
+
+  assert.equal(result.completionReason, 'natural');
+  assert.deepEqual(result.messages.at(-1)?.content, [{ type: 'text', text: 'fresh answer' }]);
 });
 
 test('createSubagent default iteration budget is a soft model-call guard', async () => {

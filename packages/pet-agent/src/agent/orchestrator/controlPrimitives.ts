@@ -4,7 +4,8 @@ import type { OrchestratorStateType } from './state';
 /**
  * Orchestrator control-flow primitives.
  *
- * Guards now live behind the shared guard registry (`agent/orchestrator/guardDefinitions`).
+ * Guard rules live in `agent/orchestrator/guardDefinitions` and are evaluated
+ * by their owning positions via `evaluateGuard` (see docs/GUARD_DESIGN.md).
  * This module keeps the remaining graph-local primitives: state patches,
  * recursion limits, and Decision node adaptation.
  */
@@ -45,6 +46,12 @@ export type OrchestratorNode = (
   state: OrchestratorStateType,
   runnableConfig?: RunnableConfig,
 ) => OrchestratorStatePatch | Promise<OrchestratorStatePatch>;
+
+export function createControlContextBuilder(orchestratorMaxIterations: number) {
+  return function buildControlContext(runnableConfig?: RunnableConfig): OrchestratorControlContext {
+    return { runnableConfig, orchestratorMaxIterations };
+  };
+}
 
 export function asDecisionNode(
   decision: OrchestratorDecision,

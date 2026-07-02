@@ -1,67 +1,37 @@
-import { AIMessage } from '@langchain/core/messages';
 import {
   defineGuard,
-  guardBlock,
-  guardPass,
+  guardProceed,
+  guardStop,
 } from '../../../guards';
-import type { TaskActiveDelegation } from '../types';
+import type { OrchestratorStateType } from '../state';
 import {
   ORCHESTRATOR_GUARD_NAME,
   ORCHESTRATOR_GUARD_POSITION,
-  statePatch,
-  type OrchestratorGuard,
+  type OrchestratorGuardPosition,
+  type RunIterationLimitGuardConfig,
 } from './types';
 
-function buildRunIterationLimitMessage(
-  delegation: TaskActiveDelegation,
-  limit: number,
-  count: number,
-): string {
-  return [
-    `主流程循环已达到上限：${count}/${limit}。`,
-    `当前仍保留 delegated task“${delegation.task}”（${delegation.lane}）。`,
-    '该轮 delegation record 为待续跑状态，可继续提交下一轮任务让我接着推进。',
-  ].join('\n');
-}
+export const RUN_ITERATION_LIMIT_REACHED = 'run_iteration_limit_reached';
 
-export function createRunIterationLimitGuard(): OrchestratorGuard {
-  return defineGuard({
-    name: ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT,
-    positions: [ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION],
-    rule: {
-      check: ({ config, state }) => {
-        const activeDelegation = state.taskActiveDelegation;
-        if (!activeDelegation) {
-          return guardPass();
-        }
-        return state.runIterationCount >= config.runIterationLimit
-          ? guardBlock('run_iteration_limit_reached')
-          : guardPass();
-      },
-    },
-    handler: {
-      handle: ({ config, result, state }) => {
-        if (result.status === 'pass') {
-          return statePatch({ runPendingFinalReply: null });
-        }
-        const activeDelegation = state.taskActiveDelegation;
-        if (!activeDelegation) {
-          return statePatch({ runPendingFinalReply: null });
-        }
-        return statePatch({
-          messages: [
-            new AIMessage(buildRunIterationLimitMessage(
-              activeDelegation,
-              config.runIterationLimit,
-              state.runIterationCount,
-            )),
-          ],
-          runPendingDelegation: null,
-          runPendingFinalReply: 'inline',
-          taskActiveDelegation: activeDelegation,
-          runIterationCount: 0,
-        });
-      },
-    },
-  });
-}
+export type RunIterationLimitGuardState =
+  Pick<OrchestratorStateType, 'taskActiveDelegation' | 'runIterationCount'>;
+
+export const runIterationLimitGuard = defineGuard<
+  RunIterationLimitGuardState,
+  RunIterationLimitGuardConfig,
+  OrchestratorGuardPosition
+>({
+  name: ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT,
+  positions: [ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION],
+  check: ({ config, state }) => {
+    if (!state.taskActiveDelegation) {
+      return guardProceed();
+    }
+    return state.runIterationCount >= config.runIterationLimit
+      ? guardStop(RUN_ITERATION_LIMIT_REACHED, {
+        runIterationCount: state.runIterationCount,
+        runIterationLimit: config.runIterationLimit,
+      })
+      : guardProceed();
+  },
+});

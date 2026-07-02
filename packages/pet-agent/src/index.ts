@@ -48,25 +48,26 @@ export type {
 
 export type {
   Guard,
-  GuardBlock,
-  GuardBlockHandler,
-  GuardCheckResult,
-  GuardCheckStatus,
-  GuardHandler,
-  GuardHandlerInput,
+  GuardDecisionEmitter,
+  GuardDecisionRecord,
+  GuardDerive,
+  GuardDetails,
+  GuardEvaluateOptions,
   GuardInput,
-  GuardPass,
-  GuardRule,
-  GuardRunOptions,
-  GuardRunResult,
+  GuardMaintain,
+  GuardOutcome,
+  GuardProceed,
+  GuardStop,
 } from './guards';
 export {
   defineGuard,
-  GUARD_PASS,
+  evaluateGuard,
+  GUARD_PROCEED,
   guardAppliesToPosition,
-  guardBlock,
-  guardPass,
-  GuardRegistry,
+  guardDerive,
+  guardMaintain,
+  guardProceed,
+  guardStop,
 } from './guards';
 
 export type {
@@ -253,7 +254,15 @@ export {
 } from './utils/operationMetadata';
 export { runAgent } from './agent/runAgent';
 export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
-export { createSubagent } from './subagent/createSubagent';
+export {
+  createSubagent,
+  SUBAGENT_GUARD_DECISION_EVENT,
+} from './subagent/createSubagent';
+export {
+  GUARD_DECISION_EVENT,
+  isGuardDecisionStreamChunk,
+  type GuardDecisionStreamChunk,
+} from './agent/orchestrator/runtime/guards/decisionEvents';
 export { isGraphRecursionLimitError } from './utils/graphErrors';
 export { clipForPrompt } from './agent/orchestrator/utils';
 export {

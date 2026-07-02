@@ -5,6 +5,7 @@ import {
 } from '../state';
 import {
   asDecisionNode,
+  createControlContextBuilder,
   type OrchestratorDecision,
 } from '../controlPrimitives';
 import type {
@@ -34,11 +35,6 @@ import {
   createPrepareNode,
   prepareUserIntentDecision,
 } from './nodes/prepare';
-import {
-  createControlContextBuilder,
-  createOrchestratorGuardRegistry,
-  createOrchestratorGuardRunner,
-} from './guards/runner';
 import { afterCapabilityDiscovery } from './routes/afterCapabilityDiscovery';
 import { afterContextPrep } from './routes/afterContextPrep';
 import { afterDecision } from './routes/afterDecision';
@@ -50,20 +46,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const orchestratorMaxIterations = readRunIterationLimit(config.maxRunIterations)
     ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
   const subagentContextWindowTokens = readSubagentContextWindowTokens(config);
-  const orchestratorGuardRegistry = createOrchestratorGuardRegistry();
-  const runOrchestratorGuard = createOrchestratorGuardRunner({
-    config,
-    orchestratorMaxIterations,
-    guardRegistry: orchestratorGuardRegistry,
-  });
   const buildControlContext = createControlContextBuilder(orchestratorMaxIterations);
-  const prepare = createPrepareNode(runOrchestratorGuard);
-  const compactContext = createCompactContextNode({ config, runOrchestratorGuard });
+  const prepare = createPrepareNode();
+  const compactContext = createCompactContextNode({ config });
   const delegationOutcomeDecisionGuardNode =
-    createDelegationOutcomeDecisionGuardNode(runOrchestratorGuard);
+    createDelegationOutcomeDecisionGuardNode();
   const delegationOutcomeIterationGuardNode =
-    createDelegationOutcomeIterationGuardNode(runOrchestratorGuard);
-  const capabilityDiscovery = createCapabilityDiscoveryNode({ config, runOrchestratorGuard });
+    createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations });
+  const capabilityDiscovery = createCapabilityDiscoveryNode({ config });
   const runOrchestrationDecision = createOrchestrationDecisionRunner(config);
 
   // The two Decision nodes bind the shared decision runner to a decision kind and

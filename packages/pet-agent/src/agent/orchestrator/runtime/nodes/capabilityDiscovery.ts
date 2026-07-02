@@ -5,10 +5,12 @@ import {
   capabilitySearchTool,
   readModelToolCalls,
 } from '../../capabilitySearch';
+import { evaluateGuard } from '../../../../guards';
 import { readContextCompactionSummaries } from '../../contextCompaction';
 import {
-  ORCHESTRATOR_GUARD_NAME,
+  forcedCapabilitySeedGuard,
   ORCHESTRATOR_GUARD_POSITION,
+  type ForcedCapabilitySeedDetails,
 } from '../../guardDefinitions';
 import {
   readLatestHumanRequest,
@@ -38,11 +40,9 @@ import {
   canSearchCapabilities,
   mainMessagesWithoutCompaction,
 } from '../decisions/capabilityCandidates';
-import type { OrchestratorGuardRunner } from '../guards/runner';
-
+import { guardDecisionEmitter } from '../guards/decisionEvents';
 export function createCapabilityDiscoveryNode(params: {
   config: OrchestratorConfig;
-  runOrchestratorGuard: OrchestratorGuardRunner;
 }) {
   return async function capabilityDiscovery(
     state: OrchestratorStateType,
@@ -50,6 +50,7 @@ export function createCapabilityDiscoveryNode(params: {
   ) {
     const {
       capabilities,
+      forcedCapabilityNames,
       toolkits,
       execution,
       workdir,
@@ -74,14 +75,14 @@ export function createCapabilityDiscoveryNode(params: {
     const capabilityList = capabilities ?? [];
     validateUniqueCapabilityNames(capabilityList);
 
-    const forcedSeedPatch = await params.runOrchestratorGuard(
-      ORCHESTRATOR_GUARD_NAME.FORCED_CAPABILITY_SEED,
-      ORCHESTRATOR_GUARD_POSITION.CAPABILITY_DISCOVERY,
+    const forcedSeedOutcome = evaluateGuard(forcedCapabilitySeedGuard, {
       state,
-      runnableConfig,
-    );
-    if (forcedSeedPatch.runCapabilitySearchState) {
-      return forcedSeedPatch;
+      config: { forcedCapabilityNames, capabilities: capabilityList },
+      position: ORCHESTRATOR_GUARD_POSITION.CAPABILITY_DISCOVERY,
+    }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
+    if (forcedSeedOutcome.kind === 'derive') {
+      const details = forcedSeedOutcome.details as ForcedCapabilitySeedDetails;
+      return { runCapabilitySearchState: details.runCapabilitySearchState };
     }
 
     const decisionBaseModel = params.config.models.act;

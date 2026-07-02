@@ -167,6 +167,37 @@ test('buildTuiOverlayModel visible owner priority stays aligned with input owner
       },
     },
     {
+      name: 'workspace',
+      expectedOwner: 'workspacePicker',
+      overlay: overlayInput({
+        workspacePicker: {
+          open: true,
+          workspaces: [{
+            id: 'workspace-a',
+            name: 'Workspace A',
+            rootPath: '/tmp/workspace-a',
+            active: true,
+          }],
+          selectedIndex: 0,
+          loading: false,
+        },
+        approval: { request: approvalRequest(), selectedIndex: 0 },
+        globalReviewPolicyPicker: {
+          open: true,
+          currentMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+          selectedIndex: 0,
+        },
+      }),
+      input: {
+        ready: true,
+        busy: false,
+        hasPendingApproval: true,
+        hasResumePicker: false,
+        hasWorkspacePicker: true,
+        hasGlobalReviewPolicyPicker: true,
+      },
+    },
+    {
       name: 'policy',
       expectedOwner: 'globalReviewPolicyPicker',
       overlay: overlayInput({

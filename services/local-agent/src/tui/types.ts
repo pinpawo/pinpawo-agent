@@ -31,3 +31,12 @@ export type ResumeSessionSummary = {
   updatedAt: string;
   active: boolean;
 };
+
+export type WorkspaceSummary = {
+  id: string;
+  name: string;
+  rootPath: string;
+  active: boolean;
+  createdAt?: string;
+  lastOpenedAt?: string;
+};

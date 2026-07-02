@@ -246,6 +246,8 @@ Server/runtime responses should expose:
 7. Replace global local tool workdir with workspace-bound toolkit factories.
 8. Add App/Desktop UI for selecting, opening, and registering workspaces.
 
+The first selector implementation should be restart-scoped: it may set the selected workspace as the default `workdir` for the next local-agent/TUI launch, but it should not claim that the already-running runtime has hot-swapped workspace state. Hot switching requires workspace-bound local toolkits, scheduler scope, checkpoints, and chat/studio session identity first.
+
 ## Validation
 
 - Runtime config tests verify stable workspace identity over existing workdir paths.

@@ -4,6 +4,7 @@ export type TuiCommandName =
   | 'chat'
   | 'studio'
   | 'new'
+  | 'workspace'
   | 'policy'
   | 'export'
   | 'edit'
@@ -64,6 +65,13 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/policy',
     description: '选择全局访问策略',
     helpText: '/policy 选择授权策略',
+  },
+  {
+    name: 'workspace',
+    aliases: ['workspaces', 'ws'],
+    usage: '/workspace',
+    description: '选择默认 workspace',
+    helpText: '/workspace 选择工作区',
   },
   {
     name: 'help',

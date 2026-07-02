@@ -12,11 +12,17 @@ import {
 } from './capabilities/capabilityAvailability';
 import { loadUserCapabilities, readUserCapabilityManifests } from './capabilityLoader';
 import type { LoadedUserCapability } from './capabilityLoader';
-import { loadStoredConfig } from './storage';
+import { loadStoredConfig, saveStoredConfig } from './storage';
 import { readAgentActivityHealthFields } from './operationActivityState';
 import { isAuthorizedLocalServerRequest } from './localServerAuth';
 import type { LocalServerDeps } from './localServerTypes';
 import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
+import {
+  listWorkspaceEntries,
+  selectWorkspaceEntry,
+  upsertWorkspaceEntry,
+  workspaceFromRuntimeConfig,
+} from './workspaceRegistry';
 
 type LocalHttpHandlerOptions = {
   authToken: string;
@@ -92,6 +98,59 @@ export function handleLocalHttpRequest(
         studio_wiki_base_dir: deps.runtimeConfig.studioWikiBaseDir,
       } : {}),
       ...studioConfigFields,
+    });
+    return true;
+  }
+
+  if (pathname === '/workspaces') {
+    if ((req.method ?? 'GET') !== 'GET') {
+      writeJson(res, 405, { error: 'method not allowed' });
+      return true;
+    }
+    const workspaces = listWorkspaceEntries({
+      runtimeConfig: deps.runtimeConfig,
+      registryPath: deps.workspaceRegistryPath,
+    });
+    const activeWorkspace = workspaces.find((workspace) => workspace.active) ?? null;
+    writeJson(res, 200, {
+      active_workspace_id: activeWorkspace?.id,
+      active_workdir: deps.runtimeConfig?.workdir ?? deps.workdir,
+      workspaces,
+    });
+    return true;
+  }
+
+  if (pathname === '/workspaces/select') {
+    if ((req.method ?? 'GET') !== 'POST') {
+      writeJson(res, 405, { error: 'method not allowed' });
+      return true;
+    }
+    readJsonBody(req).then((body) => {
+      const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId.trim() : '';
+      if (!workspaceId) {
+        writeJson(res, 400, { error: 'workspaceId is required' });
+        return;
+      }
+      const workspace = selectWorkspaceForRequest({
+        workspaceId,
+        deps,
+      });
+      const saveConfig = deps.saveStoredConfig ?? saveStoredConfig;
+      saveConfig({
+        ...loadStoredConfig(),
+        workdir: workspace.rootPath,
+      });
+      writeJson(res, 200, {
+        workspace,
+        requires_restart: true,
+      });
+    }).catch((err) => {
+      const status = err instanceof Error && err.message.startsWith('workspace not found:')
+        ? 404
+        : 400;
+      writeJson(res, status, {
+        error: err instanceof Error ? err.message : 'workspace selection failed',
+      });
     });
     return true;
   }
@@ -250,6 +309,54 @@ function readStudioConfigRuntimeFields(deps: LocalServerDeps) {
 function writeJson(res: ServerResponse, statusCode: number, payload: unknown) {
   res.writeHead(statusCode, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(payload));
+}
+
+function selectWorkspaceForRequest(input: {
+  workspaceId: string;
+  deps: LocalServerDeps;
+}) {
+  const activeWorkspace = input.deps.runtimeConfig
+    ? workspaceFromRuntimeConfig(input.deps.runtimeConfig)
+    : null;
+  if (activeWorkspace?.id === input.workspaceId) {
+    return upsertWorkspaceEntry({
+      id: activeWorkspace.id,
+      name: activeWorkspace.name,
+      rootPath: activeWorkspace.rootPath,
+      registryPath: input.deps.workspaceRegistryPath,
+    });
+  }
+  return selectWorkspaceEntry({
+    workspaceId: input.workspaceId,
+    registryPath: input.deps.workspaceRegistryPath,
+  });
+}
+
+function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    });
+    req.on('error', reject);
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8').trim();
+      if (!raw) {
+        resolve({});
+        return;
+      }
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          reject(new Error('request body must be a JSON object'));
+          return;
+        }
+        resolve(parsed as Record<string, unknown>);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  });
 }
 
 function parseStudioDueRunStatus(value: string | null): StudioDueRunStatus | null {

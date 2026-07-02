@@ -3,6 +3,7 @@ import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
+import type { StoredConfig } from './storage';
 
 export type LocalServerDeps = {
   actorId: string;
@@ -10,6 +11,8 @@ export type LocalServerDeps = {
   llmConfig: AgentLlmConfig;
   workdir: string;
   runtimeConfig?: LocalAgentRuntimeConfig;
+  workspaceRegistryPath?: string;
+  saveStoredConfig?: (config: StoredConfig) => void;
   studioDueRunScheduler?: LocalStudioDueRunScheduler;
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];

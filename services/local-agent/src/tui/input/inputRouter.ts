@@ -14,6 +14,7 @@ export type TuiInputRouteContext = {
   hasPendingApproval: boolean;
   approvalFreeTextActive?: boolean;
   hasResumePicker: boolean;
+  hasWorkspacePicker?: boolean;
   hasGlobalReviewPolicyPicker?: boolean;
   hasCommandPalette?: boolean;
   hasFileMention?: boolean;
@@ -29,6 +30,7 @@ export type TuiInputOwner =
   | { type: 'externalEditor' }
   | { type: 'unready' }
   | { type: 'resumePicker' }
+  | { type: 'workspacePicker' }
   | { type: 'globalReviewPolicyPicker' }
   | { type: 'approval'; freeTextActive: boolean }
   | { type: 'busy' }
@@ -40,6 +42,7 @@ export type TuiInputCommand =
   | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
+  | { target: 'workspace'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'globalReviewPolicy'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'commandPalette'; action: 'previous' | 'next' | 'accept' | 'submit' }
   | { target: 'fileMention'; action: 'previous' | 'next' | 'accept' }
@@ -58,6 +61,10 @@ export type TuiLegacyInputCommand =
   | { type: 'resume.next' }
   | { type: 'resume.submit' }
   | { type: 'resume.dismiss' }
+  | { type: 'workspace.previous' }
+  | { type: 'workspace.next' }
+  | { type: 'workspace.submit' }
+  | { type: 'workspace.dismiss' }
   | { type: 'globalReviewPolicy.previous' }
   | { type: 'globalReviewPolicy.next' }
   | { type: 'globalReviewPolicy.submit' }
@@ -101,6 +108,7 @@ export function resolveTuiInputOwner(context: TuiInputRouteContext): TuiInputOwn
   if (context.hasExternalEditor) return { type: 'externalEditor' };
   if (!context.ready) return { type: 'unready' };
   if (context.hasResumePicker) return { type: 'resumePicker' };
+  if (context.hasWorkspacePicker) return { type: 'workspacePicker' };
   if (context.hasPendingApproval) {
     return { type: 'approval', freeTextActive: Boolean(context.approvalFreeTextActive) };
   }
@@ -131,6 +139,13 @@ export function resolveTuiInputCommand(
       if (event.type === 'cursor.down') return { target: 'resume', action: 'next' };
       if (isReturn) return { target: 'resume', action: 'submit' };
       if (event.type === 'escape') return { target: 'resume', action: 'dismiss' };
+      return { target: 'none' };
+
+    case 'workspacePicker':
+      if (event.type === 'cursor.up') return { target: 'workspace', action: 'previous' };
+      if (event.type === 'cursor.down') return { target: 'workspace', action: 'next' };
+      if (isReturn) return { target: 'workspace', action: 'submit' };
+      if (event.type === 'escape') return { target: 'workspace', action: 'dismiss' };
       return { target: 'none' };
 
     case 'globalReviewPolicyPicker':
@@ -188,6 +203,8 @@ export function toLegacyTuiInputCommand(command: TuiInputCommand): TuiLegacyInpu
       return { type: `approval.${command.action}` };
     case 'resume':
       return { type: `resume.${command.action}` };
+    case 'workspace':
+      return { type: `workspace.${command.action}` };
     case 'globalReviewPolicy':
       return { type: `globalReviewPolicy.${command.action}` };
     case 'commandPalette':

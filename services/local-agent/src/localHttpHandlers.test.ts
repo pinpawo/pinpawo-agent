@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import test from 'node:test';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import type { LocalServerDeps } from './localServerTypes';
@@ -16,6 +17,17 @@ function makeReq(url: string, authorization?: string): IncomingMessage {
       ...(authorization ? { authorization } : {}),
     },
   } as IncomingMessage;
+}
+
+function makeJsonReq(url: string, body: unknown, authorization?: string): IncomingMessage {
+  const req = Readable.from([JSON.stringify(body)]) as IncomingMessage;
+  req.url = url;
+  req.method = 'POST';
+  req.headers = {
+    host: '127.0.0.1:3210',
+    ...(authorization ? { authorization } : {}),
+  };
+  return req;
 }
 
 function makeRes() {
@@ -261,6 +273,74 @@ test('handleLocalHttpRequest exposes workdir Studio config source on runtime end
     studio_config_active_path: studioConfigPath,
     legacy_studio_config_path: join(homedir(), '.pinpawo', 'studio.json'),
   });
+});
+
+test('handleLocalHttpRequest lists active runtime workspace and can select it', async () => {
+  const workdir = await fs.mkdtemp(join(tmpdir(), 'pinpawo-runtime-'));
+  const stateRoot = join(workdir, '.pinpawo');
+  const registryPath = join(workdir, 'workspaces.json');
+  const deps = {
+    actorId: 'pet-a',
+    llmConfig: {
+      model: 'test-model',
+      contextWindowTokens: 32000,
+    },
+    workdir,
+    workspaceRegistryPath: registryPath,
+    saveStoredConfig: () => {},
+    runtimeConfig: {
+      workdir,
+      workspace: {
+        id: 'workspace-active',
+        name: 'Active Workspace',
+        rootPath: workdir,
+      },
+      stateRoot,
+      studioConfigPath: join(stateRoot, 'studio.json'),
+      studioDueRunsPath: join(stateRoot, 'studio-due-runs.json'),
+      petsDir: join(stateRoot, 'pets'),
+      studioWikiBaseDir: join(stateRoot, 'studio-wiki'),
+      checkpointPath: join(stateRoot, 'checkpoints.json'),
+      tuiCheckpointPath: join(stateRoot, 'checkpoints-tui.json'),
+      tuiSessionPath: join(stateRoot, 'tui-sessions.json'),
+      capabilityArtifactRoot: join(stateRoot, 'capability-artifacts'),
+    },
+  } as unknown as LocalServerDeps;
+  const options = {
+    authToken: 'secret',
+    loadHistory: async () => [],
+    listSessions: async () => [],
+    resumeSession: async () => {
+      throw new Error('not called');
+    },
+  };
+
+  const listRes = makeRes();
+  assert.equal(handleLocalHttpRequest(makeReq('/workspaces', 'Bearer secret'), listRes, deps, options), true);
+  assert.equal(listRes.statusCode, 200);
+  const listPayload = JSON.parse(listRes.body);
+  assert.equal(listPayload.active_workspace_id, 'workspace-active');
+  assert.equal(listPayload.active_workdir, workdir);
+  assert.deepEqual(listPayload.workspaces.map((workspace: { id: string; active: boolean }) => ({
+    id: workspace.id,
+    active: workspace.active,
+  })), [{ id: 'workspace-active', active: true }]);
+
+  const selectRes = makeRes();
+  assert.equal(
+    handleLocalHttpRequest(
+      makeJsonReq('/workspaces/select', { workspaceId: 'workspace-active' }, 'Bearer secret'),
+      selectRes,
+      deps,
+      options,
+    ),
+    true,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(selectRes.statusCode, 200);
+  const selectedPayload = JSON.parse(selectRes.body);
+  assert.equal(selectedPayload.workspace.id, 'workspace-active');
+  assert.equal(selectedPayload.requires_restart, true);
 });
 
 test('handleLocalHttpRequest serves studio due-runs trace when scheduler is available', async () => {

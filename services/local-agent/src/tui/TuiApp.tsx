@@ -42,6 +42,7 @@ import {
 import type { AgentTimelineDisplayEntry } from './timeline/agentTimelineSelectors';
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { useResumePickerController } from './useResumePickerController';
+import { useWorkspacePickerController } from './useWorkspacePickerController';
 import { useTextAreaController } from './useTextAreaController';
 import {
   GLOBAL_REVIEW_POLICY_PICKER_OPTIONS,
@@ -229,11 +230,26 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     resetTimelineView,
     runtimeController,
   });
+  const {
+    workspacePicker,
+    workspacePickerOpen,
+    openWorkspacePicker,
+    closeWorkspacePicker,
+    selectWorkspace,
+    moveWorkspaceSelection,
+  } = useWorkspacePickerController({
+    ready,
+    busy,
+    appendSystemMessage: (text) => appendMessage('system', text),
+    clearInputValue,
+    runtimeController,
+  });
 
   // Input area focus: only when ready, not busy, and no modal panel.
   const inputFocused = ready
     && !busy
     && !resumePickerOpen
+    && !workspacePickerOpen
     && !globalReviewPolicyPickerOpen
     && !externalEditorOpen;
   const textArea = useTextAreaController({
@@ -269,6 +285,12 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
       selectedIndex: resumePicker.selectedIndex,
       loading: resumePicker.status === 'loading',
     },
+    workspacePicker: {
+      open: workspacePickerOpen,
+      workspaces: workspacePicker.workspaces,
+      selectedIndex: workspacePicker.selectedIndex,
+      loading: workspacePicker.status === 'loading',
+    },
     approval: {
       request: pendingApproval,
       selectedIndex: approvalIndex,
@@ -292,6 +314,10 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     resumePicker.selectedIndex,
     resumePicker.status,
     resumePickerOpen,
+    workspacePicker.workspaces,
+    workspacePicker.selectedIndex,
+    workspacePicker.status,
+    workspacePickerOpen,
     screenModel.regions.overlay.width,
   ]);
 
@@ -359,6 +385,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
       enterStudioMode,
       exitStudioMode,
       openResumePicker,
+      openWorkspacePicker,
       openGlobalReviewPolicyPicker,
       openExternalEditor,
       exit,
@@ -417,6 +444,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
       hasPendingApproval: Boolean(pendingApproval),
       approvalFreeTextActive: Boolean(pendingApproval && inputValue.trim()),
       hasResumePicker: resumePickerOpen,
+      hasWorkspacePicker: workspacePickerOpen,
       hasGlobalReviewPolicyPicker: globalReviewPolicyPickerOpen,
       hasCommandPalette: commandPalette.open,
       hasFileMention: fileMention.open,
@@ -484,6 +512,22 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
           return;
         }
         closeResumePicker();
+        return;
+
+      case 'workspace':
+        if (action.action === 'previous') {
+          moveWorkspaceSelection(-1);
+          return;
+        }
+        if (action.action === 'next') {
+          moveWorkspaceSelection(1);
+          return;
+        }
+        if (action.action === 'submit') {
+          selectWorkspace();
+          return;
+        }
+        closeWorkspacePicker();
         return;
 
       case 'globalReviewPolicy':

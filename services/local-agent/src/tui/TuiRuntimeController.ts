@@ -357,6 +357,14 @@ export class TuiRuntimeController {
     return this.localServerClient.resumeSession(sessionId);
   }
 
+  async listWorkspaces() {
+    return this.localServerClient.listWorkspaces();
+  }
+
+  async selectWorkspace(workspaceId: string) {
+    return this.localServerClient.selectWorkspace(workspaceId);
+  }
+
   private async initialize() {
     this.options.dispatch({
       type: 'connection.set',

@@ -12,7 +12,7 @@ import type {
   TuiCoreTimelineEntry,
 } from './contracts/tuiCoreContract';
 import { buildTuiSessionSnapshotFromMessages } from './snapshot/tuiSessionSnapshot';
-import type { ResumeSessionSummary } from './types';
+import type { ResumeSessionSummary, WorkspaceSummary } from './types';
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 1500;
 
@@ -42,6 +42,11 @@ export type LocalServerRuntimeSnapshot = {
   legacyStudioConfigPath?: string;
   petsDir?: string;
   studioWikiBaseDir?: string;
+};
+
+export type WorkspaceSelectionResult = {
+  workspace: WorkspaceSummary;
+  requiresRestart: boolean;
 };
 
 export class TuiLocalServerClient {
@@ -140,6 +145,44 @@ export class TuiLocalServerClient {
           return session ? [session] : [];
         })
       : [];
+  }
+
+  async listWorkspaces(): Promise<WorkspaceSummary[]> {
+    const res = await this.fetchAuth(this.url('/workspaces'));
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const payload = await res.json() as { workspaces?: unknown };
+    return Array.isArray(payload.workspaces)
+      ? payload.workspaces.flatMap((item) => {
+          const workspace = parseWorkspaceSummary(item);
+          return workspace ? [workspace] : [];
+        })
+      : [];
+  }
+
+  async selectWorkspace(workspaceId: string): Promise<WorkspaceSelectionResult> {
+    const res = await this.fetchAuth(this.url('/workspaces/select'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspaceId }),
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const payload = await res.json() as {
+      workspace?: unknown;
+      requires_restart?: unknown;
+      requiresRestart?: unknown;
+    };
+    const workspace = parseWorkspaceSummary(payload.workspace);
+    if (!workspace) {
+      throw new Error('invalid workspace selection payload');
+    }
+    return {
+      workspace,
+      requiresRestart: payload.requires_restart === true || payload.requiresRestart === true,
+    };
   }
 
   async resumeSession(sessionId: string): Promise<{
@@ -562,6 +605,26 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
     legacyStudioConfigPath: rawLegacyStudioConfigPath,
     petsDir: rawPetsDir,
     studioWikiBaseDir: rawStudioWikiBaseDir,
+  };
+}
+
+export function parseWorkspaceSummary(payload: unknown): WorkspaceSummary | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  const id = pickString(record, ['id', 'workspace_id', 'workspaceId']);
+  const name = pickString(record, ['name', 'workspace_name', 'workspaceName']);
+  const rootPath = pickString(record, ['rootPath', 'root_path', 'workspace_root', 'workspaceRoot', 'workdir']);
+  if (!id || !name || !rootPath) return null;
+  const active = record.active === true || record.active === 'true';
+  const createdAt = pickString(record, ['createdAt', 'created_at']);
+  const lastOpenedAt = pickString(record, ['lastOpenedAt', 'last_opened_at']);
+  return {
+    id,
+    name,
+    rootPath,
+    active,
+    ...(createdAt ? { createdAt } : {}),
+    ...(lastOpenedAt ? { lastOpenedAt } : {}),
   };
 }
 

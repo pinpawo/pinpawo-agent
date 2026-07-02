@@ -4,6 +4,7 @@ import {
   parseHistoryMessages,
   parseLocalServerRuntime,
   parseResumeSessionSummary,
+  parseWorkspaceSummary,
   TuiLocalServerClient,
 } from './tui/tuiLocalServerClient';
 
@@ -70,6 +71,23 @@ test('parseLocalServerRuntime reads workdir-scoped runtime paths', () => {
     petsDir: '/tmp/workspace/.pinpawo/pets',
     studioWikiBaseDir: '/tmp/workspace/.pinpawo/studio-wiki',
   });
+});
+
+test('parseWorkspaceSummary validates workspace payloads', () => {
+  assert.deepEqual(parseWorkspaceSummary({
+    id: 'workspace-a',
+    name: 'Workspace A',
+    rootPath: '/tmp/workspace-a',
+    active: true,
+    lastOpenedAt: '2026-07-02T00:00:00.000Z',
+  }), {
+    id: 'workspace-a',
+    name: 'Workspace A',
+    rootPath: '/tmp/workspace-a',
+    active: true,
+    lastOpenedAt: '2026-07-02T00:00:00.000Z',
+  });
+  assert.equal(parseWorkspaceSummary({ id: 'missing-root', name: 'Bad' }), null);
 });
 
 test('TuiLocalServerClient reads sessions, resume payloads, history, and health', async () => {
@@ -140,6 +158,31 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
         ],
       });
     }
+    if (url.endsWith('/workspaces')) {
+      return jsonResponse({
+        workspaces: [
+          {
+            id: 'workspace-a',
+            name: 'Workspace A',
+            rootPath: '/tmp/workspace-a',
+            active: true,
+          },
+          { id: 'bad' },
+        ],
+      });
+    }
+    if (url.endsWith('/workspaces/select')) {
+      assert.equal(init?.method, 'POST');
+      assert.equal(init?.body, JSON.stringify({ workspaceId: 'workspace-a' }));
+      return jsonResponse({
+        workspace: {
+          id: 'workspace-a',
+          name: 'Workspace A',
+          rootPath: '/tmp/workspace-a',
+        },
+        requires_restart: true,
+      });
+    }
     if (url.includes('/sessions/resume?sessionId=chat%3Aone')) {
       return jsonResponse({
         session: {
@@ -184,6 +227,10 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
   assert.equal(snapshot.runs[0]?.pendingReview?.review?.id, 'review-1');
   assert.equal(snapshot.runs[0]?.pendingReview?.petId, 'pet-a');
   assert.deepEqual((await client.listResumeSessions()).map((item) => item.id), ['chat:one']);
+  assert.deepEqual((await client.listWorkspaces()).map((item) => item.id), ['workspace-a']);
+  const workspaceSelection = await client.selectWorkspace('workspace-a');
+  assert.equal(workspaceSelection.workspace.rootPath, '/tmp/workspace-a');
+  assert.equal(workspaceSelection.requiresRestart, true);
   const resumed = await client.resumeSession('chat:one');
 
   assert.equal(resumed.session.active, true);
@@ -198,9 +245,13 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
     'http://127.0.0.1:3210/snapshot',
     'http://127.0.0.1:3210/runtime',
     'http://127.0.0.1:3210/sessions',
+    'http://127.0.0.1:3210/workspaces',
+    'http://127.0.0.1:3210/workspaces/select',
     'http://127.0.0.1:3210/sessions/resume?sessionId=chat%3Aone',
   ]);
   assert.deepEqual(seenAuth, [
+    'Bearer secret',
+    'Bearer secret',
     'Bearer secret',
     'Bearer secret',
     'Bearer secret',

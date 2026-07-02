@@ -14,6 +14,7 @@ type TuiCommandSubmitInput = {
   enterStudioMode: (conversationId: string) => void;
   exitStudioMode: () => void;
   openResumePicker: () => void;
+  openWorkspacePicker: () => void;
   openGlobalReviewPolicyPicker: () => void;
   openExternalEditor?: (initialText: string) => void;
   exit: () => void;
@@ -72,6 +73,12 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
       options.exitStudioMode();
       options.dispatch({ type: 'session.set_kind', kind: 'chat' });
       options.openResumePicker();
+      options.clearInputValue();
+      return;
+    }
+
+    if (parsed.name === 'workspace') {
+      options.openWorkspacePicker();
       options.clearInputValue();
       return;
     }

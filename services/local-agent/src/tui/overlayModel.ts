@@ -2,10 +2,11 @@ import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import type { CommandPaletteModel } from './input/commandPalette';
 import type { FileMentionModel } from './input/fileMention';
 import type { ApprovalRequestModel } from './state/tuiState';
-import type { ResumeSessionSummary } from './types';
+import type { ResumeSessionSummary, WorkspaceSummary } from './types';
 
 export type TuiOverlayOwner =
   | 'resumePicker'
+  | 'workspacePicker'
   | 'approval'
   | 'globalReviewPolicyPicker'
   | 'commandPalette'
@@ -23,6 +24,13 @@ export type TuiOverlay =
       type: 'resumePicker';
       label: 'Resume';
       sessions: ResumeSessionSummary[];
+      selectedIndex: number;
+      loading: boolean;
+    }
+  | {
+      type: 'workspacePicker';
+      label: 'Workspace';
+      workspaces: WorkspaceSummary[];
       selectedIndex: number;
       loading: boolean;
     }
@@ -49,11 +57,17 @@ export type TuiOverlay =
       model: FileMentionModel;
     };
 
-export function buildTuiOverlayModel(input: {
+export type TuiOverlayModelInput = {
   width: number;
   resumePicker: {
     open: boolean;
     sessions: ResumeSessionSummary[];
+    selectedIndex: number;
+    loading: boolean;
+  };
+  workspacePicker?: {
+    open: boolean;
+    workspaces: WorkspaceSummary[];
     selectedIndex: number;
     loading: boolean;
   };
@@ -68,7 +82,9 @@ export function buildTuiOverlayModel(input: {
   };
   commandPalette: CommandPaletteModel;
   fileMention: FileMentionModel;
-}): TuiOverlayModel {
+};
+
+export function buildTuiOverlayModel(input: TuiOverlayModelInput): TuiOverlayModel {
   const current = resolveCurrentOverlay(input);
   return {
     current,
@@ -78,7 +94,13 @@ export function buildTuiOverlayModel(input: {
   };
 }
 
-function resolveCurrentOverlay(input: Parameters<typeof buildTuiOverlayModel>[0]): TuiOverlay | null {
+function resolveCurrentOverlay(input: TuiOverlayModelInput): TuiOverlay | null {
+  const workspacePicker = input.workspacePicker ?? {
+    open: false,
+    workspaces: [],
+    selectedIndex: 0,
+    loading: false,
+  };
   if (input.resumePicker.open) {
     return {
       type: 'resumePicker',
@@ -86,6 +108,15 @@ function resolveCurrentOverlay(input: Parameters<typeof buildTuiOverlayModel>[0]
       sessions: input.resumePicker.sessions,
       selectedIndex: input.resumePicker.selectedIndex,
       loading: input.resumePicker.loading,
+    };
+  }
+  if (workspacePicker.open) {
+    return {
+      type: 'workspacePicker',
+      label: 'Workspace',
+      workspaces: workspacePicker.workspaces,
+      selectedIndex: workspacePicker.selectedIndex,
+      loading: workspacePicker.loading,
     };
   }
   if (input.approval.request) {

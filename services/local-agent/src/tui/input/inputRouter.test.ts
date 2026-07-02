@@ -120,6 +120,25 @@ test('resolveTuiInputCommand routes resume picker commands', () => {
   );
 });
 
+test('resolveTuiInputCommand routes workspace picker commands', () => {
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.up' }, { type: 'workspacePicker' }),
+    { target: 'workspace', action: 'previous' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.down' }, { type: 'workspacePicker' }),
+    { target: 'workspace', action: 'next' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'submit' }, { type: 'workspacePicker' }),
+    { target: 'workspace', action: 'submit' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'escape' }, { type: 'workspacePicker' }),
+    { target: 'workspace', action: 'dismiss' },
+  );
+});
+
 test('resolveTuiInputCommand routes global review policy picker commands', () => {
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'cursor.up' }, { type: 'globalReviewPolicyPicker' }),

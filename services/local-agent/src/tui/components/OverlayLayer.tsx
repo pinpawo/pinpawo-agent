@@ -4,6 +4,7 @@ import { CommandPalette } from './CommandPalette';
 import { FileMentionPopup } from './FileMentionPopup';
 import { GlobalReviewPolicyPicker } from './GlobalReviewPolicyPicker';
 import { ResumePicker } from './ResumePicker';
+import { WorkspacePicker } from './WorkspacePicker';
 import type { TuiOverlayModel } from '../overlayModel';
 
 export function OverlayLayer(props: {
@@ -17,6 +18,15 @@ export function OverlayLayer(props: {
       return (
         <ResumePicker
           sessions={overlay.sessions}
+          selectedIndex={overlay.selectedIndex}
+          loading={overlay.loading}
+          width={props.model.width}
+        />
+      );
+    case 'workspacePicker':
+      return (
+        <WorkspacePicker
+          workspaces={overlay.workspaces}
           selectedIndex={overlay.selectedIndex}
           loading={overlay.loading}
           width={props.model.width}

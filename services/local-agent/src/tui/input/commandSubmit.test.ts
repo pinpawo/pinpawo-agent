@@ -39,6 +39,7 @@ function createSubmitHarness(overrides: {
         studioConversationId = null;
       },
       openResumePicker: () => sent.push('resume'),
+      openWorkspacePicker: () => sent.push('workspace'),
       openGlobalReviewPolicyPicker: () => sent.push('policy'),
       openExternalEditor: overrides.openExternalEditor,
       exit: () => {},
@@ -142,6 +143,14 @@ test('submitCurrentInputFromController opens global review policy picker for /po
 
   assert.equal(harness.policyOpened(), true);
   assert.deepEqual(harness.sent, ['policy', 'clear']);
+});
+
+test('submitCurrentInputFromController opens workspace picker for /workspace', () => {
+  const harness = createSubmitHarness({ inputValue: '/workspace' });
+
+  harness.submit();
+
+  assert.deepEqual(harness.sent, ['workspace', 'clear']);
 });
 
 test('submitCurrentInputFromController reports missing external editor hook', () => {

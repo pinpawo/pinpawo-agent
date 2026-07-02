@@ -6,7 +6,7 @@ import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
-import { createSubagent } from './createSubagent';
+import { buildNestedSubagentStreamConfig, createSubagent } from './createSubagent';
 import {
   SUBAGENT_GUARD_STOP_MARKER_KEY,
   readSubagentGuardStopReason,
@@ -45,6 +45,27 @@ function usageMessage(content: string, inputTokens: number) {
   });
 }
 
+test('buildNestedSubagentStreamConfig does not inherit parent callback run identity', () => {
+  const callbacks = [{
+    handleChainStart: async () => undefined,
+  }];
+  const config = buildNestedSubagentStreamConfig({
+    callbacks,
+    runId: 'parent-run',
+    configurable: { thread_id: 'thread-1' },
+    metadata: { source: 'parent' },
+    tags: ['parent-tag'],
+    maxConcurrency: 2,
+  });
+
+  assert.deepEqual(config, {
+    configurable: { thread_id: 'thread-1' },
+    metadata: { source: 'parent' },
+    tags: ['parent-tag'],
+    maxConcurrency: 2,
+  });
+});
+
 test('createSubagent emits non-tool model text as runtime deltas', async () => {
   const events: unknown[] = [];
 
@@ -74,6 +95,108 @@ test('createSubagent emits non-tool model text as runtime deltas', async () => {
       && (event as { name?: unknown }).name === 'subagent_message_delta',
   ));
   assert.equal(deltas.map((event) => event.data.text).join(''), 'subagent result');
+});
+
+test('createSubagent emits tool lifecycle events through event streaming', async () => {
+  const events: unknown[] = [];
+  const readFile = tool(async ({ path }) => `contents:${path}`, {
+    name: 'read_file',
+    description: 'read a file',
+    schema: z.object({ path: z.string() }),
+  });
+
+  const result = await createSubagent({
+    model: new FakeToolCallingModel({
+      toolCalls: [
+        [{
+          id: 'call-read',
+          name: 'read_file',
+          args: { path: 'README.md' },
+        }],
+        [],
+      ],
+    }),
+    tools: [readFile],
+    instructions: [],
+    operations: {
+      read_file: {
+        title: 'Read File',
+      },
+    },
+    messages: [new HumanMessage('read the file')],
+    maxIterations: 4,
+    onToolEvent: (event) => {
+      events.push(event);
+    },
+  });
+
+  assert.equal(result.completionReason, 'natural');
+  const toolEvents = events.filter((event): event is {
+    event: 'on_tool_start' | 'on_tool_end';
+    name: string;
+    toolCallId?: string;
+    operation?: { title?: string };
+  } => Boolean(
+    event
+      && typeof event === 'object'
+      && (
+        (event as { event?: unknown }).event === 'on_tool_start'
+        || (event as { event?: unknown }).event === 'on_tool_end'
+      ),
+  ));
+  assert.deepEqual(toolEvents.map((event) => event.event), ['on_tool_start', 'on_tool_end']);
+  assert.equal(toolEvents[0]?.name, 'read_file');
+  assert.equal(toolEvents[0]?.toolCallId, 'call-read');
+  assert.equal(toolEvents[0]?.operation?.title, 'Read File');
+  assert.equal(toolEvents[1]?.name, 'read_file');
+  assert.equal(toolEvents[1]?.toolCallId, 'call-read');
+  assert.equal(toolEvents[1]?.operation?.title, 'Read File');
+});
+
+test('createSubagent preserves streamed tool progress from event streaming', async () => {
+  const events: unknown[] = [];
+  const search = tool(async function* ({ query }) {
+    yield { message: `searching ${query}`, progress: 0.5 };
+    return `done:${query}`;
+  }, {
+    name: 'search_docs',
+    description: 'search docs',
+    schema: z.object({ query: z.string() }),
+  });
+
+  await createSubagent({
+    model: new FakeToolCallingModel({
+      toolCalls: [
+        [{
+          id: 'call-search',
+          name: 'search_docs',
+          args: { query: 'streaming' },
+        }],
+        [],
+      ],
+    }),
+    tools: [search],
+    instructions: [],
+    messages: [new HumanMessage('search docs')],
+    maxIterations: 4,
+    onToolEvent: (event) => {
+      events.push(event);
+    },
+  });
+
+  const progress = events.find((event): event is {
+    event: 'on_tool_event';
+    name: string;
+    toolCallId?: string;
+    data: unknown;
+  } => Boolean(
+    event
+      && typeof event === 'object'
+      && (event as { event?: unknown }).event === 'on_tool_event',
+  ));
+  assert.equal(progress?.name, 'search_docs');
+  assert.equal(progress?.toolCallId, 'call-search');
+  assert.equal(progress?.data, JSON.stringify({ message: 'searching streaming', progress: 0.5 }));
 });
 
 test('createSubagent contextPolicy rewrites persisted subagent transcript', async () => {

@@ -1,3 +1,4 @@
+import React from 'react';
 import { render } from 'ink';
 import { ensureActorSelected } from '../actorSelection';
 import { applyRuntimeWorkdir } from '../runtimeWorkdir';

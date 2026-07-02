@@ -104,13 +104,21 @@ test('TuiRuntimeController uses configured workdir when runtime payload omits cw
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (controller as any).setRuntimeFromHealth({ model: 'test-model' });
+  (controller as any).setRuntimeFromHealth({
+    model: 'test-model',
+    workspaceId: 'workspace-test',
+    workspaceName: 'Workspace Test',
+    workspaceRoot: '/tmp/pinpawo-tui-workdir',
+  });
 
   assert.deepEqual(actions, [{
     type: 'session.set_runtime',
     runtime: {
       model: 'test-model',
       cwd: '/tmp/pinpawo-tui-workdir',
+      workspaceId: 'workspace-test',
+      workspaceName: 'Workspace Test',
+      workspaceRoot: '/tmp/pinpawo-tui-workdir',
     },
   }]);
 });

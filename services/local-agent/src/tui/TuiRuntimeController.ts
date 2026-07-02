@@ -310,6 +310,9 @@ export class TuiRuntimeController {
     model?: string;
     contextWindow?: number;
     cwd?: string;
+    workspaceId?: string;
+    workspaceName?: string;
+    workspaceRoot?: string;
     stateRoot?: string;
     studioConfigPath?: string;
     studioConfigSource?: string;
@@ -331,6 +334,9 @@ export class TuiRuntimeController {
         ...(model ? { model } : {}),
         ...(payload.contextWindow !== undefined ? { contextWindow: payload.contextWindow } : {}),
         ...(cwd ? { cwd } : {}),
+        ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
+        ...(payload.workspaceName ? { workspaceName: payload.workspaceName } : {}),
+        ...(payload.workspaceRoot ? { workspaceRoot: payload.workspaceRoot } : {}),
         ...(payload.stateRoot ? { stateRoot: payload.stateRoot } : {}),
         ...(payload.studioConfigPath ? { studioConfigPath: payload.studioConfigPath } : {}),
         ...(payload.studioConfigSource ? { studioConfigSource: payload.studioConfigSource } : {}),

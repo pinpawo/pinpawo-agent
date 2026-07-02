@@ -34,6 +34,9 @@ export type LocalServerRuntimeSnapshot = {
   model?: string;
   contextWindow?: number;
   cwd?: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  workspaceRoot?: string;
   stateRoot?: string;
   studioConfigPath?: string;
   studioDueRunsPath?: string;
@@ -529,6 +532,9 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
       : null;
   const rawModel = pickString(record, ['llm_model', 'llmModel', 'model']);
   const rawWorkdir = pickString(record, ['workdir', 'workDir', 'cwd', 'work_dir']);
+  const rawWorkspaceId = pickString(record, ['workspace_id', 'workspaceId']);
+  const rawWorkspaceName = pickString(record, ['workspace_name', 'workspaceName']);
+  const rawWorkspaceRoot = pickString(record, ['workspace_root', 'workspaceRoot']);
   const rawStateRoot = pickString(record, ['state_root', 'stateRoot']);
   const rawStudioConfigPath = pickString(record, ['studio_config_path', 'studioConfigPath']);
   const rawStudioDueRunsPath = pickString(record, ['studio_due_runs_path', 'studioDueRunsPath']);
@@ -554,6 +560,9 @@ export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSna
     model: rawModel ?? nestedModel,
     contextWindow: parsePositiveInteger(rawContextWindow) ?? nestedContextWindow,
     cwd: rawWorkdir ?? pickString(nested ?? {}, ['workdir', 'cwd']),
+    workspaceId: rawWorkspaceId,
+    workspaceName: rawWorkspaceName,
+    workspaceRoot: rawWorkspaceRoot,
     stateRoot: rawStateRoot,
     studioConfigPath: rawStudioConfigPath,
     studioDueRunsPath: rawStudioDueRunsPath,

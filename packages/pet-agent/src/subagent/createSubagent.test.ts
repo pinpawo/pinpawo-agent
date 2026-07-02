@@ -6,6 +6,7 @@ import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
+import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 import { buildNestedSubagentStreamConfig, createSubagent } from './createSubagent';
 import {
   SUBAGENT_GUARD_STOP_MARKER_KEY,
@@ -64,6 +65,53 @@ test('buildNestedSubagentStreamConfig does not inherit parent callback run ident
     tags: ['parent-tag'],
     maxConcurrency: 2,
   });
+});
+
+test('createSubagent does not leak run events to AsyncLocalStorage-inherited parent callbacks', async () => {
+  // Callbacks reach a nested run through AsyncLocalStorage even when the
+  // explicit config is stripped. If they leak in, the nested pregel holds
+  // duplicate tracer copies over one shared run map and every run-end fires
+  // "No <type> run to end" (see the ALS isolation in createSubagent).
+  const leaked: string[] = [];
+  const parentCallbacks = [{
+    handleChainStart: async () => {
+      leaked.push('chain_start');
+    },
+    handleLLMStart: async () => {
+      leaked.push('llm_start');
+    },
+    handleToolStart: async () => {
+      leaked.push('tool_start');
+    },
+  }];
+  const readFile = tool(async ({ path }) => `contents:${path}`, {
+    name: 'read_file',
+    description: 'read a file',
+    schema: z.object({ path: z.string() }),
+  });
+
+  const result = await AsyncLocalStorageProviderSingleton.runWithConfig(
+    { callbacks: parentCallbacks },
+    () => createSubagent({
+      model: new FakeToolCallingModel({
+        toolCalls: [
+          [{
+            id: 'call-read',
+            name: 'read_file',
+            args: { path: 'README.md' },
+          }],
+          [],
+        ],
+      }),
+      tools: [readFile],
+      instructions: [],
+      messages: [new HumanMessage('read the file')],
+      maxIterations: 4,
+    }),
+  );
+
+  assert.equal(result.completionReason, 'natural');
+  assert.deepEqual(leaked, []);
 });
 
 test('createSubagent emits non-tool model text as runtime deltas', async () => {

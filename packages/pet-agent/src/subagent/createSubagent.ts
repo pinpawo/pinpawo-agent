@@ -11,6 +11,7 @@ import type {
 } from '../guards';
 import { createAgent, createMiddleware } from 'langchain';
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 import { SubagentToolEventTracker } from './toolEventTracker';
 import {
   buildContextPolicyStateUpdate,
@@ -426,65 +427,72 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
 
   try {
     const streamConfig = buildNestedSubagentStreamConfig(input.runnableConfig);
-    const run = await agent.streamEvents(
-      { messages: inputState.messages },
-      {
-        ...streamConfig,
-        version: 'v3',
-        signal: input.signal,
-        // Normal stopping is controlled by the subagent iteration guard.
-        // LangGraph recursionLimit stays intentionally high as a final breaker.
-        recursionLimit: SUBAGENT_HARD_RECURSION_LIMIT,
-      },
-    );
+    // Stripping callbacks from the explicit config is not enough: the parent
+    // graph's callback manager also flows in implicitly through
+    // AsyncLocalStorage, and the nested pregel run can hold duplicate tracer
+    // copies that share one run map. Run the whole nested stream in a cleared
+    // ALS scope so the subagent traces as its own root run instead.
+    await AsyncLocalStorageProviderSingleton.runWithConfig({}, async () => {
+      const run = await agent.streamEvents(
+        { messages: inputState.messages },
+        {
+          ...streamConfig,
+          version: 'v3',
+          signal: input.signal,
+          // Normal stopping is controlled by the subagent iteration guard.
+          // LangGraph recursionLimit stays intentionally high as a final breaker.
+          recursionLimit: SUBAGENT_HARD_RECURSION_LIMIT,
+        },
+      );
 
-    const consumeValues = async () => {
-      for await (const value of run.values) {
-        latestMessages = readMessagesFromValuesChunk(value) ?? latestMessages;
-      }
-    };
-    const consumeMessages = async () => {
-      for await (const message of run.messages) {
-        for await (const token of message.text) {
-          await emitSubagentMessageDelta(token);
+      const consumeValues = async () => {
+        for await (const value of run.values) {
+          latestMessages = readMessagesFromValuesChunk(value) ?? latestMessages;
         }
-      }
-    };
-    const consumeToolEvents = async () => {
-      const toolEventReader = new SubagentProtocolToolEventReader();
-      for await (const event of run) {
-        // Nested parent-graph resumes can namespace this agent's values, while
-        // `run.values` only projects root values. Read protocol values too.
-        if (event.method === 'values') {
-          latestMessages = readMessagesFromValuesChunk(event.params.data) ?? latestMessages;
+      };
+      const consumeMessages = async () => {
+        for await (const message of run.messages) {
+          for await (const token of message.text) {
+            await emitSubagentMessageDelta(token);
+          }
         }
-        const toolEvent = toolEventReader.read(event);
-        if (toolEvent) {
-          await emitToolEvent(toolEvent);
+      };
+      const consumeToolEvents = async () => {
+        const toolEventReader = new SubagentProtocolToolEventReader();
+        for await (const event of run) {
+          // Nested parent-graph resumes can namespace this agent's values, while
+          // `run.values` only projects root values. Read protocol values too.
+          if (event.method === 'values') {
+            latestMessages = readMessagesFromValuesChunk(event.params.data) ?? latestMessages;
+          }
+          const toolEvent = toolEventReader.read(event);
+          if (toolEvent) {
+            await emitToolEvent(toolEvent);
+          }
         }
-      }
-    };
-    const consumeToolCallProjection = async () => {
-      const toolCalls = (run as ToolCallProjection).toolCalls;
-      if (!toolCalls) {
-        return;
-      }
-      // The native projection owns per-call output/status promises. Draining it
-      // keeps interrupt/tool-error paths settled even though raw events drive UI.
-      for await (const toolCall of toolCalls) {
-        const pending = [toolCall.output, toolCall.status, toolCall.error]
-          .filter(isPromiseLike);
-        await Promise.allSettled(pending);
-      }
-    };
+      };
+      const consumeToolCallProjection = async () => {
+        const toolCalls = (run as ToolCallProjection).toolCalls;
+        if (!toolCalls) {
+          return;
+        }
+        // The native projection owns per-call output/status promises. Draining it
+        // keeps interrupt/tool-error paths settled even though raw events drive UI.
+        for await (const toolCall of toolCalls) {
+          const pending = [toolCall.output, toolCall.status, toolCall.error]
+            .filter(isPromiseLike);
+          await Promise.allSettled(pending);
+        }
+      };
 
-    throwIfRejected(await Promise.allSettled([
-      consumeValues(),
-      consumeMessages(),
-      consumeToolEvents(),
-      consumeToolCallProjection(),
-    ]));
-    latestMessages = readMessagesFromValuesChunk(await run.output) ?? latestMessages;
+      throwIfRejected(await Promise.allSettled([
+        consumeValues(),
+        consumeMessages(),
+        consumeToolEvents(),
+        consumeToolCallProjection(),
+      ]));
+      latestMessages = readMessagesFromValuesChunk(await run.output) ?? latestMessages;
+    }, true);
 
     // A guard may have gracefully ended the agent by appending its stop
     // notice as the FINAL message (via Command goto END). That is a clean "limit

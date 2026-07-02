@@ -11,7 +11,7 @@ import { walkFiles, wildcardToRegExp } from './fileSystemUtils';
 // single matched line can be hundreds of KB (e.g. a minified bundle, a lockfile,
 // or — as seen in production — a serialized checkpoint JSON of ~493KB per line).
 // Without these, one grep_search returned 4.3M chars and blew up the context
-// window. See docs/GUARD_REGISTRY_DESIGN.md for current guard boundaries.
+// window. See docs/GUARD_DESIGN.md for current guard boundaries.
 const GREP_MAX_LINE_CHARS = 2_000;
 const GREP_MAX_TOTAL_CHARS = 50_000;
 

@@ -108,7 +108,7 @@ guard 只负责 provider 水位触发这一步；后续是否按工具覆盖、�
 
 - 淘汰规则单测：启用子代理上下文改写的能力里，大的成功结果被存根化；小结果 / 失败 / AI 消息原样保留；K 地板生效；`perTool` 覆盖优先级最高。
 - 缺省存根：用 `summarizeInput` 指纹兜底；没有摘要 metadata 时退回工具名 + 输入 JSON。
-- Guard 规则：上下文 watermark / iteration limit 等控制逻辑统一参考 [Guard Registry Design](./GUARD_REGISTRY_DESIGN.md)。
+- Guard 规则：上下文 watermark / iteration limit 等控制逻辑统一参考 [Guard Design](./GUARD_DESIGN.md)。
 - 未启用上下文改写处理的能力：行为与现状逐字节一致。
 
 ## 5. L3：checkpoint 数量封顶（不做，直接上 L4）
@@ -147,7 +147,7 @@ checkpoint 链与 git commit 模型同构（parent 指针 / 不可变快照 / la
 
 ```
 ① L2 completed 折叠 + provider usage compaction  （#117 已铺好 delegationId 基础，立即可做）
-② L1 guard registry 接入（详见 [Guard Registry Design](./GUARD_REGISTRY_DESIGN.md)）
+② L1 guard registry 接入（详见 [Guard Design](./GUARD_DESIGN.md)）
 ③ L1 子代理上下文改写机制 + 类型管道
 ④ L4 git 式 FileSaver                        （取代 L3；带上 F1/F2 约束。与 ①②③ 并行无依赖）
 
@@ -157,7 +157,7 @@ L3 不单独做（见第 5 节）；#114 不合并。
 验收标准（按策略分别适用）：
 
 - 启用旧工具输出收缩处理的能力：30 轮读密集运行不会无限保留旧的大工具输出。
-- 全保留能力：未启用上下文改写处理时保持全量上下文；guard 行为以 [Guard Registry Design](./GUARD_REGISTRY_DESIGN.md) 为准。
+- 全保留能力：未启用上下文改写处理时保持全量上下文；guard 行为以 [Guard Design](./GUARD_DESIGN.md) 为准。
 - 已完成委派在 `state.messages` 中只剩 announce 一条（工具消息和中间 AI 笔记均已清除）；checkpoint 体积由会话长度决定，不再由工具调用量决定。
 - 同 turn 续跑（progress/limit_reached）拿到完整（L1 限界后的）现场；新任务从零开始（#117 已保证）。
 - HITL 委派中途 resume 回归通过（`npm run eval:hitl -w pinpawo-local-agent`）。

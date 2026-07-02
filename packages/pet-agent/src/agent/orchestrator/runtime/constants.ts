@@ -1,7 +1,7 @@
 // Subagent iteration budget = soft model-call guard. createSubagent sets a high
 // LangGraph recursionLimit so the guard can stop gracefully before the
 // runtime breaker.
-// Unified across lanes (P4 / #281). See docs/GUARD_REGISTRY_DESIGN.md.
+// Unified across lanes (P4 / #281). See docs/GUARD_DESIGN.md.
 const SUBAGENT_MAX_ITERATIONS = 100;
 
 export const GENERAL_SUBAGENT_MAX_ITERATIONS = SUBAGENT_MAX_ITERATIONS;

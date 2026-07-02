@@ -4,7 +4,7 @@
 
 This was a historical diagnosis for recursion-limit and old local-token-fuse behavior. The proposed fixes in the original note, including derived recursion formulas such as `maxRunIterations * NODES_PER_DELEGATION + MARGIN`, are no longer the guard design.
 
-Use [Guard Registry Design](./GUARD_REGISTRY_DESIGN.md) instead.
+Use [Guard Design](./GUARD_DESIGN.md) instead.
 
 Current direction:
 

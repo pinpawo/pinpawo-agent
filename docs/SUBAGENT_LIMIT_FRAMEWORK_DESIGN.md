@@ -4,7 +4,7 @@
 
 The old subagent limit framework mixed several ideas together: local token fuse, repeated-input loop guard, LangGraph recursion fallback, and context rewrite policy. That design has been superseded.
 
-Use [Guard Registry Design](./GUARD_REGISTRY_DESIGN.md) instead.
+Use [Guard Design](./GUARD_DESIGN.md) instead.
 
 Current direction:
 

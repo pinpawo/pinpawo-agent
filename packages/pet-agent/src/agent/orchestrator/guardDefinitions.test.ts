@@ -18,6 +18,11 @@ import {
   createDelegationOutcomeDecisionGuardNode,
   createDelegationOutcomeIterationGuardNode,
 } from './runtime/guards/nodes';
+import {
+  GUARD_DECISION_EVENT,
+  guardDecisionEmitter,
+  isGuardDecisionStreamChunk,
+} from './runtime/guards/decisionEvents';
 import { setPinpetMeta } from './messageLanes';
 import type { OrchestratorStateType } from './state';
 import type { TaskActiveDelegation } from './types';
@@ -207,6 +212,46 @@ test('delegation outcome guard derives handoff refusal for a limit_reached activ
   const allowedNode = createDelegationOutcomeDecisionGuardNode();
   assert.deepEqual(await allowedNode(baseState()), {
     canHandoffActiveDelegation: true,
+  });
+});
+
+test('guard nodes push decision records onto the LangGraph custom stream writer', async () => {
+  const chunks: unknown[] = [];
+  const runnableConfig = {
+    writer: (chunk: unknown) => chunks.push(chunk),
+  } as Parameters<ReturnType<typeof createDelegationOutcomeIterationGuardNode>>[1] & {
+    writer: (chunk: unknown) => void;
+  };
+
+  const node = createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations: 5 });
+  await node(baseState({
+    taskActiveDelegation: activeDelegation,
+    runIterationCount: 5,
+  }), runnableConfig);
+
+  const records = chunks.filter(isGuardDecisionStreamChunk);
+  assert.equal(records.length, 1);
+  assert.equal(records[0]?.name, GUARD_DECISION_EVENT);
+  assert.deepEqual(records[0]?.data, {
+    guard: 'run_iteration_limit',
+    position: 'orchestrator.delegation_outcome_iteration',
+    outcome: {
+      kind: 'stop',
+      reason: 'run_iteration_limit_reached',
+      details: { runIterationCount: 5, runIterationLimit: 5 },
+    },
+    runId: 'run-1',
+    iteration: 5,
+  });
+});
+
+test('guard decision emitter is a no-op without a runnable config', () => {
+  const emit = guardDecisionEmitter(undefined);
+  // Must not throw.
+  emit({
+    guard: 'run_iteration_limit',
+    position: 'orchestrator.delegation_outcome_iteration',
+    outcome: { kind: 'proceed' },
   });
 });
 

@@ -258,7 +258,11 @@ export {
   createSubagent,
   SUBAGENT_GUARD_DECISION_EVENT,
 } from './subagent/createSubagent';
-export { GUARD_DECISION_EVENT } from './agent/orchestrator/runtime/guards/decisionEvents';
+export {
+  GUARD_DECISION_EVENT,
+  isGuardDecisionStreamChunk,
+  type GuardDecisionStreamChunk,
+} from './agent/orchestrator/runtime/guards/decisionEvents';
 export { isGraphRecursionLimitError } from './utils/graphErrors';
 export { clipForPrompt } from './agent/orchestrator/utils';
 export {

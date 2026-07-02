@@ -97,6 +97,20 @@ test('evaluateGuard emits one decision record per evaluation', () => {
   ]);
 });
 
+test('evaluateGuard never lets a throwing emitter fail the decision', () => {
+  const outcome = evaluateGuard(countLimitGuard, {
+    state: { count: 3 },
+    config: { limit: 2 },
+    position: 'before_decision',
+  }, {
+    emit: () => {
+      throw new Error('emitter exploded');
+    },
+  });
+
+  assert.equal(outcome.kind, 'stop');
+});
+
 test('evaluateGuard enforces declared positions', () => {
   assert.throws(
     () => evaluateGuard(countLimitGuard, {

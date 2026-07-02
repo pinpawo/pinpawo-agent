@@ -1,23 +1,67 @@
 import { dispatchCustomEvent } from '@langchain/core/callbacks/dispatch';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import type { GuardDecisionEmitter } from '../../../../guards';
+import type {
+  GuardDecisionEmitter,
+  GuardDecisionRecord,
+} from '../../../../guards';
 
 /**
- * Custom-event name for orchestrator guard decision records. Records flow
- * into the LangGraph event stream (`on_custom_event`) and the LangSmith trace;
- * consumers filter by this name.
+ * Event name for orchestrator guard decision records; consumers filter by it
+ * on both channels below.
  */
 export const GUARD_DECISION_EVENT = 'pinpawo_guard_decision';
 
 /**
- * Emitter for orchestrator node positions. Emission is advisory: without a
- * runnable config (e.g. direct node unit tests) or outside a run context it
- * degrades to a no-op — a decision record must never fail the decision.
+ * The chunk shape guard decision records use on the LangGraph custom stream.
+ * Mirrors the subagent runtime-event shape so consumers share one filtering
+ * convention: `{ event: 'on_runtime_event', name, data }`.
+ */
+export type GuardDecisionStreamChunk = {
+  event: 'on_runtime_event';
+  name: typeof GUARD_DECISION_EVENT;
+  data: GuardDecisionRecord;
+};
+
+export function isGuardDecisionStreamChunk(chunk: unknown): chunk is GuardDecisionStreamChunk {
+  return Boolean(
+    chunk
+    && typeof chunk === 'object'
+    && (chunk as { event?: unknown }).event === 'on_runtime_event'
+    && (chunk as { name?: unknown }).name === GUARD_DECISION_EVENT,
+  );
+}
+
+type WriterCapableConfig = RunnableConfig & {
+  writer?: (chunk: unknown) => void;
+};
+
+/**
+ * Emitter for orchestrator node positions. Records go to two channels:
+ *
+ * - the LangGraph custom stream (`streamMode: 'custom'`, via the node
+ *   config's `writer`) — this is how records reach `graph.stream` consumers
+ *   such as the local-agent chat/TUI path;
+ * - `dispatchCustomEvent` — this is how records reach `streamEvents`
+ *   (`on_custom_event`) consumers and the LangSmith trace.
+ *
+ * Emission is advisory: without a runnable config (e.g. direct node unit
+ * tests) or outside a run context it degrades to a no-op — a decision record
+ * must never fail the decision.
  */
 export function guardDecisionEmitter(runnableConfig?: RunnableConfig): GuardDecisionEmitter {
   return (record) => {
     if (!runnableConfig) {
       return;
+    }
+    const chunk: GuardDecisionStreamChunk = {
+      event: 'on_runtime_event',
+      name: GUARD_DECISION_EVENT,
+      data: record,
+    };
+    try {
+      (runnableConfig as WriterCapableConfig).writer?.(chunk);
+    } catch {
+      // Stream writer unavailable; skip.
     }
     try {
       void dispatchCustomEvent(GUARD_DECISION_EVENT, record, runnableConfig).catch(() => {});

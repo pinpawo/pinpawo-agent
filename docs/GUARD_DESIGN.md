@@ -145,11 +145,17 @@ execution.
 Records have two lifetimes, following the context-governance principle that
 conclusions cross boundaries and transcripts do not:
 
-- **Ephemeral channel**: records are emitted as runtime/stream events (the
-  `agentStreamEvents` path) and attached to the LangSmith trace. Debugging
-  "where did it go wrong" is filtering this log by position. The TUI can
-  surface `maintain` records ("context compacted at 78% watermark") and `stop`
-  records ("subagent hit iteration limit 25/25") without bespoke plumbing.
+- **Ephemeral channel**: orchestrator positions emit each record twice — onto
+  the LangGraph custom stream (`streamMode: 'custom'`, via the node config's
+  `writer`), which is how records reach `graph.stream` consumers such as the
+  local-agent chat/TUI path, and via `dispatchCustomEvent`, which is how they
+  reach `streamEvents` consumers and the LangSmith trace. Subagent middlewares
+  emit through the subagent's own `onToolEvent` runtime-event channel.
+  Debugging "where did it go wrong" is filtering this log by position; the TUI
+  can surface `maintain` records ("context compacted at 78% watermark") and
+  `stop` records ("subagent hit iteration limit 25/25") without bespoke
+  plumbing. Emission is advisory at every layer: `evaluateGuard` swallows
+  emitter failures — a record must never fail the decision.
 - **Durable form**: only `stop` outcomes need to survive checkpoints and cross
   the subagent → orchestrator boundary. Their durable form is the marked stop
   notice (`subagent/guardStop.ts`) appended to messages; the subagent's

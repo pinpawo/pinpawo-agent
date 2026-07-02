@@ -126,12 +126,20 @@ export function evaluateGuard<State, Config, Position extends string>(
     throw new Error(`Guard ${guard.name} is not declared for position: ${input.position}`);
   }
   const outcome = guard.check(input);
-  options.emit?.({
-    guard: guard.name,
-    position: input.position,
-    outcome,
-    ...(options.runId !== undefined ? { runId: options.runId } : {}),
-    ...(options.iteration !== undefined ? { iteration: options.iteration } : {}),
-  });
+  if (options.emit) {
+    // Emission is advisory: a record must never fail the decision, whatever
+    // emitter the caller supplies.
+    try {
+      options.emit({
+        guard: guard.name,
+        position: input.position,
+        outcome,
+        ...(options.runId !== undefined ? { runId: options.runId } : {}),
+        ...(options.iteration !== undefined ? { iteration: options.iteration } : {}),
+      });
+    } catch {
+      // Ignore emitter failures.
+    }
+  }
   return outcome;
 }

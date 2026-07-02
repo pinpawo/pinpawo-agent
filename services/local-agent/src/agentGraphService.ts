@@ -128,7 +128,10 @@ export class LocalAgentGraphService {
         signal: setup.input.signal,
         configurable: buildConfigurable(setup),
         recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
-        streamMode: ['messages', 'values'],
+        // 'custom' carries orchestrator guard decision records
+        // (GUARD_DECISION_EVENT chunks); consumers that only read
+        // 'messages'/'values' skip the extra mode.
+        streamMode: ['messages', 'values', 'custom'],
       },
     );
   }

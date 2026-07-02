@@ -78,6 +78,11 @@ export function handleLocalHttpRequest(
       llm_model: deps.llmConfig.model,
       llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
       workdir: deps.workdir,
+      ...(deps.runtimeConfig?.workspace ? {
+        workspace_id: deps.runtimeConfig.workspace.id,
+        workspace_name: deps.runtimeConfig.workspace.name,
+        workspace_root: deps.runtimeConfig.workspace.rootPath,
+      } : {}),
       ...(deps.runtimeConfig ? {
         state_root: deps.runtimeConfig.stateRoot,
         studio_config_path: deps.runtimeConfig.studioConfigPath,

@@ -48,8 +48,11 @@ export type {
 
 export type {
   Guard,
+  GuardDecisionEmitter,
+  GuardDecisionRecord,
   GuardDerive,
   GuardDetails,
+  GuardEvaluateOptions,
   GuardInput,
   GuardMaintain,
   GuardOutcome,
@@ -251,7 +254,11 @@ export {
 } from './utils/operationMetadata';
 export { runAgent } from './agent/runAgent';
 export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
-export { createSubagent } from './subagent/createSubagent';
+export {
+  createSubagent,
+  SUBAGENT_GUARD_DECISION_EVENT,
+} from './subagent/createSubagent';
+export { GUARD_DECISION_EVENT } from './agent/orchestrator/runtime/guards/decisionEvents';
 export { isGraphRecursionLimitError } from './utils/graphErrors';
 export { clipForPrompt } from './agent/orchestrator/utils';
 export {

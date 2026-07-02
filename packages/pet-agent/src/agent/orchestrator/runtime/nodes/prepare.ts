@@ -11,14 +11,15 @@ import { buildRunStateReset } from '../../state';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { recoverTaskActiveDelegationFromRunState } from '../decisions/delegationLifecycle';
+import { guardDecisionEmitter } from '../guards/decisionEvents';
 
 export function createPrepareNode() {
-  return async function prepare(state: OrchestratorStateType, _runnableConfig?: RunnableConfig) {
+  return async function prepare(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const outcome = evaluateGuard(runStateResetGuard, {
       state,
       config: {},
       position: ORCHESTRATOR_GUARD_POSITION.PREPARE,
-    });
+    }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
     if (outcome.kind === 'derive') {
       return buildRunStateReset();
     }
@@ -35,7 +36,7 @@ export function createCompactContextNode(params: {
       state,
       config: { contextWindowTokens: params.config.contextWindowTokens },
       position: ORCHESTRATOR_GUARD_POSITION.CONTEXT_COMPACTION,
-    });
+    }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
     if (outcome.kind !== 'maintain') {
       return {};
     }

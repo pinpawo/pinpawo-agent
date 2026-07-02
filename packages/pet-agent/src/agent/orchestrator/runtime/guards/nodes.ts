@@ -11,6 +11,7 @@ import {
 import type { OrchestratorStateType } from '../../state';
 import type { TaskActiveDelegation } from '../../types';
 import { getInvokeOptions } from '../config';
+import { guardDecisionEmitter } from './decisionEvents';
 
 function buildRunIterationLimitMessage(
   delegation: TaskActiveDelegation,
@@ -27,13 +28,13 @@ function buildRunIterationLimitMessage(
 export function createDelegationOutcomeDecisionGuardNode() {
   return async function delegationOutcomeDecisionGuardNode(
     state: OrchestratorStateType,
-    _runnableConfig?: RunnableConfig,
+    runnableConfig?: RunnableConfig,
   ) {
     const outcome = evaluateGuard(delegationOutcomeDecisionGuard, {
       state,
       config: {},
       position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
-    });
+    }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
     return statePatch({
       canHandoffActiveDelegation:
         !(outcome.kind === 'derive' && outcome.reason === ACTIVE_DELEGATION_LIMIT_REACHED),
@@ -54,6 +55,10 @@ export function createDelegationOutcomeIterationGuardNode(params: {
       state,
       config: { runIterationLimit },
       position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_ITERATION,
+    }, {
+      emit: guardDecisionEmitter(runnableConfig),
+      runId: state.runId,
+      iteration: state.runIterationCount,
     });
     const activeDelegation = state.taskActiveDelegation;
     if (outcome.kind !== 'stop' || !activeDelegation) {

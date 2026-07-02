@@ -7,6 +7,7 @@ import {
   guardMaintain,
   guardProceed,
   guardStop,
+  type GuardDecisionRecord,
 } from './guards';
 
 type State = { count: number };
@@ -60,6 +61,40 @@ test('evaluateGuard returns the rule outcome for a declared position', () => {
     position: 'before_decision',
   });
   assert.deepEqual(proceed, { kind: 'proceed' });
+});
+
+test('evaluateGuard emits one decision record per evaluation', () => {
+  const records: GuardDecisionRecord[] = [];
+
+  evaluateGuard(countLimitGuard, {
+    state: { count: 3 },
+    config: { limit: 2 },
+    position: 'before_decision',
+  }, {
+    emit: (record) => records.push(record),
+    runId: 'run-1',
+    iteration: 3,
+  });
+  evaluateGuard(countLimitGuard, {
+    state: { count: 0 },
+    config: { limit: 2 },
+    position: 'before_decision',
+  }, { emit: (record) => records.push(record) });
+
+  assert.deepEqual(records, [
+    {
+      guard: 'count_limit',
+      position: 'before_decision',
+      outcome: { kind: 'stop', reason: 'limit_reached', details: { count: 3, limit: 2 } },
+      runId: 'run-1',
+      iteration: 3,
+    },
+    {
+      guard: 'count_limit',
+      position: 'before_decision',
+      outcome: { kind: 'proceed' },
+    },
+  ]);
 });
 
 test('evaluateGuard enforces declared positions', () => {

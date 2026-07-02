@@ -5,7 +5,10 @@ import type {
   SubagentRunInput,
   SubagentToolLifecycleEvent,
 } from '../types/subagent';
-import { evaluateGuard } from '../guards';
+import {
+  evaluateGuard,
+  type GuardDecisionEmitter,
+} from '../guards';
 import { createAgent, createMiddleware } from 'langchain';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
@@ -31,6 +34,12 @@ import { Command, END, type ProtocolEvent } from '@langchain/langgraph';
 // is a deliberately high last-resort breaker, not a normal control signal.
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 100;
 const SUBAGENT_HARD_RECURSION_LIMIT = 10_000;
+
+/**
+ * Runtime-event name carrying subagent guard decision records through the
+ * subagent's own event channel (`onToolEvent`); consumers filter by this name.
+ */
+export const SUBAGENT_GUARD_DECISION_EVENT = 'subagent_guard_decision';
 
 const SUBAGENT_GOVERNING_PROMPT = [
   '你是任务执行器，负责精确完成分配给你的任务。',
@@ -82,7 +91,10 @@ function buildContextPolicyContext(
   };
 }
 
-function createContextPolicyMiddleware(inputState: SubagentInputState) {
+function createContextPolicyMiddleware(
+  inputState: SubagentInputState,
+  emitGuardDecision?: GuardDecisionEmitter,
+) {
   let iterationCount = 0;
 
   return createMiddleware({
@@ -102,7 +114,7 @@ function createContextPolicyMiddleware(inputState: SubagentInputState) {
         state: { messages: baseMessages, contextPolicy: policy },
         config: { contextWindowTokens: inputState.contextWindowTokens },
         position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_POLICY,
-      });
+      }, { emit: emitGuardDecision, iteration: iterationCount });
       if (outcome.kind !== 'maintain') {
         return undefined;
       }
@@ -115,7 +127,10 @@ function createContextPolicyMiddleware(inputState: SubagentInputState) {
   });
 }
 
-function createSubagentIterationGuardMiddleware(maxIterations: number) {
+function createSubagentIterationGuardMiddleware(
+  maxIterations: number,
+  emitGuardDecision?: GuardDecisionEmitter,
+) {
   let iterationCount = 0;
 
   return createMiddleware({
@@ -126,7 +141,7 @@ function createSubagentIterationGuardMiddleware(maxIterations: number) {
         state: { iterationCount, maxIterations },
         config: {},
         position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_ITERATION,
-      });
+      }, { emit: emitGuardDecision, iteration: iterationCount });
       if (outcome.kind === 'stop') {
         return new Command({
           goto: END,
@@ -332,8 +347,21 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     inputState.contextPolicy ? CONTEXT_POLICY_GOVERNING_PROMPT : null,
     ...inputState.instructions,
   ].filter((item): item is string => Boolean(item)).join('\n\n');
-  const contextPolicyMiddleware = createContextPolicyMiddleware(inputState);
-  const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(maxIterations);
+  // Decision records ride the subagent's own event channel; emission is
+  // advisory and must never fail the run.
+  const emitGuardDecision: GuardDecisionEmitter = (record) => {
+    try {
+      void Promise.resolve(input.onToolEvent?.({
+        event: 'on_runtime_event',
+        name: SUBAGENT_GUARD_DECISION_EVENT,
+        data: record,
+      })).catch(() => {});
+    } catch {
+      // Ignore emission failures.
+    }
+  };
+  const contextPolicyMiddleware = createContextPolicyMiddleware(inputState, emitGuardDecision);
+  const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(maxIterations, emitGuardDecision);
   const middleware = [
     contextPolicyMiddleware,
     iterationGuardMiddleware,

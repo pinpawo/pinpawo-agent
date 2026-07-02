@@ -40,6 +40,7 @@ import {
   canSearchCapabilities,
   mainMessagesWithoutCompaction,
 } from '../decisions/capabilityCandidates';
+import { guardDecisionEmitter } from '../guards/decisionEvents';
 export function createCapabilityDiscoveryNode(params: {
   config: OrchestratorConfig;
 }) {
@@ -78,7 +79,7 @@ export function createCapabilityDiscoveryNode(params: {
       state,
       config: { forcedCapabilityNames, capabilities: capabilityList },
       position: ORCHESTRATOR_GUARD_POSITION.CAPABILITY_DISCOVERY,
-    });
+    }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
     if (forcedSeedOutcome.kind === 'derive') {
       const details = forcedSeedOutcome.details as ForcedCapabilitySeedDetails;
       return { runCapabilitySearchState: details.runCapabilitySearchState };

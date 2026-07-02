@@ -7,7 +7,12 @@ import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
-import { buildNestedSubagentStreamConfig, createSubagent } from './createSubagent';
+import {
+  buildNestedSubagentStreamConfig,
+  createSubagent,
+  SUBAGENT_GUARD_DECISION_EVENT,
+} from './createSubagent';
+import type { GuardDecisionRecord } from '../guards';
 import {
   SUBAGENT_GUARD_STOP_MARKER_KEY,
   readSubagentGuardStopReason,
@@ -143,6 +148,44 @@ test('createSubagent emits non-tool model text as runtime deltas', async () => {
       && (event as { name?: unknown }).name === 'subagent_message_delta',
   ));
   assert.equal(deltas.map((event) => event.data.text).join(''), 'subagent result');
+});
+
+test('createSubagent emits guard decision records as runtime events', async () => {
+  const events: unknown[] = [];
+
+  const result = await createSubagent({
+    model: new FakeListChatModel({
+      responses: ['subagent result'],
+      sleep: 0,
+    }),
+    tools: [],
+    instructions: [],
+    messages: [new HumanMessage('do the task')],
+    maxIterations: 4,
+    onToolEvent: (event) => {
+      events.push(event);
+    },
+  });
+
+  assert.equal(result.completionReason, 'natural');
+  const records = events
+    .filter((event): event is { event: 'on_runtime_event'; name: string; data: GuardDecisionRecord } => Boolean(
+      event
+        && typeof event === 'object'
+        && (event as { event?: unknown }).event === 'on_runtime_event'
+        && (event as { name?: unknown }).name === SUBAGENT_GUARD_DECISION_EVENT,
+    ))
+    .map((event) => event.data);
+
+  // One model call → one iteration-guard evaluation that proceeds.
+  const iterationRecords = records.filter((record) => record.guard === 'subagent_iteration_limit');
+  assert.equal(iterationRecords.length, 1);
+  assert.deepEqual(iterationRecords[0], {
+    guard: 'subagent_iteration_limit',
+    position: 'subagent.before_model_iteration',
+    outcome: { kind: 'proceed' },
+    iteration: 1,
+  });
 });
 
 test('createSubagent emits tool lifecycle events through event streaming', async () => {

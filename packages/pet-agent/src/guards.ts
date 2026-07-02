@@ -95,12 +95,43 @@ export function guardAppliesToPosition<Position extends string>(
   return guard.positions.includes(position);
 }
 
+/**
+ * The sentence this language exists to speak: one record per evaluation,
+ * emitted through the `evaluateGuard` choke point so records cannot be
+ * silently dropped. Ephemeral by design — only `stop` outcomes have a durable
+ * form (marked stop notices), owned by their positions.
+ */
+export type GuardDecisionRecord = {
+  guard: string;
+  position: string;
+  outcome: GuardOutcome;
+  runId?: string;
+  iteration?: number;
+};
+
+export type GuardDecisionEmitter = (record: GuardDecisionRecord) => void;
+
+export type GuardEvaluateOptions = {
+  emit?: GuardDecisionEmitter;
+  runId?: string;
+  iteration?: number;
+};
+
 export function evaluateGuard<State, Config, Position extends string>(
   guard: Guard<State, Config, Position>,
   input: GuardInput<State, Config, Position>,
+  options: GuardEvaluateOptions = {},
 ): GuardOutcome {
   if (!guardAppliesToPosition(guard, input.position)) {
     throw new Error(`Guard ${guard.name} is not declared for position: ${input.position}`);
   }
-  return guard.check(input);
+  const outcome = guard.check(input);
+  options.emit?.({
+    guard: guard.name,
+    position: input.position,
+    outcome,
+    ...(options.runId !== undefined ? { runId: options.runId } : {}),
+    ...(options.iteration !== undefined ? { iteration: options.iteration } : {}),
+  });
+  return outcome;
 }

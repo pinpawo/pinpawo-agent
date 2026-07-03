@@ -9,6 +9,7 @@ import {
   ORCHESTRATOR_RECURSION_LIMIT,
   type OrchestratorGraph,
 } from './createAgentRuntime';
+import { invokeWithRootStreamToolEvents } from './rootStreamToolEvents';
 
 export type AgentInvokeInput = {
   messages: BaseMessage[];
@@ -51,7 +52,10 @@ export async function runAgent(
   if (input.onToolEvent) configurable.onToolEvent = input.onToolEvent;
   if (input.globalReviewPolicy) configurable.globalReviewPolicy = input.globalReviewPolicy;
 
-  const result = await graph.invoke(
+  // Tool lifecycle events for `onToolEvent` consumers come from the root
+  // protocol stream (#322 Phase 4); without a handler this is a plain invoke.
+  const result = await invokeWithRootStreamToolEvents(
+    graph,
     buildOrchestratorRunInput(input.messages),
     {
       signal: input.signal,
@@ -61,6 +65,7 @@ export async function runAgent(
       // default 25-node limit, which the soft guard can never beat. #275/P6.
       recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
     },
+    input.onToolEvent,
   );
 
   const messages = (result as { messages?: BaseMessage[] }).messages ?? [];

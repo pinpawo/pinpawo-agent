@@ -5,6 +5,7 @@ import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   readMessageCreatedAtUtc,
+  SUBAGENT_OPERATIONS_EVENT,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { LocalAgentEvent } from './events/localAgentEvent';
@@ -12,11 +13,27 @@ import type { LocalAgentGraphService } from './agentGraphService';
 import { runChatSession } from './chatSessionAdapter';
 import { readFinalMessageText, type StreamToolsPayload } from './agentStreamEvents';
 
-function graphStream(chunks: AsyncIterable<unknown>) {
-  return chunks;
+/**
+ * runChatSession consumes the ROOT `streamEvents(v3)` protocol stream
+ * (#322 Phase 4); the fakes below emit raw protocol events.
+ */
+function protocolEvent(method: string, data: unknown, namespace: string[] = []) {
+  return { type: 'event' as const, seq: 0, method, params: { namespace, data } };
 }
 
-test('runChatSession uses onToolEvent as the only operation source', async () => {
+/** A full model message lifecycle in one namespace. */
+function messageLifecycle(text: string, namespace: string[] = [], id = 'msg-1') {
+  return [
+    protocolEvent('messages', { event: 'message-start', id }, namespace),
+    protocolEvent('messages', {
+      event: 'content-block-delta',
+      delta: { type: 'text-delta', text },
+    }, namespace),
+    protocolEvent('messages', { event: 'message-finish' }, namespace),
+  ];
+}
+
+test('runChatSession sources tool operations from the root protocol stream, not the callback', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: unknown[] = [];
   const setup = {
@@ -31,30 +48,29 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    stream(streamSetup: AgentChannelSetup) {
-      return graphStream((async function* () {
-        yield [
-          'tools',
-          {
-            event: 'on_tool_start',
-            name: 'stream-source',
-            toolCallId: 'stream-call',
-            input: { source: 'stream' },
-          },
-        ];
+    streamEvents(streamSetup: AgentChannelSetup) {
+      return (async function* () {
+        yield protocolEvent('tools', {
+          event: 'tool-started',
+          tool_call_id: 'stream-call',
+          tool_name: 'stream_source',
+          input: { source: 'stream' },
+        }, ['general:t1', 'tools:t2']);
+        // Lifecycle events on the direct callback are bridge-era leftovers;
+        // only the root stream feeds operations now.
         streamSetup.input.onToolEvent?.({
           event: 'on_tool_start',
           name: 'callback-source',
           toolCallId: 'callback-call',
           input: { source: 'callback' },
         });
-        yield [
-          'values',
-          {
-            messages: [new AIMessage('done')],
-          },
-        ];
-      })());
+        yield protocolEvent('tools', {
+          event: 'tool-finished',
+          tool_call_id: 'stream-call',
+          output: 'ok',
+        }, ['general:t1', 'tools:t2']);
+        yield protocolEvent('values', { messages: [new AIMessage('done')] });
+      })();
     },
   };
 
@@ -86,9 +102,15 @@ test('runChatSession uses onToolEvent as the only operation source', async () =>
   assert.deepEqual(emittedTools, [
     {
       event: 'on_tool_start',
-      name: 'callback-source',
-      toolCallId: 'callback-call',
-      input: { source: 'callback' },
+      toolCallId: 'stream-call',
+      name: 'stream_source',
+      input: { source: 'stream' },
+    },
+    {
+      event: 'on_tool_end',
+      toolCallId: 'stream-call',
+      name: 'stream_source',
+      output: 'ok',
     },
   ]);
   assert.equal((setup.input as { onToolEvent?: unknown }).onToolEvent, undefined);
@@ -124,8 +146,8 @@ test('runChatSession falls back to checkpoint final message when stream values o
         hasPendingContinuation: false,
       };
     },
-    stream() {
-      return graphStream((async function* () {})());
+    streamEvents() {
+      return (async function* () {})();
     },
   };
 
@@ -171,8 +193,8 @@ test('runChatSession maps authorization runtime events to system notices', async
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    stream(streamSetup: AgentChannelSetup) {
-      return graphStream((async function* () {
+    streamEvents(streamSetup: AgentChannelSetup) {
+      return (async function* () {
         streamSetup.input.onToolEvent?.({
           event: 'on_runtime_event',
           name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED,
@@ -200,13 +222,8 @@ test('runChatSession maps authorization runtime events to system notices', async
             }],
           },
         });
-        yield [
-          'values',
-          {
-            messages: [new AIMessage('done')],
-          },
-        ];
-      })());
+        yield protocolEvent('values', { messages: [new AIMessage('done')] });
+      })();
     },
   };
 
@@ -244,7 +261,7 @@ test('runChatSession maps authorization runtime events to system notices', async
   );
 });
 
-test('runChatSession forwards subagent model text runtime events as subagent deltas', async () => {
+test('runChatSession emits one subagent delta per child model message lifecycle', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: LocalAgentEvent[] = [];
   const setup = {
@@ -259,20 +276,23 @@ test('runChatSession forwards subagent model text runtime events as subagent del
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    stream(streamSetup: AgentChannelSetup) {
-      return graphStream((async function* () {
-        streamSetup.input.onToolEvent?.({
-          event: 'on_runtime_event',
-          name: 'subagent_message_delta',
-          data: { text: '正在整理' },
-        });
-        yield [
-          'values',
-          {
-            messages: [new AIMessage('done')],
-          },
-        ];
-      })());
+    streamEvents() {
+      return (async function* () {
+        // A child scope (namespace depth >= 2) streams a model message in two
+        // deltas; the consumer gets ONE completed block.
+        const namespace = ['general:t1', 'model_request:t2'];
+        yield protocolEvent('messages', { event: 'message-start', id: 'child-1' }, namespace);
+        yield protocolEvent('messages', {
+          event: 'content-block-delta',
+          delta: { type: 'text-delta', text: '正在' },
+        }, namespace);
+        yield protocolEvent('messages', {
+          event: 'content-block-delta',
+          delta: { type: 'text-delta', text: '整理' },
+        }, namespace);
+        yield protocolEvent('messages', { event: 'message-finish' }, namespace);
+        yield protocolEvent('values', { messages: [new AIMessage('done')] });
+      })();
     },
   };
 
@@ -308,6 +328,61 @@ test('runChatSession forwards subagent model text runtime events as subagent del
   );
 });
 
+test('runChatSession merges subagent_operations announcements through acceptDelegationOperations', async () => {
+  const accepted: unknown[] = [];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: {
+      messages: [],
+    },
+  } as unknown as AgentChannelSetup;
+
+  const graphService = {
+    async readThreadState() {
+      return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('custom', {
+          event: 'on_runtime_event',
+          name: SUBAGENT_OPERATIONS_EVENT,
+          data: {
+            operations: {
+              save_daily_post: { title: '保存日报' },
+            },
+          },
+        }, ['capability:t1']);
+        yield protocolEvent('values', { messages: [new AIMessage('done')] });
+      })();
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      kind: 'user_message',
+      requestId: 'req-1',
+      message: 'hello',
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => {
+      throw new Error('should not interrupt');
+    },
+    emitEvent: () => {},
+    emitToolEvent: () => {},
+    acceptDelegationOperations: (operations) => {
+      accepted.push(operations);
+    },
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'done' });
+  assert.deepEqual(accepted, [{
+    save_daily_post: { title: '保存日报' },
+  }]);
+});
+
 test('runChatSession forwards canonical review interrupt specs unchanged', async () => {
   const emittedEvents: LocalAgentEvent[] = [];
   const setup = {
@@ -335,26 +410,23 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    stream() {
-      return graphStream((async function* () {
-        yield [
-          'values',
-          {
-            __interrupt__: [{
-              value: {
-                kind: 'review',
-                review,
-                pendingAction: {
-                  actionId: 'call-1',
-                  toolName: 'run_shell',
-                  args: { command: 'git status', cwd: '/repo' },
-                  description: 'Run git status?',
-                },
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('values', {
+          __interrupt__: [{
+            value: {
+              kind: 'review',
+              review,
+              pendingAction: {
+                actionId: 'call-1',
+                toolName: 'run_shell',
+                args: { command: 'git status', cwd: '/repo' },
+                description: 'Run git status?',
               },
-            }],
-          },
-        ];
-      })());
+            },
+          }],
+        });
+      })();
     },
   };
 
@@ -406,16 +478,11 @@ test('runChatSession resumes explicit response after state update clears interru
     buildResumeCommand(value: unknown) {
       return { kind: 'resume-command', value };
     },
-    stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
-      return graphStream((async function* () {
+    streamEvents(_setup: AgentChannelSetup, inputOverride?: unknown) {
+      return (async function* () {
         streamInputs.push(inputOverride);
-        yield [
-          'values',
-          {
-            messages: finalMessages,
-          },
-        ];
-      })());
+        yield protocolEvent('values', { messages: finalMessages });
+      })();
     },
   };
 
@@ -468,17 +535,12 @@ test('runChatSession allows a user message after an aborted non-review run leave
         ? { messages: [], pendingHumanReview: null, hasPendingContinuation: true }
         : { messages: finalMessages, pendingHumanReview: null, hasPendingContinuation: false };
     },
-    stream(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
-      return graphStream((async function* () {
+    streamEvents(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
+      return (async function* () {
         streamInputs.push(inputOverride);
         assert.equal(readFinalMessageText(streamSetup.input.messages.at(-1) ?? {}), 'new request');
-        yield [
-          'values',
-          {
-            messages: finalMessages,
-          },
-        ];
-      })());
+        yield protocolEvent('values', { messages: finalMessages });
+      })();
     },
   };
 
@@ -523,7 +585,7 @@ test('runChatSession rejects stale resume with user-facing message', async () =>
     buildResumeCommand() {
       throw new Error('should not build resume command');
     },
-    stream() {
+    streamEvents() {
       throw new Error('should not stream');
     },
   };
@@ -584,16 +646,11 @@ test('runChatSession does not map pending review free text to review response', 
     buildResumeCommand(value: unknown) {
       throw new Error(`should not build resume command: ${String(value)}`);
     },
-    stream(_setup: AgentChannelSetup, inputOverride?: unknown) {
-      return graphStream((async function* () {
+    streamEvents(_setup: AgentChannelSetup, inputOverride?: unknown) {
+      return (async function* () {
         streamInputs.push(inputOverride);
-        yield [
-          'values',
-          {
-            messages: finalMessages,
-          },
-        ];
-      })());
+        yield protocolEvent('values', { messages: finalMessages });
+      })();
     },
   };
 
@@ -642,14 +699,14 @@ test('runChatSession degrades a GraphRecursionError to a completed 待续跑 rep
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    stream() {
-      return graphStream((async function* () {
+    streamEvents() {
+      return (async function* () {
         const error = new Error('Recursion limit of 135 reached without hitting a stop condition.');
         (error as { lc_error_code?: string }).lc_error_code = 'GRAPH_RECURSION_LIMIT';
         throw error;
         // eslint-disable-next-line no-unreachable
-        yield ['values', { messages: [] }];
-      })());
+        yield protocolEvent('values', { messages: [] });
+      })();
     },
   };
 
@@ -684,11 +741,15 @@ test('runChatSession keeps the streamed reply when GraphRecursionError fires mid
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    stream() {
-      return graphStream((async function* () {
-        yield ['messages', [new AIMessage('部分进度'), { node: 'answer' }]];
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('messages', { event: 'message-start', id: 'main-1' });
+        yield protocolEvent('messages', {
+          event: 'content-block-delta',
+          delta: { type: 'text-delta', text: '部分进度' },
+        });
         throw new Error('GRAPH_RECURSION_LIMIT');
-      })());
+      })();
     },
   };
 
@@ -716,12 +777,12 @@ test('runChatSession rethrows non-recursion errors from the stream', async () =>
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    stream() {
-      return graphStream((async function* () {
+    streamEvents() {
+      return (async function* () {
         throw new Error('some other failure');
         // eslint-disable-next-line no-unreachable
-        yield ['values', { messages: [] }];
-      })());
+        yield protocolEvent('values', { messages: [] });
+      })();
     },
   };
 
@@ -772,22 +833,13 @@ test('runChatSession omits token usage when provider usage is unavailable', asyn
         hasPendingContinuation: false,
       };
     },
-    stream(streamSetup: AgentChannelSetup) {
-      return graphStream((async function* () {
-        yield [
-          'messages',
-          [
-            new AIMessage('你好，'),
-            { node: 'assistant' },
-          ],
-        ];
-        yield [
-          'values',
-          {
-            messages: finalMessages,
-          },
-        ];
-      })());
+    streamEvents() {
+      return (async function* () {
+        for (const event of messageLifecycle('你好，')) {
+          yield event;
+        }
+        yield protocolEvent('values', { messages: finalMessages });
+      })();
     },
   };
 
@@ -869,15 +921,10 @@ test('runChatSession emits provider token usage from new state messages', async 
         hasPendingContinuation: false,
       };
     },
-    stream() {
-      return graphStream((async function* () {
-        yield [
-          'values',
-          {
-            messages: finalMessages,
-          },
-        ];
-      })());
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('values', { messages: finalMessages });
+      })();
     },
   };
 

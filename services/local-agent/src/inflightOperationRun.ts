@@ -1,3 +1,4 @@
+import type { SubagentToolOperationMetadata } from '@pinpawo/pet-agent';
 import type { StreamToolsPayload } from './agentStreamEvents';
 import type {
   LocalAgentOperationInternalEvent,
@@ -38,6 +39,13 @@ export function configureInflightOperationRegistry(
   operationRegistry: OperationRegistry,
 ) {
   run.operationTracker.setOperationRegistry(operationRegistry);
+}
+
+export function overlayInflightDelegationOperations(
+  run: InflightOperationRun,
+  operations: Record<string, SubagentToolOperationMetadata>,
+) {
+  run.operationTracker.overlayOperations(operations);
 }
 
 export function clearInflightOperationTimer(run: InflightOperationRun) {

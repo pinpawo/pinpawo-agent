@@ -4,9 +4,7 @@ import {
   isHumanReviewInterruptPayload,
   ORCHESTRATOR_RECURSION_LIMIT,
   runAgent,
-  streamOrchestratorGraph,
   type AgentRunResult,
-  type OrchestratorGraphStream,
   type OrchestratorGraph,
   type OrchestratorStateType,
   type ReviewSpec,
@@ -51,12 +49,9 @@ export type LocalAgentGraphThreadState = {
   hasPendingContinuation: boolean;
 };
 
-export type LocalAgentGraphStream = OrchestratorGraphStream;
-
 /**
- * The root v3 run stream (#322 Phase 2). The GraphRunStream projections (raw
- * protocol iteration, subgraphs, interrupts, output) stay available to the
- * adapter path.
+ * The root v3 run stream. The GraphRunStream projections (raw protocol
+ * iteration, subgraphs, interrupts, output) stay available to consumers.
  */
 export type LocalAgentGraphEventStream = GraphRunStream<OrchestratorStateType>;
 
@@ -123,30 +118,12 @@ export class LocalAgentGraphService {
     return runAgent(this.getGraph(setup), setup.input);
   }
 
-  stream(
-    setup: AgentChannelSetup,
-    inputOverride?: unknown,
-  ): LocalAgentGraphStream {
-    const graph = this.getGraph(setup);
-    return streamOrchestratorGraph(
-      graph,
-      inputOverride ?? buildOrchestratorTurnInput(setup.input.messages),
-      {
-        signal: setup.input.signal,
-        configurable: buildConfigurable(setup),
-        recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
-        // 'custom' carries orchestrator guard decision records
-        // (GUARD_DECISION_EVENT chunks); consumers that only read
-        // 'messages'/'values' skip the extra mode.
-        streamMode: ['messages', 'values', 'custom'],
-      },
-    );
-  }
-
   /**
-   * Root streamEvents(v3) consumption path (#322 Phase 2). Parallel to
-   * `stream()` — the legacy `graph.stream` path stays the production default
-   * until the adapter correspondence is fully validated.
+   * Root streamEvents(v3) consumption — the production path since #322
+   * Phase 4 replaced the legacy `graph.stream(['messages','values','custom'])`
+   * + `onToolEvent` bridge. Raw protocol events carry every scope's
+   * messages/tools/custom/values with namespaces; consumers adapt them via
+   * `adaptRootStream`.
    */
   async streamEvents(
     setup: AgentChannelSetup,

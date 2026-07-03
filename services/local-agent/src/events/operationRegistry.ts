@@ -1,5 +1,6 @@
 import type {
   AgentToolkit,
+  SubagentToolOperationMetadata,
   ToolOperationMetadata,
   ToolOperationSummary,
 } from '@pinpawo/pet-agent';
@@ -58,3 +59,35 @@ export function createOperationRegistryFromSources(params: {
 }
 
 export const emptyOperationRegistry = createOperationRegistry();
+
+/**
+ * Overlay per-delegation operation metadata (a `subagent_operations`
+ * announcement, #322 Phase 4) on a base registry. Delegation-scoped toolset
+ * operations are not in any statically known toolkit, so the announcement is
+ * the only way their display metadata reaches the operation join. Overlay
+ * entries win over the base for the tools they name.
+ */
+export function overlayOperationRegistry(
+  base: OperationRegistry,
+  entries: Record<string, SubagentToolOperationMetadata>,
+): OperationRegistry {
+  const overlay = new Map(Object.entries(entries).map(([toolName, metadata]) => {
+    const provider = metadata.source?.provider;
+    return [
+      toolName,
+      {
+        ...metadata,
+        source: {
+          provider: provider === 'toolkit' ? 'toolkit' as const : 'toolset' as const,
+          name: metadata.source?.name ?? 'delegation',
+          toolName: metadata.source?.toolName ?? toolName,
+        },
+      } satisfies RegisteredOperationMetadata,
+    ];
+  }));
+  return {
+    resolveToolOperation(toolName: string) {
+      return overlay.get(toolName) ?? base.resolveToolOperation(toolName);
+    },
+  };
+}

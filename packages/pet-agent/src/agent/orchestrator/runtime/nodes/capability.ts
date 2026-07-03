@@ -137,7 +137,6 @@ export function createCapabilityNode(params: {
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
       contextPolicy: runtime.contextPolicy,
-      checkpoint: config.checkpoint,
       runnableConfig,
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,
@@ -149,7 +148,6 @@ export function createCapabilityNode(params: {
         delegationId: runPendingDelegation.id,
         runId: transcriptRunId,
       },
-      onToolEvent,
     };
     validateUniqueToolNames(subagentInput.tools);
 

@@ -19,6 +19,7 @@ import {
   type OrchestratorGraph,
 } from '../createAgentRuntime';
 import { isHumanReviewInterruptPayload } from '../orchestrator/review/reviewSpec';
+import { invokeWithRootStreamToolEvents } from '../rootStreamToolEvents';
 import type {
   HumanReviewer,
   HumanReviewerRequest,
@@ -161,7 +162,14 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     try {
       let graphInput: Parameters<OrchestratorGraph['invoke']>[0] = buildOrchestratorRunInput(messages);
       while (true) {
-        const result = await graph.invoke(graphInput, { signal: input.signal, configurable });
+        // Tool lifecycle for `onToolEvent` comes from the root protocol
+        // stream (#322 Phase 4); without a handler this is a plain invoke.
+        const result = await invokeWithRootStreamToolEvents(
+          graph,
+          graphInput,
+          { signal: input.signal, configurable },
+          input.onToolEvent,
+        );
         const pending = readPendingInterrupt(result);
         if (!pending) {
           return { reply: readReply(result) };

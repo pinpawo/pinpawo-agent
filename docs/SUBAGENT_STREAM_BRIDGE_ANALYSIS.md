@@ -1,18 +1,19 @@
 # Subagent Stream Bridge Analysis
 
-> Status: Phase 1 spike complete — verdict **GO** (two scoped caveats); Phase 2
-> adapter and Phase 3 operation projection landed as a parallel path.
+> Status: **Phase 4 complete — the bridge is gone.** Root `streamEvents(v3)`
+> is the production consumption path; `createSubagent()` invokes the child
+> with the parent config passed through and consumes no stream of its own.
 > Updated: 2026-07-04. Referenced by issue #322.
 > Spike evidence: `packages/pet-agent/src/subagent/rootStreamProjection.test.ts`.
-> Adapter + correspondence tests:
-> `services/local-agent/src/events/rootStreamEventAdapter.ts`.
-> Operation projection:
-> `services/local-agent/src/events/rootToolEventProjection.ts`.
+> Adapter: `services/local-agent/src/events/rootStreamEventAdapter.ts`.
+> Production integration test:
+> `packages/pet-agent/src/subagent/createSubagent.test.ts` (root-stream test).
 
-## Why the bridge exists, and what it costs
+## Why the bridge existed, and what it cost
 
-Today `createSubagent()` consumes its own child `agent.streamEvents(v3)` and
-manually re-emits everything through the `onToolEvent` callback:
+Before Phase 4, `createSubagent()` consumed its own child
+`agent.streamEvents(v3)` and manually re-emitted everything through the
+`onToolEvent` callback:
 
 - four parallel drain loops (`values`, `messages`, protocol tool events, the
   `toolCalls` projection) whose only job is to keep the child stream settled;
@@ -99,13 +100,12 @@ stream** (`for await (const event of run)`) reliably carries every event with
 its namespace. The Phase 2 local-agent adapter should be built on the
 protocol stream; adopting the sugar projections can be evaluated separately.
 
-## Phase 2 — the root event-stream adapter (landed, parallel path)
+## Phase 2 — the root event-stream adapter (landed; production since Phase 4)
 
 `services/local-agent/src/events/rootStreamEventAdapter.ts` translates raw
 root protocol events into the local-agent chat event vocabulary.
-`LocalAgentGraphService.streamEvents(setup)` opens the v3 run alongside the
-legacy `stream()`; nothing existing is rewired — the legacy path stays the
-production default until the correspondence is validated end-to-end.
+`LocalAgentGraphService.streamEvents(setup)` opens the v3 run; since Phase 4
+it is the only consumption path (the legacy `stream()` method is deleted).
 
 Correspondence with the legacy consumption (pinned by tests):
 
@@ -137,50 +137,69 @@ Two protocol facts the adapter had to absorb (worth knowing for Phase 3+):
   lifecycles may. Filtering must be "known non-assistant role excludes",
   not "assistant role includes".
 
-## Phase 3 — operation metadata projection (landed, parallel path)
+## Phase 3 — operation metadata projection (landed; folded into the tracker path in Phase 4)
 
 Root protocol `tools` events carry only `tool_call_id`/`tool_name` (the name
 only on `tool-started`); the TUI operation timeline needs title/target/summary
-from the operation registry. The projection chain:
+from the operation registry. The production chain after Phase 4:
 
 ```
 adapter `tool` event
-  → SubagentProtocolToolEventReader   (pet-agent, now a shared module:
-                                       name memory, started/finished dedup,
+  → NamespacedProtocolToolEventReader (pet-agent: per-namespace name memory,
+                                       started/finished dedup,
                                        serialized-interrupt swallowing)
-  → normalizeToolStreamEvent + OperationRegistry
-  → LocalAgentOperationInternalEvent  (+ namespace for scope attribution)
+  → emitToolEvent → ToolOperationTracker (registry join, summary inheritance,
+                                          finish-active-on-abort)
+  → LocalAgentOperationInternalEvent
 ```
 
 `SubagentProtocolToolEventReader` moved out of `createSubagent.ts` into
-`subagent/protocolToolEvents.ts` and is exported: the legacy bridge and the
-root projection share one implementation of the tools-channel semantics, so
-Phase 4 deletes the bridge's *consumption*, not the translation logic. One
-projector instance per run — `tool_call_id`s are unique per run, so a single
-reader covers every namespace on the root stream.
+`subagent/protocolToolEvents.ts` and is exported. `tool_call_id`s are only
+unique within the scope that produced them, so root-stream consumers use
+`NamespacedProtocolToolEventReader` — one reader per namespace; two scopes
+reusing an id must not share dedup/name state.
 
-Known scope note: the legacy bridge could attach per-delegation `operation`
-metadata passed into `createSubagent` (`inputState.operations`); the root
-projection resolves from the registry built out of the setup's toolkits. If a
-delegation ever carries operations that are not in the setup registry, the
-switchover (Phase 4) must merge those maps into the registry — flagged for
-the switchover checklist.
+## Phase 4 — the bridge is removed (landed)
 
-## Implications for the #322 phase plan
+What changed, per surface:
 
-- **Phase 2 (root stream adapter)**: consume raw protocol events keyed by
-  `method` + `params.namespace`; use namespace depth (see finding 3) to
-  attribute main vs subagent vs model/tool scope. Validate real-LangSmith
-  tracer behavior here — the spike used fake models without a live tracer.
-- **Phase 3 (operation projection)**: root `tools` events carry
-  `tool_call_id`/`tool_name`; display metadata (title/target/summary) still
-  needs the operation map joined in a transformer, as the issue anticipates.
-- **Phase 4 (remove the bridge)**: subagent guard decision records must move
-  from `onToolEvent` to the writer (`getWriter()`), which reaches the root
-  protocol stream natively. The orchestrator guard emitter (#318) already
-  writes to the writer; after local-agent consumes `streamEvents(v3)`, its
-  `graph.stream` custom-mode leg can be re-evaluated (`dispatchCustomEvent`
-  stays for LangSmith).
-- **Nested subagents**: scope Caveat 1 explicitly — either accept flattened
-  attribution for the inner level initially, or keep a minimal bridge for
-  the tool-boundary hop only.
+- **`createSubagent()`** no longer consumes a child `streamEvents()` run: the
+  child is `invoke()`d with the parent config passed through untouched. The
+  four drain loops, `SubagentToolEventTracker`, `subagent_message_delta`
+  bridging, `buildNestedSubagentStreamConfig` and the ALS-clearing scar
+  tissue (#313/#316) are deleted; the child no longer takes an explicit
+  checkpointer (it inherits the parent's through the config — the spike's
+  interrupt test pins that a bare `Command({ resume })` against the parent
+  re-enters the child). `SubagentRunInput` lost `onToolEvent`/`checkpoint`.
+- **Guard decision records** ride the stream writer (`getWriter()`) with the
+  shared `{ event: 'on_runtime_event', name, data }` envelope and surface as
+  root `custom` protocol events (`SUBAGENT_GUARD_DECISION_EVENT`).
+- **Per-delegation operations** (`SubagentRunInput.operations`, e.g. a
+  capability's private toolset metadata) are announced through the writer as
+  `SUBAGENT_OPERATIONS_EVENT`; local-agent overlays them on the request's
+  operation registry (`acceptDelegationOperations` →
+  `ToolOperationTracker.overlayOperations`). This closes the switchover
+  checklist item: delegation-scoped tools that are in no static toolkit still
+  join display metadata.
+- **local-agent chat** (`runChatSession`) consumes
+  `graphService.streamEvents(v3)` through `adaptRootStream`; the legacy
+  `graph.stream(['messages','values','custom'])` method is deleted. Tool
+  protocol events are translated to lifecycle payloads by
+  `NamespacedProtocolToolEventReader` and joined with the registry by the
+  existing `ToolOperationTracker` (which also finishes dangling operations on
+  abort). The `onToolEvent` configurable remains ONLY as the direct callback
+  for toolkit runtime events (authorization notices).
+- **Invoke-style consumers** (`runAgent`, the Studio pet runtime) keep their
+  `onToolEvent` contract via `invokeWithRootStreamToolEvents`: it drives the
+  run through `streamEvents(v3)`, forwards tool lifecycle + runtime events,
+  and reproduces `__interrupt__` on the result from `run.interrupts`.
+
+Remaining scope (unchanged from the spike):
+
+- **Nested subagents (Caveat 1)**: tool-boundary nesting still loses inner
+  visibility; we accept flattened attribution for that level. The pinned
+  spike assertion will flag a LangGraph upgrade that changes this.
+- **Live tracer validation**: the spike and tests use fake models without a
+  live LangSmith tracer; watch the first live runs for tracer regressions
+  (the two-stream disease itself can no longer occur — there is no second
+  consumer).

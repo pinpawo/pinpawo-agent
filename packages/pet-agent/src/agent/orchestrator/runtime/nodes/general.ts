@@ -99,10 +99,8 @@ export function createGeneralNode(params: {
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
-      checkpoint: config.checkpoint,
       runnableConfig,
       signal: runnableConfig?.signal,
-      onToolEvent,
     });
 
     const outputMessages = tagNewLaneMessages(

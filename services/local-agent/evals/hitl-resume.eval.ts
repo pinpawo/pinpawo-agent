@@ -21,7 +21,7 @@
  *   - packages/pet-agent/src/agent/orchestrator/review/reviewAuthorizations.ts
  *
  * Model is not invoked: examples use a hand-built fake graph that yields the
- * exact LangGraph stream chunks runChatSession reads — the interrupt shape
+ * exact v3 protocol events runChatSession reads — the interrupt shape
  * is the canonical HumanReviewInterruptPayload emitted by pet-agent.
  *
  * Run:
@@ -217,7 +217,7 @@ function buildShellReviewInterrupt(command: string) {
 /**
  * Hand-built fake of LocalAgentGraphService that drives runChatSession through
  * an interrupt-then-resume sequence without invoking a real LLM. Mirrors the
- * stream shape produced by graph.stream({ streamMode: ['messages', 'values'] }).
+ * raw protocol events produced by graph.streamEvents({ version: 'v3' }).
  */
 function createFakeGraphService(params: {
   pendingShellCommand: string;
@@ -259,19 +259,46 @@ function createFakeGraphService(params: {
     buildResumeCommand(resume: unknown) {
       return new Command({ resume });
     },
-    async *stream(_setup: unknown, inputOverride?: unknown) {
+    async *streamEvents(_setup: unknown, inputOverride?: unknown) {
       if (!inputOverride) {
         // First (non-resume) turn: agent raises an interrupt.
         const payload = buildShellReviewInterrupt(params.pendingShellCommand);
         interruptEmitted = true;
-        yield ['values', { __interrupt__: [{ value: payload }] }];
+        yield {
+          type: 'event' as const,
+          seq: 0,
+          method: 'values',
+          params: { namespace: [], data: { __interrupt__: [{ value: payload }] } },
+        };
         return;
       }
-      // Resume turn: emit a streamed AI token then a final values snapshot.
+      // Resume turn: emit a streamed model lifecycle then a final values snapshot.
       interruptResumed = true;
       const aiMessage = new AIMessage(params.finalReply);
-      yield ['messages', [aiMessage, {}]];
-      yield ['values', { messages: [aiMessage] }];
+      yield {
+        type: 'event' as const,
+        seq: 0,
+        method: 'messages',
+        params: { namespace: [], data: { event: 'message-start', id: 'final-1' } },
+      };
+      yield {
+        type: 'event' as const,
+        seq: 1,
+        method: 'messages',
+        params: {
+          namespace: [],
+          data: {
+            event: 'content-block-delta',
+            delta: { type: 'text-delta', text: params.finalReply },
+          },
+        },
+      };
+      yield {
+        type: 'event' as const,
+        seq: 2,
+        method: 'values',
+        params: { namespace: [], data: { messages: [aiMessage] } },
+      };
     },
     invokeState() { throw new Error('not used'); },
     run() { throw new Error('not used'); },

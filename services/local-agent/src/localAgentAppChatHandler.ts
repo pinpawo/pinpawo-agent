@@ -21,6 +21,7 @@ import { runChatSession, type ChatSessionRequest } from './chatSessionAdapter';
 import type { LocalAgentGraphService } from './agentGraphService';
 import {
   configureInflightOperationRegistry,
+  overlayInflightDelegationOperations,
   emitInflightToolEvent,
   type InflightOperationRun,
 } from './inflightOperationRun';
@@ -321,6 +322,9 @@ export class LocalAgentAppChatHandler {
         },
         emitToolEvent: (event) => {
           this.sendStreamToolOperationEvent(ws, inflight, event);
+        },
+        acceptDelegationOperations: (operations) => {
+          overlayInflightDelegationOperations(inflight, operations);
         },
       });
       if (result.status === 'waiting_human') {

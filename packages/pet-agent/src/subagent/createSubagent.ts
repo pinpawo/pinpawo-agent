@@ -3,16 +3,12 @@ import type {
   SubagentInputState,
   SubagentResult,
   SubagentRunInput,
-  SubagentToolLifecycleEvent,
 } from '../types/subagent';
 import {
   evaluateGuard,
   type GuardDecisionEmitter,
 } from '../guards';
 import { createAgent, createMiddleware } from 'langchain';
-import type { RunnableConfig } from '@langchain/core/runnables';
-import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
-import { SubagentToolEventTracker } from './toolEventTracker';
 import {
   buildContextPolicyStateUpdate,
   rewriteMessagesForContextPolicy,
@@ -27,8 +23,7 @@ import {
   buildSubagentIterationLimitStopNotice,
   isSubagentGuardStopMessage,
 } from './guardStop';
-import { Command, END } from '@langchain/langgraph';
-import { SubagentProtocolToolEventReader } from './protocolToolEvents';
+import { Command, END, getWriter } from '@langchain/langgraph';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -37,10 +32,20 @@ const DEFAULT_SUBAGENT_MAX_ITERATIONS = 100;
 const SUBAGENT_HARD_RECURSION_LIMIT = 10_000;
 
 /**
- * Runtime-event name carrying subagent guard decision records through the
- * subagent's own event channel (`onToolEvent`); consumers filter by this name.
+ * Runtime-event name carrying subagent guard decision records. Written to the
+ * run's stream writer, so the records surface as `custom` events on the root
+ * protocol stream (#322); consumers filter by this name.
  */
 export const SUBAGENT_GUARD_DECISION_EVENT = 'subagent_guard_decision';
+
+/**
+ * Runtime-event name announcing the per-delegation tool-operation display
+ * metadata (`SubagentRunInput.operations`). Root `tools` protocol events only
+ * carry `tool_call_id`/`tool_name`; a consumer that joins display metadata
+ * from a registry merges this map in so delegation-scoped toolset operations
+ * (which are not in any statically known toolkit) still resolve.
+ */
+export const SUBAGENT_OPERATIONS_EVENT = 'subagent_operations';
 
 const SUBAGENT_GOVERNING_PROMPT = [
   '你是任务执行器，负责精确完成分配给你的任务。',
@@ -59,25 +64,16 @@ const SUBAGENT_GOVERNING_PROMPT = [
 
 const CONTEXT_POLICY_GOVERNING_PROMPT = '较早的工具原始输出可能会被淘汰，重要发现要随时写进你的回复里。';
 
-function readMessagesFromValuesChunk(chunk: unknown): BaseMessage[] | null {
+function readResultMessages(result: unknown): BaseMessage[] | null {
   if (
-    typeof chunk === 'object'
-    && chunk !== null
-    && 'messages' in chunk
-    && Array.isArray((chunk as { messages?: unknown }).messages)
+    typeof result === 'object'
+    && result !== null
+    && 'messages' in result
+    && Array.isArray((result as { messages?: unknown }).messages)
   ) {
-    return (chunk as { messages: BaseMessage[] }).messages;
+    return (result as { messages: BaseMessage[] }).messages;
   }
   return null;
-}
-
-export function buildNestedSubagentStreamConfig(config: RunnableConfig | undefined): RunnableConfig {
-  const {
-    callbacks: _callbacks,
-    runId: _runId,
-    ...streamConfig
-  } = config ?? {};
-  return streamConfig;
 }
 
 function buildContextPolicyContext(
@@ -156,21 +152,24 @@ function createSubagentIterationGuardMiddleware(
   });
 }
 
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-  return Boolean(
-    value
-    && (typeof value === 'object' || typeof value === 'function')
-    && typeof (value as { then?: unknown }).then === 'function',
-  );
+/**
+ * Writes a runtime event through the run's stream writer. Pregel injects the
+ * writer with `config.writer ??= ...`, so a subagent invoked with the parent
+ * config writes through the PARENT's writer and the event surfaces as a
+ * `custom` event on the root protocol stream. Emission is advisory: outside a
+ * run context it degrades to a no-op.
+ */
+function writeSubagentRuntimeEvent(name: string, data: unknown) {
+  try {
+    getWriter()?.({
+      event: 'on_runtime_event',
+      name,
+      data,
+    });
+  } catch {
+    // Outside a run context; skip.
+  }
 }
-
-type ToolCallProjection = {
-  toolCalls?: AsyncIterable<{
-    output?: unknown;
-    status?: unknown;
-    error?: unknown;
-  }>;
-};
 
 export async function createSubagent(input: SubagentRunInput): Promise<SubagentResult> {
   const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
@@ -189,18 +188,9 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     inputState.contextPolicy ? CONTEXT_POLICY_GOVERNING_PROMPT : null,
     ...inputState.instructions,
   ].filter((item): item is string => Boolean(item)).join('\n\n');
-  // Decision records ride the subagent's own event channel; emission is
-  // advisory and must never fail the run.
+  // Decision records must never fail the run.
   const emitGuardDecision: GuardDecisionEmitter = (record) => {
-    try {
-      void Promise.resolve(input.onToolEvent?.({
-        event: 'on_runtime_event',
-        name: SUBAGENT_GUARD_DECISION_EVENT,
-        data: record,
-      })).catch(() => {});
-    } catch {
-      // Ignore emission failures.
-    }
+    writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
   };
   const contextPolicyMiddleware = createContextPolicyMiddleware(inputState, emitGuardDecision);
   const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(maxIterations, emitGuardDecision);
@@ -209,110 +199,39 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     iterationGuardMiddleware,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
+  // No checkpointer here: the child inherits the parent's through the runnable
+  // config, so its state checkpoints under the parent's namespaced thread and a
+  // bare Command({ resume }) against the parent re-enters the child (#322).
   const agent = createAgent({
     model: input.model,
     tools: input.tools,
     systemPrompt,
     ...(middleware.length > 0 ? { middleware } : {}),
-    ...(input.checkpoint ? { checkpointer: input.checkpoint } : {}),
   });
 
+  if (inputState.operations && Object.keys(inputState.operations).length > 0) {
+    writeSubagentRuntimeEvent(SUBAGENT_OPERATIONS_EVENT, { operations: inputState.operations });
+  }
+
   let latestMessages = inputState.messages;
-  const toolEvents = new SubagentToolEventTracker();
-  const emitToolEvent = async (event: SubagentToolLifecycleEvent) => {
-    const operation = event.operation ?? inputState.operations?.[event.name];
-    await input.onToolEvent?.(toolEvents.accept(operation ? { ...event, operation } : event));
-  };
-  const finishToolEvents = async (outcome: 'completed' | 'failed', error?: unknown) => {
-    for (const event of toolEvents.finishActive(outcome, error)) {
-      await input.onToolEvent?.(event);
-    }
-  };
-  const emitSubagentMessageDelta = async (token: string) => {
-    if (!token) {
-      return;
-    }
-    await input.onToolEvent?.({
-      event: 'on_runtime_event',
-      name: 'subagent_message_delta',
-      data: { text: token },
-    });
-  };
-  const throwIfRejected = (results: PromiseSettledResult<unknown>[]) => {
-    const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-    if (rejected) {
-      throw rejected.reason;
-    }
-  };
-
   try {
-    const streamConfig = buildNestedSubagentStreamConfig(input.runnableConfig);
-    // Stripping callbacks from the explicit config is not enough: the parent
-    // graph's callback manager also flows in implicitly through
-    // AsyncLocalStorage, and the nested pregel run can hold duplicate tracer
-    // copies that share one run map. Run the whole nested stream in a cleared
-    // ALS scope so the subagent traces as its own root run instead.
-    await AsyncLocalStorageProviderSingleton.runWithConfig({}, async () => {
-      const run = await agent.streamEvents(
-        { messages: inputState.messages },
-        {
-          ...streamConfig,
-          version: 'v3',
-          signal: input.signal,
-          // Normal stopping is controlled by the subagent iteration guard.
-          // LangGraph recursionLimit stays intentionally high as a final breaker.
-          recursionLimit: SUBAGENT_HARD_RECURSION_LIMIT,
-        },
-      );
-
-      const consumeValues = async () => {
-        for await (const value of run.values) {
-          latestMessages = readMessagesFromValuesChunk(value) ?? latestMessages;
-        }
-      };
-      const consumeMessages = async () => {
-        for await (const message of run.messages) {
-          for await (const token of message.text) {
-            await emitSubagentMessageDelta(token);
-          }
-        }
-      };
-      const consumeToolEvents = async () => {
-        const toolEventReader = new SubagentProtocolToolEventReader();
-        for await (const event of run) {
-          // Nested parent-graph resumes can namespace this agent's values, while
-          // `run.values` only projects root values. Read protocol values too.
-          if (event.method === 'values') {
-            latestMessages = readMessagesFromValuesChunk(event.params.data) ?? latestMessages;
-          }
-          const toolEvent = toolEventReader.read(event);
-          if (toolEvent) {
-            await emitToolEvent(toolEvent);
-          }
-        }
-      };
-      const consumeToolCallProjection = async () => {
-        const toolCalls = (run as ToolCallProjection).toolCalls;
-        if (!toolCalls) {
-          return;
-        }
-        // The native projection owns per-call output/status promises. Draining it
-        // keeps interrupt/tool-error paths settled even though raw events drive UI.
-        for await (const toolCall of toolCalls) {
-          const pending = [toolCall.output, toolCall.status, toolCall.error]
-            .filter(isPromiseLike);
-          await Promise.allSettled(pending);
-        }
-      };
-
-      throwIfRejected(await Promise.allSettled([
-        consumeValues(),
-        consumeMessages(),
-        consumeToolEvents(),
-        consumeToolCallProjection(),
-      ]));
-      latestMessages = readMessagesFromValuesChunk(await run.output) ?? latestMessages;
-    }, true);
+    // The crucial #322 shape: invoke with the parent config passed through
+    // untouched, instead of consuming a child streamEvents() run behind a
+    // stripped config and a cleared ALS scope. Tokens, tool lifecycle,
+    // custom events and interrupts all surface on the ROOT stream with the
+    // child's namespace; the double-tracer class of bugs (#313/#316) cannot
+    // occur because there is no second stream consumer.
+    const result = await agent.invoke(
+      { messages: inputState.messages },
+      {
+        ...input.runnableConfig,
+        signal: input.signal,
+        // Normal stopping is controlled by the subagent iteration guard.
+        // LangGraph recursionLimit stays intentionally high as a final breaker.
+        recursionLimit: SUBAGENT_HARD_RECURSION_LIMIT,
+      },
+    );
+    latestMessages = readResultMessages(result) ?? latestMessages;
 
     // A guard may have gracefully ended the agent by appending its stop
     // notice as the FINAL message (via Command goto END). That is a clean "limit
@@ -321,7 +240,6 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // contextPolicy may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
     const stoppedByGuard = lastMessage ? isSubagentGuardStopMessage(lastMessage) : false;
-    await finishToolEvents('completed');
     return {
       messages: latestMessages,
       artifacts: inputState.artifacts ?? [],
@@ -332,15 +250,12 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // guard is meant to stop before this, but keep it as a graceful last-resort:
     // degrade to limit_reached instead of throwing through the orchestrator.
     if (isGraphRecursionLimitError(err)) {
-      await finishToolEvents('failed', err);
       return {
         messages: latestMessages,
         artifacts: inputState.artifacts ?? [],
         completionReason: 'limit_reached',
       };
     }
-
-    await finishToolEvents('failed', err);
     throw err;
   }
 }

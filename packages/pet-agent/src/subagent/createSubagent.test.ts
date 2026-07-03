@@ -2,16 +2,24 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import type { RunnableConfig } from '@langchain/core/runnables';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
-import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 import {
-  buildNestedSubagentStreamConfig,
+  MessagesAnnotation,
+  StateGraph,
+  START,
+  END,
+} from '@langchain/langgraph';
+import {
   createSubagent,
   SUBAGENT_GUARD_DECISION_EVENT,
+  SUBAGENT_OPERATIONS_EVENT,
 } from './createSubagent';
+import { NamespacedProtocolToolEventReader } from './protocolToolEvents';
+import type { SubagentToolLifecycleEvent } from '../types/subagent';
 import type { GuardDecisionRecord } from '../guards';
 import {
   SUBAGENT_GUARD_STOP_MARKER_KEY,
@@ -51,53 +59,25 @@ function usageMessage(content: string, inputTokens: number) {
   });
 }
 
-test('buildNestedSubagentStreamConfig does not inherit parent callback run identity', () => {
-  const callbacks = [{
-    handleChainStart: async () => undefined,
-  }];
-  const config = buildNestedSubagentStreamConfig({
-    callbacks,
-    runId: 'parent-run',
-    configurable: { thread_id: 'thread-1' },
-    metadata: { source: 'parent' },
-    tags: ['parent-tag'],
-    maxConcurrency: 2,
-  });
-
-  assert.deepEqual(config, {
-    configurable: { thread_id: 'thread-1' },
-    metadata: { source: 'parent' },
-    tags: ['parent-tag'],
-    maxConcurrency: 2,
-  });
-});
-
-test('createSubagent does not leak run events to AsyncLocalStorage-inherited parent callbacks', async () => {
-  // Callbacks reach a nested run through AsyncLocalStorage even when the
-  // explicit config is stripped. If they leak in, the nested pregel holds
-  // duplicate tracer copies over one shared run map and every run-end fires
-  // "No <type> run to end" (see the ALS isolation in createSubagent).
-  const leaked: string[] = [];
-  const parentCallbacks = [{
-    handleChainStart: async () => {
-      leaked.push('chain_start');
-    },
-    handleLLMStart: async () => {
-      leaked.push('llm_start');
-    },
-    handleToolStart: async () => {
-      leaked.push('tool_start');
-    },
-  }];
+/**
+ * The production shape (#322 Phase 4): a parent graph node runs createSubagent
+ * with the parent config passed through, and every run signal — tool
+ * lifecycle, guard decision records, the per-delegation operations
+ * announcement — surfaces on the ROOT `streamEvents(v3)` protocol stream.
+ * There is no bridged `onToolEvent` anymore.
+ */
+test('createSubagent surfaces tool lifecycle, guard decisions and operations on the root stream', async () => {
   const readFile = tool(async ({ path }) => `contents:${path}`, {
     name: 'read_file',
     description: 'read a file',
     schema: z.object({ path: z.string() }),
   });
 
-  const result = await AsyncLocalStorageProviderSingleton.runWithConfig(
-    { callbacks: parentCallbacks },
-    () => createSubagent({
+  const delegate = async (
+    state: typeof MessagesAnnotation.State,
+    config?: RunnableConfig,
+  ) => {
+    const result = await createSubagent({
       model: new FakeToolCallingModel({
         toolCalls: [
           [{
@@ -110,184 +90,78 @@ test('createSubagent does not leak run events to AsyncLocalStorage-inherited par
       }),
       tools: [readFile],
       instructions: [],
-      messages: [new HumanMessage('read the file')],
+      operations: {
+        read_file: {
+          title: 'Read File',
+        },
+      },
+      messages: state.messages,
       maxIterations: 4,
-    }),
+      runnableConfig: config,
+    });
+    return { messages: result.messages };
+  };
+
+  const graph = new StateGraph(MessagesAnnotation)
+    .addNode('delegate', delegate)
+    .addEdge(START, 'delegate')
+    .addEdge('delegate', END)
+    .compile();
+
+  const run = await graph.streamEvents(
+    { messages: [new HumanMessage('read the file')] },
+    { version: 'v3' },
   );
 
-  assert.equal(result.completionReason, 'natural');
-  assert.deepEqual(leaked, []);
-});
+  const reader = new NamespacedProtocolToolEventReader();
+  const lifecycle: SubagentToolLifecycleEvent[] = [];
+  const runtimeEvents: Array<{ name?: unknown; data?: unknown }> = [];
+  for await (const event of run) {
+    if (event.method === 'tools') {
+      const toolEvent = reader.readToolsData(
+        event.params.namespace as string[] | undefined,
+        event.params.data,
+      );
+      if (toolEvent) {
+        lifecycle.push(toolEvent);
+      }
+    }
+    if (event.method === 'custom') {
+      runtimeEvents.push(event.params.data as { name?: unknown; data?: unknown });
+    }
+  }
+  await run.output;
 
-test('createSubagent emits non-tool model text as runtime deltas', async () => {
-  const events: unknown[] = [];
+  // Child tool lifecycle reached the root protocol stream with resolved names.
+  const startAndEnd = lifecycle.filter(
+    (event) => event.event === 'on_tool_start' || event.event === 'on_tool_end',
+  );
+  assert.deepEqual(startAndEnd.map((event) => event.event), ['on_tool_start', 'on_tool_end']);
+  assert.equal(startAndEnd[0]?.name, 'read_file');
+  assert.equal(startAndEnd[0]?.toolCallId, 'call-read');
+  assert.equal(startAndEnd[1]?.name, 'read_file');
+  assert.equal(startAndEnd[1]?.toolCallId, 'call-read');
 
-  const result = await createSubagent({
-    model: new FakeListChatModel({
-      responses: ['subagent result'],
-      sleep: 0,
-    }),
-    tools: [],
-    instructions: [],
-    messages: [new HumanMessage('do the task')],
-    maxIterations: 4,
-    onToolEvent: (event) => {
-      events.push(event);
-    },
-  });
-
-  assert.equal(result.completionReason, 'natural');
-  const deltas = events.filter((event): event is {
-    event: 'on_runtime_event';
-    name: 'subagent_message_delta';
-    data: { text: string };
-  } => Boolean(
-    event
-      && typeof event === 'object'
-      && (event as { event?: unknown }).event === 'on_runtime_event'
-      && (event as { name?: unknown }).name === 'subagent_message_delta',
-  ));
-  assert.equal(deltas.map((event) => event.data.text).join(''), 'subagent result');
-});
-
-test('createSubagent emits guard decision records as runtime events', async () => {
-  const events: unknown[] = [];
-
-  const result = await createSubagent({
-    model: new FakeListChatModel({
-      responses: ['subagent result'],
-      sleep: 0,
-    }),
-    tools: [],
-    instructions: [],
-    messages: [new HumanMessage('do the task')],
-    maxIterations: 4,
-    onToolEvent: (event) => {
-      events.push(event);
-    },
-  });
-
-  assert.equal(result.completionReason, 'natural');
-  const records = events
-    .filter((event): event is { event: 'on_runtime_event'; name: string; data: GuardDecisionRecord } => Boolean(
-      event
-        && typeof event === 'object'
-        && (event as { event?: unknown }).event === 'on_runtime_event'
-        && (event as { name?: unknown }).name === SUBAGENT_GUARD_DECISION_EVENT,
-    ))
-    .map((event) => event.data);
-
-  // One model call → one iteration-guard evaluation that proceeds.
-  const iterationRecords = records.filter((record) => record.guard === 'subagent_iteration_limit');
-  assert.equal(iterationRecords.length, 1);
-  assert.deepEqual(iterationRecords[0], {
+  // Guard decision records ride the writer to the root custom channel.
+  const guardRecords = runtimeEvents
+    .filter((data) => data?.name === SUBAGENT_GUARD_DECISION_EVENT)
+    .map((data) => data.data as GuardDecisionRecord)
+    .filter((record) => record.guard === 'subagent_iteration_limit');
+  assert.equal(guardRecords.length, 2);
+  assert.deepEqual(guardRecords[0], {
     guard: 'subagent_iteration_limit',
     position: 'subagent.before_model_iteration',
     outcome: { kind: 'proceed' },
     iteration: 1,
   });
-});
 
-test('createSubagent emits tool lifecycle events through event streaming', async () => {
-  const events: unknown[] = [];
-  const readFile = tool(async ({ path }) => `contents:${path}`, {
-    name: 'read_file',
-    description: 'read a file',
-    schema: z.object({ path: z.string() }),
-  });
-
-  const result = await createSubagent({
-    model: new FakeToolCallingModel({
-      toolCalls: [
-        [{
-          id: 'call-read',
-          name: 'read_file',
-          args: { path: 'README.md' },
-        }],
-        [],
-      ],
-    }),
-    tools: [readFile],
-    instructions: [],
-    operations: {
-      read_file: {
-        title: 'Read File',
-      },
-    },
-    messages: [new HumanMessage('read the file')],
-    maxIterations: 4,
-    onToolEvent: (event) => {
-      events.push(event);
-    },
-  });
-
-  assert.equal(result.completionReason, 'natural');
-  const toolEvents = events.filter((event): event is {
-    event: 'on_tool_start' | 'on_tool_end';
-    name: string;
-    toolCallId?: string;
-    operation?: { title?: string };
-  } => Boolean(
-    event
-      && typeof event === 'object'
-      && (
-        (event as { event?: unknown }).event === 'on_tool_start'
-        || (event as { event?: unknown }).event === 'on_tool_end'
-      ),
-  ));
-  assert.deepEqual(toolEvents.map((event) => event.event), ['on_tool_start', 'on_tool_end']);
-  assert.equal(toolEvents[0]?.name, 'read_file');
-  assert.equal(toolEvents[0]?.toolCallId, 'call-read');
-  assert.equal(toolEvents[0]?.operation?.title, 'Read File');
-  assert.equal(toolEvents[1]?.name, 'read_file');
-  assert.equal(toolEvents[1]?.toolCallId, 'call-read');
-  assert.equal(toolEvents[1]?.operation?.title, 'Read File');
-});
-
-test('createSubagent preserves streamed tool progress from event streaming', async () => {
-  const events: unknown[] = [];
-  const search = tool(async function* ({ query }) {
-    yield { message: `searching ${query}`, progress: 0.5 };
-    return `done:${query}`;
-  }, {
-    name: 'search_docs',
-    description: 'search docs',
-    schema: z.object({ query: z.string() }),
-  });
-
-  await createSubagent({
-    model: new FakeToolCallingModel({
-      toolCalls: [
-        [{
-          id: 'call-search',
-          name: 'search_docs',
-          args: { query: 'streaming' },
-        }],
-        [],
-      ],
-    }),
-    tools: [search],
-    instructions: [],
-    messages: [new HumanMessage('search docs')],
-    maxIterations: 4,
-    onToolEvent: (event) => {
-      events.push(event);
-    },
-  });
-
-  const progress = events.find((event): event is {
-    event: 'on_tool_event';
-    name: string;
-    toolCallId?: string;
-    data: unknown;
-  } => Boolean(
-    event
-      && typeof event === 'object'
-      && (event as { event?: unknown }).event === 'on_tool_event',
-  ));
-  assert.equal(progress?.name, 'search_docs');
-  assert.equal(progress?.toolCallId, 'call-search');
-  assert.equal(progress?.data, JSON.stringify({ message: 'searching streaming', progress: 0.5 }));
+  // The per-delegation operations map is announced for display-metadata joins.
+  const operationEvents = runtimeEvents.filter((data) => data?.name === SUBAGENT_OPERATIONS_EVENT);
+  assert.equal(operationEvents.length, 1);
+  const announced = (operationEvents[0]?.data as {
+    operations?: Record<string, { title?: string }>;
+  })?.operations;
+  assert.equal(announced?.read_file?.title, 'Read File');
 });
 
 test('createSubagent contextPolicy rewrites persisted subagent transcript', async () => {

@@ -5,23 +5,25 @@ import {
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isGraphRecursionLimitError,
   isHumanReviewInterruptPayload,
-  isOrchestratorInternalAiStreamNode,
+  NamespacedProtocolToolEventReader,
   readMessagesTokenUsage,
   stampMessageCreatedAtUtc,
+  SUBAGENT_OPERATIONS_EVENT,
   type ReviewSpec,
   type SubagentToolEvent,
-  type SubagentToolLifecycleEvent,
+  type SubagentToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { LocalAgentGraphService } from './agentGraphService';
 import type { LocalAgentEvent } from './events/localAgentEvent';
 import {
-  isLaneTaggedAiMessage,
   readFinalMessageText,
-  readMessageChunkText,
-  readStreamNode,
   type StreamToolsPayload,
 } from './agentStreamEvents';
+import {
+  adaptRootStream,
+  type RootProtocolEvent,
+} from './events/rootStreamEventAdapter';
 import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
@@ -46,6 +48,12 @@ export type ChatSessionAdapterOptions = {
   finishInterrupted: () => void;
   emitEvent: (event: LocalAgentEvent) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
+  /**
+   * Receives a delegation's `subagent_operations` announcement so the
+   * caller's operation registry can join display metadata for
+   * delegation-scoped toolset tools (#322 Phase 4).
+   */
+  acceptDelegationOperations?: (operations: Record<string, SubagentToolOperationMetadata>) => void;
 };
 
 function throwUnexpectedInterruptPayload(): never {
@@ -63,13 +71,6 @@ function emitHumanReviewRequested(params: {
     requestId: params.requestId,
     review: params.review,
   });
-}
-
-function isToolLifecycleEvent(event: SubagentToolEvent): event is SubagentToolLifecycleEvent {
-  return event.event === 'on_tool_start'
-    || event.event === 'on_tool_event'
-    || event.event === 'on_tool_end'
-    || event.event === 'on_tool_error';
 }
 
 function readRuntimeEventData(event: SubagentToolEvent): Record<string, unknown> | null {
@@ -122,13 +123,15 @@ function formatToolAuthorizationNotice(event: SubagentToolEvent): string | null 
   return '已授权当前会话中的工具操作。';
 }
 
-function readSubagentMessageDelta(event: SubagentToolEvent): string | null {
-  if (event.event !== 'on_runtime_event' || event.name !== 'subagent_message_delta') {
-    return null;
-  }
-  const data = readRuntimeEventData(event);
-  const text = data && typeof data.text === 'string' ? data.text : null;
-  return text && text.length > 0 ? text : null;
+function readDelegationOperations(data: unknown): Record<string, SubagentToolOperationMetadata> | null {
+  const operations = data
+    && typeof data === 'object'
+    && !Array.isArray(data)
+    ? (data as { operations?: unknown }).operations
+    : null;
+  return operations && typeof operations === 'object' && !Array.isArray(operations)
+    ? operations as Record<string, SubagentToolOperationMetadata>
+    : null;
 }
 
 function readMessageId(message: BaseMessage): string | null {
@@ -197,7 +200,16 @@ function readRunTokenUsage(params: {
 }
 
 export async function runChatSession(options: ChatSessionAdapterOptions): Promise<ChatSessionResult> {
-  const { request, setup, graphService, isCurrent, finishInterrupted, emitEvent, emitToolEvent } = options;
+  const {
+    request,
+    setup,
+    graphService,
+    isCurrent,
+    finishInterrupted,
+    emitEvent,
+    emitToolEvent,
+    acceptDelegationOperations,
+  } = options;
   const { requestId } = request;
   const isResumeRequest = request.kind === 'resume';
   const message = request.kind === 'user_message' ? request.message : '';
@@ -238,6 +250,9 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     ];
   }
 
+  // Toolkit runtime events (authorization notices) still arrive through the
+  // direct callback; tool lifecycle and subagent output now come from the
+  // root protocol stream below (#322 Phase 4).
   setup.input.onToolEvent = (event) => {
     if (isCurrent()) {
       const notice = formatToolAuthorizationNotice(event);
@@ -247,19 +262,6 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
           requestId,
           message: notice,
         });
-        return;
-      }
-      const subagentText = readSubagentMessageDelta(event);
-      if (subagentText) {
-        emitEvent({
-          type: 'subagent.message.delta',
-          requestId,
-          text: subagentText,
-        });
-        return;
-      }
-      if (isToolLifecycleEvent(event)) {
-        emitToolEvent(event as StreamToolsPayload);
       }
     }
   };
@@ -267,66 +269,74 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
   try {
-    const streamRun = graphService.stream(setup, graphInput);
-    for await (const chunk of streamRun) {
+    const run = await graphService.streamEvents(setup, graphInput);
+    const toolReader = new NamespacedProtocolToolEventReader();
+    for await (const chatEvent of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) {
       if (!isCurrent()) {
         finishInterrupted();
         return { status: 'interrupted' };
       }
 
-      if (!Array.isArray(chunk)) {
-        continue;
-      }
-
-      const [mode, payload] = chunk as [string, unknown];
-
-      if (mode === 'messages' && Array.isArray(payload)) {
-        const [streamMessage, metadata] = payload as [BaseMessage, Record<string, unknown> | undefined];
-        if (streamMessage._getType() !== 'ai') {
-          continue;
-        }
-        const streamNode = readStreamNode(metadata);
-        if (streamNode && isOrchestratorInternalAiStreamNode(streamNode)) {
-          continue;
-        }
-        if (isLaneTaggedAiMessage(streamMessage)) {
-          continue;
-        }
-        const chunkText = readMessageChunkText(streamMessage);
-        if (!chunkText) {
-          continue;
-        }
-        const token = chunkText.startsWith(streamedReply)
-          ? chunkText.slice(streamedReply.length)
-          : chunkText;
-        if (!token) {
-          continue;
-        }
-        streamedReply += token;
-        recordAgentRunActivity('streaming', requestId);
-        emitEvent({
-          type: 'message.delta',
-          requestId,
-          role: 'assistant',
-          text: token,
-        });
-        continue;
-      }
-
-      if (mode === 'values' && payload && typeof payload === 'object' && 'messages' in payload) {
-        finalMessages = ((payload as { messages?: BaseMessage[] }).messages ?? []);
-        continue;
-      }
-
-      if (mode === 'values' && payload && typeof payload === 'object' && '__interrupt__' in payload) {
-        const interruptPayload = readFirstHumanReviewInterruptPayload(payload);
-        if (interruptPayload) {
-          emitHumanReviewRequested({
-            review: interruptPayload.review,
+      switch (chatEvent.type) {
+        case 'assistant.delta': {
+          streamedReply += chatEvent.text;
+          recordAgentRunActivity('streaming', requestId);
+          emitEvent({
+            type: 'message.delta',
             requestId,
-            emitEvent,
+            role: 'assistant',
+            text: chatEvent.text,
           });
-          return { status: 'waiting_human' };
+          break;
+        }
+        case 'subagent.message': {
+          // One completed subagent message per child model lifecycle — the
+          // ambient progress feed is block-level by design (see the adapter).
+          emitEvent({
+            type: 'subagent.message.delta',
+            requestId,
+            text: chatEvent.text,
+          });
+          break;
+        }
+        case 'tool': {
+          const lifecycle = toolReader.readToolsData(chatEvent.namespace, chatEvent.data);
+          if (lifecycle) {
+            emitToolEvent(lifecycle as StreamToolsPayload);
+          }
+          break;
+        }
+        case 'runtime.custom': {
+          if (chatEvent.name === SUBAGENT_OPERATIONS_EVENT) {
+            const operations = readDelegationOperations(chatEvent.data);
+            if (operations) {
+              acceptDelegationOperations?.(operations);
+            }
+          }
+          break;
+        }
+        case 'guard.decision':
+          // Decision records are observability, not chat surface — parity
+          // with the legacy path, which did not consume the custom mode.
+          break;
+        case 'values': {
+          const messages = (chatEvent.values as { messages?: BaseMessage[] }).messages;
+          if (Array.isArray(messages)) {
+            finalMessages = messages;
+          }
+          break;
+        }
+        case 'interrupt': {
+          const interruptPayload = readFirstHumanReviewInterrupt(chatEvent.interrupts);
+          if (interruptPayload) {
+            emitHumanReviewRequested({
+              review: interruptPayload.review,
+              requestId,
+              emitEvent,
+            });
+            return { status: 'waiting_human' };
+          }
+          break;
         }
       }
     }
@@ -396,9 +406,8 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   return { status: 'completed', reply: finalReply };
 }
 
-function readFirstHumanReviewInterruptPayload(payload: object): { review: ReviewSpec } | null {
-  const rawInterrupts = (payload as { __interrupt__?: unknown }).__interrupt__;
-  const firstInterrupt = Array.isArray(rawInterrupts) ? rawInterrupts[0] : null;
+function readFirstHumanReviewInterrupt(interrupts: unknown[]): { review: ReviewSpec } | null {
+  const firstInterrupt = interrupts[0] ?? null;
   const value = firstInterrupt
     && typeof firstInterrupt === 'object'
     && 'value' in firstInterrupt

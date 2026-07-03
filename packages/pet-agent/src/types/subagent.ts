@@ -2,7 +2,6 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
-import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { CapabilityArtifactRef } from './artifact';
 import type { ToolOperationMetadata } from './toolkit';
 
@@ -107,10 +106,8 @@ export type SubagentInputState = {
 export type SubagentRunInput = SubagentInputState & {
   model: BaseChatModel;
   tools: StructuredTool[];
-  checkpoint?: BaseCheckpointSaver;
   runnableConfig?: RunnableConfig;
   signal?: AbortSignal;
-  onToolEvent?: SubagentToolEventHandler;
 };
 
 export type SubagentCompletionReason = 'natural' | 'limit_reached' | 'error';

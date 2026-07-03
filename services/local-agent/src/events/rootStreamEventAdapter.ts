@@ -136,7 +136,7 @@ export type RootStreamAdapterState = Map<string, {
   lastEmitted: string;
 }>;
 
-function namespaceKey(namespace: string[]): string {
+export function namespaceKey(namespace: string[]): string {
   return namespace.join('|');
 }
 

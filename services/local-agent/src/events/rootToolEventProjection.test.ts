@@ -20,6 +20,10 @@ const registry = createOperationRegistry({
     },
     source: { provider: 'toolkit', name: 'file', toolName: 'read_file' },
   },
+  run_shell: {
+    title: '执行命令',
+    source: { provider: 'toolkit', name: 'shell', toolName: 'run_shell' },
+  },
 });
 
 test('projects started/finished tool events joined with registry metadata', () => {
@@ -96,6 +100,54 @@ test('swallows a serialized-interrupt tool-error instead of projecting a failed 
   assert.ok(failed);
   assert.equal(failed.operation.phase, 'failed');
   assert.equal(failed.operation.raw?.error, 'boom');
+});
+
+test('keeps reader state per namespace when scopes reuse the same tool_call_id', () => {
+  const project = createRootToolEventProjector({ requestId: 'req-1', registry });
+  const mainScope = ['general:t1', 'tools:t2'];
+  const subagentScope = ['general:t1', 'subagent:s1', 'tools:t3'];
+
+  const mainStarted = project(toolEvent({
+    event: 'tool-started',
+    tool_call_id: 'call-dup',
+    tool_name: 'read_file',
+    input: { path: 'README.md' },
+  }, mainScope));
+  assert.ok(mainStarted);
+  assert.equal(mainStarted.operation.operation.title, '读取文件');
+
+  // Same call id from another scope while the first is still active: must not
+  // be dropped as a duplicate, and must not overwrite the first scope's name.
+  const subagentStarted = project(toolEvent({
+    event: 'tool-started',
+    tool_call_id: 'call-dup',
+    tool_name: 'run_shell',
+    input: { command: 'ls' },
+  }, subagentScope));
+  assert.ok(subagentStarted);
+  assert.equal(subagentStarted.operation.phase, 'started');
+  assert.equal(subagentStarted.operation.operation.title, '执行命令');
+  assert.deepEqual(subagentStarted.namespace, subagentScope);
+
+  const mainFinished = project(toolEvent({
+    event: 'tool-finished',
+    tool_call_id: 'call-dup',
+    output: 'contents',
+  }, mainScope));
+  assert.ok(mainFinished);
+  assert.equal(mainFinished.operation.phase, 'completed');
+  assert.equal(mainFinished.operation.operation.title, '读取文件');
+
+  // The main scope finishing call-dup must not mark the subagent's call
+  // finished: its terminal event still projects, with its own name.
+  const subagentFinished = project(toolEvent({
+    event: 'tool-finished',
+    tool_call_id: 'call-dup',
+    output: 'ok',
+  }, subagentScope));
+  assert.ok(subagentFinished);
+  assert.equal(subagentFinished.operation.phase, 'completed');
+  assert.equal(subagentFinished.operation.operation.title, '执行命令');
 });
 
 test('falls back to tool name and runtime source for unregistered tools', () => {

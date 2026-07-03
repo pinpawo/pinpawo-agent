@@ -8,7 +8,7 @@ import {
   emptyOperationRegistry,
   type OperationRegistry,
 } from './operationRegistry';
-import type { RootStreamChatEvent } from './rootStreamEventAdapter';
+import { namespaceKey, type RootStreamChatEvent } from './rootStreamEventAdapter';
 
 /**
  * Operation-metadata projection for root-stream tool events (#322 Phase 3).
@@ -25,11 +25,12 @@ import type { RootStreamChatEvent } from './rootStreamEventAdapter';
  *     → normalizeToolStreamEvent + OperationRegistry (title/target/summary)
  *     → LocalAgentOperationInternalEvent
  *
- * One projection instance per run: the reader's name memory spans the run.
- * Under root streaming, tool events from every scope arrive on one stream;
- * `tool_call_id`s are globally unique per run, so a single reader covers all
- * namespaces. The event's namespace is preserved on the result for scope
- * attribution (main vs subagent lane).
+ * One projection instance per run, one reader per namespace: the reader's
+ * dedup/name memory is keyed by raw `tool_call_id`, and call ids are only
+ * unique within the scope that produced them — two scopes reusing an id must
+ * not share dedup state, or the second `tool-started` is dropped and the name
+ * memory overwritten. The event's namespace is preserved on the result for
+ * scope attribution (main vs subagent lane).
  */
 
 export type RootOperationProjection = {
@@ -45,10 +46,16 @@ export function createRootToolEventProjector(params: {
   requestId: string;
   registry?: OperationRegistry;
 }): RootToolEventProjector {
-  const reader = new SubagentProtocolToolEventReader();
+  const readers = new Map<string, SubagentProtocolToolEventReader>();
   const registry = params.registry ?? emptyOperationRegistry;
 
   return function projectRootToolEvent(toolEvent) {
+    const key = namespaceKey(toolEvent.namespace);
+    let reader = readers.get(key);
+    if (!reader) {
+      reader = new SubagentProtocolToolEventReader();
+      readers.set(key, reader);
+    }
     const lifecycle = reader.readToolsData(toolEvent.data);
     if (!lifecycle) {
       return null;

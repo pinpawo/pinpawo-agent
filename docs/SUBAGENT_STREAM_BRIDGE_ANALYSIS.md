@@ -1,8 +1,11 @@
 # Subagent Stream Bridge Analysis
 
-> Status: Phase 1 spike complete — verdict **GO** (with two scoped caveats).
-> Updated: 2026-07-03. Referenced by issue #322.
+> Status: Phase 1 spike complete — verdict **GO** (two scoped caveats); Phase 2
+> adapter landed as a parallel path. Updated: 2026-07-03. Referenced by issue
+> #322.
 > Spike evidence: `packages/pet-agent/src/subagent/rootStreamProjection.test.ts`.
+> Adapter + correspondence tests:
+> `services/local-agent/src/events/rootStreamEventAdapter.ts`.
 
 ## Why the bridge exists, and what it costs
 
@@ -93,6 +96,35 @@ starts relative to the run, lifecycles could be missed. The **raw protocol
 stream** (`for await (const event of run)`) reliably carries every event with
 its namespace. The Phase 2 local-agent adapter should be built on the
 protocol stream; adopting the sugar projections can be evaluated separately.
+
+## Phase 2 — the root event-stream adapter (landed, parallel path)
+
+`services/local-agent/src/events/rootStreamEventAdapter.ts` translates raw
+root protocol events into the local-agent chat event vocabulary.
+`LocalAgentGraphService.streamEvents(setup)` opens the v3 run alongside the
+legacy `stream()`; nothing existing is rewired — the legacy path stays the
+production default until the correspondence is validated end-to-end.
+
+Correspondence with the legacy consumption (pinned by tests):
+
+| Legacy (`graph.stream` + bridge) | Root adapter |
+| --- | --- |
+| `messages` chunk `[msg, metadata]`, `_getType() === 'ai'` | message lifecycle per namespace; a lifecycle is excluded only by a KNOWN non-assistant role — model streams omit `role` on `message-start` |
+| `readStreamNode(metadata.langgraph_node)` | `readNamespaceNode(namespace[0])` (`"answer:<task>"` → `answer`) |
+| `isOrchestratorInternalAiStreamNode` skip | same helper applied to the namespace node |
+| `isLaneTaggedAiMessage` skip (lane tag on `additional_kwargs`) | protocol events do not carry `additional_kwargs`; the lane boundary is structural instead — depth ≥ 2 namespaces and depth-1 activity of lane nodes (`capability`/`general`) are subagent scope |
+| prefix dedup (`chunkText.startsWith(streamedReply)`) | per-scope prefix dedup: a node that streams a model then writes the message to state produces a second full-content lifecycle (the state echo); lane nodes echo their child's stream one namespace level up, so subagent scopes key on the top-level lane segment |
+| `values` payload with `__interrupt__` | root-namespace `values` event with `__interrupt__` |
+| `onToolEvent` bridged tool lifecycle | `tools` protocol events with namespaces (operation metadata join is Phase 3) |
+| `custom` stream mode chunks (#318) | `custom` protocol events filtered by `GUARD_DECISION_EVENT` / `SUBAGENT_GUARD_DECISION_EVENT` |
+
+Two protocol facts the adapter had to absorb (worth knowing for Phase 3+):
+
+- `content-block-delta` carries no message id; deltas belong to the message
+  opened by the most recent `message-start` in the same namespace.
+- `message-start` for live model streams carries no `role`; state-echo
+  lifecycles may. Filtering must be "known non-assistant role excludes",
+  not "assistant role includes".
 
 ## Implications for the #322 phase plan
 

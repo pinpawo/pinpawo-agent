@@ -1,11 +1,13 @@
 # Subagent Stream Bridge Analysis
 
 > Status: Phase 1 spike complete — verdict **GO** (two scoped caveats); Phase 2
-> adapter landed as a parallel path. Updated: 2026-07-03. Referenced by issue
-> #322.
+> adapter and Phase 3 operation projection landed as a parallel path.
+> Updated: 2026-07-04. Referenced by issue #322.
 > Spike evidence: `packages/pet-agent/src/subagent/rootStreamProjection.test.ts`.
 > Adapter + correspondence tests:
 > `services/local-agent/src/events/rootStreamEventAdapter.ts`.
+> Operation projection:
+> `services/local-agent/src/events/rootToolEventProjection.ts`.
 
 ## Why the bridge exists, and what it costs
 
@@ -134,6 +136,35 @@ Two protocol facts the adapter had to absorb (worth knowing for Phase 3+):
 - `message-start` for live model streams carries no `role`; state-echo
   lifecycles may. Filtering must be "known non-assistant role excludes",
   not "assistant role includes".
+
+## Phase 3 — operation metadata projection (landed, parallel path)
+
+Root protocol `tools` events carry only `tool_call_id`/`tool_name` (the name
+only on `tool-started`); the TUI operation timeline needs title/target/summary
+from the operation registry. The projection chain:
+
+```
+adapter `tool` event
+  → SubagentProtocolToolEventReader   (pet-agent, now a shared module:
+                                       name memory, started/finished dedup,
+                                       serialized-interrupt swallowing)
+  → normalizeToolStreamEvent + OperationRegistry
+  → LocalAgentOperationInternalEvent  (+ namespace for scope attribution)
+```
+
+`SubagentProtocolToolEventReader` moved out of `createSubagent.ts` into
+`subagent/protocolToolEvents.ts` and is exported: the legacy bridge and the
+root projection share one implementation of the tools-channel semantics, so
+Phase 4 deletes the bridge's *consumption*, not the translation logic. One
+projector instance per run — `tool_call_id`s are unique per run, so a single
+reader covers every namespace on the root stream.
+
+Known scope note: the legacy bridge could attach per-delegation `operation`
+metadata passed into `createSubagent` (`inputState.operations`); the root
+projection resolves from the registry built out of the setup's toolkits. If a
+delegation ever carries operations that are not in the setup registry, the
+switchover (Phase 4) must merge those maps into the registry — flagged for
+the switchover checklist.
 
 ## Implications for the #322 phase plan
 

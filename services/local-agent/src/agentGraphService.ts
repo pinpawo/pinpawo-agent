@@ -12,7 +12,7 @@ import {
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
-import { Command } from '@langchain/langgraph';
+import { Command, type GraphRunStream } from '@langchain/langgraph';
 import type { AgentChannelSetup } from './agentChannel';
 import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
 
@@ -52,6 +52,13 @@ export type LocalAgentGraphThreadState = {
 };
 
 export type LocalAgentGraphStream = OrchestratorGraphStream;
+
+/**
+ * The root v3 run stream (#322 Phase 2). The GraphRunStream projections (raw
+ * protocol iteration, subgraphs, interrupts, output) stay available to the
+ * adapter path.
+ */
+export type LocalAgentGraphEventStream = GraphRunStream<OrchestratorStateType>;
 
 function readSnapshotMessages(snapshot: unknown): BaseMessage[] {
   const values = (snapshot as { values?: { messages?: unknown } } | null)?.values;
@@ -134,6 +141,27 @@ export class LocalAgentGraphService {
         streamMode: ['messages', 'values', 'custom'],
       },
     );
+  }
+
+  /**
+   * Root streamEvents(v3) consumption path (#322 Phase 2). Parallel to
+   * `stream()` — the legacy `graph.stream` path stays the production default
+   * until the adapter correspondence is fully validated.
+   */
+  async streamEvents(
+    setup: AgentChannelSetup,
+    inputOverride?: unknown,
+  ): Promise<LocalAgentGraphEventStream> {
+    const graph = this.getGraph(setup);
+    return await graph.streamEvents(
+      (inputOverride ?? buildOrchestratorTurnInput(setup.input.messages)) as Parameters<OrchestratorGraph['streamEvents']>[0],
+      {
+        version: 'v3',
+        signal: setup.input.signal,
+        configurable: buildConfigurable(setup),
+        recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
+      },
+    ) as LocalAgentGraphEventStream;
   }
 
   async invokeState(setup: AgentChannelSetup, inputOverride?: unknown): Promise<OrchestratorStateType> {

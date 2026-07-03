@@ -258,6 +258,7 @@ export {
   createSubagent,
   SUBAGENT_GUARD_DECISION_EVENT,
 } from './subagent/createSubagent';
+export { SubagentProtocolToolEventReader } from './subagent/protocolToolEvents';
 export {
   GUARD_DECISION_EVENT,
   isGuardDecisionStreamChunk,

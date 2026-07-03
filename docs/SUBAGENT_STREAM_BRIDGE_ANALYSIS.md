@@ -112,11 +112,20 @@ Correspondence with the legacy consumption (pinned by tests):
 | `messages` chunk `[msg, metadata]`, `_getType() === 'ai'` | message lifecycle per namespace; a lifecycle is excluded only by a KNOWN non-assistant role — model streams omit `role` on `message-start` |
 | `readStreamNode(metadata.langgraph_node)` | `readNamespaceNode(namespace[0])` (`"answer:<task>"` → `answer`) |
 | `isOrchestratorInternalAiStreamNode` skip | same helper applied to the namespace node |
-| `isLaneTaggedAiMessage` skip (lane tag on `additional_kwargs`) | protocol events do not carry `additional_kwargs`; the lane boundary is structural instead — depth ≥ 2 namespaces and depth-1 activity of lane nodes (`capability`/`general`) are subagent scope |
-| prefix dedup (`chunkText.startsWith(streamedReply)`) | per-scope prefix dedup: a node that streams a model then writes the message to state produces a second full-content lifecycle (the state echo); lane nodes echo their child's stream one namespace level up, so subagent scopes key on the top-level lane segment |
+| `isLaneTaggedAiMessage` skip (lane tag on `additional_kwargs`) | protocol events do not carry `additional_kwargs`; the lane boundary is structural — depth-1 message activity of lane nodes (`capability`/`general`) is a state echo of what the depth ≥ 2 child scope already streamed, and is dropped exactly like the legacy lane-tag skip |
+| bridged `subagent_message_delta` (token feed) | one completed `subagent.message` per child model lifecycle (buffered deltas flushed on `message-finish`, consecutive-identical echo dropped). Subagent runs contain MULTIPLE messages; token-level dedup across them is unsound (a later message may extend or repeat earlier text — the truncation/duplication P1), and the feed is ambient progress, so block-level granularity is the intended semantics |
+| prefix dedup (`chunkText.startsWith(streamedReply)`) | kept for the MAIN assistant reply only (single-stream semantics, state-echo suppression) |
 | `values` payload with `__interrupt__` | root-namespace `values` event with `__interrupt__` |
 | `onToolEvent` bridged tool lifecycle | `tools` protocol events with namespaces (operation metadata join is Phase 3) |
 | `custom` stream mode chunks (#318) | `custom` protocol events filtered by `GUARD_DECISION_EVENT` / `SUBAGENT_GUARD_DECISION_EVENT` |
+
+Deliberate granularity change: the legacy bridge streamed subagent tokens
+live; the adapter emits completed subagent messages. Live "typing" for an
+ambient feed bought the whole token-dedup bug class; activity signals still
+arrive from tool lifecycle events between messages. If per-token subagent
+streaming ever becomes a product requirement, it must be scoped per message
+lifecycle (deltas between one `message-start`/`message-finish` pair), never
+accumulated across a lane.
 
 Two protocol facts the adapter had to absorb (worth knowing for Phase 3+):
 

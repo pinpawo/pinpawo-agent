@@ -80,10 +80,10 @@ test('adapter attributes root answer tokens to assistant and drops internal deci
       .filter((event) => event.type === 'assistant.delta')
       .every((event) => event.type === 'assistant.delta' && event.node === 'answer'),
   );
-  // Internal node output must not leak into any chat-visible delta.
+  // Internal node output must not leak into any chat-visible event.
   assert.ok(!assistantText.includes('route-thinking'));
   assert.ok(
-    events.every((event) => event.type !== 'subagent.delta'
+    events.every((event) => event.type !== 'subagent.message'
       || !event.text.includes('route-thinking')),
   );
 
@@ -92,16 +92,26 @@ test('adapter attributes root answer tokens to assistant and drops internal deci
     && Array.isArray((event.values as { messages?: unknown }).messages)));
 });
 
-test('adapter attributes delegation-lane and nested-child tokens to subagent scope', async () => {
+test('adapter emits one completed subagent message per child lifecycle across multiple messages', async () => {
+  // The P1-review scenario: a subagent emits several messages where a later
+  // one extends earlier text ('foo' then 'foobar'). Lane-cumulative token
+  // dedup would truncate the second message to 'bar'; per-lifecycle completed
+  // messages must survive intact. Each child node also writes its message
+  // back to child state (the same-namespace echo) and the lane node copies
+  // child messages into parent state (the depth-1 lane echo) — neither may
+  // duplicate or leak.
   const childGraph = new StateGraph(MessagesAnnotation)
-    .addNode('act', streamingNode(new FakeListChatModel({ responses: ['子代理输出'], sleep: 0 })))
-    .addEdge(START, 'act')
-    .addEdge('act', END)
+    .addNode('act1', streamingNode(new FakeListChatModel({ responses: ['foo'], sleep: 0 })))
+    .addNode('act2', streamingNode(new FakeListChatModel({ responses: ['foobar'], sleep: 0 })))
+    .addEdge(START, 'act1')
+    .addEdge('act1', 'act2')
+    .addEdge('act2', END)
     .compile();
 
   const general = async (state: typeof MessagesAnnotation.State, config?: RunnableConfig) => {
     const result = await childGraph.invoke({ messages: state.messages }, config);
-    return { messages: [result.messages.at(-1) as AIMessage] };
+    // Lane echo: copy the child's messages into parent state.
+    return { messages: result.messages.slice(state.messages.length) };
   };
 
   const graph = new StateGraph(MessagesAnnotation)
@@ -114,18 +124,17 @@ test('adapter attributes delegation-lane and nested-child tokens to subagent sco
 
   const events = await collectChatEvents(graph as never);
 
-  const subagentText = events
-    .filter((event): event is Extract<RootStreamChatEvent, { type: 'subagent.delta' }> => event.type === 'subagent.delta')
-    .map((event) => event.text)
-    .join('');
-  assert.ok(subagentText.includes('子代理输出'), `subagent text: ${JSON.stringify(subagentText)}`);
+  const subagentMessages = events
+    .filter((event): event is Extract<RootStreamChatEvent, { type: 'subagent.message' }> => event.type === 'subagent.message')
+    .map((event) => event.text);
+  assert.deepEqual(subagentMessages, ['foo', 'foobar']);
 
   const assistantText = events
     .filter((event): event is Extract<RootStreamChatEvent, { type: 'assistant.delta' }> => event.type === 'assistant.delta')
     .map((event) => event.text)
     .join('');
   assert.ok(assistantText.includes('主回复'));
-  assert.ok(!assistantText.includes('子代理输出'), `assistant text leaked subagent output: ${JSON.stringify(assistantText)}`);
+  assert.ok(!assistantText.includes('foo'), `assistant text leaked subagent output: ${JSON.stringify(assistantText)}`);
 });
 
 test('adapter surfaces guard decision records written to the stream writer', async () => {

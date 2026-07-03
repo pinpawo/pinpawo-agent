@@ -20,6 +20,16 @@ import {
  *   tool executions run inside a child agent);
  * - the node name is the first segment of a namespace entry (`"answer:<task>"`).
  *
+ * Scope granularities differ on purpose:
+ * - The main assistant reply streams as token deltas (the user is waiting on
+ *   it) with the legacy prefix dedup against the state echo.
+ * - Subagent output is an ambient progress feed with MULTIPLE messages per
+ *   run; it is emitted as one completed `subagent.message` per model message
+ *   lifecycle. Token-level dedup across messages is unsound there (a legit
+ *   new message can extend or repeat earlier text), and depth-1 lane echoes
+ *   of child messages are dropped entirely — matching the legacy
+ *   `isLaneTaggedAiMessage` skip.
+ *
  * The adapter deliberately consumes the protocol stream, not the ergonomic
  * projections (`run.messages` etc.), which showed subscription-timing
  * sensitivity in the spike.
@@ -40,8 +50,8 @@ export type RootProtocolEvent = {
 export type RootStreamChatEvent =
   /** Main-conversation assistant tokens (the user-facing reply stream). */
   | { type: 'assistant.delta'; messageId: string; node: string | null; text: string }
-  /** Model tokens from a delegated child scope (subagent lanes). */
-  | { type: 'subagent.delta'; namespace: string[]; messageId: string; text: string }
+  /** One completed subagent model message (ambient progress, block-level). */
+  | { type: 'subagent.message'; namespace: string[]; messageId: string; text: string }
   /** Tool lifecycle from any scope; Phase 3 joins operation metadata. */
   | { type: 'tool'; namespace: string[]; data: Record<string, unknown> }
   /** A guard decision record (orchestrator via stream writer; subagent after Phase 4). */
@@ -58,6 +68,9 @@ export type RootStreamChatEvent =
  * main assistant reply. Mirrors the legacy `isLaneTaggedAiMessage` filter:
  * lane tags live on `additional_kwargs`, which protocol message events do not
  * carry, so under root streaming the lane boundary is expressed by node name.
+ * Depth-1 lane message events are echoes of state the lane node writes
+ * (announces, copied child messages); the live subagent feed comes from the
+ * depth >= 2 child scopes, so lane echoes are dropped — as legacy does.
  */
 const DELEGATION_LANE_NODE_NAMES = new Set(['capability', 'general']);
 
@@ -111,14 +124,29 @@ function defaultIsMainAssistantNode(node: string | null): boolean {
 }
 
 /**
- * Per-run adapter state: `content-block-delta` events carry no message id —
- * within one namespace they belong to the message opened by the most recent
- * `message-start` there — so the current message is tracked per namespace.
+ * Per-namespace lifecycle tracking: `content-block-delta` events carry no
+ * message id — within one namespace they belong to the message opened by the
+ * most recent `message-start` there. Subagent lifecycles additionally buffer
+ * their text so the message can be emitted whole on `message-finish`.
  */
-export type RootStreamAdapterState = Map<string, { messageId: string; role: string }>;
+export type RootStreamAdapterState = Map<string, {
+  messageId: string;
+  role: string;
+  buffer: string;
+  lastEmitted: string;
+}>;
 
 function namespaceKey(namespace: string[]): string {
   return namespace.join('|');
+}
+
+function currentLifecycle(state: RootStreamAdapterState, key: string) {
+  let entry = state.get(key);
+  if (!entry) {
+    entry = { messageId: '', role: '', buffer: '', lastEmitted: '' };
+    state.set(key, entry);
+  }
+  return entry;
 }
 
 /**
@@ -138,38 +166,66 @@ export function readRootStreamChatEvent(
       if (!data) {
         return null;
       }
+      const key = namespaceKey(namespace);
       if (data.event === 'message-start') {
-        state.set(namespaceKey(namespace), {
+        const previous = state.get(key);
+        state.set(key, {
           messageId: typeof data.id === 'string' ? data.id : '',
           role: typeof data.role === 'string' ? data.role : '',
+          buffer: '',
+          lastEmitted: previous?.lastEmitted ?? '',
         });
         return null;
       }
-      const current = state.get(namespaceKey(namespace));
+      const current = currentLifecycle(state, key);
       // Mirrors the legacy `_getType() === 'ai'` filter. Model streams omit
       // the role on message-start (they are AI-authored by construction), so
       // only a KNOWN non-assistant role excludes a lifecycle.
-      if (current && current.role && current.role !== 'ai' && current.role !== 'assistant') {
+      if (current.role && current.role !== 'ai' && current.role !== 'assistant') {
         return null;
       }
-      const messageId = current?.messageId ?? '';
+
+      if (namespace.length >= 2) {
+        // Subagent scope: buffer deltas, emit the whole message on finish.
+        const text = readTextDelta(data);
+        if (text) {
+          current.buffer += text;
+          return null;
+        }
+        if (data.event === 'message-finish') {
+          const message = current.buffer;
+          current.buffer = '';
+          if (!message) {
+            return null;
+          }
+          // A same-namespace state echo replays the message as a second
+          // full-content lifecycle; drop consecutive identical messages.
+          if (message === current.lastEmitted) {
+            return null;
+          }
+          current.lastEmitted = message;
+          return {
+            type: 'subagent.message',
+            namespace,
+            messageId: current.messageId,
+            text: message,
+          };
+        }
+        return null;
+      }
+
       const text = readTextDelta(data);
       if (!text) {
         return null;
       }
-      if (namespace.length >= 2) {
-        return { type: 'subagent.delta', namespace, messageId, text };
-      }
       const node = readNamespaceNode(namespace);
       const isMain = options.isMainAssistantNode ?? defaultIsMainAssistantNode;
       if (!isMain(node)) {
-        // Internal decision/discovery output is dropped; delegation-lane
-        // depth-1 output is subagent scope.
-        return DELEGATION_LANE_NODE_NAMES.has(node ?? '')
-          ? { type: 'subagent.delta', namespace, messageId, text }
-          : null;
+        // Internal decision/discovery output and depth-1 lane echoes are
+        // dropped (legacy: internal-node skip + lane-tag skip).
+        return null;
       }
-      return { type: 'assistant.delta', messageId, node, text };
+      return { type: 'assistant.delta', messageId: current.messageId, node, text };
     }
 
     case 'tools': {
@@ -214,38 +270,31 @@ export function readRootStreamChatEvent(
  * Adapt a root v3 protocol stream into chat events. Adapter state is scoped
  * per run; the caller just iterates.
  *
- * Delta streams are deduplicated per scope with the same prefix trick the
- * legacy consumption uses: a node that streams a model and then writes the
- * resulting message back to state produces a second full-content lifecycle
- * (the state echo); a chunk whose text is a prefix-replay of the scope's
- * accumulated text contributes nothing new and is dropped.
+ * The main assistant reply keeps the legacy prefix dedup: a node that streams
+ * a model and then writes the resulting message back to state produces a
+ * second full-content lifecycle (the state echo); a chunk whose text is a
+ * prefix-replay of the accumulated reply contributes nothing new. Subagent
+ * messages are deduplicated per lifecycle inside `readRootStreamChatEvent`.
  */
 export async function* adaptRootStream(
   protocolEvents: AsyncIterable<RootProtocolEvent>,
   options: RootStreamAdapterOptions = {},
 ): AsyncGenerator<RootStreamChatEvent> {
   const state: RootStreamAdapterState = new Map();
-  const accumulatedByScope = new Map<string, string>();
+  let assistantReply = '';
   for await (const event of protocolEvents) {
     const chatEvent = readRootStreamChatEvent(event, state, options);
     if (!chatEvent) {
       continue;
     }
-    if (chatEvent.type === 'assistant.delta' || chatEvent.type === 'subagent.delta') {
-      // Subagent scopes share the top-level lane segment: a lane node that
-      // echoes its child's message into parent state replays the child's
-      // stream one namespace level up, and must dedupe against it.
-      const scope = chatEvent.type === 'assistant.delta'
-        ? 'assistant'
-        : `lane:${chatEvent.namespace[0] ?? ''}`;
-      const accumulated = accumulatedByScope.get(scope) ?? '';
-      const token = chatEvent.text.startsWith(accumulated)
-        ? chatEvent.text.slice(accumulated.length)
+    if (chatEvent.type === 'assistant.delta') {
+      const token = chatEvent.text.startsWith(assistantReply)
+        ? chatEvent.text.slice(assistantReply.length)
         : chatEvent.text;
       if (!token) {
         continue;
       }
-      accumulatedByScope.set(scope, accumulated + token);
+      assistantReply += token;
       yield { ...chatEvent, text: token };
       continue;
     }

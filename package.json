@@ -11,7 +11,13 @@
   "scripts": {
     "build": "npm run build -w pinpawo-local-agent",
     "test": "npm run test -w @pinpawo/pet-agent && npm run test:unit -w pinpawo-local-agent",
-    "typecheck": "npm run typecheck -w @pinpawo/pet-agent && npm run typecheck -w pinpawo-local-agent"
+    "typecheck": "npm run typecheck -w @pinpawo/pet-agent && npm run typecheck -w pinpawo-local-agent",
+    "langfuse:env": "bash infra/langfuse/bootstrap-env.sh",
+    "langfuse:up": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml up -d",
+    "langfuse:down": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml down",
+    "langfuse:logs": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml logs -f langfuse-web langfuse-worker",
+    "langfuse:ps": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml ps",
+    "langfuse:config": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml config"
   },
   "overrides": {
     "langsmith": "^0.7.2",

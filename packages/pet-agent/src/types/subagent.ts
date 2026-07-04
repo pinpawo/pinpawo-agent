@@ -2,6 +2,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
+import type { AnyAgentMiddleware } from 'langchain';
 import type { CapabilityArtifactRef } from './artifact';
 import type { ToolOperationMetadata } from './toolkit';
 
@@ -102,6 +103,7 @@ export type SubagentInputState = {
 export type SubagentRunInput = SubagentInputState & {
   model: BaseChatModel;
   tools: StructuredTool[];
+  middleware?: AnyAgentMiddleware[];
   runnableConfig?: RunnableConfig;
   signal?: AbortSignal;
 };

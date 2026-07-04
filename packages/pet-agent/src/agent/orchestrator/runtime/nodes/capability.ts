@@ -23,7 +23,7 @@ import type {
   MessageLane,
   OrchestratorConfig,
 } from '../../types';
-import { createRuntimeEventStreamEmitter } from '../../../../utils/streamWriterEvents';
+import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
 import { validateUniqueToolkitNames, validateUniqueToolNames } from '../../validation';
 import { createToolAuthorizationRecorder } from '../authorization';
 import {
@@ -112,10 +112,9 @@ export function createCapabilityNode(params: {
         artifactRefs.push(ref);
       },
       // Runtime events (authorization notices) surface as `custom` protocol
-      // events on the root stream (#322); there is no callback channel. The
-      // writer is captured HERE — review middleware emits from inside wrapped
-      // tools, where getWriter() cannot resolve.
-      emitRuntimeEvent: createRuntimeEventStreamEmitter(),
+      // events on the root stream (#322); review emits from afterModel
+      // middleware, where the writer is reachable at call time.
+      emitRuntimeEvent: emitRuntimeEventToStreamWriter,
     };
     const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
     const runtimeInstructions = await resolveInstructions(runtime, {
@@ -141,6 +140,7 @@ export function createCapabilityNode(params: {
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
       contextPolicy: runtime.contextPolicy,
+      middleware: usedToolkitResources.middleware,
       runnableConfig,
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,

@@ -195,14 +195,12 @@ What changed, per surface:
   Studio timeline ever ships, it should consume the root stream directly, not
   a callback bridge.
 - **`onToolEvent` no longer exists.** Toolkit runtime events (authorization
-  notices) also ride the stream writer: nodes wire `ToolkitContext.
-  emitRuntimeEvent` to `createRuntimeEventStreamEmitter()`, and runChatSession
-  maps the known names to system notices from `runtime.custom` chat events.
-  One protocol fact learned here: `getWriter()` resolves through
-  AsyncLocalStorage and does NOT reach tool-execution scopes inside a child
-  agent (the same tool boundary as Caveat 1) — review middleware emits from
-  inside wrapped tools, so the writer must be CAPTURED at node time and
-  closed over, not resolved at emission time.
+  notices) also ride the stream writer: toolkit review runs in child-agent
+  `afterModel` middleware, so nodes wire `ToolkitContext.emitRuntimeEvent` to
+  the call-time `emitRuntimeEventToStreamWriter` helper and runChatSession maps
+  the known names to system notices from `runtime.custom` chat events. The
+  tool-boundary writer gap from Caveat 1 still matters for nested subagents, but
+  toolkit review no longer emits from inside wrapped tools.
 
 Remaining scope (unchanged from the spike):
 

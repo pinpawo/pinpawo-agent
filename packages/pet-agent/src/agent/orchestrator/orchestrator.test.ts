@@ -10,6 +10,7 @@ import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import { defineToolset, type AgentToolkit } from '../../types/toolkit';
+import { createSubagent } from '../../subagent/createSubagent';
 import { runAgent } from '../runAgent';
 import { buildOrchestratorRunInput, createOrchestratorGraph } from '../createAgentRuntime';
 import {
@@ -61,6 +62,33 @@ function mockTool(name: string) {
     description: `${name} tool`,
     schema: z.object({}),
   });
+}
+
+type ToolkitResources = Awaited<ReturnType<typeof resolveToolkitResources>>;
+
+async function runToolkitToolCall(
+  resources: ToolkitResources,
+  toolCall: { id: string; name: string; args: Record<string, unknown> }
+    | Array<{ id: string; name: string; args: Record<string, unknown> }>,
+) {
+  const toolCalls = Array.isArray(toolCall) ? toolCall : [toolCall];
+  return createSubagent({
+    model: new FakeToolCallingModel({
+      toolCalls: [toolCalls, []],
+    }),
+    tools: resources.tools,
+    middleware: resources.middleware,
+    instructions: [],
+    operations: collectGeneralOperations(resources.toolkits),
+    messages: [new HumanMessage(`call ${toolCalls.map((call) => call.name).join(', ')}`)],
+  });
+}
+
+function readToolMessageContent(messages: unknown[], toolCallId: string) {
+  const message = messages.find((item): item is ToolMessage =>
+    item instanceof ToolMessage
+    && item.tool_call_id === toolCallId);
+  return message?.content;
 }
 
 const testActor: AgentActor = {
@@ -1264,10 +1292,12 @@ test('capability toolset runtimes expose operation metadata', async () => {
   assert.equal(JSON.stringify(summary).includes('这是一段待发布的正文'), false);
 });
 
-test('toolkit review policy wraps tool calls without changing tool identity', async () => {
+test('toolkit review policy runs after model without changing tool identity', async () => {
   let callCount = 0;
   let reviewCount = 0;
+  const order: string[] = [];
   const rawTool = tool(async () => {
+    order.push('tool');
     callCount += 1;
     return 'raw ok';
   }, {
@@ -1283,6 +1313,7 @@ test('toolkit review policy wraps tool calls without changing tool identity', as
       toolReview: {
         safe_tool: {
           request: () => {
+            order.push('review');
             reviewCount += 1;
             return null;
           },
@@ -1299,11 +1330,74 @@ test('toolkit review policy wraps tool calls without changing tool identity', as
 
   assert.equal(resources.tools[0]?.name, 'safe_tool');
   assert.equal(resources.tools[0]?.description, 'safe tool');
+  assert.equal(resources.tools[0], rawTool);
+  assert.equal(resources.middleware.length, 1);
 
-  const result = await resources.tools[0]?.invoke({});
+  const result = await runToolkitToolCall(resources, {
+    id: 'call-safe',
+    name: 'safe_tool',
+    args: {},
+  });
   assert.equal(reviewCount, 1);
   assert.equal(callCount, 1);
-  assert.equal(result, 'raw ok');
+  assert.deepEqual(order, ['review', 'tool']);
+  assert.equal(readToolMessageContent(result.messages, 'call-safe'), 'raw ok');
+});
+
+test('toolkit review cancellation does not skip other parallel tool calls', async () => {
+  let allowedCallCount = 0;
+  let blockedCallCount = 0;
+  const allowedTool = tool(async () => {
+    allowedCallCount += 1;
+    return 'allowed ok';
+  }, {
+    name: 'allowed_tool',
+    description: 'allowed tool',
+    schema: z.object({}),
+  });
+  const blockedTool = tool(async () => {
+    blockedCallCount += 1;
+    return 'blocked should not run';
+  }, {
+    name: 'blocked_tool',
+    description: 'blocked tool',
+    schema: z.object({}),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'guarded',
+    description: 'guarded toolkit',
+    tools: [allowedTool, blockedTool],
+    policy: {
+      toolReview: {
+        blocked_tool: {
+          request: () => ({
+            type: 'block',
+            reason: 'blocked by policy',
+          }),
+        },
+      },
+    },
+  }];
+
+  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+  });
+  const result = await runToolkitToolCall(resources, [
+    { id: 'call-blocked', name: 'blocked_tool', args: {} },
+    { id: 'call-allowed', name: 'allowed_tool', args: {} },
+  ]);
+
+  const blockedResult = JSON.parse(String(readToolMessageContent(
+    result.messages,
+    'call-blocked',
+  ))) as { cancelled?: boolean; reason?: string };
+  assert.equal(blockedResult.cancelled, true);
+  assert.match(blockedResult.reason ?? '', /blocked by policy/);
+  assert.equal(readToolMessageContent(result.messages, 'call-allowed'), 'allowed ok');
+  assert.equal(blockedCallCount, 0);
+  assert.equal(allowedCallCount, 1);
 });
 
 test('global review policy full_access bypasses toolkit review prompts', async () => {
@@ -1355,8 +1449,13 @@ test('global review policy full_access bypasses toolkit review prompts', async (
     globalReviewPolicy: { mode: 'full_access' },
   });
 
-  const result = await resources.tools[0]?.invoke({ path: 'notes.md', content: 'hello' });
-  assert.equal(result, 'raw ok');
+  assert.equal(resources.middleware.length, 0);
+  const result = await runToolkitToolCall(resources, {
+    id: 'call-write',
+    name: 'write_file',
+    args: { path: 'notes.md', content: 'hello' },
+  });
+  assert.equal(readToolMessageContent(result.messages, 'call-write'), 'raw ok');
   assert.equal(callCount, 1);
   assert.equal(reviewCount, 0);
 });
@@ -1412,8 +1511,12 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
     },
   });
 
-  const result = await resources.tools[0]?.invoke({ path: 'notes.md', content: 'hello' });
-  assert.equal(result, 'wrote notes.md');
+  const result = await runToolkitToolCall(resources, {
+    id: 'call-auto-write',
+    name: 'write_file',
+    args: { path: 'notes.md', content: 'hello' },
+  });
+  assert.equal(readToolMessageContent(result.messages, 'call-auto-write'), 'wrote notes.md');
   assert.equal(callCount, 1);
   assert.equal(autoReviewCount, 1);
   const systemPrompt = (autoReviewMessages as Array<{ content?: unknown }>)[0]?.content;
@@ -1461,8 +1564,15 @@ test('global review policy auto_authorization requires human authorization when 
     globalReviewPolicy: { mode: 'auto_authorization' },
   });
 
-  const result = await resources.tools[0]?.invoke({ path: 'src/index.ts', content: 'new content' });
-  const parsed = JSON.parse(String(result)) as { cancelled?: boolean; reason?: string };
+  const result = await runToolkitToolCall(resources, {
+    id: 'call-unsafe-write',
+    name: 'write_file',
+    args: { path: 'src/index.ts', content: 'new content' },
+  });
+  const parsed = JSON.parse(String(readToolMessageContent(
+    result.messages,
+    'call-unsafe-write',
+  ))) as { cancelled?: boolean; reason?: string };
   assert.equal(callCount, 0);
   assert.equal(parsed.cancelled, true);
   assert.match(parsed.reason ?? '', /too broad/);
@@ -1507,8 +1617,12 @@ test('global review policy custom resolver can authorize reviewed tool calls', a
     },
   });
 
-  const result = await resources.tools[0]?.invoke({ path: 'notes.md', content: 'hello' });
-  assert.equal(result, 'raw ok');
+  const result = await runToolkitToolCall(resources, {
+    id: 'call-custom-write',
+    name: 'write_file',
+    args: { path: 'notes.md', content: 'hello' },
+  });
+  assert.equal(readToolMessageContent(result.messages, 'call-custom-write'), 'raw ok');
   assert.equal(callCount, 1);
   assert.equal(customReviewTitle, 'write_file');
 });

@@ -8,7 +8,7 @@ import {
   evaluateGuard,
   type GuardDecisionEmitter,
 } from '../guards';
-import { createAgent, createMiddleware } from 'langchain';
+import { createAgent, createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import {
   buildContextPolicyStateUpdate,
   rewriteMessagesForContextPolicy,
@@ -180,9 +180,10 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   };
   const contextPolicyMiddleware = createContextPolicyMiddleware(inputState, emitGuardDecision);
   const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(maxIterations, emitGuardDecision);
-  const middleware = [
+  const middleware: AnyAgentMiddleware[] = [
     contextPolicyMiddleware,
     iterationGuardMiddleware,
+    ...(input.middleware ?? []),
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   // No checkpointer here: the child inherits the parent's through the runnable

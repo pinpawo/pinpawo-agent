@@ -61,6 +61,19 @@ export type GlobalReviewPolicyResolver = (
   ctx: GlobalReviewPolicyContext
 ) => GlobalReviewPolicyResolution | Promise<GlobalReviewPolicyResolution>;
 
+export type GlobalReviewPolicyBatchItem = Omit<GlobalReviewPolicyContext, 'models' | 'actor' | 'messages'>;
+
+export type GlobalReviewPolicyBatchContext = {
+  models: AgentModels;
+  actor: AgentActor;
+  messages: BaseMessage[];
+  reviews: GlobalReviewPolicyBatchItem[];
+};
+
+export type GlobalReviewPolicyBatchResolver = (
+  ctx: GlobalReviewPolicyBatchContext
+) => GlobalReviewPolicyResolution | Promise<GlobalReviewPolicyResolution>;
+
 export type GlobalReviewPolicy =
   | {
       mode: BuiltinGlobalReviewPolicyMode;
@@ -69,9 +82,14 @@ export type GlobalReviewPolicy =
   | {
       mode: typeof GLOBAL_REVIEW_POLICY_MODE.CUSTOM;
       resolve: GlobalReviewPolicyResolver;
+      resolveBatch?: GlobalReviewPolicyBatchResolver;
     };
 
 export type ResolveGlobalReviewPolicyOptions = GlobalReviewPolicyContext & {
+  policy?: GlobalReviewPolicy;
+};
+
+export type ResolveGlobalReviewBatchPolicyOptions = GlobalReviewPolicyBatchContext & {
   policy?: GlobalReviewPolicy;
 };
 
@@ -86,12 +104,12 @@ const AUTO_REVIEW_DECISION_SCHEMA = z.object({
 
 const AUTO_REVIEW_SYSTEM_PROMPT = [
   'You are a conservative security gate.',
-  'You only decide whether a proposed tool call may be automatically authorized.',
+  'You only decide whether a proposed tool-call batch may be automatically authorized.',
   'When uncertain, require human authorization.',
   'Return the decision as a JSON object matching the structured output schema.',
 ].join(' ');
 
-const DEFAULT_AUTO_REVIEW_REASON = 'Auto authorization did not approve this tool call.';
+const DEFAULT_AUTO_REVIEW_REASON = 'Auto authorization did not approve this tool-call batch.';
 const MAX_PROMPT_CHARS = 8_000;
 const MAX_FIELD_CHARS = 2_000;
 const MAX_RECENT_MESSAGES = 6;
@@ -148,29 +166,38 @@ function readOperationSummary(operation: ToolReviewOperationMetadata | undefined
   }
 }
 
-function buildAutoReviewPrompt(options: ResolveGlobalReviewPolicyOptions) {
-  const summary = readOperationSummary(options.operation, options.input);
+function formatAutoReviewItem(item: GlobalReviewPolicyBatchItem, index: number) {
+  const summary = readOperationSummary(item.operation, item.input);
   const lines = [
-    'Review this local agent tool call and decide whether it may run without human review.',
-    '',
-    'Return "authorize" only when the action is low risk, clearly expected from the user request, scoped, and unlikely to destroy data, leak secrets, spend money, change credentials, install software, or perform irreversible external side effects.',
-    'Return "require_authorization" for destructive writes, broad file changes, shell commands with unclear effects, network actions involving credentials or exfiltration, permission changes, package installs, git publish/commit actions, or whenever you are uncertain.',
-    '',
-    `Actor: ${options.actor.name}`,
-    `Toolkit: ${options.toolkitName}`,
-    `Tool: ${options.toolName}`,
-    options.operation?.title ? `Operation title: ${options.operation.title}` : null,
+    `Action ${index + 1}:`,
+    `Toolkit: ${item.toolkitName}`,
+    `Tool: ${item.toolName}`,
+    item.operation?.title ? `Operation title: ${item.operation.title}` : null,
     summary?.summary ? `Operation summary: ${summary.summary}` : null,
     summary?.target ? `Operation target: ${summary.target}` : null,
     summary?.details ? `Operation details:\n${safeJson(summary.details)}` : null,
+    `Review title: ${item.review.view.title ?? item.toolName}`,
+    `Review body:\n${clipText(reviewViewToText(item.review.view), MAX_FIELD_CHARS)}`,
+    `Tool input:\n${safeJson(item.input)}`,
+  ].filter((line): line is string => line !== null);
+
+  return lines.join('\n');
+}
+
+function buildAutoReviewPrompt(options: ResolveGlobalReviewBatchPolicyOptions) {
+  const lines = [
+    'Review this local agent tool-call batch and decide whether the entire batch may run without human review.',
     '',
-    `Review title: ${options.review.view.title ?? options.toolName}`,
-    `Review body:\n${clipText(reviewViewToText(options.review.view), MAX_FIELD_CHARS)}`,
+    'Return "authorize" only when every action in the batch is low risk, clearly expected from the user request, scoped, and unlikely to destroy data, leak secrets, spend money, change credentials, install software, or perform irreversible external side effects.',
+    'Return "require_authorization" if any action is destructive, broad, a shell command with unclear effects, a network action involving credentials or exfiltration, a permission change, a package install, a git publish/commit action, or whenever you are uncertain about any action in the batch.',
     '',
-    `Tool input:\n${safeJson(options.input)}`,
+    `Actor: ${options.actor.name}`,
+    `Batch size: ${options.reviews.length}`,
+    '',
+    options.reviews.map(formatAutoReviewItem).join('\n\n'),
     '',
     `Recent conversation:\n${formatRecentMessages(options.messages)}`,
-  ].filter((line): line is string => line !== null);
+  ];
 
   return clipText(lines.join('\n'), MAX_PROMPT_CHARS);
 }
@@ -181,7 +208,7 @@ function normalizeReason(reason: string | undefined, fallback: string) {
 }
 
 async function resolveAutoAuthorization(
-  options: ResolveGlobalReviewPolicyOptions,
+  options: ResolveGlobalReviewBatchPolicyOptions,
 ): Promise<GlobalReviewPolicyResolution> {
   const model = options.models.observe ?? options.models.act;
 
@@ -204,7 +231,7 @@ async function resolveAutoAuthorization(
     if (decision.decision === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
       return {
         type: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
-        reason: normalizeReason(decision.reason, 'Auto authorization approved this tool call.'),
+        reason: normalizeReason(decision.reason, 'Auto authorization approved this tool-call batch.'),
         ...(decision.confidence ? { confidence: decision.confidence } : {}),
       };
     }
@@ -223,9 +250,12 @@ async function resolveAutoAuthorization(
   }
 }
 
-export async function resolveGlobalReviewPolicy(
-  options: ResolveGlobalReviewPolicyOptions,
+export async function resolveGlobalReviewBatchPolicy(
+  options: ResolveGlobalReviewBatchPolicyOptions,
 ): Promise<GlobalReviewPolicyResolution> {
+  if (options.reviews.length === 0) {
+    return { type: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE, reason: 'No reviewed tool calls in this batch.' };
+  }
   const mode = options.policy?.mode ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
   if (mode === GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS) {
     return { type: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE, reason: 'Full access is enabled.' };
@@ -238,8 +268,25 @@ export async function resolveGlobalReviewPolicy(
   }
   if (options.policy?.mode === GLOBAL_REVIEW_POLICY_MODE.CUSTOM) {
     try {
-      const { policy: _policy, ...ctx } = options;
-      return await options.policy.resolve(ctx);
+      if (options.policy.resolveBatch) {
+        const { policy: _policy, ...ctx } = options;
+        return await options.policy.resolveBatch(ctx);
+      }
+      for (const review of options.reviews) {
+        const resolution = await options.policy.resolve({
+          models: options.models,
+          actor: options.actor,
+          messages: options.messages,
+          ...review,
+        });
+        if (resolution.type !== GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
+          return resolution;
+        }
+      }
+      return {
+        type: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
+        reason: 'Custom policy authorized every reviewed tool call in the batch.',
+      };
     } catch (error) {
       console.warn('[pet-agent] custom global review policy failed:', {
         error: error instanceof Error ? error.message : String(error),
@@ -251,4 +298,17 @@ export async function resolveGlobalReviewPolicy(
     }
   }
   return { type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION };
+}
+
+export async function resolveGlobalReviewPolicy(
+  options: ResolveGlobalReviewPolicyOptions,
+): Promise<GlobalReviewPolicyResolution> {
+  const { policy, models, actor, messages, ...review } = options;
+  return resolveGlobalReviewBatchPolicy({
+    policy,
+    models,
+    actor,
+    messages,
+    reviews: [review],
+  });
 }

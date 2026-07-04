@@ -39,10 +39,10 @@ type WriterCapableConfig = RunnableConfig & {
  * Emitter for orchestrator node positions. Records go to two channels:
  *
  * - the LangGraph custom stream (`streamMode: 'custom'`, via the node
- *   config's `writer`) — this is how records reach `graph.stream` consumers
- *   such as the local-agent chat/TUI path;
- * - `dispatchCustomEvent` — this is how records reach `streamEvents`
- *   (`on_custom_event`) consumers and the LangSmith trace.
+ *   config's `writer`) — this is how records surface as root custom protocol
+ *   events for local-agent stream consumers;
+ * - `dispatchCustomEvent` — this is how records reach LangGraph
+ *   `streamEvents` (`on_custom_event`) consumers and the LangSmith trace.
  *
  * Emission is advisory: without a runnable config (e.g. direct node unit
  * tests) or outside a run context it degrades to a no-op — a decision record

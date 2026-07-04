@@ -600,7 +600,7 @@ type StudioTurnEventHandler = (event: StudioTurnEvent) => void | Promise<void>;
 - **粒度低、频率低**:每棒大约 3–4 个事件(`dispatch_started` / `task_status_changed` / 可选 `wiki_updated` / `dispatch_finished`),整 turn 起止两端各 1 个。控制面据此渲染状态栏、徽章、当前棒次、wiki 最近更新。
 - **dispatch_finished 携带 resultText + artifact refs**:控制面需要"末棒最终文本"和产物卡片做"点击展开"等场景,所以这个事件带上 pet 的返回文本与 refs(冗余但便利;`turn_finished` 不重复携带)。
 - **handler 不阻塞编排**:Studio 不 await handler 的返回 promise,即便 handler 抛错或 promise reject,主流程也不受影响——控制面挂掉不应该让 turn 跟着挂。
-- **跟 pet 工具事件流是两条独立通道**:`onTurnEvent` 来自 Studio 自己(跨 pet、全局、低频),`onToolEvent` 来自 pet runtime 内部 tool 节点(单 pet 内部、高频)。一条供"控制面状态信号",一条供"pet 面板对话内容",各自独立订阅,UI 不需要做合流过滤。详见 INTERFACES 文档的 Boundary 2。
+- **跟 pet 工具事件流是两条独立通道**:`onTurnEvent` 来自 Studio 自己(跨 pet、全局、低频),pet runtime 内部 tool/runtime 事件来自 root `streamEvents(v3)` adapter(单 pet 内部、高频)。一条供"控制面状态信号",一条供"pet 面板对话内容",各自独立订阅,UI 不需要做合流过滤。详见 INTERFACES 文档的 Boundary 2。
 
 ## Local Agent Wiring (Phase 2)
 
@@ -784,7 +784,7 @@ LLM 调用集中在两处:**planner pet agent run** 和 **wiki_curator run**(每
 - 实现 obtainPlan(planner agent + studio_plan capability)+ queue runner + wiki_curator,执行单元拼成一个 turn 编排函数。`ExecuteAction` 由 zod 校验。
 - 实现 Studio Whiteboard 文件目录与 wiki_curator 节点(curator prompt 用默认值)。
 - 实现 wiki_read toolkit,在 Studio 模式下由 wiki middleware 装备到 pet。
-- pet runtime 透传 `onToolEvent` callback(Boundary 2),HITL 通过构造时注入的 `humanReviewer` 桥(Boundary 3)消化(详见 INTERFACES 文档)。
+- pet runtime 不透传工具 callback；工具/runtime 事件走 root stream Boundary 2,HITL 通过构造时注入的 `humanReviewer` 桥(Boundary 3)消化(详见 INTERFACES 文档)。
 - 支持显式 plan 顺序派发多个 standby pet agent。
 - dispatch 结果保存在 `StudioDispatchState.resultText`,artifact refs 保存在 `StudioDispatchState.artifacts`。
 - 默认路径仍派发给 `defaultPetId`。

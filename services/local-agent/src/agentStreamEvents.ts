@@ -37,4 +37,3 @@ export function readFinalMessageText(message: { content?: unknown }) {
   }
   return '';
 }
-

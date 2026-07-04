@@ -19,7 +19,7 @@
 │   单 pet ReAct + wiki middleware + capabilities + tools      │
 │   持有: humanReviewer(构造时注入, HITL 桥)                  │
 └──────────────────────────────────────────────────────────────┘
-        │ Boundary 2: 工具事件(onToolEvent,通过 invoke 入参)
+        │ Boundary 2: root stream 事件(streamEvents v3 + adapter)
         │ Boundary 3: HITL 应答桥(humanReviewer,构造时注入)
         ▼
 ┌──────────────────────────────────────────────────────────────┐
@@ -27,7 +27,7 @@
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Boundary 1 是 Studio 视角下的“pet 是什么”——一个普通函数。Boundary 2/3 是 pet runtime 与 UI 的 callback 桥（都是函数注入，不是独立信道）。Studio 不参与它们的路由。
+Boundary 1 是 Studio 视角下的“pet 是什么”——一个普通函数。Boundary 2 是 root stream 协议消费路径，不再是 `invoke` callback；Boundary 3 是构造时注入的 HITL callback。Studio 不透传 pet 工具细节。
 
 ## Boundary 1: Pet Invocation Contract
 
@@ -35,7 +35,6 @@ pet 派发一棒任务，本质是一次函数调用。
 
 ```ts
 import type {
-  SubagentToolEventHandler,
   AgentExecution,
   AgentToolkit,
   AgentCapability,
@@ -49,7 +48,6 @@ type PetInvokeArgs = {
   execution?: AgentExecution;
   workdir?: string;                 // 执行上下文工作目录
   runtimeEnvironment?: string;       // 可选 runtime prompt 叠加
-  onToolEvent?: SubagentToolEventHandler;
   toolkits?: AgentToolkit[];
   extraCapabilities?: AgentCapability[];
   forcedCapabilityNames?: string[];
@@ -69,7 +67,7 @@ interface PetAgentRuntime {
 - pet 运行时不接收 `artifactRefs` / `artifacts` 作为入参。
 - 同一 run 的历史 `CapabilityArtifactRef` 会通过上下文注入到 prompt（如 `capabilityArtifacts` 片段）。
 - 返回值是纯文本；长期产物只在 `CapabilityArtifactRef` 内传递。
-- HITL 与工具事件都通过 callback 注入，不依赖返回值。
+- HITL 通过 `humanReviewer` callback 注入；工具/运行时事件通过 root stream 消费，不依赖返回值。
 - `invoke()` 对上层是原子的：Studio 只在 Promise resolve 时拿到最终文本（或抛错/取消）。
 
 ## Wiki Middleware
@@ -127,26 +125,13 @@ capability 产物不直接依赖 `wiki`，也不依赖 `ToolMessage.artifact` �
 - pet 侧 `invoke` 返回不再带 `artifacts`。
 - `studio` 与 `UI` 的稳定交互只依赖 ref；内容通过 `store` 或专用 read tool 按需读取。
 
-## Boundary 2: Tool Event Callback (`onToolEvent`)
+## Boundary 2: Root Stream Events
 
-```ts
-type SubagentToolEvent =
-  | { event: 'on_tool_start'; toolCallId?: string; name: string; input: unknown }
-  | { event: 'on_tool_event'; toolCallId?: string; name: string; data: unknown }
-  | { event: 'on_tool_end';   toolCallId?: string; name: string; output: unknown }
-  | { event: 'on_tool_error'; toolCallId?: string; name: string; error: unknown };
+pet 工具生命周期与 runtime notice 统一从 LangGraph root `streamEvents(v3)` 读取：
 
-type SubagentToolEventHandler = (event: SubagentToolEvent) => void | Promise<void>;
-
-runtime.invoke({
-  brief, wikiRoot,
-  onToolEvent: (event) => ui.renderToolEvent(event),
-});
-```
-
-- 单一 callback,生命周期跟随 invoke。
-- pet runtime 不假设 UI 形态（ws、SSE、TUI、进程内）
-- Studio 将回调透传给 `pet.invoke()`，自身不消费细节。
+- `tools` protocol events 由 `NamespacedProtocolToolEventReader` 归一化为工具生命周期，再由 local-agent 的 `ToolOperationTracker` 结合 operation registry 投影成稳定 `operation` 事件。
+- `custom` protocol events 承载 `{ event: 'on_runtime_event', name, data }` envelope，用于 guard decision、tool authorization notice、delegation-scoped operation metadata 等 runtime 事件。
+- `PetAgentRuntime.invoke()` 和 `StudioSubmitRequestInput` 不接收工具事件 callback；Studio 当前只暴露编排级 `onTurnEvent` / run snapshot。未来若需要 Studio pet 面板时间线，应直接消费 root stream，而不是恢复 callback 桥。
 
 ## Boundary 3: HITL Bridge (`humanReviewer`)
 

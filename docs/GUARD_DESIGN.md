@@ -147,10 +147,11 @@ conclusions cross boundaries and transcripts do not:
 
 - **Ephemeral channel**: orchestrator positions emit each record twice — onto
   the LangGraph custom stream (`streamMode: 'custom'`, via the node config's
-  `writer`), which is how records reach `graph.stream` consumers such as the
-  local-agent chat/TUI path, and via `dispatchCustomEvent`, which is how they
-  reach `streamEvents` consumers and the LangSmith trace. Subagent middlewares
-  emit through the subagent's own `onToolEvent` runtime-event channel.
+  `writer`), which is how records surface as root `custom` protocol events for
+  local-agent stream consumers, and via `dispatchCustomEvent`, which is how
+  they reach LangGraph `streamEvents` consumers and the LangSmith trace.
+  Subagent middlewares emit runtime records through the shared stream-writer
+  envelope so they surface as root `custom` protocol events.
   Debugging "where did it go wrong" is filtering this log by position; the TUI
   can surface `maintain` records ("context compacted at 78% watermark") and
   `stop` records ("subagent hit iteration limit 25/25") without bespoke

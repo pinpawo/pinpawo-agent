@@ -158,10 +158,10 @@ pet-agent 在创建 subagent 时负责收集这些 metadata，并随工具事件
 ```txt
 AgentToolkit.operations
 CapabilityRuntime.toolsets[].operations
-  -> SubagentToolEvent.operation -> operation metadata
+  -> root protocol tools/custom events -> operation metadata
 ```
 
-local-agent 在每个 run 上建立由当前 `toolkits` 生成的 registry，作为 host/studio 事件和未携带 metadata 的工具事件 fallback。然后把内部 tool event normalize 成 stable local-agent event。
+local-agent 在每个 run 上建立由当前 `toolkits` 生成的 registry，作为 host/studio 事件和未携带 metadata 的工具事件 fallback。然后把 root stream 内部 tool event normalize 成 stable local-agent event。
 
 ### 3.3 adapter 拥有渲染
 
@@ -288,7 +288,7 @@ astream messages
 astream values final messages
   -> LocalAgentEvent message.completed
 
-pet/subagent onToolEvent
+root stream protocol tools/custom events
   -> LocalAgentEvent operation
 
 astream values __interrupt__
@@ -339,7 +339,7 @@ type LocalAgentOperationEvent = {
 说明：
 
 - `kind` 是开放字符串，由 toolkit/capability metadata 提供。
-- pet-agent subagent 层通过 `SubagentToolEventTracker` 规范 `onToolEvent` 的 `toolCallId`，并在 subagent 自然完成、limit reached、异常时关闭仍 active 的 tool event。
+- pet-agent/local-agent root stream adapter 通过 `NamespacedProtocolToolEventReader` 规范 protocol tool event 的 `toolCallId`，并在 run 自然完成、limit reached、异常时由 `ToolOperationTracker` 关闭仍 active 的 operation。
 - local-agent 运行层通过 `ToolOperationTracker` 保证发给客户端的 operation 有稳定 `id`；当上游缺失 `toolCallId` 时按 request 生成 synthetic id。
 - request 正常完成、异常、中断或等待人工时，tracker 会关闭仍 active 的 operation，避免客户端 `activeOperations` 泄漏。
 - `title` / `target` / `summary` 是已经归一化后的展示信息，adapter 可以直接使用。
@@ -475,9 +475,9 @@ type OperationRegistry = {
 - 新增 `events/LocalAgentEvent.ts`。
 - 新增 `events/OperationRegistry.ts`。
 - 新增 `events/AgentStreamNormalizer.ts`。
-- 运行链路改为走 `onToolEvent -> LocalAgentOperationEvent`，chat 顶层 stream 不再订阅 `tools` mode。
+- 运行链路改为走 root `streamEvents(v3)` protocol tools/custom events -> `LocalAgentOperationEvent`。
 - 内置 local tools 注册 operation metadata。
-- toolkit/capability metadata 随 subagent tool event 透传，local-agent run registry 作为 fallback。
+- toolkit/capability metadata 随 root stream protocol events / runtime metadata announcements 透传，local-agent run registry 作为 fallback。
 
 约束：
 
@@ -538,7 +538,7 @@ type OperationRegistry = {
 
 ### 阶段 5：拆分 tools/policy/capability registry
 
-状态：已完成。local 内置 tools/toolkits 已迁移到 `toolkits/local/`，其中 file/path、shell、network、search、git tools 与对应 operation metadata/review policy 同目录维护；browser toolkit 已迁移到 `toolkits/browser/`，browser capability 只保留 capability routing；pet profile toolkit 已归属 local-agent；operation metadata helper 已提升到 `toolkits/operationMetadata.ts`，供 local/browser tool metadata 共享，`plugins/` 目录不再承载内置 toolkit helper。`defineToolkit()` / `defineToolset()` 已提供 tool name 与 operation metadata/review policy key 的类型约束和运行时兜底校验。内置 local operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability/host tool operation metadata 随 subagent tool event 透传；external plugin loader 已支持 plugin 导出 `toolkits`，并忽略 plugin 顶层 raw `tools`；Studio local 内置 tools 已停止走 direct tools 注入，改由 local toolkits 暴露；`daily_post`、`capability_creator` 与 Studio planner `submit_plan` 已通过 capability-private toolset 暴露 metadata，Studio worker wiki read tools 已通过 `wiki_read` toolkit 暴露 metadata，`describe_pet_profile` 已通过 local-agent-owned `pet_profile` toolkit 暴露 metadata；草稿 memory/web_search toolkit 不再作为 pet-agent core 的已落地架构；invoke-level direct tools / tool operations fallback 已删除。local-agent 使用 run-local registry 兜底，旧的集中 local tool operation registry 文件已删除。runtime 中的 local toolkit/capability/user capability loading 与 rescan state 已收敛为 `LocalAgentCapabilityRegistry`。工具事件展示 metadata 变量命名已收敛到 operation metadata 语义，避免被误读为业务 operation。
+状态：已完成。local 内置 tools/toolkits 已迁移到 `toolkits/local/`，其中 file/path、shell、network、search、git tools 与对应 operation metadata/review policy 同目录维护；browser toolkit 已迁移到 `toolkits/browser/`，browser capability 只保留 capability routing；pet profile toolkit 已归属 local-agent；operation metadata helper 已提升到 `toolkits/operationMetadata.ts`，供 local/browser tool metadata 共享，`plugins/` 目录不再承载内置 toolkit helper。`defineToolkit()` / `defineToolset()` 已提供 tool name 与 operation metadata/review policy key 的类型约束和运行时兜底校验。内置 local operation metadata 已挂到 toolkit/tool 模块，browser toolkit 已挂载 browser operation metadata，pet-agent 已支持 toolkit/capability/host tool operation metadata 随 root stream protocol events / runtime metadata announcements 透传；external plugin loader 已支持 plugin 导出 `toolkits`，并忽略 plugin 顶层 raw `tools`；Studio local 内置 tools 已停止走 direct tools 注入，改由 local toolkits 暴露；`daily_post`、`capability_creator` 与 Studio planner `submit_plan` 已通过 capability-private toolset 暴露 metadata，Studio worker wiki read tools 已通过 `wiki_read` toolkit 暴露 metadata，`describe_pet_profile` 已通过 local-agent-owned `pet_profile` toolkit 暴露 metadata；草稿 memory/web_search toolkit 不再作为 pet-agent core 的已落地架构；invoke-level direct tools / tool operations fallback 已删除。local-agent 使用 run-local registry 兜底，旧的集中 local tool operation registry 文件已删除。runtime 中的 local toolkit/capability/user capability loading 与 rescan state 已收敛为 `LocalAgentCapabilityRegistry`。工具事件展示 metadata 变量命名已收敛到 operation metadata 语义，避免被误读为业务 operation。
 
 目标：让 local tools 和 capability 管理可维护。
 

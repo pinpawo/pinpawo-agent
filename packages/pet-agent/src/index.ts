@@ -263,7 +263,6 @@ export {
   NamespacedProtocolToolEventReader,
   SubagentProtocolToolEventReader,
 } from './subagent/protocolToolEvents';
-export { invokeWithRootStreamToolEvents } from './agent/rootStreamToolEvents';
 export {
   GUARD_DECISION_EVENT,
   isGuardDecisionStreamChunk,

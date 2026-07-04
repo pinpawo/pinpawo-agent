@@ -309,48 +309,6 @@ test('studio orchestrator emits turn_started then turn_finished(stopped) when pl
   assert.equal(finished.outcome, 'stopped');
 });
 
-test('studio orchestrator透传 onToolEvent to dispatched pet runtime', async () => {
-  const wikiBaseDir = await makeWikiTempDir('studio-tool-event-');
-  const captured: Array<unknown> = [];
-
-  const orchestrator = createStudioOrchestrator({
-    studioId: 'studio-1',
-    ownerUserId: 'user-1',
-    wikiBaseDir,
-    plannerPetId: 'planner',
-    agents: [
-      plannerRuntime(),
-      runtime({
-        petId: 'script',
-        name: 'Script Pet',
-        reply: 'script done',
-        onInvoke: (input) => {
-          captured.push(input.onToolEvent);
-        },
-      }),
-    ],
-  });
-
-  const handler = () => {};
-  await runStudio(orchestrator, {
-    userRequest: '写脚本',
-    conversationId: 'conv-tool-event',
-    onToolEvent: handler,
-    plan: {
-      tasks: [
-        {
-          petId: 'script',
-          goal: '写脚本结构',
-          acceptanceCriteria: [],
-        },
-      ],
-    },
-  });
-
-  assert.equal(captured.length, 1);
-  assert.equal(captured[0], handler, 'dispatched pet should receive the same onToolEvent');
-});
-
 test('wiki curator writes per-task source file and updates index', async () => {
   const wikiBaseDir = await makeWikiTempDir('studio-wiki-');
   const orchestrator = createStudioOrchestrator({

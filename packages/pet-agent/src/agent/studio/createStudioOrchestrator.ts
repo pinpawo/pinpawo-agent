@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import type { StudioAgent, StudioContext } from '../../types/studio';
-import type { SubagentToolEventHandler } from '../../types/subagent';
 import { createPlanCapability } from './planCapability';
 import type { StudioPlanPetListItem } from './planCapability';
 import type {
@@ -196,7 +195,6 @@ type StudioRunRecord = {
   userRequest: string;
   signal?: AbortSignal;
   abortController: AbortController;
-  onToolEvent?: SubagentToolEventHandler;
   emit: (event: StudioTurnEvent) => void;
   state: StudioRunInternalState;
   taskResults: Map<number, string>;
@@ -347,7 +345,6 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     conversationId: string;
     userRequest: string;
     signal?: AbortSignal;
-    onToolEvent?: SubagentToolEventHandler;
     onTurnEvent?: StudioTurnEventHandler;
     status: StudioRunStatus;
     createdAt: string;
@@ -363,7 +360,6 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       userRequest: params.userRequest,
       signal: params.signal,
       abortController: createRunAbortController(params.signal),
-      onToolEvent: params.onToolEvent,
       emit: makeEmitter(params.onTurnEvent),
       state: {
         turnId: params.turnId,
@@ -390,7 +386,6 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     action: StudioWorkerHandoffInput,
     dispatchId: string,
     signal: AbortSignal | undefined,
-    onToolEvent: SubagentToolEventHandler | undefined,
     emit: (event: StudioTurnEvent) => void,
   ): Promise<StudioWorkerRunResult> {
     if (!state.taskBatch) {
@@ -456,7 +451,6 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
         brief: action.brief,
         wikiRoot: state.wikiRoot,
         signal,
-        onToolEvent,
         threadId: `studio:${config.studioId}:thread:${state.conversationId}:pet:${task.petId}:dispatch:${dispatchId}`,
         workdir: config.workdir,
       });
@@ -491,7 +485,6 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
     userRequest: string;
     wikiRoot: string;
     signal?: AbortSignal;
-    onToolEvent?: SubagentToolEventHandler;
     conversationId: string;
   }): Promise<{ taskBatch: StudioQueuedTaskBatch | null; plannerReply: string | null }> {
     const planner = petRegistry.getRuntime(config.plannerPetId);
@@ -517,7 +510,6 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       brief: params.userRequest,
       wikiRoot: params.wikiRoot,
       signal: params.signal,
-      onToolEvent: params.onToolEvent,
       threadId: `studio:${config.studioId}:thread:${params.conversationId}:planner`,
       workdir: config.workdir,
       extraCapabilities: [planCapability],
@@ -693,7 +685,6 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
         userRequest: record.userRequest,
         wikiRoot: record.state.wikiRoot,
         signal: record.signal,
-        onToolEvent: record.onToolEvent,
         conversationId: record.conversationId,
       });
 
@@ -781,7 +772,6 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       { taskIndex: item.taskIndex, brief: item.brief },
       item.petRunId,
       record.signal,
-      record.onToolEvent,
       (event) => emitRunEvent(record, event),
     ).then(async (workerRun) => {
       item.errorMessage = workerRun.errorMessage;
@@ -895,7 +885,6 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       conversationId,
       userRequest: input.userRequest,
       signal: abortController.signal,
-      onToolEvent: input.onToolEvent,
       onTurnEvent: input.onTurnEvent,
       status: 'planning',
       createdAt,

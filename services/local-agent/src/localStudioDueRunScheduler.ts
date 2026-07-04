@@ -2,7 +2,6 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type {
   StudioTurnEvent,
   StudioTurnResult,
-  SubagentToolEvent,
 } from '@pinpawo/pet-agent';
 import {
   isTerminalStudioDueRunStatus,
@@ -34,7 +33,6 @@ export type LocalStudioDueRunSubmitOptions = {
   conversationId?: string;
   send: (envelope: unknown) => void;
   onProgress: (event: StudioTurnEvent) => void;
-  onToolEvent: (event: SubagentToolEvent) => void;
   slot: PendingReviewSlot;
   ownerUserId?: string | null;
   signal?: AbortSignal;
@@ -249,9 +247,6 @@ export class LocalStudioDueRunScheduler {
     const onProgress = (event: StudioTurnEvent) => {
       this.broadcastProgress(idempotencyKey, event);
     };
-    const onToolEvent = (event: SubagentToolEvent) => {
-      this.broadcastToolEvent(idempotencyKey, event);
-    };
     const onSend = (envelope: unknown) => {
       this.broadcastSend(idempotencyKey, envelope);
     };
@@ -270,7 +265,6 @@ export class LocalStudioDueRunScheduler {
           slot: owner.slot,
         },
         onProgress,
-        onToolEvent,
       });
       const completed = this.studioDueRuns.succeed(claim, {
         finalPetRunId: result.turn.outcome.outcome === 'done'
@@ -469,19 +463,6 @@ export class LocalStudioDueRunScheduler {
         continue;
       }
       waiter.onProgress(event);
-    }
-  }
-
-  private broadcastToolEvent(idempotencyKey: string, event: SubagentToolEvent) {
-    if (event.event === 'on_runtime_event') {
-      return;
-    }
-    const waiters = this.getWaiters(idempotencyKey);
-    for (const waiter of waiters) {
-      if (waiter.settled) {
-        continue;
-      }
-      waiter.onToolEvent(event);
     }
   }
 

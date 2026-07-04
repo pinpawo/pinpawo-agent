@@ -5,13 +5,8 @@ import {
   type HumanReviewResponseMessage,
   type StudioRequestMessage,
 } from './localAgentProtocol';
-import type { StreamToolsPayload } from './agentStreamEvents';
-import {
-  configureInflightOperationRegistry,
-  type InflightOperationRun,
-} from './inflightOperationRun';
+import { type InflightOperationRun } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
-import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
 import {
   LocalStudioDueRunCompletion,
   LocalStudioDueRunScheduler,
@@ -19,13 +14,12 @@ import {
 import { StudioNotConfiguredError } from './studio/studioRuntime';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import type { LocalServerDeps } from './localServerTypes';
-import { createOperationRegistryForLocalServerDeps } from './runtimeOperationRegistry';
 import {
   StudioRunService,
   type BuildStudioForTurn,
   type StudioRunServiceResult,
 } from './studioRunService';
-import type { SubagentToolEvent, StudioTurnEvent } from '@pinpawo/pet-agent';
+import type { StudioTurnEvent } from '@pinpawo/pet-agent';
 
 type InflightRequest = InflightOperationRun;
 type StudioHandleResult = StudioRunServiceResult | LocalStudioDueRunCompletion;
@@ -106,10 +100,6 @@ export class LocalServerStudioHandler {
       interruptPrevious: false,
     });
     const { controller } = inflight;
-    configureInflightOperationRegistry(
-      inflight,
-      createOperationRegistryForLocalServerDeps(deps),
-    );
 
     // 重置 review slot(防止上一 turn 残留)
     const slot = this.reviewRouter.getOrCreateSlot(ws);
@@ -130,22 +120,6 @@ export class LocalServerStudioHandler {
       });
     };
 
-    const onToolEvent = (payload: SubagentToolEvent) => {
-      if (payload.event === 'on_runtime_event') {
-        return;
-      }
-      this.sendStreamToolOperationEvent(ws, inflight, {
-        event: payload.event,
-        name: payload.name,
-        toolCallId: payload.toolCallId,
-        ...(payload.event === 'on_tool_start' ? { input: payload.input } : {}),
-        ...(payload.event === 'on_tool_event' ? { data: payload.data } : {}),
-        ...(payload.event === 'on_tool_end' ? { output: payload.output } : {}),
-        ...(payload.event === 'on_tool_error' ? { error: payload.error } : {}),
-        operation: payload.operation,
-      } as StreamToolsPayload);
-    };
-
     try {
       const result: StudioHandleResult = await (this.studioDueRunScheduler
         ? this.studioDueRunScheduler.submit({
@@ -156,12 +130,6 @@ export class LocalServerStudioHandler {
           userRequest,
           send,
           onProgress,
-          onToolEvent: (payload) => {
-            if (payload.event === 'on_runtime_event') {
-              return;
-            }
-            onToolEvent(payload);
-          },
           slot,
           signal: controller.signal,
         })
@@ -173,7 +141,6 @@ export class LocalServerStudioHandler {
           bridge: { send, requestId, slot },
           signal: controller.signal,
           onProgress,
-          onToolEvent,
         }));
 
       const completion = this.toCompletion(result);
@@ -272,18 +239,5 @@ export class LocalServerStudioHandler {
     }
 
     return result;
-  }
-
-  private sendStreamToolOperationEvent(
-    ws: WebSocket,
-    inflight: InflightRequest,
-    payload: StreamToolsPayload,
-  ) {
-    emitLocalServerToolOperationEvent({
-      run: inflight,
-      payload,
-      // Local studio review socket: include raw for diff/inspection rendering.
-      emit: (event) => sendLocalAgentEvent(ws, event, { includeRaw: true }),
-    });
   }
 }

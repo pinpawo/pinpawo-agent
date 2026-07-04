@@ -2,7 +2,6 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
-import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { CapabilityArtifactRef } from './artifact';
 import type { ToolOperationMetadata } from './toolkit';
 
@@ -49,10 +48,6 @@ export type SubagentRuntimeEvent = {
   name: string;
   data: unknown;
 };
-
-export type SubagentToolEvent = SubagentToolLifecycleEvent | SubagentRuntimeEvent;
-
-export type SubagentToolEventHandler = (event: SubagentToolEvent) => void | Promise<void>;
 
 /**
  * Lets a subagent persist a capability artifact from inside the loop and have
@@ -107,10 +102,8 @@ export type SubagentInputState = {
 export type SubagentRunInput = SubagentInputState & {
   model: BaseChatModel;
   tools: StructuredTool[];
-  checkpoint?: BaseCheckpointSaver;
   runnableConfig?: RunnableConfig;
   signal?: AbortSignal;
-  onToolEvent?: SubagentToolEventHandler;
 };
 
 export type SubagentCompletionReason = 'natural' | 'limit_reached' | 'error';

@@ -85,7 +85,7 @@ function createDeps(): LocalServerDeps {
   };
 }
 
-test('LocalServerStudioHandler emits progress, operations, and done response', async () => {
+test('LocalServerStudioHandler emits progress and done response', async () => {
   const sent: unknown[] = [];
   const ws = createFakeWebSocket(sent);
   const buildInputs: BuildStudioInput[] = [];
@@ -99,14 +99,8 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
         orchestrator: {
           submitRequest: async (turn: {
             onTurnEvent: (event: Record<string, unknown>) => void;
-            onToolEvent: (event: unknown) => void;
           }) => {
             turn.onTurnEvent({ type: 'turn_started' });
-            turn.onToolEvent({
-              event: 'on_tool_start',
-              name: 'read_file',
-              input: { path: 'README.md' },
-            });
             return { runId: 'run-100', status: 'accepted' };
           },
           waitForRun: async () => {
@@ -145,10 +139,7 @@ test('LocalServerStudioHandler emits progress, operations, and done response', a
   );
   assert.deepEqual(eventMessages.map((item) => item.event?.type), [
     'studio.progress',
-    'operation',
-    'operation',
   ]);
-  assert.deepEqual(eventMessages.map((item) => item.event?.phase).filter(Boolean), ['started', 'completed']);
   assert.deepEqual(sent.at(-1), {
     type: 'studio_response',
     requestId: 'studio-1',

@@ -5,7 +5,7 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
-import type { SubagentCompletionReason, SubagentToolEventHandler } from '../../types/subagent';
+import type { SubagentCompletionReason } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
@@ -120,7 +120,6 @@ export type OrchestratorInvokeOptions = {
   execution?: AgentExecution;
   workdir?: string;
   runtimeEnvironment?: string;
-  onToolEvent?: SubagentToolEventHandler;
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;
   maxRunIterations?: number;

@@ -47,7 +47,6 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
     turnId?: string;
   }> = [];
   const progressEvents: unknown[] = [];
-  const toolEvents: unknown[] = [];
   const service = new StudioRunService({
     buildStudio: async (input) => {
       buildInputs.push(input);
@@ -60,7 +59,6 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
             conversationId?: string;
             turnId?: string;
             onTurnEvent?: (event: unknown) => void;
-            onToolEvent?: (event: unknown) => void;
           }) => {
             invokeInputs.push({
               userRequest: turn.userRequest,
@@ -68,7 +66,6 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
               turnId: turn.turnId,
             });
             turn.onTurnEvent?.({ type: 'turn_started' });
-            turn.onToolEvent?.({ event: 'on_tool_start', name: 'read_file' });
             result = {
               turnId: turn.turnId ?? 'run-1',
               outcome: {
@@ -101,9 +98,6 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
       slot: { current: null },
     },
     onProgress: (event) => progressEvents.push(event),
-    onToolEvent: (event) => {
-      toolEvents.push(event);
-    },
   });
 
   assert.equal(buildInputs.length, 1);
@@ -126,7 +120,6 @@ test('StudioRunService runs Studio with runtimeConfig-scoped paths', async () =>
     turnId: 'run-1',
   }]);
   assert.deepEqual(progressEvents, [{ type: 'turn_started' }]);
-  assert.deepEqual(toolEvents, [{ event: 'on_tool_start', name: 'read_file' }]);
   assert.equal(result.idempotencyKey, 'studio:conversation-1:run:run-1');
   assert.equal(result.workdir, '/tmp/workspace');
   assert.equal(result.turn.outcome.outcome, 'done');
@@ -146,10 +139,8 @@ test('StudioRunService falls back to deps.workdir when runtimeConfig is absent',
             conversationId?: string;
             turnId?: string;
             onTurnEvent?: (event: unknown) => void;
-            onToolEvent?: (event: unknown) => void;
           }) => {
             turn.onTurnEvent?.({ type: 'turn_started' });
-            turn.onToolEvent?.({ event: 'on_tool_start', name: 'read_file' });
             result = {
               turnId: turn.turnId ?? 'run-legacy',
               outcome: {

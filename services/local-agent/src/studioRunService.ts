@@ -5,7 +5,6 @@ import {
 import type {
   StudioTurnEvent,
   StudioTurnResult,
-  SubagentToolEventHandler,
 } from '@pinpawo/pet-agent';
 import type { LocalServerDeps } from './localServerTypes';
 import {
@@ -26,7 +25,6 @@ export type StudioRunServiceRequest = {
   ownerUserId?: string | null;
   bridge: StudioBridgeContext;
   onProgress?: (event: StudioTurnEvent) => void;
-  onToolEvent?: SubagentToolEventHandler;
 };
 
 export type StudioRunServiceResult = {
@@ -58,7 +56,6 @@ export class StudioRunService {
       turnId: runId,
       signal: request.signal,
       onTurnEvent: request.onProgress,
-      onToolEvent: request.onToolEvent,
     });
     const turn = await orchestrator.waitForRun(accepted.runId);
 

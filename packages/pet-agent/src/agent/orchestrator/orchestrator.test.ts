@@ -1617,9 +1617,6 @@ test('toolkit review policy records authorization through orchestrator runtime t
       actor: testActor,
       capabilities: [],
       toolkits,
-      onToolEvent: (event: unknown) => {
-        runtimeEvents.push(event);
-      },
     },
   };
   const input = buildOrchestratorRunInput([new HumanMessage('run git status')]);
@@ -1634,12 +1631,20 @@ test('toolkit review policy records authorization through orchestrator runtime t
   assert.equal(reviewCount, 1);
 
   subagentModel.index = 0;
-  const finalState = await graph.invoke(new Command({
+  // Authorization runtime events ride the stream writer (#322): resume via
+  // the root protocol stream and collect `custom` events.
+  const resumedRun = await graph.streamEvents(new Command({
     resume: {
       reviewId: payload?.review?.id,
       selectedOptionId: 'approve-and-authorize-thread',
     },
-  }), config) as {
+  }), { version: 'v3', ...config });
+  for await (const event of resumedRun) {
+    if (event.method === 'custom') {
+      runtimeEvents.push(event.params.data);
+    }
+  }
+  const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
     sessionToolAuthorizations: Array<{ toolName: string; matcher: unknown; createdAt: string }>;
   };

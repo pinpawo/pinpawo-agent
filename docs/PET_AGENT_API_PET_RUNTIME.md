@@ -24,7 +24,6 @@ type PetAgentRuntimeInvokeInput = {
   execution?: AgentExecution;
   workdir?: string;
   runtimeEnvironment?: string;
-  onToolEvent?: SubagentToolEventHandler;
   toolkits?: AgentToolkit[];
   extraCapabilities?: AgentCapability[];
   forcedCapabilityNames?: string[];
@@ -63,7 +62,7 @@ type PetAgentRuntimeConfig = {
 2. `wikiRoot` 可选；存在时会读取 `{wikiRoot}/index.md`，注入 `SystemMessage`。
 3. `extraCapabilities` 仅在本次调用生效，与 runtime 级能力合并。
 4. `forcedCapabilityNames` 触发本次调用的 capability discovery 强制候选。
-5. `onToolEvent` 挂在 graph configurable 里作为工具生命周期回调。
+5. `invoke()` 是最终结果接口，不接收工具事件 callback；需要实时工具/运行时事件的宿主应消费 root `streamEvents(v3)` 并通过 adapter 投影。
 
 ## 4. 返回值与行为
 
@@ -88,13 +87,12 @@ const runtime = createPetAgentRuntime({
 const result = await runtime.invoke({
   brief: '请给这个产品写一条发布说明',
   wikiRoot: '/abs/path/to/wiki',
-  onToolEvent: (event) => logger.info(event),
   threadId: 'studio:abc:thread:def:pet:pet-a:dispatch:001',
 });
 ```
 
 ## 6. 与其他文档关系
 
-1. 运行时边界与工具事件： [PET_AGENT_STUDIO_INTERFACES](PET_AGENT_STUDIO_INTERFACES.md)
+1. 运行时边界与 root stream 事件： [PET_AGENT_STUDIO_INTERFACES](PET_AGENT_STUDIO_INTERFACES.md)
 2. HITL 细节： [工具事件与 HITL](PET_AGENT_API_EVENTS_HITL.md)
 3. Studio 编排层调用方式： [Studio Orchestrator API](PET_AGENT_API_STUDIO_ORCHESTRATOR.md)

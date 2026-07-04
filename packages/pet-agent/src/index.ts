@@ -40,8 +40,6 @@ export type {
   SubagentResult,
   SubagentRunInput,
   SubagentRuntimeEvent,
-  SubagentToolEvent,
-  SubagentToolEventHandler,
   SubagentToolLifecycleEvent,
   SubagentToolOperationMetadata,
 } from './types/subagent';
@@ -257,8 +255,12 @@ export type { AgentInvokeInput, AgentRunResult } from './agent/runAgent';
 export {
   createSubagent,
   SUBAGENT_GUARD_DECISION_EVENT,
+  SUBAGENT_OPERATIONS_EVENT,
 } from './subagent/createSubagent';
-export { SubagentProtocolToolEventReader } from './subagent/protocolToolEvents';
+export {
+  NamespacedProtocolToolEventReader,
+  SubagentProtocolToolEventReader,
+} from './subagent/protocolToolEvents';
 export {
   GUARD_DECISION_EVENT,
   isGuardDecisionStreamChunk,

@@ -152,7 +152,6 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       execution: input.execution ?? config.execution,
       workdir: input.workdir ?? config.workdir,
       runtimeEnvironment: input.runtimeEnvironment,
-      onToolEvent: input.onToolEvent,
       forcedCapabilityNames: input.forcedCapabilityNames,
     };
 

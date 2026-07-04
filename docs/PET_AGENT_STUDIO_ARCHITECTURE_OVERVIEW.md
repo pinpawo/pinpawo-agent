@@ -97,19 +97,19 @@ planner 一个 turn 只跑一次(起始),execute 是常驻循环节点。execute
 - **边界**:capability、tool、底层 API 由 pet 调用;capability artifacts 由 capability/pet runtime sink 到 artifact store;wiki 文件写入由 curator 节点承担;用户最终答复由末位 pet 的 返回文本 提供。
 - **设计立场**:execute 不自我修正大方向——若 plan 不再合理,优先 `finish`(交付当前可作产出)或 `stop`,把方向决策交还用户在 follow-up turn 解决。
 
-`finish` action 标定 `finalDispatchId`,Studio 通过两条独立的事件流告知 UI:
+`finish` action 标定 `finalDispatchId`,Studio 通过编排级事件流告知控制面；pet 内部工具时间线走 root stream:
 
 - **`onTurnEvent`**(Studio→控制面):turn_started / plan_set / dispatch_started / dispatch_finished / wiki_updated / turn_finished 等编排级状态信号,低频、跨 pet 全局。控制面据此渲染状态栏、徽章、进度环。
-- **`onToolEvent`**(pet→pet 面板):pet runtime 内部工具调用的生命周期(on_tool_start / event / end / error),高频、贴近单 pet 工作现场。pet 面板据此渲染"小张 pet 调用了哪个工具"。
+- **root `streamEvents(v3)`**(pet/root→pet 面板):pet runtime 内部工具生命周期、runtime notice、subagent 消息等协议事件,由 adapter 投影成 UI 需要的事件。
 
-两条流互不重叠,UI 分别订阅各自的目标区域。详见 INTERFACES 文档(`onToolEvent`)与 ORCHESTRATOR_DESIGN 的 Turn State Stream 段(`onTurnEvent`)。
+两条消费路径互不重叠,UI 分别订阅各自的目标区域。详见 INTERFACES 文档的 root stream Boundary 与 ORCHESTRATOR_DESIGN 的 Turn State Stream 段(`onTurnEvent`)。
 
 ### 第二层:Pet Agent(PetAgentRuntime)—— 数据加工
 
 - **是什么**:单 pet ReAct agent,复用现有 single-pet orchestrator graph。**实际加工产出的角色**。
 - **角色定位**:每次 dispatch 接收 Studio 撰写的 brief 与 wikiRoot,自主访问 wiki 检索所需上下文,在自己的 capability 集合内完成加工,输出 返回文本。
 - **输入**:Studio 撰写的 brief(自然语言任务说明字符串)+ wikiRoot + 必要 artifact refs + 自己绑定的 capability / tool 配置 + Studio 模式下默认装备的 `wiki_read` toolkit。
-- **可用 action**:在 capability / tool 集合上 reason,通过 invoke 返回最终文本;过程中通过 `onToolEvent` callback 透出工具事件,撞到 HITL interrupt 时调构造时注入的 `humanReviewer` 桥拿决策(详见 INTERFACES 文档)。
+- **可用 action**:在 capability / tool 集合上 reason,通过 invoke 返回最终文本;工具事件通过 root stream 透出,撞到 HITL interrupt 时调构造时注入的 `humanReviewer` 桥拿决策(详见 INTERFACES 文档)。
 - **检索自主权**:pet 自己决定怎么用 wiki(`ls` 看总览、`cat` 拉详情、`grep` 搜关键词),Studio 不指定具体文件。
 - **隔离性**:pet 只感知本次 dispatch 收到的 brief 与 wiki 文件内容。是否存在其他 pet、自己是否在协作链中、是否是末棒——都由 Studio 编排,pet 视角下每次调用形态一致(brief + wikiRoot 永远是核心入口)。
 
@@ -409,9 +409,9 @@ Studio → Agents → Subagents 是**编排撰稿层 + 共享知识层 + 数据�
 已经在 `packages/pet-agent/src/agent/studio/` 落地的部件:
 
 - **composer**:`createStudioOrchestrator` 拼起 planner agent invoke + execute 状态机 + wiki_curator(详见 ORCHESTRATOR_DESIGN)。
-- **接口契约**:`PetAgentRuntime.invoke({ brief, wikiRoot, artifactRefs, signal, onToolEvent? })` + wiki middleware + artifact refs + `humanReviewer` 桥(详见 INTERFACES)。
+- **接口契约**:`PetAgentRuntime.invoke({ brief, wikiRoot, signal, ... })` + wiki middleware + artifact refs + `humanReviewer` 桥；实时工具/运行时事件走 root stream adapter(详见 INTERFACES)。
 - **Studio Whiteboard 文件目录**:`{AGENT_HOME}/studio/{sid}/conv/{cid}/wiki/`,curator 维护,pet 通过 `wiki_read` toolkit 访问。
-- **两条独立事件流**:`onTurnEvent`(Studio→控制面)与 `onToolEvent`(pet→pet 面板),各自驱动各自的 UI 区域。
+- **两条独立消费路径**:`onTurnEvent`(Studio→控制面)与 root `streamEvents(v3)` adapter(pet→pet 面板),各自驱动各自的 UI 区域。
 
 后续工作集中在 local-agent 接入(Phase 2)、能力增强与并行 dispatch(Phase 3+)。
 

@@ -1,7 +1,6 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { AgentActor, AgentExecution } from '../../../types/agent';
 import type { AgentCapability } from '../../../types/capability';
-import type { SubagentToolEventHandler } from '../../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../../types/toolkit';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
@@ -29,7 +28,6 @@ export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorI
     execution: cfg.execution as AgentExecution | undefined,
     workdir: cfg.workdir as string | undefined,
     runtimeEnvironment: cfg.runtimeEnvironment as string | undefined,
-    onToolEvent: cfg.onToolEvent as SubagentToolEventHandler | undefined,
     reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
     globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),
     maxRunIterations: readRunIterationLimit(cfg.maxRunIterations),

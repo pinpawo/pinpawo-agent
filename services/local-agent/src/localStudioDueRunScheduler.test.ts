@@ -44,7 +44,6 @@ function createStudioRunService(onRunStart?: () => void): StudioRunService {
       orchestrator: {
         submitRequest: async (turn: {
           onTurnEvent?: (event: { type: string }) => void;
-          onToolEvent?: (event: unknown) => void;
           conversationId?: string;
           turnId?: string;
         }) => {
@@ -85,7 +84,6 @@ test('LocalStudioDueRunScheduler deduplicates concurrent submissions for same id
     conversationId: 'shared-conv',
     userRequest: 'build page',
     onProgress: () => undefined,
-    onToolEvent: () => undefined,
     send: () => undefined,
     slot,
   };
@@ -138,7 +136,6 @@ test('LocalStudioDueRunScheduler applies workdir claim filter and does not execu
     conversationId: 'conv-a',
     userRequest: 'run in a',
     onProgress: () => undefined,
-    onToolEvent: () => undefined,
     send: () => undefined,
     slot: slotA,
     signal: abortA.signal,
@@ -150,7 +147,6 @@ test('LocalStudioDueRunScheduler applies workdir claim filter and does not execu
     conversationId: 'conv-b',
     userRequest: 'run in b',
     onProgress: () => undefined,
-    onToolEvent: () => undefined,
     send: () => undefined,
     slot: slotB,
     signal: abortB.signal,
@@ -181,7 +177,6 @@ test('LocalStudioDueRunScheduler.submit rejects requests with non-matching workd
     conversationId: 'conv-scope',
     userRequest: 'bad scope',
     onProgress: () => undefined,
-    onToolEvent: () => undefined,
     send: () => undefined,
     slot,
   }), /outside scheduler scope|NotAllowedError/i);
@@ -202,7 +197,6 @@ test('LocalStudioDueRunScheduler.stop rejects pending waiters', async () => {
     runId: 'run-stop',
     userRequest: 'stop me',
     onProgress: () => undefined,
-    onToolEvent: () => undefined,
     send: () => undefined,
     slot,
   });
@@ -226,7 +220,6 @@ test('LocalStudioDueRunScheduler.submit rejects immediately after stop', async (
     runId: 'run-post-stop',
     userRequest: 'stopped',
     onProgress: () => undefined,
-    onToolEvent: () => undefined,
     send: () => undefined,
     slot,
   }), /aborted|AbortError/i);

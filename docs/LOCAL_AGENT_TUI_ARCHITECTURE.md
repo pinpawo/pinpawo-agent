@@ -646,9 +646,9 @@ TUI 重构不是孤立的一块。下面这些是**同一次项目重构**的不
 
 - **`operation` 事件模型 ↔ tool event 源的可靠性**，是这次重构的两端，一起改：
   - `operation` 现在带 `phase` 生命周期，TUI reducer 把 `activeOperations` 当权威 state（§5）。
-  - 对应地，tool event 的**结构化源要做成生命周期完整**——pet-agent 已通过 `SubagentToolEventTracker` 规范 `onToolEvent`，local-agent 已通过 `ToolOperationTracker` 给 operation 补稳定 id 并关闭 dangling operation；后续继续朝底层事件有序、原生稳定 callId 收敛，`operation` 从 `onToolEvent` 直接产出（见 `docs/PET_AGENT_STUDIO_INTERFACES.md` Boundary 2 + Open Question、`docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0）。
-  - pet 调用契约同时补 **message token boundary**——现 `PetAgentRuntimeInvokeInput` 只有 `onToolEvent`、没有 token 回调，需扩 INTERFACES 的 Boundary 1，让 pet 的 `message.delta` 在各路径都有出口。
-  - chat 与 studio 当前仍是同一个 `OrchestratorGraph` 的两条外壳（chat = messages/values stream + onToolEvent + 直推中断；studio = pet runtime + onToolEvent + humanReviewer 桥），tool operation 已收敛到同一条 `onToolEvent` 边界；后续继续收敛 message token 与 HITL 外壳。
+  - 对应地，tool event 的**结构化源要做成生命周期完整**——pet-agent 通过 root `tools` protocol events + `NamespacedProtocolToolEventReader` 规范工具生命周期，local-agent 通过 `ToolOperationTracker` 给 operation 补稳定 id 并关闭 dangling operation；`operation` 从 root stream adapter 产出（见 `docs/PET_AGENT_STUDIO_INTERFACES.md` Boundary 2、`docs/LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md` §5.0）。
+  - pet 调用契约同时补 **message token boundary**——message/tool/runtime 事件都从 root `streamEvents(v3)` 出口投影，让 pet 的 `message.delta` 在各路径都有出口。
+  - chat 与 studio 当前仍是同一个 `OrchestratorGraph` 的两条外壳（chat = root stream adapter + 直推中断；studio = pet runtime invoke + humanReviewer 桥），chat 的 tool operation 已收敛到 root stream 边界；若 studio 后续需要 pet 面板时间线，也应消费同一条 root stream 边界。
   - 对齐点：两端共用 `operation` 的 `phase` 生命周期语义与 `activeOperations` 的 state 语义，源侧产出什么、TUI 侧怎么消费，用同一份契约定义。
 
 - **session-keyed 形状 ↔ run 身份契约**：state 按"run 身份 = `requestId`、session 身份由客户端分配"设计（§5），与 server 端 run 标识对齐。完整 server 拆分（同一连接多 inflight / 一 session 一连接以支持真正并发）按非目标归入后续 local-agent 架构阶段，但 run 身份契约现在就对齐，到时直接契合、无需重写 state。

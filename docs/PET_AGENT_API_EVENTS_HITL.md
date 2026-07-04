@@ -3,21 +3,20 @@
 ## 1. 事件类型
 
 ```ts
-type SubagentToolEvent =
+type SubagentToolLifecycleEvent =
   | { event: 'on_tool_start'; toolCallId?: string; name: string; input: unknown; operation?: SubagentToolOperationMetadata }
   | { event: 'on_tool_event'; toolCallId?: string; name: string; data: unknown; operation?: SubagentToolOperationMetadata }
   | { event: 'on_tool_end'; toolCallId?: string; name: string; output: unknown; operation?: SubagentToolOperationMetadata }
-  | { event: 'on_tool_error'; toolCallId?: string; name: string; error: unknown; operation?: SubagentToolOperationMetadata }
-  | { event: 'on_runtime_event'; name: string; data: unknown };
+  | { event: 'on_tool_error'; toolCallId?: string; name: string; error: unknown; operation?: SubagentToolOperationMetadata };
 
-type SubagentToolEventHandler = (event: SubagentToolEvent) => void | Promise<void>;
+type SubagentRuntimeEvent = { event: 'on_runtime_event'; name: string; data: unknown };
 ```
 
 ### 调用语义
 
-1. 事件发生在 single invoke 生命周期内按时间顺序回调。
-2. 回调异常不应中断主任务执行（按当前实现，异常被吞掉）。
-3. 典型用途：UI 渲染日志、执行轨迹、调试和计量。
+1. 工具生命周期来自 root `streamEvents(v3)` 的 protocol `tools` 事件，经 adapter 归一化后供 local-agent/UI 消费。
+2. runtime notice 使用 `{ event: 'on_runtime_event', name, data }` envelope 写入 stream writer，并作为 root `custom` protocol event 出现。
+3. `PetAgentRuntime.invoke()` 不接收工具事件 callback；典型用途仍是 UI 渲染日志、执行轨迹、调试和计量。
 
 ## 2. HITL（人工审核）回调
 

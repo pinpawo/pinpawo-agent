@@ -24,7 +24,6 @@ type StudioSubmitRequestInput = {
   turnId?: string;
   conversationId?: string;
   signal?: AbortSignal;
-  onToolEvent?: SubagentToolEventHandler;
   onTurnEvent?: StudioTurnEventHandler;
 };
 
@@ -122,8 +121,8 @@ type StudioRunEvent =
 ```
 
 - `onTurnEvent`：编排级低频事件，适合控制面。
-- `onToolEvent`：高频工具事件，适合 pet 面板。
 - `subscribe` 关注 run 级快照变更；`onTurnEvent` 关注状态机阶段。
+- pet 内部工具/运行时事件不再由 Studio callback 透传；需要 pet 面板时间线时，应消费 pet/root `streamEvents(v3)` 并经 adapter 投影。
 
 ## 5. 任务模型与完成身份
 
@@ -146,7 +145,6 @@ const orchestrator = createStudioOrchestrator({
 const accepted = await orchestrator.submitRequest({
   userRequest: '先产出文案，再补齐视频脚本。',
   onTurnEvent: (event) => ui.renderTurnEvent(event),
-  onToolEvent: (event) => ui.renderToolEvent(event),
 });
 
 const result = await orchestrator.waitForRun(accepted.runId);

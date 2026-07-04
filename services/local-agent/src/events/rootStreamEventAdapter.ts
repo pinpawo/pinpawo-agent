@@ -9,10 +9,11 @@ import {
  * Root event-stream adapter (#322 Phase 2).
  *
  * Translates the RAW protocol events of a root `graph.streamEvents(version:
- * 'v3')` run into the local-agent chat event vocabulary. This is the parallel
- * consumption path to the legacy `graph.stream(['messages','values','custom'])`
- * + `onToolEvent` bridge — nothing existing is rewired yet; the correspondence
- * is pinned by tests and documented in docs/SUBAGENT_STREAM_BRIDGE_ANALYSIS.md.
+ * 'v3')` run into the local-agent chat event vocabulary. Since #322 Phase 4
+ * this is the production consumption path (the legacy
+ * `graph.stream(['messages','values','custom'])` + `onToolEvent` bridge is
+ * gone); the correspondence with the legacy semantics is pinned by tests and
+ * documented in docs/SUBAGENT_STREAM_BRIDGE_ANALYSIS.md.
  *
  * Attribution model (established by the Phase 1 spike):
  * - namespace depth 0/1 = the root graph / a root node's own activity;

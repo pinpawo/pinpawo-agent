@@ -23,6 +23,7 @@ import type {
   MessageLane,
   OrchestratorConfig,
 } from '../../types';
+import { createRuntimeEventStreamEmitter } from '../../../../utils/streamWriterEvents';
 import { validateUniqueToolkitNames, validateUniqueToolNames } from '../../validation';
 import { createToolAuthorizationRecorder } from '../authorization';
 import {
@@ -52,7 +53,6 @@ export function createCapabilityNode(params: {
       capabilities,
       toolkits,
       execution,
-      onToolEvent,
       workdir,
       runtimeEnvironment,
       reviewCapabilities,
@@ -111,7 +111,11 @@ export function createCapabilityNode(params: {
       recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
         artifactRefs.push(ref);
       },
-      emitRuntimeEvent: onToolEvent,
+      // Runtime events (authorization notices) surface as `custom` protocol
+      // events on the root stream (#322); there is no callback channel. The
+      // writer is captured HERE — review middleware emits from inside wrapped
+      // tools, where getWriter() cannot resolve.
+      emitRuntimeEvent: createRuntimeEventStreamEmitter(),
     };
     const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
     const runtimeInstructions = await resolveInstructions(runtime, {
@@ -137,7 +141,6 @@ export function createCapabilityNode(params: {
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
       contextPolicy: runtime.contextPolicy,
-      checkpoint: config.checkpoint,
       runnableConfig,
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,
@@ -149,7 +152,6 @@ export function createCapabilityNode(params: {
         delegationId: runPendingDelegation.id,
         runId: transcriptRunId,
       },
-      onToolEvent,
     };
     validateUniqueToolNames(subagentInput.tools);
 

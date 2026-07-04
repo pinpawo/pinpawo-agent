@@ -1,3 +1,4 @@
+import type { SubagentToolOperationMetadata } from '@pinpawo/pet-agent';
 import {
   buildToolOperationEvent,
   type StreamToolsPayload,
@@ -8,6 +9,7 @@ import type {
 } from './events/localAgentEvent';
 import {
   emptyOperationRegistry,
+  overlayOperationRegistry,
   type OperationRegistry,
 } from './events/operationRegistry';
 
@@ -34,6 +36,14 @@ export class ToolOperationTracker {
 
   setOperationRegistry(operationRegistry: OperationRegistry) {
     this.operationRegistry = operationRegistry;
+  }
+
+  /**
+   * Merge a per-delegation `subagent_operations` announcement (#322 Phase 4)
+   * so delegation-scoped toolset operations resolve display metadata.
+   */
+  overlayOperations(entries: Record<string, SubagentToolOperationMetadata>) {
+    this.operationRegistry = overlayOperationRegistry(this.operationRegistry, entries);
   }
 
   accept(payload: StreamToolsPayload): LocalAgentOperationInternalEvent {

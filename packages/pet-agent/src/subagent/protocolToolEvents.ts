@@ -181,3 +181,24 @@ export class SubagentProtocolToolEventReader {
     this.finishedToolCallIds.add(toolCallId);
   }
 }
+
+/**
+ * Per-namespace reader for ROOT protocol streams. Tool events from every
+ * scope arrive on one stream, but a reader's dedup/name memory is keyed by
+ * raw `tool_call_id`, which is only unique within the scope that produced
+ * it — two scopes reusing an id must not share state, or the second
+ * `tool-started` is dropped and the name memory overwritten.
+ */
+export class NamespacedProtocolToolEventReader {
+  private readonly readers = new Map<string, SubagentProtocolToolEventReader>();
+
+  readToolsData(namespace: string[] | undefined, rawData: unknown): SubagentToolLifecycleEvent | null {
+    const key = (namespace ?? []).join('|');
+    let reader = this.readers.get(key);
+    if (!reader) {
+      reader = new SubagentProtocolToolEventReader();
+      this.readers.set(key, reader);
+    }
+    return reader.readToolsData(rawData);
+  }
+}

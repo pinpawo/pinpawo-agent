@@ -7,7 +7,6 @@ import type {
   PetAgentStatus,
   StudioContext,
 } from '../../types/studio';
-import type { SubagentToolEventHandler } from '../../types/subagent';
 import type {
   HumanReviewInterruptPayload,
   ReviewResponse,
@@ -45,7 +44,7 @@ export type PetAgentRuntimeDescriptor = AgentActor & {
  * - wikiRoot: 共享知识库目录绝对路径。提供时 wiki middleware 会自动读取
  *   {wikiRoot}/index.md 注入到 system prompt,并装备 wiki_read toolkit。
  * - signal: Studio 取消信号。
- * - threadId / execution / workdir / onToolEvent: 运行时透传字段。
+ * - threadId / execution / workdir: 运行时透传字段。
  * - toolkits: 本次 invoke 临时注入的 toolkit,会与 runtime config toolkits 合并。
  */
 export type PetAgentRuntimeInvokeInput = {
@@ -56,7 +55,6 @@ export type PetAgentRuntimeInvokeInput = {
   execution?: AgentExecution;
   workdir?: string;
   runtimeEnvironment?: string;
-  onToolEvent?: SubagentToolEventHandler;
   toolkits?: AgentToolkit[];
   /**
    * 调用方在本次 invoke 临时注入的 capability(例如 Studio 给 planner agent 的
@@ -177,14 +175,9 @@ export type StudioSubmitRequestInput = {
   conversationId?: string;
   signal?: AbortSignal;
   /**
-   * 透传给每次 `pet.invoke()`(planner 与 worker pet 都会收到)。
-   * Studio 自身不消费内容,只把工具事件转给 UI 渲染。
-   */
-  onToolEvent?: SubagentToolEventHandler;
-  /**
    * Studio 编排级事件回调,供控制面状态显示(状态栏 / 徽章 / 进度环)订阅。
-   * 与 `onToolEvent` 是两条独立的流:onToolEvent 来自 pet runtime 内部 tool 节点
-   * (高频、贴近 pet 工作现场),onTurnEvent 来自 Studio 自己(低频、跨 pet 全局编排)。
+   * 来自 Studio 自己(低频、跨 pet 全局编排);pet 内部的工具执行细节不再经
+   * 回调透出 — 需要时消费 root `streamEvents(v3)`(#322)。
    */
   onTurnEvent?: StudioTurnEventHandler;
 };

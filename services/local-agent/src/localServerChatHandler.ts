@@ -14,6 +14,7 @@ import {
 import { runChatSession, type ChatSessionRequest } from './chatSessionAdapter';
 import {
   configureInflightOperationRegistry,
+  overlayInflightDelegationOperations,
   type InflightOperationRun,
 } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
@@ -295,6 +296,9 @@ export class LocalServerChatHandler {
         },
         emitToolEvent: (event) => {
           this.sendStreamToolOperationEvent(ws, inflight, event);
+        },
+        acceptDelegationOperations: (operations) => {
+          overlayInflightDelegationOperations(inflight, operations);
         },
       });
       if (result.status === 'waiting_human') {

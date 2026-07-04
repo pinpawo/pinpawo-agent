@@ -1,7 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution } from '../types/agent';
-import type { SubagentToolEventHandler } from '../types/subagent';
 import type { AgentToolkit } from '../types/toolkit';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
 import {
@@ -22,7 +21,6 @@ export type AgentInvokeInput = {
   workdir?: string;
   /** Runtime environment summary injected into system prompts. Must not contain secrets. */
   runtimeEnvironment?: string;
-  onToolEvent?: SubagentToolEventHandler;
   globalReviewPolicy?: GlobalReviewPolicy;
 };
 
@@ -48,7 +46,6 @@ export async function runAgent(
   if (input.execution) configurable.execution = input.execution;
   if (input.workdir) configurable.workdir = input.workdir;
   if (input.runtimeEnvironment) configurable.runtimeEnvironment = input.runtimeEnvironment;
-  if (input.onToolEvent) configurable.onToolEvent = input.onToolEvent;
   if (input.globalReviewPolicy) configurable.globalReviewPolicy = input.globalReviewPolicy;
 
   const result = await graph.invoke(

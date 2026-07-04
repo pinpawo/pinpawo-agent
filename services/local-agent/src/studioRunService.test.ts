@@ -139,10 +139,8 @@ test('StudioRunService falls back to deps.workdir when runtimeConfig is absent',
             conversationId?: string;
             turnId?: string;
             onTurnEvent?: (event: unknown) => void;
-            onToolEvent?: (event: unknown) => void;
           }) => {
             turn.onTurnEvent?.({ type: 'turn_started' });
-            turn.onToolEvent?.({ event: 'on_tool_start', name: 'read_file' });
             result = {
               turnId: turn.turnId ?? 'run-legacy',
               outcome: {

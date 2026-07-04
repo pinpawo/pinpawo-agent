@@ -48,7 +48,7 @@ test('runChatSession sources tool operations from the root protocol stream, not 
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    streamEvents(streamSetup: AgentChannelSetup) {
+    streamEvents() {
       return (async function* () {
         yield protocolEvent('tools', {
           event: 'tool-started',
@@ -56,14 +56,6 @@ test('runChatSession sources tool operations from the root protocol stream, not 
           tool_name: 'stream_source',
           input: { source: 'stream' },
         }, ['general:t1', 'tools:t2']);
-        // Lifecycle events on the direct callback are bridge-era leftovers;
-        // only the root stream feeds operations now.
-        streamSetup.input.onToolEvent?.({
-          event: 'on_tool_start',
-          name: 'callback-source',
-          toolCallId: 'callback-call',
-          input: { source: 'callback' },
-        });
         yield protocolEvent('tools', {
           event: 'tool-finished',
           tool_call_id: 'stream-call',
@@ -113,7 +105,6 @@ test('runChatSession sources tool operations from the root protocol stream, not 
       output: 'ok',
     },
   ]);
-  assert.equal((setup.input as { onToolEvent?: unknown }).onToolEvent, undefined);
   assert.equal(
     emittedEvents.some((event) =>
       Boolean(event && typeof event === 'object' && (event as { type?: unknown }).type === 'message.completed'),
@@ -193,25 +184,27 @@ test('runChatSession maps authorization runtime events to system notices', async
     async readThreadState() {
       return { messages: [], pendingHumanReview: null, hasPendingContinuation: false };
     },
-    streamEvents(streamSetup: AgentChannelSetup) {
+    streamEvents() {
       return (async function* () {
-        streamSetup.input.onToolEvent?.({
+        // Toolkit authorization runtime events ride the stream writer and
+        // arrive as `custom` protocol events (#322).
+        yield protocolEvent('custom', {
           event: 'on_runtime_event',
           name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED,
           data: {
             toolName: 'write_file',
             policyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
           },
-        });
-        streamSetup.input.onToolEvent?.({
+        }, ['general:t1']);
+        yield protocolEvent('custom', {
           event: 'on_runtime_event',
           name: GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED,
           data: {
             toolName: 'custom_tool',
             policyMode: GLOBAL_REVIEW_POLICY_MODE.CUSTOM,
           },
-        });
-        streamSetup.input.onToolEvent?.({
+        }, ['general:t1']);
+        yield protocolEvent('custom', {
           event: 'on_runtime_event',
           name: 'tool_authorization_recorded',
           data: {
@@ -221,7 +214,7 @@ test('runChatSession maps authorization runtime events to system notices', async
               createdAt: '2026-01-01T00:00:00.000Z',
             }],
           },
-        });
+        }, ['general:t1']);
         yield protocolEvent('values', { messages: [new AIMessage('done')] });
       })();
     },

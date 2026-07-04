@@ -7,7 +7,6 @@ import type {
   PetAgentStatus,
   StudioContext,
 } from '../../types/studio';
-import type { SubagentToolEventHandler } from '../../types/subagent';
 import type {
   HumanReviewInterruptPayload,
   ReviewResponse,

@@ -23,7 +23,8 @@ import {
   buildSubagentIterationLimitStopNotice,
   isSubagentGuardStopMessage,
 } from './guardStop';
-import { Command, END, getWriter } from '@langchain/langgraph';
+import { Command, END } from '@langchain/langgraph';
+import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -152,23 +153,8 @@ function createSubagentIterationGuardMiddleware(
   });
 }
 
-/**
- * Writes a runtime event through the run's stream writer. Pregel injects the
- * writer with `config.writer ??= ...`, so a subagent invoked with the parent
- * config writes through the PARENT's writer and the event surfaces as a
- * `custom` event on the root protocol stream. Emission is advisory: outside a
- * run context it degrades to a no-op.
- */
 function writeSubagentRuntimeEvent(name: string, data: unknown) {
-  try {
-    getWriter()?.({
-      event: 'on_runtime_event',
-      name,
-      data,
-    });
-  } catch {
-    // Outside a run context; skip.
-  }
+  emitRuntimeEventToStreamWriter({ event: 'on_runtime_event', name, data });
 }
 
 export async function createSubagent(input: SubagentRunInput): Promise<SubagentResult> {

@@ -10,7 +10,6 @@ import {
   stampMessageCreatedAtUtc,
   SUBAGENT_OPERATIONS_EVENT,
   type ReviewSpec,
-  type SubagentToolEvent,
   type SubagentToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
@@ -73,40 +72,35 @@ function emitHumanReviewRequested(params: {
   });
 }
 
-function readRuntimeEventData(event: SubagentToolEvent): Record<string, unknown> | null {
-  return event.event === 'on_runtime_event'
-    && event.data
-    && typeof event.data === 'object'
-    && !Array.isArray(event.data)
-    ? event.data as Record<string, unknown>
+function readRuntimeEventData(data: unknown): Record<string, unknown> | null {
+  return data && typeof data === 'object' && !Array.isArray(data)
+    ? data as Record<string, unknown>
     : null;
 }
 
-function formatToolAuthorizationNotice(event: SubagentToolEvent): string | null {
-  if (
-    event.event === 'on_runtime_event'
-    && event.name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED
-  ) {
-    const data = readRuntimeEventData(event);
+/**
+ * Toolkit authorization runtime events arrive as `runtime.custom` chat events
+ * from the root protocol stream (#322); map the known names to user notices.
+ */
+function formatToolAuthorizationNotice(name: string, rawData: unknown): string | null {
+  if (name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.AUTO_AUTHORIZED) {
+    const data = readRuntimeEventData(rawData);
     const toolName = typeof data?.toolName === 'string' ? data.toolName : null;
     return toolName
       ? `已自动授权 ${toolName} 操作。`
       : '已自动授权工具操作。';
   }
-  if (
-    event.event === 'on_runtime_event'
-    && event.name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED
-  ) {
-    const data = readRuntimeEventData(event);
+  if (name === GLOBAL_REVIEW_POLICY_RUNTIME_EVENT.CUSTOM_AUTHORIZED) {
+    const data = readRuntimeEventData(rawData);
     const toolName = typeof data?.toolName === 'string' ? data.toolName : null;
     return toolName
       ? `已根据全局策略授权 ${toolName} 操作。`
       : '已根据全局策略授权工具操作。';
   }
-  if (event.event !== 'on_runtime_event' || event.name !== 'tool_authorization_recorded') {
+  if (name !== 'tool_authorization_recorded') {
     return null;
   }
-  const data = readRuntimeEventData(event);
+  const data = readRuntimeEventData(rawData);
   const authorizations = Array.isArray(data?.authorizations) ? data.authorizations : [];
   const toolNames = [...new Set(authorizations
     .map((item) => item && typeof item === 'object'
@@ -250,22 +244,6 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     ];
   }
 
-  // Toolkit runtime events (authorization notices) still arrive through the
-  // direct callback; tool lifecycle and subagent output now come from the
-  // root protocol stream below (#322 Phase 4).
-  setup.input.onToolEvent = (event) => {
-    if (isCurrent()) {
-      const notice = formatToolAuthorizationNotice(event);
-      if (notice) {
-        emitEvent({
-          type: 'system.notice',
-          requestId,
-          message: notice,
-        });
-      }
-    }
-  };
-
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
   try {
@@ -312,6 +290,15 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
             if (operations) {
               acceptDelegationOperations?.(operations);
             }
+            break;
+          }
+          const notice = formatToolAuthorizationNotice(chatEvent.name, chatEvent.data);
+          if (notice) {
+            emitEvent({
+              type: 'system.notice',
+              requestId,
+              message: notice,
+            });
           }
           break;
         }
@@ -359,8 +346,6 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
     emitEvent({ type: 'message.completed', requestId, role: 'assistant', text: reply });
     clearAgentRunActivity(requestId);
     return { status: 'completed', reply };
-  } finally {
-    setup.input.onToolEvent = undefined;
   }
 
   if (!isCurrent()) {

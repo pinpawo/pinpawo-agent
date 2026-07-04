@@ -28,7 +28,6 @@ function buildConfigurable(setup: AgentChannelSetup) {
   if (setup.input.execution) configurable.execution = setup.input.execution;
   if (setup.input.workdir) configurable.workdir = setup.input.workdir;
   if (setup.input.runtimeEnvironment) configurable.runtimeEnvironment = setup.input.runtimeEnvironment;
-  if (setup.input.onToolEvent) configurable.onToolEvent = setup.input.onToolEvent;
   if (setup.input.globalReviewPolicy) configurable.globalReviewPolicy = setup.input.globalReviewPolicy;
   if (setup.interfaceContext?.kind) {
     configurable[LOCAL_AGENT_INTERFACE_CONFIG_KEY] = setup.interfaceContext;

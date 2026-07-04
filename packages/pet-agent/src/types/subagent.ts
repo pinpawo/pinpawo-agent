@@ -49,10 +49,6 @@ export type SubagentRuntimeEvent = {
   data: unknown;
 };
 
-export type SubagentToolEvent = SubagentToolLifecycleEvent | SubagentRuntimeEvent;
-
-export type SubagentToolEventHandler = (event: SubagentToolEvent) => void | Promise<void>;
-
 /**
  * Lets a subagent persist a capability artifact from inside the loop and have
  * the ref reach `state.sessionCapabilityArtifacts`. `recordCapabilityArtifact` is the

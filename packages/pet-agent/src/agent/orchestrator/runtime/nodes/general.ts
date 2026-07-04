@@ -19,6 +19,7 @@ import type {
   MessageLane,
   OrchestratorConfig,
 } from '../../types';
+import { createRuntimeEventStreamEmitter } from '../../../../utils/streamWriterEvents';
 import { validateUniqueToolkitNames, validateUniqueToolNames } from '../../validation';
 import { createToolAuthorizationRecorder } from '../authorization';
 import {
@@ -43,7 +44,7 @@ export function createGeneralNode(params: {
 
   // Node: general — reads tools from configurable
   return async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { toolkits, execution, workdir, runtimeEnvironment, onToolEvent, reviewCapabilities, globalReviewPolicy } = getInvokeOptions(runnableConfig);
+    const { toolkits, execution, workdir, runtimeEnvironment, reviewCapabilities, globalReviewPolicy } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
@@ -58,7 +59,11 @@ export function createGeneralNode(params: {
       globalReviewPolicy,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
-      emitRuntimeEvent: onToolEvent,
+      // Runtime events (authorization notices) surface as `custom` protocol
+      // events on the root stream (#322); there is no callback channel. The
+      // writer is captured HERE — review middleware emits from inside wrapped
+      // tools, where getWriter() cannot resolve.
+      emitRuntimeEvent: createRuntimeEventStreamEmitter(),
     });
     const toolList = [...toolkitResources.tools];
     validateUniqueToolNames(toolList);

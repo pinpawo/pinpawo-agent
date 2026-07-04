@@ -187,15 +187,22 @@ What changed, per surface:
   protocol events are translated to lifecycle payloads by
   `NamespacedProtocolToolEventReader` and joined with the registry by the
   existing `ToolOperationTracker` (which also finishes dangling operations on
-  abort). The `onToolEvent` configurable remains ONLY as the direct callback
-  for toolkit runtime events (authorization notices).
+  abort).
 - **Invoke-style consumers** (`runAgent`, the Studio pet runtime) are plain
   `graph.invoke()` again. The Studio surface has no UI today, so its whole
   `onToolEvent` threading (studio types/orchestrator/pet runtime, local-agent
   studio handler/scheduler/run service) was deleted rather than shimmed; if a
   Studio timeline ever ships, it should consume the root stream directly, not
-  a callback bridge. `configurable.onToolEvent` remains only as the toolkit
-  runtime-event callback (authorization notices).
+  a callback bridge.
+- **`onToolEvent` no longer exists.** Toolkit runtime events (authorization
+  notices) also ride the stream writer: nodes wire `ToolkitContext.
+  emitRuntimeEvent` to `createRuntimeEventStreamEmitter()`, and runChatSession
+  maps the known names to system notices from `runtime.custom` chat events.
+  One protocol fact learned here: `getWriter()` resolves through
+  AsyncLocalStorage and does NOT reach tool-execution scopes inside a child
+  agent (the same tool boundary as Caveat 1) — review middleware emits from
+  inside wrapped tools, so the writer must be CAPTURED at node time and
+  closed over, not resolved at emission time.
 
 Remaining scope (unchanged from the spike):
 

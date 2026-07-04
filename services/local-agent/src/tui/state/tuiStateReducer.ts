@@ -14,6 +14,7 @@ import type {
   LocalAgentOperationEvent,
 } from '../../events/localAgentEvent';
 import {
+  mergeOperationEntriesIntoTimeline,
   operationTimelineEntryFromEvent,
   timelineEntryFromMessageCell,
   timelineEntryIdFromOperationEvent,
@@ -985,9 +986,15 @@ function applySessionSnapshot(
   const existingSession = state.sessions[sessionId];
   const focusedSession = state.focusedSessionId ? state.sessions[state.focusedSessionId] : undefined;
   const baseSession = existingSession ?? focusedSession;
-  const timeline = agentTimelineEntriesFromSnapshot(snapshot.timeline);
+  const snapshotTimeline = agentTimelineEntriesFromSnapshot(snapshot.timeline);
   const preservesTransientSnapshotState = action.source === 'reconnect'
     || action.source === 'reconcile';
+  // The snapshot is the conversation authority; operation entries are the
+  // live root-stream projection's execution history and must survive a
+  // same-session snapshot overwrite (#322 Phase 5).
+  const timeline = preservesTransientSnapshotState
+    ? mergeOperationEntriesIntoTimeline(existingSession?.timeline ?? [], snapshotTimeline)
+    : snapshotTimeline;
   const sessionIdsToClear = new Set<SessionId>([sessionId]);
   if (action.source === 'resume' && state.focusedSessionId) {
     sessionIdsToClear.add(state.focusedSessionId);

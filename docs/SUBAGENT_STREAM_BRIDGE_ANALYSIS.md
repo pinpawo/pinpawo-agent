@@ -204,6 +204,28 @@ What changed, per surface:
   inside wrapped tools, so the writer must be CAPTURED at node time and
   closed over, not resolved at emission time.
 
+## Phase 5 — snapshot / live timeline reconciliation (landed)
+
+The authority split is now explicit and enforced by the TUI state layer:
+
+- **Snapshot = conversation authority.** The server `/snapshot` timeline is
+  built from checkpoint messages (user/assistant); on `message.completed` the
+  TUI reconciles against it, and snapshot messages replace live message
+  entries (fresh ids each load — identity cannot anchor).
+- **Root-stream projection = execution-process authority.** Operation
+  entries exist only in the live projection; the checkpoint knows nothing of
+  them. Before Phase 5 the reconcile replaced the session timeline wholesale,
+  erasing operation history from STATE after every turn (the terminal
+  scrollback masked it via Ink's Static rendering, but re-render, transcript
+  export and reconnect lost the history).
+- `mergeOperationEntriesIntoTimeline` (tui/timeline/agentTimeline.ts) weaves
+  the previous timeline's operation entries into the snapshot timeline on
+  `reconcile`/`reconnect`, anchoring by forward-scan (role, text) message
+  matching. `resume`/`startup` snapshots still replace wholesale (different
+  session; there is no live execution history to keep). If the server
+  snapshot ever ships its own operation entries (the contract already allows
+  them), snapshot-owned entries win by id.
+
 Remaining scope (unchanged from the spike):
 
 - **Nested subagents (Caveat 1)**: tool-boundary nesting still loses inner

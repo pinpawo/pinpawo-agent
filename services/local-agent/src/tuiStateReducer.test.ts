@@ -1606,3 +1606,96 @@ test('tuiStateReducer finishes error and studio control messages', () => {
   assert.equal(selectFocusedNotices(state).at(-1)?.text, '[studio 出错] planner failed');
   assert.equal(selectFocusedNotices(state).at(-1)?.afterTimelineEntryId, 'message:studio-error:user');
 });
+
+test('tuiStateReducer reconcile snapshot preserves operation history in the timeline (#322 Phase 5)', () => {
+  // A full turn: run start → tool operation → completed assistant message.
+  let state = startRun(initialState('chat:pet'), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+        title: 'Shell',
+        target: 'npm test',
+      },
+    },
+    now: 1200,
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: '测试全部通过。',
+    },
+    now: 1300,
+    messageCell: { id: 'assistant-1', timestamp: '10:00:03' },
+  });
+
+  // message.completed triggers a snapshot reconcile; the server snapshot is
+  // built from checkpoint messages only (fresh ids, no operations).
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconcile',
+    now: 1400,
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [
+        {
+          id: 'message:snap-user',
+          type: 'message',
+          role: 'user',
+          text: 'hello',
+          status: 'completed',
+          source: 'checkpoint',
+        },
+        {
+          id: 'message:snap-assistant',
+          type: 'message',
+          role: 'assistant',
+          text: '测试全部通过。',
+          status: 'completed',
+          source: 'checkpoint',
+        },
+      ],
+      runs: [],
+    },
+  });
+
+  // Snapshot messages are the conversation authority; the operation entry is
+  // execution history and survives the overwrite, in its original position.
+  assert.deepEqual(
+    selectFocusedTimeline(state).map((entry) => entry.id),
+    ['message:snap-user', 'req-1:operation:tool-1', 'message:snap-assistant'],
+  );
+
+  // A resume-sourced snapshot (session switch) still replaces wholesale.
+  const resumed = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'resume',
+    now: 1500,
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [{
+        id: 'message:other-user',
+        type: 'message',
+        role: 'user',
+        text: '另一个会话',
+        status: 'completed',
+        source: 'checkpoint',
+      }],
+      runs: [],
+    },
+  });
+  assert.deepEqual(
+    selectFocusedTimeline(resumed).map((entry) => entry.id),
+    ['message:other-user'],
+  );
+});

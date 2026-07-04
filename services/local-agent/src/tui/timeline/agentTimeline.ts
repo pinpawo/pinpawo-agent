@@ -165,6 +165,88 @@ function definedRawFields(raw: LocalAgentOperationRaw) {
   };
 }
 
+/**
+ * Weave the previous timeline's operation entries into a snapshot-derived
+ * timeline (#322 Phase 5).
+ *
+ * The snapshot is the CONVERSATION authority (checkpoint messages), but it
+ * knows nothing about tool operations — those are execution-process events
+ * that only exist in the live root-stream projection. Replacing the timeline
+ * wholesale on reconcile/reconnect would erase them from state (transcript
+ * export, re-render and resume would lose the operation history even though
+ * the terminal scrollback still shows the lines).
+ *
+ * Merge walk: scan the previous timeline in order, matching its message
+ * entries against the snapshot messages by (role, trimmed text) with a
+ * forward-only cursor — snapshot messages get fresh ids on every load, so
+ * identity cannot anchor. Each operation entry is re-inserted after the
+ * cursor's current snapshot position, preserving relative order. Operations
+ * whose surrounding messages no longer exist in the snapshot (history
+ * truncation) stay attached to the last matched position.
+ */
+export function mergeOperationEntriesIntoTimeline(
+  previous: AgentTimelineEntry[],
+  next: AgentTimelineEntry[],
+): AgentTimelineEntry[] {
+  const previousOperations = previous.filter((entry) => entry.type === 'operation');
+  if (previousOperations.length === 0) {
+    return next;
+  }
+  const nextIds = new Set(next.map((entry) => entry.id));
+
+  // insertions[i] = operations to place AFTER next[i - 1] (i = 0 → before all).
+  const insertions = new Map<number, AgentOperationEntry[]>();
+  let cursor = 0;
+  for (const entry of previous) {
+    if (entry.type === 'message') {
+      const matched = findMessageForward(next, cursor, entry);
+      if (matched >= 0) {
+        cursor = matched + 1;
+      }
+      continue;
+    }
+    if (nextIds.has(entry.id)) {
+      // The snapshot already carries this operation; it owns placement.
+      continue;
+    }
+    const group = insertions.get(cursor) ?? [];
+    group.push(entry);
+    insertions.set(cursor, group);
+  }
+
+  const merged: AgentTimelineEntry[] = [];
+  for (let index = 0; index <= next.length; index += 1) {
+    const group = insertions.get(index);
+    if (group) {
+      merged.push(...group);
+    }
+    const entry = next[index];
+    if (entry) {
+      merged.push(entry);
+    }
+  }
+  return merged;
+}
+
+function findMessageForward(
+  entries: AgentTimelineEntry[],
+  from: number,
+  message: AgentMessageEntry,
+): number {
+  const text = message.text.trim();
+  for (let index = from; index < entries.length; index += 1) {
+    const candidate = entries[index];
+    if (
+      candidate?.type === 'message'
+      && candidate.role === message.role
+      && candidate.text.trim() === text
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
 export function isTerminalOperationPhase(
   phase: LocalAgentOperationPhase,
 ): phase is Extract<LocalAgentOperationPhase, 'completed' | 'failed' | 'interrupted'> {

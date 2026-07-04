@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { LocalAgentOperationEvent } from '../../events/localAgentEvent';
 import {
   isAgentTimelineMessage,
+  mergeOperationEntriesIntoTimeline,
   operationTimelineEntryFromEvent,
   timelineEntryFromMessageCell,
   timelineEntryIdFromOperationEvent,
@@ -459,3 +460,122 @@ test('timeline messages include only checkpoint-backed message and operation ent
   ]);
   assert.equal(isAgentTimelineMessage(entries[2]!), true);
 });
+
+test('mergeOperationEntriesIntoTimeline weaves previous operations into a snapshot timeline', () => {
+  const previous: AgentTimelineEntry[] = [
+    message('m-old-user', 'user', '早前的问题'),
+    message('m-old-assistant', 'assistant', '早前的回答'),
+    message('m-user', 'user', '跑一下测试'),
+    operation('req-1:operation:tool-1', 'req-1', 'completed'),
+    operation('req-1:operation:tool-2', 'req-1', 'completed'),
+    message('m-assistant-streamed', 'assistant', '测试全部通过。'),
+  ];
+  // Snapshot messages carry fresh ids on every load; identity cannot anchor.
+  const next: AgentTimelineEntry[] = [
+    message('s-1', 'user', '早前的问题'),
+    message('s-2', 'assistant', '早前的回答'),
+    message('s-3', 'user', '跑一下测试'),
+    message('s-4', 'assistant', '测试全部通过。'),
+  ];
+
+  const merged = mergeOperationEntriesIntoTimeline(previous, next);
+  assert.deepEqual(merged.map((entry) => entry.id), [
+    's-1',
+    's-2',
+    's-3',
+    'req-1:operation:tool-1',
+    'req-1:operation:tool-2',
+    's-4',
+  ]);
+});
+
+test('mergeOperationEntriesIntoTimeline keeps operations when the streamed assistant text differs from checkpoint', () => {
+  const previous: AgentTimelineEntry[] = [
+    message('m-user', 'user', '跑一下测试'),
+    operation('req-1:operation:tool-1', 'req-1', 'completed'),
+    message('m-assistant', 'assistant', '流式的部分文本'),
+  ];
+  const next: AgentTimelineEntry[] = [
+    message('s-1', 'user', '跑一下测试'),
+    message('s-2', 'assistant', 'checkpoint 的最终文本'),
+  ];
+
+  const merged = mergeOperationEntriesIntoTimeline(previous, next);
+  assert.deepEqual(merged.map((entry) => entry.id), [
+    's-1',
+    'req-1:operation:tool-1',
+    's-2',
+  ]);
+});
+
+test('mergeOperationEntriesIntoTimeline places a leading operation before all snapshot messages', () => {
+  const previous: AgentTimelineEntry[] = [
+    operation('req-0:operation:tool-0', 'req-0', 'completed'),
+    message('m-user', 'user', '你好'),
+  ];
+  const next: AgentTimelineEntry[] = [
+    message('s-1', 'user', '你好'),
+    message('s-2', 'assistant', '你好呀'),
+  ];
+
+  const merged = mergeOperationEntriesIntoTimeline(previous, next);
+  assert.deepEqual(merged.map((entry) => entry.id), [
+    'req-0:operation:tool-0',
+    's-1',
+    's-2',
+  ]);
+});
+
+test('mergeOperationEntriesIntoTimeline defers to snapshot-owned operation entries', () => {
+  const previous: AgentTimelineEntry[] = [
+    message('m-user', 'user', '跑一下测试'),
+    operation('req-1:operation:tool-1', 'req-1', 'completed'),
+  ];
+  const next: AgentTimelineEntry[] = [
+    operation('req-1:operation:tool-1', 'req-1', 'completed'),
+    message('s-1', 'user', '跑一下测试'),
+  ];
+
+  const merged = mergeOperationEntriesIntoTimeline(previous, next);
+  assert.deepEqual(merged.map((entry) => entry.id), [
+    'req-1:operation:tool-1',
+    's-1',
+  ]);
+});
+
+test('mergeOperationEntriesIntoTimeline returns the snapshot unchanged without previous operations', () => {
+  const next: AgentTimelineEntry[] = [
+    message('s-1', 'user', '你好'),
+  ];
+  assert.equal(mergeOperationEntriesIntoTimeline([
+    message('m-1', 'user', '你好'),
+  ], next), next);
+});
+
+function message(id: string, role: 'user' | 'assistant', text: string): AgentTimelineEntry {
+  return {
+    id,
+    type: 'message',
+    role,
+    text,
+    status: 'completed',
+  };
+}
+
+function operation(
+  id: string,
+  requestId: string,
+  phase: 'completed' | 'started',
+): AgentTimelineEntry {
+  return {
+    id,
+    type: 'operation',
+    requestId,
+    operationKey: id,
+    kind: 'shell',
+    title: 'Shell',
+    phase,
+    startedAt: 1000,
+    updatedAt: 1100,
+  };
+}

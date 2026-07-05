@@ -1,4 +1,4 @@
-import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
+import type { ReviewResponse, ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
 import type { TuiCoreSessionSnapshotLoadedAction } from '../contracts/tuiCoreContract';
 import type { AgentTimelineEntry } from '../timeline/agentTimeline';
@@ -118,6 +118,9 @@ export type SessionActivityModel = {
 export type ApprovalRequestModel = {
   requestId: RunId;
   review: ReviewSpec;
+  reviews: ReviewSpec[];
+  reviewIndex: number;
+  decisions: ReviewResponse[];
   petId?: string;
 };
 
@@ -209,6 +212,15 @@ export type TuiAction =
       // answers.
       type: 'review.response.resume';
       requestId: RunId;
+      message: string;
+      now: number;
+      userCell: MessageCellMeta;
+      statusMessage: string;
+    }
+  | {
+      type: 'review.action.advance';
+      requestId: RunId;
+      decision: ReviewResponse;
       message: string;
       now: number;
       userCell: MessageCellMeta;

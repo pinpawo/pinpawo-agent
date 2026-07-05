@@ -15,7 +15,7 @@ import {
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
 import {
-  resolveHumanReviewResume,
+  resolveHumanReviewBatchResume,
   ReviewResponseResolutionError,
 } from './review/reviewResponseResolver';
 import {
@@ -26,6 +26,7 @@ import type {
   PendingReviewAction,
   ReviewResponseResolution,
   ReviewSpec,
+  HumanReviewBatchInterruptPayload,
   HumanReviewInterruptPayload,
 } from './review/reviewSpec';
 import {
@@ -233,7 +234,18 @@ function buildHumanReviewInterruptPayload(params: {
   };
 }
 
-function buildInvalidDecisionRequest(payload: HumanReviewInterruptPayload): HumanReviewInterruptPayload {
+function buildHumanReviewActionInterruptPayload(
+  reviews: PreparedToolkitReview[],
+): HumanReviewBatchInterruptPayload {
+  return {
+    kind: 'review_batch',
+    reviews: reviews.map((review) => review.reviewPayload),
+  };
+}
+
+function appendInvalidDecisionMessage(
+  payload: HumanReviewInterruptPayload,
+): HumanReviewInterruptPayload {
   const message = '无法识别你的决定。请批准、拒绝，或直接输入新的处理方向。';
   return {
     ...payload,
@@ -245,32 +257,34 @@ function buildInvalidDecisionRequest(payload: HumanReviewInterruptPayload): Huma
   };
 }
 
-async function resolveRuntimeReviewResume(params: {
+function buildInvalidDecisionRequest(
+  payload: HumanReviewBatchInterruptPayload,
+): HumanReviewBatchInterruptPayload {
+  return {
+    ...payload,
+    error: 'invalid_decision',
+    reviews: payload.reviews.map(appendInvalidDecisionMessage),
+  };
+}
+
+async function buildRuntimeReviewAuthorizations(params: {
   reviewPayload: HumanReviewInterruptPayload;
-  resume: unknown;
-  toolkits: AgentToolkit[];
-}): Promise<{
   resolution: ReviewResponseResolution;
-  authorizations: ToolAuthorizationRecord[];
-}> {
-  const resolution = resolveHumanReviewResume({
-    reviewSpec: params.reviewPayload.review,
-    ...(params.reviewPayload.pendingAction ? { pendingAction: params.reviewPayload.pendingAction } : {}),
-  }, params.resume);
-  if (resolution.effects.length > 0 && !params.reviewPayload.pendingAction) {
+  toolkits: AgentToolkit[];
+}): Promise<ToolAuthorizationRecord[]> {
+  if (params.resolution.effects.length > 0 && !params.reviewPayload.pendingAction) {
     throw new ReviewEffectApplicationError(
       'missing_pending_action',
       'Cannot apply review effects without a pending action.',
     );
   }
-  const authorizations = params.reviewPayload.pendingAction
+  return params.reviewPayload.pendingAction
     ? await applyReviewEffects({
         pendingAction: params.reviewPayload.pendingAction,
-        effects: resolution.effects,
+        effects: params.resolution.effects,
         toolkits: params.toolkits,
       })
     : [];
-  return { resolution, authorizations };
 }
 
 async function recordToolAuthorizations(
@@ -374,10 +388,10 @@ function buildSkippedAfterCancellationResult(toolCall: ToolCall) {
     cancelled: true,
     skipped: true,
     toolName: toolCall.name,
-    reason: 'Skipped because another tool call in this batch was cancelled before any tools executed.',
+    reason: 'Skipped because another tool call in this review action was cancelled before any tools executed.',
     input: toolCall.args,
     retryable: false,
-    guidance: 'Do not retry this same tool-call batch. Replan from the cancellation feedback.',
+    guidance: 'Do not retry this same review action. Replan from the cancellation feedback.',
   });
 }
 
@@ -448,58 +462,56 @@ async function prepareToolkitToolReview(params: {
   };
 }
 
-async function resolveHumanToolkitReview(params: {
-  review: PreparedToolkitReview;
+async function resolveReviewActionResume(params: {
+  reviews: PreparedToolkitReview[];
+  resume: unknown;
+}): Promise<ReviewResponseResolution[]> {
+  return resolveHumanReviewBatchResume(
+    params.reviews.map((review) => ({
+      reviewSpec: review.reviewPayload.review,
+      ...(review.reviewPayload.pendingAction
+        ? { pendingAction: review.reviewPayload.pendingAction }
+        : {}),
+    })),
+    params.resume,
+  );
+}
+
+async function authorizeApprovedReviewAction(params: {
+  reviews: PreparedToolkitReview[];
+  resolutions: ReviewResponseResolution[];
   toolkits: AgentToolkit[];
-}): Promise<
-  | {
-      type: 'allow';
-      approvedReviewId: string;
-      authorizations: ToolAuthorizationRecord[];
-    }
-  | { type: 'cancel'; toolCall: ToolCall; content: string }
-> {
-  const { review, toolkits } = params;
-  let reviewResume = interrupt(review.reviewPayload);
-  let reviewDecision: ReviewResponseResolution['decision'] | null = null;
-  let authorizations: ToolAuthorizationRecord[] = [];
-  while (!reviewDecision) {
-    try {
-      const resolved = await resolveRuntimeReviewResume({
-        reviewPayload: review.reviewPayload,
-        resume: reviewResume,
-        toolkits,
-      });
-      reviewDecision = resolved.resolution.decision;
-      authorizations = resolved.authorizations;
-    } catch (error) {
-      if (
-        !(error instanceof ReviewResponseResolutionError)
-        && !(error instanceof ReviewEffectApplicationError)
-      ) {
-        throw error;
-      }
-      reviewResume = interrupt(buildInvalidDecisionRequest(review.reviewPayload));
-    }
+}): Promise<ToolAuthorizationRecord[]> {
+  if (params.resolutions.length !== params.reviews.length) {
+    throw new ReviewResponseResolutionError(
+      'invalid_response',
+      `Review action approved ${params.resolutions.length} of ${params.reviews.length} pending reviews.`,
+    );
   }
 
-  if (reviewDecision.type === 'approve') {
-    return { type: 'allow', approvedReviewId: review.reviewPayload.review.id, authorizations };
+  const authorizations: ToolAuthorizationRecord[] = [];
+  for (let index = 0; index < params.resolutions.length; index += 1) {
+    const resolution = params.resolutions[index]!;
+    const review = params.reviews[index]!;
+    authorizations.push(...await buildRuntimeReviewAuthorizations({
+      reviewPayload: review.reviewPayload,
+      resolution,
+      toolkits: params.toolkits,
+    }));
   }
+  return authorizations;
+}
 
-  const reason = reviewDecision.type === 'respond'
-    ? reviewDecision.message
-    : reviewDecision.message ?? 'tool call rejected by user';
-  return {
-    type: 'cancel',
-    toolCall: review.toolCall,
-    content: buildCancelledToolResult({
-      toolName: review.toolName,
-      toolkitName: review.toolkitName,
-      reason,
-      input: review.input,
-    }),
-  };
+function buildCancellationForDecision(
+  review: PreparedToolkitReview,
+  decision: ReviewResponseResolution['decision'],
+): ToolkitReviewCancellation {
+  const reason = decision.type === 'respond'
+    ? decision.message
+    : decision.type === 'reject'
+      ? decision.message ?? 'tool call rejected by user'
+      : 'tool call rejected by user';
+  return buildCancelledOutcomeForReview(review, reason);
 }
 
 function readLatestAIMessage(messages: BaseMessage[]): {
@@ -550,7 +562,7 @@ function buildCancelledOutcomeForReview(
   };
 }
 
-async function emitGlobalReviewBatchAuthorization(params: {
+async function emitGlobalReviewAuthorizationEvent(params: {
   ctx: ToolkitContext;
   resolution: Extract<GlobalReviewPolicyResolution, { type: typeof GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE }>;
   reviews: PreparedToolkitReview[];
@@ -623,43 +635,54 @@ async function prepareToolkitReviews(params: {
 async function resolveHumanToolkitReviews(params: {
   reviews: PreparedToolkitReview[];
   toolkits: AgentToolkit[];
-  approvedReviewIds: Set<string>;
 }): Promise<ToolkitReviewResolution> {
-  const newlyApprovedReviewIds = new Set<string>();
-  const authorizations: ToolAuthorizationRecord[] = [];
-
-  for (const review of params.reviews) {
-    if (params.approvedReviewIds.has(review.reviewPayload.review.id)) {
-      continue;
+  let reviewPayload = buildHumanReviewActionInterruptPayload(params.reviews);
+  let resume = interrupt(reviewPayload);
+  while (true) {
+    try {
+      const resolutions = await resolveReviewActionResume({
+        reviews: params.reviews,
+        resume,
+      });
+      const firstCancellation = resolutions.find((resolution) =>
+        resolution.decision.type !== 'approve');
+      if (firstCancellation) {
+        const reviewIndex = resolutions.indexOf(firstCancellation);
+        return {
+          type: 'cancel',
+          cancellation: buildCancellationForDecision(
+            params.reviews[reviewIndex]!,
+            firstCancellation.decision,
+          ),
+        };
+      }
+      const authorizations = await authorizeApprovedReviewAction({
+        reviews: params.reviews,
+        resolutions,
+        toolkits: params.toolkits,
+      });
+      return {
+        type: 'authorize',
+        authorizations,
+        newlyApprovedReviewIds: new Set(params.reviews.map((review) => review.reviewPayload.review.id)),
+      };
+    } catch (error) {
+      if (
+        !(error instanceof ReviewResponseResolutionError)
+        && !(error instanceof ReviewEffectApplicationError)
+      ) {
+        throw error;
+      }
+      reviewPayload = buildInvalidDecisionRequest(reviewPayload);
+      resume = interrupt(reviewPayload);
     }
-    const outcome = await resolveHumanToolkitReview({
-      review,
-      toolkits: params.toolkits,
-    });
-    if (outcome.type === 'allow') {
-      newlyApprovedReviewIds.add(outcome.approvedReviewId);
-      params.approvedReviewIds.add(outcome.approvedReviewId);
-      authorizations.push(...outcome.authorizations);
-      continue;
-    }
-    return {
-      type: 'cancel',
-      cancellation: outcome,
-    };
   }
-
-  return {
-    type: 'authorize',
-    authorizations,
-    newlyApprovedReviewIds,
-  };
 }
 
 async function resolvePreparedToolkitReviews(params: {
   prepared: PreparedToolkitReviews;
   ctx: ToolkitContext;
   toolkits: AgentToolkit[];
-  approvedReviewIds: Set<string>;
 }): Promise<ToolkitReviewResolution> {
   if (params.prepared.cancellation) {
     return {
@@ -685,7 +708,7 @@ async function resolvePreparedToolkitReviews(params: {
   });
 
   if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
-    await emitGlobalReviewBatchAuthorization({
+    await emitGlobalReviewAuthorizationEvent({
       ctx: params.ctx,
       resolution: policyResolution,
       reviews: params.prepared.reviews,
@@ -711,7 +734,6 @@ async function resolvePreparedToolkitReviews(params: {
   return resolveHumanToolkitReviews({
     reviews: params.prepared.reviews,
     toolkits: params.toolkits,
-    approvedReviewIds: params.approvedReviewIds,
   });
 }
 
@@ -754,7 +776,6 @@ async function reviewToolkitToolCalls(params: {
     prepared,
     ctx: params.ctx,
     toolkits: params.toolkits,
-    approvedReviewIds: params.approvedReviewIds,
   });
 
   if (resolution.type === 'cancel') {
@@ -788,7 +809,7 @@ function buildToolkitReviewStateUpdate(params: {
         }
       : Object.keys(approvalUpdate).length > 0
         ? approvalUpdate
-        : undefined;
+        : {};
   }
 
   const hasPendingToolCalls = reviewedMessage.toolCalls.some(

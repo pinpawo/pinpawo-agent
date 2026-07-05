@@ -71,9 +71,11 @@ export type TuiCoreTimelineEntry =
 
 export type TuiCorePendingReview = {
   requestId: string;
+  interruptId?: string;
   reviewId: string;
   status: 'waiting' | 'answered' | 'interrupted';
   review?: ReviewSpec;
+  reviews?: ReviewSpec[];
   petId?: string;
 };
 

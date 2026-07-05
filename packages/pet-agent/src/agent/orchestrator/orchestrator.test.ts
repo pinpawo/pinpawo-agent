@@ -1348,7 +1348,7 @@ test('toolkit review policy runs after model without changing tool identity', as
   assert.equal(readToolMessageContent(result.messages, 'call-safe'), 'raw ok');
 });
 
-test('toolkit review cancellation stops the current tool-call batch', async () => {
+test('toolkit review cancellation stops the current review action', async () => {
   let allowedCallCount = 0;
   let blockedCallCount = 0;
   let allowedReviewCount = 0;
@@ -1431,13 +1431,13 @@ test('toolkit review cancellation stops the current tool-call batch', async () =
   ))) as { cancelled?: boolean; reason?: string; skipped?: boolean };
   assert.equal(allowedResult.cancelled, true);
   assert.equal(allowedResult.skipped, true);
-  assert.match(allowedResult.reason ?? '', /another tool call in this batch was cancelled/);
+  assert.match(allowedResult.reason ?? '', /another tool call in this review action was cancelled/);
   assert.equal(blockedResult.cancelled, true);
   assert.equal(blockedResult.skipped, undefined);
   assert.match(blockedResult.reason ?? '', /blocked by policy/);
   assert.equal(laterResult.cancelled, true);
   assert.equal(laterResult.skipped, true);
-  assert.match(laterResult.reason ?? '', /another tool call in this batch was cancelled/);
+  assert.match(laterResult.reason ?? '', /another tool call in this review action was cancelled/);
   assert.equal(blockedCallCount, 0);
   assert.equal(allowedCallCount, 0);
   assert.equal(allowedReviewCount, 1);
@@ -1930,22 +1930,30 @@ test('toolkit review policy records authorization through orchestrator runtime t
   const input = buildOrchestratorRunInput([new HumanMessage('run git status')]);
 
   const interrupted = await graph.invoke(input, config) as {
-    __interrupt__?: Array<{ value?: unknown }>;
+    __interrupt__?: Array<{ id?: string; value?: unknown }>;
   };
+  const interruptId = interrupted.__interrupt__?.[0]?.id;
   const payload = interrupted.__interrupt__?.[0]?.value as {
-    review?: { id?: string };
+    kind?: string;
+    reviews?: Array<{ review?: { id?: string } }>;
   } | undefined;
-  assert.equal(payload?.review?.id, 'tool-review:run_shell:call-1');
+  assert.equal(payload?.kind, 'review_batch');
+  assert.deepEqual(payload?.reviews?.map((item) => item.review?.id), [
+    'tool-review:run_shell:call-1',
+  ]);
   assert.equal(reviewCount, 1);
 
   subagentModel.index = 0;
   // Authorization runtime events ride the stream writer (#322): resume via
   // the root protocol stream and collect `custom` events.
-  const resumedRun = await graph.streamEvents(new Command({
-    resume: {
-      reviewId: payload?.review?.id,
+  const reviewResume = {
+    decisions: [{
+      reviewId: 'tool-review:run_shell:call-1',
       selectedOptionId: 'approve-and-authorize-thread',
-    },
+    }],
+  };
+  const resumedRun = await graph.streamEvents(new Command({
+    resume: interruptId ? { [interruptId]: reviewResume } : reviewResume,
   }), { version: 'v3', ...config });
   for await (const event of resumedRun) {
     if (event.method === 'custom') {
@@ -2069,20 +2077,32 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     buildOrchestratorRunInput([new HumanMessage('run git status')]),
     config,
   ) as {
-    __interrupt__?: Array<{ value?: unknown }>;
+    __interrupt__?: Array<{ id?: string; value?: unknown }>;
   };
+  const interruptId = interrupted.__interrupt__?.[0]?.id;
   const payload = interrupted.__interrupt__?.[0]?.value as {
-    review?: { id?: string };
+    kind?: string;
+    reviews?: Array<{ review?: { id?: string } }>;
   } | undefined;
-  assert.equal(payload?.review?.id, 'tool-review:run_shell:call-plain-1');
+  assert.equal(payload?.kind, 'review_batch');
+  assert.deepEqual(payload?.reviews?.map((item) => item.review?.id), [
+    'tool-review:run_shell:call-plain-1',
+  ]);
 
   subagentModel.index = 0;
-  const finalState = await graph.invoke(new Command({
-    resume: {
-      reviewId: payload?.review?.id,
+  const reviewResume = {
+    decisions: [{
+      reviewId: 'tool-review:run_shell:call-plain-1',
       selectedOptionId: 'approve',
-    },
-  }), config) as {
+    }],
+  };
+  const resumedRun = await graph.streamEvents(new Command({
+    resume: interruptId ? { [interruptId]: reviewResume } : reviewResume,
+  }), { version: 'v3', ...config });
+  for await (const _event of resumedRun) {
+    // Drain the root stream so the final output is materialized.
+  }
+  const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
     messages: Array<AIMessage | HumanMessage | ToolMessage>;
     runId: string;
@@ -2198,41 +2218,46 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
     buildOrchestratorRunInput([new HumanMessage('run git status and git diff')]),
     config,
   ) as {
-    __interrupt__?: Array<{ value?: unknown }>;
+    __interrupt__?: Array<{ id?: string; value?: unknown }>;
   };
-  const firstPayload = firstInterrupt.__interrupt__?.[0]?.value as {
-    review?: { id?: string };
+  const interruptId = firstInterrupt.__interrupt__?.[0]?.id;
+  const batchPayload = firstInterrupt.__interrupt__?.[0]?.value as {
+    kind?: string;
+    reviews?: Array<{ review?: { id?: string } }>;
   } | undefined;
-  assert.equal(firstPayload?.review?.id, 'tool-review:run_shell:call-first');
+  assert.equal(batchPayload?.kind, 'review_batch');
+  assert.deepEqual(batchPayload?.reviews?.map((item) => item.review?.id), [
+    'tool-review:run_shell:call-first',
+    'tool-review:run_shell:call-second',
+  ]);
 
   subagentModel.index = 0;
-  const secondInterrupt = await graph.invoke(new Command({
-    resume: {
-      reviewId: firstPayload?.review?.id,
-      selectedOptionId: 'approve',
-    },
-  }), config) as {
-    __interrupt__?: Array<{ value?: unknown }>;
+  const batchResume = {
+    decisions: [
+      {
+        reviewId: 'tool-review:run_shell:call-first',
+        selectedOptionId: 'approve',
+      },
+      {
+        reviewId: 'tool-review:run_shell:call-second',
+        selectedOptionId: 'approve',
+      },
+    ],
   };
-  const secondPayload = secondInterrupt.__interrupt__?.[0]?.value as {
-    review?: { id?: string };
-  } | undefined;
-  assert.equal(secondPayload?.review?.id, 'tool-review:run_shell:call-second');
-
-  subagentModel.index = 0;
-  const finalState = await graph.invoke(new Command({
-    resume: {
-      reviewId: secondPayload?.review?.id,
-      selectedOptionId: 'approve',
-    },
-  }), config) as {
+  const resumedRun = await graph.streamEvents(new Command({
+    resume: interruptId ? { [interruptId]: batchResume } : batchResume,
+  }), { version: 'v3', ...config });
+  for await (const _event of resumedRun) {
+    // Drain the root stream so the final output is materialized.
+  }
+  const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
     messages: Array<AIMessage | HumanMessage | ToolMessage>;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(runCount, 2);
-  assert.equal(reviewCount, 6);
+  assert.equal(reviewCount, 4);
 });
 
 test('buildSubagentHandoff copies the announce into main and wipes the whole delegation lane', () => {

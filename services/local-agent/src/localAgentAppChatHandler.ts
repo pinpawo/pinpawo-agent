@@ -1,6 +1,12 @@
 import { WebSocket } from 'ws';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import type { AgentCapability, AgentToolkit, CapabilityArtifactStore, ReviewSpec } from '@pinpawo/pet-agent';
+import type {
+  AgentCapability,
+  AgentToolkit,
+  CapabilityArtifactStore,
+  ReviewResponse,
+  ReviewSpec,
+} from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput, type AgentChannelSetup } from './agentChannel';
 import { loadAgentContext, type AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
@@ -28,6 +34,14 @@ import {
 import { InflightRequestController } from './inflightRequestController';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import type { LocalAgentEvent } from './events/localAgentEvent';
+import {
+  buildHumanReviewRejectResume,
+  buildHumanReviewResume,
+  readHumanReviewDecisionCount,
+  validateHumanReviewDecisions,
+  type HumanReviewResumeMode,
+  type PendingHumanReviewActionRoute,
+} from './humanReviewActionRouting';
 
 type InflightRequest = InflightOperationRun;
 type LoadContext = (actorId: string) => Promise<AgentContext>;
@@ -36,13 +50,12 @@ type BuildChatSetup = typeof buildLocalChatAgentInput;
 type AppChatRunRequest = ChatSessionRequest;
 type AppChatRunSource =
   | { type: 'chat_request' }
-  | { type: 'human_review_response'; reviewId: string; selectedOptionId: string }
-  | { type: 'interrupt_request'; reviewId: string; selectedOptionId: string };
+  | { type: 'human_review_response'; reviewId: string; selectedOptionId: string; decisionCount?: number }
+  | { type: 'interrupt_request'; reviewId: string; selectedOptionId: string; decisionCount?: number };
 type RunStudioRequest = (ws: WebSocket, message: StudioRequestMessage) => Promise<void>;
 type RouteStudioReviewResponse = (ws: WebSocket, message: HumanReviewResponseMessage) => boolean;
-type PendingReviewRoute = {
+type PendingReviewRoute = PendingHumanReviewActionRoute & {
   userId: string;
-  reviewId: string;
   rejectOptionId?: string;
   review: ReviewSpec;
 };
@@ -158,7 +171,10 @@ export class LocalAgentAppChatHandler {
       this.sendClosedReviewError(ws, msg.requestId);
       return;
     }
-    if (msg.reviewId !== route.reviewId) {
+    let decisions: ReviewResponse[];
+    try {
+      decisions = validateHumanReviewDecisions(route, msg);
+    } catch {
       this.releasePendingReviewRequest(msg.requestId);
       sendLocalAgentEvent(ws, {
         type: 'error',
@@ -169,18 +185,16 @@ export class LocalAgentAppChatHandler {
     }
 
     this.consumePendingReviewRoute(msg.requestId);
+    const decisionCount = readHumanReviewDecisionCount(route, decisions);
     await this.runChatRequest(ws, {
       kind: 'resume',
       requestId: msg.requestId,
-      resume: {
-        reviewId: msg.reviewId,
-        selectedOptionId: msg.selectedOptionId,
-        ...(msg.input ? { input: msg.input } : {}),
-      },
+      resume: buildHumanReviewResume(route, decisions),
     }, route.userId, {
       type: 'human_review_response',
       reviewId: msg.reviewId,
       selectedOptionId: msg.selectedOptionId,
+      ...(decisionCount ? { decisionCount } : {}),
     });
   }
 
@@ -238,7 +252,9 @@ export class LocalAgentAppChatHandler {
       sendLocalAgentEvent(ws, {
         type: 'human_review.requested',
         requestId: msg.requestId,
+        ...(route.interruptId ? { interruptId: route.interruptId } : {}),
         review: route.review,
+        ...(route.resumeMode === 'review_action' ? { reviews: route.reviews } : {}),
       });
       return;
     }
@@ -247,14 +263,12 @@ export class LocalAgentAppChatHandler {
     await this.runChatRequest(ws, {
       kind: 'resume',
       requestId: msg.requestId,
-      resume: {
-        reviewId: route.reviewId,
-        selectedOptionId: route.rejectOptionId,
-      },
+      resume: buildHumanReviewRejectResume(route, route.rejectOptionId),
     }, route.userId, {
       type: 'interrupt_request',
       reviewId: route.reviewId,
       selectedOptionId: route.rejectOptionId,
+      ...(route.resumeMode === 'review_action' ? { decisionCount: 1 } : {}),
     });
   }
 
@@ -272,12 +286,14 @@ export class LocalAgentAppChatHandler {
     } else if (source.type === 'human_review_response') {
       console.log(
         `[local-agent] human_review_response requestId=${requestId} `
-        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`,
+        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`
+        + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
     } else {
       console.log(
         `[local-agent] interrupt_request resume human_review requestId=${requestId} `
-        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`,
+        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`
+        + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
     }
     recordAgentRunActivity('thinking', requestId);
@@ -378,13 +394,24 @@ export class LocalAgentAppChatHandler {
     console.log(`[local-agent] new session created threadId=${threadId}`);
   }
 
-  private buildPendingReviewRoute(review: ReviewSpec, userId: string): PendingReviewRoute {
-    const rejectOption = review.options.find((option) => option.decision.type === 'reject');
+  private buildPendingReviewRoute(
+    review: ReviewSpec,
+    userId: string,
+    reviews?: ReviewSpec[],
+    interruptId?: string,
+    resumeMode?: HumanReviewResumeMode,
+  ): PendingReviewRoute {
+    const reviewActionReviews = reviews?.length ? reviews : [review];
+    const reviewResumeMode = resumeMode ?? (reviews ? 'review_action' : 'legacy_review');
+    const rejectOption = reviewActionReviews[0]?.options.find((option) => option.decision.type === 'reject');
     return {
       userId,
+      ...(interruptId ? { interruptId } : {}),
       reviewId: review.id,
+      resumeMode: reviewResumeMode,
       ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
       review,
+      reviews: reviewActionReviews,
     };
   }
 
@@ -396,7 +423,13 @@ export class LocalAgentAppChatHandler {
     this.activePendingReviewRequestIds.delete(event.requestId);
     this.pendingReviewRoutes.set(
       event.requestId,
-      this.buildPendingReviewRoute(event.review, userId),
+      this.buildPendingReviewRoute(
+        event.review,
+        userId,
+        event.reviews,
+        event.interruptId,
+        event.reviews ? 'review_action' : 'legacy_review',
+      ),
     );
   }
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { BuiltinGlobalReviewPolicyMode, ReviewOption } from '@pinpawo/pet-agent';
+import type { BuiltinGlobalReviewPolicyMode, ReviewOption, ReviewResponse } from '@pinpawo/pet-agent';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { config } from '../config';
@@ -207,14 +207,39 @@ export class TuiRuntimeController {
     }
     const requestId = currentApproval.requestId;
     const reviewId = currentApproval.review.id;
+    const reviews = currentApproval.reviews;
+    const reviewIndex = currentApproval.reviewIndex;
 
     if (option.input?.kind === 'text' && !inputText) {
       this.appendSystemMessage(TUI_TEXT.approvalRespondRequiresInput);
       return false;
     }
 
+    const response: ReviewResponse = {
+      reviewId,
+      selectedOptionId: option.id,
+      ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),
+    };
+    const decisions = [
+      ...currentApproval.decisions,
+      response,
+    ];
+    const shouldResume = option.decision.type !== 'approve' || reviewIndex >= reviews.length - 1;
     const now = Date.now();
     this.options.setNow(now);
+    if (!shouldResume) {
+      this.options.dispatch({
+        type: 'review.action.advance',
+        requestId,
+        decision: response,
+        message: decision,
+        now,
+        userCell: makeMessageMeta(),
+        statusMessage: TUI_TEXT.approvalWaiting(currentApproval.petId),
+      });
+      return true;
+    }
+
     this.options.dispatch({
       type: 'review.response.resume',
       requestId,
@@ -230,6 +255,7 @@ export class TuiRuntimeController {
       reviewId,
       selectedOptionId: option.id,
       ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),
+      decisions,
     });
     return true;
   }

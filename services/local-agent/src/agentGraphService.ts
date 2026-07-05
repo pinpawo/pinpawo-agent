@@ -1,6 +1,7 @@
 import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
+  isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
   ORCHESTRATOR_RECURSION_LIMIT,
   runAgent,
@@ -39,7 +40,9 @@ function buildConfigurable(setup: AgentChannelSetup) {
 }
 
 export type LocalAgentGraphPendingHumanReview = {
+  interruptId?: string;
   review: ReviewSpec;
+  reviews?: ReviewSpec[];
 };
 
 export type LocalAgentGraphThreadState = {
@@ -60,7 +63,7 @@ function readSnapshotMessages(snapshot: unknown): BaseMessage[] {
   return Array.isArray(messages) ? messages as BaseMessage[] : [];
 }
 
-function readPendingInterrupt(snapshot: unknown): Record<string, unknown> | null {
+function readPendingInterrupt(snapshot: unknown): { id?: string; value: Record<string, unknown> } | null {
   const tasks = Array.isArray((snapshot as { tasks?: unknown } | null)?.tasks)
     ? (snapshot as { tasks: unknown[] }).tasks
     : [];
@@ -71,7 +74,11 @@ function readPendingInterrupt(snapshot: unknown): Record<string, unknown> | null
       : [];
     const first = interrupts[0];
     if (first && typeof first === 'object' && 'value' in first && first.value && typeof first.value === 'object') {
-      return first.value as Record<string, unknown>;
+      const interrupt = first as { id?: unknown; value: unknown };
+      return {
+        ...(typeof interrupt.id === 'string' ? { id: interrupt.id } : {}),
+        value: interrupt.value as Record<string, unknown>,
+      };
     }
   }
   return null;
@@ -91,11 +98,23 @@ function hasPendingContinuation(snapshot: unknown) {
 
 function readPendingHumanReview(snapshot: unknown): LocalAgentGraphPendingHumanReview | null {
   const pendingInterrupt = readPendingInterrupt(snapshot);
-  if (!pendingInterrupt || !isHumanReviewInterruptPayload(pendingInterrupt)) {
+  if (!pendingInterrupt) {
+    return null;
+  }
+  if (isHumanReviewBatchInterruptPayload(pendingInterrupt.value)) {
+    const reviews = pendingInterrupt.value.reviews.map((item) => item.review);
+    return {
+      ...(pendingInterrupt.id ? { interruptId: pendingInterrupt.id } : {}),
+      review: reviews[0]!,
+      reviews,
+    };
+  }
+  if (!isHumanReviewInterruptPayload(pendingInterrupt.value)) {
     return null;
   }
   return {
-    review: pendingInterrupt.review,
+    ...(pendingInterrupt.id ? { interruptId: pendingInterrupt.id } : {}),
+    review: pendingInterrupt.value.review,
   };
 }
 

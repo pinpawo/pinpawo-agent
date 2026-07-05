@@ -29,6 +29,8 @@ export function OverlayLayer(props: {
           petId={overlay.request.petId}
           width={props.model.width}
           selectedIndex={overlay.selectedIndex}
+          reviewIndex={overlay.request.reviewIndex}
+          reviewCount={overlay.request.reviews.length}
         />
       );
     case 'globalReviewPolicyPicker':

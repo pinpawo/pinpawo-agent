@@ -89,7 +89,9 @@ export type LocalAgentOperationInternalEvent = LocalAgentOperationEvent;
 export type LocalAgentHumanReviewRequestedEvent = {
   type: 'human_review.requested';
   requestId: string;
+  interruptId?: string;
   review: ReviewSpec;
+  reviews?: ReviewSpec[];
   actor?: {
     petId?: string;
   };

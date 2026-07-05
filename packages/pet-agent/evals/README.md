@@ -50,3 +50,26 @@ recreate datasets.
 
 The `agent-*` datasets are seed coverage for future runners. They are meant to
 make the expected behavior explicit before each runner is migrated to Langfuse.
+
+## Langfuse Route Runner
+
+The first Langfuse-backed runner executes the real orchestrator route graph
+against `orchestrator-route-decision`:
+
+```sh
+npm run eval:langfuse:route
+```
+
+By default, this uses a local deterministic route model so it can run without
+sending eval cases to an external LLM. It still executes the real orchestrator
+graph and writes traces, scores, and dataset run items to Langfuse.
+
+Use `EVAL_CASES` to run a subset by case id or case name:
+
+```sh
+EVAL_CASES=greeting,file-read-request npm run eval:langfuse:route
+```
+
+To run the same route eval with the configured LLM instead of the local
+deterministic model, set `EVAL_ROUTE_MODEL=llm`. LLM mode reads configuration
+from `LLM_*`, `~/.pinpawo/.env`, or `~/.pinpawo/config.json`.

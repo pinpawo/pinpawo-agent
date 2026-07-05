@@ -11,6 +11,7 @@
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)",
     "eval:dataset": "node --env-file=.env --import tsx/esm evals/dataset.ts",
     "eval:langfuse:sync-datasets": "node --env-file=.env --import tsx/esm evals/scripts/sync-langfuse-datasets.ts",
+    "eval:langfuse:route": "node --env-file=.env --import tsx/esm evals/scripts/run-langfuse-route.eval.ts",
     "eval:route": "node --env-file=.env --import tsx/esm evals/orchestrator-route.eval.ts",
     "eval:flow:mock-subagent": "node --env-file=.env --import tsx/esm evals/orchestrator-flow.mock-subagent.eval.ts",
     "eval:subagent": "node --env-file=.env --import tsx/esm evals/subagent.eval.ts",

@@ -35,8 +35,9 @@ import { z } from 'zod';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 
-const DATASET_NAME = 'orchestrator-route-decision';
+export const DATASET_NAME = 'orchestrator-route-decision';
 
 // ── Model setup (env vars → ~/.pinpawo/config.json fallback) ──
 
@@ -49,10 +50,36 @@ function loadPinpetConfig(): Record<string, string> {
   }
 }
 
+function loadPinpawoEnv(): Record<string, string> {
+  try {
+    const raw = readFileSync(resolve(homedir(), '.pinpawo', '.env'), 'utf8');
+    const env: Record<string, string> = {};
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const separator = trimmed.indexOf('=');
+      if (separator < 0) continue;
+      const key = trimmed.slice(0, separator).trim();
+      let value = trimmed.slice(separator + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"'))
+        || (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      env[key] = value;
+    }
+    return env;
+  } catch {
+    return {};
+  }
+}
+
 const pinpawoConfig = loadPinpetConfig();
-const LLM_API_KEY = process.env.LLM_API_KEY || pinpawoConfig.llm_api_key;
-const LLM_BASE_URL = process.env.LLM_BASE_URL || pinpawoConfig.llm_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-const LLM_MODEL = process.env.LLM_MODEL || pinpawoConfig.llm_model || 'qwen3.5-plus';
+const pinpawoEnv = loadPinpawoEnv();
+const LLM_API_KEY = process.env.LLM_API_KEY || pinpawoEnv.LLM_API_KEY || pinpawoConfig.llm_api_key;
+export const LLM_BASE_URL = process.env.LLM_BASE_URL || pinpawoEnv.LLM_BASE_URL || pinpawoConfig.llm_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+export const LLM_MODEL = process.env.LLM_MODEL || pinpawoEnv.LLM_MODEL || pinpawoConfig.llm_model || 'qwen3.5-plus';
 
 function normalizeStructuredOutputMethod(value: string | undefined): OrchestrationDecisionStructuredOutputConfig['method'] {
   if (!value) return undefined;
@@ -87,12 +114,10 @@ const DECISION_STRUCTURED_OUTPUT = (
     } satisfies OrchestrationDecisionStructuredOutputConfig
   : undefined;
 
-if (!LLM_API_KEY) {
-  console.error('Missing LLM_API_KEY — set env var or configure ~/.pinpawo/config.json');
-  process.exit(1);
-}
-
 function buildEvalModels(): AgentModels {
+  if (!LLM_API_KEY) {
+    throw new Error('Missing LLM_API_KEY — set env var, ~/.pinpawo/.env, or ~/.pinpawo/config.json');
+  }
   const normalizedModel = LLM_MODEL.toLowerCase();
   const modelKwargs = (
     normalizedModel.includes('qwen')
@@ -216,8 +241,11 @@ function resolveCapabilityList(pack: unknown): AgentCapability[] {
   return [];
 }
 
-async function target(inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const models = buildEvalModels();
+export async function target(
+  inputs: Record<string, unknown>,
+  modelOverride?: AgentModels,
+): Promise<Record<string, unknown>> {
+  const models = modelOverride ?? buildEvalModels();
   const checkpointer = new MemorySaver();
   const graph = createOrchestratorGraph({
     models,
@@ -431,7 +459,7 @@ function extractResult(result: Record<string, unknown>, capabilityList: AgentCap
 
 // ── Evaluators ──
 
-function routeCorrectness({
+export function routeCorrectness({
   outputs,
   referenceOutputs,
 }: {
@@ -449,7 +477,7 @@ function routeCorrectness({
   };
 }
 
-function finishBias({
+export function finishBias({
   outputs,
   referenceOutputs,
 }: {
@@ -472,7 +500,7 @@ function finishBias({
   };
 }
 
-function delegateBias({
+export function delegateBias({
   outputs,
   referenceOutputs,
 }: {
@@ -495,7 +523,7 @@ function delegateBias({
   };
 }
 
-function modeCorrectness({
+export function modeCorrectness({
   outputs,
   referenceOutputs,
 }: {
@@ -516,7 +544,7 @@ function modeCorrectness({
   };
 }
 
-function phaseCorrectness({
+export function phaseCorrectness({
   outputs,
   referenceOutputs,
 }: {
@@ -537,7 +565,7 @@ function phaseCorrectness({
   };
 }
 
-function capabilityStateCorrectness({
+export function capabilityStateCorrectness({
   outputs,
   referenceOutputs,
 }: {
@@ -558,7 +586,7 @@ function capabilityStateCorrectness({
   };
 }
 
-function activeCapabilityCorrectness({
+export function activeCapabilityCorrectness({
   outputs,
   referenceOutputs,
 }: {
@@ -579,7 +607,7 @@ function activeCapabilityCorrectness({
   };
 }
 
-function capabilityCandidatesCorrectness({
+export function capabilityCandidatesCorrectness({
   outputs,
   referenceOutputs,
 }: {
@@ -614,7 +642,7 @@ function capabilityCandidatesCorrectness({
   };
 }
 
-function capabilitySearchQueryCorrectness({
+export function capabilitySearchQueryCorrectness({
   outputs,
   referenceOutputs,
 }: {
@@ -726,4 +754,6 @@ async function main() {
   console.log('View results in LangSmith dashboard.');
 }
 
-main().catch(console.error);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(console.error);
+}

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { agentEvalDatasets } from '../datasets/orchestrator-route.ts';
+import { agentEvalDatasets } from '../datasets/index.ts';
 import { AgentEvalDataset } from '../datasets/types.ts';
 
 type EnvMap = Record<string, string>;

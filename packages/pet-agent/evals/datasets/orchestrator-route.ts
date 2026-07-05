@@ -103,7 +103,3 @@ export const orchestratorRouteDataset: AgentEvalDataset<
     ],
   },
 };
-
-export const agentEvalDatasets = [
-  orchestratorRouteDataset,
-] as const;

@@ -64,6 +64,10 @@ By default, this uses a local deterministic route model so it can run without
 sending eval cases to an external LLM. It still executes the real orchestrator
 graph and writes traces, scores, and dataset run items to Langfuse.
 
+The CLI summary reports results by example tag first, then by score dimension.
+Score dimensions without a matching expected field are counted as not applicable
+instead of being presented as covered cases.
+
 Use `EVAL_CASES` to run a subset by case id or case name:
 
 ```sh

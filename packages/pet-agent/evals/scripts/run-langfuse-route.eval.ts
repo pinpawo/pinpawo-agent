@@ -31,12 +31,26 @@ type ScoreResult = {
 type EvalRow = {
   id: string;
   name: string;
+  suite: string;
+  tags: string[];
   ok: boolean;
   durationMs: number;
   scores: ScoreResult[];
   output: Record<string, unknown>;
   error?: string;
 };
+
+const scoreKeys = [
+  'route_correct',
+  'mode_correct',
+  'phase_correct',
+  'capability_state_correct',
+  'active_capability_correct',
+  'capability_candidates_correct',
+  'capability_search_query_correct',
+  'finish_correct',
+  'delegate_correct',
+];
 
 const evaluators = [
   routeCorrectness,
@@ -80,6 +94,10 @@ function runEvaluators(
 
 function scorePasses(score: ScoreResult): boolean {
   return score.score === 1;
+}
+
+function scoreApplies(score: ScoreResult): boolean {
+  return !score.comment?.startsWith('No expected ');
 }
 
 function messagesText(messages: unknown[]): string {
@@ -232,23 +250,32 @@ async function writeLangfuseResult(params: {
 }
 
 function printSummary(rows: EvalRow[]) {
-  const scoreKeys = [
-    'route_correct',
-    'mode_correct',
-    'phase_correct',
-    'capability_state_correct',
-    'active_capability_correct',
-    'capability_candidates_correct',
-    'capability_search_query_correct',
-    'finish_correct',
-    'delegate_correct',
-  ];
   console.log('\n=== Langfuse route eval complete ===');
   console.log(`Cases: ${rows.filter((row) => row.ok).length}/${rows.length} passed`);
+
+  const tags = orchestratorRouteDataset.metadata.areas.filter((tag) =>
+    rows.some((row) => row.tags.includes(tag)),
+  );
+  const knownTags = new Set<string>(tags);
+  const unknownTags = [...new Set(rows.flatMap((row) => row.tags))]
+    .filter((tag) => !knownTags.has(tag))
+    .sort();
+
+  console.log('\nBy example tag:');
+  for (const tag of [...tags, ...unknownTags]) {
+    const taggedRows = rows.filter((row) => row.tags.includes(tag));
+    const passed = taggedRows.filter((row) => row.ok).length;
+    console.log(`${tag}: ${passed}/${taggedRows.length} cases passed`);
+  }
+
+  console.log('\nBy score dimension:');
   for (const key of scoreKeys) {
     const scores = rows.flatMap((row) => row.scores.filter((score) => score.key === key));
-    const passed = scores.filter(scorePasses).length;
-    console.log(`${key}: ${passed}/${scores.length} passed`);
+    const applicableScores = scores.filter(scoreApplies);
+    const passed = applicableScores.filter(scorePasses).length;
+    const skipped = scores.length - applicableScores.length;
+    const skippedSuffix = skipped > 0 ? `, ${skipped} not applicable` : '';
+    console.log(`${key}: ${passed}/${applicableScores.length} applicable passed${skippedSuffix}`);
   }
 
   const failed = rows.filter((row) => !row.ok);
@@ -289,6 +316,8 @@ async function main() {
       const row = {
         id: testCase.id,
         name: testCase.name,
+        suite: testCase.suite,
+        tags: testCase.tags,
         ok: scores.every(scorePasses),
         durationMs: Math.round(performance.now() - started),
         scores,
@@ -301,6 +330,8 @@ async function main() {
       const row = {
         id: testCase.id,
         name: testCase.name,
+        suite: testCase.suite,
+        tags: testCase.tags,
         ok: false,
         durationMs: Math.round(performance.now() - started),
         scores: [{ key: 'run_error', score: 0, comment: compactError(error) }],

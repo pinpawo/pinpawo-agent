@@ -9,12 +9,13 @@
  * Run: npx tsx evals/dataset.ts
  */
 import { Client } from 'langsmith';
+import { pathToFileURL } from 'node:url';
 
-const DATASET_NAME = 'orchestrator-route-decision';
-const DATASET_DESCRIPTION =
+export const DATASET_NAME = 'orchestrator-route-decision';
+export const DATASET_DESCRIPTION =
   'Evaluates whether the orchestrator correctly decides to answer (reply to user) vs. delegate (call subagent).';
 
-type Example = {
+export type Example = {
   name: string;
   inputs: {
     user_message: string;
@@ -49,7 +50,7 @@ type Example = {
   };
 };
 
-const examples: Example[] = [
+export const examples: Example[] = [
   // ── Should answer: simple questions ──
   {
     name: 'greeting',
@@ -457,4 +458,6 @@ async function main() {
   console.log(`\nDone — ${examples.length} examples created.`);
 }
 
-main().catch(console.error);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(console.error);
+}

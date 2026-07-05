@@ -1,6 +1,7 @@
-import { AIMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
+import { createHash } from 'node:crypto';
+import { AIMessage, RemoveMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
-import { interrupt } from '@langchain/langgraph';
+import { REMOVE_ALL_MESSAGES, interrupt } from '@langchain/langgraph';
 import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type { AgentActor, AgentModels } from '../../types/agent';
@@ -37,7 +38,8 @@ import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RESOLUTION,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
-  resolveGlobalReviewPolicy,
+  resolveGlobalReviewBatchPolicy,
+  type GlobalReviewPolicyBatchItem,
   type GlobalReviewPolicyResolution,
 } from './review/globalReviewPolicy';
 import type { MessageLane } from './types';
@@ -201,6 +203,8 @@ function buildCancelledToolResult(params: {
     toolkitName: params.toolkitName,
     reason: params.reason,
     input: params.input,
+    retryable: false,
+    guidance: 'Do not retry this same tool call. Choose a safer alternative or explain why the action cannot be completed.',
   });
 }
 
@@ -255,14 +259,74 @@ function isToolkitReviewBlock(value: unknown): value is { type: 'block'; reason:
   );
 }
 
+function stableStringify(value: unknown): string {
+  if (!value || typeof value !== 'object') {
+    return JSON.stringify(value) ?? String(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(',')}}`;
+}
+
+function stableToolCallHash(toolCall: ToolCall) {
+  return createHash('sha256')
+    .update(stableStringify({ name: toolCall.name, args: toolCall.args }))
+    .digest('hex')
+    .slice(0, 12);
+}
+
 function readToolCallId(toolCall: ToolCall) {
   const id = toolCall.id;
   return typeof id === 'string' && id.trim() ? id.trim() : 'pending_action';
 }
 
-function materializeToolCallId(toolCall: ToolCall): ToolCall {
-  const actionId = readToolCallId(toolCall);
+function materializeToolCallId(toolCall: ToolCall, messageIndex: number, toolCallIndex: number): ToolCall {
+  const explicitId = typeof toolCall.id === 'string' && toolCall.id.trim()
+    ? toolCall.id.trim()
+    : null;
+  const actionId = explicitId
+    ?? `pending_action:${messageIndex}:${toolCallIndex}:${stableToolCallHash(toolCall)}`;
   return toolCall.id === actionId ? toolCall : { ...toolCall, id: actionId };
+}
+
+function materializeToolCallIds(
+  toolCalls: ToolCall[],
+  messageIndex: number,
+): ToolCall[] {
+  return toolCalls.map((toolCall, index) => materializeToolCallId(toolCall, messageIndex, index));
+}
+
+function cloneAIMessageWithToolCalls(message: AIMessage, toolCalls: ToolCall[]): AIMessage {
+  return new AIMessage({
+    content: message.content,
+    id: message.id,
+    name: message.name,
+    additional_kwargs: { ...message.additional_kwargs },
+    response_metadata: { ...message.response_metadata },
+    tool_calls: toolCalls,
+    invalid_tool_calls: message.invalid_tool_calls,
+    usage_metadata: message.usage_metadata,
+  });
+}
+
+function replaceMessageInState(
+  messages: BaseMessage[],
+  index: number,
+  replacement: BaseMessage,
+  appended: BaseMessage[],
+) {
+  return [
+    new RemoveMessage({ id: REMOVE_ALL_MESSAGES }) as BaseMessage,
+    ...messages.slice(0, index),
+    replacement,
+    ...messages.slice(index + 1),
+    ...appended,
+  ];
 }
 
 function inputToActionArgs(input: unknown): Record<string, unknown> {
@@ -398,9 +462,27 @@ const ToolkitReviewStateSchema = z.object({
 
 type ToolkitReviewState = z.infer<typeof ToolkitReviewStateSchema>;
 
-type ToolkitReviewOutcome =
-  | { type: 'allow'; approvedReviewId?: string }
+type PreparedToolkitReview = GlobalReviewPolicyBatchItem & {
+  toolCall: ToolCall;
+  reviewPayload: HumanReviewInterruptPayload;
+};
+
+type ToolkitReviewPreparation =
+  | { type: 'allow' }
+  | { type: 'review'; review: PreparedToolkitReview }
   | { type: 'cancel'; toolCall: ToolCall; content: string };
+
+type MaterializedToolCallMessage = {
+  message: AIMessage;
+  toolCalls: ToolCall[];
+  replacedMessage: boolean;
+};
+
+type ToolkitReviewResults = {
+  cancelledToolCallIds: Set<string>;
+  toolMessages: ToolMessage[];
+  newlyApprovedReviewIds: Set<string>;
+};
 
 function readApprovedReviewIds(state: Partial<ToolkitReviewState>) {
   return new Set(Object.entries(state.toolkitReviewApprovals ?? {})
@@ -421,14 +503,34 @@ function mergeApprovedReviewIds(
   };
 }
 
-async function reviewToolkitToolCall(params: {
+function buildSkippedAfterCancellationResult(toolCall: ToolCall) {
+  return JSON.stringify({
+    ok: false,
+    cancelled: true,
+    skipped: true,
+    toolName: toolCall.name,
+    reason: 'Skipped because another tool call in this batch was cancelled before any tools executed.',
+    input: toolCall.args,
+    retryable: false,
+    guidance: 'Do not retry this same tool-call batch. Replan from the cancellation feedback.',
+  });
+}
+
+function buildToolMessage(toolCall: ToolCall, content: string) {
+  return new ToolMessage({
+    content,
+    name: toolCall.name,
+    tool_call_id: readToolCallId(toolCall),
+  });
+}
+
+async function prepareToolkitToolReview(params: {
   binding: ToolkitReviewBinding;
   ctx: ToolkitContext;
   toolCall: ToolCall;
-  toolkits: AgentToolkit[];
   approvedReviewIds: Set<string>;
-}): Promise<ToolkitReviewOutcome> {
-  const { approvedReviewIds, binding, ctx, toolCall, toolkits } = params;
+}): Promise<ToolkitReviewPreparation> {
+  const { approvedReviewIds, binding, ctx, toolCall } = params;
   if (approvedReviewIds.has(buildToolReviewIdForToolCall(binding.toolName, toolCall))) {
     return { type: 'allow' };
   }
@@ -448,55 +550,11 @@ async function reviewToolkitToolCall(params: {
   if (isToolkitReviewBlock(reviewSpec)) {
     return {
       type: 'cancel',
-      toolCall: materializeToolCallId(toolCall),
+      toolCall,
       content: buildCancelledToolResult({
         toolName: binding.toolName,
         toolkitName: binding.toolkit.name,
         reason: reviewSpec.reason,
-        input: currentInput,
-      }),
-    };
-  }
-
-  const policyResolution = await resolveGlobalReviewPolicy({
-    policy: ctx.globalReviewPolicy,
-    models: ctx.models,
-    actor: ctx.actor,
-    messages: ctx.messages,
-    toolkitName: binding.toolkit.name,
-    toolName: binding.toolName,
-    input: currentInput,
-    operation: binding.operation,
-    review: reviewSpec,
-  });
-
-  if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
-    const policyMode = ctx.globalReviewPolicy?.mode;
-    const eventName = globalReviewPolicyAuthorizedEventName(policyMode);
-    if (eventName) {
-      await ctx.emitRuntimeEvent?.({
-        event: 'on_runtime_event',
-        name: eventName,
-        data: {
-          toolName: binding.toolName,
-          toolkitName: binding.toolkit.name,
-          policyMode,
-          reason: policyResolution.reason,
-          ...(policyResolution.confidence ? { confidence: policyResolution.confidence } : {}),
-        },
-      });
-    }
-    return { type: 'allow' };
-  }
-
-  if (!runtimeCanCollectHumanReview(ctx)) {
-    return {
-      type: 'cancel',
-      toolCall: materializeToolCallId(toolCall),
-      content: buildCancelledToolResult({
-        toolName: binding.toolName,
-        toolkitName: binding.toolkit.name,
-        reason: buildHumanReviewUnavailableReason(policyResolution),
         input: currentInput,
       }),
     };
@@ -511,13 +569,39 @@ async function reviewToolkitToolCall(params: {
   if (approvedReviewIds.has(reviewPayload.review.id)) {
     return { type: 'allow' };
   }
-  let reviewResume = interrupt(reviewPayload);
+  return {
+    type: 'review',
+    review: {
+      toolCall,
+      toolkitName: binding.toolkit.name,
+      toolName: binding.toolName,
+      input: currentInput,
+      operation: binding.operation,
+      review: reviewPayload.review,
+      reviewPayload,
+    },
+  };
+}
+
+async function resolveHumanToolkitReview(params: {
+  review: PreparedToolkitReview;
+  toolkits: AgentToolkit[];
+}): Promise<
+  | {
+      type: 'allow';
+      approvedReviewId: string;
+      authorizations: ToolAuthorizationRecord[];
+    }
+  | { type: 'cancel'; toolCall: ToolCall; content: string }
+> {
+  const { review, toolkits } = params;
+  let reviewResume = interrupt(review.reviewPayload);
   let reviewDecision: ReviewResponseResolution['decision'] | null = null;
   let authorizations: ToolAuthorizationRecord[] = [];
   while (!reviewDecision) {
     try {
       const resolved = await resolveRuntimeReviewResume({
-        reviewPayload,
+        reviewPayload: review.reviewPayload,
         resume: reviewResume,
         toolkits,
       });
@@ -530,13 +614,12 @@ async function reviewToolkitToolCall(params: {
       ) {
         throw error;
       }
-      reviewResume = interrupt(buildInvalidDecisionRequest(reviewPayload));
+      reviewResume = interrupt(buildInvalidDecisionRequest(review.reviewPayload));
     }
   }
 
   if (reviewDecision.type === 'approve') {
-    await recordToolAuthorizations(ctx, authorizations);
-    return { type: 'allow', approvedReviewId: reviewPayload.review.id };
+    return { type: 'allow', approvedReviewId: review.reviewPayload.review.id, authorizations };
   }
 
   const reason = reviewDecision.type === 'respond'
@@ -544,13 +627,229 @@ async function reviewToolkitToolCall(params: {
     : reviewDecision.message ?? 'tool call rejected by user';
   return {
     type: 'cancel',
-    toolCall: materializeToolCallId(toolCall),
+    toolCall: review.toolCall,
     content: buildCancelledToolResult({
-      toolName: binding.toolName,
-      toolkitName: binding.toolkit.name,
+      toolName: review.toolName,
+      toolkitName: review.toolkitName,
       reason,
-      input: currentInput,
+      input: review.input,
     }),
+  };
+}
+
+function readLatestAIMessage(messages: BaseMessage[]): {
+  message: AIMessage;
+  index: number;
+} | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (AIMessage.isInstance(message)) {
+      return { message, index };
+    }
+  }
+  return null;
+}
+
+function materializeAIMessageToolCalls(params: {
+  aiMessage: AIMessage;
+  aiMessageIndex: number;
+}): MaterializedToolCallMessage {
+  const toolCalls = materializeToolCallIds(
+    params.aiMessage.tool_calls ?? [],
+    params.aiMessageIndex,
+  );
+  const replacedMessage = toolCalls.some((toolCall, index) =>
+    toolCall !== params.aiMessage.tool_calls?.[index]);
+  return {
+    message: replacedMessage
+      ? cloneAIMessageWithToolCalls(params.aiMessage, toolCalls)
+      : params.aiMessage,
+    toolCalls,
+    replacedMessage,
+  };
+}
+
+function buildCancelledOutcomeForReview(
+  review: PreparedToolkitReview,
+  reason: string,
+): Extract<ToolkitReviewPreparation, { type: 'cancel' }> {
+  return {
+    type: 'cancel',
+    toolCall: review.toolCall,
+    content: buildCancelledToolResult({
+      toolName: review.toolName,
+      toolkitName: review.toolkitName,
+      reason,
+      input: review.input,
+    }),
+  };
+}
+
+async function emitGlobalReviewBatchAuthorization(params: {
+  ctx: ToolkitContext;
+  resolution: Extract<GlobalReviewPolicyResolution, { type: typeof GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE }>;
+  reviews: PreparedToolkitReview[];
+}) {
+  const policyMode = params.ctx.globalReviewPolicy?.mode;
+  const eventName = globalReviewPolicyAuthorizedEventName(policyMode);
+  if (!eventName) {
+    return;
+  }
+  const firstReview = params.reviews[0];
+  await params.ctx.emitRuntimeEvent?.({
+    event: 'on_runtime_event',
+    name: eventName,
+    data: {
+      policyMode,
+      reason: params.resolution.reason,
+      batchSize: params.reviews.length,
+      toolCalls: params.reviews.map((review) => ({
+        toolName: review.toolName,
+        toolkitName: review.toolkitName,
+      })),
+      ...(params.resolution.confidence ? { confidence: params.resolution.confidence } : {}),
+      ...(params.reviews.length === 1 && firstReview
+        ? {
+            toolName: firstReview.toolName,
+            toolkitName: firstReview.toolkitName,
+          }
+        : {}),
+    },
+  });
+}
+
+async function reviewToolkitToolCalls(params: {
+  toolCalls: ToolCall[];
+  bindingsByToolName: Map<string, ToolkitReviewBinding>;
+  ctx: ToolkitContext;
+  toolkits: AgentToolkit[];
+  approvedReviewIds: Set<string>;
+}): Promise<ToolkitReviewResults> {
+  const cancelledToolCallIds = new Set<string>();
+  const toolMessages: ToolMessage[] = [];
+  const newlyApprovedReviewIds = new Set<string>();
+  const approvedAuthorizations: ToolAuthorizationRecord[] = [];
+  const preparedReviews: PreparedToolkitReview[] = [];
+  let cancelledOutcome: Extract<ToolkitReviewPreparation, { type: 'cancel' }> | null = null;
+
+  for (const toolCall of params.toolCalls) {
+    const binding = params.bindingsByToolName.get(toolCall.name);
+    if (!binding) {
+      continue;
+    }
+    const preparation = await prepareToolkitToolReview({
+      binding,
+      ctx: params.ctx,
+      toolCall,
+      approvedReviewIds: params.approvedReviewIds,
+    });
+    if (preparation.type === 'allow') {
+      continue;
+    }
+    if (preparation.type === 'review') {
+      preparedReviews.push(preparation.review);
+      continue;
+    }
+    cancelledOutcome = preparation;
+    break;
+  }
+
+  if (!cancelledOutcome && preparedReviews.length > 0) {
+    const policyResolution = await resolveGlobalReviewBatchPolicy({
+      policy: params.ctx.globalReviewPolicy,
+      models: params.ctx.models,
+      actor: params.ctx.actor,
+      messages: params.ctx.messages,
+      reviews: preparedReviews,
+    });
+    if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
+      await emitGlobalReviewBatchAuthorization({
+        ctx: params.ctx,
+        resolution: policyResolution,
+        reviews: preparedReviews,
+      });
+    } else if (!runtimeCanCollectHumanReview(params.ctx)) {
+      cancelledOutcome = buildCancelledOutcomeForReview(
+        preparedReviews[0],
+        buildHumanReviewUnavailableReason(policyResolution),
+      );
+    } else {
+      for (const review of preparedReviews) {
+        if (params.approvedReviewIds.has(review.reviewPayload.review.id)) {
+          continue;
+        }
+        const outcome = await resolveHumanToolkitReview({
+          review,
+          toolkits: params.toolkits,
+        });
+        if (outcome.type === 'allow') {
+          newlyApprovedReviewIds.add(outcome.approvedReviewId);
+          params.approvedReviewIds.add(outcome.approvedReviewId);
+          approvedAuthorizations.push(...outcome.authorizations);
+          continue;
+        }
+        cancelledOutcome = outcome;
+        newlyApprovedReviewIds.clear();
+        break;
+      }
+    }
+  }
+
+  if (cancelledOutcome) {
+    for (const toolCall of params.toolCalls) {
+      cancelledToolCallIds.add(readToolCallId(toolCall));
+      toolMessages.push(buildToolMessage(
+        toolCall,
+        toolCall === cancelledOutcome.toolCall
+          ? cancelledOutcome.content
+          : buildSkippedAfterCancellationResult(toolCall),
+      ));
+    }
+  } else {
+    await recordToolAuthorizations(params.ctx, approvedAuthorizations);
+  }
+
+  return {
+    cancelledToolCallIds,
+    toolMessages,
+    newlyApprovedReviewIds,
+  };
+}
+
+function buildToolkitReviewStateUpdate(params: {
+  state: Partial<ToolkitReviewState>;
+  messages: BaseMessage[];
+  aiMessageIndex: number;
+  reviewedMessage: MaterializedToolCallMessage;
+  reviewResults: ToolkitReviewResults;
+}) {
+  const { reviewedMessage, reviewResults } = params;
+  const approvalUpdate = reviewResults.newlyApprovedReviewIds.size > 0
+    ? { toolkitReviewApprovals: mergeApprovedReviewIds(params.state, reviewResults.newlyApprovedReviewIds) }
+    : {};
+  if (reviewResults.toolMessages.length === 0) {
+    return reviewedMessage.replacedMessage
+      ? {
+          ...approvalUpdate,
+          messages: replaceMessageInState(params.messages, params.aiMessageIndex, reviewedMessage.message, []),
+        }
+      : Object.keys(approvalUpdate).length > 0
+        ? approvalUpdate
+        : undefined;
+  }
+
+  const hasPendingToolCalls = reviewedMessage.toolCalls.some(
+    (toolCall) => !reviewResults.cancelledToolCallIds.has(readToolCallId(toolCall)),
+  );
+  return {
+    ...approvalUpdate,
+    messages: replaceMessageInState(
+      params.messages,
+      params.aiMessageIndex,
+      reviewedMessage.message,
+      reviewResults.toolMessages,
+    ),
+    ...(hasPendingToolCalls ? {} : { jumpTo: 'model' as const }),
   };
 }
 
@@ -571,57 +870,30 @@ function createToolkitReviewMiddleware(
       canJumpTo: ['model'],
       hook: async (state) => {
         const messages = Array.isArray(state.messages) ? state.messages : [];
-        const lastMessage = [...messages].reverse().find((message) => AIMessage.isInstance(message));
-        if (!lastMessage?.tool_calls?.length) {
+        const latestAIMessage = readLatestAIMessage(messages);
+        if (!latestAIMessage?.message.tool_calls?.length) {
           return undefined;
         }
-
-        const reviewedToolCalls = lastMessage.tool_calls.map(materializeToolCallId);
-        lastMessage.tool_calls = reviewedToolCalls;
-        const cancelledToolCallIds = new Set<string>();
-        const toolMessages: ToolMessage[] = [];
+        const reviewedMessage = materializeAIMessageToolCalls({
+          aiMessage: latestAIMessage.message,
+          aiMessageIndex: latestAIMessage.index,
+        });
         const approvedReviewIds = readApprovedReviewIds(state);
-        const newlyApprovedReviewIds = new Set<string>();
-        for (const toolCall of reviewedToolCalls) {
-          const binding = bindingsByToolName.get(toolCall.name);
-          if (!binding) {
-            continue;
-          }
-          const outcome = await reviewToolkitToolCall({
-            binding,
-            ctx,
-            toolCall,
-            toolkits,
-            approvedReviewIds,
-          });
-          if (outcome.type === 'allow') {
-            if (outcome.approvedReviewId) {
-              newlyApprovedReviewIds.add(outcome.approvedReviewId);
-            }
-            continue;
-          }
-          cancelledToolCallIds.add(readToolCallId(outcome.toolCall));
-          toolMessages.push(new ToolMessage({
-            content: outcome.content,
-            name: outcome.toolCall.name,
-            tool_call_id: readToolCallId(outcome.toolCall),
-          }));
-        }
+        const reviewResults = await reviewToolkitToolCalls({
+          toolCalls: reviewedMessage.toolCalls,
+          bindingsByToolName,
+          ctx,
+          toolkits,
+          approvedReviewIds,
+        });
 
-        if (toolMessages.length === 0) {
-          return newlyApprovedReviewIds.size > 0
-            ? { toolkitReviewApprovals: mergeApprovedReviewIds(state, newlyApprovedReviewIds) }
-            : undefined;
-        }
-
-        const hasPendingToolCalls = reviewedToolCalls.some(
-          (toolCall) => !cancelledToolCallIds.has(readToolCallId(toolCall)),
-        );
-        return {
-          toolkitReviewApprovals: mergeApprovedReviewIds(state, newlyApprovedReviewIds),
-          messages: [lastMessage, ...toolMessages],
-          ...(hasPendingToolCalls ? {} : { jumpTo: 'model' as const }),
-        };
+        return buildToolkitReviewStateUpdate({
+          state,
+          messages,
+          aiMessageIndex: latestAIMessage.index,
+          reviewedMessage,
+          reviewResults,
+        });
       },
     },
   });

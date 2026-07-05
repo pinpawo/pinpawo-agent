@@ -68,13 +68,13 @@ type ToolkitResources = Awaited<ReturnType<typeof resolveToolkitResources>>;
 
 async function runToolkitToolCall(
   resources: ToolkitResources,
-  toolCall: { id: string; name: string; args: Record<string, unknown> }
-    | Array<{ id: string; name: string; args: Record<string, unknown> }>,
+  toolCall: { id?: string; name: string; args: Record<string, unknown> }
+    | Array<{ id?: string; name: string; args: Record<string, unknown> }>,
 ) {
   const toolCalls = Array.isArray(toolCall) ? toolCall : [toolCall];
   return createSubagent({
     model: new FakeToolCallingModel({
-      toolCalls: [toolCalls, []],
+      toolCalls: [toolCalls as never, []],
     }),
     tools: resources.tools,
     middleware: resources.middleware,
@@ -89,6 +89,10 @@ function readToolMessageContent(messages: unknown[], toolCallId: string) {
     item instanceof ToolMessage
     && item.tool_call_id === toolCallId);
   return message?.content;
+}
+
+function readToolMessages(messages: unknown[]) {
+  return messages.filter((item): item is ToolMessage => item instanceof ToolMessage);
 }
 
 const testActor: AgentActor = {
@@ -1344,9 +1348,12 @@ test('toolkit review policy runs after model without changing tool identity', as
   assert.equal(readToolMessageContent(result.messages, 'call-safe'), 'raw ok');
 });
 
-test('toolkit review cancellation does not skip other parallel tool calls', async () => {
+test('toolkit review cancellation stops the current tool-call batch', async () => {
   let allowedCallCount = 0;
   let blockedCallCount = 0;
+  let allowedReviewCount = 0;
+  let laterCallCount = 0;
+  let laterReviewCount = 0;
   const allowedTool = tool(async () => {
     allowedCallCount += 1;
     return 'allowed ok';
@@ -1363,10 +1370,91 @@ test('toolkit review cancellation does not skip other parallel tool calls', asyn
     description: 'blocked tool',
     schema: z.object({}),
   });
+  const laterTool = tool(async () => {
+    laterCallCount += 1;
+    return 'later ok';
+  }, {
+    name: 'later_tool',
+    description: 'later tool',
+    schema: z.object({}),
+  });
   const toolkits: AgentToolkit[] = [{
     name: 'guarded',
     description: 'guarded toolkit',
-    tools: [allowedTool, blockedTool],
+    tools: [allowedTool, blockedTool, laterTool],
+    policy: {
+      toolReview: {
+        allowed_tool: {
+          request: () => {
+            allowedReviewCount += 1;
+            return null;
+          },
+        },
+        blocked_tool: {
+          request: () => ({
+            type: 'block',
+            reason: 'blocked by policy',
+          }),
+        },
+        later_tool: {
+          request: () => {
+            laterReviewCount += 1;
+            return null;
+          },
+        },
+      },
+    },
+  }];
+
+  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+  });
+  const result = await runToolkitToolCall(resources, [
+    { id: 'call-allowed', name: 'allowed_tool', args: {} },
+    { id: 'call-blocked', name: 'blocked_tool', args: {} },
+    { id: 'call-later', name: 'later_tool', args: {} },
+  ]);
+
+  const allowedResult = JSON.parse(String(readToolMessageContent(
+    result.messages,
+    'call-allowed',
+  ))) as { cancelled?: boolean; reason?: string; skipped?: boolean };
+  const blockedResult = JSON.parse(String(readToolMessageContent(
+    result.messages,
+    'call-blocked',
+  ))) as { cancelled?: boolean; reason?: string; skipped?: boolean };
+  const laterResult = JSON.parse(String(readToolMessageContent(
+    result.messages,
+    'call-later',
+  ))) as { cancelled?: boolean; reason?: string; skipped?: boolean };
+  assert.equal(allowedResult.cancelled, true);
+  assert.equal(allowedResult.skipped, true);
+  assert.match(allowedResult.reason ?? '', /another tool call in this batch was cancelled/);
+  assert.equal(blockedResult.cancelled, true);
+  assert.equal(blockedResult.skipped, undefined);
+  assert.match(blockedResult.reason ?? '', /blocked by policy/);
+  assert.equal(laterResult.cancelled, true);
+  assert.equal(laterResult.skipped, true);
+  assert.match(laterResult.reason ?? '', /another tool call in this batch was cancelled/);
+  assert.equal(blockedCallCount, 0);
+  assert.equal(allowedCallCount, 0);
+  assert.equal(allowedReviewCount, 1);
+  assert.equal(laterCallCount, 0);
+  assert.equal(laterReviewCount, 0);
+});
+
+test('toolkit review materializes distinct fallback ids for missing tool call ids', async () => {
+  const blockedTool = tool(async () => 'blocked should not run', {
+    name: 'blocked_tool',
+    description: 'blocked tool',
+    schema: z.object({ path: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'guarded',
+    description: 'guarded toolkit',
+    tools: [blockedTool],
     policy: {
       toolReview: {
         blocked_tool: {
@@ -1385,19 +1473,31 @@ test('toolkit review cancellation does not skip other parallel tool calls', asyn
     messages: [],
   });
   const result = await runToolkitToolCall(resources, [
-    { id: 'call-blocked', name: 'blocked_tool', args: {} },
-    { id: 'call-allowed', name: 'allowed_tool', args: {} },
+    { name: 'blocked_tool', args: { path: 'a.txt' } },
+    { name: 'blocked_tool', args: { path: 'b.txt' } },
   ]);
 
-  const blockedResult = JSON.parse(String(readToolMessageContent(
-    result.messages,
-    'call-blocked',
-  ))) as { cancelled?: boolean; reason?: string };
-  assert.equal(blockedResult.cancelled, true);
-  assert.match(blockedResult.reason ?? '', /blocked by policy/);
-  assert.equal(readToolMessageContent(result.messages, 'call-allowed'), 'allowed ok');
-  assert.equal(blockedCallCount, 0);
-  assert.equal(allowedCallCount, 1);
+  const toolMessages = readToolMessages(result.messages);
+  assert.equal(toolMessages.length, 2);
+  assert.match(toolMessages[0]?.tool_call_id ?? '', /^pending_action:/);
+  assert.match(toolMessages[1]?.tool_call_id ?? '', /^pending_action:/);
+  assert.notEqual(toolMessages[0]?.tool_call_id, toolMessages[1]?.tool_call_id);
+  const cancelledResults = toolMessages.map((message) => JSON.parse(String(message.content)) as {
+    cancelled?: boolean;
+    retryable?: boolean;
+    guidance?: string;
+  });
+  assert.deepEqual(cancelledResults.map((item) => item.cancelled), [true, true]);
+  assert.deepEqual(cancelledResults.map((item) => item.retryable), [false, false]);
+  assert.match(cancelledResults[0]?.guidance ?? '', /Do not retry this same tool call/);
+
+  const reviewedMessage = result.messages.find((message): message is AIMessage =>
+    AIMessage.isInstance(message)
+    && (message.tool_calls?.length ?? 0) === 2);
+  assert.deepEqual(
+    reviewedMessage?.tool_calls?.map((toolCall) => toolCall.id),
+    toolMessages.map((message) => message.tool_call_id),
+  );
 });
 
 test('global review policy full_access bypasses toolkit review prompts', async () => {
@@ -1522,6 +1622,100 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   const systemPrompt = (autoReviewMessages as Array<{ content?: unknown }>)[0]?.content;
   assert.match(String(systemPrompt), /JSON object/);
   assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
+});
+
+test('global review policy auto_authorization evaluates a tool-call batch once', async () => {
+  let firstCallCount = 0;
+  let secondCallCount = 0;
+  let autoReviewCount = 0;
+  let autoReviewMessages: unknown;
+  const runtimeEvents: unknown[] = [];
+  const firstTool = tool(async ({ path }: { path: string }) => {
+    firstCallCount += 1;
+    return `first ${path}`;
+  }, {
+    name: 'first_write',
+    description: 'first write',
+    schema: z.object({ path: z.string(), content: z.string() }),
+  });
+  const secondTool = tool(async ({ path }: { path: string }) => {
+    secondCallCount += 1;
+    return `second ${path}`;
+  }, {
+    name: 'second_write',
+    description: 'second write',
+    schema: z.object({ path: z.string(), content: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [firstTool, secondTool],
+    policy: {
+      toolReview: {
+        first_write: ReviewPolicies.localMutation(),
+        second_write: ReviewPolicies.localMutation(),
+      },
+    },
+  }];
+  const autoModel = {
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown) => {
+        autoReviewCount += 1;
+        autoReviewMessages = messages;
+        return {
+          decision: 'authorize',
+          reason: 'Both writes are narrow and expected.',
+          confidence: 'high',
+        };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+
+  const resources = await resolveToolkitResources(toolkits, ['local'], {
+    models: { act: autoModel },
+    actor: testActor,
+    messages: [new HumanMessage('write both files')],
+    reviewCapabilities: {
+      humanReview: false,
+      sessionAuthorization: false,
+    },
+    globalReviewPolicy: { mode: 'auto_authorization' },
+    emitRuntimeEvent: (event) => {
+      runtimeEvents.push(event);
+    },
+  });
+
+  const result = await runToolkitToolCall(resources, [
+    {
+      id: 'call-first-write',
+      name: 'first_write',
+      args: { path: 'a.txt', content: 'a' },
+    },
+    {
+      id: 'call-second-write',
+      name: 'second_write',
+      args: { path: 'b.txt', content: 'b' },
+    },
+  ]);
+
+  assert.equal(readToolMessageContent(result.messages, 'call-first-write'), 'first a.txt');
+  assert.equal(readToolMessageContent(result.messages, 'call-second-write'), 'second b.txt');
+  assert.equal(firstCallCount, 1);
+  assert.equal(secondCallCount, 1);
+  assert.equal(autoReviewCount, 1);
+  const reviewPrompt = String((autoReviewMessages as Array<{ content?: unknown }>)[1]?.content);
+  assert.match(reviewPrompt, /Batch size: 2/);
+  assert.match(reviewPrompt, /Tool: first_write/);
+  assert.match(reviewPrompt, /Tool: second_write/);
+  assert.match(reviewPrompt, /a\.txt/);
+  assert.match(reviewPrompt, /b\.txt/);
+  const authorizationEvent = runtimeEvents[0] as {
+    name?: unknown;
+    data?: { batchSize?: unknown; toolCalls?: unknown[] };
+  } | undefined;
+  assert.equal(authorizationEvent?.name, 'global_review_policy_auto_authorized');
+  assert.equal(authorizationEvent?.data?.batchSize, 2);
+  assert.equal(authorizationEvent?.data?.toolCalls?.length, 2);
 });
 
 test('global review policy auto_authorization requires human authorization when unsure', async () => {
@@ -1908,6 +2102,137 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.ok(handoffSource?.delegationId);
   assert.equal(handoffSource?.task, 'run shell');
   assert.equal(readLatestAnnounce(finalState.messages, { runId: finalState.runId }), null);
+});
+
+test('toolkit review resumes multiple reviewed tool calls in one model response', async () => {
+  let runCount = 0;
+  let reviewCount = 0;
+  const rawTool = tool(async ({ command }: { command: string }) => {
+    runCount += 1;
+    return `ran ${command}`;
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [rawTool],
+    policy: {
+      toolReview: {
+        run_shell: {
+          request: () => {
+            reviewCount += 1;
+            return buildReviewSpec({
+              view: { kind: 'plain', body: 'Approve shell?' },
+              options: [{
+                id: 'approve',
+                label: 'Approve',
+                decision: { type: 'approve' },
+              }],
+            });
+          },
+        },
+      },
+    },
+  }];
+
+  let routeCallCount = 0;
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_general',
+              task: 'run shell twice',
+              context_summary: null,
+            }
+          : {
+              action: 'answer',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({
+    toolCalls: [
+      [
+        {
+          id: 'call-first',
+          name: 'run_shell',
+          args: { command: 'git status' },
+        },
+        {
+          id: 'call-second',
+          name: 'run_shell',
+          args: { command: 'git diff' },
+        },
+      ],
+      [],
+    ],
+  });
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: subagentModel,
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const config = {
+    configurable: {
+      thread_id: 'multi-tool-review-runtime-state',
+      actor: testActor,
+      capabilities: [],
+      toolkits,
+    },
+  };
+
+  const firstInterrupt = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('run git status and git diff')]),
+    config,
+  ) as {
+    __interrupt__?: Array<{ value?: unknown }>;
+  };
+  const firstPayload = firstInterrupt.__interrupt__?.[0]?.value as {
+    review?: { id?: string };
+  } | undefined;
+  assert.equal(firstPayload?.review?.id, 'tool-review:run_shell:call-first');
+
+  subagentModel.index = 0;
+  const secondInterrupt = await graph.invoke(new Command({
+    resume: {
+      reviewId: firstPayload?.review?.id,
+      selectedOptionId: 'approve',
+    },
+  }), config) as {
+    __interrupt__?: Array<{ value?: unknown }>;
+  };
+  const secondPayload = secondInterrupt.__interrupt__?.[0]?.value as {
+    review?: { id?: string };
+  } | undefined;
+  assert.equal(secondPayload?.review?.id, 'tool-review:run_shell:call-second');
+
+  subagentModel.index = 0;
+  const finalState = await graph.invoke(new Command({
+    resume: {
+      reviewId: secondPayload?.review?.id,
+      selectedOptionId: 'approve',
+    },
+  }), config) as {
+    __interrupt__?: unknown;
+    messages: Array<AIMessage | HumanMessage | ToolMessage>;
+  };
+
+  assert.equal(finalState.__interrupt__, undefined);
+  assert.equal(runCount, 2);
+  assert.equal(reviewCount, 6);
 });
 
 test('buildSubagentHandoff copies the announce into main and wipes the whole delegation lane', () => {

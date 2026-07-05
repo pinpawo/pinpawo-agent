@@ -7,6 +7,12 @@ type InterruptionRecoveryInput = {
   interruptedTask?: string;
   interruptionReason?: 'limit_reached' | 'approval_required' | 'user_interrupted';
   progressResult?: string;
+  resumeCompletion?: {
+    lane: string;
+    task: string;
+    completionReason: 'natural' | 'limit_reached';
+    result: string;
+  };
   newUserIntent?: string;
 };
 
@@ -15,6 +21,9 @@ type InterruptionRecoveryExpected = {
   expectedLane?: string | null;
   expectedTask?: string | null;
   expectedResume: boolean;
+  expectedCompletionReason?: 'natural' | 'limit_reached';
+  expectedShouldDelegateAgain?: boolean;
+  expectedAnswerShouldInclude?: string[];
   reason: string;
 };
 
@@ -22,6 +31,147 @@ const SUITE = 'agent-interruption-recovery-basics';
 const SOURCE_FILE = 'packages/pet-agent/evals/datasets/interruption-recovery-basics.ts';
 
 const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpected>[] = [
+  {
+    id: `${SUITE}.general-limit-resume-natural-completion-answers`,
+    name: 'general-limit-resume-natural-completion-answers',
+    suite: SUITE,
+    tags: ['interruption_recovery', 'delegation_control', 'context_synthesis'],
+    input: {
+      userMessage: '继续，把剩下的也处理完',
+      originalUserMessage: '帮我把 data/items.csv 的所有分片处理完，完成后告诉我总数。',
+      interruptedLane: 'general',
+      interruptedTask: '处理 data/items.csv 的所有分片并汇总结果。',
+      interruptionReason: 'limit_reached',
+      progressResult: '已处理前 80 条记录，还剩 40 条记录未处理。',
+      resumeCompletion: {
+        lane: 'general',
+        task: '处理 data/items.csv 的所有分片并汇总结果。',
+        completionReason: 'natural',
+        result: '已处理完 data/items.csv 的全部分片，共 120 条记录，没有失败项。',
+      },
+    },
+    expected: {
+      expectedMode: 'answer',
+      expectedLane: null,
+      expectedTask: null,
+      expectedResume: true,
+      expectedCompletionReason: 'natural',
+      expectedShouldDelegateAgain: false,
+      expectedAnswerShouldInclude: ['120', '没有失败项'],
+      reason: 'After a limit-reached continuation completes naturally, the orchestrator should answer from the completed result instead of delegating again.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Covers the full interruption -> resume -> natural completion -> answer loop.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
+    id: `${SUITE}.capability-limit-resume-natural-completion-answers`,
+    name: 'capability-limit-resume-natural-completion-answers',
+    suite: SUITE,
+    tags: ['interruption_recovery', 'capability_search', 'delegation_control', 'context_synthesis'],
+    input: {
+      userMessage: '继续刚才那个调查',
+      originalUserMessage: '帮我调查 local-agent 的 capability 注册链路，列出关键文件和证据。',
+      interruptedLane: 'capability:explore',
+      interruptedTask: '调查 local-agent 的 capability 注册链路，列出关键文件和证据。',
+      interruptionReason: 'limit_reached',
+      progressResult: '已定位到 capability registry，但 orchestration 装配链路还没有完整读完。',
+      resumeCompletion: {
+        lane: 'capability:explore',
+        task: '调查 local-agent 的 capability 注册链路，列出关键文件和证据。',
+        completionReason: 'natural',
+        result: '已完成 local-agent capability 注册链路调查：入口在 localAgentCapabilityRegistry，channel 装配后传入 pet-agent orchestrator。',
+      },
+    },
+    expected: {
+      expectedMode: 'answer',
+      expectedLane: null,
+      expectedTask: null,
+      expectedResume: true,
+      expectedCompletionReason: 'natural',
+      expectedShouldDelegateAgain: false,
+      expectedAnswerShouldInclude: ['localAgentCapabilityRegistry', 'orchestrator'],
+      reason: 'A capability lane that finishes naturally after resume should be handed off and summarized, not resumed again.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Capability-lane interruption recovery needs both lane reuse and final answer synthesis.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
+    id: `${SUITE}.approval-resume-natural-completion-answers`,
+    name: 'approval-resume-natural-completion-answers',
+    suite: SUITE,
+    tags: ['interruption_recovery', 'permission_control', 'delegation_control', 'context_synthesis'],
+    input: {
+      userMessage: '我同意，继续跑测试',
+      originalUserMessage: '帮我运行 npm test 并修失败项。',
+      interruptedLane: 'general',
+      interruptedTask: '运行 npm test 并修失败项。',
+      interruptionReason: 'approval_required',
+      progressResult: '等待用户确认是否允许执行 npm test。',
+      resumeCompletion: {
+        lane: 'general',
+        task: '运行 npm test 并修失败项。',
+        completionReason: 'natural',
+        result: '已运行 npm test，全部 556 个测试通过，退出码 0。',
+      },
+    },
+    expected: {
+      expectedMode: 'answer',
+      expectedLane: null,
+      expectedTask: null,
+      expectedResume: true,
+      expectedCompletionReason: 'natural',
+      expectedShouldDelegateAgain: false,
+      expectedAnswerShouldInclude: ['556', '通过'],
+      reason: 'After an approval interrupt resumes and the tool work completes naturally, the agent should report completion.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Connects HITL resume with final orchestration finish behavior.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
+    id: `${SUITE}.stale-limit-marker-ignored-after-natural-completion`,
+    name: 'stale-limit-marker-ignored-after-natural-completion',
+    suite: SUITE,
+    tags: ['interruption_recovery', 'context_synthesis', 'route_control'],
+    input: {
+      userMessage: '总结一下最终结果',
+      originalUserMessage: '帮我处理 data/items.csv 的所有分片。',
+      interruptedLane: 'general',
+      interruptedTask: '处理 data/items.csv 的所有分片。',
+      interruptionReason: 'limit_reached',
+      progressResult: '上一轮曾经触达过 limit_reached。',
+      resumeCompletion: {
+        lane: 'general',
+        task: '处理 data/items.csv 的所有分片。',
+        completionReason: 'natural',
+        result: '后续继续执行已经自然完成：全部分片处理完毕，共 120 条记录。',
+      },
+      newUserIntent: 'summarize_final_result',
+    },
+    expected: {
+      expectedMode: 'answer',
+      expectedLane: null,
+      expectedTask: null,
+      expectedResume: false,
+      expectedCompletionReason: 'natural',
+      expectedShouldDelegateAgain: false,
+      expectedAnswerShouldInclude: ['120', '全部分片'],
+      reason: 'A stale limit marker in older context must not override a newer natural completion result.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Regression coverage for stale interruption markers after successful completion.',
+      source: SOURCE_FILE,
+    },
+  },
   {
     id: `${SUITE}.resume-capability-after-limit`,
     name: 'resume-capability-after-limit',
@@ -138,6 +288,13 @@ export const interruptionRecoveryBasicsDataset: AgentEvalDataset<
   cases,
   metadata: {
     owner: 'pet-agent',
-    areas: ['interruption_recovery', 'delegation_control', 'capability_search', 'permission_control'],
+    areas: [
+      'interruption_recovery',
+      'delegation_control',
+      'capability_search',
+      'permission_control',
+      'context_synthesis',
+      'route_control',
+    ],
   },
 };

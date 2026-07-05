@@ -42,10 +42,11 @@ recreate datasets.
 ## Current Datasets
 
 - `orchestrator-route-decision`: legacy route-decision cases wrapped in the canonical format.
+- `orchestrator-flow-mock-subagent`: route -> subagent -> route flow cases, including limit-reached resume and natural completion.
 - `agent-capability-search-basics`: basic capability discovery and capability-vs-general routing cases.
 - `agent-delegation-control-basics`: multi-task delegation, completion detection, and finish-bias cases.
-- `agent-interruption-recovery-basics`: resume, changed-intent, and approval-resume cases.
-- `agent-permission-control-basics`: HITL authorization and permission-memory cases.
+- `agent-interruption-recovery-basics`: resume, changed-intent, approval-resume, and natural-completion-after-resume cases.
+- `agent-permission-control-basics`: HITL, auto-authorization, scoped authorization, and permission-memory cases.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
 
 The `agent-*` datasets are seed coverage for future runners. They are meant to

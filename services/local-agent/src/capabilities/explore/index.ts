@@ -14,6 +14,7 @@ import { z } from 'zod';
 
 const DEFAULT_EXPLORE_TOOLKITS = [
   'bash',
+  'git',
   'browser',
   'github',
   'gmail',
@@ -430,6 +431,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
     description: [
       '通用探索、调查、资料检索和代码库理解 capability。',
       '适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。',
+      '代码 review、代码审查、PR review、pull request review、diff 审查和仓库变更评审也走这个 capability，即使请求里包含 GitHub URL 或网页链接。',
       '只做只读调查和总结，不修改文件、不执行外部真实副作用。',
     ].join(' '),
     createRuntime: async (context) => {
@@ -546,6 +548,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
           '不要修改文件，不要提交、推送、删除、写入、发送消息、发布内容，或执行任何外部真实副作用。',
           '使用可用工具在执行过程中自行规划探索；createRuntime 阶段不做额外模型规划。',
           '优先先确认候选范围，再读取详细内容；避免无界浏览或无目的扫描。',
+          '代码 review、PR review、pull request review、diff 审查和仓库变更评审必须优先使用 git toolkit，尤其是 gh_pr_view、gh_pr_diff、git_diff、git_show；不要使用 browser、http_fetch 或 download_file 拉取 GitHub PR 页面、diff 或评论。',
           '运行中会保留最近的完整工具输出；较早的大型工具输出会被知识摘要替换并沉淀为知识 artifact。摘要会写明来源，需要细节时用 view_file 等工具按来源回查。',
           '结论必须包含简洁探索摘要、已查看文件列表、关键发现、证据引用（文件路径、URL、issue/PR 编号或命令输出来源）和建议下一步。',
         ],

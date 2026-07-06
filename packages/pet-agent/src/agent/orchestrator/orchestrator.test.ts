@@ -143,6 +143,15 @@ test('capability search can select explore for read-heavy investigation requests
   assert.equal(results[0]?.name, 'explore');
 });
 
+test('capability search ranks explore over browser for code review with URL', () => {
+  const results = searchCapabilities('帮我 code review 这个 GitHub PR URL', [
+    capability('explore', '通用探索、调查、资料检索和代码库理解 capability。适合代码 review、代码审查、PR review、pull request review、diff 审查和仓库变更评审。'),
+    capability('browser', '使用本机浏览器/Chrome/browser 打开 URL、链接、网站和网页，复用登录态，点击、输入、等待页面变化并提取页面内容。'),
+  ]);
+
+  assert.equal(results[0]?.name, 'explore');
+});
+
 test('capability search tool returns a state update command with candidates', async () => {
   const capabilities = [
     capability('daily_post', '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿。'),

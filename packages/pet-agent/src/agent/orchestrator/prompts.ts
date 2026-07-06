@@ -397,6 +397,7 @@ export function buildCapabilityDiscoverySystemPrompt(params: {
     `如果用户目标可能需要业务 capability，调用 ${CAPABILITY_SEARCH_TOOL_NAME}。`,
     '如果用户明确要求某类执行环境、应用或专门能力，而 general 只提供近似替代工具，先搜索 capability。',
     '如果用户请求需要大量阅读、调查、代码库理解、资料检索、上下文发现或先探索再决定下一步，先搜索 explore/探索/investigate/research capability。',
+    '如果用户请求代码 review、代码审查、PR review、pull request review、diff 审查或仓库变更评审，先搜索 explore/探索 capability；即使请求包含 GitHub URL、PR 链接或网页链接，也不要因此优先搜索 browser capability。',
     '如果用户要打开 URL/链接/网站/网页，或需要真实浏览器、Chrome、登录态、JS 渲染、点击、输入、等待页面变化，先搜索 browser/浏览器/网页/url/链接 capability。',
     '如果用户明确要访问 REST API、RSS、静态文本内容，且不需要浏览器状态或页面交互，可以不搜索 browser capability。',
     '如果用户只是询问已有上下文、最近任务状态或之前结果，不调用任何工具。',

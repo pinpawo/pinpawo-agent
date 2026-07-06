@@ -75,7 +75,9 @@ const bashToolkitOperations = {
 
 const gitToolkitInstructions = [
   '你可以使用 git_status、git_diff、git_log、git_branch、git_show、git_add、git_commit 处理本地 git 仓库。',
+  '你可以使用 gh_pr_view、gh_pr_diff、gh_issue_view 通过 GitHub CLI 只读查看 GitHub PR/issue。',
   '查看状态、diff、历史和提交内容时优先使用这些 git 工具，不要用 run_shell 包装 git 命令。',
+  '做代码 review、PR review 或 diff 审查时，优先使用 gh_pr_view 和 gh_pr_diff；不要用 browser 或 http_fetch 拉取 GitHub PR 页面/diff。',
   'git_add 必须显式传 pathspecs；不要隐式暂存整个仓库。',
   'git_commit 只创建本地提交，不会 push。',
 ];
@@ -105,7 +107,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
 export function createGitToolkit(): AgentToolkit {
   return defineToolkit({
     name: 'git',
-    description: '本地 git 仓库查看、暂存和本地提交工具。',
+    description: '本地 git 仓库查看、GitHub CLI PR/issue 只读查看、暂存和本地提交工具。',
     tools: gitTools,
     instructions: gitToolkitInstructions,
     operations: gitOperationMetadata,

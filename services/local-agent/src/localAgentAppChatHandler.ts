@@ -184,7 +184,7 @@ export class LocalAgentAppChatHandler {
     }
 
     this.consumePendingReviewRoute(msg.requestId);
-    const decisionCount = readHumanReviewDecisionCount(route, decisions);
+    const decisionCount = readHumanReviewDecisionCount(decisions);
     await this.runChatRequest(ws, {
       kind: 'resume',
       requestId: msg.requestId,

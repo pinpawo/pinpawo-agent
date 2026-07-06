@@ -45,13 +45,26 @@ export function validateHumanReviewDecisions(
 
   for (let index = 0; index < decisions.length; index += 1) {
     const review = route.reviews[index];
+    const decision = decisions[index];
     if (!review) {
       throw new ReviewResponseResolutionError(
         'invalid_response',
-        `Human review decision "${decisions[index]!.reviewId}" has no matching pending review.`,
+        `Human review decision "${decisions[index]?.reviewId ?? ''}" has no matching pending review.`,
       );
     }
-    const resolution = resolveHumanReviewResponse({ reviewSpec: review }, decisions[index]!);
+    if (!decision) {
+      throw new ReviewResponseResolutionError(
+        'invalid_response',
+        `Human review decision is missing for route step ${index}.`,
+      );
+    }
+    if (decision.reviewId !== review.id) {
+      throw new ReviewResponseResolutionError(
+        'stale_review',
+        `Human review decision "${decision.reviewId}" does not match pending review "${review.id}".`,
+      );
+    }
+    const resolution = resolveHumanReviewResponse({ reviewSpec: review }, decision);
     const isFinalDecision = index === decisions.length - 1;
     if (resolution.decision.type !== 'approve' && !isFinalDecision) {
       throw new ReviewResponseResolutionError(
@@ -91,9 +104,6 @@ export function buildHumanReviewRejectResume(
   }]);
 }
 
-export function readHumanReviewDecisionCount(
-  route: PendingHumanReviewActionRoute,
-  decisions: ReviewResponse[],
-) {
+export function readHumanReviewDecisionCount(decisions: ReviewResponse[]) {
   return decisions.length;
 }

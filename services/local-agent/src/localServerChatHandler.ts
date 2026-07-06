@@ -441,7 +441,7 @@ export class LocalServerChatHandler {
     }
 
     this.markPendingReviewConsumed(msg.requestId);
-    const decisionCount = readHumanReviewDecisionCount(route, decisions);
+    const decisionCount = readHumanReviewDecisionCount(decisions);
 
     await this.runChatRequest(ws, {
       kind: 'resume',

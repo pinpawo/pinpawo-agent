@@ -106,3 +106,21 @@ test('human review action routing resolves single-review resume as batch shape',
     },
   });
 });
+
+test('human review action routing rejects decisions for mismatched review order', () => {
+  const route = {
+    reviewId: 'review-1',
+    reviews: [reviewSpec('review-1'), reviewSpec('review-2')],
+  };
+
+  assert.throws(() => validateHumanReviewDecisions(route, {
+    type: 'human_review_response',
+    requestId: 'req-1',
+    reviewId: 'review-2',
+    selectedOptionId: 'approve',
+    decisions: [
+      { reviewId: 'review-2', selectedOptionId: 'approve' },
+      { reviewId: 'review-1', selectedOptionId: 'approve' },
+    ],
+  }));
+});

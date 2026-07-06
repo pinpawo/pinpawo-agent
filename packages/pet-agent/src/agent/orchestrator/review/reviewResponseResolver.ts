@@ -219,6 +219,12 @@ export function resolveHumanReviewBatchResponse(
         `Review batch decision "${decision.reviewId}" has no matching pending review.`,
       );
     }
+    if (decision.reviewId !== pendingReview.reviewSpec.id) {
+      throw new ReviewResponseResolutionError(
+        'stale_review',
+        `Review batch decision "${decision.reviewId}" does not match pending review "${pendingReview.reviewSpec.id}".`,
+      );
+    }
     return resolveHumanReviewResponse(pendingReview, decision);
   });
 }

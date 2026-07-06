@@ -802,6 +802,8 @@ function buildToolkitReviewStateUpdate(params: {
     ? { toolkitReviewApprovals: mergeApprovedReviewIds(params.state, reviewResults.newlyApprovedReviewIds) }
     : {};
   if (reviewResults.toolMessages.length === 0) {
+    // Return {} when no state or message updates are needed, so middleware can
+    // emit a stable state object in this no-op branch.
     return reviewedMessage.replacedMessage
       ? {
           ...approvalUpdate,

@@ -1408,6 +1408,14 @@ test('tuiStateReducer handles human review and interrupt state', () => {
       view: { kind: 'plain', body: 'Approve?' },
       options: [],
     },
+    reviews: [{
+      id: 'review-1',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [],
+    }],
+    reviewIndex: 0,
+    decisions: [],
     petId: 'pet-a',
   });
   assert.equal(state.connection.message, '等待你的决定(pet-a)');
@@ -1549,6 +1557,22 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
         decision: { type: 'approve' },
       }],
     },
+    reviews: [{
+      id: 'review-1',
+      schemaVersion: 1,
+      view: {
+        kind: 'plain',
+        title: 'Needs approval',
+        body: 'Run command?',
+      },
+      options: [{
+        id: 'approve',
+        label: 'Approve',
+        decision: { type: 'approve' },
+      }],
+    }],
+    reviewIndex: 0,
+    decisions: [],
   });
 });
 

@@ -111,14 +111,18 @@ function resumeSession(): ResumeSessionSummary {
 }
 
 function approvalRequest(): ApprovalRequestModel {
+  const review = {
+    id: 'review-1',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Need review' },
+    options: [],
+  };
   return {
     requestId: 'req-1',
     petId: 'pet-1',
-    review: {
-      id: 'review-1',
-      schemaVersion: 1,
-      view: { kind: 'plain', body: 'Need review' },
-      options: [],
-    },
+    review,
+    reviews: [review],
+    reviewIndex: 0,
+    decisions: [],
   };
 }

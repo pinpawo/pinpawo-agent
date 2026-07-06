@@ -50,11 +50,17 @@ export function ApprovalPanel(props: {
   petId?: string;
   width: number;
   selectedIndex: number;
+  reviewIndex: number;
+  reviewCount: number;
 }) {
   const options = props.review.options;
   const contentWidth = props.width - 4;
   const promptLines = buildReviewContentLines(props.review.view, contentWidth);
   const selectedIndex = Math.max(0, Math.min(options.length - 1, props.selectedIndex));
+
+  const reviewProgress = props.reviewCount > 1
+    ? ` ${Math.min(props.reviewIndex + 1, props.reviewCount)}/${props.reviewCount}`
+    : '';
 
   return (
     <Box
@@ -66,7 +72,7 @@ export function ApprovalPanel(props: {
       width={props.width}
     >
       <Text color="yellow">
-        {TUI_TEXT.approvalHeading(props.petId)}
+        {TUI_TEXT.approvalHeading(props.petId)}{reviewProgress}
       </Text>
       {promptLines.map((line, i) => (
         <Text key={`p-${i}`} {...patchToneToInkProps(line.tone)}>

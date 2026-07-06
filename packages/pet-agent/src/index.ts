@@ -160,6 +160,8 @@ export type {
   OrchestrationDecisionStructuredOutputConfig,
 } from './agent/createAgentRuntime';
 export {
+  resolveHumanReviewBatchResponse,
+  resolveHumanReviewBatchResume,
   resolveHumanReviewResume,
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
@@ -210,6 +212,8 @@ export {
 export {
   appendReviewViewMessage,
   buildReviewSpec,
+  isHumanReviewBatchInterruptPayload,
+  isHumanReviewInterrupt,
   isHumanReviewInterruptPayload,
   isReviewSpecValue,
   reviewViewToText,
@@ -222,12 +226,15 @@ export type {
   ReviewOption,
   ReviewOptionDecision,
   ReviewOptionInput,
+  ReviewBatchResponse,
   ReviewResolvedDecision,
   ReviewResolutionContext,
   ReviewResponse,
   ReviewResponseResolution,
   ReviewSpec,
   ReviewView,
+  HumanReviewBatchInterruptPayload,
+  HumanReviewInterrupt,
   HumanReviewInterruptPayload,
   ToolAuthorizationMatcher,
   ToolAuthorizationMatcherTemplate,

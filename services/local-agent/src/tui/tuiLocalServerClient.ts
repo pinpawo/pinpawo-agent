@@ -213,9 +213,11 @@ type ParsedSnapshotSession = {
 
 type ParsedPendingReview = {
   requestId: string;
+  interruptId?: string;
   reviewId: string;
   sessionId?: string;
   review: ReviewSpec;
+  reviews?: ReviewSpec[];
   petId?: string;
 };
 
@@ -254,9 +256,11 @@ function buildSessionSnapshotFromServerPayload(
       timelineEntryIds: snapshot.timeline.map((entry) => entry.id),
       pendingReview: {
         requestId: pendingReview.requestId,
+        ...(pendingReview.interruptId ? { interruptId: pendingReview.interruptId } : {}),
         reviewId: pendingReview.reviewId,
         status: 'waiting',
         review: pendingReview.review,
+        ...(pendingReview.reviews ? { reviews: pendingReview.reviews } : {}),
         ...(pendingReview.petId ? { petId: pendingReview.petId } : {}),
       },
     }],
@@ -374,14 +378,19 @@ function parseTuiCoreRunSnapshot(value: unknown): TuiCoreRunSnapshot | null {
   ) {
     return null;
   }
+  const pendingReviewReviews = isRecord(value.pendingReview)
+    ? readReviewSpecs(value.pendingReview.reviews)
+    : null;
   const pendingReview = isRecord(value.pendingReview) && typeof value.pendingReview.requestId === 'string'
     && typeof value.pendingReview.reviewId === 'string'
     && isPendingReviewStatus(value.pendingReview.status)
     ? {
         requestId: value.pendingReview.requestId,
+        ...(typeof value.pendingReview.interruptId === 'string' ? { interruptId: value.pendingReview.interruptId } : {}),
         reviewId: value.pendingReview.reviewId,
         status: value.pendingReview.status,
         ...(isRecord(value.pendingReview.review) ? { review: value.pendingReview.review as ReviewSpec } : {}),
+        ...(pendingReviewReviews ? { reviews: pendingReviewReviews } : {}),
         ...(typeof value.pendingReview.petId === 'string' ? { petId: value.pendingReview.petId } : {}),
       }
     : undefined;
@@ -425,13 +434,24 @@ function parsePendingReviewSnapshot(value: unknown): ParsedPendingReview | null 
   ) {
     return null;
   }
+  const reviews = readReviewSpecs(record.reviews);
   return {
     requestId: record.requestId,
+    ...(typeof record.interruptId === 'string' ? { interruptId: record.interruptId } : {}),
     reviewId: record.reviewId,
     ...(typeof record.sessionId === 'string' ? { sessionId: record.sessionId } : {}),
     review: review as ReviewSpec,
+    ...(reviews ? { reviews } : {}),
     ...(readPendingReviewPetId(record) ? { petId: readPendingReviewPetId(record) } : {}),
   };
+}
+
+function readReviewSpecs(value: unknown): ReviewSpec[] | null {
+  if (!Array.isArray(value)) return null;
+  const reviews = value.filter((item): item is ReviewSpec =>
+    Boolean(item && typeof item === 'object' && !Array.isArray(item)
+      && typeof (item as Record<string, unknown>).id === 'string'));
+  return reviews.length === value.length && reviews.length > 0 ? reviews : null;
 }
 
 function readPendingReviewPetId(record: Record<string, unknown>) {

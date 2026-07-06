@@ -27,6 +27,8 @@ test('ApprovalPanel renders a diff review through the patch preview', () => {
     },
     width: 100,
     selectedIndex: 0,
+    reviewIndex: 0,
+    reviewCount: 1,
   });
 
   const text = collectText(element).join('\n');

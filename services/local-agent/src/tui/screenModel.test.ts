@@ -91,6 +91,12 @@ test('buildTuiScreenModel preserves recovered ready connection messages', () => 
 test('buildTuiScreenModel keeps approval status visible while composer accepts reply text', () => {
   const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
   state.connection = { status: 'ready', message: '等待你的决定(pet-1)' };
+  const review = {
+    id: 'review-1',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Need review' },
+    options: [],
+  };
   state.runs.run1 = {
     requestId: 'run1',
     sessionId: 'chat:pet',
@@ -100,12 +106,10 @@ test('buildTuiScreenModel keeps approval status visible while composer accepts r
     pendingReview: {
       requestId: 'run1',
       petId: 'pet-1',
-      review: {
-        id: 'review-1',
-        schemaVersion: 1,
-        view: { kind: 'plain', body: 'Need review' },
-        options: [],
-      },
+      review,
+      reviews: [review],
+      reviewIndex: 0,
+      decisions: [],
     },
     startedAt: 0,
     charCount: 0,

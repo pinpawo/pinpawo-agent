@@ -168,7 +168,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
 
   useEffect(() => {
     setApprovalIndex(0);
-  }, [pendingApproval?.requestId]);
+  }, [pendingApproval?.requestId, pendingApproval?.review.id]);
 
   useEffect(() => {
     if (globalReviewPolicyPickerOpen && (busy || pendingApproval)) {

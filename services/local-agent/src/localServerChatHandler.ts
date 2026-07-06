@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import type { ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewResponse, ReviewSpec } from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
 import {
   sendLocalAgentEvent,
@@ -24,6 +24,12 @@ import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import type { LocalAgentEvent } from './events/localAgentEvent';
+import {
+  buildHumanReviewRejectResume,
+  buildHumanReviewResume,
+  validateHumanReviewDecisions,
+  type PendingHumanReviewActionRoute,
+} from './humanReviewActionRouting';
 
 type InflightRequest = InflightOperationRun;
 
@@ -31,11 +37,10 @@ type LocalServerRunRequest = ChatSessionRequest;
 
 type LocalServerRunSource =
   | { type: 'chat_request' }
-  | { type: 'human_review_response'; reviewId: string; selectedOptionId: string }
-  | { type: 'interrupt_request'; reviewId: string; selectedOptionId: string };
+  | { type: 'human_review_response'; reviewId: string; selectedOptionId: string; decisionCount?: number }
+  | { type: 'interrupt_request'; reviewId: string; selectedOptionId: string; decisionCount?: number };
 
-type PendingReviewRoute = {
-  reviewId: string;
+type PendingReviewRoute = PendingHumanReviewActionRoute & {
   rejectOptionId?: string;
   sessionId?: string;
   review: ReviewSpec;
@@ -44,9 +49,11 @@ type PendingReviewRoute = {
 
 export type PendingReviewSnapshot = {
   requestId: string;
+  interruptId?: string;
   reviewId: string;
   sessionId?: string;
   review: ReviewSpec;
+  reviews?: ReviewSpec[];
   actor?: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['actor'];
 };
 
@@ -80,16 +87,21 @@ export class LocalServerChatHandler {
   }
 
   private buildPendingReviewRoute(params: {
+    interruptId?: string;
     review: ReviewSpec;
+    reviews?: ReviewSpec[];
     sessionId?: string;
     actor?: PendingReviewRoute['actor'];
   }): PendingReviewRoute {
-    const rejectOption = params.review.options.find((option) => option.decision.type === 'reject');
+    const reviews = params.reviews?.length ? params.reviews : [params.review];
+    const rejectOption = reviews[0]?.options.find((option) => option.decision.type === 'reject');
     return {
+      ...(params.interruptId ? { interruptId: params.interruptId } : {}),
       reviewId: params.review.id,
       ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
       ...(params.sessionId ? { sessionId: params.sessionId } : {}),
       review: params.review,
+      reviews,
       ...(params.actor ? { actor: params.actor } : {}),
     };
   }
@@ -105,7 +117,9 @@ export class LocalServerChatHandler {
     this.activePendingReviewRequestIds.delete(event.requestId);
     const sessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
     this.pendingReviewRoutes.set(event.requestId, this.buildPendingReviewRoute({
+      ...(event.interruptId ? { interruptId: event.interruptId } : {}),
       review: event.review,
+      ...(event.reviews ? { reviews: event.reviews } : {}),
       ...(sessionId ? { sessionId } : {}),
       ...(event.actor ? { actor: event.actor } : {}),
     }));
@@ -121,7 +135,9 @@ export class LocalServerChatHandler {
         return null;
       }
       const route = this.buildPendingReviewRoute({
+        ...(pending.interruptId ? { interruptId: pending.interruptId } : {}),
         review: pending.review,
+        ...(pending.reviews ? { reviews: pending.reviews } : {}),
         sessionId: pending.sessionId,
       });
       this.pendingReviewRoutes.set(requestId, route);
@@ -183,9 +199,11 @@ export class LocalServerChatHandler {
       }
       return {
         requestId,
+        ...(route.interruptId ? { interruptId: route.interruptId } : {}),
         reviewId: route.reviewId,
         ...(route.sessionId ? { sessionId: route.sessionId } : {}),
         review: route.review,
+        ...(route.reviews ? { reviews: route.reviews } : {}),
         ...(route.actor ? { actor: route.actor } : {}),
       };
     }
@@ -196,15 +214,19 @@ export class LocalServerChatHandler {
     }
     const requestId = `snapshot:${pending.sessionId}:${pending.review.id}`;
     const route = this.buildPendingReviewRoute({
+      ...(pending.interruptId ? { interruptId: pending.interruptId } : {}),
       review: pending.review,
+      ...(pending.reviews ? { reviews: pending.reviews } : {}),
       sessionId: pending.sessionId,
     });
     this.pendingReviewRoutes.set(requestId, route);
     return {
       requestId,
+      ...(route.interruptId ? { interruptId: route.interruptId } : {}),
       reviewId: route.reviewId,
       sessionId: pending.sessionId,
       review: route.review,
+      ...(route.reviews ? { reviews: route.reviews } : {}),
     };
   }
 
@@ -243,12 +265,14 @@ export class LocalServerChatHandler {
     } else if (source.type === 'human_review_response') {
       console.log(
         `[local-server] human_review_response requestId=${requestId} `
-        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`,
+        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`
+        + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
     } else {
       console.log(
         `[local-server] interrupt_request resume human_review requestId=${requestId} `
-        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`,
+        + `reviewId=${source.reviewId} option=${source.selectedOptionId}`
+        + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
     }
     recordAgentRunActivity('thinking', requestId);
@@ -380,11 +404,15 @@ export class LocalServerChatHandler {
       this.sendClosedReviewError(ws, msg.requestId);
       return;
     }
-    if (msg.reviewId !== route.reviewId) {
+    let decisions: ReviewResponse[];
+    try {
+      decisions = validateHumanReviewDecisions(route, msg);
+    } catch (err) {
       this.releasePendingReviewRequest(msg.requestId);
       console.warn(
         `[local-server] human_review_response rejected: reviewId=${msg.reviewId} `
-        + `does not match pending review=${route.reviewId}`,
+        + `does not match pending review action=${route.reviews.map((review) => review.id).join(',')} `
+        + (err instanceof Error ? err.message : String(err)),
       );
       sendLocalAgentEvent(ws, {
         type: 'error',
@@ -416,15 +444,12 @@ export class LocalServerChatHandler {
     await this.runChatRequest(ws, {
       kind: 'resume',
       requestId: msg.requestId,
-      resume: {
-        reviewId: msg.reviewId,
-        selectedOptionId: msg.selectedOptionId,
-        ...(msg.input ? { input: msg.input } : {}),
-      },
+      resume: buildHumanReviewResume(route, decisions),
     }, deps, {
       type: 'human_review_response',
       reviewId: msg.reviewId,
       selectedOptionId: msg.selectedOptionId,
+      decisionCount: decisions.length,
     });
   }
 
@@ -470,7 +495,9 @@ export class LocalServerChatHandler {
       sendLocalAgentEvent(ws, {
         type: 'human_review.requested',
         requestId: msg.requestId,
+        ...(route.interruptId ? { interruptId: route.interruptId } : {}),
         review: route.review,
+        ...(route.reviews ? { reviews: route.reviews } : {}),
         ...(route.actor ? { actor: route.actor } : {}),
       });
       return true;
@@ -484,14 +511,12 @@ export class LocalServerChatHandler {
     await this.runChatRequest(ws, {
       kind: 'resume',
       requestId: msg.requestId,
-      resume: {
-        reviewId: route.reviewId,
-        selectedOptionId: route.rejectOptionId,
-      },
+      resume: buildHumanReviewRejectResume(route, route.rejectOptionId),
     }, deps, {
       type: 'interrupt_request',
       reviewId: route.reviewId,
       selectedOptionId: route.rejectOptionId,
+      decisionCount: 1,
     });
     return true;
   }

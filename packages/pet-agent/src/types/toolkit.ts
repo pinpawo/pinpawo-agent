@@ -63,6 +63,15 @@ export type ToolkitToolReviewBlock = {
 export type ToolkitToolReviewResult = ReviewSpec | ToolkitToolReviewBlock | null;
 
 export type ToolkitToolReviewPolicy = {
+  /**
+   * Produce the review requirement for a single tool call.
+   *
+   * MUST be idempotent and side-effect free: the review middleware re-derives
+   * the pending reviews from state on every afterModel pass, so `request` is
+   * re-invoked for the same tool call when a review action is resumed. Do not
+   * increment counters, emit events, or call external services here — build and
+   * return the ReviewSpec/block purely from `ctx`.
+   */
   request: (
     ctx: ToolkitToolReviewContext
   ) => ToolkitToolReviewResult | Promise<ToolkitToolReviewResult>;

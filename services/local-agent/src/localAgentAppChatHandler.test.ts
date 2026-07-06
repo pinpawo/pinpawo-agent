@@ -244,6 +244,7 @@ test('LocalAgentAppChatHandler resumes canonical human review responses through 
         options.emitEvent({
           type: 'human_review.requested',
           requestId: 'req-1',
+          interruptId: 'interrupt-1',
           review,
         });
         return { status: 'waiting_human' };
@@ -281,8 +282,12 @@ test('LocalAgentAppChatHandler resumes canonical human review responses through 
       kind: 'resume',
       requestId: 'req-1',
       resume: {
-        reviewId: 'review-1',
-        selectedOptionId: 'approve',
+        'interrupt-1': {
+          decisions: [{
+            reviewId: 'review-1',
+            selectedOptionId: 'approve',
+          }],
+        },
       },
     },
   ]);
@@ -317,6 +322,7 @@ test('LocalAgentAppChatHandler interrupts pending human review with canonical re
         options.emitEvent({
           type: 'human_review.requested',
           requestId: 'req-1',
+          interruptId: 'interrupt-1',
           review,
         });
         return { status: 'waiting_human' };
@@ -346,8 +352,12 @@ test('LocalAgentAppChatHandler interrupts pending human review with canonical re
       kind: 'resume',
       requestId: 'req-1',
       resume: {
-        reviewId: 'review-1',
-        selectedOptionId: 'reject',
+        'interrupt-1': {
+          decisions: [{
+            reviewId: 'review-1',
+            selectedOptionId: 'reject',
+          }],
+        },
       },
     },
   ]);

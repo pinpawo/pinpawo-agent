@@ -107,9 +107,11 @@ function runFromPendingReview(params: {
     timelineEntryIds: params.timeline.map((entry) => entry.id),
     pendingReview: {
       requestId: params.pendingReview.requestId,
+      ...(params.pendingReview.interruptId ? { interruptId: params.pendingReview.interruptId } : {}),
       reviewId: params.pendingReview.reviewId,
       status: 'waiting',
       review: params.pendingReview.review,
+      ...(params.pendingReview.reviews ? { reviews: params.pendingReview.reviews } : {}),
       ...(petId ? { petId } : {}),
     },
   };

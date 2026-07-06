@@ -749,6 +749,7 @@ function applyHumanReviewRequestedEvent(
   const context = resolveRunEventContext(state, event);
   if (!context) return state;
   const petId = event.actor?.petId || undefined;
+  const reviews = event.reviews?.length ? event.reviews : [event.review];
   const stateWithReview = {
     ...state,
     connection: {
@@ -762,7 +763,10 @@ function applyHumanReviewRequestedEvent(
     charCount: 0,
     pendingReview: {
       requestId: event.requestId,
-      review: event.review,
+      review: reviews[0] ?? event.review,
+      reviews,
+      reviewIndex: 0,
+      decisions: [],
       ...(petId ? { petId } : {}),
     },
   }));
@@ -861,13 +865,19 @@ function clearPendingReview<T extends ActiveRunModel>(run: T): T {
 }
 
 function activeRunToPendingApproval(run: TuiRunModel | null) {
-  return run?.pendingReview
-    ? {
-        requestId: run.pendingReview.requestId,
-        review: run.pendingReview.review,
-        ...(run.pendingReview.petId ? { petId: run.pendingReview.petId } : {}),
-      }
-    : null;
+  if (!run?.pendingReview) {
+    return null;
+  }
+  const reviewIndex = run.pendingReview.reviewIndex;
+  const currentReview = run.pendingReview.reviews[reviewIndex] ?? run.pendingReview.review;
+  return {
+    requestId: run.pendingReview.requestId,
+    review: currentReview,
+    reviews: run.pendingReview.reviews,
+    reviewIndex: run.pendingReview.reviewIndex,
+    decisions: run.pendingReview.decisions,
+    ...(run.pendingReview.petId ? { petId: run.pendingReview.petId } : {}),
+  };
 }
 
 function isTerminalSnapshotRun(run: TuiCoreRunSnapshot) {
@@ -951,10 +961,14 @@ function pendingReviewFromSnapshotRun(
   const pendingReview = run.pendingReview;
   if (pendingReview?.status !== 'waiting') return {};
   if (pendingReview.review) {
+    const reviews = pendingReview.reviews?.length ? pendingReview.reviews : [pendingReview.review];
     return {
       pendingReview: {
         requestId: pendingReview.requestId,
-        review: pendingReview.review,
+        review: reviews[0] ?? pendingReview.review,
+        reviews,
+        reviewIndex: 0,
+        decisions: [],
         ...(pendingReview.petId ? { petId: pendingReview.petId } : {}),
       },
     };
@@ -1243,6 +1257,53 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       }, [
         userDraft,
       ]));
+    }
+
+    case 'review.action.advance': {
+      const existingRun = state.runs[action.requestId];
+      const sessionId = existingRun?.sessionId ?? state.focusedSessionId;
+      if (!sessionId || !existingRun?.pendingReview) return state;
+      const pendingReview = existingRun.pendingReview;
+      const reviews = pendingReview.reviews;
+      const nextIndex = Math.min(pendingReview.reviewIndex + 1, reviews.length - 1);
+      const userDraft = messageDraft('user', action.message, action.userCell, `${action.requestId}:review-response:${nextIndex}`, action.requestId);
+      const nextRun = addTimelineEntryId({
+        ...existingRun,
+        phase: 'waiting_human',
+        pendingReview: {
+          ...pendingReview,
+          reviews,
+          review: reviews[nextIndex] ?? pendingReview.review,
+          reviewIndex: nextIndex,
+          decisions: [
+            ...pendingReview.decisions,
+            action.decision,
+          ],
+        },
+      }, `message:${userDraft.id}`);
+      return updateSession({
+        ...state,
+        connection: {
+          ...state.connection,
+          message: action.statusMessage,
+        },
+        input: clearTextAreaTransientInputState({
+          ...state.input,
+          text: '',
+          cursorOffset: 0,
+          history: resetComposerHistoryNavigation(state.input.history),
+        }),
+        runs: {
+          ...state.runs,
+          [action.requestId]: nextRun,
+        },
+      }, sessionId, (session) =>
+        appendMessageCells({
+          ...session,
+          activeRunId: action.requestId,
+        }, [
+          userDraft,
+        ]));
     }
 
     case 'review.response.resume': {

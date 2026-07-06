@@ -29,7 +29,9 @@ export type TuiHistoryMessage = {
 
 export type ActivePendingReview = {
   sessionId: string;
+  interruptId?: string;
   review: ReviewSpec;
+  reviews?: ReviewSpec[];
 };
 
 export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'deleteThread'>;
@@ -199,7 +201,13 @@ export class LocalServerTuiSessionService {
     }
     return {
       sessionId: session.id,
+      ...(threadState.pendingHumanReview.interruptId
+        ? { interruptId: threadState.pendingHumanReview.interruptId }
+        : {}),
       review: threadState.pendingHumanReview.review,
+      ...(threadState.pendingHumanReview.reviews
+        ? { reviews: threadState.pendingHumanReview.reviews }
+        : {}),
     };
   }
 

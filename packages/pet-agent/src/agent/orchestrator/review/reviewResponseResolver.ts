@@ -1,6 +1,7 @@
 import type {
   ReviewEffect,
   ReviewOption,
+  ReviewBatchResponse,
   ReviewResponse,
   ReviewResponseResolution,
   ReviewResolutionContext,
@@ -108,6 +109,17 @@ function readReviewResponse(value: unknown): ReviewResponse | null {
     : null;
 }
 
+function readReviewBatchResponse(value: unknown): ReviewBatchResponse | null {
+  const record = readRecord(value);
+  if (!record || !hasOnlyKeys(record, ['decisions'])) return null;
+  if (!Array.isArray(record.decisions)) return null;
+  const decisions = record.decisions.map(readReviewResponse);
+  if (decisions.some((decision) => !decision)) return null;
+  return {
+    decisions: decisions as ReviewResponse[],
+  };
+}
+
 function hasCanonicalReviewResponseFields(value: unknown) {
   const record = readRecord(value);
   return Boolean(
@@ -117,6 +129,14 @@ function hasCanonicalReviewResponseFields(value: unknown) {
         || Object.prototype.hasOwnProperty.call(record, 'selectedOptionId')
         || Object.prototype.hasOwnProperty.call(record, 'input')
       ),
+  );
+}
+
+function hasCanonicalReviewBatchResponseFields(value: unknown) {
+  const record = readRecord(value);
+  return Boolean(
+    record
+      && Object.prototype.hasOwnProperty.call(record, 'decisions'),
   );
 }
 
@@ -175,6 +195,40 @@ export function resolveHumanReviewResponse(
   };
 }
 
+export function resolveHumanReviewBatchResponse(
+  pendingReviews: ReviewResolutionContext[],
+  response: ReviewBatchResponse,
+): ReviewResponseResolution[] {
+  if (response.decisions.length === 0) {
+    throw new ReviewResponseResolutionError(
+      'invalid_response',
+      'Review batch response must include at least one decision.',
+    );
+  }
+  if (response.decisions.length > pendingReviews.length) {
+    throw new ReviewResponseResolutionError(
+      'invalid_response',
+      `Review batch response included ${response.decisions.length} decisions for ${pendingReviews.length} pending reviews.`,
+    );
+  }
+  return response.decisions.map((decision, index) => {
+    const pendingReview = pendingReviews[index];
+    if (!pendingReview) {
+      throw new ReviewResponseResolutionError(
+        'invalid_response',
+        `Review batch decision "${decision.reviewId}" has no matching pending review.`,
+      );
+    }
+    if (decision.reviewId !== pendingReview.reviewSpec.id) {
+      throw new ReviewResponseResolutionError(
+        'stale_review',
+        `Review batch decision "${decision.reviewId}" does not match pending review "${pendingReview.reviewSpec.id}".`,
+      );
+    }
+    return resolveHumanReviewResponse(pendingReview, decision);
+  });
+}
+
 export function resolveHumanReviewResume(
   pendingReview: ReviewResolutionContext,
   resume: unknown,
@@ -189,5 +243,27 @@ export function resolveHumanReviewResume(
     hasCanonicalReviewResponseFields(resume)
       ? `Review resume for pending review "${pendingReview.reviewSpec.id}" is an invalid canonical response.`
       : `Review resume for pending review "${pendingReview.reviewSpec.id}" is not a canonical response.`,
+  );
+}
+
+// Only the batch shape `{ decisions: [...] }` is accepted. The legacy single
+// response shape `{ reviewId, selectedOptionId }` is deprecated: it fails here
+// and drives the middleware's invalid-decision re-interrupt loop. All
+// first-party clients (TUI, local server, app chat handler) already send the
+// batch shape, so this path is only reached by out-of-date clients.
+export function resolveHumanReviewBatchResume(
+  pendingReviews: ReviewResolutionContext[],
+  resume: unknown,
+): ReviewResponseResolution[] {
+  const response = readReviewBatchResponse(resume);
+  if (response) {
+    return resolveHumanReviewBatchResponse(pendingReviews, response);
+  }
+
+  throw new ReviewResponseResolutionError(
+    'invalid_response',
+    hasCanonicalReviewBatchResponseFields(resume)
+      ? 'Review batch resume is an invalid canonical response.'
+      : 'Review batch resume is not a canonical response.',
   );
 }

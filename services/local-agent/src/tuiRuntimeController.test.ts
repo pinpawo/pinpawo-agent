@@ -6,6 +6,12 @@ import { createComposerHistoryState } from './tui/input/composerHistory';
 import type { TuiAction, TuiState } from './tui/state/tuiState';
 
 function pendingReviewState(): TuiState {
+  const review = {
+    id: 'review-1',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Need review' },
+    options: [],
+  };
   return {
     connection: { status: 'ready', message: 'ready' },
     focusedSessionId: 'sess-1',
@@ -23,12 +29,10 @@ function pendingReviewState(): TuiState {
         timelineEntryIds: [],
         pendingReview: {
           requestId: 'req-1',
-          review: {
-            id: 'review-1',
-            schemaVersion: 1,
-            view: { kind: 'plain', body: 'Need review' },
-            options: [],
-          },
+          review,
+          reviews: [review],
+          reviewIndex: 0,
+          decisions: [],
         },
         startedAt: 1,
         charCount: 0,
@@ -49,6 +53,34 @@ function pendingReviewState(): TuiState {
       },
     },
   };
+}
+
+function pendingReviewActionState(reviewIndex = 0): TuiState {
+  const state = pendingReviewState();
+  const reviews = [
+    {
+      id: 'review-1',
+      schemaVersion: 1,
+      view: { kind: 'plain' as const, body: 'First review' },
+      options: [],
+    },
+    {
+      id: 'review-2',
+      schemaVersion: 1,
+      view: { kind: 'plain' as const, body: 'Second review' },
+      options: [],
+    },
+  ];
+  state.runs['req-1']!.pendingReview = {
+    requestId: 'req-1',
+    review: reviews[reviewIndex]!,
+    reviews,
+    reviewIndex,
+    decisions: reviewIndex > 0
+      ? [{ reviewId: 'review-1', selectedOptionId: 'approve' }]
+      : [],
+  };
+  return state;
 }
 
 function busyRunState(): TuiState {
@@ -132,8 +164,79 @@ test('TuiRuntimeController submits canonical review responses without legacy res
     reviewId: 'review-1',
     selectedOptionId: 'respond',
     input: { message: '请先解释风险' },
+    decisions: [
+      {
+        reviewId: 'review-1',
+        selectedOptionId: 'respond',
+        input: { message: '请先解释风险' },
+      },
+    ],
   }]);
   assert.equal(actions.some((action) => action.type === 'review.response.resume'), true);
+});
+
+test('TuiRuntimeController queues review action decisions until the final approval', () => {
+  const first = createController(pendingReviewActionState());
+
+  const firstSubmitted = first.controller.submitReviewResponse({
+    id: 'approve',
+    label: 'Approve',
+    decision: { type: 'approve' },
+  });
+
+  assert.equal(firstSubmitted, true);
+  assert.deepEqual(first.sent, []);
+  const advance = first.actions.find((action) => action.type === 'review.action.advance');
+  assert.equal(advance?.type, 'review.action.advance');
+  if (advance?.type === 'review.action.advance') {
+    assert.equal(advance.requestId, 'req-1');
+    assert.deepEqual(advance.decision, { reviewId: 'review-1', selectedOptionId: 'approve' });
+    assert.equal(advance.message, 'Approve');
+    assert.equal(advance.statusMessage, '等待你的决定');
+  }
+
+  const final = createController(pendingReviewActionState(1));
+  const finalSubmitted = final.controller.submitReviewResponse({
+    id: 'approve',
+    label: 'Approve',
+    decision: { type: 'approve' },
+  });
+
+  assert.equal(finalSubmitted, true);
+  assert.deepEqual(final.sent, [{
+    type: 'human_review_response',
+    requestId: 'req-1',
+    reviewId: 'review-2',
+    selectedOptionId: 'approve',
+    decisions: [
+      { reviewId: 'review-1', selectedOptionId: 'approve' },
+      { reviewId: 'review-2', selectedOptionId: 'approve' },
+    ],
+  }]);
+  assert.equal(final.actions.some((action) => action.type === 'review.response.resume'), true);
+});
+
+test('TuiRuntimeController sends a review action response when the first review is rejected', () => {
+  const { controller, actions, sent } = createController(pendingReviewActionState());
+
+  const submitted = controller.submitReviewResponse({
+    id: 'reject',
+    label: 'Reject',
+    decision: { type: 'reject' },
+  });
+
+  assert.equal(submitted, true);
+  assert.deepEqual(sent, [{
+    type: 'human_review_response',
+    requestId: 'req-1',
+    reviewId: 'review-1',
+    selectedOptionId: 'reject',
+    decisions: [
+      { reviewId: 'review-1', selectedOptionId: 'reject' },
+    ],
+  }]);
+  assert.equal(actions.some((action) => action.type === 'review.response.resume'), true);
+  assert.equal(actions.some((action) => action.type === 'review.action.advance'), false);
 });
 
 test('TuiRuntimeController blocks empty required review input', () => {

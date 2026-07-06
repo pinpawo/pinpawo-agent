@@ -266,6 +266,16 @@ export type HumanReviewInterruptPayload = {
   error?: string;
 };
 
+export type HumanReviewBatchInterruptPayload = {
+  kind: 'review_batch';
+  reviews: HumanReviewInterruptPayload[];
+  error?: string;
+};
+
+export type HumanReviewInterrupt =
+  | HumanReviewInterruptPayload
+  | HumanReviewBatchInterruptPayload;
+
 function isPendingReviewActionValue(value: unknown): value is PendingReviewAction {
   const record = readRecordValue(value);
   if (!record || !hasOnlyKeys(record, ['actionId', 'toolName', 'args', 'description'])) {
@@ -288,10 +298,32 @@ export function isHumanReviewInterruptPayload(value: unknown): value is HumanRev
     && (record.error === undefined || typeof record.error === 'string');
 }
 
+export function isHumanReviewBatchInterruptPayload(
+  value: unknown,
+): value is HumanReviewBatchInterruptPayload {
+  const record = readRecordValue(value);
+  if (!record || !hasOnlyKeys(record, ['kind', 'reviews', 'error'])) {
+    return false;
+  }
+  return record.kind === 'review_batch'
+    && Array.isArray(record.reviews)
+    && record.reviews.length > 0
+    && record.reviews.every(isHumanReviewInterruptPayload)
+    && (record.error === undefined || typeof record.error === 'string');
+}
+
+export function isHumanReviewInterrupt(value: unknown): value is HumanReviewInterrupt {
+  return isHumanReviewInterruptPayload(value) || isHumanReviewBatchInterruptPayload(value);
+}
+
 export type ReviewResponse = {
   reviewId: string;
   selectedOptionId: string;
   input?: Record<string, unknown>;
+};
+
+export type ReviewBatchResponse = {
+  decisions: ReviewResponse[];
 };
 
 export type ReviewResponseResolution = {

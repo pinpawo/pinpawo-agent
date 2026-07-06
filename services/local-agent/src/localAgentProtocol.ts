@@ -3,6 +3,7 @@ import {
   parseTokenUsageSnapshot,
   isReviewSpecValue,
   type BuiltinGlobalReviewPolicyMode,
+  type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import type {
@@ -52,6 +53,7 @@ export type HumanReviewResponseMessage = {
   reviewId: string;
   selectedOptionId: string;
   input?: Record<string, unknown>;
+  decisions?: ReviewResponse[];
 };
 
 export type LocalAgentClientMessage =
@@ -146,6 +148,41 @@ function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: readonly stri
 function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpec | null {
   const review = readRecord(record, key);
   return isReviewSpecValue(review) ? review : null;
+}
+
+function readReviewSpecs(record: Record<string, unknown>, key: string): ReviewSpec[] | null {
+  const value = record[key];
+  if (value === undefined) return null;
+  if (!Array.isArray(value)) return null;
+  const reviews = value.filter(isReviewSpecValue);
+  return reviews.length === value.length && reviews.length > 0 ? reviews : null;
+}
+
+function readReviewResponse(value: unknown): ReviewResponse | null {
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  if (!record || !hasOnlyKeys(record, ['reviewId', 'selectedOptionId', 'input'])) return null;
+  const reviewId = readString(record, 'reviewId');
+  const selectedOptionId = readString(record, 'selectedOptionId');
+  const input = readRecord(record, 'input');
+  if (record.input !== undefined && !input) return null;
+  return reviewId && selectedOptionId
+    ? {
+        reviewId,
+        selectedOptionId,
+        ...(input ? { input } : {}),
+      }
+    : null;
+}
+
+function readReviewResponses(record: Record<string, unknown>, key: string): ReviewResponse[] | null {
+  const value = record[key];
+  if (value === undefined) return null;
+  if (!Array.isArray(value)) return null;
+  const responses = value.map(readReviewResponse);
+  if (responses.some((response) => !response) || responses.length === 0) return null;
+  return responses as ReviewResponse[];
 }
 
 function readBuiltinGlobalReviewPolicyMode(
@@ -253,15 +290,18 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentRuntime
     };
   }
   if (type === 'human_review.requested') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'review', 'actor'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'review', 'reviews', 'actor'])) return null;
     const review = readReviewSpec(record, 'review');
+    const reviews = readReviewSpecs(record, 'reviews');
     const actor = readRecord(record, 'actor');
     if (!review) return null;
     if (actor && !hasOnlyKeys(actor, ['petId'])) return null;
     return {
       type,
       requestId,
+      ...(readOptionalString(record, 'interruptId') ? { interruptId: readOptionalString(record, 'interruptId') } : {}),
       review,
+      ...(reviews ? { reviews } : {}),
       ...(actor ? { actor: { petId: readOptionalString(actor, 'petId') } } : {}),
     };
   }
@@ -315,12 +355,14 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
     };
   }
   if (type === 'human_review_response') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'reviewId', 'selectedOptionId', 'input'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
     const requestId = readString(record, 'requestId');
     const reviewId = readOptionalString(record, 'reviewId');
     const selectedOptionId = readOptionalString(record, 'selectedOptionId');
     const input = readRecord(record, 'input');
+    const decisions = readReviewResponses(record, 'decisions');
     if (record.input !== undefined && !input) return null;
+    if (record.decisions !== undefined && !decisions) return null;
     if (!requestId || !reviewId || !selectedOptionId) return null;
     return {
       type,
@@ -328,6 +370,7 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
       reviewId,
       selectedOptionId,
       ...(input ? { input } : {}),
+      ...(decisions ? { decisions } : {}),
     };
   }
   if (type === 'interrupt_request') {

@@ -90,6 +90,28 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
       input: { message: 'list files first' },
     },
   );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'human_review_response',
+      requestId: 'req-1',
+      reviewId: 'review-2',
+      selectedOptionId: 'approve',
+      decisions: [
+        { reviewId: 'review-1', selectedOptionId: 'approve' },
+        { reviewId: 'review-2', selectedOptionId: 'approve' },
+      ],
+    })),
+    {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      reviewId: 'review-2',
+      selectedOptionId: 'approve',
+      decisions: [
+        { reviewId: 'review-1', selectedOptionId: 'approve' },
+        { reviewId: 'review-2', selectedOptionId: 'approve' },
+      ],
+    },
+  );
   assert.equal(
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'human_review_response',

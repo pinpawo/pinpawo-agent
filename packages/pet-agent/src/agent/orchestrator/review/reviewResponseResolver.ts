@@ -246,6 +246,11 @@ export function resolveHumanReviewResume(
   );
 }
 
+// Only the batch shape `{ decisions: [...] }` is accepted. The legacy single
+// response shape `{ reviewId, selectedOptionId }` is deprecated: it fails here
+// and drives the middleware's invalid-decision re-interrupt loop. All
+// first-party clients (TUI, local server, app chat handler) already send the
+// batch shape, so this path is only reached by out-of-date clients.
 export function resolveHumanReviewBatchResume(
   pendingReviews: ReviewResolutionContext[],
   resume: unknown,

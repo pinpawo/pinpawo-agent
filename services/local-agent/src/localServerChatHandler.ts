@@ -27,7 +27,6 @@ import type { LocalAgentEvent } from './events/localAgentEvent';
 import {
   buildHumanReviewRejectResume,
   buildHumanReviewResume,
-  readHumanReviewDecisionCount,
   validateHumanReviewDecisions,
   type PendingHumanReviewActionRoute,
 } from './humanReviewActionRouting';
@@ -441,7 +440,6 @@ export class LocalServerChatHandler {
     }
 
     this.markPendingReviewConsumed(msg.requestId);
-    const decisionCount = readHumanReviewDecisionCount(decisions);
 
     await this.runChatRequest(ws, {
       kind: 'resume',
@@ -451,7 +449,7 @@ export class LocalServerChatHandler {
       type: 'human_review_response',
       reviewId: msg.reviewId,
       selectedOptionId: msg.selectedOptionId,
-      ...(decisionCount ? { decisionCount } : {}),
+      decisionCount: decisions.length,
     });
   }
 

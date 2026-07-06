@@ -39,7 +39,6 @@ import {
   buildHumanReviewResume,
   readHumanReviewDecisionCount,
   validateHumanReviewDecisions,
-  type HumanReviewResumeMode,
   type PendingHumanReviewActionRoute,
 } from './humanReviewActionRouting';
 
@@ -254,7 +253,7 @@ export class LocalAgentAppChatHandler {
         requestId: msg.requestId,
         ...(route.interruptId ? { interruptId: route.interruptId } : {}),
         review: route.review,
-        ...(route.resumeMode === 'review_action' ? { reviews: route.reviews } : {}),
+        ...(route.reviews ? { reviews: route.reviews } : {}),
       });
       return;
     }
@@ -268,7 +267,7 @@ export class LocalAgentAppChatHandler {
       type: 'interrupt_request',
       reviewId: route.reviewId,
       selectedOptionId: route.rejectOptionId,
-      ...(route.resumeMode === 'review_action' ? { decisionCount: 1 } : {}),
+      decisionCount: 1,
     });
   }
 
@@ -399,16 +398,13 @@ export class LocalAgentAppChatHandler {
     userId: string,
     reviews?: ReviewSpec[],
     interruptId?: string,
-    resumeMode?: HumanReviewResumeMode,
   ): PendingReviewRoute {
     const reviewActionReviews = reviews?.length ? reviews : [review];
-    const reviewResumeMode = resumeMode ?? (reviews ? 'review_action' : 'legacy_review');
     const rejectOption = reviewActionReviews[0]?.options.find((option) => option.decision.type === 'reject');
     return {
       userId,
       ...(interruptId ? { interruptId } : {}),
       reviewId: review.id,
-      resumeMode: reviewResumeMode,
       ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
       review,
       reviews: reviewActionReviews,
@@ -428,7 +424,6 @@ export class LocalAgentAppChatHandler {
         userId,
         event.reviews,
         event.interruptId,
-        event.reviews ? 'review_action' : 'legacy_review',
       ),
     );
   }

@@ -29,7 +29,6 @@ import {
   buildHumanReviewResume,
   readHumanReviewDecisionCount,
   validateHumanReviewDecisions,
-  type HumanReviewResumeMode,
   type PendingHumanReviewActionRoute,
 } from './humanReviewActionRouting';
 
@@ -92,17 +91,14 @@ export class LocalServerChatHandler {
     interruptId?: string;
     review: ReviewSpec;
     reviews?: ReviewSpec[];
-    resumeMode?: HumanReviewResumeMode;
     sessionId?: string;
     actor?: PendingReviewRoute['actor'];
   }): PendingReviewRoute {
     const reviews = params.reviews?.length ? params.reviews : [params.review];
-    const resumeMode = params.resumeMode ?? (params.reviews ? 'review_action' : 'legacy_review');
     const rejectOption = reviews[0]?.options.find((option) => option.decision.type === 'reject');
     return {
       ...(params.interruptId ? { interruptId: params.interruptId } : {}),
       reviewId: params.review.id,
-      resumeMode,
       ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
       ...(params.sessionId ? { sessionId: params.sessionId } : {}),
       review: params.review,
@@ -125,7 +121,6 @@ export class LocalServerChatHandler {
       ...(event.interruptId ? { interruptId: event.interruptId } : {}),
       review: event.review,
       ...(event.reviews ? { reviews: event.reviews } : {}),
-      resumeMode: event.reviews ? 'review_action' : 'legacy_review',
       ...(sessionId ? { sessionId } : {}),
       ...(event.actor ? { actor: event.actor } : {}),
     }));
@@ -144,7 +139,6 @@ export class LocalServerChatHandler {
         ...(pending.interruptId ? { interruptId: pending.interruptId } : {}),
         review: pending.review,
         ...(pending.reviews ? { reviews: pending.reviews } : {}),
-        resumeMode: pending.reviews ? 'review_action' : 'legacy_review',
         sessionId: pending.sessionId,
       });
       this.pendingReviewRoutes.set(requestId, route);
@@ -210,7 +204,7 @@ export class LocalServerChatHandler {
         reviewId: route.reviewId,
         ...(route.sessionId ? { sessionId: route.sessionId } : {}),
         review: route.review,
-        ...(route.resumeMode === 'review_action' ? { reviews: route.reviews } : {}),
+        ...(route.reviews ? { reviews: route.reviews } : {}),
         ...(route.actor ? { actor: route.actor } : {}),
       };
     }
@@ -224,7 +218,6 @@ export class LocalServerChatHandler {
       ...(pending.interruptId ? { interruptId: pending.interruptId } : {}),
       review: pending.review,
       ...(pending.reviews ? { reviews: pending.reviews } : {}),
-      resumeMode: pending.reviews ? 'review_action' : 'legacy_review',
       sessionId: pending.sessionId,
     });
     this.pendingReviewRoutes.set(requestId, route);
@@ -234,7 +227,7 @@ export class LocalServerChatHandler {
       reviewId: route.reviewId,
       sessionId: pending.sessionId,
       review: route.review,
-      ...(route.resumeMode === 'review_action' ? { reviews: route.reviews } : {}),
+      ...(route.reviews ? { reviews: route.reviews } : {}),
     };
   }
 
@@ -506,7 +499,7 @@ export class LocalServerChatHandler {
         requestId: msg.requestId,
         ...(route.interruptId ? { interruptId: route.interruptId } : {}),
         review: route.review,
-        ...(route.resumeMode === 'review_action' ? { reviews: route.reviews } : {}),
+        ...(route.reviews ? { reviews: route.reviews } : {}),
         ...(route.actor ? { actor: route.actor } : {}),
       });
       return true;
@@ -525,7 +518,7 @@ export class LocalServerChatHandler {
       type: 'interrupt_request',
       reviewId: route.reviewId,
       selectedOptionId: route.rejectOptionId,
-      ...(route.resumeMode === 'review_action' ? { decisionCount: 1 } : {}),
+      decisionCount: 1,
     });
     return true;
   }

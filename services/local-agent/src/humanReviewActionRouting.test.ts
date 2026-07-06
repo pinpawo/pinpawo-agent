@@ -31,7 +31,6 @@ test('human review action routing resumes once for a rejected first decision', (
   const route = {
     interruptId: 'interrupt-1',
     reviewId: 'review-1',
-    resumeMode: 'review_action' as const,
     reviews: [reviewSpec('review-1'), reviewSpec('review-2')],
   };
 
@@ -47,7 +46,6 @@ test('human review action routing resumes once for a rejected first decision', (
 test('human review action routing rejects partial approval resumes', () => {
   const route = {
     reviewId: 'review-1',
-    resumeMode: 'review_action' as const,
     reviews: [reviewSpec('review-1'), reviewSpec('review-2')],
   };
 
@@ -66,7 +64,6 @@ test('human review action routing resumes complete approvals as one review actio
   const route = {
     interruptId: 'interrupt-1',
     reviewId: 'review-1',
-    resumeMode: 'review_action' as const,
     reviews: [reviewSpec('review-1'), reviewSpec('review-2')],
   };
   const decisions = validateHumanReviewDecisions(route, {
@@ -87,11 +84,10 @@ test('human review action routing resumes complete approvals as one review actio
   });
 });
 
-test('human review action routing preserves legacy single-review resume shape', () => {
+test('human review action routing resolves single-review resume as batch shape', () => {
   const route = {
     interruptId: 'interrupt-1',
     reviewId: 'review-1',
-    resumeMode: 'legacy_review' as const,
     reviews: [reviewSpec('review-1')],
   };
   const decisions = validateHumanReviewDecisions(route, {
@@ -103,8 +99,10 @@ test('human review action routing preserves legacy single-review resume shape', 
 
   assert.deepEqual(buildHumanReviewResume(route, decisions), {
     'interrupt-1': {
-      reviewId: 'review-1',
-      selectedOptionId: 'approve',
+      decisions: [{
+        reviewId: 'review-1',
+        selectedOptionId: 'approve',
+      }],
     },
   });
 });

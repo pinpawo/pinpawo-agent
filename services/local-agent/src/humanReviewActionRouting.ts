@@ -6,13 +6,10 @@ import {
 } from '@pinpawo/pet-agent';
 import type { HumanReviewResponseMessage } from './localAgentProtocol';
 
-export type HumanReviewResumeMode = 'review_action' | 'legacy_review';
-
 export type PendingHumanReviewActionRoute = {
   interruptId?: string;
   reviewId: string;
   reviews: ReviewSpec[];
-  resumeMode: HumanReviewResumeMode;
 };
 
 export function readHumanReviewDecisions(msg: HumanReviewResponseMessage): ReviewResponse[] {
@@ -80,7 +77,7 @@ export function buildHumanReviewResume(
   route: PendingHumanReviewActionRoute,
   decisions: ReviewResponse[],
 ) {
-  const resume = route.resumeMode === 'review_action' ? { decisions } : decisions[0]!;
+  const resume = { decisions };
   return route.interruptId ? { [route.interruptId]: resume } : resume;
 }
 
@@ -98,5 +95,5 @@ export function readHumanReviewDecisionCount(
   route: PendingHumanReviewActionRoute,
   decisions: ReviewResponse[],
 ) {
-  return route.resumeMode === 'review_action' ? decisions.length : undefined;
+  return decisions.length;
 }

@@ -141,14 +141,17 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      reviewId: 'review-current',
-      selectedOptionId: 'approve',
+      decisions: [{
+        reviewId: 'review-current',
+        selectedOptionId: 'approve',
+      }],
     },
   });
   assert.deepEqual(forwardedSource, {
     type: 'human_review_response',
     reviewId: 'review-current',
     selectedOptionId: 'approve',
+    decisionCount: 1,
   });
   assert.equal(sentEvents.length, 1, 'second response should be rejected after route is consumed');
   const event = sentEvents[0] as { type: string; event?: { type: string; message: string; code?: string } };
@@ -170,7 +173,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   assert.equal(sentEvents.length, 1);
 });
 
-test('handleHumanReviewResponse keeps single-review action resume shape', async () => {
+test('handleHumanReviewResponse keeps single-review review as batch resume shape', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakeWs = {
@@ -301,8 +304,10 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      reviewId: 'review-current',
-      selectedOptionId: 'approve',
+      decisions: [{
+        reviewId: 'review-current',
+        selectedOptionId: 'approve',
+      }],
     },
   });
 });
@@ -343,6 +348,7 @@ test('readPendingReviewSnapshot exposes routeable pending review request ids', a
     reviewId: 'review-current',
     sessionId: 'sess-active',
     review,
+    reviews: [review],
     actor: { petId: 'pet-a' },
   });
 
@@ -371,6 +377,7 @@ test('readPendingReviewSnapshot exposes routeable pending review request ids', a
     reviewId: 'review-current',
     sessionId: 'sess-active',
     review,
+    reviews: [review],
   });
 });
 
@@ -448,14 +455,17 @@ test('handleInterruptRequest resumes pending review with canonical reject option
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      reviewId: 'review-current',
-      selectedOptionId: 'reject',
+      decisions: [{
+        reviewId: 'review-current',
+        selectedOptionId: 'reject',
+      }],
     },
   });
   assert.deepEqual(forwardedSource, {
     type: 'interrupt_request',
     reviewId: 'review-current',
     selectedOptionId: 'reject',
+    decisionCount: 1,
   });
 
   await handler.handleHumanReviewResponse(
@@ -538,14 +548,17 @@ test('handleInterruptRequest recovers missing route from active checkpoint revie
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      reviewId: 'review-current',
-      selectedOptionId: 'reject',
+      decisions: [{
+        reviewId: 'review-current',
+        selectedOptionId: 'reject',
+      }],
     },
   });
   assert.deepEqual(forwardedSource, {
     type: 'interrupt_request',
     reviewId: 'review-current',
     selectedOptionId: 'reject',
+    decisionCount: 1,
   });
 });
 
@@ -690,15 +703,18 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      reviewId: 'review-current',
-      selectedOptionId: 'respond',
-      input: { message: '请先解释风险' },
+      decisions: [{
+        reviewId: 'review-current',
+        selectedOptionId: 'respond',
+        input: { message: '请先解释风险' },
+      }],
     },
   });
   assert.deepEqual(forwardedSource, {
     type: 'human_review_response',
     reviewId: 'review-current',
     selectedOptionId: 'respond',
+    decisionCount: 1,
   });
 });
 
@@ -863,14 +879,17 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      reviewId: 'review-current',
-      selectedOptionId: 'approve-and-authorize-thread',
+      decisions: [{
+        reviewId: 'review-current',
+        selectedOptionId: 'approve-and-authorize-thread',
+      }],
     },
   });
   assert.deepEqual(forwardedSource, {
     type: 'human_review_response',
     reviewId: 'review-current',
     selectedOptionId: 'approve-and-authorize-thread',
+    decisionCount: 1,
   });
   assert.equal(
     sentEvents.some((event) =>

@@ -281,8 +281,10 @@ test('LocalAgentAppChatHandler resumes canonical human review responses through 
       kind: 'resume',
       requestId: 'req-1',
       resume: {
-        reviewId: 'review-1',
-        selectedOptionId: 'approve',
+        decisions: [{
+          reviewId: 'review-1',
+          selectedOptionId: 'approve',
+        }],
       },
     },
   ]);
@@ -346,8 +348,10 @@ test('LocalAgentAppChatHandler interrupts pending human review with canonical re
       kind: 'resume',
       requestId: 'req-1',
       resume: {
-        reviewId: 'review-1',
-        selectedOptionId: 'reject',
+        decisions: [{
+          reviewId: 'review-1',
+          selectedOptionId: 'reject',
+        }],
       },
     },
   ]);

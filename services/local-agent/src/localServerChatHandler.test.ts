@@ -25,6 +25,7 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
     getChatThreadId: () => 'thread-x',
     readActivePendingReview: async () => ({
       sessionId: 'sess-active',
+      interruptId: 'interrupt-1',
       review: {
         id: 'review-current',
         schemaVersion: 1,
@@ -49,6 +50,7 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-1',
     review: {
       id: 'review-current',
@@ -112,6 +114,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-1',
     review: {
       id: 'review-current',
@@ -141,10 +144,12 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      decisions: [{
-        reviewId: 'review-current',
-        selectedOptionId: 'approve',
-      }],
+      'interrupt-1': {
+        decisions: [{
+          reviewId: 'review-current',
+          selectedOptionId: 'approve',
+        }],
+      },
     },
   });
   assert.deepEqual(forwardedSource, {
@@ -208,6 +213,7 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-1',
     review,
     reviews: [review],
@@ -236,7 +242,9 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      decisions: [{ reviewId: 'review-current', selectedOptionId: 'approve' }],
+      'interrupt-1': {
+        decisions: [{ reviewId: 'review-current', selectedOptionId: 'approve' }],
+      },
     },
   });
   assert.deepEqual(forwardedSource, {
@@ -263,6 +271,7 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
       getChatThreadId: () => 'thread-x',
       readActivePendingReview: async () => ({
         sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
         review: {
           id: 'review-current',
           schemaVersion: 1,
@@ -304,10 +313,12 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      decisions: [{
-        reviewId: 'review-current',
-        selectedOptionId: 'approve',
-      }],
+      'interrupt-1': {
+        decisions: [{
+          reviewId: 'review-current',
+          selectedOptionId: 'approve',
+        }],
+      },
     },
   });
 });
@@ -338,6 +349,7 @@ test('readPendingReviewSnapshot exposes routeable pending review request ids', a
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-existing',
     review,
     actor: { petId: 'pet-a' },
@@ -345,6 +357,7 @@ test('readPendingReviewSnapshot exposes routeable pending review request ids', a
 
   assert.deepEqual(await handler.readPendingReviewSnapshot({ actorId: 'pet-1' } as never), {
     requestId: 'req-existing',
+    interruptId: 'interrupt-1',
     reviewId: 'review-current',
     sessionId: 'sess-active',
     review,
@@ -357,6 +370,7 @@ test('readPendingReviewSnapshot exposes routeable pending review request ids', a
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-action',
     review,
     reviews: [review],
@@ -364,6 +378,7 @@ test('readPendingReviewSnapshot exposes routeable pending review request ids', a
 
   assert.deepEqual(await handler.readPendingReviewSnapshot({ actorId: 'pet-1' } as never), {
     requestId: 'req-action',
+    interruptId: 'interrupt-1',
     reviewId: 'review-current',
     sessionId: 'sess-active',
     review,
@@ -397,6 +412,7 @@ test('handleInterruptRequest resumes pending review with canonical reject option
       getChatThreadId: () => 'thread-x',
       readActivePendingReview: async () => ({
         sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
         review: {
           id: 'review-current',
           schemaVersion: 1,
@@ -421,6 +437,7 @@ test('handleInterruptRequest resumes pending review with canonical reject option
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-1',
     review: {
       id: 'review-current',
@@ -455,10 +472,12 @@ test('handleInterruptRequest resumes pending review with canonical reject option
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      decisions: [{
-        reviewId: 'review-current',
-        selectedOptionId: 'reject',
-      }],
+      'interrupt-1': {
+        decisions: [{
+          reviewId: 'review-current',
+          selectedOptionId: 'reject',
+        }],
+      },
     },
   });
   assert.deepEqual(forwardedSource, {
@@ -504,6 +523,7 @@ test('handleInterruptRequest recovers missing route from active checkpoint revie
       getChatThreadId: () => 'thread-x',
       readActivePendingReview: async () => ({
         sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
         review: {
           id: 'review-current',
           schemaVersion: 1,
@@ -548,10 +568,12 @@ test('handleInterruptRequest recovers missing route from active checkpoint revie
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      decisions: [{
-        reviewId: 'review-current',
-        selectedOptionId: 'reject',
-      }],
+      'interrupt-1': {
+        decisions: [{
+          reviewId: 'review-current',
+          selectedOptionId: 'reject',
+        }],
+      },
     },
   });
   assert.deepEqual(forwardedSource, {
@@ -590,6 +612,7 @@ test('handleInterruptRequest restores pending review when no reject option exist
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-1',
     prompt: 'Approve?',
     review: {
@@ -666,6 +689,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-1',
     review: {
       id: 'review-current',
@@ -703,11 +727,13 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      decisions: [{
-        reviewId: 'review-current',
-        selectedOptionId: 'respond',
-        input: { message: '请先解释风险' },
-      }],
+      'interrupt-1': {
+        decisions: [{
+          reviewId: 'review-current',
+          selectedOptionId: 'respond',
+          input: { message: '请先解释风险' },
+        }],
+      },
     },
   });
   assert.deepEqual(forwardedSource, {
@@ -748,6 +774,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-1',
     review: {
       id: 'review-current',
@@ -812,6 +839,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-1',
     payload: {
       kind: 'review',
@@ -879,10 +907,12 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      decisions: [{
-        reviewId: 'review-current',
-        selectedOptionId: 'approve-and-authorize-thread',
-      }],
+      'interrupt-1': {
+        decisions: [{
+          reviewId: 'review-current',
+          selectedOptionId: 'approve-and-authorize-thread',
+        }],
+      },
     },
   });
   assert.deepEqual(forwardedSource, {
@@ -935,6 +965,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordPendingReviewRoute({
     type: 'human_review.requested',
+    interruptId: 'interrupt-1',
     requestId: 'req-1',
     payload: {
       kind: 'review',

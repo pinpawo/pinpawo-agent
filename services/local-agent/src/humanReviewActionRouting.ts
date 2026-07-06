@@ -115,20 +115,15 @@ export function buildHumanReviewResume(
   if (route.interruptId) {
     return { [route.interruptId]: { decisions } };
   }
-  // No interruptId: LangGraph always stamps one on a real interrupt, so a
-  // missing id means the pending review action is not the single, unambiguous
-  // interrupt we can safely resume by value. A bare resume is only well-defined
-  // when exactly one review is pending; anything more could be misrouted to the
-  // wrong interrupt. Fail closed there: record the anomaly and reject the whole
-  // review action instead of silently approving into the wrong slot.
-  if (route.reviews.length > 1) {
-    console.warn(
-      `[human-review] missing interruptId for multi-review action=${route.reviews.map((review) => review.id).join(',')}; `
-      + 'rejecting all pending reviews',
-    );
-    return { decisions: buildRejectAllDecisions(route) };
-  }
-  return { decisions };
+  // LangGraph always stamps an id on a real interrupt, so a missing interruptId
+  // means this is not a resumable pending review action. Resuming by value would
+  // risk delivering the decisions to the wrong interrupt, so fail closed: record
+  // the anomaly and reject the whole review action instead of guessing.
+  console.warn(
+    `[human-review] missing interruptId for review action=${route.reviews.map((review) => review.id).join(',')}; `
+    + 'rejecting all pending reviews',
+  );
+  return { decisions: buildRejectAllDecisions(route) };
 }
 
 export function buildHumanReviewRejectResume(

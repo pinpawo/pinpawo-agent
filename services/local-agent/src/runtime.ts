@@ -15,7 +15,7 @@ import {
   buildLocalLlmConfig,
 } from './llmConfig';
 import { LocalAgentGraphService } from './agentGraphService';
-import { ensureActorSelected, loadSelectedActorName } from './actorSelection';
+import { ensureActorSelected, loadSelectedActorName, LOCAL_ONLY_ACTOR_NAME } from './actorSelection';
 import { loadStoredConfig, saveStoredConfig } from './storage';
 import {
   sendLocalAgentEvent,
@@ -140,7 +140,7 @@ export class LocalAgentRuntime {
     await this.capabilityRegistry.load();
     this.hooks = collectPluginHooks(plugins);
     this.actorId = await ensureActorSelected({ interactive: false });
-    this.actorName = loadSelectedActorName();
+    this.actorName = config.apiConnected ? loadSelectedActorName() : LOCAL_ONLY_ACTOR_NAME;
     const ctx = await loadAgentContext(this.actorId);
     // Backfill name from DB in case config was written before actor_name was tracked
     if (!this.actorName && ctx.pet.name) {

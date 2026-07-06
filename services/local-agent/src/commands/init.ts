@@ -33,6 +33,9 @@ function envTemplate(): string {
 # You can also run "pinpawo-agent login" to save these values to config.json.
 
 # Server
+# Set PINPAWO_LOCAL_ONLY=1 to force local-only startup even if saved
+# server credentials exist in config.json.
+PINPAWO_LOCAL_ONLY=
 API_BASE_URL=https://your-api.example.com
 HASURA_ENDPOINT=https://your-hasura.example.com/v1/graphql
 AGENT_TOKEN=your-agent-token-here

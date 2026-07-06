@@ -73,6 +73,9 @@ export function buildSetupGuide(options: {
   const missingApiKeys = apiValues
     .filter(([key, value]) => isMissingOrGeneratedApiPlaceholder(key, value))
     .map(([key]) => key);
+  const localOnlyMode = readBooleanConfigValue(env, options.stored, 'PINPAWO_LOCAL_ONLY', 'local_only') ?? false;
+  const hostedApiConfigured = missingApiKeys.length === 0;
+  const hostedApiEnabled = hostedApiConfigured && !localOnlyMode;
   const actorId = options.stored.actor_id?.trim() ?? '';
   const readyForLocalRun = Boolean(llmApiKey.trim());
   const checks: SetupCheck[] = [
@@ -90,7 +93,15 @@ export function buildSetupGuide(options: {
           detail: 'LLM_API_KEY is missing. Local chat/TUI cannot run until it is configured.',
           nextStep: 'Run "pinpawo-agent login" or set LLM_API_KEY in ~/.pinpawo/.env.',
         },
-    missingApiKeys.length === 0
+    localOnlyMode
+      ? {
+          id: 'hosted-api',
+          label: 'Hosted app/API',
+          status: 'warning',
+          detail: 'PINPAWO_LOCAL_ONLY is enabled. Hosted app relay, scheduled posts, and Hasura context are disabled even if API credentials are configured.',
+          nextStep: 'Unset PINPAWO_LOCAL_ONLY or set local_only=false in config.json to re-enable hosted API connections.',
+        }
+      : hostedApiConfigured
       ? {
           id: 'hosted-api',
           label: 'Hosted app/API',
@@ -114,11 +125,11 @@ export function buildSetupGuide(options: {
       : {
           id: 'actor',
           label: 'Actor',
-          status: missingApiKeys.length === 0 ? 'missing' : 'warning',
-          detail: missingApiKeys.length === 0
+          status: hostedApiEnabled ? 'missing' : 'warning',
+          detail: hostedApiEnabled
             ? 'No hosted actor is selected.'
             : 'No actor is selected. Local-only mode will use the built-in local actor.',
-          nextStep: missingApiKeys.length === 0
+          nextStep: hostedApiEnabled
             ? 'Run "pinpawo-agent actor" to choose a pet actor.'
             : 'After hosted login, run "pinpawo-agent actor" to choose a pet actor.',
         },
@@ -206,6 +217,24 @@ function readConfigValue(
 ) {
   const storedValue = stored[storedKey];
   return env[envKey]?.trim() || (typeof storedValue === 'string' ? storedValue.trim() : '') || '';
+}
+
+function readBooleanConfigValue(
+  env: EnvMap,
+  stored: StoredConfig,
+  envKey: string,
+  storedKey: keyof StoredConfig,
+): boolean | undefined {
+  const envValue = env[envKey]?.trim();
+  const storedValue = stored[storedKey];
+  const raw = envValue
+    || (typeof storedValue === 'boolean' ? String(storedValue) : '')
+    || '';
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return undefined;
 }
 
 function formatStatus(status: SetupCheckStatus) {

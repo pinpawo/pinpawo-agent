@@ -173,12 +173,18 @@ export class LocalAgentAppChatHandler {
     let decisions: ReviewResponse[];
     try {
       decisions = validateHumanReviewDecisions(route, msg);
-    } catch {
+    } catch (err) {
       this.releasePendingReviewRequest(msg.requestId);
+      console.warn(
+        `[local-agent-app] human_review_response rejected: reviewId=${msg.reviewId} `
+        + `does not match pending review action=${route.reviews.map((review) => review.id).join(',')} `
+        + (err instanceof Error ? err.message : String(err)),
+      );
       sendLocalAgentEvent(ws, {
         type: 'error',
         requestId: msg.requestId,
         message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
+        code: 'review_stale',
       });
       return;
     }

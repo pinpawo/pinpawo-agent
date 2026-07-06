@@ -438,9 +438,13 @@ function readFirstHumanReviewInterrupt(
   }
   if (isHumanReviewBatchInterruptPayload(value)) {
     const reviews = value.reviews.map((item) => item.review);
+    const review = reviews[0];
+    if (!review) {
+      return null;
+    }
     return {
       ...(interruptId ? { interruptId } : {}),
-      review: reviews[0]!,
+      review,
       reviews,
     };
   }

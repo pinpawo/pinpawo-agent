@@ -103,9 +103,13 @@ function readPendingHumanReview(snapshot: unknown): LocalAgentGraphPendingHumanR
   }
   if (isHumanReviewBatchInterruptPayload(pendingInterrupt.value)) {
     const reviews = pendingInterrupt.value.reviews.map((item) => item.review);
+    const review = reviews[0];
+    if (!review) {
+      return null;
+    }
     return {
       ...(pendingInterrupt.id ? { interruptId: pendingInterrupt.id } : {}),
-      review: reviews[0]!,
+      review,
       reviews,
     };
   }

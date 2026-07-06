@@ -74,9 +74,11 @@ test('explore capability filters default toolkits to host-available toolkits', a
     ],
   });
 
-  assert.deepEqual(runtime.uses, ['bash', 'browser']);
+  assert.deepEqual(runtime.uses, ['bash', 'git', 'browser']);
   assert.equal(Array.isArray(runtime.instructions), true);
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /只读取、检查、搜索、观察和总结上下文/);
+  assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /gh_pr_view、gh_pr_diff、git_diff、git_show/);
+  assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /不要使用 browser、http_fetch 或 download_file/);
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /运行中会保留最近的完整工具输出/);
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /已查看文件列表/);
   assert.equal(typeof runtime.contextPolicy?.rewriteAsync, 'function');

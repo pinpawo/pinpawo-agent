@@ -52,6 +52,30 @@ test('buildSetupGuide accepts local-ready config without hosted API', () => {
   assert.equal(guide.checks.find((check) => check.id === 'actor')?.status, 'ok');
 });
 
+test('buildSetupGuide reports local-only override when hosted API credentials exist', () => {
+  const guide = buildSetupGuide({
+    stored: {
+      llm_api_key: 'llm-key',
+      api_base_url: 'https://api.example.test',
+      hasura_endpoint: 'https://hasura.example.test/v1/graphql',
+      agent_token: 'agent-token',
+      hasura_jwt: 'hasura-jwt',
+      local_only: true,
+    },
+    env: {},
+    configFilePath: '/tmp/pinpawo/config.json',
+    runtimeConfig: runtimeConfigForMissingStudio(),
+  });
+
+  const hostedApi = guide.checks.find((check) => check.id === 'hosted-api');
+  const actor = guide.checks.find((check) => check.id === 'actor');
+
+  assert.equal(hostedApi?.status, 'warning');
+  assert.match(hostedApi?.detail ?? '', /PINPAWO_LOCAL_ONLY is enabled/);
+  assert.equal(actor?.status, 'warning');
+  assert.match(actor?.detail ?? '', /Local-only mode/);
+});
+
 test('buildSetupGuide reports workdir-scoped Studio config when present', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-setup-'));
   const runtimeConfig = runtimeConfigFor(root);

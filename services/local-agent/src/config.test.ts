@@ -69,3 +69,34 @@ test('config workdir defaults to process cwd when env and stored config are abse
 
   assert.equal(output, process.cwd());
 });
+
+test('PINPAWO_LOCAL_ONLY disables hosted API even when credentials are present', () => {
+  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  const output = execFileSync(process.execPath, [
+    '--import',
+    'tsx',
+    '-e',
+    [
+      `const { config } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
+      'process.stdout.write(JSON.stringify({ apiConnected: config.apiConnected, localOnlyMode: config.localOnlyMode, apiSetupMessage: config.apiSetupMessage }));',
+    ].join('\n'),
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ...REQUIRED_ENV,
+      HOME: home,
+      PINPAWO_LOCAL_ONLY: '1',
+    },
+    encoding: 'utf8',
+  });
+
+  const parsed = JSON.parse(output) as {
+    apiConnected: boolean;
+    localOnlyMode: boolean;
+    apiSetupMessage: string;
+  };
+  assert.equal(parsed.apiConnected, false);
+  assert.equal(parsed.localOnlyMode, true);
+  assert.match(parsed.apiSetupMessage, /Local-only mode is enabled/);
+});

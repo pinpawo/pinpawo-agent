@@ -135,6 +135,7 @@ const apiBaseUrl = optional('API_BASE_URL', 'api_base_url').replace(/\/$/, '');
 const hasuraEndpoint = optional('HASURA_ENDPOINT', 'hasura_endpoint').replace(/\/$/, '');
 const agentToken = optional('AGENT_TOKEN', 'agent_token');
 const hasuraJwt = optional('HASURA_JWT', 'hasura_jwt');
+const localOnlyMode = getBoolean('PINPAWO_LOCAL_ONLY', 'local_only') ?? false;
 const apiCredentialValues = [
   ['API_BASE_URL', apiBaseUrl],
   ['HASURA_ENDPOINT', hasuraEndpoint],
@@ -144,6 +145,12 @@ const apiCredentialValues = [
 const missingOrPlaceholderApiConfig = apiCredentialValues
   .filter(([key, value]) => isMissingOrGeneratedApiPlaceholder(key, value))
   .map(([key]) => key);
+const apiConnected = !localOnlyMode && missingOrPlaceholderApiConfig.length === 0;
+const apiSetupMessage = localOnlyMode
+  ? 'PINPAWO_LOCAL_ONLY is enabled. Local-only mode is enabled; hosted app relay and Hasura-backed context are disabled.'
+  : missingOrPlaceholderApiConfig.length > 0
+    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable the hosted app, chat relay, and Hasura-backed context.`
+    : '';
 
 const llmPresetKey = optional('LLM_MODEL_PRESET', 'llm_model_preset');
 const selectedLlmPreset = findLlmModelPresetByKey(llmPresetKey);
@@ -179,10 +186,9 @@ export const config = {
   hasuraEndpoint,
   agentToken,
   hasuraJwt,
-  apiConnected: missingOrPlaceholderApiConfig.length === 0,
-  apiSetupMessage: missingOrPlaceholderApiConfig.length > 0
-    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable the hosted app, chat relay, and Hasura-backed context.`
-    : '',
+  localOnlyMode,
+  apiConnected,
+  apiSetupMessage,
 
   llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
   llmModelPreset: effectiveLlmPreset?.key ?? '',

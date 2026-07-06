@@ -78,10 +78,23 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
   const tools = Array.isArray(toolkit.tools) ? toolkit.tools : [];
   assert.deepEqual(
     tools.map((item) => item.name),
-    ['git_status', 'git_diff', 'git_log', 'git_branch', 'git_show', 'git_add', 'git_commit'],
+    [
+      'git_status',
+      'git_diff',
+      'git_log',
+      'git_branch',
+      'git_show',
+      'git_add',
+      'git_commit',
+      'gh_pr_view',
+      'gh_pr_diff',
+      'gh_issue_view',
+    ],
   );
   assert.equal(toolkit.operations?.git_diff?.title, '查看 git diff');
   assert.equal(toolkit.operations?.git_commit?.title, '创建 git commit');
+  assert.equal(toolkit.operations?.gh_pr_view?.title, '查看 GitHub PR');
+  assert.equal(toolkit.operations?.gh_pr_diff?.title, '查看 GitHub PR diff');
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_add), true);
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_commit), true);
 

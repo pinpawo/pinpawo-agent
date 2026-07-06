@@ -10,7 +10,7 @@ import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
-const MAX_GIT_OUTPUT_CHARS = 12_000;
+const MAX_GIT_OUTPUT_CHARS = 30_000;
 const execFileAsync = promisify(execFile);
 
 type GitCommandResult = {
@@ -71,6 +71,40 @@ export async function runGit(args: string[], cwd?: string) {
     }
     return formatGitResult({ error: err instanceof Error ? err : new Error(String(err)) });
   }
+}
+
+async function runGh(args: string[], cwd?: string) {
+  const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
+  try {
+    const result = await execFileAsync('gh', args, {
+      cwd: repo,
+      encoding: 'utf-8',
+      timeout: 20_000,
+      maxBuffer: 1024 * 512,
+    });
+    return formatGitResult(result);
+  } catch (err) {
+    if (err instanceof Error && ('stdout' in err || 'stderr' in err)) {
+      const errorRecord = err as Error & { stdout?: unknown; stderr?: unknown; code?: unknown };
+      return formatGitResult({
+        stdout: errorRecord.stdout,
+        stderr: errorRecord.stderr,
+        status: typeof errorRecord.code === 'number'
+          ? errorRecord.code
+          : null,
+        error: errorRecord,
+      });
+    }
+    return formatGitResult({ error: err instanceof Error ? err : new Error(String(err)) });
+  }
+}
+
+function normalizeGhTarget(value: string | undefined, label: string) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    throw new Error(`${label} is required`);
+  }
+  return trimmed;
 }
 
 const gitPathspecSchema = z.array(z.string().min(1)).optional();
@@ -213,6 +247,45 @@ export const gitCommitTool = tool(
   },
 );
 
+export const ghPrViewTool = tool(
+  async ({ cwd, pr }: { cwd?: string; pr: string }) =>
+    runGh(['pr', 'view', normalizeGhTarget(pr, 'pr'), '--comments'], cwd),
+  {
+    name: 'gh_pr_view',
+    description: '使用 GitHub CLI 查看 PR 元数据、描述、review 和评论。pr 可为 PR 编号、URL 或分支名；默认当前 workdir 仓库。',
+    schema: z.object({
+      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+      pr: z.string().min(1).describe('PR 编号、URL 或分支名'),
+    }),
+  },
+);
+
+export const ghPrDiffTool = tool(
+  async ({ cwd, pr }: { cwd?: string; pr: string }) =>
+    runGh(['pr', 'diff', normalizeGhTarget(pr, 'pr'), '--patch'], cwd),
+  {
+    name: 'gh_pr_diff',
+    description: '使用 GitHub CLI 查看 PR patch diff。pr 可为 PR 编号、URL 或分支名；用于代码 review，不要用 browser/http_fetch 拉取 PR diff。',
+    schema: z.object({
+      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+      pr: z.string().min(1).describe('PR 编号、URL 或分支名'),
+    }),
+  },
+);
+
+export const ghIssueViewTool = tool(
+  async ({ cwd, issue }: { cwd?: string; issue: string }) =>
+    runGh(['issue', 'view', normalizeGhTarget(issue, 'issue'), '--comments'], cwd),
+  {
+    name: 'gh_issue_view',
+    description: '使用 GitHub CLI 查看 issue 元数据、描述和评论。issue 可为 issue 编号或 URL；默认当前 workdir 仓库。',
+    schema: z.object({
+      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+      issue: z.string().min(1).describe('Issue 编号或 URL'),
+    }),
+  },
+);
+
 export const gitTools = [
   gitStatusTool as NamedStructuredTool<'git_status'>,
   gitDiffTool as NamedStructuredTool<'git_diff'>,
@@ -221,6 +294,9 @@ export const gitTools = [
   gitShowTool as NamedStructuredTool<'git_show'>,
   gitAddTool as NamedStructuredTool<'git_add'>,
   gitCommitTool as NamedStructuredTool<'git_commit'>,
+  ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
+  ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
+  ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
 ] as const;
 
 export const gitOperationMetadata = {
@@ -277,6 +353,33 @@ export const gitOperationMetadata = {
       return {
         target: readString(record, 'cwd'),
         summary: readString(record, 'message'),
+      };
+    },
+  },
+  gh_pr_view: {
+    title: '查看 GitHub PR',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'pr') ?? readString(record, 'cwd'),
+      };
+    },
+  },
+  gh_pr_diff: {
+    title: '查看 GitHub PR diff',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'pr') ?? readString(record, 'cwd'),
+      };
+    },
+  },
+  gh_issue_view: {
+    title: '查看 GitHub issue',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'issue') ?? readString(record, 'cwd'),
       };
     },
   },

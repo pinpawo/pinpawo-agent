@@ -29,7 +29,7 @@ npx pinpawo-local-agent tui
 - `~/.pinpawo/capabilities/` for user capabilities.
 - `~/.pinpawo/capabilities/hello-pinpawo/` as a minimal capability that validates and loads.
 
-Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Use `pinpawo-agent login` for interactive credential setup, `pinpawo-agent setup` to check missing config and next steps, or edit `~/.pinpawo/.env` directly. Browser automation uses Playwright with Google Chrome.
+Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Use `pinpawo-agent login` for interactive credential setup, `pinpawo-agent setup` to check missing config and next steps, or edit `~/.pinpawo/.env` directly. Set `PINPAWO_LOCAL_ONLY=1` to start without hosted API, WebSocket relay, or Hasura GraphQL connections even when saved server credentials exist. Browser automation uses Playwright with Google Chrome.
 
 For a local repository smoke test:
 

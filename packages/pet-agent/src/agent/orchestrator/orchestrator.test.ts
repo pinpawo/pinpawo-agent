@@ -45,6 +45,7 @@ import {
 import { RemoveMessage } from '@langchain/core/messages';
 import { reuseOrAppendRunDelegation, updateRunDelegationResult } from './delegations';
 import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
+import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
 import type { RunDelegation, TaskActiveDelegation } from './types';
 import type { OrchestratorStateType } from './state';
 
@@ -492,7 +493,7 @@ test('without forcedCapabilityNames the discovery path runs as before (no-regres
   assert.equal(discoveryCalled, true, 'discovery LLM call must run when no forced names provided');
 });
 
-test('a prior subagent announce reaches the decision as context and the answer node un-clipped', async () => {
+test('a completed subagent announce reaches the decision, while answer node only acknowledges delegation completion', async () => {
   let decisionInput = '';
   let answerInput = '';
   const model = {
@@ -558,10 +559,13 @@ test('a prior subagent announce reaches the decision as context and the answer n
   assert.match(decisionInput, /END_OF_FULL_SUBAGENT_RESULT/);
   // The dedicated answer node generates the final reply...
   assert.equal(result.messages.at(-1)?.content, 'answered');
-  // ...and it receives the FULL (un-clipped) subagent announce from history,
-  // so it can reproduce prior results faithfully instead of re-fabricating them.
+  // ...and still receives complete main history; the extra completion context
+  // tells it to close the delegation turn instead of re-summarizing the result.
   assert.match(answerInput, /END_OF_FULL_SUBAGENT_RESULT/);
-  assert.ok(answerInput.includes('A'.repeat(1400)), 'answer node must see the un-clipped announce body');
+  assert.ok(answerInput.includes('A'.repeat(1400)), 'answer node should still see complete main history');
+  assert.match(answerInput, /delegation completion acknowledgement/);
+  assert.match(answerInput, /delegation run：/);
+  assert.match(answerInput, /delegated task：读取文件并运行 lint/);
 });
 
 test('answer node still sees compacted older results when the user asks to re-show them', async () => {
@@ -604,18 +608,15 @@ test('answer node still sees compacted older results when the user asks to re-sh
   assert.match(answerInput, /COMPACTED_RESULT_MARKER/);
 });
 
-test('delegation outcome answer lets the answer node reproduce the completed announce from full history', async () => {
-  // The answer node sees the full conversation (including the completed announce)
-  // and is responsible for reproducing it; the decision node no longer carries
-  // any reply text. Here the answer mock echoes the announce it finds in history.
+test('delegation outcome answer asks LLM for a short delegation completion reply with full main history', async () => {
+  let answerInput = '';
   const announceMarker = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
   const routeModel = {
     invoke: async (messages: unknown[]) => {
-      const joined = (messages as Array<{ content?: unknown }>)
+      answerInput = (messages as Array<{ content?: unknown }>)
         .map((m) => String(m?.content ?? ''))
         .join('\n');
-      const echoed = joined.includes(announceMarker) ? announceMarker : '(announce missing from history)';
-      return new AIMessage(echoed);
+      return new AIMessage('执行器已经交付结果，我这边已完成收尾。');
     },
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
@@ -659,7 +660,11 @@ test('delegation outcome answer lets the answer node reproduce the completed ann
   });
   const finalMessageText = String(result.messages.at(-1)?.content ?? '');
 
-  assert.equal(finalMessageText, announceText);
+  assert.equal(finalMessageText, '执行器已经交付结果，我这边已完成收尾。');
+  assert.match(answerInput, new RegExp(announceMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(answerInput, /delegation completion acknowledgement/);
+  assert.match(answerInput, /delegation 来源：general/);
+  assert.match(answerInput, /delegated task：搜索并整理 vibecoding 模型排行榜。/);
 });
 
 test('answer decision emits no reply itself and routes to the dedicated answer node', async () => {
@@ -2301,8 +2306,47 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   assert.deepEqual(getMessageHandoffSource(copy), {
     handoffFrom: 'capability:explore',
     delegationId: 'd1',
+    runId: 't1',
     task: '查动态',
   });
+});
+
+test('handoff idempotency is scoped by delegation lane and run id', () => {
+  const oldCopy = new AIMessage('old run result');
+  setPinpetMeta(oldCopy, {
+    handoffFrom: 'general',
+    delegationId: 'same-delegation',
+    runId: 'run-old',
+    task: 'same task',
+  });
+  const currentCopy = new AIMessage('current run result');
+  setPinpetMeta(currentCopy, {
+    handoffFrom: 'general',
+    delegationId: 'same-delegation',
+    runId: 'run-current',
+    task: 'same task',
+  });
+
+  assert.equal(
+    findLatestHandoffCopyForDelegation(
+      [oldCopy, currentCopy],
+      'same-delegation',
+      'general',
+      'run-current',
+      getMessageHandoffSource,
+    ),
+    currentCopy,
+  );
+  assert.equal(
+    findLatestHandoffCopyForDelegation(
+      [oldCopy, currentCopy],
+      'same-delegation',
+      'general',
+      'run-missing',
+      getMessageHandoffSource,
+    ),
+    null,
+  );
 });
 
 test('buildSubagentHandoff carries announcement artifact refs', () => {
@@ -2356,6 +2400,7 @@ test('buildSubagentHandoff carries announcement artifact refs', () => {
   assert.deepEqual(source, {
     handoffFrom: 'capability:explore',
     delegationId: 'd-announce',
+    runId: 'run-1',
     task: '探索任务',
   });
 });
@@ -2392,6 +2437,7 @@ test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () =
   assert.deepEqual(source, {
     handoffFrom: 'general',
     delegationId: 'd-keep',
+    runId: 'run-5',
     task: '增量处理',
   });
 });
@@ -2508,6 +2554,7 @@ test('readRecentAnnounces parses handoff artifact footer values with spaces and 
   setPinpetMeta(handoffCopy, {
     handoffFrom: 'capability:explore',
     delegationId: 'd-space',
+    runId: 'run-space',
     task: '空间+等号场景',
   });
 
@@ -2698,7 +2745,8 @@ test('delegation outcome continue decision can re-enter main and finalize handof
     .find((source) => source?.delegationId === activeDelegation.id);
   assert.ok(handoffSource);
   assert.equal(handoffSource.handoffFrom, 'general');
-  assert.equal(handoffSource.task, activeDelegation.task);
+  assert.equal(handoffSource.runId, input.runId);
+  assert.equal(handoffSource.task, '继续处理剩余工作。');
   // Final handoff on answer should clear lane transcript for finished continuation.
   assert.equal(laneMessages(state.messages, 'general', input.runId, activeDelegation.id)
     .filter((message) => getMessageIsAnnounce(message)).length === 0, true);
@@ -3114,6 +3162,7 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   assert.deepEqual(getMessageHandoffSource(stateMessages[1]), {
     handoffFrom: 'general',
     delegationId: 'task-complete',
+    runId: 'turn-1',
     task: '检查项目并汇报',
   });
   // No lane-tagged messages for this delegation remain.

@@ -30,6 +30,8 @@ export function buildDelegationHandoffInstruction(params: {
     params.task ? `- 当前任务：${params.task}` : null,
     params.contextSummary ? `- 上下文摘要：${params.contextSummary}` : null,
     '- 不要重新做路由判断；如果信息足够，就直接完成当前任务。',
+    '- 最后一条自然语言回复必须是可以交给 orchestrator 的任务结果或明确进展摘要。',
+    '- 不要把工具调用过程、调试流水、内部计划或“正在处理”类中间状态作为最后交接内容。',
   ].filter(Boolean);
 
   return lines.join('\n');

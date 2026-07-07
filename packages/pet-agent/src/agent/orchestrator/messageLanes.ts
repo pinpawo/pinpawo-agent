@@ -236,6 +236,7 @@ export function tagNewLaneMessages(
 export type HandoffSource = {
   handoffFrom: MessageLane;
   delegationId: string;
+  runId: string;
   task: string | null;
 };
 
@@ -246,6 +247,7 @@ export function getMessageHandoffSource(message: BaseMessage): HandoffSource | n
   return {
     handoffFrom: handoffFrom as MessageLane,
     delegationId: typeof meta.delegationId === 'string' ? meta.delegationId : '',
+    runId: typeof meta.runId === 'string' ? meta.runId : '',
     task: typeof meta.task === 'string' ? meta.task : null,
   };
 }
@@ -319,6 +321,7 @@ export function buildSubagentHandoff(params: {
   setPinpetMeta(handoffCopy, {
     handoffFrom: params.lane,
     delegationId: params.delegationId,
+    runId: params.runId,
     task,
   });
 

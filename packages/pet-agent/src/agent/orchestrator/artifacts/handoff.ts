@@ -52,6 +52,7 @@ export type HandOffFooterArtifactRefWithKind = HandOffFooterArtifactRef & { kind
 export type HandoffMessageSource = {
   handoffFrom: MessageLane;
   delegationId: string;
+  runId: string;
 };
 export type HandoffSourceResolver = (message: BaseMessage) => HandoffMessageSource | null;
 
@@ -271,6 +272,7 @@ export function findLatestHandoffCopyForDelegation(
   messages: BaseMessage[],
   delegationId: string,
   handoffFrom: MessageLane,
+  runId: string,
   readHandoffSource: HandoffSourceResolver,
 ): AIMessage | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -282,7 +284,11 @@ export function findLatestHandoffCopyForDelegation(
     if (!source) {
       continue;
     }
-    if (source.delegationId !== delegationId || source.handoffFrom !== handoffFrom) {
+    if (
+      source.delegationId !== delegationId
+      || source.handoffFrom !== handoffFrom
+      || source.runId !== runId
+    ) {
       continue;
     }
     return message as AIMessage;

@@ -162,6 +162,7 @@ async function buildDecisionContext(params: {
             state.messages,
             activeDelegation.id,
             activeDelegation.lane,
+            activeDelegation.transcriptRunId,
             getMessageHandoffSource,
           );
           if (!latestCopy) return proposedMessages;
@@ -396,8 +397,8 @@ function buildDecisionResult(params: {
   // the next decision branch runs.
   // - answer decision: announce is final for this delegation (old lane transcript
   //   can be cleared).
-  // - continue decision: preserve lane transcript for continuation while still
-  //   keeping the latest announce in main for better downstream judgment.
+  // - continue decision: preserve lane transcript and do not write a main
+  //   handoff copy yet; a non-terminal announce is only decision context.
   //
   // Single-line delegation handoff is driven by taskActiveDelegation. run
   // summaries are not the source of truth for unfinished task lifecycle.
@@ -405,13 +406,13 @@ function buildDecisionResult(params: {
     && Boolean(activeDelegation && runPendingDelegation && activeDelegation.id !== runPendingDelegation.id);
   const handoffMessages: BaseMessage[] = [];
   const handedOffDelegationIds = new Set<string>();
-  if (preDecisionHandoffMessages) {
-    handoffMessages.push(...preDecisionHandoffMessages);
-  }
   const shouldClearLaneForHandoff = kind === 'delegation_outcome'
     && actionKind === 'answer'
     && canHandoffActiveDelegation
     && Boolean(activeDelegation);
+  if ((shouldClearLaneForHandoff || replacingActiveDelegation) && preDecisionHandoffMessages) {
+    handoffMessages.push(...preDecisionHandoffMessages);
+  }
   if ((shouldClearLaneForHandoff || replacingActiveDelegation) && activeDelegation) {
     const messages = buildSubagentHandoff({
       messages: state.messages,

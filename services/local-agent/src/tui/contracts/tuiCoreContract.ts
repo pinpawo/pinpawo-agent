@@ -103,6 +103,9 @@ export type TuiCoreRunSnapshot = {
 export type TuiCoreRuntimeSnapshot = {
   model?: string;
   cwd?: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  workspaceRoot?: string;
   stateRoot?: string;
   studioConfigPath?: string;
   studioConfigSource?: string;

@@ -49,12 +49,18 @@ export function buildLocalServerTuiRuntimeSnapshot(
     : legacyAvailable
       ? DEFAULT_STUDIO_CONFIG_PATH
       : preferredPath;
+  const effectiveWorkdir = deps.runtimeConfig?.workdir ?? deps.workdir;
   return {
     model: deps.llmConfig.model,
     ...(deps.llmConfig.contextWindowTokens !== undefined
       ? { contextWindow: deps.llmConfig.contextWindowTokens }
       : {}),
-    cwd: deps.workdir,
+    cwd: effectiveWorkdir,
+    ...(deps.runtimeConfig?.workspace ? {
+      workspaceId: deps.runtimeConfig.workspace.id,
+      workspaceName: deps.runtimeConfig.workspace.name,
+      workspaceRoot: deps.runtimeConfig.workspace.rootPath,
+    } : {}),
     ...(deps.runtimeConfig ? {
       stateRoot: deps.runtimeConfig.stateRoot,
       studioConfigPath: deps.runtimeConfig.studioConfigPath,

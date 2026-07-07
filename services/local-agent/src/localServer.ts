@@ -24,7 +24,7 @@ import { LocalServerChatHandler } from './localServerChatHandler';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { buildLocalServerTuiSnapshot } from './localServerTuiSnapshot';
 import type { LocalServerDeps } from './localServerTypes';
-import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { buildWorkspaceRuntimeConfig } from './runtimeConfig';
 
 export type { LocalServerDeps };
 
@@ -32,7 +32,9 @@ const INTERRUPT_FORCE_REPLY_MS = 1800;
 
 export function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
   return new Promise((resolve, reject) => {
-    const effectiveRuntimeConfig = deps.runtimeConfig ?? buildLocalAgentRuntimeConfig(deps.workdir);
+    const effectiveRuntimeConfig = deps.runtimeConfig ?? buildWorkspaceRuntimeConfig({
+      workdir: deps.workdir,
+    });
     const depsWithRuntime = deps.runtimeConfig ? deps : {
       ...deps,
       runtimeConfig: effectiveRuntimeConfig,

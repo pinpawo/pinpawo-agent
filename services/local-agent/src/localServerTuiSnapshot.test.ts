@@ -20,7 +20,24 @@ test('buildLocalServerTuiSnapshot returns native core snapshot shape', () => {
         model: 'test-model',
         contextWindowTokens: 32000,
       },
-      workdir: '/tmp/work',
+      workdir: '/tmp/legacy-work',
+      runtimeConfig: {
+        workdir: '/tmp/work',
+        workspace: {
+          id: 'workspace-test',
+          name: 'Workspace Test',
+          rootPath: '/tmp/work',
+        },
+        stateRoot: '/tmp/work/.pinpawo',
+        studioConfigPath: '/tmp/work/.pinpawo/studio.json',
+        studioDueRunsPath: '/tmp/work/.pinpawo/studio-due-runs.json',
+        petsDir: '/tmp/work/.pinpawo/pets',
+        studioWikiBaseDir: '/tmp/work/.pinpawo/studio-wiki',
+        checkpointPath: '/tmp/work/.pinpawo/checkpoints.json',
+        tuiCheckpointPath: '/tmp/work/.pinpawo/checkpoints-tui.json',
+        tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
+        capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
+      },
     } as LocalServerDeps,
     pendingReview: {
       requestId: 'req-review',
@@ -50,4 +67,8 @@ test('buildLocalServerTuiSnapshot returns native core snapshot shape', () => {
   assert.equal(snapshot.runs[0]?.pendingReview?.petId, 'pet-a');
   assert.equal(snapshot.runtime?.model, 'test-model');
   assert.equal(snapshot.runtime?.contextWindow, 32000);
+  assert.equal(snapshot.runtime?.cwd, '/tmp/work');
+  assert.equal(snapshot.runtime?.workspaceId, 'workspace-test');
+  assert.equal(snapshot.runtime?.workspaceName, 'Workspace Test');
+  assert.equal(snapshot.runtime?.workspaceRoot, '/tmp/work');
 });

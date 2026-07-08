@@ -103,6 +103,7 @@ export type TuiCoreRuntimeSnapshot = {
   cwd?: string;
   stateRoot?: string;
   studioConfigPath?: string;
+  studioDueRunsPath?: string;
   studioConfigSource?: string;
   studioConfigActivePath?: string;
   legacyStudioConfigPath?: string;

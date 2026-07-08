@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { BuiltinGlobalReviewPolicyMode, ReviewOption } from '@pinpawo/pet-agent';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
-import { config } from '../config';
+import { config, setConfig } from '../config';
 import { TUI_TEXT } from './render/text';
 import { formatNow } from './render/terminalText';
 import { TuiLocalServerClient } from './tuiLocalServerClient';
@@ -290,7 +290,7 @@ export class TuiRuntimeController {
   }
 
   updateRuntimeConfig(params: { globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode }) {
-    config.globalReviewPolicyMode = params.globalReviewPolicyMode;
+    setConfig({ globalReviewPolicyMode: params.globalReviewPolicyMode });
     return this.sendRuntimeConfigUpdate();
   }
 

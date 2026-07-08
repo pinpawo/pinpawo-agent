@@ -131,6 +131,30 @@ function required(envKey: string, storedKey: keyof typeof stored, label: string)
   return val;
 }
 
+export type Config = Readonly<{
+  apiBaseUrl: string;
+  hasuraEndpoint: string;
+  agentToken: string;
+  hasuraJwt: string;
+  apiConnected: boolean;
+  apiSetupMessage: string;
+  llmApiKey: string;
+  llmModelPreset: string;
+  llmBaseUrl: string;
+  llmModel: string;
+  llmContextWindowTokens: number;
+  structuredOutputAutoRepair: boolean;
+  structuredOutputRepairMaxRetries?: number;
+  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  workdir: string;
+  browserBackend: string;
+  capabilityDirs: readonly string[];
+  pollIntervalSeconds: number;
+  localServerPort: number;
+}>;
+
+export type ConfigInput = Partial<Config>;
+
 const apiBaseUrl = optional('API_BASE_URL', 'api_base_url').replace(/\/$/, '');
 const hasuraEndpoint = optional('HASURA_ENDPOINT', 'hasura_endpoint').replace(/\/$/, '');
 const agentToken = optional('AGENT_TOKEN', 'agent_token');
@@ -174,42 +198,70 @@ const llmContextWindowTokens =
   ?? inferLlmContextWindowTokens(llmModel)
   ?? 32000;
 
-export const config = {
-  apiBaseUrl,
-  hasuraEndpoint,
-  agentToken,
-  hasuraJwt,
-  apiConnected: missingOrPlaceholderApiConfig.length === 0,
-  apiSetupMessage: missingOrPlaceholderApiConfig.length > 0
-    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable the hosted app, chat relay, and Hasura-backed context.`
-    : '',
+function readCapabilityDirs(): string[] {
+  const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(':').filter(Boolean) ?? [];
+  const fromStored = (stored.capability_dirs ?? []);
+  return [...new Set([...fromEnv, ...fromStored])];
+}
 
-  llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
-  llmModelPreset: effectiveLlmPreset?.key ?? '',
-  llmBaseUrl,
-  llmModel,
-  llmContextWindowTokens,
-  structuredOutputAutoRepair: getBoolean(
-    'LLM_STRUCTURED_OUTPUT_AUTO_REPAIR',
-    'structured_output_auto_repair',
-  ) ?? false,
-  structuredOutputRepairMaxRetries: getNumber(
-    'LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES',
-    'structured_output_repair_max_retries',
-  ),
-  globalReviewPolicyMode: getGlobalReviewPolicyMode(),
+function freezeConfig(input: Config): Config {
+  return Object.freeze({
+    ...input,
+    capabilityDirs: Object.freeze([...input.capabilityDirs]),
+  });
+}
 
-  workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
-  browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
+function readConfigDefaults(): Config {
+  return freezeConfig({
+    apiBaseUrl,
+    hasuraEndpoint,
+    agentToken,
+    hasuraJwt,
+    apiConnected: missingOrPlaceholderApiConfig.length === 0,
+    apiSetupMessage: missingOrPlaceholderApiConfig.length > 0
+      ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable the hosted app, chat relay, and Hasura-backed context.`
+      : '',
 
-  /** Extra capability plugin directories beyond ~/.pinpawo/capabilities/ */
-  get capabilityDirs(): string[] {
-    const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(':').filter(Boolean) ?? [];
-    const fromStored = (stored.capability_dirs ?? []);
-    return [...new Set([...fromEnv, ...fromStored])];
-  },
+    llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
+    llmModelPreset: effectiveLlmPreset?.key ?? '',
+    llmBaseUrl,
+    llmModel,
+    llmContextWindowTokens,
+    structuredOutputAutoRepair: getBoolean(
+      'LLM_STRUCTURED_OUTPUT_AUTO_REPAIR',
+      'structured_output_auto_repair',
+    ) ?? false,
+    structuredOutputRepairMaxRetries: getNumber(
+      'LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES',
+      'structured_output_repair_max_retries',
+    ),
+    globalReviewPolicyMode: getGlobalReviewPolicyMode(),
 
-  pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
+    workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
+    browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
 
-  localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
-};
+    capabilityDirs: readCapabilityDirs(),
+
+    pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
+
+    localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
+  });
+}
+
+const defaultConfig = readConfigDefaults();
+
+export function buildConfig(input: ConfigInput = {}, defaults: Config = defaultConfig): Config {
+  return freezeConfig({
+    ...defaults,
+    ...input,
+    capabilityDirs: input.capabilityDirs ?? defaults.capabilityDirs,
+  });
+}
+
+export let config: Config = defaultConfig;
+
+export function setConfig(input: ConfigInput | ((current: Config) => ConfigInput)): Config {
+  const patch = typeof input === 'function' ? input(config) : input;
+  config = buildConfig(patch, config);
+  return config;
+}

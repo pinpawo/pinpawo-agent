@@ -46,6 +46,23 @@ test('isMissingOrGeneratedApiPlaceholder detects init scaffold values', async ()
   assert.equal(isMissingOrGeneratedApiPlaceholder('API_BASE_URL', 'https://api.example.test'), false);
 });
 
+test('setConfig applies updates through a frozen config snapshot', async () => {
+  const mod = await loadConfigHelpers();
+  const previousWorkdir = mod.config.workdir;
+  try {
+    const next = mod.setConfig({ workdir: '/tmp/pinpawo-controlled-config' });
+    assert.equal(next.workdir, '/tmp/pinpawo-controlled-config');
+    assert.equal(mod.config.workdir, '/tmp/pinpawo-controlled-config');
+    assert.equal(Object.isFrozen(next), true);
+    assert.equal(Object.isFrozen(next.capabilityDirs), true);
+    assert.throws(() => {
+      (next as { workdir: string }).workdir = '/tmp/direct-mutation';
+    }, TypeError);
+  } finally {
+    mod.setConfig({ workdir: previousWorkdir });
+  }
+});
+
 test('config workdir defaults to process cwd when env and stored config are absent', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
   const output = execFileSync(process.execPath, [

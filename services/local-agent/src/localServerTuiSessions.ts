@@ -6,7 +6,7 @@ import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
 import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
-import type { LocalServerDeps } from './localServerTypes';
+import { getLocalServerRuntimeConfig, type LocalServerDeps } from './localServerTypes';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import {
@@ -156,7 +156,7 @@ export class LocalServerTuiSessionService {
       checkpoint: this.checkpointer,
       userCapabilities: deps.userCapabilities,
       capabilityArtifactStore: deps.capabilityArtifactStore,
-      workdir: deps.workdir,
+      workdir: getLocalServerRuntimeConfig(deps).workdir,
       sessionStartedAt: session.createdAt,
     });
   }

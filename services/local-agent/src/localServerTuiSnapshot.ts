@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import type {
   TuiCoreRuntimeSnapshot,
   TuiCoreSessionSnapshot,
@@ -7,7 +6,7 @@ import type {
 import type { PendingReviewSnapshot } from './localServerChatHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import type { TuiHistoryMessage } from './localServerTuiSessions';
-import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
+import { buildTuiCoreRuntimeSnapshot } from './localConfigProjection';
 
 export function buildLocalServerTuiSnapshot(params: {
   sessionId: string;
@@ -41,34 +40,7 @@ export function buildLocalServerTuiSnapshot(params: {
 export function buildLocalServerTuiRuntimeSnapshot(
   deps: LocalServerDeps,
 ): TuiCoreRuntimeSnapshot {
-  const preferredPath = deps.runtimeConfig?.studioConfigPath ?? DEFAULT_STUDIO_CONFIG_PATH;
-  const legacyAvailable = preferredPath !== DEFAULT_STUDIO_CONFIG_PATH
-    && existsSync(DEFAULT_STUDIO_CONFIG_PATH);
-  const activePath = existsSync(preferredPath)
-    ? preferredPath
-    : legacyAvailable
-      ? DEFAULT_STUDIO_CONFIG_PATH
-      : preferredPath;
-  return {
-    model: deps.llmConfig.model,
-    ...(deps.llmConfig.contextWindowTokens !== undefined
-      ? { contextWindow: deps.llmConfig.contextWindowTokens }
-      : {}),
-    cwd: deps.workdir,
-    ...(deps.runtimeConfig ? {
-      stateRoot: deps.runtimeConfig.stateRoot,
-      studioConfigPath: deps.runtimeConfig.studioConfigPath,
-      petsDir: deps.runtimeConfig.petsDir,
-      studioWikiBaseDir: deps.runtimeConfig.studioWikiBaseDir,
-    } : {}),
-    studioConfigSource: existsSync(preferredPath)
-      ? (deps.runtimeConfig ? 'workdir' : 'legacy_home')
-      : legacyAvailable
-        ? 'legacy_home'
-        : 'missing',
-    studioConfigActivePath: activePath,
-    legacyStudioConfigPath: DEFAULT_STUDIO_CONFIG_PATH,
-  };
+  return buildTuiCoreRuntimeSnapshot(deps);
 }
 
 function timelineFromHistoryMessages(messages: TuiHistoryMessage[]): TuiCoreTimelineEntry[] {

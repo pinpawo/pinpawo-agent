@@ -6,7 +6,7 @@ import type {
   StudioTurnEvent,
   StudioTurnResult,
 } from '@pinpawo/pet-agent';
-import type { LocalServerDeps } from './localServerTypes';
+import { getLocalServerRuntimeConfig, type LocalServerDeps } from './localServerTypes';
 import {
   buildStudioForTurn,
   type BuildStudioInput,
@@ -44,7 +44,7 @@ export class StudioRunService {
 
   async run(request: StudioRunServiceRequest): Promise<StudioRunServiceResult> {
     const { deps, runId, userRequest } = request;
-    const effectiveWorkdir = deps.runtimeConfig?.workdir ?? deps.workdir;
+    const { workdir } = getLocalServerRuntimeConfig(deps);
     const identity: StudioRunIdentity = buildStudioRunIdentity({
       runId,
       conversationId: request.conversationId,
@@ -63,7 +63,7 @@ export class StudioRunService {
       runId: identity.runId,
       conversationId: identity.conversationId,
       idempotencyKey: identity.idempotencyKey,
-      workdir: effectiveWorkdir,
+      workdir,
       turn,
     };
   }
@@ -71,6 +71,7 @@ export class StudioRunService {
 
 function buildStudioInputFromDeps(request: StudioRunServiceRequest): BuildStudioInput {
   const { deps } = request;
+  const runtimeConfig = getLocalServerRuntimeConfig(deps);
   return {
     llmConfig: deps.llmConfig,
     capabilities: [
@@ -80,11 +81,9 @@ function buildStudioInputFromDeps(request: StudioRunServiceRequest): BuildStudio
     toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
     ownerUserId: request.ownerUserId ?? null,
     bridge: request.bridge,
-    workdir: deps.runtimeConfig?.workdir ?? deps.workdir,
-    ...(deps.runtimeConfig ? {
-      studioConfigPath: deps.runtimeConfig.studioConfigPath,
-      petsDir: deps.runtimeConfig.petsDir,
-      wikiBaseDir: deps.runtimeConfig.studioWikiBaseDir,
-    } : {}),
+    workdir: runtimeConfig.workdir,
+    studioConfigPath: runtimeConfig.studioConfigPath,
+    petsDir: runtimeConfig.petsDir,
+    wikiBaseDir: runtimeConfig.studioWikiBaseDir,
   };
 }

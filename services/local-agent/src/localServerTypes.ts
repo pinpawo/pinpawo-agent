@@ -2,7 +2,7 @@ import type { AgentCapability, AgentToolkit, CapabilityArtifactStore } from '@pi
 import type { LocalStudioDueRunScheduler } from './localStudioDueRunScheduler';
 import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
-import type { LocalAgentRuntimeConfig } from './runtimeConfig';
+import { buildLocalAgentRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
 
 export type LocalServerDeps = {
   actorId: string;
@@ -24,3 +24,21 @@ export type LocalServerDeps = {
     userCapabilities: LoadedUserCapability[];
   }>;
 };
+
+export type NormalizedLocalServerDeps = Omit<LocalServerDeps, 'workdir' | 'runtimeConfig'> & {
+  workdir: string;
+  runtimeConfig: LocalAgentRuntimeConfig;
+};
+
+export function getLocalServerRuntimeConfig(deps: LocalServerDeps): LocalAgentRuntimeConfig {
+  return deps.runtimeConfig ?? buildLocalAgentRuntimeConfig(deps.workdir);
+}
+
+export function normalizeLocalServerDeps(deps: LocalServerDeps): NormalizedLocalServerDeps {
+  const runtimeConfig = getLocalServerRuntimeConfig(deps);
+  return {
+    ...deps,
+    workdir: runtimeConfig.workdir,
+    runtimeConfig,
+  };
+}

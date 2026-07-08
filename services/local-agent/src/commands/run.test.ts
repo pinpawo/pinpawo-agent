@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { config } from '../config';
+import { config, setConfig } from '../config';
 import { buildRunAgentRuntimeConfig } from './run';
 
-test('buildRunAgentRuntimeConfig applies explicit workdir to runtime config and global config fallback', () => {
+test('buildRunAgentRuntimeConfig applies explicit workdir through runtime config and config setter', () => {
   const previous = config.workdir;
   const previousCwd = process.cwd();
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-run-workdir-'));
@@ -22,6 +22,6 @@ test('buildRunAgentRuntimeConfig applies explicit workdir to runtime config and 
     assert.equal(process.cwd(), expectedWorkdir);
   } finally {
     process.chdir(previousCwd);
-    config.workdir = previous;
+    setConfig({ workdir: previous });
   }
 });

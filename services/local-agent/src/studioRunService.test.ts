@@ -179,9 +179,9 @@ test('StudioRunService falls back to deps.workdir when runtimeConfig is absent',
 
   assert.equal(buildInputs.length, 1);
   assert.equal(buildInputs[0]?.workdir, '/tmp/legacy-workdir');
-  assert.equal(buildInputs[0]?.studioConfigPath, undefined);
-  assert.equal(buildInputs[0]?.petsDir, undefined);
-  assert.equal(buildInputs[0]?.wikiBaseDir, undefined);
+  assert.equal(buildInputs[0]?.studioConfigPath, '/tmp/legacy-workdir/.pinpawo/studio.json');
+  assert.equal(buildInputs[0]?.petsDir, '/tmp/legacy-workdir/.pinpawo/pets');
+  assert.equal(buildInputs[0]?.wikiBaseDir, '/tmp/legacy-workdir/.pinpawo/studio-wiki');
   assert.equal(result.idempotencyKey, 'studio:run-2:run:run-2');
   assert.equal(result.workdir, '/tmp/legacy-workdir');
   assert.equal(result.turn.outcome.outcome, 'done');

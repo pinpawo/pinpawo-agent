@@ -23,8 +23,7 @@ import { ensureLocalServerAuthToken } from './localServerAuth';
 import { LocalServerChatHandler } from './localServerChatHandler';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { buildLocalServerTuiSnapshot } from './localServerTuiSnapshot';
-import type { LocalServerDeps } from './localServerTypes';
-import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { normalizeLocalServerDeps, type LocalServerDeps } from './localServerTypes';
 
 export type { LocalServerDeps };
 
@@ -32,23 +31,20 @@ const INTERRUPT_FORCE_REPLY_MS = 1800;
 
 export function startLocalServer(port: number, deps: LocalServerDeps): Promise<void> {
   return new Promise((resolve, reject) => {
-    const effectiveRuntimeConfig = deps.runtimeConfig ?? buildLocalAgentRuntimeConfig(deps.workdir);
-    const depsWithRuntime = deps.runtimeConfig ? deps : {
-      ...deps,
-      runtimeConfig: effectiveRuntimeConfig,
-    };
+    const depsWithRuntime = normalizeLocalServerDeps(deps);
+    const { runtimeConfig } = depsWithRuntime;
     const chatGraphService = new LocalAgentGraphService();
     const tuiSessions = new LocalServerTuiSessionService({
       graphService: chatGraphService,
-      runtimeConfig: effectiveRuntimeConfig,
+      runtimeConfig,
     });
     const studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
     const studioDueRunScheduler = deps.studioDueRunScheduler
       ?? new LocalStudioDueRunScheduler({
         store: new FileStudioDueRunStore({
-          filePath: effectiveRuntimeConfig.studioDueRunsPath,
+          filePath: runtimeConfig.studioDueRunsPath,
         }),
-        filterWorkdir: effectiveRuntimeConfig.workdir,
+        filterWorkdir: runtimeConfig.workdir,
       });
     const inflightRequests = new InflightRequestController<WebSocket>({
       forceInterruptMs: INTERRUPT_FORCE_REPLY_MS,

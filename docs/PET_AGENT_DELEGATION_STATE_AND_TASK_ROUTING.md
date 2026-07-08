@@ -1,6 +1,6 @@
 # 方案：delegation state 分层澄清 + task-first 路由管道
 
-> 状态：pinned direction（方向已定，未动代码）。
+> 状态：pinned direction（方向已定；Stage 0/0.5 已落地，Stage A/B 待实施）。
 > 归属：issue #308（state 命名/生命周期）+ issue #274（任务分解与 capability 路由顺序）。
 > 生命周期前缀规范以 `docs/PET_AGENT_STATE_LIFECYCLE_REFACTOR.md` §1/§2 为准，本文扩展其命名契约表。
 > handoff 语义以 `docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md` 为准，本文不改 handoff 模型。
@@ -12,7 +12,7 @@
   - search 的 query 被复合请求里所有步骤的关键词稀释，候选是"对整个请求的近似"而非"对当前步骤的匹配"；
   - task 在 `userIntentDecision` 最后一刻出生，且同一次输出还要选 lane，模型自然把整个请求塞进一个 task。
 
-两个 issue 在同一批 state 字段上汇合：`taskActiveDelegation` 是任务游标、`runDelegations` 是结论账本、`runPendingDelegation` 是下一跳命令。先澄清分层（#308），再在干净分层上改路由顺序（#274）。
+两个 issue 在同一批 state 字段上汇合：`taskActiveDelegation` 是任务游标、`runDelegationSummaries` 是结论账本、`runNextDelegation` 是下一跳命令。先澄清分层（#308），再在干净分层上改路由顺序（#274）。
 
 ## 2. 已钉住的决定（Decisions）
 
@@ -36,7 +36,7 @@
 | `runPendingDelegation` | `runNextDelegation` | run | **路由命令**（单跳） | routeDecision 节点 | `afterRouteDecision` + capability/general 节点 | 执行节点消费后置 null；run 入口 reset |
 | `runPendingFinalReply` | **删除**（D10；Stage 0 不改名，仅终点置 null） | run→— | 路由信号；目标图中 answer 路由由 `runPendingTask` 缺席派生，「已回复 → END」改 `Command goto` | — | — | — |
 | （新增） | `runPendingTask` | run | **任务命令**（管道内单段：decision → search → route） | taskDecision / outcomeDecision | capabilitySearch、routeDecision | routeDecision 落定后置 null；run 入口 reset |
-| `runDelegations` | `runDelegationSummaries` | run | **账本**：只进 prompt/decision context，永不参与控制流分支 | 执行节点追加/更新 | `buildRunDelegationContext` | run 入口 reset |
+| `runDelegations` | `runDelegationSummaries` | run | **账本**：只进 prompt/decision context，永不参与控制流分支 | 执行节点追加/更新 | `buildRunDelegationSummaryContext` | run 入口 reset |
 | `runCapabilitySearchState` | 不变 | run | search 草稿；语义更新为**每个任务边界重置** | capabilitySearch 节点 | routeDecision | 任务边界（next_task）重置；run 入口 reset |
 | `canHandoffActiveDelegation` | **删除**（D9） | — | 派生值误存为 state；改为 decision context 就地 evaluateGuard | — | — | — |
 | `taskActiveDelegation` | 不变 | task | **任务游标**，唯一 active delegation source of truth | decision result + 执行节点 | `afterContextPrep`、decision context、handoff | 任务完成 handoff 时置 null |
@@ -126,19 +126,19 @@ delegationOutcomeDecision (LLM，静态 schema)
 
 | Stage | 内容 | 图改动 | 守护 |
 |---|---|---|---|
-| 0 | #308 重命名（§3 表；`runPendingFinalReply` 不改名，仅 answer/inline 终点置 null，见 D10）+ D7 注释 + channel 前缀单测 + transient 断言 + 更新 `PET_AGENT_STATE_LIFECYCLE_REFACTOR.md` §2 表 | 无 | 纯机械，现有测试全绿即验收 |
-| 0.5 | D9：删 `canHandoffActiveDelegation` 字段，guard 内联进 decision context，删 `delegationOutcomeDecisionGuard` / `prepareUserIntentDecision` 两节点 | 有（行为等价） | 现有测试 + guard 决策事件仍可观测；也可并入 Stage A/B 顺带 |
-| A | run 入口拆 taskDecision + capabilitySearch + routeDecision，删 capabilityDiscovery，新增 `runPendingTask`；单步约束 prompt 进 taskDecision | 有 | eval:route 等价性 + 新增复合请求 eval case |
-| B | outcomeDecision 三态化，`next_task` 汇入管道；迭代预算评估；删除 `runPendingFinalReply`（D10：inline 路径改 Command goto，answer 路由按 `runPendingTask` 缺席派生） | 有 | eval:flow + 「多步请求最终全部完成」断言（观测 plan drift，决定是否启用 D3 预留的 `remaining_work`） |
-| B 捎带 | `buildDecisionResult` 里 handoff/生命周期块下沉 `delegationLifecycle.ts` | 无 | 现有测试 |
+| 0 | **已落地**：#308 重命名（§3 表；`runPendingFinalReply` 不改名，仅 answer/inline 终点置 null，见 D10）+ D7 注释 + channel 前缀单测 + transient 断言 + 更新 `PET_AGENT_STATE_LIFECYCLE_REFACTOR.md` §2 表 | 无 | 已由现有测试验收 |
+| 0.5 | **已落地**：D9：删 `canHandoffActiveDelegation` 字段，guard 内联进 decision context，删 `delegationOutcomeDecisionGuard` / `prepareUserIntentDecision` 两节点 | 有（行为等价） | 现有测试 + guard 决策事件仍可观测 |
+| A | 待实施：run 入口拆 taskDecision + capabilitySearch + routeDecision，删 capabilityDiscovery，新增 `runPendingTask`；单步约束 prompt 进 taskDecision | 有 | eval:route 等价性 + 新增复合请求 eval case |
+| B | 待实施：outcomeDecision 三态化，`next_task` 汇入管道；迭代预算评估；删除 `runPendingFinalReply`（D10：inline 路径改 Command goto，answer 路由按 `runPendingTask` 缺席派生） | 有 | eval:flow + 「多步请求最终全部完成」断言（观测 plan drift，决定是否启用 D3 预留的 `remaining_work`） |
+| B 捎带 | 待实施：`buildDecisionResult` 里 handoff/生命周期块下沉 `delegationLifecycle.ts` | 无 | 现有测试 |
 
 ## 8. 验收标准
 
 - 日志/checkpoint 里所有 delegation 字段名自带生命周期与角色（#308 验收项全覆盖）。
 - 复合请求产生 ≥2 个 delegation，每个 task 独立走 search+route（#274 验收）。
 - 首个 task 文本不含编号步骤清单（eval 断言）。
-- run 结束 snapshot 中 transient 字段全部为 null；Stage B 后 `runPendingFinalReply`、`canHandoffActiveDelegation` 不再出现在 snapshot 中。
-- Stage 0 不改变任何控制流行为。
+- run 结束 snapshot 中 transient 字段全部为 null；Stage 0.5 后 `canHandoffActiveDelegation` 不再出现在 snapshot 中；Stage B 后 `runPendingFinalReply` 不再出现在 snapshot 中。
+- Stage 0 不改变任何控制流行为；Stage 0.5 只移除派生 state，不改变 handoff 判定。
 
 ## 9. Non-goals
 

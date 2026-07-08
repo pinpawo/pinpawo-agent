@@ -1,7 +1,14 @@
 # Pet Agent state lifecycle refactor
 
-> Status: design draft.
+> Status: design draft. Phases 1–4 have landed in code.
 > Scope: `packages/pet-agent` orchestrator state naming, lifecycle boundaries, and the delegation handoff loop.
+> Update 2026-07: the naming contract in §2 is extended by
+> `docs/PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md` (issues #274/#308), which renames
+> `runPendingDelegation` → `runNextDelegation` and `runDelegations` → `runDelegationSummaries`,
+> deletes `canHandoffActiveDelegation` (derived value, not state) and `runPendingFinalReply`
+> (route signal replaced by Command goto + derived answer routing), and adds `runPendingTask`.
+> That doc is authoritative for those fields; the lifecycle prefix rules in §1 remain
+> canonical here.
 
 ## 1. Fixed terminology
 

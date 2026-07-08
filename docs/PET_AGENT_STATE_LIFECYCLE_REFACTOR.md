@@ -46,12 +46,14 @@ All orchestrator state channels should carry their lifecycle prefix except the L
 | `capabilityArtifacts` | `sessionCapabilityArtifacts` | session | Cross-run artifact ref index. Never reset at run start. |
 | `toolAuthorizations` | `sessionToolAuthorizations` | session | Thread-scoped authorization state. Never reset at run start. |
 | none | `taskActiveDelegation` | task | The single source of truth for an unfinished delegation. Not reset at run start. |
-| `runPendingDelegation` | `runPendingDelegation` | run | Transient route signal from decision to `general` or `capability`. Reset at run start. |
+| `runPendingDelegation` | `runNextDelegation` | run | Transient route command from decision/route to `general` or `capability`. Reset at run start and cleared after the execution node consumes it. |
 | `runPendingFinalReply` | `runPendingFinalReply` | run | Transient route signal from decision to `answer` or end. Reset at run start. |
 | `runCapabilitySearchState` | `runCapabilitySearchState` | run | Discovery/search scratchpad for this run. Reset at run start. |
-| `runDelegations` | `runDelegations` | run | Per-run prompt/debug summary only. It must not be used as unfinished task state. |
+| `runDelegations` | `runDelegationSummaries` | run | Per-run prompt/debug summary only. It must not be used as unfinished task state. |
 | `runIterationCount` | `runIterationCount` | run | Loop guard for the current run. Reset at run start. |
 | `runId` | `runId` | run | Current execution loop id. Do not use it as the long-lived task transcript id. |
+| `canHandoffActiveDelegation` | delete | — | Derived from `taskActiveDelegation` + `messages`; evaluate the guard in decision context instead of storing it in state. |
+| none | `runPendingTask` | run | Planned task-first routing command; introduced by the later task → search → route pipeline. |
 | `buildRunStateReset` | `buildRunStateReset` | run | Resets only `run*` fields. |
 | `buildOrchestratorRunInput` | `buildOrchestratorRunInput` | run | Add a temporary compatibility alias if external callers still import the old name. |
 
@@ -59,8 +61,8 @@ Type names should follow the same rule:
 
 | Current type | Target type |
 |---|---|
-| `RunDelegation` | `RunDelegation` |
-| `RunPendingDelegation` | `RunPendingDelegation` |
+| `RunDelegation` | `RunDelegationSummary` |
+| `RunPendingDelegation` | `RunNextDelegation` |
 | `RunFinalReplyRoute` | `RunFinalReplyRoute` |
 | `RunCapabilitySearchState` | `RunCapabilitySearchState` |
 | none | `TaskActiveDelegation` |

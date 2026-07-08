@@ -6,7 +6,7 @@ import {
   buildEmptyRunCapabilitySearchState,
   type OrchestratorStateType,
 } from '../../state';
-import { updateRunDelegationResult } from '../../delegations';
+import { updateRunDelegationSummaryResult } from '../../delegations';
 import {
   laneMessages,
   readLatestAnnounce,
@@ -61,11 +61,11 @@ export function createCapabilityNode(params: {
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = capabilityLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
-    const runPendingDelegation = state.runPendingDelegation;
-    if (!runPendingDelegation) {
+    const runNextDelegation = state.runNextDelegation;
+    if (!runNextDelegation) {
       throw new Error('Capability node cannot run without a pending capability delegation.');
     }
-    const capabilityName = readCapabilityNameFromLane(runPendingDelegation.lane);
+    const capabilityName = readCapabilityNameFromLane(runNextDelegation.lane);
     if (!capabilityName) {
       throw new Error('Capability node received a non-capability delegation lane.');
     }
@@ -74,8 +74,8 @@ export function createCapabilityNode(params: {
       throw new Error(`Capability node cannot resolve capability "${capabilityName}".`);
     }
     const lane: MessageLane = `capability:${capability.name}`;
-    const transcriptRunId = resolveDelegationTranscriptRunId(state, runPendingDelegation);
-    const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runPendingDelegation.id);
+    const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
+    const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
     const threadId = readThreadId(runnableConfig);
 
     const availableToolkits = toolkitList.map(({ name, description }) => ({
@@ -101,7 +101,7 @@ export function createCapabilityNode(params: {
       threadId,
       capabilityId: capability.name,
       resultSchema: capability.resultSchema,
-      delegationId: runPendingDelegation.id,
+      delegationId: runNextDelegation.id,
       runId: transcriptRunId,
       execution,
       reviewCapabilities,
@@ -126,8 +126,8 @@ export function createCapabilityNode(params: {
     const middleware = runtime.middleware;
     const handoffInstruction = buildDelegationHandoffInstruction({
       lane,
-      task: runPendingDelegation.task,
-      contextSummary: runPendingDelegation.contextSummary,
+      task: runNextDelegation.task,
+      contextSummary: runNextDelegation.contextSummary,
       workdir: workdir ?? null,
     });
 
@@ -149,7 +149,7 @@ export function createCapabilityNode(params: {
           artifactRefs.push(ref);
         },
         threadId,
-        delegationId: runPendingDelegation.id,
+        delegationId: runNextDelegation.id,
         runId: transcriptRunId,
       },
     };
@@ -169,7 +169,7 @@ export function createCapabilityNode(params: {
         },
         threadId,
         capabilityId: capability.name,
-        delegationId: runPendingDelegation.id,
+        delegationId: runNextDelegation.id,
         runId: transcriptRunId,
       });
     }
@@ -181,18 +181,18 @@ export function createCapabilityNode(params: {
       transcriptRunId,
       result.completionReason,
       {
-        delegationId: runPendingDelegation.id,
-        task: runPendingDelegation.task,
+        delegationId: runNextDelegation.id,
+        task: runNextDelegation.task,
       },
     );
-    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runPendingDelegation.id });
+    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runNextDelegation.id });
     // The subagent node only records that the delegation ran (status 'progress');
     // whether it is complete is the orchestrator's call at delegationOutcomeDecision,
     // which upgrades the status to 'completed' when it hands off. The raw lane
     // messages are kept in place — handoff (or a later continuation) cleans them up.
-    const updatedRunDelegations = updateRunDelegationResult(
-      state.runDelegations,
-      runPendingDelegation.id,
+    const updatedRunDelegationSummaries = updateRunDelegationSummaryResult(
+      state.runDelegationSummaries,
+      runNextDelegation.id,
       {
         status: 'progress',
         resultPreview: delegationAnnounce?.text ?? null,
@@ -203,10 +203,10 @@ export function createCapabilityNode(params: {
       messages: laneOutputMessages,
       sessionCapabilityArtifacts: result.artifacts,
       runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
-      runDelegations: updatedRunDelegations,
-      runPendingDelegation: null,
+      runDelegationSummaries: updatedRunDelegationSummaries,
+      runNextDelegation: null,
       taskActiveDelegation: {
-        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runPendingDelegation, transcriptRunId)),
+        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runNextDelegation, transcriptRunId)),
         status: 'awaiting_decision' as const,
         resultPreview: delegationAnnounce?.text ?? null,
       },

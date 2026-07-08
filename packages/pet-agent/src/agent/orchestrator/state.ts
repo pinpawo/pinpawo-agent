@@ -5,8 +5,8 @@ import type {
   RunCapabilitySearchState,
   RunFinalReplyRoute,
   MessageLane,
-  RunPendingDelegation,
-  RunDelegation,
+  RunNextDelegation,
+  RunDelegationSummary,
   TaskActiveDelegation,
 } from './types';
 import type { CapabilityArtifactRef } from '../../types/artifact';
@@ -16,12 +16,12 @@ import {
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
 
-export const OrchestratorState = Annotation.Root({
+const orchestratorStateChannels = {
   messages: Annotation<BaseMessage[]>({
     reducer: messagesStateReducer,
     default: () => [],
   }),
-  runPendingDelegation: Annotation<RunPendingDelegation | null>({
+  runNextDelegation: Annotation<RunNextDelegation | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -44,17 +44,13 @@ export const OrchestratorState = Annotation.Root({
     reducer: (_prev, next) => next,
     default: buildEmptyRunCapabilitySearchState,
   }),
-  runDelegations: Annotation<RunDelegation[]>({
+  runDelegationSummaries: Annotation<RunDelegationSummary[]>({
     reducer: (_prev, next) => next,
     default: () => [],
   }),
   runIterationCount: Annotation<number>({
     reducer: (_prev, next) => next,
     default: () => 0,
-  }),
-  canHandoffActiveDelegation: Annotation<boolean>({
-    reducer: (_prev, next) => next,
-    default: () => true,
   }),
   runId: Annotation<string>({
     reducer: (_prev, next) => next,
@@ -64,18 +60,21 @@ export const OrchestratorState = Annotation.Root({
     reducer: (prev, next) => mergeToolAuthorizations(prev, next),
     default: () => [],
   }),
-});
+};
+
+export const ORCHESTRATOR_STATE_CHANNEL_NAMES = Object.keys(orchestratorStateChannels);
+
+export const OrchestratorState = Annotation.Root(orchestratorStateChannels);
 
 export type OrchestratorStateType = typeof OrchestratorState.State;
 
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
-  | 'runPendingDelegation'
+  | 'runNextDelegation'
   | 'runPendingFinalReply'
   | 'runCapabilitySearchState'
-  | 'runDelegations'
+  | 'runDelegationSummaries'
   | 'runIterationCount'
-  | 'canHandoffActiveDelegation'
   | 'runId'
 >;
 
@@ -89,12 +88,11 @@ export function buildEmptyRunCapabilitySearchState(): RunCapabilitySearchState {
 
 export function buildRunStateReset(): OrchestratorRunState {
   return {
-    runPendingDelegation: null,
+    runNextDelegation: null,
     runPendingFinalReply: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
-    runDelegations: [],
+    runDelegationSummaries: [],
     runIterationCount: 0,
-    canHandoffActiveDelegation: true,
     runId: randomUUID().slice(0, 8),
   };
 }

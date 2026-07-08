@@ -43,11 +43,11 @@ import {
   tagNewLaneMessages,
 } from './messageLanes';
 import { RemoveMessage } from '@langchain/core/messages';
-import { reuseOrAppendRunDelegation, updateRunDelegationResult } from './delegations';
+import { reuseOrAppendRunDelegationSummary, updateRunDelegationSummaryResult } from './delegations';
 import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
 import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
-import type { RunDelegation, TaskActiveDelegation } from './types';
-import type { OrchestratorStateType } from './state';
+import type { RunDelegationSummary, TaskActiveDelegation } from './types';
+import { ORCHESTRATOR_STATE_CHANNEL_NAMES, type OrchestratorStateType } from './state';
 
 function capability(name: string, description: string): AgentCapability {
   return {
@@ -91,6 +91,15 @@ function readToolMessageContent(messages: unknown[], toolCallId: string) {
     && item.tool_call_id === toolCallId);
   return message?.content;
 }
+
+test('orchestrator state channels encode lifecycle prefixes in their names', () => {
+  const invalidChannels = ORCHESTRATOR_STATE_CHANNEL_NAMES.filter((name) =>
+    name !== 'messages'
+    && !/^(session|task|run)/.test(name),
+  );
+
+  assert.deepEqual(invalidChannels, []);
+});
 
 function readToolMessages(messages: unknown[]) {
   return messages.filter((item): item is ToolMessage => item instanceof ToolMessage);
@@ -365,6 +374,8 @@ test('decision structured output autoRepair reruns the same route LLM call after
   });
   // After the retry resolves to answer, the dedicated answer node produces the reply.
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'answered');
+  assert.equal(state.runNextDelegation, null);
+  assert.equal(state.runPendingFinalReply, null);
 });
 
 test('user intent decision without candidates does not advertise capability actions', async () => {
@@ -536,7 +547,7 @@ test('a completed subagent announce reaches the decision, while answer node only
     delegationId: 'task-1',
     task: '读取文件并运行 lint',
   });
-  input.runDelegations = [{
+  input.runDelegationSummaries = [{
     id: 'task-1',
     lane: 'general',
     task: '读取文件并运行 lint',
@@ -642,7 +653,7 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
     task: '搜索并整理 vibecoding 模型排行榜。',
   });
   input.messages.push(announceMessage);
-  input.runDelegations = [{
+  input.runDelegationSummaries = [{
     id: 'task-1',
     lane: 'general',
     task: '搜索并整理 vibecoding 模型排行榜。',
@@ -766,7 +777,7 @@ test('limit-reached progress announce lets model choose the same capability dele
     task: '调查仓库 capability 注册链路。',
   });
   input.messages.push(progressAnnounce);
-  input.runDelegations = [{
+  input.runDelegationSummaries = [{
     id: 'task-limit',
     lane: 'capability:inspect_repo',
     task: '调查仓库 capability 注册链路。',
@@ -2627,7 +2638,7 @@ test('different-lane outcome decision keeps active delegation when handoff canno
     ]),
     taskActiveDelegation: activeDelegation,
   };
-  input.runDelegations = [{
+  input.runDelegationSummaries = [{
     id: 'active-1',
     lane: 'capability:explore',
     task: '当前 explore 任务',
@@ -2648,16 +2659,16 @@ test('different-lane outcome decision keeps active delegation when handoff canno
     },
   }) as {
     messages: Array<AIMessage | HumanMessage>;
-    runPendingDelegation: unknown;
+    runNextDelegation: unknown;
     taskActiveDelegation: TaskActiveDelegation | null;
-    runDelegations: RunDelegation[];
+    runDelegationSummaries: RunDelegationSummary[];
   };
 
   assert.equal(toolRunCount, 0);
-  assert.equal(state.runPendingDelegation, null);
+  assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation?.id, 'active-1');
   assert.equal(state.taskActiveDelegation?.lane, 'capability:explore');
-  assert.deepEqual(state.runDelegations.map((item) => item.id), ['active-1']);
+  assert.deepEqual(state.runDelegationSummaries.map((item) => item.id), ['active-1']);
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /暂不能切换到新的执行器/);
 });
 
@@ -2707,7 +2718,7 @@ test('delegation outcome continue decision can re-enter main and finalize handof
     ...inputBase,
     taskActiveDelegation: activeDelegation,
   };
-  input.runDelegations = [{
+  input.runDelegationSummaries = [{
     id: activeDelegation.id,
     lane: activeDelegation.lane,
     task: activeDelegation.task,
@@ -2793,13 +2804,13 @@ test('delegation outcome continuation path rechecks run iteration guard before n
   const input = {
     ...inputBase,
     taskActiveDelegation: activeDelegation,
-    runDelegations: [{
+    runDelegationSummaries: [{
       id: activeDelegation.id,
       lane: activeDelegation.lane,
       task: activeDelegation.task,
       status: 'progress',
       resultPreview: activeDelegation.resultPreview,
-    }] as RunDelegation[],
+    }] as RunDelegationSummary[],
   };
 
   const announce = new AIMessage('进度已完成前段。');
@@ -2882,13 +2893,13 @@ test('delegation_outcome does not append duplicate handoff copies for unchanged 
   const input = {
     ...inputBase,
     taskActiveDelegation: activeDelegation,
-    runDelegations: [{
+    runDelegationSummaries: [{
       id: activeDelegation.id,
       lane: activeDelegation.lane,
       task: activeDelegation.task,
       status: 'progress',
       resultPreview: activeDelegation.resultPreview,
-    }] as RunDelegation[],
+    }] as RunDelegationSummary[],
   };
   const initialAnnounce = new AIMessage('进度更新：已完成一部分，继续保留。');
   initialAnnounce.id = 'm-dup-copy';
@@ -3006,7 +3017,7 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
   const input = {
     ...baseInput,
     taskActiveDelegation: activeDelegation,
-    runDelegations: [{
+    runDelegationSummaries: [{
       id: activeDelegation.id,
       lane: activeDelegation.lane,
       task: activeDelegation.task,
@@ -3043,7 +3054,7 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
   assert.equal(handoffMessages.length, 0);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.taskActiveDelegation?.status, 'awaiting_decision');
-  assert.equal(state.runDelegations.find((item) => item.id === activeDelegation.id)?.status, 'progress');
+  assert.equal(state.runDelegationSummaries.find((item) => item.id === activeDelegation.id)?.status, 'progress');
   assert.equal(state.messages.filter((message) => getMessageLane(message) === 'general').length > 0, true);
 });
 
@@ -3072,7 +3083,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
   const input = {
     ...baseInput,
     taskActiveDelegation: null as TaskActiveDelegation | null,
-    runDelegations: [] as RunDelegation[],
+    runDelegationSummaries: [] as RunDelegationSummary[],
   };
   input.runIterationCount = 2;
   const activeDelegation: TaskActiveDelegation = {
@@ -3096,7 +3107,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
 
   input.messages.push(partialAnnounce);
   input.taskActiveDelegation = activeDelegation;
-  input.runDelegations = [{
+  input.runDelegationSummaries = [{
     id: activeDelegation.id,
     lane: activeDelegation.lane,
     task: activeDelegation.task,
@@ -3326,7 +3337,7 @@ test('lane messages exclude legacy lane history without per-message delegationId
 });
 
 test('delegation helpers reuse progress delegation and update result', () => {
-  const delegations: RunDelegation[] = [
+  const delegations: RunDelegationSummary[] = [
     {
       id: 'task-1',
       lane: 'general',
@@ -3336,20 +3347,20 @@ test('delegation helpers reuse progress delegation and update result', () => {
     },
   ];
 
-  const reused = reuseOrAppendRunDelegation(delegations, {
+  const reused = reuseOrAppendRunDelegationSummary(delegations, {
     id: 'task-2',
     lane: 'general',
     task: '继续读取文件并运行 lint',
     contextSummary: '继续完成用户当前请求。',
   });
 
-  assert.equal(reused.runPendingDelegation?.id, 'task-1');
-  assert.equal(reused.runPendingDelegation?.task, '继续读取文件并运行 lint');
-  assert.equal(reused.runDelegations.length, 1);
-  assert.equal(reused.runDelegations[0].task, '继续读取文件并运行 lint');
-  assert.equal(reused.runDelegations[0].status, 'pending');
+  assert.equal(reused.runNextDelegation?.id, 'task-1');
+  assert.equal(reused.runNextDelegation?.task, '继续读取文件并运行 lint');
+  assert.equal(reused.runDelegationSummaries.length, 1);
+  assert.equal(reused.runDelegationSummaries[0].task, '继续读取文件并运行 lint');
+  assert.equal(reused.runDelegationSummaries[0].status, 'pending');
 
-  const completed = updateRunDelegationResult(reused.runDelegations, 'task-1', {
+  const completed = updateRunDelegationSummaryResult(reused.runDelegationSummaries, 'task-1', {
     status: 'completed',
     resultPreview: '任务完成',
   });

@@ -21,7 +21,7 @@ import {
   buildCapabilityDiscoveryInput,
   buildCapabilityDiscoveryRequestContext,
   buildCapabilityDiscoverySystemPrompt,
-  buildRunDelegationContext,
+  buildRunDelegationSummaryContext,
 } from '../../prompts';
 import type { OrchestratorStateType } from '../../state';
 import { resolveToolkitResources } from '../../subagentHandoff';
@@ -106,7 +106,7 @@ export function createCapabilityDiscoveryNode(params: {
       [
         new SystemMessage(buildCapabilityDiscoverySystemPrompt({
           actor,
-          runDelegationContext: buildRunDelegationContext(state.runDelegations),
+          runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
           generalTools,
           workdir,
           runtimeEnvironment,
@@ -130,7 +130,7 @@ export function createCapabilityDiscoveryNode(params: {
 
     return {
       messages: [response],
-      runPendingDelegation: null,
+      runNextDelegation: null,
     };
   };
 }

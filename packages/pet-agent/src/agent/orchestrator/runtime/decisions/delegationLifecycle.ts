@@ -5,17 +5,17 @@ import type { OrchestratorStateType } from '../../state';
 import type {
   DecisionMode,
   MessageLane,
-  RunPendingDelegation,
+  RunNextDelegation,
   TaskActiveDelegation,
 } from '../../types';
 
-export function decisionModeFromRunPendingDelegation(pending: RunPendingDelegation | null): DecisionMode {
+export function decisionModeFromRunNextDelegation(pending: RunNextDelegation | null): DecisionMode {
   if (!pending) return 'answer';
   return pending.lane === 'general' ? 'general' : 'capability';
 }
 
 export function createTaskActiveDelegation(
-  delegation: RunPendingDelegation,
+  delegation: RunNextDelegation,
   runId: string,
 ): TaskActiveDelegation {
   return {
@@ -32,11 +32,14 @@ export function createTaskActiveDelegation(
 export function recoverTaskActiveDelegationFromRunState(
   state: OrchestratorStateType,
 ): TaskActiveDelegation | null {
+  // Legacy checkpoint recovery for checkpoints written before taskActiveDelegation
+  // existed. Remove once old checkpoints have aged out or at the next checkpoint
+  // incompatibility boundary.
   if (state.taskActiveDelegation || !state.runId) {
     return null;
   }
-  for (let index = state.runDelegations.length - 1; index >= 0; index -= 1) {
-    const delegation = state.runDelegations[index];
+  for (let index = state.runDelegationSummaries.length - 1; index >= 0; index -= 1) {
+    const delegation = state.runDelegationSummaries[index];
     if (delegation.status !== 'progress' && delegation.status !== 'completed') {
       continue;
     }
@@ -62,7 +65,7 @@ export function recoverTaskActiveDelegationFromRunState(
 
 export function resolveDelegationTranscriptRunId(
   state: OrchestratorStateType,
-  delegation: RunPendingDelegation,
+  delegation: RunNextDelegation,
 ) {
   return state.taskActiveDelegation?.id === delegation.id
     ? state.taskActiveDelegation.transcriptRunId

@@ -1,7 +1,6 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { evaluateGuard } from '../../../../guards';
 import { compactOrchestratorMessages } from '../../contextCompaction';
-import type { OrchestratorStatePatch } from '../../controlPrimitives';
 import {
   contextCompactionWatermarkGuard,
   ORCHESTRATOR_GUARD_POSITION,
@@ -51,11 +50,5 @@ export function createCompactContextNode(params: {
     return {
       messages: compacted.messages,
     };
-  };
-}
-
-export function prepareUserIntentDecision(): OrchestratorStatePatch {
-  return {
-    canHandoffActiveDelegation: true,
   };
 }

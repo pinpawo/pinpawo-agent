@@ -128,7 +128,7 @@ export function toolProtocolSafeMessages(messages: BaseMessage[]) {
  * A continued delegation (limit_reached -> resume) reuses its delegationId, so it
  * carries its own transcript back; a new task in the same lane gets a fresh
  * delegationId and starts clean — conclusions cross task boundaries via
- * runDelegations/announces, transcripts don't.
+ * runDelegationSummaries/announces, transcripts don't.
  * Lane messages without a delegationId (legacy checkpoints) are excluded.
  * For orchestration decisions, use mainConversationMessages() instead.
  */
@@ -416,7 +416,7 @@ export function readLatestAnnounceCompletionReason(
  * that ran but have NOT been handed off (completed delegations get handed off and
  * their lane wiped, so a lane announce that survives is by definition unfinished).
  * Used to offer "continue this in-progress capability" candidates; persists across
- * runs because the lane announce lives in messages, unlike runDelegations.
+ * runs because the lane announce lives in messages, unlike runDelegationSummaries.
  */
 export function readInFlightAnnounceLanes(messages: BaseMessage[]): Array<MessageLane | undefined> {
   const lanes: MessageLane[] = [];

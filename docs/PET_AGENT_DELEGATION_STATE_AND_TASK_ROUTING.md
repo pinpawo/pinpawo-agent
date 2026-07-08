@@ -22,7 +22,7 @@
 - **D4 — 图重构为 task → search → route 三段管道。** task 先出生，capability search 用 task 文本（+ 决策顺带输出的 `search_keywords`）做 query，路由决策最后落 lane。`capabilityDiscovery` 节点删除——它唯一的职责（LLM 从原始请求提炼 query）被"task 即 query"取代。
 - **D5 — delegation outcome 决策收窄为三态** `continue | next_task | answer`，schema 不再携带 capability 枚举；capability 枚举只存在于 routeDecision 的小 schema。
 - **D6 — routeDecision 只在零候选时走确定性 fallback**（直接 `general`），有候选一律过 LLM。不做"单一高分候选跳过 LLM"：词法打分置信度不足以定阈值。
-- **D7 — `recoverTaskActiveDelegationFromRunState` 标注为 legacy checkpoint recovery**（服务 `taskActiveDelegation` 上线前的旧 checkpoint），注释写明删除条件：旧 checkpoint 超出保留期或下次 checkpoint 不兼容变更时删除。不为它引入版本号机制。
+- **D7 — 删除 `recoverTaskActiveDelegationFromRunState`。** 它原本只服务 `taskActiveDelegation` 上线前的旧 checkpoint，但本轮把旧 `runDelegations` channel 改名为 `runDelegationSummaries` 后，旧 checkpoint 的 `runDelegations` 会被新图当作未知 channel 忽略；保留该 recovery 只会形成永远返回 null 的死代码。不做 checkpoint 迁移，旧 interrupt resume 重新决策。
 - **D8 — 单步任务约束随图重构落地**（进 taskDecision / outcomeDecision 的 prompt），不作为独立的 prompt-only PR。粒度标准："同一执行器、同一工具域内能连续完成的相邻动作算一步"，并明确禁止过度拆分。
 - **D9 — `canHandoffActiveDelegation` 整字段删除，不改名。** 它是存进 state 的派生值：guard 逻辑是 `(taskActiveDelegation, messages)` 的纯函数（announce completionReason === 'limit_reached' → false），写者到唯一读者只有一跳，且派生输入在这一跳间不可变；decision context 已在为 announce context 计算同一个 completionReason。改法：`buildDecisionContext` 在 delegation_outcome 时就地 `evaluateGuard(delegationOutcomeDecisionGuard, ...)`（guard 定义与决策事件保留，观测面不丢），连带删除 `delegationOutcomeDecisionGuard` 图节点（薄包装）与 `prepareUserIntentDecision` 图节点（全部职责是写 true，而 run reset 已置 true、user_intent 读者硬编码忽略 state——双重死代码）。
 - **D10 — `runPendingFinalReply` 在目标图中整字段删除，Stage 0 不改名。** 它与 D9 性质不同：不是可派生的 memo，而是真正的单跳路由信号（`'inline'` = 写者已发出最终消息；iteration guard 停止时还会清零 `runIterationCount`，读点无法重算），所以现状删不掉。但目标图里它的写入场景大部分蒸发：answer 路由由 `runPendingTask` 缺席派生；「指了不存在的 capability」「delegate 无 task 文本」被新 schema 杀死；存活的三个场景（无任何执行器、replacementBlocked、iteration limit）形状统一为「已发消息 → END」，改用 `Command({ goto: END })`（仓库已有先例：capabilitySearch tool 返回 Command）。Stage 0 对它只做 answer/inline 终点置 null 消日志噪音，不改名（改完就删是纯 churn）。
@@ -55,7 +55,7 @@ type RunPendingTask = {
 补充约束：
 
 - **transient 不跨 run 存活**：进入 END 前 `runNextDelegation` / `runPendingTask`（及 Stage 0 期间的 `runPendingFinalReply`）必须为 null，orchestrator 测试断言之。
-- **`runDelegationSummaries` 只读不判**：route/guard 不得依据它分支（唯一现存例外是 D7 的 legacy recovery，带删除条件）。
+- **`runDelegationSummaries` 只读不判**：route/guard 不得依据它分支。
 - checkpoint 兼容：本次改名只涉及 `run*` 字段（run 入口本来就 reset），`taskActiveDelegation` 与 `session*` 不动，跨 run 状态不受影响。部署边界上处于 interrupt 中的 run 会丢路由 transient，接受（罕见，重新决策即可恢复），不做迁移。
 
 ## 4. Graph 设计（目标）
@@ -126,7 +126,7 @@ delegationOutcomeDecision (LLM，静态 schema)
 
 | Stage | 内容 | 图改动 | 守护 |
 |---|---|---|---|
-| 0 | **已落地**：#308 重命名（§3 表；`runPendingFinalReply` 不改名，仅 answer/inline 终点置 null，见 D10）+ D7 注释 + channel 前缀单测 + transient 断言 + 更新 `PET_AGENT_STATE_LIFECYCLE_REFACTOR.md` §2 表 | 无 | 已由现有测试验收 |
+| 0 | **已落地**：#308 重命名（§3 表；`runPendingFinalReply` 不改名，仅 answer/inline 终点置 null，见 D10）+ 删除无效 legacy recovery（D7）+ channel 前缀单测 + transient 断言 + 更新 `PET_AGENT_STATE_LIFECYCLE_REFACTOR.md` §2 表 | 小（inline 终点 flush） | 已由现有测试验收 |
 | 0.5 | **已落地**：D9：删 `canHandoffActiveDelegation` 字段，guard 内联进 decision context，删 `delegationOutcomeDecisionGuard` / `prepareUserIntentDecision` 两节点 | 有（行为等价） | 现有测试 + guard 决策事件仍可观测 |
 | A | 待实施：run 入口拆 taskDecision + capabilitySearch + routeDecision，删 capabilityDiscovery，新增 `runPendingTask`；单步约束 prompt 进 taskDecision | 有 | eval:route 等价性 + 新增复合请求 eval case |
 | B | 待实施：outcomeDecision 三态化，`next_task` 汇入管道；迭代预算评估；删除 `runPendingFinalReply`（D10：inline 路径改 Command goto，answer 路由按 `runPendingTask` 缺席派生） | 有 | eval:flow + 「多步请求最终全部完成」断言（观测 plan drift，决定是否启用 D3 预留的 `remaining_work`） |

@@ -9,7 +9,6 @@ import {
 import { buildRunStateReset } from '../../state';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
-import { recoverTaskActiveDelegationFromRunState } from '../decisions/delegationLifecycle';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
 
 export function createPrepareNode() {
@@ -22,8 +21,7 @@ export function createPrepareNode() {
     if (outcome.kind === 'derive') {
       return buildRunStateReset();
     }
-    const taskActiveDelegation = recoverTaskActiveDelegationFromRunState(state);
-    return taskActiveDelegation ? { taskActiveDelegation } : {};
+    return {};
   };
 }
 

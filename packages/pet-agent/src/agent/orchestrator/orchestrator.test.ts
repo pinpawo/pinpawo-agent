@@ -378,6 +378,42 @@ test('decision structured output autoRepair reruns the same route LLM call after
   assert.equal(state.runPendingFinalReply, null);
 });
 
+test('inline fallback replies clear the pending final reply route before END', async () => {
+  const model = {
+    invoke: async () => new AIMessage('should not call answer'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => ({
+        action: 'delegate_general',
+        task: '读取本地文件。',
+        context_summary: '用户需要本地执行器。',
+      }),
+    }),
+  } as unknown as AgentModels['act'];
+
+  const graph = createOrchestratorGraph({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('帮我读取本地文件'),
+  ]), {
+    configurable: {
+      thread_id: 'inline-fallback-clears-route',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有可用的通用工具执行器/);
+  assert.equal(state.runNextDelegation, null);
+  assert.equal(state.runPendingFinalReply, null);
+});
+
 test('user intent decision without candidates does not advertise capability actions', async () => {
   let decisionSystemPrompt = '';
   let schemaAllowsBrowser = false;
@@ -535,10 +571,13 @@ test('a completed subagent announce reaches the decision, while answer node only
     'END_OF_FULL_SUBAGENT_RESULT',
   ].join('\n\n');
   const currentAnnounce = new AIMessage(currentAnnounceText);
-  const input = buildOrchestratorRunInput([
-    new HumanMessage('读取文件并运行 lint'),
-    currentAnnounce,
-  ]);
+  const input = {
+    ...buildOrchestratorRunInput([
+      new HumanMessage('读取文件并运行 lint'),
+      currentAnnounce,
+    ]),
+    taskActiveDelegation: null as TaskActiveDelegation | null,
+  };
   setPinpetMeta(currentAnnounce, {
     lane: 'general',
     runId: input.runId,
@@ -554,6 +593,15 @@ test('a completed subagent announce reaches the decision, while answer node only
     status: 'progress',
     resultPreview: currentAnnounceText,
   }];
+  input.taskActiveDelegation = {
+    id: 'task-1',
+    lane: 'general',
+    task: '读取文件并运行 lint',
+    contextSummary: null,
+    transcriptRunId: input.runId,
+    status: 'awaiting_decision',
+    resultPreview: currentAnnounceText,
+  };
 
   const result = await graph.invoke(input, {
     configurable: {
@@ -640,9 +688,12 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
     models: { act: routeModel },
     actor: testActor,
   });
-  const input = buildOrchestratorRunInput([
-    new HumanMessage('帮我列一个目前 vibecoding 的模型排行榜。'),
-  ]);
+  const input = {
+    ...buildOrchestratorRunInput([
+      new HumanMessage('帮我列一个目前 vibecoding 的模型排行榜。'),
+    ]),
+    taskActiveDelegation: null as TaskActiveDelegation | null,
+  };
   const announceText = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
   const announceMessage = new AIMessage(announceText);
   setPinpetMeta(announceMessage, {
@@ -660,6 +711,15 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
     status: 'completed',
     resultPreview: announceText,
   }];
+  input.taskActiveDelegation = {
+    id: 'task-1',
+    lane: 'general',
+    task: '搜索并整理 vibecoding 模型排行榜。',
+    contextSummary: null,
+    transcriptRunId: input.runId,
+    status: 'awaiting_decision',
+    resultPreview: announceText,
+  };
 
   const result = await graph.invoke(input, {
     configurable: {
@@ -766,7 +826,10 @@ test('limit-reached progress announce lets model choose the same capability dele
     maxRunIterations: 1,
     actor: testActor,
   });
-  const input = buildOrchestratorRunInput([new HumanMessage('继续')]);
+  const input = {
+    ...buildOrchestratorRunInput([new HumanMessage('继续')]),
+    taskActiveDelegation: null as TaskActiveDelegation | null,
+  };
   const progressAnnounce = new AIMessage('(no matches)');
   setPinpetMeta(progressAnnounce, {
     lane: 'capability:inspect_repo',
@@ -784,6 +847,15 @@ test('limit-reached progress announce lets model choose the same capability dele
     status: 'progress',
     resultPreview: '(no matches)',
   }];
+  input.taskActiveDelegation = {
+    id: 'task-limit',
+    lane: 'capability:inspect_repo',
+    task: '调查仓库 capability 注册链路。',
+    contextSummary: null,
+    transcriptRunId: input.runId,
+    status: 'awaiting_decision',
+    resultPreview: '(no matches)',
+  };
 
   await graph.invoke(input, {
     configurable: {
@@ -2842,6 +2914,7 @@ test('delegation outcome continuation path rechecks run iteration guard before n
   assert.equal(routeCallCount, 1);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.runIterationCount, 0);
+  assert.equal(state.runPendingFinalReply, null);
   const finalText = String(state.messages.at(-1)?.content ?? '');
   assert.match(finalText, /主流程循环已达到上限/);
 });
@@ -3130,6 +3203,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
 
   assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
   assert.equal(state.runIterationCount, 0);
+  assert.equal(state.runPendingFinalReply, null);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
 });
 

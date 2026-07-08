@@ -28,6 +28,7 @@ import {
 import { createAnswerNode } from './nodes/answer';
 import { createCapabilityNode } from './nodes/capability';
 import { createCapabilityDiscoveryNode } from './nodes/capabilityDiscovery';
+import { finalizeRun } from './nodes/finalize';
 import { createGeneralNode } from './nodes/general';
 import {
   createCompactContextNode,
@@ -75,6 +76,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('delegationOutcomeIterationGuard', delegationOutcomeIterationGuardNode)
     .addNode('delegationOutcomeDecision', asDecisionNode(delegationOutcomeDecision, buildControlContext))
     .addNode('answer', answerNode)
+    .addNode('finalizeRun', finalizeRun)
     .addNode('capability', capabilityNode)
     .addNode('general', generalNode)
     .addEdge(START, 'prepare')
@@ -92,20 +94,24 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addConditionalEdges('delegationOutcomeIterationGuard', afterDelegationOutcomeIterationGuard, {
       end: END,
       delegationOutcomeDecision: 'delegationOutcomeDecision',
+      finalizeRun: 'finalizeRun',
     })
     .addConditionalEdges('userIntentDecision', afterDecision, {
       end: END,
       answer: 'answer',
       capability: 'capability',
+      finalizeRun: 'finalizeRun',
       general: 'general',
     })
     .addConditionalEdges('delegationOutcomeDecision', afterDecision, {
       end: END,
       answer: 'answer',
       capability: 'capability',
+      finalizeRun: 'finalizeRun',
       general: 'general',
     })
     .addEdge('answer', END)
+    .addEdge('finalizeRun', END)
     .addEdge('capabilitySearch', 'userIntentDecision')
     .addEdge('capability', 'delegationOutcomeIterationGuard')
     .addEdge('general', 'delegationOutcomeIterationGuard');

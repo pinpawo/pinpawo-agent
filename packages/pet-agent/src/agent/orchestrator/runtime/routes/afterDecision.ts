@@ -7,5 +7,7 @@ export function afterDecision(state: OrchestratorStateType) {
   if (decisionMode === 'general') return 'general';
   // answer bucket: route a real answer decision to the answer node; inline fallback
   // errors already emitted their message.
-  return state.runPendingFinalReply === 'answer' ? 'answer' : 'end';
+  if (state.runPendingFinalReply === 'answer') return 'answer';
+  if (state.runPendingFinalReply === 'inline') return 'finalizeRun';
+  return 'end';
 }

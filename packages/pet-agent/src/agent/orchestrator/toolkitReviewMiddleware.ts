@@ -360,6 +360,7 @@ type MaterializedToolCallMessage = {
 type ToolkitReviewResults = {
   cancelledToolCallIds: Set<string>;
   toolMessages: ToolMessage[];
+  finalMessage: AIMessage | null;
   newlyApprovedReviewIds: Set<string>;
 };
 
@@ -755,8 +756,39 @@ function buildCancelledToolCallResults(
   return {
     cancelledToolCallIds,
     toolMessages,
+    finalMessage: buildCancellationFinalMessage({
+      cancellation,
+      toolCallCount: toolCalls.length,
+    }),
     newlyApprovedReviewIds: new Set<string>(),
   };
+}
+
+function buildCancellationFinalMessage(params: {
+  cancellation: ToolkitReviewCancellation;
+  toolCallCount: number;
+}) {
+  const rawReason = readCancellationReason(params.cancellation.content);
+  const reason = rawReason === 'tool call rejected by user'
+    ? '用户拒绝了本次工具调用'
+    : rawReason;
+  const toolName = params.cancellation.toolCall.name || 'tool';
+  const content = params.toolCallCount > 1
+    ? `已停止本次工具调用请求；${params.toolCallCount} 个工具调用均未执行。触发项：${toolName}。原因：${reason}`
+    : `已停止执行工具调用：${toolName}。原因：${reason}`;
+  return new AIMessage({ content });
+}
+
+function readCancellationReason(content: string) {
+  try {
+    const parsed = JSON.parse(content) as { reason?: unknown };
+    if (typeof parsed.reason === 'string' && parsed.reason.trim()) {
+      return parsed.reason.trim();
+    }
+  } catch {
+    // Keep cancellation finalization robust if an older checkpoint has plain text.
+  }
+  return 'tool call cancelled';
 }
 
 async function reviewToolkitToolCalls(params: {
@@ -786,6 +818,7 @@ async function reviewToolkitToolCalls(params: {
   return {
     cancelledToolCallIds: new Set<string>(),
     toolMessages: [],
+    finalMessage: null,
     newlyApprovedReviewIds: resolution.newlyApprovedReviewIds,
   };
 }
@@ -814,18 +847,17 @@ function buildToolkitReviewStateUpdate(params: {
         : {};
   }
 
-  const hasPendingToolCalls = reviewedMessage.toolCalls.some(
-    (toolCall) => !reviewResults.cancelledToolCallIds.has(readToolCallId(toolCall)),
-  );
+  const appendedMessages = reviewResults.finalMessage
+    ? [...reviewResults.toolMessages, reviewResults.finalMessage]
+    : reviewResults.toolMessages;
   return {
     ...approvalUpdate,
     messages: replaceMessageInState(
       params.messages,
       params.aiMessageIndex,
       reviewedMessage.message,
-      reviewResults.toolMessages,
+      appendedMessages,
     ),
-    ...(hasPendingToolCalls ? {} : { jumpTo: 'model' as const }),
   };
 }
 
@@ -843,7 +875,6 @@ export function createToolkitReviewMiddleware(
     name: 'ToolkitReviewMiddleware',
     stateSchema: ToolkitReviewStateSchema,
     afterModel: {
-      canJumpTo: ['model'],
       hook: async (state) => {
         const messages = Array.isArray(state.messages) ? state.messages : [];
         const latestAIMessage = readLatestAIMessage(messages);

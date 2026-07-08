@@ -19,7 +19,8 @@
     "langfuse:ps": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml ps",
     "langfuse:config": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml config",
     "eval:langfuse:sync-datasets": "npm -w @pinpawo/pet-agent run eval:langfuse:sync-datasets",
-    "eval:langfuse:route": "npm -w @pinpawo/pet-agent run eval:langfuse:route"
+    "eval:langfuse:route": "npm -w @pinpawo/pet-agent run eval:langfuse:route",
+    "eval:langfuse:tool-review-reject": "npm -w @pinpawo/pet-agent run eval:langfuse:tool-review-reject"
   },
   "overrides": {
     "langsmith": "^0.7.2",

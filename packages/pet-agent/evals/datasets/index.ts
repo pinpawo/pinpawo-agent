@@ -5,6 +5,7 @@ import { interruptionRecoveryBasicsDataset } from './interruption-recovery-basic
 import { orchestratorFlowMockSubagentDataset } from './orchestrator-flow-mock-subagent.ts';
 import { orchestratorRouteDataset } from './orchestrator-route.ts';
 import { permissionControlBasicsDataset } from './permission-control-basics.ts';
+import { toolReviewRejectRuntimeDataset } from './tool-review-reject-runtime.ts';
 
 export const agentEvalDatasets = [
   orchestratorRouteDataset,
@@ -14,6 +15,7 @@ export const agentEvalDatasets = [
   interruptionRecoveryBasicsDataset,
   permissionControlBasicsDataset,
   contextSynthesisBasicsDataset,
+  toolReviewRejectRuntimeDataset,
 ] as const;
 
 export {
@@ -24,4 +26,5 @@ export {
   orchestratorFlowMockSubagentDataset,
   orchestratorRouteDataset,
   permissionControlBasicsDataset,
+  toolReviewRejectRuntimeDataset,
 };

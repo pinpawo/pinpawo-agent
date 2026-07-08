@@ -1542,6 +1542,69 @@ test('toolkit review cancellation stops the current review action', async () => 
   assert.equal(laterReviewCount, 0);
 });
 
+test('toolkit review cancellation ends subagent without retrying tools', async () => {
+  let blockedCallCount = 0;
+  let retryCallCount = 0;
+  const blockedTool = tool(async () => {
+    blockedCallCount += 1;
+    return 'blocked should not run';
+  }, {
+    name: 'blocked_tool',
+    description: 'blocked tool',
+    schema: z.object({}),
+  });
+  const retryTool = tool(async () => {
+    retryCallCount += 1;
+    return 'retry should not run';
+  }, {
+    name: 'retry_tool',
+    description: 'retry tool',
+    schema: z.object({}),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'guarded',
+    description: 'guarded toolkit',
+    tools: [blockedTool, retryTool],
+    policy: {
+      toolReview: {
+        blocked_tool: {
+          request: () => ({
+            type: 'block',
+            reason: 'blocked by policy',
+          }),
+        },
+      },
+    },
+  }];
+
+  const resources = await resolveToolkitResources(toolkits, ['guarded'], {
+    models: {} as AgentModels,
+    actor: testActor,
+    messages: [],
+  });
+  const result = await createSubagent({
+    model: new FakeToolCallingModel({
+      toolCalls: [
+        [{ id: 'call-blocked', name: 'blocked_tool', args: {} }],
+        [{ id: 'call-retry', name: 'retry_tool', args: {} }],
+        [],
+      ],
+    }),
+    tools: resources.tools,
+    middleware: resources.middleware,
+    instructions: [],
+    operations: collectGeneralOperations(resources.toolkits),
+    messages: [new HumanMessage('try guarded work')],
+  });
+
+  assert.equal(blockedCallCount, 0);
+  assert.equal(retryCallCount, 0);
+  assert.equal(readToolMessageContent(result.messages, 'call-retry'), undefined);
+  const lastMessage = result.messages.at(-1);
+  assert.ok(AIMessage.isInstance(lastMessage));
+  assert.match(String(lastMessage.content), /已停止执行工具调用/);
+});
+
 test('toolkit review materializes distinct fallback ids for missing tool call ids', async () => {
   const blockedTool = tool(async () => 'blocked should not run', {
     name: 'blocked_tool',
@@ -2219,6 +2282,142 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.ok(handoffSource?.delegationId);
   assert.equal(handoffSource?.task, 'run shell');
   assert.equal(readLatestAnnounce(finalState.messages, { runId: finalState.runId }), null);
+});
+
+test('toolkit review policy stops after human reject without requesting another tool', async () => {
+  let runCount = 0;
+  let reviewCount = 0;
+  const rawTool = tool(async ({ command }: { command: string }) => {
+    runCount += 1;
+    return `ran ${command}`;
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [rawTool],
+    policy: {
+      toolReview: {
+        run_shell: {
+          request: () => {
+            reviewCount += 1;
+            return buildReviewSpec({
+              view: { kind: 'plain', body: 'Approve shell?' },
+              options: [
+                {
+                  id: 'approve',
+                  label: 'Approve',
+                  decision: { type: 'approve' },
+                },
+                {
+                  id: 'reject',
+                  label: 'Reject',
+                  decision: { type: 'reject' },
+                },
+              ],
+            });
+          },
+        },
+      },
+    },
+  }];
+
+  let routeCallCount = 0;
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? {
+              action: 'delegate_general',
+              task: 'run shell',
+              context_summary: null,
+            }
+          : {
+              action: 'answer',
+            };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({
+    toolCalls: [
+      [{
+        id: 'call-rejected',
+        name: 'run_shell',
+        args: { command: 'git status' },
+      }],
+      [{
+        id: 'call-after-reject',
+        name: 'run_shell',
+        args: { command: 'git status' },
+      }],
+      [],
+    ],
+  });
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: subagentModel,
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+  });
+  const config = {
+    configurable: {
+      thread_id: 'human-reject-stops-review-loop',
+      actor: testActor,
+      capabilities: [],
+      toolkits,
+    },
+  };
+
+  const interrupted = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage('run git status')]),
+    config,
+  ) as {
+    __interrupt__?: Array<{ id?: string; value?: unknown }>;
+  };
+  const interruptId = interrupted.__interrupt__?.[0]?.id;
+  const payload = interrupted.__interrupt__?.[0]?.value as {
+    kind?: string;
+    reviews?: Array<{ review?: { id?: string } }>;
+  } | undefined;
+  assert.equal(payload?.kind, 'review_batch');
+  assert.deepEqual(payload?.reviews?.map((item) => item.review?.id), [
+    'tool-review:run_shell:call-rejected',
+  ]);
+
+  const reviewResume = {
+    decisions: [{
+      reviewId: 'tool-review:run_shell:call-rejected',
+      selectedOptionId: 'reject',
+    }],
+  };
+  const resumedRun = await graph.streamEvents(new Command({
+    resume: interruptId ? { [interruptId]: reviewResume } : reviewResume,
+  }), { version: 'v3', ...config });
+  for await (const _event of resumedRun) {
+    // Drain the root stream so the final output is materialized.
+  }
+  const finalState = await resumedRun.output as {
+    __interrupt__?: unknown;
+    messages: unknown[];
+  };
+
+  assert.equal(finalState.__interrupt__, undefined);
+  assert.equal(runCount, 0);
+  // Resume replays the same interrupted review policy once; it must not reach
+  // the second model-proposed tool call after the reject.
+  assert.equal(reviewCount, 2);
+  assert.equal(readToolMessageContent(finalState.messages, 'call-after-reject'), undefined);
 });
 
 test('toolkit review resumes multiple reviewed tool calls in one model response', async () => {

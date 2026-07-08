@@ -48,6 +48,7 @@ recreate datasets.
 - `agent-interruption-recovery-basics`: resume, changed-intent, approval-resume, and natural-completion-after-resume cases.
 - `agent-permission-control-basics`: HITL, auto-authorization, scoped authorization, and permission-memory cases.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
+- `agent-tool-review-reject-runtime`: runtime regression case for reviewed tool-call rejection stopping subagent execution and handing off the cancellation announce.
 
 The `agent-*` datasets are seed coverage for future runners. They are meant to
 make the expected behavior explicit before each runner is migrated to Langfuse.
@@ -78,3 +79,17 @@ EVAL_CASES=greeting,file-read-request npm run eval:langfuse:route
 To run the same route eval with the configured LLM instead of the local
 deterministic model, set `EVAL_ROUTE_MODEL=llm`. LLM mode reads configuration
 from `LLM_*`, `~/.pinpawo/.env`, or `~/.pinpawo/config.json`.
+
+## Langfuse Tool-Review Reject Runner
+
+The tool-review reject runner executes the real orchestrator runtime with
+deterministic local models and tools, then writes the trace, scores, and dataset
+run item to Langfuse:
+
+```sh
+npm run eval:langfuse:tool-review-reject
+```
+
+It covers the reviewed-tool rejection path: the first run must interrupt for
+human review, the reject resume must finish without executing or retrying the
+tool, and the cancellation announce must be handed off into main messages.

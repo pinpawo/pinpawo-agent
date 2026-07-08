@@ -4,7 +4,7 @@ import {
   buildEmptyRunCapabilitySearchState,
   type OrchestratorStateType,
 } from '../../state';
-import { updateRunDelegationResult } from '../../delegations';
+import { updateRunDelegationSummaryResult } from '../../delegations';
 import {
   laneMessages,
   readLatestAnnounce,
@@ -72,16 +72,16 @@ export function createGeneralNode(params: {
     }
 
     const lane: MessageLane = 'general';
-    const runPendingDelegation = state.runPendingDelegation;
-    if (!runPendingDelegation || runPendingDelegation.lane !== 'general') {
+    const runNextDelegation = state.runNextDelegation;
+    if (!runNextDelegation || runNextDelegation.lane !== 'general') {
       throw new Error('General node cannot run without a pending general delegation.');
     }
-    const transcriptRunId = resolveDelegationTranscriptRunId(state, runPendingDelegation);
-    const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runPendingDelegation.id);
+    const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
+    const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
     const handoffInstruction = buildDelegationHandoffInstruction({
       lane,
-      task: runPendingDelegation.task,
-      contextSummary: runPendingDelegation.contextSummary,
+      task: runNextDelegation.task,
+      contextSummary: runNextDelegation.contextSummary,
       workdir: workdir ?? null,
     });
     const instructions = [
@@ -115,17 +115,17 @@ export function createGeneralNode(params: {
       transcriptRunId,
       result.completionReason,
       {
-        delegationId: runPendingDelegation.id,
-        task: runPendingDelegation.task,
+        delegationId: runNextDelegation.id,
+        task: runNextDelegation.task,
       },
     );
-    const delegationAnnounce = readLatestAnnounce(outputMessages, { delegationId: runPendingDelegation.id });
+    const delegationAnnounce = readLatestAnnounce(outputMessages, { delegationId: runNextDelegation.id });
 
     // See capabilityNode: status is 'progress' until the orchestrator judges it
     // complete at delegationOutcomeDecision; raw lane messages are kept in place.
-    const updatedRunDelegations = updateRunDelegationResult(
-      state.runDelegations,
-      runPendingDelegation.id,
+    const updatedRunDelegationSummaries = updateRunDelegationSummaryResult(
+      state.runDelegationSummaries,
+      runNextDelegation.id,
       {
         status: 'progress',
         resultPreview: delegationAnnounce?.text ?? null,
@@ -135,10 +135,10 @@ export function createGeneralNode(params: {
     return {
       messages: outputMessages,
       runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
-      runDelegations: updatedRunDelegations,
-      runPendingDelegation: null,
+      runDelegationSummaries: updatedRunDelegationSummaries,
+      runNextDelegation: null,
       taskActiveDelegation: {
-        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runPendingDelegation, transcriptRunId)),
+        ...(state.taskActiveDelegation ?? createTaskActiveDelegation(runNextDelegation, transcriptRunId)),
         status: 'awaiting_decision' as const,
         resultPreview: delegationAnnounce?.text ?? null,
       },

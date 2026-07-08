@@ -8,7 +8,7 @@ import type {
   CapabilityDecisionState,
   SubagentAnnounce,
   SubagentCompletionReason,
-  RunDelegation,
+  RunDelegationSummary,
 } from './types';
 import { clipForPrompt, formatDelegationStatus, readMessageText } from './utils';
 
@@ -31,12 +31,12 @@ export function buildCapabilityArtifactContext(artifacts: CapabilityArtifactRef[
   return lines.join('\n');
 }
 
-export function buildRunDelegationContext(runDelegations: RunDelegation[]): string {
-  if (runDelegations.length === 0) {
+export function buildRunDelegationSummaryContext(runDelegationSummaries: RunDelegationSummary[]): string {
+  if (runDelegationSummaries.length === 0) {
     return '当前 run 任务跟踪：\n- 暂无 delegated task。';
   }
 
-  const visibleDelegations = runDelegations.slice(-MAX_DECISION_RUN_DELEGATIONS);
+  const visibleDelegations = runDelegationSummaries.slice(-MAX_DECISION_RUN_DELEGATIONS);
   const lines = [
     '当前 run 任务跟踪（仅保留本 run 近期任务）',
     visibleDelegations.some((delegation) => delegation.status !== 'completed')
@@ -174,12 +174,12 @@ export function buildDelegationOutcomeCurrentTaskContext(task: {
 }
 
 export function buildDelegationOutcomeOtherTasksContext(
-  runDelegations: RunDelegation[],
+  runDelegationSummaries: RunDelegationSummary[],
   activeDelegationId: string | null,
 ): string {
   const otherDelegations = activeDelegationId
-    ? runDelegations.filter((delegation) => delegation.id !== activeDelegationId)
-    : runDelegations;
+    ? runDelegationSummaries.filter((delegation) => delegation.id !== activeDelegationId)
+    : runDelegationSummaries;
   if (otherDelegations.length === 0) {
     return [
       '<other_delegations>',

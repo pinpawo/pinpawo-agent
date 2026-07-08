@@ -1,7 +1,6 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { evaluateGuard } from '../../../../guards';
 import { compactOrchestratorMessages } from '../../contextCompaction';
-import type { OrchestratorStatePatch } from '../../controlPrimitives';
 import {
   contextCompactionWatermarkGuard,
   ORCHESTRATOR_GUARD_POSITION,
@@ -10,7 +9,6 @@ import {
 import { buildRunStateReset } from '../../state';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
-import { recoverTaskActiveDelegationFromRunState } from '../decisions/delegationLifecycle';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
 
 export function createPrepareNode() {
@@ -23,8 +21,7 @@ export function createPrepareNode() {
     if (outcome.kind === 'derive') {
       return buildRunStateReset();
     }
-    const taskActiveDelegation = recoverTaskActiveDelegationFromRunState(state);
-    return taskActiveDelegation ? { taskActiveDelegation } : {};
+    return {};
   };
 }
 
@@ -51,11 +48,5 @@ export function createCompactContextNode(params: {
     return {
       messages: compacted.messages,
     };
-  };
-}
-
-export function prepareUserIntentDecision(): OrchestratorStatePatch {
-  return {
-    canHandoffActiveDelegation: true,
   };
 }

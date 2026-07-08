@@ -178,11 +178,12 @@ conclusions cross boundaries and transcripts do not:
 
 Notes:
 
-- `delegation_outcome_decision` sets `canHandoffActiveDelegation` on **every**
-  evaluation (both when handoff is allowed and when it is not). Under
-  `pass`/`block` this was a contradiction; as a `derive` it is simply the rule
-  doing its job. When it derives "handoff not allowed", the reason is
-  `active_delegation_limit_reached`.
+- `delegation_outcome_decision` derives `canHandoffActiveDelegation` details on
+  **every** evaluation (both when handoff is allowed and when it is not). The
+  value is consumed immediately in the decision context rather than persisted in
+  graph state. Under `pass`/`block` this was a contradiction; as a `derive` it is
+  simply the rule doing its job. When it derives "handoff not allowed", the
+  reason is `active_delegation_limit_reached`.
 - The two `stop` guards and the two `maintain` guards share decision helpers
   (limit comparison, `checkProviderInputWatermark`), not guard objects.
 

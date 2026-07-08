@@ -1,20 +1,20 @@
 import type {
   MessageLane,
-  RunPendingDelegation,
-  RunDelegation,
+  RunNextDelegation,
+  RunDelegationSummary,
 } from './types';
 import { clipForPrompt } from './utils';
 
-export function updateRunDelegationResult(
-  runDelegations: RunDelegation[],
+export function updateRunDelegationSummaryResult(
+  runDelegationSummaries: RunDelegationSummary[],
   delegationId: string | null,
   params: {
-    status: RunDelegation['status'];
+    status: RunDelegationSummary['status'];
     resultPreview: string | null;
   },
-): RunDelegation[] {
-  if (!delegationId) return runDelegations;
-  return runDelegations.map((delegation) => delegation.id === delegationId
+): RunDelegationSummary[] {
+  if (!delegationId) return runDelegationSummaries;
+  return runDelegationSummaries.map((delegation) => delegation.id === delegationId
     ? {
         ...delegation,
         status: params.status,
@@ -23,24 +23,24 @@ export function updateRunDelegationResult(
     : delegation);
 }
 
-export function reuseOrAppendRunDelegation(
-  runDelegations: RunDelegation[],
-  nextDelegation: RunPendingDelegation | null,
+export function reuseOrAppendRunDelegationSummary(
+  runDelegationSummaries: RunDelegationSummary[],
+  nextDelegation: RunNextDelegation | null,
 ) {
   if (!nextDelegation) {
     return {
-      runDelegations,
-      runPendingDelegation: null as RunPendingDelegation | null,
+      runDelegationSummaries,
+      runNextDelegation: null as RunNextDelegation | null,
     };
   }
 
   // If the same lane already has a delegation in progress, always reuse it.
-  const inProgress = runDelegations.find((delegation) =>
+  const inProgress = runDelegationSummaries.find((delegation) =>
     delegation.lane === nextDelegation.lane && delegation.status === 'progress',
   );
   if (inProgress) {
     return {
-      runDelegations: runDelegations.map((delegation) => delegation.id === inProgress.id
+      runDelegationSummaries: runDelegationSummaries.map((delegation) => delegation.id === inProgress.id
         ? {
             ...delegation,
             task: nextDelegation.task,
@@ -48,14 +48,14 @@ export function reuseOrAppendRunDelegation(
             resultPreview: null,
           }
         : delegation),
-      runPendingDelegation: {
+      runNextDelegation: {
         ...nextDelegation,
         id: inProgress.id,
       },
     };
   }
 
-  const runDelegation: RunDelegation = {
+  const runDelegation: RunDelegationSummary = {
     id: nextDelegation.id,
     lane: nextDelegation.lane,
     task: nextDelegation.task,
@@ -64,7 +64,7 @@ export function reuseOrAppendRunDelegation(
   };
 
   return {
-    runDelegations: [...runDelegations, runDelegation],
-    runPendingDelegation: nextDelegation,
+    runDelegationSummaries: [...runDelegationSummaries, runDelegation],
+    runNextDelegation: nextDelegation,
   };
 }

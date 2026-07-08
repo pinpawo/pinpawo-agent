@@ -1,6 +1,7 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { randomUUID } from 'node:crypto';
+import { evaluateGuard } from '../../../../guards';
 import {
   buildEmptyRunCapabilitySearchState,
   type OrchestratorStateType,
@@ -10,7 +11,7 @@ import type {
   MessageLane,
   OrchestratorConfig,
   RunFinalReplyRoute,
-  RunPendingDelegation,
+  RunNextDelegation,
   TaskActiveDelegation,
 } from '../../types';
 import {
@@ -29,12 +30,17 @@ import {
   buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
   buildPreparedRequestContext,
-  buildRunDelegationContext,
+  buildRunDelegationSummaryContext,
   buildSubagentAnnounceContext,
   buildUserIntentDecisionInput,
   buildUserIntentDecisionSystemPrompt,
 } from '../../prompts';
-import { reuseOrAppendRunDelegation } from '../../delegations';
+import { reuseOrAppendRunDelegationSummary } from '../../delegations';
+import {
+  ACTIVE_DELEGATION_LIMIT_REACHED,
+  delegationOutcomeDecisionGuard,
+  ORCHESTRATOR_GUARD_POSITION,
+} from '../../guardDefinitions';
 import {
   buildHandoffArtifactRefs,
   findLatestHandoffCopyForDelegation,
@@ -70,6 +76,7 @@ import {
   getInvokeOptions,
   resolveActor,
 } from '../config';
+import { guardDecisionEmitter } from '../guards/decisionEvents';
 
 type DecisionKind = 'user_intent' | 'delegation_outcome';
 
@@ -136,9 +143,17 @@ async function buildDecisionContext(params: {
         },
       )
     : [];
-  const canHandoffActiveDelegation = kind === 'delegation_outcome'
-    ? state.canHandoffActiveDelegation
-    : true;
+  const handoffGuardOutcome = kind === 'delegation_outcome'
+    ? evaluateGuard(delegationOutcomeDecisionGuard, {
+        state,
+        config: {},
+        position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
+      }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId })
+    : null;
+  const canHandoffActiveDelegation = !(
+    handoffGuardOutcome?.kind === 'derive'
+    && handoffGuardOutcome.reason === ACTIVE_DELEGATION_LIMIT_REACHED
+  );
   const preDecisionHandoffMessages =
     kind === 'delegation_outcome'
     && canHandoffActiveDelegation
@@ -223,7 +238,7 @@ async function buildDecisionContext(params: {
     capabilityCandidates: decisionCapabilityCandidates,
     capabilitySearchAttempted: decisionCapabilitySearchAttempted,
   });
-  const runDelegationContext = buildRunDelegationContext(state.runDelegations);
+  const runDelegationContext = buildRunDelegationSummaryContext(state.runDelegationSummaries);
   const decisionTargetsContext = buildDecisionTargetsContext({
     generalTools,
     capabilityCandidates: decisionCapabilityCandidates,
@@ -265,7 +280,7 @@ async function buildDecisionContext(params: {
         activeDelegationCompletionReason,
       ),
       otherTasksContext: buildDelegationOutcomeOtherTasksContext(
-        state.runDelegations,
+        state.runDelegationSummaries,
         activeDelegation?.id ?? null,
       ),
       capabilityArtifacts: state.sessionCapabilityArtifacts,
@@ -381,7 +396,7 @@ function buildDecisionResult(params: {
   const delegationContextSummary = decisionMode !== 'answer'
     ? decisionContextSummary ?? '继续完成用户当前请求。'
     : null;
-  const runPendingDelegation: RunPendingDelegation | null = delegationLane && delegationTask
+  const runNextDelegation: RunNextDelegation | null = delegationLane && delegationTask
     ? {
         id: activeDelegation && activeDelegation.lane === delegationLane
           ? activeDelegation.id
@@ -391,7 +406,7 @@ function buildDecisionResult(params: {
         contextSummary: delegationContextSummary,
       }
     : null;
-  const nextDelegationState = reuseOrAppendRunDelegation(state.runDelegations, runPendingDelegation);
+  const nextDelegationState = reuseOrAppendRunDelegationSummary(state.runDelegationSummaries, runNextDelegation);
 
   // Handoff (D1): copy the active subagent announce into the main queue before
   // the next decision branch runs.
@@ -403,7 +418,7 @@ function buildDecisionResult(params: {
   // Single-line delegation handoff is driven by taskActiveDelegation. run
   // summaries are not the source of truth for unfinished task lifecycle.
   const replacingActiveDelegation = kind === 'delegation_outcome'
-    && Boolean(activeDelegation && runPendingDelegation && activeDelegation.id !== runPendingDelegation.id);
+    && Boolean(activeDelegation && runNextDelegation && activeDelegation.id !== runNextDelegation.id);
   const handoffMessages: BaseMessage[] = [];
   const handedOffDelegationIds = new Set<string>();
   const shouldClearLaneForHandoff = kind === 'delegation_outcome'
@@ -437,12 +452,12 @@ function buildDecisionResult(params: {
 
   // A handed-off delegation is, by the orchestrator's judgment, complete.
   const shouldMarkDelegationComplete = actionKind === 'answer' || replacingActiveDelegation;
-  const finalRunDelegations = handedOffDelegationIds.size > 0 && shouldMarkDelegationComplete
-    ? nextDelegationState.runDelegations.map((delegation) =>
+  const finalRunDelegationSummaries = handedOffDelegationIds.size > 0 && shouldMarkDelegationComplete
+    ? nextDelegationState.runDelegationSummaries.map((delegation) =>
         handedOffDelegationIds.has(delegation.id)
           ? { ...delegation, status: 'completed' as const }
           : delegation)
-    : nextDelegationState.runDelegations;
+    : nextDelegationState.runDelegationSummaries;
 
   let nextTaskActiveDelegation: TaskActiveDelegation | null;
   const shouldClearTaskActiveDelegation = shouldClearLaneForHandoff;
@@ -450,16 +465,16 @@ function buildDecisionResult(params: {
     nextTaskActiveDelegation = activeDelegation;
   } else if (shouldClearTaskActiveDelegation) {
     nextTaskActiveDelegation = null;
-  } else if (runPendingDelegation) {
-    nextTaskActiveDelegation = activeDelegation && activeDelegation.id === runPendingDelegation.id
+  } else if (runNextDelegation) {
+    nextTaskActiveDelegation = activeDelegation && activeDelegation.id === runNextDelegation.id
       ? {
           ...activeDelegation,
-          task: runPendingDelegation.task,
-          contextSummary: runPendingDelegation.contextSummary,
+          task: runNextDelegation.task,
+          contextSummary: runNextDelegation.contextSummary,
           status: 'pending' as const,
           resultPreview: null,
         }
-      : createTaskActiveDelegation(runPendingDelegation, state.runId);
+      : createTaskActiveDelegation(runNextDelegation, state.runId);
   } else {
     nextTaskActiveDelegation = activeDelegation;
   }
@@ -470,7 +485,7 @@ function buildDecisionResult(params: {
       ...(blockedReplacementMessage ? [blockedReplacementMessage] : []),
       ...(inlineReply ? [stampMessageCreatedAtUtc(new AIMessage(inlineReply))] : []),
     ],
-    runPendingDelegation: replacementBlocked ? null : nextDelegationState.runPendingDelegation,
+    runNextDelegation: replacementBlocked ? null : nextDelegationState.runNextDelegation,
     runPendingFinalReply: replacementBlocked ? 'inline' : runPendingFinalReply,
     taskActiveDelegation: nextTaskActiveDelegation,
     ...(kind === 'delegation_outcome'
@@ -478,6 +493,6 @@ function buildDecisionResult(params: {
           runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
         }
       : {}),
-    runDelegations: replacementBlocked ? state.runDelegations : finalRunDelegations,
+    runDelegationSummaries: replacementBlocked ? state.runDelegationSummaries : finalRunDelegationSummaries,
   };
 }

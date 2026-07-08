@@ -18,13 +18,13 @@ function buildContext(runnableConfig?: RunnableConfig): OrchestratorControlConte
 test('asDecisionNode awaits the decision and forwards its patch', async () => {
   const decision: OrchestratorDecision = async (_state, ctx) => {
     assert.equal(ctx.orchestratorMaxIterations, 25);
-    return { runPendingDelegation: null };
+    return { runNextDelegation: null };
   };
 
   const node = asDecisionNode(decision, buildContext);
   const patch = await node(STATE);
 
-  assert.deepEqual(patch, { runPendingDelegation: null });
+  assert.deepEqual(patch, { runNextDelegation: null });
 });
 
 test('ORCHESTRATOR_RECURSION_LIMIT comfortably exceeds a healthy run', () => {

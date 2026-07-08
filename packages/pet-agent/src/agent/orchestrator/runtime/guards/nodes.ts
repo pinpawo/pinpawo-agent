@@ -2,8 +2,6 @@ import { AIMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { evaluateGuard } from '../../../../guards';
 import {
-  ACTIVE_DELEGATION_LIMIT_REACHED,
-  delegationOutcomeDecisionGuard,
   ORCHESTRATOR_GUARD_POSITION,
   runIterationLimitGuard,
   statePatch,
@@ -23,23 +21,6 @@ function buildRunIterationLimitMessage(
     `当前仍保留 delegated task“${delegation.task}”（${delegation.lane}）。`,
     '该轮 delegation record 为待续跑状态，可继续提交下一轮任务让我接着推进。',
   ].join('\n');
-}
-
-export function createDelegationOutcomeDecisionGuardNode() {
-  return async function delegationOutcomeDecisionGuardNode(
-    state: OrchestratorStateType,
-    runnableConfig?: RunnableConfig,
-  ) {
-    const outcome = evaluateGuard(delegationOutcomeDecisionGuard, {
-      state,
-      config: {},
-      position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
-    }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
-    return statePatch({
-      canHandoffActiveDelegation:
-        !(outcome.kind === 'derive' && outcome.reason === ACTIVE_DELEGATION_LIMIT_REACHED),
-    });
-  };
 }
 
 export function createDelegationOutcomeIterationGuardNode(params: {
@@ -72,7 +53,7 @@ export function createDelegationOutcomeIterationGuardNode(params: {
           state.runIterationCount,
         )),
       ],
-      runPendingDelegation: null,
+      runNextDelegation: null,
       runPendingFinalReply: 'inline',
       taskActiveDelegation: activeDelegation,
       runIterationCount: 0,

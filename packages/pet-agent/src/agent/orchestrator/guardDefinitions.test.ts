@@ -15,7 +15,6 @@ import {
   type ForcedCapabilitySeedDetails,
 } from './guardDefinitions';
 import {
-  createDelegationOutcomeDecisionGuardNode,
   createDelegationOutcomeIterationGuardNode,
 } from './runtime/guards/nodes';
 import {
@@ -30,7 +29,7 @@ import type { TaskActiveDelegation } from './types';
 function baseState(over: Partial<OrchestratorStateType> = {}): OrchestratorStateType {
   return {
     messages: [],
-    runDelegations: [],
+    runDelegationSummaries: [],
     runIterationCount: 0,
     taskActiveDelegation: null,
     runId: 'run-1',
@@ -203,16 +202,6 @@ test('delegation outcome guard derives handoff refusal for a limit_reached activ
   });
   assert.equal(outcome.kind, 'derive');
   assert.equal(outcome.kind === 'derive' && outcome.reason, ACTIVE_DELEGATION_LIMIT_REACHED);
-
-  const node = createDelegationOutcomeDecisionGuardNode();
-  assert.deepEqual(await node(state), {
-    canHandoffActiveDelegation: false,
-  });
-
-  const allowedNode = createDelegationOutcomeDecisionGuardNode();
-  assert.deepEqual(await allowedNode(baseState()), {
-    canHandoffActiveDelegation: true,
-  });
 });
 
 test('guard nodes push decision records onto the LangGraph custom stream writer', async () => {
@@ -277,7 +266,7 @@ test('run iteration limit guard stops at the resolved limit and the node returns
 
   assert.equal(patch.runPendingFinalReply, 'inline');
   assert.equal(patch.runIterationCount, 0);
-  assert.equal(patch.runPendingDelegation, null);
+  assert.equal(patch.runNextDelegation, null);
   assert.ok(Array.isArray(patch.messages) && patch.messages.length === 1);
 
   const belowLimitNode = createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations: 25 });

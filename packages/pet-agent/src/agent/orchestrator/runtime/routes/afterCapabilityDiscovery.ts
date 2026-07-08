@@ -19,5 +19,5 @@ export function afterCapabilityDiscovery(state: OrchestratorStateType) {
   ) {
     return 'capabilitySearch';
   }
-  return 'prepareUserIntentDecision';
+  return 'userIntentDecision';
 }

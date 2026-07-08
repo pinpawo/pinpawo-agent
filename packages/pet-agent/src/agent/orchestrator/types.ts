@@ -16,7 +16,7 @@ export type PinpetMessageLane = MessageLane | 'orchestrator';
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
 export type { SubagentCompletionReason };
 
-export type RunDelegation = {
+export type RunDelegationSummary = {
   id: string;
   lane: MessageLane;
   task: string;
@@ -24,7 +24,7 @@ export type RunDelegation = {
   resultPreview: string | null;
 };
 
-export type RunPendingDelegation = {
+export type RunNextDelegation = {
   id: string;
   lane: MessageLane;
   task: string;

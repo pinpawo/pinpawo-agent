@@ -772,7 +772,7 @@ studio turn run
 
 LLM 调用集中在两处:**planner pet agent run** 和 **wiki_curator run**(每棒一次)。queue runner 本身不耗 LLM,只产出 action 决定下一步。这种结构让 trace 清晰、planner 行为可单独 eval、curator 提示词可独立 tune。turn 结束时由 `finish` 的 `finalDispatchId` 指明用户答复来源。
 
-这样可以避免多 pet 协作时 route、capability discovery 和具体执行日志混在一起。
+这样可以避免多 pet 协作时 task/route/search 和具体执行日志混在一起。
 
 ## Phasing
 

@@ -1,66 +1,7 @@
 import type { AIMessage } from '@langchain/core/messages';
-import { ToolMessage, type ToolCall } from '@langchain/core/messages/tool';
-import { tool, type ToolRuntime } from '@langchain/core/tools';
-import { Command } from '@langchain/langgraph';
-import { z } from 'zod';
+import type { ToolCall } from '@langchain/core/messages/tool';
 import type { AgentCapability } from '../../types/capability';
 import type { CapabilityCandidate } from './types';
-import { setPinpetMeta } from './messageLanes';
-
-export const CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-
-const CapabilitySearchInputSchema = z.object({
-  query: z.string().min(1).describe('用于搜索 capability 的关键词或短语。多个词用 | 分隔，例如：宠物动态|发帖|内容生成。'),
-});
-
-const ORCHESTRATOR_INTERNAL_LANE = 'orchestrator';
-
-function readRuntimeCapabilities(runtime: ToolRuntime): AgentCapability[] {
-  const configurable = runtime.config?.configurable ?? runtime.configurable ?? {};
-  const capabilities = (configurable as { capabilities?: unknown }).capabilities;
-  return Array.isArray(capabilities) ? capabilities as AgentCapability[] : [];
-}
-
-export const capabilitySearchTool = tool(
-  async ({ query }: z.infer<typeof CapabilitySearchInputSchema>, runtime: ToolRuntime) => {
-    const searchQuery = query.trim();
-    const candidates = searchQuery ? searchCapabilities(searchQuery, readRuntimeCapabilities(runtime)) : [];
-    const toolCallId = runtime.toolCall?.id || runtime.toolCallId;
-    if (!toolCallId) {
-      throw new Error('capability_search requires a tool call id');
-    }
-
-    const toolMessage = new ToolMessage({
-      content: candidates.length > 0
-        ? `Found ${candidates.length} capability candidate(s).`
-        : 'No capability candidates found.',
-      name: CAPABILITY_SEARCH_TOOL_NAME,
-      tool_call_id: toolCallId,
-    });
-    setPinpetMeta(toolMessage, { lane: ORCHESTRATOR_INTERNAL_LANE });
-
-    return new Command({
-      update: {
-        messages: [toolMessage],
-        runNextDelegation: null,
-        runCapabilitySearchState: {
-          query: searchQuery || null,
-          attempted: true,
-          candidates,
-        },
-      },
-    });
-  },
-  {
-    name: CAPABILITY_SEARCH_TOOL_NAME,
-    description: [
-      '搜索可用于处理当前用户业务目标的 capability 候选。',
-      '输入 query：用一句话或关键词描述用户想完成的业务目标；多个词或短语可用 | 分隔。',
-      '输出：更新 orchestrator 的 capability 候选状态；没有匹配时记录为空候选。',
-    ].join('\n'),
-    schema: CapabilitySearchInputSchema,
-  },
-);
 
 export function readModelToolCalls(response: AIMessage): ToolCall[] {
   const normalizedToolCalls = response.tool_calls;

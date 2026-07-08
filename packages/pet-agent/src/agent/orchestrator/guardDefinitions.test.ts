@@ -155,7 +155,7 @@ test('forced capability seed guard derives the seeded search state once', () => 
         stubCapability('other', '其他'),
       ],
     },
-    position: ORCHESTRATOR_GUARD_POSITION.CAPABILITY_DISCOVERY,
+    position: ORCHESTRATOR_GUARD_POSITION.CAPABILITY_SEARCH,
   });
 
   assert.equal(outcome.kind, 'derive');
@@ -175,7 +175,7 @@ test('forced capability seed guard proceeds when a search was already attempted'
       forcedCapabilityNames: ['weather'],
       capabilities: [stubCapability('weather', '查天气')],
     },
-    position: ORCHESTRATOR_GUARD_POSITION.CAPABILITY_DISCOVERY,
+    position: ORCHESTRATOR_GUARD_POSITION.CAPABILITY_SEARCH,
   });
 
   assert.equal(outcome.kind, 'proceed');

@@ -4,7 +4,7 @@ import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool } from '@langchain/core/tools';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
-import { Command, isCommand, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
+import { Command, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
@@ -14,7 +14,6 @@ import { createSubagent } from '../../subagent/createSubagent';
 import { runAgent } from '../runAgent';
 import { buildOrchestratorRunInput, createOrchestratorGraph } from '../createAgentRuntime';
 import {
-  capabilitySearchTool,
   searchCapabilities,
   splitCapabilitySearchTerms,
 } from './capabilitySearch';
@@ -47,7 +46,12 @@ import { reuseOrAppendRunDelegationSummary, updateRunDelegationSummaryResult } f
 import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
 import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
 import type { RunDelegationSummary, TaskActiveDelegation } from './types';
-import { ORCHESTRATOR_STATE_CHANNEL_NAMES, type OrchestratorStateType } from './state';
+import {
+  buildEmptyRunCapabilitySearchState,
+  ORCHESTRATOR_STATE_CHANNEL_NAMES,
+  type OrchestratorStateType,
+} from './state';
+import { createRouteDecisionRunner } from './runtime/decisions/orchestrationDecision';
 
 function capability(name: string, description: string): AgentCapability {
   return {
@@ -114,6 +118,27 @@ const testActor: AgentActor = {
   species: 'cat',
 };
 
+function nextTaskDecision(
+  task: string,
+  contextSummary: string | null = null,
+  searchKeywords: string | null = null,
+) {
+  return {
+    action: 'next_task',
+    task,
+    context_summary: contextSummary,
+    search_keywords: searchKeywords,
+  };
+}
+
+function routeCapabilityDecision(capabilityName: string) {
+  return { lane: `capability.${capabilityName}` };
+}
+
+function routeGeneralDecision() {
+  return { lane: 'general' };
+}
+
 test('capability search ranks matching capability and keeps original query terms', () => {
   const results = searchCapabilities('宠物发帖|小红书日常', [
     capability('daily_post', '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿。'),
@@ -162,61 +187,31 @@ test('capability search ranks explore over browser for code review with URL', ()
   assert.equal(results[0]?.name, 'explore');
 });
 
-test('capability search tool returns a state update command with candidates', async () => {
-  const capabilities = [
-    capability('daily_post', '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿。'),
-    capability('capability_creator', '生成和验证用户自定义 capability 插件模板。'),
-  ];
-  const result = await capabilitySearchTool.invoke({
-    type: 'tool_call',
-    name: 'capability_search',
-    id: 'call-1',
-    args: { query: ' 宠物发帖|小红书日常 ' },
-  }, {
-    configurable: { capabilities },
-  });
-
-  assert.equal(isCommand(result), true);
-  const command = result as unknown as Command<unknown, {
-    runCapabilitySearchState: {
-      query: string | null;
-      attempted: boolean;
-      candidates: { name: string }[];
-    };
-    messages: { tool_call_id: string }[];
-  }>;
-  const update = command.update as {
-    runCapabilitySearchState: {
-      query: string | null;
-      attempted: boolean;
-      candidates: { name: string }[];
-    };
-    messages: { tool_call_id: string }[];
-  };
-  assert.equal(update.runCapabilitySearchState.query, '宠物发帖|小红书日常');
-  assert.equal(update.runCapabilitySearchState.attempted, true);
-  assert.equal(update.runCapabilitySearchState.candidates[0]?.name, 'daily_post');
-  assert.equal(update.messages[0]?.tool_call_id, 'call-1');
+test('capability search splits pipe and word terms for keyword matching', () => {
   assert.deepEqual(splitCapabilitySearchTerms('宠物发帖|宠物 发帖'), ['宠物发帖', '宠物 发帖', '宠物', '发帖']);
 });
 
-test('capability discovery receives compact task status context', async () => {
-  let discoveryInput = '';
+test('task decision receives recent task status context', async () => {
+  let taskDecisionInput = '';
   const model = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
-      invoke: async (messages: unknown[]) => {
-        discoveryInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-        return new AIMessage('');
-      },
+      invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'answer' }),
+      invoke: async (messages: unknown[]) => {
+        taskDecisionInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
+        return { action: 'answer' };
+      },
     }),
   } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
     actor: testActor,
   });
   const previousAnnounce = new AIMessage('已确认目标目录，打包因超时停止。');
@@ -243,17 +238,17 @@ test('capability discovery receives compact task status context', async () => {
     },
   });
 
-  assert.match(discoveryInput, /当前用户请求：之前的任务完成的怎么样了？/);
-  assert.match(discoveryInput, /近期任务状态/);
-  assert.match(discoveryInput, /执行器：general/);
-  assert.match(discoveryInput, /任务目标：归档 Downloads/);
-  assert.doesNotMatch(discoveryInput, /最近 subagent announce/);
-  assert.doesNotMatch(discoveryInput, /打包因超时停止/);
+  assert.match(taskDecisionInput, /<task_decision_input>/);
+  assert.match(taskDecisionInput, /<user_request>\n\s+<!\[CDATA\[\n之前的任务完成的怎么样了？/);
+  assert.match(taskDecisionInput, /<recent_subagent_announces/);
+  assert.match(taskDecisionInput, /<lane>general<\/lane>/);
+  assert.match(taskDecisionInput, /归档 Downloads/);
+  assert.match(taskDecisionInput, /打包因超时停止/);
 });
 
-test('user intent decision exposes in-progress capability candidates independent of latest user text', async () => {
-  let decisionSystemPrompt = '';
-  let decisionInput = '';
+test('task-first route decision exposes capability candidates from the pending task search', async () => {
+  let routeSystemPrompt = '';
+  let routeInput = '';
   let decisionCallCount = 0;
   let schemaAllowsExplore = false;
   const model = {
@@ -266,23 +261,24 @@ test('user intent decision exposes in-progress capability candidates independent
     withStructuredOutput: (schema: unknown) => ({
       invoke: async (messages: unknown[]) => {
         decisionCallCount += 1;
-        if (decisionCallCount > 1) {
+        if (decisionCallCount === 1) {
+          return nextTaskDecision(
+            '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
+            '上一轮 explore 调查仍处于 progress 状态。',
+            '代码库理解|调查|capability 注册链路',
+          );
+        }
+        if (decisionCallCount > 2) {
           return { action: 'answer' };
         }
         schemaAllowsExplore = Boolean(
           (schema as { safeParse?: (value: unknown) => { success: boolean } }).safeParse?.({
-            action: 'delegate_capability.explore',
-            task: '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
-            context_summary: '上一轮 explore 调查仍处于 progress 状态。',
+            lane: 'capability.explore',
           }).success,
         );
-        decisionSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
-        decisionInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-        return {
-          action: 'delegate_capability.explore',
-          task: '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
-          context_summary: '上一轮 explore 调查仍处于 progress 状态。',
-        };
+        routeSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
+        routeInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
+        return routeCapabilityDecision('explore');
       },
     }),
   } as unknown as AgentModels['act'];
@@ -318,13 +314,12 @@ test('user intent decision exposes in-progress capability candidates independent
   });
 
   assert.equal(schemaAllowsExplore, true);
-  assert.match(decisionSystemPrompt, /delegate_capability\.explore/);
-  assert.doesNotMatch(decisionSystemPrompt, /ask_user/);
-  assert.match(decisionInput, /<user_intent_decision_input>/);
-  assert.match(decisionInput, /<user_request>\n\s+<!\[CDATA\[\n现在状态如何？\n\s+\]\]>\n\s+<\/user_request>/);
-  assert.match(decisionInput, /capability:explore/);
-  assert.match(decisionInput, /调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
-  assert.equal(decisionCallCount, 2);
+  assert.match(routeSystemPrompt, /capability\.explore/);
+  assert.doesNotMatch(routeSystemPrompt, /delegate_capability\.explore/);
+  assert.match(routeInput, /<route_decision_input>/);
+  assert.match(routeInput, /继续调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
+  assert.match(routeInput, /代码库理解\|调查\|capability 注册链路/);
+  assert.equal(decisionCallCount, 3);
 });
 
 test('decision structured output autoRepair reruns the same route LLM call after invalid shape', async () => {
@@ -375,6 +370,7 @@ test('decision structured output autoRepair reruns the same route LLM call after
   // After the retry resolves to answer, the dedicated answer node produces the reply.
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'answered');
   assert.equal(state.runNextDelegation, null);
+  assert.equal(state.runPendingTask, null);
   assert.equal(state.runPendingFinalReply, null);
 });
 
@@ -385,16 +381,16 @@ test('inline fallback replies clear the pending final reply route before END', a
       invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
-      invoke: async () => ({
-        action: 'delegate_general',
-        task: '读取本地文件。',
-        context_summary: '用户需要本地执行器。',
-      }),
+      invoke: async () => nextTaskDecision('读取本地文件。', '用户需要本地执行器。'),
     }),
   } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
     actor: testActor,
   });
 
@@ -411,10 +407,52 @@ test('inline fallback replies clear the pending final reply route before END', a
 
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有可用的通用工具执行器/);
   assert.equal(state.runNextDelegation, null);
+  assert.equal(state.runPendingTask, null);
   assert.equal(state.runPendingFinalReply, null);
+  assert.deepEqual(state.runCapabilitySearchState, buildEmptyRunCapabilitySearchState());
 });
 
-test('user intent decision without candidates does not advertise capability actions', async () => {
+test('route decision missing pending task clears stale transient state', async () => {
+  const model = new FakeListChatModel({ responses: ['unused'] }) as unknown as AgentModels['act'];
+  const runRouteDecision = createRouteDecisionRunner({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+  const input = buildOrchestratorRunInput([new HumanMessage('继续')]);
+  const patch = await runRouteDecision({
+    ...input,
+    runNextDelegation: {
+      id: 'stale',
+      lane: 'general',
+      task: '旧任务',
+      contextSummary: null,
+    },
+    runCapabilitySearchState: {
+      query: '旧 query',
+      attempted: true,
+      candidates: [{
+        name: 'stale_capability',
+        description: '旧候选',
+        score: 1,
+        matchedTerms: ['旧'],
+      }],
+    },
+  } as OrchestratorStateType, {
+    configurable: {
+      thread_id: 'route-missing-task-clears-stale-transients',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [],
+    },
+  });
+
+  assert.equal(patch.runNextDelegation, null);
+  assert.equal(patch.runPendingTask, null);
+  assert.equal(patch.runPendingFinalReply, 'inline');
+  assert.deepEqual(patch.runCapabilitySearchState, buildEmptyRunCapabilitySearchState());
+});
+
+test('task decision schema does not advertise capability actions', async () => {
   let decisionSystemPrompt = '';
   let schemaAllowsBrowser = false;
   const model = {
@@ -438,7 +476,11 @@ test('user intent decision without candidates does not advertise capability acti
   } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
     actor: testActor,
   });
 
@@ -454,34 +496,45 @@ test('user intent decision without candidates does not advertise capability acti
   });
 
   assert.equal(schemaAllowsBrowser, false);
-  assert.match(decisionSystemPrompt, /本 run 没有业务 capability candidate 进入当前 action schema/);
-  assert.match(decisionSystemPrompt, /如果仍需要工具执行，选择 delegate_general/);
-  assert.doesNotMatch(decisionSystemPrompt, /调用 capability_search/);
+  assert.match(decisionSystemPrompt, /task decision 节点/);
+  assert.match(decisionSystemPrompt, /不要选择 general\/capability lane/);
+  assert.match(decisionSystemPrompt, /next_task/);
   assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.browser/);
 });
 
-test('forcedCapabilityNames pre-seeds capability candidates and skips capability discovery LLM call', async () => {
-  let discoveryCalled = false;
-  let decisionSystemPrompt = '';
-  const decisionPayload: Record<string, unknown> = { action: 'answer' };
+test('forcedCapabilityNames pre-seeds route candidates without keyword search', async () => {
+  let legacyToolPathCalled = false;
+  let routeSystemPrompt = '';
+  let structuredCallCount = 0;
   const model = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
       invoke: async () => {
-        discoveryCalled = true;
+        legacyToolPathCalled = true;
         return new AIMessage('');
       },
     }),
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
-        decisionSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
-        return decisionPayload;
+        structuredCallCount += 1;
+        if (structuredCallCount === 1) {
+          return nextTaskDecision('规划一支讲秋日食材的短视频。', null, '短视频|Planner');
+        }
+        if (structuredCallCount === 2) {
+          routeSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
+          return routeCapabilityDecision('studio_plan');
+        }
+        return { action: 'answer' };
       },
     }),
   } as unknown as AgentModels['act'];
 
   const graph = createOrchestratorGraph({
-    models: { act: model, observe: model },
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
     actor: testActor,
   });
   const input = buildOrchestratorRunInput([new HumanMessage('做一支讲秋日食材的短视频')]);
@@ -499,20 +552,20 @@ test('forcedCapabilityNames pre-seeds capability candidates and skips capability
     },
   });
 
-  assert.equal(discoveryCalled, false, 'discovery LLM call must be short-circuited when forced names present');
-  assert.match(decisionSystemPrompt, /delegate_capability\.studio_plan/);
+  assert.equal(legacyToolPathCalled, false, 'forced names must not call a model tool path');
+  assert.match(routeSystemPrompt, /capability\.studio_plan/);
   // 仅强制 studio_plan,other_cap 不应被作为候选注入。
-  assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.other_cap/);
+  assert.doesNotMatch(routeSystemPrompt, /capability\.other_cap/);
 });
 
-test('without forcedCapabilityNames the discovery path runs as before (no-regression)', async () => {
-  let discoveryCalled = false;
+test('without forcedCapabilityNames task-first search does not call model tools', async () => {
+  let legacyToolPathCalled = false;
   const model = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
       invoke: async () => {
-        discoveryCalled = true;
-        // 不发起 capability_search tool_call,让 graph 走完;后续 userIntentDecision 直接 answer。
+        legacyToolPathCalled = true;
+        // Stage A 不再发起 capability_search tool_call;taskDecision 直接 answer。
         return new AIMessage('');
       },
     }),
@@ -533,11 +586,11 @@ test('without forcedCapabilityNames the discovery path runs as before (no-regres
       actor: testActor,
       capabilities: [capability('studio_plan', 'Planner 唯一的目标:把用户请求拆解为一份 plan。')],
       tools: [],
-      // forcedCapabilityNames 未传 —— 走通用 pet agent 老路径
+      // forcedCapabilityNames 未传 —— taskDecision 直接判断为 answer。
     },
   });
 
-  assert.equal(discoveryCalled, true, 'discovery LLM call must run when no forced names provided');
+  assert.equal(legacyToolPathCalled, false, 'Stage A removed the LLM tool-call search path');
 });
 
 test('a completed subagent announce reaches the decision, while answer node only acknowledges delegation completion', async () => {
@@ -782,8 +835,8 @@ test('limit-reached progress announce lets model choose the same capability dele
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
-      // A new turn re-evaluates intent via capabilityDiscovery; with the
-      // in-progress capability already seeded as a candidate, no search is needed.
+      // delegation_outcome keeps using the active capability lane as its
+      // continuation candidate; no run-entry search is needed here.
       invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
@@ -953,15 +1006,13 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? {
-              action: 'delegate_capability.inspect_repo',
-              task: 'inspect repository',
-              context_summary: null,
-            }
-          : {
-              action: 'answer',
-            };
+        if (routeCallCount === 1) {
+          return nextTaskDecision('inspect repository', null, 'inspect repository');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('inspect_repo');
+        }
+        return { action: 'answer' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -1030,11 +1081,7 @@ test('toolkit exposure can hide tools from the general lane', async () => {
       invoke: async () => {
         routeCallCount += 1;
         return routeCallCount === 1
-          ? {
-              action: 'delegate_general',
-              task: 'inspect with tools',
-              context_summary: null,
-            }
+          ? nextTaskDecision('inspect with tools')
           : {
               action: 'answer',
             };
@@ -1151,15 +1198,13 @@ test('capability artifact refs recorded by subagent tools are merged into state'
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? {
-              action: 'delegate_capability.explore',
-              task: 'inspect issue context',
-              context_summary: null,
-            }
-          : {
-              action: 'answer',
-            };
+        if (routeCallCount === 1) {
+          return nextTaskDecision('inspect issue context', null, 'explore issue');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('explore');
+        }
+        return { action: 'answer' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -1237,15 +1282,13 @@ test('capability result artifacts are represented only as refs in state', async 
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? {
-              action: 'delegate_capability.daily_post',
-              task: 'create post',
-              context_summary: null,
-            }
-          : {
-              action: 'answer',
-            };
+        if (routeCallCount === 1) {
+          return nextTaskDecision('create post', null, 'daily post');
+        }
+        if (routeCallCount === 2) {
+          return routeCapabilityDecision('daily_post');
+        }
+        return { action: 'answer' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -1981,11 +2024,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
       invoke: async () => {
         routeCallCount += 1;
         return routeCallCount === 1
-          ? {
-              action: 'delegate_general',
-              task: 'run shell',
-              context_summary: null,
-            }
+          ? nextTaskDecision('run shell')
           : {
               action: 'answer',
             };
@@ -2131,11 +2170,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
       invoke: async () => {
         routeCallCount += 1;
         return routeCallCount === 1
-          ? {
-              action: 'delegate_general',
-              task: 'run shell',
-              context_summary: null,
-            }
+          ? nextTaskDecision('run shell')
           : {
               action: 'answer',
             };
@@ -2265,11 +2300,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
       invoke: async () => {
         routeCallCount += 1;
         return routeCallCount === 1
-          ? {
-              action: 'delegate_general',
-              task: 'run shell twice',
-              context_summary: null,
-            }
+          ? nextTaskDecision('run shell twice')
           : {
               action: 'answer',
             };
@@ -2914,6 +2945,7 @@ test('delegation outcome continuation path rechecks run iteration guard before n
   assert.equal(routeCallCount, 1);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.runIterationCount, 0);
+  assert.equal(state.runPendingTask, null);
   assert.equal(state.runPendingFinalReply, null);
   const finalText = String(state.messages.at(-1)?.content ?? '');
   assert.match(finalText, /主流程循环已达到上限/);
@@ -3203,6 +3235,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
 
   assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
   assert.equal(state.runIterationCount, 0);
+  assert.equal(state.runPendingTask, null);
   assert.equal(state.runPendingFinalReply, null);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
 });

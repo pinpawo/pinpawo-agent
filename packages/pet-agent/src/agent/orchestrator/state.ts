@@ -6,6 +6,7 @@ import type {
   RunFinalReplyRoute,
   MessageLane,
   RunNextDelegation,
+  RunPendingTask,
   RunDelegationSummary,
   TaskActiveDelegation,
 } from './types';
@@ -22,6 +23,10 @@ const orchestratorStateChannels = {
     default: () => [],
   }),
   runNextDelegation: Annotation<RunNextDelegation | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
+  runPendingTask: Annotation<RunPendingTask | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -71,6 +76,7 @@ export type OrchestratorStateType = typeof OrchestratorState.State;
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runNextDelegation'
+  | 'runPendingTask'
   | 'runPendingFinalReply'
   | 'runCapabilitySearchState'
   | 'runDelegationSummaries'
@@ -89,6 +95,7 @@ export function buildEmptyRunCapabilitySearchState(): RunCapabilitySearchState {
 export function buildRunStateReset(): OrchestratorRunState {
   return {
     runNextDelegation: null,
+    runPendingTask: null,
     runPendingFinalReply: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     runDelegationSummaries: [],

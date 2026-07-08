@@ -4,7 +4,7 @@ import type { OrchestratorStatePatch } from '../controlPrimitives';
 export const ORCHESTRATOR_GUARD_POSITION = {
   PREPARE: 'orchestrator.prepare',
   CONTEXT_COMPACTION: 'orchestrator.context_compaction',
-  CAPABILITY_DISCOVERY: 'orchestrator.capability_discovery',
+  CAPABILITY_SEARCH: 'orchestrator.capability_search',
   DELEGATION_OUTCOME_DECISION: 'orchestrator.delegation_outcome_decision',
   DELEGATION_OUTCOME_ITERATION: 'orchestrator.delegation_outcome_iteration',
 } as const;

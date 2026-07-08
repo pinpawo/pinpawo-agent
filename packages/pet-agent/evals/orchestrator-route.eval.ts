@@ -29,6 +29,12 @@ import type { AgentCapability } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
 import { inferStructuredOutputMethod } from '../src/utils/structuredOutput';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
+import {
+  activeCapabilityFromResult,
+  hasObservedDelegation,
+  readCapabilitySearchState,
+  routeModeFromResult,
+} from './orchestratorStateReaders';
 import { MemorySaver } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
@@ -284,6 +290,17 @@ export async function target(
         new HumanMessage(userMessage),
       ]
     : [new HumanMessage(userMessage)]);
+  if (resumeProgressLane) {
+    turnInput.taskActiveDelegation = {
+      id: 'resume-progress-1',
+      lane: resumeProgressLane,
+      task: String(inputs.resume_progress_task ?? inputs.resume_original_user_message ?? userMessage),
+      contextSummary: null,
+      transcriptRunId: 'previous-turn',
+      status: 'awaiting_decision',
+      resultPreview: String(inputs.resume_progress_result ?? ''),
+    };
+  }
   const completedResults = Array.isArray(inputs.completed_results)
     ? inputs.completed_results.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : [];
@@ -294,7 +311,7 @@ export async function target(
     ? inputs.progress_results.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : [];
   if (completedResults.length > 0) {
-    turnInput.runDelegations = completedResults.map((text, index) => ({
+    turnInput.runDelegationSummaries = completedResults.map((text, index) => ({
       id: `eval-${index + 1}`,
       lane: 'general',
       task: completedTasks[index] ?? userMessage,
@@ -318,16 +335,27 @@ export async function target(
     );
   }
   if (progressResults.length > 0) {
-    const offset = turnInput.runDelegations.length;
-    turnInput.runDelegations.push(
-      ...progressResults.map((text, index) => ({
-        id: `eval-${offset + index + 1}`,
-        lane: 'general',
-        task: userMessage,
-        status: 'progress',
-        resultPreview: text,
-      })),
-    );
+    const offset = turnInput.runDelegationSummaries.length;
+    const progressSummaries = progressResults.map((text, index) => ({
+      id: `eval-${offset + index + 1}`,
+      lane: 'general',
+      task: userMessage,
+      status: 'progress',
+      resultPreview: text,
+    }));
+    turnInput.runDelegationSummaries.push(...progressSummaries);
+    const latestProgress = progressSummaries.at(-1);
+    if (latestProgress) {
+      turnInput.taskActiveDelegation = {
+        id: latestProgress.id,
+        lane: latestProgress.lane,
+        task: latestProgress.task,
+        contextSummary: null,
+        transcriptRunId: turnInput.runId,
+        status: 'awaiting_decision',
+        resultPreview: latestProgress.resultPreview,
+      };
+    }
     turnInput.messages.push(
       ...progressResults.map((text, index) => new AIMessage({
         content: text,
@@ -347,24 +375,8 @@ export async function target(
   const capabilityCandidateNames = Array.isArray(inputs.capability_candidates)
     ? inputs.capability_candidates.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : [];
-  if (capabilityCandidateNames.length > 0) {
-    turnInput.runCapabilitySearchState = {
-      query: 'eval',
-      attempted: true,
-      candidates: capabilityCandidateNames.flatMap((name) => {
-      const capability = capabilityList.find((item) => item.name === name);
-      if (!capability) return [];
-      return [{
-        name: capability.name,
-        description: capability.description,
-        score: 100,
-        matchedTerms: ['eval'],
-      }];
-      }),
-    };
-  }
 
-  // Evaluate through discovery + route decision, but stop before executing subagents.
+  // Evaluate through task/search + route decision, but stop before executing subagents.
   const result = await compiled.invoke(turnInput, {
     interruptBefore: ['capability', 'general'],
     configurable: {
@@ -372,52 +384,22 @@ export async function target(
       actor: testActor,
       toolkits: [mockGeneralToolkit],
       capabilities: capabilityList,
+      forcedCapabilityNames: capabilityCandidateNames,
       maxIterations: 1,
     },
   });
   return extractResult(result, capabilityList);
 }
 
-function readPendingDelegation(result: Record<string, unknown>): Record<string, unknown> | null {
-  return result.runPendingDelegation && typeof result.runPendingDelegation === 'object'
-    ? result.runPendingDelegation as Record<string, unknown>
-    : null;
-}
-
-function routeModeFromResult(result: Record<string, unknown>): string {
-  const pendingDelegation = readPendingDelegation(result);
-  const lane = pendingDelegation?.lane;
-  if (lane === 'general') return 'general';
-  if (typeof lane === 'string' && lane.startsWith('capability:')) return 'capability';
-  return 'answer';
-}
-
-function activeCapabilityFromResult(result: Record<string, unknown>): string | null {
-  const lane = readPendingDelegation(result)?.lane;
-  return typeof lane === 'string' && lane.startsWith('capability:')
-    ? lane.slice('capability:'.length)
-    : null;
-}
-
-function capabilitySearchFromResult(result: Record<string, unknown>) {
-  return result.runCapabilitySearchState && typeof result.runCapabilitySearchState === 'object'
-    ? result.runCapabilitySearchState as Record<string, unknown>
-    : {};
-}
-
 function hasCurrentSubagentObservation(result: Record<string, unknown>): boolean {
   if (latestAnnounceFromResult(result)) return true;
-  const runDelegations = Array.isArray(result.runDelegations) ? result.runDelegations : [];
-  return runDelegations.some((delegation) => {
-    if (!delegation || typeof delegation !== 'object') return false;
-    const status = (delegation as Record<string, unknown>).status;
-    return status === 'progress' || status === 'completed';
-  });
+  return hasObservedDelegation(result);
 }
 
 function capabilityStateFromResult(result: Record<string, unknown>, capabilityList: AgentCapability[]): string {
-  const search = capabilitySearchFromResult(result);
-  const candidates = Array.isArray(search.candidates) ? search.candidates : [];
+  if (activeCapabilityFromResult(result)) return 'candidates_available';
+  const search = readCapabilitySearchState(result);
+  const candidates = search.candidates;
   if (hasCurrentSubagentObservation(result)) return 'unavailable';
   if (candidates.length > 0) return 'candidates_available';
   if (search.attempted === true) return 'search_exhausted';
@@ -438,21 +420,25 @@ function extractResult(result: Record<string, unknown>, capabilityList: AgentCap
   const messages = result.messages as { content?: unknown; _getType?: () => string }[] | undefined;
   const lastMsg = messages?.at(-1);
   const reply = lastMsg && typeof lastMsg.content === 'string' ? lastMsg.content : '';
-  const capabilitySearchState = capabilitySearchFromResult(result);
+  const capabilitySearchState = readCapabilitySearchState(result);
   const rawCandidates = Array.isArray(capabilitySearchState.candidates) ? capabilitySearchState.candidates : [];
+  const activeCapability = activeCapabilityFromResult(result);
   const capabilityCandidates = rawCandidates.flatMap((candidate) => {
         if (!candidate || typeof candidate !== 'object') return [];
         const name = (candidate as { name?: unknown }).name;
         return typeof name === 'string' ? [name] : [];
       });
+  const inferredCapabilityCandidates = capabilityCandidates.length > 0
+    ? capabilityCandidates
+    : activeCapability ? [activeCapability] : [];
   return {
     route: finalRoute,
     mode: routeMode,
     phase: latestAnnounce || hasCurrentSubagentObservation(result) ? 'after_subagent' : 'initial_request',
     capability_state: capabilityStateFromResult(result, capabilityList),
-    active_capability: activeCapabilityFromResult(result),
+    active_capability: activeCapability,
     capability_search_query: capabilitySearchState.query,
-    capability_candidates: capabilityCandidates,
+    capability_candidates: inferredCapabilityCandidates,
     reply,
   };
 }

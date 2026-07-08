@@ -53,7 +53,7 @@ export const forcedCapabilitySeedGuard = defineGuard<
   OrchestratorGuardPosition
 >({
   name: ORCHESTRATOR_GUARD_NAME.FORCED_CAPABILITY_SEED,
-  positions: [ORCHESTRATOR_GUARD_POSITION.CAPABILITY_DISCOVERY],
+  positions: [ORCHESTRATOR_GUARD_POSITION.CAPABILITY_SEARCH],
   check: ({ config, state }) => {
     if (
       state.runCapabilitySearchState.attempted

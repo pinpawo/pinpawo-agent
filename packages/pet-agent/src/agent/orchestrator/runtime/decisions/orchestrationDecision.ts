@@ -12,28 +12,36 @@ import type {
   OrchestratorConfig,
   RunFinalReplyRoute,
   RunNextDelegation,
+  RunPendingTask,
   TaskActiveDelegation,
 } from '../../types';
 import {
+  buildRouteDecisionSchema,
+  buildTaskDecisionSchema,
   buildOrchestrationDecisionOutputInstruction,
   buildOrchestrationDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
   parseAction,
+  parseRouteLane,
   readDecisionText,
+  type RouteDecision,
+  type TaskDecision,
   type OrchestrationDecision,
 } from '../../schemas';
 import { readContextCompactionSummaries } from '../../contextCompaction';
 import {
-  buildDecisionTargetsContext,
   buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
   buildPreparedRequestContext,
+  buildRouteDecisionInput,
+  buildRouteDecisionSystemPrompt,
+  buildRouteTargetsContext,
   buildRunDelegationSummaryContext,
   buildSubagentAnnounceContext,
-  buildUserIntentDecisionInput,
-  buildUserIntentDecisionSystemPrompt,
+  buildTaskDecisionInput,
+  buildTaskDecisionSystemPrompt,
 } from '../../prompts';
 import { reuseOrAppendRunDelegationSummary } from '../../delegations';
 import {
@@ -48,7 +56,6 @@ import {
 import {
   buildSubagentHandoff,
   getMessageHandoffSource,
-  readInFlightAnnounceLanes,
   readLatestAnnounce,
   readLatestAnnounceCompletionReason,
   readLatestHumanRequest,
@@ -65,10 +72,7 @@ import { readMessageText } from '../../utils';
 import { invokeStructuredOutput } from '../../../../utils/structuredOutput';
 import {
   buildCapabilityCandidatesFromLanes,
-  canSearchCapabilities,
   mainMessagesWithoutCompaction,
-  mergeCapabilityCandidates,
-  resolveCapabilityDecisionState,
 } from './capabilityCandidates';
 import { createTaskActiveDelegation } from './delegationLifecycle';
 import {
@@ -78,7 +82,40 @@ import {
 } from '../config';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
 
-type DecisionKind = 'user_intent' | 'delegation_outcome';
+type DecisionKind = 'delegation_outcome';
+
+export function createTaskDecisionRunner(config: OrchestratorConfig) {
+  return async function runTaskDecision(
+    state: OrchestratorStateType,
+    runnableConfig?: RunnableConfig,
+  ) {
+    const context = buildTaskDecisionContext({ config, state, runnableConfig });
+    const decision = await invokeTaskDecision({ config, context, runnableConfig });
+    return buildTaskDecisionResult({ state, decision });
+  };
+}
+
+export function createRouteDecisionRunner(config: OrchestratorConfig) {
+  return async function runRouteDecision(
+    state: OrchestratorStateType,
+    runnableConfig?: RunnableConfig,
+  ) {
+    const context = await buildRouteDecisionContext({ config, state, runnableConfig });
+    if (!context.pendingTask) {
+      return buildInlineStopResult('当前没有待路由的 delegated task，无法继续执行。');
+    }
+    const readyContext: RouteDecisionReadyContext = {
+      ...context,
+      pendingTask: context.pendingTask,
+    };
+    if (context.decisionCapabilityCandidates.length === 0) {
+      return buildRouteDecisionResult({ state, context: readyContext, routeLane: 'general' });
+    }
+
+    const decision = await invokeRouteDecision({ config, context, runnableConfig });
+    return buildRouteDecisionResult({ state, context: readyContext, routeLane: decision.lane });
+  };
+}
 
 export function createOrchestrationDecisionRunner(config: OrchestratorConfig) {
   return async function runOrchestrationDecision(
@@ -91,6 +128,113 @@ export function createOrchestrationDecisionRunner(config: OrchestratorConfig) {
     return buildDecisionResult({ kind, state, context, decision });
   };
 }
+
+function buildTaskDecisionContext(params: {
+  config: OrchestratorConfig;
+  state: OrchestratorStateType;
+  runnableConfig?: RunnableConfig;
+}) {
+  const { config, state, runnableConfig } = params;
+  const {
+    workdir,
+    runtimeEnvironment,
+  } = getInvokeOptions(runnableConfig);
+  const actor = resolveActor(config, runnableConfig);
+  const latestHumanRequest = readLatestHumanRequest(state.messages);
+  const contextSummaries = readContextCompactionSummaries(state.messages);
+  const recentMainMessages = mainMessagesWithoutCompaction(state.messages);
+  const recentAnnounces = readRecentAnnounces(state.messages);
+  const requestContext = buildPreparedRequestContext({
+    latestUserRequest: latestHumanRequest,
+    recentMessages: recentMainMessages,
+    recentAnnounces,
+    contextSummaries,
+    capabilityArtifacts: state.sessionCapabilityArtifacts,
+  });
+  const systemPrompt = buildTaskDecisionSystemPrompt({
+    actor,
+    runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
+    workdir,
+    runtimeEnvironment,
+  });
+  const decisionInputMessage = new HumanMessage(buildTaskDecisionInput({
+    latestUserRequest: latestHumanRequest,
+    recentMessages: recentMainMessages,
+    requestContext,
+  }));
+
+  return {
+    decisionInputMessage,
+    systemPrompt,
+  };
+}
+
+type TaskDecisionContext = ReturnType<typeof buildTaskDecisionContext>;
+
+async function buildRouteDecisionContext(params: {
+  config: OrchestratorConfig;
+  state: OrchestratorStateType;
+  runnableConfig?: RunnableConfig;
+}) {
+  const { config, state, runnableConfig } = params;
+  const {
+    capabilities,
+    toolkits,
+    execution,
+    workdir,
+    runtimeEnvironment,
+    reviewCapabilities,
+    globalReviewPolicy,
+  } = getInvokeOptions(runnableConfig);
+  const actor = resolveActor(config, runnableConfig);
+  const toolkitList = generalLaneToolkits(toolkits ?? []);
+  validateUniqueToolkitNames(toolkitList);
+  const generalToolkitResources = await resolveToolkitResources(toolkitList, undefined, {
+    models: config.models,
+    actor,
+    messages: state.messages,
+    execution,
+    reviewCapabilities,
+    globalReviewPolicy,
+    toolAuthorizations: state.sessionToolAuthorizations,
+  }, { includeInstructions: false });
+  const generalTools = generalToolkitResources.tools;
+  validateUniqueToolNames(generalTools);
+
+  const capabilityList = capabilities ?? [];
+  validateUniqueCapabilityNames(capabilityList);
+  const decisionCapabilityCandidates = state.runCapabilitySearchState.candidates;
+  const targetsContext = buildRouteTargetsContext({
+    generalTools,
+    capabilityCandidates: decisionCapabilityCandidates,
+    capabilitySearchAttempted: state.runCapabilitySearchState.attempted,
+    capabilitySearchQuery: state.runCapabilitySearchState.query,
+    capabilityRegistryAvailable: capabilityList.length > 0,
+  });
+  const systemPrompt = buildRouteDecisionSystemPrompt({
+    actor,
+    targetsContext,
+    workdir,
+    runtimeEnvironment,
+  });
+  const decisionInputMessage = new HumanMessage(buildRouteDecisionInput({
+    pendingTask: state.runPendingTask,
+  }));
+
+  return {
+    capabilityList,
+    decisionCapabilityCandidates,
+    decisionInputMessage,
+    generalTools,
+    pendingTask: state.runPendingTask,
+    systemPrompt,
+  };
+}
+
+type RouteDecisionContext = Awaited<ReturnType<typeof buildRouteDecisionContext>>;
+type RouteDecisionReadyContext = Omit<RouteDecisionContext, 'pendingTask'> & {
+  pendingTask: RunPendingTask;
+};
 
 async function buildDecisionContext(params: {
   config: OrchestratorConfig;
@@ -127,7 +271,6 @@ async function buildDecisionContext(params: {
   const capabilityList = capabilities ?? [];
   validateUniqueCapabilityNames(capabilityList);
   const latestHumanRequest = readLatestHumanRequest(state.messages);
-  const contextSummaries = readContextCompactionSummaries(state.messages);
   const activeDelegation = state.taskActiveDelegation;
   const activeDelegationCapabilityId = activeDelegation
     && activeDelegation.lane.startsWith('capability:')
@@ -143,20 +286,17 @@ async function buildDecisionContext(params: {
         },
       )
     : [];
-  const handoffGuardOutcome = kind === 'delegation_outcome'
-    ? evaluateGuard(delegationOutcomeDecisionGuard, {
-        state,
-        config: {},
-        position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
-      }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId })
-    : null;
+  const handoffGuardOutcome = evaluateGuard(delegationOutcomeDecisionGuard, {
+    state,
+    config: {},
+    position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
+  }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
   const canHandoffActiveDelegation = !(
     handoffGuardOutcome?.kind === 'derive'
     && handoffGuardOutcome.reason === ACTIVE_DELEGATION_LIMIT_REACHED
   );
   const preDecisionHandoffMessages =
-    kind === 'delegation_outcome'
-    && canHandoffActiveDelegation
+    canHandoffActiveDelegation
     && activeDelegation
       ? (() => {
           const proposedMessages = buildSubagentHandoff({
@@ -187,11 +327,6 @@ async function buildDecisionContext(params: {
             : proposedMessages;
         })()
       : null;
-  const decisionContextMessages = preDecisionHandoffMessages
-    ? [...state.messages, ...preDecisionHandoffMessages]
-    : state.messages;
-  const recentMainMessages = mainMessagesWithoutCompaction(decisionContextMessages);
-  const recentAnnounces = readRecentAnnounces(decisionContextMessages);
   const activeDelegationAnnounce = activeDelegation
     ? readLatestAnnounce(state.messages, {
         runId: activeDelegation.transcriptRunId,
@@ -207,72 +342,22 @@ async function buildDecisionContext(params: {
   const activeDelegationAnnounceForDecision = activeDelegationAnnounce
     ? { ...activeDelegationAnnounce, artifactRefs: activeDelegationArtifactRefs }
     : null;
-  const requestContext = buildPreparedRequestContext({
-    latestUserRequest: latestHumanRequest,
-    recentMessages: recentMainMessages,
-    recentAnnounces,
-    contextSummaries,
-    capabilityArtifacts: state.sessionCapabilityArtifacts,
-  });
-  const isUserIntentDecision = kind === 'user_intent';
   // Unfinished delegation lifecycle is explicit task state. Lane announces are
   // transcript storage and context, not normal control-flow authority.
-  const inProgressCapabilityCandidates = buildCapabilityCandidatesFromLanes(
+  const decisionCapabilityCandidates = buildCapabilityCandidatesFromLanes(
     capabilityList,
-    isUserIntentDecision
-      ? [
-          activeDelegation?.lane,
-          ...(state.taskActiveDelegation ? [] : readInFlightAnnounceLanes(state.messages)),
-        ]
-      : [activeDelegationAnnounce?.lane ?? activeDelegation?.lane],
+    [activeDelegationAnnounce?.lane ?? activeDelegation?.lane],
   );
-  const decisionCapabilityCandidates = isUserIntentDecision
-    ? mergeCapabilityCandidates(state.runCapabilitySearchState.candidates, inProgressCapabilityCandidates)
-    : inProgressCapabilityCandidates;
-  const decisionCapabilitySearchAttempted = isUserIntentDecision && state.runCapabilitySearchState.attempted;
-  const decisionCapabilitySearchQuery = isUserIntentDecision ? state.runCapabilitySearchState.query : null;
-  const searchAvailable = isUserIntentDecision
-    && canSearchCapabilities(config.models.act, state, capabilityList);
-  const capabilityDecisionState = resolveCapabilityDecisionState({
-    canSearch: searchAvailable,
-    capabilityCandidates: decisionCapabilityCandidates,
-    capabilitySearchAttempted: decisionCapabilitySearchAttempted,
-  });
-  const runDelegationContext = buildRunDelegationSummaryContext(state.runDelegationSummaries);
-  const decisionTargetsContext = buildDecisionTargetsContext({
-    generalTools,
-    capabilityCandidates: decisionCapabilityCandidates,
-    capabilitySearchAttempted: decisionCapabilitySearchAttempted,
-    capabilitySearchAvailable: false,
-    capabilitySearchQuery: decisionCapabilitySearchQuery,
-    capabilityRegistryAvailable: capabilityList.length > 0,
-  });
   const outputInstruction = buildOrchestrationDecisionOutputInstruction({
     capabilityCandidates: decisionCapabilityCandidates,
   });
-  const systemPrompt = isUserIntentDecision
-    ? buildUserIntentDecisionSystemPrompt({
-      actor,
-      runDelegationContext: runDelegationContext,
-      targetsContext: decisionTargetsContext,
-      capabilityDecisionState,
-      outputInstruction,
-      workdir,
-      runtimeEnvironment,
-    })
-    : buildDelegationOutcomeDecisionSystemPrompt({
+  const systemPrompt = buildDelegationOutcomeDecisionSystemPrompt({
       actor,
       outputInstruction,
       workdir,
       runtimeEnvironment,
     });
-  const decisionInputMessage = isUserIntentDecision
-    ? new HumanMessage(buildUserIntentDecisionInput({
-      latestUserRequest: latestHumanRequest,
-      recentMessages: recentMainMessages,
-      requestContext,
-    }))
-    : new HumanMessage(buildDelegationOutcomeDecisionInput({
+  const decisionInputMessage = new HumanMessage(buildDelegationOutcomeDecisionInput({
       latestUserRequest: latestHumanRequest,
       currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
       subagentAnnounceContext: buildSubagentAnnounceContext(
@@ -300,6 +385,62 @@ async function buildDecisionContext(params: {
 }
 
 type OrchestrationDecisionContext = Awaited<ReturnType<typeof buildDecisionContext>>;
+
+async function invokeTaskDecision(params: {
+  config: OrchestratorConfig;
+  context: TaskDecisionContext;
+  runnableConfig?: RunnableConfig;
+}) {
+  const { config, context, runnableConfig } = params;
+  try {
+    return await invokeStructuredOutput({
+      model: config.models.act,
+      schema: buildTaskDecisionSchema(),
+      options: buildOrchestrationDecisionStructuredOutputOptions(
+        config.decisionStructuredOutput,
+      ),
+      messages: [
+        new SystemMessage(context.systemPrompt),
+        context.decisionInputMessage,
+      ],
+      runnableConfig,
+    }) as TaskDecision;
+  } catch (error) {
+    console.warn('[pet-agent] invalid task decision structured output:', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
+async function invokeRouteDecision(params: {
+  config: OrchestratorConfig;
+  context: RouteDecisionContext;
+  runnableConfig?: RunnableConfig;
+}) {
+  const { config, context, runnableConfig } = params;
+  try {
+    return await invokeStructuredOutput({
+      model: config.models.act,
+      schema: buildRouteDecisionSchema({
+        capabilityCandidates: context.decisionCapabilityCandidates,
+      }),
+      options: buildOrchestrationDecisionStructuredOutputOptions(
+        config.decisionStructuredOutput,
+      ),
+      messages: [
+        new SystemMessage(context.systemPrompt),
+        context.decisionInputMessage,
+      ],
+      runnableConfig,
+    }) as RouteDecision;
+  } catch (error) {
+    console.warn('[pet-agent] invalid route decision structured output:', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
 
 async function invokeDecision(params: {
   config: OrchestratorConfig;
@@ -331,6 +472,103 @@ async function invokeDecision(params: {
     throw error;
   }
   return decision;
+}
+
+function buildTaskDecisionResult(params: {
+  state: OrchestratorStateType;
+  decision: TaskDecision;
+}) {
+  const { decision } = params;
+  const task = readDecisionText(decision.task);
+  if (decision.action === 'answer') {
+    return {
+      runNextDelegation: null,
+      runPendingTask: null,
+      runPendingFinalReply: 'answer' as const,
+      runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+    };
+  }
+  if (!task) {
+    return buildInlineStopResult('当前 task decision 选择继续执行，但没有提供明确任务。');
+  }
+
+  const pendingTask: RunPendingTask = {
+    task,
+    contextSummary: readDecisionText(decision.context_summary),
+    searchKeywords: readDecisionText(decision.search_keywords),
+  };
+  return {
+    runNextDelegation: null,
+    runPendingTask: pendingTask,
+    runPendingFinalReply: null,
+    runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+  };
+}
+
+function buildRouteDecisionResult(params: {
+  state: OrchestratorStateType;
+  context: RouteDecisionReadyContext;
+  routeLane: RouteDecision['lane'];
+}) {
+  const { state, context, routeLane } = params;
+  const pendingTask = context.pendingTask;
+
+  const parsedLane = parseRouteLane(routeLane);
+  const activeCapability = parsedLane.kind === 'capability'
+    && parsedLane.capabilityName
+    && context.capabilityList.some((item) => item.name === parsedLane.capabilityName)
+    ? parsedLane.capabilityName
+    : null;
+  const delegationLane: MessageLane | null = activeCapability
+    ? `capability:${activeCapability}`
+    : parsedLane.kind === 'general'
+      ? 'general'
+      : null;
+  if (!delegationLane) {
+    return buildInlineStopResult(`当前没有可用的 capability「${parsedLane.capabilityName ?? ''}」，无法继续完成这一步。`);
+  }
+  if (delegationLane === 'general' && context.generalTools.length === 0) {
+    return buildInlineStopResult('我现在没有可用的通用工具执行器，无法继续完成这一步。');
+  }
+
+  const runNextDelegation: RunNextDelegation = {
+    id: state.taskActiveDelegation && state.taskActiveDelegation.lane === delegationLane
+      ? state.taskActiveDelegation.id
+      : randomUUID().slice(0, 8),
+    lane: delegationLane,
+    task: pendingTask.task,
+    contextSummary: pendingTask.contextSummary ?? '继续完成用户当前请求。',
+  };
+  const nextDelegationState = reuseOrAppendRunDelegationSummary(state.runDelegationSummaries, runNextDelegation);
+  const nextTaskActiveDelegation = state.taskActiveDelegation
+    && state.taskActiveDelegation.id === runNextDelegation.id
+    ? {
+        ...state.taskActiveDelegation,
+        task: runNextDelegation.task,
+        contextSummary: runNextDelegation.contextSummary,
+        status: 'pending' as const,
+        resultPreview: null,
+      }
+    : createTaskActiveDelegation(runNextDelegation, state.runId);
+
+  return {
+    runNextDelegation: nextDelegationState.runNextDelegation,
+    runPendingTask: null,
+    runPendingFinalReply: null,
+    runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+    taskActiveDelegation: nextTaskActiveDelegation,
+    runDelegationSummaries: nextDelegationState.runDelegationSummaries,
+  };
+}
+
+function buildInlineStopResult(message: string) {
+  return {
+    messages: [stampMessageCreatedAtUtc(new AIMessage(message))],
+    runNextDelegation: null,
+    runPendingTask: null,
+    runPendingFinalReply: 'inline' as const,
+    runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+  };
 }
 
 function buildDecisionResult(params: {

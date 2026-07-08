@@ -31,6 +31,12 @@ export type RunNextDelegation = {
   contextSummary: string | null;
 };
 
+export type RunPendingTask = {
+  task: string;
+  contextSummary: string | null;
+  searchKeywords: string | null;
+};
+
 export type TaskActiveDelegation = {
   id: string;
   lane: MessageLane;
@@ -76,7 +82,6 @@ export type DecisionMode = 'answer' | 'general' | 'capability';
  * - null: not an answer-bucket decision (delegation in progress).
  */
 export type RunFinalReplyRoute = 'answer' | 'inline' | null;
-export type CapabilityDecisionState = 'unavailable' | 'search_available' | 'candidates_available' | 'search_exhausted';
 
 export type ToolBindableChatModel = AgentModels['act'] & {
   bindTools?: (tools: StructuredTool[], options?: Record<string, unknown>) => {
@@ -124,8 +129,8 @@ export type OrchestratorInvokeOptions = {
   globalReviewPolicy?: GlobalReviewPolicy;
   maxRunIterations?: number;
   /**
-   * 强制以"已发现候选"形态登记的 capability 名字列表。`prepare` 节点会
-   * 据此 pre-seed `runCapabilitySearchState`,跳过 capability discovery/search。
+   * 强制以"已发现候选"形态登记的 capability 名字列表。`capabilitySearch`
+   * 节点会据此 pre-seed `runCapabilitySearchState`, 跳过 keyword capability search。
    * 仅由 Studio 等明确知道需要哪个 capability 的调用方注入;通用 pet agent
    * 不传 → 0 行为变化。
    */

@@ -6,8 +6,8 @@
 
 目前注入路径是：
 
-1. `capabilityDiscovery`（能力发现）
-2. `user_intent`（用户意图决策）
+1. `taskDecision`（用户请求到单步 task）
+2. `routeDecision`（task 到执行 lane）
 3. `delegation_outcome`（委派结果决策）
 
 注入函数主要是 `buildCapabilityArtifactContext()`（全局短引用）与 `buildSubagentAnnounceContext()`（任务级归属）。
@@ -42,7 +42,7 @@
 
 `buildRunDelegationContext` 和 `recentSubagentAnnounces` 仍作为补充上下文保留。
 
-如果你希望在 `user_intent` 里也只按任务归属展示 artifact，可在未来按 `capability_artifacts` 做 `delegationId` 分组重构。
+如果你希望在 `taskDecision` 里也只按任务归属展示 artifact，可在未来按 `capability_artifacts` 做 `delegationId` 分组重构。
 
 ## 注入链路（运行时）
 

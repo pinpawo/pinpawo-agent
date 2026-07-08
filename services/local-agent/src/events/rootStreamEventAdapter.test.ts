@@ -61,10 +61,10 @@ async function collectChatEvents(graph: {
 
 test('adapter attributes root answer tokens to assistant and drops internal decision output', async () => {
   const graph = new StateGraph(MessagesAnnotation)
-    .addNode('userIntentDecision', streamingNode(new FakeListChatModel({ responses: ['route-thinking'], sleep: 0 })))
+    .addNode('routeDecision', streamingNode(new FakeListChatModel({ responses: ['route-thinking'], sleep: 0 })))
     .addNode('answer', streamingNode(new FakeListChatModel({ responses: ['你好，这是回复'], sleep: 0 })))
-    .addEdge(START, 'userIntentDecision')
-    .addEdge('userIntentDecision', 'answer')
+    .addEdge(START, 'routeDecision')
+    .addEdge('routeDecision', 'answer')
     .addEdge('answer', END)
     .compile();
 

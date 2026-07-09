@@ -258,13 +258,28 @@ function buildDecisionConfigLines(actor: AgentActor, workdir?: string, runtimeEn
   return configLines as string[];
 }
 
-function buildOrchestratorExecutionPrincipleLines(): string[] {
+function buildOrchestratorDecisionFrameLines(): string[] {
   return [
     'Agent 执行核心原则：',
-    '- orchestrator 负责推进用户当前 run 目标：能直接回复就交给 answer 节点；需要执行就拆成一个当前单步 delegated task。',
-    '- decision 节点只做判断和写路由信号，不回答用户、不执行工具、不编造执行结果。',
-    '- taskDecision 负责生成当前 task；routeDecision 负责为已生成 task 选择执行 lane；delegationOutcomeDecision 负责验收当前 task 的执行结果。',
-    '- 执行事实以用户请求、对话历史、subagent/执行器 announce 与 handoff 后的主对话记录为准。',
+    '- orchestrator 是当前 run 的调度者：理解用户目标，决定是否直接 answer，或把工作拆成当前单步 delegated task 后交给执行 lane。',
+    '- decision 是结构化判断节点：只输出 schema 字段来更新 state/route signal；不回答用户、不执行工具、不编造执行事实。',
+    '- 执行事实只来自用户请求、对话历史、subagent announce、handoff 后的主对话记录和本轮动态上下文。',
+    '',
+    '术语约定：',
+    '- taskDecision：task 的唯一出生点；只决定 action=answer 或 action=next_task，并在 next_task 时写当前单步 task、必要上下文和 capability search 关键词。',
+    '- routeDecision：在 task 已生成、capability search 已完成后，只为当前 task 选择执行 lane。',
+    '- outcomeDecision：subagent announce 返回后的验收点；只判断 continue、task_done 或 goal_done，不生成下一步 task。',
+    '- task / delegated task：一个可执行的单步目标；routeDecision 选定 lane 后由对应 subagent 执行，并以 taskActiveDelegation 作为当前 active task 游标。',
+    '- capability：可执行 lane 的抽象。general capability/lane 是通用工具执行器；custom capability 是注册表中的领域能力，路由名形如 capability.<name>。',
+    '- subagent announce：执行 lane 返回的进展或结果消息；outcomeDecision 读取 announce 原文来判断当前 task 是否达标。',
+    '- handoff：当 task 或 run 完成时，把最新 announce 复制到主对话并清理 lane/active delegation；answer 节点基于主对话生成用户可见回复。',
+    '',
+    '核心流程：',
+    '- taskDecision → capabilitySearch → routeDecision → general/custom capability 执行当前 task。',
+    '- 执行 lane 产出 subagent announce → outcomeDecision 验收当前 task。',
+    '- outcome=continue：同一 task、同一 lane 继续执行。',
+    '- outcome=task_done：handoff 当前 task；若已有后续 plan draft，则回到 taskDecision 生成下一个 task，否则进入 answer。',
+    '- outcome=goal_done：handoff 后进入 answer；answer 节点负责最终回复用户。',
   ];
 }
 
@@ -325,14 +340,14 @@ export function buildTaskDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    ...buildOrchestratorExecutionPrincipleLines(),
+    ...buildOrchestratorDecisionFrameLines(),
     '',
     '当前阶段：taskDecision（用户请求后的 task 生成）。',
     '当前节点：task decision 节点。',
     '节点边界：只决定当前是否需要进入执行管道，以及当前 delegated task 是什么；不要选择 general/capability lane，不要回答用户，不要执行工具。',
     '',
+    '当前 decision 的核心策略：',
     taskDecisionFocus,
-    '',
     '你需要决策：',
     '- action=answer：当前不需要进入执行管道，交给 answer 节点基于完整对话历史回复用户。',
     '- action=next_task：生成当前单步 delegated task，并提供必要 context_summary 与 capability search 关键词。',
@@ -355,6 +370,12 @@ export function buildTaskDecisionSystemPrompt(params: {
     '- search_keywords 用于下一步 capability search：提取能匹配执行器能力的关键词、同义词或短语；多个词用 | 分隔。没有额外关键词时可为 null。',
     '- 对 code review / PR review / GitHub PR URL / 仓库变更评审类请求，search_keywords 应包含 explore、code review、PR review、repository investigation 等调查/审查词；不要只因为出现 URL 就只输出 browser/url。',
     ...taskPlanDraftInstructions,
+    '',
+    '动态上下文内容：',
+    '- user_intent_context：本轮用户请求、近期主对话、近期 announce、压缩摘要和 artifact 短引用，来自 task_decision_input。',
+    '- task_plan_draft：可选；只有上一轮已有草案时才会出现在 task_decision_input，且只作为后续 task 草案参考。',
+    '- runDelegationSummaries：当前 run 的任务账本，列出近期 delegated task、状态与结果摘要。',
+    params.runDelegationContext,
     '',
     '输出一个结构化 task decision。',
     '必须返回一个 JSON object，字段名必须严格使用：action、task、context_summary、search_keywords、plan_draft。',
@@ -408,12 +429,13 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    ...buildOrchestratorExecutionPrincipleLines(),
+    ...buildOrchestratorDecisionFrameLines(),
     '',
     '当前阶段：delegationOutcomeDecision（subagent 返回后的结果验收）。',
     '当前节点：子任务结果验收节点。你的唯一职责是判断当前 delegated task 和当前 run 目标的完成度。',
     '节点边界：不要回答用户、不要总结 subagent 结果、不要生成下一步 task、不要选择 general/capability lane、不要执行工具；最终回复由后续 answer 节点生成。',
     '',
+    '当前 decision 的核心策略：',
     '你需要决策：',
     '- outcome=continue：当前 delegated task 未达标，但同一 task 仍可继续执行。',
     '- outcome=task_done：当前 delegated task 已达标，但用户当前 run 目标仍有明确未完成部分。',
@@ -432,6 +454,13 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
     '- 如果 subagent announce 已经满足用户当前 run 目标，选择 goal_done；不要在这里撰写最终回复内容。',
     '- 如果信息不足、用户意图不明确，或下一步需要用户先补充、澄清、确认，选择 goal_done 交给 answer 节点处理；不要在决策层直接提问。',
     '- outcome 只表达验收 verdict；不要输出 task 文本、context summary、search keywords、lane 或 capability。',
+    '',
+    '动态上下文内容：',
+    '- user_request：用户当前 run 的原始请求，用来判断总目标。',
+    '- current_delegation：当前 active delegated task、lane、task 文本和必要 context summary。',
+    '- subagent_announce：当前执行 lane 返回的 announce 原文，是判断 task 是否达标的主要证据。',
+    '- other_delegations：同一 run 里其他 delegated task 的账本摘要，用来避免重复判断。',
+    '- capability_artifacts：可选 artifact 短引用，只作为结果证据索引，不替代 announce 原文。',
     '',
     params.outputInstruction,
   ].filter((line) => line !== null).join('\n');
@@ -573,11 +602,14 @@ export function buildTaskDecisionInput(params: {
     recentMessages: params.recentMessages,
     recentAnnounces: [],
   });
+  const instruction = params.taskPlanDraftContext
+    ? '请根据以上动态上下文判断是否需要执行器；需要时先生成当前单步 task，并维护当前 task 之后仍未开始的后续 plan_draft。'
+    : '请根据以上动态上下文判断是否需要执行器；需要时只生成当前单步 task，plan_draft 返回 null，不要新建后续草案。';
   return [
     '<task_decision_input>',
     indentXmlBlock(context, 2),
     params.taskPlanDraftContext ? indentXmlBlock(params.taskPlanDraftContext, 2) : null,
-    '  <instruction>请根据以上上下文判断是否需要执行器；需要时先生成当前单步 task，并考虑当前 task 之后是否还有后续 task 草案。</instruction>',
+    `  <instruction>${instruction}</instruction>`,
     '</task_decision_input>',
   ].filter((line) => line !== null).join('\n');
 }

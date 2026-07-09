@@ -107,9 +107,17 @@ test('task decision prompt owns single-step task birth', () => {
 
   assert.match(prompt, /task decision 节点/);
   assert.match(prompt, /Agent 执行核心原则/);
+  assert.match(prompt, /术语约定/);
+  assert.match(prompt, /核心流程/);
+  assert.match(prompt, /当前 decision 的核心策略/);
   assert.match(prompt, /当前阶段：taskDecision/);
   assert.match(prompt, /你需要决策/);
   assert.match(prompt, /决策依据/);
+  assert.match(prompt, /general capability\/lane/);
+  assert.match(prompt, /custom capability/);
+  assert.match(prompt, /subagent announce/);
+  assert.match(prompt, /handoff/);
+  assert.match(prompt, /动态上下文内容/);
   assert.match(prompt, /单步任务粒度/);
   assert.match(prompt, /不要选择 general\/capability lane/);
   assert.match(prompt, /PR review/);
@@ -122,6 +130,7 @@ test('task decision prompt owns single-step task birth', () => {
   assert.match(prompt, /plan_draft 在当前没有上一轮 plan_draft 时必须为 null/);
   assert.doesNotMatch(prompt, /仍合理的后续 task 可以沿用/);
   assert.match(input, /<task_decision_input>/);
+  assert.match(input, /plan_draft 返回 null/);
   assert.doesNotMatch(input, /<task_plan_draft/);
   assert.doesNotMatch(input, /重新规划/);
 });
@@ -143,9 +152,17 @@ test('task decision prompt maintains existing plan draft only', () => {
 
   assert.match(prompt, /参考上一轮 plan_draft/);
   assert.match(prompt, /Agent 执行核心原则/);
+  assert.match(prompt, /术语约定/);
+  assert.match(prompt, /核心流程/);
+  assert.match(prompt, /当前 decision 的核心策略/);
   assert.match(prompt, /当前阶段：taskDecision/);
   assert.match(prompt, /你需要决策/);
   assert.match(prompt, /决策依据/);
+  assert.match(prompt, /general capability\/lane/);
+  assert.match(prompt, /custom capability/);
+  assert.match(prompt, /subagent announce/);
+  assert.match(prompt, /handoff/);
+  assert.match(prompt, /动态上下文内容/);
   assert.match(prompt, /仍合理的后续 task 可以沿用/);
   assert.match(prompt, /本次 task 之后尚未开始的后续 task/);
   assert.match(prompt, /不输出 patch/);
@@ -154,6 +171,7 @@ test('task decision prompt maintains existing plan draft only', () => {
   assert.match(input, /<task_plan_draft/);
   assert.match(input, /当前单步 task/);
   assert.match(input, /选择下一步 task/);
+  assert.match(input, /维护当前 task 之后仍未开始的后续 plan_draft/);
   assert.doesNotMatch(input, /重新规划/);
   assert.match(input, /检索本地实现与 git log/);
 });
@@ -213,9 +231,17 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
   assert.doesNotMatch(prompt, /ask_user/);
   assert.doesNotMatch(prompt, /delegate_capability/);
   assert.match(prompt, /Agent 执行核心原则/);
+  assert.match(prompt, /术语约定/);
+  assert.match(prompt, /核心流程/);
+  assert.match(prompt, /当前 decision 的核心策略/);
   assert.match(prompt, /当前阶段：delegationOutcomeDecision/);
   assert.match(prompt, /你需要决策/);
   assert.match(prompt, /决策依据/);
+  assert.match(prompt, /general capability\/lane/);
+  assert.match(prompt, /custom capability/);
+  assert.match(prompt, /subagent announce/);
+  assert.match(prompt, /handoff/);
+  assert.match(prompt, /动态上下文内容/);
   assert.match(prompt, /不接收 plan 草案/);
   assert.match(prompt, /唯一职责/);
 });

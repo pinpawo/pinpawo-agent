@@ -40,6 +40,8 @@ test('task decision schema separates task birth from route selection', () => {
     task: '读取 issue #269 并提炼需求点。',
     plan_draft: ['1', '2', '3', '4', '5', '6'],
   }).success, false);
+  assert.equal(schema.safeParse({ action: 'next_task', task: null }).success, false);
+  assert.equal(schema.safeParse({ action: 'next_task', task: '   ' }).success, false);
   assert.equal(schema.safeParse({
     action: 'delegate_capability.browser',
     task: '打开网页',

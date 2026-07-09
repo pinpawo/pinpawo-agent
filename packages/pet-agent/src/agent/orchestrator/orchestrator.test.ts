@@ -505,7 +505,7 @@ test('task_done without a plan draft returns to taskDecision and can create a ne
   assert.equal(state.taskActiveDelegation, null);
 });
 
-test('decision structured output autoRepair reruns the same route LLM call after invalid shape', async () => {
+test('task decision autoRepair retries next_task without a task', async () => {
   const invokedMessages: unknown[] = [];
   let invokeCount = 0;
   let capturedOptions: unknown;
@@ -518,7 +518,7 @@ test('decision structured output autoRepair reruns the same route LLM call after
           invokeCount += 1;
           invokedMessages.push(messages);
           return invokeCount === 1
-            ? { action: 'not_allowed' }
+            ? { action: 'next_task', task: null }
             : { action: 'answer' };
         },
       };
@@ -3060,6 +3060,7 @@ test('buildSubagentHandoff returns null when the delegation has no announce text
 
 test('terminal outcome decision keeps active delegation when handoff cannot be built', async () => {
   let toolRunCount = 0;
+  let answerSystemContext = '';
   const rawTool = tool(async () => {
     toolRunCount += 1;
     return 'ran';
@@ -3069,7 +3070,12 @@ test('terminal outcome decision keeps active delegation when handoff cannot be b
     schema: z.object({}),
   });
   const routeModel = {
-    invoke: async () => new AIMessage('当前 delegated task 还没有可交接结果，暂不能完成任务边界切换。'),
+    invoke: async (messages: unknown[]) => {
+      answerSystemContext = messages.map((message) => String(
+        (message as { content?: unknown }).content ?? '',
+      )).join('\n');
+      return new AIMessage('当前 delegated task 还没有可交接结果，暂不能完成任务边界切换。');
+    },
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
     }),
@@ -3083,6 +3089,7 @@ test('terminal outcome decision keeps active delegation when handoff cannot be b
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
+    maxRunIterations: 0,
   });
   const activeDelegation: TaskActiveDelegation = {
     id: 'active-1',
@@ -3132,6 +3139,8 @@ test('terminal outcome decision keeps active delegation when handoff cannot be b
   assert.equal(state.taskActiveDelegation?.id, 'active-1');
   assert.equal(state.taskActiveDelegation?.lane, 'capability:explore');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.id), ['active-1']);
+  assert.doesNotMatch(answerSystemContext, /达到本 run 的迭代上限/);
+  assert.match(answerSystemContext, /尚无可交接的完成结果/);
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /暂不能完成任务边界切换/);
 });
 

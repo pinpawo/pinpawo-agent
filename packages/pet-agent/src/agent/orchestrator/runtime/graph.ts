@@ -73,6 +73,10 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const answerNode = createAnswerNode(config);
   const capabilityNode = createCapabilityNode({ config, subagentContextWindowTokens });
   const generalNode = createGeneralNode({ config, subagentContextWindowTokens });
+  // Graph-visible anchor shared by resume and post-execution paths. Its
+  // conditional edge owns deterministic guard evaluation and telemetry only;
+  // it must not grow state updates or user-facing output.
+  const delegationOutcomeIterationGuard = () => ({});
 
   const graph = new StateGraph(OrchestratorState)
     .addNode('prepare', prepare)
@@ -80,7 +84,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('taskDecision', asDecisionNode(taskDecision, buildControlContext))
     .addNode('capabilitySearch', capabilitySearch)
     .addNode('routeDecision', asDecisionNode(routeDecision, buildControlContext))
-    .addNode('delegationOutcomeIterationGuard', () => ({}))
+    .addNode('delegationOutcomeIterationGuard', delegationOutcomeIterationGuard)
     .addNode('delegationOutcomeDecision', delegationOutcomeDecision, {
       ends: ['capability', 'general', 'taskDecision', 'answer'],
     })

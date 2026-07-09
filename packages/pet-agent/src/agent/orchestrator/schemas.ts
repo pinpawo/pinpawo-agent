@@ -78,6 +78,14 @@ export function buildTaskDecisionSchema() {
     plan_draft: z.array(z.string()).max(5).nullable().optional().describe(
       '本次 next_task 之后尚未开始的步骤短句清单，仅作为下一轮 taskDecision 的自我引导备忘；单步任务或没有后续未开始步骤时为 null。',
     ),
+  }).superRefine((decision, ctx) => {
+    if (decision.action === 'next_task' && !decision.task?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['task'],
+        message: 'action=next_task requires a non-empty task.',
+      });
+    }
   });
 }
 

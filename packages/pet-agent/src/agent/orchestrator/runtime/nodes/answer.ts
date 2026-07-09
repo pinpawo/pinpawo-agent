@@ -3,6 +3,7 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   getMessageHandoffSource,
   mainConversationMessages,
+  readLatestAnnounceCompletionReason,
   stampMessageCreatedAtUtc,
   type HandoffSource,
 } from '../../messageLanes';
@@ -13,9 +14,9 @@ import {
 } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { readMessageText } from '../../utils';
-import { readLatestAnnounceCompletionReason } from '../../messageLanes';
 import {
   getInvokeOptions,
+  readRunIterationLimit,
   resolveActor,
 } from '../config';
 import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
@@ -40,7 +41,9 @@ export function createAnswerNode(config: OrchestratorConfig) {
       : null;
     const terminalContext = buildTerminalAnswerContext(
       state,
-      maxRunIterations ?? config.maxRunIterations ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
+      maxRunIterations
+        ?? readRunIterationLimit(config.maxRunIterations)
+        ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
     );
     const response = await config.models.act.invoke(
       [

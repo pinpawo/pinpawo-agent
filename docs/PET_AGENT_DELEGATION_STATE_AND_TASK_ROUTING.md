@@ -21,7 +21,7 @@
 
 - **D1 — 生命周期前缀保留，不用注释替代。** 字段名会被序列化进 checkpoint 和 LangSmith trace，注释不会；`buildRunStateReset` 的 reset 纪律按名字执行。前缀编码生命周期（谁重置你），注释编码角色（命令/游标/账本），分工不二选一。新增一条单测断言所有 channel 名匹配 `/^(session|task|run)/` 或等于 `messages`。
 - **D2 — 重命名遵守前缀规范**（#308 issue 正文里建议的 `nextDelegation`/`routePendingDelegation` 不合规，以本表为准），见 §3。
-- **D3（修订 2026-07-09）— 不引入 source-of-truth 的 taskPlan；引入轻量 plan 草案（可选的自我引导备忘）。** plan 的权威载体仍是「用户原始请求 + 已完成任务的结论（handoff copy + `runDelegationSummaries`）」；游标是 `taskActiveDelegation`（#115 "conclusions cross boundaries" 的延伸）。`runTaskPlanDraft: string[]` 只表示"上一轮已经预留、但还没开始的后续步骤短句清单"：**taskDecision 只在已有草案时维护它，不从空创建草案**。没有上一轮 `runTaskPlanDraft` 时，taskDecision 的 `plan_draft` 必须为 null；当前 delegated task 若验收为 `task_done`，后面没有预留后续 lane，直接进入 answer 结束。已有草案时，taskDecision 先决定当前 `next_task`，再把本次 task 之后仍未开始的后续步骤整体写回；仍合理的步骤可以沿用，已被本次 task、已完成步骤或最新结论覆盖的项必须移除。三条纪律防止草案滑回被否决的显式 taskPlan：①**内容不是控制流依据**——route/guard 不读取草案文本，`afterDelegationOutcomeDecision` 只检查草案是否非空，作为 `task_done` 后是否回环 taskDecision 的窄门；草案与 `goal_done` 冲突时以验收为准；②**草案只含还没开始的步骤，没有 replan 机制**——已完成工作归 `runDelegationSummaries` 账本 + handoff 结论，当前正在出生/执行的步骤归 `runPendingTask` / `taskActiveDelegation`；taskDecision 输出的 `plan_draft` 不包含本次 `next_task` 本身，只包含其后的未开始步骤，不存在增量修补、删除标记和游标进位；③**丢了无害**——run 级字段，跨 run 重置后不会主动重建。第一版草案只喂 taskDecision 自己，不给验收节点（避免"结果 vs 目标"被污染成"结果 vs 草案"）。定位边界：pet-agent 的草案是给自己看的便签（简单任务，1~5 步），需要结构化多角色计划的场景走 Studio planner（`studio_plan` 的 plan 是给系统执行的合同），两层不打架。
+- **D3（修订 2026-07-09）— 不引入 source-of-truth 的 taskPlan；引入轻量 plan 草案（可选的自我引导备忘）。** plan 的权威载体仍是「用户原始请求 + 已完成任务的结论（handoff copy + `runDelegationSummaries`）」；游标是 `taskActiveDelegation`（#115 "conclusions cross boundaries" 的延伸）。`runTaskPlanDraft: string[]` 表示"已经预留、但还没开始的后续步骤短句清单"：**taskDecision 只允许在本 run 首轮创建一次；之后只维护已有草案，不能从 null 重新创建**。首轮创建恢复复合请求的多任务能力；回环轮无草案则表示没有预留后续 lane，当前 delegated task 若验收为 `task_done`，直接进入 answer。已有草案时，taskDecision 先决定当前 `next_task`，再把本次 task 之后仍未开始的后续步骤整体写回；仍合理的步骤可以沿用，已被本次 task、已完成步骤或最新结论覆盖的项必须移除。三条纪律防止草案滑回被否决的显式 taskPlan：①**内容不是控制流依据**——route/guard 不读取草案文本，`afterDelegationOutcomeDecision` 只检查草案是否非空，作为 `task_done` 后是否回环 taskDecision 的窄门；草案与 `goal_done` 冲突时以验收为准；②**草案只含还没开始的步骤，没有 replan 机制**——已完成工作归 `runDelegationSummaries` 账本 + handoff 结论，当前正在出生/执行的步骤归 `runPendingTask` / `taskActiveDelegation`；taskDecision 输出的 `plan_draft` 不包含本次 `next_task` 本身，只包含其后的未开始步骤，不存在增量修补、删除标记和游标进位；③**丢了无害**——run 级字段，跨 run 重置后不会主动重建。第一版草案只喂 taskDecision 自己，不给验收节点（避免"结果 vs 目标"被污染成"结果 vs 草案"）。定位边界：pet-agent 的草案是给自己看的便签（简单任务，1~5 步），需要结构化多角色计划的场景走 Studio planner（`studio_plan` 的 plan 是给系统执行的合同），两层不打架。
 - **D4 — 图重构为 task → search → route 三段管道。** task 先出生，capability search 用 task 文本（+ 决策顺带输出的 `search_keywords`）做 query，路由决策最后落 lane。`capabilityDiscovery` 节点删除——它唯一的职责（LLM 从原始请求提炼 query）被"task 即 query"取代。
 - **D5（修订 2026-07-09）— delegation outcome 决策验收化**：三态 `continue | task_done | goal_done` + 可选 `gap_note`，**不携带任何 task 文本字段**，也不携带 capability 枚举（枚举只在 routeDecision 小 schema）。它只回答一个问题——"这次 announce 的结果是否符合目标"：`continue` = 当前任务没达标，同 lane 继续（`gap_note` 说缺什么）；`task_done` = 这步达标但总目标未完；`goal_done` = 总目标满足。原三态里的 `next_task`（验收节点顺手写下一个 task）被否决：那让它同时干验收和规划两件事，prompt 会越写越长、稳定性下降。
 - **D6 — routeDecision 只在零候选时走确定性 fallback**（直接 `general`），有候选一律过 LLM。不做"单一高分候选跳过 LLM"：词法打分置信度不足以定阈值。
@@ -40,7 +40,7 @@
 | `runPendingDelegation` | `runNextDelegation` | run | **路由命令**（单跳） | routeDecision 节点 | `afterRouteDecision` + capability/general 节点 | 执行节点消费后置 null；run 入口 reset |
 | `runPendingFinalReply` | 不变（D10：暂保留，Command 化后置） | run | **终点路由信号**（answer/inline 单跳） | taskDecision、delegationOutcomeDecision、inline stop/iteration guard | after* route helpers、answer/finalize | answer/finalize 置 null；run 入口 reset |
 | （新增） | `runPendingTask` | run | **任务命令**（管道内单段：decision → search → route） | taskDecision（D11 后唯一写方） | capabilitySearch、routeDecision | routeDecision 落定后置 null；run 入口 reset |
-| （新增，Stage B） | `runTaskPlanDraft` | run | **可选自我引导备忘**（非 source of truth；内容不驱动 route/guard，存在性只作续跑门，纪律见 D3） | taskDecision（仅维护已有草案；不从 null 创建） | 下一轮 taskDecision；`afterDelegationOutcomeDecision` 仅检查是否非空 | run 入口 reset |
+| （新增，Stage B） | `runTaskPlanDraft` | run | **可选自我引导备忘**（非 source of truth；内容不驱动 route/guard，存在性只作续跑门，纪律见 D3） | taskDecision（首轮可创建一次；之后仅维护已有草案，不从 null 重建） | 下一轮 taskDecision；`afterDelegationOutcomeDecision` 仅检查是否非空 | run 入口 reset |
 | `runDelegations` | `runDelegationSummaries` | run | **账本**：只进 prompt/decision context，永不参与控制流分支 | 执行节点追加/更新 | `buildRunDelegationSummaryContext` | run 入口 reset |
 | `runCapabilitySearchState` | 不变 | run | search 草稿；语义更新为**每个任务边界重置** | capabilitySearch 节点 | routeDecision | 任务边界（task_done）重置；run 入口 reset |
 | `canHandoffActiveDelegation` | **删除**（D9） | — | 派生值误存为 state；改为 decision context 就地 evaluateGuard | — | — | — |
@@ -56,8 +56,8 @@ type RunPendingTask = {
   searchKeywords: string | null; // taskDecision 顺带输出，capabilitySearch 优先使用
 };
 
-// 上一轮已预留、还没开始的步骤短句清单；string[] 而非自由文本，天然抑制长篇。
-// taskDecision 只维护已有草案，不从 null 创建。
+// 已预留、还没开始的步骤短句清单；string[] 而非自由文本，天然抑制长篇。
+// taskDecision 在 run 首轮可创建一次；之后只维护已有草案，不从 null 重建。
 // 不包含已完成步骤，也不包含本次 taskDecision 产出的当前 next_task。
 // null = 无预留后续步骤（单步任务常态）；task_done 后直接 answer。
 type RunTaskPlanDraft = string[] | null;
@@ -83,9 +83,9 @@ START → prepare → compactContext
 taskDecision (LLM，静态 schema) —— 规划节点，唯一 task 出生点（D11）
   输入：用户请求 + runTaskPlanDraft（如有）+ runDelegationSummaries 结论摘要
   输出 { action: 'answer' | 'next_task', task?, context_summary?, search_keywords?, plan_draft? }
-  ── 不含 capability 枚举；单步约束 prompt 在此；plan_draft 仅在已有 runTaskPlanDraft 时维护本次 next_task 之后还没开始的步骤草案（D3）
+  ── 不含 capability 枚举；单步约束 prompt 在此；plan_draft 首轮可创建一次，之后仅在已有 runTaskPlanDraft 时维护本次 next_task 之后还没开始的步骤草案（D3）
   → answer   → answerNode → END
-  → next_task → 写 runPendingTask + runTaskPlanDraft（无已有草案时保持 null）→ capabilitySearch
+  → next_task → 写 runPendingTask + runTaskPlanDraft（首轮可创建；后续无已有草案时保持 null）→ capabilitySearch
 
 capabilitySearch（确定性节点，无 LLM）
   query = runPendingTask.searchKeywords ?? runPendingTask.task
@@ -132,9 +132,7 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 
 「看 issue #269 → 分析需求点 → 搜本地代码/git log → 汇报结论」：
 
-以下走查假设 run 进入 taskDecision 前已经有上一轮草案 `runTaskPlanDraft=[「获取 issue #269 内容并提炼需求点」,「在本地仓库检索实现与 git log 比对」,「汇总结论」]`。如果 run 开始时没有草案，taskDecision 不新建草案；第一步 `task_done` 后直接 answer 结束。
-
-1. taskDecision：`next_task`，task=「获取 issue #269 内容并提炼需求点」（单步约束生效），search_keywords=「github issue|网页抓取」，plan_draft 覆写为 [「在本地仓库检索实现与 git log 比对」,「汇总结论」]；
+1. 首轮 taskDecision：`next_task`，task=「获取 issue #269 内容并提炼需求点」（单步约束生效），search_keywords=「github issue|网页抓取」，plan_draft 创建为 [「在本地仓库检索实现与 git log 比对」,「汇总结论」]；
 2. capabilitySearch 用 task 关键词匹配 → 假设命中 `web_reader` capability → routeDecision 选 `capability.web_reader`；
 3. 执行 → announce → outcomeDecision（验收）：`task_done`（需求点已提炼，总目标未完）→ handoff 任务 1 结论进 main，清游标，重搜；
 4. 回环 taskDecision：看到草案 + 任务 1 结论 → task=「在本地仓库检索相关实现与 git log，判断需求点是否已实现」，plan_draft 覆写为 [「汇总结论」]；
@@ -150,7 +148,7 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 | 0 | **已落地**：#308 重命名（§3 表；`runPendingFinalReply` 不改名，仅 answer/inline 终点置 null，见 D10）+ 删除无效 legacy recovery（D7）+ channel 前缀单测 + transient 断言 + 更新 `PET_AGENT_STATE_LIFECYCLE_REFACTOR.md` §2 表 | 小（inline 终点 flush） | 已由现有测试验收 |
 | 0.5 | **已落地**：D9：删 `canHandoffActiveDelegation` 字段，guard 内联进 decision context，删 `delegationOutcomeDecisionGuard` / `prepareUserIntentDecision` 两节点 | 有（行为等价） | 现有测试 + guard 决策事件仍可观测 |
 | A | **已落地**：run 入口拆 taskDecision + capabilitySearch + routeDecision，删 capabilityDiscovery，新增 `runPendingTask`；单步约束 prompt 进 taskDecision | 有 | orchestrator/schema/prompt 测试覆盖 task-first route |
-| B | **已落地**：outcomeDecision 验收化（D5：`continue \| task_done \| goal_done` + gap_note，无 task 字段）；有草案的任务边界回环 taskDecision（D11），无草案的 `task_done` 直接 answer；taskDecision 增加 `plan_draft` 输出 + 新增 `runTaskPlanDraft` channel（D3：只维护已有草案，不从空创建）；保留 `runPendingFinalReply` + conditional routes，避免把 Command 化 graph 作为本 PR 的捎带重构（D10） | 有 | pet-agent 全量测试 + 「有草案时 task_done 回环 taskDecision 并独立 reroute 下一 task」/「无草案时 task_done 直接 answer」断言 |
+| B | **已落地**：outcomeDecision 验收化（D5：`continue \| task_done \| goal_done` + gap_note，无 task 字段）；有草案的任务边界回环 taskDecision（D11），无草案的 `task_done` 直接 answer；taskDecision 增加 `plan_draft` 输出 + 新增 `runTaskPlanDraft` channel（D3：首轮可创建一次，之后只维护已有草案）；保留 `runPendingFinalReply` + conditional routes，避免把 Command 化 graph 作为本 PR 的捎带重构（D10） | 有 | pet-agent 全量测试 + 「首轮可创建草案并在 task_done 后回环 reroute」/「无草案时 task_done 直接 answer」断言 |
 | B 捎带 | 待实施：`buildDecisionResult` 里 handoff/生命周期块下沉 `delegationLifecycle.ts` | 无 | 现有测试 |
 
 ## 8. 验收标准
@@ -160,11 +158,11 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 - 首个 task 文本不含编号步骤清单（eval 断言）。
 - run 结束 snapshot 中 transient 字段全部为 null；Stage 0.5 后 `canHandoffActiveDelegation` 不再出现在 snapshot 中；Stage B 保留 `runPendingFinalReply`，但 answer/inline 终点必须置 null。
 - Stage 0 不改变任何控制流行为；Stage 0.5 只移除派生 state，不改变 handoff 判定。
-- Stage B：`runTaskPlanDraft` 的内容只被 prompt 构建读取；`afterDelegationOutcomeDecision` 只检查是否非空，作为 `task_done` 后是否回环 taskDecision 的窄门（D3）；outcomeDecision schema 不含 task 文本字段（D5）；有草案的多步请求中，第 2+ 个 task 由回环后的 taskDecision 产出并独立走 search+route（D11）。
+- Stage B：`runTaskPlanDraft` 的内容只被 prompt 构建读取；`afterDelegationOutcomeDecision` 只检查是否非空，作为 `task_done` 后是否回环 taskDecision 的窄门（D3）；outcomeDecision schema 不含 task 文本字段（D5）；复合请求可在首轮创建草案，第 2+ 个 task 由回环后的 taskDecision 产出并独立走 search+route（D11）。
 
 ## 9. Non-goals
 
-- 不引入 source-of-truth 的 taskPlan（轻量草案见 D3：只维护已有草案，草案内容不驱动 route/guard）/ 不做多任务并发委派。
+- 不引入 source-of-truth 的 taskPlan（轻量草案见 D3：首轮可创建一次，之后只维护已有草案，草案内容不驱动 route/guard）/ 不做多任务并发委派。
 - 不改 handoff/announce 语义与 subagent 执行行为。
 - 不做 checkpoint 迁移（理由见 §3 末）。
 - 不合并 taskDecision 与 outcomeDecision 为单节点——D5/D11 后两者职责正交（规划 vs 验收），合并不再是方向。

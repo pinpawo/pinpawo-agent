@@ -311,29 +311,43 @@ export function buildTaskDecisionSystemPrompt(params: {
   actor: AgentActor;
   runDelegationContext: string;
   hasTaskPlanDraft?: boolean;
+  canCreateTaskPlanDraft?: boolean;
   workdir?: string;
   runtimeEnvironment?: string;
 }): string {
-  const taskDecisionFocus = params.hasTaskPlanDraft
+  const hasTaskPlanDraft = Boolean(params.hasTaskPlanDraft);
+  const canCreateTaskPlanDraft = Boolean(params.canCreateTaskPlanDraft);
+  const canWriteTaskPlanDraft = hasTaskPlanDraft || canCreateTaskPlanDraft;
+  const taskDecisionFocus = hasTaskPlanDraft
     ? '判断重点：根据上下文决定当前要交给执行器的单步 task；参考上一轮 plan_draft，维护当前 task 之后仍未开始的后续 task 草案。'
-    : '判断重点：根据上下文决定当前要交给执行器的单步 task；当前没有上一轮 plan_draft，本轮不新建后续 task 草案。';
-  const taskPlanDraftDecisionBasis = params.hasTaskPlanDraft
+    : canCreateTaskPlanDraft
+      ? '判断重点：根据上下文决定当前要交给执行器的单步 task；这是本 run 首轮 taskDecision，明显需要多步时可以创建当前 task 之后的后续 task 草案。'
+      : '判断重点：根据上下文决定当前要交给执行器的单步 task；当前没有上一轮 plan_draft，本轮不新建后续 task 草案。';
+  const taskPlanDraftDecisionBasis = hasTaskPlanDraft
     ? '- 上一轮 plan_draft 只是参考：只维护本次 task 之后仍未开始的后续草案，已被最新结论覆盖的项不要保留。'
-    : '- 当前没有上一轮 plan_draft：不要新建后续草案，plan_draft 必须为 null；本次 task_done 后如果没有预留草案就会进入 answer。';
-  const taskPlanDraftInstructions = params.hasTaskPlanDraft
+    : canCreateTaskPlanDraft
+      ? '- 这是本 run 首轮 taskDecision：如果用户目标明显需要多步，plan_draft 可以写本次 task 之后尚未开始的后续 task；单步任务时为 null。'
+      : '- 当前没有上一轮 plan_draft：不要新建后续草案，plan_draft 必须为 null；本次 task_done 后如果没有预留草案就会进入 answer。';
+  const taskPlanDraftInstructions = hasTaskPlanDraft
     ? [
         '- 先决定 task 字段；再参考上一轮 plan_draft，判断本次 task 之后是否还有后续 task。',
         '- 仍合理的后续 task 可以沿用；已被本次 task、已完成步骤或最新结论覆盖的项不要保留。',
         '- plan_draft 只填写本次 task 之后尚未开始的后续 task，1~5 个短句；没有后续 task 时为 null；不输出 patch、删除标记或游标。',
       ]
+    : canCreateTaskPlanDraft
+      ? [
+          '- 先决定 task 字段；如果用户目标明显需要多步，再创建本次 task 之后尚未开始的后续 task 草案。',
+          '- plan_draft 只填写本次 task 之后的后续 task，1~5 个短句；单步任务或没有明确后续 task 时为 null。',
+          '- plan_draft 不包含本次 task，不输出 patch、删除标记或游标。',
+        ]
     : [
         '- 先决定 task 字段；plan_draft 返回 null，不要新建后续 task 草案。',
         '- 如果这是 task_done 后的回环且没有上一轮 plan_draft，表示没有预留后续 task，选择 answer 结束。',
       ];
-  const planDraftFieldSemantic = params.hasTaskPlanDraft
+  const planDraftFieldSemantic = canWriteTaskPlanDraft
     ? '- plan_draft 可在 action=next_task 时填写本次 task 之后尚未开始的后续 task 草案；answer 时为 null 或省略。'
     : '- plan_draft 在当前没有上一轮 plan_draft 时必须为 null；answer 时为 null 或省略。';
-  const taskDecisionExample = params.hasTaskPlanDraft
+  const taskDecisionExample = canWriteTaskPlanDraft
     ? {
         action: 'next_task',
         task: '读取 issue #269 内容并提炼需求点。',
@@ -365,9 +379,11 @@ export function buildTaskDecisionSystemPrompt(params: {
     taskDecisionFocus,
     '- action=answer：当前不需要进入执行管道，交给 answer 节点基于完整对话历史回复用户。',
     '- action=next_task：生成当前单步 delegated task，并提供必要 context_summary 与 capability search 关键词。',
-    params.hasTaskPlanDraft
+    hasTaskPlanDraft
       ? '- 如果 action=next_task，同时维护本次 task 之后仍未开始的后续 plan_draft。'
-      : '- 当前没有上一轮 plan_draft；无论 action 是什么，plan_draft 都不要新建。',
+      : canCreateTaskPlanDraft
+        ? '- 如果 action=next_task 且用户目标明显需要多步，可以创建本次 task 之后仍未开始的后续 plan_draft。'
+        : '- 当前没有上一轮 plan_draft；无论 action 是什么，plan_draft 都不要新建。',
     '- 用户当前请求、近期对话上下文，以及 runDelegationSummaries 中已经完成的任务结论。',
     '- runDelegationSummaries 是只读事实账本，用来避免重复执行和理解已有结论；不要把它当作控制流命令。',
     taskPlanDraftDecisionBasis,
@@ -589,6 +605,7 @@ export function buildTaskDecisionInput(params: {
   recentMessages: BaseMessage[];
   requestContext?: string | null;
   taskPlanDraftContext?: string | null;
+  canCreateTaskPlanDraft?: boolean;
 }): string {
   const context = params.requestContext ?? buildPreparedRequestContext({
     latestUserRequest: params.latestUserRequest,
@@ -597,7 +614,9 @@ export function buildTaskDecisionInput(params: {
   });
   const instruction = params.taskPlanDraftContext
     ? '请根据以上动态上下文判断是否需要执行器；需要时先生成当前单步 task，并维护当前 task 之后仍未开始的后续 plan_draft。'
-    : '请根据以上动态上下文判断是否需要执行器；需要时只生成当前单步 task，plan_draft 返回 null，不要新建后续草案。';
+    : params.canCreateTaskPlanDraft
+      ? '请根据以上动态上下文判断是否需要执行器；需要时先生成当前单步 task，用户目标明显需要多步时可以创建后续 plan_draft。'
+      : '请根据以上动态上下文判断是否需要执行器；需要时只生成当前单步 task，plan_draft 返回 null，不要新建后续草案。';
   return [
     '<task_decision_input>',
     indentXmlBlock(context, 2),

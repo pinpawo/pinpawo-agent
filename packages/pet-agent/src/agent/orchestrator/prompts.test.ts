@@ -98,11 +98,13 @@ test('task decision prompt owns single-step task birth', () => {
   const prompt = buildTaskDecisionSystemPrompt({
     actor: testActor,
     runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
+    canCreateTaskPlanDraft: true,
   });
   const input = buildTaskDecisionInput({
     latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
     recentMessages: recentMessages(1),
     taskPlanDraftContext: buildTaskPlanDraftContext(null),
+    canCreateTaskPlanDraft: true,
   });
 
   assert.match(prompt, /task decision 节点/);
@@ -119,15 +121,33 @@ test('task decision prompt owns single-step task birth', () => {
   assert.match(prompt, /不要只因为出现 URL 就只输出 browser\/url/);
   assert.match(prompt, /plan_draft/);
   assert.match(prompt, /先决定 task 字段/);
+  assert.match(prompt, /本 run 首轮 taskDecision/);
+  assert.match(prompt, /可以创建当前 task 之后的后续 task 草案/);
+  assert.match(prompt, /单步任务时为 null/);
+  assert.doesNotMatch(prompt, /仍合理的后续 task 可以沿用/);
+  assert.match(input, /<task_decision_input>/);
+  assert.match(input, /可以创建后续 plan_draft/);
+  assert.doesNotMatch(input, /<task_plan_draft/);
+  assert.doesNotMatch(input, /重新规划/);
+});
+
+test('task decision prompt does not create a plan draft after the first run task without one', () => {
+  const prompt = buildTaskDecisionSystemPrompt({
+    actor: testActor,
+    runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
+  });
+  const input = buildTaskDecisionInput({
+    latestUserRequest: '继续推进。',
+    recentMessages: recentMessages(1),
+    taskPlanDraftContext: buildTaskPlanDraftContext(null),
+  });
+
   assert.match(prompt, /当前没有上一轮 plan_draft/);
   assert.match(prompt, /plan_draft 返回 null/);
   assert.match(prompt, /不新建后续 task 草案/);
   assert.match(prompt, /plan_draft 在当前没有上一轮 plan_draft 时必须为 null/);
-  assert.doesNotMatch(prompt, /仍合理的后续 task 可以沿用/);
-  assert.match(input, /<task_decision_input>/);
   assert.match(input, /plan_draft 返回 null/);
-  assert.doesNotMatch(input, /<task_plan_draft/);
-  assert.doesNotMatch(input, /重新规划/);
+  assert.doesNotMatch(input, /可以创建后续 plan_draft/);
 });
 
 test('task decision prompt maintains existing plan draft only', () => {

@@ -334,7 +334,7 @@ test('task-first route decision exposes capability candidates from the pending t
   assert.equal(decisionCallCount, 3);
 });
 
-test('task_done outcome with a plan draft loops back through taskDecision and reroutes the next task', async () => {
+test('first task decision can create a plan draft and task_done reroutes the next task', async () => {
   let structuredCallCount = 0;
   const taskDecisionInputs: string[] = [];
   const routeInputs: string[] = [];
@@ -391,17 +391,9 @@ test('task_done outcome with a plan draft loops back through taskDecision and re
     actor: testActor,
   });
 
-  const input = {
-    ...buildOrchestratorRunInput([
-      new HumanMessage('看 issue #269，再查本地实现，最后总结。'),
-    ]),
-    runTaskPlanDraft: [
-      '读取 issue 并提炼需求点',
-      '检索本地实现与 git log',
-      '汇总结论',
-    ],
-  };
-  const state = await graph.invoke(input, {
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('看 issue #269，再查本地实现，最后总结。'),
+  ]), {
     configurable: {
       thread_id: 'stage-b-task-done-loop',
       actor: testActor,
@@ -412,8 +404,7 @@ test('task_done outcome with a plan draft loops back through taskDecision and re
 
   assert.equal(taskDecisionInputs.length, 2);
   assert.equal(routeInputs.length, 2);
-  assert.match(taskDecisionInputs[0], /<task_plan_draft/);
-  assert.match(taskDecisionInputs[0], /读取 issue 并提炼需求点/);
+  assert.doesNotMatch(taskDecisionInputs[0], /<task_plan_draft/);
   assert.match(taskDecisionInputs[1], /<task_plan_draft/);
   assert.match(taskDecisionInputs[1], /检索本地实现与 git log/);
   assert.doesNotMatch(taskDecisionInputs[1], /读取 issue 并提炼需求点/);
@@ -441,10 +432,7 @@ test('task_done outcome without a plan draft answers instead of creating follow-
         const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
         if (structuredCallCount === 1) {
           taskDecisionInputs.push(inputText);
-          return {
-            ...nextTaskDecision('读取 issue #269 并提炼需求点。', null, 'issue|需求分析'),
-            plan_draft: ['检索本地实现与 git log'],
-          };
+          return nextTaskDecision('读取 issue #269 并提炼需求点。', null, 'issue|需求分析');
         }
         if (structuredCallCount === 2) {
           routeInputs.push(inputText);

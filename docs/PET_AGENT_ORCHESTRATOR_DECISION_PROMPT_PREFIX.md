@@ -43,7 +43,7 @@ task loop 流程：
 
 1. 术语键使用中文 + 英文形式（如"用户目标（user goal）"）。`task` / `announce` / `handoff` / `plan_draft` / `gap_note` 保持英文，因为它们是字段或机制名。
 2. 测试锚点优先使用：`task loop`、`唯一基准`、`不编造执行事实`、`系统 handoff`、`不是验收依据`。
-3. 有意不放入共享前缀：iteration guard / inline stop、"无草案不新建"规则、capability 候选打分细节。这些分别属于系统守卫、taskDecision 节点级纪律和 routeDecision 动态上下文。
+3. 有意不放入共享前缀：iteration guard / inline stop、"首轮可创建草案、回环无草案不新建"规则、capability 候选打分细节。这些分别属于系统守卫、taskDecision 节点级纪律和 routeDecision 动态上下文。
 
 共享前缀之后，每个 decision 节点自己的段落只保留三类内容：
 

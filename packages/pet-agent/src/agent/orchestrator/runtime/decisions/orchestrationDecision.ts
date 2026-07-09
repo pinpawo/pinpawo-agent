@@ -151,10 +151,13 @@ function buildTaskDecisionContext(params: {
     contextSummaries,
     capabilityArtifacts: state.sessionCapabilityArtifacts,
   });
+  const hasTaskPlanDraft = Boolean(state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0);
+  const canCreateTaskPlanDraft = state.runDelegationSummaries.length === 0;
   const systemPrompt = buildTaskDecisionSystemPrompt({
     actor,
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
-    hasTaskPlanDraft: Boolean(state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0),
+    hasTaskPlanDraft,
+    canCreateTaskPlanDraft,
     workdir,
     runtimeEnvironment,
   });
@@ -163,6 +166,7 @@ function buildTaskDecisionContext(params: {
     recentMessages: recentMainMessages,
     requestContext,
     taskPlanDraftContext: buildTaskPlanDraftContext(state.runTaskPlanDraft),
+    canCreateTaskPlanDraft,
   }));
 
   return {
@@ -444,7 +448,9 @@ function buildTaskDecisionResult(params: {
 }) {
   const { state, decision } = params;
   const task = readDecisionText(decision.task);
-  const planDraft = state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0
+  const canWritePlanDraft = (state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0)
+    || state.runDelegationSummaries.length === 0;
+  const planDraft = canWritePlanDraft
     ? normalizePlanDraft(decision.plan_draft)
     : null;
   if (decision.action === 'answer') {

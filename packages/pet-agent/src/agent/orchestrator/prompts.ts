@@ -163,7 +163,7 @@ export function buildTaskPlanDraftContext(planDraft: RunTaskPlanDraft): string |
 
   const lines = [
     '<task_plan_draft role="self_guidance" source="previous_task_decision">',
-    '  <note>这是上一轮 taskDecision 的剩余步骤草案，只用于辅助本轮重新规划；它不是控制流依据。</note>',
+    '  <note>这是上一轮 taskDecision 预计还没开始的步骤草案，只用于辅助本轮重新规划；它不是控制流依据。</note>',
   ];
   visibleSteps.forEach((step, index) => {
     lines.push(indentXmlBlock(xmlTextBlock('step', step, ` index="${(index + 1).toString()}"`), 2));
@@ -292,8 +292,9 @@ export function buildTaskDecisionSystemPrompt(params: {
     ...buildSingleStepTaskInstructions().map((line) => `- ${line}`),
     '- search_keywords 用于下一步 capability search：提取能匹配执行器能力的关键词、同义词或短语；多个词用 | 分隔。没有额外关键词时可为 null。',
     '- 对 code review / PR review / GitHub PR URL / 仓库变更评审类请求，search_keywords 应包含 explore、code review、PR review、repository investigation 等调查/审查词；不要只因为出现 URL 就只输出 browser/url。',
-    '- plan_draft 是给下一轮 taskDecision 的轻量自我引导备忘：用 1~5 个短句只列当前判断仍未完成的预计剩余步骤；已由最新结论覆盖的步骤不要保留；单步任务或不需要时为 null。',
-    '- plan_draft 不是 source of truth，也不是路线/守卫依据；有必要时可整体改写为新的剩余步骤清单，不要输出增量 patch、删除标记或游标推进。',
+    '- plan_draft 是给下一轮 taskDecision 的轻量自我引导备忘：用 1~5 个短句只列当前 next_task 之后还没开始的预计步骤；不要包含本次 action=next_task 的 task 本身。',
+    '- plan_draft 已由最新结论覆盖的步骤不要保留；单步任务或没有后续未开始步骤时为 null。',
+    '- plan_draft 不是 source of truth，也不是路线/守卫依据；有必要时可整体改写为新的未开始步骤清单，不要输出增量 patch、删除标记或游标推进。',
     '',
     '输出一个结构化 task decision。',
     '必须返回一个 JSON object，字段名必须严格使用：action、task、context_summary、search_keywords、plan_draft。',
@@ -305,14 +306,13 @@ export function buildTaskDecisionSystemPrompt(params: {
     '- task 只在 action=next_task 时填写；answer 时为 null 或省略。',
     '- context_summary 只在 action=next_task 时填写必要上下文；answer 时为 null 或省略。',
     '- search_keywords 只在 action=next_task 时填写用于 capability search 的关键词；answer 时为 null 或省略。',
-    '- plan_draft 可在 action=next_task 时填写剩余步骤短句清单；answer 时为 null 或省略。',
+    '- plan_draft 可在 action=next_task 时填写本次 task 之后尚未开始的步骤短句清单；answer 时为 null 或省略。',
     `正确示例：${JSON.stringify({
       action: 'next_task',
       task: '读取 issue #269 内容并提炼需求点。',
       context_summary: '用户要求先理解 issue，再继续检查本地实现。',
       search_keywords: 'github issue|网页抓取|需求分析',
       plan_draft: [
-        '读取 issue 并提炼需求点',
         '检索本地实现与 git log',
         '汇总结论并回复用户',
       ],

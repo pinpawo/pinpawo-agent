@@ -361,7 +361,7 @@ test('task_done outcome loops back through taskDecision and reroutes the next ta
           taskDecisionInputs.push(inputText);
           return {
             ...nextTaskDecision('读取 issue #269 并提炼需求点。', null, 'issue|需求分析'),
-            plan_draft: ['读取 issue 并提炼需求点', '检索本地实现与 git log', '汇总结论'],
+            plan_draft: ['检索本地实现与 git log', '汇总结论'],
           };
         }
         if (structuredCallCount === 2) {
@@ -375,7 +375,7 @@ test('task_done outcome loops back through taskDecision and reroutes the next ta
           taskDecisionInputs.push(inputText);
           return {
             ...nextTaskDecision('检索本地实现与 git log，判断需求点是否已覆盖。', null, 'repository|git log'),
-            plan_draft: ['检索本地实现与 git log', '汇总结论'],
+            plan_draft: ['汇总结论'],
           };
         }
         if (structuredCallCount === 5) {
@@ -417,6 +417,7 @@ test('task_done outcome loops back through taskDecision and reroutes the next ta
   assert.doesNotMatch(taskDecisionInputs[0], /<task_plan_draft/);
   assert.match(taskDecisionInputs[1], /<task_plan_draft/);
   assert.match(taskDecisionInputs[1], /检索本地实现与 git log/);
+  assert.doesNotMatch(taskDecisionInputs[1], /读取 issue 并提炼需求点/);
   assert.match(routeInputs[0], /读取 issue #269/);
   assert.match(routeInputs[1], /检索本地实现与 git log/);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);

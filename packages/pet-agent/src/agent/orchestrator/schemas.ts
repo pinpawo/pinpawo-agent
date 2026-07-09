@@ -76,7 +76,7 @@ export function buildTaskDecisionSchema() {
       'action=next_task 时用于 capability search 的关键词或短语；多个词用 | 分隔。没有更好关键词时可为 null。',
     ),
     plan_draft: z.array(z.string()).max(5).nullable().optional().describe(
-      '剩余步骤短句清单，仅作为下一轮 taskDecision 的自我引导备忘；单步任务或不需要草案时为 null。',
+      '本次 next_task 之后尚未开始的步骤短句清单，仅作为下一轮 taskDecision 的自我引导备忘；单步任务或没有后续未开始步骤时为 null。',
     ),
   });
 }

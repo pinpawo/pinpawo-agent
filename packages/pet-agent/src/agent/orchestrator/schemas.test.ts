@@ -33,7 +33,7 @@ test('task decision schema separates task birth from route selection', () => {
     task: '读取 issue #269 并提炼需求点。',
     context_summary: '用户要求先理解 issue。',
     search_keywords: 'github issue|需求分析',
-    plan_draft: ['读取 issue', '检索代码', '汇总结论'],
+    plan_draft: ['检索代码', '汇总结论'],
   }).success, true);
   assert.equal(schema.safeParse({
     action: 'next_task',

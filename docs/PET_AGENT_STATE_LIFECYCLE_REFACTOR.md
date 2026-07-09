@@ -54,6 +54,7 @@ All orchestrator state channels should carry their lifecycle prefix except the L
 | `runId` | `runId` | run | Current execution loop id. Do not use it as the long-lived task transcript id. |
 | `canHandoffActiveDelegation` | delete | — | Derived from `taskActiveDelegation` + `messages`; evaluate the guard in decision context instead of storing it in state. |
 | none | `runPendingTask` | run | Planned task-first routing command; introduced by the later task → search → route pipeline. |
+| none | `runTaskPlanDraft` | run | Self-guidance plan draft written by taskDecision (Stage B). Prompt-only memo; must never drive routes or guards. |
 | `buildRunStateReset` | `buildRunStateReset` | run | Resets only `run*` fields. |
 | `buildOrchestratorRunInput` | `buildOrchestratorRunInput` | run | Add a temporary compatibility alias if external callers still import the old name. |
 

@@ -25,6 +25,7 @@ import { resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   buildRunDelegationSummaryContext,
+  buildRuntimeContext,
   buildTaskDecisionInput,
   buildTaskDecisionSystemPrompt,
   buildTaskPlanDraftContext,
@@ -452,13 +453,12 @@ async function runOne(params: {
   try {
     const systemPrompt = buildTaskDecisionSystemPrompt({
       actor: evalActor,
-      runDelegationContext: buildRunDelegationSummaryContext(params.testCase.runDelegationSummaries ?? []),
-      hasTaskPlanDraft: Boolean(params.testCase.runTaskPlanDraft?.length),
-      workdir: process.cwd(),
     });
     const input = buildTaskDecisionInput({
       latestUserRequest: params.testCase.latestUserRequest,
       recentMessages: params.testCase.recentMessages ?? [new HumanMessage(params.testCase.latestUserRequest)],
+      runDelegationContext: buildRunDelegationSummaryContext(params.testCase.runDelegationSummaries ?? []),
+      runtimeContext: buildRuntimeContext(process.cwd(), process.version),
       taskPlanDraftContext: buildTaskPlanDraftContext(params.testCase.runTaskPlanDraft ?? null),
     });
     const structuredModel = params.chatModel.withStructuredOutput(

@@ -327,11 +327,13 @@ test('task-first route decision exposes capability candidates from the pending t
   });
 
   assert.equal(schemaAllowsExplore, true);
-  assert.match(routeSystemPrompt, /capability\.explore/);
+  assert.doesNotMatch(routeSystemPrompt, /capability\.explore/);
   assert.doesNotMatch(routeSystemPrompt, /delegate_capability\.explore/);
   assert.match(routeInput, /<route_decision_input>/);
   assert.match(routeInput, /继续调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
   assert.match(routeInput, /代码库理解\|调查\|capability 注册链路/);
+  assert.match(routeInput, /capability\.explore/);
+  assert.doesNotMatch(routeInput, /delegate_capability\.explore/);
   assert.equal(decisionCallCount, 3);
 });
 
@@ -684,6 +686,7 @@ test('task decision schema does not advertise capability actions', async () => {
 test('forcedCapabilityNames pre-seeds route candidates without keyword search', async () => {
   let legacyToolPathCalled = false;
   let routeSystemPrompt = '';
+  let routeInput = '';
   let structuredCallCount = 0;
   const model = {
     invoke: async () => new AIMessage('answered'),
@@ -701,6 +704,7 @@ test('forcedCapabilityNames pre-seeds route candidates without keyword search', 
         }
         if (structuredCallCount === 2) {
           routeSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
+          routeInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
           return routeCapabilityDecision('studio_plan');
         }
         return goalDoneDecision();
@@ -732,9 +736,10 @@ test('forcedCapabilityNames pre-seeds route candidates without keyword search', 
   });
 
   assert.equal(legacyToolPathCalled, false, 'forced names must not call a model tool path');
-  assert.match(routeSystemPrompt, /capability\.studio_plan/);
+  assert.doesNotMatch(routeSystemPrompt, /capability\.studio_plan/);
+  assert.match(routeInput, /capability\.studio_plan/);
   // 仅强制 studio_plan,other_cap 不应被作为候选注入。
-  assert.doesNotMatch(routeSystemPrompt, /capability\.other_cap/);
+  assert.doesNotMatch(routeInput, /capability\.other_cap/);
 });
 
 test('without forcedCapabilityNames task-first search does not call model tools', async () => {

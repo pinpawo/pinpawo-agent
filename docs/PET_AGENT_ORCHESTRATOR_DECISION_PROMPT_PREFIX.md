@@ -1,6 +1,6 @@
 # pet-agent orchestrator decision shared prompt prefix
 
-> 状态：Stage B prompt contract；2026-07-10 plan_draft 与 task_done 控制流修订已同步生产，完整 system prompt 重构另行推进。
+> 状态：Stage B prompt contract；2026-07-10 plan_draft 与 task_done 控制流修订已同步生产，静态 system prompt 与动态 input 分离已同步生产。
 > 用途：三个 decision 节点（taskDecision / routeDecision / outcomeDecision）共用的 system prompt 前缀。
 > 组装位置：放在 `[配置]` 行之后、各节点自己的"当前阶段/节点边界"段之前。
 
@@ -27,7 +27,7 @@ task loop 流程：
    - 读取：用户目标、当前 task、subagent announce、同一 run 的其他 task 摘要。
    - continue：当前 task 未达标 → 同一 capability 继续执行，gap_note 说明缺口。
    - task_done：当前 task 已达标但用户目标未完 → 系统 handoff 本任务结论并回到 taskDecision，由 taskDecision 结合上下文判断 answer 或 next_task。
-   - goal_done：用户目标已达成 → 系统 handoff 后进入 answer。
+   - goal_done：不再自主执行，交给 answer；通常因为用户目标已达成，或需要用户澄清/确认。
 6. answer（回复）
    - 基于主对话（含 handoff 进来的任务结论）生成用户可见回复。
 

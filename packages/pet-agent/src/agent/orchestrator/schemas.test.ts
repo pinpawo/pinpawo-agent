@@ -104,6 +104,7 @@ test('delegation outcome output instruction does not expose task or capability r
   const instruction = buildDelegationOutcomeDecisionOutputInstruction();
   assert.match(instruction, /outcome/);
   assert.match(instruction, /gap_note/);
+  assert.match(instruction, /不再自主执行，交给 answer/);
   assert.doesNotMatch(instruction, /delegate_capability\.browser/);
   assert.doesNotMatch(instruction, /context_summary 时/);
 });

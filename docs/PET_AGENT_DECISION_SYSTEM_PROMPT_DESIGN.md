@@ -1,6 +1,6 @@
 # pet-agent decision prompt 设计
 
-> 状态：设计稿，尚未落地到生产 prompt。
+> 状态：prompt contract；本 PR 已落地到 taskDecision / routeDecision / outcomeDecision 的生产组装。
 > 范围：taskDecision / routeDecision / outcomeDecision 的有效提示词，包括 system prompt、条件策略、动态 input 与 structured-output schema。
 > 目标：shared prefix 完整描述 orchestrator/task loop 的共同世界观；各 decision 只处理本节点的一种判断。
 > 职责摸排：见 [`PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md`](./PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md)。
@@ -72,6 +72,8 @@ effective decision prompt
 - `workdir`、runtime environment、capability availability 等每次调用可能变化的内容属于注入事实。
 - 与 decision 无关的配置不进入提示词。
 
+当前三个 decision 没有会改变 graph 语义的 provider/config 条件协议；如果未来某个 provider 只能使用 `jsonMode`，条件内容只补充最小 JSON 形状，不把 run state 分支搬进 prompt。
+
 ## 3. Shared orchestrator contract
 
 shared prefix 直接使用 [`PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md`](./PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md) 中的 Stage B prompt contract，不在本设计稿里维护第二份改写版本。其整体表述保持不变；`task_done` 按 plan_draft 是否存在分流等 state 控制条件从前缀中移除，改为描述代码已经确定的稳定职责。
@@ -118,7 +120,7 @@ routeDecision 为 task 选择执行 capability。
 
 plan_draft 是 taskDecision 给后续 taskDecision 留下的可选自我引导草稿：
 - 根据用户目标、当前 task、已有委托结论和对话上下文，观察当前 task 之后是否还可能需要其他 delegated task。
-- input 中已有 plan_draft 时把它作为参考；可以沿用、修订或清空。没有旧草案时也可以按当前上下文创建，或保持 null。
+- input 中已有 plan_draft 时默认把它作为参考；只有最新结论使其中步骤不再适用时才整体更新，没有明确后续工作时保持 null。
 - 输出始终是当前 task 之后仍可能需要、尚未开始的 delegated task 完整草稿，1~5 个短句；不包含当前 task，不包含 answer 工作，也不输出增量 patch 或游标。
 - plan_draft 不是验收依据，不决定 task_done 后的路由；代码只负责保存、重置和再次注入它。
 ```
@@ -245,28 +247,24 @@ Zod schema description 是有效提示词的一部分。每个字段的语义只
 
 尤其要移除与业务无关的固定示例，例如长期使用 `issue #269` 会让模型把 task 粒度和 plan_draft 内容锚定到代码调查场景。
 
-## 8. 当前实现与目标设计的差距
+## 8. 落地状态与后续边界
 
-| 当前实现 | 目标 |
+| 设计项 | 状态 |
 |---|---|
-| `workdir/runtimeEnvironment` 位于 system 最前面 | 作为动态事实放到 input；稳定 shared prefix 保持在前 |
-| taskDecision 把 `runDelegationContext` 拼进 system | 放入 taskDecision input |
-| routeDecision 把 capability targets 拼进 system | 放入 routeDecision input，并标记为数据 |
-| 三个 input 的 `<instruction>` 重复 system policy | 删除，只保留动态事实 |
-| taskDecision 根据首轮/有草案/无草案拼接多套 plan 规则 | 改为一套稳定的自我引导草稿语义 |
-| `afterDelegationOutcomeDecision` 根据 plan_draft 是否非空选择 taskDecision/answer | `task_done` 一律回 taskDecision，由模型结合上下文判断 answer/next_task |
-| result builder 根据旧草案/summary 决定是否接受 plan_draft | 代码只做结构归一化；草案是否创建、沿用、修订或清空由 taskDecision 判断 |
-| code/guard 直接写 AIMessage，再以 `inline → finalizeRun` 结束 | 删除 final-reply route state；正常终态统一进入 answer，真正 invariant violation 由校验或恢复处理 |
-| schema 把 `goal_done` 只定义为目标满足 | 与 terminal verdict 定义统一 |
-| prompt 重复完整字段字典和固定 JSON 示例 | 以 structured-output schema 为主，只保留最小 output contract |
-| code review 请求使用固定关键词词表 | 改为“执行意图 + 目标对象”的通用检索口径 |
+| 动态 runtime、run summaries 和 capability candidates | 本 PR 已移入对应 decision input，并用事实数据边界包裹 |
+| input 中重复 system policy 的 `<instruction>` | 本 PR 已删除；input 只保留当前调用事实 |
+| taskDecision 的 plan_draft 规则 | 本 PR 已收敛为一套稳定语义，不按 state mode 拼接多套 prompt |
+| `goal_done` 的 system/schema/output wording | 本 PR 已统一为 terminal verdict 语义 |
+| 固定业务 JSON 示例和领域关键词 | 本 PR 已移除，保留通用 task 粒度与 search_keywords 规则 |
+| task_done 的回环、plan_draft 保存和结果归一化 | 已由 Stage B 实现；本 PR 不改 graph/state 行为 |
+| inline/finalizeRun、`runPendingFinalReply` 等终态旁路 | 后续独立 graph/state 工作；不属于本 PR |
 
 ## 9. 验收与 eval
 
 ### 9.1 静态检查
 
 - 三个 decision 的 shared prefix 完全一致。
-- `当前阶段`、`当前节点`、重复的 `节点边界` 不再出现。
+- 每个 decision 只有一段 node-local 的阶段/边界说明，不重复注入动态 state。
 - 动态用户内容、task summaries、capability candidates、announce、workdir/runtime 不进入 system。
 - input XML 不包含新的 policy instruction。
 - routeDecision 私有段不展开 plan_draft、handoff 或 outcome 枚举。

@@ -1,6 +1,6 @@
 # pet-agent decision node 职责摸排
 
-> 状态：当前实现审计，尚未修改生产代码。
+> 状态：当前实现审计基线；prompt ownership 与动态上下文边界已由独立 prompt PR 落地。
 > 范围：taskDecision、capabilitySearch、routeDecision、outcomeDecision，以及它们前后的 guard、state patch 和 conditional route。
 > 目标：区分语义判断与确定性状态机，明确哪些事情交给 LLM，哪些事情必须由 node/graph 代码保证。
 
@@ -42,7 +42,19 @@ prepare / compactContext                         code guard + compaction
 
 整体上，graph route 已经由代码管理；问题主要集中在 decision 调用内部：同一个 state 条件同时出现在调用前代码、system prompt、input instruction、schema description 和返回后归一化中。
 
-## 3. taskDecision
+### 2.1 本 PR 的职责边界
+
+本审计驱动的 prompt PR 只调整 decision 的有效提示词组装，不重构 graph：
+
+- static shared contract、node contract 和 structured-output wording 保持在 system/schema。
+- 用户请求、任务摘要、候选 capability、announce、workdir/runtime 作为事实注入对应 input。
+- input 不再添加与 system policy 重复的 `<instruction>`。
+- plan_draft 继续是 taskDecision 的可选参考；prompt 不根据草案存在性表达 route/guard 条件。
+- capability subagent 的选择仍由 routeDecision 的语义判断完成，`lane` 只是 schema/graph 的编码字段。
+
+下列“当前职责分布”和“当前问题”章节保留改造前摸排，便于审阅每项变更；它们不是本 PR 合并后的运行时状态。
+
+## 3. taskDecision（改造前基线）
 
 ### 3.1 当前职责分布
 
@@ -110,7 +122,7 @@ prompt 只需要：
 - plan_draft 字段的稳定内容语义。
 - 上一轮 plan_draft 作为可选 input data；不再把 state mode 翻译成多套自然语言规则，也不暗示草案决定是否续跑。
 
-## 4. capabilitySearch
+## 4. capabilitySearch（改造前基线）
 
 capabilitySearch 当前是纯代码节点，不调用 LLM：
 
@@ -125,7 +137,7 @@ capabilitySearch 当前是纯代码节点，不调用 LLM：
 - taskDecision 只提供搜索语义，不知道 capability 枚举。
 - routeDecision 只在候选已经形成之后做语义选择。
 
-## 5. routeDecision
+## 5. routeDecision（改造前基线）
 
 ### 5.1 当前职责分布
 
@@ -183,7 +195,7 @@ prompt 只需要：
 - task 和候选 capability 作为 input data。
 - 不需要描述候选为空、registry 不可用或 general 不可用等状态分支。
 
-## 6. outcomeDecision
+## 6. outcomeDecision（改造前基线）
 
 ### 6.1 当前职责分布
 

@@ -39,6 +39,7 @@ import {
   buildRouteDecisionSystemPrompt,
   buildRouteTargetsContext,
   buildRunDelegationSummaryContext,
+  buildRuntimeContext,
   buildSubagentAnnounceContext,
   buildTaskDecisionInput,
   buildTaskPlanDraftContext,
@@ -156,18 +157,15 @@ function buildTaskDecisionContext(params: {
     contextSummaries,
     capabilityArtifacts: state.sessionCapabilityArtifacts,
   });
-  const hasTaskPlanDraft = Boolean(state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0);
   const systemPrompt = buildTaskDecisionSystemPrompt({
     actor,
-    runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
-    hasTaskPlanDraft,
-    workdir,
-    runtimeEnvironment,
   });
   const decisionInputMessage = new HumanMessage(buildTaskDecisionInput({
     latestUserRequest: latestHumanRequest,
     recentMessages: recentMainMessages,
     requestContext,
+    runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
+    runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
     taskPlanDraftContext: buildTaskPlanDraftContext(state.runTaskPlanDraft),
   }));
 
@@ -221,12 +219,11 @@ async function buildRouteDecisionContext(params: {
   });
   const systemPrompt = buildRouteDecisionSystemPrompt({
     actor,
-    targetsContext,
-    workdir,
-    runtimeEnvironment,
   });
   const decisionInputMessage = new HumanMessage(buildRouteDecisionInput({
     pendingTask: state.runPendingTask,
+    targetsContext,
+    runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
   }));
 
   return {
@@ -329,24 +326,22 @@ function buildDecisionContext(params: {
     ? { ...activeDelegationAnnounce, artifactRefs: activeDelegationArtifactRefs }
     : null;
   const systemPrompt = buildDelegationOutcomeDecisionSystemPrompt({
-      actor,
-      outputInstruction: buildDelegationOutcomeDecisionOutputInstruction(),
-      workdir,
-      runtimeEnvironment,
-    });
+    actor,
+    outputInstruction: buildDelegationOutcomeDecisionOutputInstruction(),
+  });
   const decisionInputMessage = new HumanMessage(buildDelegationOutcomeDecisionInput({
-      latestUserRequest: latestHumanRequest,
-      currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
-      subagentAnnounceContext: buildSubagentAnnounceContext(
-        activeDelegationAnnounceForDecision,
-        activeDelegationCompletionReason,
-      ),
-      otherTasksContext: buildDelegationOutcomeOtherTasksContext(
-        state.runDelegationSummaries,
-        activeDelegation?.id ?? null,
-      ),
-      capabilityArtifacts: state.sessionCapabilityArtifacts,
-    }));
+    latestUserRequest: latestHumanRequest,
+    currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
+    subagentAnnounceContext: buildSubagentAnnounceContext(
+      activeDelegationAnnounceForDecision,
+      activeDelegationCompletionReason,
+    ),
+    otherTasksContext: buildDelegationOutcomeOtherTasksContext(
+      state.runDelegationSummaries,
+      activeDelegation?.id ?? null,
+    ),
+    capabilityArtifacts: state.sessionCapabilityArtifacts,
+  }));
 
   return {
     activeDelegation,

@@ -15,8 +15,8 @@ import {
   type ForcedCapabilitySeedDetails,
 } from './guardDefinitions';
 import {
-  createDelegationOutcomeIterationGuardNode,
-} from './runtime/guards/nodes';
+  createAfterDelegationOutcomeIterationGuard,
+} from './runtime/routes/afterDelegationOutcomeIterationGuard';
 import {
   GUARD_DECISION_EVENT,
   guardDecisionEmitter,
@@ -204,16 +204,16 @@ test('delegation outcome guard derives handoff refusal for a limit_reached activ
   assert.equal(outcome.kind === 'derive' && outcome.reason, ACTIVE_DELEGATION_LIMIT_REACHED);
 });
 
-test('guard nodes push decision records onto the LangGraph custom stream writer', async () => {
+test('guard routes push decision records onto the LangGraph custom stream writer', () => {
   const chunks: unknown[] = [];
   const runnableConfig = {
     writer: (chunk: unknown) => chunks.push(chunk),
-  } as Parameters<ReturnType<typeof createDelegationOutcomeIterationGuardNode>>[1] & {
+  } as Parameters<ReturnType<typeof createAfterDelegationOutcomeIterationGuard>>[1] & {
     writer: (chunk: unknown) => void;
   };
 
-  const node = createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations: 5 });
-  await node(baseState({
+  const route = createAfterDelegationOutcomeIterationGuard({ orchestratorMaxIterations: 5 });
+  route(baseState({
     taskActiveDelegation: activeDelegation,
     runIterationCount: 5,
   }), runnableConfig);
@@ -244,7 +244,7 @@ test('guard decision emitter is a no-op without a runnable config', () => {
   });
 });
 
-test('run iteration limit guard stops at the resolved limit and the node returns an inline stop patch', async () => {
+test('run iteration limit guard routes through answer at the resolved limit', () => {
   const state = baseState({
     taskActiveDelegation: activeDelegation,
     runIterationCount: 5,
@@ -261,14 +261,9 @@ test('run iteration limit guard stops at the resolved limit and the node returns
     runIterationLimit: 5,
   });
 
-  const node = createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations: 5 });
-  const patch = await node(state) as Record<string, unknown>;
+  const atLimitRoute = createAfterDelegationOutcomeIterationGuard({ orchestratorMaxIterations: 5 });
+  assert.equal(atLimitRoute(state), 'answer');
 
-  assert.equal(patch.runPendingFinalReply, 'inline');
-  assert.equal(patch.runIterationCount, 0);
-  assert.equal(patch.runNextDelegation, null);
-  assert.ok(Array.isArray(patch.messages) && patch.messages.length === 1);
-
-  const belowLimitNode = createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations: 25 });
-  assert.deepEqual(await belowLimitNode(state), { runPendingFinalReply: null });
+  const belowLimitRoute = createAfterDelegationOutcomeIterationGuard({ orchestratorMaxIterations: 25 });
+  assert.equal(belowLimitRoute(state), 'delegationOutcomeDecision');
 });

@@ -1,5 +1,4 @@
 import type { AgentCapability } from '../../../types/capability';
-import type { OrchestratorStatePatch } from '../controlPrimitives';
 
 export const ORCHESTRATOR_GUARD_POSITION = {
   PREPARE: 'orchestrator.prepare',
@@ -41,7 +40,3 @@ export type ForcedCapabilitySeedGuardConfig = {
 export type RunIterationLimitGuardConfig = {
   runIterationLimit: number;
 };
-
-export function statePatch(patch: OrchestratorStatePatch): OrchestratorStatePatch {
-  return patch;
-}

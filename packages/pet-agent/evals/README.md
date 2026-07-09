@@ -93,3 +93,26 @@ npm run eval:langfuse:tool-review-reject
 It covers the reviewed-tool rejection path: the first run must interrupt for
 human review, the reject resume must finish without executing or retrying the
 tool, and the cancellation announce must be handed off into main messages.
+
+## Task Decision Stability Runner
+
+The task-decision runner calls the production `taskDecision` prompt and schema
+directly with the configured real LLM. It repeats each case so prompt drift is
+visible without subagent or graph noise:
+
+```sh
+npm run eval:task-decision
+```
+
+It covers direct answer, single delegated task, first-run multi-step draft
+creation, PR review keywords, existing draft maintenance, post-first no-draft recovery
+discipline, and completed-goal answer. The summary shows per-case pass counts,
+action distribution, and `plan_draft` size distribution.
+
+Useful knobs:
+
+```sh
+TASK_DECISION_REPEATS=5 npm run eval:task-decision
+TASK_DECISION_CASES=initial-multi-step-investigation,maintain-existing-draft npm run eval:task-decision
+DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:task-decision
+```

@@ -14,6 +14,7 @@ import {
   buildRouteTargetsContext,
   buildSubagentAnnounceContext,
   buildTaskDecisionInput,
+  buildTaskPlanDraftContext,
   buildTaskDecisionSystemPrompt,
 } from './prompts';
 
@@ -101,14 +102,84 @@ test('task decision prompt owns single-step task birth', () => {
   const input = buildTaskDecisionInput({
     latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
     recentMessages: recentMessages(1),
+    taskPlanDraftContext: buildTaskPlanDraftContext(null),
   });
 
   assert.match(prompt, /task decision 节点/);
+  assert.match(prompt, /task loop/);
+  assert.match(prompt, /唯一基准/);
+  assert.match(prompt, /不编造执行事实/);
+  assert.match(prompt, /系统 handoff/);
+  assert.match(prompt, /不是验收依据/);
+  assert.match(prompt, /当前阶段：taskDecision/);
+  assert.match(prompt, /决策原则/);
   assert.match(prompt, /单步任务粒度/);
   assert.match(prompt, /不要选择 general\/capability lane/);
   assert.match(prompt, /PR review/);
   assert.match(prompt, /不要只因为出现 URL 就只输出 browser\/url/);
+  assert.match(prompt, /plan_draft/);
+  assert.match(prompt, /先决定 task 字段/);
+  assert.match(prompt, /可以创建本次 task 之后的草案/);
+  assert.match(prompt, /没有明确后续 task 时为 null/);
+  assert.doesNotMatch(prompt, /仍合理的后续 task 可以沿用/);
   assert.match(input, /<task_decision_input>/);
+  assert.match(input, /可以创建 plan_draft/);
+  assert.doesNotMatch(input, /<task_plan_draft/);
+  assert.doesNotMatch(input, /重新规划/);
+});
+
+test('task decision prompt may create a plan draft whenever context has follow-up work', () => {
+  const prompt = buildTaskDecisionSystemPrompt({
+    actor: testActor,
+    runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
+  });
+  const input = buildTaskDecisionInput({
+    latestUserRequest: '继续推进。',
+    recentMessages: recentMessages(1),
+    taskPlanDraftContext: buildTaskPlanDraftContext(null),
+  });
+
+  assert.match(prompt, /当前没有上一轮 plan_draft/);
+  assert.match(prompt, /可以创建本次 task 之后的草案/);
+  assert.match(prompt, /否则保持 null/);
+  assert.doesNotMatch(prompt, /必须为 null/);
+  assert.match(input, /可以创建 plan_draft/);
+});
+
+test('task decision prompt maintains existing plan draft only', () => {
+  const prompt = buildTaskDecisionSystemPrompt({
+    actor: testActor,
+    runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
+    hasTaskPlanDraft: true,
+  });
+  const input = buildTaskDecisionInput({
+    latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
+    recentMessages: recentMessages(1),
+    taskPlanDraftContext: buildTaskPlanDraftContext([
+      '检索本地实现与 git log',
+      '汇总结论',
+    ]),
+  });
+
+  assert.match(prompt, /参考上一轮 plan_draft/);
+  assert.match(prompt, /task loop/);
+  assert.match(prompt, /唯一基准/);
+  assert.match(prompt, /不编造执行事实/);
+  assert.match(prompt, /系统 handoff/);
+  assert.match(prompt, /不是验收依据/);
+  assert.match(prompt, /当前阶段：taskDecision/);
+  assert.match(prompt, /决策原则/);
+  assert.match(prompt, /仍合理的后续 task 可以沿用/);
+  assert.match(prompt, /本次 task 之后尚未开始的后续 task/);
+  assert.match(prompt, /不输出 patch/);
+  assert.doesNotMatch(prompt, /当前没有上一轮 plan_draft/);
+  assert.match(input, /<task_decision_input>/);
+  assert.match(input, /<task_plan_draft/);
+  assert.match(input, /当前单步 task/);
+  assert.match(input, /选择下一步 task/);
+  assert.match(input, /维护当前 task 之后仍未开始的后续 plan_draft/);
+  assert.doesNotMatch(input, /重新规划/);
+  assert.match(input, /检索本地实现与 git log/);
 });
 
 test('route decision prompt owns capability lane selection', () => {
@@ -136,6 +207,11 @@ test('route decision prompt owns capability lane selection', () => {
   });
 
   assert.match(prompt, /route decision 节点/);
+  assert.match(prompt, /task loop/);
+  assert.match(prompt, /唯一基准/);
+  assert.match(prompt, /不编造执行事实/);
+  assert.match(prompt, /系统 handoff/);
+  assert.match(prompt, /不是验收依据/);
   assert.match(prompt, /capability\.explore/);
   assert.doesNotMatch(prompt, /delegate_capability\.explore/);
   assert.match(input, /<route_decision_input>/);
@@ -164,7 +240,15 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
   assert.doesNotMatch(prompt, /Delegate targets/);
   assert.doesNotMatch(prompt, /run_shell/);
   assert.doesNotMatch(prompt, /ask_user/);
-  assert.match(prompt, /不接收、不需要、也不应该依赖具体工具列表/);
+  assert.doesNotMatch(prompt, /delegate_capability/);
+  assert.match(prompt, /task loop/);
+  assert.match(prompt, /唯一基准/);
+  assert.match(prompt, /不编造执行事实/);
+  assert.match(prompt, /系统 handoff/);
+  assert.match(prompt, /不是验收依据/);
+  assert.match(prompt, /当前阶段：delegationOutcomeDecision/);
+  assert.match(prompt, /决策原则/);
+  assert.match(prompt, /不接收 plan 草案/);
   assert.match(prompt, /唯一职责/);
 });
 
@@ -205,7 +289,7 @@ test('delegation outcome input carries current task context separately', () => {
 
   assert.match(currentTaskContext ?? '', /<current_delegation>/);
   assert.match(currentTaskContext ?? '', /<task>\n\s+<!\[CDATA\[\n修复 lint\n\s+\]\]>\n\s+<\/task>/);
-  assert.match(currentTaskContext ?? '', /<continuation_action>delegate_general<\/continuation_action>/);
+  assert.doesNotMatch(currentTaskContext ?? '', /continuation_action/);
   assert.match(otherTasksContext, /<delegation_id>task-0<\/delegation_id>/);
   assert.doesNotMatch(otherTasksContext, /<!\[CDATA\[\n修复 lint\n\s+\]\]>/);
 });

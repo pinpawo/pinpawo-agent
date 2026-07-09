@@ -8,6 +8,7 @@ import type {
   SubagentCompletionReason,
   RunDelegationSummary,
   RunPendingTask,
+  RunTaskPlanDraft,
 } from './types';
 import { clipForPrompt, formatDelegationStatus, readMessageText } from './utils';
 
@@ -133,15 +134,6 @@ function indentXmlBlock(block: string, spaces: number): string {
   }).join('\n');
 }
 
-function buildDelegationContinuationAction(lane: string): string | null {
-  if (lane === 'general') return 'delegate_general';
-  if (lane.startsWith('capability:')) {
-    const capabilityName = lane.slice('capability:'.length);
-    return capabilityName ? `delegate_capability.${capabilityName}` : null;
-  }
-  return null;
-}
-
 export function buildDelegationOutcomeCurrentTaskContext(task: {
   id: string;
   lane: string;
@@ -149,18 +141,34 @@ export function buildDelegationOutcomeCurrentTaskContext(task: {
   contextSummary: string | null;
 } | null): string | null {
   if (!task) return null;
-  const continuationAction = buildDelegationContinuationAction(task.lane);
   const lines = [
     '<current_delegation>',
     `  <delegation_id>${task.id}</delegation_id>`,
     `  <lane>${task.lane}</lane>`,
-    continuationAction ? `  <continuation_action>${continuationAction}</continuation_action>` : null,
     indentXmlBlock(xmlTextBlock('task', clipForPrompt(task.task, 240)), 2),
   ].filter((line): line is string => Boolean(line));
   if (task.contextSummary) {
     lines.push(indentXmlBlock(xmlTextBlock('context_summary', clipForPrompt(task.contextSummary, 320)), 2));
   }
   lines.push('</current_delegation>');
+  return lines.join('\n');
+}
+
+export function buildTaskPlanDraftContext(planDraft: RunTaskPlanDraft): string | null {
+  const visibleSteps = (planDraft ?? [])
+    .map((step) => clipForPrompt(step, 160))
+    .filter(Boolean)
+    .slice(0, 5);
+  if (visibleSteps.length === 0) return null;
+
+  const lines = [
+    '<task_plan_draft role="self_guidance" source="previous_task_decision">',
+    '  <note>这是上一轮 taskDecision 预计还没开始的步骤草案，只作为本轮选择下一步 task 与维护后续草案的参考；它不是控制流依据。</note>',
+  ];
+  visibleSteps.forEach((step, index) => {
+    lines.push(indentXmlBlock(xmlTextBlock('step', step, ` index="${(index + 1).toString()}"`), 2));
+  });
+  lines.push('</task_plan_draft>');
   return lines.join('\n');
 }
 
@@ -250,6 +258,46 @@ function buildDecisionConfigLines(actor: AgentActor, workdir?: string, runtimeEn
   return configLines as string[];
 }
 
+// Core decision prompt prefix shared by taskDecision, routeDecision, and
+// outcomeDecision. Keep this synchronized with
+// docs/PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md.
+function buildOrchestratorDecisionPromptPrefixLines(): string[] {
+  return [
+    'pet-agent orchestrator 是围绕用户目标运行 task loop 的控制层。',
+    '它理解用户当前输入与对话上下文，把需要推进的工作组织成当前单步 task，交给 capability subagent 执行；subagent 以 announce 返回执行结果。',
+    'task loop 由三个 decision 节点驱动：taskDecision 生成当前单步 task，routeDecision 为 task 选择执行 capability，outcomeDecision 验收 announce 并决定继续当前 task、进入下一个 task，或结束交给 answer。',
+    'decision 节点只输出结构化判断字段：不回答用户、不执行工具、不编造执行事实；用户可见的回复始终由 answer 节点基于主对话生成。',
+    '用户目标是 outcomeDecision 判断 task loop 继续或结束的唯一基准。',
+    '',
+    'task loop 流程：',
+    '1. taskDecision（决策）',
+    '   - 读取：用户请求、对话上下文、已完成 task 的结论摘要、上一轮 plan_draft（如有）。',
+    '   - 用户目标已能直接回应 → action=answer，交给 answer。',
+    '   - 还需要执行 → action=next_task，产出当前单步 task 与 search_keywords；根据上下文决定是否创建或维护 plan_draft。',
+    '2. capabilitySearch（系统步骤，关键词匹配）',
+    '   - 用 search_keywords（缺省时用 task 文本）搜索 custom capability，产出 capability 候选。',
+    '3. routeDecision（决策）',
+    '   - 读取：当前 task、capability 候选。',
+    '   - 从候选中选择执行 capability；没有匹配候选时兜底 general（内建通用 capability）。',
+    '4. capability subagent 执行（执行步骤）',
+    '   - 选中的 capability subagent 执行当前 task，以 announce 返回结果；announce 是执行结果回到 task loop 的唯一通道。',
+    '5. outcomeDecision（决策）',
+    '   - 读取：用户目标、当前 task、subagent announce、同一 run 的其他 task 摘要。',
+    '   - continue：当前 task 未达标 → 同一 capability 继续执行，gap_note 说明缺口。',
+    '   - task_done：当前 task 已达标但用户目标未完 → 系统 handoff 本任务结论并回到 taskDecision。',
+    '   - goal_done：用户目标已达成 → 系统 handoff 后进入 answer。',
+    '6. answer（回复）',
+    '   - 基于主对话（含 handoff 进来的任务结论）生成用户可见回复。',
+    '',
+    '术语：',
+    '- 用户请求（user request）：用户本轮的原始输入。',
+    '- 用户目标（user goal）：orchestrator 从用户请求和对话上下文理解出的本轮目标；它是验收的唯一基准，不等于任何任务清单或草案。',
+    '- plan_draft：taskDecision 可选的后续步骤自我引导草稿；只作为后续 taskDecision 的上下文参考，不是任务清单，不是验收依据，也不参与 route/guard。',
+    '- gap_note：outcomeDecision 在 continue / task_done 时对缺口的一句说明，作为后续执行或规划的提示。',
+    '- handoff：系统动作——task 达标或 goal 达成时，把 announce 结论并入主对话并清理执行现场；此后所有节点只依赖主对话里的结论，不依赖执行过程记录。',
+  ];
+}
+
 function buildSingleStepTaskInstructions(): string[] {
   return [
     '单步任务粒度：同一执行器、同一工具域内能连续完成的相邻动作算一步。',
@@ -262,21 +310,60 @@ function buildSingleStepTaskInstructions(): string[] {
 export function buildTaskDecisionSystemPrompt(params: {
   actor: AgentActor;
   runDelegationContext: string;
+  hasTaskPlanDraft?: boolean;
   workdir?: string;
   runtimeEnvironment?: string;
 }): string {
+  const hasTaskPlanDraft = Boolean(params.hasTaskPlanDraft);
+  const taskDecisionFocus = hasTaskPlanDraft
+    ? '判断重点：根据上下文决定当前要交给执行器的单步 task；参考上一轮 plan_draft，维护当前 task 之后仍未开始的后续 task 草案。'
+    : '判断重点：根据上下文决定当前要交给执行器的单步 task；如果用户目标明显还有后续 task，可以创建当前 task 之后的 plan_draft。';
+  const taskPlanDraftDecisionBasis = hasTaskPlanDraft
+    ? '- 上一轮 plan_draft 只是参考：只维护本次 task 之后仍未开始的后续草案，已被最新结论覆盖的项不要保留。'
+    : '- 当前没有上一轮 plan_draft：如果用户目标明显还有后续 task，可以创建本次 task 之后的草案；否则保持 null。';
+  const taskPlanDraftInstructions = hasTaskPlanDraft
+    ? [
+        '- 先决定 task 字段；再参考上一轮 plan_draft，判断本次 task 之后是否还有后续 task。',
+        '- 仍合理的后续 task 可以沿用；已被本次 task、已完成步骤或最新结论覆盖的项不要保留。',
+        '- plan_draft 只填写本次 task 之后尚未开始的后续 task，1~5 个短句；没有后续 task 时为 null；不输出 patch、删除标记或游标。',
+      ]
+    : [
+        '- 先决定 task 字段；如果用户目标明显还有后续 task，可以创建本次 task 之后尚未开始的后续 task 草案。',
+        '- plan_draft 只填写本次 task 之后的后续 task，1~5 个短句；单步任务或没有明确后续 task 时为 null。',
+        '- plan_draft 不包含本次 task，不输出 patch、删除标记或游标。',
+      ];
+  const planDraftFieldSemantic = '- plan_draft 可在 action=next_task 时填写本次 task 之后尚未开始的后续 task 草案；answer 时为 null 或省略。';
+  const taskDecisionExample = {
+    action: 'next_task',
+    task: '读取 issue #269 内容并提炼需求点。',
+    context_summary: '用户要求先理解 issue，再继续检查本地实现。',
+    search_keywords: 'github issue|网页抓取|需求分析',
+    plan_draft: [
+      '检索本地实现与 git log',
+      '汇总结论并回复用户',
+    ],
+  };
+
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的 task decision 节点，只决定当前用户请求是否需要进入执行管道，以及第一个 delegated task 是什么。',
-    '不要选择 general/capability lane，不要回答用户，不要执行工具。',
+    ...buildOrchestratorDecisionPromptPrefixLines(),
     '',
-    params.runDelegationContext,
-    '',
-    '当前阶段：用户请求后的 task 生成。',
-    '判断重点：理解用户当前想完成什么，并把需要执行器推进的目标收窄为一个单步 task。',
+    '当前阶段：taskDecision（用户请求后的 task 生成）。',
+    '当前节点：task decision 节点。',
+    '节点边界：只决定当前是否需要进入执行管道，以及当前 delegated task 是什么；不要选择 general/capability lane，不要回答用户，不要执行工具。',
     '',
     '决策原则：',
+    taskDecisionFocus,
+    '- action=answer：当前不需要进入执行管道，交给 answer 节点基于完整对话历史回复用户。',
+    '- action=next_task：生成当前单步 delegated task，并提供必要 context_summary 与 capability search 关键词。',
+    hasTaskPlanDraft
+      ? '- 如果 action=next_task，同时维护本次 task 之后仍未开始的后续 plan_draft。'
+      : '- 如果 action=next_task 且用户目标明显还有后续 task，可以创建本次 task 之后仍未开始的 plan_draft。',
+    '- 用户当前请求、近期对话上下文，以及 runDelegationSummaries 中已经完成的任务结论。',
+    '- runDelegationSummaries 是只读事实账本，用来避免重复执行和理解已有结论；不要把它当作控制流命令。',
+    taskPlanDraftDecisionBasis,
+    params.runDelegationContext,
     '- 如果当前输入足以直接回应用户（无需 delegate 给执行器），选择 answer；最终回复由后续 answer 节点基于完整对话历史生成。',
     '- 如果用户询问已有上下文、最近任务状态或之前结果，选择 answer 交给回复节点回答；不要在决策层凭印象复述或编造之前的结果。',
     '- 如果用户目标本身无法判断，或需要向用户补充、澄清、确认，选择 answer 交给回复节点处理；不要在决策层直接提问。',
@@ -284,9 +371,10 @@ export function buildTaskDecisionSystemPrompt(params: {
     ...buildSingleStepTaskInstructions().map((line) => `- ${line}`),
     '- search_keywords 用于下一步 capability search：提取能匹配执行器能力的关键词、同义词或短语；多个词用 | 分隔。没有额外关键词时可为 null。',
     '- 对 code review / PR review / GitHub PR URL / 仓库变更评审类请求，search_keywords 应包含 explore、code review、PR review、repository investigation 等调查/审查词；不要只因为出现 URL 就只输出 browser/url。',
+    ...taskPlanDraftInstructions,
     '',
     '输出一个结构化 task decision。',
-    '必须返回一个 JSON object，字段名必须严格使用：action、task、context_summary、search_keywords。',
+    '必须返回一个 JSON object，字段名必须严格使用：action、task、context_summary、search_keywords、plan_draft。',
     'action 取值：',
     '- answer：无需继续 delegate，交给后续 answer 节点回复用户；不要在这里撰写最终回复内容。',
     '- next_task：生成一个单步 delegated task，交给后续 search/route 管道选择执行器。',
@@ -295,12 +383,8 @@ export function buildTaskDecisionSystemPrompt(params: {
     '- task 只在 action=next_task 时填写；answer 时为 null 或省略。',
     '- context_summary 只在 action=next_task 时填写必要上下文；answer 时为 null 或省略。',
     '- search_keywords 只在 action=next_task 时填写用于 capability search 的关键词；answer 时为 null 或省略。',
-    `正确示例：${JSON.stringify({
-      action: 'next_task',
-      task: '读取 issue #269 内容并提炼需求点。',
-      context_summary: '用户要求先理解 issue，再继续检查本地实现。',
-      search_keywords: 'github issue|网页抓取|需求分析',
-    })}`,
+    planDraftFieldSemantic,
+    `正确示例：${JSON.stringify(taskDecisionExample)}`,
   ].filter((line) => line !== null).join('\n');
 }
 
@@ -313,18 +397,19 @@ export function buildRouteDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的 route decision 节点，只为当前单步 task 选择执行 lane。',
-    '不要改写 task，不要回答用户，不要执行工具。',
+    ...buildOrchestratorDecisionPromptPrefixLines(),
+    '',
+    '当前阶段：routeDecision（task 已生成，capability search 已完成）。',
+    '当前节点：route decision 节点。',
+    '节点边界：只为当前单步 task 选择执行 capability；不要改写 task，不要回答用户，不要执行工具。',
     '',
     params.targetsContext,
     '',
-    '当前阶段：task 已生成，capability search 已完成，现在只选择执行器 lane。',
-    '',
     '决策原则：',
-    '- 如果当前 task 匹配某个业务 capability candidate，选择对应 capability.<name> lane；capability 优先于 general。',
+    '- 如果当前 task 匹配某个 custom capability candidate，选择对应 capability.<name>；custom capability 优先于 general。',
     '- 如果所有候选都不匹配，且需要通用工具能力才能继续，选择 general。',
     '- 不要因为缺少主题、平台、时长等执行参数就避开匹配的 capability；澄清由执行器内部处理，除非 task 本身无法判断。',
-    '- 每次只选择一个 lane。',
+    '- 每次只选择一个执行 capability。',
     '',
     '输出一个结构化 route decision。',
     '必须返回一个 JSON object，字段名必须严格使用：lane。',
@@ -341,21 +426,26 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的子任务结果判断节点。你的唯一职责是判断下一步路由：交给 answer 节点，或继续 delegate 给执行器。',
-    '不要回答用户、不要总结 subagent 结果、不要执行或规划具体工具调用；最终回复由后续 answer 节点生成。',
+    ...buildOrchestratorDecisionPromptPrefixLines(),
     '',
-    '当前阶段：subagent 返回后的结果判断。',
-    '判断重点：读取输入中的 subagent announce 原文，结合用户原始请求和当前 run 任务跟踪，判断用户当前 run 目标是否已经满足。',
-    'run 任务跟踪只用于理解 delegation 链路；完成与否以当前 subagent announce 是否覆盖用户目标为准。',
-    '可选 action 由结构化输出 schema 限定；本节点不接收、不需要、也不应该依赖具体工具列表。',
+    '当前阶段：delegationOutcomeDecision（subagent 返回后的结果验收）。',
+    '当前节点：子任务结果验收节点。你的唯一职责是判断当前 delegated task 和当前 run 目标的完成度。',
+    '节点边界：不要回答用户、不要总结 subagent 结果、不要生成下一步 task、不要选择 general/capability lane、不要执行工具；最终回复由后续 answer 节点生成。',
     '',
     '决策原则：',
-    '- 如果 subagent announce 已经满足用户当前 run 目标，选择 answer；不要在这里撰写最终回复内容。',
-    '- 如果 subagent announce 只是阶段性进展，判断还缺什么；需要执行器继续时再 delegate。',
-    '- 如果当前 delegated task 还没完成，但用户目标仍明确且不需要用户补充信息，优先继续当前 delegated task 对应的执行器；不要仅因为停止原因不是 natural 就选择 answer。',
-    '- 如果用户原始请求仍有明确未完成目标，选择一个最明确的下一步。',
-    '- 如果信息不足、用户意图不明确，或下一步需要用户先补充、澄清、确认，选择 answer 交给 answer 节点处理；不要在决策层直接提问。',
-    '- 一旦决定 delegate_*，就交给执行器；运行期的工具级风险（rm -rf、git push --force 等）由具体工具自己拦截，不需要在决策层重复表达。',
+    '- outcome=continue：当前 delegated task 未达标，但同一 task 仍可继续执行。',
+    '- outcome=task_done：当前 delegated task 已达标，但用户当前 run 目标仍有明确未完成部分。',
+    '- outcome=goal_done：用户当前 run 目标已经满足，或需要交给 answer 节点向用户澄清/确认。',
+    '- 用户原始请求：判断当前 run 目标是什么、是否已经满足。',
+    '- 当前 delegated task：判断这一次执行原本要完成什么。',
+    '- subagent announce 原文：判断当前 task 是否达标的执行结果来源。',
+    '- run 任务跟踪只用于理解 delegation 链路；完成与否以当前 subagent announce 是否覆盖用户目标为准。',
+    '- 本节点不接收 plan 草案、不接收工具列表，也不依赖 capability 枚举。',
+    '- 如果当前 delegated task 未达标，但用户目标仍明确且不需要用户补充信息，选择 continue；gap_note 简述缺口。',
+    '- 如果当前 delegated task 已达标，但用户原始请求仍有明确未完成目标，选择 task_done；不要在这里写下一步 task，只在 gap_note 写未完成方向。',
+    '- 如果 subagent announce 已经满足用户当前 run 目标，选择 goal_done；不要在这里撰写最终回复内容。',
+    '- 如果信息不足、用户意图不明确，或下一步需要用户先补充、澄清、确认，选择 goal_done 交给 answer 节点处理；不要在决策层直接提问。',
+    '- outcome 只表达验收 verdict；不要输出 task 文本、context summary、search keywords、lane 或 capability。',
     '',
     params.outputInstruction,
   ].filter((line) => line !== null).join('\n');
@@ -490,18 +580,23 @@ export function buildTaskDecisionInput(params: {
   latestUserRequest: string | null;
   recentMessages: BaseMessage[];
   requestContext?: string | null;
+  taskPlanDraftContext?: string | null;
 }): string {
   const context = params.requestContext ?? buildPreparedRequestContext({
     latestUserRequest: params.latestUserRequest,
     recentMessages: params.recentMessages,
     recentAnnounces: [],
   });
+  const instruction = params.taskPlanDraftContext
+    ? '请根据以上动态上下文判断是否需要执行器；需要时先生成当前单步 task，并维护当前 task 之后仍未开始的后续 plan_draft。'
+    : '请根据以上动态上下文判断是否需要执行器；需要时先生成当前单步 task，用户目标明显还有后续 task 时可以创建 plan_draft。';
   return [
     '<task_decision_input>',
     indentXmlBlock(context, 2),
-    '  <instruction>请根据以上上下文判断是否需要执行器，并在需要时生成当前第一个单步 task。</instruction>',
+    params.taskPlanDraftContext ? indentXmlBlock(params.taskPlanDraftContext, 2) : null,
+    `  <instruction>${instruction}</instruction>`,
     '</task_decision_input>',
-  ].join('\n');
+  ].filter((line) => line !== null).join('\n');
 }
 
 export function buildRouteDecisionInput(params: {

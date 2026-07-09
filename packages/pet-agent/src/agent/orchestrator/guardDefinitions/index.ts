@@ -1,7 +1,6 @@
 export {
   ORCHESTRATOR_GUARD_NAME,
   ORCHESTRATOR_GUARD_POSITION,
-  statePatch,
   type ContextCompactionWatermarkGuardConfig,
   type EmptyGuardConfig,
   type ForcedCapabilitySeedGuardConfig,

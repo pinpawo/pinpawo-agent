@@ -4,29 +4,21 @@ import type {
   OrchestrationDecisionStructuredOutputOptions,
 } from './types';
 
-/**
- * Static action kinds — values that don't depend on the current capability set.
- * `delegate_capability.<name>` values are appended at schema-build time.
- */
-const STATIC_ACTION_KINDS = ['answer', 'delegate_general'] as const;
-const CAPABILITY_ACTION_PREFIX = 'delegate_capability.' as const;
 const ROUTE_CAPABILITY_PREFIX = 'capability.' as const;
 
-export type CapabilityActionName = `${typeof CAPABILITY_ACTION_PREFIX}${string}`;
-export type ActionName = (typeof STATIC_ACTION_KINDS)[number] | CapabilityActionName;
 export type RouteCapabilityLane = `${typeof ROUTE_CAPABILITY_PREFIX}${string}`;
-
-export type OrchestrationDecision = {
-  action: ActionName;
-  task?: string | null;
-  context_summary?: string | null;
-};
 
 export type TaskDecision = {
   action: 'answer' | 'next_task';
   task?: string | null;
   context_summary?: string | null;
   search_keywords?: string | null;
+  plan_draft?: string[] | null;
+};
+
+export type DelegationOutcomeDecision = {
+  outcome: 'continue' | 'task_done' | 'goal_done';
+  gap_note?: string | null;
 };
 
 export type RouteDecision = {
@@ -37,29 +29,8 @@ export type OrchestrationDecisionSchemaParams = {
   capabilityCandidates: ReadonlyArray<{ name: string }>;
 };
 
-export function buildCapabilityActionName(capabilityName: string): CapabilityActionName {
-  return `${CAPABILITY_ACTION_PREFIX}${capabilityName}` as CapabilityActionName;
-}
-
 export function buildRouteCapabilityLane(capabilityName: string): RouteCapabilityLane {
   return `${ROUTE_CAPABILITY_PREFIX}${capabilityName}` as RouteCapabilityLane;
-}
-
-export function parseAction(action: string): {
-  kind: 'answer' | 'delegate_general' | 'delegate_capability';
-  capabilityName: string | null;
-} {
-  if (action.startsWith(CAPABILITY_ACTION_PREFIX)) {
-    return {
-      kind: 'delegate_capability',
-      capabilityName: action.slice(CAPABILITY_ACTION_PREFIX.length) || null,
-    };
-  }
-  if (action === 'answer' || action === 'delegate_general') {
-    return { kind: action, capabilityName: null };
-  }
-  // Unknown action; surfaced upstream by schema rejection. Default to answer for safety.
-  return { kind: 'answer', capabilityName: null };
 }
 
 export function parseRouteLane(lane: string): {
@@ -90,30 +61,6 @@ function validateCapabilityCandidateNames(params: OrchestrationDecisionSchemaPar
   }
 }
 
-export function buildOrchestrationDecisionSchema(params: OrchestrationDecisionSchemaParams) {
-  validateCapabilityCandidateNames(params);
-
-  const actionValues = [
-    ...STATIC_ACTION_KINDS,
-    ...params.capabilityCandidates.map((c) => buildCapabilityActionName(c.name)),
-  ] as [string, ...string[]];
-  const capabilityActionValues = params.capabilityCandidates.map((c) => buildCapabilityActionName(c.name));
-
-  return z.object({
-    action: z.enum(actionValues).describe(
-      capabilityActionValues.length > 0
-        ? `下一步动作。当前可选业务 capability action：${capabilityActionValues.join('、')}。`
-        : '下一步动作。当前没有可选业务 capability action。',
-    ),
-    task: z.string().nullable().optional().describe(
-      'action=delegate_general 或 delegate_capability.<name> 时交给执行器的明确任务；其他 action 为 null 或省略。',
-    ),
-    context_summary: z.string().nullable().optional().describe(
-      'action=delegate_general 或 delegate_capability.<name> 时执行器所需的简短上下文；其他 action 为 null 或省略。',
-    ),
-  });
-}
-
 export function buildTaskDecisionSchema() {
   return z.object({
     action: z.enum(['answer', 'next_task']).describe(
@@ -127,6 +74,28 @@ export function buildTaskDecisionSchema() {
     ),
     search_keywords: z.string().nullable().optional().describe(
       'action=next_task 时用于 capability search 的关键词或短语；多个词用 | 分隔。没有更好关键词时可为 null。',
+    ),
+    plan_draft: z.array(z.string()).max(5).nullable().optional().describe(
+      '本次 next_task 之后尚未开始的步骤短句清单，仅作为下一轮 taskDecision 的自我引导备忘；单步任务或没有后续未开始步骤时为 null。',
+    ),
+  }).superRefine((decision, ctx) => {
+    if (decision.action === 'next_task' && !decision.task?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['task'],
+        message: 'action=next_task requires a non-empty task.',
+      });
+    }
+  });
+}
+
+export function buildDelegationOutcomeDecisionSchema() {
+  return z.object({
+    outcome: z.enum(['continue', 'task_done', 'goal_done']).describe(
+      '验收结论。continue=当前 task 未达标，同 lane 继续；task_done=当前 task 达标但总目标未完；goal_done=用户当前 run 目标已满足。',
+    ),
+    gap_note: z.string().nullable().optional().describe(
+      'outcome=continue 或 task_done 时可填写缺口/下一步依据的简短说明；goal_done 时为 null 或省略。',
     ),
   });
 }
@@ -159,37 +128,22 @@ export function buildOrchestrationDecisionStructuredOutputOptions(
   };
 }
 
-export function buildOrchestrationDecisionOutputInstruction(
-  params: OrchestrationDecisionSchemaParams = { capabilityCandidates: [] },
-): string {
-  const capabilityActionValues = params.capabilityCandidates.map((c) => buildCapabilityActionName(c.name));
-  const capabilityActionLines = capabilityActionValues.length > 0
-    ? [
-        `- delegate_capability.<name> action：只能选择当前候选中的 ${capabilityActionValues.join('、')}。`,
-      ]
-    : [
-        '- 当前没有 delegate_capability.<name> action 可选；不要输出任何 delegate_capability action。',
-      ];
-  const exampleAction = capabilityActionValues[0] ?? 'delegate_general';
-
+export function buildDelegationOutcomeDecisionOutputInstruction(): string {
   return [
-    '输出一个结构化 orchestration decision。',
-    '必须返回一个 JSON object，字段名必须严格使用：action、task、context_summary。',
-    '必须使用 action 字段表达下一步动作；不要输出 delegate_capability、delegate_general 或 answer 作为字段名。',
-    'action 取值：',
-    '- answer：无需继续 delegate，交给后续 answer 节点基于完整对话历史回复用户；你只需选择 answer，不要在这里撰写最终回复内容。',
-    '- delegate_general：delegate 给通用工具执行器。',
-    ...capabilityActionLines,
+    '输出一个结构化 delegation outcome decision。',
+    '必须返回一个 JSON object，字段名必须严格使用：outcome、gap_note。',
+    'outcome 取值：',
+    '- continue：当前 delegated task 还没有达标；同一个 lane 继续当前 task。',
+    '- task_done：当前 delegated task 已达标，但用户当前 run 目标还有下一步。',
+    '- goal_done：用户当前 run 目标已经满足，交给 answer 节点回复用户。',
     '字段语义：',
-    '- action 必填，且必须是上面的枚举值之一。',
-    '- task 只在 delegate_general 或 delegate_capability.<name> 时填写明确任务；其他 action 为 null 或省略。',
-    '- context_summary 只在 delegate_general 或 delegate_capability.<name> 时填写必要上下文；其他 action 为 null 或省略。',
+    '- outcome 必填，且必须是上面的枚举值之一。',
+    '- gap_note 只写缺口/未完成依据的短说明；没有缺口时为 null 或省略。',
+    '- 不要输出 task、context_summary、search_keywords、lane、capability 或任何 delegate_* 字段。',
     `正确示例：${JSON.stringify({
-      action: exampleAction,
-      task: '调查当前项目 typecheck 失败原因并修复。',
-      context_summary: '用户要求定位并修复 typecheck 失败。',
+      outcome: 'task_done',
+      gap_note: '已拿到 issue 需求点，但还需要检查本地实现与 git log。',
     })}`,
-    '一旦决定 delegate_* 就直接交给执行器；运行期的工具级风险由具体工具自己拦截，无需在决策层重复表达。',
   ].join('\n');
 }
 

@@ -3,10 +3,10 @@ import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import type {
   RunCapabilitySearchState,
-  RunFinalReplyRoute,
   MessageLane,
   RunNextDelegation,
   RunPendingTask,
+  RunTaskPlanDraft,
   RunDelegationSummary,
   TaskActiveDelegation,
 } from './types';
@@ -30,10 +30,7 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  // Transient routing signal set by the decision nodes so afterDecision can
-  // distinguish an `answer` route that must run the answer node from an
-  // inline fallback reply that already emitted its message and ends the turn.
-  runPendingFinalReply: Annotation<RunFinalReplyRoute>({
+  runTaskPlanDraft: Annotation<RunTaskPlanDraft>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -77,7 +74,7 @@ export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runNextDelegation'
   | 'runPendingTask'
-  | 'runPendingFinalReply'
+  | 'runTaskPlanDraft'
   | 'runCapabilitySearchState'
   | 'runDelegationSummaries'
   | 'runIterationCount'
@@ -96,7 +93,7 @@ export function buildRunStateReset(): OrchestratorRunState {
   return {
     runNextDelegation: null,
     runPendingTask: null,
-    runPendingFinalReply: null,
+    runTaskPlanDraft: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     runDelegationSummaries: [],
     runIterationCount: 0,

@@ -114,12 +114,14 @@ test('task decision prompt owns single-step task birth', () => {
   assert.match(prompt, /PR review/);
   assert.match(prompt, /不要只因为出现 URL 就只输出 browser\/url/);
   assert.match(prompt, /plan_draft/);
-  assert.match(prompt, /还没开始的预计步骤/);
-  assert.match(prompt, /不要包含本次 action=next_task 的 task 本身/);
+  assert.match(prompt, /先决定 task 字段/);
+  assert.match(prompt, /本次 task 之后是否还有后续 task/);
+  assert.match(prompt, /不包含本次 task/);
   assert.match(prompt, /默认参考沿用合理草案/);
-  assert.match(prompt, /不要输出增量 patch/);
+  assert.match(prompt, /不输出 patch/);
   assert.match(input, /<task_decision_input>/);
   assert.match(input, /<task_plan_draft/);
+  assert.match(input, /当前单步 task/);
   assert.match(input, /选择下一步 task/);
   assert.doesNotMatch(input, /重新规划/);
   assert.match(input, /检索本地实现与 git log/);

@@ -163,7 +163,7 @@ export function buildTaskPlanDraftContext(planDraft: RunTaskPlanDraft): string |
 
   const lines = [
     '<task_plan_draft role="self_guidance" source="previous_task_decision">',
-    '  <note>这是上一轮 taskDecision 预计还没开始的步骤草案，只用于辅助本轮重新规划；它不是控制流依据。</note>',
+    '  <note>这是上一轮 taskDecision 预计还没开始的步骤草案，只作为本轮选择下一步 task 与维护后续草案的参考；它不是控制流依据。</note>',
   ];
   visibleSteps.forEach((step, index) => {
     lines.push(indentXmlBlock(xmlTextBlock('step', step, ` index="${(index + 1).toString()}"`), 2));
@@ -294,7 +294,7 @@ export function buildTaskDecisionSystemPrompt(params: {
     '- 对 code review / PR review / GitHub PR URL / 仓库变更评审类请求，search_keywords 应包含 explore、code review、PR review、repository investigation 等调查/审查词；不要只因为出现 URL 就只输出 browser/url。',
     '- plan_draft 是给下一轮 taskDecision 的轻量自我引导备忘：用 1~5 个短句只列当前 next_task 之后还没开始的预计步骤；不要包含本次 action=next_task 的 task 本身。',
     '- plan_draft 已由最新结论覆盖的步骤不要保留；单步任务或没有后续未开始步骤时为 null。',
-    '- plan_draft 不是 source of truth，也不是路线/守卫依据；有必要时可整体改写为新的未开始步骤清单，不要输出增量 patch、删除标记或游标推进。',
+    '- plan_draft 不是 source of truth，也不是路线/守卫依据；默认参考沿用合理草案，只有必要时才整体改写为新的未开始步骤清单；不要输出增量 patch、删除标记或游标推进。',
     '',
     '输出一个结构化 task decision。',
     '必须返回一个 JSON object，字段名必须严格使用：action、task、context_summary、search_keywords、plan_draft。',

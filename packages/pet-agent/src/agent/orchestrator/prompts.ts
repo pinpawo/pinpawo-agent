@@ -258,6 +258,16 @@ function buildDecisionConfigLines(actor: AgentActor, workdir?: string, runtimeEn
   return configLines as string[];
 }
 
+function buildOrchestratorExecutionPrincipleLines(): string[] {
+  return [
+    'Agent 执行核心原则：',
+    '- orchestrator 负责推进用户当前 run 目标：能直接回复就交给 answer 节点；需要执行就拆成一个当前单步 delegated task。',
+    '- decision 节点只做判断和写路由信号，不回答用户、不执行工具、不编造执行结果。',
+    '- taskDecision 负责生成当前 task；routeDecision 负责为已生成 task 选择执行 lane；delegationOutcomeDecision 负责验收当前 task 的执行结果。',
+    '- 执行事实以用户请求、对话历史、subagent/执行器 announce 与 handoff 后的主对话记录为准。',
+  ];
+}
+
 function buildSingleStepTaskInstructions(): string[] {
   return [
     '单步任务粒度：同一执行器、同一工具域内能连续完成的相邻动作算一步。',
@@ -277,6 +287,9 @@ export function buildTaskDecisionSystemPrompt(params: {
   const taskDecisionFocus = params.hasTaskPlanDraft
     ? '判断重点：根据上下文决定当前要交给执行器的单步 task；参考上一轮 plan_draft，维护当前 task 之后仍未开始的后续 task 草案。'
     : '判断重点：根据上下文决定当前要交给执行器的单步 task；当前没有上一轮 plan_draft，本轮不新建后续 task 草案。';
+  const taskPlanDraftDecisionBasis = params.hasTaskPlanDraft
+    ? '- 上一轮 plan_draft 只是参考：只维护本次 task 之后仍未开始的后续草案，已被最新结论覆盖的项不要保留。'
+    : '- 当前没有上一轮 plan_draft：不要新建后续草案，plan_draft 必须为 null；本次 task_done 后如果没有预留草案就会进入 answer。';
   const taskPlanDraftInstructions = params.hasTaskPlanDraft
     ? [
         '- 先决定 task 字段；再参考上一轮 plan_draft，判断本次 task 之后是否还有后续 task。',
@@ -312,15 +325,28 @@ export function buildTaskDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的 task decision 节点，只决定当前用户请求是否需要进入执行管道，以及当前 delegated task 是什么。',
-    '不要选择 general/capability lane，不要回答用户，不要执行工具。',
+    ...buildOrchestratorExecutionPrincipleLines(),
     '',
-    params.runDelegationContext,
+    '当前阶段：taskDecision（用户请求后的 task 生成）。',
+    '当前节点：task decision 节点。',
+    '节点边界：只决定当前是否需要进入执行管道，以及当前 delegated task 是什么；不要选择 general/capability lane，不要回答用户，不要执行工具。',
     '',
-    '当前阶段：用户请求后的 task 生成。',
     taskDecisionFocus,
     '',
-    '决策原则：',
+    '你需要决策：',
+    '- action=answer：当前不需要进入执行管道，交给 answer 节点基于完整对话历史回复用户。',
+    '- action=next_task：生成当前单步 delegated task，并提供必要 context_summary 与 capability search 关键词。',
+    params.hasTaskPlanDraft
+      ? '- 如果 action=next_task，同时维护本次 task 之后仍未开始的后续 plan_draft。'
+      : '- 当前没有上一轮 plan_draft；无论 action 是什么，plan_draft 都不要新建。',
+    '',
+    '决策依据：',
+    '- 用户当前请求、近期对话上下文，以及 runDelegationSummaries 中已经完成的任务结论。',
+    '- runDelegationSummaries 是只读事实账本，用来避免重复执行和理解已有结论；不要把它当作控制流命令。',
+    taskPlanDraftDecisionBasis,
+    params.runDelegationContext,
+    '',
+    '决策规则：',
     '- 如果当前输入足以直接回应用户（无需 delegate 给执行器），选择 answer；最终回复由后续 answer 节点基于完整对话历史生成。',
     '- 如果用户询问已有上下文、最近任务状态或之前结果，选择 answer 交给回复节点回答；不要在决策层凭印象复述或编造之前的结果。',
     '- 如果用户目标本身无法判断，或需要向用户补充、澄清、确认，选择 answer 交给回复节点处理；不要在决策层直接提问。',
@@ -382,15 +408,25 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的子任务结果验收节点。你的唯一职责是判断当前 delegated task 和当前 run 目标的完成度。',
-    '不要回答用户、不要总结 subagent 结果、不要生成下一步 task、不要选择 general/capability lane、不要执行工具；最终回复由后续 answer 节点生成。',
+    ...buildOrchestratorExecutionPrincipleLines(),
     '',
-    '当前阶段：subagent 返回后的结果判断。',
-    '判断重点：读取输入中的 subagent announce 原文，结合用户原始请求和当前 delegated task，判断当前 task 是否达标以及用户当前 run 目标是否已经满足。',
-    'run 任务跟踪只用于理解 delegation 链路；完成与否以当前 subagent announce 是否覆盖用户目标为准。',
-    '本节点不接收 plan 草案、不接收工具列表，也不依赖 capability 枚举。',
+    '当前阶段：delegationOutcomeDecision（subagent 返回后的结果验收）。',
+    '当前节点：子任务结果验收节点。你的唯一职责是判断当前 delegated task 和当前 run 目标的完成度。',
+    '节点边界：不要回答用户、不要总结 subagent 结果、不要生成下一步 task、不要选择 general/capability lane、不要执行工具；最终回复由后续 answer 节点生成。',
     '',
-    '决策原则：',
+    '你需要决策：',
+    '- outcome=continue：当前 delegated task 未达标，但同一 task 仍可继续执行。',
+    '- outcome=task_done：当前 delegated task 已达标，但用户当前 run 目标仍有明确未完成部分。',
+    '- outcome=goal_done：用户当前 run 目标已经满足，或需要交给 answer 节点向用户澄清/确认。',
+    '',
+    '决策依据：',
+    '- 用户原始请求：判断当前 run 目标是什么、是否已经满足。',
+    '- 当前 delegated task：判断这一次执行原本要完成什么。',
+    '- subagent announce 原文：判断当前 task 是否达标的执行结果来源。',
+    '- run 任务跟踪只用于理解 delegation 链路；完成与否以当前 subagent announce 是否覆盖用户目标为准。',
+    '- 本节点不接收 plan 草案、不接收工具列表，也不依赖 capability 枚举。',
+    '',
+    '决策规则：',
     '- 如果当前 delegated task 未达标，但用户目标仍明确且不需要用户补充信息，选择 continue；gap_note 简述缺口。',
     '- 如果当前 delegated task 已达标，但用户原始请求仍有明确未完成目标，选择 task_done；不要在这里写下一步 task，只在 gap_note 写未完成方向。',
     '- 如果 subagent announce 已经满足用户当前 run 目标，选择 goal_done；不要在这里撰写最终回复内容。',

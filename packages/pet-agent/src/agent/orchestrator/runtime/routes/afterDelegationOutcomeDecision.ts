@@ -7,10 +7,12 @@ export function afterDelegationOutcomeDecision(state: OrchestratorStateType) {
   if (decisionMode === 'general') return 'general';
   if (state.runPendingFinalReply === 'answer') return 'answer';
   if (state.runPendingFinalReply === 'inline') return 'finalizeRun';
-  // A verdict-only task_done clears the active task but intentionally leaves
-  // planning to the next taskDecision pass.
+  // A verdict-only task_done clears the active task. Only an existing plan draft
+  // keeps the follow-up planning lane open; without one, answer and end.
   if (!state.taskActiveDelegation && !state.runPendingTask && !state.runNextDelegation) {
-    return 'taskDecision';
+    return state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0
+      ? 'taskDecision'
+      : 'answer';
   }
   return 'end';
 }

@@ -102,10 +102,7 @@ test('task decision prompt owns single-step task birth', () => {
   const input = buildTaskDecisionInput({
     latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
     recentMessages: recentMessages(1),
-    taskPlanDraftContext: buildTaskPlanDraftContext([
-      '检索本地实现与 git log',
-      '汇总结论',
-    ]),
+    taskPlanDraftContext: buildTaskPlanDraftContext(null),
   });
 
   assert.match(prompt, /task decision 节点/);
@@ -115,10 +112,36 @@ test('task decision prompt owns single-step task birth', () => {
   assert.match(prompt, /不要只因为出现 URL 就只输出 browser\/url/);
   assert.match(prompt, /plan_draft/);
   assert.match(prompt, /先决定 task 字段/);
-  assert.match(prompt, /本次 task 之后是否还有后续 task/);
-  assert.match(prompt, /不包含本次 task/);
-  assert.match(prompt, /默认参考沿用合理草案/);
+  assert.match(prompt, /当前没有上一轮 plan_draft/);
+  assert.match(prompt, /plan_draft 返回 null/);
+  assert.match(prompt, /不新建后续 task 草案/);
+  assert.match(prompt, /plan_draft 在当前没有上一轮 plan_draft 时必须为 null/);
+  assert.doesNotMatch(prompt, /仍合理的后续 task 可以沿用/);
+  assert.match(input, /<task_decision_input>/);
+  assert.doesNotMatch(input, /<task_plan_draft/);
+  assert.doesNotMatch(input, /重新规划/);
+});
+
+test('task decision prompt maintains existing plan draft only', () => {
+  const prompt = buildTaskDecisionSystemPrompt({
+    actor: testActor,
+    runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
+    hasTaskPlanDraft: true,
+  });
+  const input = buildTaskDecisionInput({
+    latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
+    recentMessages: recentMessages(1),
+    taskPlanDraftContext: buildTaskPlanDraftContext([
+      '检索本地实现与 git log',
+      '汇总结论',
+    ]),
+  });
+
+  assert.match(prompt, /参考上一轮 plan_draft/);
+  assert.match(prompt, /仍合理的后续 task 可以沿用/);
+  assert.match(prompt, /本次 task 之后尚未开始的后续 task/);
   assert.match(prompt, /不输出 patch/);
+  assert.doesNotMatch(prompt, /当前没有上一轮 plan_draft/);
   assert.match(input, /<task_decision_input>/);
   assert.match(input, /<task_plan_draft/);
   assert.match(input, /当前单步 task/);

@@ -270,19 +270,55 @@ function buildSingleStepTaskInstructions(): string[] {
 export function buildTaskDecisionSystemPrompt(params: {
   actor: AgentActor;
   runDelegationContext: string;
+  hasTaskPlanDraft?: boolean;
   workdir?: string;
   runtimeEnvironment?: string;
 }): string {
+  const taskDecisionFocus = params.hasTaskPlanDraft
+    ? '判断重点：根据上下文决定当前要交给执行器的单步 task；参考上一轮 plan_draft，维护当前 task 之后仍未开始的后续 task 草案。'
+    : '判断重点：根据上下文决定当前要交给执行器的单步 task；当前没有上一轮 plan_draft，本轮不新建后续 task 草案。';
+  const taskPlanDraftInstructions = params.hasTaskPlanDraft
+    ? [
+        '- 先决定 task 字段；再参考上一轮 plan_draft，判断本次 task 之后是否还有后续 task。',
+        '- 仍合理的后续 task 可以沿用；已被本次 task、已完成步骤或最新结论覆盖的项不要保留。',
+        '- plan_draft 只填写本次 task 之后尚未开始的后续 task，1~5 个短句；没有后续 task 时为 null；不输出 patch、删除标记或游标。',
+      ]
+    : [
+        '- 先决定 task 字段；plan_draft 返回 null，不要新建后续 task 草案。',
+        '- 如果这是 task_done 后的回环且没有上一轮 plan_draft，表示没有预留后续 task，选择 answer 结束。',
+      ];
+  const planDraftFieldSemantic = params.hasTaskPlanDraft
+    ? '- plan_draft 可在 action=next_task 时填写本次 task 之后尚未开始的后续 task 草案；answer 时为 null 或省略。'
+    : '- plan_draft 在当前没有上一轮 plan_draft 时必须为 null；answer 时为 null 或省略。';
+  const taskDecisionExample = params.hasTaskPlanDraft
+    ? {
+        action: 'next_task',
+        task: '读取 issue #269 内容并提炼需求点。',
+        context_summary: '用户要求先理解 issue，再继续检查本地实现。',
+        search_keywords: 'github issue|网页抓取|需求分析',
+        plan_draft: [
+          '检索本地实现与 git log',
+          '汇总结论并回复用户',
+        ],
+      }
+    : {
+        action: 'next_task',
+        task: '读取 issue #269 内容并提炼需求点。',
+        context_summary: '用户要求先理解 issue，再回复当前可得结论。',
+        search_keywords: 'github issue|网页抓取|需求分析',
+        plan_draft: null,
+      };
+
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的 task decision 节点，只决定当前用户请求是否需要进入执行管道，以及第一个 delegated task 是什么。',
+    '你是 orchestrator 的 task decision 节点，只决定当前用户请求是否需要进入执行管道，以及当前 delegated task 是什么。',
     '不要选择 general/capability lane，不要回答用户，不要执行工具。',
     '',
     params.runDelegationContext,
     '',
     '当前阶段：用户请求后的 task 生成。',
-    '判断重点：根据上下文决定当前要交给执行器的单步 task；同时判断这个 task 之后是否还有后续 task，作为 plan_draft 留给下一轮参考。',
+    taskDecisionFocus,
     '',
     '决策原则：',
     '- 如果当前输入足以直接回应用户（无需 delegate 给执行器），选择 answer；最终回复由后续 answer 节点基于完整对话历史生成。',
@@ -292,9 +328,7 @@ export function buildTaskDecisionSystemPrompt(params: {
     ...buildSingleStepTaskInstructions().map((line) => `- ${line}`),
     '- search_keywords 用于下一步 capability search：提取能匹配执行器能力的关键词、同义词或短语；多个词用 | 分隔。没有额外关键词时可为 null。',
     '- 对 code review / PR review / GitHub PR URL / 仓库变更评审类请求，search_keywords 应包含 explore、code review、PR review、repository investigation 等调查/审查词；不要只因为出现 URL 就只输出 browser/url。',
-    '- 先决定 task 字段；再判断本次 task 之后是否还有后续 task。',
-    '- plan_draft 只填写本次 task 之后尚未开始的后续 task，1~5 个短句；没有后续 task 时为 null。',
-    '- plan_draft 不包含本次 task、已完成步骤或已被最新结论覆盖的步骤；默认参考沿用合理草案，必要时整体更新，不输出 patch、删除标记或游标。',
+    ...taskPlanDraftInstructions,
     '',
     '输出一个结构化 task decision。',
     '必须返回一个 JSON object，字段名必须严格使用：action、task、context_summary、search_keywords、plan_draft。',
@@ -306,17 +340,8 @@ export function buildTaskDecisionSystemPrompt(params: {
     '- task 只在 action=next_task 时填写；answer 时为 null 或省略。',
     '- context_summary 只在 action=next_task 时填写必要上下文；answer 时为 null 或省略。',
     '- search_keywords 只在 action=next_task 时填写用于 capability search 的关键词；answer 时为 null 或省略。',
-    '- plan_draft 可在 action=next_task 时填写本次 task 之后尚未开始的后续 task 草案；answer 时为 null 或省略。',
-    `正确示例：${JSON.stringify({
-      action: 'next_task',
-      task: '读取 issue #269 内容并提炼需求点。',
-      context_summary: '用户要求先理解 issue，再继续检查本地实现。',
-      search_keywords: 'github issue|网页抓取|需求分析',
-      plan_draft: [
-        '检索本地实现与 git log',
-        '汇总结论并回复用户',
-      ],
-    })}`,
+    planDraftFieldSemantic,
+    `正确示例：${JSON.stringify(taskDecisionExample)}`,
   ].filter((line) => line !== null).join('\n');
 }
 

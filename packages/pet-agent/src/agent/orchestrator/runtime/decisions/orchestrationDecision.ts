@@ -91,7 +91,7 @@ export function createTaskDecisionRunner(config: OrchestratorConfig) {
   ) {
     const context = buildTaskDecisionContext({ config, state, runnableConfig });
     const decision = await invokeTaskDecision({ config, context, runnableConfig });
-    return buildTaskDecisionResult({ decision });
+    return buildTaskDecisionResult({ state, decision });
   };
 }
 
@@ -154,6 +154,7 @@ function buildTaskDecisionContext(params: {
   const systemPrompt = buildTaskDecisionSystemPrompt({
     actor,
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
+    hasTaskPlanDraft: Boolean(state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0),
     workdir,
     runtimeEnvironment,
   });
@@ -438,11 +439,14 @@ async function invokeDelegationOutcomeDecision(params: {
 }
 
 function buildTaskDecisionResult(params: {
+  state: OrchestratorStateType;
   decision: TaskDecision;
 }) {
-  const { decision } = params;
+  const { state, decision } = params;
   const task = readDecisionText(decision.task);
-  const planDraft = normalizePlanDraft(decision.plan_draft);
+  const planDraft = state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0
+    ? normalizePlanDraft(decision.plan_draft)
+    : null;
   if (decision.action === 'answer') {
     return {
       runNextDelegation: null,

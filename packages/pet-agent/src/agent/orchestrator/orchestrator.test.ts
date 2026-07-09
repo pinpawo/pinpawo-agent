@@ -334,7 +334,7 @@ test('task-first route decision exposes capability candidates from the pending t
   assert.equal(decisionCallCount, 3);
 });
 
-test('task_done outcome loops back through taskDecision and reroutes the next task', async () => {
+test('task_done outcome with a plan draft loops back through taskDecision and reroutes the next task', async () => {
   let structuredCallCount = 0;
   const taskDecisionInputs: string[] = [];
   const routeInputs: string[] = [];
@@ -391,9 +391,17 @@ test('task_done outcome loops back through taskDecision and reroutes the next ta
     actor: testActor,
   });
 
-  const state = await graph.invoke(buildOrchestratorRunInput([
-    new HumanMessage('看 issue #269，再查本地实现，最后总结。'),
-  ]), {
+  const input = {
+    ...buildOrchestratorRunInput([
+      new HumanMessage('看 issue #269，再查本地实现，最后总结。'),
+    ]),
+    runTaskPlanDraft: [
+      '读取 issue 并提炼需求点',
+      '检索本地实现与 git log',
+      '汇总结论',
+    ],
+  };
+  const state = await graph.invoke(input, {
     configurable: {
       thread_id: 'stage-b-task-done-loop',
       actor: testActor,
@@ -404,7 +412,8 @@ test('task_done outcome loops back through taskDecision and reroutes the next ta
 
   assert.equal(taskDecisionInputs.length, 2);
   assert.equal(routeInputs.length, 2);
-  assert.doesNotMatch(taskDecisionInputs[0], /<task_plan_draft/);
+  assert.match(taskDecisionInputs[0], /<task_plan_draft/);
+  assert.match(taskDecisionInputs[0], /读取 issue 并提炼需求点/);
   assert.match(taskDecisionInputs[1], /<task_plan_draft/);
   assert.match(taskDecisionInputs[1], /检索本地实现与 git log/);
   assert.doesNotMatch(taskDecisionInputs[1], /读取 issue 并提炼需求点/);
@@ -413,6 +422,74 @@ test('task_done outcome loops back through taskDecision and reroutes the next ta
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
   assert.equal(state.runNextDelegation, null);
+  assert.equal(state.runTaskPlanDraft, null);
+  assert.equal(state.taskActiveDelegation, null);
+});
+
+test('task_done outcome without a plan draft answers instead of creating follow-up plan', async () => {
+  let structuredCallCount = 0;
+  const taskDecisionInputs: string[] = [];
+  const routeInputs: string[] = [];
+  const routeModel = {
+    invoke: async () => new AIMessage('final answer'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        structuredCallCount += 1;
+        const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
+        if (structuredCallCount === 1) {
+          taskDecisionInputs.push(inputText);
+          return {
+            ...nextTaskDecision('读取 issue #269 并提炼需求点。', null, 'issue|需求分析'),
+            plan_draft: ['检索本地实现与 git log'],
+          };
+        }
+        if (structuredCallCount === 2) {
+          routeInputs.push(inputText);
+          return routeCapabilityDecision('explore');
+        }
+        if (structuredCallCount === 3) {
+          return taskDoneDecision('已提炼 issue 需求点，但没有预留后续计划。');
+        }
+        throw new Error(`unexpected structured call ${structuredCallCount.toString()}`);
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeListChatModel({
+        responses: ['issue #269 需求点：需要检查本地实现。'],
+        sleep: 0,
+      }),
+    },
+    actor: testActor,
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('看 issue #269，再查本地实现。'),
+  ]), {
+    configurable: {
+      thread_id: 'stage-b-task-done-no-plan',
+      actor: testActor,
+      capabilities: [capability('explore', '通用探索、调查、代码库理解 capability。')],
+      forcedCapabilityNames: ['explore'],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(structuredCallCount, 3);
+  assert.equal(taskDecisionInputs.length, 1);
+  assert.equal(routeInputs.length, 1);
+  assert.doesNotMatch(taskDecisionInputs[0], /<task_plan_draft/);
+  assert.equal(String(state.messages.at(-1)?.content ?? ''), 'final answer');
+  assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed']);
+  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runNextDelegation, null);
+  assert.equal(state.runPendingFinalReply, null);
+  assert.equal(state.runTaskPlanDraft, null);
   assert.equal(state.taskActiveDelegation, null);
 });
 

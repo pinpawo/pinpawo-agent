@@ -17,6 +17,7 @@
     "eval:route": "node --env-file=.env --import tsx/esm evals/orchestrator-route.eval.ts",
     "eval:flow:mock-subagent": "node --env-file=.env --import tsx/esm evals/orchestrator-flow.mock-subagent.eval.ts",
     "eval:subagent": "node --env-file=.env --import tsx/esm evals/subagent.eval.ts",
+    "eval:task-decision": "node --env-file-if-exists=.env --import tsx/esm evals/task-decision.eval.ts",
     "eval:structured-output": "LANGCHAIN_TRACING_V2=false node --env-file=.env --import tsx/esm evals/structured-output-compat.eval.ts"
   },
   "dependencies": {

@@ -1,11 +1,13 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { Command } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import { evaluateGuard } from '../../../../guards';
 import {
   buildEmptyRunCapabilitySearchState,
   type OrchestratorStateType,
 } from '../../state';
+import type { OrchestratorStatePatch } from '../../controlPrimitives';
 import type {
   MessageLane,
   OrchestratorConfig,
@@ -59,7 +61,6 @@ import {
   readLatestAnnounceCompletionReason,
   readLatestHumanRequest,
   readRecentAnnounces,
-  stampMessageCreatedAtUtc,
 } from '../../messageLanes';
 import { resolveToolkitResources } from '../../subagentHandoff';
 import {
@@ -102,7 +103,7 @@ export function createRouteDecisionRunner(config: OrchestratorConfig) {
   ) {
     const context = await buildRouteDecisionContext({ config, state, runnableConfig });
     if (!context.pendingTask) {
-      return buildInlineStopResult('当前没有待路由的 delegated task，无法继续执行。');
+      throw new Error('routeDecision requires runPendingTask');
     }
     const readyContext: RouteDecisionReadyContext = {
       ...context,
@@ -125,7 +126,11 @@ export function createOrchestrationDecisionRunner(config: OrchestratorConfig) {
   ) {
     const context = buildDecisionContext({ config, kind, state, runnableConfig });
     const decision = await invokeDelegationOutcomeDecision({ config, context, runnableConfig });
-    return buildDelegationOutcomeDecisionResult({ state, context, decision });
+    const transition = buildDelegationOutcomeDecisionResult({ state, context, decision });
+    return new Command({
+      update: transition.update,
+      goto: transition.goto,
+    });
   };
 }
 
@@ -152,12 +157,10 @@ function buildTaskDecisionContext(params: {
     capabilityArtifacts: state.sessionCapabilityArtifacts,
   });
   const hasTaskPlanDraft = Boolean(state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0);
-  const canCreateTaskPlanDraft = state.runDelegationSummaries.length === 0;
   const systemPrompt = buildTaskDecisionSystemPrompt({
     actor,
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
     hasTaskPlanDraft,
-    canCreateTaskPlanDraft,
     workdir,
     runtimeEnvironment,
   });
@@ -166,7 +169,6 @@ function buildTaskDecisionContext(params: {
     recentMessages: recentMainMessages,
     requestContext,
     taskPlanDraftContext: buildTaskPlanDraftContext(state.runTaskPlanDraft),
-    canCreateTaskPlanDraft,
   }));
 
   return {
@@ -448,22 +450,17 @@ function buildTaskDecisionResult(params: {
 }) {
   const { state, decision } = params;
   const task = readDecisionText(decision.task);
-  const canWritePlanDraft = (state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0)
-    || state.runDelegationSummaries.length === 0;
-  const planDraft = canWritePlanDraft
-    ? normalizePlanDraft(decision.plan_draft)
-    : null;
+  const planDraft = normalizePlanDraft(decision.plan_draft);
   if (decision.action === 'answer') {
     return {
       runNextDelegation: null,
       runPendingTask: null,
-      runPendingFinalReply: 'answer' as const,
       runTaskPlanDraft: null,
       runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     };
   }
   if (!task) {
-    return buildInlineStopResult('当前 task decision 选择继续执行，但没有提供明确任务。');
+    throw new Error('taskDecision returned next_task without a task');
   }
 
   const pendingTask: RunPendingTask = {
@@ -474,7 +471,6 @@ function buildTaskDecisionResult(params: {
   return {
     runNextDelegation: null,
     runPendingTask: pendingTask,
-    runPendingFinalReply: null,
     runTaskPlanDraft: planDraft,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
   };
@@ -500,10 +496,14 @@ function buildRouteDecisionResult(params: {
       ? 'general'
       : null;
   if (!delegationLane) {
-    return buildInlineStopResult(`当前没有可用的 capability「${parsedLane.capabilityName ?? ''}」，无法继续完成这一步。`);
+    throw new Error(`routeDecision selected unavailable capability: ${parsedLane.capabilityName ?? ''}`);
   }
   if (delegationLane === 'general' && context.generalTools.length === 0) {
-    return buildInlineStopResult('我现在没有可用的通用工具执行器，无法继续完成这一步。');
+    return {
+      runNextDelegation: null,
+      runPendingTask: pendingTask,
+      runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+    };
   }
 
   const runNextDelegation: RunNextDelegation = {
@@ -529,21 +529,9 @@ function buildRouteDecisionResult(params: {
   return {
     runNextDelegation: nextDelegationState.runNextDelegation,
     runPendingTask: null,
-    runPendingFinalReply: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     taskActiveDelegation: nextTaskActiveDelegation,
     runDelegationSummaries: nextDelegationState.runDelegationSummaries,
-  };
-}
-
-function buildInlineStopResult(message: string) {
-  return {
-    messages: [stampMessageCreatedAtUtc(new AIMessage(message))],
-    runNextDelegation: null,
-    runPendingTask: null,
-    runPendingFinalReply: 'inline' as const,
-    runTaskPlanDraft: null,
-    runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
   };
 }
 
@@ -551,28 +539,56 @@ function buildDelegationOutcomeDecisionResult(params: {
   state: OrchestratorStateType;
   context: OrchestrationDecisionContext;
   decision: DelegationOutcomeDecision;
-}) {
+}): DelegationOutcomeTransition {
   const { state, context, decision } = params;
   const activeDelegation = context.activeDelegation;
 
   if (!activeDelegation) {
-    return buildInlineStopResult('当前没有 active delegated task，无法判断执行结果。');
+    throw new Error('outcomeDecision requires taskActiveDelegation');
   }
 
   if (decision.outcome === 'continue') {
-    return buildContinueDelegationResult({
-      state,
-      activeDelegation,
-      gapNote: readDecisionText(decision.gap_note),
-    });
+    return {
+      goto: activeDelegation.lane === 'general' ? 'general' as const : 'capability' as const,
+      update: buildContinueDelegationResult({
+        state,
+        activeDelegation,
+        gapNote: readDecisionText(decision.gap_note),
+      }),
+    };
   }
 
-  return buildCompletedTaskResult({
+  if (!context.canHandoffActiveDelegation) {
+    return {
+      goto: 'answer' as const,
+      update: {
+        runNextDelegation: null,
+        runPendingTask: null,
+        runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+      },
+    };
+  }
+
+  const completedTaskUpdate = buildCompletedTaskResult({
     state,
     context,
-    routeToAnswer: decision.outcome === 'goal_done',
     clearPlanDraft: decision.outcome === 'goal_done',
   });
+  if (!completedTaskUpdate) {
+    return {
+      goto: 'answer',
+      update: {
+        runNextDelegation: null,
+        runPendingTask: null,
+        runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+      },
+    };
+  }
+
+  return {
+    goto: decision.outcome === 'goal_done' ? 'answer' : 'taskDecision',
+    update: completedTaskUpdate,
+  };
 }
 
 function normalizePlanDraft(value: TaskDecision['plan_draft']): RunTaskPlanDraft {
@@ -605,7 +621,6 @@ function buildContinueDelegationResult(params: {
   return {
     runNextDelegation: nextDelegationState.runNextDelegation,
     runPendingTask: null,
-    runPendingFinalReply: null,
     taskActiveDelegation: nextTaskActiveDelegation,
     runDelegationSummaries: nextDelegationState.runDelegationSummaries,
   };
@@ -614,20 +629,19 @@ function buildContinueDelegationResult(params: {
 function buildCompletedTaskResult(params: {
   state: OrchestratorStateType;
   context: OrchestrationDecisionContext;
-  routeToAnswer: boolean;
   clearPlanDraft: boolean;
 }) {
-  const { state, context, routeToAnswer, clearPlanDraft } = params;
+  const { state, context, clearPlanDraft } = params;
   const {
     activeDelegation,
     canHandoffActiveDelegation,
     preDecisionHandoffMessages,
   } = context;
   if (!activeDelegation) {
-    return buildInlineStopResult('当前没有 active delegated task，无法完成任务交接。');
+    throw new Error('completed outcome requires taskActiveDelegation');
   }
   if (!canHandoffActiveDelegation) {
-    return buildInlineStopResult('当前 delegated task 还没有可交接的结果，暂不能完成任务边界切换。请先继续当前 delegated task，或明确说明要放弃它。');
+    throw new Error('completed outcome requires a handoff-ready active delegation');
   }
 
   const handoffMessages: BaseMessage[] = [];
@@ -643,7 +657,7 @@ function buildCompletedTaskResult(params: {
     includeCopy: false,
   });
   if (!clearLaneMessages) {
-    return buildInlineStopResult('当前 delegated task 还没有可交接的结果，暂不能完成任务边界切换。');
+    return null;
   }
   handoffMessages.push(...clearLaneMessages);
 
@@ -656,10 +670,16 @@ function buildCompletedTaskResult(params: {
     messages: handoffMessages,
     runNextDelegation: null,
     runPendingTask: null,
-    runPendingFinalReply: routeToAnswer ? 'answer' as const : null,
     ...(clearPlanDraft ? { runTaskPlanDraft: null } : {}),
     taskActiveDelegation: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     runDelegationSummaries,
   };
 }
+
+type DelegationOutcomeDestination = 'capability' | 'general' | 'taskDecision' | 'answer';
+
+type DelegationOutcomeTransition = {
+  goto: DelegationOutcomeDestination;
+  update: OrchestratorStatePatch;
+};

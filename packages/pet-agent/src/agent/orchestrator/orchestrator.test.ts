@@ -103,6 +103,7 @@ test('orchestrator state channels encode lifecycle prefixes in their names', () 
   );
 
   assert.deepEqual(invalidChannels, []);
+  assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runPendingFinalReply'), false);
 });
 
 function readToolMessages(messages: unknown[]) {
@@ -417,7 +418,7 @@ test('first task decision can create a plan draft and task_done reroutes the nex
   assert.equal(state.taskActiveDelegation, null);
 });
 
-test('task_done outcome without a plan draft answers instead of creating follow-up plan', async () => {
+test('task_done without a plan draft returns to taskDecision and can create a new draft', async () => {
   let structuredCallCount = 0;
   const taskDecisionInputs: string[] = [];
   const routeInputs: string[] = [];
@@ -441,6 +442,24 @@ test('task_done outcome without a plan draft answers instead of creating follow-
         if (structuredCallCount === 3) {
           return taskDoneDecision('已提炼 issue 需求点，但没有预留后续计划。');
         }
+        if (structuredCallCount === 4) {
+          taskDecisionInputs.push(inputText);
+          return {
+            ...nextTaskDecision('检索本地实现与 git log。', null, 'repository|git log'),
+            plan_draft: ['汇总结论'],
+          };
+        }
+        if (structuredCallCount === 5) {
+          routeInputs.push(inputText);
+          return routeCapabilityDecision('explore');
+        }
+        if (structuredCallCount === 6) {
+          return taskDoneDecision('已完成本地实现与 git log 检索。');
+        }
+        if (structuredCallCount === 7) {
+          taskDecisionInputs.push(inputText);
+          return { action: 'answer' };
+        }
         throw new Error(`unexpected structured call ${structuredCallCount.toString()}`);
       },
     }),
@@ -450,7 +469,10 @@ test('task_done outcome without a plan draft answers instead of creating follow-
       act: routeModel,
       observe: routeModel,
       subagent: new FakeListChatModel({
-        responses: ['issue #269 需求点：需要检查本地实现。'],
+        responses: [
+          'issue #269 需求点：需要检查本地实现。',
+          '本地实现与 git log 已检查。',
+        ],
         sleep: 0,
       }),
     },
@@ -468,15 +490,17 @@ test('task_done outcome without a plan draft answers instead of creating follow-
     },
   }) as OrchestratorStateType;
 
-  assert.equal(structuredCallCount, 3);
-  assert.equal(taskDecisionInputs.length, 1);
-  assert.equal(routeInputs.length, 1);
+  assert.equal(structuredCallCount, 7);
+  assert.equal(taskDecisionInputs.length, 3);
+  assert.equal(routeInputs.length, 2);
   assert.doesNotMatch(taskDecisionInputs[0], /<task_plan_draft/);
+  assert.doesNotMatch(taskDecisionInputs[1], /<task_plan_draft/);
+  assert.match(taskDecisionInputs[2], /<task_plan_draft/);
+  assert.match(taskDecisionInputs[2], /汇总结论/);
   assert.equal(String(state.messages.at(-1)?.content ?? ''), 'final answer');
-  assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed']);
+  assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
   assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runPendingFinalReply, null);
   assert.equal(state.runTaskPlanDraft, null);
   assert.equal(state.taskActiveDelegation, null);
 });
@@ -532,9 +556,9 @@ test('decision structured output autoRepair reruns the same route LLM call after
   assert.equal(state.runPendingTask, null);
 });
 
-test('inline fallback replies clear the pending final reply route before END', async () => {
+test('missing executable capability routes through the answer node', async () => {
   const model = {
-    invoke: async () => new AIMessage('should not call answer'),
+    invoke: async () => new AIMessage('当前没有可用的执行能力来读取本地文件。'),
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
     }),
@@ -556,58 +580,55 @@ test('inline fallback replies clear the pending final reply route before END', a
     new HumanMessage('帮我读取本地文件'),
   ]), {
     configurable: {
-      thread_id: 'inline-fallback-clears-route',
+      thread_id: 'missing-executable-capability-routes-answer',
       actor: testActor,
       capabilities: [],
       toolkits: [],
     },
   }) as OrchestratorStateType;
 
-  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有可用的通用工具执行器/);
+  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有可用的执行能力/);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.runPendingTask, null);
-  assert.equal(state.runPendingFinalReply, null);
   assert.deepEqual(state.runCapabilitySearchState, buildEmptyRunCapabilitySearchState());
 });
 
-test('route decision missing pending task clears stale transient state', async () => {
+test('route decision rejects missing pending task as an invariant violation', async () => {
   const model = new FakeListChatModel({ responses: ['unused'] }) as unknown as AgentModels['act'];
   const runRouteDecision = createRouteDecisionRunner({
     models: { act: model, observe: model },
     actor: testActor,
   });
   const input = buildOrchestratorRunInput([new HumanMessage('继续')]);
-  const patch = await runRouteDecision({
-    ...input,
-    runNextDelegation: {
-      id: 'stale',
-      lane: 'general',
-      task: '旧任务',
-      contextSummary: null,
-    },
-    runCapabilitySearchState: {
-      query: '旧 query',
-      attempted: true,
-      candidates: [{
-        name: 'stale_capability',
-        description: '旧候选',
-        score: 1,
-        matchedTerms: ['旧'],
-      }],
-    },
-  } as OrchestratorStateType, {
-    configurable: {
-      thread_id: 'route-missing-task-clears-stale-transients',
-      actor: testActor,
-      capabilities: [],
-      toolkits: [],
-    },
-  });
-
-  assert.equal(patch.runNextDelegation, null);
-  assert.equal(patch.runPendingTask, null);
-  assert.equal(patch.runPendingFinalReply, 'inline');
-  assert.deepEqual(patch.runCapabilitySearchState, buildEmptyRunCapabilitySearchState());
+  await assert.rejects(
+    runRouteDecision({
+      ...input,
+      runNextDelegation: {
+        id: 'stale',
+        lane: 'general',
+        task: '旧任务',
+        contextSummary: null,
+      },
+      runCapabilitySearchState: {
+        query: '旧 query',
+        attempted: true,
+        candidates: [{
+          name: 'stale_capability',
+          description: '旧候选',
+          score: 1,
+          matchedTerms: ['旧'],
+        }],
+      },
+    } as OrchestratorStateType, {
+      configurable: {
+        thread_id: 'route-missing-task-invariant',
+        actor: testActor,
+        capabilities: [],
+        toolkits: [],
+      },
+    }),
+    /routeDecision requires runPendingTask/,
+  );
 });
 
 test('task decision schema does not advertise capability actions', async () => {
@@ -3048,7 +3069,7 @@ test('terminal outcome decision keeps active delegation when handoff cannot be b
     schema: z.object({}),
   });
   const routeModel = {
-    invoke: async () => new AIMessage('answered'),
+    invoke: async () => new AIMessage('当前 delegated task 还没有可交接结果，暂不能完成任务边界切换。'),
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
     }),
@@ -3202,7 +3223,7 @@ test('delegation outcome continue decision can re-enter main and finalize handof
 test('delegation outcome continuation path rechecks run iteration guard before next decision', async () => {
   let routeCallCount = 0;
   const routeModel = {
-    invoke: async () => new AIMessage(''),
+    invoke: async () => new AIMessage('主流程循环已达到上限。'),
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
     }),
@@ -3277,7 +3298,6 @@ test('delegation outcome continuation path rechecks run iteration guard before n
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.runIterationCount, 0);
   assert.equal(state.runPendingTask, null);
-  assert.equal(state.runPendingFinalReply, null);
   const finalText = String(state.messages.at(-1)?.content ?? '');
   assert.match(finalText, /主流程循环已达到上限/);
 });
@@ -3491,8 +3511,14 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
 });
 
 test('delegation outcome uses a unified run-iteration guard before invoking decision', async () => {
+  let answerSystemContext = '';
   const routeModel = {
-    invoke: async () => new AIMessage('answered'),
+    invoke: async (messages: unknown[]) => {
+      answerSystemContext = messages.map((message) => String(
+        (message as { content?: unknown }).content ?? '',
+      )).join('\n');
+      return new AIMessage('主流程循环已达到上限，当前任务仍可续跑。');
+    },
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
     }),
@@ -3560,10 +3586,10 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
     },
   }) as OrchestratorStateType;
 
+  assert.match(answerSystemContext, /task loop 已达到本 run 的迭代上限/);
   assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
   assert.equal(state.runIterationCount, 0);
   assert.equal(state.runPendingTask, null);
-  assert.equal(state.runPendingFinalReply, null);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
 });
 

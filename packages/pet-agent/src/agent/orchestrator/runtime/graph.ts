@@ -1,6 +1,8 @@
 import { StateGraph, START, END } from '@langchain/langgraph';
+import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   OrchestratorState,
+  type OrchestratorStateType,
 } from '../state';
 import {
   asDecisionNode,
@@ -22,13 +24,9 @@ import {
   readRunIterationLimit,
   readSubagentContextWindowTokens,
 } from './config';
-import {
-  createDelegationOutcomeIterationGuardNode,
-} from './guards/nodes';
 import { createAnswerNode } from './nodes/answer';
 import { createCapabilitySearchNode } from './nodes/capabilitySearch';
 import { createCapabilityNode } from './nodes/capability';
-import { finalizeRun } from './nodes/finalize';
 import { createGeneralNode } from './nodes/general';
 import {
   createCompactContextNode,
@@ -36,8 +34,7 @@ import {
 } from './nodes/prepare';
 import { afterContextPrep } from './routes/afterContextPrep';
 import { afterDecision } from './routes/afterDecision';
-import { afterDelegationOutcomeDecision } from './routes/afterDelegationOutcomeDecision';
-import { afterDelegationOutcomeIterationGuard } from './routes/afterDelegationOutcomeIterationGuard';
+import { createAfterDelegationOutcomeIterationGuard } from './routes/afterDelegationOutcomeIterationGuard';
 import { afterTaskDecision } from './routes/afterTaskDecision';
 
 // --- Graph builder ---
@@ -49,8 +46,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const buildControlContext = createControlContextBuilder(orchestratorMaxIterations);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
-  const delegationOutcomeIterationGuardNode =
-    createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations });
+  const afterDelegationOutcomeIterationGuard =
+    createAfterDelegationOutcomeIterationGuard({ orchestratorMaxIterations });
   const capabilitySearch = createCapabilitySearchNode({ config });
   const runOrchestrationDecision = createOrchestrationDecisionRunner(config);
   const runTaskDecision = createTaskDecisionRunner(config);
@@ -66,8 +63,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     return runRouteDecision(state, ctx.runnableConfig);
   };
 
-  const delegationOutcomeDecision: OrchestratorDecision = (state, ctx) => {
-    return runOrchestrationDecision('delegation_outcome', state, ctx.runnableConfig);
+  const delegationOutcomeDecision = (
+    state: OrchestratorStateType,
+    runnableConfig?: RunnableConfig,
+  ) => {
+    return runOrchestrationDecision('delegation_outcome', state, runnableConfig);
   };
 
   const answerNode = createAnswerNode(config);
@@ -80,10 +80,11 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('taskDecision', asDecisionNode(taskDecision, buildControlContext))
     .addNode('capabilitySearch', capabilitySearch)
     .addNode('routeDecision', asDecisionNode(routeDecision, buildControlContext))
-    .addNode('delegationOutcomeIterationGuard', delegationOutcomeIterationGuardNode)
-    .addNode('delegationOutcomeDecision', asDecisionNode(delegationOutcomeDecision, buildControlContext))
+    .addNode('delegationOutcomeIterationGuard', () => ({}))
+    .addNode('delegationOutcomeDecision', delegationOutcomeDecision, {
+      ends: ['capability', 'general', 'taskDecision', 'answer'],
+    })
     .addNode('answer', answerNode)
-    .addNode('finalizeRun', finalizeRun)
     .addNode('capability', capabilityNode)
     .addNode('general', generalNode)
     .addEdge(START, 'prepare')
@@ -95,33 +96,19 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       taskDecision: 'taskDecision',
     })
     .addConditionalEdges('taskDecision', afterTaskDecision, {
-      end: END,
       answer: 'answer',
       capabilitySearch: 'capabilitySearch',
-      finalizeRun: 'finalizeRun',
     })
     .addConditionalEdges('delegationOutcomeIterationGuard', afterDelegationOutcomeIterationGuard, {
-      end: END,
+      answer: 'answer',
       delegationOutcomeDecision: 'delegationOutcomeDecision',
-      finalizeRun: 'finalizeRun',
     })
     .addConditionalEdges('routeDecision', afterDecision, {
-      end: END,
       answer: 'answer',
       capability: 'capability',
-      finalizeRun: 'finalizeRun',
       general: 'general',
-    })
-    .addConditionalEdges('delegationOutcomeDecision', afterDelegationOutcomeDecision, {
-      end: END,
-      answer: 'answer',
-      capability: 'capability',
-      finalizeRun: 'finalizeRun',
-      general: 'general',
-      taskDecision: 'taskDecision',
     })
     .addEdge('answer', END)
-    .addEdge('finalizeRun', END)
     .addEdge('capabilitySearch', 'routeDecision')
     .addEdge('capability', 'delegationOutcomeIterationGuard')
     .addEdge('general', 'delegationOutcomeIterationGuard');

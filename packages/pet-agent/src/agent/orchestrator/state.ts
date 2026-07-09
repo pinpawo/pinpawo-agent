@@ -3,7 +3,6 @@ import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import type {
   RunCapabilitySearchState,
-  RunFinalReplyRoute,
   MessageLane,
   RunNextDelegation,
   RunPendingTask,
@@ -28,10 +27,6 @@ const orchestratorStateChannels = {
     default: () => null,
   }),
   runPendingTask: Annotation<RunPendingTask | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  runPendingFinalReply: Annotation<RunFinalReplyRoute>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -79,7 +74,6 @@ export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runNextDelegation'
   | 'runPendingTask'
-  | 'runPendingFinalReply'
   | 'runTaskPlanDraft'
   | 'runCapabilitySearchState'
   | 'runDelegationSummaries'
@@ -99,7 +93,6 @@ export function buildRunStateReset(): OrchestratorRunState {
   return {
     runNextDelegation: null,
     runPendingTask: null,
-    runPendingFinalReply: null,
     runTaskPlanDraft: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     runDelegationSummaries: [],

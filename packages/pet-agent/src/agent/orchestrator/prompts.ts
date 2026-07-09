@@ -273,7 +273,7 @@ function buildOrchestratorDecisionPromptPrefixLines(): string[] {
     '1. taskDecision（决策）',
     '   - 读取：用户请求、对话上下文、已完成 task 的结论摘要、上一轮 plan_draft（如有）。',
     '   - 用户目标已能直接回应 → action=answer，交给 answer。',
-    '   - 还需要执行 → action=next_task，产出当前单步 task 与 search_keywords；已有 plan_draft 时同步维护它。',
+    '   - 还需要执行 → action=next_task，产出当前单步 task 与 search_keywords；根据上下文决定是否创建或维护 plan_draft。',
     '2. capabilitySearch（系统步骤，关键词匹配）',
     '   - 用 search_keywords（缺省时用 task 文本）搜索 custom capability，产出 capability 候选。',
     '3. routeDecision（决策）',
@@ -284,7 +284,7 @@ function buildOrchestratorDecisionPromptPrefixLines(): string[] {
     '5. outcomeDecision（决策）',
     '   - 读取：用户目标、当前 task、subagent announce、同一 run 的其他 task 摘要。',
     '   - continue：当前 task 未达标 → 同一 capability 继续执行，gap_note 说明缺口。',
-    '   - task_done：当前 task 已达标但用户目标未完 → 系统 handoff 本任务结论；有后续 plan_draft 时回到 taskDecision，否则进入 answer。',
+    '   - task_done：当前 task 已达标但用户目标未完 → 系统 handoff 本任务结论并回到 taskDecision。',
     '   - goal_done：用户目标已达成 → 系统 handoff 后进入 answer。',
     '6. answer（回复）',
     '   - 基于主对话（含 handoff 进来的任务结论）生成用户可见回复。',
@@ -292,7 +292,7 @@ function buildOrchestratorDecisionPromptPrefixLines(): string[] {
     '术语：',
     '- 用户请求（user request）：用户本轮的原始输入。',
     '- 用户目标（user goal）：orchestrator 从用户请求和对话上下文理解出的本轮目标；它是验收的唯一基准，不等于任何任务清单或草案。',
-    '- plan_draft：上一轮 taskDecision 预留的、尚未开始的后续步骤备忘；只作为 taskDecision 规划参考，不是任务清单，不是验收依据。',
+    '- plan_draft：taskDecision 可选的后续步骤自我引导草稿；只作为后续 taskDecision 的上下文参考，不是任务清单，不是验收依据，也不参与 route/guard。',
     '- gap_note：outcomeDecision 在 continue / task_done 时对缺口的一句说明，作为后续执行或规划的提示。',
     '- handoff：系统动作——task 达标或 goal 达成时，把 announce 结论并入主对话并清理执行现场；此后所有节点只依赖主对话里的结论，不依赖执行过程记录。',
   ];
@@ -311,60 +311,38 @@ export function buildTaskDecisionSystemPrompt(params: {
   actor: AgentActor;
   runDelegationContext: string;
   hasTaskPlanDraft?: boolean;
-  canCreateTaskPlanDraft?: boolean;
   workdir?: string;
   runtimeEnvironment?: string;
 }): string {
   const hasTaskPlanDraft = Boolean(params.hasTaskPlanDraft);
-  const canCreateTaskPlanDraft = Boolean(params.canCreateTaskPlanDraft);
-  const canWriteTaskPlanDraft = hasTaskPlanDraft || canCreateTaskPlanDraft;
   const taskDecisionFocus = hasTaskPlanDraft
     ? '判断重点：根据上下文决定当前要交给执行器的单步 task；参考上一轮 plan_draft，维护当前 task 之后仍未开始的后续 task 草案。'
-    : canCreateTaskPlanDraft
-      ? '判断重点：根据上下文决定当前要交给执行器的单步 task；这是本 run 首轮 taskDecision，明显需要多步时可以创建当前 task 之后的后续 task 草案。'
-      : '判断重点：根据上下文决定当前要交给执行器的单步 task；当前没有上一轮 plan_draft，本轮不新建后续 task 草案。';
+    : '判断重点：根据上下文决定当前要交给执行器的单步 task；如果用户目标明显还有后续 task，可以创建当前 task 之后的 plan_draft。';
   const taskPlanDraftDecisionBasis = hasTaskPlanDraft
     ? '- 上一轮 plan_draft 只是参考：只维护本次 task 之后仍未开始的后续草案，已被最新结论覆盖的项不要保留。'
-    : canCreateTaskPlanDraft
-      ? '- 这是本 run 首轮 taskDecision：如果用户目标明显需要多步，plan_draft 可以写本次 task 之后尚未开始的后续 task；单步任务时为 null。'
-      : '- 当前没有上一轮 plan_draft：不要新建后续草案，plan_draft 必须为 null；本次 task_done 后如果没有预留草案就会进入 answer。';
+    : '- 当前没有上一轮 plan_draft：如果用户目标明显还有后续 task，可以创建本次 task 之后的草案；否则保持 null。';
   const taskPlanDraftInstructions = hasTaskPlanDraft
     ? [
         '- 先决定 task 字段；再参考上一轮 plan_draft，判断本次 task 之后是否还有后续 task。',
         '- 仍合理的后续 task 可以沿用；已被本次 task、已完成步骤或最新结论覆盖的项不要保留。',
         '- plan_draft 只填写本次 task 之后尚未开始的后续 task，1~5 个短句；没有后续 task 时为 null；不输出 patch、删除标记或游标。',
       ]
-    : canCreateTaskPlanDraft
-      ? [
-          '- 先决定 task 字段；如果用户目标明显需要多步，再创建本次 task 之后尚未开始的后续 task 草案。',
-          '- plan_draft 只填写本次 task 之后的后续 task，1~5 个短句；单步任务或没有明确后续 task 时为 null。',
-          '- plan_draft 不包含本次 task，不输出 patch、删除标记或游标。',
-        ]
     : [
-        '- 先决定 task 字段；plan_draft 返回 null，不要新建后续 task 草案。',
-        '- 如果这是 task_done 后的回环且没有上一轮 plan_draft，表示没有预留后续 task，选择 answer 结束。',
+        '- 先决定 task 字段；如果用户目标明显还有后续 task，可以创建本次 task 之后尚未开始的后续 task 草案。',
+        '- plan_draft 只填写本次 task 之后的后续 task，1~5 个短句；单步任务或没有明确后续 task 时为 null。',
+        '- plan_draft 不包含本次 task，不输出 patch、删除标记或游标。',
       ];
-  const planDraftFieldSemantic = canWriteTaskPlanDraft
-    ? '- plan_draft 可在 action=next_task 时填写本次 task 之后尚未开始的后续 task 草案；answer 时为 null 或省略。'
-    : '- plan_draft 在当前没有上一轮 plan_draft 时必须为 null；answer 时为 null 或省略。';
-  const taskDecisionExample = canWriteTaskPlanDraft
-    ? {
-        action: 'next_task',
-        task: '读取 issue #269 内容并提炼需求点。',
-        context_summary: '用户要求先理解 issue，再继续检查本地实现。',
-        search_keywords: 'github issue|网页抓取|需求分析',
-        plan_draft: [
-          '检索本地实现与 git log',
-          '汇总结论并回复用户',
-        ],
-      }
-    : {
-        action: 'next_task',
-        task: '读取 issue #269 内容并提炼需求点。',
-        context_summary: '用户要求先理解 issue，再回复当前可得结论。',
-        search_keywords: 'github issue|网页抓取|需求分析',
-        plan_draft: null,
-      };
+  const planDraftFieldSemantic = '- plan_draft 可在 action=next_task 时填写本次 task 之后尚未开始的后续 task 草案；answer 时为 null 或省略。';
+  const taskDecisionExample = {
+    action: 'next_task',
+    task: '读取 issue #269 内容并提炼需求点。',
+    context_summary: '用户要求先理解 issue，再继续检查本地实现。',
+    search_keywords: 'github issue|网页抓取|需求分析',
+    plan_draft: [
+      '检索本地实现与 git log',
+      '汇总结论并回复用户',
+    ],
+  };
 
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
@@ -381,9 +359,7 @@ export function buildTaskDecisionSystemPrompt(params: {
     '- action=next_task：生成当前单步 delegated task，并提供必要 context_summary 与 capability search 关键词。',
     hasTaskPlanDraft
       ? '- 如果 action=next_task，同时维护本次 task 之后仍未开始的后续 plan_draft。'
-      : canCreateTaskPlanDraft
-        ? '- 如果 action=next_task 且用户目标明显需要多步，可以创建本次 task 之后仍未开始的后续 plan_draft。'
-        : '- 当前没有上一轮 plan_draft；无论 action 是什么，plan_draft 都不要新建。',
+      : '- 如果 action=next_task 且用户目标明显还有后续 task，可以创建本次 task 之后仍未开始的 plan_draft。',
     '- 用户当前请求、近期对话上下文，以及 runDelegationSummaries 中已经完成的任务结论。',
     '- runDelegationSummaries 是只读事实账本，用来避免重复执行和理解已有结论；不要把它当作控制流命令。',
     taskPlanDraftDecisionBasis,
@@ -605,7 +581,6 @@ export function buildTaskDecisionInput(params: {
   recentMessages: BaseMessage[];
   requestContext?: string | null;
   taskPlanDraftContext?: string | null;
-  canCreateTaskPlanDraft?: boolean;
 }): string {
   const context = params.requestContext ?? buildPreparedRequestContext({
     latestUserRequest: params.latestUserRequest,
@@ -614,9 +589,7 @@ export function buildTaskDecisionInput(params: {
   });
   const instruction = params.taskPlanDraftContext
     ? '请根据以上动态上下文判断是否需要执行器；需要时先生成当前单步 task，并维护当前 task 之后仍未开始的后续 plan_draft。'
-    : params.canCreateTaskPlanDraft
-      ? '请根据以上动态上下文判断是否需要执行器；需要时先生成当前单步 task，用户目标明显需要多步时可以创建后续 plan_draft。'
-      : '请根据以上动态上下文判断是否需要执行器；需要时只生成当前单步 task，plan_draft 返回 null，不要新建后续草案。';
+    : '请根据以上动态上下文判断是否需要执行器；需要时先生成当前单步 task，用户目标明显还有后续 task 时可以创建 plan_draft。';
   return [
     '<task_decision_input>',
     indentXmlBlock(context, 2),

@@ -21,7 +21,7 @@
 
 - **D1 — 生命周期前缀保留，不用注释替代。** 字段名会被序列化进 checkpoint 和 LangSmith trace，注释不会；`buildRunStateReset` 的 reset 纪律按名字执行。前缀编码生命周期（谁重置你），注释编码角色（命令/游标/账本），分工不二选一。新增一条单测断言所有 channel 名匹配 `/^(session|task|run)/` 或等于 `messages`。
 - **D2 — 重命名遵守前缀规范**（#308 issue 正文里建议的 `nextDelegation`/`routePendingDelegation` 不合规，以本表为准），见 §3。
-- **D3（修订 2026-07-09）— 不引入 source-of-truth 的 taskPlan；引入轻量 plan 草案（自我引导备忘）。** plan 的权威载体仍是「用户原始请求 + 已完成任务的结论（handoff copy + `runDelegationSummaries`）」，每轮规划重推；游标是 `taskActiveDelegation`（#115 "conclusions cross boundaries" 的延伸）。在此之上，taskDecision 顺带产出 `runTaskPlanDraft: string[]`（剩余步骤短句清单）作为下一轮规划的**锚点**，替代原设计中"等 eval 证明 drift 再加 `remaining_work`"的预留——升格理由不是防 drift，而是 D5/D11 的职责垂直化需要它。三条纪律防止草案滑回被否决的显式 taskPlan：①**只进 prompt，永不驱动控制流**——route/guard 不得依据草案分支，"还要不要继续"永远由验收节点基于「用户目标 vs 已有结论」判断，草案剩余步骤与 `goal_done` 冲突时以验收为准；②**每轮整体覆写，没有 replan 机制**——taskDecision 每次输出全新草案（自然完成"划掉已完成 + 按新结论修订"），不存在增量修补和游标进位；③**丢了无害**——run 级字段，跨 run 重置后可从对话结论重推。第一版草案只喂 taskDecision 自己，不给验收节点（避免"结果 vs 目标"被污染成"结果 vs 草案"）；eval 观察到验收系统性漏判"还有后续"再议。定位边界：pet-agent 的草案是给自己看的便签（简单任务，1~5 步），需要结构化多角色计划的场景走 Studio planner（`studio_plan` 的 plan 是给系统执行的合同），两层不打架。
+- **D3（修订 2026-07-09）— 不引入 source-of-truth 的 taskPlan；引入轻量 plan 草案（自我引导备忘）。** plan 的权威载体仍是「用户原始请求 + 已完成任务的结论（handoff copy + `runDelegationSummaries`）」，每轮规划重推；游标是 `taskActiveDelegation`（#115 "conclusions cross boundaries" 的延伸）。在此之上，taskDecision 顺带产出 `runTaskPlanDraft: string[]`（当前剩余步骤短句清单）作为下一轮规划的**锚点**，替代原设计中"等 eval 证明 drift 再加 `remaining_work`"的预留——升格理由不是防 drift，而是 D5/D11 的职责垂直化需要它。三条纪律防止草案滑回被否决的显式 taskPlan：①**只进 prompt，永不驱动控制流**——route/guard 不得依据草案分支，"还要不要继续"永远由验收节点基于「用户目标 vs 已有结论」判断，草案剩余步骤与 `goal_done` 冲突时以验收为准；②**输出当前剩余草案，没有 replan 机制**——taskDecision 输出的是当前判断仍未完成的剩余短句清单，已由最新结论覆盖的步骤不要保留；必要时可整体改写这份剩余草案，但不存在增量修补、删除标记和游标进位；③**丢了无害**——run 级字段，跨 run 重置后可从对话结论重推。第一版草案只喂 taskDecision 自己，不给验收节点（避免"结果 vs 目标"被污染成"结果 vs 草案"）；eval 观察到验收系统性漏判"还有后续"再议。定位边界：pet-agent 的草案是给自己看的便签（简单任务，1~5 步），需要结构化多角色计划的场景走 Studio planner（`studio_plan` 的 plan 是给系统执行的合同），两层不打架。
 - **D4 — 图重构为 task → search → route 三段管道。** task 先出生，capability search 用 task 文本（+ 决策顺带输出的 `search_keywords`）做 query，路由决策最后落 lane。`capabilityDiscovery` 节点删除——它唯一的职责（LLM 从原始请求提炼 query）被"task 即 query"取代。
 - **D5（修订 2026-07-09）— delegation outcome 决策验收化**：三态 `continue | task_done | goal_done` + 可选 `gap_note`，**不携带任何 task 文本字段**，也不携带 capability 枚举（枚举只在 routeDecision 小 schema）。它只回答一个问题——"这次 announce 的结果是否符合目标"：`continue` = 当前任务没达标，同 lane 继续（`gap_note` 说缺什么）；`task_done` = 这步达标但总目标未完；`goal_done` = 总目标满足。原三态里的 `next_task`（验收节点顺手写下一个 task）被否决：那让它同时干验收和规划两件事，prompt 会越写越长、稳定性下降。
 - **D6 — routeDecision 只在零候选时走确定性 fallback**（直接 `general`），有候选一律过 LLM。不做"单一高分候选跳过 LLM"：词法打分置信度不足以定阈值。
@@ -40,7 +40,7 @@
 | `runPendingDelegation` | `runNextDelegation` | run | **路由命令**（单跳） | routeDecision 节点 | `afterRouteDecision` + capability/general 节点 | 执行节点消费后置 null；run 入口 reset |
 | `runPendingFinalReply` | **删除**（D10；Stage 0 不改名，仅终点置 null） | run→— | 路由信号；目标图中 answer 路由由 `runPendingTask` 缺席派生，「已回复 → END」改 `Command goto` | — | — | — |
 | （新增） | `runPendingTask` | run | **任务命令**（管道内单段：decision → search → route） | taskDecision（D11 后唯一写方） | capabilitySearch、routeDecision | routeDecision 落定后置 null；run 入口 reset |
-| （新增，Stage B） | `runTaskPlanDraft` | run | **自我引导备忘**（非 source of truth，只进 prompt，纪律见 D3） | taskDecision（每轮整体覆写） | 下一轮 taskDecision | run 入口 reset |
+| （新增，Stage B） | `runTaskPlanDraft` | run | **自我引导备忘**（非 source of truth，只进 prompt，纪律见 D3） | taskDecision（写当前剩余草案；必要时整体改写） | 下一轮 taskDecision | run 入口 reset |
 | `runDelegations` | `runDelegationSummaries` | run | **账本**：只进 prompt/decision context，永不参与控制流分支 | 执行节点追加/更新 | `buildRunDelegationSummaryContext` | run 入口 reset |
 | `runCapabilitySearchState` | 不变 | run | search 草稿；语义更新为**每个任务边界重置** | capabilitySearch 节点 | routeDecision | 任务边界（task_done）重置；run 入口 reset |
 | `canHandoffActiveDelegation` | **删除**（D9） | — | 派生值误存为 state；改为 decision context 就地 evaluateGuard | — | — | — |
@@ -56,7 +56,7 @@ type RunPendingTask = {
   searchKeywords: string | null; // taskDecision 顺带输出，capabilitySearch 优先使用
 };
 
-// 剩余步骤短句清单；string[] 而非自由文本——渲染进 prompt 时可标注
+// 当前剩余步骤短句清单；string[] 而非自由文本——渲染进 prompt 时可标注
 // 已完成/当前/剩余，也天然抑制长篇。null = 无草案（单步任务常态）。
 type RunTaskPlanDraft = string[] | null;
 ```
@@ -81,7 +81,7 @@ START → prepare → compactContext
 taskDecision (LLM，静态 schema) —— 规划节点，唯一 task 出生点（D11）
   输入：用户请求 + runTaskPlanDraft（如有）+ runDelegationSummaries 结论摘要
   输出 { action: 'answer' | 'next_task', task?, context_summary?, search_keywords?, plan_draft? }
-  ── 不含 capability 枚举；单步约束 prompt 在此；plan_draft 每轮整体覆写 runTaskPlanDraft（D3）
+  ── 不含 capability 枚举；单步约束 prompt 在此；plan_draft 写当前剩余草案（必要时整体改写 runTaskPlanDraft，D3）
   → answer   → answerNode → END
   → next_task → 写 runPendingTask + runTaskPlanDraft → capabilitySearch
 

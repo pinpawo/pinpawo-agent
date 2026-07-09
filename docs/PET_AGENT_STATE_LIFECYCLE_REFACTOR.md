@@ -5,8 +5,8 @@
 > Update 2026-07: the naming contract in §2 is extended by
 > `docs/PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md` (issues #274/#308), which renames
 > `runPendingDelegation` → `runNextDelegation` and `runDelegations` → `runDelegationSummaries`,
-> deletes `canHandoffActiveDelegation` (derived value, not state) and `runPendingFinalReply`
-> (route signal replaced by Command goto), and adds `runPendingTask` / `runTaskPlanDraft`.
+> deletes `canHandoffActiveDelegation` (derived value, not state), keeps `runPendingFinalReply`
+> as a narrow answer/inline route signal, and adds `runPendingTask` / `runTaskPlanDraft`.
 > That doc is authoritative for those fields; the lifecycle prefix rules in §1 remain
 > canonical here.
 
@@ -47,7 +47,7 @@ All orchestrator state channels should carry their lifecycle prefix except the L
 | `toolAuthorizations` | `sessionToolAuthorizations` | session | Thread-scoped authorization state. Never reset at run start. |
 | none | `taskActiveDelegation` | task | The single source of truth for an unfinished delegation. Not reset at run start. |
 | `runPendingDelegation` | `runNextDelegation` | run | Transient route command from decision/route to `general` or `capability`. Reset at run start and cleared after the execution node consumes it. |
-| `runPendingFinalReply` | delete | — | Removed in Stage B; decision/guard nodes route via `Command({ goto })` instead of a transient state channel. |
+| `runPendingFinalReply` | `runPendingFinalReply` | run | Narrow answer/inline route signal. Kept in Stage B so graph routing remains visible through conditional edges; answer/finalize clear it before END. |
 | `runCapabilitySearchState` | `runCapabilitySearchState` | run | Discovery/search scratchpad for this run. Reset at run start. |
 | `runDelegations` | `runDelegationSummaries` | run | Per-run prompt/debug summary only. It must not be used as unfinished task state. |
 | `runIterationCount` | `runIterationCount` | run | Loop guard for the current run. Reset at run start. |
@@ -64,7 +64,7 @@ Type names should follow the same rule:
 |---|---|
 | `RunDelegation` | `RunDelegationSummary` |
 | `RunPendingDelegation` | `RunNextDelegation` |
-| `RunFinalReplyRoute` | delete |
+| `RunFinalReplyRoute` | `RunFinalReplyRoute` |
 | `RunCapabilitySearchState` | `RunCapabilitySearchState` |
 | none | `TaskActiveDelegation` |
 

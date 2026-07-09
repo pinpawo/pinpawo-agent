@@ -75,6 +75,13 @@ export type SubagentAnnounce = {
 
 export type DecisionMode = 'answer' | 'general' | 'capability';
 
+/**
+ * Transient answer-route signal. Kept deliberately small so the graph builder
+ * owns the conditional edges while inline fallback paths can still say "message
+ * already emitted, end after finalizing".
+ */
+export type RunFinalReplyRoute = 'answer' | 'inline' | null;
+
 export type ToolBindableChatModel = AgentModels['act'] & {
   bindTools?: (tools: StructuredTool[], options?: Record<string, unknown>) => {
     invoke: (messages: BaseMessage[], options?: RunnableConfig) => Promise<AIMessage>;

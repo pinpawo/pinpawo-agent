@@ -244,7 +244,7 @@ test('guard decision emitter is a no-op without a runnable config', () => {
   });
 });
 
-test('run iteration limit guard stops at the resolved limit and the node returns an inline stop command', async () => {
+test('run iteration limit guard stops at the resolved limit and the node returns an inline stop patch', async () => {
   const state = baseState({
     taskActiveDelegation: activeDelegation,
     runIterationCount: 5,
@@ -262,17 +262,13 @@ test('run iteration limit guard stops at the resolved limit and the node returns
   });
 
   const node = createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations: 5 });
-  const command = await node(state) as {
-    goto?: string | string[];
-    update?: Record<string, unknown>;
-  };
+  const patch = await node(state) as Record<string, unknown>;
 
-  assert.deepEqual(command.goto, ['__end__']);
-  assert.equal(command.update?.runIterationCount, 0);
-  assert.equal(command.update?.runNextDelegation, null);
-  assert.ok(Array.isArray(command.update?.messages) && command.update.messages.length === 1);
+  assert.equal(patch.runPendingFinalReply, 'inline');
+  assert.equal(patch.runIterationCount, 0);
+  assert.equal(patch.runNextDelegation, null);
+  assert.ok(Array.isArray(patch.messages) && patch.messages.length === 1);
 
   const belowLimitNode = createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations: 25 });
-  const continueCommand = await belowLimitNode(state) as { goto?: string | string[] };
-  assert.deepEqual(continueCommand.goto, ['delegationOutcomeDecision']);
+  assert.deepEqual(await belowLimitNode(state), { runPendingFinalReply: null });
 });

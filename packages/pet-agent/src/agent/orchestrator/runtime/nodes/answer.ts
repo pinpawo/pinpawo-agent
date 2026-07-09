@@ -47,10 +47,12 @@ export function createAnswerNode(config: OrchestratorConfig) {
       const fallback = new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。');
       return {
         messages: [stampMessageCreatedAtUtc(fallback)],
+        runPendingFinalReply: null,
       };
     }
     return {
       messages: [stampMessageCreatedAtUtc(response)],
+      runPendingFinalReply: null,
     };
   };
 }

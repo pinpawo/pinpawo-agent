@@ -1,6 +1,5 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { END } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import { evaluateGuard } from '../../../../guards';
 import {
@@ -27,7 +26,6 @@ import {
   type RouteDecision,
   type TaskDecision,
 } from '../../schemas';
-import { commandTo } from '../../controlPrimitives';
 import { readContextCompactionSummaries } from '../../contextCompaction';
 import {
   buildDelegationOutcomeCurrentTaskContext,
@@ -76,7 +74,6 @@ import {
 } from './capabilityCandidates';
 import {
   createTaskActiveDelegation,
-  decisionModeFromRunNextDelegation,
 } from './delegationLifecycle';
 import {
   generalLaneToolkits,
@@ -447,12 +444,13 @@ function buildTaskDecisionResult(params: {
   const task = readDecisionText(decision.task);
   const planDraft = normalizePlanDraft(decision.plan_draft);
   if (decision.action === 'answer') {
-    return commandTo('answer', {
+    return {
       runNextDelegation: null,
       runPendingTask: null,
+      runPendingFinalReply: 'answer' as const,
       runTaskPlanDraft: null,
       runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
-    });
+    };
   }
   if (!task) {
     return buildInlineStopResult('当前 task decision 选择继续执行，但没有提供明确任务。');
@@ -463,12 +461,13 @@ function buildTaskDecisionResult(params: {
     contextSummary: readDecisionText(decision.context_summary),
     searchKeywords: readDecisionText(decision.search_keywords),
   };
-  return commandTo('capabilitySearch', {
+  return {
     runNextDelegation: null,
     runPendingTask: pendingTask,
+    runPendingFinalReply: null,
     runTaskPlanDraft: planDraft,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
-  });
+  };
 }
 
 function buildRouteDecisionResult(params: {
@@ -517,23 +516,25 @@ function buildRouteDecisionResult(params: {
       }
     : createTaskActiveDelegation(runNextDelegation, state.runId);
 
-  const decisionMode = decisionModeFromRunNextDelegation(nextDelegationState.runNextDelegation);
-  return commandTo(decisionMode, {
+  return {
     runNextDelegation: nextDelegationState.runNextDelegation,
     runPendingTask: null,
+    runPendingFinalReply: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     taskActiveDelegation: nextTaskActiveDelegation,
     runDelegationSummaries: nextDelegationState.runDelegationSummaries,
-  });
+  };
 }
 
 function buildInlineStopResult(message: string) {
-  return commandTo(END, {
+  return {
     messages: [stampMessageCreatedAtUtc(new AIMessage(message))],
     runNextDelegation: null,
     runPendingTask: null,
+    runPendingFinalReply: 'inline' as const,
+    runTaskPlanDraft: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
-  });
+  };
 }
 
 function buildDelegationOutcomeDecisionResult(params: {
@@ -559,7 +560,7 @@ function buildDelegationOutcomeDecisionResult(params: {
   return buildCompletedTaskResult({
     state,
     context,
-    goto: decision.outcome === 'task_done' ? 'taskDecision' : 'answer',
+    routeToAnswer: decision.outcome === 'goal_done',
     clearPlanDraft: decision.outcome === 'goal_done',
   });
 }
@@ -591,22 +592,22 @@ function buildContinueDelegationResult(params: {
     status: 'pending',
     resultPreview: null,
   };
-  const decisionMode = decisionModeFromRunNextDelegation(nextDelegationState.runNextDelegation);
-  return commandTo(decisionMode, {
+  return {
     runNextDelegation: nextDelegationState.runNextDelegation,
     runPendingTask: null,
+    runPendingFinalReply: null,
     taskActiveDelegation: nextTaskActiveDelegation,
     runDelegationSummaries: nextDelegationState.runDelegationSummaries,
-  });
+  };
 }
 
 function buildCompletedTaskResult(params: {
   state: OrchestratorStateType;
   context: OrchestrationDecisionContext;
-  goto: 'taskDecision' | 'answer';
+  routeToAnswer: boolean;
   clearPlanDraft: boolean;
 }) {
-  const { state, context, goto, clearPlanDraft } = params;
+  const { state, context, routeToAnswer, clearPlanDraft } = params;
   const {
     activeDelegation,
     canHandoffActiveDelegation,
@@ -641,13 +642,14 @@ function buildCompletedTaskResult(params: {
       ? { ...delegation, status: 'completed' as const }
       : delegation);
 
-  return commandTo(goto, {
+  return {
     messages: handoffMessages,
     runNextDelegation: null,
     runPendingTask: null,
+    runPendingFinalReply: routeToAnswer ? 'answer' as const : null,
     ...(clearPlanDraft ? { runTaskPlanDraft: null } : {}),
     taskActiveDelegation: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     runDelegationSummaries,
-  });
+  };
 }

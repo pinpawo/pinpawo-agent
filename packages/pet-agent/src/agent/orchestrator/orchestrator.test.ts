@@ -151,16 +151,6 @@ function continueDecision(gapNote: string | null = '当前 delegated task 还未
   return { outcome: 'continue', gap_note: gapNote };
 }
 
-function commandGoto(result: unknown): string | undefined {
-  const goto = (result as { goto?: string | string[] }).goto;
-  return Array.isArray(goto) ? goto[0] : goto;
-}
-
-function commandUpdate(result: unknown): Partial<OrchestratorStateType> {
-  return ((result as { update?: Partial<OrchestratorStateType> }).update
-    ?? result) as Partial<OrchestratorStateType>;
-}
-
 test('capability search ranks matching capability and keeps original query terms', () => {
   const results = searchCapabilities('宠物发帖|小红书日常', [
     capability('daily_post', '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿。'),
@@ -477,7 +467,7 @@ test('decision structured output autoRepair reruns the same route LLM call after
   assert.equal(state.runPendingTask, null);
 });
 
-test('inline fallback replies end without a pending final reply route field', async () => {
+test('inline fallback replies clear the pending final reply route before END', async () => {
   const model = {
     invoke: async () => new AIMessage('should not call answer'),
     bindTools: () => ({
@@ -511,7 +501,7 @@ test('inline fallback replies end without a pending final reply route field', as
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有可用的通用工具执行器/);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.runPendingTask, null);
-  assert.equal('runPendingFinalReply' in state, false);
+  assert.equal(state.runPendingFinalReply, null);
   assert.deepEqual(state.runCapabilitySearchState, buildEmptyRunCapabilitySearchState());
 });
 
@@ -522,7 +512,7 @@ test('route decision missing pending task clears stale transient state', async (
     actor: testActor,
   });
   const input = buildOrchestratorRunInput([new HumanMessage('继续')]);
-  const result = await runRouteDecision({
+  const patch = await runRouteDecision({
     ...input,
     runNextDelegation: {
       id: 'stale',
@@ -548,11 +538,10 @@ test('route decision missing pending task clears stale transient state', async (
       toolkits: [],
     },
   });
-  const patch = commandUpdate(result);
 
-  assert.equal(commandGoto(result), '__end__');
   assert.equal(patch.runNextDelegation, null);
   assert.equal(patch.runPendingTask, null);
+  assert.equal(patch.runPendingFinalReply, 'inline');
   assert.deepEqual(patch.runCapabilitySearchState, buildEmptyRunCapabilitySearchState());
 });
 
@@ -3223,7 +3212,7 @@ test('delegation outcome continuation path rechecks run iteration guard before n
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.runIterationCount, 0);
   assert.equal(state.runPendingTask, null);
-  assert.equal('runPendingFinalReply' in state, false);
+  assert.equal(state.runPendingFinalReply, null);
   const finalText = String(state.messages.at(-1)?.content ?? '');
   assert.match(finalText, /主流程循环已达到上限/);
 });
@@ -3509,7 +3498,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
   assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
   assert.equal(state.runIterationCount, 0);
   assert.equal(state.runPendingTask, null);
-  assert.equal('runPendingFinalReply' in state, false);
+  assert.equal(state.runPendingFinalReply, null);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
 });
 

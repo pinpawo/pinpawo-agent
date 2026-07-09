@@ -1,12 +1,10 @@
 import { AIMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { END } from '@langchain/langgraph';
 import { evaluateGuard } from '../../../../guards';
 import {
   ORCHESTRATOR_GUARD_POSITION,
   runIterationLimitGuard,
 } from '../../guardDefinitions';
-import { commandTo } from '../../controlPrimitives';
 import type { OrchestratorStateType } from '../../state';
 import type { TaskActiveDelegation } from '../../types';
 import { getInvokeOptions } from '../config';
@@ -44,9 +42,9 @@ export function createDelegationOutcomeIterationGuardNode(params: {
     });
     const activeDelegation = state.taskActiveDelegation;
     if (outcome.kind !== 'stop' || !activeDelegation) {
-      return commandTo('delegationOutcomeDecision');
+      return { runPendingFinalReply: null };
     }
-    return commandTo(END, {
+    return {
       messages: [
         new AIMessage(buildRunIterationLimitMessage(
           activeDelegation,
@@ -55,8 +53,9 @@ export function createDelegationOutcomeIterationGuardNode(params: {
         )),
       ],
       runNextDelegation: null,
+      runPendingFinalReply: 'inline' as const,
       taskActiveDelegation: activeDelegation,
       runIterationCount: 0,
-    });
+    };
   };
 }

@@ -61,7 +61,7 @@ type PetAgentRuntimeConfig = {
 1. 入参 `brief` 为必填自然语言任务文本。
 2. `wikiRoot` 可选；存在时会读取 `{wikiRoot}/index.md`，注入 `SystemMessage`。
 3. `extraCapabilities` 仅在本次调用生效，与 runtime 级能力合并。
-4. `forcedCapabilityNames` 触发本次调用的 capability discovery 强制候选。
+4. `forcedCapabilityNames` 触发本次调用的 routeDecision 强制 capability 候选。
 5. `invoke()` 是最终结果接口，不接收工具事件 callback；需要实时工具/运行时事件的宿主应消费 root `streamEvents(v3)` 并通过 adapter 投影。
 
 ## 4. 返回值与行为

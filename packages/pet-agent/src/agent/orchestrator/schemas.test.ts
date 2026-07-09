@@ -4,7 +4,10 @@ import {
   buildCapabilityActionName,
   buildOrchestrationDecisionOutputInstruction,
   buildOrchestrationDecisionSchema,
+  buildRouteDecisionSchema,
+  buildTaskDecisionSchema,
   parseAction,
+  parseRouteLane,
 } from './schemas';
 
 test('buildOrchestrationDecisionSchema rejects candidate names containing "."', () => {
@@ -55,6 +58,32 @@ test('schema enum allows static actions when no candidates', () => {
   assert.equal(schema.safeParse({ action: 'delegate_capability' }).success, false);
 });
 
+test('task decision schema separates task birth from route selection', () => {
+  const schema = buildTaskDecisionSchema();
+  assert.equal(schema.safeParse({ action: 'answer' }).success, true);
+  assert.equal(schema.safeParse({
+    action: 'next_task',
+    task: '读取 issue #269 并提炼需求点。',
+    context_summary: '用户要求先理解 issue。',
+    search_keywords: 'github issue|需求分析',
+  }).success, true);
+  assert.equal(schema.safeParse({
+    action: 'delegate_capability.browser',
+    task: '打开网页',
+  }).success, false);
+  assert.equal(schema.safeParse({ lane: 'capability.browser' }).success, false);
+});
+
+test('route decision schema owns capability lane enum', () => {
+  const schema = buildRouteDecisionSchema({
+    capabilityCandidates: [{ name: 'browser' }],
+  });
+  assert.equal(schema.safeParse({ lane: 'general' }).success, true);
+  assert.equal(schema.safeParse({ lane: 'capability.browser' }).success, true);
+  assert.equal(schema.safeParse({ lane: 'capability.daily_post' }).success, false);
+  assert.equal(schema.safeParse({ action: 'delegate_capability.browser' }).success, false);
+});
+
 test('schema strips legacy fields like question/capability/needs_human_review', () => {
   // schema currently strips unknowns silently (z.object default). The point is
   // these fields are gone — verify they don't appear on parsed output.
@@ -97,6 +126,17 @@ test('parseAction handles capability names containing dots in payload as a singl
   assert.deepEqual(parseAction('delegate_capability.foo.bar'), {
     kind: 'delegate_capability',
     capabilityName: 'foo.bar',
+  });
+});
+
+test('parseRouteLane splits capability lane names', () => {
+  assert.deepEqual(parseRouteLane('capability.browser'), {
+    kind: 'capability',
+    capabilityName: 'browser',
+  });
+  assert.deepEqual(parseRouteLane('general'), {
+    kind: 'general',
+    capabilityName: null,
   });
 });
 

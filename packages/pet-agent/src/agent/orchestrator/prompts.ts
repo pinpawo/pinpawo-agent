@@ -2,13 +2,12 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentActor } from '../../types/agent';
 import type { CapabilityArtifactRef } from '../../types/artifact';
-import { CAPABILITY_SEARCH_TOOL_NAME } from './capabilitySearch';
 import type {
   CapabilityCandidate,
-  CapabilityDecisionState,
   SubagentAnnounce,
   SubagentCompletionReason,
   RunDelegationSummary,
+  RunPendingTask,
 } from './types';
 import { clipForPrompt, formatDelegationStatus, readMessageText } from './utils';
 
@@ -58,11 +57,10 @@ export function buildRunDelegationSummaryContext(runDelegationSummaries: RunDele
   return lines.join('\n');
 }
 
-export function buildDecisionTargetsContext(params: {
+export function buildRouteTargetsContext(params: {
   generalTools: StructuredTool[];
   capabilityCandidates: CapabilityCandidate[];
   capabilitySearchAttempted: boolean;
-  capabilitySearchAvailable: boolean;
   capabilitySearchQuery: string | null;
   capabilityRegistryAvailable?: boolean;
 }): string {
@@ -70,50 +68,43 @@ export function buildDecisionTargetsContext(params: {
     generalTools,
     capabilityCandidates,
     capabilitySearchAttempted,
-    capabilitySearchAvailable,
     capabilitySearchQuery,
     capabilityRegistryAvailable,
   } = params;
   const lines = [
-    'Delegate targets：',
-    '只根据下面的 target 描述判断是否 delegate。',
+    'Route targets：',
+    '只根据下面的 target 描述为当前 task 选择 lane。',
   ];
   if (generalTools.length > 0) {
-    lines.push('', '通用工具执行器 general（可使用下列通用工具）：');
+    lines.push('', 'general lane（可使用下列通用工具）：');
     for (const toolItem of generalTools) {
       lines.push(`- ${toolItem.name}: ${clipForPrompt(toolItem.description, 140)}`);
     }
   } else {
-    lines.push('', '通用工具执行器 general：不可用');
+    lines.push('', 'general lane：不可用');
   }
 
   if (capabilityCandidates.length > 0) {
-    lines.push('', '业务 capability 候选（如果匹配，优先使用对应的 delegate_capability.<name> action）：');
+    lines.push('', 'capability lane 候选（如果匹配，优先使用对应 capability.<name> lane）：');
     for (const candidate of capabilityCandidates) {
       const matchedTerms = candidate.matchedTerms.length > 0
         ? `；匹配：${candidate.matchedTerms.join('|')}`
         : '';
-      lines.push(`- delegate_capability.${candidate.name}：${clipForPrompt(candidate.description, 180)}${matchedTerms}`);
+      lines.push(`- capability.${candidate.name}：${clipForPrompt(candidate.description, 180)}${matchedTerms}`);
     }
   } else if (capabilitySearchAttempted) {
-    lines.push('', '业务 capability：已搜索，未找到匹配候选。');
+    lines.push('', 'capability lane：已搜索，未找到匹配候选。');
     if (capabilitySearchQuery) {
-      lines.push(`- 上次搜索 query：${clipForPrompt(capabilitySearchQuery, 120)}`);
+      lines.push(`- 搜索 query：${clipForPrompt(capabilitySearchQuery, 120)}`);
     }
-  } else if (capabilitySearchAvailable) {
-    lines.push('', '业务 capability：默认不注入完整列表。');
-    lines.push(`- 如果用户请求可能需要业务 capability，请调用 ${CAPABILITY_SEARCH_TOOL_NAME} 先搜索候选。`);
-    lines.push('- 搜索 query 使用用户意图中的关键词、短语或同义词，多个词用 | 分隔。');
   } else if (capabilityRegistryAvailable) {
-    lines.push('', '业务 capability：当前没有候选。');
+    lines.push('', 'capability lane：当前没有候选。');
   } else {
-    lines.push('', '业务 capability：不可用');
+    lines.push('', 'capability lane：不可用');
   }
 
   return lines.join('\n');
 }
-
-export const buildRouteTargetsContext = buildDecisionTargetsContext;
 
 function xmlTextBlock(tag: string, text: string, attrs = ''): string {
   const safeText = text.replaceAll(']]>', ']]]]><![CDATA[>');
@@ -248,22 +239,6 @@ function buildRecentSubagentAnnounceXmlContext(announces: SubagentAnnounce[]): s
   return lines.join('\n');
 }
 
-export function buildCapabilityDiscoveryTaskContext(announces: SubagentAnnounce[]): string {
-  if (announces.length === 0) {
-    return '';
-  }
-
-  const lines = ['近期任务状态（只用于理解当前请求是否承接已有任务；不要把旧任务目标当成当前搜索目标）：'];
-  for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
-    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}执行器：${item.lane}`);
-    if (item.task) {
-      lines.push(`  任务目标：${clipForPrompt(item.task, 120)}`);
-    }
-  }
-
-  return lines.join('\n');
-}
-
 function buildDecisionConfigLines(actor: AgentActor, workdir?: string, runtimeEnvironment?: string): string[] {
   const configLines = [
     '[配置]',
@@ -275,39 +250,85 @@ function buildDecisionConfigLines(actor: AgentActor, workdir?: string, runtimeEn
   return configLines as string[];
 }
 
-export function buildUserIntentDecisionSystemPrompt(params: {
+function buildSingleStepTaskInstructions(): string[] {
+  return [
+    '单步任务粒度：同一执行器、同一工具域内能连续完成的相邻动作算一步。',
+    '复合请求只产出当前最应该先执行的一步；不要把多个阶段、多个工具域或完整编号计划塞进一个 task。',
+    'task 文本必须是执行器可直接开始的明确目标，不要写成步骤清单。',
+    '如果需要后续步骤，等当前 delegated task 返回后再由 outcome decision 继续判断。',
+  ];
+}
+
+export function buildTaskDecisionSystemPrompt(params: {
   actor: AgentActor;
   runDelegationContext: string;
-  targetsContext: string;
-  capabilityDecisionState: CapabilityDecisionState;
-  outputInstruction: string;
   workdir?: string;
   runtimeEnvironment?: string;
 }): string {
-  const capabilityInstructions = buildCapabilityDecisionInstructions(params.capabilityDecisionState);
   return [
     ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
     '',
-    '你是 orchestrator 的用户意图判断节点，只决定下一步，不亲自执行 delegate targets 里的能力。',
+    '你是 orchestrator 的 task decision 节点，只决定当前用户请求是否需要进入执行管道，以及第一个 delegated task 是什么。',
+    '不要选择 general/capability lane，不要回答用户，不要执行工具。',
     '',
     params.runDelegationContext,
     '',
-    params.targetsContext,
-    '',
-    '当前阶段：用户请求后的初始意图判断。',
-    '判断重点：理解用户当前想完成什么，决定是否需要外部执行器。',
+    '当前阶段：用户请求后的 task 生成。',
+    '判断重点：理解用户当前想完成什么，并把需要执行器推进的目标收窄为一个单步 task。',
     '',
     '决策原则：',
-    '- 如果当前输入足以直接回应用户（无需 delegate 给执行器），选择 answer；最终回复由后续回复节点基于完整对话历史生成，你不要在这里撰写回复内容。',
+    '- 如果当前输入足以直接回应用户（无需 delegate 给执行器），选择 answer；最终回复由后续 answer 节点基于完整对话历史生成。',
     '- 如果用户询问已有上下文、最近任务状态或之前结果，选择 answer 交给回复节点回答；不要在决策层凭印象复述或编造之前的结果。',
     '- 如果用户目标本身无法判断，或需要向用户补充、澄清、确认，选择 answer 交给回复节点处理；不要在决策层直接提问。',
-    `- ${buildCapabilityDelegationDecisionPrinciple(params.capabilityDecisionState)}`,
-    ...capabilityInstructions.map((line) => `- ${line}`),
-    '- 当所有候选都不匹配，且需要 general 的工具能力才能继续时，选择 delegate_general。',
-    '- 一旦决定 delegate_*，就交给执行器；运行期的工具级风险（rm -rf、git push --force 等）由具体工具自己拦截，不需要在决策层重复表达。',
-    '- 每次只选择一个最明确的下一步。',
+    '- 如果需要执行器读取、搜索、修改、运行命令、访问外部系统或调用专门能力，选择 next_task。',
+    ...buildSingleStepTaskInstructions().map((line) => `- ${line}`),
+    '- search_keywords 用于下一步 capability search：提取能匹配执行器能力的关键词、同义词或短语；多个词用 | 分隔。没有额外关键词时可为 null。',
+    '- 对 code review / PR review / GitHub PR URL / 仓库变更评审类请求，search_keywords 应包含 explore、code review、PR review、repository investigation 等调查/审查词；不要只因为出现 URL 就只输出 browser/url。',
     '',
-    params.outputInstruction,
+    '输出一个结构化 task decision。',
+    '必须返回一个 JSON object，字段名必须严格使用：action、task、context_summary、search_keywords。',
+    'action 取值：',
+    '- answer：无需继续 delegate，交给后续 answer 节点回复用户；不要在这里撰写最终回复内容。',
+    '- next_task：生成一个单步 delegated task，交给后续 search/route 管道选择执行器。',
+    '字段语义：',
+    '- action 必填，且必须是上面的枚举值之一。',
+    '- task 只在 action=next_task 时填写；answer 时为 null 或省略。',
+    '- context_summary 只在 action=next_task 时填写必要上下文；answer 时为 null 或省略。',
+    '- search_keywords 只在 action=next_task 时填写用于 capability search 的关键词；answer 时为 null 或省略。',
+    `正确示例：${JSON.stringify({
+      action: 'next_task',
+      task: '读取 issue #269 内容并提炼需求点。',
+      context_summary: '用户要求先理解 issue，再继续检查本地实现。',
+      search_keywords: 'github issue|网页抓取|需求分析',
+    })}`,
+  ].filter((line) => line !== null).join('\n');
+}
+
+export function buildRouteDecisionSystemPrompt(params: {
+  actor: AgentActor;
+  targetsContext: string;
+  workdir?: string;
+  runtimeEnvironment?: string;
+}): string {
+  return [
+    ...buildDecisionConfigLines(params.actor, params.workdir, params.runtimeEnvironment),
+    '',
+    '你是 orchestrator 的 route decision 节点，只为当前单步 task 选择执行 lane。',
+    '不要改写 task，不要回答用户，不要执行工具。',
+    '',
+    params.targetsContext,
+    '',
+    '当前阶段：task 已生成，capability search 已完成，现在只选择执行器 lane。',
+    '',
+    '决策原则：',
+    '- 如果当前 task 匹配某个业务 capability candidate，选择对应 capability.<name> lane；capability 优先于 general。',
+    '- 如果所有候选都不匹配，且需要通用工具能力才能继续，选择 general。',
+    '- 不要因为缺少主题、平台、时长等执行参数就避开匹配的 capability；澄清由执行器内部处理，除非 task 本身无法判断。',
+    '- 每次只选择一个 lane。',
+    '',
+    '输出一个结构化 route decision。',
+    '必须返回一个 JSON object，字段名必须严格使用：lane。',
+    'lane 取值由 schema 限定：general 或当前候选中的 capability.<name>。',
   ].filter((line) => line !== null).join('\n');
 }
 
@@ -362,82 +383,8 @@ export function buildAnswerSystemPrompt(params: {
   ].filter((line) => line !== null).join('\n');
 }
 
-export function buildCapabilityDiscoverySystemPrompt(params: {
-  actor: AgentActor;
-  runDelegationContext: string;
-  generalTools: StructuredTool[];
-  workdir?: string;
-  runtimeEnvironment?: string;
-}): string {
-  const configLines = [
-    '[配置]',
-    `角色：「${params.actor.name}」`,
-    params.workdir ? `工作目录：${params.workdir}` : null,
-    params.workdir ? '相对路径默认相对于工作目录。' : null,
-    params.runtimeEnvironment ? params.runtimeEnvironment : null,
-  ].filter((line) => line !== null);
-  const generalToolLines = params.generalTools.length > 0
-    ? [
-        '通用工具执行器 general：',
-        ...params.generalTools.map((toolItem) => `- ${toolItem.name}: ${clipForPrompt(toolItem.description, 140)}`),
-      ]
-    : ['通用工具执行器 general：不可用'];
-
-  return [
-    ...configLines,
-    '',
-    '你是 capability discovery，只判断是否需要先搜索业务 capability 候选。',
-    '不要做最终路由决策，不要回答用户，也不要 delegate 给执行器。',
-    '',
-    params.runDelegationContext,
-    '',
-    ...generalToolLines,
-    '',
-    '当前阶段：用户请求后的 capability 候选发现。',
-    `如果用户目标可能需要业务 capability，调用 ${CAPABILITY_SEARCH_TOOL_NAME}。`,
-    '如果用户明确要求某类执行环境、应用或专门能力，而 general 只提供近似替代工具，先搜索 capability。',
-    '如果用户请求需要大量阅读、调查、代码库理解、资料检索、上下文发现或先探索再决定下一步，先搜索 explore/探索/investigate/research capability。',
-    '如果用户请求代码 review、代码审查、PR review、pull request review、diff 审查或仓库变更评审，先搜索 explore/探索 capability；即使请求包含 GitHub URL、PR 链接或网页链接，也不要因此优先搜索 browser capability。',
-    '如果用户要打开 URL/链接/网站/网页，或需要真实浏览器、Chrome、登录态、JS 渲染、点击、输入、等待页面变化，先搜索 browser/浏览器/网页/url/链接 capability。',
-    '如果用户明确要访问 REST API、RSS、静态文本内容，且不需要浏览器状态或页面交互，可以不搜索 browser capability。',
-    '如果用户只是询问已有上下文、最近任务状态或之前结果，不调用任何工具。',
-    '如果用户目标不需要业务 capability，不调用任何工具，也不要回答用户。',
-  ].filter((line) => line !== null).join('\n');
-}
-
 export function buildUserRequestContext(userRequest: string | null): string | null {
   return userRequest ? `用户原始请求：${clipForPrompt(userRequest, 320)}` : null;
-}
-
-function buildCapabilityDecisionInstructions(capabilityDecisionState: CapabilityDecisionState): string[] {
-  if (capabilityDecisionState === 'search_available') {
-    return [
-      'capability discovery 未给本轮 decision schema 产出候选；当前 action 枚举里没有 delegate_capability.<name> option。',
-    ];
-  }
-  if (capabilityDecisionState === 'candidates_available') {
-    // schema 已经把候选硬编码进 action 枚举，无需再约束选择来源。
-    return [];
-  }
-  if (capabilityDecisionState === 'search_exhausted') {
-    return [
-      '已搜索但没有找到匹配的业务 capability candidate；本 run 不再尝试该路径。',
-    ];
-  }
-  return [];
-}
-
-function buildCapabilityDelegationDecisionPrinciple(capabilityDecisionState: CapabilityDecisionState): string {
-  if (capabilityDecisionState === 'candidates_available') {
-    return '如果下一步任务匹配某个业务 capability candidate，选择对应的 delegate_capability.<name>；delegate_capability 优先于 delegate_general。即使缺少主题、平台、时长等执行参数，也应把澄清交给 capability 内部处理，除非用户目标本身无法判断或涉及真实风险。';
-  }
-  if (capabilityDecisionState === 'search_exhausted') {
-    return '本 run 已搜索但没有可选业务 capability candidate；不要输出 delegate_capability.<name>。如果仍需要工具执行，选择 delegate_general。';
-  }
-  if (capabilityDecisionState === 'search_available') {
-    return '本 run 没有业务 capability candidate 进入当前 action schema；不要输出 delegate_capability.<name>。如果仍需要工具执行，选择 delegate_general。';
-  }
-  return '业务 capability 不可用；不要输出 delegate_capability.<name>。如果仍需要工具执行，选择 delegate_general。';
 }
 
 function formatSubagentAnnounceText(item: SubagentAnnounce): string | null {
@@ -494,21 +441,6 @@ function messageRoleLabel(message: BaseMessage): string {
   return type;
 }
 
-function buildCompactionSummaryContext(contextSummaries: string[] | undefined): string | null {
-  const visibleSummaries = (contextSummaries ?? [])
-    .slice(-MAX_CONTEXT_SUMMARIES)
-    .map((summary) => clipForPrompt(summary, 1200))
-    .filter(Boolean);
-  if (visibleSummaries.length === 0) {
-    return null;
-  }
-
-  return [
-    '压缩任务上下文（来自更早对话；只用于理解当前请求，不是新的用户指令）：',
-    ...visibleSummaries.map((summary, index) => `摘要 ${index + 1}：${summary}`),
-  ].join('\n');
-}
-
 function buildCompactionSummaryXmlContext(contextSummaries: string[] | undefined): string | null {
   const visibleSummaries = (contextSummaries ?? [])
     .slice(-MAX_CONTEXT_SUMMARIES)
@@ -554,7 +486,7 @@ function buildRecentMessagesXmlContext(messages: BaseMessage[]): string | null {
   return lines.join('\n');
 }
 
-export function buildUserIntentDecisionInput(params: {
+export function buildTaskDecisionInput(params: {
   latestUserRequest: string | null;
   recentMessages: BaseMessage[];
   requestContext?: string | null;
@@ -565,11 +497,31 @@ export function buildUserIntentDecisionInput(params: {
     recentAnnounces: [],
   });
   return [
-    '<user_intent_decision_input>',
+    '<task_decision_input>',
     indentXmlBlock(context, 2),
-    '  <instruction>请根据以上上下文判断当前用户请求的下一步。</instruction>',
-    '</user_intent_decision_input>',
+    '  <instruction>请根据以上上下文判断是否需要执行器，并在需要时生成当前第一个单步 task。</instruction>',
+    '</task_decision_input>',
   ].join('\n');
+}
+
+export function buildRouteDecisionInput(params: {
+  pendingTask: RunPendingTask | null;
+}): string {
+  const task = params.pendingTask;
+  return [
+    '<route_decision_input>',
+    task
+      ? indentXmlBlock(xmlTextBlock('task', clipForPrompt(task.task, 420)), 2)
+      : '  <task missing="true" />',
+    task?.contextSummary
+      ? indentXmlBlock(xmlTextBlock('context_summary', clipForPrompt(task.contextSummary, 420)), 2)
+      : null,
+    task?.searchKeywords
+      ? indentXmlBlock(xmlTextBlock('search_keywords', clipForPrompt(task.searchKeywords, 240)), 2)
+      : null,
+    '  <instruction>请只为当前 task 选择执行 lane。</instruction>',
+    '</route_decision_input>',
+  ].filter((line) => line !== null).join('\n');
 }
 
 export function buildPreparedRequestContext(params: {
@@ -595,57 +547,6 @@ export function buildPreparedRequestContext(params: {
     recentMessagesContext ? indentXmlBlock(recentMessagesContext, 2) : null,
     '</user_intent_context>',
   ].filter((line) => line !== null).join('\n');
-}
-
-export function buildCapabilityDiscoveryRequestContext(params: {
-  latestUserRequest: string | null;
-  recentMessages: BaseMessage[];
-  recentAnnounces: SubagentAnnounce[];
-  contextSummaries?: string[];
-  capabilityArtifacts?: CapabilityArtifactRef[];
-}): string {
-  const recentLines = params.recentMessages
-    .slice(-MAX_RECENT_MAIN_MESSAGES)
-    .map((message) => {
-      const text = readMessageText(message);
-      return text ? `- ${messageRoleLabel(message)}：${clipForPrompt(text, 220)}` : null;
-    })
-    .filter((line): line is string => Boolean(line));
-
-  const compactionSummaryContext = buildCompactionSummaryContext(params.contextSummaries);
-  const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
-
-  return [
-    params.latestUserRequest
-      ? `当前用户请求：${clipForPrompt(params.latestUserRequest, 420)}`
-      : '当前用户请求：未提供',
-    compactionSummaryContext ? '' : null,
-    compactionSummaryContext,
-    artifactContext ? '' : null,
-    artifactContext,
-    params.recentAnnounces.length > 0 ? '' : null,
-    params.recentAnnounces.length > 0 ? buildCapabilityDiscoveryTaskContext(params.recentAnnounces) : null,
-    recentLines.length > 0 ? '' : null,
-    recentLines.length > 0 ? '近期对话上下文（只用于消解指代，不要续写这些内容）：' : null,
-    ...recentLines,
-  ].filter((line) => line !== null).join('\n');
-}
-
-export function buildCapabilityDiscoveryInput(params: {
-  latestUserRequest: string | null;
-  requestContext?: string | null;
-}): string {
-  if (params.requestContext) {
-    return [
-      params.requestContext,
-      '',
-      '请只判断是否需要搜索业务 capability 候选。',
-    ].join('\n');
-  }
-
-  return params.latestUserRequest
-    ? `当前用户请求：${clipForPrompt(params.latestUserRequest, 420)}`
-    : '当前用户请求：未提供';
 }
 
 export function buildDelegationOutcomeDecisionInput(params: {

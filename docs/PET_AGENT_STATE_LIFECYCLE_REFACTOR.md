@@ -189,10 +189,11 @@ const OrchestratorState = Annotation.Root({
 ```ts
 type OrchestratorRunState = Pick<
   OrchestratorStateType,
-  | 'runPendingDelegation'
+  | 'runNextDelegation'
+  | 'runPendingTask'
   | 'runPendingFinalReply'
   | 'runCapabilitySearchState'
-  | 'runDelegations'
+  | 'runDelegationSummaries'
   | 'runIterationCount'
   | 'runId'
 >;
@@ -211,18 +212,18 @@ The system supports one active delegation at a time.
 
 ### Start delegation
 
-When `userIntentDecision` chooses `delegate_general` or `delegate_capability`:
+When `routeDecision` chooses `general` or `capability.<name>` for `runPendingTask`:
 
-1. Create `runPendingDelegation`.
+1. Create `runNextDelegation`.
 2. Create or update `taskActiveDelegation`.
 3. Set `taskActiveDelegation.transcriptRunId` to the current `runId` when the task starts.
 
 ```ts
 taskActiveDelegation = {
-  id: runPendingDelegation.id,
-  lane: runPendingDelegation.lane,
-  task: runPendingDelegation.task,
-  contextSummary: runPendingDelegation.contextSummary,
+  id: runNextDelegation.id,
+  lane: runNextDelegation.lane,
+  task: runNextDelegation.task,
+  contextSummary: runNextDelegation.contextSummary,
   transcriptRunId: state.runId,
   status: 'pending',
   resultPreview: null,
@@ -234,7 +235,7 @@ taskActiveDelegation = {
 When `generalNode` or `capabilityNode` returns:
 
 1. Append lane messages tagged with `taskActiveDelegation.transcriptRunId`.
-2. Clear `runPendingDelegation`.
+2. Clear `runNextDelegation`.
 3. Set `taskActiveDelegation.status = 'awaiting_decision'`.
 4. Store `resultPreview`.
 5. Increment `runIterationCount`.
@@ -245,7 +246,7 @@ When `delegationOutcomeDecision` runs:
 
 - `finish`: handoff the active delegation into the main queue, clear `taskActiveDelegation`, set `runPendingFinalReply = 'answer'`.
 - `ask_user`: emit the inline question, keep `taskActiveDelegation`, end the current run.
-- `delegate_*` same lane: reuse `taskActiveDelegation.id` and `transcriptRunId`, set `runPendingDelegation`, continue the same task.
+- `delegate_*` same lane: reuse `taskActiveDelegation.id` and `transcriptRunId`, set `runNextDelegation`, continue the same task.
 - `delegate_*` different lane: first handoff or explicitly abandon the current active delegation, then create a new `taskActiveDelegation`. Silent overwrite is not allowed.
 
 ## 6. Routing model
@@ -255,9 +256,9 @@ The graph entry route should depend on explicit task state, not lane announce st
 ```ts
 function afterContextPrep(state: OrchestratorStateType) {
   if (state.taskActiveDelegation?.status === 'awaiting_decision') {
-    return 'delegationOutcomeDecision';
+    return 'delegationOutcomeIterationGuard';
   }
-  return 'capabilityDiscovery';
+  return 'taskDecision';
 }
 ```
 
@@ -268,8 +269,8 @@ START
   -> prepare
   -> compactContext
   -> afterContextPrep
-       -> delegationOutcomeDecision
-       -> capabilityDiscovery
+       -> delegationOutcomeIterationGuard -> delegationOutcomeDecision
+       -> taskDecision -> capabilitySearch -> routeDecision
 ```
 
 This keeps `buildRunStateReset()` simple: run state can be cleared before routing, while task state remains available to decide whether an unfinished delegation must be judged.

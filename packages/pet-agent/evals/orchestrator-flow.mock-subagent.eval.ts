@@ -31,6 +31,11 @@ import type { AgentCapability } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
 import { inferStructuredOutputMethod } from '../src/utils/structuredOutput';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
+import {
+  readRunDelegationSummaries,
+  readTaskActiveDelegation,
+  routeModeFromResult,
+} from './orchestratorStateReaders';
 
 const DATASET_NAME = 'orchestrator-flow-mock-subagent';
 
@@ -469,28 +474,12 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     ? inputs.capability_candidates.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : [];
 
-  if (capabilityCandidateNames.length > 0) {
-    turnInput.runCapabilitySearchState = {
-      query: 'eval',
-      attempted: true,
-      candidates: capabilityCandidateNames.flatMap((name) => {
-        const capability = capabilityList.find((item) => item.name === name);
-        if (!capability) return [];
-        return [{
-          name: capability.name,
-          description: capability.description,
-          score: 100,
-          matchedTerms: ['eval'],
-        }];
-      }),
-    };
-  }
-
   const configurable = {
     thread_id: `eval-flow-${Date.now()}-${++evalCounter}`,
     actor: testActor,
     toolkits: [mockGeneralToolkit],
     capabilities: capabilityList,
+    forcedCapabilityNames: capabilityCandidateNames,
     maxIterations: typeof inputs.max_iterations === 'number' ? inputs.max_iterations : 3,
     workdir: '/mock/project',
   };
@@ -527,15 +516,7 @@ function extractResult(
   subagentModel: ProbeSubagentModel,
   iterationLimitInterruptCount: number,
 ): Record<string, unknown> {
-  const pendingDelegation = result.runPendingDelegation && typeof result.runPendingDelegation === 'object'
-    ? result.runPendingDelegation as Record<string, unknown>
-    : null;
-  const lane = pendingDelegation?.lane;
-  const routeMode = lane === 'general'
-    ? 'general'
-    : typeof lane === 'string' && lane.startsWith('capability:')
-      ? 'capability'
-      : 'answer';
+  const routeMode = routeModeFromResult(result);
   const finalRoute = routeMode === 'answer' ? 'answer' : 'delegate';
   const messages = Array.isArray(result.messages) ? result.messages : [];
   const visibleMessages = messages.filter((message) => {
@@ -547,8 +528,9 @@ function extractResult(
     messages,
     { runId: typeof result.runId === 'string' ? result.runId : null },
   );
-  const runDelegations = Array.isArray(result.runDelegations) ? result.runDelegations : [];
-  const observedRunDelegations = runDelegations.filter((delegation) =>
+  const runDelegationSummaries = readRunDelegationSummaries(result);
+  const activeDelegation = readTaskActiveDelegation(result);
+  const observedRunDelegations = runDelegationSummaries.filter((delegation) =>
     delegation?.status === 'progress' || delegation?.status === 'completed'
   );
   const latestObservedDelegation = observedRunDelegations.at(-1);
@@ -570,12 +552,15 @@ function extractResult(
   return {
     route: finalRoute,
     mode: routeMode,
-    phase: latestAnnounce || observedRunDelegations.length > 0 ? 'after_subagent' : 'initial_request',
+    phase: latestAnnounce || observedRunDelegations.length > 0 || activeDelegation?.status === 'awaiting_decision'
+      ? 'after_subagent'
+      : 'initial_request',
     reply: typeof lastMsg?.content === 'string' ? lastMsg.content : '',
-    delegation_count: runDelegations.length,
-    delegation_statuses: runDelegations.map((item) => item.status),
-    latest_announce_kind: latestObservedDelegation?.status ?? null,
-    latest_announce_lane: latestAnnounce?.lane ?? latestObservedDelegation?.lane ?? null,
+    delegation_count: runDelegationSummaries.length,
+    delegation_statuses: runDelegationSummaries.map((item) => item.status),
+    latest_announce_kind: latestObservedDelegation?.status
+      ?? (activeDelegation?.status === 'awaiting_decision' ? 'progress' : null),
+    latest_announce_lane: latestAnnounce?.lane ?? latestObservedDelegation?.lane ?? activeDelegation?.lane ?? null,
     subagent_invocation_count: invocationStats.length,
     transcript_leak: transcriptLeak,
     carryover_seen: carryoverSeen,

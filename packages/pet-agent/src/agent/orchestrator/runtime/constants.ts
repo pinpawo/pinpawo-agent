@@ -9,8 +9,8 @@ export const CAPABILITY_SUBAGENT_MAX_ITERATIONS = SUBAGENT_MAX_ITERATIONS;
 export const DEFAULT_ORCHESTRATOR_MAX_ITERATIONS = 25;
 
 const ORCHESTRATOR_INTERNAL_AI_STREAM_NODE_NAMES = [
-  'capabilityDiscovery',
-  'userIntentDecision',
+  'taskDecision',
+  'routeDecision',
   'delegationOutcomeDecision',
 ] as const;
 

@@ -411,27 +411,6 @@ export function readLatestAnnounceCompletionReason(
   return message ? getMessageCompletionReason(message) : null;
 }
 
-/**
- * Lanes that still have an in-flight (lane-tagged) announce — i.e. delegations
- * that ran but have NOT been handed off (completed delegations get handed off and
- * their lane wiped, so a lane announce that survives is by definition unfinished).
- * Used to offer "continue this in-progress capability" candidates; persists across
- * runs because the lane announce lives in messages, unlike runDelegationSummaries.
- */
-export function readInFlightAnnounceLanes(messages: BaseMessage[]): Array<MessageLane | undefined> {
-  const lanes: MessageLane[] = [];
-  const seen = new Set<string>();
-  for (const message of messages) {
-    if (!getMessageIsAnnounce(message)) continue;
-    const lane = getMessageLane(message);
-    if (!isDelegationLane(lane)) continue;
-    if (seen.has(lane)) continue;
-    seen.add(lane);
-    lanes.push(lane);
-  }
-  return lanes;
-}
-
 export function readRecentAnnounces(messages: BaseMessage[], limit = 5): SubagentAnnounce[] {
   const announces: SubagentAnnounce[] = [];
   const seen = new Set<string>();

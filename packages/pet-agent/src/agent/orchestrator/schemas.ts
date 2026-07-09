@@ -10,14 +10,27 @@ import type {
  */
 const STATIC_ACTION_KINDS = ['answer', 'delegate_general'] as const;
 const CAPABILITY_ACTION_PREFIX = 'delegate_capability.' as const;
+const ROUTE_CAPABILITY_PREFIX = 'capability.' as const;
 
 export type CapabilityActionName = `${typeof CAPABILITY_ACTION_PREFIX}${string}`;
 export type ActionName = (typeof STATIC_ACTION_KINDS)[number] | CapabilityActionName;
+export type RouteCapabilityLane = `${typeof ROUTE_CAPABILITY_PREFIX}${string}`;
 
 export type OrchestrationDecision = {
   action: ActionName;
   task?: string | null;
   context_summary?: string | null;
+};
+
+export type TaskDecision = {
+  action: 'answer' | 'next_task';
+  task?: string | null;
+  context_summary?: string | null;
+  search_keywords?: string | null;
+};
+
+export type RouteDecision = {
+  lane: 'general' | RouteCapabilityLane;
 };
 
 export type OrchestrationDecisionSchemaParams = {
@@ -26,6 +39,10 @@ export type OrchestrationDecisionSchemaParams = {
 
 export function buildCapabilityActionName(capabilityName: string): CapabilityActionName {
   return `${CAPABILITY_ACTION_PREFIX}${capabilityName}` as CapabilityActionName;
+}
+
+export function buildRouteCapabilityLane(capabilityName: string): RouteCapabilityLane {
+  return `${ROUTE_CAPABILITY_PREFIX}${capabilityName}` as RouteCapabilityLane;
 }
 
 export function parseAction(action: string): {
@@ -45,13 +62,25 @@ export function parseAction(action: string): {
   return { kind: 'answer', capabilityName: null };
 }
 
-export function buildOrchestrationDecisionSchema(params: OrchestrationDecisionSchemaParams) {
+export function parseRouteLane(lane: string): {
+  kind: 'general' | 'capability';
+  capabilityName: string | null;
+} {
+  if (lane.startsWith(ROUTE_CAPABILITY_PREFIX)) {
+    return {
+      kind: 'capability',
+      capabilityName: lane.slice(ROUTE_CAPABILITY_PREFIX.length) || null,
+    };
+  }
+  return { kind: 'general', capabilityName: null };
+}
+
+function validateCapabilityCandidateNames(params: OrchestrationDecisionSchemaParams) {
   const seen = new Set<string>();
   for (const candidate of params.capabilityCandidates) {
     if (candidate.name.includes('.')) {
       throw new Error(
-        `capability name must not contain '.': received "${candidate.name}". `
-        + `Action enum encodes lane via "${CAPABILITY_ACTION_PREFIX}<name>".`,
+        `capability name must not contain '.': received "${candidate.name}".`,
       );
     }
     if (seen.has(candidate.name)) {
@@ -59,6 +88,10 @@ export function buildOrchestrationDecisionSchema(params: OrchestrationDecisionSc
     }
     seen.add(candidate.name);
   }
+}
+
+export function buildOrchestrationDecisionSchema(params: OrchestrationDecisionSchemaParams) {
+  validateCapabilityCandidateNames(params);
 
   const actionValues = [
     ...STATIC_ACTION_KINDS,
@@ -77,6 +110,40 @@ export function buildOrchestrationDecisionSchema(params: OrchestrationDecisionSc
     ),
     context_summary: z.string().nullable().optional().describe(
       'action=delegate_general 或 delegate_capability.<name> 时执行器所需的简短上下文；其他 action 为 null 或省略。',
+    ),
+  });
+}
+
+export function buildTaskDecisionSchema() {
+  return z.object({
+    action: z.enum(['answer', 'next_task']).describe(
+      '下一步动作。answer 表示不需要执行器；next_task 表示先产出一个单步 delegated task。',
+    ),
+    task: z.string().nullable().optional().describe(
+      'action=next_task 时要执行的单步任务；action=answer 时为 null 或省略。',
+    ),
+    context_summary: z.string().nullable().optional().describe(
+      'action=next_task 时执行器需要的简短上下文；action=answer 时为 null 或省略。',
+    ),
+    search_keywords: z.string().nullable().optional().describe(
+      'action=next_task 时用于 capability search 的关键词或短语；多个词用 | 分隔。没有更好关键词时可为 null。',
+    ),
+  });
+}
+
+export function buildRouteDecisionSchema(params: OrchestrationDecisionSchemaParams) {
+  validateCapabilityCandidateNames(params);
+  const laneValues = [
+    'general',
+    ...params.capabilityCandidates.map((c) => buildRouteCapabilityLane(c.name)),
+  ] as [string, ...string[]];
+  const capabilityLaneValues = params.capabilityCandidates.map((c) => buildRouteCapabilityLane(c.name));
+
+  return z.object({
+    lane: z.enum(laneValues).describe(
+      capabilityLaneValues.length > 0
+        ? `选择执行当前 task 的 lane。当前 capability lane：${capabilityLaneValues.join('、')}。`
+        : '选择执行当前 task 的 lane。当前没有可选 capability lane。',
     ),
   });
 }

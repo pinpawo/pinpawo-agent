@@ -108,12 +108,22 @@ function messagesText(messages: unknown[]): string {
   }).join('\n');
 }
 
+function readXmlCdataTag(text: string, tag: string): string | null {
+  const match = text.match(new RegExp(`<${tag}>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*</${tag}>`));
+  return match?.[1]?.trim() || null;
+}
+
+function searchIntentText(text: string): string {
+  return readXmlCdataTag(text, 'user_request') ?? text;
+}
+
 function chooseCapabilitySearchQuery(text: string): string | null {
-  if (/src\/|package\.json|formatDate|npm test|LangGraph/.test(text)) return null;
-  if (/库存|仓库/.test(text)) return '库存|仓库';
-  if (/宠物发帖|小红书日常|日常草稿|daily post/i.test(text)) return '宠物发帖|小红书日常';
-  if (/浏览器|网页|打开 https?:\/\//.test(text)) return '浏览器|网页|打开';
-  if (/调查|探索|代码库理解|注册链路/.test(text)) return '代码库理解|调查|先探索再决定';
+  const intent = searchIntentText(text);
+  if (/库存|仓库/.test(intent)) return '库存|仓库';
+  if (/宠物发帖|小红书日常|日常草稿|daily post/i.test(intent)) return '宠物发帖|小红书日常';
+  if (/浏览器|网页|打开 https?:\/\//.test(intent)) return '浏览器|网页|打开';
+  if (/调查|探索|代码库理解|注册链路/.test(intent)) return '代码库理解|调查|先探索再决定';
+  if (/src\/|package\.json|formatDate|npm test|LangGraph/.test(intent)) return null;
   return null;
 }
 
@@ -151,11 +161,61 @@ function chooseDecisionAction(text: string): string {
     return 'answer';
   }
 
+  if (/宠物发帖|小红书日常|日常草稿|daily post/i.test(text)) {
+    return 'delegate_capability.daily_post';
+  }
+  if (/浏览器|网页|打开 https?:\/\//.test(text)) {
+    return 'delegate_capability.browser';
+  }
+  if (/调查|探索|代码库理解|注册链路/.test(text)) {
+    return 'delegate_capability.explore';
+  }
+  if (/库存盘点|库存|仓库/.test(text)) {
+    return 'delegate_general';
+  }
+
   if (/src\/|package\.json|formatDate|npm test|LangGraph|运行一下|重构 auth|读取|搜索|改成|代码结构/.test(text)) {
     return 'delegate_general';
   }
 
   return 'answer';
+}
+
+function chooseRouteLane(text: string): string {
+  if (/capability\.explore/.test(text) && /继续|limit_reached|capability:explore|调查|探索|代码库理解|注册链路/.test(text)) {
+    return 'capability.explore';
+  }
+  if (/capability\.browser/.test(text) && /浏览器|网页|打开 https?:\/\//.test(text)) {
+    return 'capability.browser';
+  }
+  if (/capability\.daily_post/.test(text) && /宠物发帖|小红书日常|日常草稿|daily post/i.test(text)) {
+    return 'capability.daily_post';
+  }
+  return 'general';
+}
+
+function taskDecisionFromText(text: string) {
+  const action = chooseDecisionAction(text);
+  if (action === 'answer') {
+    return { action };
+  }
+  return {
+    action: 'next_task',
+    task: 'mock delegated task',
+    context_summary: 'mock route eval context',
+    search_keywords: chooseCapabilitySearchQuery(text),
+  };
+}
+
+function orchestrationDecisionFromText(text: string) {
+  const action = chooseDecisionAction(text);
+  return action === 'answer'
+    ? { action }
+    : {
+        action,
+        task: 'mock delegated task',
+        context_summary: 'mock route eval context',
+      };
 }
 
 function createHeuristicRouteModels(): AgentModels {
@@ -178,14 +238,14 @@ function createHeuristicRouteModels(): AgentModels {
     }),
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
-        const action = chooseDecisionAction(messagesText(messages));
-        return action === 'answer'
-          ? { action }
-          : {
-              action,
-              task: 'mock delegated task',
-              context_summary: 'mock route eval context',
-            };
+        const text = messagesText(messages);
+        if (/task decision 节点/.test(text)) {
+          return taskDecisionFromText(text);
+        }
+        if (/route decision 节点/.test(text)) {
+          return { lane: chooseRouteLane(text) };
+        }
+        return orchestrationDecisionFromText(text);
       },
     }),
   } as unknown as AgentModels['act'];

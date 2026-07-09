@@ -1,5 +1,4 @@
 import { StateGraph, START, END } from '@langchain/langgraph';
-import { ToolNode } from '@langchain/langgraph/prebuilt';
 import {
   OrchestratorState,
 } from '../state';
@@ -12,9 +11,10 @@ import type {
   OrchestratorConfig,
 } from '../types';
 import {
-  capabilitySearchTool,
-} from '../capabilitySearch';
-import { createOrchestrationDecisionRunner } from './decisions/orchestrationDecision';
+  createOrchestrationDecisionRunner,
+  createRouteDecisionRunner,
+  createTaskDecisionRunner,
+} from './decisions/orchestrationDecision';
 import {
   DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
 } from './constants';
@@ -26,18 +26,18 @@ import {
   createDelegationOutcomeIterationGuardNode,
 } from './guards/nodes';
 import { createAnswerNode } from './nodes/answer';
+import { createCapabilitySearchNode } from './nodes/capabilitySearch';
 import { createCapabilityNode } from './nodes/capability';
-import { createCapabilityDiscoveryNode } from './nodes/capabilityDiscovery';
 import { finalizeRun } from './nodes/finalize';
 import { createGeneralNode } from './nodes/general';
 import {
   createCompactContextNode,
   createPrepareNode,
 } from './nodes/prepare';
-import { afterCapabilityDiscovery } from './routes/afterCapabilityDiscovery';
 import { afterContextPrep } from './routes/afterContextPrep';
 import { afterDecision } from './routes/afterDecision';
 import { afterDelegationOutcomeIterationGuard } from './routes/afterDelegationOutcomeIterationGuard';
+import { afterTaskDecision } from './routes/afterTaskDecision';
 
 // --- Graph builder ---
 
@@ -50,13 +50,19 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const compactContext = createCompactContextNode({ config });
   const delegationOutcomeIterationGuardNode =
     createDelegationOutcomeIterationGuardNode({ orchestratorMaxIterations });
-  const capabilityDiscovery = createCapabilityDiscoveryNode({ config });
+  const capabilitySearch = createCapabilitySearchNode({ config });
   const runOrchestrationDecision = createOrchestrationDecisionRunner(config);
+  const runTaskDecision = createTaskDecisionRunner(config);
+  const runRouteDecision = createRouteDecisionRunner(config);
 
   // The two Decision nodes bind the shared decision runner to a decision kind and
   // conform to the OrchestratorDecision contract (state, ctx) -> patch.
-  const userIntentDecision: OrchestratorDecision = (state, ctx) => {
-    return runOrchestrationDecision('user_intent', state, ctx.runnableConfig);
+  const taskDecision: OrchestratorDecision = (state, ctx) => {
+    return runTaskDecision(state, ctx.runnableConfig);
+  };
+
+  const routeDecision: OrchestratorDecision = (state, ctx) => {
+    return runRouteDecision(state, ctx.runnableConfig);
   };
 
   const delegationOutcomeDecision: OrchestratorDecision = (state, ctx) => {
@@ -70,9 +76,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const graph = new StateGraph(OrchestratorState)
     .addNode('prepare', prepare)
     .addNode('compactContext', compactContext)
-    .addNode('capabilityDiscovery', capabilityDiscovery)
-    .addNode('capabilitySearch', new ToolNode([capabilitySearchTool]))
-    .addNode('userIntentDecision', asDecisionNode(userIntentDecision, buildControlContext))
+    .addNode('taskDecision', asDecisionNode(taskDecision, buildControlContext))
+    .addNode('capabilitySearch', capabilitySearch)
+    .addNode('routeDecision', asDecisionNode(routeDecision, buildControlContext))
     .addNode('delegationOutcomeIterationGuard', delegationOutcomeIterationGuardNode)
     .addNode('delegationOutcomeDecision', asDecisionNode(delegationOutcomeDecision, buildControlContext))
     .addNode('answer', answerNode)
@@ -85,18 +91,20 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     // transcript/context storage and are not the normal control-flow signal.
     .addConditionalEdges('compactContext', afterContextPrep, {
       delegationOutcomeIterationGuard: 'delegationOutcomeIterationGuard',
-      capabilityDiscovery: 'capabilityDiscovery',
+      taskDecision: 'taskDecision',
     })
-    .addConditionalEdges('capabilityDiscovery', afterCapabilityDiscovery, {
+    .addConditionalEdges('taskDecision', afterTaskDecision, {
+      end: END,
+      answer: 'answer',
       capabilitySearch: 'capabilitySearch',
-      userIntentDecision: 'userIntentDecision',
+      finalizeRun: 'finalizeRun',
     })
     .addConditionalEdges('delegationOutcomeIterationGuard', afterDelegationOutcomeIterationGuard, {
       end: END,
       delegationOutcomeDecision: 'delegationOutcomeDecision',
       finalizeRun: 'finalizeRun',
     })
-    .addConditionalEdges('userIntentDecision', afterDecision, {
+    .addConditionalEdges('routeDecision', afterDecision, {
       end: END,
       answer: 'answer',
       capability: 'capability',
@@ -112,7 +120,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     })
     .addEdge('answer', END)
     .addEdge('finalizeRun', END)
-    .addEdge('capabilitySearch', 'userIntentDecision')
+    .addEdge('capabilitySearch', 'routeDecision')
     .addEdge('capability', 'delegationOutcomeIterationGuard')
     .addEdge('general', 'delegationOutcomeIterationGuard');
 

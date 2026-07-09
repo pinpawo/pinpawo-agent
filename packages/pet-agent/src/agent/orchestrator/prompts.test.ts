@@ -4,16 +4,17 @@ import { HumanMessage } from '@langchain/core/messages';
 import {
   buildAnswerSystemPrompt,
   buildCapabilityArtifactContext,
-  buildCapabilityDiscoverySystemPrompt,
-  buildCapabilityDiscoveryRequestContext,
   buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
   buildPreparedRequestContext,
+  buildRouteDecisionInput,
+  buildRouteDecisionSystemPrompt,
+  buildRouteTargetsContext,
   buildSubagentAnnounceContext,
-  buildUserIntentDecisionInput,
-  buildUserIntentDecisionSystemPrompt,
+  buildTaskDecisionInput,
+  buildTaskDecisionSystemPrompt,
 } from './prompts';
 
 function recentMessages(count: number) {
@@ -43,22 +44,6 @@ test('start-loop router request context includes compaction summaries outside re
   assert.match(requestContext, /<recent_messages purpose="coreference">/);
   assert.match(requestContext, /recent-7/);
   assert.doesNotMatch(requestContext, /recent-0/);
-});
-
-test('capability discovery routes code review toward explore before browser', () => {
-  const prompt = buildCapabilityDiscoverySystemPrompt({
-    actor: testActor,
-    runDelegationContext: '用户原始请求：帮我 code review 这个 GitHub PR URL',
-    generalTools: [],
-  });
-
-  assert.match(prompt, /代码 review、代码审查、PR review/);
-  assert.match(prompt, /先搜索 explore\/探索 capability/);
-  assert.match(prompt, /不要因此优先搜索 browser capability/);
-  assert.ok(
-    prompt.indexOf('代码 review、代码审查、PR review')
-      < prompt.indexOf('如果用户要打开 URL/链接/网站/网页'),
-  );
 });
 
 test('request contexts include bounded capability artifact refs', () => {
@@ -108,51 +93,53 @@ test('request contexts include bounded capability artifact refs', () => {
   assert.match(requestContext, /继续刚才的探索/);
 });
 
-test('user intent decision input wraps context as xml-ish blocks', () => {
-  const input = buildUserIntentDecisionInput({
-    latestUserRequest: '继续推进',
-    recentMessages: recentMessages(1),
-    requestContext: buildPreparedRequestContext({
-      latestUserRequest: '继续推进',
-      recentMessages: recentMessages(1),
-      recentAnnounces: [],
-    }),
-  });
-
-  assert.match(input, /<user_intent_decision_input>/);
-  assert.match(input, /<user_intent_context>/);
-  assert.match(input, /<user_request>/);
-  assert.match(input, /<!\[CDATA\[\n继续推进\n\s+\]\]>/);
-  assert.match(input, /<instruction>请根据以上上下文判断当前用户请求的下一步。<\/instruction>/);
-});
-
-test('user intent prompt routes clarification through answer instead of ask_user', () => {
-  const prompt = buildUserIntentDecisionSystemPrompt({
+test('task decision prompt owns single-step task birth', () => {
+  const prompt = buildTaskDecisionSystemPrompt({
     actor: testActor,
     runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
-    targetsContext: '<decision_targets></decision_targets>',
-    capabilityDecisionState: 'unavailable',
-    outputInstruction: [
-      'action 取值：',
-      '- answer：无需 delegate，或需要直接向用户补充、澄清、确认。',
-      '- delegate_general：delegate 给通用工具执行器。',
-    ].join('\n'),
+  });
+  const input = buildTaskDecisionInput({
+    latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
+    recentMessages: recentMessages(1),
   });
 
-  assert.match(prompt, /选择 answer 交给回复节点处理/);
-  assert.doesNotMatch(prompt, /ask_user/);
+  assert.match(prompt, /task decision 节点/);
+  assert.match(prompt, /单步任务粒度/);
+  assert.match(prompt, /不要选择 general\/capability lane/);
+  assert.match(prompt, /PR review/);
+  assert.match(prompt, /不要只因为出现 URL 就只输出 browser\/url/);
+  assert.match(input, /<task_decision_input>/);
 });
 
-test('capability discovery request context also receives compaction summaries', () => {
-  const requestContext = buildCapabilityDiscoveryRequestContext({
-    latestUserRequest: '帮我继续',
-    recentMessages: recentMessages(1),
-    recentAnnounces: [],
-    contextSummaries: ['更早上下文：当前任务是修复 context compaction。'],
+test('route decision prompt owns capability lane selection', () => {
+  const targetsContext = buildRouteTargetsContext({
+    generalTools: [],
+    capabilityCandidates: [{
+      name: 'explore',
+      description: '代码库理解和调查。',
+      score: 8,
+      matchedTerms: ['代码库理解'],
+    }],
+    capabilitySearchAttempted: true,
+    capabilitySearchQuery: '代码库理解',
+  });
+  const prompt = buildRouteDecisionSystemPrompt({
+    actor: testActor,
+    targetsContext,
+  });
+  const input = buildRouteDecisionInput({
+    pendingTask: {
+      task: '在本地仓库检索相关实现。',
+      contextSummary: '用户需要判断 issue 是否已实现。',
+      searchKeywords: '代码库理解',
+    },
   });
 
-  assert.match(requestContext, /压缩任务上下文/);
-  assert.match(requestContext, /当前任务是修复 context compaction/);
+  assert.match(prompt, /route decision 节点/);
+  assert.match(prompt, /capability\.explore/);
+  assert.doesNotMatch(prompt, /delegate_capability\.explore/);
+  assert.match(input, /<route_decision_input>/);
+  assert.match(input, /在本地仓库检索相关实现/);
 });
 
 test('loop-internal router input stays focused on current run announce context', () => {

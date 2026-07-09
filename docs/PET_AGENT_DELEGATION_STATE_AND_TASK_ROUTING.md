@@ -21,7 +21,7 @@
 
 - **D1 — 生命周期前缀保留，不用注释替代。** 字段名会被序列化进 checkpoint 和 LangSmith trace，注释不会；`buildRunStateReset` 的 reset 纪律按名字执行。前缀编码生命周期（谁重置你），注释编码角色（命令/游标/账本），分工不二选一。新增一条单测断言所有 channel 名匹配 `/^(session|task|run)/` 或等于 `messages`。
 - **D2 — 重命名遵守前缀规范**（#308 issue 正文里建议的 `nextDelegation`/`routePendingDelegation` 不合规，以本表为准），见 §3。
-- **D3（修订 2026-07-09）— 不引入 source-of-truth 的 taskPlan；引入轻量 plan 草案（自我引导备忘）。** plan 的权威载体仍是「用户原始请求 + 已完成任务的结论（handoff copy + `runDelegationSummaries`）」，每轮规划重推；游标是 `taskActiveDelegation`（#115 "conclusions cross boundaries" 的延伸）。在此之上，taskDecision 顺带产出 `runTaskPlanDraft: string[]`（剩余步骤短句清单）作为下一轮规划的**锚点**，替代原设计中"等 eval 证明 drift 再加 `remaining_work`"的预留——升格理由不是防 drift，而是 D5/D11 的职责垂直化需要它。三条纪律防止草案滑回被否决的显式 taskPlan：①**只进 prompt，永不驱动控制流**——route/guard 不得依据草案分支，"还要不要继续"永远由验收节点基于「用户目标 vs 已有结论」判断，草案剩余步骤与 `goal_done` 冲突时以验收为准；②**每轮整体覆写，没有 replan 机制**——taskDecision 每次输出全新草案（自然完成"划掉已完成 + 按新结论修订"），不存在增量修补和游标进位；③**丢了无害**——run 级字段，跨 run 重置后可从对话结论重推。第一版草案只喂 taskDecision 自己，不给验收节点（避免"结果 vs 目标"被污染成"结果 vs 草案"）；eval 观察到验收系统性漏判"还有后续"再议。定位边界：pet-agent 的草案是给自己看的便签（简单任务，1~5 步），需要结构化多角色计划的场景走 Studio planner（`studio_plan` 的 plan 是给系统执行的合同），两层不打架。
+- **D3（修订 2026-07-09）— 不引入 source-of-truth 的 taskPlan；引入轻量 plan 草案（自我引导备忘）。** plan 的权威载体仍是「用户原始请求 + 已完成任务的结论（handoff copy + `runDelegationSummaries`）」，每轮规划重推；游标是 `taskActiveDelegation`（#115 "conclusions cross boundaries" 的延伸）。在此之上，taskDecision 顺带产出 `runTaskPlanDraft: string[]`（**纯剩余步骤**短句清单）作为下一轮规划的**锚点**，替代原设计中"等 eval 证明 drift 再加 `remaining_work`"的预留——升格理由不是防 drift，而是 D5/D11 的职责垂直化需要它。**草案边界**：只含还没开始的步骤，不含已完成的（事实层归 `runDelegationSummaries` 账本 + handoff 结论，append-only，LLM 永不改写）、也不含本轮刚派发的那一步（归 `runPendingTask`/`taskActiveDelegation`）；taskDecision 的 prompt 分「事实区（只读）/ 草案区（可修订）」两块渲染。三条纪律防止草案滑回被否决的显式 taskPlan：①**只进 prompt，永不驱动控制流**——route/guard 不得依据草案分支，"还要不要继续"永远由验收节点基于「用户目标 vs 已有结论」判断，草案剩余步骤与 `goal_done` 冲突时以验收为准；②**每轮整体覆写，没有 replan 机制**——覆写对象只是剩余清单（历史不在草案里，故无"重写历史"问题）；无条件覆写而非"有必要才重写"：条件化需要"是否变化"判断和"维持原样"协议，是新的出错面，而旧草案就在 prompt 里、抄一遍去掉已派发步是零成本；不存在增量修补和游标进位；③**丢了无害**——run 级字段，跨 run 重置后可从对话结论重推。第一版草案只喂 taskDecision 自己，不给验收节点（避免"结果 vs 目标"被污染成"结果 vs 草案"）；eval 观察到验收系统性漏判"还有后续"再议。定位边界：pet-agent 的草案是给自己看的便签（简单任务，1~5 步），需要结构化多角色计划的场景走 Studio planner（`studio_plan` 的 plan 是给系统执行的合同），两层不打架。
 - **D4 — 图重构为 task → search → route 三段管道。** task 先出生，capability search 用 task 文本（+ 决策顺带输出的 `search_keywords`）做 query，路由决策最后落 lane。`capabilityDiscovery` 节点删除——它唯一的职责（LLM 从原始请求提炼 query）被"task 即 query"取代。
 - **D5（修订 2026-07-09）— delegation outcome 决策验收化**：三态 `continue | task_done | goal_done` + 可选 `gap_note`，**不携带任何 task 文本字段**，也不携带 capability 枚举（枚举只在 routeDecision 小 schema）。它只回答一个问题——"这次 announce 的结果是否符合目标"：`continue` = 当前任务没达标，同 lane 继续（`gap_note` 说缺什么）；`task_done` = 这步达标但总目标未完；`goal_done` = 总目标满足。原三态里的 `next_task`（验收节点顺手写下一个 task）被否决：那让它同时干验收和规划两件事，prompt 会越写越长、稳定性下降。
 - **D6 — routeDecision 只在零候选时走确定性 fallback**（直接 `general`），有候选一律过 LLM。不做"单一高分候选跳过 LLM"：词法打分置信度不足以定阈值。
@@ -56,8 +56,9 @@ type RunPendingTask = {
   searchKeywords: string | null; // taskDecision 顺带输出，capabilitySearch 优先使用
 };
 
-// 剩余步骤短句清单；string[] 而非自由文本——渲染进 prompt 时可标注
-// 已完成/当前/剩余，也天然抑制长篇。null = 无草案（单步任务常态）。
+// 纯剩余步骤短句清单：不含已完成步骤（事实层归账本/handoff 结论），
+// 不含当前已派发的一步（归 runPendingTask/taskActiveDelegation）。
+// string[] 而非自由文本——天然抑制长篇。null = 无剩余（单步任务常态）。
 type RunTaskPlanDraft = string[] | null;
 ```
 
@@ -129,10 +130,10 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 
 「看 issue #269 → 分析需求点 → 搜本地代码/git log → 汇报结论」：
 
-1. taskDecision：`next_task`，task=「获取 issue #269 内容并提炼需求点」（单步约束生效），search_keywords=「github issue|网页抓取」，plan_draft=[「取 issue 并提炼需求点」,「在本地仓库检索实现与 git log 比对」,「汇总结论」]；
+1. taskDecision：`next_task`，task=「获取 issue #269 内容并提炼需求点」（单步约束生效），search_keywords=「github issue|网页抓取」，plan_draft=[「在本地仓库检索实现与 git log 比对」,「汇总结论」]（纯剩余，不含当前派发的这一步）；
 2. capabilitySearch 用 task 关键词匹配 → 假设命中 `web_reader` capability → routeDecision 选 `capability.web_reader`；
 3. 执行 → announce → outcomeDecision（验收）：`task_done`（需求点已提炼，总目标未完）→ handoff 任务 1 结论进 main，清游标，重搜；
-4. 回环 taskDecision：看到草案 + 任务 1 结论 → task=「在本地仓库检索相关实现与 git log，判断需求点是否已实现」，plan_draft 覆写为剩余两步；
+4. 回环 taskDecision：事实区显示任务 1 结论、草案区显示上轮剩余两步 → task=「在本地仓库检索相关实现与 git log，判断需求点是否已实现」，plan_draft 覆写为 [「汇总结论」]；
 5. capabilitySearch 零候选 → routeDecision 确定性 fallback `general`；
 6. 执行 → announce → outcomeDecision（验收）：`goal_done` → handoff → answerNode 汇总两个任务的结论回复。
 

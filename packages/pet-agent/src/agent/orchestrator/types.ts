@@ -9,7 +9,7 @@ import type { SubagentCompletionReason } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
-import type { OrchestrationDecision } from './schemas';
+import type { DelegationOutcomeDecision } from './schemas';
 
 export type MessageLane = 'general' | `capability:${string}`;
 export type PinpetMessageLane = MessageLane | 'orchestrator';
@@ -36,6 +36,8 @@ export type RunPendingTask = {
   contextSummary: string | null;
   searchKeywords: string | null;
 };
+
+export type RunTaskPlanDraft = string[] | null;
 
 export type TaskActiveDelegation = {
   id: string;
@@ -73,16 +75,6 @@ export type SubagentAnnounce = {
 
 export type DecisionMode = 'answer' | 'general' | 'capability';
 
-/**
- * How an `answer`-bucket decision should be turned into a user-facing reply.
- * - 'answer': route to the dedicated answer node, which reads the full
- *   conversation and synthesizes the reply.
- * - 'inline': a degenerate fallback or stop path already emitted a fixed reply;
- *   the run ends without the answer node.
- * - null: not an answer-bucket decision (delegation in progress).
- */
-export type RunFinalReplyRoute = 'answer' | 'inline' | null;
-
 export type ToolBindableChatModel = AgentModels['act'] & {
   bindTools?: (tools: StructuredTool[], options?: Record<string, unknown>) => {
     invoke: (messages: BaseMessage[], options?: RunnableConfig) => Promise<AIMessage>;
@@ -90,7 +82,7 @@ export type ToolBindableChatModel = AgentModels['act'] & {
 };
 
 export type StructuredOrchestrationDecisionModel = {
-  invoke: (messages: BaseMessage[], options?: RunnableConfig) => Promise<OrchestrationDecision>;
+  invoke: (messages: BaseMessage[], options?: RunnableConfig) => Promise<DelegationOutcomeDecision>;
 };
 
 export type OrchestratorConfig = {

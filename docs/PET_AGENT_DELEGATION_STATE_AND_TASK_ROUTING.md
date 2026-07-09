@@ -1,6 +1,6 @@
 # 方案：delegation state 分层澄清 + task-first 路由管道
 
-> 状态：pinned direction（方向已定；Stage 0/0.5/A 已落地，Stage B 待实施）。
+> 状态：pinned direction（方向已定；Stage 0/0.5/A/B 已落地，B 捎带重构待实施）。
 > 归属：issue #308（state 命名/生命周期）+ issue #274（任务分解与 capability 路由顺序）。
 > 生命周期前缀规范以 `docs/PET_AGENT_STATE_LIFECYCLE_REFACTOR.md` §1/§2 为准，本文扩展其命名契约表。
 > handoff 语义以 `docs/PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md` 为准，本文不改 handoff 模型。
@@ -145,7 +145,7 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 | 0 | **已落地**：#308 重命名（§3 表；`runPendingFinalReply` 不改名，仅 answer/inline 终点置 null，见 D10）+ 删除无效 legacy recovery（D7）+ channel 前缀单测 + transient 断言 + 更新 `PET_AGENT_STATE_LIFECYCLE_REFACTOR.md` §2 表 | 小（inline 终点 flush） | 已由现有测试验收 |
 | 0.5 | **已落地**：D9：删 `canHandoffActiveDelegation` 字段，guard 内联进 decision context，删 `delegationOutcomeDecisionGuard` / `prepareUserIntentDecision` 两节点 | 有（行为等价） | 现有测试 + guard 决策事件仍可观测 |
 | A | **已落地**：run 入口拆 taskDecision + capabilitySearch + routeDecision，删 capabilityDiscovery，新增 `runPendingTask`；单步约束 prompt 进 taskDecision | 有 | orchestrator/schema/prompt 测试覆盖 task-first route |
-| B | 待实施（2026-07-09 重定义）：outcomeDecision 验收化（D5：`continue \| task_done \| goal_done` + gap_note，无 task 字段）；任务边界回环 taskDecision（D11）；taskDecision 增加 `plan_draft` 输出 + 新增 `runTaskPlanDraft` channel（D3）；迭代预算评估；删除 `runPendingFinalReply`（D10：inline 路径改 Command goto，answer 路由按 `runPendingTask` 缺席派生） | 有 | eval:flow + 「多步请求最终全部完成」断言（观测漏步骤，决定草案是否需要喂给验收节点） |
+| B | **已落地**：outcomeDecision 验收化（D5：`continue \| task_done \| goal_done` + gap_note，无 task 字段）；任务边界回环 taskDecision（D11）；taskDecision 增加 `plan_draft` 输出 + 新增 `runTaskPlanDraft` channel（D3）；删除 `runPendingFinalReply`（D10：inline 路径改 Command goto，answer 路由由节点 Command 指向 answer） | 有 | pet-agent 全量测试 + 「task_done 回环 taskDecision 并独立 reroute 下一 task」断言 |
 | B 捎带 | 待实施：`buildDecisionResult` 里 handoff/生命周期块下沉 `delegationLifecycle.ts` | 无 | 现有测试 |
 
 ## 8. 验收标准

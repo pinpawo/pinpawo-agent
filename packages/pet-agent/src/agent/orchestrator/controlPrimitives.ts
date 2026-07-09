@@ -1,4 +1,5 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { Command } from '@langchain/langgraph';
 import type { OrchestratorStateType } from './state';
 
 /**
@@ -12,6 +13,7 @@ import type { OrchestratorStateType } from './state';
 
 /** A patch returned by a guard/decision; merged into orchestrator state by the graph. */
 export type OrchestratorStatePatch = Partial<OrchestratorStateType>;
+export type OrchestratorNodeResult = OrchestratorStatePatch | Command;
 
 /**
  * The orchestrator graph's hard `recursionLimit` — a last-resort breaker for a
@@ -39,13 +41,13 @@ export type OrchestratorControlContext = {
 export type OrchestratorDecision = (
   state: OrchestratorStateType,
   ctx: OrchestratorControlContext,
-) => Promise<OrchestratorStatePatch>;
+) => Promise<OrchestratorNodeResult>;
 
 /** The node signature LangGraph invokes. */
 export type OrchestratorNode = (
   state: OrchestratorStateType,
   runnableConfig?: RunnableConfig,
-) => OrchestratorStatePatch | Promise<OrchestratorStatePatch>;
+) => OrchestratorNodeResult | Promise<OrchestratorNodeResult>;
 
 export function createControlContextBuilder(orchestratorMaxIterations: number) {
   return function buildControlContext(runnableConfig?: RunnableConfig): OrchestratorControlContext {
@@ -58,4 +60,11 @@ export function asDecisionNode(
   buildContext: (runnableConfig?: RunnableConfig) => OrchestratorControlContext,
 ): OrchestratorNode {
   return (state, runnableConfig) => decision(state, buildContext(runnableConfig));
+}
+
+export function commandTo(goto: string, update?: OrchestratorStatePatch): Command {
+  return new Command({
+    goto,
+    ...(update ? { update: update as Record<string, unknown> } : {}),
+  });
 }

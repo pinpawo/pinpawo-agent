@@ -139,6 +139,28 @@ function routeGeneralDecision() {
   return { lane: 'general' };
 }
 
+function goalDoneDecision() {
+  return { outcome: 'goal_done', gap_note: null };
+}
+
+function taskDoneDecision(gapNote: string | null = '当前任务已完成，但用户目标仍有后续步骤。') {
+  return { outcome: 'task_done', gap_note: gapNote };
+}
+
+function continueDecision(gapNote: string | null = '当前 delegated task 还未达标，继续执行。') {
+  return { outcome: 'continue', gap_note: gapNote };
+}
+
+function commandGoto(result: unknown): string | undefined {
+  const goto = (result as { goto?: string | string[] }).goto;
+  return Array.isArray(goto) ? goto[0] : goto;
+}
+
+function commandUpdate(result: unknown): Partial<OrchestratorStateType> {
+  return ((result as { update?: Partial<OrchestratorStateType> }).update
+    ?? result) as Partial<OrchestratorStateType>;
+}
+
 test('capability search ranks matching capability and keeps original query terms', () => {
   const results = searchCapabilities('宠物发帖|小红书日常', [
     capability('daily_post', '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿。'),
@@ -269,7 +291,7 @@ test('task-first route decision exposes capability candidates from the pending t
           );
         }
         if (decisionCallCount > 2) {
-          return { action: 'answer' };
+          return goalDoneDecision();
         }
         schemaAllowsExplore = Boolean(
           (schema as { safeParse?: (value: unknown) => { success: boolean } }).safeParse?.({
@@ -322,6 +344,87 @@ test('task-first route decision exposes capability candidates from the pending t
   assert.equal(decisionCallCount, 3);
 });
 
+test('task_done outcome loops back through taskDecision and reroutes the next task', async () => {
+  let structuredCallCount = 0;
+  const taskDecisionInputs: string[] = [];
+  const routeInputs: string[] = [];
+  const routeModel = {
+    invoke: async () => new AIMessage('final summary'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        structuredCallCount += 1;
+        const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
+        if (structuredCallCount === 1) {
+          taskDecisionInputs.push(inputText);
+          return {
+            ...nextTaskDecision('读取 issue #269 并提炼需求点。', null, 'issue|需求分析'),
+            plan_draft: ['读取 issue 并提炼需求点', '检索本地实现与 git log', '汇总结论'],
+          };
+        }
+        if (structuredCallCount === 2) {
+          routeInputs.push(inputText);
+          return routeCapabilityDecision('explore');
+        }
+        if (structuredCallCount === 3) {
+          return taskDoneDecision('已提炼 issue 需求点，还需要检索本地实现。');
+        }
+        if (structuredCallCount === 4) {
+          taskDecisionInputs.push(inputText);
+          return {
+            ...nextTaskDecision('检索本地实现与 git log，判断需求点是否已覆盖。', null, 'repository|git log'),
+            plan_draft: ['检索本地实现与 git log', '汇总结论'],
+          };
+        }
+        if (structuredCallCount === 5) {
+          routeInputs.push(inputText);
+          return routeCapabilityDecision('explore');
+        }
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: routeModel,
+      observe: routeModel,
+      subagent: new FakeListChatModel({
+        responses: [
+          'issue #269 需求点：需要检查本地实现。',
+          '本地实现与 git log 已检查，可以汇总结论。',
+        ],
+        sleep: 0,
+      }),
+    },
+    actor: testActor,
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('看 issue #269，再查本地实现，最后总结。'),
+  ]), {
+    configurable: {
+      thread_id: 'stage-b-task-done-loop',
+      actor: testActor,
+      capabilities: [capability('explore', '通用探索、调查、代码库理解 capability。')],
+      forcedCapabilityNames: ['explore'],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(taskDecisionInputs.length, 2);
+  assert.equal(routeInputs.length, 2);
+  assert.doesNotMatch(taskDecisionInputs[0], /<task_plan_draft/);
+  assert.match(taskDecisionInputs[1], /<task_plan_draft/);
+  assert.match(taskDecisionInputs[1], /检索本地实现与 git log/);
+  assert.match(routeInputs[0], /读取 issue #269/);
+  assert.match(routeInputs[1], /检索本地实现与 git log/);
+  assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
+  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runNextDelegation, null);
+  assert.equal(state.taskActiveDelegation, null);
+});
+
 test('decision structured output autoRepair reruns the same route LLM call after invalid shape', async () => {
   const invokedMessages: unknown[] = [];
   let invokeCount = 0;
@@ -371,10 +474,9 @@ test('decision structured output autoRepair reruns the same route LLM call after
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'answered');
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.runPendingTask, null);
-  assert.equal(state.runPendingFinalReply, null);
 });
 
-test('inline fallback replies clear the pending final reply route before END', async () => {
+test('inline fallback replies end without a pending final reply route field', async () => {
   const model = {
     invoke: async () => new AIMessage('should not call answer'),
     bindTools: () => ({
@@ -408,7 +510,7 @@ test('inline fallback replies clear the pending final reply route before END', a
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有可用的通用工具执行器/);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.runPendingTask, null);
-  assert.equal(state.runPendingFinalReply, null);
+  assert.equal('runPendingFinalReply' in state, false);
   assert.deepEqual(state.runCapabilitySearchState, buildEmptyRunCapabilitySearchState());
 });
 
@@ -419,7 +521,7 @@ test('route decision missing pending task clears stale transient state', async (
     actor: testActor,
   });
   const input = buildOrchestratorRunInput([new HumanMessage('继续')]);
-  const patch = await runRouteDecision({
+  const result = await runRouteDecision({
     ...input,
     runNextDelegation: {
       id: 'stale',
@@ -445,10 +547,11 @@ test('route decision missing pending task clears stale transient state', async (
       toolkits: [],
     },
   });
+  const patch = commandUpdate(result);
 
+  assert.equal(commandGoto(result), '__end__');
   assert.equal(patch.runNextDelegation, null);
   assert.equal(patch.runPendingTask, null);
-  assert.equal(patch.runPendingFinalReply, 'inline');
   assert.deepEqual(patch.runCapabilitySearchState, buildEmptyRunCapabilitySearchState());
 });
 
@@ -524,7 +627,7 @@ test('forcedCapabilityNames pre-seeds route candidates without keyword search', 
           routeSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
           return routeCapabilityDecision('studio_plan');
         }
-        return { action: 'answer' };
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -609,7 +712,7 @@ test('a completed subagent announce reaches the decision, while answer node only
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
         decisionInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
-        return { action: 'answer' };
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -734,7 +837,7 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
       invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'answer' }),
+      invoke: async () => goalDoneDecision(),
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -852,13 +955,9 @@ test('limit-reached progress announce lets model choose the same capability dele
           assert.equal(inputMessage?._getType?.(), 'human');
           decisionSystemPrompt = String(systemMessage.content ?? '');
           decisionInput = String(inputMessage.content ?? '');
-          return {
-            action: 'delegate_capability.inspect_repo',
-            task: '继续调查仓库 capability 注册链路。',
-            context_summary: '上一轮因迭代上限停止，任务仍未完成。',
-          };
+          return continueDecision('上一轮因迭代上限停止，任务仍未完成。');
         }
-        return { action: 'answer' };
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -921,11 +1020,12 @@ test('limit-reached progress announce lets model choose the same capability dele
 
   assert.equal(capabilityRunCount, 1);
   assert.equal(decisionCallCount, 1);
-  // The active task context carries the continuation action, and the output
-  // instruction mirrors the schema enum without expanding full target context.
-  assert.match(decisionSystemPrompt, /当前候选中的 delegate_capability\.inspect_repo/);
+  // The active task context carries the lane, while the verdict schema stays
+  // static and does not expand full target context.
+  assert.match(decisionSystemPrompt, /continue/);
   assert.doesNotMatch(decisionSystemPrompt, /业务 capability 候选/);
-  assert.match(decisionInput, /<continuation_action>delegate_capability\.inspect_repo<\/continuation_action>/);
+  assert.match(decisionInput, /<lane>capability:inspect_repo<\/lane>/);
+  assert.doesNotMatch(decisionInput, /continuation_action/);
 });
 
 test('toolkits compose tools and instructions for capability runtimes', async () => {
@@ -1012,7 +1112,7 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
         if (routeCallCount === 2) {
           return routeCapabilityDecision('inspect_repo');
         }
-        return { action: 'answer' };
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -1083,7 +1183,7 @@ test('toolkit exposure can hide tools from the general lane', async () => {
         return routeCallCount === 1
           ? nextTaskDecision('inspect with tools')
           : {
-              action: 'answer',
+              ...goalDoneDecision(),
             };
       },
     }),
@@ -1204,7 +1304,7 @@ test('capability artifact refs recorded by subagent tools are merged into state'
         if (routeCallCount === 2) {
           return routeCapabilityDecision('explore');
         }
-        return { action: 'answer' };
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -1288,7 +1388,7 @@ test('capability result artifacts are represented only as refs in state', async 
         if (routeCallCount === 2) {
           return routeCapabilityDecision('daily_post');
         }
-        return { action: 'answer' };
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -2088,9 +2188,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
         routeCallCount += 1;
         return routeCallCount === 1
           ? nextTaskDecision('run shell')
-          : {
-              action: 'answer',
-            };
+          : goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -2234,9 +2332,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
         routeCallCount += 1;
         return routeCallCount === 1
           ? nextTaskDecision('run shell')
-          : {
-              action: 'answer',
-            };
+          : goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -2369,15 +2465,10 @@ test('toolkit review policy stops after human reject without requesting another 
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return routeCallCount === 1
-          ? {
-              action: 'delegate_general',
-              task: 'run shell',
-              context_summary: null,
-            }
-          : {
-              action: 'answer',
-            };
+        if (routeCallCount === 1) {
+          return nextTaskDecision('run shell');
+        }
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -2500,9 +2591,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
         routeCallCount += 1;
         return routeCallCount === 1
           ? nextTaskDecision('run shell twice')
-          : {
-              action: 'answer',
-            };
+          : goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -2893,7 +2982,7 @@ test('buildSubagentHandoff returns null when the delegation has no announce text
   assert.equal(update, null);
 });
 
-test('different-lane outcome decision keeps active delegation when handoff cannot be built', async () => {
+test('terminal outcome decision keeps active delegation when handoff cannot be built', async () => {
   let toolRunCount = 0;
   const rawTool = tool(async () => {
     toolRunCount += 1;
@@ -2909,11 +2998,7 @@ test('different-lane outcome decision keeps active delegation when handoff canno
       invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
-      invoke: async () => ({
-        action: 'delegate_general',
-        task: '改用 general 继续调查。',
-        context_summary: '尝试切换执行器。',
-      }),
+      invoke: async () => taskDoneDecision('当前任务似乎完成，但没有可交接 announce。'),
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -2971,7 +3056,7 @@ test('different-lane outcome decision keeps active delegation when handoff canno
   assert.equal(state.taskActiveDelegation?.id, 'active-1');
   assert.equal(state.taskActiveDelegation?.lane, 'capability:explore');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.id), ['active-1']);
-  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /暂不能切换到新的执行器/);
+  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /暂不能完成任务边界切换/);
 });
 
 test('delegation outcome continue decision can re-enter main and finalize handoff', async () => {
@@ -2986,14 +3071,8 @@ test('delegation outcome continue decision can re-enter main and finalize handof
       invoke: async () => {
         routeCallCount += 1;
         return routeCallCount === 1
-          ? {
-              action: 'delegate_general',
-              task: '继续处理剩余工作。',
-              context_summary: '保留当前发现并往下推进。',
-            }
-          : {
-              action: 'answer',
-            };
+          ? continueDecision('保留当前发现并往下推进。')
+          : goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3059,7 +3138,7 @@ test('delegation outcome continue decision can re-enter main and finalize handof
   assert.ok(handoffSource);
   assert.equal(handoffSource.handoffFrom, 'general');
   assert.equal(handoffSource.runId, input.runId);
-  assert.equal(handoffSource.task, '继续处理剩余工作。');
+  assert.equal(handoffSource.task, '批量梳理仓库问题');
   // Final handoff on answer should clear lane transcript for finished continuation.
   assert.equal(laneMessages(state.messages, 'general', input.runId, activeDelegation.id)
     .filter((message) => getMessageIsAnnounce(message)).length === 0, true);
@@ -3075,11 +3154,9 @@ test('delegation outcome continuation path rechecks run iteration guard before n
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        return {
-          action: routeCallCount === 1 ? 'delegate_general' : 'answer',
-          task: '继续执行下一段。',
-          context_summary: '已经执行了一段进度。',
-        };
+        return routeCallCount === 1
+          ? continueDecision('已经执行了一段进度，继续执行下一段。')
+          : goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3145,7 +3222,7 @@ test('delegation outcome continuation path rechecks run iteration guard before n
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(state.runIterationCount, 0);
   assert.equal(state.runPendingTask, null);
-  assert.equal(state.runPendingFinalReply, null);
+  assert.equal('runPendingFinalReply' in state, false);
   const finalText = String(state.messages.at(-1)?.content ?? '');
   assert.match(finalText, /主流程循环已达到上限/);
 });
@@ -3161,13 +3238,9 @@ test('delegation_outcome does not append duplicate handoff copies for unchanged 
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1 || routeCallCount === 2) {
-          return {
-            action: 'delegate_general',
-            task: '继续执行后续步骤。',
-            context_summary: '任务仍未完成。',
-          };
+          return continueDecision('任务仍未完成，继续执行后续步骤。');
         }
-        return { action: 'answer' };
+        return goalDoneDecision();
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3297,7 +3370,7 @@ test('delegation outcome does not handoff a limit_reached announce', async () =>
       invoke: async () => new AIMessage(''),
     }),
     withStructuredOutput: () => ({
-      invoke: async () => ({ action: 'answer' }),
+      invoke: async () => goalDoneDecision(),
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -3435,7 +3508,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
   assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
   assert.equal(state.runIterationCount, 0);
   assert.equal(state.runPendingTask, null);
-  assert.equal(state.runPendingFinalReply, null);
+  assert.equal('runPendingFinalReply' in state, false);
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
 });
 

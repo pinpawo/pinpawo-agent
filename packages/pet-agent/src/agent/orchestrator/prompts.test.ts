@@ -14,6 +14,7 @@ import {
   buildRouteTargetsContext,
   buildSubagentAnnounceContext,
   buildTaskDecisionInput,
+  buildTaskPlanDraftContext,
   buildTaskDecisionSystemPrompt,
 } from './prompts';
 
@@ -101,6 +102,10 @@ test('task decision prompt owns single-step task birth', () => {
   const input = buildTaskDecisionInput({
     latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
     recentMessages: recentMessages(1),
+    taskPlanDraftContext: buildTaskPlanDraftContext([
+      '读取 issue 并提炼需求点',
+      '检索本地实现与 git log',
+    ]),
   });
 
   assert.match(prompt, /task decision 节点/);
@@ -108,7 +113,11 @@ test('task decision prompt owns single-step task birth', () => {
   assert.match(prompt, /不要选择 general\/capability lane/);
   assert.match(prompt, /PR review/);
   assert.match(prompt, /不要只因为出现 URL 就只输出 browser\/url/);
+  assert.match(prompt, /plan_draft/);
+  assert.match(prompt, /整体重写/);
   assert.match(input, /<task_decision_input>/);
+  assert.match(input, /<task_plan_draft/);
+  assert.match(input, /检索本地实现与 git log/);
 });
 
 test('route decision prompt owns capability lane selection', () => {
@@ -164,7 +173,8 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
   assert.doesNotMatch(prompt, /Delegate targets/);
   assert.doesNotMatch(prompt, /run_shell/);
   assert.doesNotMatch(prompt, /ask_user/);
-  assert.match(prompt, /不接收、不需要、也不应该依赖具体工具列表/);
+  assert.doesNotMatch(prompt, /delegate_capability/);
+  assert.match(prompt, /不接收 plan 草案/);
   assert.match(prompt, /唯一职责/);
 });
 
@@ -205,7 +215,7 @@ test('delegation outcome input carries current task context separately', () => {
 
   assert.match(currentTaskContext ?? '', /<current_delegation>/);
   assert.match(currentTaskContext ?? '', /<task>\n\s+<!\[CDATA\[\n修复 lint\n\s+\]\]>\n\s+<\/task>/);
-  assert.match(currentTaskContext ?? '', /<continuation_action>delegate_general<\/continuation_action>/);
+  assert.doesNotMatch(currentTaskContext ?? '', /continuation_action/);
   assert.match(otherTasksContext, /<delegation_id>task-0<\/delegation_id>/);
   assert.doesNotMatch(otherTasksContext, /<!\[CDATA\[\n修复 lint\n\s+\]\]>/);
 });

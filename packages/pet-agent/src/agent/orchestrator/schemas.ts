@@ -1,4 +1,6 @@
+import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { z } from 'zod';
+import type { StructuredOutputMethod } from '../../utils/structuredOutput';
 import type {
   OrchestrationDecisionStructuredOutputConfig,
   OrchestrationDecisionStructuredOutputOptions,
@@ -128,19 +130,38 @@ export function buildOrchestrationDecisionStructuredOutputOptions(
   };
 }
 
-export function buildDelegationOutcomeDecisionOutputInstruction(): string {
+function buildDecisionOutputInstruction(
+  label: string,
+  schema: z.ZodTypeAny,
+  method?: StructuredOutputMethod,
+): string {
+  const baseInstruction = `输出符合 structured-output schema 的 ${label}；不要输出 schema 未声明的字段。`;
+  if (method !== 'jsonMode') return baseInstruction;
+
   return [
-    '输出一个结构化 delegation outcome decision。',
-    '必须返回一个 JSON object，字段名必须严格使用：outcome、gap_note。',
-    'outcome 取值：',
-    '- continue：当前 delegated task 还没有达标；同一 capability 继续当前 task。',
-    '- task_done：当前 delegated task 已达标，但用户当前 run 目标还有下一步。',
-    '- goal_done：不再自主执行，交给 answer 节点；通常因为用户当前 run 目标已经满足，或需要用户澄清/确认。',
-    '字段语义：',
-    '- outcome 必填，且必须是上面的枚举值之一。',
-    '- gap_note 只写缺口/未完成依据的短说明；没有缺口时为 null 或省略。',
-    '- 不要输出 task、context_summary、search_keywords、lane、capability 或任何 delegate_* 字段。',
+    baseInstruction,
+    '当前 provider 使用 jsonMode：只输出一个 JSON object，不要输出 Markdown 代码围栏或额外文本。',
+    `JSON Schema：${JSON.stringify(toJsonSchema(schema))}`,
   ].join('\n');
+}
+
+export function buildTaskDecisionOutputInstruction(method?: StructuredOutputMethod): string {
+  return buildDecisionOutputInstruction('task decision', buildTaskDecisionSchema(), method);
+}
+
+export function buildRouteDecisionOutputInstruction(
+  params: OrchestrationDecisionSchemaParams,
+  method?: StructuredOutputMethod,
+): string {
+  return buildDecisionOutputInstruction('route decision', buildRouteDecisionSchema(params), method);
+}
+
+export function buildDelegationOutcomeDecisionOutputInstruction(method?: StructuredOutputMethod): string {
+  return buildDecisionOutputInstruction(
+    'delegation outcome decision',
+    buildDelegationOutcomeDecisionSchema(),
+    method,
+  );
 }
 
 export function readDecisionText(value: string | null | undefined): string | null {

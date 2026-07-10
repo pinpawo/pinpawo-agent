@@ -72,7 +72,7 @@ effective decision prompt
 - `workdir`、runtime environment、capability availability 等每次调用可能变化的内容属于注入事实。
 - 与 decision 无关的配置不进入提示词。
 
-当前三个 decision 没有会改变 graph 语义的 provider/config 条件协议；如果未来某个 provider 只能使用 `jsonMode`，条件内容只补充最小 JSON 形状，不把 run state 分支搬进 prompt。
+当前 provider/config 可以选择 `functionCalling`、`jsonSchema` 或 `jsonMode`。只有 `jsonMode` 会把由同一 Zod schema 转换出的 JSON Schema 作为条件协议加入 system；其他方法依赖 provider 的结构化协议，不重复字段字典。任何方法都不把 run state 分支搬进 prompt。
 
 ## 3. Shared orchestrator contract
 
@@ -228,9 +228,8 @@ outcomeDecision input 只承载：
 - 当前 delegated task。
 - 当前 announce 原文与 completion reason。
 - 同一 run 的其他 task 结论。
-- 必要的系统事实，例如 handoff 是否可用。
 
-handoff 是否可用不改变 outcome schema，也不由模型决定 graph 路由。
+handoff 是否可用不改变语义验收结果，也不由模型决定 graph 路由，因此由代码处理，不作为 outcomeDecision input policy。
 
 ## 7. Structured Output 与示例
 
@@ -255,7 +254,9 @@ Zod schema description 是有效提示词的一部分。每个字段的语义只
 | input 中重复 system policy 的 `<instruction>` | 本 PR 已删除；input 只保留当前调用事实 |
 | taskDecision 的 plan_draft 规则 | 本 PR 已收敛为一套稳定语义，不按 state mode 拼接多套 prompt |
 | `goal_done` 的 system/schema/output wording | 本 PR 已统一为 terminal verdict 语义 |
+| provider-specific output protocol | `jsonMode` 条件注入由 Zod schema 生成的 JSON Schema；其他方法只保留最小输出要求 |
 | 固定业务 JSON 示例和领域关键词 | 本 PR 已移除，保留通用 task 粒度与 search_keywords 规则 |
+| outcomeDecision 的用户目标上下文 | 本 PR 已注入用户请求、近期主对话和 compaction summaries，不注入 plan_draft |
 | task_done 的回环、plan_draft 保存和结果归一化 | 已由 Stage B 实现；本 PR 不改 graph/state 行为 |
 | inline/finalizeRun、`runPendingFinalReply` 等终态旁路 | 后续独立 graph/state 工作；不属于本 PR |
 
@@ -265,7 +266,7 @@ Zod schema description 是有效提示词的一部分。每个字段的语义只
 
 - 三个 decision 的 shared prefix 完全一致。
 - 每个 decision 只有一段 node-local 的阶段/边界说明，不重复注入动态 state。
-- 动态用户内容、task summaries、capability candidates、announce、workdir/runtime 不进入 system。
+- 动态用户内容、task summaries、capability candidates、announce、workdir/runtime 不进入 static system；`jsonMode` 的条件输出协议可以包含 schema 当前允许的枚举值。
 - input XML 不包含新的 policy instruction。
 - routeDecision 私有段不展开 plan_draft、handoff 或 outcome 枚举。
 - outcomeDecision 不接收 plan_draft，也不输出下一步 task。

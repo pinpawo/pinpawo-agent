@@ -19,7 +19,9 @@ import type {
 import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
+  buildRouteDecisionOutputInstruction,
   buildRouteDecisionSchema,
+  buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
   parseRouteLane,
@@ -159,6 +161,9 @@ function buildTaskDecisionContext(params: {
   });
   const systemPrompt = buildTaskDecisionSystemPrompt({
     actor,
+    outputInstruction: buildTaskDecisionOutputInstruction(
+      config.decisionStructuredOutput?.method,
+    ),
   });
   const decisionInputMessage = new HumanMessage(buildTaskDecisionInput({
     latestUserRequest: latestHumanRequest,
@@ -219,6 +224,10 @@ async function buildRouteDecisionContext(params: {
   });
   const systemPrompt = buildRouteDecisionSystemPrompt({
     actor,
+    outputInstruction: buildRouteDecisionOutputInstruction(
+      { capabilityCandidates: decisionCapabilityCandidates },
+      config.decisionStructuredOutput?.method,
+    ),
   });
   const decisionInputMessage = new HumanMessage(buildRouteDecisionInput({
     pendingTask: state.runPendingTask,
@@ -248,12 +257,14 @@ function buildDecisionContext(params: {
   runnableConfig?: RunnableConfig;
 }) {
   const { config, state, runnableConfig } = params;
-  const {
-    workdir,
-    runtimeEnvironment,
-  } = getInvokeOptions(runnableConfig);
   const actor = resolveActor(config, runnableConfig);
   const latestHumanRequest = readLatestHumanRequest(state.messages);
+  const userIntentContext = buildPreparedRequestContext({
+    latestUserRequest: latestHumanRequest,
+    recentMessages: mainMessagesWithoutCompaction(state.messages),
+    recentAnnounces: [],
+    contextSummaries: readContextCompactionSummaries(state.messages),
+  });
   const activeDelegation = state.taskActiveDelegation;
   const activeDelegationCapabilityId = activeDelegation
     && activeDelegation.lane.startsWith('capability:')
@@ -327,10 +338,13 @@ function buildDecisionContext(params: {
     : null;
   const systemPrompt = buildDelegationOutcomeDecisionSystemPrompt({
     actor,
-    outputInstruction: buildDelegationOutcomeDecisionOutputInstruction(),
+    outputInstruction: buildDelegationOutcomeDecisionOutputInstruction(
+      config.decisionStructuredOutput?.method,
+    ),
   });
   const decisionInputMessage = new HumanMessage(buildDelegationOutcomeDecisionInput({
     latestUserRequest: latestHumanRequest,
+    userIntentContext,
     currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
     subagentAnnounceContext: buildSubagentAnnounceContext(
       activeDelegationAnnounceForDecision,

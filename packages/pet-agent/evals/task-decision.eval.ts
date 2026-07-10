@@ -32,6 +32,7 @@ import {
 } from '../src/agent/orchestrator/prompts';
 import {
   buildOrchestrationDecisionStructuredOutputOptions,
+  buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
   type TaskDecision,
 } from '../src/agent/orchestrator/schemas';
@@ -453,6 +454,7 @@ async function runOne(params: {
   try {
     const systemPrompt = buildTaskDecisionSystemPrompt({
       actor: evalActor,
+      outputInstruction: buildTaskDecisionOutputInstruction(params.method),
     });
     const input = buildTaskDecisionInput({
       latestUserRequest: params.testCase.latestUserRequest,

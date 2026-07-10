@@ -18,6 +18,10 @@ import {
   buildTaskPlanDraftContext,
   buildTaskDecisionSystemPrompt,
 } from './prompts';
+import {
+  buildRouteDecisionOutputInstruction,
+  buildTaskDecisionOutputInstruction,
+} from './schemas';
 
 function recentMessages(count: number) {
   return Array.from({ length: count }, (_, index) => new HumanMessage(`recent-${index}`));
@@ -98,6 +102,7 @@ test('request contexts include bounded capability artifact refs', () => {
 test('task decision prompt owns single-step task birth', () => {
   const prompt = buildTaskDecisionSystemPrompt({
     actor: testActor,
+    outputInstruction: buildTaskDecisionOutputInstruction(),
   });
   const input = buildTaskDecisionInput({
     latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
@@ -136,6 +141,7 @@ test('task decision prompt owns single-step task birth', () => {
 test('task decision prompt keeps plan draft policy stable when no draft is injected', () => {
   const prompt = buildTaskDecisionSystemPrompt({
     actor: testActor,
+    outputInstruction: buildTaskDecisionOutputInstruction(),
   });
   const input = buildTaskDecisionInput({
     latestUserRequest: '继续推进。',
@@ -154,6 +160,7 @@ test('task decision prompt keeps plan draft policy stable when no draft is injec
 test('task decision prompt treats an injected plan draft as revisable input data', () => {
   const prompt = buildTaskDecisionSystemPrompt({
     actor: testActor,
+    outputInstruction: buildTaskDecisionOutputInstruction(),
   });
   const input = buildTaskDecisionInput({
     latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
@@ -176,7 +183,7 @@ test('task decision prompt treats an injected plan draft as revisable input data
   assert.doesNotMatch(prompt, /当前没有上一轮 plan_draft/);
   assert.match(input, /<task_decision_input>/);
   assert.match(input, /<task_plan_draft/);
-  assert.match(input, /本轮判断当前 task 的参考/);
+  assert.doesNotMatch(input, /不是控制流依据/);
   assert.doesNotMatch(input, /重新规划/);
   assert.doesNotMatch(input, /<instruction>/);
   assert.match(input, /检索本地实现与 git log/);
@@ -196,6 +203,9 @@ test('route decision prompt owns capability lane selection', () => {
   });
   const prompt = buildRouteDecisionSystemPrompt({
     actor: testActor,
+    outputInstruction: buildRouteDecisionOutputInstruction({
+      capabilityCandidates: [{ name: 'explore' }],
+    }),
   });
   const input = buildRouteDecisionInput({
     pendingTask: {
@@ -219,11 +229,14 @@ test('route decision prompt owns capability lane selection', () => {
   assert.match(input, /在本地仓库检索相关实现/);
   assert.match(input, /capability\.explore/);
   assert.match(input, /<runtime_context/);
+  assert.doesNotMatch(input, /只根据下面/);
+  assert.doesNotMatch(input, /如果匹配，优先/);
 });
 
 test('loop-internal router input stays focused on current run announce context', () => {
   const input = buildDelegationOutcomeDecisionInput({
     latestUserRequest: '继续推进',
+    userIntentContext: '<user_intent_context><recent_messages>先完成调查，再修复。</recent_messages></user_intent_context>',
     currentTaskContext: '<current_delegation>\n  <delegation_id>task-1</delegation_id>\n</current_delegation>',
     subagentAnnounceContext: '<subagent_announce>\n  <result>completed</result>\n</subagent_announce>',
     otherTasksContext: '<other_delegations>\n  <none>true</none>\n</other_delegations>',
@@ -231,6 +244,7 @@ test('loop-internal router input stays focused on current run announce context',
   });
 
   assert.doesNotMatch(input, /压缩任务上下文/);
+  assert.match(input, /先完成调查，再修复/);
   assert.match(input, /<subagent_announce>/);
 });
 

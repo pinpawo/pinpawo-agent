@@ -4,7 +4,9 @@ import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
   buildRouteCapabilityLane,
+  buildRouteDecisionOutputInstruction,
   buildRouteDecisionSchema,
+  buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
   parseRouteLane,
 } from './schemas';
@@ -100,11 +102,27 @@ test('buildRouteCapabilityLane composes the prefix correctly', () => {
   assert.equal(buildRouteCapabilityLane('browser'), 'capability.browser');
 });
 
-test('delegation outcome output instruction does not expose task or capability routing fields', () => {
-  const instruction = buildDelegationOutcomeDecisionOutputInstruction();
-  assert.match(instruction, /outcome/);
-  assert.match(instruction, /gap_note/);
-  assert.match(instruction, /不再自主执行，交给 answer/);
-  assert.doesNotMatch(instruction, /delegate_capability\.browser/);
-  assert.doesNotMatch(instruction, /context_summary 时/);
+test('decision output instructions add schema shape only for jsonMode', () => {
+  const defaultTaskInstruction = buildTaskDecisionOutputInstruction();
+  assert.match(defaultTaskInstruction, /structured-output schema/);
+  assert.doesNotMatch(defaultTaskInstruction, /JSON Schema/);
+  assert.doesNotMatch(defaultTaskInstruction, /plan_draft/);
+
+  const jsonModeTaskInstruction = buildTaskDecisionOutputInstruction('jsonMode');
+  assert.match(jsonModeTaskInstruction, /JSON Schema/);
+  assert.match(jsonModeTaskInstruction, /"action"/);
+  assert.match(jsonModeTaskInstruction, /"plan_draft"/);
+
+  const jsonModeRouteInstruction = buildRouteDecisionOutputInstruction({
+    capabilityCandidates: [{ name: 'browser' }],
+  }, 'jsonMode');
+  assert.match(jsonModeRouteInstruction, /"lane"/);
+  assert.match(jsonModeRouteInstruction, /capability\.browser/);
+
+  const defaultOutcomeInstruction = buildDelegationOutcomeDecisionOutputInstruction();
+  assert.doesNotMatch(defaultOutcomeInstruction, /JSON Schema/);
+  const jsonModeOutcomeInstruction = buildDelegationOutcomeDecisionOutputInstruction('jsonMode');
+  assert.match(jsonModeOutcomeInstruction, /"outcome"/);
+  assert.match(jsonModeOutcomeInstruction, /"gap_note"/);
+  assert.doesNotMatch(jsonModeOutcomeInstruction, /delegate_capability\.browser/);
 });

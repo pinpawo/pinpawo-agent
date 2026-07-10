@@ -552,6 +552,13 @@ test('task decision autoRepair retries next_task without a task', async () => {
     name: 'orchestration_decision',
     method: 'jsonMode',
   });
+  const jsonModeSystemPrompt = String(
+    ((invokedMessages[0] as Array<{ content?: unknown }>)[0]?.content ?? ''),
+  );
+  assert.match(jsonModeSystemPrompt, /当前 provider 使用 jsonMode/);
+  assert.match(jsonModeSystemPrompt, /JSON Schema/);
+  assert.match(jsonModeSystemPrompt, /"action"/);
+  assert.match(jsonModeSystemPrompt, /"plan_draft"/);
   // After the retry resolves to answer, the dedicated answer node produces the reply.
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'answered');
   assert.equal(state.runNextDelegation, null);
@@ -1060,7 +1067,11 @@ test('limit-reached progress announce lets model choose the same capability dele
     actor: testActor,
   });
   const input = {
-    ...buildOrchestratorRunInput([new HumanMessage('继续')]),
+    ...buildOrchestratorRunInput([
+      new HumanMessage('先调查仓库，再修复注册链路。'),
+      new AIMessage('先从仓库调查开始。'),
+      new HumanMessage('继续'),
+    ]),
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
   const progressAnnounce = new AIMessage('(no matches)');
@@ -1106,6 +1117,7 @@ test('limit-reached progress announce lets model choose the same capability dele
   assert.match(decisionSystemPrompt, /continue/);
   assert.doesNotMatch(decisionSystemPrompt, /业务 capability 候选/);
   assert.match(decisionInput, /<lane>capability:inspect_repo<\/lane>/);
+  assert.match(decisionInput, /先调查仓库，再修复注册链路/);
   assert.doesNotMatch(decisionInput, /continuation_action/);
 });
 

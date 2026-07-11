@@ -1,6 +1,7 @@
 # pet-agent decision prompt 设计
 
-> 状态：prompt contract；本 PR 已落地到 taskDecision / routeDecision / outcomeDecision 的生产组装。
+> 状态：Stage B 历史 prompt contract。当前生产设计已由 issue #349 Phase 2 的
+> `entryDecision / capabilityPlanner / capabilityDecision / outcomeDecision` 契约取代；本文保留用于解释演进背景。
 > 范围：taskDecision / routeDecision / outcomeDecision 的有效提示词，包括 system prompt、条件策略、动态 input 与 structured-output schema。
 > 目标：shared prefix 完整描述 orchestrator/task loop 的共同世界观；各 decision 只处理本节点的一种判断。
 > 职责摸排：见 [`PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md`](./PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md)。

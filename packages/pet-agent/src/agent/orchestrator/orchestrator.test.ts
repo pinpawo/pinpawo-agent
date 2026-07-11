@@ -47,11 +47,10 @@ import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
 import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
 import type { RunDelegationSummary, TaskActiveDelegation } from './types';
 import {
-  buildEmptyRunCapabilitySearchState,
   ORCHESTRATOR_STATE_CHANNEL_NAMES,
   type OrchestratorStateType,
 } from './state';
-import { createRouteDecisionRunner } from './runtime/decisions/orchestrationDecision';
+import { createCapabilityDecisionRunner } from './runtime/decisions/orchestrationDecision';
 
 function capability(name: string, description: string): AgentCapability {
   return {
@@ -122,13 +121,12 @@ const testActor: AgentActor = {
 function nextTaskDecision(
   task: string,
   contextSummary: string | null = null,
-  searchKeywords: string | null = null,
+  _searchKeywords: string | null = null,
 ) {
   return {
-    action: 'next_task',
+    action: 'direct_task',
     task,
     context_summary: contextSummary,
-    search_keywords: searchKeywords,
   };
 }
 
@@ -259,7 +257,7 @@ test('task decision receives recent task status context', async () => {
   assert.match(taskDecisionInput, /打包因超时停止/);
 });
 
-test('task-first route decision exposes capability candidates from the pending task search', async () => {
+test('capability decision searches candidates from the pending task', async () => {
   let routeSystemPrompt = '';
   let routeInput = '';
   let decisionCallCount = 0;
@@ -329,17 +327,18 @@ test('task-first route decision exposes capability candidates from the pending t
   assert.equal(schemaAllowsExplore, true);
   assert.doesNotMatch(routeSystemPrompt, /capability\.explore/);
   assert.doesNotMatch(routeSystemPrompt, /delegate_capability\.explore/);
-  assert.match(routeInput, /<route_decision_input>/);
+  assert.match(routeInput, /<capability_decision_input>/);
   assert.match(routeInput, /继续调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
-  assert.match(routeInput, /代码库理解\|调查\|capability 注册链路/);
+  assert.match(routeInput, /匹配：继续调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
   assert.match(routeInput, /capability\.explore/);
   assert.doesNotMatch(routeInput, /delegate_capability\.explore/);
   assert.equal(decisionCallCount, 3);
 });
 
-test('task_done reroutes through taskDecision before the next task', async () => {
+test('task_done reroutes through capabilityPlanner before the next task', async () => {
   let structuredCallCount = 0;
   const taskDecisionInputs: string[] = [];
+  const plannerInputs: string[] = [];
   const routeInputs: string[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('final summary'),
@@ -362,8 +361,12 @@ test('task_done reroutes through taskDecision before the next task', async () =>
           return taskDoneDecision('已提炼 issue 需求点，还需要检索本地实现。');
         }
         if (structuredCallCount === 4) {
-          taskDecisionInputs.push(inputText);
-          return nextTaskDecision('检索本地实现与 git log，判断需求点是否已覆盖。', null, 'repository|git log');
+          plannerInputs.push(inputText);
+          return {
+            result: 'next_task',
+            remaining_plan: [{ objective: '检索本地实现与 git log，判断需求点是否已覆盖。', capability_intent: 'codebase_exploration', status: 'concrete' }],
+            next_task: { objective: '检索本地实现与 git log，判断需求点是否已覆盖。', capability_intent: 'codebase_exploration' },
+          };
         }
         if (structuredCallCount === 5) {
           routeInputs.push(inputText);
@@ -399,22 +402,25 @@ test('task_done reroutes through taskDecision before the next task', async () =>
     },
   }) as OrchestratorStateType;
 
-  assert.equal(taskDecisionInputs.length, 2);
+  assert.equal(taskDecisionInputs.length, 1);
+  assert.equal(plannerInputs.length, 1);
   assert.equal(routeInputs.length, 2);
   assert.doesNotMatch(taskDecisionInputs[0], /plan_draft|task_plan_draft/);
-  assert.doesNotMatch(taskDecisionInputs[1], /plan_draft|task_plan_draft/);
-  assert.doesNotMatch(taskDecisionInputs[1], /读取 issue 并提炼需求点/);
+  assert.match(plannerInputs[0], /capability_planning_input/);
+  assert.match(plannerInputs[0], /issue #269 需求点/);
   assert.match(routeInputs[0], /读取 issue #269/);
   assert.match(routeInputs[1], /检索本地实现与 git log/);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
+  assert.deepEqual(state.runCapabilityPlan, []);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
 });
 
-test('task_done returns to taskDecision until the remaining goal is complete', async () => {
+test('task_done returns to capabilityPlanner until the remaining goal is complete', async () => {
   let structuredCallCount = 0;
   const taskDecisionInputs: string[] = [];
+  const plannerInputs: string[] = [];
   const routeInputs: string[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('final answer'),
@@ -437,8 +443,12 @@ test('task_done returns to taskDecision until the remaining goal is complete', a
           return taskDoneDecision('已提炼 issue 需求点，但没有预留后续计划。');
         }
         if (structuredCallCount === 4) {
-          taskDecisionInputs.push(inputText);
-          return nextTaskDecision('检索本地实现与 git log。', null, 'repository|git log');
+          plannerInputs.push(inputText);
+          return {
+            result: 'next_task',
+            remaining_plan: [{ objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration', status: 'concrete' }],
+            next_task: { objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration' },
+          };
         }
         if (structuredCallCount === 5) {
           routeInputs.push(inputText);
@@ -448,8 +458,8 @@ test('task_done returns to taskDecision until the remaining goal is complete', a
           return taskDoneDecision('已完成本地实现与 git log 检索。');
         }
         if (structuredCallCount === 7) {
-          taskDecisionInputs.push(inputText);
-          return { action: 'answer' };
+          plannerInputs.push(inputText);
+          return { result: 'answer', remaining_plan: [], next_task: null };
         }
         throw new Error(`unexpected structured call ${structuredCallCount.toString()}`);
       },
@@ -482,17 +492,19 @@ test('task_done returns to taskDecision until the remaining goal is complete', a
   }) as OrchestratorStateType;
 
   assert.equal(structuredCallCount, 7);
-  assert.equal(taskDecisionInputs.length, 3);
+  assert.equal(taskDecisionInputs.length, 1);
+  assert.equal(plannerInputs.length, 2);
   assert.equal(routeInputs.length, 2);
-  assert.ok(taskDecisionInputs.every((input) => !/plan_draft|task_plan_draft/.test(input)));
+  assert.ok(plannerInputs.every((input) => /capability_planning_input/.test(input)));
   assert.equal(String(state.messages.at(-1)?.content ?? ''), 'final answer');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
+  assert.deepEqual(state.runCapabilityPlan, []);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
 });
 
-test('task decision autoRepair retries next_task without a task', async () => {
+test('entry decision autoRepair retries direct_task without a task', async () => {
   const invokedMessages: unknown[] = [];
   let invokeCount = 0;
   let capturedOptions: unknown;
@@ -505,7 +517,7 @@ test('task decision autoRepair retries next_task without a task', async () => {
           invokeCount += 1;
           invokedMessages.push(messages);
           return invokeCount === 1
-            ? { action: 'next_task', task: null }
+            ? { action: 'direct_task', task: null }
             : { action: 'answer' };
         },
       };
@@ -584,34 +596,23 @@ test('missing executable capability routes through the answer node', async () =>
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有可用的执行能力/);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.runPendingTask, null);
-  assert.deepEqual(state.runCapabilitySearchState, buildEmptyRunCapabilitySearchState());
 });
 
 test('route decision rejects missing pending task as an invariant violation', async () => {
   const model = new FakeListChatModel({ responses: ['unused'] }) as unknown as AgentModels['act'];
-  const runRouteDecision = createRouteDecisionRunner({
+  const runCapabilityDecision = createCapabilityDecisionRunner({
     models: { act: model, observe: model },
     actor: testActor,
   });
   const input = buildOrchestratorRunInput([new HumanMessage('继续')]);
   await assert.rejects(
-    runRouteDecision({
+    runCapabilityDecision({
       ...input,
       runNextDelegation: {
         id: 'stale',
         lane: 'general',
         task: '旧任务',
         contextSummary: null,
-      },
-      runCapabilitySearchState: {
-        query: '旧 query',
-        attempted: true,
-        candidates: [{
-          name: 'stale_capability',
-          description: '旧候选',
-          score: 1,
-          matchedTerms: ['旧'],
-        }],
       },
     } as OrchestratorStateType, {
       configurable: {
@@ -621,11 +622,11 @@ test('route decision rejects missing pending task as an invariant violation', as
         toolkits: [],
       },
     }),
-    /routeDecision requires runPendingTask/,
+    /capabilityDecision requires runPendingTask/,
   );
 });
 
-test('task decision schema does not advertise capability actions', async () => {
+test('entry decision schema does not advertise capability actions', async () => {
   let decisionSystemPrompt = '';
   let schemaAllowsBrowser = false;
   const model = {
@@ -669,9 +670,9 @@ test('task decision schema does not advertise capability actions', async () => {
   });
 
   assert.equal(schemaAllowsBrowser, false);
-  assert.match(decisionSystemPrompt, /task decision 节点/);
-  assert.match(decisionSystemPrompt, /不要选择 general\/capability lane/);
-  assert.match(decisionSystemPrompt, /next_task/);
+  assert.match(decisionSystemPrompt, /entry decision 节点/);
+  assert.match(decisionSystemPrompt, /不要选择具体 capability/);
+  assert.match(decisionSystemPrompt, /direct_task/);
   assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.browser/);
 });
 

@@ -12,6 +12,8 @@
 > 修订 2026-07-12（issue #349）：启动 capability-aware planning 的 eval-first 设计。
 > Stage B 的无 plan 实现保持为 baseline；先通过评估确定 capability execution boundaries，
 > 再引入独立 capabilityPlanner，并把 capabilitySearch + routeDecision 收口为 capabilityDecision。
+> 修订 2026-07-12（issue #349 Phase 2）：上述目标 graph 已进入生产实现；本文早期章节中
+> taskDecision → capabilitySearch → routeDecision 的描述保留为 Stage A/B 历史，不再是当前目标结构。
 
 ## 1. 两个 issue，一个根因
 
@@ -35,6 +37,7 @@
 - **D9 — `canHandoffActiveDelegation` 整字段删除，不改名。** 它是存进 state 的派生值：guard 逻辑是 `(taskActiveDelegation, messages)` 的纯函数（announce completionReason === 'limit_reached' → false），写者到唯一读者只有一跳，且派生输入在这一跳间不可变；decision context 已在为 announce context 计算同一个 completionReason。改法：`buildDecisionContext` 在 delegation_outcome 时就地 `evaluateGuard(delegationOutcomeDecisionGuard, ...)`（guard 定义与决策事件保留，观测面不丢），连带删除 `delegationOutcomeDecisionGuard` 图节点（薄包装）与 `prepareUserIntentDecision` 图节点（全部职责是写 true，而 run reset 已置 true、user_intent 读者硬编码忽略 state——双重死代码）。
 - **D10（修订 2026-07-10）— 删除 `runPendingFinalReply` 与 inline/finalizeRun 链路；所有用户可见终态统一经过 answer。** taskDecision 和 routeDecision 的下一跳可由已有业务 state 推导：有 `runPendingTask` 才进入 search，否则 answer；有 `runNextDelegation` 才进入 capability subagent，否则 answer。iteration guard 同样由 guard/state 决定 outcomeDecision 或 answer。outcomeDecision 的三态 verdict 既决定 state update 又决定下一节点，按 LangGraph 官方边界窄用 `Command({ update, goto })`：`continue` 回当前 capability，`task_done` 去 taskDecision，`goal_done` 去 answer；node 声明有限 `ends`，不引入新的 route state。删除 `runPendingFinalReply` channel/type/reset、`'inline'`、`buildInlineStopResult`、`finalizeRun` 及相关 route 分支。可预期终止由 answer 根据现有 state/guard 事实生成回复；真正 invariant violation 抛错或进入恢复，不由 decision/guard 代码直接写用户可见 `AIMessage`。
 - **D11（修订 2026-07-11）— taskDecision 是唯一 task 出生点；`task_done` 无条件回环 taskDecision。** 垂直化推到底的结构结论：规划（"下一步怎么做"）全部收口在 taskDecision，验收（"结果符不符合目标"）全部收口在 outcomeDecision。任务边界流转为 `outcomeDecision(task_done) → handoff + 清 taskActiveDelegation + 重置 runCapabilitySearchState → taskDecision（用户目标 + 新结论）→ answer 或 capabilitySearch → routeDecision`。代价：每个 task_done 边界固定多一次 taskDecision LLM 调用；这正是规划/验收职责分离的结构成本。
+- **D12（2026-07-12，取代 D4/D11 的当前 graph 结论）— capability-aware planning。** `entryDecision` 每个 run 只执行一次，选择 `answer | direct_task | needs_plan`；`capabilityPlanner` 是 plan 唯一写方，在 entry/boundary 两种输入分布下维护 capability execution boundaries 并 materialize current task；`capabilityDecision` 在单节点内部完成搜索与 custom/general 选择；`task_done → handoff → capabilityPlanner(boundary)`，`goal_done → handoff → answer`。outcomeDecision 与 guard 均不读取 plan 内容。
 
 ## 3. State 模型（目标）
 
@@ -153,6 +156,7 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 | 0.5 | **已落地**：D9：删 `canHandoffActiveDelegation` 字段，guard 内联进 decision context，删 `delegationOutcomeDecisionGuard` / `prepareUserIntentDecision` 两节点 | 有（行为等价） | 现有测试 + guard 决策事件仍可观测 |
 | A | **已落地**：run 入口拆 taskDecision + capabilitySearch + routeDecision，删 capabilityDiscovery，新增 `runPendingTask`；单步约束 prompt 进 taskDecision | 有 | orchestrator/schema/prompt 测试覆盖 task-first route |
 | B | **本分支已完成**：outcomeDecision 验收化（D5）；task_done 一律回 taskDecision；删除 `plan_draft`、`runPendingFinalReply` 与 inline/finalizeRun，outcomeDecision 窄用 Command，其余路由由业务 state 的 conditional edge 推导；所有正常终态统一经过 answer（D3/D10/D11） | 有 | 多 task 回环、outcome 三态 Command 目的地、其余 conditional edge 与所有正常终态只产生一条 answer 回复均有测试覆盖 |
+| C | **#349 Phase 2**：entryDecision + capabilityPlanner(entry/boundary) + capabilityDecision；search 与 selection 合并；task_done 回 planner | 有 | Phase 1 decision contracts、planner scorer、multi-task graph eval 与 production graph 单测 |
 | B 捎带 | 待实施：`buildDecisionResult` 里 handoff/生命周期块下沉 `delegationLifecycle.ts` | 无 | 现有测试 |
 
 ## 8. 验收标准
@@ -163,6 +167,7 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 - run 结束 snapshot 中保留的 transient 字段全部为 null；Stage 0.5 后 `canHandoffActiveDelegation` 不再出现，D10 修订后 `runPendingFinalReply` channel/type/reset 与 inline/finalizeRun 终点均不存在。
 - Stage 0 不改变任何控制流行为；Stage 0.5 只移除派生 state，不改变 handoff 判定。
 - Stage B：`plan_draft` / `runTaskPlanDraft` 不存在；`task_done` 无条件回 taskDecision；outcomeDecision schema 不含 task 文本字段（D5）；第 2+ 个 task 由回环后的 taskDecision 结合用户目标和委托结论产出并独立走 search+route（D11）。
+- Stage C：entryDecision 只在 run 入口执行；plan 只有 capabilityPlanner 一个写方；task_done 回 capabilityPlanner boundary；每个 current task 统一经过 capabilityDecision；outcomeDecision/guard 不读取 plan 内容；answer 清空 runCapabilityPlan。
 
 ## 9. Non-goals
 

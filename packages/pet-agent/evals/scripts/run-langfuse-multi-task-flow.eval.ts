@@ -65,7 +65,8 @@ function buildRecordingSubagent(responses: string[]) {
 }
 
 function buildScriptedDecisionModel() {
-  let taskDecisionCount = 0;
+  let entryDecisionCount = 0;
+  let plannerDecisionCount = 0;
   let routeDecisionCount = 0;
   let outcomeDecisionCount = 0;
   const searchQueries: string[] = [];
@@ -79,32 +80,34 @@ function buildScriptedDecisionModel() {
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
         const text = messages.map((message) => String((message as { content?: unknown })?.content ?? '')).join('\n');
-        if (/task decision 节点/.test(text)) {
-          taskDecisionCount += 1;
-          if (taskDecisionCount === 1) {
-            const decision = {
-              action: 'next_task',
-              task: '调查 auth 模块的结构、依赖和风险',
-              context_summary: '探索结论将决定后续重构任务。',
-              search_keywords: '代码库|auth|调查|结构',
-            };
-            searchQueries.push(decision.search_keywords);
-            return decision;
-          }
-          if (taskDecisionCount === 2) {
-            secondTaskSawHandoff = /循环依赖|token validation/.test(text);
-            const decision = {
-              action: 'next_task',
-              task: '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖',
-              context_summary: '调查已定位循环依赖，按 handoff 结论实施重构。',
-              search_keywords: '代码修改|auth|重构|token validation',
-            };
-            searchQueries.push(decision.search_keywords);
-            return decision;
-          }
-          return { action: 'answer' };
+        if (/entry decision 节点/.test(text)) {
+          entryDecisionCount += 1;
+          return { action: 'needs_plan' };
         }
-        if (/route decision 节点/.test(text)) {
+        if (/capability planning decision 节点/.test(text)) {
+          plannerDecisionCount += 1;
+          if (plannerDecisionCount === 1) {
+            const objective = '调查 auth 模块的结构、依赖和风险';
+            searchQueries.push(objective);
+            return {
+              result: 'next_task',
+              remaining_plan: [
+                { objective, capability_intent: 'codebase_exploration', status: 'concrete' },
+                { objective: '根据调查结论重构 auth 模块', capability_intent: 'code_modification', status: 'deferred' },
+              ],
+              next_task: { objective, capability_intent: 'codebase_exploration' },
+            };
+          }
+          secondTaskSawHandoff = /循环依赖|token validation/.test(text);
+          const objective = '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖';
+          searchQueries.push(objective);
+          return {
+            result: 'next_task',
+            remaining_plan: [{ objective, capability_intent: 'code_modification', status: 'concrete' }],
+            next_task: { objective, capability_intent: 'code_modification' },
+          };
+        }
+        if (/capability decision 节点/.test(text)) {
           routeDecisionCount += 1;
           const capabilityName = routeDecisionCount === 1 ? 'explore' : 'code_modify';
           selectedCapabilityNames.push(capabilityName);
@@ -123,7 +126,8 @@ function buildScriptedDecisionModel() {
   return {
     model,
     stats: () => ({
-      taskDecisionCount,
+      entryDecisionCount,
+      plannerDecisionCount,
       routeDecisionCount,
       outcomeDecisionCount,
       searchQueries,

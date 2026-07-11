@@ -11,10 +11,21 @@ const ROUTE_CAPABILITY_PREFIX = 'capability.' as const;
 export type RouteCapabilityLane = `${typeof ROUTE_CAPABILITY_PREFIX}${string}`;
 
 export type TaskDecision = {
-  action: 'answer' | 'next_task';
+  action: 'answer' | 'direct_task' | 'needs_plan';
   task?: string | null;
   context_summary?: string | null;
-  search_keywords?: string | null;
+};
+
+export type CapabilityPlanTaskDecision = {
+  objective: string;
+  capability_intent: string;
+  status: 'concrete' | 'deferred';
+};
+
+export type CapabilityPlanningDecision = {
+  result: 'next_task' | 'answer';
+  remaining_plan: CapabilityPlanTaskDecision[];
+  next_task?: { objective: string; capability_intent: string } | null;
 };
 
 export type DelegationOutcomeDecision = {
@@ -64,25 +75,53 @@ function validateCapabilityCandidateNames(params: OrchestrationDecisionSchemaPar
 
 export function buildTaskDecisionSchema() {
   return z.object({
-    action: z.enum(['answer', 'next_task']).describe(
-      '下一步动作。answer 表示不需要执行器；next_task 表示先产出一个单步 delegated task。',
+    action: z.enum(['answer', 'direct_task', 'needs_plan']).describe(
+      'run 入口执行形态。answer=回复；direct_task=一次 capability 执行；needs_plan=先做 capability-aware planning。',
     ),
     task: z.string().nullable().optional().describe(
-      'action=next_task 时要执行的单步任务；action=answer 时为 null 或省略。',
+      'action=direct_task 时要执行的单步任务；其他 action 为 null 或省略。',
     ),
     context_summary: z.string().nullable().optional().describe(
-      'action=next_task 时执行器需要的简短上下文；action=answer 时为 null 或省略。',
-    ),
-    search_keywords: z.string().nullable().optional().describe(
-      'action=next_task 时用于 capability search 的关键词或短语；多个词用 | 分隔。没有更好关键词时可为 null。',
+      'action=direct_task 时执行器需要的简短上下文；其他 action 为 null 或省略。',
     ),
   }).superRefine((decision, ctx) => {
-    if (decision.action === 'next_task' && !decision.task?.trim()) {
+    if (decision.action === 'direct_task' && !decision.task?.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['task'],
-        message: 'action=next_task requires a non-empty task.',
+        message: 'action=direct_task requires a non-empty task.',
       });
+    }
+  });
+}
+
+export function buildCapabilityPlanningDecisionSchema() {
+  const planTask = z.object({
+    objective: z.string().min(1),
+    capability_intent: z.string().min(1),
+    status: z.enum(['concrete', 'deferred']),
+  });
+  return z.object({
+    result: z.enum(['next_task', 'answer']),
+    remaining_plan: z.array(planTask),
+    next_task: z.object({
+      objective: z.string().min(1),
+      capability_intent: z.string().min(1),
+    }).nullable().optional(),
+  }).superRefine((decision, ctx) => {
+    if (decision.result === 'next_task' && !decision.next_task?.objective.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['next_task'], message: 'next_task result requires a concrete next_task.' });
+    }
+    if (decision.result === 'next_task' && decision.next_task) {
+      const first = decision.remaining_plan[0];
+      if (!first || first.status !== 'concrete'
+        || first.objective.trim() !== decision.next_task.objective.trim()
+        || first.capability_intent.trim() !== decision.next_task.capability_intent.trim()) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['remaining_plan'], message: 'remaining_plan must start with the concrete next_task.' });
+      }
+    }
+    if (decision.result === 'answer' && (decision.next_task || decision.remaining_plan.length > 0)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['remaining_plan'], message: 'answer result must have an empty plan and no next_task.' });
     }
   });
 }
@@ -143,6 +182,14 @@ function buildDecisionOutputInstruction(
 
 export function buildTaskDecisionOutputInstruction(method?: StructuredOutputMethod): string {
   return buildDecisionOutputInstruction('task decision', buildTaskDecisionSchema(), method);
+}
+
+export function buildCapabilityPlanningDecisionOutputInstruction(method?: StructuredOutputMethod): string {
+  return buildDecisionOutputInstruction(
+    'capability planning decision',
+    buildCapabilityPlanningDecisionSchema(),
+    method,
+  );
 }
 
 export function buildRouteDecisionOutputInstruction(

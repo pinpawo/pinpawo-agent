@@ -56,7 +56,7 @@ recreate datasets.
 - `agent-entry-decision-basics`: eval contract for `answer | direct_task | needs_plan`.
 - `agent-capability-decision-basics`: end-to-end capability search and selection from a current task.
 - `agent-outcome-decision-basics`: `continue | task_done | goal_done` verdict boundaries.
-- `agent-capability-planning-basics`: eval-only `planner@entry` and `planner@boundary` cases.
+- `agent-capability-planning-basics`: production `planner@entry` and `planner@boundary` contracts.
 - `agent-multi-task-flow-basics`: real graph baseline across meaningful task boundaries.
 - `agent-tool-review-reject-runtime`: runtime regression case for reviewed tool-call rejection stopping subagent execution and handing off the cancellation announce.
 
@@ -96,25 +96,20 @@ from `LLM_*`, `~/.pinpawo/.env`, or `~/.pinpawo/config.json`.
 
 ## Decision Eval Boundaries
 
-Phase 1 evaluates the target decision contracts without changing the production
-graph:
+These evals exercise the production Phase 2 decision contracts:
 
-1. `entryDecision` chooses `answer | direct_task | needs_plan`. The existing
-   taskDecision stability runner is the production baseline adapter; current
-   production cannot yet emit `needs_plan`:
+1. `entryDecision` chooses `answer | direct_task | needs_plan`:
 
    ```sh
    npm run eval:task-decision
    ```
 
-   The runner imports the canonical entry dataset. A target `needs_plan` case is
-   expected to fail against the current adapter (`next_task -> direct_task`), so
-   the Phase 1 baseline records the missing mode instead of hiding it.
+   The runner imports the canonical entry dataset and uses the production
+   entry-decision prompt and schema.
 
 2. `capabilityDecision` starts from an already-defined current task and evaluates
-   candidate recall plus final custom/general selection. Until Phase 2 merges
-   the graph nodes, the baseline runner uses production capabilitySearch and
-   routeDecision internally:
+   candidate recall plus final custom/general selection. Candidate search and
+   selection are one production graph node:
 
    ```sh
    npm run eval:langfuse:capability-decision
@@ -138,8 +133,8 @@ graph:
 
 4. `capabilityPlanner` cases are split into `planner@entry` and
    `planner@boundary`. They define plan creation, materialization, cancellation,
-   and rubber-stamp expectations before a production planner exists. The runner
-   uses an eval-only candidate prompt and never imports it into the graph:
+   and rubber-stamp expectations. The runner imports the production planner
+   prompt and schema:
 
    ```sh
    npm run eval:langfuse:capability-planning

@@ -2,7 +2,6 @@ import type { OrchestratorStateType } from '../src/agent/orchestrator/state';
 import type {
   CapabilityCandidate,
   MessageLane,
-  RunCapabilitySearchState,
   RunDelegationSummary,
   RunNextDelegation,
   TaskActiveDelegation,
@@ -12,7 +11,6 @@ export type EvalOrchestratorStateSnapshot = Partial<Pick<
   OrchestratorStateType,
   | 'runNextDelegation'
   | 'runDelegationSummaries'
-  | 'runCapabilitySearchState'
   | 'taskActiveDelegation'
 >> & Record<string, unknown>;
 
@@ -84,7 +82,11 @@ export function activeCapabilityFromResult(result: EvalOrchestratorStateSnapshot
     : null;
 }
 
-export function readCapabilitySearchState(result: EvalOrchestratorStateSnapshot): RunCapabilitySearchState {
+export function readCapabilitySearchState(result: EvalOrchestratorStateSnapshot): {
+  query: string | null;
+  attempted: boolean;
+  candidates: CapabilityCandidate[];
+} {
   const state = result.runCapabilitySearchState;
   if (!isRecord(state)) {
     return { query: null, attempted: false, candidates: [] };

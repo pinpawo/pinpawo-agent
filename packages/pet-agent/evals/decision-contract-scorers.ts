@@ -38,8 +38,11 @@ export function scoreEntryDecision(
   ];
 }
 
-export function adaptTaskDecisionMode(action: 'answer' | 'next_task'): 'answer' | 'direct_task' {
-  return action === 'answer' ? 'answer' : 'direct_task';
+export function adaptTaskDecisionMode(
+  action: 'answer' | 'direct_task' | 'needs_plan',
+): 'answer' | 'direct_task' | 'needs_plan' {
+  if (action === 'answer' || action === 'needs_plan') return action;
+  return 'direct_task';
 }
 
 export function scoreCapabilityDecision(

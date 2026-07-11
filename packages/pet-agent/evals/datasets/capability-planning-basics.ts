@@ -125,7 +125,7 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
 
 export const capabilityPlanningBasicsDataset: AgentEvalDataset<CapabilityPlanningInput, CapabilityPlanningExpected> = {
   name: SUITE,
-  description: 'Eval-only contracts for planner@entry and planner@boundary before production graph implementation.',
+  description: 'Production contracts for capabilityPlanner at entry and task boundaries.',
   cases,
   metadata: { owner: 'pet-agent', areas: ['capability_planning', 'entry_decision', 'delegation_control'] },
 };

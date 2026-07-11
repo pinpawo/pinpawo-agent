@@ -54,8 +54,6 @@ type EvalCase = {
   targetMode: 'answer' | 'direct_task' | 'needs_plan';
   expectedTaskPattern?: RegExp;
   forbiddenTaskPattern?: RegExp;
-  expectedSearchKeywordsPattern?: RegExp;
-  forbiddenSearchKeywordsPattern?: RegExp;
 };
 
 type EvalResult = {
@@ -66,7 +64,6 @@ type EvalResult = {
   durationMs: number;
   action: string | null;
   taskPreview: string | null;
-  searchKeywords: string | null;
   issues: string[];
   errorType: string | null;
   errorMessage: string | null;
@@ -111,7 +108,7 @@ const entryCases: EvalCase[] = entryDecisionBasicsDataset.cases.map((testCase) =
   name: testCase.name,
   latestUserRequest: testCase.input.userRequest,
   recentMessages: testCase.input.conversationContext?.map((text) => new AIMessage(text)),
-  expectedAction: testCase.expected.mode === 'answer' ? 'answer' : 'next_task',
+  expectedAction: testCase.expected.mode,
   targetMode: testCase.expected.mode,
   expectedTaskPattern: termsPattern(testCase.expected.expectedTaskTerms),
 }));
@@ -122,11 +119,9 @@ const EVAL_CASES: EvalCase[] = [
     id: 'initial-pr-review-keywords',
     name: 'PR review stays one deliverable and keeps investigation keywords',
     latestUserRequest: 'review https://github.com/pinpawo/pinpawo-agent/pull/344，重点看 Stage B 的 task routing 有没有回归。',
-    expectedAction: 'next_task',
+    expectedAction: 'direct_task',
     targetMode: 'direct_task',
     expectedTaskPattern: /review|PR|344|Stage B|routing|回归/i,
-    expectedSearchKeywordsPattern: /review|PR|code|repository|explore|调查|审查|代码/i,
-    forbiddenSearchKeywordsPattern: /^https?:\/\/\S+$/i,
   },
   {
     id: 'after-first-handoff-next-task',
@@ -139,7 +134,7 @@ const EVAL_CASES: EvalCase[] = [
         'issue #269 要求检查本地实现是否已经覆盖 Stage B 的任务边界设计。',
       ),
     ],
-    expectedAction: 'next_task',
+    expectedAction: 'direct_task',
     targetMode: 'direct_task',
     expectedTaskPattern: /本地|实现|git|log|检索|检查/i,
     forbiddenTaskPattern: /读取 issue|提炼需求点/i,
@@ -155,7 +150,7 @@ const EVAL_CASES: EvalCase[] = [
         '已拿到 issue 诉求，接下来仍需检查本地实现和 git log。',
       ),
     ],
-    expectedAction: 'next_task',
+    expectedAction: 'direct_task',
     targetMode: 'direct_task',
     expectedTaskPattern: /本地|实现|git|log|检索|检查/i,
   },
@@ -333,9 +328,6 @@ function hasMultiStepShape(task: string | null | undefined): boolean {
 function evaluateDecision(testCase: EvalCase, decision: TaskDecision): string[] {
   const issues: string[] = [];
   const task = typeof decision.task === 'string' ? decision.task.trim() : null;
-  const searchKeywords = typeof decision.search_keywords === 'string'
-    ? decision.search_keywords.trim()
-    : null;
 
   if (testCase.expectedAction && decision.action !== testCase.expectedAction) {
     issues.push(`expected action=${testCase.expectedAction}, got ${decision.action}`);
@@ -346,10 +338,9 @@ function evaluateDecision(testCase: EvalCase, decision: TaskDecision): string[] 
   }
   if (decision.action === 'answer') {
     if (task) issues.push('answer action should not include task text');
-    if (searchKeywords) issues.push('answer action should not include search_keywords');
   }
-  if (decision.action === 'next_task') {
-    if (!task) issues.push('next_task action requires task');
+  if (decision.action === 'direct_task') {
+    if (!task) issues.push(`${decision.action} action requires task`);
     if (hasMultiStepShape(task)) {
       issues.push('task appears to contain an enumerated plan or is oversized');
     }
@@ -359,20 +350,6 @@ function evaluateDecision(testCase: EvalCase, decision: TaskDecision): string[] 
   }
   if (task && testCase.forbiddenTaskPattern && testCase.forbiddenTaskPattern.test(task)) {
     issues.push(`task matches forbidden pattern ${testCase.forbiddenTaskPattern.toString()}`);
-  }
-  if (
-    searchKeywords
-    && testCase.expectedSearchKeywordsPattern
-    && !testCase.expectedSearchKeywordsPattern.test(searchKeywords)
-  ) {
-    issues.push(`search_keywords does not match ${testCase.expectedSearchKeywordsPattern.toString()}`);
-  }
-  if (
-    searchKeywords
-    && testCase.forbiddenSearchKeywordsPattern
-    && testCase.forbiddenSearchKeywordsPattern.test(searchKeywords)
-  ) {
-    issues.push(`search_keywords matches forbidden pattern ${testCase.forbiddenSearchKeywordsPattern.toString()}`);
   }
 
   return issues;
@@ -434,7 +411,6 @@ async function runOne(params: {
         durationMs: Math.round(performance.now() - started),
         action: null,
         taskPreview: null,
-        searchKeywords: null,
         issues: ['schema validation failed'],
         errorType: 'ZodError',
         errorMessage: parsed.error.message.slice(0, 500),
@@ -449,7 +425,6 @@ async function runOne(params: {
       durationMs: Math.round(performance.now() - started),
       action: parsed.data.action,
       taskPreview: preview(parsed.data.task),
-      searchKeywords: preview(parsed.data.search_keywords, 120),
       issues,
       errorType: null,
       errorMessage: null,
@@ -464,7 +439,6 @@ async function runOne(params: {
       durationMs: Math.round(performance.now() - started),
       action: null,
       taskPreview: null,
-      searchKeywords: null,
       issues: ['invoke failed'],
       errorType: compact.type,
       errorMessage: compact.message,
@@ -491,7 +465,6 @@ function printSummary(results: EvalResult[], repeats: number) {
     action: result.action ?? '',
     ms: result.durationMs,
     task: result.taskPreview ?? '',
-    keywords: result.searchKeywords ?? '',
     issues: result.issues.join('; '),
     error: result.errorMessage ? `${result.errorType}: ${result.errorMessage}` : '',
   })));

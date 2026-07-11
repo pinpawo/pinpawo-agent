@@ -4,6 +4,8 @@ import { HumanMessage } from '@langchain/core/messages';
 import {
   buildAnswerSystemPrompt,
   buildCapabilityArtifactContext,
+  buildCapabilityPlanningDecisionInput,
+  buildCapabilityPlanningDecisionSystemPrompt,
   buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeDecisionSystemPrompt,
@@ -19,6 +21,7 @@ import {
 } from './prompts';
 import {
   buildRouteDecisionOutputInstruction,
+  buildCapabilityPlanningDecisionOutputInstruction,
   buildTaskDecisionOutputInstruction,
 } from './schemas';
 
@@ -98,7 +101,7 @@ test('request contexts include bounded capability artifact refs', () => {
   assert.match(requestContext, /继续刚才的探索/);
 });
 
-test('task decision prompt owns single-step task birth', () => {
+test('entry decision prompt owns execution mode selection', () => {
   const prompt = buildTaskDecisionSystemPrompt({
     actor: testActor,
     outputInstruction: buildTaskDecisionOutputInstruction(),
@@ -110,17 +113,15 @@ test('task decision prompt owns single-step task birth', () => {
     runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });
 
-  assert.match(prompt, /task decision 节点/);
+  assert.match(prompt, /entry decision 节点/);
   assert.match(prompt, /task loop/);
   assert.match(prompt, /唯一基准/);
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
-  assert.match(prompt, /当前阶段：taskDecision/);
+  assert.match(prompt, /当前阶段：entryDecision/);
   assert.match(prompt, /决策原则/);
-  assert.match(prompt, /单步任务粒度/);
-  assert.match(prompt, /不要选择 general\/capability lane/);
-  assert.match(prompt, /search_keywords 应同时表达执行意图和目标对象/);
-  assert.match(prompt, /不要只输出 URL、文件类型或载体名称/);
+  assert.match(prompt, /answer、direct_task 或 needs_plan/);
+  assert.match(prompt, /capability execution boundaries/);
   assert.doesNotMatch(prompt, /plan_draft|task_plan_draft/);
   assert.match(input, /<task_decision_input>/);
   assert.match(input, /run_delegation_summaries/);
@@ -131,7 +132,7 @@ test('task decision prompt owns single-step task birth', () => {
   assert.doesNotMatch(input, /重新规划/);
 });
 
-test('route decision prompt owns capability lane selection', () => {
+test('capability decision prompt owns capability selection', () => {
   const targetsContext = buildRouteTargetsContext({
     generalTools: [],
     capabilityCandidates: [{
@@ -159,19 +160,39 @@ test('route decision prompt owns capability lane selection', () => {
     runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });
 
-  assert.match(prompt, /route decision 节点/);
+  assert.match(prompt, /capability decision 节点/);
   assert.match(prompt, /task loop/);
   assert.match(prompt, /唯一基准/);
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
   assert.doesNotMatch(prompt, /capability\.explore/);
   assert.doesNotMatch(prompt, /delegate_capability\.explore/);
-  assert.match(input, /<route_decision_input>/);
+  assert.match(input, /<capability_decision_input>/);
   assert.match(input, /在本地仓库检索相关实现/);
   assert.match(input, /capability\.explore/);
   assert.match(input, /<runtime_context/);
   assert.doesNotMatch(input, /只根据下面/);
   assert.doesNotMatch(input, /如果匹配，优先/);
+});
+
+test('capability planner prompt owns entry and boundary materialization', () => {
+  const prompt = buildCapabilityPlanningDecisionSystemPrompt({
+    actor: testActor,
+    outputInstruction: buildCapabilityPlanningDecisionOutputInstruction(),
+  });
+  const input = buildCapabilityPlanningDecisionInput({
+    mode: 'boundary',
+    userIntentContext: '<user_intent_context>重构 auth</user_intent_context>',
+    remainingPlan: [{ objective: '根据调查重构 auth', capabilityIntent: 'code_modification', status: 'deferred' }],
+    latestHandoff: '发现 token validation 循环依赖。',
+    capabilityRegistryContext: 'explore: codebase exploration',
+  });
+  assert.match(prompt, /capability planning decision 节点/);
+  assert.match(prompt, /不绑定 registry 中的具体 capability id/);
+  assert.match(prompt, /boundary 模式/);
+  assert.match(input, /<mode>boundary<\/mode>/);
+  assert.match(input, /token validation/);
+  assert.match(input, /code_modification/);
 });
 
 test('loop-internal router input stays focused on current run announce context', () => {

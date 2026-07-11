@@ -8,10 +8,7 @@ import {
   type HandoffSource,
 } from '../../messageLanes';
 import { buildAnswerSystemPrompt } from '../../prompts';
-import {
-  buildEmptyRunCapabilitySearchState,
-  type OrchestratorStateType,
-} from '../../state';
+import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { readMessageText } from '../../utils';
 import {
@@ -74,7 +71,7 @@ function buildAnswerCleanup() {
   return {
     runNextDelegation: null,
     runPendingTask: null,
-    runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+    runCapabilityPlan: [],
     runIterationCount: 0,
   };
 }

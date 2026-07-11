@@ -6,6 +6,8 @@ import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
 } from '../../src/agent/createAgentRuntime.ts';
+import { getMessageLane } from '../../src/agent/orchestrator/messageLanes.ts';
+import type { AgentCapability } from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
@@ -32,11 +34,43 @@ const generalToolkit = defineToolkit({
   })],
 });
 
+const capabilities: AgentCapability[] = [
+  {
+    name: 'explore',
+    description: '代码库调查、结构分析、依赖和风险探索。Keywords: 代码库|auth|调查|结构',
+    createRuntime: () => ({ instructions: ['Investigate the requested codebase task.'] }),
+  },
+  {
+    name: 'code_modify',
+    description: '代码修改与重构。Keywords: 代码修改|auth|重构|token validation',
+    createRuntime: () => ({ instructions: ['Implement the requested code changes.'] }),
+  },
+];
+
+function buildRecordingSubagent(responses: string[]) {
+  const model = new FakeListChatModel({ responses, sleep: 0 });
+  const laneMessageCounts: number[] = [];
+  const bindTools = model.bindTools.bind(model);
+  model.bindTools = ((tools) => {
+    const runnable = bindTools(tools);
+    const invoke = runnable.invoke.bind(runnable);
+    runnable.invoke = async (input, options) => {
+      const messages = Array.isArray(input) ? input : [];
+      laneMessageCounts.push(messages.filter((message) => getMessageLane(message as never) !== null).length);
+      return invoke(input, options);
+    };
+    return runnable;
+  }) as typeof model.bindTools;
+  return { model, laneMessageCounts };
+}
+
 function buildScriptedDecisionModel() {
   let taskDecisionCount = 0;
   let routeDecisionCount = 0;
   let outcomeDecisionCount = 0;
   const searchQueries: string[] = [];
+  const selectedCapabilityNames: string[] = [];
+  let secondTaskSawHandoff = false;
   const model = {
     invoke: async () => new AIMessage(
       'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。',
@@ -58,6 +92,7 @@ function buildScriptedDecisionModel() {
             return decision;
           }
           if (taskDecisionCount === 2) {
+            secondTaskSawHandoff = /循环依赖|token validation/.test(text);
             const decision = {
               action: 'next_task',
               task: '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖',
@@ -71,7 +106,9 @@ function buildScriptedDecisionModel() {
         }
         if (/route decision 节点/.test(text)) {
           routeDecisionCount += 1;
-          return { lane: 'general' };
+          const capabilityName = routeDecisionCount === 1 ? 'explore' : 'code_modify';
+          selectedCapabilityNames.push(capabilityName);
+          return { lane: `capability.${capabilityName}` };
         }
         if (/子任务结果验收节点/.test(text)) {
           outcomeDecisionCount += 1;
@@ -85,7 +122,14 @@ function buildScriptedDecisionModel() {
   } as unknown as AgentModels['act'];
   return {
     model,
-    stats: () => ({ taskDecisionCount, routeDecisionCount, outcomeDecisionCount, searchQueries }),
+    stats: () => ({
+      taskDecisionCount,
+      routeDecisionCount,
+      outcomeDecisionCount,
+      searchQueries,
+      selectedCapabilityNames,
+      secondTaskSawHandoff,
+    }),
   };
 }
 
@@ -95,12 +139,12 @@ function taskMatches(actual: string, expectedTerms: string[]) {
 
 async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]) {
   const decisions = buildScriptedDecisionModel();
-  const subagent = new FakeListChatModel({ responses: testCase.input.subagentResults, sleep: 0 });
+  const subagent = buildRecordingSubagent(testCase.input.subagentResults);
   const graph = createOrchestratorGraph({
     models: {
       act: decisions.model,
       observe: decisions.model,
-      subagent,
+      subagent: subagent.model,
     },
     actor,
   });
@@ -111,7 +155,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
         thread_id: `multi-task-flow-${Date.now()}`,
         actor,
         toolkits: [generalToolkit],
-        capabilities: [],
+        capabilities,
         maxIterations: 10,
         workdir: '/mock/project',
       },
@@ -123,6 +167,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
   const stats = decisions.stats();
   const messages = Array.isArray(result.messages) ? result.messages : [];
   const finalText = String((messages.at(-1) as { content?: unknown } | undefined)?.content ?? '');
+  const remainingLaneMessageCount = messages.filter((message) => getMessageLane(message as never) !== null).length;
   const expected = testCase.expected;
   const scores: LangfuseEvalScore[] = [
     {
@@ -141,8 +186,22 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       score: stats.searchQueries.length === expected.expectedSearchQueryTerms.length
         && stats.searchQueries.every((query, index) =>
           (expected.expectedSearchQueryTerms[index] ?? []).every((term) => query.includes(term)))
+        && stats.routeDecisionCount === expected.expectedDelegationCount
+        && JSON.stringify(stats.selectedCapabilityNames) === JSON.stringify(expected.expectedCapabilityNames)
         && summaries.length === expected.expectedTaskTerms.length ? 1 : 0,
-      comment: `searchQueries=${JSON.stringify(stats.searchQueries)}, delegations=${summaries.length}`,
+      comment: `searchQueries=${JSON.stringify(stats.searchQueries)}, capabilityDecisions=${stats.routeDecisionCount}, selected=${JSON.stringify(stats.selectedCapabilityNames)}`,
+    },
+    {
+      key: 'handoff_consumed_by_next_task_correct',
+      score: stats.secondTaskSawHandoff ? 1 : 0,
+      comment: `secondTaskSawHandoff=${String(stats.secondTaskSawHandoff)}`,
+    },
+    {
+      key: 'lane_isolation_correct',
+      score: remainingLaneMessageCount === 0
+        && subagent.laneMessageCounts.length === expected.expectedDelegationCount
+        && subagent.laneMessageCounts.every((count) => count === 0) ? 1 : 0,
+      comment: `subagentInputLaneMessages=${JSON.stringify(subagent.laneMessageCounts)}, remainingLaneMessages=${remainingLaneMessageCount}`,
     },
     {
       key: 'handoff_completion_correct',
@@ -164,6 +223,8 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       ...stats,
       finalMode: routeModeFromResult(result),
       finalText,
+      remainingLaneMessageCount,
+      subagentInputLaneMessageCounts: subagent.laneMessageCounts,
     },
     scores,
   };

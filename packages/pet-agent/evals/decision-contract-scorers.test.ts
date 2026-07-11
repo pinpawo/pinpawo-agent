@@ -5,6 +5,7 @@ import { capabilityPlanningBasicsDataset } from './datasets/capability-planning-
 import { entryDecisionBasicsDataset } from './datasets/entry-decision-basics.ts';
 import { outcomeDecisionBasicsDataset } from './datasets/outcome-decision-basics.ts';
 import {
+  adaptTaskDecisionMode,
   scoreCapabilityDecision,
   scoreCapabilityPlanning,
   scoreEntryDecision,
@@ -24,6 +25,11 @@ test('entry scorer treats textual steps as one task when the execution boundary 
     task: '读取 package.json 的依赖，运行 npm test，并汇总结果。',
     boundaryCount: 1,
   }, testCase.expected)));
+});
+
+test('current taskDecision adapter exposes the missing needs_plan mode', () => {
+  assert.equal(adaptTaskDecisionMode('next_task'), 'direct_task');
+  assert.notEqual(adaptTaskDecisionMode('next_task'), 'needs_plan');
 });
 
 test('capability scorer rejects an unregistered selected capability', () => {
@@ -58,8 +64,24 @@ test('planner scorer rejects binding a concrete capability id', () => {
     nextTask: '调查 auth 模块的结构和风险',
     capabilityIntent: testCase.expected.capabilityIntent,
     capabilityId: 'explore',
-    planEffect: testCase.expected.planEffect,
-    rubberStamp: testCase.expected.rubberStamp,
-  }, testCase.expected);
+    remainingPlan: testCase.expected.remainingPlan.map((item) => ({
+      objective: item.objectiveTerms.join(' '),
+      capabilityIntent: item.capabilityIntent,
+      status: item.status,
+    })),
+  }, testCase.expected, testCase.input);
   assert.equal(scores.find((score) => score.key === 'planner_does_not_bind_capability_id')?.score, 0);
+});
+
+test('planner scorer derives cancellation instead of trusting a label', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases.find((item) => item.name === 'boundary-cancels-obsolete-task');
+  assert.ok(testCase);
+  const scores = scoreCapabilityPlanning({
+    result: 'answer',
+    nextTask: null,
+    capabilityIntent: null,
+    remainingPlan: testCase.input.remainingPlan ?? [],
+  }, testCase.expected, testCase.input);
+  assert.equal(scores.find((score) => score.key === 'plan_effect_correct')?.score, 0);
+  assert.equal(scores.find((score) => score.key === 'remaining_plan_correct')?.score, 0);
 });

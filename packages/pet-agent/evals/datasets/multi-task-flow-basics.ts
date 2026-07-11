@@ -9,6 +9,7 @@ export type MultiTaskFlowExpected = {
   expectedTaskTerms: string[][];
   expectedSearchQueryTerms: string[][];
   expectedDelegationCount: number;
+  expectedCapabilityNames: string[];
   expectedFinalMode: 'answer';
   expectedResultTerms: string[];
   reason: string;
@@ -40,6 +41,7 @@ const cases: AgentEvalCase<MultiTaskFlowInput, MultiTaskFlowExpected>[] = [
         ['代码修改', 'auth', '重构'],
       ],
       expectedDelegationCount: 2,
+      expectedCapabilityNames: ['explore', 'code_modify'],
       expectedFinalMode: 'answer',
       expectedResultTerms: ['token validation', '循环依赖', '测试通过'],
       reason: 'Exploration and implementation form separate execution boundaries because the handoff determines the implementation task.',

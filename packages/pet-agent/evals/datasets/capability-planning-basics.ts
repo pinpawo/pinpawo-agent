@@ -12,6 +12,7 @@ export type CapabilityPlanningExpected = {
   result: 'next_task' | 'answer';
   nextTaskTerms?: string[];
   capabilityIntent?: string;
+  remainingPlan: Array<{ objectiveTerms: string[]; capabilityIntent: string; status: 'concrete' | 'deferred' }>;
   planEffect: 'created' | 'revised' | 'cancelled' | 'unchanged' | 'empty';
   rubberStamp: boolean;
   reason: string;
@@ -35,6 +36,10 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       result: 'next_task',
       nextTaskTerms: ['auth', '调查'],
       capabilityIntent: 'codebase_exploration',
+      remainingPlan: [
+        { objectiveTerms: ['auth', '调查'], capabilityIntent: 'codebase_exploration', status: 'concrete' },
+        { objectiveTerms: ['auth', '重构'], capabilityIntent: 'code_modification', status: 'deferred' },
+      ],
       planEffect: 'created',
       rubberStamp: false,
       reason: 'Entry planning creates exploration first and leaves implementation deferred.',
@@ -57,6 +62,11 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       result: 'next_task',
       nextTaskTerms: ['循环依赖', 'token', '接口'],
       capabilityIntent: 'code_modification',
+      remainingPlan: [{
+        objectiveTerms: ['循环依赖', 'token', '接口'],
+        capabilityIntent: 'code_modification',
+        status: 'concrete',
+      }],
       planEffect: 'revised',
       rubberStamp: false,
       reason: 'Boundary planning materializes implementation details from the handoff.',
@@ -77,6 +87,7 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     },
     expected: {
       result: 'answer',
+      remainingPlan: [],
       planEffect: 'cancelled',
       rubberStamp: false,
       reason: 'The handoff makes the deferred repair unnecessary.',
@@ -99,6 +110,11 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       result: 'next_task',
       nextTaskTerms: ['报告', '发送', '负责人'],
       capabilityIntent: 'message_delivery',
+      remainingPlan: [{
+        objectiveTerms: ['报告', '发送', '负责人'],
+        capabilityIntent: 'message_delivery',
+        status: 'concrete',
+      }],
       planEffect: 'unchanged',
       rubberStamp: true,
       reason: 'The concrete next task remains valid after the handoff.',

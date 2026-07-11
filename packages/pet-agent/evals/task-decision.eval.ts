@@ -37,6 +37,8 @@ import {
 } from '../src/agent/orchestrator/schemas';
 import type { RunDelegationSummary } from '../src/agent/orchestrator/types';
 import type { AgentActor } from '../src/types/agent';
+import { entryDecisionBasicsDataset } from './datasets/entry-decision-basics.ts';
+import { adaptTaskDecisionMode } from './decision-contract-scorers.ts';
 import {
   inferStructuredOutputMethod,
   type StructuredOutputMethod,
@@ -99,35 +101,23 @@ function completedSummary(
   };
 }
 
+function termsPattern(terms: string[] | undefined): RegExp | undefined {
+  if (!terms?.length) return undefined;
+  return new RegExp(terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'i');
+}
+
+const entryCases: EvalCase[] = entryDecisionBasicsDataset.cases.map((testCase) => ({
+  id: testCase.id,
+  name: testCase.name,
+  latestUserRequest: testCase.input.userRequest,
+  recentMessages: testCase.input.conversationContext?.map((text) => new AIMessage(text)),
+  expectedAction: testCase.expected.mode === 'answer' ? 'answer' : 'next_task',
+  targetMode: testCase.expected.mode,
+  expectedTaskPattern: termsPattern(testCase.expected.expectedTaskTerms),
+}));
+
 const EVAL_CASES: EvalCase[] = [
-  {
-    id: 'direct-answer-existing-context',
-    name: 'answer from existing conversation context',
-    latestUserRequest: '把刚刚的结论再用三句话总结一下。',
-    recentMessages: [
-      new HumanMessage('帮我看一下当前 PR 的核心风险。'),
-      new AIMessage('结论：task_done 会回到 taskDecision，由最新上下文决定是否还有后续 task。'),
-    ],
-    expectedAction: 'answer',
-    targetMode: 'answer',
-  },
-  {
-    id: 'single-step-file-read',
-    name: 'single direct task',
-    latestUserRequest: '读取 docs/PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md，告诉我 Stage B 的验收标准。',
-    expectedAction: 'next_task',
-    targetMode: 'direct_task',
-    expectedTaskPattern: /读取|查看|检查|提炼|验收标准/i,
-  },
-  {
-    id: 'initial-multi-step-investigation',
-    name: 'dynamic exploration request exposes missing planning mode',
-    latestUserRequest: '看 issue #269 的设计诉求，再查本地实现和 git log，最后总结是否已经覆盖。',
-    expectedAction: 'next_task',
-    targetMode: 'needs_plan',
-    expectedTaskPattern: /issue|269|设计|诉求|需求/i,
-    forbiddenTaskPattern: /最后总结|完整计划|步骤\s*[123]|1[.、].*2[.、]/i,
-  },
+  ...entryCases,
   {
     id: 'initial-pr-review-keywords',
     name: 'PR review stays one deliverable and keeps investigation keywords',
@@ -187,14 +177,6 @@ const EVAL_CASES: EvalCase[] = [
     ],
     expectedAction: 'answer',
     targetMode: 'answer',
-  },
-  {
-    id: 'multiple-actions-one-capability-call',
-    name: 'multiple textual actions remain one capability execution',
-    latestUserRequest: '读取 package.json 的依赖列表，然后运行 npm test，并告诉我结果。',
-    expectedAction: 'next_task',
-    targetMode: 'direct_task',
-    expectedTaskPattern: /package\.json.*npm test|npm test.*package\.json/i,
   },
 ];
 
@@ -357,6 +339,10 @@ function evaluateDecision(testCase: EvalCase, decision: TaskDecision): string[] 
 
   if (testCase.expectedAction && decision.action !== testCase.expectedAction) {
     issues.push(`expected action=${testCase.expectedAction}, got ${decision.action}`);
+  }
+  const adaptedMode = adaptTaskDecisionMode(decision.action);
+  if (adaptedMode !== testCase.targetMode) {
+    issues.push(`target mode=${testCase.targetMode}, current adapter produced ${adaptedMode}`);
   }
   if (decision.action === 'answer') {
     if (task) issues.push('answer action should not include task text');

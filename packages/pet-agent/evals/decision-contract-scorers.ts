@@ -1,5 +1,6 @@
 import type { CapabilityDecisionBasicsExpected } from './datasets/capability-decision-basics.ts';
 import type { CapabilityPlanningExpected } from './datasets/capability-planning-basics.ts';
+import type { CapabilityPlanningInput } from './datasets/capability-planning-basics.ts';
 import type { EntryDecisionExpected } from './datasets/entry-decision-basics.ts';
 import type { OutcomeDecisionExpected } from './datasets/outcome-decision-basics.ts';
 
@@ -35,6 +36,10 @@ export function scoreEntryDecision(
     exact('task_boundary_count_correct', output.boundaryCount, expected.expectedBoundaryCount),
     containsTerms('direct_task_content_correct', output.task, expected.expectedTaskTerms),
   ];
+}
+
+export function adaptTaskDecisionMode(action: 'answer' | 'next_task'): 'answer' | 'direct_task' {
+  return action === 'answer' ? 'answer' : 'direct_task';
 }
 
 export function scoreCapabilityDecision(
@@ -84,15 +89,29 @@ export function scoreCapabilityPlanning(
     nextTask?: string | null;
     capabilityIntent?: string | null;
     capabilityId?: string | null;
-    planEffect: string;
-    rubberStamp: boolean;
+    remainingPlan: Array<{ objective: string; capabilityIntent: string; status: 'concrete' | 'deferred' }>;
   },
   expected: CapabilityPlanningExpected,
+  input: CapabilityPlanningInput,
 ): DecisionContractScore[] {
+  const metrics = derivePlanningMetrics(input, output.remainingPlan);
+  const remainingPlanMatches = output.remainingPlan.length === expected.remainingPlan.length
+    && output.remainingPlan.every((item, index) => {
+      const expectedItem = expected.remainingPlan[index];
+      return Boolean(expectedItem)
+        && item.capabilityIntent === expectedItem.capabilityIntent
+        && item.status === expectedItem.status
+        && expectedItem.objectiveTerms.every((term) => item.objective.toLowerCase().includes(term.toLowerCase()));
+    });
   return [
     exact('planner_result_correct', output.result, expected.result),
-    exact('plan_effect_correct', output.planEffect, expected.planEffect),
-    exact('rubber_stamp_correct', output.rubberStamp, expected.rubberStamp),
+    exact('plan_effect_correct', metrics.planEffect, expected.planEffect),
+    exact('rubber_stamp_correct', metrics.rubberStamp, expected.rubberStamp),
+    {
+      key: 'remaining_plan_correct',
+      score: remainingPlanMatches ? 1 : 0,
+      comment: JSON.stringify(output.remainingPlan),
+    },
     exact('capability_intent_correct', output.capabilityIntent ?? null, expected.capabilityIntent ?? null),
     containsTerms('materialized_task_correct', output.nextTask, expected.nextTaskTerms),
     {
@@ -101,4 +120,31 @@ export function scoreCapabilityPlanning(
       comment: output.capabilityId ?? 'No concrete capability id.',
     },
   ];
+}
+
+function normalizePlan(plan: Array<{ objective: string; capabilityIntent: string; status: 'concrete' | 'deferred' }>) {
+  return plan.map((item) => ({
+    objective: item.objective.trim().replace(/\s+/g, ' '),
+    capabilityIntent: item.capabilityIntent.trim(),
+    status: item.status,
+  }));
+}
+
+export function derivePlanningMetrics(
+  input: CapabilityPlanningInput,
+  outputPlan: Array<{ objective: string; capabilityIntent: string; status: 'concrete' | 'deferred' }>,
+): { planEffect: CapabilityPlanningExpected['planEffect']; rubberStamp: boolean } {
+  const before = normalizePlan(input.remainingPlan ?? []);
+  const after = normalizePlan(outputPlan);
+  const unchanged = JSON.stringify(before) === JSON.stringify(after);
+  if (input.mode === 'entry') {
+    return { planEffect: after.length > 0 ? 'created' : 'empty', rubberStamp: false };
+  }
+  if (unchanged) {
+    return { planEffect: before.length > 0 ? 'unchanged' : 'empty', rubberStamp: before.length > 0 };
+  }
+  if (before.length > 0 && after.length === 0) {
+    return { planEffect: 'cancelled', rubberStamp: false };
+  }
+  return { planEffect: 'revised', rubberStamp: false };
 }

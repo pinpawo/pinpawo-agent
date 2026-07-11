@@ -107,6 +107,10 @@ graph:
    npm run eval:task-decision
    ```
 
+   The runner imports the canonical entry dataset. A target `needs_plan` case is
+   expected to fail against the current adapter (`next_task -> direct_task`), so
+   the Phase 1 baseline records the missing mode instead of hiding it.
+
 2. `capabilityDecision` starts from an already-defined current task and evaluates
    candidate recall plus final custom/general selection. Until Phase 2 merges
    the graph nodes, the baseline runner uses production capabilitySearch and
@@ -187,6 +191,6 @@ Useful knobs:
 
 ```sh
 TASK_DECISION_REPEATS=5 npm run eval:task-decision
-TASK_DECISION_CASES=initial-multi-step-investigation,after-first-handoff-remaining-work npm run eval:task-decision
+TASK_DECISION_CASES=agent-entry-decision-basics.explore-before-implementation-needs-plan,after-first-handoff-remaining-work npm run eval:task-decision
 DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:task-decision
 ```

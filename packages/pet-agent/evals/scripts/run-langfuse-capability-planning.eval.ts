@@ -1,7 +1,7 @@
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import type { AgentModels } from '../../src/types/agent.ts';
-import { scoreCapabilityPlanning } from '../decision-contract-scorers.ts';
+import { derivePlanningMetrics, scoreCapabilityPlanning } from '../decision-contract-scorers.ts';
 import { capabilityPlanningBasicsDataset } from '../datasets/capability-planning-basics.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 import { resolveLangfuseConfig } from './langfuse-api.ts';
@@ -15,8 +15,6 @@ const plannerSchema = z.object({
     status: z.enum(['concrete', 'deferred']),
   })),
   next_task: z.object({ objective: z.string(), capability_intent: z.string() }).nullable(),
-  plan_effect: z.enum(['created', 'revised', 'cancelled', 'unchanged', 'empty']),
-  rubber_stamp: z.boolean(),
 });
 
 const systemPrompt = [
@@ -26,24 +24,34 @@ const systemPrompt = [
   'Use capability_intent to describe the needed ability. Never bind a concrete registered capability id.',
   'In entry mode, create only meaningful execution boundaries and return the first concrete task.',
   'In boundary mode, use the latest handoff to revise, materialize, keep, or cancel remaining work before returning the next task.',
+  'remaining_plan contains all not-yet-completed tasks, including the concrete next_task as its first item.',
   'Do not invent implementation details that depend on a future exploration handoff.',
   'If no work remains, result=answer and next_task=null.',
 ].join('\n');
 
 function deterministicModel(testCase: typeof capabilityPlanningBasicsDataset.cases[number]): AgentModels['act'] {
   const expected = testCase.expected;
+  const remainingPlan = expected.planEffect === 'unchanged'
+    ? testCase.input.remainingPlan ?? []
+    : expected.remainingPlan.map((item) => ({
+      objective: item.objectiveTerms.join(' '),
+      capabilityIntent: item.capabilityIntent,
+      status: item.status,
+    }));
   return {
     invoke: async () => new AIMessage(''),
     withStructuredOutput: () => ({
       invoke: async () => ({
         result: expected.result,
-        remaining_plan: [],
+        remaining_plan: remainingPlan.map((item) => ({
+          objective: item.objective,
+          capability_intent: item.capabilityIntent,
+          status: item.status,
+        })),
         next_task: expected.result === 'next_task' ? {
           objective: expected.nextTaskTerms?.join(' ') ?? '',
           capability_intent: expected.capabilityIntent ?? 'general',
         } : null,
-        plan_effect: expected.planEffect,
-        rubber_stamp: expected.rubberStamp,
       }),
     }),
   } as unknown as AgentModels['act'];
@@ -63,13 +71,16 @@ async function runCase(testCase: typeof capabilityPlanningBasicsDataset.cases[nu
   const parsed = plannerSchema.parse(raw);
   const output = {
     result: parsed.result,
-    remainingPlan: parsed.remaining_plan,
+    remainingPlan: parsed.remaining_plan.map((item) => ({
+      objective: item.objective,
+      capabilityIntent: item.capability_intent,
+      status: item.status,
+    })),
     nextTask: parsed.next_task?.objective ?? null,
     capabilityIntent: parsed.next_task?.capability_intent ?? null,
-    planEffect: parsed.plan_effect,
-    rubberStamp: parsed.rubber_stamp,
   };
-  return { output, scores: scoreCapabilityPlanning(output, testCase.expected) };
+  const scores = scoreCapabilityPlanning(output, testCase.expected, testCase.input);
+  return { output: { ...output, ...derivePlanningMetrics(testCase.input, output.remainingPlan) }, scores };
 }
 
 async function main() {

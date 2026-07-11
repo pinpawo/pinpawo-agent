@@ -4,6 +4,7 @@ import { getConfig } from '../config';
 import { ensureActorSelected } from '../actorSelection';
 import { browserSession } from '../toolkits/browser';
 import { applyRuntimeWorkdir } from '../runtimeWorkdir';
+import { logStartupConfig } from '../startupConfigLog';
 
 export type RunAgentOptions = {
   workdir?: string;
@@ -37,6 +38,12 @@ export async function runAgent(options: RunAgentOptions = {}) {
 
   // Init runtime first to load plugins/llmConfig, then start local server
   const hooks = await runtime.init();
+  logStartupConfig({
+    mode: 'run',
+    workdir: runtimeConfig.workdir,
+    actorId: runtime.getActorId(),
+    actorName: runtime.getActorName(),
+  });
   await startLocalServer(getConfig().localServerPort, {
     actorId: runtime.getActorId(),
     actorName: runtime.getActorName() ?? undefined,

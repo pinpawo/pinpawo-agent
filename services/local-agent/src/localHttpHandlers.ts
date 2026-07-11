@@ -14,7 +14,11 @@ import type { LoadedUserCapability } from './capabilityLoader';
 import { loadStoredConfig } from './storage';
 import { readAgentActivityHealthFields } from './operationActivityState';
 import { isAuthorizedLocalServerRequest } from './localServerAuth';
-import { getLocalServerWorkdir, type LocalServerDeps } from './localServerTypes';
+import {
+  getLocalServerWorkdir,
+  type LocalServerCapabilityStatePatch,
+  type LocalServerDeps,
+} from './localServerTypes';
 import { buildLocalHttpRuntimeProjection } from './localConfigProjection';
 
 type LocalHttpHandlerOptions = {
@@ -27,6 +31,7 @@ type LocalHttpHandlerOptions = {
     messages: Array<{ role: string; text: string }>;
     snapshot?: unknown;
   }>;
+  updateCapabilities?: (patch: LocalServerCapabilityStatePatch) => LocalServerDeps;
 };
 
 export function handleLocalHttpRequest(
@@ -37,6 +42,10 @@ export function handleLocalHttpRequest(
 ) {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const pathname = url.pathname;
+  const applyCapabilityUpdate = (patch: LocalServerCapabilityStatePatch): LocalServerDeps => {
+    if (options.updateCapabilities) return options.updateCapabilities(patch);
+    return Object.isFrozen(deps) ? { ...deps, ...patch } : Object.assign(deps, patch);
+  };
 
   if (!isAuthorizedLocalServerRequest(req, options.authToken)) {
     writeJson(res, 401, { error: 'unauthorized' });
@@ -57,11 +66,11 @@ export function handleLocalHttpRequest(
     const refreshCapabilityName = url.searchParams.get('refresh_capability')
       ?? (url.searchParams.get('refresh_browser') === '1' ? 'browser' : null);
     if (refreshCapabilityName) {
-      refreshRuntimeCapability(deps, refreshCapabilityName).then(() => {
+      refreshRuntimeCapability(deps, refreshCapabilityName).then((patch) => {
+        if (patch) applyCapabilityUpdate(patch);
         writeHealth();
       }).catch(() => {
-        replaceLocalCapability(deps, refreshCapabilityName, null);
-        replaceUserCapability(deps, refreshCapabilityName, null);
+        applyCapabilityUpdate(removeRuntimeCapability(deps, refreshCapabilityName));
         writeHealth();
       });
       return true;
@@ -137,11 +146,12 @@ export function handleLocalHttpRequest(
   }
 
   if (pathname === '/capabilities/rescan') {
-    rescanUserCapabilities(deps).then((summary) => {
+    rescanUserCapabilities(deps).then(({ patch, summary }) => {
+      const updatedDeps = applyCapabilityUpdate(patch);
       writeJson(res, 200, {
         status: 'ok',
         ...summary,
-        ...buildCapabilitiesPayload(deps),
+        ...buildCapabilitiesPayload(updatedDeps),
       });
     }).catch((err) => {
       writeJson(res, 500, {
@@ -251,95 +261,98 @@ function parsePositiveInteger(value: string | null): number | undefined {
   return parsed;
 }
 
+function replaceListItem<T>(
+  items: T[] | undefined,
+  matches: (item: T) => boolean,
+  replacement: T | null,
+): T[] | undefined {
+  if (!items) return undefined;
+  const index = items.findIndex(matches);
+  if (!replacement) {
+    return index >= 0 ? items.filter((_, itemIndex) => itemIndex !== index) : [...items];
+  }
+  if (index < 0) return [...items, replacement];
+  return items.map((item, itemIndex) => itemIndex === index ? replacement : item);
+}
+
 function replaceLocalCapability(
   deps: LocalServerDeps,
   name: string,
   record: CapabilityAvailabilityRecord | null,
-) {
-  const localCapabilities = deps.localCapabilities;
-  if (!localCapabilities) return;
-
-  const index = localCapabilities.findIndex((item) => item.name === name);
-  if (record?.availability.available) {
-    if (index >= 0) {
-      localCapabilities[index] = record.capability;
-    } else {
-      localCapabilities.push(record.capability);
-    }
-  } else if (index >= 0) {
-    localCapabilities.splice(index, 1);
-  }
+): LocalServerCapabilityStatePatch {
+  const localCapabilities = replaceListItem(
+    deps.localCapabilities,
+    (item) => item.name === name,
+    record?.availability.available ? record.capability : null,
+  );
+  return localCapabilities ? { localCapabilities } : {};
 }
 
 function replaceLocalToolkit(
   deps: LocalServerDeps,
   name: string,
   record: ToolkitAvailabilityRecord | null,
-) {
-  const localToolkits = deps.localToolkits;
-  if (!localToolkits) return;
-
-  const index = localToolkits.findIndex((item) => item.name === name);
-  if (record?.availability.available) {
-    if (index >= 0) {
-      localToolkits[index] = record.toolkit;
-    } else {
-      localToolkits.push(record.toolkit);
-    }
-  } else if (index >= 0) {
-    localToolkits.splice(index, 1);
-  }
+): LocalServerCapabilityStatePatch {
+  const localToolkits = replaceListItem(
+    deps.localToolkits,
+    (item) => item.name === name,
+    record?.availability.available ? record.toolkit : null,
+  );
+  return localToolkits ? { localToolkits } : {};
 }
 
 function replaceUserCapability(
   deps: LocalServerDeps,
   name: string,
   record: CapabilityAvailabilityRecord | null,
-) {
-  const userCapabilities = deps.userCapabilities;
-  if (!userCapabilities) return;
-
-  const index = userCapabilities.findIndex((item) =>
-    item.meta.id === name || item.capability.name === name,
-  );
-  if (record?.availability.available) {
-    const definition = deps.userCapabilityDefinitions?.find((item) =>
+): LocalServerCapabilityStatePatch {
+  const definition = record?.availability.available
+    ? deps.userCapabilityDefinitions?.find((item) =>
       item.meta.id === name || item.capability.name === name,
-    );
-    if (!definition) return;
-    if (index >= 0) {
-      userCapabilities[index] = definition;
-    } else {
-      userCapabilities.push(definition);
-    }
-  } else if (index >= 0) {
-    userCapabilities.splice(index, 1);
-  }
+    ) ?? null
+    : null;
+  const userCapabilities = replaceListItem(
+    deps.userCapabilities,
+    (item) => item.meta.id === name || item.capability.name === name,
+    definition,
+  );
+  return userCapabilities ? { userCapabilities } : {};
 }
 
-async function refreshRuntimeCapability(deps: LocalServerDeps, name: string) {
+function removeRuntimeCapability(
+  deps: LocalServerDeps,
+  name: string,
+): LocalServerCapabilityStatePatch {
+  return {
+    ...replaceLocalCapability(deps, name, null),
+    ...replaceLocalToolkit(deps, name, null),
+    ...replaceUserCapability(deps, name, null),
+  };
+}
+
+async function refreshRuntimeCapability(
+  deps: LocalServerDeps,
+  name: string,
+): Promise<LocalServerCapabilityStatePatch | null> {
   const localRecord = await refreshCapability(deps.localCapabilityDefinitions ?? [], name);
   const localToolkitRecord = await refreshToolkit(deps.localToolkitDefinitions ?? [], name);
-  if (localRecord) {
-    replaceLocalCapability(deps, name, localRecord);
-  }
-  if (localToolkitRecord) {
-    replaceLocalToolkit(deps, name, localToolkitRecord);
-  }
   if (localRecord || localToolkitRecord) {
-    return;
+    return {
+      ...(localRecord ? replaceLocalCapability(deps, name, localRecord) : {}),
+      ...(localToolkitRecord ? replaceLocalToolkit(deps, name, localToolkitRecord) : {}),
+    };
   }
 
   const userDefinition = deps.userCapabilityDefinitions?.find((item) =>
     item.meta.id === name || item.capability.name === name,
   );
-  if (!userDefinition) return;
+  if (!userDefinition) return null;
 
   const userRecord = await refreshCapability(
     deps.userCapabilityDefinitions?.map((item) => item.capability) ?? [],
     userDefinition.capability.name,
   );
-  replaceUserCapability(deps, name, userRecord);
+  return replaceUserCapability(deps, name, userRecord);
 }
 
 function isCapabilityEnabled(id: string) {
@@ -369,11 +382,15 @@ async function rescanUserCapabilities(deps: LocalServerDeps) {
   const definitions = runtimeRescan?.userCapabilityDefinitions ?? await loadUserCapabilities();
   const available = runtimeRescan?.userCapabilities
     ?? await filterAvailableUserCapabilities(definitions, { force: true });
-  deps.userCapabilityDefinitions = definitions;
-  deps.userCapabilities = available;
   return {
-    loaded: definitions.length,
-    available: available.length,
+    patch: {
+      userCapabilityDefinitions: definitions,
+      userCapabilities: available,
+    } satisfies LocalServerCapabilityStatePatch,
+    summary: {
+      loaded: definitions.length,
+      available: available.length,
+    },
   };
 }
 

@@ -30,10 +30,37 @@ export type NormalizedLocalServerDeps = Readonly<Omit<LocalServerDeps, 'workdir'
   runtimeConfig: LocalAgentRuntimeConfig;
 }>;
 
+export type LocalServerCapabilityStatePatch = Partial<Pick<LocalServerDeps,
+  | 'localToolkitDefinitions'
+  | 'localToolkits'
+  | 'localCapabilityDefinitions'
+  | 'localCapabilities'
+  | 'userCapabilityDefinitions'
+  | 'userCapabilities'
+>>;
+
 export type LocalServerRuntimeDepsStore = Readonly<{
   get: () => NormalizedLocalServerDeps;
   updateLlmConfig: (patch: Partial<AgentLlmConfig>) => NormalizedLocalServerDeps;
+  updateCapabilities: (patch: LocalServerCapabilityStatePatch) => NormalizedLocalServerDeps;
 }>;
+
+function freezeList<T>(value: T[] | undefined): T[] | undefined {
+  return value ? Object.freeze([...value]) as T[] : undefined;
+}
+
+function freezeCapabilityLists<T extends LocalServerDeps>(deps: T): T {
+  return {
+    ...deps,
+    localToolkitDefinitions: freezeList(deps.localToolkitDefinitions),
+    localToolkits: freezeList(deps.localToolkits),
+    pluginToolkits: freezeList(deps.pluginToolkits),
+    localCapabilityDefinitions: freezeList(deps.localCapabilityDefinitions),
+    localCapabilities: freezeList(deps.localCapabilities),
+    userCapabilityDefinitions: freezeList(deps.userCapabilityDefinitions),
+    userCapabilities: freezeList(deps.userCapabilities),
+  };
+}
 
 export function getLocalServerRuntimeConfig(deps: LocalServerDeps): LocalAgentRuntimeConfig {
   return deps.runtimeConfig ?? buildWorkspaceRuntimeConfig({ workdir: deps.workdir });
@@ -45,12 +72,12 @@ export function getLocalServerWorkdir(deps: LocalServerDeps): string {
 
 export function normalizeLocalServerDeps(deps: LocalServerDeps): NormalizedLocalServerDeps {
   const runtimeConfig = getLocalServerRuntimeConfig(deps);
-  return Object.freeze({
+  return Object.freeze(freezeCapabilityLists({
     ...deps,
     llmConfig: Object.freeze({ ...deps.llmConfig }),
     workdir: runtimeConfig.workdir,
     runtimeConfig,
-  });
+  }));
 }
 
 export function createLocalServerRuntimeDepsStore(
@@ -67,6 +94,13 @@ export function createLocalServerRuntimeDepsStore(
           ...patch,
         }),
       });
+      return current;
+    },
+    updateCapabilities: (patch: LocalServerCapabilityStatePatch) => {
+      current = Object.freeze(freezeCapabilityLists({
+        ...current,
+        ...patch,
+      }));
       return current;
     },
   });

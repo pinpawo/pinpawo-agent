@@ -102,6 +102,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
             }),
           };
         },
+        updateCapabilities: (patch) => runtimeDeps.updateCapabilities(patch),
       });
       if (handled) {
         return;

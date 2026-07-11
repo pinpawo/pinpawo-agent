@@ -5,7 +5,11 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { handleLocalHttpRequest } from './localHttpHandlers';
-import type { LocalServerDeps } from './localServerTypes';
+import {
+  createLocalServerRuntimeDepsStore,
+  type LocalServerDeps,
+} from './localServerTypes';
+import type { LoadedUserCapability } from './capabilityLoader';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 
 function makeReq(url: string, authorization?: string): IncomingMessage {
@@ -201,6 +205,102 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
   assert.equal(payload.agent_run_phase, 'using_tool');
 
   clearAgentRunActivity('req-1');
+});
+
+test('capability rescan replaces frozen runtime capability snapshots', async () => {
+  const definition = {
+    meta: {
+      id: 'custom-test',
+      name: 'Custom Test',
+      description: 'test capability',
+      icon: 'test',
+      color: 'gray',
+      defaultEnabled: true,
+      builtIn: false,
+    },
+    capability: { name: 'custom-test' },
+  } as LoadedUserCapability;
+  const runtimeDeps = createLocalServerRuntimeDepsStore({
+    actorId: 'pet-a',
+    llmConfig: {
+      apiKey: 'test',
+      baseUrl: 'http://localhost',
+      model: 'test-model',
+    },
+    workdir: '/tmp/pinpawo-capability-rescan',
+    userCapabilityDefinitions: [],
+    userCapabilities: [],
+    rescanUserCapabilities: async () => ({
+      userCapabilityDefinitions: [definition],
+      userCapabilities: [definition],
+    }),
+  });
+  const before = runtimeDeps.get();
+  const res = makeRes();
+
+  assert.equal(handleLocalHttpRequest(
+    makeReq('/capabilities/rescan', 'Bearer secret'),
+    res,
+    before,
+    {
+      authToken: 'secret',
+      loadHistory: async () => [],
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+      updateCapabilities: (patch) => runtimeDeps.updateCapabilities(patch),
+    },
+  ), true);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const after = runtimeDeps.get();
+  assert.equal(res.statusCode, 200);
+  assert.equal(JSON.parse(res.body).status, 'ok');
+  assert.equal(JSON.parse(res.body).loaded, 1);
+  assert.notEqual(after, before);
+  assert.deepEqual(before.userCapabilities, []);
+  assert.equal(after.userCapabilities?.[0], definition);
+  assert.equal(Object.isFrozen(after.userCapabilities), true);
+});
+
+test('capability refresh updates frozen runtime lists with copy-on-write', async () => {
+  const capability = { name: 'dynamic-test' } as NonNullable<LocalServerDeps['localCapabilities']>[number];
+  const runtimeDeps = createLocalServerRuntimeDepsStore({
+    actorId: 'pet-a',
+    llmConfig: {
+      apiKey: 'test',
+      baseUrl: 'http://localhost',
+      model: 'test-model',
+    },
+    workdir: '/tmp/pinpawo-capability-refresh',
+    localCapabilityDefinitions: [capability],
+    localCapabilities: [],
+  });
+  const before = runtimeDeps.get();
+  const res = makeRes();
+
+  handleLocalHttpRequest(
+    makeReq('/health?refresh_capability=dynamic-test', 'Bearer secret'),
+    res,
+    before,
+    {
+      authToken: 'secret',
+      loadHistory: async () => [],
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+      updateCapabilities: (patch) => runtimeDeps.updateCapabilities(patch),
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const after = runtimeDeps.get();
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(before.localCapabilities, []);
+  assert.equal(after.localCapabilities?.[0], capability);
+  assert.equal(Object.isFrozen(after.localCapabilities), true);
 });
 
 test('handleLocalHttpRequest exposes workdir Studio config source on runtime endpoint', async () => {

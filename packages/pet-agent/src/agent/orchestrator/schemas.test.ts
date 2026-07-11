@@ -88,11 +88,22 @@ test('capability planner schema materializes a concrete next task without capabi
   assert.equal(schema.safeParse({
     result: 'next_task',
     remaining_plan: [
-      { objective: '调查 auth', capability_intent: 'codebase_exploration', status: 'concrete' },
       { objective: '根据结论重构 auth', capability_intent: 'code_modification', status: 'deferred' },
     ],
     next_task: { objective: '调查 auth', capability_intent: 'codebase_exploration' },
   }).success, true);
+  assert.equal(schema.safeParse({
+    result: 'next_task',
+    remaining_plan: [],
+    next_task: { objective: '调查 auth', capability_intent: 'codebase_exploration' },
+  }).success, true);
+  assert.equal(schema.safeParse({
+    result: 'next_task',
+    remaining_plan: [
+      { objective: '调查 auth', capability_intent: 'codebase_exploration', status: 'concrete' },
+    ],
+    next_task: { objective: '调查 auth', capability_intent: 'codebase_exploration' },
+  }).success, false);
   assert.equal(schema.safeParse({ result: 'next_task', remaining_plan: [], next_task: null }).success, false);
   assert.equal(schema.safeParse({
     result: 'next_task',

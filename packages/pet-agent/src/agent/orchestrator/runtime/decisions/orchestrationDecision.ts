@@ -605,10 +605,7 @@ function buildCapabilityPlanningResult(decision: CapabilityPlanningDecision) {
   return {
     goto: 'capabilityDecision' as const,
     update: {
-      // The materialized head now belongs to runPendingTask. Plan state keeps
-      // only work that has not started, so boundary planning never receives
-      // the just-completed task as though it were still remaining.
-      runCapabilityPlan: remainingPlan.slice(1),
+      runCapabilityPlan: remainingPlan,
       runPendingTask: {
         task: decision.next_task.objective.trim(),
         contextSummary: `Capability intent: ${decision.next_task.capability_intent.trim()}`,

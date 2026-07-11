@@ -92,7 +92,6 @@ function buildScriptedDecisionModel() {
             return {
               result: 'next_task',
               remaining_plan: [
-                { objective, capability_intent: 'codebase_exploration', status: 'concrete' },
                 { objective: '根据调查结论重构 auth 模块', capability_intent: 'code_modification', status: 'deferred' },
               ],
               next_task: { objective, capability_intent: 'codebase_exploration' },
@@ -103,7 +102,7 @@ function buildScriptedDecisionModel() {
           searchQueries.push(objective);
           return {
             result: 'next_task',
-            remaining_plan: [{ objective, capability_intent: 'code_modification', status: 'concrete' }],
+            remaining_plan: [],
             next_task: { objective, capability_intent: 'code_modification' },
           };
         }

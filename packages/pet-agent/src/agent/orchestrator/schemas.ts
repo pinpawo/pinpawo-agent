@@ -97,28 +97,25 @@ export function buildTaskDecisionSchema() {
 
 export function buildCapabilityPlanningDecisionSchema() {
   const planTask = z.object({
-    objective: z.string().trim().min(1),
-    capability_intent: z.string().trim().min(1),
-    status: z.enum(['concrete', 'deferred']),
+    objective: z.string().trim().min(1).describe('尚未开始的 future task 目标。'),
+    capability_intent: z.string().trim().min(1).describe('所需能力类型，不是 registry capability id。'),
+    status: z.enum(['concrete', 'deferred']).describe('concrete=现在已可定义；deferred=仍依赖未来 handoff。'),
   });
   return z.object({
-    result: z.enum(['next_task', 'answer']),
-    remaining_plan: z.array(planTask),
+    result: z.enum(['next_task', 'answer']).describe('next_task=materialize 一个 current task；answer=不再自主执行。'),
+    remaining_plan: z.array(planTask).describe('next_task 之后尚未开始的 future tail；不得重复 next_task。'),
     next_task: z.object({
-      objective: z.string().trim().min(1),
-      capability_intent: z.string().trim().min(1),
-    }).nullable().optional(),
+      objective: z.string().trim().min(1).describe('本轮唯一 materialize 的 current task。'),
+      capability_intent: z.string().trim().min(1).describe('current task 所需能力类型，不是 registry capability id。'),
+    }).nullable().optional().describe('result=next_task 时必填；result=answer 时为 null。'),
   }).superRefine((decision, ctx) => {
     if (decision.result === 'next_task' && !decision.next_task?.objective.trim()) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['next_task'], message: 'next_task result requires a concrete next_task.' });
     }
-    if (decision.result === 'next_task' && decision.next_task) {
-      const first = decision.remaining_plan[0];
-      if (!first || first.status !== 'concrete'
-        || first.objective.trim() !== decision.next_task.objective.trim()
-        || first.capability_intent.trim() !== decision.next_task.capability_intent.trim()) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['remaining_plan'], message: 'remaining_plan must start with the concrete next_task.' });
-      }
+    if (decision.next_task && decision.remaining_plan.some((item) =>
+      item.objective === decision.next_task?.objective
+      && item.capability_intent === decision.next_task.capability_intent)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['remaining_plan'], message: 'remaining_plan must not repeat next_task.' });
     }
     if (decision.result === 'answer' && (decision.next_task || decision.remaining_plan.length > 0)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['remaining_plan'], message: 'answer result must have an empty plan and no next_task.' });
@@ -129,7 +126,7 @@ export function buildCapabilityPlanningDecisionSchema() {
 export function buildDelegationOutcomeDecisionSchema() {
   return z.object({
     outcome: z.enum(['continue', 'task_done', 'goal_done']).describe(
-      '验收结论。continue=当前 task 未达标，同一 capability 继续；task_done=当前 task 达标但总目标未完；goal_done=不再自主执行，交给 answer，通常因为目标已满足或需要用户澄清/确认。',
+      '验收结论。continue=当前 task 未达标，同一 capability 继续；task_done=当前 task 达标但不能明确断言总目标完成，后续交 planner；goal_done=不再自主执行，交给 answer，通常因为目标已满足或需要用户澄清/确认。',
     ),
     gap_note: z.string().nullable().optional().describe(
       'outcome=continue 或 task_done 时可填写缺口/下一步依据的简短说明；goal_done 时为 null 或省略。',

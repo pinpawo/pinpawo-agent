@@ -37,7 +37,6 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       nextTaskTerms: ['auth', '调查'],
       capabilityIntent: 'codebase_exploration',
       remainingPlan: [
-        { objectiveTerms: ['auth', '调查'], capabilityIntent: 'codebase_exploration', status: 'concrete' },
         { objectiveTerms: ['auth', '重构'], capabilityIntent: 'code_modification', status: 'deferred' },
       ],
       planEffect: 'created',
@@ -62,11 +61,7 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       result: 'next_task',
       nextTaskTerms: ['循环依赖', 'token', '接口'],
       capabilityIntent: 'code_modification',
-      remainingPlan: [{
-        objectiveTerms: ['循环依赖', 'token', '接口'],
-        capabilityIntent: 'code_modification',
-        status: 'concrete',
-      }],
+      remainingPlan: [],
       planEffect: 'revised',
       rubberStamp: false,
       reason: 'Boundary planning materializes implementation details from the handoff.',
@@ -110,16 +105,42 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
       result: 'next_task',
       nextTaskTerms: ['报告', '发送', '负责人'],
       capabilityIntent: 'message_delivery',
-      remainingPlan: [{
-        objectiveTerms: ['报告', '发送', '负责人'],
-        capabilityIntent: 'message_delivery',
-        status: 'concrete',
-      }],
+      remainingPlan: [],
       planEffect: 'unchanged',
       rubberStamp: true,
       reason: 'The concrete next task remains valid after the handoff.',
     },
     metadata: { difficulty: 'medium', reason: 'Rubber-stamp measurement case.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.boundary-materializes-head-and-preserves-tail`,
+    name: 'boundary-materializes-head-and-preserves-tail',
+    suite: SUITE,
+    tags: ['capability_planning', 'delegation_control'],
+    input: {
+      mode: 'boundary',
+      userGoal: '根据调查修复 auth 风险，然后独立运行 release verification。',
+      capabilityRegistry: ['code_modification', 'quality_verification', 'general'],
+      remainingPlan: [
+        { objective: '根据调查结论修复 auth 风险', capabilityIntent: 'code_modification', status: 'deferred' },
+        { objective: '独立运行 release verification', capabilityIntent: 'quality_verification', status: 'deferred' },
+      ],
+      latestHandoff: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
+    },
+    expected: {
+      result: 'next_task',
+      nextTaskTerms: ['token', '循环依赖', '公开接口'],
+      capabilityIntent: 'code_modification',
+      remainingPlan: [{
+        objectiveTerms: ['release', 'verification'],
+        capabilityIntent: 'quality_verification',
+        status: 'deferred',
+      }],
+      planEffect: 'revised',
+      rubberStamp: false,
+      reason: 'Boundary planning materializes only the next task and preserves later future work as tail.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Separated next_task and future tail.', source: SOURCE_FILE },
   },
 ];
 

@@ -26,13 +26,19 @@ const actor = {
 function deterministicModel(testCase: typeof capabilityPlanningBasicsDataset.cases[number]): AgentModels['act'] {
   const expected = testCase.expected;
   const remainingPlan = expected.planEffect === 'unchanged'
-    ? testCase.input.remainingPlan ?? []
+    ? (testCase.input.remainingPlan ?? []).slice(1)
     : expected.remainingPlan.map((item) => ({
       objective: item.objectiveTerms.join(' '),
       capabilityIntent: item.capabilityIntent,
       status: item.status,
     }));
-  const nextTask = remainingPlan[0];
+  const unchangedNextTask = expected.planEffect === 'unchanged'
+    ? testCase.input.remainingPlan?.[0]
+    : null;
+  const nextTask = expected.result === 'next_task' ? {
+    objective: unchangedNextTask?.objective ?? expected.nextTaskTerms?.join(' ') ?? '',
+    capabilityIntent: unchangedNextTask?.capabilityIntent ?? expected.capabilityIntent ?? '',
+  } : null;
   return {
     invoke: async () => new AIMessage(''),
     withStructuredOutput: () => ({
@@ -43,7 +49,7 @@ function deterministicModel(testCase: typeof capabilityPlanningBasicsDataset.cas
           capability_intent: item.capabilityIntent,
           status: item.status,
         })),
-        next_task: expected.result === 'next_task' && nextTask ? {
+        next_task: nextTask ? {
           objective: nextTask.objective,
           capability_intent: nextTask.capabilityIntent,
         } : null,
@@ -87,7 +93,19 @@ async function runCase(testCase: typeof capabilityPlanningBasicsDataset.cases[nu
     capabilityIntent: parsed.next_task?.capability_intent ?? null,
   };
   const scores = scoreCapabilityPlanning(output, testCase.expected, testCase.input);
-  return { output: { ...output, ...derivePlanningMetrics(testCase.input, output.remainingPlan) }, scores };
+  return {
+    output: {
+      ...output,
+      ...derivePlanningMetrics(
+        testCase.input,
+        output.remainingPlan,
+        output.nextTask && output.capabilityIntent
+          ? { objective: output.nextTask, capabilityIntent: output.capabilityIntent }
+          : null,
+      ),
+    },
+    scores,
+  };
 }
 
 async function main() {
@@ -108,8 +126,8 @@ async function main() {
         if (output.rubberStamp) rubberStampCount += 1;
       }
       const ok = scores.every(({ score }) => score === 1);
-      if (ok) passed += 1;
       await writeLangfuseEvalResult({ config, datasetName: capabilityPlanningBasicsDataset.name, runName, traceName: `capability-planner-${testCase.input.mode}`, testCase, output, scores, durationMs: Math.round(performance.now() - started) });
+      if (ok) passed += 1;
       console.log(`[${ok ? 'PASS' : 'FAIL'}] planner@${testCase.input.mode} ${testCase.name}: ${scores.map(({ key, score }) => `${key}=${score}`).join(' ')}`);
     } catch (error) {
       console.log(`[ERROR] ${testCase.name}: ${String(error)}`);

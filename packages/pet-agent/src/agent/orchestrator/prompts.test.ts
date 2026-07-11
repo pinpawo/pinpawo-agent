@@ -191,7 +191,8 @@ test('capability planner prompt owns entry and boundary materialization', () => 
   });
   assert.match(prompt, /capability planning decision 节点/);
   assert.match(prompt, /不绑定 registry 中的具体 capability id/);
-  assert.match(prompt, /boundary 模式/);
+  assert.match(prompt, /mode=entry：[^]*mode=boundary：[^]*result=next_task：[^]*result=answer：/);
+  assert.match(prompt, /remaining_plan 只包含 next_task 之后/);
   assert.match(input, /<mode>boundary<\/mode>/);
   assert.match(input, /token validation/);
   assert.match(input, /code_modification/);
@@ -226,19 +227,21 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
   assert.match(prompt, /当前阶段：delegationOutcomeDecision/);
-  assert.match(prompt, /决策原则/);
+  assert.match(prompt, /决策条件/);
+  assert.match(prompt, /outcome=continue：[^]*outcome=task_done：[^]*outcome=goal_done：/);
+  assert.match(prompt, /系统 handoff 后由 capabilityPlanner/);
   assert.match(prompt, /不再自主执行，交给 answer/);
   assert.match(prompt, /唯一职责/);
 });
 
-test('answer prompt owns clarification questions', () => {
+test('answer prompt owns the user-visible reply', () => {
   const prompt = buildAnswerSystemPrompt({
     actor: testActor,
   });
 
-  assert.match(prompt, /最终总结、结论、关键依据/);
+  assert.match(prompt, /主对话中的 handoff 结论/);
   assert.match(prompt, /不要把紧邻的执行器\/subagent 结果原文整体复制一遍/);
-  assert.match(prompt, /直接向用户提出需要补充或确认的问题/);
+  assert.match(prompt, /明确提出当前需要用户回答的问题/);
   assert.match(prompt, /不要输出 JSON、动作字段/);
 });
 

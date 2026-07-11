@@ -85,3 +85,17 @@ test('planner scorer derives cancellation instead of trusting a label', () => {
   assert.equal(scores.find((score) => score.key === 'plan_effect_correct')?.score, 0);
   assert.equal(scores.find((score) => score.key === 'remaining_plan_correct')?.score, 0);
 });
+
+test('planner scorer reconstructs an unchanged plan from next task plus future tail', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases.find((item) => item.name === 'boundary-keeps-valid-concrete-task');
+  assert.ok(testCase);
+  const materialized = testCase.input.remainingPlan?.[0];
+  assert.ok(materialized);
+  const scores = scoreCapabilityPlanning({
+    result: 'next_task',
+    nextTask: materialized.objective,
+    capabilityIntent: materialized.capabilityIntent,
+    remainingPlan: [],
+  }, testCase.expected, testCase.input);
+  assert.ok(allPass(scores));
+});

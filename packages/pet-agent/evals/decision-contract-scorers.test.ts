@@ -1,0 +1,65 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { capabilityDecisionBasicsDataset } from './datasets/capability-decision-basics.ts';
+import { capabilityPlanningBasicsDataset } from './datasets/capability-planning-basics.ts';
+import { entryDecisionBasicsDataset } from './datasets/entry-decision-basics.ts';
+import { outcomeDecisionBasicsDataset } from './datasets/outcome-decision-basics.ts';
+import {
+  scoreCapabilityDecision,
+  scoreCapabilityPlanning,
+  scoreEntryDecision,
+  scoreOutcomeDecision,
+} from './decision-contract-scorers.ts';
+
+function allPass(scores: Array<{ score: number }>) {
+  return scores.every((score) => score.score === 1);
+}
+
+test('entry scorer treats textual steps as one task when the execution boundary is shared', () => {
+  const testCase = entryDecisionBasicsDataset.cases.find((item) => item.name === 'multiple-actions-one-capability-call');
+  assert.ok(testCase);
+  assert.equal(testCase.expected.expectedBoundaryCount, 1);
+  assert.ok(allPass(scoreEntryDecision({
+    mode: 'direct_task',
+    task: '读取 package.json 的依赖，运行 npm test，并汇总结果。',
+    boundaryCount: 1,
+  }, testCase.expected)));
+});
+
+test('capability scorer rejects an unregistered selected capability', () => {
+  const testCase = capabilityDecisionBasicsDataset.cases[0];
+  assert.ok(testCase);
+  const scores = scoreCapabilityDecision({
+    selectedLane: 'capability.fabricated',
+    candidateNames: testCase.expected.expectedCandidateNames,
+  }, testCase.expected, testCase.input.availableCapabilities.map(({ name }) => name));
+  assert.equal(scores.find((score) => score.key === 'selected_capability_registered')?.score, 0);
+});
+
+test('outcome scorer rejects next-task generation', () => {
+  const testCase = outcomeDecisionBasicsDataset.cases[1];
+  assert.ok(testCase);
+  const scores = scoreOutcomeDecision({ outcome: 'task_done', next_task: '修改 auth 模块' }, testCase.expected);
+  assert.equal(scores.find((score) => score.key === 'outcome_ownership_correct')?.score, 0);
+});
+
+test('planning datasets cover entry and boundary distributions', () => {
+  const modes = new Set(capabilityPlanningBasicsDataset.cases.map((testCase) => testCase.input.mode));
+  assert.deepEqual([...modes].sort(), ['boundary', 'entry']);
+  assert.ok(capabilityPlanningBasicsDataset.cases.some((testCase) => testCase.expected.rubberStamp));
+  assert.ok(capabilityPlanningBasicsDataset.cases.some((testCase) => testCase.expected.planEffect === 'cancelled'));
+});
+
+test('planner scorer rejects binding a concrete capability id', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases[0];
+  assert.ok(testCase);
+  const scores = scoreCapabilityPlanning({
+    result: testCase.expected.result,
+    nextTask: '调查 auth 模块的结构和风险',
+    capabilityIntent: testCase.expected.capabilityIntent,
+    capabilityId: 'explore',
+    planEffect: testCase.expected.planEffect,
+    rubberStamp: testCase.expected.rubberStamp,
+  }, testCase.expected);
+  assert.equal(scores.find((score) => score.key === 'planner_does_not_bind_capability_id')?.score, 0);
+});

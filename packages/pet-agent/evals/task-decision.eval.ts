@@ -49,6 +49,7 @@ type EvalCase = {
   recentMessages?: BaseMessage[];
   runDelegationSummaries?: RunDelegationSummary[];
   expectedAction?: TaskDecision['action'];
+  targetMode: 'answer' | 'direct_task' | 'needs_plan';
   expectedTaskPattern?: RegExp;
   forbiddenTaskPattern?: RegExp;
   expectedSearchKeywordsPattern?: RegExp;
@@ -108,19 +109,22 @@ const EVAL_CASES: EvalCase[] = [
       new AIMessage('结论：task_done 会回到 taskDecision，由最新上下文决定是否还有后续 task。'),
     ],
     expectedAction: 'answer',
+    targetMode: 'answer',
   },
   {
     id: 'single-step-file-read',
-    name: 'single delegated task without follow-up draft',
+    name: 'single direct task',
     latestUserRequest: '读取 docs/PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md，告诉我 Stage B 的验收标准。',
     expectedAction: 'next_task',
+    targetMode: 'direct_task',
     expectedTaskPattern: /读取|查看|检查|提炼|验收标准/i,
   },
   {
     id: 'initial-multi-step-investigation',
-    name: 'initial multi-step request creates a follow-up draft',
+    name: 'dynamic exploration request exposes missing planning mode',
     latestUserRequest: '看 issue #269 的设计诉求，再查本地实现和 git log，最后总结是否已经覆盖。',
     expectedAction: 'next_task',
+    targetMode: 'needs_plan',
     expectedTaskPattern: /issue|269|设计|诉求|需求/i,
     forbiddenTaskPattern: /最后总结|完整计划|步骤\s*[123]|1[.、].*2[.、]/i,
   },
@@ -129,13 +133,14 @@ const EVAL_CASES: EvalCase[] = [
     name: 'PR review stays one deliverable and keeps investigation keywords',
     latestUserRequest: 'review https://github.com/pinpawo/pinpawo-agent/pull/344，重点看 Stage B 的 task routing 有没有回归。',
     expectedAction: 'next_task',
+    targetMode: 'direct_task',
     expectedTaskPattern: /review|PR|344|Stage B|routing|回归/i,
     expectedSearchKeywordsPattern: /review|PR|code|repository|explore|调查|审查|代码/i,
     forbiddenSearchKeywordsPattern: /^https?:\/\/\S+$/i,
   },
   {
-    id: 'maintain-existing-draft',
-    name: 'existing draft picks next task and shrinks remaining draft',
+    id: 'after-first-handoff-next-task',
+    name: 'completed handoff informs the next current task',
     latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
     runDelegationSummaries: [
       completedSummary(
@@ -145,11 +150,12 @@ const EVAL_CASES: EvalCase[] = [
       ),
     ],
     expectedAction: 'next_task',
+    targetMode: 'direct_task',
     expectedTaskPattern: /本地|实现|git|log|检索|检查/i,
     forbiddenTaskPattern: /读取 issue|提炼需求点/i,
   },
   {
-    id: 'post-first-no-draft',
+    id: 'after-first-handoff-remaining-work',
     name: 'remaining work fits one task and does not create answer-work guidance',
     latestUserRequest: '看 issue #269，再查本地实现和 git log，最后总结是否已经覆盖。',
     runDelegationSummaries: [
@@ -160,6 +166,7 @@ const EVAL_CASES: EvalCase[] = [
       ),
     ],
     expectedAction: 'next_task',
+    targetMode: 'direct_task',
     expectedTaskPattern: /本地|实现|git|log|检索|检查/i,
   },
   {
@@ -175,10 +182,19 @@ const EVAL_CASES: EvalCase[] = [
       completedSummary(
         'task-2',
         '检索本地实现与 git log，判断需求点是否已覆盖。',
-        '本地实现已经把 outcomeDecision 验收化，并让有草案的 task_done 回环 taskDecision。',
+        '本地实现已经把 outcomeDecision 验收化，并让 task_done 回环 taskDecision。',
       ),
     ],
     expectedAction: 'answer',
+    targetMode: 'answer',
+  },
+  {
+    id: 'multiple-actions-one-capability-call',
+    name: 'multiple textual actions remain one capability execution',
+    latestUserRequest: '读取 package.json 的依赖列表，然后运行 npm test，并告诉我结果。',
+    expectedAction: 'next_task',
+    targetMode: 'direct_task',
+    expectedTaskPattern: /package\.json.*npm test|npm test.*package\.json/i,
   },
 ];
 
@@ -328,7 +344,6 @@ function hasMultiStepShape(task: string | null | undefined): boolean {
   if (!task) return false;
   return (
     /(?:^|\n)\s*(?:\d+[.、)]|[-*])\s+\S/.test(task)
-    || /(?:然后|接着|再查|最后|并最终|并且最后)/.test(task)
     || task.length > 220
   );
 }
@@ -350,7 +365,7 @@ function evaluateDecision(testCase: EvalCase, decision: TaskDecision): string[] 
   if (decision.action === 'next_task') {
     if (!task) issues.push('next_task action requires task');
     if (hasMultiStepShape(task)) {
-      issues.push('task appears to contain multiple steps or an oversized plan');
+      issues.push('task appears to contain an enumerated plan or is oversized');
     }
   }
   if (task && testCase.expectedTaskPattern && !testCase.expectedTaskPattern.test(task)) {
@@ -502,6 +517,7 @@ function printSummary(results: EvalResult[], repeats: number) {
     const pass = group.filter((result) => result.ok).length;
     console.log(
       `- ${caseId}: ${pass}/${repeats} passed; ` +
+      `target=${EVAL_CASES.find((item) => item.id === caseId)?.targetMode}; ` +
       `actions=[${formatDistribution(group.map((item) => item.action))}]; ` +
       `tasks=[${formatDistribution(group.map((item) => item.taskPreview))}]`,
     );

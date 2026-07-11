@@ -234,14 +234,14 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
   assert.match(prompt, /唯一职责/);
 });
 
-test('answer prompt owns clarification questions', () => {
+test('answer prompt owns the user-visible reply', () => {
   const prompt = buildAnswerSystemPrompt({
     actor: testActor,
   });
 
-  assert.match(prompt, /最终总结、结论、关键依据/);
+  assert.match(prompt, /主对话中的 handoff 结论/);
   assert.match(prompt, /不要把紧邻的执行器\/subagent 结果原文整体复制一遍/);
-  assert.match(prompt, /直接向用户提出需要补充或确认的问题/);
+  assert.match(prompt, /明确提出当前需要用户回答的问题/);
   assert.match(prompt, /不要输出 JSON、动作字段/);
 });
 

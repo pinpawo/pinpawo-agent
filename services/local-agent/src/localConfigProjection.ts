@@ -19,12 +19,20 @@ export type LocalRuntimeProjection = {
   legacyStudioConfigPath: string;
 };
 
-export function buildLocalRuntimeProjection(deps: LocalServerDeps): LocalRuntimeProjection {
+export type LocalRuntimeProjectionOptions = {
+  legacyStudioConfigPath?: string;
+};
+
+export function buildLocalRuntimeProjection(
+  deps: LocalServerDeps,
+  options: LocalRuntimeProjectionOptions = {},
+): LocalRuntimeProjection {
   const runtimeConfig = deps.runtimeConfig;
-  const preferredPath = runtimeConfig?.studioConfigPath ?? DEFAULT_STUDIO_CONFIG_PATH;
+  const legacyStudioConfigPath = options.legacyStudioConfigPath ?? DEFAULT_STUDIO_CONFIG_PATH;
+  const preferredPath = runtimeConfig?.studioConfigPath ?? legacyStudioConfigPath;
   const preferredAvailable = existsSync(preferredPath);
-  const legacyAvailable = preferredPath !== DEFAULT_STUDIO_CONFIG_PATH
-    && existsSync(DEFAULT_STUDIO_CONFIG_PATH);
+  const legacyAvailable = preferredPath !== legacyStudioConfigPath
+    && existsSync(legacyStudioConfigPath);
 
   return {
     model: deps.llmConfig.model,
@@ -52,9 +60,9 @@ export function buildLocalRuntimeProjection(deps: LocalServerDeps): LocalRuntime
     studioConfigActivePath: preferredAvailable
       ? preferredPath
       : legacyAvailable
-        ? DEFAULT_STUDIO_CONFIG_PATH
+        ? legacyStudioConfigPath
         : preferredPath,
-    legacyStudioConfigPath: DEFAULT_STUDIO_CONFIG_PATH,
+    legacyStudioConfigPath,
   };
 }
 

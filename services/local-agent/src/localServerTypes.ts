@@ -25,10 +25,15 @@ export type LocalServerDeps = {
   }>;
 };
 
-export type NormalizedLocalServerDeps = Omit<LocalServerDeps, 'workdir' | 'runtimeConfig'> & {
+export type NormalizedLocalServerDeps = Readonly<Omit<LocalServerDeps, 'workdir' | 'runtimeConfig'> & {
   workdir: string;
   runtimeConfig: LocalAgentRuntimeConfig;
-};
+}>;
+
+export type LocalServerRuntimeDepsStore = Readonly<{
+  get: () => NormalizedLocalServerDeps;
+  updateLlmConfig: (patch: Partial<AgentLlmConfig>) => NormalizedLocalServerDeps;
+}>;
 
 export function getLocalServerRuntimeConfig(deps: LocalServerDeps): LocalAgentRuntimeConfig {
   return deps.runtimeConfig ?? buildWorkspaceRuntimeConfig({ workdir: deps.workdir });
@@ -40,9 +45,29 @@ export function getLocalServerWorkdir(deps: LocalServerDeps): string {
 
 export function normalizeLocalServerDeps(deps: LocalServerDeps): NormalizedLocalServerDeps {
   const runtimeConfig = getLocalServerRuntimeConfig(deps);
-  return {
+  return Object.freeze({
     ...deps,
+    llmConfig: Object.freeze({ ...deps.llmConfig }),
     workdir: runtimeConfig.workdir,
     runtimeConfig,
-  };
+  });
+}
+
+export function createLocalServerRuntimeDepsStore(
+  deps: LocalServerDeps,
+): LocalServerRuntimeDepsStore {
+  let current = normalizeLocalServerDeps(deps);
+  return Object.freeze({
+    get: () => current,
+    updateLlmConfig: (patch: Partial<AgentLlmConfig>) => {
+      current = Object.freeze({
+        ...current,
+        llmConfig: Object.freeze({
+          ...current.llmConfig,
+          ...patch,
+        }),
+      });
+      return current;
+    },
+  });
 }

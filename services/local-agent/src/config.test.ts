@@ -109,7 +109,6 @@ test('setConfig replaces the current frozen snapshot without mutating previous s
   try {
     const updated = setConfig((current) => ({
       workdir: `${current.workdir}-updated`,
-      capabilityDirs: [...current.capabilityDirs, '/tmp/example-capability'],
     }));
 
     assert.notEqual(updated, original);
@@ -117,7 +116,6 @@ test('setConfig replaces the current frozen snapshot without mutating previous s
     assert.equal(original.workdir.endsWith('-updated'), false);
     assert.equal(updated.workdir, `${original.workdir}-updated`);
     assert.equal(Object.isFrozen(updated), true);
-    assert.equal(Object.isFrozen(updated.capabilityDirs), true);
   } finally {
     setConfig(original);
   }

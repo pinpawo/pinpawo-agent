@@ -9,6 +9,7 @@ import {
   summarizeTuiHistoryMessages,
   type TuiSessionCheckpointer,
 } from './localServerTuiSessions';
+import { createLocalServerRuntimeDepsStore } from './localServerTypes';
 
 test('readTuiHistoryMessages keeps visible user/assistant messages only', () => {
   const userMessage = stampMessageCreatedAtUtc(
@@ -117,6 +118,53 @@ test('LocalServerTuiSessionService injects active session createdAt into runtime
   assert.match(setup.input.runtimeEnvironment ?? '', /时区：/);
   assert.match(setup.input.runtimeEnvironment ?? '', /工作目录：\/tmp\/pinpawo-tui-workdir/);
   assert.doesNotMatch(setup.input.runtimeEnvironment ?? '', /进程 cwd/);
+});
+
+test('runtime config updates reach the next chat setup through the normalized deps store', () => {
+  const service = new LocalServerTuiSessionService({
+    state: createEmptyTuiSessionState(),
+    saveState: () => {},
+  });
+  const runtimeDeps = createLocalServerRuntimeDepsStore({
+    actorId: 'pet-a',
+    llmConfig: {
+      apiKey: 'test',
+      baseUrl: 'http://localhost',
+      model: 'test-model',
+      globalReviewPolicyMode: 'require_authorization',
+    },
+    workdir: '/tmp/pinpawo-policy-update',
+  });
+  const context = {
+    pet: {
+      id: 'pet-a',
+      name: 'Paw',
+      personality: null,
+      species: null,
+      stage: null,
+      growth_value: null,
+      stage_asset_id: null,
+    },
+    context: {
+      petMemoryText: '',
+      recentChatTurns: [],
+      recentDaily: [],
+      trendItems: [],
+      today: '2026-06-11',
+    },
+  };
+
+  const beforeDeps = runtimeDeps.get();
+  const before = service.buildChatSetup(beforeDeps, context);
+  runtimeDeps.updateLlmConfig({ globalReviewPolicyMode: 'auto_authorization' });
+  const afterDeps = runtimeDeps.get();
+  const after = service.buildChatSetup(afterDeps, context);
+
+  assert.notEqual(afterDeps, beforeDeps);
+  assert.equal(Object.isFrozen(afterDeps), true);
+  assert.equal(Object.isFrozen(afterDeps.llmConfig), true);
+  assert.equal(before.input.globalReviewPolicy?.mode, 'require_authorization');
+  assert.equal(after.input.globalReviewPolicy?.mode, 'auto_authorization');
 });
 
 test('LocalServerTuiSessionService reads active pending review from checkpoint interrupt', async () => {

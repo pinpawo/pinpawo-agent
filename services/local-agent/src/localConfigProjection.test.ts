@@ -13,7 +13,6 @@ import {
   type LocalServerDeps,
 } from './localServerTypes';
 import { buildWorkspaceRuntimeConfig } from './runtimeConfig';
-import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
 
 function createDeps(workdir: string): LocalServerDeps {
   return {
@@ -63,11 +62,16 @@ test('HTTP and TUI projections expose the same normalized runtime values', () =>
 });
 
 test('projection without runtime config preserves the legacy home contract', () => {
-  const runtime = buildLocalRuntimeProjection(createDeps('/tmp/legacy-workdir'));
+  const home = mkdtempSync(join(tmpdir(), 'pinpawo-legacy-home-'));
+  const legacyStudioConfigPath = join(home, '.pinpawo', 'studio.json');
+  const runtime = buildLocalRuntimeProjection(createDeps('/tmp/legacy-workdir'), {
+    legacyStudioConfigPath,
+  });
 
   assert.equal(runtime.workdir, '/tmp/legacy-workdir');
   assert.equal(runtime.stateRoot, undefined);
   assert.equal(runtime.studioConfigPath, undefined);
-  assert.equal(runtime.studioConfigActivePath, DEFAULT_STUDIO_CONFIG_PATH);
-  assert.ok(runtime.studioConfigSource === 'legacy_home' || runtime.studioConfigSource === 'missing');
+  assert.equal(runtime.studioConfigActivePath, legacyStudioConfigPath);
+  assert.equal(runtime.legacyStudioConfigPath, legacyStudioConfigPath);
+  assert.equal(runtime.studioConfigSource, 'missing');
 });

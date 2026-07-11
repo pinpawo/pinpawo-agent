@@ -199,24 +199,14 @@ export type Config = Readonly<{
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   workdir: string;
   browserBackend: string;
-  capabilityDirs: readonly string[];
   pollIntervalSeconds: number;
   localServerPort: number;
 }>;
 
 export type ConfigInput = Partial<Config>;
 
-function readCapabilityDirs(): string[] {
-  const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(':').filter(Boolean) ?? [];
-  const fromStored = stored.capability_dirs ?? [];
-  return [...new Set([...fromEnv, ...fromStored])];
-}
-
 function freezeConfig(input: Config): Config {
-  return Object.freeze({
-    ...input,
-    capabilityDirs: Object.freeze([...input.capabilityDirs]),
-  });
+  return Object.freeze({ ...input });
 }
 
 function readConfigDefaults(): Config {
@@ -244,7 +234,6 @@ function readConfigDefaults(): Config {
     globalReviewPolicyMode: getGlobalReviewPolicyMode(),
     workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
     browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
-    capabilityDirs: readCapabilityDirs(),
     pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
     localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
   });
@@ -261,7 +250,6 @@ export function buildConfig(input: ConfigInput = {}, defaults: Config = defaultC
   return freezeConfig({
     ...defaults,
     ...input,
-    capabilityDirs: input.capabilityDirs ?? defaults.capabilityDirs,
   });
 }
 

@@ -37,8 +37,6 @@ export type RunPendingTask = {
   searchKeywords: string | null;
 };
 
-export type RunTaskPlanDraft = string[] | null;
-
 export type TaskActiveDelegation = {
   id: string;
   lane: MessageLane;

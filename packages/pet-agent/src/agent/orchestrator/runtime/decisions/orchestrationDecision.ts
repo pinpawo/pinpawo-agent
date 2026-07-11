@@ -13,13 +13,14 @@ import type {
   OrchestratorConfig,
   RunNextDelegation,
   RunPendingTask,
-  RunTaskPlanDraft,
   TaskActiveDelegation,
 } from '../../types';
 import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
+  buildRouteDecisionOutputInstruction,
   buildRouteDecisionSchema,
+  buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
   buildOrchestrationDecisionStructuredOutputOptions,
   parseRouteLane,
@@ -39,9 +40,9 @@ import {
   buildRouteDecisionSystemPrompt,
   buildRouteTargetsContext,
   buildRunDelegationSummaryContext,
+  buildRuntimeContext,
   buildSubagentAnnounceContext,
   buildTaskDecisionInput,
-  buildTaskPlanDraftContext,
   buildTaskDecisionSystemPrompt,
 } from '../../prompts';
 import { reuseOrAppendRunDelegationSummary } from '../../delegations';
@@ -156,19 +157,18 @@ function buildTaskDecisionContext(params: {
     contextSummaries,
     capabilityArtifacts: state.sessionCapabilityArtifacts,
   });
-  const hasTaskPlanDraft = Boolean(state.runTaskPlanDraft && state.runTaskPlanDraft.length > 0);
   const systemPrompt = buildTaskDecisionSystemPrompt({
     actor,
-    runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
-    hasTaskPlanDraft,
-    workdir,
-    runtimeEnvironment,
+    outputInstruction: buildTaskDecisionOutputInstruction(
+      config.decisionStructuredOutput?.method,
+    ),
   });
   const decisionInputMessage = new HumanMessage(buildTaskDecisionInput({
     latestUserRequest: latestHumanRequest,
     recentMessages: recentMainMessages,
     requestContext,
-    taskPlanDraftContext: buildTaskPlanDraftContext(state.runTaskPlanDraft),
+    runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
+    runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
   }));
 
   return {
@@ -221,12 +221,15 @@ async function buildRouteDecisionContext(params: {
   });
   const systemPrompt = buildRouteDecisionSystemPrompt({
     actor,
-    targetsContext,
-    workdir,
-    runtimeEnvironment,
+    outputInstruction: buildRouteDecisionOutputInstruction(
+      { capabilityCandidates: decisionCapabilityCandidates },
+      config.decisionStructuredOutput?.method,
+    ),
   });
   const decisionInputMessage = new HumanMessage(buildRouteDecisionInput({
     pendingTask: state.runPendingTask,
+    targetsContext,
+    runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
   }));
 
   return {
@@ -251,12 +254,14 @@ function buildDecisionContext(params: {
   runnableConfig?: RunnableConfig;
 }) {
   const { config, state, runnableConfig } = params;
-  const {
-    workdir,
-    runtimeEnvironment,
-  } = getInvokeOptions(runnableConfig);
   const actor = resolveActor(config, runnableConfig);
   const latestHumanRequest = readLatestHumanRequest(state.messages);
+  const userIntentContext = buildPreparedRequestContext({
+    latestUserRequest: latestHumanRequest,
+    recentMessages: mainMessagesWithoutCompaction(state.messages),
+    recentAnnounces: [],
+    contextSummaries: readContextCompactionSummaries(state.messages),
+  });
   const activeDelegation = state.taskActiveDelegation;
   const activeDelegationCapabilityId = activeDelegation
     && activeDelegation.lane.startsWith('capability:')
@@ -329,24 +334,24 @@ function buildDecisionContext(params: {
     ? { ...activeDelegationAnnounce, artifactRefs: activeDelegationArtifactRefs }
     : null;
   const systemPrompt = buildDelegationOutcomeDecisionSystemPrompt({
-      actor,
-      outputInstruction: buildDelegationOutcomeDecisionOutputInstruction(),
-      workdir,
-      runtimeEnvironment,
-    });
+    actor,
+    outputInstruction: buildDelegationOutcomeDecisionOutputInstruction(
+      config.decisionStructuredOutput?.method,
+    ),
+  });
   const decisionInputMessage = new HumanMessage(buildDelegationOutcomeDecisionInput({
-      latestUserRequest: latestHumanRequest,
-      currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
-      subagentAnnounceContext: buildSubagentAnnounceContext(
-        activeDelegationAnnounceForDecision,
-        activeDelegationCompletionReason,
-      ),
-      otherTasksContext: buildDelegationOutcomeOtherTasksContext(
-        state.runDelegationSummaries,
-        activeDelegation?.id ?? null,
-      ),
-      capabilityArtifacts: state.sessionCapabilityArtifacts,
-    }));
+    userIntentContext,
+    currentTaskContext: buildDelegationOutcomeCurrentTaskContext(activeDelegation),
+    subagentAnnounceContext: buildSubagentAnnounceContext(
+      activeDelegationAnnounceForDecision,
+      activeDelegationCompletionReason,
+    ),
+    otherTasksContext: buildDelegationOutcomeOtherTasksContext(
+      state.runDelegationSummaries,
+      activeDelegation?.id ?? null,
+    ),
+    capabilityArtifacts: state.sessionCapabilityArtifacts,
+  }));
 
   return {
     activeDelegation,
@@ -450,12 +455,10 @@ function buildTaskDecisionResult(params: {
 }) {
   const { state, decision } = params;
   const task = readDecisionText(decision.task);
-  const planDraft = normalizePlanDraft(decision.plan_draft);
   if (decision.action === 'answer') {
     return {
       runNextDelegation: null,
       runPendingTask: null,
-      runTaskPlanDraft: null,
       runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     };
   }
@@ -471,7 +474,6 @@ function buildTaskDecisionResult(params: {
   return {
     runNextDelegation: null,
     runPendingTask: pendingTask,
-    runTaskPlanDraft: planDraft,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
   };
 }
@@ -569,11 +571,7 @@ function buildDelegationOutcomeDecisionResult(params: {
     };
   }
 
-  const completedTaskUpdate = buildCompletedTaskResult({
-    state,
-    context,
-    clearPlanDraft: decision.outcome === 'goal_done',
-  });
+  const completedTaskUpdate = buildCompletedTaskResult({ state, context });
   if (!completedTaskUpdate) {
     return {
       goto: 'answer',
@@ -589,14 +587,6 @@ function buildDelegationOutcomeDecisionResult(params: {
     goto: decision.outcome === 'goal_done' ? 'answer' : 'taskDecision',
     update: completedTaskUpdate,
   };
-}
-
-function normalizePlanDraft(value: TaskDecision['plan_draft']): RunTaskPlanDraft {
-  const steps = (value ?? [])
-    .map((step) => readDecisionText(step))
-    .filter((step): step is string => Boolean(step))
-    .slice(0, 5);
-  return steps.length > 0 ? steps : null;
 }
 
 function buildContinueDelegationResult(params: {
@@ -629,9 +619,8 @@ function buildContinueDelegationResult(params: {
 function buildCompletedTaskResult(params: {
   state: OrchestratorStateType;
   context: OrchestrationDecisionContext;
-  clearPlanDraft: boolean;
 }) {
-  const { state, context, clearPlanDraft } = params;
+  const { state, context } = params;
   const {
     activeDelegation,
     canHandoffActiveDelegation,
@@ -670,7 +659,6 @@ function buildCompletedTaskResult(params: {
     messages: handoffMessages,
     runNextDelegation: null,
     runPendingTask: null,
-    ...(clearPlanDraft ? { runTaskPlanDraft: null } : {}),
     taskActiveDelegation: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     runDelegationSummaries,

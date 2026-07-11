@@ -1,4 +1,6 @@
+import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { z } from 'zod';
+import type { StructuredOutputMethod } from '../../utils/structuredOutput';
 import type {
   OrchestrationDecisionStructuredOutputConfig,
   OrchestrationDecisionStructuredOutputOptions,
@@ -13,7 +15,6 @@ export type TaskDecision = {
   task?: string | null;
   context_summary?: string | null;
   search_keywords?: string | null;
-  plan_draft?: string[] | null;
 };
 
 export type DelegationOutcomeDecision = {
@@ -75,9 +76,6 @@ export function buildTaskDecisionSchema() {
     search_keywords: z.string().nullable().optional().describe(
       'action=next_task 时用于 capability search 的关键词或短语；多个词用 | 分隔。没有更好关键词时可为 null。',
     ),
-    plan_draft: z.array(z.string()).max(5).nullable().optional().describe(
-      '本次 next_task 之后尚未开始的步骤短句清单，仅作为下一轮 taskDecision 的自我引导备忘；单步任务或没有后续未开始步骤时为 null。',
-    ),
   }).superRefine((decision, ctx) => {
     if (decision.action === 'next_task' && !decision.task?.trim()) {
       ctx.addIssue({
@@ -92,7 +90,7 @@ export function buildTaskDecisionSchema() {
 export function buildDelegationOutcomeDecisionSchema() {
   return z.object({
     outcome: z.enum(['continue', 'task_done', 'goal_done']).describe(
-      '验收结论。continue=当前 task 未达标，同 lane 继续；task_done=当前 task 达标但总目标未完；goal_done=用户当前 run 目标已满足。',
+      '验收结论。continue=当前 task 未达标，同一 capability 继续；task_done=当前 task 达标但总目标未完；goal_done=不再自主执行，交给 answer，通常因为目标已满足或需要用户澄清/确认。',
     ),
     gap_note: z.string().nullable().optional().describe(
       'outcome=continue 或 task_done 时可填写缺口/下一步依据的简短说明；goal_done 时为 null 或省略。',
@@ -111,8 +109,8 @@ export function buildRouteDecisionSchema(params: OrchestrationDecisionSchemaPara
   return z.object({
     lane: z.enum(laneValues).describe(
       capabilityLaneValues.length > 0
-        ? `选择执行当前 task 的 lane。当前 capability lane：${capabilityLaneValues.join('、')}。`
-        : '选择执行当前 task 的 lane。当前没有可选 capability lane。',
+        ? `选择执行当前 task 的 capability；结果用 lane 编码。当前 capability lane：${capabilityLaneValues.join('、')}。`
+        : '选择执行当前 task 的 capability；结果用 lane 编码。当前没有可选 capability lane。',
     ),
   });
 }
@@ -128,23 +126,38 @@ export function buildOrchestrationDecisionStructuredOutputOptions(
   };
 }
 
-export function buildDelegationOutcomeDecisionOutputInstruction(): string {
+function buildDecisionOutputInstruction(
+  label: string,
+  schema: z.ZodTypeAny,
+  method?: StructuredOutputMethod,
+): string {
+  const baseInstruction = `输出符合 structured-output schema 的 ${label}；不要输出 schema 未声明的字段。`;
+  if (method !== 'jsonMode') return baseInstruction;
+
   return [
-    '输出一个结构化 delegation outcome decision。',
-    '必须返回一个 JSON object，字段名必须严格使用：outcome、gap_note。',
-    'outcome 取值：',
-    '- continue：当前 delegated task 还没有达标；同一个 lane 继续当前 task。',
-    '- task_done：当前 delegated task 已达标，但用户当前 run 目标还有下一步。',
-    '- goal_done：用户当前 run 目标已经满足，交给 answer 节点回复用户。',
-    '字段语义：',
-    '- outcome 必填，且必须是上面的枚举值之一。',
-    '- gap_note 只写缺口/未完成依据的短说明；没有缺口时为 null 或省略。',
-    '- 不要输出 task、context_summary、search_keywords、lane、capability 或任何 delegate_* 字段。',
-    `正确示例：${JSON.stringify({
-      outcome: 'task_done',
-      gap_note: '已拿到 issue 需求点，但还需要检查本地实现与 git log。',
-    })}`,
+    baseInstruction,
+    '当前 provider 使用 jsonMode：只输出一个 JSON object，不要输出 Markdown 代码围栏或额外文本。',
+    `JSON Schema：${JSON.stringify(toJsonSchema(schema))}`,
   ].join('\n');
+}
+
+export function buildTaskDecisionOutputInstruction(method?: StructuredOutputMethod): string {
+  return buildDecisionOutputInstruction('task decision', buildTaskDecisionSchema(), method);
+}
+
+export function buildRouteDecisionOutputInstruction(
+  params: OrchestrationDecisionSchemaParams,
+  method?: StructuredOutputMethod,
+): string {
+  return buildDecisionOutputInstruction('route decision', buildRouteDecisionSchema(params), method);
+}
+
+export function buildDelegationOutcomeDecisionOutputInstruction(method?: StructuredOutputMethod): string {
+  return buildDecisionOutputInstruction(
+    'delegation outcome decision',
+    buildDelegationOutcomeDecisionSchema(),
+    method,
+  );
 }
 
 export function readDecisionText(value: string | null | undefined): string | null {

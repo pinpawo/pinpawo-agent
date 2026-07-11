@@ -1,6 +1,6 @@
 # pet-agent orchestrator decision shared prompt prefix
 
-> 状态：Stage B prompt contract；2026-07-10 plan_draft 与 task_done 控制流修订已同步生产，完整 system prompt 重构另行推进。
+> 状态：Stage B prompt contract；task_done 回环与静态 system prompt / 动态 input 分离已同步生产。
 > 用途：三个 decision 节点（taskDecision / routeDecision / outcomeDecision）共用的 system prompt 前缀。
 > 组装位置：放在 `[配置]` 行之后、各节点自己的"当前阶段/节点边界"段之前。
 
@@ -13,9 +13,9 @@ decision 节点只输出结构化判断字段：不回答用户、不执行工�
 
 task loop 流程：
 1. taskDecision（决策）
-   - 读取：用户请求、对话上下文、已完成 task 的结论摘要、上一轮 plan_draft（如有）。
+   - 读取：用户请求、对话上下文、已完成 task 的结论摘要。
    - 用户目标已能直接回应 → action=answer，交给 answer。
-   - 还需要执行 → action=next_task，产出当前单步 task 与 search_keywords；同时可结合上下文维护可选 plan_draft。
+   - 还需要执行 → action=next_task，产出当前单步 task 与 search_keywords。
 2. capabilitySearch（系统步骤，关键词匹配）
    - 用 search_keywords（缺省时用 task 文本）搜索 custom capability，产出 capability 候选。
 3. routeDecision（决策）
@@ -27,26 +27,25 @@ task loop 流程：
    - 读取：用户目标、当前 task、subagent announce、同一 run 的其他 task 摘要。
    - continue：当前 task 未达标 → 同一 capability 继续执行，gap_note 说明缺口。
    - task_done：当前 task 已达标但用户目标未完 → 系统 handoff 本任务结论并回到 taskDecision，由 taskDecision 结合上下文判断 answer 或 next_task。
-   - goal_done：用户目标已达成 → 系统 handoff 后进入 answer。
+   - goal_done：不再自主执行，交给 answer；通常因为用户目标已达成，或需要用户澄清/确认。
 6. answer（回复）
    - 基于主对话（含 handoff 进来的任务结论）生成用户可见回复。
 
 术语：
 - 用户请求（user request）：用户本轮的原始输入。
-- 用户目标（user goal）：orchestrator 从用户请求和对话上下文理解出的本轮目标；它是验收的唯一基准，不等于任何任务清单或草案。
-- plan_draft：taskDecision 可选的后续步骤自我引导草稿；只作为后续 taskDecision 的上下文参考，不是任务清单，不是验收依据，也不参与 route/guard。
+- 用户目标（user goal）：orchestrator 从用户请求和对话上下文理解出的本轮目标；它是验收的唯一基准，不等于任何任务清单。
 - gap_note：outcomeDecision 在 continue / task_done 时对缺口的一句说明，作为后续执行或规划的提示。
 - handoff：系统动作——task 达标或 goal 达成时，把 announce 结论并入主对话并清理执行现场；此后所有节点只依赖主对话里的结论，不依赖执行过程记录。
 ```
 
 组装说明：
 
-1. 术语键使用中文 + 英文形式（如"用户目标（user goal）"）。`task` / `announce` / `handoff` / `plan_draft` / `gap_note` 保持英文，因为它们是字段或机制名。
+1. 术语键使用中文 + 英文形式（如"用户目标（user goal）"）。`task` / `announce` / `handoff` / `gap_note` 保持英文，因为它们是字段或机制名。
 2. 测试锚点优先使用：`task loop`、`唯一基准`、`不编造执行事实`、`系统 handoff`、`不是验收依据`。
-3. 有意不放入共享前缀：iteration guard / inline stop、plan_draft 的内容维护细节、capability 候选打分细节。这些分别属于系统守卫、taskDecision 节点级语义和 routeDecision 动态上下文。
+3. 有意不放入共享前缀：iteration guard / inline stop、capability 候选打分细节。这些分别属于系统守卫和 routeDecision 动态上下文。
 
 共享前缀之后，每个 decision 节点自己的段落只保留三类内容：
 
 1. 当前阶段 + 节点边界。
-2. 决策原则（节点级规则，如 taskDecision 的单步粒度和草案维护规则）。
+2. 决策原则（节点级规则，如 taskDecision 的单步粒度）。
 3. 输出 schema 指令。

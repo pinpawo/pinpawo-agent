@@ -1,6 +1,6 @@
 # pet-agent decision prompt 设计
 
-> 状态：设计稿，尚未落地到生产 prompt。
+> 状态：prompt contract；本 PR 已落地到 taskDecision / routeDecision / outcomeDecision 的生产组装。
 > 范围：taskDecision / routeDecision / outcomeDecision 的有效提示词，包括 system prompt、条件策略、动态 input 与 structured-output schema。
 > 目标：shared prefix 完整描述 orchestrator/task loop 的共同世界观；各 decision 只处理本节点的一种判断。
 > 职责摸排：见 [`PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md`](./PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md)。
@@ -72,9 +72,11 @@ effective decision prompt
 - `workdir`、runtime environment、capability availability 等每次调用可能变化的内容属于注入事实。
 - 与 decision 无关的配置不进入提示词。
 
+当前 provider/config 可以选择 `functionCalling`、`jsonSchema` 或 `jsonMode`。只有 `jsonMode` 会把由同一 Zod schema 转换出的 JSON Schema 作为条件协议加入 system；其他方法依赖 provider 的结构化协议，不重复字段字典。任何方法都不把 run state 分支搬进 prompt。
+
 ## 3. Shared orchestrator contract
 
-shared prefix 直接使用 [`PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md`](./PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md) 中的 Stage B prompt contract，不在本设计稿里维护第二份改写版本。其整体表述保持不变；`task_done` 按 plan_draft 是否存在分流等 state 控制条件从前缀中移除，改为描述代码已经确定的稳定职责。
+shared prefix 直接使用 [`PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md`](./PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md) 中的 Stage B prompt contract，不在本设计稿里维护第二份改写版本。`task_done` 无条件回到 taskDecision，由最新上下文决定 answer 或 next_task。
 
 其中 routeDecision 的业务语义保持为：
 
@@ -87,9 +89,9 @@ routeDecision 为 task 选择执行 capability。
 本轮 prompt 优化保留 shared prefix 的基础表述，同时调整其中已经越界的 state 控制条件，并继续收敛 shared prefix 之后的 node policy、动态 input 和 schema 协议。需要补充的严格边界放在对应节点段：
 
 - taskDecision 是 task 文本的唯一生成节点。
-- 当前 task 由 `runPendingTask` / `taskActiveDelegation` 表达；已完成 task 由 handoff + `runDelegationSummaries` 表达，plan_draft 不替代这些事实。
+- 当前 task 由 `runPendingTask` / `taskActiveDelegation` 表达；已完成 task 由 handoff + `runDelegationSummaries` 表达。
 - routeDecision 选择 capability，不修改 task。
-- outcomeDecision 不生成下一步 task，也不把 plan_draft 当作验收依据。
+- outcomeDecision 不生成下一步 task。
 - answer 生成用户可见回复。
 
 ## 4. taskDecision
@@ -104,7 +106,6 @@ routeDecision 为 task 选择执行 capability。
 判断依据：
 - 用户请求和近期对话。
 - 主对话与 runDelegationSummaries 中已完成 task 的结论。
-- input 中已有的 plan_draft（如有）。
 
 决策规则：
 - 当前事实已经足以由 answer 回复，或继续执行前必须先获得用户输入时，选择 action=answer。
@@ -116,11 +117,6 @@ routeDecision 为 task 选择执行 capability。
 
 输出符合 structured-output schema 的 task decision。action=answer 时不填写执行字段；action=next_task 时只填写当前一个 task。
 
-plan_draft 是 taskDecision 给后续 taskDecision 留下的可选自我引导草稿：
-- 根据用户目标、当前 task、已有委托结论和对话上下文，观察当前 task 之后是否还可能需要其他 delegated task。
-- input 中已有 plan_draft 时把它作为参考；可以沿用、修订或清空。没有旧草案时也可以按当前上下文创建，或保持 null。
-- 输出始终是当前 task 之后仍可能需要、尚未开始的 delegated task 完整草稿，1~5 个短句；不包含当前 task，不包含 answer 工作，也不输出增量 patch 或游标。
-- plan_draft 不是验收依据，不决定 task_done 后的路由；代码只负责保存、重置和再次注入它。
 ```
 
 `context_summary` 只补充 subagent 执行当前 task 必须知道、但 task 文本没有表达的上下文；不要复述完整用户请求。
@@ -133,10 +129,9 @@ taskDecision input 只承载事实：
 
 - 用户本轮请求与近期主对话。
 - 已 handoff 的任务结论和 runDelegationSummaries。
-- 上一轮 plan_draft 的具体条目（如有）。
 - 与执行相关的 workdir/runtime context（如有）。
 
-input 不再包含“首轮可创建”“无草案结束”“请维护草案”等 `<instruction>`。是否还有后续 task，由 taskDecision 根据完整上下文判断，不由旧草案是否存在决定。
+input 不包含 state 分支或流程 policy 的 `<instruction>`。是否还有后续 task，由 taskDecision 根据完整上下文判断。
 
 ## 5. routeDecision
 
@@ -201,7 +196,6 @@ routeDecision 的 schema 只暴露当前实际可选择的 capability 编码，�
 - outcome=goal_done：当前 run 不应再自主执行，停止 loop 并交给 answer。通常因为现有结论已足够回应用户，继续前需要用户澄清/确认，或当前阻塞无法通过继续同一 task 解决。
 - 判断用户目标时必须结合已有任务结论和当前 announce；单次 announce 不替代完整目标上下文。
 - 如果用户目标已经足够回应，即使当前 task 没有完全按原计划完成，也选择 goal_done，而不是为了完成 task 本身继续执行。
-- plan_draft 不进入 outcomeDecision，也不是验收依据。
 
 输出符合 structured-output schema 的 outcome decision。outcome 只表达 verdict，不输出 task、lane 或用户回复。
 ```
@@ -216,7 +210,7 @@ routeDecision 的 schema 只暴露当前实际可选择的 capability 编码，�
 
 `goal_done` 是 terminal verdict，不只等于“用户目标已经完全满足”。字段名虽然保留历史语义，但 system prompt、schema description、output instruction 和测试必须统一使用 terminal verdict 定义。
 
-`task_done` 后代码只负责 handoff 当前 task 并回到 taskDecision。taskDecision 根据用户目标、已 handoff 结论、委托记录和可选 plan_draft 决定 `answer` 或新的 `next_task`；plan_draft 是否为空不参与这条 route。
+`task_done` 后代码只负责 handoff 当前 task 并回到 taskDecision。taskDecision 根据用户目标、已 handoff 结论和委托记录决定 `answer` 或新的 `next_task`。
 
 ### 6.2 注入内容
 
@@ -226,9 +220,8 @@ outcomeDecision input 只承载：
 - 当前 delegated task。
 - 当前 announce 原文与 completion reason。
 - 同一 run 的其他 task 结论。
-- 必要的系统事实，例如 handoff 是否可用。
 
-handoff 是否可用不改变 outcome schema，也不由模型决定 graph 路由。
+handoff 是否可用不改变语义验收结果，也不由模型决定 graph 路由，因此由代码处理，不作为 outcomeDecision input policy。
 
 ## 7. Structured Output 与示例
 
@@ -243,36 +236,33 @@ Zod schema description 是有效提示词的一部分。每个字段的语义只
 - provider 只能使用 `jsonMode` 时，增加由 schema 生成的最小 JSON 形状说明，不维护手写的第二份 schema。
 - 默认不放 JSON 示例。示例只有在 eval 证明字段关系持续出错时才加入，并且只展示那个边界。
 
-尤其要移除与业务无关的固定示例，例如长期使用 `issue #269` 会让模型把 task 粒度和 plan_draft 内容锚定到代码调查场景。
+尤其要移除与业务无关的固定示例，例如长期使用 `issue #269` 会让模型把 task 粒度和 search keywords 锚定到代码调查场景。
 
-## 8. 当前实现与目标设计的差距
+## 8. 落地状态与后续边界
 
-| 当前实现 | 目标 |
+| 设计项 | 状态 |
 |---|---|
-| `workdir/runtimeEnvironment` 位于 system 最前面 | 作为动态事实放到 input；稳定 shared prefix 保持在前 |
-| taskDecision 把 `runDelegationContext` 拼进 system | 放入 taskDecision input |
-| routeDecision 把 capability targets 拼进 system | 放入 routeDecision input，并标记为数据 |
-| 三个 input 的 `<instruction>` 重复 system policy | 删除，只保留动态事实 |
-| taskDecision 根据首轮/有草案/无草案拼接多套 plan 规则 | 改为一套稳定的自我引导草稿语义 |
-| `afterDelegationOutcomeDecision` 根据 plan_draft 是否非空选择 taskDecision/answer | `task_done` 一律回 taskDecision，由模型结合上下文判断 answer/next_task |
-| result builder 根据旧草案/summary 决定是否接受 plan_draft | 代码只做结构归一化；草案是否创建、沿用、修订或清空由 taskDecision 判断 |
-| code/guard 直接写 AIMessage，再以 `inline → finalizeRun` 结束 | 删除 final-reply route state；正常终态统一进入 answer，真正 invariant violation 由校验或恢复处理 |
-| schema 把 `goal_done` 只定义为目标满足 | 与 terminal verdict 定义统一 |
-| prompt 重复完整字段字典和固定 JSON 示例 | 以 structured-output schema 为主，只保留最小 output contract |
-| code review 请求使用固定关键词词表 | 改为“执行意图 + 目标对象”的通用检索口径 |
+| 动态 runtime、run summaries 和 capability candidates | 本 PR 已移入对应 decision input，并用事实数据边界包裹 |
+| input 中重复 system policy 的 `<instruction>` | 本 PR 已删除；input 只保留当前调用事实 |
+| `goal_done` 的 system/schema/output wording | 本 PR 已统一为 terminal verdict 语义 |
+| provider-specific output protocol | `jsonMode` 条件注入由 Zod schema 生成的 JSON Schema；其他方法只保留最小输出要求 |
+| 固定业务 JSON 示例和领域关键词 | 本 PR 已移除，保留通用 task 粒度与 search_keywords 规则 |
+| outcomeDecision 的用户目标上下文 | 本 PR 已注入用户请求、近期主对话和 compaction summaries |
+| task_done 的回环 | task_done 无条件回 taskDecision，由最新上下文决定后续 |
+| plan_draft | 已删除；多 task 连续性来自用户目标、主对话和 append-only 委托结论 |
+| inline/finalizeRun、`runPendingFinalReply` 等终态旁路 | 后续独立 graph/state 工作；不属于本 PR |
 
 ## 9. 验收与 eval
 
 ### 9.1 静态检查
 
 - 三个 decision 的 shared prefix 完全一致。
-- `当前阶段`、`当前节点`、重复的 `节点边界` 不再出现。
-- 动态用户内容、task summaries、capability candidates、announce、workdir/runtime 不进入 system。
+- 每个 decision 只有一段 node-local 的阶段/边界说明，不重复注入动态 state。
+- 动态用户内容、task summaries、capability candidates、announce、workdir/runtime 不进入 static system；`jsonMode` 的条件输出协议可以包含 schema 当前允许的枚举值。
 - input XML 不包含新的 policy instruction。
-- routeDecision 私有段不展开 plan_draft、handoff 或 outcome 枚举。
-- outcomeDecision 不接收 plan_draft，也不输出下一步 task。
-- route/guard/result builder 不读取 plan_draft 来决定控制流或写权限。
-- task_done 后始终进入 taskDecision；taskDecision 不因旧草案为空而被跳过或强制 answer。
+- routeDecision 私有段不展开 handoff 或 outcome 枚举。
+- outcomeDecision 不输出下一步 task。
+- task_done 后始终进入 taskDecision。
 - 不存在 `inline` 或 `finalizeRun` 终点；decision/guard/fallback 不直接生成用户可见最终 AIMessage。
 - `runPendingFinalReply` 不存在；taskDecision、routeDecision 和 iteration guard 的 route 由业务 state 的 conditional edge 推导。
 - outcomeDecision 使用带有限 `ends` 的 `Command({ update, goto })`：continue 回当前 capability，task_done 去 taskDecision，goal_done 去 answer。
@@ -285,13 +275,9 @@ Zod schema description 是有效提示词的一部分。每个字段的语义只
 taskDecision 至少覆盖：
 
 - 已有上下文可直接 answer。
-- 单步执行请求可以输出 null plan_draft。
-- 明确复合请求可以创建后续 plan_draft。
-- 已有草案且最新结论不改变后续，稳定沿用。
-- 已有草案但最新结论覆盖或改变后续，正确整体覆写。
-- 非首轮无草案但用户目标仍有执行工作，能够从上下文产出 next_task；不能因为没有草案而提前 answer。
-- 非首轮无草案且已有结论足够回答，输出 answer。
-- task 保持单一可验收结果；plan_draft 不包含当前 task 或 answer 工作。
+- task_done 后用户目标仍有执行工作时，能够从上下文产出 next_task。
+- task_done 后已有结论足够回答时，输出 answer。
+- task 保持单一可验收结果。
 - search_keywords 同时保留执行意图和目标对象。
 
 routeDecision 至少覆盖：
@@ -315,7 +301,7 @@ outcomeDecision 至少覆盖：
 - schema validity。
 - decision accuracy。
 - 同输入 action/outcome/所选 capability 的稳定率。
-- task 粒度与 plan policy 违规率。
+- task 粒度违规率。
 - 从 taskDecision 到 outcomeDecision 的端到端 graph transition 是否符合预期。
 
 对 reasoning model 比较低、中两个 reasoning level；不预设更高 reasoning 一定更好。以 transition correctness、稳定率、延迟和成本共同选择配置。
@@ -323,11 +309,11 @@ outcomeDecision 至少覆盖：
 ## 10. 落地顺序
 
 1. 删除 `runPendingFinalReply` 与 inline/finalizeRun 旁路；正常终态统一进入 answer，真正 invariant violation 交给校验或恢复。
-2. 移除 plan_draft 对 `task_done` 后 route 和写权限的代码依赖，恢复其纯模型自我引导属性。
+2. 删除 plan_draft；task_done 后只依靠用户目标、主对话和 append-only 委托结论继续。
 3. 统一 shared contract、canonical schema wording 和有效提示词组装顺序。
 4. 把所有动态 context 从 system 移到对应 input，并删除 input 中重复的 `<instruction>`。
 5. 落 routeDecision 的最小 node contract 与动态候选注入。
 6. 落 outcomeDecision，同时统一 `goal_done` 的 system/schema/test 语义，并用有限 `Command({ update, goto })` 原子提交 verdict state 与下一跳。
-7. 落 taskDecision 的单一 plan_draft 语义，不再按 state 拼三套 plan policy。
-8. 更新 prompt 单测和 graph transition 测试，证明所有终态只经过 answer、task_done 总会进入 taskDecision，且无草案不导致提前结束。
+7. 收窄 taskDecision schema，只输出 action、当前 task、context_summary 和 search_keywords。
+8. 更新 prompt 单测和 graph transition 测试，证明所有终态只经过 answer、task_done 总会进入 taskDecision。
 9. 跑三个 decision 的重复 eval，再根据失败样本增加规则；不凭直觉重新堆叠提示词。

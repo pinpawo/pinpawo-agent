@@ -25,23 +25,22 @@ import { resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import {
   buildRunDelegationSummaryContext,
+  buildRuntimeContext,
   buildTaskDecisionInput,
   buildTaskDecisionSystemPrompt,
-  buildTaskPlanDraftContext,
 } from '../src/agent/orchestrator/prompts';
 import {
   buildOrchestrationDecisionStructuredOutputOptions,
+  buildTaskDecisionOutputInstruction,
   buildTaskDecisionSchema,
   type TaskDecision,
 } from '../src/agent/orchestrator/schemas';
-import type { RunDelegationSummary, RunTaskPlanDraft } from '../src/agent/orchestrator/types';
+import type { RunDelegationSummary } from '../src/agent/orchestrator/types';
 import type { AgentActor } from '../src/types/agent';
 import {
   inferStructuredOutputMethod,
   type StructuredOutputMethod,
 } from '../src/utils/structuredOutput';
-
-type PlanPolicy = 'must_null' | 'must_create' | 'must_maintain_or_finish' | 'no_check';
 
 type EvalCase = {
   id: string;
@@ -49,9 +48,7 @@ type EvalCase = {
   latestUserRequest: string;
   recentMessages?: BaseMessage[];
   runDelegationSummaries?: RunDelegationSummary[];
-  runTaskPlanDraft?: RunTaskPlanDraft;
   expectedAction?: TaskDecision['action'];
-  planPolicy: PlanPolicy;
   expectedTaskPattern?: RegExp;
   forbiddenTaskPattern?: RegExp;
   expectedSearchKeywordsPattern?: RegExp;
@@ -65,7 +62,6 @@ type EvalResult = {
   schemaOk: boolean;
   durationMs: number;
   action: string | null;
-  planSize: number | null;
   taskPreview: string | null;
   searchKeywords: string | null;
   issues: string[];
@@ -109,16 +105,14 @@ const EVAL_CASES: EvalCase[] = [
     latestUserRequest: '把刚刚的结论再用三句话总结一下。',
     recentMessages: [
       new HumanMessage('帮我看一下当前 PR 的核心风险。'),
-      new AIMessage('结论：主要风险是 taskDecision 首轮不能创建 plan_draft，导致 task_done 后无法回环。'),
+      new AIMessage('结论：task_done 会回到 taskDecision，由最新上下文决定是否还有后续 task。'),
     ],
-    planPolicy: 'must_null',
     expectedAction: 'answer',
   },
   {
     id: 'single-step-file-read',
     name: 'single delegated task without follow-up draft',
     latestUserRequest: '读取 docs/PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md，告诉我 Stage B 的验收标准。',
-    planPolicy: 'must_null',
     expectedAction: 'next_task',
     expectedTaskPattern: /读取|查看|检查|提炼|验收标准/i,
   },
@@ -126,16 +120,14 @@ const EVAL_CASES: EvalCase[] = [
     id: 'initial-multi-step-investigation',
     name: 'initial multi-step request creates a follow-up draft',
     latestUserRequest: '看 issue #269 的设计诉求，再查本地实现和 git log，最后总结是否已经覆盖。',
-    planPolicy: 'must_create',
     expectedAction: 'next_task',
     expectedTaskPattern: /issue|269|设计|诉求|需求/i,
     forbiddenTaskPattern: /最后总结|完整计划|步骤\s*[123]|1[.、].*2[.、]/i,
   },
   {
     id: 'initial-pr-review-keywords',
-    name: 'PR review request keeps investigation keywords',
+    name: 'PR review stays one deliverable and keeps investigation keywords',
     latestUserRequest: 'review https://github.com/pinpawo/pinpawo-agent/pull/344，重点看 Stage B 的 task routing 有没有回归。',
-    planPolicy: 'no_check',
     expectedAction: 'next_task',
     expectedTaskPattern: /review|PR|344|Stage B|routing|回归/i,
     expectedSearchKeywordsPattern: /review|PR|code|repository|explore|调查|审查|代码/i,
@@ -152,15 +144,13 @@ const EVAL_CASES: EvalCase[] = [
         'issue #269 要求检查本地实现是否已经覆盖 Stage B 的任务边界设计。',
       ),
     ],
-    runTaskPlanDraft: ['检索本地实现与 git log', '汇总结论'],
-    planPolicy: 'must_maintain_or_finish',
     expectedAction: 'next_task',
     expectedTaskPattern: /本地|实现|git|log|检索|检查/i,
     forbiddenTaskPattern: /读取 issue|提炼需求点/i,
   },
   {
     id: 'post-first-no-draft',
-    name: 'post-first no-draft context can still create follow-up guidance',
+    name: 'remaining work fits one task and does not create answer-work guidance',
     latestUserRequest: '看 issue #269，再查本地实现和 git log，最后总结是否已经覆盖。',
     runDelegationSummaries: [
       completedSummary(
@@ -169,7 +159,6 @@ const EVAL_CASES: EvalCase[] = [
         '已拿到 issue 诉求，接下来仍需检查本地实现和 git log。',
       ),
     ],
-    planPolicy: 'must_create',
     expectedAction: 'next_task',
     expectedTaskPattern: /本地|实现|git|log|检索|检查/i,
   },
@@ -189,8 +178,6 @@ const EVAL_CASES: EvalCase[] = [
         '本地实现已经把 outcomeDecision 验收化，并让有草案的 task_done 回环 taskDecision。',
       ),
     ],
-    runTaskPlanDraft: ['汇总结论'],
-    planPolicy: 'must_null',
     expectedAction: 'answer',
   },
 ];
@@ -337,13 +324,6 @@ function preview(value: string | null | undefined, maxLength = 90): string | nul
   return value.replace(/\s+/g, ' ').slice(0, maxLength);
 }
 
-function normalizePlanDraft(value: TaskDecision['plan_draft']): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => typeof item === 'string' ? item.trim() : '')
-    .filter(Boolean);
-}
-
 function hasMultiStepShape(task: string | null | undefined): boolean {
   if (!task) return false;
   return (
@@ -359,7 +339,6 @@ function evaluateDecision(testCase: EvalCase, decision: TaskDecision): string[] 
   const searchKeywords = typeof decision.search_keywords === 'string'
     ? decision.search_keywords.trim()
     : null;
-  const planDraft = normalizePlanDraft(decision.plan_draft);
 
   if (testCase.expectedAction && decision.action !== testCase.expectedAction) {
     issues.push(`expected action=${testCase.expectedAction}, got ${decision.action}`);
@@ -395,33 +374,6 @@ function evaluateDecision(testCase: EvalCase, decision: TaskDecision): string[] 
     issues.push(`search_keywords matches forbidden pattern ${testCase.forbiddenSearchKeywordsPattern.toString()}`);
   }
 
-  if (testCase.planPolicy === 'must_null' && planDraft.length > 0) {
-    issues.push(`plan_draft should be null/empty, got ${planDraft.length} item(s)`);
-  }
-  if (testCase.planPolicy === 'must_create') {
-    if (decision.action !== 'next_task') {
-      issues.push('must_create plan policy requires next_task action');
-    } else if (planDraft.length === 0) {
-      issues.push('initial multi-step case should create non-empty plan_draft');
-    }
-  }
-  if (testCase.planPolicy === 'must_maintain_or_finish') {
-    if (decision.action === 'next_task') {
-      const previousSize = testCase.runTaskPlanDraft?.length ?? 0;
-      if (planDraft.length > Math.max(0, previousSize - 1)) {
-        issues.push(`plan_draft should shrink after selecting current task; previous=${previousSize}, got=${planDraft.length}`);
-      }
-      if (task && planDraft.some((step) => step === task || step.includes(task) || task.includes(step))) {
-        issues.push('plan_draft should not repeat the current task');
-      }
-    } else if (planDraft.length > 0) {
-      issues.push('answer action should clear plan_draft');
-    }
-  }
-  if (planDraft.length > 5) {
-    issues.push(`plan_draft should contain at most 5 items, got ${planDraft.length}`);
-  }
-
   return issues;
 }
 
@@ -452,14 +404,13 @@ async function runOne(params: {
   try {
     const systemPrompt = buildTaskDecisionSystemPrompt({
       actor: evalActor,
-      runDelegationContext: buildRunDelegationSummaryContext(params.testCase.runDelegationSummaries ?? []),
-      hasTaskPlanDraft: Boolean(params.testCase.runTaskPlanDraft?.length),
-      workdir: process.cwd(),
+      outputInstruction: buildTaskDecisionOutputInstruction(params.method),
     });
     const input = buildTaskDecisionInput({
       latestUserRequest: params.testCase.latestUserRequest,
       recentMessages: params.testCase.recentMessages ?? [new HumanMessage(params.testCase.latestUserRequest)],
-      taskPlanDraftContext: buildTaskPlanDraftContext(params.testCase.runTaskPlanDraft ?? null),
+      runDelegationContext: buildRunDelegationSummaryContext(params.testCase.runDelegationSummaries ?? []),
+      runtimeContext: buildRuntimeContext(process.cwd(), process.version),
     });
     const structuredModel = params.chatModel.withStructuredOutput(
       buildTaskDecisionSchema(),
@@ -481,7 +432,6 @@ async function runOne(params: {
         schemaOk: false,
         durationMs: Math.round(performance.now() - started),
         action: null,
-        planSize: null,
         taskPreview: null,
         searchKeywords: null,
         issues: ['schema validation failed'],
@@ -490,7 +440,6 @@ async function runOne(params: {
       };
     }
     const issues = evaluateDecision(params.testCase, parsed.data);
-    const planDraft = normalizePlanDraft(parsed.data.plan_draft);
     return {
       caseId: params.testCase.id,
       repeat: params.repeat,
@@ -498,7 +447,6 @@ async function runOne(params: {
       schemaOk: true,
       durationMs: Math.round(performance.now() - started),
       action: parsed.data.action,
-      planSize: planDraft.length,
       taskPreview: preview(parsed.data.task),
       searchKeywords: preview(parsed.data.search_keywords, 120),
       issues,
@@ -514,7 +462,6 @@ async function runOne(params: {
       schemaOk: false,
       durationMs: Math.round(performance.now() - started),
       action: null,
-      planSize: null,
       taskPreview: null,
       searchKeywords: null,
       issues: ['invoke failed'],
@@ -541,7 +488,6 @@ function printSummary(results: EvalResult[], repeats: number) {
     rep: result.repeat,
     ok: result.ok ? 'ok' : 'fail',
     action: result.action ?? '',
-    plan: result.planSize == null ? '' : String(result.planSize),
     ms: result.durationMs,
     task: result.taskPreview ?? '',
     keywords: result.searchKeywords ?? '',
@@ -557,7 +503,7 @@ function printSummary(results: EvalResult[], repeats: number) {
     console.log(
       `- ${caseId}: ${pass}/${repeats} passed; ` +
       `actions=[${formatDistribution(group.map((item) => item.action))}]; ` +
-      `planSizes=[${formatDistribution(group.map((item) => item.planSize))}]`,
+      `tasks=[${formatDistribution(group.map((item) => item.taskPreview))}]`,
     );
   }
 }
@@ -622,7 +568,7 @@ async function main() {
       const marker = result.ok ? 'PASS' : 'FAIL';
       console.log(
         `[${marker}] case=${testCase.id} repeat=${repeat} ` +
-        `action=${result.action ?? 'n/a'} planSize=${result.planSize ?? 'n/a'} ` +
+        `action=${result.action ?? 'n/a'} ` +
         `durationMs=${result.durationMs}` +
         (result.issues.length > 0 ? ` issues=${result.issues.join('; ')}` : '') +
         (result.errorMessage ? ` error=${result.errorType}: ${result.errorMessage}` : ''),

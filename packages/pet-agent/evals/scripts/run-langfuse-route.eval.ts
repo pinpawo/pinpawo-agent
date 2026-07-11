@@ -207,15 +207,26 @@ function taskDecisionFromText(text: string) {
   };
 }
 
-function orchestrationDecisionFromText(text: string) {
-  const action = chooseDecisionAction(text);
-  return action === 'answer'
-    ? { action }
-    : {
-        action,
-        task: 'mock delegated task',
-        context_summary: 'mock route eval context',
-      };
+function delegationOutcomeDecisionFromText(text: string) {
+  if (
+    /limit_reached|还没有完成|尚未完成|需要继续|部分.+(?:文件|结果|链路)/.test(text)
+    || (/var.+const/s.test(text) && /lint/.test(text) && !/lint.+(?:通过|完成)/s.test(text))
+  ) {
+    return {
+      outcome: 'continue',
+      gap_note: 'mock current-task gap',
+    };
+  }
+  if (/仍有明确未完成|然后运行 npm test|尚未运行 lint|还需要/.test(text)) {
+    return {
+      outcome: 'task_done',
+      gap_note: 'mock remaining goal work',
+    };
+  }
+  return {
+    outcome: 'goal_done',
+    gap_note: null,
+  };
 }
 
 function createHeuristicRouteModels(): AgentModels {
@@ -245,7 +256,10 @@ function createHeuristicRouteModels(): AgentModels {
         if (/route decision 节点/.test(text)) {
           return { lane: chooseRouteLane(text) };
         }
-        return orchestrationDecisionFromText(text);
+        if (/子任务结果验收节点/.test(text)) {
+          return delegationOutcomeDecisionFromText(messagesText(messages.slice(-1)));
+        }
+        throw new Error('local route eval mock received an unknown decision prompt');
       },
     }),
   } as unknown as AgentModels['act'];

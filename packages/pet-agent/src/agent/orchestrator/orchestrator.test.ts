@@ -327,15 +327,17 @@ test('task-first route decision exposes capability candidates from the pending t
   });
 
   assert.equal(schemaAllowsExplore, true);
-  assert.match(routeSystemPrompt, /capability\.explore/);
+  assert.doesNotMatch(routeSystemPrompt, /capability\.explore/);
   assert.doesNotMatch(routeSystemPrompt, /delegate_capability\.explore/);
   assert.match(routeInput, /<route_decision_input>/);
   assert.match(routeInput, /继续调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
   assert.match(routeInput, /代码库理解\|调查\|capability 注册链路/);
+  assert.match(routeInput, /capability\.explore/);
+  assert.doesNotMatch(routeInput, /delegate_capability\.explore/);
   assert.equal(decisionCallCount, 3);
 });
 
-test('first task decision can create a plan draft and task_done reroutes the next task', async () => {
+test('task_done reroutes through taskDecision before the next task', async () => {
   let structuredCallCount = 0;
   const taskDecisionInputs: string[] = [];
   const routeInputs: string[] = [];
@@ -350,10 +352,7 @@ test('first task decision can create a plan draft and task_done reroutes the nex
         const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
         if (structuredCallCount === 1) {
           taskDecisionInputs.push(inputText);
-          return {
-            ...nextTaskDecision('读取 issue #269 并提炼需求点。', null, 'issue|需求分析'),
-            plan_draft: ['检索本地实现与 git log', '汇总结论'],
-          };
+          return nextTaskDecision('读取 issue #269 并提炼需求点。', null, 'issue|需求分析');
         }
         if (structuredCallCount === 2) {
           routeInputs.push(inputText);
@@ -364,10 +363,7 @@ test('first task decision can create a plan draft and task_done reroutes the nex
         }
         if (structuredCallCount === 4) {
           taskDecisionInputs.push(inputText);
-          return {
-            ...nextTaskDecision('检索本地实现与 git log，判断需求点是否已覆盖。', null, 'repository|git log'),
-            plan_draft: ['汇总结论'],
-          };
+          return nextTaskDecision('检索本地实现与 git log，判断需求点是否已覆盖。', null, 'repository|git log');
         }
         if (structuredCallCount === 5) {
           routeInputs.push(inputText);
@@ -405,20 +401,18 @@ test('first task decision can create a plan draft and task_done reroutes the nex
 
   assert.equal(taskDecisionInputs.length, 2);
   assert.equal(routeInputs.length, 2);
-  assert.doesNotMatch(taskDecisionInputs[0], /<task_plan_draft/);
-  assert.match(taskDecisionInputs[1], /<task_plan_draft/);
-  assert.match(taskDecisionInputs[1], /检索本地实现与 git log/);
+  assert.doesNotMatch(taskDecisionInputs[0], /plan_draft|task_plan_draft/);
+  assert.doesNotMatch(taskDecisionInputs[1], /plan_draft|task_plan_draft/);
   assert.doesNotMatch(taskDecisionInputs[1], /读取 issue 并提炼需求点/);
   assert.match(routeInputs[0], /读取 issue #269/);
   assert.match(routeInputs[1], /检索本地实现与 git log/);
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
   assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runTaskPlanDraft, null);
   assert.equal(state.taskActiveDelegation, null);
 });
 
-test('task_done without a plan draft returns to taskDecision and can create a new draft', async () => {
+test('task_done returns to taskDecision until the remaining goal is complete', async () => {
   let structuredCallCount = 0;
   const taskDecisionInputs: string[] = [];
   const routeInputs: string[] = [];
@@ -444,10 +438,7 @@ test('task_done without a plan draft returns to taskDecision and can create a ne
         }
         if (structuredCallCount === 4) {
           taskDecisionInputs.push(inputText);
-          return {
-            ...nextTaskDecision('检索本地实现与 git log。', null, 'repository|git log'),
-            plan_draft: ['汇总结论'],
-          };
+          return nextTaskDecision('检索本地实现与 git log。', null, 'repository|git log');
         }
         if (structuredCallCount === 5) {
           routeInputs.push(inputText);
@@ -493,15 +484,11 @@ test('task_done without a plan draft returns to taskDecision and can create a ne
   assert.equal(structuredCallCount, 7);
   assert.equal(taskDecisionInputs.length, 3);
   assert.equal(routeInputs.length, 2);
-  assert.doesNotMatch(taskDecisionInputs[0], /<task_plan_draft/);
-  assert.doesNotMatch(taskDecisionInputs[1], /<task_plan_draft/);
-  assert.match(taskDecisionInputs[2], /<task_plan_draft/);
-  assert.match(taskDecisionInputs[2], /汇总结论/);
+  assert.ok(taskDecisionInputs.every((input) => !/plan_draft|task_plan_draft/.test(input)));
   assert.equal(String(state.messages.at(-1)?.content ?? ''), 'final answer');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);
   assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runTaskPlanDraft, null);
   assert.equal(state.taskActiveDelegation, null);
 });
 
@@ -550,6 +537,13 @@ test('task decision autoRepair retries next_task without a task', async () => {
     name: 'orchestration_decision',
     method: 'jsonMode',
   });
+  const jsonModeSystemPrompt = String(
+    ((invokedMessages[0] as Array<{ content?: unknown }>)[0]?.content ?? ''),
+  );
+  assert.match(jsonModeSystemPrompt, /当前 provider 使用 jsonMode/);
+  assert.match(jsonModeSystemPrompt, /JSON Schema/);
+  assert.match(jsonModeSystemPrompt, /"action"/);
+  assert.doesNotMatch(jsonModeSystemPrompt, /"plan_draft"/);
   // After the retry resolves to answer, the dedicated answer node produces the reply.
   assert.equal(mainConversationMessages(state.messages).at(-1)?.content, 'answered');
   assert.equal(state.runNextDelegation, null);
@@ -684,6 +678,7 @@ test('task decision schema does not advertise capability actions', async () => {
 test('forcedCapabilityNames pre-seeds route candidates without keyword search', async () => {
   let legacyToolPathCalled = false;
   let routeSystemPrompt = '';
+  let routeInput = '';
   let structuredCallCount = 0;
   const model = {
     invoke: async () => new AIMessage('answered'),
@@ -701,6 +696,7 @@ test('forcedCapabilityNames pre-seeds route candidates without keyword search', 
         }
         if (structuredCallCount === 2) {
           routeSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
+          routeInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
           return routeCapabilityDecision('studio_plan');
         }
         return goalDoneDecision();
@@ -732,9 +728,10 @@ test('forcedCapabilityNames pre-seeds route candidates without keyword search', 
   });
 
   assert.equal(legacyToolPathCalled, false, 'forced names must not call a model tool path');
-  assert.match(routeSystemPrompt, /capability\.studio_plan/);
+  assert.doesNotMatch(routeSystemPrompt, /capability\.studio_plan/);
+  assert.match(routeInput, /capability\.studio_plan/);
   // 仅强制 studio_plan,other_cap 不应被作为候选注入。
-  assert.doesNotMatch(routeSystemPrompt, /capability\.other_cap/);
+  assert.doesNotMatch(routeInput, /capability\.other_cap/);
 });
 
 test('without forcedCapabilityNames task-first search does not call model tools', async () => {
@@ -1055,7 +1052,11 @@ test('limit-reached progress announce lets model choose the same capability dele
     actor: testActor,
   });
   const input = {
-    ...buildOrchestratorRunInput([new HumanMessage('继续')]),
+    ...buildOrchestratorRunInput([
+      new HumanMessage('先调查仓库，再修复注册链路。'),
+      new AIMessage('先从仓库调查开始。'),
+      new HumanMessage('继续'),
+    ]),
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
   const progressAnnounce = new AIMessage('(no matches)');
@@ -1101,6 +1102,7 @@ test('limit-reached progress announce lets model choose the same capability dele
   assert.match(decisionSystemPrompt, /continue/);
   assert.doesNotMatch(decisionSystemPrompt, /业务 capability 候选/);
   assert.match(decisionInput, /<lane>capability:inspect_repo<\/lane>/);
+  assert.match(decisionInput, /先调查仓库，再修复注册链路/);
   assert.doesNotMatch(decisionInput, /continuation_action/);
 });
 

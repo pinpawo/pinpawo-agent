@@ -12,11 +12,15 @@ import {
   buildRouteDecisionInput,
   buildRouteDecisionSystemPrompt,
   buildRouteTargetsContext,
+  buildRuntimeContext,
   buildSubagentAnnounceContext,
   buildTaskDecisionInput,
-  buildTaskPlanDraftContext,
   buildTaskDecisionSystemPrompt,
 } from './prompts';
+import {
+  buildRouteDecisionOutputInstruction,
+  buildTaskDecisionOutputInstruction,
+} from './schemas';
 
 function recentMessages(count: number) {
   return Array.from({ length: count }, (_, index) => new HumanMessage(`recent-${index}`));
@@ -97,12 +101,13 @@ test('request contexts include bounded capability artifact refs', () => {
 test('task decision prompt owns single-step task birth', () => {
   const prompt = buildTaskDecisionSystemPrompt({
     actor: testActor,
-    runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
+    outputInstruction: buildTaskDecisionOutputInstruction(),
   });
   const input = buildTaskDecisionInput({
     latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
     recentMessages: recentMessages(1),
-    taskPlanDraftContext: buildTaskPlanDraftContext(null),
+    runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
+    runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });
 
   assert.match(prompt, /task decision 节点/);
@@ -110,76 +115,20 @@ test('task decision prompt owns single-step task birth', () => {
   assert.match(prompt, /唯一基准/);
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
-  assert.match(prompt, /不是验收依据/);
   assert.match(prompt, /当前阶段：taskDecision/);
   assert.match(prompt, /决策原则/);
   assert.match(prompt, /单步任务粒度/);
   assert.match(prompt, /不要选择 general\/capability lane/);
-  assert.match(prompt, /PR review/);
-  assert.match(prompt, /不要只因为出现 URL 就只输出 browser\/url/);
-  assert.match(prompt, /plan_draft/);
-  assert.match(prompt, /先决定 task 字段/);
-  assert.match(prompt, /可以创建本次 task 之后的草案/);
-  assert.match(prompt, /没有明确后续 task 时为 null/);
-  assert.doesNotMatch(prompt, /仍合理的后续 task 可以沿用/);
+  assert.match(prompt, /search_keywords 应同时表达执行意图和目标对象/);
+  assert.match(prompt, /不要只输出 URL、文件类型或载体名称/);
+  assert.doesNotMatch(prompt, /plan_draft|task_plan_draft/);
   assert.match(input, /<task_decision_input>/);
-  assert.match(input, /可以创建 plan_draft/);
+  assert.match(input, /run_delegation_summaries/);
+  assert.match(input, /<runtime_context/);
+  assert.doesNotMatch(prompt, /\/repo|run_delegations/);
   assert.doesNotMatch(input, /<task_plan_draft/);
+  assert.doesNotMatch(input, /<instruction>/);
   assert.doesNotMatch(input, /重新规划/);
-});
-
-test('task decision prompt may create a plan draft whenever context has follow-up work', () => {
-  const prompt = buildTaskDecisionSystemPrompt({
-    actor: testActor,
-    runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
-  });
-  const input = buildTaskDecisionInput({
-    latestUserRequest: '继续推进。',
-    recentMessages: recentMessages(1),
-    taskPlanDraftContext: buildTaskPlanDraftContext(null),
-  });
-
-  assert.match(prompt, /当前没有上一轮 plan_draft/);
-  assert.match(prompt, /可以创建本次 task 之后的草案/);
-  assert.match(prompt, /否则保持 null/);
-  assert.doesNotMatch(prompt, /必须为 null/);
-  assert.match(input, /可以创建 plan_draft/);
-});
-
-test('task decision prompt maintains existing plan draft only', () => {
-  const prompt = buildTaskDecisionSystemPrompt({
-    actor: testActor,
-    runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
-    hasTaskPlanDraft: true,
-  });
-  const input = buildTaskDecisionInput({
-    latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
-    recentMessages: recentMessages(1),
-    taskPlanDraftContext: buildTaskPlanDraftContext([
-      '检索本地实现与 git log',
-      '汇总结论',
-    ]),
-  });
-
-  assert.match(prompt, /参考上一轮 plan_draft/);
-  assert.match(prompt, /task loop/);
-  assert.match(prompt, /唯一基准/);
-  assert.match(prompt, /不编造执行事实/);
-  assert.match(prompt, /系统 handoff/);
-  assert.match(prompt, /不是验收依据/);
-  assert.match(prompt, /当前阶段：taskDecision/);
-  assert.match(prompt, /决策原则/);
-  assert.match(prompt, /仍合理的后续 task 可以沿用/);
-  assert.match(prompt, /本次 task 之后尚未开始的后续 task/);
-  assert.match(prompt, /不输出 patch/);
-  assert.doesNotMatch(prompt, /当前没有上一轮 plan_draft/);
-  assert.match(input, /<task_decision_input>/);
-  assert.match(input, /<task_plan_draft/);
-  assert.match(input, /当前单步 task/);
-  assert.match(input, /选择下一步 task/);
-  assert.match(input, /维护当前 task 之后仍未开始的后续 plan_draft/);
-  assert.doesNotMatch(input, /重新规划/);
-  assert.match(input, /检索本地实现与 git log/);
 });
 
 test('route decision prompt owns capability lane selection', () => {
@@ -196,7 +145,9 @@ test('route decision prompt owns capability lane selection', () => {
   });
   const prompt = buildRouteDecisionSystemPrompt({
     actor: testActor,
-    targetsContext,
+    outputInstruction: buildRouteDecisionOutputInstruction({
+      capabilityCandidates: [{ name: 'explore' }],
+    }),
   });
   const input = buildRouteDecisionInput({
     pendingTask: {
@@ -204,6 +155,8 @@ test('route decision prompt owns capability lane selection', () => {
       contextSummary: '用户需要判断 issue 是否已实现。',
       searchKeywords: '代码库理解',
     },
+    targetsContext,
+    runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });
 
   assert.match(prompt, /route decision 节点/);
@@ -211,16 +164,19 @@ test('route decision prompt owns capability lane selection', () => {
   assert.match(prompt, /唯一基准/);
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
-  assert.match(prompt, /不是验收依据/);
-  assert.match(prompt, /capability\.explore/);
+  assert.doesNotMatch(prompt, /capability\.explore/);
   assert.doesNotMatch(prompt, /delegate_capability\.explore/);
   assert.match(input, /<route_decision_input>/);
   assert.match(input, /在本地仓库检索相关实现/);
+  assert.match(input, /capability\.explore/);
+  assert.match(input, /<runtime_context/);
+  assert.doesNotMatch(input, /只根据下面/);
+  assert.doesNotMatch(input, /如果匹配，优先/);
 });
 
 test('loop-internal router input stays focused on current run announce context', () => {
   const input = buildDelegationOutcomeDecisionInput({
-    latestUserRequest: '继续推进',
+    userIntentContext: '<user_intent_context><recent_messages>先完成调查，再修复。</recent_messages></user_intent_context>',
     currentTaskContext: '<current_delegation>\n  <delegation_id>task-1</delegation_id>\n</current_delegation>',
     subagentAnnounceContext: '<subagent_announce>\n  <result>completed</result>\n</subagent_announce>',
     otherTasksContext: '<other_delegations>\n  <none>true</none>\n</other_delegations>',
@@ -228,6 +184,7 @@ test('loop-internal router input stays focused on current run announce context',
   });
 
   assert.doesNotMatch(input, /压缩任务上下文/);
+  assert.match(input, /先完成调查，再修复/);
   assert.match(input, /<subagent_announce>/);
 });
 
@@ -245,10 +202,9 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
   assert.match(prompt, /唯一基准/);
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
-  assert.match(prompt, /不是验收依据/);
   assert.match(prompt, /当前阶段：delegationOutcomeDecision/);
   assert.match(prompt, /决策原则/);
-  assert.match(prompt, /不接收 plan 草案/);
+  assert.match(prompt, /不再自主执行，交给 answer/);
   assert.match(prompt, /唯一职责/);
 });
 
@@ -390,7 +346,7 @@ test('delegation outcome input does not duplicate the active task in announce co
     contextSummary: null,
   });
   const input = buildDelegationOutcomeDecisionInput({
-    latestUserRequest: '请处理代码质量',
+    userIntentContext: '<user_intent_context><user_request>请处理代码质量</user_request></user_intent_context>',
     currentTaskContext,
     subagentAnnounceContext: buildSubagentAnnounceContext({
       lane: 'general',

@@ -158,6 +158,60 @@ The package dependency plus test request is intentionally an entryDecision
 single-task case because both actions can be completed naturally in one
 workspace capability execution.
 
+## Decision Prompt Preview
+
+Render the exact production system and human input messages for canonical
+decision cases without calling a model:
+
+```sh
+npm run prompt:preview -- entry
+npm run prompt:preview -- planner --case boundary-materializes-from-explore-handoff
+npm run prompt:preview -- outcome --case partial-result-continues-current-task
+npm run prompt:preview -- all --method jsonMode
+```
+
+The preview prints the dataset identity, expected verdict, complete messages,
+character and line counts, a model-independent approximate token count, and the
+shared-prefix percentage of the system prompt. The token estimate counts CJK
+characters individually and groups other characters four-to-one; it is useful
+for relative prompt comparisons, not provider billing.
+
+Both preview and stability evaluation use `decision-eval-scenarios.ts`, so the
+displayed messages cannot drift from the messages sent by the runner.
+
+## Cross-Decision Stability Runner
+
+Run every canonical entry, planner, capability, and outcome case repeatedly
+against the configured real model:
+
+```sh
+npm run eval:decision-stability
+```
+
+The default is five repetitions per case. The summary reports pass rate,
+verdict distribution, distinct structured-output variants, schema errors,
+output-shape distribution (including planner task/tail counts and rubber-stamp
+status), invocation errors, failed score dimensions, and mean latency. This
+runner is local and does not require Langfuse.
+
+Useful filters:
+
+```sh
+DECISION_EVAL_TARGETS=entry,planner DECISION_EVAL_REPEATS=5 \
+  npm run eval:decision-stability
+
+DECISION_EVAL_CASES=boundary-cancels-obsolete-task DECISION_EVAL_REPEATS=3 \
+  npm run eval:decision-stability
+
+DECISION_EVAL_TIMEOUT_MS=180000 npm run eval:decision-stability
+
+DECISION_EVAL_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:decision-stability
+```
+
+Model configuration is resolved from `LLM_*`, then `~/.pinpawo/.env`, then
+`~/.pinpawo/config.json`. Entry scoring covers mode and direct-task content;
+planner scoring owns plan boundary count and plan contents.
+
 ## Langfuse Tool-Review Reject Runner
 
 The tool-review reject runner executes the real orchestrator runtime with

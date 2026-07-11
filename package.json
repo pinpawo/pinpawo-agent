@@ -20,6 +20,10 @@
     "langfuse:config": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml config",
     "eval:langfuse:sync-datasets": "npm -w @pinpawo/pet-agent run eval:langfuse:sync-datasets",
     "eval:langfuse:route": "npm -w @pinpawo/pet-agent run eval:langfuse:route",
+    "eval:langfuse:capability-decision": "npm -w @pinpawo/pet-agent run eval:langfuse:capability-decision",
+    "eval:langfuse:outcome-decision": "npm -w @pinpawo/pet-agent run eval:langfuse:outcome-decision",
+    "eval:langfuse:capability-planning": "npm -w @pinpawo/pet-agent run eval:langfuse:capability-planning",
+    "eval:langfuse:multi-task-flow": "npm -w @pinpawo/pet-agent run eval:langfuse:multi-task-flow",
     "eval:langfuse:tool-review-reject": "npm -w @pinpawo/pet-agent run eval:langfuse:tool-review-reject"
   },
   "overrides": {

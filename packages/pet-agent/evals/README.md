@@ -16,6 +16,11 @@ capability each case covers:
 - `permission_control`: preserve and apply user approvals safely.
 - `context_synthesis`: answer from completed subagent context.
 - `structured_output`: produce schema-compatible orchestration outputs.
+- `entry_decision`: choose answer, direct task, or planning at run entry.
+- `capability_decision`: search and select the capability for a current task.
+- `outcome_decision`: accept the announce and select the next transition.
+- `capability_planning`: define capability execution boundaries and materialize tasks.
+- `multi_task_flow`: complete goals across isolated task executions and handoffs.
 
 This keeps broad agent quality dimensions visible even when a suite starts as a
 single file such as `orchestrator-route`.
@@ -48,6 +53,11 @@ recreate datasets.
 - `agent-interruption-recovery-basics`: resume, changed-intent, approval-resume, and natural-completion-after-resume cases.
 - `agent-permission-control-basics`: HITL, auto-authorization, scoped authorization, and permission-memory cases.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
+- `agent-entry-decision-basics`: eval contract for `answer | direct_task | needs_plan`.
+- `agent-capability-decision-basics`: end-to-end capability search and selection from a current task.
+- `agent-outcome-decision-basics`: `continue | task_done | goal_done` verdict boundaries.
+- `agent-capability-planning-basics`: eval-only `planner@entry` and `planner@boundary` cases.
+- `agent-multi-task-flow-basics`: real graph baseline across meaningful task boundaries.
 - `agent-tool-review-reject-runtime`: runtime regression case for reviewed tool-call rejection stopping subagent execution and handing off the cancellation announce.
 
 The `agent-*` datasets are seed coverage for future runners. They are meant to
@@ -55,8 +65,8 @@ make the expected behavior explicit before each runner is migrated to Langfuse.
 
 ## Langfuse Route Runner
 
-The first Langfuse-backed runner executes the real orchestrator route graph
-against `orchestrator-route-decision`:
+The legacy Langfuse-backed route snapshot runner executes the orchestrator graph
+up to the execution boundary against `orchestrator-route-decision`:
 
 ```sh
 npm run eval:langfuse:route
@@ -65,6 +75,10 @@ npm run eval:langfuse:route
 By default, this uses a local deterministic route model so it can run without
 sending eval cases to an external LLM. It still executes the real orchestrator
 graph and writes traces, scores, and dataset run items to Langfuse.
+
+This runner is retained as broad graph-plumbing regression coverage. It does
+not prove task text quality, capability search query quality, or a complete
+multi-task execution loop.
 
 The CLI summary reports results by example tag first, then by score dimension.
 Score dimensions without a matching expected field are counted as not applicable
@@ -79,6 +93,70 @@ EVAL_CASES=greeting,file-read-request npm run eval:langfuse:route
 To run the same route eval with the configured LLM instead of the local
 deterministic model, set `EVAL_ROUTE_MODEL=llm`. LLM mode reads configuration
 from `LLM_*`, `~/.pinpawo/.env`, or `~/.pinpawo/config.json`.
+
+## Decision Eval Boundaries
+
+Phase 1 evaluates the target decision contracts without changing the production
+graph:
+
+1. `entryDecision` chooses `answer | direct_task | needs_plan`. The existing
+   taskDecision stability runner is the production baseline adapter; current
+   production cannot yet emit `needs_plan`:
+
+   ```sh
+   npm run eval:task-decision
+   ```
+
+   The runner imports the canonical entry dataset. A target `needs_plan` case is
+   expected to fail against the current adapter (`next_task -> direct_task`), so
+   the Phase 1 baseline records the missing mode instead of hiding it.
+
+2. `capabilityDecision` starts from an already-defined current task and evaluates
+   candidate recall plus final custom/general selection. Until Phase 2 merges
+   the graph nodes, the baseline runner uses production capabilitySearch and
+   routeDecision internally:
+
+   ```sh
+   npm run eval:langfuse:capability-decision
+   ```
+
+   The default is deterministic and validates dataset/search/route plumbing.
+   Use the production decision model to evaluate the route prompt itself:
+
+   ```sh
+   EVAL_CAPABILITY_MODEL=llm npm run eval:langfuse:capability-decision
+   ```
+
+3. `outcomeDecision` has a standalone canonical dataset for current-task
+   acceptance. `task_done` deliberately leaves next-task planning to
+   `planner@boundary`:
+
+   ```sh
+   npm run eval:langfuse:outcome-decision
+   EVAL_OUTCOME_MODEL=llm npm run eval:langfuse:outcome-decision
+   ```
+
+4. `capabilityPlanner` cases are split into `planner@entry` and
+   `planner@boundary`. They define plan creation, materialization, cancellation,
+   and rubber-stamp expectations before a production planner exists. The runner
+   uses an eval-only candidate prompt and never imports it into the graph:
+
+   ```sh
+   npm run eval:langfuse:capability-planning
+   EVAL_PLANNER_MODEL=llm npm run eval:langfuse:capability-planning
+   ```
+
+5. Multi-task loop executes the current real graph across meaningful task
+   boundaries with deterministic decision/subagent models:
+
+   ```sh
+   npm run eval:langfuse:multi-task-flow
+   ```
+
+The canonical two-task baseline is `explore auth -> implement from handoff`.
+The package dependency plus test request is intentionally an entryDecision
+single-task case because both actions can be completed naturally in one
+workspace capability execution.
 
 ## Langfuse Tool-Review Reject Runner
 
@@ -113,6 +191,6 @@ Useful knobs:
 
 ```sh
 TASK_DECISION_REPEATS=5 npm run eval:task-decision
-TASK_DECISION_CASES=initial-multi-step-investigation,post-first-no-draft npm run eval:task-decision
+TASK_DECISION_CASES=agent-entry-decision-basics.explore-before-implementation-needs-plan,after-first-handoff-remaining-work npm run eval:task-decision
 DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:task-decision
 ```

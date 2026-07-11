@@ -37,6 +37,8 @@ import {
 } from '../src/agent/orchestrator/schemas';
 import type { RunDelegationSummary } from '../src/agent/orchestrator/types';
 import type { AgentActor } from '../src/types/agent';
+import { entryDecisionBasicsDataset } from './datasets/entry-decision-basics.ts';
+import { adaptTaskDecisionMode } from './decision-contract-scorers.ts';
 import {
   inferStructuredOutputMethod,
   type StructuredOutputMethod,
@@ -49,6 +51,7 @@ type EvalCase = {
   recentMessages?: BaseMessage[];
   runDelegationSummaries?: RunDelegationSummary[];
   expectedAction?: TaskDecision['action'];
+  targetMode: 'answer' | 'direct_task' | 'needs_plan';
   expectedTaskPattern?: RegExp;
   forbiddenTaskPattern?: RegExp;
   expectedSearchKeywordsPattern?: RegExp;
@@ -98,44 +101,36 @@ function completedSummary(
   };
 }
 
+function termsPattern(terms: string[] | undefined): RegExp | undefined {
+  if (!terms?.length) return undefined;
+  return new RegExp(terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'i');
+}
+
+const entryCases: EvalCase[] = entryDecisionBasicsDataset.cases.map((testCase) => ({
+  id: testCase.id,
+  name: testCase.name,
+  latestUserRequest: testCase.input.userRequest,
+  recentMessages: testCase.input.conversationContext?.map((text) => new AIMessage(text)),
+  expectedAction: testCase.expected.mode === 'answer' ? 'answer' : 'next_task',
+  targetMode: testCase.expected.mode,
+  expectedTaskPattern: termsPattern(testCase.expected.expectedTaskTerms),
+}));
+
 const EVAL_CASES: EvalCase[] = [
-  {
-    id: 'direct-answer-existing-context',
-    name: 'answer from existing conversation context',
-    latestUserRequest: '把刚刚的结论再用三句话总结一下。',
-    recentMessages: [
-      new HumanMessage('帮我看一下当前 PR 的核心风险。'),
-      new AIMessage('结论：task_done 会回到 taskDecision，由最新上下文决定是否还有后续 task。'),
-    ],
-    expectedAction: 'answer',
-  },
-  {
-    id: 'single-step-file-read',
-    name: 'single delegated task without follow-up draft',
-    latestUserRequest: '读取 docs/PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md，告诉我 Stage B 的验收标准。',
-    expectedAction: 'next_task',
-    expectedTaskPattern: /读取|查看|检查|提炼|验收标准/i,
-  },
-  {
-    id: 'initial-multi-step-investigation',
-    name: 'initial multi-step request creates a follow-up draft',
-    latestUserRequest: '看 issue #269 的设计诉求，再查本地实现和 git log，最后总结是否已经覆盖。',
-    expectedAction: 'next_task',
-    expectedTaskPattern: /issue|269|设计|诉求|需求/i,
-    forbiddenTaskPattern: /最后总结|完整计划|步骤\s*[123]|1[.、].*2[.、]/i,
-  },
+  ...entryCases,
   {
     id: 'initial-pr-review-keywords',
     name: 'PR review stays one deliverable and keeps investigation keywords',
     latestUserRequest: 'review https://github.com/pinpawo/pinpawo-agent/pull/344，重点看 Stage B 的 task routing 有没有回归。',
     expectedAction: 'next_task',
+    targetMode: 'direct_task',
     expectedTaskPattern: /review|PR|344|Stage B|routing|回归/i,
     expectedSearchKeywordsPattern: /review|PR|code|repository|explore|调查|审查|代码/i,
     forbiddenSearchKeywordsPattern: /^https?:\/\/\S+$/i,
   },
   {
-    id: 'maintain-existing-draft',
-    name: 'existing draft picks next task and shrinks remaining draft',
+    id: 'after-first-handoff-next-task',
+    name: 'completed handoff informs the next current task',
     latestUserRequest: '看 issue #269，再查本地实现，最后总结。',
     runDelegationSummaries: [
       completedSummary(
@@ -145,11 +140,12 @@ const EVAL_CASES: EvalCase[] = [
       ),
     ],
     expectedAction: 'next_task',
+    targetMode: 'direct_task',
     expectedTaskPattern: /本地|实现|git|log|检索|检查/i,
     forbiddenTaskPattern: /读取 issue|提炼需求点/i,
   },
   {
-    id: 'post-first-no-draft',
+    id: 'after-first-handoff-remaining-work',
     name: 'remaining work fits one task and does not create answer-work guidance',
     latestUserRequest: '看 issue #269，再查本地实现和 git log，最后总结是否已经覆盖。',
     runDelegationSummaries: [
@@ -160,6 +156,7 @@ const EVAL_CASES: EvalCase[] = [
       ),
     ],
     expectedAction: 'next_task',
+    targetMode: 'direct_task',
     expectedTaskPattern: /本地|实现|git|log|检索|检查/i,
   },
   {
@@ -175,10 +172,11 @@ const EVAL_CASES: EvalCase[] = [
       completedSummary(
         'task-2',
         '检索本地实现与 git log，判断需求点是否已覆盖。',
-        '本地实现已经把 outcomeDecision 验收化，并让有草案的 task_done 回环 taskDecision。',
+        '本地实现已经把 outcomeDecision 验收化，并让 task_done 回环 taskDecision。',
       ),
     ],
     expectedAction: 'answer',
+    targetMode: 'answer',
   },
 ];
 
@@ -328,7 +326,6 @@ function hasMultiStepShape(task: string | null | undefined): boolean {
   if (!task) return false;
   return (
     /(?:^|\n)\s*(?:\d+[.、)]|[-*])\s+\S/.test(task)
-    || /(?:然后|接着|再查|最后|并最终|并且最后)/.test(task)
     || task.length > 220
   );
 }
@@ -343,6 +340,10 @@ function evaluateDecision(testCase: EvalCase, decision: TaskDecision): string[] 
   if (testCase.expectedAction && decision.action !== testCase.expectedAction) {
     issues.push(`expected action=${testCase.expectedAction}, got ${decision.action}`);
   }
+  const adaptedMode = adaptTaskDecisionMode(decision.action);
+  if (adaptedMode !== testCase.targetMode) {
+    issues.push(`target mode=${testCase.targetMode}, current adapter produced ${adaptedMode}`);
+  }
   if (decision.action === 'answer') {
     if (task) issues.push('answer action should not include task text');
     if (searchKeywords) issues.push('answer action should not include search_keywords');
@@ -350,7 +351,7 @@ function evaluateDecision(testCase: EvalCase, decision: TaskDecision): string[] 
   if (decision.action === 'next_task') {
     if (!task) issues.push('next_task action requires task');
     if (hasMultiStepShape(task)) {
-      issues.push('task appears to contain multiple steps or an oversized plan');
+      issues.push('task appears to contain an enumerated plan or is oversized');
     }
   }
   if (task && testCase.expectedTaskPattern && !testCase.expectedTaskPattern.test(task)) {
@@ -502,6 +503,7 @@ function printSummary(results: EvalResult[], repeats: number) {
     const pass = group.filter((result) => result.ok).length;
     console.log(
       `- ${caseId}: ${pass}/${repeats} passed; ` +
+      `target=${EVAL_CASES.find((item) => item.id === caseId)?.targetMode}; ` +
       `actions=[${formatDistribution(group.map((item) => item.action))}]; ` +
       `tasks=[${formatDistribution(group.map((item) => item.taskPreview))}]`,
     );

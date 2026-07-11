@@ -9,6 +9,9 @@
 > 简单任务，复杂任务走 Studio planner。
 > 修订 2026-07-11：删除 plan_draft；task_done 无条件回 taskDecision，
 > route/guard 不再读取草案内容或存在性。
+> 修订 2026-07-12（issue #349）：启动 capability-aware planning 的 eval-first 设计。
+> Stage B 的无 plan 实现保持为 baseline；先通过评估确定 capability execution boundaries，
+> 再引入独立 capabilityPlanner，并把 capabilitySearch + routeDecision 收口为 capabilityDecision。
 
 ## 1. 两个 issue，一个根因
 
@@ -23,7 +26,7 @@
 
 - **D1 — 生命周期前缀保留，不用注释替代。** 字段名会被序列化进 checkpoint 和 LangSmith trace，注释不会；`buildRunStateReset` 的 reset 纪律按名字执行。前缀编码生命周期（谁重置你），注释编码角色（命令/游标/账本），分工不二选一。新增一条单测断言所有 channel 名匹配 `/^(session|task|run)/` 或等于 `messages`。
 - **D2 — 重命名遵守前缀规范**（#308 issue 正文里建议的 `nextDelegation`/`routePendingDelegation` 不合规，以本表为准），见 §3。
-- **D3（修订 2026-07-11）— 不引入 taskPlan 或 plan_draft。** task loop 的权威上下文是「用户原始请求 + 当前 task/委托 + 已完成任务结论（handoff copy + `runDelegationSummaries`）」；当前任务游标是 `taskActiveDelegation`（#115 "conclusions cross boundaries" 的延伸）。`task_done` 无条件回 taskDecision，模型根据最新上下文决定 `answer` 或 `next_task`。pet-agent 不维护未来任务草案；复杂任务的结构化多角色计划仍由 Studio planner 承担。
+- **D3（再次修订 2026-07-12）— 不恢复自然语言 plan_draft；评估 capability-aware plan。** Stage B 当前仍以「用户原始请求 + 当前 task/委托 + 已完成任务结论（handoff copy + `runDelegationSummaries`）」作为 baseline，`task_done` 回 taskDecision。issue #349 的后续方向是独立 capabilityPlanner：plan 描述 capability execution boundaries、依赖和 deferred task，不是文字步骤清单。新纪律是：plan 只有 capabilityPlanner 一个写方；entryDecision 不写 plan，outcomeDecision 不读 plan；guard/预算只读 task 总数、plan 修订次数等计数，不读 plan 内容做分支。Phase 1 先建立 `planner@entry` / `planner@boundary` eval，Phase 2 才修改生产 graph。
 - **D4 — 图重构为 task → search → route 三段管道。** task 先出生，capability search 用 task 文本（+ 决策顺带输出的 `search_keywords`）做 query，路由决策最后落 lane。`capabilityDiscovery` 节点删除——它唯一的职责（LLM 从原始请求提炼 query）被"task 即 query"取代。
 - **D5（修订 2026-07-09）— delegation outcome 决策验收化**：三态 `continue | task_done | goal_done` + 可选 `gap_note`，**不携带任何 task 文本字段**，也不携带 capability 枚举（枚举只在 routeDecision 小 schema）。它只回答一个问题——"这次 announce 的结果是否符合目标"：`continue` = 当前任务没达标，同 lane 继续（`gap_note` 说缺什么）；`task_done` = 这步达标但总目标未完；`goal_done` = 总目标满足。原三态里的 `next_task`（验收节点顺手写下一个 task）被否决：那让它同时干验收和规划两件事，prompt 会越写越长、稳定性下降。
 - **D6 — routeDecision 只在零候选时走确定性 fallback**（直接 `general`），有候选一律过 LLM。不做"单一高分候选跳过 LLM"：词法打分置信度不足以定阈值。
@@ -163,8 +166,10 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 
 ## 9. Non-goals
 
-- 不引入 source-of-truth 的 taskPlan（轻量草案见 D3：每轮可创建、沿用、修订或清空，草案内容与存在性都不驱动 route/guard）/ 不做多任务并发委派。
+- 不恢复旧的自然语言 `plan_draft`，不把用户文字步骤机械映射成 task，不做多任务并发委派。
+- planner 不提前绑定具体 capability id；实际执行者由 capabilityDecision 根据当时 registry 决定。
+- 不跨 task 复用 capability subagent lane messages；结论只通过 announce/handoff 穿过 task boundary。
 - 不改 handoff/announce 语义与 subagent 执行行为。
 - 不做 checkpoint 迁移（理由见 §3 末）。
 - 不合并 taskDecision 与 outcomeDecision 为单节点——D5/D11 后两者职责正交（规划 vs 验收），合并不再是方向。
-- 复杂任务的结构化规划不进 pet-agent：那是 Studio planner 的职责边界。
+- 不复制 Studio 的多角色任务队列；pet-agent planner 只组织自身 capability subagent 的执行边界。

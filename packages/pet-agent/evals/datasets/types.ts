@@ -5,7 +5,12 @@ export type AgentEvalArea =
   | 'interruption_recovery'
   | 'permission_control'
   | 'context_synthesis'
-  | 'structured_output';
+  | 'structured_output'
+  | 'entry_decision'
+  | 'capability_decision'
+  | 'outcome_decision'
+  | 'capability_planning'
+  | 'multi_task_flow';
 
 export type AgentEvalDifficulty = 'easy' | 'medium' | 'hard';
 
@@ -42,4 +47,9 @@ export const AGENT_EVAL_AREAS: Record<AgentEvalArea, string> = {
   permission_control: 'Ask for, preserve, and apply user approvals safely.',
   context_synthesis: 'Use completed subagent context to answer instead of doing more work.',
   structured_output: 'Produce schema-compatible model outputs for orchestration internals.',
+  entry_decision: 'Choose answer, direct task, or capability-aware planning at run entry.',
+  capability_decision: 'Search and select the capability subagent for a current task.',
+  outcome_decision: 'Evaluate a subagent announce and choose the next orchestration transition.',
+  capability_planning: 'Plan capability execution boundaries and materialize the next task.',
+  multi_task_flow: 'Complete goals across isolated task executions and handoffs.',
 };

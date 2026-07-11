@@ -141,13 +141,13 @@ search keywords 或 plan。
 
 ### 5.2 Plan 生命周期
 
-planner 输出的 `remaining_plan` 包含本轮 materialize 的 concrete head 和其后的未开始任务；
-`next_task` 必须与第一项完全一致。
+planner 用 `next_task` 单独输出本轮 materialize 的 current task；`remaining_plan` 从输出开始就只包含
+next task 之后尚未开始的 future tail，不重复 current task。
 
 运行时只做机械消费：
 
-1. concrete head 写入 `runPendingTask`。
-2. `runCapabilityPlan` 只保存 head 之后尚未开始的 tail。
+1. `next_task` 写入 `runPendingTask`。
+2. `remaining_plan` 直接写入 `runCapabilityPlan`。
 3. task_done 后，boundary planner 接收完整 handoff + tail。
 
 运行时不改写 objective、不判断 deferred task 是否仍有效，也不根据 plan 内容决定 route/guard。
@@ -177,7 +177,7 @@ type PlanTask = {
 }
 ```
 
-`next_task` 要求 plan 第一项为内容一致的 concrete task。`answer` 要求空 plan 和 null next_task。
+`next_task` 与 `remaining_plan` 不重复表达同一 task。`answer` 要求空 plan 和 null next_task。
 所有 objective/intent 在 schema 层 trim，并拒绝空白字符串。
 
 ## 6. capabilityDecision
@@ -228,14 +228,14 @@ capability search 和 selection 属于同一个 graph node，但职责仍分两�
 | 当前 task 已达标，但不能明确断言用户目标已经完成 | `task_done` |
 | 不应继续自主执行：目标已满足，或需要用户澄清/确认 | `goal_done` |
 
-判断原则：
+每个 outcome 的条件、字段和后续责任必须在对应分组内完整表达：
 
-- 当前 task 是否达标主要依据完整 announce 是否覆盖 task 目标。
-- 用户目标是判断 task loop 继续或结束的唯一基准。
-- `continue` 的 `gap_note` 只描述当前 task 缺口，同一 capability 继续，不重新 search。
-- `task_done` 不生成下一 task；系统 handoff 后固定进入 capabilityPlanner boundary。
-- `goal_done` 是 terminal verdict，不在 decision 层生成用户回复。
-- 本节点不读取 plan 内容，也不接收 capability registry。
+- `continue`：当前 task 未达标；同一 capability 可继续且不需要用户输入；`gap_note` 只写当前 task 缺口。
+- `task_done`：当前 task 已达标，但不能明确断言总目标完成；不生成 task，handoff 后由 capabilityPlanner 处理后续。
+- `goal_done`：目标已经满足，或继续前需要用户输入；停止自主执行并交给 answer。
+
+所有 outcome 都以完整 announce 验收当前 task，以用户目标和其他结论判断 loop 是否结束。本节点不读取
+plan 内容，也不接收 capability registry。
 
 ### 7.2 注入事实
 
@@ -262,7 +262,7 @@ schema 不包含 task、plan、search keywords、lane、capability 或用户回�
 |---|---|
 | answer / direct / needs plan | entryDecision LLM |
 | capability execution boundaries 和 plan 内容 | capabilityPlanner LLM |
-| materialized head 从 plan 输出转入 pending task | 代码机械消费 |
+| next_task / remaining_plan 写入各自 state | 代码机械映射 |
 | capability candidate search | capabilityDecision 内确定性代码 |
 | candidate 与 task 的语义匹配 | capabilityDecision LLM |
 | 零 candidate fallback general | 代码 |

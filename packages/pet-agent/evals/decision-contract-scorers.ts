@@ -97,7 +97,9 @@ export function scoreCapabilityPlanning(
   expected: CapabilityPlanningExpected,
   input: CapabilityPlanningInput,
 ): DecisionContractScore[] {
-  const metrics = derivePlanningMetrics(input, output.remainingPlan);
+  const metrics = derivePlanningMetrics(input, output.remainingPlan, output.nextTask && output.capabilityIntent
+    ? { objective: output.nextTask, capabilityIntent: output.capabilityIntent }
+    : null);
   const remainingPlanMatches = output.remainingPlan.length === expected.remainingPlan.length
     && output.remainingPlan.every((item, index) => {
       const expectedItem = expected.remainingPlan[index];
@@ -136,9 +138,13 @@ function normalizePlan(plan: Array<{ objective: string; capabilityIntent: string
 export function derivePlanningMetrics(
   input: CapabilityPlanningInput,
   outputPlan: Array<{ objective: string; capabilityIntent: string; status: 'concrete' | 'deferred' }>,
+  materializedTask: { objective: string; capabilityIntent: string } | null = null,
 ): { planEffect: CapabilityPlanningExpected['planEffect']; rubberStamp: boolean } {
   const before = normalizePlan(input.remainingPlan ?? []);
-  const after = normalizePlan(outputPlan);
+  const after = normalizePlan([
+    ...(materializedTask ? [{ ...materializedTask, status: 'concrete' as const }] : []),
+    ...outputPlan,
+  ]);
   const unchanged = JSON.stringify(before) === JSON.stringify(after);
   if (input.mode === 'entry') {
     return { planEffect: after.length > 0 ? 'created' : 'empty', rubberStamp: false };

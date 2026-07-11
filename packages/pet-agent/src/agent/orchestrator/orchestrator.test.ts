@@ -364,7 +364,7 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
           plannerInputs.push(inputText);
           return {
             result: 'next_task',
-            remaining_plan: [{ objective: '检索本地实现与 git log，判断需求点是否已覆盖。', capability_intent: 'codebase_exploration', status: 'concrete' }],
+            remaining_plan: [],
             next_task: { objective: '检索本地实现与 git log，判断需求点是否已覆盖。', capability_intent: 'codebase_exploration' },
           };
         }
@@ -440,7 +440,6 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
           return {
             result: 'next_task',
             remaining_plan: [
-              { objective: '读取 issue #269 并提炼需求点。', capability_intent: 'codebase_exploration', status: 'concrete' },
               { objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration', status: 'deferred' },
             ],
             next_task: { objective: '读取 issue #269 并提炼需求点。', capability_intent: 'codebase_exploration' },
@@ -457,7 +456,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
           plannerInputs.push(inputText);
           return {
             result: 'next_task',
-            remaining_plan: [{ objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration', status: 'concrete' }],
+            remaining_plan: [],
             next_task: { objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration' },
           };
         }

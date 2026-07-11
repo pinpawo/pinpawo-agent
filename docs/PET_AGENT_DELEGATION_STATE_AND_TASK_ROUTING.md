@@ -37,7 +37,7 @@
 - **D9 — `canHandoffActiveDelegation` 整字段删除，不改名。** 它是存进 state 的派生值：guard 逻辑是 `(taskActiveDelegation, messages)` 的纯函数（announce completionReason === 'limit_reached' → false），写者到唯一读者只有一跳，且派生输入在这一跳间不可变；decision context 已在为 announce context 计算同一个 completionReason。改法：`buildDecisionContext` 在 delegation_outcome 时就地 `evaluateGuard(delegationOutcomeDecisionGuard, ...)`（guard 定义与决策事件保留，观测面不丢），连带删除 `delegationOutcomeDecisionGuard` 图节点（薄包装）与 `prepareUserIntentDecision` 图节点（全部职责是写 true，而 run reset 已置 true、user_intent 读者硬编码忽略 state——双重死代码）。
 - **D10（修订 2026-07-10）— 删除 `runPendingFinalReply` 与 inline/finalizeRun 链路；所有用户可见终态统一经过 answer。** taskDecision 和 routeDecision 的下一跳可由已有业务 state 推导：有 `runPendingTask` 才进入 search，否则 answer；有 `runNextDelegation` 才进入 capability subagent，否则 answer。iteration guard 同样由 guard/state 决定 outcomeDecision 或 answer。outcomeDecision 的三态 verdict 既决定 state update 又决定下一节点，按 LangGraph 官方边界窄用 `Command({ update, goto })`：`continue` 回当前 capability，`task_done` 去 taskDecision，`goal_done` 去 answer；node 声明有限 `ends`，不引入新的 route state。删除 `runPendingFinalReply` channel/type/reset、`'inline'`、`buildInlineStopResult`、`finalizeRun` 及相关 route 分支。可预期终止由 answer 根据现有 state/guard 事实生成回复；真正 invariant violation 抛错或进入恢复，不由 decision/guard 代码直接写用户可见 `AIMessage`。
 - **D11（修订 2026-07-11）— taskDecision 是唯一 task 出生点；`task_done` 无条件回环 taskDecision。** 垂直化推到底的结构结论：规划（"下一步怎么做"）全部收口在 taskDecision，验收（"结果符不符合目标"）全部收口在 outcomeDecision。任务边界流转为 `outcomeDecision(task_done) → handoff + 清 taskActiveDelegation + 重置 runCapabilitySearchState → taskDecision（用户目标 + 新结论）→ answer 或 capabilitySearch → routeDecision`。代价：每个 task_done 边界固定多一次 taskDecision LLM 调用；这正是规划/验收职责分离的结构成本。
-- **D12（2026-07-12，取代 D4/D11 的当前 graph 结论）— capability-aware planning。** `entryDecision` 每个 run 只执行一次，选择 `answer | direct_task | needs_plan`；`capabilityPlanner` 是 plan 内容的唯一写方，在 entry/boundary 两种输入分布下维护 capability execution boundaries 并 materialize current task。planner 输出包含 materialized head，运行时把 head 转交 `runPendingTask` 后，`runCapabilityPlan` 只保存尚未开始的 tail；boundary 读取完整 handoff 和 tail，不会把刚完成的 task 重新标成 remaining。`capabilityDecision` 在单节点内部完成搜索与 custom/general 选择；`task_done → handoff → capabilityPlanner(boundary)`，`goal_done → handoff → answer`。outcomeDecision 与 guard 均不读取 plan 内容。
+- **D12（2026-07-12，取代 D4/D11 的当前 graph 结论）— capability-aware planning。** `entryDecision` 每个 run 只执行一次，选择 `answer | direct_task | needs_plan`；`capabilityPlanner` 是 plan 内容的唯一写方，在 entry/boundary 两种输入分布下维护 capability execution boundaries，并分别输出 materialized `next_task` 与尚未开始的 `remaining_plan` tail。运行时只把两者机械写入 `runPendingTask` / `runCapabilityPlan`；boundary 读取完整 handoff 和 tail，不会把刚完成的 task 重新标成 remaining。`capabilityDecision` 在单节点内部完成搜索与 custom/general 选择；`task_done → handoff → capabilityPlanner(boundary)`，`goal_done → handoff → answer`。outcomeDecision 与 guard 均不读取 plan 内容。
 
 ## 3. State 模型（目标）
 
@@ -48,7 +48,7 @@
 | `runPendingDelegation` | `runNextDelegation` | run | **路由命令**（单跳） | capabilityDecision | `afterDecision` + capability/general 节点 | 执行节点消费后置 null；run 入口 reset |
 | `runPendingFinalReply` | **删除**（D10） | — | 纯路由 state；task/route 由业务 state 推导，outcomeDecision 窄用 Command | — | — | — |
 | （新增） | `runPendingTask` | run | **当前待路由 task** | entryDecision（direct）或 capabilityPlanner（planned） | capabilityDecision | capabilityDecision 落定 delegation 后置 null；run 入口 reset |
-| （新增） | `runCapabilityPlan` | run | **尚未开始的 capability execution boundary tail** | capabilityPlanner 决定内容；运行时消费 materialized head | capabilityPlanner | answer / run 入口清空；每次 materialize 后只保留 tail |
+| （新增） | `runCapabilityPlan` | run | **尚未开始的 capability execution boundary tail** | capabilityPlanner | capabilityPlanner | answer / run 入口清空；每次 planner 输出整体替换 tail |
 | `runDelegations` | `runDelegationSummaries` | run | **账本**：只进 prompt/decision context，永不参与控制流分支 | 执行节点追加/更新 | `buildRunDelegationSummaryContext` | run 入口 reset |
 | `runCapabilitySearchState` | **删除** | — | search candidates 改为 capabilityDecision 内部局部值，不进入 graph state | — | — | — |
 | `canHandoffActiveDelegation` | **删除**（D9） | — | 派生值误存为 state；改为 decision context 就地 evaluateGuard | — | — | — |
@@ -74,7 +74,7 @@ type CapabilityPlanTask = {
 补充约束：
 
 - **transient 不跨 run 存活**：进入 END 前 `runNextDelegation` / `runPendingTask` 必须为 null、`runCapabilityPlan` 必须为空，orchestrator 测试断言之。
-- **plan state 只保存 tail**：planner 输出的第一项 concrete task 被 materialize 到 `runPendingTask` 后，运行时只把其后的未开始任务写入 `runCapabilityPlan`；task_done 后 boundary planner 读取完整 handoff + tail。
+- **plan state 只保存 tail**：planner 用 `next_task` 单独 materialize current task，`remaining_plan` 从输出开始就只包含未开始的 future tail，并直接写入 `runCapabilityPlan`；task_done 后 boundary planner 读取完整 handoff + tail。
 - **`runDelegationSummaries` 只读不判**：route/guard 不得依据它分支。
 - **不从 lane announce 恢复 active delegation**：`taskActiveDelegation` 是唯一 active delegation source of truth；lane-tagged announce 只作为 transcript/context/handoff provenance，不再驱动控制流或候选恢复。
 - checkpoint 兼容：本次改名只涉及 `run*` 字段（run 入口本来就 reset），`taskActiveDelegation` 与 `session*` 不动，跨 run 状态不受影响。部署边界上处于 interrupt 中的 run 会丢路由 transient，接受（罕见，重新决策即可恢复），不做迁移。
@@ -100,8 +100,8 @@ capabilityPlanner（LLM，静态 schema；plan 内容唯一写方）
   entry 输入：用户目标 + capability registry；建立 capability execution boundaries
   boundary 输入：用户目标 + 完整 latest handoff + 尚未开始的 runCapabilityPlan tail
   输出 { result: 'next_task' | 'answer', remaining_plan, next_task? }
-  ── next_task → materialize 第一项 concrete task 到 runPendingTask
-                 → runCapabilityPlan 只保存其后 tail
+  ── next_task → materialize 到 runPendingTask
+                 → remaining_plan 直接写入 runCapabilityPlan tail
                  → Command(goto: capabilityDecision)
   ── answer → 清 plan → Command(goto: answer)
 
@@ -180,7 +180,7 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 - run 结束 snapshot 中保留的 transient 字段全部为 null；Stage 0.5 后 `canHandoffActiveDelegation` 不再出现，D10 修订后 `runPendingFinalReply` channel/type/reset 与 inline/finalizeRun 终点均不存在。
 - Stage 0 不改变任何控制流行为；Stage 0.5 只移除派生 state，不改变 handoff 判定。
 - Stage B：`plan_draft` / `runTaskPlanDraft` 不存在；`task_done` 无条件回 taskDecision；outcomeDecision schema 不含 task 文本字段（D5）；第 2+ 个 task 由回环后的 taskDecision 结合用户目标和委托结论产出并独立走 search+route（D11）。
-- Stage C：entryDecision 只在 run 入口执行；plan 内容只有 capabilityPlanner 一个写方，运行时仅消费 materialized head；runCapabilityPlan 只保存未开始 tail；task_done 回 capabilityPlanner boundary 并读取完整 handoff；每个 current task 统一经过 capabilityDecision；outcomeDecision/guard 不读取 plan 内容；answer 清空 runCapabilityPlan。
+- Stage C：entryDecision 只在 run 入口执行；plan 内容只有 capabilityPlanner 一个写方，planner 分别输出 current `next_task` 与 future `remaining_plan`；runCapabilityPlan 只保存未开始 tail；task_done 回 capabilityPlanner boundary 并读取完整 handoff；每个 current task 统一经过 capabilityDecision；outcomeDecision/guard 不读取 plan 内容；answer 清空 runCapabilityPlan。
 
 ## 9. Non-goals
 

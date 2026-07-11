@@ -191,7 +191,8 @@ test('capability planner prompt owns entry and boundary materialization', () => 
   });
   assert.match(prompt, /capability planning decision 节点/);
   assert.match(prompt, /不绑定 registry 中的具体 capability id/);
-  assert.match(prompt, /boundary 模式/);
+  assert.match(prompt, /mode=entry：[^]*mode=boundary：[^]*result=next_task：[^]*result=answer：/);
+  assert.match(prompt, /remaining_plan 只包含 next_task 之后/);
   assert.match(input, /<mode>boundary<\/mode>/);
   assert.match(input, /token validation/);
   assert.match(input, /code_modification/);
@@ -226,7 +227,9 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
   assert.match(prompt, /当前阶段：delegationOutcomeDecision/);
-  assert.match(prompt, /决策原则/);
+  assert.match(prompt, /决策条件/);
+  assert.match(prompt, /outcome=continue：[^]*outcome=task_done：[^]*outcome=goal_done：/);
+  assert.match(prompt, /系统 handoff 后由 capabilityPlanner/);
   assert.match(prompt, /不再自主执行，交给 answer/);
   assert.match(prompt, /唯一职责/);
 });

@@ -1,4 +1,4 @@
-import { config } from './config';
+import { getConfig } from './config';
 
 export type StartupConfigSnapshot = {
   mode: 'run' | 'tui';
@@ -38,6 +38,7 @@ export function buildStartupConfigSnapshot(params: {
   actorId?: string;
   actorName?: string | null;
 }): StartupConfigSnapshot {
+  const config = getConfig();
   return {
     mode: params.mode,
     workdir: params.workdir,

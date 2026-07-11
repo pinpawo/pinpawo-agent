@@ -6,7 +6,7 @@ import type {
   StudioTurnEvent,
   StudioTurnResult,
 } from '@pinpawo/pet-agent';
-import type { LocalServerDeps } from './localServerTypes';
+import { getLocalServerWorkdir, type LocalServerDeps } from './localServerTypes';
 import {
   buildStudioForTurn,
   type BuildStudioInput,
@@ -44,7 +44,7 @@ export class StudioRunService {
 
   async run(request: StudioRunServiceRequest): Promise<StudioRunServiceResult> {
     const { deps, runId, userRequest } = request;
-    const effectiveWorkdir = deps.runtimeConfig?.workdir ?? deps.workdir;
+    const effectiveWorkdir = getLocalServerWorkdir(deps);
     const identity: StudioRunIdentity = buildStudioRunIdentity({
       runId,
       conversationId: request.conversationId,
@@ -80,7 +80,7 @@ function buildStudioInputFromDeps(request: StudioRunServiceRequest): BuildStudio
     toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
     ownerUserId: request.ownerUserId ?? null,
     bridge: request.bridge,
-    workdir: deps.runtimeConfig?.workdir ?? deps.workdir,
+    workdir: getLocalServerWorkdir(deps),
     ...(deps.runtimeConfig ? {
       studioConfigPath: deps.runtimeConfig.studioConfigPath,
       petsDir: deps.runtimeConfig.petsDir,

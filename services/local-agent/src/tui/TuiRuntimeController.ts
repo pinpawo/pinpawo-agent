@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { BuiltinGlobalReviewPolicyMode, ReviewOption, ReviewResponse } from '@pinpawo/pet-agent';
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
-import { config } from '../config';
+import { getConfig, setConfig } from '../config';
 import { TUI_TEXT } from './render/text';
 import { formatNow } from './render/terminalText';
 import { TuiLocalServerClient } from './tuiLocalServerClient';
@@ -316,7 +316,7 @@ export class TuiRuntimeController {
   }
 
   updateRuntimeConfig(params: { globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode }) {
-    config.globalReviewPolicyMode = params.globalReviewPolicyMode;
+    setConfig({ globalReviewPolicyMode: params.globalReviewPolicyMode });
     return this.sendRuntimeConfigUpdate();
   }
 
@@ -341,12 +341,14 @@ export class TuiRuntimeController {
     workspaceRoot?: string;
     stateRoot?: string;
     studioConfigPath?: string;
+    studioDueRunsPath?: string;
     studioConfigSource?: string;
     studioConfigActivePath?: string;
     legacyStudioConfigPath?: string;
     petsDir?: string;
     studioWikiBaseDir?: string;
   }) {
+    const config = getConfig();
     const model = payload.model ?? config.llmModel;
     const cwd = payload.cwd ?? this.options.workdir ?? config.workdir;
 
@@ -365,6 +367,7 @@ export class TuiRuntimeController {
         ...(payload.workspaceRoot ? { workspaceRoot: payload.workspaceRoot } : {}),
         ...(payload.stateRoot ? { stateRoot: payload.stateRoot } : {}),
         ...(payload.studioConfigPath ? { studioConfigPath: payload.studioConfigPath } : {}),
+        ...(payload.studioDueRunsPath ? { studioDueRunsPath: payload.studioDueRunsPath } : {}),
         ...(payload.studioConfigSource ? { studioConfigSource: payload.studioConfigSource } : {}),
         ...(payload.studioConfigActivePath ? { studioConfigActivePath: payload.studioConfigActivePath } : {}),
         ...(payload.legacyStudioConfigPath ? { legacyStudioConfigPath: payload.legacyStudioConfigPath } : {}),
@@ -644,7 +647,7 @@ export class TuiRuntimeController {
     }
     return Boolean(this.wsClient.send({
       type: 'runtime_config.update',
-      globalReviewPolicyMode: config.globalReviewPolicyMode,
+      globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
     }));
   }
 }

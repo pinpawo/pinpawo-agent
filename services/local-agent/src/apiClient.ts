@@ -1,4 +1,4 @@
-import { config } from './config';
+import { getConfig } from './config';
 
 export type PostPayload = {
   content: string;
@@ -18,6 +18,7 @@ export type PostPayload = {
 };
 
 export async function submitPost(payload: PostPayload): Promise<{ post_id: string }> {
+  const config = getConfig();
   const res = await fetch(`${config.apiBaseUrl}/agent/post`, {
     method: 'POST',
     headers: {
@@ -42,6 +43,7 @@ export async function submitPost(payload: PostPayload): Promise<{ post_id: strin
 }
 
 export async function requestPostImage(postId: string): Promise<void> {
+  const config = getConfig();
   const res = await fetch(`${config.apiBaseUrl}/agent/post/${postId}/image-request`, {
     method: 'PATCH',
     headers: {
@@ -70,6 +72,7 @@ export async function postTrends(
   platform: string,
   items: TrendItemInput[],
 ): Promise<{ accepted: number; duplicates: number }> {
+  const config = getConfig();
   const res = await fetch(`${config.apiBaseUrl}/agent/trends`, {
     method: 'POST',
     headers: {

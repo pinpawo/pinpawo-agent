@@ -1,6 +1,6 @@
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { arch, cpus, homedir, hostname, platform, release, type } from 'node:os';
-import { config } from './config';
+import { getConfig } from './config';
 
 export type RuntimeEnvironmentSummaryOptions = {
   sessionStartedAt?: string;
@@ -31,9 +31,10 @@ function resolveTimezone(timezone?: string): string {
 }
 
 export function buildRuntimeEnvironmentSummary(
-  workdir = config.workdir,
+  workdir = getConfig().workdir,
   options: RuntimeEnvironmentSummaryOptions = {},
 ): string {
+  const config = getConfig();
   const sessionStartedAt = options.sessionStartedAt?.trim();
   const lines = [
     '[运行环境]',

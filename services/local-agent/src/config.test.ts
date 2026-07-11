@@ -53,8 +53,8 @@ test('config workdir defaults to process cwd when env and stored config are abse
     'tsx',
     '-e',
     [
-      `const { config } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
-      'process.stdout.write(config.workdir);',
+      `const { getConfig } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
+      'process.stdout.write(getConfig().workdir);',
     ].join('\n'),
   ], {
     cwd: process.cwd(),
@@ -77,7 +77,8 @@ test('PINPAWO_LOCAL_ONLY disables hosted API even when credentials are present',
     'tsx',
     '-e',
     [
-      `const { config } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
+      `const { getConfig } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
+      'const config = getConfig();',
       'process.stdout.write(JSON.stringify({ apiConnected: config.apiConnected, localOnlyMode: config.localOnlyMode, apiSetupMessage: config.apiSetupMessage }));',
     ].join('\n'),
   ], {
@@ -99,4 +100,23 @@ test('PINPAWO_LOCAL_ONLY disables hosted API even when credentials are present',
   assert.equal(parsed.apiConnected, false);
   assert.equal(parsed.localOnlyMode, true);
   assert.match(parsed.apiSetupMessage, /Local-only mode is enabled/);
+});
+
+test('setConfig replaces the current frozen snapshot without mutating previous snapshots', async () => {
+  const { getConfig, setConfig } = await loadConfigHelpers();
+  const original = getConfig();
+
+  try {
+    const updated = setConfig((current) => ({
+      workdir: `${current.workdir}-updated`,
+    }));
+
+    assert.notEqual(updated, original);
+    assert.equal(getConfig(), updated);
+    assert.equal(original.workdir.endsWith('-updated'), false);
+    assert.equal(updated.workdir, `${original.workdir}-updated`);
+    assert.equal(Object.isFrozen(updated), true);
+  } finally {
+    setConfig(original);
+  }
 });

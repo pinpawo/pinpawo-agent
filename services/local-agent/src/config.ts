@@ -181,41 +181,80 @@ const llmContextWindowTokens =
   ?? inferLlmContextWindowTokens(llmModel)
   ?? 32000;
 
-export const config = {
-  apiBaseUrl,
-  hasuraEndpoint,
-  agentToken,
-  hasuraJwt,
-  localOnlyMode,
-  apiConnected,
-  apiSetupMessage,
+export type Config = Readonly<{
+  apiBaseUrl: string;
+  hasuraEndpoint: string;
+  agentToken: string;
+  hasuraJwt: string;
+  localOnlyMode: boolean;
+  apiConnected: boolean;
+  apiSetupMessage: string;
+  llmApiKey: string;
+  llmModelPreset: string;
+  llmBaseUrl: string;
+  llmModel: string;
+  llmContextWindowTokens: number;
+  structuredOutputAutoRepair: boolean;
+  structuredOutputRepairMaxRetries?: number;
+  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  workdir: string;
+  browserBackend: string;
+  pollIntervalSeconds: number;
+  localServerPort: number;
+}>;
 
-  llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
-  llmModelPreset: effectiveLlmPreset?.key ?? '',
-  llmBaseUrl,
-  llmModel,
-  llmContextWindowTokens,
-  structuredOutputAutoRepair: getBoolean(
-    'LLM_STRUCTURED_OUTPUT_AUTO_REPAIR',
-    'structured_output_auto_repair',
-  ) ?? false,
-  structuredOutputRepairMaxRetries: getNumber(
-    'LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES',
-    'structured_output_repair_max_retries',
-  ),
-  globalReviewPolicyMode: getGlobalReviewPolicyMode(),
+export type ConfigInput = Partial<Config>;
 
-  workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
-  browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
+function freezeConfig(input: Config): Config {
+  return Object.freeze({ ...input });
+}
 
-  /** Extra capability plugin directories beyond ~/.pinpawo/capabilities/ */
-  get capabilityDirs(): string[] {
-    const fromEnv = process.env.PINPAWO_CAPABILITY_DIRS?.split(':').filter(Boolean) ?? [];
-    const fromStored = (stored.capability_dirs ?? []);
-    return [...new Set([...fromEnv, ...fromStored])];
-  },
+function readConfigDefaults(): Config {
+  return freezeConfig({
+    apiBaseUrl,
+    hasuraEndpoint,
+    agentToken,
+    hasuraJwt,
+    localOnlyMode,
+    apiConnected,
+    apiSetupMessage,
+    llmApiKey: required('LLM_API_KEY', 'llm_api_key', 'LLM_API_KEY'),
+    llmModelPreset: effectiveLlmPreset?.key ?? '',
+    llmBaseUrl,
+    llmModel,
+    llmContextWindowTokens,
+    structuredOutputAutoRepair: getBoolean(
+      'LLM_STRUCTURED_OUTPUT_AUTO_REPAIR',
+      'structured_output_auto_repair',
+    ) ?? false,
+    structuredOutputRepairMaxRetries: getNumber(
+      'LLM_STRUCTURED_OUTPUT_REPAIR_MAX_RETRIES',
+      'structured_output_repair_max_retries',
+    ),
+    globalReviewPolicyMode: getGlobalReviewPolicyMode(),
+    workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
+    browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
+    pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
+    localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
+  });
+}
 
-  pollIntervalSeconds: Number(process.env.POLL_INTERVAL_SECONDS ?? 60),
+const defaultConfig = readConfigDefaults();
+let currentConfig = defaultConfig;
 
-  localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
-};
+export function getConfig(): Config {
+  return currentConfig;
+}
+
+export function buildConfig(input: ConfigInput = {}, defaults: Config = defaultConfig): Config {
+  return freezeConfig({
+    ...defaults,
+    ...input,
+  });
+}
+
+export function setConfig(input: ConfigInput | ((current: Config) => ConfigInput)): Config {
+  const patch = typeof input === 'function' ? input(currentConfig) : input;
+  currentConfig = buildConfig(patch, currentConfig);
+  return currentConfig;
+}

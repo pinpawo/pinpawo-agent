@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { config } from './config';
+import { getConfig } from './config';
 import { gql } from './graphqlClient';
 import { loadStoredConfig, saveStoredConfig } from './storage';
 
@@ -86,7 +86,7 @@ export function loadSelectedActorName(): string | null {
 }
 
 export async function listAvailableActors(): Promise<AvailableActor[]> {
-  if (!config.apiConnected) {
+  if (!getConfig().apiConnected) {
     return [localOnlyActor()];
   }
   const data = await gql<ActorQueryResult>(AVAILABLE_ACTORS_QUERY);
@@ -150,7 +150,7 @@ export async function selectActorInteractively(options?: {
 export async function ensureActorSelected(options?: {
   interactive?: boolean;
 }): Promise<string> {
-  if (!config.apiConnected) {
+  if (!getConfig().apiConnected) {
     return LOCAL_ONLY_ACTOR_ID;
   }
   const interactive = options?.interactive ?? false;

@@ -1,6 +1,6 @@
 import { LocalAgentRuntime } from '../runtime';
 import { startLocalServer } from '../localServer';
-import { config } from '../config';
+import { getConfig } from '../config';
 import { ensureActorSelected } from '../actorSelection';
 import { browserSession } from '../toolkits/browser';
 import { applyRuntimeWorkdir } from '../runtimeWorkdir';
@@ -44,7 +44,7 @@ export async function runAgent(options: RunAgentOptions = {}) {
     actorId: runtime.getActorId(),
     actorName: runtime.getActorName(),
   });
-  await startLocalServer(config.localServerPort, {
+  await startLocalServer(getConfig().localServerPort, {
     actorId: runtime.getActorId(),
     actorName: runtime.getActorName() ?? undefined,
     llmConfig: runtime.getLlmConfig(),

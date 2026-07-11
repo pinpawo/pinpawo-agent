@@ -11,7 +11,7 @@ import {
   type StudioDueRunClaim,
 } from '@pinpawo/pet-agent';
 import type { PendingReviewSlot } from './studio/studioBridge';
-import type { LocalServerDeps } from './localServerTypes';
+import { getLocalServerWorkdir, type LocalServerDeps } from './localServerTypes';
 import { StudioRunService } from './studioRunService';
 
 export type LocalStudioDueRunCompletion = {
@@ -102,7 +102,7 @@ export class LocalStudioDueRunScheduler {
       throw new DOMException('scheduler stopped', 'AbortError');
     }
 
-    const workdir = input.deps.runtimeConfig?.workdir ?? input.deps.workdir;
+    const workdir = getLocalServerWorkdir(input.deps);
     if (!this.matchesWorkdirFilter(workdir)) {
       throw new DOMException(
         `studio request workdir ${workdir} is outside scheduler scope`,

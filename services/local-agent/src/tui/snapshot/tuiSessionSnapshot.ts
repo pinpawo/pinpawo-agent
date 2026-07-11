@@ -94,6 +94,7 @@ function normalizeRuntimeSnapshot(
     ...(runtime.cwd ? { cwd: runtime.cwd } : {}),
     ...(runtime.stateRoot ? { stateRoot: runtime.stateRoot } : {}),
     ...(runtime.studioConfigPath ? { studioConfigPath: runtime.studioConfigPath } : {}),
+    ...(runtime.studioDueRunsPath ? { studioDueRunsPath: runtime.studioDueRunsPath } : {}),
     ...(runtime.studioConfigSource ? { studioConfigSource: runtime.studioConfigSource } : {}),
     ...(runtime.studioConfigActivePath ? { studioConfigActivePath: runtime.studioConfigActivePath } : {}),
     ...(runtime.legacyStudioConfigPath ? { legacyStudioConfigPath: runtime.legacyStudioConfigPath } : {}),

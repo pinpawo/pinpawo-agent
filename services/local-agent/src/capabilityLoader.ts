@@ -236,7 +236,7 @@ async function loadCapabilitiesFromDir(
 
 /**
  * Scan all configured capability directories and load every valid plugin.
- * Directories: ~/.pinpawo/capabilities/ (default) + config.capabilityDirs + PINPAWO_CAPABILITY_DIRS env.
+ * Directories: ~/.pinpawo/capabilities/ (default) plus stored and environment-configured paths.
  * Duplicate IDs across directories are skipped (first-seen wins).
  */
 export async function loadUserCapabilities(): Promise<LoadedUserCapability[]> {

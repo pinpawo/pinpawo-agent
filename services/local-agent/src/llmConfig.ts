@@ -1,8 +1,9 @@
 import type { AgentLlmConfig } from './agentConfig';
-import { config } from './config';
+import { getConfig } from './config';
 import { loadStoredConfig } from './storage';
 
 export function buildLocalLlmConfig(overrides: Partial<AgentLlmConfig> = {}): AgentLlmConfig {
+  const config = getConfig();
   const stored = loadStoredConfig();
   return {
     apiKey: config.llmApiKey,

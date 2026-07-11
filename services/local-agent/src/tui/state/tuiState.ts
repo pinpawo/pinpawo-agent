@@ -63,6 +63,7 @@ export type SessionModel = {
     workspaceRoot?: string;
     stateRoot?: string;
     studioConfigPath?: string;
+    studioDueRunsPath?: string;
     studioConfigSource?: string;
     studioConfigActivePath?: string;
     legacyStudioConfigPath?: string;

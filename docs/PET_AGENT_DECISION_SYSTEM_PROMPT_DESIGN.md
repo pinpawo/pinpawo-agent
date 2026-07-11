@@ -302,3 +302,15 @@ npm run eval:langfuse:capability-decision -w @pinpawo/pet-agent
 npm run eval:langfuse:outcome-decision -w @pinpawo/pet-agent
 npm run eval:langfuse:multi-task-flow -w @pinpawo/pet-agent
 ```
+
+## 10. 代码组织
+
+orchestrator prompt 按节点拆分在 `packages/pet-agent/src/agent/orchestrator/prompts/`：
+
+- `shared.ts`：共享 decision prefix、配置行和 XML 组合工具。
+- `context.ts`：跨节点复用的动态上下文 builder。
+- `entryDecision.ts`、`capabilityPlanner.ts`、`capabilityDecision.ts`、`outcomeDecision.ts`：各节点独立维护 system prompt 与输入格式。
+- `answer.ts`：用户可见回复节点的 prompt。
+
+`prompts.ts` 只作为稳定公共 facade 导出这些 builder，runtime、测试和 eval 不直接依赖内部文件布局。
+prompt 继续使用 TypeScript 行数组组合：当前动态内容都有明确类型，不引入额外字符串模板引擎。

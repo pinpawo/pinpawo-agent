@@ -81,19 +81,28 @@ shared prefix 不包含：
 
 目标：在 run 入口一次性选择执行形态。
 
+决策条件按 action 完整归组：
+
 ```text
-answer       当前事实足以回复，或继续前需要用户输入。
-direct_task  一次 capability subagent 执行可以自然完成目标。
-needs_plan   存在多个有意义的 capability execution boundaries。
+action=answer
+  - 当前事实已经足以回应，不需要 capability subagent 执行。
+  - 用户在询问已有上下文、最近任务状态或之前结果。
+  - 目标无法判断，或继续前需要用户补充、澄清、确认。
+
+action=direct_task
+  - 目标需要执行，但一次 capability subagent 执行可以自然完成，并形成整体可验收结果。
+  - 多个文字动作能在同一次执行中共享上下文并连续完成。
+  - 输出一个完整 current task，不输出步骤清单或计划。
+
+action=needs_plan
+  - 目标需要两次或更多彼此独立的 capability subagent 执行。
+  - 后续 task 必须等待前一次 announce 才能确定。
+  - 或不同部分需要分别选择 capability、分别执行并分别验收。
+  - 本节点不生成 plan 或 current task，交给 capabilityPlanner。
 ```
 
-判断原则：
-
-- 用户文字中有多个动作，不自动等于需要 plan。
-- 同一次 capability 调用可以共享执行上下文并自然完成时，选择 `direct_task`。
-- explore 结论会决定后续实现、需要不同 capability intent，或存在独立验收边界时，选择 `needs_plan`。
-- `direct_task.task` 是一次可直接开始、可验收的 capability execution boundary，不是完整计划。
-- 本节点不选择具体 capability，也不生成用户回复。
+本节点不选择具体 capability，也不生成用户回复。所有 action 都结合用户目标、已有委托结论和
+对话上下文判断，且不得重复已完成工作。
 
 ### 4.2 注入事实
 

@@ -4,10 +4,13 @@ import { clipForPrompt } from '../utils';
 import {
   buildDecisionConfig,
   buildOrchestratorDecisionPromptPrefix,
-  indentXmlBlock,
+  promptBlock,
   xmlTextBlock,
 } from './shared';
-import { CAPABILITY_DECISION_SYSTEM_PROMPT } from './templates/capabilityDecision.prompt';
+import {
+  CAPABILITY_DECISION_INPUT_PROMPT,
+  CAPABILITY_DECISION_SYSTEM_PROMPT,
+} from './templates/capabilityDecision.prompt';
 
 export function buildRouteDecisionSystemPrompt(params: {
   actor: AgentActor;
@@ -26,21 +29,19 @@ export function buildRouteDecisionInput(params: {
   runtimeContext?: string | null;
 }): string {
   const task = params.pendingTask;
-  return [
-    '<capability_decision_input>',
-    params.runtimeContext ? indentXmlBlock(params.runtimeContext, 2) : null,
-    task
-      ? indentXmlBlock(xmlTextBlock('task', clipForPrompt(task.task, 420)), 2)
-      : '  <task missing="true" />',
-    task?.contextSummary
-      ? indentXmlBlock(xmlTextBlock('context_summary', clipForPrompt(task.contextSummary, 420)), 2)
-      : null,
-    task?.searchKeywords
-      ? indentXmlBlock(xmlTextBlock('search_keywords', clipForPrompt(task.searchKeywords, 240)), 2)
-      : null,
-    params.targetsContext
-      ? indentXmlBlock(xmlTextBlock('route_targets', params.targetsContext, ' role="fact" source="capability_search"'), 2)
-      : null,
-    '</capability_decision_input>',
-  ].filter((line) => line !== null).join('\n');
+  return CAPABILITY_DECISION_INPUT_PROMPT.render({
+    runtimeContextBlock: promptBlock(params.runtimeContext, 2),
+    taskBlock: promptBlock(task
+      ? xmlTextBlock('task', clipForPrompt(task.task, 420))
+      : '<task missing="true" />', 2),
+    contextSummaryBlock: promptBlock(task?.contextSummary
+      ? xmlTextBlock('context_summary', clipForPrompt(task.contextSummary, 420))
+      : null, 2),
+    searchKeywordsBlock: promptBlock(task?.searchKeywords
+      ? xmlTextBlock('search_keywords', clipForPrompt(task.searchKeywords, 240))
+      : null, 2),
+    routeTargetsBlock: promptBlock(params.targetsContext
+      ? xmlTextBlock('route_targets', params.targetsContext, ' role="fact" source="capability_search"')
+      : null, 2),
+  });
 }

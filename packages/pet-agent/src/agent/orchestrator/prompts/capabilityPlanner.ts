@@ -2,10 +2,13 @@ import type { AgentActor } from '../../../types/agent';
 import {
   buildDecisionConfig,
   buildOrchestratorDecisionPromptPrefix,
-  indentXmlBlock,
+  promptBlock,
   xmlTextBlock,
 } from './shared';
-import { CAPABILITY_PLANNER_SYSTEM_PROMPT } from './templates/capabilityPlanner.prompt';
+import {
+  CAPABILITY_PLANNER_INPUT_PROMPT,
+  CAPABILITY_PLANNER_SYSTEM_PROMPT,
+} from './templates/capabilityPlanner.prompt';
 
 export function buildCapabilityPlanningDecisionSystemPrompt(params: {
   actor: AgentActor;
@@ -25,15 +28,19 @@ export function buildCapabilityPlanningDecisionInput(params: {
   latestHandoff: string | null;
   capabilityRegistryContext: string;
 }): string {
-  return [
-    '<capability_planning_input>',
-    `  <mode>${params.mode}</mode>`,
-    indentXmlBlock(params.userIntentContext, 2),
-    indentXmlBlock(xmlTextBlock('remaining_plan', JSON.stringify(params.remainingPlan), ' role="state"'), 2),
-    params.latestHandoff
-      ? indentXmlBlock(xmlTextBlock('latest_handoff', params.latestHandoff), 2)
-      : '  <latest_handoff missing="true" />',
-    indentXmlBlock(xmlTextBlock('capability_registry', params.capabilityRegistryContext, ' role="fact"'), 2),
-    '</capability_planning_input>',
-  ].join('\n');
+  return CAPABILITY_PLANNER_INPUT_PROMPT.render({
+    mode: params.mode,
+    userIntentContextBlock: promptBlock(params.userIntentContext, 2),
+    remainingPlanBlock: promptBlock(
+      xmlTextBlock('remaining_plan', JSON.stringify(params.remainingPlan), ' role="state"'),
+      2,
+    ),
+    latestHandoffBlock: promptBlock(params.latestHandoff
+      ? xmlTextBlock('latest_handoff', params.latestHandoff)
+      : '<latest_handoff missing="true" />', 2),
+    capabilityRegistryBlock: promptBlock(
+      xmlTextBlock('capability_registry', params.capabilityRegistryContext, ' role="fact"'),
+      2,
+    ),
+  });
 }

@@ -307,7 +307,7 @@ npm run eval:langfuse:multi-task-flow -w @pinpawo/pet-agent
 
 orchestrator prompt 按节点拆分在 `packages/pet-agent/src/agent/orchestrator/prompts/`：
 
-- `templates/*.prompt.ts`：各节点可直接阅读的 LangChain f-string system prompt 模板，以及共享 decision prefix。
+- `templates/*.prompt.ts`：各节点可直接阅读的 LangChain f-string system prompt 与 XML input 模板，以及共享 decision prefix。
 - `template.ts`：用 `PromptTemplate` 在模块初始化时校验变量，用 `renderTemplate` 同步渲染。
 - `shared.ts`：配置、共享 prefix 和 XML 组合工具。
 - `context.ts`：跨节点复用的动态上下文 builder。
@@ -315,6 +315,6 @@ orchestrator prompt 按节点拆分在 `packages/pet-agent/src/agent/orchestrato
 - `answer.ts`：用户可见回复节点的 prompt。
 
 `prompts.ts` 只作为稳定公共 facade 导出这些 builder，runtime、测试和 eval 不直接依赖内部文件布局。
-system prompt 不再用 TypeScript 行数组拼接；模板变量由泛型约束，并在初始化时校验。
-动态 XML input 继续由 TypeScript builder 生成，因为它是结构化运行时数据，不是静态提示词正文。
+system prompt 和 decision input 的 XML envelope 不再用 TypeScript 行数组拼接；模板变量由泛型约束，并在初始化时校验。
+TypeScript builder 只负责裁剪、CDATA 转义和生成可选 XML block；可选 block 自带前导换行，缺失时不会在模板中留下空行。
 模板使用 `.prompt.ts` 而不是运行时读取 `.prompt.md`，确保 tsup 单文件 bundle 能直接包含模板资产。

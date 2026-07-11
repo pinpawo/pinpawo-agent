@@ -40,3 +40,18 @@ export const OUTCOME_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 - capability_artifacts：可选 artifact 短引用，只作为结果证据索引，不替代 announce 原文。
 
 {outputInstruction}`, ['config', 'sharedPrefix', 'outputInstruction']);
+
+export const OUTCOME_DECISION_INPUT_PROMPT = definePromptTemplate<{
+  userIntentContextBlock: string;
+  currentDelegationBlock: string;
+  subagentAnnounceBlock: string;
+  otherDelegationsBlock: string;
+  capabilityArtifactsBlock: string;
+}>(`<delegation_outcome_input>{userIntentContextBlock}{currentDelegationBlock}{subagentAnnounceBlock}{otherDelegationsBlock}{capabilityArtifactsBlock}
+</delegation_outcome_input>`, [
+  'userIntentContextBlock',
+  'currentDelegationBlock',
+  'subagentAnnounceBlock',
+  'otherDelegationsBlock',
+  'capabilityArtifactsBlock',
+]);

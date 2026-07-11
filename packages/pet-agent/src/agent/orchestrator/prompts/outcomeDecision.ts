@@ -8,9 +8,13 @@ import {
   buildOrchestratorDecisionPromptPrefix,
   indentXmlBlock,
   MAX_DECISION_RUN_DELEGATIONS,
+  promptBlock,
   xmlTextBlock,
 } from './shared';
-import { OUTCOME_DECISION_SYSTEM_PROMPT } from './templates/outcomeDecision.prompt';
+import {
+  OUTCOME_DECISION_INPUT_PROMPT,
+  OUTCOME_DECISION_SYSTEM_PROMPT,
+} from './templates/outcomeDecision.prompt';
 
 export function buildDelegationOutcomeCurrentTaskContext(task: {
   id: string;
@@ -78,17 +82,20 @@ export function buildDelegationOutcomeDecisionInput(params: {
   capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
   const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
-  return [
-    '<delegation_outcome_input>',
-    indentXmlBlock(params.userIntentContext, 2),
-    params.currentTaskContext
-      ? indentXmlBlock(params.currentTaskContext, 2)
-      : '  <current_delegation missing="true" />',
-    params.subagentAnnounceContext
-      ? indentXmlBlock(params.subagentAnnounceContext, 2)
-      : '  <subagent_announce missing="true" />',
-    params.otherTasksContext ? indentXmlBlock(params.otherTasksContext, 2) : null,
-    artifactContext ? indentXmlBlock(xmlTextBlock('capability_artifacts', artifactContext), 2) : null,
-    '</delegation_outcome_input>',
-  ].filter((line) => line !== null).join('\n');
+  return OUTCOME_DECISION_INPUT_PROMPT.render({
+    userIntentContextBlock: promptBlock(params.userIntentContext, 2),
+    currentDelegationBlock: promptBlock(
+      params.currentTaskContext ?? '<current_delegation missing="true" />',
+      2,
+    ),
+    subagentAnnounceBlock: promptBlock(
+      params.subagentAnnounceContext ?? '<subagent_announce missing="true" />',
+      2,
+    ),
+    otherDelegationsBlock: promptBlock(params.otherTasksContext, 2),
+    capabilityArtifactsBlock: promptBlock(
+      artifactContext ? xmlTextBlock('capability_artifacts', artifactContext) : null,
+      2,
+    ),
+  });
 }

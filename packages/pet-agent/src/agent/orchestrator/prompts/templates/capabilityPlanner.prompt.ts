@@ -33,3 +33,19 @@ export const CAPABILITY_PLANNER_SYSTEM_PROMPT = definePromptTemplate<{
   - explore 结果尚未产生时，不编造依赖该结果的实施细节。
 
 {outputInstruction}`, ['config', 'sharedPrefix', 'outputInstruction']);
+
+export const CAPABILITY_PLANNER_INPUT_PROMPT = definePromptTemplate<{
+  mode: string;
+  userIntentContextBlock: string;
+  remainingPlanBlock: string;
+  latestHandoffBlock: string;
+  capabilityRegistryBlock: string;
+}>(`<capability_planning_input>
+  <mode>{mode}</mode>{userIntentContextBlock}{remainingPlanBlock}{latestHandoffBlock}{capabilityRegistryBlock}
+</capability_planning_input>`, [
+  'mode',
+  'userIntentContextBlock',
+  'remainingPlanBlock',
+  'latestHandoffBlock',
+  'capabilityRegistryBlock',
+]);

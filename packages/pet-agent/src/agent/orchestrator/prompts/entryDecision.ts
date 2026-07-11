@@ -4,10 +4,13 @@ import { buildPreparedRequestContext } from './context';
 import {
   buildDecisionConfig,
   buildOrchestratorDecisionPromptPrefix,
-  indentXmlBlock,
+  promptBlock,
   xmlTextBlock,
 } from './shared';
-import { ENTRY_DECISION_SYSTEM_PROMPT } from './templates/entryDecision.prompt';
+import {
+  ENTRY_DECISION_INPUT_PROMPT,
+  ENTRY_DECISION_SYSTEM_PROMPT,
+} from './templates/entryDecision.prompt';
 
 export function buildTaskDecisionSystemPrompt(params: {
   actor: AgentActor;
@@ -32,13 +35,11 @@ export function buildTaskDecisionInput(params: {
     recentMessages: params.recentMessages,
     recentAnnounces: [],
   });
-  return [
-    '<task_decision_input>',
-    params.runtimeContext ? indentXmlBlock(params.runtimeContext, 2) : null,
-    indentXmlBlock(context, 2),
-    params.runDelegationContext
-      ? indentXmlBlock(xmlTextBlock('run_delegation_summaries', params.runDelegationContext, ' role="fact" source="state"'), 2)
-      : null,
-    '</task_decision_input>',
-  ].filter((line) => line !== null).join('\n');
+  return ENTRY_DECISION_INPUT_PROMPT.render({
+    runtimeContextBlock: promptBlock(params.runtimeContext, 2),
+    userIntentContextBlock: promptBlock(context, 2),
+    runDelegationContextBlock: promptBlock(params.runDelegationContext
+      ? xmlTextBlock('run_delegation_summaries', params.runDelegationContext, ' role="fact" source="state"')
+      : null, 2),
+  });
 }

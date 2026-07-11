@@ -32,7 +32,6 @@ import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
 import {
   activeCapabilityFromResult,
   hasObservedDelegation,
-  readCapabilitySearchState,
   routeModeFromResult,
 } from './orchestratorStateReaders';
 import { MemorySaver } from '@langchain/langgraph';
@@ -388,23 +387,12 @@ export async function target(
       maxIterations: 1,
     },
   });
-  return extractResult(result, capabilityList);
+  return extractResult(result);
 }
 
 function hasCurrentSubagentObservation(result: Record<string, unknown>): boolean {
   if (latestAnnounceFromResult(result)) return true;
   return hasObservedDelegation(result);
-}
-
-function capabilityStateFromResult(result: Record<string, unknown>, capabilityList: AgentCapability[]): string {
-  if (activeCapabilityFromResult(result)) return 'candidates_available';
-  const search = readCapabilitySearchState(result);
-  const candidates = search.candidates;
-  if (hasCurrentSubagentObservation(result)) return 'unavailable';
-  if (candidates.length > 0) return 'candidates_available';
-  if (search.attempted === true) return 'search_exhausted';
-  if (capabilityList.length > 0) return 'search_available';
-  return 'unavailable';
 }
 
 function latestAnnounceFromResult(result: Record<string, unknown>) {
@@ -413,32 +401,19 @@ function latestAnnounceFromResult(result: Record<string, unknown>) {
   return readLatestAnnounce(messages, { runId });
 }
 
-function extractResult(result: Record<string, unknown>, capabilityList: AgentCapability[]): Record<string, unknown> {
+function extractResult(result: Record<string, unknown>): Record<string, unknown> {
   const routeMode = routeModeFromResult(result);
   const finalRoute = routeMode === 'answer' ? 'answer' : 'delegate';
   const latestAnnounce = latestAnnounceFromResult(result);
   const messages = result.messages as { content?: unknown; _getType?: () => string }[] | undefined;
   const lastMsg = messages?.at(-1);
   const reply = lastMsg && typeof lastMsg.content === 'string' ? lastMsg.content : '';
-  const capabilitySearchState = readCapabilitySearchState(result);
-  const rawCandidates = Array.isArray(capabilitySearchState.candidates) ? capabilitySearchState.candidates : [];
   const activeCapability = activeCapabilityFromResult(result);
-  const capabilityCandidates = rawCandidates.flatMap((candidate) => {
-        if (!candidate || typeof candidate !== 'object') return [];
-        const name = (candidate as { name?: unknown }).name;
-        return typeof name === 'string' ? [name] : [];
-      });
-  const inferredCapabilityCandidates = capabilityCandidates.length > 0
-    ? capabilityCandidates
-    : activeCapability ? [activeCapability] : [];
   return {
     route: finalRoute,
     mode: routeMode,
     phase: latestAnnounce || hasCurrentSubagentObservation(result) ? 'after_subagent' : 'initial_request',
-    capability_state: capabilityStateFromResult(result, capabilityList),
     active_capability: activeCapability,
-    capability_search_query: capabilitySearchState.query,
-    capability_candidates: inferredCapabilityCandidates,
     reply,
   };
 }
@@ -551,27 +526,6 @@ export function phaseCorrectness({
   };
 }
 
-export function capabilityStateCorrectness({
-  outputs,
-  referenceOutputs,
-}: {
-  outputs: Record<string, unknown> | undefined;
-  referenceOutputs: Record<string, unknown> | undefined;
-}) {
-  const expected = referenceOutputs?.expected_capability_state as string | undefined;
-  if (!expected) {
-    return { key: 'capability_state_correct', score: 1, comment: 'No expected capability state specified' };
-  }
-  const actual = outputs?.capability_state as string | undefined;
-  return {
-    key: 'capability_state_correct',
-    score: actual === expected ? 1 : 0,
-    comment: actual === expected
-      ? `Correct: ${actual}`
-      : `Expected capability state ${expected}, got ${actual}`,
-  };
-}
-
 export function activeCapabilityCorrectness({
   outputs,
   referenceOutputs,
@@ -590,68 +544,6 @@ export function activeCapabilityCorrectness({
     comment: actual === expected
       ? `Correct: ${actual ?? 'null'}`
       : `Expected active capability ${expected ?? 'null'}, got ${actual ?? 'null'}`,
-  };
-}
-
-export function capabilityCandidatesCorrectness({
-  outputs,
-  referenceOutputs,
-}: {
-  outputs: Record<string, unknown> | undefined;
-  referenceOutputs: Record<string, unknown> | undefined;
-}) {
-  const actual = Array.isArray(outputs?.capability_candidates)
-    ? outputs.capability_candidates.filter((item): item is string => typeof item === 'string')
-    : [];
-  if (referenceOutputs?.expected_capability_candidates_empty === true) {
-    return {
-      key: 'capability_candidates_correct',
-      score: actual.length === 0 ? 1 : 0,
-      comment: actual.length === 0
-        ? 'Correct: no candidates'
-        : `Expected no candidates, got ${actual.join(', ')}`,
-    };
-  }
-  const expectedIncludes = Array.isArray(referenceOutputs?.expected_capability_candidates_include)
-    ? referenceOutputs.expected_capability_candidates_include.filter((item): item is string => typeof item === 'string')
-    : [];
-  if (expectedIncludes.length === 0) {
-    return { key: 'capability_candidates_correct', score: 1, comment: 'No expected capability candidates specified' };
-  }
-  const missing = expectedIncludes.filter((name) => !actual.includes(name));
-  return {
-    key: 'capability_candidates_correct',
-    score: missing.length === 0 ? 1 : 0,
-    comment: missing.length === 0
-      ? `Correct: includes ${expectedIncludes.join(', ')}`
-      : `Expected candidates to include ${missing.join(', ')}; got ${actual.join(', ') || '(none)'}`,
-  };
-}
-
-export function capabilitySearchQueryCorrectness({
-  outputs,
-  referenceOutputs,
-}: {
-  outputs: Record<string, unknown> | undefined;
-  referenceOutputs: Record<string, unknown> | undefined;
-}) {
-  const expectedTerms = Array.isArray(referenceOutputs?.expected_capability_search_query_terms)
-    ? referenceOutputs.expected_capability_search_query_terms.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    : [];
-  if (expectedTerms.length === 0) {
-    return { key: 'capability_search_query_correct', score: 1, comment: 'No expected search query terms specified' };
-  }
-  const actual = typeof outputs?.capability_search_query === 'string'
-    ? outputs.capability_search_query
-    : '';
-  const normalizedActual = actual.replace(/\s+/g, '').toLowerCase();
-  const missing = expectedTerms.filter((term) => !normalizedActual.includes(term.replace(/\s+/g, '').toLowerCase()));
-  return {
-    key: 'capability_search_query_correct',
-    score: missing.length === 0 ? 1 : 0,
-    comment: missing.length === 0
-      ? `Correct query: ${actual}`
-      : `Expected search query to contain ${missing.join(', ')}; got ${actual || '(empty)'}`,
   };
 }
 
@@ -682,10 +574,7 @@ async function main() {
       routeCorrectness,
       modeCorrectness,
       phaseCorrectness,
-      capabilityStateCorrectness,
       activeCapabilityCorrectness,
-      capabilityCandidatesCorrectness,
-      capabilitySearchQueryCorrectness,
       finishBias,
       delegateBias,
     ],
@@ -708,10 +597,7 @@ async function main() {
     ['Route correctness', 'route_correct'],
     ['Mode correctness', 'mode_correct'],
     ['Phase correctness', 'phase_correct'],
-    ['Capability-state correctness', 'capability_state_correct'],
     ['Active-capability correctness', 'active_capability_correct'],
-    ['Capability-candidates correctness', 'capability_candidates_correct'],
-    ['Capability-search-query correctness', 'capability_search_query_correct'],
   ] as const) {
     const score = summarizeScore(key);
     console.log(`${label}: ${score.passed}/${score.total} passed, ${score.failed} failed.`);
@@ -722,10 +608,7 @@ async function main() {
         'route_correct',
         'mode_correct',
         'phase_correct',
-        'capability_state_correct',
         'active_capability_correct',
-        'capability_candidates_correct',
-        'capability_search_query_correct',
       ].includes(item.key)
       && item.score !== 1,
     );

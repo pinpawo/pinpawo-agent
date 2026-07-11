@@ -7,12 +7,10 @@ import {
   ACTIVE_DELEGATION_LIMIT_REACHED,
   contextCompactionWatermarkGuard,
   delegationOutcomeDecisionGuard,
-  forcedCapabilitySeedGuard,
   ORCHESTRATOR_GUARD_POSITION,
   RUN_STATE_RESET_REQUIRED,
   runIterationLimitGuard,
   runStateResetGuard,
-  type ForcedCapabilitySeedDetails,
 } from './guardDefinitions';
 import {
   createAfterDelegationOutcomeIterationGuard,
@@ -46,16 +44,6 @@ function usageMessage(content: string, inputTokens: number) {
       total_tokens: inputTokens + 10,
     },
   });
-}
-
-function stubCapability(name: string, description: string) {
-  return {
-    name,
-    description,
-    createRuntime: () => {
-      throw new Error('not used in guard tests');
-    },
-  };
 }
 
 const activeDelegation: TaskActiveDelegation = {
@@ -141,44 +129,6 @@ test('context compaction watermark guard maintains when main provider usage cros
     latestInputTokens: 900,
     watermarkTokens: 750,
   });
-});
-
-test('forced capability seed guard derives the seeded search state once', () => {
-  const outcome = evaluateGuard(forcedCapabilitySeedGuard, {
-    state: baseState({
-      runCapabilitySearchState: { query: null, attempted: false, candidates: [] },
-    }),
-    config: {
-      forcedCapabilityNames: ['weather', 'weather', 'missing'],
-      capabilities: [
-        stubCapability('weather', '查天气'),
-        stubCapability('other', '其他'),
-      ],
-    },
-    position: ORCHESTRATOR_GUARD_POSITION.CAPABILITY_SEARCH,
-  });
-
-  assert.equal(outcome.kind, 'derive');
-  const details = (outcome.kind === 'derive' && outcome.details) as ForcedCapabilitySeedDetails;
-  assert.deepEqual(details.seededCapabilityNames, ['weather']);
-  assert.equal(details.runCapabilitySearchState.attempted, true);
-  assert.equal(details.runCapabilitySearchState.candidates.length, 1);
-  assert.equal(details.runCapabilitySearchState.candidates[0]?.name, 'weather');
-});
-
-test('forced capability seed guard proceeds when a search was already attempted', () => {
-  const outcome = evaluateGuard(forcedCapabilitySeedGuard, {
-    state: baseState({
-      runCapabilitySearchState: { query: 'q', attempted: true, candidates: [] },
-    }),
-    config: {
-      forcedCapabilityNames: ['weather'],
-      capabilities: [stubCapability('weather', '查天气')],
-    },
-    position: ORCHESTRATOR_GUARD_POSITION.CAPABILITY_SEARCH,
-  });
-
-  assert.equal(outcome.kind, 'proceed');
 });
 
 test('delegation outcome guard derives handoff refusal for a limit_reached active delegation', async () => {

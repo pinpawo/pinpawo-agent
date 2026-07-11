@@ -37,6 +37,13 @@ export type RunPendingTask = {
   searchKeywords: string | null;
 };
 
+export type CapabilityPlanTask = {
+  /** Planned capability boundary that has not started yet. */
+  objective: string;
+  capabilityIntent: string;
+  status: 'concrete' | 'deferred';
+};
+
 export type TaskActiveDelegation = {
   id: string;
   lane: MessageLane;
@@ -52,12 +59,6 @@ export type CapabilityCandidate = {
   description: string;
   score: number;
   matchedTerms: string[];
-};
-
-export type RunCapabilitySearchState = {
-  query: string | null;
-  attempted: boolean;
-  candidates: CapabilityCandidate[];
 };
 
 export type SubagentAnnounce = {
@@ -119,8 +120,7 @@ export type OrchestratorInvokeOptions = {
   globalReviewPolicy?: GlobalReviewPolicy;
   maxRunIterations?: number;
   /**
-   * 强制以"已发现候选"形态登记的 capability 名字列表。`capabilitySearch`
-   * 节点会据此 pre-seed `runCapabilitySearchState`, 跳过 keyword capability search。
+   * 强制加入本次 capabilityDecision 局部候选集的 capability 名字列表。
    * 仅由 Studio 等明确知道需要哪个 capability 的调用方注入;通用 pet agent
    * 不传 → 0 行为变化。
    */

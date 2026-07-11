@@ -3,7 +3,6 @@ export {
   ORCHESTRATOR_GUARD_POSITION,
   type ContextCompactionWatermarkGuardConfig,
   type EmptyGuardConfig,
-  type ForcedCapabilitySeedGuardConfig,
   type OrchestratorGuardName,
   type OrchestratorGuardPosition,
   type RunIterationLimitGuardConfig,
@@ -19,12 +18,6 @@ export {
   delegationOutcomeDecisionGuard,
   type DelegationOutcomeDecisionGuardState,
 } from './delegationOutcomeDecisionGuard';
-export {
-  FORCED_CAPABILITY_SEED_REQUIRED,
-  forcedCapabilitySeedGuard,
-  type ForcedCapabilitySeedDetails,
-  type ForcedCapabilitySeedGuardState,
-} from './forcedCapabilitySeedGuard';
 export {
   RUN_ITERATION_LIMIT_REACHED,
   runIterationLimitGuard,

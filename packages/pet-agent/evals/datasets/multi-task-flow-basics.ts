@@ -37,8 +37,8 @@ const cases: AgentEvalCase<MultiTaskFlowInput, MultiTaskFlowExpected>[] = [
         ['auth', '重构', 'token validation', '循环依赖'],
       ],
       expectedSearchQueryTerms: [
-        ['代码库', 'auth', '调查'],
-        ['代码修改', 'auth', '重构'],
+        ['auth', '调查'],
+        ['auth', '重构'],
       ],
       expectedDelegationCount: 2,
       expectedCapabilityNames: ['explore', 'code_modify'],

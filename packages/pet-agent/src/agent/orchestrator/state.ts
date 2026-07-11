@@ -2,11 +2,11 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import type {
-  RunCapabilitySearchState,
   MessageLane,
   RunNextDelegation,
   RunPendingTask,
   RunDelegationSummary,
+  CapabilityPlanTask,
   TaskActiveDelegation,
 } from './types';
 import type { CapabilityArtifactRef } from '../../types/artifact';
@@ -29,6 +29,10 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
+  runCapabilityPlan: Annotation<CapabilityPlanTask[]>({
+    reducer: (_prev, next) => next,
+    default: () => [],
+  }),
   sessionCapabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
     reducer: (prev, next) => mergeCapabilityArtifactRefs(prev, next),
     default: () => [],
@@ -36,10 +40,6 @@ const orchestratorStateChannels = {
   taskActiveDelegation: Annotation<TaskActiveDelegation | null>({
     reducer: (_prev, next) => next,
     default: () => null,
-  }),
-  runCapabilitySearchState: Annotation<RunCapabilitySearchState>({
-    reducer: (_prev, next) => next,
-    default: buildEmptyRunCapabilitySearchState,
   }),
   runDelegationSummaries: Annotation<RunDelegationSummary[]>({
     reducer: (_prev, next) => next,
@@ -69,25 +69,17 @@ export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runNextDelegation'
   | 'runPendingTask'
-  | 'runCapabilitySearchState'
+  | 'runCapabilityPlan'
   | 'runDelegationSummaries'
   | 'runIterationCount'
   | 'runId'
 >;
 
-export function buildEmptyRunCapabilitySearchState(): RunCapabilitySearchState {
-  return {
-    query: null,
-    attempted: false,
-    candidates: [],
-  };
-}
-
 export function buildRunStateReset(): OrchestratorRunState {
   return {
     runNextDelegation: null,
     runPendingTask: null,
-    runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
+    runCapabilityPlan: [],
     runDelegationSummaries: [],
     runIterationCount: 0,
     runId: randomUUID().slice(0, 8),

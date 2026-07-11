@@ -2,10 +2,7 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import { createSubagent } from '../../../../subagent/createSubagent';
 import type { CapabilityArtifactRef } from '../../../../types/artifact';
 import type { SubagentRunInput } from '../../../../types/subagent';
-import {
-  buildEmptyRunCapabilitySearchState,
-  type OrchestratorStateType,
-} from '../../state';
+import type { OrchestratorStateType } from '../../state';
 import { updateRunDelegationSummaryResult } from '../../delegations';
 import {
   laneMessages,
@@ -202,7 +199,6 @@ export function createCapabilityNode(params: {
     return {
       messages: laneOutputMessages,
       sessionCapabilityArtifacts: result.artifacts,
-      runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
       runDelegationSummaries: updatedRunDelegationSummaries,
       runNextDelegation: null,
       taskActiveDelegation: {

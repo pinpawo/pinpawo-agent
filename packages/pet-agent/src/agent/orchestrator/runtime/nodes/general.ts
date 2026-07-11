@@ -1,9 +1,6 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createSubagent } from '../../../../subagent/createSubagent';
-import {
-  buildEmptyRunCapabilitySearchState,
-  type OrchestratorStateType,
-} from '../../state';
+import type { OrchestratorStateType } from '../../state';
 import { updateRunDelegationSummaryResult } from '../../delegations';
 import {
   laneMessages,
@@ -134,7 +131,6 @@ export function createGeneralNode(params: {
 
     return {
       messages: outputMessages,
-      runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
       runDelegationSummaries: updatedRunDelegationSummaries,
       runNextDelegation: null,
       taskActiveDelegation: {

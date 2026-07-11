@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
+  buildCapabilityPlanningDecisionSchema,
   buildRouteCapabilityLane,
   buildRouteDecisionOutputInstruction,
   buildRouteDecisionSchema,
@@ -31,13 +32,14 @@ test('task decision schema separates task birth from route selection', () => {
   const schema = buildTaskDecisionSchema();
   assert.equal(schema.safeParse({ action: 'answer' }).success, true);
   assert.equal(schema.safeParse({
-    action: 'next_task',
+    action: 'direct_task',
     task: '读取 issue #269 并提炼需求点。',
     context_summary: '用户要求先理解 issue。',
     search_keywords: 'github issue|需求分析',
   }).success, true);
-  assert.equal(schema.safeParse({ action: 'next_task', task: null }).success, false);
-  assert.equal(schema.safeParse({ action: 'next_task', task: '   ' }).success, false);
+  assert.equal(schema.safeParse({ action: 'direct_task', task: null }).success, false);
+  assert.equal(schema.safeParse({ action: 'direct_task', task: '   ' }).success, false);
+  assert.equal(schema.safeParse({ action: 'needs_plan' }).success, true);
   assert.equal(schema.safeParse({
     action: 'delegate_capability.browser',
     task: '打开网页',
@@ -79,6 +81,31 @@ test('delegation outcome decision schema is verdict-only', () => {
     assert.equal('lane' in parsed.data, false);
     assert.equal('capability' in parsed.data, false);
   }
+});
+
+test('capability planner schema materializes a concrete next task without capability ids', () => {
+  const schema = buildCapabilityPlanningDecisionSchema();
+  assert.equal(schema.safeParse({
+    result: 'next_task',
+    remaining_plan: [
+      { objective: '调查 auth', capability_intent: 'codebase_exploration', status: 'concrete' },
+      { objective: '根据结论重构 auth', capability_intent: 'code_modification', status: 'deferred' },
+    ],
+    next_task: { objective: '调查 auth', capability_intent: 'codebase_exploration' },
+  }).success, true);
+  assert.equal(schema.safeParse({ result: 'next_task', remaining_plan: [], next_task: null }).success, false);
+  assert.equal(schema.safeParse({
+    result: 'next_task',
+    remaining_plan: [{ objective: '调查 auth', capability_intent: '   ', status: 'concrete' }],
+    next_task: { objective: '调查 auth', capability_intent: '   ' },
+  }).success, false);
+  const parsed = schema.parse({
+    result: 'answer',
+    remaining_plan: [],
+    next_task: null,
+    capability_id: 'explore',
+  });
+  assert.equal('capability_id' in parsed, false);
 });
 
 test('parseRouteLane splits capability lane names', () => {

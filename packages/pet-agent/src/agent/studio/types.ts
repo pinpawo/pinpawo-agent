@@ -62,17 +62,16 @@ export type PetAgentRuntimeInvokeInput = {
    */
   extraCapabilities?: AgentCapability[];
   /**
-   * 强制以"已发现候选"形态登记到本次 invoke 的 capability 名字列表。
+   * 强制加入本次 capabilityDecision 局部候选集的 capability 名字列表。
    *
-   * 命中后,orchestrator 会在 `capabilitySearch` 阶段把合并后的
-   * capability 列表(config.capabilities + extraCapabilities)中同名条目
-   * 直接塞进 `runCapabilitySearchState.candidates`,并把 `attempted`
-   * 置为 true。`routeDecision` 直接看到强制 capability 作为候选。
+   * 命中后,orchestrator 从合并后的 capability 列表
+   * (config.capabilities + extraCapabilities)中选择同名条目作为候选，
+   * 不依赖关键词匹配，也不把候选写入 graph state。
    *
    * 典型用途:Studio 调 planner 时强制 `studio_plan` —— 不依赖用户请求文本
    * 与 capability 描述的 keyword 匹配。
    *
-   * **不传时,通用 pet agent 走 task-first 的 deterministic capability search。**
+   * **不传时,通用 pet agent 在 capabilityDecision 内按 current task 搜索。**
    */
   forcedCapabilityNames?: string[];
 };

@@ -27,9 +27,9 @@ test('entry scorer treats textual steps as one task when the execution boundary 
   }, testCase.expected)));
 });
 
-test('current taskDecision adapter exposes the missing needs_plan mode', () => {
-  assert.equal(adaptTaskDecisionMode('next_task'), 'direct_task');
-  assert.notEqual(adaptTaskDecisionMode('next_task'), 'needs_plan');
+test('entryDecision adapter exposes the planning mode', () => {
+  assert.equal(adaptTaskDecisionMode('direct_task'), 'direct_task');
+  assert.equal(adaptTaskDecisionMode('needs_plan'), 'needs_plan');
 });
 
 test('capability scorer rejects an unregistered selected capability', () => {

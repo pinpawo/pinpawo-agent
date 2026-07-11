@@ -7,9 +7,6 @@ import {
   LLM_BASE_URL,
   LLM_MODEL,
   activeCapabilityCorrectness,
-  capabilityCandidatesCorrectness,
-  capabilitySearchQueryCorrectness,
-  capabilityStateCorrectness,
   delegateBias,
   finishBias,
   modeCorrectness,
@@ -44,10 +41,7 @@ const scoreKeys = [
   'route_correct',
   'mode_correct',
   'phase_correct',
-  'capability_state_correct',
   'active_capability_correct',
-  'capability_candidates_correct',
-  'capability_search_query_correct',
   'finish_correct',
   'delegate_correct',
 ];
@@ -56,10 +50,7 @@ const evaluators = [
   routeCorrectness,
   modeCorrectness,
   phaseCorrectness,
-  capabilityStateCorrectness,
   activeCapabilityCorrectness,
-  capabilityCandidatesCorrectness,
-  capabilitySearchQueryCorrectness,
   finishBias,
   delegateBias,
 ];
@@ -200,10 +191,9 @@ function taskDecisionFromText(text: string) {
     return { action };
   }
   return {
-    action: 'next_task',
-    task: 'mock delegated task',
-    context_summary: 'mock route eval context',
-    search_keywords: chooseCapabilitySearchQuery(text),
+    action: 'direct_task',
+    task: searchIntentText(text),
+    context_summary: chooseCapabilitySearchQuery(text),
   };
 }
 
@@ -250,11 +240,14 @@ function createHeuristicRouteModels(): AgentModels {
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
         const text = messagesText(messages);
-        if (/task decision 节点/.test(text)) {
+        if (/entry decision 节点/.test(text)) {
           return taskDecisionFromText(text);
         }
-        if (/route decision 节点/.test(text)) {
+        if (/capability decision 节点/.test(text)) {
           return { lane: chooseRouteLane(text) };
+        }
+        if (/capability planning decision 节点/.test(text)) {
+          return { result: 'answer', remaining_plan: [], next_task: null };
         }
         if (/子任务结果验收节点/.test(text)) {
           return delegationOutcomeDecisionFromText(messagesText(messages.slice(-1)));

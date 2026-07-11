@@ -284,9 +284,18 @@ function buildCapabilityPlanningContext(params: {
   });
   const capabilityList = getInvokeOptions(runnableConfig).capabilities ?? [];
   validateUniqueCapabilityNames(capabilityList);
-  const latestHandoff = [...state.runDelegationSummaries]
+  const latestCompletedDelegation = [...state.runDelegationSummaries]
     .reverse()
-    .find((item) => item.status === 'completed' && item.resultPreview)?.resultPreview ?? null;
+    .find((item) => item.status === 'completed');
+  const latestHandoff = latestCompletedDelegation
+    ? [...state.messages]
+        .reverse()
+        .find((message) => {
+          const source = getMessageHandoffSource(message);
+          return source?.delegationId === latestCompletedDelegation.id
+            && source.handoffFrom === latestCompletedDelegation.lane;
+        })
+    : null;
   const mode = state.runDelegationSummaries.length === 0 && state.runCapabilityPlan.length === 0
     ? 'entry' as const
     : 'boundary' as const;
@@ -296,7 +305,7 @@ function buildCapabilityPlanningContext(params: {
       mode,
       userIntentContext,
       remainingPlan: state.runCapabilityPlan,
-      latestHandoff,
+      latestHandoff: latestHandoff ? readMessageText(latestHandoff) : null,
       capabilityRegistryContext: capabilityList.length > 0
         ? capabilityList.map((item) => `${item.name}: ${item.description}`).join('\n')
         : 'No custom capabilities registered; general capability remains available.',
@@ -596,7 +605,10 @@ function buildCapabilityPlanningResult(decision: CapabilityPlanningDecision) {
   return {
     goto: 'capabilityDecision' as const,
     update: {
-      runCapabilityPlan: remainingPlan,
+      // The materialized head now belongs to runPendingTask. Plan state keeps
+      // only work that has not started, so boundary planning never receives
+      // the just-completed task as though it were still remaining.
+      runCapabilityPlan: remainingPlan.slice(1),
       runPendingTask: {
         task: decision.next_task.objective.trim(),
         contextSummary: `Capability intent: ${decision.next_task.capability_intent.trim()}`,

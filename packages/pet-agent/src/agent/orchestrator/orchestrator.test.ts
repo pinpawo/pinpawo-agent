@@ -433,16 +433,27 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
         const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
         if (structuredCallCount === 1) {
           taskDecisionInputs.push(inputText);
-          return nextTaskDecision('读取 issue #269 并提炼需求点。', null, 'issue|需求分析');
+          return { action: 'needs_plan' };
         }
         if (structuredCallCount === 2) {
+          plannerInputs.push(inputText);
+          return {
+            result: 'next_task',
+            remaining_plan: [
+              { objective: '读取 issue #269 并提炼需求点。', capability_intent: 'codebase_exploration', status: 'concrete' },
+              { objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration', status: 'deferred' },
+            ],
+            next_task: { objective: '读取 issue #269 并提炼需求点。', capability_intent: 'codebase_exploration' },
+          };
+        }
+        if (structuredCallCount === 3) {
           routeInputs.push(inputText);
           return routeCapabilityDecision('explore');
         }
-        if (structuredCallCount === 3) {
-          return taskDoneDecision('已提炼 issue 需求点，但没有预留后续计划。');
-        }
         if (structuredCallCount === 4) {
+          return taskDoneDecision('已提炼 issue 需求点。');
+        }
+        if (structuredCallCount === 5) {
           plannerInputs.push(inputText);
           return {
             result: 'next_task',
@@ -450,16 +461,12 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
             next_task: { objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration' },
           };
         }
-        if (structuredCallCount === 5) {
+        if (structuredCallCount === 6) {
           routeInputs.push(inputText);
           return routeCapabilityDecision('explore');
         }
-        if (structuredCallCount === 6) {
-          return taskDoneDecision('已完成本地实现与 git log 检索。');
-        }
         if (structuredCallCount === 7) {
-          plannerInputs.push(inputText);
-          return { result: 'answer', remaining_plan: [], next_task: null };
+          return goalDoneDecision();
         }
         throw new Error(`unexpected structured call ${structuredCallCount.toString()}`);
       },
@@ -471,7 +478,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
       observe: routeModel,
       subagent: new FakeListChatModel({
         responses: [
-          'issue #269 需求点：需要检查本地实现。',
+          `issue #269 需求点：需要检查本地实现。${'背景信息。'.repeat(100)}完整 handoff 末尾约束：必须检查兼容性。`,
           '本地实现与 git log 已检查。',
         ],
         sleep: 0,
@@ -496,6 +503,9 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
   assert.equal(plannerInputs.length, 2);
   assert.equal(routeInputs.length, 2);
   assert.ok(plannerInputs.every((input) => /capability_planning_input/.test(input)));
+  assert.match(plannerInputs[1], /<remaining_plan[^]*?检索本地实现与 git log[^]*?<\/remaining_plan>/);
+  assert.doesNotMatch(plannerInputs[1], /<remaining_plan[^]*?读取 issue #269[^]*?<\/remaining_plan>/);
+  assert.match(plannerInputs[1], /完整 handoff 末尾约束：必须检查兼容性/);
   assert.equal(String(state.messages.at(-1)?.content ?? ''), 'final answer');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runPendingTask, null);

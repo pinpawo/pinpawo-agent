@@ -1,6 +1,5 @@
 import type { OrchestratorStateType } from '../src/agent/orchestrator/state';
 import type {
-  CapabilityCandidate,
   MessageLane,
   RunDelegationSummary,
   RunNextDelegation,
@@ -55,15 +54,6 @@ function isTaskActiveDelegation(value: unknown): value is TaskActiveDelegation {
     && (value.resultPreview === null || typeof value.resultPreview === 'string');
 }
 
-function isCapabilityCandidate(value: unknown): value is CapabilityCandidate {
-  if (!isRecord(value)) return false;
-  return typeof value.name === 'string'
-    && typeof value.description === 'string'
-    && typeof value.score === 'number'
-    && Array.isArray(value.matchedTerms)
-    && value.matchedTerms.every((term) => typeof term === 'string');
-}
-
 export function readPendingDelegation(result: EvalOrchestratorStateSnapshot): RunNextDelegation | null {
   return isRunNextDelegation(result.runNextDelegation) ? result.runNextDelegation : null;
 }
@@ -80,24 +70,6 @@ export function activeCapabilityFromResult(result: EvalOrchestratorStateSnapshot
   return typeof lane === 'string' && lane.startsWith('capability:')
     ? lane.slice('capability:'.length)
     : null;
-}
-
-export function readCapabilitySearchState(result: EvalOrchestratorStateSnapshot): {
-  query: string | null;
-  attempted: boolean;
-  candidates: CapabilityCandidate[];
-} {
-  const state = result.runCapabilitySearchState;
-  if (!isRecord(state)) {
-    return { query: null, attempted: false, candidates: [] };
-  }
-  return {
-    query: typeof state.query === 'string' ? state.query : null,
-    attempted: state.attempted === true,
-    candidates: Array.isArray(state.candidates)
-      ? state.candidates.filter(isCapabilityCandidate)
-      : [],
-  };
 }
 
 export function readRunDelegationSummaries(result: EvalOrchestratorStateSnapshot): RunDelegationSummary[] {

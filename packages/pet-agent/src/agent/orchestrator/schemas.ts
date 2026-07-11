@@ -97,16 +97,16 @@ export function buildTaskDecisionSchema() {
 
 export function buildCapabilityPlanningDecisionSchema() {
   const planTask = z.object({
-    objective: z.string().min(1),
-    capability_intent: z.string().min(1),
+    objective: z.string().trim().min(1),
+    capability_intent: z.string().trim().min(1),
     status: z.enum(['concrete', 'deferred']),
   });
   return z.object({
     result: z.enum(['next_task', 'answer']),
     remaining_plan: z.array(planTask),
     next_task: z.object({
-      objective: z.string().min(1),
-      capability_intent: z.string().min(1),
+      objective: z.string().trim().min(1),
+      capability_intent: z.string().trim().min(1),
     }).nullable().optional(),
   }).superRefine((decision, ctx) => {
     if (decision.result === 'next_task' && !decision.next_task?.objective.trim()) {

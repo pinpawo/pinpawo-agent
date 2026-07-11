@@ -80,6 +80,11 @@ This runner is retained as broad graph-plumbing regression coverage. It does
 not prove task text quality, capability search query quality, or a complete
 multi-task execution loop.
 
+Because capability search candidates are now local to `capabilityDecision`
+rather than graph state, this legacy runner scores route/mode/phase, active
+capability, and finish/delegate behavior. Candidate recall and search-query
+quality are covered by `eval:langfuse:capability-decision` instead.
+
 The CLI summary reports results by example tag first, then by score dimension.
 Score dimensions without a matching expected field are counted as not applicable
 instead of being presented as covered cases.

@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import type {
   TuiCoreRuntimeSnapshot,
   TuiCoreSessionSnapshot,
@@ -7,7 +6,7 @@ import type {
 import type { PendingReviewSnapshot } from './localServerChatHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import type { TuiHistoryMessage } from './localServerTuiSessions';
-import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
+import { buildLocalRuntimeProjection } from './localConfigProjection';
 
 export function buildLocalServerTuiSnapshot(params: {
   sessionId: string;
@@ -41,39 +40,22 @@ export function buildLocalServerTuiSnapshot(params: {
 export function buildLocalServerTuiRuntimeSnapshot(
   deps: LocalServerDeps,
 ): TuiCoreRuntimeSnapshot {
-  const preferredPath = deps.runtimeConfig?.studioConfigPath ?? DEFAULT_STUDIO_CONFIG_PATH;
-  const legacyAvailable = preferredPath !== DEFAULT_STUDIO_CONFIG_PATH
-    && existsSync(DEFAULT_STUDIO_CONFIG_PATH);
-  const activePath = existsSync(preferredPath)
-    ? preferredPath
-    : legacyAvailable
-      ? DEFAULT_STUDIO_CONFIG_PATH
-      : preferredPath;
-  const effectiveWorkdir = deps.runtimeConfig?.workdir ?? deps.workdir;
+  const runtime = buildLocalRuntimeProjection(deps);
   return {
-    model: deps.llmConfig.model,
-    ...(deps.llmConfig.contextWindowTokens !== undefined
-      ? { contextWindow: deps.llmConfig.contextWindowTokens }
-      : {}),
-    cwd: effectiveWorkdir,
-    ...(deps.runtimeConfig?.workspace ? {
-      workspaceId: deps.runtimeConfig.workspace.id,
-      workspaceName: deps.runtimeConfig.workspace.name,
-      workspaceRoot: deps.runtimeConfig.workspace.rootPath,
-    } : {}),
-    ...(deps.runtimeConfig ? {
-      stateRoot: deps.runtimeConfig.stateRoot,
-      studioConfigPath: deps.runtimeConfig.studioConfigPath,
-      petsDir: deps.runtimeConfig.petsDir,
-      studioWikiBaseDir: deps.runtimeConfig.studioWikiBaseDir,
-    } : {}),
-    studioConfigSource: existsSync(preferredPath)
-      ? (deps.runtimeConfig ? 'workdir' : 'legacy_home')
-      : legacyAvailable
-        ? 'legacy_home'
-        : 'missing',
-    studioConfigActivePath: activePath,
-    legacyStudioConfigPath: DEFAULT_STUDIO_CONFIG_PATH,
+    model: runtime.model,
+    ...(runtime.contextWindow !== undefined ? { contextWindow: runtime.contextWindow } : {}),
+    cwd: runtime.workdir,
+    ...(runtime.workspaceId ? { workspaceId: runtime.workspaceId } : {}),
+    ...(runtime.workspaceName ? { workspaceName: runtime.workspaceName } : {}),
+    ...(runtime.workspaceRoot ? { workspaceRoot: runtime.workspaceRoot } : {}),
+    ...(runtime.stateRoot ? { stateRoot: runtime.stateRoot } : {}),
+    ...(runtime.studioConfigPath ? { studioConfigPath: runtime.studioConfigPath } : {}),
+    ...(runtime.studioDueRunsPath ? { studioDueRunsPath: runtime.studioDueRunsPath } : {}),
+    ...(runtime.petsDir ? { petsDir: runtime.petsDir } : {}),
+    ...(runtime.studioWikiBaseDir ? { studioWikiBaseDir: runtime.studioWikiBaseDir } : {}),
+    studioConfigSource: runtime.studioConfigSource,
+    studioConfigActivePath: runtime.studioConfigActivePath,
+    legacyStudioConfigPath: runtime.legacyStudioConfigPath,
   };
 }
 

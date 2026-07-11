@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { WebSocket } from 'ws';
 import { FileSaver } from './fileSaver';
-import { config } from './config';
+import { getConfig } from './config';
 import { loadAgentContext } from './contextLoader';
 import {
   type AgentCapability,
@@ -140,7 +140,7 @@ export class LocalAgentRuntime {
     await this.capabilityRegistry.load();
     this.hooks = collectPluginHooks(plugins);
     this.actorId = await ensureActorSelected({ interactive: false });
-    this.actorName = config.apiConnected ? loadSelectedActorName() : LOCAL_ONLY_ACTOR_NAME;
+    this.actorName = getConfig().apiConnected ? loadSelectedActorName() : LOCAL_ONLY_ACTOR_NAME;
     const ctx = await loadAgentContext(this.actorId);
     // Backfill name from DB in case config was written before actor_name was tracked
     if (!this.actorName && ctx.pet.name) {
@@ -217,6 +217,7 @@ export class LocalAgentRuntime {
     }
     console.log('[local-agent] started — local server + chat relay');
 
+    const config = getConfig();
     if (config.apiConnected) {
       // Connect WebSocket for app ↔ local agent chat relay.
       this.connectWs();
@@ -235,6 +236,7 @@ export class LocalAgentRuntime {
   // ---- WebSocket connection ----
 
   connectWs() {
+    const config = getConfig();
     if (this.stopRequested) return;
     if (!config.apiConnected) {
       console.log(`[local-agent] hosted app WebSocket disabled: ${config.apiSetupMessage}`);

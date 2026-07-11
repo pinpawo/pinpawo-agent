@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
-import { config } from '../config';
+import { getConfig } from '../config';
 import { loadStoredConfig, saveStoredConfig } from '../storage';
 import { AgentTimelineItem } from './components/AgentTimelineItem';
 import { BottomStatusLine } from './components/BottomStatusLine';
@@ -101,6 +101,7 @@ function renderTimelineDisplayEntry(
 // ---------------------------------------------------------------------------
 
 export function TuiApp(props: { actorId: string; workdir?: string }) {
+  const config = getConfig();
   const { exit } = useApp();
   const { stdout } = useStdout();
   const defaultSessionId = useMemo(() => `chat:${props.actorId}`, [props.actorId]);
@@ -336,7 +337,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
         ...loadStoredConfig(),
         global_review_policy: option.mode,
       });
-      config.globalReviewPolicyMode = option.mode;
       setGlobalReviewPolicyMode(option.mode);
       const synced = runtimeController.updateRuntimeConfig({
         globalReviewPolicyMode: option.mode,

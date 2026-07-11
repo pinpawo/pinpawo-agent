@@ -3,13 +3,13 @@ import { createHash } from 'node:crypto';
 import { basename, isAbsolute, resolve } from 'node:path';
 import { loadStoredConfig, type StoredConfig } from './storage';
 
-export type LocalAgentWorkspaceConfig = {
+export type LocalAgentWorkspaceConfig = Readonly<{
   id: string;
   name: string;
   rootPath: string;
-};
+}>;
 
-export type LocalAgentRuntimeConfig = {
+export type LocalAgentRuntimeConfig = Readonly<{
   workdir: string;
   workspace?: LocalAgentWorkspaceConfig;
   stateRoot: string;
@@ -21,7 +21,14 @@ export type LocalAgentRuntimeConfig = {
   tuiCheckpointPath: string;
   tuiSessionPath: string;
   capabilityArtifactRoot: string;
-};
+}>;
+
+function freezeRuntimeConfig(input: LocalAgentRuntimeConfig): LocalAgentRuntimeConfig {
+  return Object.freeze({
+    ...input,
+    ...(input.workspace ? { workspace: Object.freeze({ ...input.workspace }) } : {}),
+  });
+}
 
 export function resolveUserDir(input: string): string {
   const trimmed = input.trim();
@@ -44,7 +51,7 @@ export function resolveDefaultWorkdir(
 export function buildLocalAgentRuntimeConfig(workdir = resolveDefaultWorkdir()): LocalAgentRuntimeConfig {
   const resolvedWorkdir = resolveUserDir(workdir || homedir());
   const stateRoot = resolve(resolvedWorkdir, '.pinpawo');
-  return {
+  return freezeRuntimeConfig({
     workdir: resolvedWorkdir,
     stateRoot,
     studioConfigPath: resolve(stateRoot, 'studio.json'),
@@ -55,7 +62,7 @@ export function buildLocalAgentRuntimeConfig(workdir = resolveDefaultWorkdir()):
     tuiCheckpointPath: resolve(stateRoot, 'checkpoints-tui.json'),
     tuiSessionPath: resolve(stateRoot, 'tui-sessions.json'),
     capabilityArtifactRoot: resolve(stateRoot, 'capability-artifacts'),
-  };
+  });
 }
 
 export type WorkspaceRuntimeConfigOptions = {
@@ -83,14 +90,14 @@ export function attachWorkspaceConfig(
   runtimeConfig: LocalAgentRuntimeConfig,
   options: Omit<WorkspaceRuntimeConfigOptions, 'workdir'> = {},
 ): LocalAgentRuntimeConfig {
-  return {
+  return freezeRuntimeConfig({
     ...runtimeConfig,
-    workspace: {
+    workspace: Object.freeze({
       id: cleanWorkspaceText(options.workspaceId) ?? deriveWorkspaceId(runtimeConfig.workdir),
       name: cleanWorkspaceText(options.workspaceName) ?? deriveWorkspaceName(runtimeConfig.workdir),
       rootPath: runtimeConfig.workdir,
-    },
-  };
+    }),
+  });
 }
 
 export function buildWorkspaceRuntimeConfig(

@@ -1,5 +1,5 @@
 import { gql } from './graphqlClient';
-import { config } from './config';
+import { getConfig } from './config';
 import { LOCAL_ONLY_ACTOR_ID, LOCAL_ONLY_ACTOR_NAME } from './actorSelection';
 import type { TrendPromptItem } from './capabilities/dailyPost';
 
@@ -193,7 +193,7 @@ export function buildLocalOnlyAgentContext(actorId = LOCAL_ONLY_ACTOR_ID): Agent
 }
 
 export async function loadAgentContext(actorId: string): Promise<AgentContext> {
-  if (!config.apiConnected) {
+  if (!getConfig().apiConnected) {
     return buildLocalOnlyAgentContext(actorId);
   }
   const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();

@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { existsSync } from 'node:fs';
 import type { StudioDueRunStatus, StudioDueRunStoreTrace } from '@pinpawo/pet-agent';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
@@ -15,8 +14,8 @@ import type { LoadedUserCapability } from './capabilityLoader';
 import { loadStoredConfig } from './storage';
 import { readAgentActivityHealthFields } from './operationActivityState';
 import { isAuthorizedLocalServerRequest } from './localServerAuth';
-import type { LocalServerDeps } from './localServerTypes';
-import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
+import { getLocalServerWorkdir, type LocalServerDeps } from './localServerTypes';
+import { buildLocalHttpRuntimeProjection } from './localConfigProjection';
 
 type LocalHttpHandlerOptions = {
   authToken: string;
@@ -73,26 +72,7 @@ export function handleLocalHttpRequest(
   }
 
   if (pathname === '/runtime') {
-    const studioConfigFields = readStudioConfigRuntimeFields(deps);
-    const effectiveWorkdir = deps.runtimeConfig?.workdir ?? deps.workdir;
-    writeJson(res, 200, {
-      llm_model: deps.llmConfig.model,
-      llm_context_window_tokens: deps.llmConfig.contextWindowTokens,
-      workdir: effectiveWorkdir,
-      ...(deps.runtimeConfig?.workspace ? {
-        workspace_id: deps.runtimeConfig.workspace.id,
-        workspace_name: deps.runtimeConfig.workspace.name,
-        workspace_root: deps.runtimeConfig.workspace.rootPath,
-      } : {}),
-      ...(deps.runtimeConfig ? {
-        state_root: deps.runtimeConfig.stateRoot,
-        studio_config_path: deps.runtimeConfig.studioConfigPath,
-        studio_due_runs_path: deps.runtimeConfig.studioDueRunsPath,
-        pets_dir: deps.runtimeConfig.petsDir,
-        studio_wiki_base_dir: deps.runtimeConfig.studioWikiBaseDir,
-      } : {}),
-      ...studioConfigFields,
-    });
+    writeJson(res, 200, buildLocalHttpRuntimeProjection(deps));
     return true;
   }
 
@@ -116,7 +96,7 @@ export function handleLocalHttpRequest(
       const next = (status ? trace.filter((row) => row.status === status) : trace)
         .slice(0, limit ?? trace.length);
       const payload = {
-        workdir: deps.runtimeConfig?.workdir ?? deps.workdir,
+        workdir: getLocalServerWorkdir(deps),
         studio_due_runs_path: deps.runtimeConfig?.studioDueRunsPath,
         studio_due_runs: next,
       };
@@ -226,25 +206,6 @@ export function handleLocalHttpRequest(
   }
 
   return false;
-}
-
-function readStudioConfigRuntimeFields(deps: LocalServerDeps) {
-  const preferredPath = deps.runtimeConfig?.studioConfigPath ?? DEFAULT_STUDIO_CONFIG_PATH;
-  if (existsSync(preferredPath)) {
-    return {
-      studio_config_source: deps.runtimeConfig ? 'workdir' : 'legacy_home',
-      studio_config_active_path: preferredPath,
-      legacy_studio_config_path: DEFAULT_STUDIO_CONFIG_PATH,
-    };
-  }
-
-  const legacyAvailable = preferredPath !== DEFAULT_STUDIO_CONFIG_PATH
-    && existsSync(DEFAULT_STUDIO_CONFIG_PATH);
-  return {
-    studio_config_source: legacyAvailable ? 'legacy_home' : 'missing',
-    studio_config_active_path: legacyAvailable ? DEFAULT_STUDIO_CONFIG_PATH : preferredPath,
-    legacy_studio_config_path: DEFAULT_STUDIO_CONFIG_PATH,
-  };
 }
 
 function writeJson(res: ServerResponse, statusCode: number, payload: unknown) {

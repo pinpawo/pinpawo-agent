@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
-import { config } from '../../config';
+import { getConfig } from '../../config';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { isAbsolute, resolve } from 'node:path';
@@ -195,7 +195,7 @@ export type BrowserStatus = {
 async function detectBackend(): Promise<BrowserBackend> {
   // Env var takes precedence; falls back to stored config (written by Settings UI)
   const fromEnv = process.env.PINPAWO_BROWSER_BACKEND?.trim();
-  const fromConfig = config.browserBackend;
+  const fromConfig = getConfig().browserBackend;
   const forced = fromEnv || fromConfig || 'auto';
 
   console.log(`[browser] detectBackend: env=${fromEnv ?? '(unset)'} config=${fromConfig} → forced=${forced}`);
@@ -583,7 +583,7 @@ export const browserSession = new BrowserSession();
 // ── Lightweight detection (no browser launch) ─────────────────────────────────
 export async function detectBrowserStatus(): Promise<BrowserStatus> {
   const fromEnv = process.env.PINPAWO_BROWSER_BACKEND?.trim();
-  const fromConfig = config.browserBackend;
+  const fromConfig = getConfig().browserBackend;
   const configured = fromEnv || fromConfig || 'auto';
   const chromeExecPath =
     process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
@@ -626,7 +626,7 @@ export async function detectBrowserEnvironment(): Promise<BrowserEnvironment> {
   const chromePath =
     process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
   const fromEnv = process.env.PINPAWO_BROWSER_BACKEND?.trim();
-  const fromConfig = config.browserBackend;
+  const fromConfig = getConfig().browserBackend;
 
   return {
     configured: fromEnv || fromConfig || 'auto',

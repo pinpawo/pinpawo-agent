@@ -34,6 +34,7 @@ test('buildLocalAgentRuntimeConfig scopes runtime state under workdir .pinpawo',
     tuiSessionPath: '/tmp/pinpawo-workdir/.pinpawo/tui-sessions.json',
     capabilityArtifactRoot: '/tmp/pinpawo-workdir/.pinpawo/capability-artifacts',
   });
+  assert.equal(Object.isFrozen(runtimeConfig), true);
 });
 
 test('resolveDefaultWorkdir prefers env, then stored config, then process cwd', () => {
@@ -63,6 +64,8 @@ test('buildWorkspaceRuntimeConfig adds stable workspace identity over workdir st
     name: 'PinPawo Agent',
     rootPath: '/tmp/pinpawo-workspace',
   });
+  assert.equal(Object.isFrozen(runtimeConfig), true);
+  assert.equal(Object.isFrozen(runtimeConfig.workspace), true);
 });
 
 test('attachWorkspaceConfig honors explicit workspace id and derives readable names', () => {

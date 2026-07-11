@@ -1,4 +1,4 @@
-import { config } from './config';
+import { getConfig } from './config';
 
 type GqlResponse<T> = {
   data?: T;
@@ -6,6 +6,7 @@ type GqlResponse<T> = {
 };
 
 function checkJwtExpiry() {
+  const config = getConfig();
   try {
     const payload = config.hasuraJwt.split('.')[1];
     const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString());
@@ -24,6 +25,7 @@ function checkJwtExpiry() {
 }
 
 export async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+  const config = getConfig();
   if (!config.apiConnected) {
     throw new Error(`${config.apiSetupMessage || 'API login is not configured.'}`);
   }

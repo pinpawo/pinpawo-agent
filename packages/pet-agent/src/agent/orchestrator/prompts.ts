@@ -8,7 +8,6 @@ import type {
   SubagentCompletionReason,
   RunDelegationSummary,
   RunPendingTask,
-  RunTaskPlanDraft,
 } from './types';
 import { clipForPrompt, formatDelegationStatus, readMessageText } from './utils';
 
@@ -151,23 +150,6 @@ export function buildDelegationOutcomeCurrentTaskContext(task: {
   return lines.join('\n');
 }
 
-export function buildTaskPlanDraftContext(planDraft: RunTaskPlanDraft): string | null {
-  const visibleSteps = (planDraft ?? [])
-    .map((step) => clipForPrompt(step, 160))
-    .filter(Boolean)
-    .slice(0, 5);
-  if (visibleSteps.length === 0) return null;
-
-  const lines = [
-    '<task_plan_draft role="self_guidance" source="previous_task_decision">',
-  ];
-  visibleSteps.forEach((step, index) => {
-    lines.push(indentXmlBlock(xmlTextBlock('step', step, ` index="${(index + 1).toString()}"`), 2));
-  });
-  lines.push('</task_plan_draft>');
-  return lines.join('\n');
-}
-
 export function buildDelegationOutcomeOtherTasksContext(
   runDelegationSummaries: RunDelegationSummary[],
   activeDelegationId: string | null,
@@ -267,9 +249,9 @@ function buildOrchestratorDecisionPromptPrefixLines(): string[] {
     '',
     'task loop 流程：',
     '1. taskDecision（决策）',
-    '   - 读取：用户请求、对话上下文、已完成 task 的结论摘要、上一轮 plan_draft（如有）。',
+    '   - 读取：用户请求、对话上下文、已完成 task 的结论摘要。',
     '   - 用户目标已能直接回应 → action=answer，交给 answer。',
-    '   - 还需要执行 → action=next_task，产出当前单步 task 与 search_keywords；同时可结合上下文维护可选 plan_draft。',
+    '   - 还需要执行 → action=next_task，产出当前单步 task 与 search_keywords。',
     '2. capabilitySearch（系统步骤，关键词匹配）',
     '   - 用 search_keywords（缺省时用 task 文本）搜索 custom capability，产出 capability 候选。',
     '3. routeDecision（决策）',
@@ -287,8 +269,7 @@ function buildOrchestratorDecisionPromptPrefixLines(): string[] {
     '',
     '术语：',
     '- 用户请求（user request）：用户本轮的原始输入。',
-    '- 用户目标（user goal）：orchestrator 从用户请求和对话上下文理解出的本轮目标；它是验收的唯一基准，不等于任何任务清单或草案。',
-    '- plan_draft：taskDecision 可选的后续步骤自我引导草稿；只作为后续 taskDecision 的上下文参考，不是任务清单，不是验收依据，也不参与 route/guard。',
+    '- 用户目标（user goal）：orchestrator 从用户请求和对话上下文理解出的本轮目标；它是验收的唯一基准，不等于任何任务清单。',
     '- gap_note：outcomeDecision 在 continue / task_done 时对缺口的一句说明，作为后续执行或规划的提示。',
     '- handoff：系统动作——task 达标或 goal 达成时，把 announce 结论并入主对话并清理执行现场；此后所有节点只依赖主对话里的结论，不依赖执行过程记录。',
   ];
@@ -320,7 +301,7 @@ export function buildTaskDecisionSystemPrompt(params: {
     '- 判断用户当前目标是否需要一个新的 delegated task；需要时只生成当前一个 task。',
     '- action=answer：当前不需要进入执行管道，交给 answer 节点基于完整对话历史回复用户。',
     '- action=next_task：生成当前单步 delegated task，并提供必要 context_summary 与 capability search 关键词。',
-    '- 先根据用户目标、已有委托结论和对话上下文决定当前 task；已有 plan_draft 时默认把它作为参考，仅在最新结论使其中步骤不再适用时整体更新。',
+    '- 根据用户目标、已有委托结论和对话上下文决定当前 task；不要重复已完成的工作。',
     '- 如果当前输入足以直接回应用户（无需 delegate 给执行器），选择 answer；最终回复由后续 answer 节点基于完整对话历史生成。',
     '- 如果用户询问已有上下文、最近任务状态或之前结果，选择 answer 交给回复节点回答；不要在决策层凭印象复述或编造之前的结果。',
     '- 如果用户目标本身无法判断，或需要向用户补充、澄清、确认，选择 answer 交给回复节点处理；不要在决策层直接提问。',
@@ -328,13 +309,11 @@ export function buildTaskDecisionSystemPrompt(params: {
     ...buildSingleStepTaskInstructions().map((line) => `- ${line}`),
     '- search_keywords 用于下一步 capability search：提取能匹配执行器能力的关键词、同义词或短语；多个词用 | 分隔。没有额外关键词时可为 null。',
     '- search_keywords 应同时表达执行意图和目标对象；不要只输出 URL、文件类型或载体名称。',
-    '- plan_draft 只列当前 task 之后尚未开始的后续 delegated task，最多 5 个短句；没有明确后续工作时为 null，不包含当前 task、answer 工作、增量 patch、删除标记或游标。',
     '',
     '动态上下文内容：',
     '- runtime_context：本次调用的工作目录和运行环境，仅作为执行事实背景。',
     '- user_intent_context：用户请求、近期主对话、近期 announce、压缩摘要和 capability artifact 短引用。',
     '- run_delegation_summaries：当前 run 的任务账本，只用于理解已完成结论和避免重复执行，不是控制流命令。',
-    '- task_plan_draft：可选的后续步骤草案，只作为 taskDecision 的参考，不是控制流依据。',
     '',
     params.outputInstruction,
   ].filter((line) => line !== null).join('\n');
@@ -389,7 +368,7 @@ export function buildDelegationOutcomeDecisionSystemPrompt(params: {
     '- 当前 delegated task：判断这一次执行原本要完成什么。',
     '- subagent announce 原文：判断当前 task 是否达标的执行结果来源。',
     '- 其他 run 结论用于判断用户目标是否还有未完成部分；当前 task 是否达标以 subagent announce 是否覆盖当前 task 的目标为主。',
-    '- 本节点不接收 plan 草案、不接收工具列表，也不依赖 capability 枚举。',
+    '- 本节点不接收工具列表，也不依赖 capability 枚举。',
     '- 如果当前 delegated task 未达标，但用户目标仍明确且不需要用户补充信息，选择 continue；gap_note 简述缺口。',
     '- 如果当前 delegated task 已达标，但用户原始请求仍有明确未完成目标，选择 task_done；不要在这里写下一步 task，只在 gap_note 写未完成方向。',
     '- 如果 subagent announce 已经满足用户当前 run 目标，选择 goal_done；不要在这里撰写最终回复内容。',
@@ -550,7 +529,6 @@ export function buildTaskDecisionInput(params: {
   requestContext?: string | null;
   runDelegationContext?: string | null;
   runtimeContext?: string | null;
-  taskPlanDraftContext?: string | null;
 }): string {
   const context = params.requestContext ?? buildPreparedRequestContext({
     latestUserRequest: params.latestUserRequest,
@@ -564,7 +542,6 @@ export function buildTaskDecisionInput(params: {
     params.runDelegationContext
       ? indentXmlBlock(xmlTextBlock('run_delegation_summaries', params.runDelegationContext, ' role="fact" source="state"'), 2)
       : null,
-    params.taskPlanDraftContext ? indentXmlBlock(params.taskPlanDraftContext, 2) : null,
     '</task_decision_input>',
   ].filter((line) => line !== null).join('\n');
 }
@@ -620,8 +597,7 @@ export function buildPreparedRequestContext(params: {
 }
 
 export function buildDelegationOutcomeDecisionInput(params: {
-  latestUserRequest: string | null;
-  userIntentContext?: string | null;
+  userIntentContext: string;
   currentTaskContext: string | null;
   subagentAnnounceContext: string | null;
   otherTasksContext?: string | null;
@@ -630,11 +606,7 @@ export function buildDelegationOutcomeDecisionInput(params: {
   const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
   return [
     '<delegation_outcome_input>',
-    params.userIntentContext
-      ? indentXmlBlock(params.userIntentContext, 2)
-      : params.latestUserRequest
-        ? indentXmlBlock(xmlTextBlock('user_request', clipForPrompt(params.latestUserRequest, 420)), 2)
-        : '  <user_request missing="true" />',
+    indentXmlBlock(params.userIntentContext, 2),
     params.currentTaskContext
       ? indentXmlBlock(params.currentTaskContext, 2)
       : '  <current_delegation missing="true" />',

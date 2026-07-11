@@ -35,13 +35,7 @@ test('task decision schema separates task birth from route selection', () => {
     task: '读取 issue #269 并提炼需求点。',
     context_summary: '用户要求先理解 issue。',
     search_keywords: 'github issue|需求分析',
-    plan_draft: ['检索代码', '汇总结论'],
   }).success, true);
-  assert.equal(schema.safeParse({
-    action: 'next_task',
-    task: '读取 issue #269 并提炼需求点。',
-    plan_draft: ['1', '2', '3', '4', '5', '6'],
-  }).success, false);
   assert.equal(schema.safeParse({ action: 'next_task', task: null }).success, false);
   assert.equal(schema.safeParse({ action: 'next_task', task: '   ' }).success, false);
   assert.equal(schema.safeParse({
@@ -106,12 +100,11 @@ test('decision output instructions add schema shape only for jsonMode', () => {
   const defaultTaskInstruction = buildTaskDecisionOutputInstruction();
   assert.match(defaultTaskInstruction, /structured-output schema/);
   assert.doesNotMatch(defaultTaskInstruction, /JSON Schema/);
-  assert.doesNotMatch(defaultTaskInstruction, /plan_draft/);
 
   const jsonModeTaskInstruction = buildTaskDecisionOutputInstruction('jsonMode');
   assert.match(jsonModeTaskInstruction, /JSON Schema/);
   assert.match(jsonModeTaskInstruction, /"action"/);
-  assert.match(jsonModeTaskInstruction, /"plan_draft"/);
+  assert.doesNotMatch(jsonModeTaskInstruction, /"plan_draft"/);
 
   const jsonModeRouteInstruction = buildRouteDecisionOutputInstruction({
     capabilityCandidates: [{ name: 'browser' }],

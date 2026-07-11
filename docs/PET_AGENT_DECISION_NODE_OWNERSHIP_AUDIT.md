@@ -1,8 +1,9 @@
 # pet-agent decision node 职责摸排
 
-> 状态：当前实现审计基线；prompt ownership 与动态上下文边界已由独立 prompt PR 落地。
+> 状态：历史审计记录；prompt ownership 与动态上下文边界已落地，`plan_draft` 已于 2026-07-11 删除。
 > 范围：taskDecision、capabilitySearch、routeDecision、outcomeDecision，以及它们前后的 guard、state patch 和 conditional route。
 > 目标：区分语义判断与确定性状态机，明确哪些事情交给 LLM，哪些事情必须由 node/graph 代码保证。
+> 注：第 3–7 节保留删除前的问题证据；其中涉及 `plan_draft` 的描述不代表当前实现。
 
 ## 1. 判断原则
 
@@ -12,7 +13,6 @@ LLM 只处理无法从 state 确定推导的语义问题：
 - 当前一个 task 应该是什么。
 - capability 描述是否语义匹配当前 task。
 - announce 是否满足当前 task，以及用户目标是否还需执行。
-- 是否需要 plan_draft，以及草案应如何根据最新结论创建、沿用、修订或清空。
 
 node/graph 代码处理所有可以从 state、config、schema 或 guard 确定推导的问题：
 
@@ -20,7 +20,6 @@ node/graph 代码处理所有可以从 state、config、schema 或 guard 确定�
 - 当前属于哪个 run/plan 模式。
 - 哪些 capability 实际可用。
 - 空候选、缺失 task、缺失 active delegation 等异常状态。
-- plan_draft 的 run 级保存、注入和 reset；代码不根据其内容或存在性决定流转。
 - iteration limit、handoff availability 和 forced capability。
 - 模型结果如何写 state、如何路由、何时停止。
 
@@ -305,12 +304,8 @@ answer 负责：
 | context 是否需要 compact | contextCompactionWatermarkGuard | code |
 | active task 是否 awaiting decision | afterContextPrep | code |
 | run iteration 是否达到上限 | runIterationLimitGuard | code |
-| 是否为本 run 首轮 taskDecision | code 计算，并写入 prompt | 不再作为 plan policy；仅作为普通上下文事实时才注入 |
-| 是否已有 plan_draft | code、system、input、postprocess | input 事实；不产生 code branch |
-| 非首轮无草案是否结束 | graph route + prompt | 由 taskDecision LLM 根据目标与委托结论判断，不能只看草案 |
 | 当前是否还需要执行 | taskDecision LLM | LLM |
 | 当前单步 task 内容 | taskDecision LLM | LLM |
-| 是否创建/维护/清空 plan_draft 及其内容 | taskDecision LLM + code gate | LLM；code 只校验结构并保存 |
 | capability search query fallback | capabilitySearch | code |
 | forced capability candidates | forcedCapabilitySeedGuard | code |
 | candidates 是否为空 | route runner + system context | code |
@@ -323,7 +318,7 @@ answer 负责：
 | 同一 task 是否值得继续 | outcomeDecision LLM | LLM |
 | 用户目标是否还有明确执行工作 | outcomeDecision LLM | LLM |
 | verdict 对 state 的写入 | buildDelegationOutcomeDecisionResult | code |
-| task_done 后是否回 taskDecision | afterDelegationOutcomeDecision 读取 plan_draft | code 固定回 taskDecision，不读取 plan_draft |
+| task_done 后是否回 taskDecision | outcomeDecision Command | code 固定回 taskDecision |
 | 用户可见终态由谁生成 | answer 或 inline/finalize 两条路径 | 正常终态统一由 answer 生成；不新增 final-reply route state |
 
 ## 9. 目标边界
@@ -332,7 +327,7 @@ answer 负责：
 
 ```text
 taskDecision:
-  结合用户目标和已有委托结论，现在是否需要一个新的 task？需要的话，当前一个 task 是什么；是否要留下或调整后续 plan 草稿？
+  结合用户目标和已有委托结论，现在是否需要一个新的 task？需要的话，当前一个 task 是什么？
 
 routeDecision:
   当前真实可用的 capability subagent 中，哪个最适合执行这个 task？
@@ -341,15 +336,15 @@ outcomeDecision:
   当前 announce 是否足以结束当前 task；接下来应继续同一 task、结束当前 task，还是停止自主执行？
 ```
 
-任何能写成 `if (state.x ...)`、集合为空检查、枚举合法性、计数上限或 availability 判断的规则，默认归 code；但 plan_draft 是明确例外：它是模型自我引导内容，代码可以存取，不能把它提升为 flow condition。prompt 只保留模型完成上述三个语义判断所需的稳定契约和事实输入。
+任何能写成 `if (state.x ...)`、集合为空检查、枚举合法性、计数上限或 availability 判断的规则，默认归 code。prompt 只保留模型完成上述三个语义判断所需的稳定契约和事实输入。
 
 ## 10. 建议迁移顺序
 
 1. 删除 `runPendingFinalReply` 与 inline/finalizeRun 旁路；正常终态统一进入 answer，真正 invariant violation 交给校验或恢复。
-2. 移除 `afterDelegationOutcomeDecision` 和 task result builder 对 plan_draft 存在性的控制依赖；task_done 固定回 taskDecision。
-3. 删除 taskDecision 的首轮/有草案/无草案三套 state policy，改成一个稳定的 plan 草稿语义。
+2. 删除 plan_draft；task_done 固定回 taskDecision。
+3. taskDecision 只根据用户目标、主对话和已完成委托结论生成当前 task。
 4. 为三个 runner 增加明确的 code precondition，消除其他不应调用 LLM 的状态。
 5. 把 route targets 从 system 移到 input，并让 schema 只暴露真实可用 capability。
 6. 统一 outcome schema description 与 system verdict 语义，删除重复 output instruction。
 7. 删除三个 input 中的 `<instruction>`，确保 input 只剩事实。
-8. 增加 transition 测试：task_done 无论 plan_draft 为 null 或非空都进入 taskDecision；outcome 三态 Command 与其余 conditional edge 目的地正确；所有正常终态只经过 answer 并只产生一条用户回复。
+8. 增加 transition 测试：task_done 进入 taskDecision；outcome 三态 Command 与其余 conditional edge 目的地正确；所有正常终态只经过 answer 并只产生一条用户回复。

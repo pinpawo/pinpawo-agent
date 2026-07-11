@@ -104,15 +104,15 @@ visible without subagent or graph noise:
 npm run eval:task-decision
 ```
 
-It covers direct answer, single delegated task, first-run multi-step draft
-creation, PR review keywords, existing draft maintenance, post-first no-draft recovery
-discipline, and completed-goal answer. The summary shows per-case pass counts,
-action distribution, and `plan_draft` size distribution.
+It covers direct answer, single delegated task, multi-step investigation,
+PR review keywords, task continuation from completed summaries, and completed-goal
+answer. The summary shows per-case pass counts, action distribution, and task output
+distribution.
 
 Useful knobs:
 
 ```sh
 TASK_DECISION_REPEATS=5 npm run eval:task-decision
-TASK_DECISION_CASES=initial-multi-step-investigation,maintain-existing-draft npm run eval:task-decision
+TASK_DECISION_CASES=initial-multi-step-investigation,post-first-no-draft npm run eval:task-decision
 DECISION_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:task-decision
 ```

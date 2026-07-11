@@ -74,7 +74,6 @@ function buildAnswerCleanup() {
   return {
     runNextDelegation: null,
     runPendingTask: null,
-    runTaskPlanDraft: null,
     runCapabilitySearchState: buildEmptyRunCapabilitySearchState(),
     runIterationCount: 0,
   };

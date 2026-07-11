@@ -6,7 +6,8 @@
 > `docs/PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md` (issues #274/#308), which renames
 > `runPendingDelegation` → `runNextDelegation` and `runDelegations` → `runDelegationSummaries`,
 > deletes `canHandoffActiveDelegation` (derived value, not state), keeps `runPendingFinalReply`
-> as a narrow answer/inline route signal, and adds `runPendingTask` / `runTaskPlanDraft`.
+> as a narrow answer/inline route signal, and adds `runPendingTask`. Later Stage B cleanup
+> removed both `runPendingFinalReply` and `runTaskPlanDraft`.
 > That doc is authoritative for those fields; the lifecycle prefix rules in §1 remain
 > canonical here.
 
@@ -54,7 +55,6 @@ All orchestrator state channels should carry their lifecycle prefix except the L
 | `runId` | `runId` | run | Current execution loop id. Do not use it as the long-lived task transcript id. |
 | `canHandoffActiveDelegation` | delete | — | Derived from `taskActiveDelegation` + `messages`; evaluate the guard in decision context instead of storing it in state. |
 | none | `runPendingTask` | run | Planned task-first routing command; introduced by the later task → search → route pipeline. |
-| none | `runTaskPlanDraft` | run | Self-guidance plan draft written by taskDecision. Prompt-only memo; must never drive routes or guards. |
 | `buildRunStateReset` | `buildRunStateReset` | run | Resets only `run*` fields. |
 | `buildOrchestratorRunInput` | `buildOrchestratorRunInput` | run | Add a temporary compatibility alias if external callers still import the old name. |
 

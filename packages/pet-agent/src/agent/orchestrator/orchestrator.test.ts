@@ -43,7 +43,11 @@ import {
 } from './messageLanes';
 import { RemoveMessage } from '@langchain/core/messages';
 import { isDelegationBriefingMessage } from './delegationBriefing';
-import { reuseOrAppendRunDelegationSummary, updateRunDelegationSummaryResult } from './delegations';
+import {
+  appendRunDelegationSummary,
+  resumeRunDelegationSummary,
+  updateRunDelegationSummaryResult,
+} from './delegations';
 import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
 import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
 import type { RunDelegationSummary, TaskActiveDelegation } from './types';
@@ -3818,7 +3822,7 @@ test('lane messages exclude legacy lane history without per-message delegationId
   ]);
 });
 
-test('delegation helpers reuse progress delegation and update result', () => {
+test('delegation helpers keep new same-lane tasks separate and resume by explicit id', () => {
   const delegations: RunDelegationSummary[] = [
     {
       id: 'task-1',
@@ -3829,20 +3833,31 @@ test('delegation helpers reuse progress delegation and update result', () => {
     },
   ];
 
-  const reused = reuseOrAppendRunDelegationSummary(delegations, {
+  const appended = appendRunDelegationSummary(delegations, {
     id: 'task-2',
     lane: 'general',
-    task: '继续读取文件并运行 lint',
-    contextSummary: '继续完成用户当前请求。',
+    task: '运行 lint',
+    contextSummary: '这是同一 lane 的新任务。',
   });
 
-  assert.equal(reused.runNextDelegation?.id, 'task-1');
-  assert.equal(reused.runNextDelegation?.task, '继续读取文件并运行 lint');
-  assert.equal(reused.runDelegationSummaries.length, 1);
-  assert.equal(reused.runDelegationSummaries[0].task, '继续读取文件并运行 lint');
-  assert.equal(reused.runDelegationSummaries[0].status, 'pending');
+  assert.deepEqual(appended.map((item) => item.id), ['task-1', 'task-2']);
+  assert.equal(appended[0].task, '读取文件');
+  assert.equal(appended[0].status, 'progress');
+  assert.equal(appended[1].task, '运行 lint');
+  assert.equal(appended[1].status, 'pending');
 
-  const completed = updateRunDelegationSummaryResult(reused.runDelegationSummaries, 'task-1', {
+  const resumed = resumeRunDelegationSummary(appended, {
+    id: 'task-1',
+    lane: 'general',
+    task: '读取文件',
+    contextSummary: '继续原任务。',
+  });
+  assert.equal(resumed[0].status, 'pending');
+  assert.equal(resumed[0].resultPreview, null);
+  assert.equal(resumed[1].status, 'pending');
+  assert.equal(resumed[1].task, '运行 lint');
+
+  const completed = updateRunDelegationSummaryResult(resumed, 'task-1', {
     status: 'completed',
     resultPreview: '任务完成',
   });

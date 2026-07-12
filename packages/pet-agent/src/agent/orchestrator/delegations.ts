@@ -23,38 +23,10 @@ export function updateRunDelegationSummaryResult(
     : delegation);
 }
 
-export function reuseOrAppendRunDelegationSummary(
+export function appendRunDelegationSummary(
   runDelegationSummaries: RunDelegationSummary[],
-  nextDelegation: RunNextDelegation | null,
-) {
-  if (!nextDelegation) {
-    return {
-      runDelegationSummaries,
-      runNextDelegation: null as RunNextDelegation | null,
-    };
-  }
-
-  // If the same lane already has a delegation in progress, always reuse it.
-  const inProgress = runDelegationSummaries.find((delegation) =>
-    delegation.lane === nextDelegation.lane && delegation.status === 'progress',
-  );
-  if (inProgress) {
-    return {
-      runDelegationSummaries: runDelegationSummaries.map((delegation) => delegation.id === inProgress.id
-        ? {
-            ...delegation,
-            task: nextDelegation.task,
-            status: 'pending' as const,
-            resultPreview: null,
-          }
-        : delegation),
-      runNextDelegation: {
-        ...nextDelegation,
-        id: inProgress.id,
-      },
-    };
-  }
-
+  nextDelegation: RunNextDelegation,
+): RunDelegationSummary[] {
   const runDelegation: RunDelegationSummary = {
     id: nextDelegation.id,
     lane: nextDelegation.lane,
@@ -63,8 +35,24 @@ export function reuseOrAppendRunDelegationSummary(
     resultPreview: null,
   };
 
-  return {
-    runDelegationSummaries: [...runDelegationSummaries, runDelegation],
-    runNextDelegation: nextDelegation,
-  };
+  return [...runDelegationSummaries, runDelegation];
+}
+
+export function resumeRunDelegationSummary(
+  runDelegationSummaries: RunDelegationSummary[],
+  delegation: RunNextDelegation,
+): RunDelegationSummary[] {
+  const existing = runDelegationSummaries.some((item) => item.id === delegation.id);
+  if (!existing) {
+    return appendRunDelegationSummary(runDelegationSummaries, delegation);
+  }
+  return runDelegationSummaries.map((item) => item.id === delegation.id
+    ? {
+        ...item,
+        lane: delegation.lane,
+        task: delegation.task,
+        status: 'pending' as const,
+        resultPreview: null,
+      }
+    : item);
 }

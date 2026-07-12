@@ -131,7 +131,18 @@ export function buildDelegationOutcomeDecisionSchema() {
     gap_note: z.string().nullable().optional().describe(
       '仅 outcome=continue 时填写：当前结果未达标的缺口说明，会作为继续执行的依据交给执行者；其他 outcome 为 null 或省略。',
     ),
-  });
+    // Normalize instead of reject: gap_note is advisory and outcome is the
+    // authoritative field, so a stray gap_note on task_done/goal_done is
+    // harmless model noise — stripping it keeps the continue-only contract
+    // structural without turning noise into a failed run (autoRepair defaults
+    // to zero retries). A missing gap on continue stays valid: the schema
+    // cannot see completionReason, and limit_reached continues legitimately
+    // omit it.
+  }).transform((decision) => (
+    decision.outcome === 'continue'
+      ? decision
+      : { ...decision, gap_note: null }
+  ));
 }
 
 export function buildRouteDecisionSchema(params: OrchestrationDecisionSchemaParams) {

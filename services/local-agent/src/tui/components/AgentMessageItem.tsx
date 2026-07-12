@@ -2,12 +2,16 @@ import React from 'react';
 import { MessageBlock } from './MessageBlock';
 import { formatMessageTimestamp } from '../render/terminalText';
 import type { AgentMessageEntry } from '../timeline/agentTimeline';
+import { SubagentMessageItem } from './SubagentMessageItem';
 
 export function AgentMessageItem(props: {
   entry: AgentMessageEntry;
   petName: string;
   width: number;
 }) {
+  if (props.entry.role === 'subagent') {
+    return <SubagentMessageItem entry={props.entry} width={props.width} />;
+  }
   const timestamp = props.entry.updatedAt ?? props.entry.createdAt;
   return (
     <MessageBlock

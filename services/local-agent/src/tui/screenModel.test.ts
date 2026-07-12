@@ -138,21 +138,10 @@ test('buildTuiScreenModel keeps timeline viewport ids stable across resize', () 
     id: 'chat:pet',
     timeline: [
       message('m1', 'user', 'hello', 'completed'),
+      message('notice-1', 'system', 'after m1', 'completed'),
       message('m2', 'assistant', 'done', 'completed'),
+      message('activity-1', 'subagent', 'delegate', 'streaming'),
       message('m3', 'assistant', 'working', 'streaming'),
-    ],
-    notices: [
-      { id: 'notice-1', text: 'after m1', afterTimelineEntryId: 'm1' },
-    ],
-    activities: [
-      {
-        id: 'activity-1',
-        type: 'subagent.message',
-        requestId: 'run1',
-        text: 'delegate',
-        status: 'streaming',
-        afterTimelineEntryId: 'm2',
-      },
     ],
   }));
 
@@ -264,7 +253,7 @@ test('buildTuiScreenModel keeps operation viewport boundary stable across comple
 
 function message(
   id: string,
-  role: 'user' | 'assistant',
+  role: 'user' | 'assistant' | 'system' | 'subagent',
   text: string,
   status: 'streaming' | 'completed',
 ): AgentTimelineEntry {

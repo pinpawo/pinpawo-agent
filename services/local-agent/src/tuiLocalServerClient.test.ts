@@ -319,6 +319,35 @@ test('TuiLocalServerClient rejects malformed snapshot payloads instead of synthe
   assert.equal(seenUrls.includes('http://127.0.0.1:3210/history'), false);
 });
 
+test('TuiLocalServerClient rejects subagent snapshot messages without requestId', async () => {
+  const client = new TuiLocalServerClient({
+    port: 3210,
+    fetchImpl: (async (url: RequestInfo | URL) => {
+      if (String(url).endsWith('/snapshot')) {
+        return jsonResponse({
+          sessionId: 'chat:pet',
+          kind: 'chat',
+          timeline: [{
+            id: 'subagent-1',
+            type: 'message',
+            role: 'subagent',
+            text: 'working',
+            status: 'streaming',
+            source: 'live-event',
+          }],
+          runs: [],
+        });
+      }
+      return jsonResponse({});
+    }) as typeof fetch,
+  });
+
+  await assert.rejects(
+    () => client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'chat' }),
+    /invalid local server snapshot payload/,
+  );
+});
+
 test('TuiLocalServerClient treats health errors as unhealthy', async () => {
   const client = new TuiLocalServerClient({
     port: 3210,

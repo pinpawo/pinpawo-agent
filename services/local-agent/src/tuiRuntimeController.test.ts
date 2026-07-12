@@ -46,8 +46,6 @@ function pendingReviewState(): TuiState {
         actor: { label: 'Pet', summary: 'summary' },
         runtime: {},
         timeline: [],
-        notices: [],
-        activities: [],
         tokenUsage: null,
         activeRunId: 'req-1',
       },

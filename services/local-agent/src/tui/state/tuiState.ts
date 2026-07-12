@@ -10,9 +10,6 @@ import {
 import type { TextAreaModel } from '../input/textarea/engine';
 import { TUI_TEXT } from '../render/text';
 
-export const MAX_TUI_NOTICE_ITEMS = 120;
-export const MAX_TUI_ACTIVITY_ITEMS = 80;
-
 export type RunId = string;
 export type SessionId = string;
 
@@ -72,8 +69,6 @@ export type SessionModel = {
     contextWindow?: number;
   };
   timeline: AgentTimelineEntry[];
-  notices: SessionNoticeModel[];
-  activities: SessionActivityModel[];
   activeRunId: RunId | null;
   tokenUsage: TokenUsageModel | null;
 };
@@ -100,23 +95,6 @@ export type MessageCellModel = {
   text: string;
   requestId?: RunId;
   timestamp?: string;
-};
-
-export type SessionNoticeModel = {
-  id: string;
-  text: string;
-  timestamp?: string;
-  afterTimelineEntryId?: string;
-};
-
-export type SessionActivityModel = {
-  id: string;
-  type: 'subagent.message';
-  requestId: RunId;
-  text: string;
-  status: 'streaming' | 'completed';
-  timestamp?: string;
-  afterTimelineEntryId?: string;
 };
 
 export type ApprovalRequestModel = {
@@ -306,8 +284,6 @@ export function createSession(params: {
   kind?: SessionModel['kind'];
   actor?: Partial<SessionModel['actor']>;
   timeline?: AgentTimelineEntry[];
-  notices?: SessionNoticeModel[];
-  activities?: SessionActivityModel[];
 }): SessionModel {
   return {
     id: params.id,
@@ -318,8 +294,6 @@ export function createSession(params: {
     },
     runtime: {},
     timeline: params.timeline ?? [],
-    notices: params.notices ?? [],
-    activities: params.activities ?? [],
     activeRunId: null,
     tokenUsage: null,
   };

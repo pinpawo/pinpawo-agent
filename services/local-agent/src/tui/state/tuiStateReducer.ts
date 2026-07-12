@@ -31,15 +31,12 @@ import {
   agentTimelineEntriesFromSnapshot,
 } from '../snapshot/tuiSessionSnapshot';
 import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
-import { MAX_TUI_ACTIVITY_ITEMS, MAX_TUI_NOTICE_ITEMS } from './tuiState';
 import type {
   ActiveRunModel,
   MessageCellDraft,
   MessageCellMeta,
   MessageCellModel,
   RunId,
-  SessionActivityModel,
-  SessionNoticeModel,
   SessionId,
   SessionModel,
   TuiAction,
@@ -64,44 +61,13 @@ function appendMessageCells(
 ) {
   if (drafts.length === 0) return session;
   const cells = drafts.map(toMessageCell);
-  const timeline = [...session.timeline];
-  const notices = [...session.notices];
-  let afterTimelineEntryId = timeline.at(-1)?.id;
-
-  for (const cell of cells) {
-    const entry = timelineEntryFromMessageCell(cell);
-    if (entry) {
-      timeline.push(entry);
-      afterTimelineEntryId = entry.id;
-      continue;
-    }
-    if (cell.kind === 'system') {
-      notices.push({
-        ...(afterTimelineEntryId ? { afterTimelineEntryId } : {}),
-        id: cell.id,
-        text: cell.text,
-        ...(cell.timestamp ? { timestamp: cell.timestamp } : {}),
-      });
-    }
-  }
-
   return {
     ...session,
-    timeline,
-    notices: trimNotices(notices),
+    timeline: [
+      ...session.timeline,
+      ...cells.map(timelineEntryFromMessageCell),
+    ],
   };
-}
-
-function trimNotices(notices: SessionNoticeModel[]) {
-  return notices.length > MAX_TUI_NOTICE_ITEMS
-    ? notices.slice(notices.length - MAX_TUI_NOTICE_ITEMS)
-    : notices;
-}
-
-function trimActivities(activities: SessionActivityModel[]) {
-  return activities.length > MAX_TUI_ACTIVITY_ITEMS
-    ? activities.slice(activities.length - MAX_TUI_ACTIVITY_ITEMS)
-    : activities;
 }
 
 function addTimelineEntryId<T extends ActiveRunModel>(activeRun: T, entryId: string): T {
@@ -168,8 +134,11 @@ function findSessionIdForTimelineRequest(state: TuiState, requestId: string): Se
   return null;
 }
 
-function hasLocalInterruptReleaseNotice(session: SessionModel) {
-  return session.notices.some((notice) => notice.text === TUI_TEXT.interruptRequestedLocalRelease);
+function hasLocalInterruptReleaseNotice(session: SessionModel, requestId: string) {
+  return session.timeline.some((entry) =>
+    entry.type === 'message'
+      && entry.role === 'system'
+      && entry.id === `message:${requestId}:interrupt-local-release`);
 }
 
 type TimelineEventOwner = {
@@ -340,75 +309,47 @@ function upsertOperationTimelineEntry(
   };
 }
 
-function appendOrUpdateActivity(
-  activities: SessionActivityModel[],
-  activity: SessionActivityModel,
-) {
-  const index = activities.findIndex((item) => item.id === activity.id);
-  if (index < 0) {
-    return trimActivities([...activities, activity]);
-  }
-  return trimActivities([
-    ...activities.slice(0, index),
-    activity,
-    ...activities.slice(index + 1),
-  ]);
-}
-
-function readSubagentActivityText(session: SessionModel, activityId: string) {
-  const activity = session.activities.find((item) => item.id === activityId);
-  return activity?.type === 'subagent.message' ? activity.text : '';
-}
-
-function hasTimelineEntry(session: SessionModel, entryId: string) {
-  return session.timeline.some((entry) => entry.id === entryId);
-}
-
-function isUsableActivityAnchor(session: SessionModel, entryId: string | undefined) {
-  if (!entryId) return false;
-  return hasTimelineEntry(session, entryId);
-}
-
-function appendSubagentActivityDelta(
+function appendSubagentMessageDelta(
   session: SessionModel,
   requestId: string,
   token: string,
-  turnAnchorId: string | undefined,
 ): { session: SessionModel; entryId?: string } {
   const id = `${requestId}:subagent-output`;
-  const previous = session.activities.find((item) => item.id === id);
-  const text = readSubagentActivityText(session, id) + token;
+  const previous = session.timeline.find((entry): entry is AgentMessageEntry =>
+    entry.type === 'message'
+      && entry.role === 'subagent'
+      && entry.id === id);
+  const text = (previous?.text ?? '') + token;
   const hasContent = Boolean(formatSubagentMessage(text));
   if (!hasContent) return { session };
-  const previousAnchor = previous?.afterTimelineEntryId;
-  const anchorId = isUsableActivityAnchor(session, previousAnchor)
-    ? previousAnchor
-    : turnAnchorId;
-  const activity: SessionActivityModel = {
+  const message: AgentMessageEntry = {
     id,
-    type: 'subagent.message',
+    type: 'message',
+    role: 'subagent',
     requestId,
     text,
     status: 'streaming',
-    ...(previous?.timestamp ? { timestamp: previous.timestamp } : {}),
-    ...(anchorId ? { afterTimelineEntryId: anchorId } : {}),
+    ...(previous?.createdAt ? { createdAt: previous.createdAt } : {}),
+    ...(previous?.updatedAt ? { updatedAt: previous.updatedAt } : {}),
   };
   return {
     session: {
       ...session,
-      activities: appendOrUpdateActivity(session.activities, activity),
+      timeline: appendOrUpdateTimelineEntry(session.timeline, message),
     },
-    entryId: activity.id,
+    entryId: message.id,
   };
 }
 
-function finalizeSubagentActivities(session: SessionModel, requestId: string) {
+function finalizeSubagentMessages(session: SessionModel, requestId: string) {
   return {
     ...session,
-    activities: session.activities.map((activity) =>
-      activity.requestId === requestId
-        ? { ...activity, status: 'completed' as const }
-        : activity),
+    timeline: session.timeline.map((entry) =>
+      entry.type === 'message'
+        && entry.role === 'subagent'
+        && entry.requestId === requestId
+        ? { ...entry, status: 'completed' as const }
+        : entry),
   };
 }
 
@@ -499,7 +440,7 @@ function finishRun(
   if (!session) return state;
   const nextState = updateSession(state, sessionId, (sessionToUpdate) => {
     const finalizedSession = sessionToUpdate.activeRunId === requestId
-      ? finalizeSubagentActivities(sessionToUpdate, requestId)
+      ? finalizeSubagentMessages(sessionToUpdate, requestId)
       : sessionToUpdate;
     return appendMessageCells({
       ...finalizedSession,
@@ -662,7 +603,7 @@ function applyAssistantMessageCompletedEvent(
   if (!owner) return state;
   const session = state.sessions[owner.sessionId];
   if (!session) return state;
-  if (owner.recoveredFromTimeline && hasLocalInterruptReleaseNotice(session)) return state;
+  if (owner.recoveredFromTimeline && hasLocalInterruptReleaseNotice(session, event.requestId)) return state;
   const reply = event.text.trim();
   const finalText = reply || findLatestAssistantTimelineText(session, event.requestId) || '...';
   const stateWithTimeline = updateSession(state, owner.sessionId, (currentSession) => {
@@ -726,16 +667,15 @@ function applySubagentMessageDeltaEvent(
   if (!token) return state;
   const context = resolveRunEventContext(state, event);
   if (!context) return state;
-  const stateWithActivity = updateSession(state, context.sessionId, (currentSession) => {
-    const { session: sessionWithActivity } = appendSubagentActivityDelta(
+  const stateWithMessage = updateSession(state, context.sessionId, (currentSession) => {
+    const { session: sessionWithMessage } = appendSubagentMessageDelta(
       currentSession,
       event.requestId,
       token,
-      context.run.timelineEntryIds[0],
     );
-    return sessionWithActivity;
+    return sessionWithMessage;
   });
-  return updateExistingRun(stateWithActivity, event.requestId, (currentRun) => ({
+  return updateExistingRun(stateWithMessage, event.requestId, (currentRun) => ({
     ...currentRun,
     phase: currentRun.phase === 'waiting_human' ? currentRun.phase : 'streaming',
     charCount: currentRun.charCount + token.length,
@@ -783,7 +723,7 @@ function applySystemNoticeEvent(
   return notice
     ? updateSession(state, context.sessionId, (currentSession) =>
         appendMessageCells(currentSession, [
-          messageDraft('system', notice, messageCell, `${event.requestId}:notice`),
+          messageDraft('system', notice, messageCell, `${event.requestId}:notice`, event.requestId),
         ]))
     : state;
 }
@@ -799,7 +739,7 @@ function applyStudioProgressEvent(
   return line
     ? updateSession(state, context.sessionId, (currentSession) =>
         appendMessageCells(currentSession, [
-          messageDraft('system', line, messageCell, `${event.requestId}:studio-progress`),
+          messageDraft('system', line, messageCell, `${event.requestId}:studio-progress`, event.requestId),
         ]))
     : state;
 }
@@ -813,7 +753,7 @@ function applyRuntimeErrorEvent(
   if (!context) return state;
   const message = event.message || 'internal error';
   return finishRun(state, event.requestId, TUI_TEXT.statusErrorRecovered, [
-    messageDraft('system', TUI_TEXT.errorLine(message), messageCell, `${event.requestId}:event-error`),
+    messageDraft('system', TUI_TEXT.errorLine(message), messageCell, `${event.requestId}:event-error`, event.requestId),
   ]);
 }
 
@@ -978,15 +918,6 @@ function pendingReviewFromSnapshotRun(
     : {};
 }
 
-function filterReconnectNotices(
-  notices: SessionNoticeModel[],
-  timeline: AgentTimelineEntry[],
-) {
-  const timelineIds = new Set(timeline.map((entry) => entry.id));
-  return trimNotices(notices.filter((notice) =>
-    !notice.afterTimelineEntryId || timelineIds.has(notice.afterTimelineEntryId)));
-}
-
 function applySessionSnapshot(
   state: TuiState,
   action: Extract<TuiAction, { type: typeof TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded }>,
@@ -1028,10 +959,6 @@ function applySessionSnapshot(
       ...(snapshot.runtime ?? {}),
     },
     timeline,
-    notices: preservesTransientSnapshotState
-      ? filterReconnectNotices(existingSession?.notices ?? [], timeline)
-      : [],
-    activities: [],
     activeRunId,
     tokenUsage: snapshot.tokenUsage
       ?? (preservesTransientSnapshotState ? existingSession?.tokenUsage ?? null : null),
@@ -1139,8 +1066,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...session,
           kind: 'chat',
           timeline: [],
-          notices: [],
-          activities: [],
           activeRunId: null,
           tokenUsage: null,
         }));
@@ -1378,18 +1303,19 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
     case 'server.interrupted':
       return finishRun(state, action.requestId, action.statusMessage, [
-        messageDraft('assistant', TUI_TEXT.interrupted, action.messageCell, `${action.requestId}:interrupted`),
+        messageDraft('assistant', TUI_TEXT.interrupted, action.messageCell, `${action.requestId}:interrupted`, action.requestId),
       ]);
 
     case 'server.studio_response': {
       const messages: MessageCellDraft[] = [
         action.reply.trim()
-          ? messageDraft('assistant', action.reply.trim(), action.messageCell, `${action.requestId}:studio-response`)
+          ? messageDraft('assistant', action.reply.trim(), action.messageCell, `${action.requestId}:studio-response`, action.requestId)
           : messageDraft(
               'system',
               TUI_TEXT.studioEmptyTurn(action.outcome),
               action.messageCell,
               `${action.requestId}:studio-empty`,
+              action.requestId,
             ),
       ];
       if (action.outcome === 'stopped' && action.reason) {
@@ -1398,6 +1324,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           TUI_TEXT.studioStoppedReason(action.reason),
           action.stoppedReasonCell,
           `${action.requestId}:studio-stopped`,
+          action.requestId,
         ));
       }
       return finishRun(state, action.requestId, action.statusMessage, messages);
@@ -1405,7 +1332,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
 
     case 'server.studio_error':
       return finishRun(state, action.requestId, action.statusMessage, [
-        messageDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.messageCell, `${action.requestId}:studio-error`),
+        messageDraft('system', TUI_TEXT.studioErrorLine(action.message || 'studio error'), action.messageCell, `${action.requestId}:studio-error`, action.requestId),
       ]);
 
     default:
@@ -1419,14 +1346,6 @@ export function selectFocusedSession(state: TuiState) {
 
 export function selectFocusedTimeline(state: TuiState) {
   return selectFocusedSession(state)?.timeline ?? [];
-}
-
-export function selectFocusedNotices(state: TuiState) {
-  return selectFocusedSession(state)?.notices ?? [];
-}
-
-export function selectFocusedActivities(state: TuiState) {
-  return selectFocusedSession(state)?.activities ?? [];
 }
 
 export function selectFocusedActiveRun(state: TuiState) {

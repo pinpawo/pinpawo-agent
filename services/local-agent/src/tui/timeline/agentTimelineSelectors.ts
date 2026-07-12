@@ -1,4 +1,3 @@
-import type { SessionActivityModel, SessionNoticeModel } from '../state/tuiState';
 import type { ActiveOperation } from '../types';
 import {
   isRunningOperationPhase,
@@ -49,10 +48,11 @@ export function findTimelineOperationEntry(
     entry.id === operationId || entry.operationKey === operationId) ?? null;
 }
 
-export type AgentTimelineDisplayEntry =
-  | { type: 'timeline'; id: string; entry: AgentTimelineEntry }
-  | { type: 'notice'; id: string; notice: SessionNoticeModel }
-  | { type: 'activity'; id: string; activity: SessionActivityModel };
+export type AgentTimelineDisplayEntry = {
+  type: 'timeline';
+  id: string;
+  entry: AgentTimelineEntry;
+};
 
 export type AgentTimelineViewportModel = {
   entries: AgentTimelineDisplayEntry[];
@@ -62,10 +62,8 @@ export type AgentTimelineViewportModel = {
 
 export function buildTimelineViewportModel(
   entries: AgentTimelineEntry[],
-  notices: SessionNoticeModel[],
-  activities: SessionActivityModel[] = [],
 ): AgentTimelineViewportModel {
-  const displayEntries = buildTimelineDisplayEntries(entries, notices, activities);
+  const displayEntries = buildTimelineDisplayEntries(entries);
   return {
     entries: displayEntries,
     ...splitTimelineDisplayForViewport(displayEntries),
@@ -74,55 +72,8 @@ export function buildTimelineViewportModel(
 
 export function buildTimelineDisplayEntries(
   entries: AgentTimelineEntry[],
-  notices: SessionNoticeModel[],
-  activities: SessionActivityModel[] = [],
 ): AgentTimelineDisplayEntry[] {
-  const entriesByAnchor = new Map<string, AgentTimelineDisplayEntry[]>();
-  const unanchoredEntries: AgentTimelineDisplayEntry[] = [];
-  const addDisplayEntry = (
-    entry: AgentTimelineDisplayEntry,
-    afterTimelineEntryId: string | undefined,
-  ) => {
-    if (afterTimelineEntryId) {
-      const group = entriesByAnchor.get(afterTimelineEntryId) ?? [];
-      group.push(entry);
-      entriesByAnchor.set(afterTimelineEntryId, group);
-    } else {
-      unanchoredEntries.push(entry);
-    }
-  };
-
-  for (const notice of notices) {
-    addDisplayEntry(
-      { type: 'notice', id: notice.id, notice },
-      notice.afterTimelineEntryId,
-    );
-  }
-  for (const activity of activities) {
-    addDisplayEntry(
-      { type: 'activity', id: activity.id, activity },
-      activity.afterTimelineEntryId,
-    );
-  }
-
-  const displayEntries: AgentTimelineDisplayEntry[] = [];
-  for (const entry of entries) {
-    displayEntries.push({ type: 'timeline', id: entry.id, entry });
-    for (const displayEntry of entriesByAnchor.get(entry.id) ?? []) {
-      displayEntries.push(displayEntry);
-    }
-  }
-
-  for (const [anchorId, anchoredEntries] of entriesByAnchor) {
-    if (entries.some((entry) => entry.id === anchorId)) {
-      continue;
-    }
-    for (const displayEntry of anchoredEntries) {
-      unanchoredEntries.push(displayEntry);
-    }
-  }
-  displayEntries.push(...unanchoredEntries);
-  return displayEntries;
+  return entries.map((entry) => ({ type: 'timeline', id: entry.id, entry }));
 }
 
 export function splitTimelineDisplayForViewport(
@@ -145,14 +96,7 @@ export function splitTimelineDisplayForViewport(
 }
 
 function isSettledDisplayEntry(entry: AgentTimelineDisplayEntry) {
-  switch (entry.type) {
-    case 'timeline':
-      return isSettledTimelineEntry(entry.entry);
-    case 'activity':
-      return entry.activity.status === 'completed';
-    case 'notice':
-      return true;
-  }
+  return isSettledTimelineEntry(entry.entry);
 }
 
 function isSettledTimelineEntry(entry: AgentTimelineEntry) {

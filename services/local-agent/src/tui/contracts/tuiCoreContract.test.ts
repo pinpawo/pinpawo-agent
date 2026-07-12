@@ -11,7 +11,7 @@ import {
 } from './tuiCoreContract';
 
 test('TUI core contract freezes timeline and snapshot ownership', () => {
-  assert.equal(TUI_CORE_CONTRACT_VERSION, 1);
+  assert.equal(TUI_CORE_CONTRACT_VERSION, 2);
   assert.deepEqual([...TUI_CORE_TIMELINE_ENTRY_TYPES], ['message', 'operation']);
   assert.deepEqual([...TUI_CORE_STATE_OWNERS], [
     'activeRun',
@@ -19,8 +19,6 @@ test('TUI core contract freezes timeline and snapshot ownership', () => {
     'pendingReview',
     'runs',
     'runtime',
-    'studioProgress',
-    'subagentActivity',
     'tokenUsage',
   ]);
   assert.deepEqual([...TUI_CORE_FORBIDDEN_SECONDARY_LOGS], [

@@ -1,6 +1,6 @@
 import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
 
-export const TUI_CORE_CONTRACT_VERSION = 1 as const;
+export const TUI_CORE_CONTRACT_VERSION = 2 as const;
 
 export const TUI_CORE_TARGET_ACTIONS = {
   sessionSnapshotLoaded: 'session.snapshot.loaded',
@@ -17,8 +17,6 @@ export const TUI_CORE_STATE_OWNERS = [
   'pendingReview',
   'runs',
   'runtime',
-  'studioProgress',
-  'subagentActivity',
   'tokenUsage',
 ] as const;
 
@@ -30,9 +28,9 @@ export const TUI_CORE_FORBIDDEN_SECONDARY_LOGS = [
 ] as const;
 
 export const TUI_CORE_CONTRACT_RULES = [
-  'timeline is the TUI projection of backend checkpoint messages',
-  'timeline entries are limited to user messages, assistant messages, and tool operations',
-  'pending review, runtime, studio progress, subagent activity, connection, token usage, and active run are state, not timeline messages',
+  'timeline is the ordered TUI projection of checkpoint messages and live presentation events',
+  'timeline entries are limited to user, assistant, system, and subagent messages plus tool operations',
+  'pending review, runtime, connection, token usage, and active run are state, not timeline messages',
   'session snapshots are reconciled through session.snapshot.loaded',
   'session.history, message-only views, transcript, and transcriptSnapshot must not be introduced as second message logs',
 ] as const;
@@ -42,7 +40,7 @@ export type TuiCoreTimelineSource = 'checkpoint' | 'live-event' | 'local-input';
 export type TuiCoreMessageTimelineEntry = {
   id: string;
   type: 'message';
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system' | 'subagent';
   text: string;
   status: 'streaming' | 'completed';
   source: TuiCoreTimelineSource;

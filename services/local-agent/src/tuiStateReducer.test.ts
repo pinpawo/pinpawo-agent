@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import type { AgentMessageEntry } from './tui/timeline/agentTimeline';
 import { TUI_CORE_TARGET_ACTIONS } from './tui/contracts/tuiCoreContract';
 import { createInitialTuiState, createSession, type TuiState } from './tui/state/tuiState';
 import {
   selectFocusedActiveOperations,
   selectFocusedActiveRun,
-  selectFocusedActivities,
   selectFocusedBusy,
-  selectFocusedNotices,
   selectFocusedPendingApproval,
   selectFocusedTimeline,
   tuiStateReducer,
@@ -51,6 +50,11 @@ function transcriptTimeline(state: TuiState, sessionId = 'chat:pet') {
       entry.type === 'message' ? entry.role : 'system',
       entry.type === 'message' ? entry.text : '',
     ]) ?? [];
+}
+
+function timelineMessagesByRole(state: TuiState, role: 'system' | 'subagent', sessionId = 'chat:pet') {
+  return state.sessions[sessionId]?.timeline.filter((entry): entry is AgentMessageEntry =>
+    entry.type === 'message' && entry.role === role) ?? [];
 }
 
 test('tuiStateReducer initializes reducer-owned UI owner state', () => {
@@ -459,7 +463,7 @@ test('tuiStateReducer falls back to assistant timeline text when completed text 
   ]);
 });
 
-test('tuiStateReducer displays subagent deltas as session activity outside checkpoint timeline', () => {
+test('tuiStateReducer displays subagent deltas as timeline message entries', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -483,15 +487,15 @@ test('tuiStateReducer displays subagent deltas as session activity outside check
 
   assert.equal(selectFocusedActiveRun(state)?.phase, 'streaming');
   assert.equal(selectFocusedActiveRun(state)?.charCount, '先检查文件，再整理结果。'.length);
-  assert.deepEqual(selectFocusedActivities(state).at(-1), {
+  assert.deepEqual(timelineMessagesByRole(state, 'subagent').at(-1), {
     id: 'req-1:subagent-output',
-    type: 'subagent.message',
+    type: 'message',
+    role: 'subagent',
     requestId: 'req-1',
     text: '先检查文件，再整理结果。',
     status: 'streaming',
-    afterTimelineEntryId: 'message:req-1:user',
   });
-  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'req-1:subagent-output'), false);
+  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'req-1:subagent-output'), true);
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -509,11 +513,12 @@ test('tuiStateReducer displays subagent deltas as session activity outside check
     ['user', 'hello'],
     ['assistant', '最终答复'],
   ]);
-  const subagentActivity = state.sessions['chat:pet']?.activities.find((entry) => entry.id === 'req-1:subagent-output');
-  assert.equal(subagentActivity?.status, 'completed');
+  const subagentMessage = timelineMessagesByRole(state, 'subagent')
+    .find((entry) => entry.id === 'req-1:subagent-output');
+  assert.equal(subagentMessage?.status, 'completed');
 });
 
-test('tuiStateReducer anchors subagent activity to the turn even after assistant streaming starts', () => {
+test('tuiStateReducer orders subagent messages by live event arrival', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -536,19 +541,17 @@ test('tuiStateReducer anchors subagent activity to the turn even after assistant
     now: 1200,
   });
 
-  const activities = selectFocusedActivities(state);
-  assert.equal(activities.at(-1)?.afterTimelineEntryId, 'message:req-1:user');
   assert.deepEqual(
-    buildTimelineDisplayEntries(selectFocusedTimeline(state), [], activities).map((entry) => entry.id),
+    buildTimelineDisplayEntries(selectFocusedTimeline(state)).map((entry) => entry.id),
     [
       'message:req-1:user',
-      'req-1:subagent-output',
       'req-1:assistant:0',
+      'req-1:subagent-output',
     ],
   );
 });
 
-test('tuiStateReducer keeps notice and studio progress events outside checkpoint timeline', () => {
+test('tuiStateReducer stores notice and studio progress events as system timeline messages', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -576,21 +579,31 @@ test('tuiStateReducer keeps notice and studio progress events outside checkpoint
     messageCell: { id: 'studio-progress-1', timestamp: '10:00:02' },
   });
 
-  assert.deepEqual(selectFocusedNotices(state).slice(-2), [
+  assert.deepEqual(timelineMessagesByRole(state, 'system').slice(-2), [
     {
-      id: 'notice-1',
+      id: 'message:notice-1',
+      type: 'message',
+      role: 'system',
       text: '授权已更新',
-      timestamp: '10:00:01',
-      afterTimelineEntryId: 'message:req-1:user',
+      status: 'completed',
+      requestId: 'req-1',
+      createdAt: '10:00:01',
     },
     {
-      id: 'studio-progress-1',
+      id: 'message:studio-progress-1',
+      type: 'message',
+      role: 'system',
       text: '[studio] tasks queued：2 项',
-      timestamp: '10:00:02',
-      afterTimelineEntryId: 'message:req-1:user',
+      status: 'completed',
+      requestId: 'req-1',
+      createdAt: '10:00:02',
     },
   ]);
-  assert.deepEqual(selectFocusedTimeline(state).map((entry) => entry.id), ['message:req-1:user']);
+  assert.deepEqual(selectFocusedTimeline(state).map((entry) => entry.id), [
+    'message:req-1:user',
+    'message:notice-1',
+    'message:studio-progress-1',
+  ]);
   assert.deepEqual(transcriptTimeline(state), [['user', 'hello']]);
 });
 
@@ -977,7 +990,7 @@ test('tuiStateReducer preserves reconcile token usage when snapshot omits usage'
   });
 });
 
-test('tuiStateReducer drops reconnect notices with stale timeline anchors', () => {
+test('tuiStateReducer replaces live-only system messages during snapshot reconciliation', () => {
   let state = initialState('chat:pet');
   state = {
     ...state,
@@ -985,10 +998,14 @@ test('tuiStateReducer drops reconnect notices with stale timeline anchors', () =
       ...state.sessions,
       'chat:pet': {
         ...state.sessions['chat:pet']!,
-        notices: [
-          { id: 'notice-kept', text: 'keep', afterTimelineEntryId: 'message:user-1' },
-          { id: 'notice-stale', text: 'drop', afterTimelineEntryId: 'message:old' },
-          { id: 'notice-unanchored', text: 'keep too' },
+        timeline: [
+          {
+            id: 'message:live-system',
+            type: 'message',
+            role: 'system',
+            text: 'live only',
+            status: 'completed',
+          },
         ],
       },
     },
@@ -1012,10 +1029,7 @@ test('tuiStateReducer drops reconnect notices with stale timeline anchors', () =
     },
   });
 
-  assert.deepEqual(state.sessions['chat:pet']?.notices.map((notice) => notice.id), [
-    'notice-kept',
-    'notice-unanchored',
-  ]);
+  assert.deepEqual(state.sessions['chat:pet']?.timeline.map((entry) => entry.id), ['message:user-1']);
 });
 
 test('tuiStateReducer restores pending approval from authoritative session snapshots', () => {
@@ -1117,7 +1131,7 @@ test('tuiStateReducer ignores late terminal events after local interrupt release
     requestId: 'req-1',
     statusMessage: '已请求打断',
     messages: [{
-      id: 'local-release',
+      id: 'req-1:interrupt-local-release',
       kind: 'system',
       text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
     }],
@@ -1138,9 +1152,57 @@ test('tuiStateReducer ignores late terminal events after local interrupt release
   assert.equal(selectFocusedActiveRun(next), null);
   assert.equal(timelineMessageText(next, 'chat:pet', 'req-1:assistant:0'), undefined);
   assert.deepEqual(transcriptTimeline(next), [['user', 'hello']]);
-  assert.deepEqual(selectFocusedNotices(next).map((notice) => notice.text), [
+  assert.deepEqual(timelineMessagesByRole(next, 'system').map((notice) => notice.text), [
     '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
   ]);
+});
+
+test('tuiStateReducer ignores late terminal events after interrupt release and snapshot replacement', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'run.finish',
+    requestId: 'req-1',
+    statusMessage: '已请求打断',
+    messages: [{
+      id: 'req-1:interrupt-local-release',
+      kind: 'system',
+      text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+    }],
+  });
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [{
+        id: 'message:0:user',
+        type: 'message',
+        role: 'user',
+        text: 'hello',
+        status: 'completed',
+        source: 'checkpoint',
+      }],
+      runs: [],
+    },
+  });
+
+  const next = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'late final answer',
+    },
+    now: 1300,
+  });
+
+  assert.equal(next, state);
+  assert.equal(selectFocusedActiveRun(next), null);
+  assert.equal(selectFocusedTimeline(next).some((entry) =>
+    entry.type === 'message' && entry.role === 'assistant'), false);
+  assert.deepEqual(transcriptTimeline(next), [['user', 'hello']]);
 });
 
 test('tuiStateReducer keeps two requestIds from mixing assistant timeline entries', () => {
@@ -1591,8 +1653,7 @@ test('tuiStateReducer finishes error and studio control messages', () => {
 
   assert.equal(selectFocusedActiveRun(state), null);
   assert.equal(state.connection.message, '出错，已恢复输入');
-  assert.equal(selectFocusedNotices(state).at(-1)?.text, '出错：boom');
-  assert.equal(selectFocusedNotices(state).at(-1)?.afterTimelineEntryId, 'message:chat-req:user');
+  assert.equal(timelineMessagesByRole(state, 'system').at(-1)?.text, '出错：boom');
 
   state = startRun(state, 'studio-req');
   state = tuiStateReducer(state, {
@@ -1607,13 +1668,9 @@ test('tuiStateReducer finishes error and studio control messages', () => {
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
-  assert.deepEqual(selectFocusedNotices(state).slice(-2).map((item) => item.text), [
+  assert.deepEqual(timelineMessagesByRole(state, 'system').slice(-2).map((item) => item.text), [
     '[studio] turn stopped (无最终输出)',
     '[studio] stopped: done enough',
-  ]);
-  assert.deepEqual(selectFocusedNotices(state).slice(-2).map((item) => item.afterTimelineEntryId), [
-    'message:studio-req:user',
-    'message:studio-req:user',
   ]);
 
   state = startRun(state, 'studio-error');
@@ -1627,6 +1684,5 @@ test('tuiStateReducer finishes error and studio control messages', () => {
 
   assert.equal(selectFocusedActiveRun(state), null);
   assert.equal(state.connection.message, 'Studio 出错，已恢复输入');
-  assert.equal(selectFocusedNotices(state).at(-1)?.text, '[studio 出错] planner failed');
-  assert.equal(selectFocusedNotices(state).at(-1)?.afterTimelineEntryId, 'message:studio-error:user');
+  assert.equal(timelineMessagesByRole(state, 'system').at(-1)?.text, '[studio 出错] planner failed');
 });

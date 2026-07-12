@@ -7,7 +7,7 @@ import stringWidth from 'string-width';
 import { AgentOperationItem } from './AgentOperationItem';
 import { AgentTimeline } from './AgentTimeline';
 import { MessageBlock } from './MessageBlock';
-import { SubagentActivityItem } from './SubagentActivityItem';
+import { SubagentMessageItem } from './SubagentMessageItem';
 import {
   buildAgentOperationDisplayLines,
   OPERATION_STATUS_DOT,
@@ -21,7 +21,6 @@ import type {
   AgentOperationEntry,
   AgentTimelineEntry,
 } from '../timeline/agentTimeline';
-import type { SessionActivityModel } from '../state/tuiState';
 
 test('buildAgentOperationDisplayLines renders the header as toolName(args) and shows raw output under ⎿', () => {
   const entry = operationEntry({
@@ -424,7 +423,7 @@ test('history snapshot assistant messages render through markdown', () => {
 
   const element = MessageBlock({
     entry: {
-      kind: entry.role,
+      kind: 'assistant',
       text: entry.text,
     },
     petName: '小派',
@@ -436,10 +435,10 @@ test('history snapshot assistant messages render through markdown', () => {
   assert.equal(markdown.props.children, '**历史回答**\n\n- 第一项\n- 第二项');
 });
 
-test('SubagentActivityItem renders subagent activity outside timeline entries', () => {
-  const activity = subagentActivity('req-1:subagent-output', '先检查文件');
-  const element = SubagentActivityItem({
-    activity,
+test('SubagentMessageItem renders a subagent timeline message entry', () => {
+  const message = subagentMessage('req-1:subagent-output', '先检查文件');
+  const element = SubagentMessageItem({
+    entry: message,
     width: 80,
   });
 
@@ -493,10 +492,11 @@ function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEnt
   };
 }
 
-function subagentActivity(id: string, text: string): SessionActivityModel {
+function subagentMessage(id: string, text: string): AgentMessageEntry {
   return {
     id,
-    type: 'subagent.message',
+    type: 'message',
+    role: 'subagent',
     requestId: 'req-1',
     text,
     status: 'streaming',

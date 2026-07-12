@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { formatSubagentMessage } from '../render/eventText';
 import { wrapLine } from '../render/terminalText';
-import type { SessionActivityModel } from '../state/tuiState';
+import type { AgentMessageEntry } from '../timeline/agentTimeline';
 
 function wrapText(text: string, width: number) {
   return text
@@ -11,14 +11,15 @@ function wrapText(text: string, width: number) {
     .map((line) => line || ' ');
 }
 
-export function SubagentActivityItem(props: {
-  activity: SessionActivityModel;
+export function SubagentMessageItem(props: {
+  entry: AgentMessageEntry;
   width: number;
 }) {
-  const text = formatSubagentMessage(props.activity.text);
+  const text = formatSubagentMessage(props.entry.text);
   if (!text) return null;
 
-  const label = props.activity.timestamp ? `[${props.activity.timestamp}] subagent` : 'subagent';
+  const timestamp = props.entry.updatedAt ?? props.entry.createdAt;
+  const label = timestamp ? `[${timestamp}] subagent` : 'subagent';
   const contentWidth = Math.max(20, props.width - 4);
 
   return (
@@ -28,7 +29,7 @@ export function SubagentActivityItem(props: {
       </Text>
       <Box flexDirection="column" marginLeft={1} width={contentWidth}>
         {wrapText(text, contentWidth).map((line, index) => (
-          <Text key={`${props.activity.id}:line:${index}`} color="yellow" dimColor>
+          <Text key={`${props.entry.id}:line:${index}`} color="yellow" dimColor>
             {line}
           </Text>
         ))}

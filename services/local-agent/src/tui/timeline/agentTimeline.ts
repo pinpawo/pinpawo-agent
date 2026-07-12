@@ -16,6 +16,8 @@ export type AgentTimelineEntry =
 export type AgentTimelineMessage =
   | AgentUserTimelineMessage
   | AgentAssistantTimelineMessage
+  | AgentSystemTimelineMessage
+  | AgentSubagentTimelineMessage
   | AgentToolTimelineMessage;
 
 export type AgentUserTimelineMessage = {
@@ -40,12 +42,34 @@ export type AgentAssistantTimelineMessage = {
   updatedAt?: string;
 };
 
+export type AgentSystemTimelineMessage = {
+  id: string;
+  type: 'message';
+  role: 'system';
+  requestId?: string;
+  text: string;
+  status: 'completed';
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type AgentSubagentTimelineMessage = {
+  id: string;
+  type: 'message';
+  role: 'subagent';
+  requestId: string;
+  text: string;
+  status: 'completed' | 'streaming';
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type AgentToolTimelineMessage = AgentOperationEntry;
 
 export type AgentMessageEntry = {
   id: string;
   type: 'message';
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system' | 'subagent';
   requestId?: string;
   text: string;
   status: 'completed' | 'streaming';
@@ -76,8 +100,7 @@ export function timelineMessagesFromEntries(entries: AgentTimelineEntry[]): Agen
   return entries.filter(isAgentTimelineMessage);
 }
 
-export function timelineEntryFromMessageCell(cell: MessageCellModel): AgentTimelineEntry | null {
-  if (cell.kind === 'system') return null;
+export function timelineEntryFromMessageCell(cell: MessageCellModel): AgentMessageEntry {
   return {
     id: timelineEntryIdFromMessageCell(cell),
     type: 'message',

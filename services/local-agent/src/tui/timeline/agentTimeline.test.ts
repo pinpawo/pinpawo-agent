@@ -19,14 +19,20 @@ import {
 import { buildOperationPresentation, getOperationPresentationKey } from './operationPresentation';
 import type { AgentTimelineEntry } from './agentTimeline';
 
-test('timelineEntryFromMessageCell excludes system message cells from checkpoint timeline', () => {
-  assert.equal(
+test('timelineEntryFromMessageCell includes system message cells in the timeline', () => {
+  assert.deepEqual(
     timelineEntryFromMessageCell({
       id: 'operation-1',
       kind: 'system',
       text: '执行命令：npm test',
     }),
-    null,
+    {
+      id: 'message:operation-1',
+      type: 'message',
+      role: 'system',
+      text: '执行命令：npm test',
+      status: 'completed',
+    },
   );
 });
 
@@ -284,13 +290,20 @@ test('splitTimelineDisplayForViewport keeps only the settled display prefix stat
   });
 });
 
-test('timeline display entries render notices after their anchored timeline entry', () => {
+test('timeline display entries keep system and subagent messages in canonical order', () => {
   const timeline: AgentTimelineEntry[] = [
     {
       id: 'message:user-1',
       type: 'message',
       role: 'user',
       text: 'hello',
+      status: 'completed',
+    },
+    {
+      id: 'notice-1',
+      type: 'message',
+      role: 'system',
+      text: 'after user',
       status: 'completed',
     },
     {
@@ -305,6 +318,14 @@ test('timeline display entries render notices after their anchored timeline entr
       updatedAt: 1100,
     },
     {
+      id: 'req-1:subagent-output',
+      type: 'message',
+      role: 'subagent',
+      requestId: 'req-1',
+      text: 'working',
+      status: 'streaming',
+    },
+    {
       id: 'req-1:assistant:0',
       type: 'message',
       role: 'assistant',
@@ -312,29 +333,14 @@ test('timeline display entries render notices after their anchored timeline entr
       status: 'streaming',
     },
   ];
-  const displayEntries = buildTimelineDisplayEntries(timeline, [
-    { id: 'notice-1', text: 'after user', afterTimelineEntryId: 'message:user-1' },
-    { id: 'notice-2', text: 'after operation', afterTimelineEntryId: 'req-1:operation:tool' },
-    { id: 'notice-3', text: 'fallback' },
-  ], [
-    {
-      id: 'req-1:subagent-output',
-      type: 'subagent.message',
-      requestId: 'req-1',
-      text: 'working',
-      status: 'streaming',
-      afterTimelineEntryId: 'req-1:operation:tool',
-    },
-  ]);
+  const displayEntries = buildTimelineDisplayEntries(timeline);
 
   assert.deepEqual(displayEntries.map((entry) => entry.id), [
     'message:user-1',
     'notice-1',
     'req-1:operation:tool',
-    'notice-2',
     'req-1:subagent-output',
     'req-1:assistant:0',
-    'notice-3',
   ]);
 
   const displaySplit = splitTimelineDisplayForViewport(displayEntries);
@@ -342,12 +348,10 @@ test('timeline display entries render notices after their anchored timeline entr
     'message:user-1',
     'notice-1',
     'req-1:operation:tool',
-    'notice-2',
   ]);
   assert.deepEqual(displaySplit.dynamicEntries.map((entry) => entry.id), [
     'req-1:subagent-output',
     'req-1:assistant:0',
-    'notice-3',
   ]);
 });
 
@@ -361,6 +365,13 @@ test('buildTimelineViewportModel derives display entries and viewport split toge
       status: 'completed',
     },
     {
+      id: 'notice-1',
+      type: 'message',
+      role: 'system',
+      text: 'after user',
+      status: 'completed',
+    },
+    {
       id: 'req-1:assistant:0',
       type: 'message',
       role: 'assistant',
@@ -369,9 +380,7 @@ test('buildTimelineViewportModel derives display entries and viewport split toge
     },
   ];
 
-  const viewport = buildTimelineViewportModel(timeline, [
-    { id: 'notice-1', text: 'after user', afterTimelineEntryId: 'message:user-1' },
-  ]);
+  const viewport = buildTimelineViewportModel(timeline);
 
   assert.deepEqual(viewport.entries.map((entry) => entry.id), [
     'message:user-1',
@@ -428,7 +437,7 @@ function operationEvent(params: {
   };
 }
 
-test('timeline messages include only checkpoint-backed message and operation entries', () => {
+test('timeline messages include message roles and operation entries', () => {
   const operationEntry = operationTimelineEntryFromEvent(operationEvent({
     phase: 'started',
     target: 'pwd',
@@ -449,12 +458,29 @@ test('timeline messages include only checkpoint-backed message and operation ent
       text: 'hi',
       status: 'streaming',
     },
+    {
+      id: 'system-1',
+      type: 'message',
+      role: 'system',
+      text: 'notice',
+      status: 'completed',
+    },
+    {
+      id: 'subagent-1',
+      type: 'message',
+      role: 'subagent',
+      requestId: 'req-1',
+      text: 'working',
+      status: 'streaming',
+    },
     operationEntry,
   ];
 
   assert.deepEqual(timelineMessagesFromEntries(entries).map((entry) => entry.id), [
     'user-1',
     'assistant-1',
+    'system-1',
+    'subagent-1',
     operationEntry.id,
   ]);
   assert.equal(isAgentTimelineMessage(entries[2]!), true);

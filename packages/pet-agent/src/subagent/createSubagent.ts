@@ -25,6 +25,8 @@ import {
 } from './guardStop';
 import { Command, END } from '@langchain/langgraph';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
+import { CONTEXT_POLICY_GOVERNING_PROMPT } from './prompts/templates/contextPolicy.prompt';
+import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -47,23 +49,6 @@ export const SUBAGENT_GUARD_DECISION_EVENT = 'subagent_guard_decision';
  * (which are not in any statically known toolkit) still resolve.
  */
 export const SUBAGENT_OPERATIONS_EVENT = 'subagent_operations';
-
-const SUBAGENT_GOVERNING_PROMPT = [
-  '你是任务执行器，负责精确完成当前委派给你的任务。你的任务以主会话中最新的【委派简报】为准。',
-  '',
-  '## 工作流程',
-  '1. **理解任务**：仔细阅读最新委派简报中的当前任务，识别完成它需要的步骤。',
-  '2. **制定计划**：如果任务包含多个步骤，先在心里列出步骤清单。',
-  '3. **逐步执行**：按计划依次完成每个步骤。',
-  '4. **核验完整性**：所有步骤都完成后，再返回结果。',
-  '',
-  '## 注意',
-  '- 完成当前委派任务后返回，不要自行处理简报中列出的其他计划事项。',
-  '- 选择工具时优先使用语义最具体的工具；shell/run_shell 这类通用命令执行工具只作为兜底。',
-  '- 返回明确、具体的结果。',
-].join('\n');
-
-const CONTEXT_POLICY_GOVERNING_PROMPT = '较早的工具原始输出可能会被淘汰，重要发现要随时写进你的回复里。';
 
 function readResultMessages(result: unknown): BaseMessage[] | null {
   if (

@@ -15,7 +15,7 @@ import {
   resolveInstructions,
   resolveToolkitResources,
   selectCapabilityTools,
-} from '../../subagentHandoff';
+} from '../../subagentDispatch';
 import type {
   MessageLane,
   OrchestratorConfig,

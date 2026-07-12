@@ -69,7 +69,7 @@ import {
   readLatestHumanRequest,
   readRecentAnnounces,
 } from '../../messageLanes';
-import { resolveToolkitResources } from '../../subagentHandoff';
+import { resolveToolkitResources } from '../../subagentDispatch';
 import {
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,
@@ -676,7 +676,7 @@ function buildCapabilityDecisionResult(params: {
   // "当前执行 X" briefing behind. See issue #362.
   const briefingMessage = buildDelegationBriefingMessage({
     lane: runNextDelegation.lane,
-    runId: state.runId,
+    runId: nextTaskActiveDelegation.transcriptRunId,
     delegationId: runNextDelegation.id,
     task: runNextDelegation.task,
     // Pre-fallback value: the '继续完成用户当前请求。' placeholder that pads
@@ -770,7 +770,7 @@ function buildContinueDelegationResult(params: {
   // subagent re-announcing the same conclusion. gapNote may be null (e.g.
   // limit_reached), where continuing is self-evident from the transcript.
   const briefingMessage = buildContinuationBriefingMessage({
-    runId: state.runId,
+    runId: activeDelegation.transcriptRunId,
     delegationId: runNextDelegation.id,
     task: runNextDelegation.task,
     gapNote,

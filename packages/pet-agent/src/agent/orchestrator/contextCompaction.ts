@@ -12,6 +12,7 @@ import {
   toolProtocolSafeMessages,
 } from './messageLanes';
 import { clipForPrompt, readMessageText } from './utils';
+import { isDelegationBriefingMessage } from './delegationBriefing';
 
 const DEFAULT_KEEP_MESSAGES = 10;
 const DEFAULT_SUMMARY_TRANSCRIPT_CHARS = 12000;
@@ -50,6 +51,7 @@ function selectMessagesToKeep(messages: BaseMessage[], keepMessages: number): Ba
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
+  if (isDelegationBriefingMessage(message)) return null;
   const type = message._getType();
   const text = readMessageText(message);
   if (!text) return null;

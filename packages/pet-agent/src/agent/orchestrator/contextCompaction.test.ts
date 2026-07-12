@@ -11,6 +11,7 @@ import {
   readContextCompactionSummaries,
 } from './contextCompaction';
 import { setPinpetMeta } from './messageLanes';
+import { buildDelegationBriefingMessage } from './delegationBriefing';
 
 function fakeSummaryModel(summary = '旧上下文摘要', onInvoke?: (messages: unknown[], config?: RunnableConfig) => void) {
   return {
@@ -71,6 +72,36 @@ test('orchestrator context compaction summarizes old messages and keeps recent s
     result.messages.slice(2).map((message) => message.content),
     messages.slice(-4).map((message) => message.content),
   );
+});
+
+test('orchestrator context compaction excludes delegation briefings from summary input', async () => {
+  let summaryInput = '';
+  const briefing = buildDelegationBriefingMessage({
+    lane: 'general',
+    runId: 'run-1',
+    delegationId: 'delegation-1',
+    task: '不要把这段调度文本写入摘要',
+    contextSummary: null,
+    runDelegationSummaries: [],
+    remainingPlan: [],
+  });
+  const messages: BaseMessage[] = [
+    new HumanMessage('完成任务'),
+    briefing,
+    ...Array.from({ length: 12 }, (_, index) => longMessage(index)),
+    usageMessage('模型已经看到了较长主线。', 900),
+  ];
+
+  await compactOrchestratorMessages({
+    messages,
+    model: fakeSummaryModel('摘要', (input) => {
+      summaryInput = input.map((message) => String((message as BaseMessage).content)).join('\n');
+    }),
+    options: { keepMessages: 4 },
+  });
+
+  assert.doesNotMatch(summaryInput, /不要把这段调度文本写入摘要/);
+  assert.doesNotMatch(summaryInput, /主线 agent 回复[\s\S]*委派简报/);
 });
 
 test('orchestrator context compaction forwards runnable config to summary model', async () => {

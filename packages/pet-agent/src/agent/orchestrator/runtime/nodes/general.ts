@@ -11,7 +11,7 @@ import {
   buildSubagentExecutionInstruction,
   collectGeneralOperations,
   resolveToolkitResources,
-} from '../../subagentHandoff';
+} from '../../subagentDispatch';
 import type {
   MessageLane,
   OrchestratorConfig,

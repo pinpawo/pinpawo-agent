@@ -9,6 +9,7 @@ import type {
 } from '../types';
 import { clipForPrompt, formatDelegationStatus, readMessageText } from '../utils';
 import { indentXmlBlock, MAX_DECISION_RUN_DELEGATIONS, xmlTextBlock } from './shared';
+import { isDelegationBriefingMessage } from '../delegationBriefing';
 
 const MAX_RECENT_MAIN_MESSAGES = 6;
 const MAX_RECENT_ANNOUNCE_CONTEXT = 5;
@@ -171,6 +172,7 @@ export function buildSubagentAnnounceContext(
 }
 
 function messageRoleLabel(message: BaseMessage): string {
+  if (isDelegationBriefingMessage(message)) return '委派简报';
   const type = message._getType();
   if (type === 'human') return '用户';
   if (type === 'ai') return '助手';

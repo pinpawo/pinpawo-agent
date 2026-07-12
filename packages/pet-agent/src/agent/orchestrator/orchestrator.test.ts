@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool } from '@langchain/core/tools';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
@@ -42,6 +42,7 @@ import {
   tagNewLaneMessages,
 } from './messageLanes';
 import { RemoveMessage } from '@langchain/core/messages';
+import { isDelegationBriefingMessage } from './delegationBriefing';
 import { reuseOrAppendRunDelegationSummary, updateRunDelegationSummaryResult } from './delegations';
 import { CONTEXT_COMPACTION_MESSAGE_NAME } from './contextCompaction';
 import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
@@ -3847,4 +3848,168 @@ test('delegation helpers reuse progress delegation and update result', () => {
   });
   assert.equal(completed[0].status, 'completed');
   assert.equal(completed[0].resultPreview, '任务完成');
+});
+
+/**
+ * Record the exact message arrays the subagent chat model receives. The fake
+ * decision models are plain objects (not runnables), so handleChatModelStart
+ * fires only for the real subagent FakeListChatModel.
+ */
+function createSubagentInputRecorder() {
+  const subagentInputs: BaseMessage[][] = [];
+  return {
+    subagentInputs,
+    callbacks: [{
+      handleChatModelStart: (_llm: unknown, messages: BaseMessage[][]) => {
+        subagentInputs.push(...messages);
+      },
+    }],
+  };
+}
+
+test('delegation briefing is written at task materialization and reaches the subagent input', async () => {
+  let structuredCallCount = 0;
+  const actModel = {
+    invoke: async () => new AIMessage('两项任务都已完成。'),
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        structuredCallCount += 1;
+        if (structuredCallCount === 1) {
+          return nextTaskDecision('关闭 GitHub Issue #272。', 'GitHub issue 操作。');
+        }
+        if (structuredCallCount === 2) return routeCapabilityDecision('ops');
+        if (structuredCallCount === 3) return taskDoneDecision('issue 已关闭，还需删除目录。');
+        if (structuredCallCount === 4) {
+          return {
+            result: 'next_task',
+            remaining_plan: [
+              { objective: '汇总执行结果。', capability_intent: 'summary', status: 'deferred' },
+            ],
+            next_task: { objective: '删除 packages/goat 目录。', capability_intent: 'file_cleanup' },
+          };
+        }
+        if (structuredCallCount === 5) return routeCapabilityDecision('ops');
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeListChatModel({
+    responses: ['Issue #272 已关闭。', 'packages/goat 目录已删除。'],
+    sleep: 0,
+  });
+  const recorder = createSubagentInputRecorder();
+  const graph = createOrchestratorGraph({
+    models: { act: actModel, observe: actModel, subagent: subagentModel },
+    actor: testActor,
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('关闭 issue #272，然后删除 packages/goat 目录。'),
+  ]), {
+    configurable: {
+      thread_id: 'briefing-a-plus-b',
+      actor: testActor,
+      capabilities: [capability('ops', '仓库运维：issue 操作、文件清理。')],
+      forcedCapabilityNames: ['ops'],
+    },
+    callbacks: recorder.callbacks,
+  }) as OrchestratorStateType;
+
+  // State: one briefing per materialized delegation, deterministic content.
+  const briefings = state.messages.filter(isDelegationBriefingMessage);
+  assert.equal(briefings.length, 2);
+  const briefingA = String(briefings[0].content);
+  const briefingB = String(briefings[1].content);
+  assert.match(briefingA, /【委派简报】/);
+  assert.match(briefingA, /当前任务：关闭 GitHub Issue #272。/);
+  assert.match(briefingA, /只执行当前任务/);
+  assert.match(briefingB, /当前任务：删除 packages\/goat 目录。/);
+  assert.match(briefingB, /\[已完成\] 关闭 GitHub Issue #272。/);
+  assert.match(briefingB, /1\. 汇总执行结果。（summary）/);
+
+  // The original user request is intact — no copy, rewrite, or demotion.
+  const humanMessages = state.messages.filter((message) => message._getType() === 'human');
+  assert.equal(humanMessages.length, 1);
+  assert.equal(String(humanMessages[0].content), '关闭 issue #272，然后删除 packages/goat 目录。');
+
+  // Subagent model input: the briefing is the latest orchestrator message and
+  // no synthetic HumanMessage is appended.
+  assert.equal(recorder.subagentInputs.length, 2);
+  const [firstInput, secondInput] = recorder.subagentInputs;
+  assert.match(String(firstInput.at(-1)?.content), /【委派简报】[\s\S]*关闭 GitHub Issue #272/);
+  assert.match(String(secondInput.at(-1)?.content), /【委派简报】[\s\S]*删除 packages\/goat 目录/);
+  const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
+  assert.match(secondInputText, /Issue #272 已关闭。/);
+
+  // System prompt keeps the stable protocol but never restates the task.
+  for (const input of recorder.subagentInputs) {
+    const systemMessages = input.filter((message) => message._getType() === 'system');
+    assert.ok(systemMessages.length > 0);
+    for (const message of systemMessages) {
+      const systemText = typeof message.content === 'string'
+        ? message.content
+        : JSON.stringify(message.content);
+      assert.match(systemText, /委派简报协议/);
+      assert.doesNotMatch(systemText, /当前任务：关闭 GitHub Issue #272/);
+      assert.doesNotMatch(systemText, /上下文摘要/);
+    }
+  }
+});
+
+test('continue outcome appends a continuation briefing carrying the gap note', async () => {
+  let structuredCallCount = 0;
+  const actModel = {
+    invoke: async () => new AIMessage('issue 已确认关闭。'),
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        structuredCallCount += 1;
+        if (structuredCallCount === 1) {
+          return nextTaskDecision('关闭 GitHub Issue #272。', 'GitHub issue 操作。');
+        }
+        if (structuredCallCount === 2) return routeCapabilityDecision('ops');
+        if (structuredCallCount === 3) return continueDecision('未验证 issue 状态，请确认已关闭。');
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeListChatModel({
+    responses: ['已尝试关闭 issue。', 'issue 已确认关闭。'],
+    sleep: 0,
+  });
+  const recorder = createSubagentInputRecorder();
+  const graph = createOrchestratorGraph({
+    models: { act: actModel, observe: actModel, subagent: subagentModel },
+    actor: testActor,
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('关闭 issue #272。'),
+  ]), {
+    configurable: {
+      thread_id: 'briefing-continue-gap',
+      actor: testActor,
+      capabilities: [capability('ops', '仓库运维：issue 操作。')],
+      forcedCapabilityNames: ['ops'],
+    },
+    callbacks: recorder.callbacks,
+  }) as OrchestratorStateType;
+
+  const briefings = state.messages.filter(isDelegationBriefingMessage);
+  assert.equal(briefings.length, 2);
+  assert.match(String(briefings[0].content), /【委派简报】/);
+  const continuation = String(briefings[1].content);
+  assert.match(continuation, /【委派简报·继续】/);
+  assert.match(continuation, /任务仍然是：关闭 GitHub Issue #272。/);
+  assert.match(continuation, /上轮缺口：未验证 issue 状态，请确认已关闭。/);
+  assert.match(continuation, /不要重新开始/);
+
+  // The continuation run keeps the same delegation transcript and reads the
+  // continuation briefing as the latest message.
+  assert.equal(recorder.subagentInputs.length, 2);
+  const secondInput = recorder.subagentInputs[1];
+  assert.match(String(secondInput.at(-1)?.content), /【委派简报·继续】/);
+  const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
+  assert.match(secondInputText, /已尝试关闭 issue。/);
 });

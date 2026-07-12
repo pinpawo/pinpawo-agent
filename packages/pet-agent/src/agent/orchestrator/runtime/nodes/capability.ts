@@ -10,7 +10,7 @@ import {
   tagNewLaneMessages,
 } from '../../messageLanes';
 import {
-  buildDelegationHandoffInstruction,
+  buildSubagentExecutionInstruction,
   collectCapabilityOperations,
   resolveInstructions,
   resolveToolkitResources,
@@ -121,17 +121,15 @@ export function createCapabilityNode(params: {
       availableToolkits,
     }, execution);
     const middleware = runtime.middleware;
-    const handoffInstruction = buildDelegationHandoffInstruction({
+    const executionInstruction = buildSubagentExecutionInstruction({
       lane,
-      task: runNextDelegation.task,
-      contextSummary: runNextDelegation.contextSummary,
       workdir: workdir ?? null,
     });
 
     let subagentInput: SubagentRunInput = {
       model: config.models.subagent ?? config.models.act,
       tools: selectCapabilityTools(runtime, usedToolkitResources.tools),
-      instructions: [handoffInstruction, ...usedToolkitResources.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
+      instructions: [executionInstruction, ...usedToolkitResources.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
       operations: collectCapabilityOperations(usedToolkitResources.toolkits, runtime),
       messages: scopedMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,

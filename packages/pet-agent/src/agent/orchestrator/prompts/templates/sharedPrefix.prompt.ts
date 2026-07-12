@@ -21,5 +21,5 @@ task loop 流程：
 术语：
 - 用户请求（user request）：用户本轮的原始输入。
 - 用户目标（user goal）：orchestrator 从用户请求和对话上下文理解出的本轮目标；它是验收的唯一基准，不等于任何任务清单。
-- gap_note：outcomeDecision 在 continue / task_done 时对缺口的一句说明，作为后续执行或规划的提示。
+- gap_note：outcomeDecision 在 continue 时对缺口的一句说明，随委派简报交给执行者作为继续执行的依据。
 - handoff：系统动作——task 达标或 goal 达成时，把 announce 结论并入主对话并清理执行现场；此后所有节点只依赖主对话里的结论，不依赖执行过程记录。`;

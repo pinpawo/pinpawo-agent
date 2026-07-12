@@ -8,7 +8,7 @@ import {
   tagNewLaneMessages,
 } from '../../messageLanes';
 import {
-  buildDelegationHandoffInstruction,
+  buildSubagentExecutionInstruction,
   collectGeneralOperations,
   resolveToolkitResources,
 } from '../../subagentHandoff';
@@ -75,10 +75,8 @@ export function createGeneralNode(params: {
     }
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
     const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
-    const handoffInstruction = buildDelegationHandoffInstruction({
+    const executionInstruction = buildSubagentExecutionInstruction({
       lane,
-      task: runNextDelegation.task,
-      contextSummary: runNextDelegation.contextSummary,
       workdir: workdir ?? null,
     });
     const instructions = [
@@ -95,7 +93,7 @@ export function createGeneralNode(params: {
     const result = await createSubagent({
       model: config.models.subagent ?? config.models.act,
       tools: toolList,
-      instructions: [handoffInstruction, ...toolkitResources.instructions, ...instructions],
+      instructions: [executionInstruction, ...toolkitResources.instructions, ...instructions],
       operations: collectGeneralOperations(toolkitResources.toolkits),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,

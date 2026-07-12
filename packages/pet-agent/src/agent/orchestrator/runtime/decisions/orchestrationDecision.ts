@@ -49,6 +49,10 @@ import {
 } from '../../prompts';
 import { reuseOrAppendRunDelegationSummary } from '../../delegations';
 import {
+  buildContinuationBriefingMessage,
+  buildDelegationBriefingMessage,
+} from '../../delegationBriefing';
+import {
   ACTIVE_DELEGATION_LIMIT_REACHED,
   delegationOutcomeDecisionGuard,
   ORCHESTRATOR_GUARD_POSITION,
@@ -665,7 +669,23 @@ function buildCapabilityDecisionResult(params: {
       }
     : createTaskActiveDelegation(runNextDelegation, state.runId);
 
+  // Delegation briefing: the deterministic projection of the materialized
+  // delegation into main messages. Written here — and only here — because this
+  // is the single point where both entry direct_task and planner next_task
+  // become a real delegation; bail-out paths above never leave a stale
+  // "当前执行 X" briefing behind. See issue #362.
+  const briefingMessage = buildDelegationBriefingMessage({
+    lane: runNextDelegation.lane,
+    runId: state.runId,
+    delegationId: runNextDelegation.id,
+    task: runNextDelegation.task,
+    contextSummary: runNextDelegation.contextSummary,
+    runDelegationSummaries: nextDelegationState.runDelegationSummaries,
+    remainingPlan: state.runCapabilityPlan,
+  });
+
   return {
+    messages: [briefingMessage],
     runNextDelegation: nextDelegationState.runNextDelegation,
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,
@@ -742,7 +762,18 @@ function buildContinueDelegationResult(params: {
     status: 'pending',
     resultPreview: null,
   };
+  // Continuation briefing: same task, same delegation transcript, plus the
+  // reviewer's gap note — a rejected announce without a reason would leave the
+  // subagent re-announcing the same conclusion. gapNote may be null (e.g.
+  // limit_reached), where continuing is self-evident from the transcript.
+  const briefingMessage = buildContinuationBriefingMessage({
+    runId: state.runId,
+    delegationId: runNextDelegation.id,
+    task: runNextDelegation.task,
+    gapNote,
+  });
   return {
+    messages: [briefingMessage],
     runNextDelegation: nextDelegationState.runNextDelegation,
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,

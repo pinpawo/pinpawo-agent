@@ -129,7 +129,7 @@ export function buildDelegationOutcomeDecisionSchema() {
       '验收结论。continue=当前 task 未达标，同一 capability 继续；task_done=当前 task 达标但不能明确断言总目标完成，后续交 planner；goal_done=不再自主执行，交给 answer，通常因为目标已满足或需要用户澄清/确认。',
     ),
     gap_note: z.string().nullable().optional().describe(
-      'outcome=continue 或 task_done 时可填写缺口/下一步依据的简短说明；goal_done 时为 null 或省略。',
+      '仅 outcome=continue 时填写：当前结果未达标的缺口说明，会作为继续执行的依据交给执行者；其他 outcome 为 null 或省略。',
     ),
   });
 }

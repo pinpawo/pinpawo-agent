@@ -1,5 +1,6 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { getPinpetMeta, setPinpetMeta, stampMessageCreatedAtUtc } from './messageLanes';
+import { formatDelegationStatus } from './utils';
 import type { CapabilityPlanTask, MessageLane, RunDelegationSummary } from './types';
 
 /**
@@ -30,12 +31,6 @@ export const DELEGATION_BRIEFING_PROTOCOL = [
   '完成当前任务后将结果交还 orchestrator，不要自行推进后续计划。',
   '若简报为继续模式，结合已有执行记录继续，不要重新开始。',
 ].join('\n');
-
-const DELEGATION_STATUS_LABEL: Record<RunDelegationSummary['status'], string> = {
-  pending: '待执行',
-  progress: '进行中',
-  completed: '已完成',
-};
 
 function stampBriefingMeta(
   message: AIMessage,
@@ -71,7 +66,7 @@ export function buildDelegationBriefingMessage(params: {
 }): AIMessage {
   const progressLines = params.runDelegationSummaries
     .filter((item) => item.id !== params.delegationId)
-    .map((item) => `- [${DELEGATION_STATUS_LABEL[item.status]}] ${item.task}`);
+    .map((item) => `- [${formatDelegationStatus(item.status)}] ${item.task}`);
   const remainingPlanLines = params.remainingPlan.map((item, index) =>
     `${index + 1}. ${item.objective}（${item.capabilityIntent}）`);
 

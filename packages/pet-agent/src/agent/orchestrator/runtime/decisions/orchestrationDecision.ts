@@ -679,7 +679,10 @@ function buildCapabilityDecisionResult(params: {
     runId: state.runId,
     delegationId: runNextDelegation.id,
     task: runNextDelegation.task,
-    contextSummary: runNextDelegation.contextSummary,
+    // Pre-fallback value: the '继续完成用户当前请求。' placeholder that pads
+    // runNextDelegation.contextSummary carries no execution guidance, so the
+    // briefing omits its context line rather than rendering filler.
+    contextSummary: pendingTask.contextSummary,
     runDelegationSummaries: nextDelegationState.runDelegationSummaries,
     remainingPlan: state.runCapabilityPlan,
   });

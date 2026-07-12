@@ -83,6 +83,34 @@ test('delegation outcome decision schema is verdict-only', () => {
   }
 });
 
+test('delegation outcome schema keeps gap_note on continue and strips it elsewhere', () => {
+  const schema = buildDelegationOutcomeDecisionSchema();
+
+  const continueWithGap = schema.safeParse({ outcome: 'continue', gap_note: '未验证 issue 状态。' });
+  assert.equal(continueWithGap.success, true);
+  if (continueWithGap.success) {
+    assert.equal(continueWithGap.data.gap_note, '未验证 issue 状态。');
+  }
+
+  // limit_reached continues legitimately omit the gap; stays valid.
+  const continueWithoutGap = schema.safeParse({ outcome: 'continue' });
+  assert.equal(continueWithoutGap.success, true);
+
+  // Stray gap_note on a terminal outcome is harmless model noise: normalized
+  // away instead of failing the run (autoRepair defaults to zero retries).
+  const taskDoneWithGap = schema.safeParse({ outcome: 'task_done', gap_note: '多余的缺口说明' });
+  assert.equal(taskDoneWithGap.success, true);
+  if (taskDoneWithGap.success) {
+    assert.equal(taskDoneWithGap.data.gap_note, null);
+  }
+
+  const goalDoneWithGap = schema.safeParse({ outcome: 'goal_done', gap_note: '多余的缺口说明' });
+  assert.equal(goalDoneWithGap.success, true);
+  if (goalDoneWithGap.success) {
+    assert.equal(goalDoneWithGap.data.gap_note, null);
+  }
+});
+
 test('capability planner schema materializes a concrete next task without capability ids', () => {
   const schema = buildCapabilityPlanningDecisionSchema();
   assert.equal(schema.safeParse({

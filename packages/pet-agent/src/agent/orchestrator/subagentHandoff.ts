@@ -13,26 +13,30 @@ import {
   GLOBAL_REVIEW_POLICY_MODE,
 } from './review/globalReviewPolicy';
 import { createToolkitReviewMiddleware, type ToolkitReviewBinding } from './toolkitReviewMiddleware';
+import { DELEGATION_BRIEFING_PROTOCOL } from './delegationBriefing';
 import type { MessageLane } from './types';
 
-export function buildDelegationHandoffInstruction(params: {
+/**
+ * Stable per-executor system instruction. Deliberately free of the delegated
+ * task itself: the current task lives in the delegation briefing message (see
+ * delegationBriefing.ts / issue #362), so the system prompt never restates
+ * per-delegation dynamic content it could drift from.
+ */
+export function buildSubagentExecutionInstruction(params: {
   lane: MessageLane;
-  task: string | null;
-  contextSummary: string | null;
   workdir?: string | null;
 }) {
   const lines = [
-    '## 当前任务',
-    '这是 orchestrator 下发给你的当前任务，请优先完成这件事。',
+    '## 当前委派',
     `- 执行器：${params.lane}`,
     params.workdir ? `- 当前工作目录：${params.workdir}` : null,
     params.workdir ? '- 相对路径默认相对于当前工作目录。' : null,
-    params.task ? `- 当前任务：${params.task}` : null,
-    params.contextSummary ? `- 上下文摘要：${params.contextSummary}` : null,
     '- 不要重新做路由判断；如果信息足够，就直接完成当前任务。',
     '- 最后一条自然语言回复必须是可以交给 orchestrator 的任务结果或明确进展摘要。',
     '- 不要把工具调用过程、调试流水、内部计划或“正在处理”类中间状态作为最后交接内容。',
-  ].filter(Boolean);
+    '',
+    DELEGATION_BRIEFING_PROTOCOL,
+  ].filter((line): line is string => line !== null);
 
   return lines.join('\n');
 }

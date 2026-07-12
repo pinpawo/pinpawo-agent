@@ -7,9 +7,7 @@ import { loadStoredConfig, saveStoredConfig } from '../storage';
 import { AgentTimelineItem } from './components/AgentTimelineItem';
 import { BottomStatusLine } from './components/BottomStatusLine';
 import { Composer } from './components/Composer';
-import { MessageBlock } from './components/MessageBlock';
 import { OverlayLayer } from './components/OverlayLayer';
-import { SubagentActivityItem } from './components/SubagentActivityItem';
 import {
   createInitialTuiInputBufferState,
   normalizeTuiInputEvent,
@@ -61,30 +59,6 @@ function renderTimelineDisplayEntry(
     width: number;
   },
 ) {
-  if (displayEntry.type === 'notice') {
-    const notice = displayEntry.notice;
-    return (
-      <MessageBlock
-        key={displayEntry.id}
-        entry={{
-          kind: 'system',
-          timestamp: notice.timestamp,
-          text: notice.text,
-        }}
-        petName={props.petName}
-        width={props.width}
-      />
-    );
-  }
-  if (displayEntry.type === 'activity') {
-    return (
-      <SubagentActivityItem
-        key={displayEntry.id}
-        activity={displayEntry.activity}
-        width={props.width}
-      />
-    );
-  }
   return (
     <AgentTimelineItem
       key={displayEntry.id}

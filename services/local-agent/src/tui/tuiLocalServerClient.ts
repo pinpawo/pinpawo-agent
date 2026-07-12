@@ -326,7 +326,10 @@ function parseTuiCoreTimelineEntry(value: unknown): TuiCoreTimelineEntry | null 
   }
   if (value.type === 'message') {
     if (
-      (value.role !== 'user' && value.role !== 'assistant')
+      (value.role !== 'user'
+        && value.role !== 'assistant'
+        && value.role !== 'system'
+        && value.role !== 'subagent')
       || typeof value.text !== 'string'
       || (value.status !== 'streaming' && value.status !== 'completed')
     ) {

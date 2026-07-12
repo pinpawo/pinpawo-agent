@@ -2,9 +2,7 @@ import { buildBusyStatusLine } from './render/eventText';
 import { TUI_TEXT } from './render/text';
 import {
   selectFocusedActiveOperations,
-  selectFocusedActivities,
   selectFocusedBusy,
-  selectFocusedNotices,
   selectFocusedPendingApproval,
   selectFocusedPendingUi,
   selectFocusedSession,
@@ -71,8 +69,6 @@ export function buildTuiScreenModel(input: {
 }): TuiScreenModel {
   const session = selectFocusedSession(input.state);
   const timeline = selectFocusedTimeline(input.state);
-  const notices = selectFocusedNotices(input.state);
-  const activities = selectFocusedActivities(input.state);
   const ready = selectReady(input.state);
   const busy = selectFocusedBusy(input.state);
   const pendingUi = selectFocusedPendingUi(input.state);
@@ -80,7 +76,7 @@ export function buildTuiScreenModel(input: {
   const pendingApproval = selectFocusedPendingApproval(input.state);
   const contentWidth = Math.max(20, input.terminalColumns - 4);
   const textAreaWidth = Math.max(8, contentWidth - 4);
-  const timelineViewport = buildTimelineViewportModel(timeline, notices, activities);
+  const timelineViewport = buildTimelineViewportModel(timeline);
   const petName = session?.actor.label ?? TUI_TEXT.defaultPetName;
   const spinnerFrame = SPINNER_FRAMES[input.animationFrame % SPINNER_FRAMES.length] ?? SPINNER_FRAMES[0];
   const activityStatus = pendingUi

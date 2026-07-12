@@ -290,6 +290,7 @@ export class TuiRuntimeController {
         statusMessage: TUI_TEXT.interruptRequestedStatus,
         messages: [{
           ...makeMessageMeta(),
+          id: `${interruptRequestId}:interrupt-local-release`,
           kind: 'system',
           text: TUI_TEXT.interruptRequestedLocalRelease,
         }],

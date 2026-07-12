@@ -309,14 +309,6 @@ function upsertOperationTimelineEntry(
   };
 }
 
-function readSubagentMessageText(session: SessionModel, entryId: string) {
-  const message = session.timeline.find((entry) =>
-    entry.type === 'message'
-      && entry.role === 'subagent'
-      && entry.id === entryId);
-  return message?.type === 'message' ? message.text : '';
-}
-
 function appendSubagentMessageDelta(
   session: SessionModel,
   requestId: string,
@@ -327,7 +319,7 @@ function appendSubagentMessageDelta(
     entry.type === 'message'
       && entry.role === 'subagent'
       && entry.id === id);
-  const text = readSubagentMessageText(session, id) + token;
+  const text = (previous?.text ?? '') + token;
   const hasContent = Boolean(formatSubagentMessage(text));
   if (!hasContent) return { session };
   const message: AgentMessageEntry = {

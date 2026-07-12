@@ -1157,6 +1157,54 @@ test('tuiStateReducer ignores late terminal events after local interrupt release
   ]);
 });
 
+test('tuiStateReducer ignores late terminal events after interrupt release and snapshot replacement', () => {
+  let state = startRun(initialState(), 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'run.finish',
+    requestId: 'req-1',
+    statusMessage: '已请求打断',
+    messages: [{
+      id: 'req-1:interrupt-local-release',
+      kind: 'system',
+      text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
+    }],
+  });
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [{
+        id: 'message:0:user',
+        type: 'message',
+        role: 'user',
+        text: 'hello',
+        status: 'completed',
+        source: 'checkpoint',
+      }],
+      runs: [],
+    },
+  });
+
+  const next = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'late final answer',
+    },
+    now: 1300,
+  });
+
+  assert.equal(next, state);
+  assert.equal(selectFocusedActiveRun(next), null);
+  assert.equal(selectFocusedTimeline(next).some((entry) =>
+    entry.type === 'message' && entry.role === 'assistant'), false);
+  assert.deepEqual(transcriptTimeline(next), [['user', 'hello']]);
+});
+
 test('tuiStateReducer keeps two requestIds from mixing assistant timeline entries', () => {
   let state = initialState('s1');
   state = {

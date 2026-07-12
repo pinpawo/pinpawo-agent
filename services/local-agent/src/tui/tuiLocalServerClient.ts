@@ -330,6 +330,7 @@ function parseTuiCoreTimelineEntry(value: unknown): TuiCoreTimelineEntry | null 
         && value.role !== 'assistant'
         && value.role !== 'system'
         && value.role !== 'subagent')
+      || (value.role === 'subagent' && typeof value.requestId !== 'string')
       || typeof value.text !== 'string'
       || (value.status !== 'streaming' && value.status !== 'completed')
     ) {

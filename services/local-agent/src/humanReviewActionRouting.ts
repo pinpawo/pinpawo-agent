@@ -5,12 +5,18 @@ import {
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import type { HumanReviewResponseMessage } from './localAgentProtocol';
+import type { ReviewAction } from './reviewAction';
 
-export type PendingHumanReviewActionRoute = {
+export type HumanReviewActionRoute = ReviewAction & {
   interruptId?: string;
-  reviewId: string;
-  reviews: ReviewSpec[];
 };
+
+export function matchesHumanReviewAction(
+  route: HumanReviewActionRoute,
+  actionId: string | undefined,
+) {
+  return !actionId || actionId === route.actionId;
+}
 
 export function readHumanReviewDecisions(msg: HumanReviewResponseMessage): ReviewResponse[] {
   return msg.decisions ?? [{
@@ -21,7 +27,7 @@ export function readHumanReviewDecisions(msg: HumanReviewResponseMessage): Revie
 }
 
 export function validateHumanReviewDecisions(
-  route: PendingHumanReviewActionRoute,
+  route: HumanReviewActionRoute,
   msg: HumanReviewResponseMessage,
 ): ReviewResponse[] {
   const decisions = readHumanReviewDecisions(msg);
@@ -101,7 +107,7 @@ function readRejectOptionId(review: ReviewSpec): string {
 
 // Fail-closed resume: reject every pending review in the action. Used when we
 // cannot safely map decisions to a specific interrupt (missing interruptId).
-function buildRejectAllDecisions(route: PendingHumanReviewActionRoute): ReviewResponse[] {
+function buildRejectAllDecisions(route: HumanReviewActionRoute): ReviewResponse[] {
   return route.reviews.map((review) => ({
     reviewId: review.id,
     selectedOptionId: readRejectOptionId(review),
@@ -109,7 +115,7 @@ function buildRejectAllDecisions(route: PendingHumanReviewActionRoute): ReviewRe
 }
 
 export function buildHumanReviewResume(
-  route: PendingHumanReviewActionRoute,
+  route: HumanReviewActionRoute,
   decisions: ReviewResponse[],
 ) {
   if (route.interruptId) {
@@ -127,11 +133,18 @@ export function buildHumanReviewResume(
 }
 
 export function buildHumanReviewRejectResume(
-  route: PendingHumanReviewActionRoute,
+  route: HumanReviewActionRoute,
   rejectOptionId: string,
 ) {
+  const firstReview = route.reviews[0];
+  if (!firstReview) {
+    throw new ReviewResponseResolutionError(
+      'invalid_response',
+      `Review action "${route.actionId}" has no reviews to cancel.`,
+    );
+  }
   return buildHumanReviewResume(route, [{
-    reviewId: route.reviewId,
+    reviewId: firstReview.id,
     selectedOptionId: rejectOptionId,
   }]);
 }

@@ -310,11 +310,10 @@ test('tuiStateReducer records composer prompt history only for run starts', () =
   assert.deepEqual(state.input.history.entries, ['hello']);
 
   state = tuiStateReducer(state, {
-    type: 'review.response.resume',
+    type: 'review.action.submit',
     requestId: 'req-2',
-    message: 'approval text',
-    now: 3000,
-    userCell: { id: 'req-2:review' },
+    actionId: 'request:req-2:reviews:unknown',
+    decision: { reviewId: 'review-2', selectedOptionId: 'approve' },
     statusMessage: '继续执行',
   });
   assert.deepEqual(state.input.history.entries, ['hello']);
@@ -1059,27 +1058,25 @@ test('tuiStateReducer restores pending approval from authoritative session snaps
         phase: 'waiting_human',
         timelineEntryIds: ['message:user-1'],
         startedAt: 1000,
-        pendingReview: {
-          requestId: 'req-review',
-          reviewId: 'review-1',
+        reviewAction: {
+          actionId: 'interrupt-1',
           status: 'waiting',
           petId: 'pet-a',
-          review: {
+          reviews: [{
             id: 'review-1',
             schemaVersion: 1,
             view: { kind: 'plain', body: 'Approve?' },
             options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-          },
+          }],
         },
       }],
       activeRunId: 'req-review',
-      pendingReviewId: 'review-1',
     },
   });
 
   const pending = selectFocusedPendingApproval(state);
   assert.equal(state.sessions['chat:pet']?.activeRunId, 'req-review');
-  assert.equal(state.runs['req-review']?.pendingReview?.review.id, 'review-1');
+  assert.equal(state.runs['req-review']?.reviewAction?.reviews[0]?.id, 'review-1');
   assert.equal(pending?.requestId, 'req-review');
   assert.equal(pending?.review.id, 'review-1');
   assert.equal(pending?.petId, 'pet-a');
@@ -1464,6 +1461,8 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
   assert.deepEqual(selectFocusedPendingApproval(state), {
     requestId: 'req-1',
+    actionId: 'request:req-1:reviews:review-1',
+    status: 'waiting',
     review: {
       id: 'review-1',
       schemaVersion: 1,
@@ -1476,7 +1475,6 @@ test('tuiStateReducer handles human review and interrupt state', () => {
       view: { kind: 'plain', body: 'Approve?' },
       options: [],
     }],
-    reviewIndex: 0,
     decisions: [],
     petId: 'pet-a',
   });
@@ -1485,11 +1483,10 @@ test('tuiStateReducer handles human review and interrupt state', () => {
 
   const activeRunBefore = selectFocusedActiveRun(state);
   state = tuiStateReducer(state, {
-    type: 'review.response.resume',
+    type: 'review.action.submit',
     requestId: 'req-1',
-    message: '批准',
-    now: 1300,
-    userCell: { id: 'review-response' },
+    actionId: 'request:req-1:reviews:review-1',
+    decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
     statusMessage: '提交确认',
   });
 
@@ -1499,14 +1496,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.equal(selectFocusedActiveRun(state)?.requestId, 'req-1');
   assert.equal(selectFocusedActiveRun(state)?.startedAt, activeRunBefore?.startedAt);
   assert.equal(selectFocusedPendingApproval(state), null);
-  assert.deepEqual(selectFocusedTimeline(state).at(-1), {
-    id: 'message:review-response',
-    type: 'message',
-    role: 'user',
-    requestId: 'req-1',
-    text: '批准',
-    status: 'completed',
-  });
+  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'message:review-response'), false);
 
   state = tuiStateReducer(state, {
     type: 'run.interrupting',
@@ -1518,7 +1508,78 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.equal(state.connection.message, '正在打断');
 });
 
-test('tuiStateReducer clears pending review when interrupting human review', () => {
+test('tuiStateReducer keeps batch draft local and out of the conversation timeline', () => {
+  let state = startRun(initialState(), 'req-1');
+  const reviews = ['review-1', 'review-2'].map((id) => ({
+    id,
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: id },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  }));
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'human_review.requested',
+      requestId: 'req-1',
+      interruptId: 'interrupt-1',
+      review: reviews[0]!,
+      reviews,
+    },
+    now: 1200,
+  });
+  const timelineBefore = selectFocusedTimeline(state);
+
+  const stateAfterStaleDecision = tuiStateReducer(state, {
+    type: 'review.draft.record',
+    requestId: 'req-1',
+    actionId: 'interrupt-stale',
+    decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
+    statusMessage: '不应应用',
+  });
+  assert.equal(stateAfterStaleDecision, state);
+
+  state = tuiStateReducer(state, {
+    type: 'review.draft.record',
+    requestId: 'req-1',
+    actionId: 'interrupt-1',
+    decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
+    statusMessage: '等待下一项',
+  });
+
+  assert.equal(selectFocusedPendingApproval(state)?.review.id, 'review-2');
+  assert.deepEqual(state.runs['req-1']?.reviewAction?.draft.decisions, [
+    { reviewId: 'review-1', selectedOptionId: 'approve' },
+  ]);
+  assert.deepEqual(selectFocusedTimeline(state), timelineBefore);
+
+  state = tuiStateReducer(state, {
+    type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+    source: 'reconnect',
+    snapshot: {
+      sessionId: 'chat:pet',
+      kind: 'chat',
+      timeline: [],
+      runs: [{
+        requestId: 'req-1',
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        phase: 'waiting_human',
+        timelineEntryIds: [],
+        reviewAction: {
+          actionId: 'interrupt-1',
+          reviews,
+          status: 'waiting',
+        },
+      }],
+      activeRunId: 'req-1',
+    },
+  });
+
+  assert.deepEqual(state.runs['req-1']?.reviewAction?.draft.decisions, []);
+  assert.equal(selectFocusedPendingApproval(state)?.review.id, 'review-1');
+});
+
+test('tuiStateReducer marks review cancellation separately from run interruption', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -1536,16 +1597,18 @@ test('tuiStateReducer clears pending review when interrupting human review', () 
     now: 1200,
   });
   state = tuiStateReducer(state, {
-    type: 'run.interrupting',
+    type: 'review.action.cancel',
     requestId: 'req-1',
+    actionId: 'request:req-1:reviews:review-1',
     statusMessage: '正在打断',
   });
 
   assert.equal(selectFocusedActiveRun(state)?.phase, 'interrupting');
+  assert.equal(selectFocusedActiveRun(state)?.reviewAction?.status, 'canceling');
   assert.equal(selectFocusedPendingApproval(state), null);
 });
 
-test('tuiStateReducer review.response.resume falls back to focused session when route is missing', () => {
+test('tuiStateReducer review.action.submit preserves the owning run', () => {
   let state = startRun(initialState(), 'req-1');
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -1564,11 +1627,10 @@ test('tuiStateReducer review.response.resume falls back to focused session when 
   });
 
   state = tuiStateReducer(state, {
-    type: 'review.response.resume',
+    type: 'review.action.submit',
     requestId: 'req-1',
-    message: '批准',
-    now: 1300,
-    userCell: { id: 'review-response' },
+    actionId: 'request:req-1:reviews:review-1',
+    decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
     statusMessage: '提交确认',
   });
 
@@ -1605,6 +1667,8 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
 
   assert.deepEqual(selectFocusedPendingApproval(state), {
     requestId: 'req-1',
+    actionId: 'request:req-1:reviews:review-1',
+    status: 'waiting',
     review: {
       id: 'review-1',
       schemaVersion: 1,
@@ -1633,7 +1697,6 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
         decision: { type: 'approve' },
       }],
     }],
-    reviewIndex: 0,
     decisions: [],
   });
 });

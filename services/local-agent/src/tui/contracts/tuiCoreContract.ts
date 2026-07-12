@@ -1,6 +1,7 @@
-import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
+import type { TokenUsageSnapshot } from '@pinpawo/pet-agent';
+import type { ReviewAction } from '../../reviewAction';
 
-export const TUI_CORE_CONTRACT_VERSION = 2 as const;
+export const TUI_CORE_CONTRACT_VERSION = 3 as const;
 
 export const TUI_CORE_TARGET_ACTIONS = {
   sessionSnapshotLoaded: 'session.snapshot.loaded',
@@ -14,7 +15,7 @@ export const TUI_CORE_TIMELINE_ENTRY_TYPES = [
 export const TUI_CORE_STATE_OWNERS = [
   'activeRun',
   'connection',
-  'pendingReview',
+  'reviewAction',
   'runs',
   'runtime',
   'tokenUsage',
@@ -67,13 +68,7 @@ export type TuiCoreTimelineEntry =
   | TuiCoreMessageTimelineEntry
   | TuiCoreOperationTimelineEntry;
 
-export type TuiCorePendingReview = {
-  requestId: string;
-  interruptId?: string;
-  reviewId: string;
-  status: 'waiting' | 'answered' | 'interrupted';
-  review?: ReviewSpec;
-  reviews?: ReviewSpec[];
+export type TuiCoreReviewAction = ReviewAction & {
   petId?: string;
 };
 
@@ -92,7 +87,7 @@ export type TuiCoreRunSnapshot = {
     | 'failed'
     | 'interrupted';
   timelineEntryIds: string[];
-  pendingReview?: TuiCorePendingReview;
+  reviewAction?: TuiCoreReviewAction;
   startedAt?: number;
   updatedAt?: number;
   finishedAt?: number;
@@ -123,7 +118,6 @@ export type TuiCoreSessionSnapshot = {
   timeline: TuiCoreTimelineEntry[];
   runs: TuiCoreRunSnapshot[];
   activeRunId?: string;
-  pendingReviewId?: string;
   runtime?: TuiCoreRuntimeSnapshot;
   tokenUsage?: TuiCoreTokenUsageSnapshot;
 };

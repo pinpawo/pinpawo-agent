@@ -119,10 +119,11 @@ function approvalRequest(): ApprovalRequestModel {
   };
   return {
     requestId: 'req-1',
+    actionId: 'interrupt-1',
+    status: 'waiting',
     petId: 'pet-1',
     review,
     reviews: [review],
-    reviewIndex: 0,
     decisions: [],
   };
 }

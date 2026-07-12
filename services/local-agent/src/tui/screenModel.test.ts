@@ -103,13 +103,13 @@ test('buildTuiScreenModel keeps approval status visible while composer accepts r
     kind: 'chat',
     phase: 'waiting_human',
     timelineEntryIds: [],
-    pendingReview: {
+    reviewAction: {
       requestId: 'run1',
+      actionId: 'interrupt-1',
+      status: 'waiting',
       petId: 'pet-1',
-      review,
       reviews: [review],
-      reviewIndex: 0,
-      decisions: [],
+      draft: { actionId: 'interrupt-1', decisions: [] },
     },
     startedAt: 0,
     charCount: 0,

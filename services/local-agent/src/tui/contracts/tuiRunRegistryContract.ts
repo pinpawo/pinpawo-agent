@@ -24,10 +24,9 @@ export type TuiRunTerminalPhase = (typeof TUI_RUN_TERMINAL_PHASES)[number];
 export type RunId = string;
 export type SessionId = string;
 
-export type TuiRunPendingReview = {
-  requestId: RunId;
-  reviewId: string;
-  status: 'waiting' | 'answered' | 'interrupted';
+export type TuiRunReviewAction = {
+  actionId: string;
+  status: 'waiting' | 'submitting' | 'canceling';
 };
 
 export type TuiRunRegistryModel = {
@@ -36,7 +35,7 @@ export type TuiRunRegistryModel = {
   kind: 'chat' | 'studio';
   phase: TuiRunPhase;
   timelineEntryIds: string[];
-  pendingReview?: TuiRunPendingReview;
+  reviewAction?: TuiRunReviewAction;
   startedAt: number;
   updatedAt?: number;
   finishedAt?: number;

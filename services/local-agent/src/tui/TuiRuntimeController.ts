@@ -208,7 +208,6 @@ export class TuiRuntimeController {
     const requestId = currentApproval.requestId;
     const reviewId = currentApproval.review.id;
     const reviews = currentApproval.reviews;
-    const reviewIndex = currentApproval.reviewIndex;
 
     if (option.input?.kind === 'text' && !inputText) {
       this.appendSystemMessage(TUI_TEXT.approvalRespondRequiresInput);
@@ -224,34 +223,32 @@ export class TuiRuntimeController {
       ...currentApproval.decisions,
       response,
     ];
-    const shouldResume = option.decision.type !== 'approve' || reviewIndex >= reviews.length - 1;
+    const shouldResume = option.decision.type !== 'approve' || decisions.length >= reviews.length;
     const now = Date.now();
     this.options.setNow(now);
     if (!shouldResume) {
       this.options.dispatch({
-        type: 'review.action.advance',
+        type: 'review.draft.record',
         requestId,
+        actionId: currentApproval.actionId,
         decision: response,
-        message: decision,
-        now,
-        userCell: makeMessageMeta(),
         statusMessage: TUI_TEXT.approvalWaiting(currentApproval.petId),
       });
       return true;
     }
 
     this.options.dispatch({
-      type: 'review.response.resume',
+      type: 'review.action.submit',
       requestId,
-      message: decision,
-      now,
-      userCell: makeMessageMeta(),
+      actionId: currentApproval.actionId,
+      decision: response,
       statusMessage: TUI_TEXT.reviewSubmitting,
     });
 
     this.wsClient.send({
       type: 'human_review_response',
       requestId,
+      actionId: currentApproval.actionId,
       reviewId,
       selectedOptionId: option.id,
       ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),
@@ -269,12 +266,20 @@ export class TuiRuntimeController {
     this.wsClient.send({
       type: 'interrupt_request',
       requestId: activeRun.requestId,
+      ...(activeRun.reviewAction ? { actionId: activeRun.reviewAction.actionId } : {}),
     });
-    this.options.dispatch({
-      type: 'run.interrupting',
-      requestId: activeRun.requestId,
-      statusMessage: TUI_TEXT.interrupting,
-    });
+    this.options.dispatch(activeRun.reviewAction
+      ? {
+          type: 'review.action.cancel',
+          requestId: activeRun.requestId,
+          actionId: activeRun.reviewAction.actionId,
+          statusMessage: TUI_TEXT.interrupting,
+        }
+      : {
+          type: 'run.interrupting',
+          requestId: activeRun.requestId,
+          statusMessage: TUI_TEXT.interrupting,
+        });
     this.clearInterruptTimeout();
 
     const interruptRequestId = activeRun.requestId;

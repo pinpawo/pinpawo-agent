@@ -73,7 +73,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
         loadHistory: () => tuiSessions.loadHistory(requestDeps),
         loadSnapshot: async () => {
           const messages = await tuiSessions.loadHistory(requestDeps);
-          const pendingReview = await chatHandler.readPendingReviewSnapshot(requestDeps);
+          const pendingReview = await chatHandler.readReviewActionSnapshot(requestDeps);
           const sessionId = tuiSessions.getActiveSessionId(requestDeps.actorId);
           return buildLocalServerTuiSnapshot({
             sessionId,
@@ -86,7 +86,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
         listSessions: () => tuiSessions.listSessions(requestDeps),
         resumeSession: async (sessionId) => {
           const result = await tuiSessions.resumeSession(requestDeps, sessionId);
-          const pendingReview = await chatHandler.readPendingReviewSnapshot(requestDeps);
+          const pendingReview = await chatHandler.readReviewActionSnapshot(requestDeps);
           return {
             session: {
               ...result.session,

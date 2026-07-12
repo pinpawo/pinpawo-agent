@@ -31,6 +31,7 @@ import {
   agentTimelineEntriesFromSnapshot,
 } from '../snapshot/tuiSessionSnapshot';
 import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
+import { currentReview, reviewActionId } from '../../reviewAction';
 import type {
   ActiveRunModel,
   MessageCellDraft,
@@ -690,6 +691,11 @@ function applyHumanReviewRequestedEvent(
   if (!context) return state;
   const petId = event.actor?.petId || undefined;
   const reviews = event.reviews?.length ? event.reviews : [event.review];
+  const actionId = reviewActionId({
+    requestId: event.requestId,
+    ...(event.interruptId ? { interruptId: event.interruptId } : {}),
+    reviews,
+  });
   const stateWithReview = {
     ...state,
     connection: {
@@ -701,12 +707,15 @@ function applyHumanReviewRequestedEvent(
     ...currentRun,
     phase: 'waiting_human',
     charCount: 0,
-    pendingReview: {
+    reviewAction: {
       requestId: event.requestId,
-      review: reviews[0] ?? event.review,
+      actionId,
       reviews,
-      reviewIndex: 0,
-      decisions: [],
+      status: 'waiting',
+      draft: {
+        actionId,
+        decisions: [],
+      },
       ...(petId ? { petId } : {}),
     },
   }));
@@ -797,26 +806,27 @@ function activeRunToPendingUi(run: TuiRunModel | null) {
   };
 }
 
-function clearPendingReview<T extends ActiveRunModel>(run: T): T {
-  if (!run.pendingReview) return run;
-  const { pendingReview, ...rest } = run;
-  void pendingReview;
+function clearReviewAction<T extends ActiveRunModel>(run: T): T {
+  if (!run.reviewAction) return run;
+  const { reviewAction, ...rest } = run;
+  void reviewAction;
   return rest as T;
 }
 
 function activeRunToPendingApproval(run: TuiRunModel | null) {
-  if (!run?.pendingReview) {
+  if (!run?.reviewAction || run.reviewAction.status !== 'waiting') {
     return null;
   }
-  const reviewIndex = run.pendingReview.reviewIndex;
-  const currentReview = run.pendingReview.reviews[reviewIndex] ?? run.pendingReview.review;
+  const review = currentReview(run.reviewAction, run.reviewAction.draft);
+  if (!review) return null;
   return {
-    requestId: run.pendingReview.requestId,
-    review: currentReview,
-    reviews: run.pendingReview.reviews,
-    reviewIndex: run.pendingReview.reviewIndex,
-    decisions: run.pendingReview.decisions,
-    ...(run.pendingReview.petId ? { petId: run.pendingReview.petId } : {}),
+    requestId: run.reviewAction.requestId,
+    actionId: run.reviewAction.actionId,
+    reviews: run.reviewAction.reviews,
+    status: run.reviewAction.status,
+    ...(run.reviewAction.petId ? { petId: run.reviewAction.petId } : {}),
+    review,
+    decisions: run.reviewAction.draft.decisions,
   };
 }
 
@@ -881,7 +891,7 @@ function runFromSnapshot(
     timelineEntryIds: run.timelineEntryIds,
     startedAt: normalizeSnapshotRunStartedAt(run.startedAt, existingRun, now),
     charCount: countSnapshotAssistantChars(snapshot, run.requestId),
-    ...pendingReviewFromSnapshotRun(run, existingRun ?? null),
+    ...reviewActionFromSnapshotRun(run),
   };
 }
 
@@ -894,28 +904,23 @@ function activeRunIdFromSnapshot(
   return activeRunId && snapshotRuns[activeRunId] ? activeRunId : null;
 }
 
-function pendingReviewFromSnapshotRun(
+function reviewActionFromSnapshotRun(
   run: TuiCoreRunSnapshot,
-  existingRun: TuiRunModel | null,
-): Pick<TuiRunModel, 'pendingReview'> | Record<string, never> {
-  const pendingReview = run.pendingReview;
-  if (pendingReview?.status !== 'waiting') return {};
-  if (pendingReview.review) {
-    const reviews = pendingReview.reviews?.length ? pendingReview.reviews : [pendingReview.review];
-    return {
-      pendingReview: {
-        requestId: pendingReview.requestId,
-        review: reviews[0] ?? pendingReview.review,
-        reviews,
-        reviewIndex: 0,
+): Pick<TuiRunModel, 'reviewAction'> | Record<string, never> {
+  const action = run.reviewAction;
+  if (!action?.reviews.length) return {};
+  return {
+    reviewAction: {
+      requestId: run.requestId,
+      ...action,
+      // ReviewDraft is intentionally client-local. A snapshot/reconnect starts
+      // the ordered action at its first undecided review.
+      draft: {
+        actionId: action.actionId,
         decisions: [],
-        ...(pendingReview.petId ? { petId: pendingReview.petId } : {}),
       },
-    };
-  }
-  return existingRun?.pendingReview
-    ? { pendingReview: existingRun.pendingReview }
-    : {};
+    },
+  };
 }
 
 function applySessionSnapshot(
@@ -1184,29 +1189,23 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       ]));
     }
 
-    case 'review.action.advance': {
+    case 'review.draft.record': {
       const existingRun = state.runs[action.requestId];
       const sessionId = existingRun?.sessionId ?? state.focusedSessionId;
-      if (!sessionId || !existingRun?.pendingReview) return state;
-      const pendingReview = existingRun.pendingReview;
-      const reviews = pendingReview.reviews;
-      const nextIndex = Math.min(pendingReview.reviewIndex + 1, reviews.length - 1);
-      const userDraft = messageDraft('user', action.message, action.userCell, `${action.requestId}:review-response:${nextIndex}`, action.requestId);
-      const nextRun = addTimelineEntryId({
+      if (!sessionId || !existingRun?.reviewAction || existingRun.reviewAction.actionId !== action.actionId) return state;
+      const reviewAction = existingRun.reviewAction;
+      const nextRun: TuiRunModel = {
         ...existingRun,
         phase: 'waiting_human',
-        pendingReview: {
-          ...pendingReview,
-          reviews,
-          review: reviews[nextIndex] ?? pendingReview.review,
-          reviewIndex: nextIndex,
-          decisions: [
-            ...pendingReview.decisions,
-            action.decision,
-          ],
+        reviewAction: {
+          ...reviewAction,
+          draft: {
+            ...reviewAction.draft,
+            decisions: [...reviewAction.draft.decisions, action.decision],
+          },
         },
-      }, `message:${userDraft.id}`);
-      return updateSession({
+      };
+      return {
         ...state,
         connection: {
           ...state.connection,
@@ -1222,35 +1221,26 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.runs,
           [action.requestId]: nextRun,
         },
-      }, sessionId, (session) =>
-        appendMessageCells({
-          ...session,
-          activeRunId: action.requestId,
-        }, [
-          userDraft,
-        ]));
+      };
     }
 
-    case 'review.response.resume': {
+    case 'review.action.submit': {
       const existingRun = state.runs[action.requestId];
       const sessionId = existingRun?.sessionId ?? state.focusedSessionId;
-      if (!sessionId) return state;
-      const userDraft = messageDraft('user', action.message, action.userCell, `${action.requestId}:review-response`, action.requestId);
-      const nextRun: TuiRunModel = existingRun
-        ? addTimelineEntryId(clearPendingReview({
-            ...existingRun,
-            phase: 'thinking',
-          }), `message:${userDraft.id}`)
-        : {
-            requestId: action.requestId,
-            sessionId,
-            kind: state.sessions[sessionId]?.kind ?? 'chat',
-            phase: 'thinking',
-            timelineEntryIds: [`message:${userDraft.id}`],
-            startedAt: action.now,
-            charCount: 0,
-          };
-      return updateSession({
+      if (!sessionId || !existingRun?.reviewAction || existingRun.reviewAction.actionId !== action.actionId) return state;
+      const nextRun: TuiRunModel = {
+        ...existingRun,
+        phase: 'thinking',
+        reviewAction: {
+          ...existingRun.reviewAction,
+          status: 'submitting',
+          draft: {
+            ...existingRun.reviewAction.draft,
+            decisions: [...existingRun.reviewAction.draft.decisions, action.decision],
+          },
+        },
+      };
+      return {
         ...state,
         connection: {
           ...state.connection,
@@ -1266,14 +1256,30 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.runs,
           [action.requestId]: nextRun,
         },
-      }, sessionId, (session) => {
-        return appendMessageCells({
-          ...session,
-          activeRunId: action.requestId,
-        }, [
-          userDraft,
-        ]);
-      });
+      };
+    }
+
+    case 'review.action.cancel': {
+      const existingRun = state.runs[action.requestId];
+      if (!existingRun?.reviewAction || existingRun.reviewAction.actionId !== action.actionId) return state;
+      return {
+        ...state,
+        connection: {
+          ...state.connection,
+          message: action.statusMessage,
+        },
+        runs: {
+          ...state.runs,
+          [action.requestId]: {
+            ...existingRun,
+            phase: 'interrupting',
+            reviewAction: {
+              ...existingRun.reviewAction,
+              status: 'canceling',
+            },
+          },
+        },
+      };
     }
 
     case 'run.interrupting':
@@ -1281,7 +1287,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       const run = state.runs[action.requestId];
       if (!run) return state;
       const stateWithRun = updateExistingRun(state, action.requestId, (currentRun) => ({
-        ...clearPendingReview(currentRun),
+        ...clearReviewAction(currentRun),
         sessionId: currentRun.sessionId,
         kind: currentRun.kind,
         phase: 'interrupting',

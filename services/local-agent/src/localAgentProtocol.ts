@@ -24,6 +24,7 @@ export type ChatRequestMessage = {
 export type InterruptRequestMessage = {
   type: 'interrupt_request';
   requestId: string;
+  actionId?: string;
 };
 
 export type NewSessionMessage = {
@@ -50,6 +51,7 @@ export type StudioRequestMessage = {
 export type HumanReviewResponseMessage = {
   type: 'human_review_response';
   requestId: string;
+  actionId?: string;
   reviewId: string;
   selectedOptionId: string;
   input?: Record<string, unknown>;
@@ -355,18 +357,21 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
     };
   }
   if (type === 'human_review_response') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
     const requestId = readString(record, 'requestId');
+    const actionId = readOptionalString(record, 'actionId');
     const reviewId = readOptionalString(record, 'reviewId');
     const selectedOptionId = readOptionalString(record, 'selectedOptionId');
     const input = readRecord(record, 'input');
     const decisions = readReviewResponses(record, 'decisions');
     if (record.input !== undefined && !input) return null;
     if (record.decisions !== undefined && !decisions) return null;
+    if (record.actionId !== undefined && !actionId) return null;
     if (!requestId || !reviewId || !selectedOptionId) return null;
     return {
       type,
       requestId,
+      ...(actionId ? { actionId } : {}),
       reviewId,
       selectedOptionId,
       ...(input ? { input } : {}),
@@ -375,7 +380,15 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
   }
   if (type === 'interrupt_request') {
     const requestId = readString(record, 'requestId');
-    return requestId ? { type, requestId } : null;
+    const actionId = readOptionalString(record, 'actionId');
+    if (record.actionId !== undefined && !actionId) return null;
+    return requestId
+      ? {
+          type,
+          requestId,
+          ...(actionId ? { actionId } : {}),
+        }
+      : null;
   }
   if (type === 'new_session') {
     return {

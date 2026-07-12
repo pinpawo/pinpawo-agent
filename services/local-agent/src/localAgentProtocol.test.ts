@@ -24,6 +24,14 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
       userId: 'user-1',
     },
   );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'interrupt_request',
+      requestId: 'req-1',
+      actionId: 123,
+    })),
+    null,
+  );
   assert.equal(parseLocalAgentClientMessage('{bad json'), null);
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'chat_request', message: 'missing request' })), null);
   assert.equal(
@@ -78,6 +86,7 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'human_review_response',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
       reviewId: 'review-1',
       selectedOptionId: 'respond',
       input: { message: 'list files first' },
@@ -85,9 +94,22 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     {
       type: 'human_review_response',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
       reviewId: 'review-1',
       selectedOptionId: 'respond',
       input: { message: 'list files first' },
+    },
+  );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'interrupt_request',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+    })),
+    {
+      type: 'interrupt_request',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
     },
   );
   assert.deepEqual(

@@ -27,12 +27,12 @@ function pendingReviewState(): TuiState {
         kind: 'chat',
         phase: 'waiting_human',
         timelineEntryIds: [],
-        pendingReview: {
+        reviewAction: {
           requestId: 'req-1',
-          review,
+          actionId: 'interrupt-1',
+          status: 'waiting',
           reviews: [review],
-          reviewIndex: 0,
-          decisions: [],
+          draft: { actionId: 'interrupt-1', decisions: [] },
         },
         startedAt: 1,
         charCount: 0,
@@ -69,14 +69,17 @@ function pendingReviewActionState(reviewIndex = 0): TuiState {
       options: [],
     },
   ];
-  state.runs['req-1']!.pendingReview = {
+  state.runs['req-1']!.reviewAction = {
     requestId: 'req-1',
-    review: reviews[reviewIndex]!,
+    actionId: 'interrupt-1',
+    status: 'waiting',
     reviews,
-    reviewIndex,
-    decisions: reviewIndex > 0
-      ? [{ reviewId: 'review-1', selectedOptionId: 'approve' }]
-      : [],
+    draft: {
+      actionId: 'interrupt-1',
+      decisions: reviewIndex > 0
+        ? [{ reviewId: 'review-1', selectedOptionId: 'approve' }]
+        : [],
+    },
   };
   return state;
 }
@@ -167,6 +170,7 @@ test('TuiRuntimeController submits canonical review responses without legacy res
   assert.deepEqual(sent, [{
     type: 'human_review_response',
     requestId: 'req-1',
+    actionId: 'interrupt-1',
     reviewId: 'review-1',
     selectedOptionId: 'respond',
     input: { message: '请先解释风险' },
@@ -178,7 +182,7 @@ test('TuiRuntimeController submits canonical review responses without legacy res
       },
     ],
   }]);
-  assert.equal(actions.some((action) => action.type === 'review.response.resume'), true);
+  assert.equal(actions.some((action) => action.type === 'review.action.submit'), true);
 });
 
 test('TuiRuntimeController queues review action decisions until the final approval', () => {
@@ -192,12 +196,11 @@ test('TuiRuntimeController queues review action decisions until the final approv
 
   assert.equal(firstSubmitted, true);
   assert.deepEqual(first.sent, []);
-  const advance = first.actions.find((action) => action.type === 'review.action.advance');
-  assert.equal(advance?.type, 'review.action.advance');
-  if (advance?.type === 'review.action.advance') {
+  const advance = first.actions.find((action) => action.type === 'review.draft.record');
+  assert.equal(advance?.type, 'review.draft.record');
+  if (advance?.type === 'review.draft.record') {
     assert.equal(advance.requestId, 'req-1');
     assert.deepEqual(advance.decision, { reviewId: 'review-1', selectedOptionId: 'approve' });
-    assert.equal(advance.message, 'Approve');
     assert.equal(advance.statusMessage, '等待你的决定');
   }
 
@@ -212,6 +215,7 @@ test('TuiRuntimeController queues review action decisions until the final approv
   assert.deepEqual(final.sent, [{
     type: 'human_review_response',
     requestId: 'req-1',
+    actionId: 'interrupt-1',
     reviewId: 'review-2',
     selectedOptionId: 'approve',
     decisions: [
@@ -219,7 +223,7 @@ test('TuiRuntimeController queues review action decisions until the final approv
       { reviewId: 'review-2', selectedOptionId: 'approve' },
     ],
   }]);
-  assert.equal(final.actions.some((action) => action.type === 'review.response.resume'), true);
+  assert.equal(final.actions.some((action) => action.type === 'review.action.submit'), true);
 });
 
 test('TuiRuntimeController sends a review action response when the first review is rejected', () => {
@@ -235,14 +239,15 @@ test('TuiRuntimeController sends a review action response when the first review 
   assert.deepEqual(sent, [{
     type: 'human_review_response',
     requestId: 'req-1',
+    actionId: 'interrupt-1',
     reviewId: 'review-1',
     selectedOptionId: 'reject',
     decisions: [
       { reviewId: 'review-1', selectedOptionId: 'reject' },
     ],
   }]);
-  assert.equal(actions.some((action) => action.type === 'review.response.resume'), true);
-  assert.equal(actions.some((action) => action.type === 'review.action.advance'), false);
+  assert.equal(actions.some((action) => action.type === 'review.action.submit'), true);
+  assert.equal(actions.some((action) => action.type === 'review.draft.record'), false);
 });
 
 test('TuiRuntimeController blocks empty required review input', () => {
@@ -260,7 +265,7 @@ test('TuiRuntimeController blocks empty required review input', () => {
   assert.equal(actions.some((action) => action.type === 'message.append'), true);
 });
 
-test('TuiRuntimeController interrupts pending human review instead of dismissing it locally', () => {
+test('TuiRuntimeController requests review cancellation separately from run interruption', () => {
   const { controller, actions, sent } = createController(pendingReviewState());
 
   const submitted = controller.requestInterrupt();
@@ -269,10 +274,12 @@ test('TuiRuntimeController interrupts pending human review instead of dismissing
   assert.deepEqual(sent, [{
     type: 'interrupt_request',
     requestId: 'req-1',
+    actionId: 'interrupt-1',
   }]);
-  assert.deepEqual(actions.find((action) => action.type === 'run.interrupting'), {
-    type: 'run.interrupting',
+  assert.deepEqual(actions.find((action) => action.type === 'review.action.cancel'), {
+    type: 'review.action.cancel',
     requestId: 'req-1',
+    actionId: 'interrupt-1',
     statusMessage: '正在打断',
   });
 });

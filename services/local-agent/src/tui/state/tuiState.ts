@@ -9,6 +9,7 @@ import {
 } from '../input/composerHistory';
 import type { TextAreaModel } from '../input/textarea/engine';
 import { TUI_TEXT } from '../render/text';
+import type { ReviewAction, ReviewDraft } from '../../reviewAction';
 
 export type RunId = string;
 export type SessionId = string;
@@ -77,7 +78,7 @@ export type ActiveRunModel = {
   requestId: RunId;
   phase: 'thinking' | 'using_tool' | 'streaming' | 'waiting_human' | 'interrupting';
   timelineEntryIds: string[];
-  pendingReview?: ApprovalRequestModel;
+  reviewAction?: ReviewActionModel;
   startedAt: number;
   charCount: number;
 };
@@ -97,13 +98,15 @@ export type MessageCellModel = {
   timestamp?: string;
 };
 
-export type ApprovalRequestModel = {
+export type ReviewActionModel = ReviewAction & {
   requestId: RunId;
-  review: ReviewSpec;
-  reviews: ReviewSpec[];
-  reviewIndex: number;
-  decisions: ReviewResponse[];
+  draft: ReviewDraft;
   petId?: string;
+};
+
+export type ApprovalRequestModel = Omit<ReviewActionModel, 'draft'> & {
+  review: ReviewSpec;
+  decisions: ReviewResponse[];
 };
 
 export type MessageCellDraft = {
@@ -192,20 +195,23 @@ export type TuiAction =
       // activeRun (phase: 'waiting_human' → 'thinking'), not starting a new
       // run. requestId stays the same as the human_review.requested it
       // answers.
-      type: 'review.response.resume';
+      type: 'review.action.submit';
       requestId: RunId;
-      message: string;
-      now: number;
-      userCell: MessageCellMeta;
+      actionId: string;
+      decision: ReviewResponse;
       statusMessage: string;
     }
   | {
-      type: 'review.action.advance';
+      type: 'review.draft.record';
       requestId: RunId;
+      actionId: string;
       decision: ReviewResponse;
-      message: string;
-      now: number;
-      userCell: MessageCellMeta;
+      statusMessage: string;
+    }
+  | {
+      type: 'review.action.cancel';
+      requestId: RunId;
+      actionId: string;
       statusMessage: string;
     }
   | {

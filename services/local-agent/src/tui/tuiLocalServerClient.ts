@@ -13,6 +13,7 @@ import type {
 } from './contracts/tuiCoreContract';
 import { buildTuiSessionSnapshotFromMessages } from './snapshot/tuiSessionSnapshot';
 import type { ResumeSessionSummary } from './types';
+import { reviewActionId, reviewActionReviews } from '../reviewAction';
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 1500;
 
@@ -216,11 +217,9 @@ type ParsedSnapshotSession = {
 
 type ParsedPendingReview = {
   requestId: string;
-  interruptId?: string;
-  reviewId: string;
+  actionId: string;
   sessionId?: string;
-  review: ReviewSpec;
-  reviews?: ReviewSpec[];
+  reviews: ReviewSpec[];
   petId?: string;
 };
 
@@ -257,18 +256,14 @@ function buildSessionSnapshotFromServerPayload(
       kind,
       phase: 'waiting_human',
       timelineEntryIds: snapshot.timeline.map((entry) => entry.id),
-      pendingReview: {
-        requestId: pendingReview.requestId,
-        ...(pendingReview.interruptId ? { interruptId: pendingReview.interruptId } : {}),
-        reviewId: pendingReview.reviewId,
+      reviewAction: {
+        actionId: pendingReview.actionId,
         status: 'waiting',
-        review: pendingReview.review,
-        ...(pendingReview.reviews ? { reviews: pendingReview.reviews } : {}),
+        reviews: pendingReview.reviews,
         ...(pendingReview.petId ? { petId: pendingReview.petId } : {}),
       },
     }],
     activeRunId: pendingReview.requestId,
-    pendingReviewId: pendingReview.reviewId,
   };
 }
 
@@ -314,7 +309,6 @@ function parseTuiCoreSessionSnapshot(value: unknown): TuiCoreSessionSnapshot | n
     timeline,
     runs,
     ...(typeof record.activeRunId === 'string' ? { activeRunId: record.activeRunId } : {}),
-    ...(typeof record.pendingReviewId === 'string' ? { pendingReviewId: record.pendingReviewId } : {}),
     ...(isRecord(record.runtime) ? { runtime: record.runtime as TuiCoreSessionSnapshot['runtime'] } : {}),
     ...(isTokenUsageSnapshot(record.tokenUsage) ? { tokenUsage: record.tokenUsage } : {}),
   };
@@ -385,32 +379,60 @@ function parseTuiCoreRunSnapshot(value: unknown): TuiCoreRunSnapshot | null {
   ) {
     return null;
   }
-  const pendingReviewReviews = isRecord(value.pendingReview)
-    ? readReviewSpecs(value.pendingReview.reviews)
-    : null;
-  const pendingReview = isRecord(value.pendingReview) && typeof value.pendingReview.requestId === 'string'
-    && typeof value.pendingReview.reviewId === 'string'
-    && isPendingReviewStatus(value.pendingReview.status)
-    ? {
-        requestId: value.pendingReview.requestId,
-        ...(typeof value.pendingReview.interruptId === 'string' ? { interruptId: value.pendingReview.interruptId } : {}),
-        reviewId: value.pendingReview.reviewId,
-        status: value.pendingReview.status,
-        ...(isRecord(value.pendingReview.review) ? { review: value.pendingReview.review as ReviewSpec } : {}),
-        ...(pendingReviewReviews ? { reviews: pendingReviewReviews } : {}),
-        ...(typeof value.pendingReview.petId === 'string' ? { petId: value.pendingReview.petId } : {}),
-      }
-    : undefined;
+  const reviewAction = parseNativeReviewAction(value.reviewAction);
+  if (value.reviewAction !== undefined && !reviewAction) return null;
+  const legacyReviewAction = reviewAction
+    ? null
+    : parseLegacyPendingReview(value.pendingReview, value.requestId);
+  if (!reviewAction && value.pendingReview !== undefined && !legacyReviewAction) return null;
+  const normalizedReviewAction = reviewAction ?? legacyReviewAction;
   return {
     requestId: value.requestId,
     sessionId: value.sessionId,
     kind: value.kind,
     phase: value.phase,
     timelineEntryIds: value.timelineEntryIds,
-    ...(pendingReview ? { pendingReview } : {}),
+    ...(normalizedReviewAction ? { reviewAction: normalizedReviewAction } : {}),
     ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
     ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
     ...(typeof value.finishedAt === 'number' ? { finishedAt: value.finishedAt } : {}),
+  };
+}
+
+function parseNativeReviewAction(value: unknown): TuiCoreRunSnapshot['reviewAction'] | null {
+  if (!isRecord(value)) return null;
+  const reviews = readReviewSpecs(value.reviews);
+  if (typeof value.actionId !== 'string' || !isReviewActionStatus(value.status) || !reviews) {
+    return null;
+  }
+  return {
+    actionId: value.actionId,
+    status: value.status,
+    reviews,
+    ...(typeof value.petId === 'string' ? { petId: value.petId } : {}),
+  };
+}
+
+function parseLegacyPendingReview(
+  value: unknown,
+  requestId: string,
+): TuiCoreRunSnapshot['reviewAction'] | null {
+  if (!isRecord(value) || value.requestId !== requestId) return null;
+  const review = isRecord(value.review) && typeof value.review.id === 'string'
+    ? value.review as ReviewSpec
+    : null;
+  const reviews = readReviewSpecs(value.reviews) ?? (review ? [review] : null);
+  if (!reviews || !isLegacyPendingReviewStatus(value.status)) return null;
+  const interruptId = typeof value.interruptId === 'string' ? value.interruptId : undefined;
+  return {
+    actionId: reviewActionId({ requestId, ...(interruptId ? { interruptId } : {}), reviews }),
+    reviews,
+    status: value.status === 'waiting'
+      ? 'waiting'
+      : value.status === 'answered'
+        ? 'submitting'
+        : 'canceling',
+    ...(typeof value.petId === 'string' ? { petId: value.petId } : {}),
   };
 }
 
@@ -430,6 +452,17 @@ function parseSnapshotSession(value: unknown): ParsedSnapshotSession | null {
 function parsePendingReviewSnapshot(value: unknown): ParsedPendingReview | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
+  const action = isRecord(record.reviewAction) ? record.reviewAction : null;
+  const actionReviews = action ? readReviewSpecs(action.reviews) : null;
+  if (typeof record.requestId === 'string' && action && typeof action.actionId === 'string' && actionReviews?.length) {
+    return {
+      requestId: record.requestId,
+      actionId: action.actionId,
+      ...(typeof record.sessionId === 'string' ? { sessionId: record.sessionId } : {}),
+      reviews: actionReviews,
+      ...(readPendingReviewPetId(record) ? { petId: readPendingReviewPetId(record) } : {}),
+    };
+  }
   const review = record.review;
   if (
     typeof record.requestId !== 'string'
@@ -442,13 +475,16 @@ function parsePendingReviewSnapshot(value: unknown): ParsedPendingReview | null 
     return null;
   }
   const reviews = readReviewSpecs(record.reviews);
+  const normalizedReviews = reviewActionReviews(review as ReviewSpec, reviews ?? undefined);
   return {
     requestId: record.requestId,
-    ...(typeof record.interruptId === 'string' ? { interruptId: record.interruptId } : {}),
-    reviewId: record.reviewId,
+    actionId: reviewActionId({
+      requestId: record.requestId,
+      ...(typeof record.interruptId === 'string' ? { interruptId: record.interruptId } : {}),
+      reviews: normalizedReviews,
+    }),
     ...(typeof record.sessionId === 'string' ? { sessionId: record.sessionId } : {}),
-    review: review as ReviewSpec,
-    ...(reviews ? { reviews } : {}),
+    reviews: normalizedReviews,
     ...(readPendingReviewPetId(record) ? { petId: readPendingReviewPetId(record) } : {}),
   };
 }
@@ -630,6 +666,10 @@ function isRunPhase(value: unknown): value is TuiCoreRunSnapshot['phase'] {
     || value === 'interrupted';
 }
 
-function isPendingReviewStatus(value: unknown): value is NonNullable<TuiCoreRunSnapshot['pendingReview']>['status'] {
+function isReviewActionStatus(value: unknown): value is NonNullable<TuiCoreRunSnapshot['reviewAction']>['status'] {
+  return value === 'waiting' || value === 'submitting' || value === 'canceling';
+}
+
+function isLegacyPendingReviewStatus(value: unknown) {
   return value === 'waiting' || value === 'answered' || value === 'interrupted';
 }

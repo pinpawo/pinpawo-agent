@@ -116,21 +116,19 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
           kind: 'chat',
           phase: 'waiting_human',
           timelineEntryIds: ['message:0:user'],
-          pendingReview: {
-            requestId: 'req-review',
-            reviewId: 'review-1',
+          reviewAction: {
+            actionId: 'interrupt-1',
             status: 'waiting',
             petId: 'pet-a',
-            review: {
+            reviews: [{
               id: 'review-1',
               schemaVersion: 1,
               view: { kind: 'plain', body: 'Approve?' },
               options: [],
-            },
+            }],
           },
         }],
         activeRunId: 'req-review',
-        pendingReviewId: 'review-1',
       });
     }
     if (url.endsWith('/sessions')) {
@@ -187,8 +185,8 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
     ['message', 'restored from snapshot'],
   ]);
   assert.equal(snapshot.activeRunId, 'req-review');
-  assert.equal(snapshot.runs[0]?.pendingReview?.review?.id, 'review-1');
-  assert.equal(snapshot.runs[0]?.pendingReview?.petId, 'pet-a');
+  assert.equal(snapshot.runs[0]?.reviewAction?.reviews[0]?.id, 'review-1');
+  assert.equal(snapshot.runs[0]?.reviewAction?.petId, 'pet-a');
   assert.deepEqual((await client.listResumeSessions()).map((item) => item.id), ['chat:one']);
   const resumed = await client.resumeSession('chat:one');
 
@@ -240,6 +238,74 @@ test('TuiLocalServerClient does not synthesize snapshots when history restore fa
   );
 });
 
+test('TuiLocalServerClient adapts v2 native pendingReview snapshots', async () => {
+  const client = new TuiLocalServerClient({
+    port: 3210,
+    fetchImpl: (async (url: RequestInfo | URL) => {
+      if (String(url).endsWith('/runtime')) return jsonResponse({});
+      return jsonResponse({
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        timeline: [],
+        runs: [{
+          requestId: 'req-review',
+          sessionId: 'chat:pet',
+          kind: 'chat',
+          phase: 'waiting_human',
+          timelineEntryIds: [],
+          pendingReview: {
+            requestId: 'req-review',
+            interruptId: 'interrupt-v2',
+            reviewId: 'review-1',
+            status: 'waiting',
+            review: {
+              id: 'review-1',
+              schemaVersion: 1,
+              view: { kind: 'plain', body: 'Approve?' },
+              options: [],
+            },
+          },
+        }],
+        activeRunId: 'req-review',
+        pendingReviewId: 'review-1',
+      });
+    }) as typeof fetch,
+  });
+
+  const snapshot = await client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'chat' });
+
+  assert.equal(snapshot.runs[0]?.reviewAction?.actionId, 'interrupt-v2');
+  assert.equal(snapshot.runs[0]?.reviewAction?.reviews[0]?.id, 'review-1');
+});
+
+test('TuiLocalServerClient rejects malformed native review actions', async () => {
+  const client = new TuiLocalServerClient({
+    port: 3210,
+    fetchImpl: (async (url: RequestInfo | URL) => {
+      if (String(url).endsWith('/runtime')) return jsonResponse({});
+      return jsonResponse({
+        sessionId: 'chat:pet',
+        kind: 'chat',
+        timeline: [],
+        runs: [{
+          requestId: 'req-review',
+          sessionId: 'chat:pet',
+          kind: 'chat',
+          phase: 'waiting_human',
+          timelineEntryIds: [],
+          reviewAction: { actionId: 'interrupt-1', status: 'waiting', reviews: [] },
+        }],
+        activeRunId: 'req-review',
+      });
+    }) as typeof fetch,
+  });
+
+  await assert.rejects(
+    () => client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'chat' }),
+    /invalid local server snapshot payload/,
+  );
+});
+
 test('TuiLocalServerClient adapts recognized legacy snapshot payloads at the compatibility boundary', async () => {
   const client = new TuiLocalServerClient({
     port: 3210,
@@ -281,8 +347,8 @@ test('TuiLocalServerClient adapts recognized legacy snapshot payloads at the com
     ['message', 'legacy answer'],
   ]);
   assert.equal(snapshot.activeRunId, 'req-review');
-  assert.equal(snapshot.runs[0]?.pendingReview?.review?.id, 'review-1');
-  assert.equal(snapshot.runs[0]?.pendingReview?.petId, 'pet-a');
+  assert.equal(snapshot.runs[0]?.reviewAction?.reviews[0]?.id, 'review-1');
+  assert.equal(snapshot.runs[0]?.reviewAction?.petId, 'pet-a');
 });
 
 test('TuiLocalServerClient rejects malformed snapshot payloads instead of synthesizing empty snapshots', async () => {

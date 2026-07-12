@@ -363,6 +363,49 @@ test('LocalAgentAppChatHandler interrupts pending human review with canonical re
   ]);
 });
 
+test('LocalAgentAppChatHandler rejects cancellation for a stale review action', async () => {
+  const runRequests: unknown[] = [];
+  const review = {
+    id: 'review-1',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'reject', label: 'Reject', decision: { type: 'reject' as const } }],
+  };
+  const { handler, ws, sent } = createHandler({
+    runChat: async (options) => {
+      runRequests.push(options.request);
+      if (options.request.kind === 'user_message') {
+        options.emitEvent({
+          type: 'human_review.requested',
+          requestId: 'req-1',
+          interruptId: 'interrupt-current',
+          review,
+        });
+        return { status: 'waiting_human' };
+      }
+      return { status: 'completed', reply: 'unexpected' };
+    },
+  });
+
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-1',
+    message: 'hello',
+    userId: 'user-1',
+  });
+  await handler.handleInterruptRequest(ws, {
+    type: 'interrupt_request',
+    requestId: 'req-1',
+    actionId: 'interrupt-stale',
+  });
+
+  assert.equal(runRequests.length, 1);
+  const errorEvent = sent.at(-1) as { type?: string; event?: { type?: string; code?: string } };
+  assert.equal(errorEvent.type, 'event');
+  assert.equal(errorEvent.event?.type, 'error');
+  assert.equal(errorEvent.event?.code, 'review_stale');
+});
+
 test('LocalAgentAppChatHandler routes human review responses to studio router first', async () => {
   let studioRouted = false;
   const runRequests: unknown[] = [];

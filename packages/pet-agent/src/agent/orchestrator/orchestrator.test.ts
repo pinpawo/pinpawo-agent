@@ -23,7 +23,7 @@ import {
   collectToolkitOperations,
   resolveToolkitResources,
   selectCapabilityTools,
-} from './subagentHandoff';
+} from './subagentDispatch';
 import { buildReviewSpec } from './review/reviewSpec';
 import { isToolActionAuthorized } from './review/reviewAuthorizations';
 import { ReviewPolicies } from './review/reviewPolicies';

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HumanMessage } from '@langchain/core/messages';
+import { buildDelegationBriefingMessage } from './delegationBriefing';
 import {
   buildAnswerSystemPrompt,
   buildCapabilityArtifactContext,
@@ -52,6 +53,26 @@ test('start-loop router request context includes compaction summaries outside re
   assert.match(requestContext, /<recent_messages purpose="coreference">/);
   assert.match(requestContext, /recent-7/);
   assert.doesNotMatch(requestContext, /recent-0/);
+});
+
+test('decision recent messages label delegation briefings as scheduling context', () => {
+  const briefing = buildDelegationBriefingMessage({
+    lane: 'general',
+    runId: 'run-1',
+    delegationId: 'delegation-1',
+    task: '只完成任务 A',
+    contextSummary: null,
+    runDelegationSummaries: [],
+    remainingPlan: [],
+  });
+  const requestContext = buildPreparedRequestContext({
+    latestUserRequest: '完成 A 和 B',
+    recentMessages: [briefing],
+    recentAnnounces: [],
+  });
+
+  assert.match(requestContext, /<role>委派简报<\/role>/);
+  assert.doesNotMatch(requestContext, /<role>助手<\/role>/);
 });
 
 test('request contexts include bounded capability artifact refs', () => {
@@ -118,6 +139,8 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(prompt, /唯一基准/);
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
+  assert.match(prompt, /委派简报（delegation briefing）/);
+  assert.match(prompt, /物化 delegation 时向主对话写入委派简报/);
   assert.match(prompt, /当前阶段：entryDecision/);
   assert.match(prompt, /决策条件/);
   assert.match(prompt, /answer、direct_task 或 needs_plan/);
@@ -240,6 +263,7 @@ test('answer prompt owns the user-visible reply', () => {
   });
 
   assert.match(prompt, /主对话中的 handoff 结论/);
+  assert.match(prompt, /忽略主对话中的委派简报/);
   assert.match(prompt, /不要把紧邻的执行器\/subagent 结果原文整体复制一遍/);
   assert.match(prompt, /明确提出当前需要用户回答的问题/);
   assert.match(prompt, /不要输出 JSON、动作字段/);

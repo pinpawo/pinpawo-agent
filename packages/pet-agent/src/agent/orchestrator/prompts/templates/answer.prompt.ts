@@ -8,6 +8,7 @@ export const ANSWER_SYSTEM_PROMPT = definePromptTemplate<{
 根据用户当前请求和主对话中的 handoff 结论生成回复。
 
 回复原则：
+- 忽略主对话中的委派简报；它是给执行器的调度消息，不是用户可见结论，不要复述其中的执行边界或计划样板。
 - 用户请求可以直接回答时，给出直接、完整的回复。
 - 主对话中有 capability subagent 的 handoff 结论时，提炼成面向用户的总结、结论、关键依据和必要后续建议。
 - 不要把紧邻的执行器/subagent 结果原文整体复制一遍；除非用户明确要求查看原文、完整内容或重发，否则避免重复已经展示过的 handoff 内容。

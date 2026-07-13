@@ -28,7 +28,10 @@ function createTestController(options: { forceInterruptMs?: number } = {}) {
 
 test('InflightRequestController replaces previous request without notifying when requested', () => {
   const { controller, controls, operations } = createTestController();
-  const first = controller.start('client', 'req-1');
+  const observedOperations: LocalAgentOperationEvent[] = [];
+  const first = controller.start('client', 'req-1', {
+    observeOperation: (event) => observedOperations.push(event),
+  });
   emitInflightToolEvent(first, {
     event: 'on_tool_start',
     name: 'read_file',
@@ -44,6 +47,7 @@ test('InflightRequestController replaces previous request without notifying when
   assert.equal(controller.get('client'), second);
   assert.deepEqual(controls, []);
   assert.deepEqual(operations.map((event) => event.phase), ['started', 'interrupted']);
+  assert.deepEqual(observedOperations.map((event) => event.phase), ['interrupted']);
 });
 
 test('InflightRequestController replaces previous request with interrupted control message', () => {

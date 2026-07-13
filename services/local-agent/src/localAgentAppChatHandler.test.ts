@@ -10,6 +10,9 @@ import type { AgentChannelSetup } from './agentChannel';
 import type { AgentContext } from './contextLoader';
 import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
+import type { LocalAgentRuntimeEvent } from './events/localAgentEvent';
+import { createInitialTuiState, createSession } from './tui/state/tuiState';
+import { tuiStateReducer } from './tui/state/tuiStateReducer';
 
 function createFakeWebSocket(sent: unknown[]) {
   return {
@@ -54,6 +57,16 @@ function createSetup(): AgentChannelSetup {
   };
 }
 
+function createCheckpoint(threadIds: string[]) {
+  return {
+    async *list() {
+      for (const threadId of threadIds) {
+        yield { config: { configurable: { thread_id: threadId } } };
+      }
+    },
+  } as unknown as BaseCheckpointSaver;
+}
+
 function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgentAppChatHandler>[0]> = {}) {
   const sent: unknown[] = [];
   const deletedThreads: string[] = [];
@@ -61,7 +74,7 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
   const ws = createFakeWebSocket(sent);
   const handler = new LocalAgentAppChatHandler({
     graphService: {} as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
-    checkpoint: {} as BaseCheckpointSaver,
+    checkpoint: createCheckpoint([]),
     deleteThread: async (threadId) => {
       deletedThreads.push(threadId);
     },
@@ -90,7 +103,9 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
     loadContext: async () => ({} as AgentContext),
     buildChatSetup: (params) => {
       buildInputs.push(params as unknown as Record<string, unknown>);
-      return createSetup();
+      const setup = createSetup();
+      setup.input.threadId = params.threadId;
+      return setup;
     },
     runChat: async () => ({ status: 'completed', reply: 'done reply' }),
     ...overrides,
@@ -138,6 +153,7 @@ test('LocalAgentAppChatHandler resets app chat checkpoint by explicit user threa
 
 test('LocalAgentAppChatHandler runs app chat with typed events and operation output', async () => {
   const { handler, ws, sent, buildInputs } = createHandler({
+    now: () => 1000,
     runChat: async (options) => {
       assert.equal(options.isCurrent(), true);
       assert.ok(options.setup.input.signal instanceof AbortSignal);
@@ -184,7 +200,11 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     'local-toolkit',
   ]);
 
-  const eventMessages = sent.filter((item): item is { type: string; event?: { type?: string; phase?: string; operation?: { kind?: string; target?: string } } } =>
+  const eventMessages = sent.filter((item): item is {
+    type: 'event';
+    requestId: string;
+    event: LocalAgentRuntimeEvent;
+  } =>
     Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'event'),
   );
   assert.deepEqual(eventMessages.map((item) => item.event?.type), [
@@ -193,15 +213,197 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     'operation',
     'message.completed',
   ]);
-  assert.deepEqual(eventMessages.map((item) => item.event?.phase).filter(Boolean), ['started', 'completed']);
+  const operationEvents = eventMessages
+    .map((item) => item.event)
+    .filter((event): event is Extract<LocalAgentRuntimeEvent, { type: 'operation' }> =>
+      event.type === 'operation');
+  assert.deepEqual(operationEvents.map((event) => event.phase), ['started', 'completed']);
   assert.deepEqual(
-    eventMessages
-      .map((item) => item.event?.operation)
-      .filter(Boolean)
-      .map((operation) => [operation?.kind, operation?.target]),
+    operationEvents.map((event) => [event.operation.kind, event.operation.target]),
     // The completed event inherits the start event's target even though
     // read_file only describes itself via summarizeInput.
     [['local-toolkit.read_file', 'README.md'], ['local-toolkit.read_file', 'README.md']],
+  );
+
+  assert.equal(operationEvents.some((event) => 'raw' in event), false);
+
+  const hostedSession = handler.readSessionProjection('user-1');
+  assert.ok(hostedSession);
+  assert.equal(hostedSession.activeRun, null);
+  assert.equal(
+    hostedSession.timeline.some((entry) => entry.type === 'operation' && entry.raw !== undefined),
+    false,
+  );
+
+  let tuiState = createInitialTuiState(createSession({ id: hostedSession.sessionId }));
+  tuiState = tuiStateReducer(tuiState, {
+    type: 'run.start',
+    requestId: 'req-1',
+    kind: 'chat',
+    userText: 'hello',
+    now: 1000,
+    userCell: { id: 'req-1:user' },
+    statusMessage: 'working',
+  });
+  for (const envelope of eventMessages) {
+    tuiState = tuiStateReducer(tuiState, {
+      type: 'event.received',
+      event: envelope.event,
+      now: 1000,
+    });
+  }
+  assert.deepEqual(tuiState.sessions[hostedSession.sessionId]?.timeline, hostedSession.timeline);
+  assert.deepEqual(tuiState.sessions[hostedSession.sessionId]?.activeRun, hostedSession.activeRun);
+});
+
+test('LocalAgentAppChatHandler settles projected operations when a run is interrupted', async () => {
+  let notifyStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    notifyStarted = resolve;
+  });
+  const { handler, ws, sent } = createHandler({
+    now: () => 1000,
+    runChat: async (options) => {
+      options.emitToolEvent({
+        event: 'on_tool_start',
+        name: 'run_shell',
+        input: { command: 'npm test' },
+      });
+      notifyStarted();
+      const signal = options.setup.input.signal;
+      assert.ok(signal);
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+      options.finishInterrupted();
+      return { status: 'interrupted', reply: '' };
+    },
+  });
+
+  const runPromise = handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-interrupt',
+    message: 'run tests',
+    userId: 'user-1',
+  });
+  await started;
+
+  handler.handleRunInterrupt(ws, {
+    type: 'run.interrupt',
+    requestId: 'req-interrupt',
+  });
+  await runPromise;
+
+  const projection = handler.readSessionProjection('user-1');
+  assert.ok(projection);
+  assert.equal(projection.activeRun, null);
+  const operation = projection.timeline.find((entry) => entry.type === 'operation');
+  assert.equal(operation?.type, 'operation');
+  assert.equal(operation?.phase, 'interrupted');
+  const operationEvents = sent
+    .filter((item): item is { type: 'event'; event: LocalAgentRuntimeEvent } =>
+      Boolean(item && typeof item === 'object' && (item as { type?: unknown }).type === 'event'))
+    .map((item) => item.event)
+    .filter((event): event is Extract<LocalAgentRuntimeEvent, { type: 'operation' }> =>
+      event.type === 'operation');
+  assert.deepEqual(operationEvents.map((event) => event.phase), ['started', 'interrupted']);
+
+  let tuiState = createInitialTuiState(createSession({ id: projection.sessionId }));
+  tuiState = tuiStateReducer(tuiState, {
+    type: 'run.start',
+    requestId: 'req-interrupt',
+    kind: 'chat',
+    userText: 'run tests',
+    now: 1000,
+    userCell: { id: 'req-interrupt:user' },
+    statusMessage: 'working',
+  });
+  tuiState = tuiStateReducer(tuiState, {
+    type: 'event.received',
+    event: operationEvents[0]!,
+    now: 1000,
+  });
+  tuiState = tuiStateReducer(tuiState, {
+    type: 'run.interrupting',
+    requestId: 'req-interrupt',
+    statusMessage: 'interrupting',
+  });
+  tuiState = tuiStateReducer(tuiState, {
+    type: 'event.received',
+    event: operationEvents[1]!,
+    now: 1000,
+  });
+  tuiState = tuiStateReducer(tuiState, {
+    type: 'run.finish',
+    requestId: 'req-interrupt',
+    statusMessage: 'interrupted',
+  });
+  assert.deepEqual(tuiState.sessions[projection.sessionId]?.timeline, projection.timeline);
+  assert.deepEqual(tuiState.sessions[projection.sessionId]?.activeRun, projection.activeRun);
+});
+
+test('LocalAgentAppChatHandler settles the previous run before projecting replacement input', async () => {
+  let notifyFirstStarted!: () => void;
+  const firstStarted = new Promise<void>((resolve) => {
+    notifyFirstStarted = resolve;
+  });
+  const { handler, ws, sent } = createHandler({
+    now: () => 1000,
+    runChat: async (options) => {
+      if (options.request.requestId !== 'req-old') {
+        return { status: 'completed', reply: 'replacement completed' };
+      }
+      options.emitToolEvent({
+        event: 'on_tool_start',
+        name: 'run_shell',
+        input: { command: 'long-running' },
+      });
+      notifyFirstStarted();
+      const signal = options.setup.input.signal;
+      assert.ok(signal);
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+      options.emitEvent({
+        type: 'message.delta',
+        requestId: 'req-old',
+        role: 'assistant',
+        text: 'late stale output',
+      });
+      return { status: 'interrupted', reply: '' };
+    },
+  });
+
+  const oldRun = handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-old',
+    message: 'old request',
+    userId: 'user-1',
+  });
+  await firstStarted;
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-new',
+    message: 'new request',
+    userId: 'user-1',
+  });
+  await oldRun;
+
+  const projection = handler.readSessionProjection('user-1');
+  assert.ok(projection);
+  assert.equal(projection.activeRun, null);
+  const operation = projection.timeline.find((entry) => entry.type === 'operation');
+  assert.ok(operation && operation.type === 'operation');
+  assert.equal(operation.phase, 'interrupted');
+  assert.deepEqual(
+    projection.timeline
+      .filter((entry) => entry.type === 'message' && entry.role === 'user')
+      .map((entry) => entry.requestId),
+    ['req-old', 'req-new'],
+  );
+  assert.equal(
+    sent.some((item) => JSON.stringify(item).includes('late stale output')),
+    false,
   );
 });
 
@@ -224,6 +426,116 @@ test('LocalAgentAppChatHandler keeps app chat session start time stable per user
   assert.equal(buildInputs.length, 2);
   assert.equal(typeof buildInputs[0]?.sessionStartedAt, 'string');
   assert.equal(buildInputs[1]?.sessionStartedAt, buildInputs[0]?.sessionStartedAt);
+});
+
+test('LocalAgentAppChatHandler bounds hosted session projections by recency', async () => {
+  const { handler, ws } = createHandler({ maxSessionProjections: 2 });
+
+  for (const userId of ['user-1', 'user-2', 'user-3']) {
+    await handler.handleChatRequest(ws, {
+      type: 'chat_request',
+      requestId: `req-${userId}`,
+      message: userId,
+      userId,
+    });
+  }
+
+  assert.equal(handler.readSessionProjection('user-1'), null);
+  assert.ok(handler.readSessionProjection('user-2'));
+  assert.ok(handler.readSessionProjection('user-3'));
+});
+
+test('LocalAgentAppChatHandler retains active projections above the idle retention limit', async () => {
+  let notifyFirstStarted!: () => void;
+  const firstStarted = new Promise<void>((resolve) => {
+    notifyFirstStarted = resolve;
+  });
+  let notifySecondStarted!: () => void;
+  const secondStarted = new Promise<void>((resolve) => {
+    notifySecondStarted = resolve;
+  });
+  let releaseFirst!: () => void;
+  const firstReleased = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  let releaseSecond!: () => void;
+  const secondReleased = new Promise<void>((resolve) => {
+    releaseSecond = resolve;
+  });
+  const { handler, ws } = createHandler({
+    maxSessionProjections: 1,
+    isCurrentSocket: () => true,
+    runChat: async (options) => {
+      options.emitEvent({
+        type: 'message.delta',
+        requestId: options.request.requestId,
+        role: 'assistant',
+        text: options.request.requestId,
+      });
+      if (options.request.requestId === 'req-active-1') {
+        notifyFirstStarted();
+        await firstReleased;
+      } else {
+        notifySecondStarted();
+        await secondReleased;
+      }
+      return { status: 'completed', reply: 'done' };
+    },
+  });
+  const secondWs = createFakeWebSocket([]);
+
+  const firstRun = handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-active-1',
+    message: 'first',
+    userId: 'user-active-1',
+  });
+  await firstStarted;
+  const secondRun = handler.handleChatRequest(secondWs, {
+    type: 'chat_request',
+    requestId: 'req-active-2',
+    message: 'second',
+    userId: 'user-active-2',
+  });
+  await secondStarted;
+
+  assert.equal(handler.readSessionProjection('user-active-1')?.activeRun?.requestId, 'req-active-1');
+  assert.equal(handler.readSessionProjection('user-active-2')?.activeRun?.requestId, 'req-active-2');
+
+  releaseFirst();
+  releaseSecond();
+  await Promise.all([firstRun, secondRun]);
+});
+
+test('LocalAgentAppChatHandler keeps runtime error details out of remote state and events', async () => {
+  const { handler, ws, sent } = createHandler({
+    runChat: async () => {
+      throw new Error('secret command failed in /private/workdir');
+    },
+  });
+
+  await handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-error',
+    message: 'fail',
+    userId: 'user-1',
+  });
+
+  const errorEnvelope = sent.at(-1) as {
+    type?: string;
+    event?: { type?: string; message?: string };
+  };
+  assert.equal(errorEnvelope.type, 'event');
+  assert.equal(errorEnvelope.event?.type, 'error');
+  assert.equal(errorEnvelope.event?.message, 'internal error');
+  const projection = handler.readSessionProjection('user-1');
+  assert.ok(projection);
+  assert.equal(projection.activeRun, null);
+  assert.equal(
+    projection.timeline.some((entry) =>
+      entry.type === 'message' && entry.text.includes('secret command')),
+    false,
+  );
 });
 
 test('LocalAgentAppChatHandler resumes canonical human review responses through cached route', async () => {
@@ -302,6 +614,301 @@ test('LocalAgentAppChatHandler resumes canonical human review responses through 
     'error',
   ]);
   assert.match(eventMessages[1]?.event?.message ?? '', /已关闭|不存在/);
+});
+
+test('LocalAgentAppChatHandler recovers a batch review route from app-chat checkpoint state', async () => {
+  const reviews = [
+    {
+      id: 'review-1',
+      schemaVersion: 1,
+      view: { kind: 'plain' as const, body: 'Approve first?' },
+      options: [{ id: 'approve-1', label: 'Approve', decision: { type: 'approve' as const } }],
+    },
+    {
+      id: 'review-2',
+      schemaVersion: 1,
+      view: { kind: 'plain' as const, body: 'Approve second?' },
+      options: [{ id: 'approve-2', label: 'Approve', decision: { type: 'approve' as const } }],
+    },
+  ];
+  const runRequests: unknown[] = [];
+  let stateReads = 0;
+  let phaseDuringResume: string | undefined;
+  let reviewStatusDuringResume: string | undefined;
+  let fixture: ReturnType<typeof createHandler>;
+  fixture = createHandler({
+    checkpoint: createCheckpoint([
+      'petbot:chat:pet:pet-a:user:user-1',
+      'petbot:chat:pet:pet-a:user:user-1',
+    ]),
+    graphService: {
+      async readThreadState(setup: AgentChannelSetup) {
+        stateReads += 1;
+        assert.equal(setup.input.threadId, 'petbot:chat:pet:pet-a:user:user-1');
+        return {
+          messages: [],
+          pendingHumanReview: {
+            interruptId: 'interrupt-recovered',
+            review: reviews[0],
+            reviews,
+          },
+          hasPendingContinuation: true,
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
+    now: () => 1000,
+    runChat: async (options) => {
+      runRequests.push(options.request);
+      const projection = fixture.handler.readSessionProjection('user-1');
+      phaseDuringResume = projection?.activeRun?.phase;
+      reviewStatusDuringResume = projection?.activeRun?.reviewAction?.status;
+      return { status: 'completed', reply: 'done after recovery' };
+    },
+  });
+
+  await fixture.handler.handleHumanReviewResponse(fixture.ws, {
+    type: 'human_review_response',
+    requestId: 'req-recovered',
+    actionId: 'interrupt-recovered',
+    reviewId: 'review-2',
+    selectedOptionId: 'approve-2',
+    decisions: [
+      { reviewId: 'review-1', selectedOptionId: 'approve-1' },
+      { reviewId: 'review-2', selectedOptionId: 'approve-2' },
+    ],
+  });
+
+  assert.equal(stateReads, 1);
+  assert.deepEqual(runRequests, [{
+    kind: 'resume',
+    requestId: 'req-recovered',
+    resume: {
+      'interrupt-recovered': {
+        decisions: [
+          { reviewId: 'review-1', selectedOptionId: 'approve-1' },
+          { reviewId: 'review-2', selectedOptionId: 'approve-2' },
+        ],
+      },
+    },
+  }]);
+  assert.equal(phaseDuringResume, 'thinking');
+  assert.equal(reviewStatusDuringResume, 'submitting');
+  assert.equal(fixture.handler.readSessionProjection('user-1')?.activeRun, null);
+
+  await fixture.handler.handleHumanReviewResponse(fixture.ws, {
+    type: 'human_review_response',
+    requestId: 'req-recovered',
+    actionId: 'interrupt-recovered',
+    reviewId: 'review-2',
+    selectedOptionId: 'approve-2',
+    decisions: [
+      { reviewId: 'review-1', selectedOptionId: 'approve-1' },
+      { reviewId: 'review-2', selectedOptionId: 'approve-2' },
+    ],
+  });
+
+  assert.equal(runRequests.length, 1);
+  const duplicateResponse = fixture.sent.at(-1) as { event?: { type?: string } };
+  assert.equal(duplicateResponse.event?.type, 'error');
+});
+
+test('LocalAgentAppChatHandler claims a recovered review by actionId across requestIds', async () => {
+  const review = {
+    id: 'review-shared-action',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  let notifyResumeStarted!: () => void;
+  const resumeStarted = new Promise<void>((resolve) => {
+    notifyResumeStarted = resolve;
+  });
+  let releaseResume!: () => void;
+  const resumeReleased = new Promise<void>((resolve) => {
+    releaseResume = resolve;
+  });
+  let runCount = 0;
+  const { handler, ws, sent } = createHandler({
+    checkpoint: createCheckpoint(['petbot:chat:pet:pet-a:user:user-1']),
+    graphService: {
+      async readThreadState() {
+        return {
+          messages: [],
+          pendingHumanReview: {
+            interruptId: 'interrupt-shared-action',
+            review,
+          },
+          hasPendingContinuation: true,
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
+    runChat: async () => {
+      runCount += 1;
+      notifyResumeStarted();
+      await resumeReleased;
+      return { status: 'completed', reply: 'done' };
+    },
+  });
+  const response = {
+    type: 'human_review_response' as const,
+    actionId: 'interrupt-shared-action',
+    reviewId: review.id,
+    selectedOptionId: 'approve',
+  };
+
+  const firstResponse = handler.handleHumanReviewResponse(ws, {
+    ...response,
+    requestId: 'req-first-envelope',
+  });
+  await resumeStarted;
+  await handler.handleHumanReviewResponse(ws, {
+    ...response,
+    requestId: 'req-second-envelope',
+  });
+  releaseResume();
+  await firstResponse;
+
+  assert.equal(runCount, 1);
+  const duplicate = sent.at(-1) as { requestId?: string; event?: { type?: string } };
+  assert.equal(duplicate.requestId, 'req-second-envelope');
+  assert.equal(duplicate.event?.type, 'error');
+});
+
+test('LocalAgentAppChatHandler retries checkpoint recovery after a failed resume', async () => {
+  const review = {
+    id: 'review-retry',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  let runCount = 0;
+  let stateReads = 0;
+  const { handler, ws } = createHandler({
+    checkpoint: createCheckpoint(['petbot:chat:pet:pet-a:user:user-1']),
+    graphService: {
+      async readThreadState() {
+        stateReads += 1;
+        return {
+          messages: [],
+          pendingHumanReview: {
+            interruptId: 'interrupt-retry',
+            review,
+          },
+          hasPendingContinuation: true,
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
+    runChat: async () => {
+      runCount += 1;
+      if (runCount === 1) {
+        throw new Error('transient resume failure');
+      }
+      return { status: 'completed', reply: 'recovered' };
+    },
+  });
+  const response = {
+    type: 'human_review_response' as const,
+    requestId: 'req-retry',
+    actionId: 'interrupt-retry',
+    reviewId: review.id,
+    selectedOptionId: 'approve',
+  };
+
+  await handler.handleHumanReviewResponse(ws, response);
+  await handler.handleHumanReviewResponse(ws, response);
+
+  assert.equal(runCount, 2);
+  assert.equal(stateReads, 2);
+});
+
+test('LocalAgentAppChatHandler fails closed when a legacy recovery scan is incomplete', async () => {
+  const review = {
+    id: 'review-incomplete',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  let runCount = 0;
+  const { handler, ws, sent } = createHandler({
+    checkpoint: createCheckpoint([
+      'petbot:chat:pet:pet-a:user:user-1',
+      'petbot:chat:pet:pet-a:user:user-2',
+    ]),
+    graphService: {
+      async readThreadState(setup: AgentChannelSetup) {
+        if (setup.input.threadId?.endsWith('user-2')) {
+          throw new Error('checkpoint unavailable');
+        }
+        return {
+          messages: [],
+          pendingHumanReview: {
+            interruptId: 'interrupt-readable',
+            review,
+          },
+          hasPendingContinuation: true,
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
+    runChat: async () => {
+      runCount += 1;
+      return { status: 'completed', reply: 'unexpected' };
+    },
+  });
+
+  await handler.handleHumanReviewResponse(ws, {
+    type: 'human_review_response',
+    requestId: 'req-incomplete',
+    reviewId: review.id,
+    selectedOptionId: 'approve',
+  });
+
+  assert.equal(runCount, 0);
+  const error = sent.at(-1) as { event?: { type?: string } };
+  assert.equal(error.event?.type, 'error');
+});
+
+test('LocalAgentAppChatHandler fails closed when legacy checkpoint review recovery is ambiguous', async () => {
+  const review = {
+    id: 'shared-review',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  let runCount = 0;
+  const { handler, ws, sent } = createHandler({
+    checkpoint: createCheckpoint([
+      'petbot:chat:pet:pet-a:user:user-1',
+      'petbot:chat:pet:pet-a:user:user-2',
+    ]),
+    graphService: {
+      async readThreadState() {
+        return {
+          messages: [],
+          pendingHumanReview: {
+            interruptId: 'interrupt-by-user',
+            review,
+          },
+          hasPendingContinuation: true,
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
+    runChat: async () => {
+      runCount += 1;
+      return { status: 'completed', reply: 'unexpected' };
+    },
+  });
+
+  await handler.handleHumanReviewResponse(ws, {
+    type: 'human_review_response',
+    requestId: 'req-legacy',
+    reviewId: 'shared-review',
+    selectedOptionId: 'approve',
+  });
+
+  assert.equal(runCount, 0);
+  const last = sent.at(-1) as { event?: { type?: string; message?: string } };
+  assert.equal(last.event?.type, 'error');
+  assert.match(last.event?.message ?? '', /已关闭|不存在/);
 });
 
 test('LocalAgentAppChatHandler cancels pending human review with canonical reject option', async () => {

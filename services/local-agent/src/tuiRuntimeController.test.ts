@@ -30,7 +30,6 @@ function pendingReviewState(): TuiState {
         actor: { label: 'Pet', summary: 'summary' },
         runtime: {},
         timeline: [],
-        tokenUsage: null,
         activeRun: {
         requestId: 'req-1',
         phase: 'waiting_human',

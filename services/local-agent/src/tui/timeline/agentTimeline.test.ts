@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { LocalAgentOperationEvent } from '../../events/localAgentEvent';
+import { localAgentOperationKey } from '../../localAgentTimeline';
 import {
   isAgentTimelineMessage,
   operationTimelineEntryFromEvent,
@@ -16,7 +17,6 @@ import {
   selectRunningOperationEntries,
   splitTimelineDisplayForViewport,
 } from './agentTimelineSelectors';
-import { buildOperationPresentation, getOperationPresentationKey } from './operationPresentation';
 import type { AgentTimelineEntry } from './agentTimeline';
 
 test('timelineEntryFromMessageCell includes system message cells in the timeline', () => {
@@ -148,7 +148,7 @@ test('operation timeline terminal events keep raw input for payload renderers', 
   });
 });
 
-test('operation presentation derives stable keys from operation event fields', () => {
+test('shared operation projection derives stable keys from operation event fields', () => {
   const event = operationEvent({
     id: null,
     callId: 'source-call',
@@ -157,8 +157,18 @@ test('operation presentation derives stable keys from operation event fields', (
     summary: undefined,
   });
 
-  assert.equal(getOperationPresentationKey(event), 'source-call');
-  assert.deepEqual(buildOperationPresentation(event), {
+  assert.equal(localAgentOperationKey(event), 'source-call');
+  const entry = operationTimelineEntryFromEvent(event, 1000);
+  assert.deepEqual({
+    operationKey: entry.operationKey,
+    kind: entry.kind,
+    title: entry.title,
+    phase: entry.phase,
+    target: entry.target,
+    summary: entry.summary,
+    details: entry.details,
+    source: entry.operationSource,
+  }, {
     operationKey: 'source-call',
     kind: 'browser.browser_open',
     title: '打开网页',

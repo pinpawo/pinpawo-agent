@@ -3,7 +3,7 @@ import type {
   TuiCoreSessionSnapshot,
   TuiCoreTimelineEntry,
 } from './tui/contracts/tuiCoreContract';
-import type { PendingReviewSnapshot } from './localServerChatHandler';
+import type { ReviewActionSnapshot } from './localServerChatHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import type { TuiHistoryMessage } from './localServerTuiSessions';
 import { buildLocalRuntimeProjection } from './localConfigProjection';
@@ -13,7 +13,7 @@ export function buildLocalServerTuiSnapshot(params: {
   kind: TuiCoreSessionSnapshot['kind'];
   messages: TuiHistoryMessage[];
   deps: LocalServerDeps;
-  pendingReview?: PendingReviewSnapshot | null;
+  pendingReview?: ReviewActionSnapshot | null;
 }): TuiCoreSessionSnapshot {
   const timeline = timelineFromHistoryMessages(params.messages);
   const pendingReview = params.pendingReview ?? null;
@@ -31,7 +31,6 @@ export function buildLocalServerTuiSnapshot(params: {
       : [],
     ...(pendingReview ? {
       activeRunId: pendingReview.requestId,
-      pendingReviewId: pendingReview.reviewId,
     } : {}),
     runtime: buildLocalServerTuiRuntimeSnapshot(params.deps),
   };
@@ -81,7 +80,7 @@ function timelineFromHistoryMessages(messages: TuiHistoryMessage[]): TuiCoreTime
 }
 
 function runFromPendingReview(params: {
-  pendingReview: PendingReviewSnapshot;
+  pendingReview: ReviewActionSnapshot;
   sessionId: string;
   kind: TuiCoreSessionSnapshot['kind'];
   timeline: TuiCoreTimelineEntry[];
@@ -93,13 +92,8 @@ function runFromPendingReview(params: {
     kind: params.kind,
     phase: 'waiting_human',
     timelineEntryIds: params.timeline.map((entry) => entry.id),
-    pendingReview: {
-      requestId: params.pendingReview.requestId,
-      ...(params.pendingReview.interruptId ? { interruptId: params.pendingReview.interruptId } : {}),
-      reviewId: params.pendingReview.reviewId,
-      status: 'waiting',
-      review: params.pendingReview.review,
-      ...(params.pendingReview.reviews ? { reviews: params.pendingReview.reviews } : {}),
+    reviewAction: {
+      ...params.pendingReview.reviewAction,
       ...(petId ? { petId } : {}),
     },
   };

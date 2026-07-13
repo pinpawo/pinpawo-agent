@@ -48,7 +48,7 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-1',
@@ -112,7 +112,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-1',
@@ -165,17 +165,16 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
   assert.equal(event.event?.code, 'review_closed');
 
-  const interruptHandled = await handler.handleInterruptRequest(
+  await handler.handleReviewCancel(
     fakeWs,
     {
-      type: 'interrupt_request',
+      type: 'review.cancel',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
-  assert.equal(interruptHandled, false, 'consumed review route should fall through to inflight interrupt');
-  assert.equal(handleChatCalls.length, 1);
-  assert.equal(sentEvents.length, 1);
+  assert.equal((sentEvents.at(-1) as { event?: { code?: string } }).event?.code, 'review_closed');
 });
 
 test('handleHumanReviewResponse keeps single-review review as batch resume shape', async () => {
@@ -211,7 +210,7 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-1',
@@ -323,7 +322,7 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
   });
 });
 
-test('readPendingReviewSnapshot exposes routeable pending review request ids', async () => {
+test('readReviewActionSnapshot exposes routeable review action request ids', async () => {
   const review = {
     id: 'review-current',
     schemaVersion: 1,
@@ -347,7 +346,7 @@ test('readPendingReviewSnapshot exposes routeable pending review request ids', a
     }),
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-existing',
@@ -355,20 +354,21 @@ test('readPendingReviewSnapshot exposes routeable pending review request ids', a
     actor: { petId: 'pet-a' },
   }, { actorId: 'pet-1' });
 
-  assert.deepEqual(await handler.readPendingReviewSnapshot({ actorId: 'pet-1' } as never), {
+  assert.deepEqual(await handler.readReviewActionSnapshot({ actorId: 'pet-1' } as never), {
     requestId: 'req-existing',
-    interruptId: 'interrupt-1',
-    reviewId: 'review-current',
     sessionId: 'sess-active',
-    review,
-    reviews: [review],
+    reviewAction: {
+      actionId: 'interrupt-1',
+      reviews: [review],
+      status: 'waiting',
+    },
     actor: { petId: 'pet-a' },
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).pendingReviewRoutes.clear();
+  (handler as any).reviewActionRoutes.clear();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-action',
@@ -376,27 +376,30 @@ test('readPendingReviewSnapshot exposes routeable pending review request ids', a
     reviews: [review],
   }, { actorId: 'pet-1' });
 
-  assert.deepEqual(await handler.readPendingReviewSnapshot({ actorId: 'pet-1' } as never), {
+  assert.deepEqual(await handler.readReviewActionSnapshot({ actorId: 'pet-1' } as never), {
     requestId: 'req-action',
-    interruptId: 'interrupt-1',
-    reviewId: 'review-current',
     sessionId: 'sess-active',
-    review,
-    reviews: [review],
+    reviewAction: {
+      actionId: 'interrupt-1',
+      reviews: [review],
+      status: 'waiting',
+    },
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).pendingReviewRoutes.clear();
-  assert.deepEqual(await handler.readPendingReviewSnapshot({ actorId: 'pet-1' } as never), {
+  (handler as any).reviewActionRoutes.clear();
+  assert.deepEqual(await handler.readReviewActionSnapshot({ actorId: 'pet-1' } as never), {
     requestId: 'snapshot:sess-active:review-current',
-    reviewId: 'review-current',
     sessionId: 'sess-active',
-    review,
-    reviews: [review],
+    reviewAction: {
+      actionId: 'request:snapshot:sess-active:review-current:reviews:review-current',
+      reviews: [review],
+      status: 'waiting',
+    },
   });
 });
 
-test('handleInterruptRequest resumes pending review with canonical reject option', async () => {
+test('handleReviewCancel resumes pending review with canonical reject option', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakeWs = {
@@ -435,7 +438,7 @@ test('handleInterruptRequest resumes pending review with canonical reject option
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-1',
@@ -450,16 +453,16 @@ test('handleInterruptRequest resumes pending review with canonical reject option
     },
   }, { actorId: 'pet-1' });
 
-  const handled = await handler.handleInterruptRequest(
+  await handler.handleReviewCancel(
     fakeWs,
     {
-      type: 'interrupt_request',
+      type: 'review.cancel',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(handled, true);
   assert.equal(sentEvents.length, 0);
   assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
@@ -481,7 +484,7 @@ test('handleInterruptRequest resumes pending review with canonical reject option
     },
   });
   assert.deepEqual(forwardedSource, {
-    type: 'interrupt_request',
+    type: 'review.cancel',
     reviewId: 'review-current',
     selectedOptionId: 'reject',
     decisionCount: 1,
@@ -507,7 +510,7 @@ test('handleInterruptRequest resumes pending review with canonical reject option
   assert.equal(event.event?.code, 'review_closed');
 });
 
-test('handleInterruptRequest recovers missing route from active checkpoint review', async () => {
+test('handleReviewCancel recovers missing route from active checkpoint review', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakeWs = {
@@ -546,16 +549,16 @@ test('handleInterruptRequest recovers missing route from active checkpoint revie
     handleChatCalls.push(args);
   };
 
-  const handled = await handler.handleInterruptRequest(
+  await handler.handleReviewCancel(
     fakeWs,
     {
-      type: 'interrupt_request',
+      type: 'review.cancel',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(handled, true);
   assert.equal(sentEvents.length, 0);
   assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
@@ -577,14 +580,14 @@ test('handleInterruptRequest recovers missing route from active checkpoint revie
     },
   });
   assert.deepEqual(forwardedSource, {
-    type: 'interrupt_request',
+    type: 'review.cancel',
     reviewId: 'review-current',
     selectedOptionId: 'reject',
     decisionCount: 1,
   });
 });
 
-test('handleInterruptRequest restores pending review when no reject option exists', async () => {
+test('handleReviewCancel restores pending review when no reject option exists', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakeWs = {
@@ -610,7 +613,7 @@ test('handleInterruptRequest restores pending review when no reject option exist
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-1',
@@ -623,16 +626,16 @@ test('handleInterruptRequest restores pending review when no reject option exist
     },
   }, { actorId: 'pet-1' });
 
-  const handled = await handler.handleInterruptRequest(
+  await handler.handleReviewCancel(
     fakeWs,
     {
-      type: 'interrupt_request',
+      type: 'review.cancel',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(handled, true);
   assert.equal(handleChatCalls.length, 0);
   assert.equal(sentEvents.length, 2);
   const notice = sentEvents[0] as { type: string; event?: { type: string; message: string } };
@@ -687,7 +690,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-1',
@@ -772,7 +775,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-1',
@@ -837,7 +840,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-1',
@@ -963,7 +966,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
     handleChatCalls.push(args);
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).recordPendingReviewRoute({
+  (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
     interruptId: 'interrupt-1',
     requestId: 'req-1',

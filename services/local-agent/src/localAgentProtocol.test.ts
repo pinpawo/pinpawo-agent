@@ -24,6 +24,14 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
       userId: 'user-1',
     },
   );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'interrupt_request',
+      requestId: 'req-1',
+      actionId: 123,
+    })),
+    null,
+  );
   assert.equal(parseLocalAgentClientMessage('{bad json'), null);
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'chat_request', message: 'missing request' })), null);
   assert.equal(
@@ -78,6 +86,7 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     parseLocalAgentClientMessage(JSON.stringify({
       type: 'human_review_response',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
       reviewId: 'review-1',
       selectedOptionId: 'respond',
       input: { message: 'list files first' },
@@ -85,10 +94,64 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     {
       type: 'human_review_response',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
       reviewId: 'review-1',
       selectedOptionId: 'respond',
       input: { message: 'list files first' },
     },
+  );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'review.cancel',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+    })),
+    {
+      type: 'review.cancel',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+    },
+  );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'run.interrupt',
+      requestId: 'req-1',
+    })),
+    { type: 'run.interrupt', requestId: 'req-1' },
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'run.interrupt',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'review.cancel',
+      requestId: 'req-1',
+    })),
+    null,
+  );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'interrupt_request',
+      requestId: 'legacy-review',
+      actionId: 'interrupt-legacy',
+    })),
+    {
+      type: 'review.cancel',
+      requestId: 'legacy-review',
+      actionId: 'interrupt-legacy',
+    },
+  );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'interrupt_request',
+      requestId: 'legacy-run',
+    })),
+    { type: 'run.interrupt', requestId: 'legacy-run' },
   );
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({

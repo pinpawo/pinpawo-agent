@@ -41,14 +41,17 @@ test('buildLocalServerTuiSnapshot returns native core snapshot shape', () => {
     } as LocalServerDeps,
     pendingReview: {
       requestId: 'req-review',
-      reviewId: 'review-1',
       sessionId: 'chat:pet-a',
       actor: { petId: 'pet-a' },
-      review: {
-        id: 'review-1',
-        schemaVersion: 1,
-        view: { kind: 'plain', body: 'Approve?' },
-        options: [],
+      reviewAction: {
+        actionId: 'interrupt-1',
+        status: 'waiting',
+        reviews: [{
+          id: 'review-1',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [],
+        }],
       },
     },
   });
@@ -63,8 +66,8 @@ test('buildLocalServerTuiSnapshot returns native core snapshot shape', () => {
     '2026-06-01T01:00:00.000Z',
   );
   assert.equal(snapshot.activeRunId, 'req-review');
-  assert.equal(snapshot.runs[0]?.pendingReview?.review?.id, 'review-1');
-  assert.equal(snapshot.runs[0]?.pendingReview?.petId, 'pet-a');
+  assert.equal(snapshot.runs[0]?.reviewAction?.reviews[0]?.id, 'review-1');
+  assert.equal(snapshot.runs[0]?.reviewAction?.petId, 'pet-a');
   assert.equal(snapshot.runtime?.model, 'test-model');
   assert.equal(snapshot.runtime?.contextWindow, 32000);
   assert.equal(snapshot.runtime?.cwd, '/tmp/work');

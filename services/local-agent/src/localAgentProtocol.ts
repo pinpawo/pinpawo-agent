@@ -21,9 +21,15 @@ export type ChatRequestMessage = {
   userId?: string;
 };
 
-export type InterruptRequestMessage = {
-  type: 'interrupt_request';
+export type RunInterruptMessage = {
+  type: 'run.interrupt';
   requestId: string;
+};
+
+export type ReviewCancelMessage = {
+  type: 'review.cancel';
+  requestId: string;
+  actionId: string;
 };
 
 export type NewSessionMessage = {
@@ -50,6 +56,7 @@ export type StudioRequestMessage = {
 export type HumanReviewResponseMessage = {
   type: 'human_review_response';
   requestId: string;
+  actionId?: string;
   reviewId: string;
   selectedOptionId: string;
   input?: Record<string, unknown>;
@@ -58,7 +65,8 @@ export type HumanReviewResponseMessage = {
 
 export type LocalAgentClientMessage =
   | ChatRequestMessage
-  | InterruptRequestMessage
+  | RunInterruptMessage
+  | ReviewCancelMessage
   | NewSessionMessage
   | RuntimeConfigUpdateMessage
   | StudioRequestMessage
@@ -355,27 +363,49 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
     };
   }
   if (type === 'human_review_response') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
     const requestId = readString(record, 'requestId');
+    const actionId = readOptionalString(record, 'actionId');
     const reviewId = readOptionalString(record, 'reviewId');
     const selectedOptionId = readOptionalString(record, 'selectedOptionId');
     const input = readRecord(record, 'input');
     const decisions = readReviewResponses(record, 'decisions');
     if (record.input !== undefined && !input) return null;
     if (record.decisions !== undefined && !decisions) return null;
+    if (record.actionId !== undefined && !actionId) return null;
     if (!requestId || !reviewId || !selectedOptionId) return null;
     return {
       type,
       requestId,
+      ...(actionId ? { actionId } : {}),
       reviewId,
       selectedOptionId,
       ...(input ? { input } : {}),
       ...(decisions ? { decisions } : {}),
     };
   }
-  if (type === 'interrupt_request') {
+  if (type === 'run.interrupt') {
+    if (!hasOnlyKeys(record, ['type', 'requestId'])) return null;
     const requestId = readString(record, 'requestId');
     return requestId ? { type, requestId } : null;
+  }
+  if (type === 'review.cancel') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId'])) return null;
+    const requestId = readString(record, 'requestId');
+    const actionId = readString(record, 'actionId');
+    return requestId && actionId ? { type, requestId, actionId } : null;
+  }
+  // Compatibility boundary for clients predating the split control messages.
+  // Normalize immediately so downstream code never infers intent from actionId?.
+  if (type === 'interrupt_request') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId'])) return null;
+    const requestId = readString(record, 'requestId');
+    const actionId = readOptionalString(record, 'actionId');
+    if (record.actionId !== undefined && !actionId) return null;
+    if (!requestId) return null;
+    return actionId
+      ? { type: 'review.cancel', requestId, actionId }
+      : { type: 'run.interrupt', requestId };
   }
   if (type === 'new_session') {
     return {

@@ -34,9 +34,8 @@ test('TUI run registry contract is explicit and deterministic', () => {
       kind: 'chat',
       phase: 'waiting_human',
       timelineEntryIds: [],
-      pendingReview: {
-        requestId: 'req-2',
-        reviewId: 'review-1',
+      reviewAction: {
+        actionId: 'interrupt-1',
         status: 'waiting',
       },
       startedAt: 2000,
@@ -54,5 +53,5 @@ test('TUI run registry contract is explicit and deterministic', () => {
   assert.equal(isRunTerminal('completed'), true);
   assert.equal(isRunTerminal('streaming'), false);
   assert.equal(state.sessions['sess-1']?.activeRunId, 'req-2');
-  assert.equal(state.runs['req-2']?.pendingReview?.status, 'waiting');
+  assert.equal(state.runs['req-2']?.reviewAction?.status, 'waiting');
 });

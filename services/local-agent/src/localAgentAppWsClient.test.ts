@@ -33,8 +33,11 @@ function createHandlers(events: string[] = []): LocalAgentAppWsClientHandlers {
     onNewSession: async (_ws, message) => {
       events.push(`new:${message.userId ?? ''}`);
     },
-    onInterruptRequest: async (_ws, message) => {
-      events.push(`interrupt:${message.requestId}`);
+    onReviewCancel: async (_ws, message) => {
+      events.push(`review-cancel:${message.requestId}:${message.actionId}`);
+    },
+    onRunInterrupt: async (_ws, message) => {
+      events.push(`run-interrupt:${message.requestId}`);
     },
     onHumanReviewResponse: async (_ws, message) => {
       events.push(`review:${message.requestId}:${message.reviewId}:${message.selectedOptionId}`);
@@ -69,8 +72,13 @@ test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', 
     userId: 'user-1',
   }), handlers);
   dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
-    type: 'interrupt_request',
+    type: 'run.interrupt',
     requestId: 'req-1',
+  }), handlers);
+  dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
+    type: 'review.cancel',
+    requestId: 'req-1',
+    actionId: 'action-1',
   }), handlers);
   dispatchLocalAgentAppWebSocketMessage(ws, JSON.stringify({
     type: 'human_review_response',
@@ -98,7 +106,8 @@ test('dispatchLocalAgentAppWebSocketMessage routes app chat protocol messages', 
   assert.deepEqual(events, [
     'chat:req-1',
     'new:user-1',
-    'interrupt:req-1',
+    'run-interrupt:req-1',
+    'review-cancel:req-1:action-1',
     'review:req-1:review-1:approve',
     'studio:studio-1:plan this',
   ]);

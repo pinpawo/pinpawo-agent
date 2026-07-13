@@ -29,7 +29,7 @@ export function OverlayLayer(props: {
           petId={overlay.request.petId}
           width={props.model.width}
           selectedIndex={overlay.selectedIndex}
-          reviewIndex={overlay.request.reviewIndex}
+          reviewIndex={overlay.request.decisions.length}
           reviewCount={overlay.request.reviews.length}
         />
       );

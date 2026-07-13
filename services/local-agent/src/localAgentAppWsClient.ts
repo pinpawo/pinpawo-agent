@@ -6,8 +6,9 @@ import {
   sendLocalAgentMessage,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
-  type InterruptRequestMessage,
   type NewSessionMessage,
+  type ReviewCancelMessage,
+  type RunInterruptMessage,
   type StudioRequestMessage,
 } from './localAgentProtocol';
 
@@ -20,7 +21,8 @@ export type LocalAgentAppWsClientHandlers = {
   onChatRequest: (ws: WebSocket, message: ChatRequestMessage) => MaybePromise<void>;
   onStudioRequest: (ws: WebSocket, message: StudioRequestMessage) => MaybePromise<void>;
   onNewSession: (ws: WebSocket, message: NewSessionMessage) => MaybePromise<void>;
-  onInterruptRequest: (ws: WebSocket, message: InterruptRequestMessage) => MaybePromise<void>;
+  onReviewCancel: (ws: WebSocket, message: ReviewCancelMessage) => MaybePromise<void>;
+  onRunInterrupt: (ws: WebSocket, message: RunInterruptMessage) => MaybePromise<void>;
   onHumanReviewResponse: (ws: WebSocket, message: HumanReviewResponseMessage) => MaybePromise<void>;
   onClose: (ws: WebSocket) => MaybePromise<void>;
 };
@@ -100,8 +102,10 @@ export function dispatchLocalAgentAppWebSocketMessage(
       runHandler('handleStudioRequest', () => handlers.onStudioRequest(ws, msg), logError);
     } else if (msg.type === 'new_session') {
       runHandler('handleNewSession', () => handlers.onNewSession(ws, msg), logError);
-    } else if (msg.type === 'interrupt_request') {
-      runHandler('handleInterruptRequest', () => handlers.onInterruptRequest(ws, msg), logError);
+    } else if (msg.type === 'review.cancel') {
+      runHandler('handleReviewCancel', () => handlers.onReviewCancel(ws, msg), logError);
+    } else if (msg.type === 'run.interrupt') {
+      runHandler('handleRunInterrupt', () => handlers.onRunInterrupt(ws, msg), logError);
     } else if (msg.type === 'human_review_response') {
       runHandler('handleHumanReviewResponse', () => handlers.onHumanReviewResponse(ws, msg), logError);
     } else if (msg.type === 'ping') {

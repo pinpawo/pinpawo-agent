@@ -871,7 +871,8 @@ test('a completed subagent announce reaches the decision, while answer node only
   });
 
   // A new turn re-evaluates intent (discovery may run); the decision still sees
-  // the prior announce as context via recent announces.
+  // the prior announce as context — it lives in the main queue as a handed-off
+  // copy, surfaced via mainConversationMessages.
   assert.match(decisionInput, /文件读取完成，lint 已通过/);
   assert.match(decisionInput, /END_OF_FULL_SUBAGENT_RESULT/);
   // The dedicated answer node generates the final reply...

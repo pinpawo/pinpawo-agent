@@ -149,8 +149,10 @@ export function laneMessages(
 
 /**
  * Build message list for orchestration decision nodes.
- * Decision nodes see the user-facing conversation only. Subagent announce history
- * is recalled separately from lane-tagged messages.
+ * Decision nodes see the user-facing conversation only — i.e. everything that is
+ * not lane-tagged. A completed subagent's announce reaches this view because
+ * handoff copies it into the main queue (untagged); there is no separate recall
+ * from lane-tagged messages.
  */
 export function mainConversationMessages(messages: BaseMessage[]): BaseMessage[] {
   return messages.filter((message) => !getMessageLane(message));

@@ -36,7 +36,6 @@ import {
   laneMessages,
   mainConversationMessages,
   readLatestAnnounce,
-  readRecentAnnounces,
   readMessageCreatedAtUtc,
   setPinpetMeta,
   tagNewLaneMessages,
@@ -872,7 +871,8 @@ test('a completed subagent announce reaches the decision, while answer node only
   });
 
   // A new turn re-evaluates intent (discovery may run); the decision still sees
-  // the prior announce as context via recent announces.
+  // the prior announce as context — it lives in the main queue as a handed-off
+  // copy, surfaced via mainConversationMessages.
   assert.match(decisionInput, /文件读取完成，lint 已通过/);
   assert.match(decisionInput, /END_OF_FULL_SUBAGENT_RESULT/);
   // The dedicated answer node generates the final reply...
@@ -2952,7 +2952,7 @@ test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () =
   });
 });
 
-test('readRecentAnnounces strips handoff artifact footer and preserves artifact refs', () => {
+test('buildSubagentHandoff appends handoff artifact footer to the main-queue copy', () => {
   const userAsk = new HumanMessage('请帮我做一次探索');
   const announce = new AIMessage('探索已完成，产出三条关键结论。');
   announce.id = 'm-announce-3';
@@ -2976,7 +2976,7 @@ test('readRecentAnnounces strips handoff artifact footer and preserves artifact 
         mimeType: 'text/markdown',
         uri: 'capability-artifact://thread/t1/delegation/d-announce-2/artifact/artifact-1',
         title: 'Explore report',
-        preview: '这是一个用于验证 footer 解析的短 preview。',
+        preview: '这是一个用于验证 footer 渲染的短 preview。',
         capabilityId: 'explore',
         delegationId: 'd-announce-2',
         runId: 'run-2',
@@ -2995,17 +2995,12 @@ test('readRecentAnnounces strips handoff artifact footer and preserves artifact 
 
   assert.ok(update);
   const copy = update.find((message) => message instanceof AIMessage && message.id !== 'm-announce-3') as AIMessage;
-  const announces = readRecentAnnounces([copy]);
-  assert.equal(announces.length, 1);
-  const announcement = announces[0];
-  assert.equal(announcement.text, '探索已完成，产出三条关键结论。');
-  assert.deepEqual(announcement.artifactRefs?.length, 2);
-  assert.equal(announcement.artifactRefs?.[0]?.kind, 'report');
-  assert.match(announcement.artifactRefs?.[0]?.uri ?? '', /artifact-1$/);
-
   const copyText = String(copy.content);
-  assert.match(copyText, /<artifacts>/);
-  assert.match(copyText, /artifact-1/);
+  assert.match(copyText, /^探索已完成，产出三条关键结论。/);
+  assert.match(copyText, /<artifacts>[\s\S]*<\/artifacts>\s*$/);
+  assert.equal((copyText.match(/- kind=/g) ?? []).length, 2);
+  assert.match(copyText, /kind=report/);
+  assert.match(copyText, /uri=capability-artifact:\/\/thread\/t1\/delegation\/d-announce-2\/artifact\/artifact-1/);
 });
 
 test('buildSubagentHandoff clips and bounds handoff artifact footer refs', () => {
@@ -3042,39 +3037,15 @@ test('buildSubagentHandoff clips and bounds handoff artifact footer refs', () =>
 
   assert.ok(update);
   const copy = update.find((message) => message instanceof AIMessage && message.id !== 'm-announce-4') as AIMessage;
-  const announces = readRecentAnnounces([copy]);
-  const announcedRefs = announces[0]?.artifactRefs ?? [];
-  assert.equal(announcedRefs.length, 5);
-  assert.ok(announcedRefs.every((ref) => ref.uri.includes('…') || ref.title?.includes('…') || ref.preview?.includes('…')));
-});
-
-test('readRecentAnnounces parses handoff artifact footer values with spaces and equals', () => {
-  const handoffCopy = new AIMessage(
-    [
-      '探索完成，给你最终结论。',
-      '<artifacts>',
-      '- kind=report',
-      '  capability=explore',
-      '  uri=capability-artifact://thread/t4/delegation/d-space/artifact/result?query=a=b&flag=1',
-      '  title=含 空格 与 等号 a=b 的标题',
-      '  preview=preview 里包含 空格 与 a=b 等号，仍应完整保留。',
-      '</artifacts>',
-    ].join('\n'),
-  );
-  setPinpetMeta(handoffCopy, {
-    handoffFrom: 'capability:explore',
-    delegationId: 'd-space',
-    runId: 'run-space',
-    task: '空间+等号场景',
-  });
-
-  const recalls = readRecentAnnounces([handoffCopy]);
-  assert.equal(recalls.length, 1);
-  const firstArtifact = recalls[0]?.artifactRefs?.[0];
-  assert.equal(firstArtifact?.uri, 'capability-artifact://thread/t4/delegation/d-space/artifact/result?query=a=b&flag=1');
-  assert.equal(firstArtifact?.title, '含 空格 与 等号 a=b 的标题');
-  assert.equal(firstArtifact?.preview, 'preview 里包含 空格 与 a=b 等号，仍应完整保留。');
-  assert.equal(recalls[0]?.text, '探索完成，给你最终结论。');
+  const copyText = String(copy.content);
+  const footerEntries = copyText.match(/- kind=/g) ?? [];
+  assert.equal(footerEntries.length, 5);
+  const uriLines = copyText.split('\n').filter((line) => line.startsWith('  uri='));
+  assert.equal(uriLines.length, 5);
+  assert.ok(uriLines.every((line) => line.includes('…')));
+  const previewLines = copyText.split('\n').filter((line) => line.startsWith('  preview='));
+  assert.equal(previewLines.length, 5);
+  assert.ok(previewLines.every((line) => line.includes('…')));
 });
 
 test('buildSubagentHandoff returns null when the delegation has no announce text', () => {
@@ -3679,17 +3650,6 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   });
   // No lane-tagged messages for this delegation remain.
   assert.equal(stateMessages.filter((m) => getMessageLane(m) === 'general').length, 0);
-
-  // readRecentAnnounces must still recall the announce after handoff — it now
-  // lives in the main queue as a handed-off copy, not in the (wiped) lane.
-  const recalled = readRecentAnnounces(stateMessages);
-  assert.equal(recalled.length, 1);
-  assert.deepEqual(recalled[0], {
-    lane: 'general',
-    delegationId: 'task-complete',
-    task: '检查项目并汇报',
-    text: '检查完成，测试脚本是 node --test。',
-  });
 });
 
 test('handoff after a resumed delegation wipes the whole delegation lane including old progress', () => {

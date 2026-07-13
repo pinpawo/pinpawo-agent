@@ -12,7 +12,6 @@ import { indentXmlBlock, MAX_DECISION_RUN_DELEGATIONS, xmlTextBlock } from './sh
 import { isDelegationBriefingMessage } from '../delegationBriefing';
 
 const MAX_RECENT_MAIN_MESSAGES = 6;
-const MAX_RECENT_ANNOUNCE_CONTEXT = 5;
 const MAX_CONTEXT_SUMMARIES = 2;
 const MAX_RECENT_CAPABILITY_ARTIFACTS = 6;
 
@@ -90,32 +89,6 @@ export function buildRouteTargetsContext(params: {
   } else {
     lines.push('', 'custom capability：不可用');
   }
-  return lines.join('\n');
-}
-
-export function buildRecentSubagentAnnounceContext(announces: SubagentAnnounce[]): string {
-  if (announces.length === 0) return '';
-  const lines = ['最近 subagent announce（用于理解“之前/刚刚/继续/完成了吗”等指代）：'];
-  for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
-    lines.push(`- ${item.delegationId ? `[${item.delegationId}] ` : ''}${item.lane}`);
-    if (item.task) lines.push(`  delegated task：${clipForPrompt(item.task, 140)}`);
-    if (item.text) lines.push(`  返回摘要：${clipForPrompt(item.text, 220)}`);
-  }
-  return lines.join('\n');
-}
-
-function buildRecentSubagentAnnounceXmlContext(announces: SubagentAnnounce[]): string | null {
-  if (announces.length === 0) return null;
-  const lines = ['<recent_subagent_announces purpose="coreference">'];
-  for (const item of announces.slice(-MAX_RECENT_ANNOUNCE_CONTEXT)) {
-    lines.push('  <announce>');
-    if (item.delegationId) lines.push(`    <delegation_id>${item.delegationId}</delegation_id>`);
-    lines.push(`    <lane>${item.lane}</lane>`);
-    if (item.task) lines.push(indentXmlBlock(xmlTextBlock('task', clipForPrompt(item.task, 140)), 4));
-    if (item.text) lines.push(indentXmlBlock(xmlTextBlock('summary', item.text), 4));
-    lines.push('  </announce>');
-  }
-  lines.push('</recent_subagent_announces>');
   return lines.join('\n');
 }
 
@@ -218,13 +191,11 @@ function buildRecentMessagesXmlContext(messages: BaseMessage[]): string | null {
 export function buildPreparedRequestContext(params: {
   latestUserRequest: string | null;
   recentMessages: BaseMessage[];
-  recentAnnounces: SubagentAnnounce[];
   contextSummaries?: string[];
   capabilityArtifacts?: CapabilityArtifactRef[];
 }): string {
   const compactionSummaryContext = buildCompactionSummaryXmlContext(params.contextSummaries);
   const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
-  const recentAnnouncesContext = buildRecentSubagentAnnounceXmlContext(params.recentAnnounces);
   const recentMessagesContext = buildRecentMessagesXmlContext(params.recentMessages);
   return [
     '<user_intent_context>',
@@ -233,7 +204,6 @@ export function buildPreparedRequestContext(params: {
       : '  <user_request missing="true" />',
     compactionSummaryContext ? indentXmlBlock(compactionSummaryContext, 2) : null,
     artifactContext ? indentXmlBlock(xmlTextBlock('capability_artifacts', artifactContext), 2) : null,
-    recentAnnouncesContext ? indentXmlBlock(recentAnnouncesContext, 2) : null,
     recentMessagesContext ? indentXmlBlock(recentMessagesContext, 2) : null,
     '</user_intent_context>',
   ].filter((line) => line !== null).join('\n');

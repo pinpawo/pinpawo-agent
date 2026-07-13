@@ -39,7 +39,7 @@
 
 ### 语义
 
-- 委派状态变为 `completed` 的那一刻，该 delegationId 的 lane 消息**只保留 announce 一条**，其余全部清除——包括纯文本 AI 中间笔记。依据：完成后的下游消费者只有三个，全部只读 announce——决策节点（`readLatestAnnounce` / `readRecentAnnounces`）、compaction（`formatLaneAnnounceForSummary`）、handoff 转发（previousReport）。中间笔记的服务对象是"本任务的后续迭代"，任务完成即失去全部读者；结构化结果与长内容应在折叠前通过 `CapabilityArtifactRef` / `resultSchema` 定型，不依赖完成后的 lane transcript。
+- 委派状态变为 `completed` 的那一刻，该 delegationId 的 lane 消息**只保留 announce 一条**，其余全部清除——包括纯文本 AI 中间笔记。依据：完成后的下游消费者只有三个，全部只读 announce——决策节点（`readLatestAnnounce`；全局 `readRecentAnnounces` recall 路径已在 PR #372 删除，completed announce 改由 main handoff 复制进主队列后经 `mainConversationMessages()` 消费）、compaction（`formatLaneAnnounceForSummary`）、handoff 转发（previousReport）。中间笔记的服务对象是"本任务的后续迭代"，任务完成即失去全部读者；结构化结果与长内容应在折叠前通过 `CapabilityArtifactRef` / `resultSchema` 定型，不依赖完成后的 lane transcript。
 - **超出 announce 的收割走 `resultSchema` / result artifact，不要回头保留笔记**：announce 是给人/下游 LLM 读的自然语言结论，`kind: "result"` artifact（schema 校验后以 `CapabilityArtifactRef` 进 state）是给程序读的结构化收割通道——两者都在折叠前定型。将来 memory 层若要收割探索发现，正确做法是给该能力定义 `resultSchema`（与 #75 "ExploreResult schema 延后到需要时再做"对齐），而不是改折叠逻辑。折叠清掉的只是产生 announce / result 的过程性废料。
 - **当前 completed announce 是完整 handoff 结果，不是 preview**：`delegation_outcome` / 父 agent 必须能读取刚返回 announce 的完整文本来判断是否 finish、是否继续委派、以及如何组织给用户的最终回复。`resultPreview`、最近任务列表、compaction summary 和 artifact preview 可以有界裁剪，但它们不能替代当前 completed announce 的文本。
 - **artifact 不替代 announce，而是承载 announce 放不下或不该放的本体**：长结构化 JSON、长报告、图片/视频/PDF/文件包、跨 turn 复用资料，应在折叠前写成 `CapabilityArtifactRef`。此时 announce 仍要说明用户可读结论、关键发现、以及相关 artifact ref/title/preview；父 agent 默认只读 bounded artifact preview，不读 artifact 全文。

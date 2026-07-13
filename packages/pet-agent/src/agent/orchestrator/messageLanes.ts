@@ -2,7 +2,7 @@ import { AIMessage, RemoveMessage, type BaseMessage } from '@langchain/core/mess
 import { randomUUID } from 'node:crypto';
 import type { MessageLane, PinpetMessageLane, SubagentAnnounce, SubagentCompletionReason } from './types';
 import type { CapabilityArtifactRef } from '../../types/artifact';
-import { parseHandoffArtifactFooter, formatHandoffArtifactRefsForMessage } from './artifacts/handoff';
+import { formatHandoffArtifactRefsForMessage } from './artifacts/handoff';
 import { messageHasToolCalls, readMessageToolCallIds, readToolResultCallId } from '../../utils/messages';
 import { readMessageText } from './utils';
 
@@ -149,8 +149,10 @@ export function laneMessages(
 
 /**
  * Build message list for orchestration decision nodes.
- * Decision nodes see the user-facing conversation only. Subagent announce history
- * is recalled separately from lane-tagged messages.
+ * Decision nodes see the user-facing conversation only — i.e. everything that is
+ * not lane-tagged. A completed subagent's announce reaches this view because
+ * handoff copies it into the main queue (untagged); there is no separate recall
+ * from lane-tagged messages.
  */
 export function mainConversationMessages(messages: BaseMessage[]): BaseMessage[] {
   return messages.filter((message) => !getMessageLane(message));
@@ -357,30 +359,6 @@ function readTaggedAnnounce(message: BaseMessage): SubagentAnnounce | null {
   };
 }
 
-/**
- * Read an announce from either an in-flight lane-tagged announce (still in its
- * lane) OR a handed-off copy that now lives in the main queue. After handoff the
- * lane announce is gone, so callers that want "the recent announces" must also
- * recall them from the main-queue copies (provenance via handoffFrom).
- */
-function readAnnounceFromAnyMessage(message: BaseMessage): SubagentAnnounce | null {
-  const tagged = readTaggedAnnounce(message);
-  if (tagged) return tagged;
-  const handoff = getMessageHandoffSource(message);
-  if (!handoff || !isDelegationLane(handoff.handoffFrom)) return null;
-  const parsed = parseHandoffArtifactFooter(readMessageText(message));
-  const announce: SubagentAnnounce = {
-    lane: handoff.handoffFrom,
-    delegationId: handoff.delegationId || null,
-    task: handoff.task,
-    text: parsed.text || null,
-  };
-  if (parsed.artifactRefs.length > 0) {
-    announce.artifactRefs = parsed.artifactRefs;
-  }
-  return announce;
-}
-
 function readLatestAnnounceMessage(
   messages: BaseMessage[],
   options: { runId?: string | null; delegationId?: string | null } = {},
@@ -409,26 +387,4 @@ export function readLatestAnnounceCompletionReason(
 ): SubagentCompletionReason | null {
   const message = readLatestAnnounceMessage(messages, options);
   return message ? getMessageCompletionReason(message) : null;
-}
-
-export function readRecentAnnounces(messages: BaseMessage[], limit = 5): SubagentAnnounce[] {
-  const announces: SubagentAnnounce[] = [];
-  const seen = new Set<string>();
-
-  // Recall announces from BOTH still-in-flight lane announces and handed-off
-  // copies in the main queue, so "recent announces" survives handoff (which wipes
-  // the lane). Dedupe by delegationId so a lane announce and its later main copy
-  // count once.
-  for (let i = messages.length - 1; i >= 0 && announces.length < limit; i--) {
-    const message = messages[i];
-    const announce = readAnnounceFromAnyMessage(message);
-    if (!announce) continue;
-    const key = announce.delegationId
-      ?? `${announce.lane}:${getMessageTurnId(message) ?? 'unknown'}:${i}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    announces.push(announce);
-  }
-
-  return announces.reverse();
 }

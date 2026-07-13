@@ -24,11 +24,11 @@ The TUI reducer adapts TUI actions and presentation text into these inputs. Comp
 
 ## Hosted chat adapter
 
-The hosted chat adapter folds accepted user input, runtime events, review actions, interrupts, and terminal state through the same reducer as the TUI. It keeps this projection process-local; the existing event and control wire protocol remains compatible and does not add session patches or revision numbers.
+The hosted chat adapter folds accepted user input, runtime events, review actions, interrupts, and terminal state through the same reducer as the TUI. Runtime events rejected by the shared ownership rules are not forwarded to the hosted wire. The process-local projection evicts least-recently-updated idle sessions above its retention limit while always retaining active runs; the existing event and control wire protocol remains compatible and does not add session patches or revision numbers.
 
 Before an operation event reaches either the hosted projection or the wire, the adapter removes `raw`. Hosted clients derive operation UI from `title`, `target`, `summary`, and `details`.
 
-Pending chat reviews are durable in LangGraph checkpoints. If an in-memory review route is lost after a restart or websocket route change, the hosted adapter scans the actor's app-chat threads and reconstructs the route from checkpoint state. New clients identify the continuation with `actionId` (the checkpoint interrupt ID). Legacy responses without `actionId` may recover by `reviewId` only when exactly one pending review matches; ambiguous matches fail closed. Decisions remain ordered as supplied by the review batch, and consumed request IDs reject duplicate submissions within the process.
+Pending chat reviews are durable in LangGraph checkpoints. If an in-memory review route is lost after a restart or websocket route change, the hosted adapter scans the actor's app-chat threads and reconstructs the route from checkpoint state. New clients identify the continuation with `actionId` (the checkpoint interrupt ID), which is also the concurrency and duplicate-protection key. A failed or interrupted resume releases its action claim and forces the next attempt to re-read checkpoint authority. Legacy responses without `actionId` may recover by `reviewId` only when exactly one pending review matches and every candidate thread was readable; ambiguity or an incomplete scan fails closed. Decisions remain ordered as supplied by the review batch.
 
 Studio review batching and backend persistence changes are outside this compatibility step.
 

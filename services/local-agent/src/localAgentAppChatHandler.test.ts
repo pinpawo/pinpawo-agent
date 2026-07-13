@@ -74,7 +74,7 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
   const ws = createFakeWebSocket(sent);
   const handler = new LocalAgentAppChatHandler({
     graphService: {} as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
-    checkpoint: {} as BaseCheckpointSaver,
+    checkpoint: createCheckpoint([]),
     deleteThread: async (threadId) => {
       deletedThreads.push(threadId);
     },
@@ -347,7 +347,7 @@ test('LocalAgentAppChatHandler settles the previous run before projecting replac
   const firstStarted = new Promise<void>((resolve) => {
     notifyFirstStarted = resolve;
   });
-  const { handler, ws } = createHandler({
+  const { handler, ws, sent } = createHandler({
     now: () => 1000,
     runChat: async (options) => {
       if (options.request.requestId !== 'req-old') {
@@ -363,6 +363,12 @@ test('LocalAgentAppChatHandler settles the previous run before projecting replac
       assert.ok(signal);
       await new Promise<void>((resolve) => {
         signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+      options.emitEvent({
+        type: 'message.delta',
+        requestId: 'req-old',
+        role: 'assistant',
+        text: 'late stale output',
       });
       return { status: 'interrupted', reply: '' };
     },
@@ -395,6 +401,10 @@ test('LocalAgentAppChatHandler settles the previous run before projecting replac
       .map((entry) => entry.requestId),
     ['req-old', 'req-new'],
   );
+  assert.equal(
+    sent.some((item) => JSON.stringify(item).includes('late stale output')),
+    false,
+  );
 });
 
 test('LocalAgentAppChatHandler keeps app chat session start time stable per user thread', async () => {
@@ -416,6 +426,85 @@ test('LocalAgentAppChatHandler keeps app chat session start time stable per user
   assert.equal(buildInputs.length, 2);
   assert.equal(typeof buildInputs[0]?.sessionStartedAt, 'string');
   assert.equal(buildInputs[1]?.sessionStartedAt, buildInputs[0]?.sessionStartedAt);
+});
+
+test('LocalAgentAppChatHandler bounds hosted session projections by recency', async () => {
+  const { handler, ws } = createHandler({ maxSessionProjections: 2 });
+
+  for (const userId of ['user-1', 'user-2', 'user-3']) {
+    await handler.handleChatRequest(ws, {
+      type: 'chat_request',
+      requestId: `req-${userId}`,
+      message: userId,
+      userId,
+    });
+  }
+
+  assert.equal(handler.readSessionProjection('user-1'), null);
+  assert.ok(handler.readSessionProjection('user-2'));
+  assert.ok(handler.readSessionProjection('user-3'));
+});
+
+test('LocalAgentAppChatHandler retains active projections above the idle retention limit', async () => {
+  let notifyFirstStarted!: () => void;
+  const firstStarted = new Promise<void>((resolve) => {
+    notifyFirstStarted = resolve;
+  });
+  let notifySecondStarted!: () => void;
+  const secondStarted = new Promise<void>((resolve) => {
+    notifySecondStarted = resolve;
+  });
+  let releaseFirst!: () => void;
+  const firstReleased = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  let releaseSecond!: () => void;
+  const secondReleased = new Promise<void>((resolve) => {
+    releaseSecond = resolve;
+  });
+  const { handler, ws } = createHandler({
+    maxSessionProjections: 1,
+    isCurrentSocket: () => true,
+    runChat: async (options) => {
+      options.emitEvent({
+        type: 'message.delta',
+        requestId: options.request.requestId,
+        role: 'assistant',
+        text: options.request.requestId,
+      });
+      if (options.request.requestId === 'req-active-1') {
+        notifyFirstStarted();
+        await firstReleased;
+      } else {
+        notifySecondStarted();
+        await secondReleased;
+      }
+      return { status: 'completed', reply: 'done' };
+    },
+  });
+  const secondWs = createFakeWebSocket([]);
+
+  const firstRun = handler.handleChatRequest(ws, {
+    type: 'chat_request',
+    requestId: 'req-active-1',
+    message: 'first',
+    userId: 'user-active-1',
+  });
+  await firstStarted;
+  const secondRun = handler.handleChatRequest(secondWs, {
+    type: 'chat_request',
+    requestId: 'req-active-2',
+    message: 'second',
+    userId: 'user-active-2',
+  });
+  await secondStarted;
+
+  assert.equal(handler.readSessionProjection('user-active-1')?.activeRun?.requestId, 'req-active-1');
+  assert.equal(handler.readSessionProjection('user-active-2')?.activeRun?.requestId, 'req-active-2');
+
+  releaseFirst();
+  releaseSecond();
+  await Promise.all([firstRun, secondRun]);
 });
 
 test('LocalAgentAppChatHandler keeps runtime error details out of remote state and events', async () => {
@@ -621,6 +710,161 @@ test('LocalAgentAppChatHandler recovers a batch review route from app-chat check
   assert.equal(runRequests.length, 1);
   const duplicateResponse = fixture.sent.at(-1) as { event?: { type?: string } };
   assert.equal(duplicateResponse.event?.type, 'error');
+});
+
+test('LocalAgentAppChatHandler claims a recovered review by actionId across requestIds', async () => {
+  const review = {
+    id: 'review-shared-action',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  let notifyResumeStarted!: () => void;
+  const resumeStarted = new Promise<void>((resolve) => {
+    notifyResumeStarted = resolve;
+  });
+  let releaseResume!: () => void;
+  const resumeReleased = new Promise<void>((resolve) => {
+    releaseResume = resolve;
+  });
+  let runCount = 0;
+  const { handler, ws, sent } = createHandler({
+    checkpoint: createCheckpoint(['petbot:chat:pet:pet-a:user:user-1']),
+    graphService: {
+      async readThreadState() {
+        return {
+          messages: [],
+          pendingHumanReview: {
+            interruptId: 'interrupt-shared-action',
+            review,
+          },
+          hasPendingContinuation: true,
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
+    runChat: async () => {
+      runCount += 1;
+      notifyResumeStarted();
+      await resumeReleased;
+      return { status: 'completed', reply: 'done' };
+    },
+  });
+  const response = {
+    type: 'human_review_response' as const,
+    actionId: 'interrupt-shared-action',
+    reviewId: review.id,
+    selectedOptionId: 'approve',
+  };
+
+  const firstResponse = handler.handleHumanReviewResponse(ws, {
+    ...response,
+    requestId: 'req-first-envelope',
+  });
+  await resumeStarted;
+  await handler.handleHumanReviewResponse(ws, {
+    ...response,
+    requestId: 'req-second-envelope',
+  });
+  releaseResume();
+  await firstResponse;
+
+  assert.equal(runCount, 1);
+  const duplicate = sent.at(-1) as { requestId?: string; event?: { type?: string } };
+  assert.equal(duplicate.requestId, 'req-second-envelope');
+  assert.equal(duplicate.event?.type, 'error');
+});
+
+test('LocalAgentAppChatHandler retries checkpoint recovery after a failed resume', async () => {
+  const review = {
+    id: 'review-retry',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  let runCount = 0;
+  let stateReads = 0;
+  const { handler, ws } = createHandler({
+    checkpoint: createCheckpoint(['petbot:chat:pet:pet-a:user:user-1']),
+    graphService: {
+      async readThreadState() {
+        stateReads += 1;
+        return {
+          messages: [],
+          pendingHumanReview: {
+            interruptId: 'interrupt-retry',
+            review,
+          },
+          hasPendingContinuation: true,
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
+    runChat: async () => {
+      runCount += 1;
+      if (runCount === 1) {
+        throw new Error('transient resume failure');
+      }
+      return { status: 'completed', reply: 'recovered' };
+    },
+  });
+  const response = {
+    type: 'human_review_response' as const,
+    requestId: 'req-retry',
+    actionId: 'interrupt-retry',
+    reviewId: review.id,
+    selectedOptionId: 'approve',
+  };
+
+  await handler.handleHumanReviewResponse(ws, response);
+  await handler.handleHumanReviewResponse(ws, response);
+
+  assert.equal(runCount, 2);
+  assert.equal(stateReads, 2);
+});
+
+test('LocalAgentAppChatHandler fails closed when a legacy recovery scan is incomplete', async () => {
+  const review = {
+    id: 'review-incomplete',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  let runCount = 0;
+  const { handler, ws, sent } = createHandler({
+    checkpoint: createCheckpoint([
+      'petbot:chat:pet:pet-a:user:user-1',
+      'petbot:chat:pet:pet-a:user:user-2',
+    ]),
+    graphService: {
+      async readThreadState(setup: AgentChannelSetup) {
+        if (setup.input.threadId?.endsWith('user-2')) {
+          throw new Error('checkpoint unavailable');
+        }
+        return {
+          messages: [],
+          pendingHumanReview: {
+            interruptId: 'interrupt-readable',
+            review,
+          },
+          hasPendingContinuation: true,
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
+    runChat: async () => {
+      runCount += 1;
+      return { status: 'completed', reply: 'unexpected' };
+    },
+  });
+
+  await handler.handleHumanReviewResponse(ws, {
+    type: 'human_review_response',
+    requestId: 'req-incomplete',
+    reviewId: review.id,
+    selectedOptionId: 'approve',
+  });
+
+  assert.equal(runCount, 0);
+  const error = sent.at(-1) as { event?: { type?: string } };
+  assert.equal(error.event?.type, 'error');
 });
 
 test('LocalAgentAppChatHandler fails closed when legacy checkpoint review recovery is ambiguous', async () => {

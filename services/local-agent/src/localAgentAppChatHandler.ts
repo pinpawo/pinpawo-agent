@@ -67,8 +67,10 @@ type ReviewActionRoute = HumanReviewActionRoute & {
   userId: string;
   rejectOptionId?: string;
 };
+type AppChatRunOutcome = 'completed' | 'waiting_human' | 'interrupted' | 'failed';
 
-const MAX_CONSUMED_PENDING_REVIEW_REQUEST_IDS = 1000;
+const MAX_CONSUMED_REVIEW_ACTION_IDS = 1000;
+const MAX_HOSTED_SESSION_PROJECTIONS = 100;
 
 export type LocalAgentAppChatHandlerOptions = {
   graphService: LocalAgentGraphService;
@@ -92,6 +94,7 @@ export type LocalAgentAppChatHandlerOptions = {
   runChat?: RunChatSession;
   buildChatSetup?: BuildChatSetup;
   now?: () => number;
+  maxSessionProjections?: number;
 };
 
 export class LocalAgentAppChatHandler {
@@ -116,9 +119,10 @@ export class LocalAgentAppChatHandler {
   private readonly runChat: RunChatSession;
   private readonly buildChatSetup: BuildChatSetup;
   private readonly now: () => number;
+  private readonly maxSessionProjections: number;
   private readonly reviewActionRoutes = new Map<string, ReviewActionRoute>();
-  private readonly consumedPendingReviewRequestIds = new Set<string>();
-  private readonly activePendingReviewRequestIds = new Set<string>();
+  private readonly consumedReviewActionIds = new Set<string>();
+  private readonly activeReviewActions = new Map<string, string>();
   private readonly sessionStartedAtByThreadId = new Map<string, string>();
   private readonly sessionsByThreadId = new Map<string, LocalAgentSession>();
   private sessionResetPromise: Promise<void> = Promise.resolve();
@@ -145,6 +149,10 @@ export class LocalAgentAppChatHandler {
     this.runChat = options.runChat ?? runChatSession;
     this.buildChatSetup = options.buildChatSetup ?? buildLocalChatAgentInput;
     this.now = options.now ?? Date.now;
+    this.maxSessionProjections = Math.max(
+      1,
+      options.maxSessionProjections ?? MAX_HOSTED_SESSION_PROJECTIONS,
+    );
   }
 
   readSessionProjection(userId: string) {
@@ -202,22 +210,16 @@ export class LocalAgentAppChatHandler {
     if (!this.canUseSocket(ws)) {
       return;
     }
-    if (!this.claimPendingReviewRequest(msg.requestId)) {
-      this.sendClosedReviewError(ws, msg.requestId);
-      return;
-    }
     const route = await this.readReviewActionRoute({
       requestId: msg.requestId,
       actionId: msg.actionId,
       reviewId: msg.reviewId,
     });
     if (!route) {
-      this.releasePendingReviewRequest(msg.requestId);
       this.sendClosedReviewError(ws, msg.requestId);
       return;
     }
     if (!matchesHumanReviewAction(route, msg.actionId)) {
-      this.releasePendingReviewRequest(msg.requestId);
       sendLocalAgentEvent(ws, {
         type: 'error',
         requestId: msg.requestId,
@@ -230,7 +232,6 @@ export class LocalAgentAppChatHandler {
     try {
       decisions = validateHumanReviewDecisions(route, msg);
     } catch (err) {
-      this.releasePendingReviewRequest(msg.requestId);
       console.warn(
         `[local-agent-app] human_review_response rejected: reviewId=${msg.reviewId} `
         + `does not match pending review action=${route.reviews.map((review) => review.id).join(',')} `
@@ -244,23 +245,33 @@ export class LocalAgentAppChatHandler {
       });
       return;
     }
+    if (!this.claimReviewAction(route)) {
+      this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
+      this.sendClosedReviewError(ws, msg.requestId);
+      return;
+    }
 
+    this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
     this.reduceRemoteSession(route.userId, {
       type: 'review.submitted',
       requestId: msg.requestId,
       actionId: route.actionId,
     });
-    this.consumeReviewActionRoute(msg.requestId);
-    await this.runChatRequest(ws, {
-      kind: 'resume',
-      requestId: msg.requestId,
-      resume: buildHumanReviewResume(route, decisions),
-    }, route.userId, {
-      type: 'human_review_response',
-      reviewId: msg.reviewId,
-      selectedOptionId: msg.selectedOptionId,
-      decisionCount: decisions.length,
-    });
+    let outcome: AppChatRunOutcome = 'failed';
+    try {
+      outcome = await this.runChatRequest(ws, {
+        kind: 'resume',
+        requestId: msg.requestId,
+        resume: buildHumanReviewResume(route, decisions),
+      }, route.userId, {
+        type: 'human_review_response',
+        reviewId: msg.reviewId,
+        selectedOptionId: msg.selectedOptionId,
+        decisionCount: decisions.length,
+      });
+    } finally {
+      this.settleReviewAction(route.actionId, outcome);
+    }
   }
 
   handleClose(ws: WebSocket) {
@@ -312,12 +323,8 @@ export class LocalAgentAppChatHandler {
     msg: ReviewCancelMessage,
     route: ReviewActionRoute,
   ) {
-    if (!this.claimPendingReviewRequest(msg.requestId)) {
-      return;
-    }
     if (!route.rejectOptionId) {
       const firstReview = route.reviews[0];
-      this.releasePendingReviewRequest(msg.requestId);
       sendLocalAgentEvent(ws, {
         type: 'system.notice',
         requestId: msg.requestId,
@@ -332,24 +339,34 @@ export class LocalAgentAppChatHandler {
       });
       return;
     }
+    if (!this.claimReviewAction(route)) {
+      this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
+      this.sendClosedReviewError(ws, msg.requestId);
+      return;
+    }
 
+    this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
     this.reduceRemoteSession(route.userId, {
       type: 'review.canceled',
       requestId: msg.requestId,
       actionId: route.actionId,
     });
-    this.consumeReviewActionRoute(msg.requestId);
     const firstReview = route.reviews[0]!;
-    await this.runChatRequest(ws, {
-      kind: 'resume',
-      requestId: msg.requestId,
-      resume: buildHumanReviewRejectResume(route, route.rejectOptionId),
-    }, route.userId, {
-      type: 'review.cancel',
-      reviewId: firstReview.id,
-      selectedOptionId: route.rejectOptionId,
-      decisionCount: 1,
-    });
+    let outcome: AppChatRunOutcome = 'failed';
+    try {
+      outcome = await this.runChatRequest(ws, {
+        kind: 'resume',
+        requestId: msg.requestId,
+        resume: buildHumanReviewRejectResume(route, route.rejectOptionId),
+      }, route.userId, {
+        type: 'review.cancel',
+        reviewId: firstReview.id,
+        selectedOptionId: route.rejectOptionId,
+        decisionCount: 1,
+      });
+    } finally {
+      this.settleReviewAction(route.actionId, outcome);
+    }
   }
 
   private async runChatRequest(
@@ -357,7 +374,7 @@ export class LocalAgentAppChatHandler {
     request: AppChatRunRequest,
     userId: string,
     source: AppChatRunSource,
-  ) {
+  ): Promise<AppChatRunOutcome> {
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';
 
@@ -382,10 +399,7 @@ export class LocalAgentAppChatHandler {
       interruptPrevious: true,
       notifyPrevious: false,
       observeOperation: (event) => {
-        this.reduceRemoteSession(userId, {
-          type: 'runtime.event',
-          event: sanitizeLocalAgentRemoteEvent(event),
-        });
+        this.projectRemoteEvent(userId, sanitizeLocalAgentRemoteEvent(event));
       },
     });
     if (request.kind === 'user_message') {
@@ -412,7 +426,7 @@ export class LocalAgentAppChatHandler {
       const ctx = await this.loadContext(this.getActorId());
       if (!isCurrent()) {
         finishInterrupted();
-        return;
+        return 'interrupted';
       }
 
       const setup = this.buildSetup(ctx, message, userId);
@@ -442,16 +456,17 @@ export class LocalAgentAppChatHandler {
         this.inflightRequests.finish(ws, inflight, 'interrupted');
         console.log(`[local-agent] human_review.requested requestId=${requestId}`);
         this.inflightRequests.clear(ws, inflight);
-        return;
+        return 'waiting_human';
       }
       if (result.status === 'interrupted') {
-        return;
+        return 'interrupted';
       }
       this.inflightRequests.finish(ws, inflight, 'completed');
       this.inflightRequests.clear(ws, inflight);
       this.finishRemoteRun(userId, requestId);
 
       console.log(`[local-agent] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
+      return 'completed';
     } catch (err) {
       const isStillCurrent = this.inflightRequests.isCurrent(ws, inflight);
       const aborted = controller.signal.aborted
@@ -462,7 +477,7 @@ export class LocalAgentAppChatHandler {
         this.finishRemoteRun(userId, requestId);
         recordAgentRunActivity('interrupted', requestId, 2_500);
         this.inflightRequests.clear(ws, inflight);
-        return;
+        return 'interrupted';
       }
       this.inflightRequests.finish(ws, inflight, 'failed', err);
       this.inflightRequests.clear(ws, inflight);
@@ -475,6 +490,7 @@ export class LocalAgentAppChatHandler {
           message: 'internal error',
         });
       }
+      return 'failed';
     }
   }
 
@@ -519,8 +535,6 @@ export class LocalAgentAppChatHandler {
     if (event.type !== 'human_review.requested' || !event.review?.id) {
       return;
     }
-    this.consumedPendingReviewRequestIds.delete(event.requestId);
-    this.activePendingReviewRequestIds.delete(event.requestId);
     this.reviewActionRoutes.set(
       event.requestId,
       this.buildReviewActionRoute(
@@ -538,12 +552,12 @@ export class LocalAgentAppChatHandler {
     actionId?: string;
     reviewId?: string;
   }) {
-    if (this.consumedPendingReviewRequestIds.has(params.requestId)) {
+    if (params.actionId && this.isReviewActionUnavailable(params.actionId)) {
       return null;
     }
     const cached = this.reviewActionRoutes.get(params.requestId);
     if (cached) {
-      return cached;
+      return this.isReviewActionUnavailable(cached.actionId) ? null : cached;
     }
     return this.recoverReviewActionRoute(params);
   }
@@ -558,6 +572,7 @@ export class LocalAgentAppChatHandler {
       if (userIds.length === 0) return null;
       const context = await this.loadContext(this.getActorId());
       const candidates: ReviewActionRoute[] = [];
+      let incompleteScan = false;
       for (const userId of userIds) {
         try {
           const setup = this.buildSetup(context, '', userId);
@@ -581,11 +596,18 @@ export class LocalAgentAppChatHandler {
             candidates.push(route);
           }
         } catch (err) {
+          incompleteScan = true;
           console.warn(
             `[local-agent-app] failed to inspect pending review userId=${userId}:`,
             err instanceof Error ? err.message : err,
           );
         }
+      }
+      if (incompleteScan && !params.actionId) {
+        console.warn(
+          `[local-agent-app] legacy pending review recovery is incomplete requestId=${params.requestId}`,
+        );
+        return null;
       }
       if (candidates.length !== 1) {
         if (candidates.length > 1) {
@@ -597,6 +619,9 @@ export class LocalAgentAppChatHandler {
         return null;
       }
       const route = candidates[0]!;
+      if (this.isReviewActionUnavailable(route.actionId)) {
+        return null;
+      }
       this.reviewActionRoutes.set(params.requestId, route);
       this.reconcilePendingReviewSession(params.requestId, route);
       return route;
@@ -637,20 +662,33 @@ export class LocalAgentAppChatHandler {
   }
 
   private reduceRemoteSession(userId: string, input: LocalAgentSessionInput) {
+    return this.applyRemoteSessionInput(userId, input).session;
+  }
+
+  private applyRemoteSessionInput(userId: string, input: LocalAgentSessionInput) {
     const threadId = this.getChatThreadId(userId);
     const session = this.sessionsByThreadId.get(threadId) ?? this.createRemoteSession(userId);
     const nextSession = reduceSession(session, input, { observedAt: this.now() });
-    this.sessionsByThreadId.set(threadId, nextSession);
-    return nextSession;
+    this.storeRemoteSession(threadId, nextSession);
+    return { session: nextSession, changed: nextSession !== session };
+  }
+
+  private storeRemoteSession(threadId: string, session: LocalAgentSession) {
+    this.sessionsByThreadId.delete(threadId);
+    this.sessionsByThreadId.set(threadId, session);
+    while (this.sessionsByThreadId.size > this.maxSessionProjections) {
+      const oldestThreadId = [...this.sessionsByThreadId.entries()].find(
+        ([, candidate]) => candidate.activeRun === null,
+      )?.[0];
+      if (!oldestThreadId) break;
+      this.sessionsByThreadId.delete(oldestThreadId);
+    }
   }
 
   private reduceSessionForRequest(requestId: string, input: LocalAgentSessionInput) {
     for (const [threadId, session] of this.sessionsByThreadId) {
       if (session.activeRun?.requestId !== requestId) continue;
-      this.sessionsByThreadId.set(
-        threadId,
-        reduceSession(session, input, { observedAt: this.now() }),
-      );
+      this.storeRemoteSession(threadId, reduceSession(session, input, { observedAt: this.now() }));
       return;
     }
   }
@@ -661,9 +699,15 @@ export class LocalAgentAppChatHandler {
 
   private emitRemoteEvent(ws: WebSocket, userId: string, event: LocalAgentEvent) {
     const safeEvent = sanitizeLocalAgentRemoteEvent(event);
+    if (!this.projectRemoteEvent(userId, safeEvent)) {
+      return false;
+    }
     this.recordReviewActionRoute(safeEvent, userId);
-    this.reduceRemoteSession(userId, { type: 'runtime.event', event: safeEvent });
-    sendLocalAgentEvent(ws, safeEvent);
+    return sendLocalAgentEvent(ws, safeEvent);
+  }
+
+  private projectRemoteEvent(userId: string, event: LocalAgentEvent) {
+    return this.applyRemoteSessionInput(userId, { type: 'runtime.event', event }).changed;
   }
 
   private reconcilePendingReviewSession(requestId: string, route: ReviewActionRoute) {
@@ -684,20 +728,40 @@ export class LocalAgentAppChatHandler {
         },
       },
     };
-    this.sessionsByThreadId.set(
+    this.storeRemoteSession(
       threadId,
       reconcileSessionSnapshot(session, snapshot, 'reconcile', { observedAt: this.now() }),
     );
   }
 
-  private consumeReviewActionRoute(requestId: string) {
-    this.reviewActionRoutes.delete(requestId);
-    this.activePendingReviewRequestIds.delete(requestId);
-    this.consumedPendingReviewRequestIds.add(requestId);
-    while (this.consumedPendingReviewRequestIds.size > MAX_CONSUMED_PENDING_REVIEW_REQUEST_IDS) {
-      const oldest = this.consumedPendingReviewRequestIds.values().next().value as string | undefined;
+  private claimReviewAction(route: ReviewActionRoute) {
+    if (this.isReviewActionUnavailable(route.actionId)) {
+      return false;
+    }
+    this.activeReviewActions.set(route.actionId, route.userId);
+    return true;
+  }
+
+  private settleReviewAction(actionId: string, outcome: AppChatRunOutcome) {
+    this.activeReviewActions.delete(actionId);
+    if (outcome !== 'completed' && outcome !== 'waiting_human') {
+      return;
+    }
+    this.consumedReviewActionIds.add(actionId);
+    while (this.consumedReviewActionIds.size > MAX_CONSUMED_REVIEW_ACTION_IDS) {
+      const oldest = this.consumedReviewActionIds.values().next().value as string | undefined;
       if (!oldest) break;
-      this.consumedPendingReviewRequestIds.delete(oldest);
+      this.consumedReviewActionIds.delete(oldest);
+    }
+  }
+
+  private isReviewActionUnavailable(actionId: string) {
+    return this.consumedReviewActionIds.has(actionId) || this.activeReviewActions.has(actionId);
+  }
+
+  private deleteCachedReviewActionRoute(requestId: string, actionId: string) {
+    if (this.reviewActionRoutes.get(requestId)?.actionId === actionId) {
+      this.reviewActionRoutes.delete(requestId);
     }
   }
 
@@ -705,25 +769,13 @@ export class LocalAgentAppChatHandler {
     for (const [requestId, route] of this.reviewActionRoutes) {
       if (route.userId === userId) {
         this.reviewActionRoutes.delete(requestId);
-        this.activePendingReviewRequestIds.delete(requestId);
-        this.consumedPendingReviewRequestIds.delete(requestId);
       }
     }
-  }
-
-  private claimPendingReviewRequest(requestId: string) {
-    if (
-      this.consumedPendingReviewRequestIds.has(requestId)
-      || this.activePendingReviewRequestIds.has(requestId)
-    ) {
-      return false;
+    for (const [actionId, actionUserId] of this.activeReviewActions) {
+      if (actionUserId === userId) {
+        this.activeReviewActions.delete(actionId);
+      }
     }
-    this.activePendingReviewRequestIds.add(requestId);
-    return true;
-  }
-
-  private releasePendingReviewRequest(requestId: string) {
-    this.activePendingReviewRequestIds.delete(requestId);
   }
 
   private sendClosedReviewError(ws: WebSocket, requestId: string) {

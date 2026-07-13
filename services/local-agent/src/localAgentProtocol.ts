@@ -514,7 +514,7 @@ export function sendLocalAgentEvent(
   if (ws.readyState !== WS_OPEN) {
     return false;
   }
-  const wireEvent = options.includeRaw ? event : stripRawFromEvent(event);
+  const wireEvent = options.includeRaw ? event : sanitizeLocalAgentRemoteEvent(event);
   ws.send(JSON.stringify({
     type: 'event',
     requestId: wireEvent.requestId,
@@ -523,7 +523,9 @@ export function sendLocalAgentEvent(
   return true;
 }
 
-function stripRawFromEvent(event: LocalAgentRuntimeEvent): LocalAgentRuntimeEvent {
+export function sanitizeLocalAgentRemoteEvent(
+  event: LocalAgentRuntimeEvent,
+): LocalAgentRuntimeEvent {
   if (event.type !== 'operation' || event.raw === undefined) {
     return event;
   }

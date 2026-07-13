@@ -14,6 +14,7 @@ import type { AgentLlmConfig } from './agentConfig';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { buildAppChatThreadId } from './chatInterface';
 import {
+  sanitizeLocalAgentRemoteEvent,
   sendLocalAgentEvent,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
@@ -43,6 +44,13 @@ import {
   type HumanReviewActionRoute,
 } from './humanReviewActionRouting';
 import { reviewActionId, reviewActionReviews } from './reviewAction';
+import type { LocalAgentSession } from './localAgentSession';
+import { LOCAL_AGENT_SESSION_SNAPSHOT_VERSION } from './localAgentSession';
+import {
+  reconcileSessionSnapshot,
+  reduceSession,
+  type LocalAgentSessionInput,
+} from './localAgentSessionReducer';
 
 type InflightRequest = InflightOperationRun;
 type LoadContext = (actorId: string) => Promise<AgentContext>;
@@ -83,6 +91,7 @@ export type LocalAgentAppChatHandlerOptions = {
   loadContext?: LoadContext;
   runChat?: RunChatSession;
   buildChatSetup?: BuildChatSetup;
+  now?: () => number;
 };
 
 export class LocalAgentAppChatHandler {
@@ -106,10 +115,12 @@ export class LocalAgentAppChatHandler {
   private readonly loadContext: LoadContext;
   private readonly runChat: RunChatSession;
   private readonly buildChatSetup: BuildChatSetup;
+  private readonly now: () => number;
   private readonly reviewActionRoutes = new Map<string, ReviewActionRoute>();
   private readonly consumedPendingReviewRequestIds = new Set<string>();
   private readonly activePendingReviewRequestIds = new Set<string>();
   private readonly sessionStartedAtByThreadId = new Map<string, string>();
+  private readonly sessionsByThreadId = new Map<string, LocalAgentSession>();
   private sessionResetPromise: Promise<void> = Promise.resolve();
 
   constructor(options: LocalAgentAppChatHandlerOptions) {
@@ -133,6 +144,11 @@ export class LocalAgentAppChatHandler {
     this.loadContext = options.loadContext ?? loadAgentContext;
     this.runChat = options.runChat ?? runChatSession;
     this.buildChatSetup = options.buildChatSetup ?? buildLocalChatAgentInput;
+    this.now = options.now ?? Date.now;
+  }
+
+  readSessionProjection(userId: string) {
+    return this.sessionsByThreadId.get(this.getChatThreadId(userId)) ?? null;
   }
 
   handleNewSession(msg: NewSessionMessage) {
@@ -146,14 +162,23 @@ export class LocalAgentAppChatHandler {
     if (!this.canUseSocket(ws)) {
       return;
     }
-    this.inflightRequests.interrupt(ws, { requestId: msg.requestId });
+    const run = this.inflightRequests.interrupt(ws, { requestId: msg.requestId });
+    if (run) {
+      this.reduceSessionForRequest(msg.requestId, {
+        type: 'run.interrupting',
+        requestId: msg.requestId,
+      });
+    }
   }
 
   async handleReviewCancel(ws: WebSocket, msg: ReviewCancelMessage) {
     if (!this.canUseSocket(ws)) {
       return;
     }
-    const route = this.readReviewActionRoute(msg.requestId);
+    const route = await this.readReviewActionRoute({
+      requestId: msg.requestId,
+      actionId: msg.actionId,
+    });
     if (!route) {
       this.sendClosedReviewError(ws, msg.requestId);
       return;
@@ -181,7 +206,11 @@ export class LocalAgentAppChatHandler {
       this.sendClosedReviewError(ws, msg.requestId);
       return;
     }
-    const route = this.readReviewActionRoute(msg.requestId);
+    const route = await this.readReviewActionRoute({
+      requestId: msg.requestId,
+      actionId: msg.actionId,
+      reviewId: msg.reviewId,
+    });
     if (!route) {
       this.releasePendingReviewRequest(msg.requestId);
       this.sendClosedReviewError(ws, msg.requestId);
@@ -216,6 +245,11 @@ export class LocalAgentAppChatHandler {
       return;
     }
 
+    this.reduceRemoteSession(route.userId, {
+      type: 'review.submitted',
+      requestId: msg.requestId,
+      actionId: route.actionId,
+    });
     this.consumeReviewActionRoute(msg.requestId);
     await this.runChatRequest(ws, {
       kind: 'resume',
@@ -231,6 +265,14 @@ export class LocalAgentAppChatHandler {
 
   handleClose(ws: WebSocket) {
     this.rejectStudioPendingReview(ws);
+    const inflight = this.inflightRequests.get(ws);
+    if (inflight) {
+      this.inflightRequests.finish(ws, inflight, 'interrupted');
+      this.reduceSessionForRequest(inflight.requestId, {
+        type: 'run.finished',
+        requestId: inflight.requestId,
+      });
+    }
     this.inflightRequests.abortAndClear(ws);
   }
 
@@ -291,6 +333,11 @@ export class LocalAgentAppChatHandler {
       return;
     }
 
+    this.reduceRemoteSession(route.userId, {
+      type: 'review.canceled',
+      requestId: msg.requestId,
+      actionId: route.actionId,
+    });
     this.consumeReviewActionRoute(msg.requestId);
     const firstReview = route.reviews[0]!;
     await this.runChatRequest(ws, {
@@ -334,7 +381,22 @@ export class LocalAgentAppChatHandler {
     const inflight = this.inflightRequests.start(ws, requestId, {
       interruptPrevious: true,
       notifyPrevious: false,
+      observeOperation: (event) => {
+        this.reduceRemoteSession(userId, {
+          type: 'runtime.event',
+          event: sanitizeLocalAgentRemoteEvent(event),
+        });
+      },
     });
+    if (request.kind === 'user_message') {
+      this.reduceRemoteSession(userId, {
+        type: 'user.accepted',
+        requestId,
+        kind: 'chat',
+        text: message,
+        message: { id: `message:${requestId}:user` },
+      });
+    }
     const { controller } = inflight;
     const isCurrent = () => this.inflightRequests.isCurrentActive(ws, inflight);
     const finishInterrupted = () => {
@@ -342,6 +404,7 @@ export class LocalAgentAppChatHandler {
         return;
       }
       this.inflightRequests.sendInterrupted(ws, inflight);
+      this.finishRemoteRun(userId, requestId);
       this.inflightRequests.clear(ws, inflight);
     };
 
@@ -366,11 +429,10 @@ export class LocalAgentAppChatHandler {
         isCurrent,
         finishInterrupted,
         emitEvent: (event) => {
-          this.recordReviewActionRoute(event, userId);
-          sendLocalAgentEvent(ws, event);
+          this.emitRemoteEvent(ws, userId, event);
         },
         emitToolEvent: (event) => {
-          this.sendStreamToolOperationEvent(ws, inflight, event);
+          this.sendStreamToolOperationEvent(ws, inflight, event, userId);
         },
         acceptDelegationOperations: (operations) => {
           overlayInflightDelegationOperations(inflight, operations);
@@ -387,6 +449,7 @@ export class LocalAgentAppChatHandler {
       }
       this.inflightRequests.finish(ws, inflight, 'completed');
       this.inflightRequests.clear(ws, inflight);
+      this.finishRemoteRun(userId, requestId);
 
       console.log(`[local-agent] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
     } catch (err) {
@@ -396,6 +459,7 @@ export class LocalAgentAppChatHandler {
       if (aborted) {
         console.warn(`[local-agent] chat interrupted requestId=${requestId}`);
         this.inflightRequests.sendInterrupted(ws, inflight);
+        this.finishRemoteRun(userId, requestId);
         recordAgentRunActivity('interrupted', requestId, 2_500);
         this.inflightRequests.clear(ws, inflight);
         return;
@@ -405,10 +469,10 @@ export class LocalAgentAppChatHandler {
       recordAgentRunActivity('error', requestId, 5_000);
       console.error('[local-agent] chat error:', err instanceof Error ? err.message : err);
       if (isStillCurrent && ws.readyState === WebSocket.OPEN) {
-        sendLocalAgentEvent(ws, {
+        this.emitRemoteEvent(ws, userId, {
           type: 'error',
           requestId,
-          message: err instanceof Error ? err.message : 'internal error',
+          message: 'internal error',
         });
       }
     }
@@ -423,6 +487,7 @@ export class LocalAgentAppChatHandler {
     const threadId = this.getChatThreadId(userId);
     await this.deleteThread(threadId);
     this.sessionStartedAtByThreadId.delete(threadId);
+    this.sessionsByThreadId.delete(threadId);
     this.clearReviewActionRoutesForUser(userId);
     console.log(`[local-agent] new session created threadId=${threadId}`);
   }
@@ -468,11 +533,161 @@ export class LocalAgentAppChatHandler {
     );
   }
 
-  private readReviewActionRoute(requestId: string) {
-    if (this.consumedPendingReviewRequestIds.has(requestId)) {
+  private async readReviewActionRoute(params: {
+    requestId: string;
+    actionId?: string;
+    reviewId?: string;
+  }) {
+    if (this.consumedPendingReviewRequestIds.has(params.requestId)) {
       return null;
     }
-    return this.reviewActionRoutes.get(requestId) ?? null;
+    const cached = this.reviewActionRoutes.get(params.requestId);
+    if (cached) {
+      return cached;
+    }
+    return this.recoverReviewActionRoute(params);
+  }
+
+  private async recoverReviewActionRoute(params: {
+    requestId: string;
+    actionId?: string;
+    reviewId?: string;
+  }) {
+    try {
+      const userIds = await this.readCheckpointAppChatUserIds();
+      if (userIds.length === 0) return null;
+      const context = await this.loadContext(this.getActorId());
+      const candidates: ReviewActionRoute[] = [];
+      for (const userId of userIds) {
+        try {
+          const setup = this.buildSetup(context, '', userId);
+          const state = await this.graphService.readThreadState(setup);
+          const pending = state.pendingHumanReview;
+          if (!pending) continue;
+          const route = this.buildReviewActionRoute(
+            params.requestId,
+            pending.review,
+            userId,
+            pending.reviews,
+            pending.interruptId,
+          );
+          const matches = params.actionId
+            ? route.actionId === params.actionId
+            : Boolean(
+              params.reviewId
+              && route.reviews.some((review) => review.id === params.reviewId),
+            );
+          if (matches) {
+            candidates.push(route);
+          }
+        } catch (err) {
+          console.warn(
+            `[local-agent-app] failed to inspect pending review userId=${userId}:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
+      if (candidates.length !== 1) {
+        if (candidates.length > 1) {
+          console.warn(
+            `[local-agent-app] pending review recovery is ambiguous requestId=${params.requestId} `
+            + `matches=${candidates.length}`,
+          );
+        }
+        return null;
+      }
+      const route = candidates[0]!;
+      this.reviewActionRoutes.set(params.requestId, route);
+      this.reconcilePendingReviewSession(params.requestId, route);
+      return route;
+    } catch (err) {
+      console.warn(
+        '[local-agent-app] failed to recover pending human_review from checkpoint:',
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    }
+  }
+
+  private async readCheckpointAppChatUserIds() {
+    const actorId = this.getActorId();
+    const prefix = `petbot:chat:pet:${actorId}:user:`;
+    const userIds = new Set<string>();
+    for await (const tuple of this.checkpoint.list({ configurable: {} })) {
+      const threadId = tuple.config.configurable?.thread_id;
+      if (typeof threadId !== 'string' || !threadId.startsWith(prefix)) continue;
+      const userId = threadId.slice(prefix.length).trim();
+      if (userId) userIds.add(userId);
+    }
+    return [...userIds];
+  }
+
+  private createRemoteSession(userId: string): LocalAgentSession {
+    const llmConfig = this.getLlmConfig();
+    return {
+      sessionId: this.getChatThreadId(userId),
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+      runtime: {
+        cwd: this.getWorkdir(),
+        ...(llmConfig?.model ? { model: llmConfig.model } : {}),
+      },
+    };
+  }
+
+  private reduceRemoteSession(userId: string, input: LocalAgentSessionInput) {
+    const threadId = this.getChatThreadId(userId);
+    const session = this.sessionsByThreadId.get(threadId) ?? this.createRemoteSession(userId);
+    const nextSession = reduceSession(session, input, { observedAt: this.now() });
+    this.sessionsByThreadId.set(threadId, nextSession);
+    return nextSession;
+  }
+
+  private reduceSessionForRequest(requestId: string, input: LocalAgentSessionInput) {
+    for (const [threadId, session] of this.sessionsByThreadId) {
+      if (session.activeRun?.requestId !== requestId) continue;
+      this.sessionsByThreadId.set(
+        threadId,
+        reduceSession(session, input, { observedAt: this.now() }),
+      );
+      return;
+    }
+  }
+
+  private finishRemoteRun(userId: string, requestId: string) {
+    this.reduceRemoteSession(userId, { type: 'run.finished', requestId });
+  }
+
+  private emitRemoteEvent(ws: WebSocket, userId: string, event: LocalAgentEvent) {
+    const safeEvent = sanitizeLocalAgentRemoteEvent(event);
+    this.recordReviewActionRoute(safeEvent, userId);
+    this.reduceRemoteSession(userId, { type: 'runtime.event', event: safeEvent });
+    sendLocalAgentEvent(ws, safeEvent);
+  }
+
+  private reconcilePendingReviewSession(requestId: string, route: ReviewActionRoute) {
+    const threadId = this.getChatThreadId(route.userId);
+    const session = this.sessionsByThreadId.get(threadId) ?? this.createRemoteSession(route.userId);
+    const snapshot = {
+      version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
+      session: {
+        ...session,
+        activeRun: {
+          requestId,
+          phase: 'waiting_human' as const,
+          reviewAction: {
+            actionId: route.actionId,
+            reviews: route.reviews,
+            status: 'waiting' as const,
+          },
+        },
+      },
+    };
+    this.sessionsByThreadId.set(
+      threadId,
+      reconcileSessionSnapshot(session, snapshot, 'reconcile', { observedAt: this.now() }),
+    );
   }
 
   private consumeReviewActionRoute(requestId: string) {
@@ -558,9 +773,10 @@ export class LocalAgentAppChatHandler {
     ws: WebSocket,
     inflight: InflightRequest,
     payload: StreamToolsPayload,
+    userId: string,
   ) {
     // Hosted app relay: strip raw (default). Remote UI must derive its view
     // from operation.summary/details — see docs/local-agent-events.md.
-    emitInflightToolEvent(inflight, payload, (event) => sendLocalAgentEvent(ws, event));
+    emitInflightToolEvent(inflight, payload, (event) => this.emitRemoteEvent(ws, userId, event));
   }
 }

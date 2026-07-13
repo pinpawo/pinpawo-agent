@@ -47,7 +47,10 @@ import {
   buildTaskDecisionInput,
   buildTaskDecisionSystemPrompt,
 } from '../../prompts';
-import { reuseOrAppendRunDelegationSummary } from '../../delegations';
+import {
+  appendRunDelegationSummary,
+  resumeRunDelegationSummary,
+} from '../../delegations';
 import {
   buildContinuationBriefingMessage,
   buildDelegationBriefingMessage,
@@ -650,24 +653,16 @@ function buildCapabilityDecisionResult(params: {
   }
 
   const runNextDelegation: RunNextDelegation = {
-    id: state.taskActiveDelegation && state.taskActiveDelegation.lane === delegationLane
-      ? state.taskActiveDelegation.id
-      : randomUUID().slice(0, 8),
+    id: randomUUID().slice(0, 8),
     lane: delegationLane,
     task: pendingTask.task,
     contextSummary: pendingTask.contextSummary ?? '继续完成用户当前请求。',
   };
-  const nextDelegationState = reuseOrAppendRunDelegationSummary(state.runDelegationSummaries, runNextDelegation);
-  const nextTaskActiveDelegation = state.taskActiveDelegation
-    && state.taskActiveDelegation.id === runNextDelegation.id
-    ? {
-        ...state.taskActiveDelegation,
-        task: runNextDelegation.task,
-        contextSummary: runNextDelegation.contextSummary,
-        status: 'pending' as const,
-        resultPreview: null,
-      }
-    : createTaskActiveDelegation(runNextDelegation, state.runId);
+  const runDelegationSummaries = appendRunDelegationSummary(
+    state.runDelegationSummaries,
+    runNextDelegation,
+  );
+  const nextTaskActiveDelegation = createTaskActiveDelegation(runNextDelegation, state.runId);
 
   // Delegation briefing: the deterministic projection of the materialized
   // delegation into main messages. Written here — and only here — because this
@@ -683,16 +678,16 @@ function buildCapabilityDecisionResult(params: {
     // runNextDelegation.contextSummary carries no execution guidance, so the
     // briefing omits its context line rather than rendering filler.
     contextSummary: pendingTask.contextSummary,
-    runDelegationSummaries: nextDelegationState.runDelegationSummaries,
+    runDelegationSummaries,
     remainingPlan: state.runCapabilityPlan,
   });
 
   return {
     messages: [briefingMessage],
-    runNextDelegation: nextDelegationState.runNextDelegation,
+    runNextDelegation,
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,
-    runDelegationSummaries: nextDelegationState.runDelegationSummaries,
+    runDelegationSummaries,
   };
 }
 
@@ -758,7 +753,10 @@ function buildContinueDelegationResult(params: {
     task: activeDelegation.task,
     contextSummary: gapNote ?? activeDelegation.contextSummary ?? '继续完成当前 delegated task。',
   };
-  const nextDelegationState = reuseOrAppendRunDelegationSummary(state.runDelegationSummaries, runNextDelegation);
+  const runDelegationSummaries = resumeRunDelegationSummary(
+    state.runDelegationSummaries,
+    runNextDelegation,
+  );
   const nextTaskActiveDelegation: TaskActiveDelegation = {
     ...activeDelegation,
     contextSummary: runNextDelegation.contextSummary,
@@ -777,10 +775,10 @@ function buildContinueDelegationResult(params: {
   });
   return {
     messages: [briefingMessage],
-    runNextDelegation: nextDelegationState.runNextDelegation,
+    runNextDelegation,
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,
-    runDelegationSummaries: nextDelegationState.runDelegationSummaries,
+    runDelegationSummaries,
   };
 }
 

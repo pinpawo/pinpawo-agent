@@ -385,8 +385,6 @@ async function runOne(params: {
       outputInstruction: buildTaskDecisionOutputInstruction(params.method),
     });
     const input = buildTaskDecisionInput({
-      latestUserRequest: params.testCase.latestUserRequest,
-      recentMessages: params.testCase.recentMessages ?? [new HumanMessage(params.testCase.latestUserRequest)],
       runDelegationContext: buildRunDelegationSummaryContext(params.testCase.runDelegationSummaries ?? []),
       runtimeContext: buildRuntimeContext(process.cwd(), process.version),
     });
@@ -399,7 +397,9 @@ async function runOne(params: {
     );
     const raw = await structuredModel.invoke([
       new SystemMessage(systemPrompt),
-      new HumanMessage(input),
+      new SystemMessage(input),
+      ...(params.testCase.recentMessages ?? []),
+      new HumanMessage(params.testCase.latestUserRequest),
     ]);
     const parsed = buildTaskDecisionSchema().safeParse(raw);
     if (!parsed.success) {

@@ -37,6 +37,7 @@ import {
   buildDelegationOutcomeOtherTasksContext,
   buildCapabilityPlanningDecisionInput,
   buildCapabilityPlanningDecisionSystemPrompt,
+  buildCompactionSummaryXmlContext,
   buildPreparedRequestContext,
   buildRouteDecisionInput,
   buildRouteDecisionSystemPrompt,
@@ -70,7 +71,6 @@ import {
   readLatestAnnounce,
   readLatestAnnounceCompletionReason,
   readLatestHumanRequest,
-  readRecentAnnounces,
 } from '../../messageLanes';
 import { resolveToolkitResources } from '../../subagentDispatch';
 import {
@@ -169,33 +169,28 @@ function buildTaskDecisionContext(params: {
     runtimeEnvironment,
   } = getInvokeOptions(runnableConfig);
   const actor = resolveActor(config, runnableConfig);
-  const latestHumanRequest = readLatestHumanRequest(state.messages);
   const contextSummaries = readContextCompactionSummaries(state.messages);
-  const recentMainMessages = mainMessagesWithoutCompaction(state.messages);
-  const recentAnnounces = readRecentAnnounces(state.messages);
-  const requestContext = buildPreparedRequestContext({
-    latestUserRequest: latestHumanRequest,
-    recentMessages: recentMainMessages,
-    recentAnnounces,
-    contextSummaries,
-    capabilityArtifacts: state.sessionCapabilityArtifacts,
-  });
+  const compactionContext = buildCompactionSummaryXmlContext(contextSummaries);
+  const conversationMessages = [
+    ...(compactionContext ? [new AIMessage(compactionContext)] : []),
+    ...mainMessagesWithoutCompaction(state.messages)
+      .filter((message) => message._getType() === 'human' || message._getType() === 'ai'),
+  ];
   const systemPrompt = buildTaskDecisionSystemPrompt({
     actor,
     outputInstruction: buildTaskDecisionOutputInstruction(
       config.decisionStructuredOutput?.method,
     ),
   });
-  const decisionInputMessage = new HumanMessage(buildTaskDecisionInput({
-    latestUserRequest: latestHumanRequest,
-    recentMessages: recentMainMessages,
-    requestContext,
+  const decisionContextMessage = new SystemMessage(buildTaskDecisionInput({
+    capabilityArtifacts: state.sessionCapabilityArtifacts,
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
     runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
   }));
 
   return {
-    decisionInputMessage,
+    conversationMessages,
+    decisionContextMessage,
     systemPrompt,
   };
 }
@@ -463,7 +458,8 @@ async function invokeTaskDecision(params: {
       ),
       messages: [
         new SystemMessage(context.systemPrompt),
-        context.decisionInputMessage,
+        context.decisionContextMessage,
+        ...context.conversationMessages,
       ],
       runnableConfig,
     }) as TaskDecision;

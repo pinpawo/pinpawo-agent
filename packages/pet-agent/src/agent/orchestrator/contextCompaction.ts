@@ -3,11 +3,7 @@ import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
-  getMessageIsAnnounce,
-  getMessageDelegatedTask,
-  getMessageDelegationId,
   getMessageLane,
-  getMessageTurnId,
   mainConversationMessages,
   toolProtocolSafeMessages,
 } from './messageLanes';
@@ -67,27 +63,9 @@ function formatMainMessageForSummary(message: BaseMessage): string | null {
   return null;
 }
 
-function formatLaneAnnounceForSummary(message: BaseMessage): string | null {
-  const lane = getMessageLane(message);
-  if (!lane || lane === 'orchestrator') return null;
-  if (!getMessageIsAnnounce(message)) return null;
-  const text = readMessageText(message);
-
-  return [
-    `### 任务执行记录 (${[
-      `lane=${lane}`,
-      getMessageTurnId(message) ? `turn=${getMessageTurnId(message)}` : null,
-      getMessageDelegationId(message) ? `delegation=${getMessageDelegationId(message)}` : null,
-    ].filter(Boolean).join(', ')})`,
-    getMessageDelegatedTask(message) ? `任务：${clipForPrompt(getMessageDelegatedTask(message) ?? '', 420)}` : null,
-    text ? `结果：${clipForPrompt(text, 1200)}` : '结果：[无文本内容]',
-  ].filter((line): line is string => Boolean(line)).join('\n');
-}
-
 function formatMessageForSummary(message: BaseMessage): string | null {
-  const lane = getMessageLane(message);
-  if (!lane) return formatMainMessageForSummary(message);
-  return formatLaneAnnounceForSummary(message);
+  if (getMessageLane(message)) return null;
+  return formatMainMessageForSummary(message);
 }
 
 function buildSummaryItems(messages: BaseMessage[]): string[] {
@@ -98,17 +76,13 @@ function buildSummaryItems(messages: BaseMessage[]): string[] {
 }
 
 function buildNoisyFallbackSummary(messages: BaseMessage[]): string {
-  const counts = new Map<string, number>();
-  for (const message of messages) {
-    const lane = getMessageLane(message) ?? 'main';
-    counts.set(lane, (counts.get(lane) ?? 0) + 1);
-  }
-  const countLines = [...counts.entries()]
-    .map(([lane, count]) => `- ${lane}: ${count} 条旧消息已压缩，未发现需要保留的主线输入或任务结果。`);
+  const mainMessageCount = messages.filter((message) => !getMessageLane(message)).length;
 
   return [
     '[以下是更早上下文的自动压缩摘要]',
-    ...countLines,
+    mainMessageCount > 0
+      ? `- main: ${mainMessageCount.toString()} 条旧消息已压缩，未发现需要保留的主线输入或任务结果。`
+      : '- 没有可保留的旧主线消息。',
   ].join('\n');
 }
 

@@ -53,8 +53,15 @@ function main() {
     console.log(`Shared prefix: ${metrics.sharedPrefixPercent}% of system prompt`);
     console.log('\n--- SYSTEM MESSAGE ---');
     console.log(prompt.system);
-    console.log('\n--- HUMAN INPUT MESSAGE ---');
+    console.log('\n--- STRUCTURED CONTEXT MESSAGE ---');
     console.log(prompt.input);
+    if (prompt.conversationMessages) {
+      console.log('\n--- CANONICAL MAIN MESSAGES ---');
+      for (const message of prompt.conversationMessages) {
+        console.log(`[${message._getType()}]`);
+        console.log(typeof message.content === 'string' ? message.content : JSON.stringify(message.content));
+      }
+    }
   }
 }
 

@@ -53,6 +53,11 @@ prepare / compactContext                         code guard + compaction
 
 下列“当前职责分布”和“当前问题”章节保留改造前摸排，便于审阅每项变更；它们不是本 PR 合并后的运行时状态。
 
+> 后续修订：entryDecision 不再把主对话压缩进 `user_intent_context`，也不再读取全局
+> recent announces。它使用 facts-only system message，加上保留 human/assistant 角色和时间顺序的
+> canonical main messages；main-only compaction summary 以 assistant context 注入，completed announce
+> 只通过 handoff copy 进入该对话。
+
 ## 3. taskDecision（改造前基线）
 
 ### 3.1 当前职责分布

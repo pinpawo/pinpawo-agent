@@ -180,7 +180,7 @@ function messageRoleLabel(message: BaseMessage): string {
   return type;
 }
 
-function buildCompactionSummaryXmlContext(contextSummaries: string[] | undefined): string | null {
+export function buildCompactionSummaryXmlContext(contextSummaries: string[] | undefined): string | null {
   const visibleSummaries = (contextSummaries ?? [])
     .slice(-MAX_CONTEXT_SUMMARIES)
     .map((summary) => clipForPrompt(summary, 1200))

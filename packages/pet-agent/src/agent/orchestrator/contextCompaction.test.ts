@@ -168,11 +168,12 @@ test('orchestrator context compaction falls back when summary model fails', asyn
   }
 });
 
-test('orchestrator context compaction summarizes lane announces without subagent details', async () => {
+test('orchestrator context compaction uses handoff copies and excludes every lane message', async () => {
   let summaryRequest = '';
   const messages: BaseMessage[] = Array.from({ length: 10 }, (_, index) => longMessage(index));
   messages.push(new HumanMessage('用户要求：整理素材并生成交付结果。'));
   messages.push(usageMessage('模型已经看到了较长主线和任务结果。', 900));
+  messages.push(new AIMessage('主线 handoff：素材已经整理完成，输出了 canonical-result.md。'));
 
   const subagentDetail = new AIMessage(`subagent verbose detail ${'z'.repeat(3200)}`);
   setPinpetMeta(subagentDetail, {
@@ -210,9 +211,10 @@ test('orchestrator context compaction summarizes lane announces without subagent
   assert.equal(result.compacted, true);
   assert.match(summaryRequest, /主线用户输入/);
   assert.match(summaryRequest, /用户要求：整理素材并生成交付结果/);
-  assert.match(summaryRequest, /任务执行记录/);
-  assert.match(summaryRequest, /任务：整理素材/);
-  assert.match(summaryRequest, /结果：素材已经整理完成，输出了 result\.md/);
+  assert.match(summaryRequest, /主线 handoff：素材已经整理完成，输出了 canonical-result\.md/);
+  assert.doesNotMatch(summaryRequest, /任务执行记录/);
+  assert.doesNotMatch(summaryRequest, /任务：整理素材/);
+  assert.doesNotMatch(summaryRequest, /结果：素材已经整理完成，输出了 result\.md/);
   assert.doesNotMatch(summaryRequest, /subagent verbose detail/);
   assert.doesNotMatch(summaryRequest, /内部路由决策/);
 });

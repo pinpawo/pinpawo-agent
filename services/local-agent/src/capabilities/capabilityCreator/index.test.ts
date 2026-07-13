@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createCapabilityCreatorCapability } from './index';
 
-test('capability_creator declares read-heavy context policy', async () => {
+test('capability_creator declares read-heavy context management overrides', async () => {
   const capability = createCapabilityCreatorCapability();
   const runtime = await capability.createRuntime({} as never);
 
-  assert.deepEqual(runtime.contextPolicy?.evictToolResults, {
+  assert.deepEqual(runtime.contextManagement?.evictToolResults, {
     keepRecent: 5,
     keepFailures: true,
   });

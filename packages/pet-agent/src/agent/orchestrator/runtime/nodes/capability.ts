@@ -134,7 +134,7 @@ export function createCapabilityNode(params: {
       messages: scopedMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
-      contextPolicy: runtime.contextPolicy,
+      contextManagement: runtime.contextManagement ?? runtime.contextPolicy,
       middleware: usedToolkitResources.middleware,
       runnableConfig,
       signal: runnableConfig?.signal,

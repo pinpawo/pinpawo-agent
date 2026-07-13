@@ -23,7 +23,7 @@ function toolResult(id: string, content: string) {
   });
 }
 
-function contextPolicyCtx() {
+function contextManagementCtx() {
   return {
     iterationCount: 2,
     operations: {},
@@ -81,7 +81,7 @@ test('explore capability filters default toolkits to host-available toolkits', a
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /不要使用 browser、http_fetch 或 download_file/);
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /运行中会保留最近的完整工具输出/);
   assert.match(Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '', /已查看文件列表/);
-  assert.equal(typeof runtime.contextPolicy?.rewriteAsync, 'function');
+  assert.equal(typeof runtime.contextManagement?.rewriteAsync, 'function');
   assert.equal(typeof runtime.middleware?.afterRun, 'function');
   assert.equal(capability.resultSchema, exploreResultSchema);
 });
@@ -125,7 +125,7 @@ test('explore result does not fall back to latest assistant text without ingest 
   ]), null);
 });
 
-test('explore context policy leaves recent raw tool output untouched', async () => {
+test('explore context management leaves recent raw tool output untouched', async () => {
   let ingestCalls = 0;
   const runtime = await createRuntime(fakeSummaryModel('should not be used', () => {
     ingestCalls += 1;
@@ -134,14 +134,14 @@ test('explore context policy leaves recent raw tool output untouched', async () 
     toolResult('call-1', `raw file output\n${'x'.repeat(2000)}`),
   ];
 
-  const rewritten = await runtime.contextPolicy?.rewriteAsync?.(messages, contextPolicyCtx());
+  const rewritten = await runtime.contextManagement?.rewriteAsync?.(messages, contextManagementCtx());
 
   assert.equal(rewritten, messages);
   assert.equal(ingestCalls, 0);
   assert.match(String(rewritten?.[0]?.content ?? ''), /^raw file output/);
 });
 
-test('explore context policy ingests and compresses older raw tool output', async () => {
+test('explore context management ingests and compresses older raw tool output', async () => {
   let capturedHuman = '';
   const summary = [
     '已确认旧工具输出需要摘要。',
@@ -158,7 +158,7 @@ test('explore context policy ingests and compresses older raw tool output', asyn
     toolResult('call-4', `recent raw 4\n${'w'.repeat(1200)}`),
   ];
 
-  const rewritten = await runtime.contextPolicy?.rewriteAsync?.(messages, contextPolicyCtx());
+  const rewritten = await runtime.contextManagement?.rewriteAsync?.(messages, contextManagementCtx());
 
   assert.ok(rewritten);
   assert.match(capturedHuman, /触发原因：old_tool_output/);
@@ -182,11 +182,11 @@ test('explore ingest forwards configured structured output method', async () => 
   const structuredOutput: OrchestrationDecisionStructuredOutputConfig = { method: 'functionCalling' };
   const runtime = await createRuntime(model, { structuredOutput });
 
-  const rewritten = await runtime.contextPolicy?.rewriteAsync?.([
+  const rewritten = await runtime.contextManagement?.rewriteAsync?.([
     toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
-  ], contextPolicyCtx());
+  ], contextManagementCtx());
 
   assert.deepEqual(capturedOptions, {
     name: 'explore_knowledge_ingest',
@@ -204,7 +204,7 @@ test('explore ingest failure keeps raw outputs instead of crashing the run', asy
     }),
   } as unknown as BaseChatModel;
   const runtime = await createRuntime(model);
-  assert.ok(runtime.contextPolicy?.rewriteAsync);
+  assert.ok(runtime.contextManagement?.rewriteAsync);
 
   const input = [
     toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
@@ -213,7 +213,7 @@ test('explore ingest failure keeps raw outputs instead of crashing the run', asy
   ];
   // An ingest model failure must degrade gracefully (review finding #1): the
   // rewrite returns the original messages unchanged — no throw, no eviction.
-  const rewritten = await runtime.contextPolicy!.rewriteAsync!(input, contextPolicyCtx());
+  const rewritten = await runtime.contextManagement!.rewriteAsync!(input, contextManagementCtx());
   assert.deepEqual(rewritten, input);
 });
 
@@ -238,12 +238,12 @@ test('explore summarizes old tool output and defers report persistence to afterR
   } as unknown as BaseChatModel;
   const runtime = await createRuntime(model, { artifactStore: store });
 
-  const rewritten = await runtime.contextPolicy?.rewriteAsync?.([
+  const rewritten = await runtime.contextManagement?.rewriteAsync?.([
     toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
   ], {
-    ...contextPolicyCtx(),
+    ...contextManagementCtx(),
     artifactSink: {
       recordCapabilityArtifact: (ref) => { recorded.push(ref); },
       threadId: 'thread-1',
@@ -292,12 +292,12 @@ test('explore ingest is a no-op write when no artifact sink is provided', async 
   } as unknown as NonNullable<CapabilityContext['artifactStore']>;
   const runtime = await createRuntime(fakeSummaryModel(summary), { artifactStore: store });
 
-  const rewritten = await runtime.contextPolicy?.rewriteAsync?.([
+  const rewritten = await runtime.contextManagement?.rewriteAsync?.([
     toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
   ], {
-    ...contextPolicyCtx(),
+    ...contextManagementCtx(),
     // no artifactSink
   });
 
@@ -488,12 +488,12 @@ test('explore writes at most once per run even when old-output summaries are gen
   } as unknown as BaseChatModel;
   const runtime = await createRuntime(model, { artifactStore: store });
 
-  const rewritten = await runtime.contextPolicy?.rewriteAsync?.([
+  const rewritten = await runtime.contextManagement?.rewriteAsync?.([
     toolResult('call-1', `old raw\n${'x'.repeat(1200)}`),
     toolResult('call-2', `old raw\n${'y'.repeat(1200)}`),
     toolResult('call-3', `old raw\n${'z'.repeat(1200)}`),
   ], {
-    ...contextPolicyCtx(),
+    ...contextManagementCtx(),
     artifactSink: {
       recordCapabilityArtifact: () => {},
       threadId: 'thread-1',

@@ -34,8 +34,10 @@ export type {
 
 export type {
   CapabilityArtifactSink,
+  ContextManagementContext,
   ContextPolicyContext,
   SubagentInputState,
+  SubagentContextManagement,
   SubagentContextPolicy,
   SubagentResult,
   SubagentRunInput,

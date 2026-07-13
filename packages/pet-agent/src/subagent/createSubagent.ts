@@ -10,12 +10,14 @@ import {
 } from '../guards';
 import { createAgent, createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import {
-  buildContextPolicyStateUpdate,
-  rewriteMessagesForContextPolicy,
-} from './contextPolicy';
+  buildContextManagementStateUpdate,
+  resolveSubagentContextManagement,
+  rewriteMessagesForContextManagement,
+  truncateOversizedToolResults,
+} from './contextManagement';
 import { isGraphRecursionLimitError } from '../utils/graphErrors';
 import {
-  contextRewriteWatermarkGuard,
+  contextMaintenanceGuard,
   SUBAGENT_GUARD_POSITION,
   subagentIterationLimitGuard,
 } from './guardDefinitions';
@@ -25,7 +27,7 @@ import {
 } from './guardStop';
 import { Command, END } from '@langchain/langgraph';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
-import { CONTEXT_POLICY_GOVERNING_PROMPT } from './prompts/templates/contextPolicy.prompt';
+import { CONTEXT_MANAGEMENT_GOVERNING_PROMPT } from './prompts/templates/contextManagement.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
@@ -62,7 +64,7 @@ function readResultMessages(result: unknown): BaseMessage[] | null {
   return null;
 }
 
-function buildContextPolicyContext(
+function buildContextManagementContext(
   inputState: SubagentInputState,
   iterationCount: number,
 ) {
@@ -74,18 +76,18 @@ function buildContextPolicyContext(
   };
 }
 
-function createContextPolicyMiddleware(
+function createContextManagementMiddleware(
   inputState: SubagentInputState,
   emitGuardDecision?: GuardDecisionEmitter,
 ) {
   let iterationCount = 0;
 
   return createMiddleware({
-    name: 'SubagentContextPolicy',
+    name: 'SubagentContextManagement',
     beforeModel: async (state) => {
       iterationCount += 1;
-      const policy = inputState.contextPolicy;
-      if (!policy) {
+      const management = inputState.contextManagement;
+      if (!management) {
         return undefined;
       }
       const messages = state.messages;
@@ -93,19 +95,20 @@ function createContextPolicyMiddleware(
         return undefined;
       }
       const baseMessages = messages as BaseMessage[];
-      const outcome = evaluateGuard(contextRewriteWatermarkGuard, {
-        state: { messages: baseMessages, contextPolicy: policy },
+      const outcome = evaluateGuard(contextMaintenanceGuard, {
+        state: { messages: baseMessages, contextManagement: management },
         config: { contextWindowTokens: inputState.contextWindowTokens },
-        position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_POLICY,
+        position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_MANAGEMENT,
       }, { emit: emitGuardDecision, iteration: iterationCount });
       if (outcome.kind !== 'maintain') {
         return undefined;
       }
-      const context = buildContextPolicyContext(inputState, iterationCount);
-      const rewritten = policy.rewriteAsync
-        ? await policy.rewriteAsync(baseMessages, context)
-        : rewriteMessagesForContextPolicy(baseMessages, policy, context);
-      return buildContextPolicyStateUpdate(baseMessages, rewritten) ?? undefined;
+      const context = buildContextManagementContext(inputState, iterationCount);
+      const boundedMessages = truncateOversizedToolResults(baseMessages, management, context);
+      const rewritten = management.rewriteAsync
+        ? await management.rewriteAsync(boundedMessages, context)
+        : rewriteMessagesForContextManagement(boundedMessages, management, context);
+      return buildContextManagementStateUpdate(baseMessages, rewritten) ?? undefined;
     },
   });
 }
@@ -144,29 +147,32 @@ function writeSubagentRuntimeEvent(name: string, data: unknown) {
 
 export async function createSubagent(input: SubagentRunInput): Promise<SubagentResult> {
   const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
+  const contextManagement = resolveSubagentContextManagement(
+    input.contextManagement ?? input.contextPolicy,
+  );
   const inputState: SubagentInputState = {
     instructions: input.instructions,
     operations: input.operations,
     messages: input.messages,
     maxIterations: input.maxIterations,
     contextWindowTokens: input.contextWindowTokens,
-    contextPolicy: input.contextPolicy,
+    contextManagement,
     artifacts: input.artifacts,
     artifactSink: input.artifactSink,
   };
   const systemPrompt = [
     SUBAGENT_GOVERNING_PROMPT,
-    inputState.contextPolicy ? CONTEXT_POLICY_GOVERNING_PROMPT : null,
+    inputState.contextManagement ? CONTEXT_MANAGEMENT_GOVERNING_PROMPT : null,
     ...inputState.instructions,
   ].filter((item): item is string => Boolean(item)).join('\n\n');
   // Decision records must never fail the run.
   const emitGuardDecision: GuardDecisionEmitter = (record) => {
     writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
   };
-  const contextPolicyMiddleware = createContextPolicyMiddleware(inputState, emitGuardDecision);
+  const contextManagementMiddleware = createContextManagementMiddleware(inputState, emitGuardDecision);
   const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(maxIterations, emitGuardDecision);
   const middleware: AnyAgentMiddleware[] = [
-    contextPolicyMiddleware,
+    contextManagementMiddleware,
     iterationGuardMiddleware,
     ...(input.middleware ?? []),
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
@@ -209,7 +215,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // notice as the FINAL message (via Command goto END). That is a clean "limit
     // reached" stop, not natural completion. Check only the last message — a stop
     // marker buried in the input history must not be misread as our stop, and
-    // contextPolicy may rewrite the list so an index-based slice is unreliable.
+    // Context management may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
     const stoppedByGuard = lastMessage ? isSubagentGuardStopMessage(lastMessage) : false;
     return {

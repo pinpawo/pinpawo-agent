@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CONTEXT_POLICY_GOVERNING_PROMPT } from './contextPolicy.prompt';
+import { CONTEXT_MANAGEMENT_GOVERNING_PROMPT } from './contextManagement.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './governing.prompt';
 
 test('subagent governing prompt anchors execution to the latest delegation briefing', () => {
@@ -9,6 +9,6 @@ test('subagent governing prompt anchors execution to the latest delegation brief
   assert.doesNotMatch(SUBAGENT_GOVERNING_PROMPT, /任务描述中的每一项都已处理/);
 });
 
-test('context policy prompt tells the subagent to preserve important findings', () => {
-  assert.match(CONTEXT_POLICY_GOVERNING_PROMPT, /重要发现要随时写进你的回复里/);
+test('context management prompt tells the subagent to preserve important findings', () => {
+  assert.match(CONTEXT_MANAGEMENT_GOVERNING_PROMPT, /重要发现要随时写进你的回复里/);
 });

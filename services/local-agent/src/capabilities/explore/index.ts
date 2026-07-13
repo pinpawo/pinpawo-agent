@@ -5,7 +5,7 @@ import type {
   AgentCapability,
   CapabilityArtifactSink,
   CapabilityArtifactStore,
-  ContextPolicyContext,
+  ContextManagementContext,
   CapabilityMiddlewareContext,
   OrchestrationDecisionStructuredOutputConfig,
   SubagentResult,
@@ -442,7 +442,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       let pendingArtifact: PendingExploreArtifact | null = null;
       const rewriteOldToolOutput = async (
         messages: BaseMessage[],
-        _ctx: ContextPolicyContext,
+        _ctx: ContextManagementContext,
       ): Promise<BaseMessage[]> => {
         const toolIndexes = collectCompressibleToolResultIndexes(messages);
         if (toolIndexes.length === 0) {
@@ -540,7 +540,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       return {
         uses: DEFAULT_EXPLORE_TOOLKITS.filter((name) => available.has(name)),
         middleware,
-        contextPolicy: {
+        contextManagement: {
           rewriteAsync: rewriteOldToolOutput,
         },
         instructions: [

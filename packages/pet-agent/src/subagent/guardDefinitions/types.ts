@@ -1,8 +1,8 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import type { SubagentContextPolicy } from '../../types/subagent';
+import type { SubagentContextManagement } from '../../types/subagent';
 
 export const SUBAGENT_GUARD_POSITION = {
-  BEFORE_MODEL_CONTEXT_POLICY: 'subagent.before_model_context_policy',
+  BEFORE_MODEL_CONTEXT_MANAGEMENT: 'subagent.before_model_context_management',
   BEFORE_MODEL_ITERATION: 'subagent.before_model_iteration',
 } as const;
 
@@ -10,7 +10,7 @@ export type SubagentGuardPosition =
   typeof SUBAGENT_GUARD_POSITION[keyof typeof SUBAGENT_GUARD_POSITION];
 
 export const SUBAGENT_GUARD_NAME = {
-  CONTEXT_REWRITE_WATERMARK: 'context_rewrite_watermark',
+  CONTEXT_MAINTENANCE: 'context_maintenance',
   ITERATION_LIMIT: 'subagent_iteration_limit',
 } as const;
 
@@ -20,12 +20,12 @@ export type SubagentGuardName =
 // Guard rules declare the minimal input they read; middleware hooks pass their
 // hook-local values directly instead of snapshotting a synthetic full state.
 
-export type ContextRewriteWatermarkGuardState = {
+export type ContextMaintenanceGuardState = {
   messages: BaseMessage[];
-  contextPolicy?: SubagentContextPolicy;
+  contextManagement?: SubagentContextManagement;
 };
 
-export type ContextRewriteWatermarkGuardConfig = {
+export type ContextMaintenanceGuardConfig = {
   contextWindowTokens?: number;
 };
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
@@ -164,7 +164,7 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
   assert.equal(announced?.read_file?.title, 'Read File');
 });
 
-test('createSubagent contextPolicy rewrites persisted subagent transcript', async () => {
+test('createSubagent context management rewrites persisted subagent transcript', async () => {
   const readFile = tool(async () => `file output\n${'x'.repeat(2600)}`, {
     name: 'view_file_chunk',
     description: 'read file chunk',
@@ -188,7 +188,7 @@ test('createSubagent contextPolicy rewrites persisted subagent transcript', asyn
         summarizeInput: (input) => ({ target: (input as { path?: string }).path }),
       },
     },
-    contextPolicy: {
+    contextManagement: {
       evictToolResults: {
         keepRecent: 0,
         minSizeChars: 2000,
@@ -208,7 +208,67 @@ test('createSubagent contextPolicy rewrites persisted subagent transcript', asyn
   assert.equal(toolMessages[0]?.content, '[evicted: view_file_chunk src/a.ts -> 已读；需要时重新调用]');
 });
 
-test('createSubagent custom context rewrite runs only after watermark guard blocks', async () => {
+test('createSubagent applies default context management to an oversized latest tool result', async () => {
+  const readFile = tool(async () => 'x'.repeat(20_001), {
+    name: 'read_file',
+    description: 'read a large file',
+    schema: z.object({ path: z.string() }),
+  });
+  const result = await createSubagent({
+    model: new FakeToolCallingModel({
+      toolCalls: [
+        [{ id: 'call-large', name: 'read_file', args: { path: 'large.log' } }],
+        [],
+      ],
+    }),
+    tools: [readFile],
+    instructions: [],
+    messages: [new HumanMessage('read the file')],
+    maxIterations: 4,
+  });
+
+  const toolResult = result.messages.find((message) => message._getType() === 'tool');
+  assert.ok(toolResult);
+  assert.match(String(toolResult.content), /\[truncated: tool result exceeded context budget/);
+  assert.ok(String(toolResult.content).length < 20_100);
+});
+
+test('createSubagent applies default eviction after provider input crosses the watermark', async () => {
+  const messages: BaseMessage[] = [new HumanMessage('inspect several files')];
+  for (let index = 0; index < 6; index += 1) {
+    messages.push(
+      new AIMessage({
+        content: '',
+        tool_calls: [{
+          id: `call-${index}`,
+          name: 'read_file',
+          args: { path: `file-${index}.txt` },
+        }],
+      }),
+      new ToolMessage({
+        tool_call_id: `call-${index}`,
+        content: `file-${index}\n${'x'.repeat(2600)}`,
+      }),
+    );
+  }
+  messages.push(usageMessage('previous provider usage', 900));
+
+  const result = await createSubagent({
+    model: new FakeListChatModel({ responses: ['done'], sleep: 0 }),
+    tools: [],
+    instructions: [],
+    messages,
+    contextWindowTokens: 1000,
+    maxIterations: 4,
+  });
+
+  const toolResults = result.messages.filter((message) => message._getType() === 'tool');
+  assert.equal(toolResults.length, 6);
+  assert.match(String(toolResults[0]?.content), /^\[evicted: read_file/);
+  assert.equal(toolResults.filter((message) => String(message.content).startsWith('file-')).length, 5);
+});
+
+test('createSubagent custom context rewrite runs only after the maintenance guard triggers', async () => {
   const run = (inputTokens: number) => createSubagent({
     model: new FakeListChatModel({
       responses: ['subagent result'],
@@ -216,7 +276,7 @@ test('createSubagent custom context rewrite runs only after watermark guard bloc
     }),
     tools: [],
     instructions: [],
-    contextPolicy: {
+    contextManagement: {
       rewrite: () => [new HumanMessage('custom rewritten context')],
     },
     messages: [
@@ -236,6 +296,28 @@ test('createSubagent custom context rewrite runs only after watermark guard bloc
   const aboveWatermark = await run(900);
   assert.equal(
     aboveWatermark.messages.some((message) => message.content === 'custom rewritten context'),
+    true,
+  );
+});
+
+test('createSubagent accepts the deprecated contextPolicy input alias', async () => {
+  const result = await createSubagent({
+    model: new FakeListChatModel({ responses: ['done'], sleep: 0 }),
+    tools: [],
+    instructions: [],
+    contextPolicy: {
+      rewrite: () => [new HumanMessage('legacy custom rewrite')],
+    },
+    messages: [
+      new HumanMessage('do the task'),
+      usageMessage('previous provider usage', 900),
+    ],
+    contextWindowTokens: 1000,
+    maxIterations: 4,
+  });
+
+  assert.equal(
+    result.messages.some((message) => message.content === 'legacy custom rewrite'),
     true,
   );
 });

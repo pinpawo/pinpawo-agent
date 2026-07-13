@@ -3,8 +3,11 @@ import test from 'node:test';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import type { BaseMessage } from '@langchain/core/messages';
-import type { SubagentContextPolicy, SubagentToolOperationMetadata } from '../types/subagent';
-import { rewriteMessagesForContextPolicy } from './contextPolicy';
+import type { SubagentContextManagement, SubagentToolOperationMetadata } from '../types/subagent';
+import {
+  resolveSubagentContextManagement,
+  rewriteMessagesForContextManagement,
+} from './contextManagement';
 
 function toolCallMessage(id: string, name: string, args: Record<string, unknown>) {
   return new AIMessage({
@@ -30,7 +33,61 @@ function ctx(operations: Record<string, SubagentToolOperationMetadata>) {
   };
 }
 
-test('context policy evicts old large successful tool results only', () => {
+test('subagent context management defaults on and can be explicitly disabled', () => {
+  const defaults = resolveSubagentContextManagement(undefined);
+
+  assert.deepEqual(defaults?.evictToolResults, {
+    keepRecent: 5,
+    keepFailures: true,
+    defaultMode: 'evict',
+    minSizeChars: 2000,
+    maxSingleResultChars: 20_000,
+  });
+  assert.equal(resolveSubagentContextManagement(false), undefined);
+});
+
+test('context management hard-truncates an oversized recent result', () => {
+  const messages: BaseMessage[] = [
+    new HumanMessage('inspect'),
+    toolCallMessage('call-large', 'read_file', { path: 'large.log' }),
+    toolResult('call-large', 'x'.repeat(101)),
+  ];
+  const management = resolveSubagentContextManagement({
+    evictToolResults: {
+      keepRecent: 5,
+      maxSingleResultChars: 100,
+    },
+  });
+
+  const rewritten = rewriteMessagesForContextManagement(messages, management, ctx({ read_file: {} }));
+
+  assert.match(String(rewritten[2]?.content), /^x{100}\n\[truncated: tool result exceeded context budget/);
+});
+
+test('custom context rewrite receives hard-bounded tool results', () => {
+  const messages: BaseMessage[] = [
+    new HumanMessage('inspect'),
+    toolCallMessage('call-large', 'read_file', { path: 'large.log' }),
+    toolResult('call-large', 'x'.repeat(101)),
+  ];
+  let customInput: BaseMessage[] = [];
+  const management = resolveSubagentContextManagement({
+    evictToolResults: {
+      keepRecent: 5,
+      maxSingleResultChars: 100,
+    },
+    rewrite: (input) => {
+      customInput = input;
+      return input;
+    },
+  });
+
+  rewriteMessagesForContextManagement(messages, management, ctx({ read_file: {} }));
+
+  assert.match(String(customInput[2]?.content), /\[truncated: tool result exceeded context budget/);
+});
+
+test('context management evicts old large successful tool results only', () => {
   const operations = {
     view_file_chunk: {
       summarizeInput: (input: unknown) => {
@@ -57,7 +114,7 @@ test('context policy evicts old large successful tool results only', () => {
     toolCallMessage('call-recent', 'view_file_chunk', { path: 'src/recent.ts' }),
     toolResult('call-recent', `recent large output\n${'z'.repeat(2600)}`),
   ];
-  const policy: SubagentContextPolicy = {
+  const management: SubagentContextManagement = {
     evictToolResults: {
       keepRecent: 1,
       minSizeChars: 2000,
@@ -68,7 +125,7 @@ test('context policy evicts old large successful tool results only', () => {
     },
   };
 
-  const rewritten = rewriteMessagesForContextPolicy(messages, policy, ctx(operations));
+  const rewritten = rewriteMessagesForContextManagement(messages, management, ctx(operations));
 
   assert.match(String(rewritten[2]?.content), /^\[evicted: view_file_chunk src\/a\.ts 1-200 -> 已读；需要时重新调用\]$/);
   assert.equal(rewritten[3]?.content, 'important note stays');
@@ -78,7 +135,7 @@ test('context policy evicts old large successful tool results only', () => {
   assert.match(String(rewritten[11]?.content), /^recent large output/);
 });
 
-test('context policy executor does not own the provider input-token trigger', () => {
+test('context management executor does not own the provider input-token trigger', () => {
   const operations = {
     view_file_chunk: {},
   } satisfies Record<string, SubagentToolOperationMetadata>;
@@ -90,7 +147,7 @@ test('context policy executor does not own the provider input-token trigger', ()
     toolResult('call-new', `new large file output\n${'y'.repeat(2600)}`),
   ];
 
-  const rewritten = rewriteMessagesForContextPolicy(messages, {
+  const rewritten = rewriteMessagesForContextManagement(messages, {
     evictToolResults: {
       keepRecent: 0,
       minSizeChars: 2000,
@@ -101,7 +158,7 @@ test('context policy executor does not own the provider input-token trigger', ()
   assert.match(String(rewritten[4]?.content), /^\[evicted:/);
 });
 
-test('context policy perTool keep and truncate override default eviction mode', () => {
+test('context management perTool keep and truncate override default eviction mode', () => {
   const operations = {
     view_file_chunk: {},
     http_fetch: {},
@@ -114,7 +171,7 @@ test('context policy perTool keep and truncate override default eviction mode', 
     toolResult('call-truncate', `truncate me\n${'y'.repeat(2600)}`),
   ];
 
-  const rewritten = rewriteMessagesForContextPolicy(messages, {
+  const rewritten = rewriteMessagesForContextManagement(messages, {
     evictToolResults: {
       keepRecent: 0,
       minSizeChars: 80,
@@ -131,7 +188,7 @@ test('context policy perTool keep and truncate override default eviction mode', 
   assert.ok(String(rewritten[4]?.content).length < String(messages[4]?.content).length);
 });
 
-test('context policy perTool evict overrides failure protections but not recency', () => {
+test('context management perTool evict overrides failure protections but not recency', () => {
   const operations = {
     run_shell: {},
   } satisfies Record<string, SubagentToolOperationMetadata>;
@@ -143,7 +200,7 @@ test('context policy perTool evict overrides failure protections but not recency
     toolResult('call-recent', `recent failure\n${'y'.repeat(2600)}`, { status: 'error' }),
   ];
 
-  const rewritten = rewriteMessagesForContextPolicy(messages, {
+  const rewritten = rewriteMessagesForContextManagement(messages, {
     evictToolResults: {
       keepRecent: 1,
       minSizeChars: 2000,
@@ -158,7 +215,7 @@ test('context policy perTool evict overrides failure protections but not recency
   assert.equal(rewritten[4]?.content, messages[4]?.content);
 });
 
-test('context policy keeps recent tool results while evicting older matches', () => {
+test('context management keeps recent tool results while evicting older matches', () => {
   const operations = {
     view_file_chunk: {},
   } satisfies Record<string, SubagentToolOperationMetadata>;
@@ -170,7 +227,7 @@ test('context policy keeps recent tool results while evicting older matches', ()
     toolResult('call-new', `new\n${'y'.repeat(2600)}`),
   ];
 
-  const rewritten = rewriteMessagesForContextPolicy(messages, {
+  const rewritten = rewriteMessagesForContextManagement(messages, {
     evictToolResults: {
       keepRecent: 1,
       minSizeChars: 2000,
@@ -181,7 +238,7 @@ test('context policy keeps recent tool results while evicting older matches', ()
   assert.equal(rewritten[4]?.content, messages[4]?.content);
 });
 
-test('context policy default truncate preserves older tool result prefixes while shortening content', () => {
+test('context management default truncate preserves older tool result prefixes while shortening content', () => {
   const operations = {
     view_file_chunk: {},
   } satisfies Record<string, SubagentToolOperationMetadata>;
@@ -193,7 +250,7 @@ test('context policy default truncate preserves older tool result prefixes while
     toolResult('call-new', `new evidence line\n${'y'.repeat(2600)}`),
   ];
 
-  const rewritten = rewriteMessagesForContextPolicy(messages, {
+  const rewritten = rewriteMessagesForContextManagement(messages, {
     evictToolResults: {
       keepRecent: 1,
       defaultMode: 'truncate',
@@ -207,7 +264,7 @@ test('context policy default truncate preserves older tool result prefixes while
   assert.equal(rewritten[4]?.content, messages[4]?.content);
 });
 
-test('context policy rewrites thirty read-heavy tool results while preserving recent floor', () => {
+test('context management rewrites thirty read-heavy tool results while preserving recent floor', () => {
   const operations = {
     view_file_chunk: {
       summarizeInput: (input: unknown) => {
@@ -225,7 +282,7 @@ test('context policy rewrites thirty read-heavy tool results while preserving re
     );
   }
 
-  const rewritten = rewriteMessagesForContextPolicy(messages, {
+  const rewritten = rewriteMessagesForContextManagement(messages, {
     evictToolResults: {
       keepRecent: 5,
       minSizeChars: 2_000,
@@ -249,14 +306,14 @@ test('context policy rewrites thirty read-heavy tool results while preserving re
   assert.ok(String(stubs[0]?.content ?? '').startsWith('[evicted:'));
 });
 
-test('context policy is a no-op when a capability does not declare one', () => {
+test('context management can be explicitly disabled', () => {
   const messages: BaseMessage[] = [
     new HumanMessage('inspect'),
     toolCallMessage('call-1', 'view_file_chunk', { path: 'src/a.ts' }),
     toolResult('call-1', `large\n${'x'.repeat(2600)}`),
   ];
 
-  const rewritten = rewriteMessagesForContextPolicy(messages, undefined, ctx({
+  const rewritten = rewriteMessagesForContextManagement(messages, undefined, ctx({
     view_file_chunk: {},
   }));
 
@@ -264,14 +321,14 @@ test('context policy is a no-op when a capability does not declare one', () => {
   assert.deepEqual(rewritten.map((message) => message.content), messages.map((message) => message.content));
 });
 
-test('context policy rewrite escape hatch', () => {
+test('context management rewrite escape hatch', () => {
   const messages: BaseMessage[] = [
     new HumanMessage('inspect'),
     toolCallMessage('call-1', 'grep_search', { query: 'needle' }),
     toolResult('call-1', `large grep output\n${'x'.repeat(2600)}`),
   ];
 
-  const escapeHatch = rewriteMessagesForContextPolicy(messages, {
+  const escapeHatch = rewriteMessagesForContextManagement(messages, {
     evictToolResults: {
       keepRecent: 0,
     },
@@ -280,7 +337,7 @@ test('context policy rewrite escape hatch', () => {
   assert.deepEqual(escapeHatch.map((message) => message.content), ['rewritten directly']);
 });
 
-test('context policy does not rewrite evicted stubs or truncated results again', () => {
+test('context management does not rewrite evicted stubs or truncated results again', () => {
   const evictMessages: BaseMessage[] = [
     new HumanMessage('inspect'),
     toolCallMessage('call-1', 'grep_search', { query: 'needle' }),
@@ -291,13 +348,13 @@ test('context policy does not rewrite evicted stubs or truncated results again',
     http_fetch: {},
   } satisfies Record<string, SubagentToolOperationMetadata>;
 
-  const once = rewriteMessagesForContextPolicy(evictMessages, {
+  const once = rewriteMessagesForContextManagement(evictMessages, {
     evictToolResults: {
       keepRecent: 0,
       minSizeChars: 1,
     },
   }, ctx(operations));
-  const twice = rewriteMessagesForContextPolicy(once, {
+  const twice = rewriteMessagesForContextManagement(once, {
     evictToolResults: {
       keepRecent: 0,
       minSizeChars: 1,
@@ -312,14 +369,14 @@ test('context policy does not rewrite evicted stubs or truncated results again',
     toolCallMessage('call-2', 'http_fetch', { url: 'https://example.com' }),
     toolResult('call-2', `abcdef\n${'y'.repeat(2600)}`),
   ];
-  const truncatedOnce = rewriteMessagesForContextPolicy(truncMessages, {
+  const truncatedOnce = rewriteMessagesForContextManagement(truncMessages, {
     evictToolResults: {
       keepRecent: 0,
       minSizeChars: 3,
       perTool: { http_fetch: 'truncate' },
     },
   }, ctx(operations));
-  const truncatedTwice = rewriteMessagesForContextPolicy(truncatedOnce, {
+  const truncatedTwice = rewriteMessagesForContextManagement(truncatedOnce, {
     evictToolResults: {
       keepRecent: 0,
       minSizeChars: 3,

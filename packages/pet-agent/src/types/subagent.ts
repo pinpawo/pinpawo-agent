@@ -70,24 +70,31 @@ export type CapabilityArtifactSink = {
   runId?: string;
 };
 
-export type ContextPolicyContext = {
+export type ContextManagementContext = {
   iterationCount: number;
   operations: Record<string, SubagentToolOperationMetadata>;
   contextWindowTokens?: number;
   artifactSink?: CapabilityArtifactSink;
 };
 
-export type SubagentContextPolicy = {
+/** @deprecated Use ContextManagementContext. */
+export type ContextPolicyContext = ContextManagementContext;
+
+export type SubagentContextManagement = {
   evictToolResults?: {
     keepRecent: number;
     defaultMode?: 'evict' | 'truncate';
     minSizeChars?: number;
+    maxSingleResultChars?: number;
     keepFailures?: boolean;
     perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
   };
-  rewrite?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[];
-  rewriteAsync?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[] | Promise<BaseMessage[]>;
+  rewrite?: (messages: BaseMessage[], ctx: ContextManagementContext) => BaseMessage[];
+  rewriteAsync?: (messages: BaseMessage[], ctx: ContextManagementContext) => BaseMessage[] | Promise<BaseMessage[]>;
 };
+
+/** @deprecated Use SubagentContextManagement. */
+export type SubagentContextPolicy = SubagentContextManagement;
 
 export type SubagentInputState = {
   instructions: string[];
@@ -95,7 +102,8 @@ export type SubagentInputState = {
   messages: BaseMessage[];
   maxIterations?: number;
   contextWindowTokens?: number;
-  contextPolicy?: SubagentContextPolicy;
+  /** Uses the built-in context management defaults when omitted. */
+  contextManagement?: SubagentContextManagement | false;
   artifacts?: CapabilityArtifactRef[];
   artifactSink?: CapabilityArtifactSink;
 };
@@ -103,6 +111,8 @@ export type SubagentInputState = {
 export type SubagentRunInput = SubagentInputState & {
   model: BaseChatModel;
   tools: StructuredTool[];
+  /** @deprecated Use contextManagement. */
+  contextPolicy?: SubagentContextManagement;
   middleware?: AnyAgentMiddleware[];
   runnableConfig?: RunnableConfig;
   signal?: AbortSignal;

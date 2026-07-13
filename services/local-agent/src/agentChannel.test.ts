@@ -272,7 +272,7 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
     messages: [],
     availableToolkits: [],
   });
-  const rewritten = await runtime.contextPolicy?.rewriteAsync?.([
+  const rewritten = await runtime.contextManagement?.rewriteAsync?.([
     new ToolMessage({
       content: `old raw output\n${'x'.repeat(1200)}`,
       tool_call_id: 'call-1',

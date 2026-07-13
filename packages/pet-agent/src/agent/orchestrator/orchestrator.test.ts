@@ -238,8 +238,11 @@ test('task decision reads full canonical main messages and excludes lane announc
     delegationId: 'task-prev',
     task: '旧 lane task',
   });
+  const compactionSummary = new SystemMessage('更早的 canonical main 摘要。COMPACTED_MAIN_CONTEXT');
+  compactionSummary.name = CONTEXT_COMPACTION_MESSAGE_NAME;
   const longReview = `${'distribution-worker 专项审查。'.repeat(30)}\n最新问题：NEW_DISTRIBUTION_FINDING_A、NEW_DISTRIBUTION_FINDING_B。`;
   const input = buildOrchestratorRunInput([
+    compactionSummary,
     new HumanMessage('发布上一轮全仓库审查的问题。'),
     new AIMessage('上一轮 10 个全仓库架构问题已经发布为 issue。'),
     previousAnnounce,
@@ -258,15 +261,16 @@ test('task decision reads full canonical main messages and excludes lane announc
 
   assert.deepEqual(
     taskDecisionMessages.map((message) => message._getType?.()),
-    ['system', 'system', 'human', 'ai', 'ai', 'human'],
+    ['system', 'system', 'ai', 'human', 'ai', 'ai', 'human'],
   );
   const contextText = String(taskDecisionMessages[1]?.content ?? '');
   assert.match(contextText, /<entry_decision_context>/);
-  assert.doesNotMatch(contextText, /<user_request>|<recent_messages>|<recent_subagent_announces>/);
+  assert.doesNotMatch(contextText, /<user_request>|<recent_messages>|<recent_subagent_announces>|context_summaries/);
+  assert.match(String(taskDecisionMessages[2]?.content ?? ''), /COMPACTED_MAIN_CONTEXT/);
   assert.equal(String(taskDecisionMessages.at(-1)?.content ?? ''), 'OK，把这些问题也发 issue 帮我。');
-  assert.equal(String(taskDecisionMessages[3]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
-  assert.match(String(taskDecisionMessages[4]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);
-  assert.match(String(taskDecisionMessages[4]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_B/);
+  assert.equal(String(taskDecisionMessages[4]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
+  assert.match(String(taskDecisionMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);
+  assert.match(String(taskDecisionMessages[5]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_B/);
   assert.doesNotMatch(
     taskDecisionMessages.map((message) => String(message.content ?? '')).join('\n'),
     /未 handoff 的 lane announce/,

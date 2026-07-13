@@ -128,7 +128,6 @@ test('entry decision prompt owns execution mode selection', () => {
     outputInstruction: buildTaskDecisionOutputInstruction(),
   });
   const input = buildTaskDecisionInput({
-    contextSummaries: ['更早上下文已经压缩。'],
     runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
     runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });
@@ -150,7 +149,8 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(input, /<entry_decision_context>/);
   assert.match(input, /run_delegation_summaries/);
   assert.match(input, /<runtime_context/);
-  assert.match(input, /更早上下文已经压缩/);
+  assert.match(prompt, /assistant 角色的 compaction context/);
+  assert.doesNotMatch(input, /context_summaries/);
   assert.doesNotMatch(input, /<user_request>|<recent_messages>|<recent_subagent_announces>/);
   assert.doesNotMatch(prompt, /\/repo|run_delegations/);
   assert.doesNotMatch(input, /<task_plan_draft/);

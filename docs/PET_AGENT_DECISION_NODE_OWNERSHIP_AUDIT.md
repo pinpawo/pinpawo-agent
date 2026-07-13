@@ -55,7 +55,8 @@ prepare / compactContext                         code guard + compaction
 
 > 后续修订：entryDecision 不再把主对话压缩进 `user_intent_context`，也不再读取全局
 > recent announces。它使用 facts-only system message，加上保留 human/assistant 角色和时间顺序的
-> canonical main messages；completed announce 只通过 handoff copy 进入该对话。
+> canonical main messages；main-only compaction summary 以 assistant context 注入，completed announce
+> 只通过 handoff copy 进入该对话。
 
 ## 3. taskDecision（改造前基线）
 

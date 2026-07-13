@@ -1,9 +1,6 @@
 import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type { AgentActor } from '../../../types/agent';
-import {
-  buildCapabilityArtifactContext,
-  buildCompactionSummaryXmlContext,
-} from './context';
+import { buildCapabilityArtifactContext } from './context';
 import {
   buildDecisionConfig,
   buildOrchestratorDecisionPromptPrefix,
@@ -27,16 +24,13 @@ export function buildTaskDecisionSystemPrompt(params: {
 }
 
 export function buildTaskDecisionInput(params: {
-  contextSummaries?: string[];
   capabilityArtifacts?: CapabilityArtifactRef[];
   runDelegationContext?: string | null;
   runtimeContext?: string | null;
 }): string {
-  const compactionContext = buildCompactionSummaryXmlContext(params.contextSummaries);
   const artifactContext = buildCapabilityArtifactContext(params.capabilityArtifacts);
   return ENTRY_DECISION_INPUT_PROMPT.render({
     runtimeContextBlock: promptBlock(params.runtimeContext, 2),
-    compactionContextBlock: promptBlock(compactionContext, 2),
     capabilityArtifactsBlock: promptBlock(artifactContext
       ? xmlTextBlock('capability_artifacts', artifactContext, ' role="fact" source="state"')
       : null, 2),

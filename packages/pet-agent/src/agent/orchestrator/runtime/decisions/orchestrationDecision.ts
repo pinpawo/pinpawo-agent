@@ -37,6 +37,7 @@ import {
   buildDelegationOutcomeOtherTasksContext,
   buildCapabilityPlanningDecisionInput,
   buildCapabilityPlanningDecisionSystemPrompt,
+  buildCompactionSummaryXmlContext,
   buildPreparedRequestContext,
   buildRouteDecisionInput,
   buildRouteDecisionSystemPrompt,
@@ -169,8 +170,12 @@ function buildTaskDecisionContext(params: {
   } = getInvokeOptions(runnableConfig);
   const actor = resolveActor(config, runnableConfig);
   const contextSummaries = readContextCompactionSummaries(state.messages);
-  const conversationMessages = mainMessagesWithoutCompaction(state.messages)
-    .filter((message) => message._getType() === 'human' || message._getType() === 'ai');
+  const compactionContext = buildCompactionSummaryXmlContext(contextSummaries);
+  const conversationMessages = [
+    ...(compactionContext ? [new AIMessage(compactionContext)] : []),
+    ...mainMessagesWithoutCompaction(state.messages)
+      .filter((message) => message._getType() === 'human' || message._getType() === 'ai'),
+  ];
   const systemPrompt = buildTaskDecisionSystemPrompt({
     actor,
     outputInstruction: buildTaskDecisionOutputInstruction(
@@ -178,7 +183,6 @@ function buildTaskDecisionContext(params: {
     ),
   });
   const decisionContextMessage = new SystemMessage(buildTaskDecisionInput({
-    contextSummaries,
     capabilityArtifacts: state.sessionCapabilityArtifacts,
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
     runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),

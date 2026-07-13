@@ -108,9 +108,11 @@ action=needs_plan
 
 - 第一条 system message 是静态节点契约和 structured-output 约束。
 - 第二条 system message 的 `entry_decision_context` 只注入事实：`runtime_context`、
-  compaction summary、artifact 短引用和 `run_delegation_summaries`。
+  artifact 短引用和 `run_delegation_summaries`。
+- 如果发生过 compaction，更早的 main conversation summary 以 assistant context message 注入，
+  不提升为 system policy；该摘要不包含任何 lane message 或 announce。
 - 随后的 canonical main messages 保持原生 human/assistant 角色和时间顺序，是本节点理解用户目标、
-  指代和既有 handoff 结论的唯一对话来源。
+  指代和既有 handoff 结论的主要对话来源。
 - 不单独读取全局 recent announces。completed announce 已由 handoff 写入 main messages；
   unfinished delegation 由 outcomeDecision 处理。
 - lane transcript、tool message、internal/system message 不进入 entryDecision 的原生对话序列。

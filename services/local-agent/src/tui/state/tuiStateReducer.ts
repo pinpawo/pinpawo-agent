@@ -187,7 +187,9 @@ function reduceRuntimeEvent(
   const event = action.event;
   const owner = findSessionForRuntimeEvent(state, event);
   if (!owner) return state;
-  const previousRun = owner.session.activeRun;
+  const previousRun = owner.session.activeRun?.requestId === event.requestId
+    ? owner.session.activeRun
+    : null;
   const previousReviewActionId = previousRun?.reviewAction?.actionId;
   const message = runtimeMessageInput(event, action.messageCell);
   const nextState = applySessionInput(state, owner.sessionId, {

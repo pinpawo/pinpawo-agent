@@ -307,6 +307,61 @@ test('tuiStateReducer recovers completed messages from timeline ownership when t
   });
 });
 
+test('tuiStateReducer keeps the current review draft when an older request completes late', () => {
+  let state = startRun(initialState(), 'req-old');
+  state = {
+    ...state,
+    sessions: {
+      ...state.sessions,
+      'chat:pet': {
+        ...state.sessions['chat:pet']!,
+        activeRun: null,
+      },
+    },
+  };
+  state = startRun(state, 'req-new');
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'human_review.requested',
+      requestId: 'req-new',
+      review: {
+        id: 'review-new',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Approve the new run?' },
+        options: [],
+      },
+    },
+    now: 1200,
+  });
+
+  const actionId = 'request:req-new:reviews:review-new';
+  assert.deepEqual(state.reviewDrafts[actionId], {
+    actionId,
+    decisions: [],
+  });
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-old',
+      role: 'assistant',
+      text: 'late old answer',
+    },
+    now: 1300,
+    messageCell: { id: 'assistant-old', timestamp: '10:00:01' },
+  });
+
+  assert.equal(state.sessions['chat:pet']?.activeRun?.requestId, 'req-new');
+  assert.equal(state.sessions['chat:pet']?.activeRun?.phase, 'waiting_human');
+  assert.deepEqual(state.reviewDrafts[actionId], {
+    actionId,
+    decisions: [],
+  });
+  assert.equal(selectFocusedPendingApproval(state)?.actionId, actionId);
+});
+
 test('tuiStateReducer records composer prompt history only for run starts', () => {
   let state = initialState();
 

@@ -18,14 +18,21 @@ export function estimatePromptTokens(text: string): number {
 }
 
 export function measureDecisionPrompt(prompt: RenderedDecisionPrompt): PromptPreviewMetrics {
-  const combined = `${prompt.system}\n${prompt.input}`;
+  const conversation = prompt.conversationMessages?.map((message) => {
+    const content = typeof message.content === 'string'
+      ? message.content
+      : JSON.stringify(message.content);
+    return `[${message._getType()}]\n${content}`;
+  }).join('\n') ?? '';
+  const renderedInput = [prompt.input, conversation].filter(Boolean).join('\n');
+  const combined = `${prompt.system}\n${renderedInput}`;
   const sharedPrefix = buildOrchestratorDecisionPromptPrefix();
   return {
     systemChars: prompt.system.length,
-    inputChars: prompt.input.length,
+    inputChars: renderedInput.length,
     totalChars: combined.length,
     systemLines: prompt.system.split('\n').length,
-    inputLines: prompt.input.split('\n').length,
+    inputLines: renderedInput.split('\n').length,
     approximateTokens: estimatePromptTokens(combined),
     sharedPrefixPercent: prompt.system.includes(sharedPrefix)
       ? Math.round((sharedPrefix.length / prompt.system.length) * 100)

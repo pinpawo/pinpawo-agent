@@ -207,8 +207,8 @@ test('capability search splits pipe and word terms for keyword matching', () => 
   assert.deepEqual(splitCapabilitySearchTerms('宠物发帖|宠物 发帖'), ['宠物发帖', '宠物 发帖', '宠物', '发帖']);
 });
 
-test('task decision receives recent task status context', async () => {
-  let taskDecisionInput = '';
+test('task decision reads full canonical main messages and excludes lane announces', async () => {
+  let taskDecisionMessages: Array<{ _getType?: () => string; content?: unknown }> = [];
   const model = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -216,7 +216,7 @@ test('task decision receives recent task status context', async () => {
     }),
     withStructuredOutput: () => ({
       invoke: async (messages: unknown[]) => {
-        taskDecisionInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
+        taskDecisionMessages = messages as Array<{ _getType?: () => string; content?: unknown }>;
         return { action: 'answer' };
       },
     }),
@@ -230,19 +230,21 @@ test('task decision receives recent task status context', async () => {
     },
     actor: testActor,
   });
-  const previousAnnounce = new AIMessage('已确认目标目录，打包因超时停止。');
+  const previousAnnounce = new AIMessage('这是未 handoff 的 lane announce，不应进入 entryDecision。');
   setPinpetMeta(previousAnnounce, {
     lane: 'general',
     runId: 'prev-turn',
     isAnnounce: true,
     delegationId: 'task-prev',
-    task: '归档 Downloads',
+    task: '旧 lane task',
   });
+  const longReview = `${'distribution-worker 专项审查。'.repeat(30)}\n最新问题：NEW_DISTRIBUTION_FINDING_A、NEW_DISTRIBUTION_FINDING_B。`;
   const input = buildOrchestratorRunInput([
-    new HumanMessage('打开 Gmail 登录页面'),
-    new AIMessage('Gmail 登录页面已经打开了。'),
+    new HumanMessage('发布上一轮全仓库审查的问题。'),
+    new AIMessage('上一轮 10 个全仓库架构问题已经发布为 issue。'),
     previousAnnounce,
-    new HumanMessage('之前的任务完成的怎么样了？'),
+    new AIMessage(longReview),
+    new HumanMessage('OK，把这些问题也发 issue 帮我。'),
   ]);
 
   await graph.invoke(input, {
@@ -254,12 +256,21 @@ test('task decision receives recent task status context', async () => {
     },
   });
 
-  assert.match(taskDecisionInput, /<task_decision_input>/);
-  assert.match(taskDecisionInput, /<user_request>\n\s+<!\[CDATA\[\n之前的任务完成的怎么样了？/);
-  assert.match(taskDecisionInput, /<recent_subagent_announces/);
-  assert.match(taskDecisionInput, /<lane>general<\/lane>/);
-  assert.match(taskDecisionInput, /归档 Downloads/);
-  assert.match(taskDecisionInput, /打包因超时停止/);
+  assert.deepEqual(
+    taskDecisionMessages.map((message) => message._getType?.()),
+    ['system', 'system', 'human', 'ai', 'ai', 'human'],
+  );
+  const contextText = String(taskDecisionMessages[1]?.content ?? '');
+  assert.match(contextText, /<entry_decision_context>/);
+  assert.doesNotMatch(contextText, /<user_request>|<recent_messages>|<recent_subagent_announces>/);
+  assert.equal(String(taskDecisionMessages.at(-1)?.content ?? ''), 'OK，把这些问题也发 issue 帮我。');
+  assert.equal(String(taskDecisionMessages[3]?.content ?? ''), '上一轮 10 个全仓库架构问题已经发布为 issue。');
+  assert.match(String(taskDecisionMessages[4]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_A/);
+  assert.match(String(taskDecisionMessages[4]?.content ?? ''), /NEW_DISTRIBUTION_FINDING_B/);
+  assert.doesNotMatch(
+    taskDecisionMessages.map((message) => String(message.content ?? '')).join('\n'),
+    /未 handoff 的 lane announce/,
+  );
 });
 
 test('capability decision searches candidates from the pending task', async () => {

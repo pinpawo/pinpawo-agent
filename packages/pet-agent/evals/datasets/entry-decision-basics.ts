@@ -54,6 +54,27 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     metadata: { difficulty: 'medium', reason: 'Textual steps must not force task splitting.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.latest-review-overrides-older-published-work`,
+    name: 'latest-review-overrides-older-published-work',
+    suite: SUITE,
+    tags: ['entry_decision', 'context_synthesis'],
+    input: {
+      userRequest: 'OK，把这些问题也发 issue 帮我。',
+      conversationContext: [
+        '更早的全仓库架构审查已经发布了 10 个 GitHub issues。',
+        '刚完成 packages/distribution-worker 专项 review，新发现 Prisma raw SQL 绕过类型安全、模块职责越界和 shared-events 接入缺失；这些发现尚未发布 issue。',
+      ],
+      availableCapabilityIntents: ['general_github_issue_operations'],
+    },
+    expected: {
+      mode: 'direct_task',
+      expectedTaskTerms: ['distribution-worker', 'issue'],
+      expectedBoundaryCount: 1,
+      reason: 'The demonstrative refers to the latest review, not the older already-published findings.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Native message recency must resolve the latest review referent.', source: SOURCE_FILE },
+  },
+  {
     id: `${SUITE}.explore-before-implementation-needs-plan`,
     name: 'explore-before-implementation-needs-plan',
     suite: SUITE,

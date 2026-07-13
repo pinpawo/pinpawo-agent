@@ -1,4 +1,4 @@
-import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { searchCapabilities } from '../src/agent/orchestrator/capabilitySearch.ts';
 import {
   buildCapabilityPlanningDecisionInput,
@@ -53,6 +53,7 @@ export type DecisionEvalTarget = 'entry' | 'planner' | 'capability' | 'outcome';
 export type RenderedDecisionPrompt = {
   system: string;
   input: string;
+  conversationMessages?: BaseMessage[];
 };
 
 export type DecisionEvalRunResult = {
@@ -82,24 +83,30 @@ const actor = {
 };
 
 function messages(prompt: RenderedDecisionPrompt) {
-  return [new SystemMessage(prompt.system), new HumanMessage(prompt.input)];
+  return prompt.conversationMessages
+    ? [new SystemMessage(prompt.system), new SystemMessage(prompt.input), ...prompt.conversationMessages]
+    : [new SystemMessage(prompt.system), new HumanMessage(prompt.input)];
 }
 
 function entryScenarios(): DecisionEvalScenario[] {
   return entryDecisionBasicsDataset.cases.map((testCase) => {
-    const render = (method?: StructuredOutputMethod): RenderedDecisionPrompt => ({
-      system: buildTaskDecisionSystemPrompt({
-        actor,
-        outputInstruction: buildTaskDecisionOutputInstruction(method),
-      }),
-      input: buildTaskDecisionInput({
-        latestUserRequest: testCase.input.userRequest,
-        recentMessages: testCase.input.conversationContext?.map((text) => new AIMessage(text))
-          ?? [new HumanMessage(testCase.input.userRequest)],
-        runDelegationContext: buildRunDelegationSummaryContext([]),
-        runtimeContext: buildRuntimeContext('/workspace', 'Node.js decision eval'),
-      }),
-    });
+    const render = (method?: StructuredOutputMethod): RenderedDecisionPrompt => {
+      const conversationMessages = [
+        ...(testCase.input.conversationContext?.map((text) => new AIMessage(text)) ?? []),
+        new HumanMessage(testCase.input.userRequest),
+      ];
+      return {
+        system: buildTaskDecisionSystemPrompt({
+          actor,
+          outputInstruction: buildTaskDecisionOutputInstruction(method),
+        }),
+        input: buildTaskDecisionInput({
+          runDelegationContext: buildRunDelegationSummaryContext([]),
+          runtimeContext: buildRuntimeContext('/workspace', 'Node.js decision eval'),
+        }),
+        conversationMessages,
+      };
+    };
     return {
       target: 'entry',
       datasetName: entryDecisionBasicsDataset.name,

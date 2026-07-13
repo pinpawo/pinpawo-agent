@@ -16,12 +16,12 @@ test('decision eval scenarios cover every canonical prompt distribution', () => 
     planner: getDecisionEvalScenarios('planner').length,
     capability: getDecisionEvalScenarios('capability').length,
     outcome: getDecisionEvalScenarios('outcome').length,
-  }, { entry: 4, planner: 5, capability: 4, outcome: 3 });
+  }, { entry: 5, planner: 5, capability: 4, outcome: 3 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
   const inputRoots = {
-    entry: 'task_decision_input',
+    entry: 'entry_decision_context',
     planner: 'capability_planning_input',
     capability: 'capability_decision_input',
     outcome: 'delegation_outcome_input',
@@ -35,7 +35,11 @@ test('decision eval scenarios render complete production messages', () => {
       /\{(?:config|sharedPrefix|outputInstruction|\w+Block)\}/,
     );
     const metrics = measureDecisionPrompt(prompt);
-    assert.equal(metrics.totalChars, prompt.system.length + prompt.input.length + 1);
+    assert.ok(metrics.totalChars >= prompt.system.length + prompt.input.length + 1);
+    if (scenario.target === 'entry') {
+      assert.ok(prompt.conversationMessages?.length);
+      assert.equal(prompt.conversationMessages?.at(-1)?._getType(), 'human');
+    }
     assert.ok(metrics.approximateTokens > 0);
     assert.ok(metrics.sharedPrefixPercent > 0);
   }

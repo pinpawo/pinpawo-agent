@@ -304,7 +304,7 @@ test('LocalAgentAppChatHandler resumes canonical human review responses through 
   assert.match(eventMessages[1]?.event?.message ?? '', /已关闭|不存在/);
 });
 
-test('LocalAgentAppChatHandler interrupts pending human review with canonical reject option', async () => {
+test('LocalAgentAppChatHandler cancels pending human review with canonical reject option', async () => {
   const runRequests: unknown[] = [];
   const review = {
     id: 'review-1',
@@ -337,9 +337,10 @@ test('LocalAgentAppChatHandler interrupts pending human review with canonical re
     message: 'hello',
     userId: 'user-1',
   });
-  await handler.handleInterruptRequest(ws, {
-    type: 'interrupt_request',
+  await handler.handleReviewCancel(ws, {
+    type: 'review.cancel',
     requestId: 'req-1',
+    actionId: 'interrupt-1',
   });
 
   assert.deepEqual(runRequests, [
@@ -393,8 +394,8 @@ test('LocalAgentAppChatHandler rejects cancellation for a stale review action', 
     message: 'hello',
     userId: 'user-1',
   });
-  await handler.handleInterruptRequest(ws, {
-    type: 'interrupt_request',
+  await handler.handleReviewCancel(ws, {
+    type: 'review.cancel',
     requestId: 'req-1',
     actionId: 'interrupt-stale',
   });

@@ -272,7 +272,7 @@ test('TuiRuntimeController requests review cancellation separately from run inte
 
   assert.equal(submitted, true);
   assert.deepEqual(sent, [{
-    type: 'interrupt_request',
+    type: 'review.cancel',
     requestId: 'req-1',
     actionId: 'interrupt-1',
   }]);
@@ -280,6 +280,23 @@ test('TuiRuntimeController requests review cancellation separately from run inte
     type: 'review.action.cancel',
     requestId: 'req-1',
     actionId: 'interrupt-1',
+    statusMessage: '正在打断',
+  });
+});
+
+test('TuiRuntimeController interrupts the run after review submission starts', () => {
+  const state = pendingReviewState();
+  state.runs['req-1']!.reviewAction!.status = 'submitting';
+  const { controller, actions, sent } = createController(state);
+
+  assert.equal(controller.requestInterrupt(), true);
+  assert.deepEqual(sent, [{
+    type: 'run.interrupt',
+    requestId: 'req-1',
+  }]);
+  assert.deepEqual(actions.find((action) => action.type === 'run.interrupting'), {
+    type: 'run.interrupting',
+    requestId: 'req-1',
     statusMessage: '正在打断',
   });
 });

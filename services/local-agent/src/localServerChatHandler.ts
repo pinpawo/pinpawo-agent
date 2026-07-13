@@ -5,7 +5,7 @@ import {
   sendLocalAgentEvent,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
-  type InterruptRequestMessage,
+  type ReviewCancelMessage,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
 import {
@@ -44,7 +44,7 @@ type LocalServerRunRequest = ChatSessionRequest;
 type LocalServerRunSource =
   | { type: 'chat_request' }
   | { type: 'human_review_response'; reviewId: string; selectedOptionId: string; decisionCount?: number }
-  | { type: 'interrupt_request'; reviewId: string; selectedOptionId: string; decisionCount?: number };
+  | { type: 'review.cancel'; reviewId: string; selectedOptionId: string; decisionCount?: number };
 
 type ReviewActionRoute = HumanReviewActionRoute & {
   rejectOptionId?: string;
@@ -282,7 +282,7 @@ export class LocalServerChatHandler {
       );
     } else {
       console.log(
-        `[local-server] interrupt_request resume human_review requestId=${requestId} `
+        `[local-server] review.cancel resume human_review requestId=${requestId} `
         + `reviewId=${source.reviewId} option=${source.selectedOptionId}`
         + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
@@ -475,18 +475,15 @@ export class LocalServerChatHandler {
     });
   }
 
-  async handleInterruptRequest(
+  async handleReviewCancel(
     ws: WebSocket,
-    msg: InterruptRequestMessage,
+    msg: ReviewCancelMessage,
     deps: LocalServerDeps,
   ) {
     const route = await this.readReviewActionRoute(msg.requestId, deps);
     if (!route) {
-      if (msg.actionId) {
-        this.sendClosedReviewError(ws, msg.requestId);
-        return true;
-      }
-      return false;
+      this.sendClosedReviewError(ws, msg.requestId);
+      return;
     }
     if (!matchesHumanReviewAction(route, msg.actionId)) {
       sendLocalAgentEvent(ws, {
@@ -495,17 +492,17 @@ export class LocalServerChatHandler {
         message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
         code: 'review_stale',
       });
-      return true;
+      return;
     }
     if (!this.claimPendingReviewRequest(msg.requestId)) {
-      return true;
+      return;
     }
 
     const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
     if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
       this.releasePendingReviewRequest(msg.requestId);
       console.warn(
-        `[local-server] interrupt_request rejected: route sessionId=${route.sessionId} `
+        `[local-server] review.cancel rejected: route sessionId=${route.sessionId} `
         + `does not match active session=${activeSessionId}`,
       );
       sendLocalAgentEvent(ws, {
@@ -514,14 +511,14 @@ export class LocalServerChatHandler {
         message: '请回到发起该 review 的会话再打断。',
         code: 'review_wrong_session',
       });
-      return true;
+      return;
     }
 
     if (!route.rejectOptionId) {
       const firstReview = route.reviews[0];
       this.releasePendingReviewRequest(msg.requestId);
       console.warn(
-        `[local-server] interrupt_request rejected: review action=${route.actionId} has no reject option`,
+        `[local-server] review.cancel rejected: review action=${route.actionId} has no reject option`,
       );
       sendLocalAgentEvent(ws, {
         type: 'system.notice',
@@ -536,7 +533,7 @@ export class LocalServerChatHandler {
         reviews: route.reviews,
         ...(route.actor ? { actor: route.actor } : {}),
       });
-      return true;
+      return;
     }
 
     this.markPendingReviewConsumed(msg.requestId);
@@ -550,12 +547,11 @@ export class LocalServerChatHandler {
       requestId: msg.requestId,
       resume: buildHumanReviewRejectResume(route, route.rejectOptionId),
     }, deps, {
-      type: 'interrupt_request',
+      type: 'review.cancel',
       reviewId: firstReview.id,
       selectedOptionId: route.rejectOptionId,
       decisionCount: 1,
     });
-    return true;
   }
 
   private sendStreamToolOperationEvent(

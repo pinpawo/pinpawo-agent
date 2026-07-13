@@ -263,23 +263,32 @@ export class TuiRuntimeController {
       return false;
     }
 
-    this.wsClient.send({
-      type: 'interrupt_request',
-      requestId: activeRun.requestId,
-      ...(activeRun.reviewAction ? { actionId: activeRun.reviewAction.actionId } : {}),
-    });
-    this.options.dispatch(activeRun.reviewAction
-      ? {
-          type: 'review.action.cancel',
-          requestId: activeRun.requestId,
-          actionId: activeRun.reviewAction.actionId,
-          statusMessage: TUI_TEXT.interrupting,
-        }
-      : {
-          type: 'run.interrupting',
-          requestId: activeRun.requestId,
-          statusMessage: TUI_TEXT.interrupting,
-        });
+    const waitingReviewAction = activeRun.reviewAction?.status === 'waiting'
+      ? activeRun.reviewAction
+      : null;
+    if (waitingReviewAction) {
+      this.wsClient.send({
+        type: 'review.cancel',
+        requestId: activeRun.requestId,
+        actionId: waitingReviewAction.actionId,
+      });
+      this.options.dispatch({
+        type: 'review.action.cancel',
+        requestId: activeRun.requestId,
+        actionId: waitingReviewAction.actionId,
+        statusMessage: TUI_TEXT.interrupting,
+      });
+    } else {
+      this.wsClient.send({
+        type: 'run.interrupt',
+        requestId: activeRun.requestId,
+      });
+      this.options.dispatch({
+        type: 'run.interrupting',
+        requestId: activeRun.requestId,
+        statusMessage: TUI_TEXT.interrupting,
+      });
+    }
     this.clearInterruptTimeout();
 
     const interruptRequestId = activeRun.requestId;

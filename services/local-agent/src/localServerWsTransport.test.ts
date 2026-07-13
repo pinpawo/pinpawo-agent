@@ -33,8 +33,11 @@ test('local websocket transport dispatches typed client messages and pong', asyn
     onHumanReviewResponse: (_ws, message) => {
       seen.push(`review:${message.requestId}:${message.reviewId}:${message.selectedOptionId}`);
     },
-    onInterruptRequest: (_ws, message) => {
-      seen.push(`interrupt:${message.requestId}`);
+    onReviewCancel: (_ws, message) => {
+      seen.push(`review-cancel:${message.requestId}:${message.actionId}`);
+    },
+    onRunInterrupt: (_ws, message) => {
+      seen.push(`run-interrupt:${message.requestId}`);
     },
     onNewSession: (_ws, message) => {
       seen.push(`new:${message.userId ?? ''}`);
@@ -60,7 +63,12 @@ test('local websocket transport dispatches typed client messages and pong', asyn
     reviewId: 'review-spec-1',
     selectedOptionId: 'approve',
   }), handlers);
-  dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'interrupt_request', requestId: 'chat-1' }), handlers);
+  dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'run.interrupt', requestId: 'chat-1' }), handlers);
+  dispatchLocalServerWebSocketMessage(ws, JSON.stringify({
+    type: 'review.cancel',
+    requestId: 'review-1',
+    actionId: 'action-1',
+  }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({ type: 'new_session', userId: 'user-1' }), handlers);
   dispatchLocalServerWebSocketMessage(ws, JSON.stringify({
     type: 'runtime_config.update',
@@ -91,7 +99,8 @@ test('local websocket transport dispatches typed client messages and pong', asyn
       'chat:chat-1:hi',
       'studio:studio-1:plan',
       'review:review-1:review-spec-1:approve',
-      'interrupt:chat-1',
+      'run-interrupt:chat-1',
+      'review-cancel:review-1:action-1',
       'new:user-1',
       'policy:auto_authorization',
     ]);
@@ -156,7 +165,8 @@ function createHandlers(): LocalServerWsHandlers {
     onChatRequest: () => undefined,
     onStudioRequest: () => undefined,
     onHumanReviewResponse: () => undefined,
-    onInterruptRequest: () => undefined,
+    onReviewCancel: () => undefined,
+    onRunInterrupt: () => undefined,
     onNewSession: () => undefined,
     onRuntimeConfigUpdate: () => undefined,
     onClose: () => undefined,

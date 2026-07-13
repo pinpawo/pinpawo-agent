@@ -165,28 +165,15 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
   assert.equal(event.event?.code, 'review_closed');
 
-  const interruptHandled = await handler.handleInterruptRequest(
+  await handler.handleReviewCancel(
     fakeWs,
     {
-      type: 'interrupt_request',
-      requestId: 'req-1',
-    },
-    { actorId: 'pet-1' } as never,
-  );
-  assert.equal(interruptHandled, false, 'consumed review route should fall through to inflight interrupt');
-  assert.equal(handleChatCalls.length, 1);
-  assert.equal(sentEvents.length, 1);
-
-  const staleReviewCancelHandled = await handler.handleInterruptRequest(
-    fakeWs,
-    {
-      type: 'interrupt_request',
+      type: 'review.cancel',
       requestId: 'req-1',
       actionId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
-  assert.equal(staleReviewCancelHandled, true, 'review cancellation must not fall through to run interruption');
   assert.equal((sentEvents.at(-1) as { event?: { code?: string } }).event?.code, 'review_closed');
 });
 
@@ -412,7 +399,7 @@ test('readReviewActionSnapshot exposes routeable review action request ids', asy
   });
 });
 
-test('handleInterruptRequest resumes pending review with canonical reject option', async () => {
+test('handleReviewCancel resumes pending review with canonical reject option', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakeWs = {
@@ -466,16 +453,16 @@ test('handleInterruptRequest resumes pending review with canonical reject option
     },
   }, { actorId: 'pet-1' });
 
-  const handled = await handler.handleInterruptRequest(
+  await handler.handleReviewCancel(
     fakeWs,
     {
-      type: 'interrupt_request',
+      type: 'review.cancel',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(handled, true);
   assert.equal(sentEvents.length, 0);
   assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
@@ -497,7 +484,7 @@ test('handleInterruptRequest resumes pending review with canonical reject option
     },
   });
   assert.deepEqual(forwardedSource, {
-    type: 'interrupt_request',
+    type: 'review.cancel',
     reviewId: 'review-current',
     selectedOptionId: 'reject',
     decisionCount: 1,
@@ -523,7 +510,7 @@ test('handleInterruptRequest resumes pending review with canonical reject option
   assert.equal(event.event?.code, 'review_closed');
 });
 
-test('handleInterruptRequest recovers missing route from active checkpoint review', async () => {
+test('handleReviewCancel recovers missing route from active checkpoint review', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakeWs = {
@@ -562,16 +549,16 @@ test('handleInterruptRequest recovers missing route from active checkpoint revie
     handleChatCalls.push(args);
   };
 
-  const handled = await handler.handleInterruptRequest(
+  await handler.handleReviewCancel(
     fakeWs,
     {
-      type: 'interrupt_request',
+      type: 'review.cancel',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(handled, true);
   assert.equal(sentEvents.length, 0);
   assert.equal(handleChatCalls.length, 1);
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
@@ -593,14 +580,14 @@ test('handleInterruptRequest recovers missing route from active checkpoint revie
     },
   });
   assert.deepEqual(forwardedSource, {
-    type: 'interrupt_request',
+    type: 'review.cancel',
     reviewId: 'review-current',
     selectedOptionId: 'reject',
     decisionCount: 1,
   });
 });
 
-test('handleInterruptRequest restores pending review when no reject option exists', async () => {
+test('handleReviewCancel restores pending review when no reject option exists', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakeWs = {
@@ -639,16 +626,16 @@ test('handleInterruptRequest restores pending review when no reject option exist
     },
   }, { actorId: 'pet-1' });
 
-  const handled = await handler.handleInterruptRequest(
+  await handler.handleReviewCancel(
     fakeWs,
     {
-      type: 'interrupt_request',
+      type: 'review.cancel',
       requestId: 'req-1',
+      actionId: 'interrupt-1',
     },
     { actorId: 'pet-1' } as never,
   );
 
-  assert.equal(handled, true);
   assert.equal(handleChatCalls.length, 0);
   assert.equal(sentEvents.length, 2);
   const notice = sentEvents[0] as { type: string; event?: { type: string; message: string } };

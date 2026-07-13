@@ -85,7 +85,6 @@ export type SubagentContextManagement = {
     keepRecent: number;
     defaultMode?: 'evict' | 'truncate';
     minSizeChars?: number;
-    maxSingleResultChars?: number;
     keepFailures?: boolean;
     perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
   };

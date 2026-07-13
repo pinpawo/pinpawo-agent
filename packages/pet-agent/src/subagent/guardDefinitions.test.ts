@@ -49,24 +49,24 @@ test('context maintenance guard maintains at the provider input watermark', () =
   });
 });
 
-test('context maintenance guard reacts to an oversized tool result before provider usage catches up', () => {
+test('context maintenance guard leaves single-result sizing to the toolkit below the watermark', () => {
   const outcome = evaluateGuard(contextMaintenanceGuard, {
     state: {
       messages: [
         new HumanMessage('inspect'),
+        usageMessage('previous provider usage', 400),
         new AIMessage({
           content: '',
           tool_calls: [{ id: 'call-large', name: 'read_file', args: { path: 'large.log' } }],
         }),
         new ToolMessage({
           tool_call_id: 'call-large',
-          content: 'x'.repeat(101),
+          content: 'x'.repeat(20_001),
         }),
       ],
       contextManagement: {
         evictToolResults: {
           keepRecent: 5,
-          maxSingleResultChars: 100,
         },
       },
     },
@@ -74,14 +74,7 @@ test('context maintenance guard reacts to an oversized tool result before provid
     position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_MANAGEMENT,
   });
 
-  assert.equal(outcome.kind, 'maintain');
-  assert.equal(outcome.kind === 'maintain' && outcome.reason, CONTEXT_MAINTENANCE_REQUIRED);
-  assert.deepEqual(outcome.kind === 'maintain' && outcome.details, {
-    trigger: 'oversized_tool_result',
-    toolName: 'read_file',
-    resultChars: 101,
-    maxSingleResultChars: 100,
-  });
+  assert.equal(outcome.kind, 'proceed');
 });
 
 test('context maintenance guard proceeds when disabled or below the watermark', () => {

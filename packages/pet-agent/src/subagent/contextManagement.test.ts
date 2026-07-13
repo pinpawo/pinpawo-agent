@@ -41,50 +41,26 @@ test('subagent context management defaults on and can be explicitly disabled', (
     keepFailures: true,
     defaultMode: 'evict',
     minSizeChars: 2000,
-    maxSingleResultChars: 20_000,
   });
   assert.equal(resolveSubagentContextManagement(false), undefined);
 });
 
-test('context management hard-truncates an oversized recent result', () => {
+test('context management preserves recent results regardless of their size', () => {
   const messages: BaseMessage[] = [
     new HumanMessage('inspect'),
     toolCallMessage('call-large', 'read_file', { path: 'large.log' }),
-    toolResult('call-large', 'x'.repeat(101)),
+    toolResult('call-large', 'x'.repeat(20_001)),
   ];
   const management = resolveSubagentContextManagement({
     evictToolResults: {
       keepRecent: 5,
-      maxSingleResultChars: 100,
     },
   });
 
   const rewritten = rewriteMessagesForContextManagement(messages, management, ctx({ read_file: {} }));
 
-  assert.match(String(rewritten[2]?.content), /^x{100}\n\[truncated: tool result exceeded context budget/);
-});
-
-test('custom context rewrite receives hard-bounded tool results', () => {
-  const messages: BaseMessage[] = [
-    new HumanMessage('inspect'),
-    toolCallMessage('call-large', 'read_file', { path: 'large.log' }),
-    toolResult('call-large', 'x'.repeat(101)),
-  ];
-  let customInput: BaseMessage[] = [];
-  const management = resolveSubagentContextManagement({
-    evictToolResults: {
-      keepRecent: 5,
-      maxSingleResultChars: 100,
-    },
-    rewrite: (input) => {
-      customInput = input;
-      return input;
-    },
-  });
-
-  rewriteMessagesForContextManagement(messages, management, ctx({ read_file: {} }));
-
-  assert.match(String(customInput[2]?.content), /\[truncated: tool result exceeded context budget/);
+  assert.equal(rewritten, messages);
+  assert.equal(String(rewritten[2]?.content).length, 20_001);
 });
 
 test('context management evicts old large successful tool results only', () => {

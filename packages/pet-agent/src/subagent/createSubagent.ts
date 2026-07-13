@@ -13,7 +13,6 @@ import {
   buildContextManagementStateUpdate,
   resolveSubagentContextManagement,
   rewriteMessagesForContextManagement,
-  truncateOversizedToolResults,
 } from './contextManagement';
 import { isGraphRecursionLimitError } from '../utils/graphErrors';
 import {
@@ -104,10 +103,9 @@ function createContextManagementMiddleware(
         return undefined;
       }
       const context = buildContextManagementContext(inputState, iterationCount);
-      const boundedMessages = truncateOversizedToolResults(baseMessages, management, context);
       const rewritten = management.rewriteAsync
-        ? await management.rewriteAsync(boundedMessages, context)
-        : rewriteMessagesForContextManagement(boundedMessages, management, context);
+        ? await management.rewriteAsync(baseMessages, context)
+        : rewriteMessagesForContextManagement(baseMessages, management, context);
       return buildContextManagementStateUpdate(baseMessages, rewritten) ?? undefined;
     },
   });

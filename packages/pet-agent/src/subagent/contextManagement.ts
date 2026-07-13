@@ -14,7 +14,6 @@ import {
 import { readMessageText } from '../agent/orchestrator/utils';
 
 const DEFAULT_MIN_SIZE_CHARS = 2000;
-const DEFAULT_MAX_SINGLE_RESULT_CHARS = 20_000;
 const CONTEXT_MANAGEMENT_MARKER_KEY = 'contextManagementRewrite';
 const LEGACY_CONTEXT_POLICY_MARKER_KEY = 'contextPolicyRewrite';
 
@@ -24,7 +23,6 @@ export const DEFAULT_SUBAGENT_CONTEXT_MANAGEMENT: SubagentContextManagement = {
     keepFailures: true,
     defaultMode: 'evict',
     minSizeChars: DEFAULT_MIN_SIZE_CHARS,
-    maxSingleResultChars: DEFAULT_MAX_SINGLE_RESULT_CHARS,
   },
 };
 
@@ -57,8 +55,6 @@ type ToolResultCandidate = {
 
 type RewriteDecision = {
   mode: 'evict' | 'truncate';
-  maxChars?: number;
-  trigger?: 'oversized_tool_result';
 };
 
 function collectToolCallInfo(messages: BaseMessage[]) {
@@ -178,46 +174,11 @@ function readRewriteMarker(message: ToolMessage): string | null {
   return typeof marker === 'string' ? marker : null;
 }
 
-export type OversizedToolResult = {
-  toolName: string | null;
-  resultChars: number;
-  maxSingleResultChars: number;
-};
-
-export function readOversizedToolResult(
-  messages: BaseMessage[],
-  management: SubagentContextManagement | undefined,
-): OversizedToolResult | null {
-  const maxSingleResultChars = management?.evictToolResults?.maxSingleResultChars;
-  if (!maxSingleResultChars || maxSingleResultChars <= 0) return null;
-  const candidates = collectToolResultCandidates(messages, {});
-  for (let index = candidates.length - 1; index >= 0; index -= 1) {
-    const candidate = candidates[index]!;
-    if (readRewriteMarker(candidate.message) || isDefaultEvictionStub(candidate.content)) continue;
-    if (candidate.content.length > maxSingleResultChars) {
-      return {
-        toolName: candidate.toolName,
-        resultChars: candidate.content.length,
-        maxSingleResultChars,
-      };
-    }
-  }
-  return null;
-}
-
 function shouldRewriteCandidate(
   candidate: ToolResultCandidate,
   policy: NonNullable<SubagentContextManagement['evictToolResults']>,
 ): RewriteDecision | null {
   if (readRewriteMarker(candidate.message) || isDefaultEvictionStub(candidate.content)) return null;
-  const maxSingleResultChars = policy.maxSingleResultChars;
-  if (maxSingleResultChars && candidate.content.length > maxSingleResultChars) {
-    return {
-      mode: 'truncate',
-      maxChars: maxSingleResultChars,
-      trigger: 'oversized_tool_result',
-    };
-  }
   const toolName = candidate.toolName ?? '';
   const perTool = toolName ? policy.perTool?.[toolName] : undefined;
   if (perTool === 'keep') return null;
@@ -245,38 +206,9 @@ function rewriteCandidate(
   minSizeChars: number,
 ): ToolMessage {
   if (decision.mode === 'truncate') {
-    const maxChars = decision.maxChars ?? minSizeChars;
-    const notice = decision.trigger === 'oversized_tool_result'
-      ? '[truncated: tool result exceeded context budget; recall or rerun tool if needed]'
-      : '[truncated: older tool result; recall or rerun tool if needed]';
-    return replaceToolMessageContent(candidate.message, `${candidate.content.slice(0, maxChars)}\n${notice}`, 'truncated');
+    return replaceToolMessageContent(candidate.message, `${candidate.content.slice(0, minSizeChars)}\n[truncated: older tool result; recall or rerun tool if needed]`, 'truncated');
   }
   return replaceToolMessageContent(candidate.message, buildDefaultStub(candidate), 'evicted');
-}
-
-export function truncateOversizedToolResults(
-  messages: BaseMessage[],
-  management: SubagentContextManagement | undefined,
-  ctx: ContextManagementContext,
-): BaseMessage[] {
-  const evictPolicy = management?.evictToolResults;
-  const maxSingleResultChars = evictPolicy?.maxSingleResultChars;
-  if (!evictPolicy || !maxSingleResultChars || maxSingleResultChars <= 0) return messages;
-
-  const candidates = collectToolResultCandidates(messages, ctx.operations);
-  const nextMessages = [...messages];
-  let changed = false;
-  for (const candidate of candidates) {
-    if (readRewriteMarker(candidate.message) || isDefaultEvictionStub(candidate.content)) continue;
-    if (candidate.content.length <= maxSingleResultChars) continue;
-    nextMessages[candidate.index] = rewriteCandidate(candidate, {
-      mode: 'truncate',
-      maxChars: maxSingleResultChars,
-      trigger: 'oversized_tool_result',
-    }, evictPolicy.minSizeChars ?? DEFAULT_MIN_SIZE_CHARS);
-    changed = true;
-  }
-  return changed ? nextMessages : messages;
 }
 
 export function rewriteMessagesForContextManagement(
@@ -285,23 +217,22 @@ export function rewriteMessagesForContextManagement(
   ctx: ContextManagementContext,
 ): BaseMessage[] {
   if (!management) return messages;
-  const boundedMessages = truncateOversizedToolResults(messages, management, ctx);
   if (management.rewrite) {
-    return management.rewrite(boundedMessages, ctx);
+    return management.rewrite(messages, ctx);
   }
   if (management.rewriteAsync) {
     throw new Error('rewriteAsync must be resolved by the async context management middleware');
   }
   const evictPolicy = management.evictToolResults;
-  if (!evictPolicy) return boundedMessages;
+  if (!evictPolicy) return messages;
 
   const minSizeChars = evictPolicy.minSizeChars ?? DEFAULT_MIN_SIZE_CHARS;
   const candidates = markRecentProtected(
-    collectToolResultCandidates(boundedMessages, ctx.operations),
+    collectToolResultCandidates(messages, ctx.operations),
     evictPolicy.keepRecent,
   );
-  const nextMessages = [...boundedMessages];
-  let changed = boundedMessages !== messages;
+  const nextMessages = [...messages];
+  let changed = false;
 
   for (const candidate of candidates) {
     const decision = shouldRewriteCandidate(candidate, evictPolicy);
@@ -312,7 +243,7 @@ export function rewriteMessagesForContextManagement(
     changed = true;
   }
 
-  return changed ? nextMessages : boundedMessages;
+  return changed ? nextMessages : messages;
 }
 
 export function buildContextManagementStateUpdate(

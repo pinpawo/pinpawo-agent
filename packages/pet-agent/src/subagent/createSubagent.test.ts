@@ -208,7 +208,7 @@ test('createSubagent context management rewrites persisted subagent transcript',
   assert.equal(toolMessages[0]?.content, '[evicted: view_file_chunk src/a.ts -> 已读；需要时重新调用]');
 });
 
-test('createSubagent applies default context management to an oversized latest tool result', async () => {
+test('createSubagent leaves single-result sizing to the toolkit below the watermark', async () => {
   const readFile = tool(async () => 'x'.repeat(20_001), {
     name: 'read_file',
     description: 'read a large file',
@@ -229,8 +229,7 @@ test('createSubagent applies default context management to an oversized latest t
 
   const toolResult = result.messages.find((message) => message._getType() === 'tool');
   assert.ok(toolResult);
-  assert.match(String(toolResult.content), /\[truncated: tool result exceeded context budget/);
-  assert.ok(String(toolResult.content).length < 20_100);
+  assert.equal(String(toolResult.content).length, 20_001);
 });
 
 test('createSubagent applies default eviction after provider input crosses the watermark', async () => {

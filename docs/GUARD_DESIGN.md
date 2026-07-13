@@ -173,7 +173,7 @@ conclusions cross boundaries and transcripts do not:
 | `forced_capability_seed` | `orchestrator.capability_discovery` | `derive` | seeded candidate names |
 | `delegation_outcome_decision` | `orchestrator.delegation_outcome_decision` | `derive` | `completionReason`, resulting `canHandoffActiveDelegation` |
 | `run_iteration_limit` | `orchestrator.delegation_outcome_iteration` | `stop` | `runIterationCount`, `runIterationLimit` |
-| `context_maintenance` | `subagent.before_model_context_management` | `maintain` | `trigger`; provider watermark details or oversized tool-result details |
+| `context_maintenance` | `subagent.before_model_context_management` | `maintain` | provider watermark details |
 | `iteration_limit` | `subagent.before_model_iteration` | `stop` | `iterationCount`, `maxIterations` |
 
 Notes:
@@ -185,8 +185,7 @@ Notes:
   simply the rule doing its job. When it derives "handoff not allowed", the
   reason is `active_delegation_limit_reached`.
 - The two `stop` guards share limit-comparison helpers. The two `maintain`
-  guards share `checkProviderInputWatermark`, while subagent context maintenance
-  also reacts to an oversized tool result before provider usage catches up.
+  guards share `checkProviderInputWatermark`.
 
 ## What There Is No More
 

@@ -7,7 +7,6 @@ import {
   checkProviderInputWatermark,
   readLatestProviderInputTokens,
 } from '../../agent/tokenUsage';
-import { readOversizedToolResult } from '../contextManagement';
 import {
   SUBAGENT_GUARD_NAME,
   SUBAGENT_GUARD_POSITION,
@@ -29,13 +28,6 @@ export const contextMaintenanceGuard = defineGuard<
     const management = state.contextManagement;
     if (!management?.rewrite && !management?.rewriteAsync && !management?.evictToolResults) {
       return guardProceed();
-    }
-    const oversizedToolResult = readOversizedToolResult(state.messages, management);
-    if (oversizedToolResult) {
-      return guardMaintain(CONTEXT_MAINTENANCE_REQUIRED, {
-        trigger: 'oversized_tool_result',
-        ...oversizedToolResult,
-      });
     }
     const watermark = checkProviderInputWatermark(
       readLatestProviderInputTokens(state.messages),

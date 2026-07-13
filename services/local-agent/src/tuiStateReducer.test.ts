@@ -688,7 +688,7 @@ test('tuiStateReducer clears session token usage when clearing session state', (
     type: 'session.clear',
   });
 
-  assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
+  assert.equal(state.sessions['chat:pet']?.tokenUsage, undefined);
   assert.equal(state.sessions['chat:pet']?.kind, 'chat');
   assert.deepEqual(state.ui, {
     mode: 'chat',
@@ -953,7 +953,7 @@ test('tuiStateReducer preserves reconnect token usage when snapshot omits usage'
     }),
   });
 
-  assert.equal(state.sessions['chat:pet']?.tokenUsage, null);
+  assert.equal(state.sessions['chat:pet']?.tokenUsage, undefined);
 });
 
 test('tuiStateReducer preserves reconcile token usage when snapshot omits usage', () => {

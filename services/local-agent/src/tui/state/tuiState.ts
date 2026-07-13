@@ -55,11 +55,10 @@ export type TuiUiState = {
 
 export type SessionModel = Omit<
   LocalAgentSession,
-  'actor' | 'runtime' | 'tokenUsage'
+  'actor' | 'runtime'
 > & {
   actor: LocalAgentActorView;
   runtime: LocalAgentRuntimeView;
-  tokenUsage: TokenUsageModel | null;
 };
 
 export type ActiveRunModel = LocalAgentRun;
@@ -279,6 +278,5 @@ export function createSession(params: {
     runtime: {},
     timeline: params.timeline ?? [],
     activeRun: null,
-    tokenUsage: null,
   };
 }

@@ -1,8 +1,4 @@
-import type {
-  LocalAgentOperationEvent,
-  LocalAgentOperationPhase,
-  LocalAgentOperationRaw,
-} from '../../events/localAgentEvent';
+import type { LocalAgentOperationEvent } from '../../events/localAgentEvent';
 import type {
   LocalAgentMessageEntry,
   LocalAgentOperationEntry,
@@ -10,9 +6,14 @@ import type {
 } from '../../localAgentSession';
 import type { MessageCellModel } from '../state/tuiState';
 import {
-  buildOperationPresentation,
-  type OperationPresentation,
-} from './operationPresentation';
+  localAgentOperationEntryFromEvent,
+  localAgentOperationEntryId,
+} from '../../localAgentTimeline';
+
+export {
+  isRunningOperationPhase,
+  isTerminalOperationPhase,
+} from '../../localAgentTimeline';
 
 export type AgentTimelineEntry = LocalAgentTimelineEntry;
 
@@ -74,7 +75,7 @@ export function timelineEntryFromMessageCell(cell: MessageCellModel): AgentMessa
 }
 
 export function timelineEntryIdFromOperationEvent(event: LocalAgentOperationEvent) {
-  return `${event.requestId}:operation:${buildOperationPresentation(event).operationKey}`;
+  return localAgentOperationEntryId(event);
 }
 
 export function operationTimelineEntryFromEvent(
@@ -82,84 +83,5 @@ export function operationTimelineEntryFromEvent(
   now: number,
   previous?: AgentOperationEntry,
 ): AgentOperationEntry {
-  const presentation = buildOperationPresentation(event);
-  const mergedPresentation = previous
-    ? mergeOperationPresentation(event, presentation, previous)
-    : presentation;
-  const { source: operationSource, ...operationPresentation } = mergedPresentation;
-  return {
-    ...operationPresentation,
-    id: previous?.id ?? timelineEntryIdFromOperationEvent(event),
-    type: 'operation',
-    requestId: event.requestId,
-    phase: event.phase,
-    source: 'live-event',
-    ...(operationSource ? { operationSource } : {}),
-    startedAt: previous?.startedAt ?? now,
-    updatedAt: now,
-    ...(isTerminalOperationPhase(event.phase) ? { completedAt: now } : {}),
-    ...rawField(mergeOperationRaw(previous?.raw, event.raw)),
-  };
-}
-
-function mergeOperationPresentation(
-  event: LocalAgentOperationEvent,
-  presentation: OperationPresentation,
-  previous: AgentOperationEntry,
-): OperationPresentation {
-  return {
-    ...presentation,
-    title: event.operation.title !== undefined ? presentation.title : previous.title,
-    target: event.operation.target !== undefined ? presentation.target : previous.target,
-    summary: event.operation.summary !== undefined ? presentation.summary : previous.summary,
-    details: event.operation.details !== undefined
-      ? mergeOperationDetails(previous.details, presentation.details)
-      : previous.details,
-    source: event.operation.source !== undefined ? presentation.source : previous.operationSource,
-  };
-}
-
-function mergeOperationDetails(
-  previous: Record<string, unknown> | undefined,
-  next: Record<string, unknown> | undefined,
-) {
-  if (!previous) return next;
-  if (!next) return previous;
-  return { ...previous, ...next };
-}
-
-function mergeOperationRaw(
-  previous: LocalAgentOperationRaw | undefined,
-  next: LocalAgentOperationRaw | undefined,
-) {
-  if (!previous) return next;
-  if (!next) return previous;
-  return {
-    ...previous,
-    ...definedRawFields(next),
-  };
-}
-
-function rawField(raw: LocalAgentOperationRaw | undefined) {
-  return raw ? { raw } : {};
-}
-
-function definedRawFields(raw: LocalAgentOperationRaw) {
-  return {
-    ...(raw.input !== undefined ? { input: raw.input } : {}),
-    ...(raw.output !== undefined ? { output: raw.output } : {}),
-    ...(raw.error !== undefined ? { error: raw.error } : {}),
-  };
-}
-
-export function isTerminalOperationPhase(
-  phase: LocalAgentOperationPhase,
-): phase is Extract<LocalAgentOperationPhase, 'completed' | 'failed' | 'interrupted'> {
-  return phase === 'completed' || phase === 'failed' || phase === 'interrupted';
-}
-
-export function isRunningOperationPhase(
-  phase: LocalAgentOperationPhase,
-): phase is Extract<LocalAgentOperationPhase, 'started' | 'updated'> {
-  return phase === 'started' || phase === 'updated';
+  return localAgentOperationEntryFromEvent(event, now, previous);
 }

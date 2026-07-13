@@ -44,7 +44,6 @@ async function runCase(testCase: typeof outcomeDecisionBasicsDataset.cases[numbe
     userIntentContext: buildPreparedRequestContext({
       latestUserRequest: testCase.input.userGoal,
       recentMessages: [new HumanMessage(testCase.input.userGoal)],
-      recentAnnounces: [],
     }),
     currentTaskContext: buildDelegationOutcomeCurrentTaskContext({
       id: delegationId,

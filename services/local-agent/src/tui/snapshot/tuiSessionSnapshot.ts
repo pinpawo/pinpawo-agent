@@ -1,12 +1,12 @@
 import type {
-  TuiCoreOperationTimelineEntry,
-  TuiCoreRuntimeSnapshot,
-  TuiCoreSessionSnapshot,
-  TuiCoreTimelineEntry,
-} from '../contracts/tuiCoreContract';
+  LocalAgentRuntimeView,
+  LocalAgentSession,
+  LocalAgentSessionSnapshot,
+  LocalAgentTimelineEntry,
+} from '../../localAgentSession';
+import { LOCAL_AGENT_SESSION_SNAPSHOT_VERSION } from '../../localAgentSession';
 import {
   timelineEntryIdFromMessageCell,
-  type AgentOperationEntry,
   type AgentTimelineEntry,
 } from '../timeline/agentTimeline';
 import type {
@@ -17,7 +17,7 @@ import type {
 
 type BuildSnapshotFromMessagesParams = {
   sessionId: string;
-  kind: TuiCoreSessionSnapshot['kind'];
+  kind: LocalAgentSession['kind'];
   messages: MessageCellModel[];
   runtime?: Partial<SessionModel['runtime']> | null;
   tokenUsage?: TokenUsageModel | null;
@@ -25,18 +25,21 @@ type BuildSnapshotFromMessagesParams = {
 
 export function buildTuiSessionSnapshotFromMessages(
   params: BuildSnapshotFromMessagesParams,
-): TuiCoreSessionSnapshot {
+): LocalAgentSessionSnapshot {
   return {
-    sessionId: params.sessionId,
-    kind: params.kind,
-    timeline: timelineSnapshotFromMessages(params.messages),
-    runs: [],
-    ...(params.runtime ? { runtime: normalizeRuntimeSnapshot(params.runtime) } : {}),
-    ...(params.tokenUsage ? { tokenUsage: params.tokenUsage } : {}),
+    version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
+    session: {
+      sessionId: params.sessionId,
+      kind: params.kind,
+      timeline: timelineSnapshotFromMessages(params.messages),
+      activeRun: null,
+      ...(params.runtime ? { runtime: normalizeRuntimeSnapshot(params.runtime) } : {}),
+      ...(params.tokenUsage ? { tokenUsage: params.tokenUsage } : {}),
+    },
   };
 }
 
-export function timelineSnapshotFromMessages(messages: MessageCellModel[]): TuiCoreTimelineEntry[] {
+export function timelineSnapshotFromMessages(messages: MessageCellModel[]): LocalAgentTimelineEntry[] {
   return messages.flatMap((cell) => {
     if (cell.kind !== 'user' && cell.kind !== 'assistant') return [];
     return [{
@@ -48,47 +51,17 @@ export function timelineSnapshotFromMessages(messages: MessageCellModel[]): TuiC
       source: 'checkpoint',
       ...(cell.requestId ? { requestId: cell.requestId } : {}),
       ...(cell.timestamp ? { createdAt: cell.timestamp } : {}),
-    } satisfies TuiCoreTimelineEntry];
+    } satisfies LocalAgentTimelineEntry];
   });
 }
 
-export function agentTimelineEntriesFromSnapshot(timeline: TuiCoreTimelineEntry[]): AgentTimelineEntry[] {
-  return timeline.map((entry) => {
-    if (entry.type === 'message') {
-      return {
-        id: entry.id,
-        type: 'message',
-        role: entry.role,
-        text: entry.text,
-        status: entry.status,
-        ...(entry.requestId ? { requestId: entry.requestId } : {}),
-        ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
-        ...(entry.updatedAt ? { updatedAt: entry.updatedAt } : {}),
-      } satisfies AgentTimelineEntry;
-    }
-    return operationEntryFromSnapshot(entry);
-  });
-}
-
-function operationEntryFromSnapshot(entry: TuiCoreOperationTimelineEntry): AgentOperationEntry {
-  return {
-    id: entry.id,
-    type: 'operation',
-    requestId: entry.requestId,
-    operationKey: entry.operationKey,
-    kind: entry.operationKey,
-    title: entry.title ?? entry.operationKey,
-    phase: entry.phase,
-    summary: entry.summary,
-    startedAt: entry.startedAt ?? entry.updatedAt ?? 0,
-    updatedAt: entry.updatedAt ?? entry.startedAt ?? 0,
-    ...(entry.completedAt !== undefined ? { completedAt: entry.completedAt } : {}),
-  };
+export function agentTimelineEntriesFromSnapshot(timeline: LocalAgentTimelineEntry[]): AgentTimelineEntry[] {
+  return timeline.map((entry) => ({ ...entry }));
 }
 
 function normalizeRuntimeSnapshot(
   runtime: Partial<SessionModel['runtime']>,
-): TuiCoreRuntimeSnapshot {
+): LocalAgentRuntimeView {
   return {
     ...(runtime.model ? { model: runtime.model } : {}),
     ...(runtime.cwd ? { cwd: runtime.cwd } : {}),

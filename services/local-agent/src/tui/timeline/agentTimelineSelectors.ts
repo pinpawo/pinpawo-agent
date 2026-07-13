@@ -36,7 +36,7 @@ export function selectActiveOperationsFromTimeline(
     name: entry.operationKey,
     label: entry.title,
     detail: formatOperationTimelineDetail(entry),
-    startedAt: entry.startedAt,
+    startedAt: entry.startedAt ?? entry.updatedAt ?? 0,
   }));
 }
 

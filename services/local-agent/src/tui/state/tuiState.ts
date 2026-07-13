@@ -1,7 +1,14 @@
 import type { ReviewResponse, ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
 import type { LocalAgentEvent } from '../../events/localAgentEvent';
-import type { TuiCoreSessionSnapshotLoadedAction } from '../contracts/tuiCoreContract';
-import type { AgentTimelineEntry } from '../timeline/agentTimeline';
+import type {
+  LocalAgentActorView,
+  LocalAgentReviewAction,
+  LocalAgentRun,
+  LocalAgentRuntimeView,
+  LocalAgentSession,
+  LocalAgentSessionSnapshot,
+  LocalAgentTimelineEntry,
+} from '../../localAgentSession';
 import {
   createComposerHistoryState,
   type ComposerHistoryDirection,
@@ -9,7 +16,7 @@ import {
 } from '../input/composerHistory';
 import type { TextAreaModel } from '../input/textarea/engine';
 import { TUI_TEXT } from '../render/text';
-import type { ReviewAction, ReviewDraft } from '../../reviewAction';
+import type { ReviewDraft } from '../../reviewAction';
 
 export type RunId = string;
 export type SessionId = string;
@@ -30,7 +37,7 @@ export type TuiState = {
   connection: TuiConnectionState;
   sessions: Record<SessionId, SessionModel>;
   focusedSessionId: SessionId | null;
-  runs: Record<RunId, TuiRunModel>;
+  reviewDrafts: Record<string, ReviewDraft>;
   ui: TuiUiState;
   input: TextAreaModel & {
     focused: boolean;
@@ -46,47 +53,18 @@ export type TuiUiState = {
   externalEditorOpen: boolean;
 };
 
-export type SessionModel = {
-  id: SessionId;
-  kind: 'chat' | 'studio';
-  actor: {
-    label: string;
-    summary: string;
-  };
-  runtime: {
-    model?: string;
-    cwd?: string;
-    workspaceId?: string;
-    workspaceName?: string;
-    workspaceRoot?: string;
-    stateRoot?: string;
-    studioConfigPath?: string;
-    studioDueRunsPath?: string;
-    studioConfigSource?: string;
-    studioConfigActivePath?: string;
-    legacyStudioConfigPath?: string;
-    petsDir?: string;
-    studioWikiBaseDir?: string;
-    contextWindow?: number;
-  };
-  timeline: AgentTimelineEntry[];
-  activeRunId: RunId | null;
+export type SessionModel = Omit<
+  LocalAgentSession,
+  'actor' | 'runtime' | 'tokenUsage'
+> & {
+  actor: LocalAgentActorView;
+  runtime: LocalAgentRuntimeView;
   tokenUsage: TokenUsageModel | null;
 };
 
-export type ActiveRunModel = {
-  requestId: RunId;
-  phase: 'thinking' | 'using_tool' | 'streaming' | 'waiting_human' | 'interrupting';
-  timelineEntryIds: string[];
-  reviewAction?: ReviewActionModel;
-  startedAt: number;
-  charCount: number;
-};
+export type ActiveRunModel = LocalAgentRun;
 
-export type TuiRunModel = ActiveRunModel & {
-  sessionId: SessionId;
-  kind: SessionModel['kind'];
-};
+export type TuiRunModel = LocalAgentRun;
 
 export type TokenUsageModel = TokenUsageSnapshot;
 
@@ -98,13 +76,8 @@ export type MessageCellModel = {
   timestamp?: string;
 };
 
-export type ReviewActionModel = ReviewAction & {
+export type ApprovalRequestModel = LocalAgentReviewAction & {
   requestId: RunId;
-  draft: ReviewDraft;
-  petId?: string;
-};
-
-export type ApprovalRequestModel = Omit<ReviewActionModel, 'draft'> & {
   review: ReviewSpec;
   decisions: ReviewResponse[];
 };
@@ -123,7 +96,12 @@ export type MessageCellMeta = {
 };
 
 export type TuiAction =
-  | TuiCoreSessionSnapshotLoadedAction
+  | {
+      type: 'session.snapshot.loaded';
+      source: 'startup' | 'reconnect' | 'resume' | 'reconcile';
+      snapshot: LocalAgentSessionSnapshot;
+      now?: number;
+    }
   | {
       type: 'connection.set';
       status: TuiConnectionStatus;
@@ -267,10 +245,10 @@ export function createInitialTuiState(defaultSession: SessionModel): TuiState {
       message: TUI_TEXT.statusInitializing,
     },
     sessions: {
-      [defaultSession.id]: defaultSession,
+      [defaultSession.sessionId]: defaultSession,
     },
-    focusedSessionId: defaultSession.id,
-    runs: {},
+    focusedSessionId: defaultSession.sessionId,
+    reviewDrafts: {},
     ui: {
       mode: 'chat',
       studioConversationId: null,
@@ -289,10 +267,10 @@ export function createSession(params: {
   id: SessionId;
   kind?: SessionModel['kind'];
   actor?: Partial<SessionModel['actor']>;
-  timeline?: AgentTimelineEntry[];
+  timeline?: LocalAgentTimelineEntry[];
 }): SessionModel {
   return {
-    id: params.id,
+    sessionId: params.id,
     kind: params.kind ?? 'chat',
     actor: {
       label: params.actor?.label ?? TUI_TEXT.defaultPetName,
@@ -300,7 +278,7 @@ export function createSession(params: {
     },
     runtime: {},
     timeline: params.timeline ?? [],
-    activeRunId: null,
+    activeRun: null,
     tokenUsage: null,
   };
 }

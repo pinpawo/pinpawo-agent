@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 import { TuiRuntimeController } from './tui/TuiRuntimeController';
-import { TUI_CORE_TARGET_ACTIONS } from './tui/contracts/tuiCoreContract';
 import { createComposerHistoryState } from './tui/input/composerHistory';
 import type { TuiAction, TuiState } from './tui/state/tuiState';
 
@@ -15,39 +14,33 @@ function pendingReviewState(): TuiState {
   return {
     connection: { status: 'ready', message: 'ready' },
     focusedSessionId: 'sess-1',
+    reviewDrafts: {
+      'interrupt-1': { actionId: 'interrupt-1', decisions: [] },
+    },
     ui: {
       mode: 'chat',
       studioConversationId: null,
       externalEditorOpen: false,
     },
-    runs: {
-      'req-1': {
-        requestId: 'req-1',
-        sessionId: 'sess-1',
-        kind: 'chat',
-        phase: 'waiting_human',
-        timelineEntryIds: [],
-        reviewAction: {
-          requestId: 'req-1',
-          actionId: 'interrupt-1',
-          status: 'waiting',
-          reviews: [review],
-          draft: { actionId: 'interrupt-1', decisions: [] },
-        },
-        startedAt: 1,
-        charCount: 0,
-      },
-    },
     input: { text: '', cursorOffset: 0, focused: true, history: createComposerHistoryState() },
     sessions: {
       'sess-1': {
-        id: 'sess-1',
+        sessionId: 'sess-1',
         kind: 'chat',
         actor: { label: 'Pet', summary: 'summary' },
         runtime: {},
         timeline: [],
         tokenUsage: null,
-        activeRunId: 'req-1',
+        activeRun: {
+        requestId: 'req-1',
+        phase: 'waiting_human',
+        reviewAction: {
+          actionId: 'interrupt-1',
+          status: 'waiting',
+          reviews: [review],
+        },
+        startedAt: 1,
+      },
       },
     },
   };
@@ -69,36 +62,28 @@ function pendingReviewActionState(reviewIndex = 0): TuiState {
       options: [],
     },
   ];
-  state.runs['req-1']!.reviewAction = {
-    requestId: 'req-1',
+  state.sessions['sess-1']!.activeRun!.reviewAction = {
     actionId: 'interrupt-1',
     status: 'waiting',
     reviews,
-    draft: {
-      actionId: 'interrupt-1',
-      decisions: reviewIndex > 0
-        ? [{ reviewId: 'review-1', selectedOptionId: 'approve' }]
-        : [],
-    },
+  };
+  state.reviewDrafts['interrupt-1'] = {
+    actionId: 'interrupt-1',
+    decisions: reviewIndex > 0
+      ? [{ reviewId: 'review-1', selectedOptionId: 'approve' }]
+      : [],
   };
   return state;
 }
 
 function busyRunState(): TuiState {
-  return {
-    ...pendingReviewState(),
-    runs: {
-      'req-1': {
-        requestId: 'req-1',
-        sessionId: 'sess-1',
-        kind: 'chat',
-        phase: 'thinking',
-        timelineEntryIds: [],
-        startedAt: 1,
-        charCount: 0,
-      },
-    },
+  const state = pendingReviewState();
+  state.sessions['sess-1']!.activeRun = {
+    requestId: 'req-1',
+    phase: 'thinking',
+    startedAt: 1,
   };
+  return state;
 }
 
 function createController(state: TuiState) {
@@ -286,7 +271,7 @@ test('TuiRuntimeController requests review cancellation separately from run inte
 
 test('TuiRuntimeController interrupts the run after review submission starts', () => {
   const state = pendingReviewState();
-  state.runs['req-1']!.reviewAction!.status = 'submitting';
+  state.sessions['sess-1']!.activeRun!.reviewAction!.status = 'submitting';
   const { controller, actions, sent } = createController(state);
 
   assert.equal(controller.requestInterrupt(), true);
@@ -347,17 +332,20 @@ test('TuiRuntimeController restores a reconnect snapshot before opening websocke
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        sessionId: 'sess-1',
-        kind: 'chat',
-        timeline: [{
-          id: 'message:user-1',
-          type: 'message',
-          role: 'user',
-          text: 'hello',
-          status: 'completed',
-          source: 'checkpoint',
-        }],
-        runs: [],
+        version: 1,
+        session: {
+          sessionId: 'sess-1',
+          kind: 'chat',
+          timeline: [{
+            id: 'message:user-1',
+            type: 'message',
+            role: 'user',
+            text: 'hello',
+            status: 'completed',
+            source: 'checkpoint',
+          }],
+          activeRun: null,
+        },
       };
     },
   };
@@ -377,9 +365,9 @@ test('TuiRuntimeController restores a reconnect snapshot before opening websocke
 
   assert.deepEqual(events, ['snapshot', 'connect']);
   assert.equal(harness.resetCount, 1);
-  assert.equal(harness.actions[0]?.type, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
+  assert.equal(harness.actions[0]?.type, 'session.snapshot.loaded');
   assert.equal(
-    harness.actions[0]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
+    harness.actions[0]?.type === 'session.snapshot.loaded'
       ? harness.actions[0].source
       : undefined,
     'reconnect',
@@ -394,17 +382,20 @@ test('TuiRuntimeController reconciles snapshots after stale review errors', asyn
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        sessionId: 'sess-1',
-        kind: 'chat',
-        timeline: [{
-          id: 'message:user-1',
-          type: 'message',
-          role: 'user',
-          text: 'hello',
-          status: 'completed',
-          source: 'checkpoint',
-        }],
-        runs: [],
+        version: 1,
+        session: {
+          sessionId: 'sess-1',
+          kind: 'chat',
+          timeline: [{
+            id: 'message:user-1',
+            type: 'message',
+            role: 'user',
+            text: 'hello',
+            status: 'completed',
+            source: 'checkpoint',
+          }],
+          activeRun: null,
+        },
       };
     },
   };
@@ -428,9 +419,9 @@ test('TuiRuntimeController reconciles snapshots after stale review errors', asyn
   assert.deepEqual(events, ['snapshot']);
   assert.equal(harness.resetCount, 1);
   assert.equal(harness.actions[0]?.type, 'event.received');
-  assert.equal(harness.actions[1]?.type, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
+  assert.equal(harness.actions[1]?.type, 'session.snapshot.loaded');
   assert.equal(
-    harness.actions[1]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
+    harness.actions[1]?.type === 'session.snapshot.loaded'
       ? harness.actions[1].source
       : undefined,
     'reconnect',
@@ -445,18 +436,21 @@ test('TuiRuntimeController reconciles snapshots after completed messages', async
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        sessionId: 'sess-1',
-        kind: 'chat',
-        timeline: [{
-          id: 'message:assistant-1',
-          type: 'message',
-          role: 'assistant',
-          text: 'final',
-          status: 'completed',
-          source: 'checkpoint',
-          requestId: 'req-1',
-        }],
-        runs: [],
+        version: 1,
+        session: {
+          sessionId: 'sess-1',
+          kind: 'chat',
+          timeline: [{
+            id: 'message:assistant-1',
+            type: 'message',
+            role: 'assistant',
+            text: 'final',
+            status: 'completed',
+            source: 'checkpoint',
+            requestId: 'req-1',
+          }],
+          activeRun: null,
+        },
       };
     },
   };
@@ -485,9 +479,9 @@ test('TuiRuntimeController reconciles snapshots after completed messages', async
   assert.deepEqual(events, ['snapshot']);
   assert.equal(harness.resetCount, 1);
   assert.equal(harness.actions[0]?.type, 'event.received');
-  assert.equal(harness.actions[1]?.type, TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded);
+  assert.equal(harness.actions[1]?.type, 'session.snapshot.loaded');
   assert.equal(
-    harness.actions[1]?.type === TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded
+    harness.actions[1]?.type === 'session.snapshot.loaded'
       ? harness.actions[1].source
       : undefined,
     'reconcile',

@@ -17,15 +17,14 @@ import {
   operationTimelineEntryFromEvent,
   timelineEntryFromMessageCell,
   timelineEntryIdFromOperationEvent,
-  type AgentMessageEntry,
-  type AgentOperationEntry,
-  type AgentTimelineEntry,
 } from '../timeline/agentTimeline';
-import {
-  TUI_CORE_TARGET_ACTIONS,
-  type TuiCoreRunSnapshot,
-  type TuiCoreSessionSnapshot,
-} from '../contracts/tuiCoreContract';
+import type {
+  LocalAgentMessageEntry,
+  LocalAgentOperationEntry,
+  LocalAgentRun,
+  LocalAgentSession,
+  LocalAgentTimelineEntry,
+} from '../../localAgentSession';
 import { MAX_REASONABLE_ELAPSED_MS } from '../render/terminalText';
 import {
   agentTimelineEntriesFromSnapshot,
@@ -33,7 +32,6 @@ import {
 import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
 import { currentReview, reviewActionId } from '../../reviewAction';
 import type {
-  ActiveRunModel,
   MessageCellDraft,
   MessageCellMeta,
   MessageCellModel,
@@ -71,18 +69,9 @@ function appendMessageCells(
   };
 }
 
-function addTimelineEntryId<T extends ActiveRunModel>(activeRun: T, entryId: string): T {
-  return activeRun.timelineEntryIds.includes(entryId)
-    ? activeRun
-    : {
-        ...activeRun,
-        timelineEntryIds: [...activeRun.timelineEntryIds, entryId],
-      };
-}
-
 function appendOrUpdateTimelineEntry(
-  timeline: AgentTimelineEntry[],
-  entry: AgentTimelineEntry,
+  timeline: LocalAgentTimelineEntry[],
+  entry: LocalAgentTimelineEntry,
 ) {
   const index = timeline.findIndex((item) => item.id === entry.id);
   if (index < 0) {
@@ -96,9 +85,9 @@ function appendOrUpdateTimelineEntry(
 }
 
 function countTimelineMessagesForRequest(
-  timeline: AgentTimelineEntry[],
+  timeline: LocalAgentTimelineEntry[],
   requestId: string,
-  role: AgentMessageEntry['role'],
+  role: LocalAgentMessageEntry['role'],
 ) {
   return timeline.filter((entry) =>
     entry.type === 'message'
@@ -106,7 +95,7 @@ function countTimelineMessagesForRequest(
       && entry.role === role).length;
 }
 
-function findStreamingAssistantIndex(timeline: AgentTimelineEntry[], requestId: string) {
+function findStreamingAssistantIndex(timeline: LocalAgentTimelineEntry[], requestId: string) {
   for (let index = timeline.length - 1; index >= 0; index -= 1) {
     const entry = timeline[index];
     if (entry.type === 'message' && entry.requestId === requestId && entry.role === 'assistant') {
@@ -135,6 +124,15 @@ function findSessionIdForTimelineRequest(state: TuiState, requestId: string): Se
   return null;
 }
 
+function findSessionForRun(state: TuiState, requestId: string) {
+  for (const [sessionId, session] of Object.entries(state.sessions)) {
+    if (session.activeRun?.requestId === requestId) {
+      return { sessionId, session };
+    }
+  }
+  return null;
+}
+
 function hasLocalInterruptReleaseNotice(session: SessionModel, requestId: string) {
   return session.timeline.some((entry) =>
     entry.type === 'message'
@@ -154,12 +152,12 @@ function resolveTimelineEventOwner(
   requestId: RunId,
   options: { allowTimelineFallback?: boolean } = {},
 ): TimelineEventOwner | null {
-  const run = state.runs[requestId];
-  if (run) {
+  const runOwner = findSessionForRun(state, requestId);
+  if (runOwner) {
     return {
       requestId,
-      sessionId: run.sessionId,
-      run,
+      sessionId: runOwner.sessionId,
+      run: runOwner.session.activeRun,
       recoveredFromTimeline: false,
     };
   }
@@ -184,8 +182,8 @@ function appendAssistantTimelineDelta(
 ): { session: SessionModel; entryId: string } {
   const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
   if (streamingIndex >= 0) {
-    const current = session.timeline[streamingIndex] as AgentMessageEntry;
-    const entry: AgentMessageEntry = {
+    const current = session.timeline[streamingIndex] as LocalAgentMessageEntry;
+    const entry: LocalAgentMessageEntry = {
       ...current,
       text: current.text + token,
       ...(timestamp ? { updatedAt: timestamp } : {}),
@@ -203,13 +201,14 @@ function appendAssistantTimelineDelta(
     };
   }
 
-  const entry: AgentMessageEntry = {
+  const entry: LocalAgentMessageEntry = {
     id: `${requestId}:assistant:${countTimelineMessagesForRequest(session.timeline, requestId, 'assistant')}`,
     type: 'message',
     role: 'assistant',
     requestId,
     text: token,
     status: 'streaming',
+    source: 'live-event',
     ...(timestamp ? { createdAt: timestamp } : {}),
   };
   return {
@@ -230,8 +229,8 @@ function finalizeAssistantTimelineEntry(
   if (!text) return { session };
   const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
   if (streamingIndex >= 0) {
-    const current = session.timeline[streamingIndex] as AgentMessageEntry;
-    const entry: AgentMessageEntry = {
+    const current = session.timeline[streamingIndex] as LocalAgentMessageEntry;
+    const entry: LocalAgentMessageEntry = {
       ...current,
       text,
       status: 'completed',
@@ -250,13 +249,14 @@ function finalizeAssistantTimelineEntry(
     };
   }
 
-  const entry: AgentMessageEntry = {
+  const entry: LocalAgentMessageEntry = {
     id: `${requestId}:assistant:${countTimelineMessagesForRequest(session.timeline, requestId, 'assistant')}`,
     type: 'message',
     role: 'assistant',
     requestId,
     text,
     status: 'completed',
+    source: 'live-event',
     ...(timestamp ? { createdAt: timestamp } : {}),
   };
   return {
@@ -274,8 +274,8 @@ function settleStreamingAssistantTimelineEntry(
 ): SessionModel {
   const streamingIndex = findStreamingAssistantIndex(session.timeline, requestId);
   if (streamingIndex < 0) return session;
-  const current = session.timeline[streamingIndex] as AgentMessageEntry;
-  const entry: AgentMessageEntry = {
+  const current = session.timeline[streamingIndex] as LocalAgentMessageEntry;
+  const entry: LocalAgentMessageEntry = {
     ...current,
     status: 'completed',
   };
@@ -293,12 +293,12 @@ function upsertOperationTimelineEntry(
   session: SessionModel,
   event: LocalAgentOperationEvent,
   now: number,
-): { session: SessionModel; entry: AgentOperationEntry } {
+): { session: SessionModel; entry: LocalAgentOperationEntry } {
   const sessionWithSettledAssistant = event.phase === 'started'
     ? settleStreamingAssistantTimelineEntry(session, event.requestId)
     : session;
   const id = timelineEntryIdFromOperationEvent(event);
-  const previous = sessionWithSettledAssistant.timeline.find((entry): entry is AgentOperationEntry =>
+  const previous = sessionWithSettledAssistant.timeline.find((entry): entry is LocalAgentOperationEntry =>
     entry.type === 'operation' && entry.id === id);
   const entry = operationTimelineEntryFromEvent(event, now, previous);
   return {
@@ -316,20 +316,21 @@ function appendSubagentMessageDelta(
   token: string,
 ): { session: SessionModel; entryId?: string } {
   const id = `${requestId}:subagent-output`;
-  const previous = session.timeline.find((entry): entry is AgentMessageEntry =>
+  const previous = session.timeline.find((entry): entry is LocalAgentMessageEntry =>
     entry.type === 'message'
       && entry.role === 'subagent'
       && entry.id === id);
   const text = (previous?.text ?? '') + token;
   const hasContent = Boolean(formatSubagentMessage(text));
   if (!hasContent) return { session };
-  const message: AgentMessageEntry = {
+  const message: LocalAgentMessageEntry = {
     id,
     type: 'message',
     role: 'subagent',
     requestId,
     text,
     status: 'streaming',
+    source: 'live-event',
     ...(previous?.createdAt ? { createdAt: previous.createdAt } : {}),
     ...(previous?.updatedAt ? { updatedAt: previous.updatedAt } : {}),
   };
@@ -389,42 +390,29 @@ function updateExistingRun(
   requestId: string,
   updater: (run: TuiRunModel) => TuiRunModel,
 ) {
-  const run = state.runs[requestId];
-  if (!run) return state;
-  return {
-    ...state,
-    runs: {
-      ...state.runs,
-      [requestId]: updater(run),
-    },
-  };
+  const owner = findSessionForRun(state, requestId);
+  const activeRun = owner?.session.activeRun;
+  if (!owner || !activeRun) return state;
+  return updateSession(state, owner.sessionId, (session) => ({
+    ...session,
+    activeRun: updater(activeRun),
+  }));
+}
+
+function removeReviewDraft(state: TuiState, actionId: string | undefined) {
+  if (!actionId || !state.reviewDrafts[actionId]) return state;
+  const { [actionId]: _removed, ...reviewDrafts } = state.reviewDrafts;
+  void _removed;
+  return { ...state, reviewDrafts };
 }
 
 function removeRun(state: TuiState, requestId: string) {
-  const run = state.runs[requestId];
-  if (!run) return state;
-  const { [requestId]: _removed, ...runs } = state.runs;
-  const session = state.sessions[run.sessionId];
-  return {
-    ...state,
-    runs,
-    sessions: session
-      ? {
-          ...state.sessions,
-          [run.sessionId]: {
-            ...session,
-            activeRunId: session.activeRunId === requestId ? null : session.activeRunId,
-          },
-        }
-      : state.sessions,
-  };
-}
-
-function removeSessionRuns(state: TuiState, sessionId: SessionId) {
-  const runs = Object.fromEntries(
-    Object.entries(state.runs).filter(([, run]) => run.sessionId !== sessionId),
-  );
-  return { ...state, runs };
+  const owner = findSessionForRun(state, requestId);
+  if (!owner) return state;
+  return updateSession(state, owner.sessionId, (session) => ({
+    ...session,
+    activeRun: session.activeRun?.requestId === requestId ? null : session.activeRun,
+  }));
 }
 
 function finishRun(
@@ -434,18 +422,19 @@ function finishRun(
   messages: MessageCellDraft[] = [],
   tokenUsage?: TokenUsageModel | null,
 ) {
-  const run = state.runs[requestId];
-  if (!run) return state;
-  const sessionId = run.sessionId;
+  const owner = findSessionForRun(state, requestId);
+  if (!owner) return state;
+  const sessionId = owner.sessionId;
   const session = state.sessions[sessionId];
   if (!session) return state;
+  const reviewActionIdToRemove = owner.session.activeRun?.reviewAction?.actionId;
   const nextState = updateSession(state, sessionId, (sessionToUpdate) => {
-    const finalizedSession = sessionToUpdate.activeRunId === requestId
+    const finalizedSession = sessionToUpdate.activeRun?.requestId === requestId
       ? finalizeSubagentMessages(sessionToUpdate, requestId)
       : sessionToUpdate;
     return appendMessageCells({
       ...finalizedSession,
-      activeRunId: sessionToUpdate.activeRunId === requestId ? null : sessionToUpdate.activeRunId,
+      activeRun: sessionToUpdate.activeRun?.requestId === requestId ? null : sessionToUpdate.activeRun,
     }, [
       ...messages,
     ]);
@@ -458,7 +447,10 @@ function finishRun(
       message: statusMessage,
     },
   };
-  const stateWithRunRemoved = removeRun(stateWithRouteRemoved, requestId);
+  const stateWithRunRemoved = removeReviewDraft(
+    removeRun(stateWithRouteRemoved, requestId),
+    reviewActionIdToRemove,
+  );
 
   if (tokenUsage === undefined) {
     return stateWithRunRemoved;
@@ -581,17 +573,10 @@ function applyAssistantMessageDeltaEvent(
     return sessionWithTimeline;
   });
   return assistantEntryId && owner.run
-    ? {
-        ...stateWithTimeline,
-        runs: {
-          ...stateWithTimeline.runs,
-          [event.requestId]: addTimelineEntryId({
-            ...owner.run,
-            phase: 'streaming',
-            charCount: owner.run.charCount + token.length,
-          }, assistantEntryId),
-        },
-      }
+    ? updateExistingRun(stateWithTimeline, event.requestId, (run) => ({
+        ...run,
+        phase: 'streaming',
+      }))
     : stateWithTimeline;
 }
 
@@ -630,10 +615,10 @@ function resolveRunEventContext(
   state: TuiState,
   event: Pick<LocalAgentEvent, 'requestId'>,
 ): RunEventContext | null {
-  const run = state.runs[event.requestId];
-  if (!run) return null;
-  const sessionId = run.sessionId;
-  return state.sessions[sessionId] ? { run, sessionId } : null;
+  const owner = findSessionForRun(state, event.requestId);
+  return owner?.session.activeRun
+    ? { run: owner.session.activeRun, sessionId: owner.sessionId }
+    : null;
 }
 
 function applyOperationEvent(
@@ -650,13 +635,12 @@ function applyOperationEvent(
     return sessionWithTimeline;
   });
   return operationEntryId
-    ? updateExistingRun(stateWithTimeline, event.requestId, (currentRun) =>
-        addTimelineEntryId({
-          ...currentRun,
-          phase: event.phase === 'started' || event.phase === 'updated'
-            ? 'using_tool'
-            : currentRun.phase,
-        }, operationEntryId!))
+    ? updateExistingRun(stateWithTimeline, event.requestId, (currentRun) => ({
+        ...currentRun,
+        phase: event.phase === 'started' || event.phase === 'updated'
+          ? 'using_tool'
+          : currentRun.phase,
+      }))
     : stateWithTimeline;
 }
 
@@ -679,7 +663,6 @@ function applySubagentMessageDeltaEvent(
   return updateExistingRun(stateWithMessage, event.requestId, (currentRun) => ({
     ...currentRun,
     phase: currentRun.phase === 'waiting_human' ? currentRun.phase : 'streaming',
-    charCount: currentRun.charCount + token.length,
   }));
 }
 
@@ -703,22 +686,25 @@ function applyHumanReviewRequestedEvent(
       message: TUI_TEXT.approvalWaiting(petId),
     },
   };
-  return updateExistingRun(stateWithReview, event.requestId, (currentRun) => ({
+  const previousReviewActionId = context.run.reviewAction?.actionId;
+  const nextState = updateExistingRun(stateWithReview, event.requestId, (currentRun) => ({
     ...currentRun,
     phase: 'waiting_human',
-    charCount: 0,
     reviewAction: {
-      requestId: event.requestId,
       actionId,
       reviews,
       status: 'waiting',
-      draft: {
-        actionId,
-        decisions: [],
-      },
       ...(petId ? { petId } : {}),
     },
   }));
+  const stateWithoutPreviousDraft = removeReviewDraft(nextState, previousReviewActionId);
+  return {
+    ...stateWithoutPreviousDraft,
+    reviewDrafts: {
+      ...stateWithoutPreviousDraft.reviewDrafts,
+      [actionId]: { actionId, decisions: [] },
+    },
+  };
 }
 
 function applySystemNoticeEvent(
@@ -793,66 +779,58 @@ function applyRuntimeEvent(
   }
 }
 
-function activeRunToPendingUi(run: TuiRunModel | null) {
-  if (!run || run.phase === 'waiting_human') return null;
-  return {
-    startedAt: run.startedAt,
-    phase: run.phase === 'interrupting'
-      ? 'interrupting' as const
-      : run.phase === 'streaming'
-        ? 'replying' as const
-        : 'thinking' as const,
-    charCount: run.charCount,
-  };
-}
-
-function clearReviewAction<T extends ActiveRunModel>(run: T): T {
-  if (!run.reviewAction) return run;
-  const { reviewAction, ...rest } = run;
-  void reviewAction;
-  return rest as T;
-}
-
-function activeRunToPendingApproval(run: TuiRunModel | null) {
-  if (!run?.reviewAction || run.reviewAction.status !== 'waiting') {
-    return null;
-  }
-  const review = currentReview(run.reviewAction, run.reviewAction.draft);
-  if (!review) return null;
-  return {
-    requestId: run.reviewAction.requestId,
-    actionId: run.reviewAction.actionId,
-    reviews: run.reviewAction.reviews,
-    status: run.reviewAction.status,
-    ...(run.reviewAction.petId ? { petId: run.reviewAction.petId } : {}),
-    review,
-    decisions: run.reviewAction.draft.decisions,
-  };
-}
-
-function isTerminalSnapshotRun(run: TuiCoreRunSnapshot) {
-  return run.phase === 'completed' || run.phase === 'failed' || run.phase === 'interrupted';
-}
-
-function activeRunPhaseFromSnapshot(run: TuiCoreRunSnapshot): ActiveRunModel['phase'] | null {
-  if (isTerminalSnapshotRun(run)) return null;
-  if (run.phase === 'using_tool' || run.phase === 'streaming' || run.phase === 'waiting_human' || run.phase === 'interrupting') {
-    return run.phase;
-  }
-  return 'thinking';
-}
-
-function countSnapshotAssistantChars(snapshot: TuiCoreSessionSnapshot, requestId: string) {
-  return snapshot.timeline.reduce((count, entry) => (
-    entry.type === 'message' && entry.role === 'assistant' && entry.requestId === requestId
+function countRunOutputChars(session: SessionModel, requestId: string) {
+  return session.timeline.reduce((count, entry) => (
+    entry.type === 'message'
+      && entry.requestId === requestId
+      && (entry.role === 'assistant' || entry.role === 'subagent')
       ? count + entry.text.length
       : count
   ), 0);
 }
 
+function activeRunToPendingUi(session: SessionModel, run: LocalAgentRun | null) {
+  if (!run || run.phase === 'waiting_human') return null;
+  return {
+    startedAt: run.startedAt ?? 0,
+    phase: run.phase === 'interrupting'
+      ? 'interrupting' as const
+      : run.phase === 'streaming'
+        ? 'replying' as const
+        : 'thinking' as const,
+    charCount: countRunOutputChars(session, run.requestId),
+  };
+}
+
+function clearReviewAction(run: LocalAgentRun): LocalAgentRun {
+  if (!run.reviewAction) return run;
+  const { reviewAction, ...rest } = run;
+  void reviewAction;
+  return rest;
+}
+
+function activeRunToPendingApproval(state: TuiState, run: LocalAgentRun | null) {
+  if (!run?.reviewAction || run.reviewAction.status !== 'waiting') {
+    return null;
+  }
+  const draft = state.reviewDrafts[run.reviewAction.actionId];
+  if (!draft) return null;
+  const review = currentReview(run.reviewAction, draft);
+  if (!review) return null;
+  return {
+    requestId: run.requestId,
+    actionId: run.reviewAction.actionId,
+    reviews: run.reviewAction.reviews,
+    status: run.reviewAction.status,
+    ...(run.reviewAction.petId ? { petId: run.reviewAction.petId } : {}),
+    review,
+    decisions: draft.decisions,
+  };
+}
+
 function normalizeSnapshotRunStartedAt(
   startedAt: number | undefined,
-  existingRun: TuiRunModel | undefined,
+  existingRun: LocalAgentRun | undefined,
   now: number,
 ) {
   const normalizedStartedAt = normalizeSnapshotTimestamp(startedAt, now);
@@ -876,58 +854,21 @@ function shouldTreatAsEpochSeconds(value: number, now: number) {
 }
 
 function runFromSnapshot(
-  snapshot: TuiCoreSessionSnapshot,
-  run: TuiCoreRunSnapshot,
-  existingRun: TuiRunModel | undefined,
+  run: LocalAgentRun,
+  existingRun: LocalAgentRun | undefined,
   now: number,
-): TuiRunModel | null {
-  const phase = activeRunPhaseFromSnapshot(run);
-  if (!phase) return null;
+): LocalAgentRun {
   return {
-    requestId: run.requestId,
-    sessionId: run.sessionId || snapshot.sessionId,
-    kind: run.kind,
-    phase,
-    timelineEntryIds: run.timelineEntryIds,
+    ...run,
     startedAt: normalizeSnapshotRunStartedAt(run.startedAt, existingRun, now),
-    charCount: countSnapshotAssistantChars(snapshot, run.requestId),
-    ...reviewActionFromSnapshotRun(run),
-  };
-}
-
-function activeRunIdFromSnapshot(
-  snapshot: TuiCoreSessionSnapshot,
-  snapshotRuns: Record<RunId, TuiRunModel>,
-) {
-  const activeRunId = snapshot.activeRunId
-    ?? snapshot.runs.find((run) => !isTerminalSnapshotRun(run))?.requestId;
-  return activeRunId && snapshotRuns[activeRunId] ? activeRunId : null;
-}
-
-function reviewActionFromSnapshotRun(
-  run: TuiCoreRunSnapshot,
-): Pick<TuiRunModel, 'reviewAction'> | Record<string, never> {
-  const action = run.reviewAction;
-  if (!action?.reviews.length) return {};
-  return {
-    reviewAction: {
-      requestId: run.requestId,
-      ...action,
-      // ReviewDraft is intentionally client-local. A snapshot/reconnect starts
-      // the ordered action at its first undecided review.
-      draft: {
-        actionId: action.actionId,
-        decisions: [],
-      },
-    },
   };
 }
 
 function applySessionSnapshot(
   state: TuiState,
-  action: Extract<TuiAction, { type: typeof TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded }>,
+  action: Extract<TuiAction, { type: 'session.snapshot.loaded' }>,
 ) {
-  const snapshot = action.snapshot;
+  const snapshot = action.snapshot.session;
   const now = typeof action.now === 'number' && Number.isFinite(action.now)
     ? action.now
     : Date.now();
@@ -942,20 +883,18 @@ function applySessionSnapshot(
   if (action.source === 'resume' && state.focusedSessionId) {
     sessionIdsToClear.add(state.focusedSessionId);
   }
-  const snapshotRunIds = new Set(snapshot.runs.map((run) => run.requestId));
-  const preservedRuns = Object.fromEntries(
-    Object.entries(state.runs).filter(([requestId, run]) =>
-      !sessionIdsToClear.has(run.sessionId) && !snapshotRunIds.has(requestId)),
-  );
-  const snapshotRuns = Object.fromEntries(snapshot.runs.flatMap((run) => {
-    const nextRun = runFromSnapshot(snapshot, run, state.runs[run.requestId], now);
-    return nextRun ? [[run.requestId, nextRun]] : [];
-  }));
-  const activeRunId = activeRunIdFromSnapshot(snapshot, snapshotRuns);
+  const existingRun = existingSession?.activeRun
+    && snapshot.activeRun
+    && existingSession.activeRun.requestId === snapshot.activeRun.requestId
+    ? existingSession.activeRun
+    : undefined;
+  const activeRun = snapshot.activeRun
+    ? runFromSnapshot(snapshot.activeRun, existingRun ?? undefined, now)
+    : null;
   const nextSession: SessionModel = {
-    id: sessionId,
+    sessionId,
     kind: snapshot.kind,
-    actor: baseSession?.actor ?? {
+    actor: snapshot.actor ?? baseSession?.actor ?? {
       label: TUI_TEXT.defaultPetName,
       summary: TUI_TEXT.defaultPetSummary,
     },
@@ -964,7 +903,7 @@ function applySessionSnapshot(
       ...(snapshot.runtime ?? {}),
     },
     timeline,
-    activeRunId,
+    activeRun,
     tokenUsage: snapshot.tokenUsage
       ?? (preservesTransientSnapshotState ? existingSession?.tokenUsage ?? null : null),
   };
@@ -973,13 +912,31 @@ function applySessionSnapshot(
     ...state.sessions,
     [sessionId]: nextSession,
   };
+  const nextReviewDrafts = { ...state.reviewDrafts };
+  const previousReviewActionId = existingSession?.activeRun?.reviewAction?.actionId;
+  if (previousReviewActionId) {
+    delete nextReviewDrafts[previousReviewActionId];
+  }
+  const snapshotReviewAction = activeRun?.reviewAction;
+  if (snapshotReviewAction?.reviews.length) {
+    // ReviewDraft is intentionally client-local. Every authoritative snapshot
+    // restarts the ordered review action at its first undecided review.
+    nextReviewDrafts[snapshotReviewAction.actionId] = {
+      actionId: snapshotReviewAction.actionId,
+      decisions: [],
+    };
+  }
   for (const clearedSessionId of sessionIdsToClear) {
     if (clearedSessionId === sessionId) continue;
     const clearedSession = nextSessions[clearedSessionId];
-    if (clearedSession?.activeRunId) {
+    if (clearedSession?.activeRun) {
+      const clearedReviewActionId = clearedSession.activeRun.reviewAction?.actionId;
+      if (clearedReviewActionId) {
+        delete nextReviewDrafts[clearedReviewActionId];
+      }
       nextSessions[clearedSessionId] = {
         ...clearedSession,
-        activeRunId: null,
+        activeRun: null,
       };
     }
   }
@@ -995,10 +952,7 @@ function applySessionSnapshot(
       : state.ui,
     focusedSessionId: sessionId,
     sessions: nextSessions,
-    runs: {
-      ...preservedRuns,
-      ...snapshotRuns,
-    },
+    reviewDrafts: nextReviewDrafts,
   };
 }
 
@@ -1020,7 +974,7 @@ function messageDraft(
 
 export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
   switch (action.type) {
-    case TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded:
+    case 'session.snapshot.loaded':
       return applySessionSnapshot(state, action);
 
     case 'connection.set':
@@ -1056,6 +1010,9 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     case 'session.clear':
       {
         const sessionId = resolveSessionId(state, action.sessionId);
+        const reviewActionIdToRemove = sessionId
+          ? state.sessions[sessionId]?.activeRun?.reviewAction?.actionId
+          : undefined;
         const nextState = updateSession({
           ...state,
           ui: {
@@ -1071,12 +1028,10 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...session,
           kind: 'chat',
           timeline: [],
-          activeRunId: null,
+          activeRun: null,
           tokenUsage: null,
         }));
-        return sessionId
-          ? removeSessionRuns(nextState, sessionId)
-          : nextState;
+        return removeReviewDraft(nextState, reviewActionIdToRemove);
       }
 
     case 'ui.mode.set':
@@ -1154,8 +1109,9 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     case 'run.start': {
       const sessionId = resolveSessionId(state, action.sessionId);
       if (!sessionId) return state;
+      const reviewActionIdToRemove = state.sessions[sessionId]?.activeRun?.reviewAction?.actionId;
       const userDraft = messageDraft('user', action.userText, action.userCell, `${action.requestId}:user`, action.requestId);
-      return updateSession({
+      const nextState = updateSession({
         ...state,
         connection: {
           ...state.connection,
@@ -1167,45 +1123,32 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: 0,
           history: recordComposerHistoryEntry(state.input.history, action.userText),
         }),
-        runs: {
-          ...state.runs,
-          [action.requestId]: {
-            requestId: action.requestId,
-            sessionId,
-            kind: action.kind,
-            phase: 'thinking',
-            timelineEntryIds: [`message:${userDraft.id}`],
-            startedAt: action.now,
-            charCount: 0,
-          },
-        },
       }, sessionId, (session) => appendMessageCells({
         ...session,
         kind: action.kind,
-        activeRunId: action.requestId,
+        activeRun: {
+          requestId: action.requestId,
+          phase: 'thinking',
+          startedAt: action.now,
+        },
         tokenUsage: null,
       }, [
         userDraft,
       ]));
+      return removeReviewDraft(nextState, reviewActionIdToRemove);
     }
 
     case 'review.draft.record': {
-      const existingRun = state.runs[action.requestId];
-      const sessionId = existingRun?.sessionId ?? state.focusedSessionId;
-      if (!sessionId || !existingRun?.reviewAction || existingRun.reviewAction.actionId !== action.actionId) return state;
-      const reviewAction = existingRun.reviewAction;
+      const owner = findSessionForRun(state, action.requestId);
+      const existingRun = owner?.session.activeRun;
+      if (!owner || !existingRun?.reviewAction || existingRun.reviewAction.actionId !== action.actionId) return state;
+      const existingDraft = state.reviewDrafts[action.actionId]
+        ?? { actionId: action.actionId, decisions: [] };
       const nextRun: TuiRunModel = {
         ...existingRun,
         phase: 'waiting_human',
-        reviewAction: {
-          ...reviewAction,
-          draft: {
-            ...reviewAction.draft,
-            decisions: [...reviewAction.draft.decisions, action.decision],
-          },
-        },
       };
-      return {
+      const nextState = updateExistingRun({
         ...state,
         connection: {
           ...state.connection,
@@ -1217,30 +1160,34 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: 0,
           history: resetComposerHistoryNavigation(state.input.history),
         }),
-        runs: {
-          ...state.runs,
-          [action.requestId]: nextRun,
+      }, action.requestId, () => nextRun);
+      return {
+        ...nextState,
+        reviewDrafts: {
+          ...nextState.reviewDrafts,
+          [action.actionId]: {
+            ...existingDraft,
+            decisions: [...existingDraft.decisions, action.decision],
+          },
         },
       };
     }
 
     case 'review.action.submit': {
-      const existingRun = state.runs[action.requestId];
-      const sessionId = existingRun?.sessionId ?? state.focusedSessionId;
-      if (!sessionId || !existingRun?.reviewAction || existingRun.reviewAction.actionId !== action.actionId) return state;
+      const owner = findSessionForRun(state, action.requestId);
+      const existingRun = owner?.session.activeRun;
+      if (!owner || !existingRun?.reviewAction || existingRun.reviewAction.actionId !== action.actionId) return state;
+      const existingDraft = state.reviewDrafts[action.actionId]
+        ?? { actionId: action.actionId, decisions: [] };
       const nextRun: TuiRunModel = {
         ...existingRun,
         phase: 'thinking',
         reviewAction: {
           ...existingRun.reviewAction,
           status: 'submitting',
-          draft: {
-            ...existingRun.reviewAction.draft,
-            decisions: [...existingRun.reviewAction.draft.decisions, action.decision],
-          },
         },
       };
-      return {
+      const nextState = updateExistingRun({
         ...state,
         connection: {
           ...state.connection,
@@ -1252,50 +1199,52 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: 0,
           history: resetComposerHistoryNavigation(state.input.history),
         }),
-        runs: {
-          ...state.runs,
-          [action.requestId]: nextRun,
-        },
-      };
-    }
-
-    case 'review.action.cancel': {
-      const existingRun = state.runs[action.requestId];
-      if (!existingRun?.reviewAction || existingRun.reviewAction.actionId !== action.actionId) return state;
+      }, action.requestId, () => nextRun);
       return {
-        ...state,
-        connection: {
-          ...state.connection,
-          message: action.statusMessage,
-        },
-        runs: {
-          ...state.runs,
-          [action.requestId]: {
-            ...existingRun,
-            phase: 'interrupting',
-            reviewAction: {
-              ...existingRun.reviewAction,
-              status: 'canceling',
-            },
+        ...nextState,
+        reviewDrafts: {
+          ...nextState.reviewDrafts,
+          [action.actionId]: {
+            ...existingDraft,
+            decisions: [...existingDraft.decisions, action.decision],
           },
         },
       };
     }
 
+    case 'review.action.cancel': {
+      const existingRun = findSessionForRun(state, action.requestId)?.session.activeRun;
+      if (!existingRun?.reviewAction || existingRun.reviewAction.actionId !== action.actionId) return state;
+      return updateExistingRun({
+        ...state,
+        connection: {
+          ...state.connection,
+          message: action.statusMessage,
+        },
+      }, action.requestId, () => ({
+        ...existingRun,
+        phase: 'interrupting',
+        reviewAction: {
+          ...existingRun.reviewAction!,
+          status: 'canceling',
+        },
+      }));
+    }
+
     case 'run.interrupting':
     case 'server.interrupting': {
-      const run = state.runs[action.requestId];
+      const run = findSessionForRun(state, action.requestId)?.session.activeRun;
       if (!run) return state;
+      const reviewActionIdToRemove = run.reviewAction?.actionId;
       const stateWithRun = updateExistingRun(state, action.requestId, (currentRun) => ({
         ...clearReviewAction(currentRun),
-        sessionId: currentRun.sessionId,
-        kind: currentRun.kind,
         phase: 'interrupting',
       }));
+      const stateWithoutDraft = removeReviewDraft(stateWithRun, reviewActionIdToRemove);
       return {
-        ...stateWithRun,
+        ...stateWithoutDraft,
         connection: {
-          ...stateWithRun.connection,
+          ...stateWithoutDraft.connection,
           message: action.statusMessage,
         },
       };
@@ -1356,8 +1305,7 @@ export function selectFocusedTimeline(state: TuiState) {
 
 export function selectFocusedActiveRun(state: TuiState) {
   const session = selectFocusedSession(state);
-  if (!session) return null;
-  return session.activeRunId ? state.runs[session.activeRunId] ?? null : null;
+  return session?.activeRun ?? null;
 }
 
 export function selectFocusedBusy(state: TuiState) {
@@ -1366,7 +1314,8 @@ export function selectFocusedBusy(state: TuiState) {
 }
 
 export function selectFocusedPendingUi(state: TuiState) {
-  return activeRunToPendingUi(selectFocusedActiveRun(state));
+  const session = selectFocusedSession(state);
+  return session ? activeRunToPendingUi(session, session.activeRun) : null;
 }
 
 export function selectFocusedActiveOperations(state: TuiState) {
@@ -1378,7 +1327,7 @@ export function selectFocusedActiveOperations(state: TuiState) {
 }
 
 export function selectFocusedPendingApproval(state: TuiState) {
-  return activeRunToPendingApproval(selectFocusedActiveRun(state));
+  return activeRunToPendingApproval(state, selectFocusedActiveRun(state));
 }
 
 export function selectReady(state: TuiState) {

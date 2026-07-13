@@ -3,15 +3,18 @@ import type {
   LocalAgentOperationPhase,
   LocalAgentOperationRaw,
 } from '../../events/localAgentEvent';
+import type {
+  LocalAgentMessageEntry,
+  LocalAgentOperationEntry,
+  LocalAgentTimelineEntry,
+} from '../../localAgentSession';
 import type { MessageCellModel } from '../state/tuiState';
 import {
   buildOperationPresentation,
   type OperationPresentation,
 } from './operationPresentation';
 
-export type AgentTimelineEntry =
-  | AgentMessageEntry
-  | AgentOperationEntry;
+export type AgentTimelineEntry = LocalAgentTimelineEntry;
 
 export type AgentTimelineMessage =
   | AgentUserTimelineMessage
@@ -20,73 +23,30 @@ export type AgentTimelineMessage =
   | AgentSubagentTimelineMessage
   | AgentToolTimelineMessage;
 
-export type AgentUserTimelineMessage = {
-  id: string;
-  type: 'message';
+export type AgentUserTimelineMessage = LocalAgentMessageEntry & {
   role: 'user';
-  requestId?: string;
-  text: string;
   status: 'completed';
-  createdAt?: string;
-  updatedAt?: string;
 };
 
-export type AgentAssistantTimelineMessage = {
-  id: string;
-  type: 'message';
+export type AgentAssistantTimelineMessage = LocalAgentMessageEntry & {
   role: 'assistant';
-  requestId?: string;
-  text: string;
-  status: 'completed' | 'streaming';
-  createdAt?: string;
-  updatedAt?: string;
 };
 
-export type AgentSystemTimelineMessage = {
-  id: string;
-  type: 'message';
+export type AgentSystemTimelineMessage = LocalAgentMessageEntry & {
   role: 'system';
-  requestId?: string;
-  text: string;
   status: 'completed';
-  createdAt?: string;
-  updatedAt?: string;
 };
 
-export type AgentSubagentTimelineMessage = {
-  id: string;
-  type: 'message';
+export type AgentSubagentTimelineMessage = LocalAgentMessageEntry & {
   role: 'subagent';
   requestId: string;
-  text: string;
-  status: 'completed' | 'streaming';
-  createdAt?: string;
-  updatedAt?: string;
 };
 
 export type AgentToolTimelineMessage = AgentOperationEntry;
 
-export type AgentMessageEntry = {
-  id: string;
-  type: 'message';
-  role: 'user' | 'assistant' | 'system' | 'subagent';
-  requestId?: string;
-  text: string;
-  status: 'completed' | 'streaming';
-  createdAt?: string;
-  updatedAt?: string;
-};
+export type AgentMessageEntry = LocalAgentMessageEntry;
 
-export type AgentOperationEntry = OperationPresentation & {
-  id: string;
-  type: 'operation';
-  requestId: string;
-  phase: LocalAgentOperationPhase;
-  startedAt: number;
-  updatedAt: number;
-  completedAt?: number;
-  raw?: LocalAgentOperationRaw;
-};
+export type AgentOperationEntry = LocalAgentOperationEntry;
 
 export function timelineEntryIdFromMessageCell(cell: Pick<MessageCellModel, 'id'>) {
   return `message:${cell.id}`;
@@ -108,6 +68,7 @@ export function timelineEntryFromMessageCell(cell: MessageCellModel): AgentMessa
     ...(cell.requestId ? { requestId: cell.requestId } : {}),
     text: cell.text,
     status: 'completed',
+    source: cell.kind === 'user' ? 'local-input' : 'live-event',
     ...(cell.timestamp ? { createdAt: cell.timestamp } : {}),
   };
 }
@@ -125,12 +86,15 @@ export function operationTimelineEntryFromEvent(
   const mergedPresentation = previous
     ? mergeOperationPresentation(event, presentation, previous)
     : presentation;
+  const { source: operationSource, ...operationPresentation } = mergedPresentation;
   return {
-    ...mergedPresentation,
+    ...operationPresentation,
     id: previous?.id ?? timelineEntryIdFromOperationEvent(event),
     type: 'operation',
     requestId: event.requestId,
     phase: event.phase,
+    source: 'live-event',
+    ...(operationSource ? { operationSource } : {}),
     startedAt: previous?.startedAt ?? now,
     updatedAt: now,
     ...(isTerminalOperationPhase(event.phase) ? { completedAt: now } : {}),
@@ -151,7 +115,7 @@ function mergeOperationPresentation(
     details: event.operation.details !== undefined
       ? mergeOperationDetails(previous.details, presentation.details)
       : previous.details,
-    source: event.operation.source !== undefined ? presentation.source : previous.source,
+    source: event.operation.source !== undefined ? presentation.source : previous.operationSource,
   };
 }
 

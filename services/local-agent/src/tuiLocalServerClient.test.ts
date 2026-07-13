@@ -99,36 +99,60 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
     }
     if (url.endsWith('/snapshot')) {
       return jsonResponse({
-        sessionId: 'chat:pet',
-        kind: 'chat',
-        timeline: [{
-          id: 'message:0:user',
-          type: 'message',
-          role: 'user',
-          text: 'restored from snapshot',
-          status: 'completed',
-          source: 'checkpoint',
-          requestId: 'req-review',
-        }],
-        runs: [{
-          requestId: 'req-review',
+        version: 1,
+        session: {
           sessionId: 'chat:pet',
           kind: 'chat',
-          phase: 'waiting_human',
-          timelineEntryIds: ['message:0:user'],
-          reviewAction: {
-            actionId: 'interrupt-1',
-            status: 'waiting',
-            petId: 'pet-a',
-            reviews: [{
-              id: 'review-1',
-              schemaVersion: 1,
-              view: { kind: 'plain', body: 'Approve?' },
-              options: [],
-            }],
+          timeline: [
+            {
+              id: 'message:0:user',
+              type: 'message',
+              role: 'user',
+              text: 'restored from snapshot',
+              status: 'completed',
+              source: 'checkpoint',
+              requestId: 'req-review',
+            },
+            {
+              id: 'req-review:operation:call-1',
+              type: 'operation',
+              requestId: 'req-review',
+              operationKey: 'call-1',
+              kind: 'browser.open',
+              title: 'Open page',
+              phase: 'completed',
+              source: 'live-event',
+              target: 'https://example.com',
+              summary: 'Example Domain',
+              details: { status: 200 },
+              operationSource: {
+                provider: 'toolkit',
+                name: 'browser',
+                toolName: 'browser_open',
+                callId: 'call-1',
+              },
+              raw: { output: 'loaded' },
+              startedAt: 10,
+              updatedAt: 20,
+              completedAt: 20,
+            },
+          ],
+          activeRun: {
+            requestId: 'req-review',
+            phase: 'waiting_human',
+            reviewAction: {
+              actionId: 'interrupt-1',
+              status: 'waiting',
+              petId: 'pet-a',
+              reviews: [{
+                id: 'review-1',
+                schemaVersion: 1,
+                view: { kind: 'plain', body: 'Approve?' },
+                options: [],
+              }],
+            },
           },
-        }],
-        activeRunId: 'req-review',
+        },
       });
     }
     if (url.endsWith('/sessions')) {
@@ -156,17 +180,20 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
         },
         messages: [{ role: 'assistant', text: 'welcome back' }],
         snapshot: {
-          sessionId: 'chat:one',
-          kind: 'studio',
-          timeline: [{
-            id: 'message:0:assistant',
-            type: 'message',
-            role: 'assistant',
-            text: 'welcome back',
-            status: 'completed',
-            source: 'checkpoint',
-          }],
-          runs: [],
+          version: 1,
+          session: {
+            sessionId: 'chat:one',
+            kind: 'studio',
+            timeline: [{
+              id: 'message:0:assistant',
+              type: 'message',
+              role: 'assistant',
+              text: 'welcome back',
+              status: 'completed',
+              source: 'checkpoint',
+            }],
+            activeRun: null,
+          },
         },
       });
     }
@@ -181,19 +208,43 @@ test('TuiLocalServerClient reads sessions, resume payloads, history, and health'
   assert.equal(await client.isHealthy(), true);
   assert.deepEqual((await client.readHistory()).map((item) => item.text), ['restored', 'notice']);
   const snapshot = await client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'chat' });
-  assert.deepEqual(snapshot.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
+  assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
     ['message', 'restored from snapshot'],
+    ['operation', ''],
   ]);
-  assert.equal(snapshot.activeRunId, 'req-review');
-  assert.equal(snapshot.runs[0]?.reviewAction?.reviews[0]?.id, 'review-1');
-  assert.equal(snapshot.runs[0]?.reviewAction?.petId, 'pet-a');
+  assert.deepEqual(snapshot.session.timeline[1], {
+    id: 'req-review:operation:call-1',
+    type: 'operation',
+    requestId: 'req-review',
+    operationKey: 'call-1',
+    kind: 'browser.open',
+    title: 'Open page',
+    phase: 'completed',
+    source: 'live-event',
+    target: 'https://example.com',
+    summary: 'Example Domain',
+    details: { status: 200 },
+    operationSource: {
+      provider: 'toolkit',
+      name: 'browser',
+      toolName: 'browser_open',
+      callId: 'call-1',
+    },
+    raw: { output: 'loaded' },
+    startedAt: 10,
+    updatedAt: 20,
+    completedAt: 20,
+  });
+  assert.equal(snapshot.session.activeRun?.requestId, 'req-review');
+  assert.equal(snapshot.session.activeRun?.reviewAction?.reviews[0]?.id, 'review-1');
+  assert.equal(snapshot.session.activeRun?.reviewAction?.petId, 'pet-a');
   assert.deepEqual((await client.listResumeSessions()).map((item) => item.id), ['chat:one']);
   const resumed = await client.resumeSession('chat:one');
 
   assert.equal(resumed.session.active, true);
   assert.equal(resumed.session.kind, 'studio');
-  assert.equal(resumed.snapshot.kind, 'studio');
-  assert.deepEqual(resumed.snapshot.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
+  assert.equal(resumed.snapshot.session.kind, 'studio');
+  assert.deepEqual(resumed.snapshot.session.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
     ['message', 'welcome back'],
   ]);
   assert.deepEqual(seenUrls, [
@@ -274,8 +325,8 @@ test('TuiLocalServerClient adapts v2 native pendingReview snapshots', async () =
 
   const snapshot = await client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'chat' });
 
-  assert.equal(snapshot.runs[0]?.reviewAction?.actionId, 'interrupt-v2');
-  assert.equal(snapshot.runs[0]?.reviewAction?.reviews[0]?.id, 'review-1');
+  assert.equal(snapshot.session.activeRun?.reviewAction?.actionId, 'interrupt-v2');
+  assert.equal(snapshot.session.activeRun?.reviewAction?.reviews[0]?.id, 'review-1');
 });
 
 test('TuiLocalServerClient rejects malformed native review actions', async () => {
@@ -340,15 +391,15 @@ test('TuiLocalServerClient adapts recognized legacy snapshot payloads at the com
 
   const snapshot = await client.readSessionSnapshot({ sessionId: 'chat:pet', kind: 'studio' });
 
-  assert.equal(snapshot.sessionId, 'chat:legacy');
-  assert.equal(snapshot.kind, 'chat');
-  assert.deepEqual(snapshot.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
+  assert.equal(snapshot.session.sessionId, 'chat:legacy');
+  assert.equal(snapshot.session.kind, 'chat');
+  assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.type, entry.type === 'message' ? entry.text : '']), [
     ['message', 'legacy prompt'],
     ['message', 'legacy answer'],
   ]);
-  assert.equal(snapshot.activeRunId, 'req-review');
-  assert.equal(snapshot.runs[0]?.reviewAction?.reviews[0]?.id, 'review-1');
-  assert.equal(snapshot.runs[0]?.reviewAction?.petId, 'pet-a');
+  assert.equal(snapshot.session.activeRun?.requestId, 'req-review');
+  assert.equal(snapshot.session.activeRun?.reviewAction?.reviews[0]?.id, 'review-1');
+  assert.equal(snapshot.session.activeRun?.reviewAction?.petId, 'pet-a');
 });
 
 test('TuiLocalServerClient rejects malformed snapshot payloads instead of synthesizing empty snapshots', async () => {

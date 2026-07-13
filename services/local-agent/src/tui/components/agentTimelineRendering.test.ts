@@ -29,7 +29,7 @@ test('buildAgentOperationDisplayLines renders the header as toolName(args) and s
     target: 'https://example.com',
     summary: '页面：Example Domain',
     details: { status: 200 },
-    source: { provider: 'toolkit', name: 'browser', toolName: '打开网页' },
+    operationSource: { provider: 'toolkit', name: 'browser', toolName: '打开网页' },
   }) as AgentOperationEntry & { raw: { output: string } };
   entry.raw = { output: 'Example Domain loaded' };
 
@@ -289,13 +289,13 @@ test('buildAgentOperationDisplayLines collapses long output and surfaces errors'
     line.text.includes('No such file or directory') && line.tone === 'removed'));
 });
 
-test('buildAgentOperationDisplayLines uses source.toolName for the header label', () => {
+test('buildAgentOperationDisplayLines uses operationSource.toolName for the header label', () => {
   const lines = buildAgentOperationDisplayLines(operationEntry({
     phase: 'completed',
     kind: 'local.apply_patch',
     title: '应用补丁',
     target: 'src/app.ts',
-    source: { provider: 'toolkit', name: 'apply_patch', toolName: 'apply_patch' },
+    operationSource: { provider: 'toolkit', name: 'apply_patch', toolName: 'apply_patch' },
   }), 3500, 120);
 
   assert.match(lines[0]!.text, /^apply_patch\(src\/app\.ts\)（完成）$/);
@@ -417,7 +417,7 @@ test('history snapshot assistant messages render through markdown', () => {
       },
     ],
   });
-  const [entry] = agentTimelineEntriesFromSnapshot(snapshot.timeline);
+  const [entry] = agentTimelineEntriesFromSnapshot(snapshot.session.timeline);
   assert.equal(entry?.type, 'message');
   assert.equal(entry?.type === 'message' ? entry.role : undefined, 'assistant');
 
@@ -486,6 +486,7 @@ function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEnt
     kind: 'browser.open',
     title: '打开网页',
     phase: 'started',
+    source: 'live-event',
     startedAt: 1000,
     updatedAt: 1000,
     ...params,
@@ -500,6 +501,7 @@ function subagentMessage(id: string, text: string): AgentMessageEntry {
     requestId: 'req-1',
     text,
     status: 'streaming',
+    source: 'live-event',
   };
 }
 
@@ -511,5 +513,6 @@ function messageEntry(id: string, text: string): AgentMessageEntry {
     requestId: 'req-1',
     text,
     status: 'completed',
+    source: 'live-event',
   };
 }

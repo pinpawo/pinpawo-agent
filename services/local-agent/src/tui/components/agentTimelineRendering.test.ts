@@ -12,10 +12,6 @@ import {
   buildAgentOperationDisplayLines,
   OPERATION_STATUS_DOT,
 } from './agentTimelineRendering';
-import {
-  agentTimelineEntriesFromSnapshot,
-  buildTuiSessionSnapshotFromMessages,
-} from '../snapshot/tuiSessionSnapshot';
 import type {
   AgentMessageEntry,
   AgentOperationEntry,
@@ -405,21 +401,15 @@ test('MessageBlock renders assistant content through markdown', () => {
   assert.equal(markdownProps.showSectionPrefix, false);
 });
 
-test('history snapshot assistant messages render through markdown', () => {
-  const snapshot = buildTuiSessionSnapshotFromMessages({
-    sessionId: 'chat:pet',
-    kind: 'chat',
-    messages: [
-      {
-        id: 'assistant-history',
-        kind: 'assistant',
-        text: '**历史回答**\n\n- 第一项\n- 第二项',
-      },
-    ],
-  });
-  const [entry] = agentTimelineEntriesFromSnapshot(snapshot.session.timeline);
-  assert.equal(entry?.type, 'message');
-  assert.equal(entry?.type === 'message' ? entry.role : undefined, 'assistant');
+test('checkpoint assistant messages render through markdown', () => {
+  const entry: AgentMessageEntry = {
+    id: 'message:assistant-checkpoint',
+    type: 'message',
+    role: 'assistant',
+    text: '**历史回答**\n\n- 第一项\n- 第二项',
+    status: 'completed',
+    source: 'checkpoint',
+  };
 
   const element = MessageBlock({
     entry: {

@@ -90,7 +90,7 @@ export function useResumePickerController(options: ResumePickerControllerOptions
       options.resetTimelineView();
       options.dispatch({
         type: 'session.snapshot.loaded',
-        source: 'resume',
+        reason: 'resume',
         snapshot,
         now: Date.now(),
       });

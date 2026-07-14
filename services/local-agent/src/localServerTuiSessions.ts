@@ -21,7 +21,7 @@ import {
   type TuiSessionState,
 } from './tuiSessionRegistry';
 
-export type TuiHistoryMessage = {
+export type TuiCheckpointMessage = {
   role: string;
   text: string;
   createdAt?: string;
@@ -34,10 +34,16 @@ export type ActivePendingReview = {
   reviews?: ReviewSpec[];
 };
 
-export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'deleteThread'>;
-type TuiSessionGraphService = Pick<LocalAgentGraphService, 'readThreadMessages' | 'readThreadState'>;
+export type TuiCheckpointPoint = {
+  sessionId: string;
+  messages: TuiCheckpointMessage[];
+  pendingReview: ActivePendingReview | null;
+};
 
-export function readTuiHistoryMessages(messages: BaseMessage[]): TuiHistoryMessage[] {
+export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'deleteThread'>;
+type TuiSessionGraphService = Pick<LocalAgentGraphService, 'readThreadState'>;
+
+export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpointMessage[] {
   return messages.flatMap((message) => {
     const type = message._getType();
     if (type !== 'human' && type !== 'ai') {
@@ -62,8 +68,8 @@ export function readTuiHistoryMessages(messages: BaseMessage[]): TuiHistoryMessa
   });
 }
 
-export function summarizeTuiHistoryMessages(
-  messages: TuiHistoryMessage[],
+export function summarizeTuiCheckpointMessages(
+  messages: TuiCheckpointMessage[],
   updatedAt = new Date().toISOString(),
 ) {
   const titleSource = messages.find((message) => message.role === 'user' && message.text.trim())
@@ -163,29 +169,52 @@ export class LocalServerTuiSessionService {
     });
   }
 
-  async readSessionHistoryMessages(
+  async readSessionCheckpointPoint(
+    deps: LocalServerDeps,
+    session: TuiSessionRecord,
+  ): Promise<TuiCheckpointPoint> {
+    const ctx = await this.loadContext(deps.actorId);
+    const setup = this.buildChatSetup(deps, ctx, session.threadId);
+    const state = await this.graphService.readThreadState(setup);
+    const pendingReview = state.pendingHumanReview
+      ? {
+          sessionId: session.id,
+          ...(state.pendingHumanReview.interruptId
+            ? { interruptId: state.pendingHumanReview.interruptId }
+            : {}),
+          review: state.pendingHumanReview.review,
+          ...(state.pendingHumanReview.reviews
+            ? { reviews: state.pendingHumanReview.reviews }
+            : {}),
+        }
+      : null;
+    return {
+      sessionId: session.id,
+      messages: readTuiCheckpointMessages(state.messages),
+      pendingReview,
+    };
+  }
+
+  async readSessionCheckpointMessages(
     deps: LocalServerDeps,
     session: TuiSessionRecord,
   ) {
-    const ctx = await this.loadContext(deps.actorId);
-    const setup = this.buildChatSetup(deps, ctx, session.threadId);
-    const messages = await this.graphService.readThreadMessages(setup);
-    return readTuiHistoryMessages(messages);
+    return (await this.readSessionCheckpointPoint(deps, session)).messages;
   }
 
-  updateSessionSummaryFromHistory(
+  updateSessionSummaryFromCheckpoint(
     session: TuiSessionRecord,
-    messages: TuiHistoryMessage[],
+    messages: TuiCheckpointMessage[],
   ) {
-    updateTuiSessionSummary(this.state, session.id, summarizeTuiHistoryMessages(messages));
+    updateTuiSessionSummary(this.state, session.id, summarizeTuiCheckpointMessages(messages));
     this.save();
   }
 
   async refreshActiveSessionSummary(deps: LocalServerDeps) {
     try {
       const session = this.getActiveSession(deps.actorId);
-      const messages = await this.readSessionHistoryMessages(deps, session);
-      this.updateSessionSummaryFromHistory(session, messages);
+      const messages = await this.readSessionCheckpointMessages(deps, session);
+      this.updateSessionSummaryFromCheckpoint(session, messages);
     } catch (err) {
       console.warn('[local-server] failed to refresh TUI session summary:', err instanceof Error ? err.message : err);
     }
@@ -193,38 +222,27 @@ export class LocalServerTuiSessionService {
 
   async readActivePendingReview(deps: LocalServerDeps): Promise<ActivePendingReview | null> {
     const session = this.getActiveSession(deps.actorId);
-    const ctx = await this.loadContext(deps.actorId);
-    const setup = this.buildChatSetup(deps, ctx, session.threadId);
-    const threadState = await this.graphService.readThreadState(setup);
-    if (!threadState.pendingHumanReview) {
-      return null;
-    }
-    return {
-      sessionId: session.id,
-      ...(threadState.pendingHumanReview.interruptId
-        ? { interruptId: threadState.pendingHumanReview.interruptId }
-        : {}),
-      review: threadState.pendingHumanReview.review,
-      ...(threadState.pendingHumanReview.reviews
-        ? { reviews: threadState.pendingHumanReview.reviews }
-        : {}),
-    };
+    return (await this.readSessionCheckpointPoint(deps, session)).pendingReview;
   }
 
-  async loadHistory(deps: LocalServerDeps) {
+  async readActiveCheckpointPoint(deps: LocalServerDeps) {
     const session = this.getActiveSession(deps.actorId);
-    const messages = await this.readSessionHistoryMessages(deps, session);
-    updateTuiSessionSummary(this.state, session.id, summarizeTuiHistoryMessages(messages, session.updatedAt));
+    const checkpoint = await this.readSessionCheckpointPoint(deps, session);
+    updateTuiSessionSummary(
+      this.state,
+      session.id,
+      summarizeTuiCheckpointMessages(checkpoint.messages, session.updatedAt),
+    );
     this.save();
-    return messages;
+    return checkpoint;
   }
 
   async listSessions(deps: LocalServerDeps) {
     this.getActiveSession(deps.actorId);
     const sessions = listTuiSessions(this.state, deps.actorId);
     const enriched = await Promise.all(sessions.map(async (session) => {
-      const messages = await this.readSessionHistoryMessages(deps, session);
-      const summary = summarizeTuiHistoryMessages(messages, session.updatedAt);
+      const messages = await this.readSessionCheckpointMessages(deps, session);
+      const summary = summarizeTuiCheckpointMessages(messages, session.updatedAt);
       const updated = updateTuiSessionSummary(this.state, session.id, summary) ?? session;
       return {
         ...updated,
@@ -243,20 +261,25 @@ export class LocalServerTuiSessionService {
     if (!candidate || candidate.petId !== deps.actorId) {
       throw new Error('session not found');
     }
-    const messages = await this.readSessionHistoryMessages(deps, candidate);
+    const checkpoint = await this.readSessionCheckpointPoint(deps, candidate);
     const session = resumeTuiSession(this.state, deps.actorId, sessionId);
     if (!session) {
       throw new Error('session not found');
     }
     this.save();
-    updateTuiSessionSummary(this.state, session.id, summarizeTuiHistoryMessages(messages, session.updatedAt));
+    updateTuiSessionSummary(
+      this.state,
+      session.id,
+      summarizeTuiCheckpointMessages(checkpoint.messages, session.updatedAt),
+    );
     this.save();
     return {
       session: {
         ...(this.state.sessions[session.id] ?? session),
         active: true,
       },
-      messages,
+      messages: checkpoint.messages,
+      pendingReview: checkpoint.pendingReview,
     };
   }
 

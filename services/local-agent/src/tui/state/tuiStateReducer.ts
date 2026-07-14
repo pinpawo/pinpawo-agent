@@ -1,7 +1,7 @@
 import type { LocalAgentRuntimeEvent } from '../../events/localAgentEvent';
 import type { LocalAgentRun, LocalAgentSession } from '../../localAgentSession';
 import {
-  reconcileSessionSnapshot,
+  applySessionSnapshot,
   reduceSession,
   type LocalAgentSessionInput,
   type LocalAgentSessionMessageInput,
@@ -233,7 +233,7 @@ function reduceRuntimeEvent(
   return next;
 }
 
-function applySessionSnapshot(
+function applyLoadedSessionSnapshot(
   state: TuiState,
   action: Extract<TuiAction, { type: 'session.snapshot.loaded' }>,
 ) {
@@ -245,21 +245,26 @@ function applySessionSnapshot(
   const baseSession = existingSession
     ?? focusedSession
     ?? createSession({ id: incoming.sessionId, kind: incoming.kind });
-  const reconciled = normalizeTuiSession(
-    reconcileSessionSnapshot(
+  const appliedSession = normalizeTuiSession(
+    applySessionSnapshot(
       baseSession,
       action.snapshot,
-      action.source,
-      { observedAt: action.now ?? 0 },
+      {
+        observedAt: action.now ?? 0,
+        preserveOmittedTokenUsage:
+          action.reason === 'reconnect'
+          || action.reason === 'completion'
+          || action.reason === 'review-refresh',
+      },
     ),
     baseSession,
   );
-  const sessions = { ...state.sessions, [incoming.sessionId]: reconciled };
+  const sessions = { ...state.sessions, [incoming.sessionId]: appliedSession };
   const reviewDrafts = { ...state.reviewDrafts };
 
   const previousActionId = existingSession?.activeRun?.reviewAction?.actionId;
   if (previousActionId) delete reviewDrafts[previousActionId];
-  const incomingReviewAction = reconciled.activeRun?.reviewAction;
+  const incomingReviewAction = appliedSession.activeRun?.reviewAction;
   if (incomingReviewAction?.reviews.length) {
     reviewDrafts[incomingReviewAction.actionId] = {
       actionId: incomingReviewAction.actionId,
@@ -267,7 +272,7 @@ function applySessionSnapshot(
     };
   }
 
-  if (action.source === 'resume' && state.focusedSessionId !== incoming.sessionId) {
+  if (action.reason === 'resume' && state.focusedSessionId !== incoming.sessionId) {
     const previousFocused = state.focusedSessionId
       ? sessions[state.focusedSessionId]
       : undefined;
@@ -286,7 +291,7 @@ function applySessionSnapshot(
     sessions,
     reviewDrafts,
     focusedSessionId: incoming.sessionId,
-    ui: action.source === 'resume'
+    ui: action.reason === 'resume'
       ? { mode: 'chat' as const, studioConversationId: null, externalEditorOpen: false }
       : state.ui,
   };
@@ -354,7 +359,7 @@ function activeRunToPendingApproval(state: TuiState, run: TuiRunModel | null) {
 export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
   switch (action.type) {
     case 'session.snapshot.loaded':
-      return applySessionSnapshot(state, action);
+      return applyLoadedSessionSnapshot(state, action);
     case 'connection.set':
       return {
         ...state,

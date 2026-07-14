@@ -20,7 +20,10 @@ import {
 import { InflightRequestController } from './inflightRequestController';
 import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
 import { LocalAgentGraphService } from './agentGraphService';
-import { LocalServerTuiSessionService } from './localServerTuiSessions';
+import {
+  LocalServerTuiSessionService,
+  type ActivePendingReview,
+} from './localServerTuiSessions';
 import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import type { LocalAgentEvent } from './events/localAgentEvent';
@@ -200,7 +203,10 @@ export class LocalServerChatHandler {
     }
   }
 
-  async readReviewActionSnapshot(deps: LocalServerDeps): Promise<ReviewActionSnapshot | null> {
+  buildReviewActionSnapshot(
+    deps: LocalServerDeps,
+    pending: ActivePendingReview | null,
+  ): ReviewActionSnapshot | null {
     const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
     for (const [requestId, route] of this.reviewActionRoutes) {
       if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
@@ -218,7 +224,6 @@ export class LocalServerChatHandler {
       };
     }
 
-    const pending = await this.tuiSessions.readActivePendingReview(deps);
     if (!pending) {
       return null;
     }

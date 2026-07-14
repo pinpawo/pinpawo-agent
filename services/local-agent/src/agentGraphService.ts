@@ -191,11 +191,6 @@ export class LocalAgentGraphService {
     };
   }
 
-  async readThreadMessages(setup: AgentChannelSetup): Promise<BaseMessage[]> {
-    const state = await this.readThreadState(setup);
-    return state.messages;
-  }
-
   async updateState(
     setup: AgentChannelSetup,
     values: Partial<OrchestratorStateType>,

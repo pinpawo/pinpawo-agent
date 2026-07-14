@@ -51,7 +51,7 @@ services/local-agent/src/commands/tui.tsx
 
 - `commands/tui.tsx` 是 CLI entry，主要负责加载配置并挂载 TUI app。
 - `tui/TuiApp.tsx` 负责 Ink layout、输入组合、命令分发和 hooks/components 组装。
-- `tui/TuiRuntimeController.ts` 负责 websocket lifecycle、发送 client message、session/history 加载；本地 HTTP 访问由 `tui/tuiLocalServerClient.ts` 承担。
+- `tui/TuiRuntimeController.ts` 负责 websocket lifecycle、发送 client message 和 session snapshot 应用；本地 HTTP 访问由 `tui/tuiLocalServerClient.ts` 承担。
 - `/resume` picker 的 modal 状态、sessions 加载和恢复流程由 `tui/useResumePickerController.ts` 承担。
 - slash command 已收敛为 `tui/input/commandRegistry.ts`，统一承载 help metadata。
 - key handling 已收敛为 `tui/input/keymap.ts`，统一表达 global、composer、approval、resume picker 快捷键。
@@ -240,7 +240,7 @@ services/local-agent/src/
   tui/
     TuiApp.tsx               # app shell: compose hooks/components
     TuiRuntimeController.ts  # 阶段 1C: 运行时编排、重连策略、dispatch actions
-    tuiLocalServerClient.ts  # TUI -> local HTTP: health/history/sessions/resume
+    tuiLocalServerClient.ts  # TUI -> local HTTP: health/snapshot/sessions/resume
     tuiLocalWebSocketClient.ts # TUI -> local WS: socket lifecycle + client message send
     tuiServerMessageActions.ts # typed server messages -> TuiAction[]
     useResumePickerController.ts # resume picker modal state + async session resume flow
@@ -273,7 +273,7 @@ services/local-agent/src/
 - **去掉 `state/selectors.ts`**：当前没有跨组件复用的派生状态，组件内 `useMemo` 就够；真出现重复再抽。
 - **`render/eventToActivity.ts` + `operationText.ts` + `studioText.ts` 合并为 `render/eventText.ts`**：当前事件文本映射规模仍适合单文件，拆成三个会碎片化。
 - **去掉 `input/composerModel.ts`**：在 multiline / paste / mention 都还不存在时拆 model/component 是为想象功能预留。先让 `Composer.tsx` 自带光标和快捷键，等真要做这些能力再拆 model。
-- **去掉 `session/historyAdapter.ts` 子目录**：history/session restore 目前通过 `TuiLocalServerClient` 访问本地 HTTP，归在 TUI client 边界内即可，不需要独立子系统。
+- **去掉 `session/historyAdapter.ts` 子目录**：session snapshot 由 `TuiLocalServerClient` 直接读取并严格解析，不需要独立 history adapter。
 - **`copy.zh-CN.ts` → `text.ts` / `TUI_TEXT`**：当前只有中文一种，先做 single-locale TUI 文本入口；完整 i18n 的 locale lookup、fallback 和参数协议后续单独设计。
 
 关键约束：
@@ -552,7 +552,7 @@ LocalAgentEvent
 - 把 `LocalAgentEvent`、control message、user action 映射成 `TuiAction`。
 - chat 的 `message.completed` 与 studio 的 `studio_response` / `studio_error` 收敛到同一个"run 结束"动作。
 - 动画时钟（spinner / now）留在组件 local state，不进 reducer。
-- network 副作用、session/history 加载和重连策略已在阶段 1C 收敛到 controller/client。
+- network 副作用、session snapshot 应用和重连策略已在阶段 1C 收敛到 controller/client。
 
 验收：
 
@@ -624,7 +624,7 @@ LocalAgentEvent
 工作项（可按价值再拆小 PR）：
 
 - transcript export / debug view：先提供 `/export [path]`，把当前 session history 导出为 Markdown，作为 transcript model 前的可用调试入口。未传 `path` 时默认写入 TUI 启动目录（`process.cwd()`）；`~/foo.md` 会展开到当前用户 home；有扩展名的 `path` 视为目标文件，无扩展名的 `path` 视为目录并在其下生成默认文件名；显式目标文件已存在时按常规导出语义覆盖。
-- resume picker：提供 `/resume`，从 local server 的 TUI session registry 读取可恢复 chat sessions；TUI session registry 使用 versioned state，并保留 v1 petId→suffix map 迁移读取，避免已有本地 TUI 会话丢失。TUI 侧通过 `TuiLocalServerClient` 访问本地 HTTP `/health`、`/history`、`/sessions`、`/sessions/resume`，让 controller 只负责运行时状态和 websocket lifecycle；TUI 中用 picker 展示会话标题、消息数、更新时间和当前会话标记，picker 状态与异步恢复流程由 `useResumePickerController` 管理；选择后 local server 切换 active thread 并返回该 session transcript，TUI 替换当前 history。`/new` 创建新 TUI session 时保留旧 checkpoint，工具协议错误恢复这类内部 reset 可以删除坏 checkpoint。
+- resume picker：提供 `/resume`，从 local server 的 TUI session registry 读取可恢复 chat sessions；TUI session registry 使用 versioned state，并保留 v1 petId→suffix map 的持久数据迁移读取。TUI 侧通过 `TuiLocalServerClient` 访问本地 HTTP `/health`、`/snapshot`、`/sessions`、`/sessions/resume`；选择后 local server 切换 active thread，并返回当前 versioned `LocalAgentSessionSnapshot`。TUI 不再支持 `/history` 或 message-only restore fallback。`/new` 创建新 TUI session 时保留旧 checkpoint，工具协议错误恢复这类内部 reset 可以删除坏 checkpoint。
 - diff renderer：文件修改 / shell patch / capability 变更的可审查 diff。此项依赖真实 before/after diff 源；TUI 不生成伪 diff。
 - transcript model：区分 durable messages 和 run activity。
 - file mention / path search、richer status line。

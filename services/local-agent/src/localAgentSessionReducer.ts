@@ -72,11 +72,10 @@ export type LocalAgentSessionReductionContext = {
   observedAt: number;
 };
 
-export type LocalAgentSessionSnapshotSource =
-  | 'startup'
-  | 'reconnect'
-  | 'resume'
-  | 'reconcile';
+export type LocalAgentSessionSnapshotApplyOptions = {
+  observedAt?: number;
+  preserveOmittedTokenUsage?: boolean;
+};
 
 export function reduceSession(
   session: LocalAgentSession,
@@ -147,14 +146,15 @@ export function reduceSession(
   }
 }
 
-export function reconcileSessionSnapshot(
+export function applySessionSnapshot(
   session: LocalAgentSession,
   snapshot: LocalAgentSessionSnapshot,
-  source: LocalAgentSessionSnapshotSource,
-  context?: LocalAgentSessionReductionContext,
+  options: LocalAgentSessionSnapshotApplyOptions = {},
 ): LocalAgentSession {
   const incoming = snapshot.session;
-  const preserveOmittedUsage = source === 'reconnect' || source === 'reconcile';
+  const context = options.observedAt === undefined
+    ? undefined
+    : { observedAt: options.observedAt };
   const runtime = {
     ...(session.runtime ?? {}),
     ...(incoming.runtime ?? {}),
@@ -173,7 +173,7 @@ export function reconcileSessionSnapshot(
     ...(Object.keys(runtime).length ? { runtime } : {}),
     ...(incoming.tokenUsage
       ? { tokenUsage: incoming.tokenUsage }
-      : preserveOmittedUsage && session.tokenUsage
+      : options.preserveOmittedTokenUsage && session.tokenUsage
         ? { tokenUsage: session.tokenUsage }
         : {}),
   };

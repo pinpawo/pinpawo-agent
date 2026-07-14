@@ -321,7 +321,7 @@ test('TuiRuntimeController resets static timeline view for new sessions', () => 
   assert.deepEqual(harness.sent, [{ type: 'new_session' }]);
 });
 
-test('TuiRuntimeController restores a reconnect snapshot before opening websocket', async () => {
+test('TuiRuntimeController applies the latest snapshot before opening websocket', async () => {
   const state = pendingReviewState();
   const harness = createController(state);
   const events: string[] = [];
@@ -367,13 +367,13 @@ test('TuiRuntimeController restores a reconnect snapshot before opening websocke
   assert.equal(harness.actions[0]?.type, 'session.snapshot.loaded');
   assert.equal(
     harness.actions[0]?.type === 'session.snapshot.loaded'
-      ? harness.actions[0].source
+      ? harness.actions[0].reason
       : undefined,
     'reconnect',
   );
 });
 
-test('TuiRuntimeController reconciles snapshots after stale review errors', async () => {
+test('TuiRuntimeController refreshes from the latest snapshot after stale review errors', async () => {
   const harness = createController(pendingReviewState());
   const events: string[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -421,13 +421,13 @@ test('TuiRuntimeController reconciles snapshots after stale review errors', asyn
   assert.equal(harness.actions[1]?.type, 'session.snapshot.loaded');
   assert.equal(
     harness.actions[1]?.type === 'session.snapshot.loaded'
-      ? harness.actions[1].source
+      ? harness.actions[1].reason
       : undefined,
-    'reconnect',
+    'review-refresh',
   );
 });
 
-test('TuiRuntimeController reconciles snapshots after completed messages', async () => {
+test('TuiRuntimeController applies the latest snapshot after completed messages', async () => {
   const harness = createController(pendingReviewState());
   const events: string[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -481,8 +481,8 @@ test('TuiRuntimeController reconciles snapshots after completed messages', async
   assert.equal(harness.actions[1]?.type, 'session.snapshot.loaded');
   assert.equal(
     harness.actions[1]?.type === 'session.snapshot.loaded'
-      ? harness.actions[1].source
+      ? harness.actions[1].reason
       : undefined,
-    'reconcile',
+    'completion',
   );
 });

@@ -10,12 +10,6 @@ export function createCapabilityCreatorCapability(): AgentCapability {
     createRuntime: async (context) => ({
       toolsets: [createCapabilityCreatorToolset()],
       uses: ['bash'],
-      contextManagement: {
-        evictToolResults: {
-          keepRecent: 5,
-          keepFailures: true,
-        },
-      },
       instructions: capabilityCreatorInstructions,
     }),
     resultSchema: capabilityCreatorResultSchema,

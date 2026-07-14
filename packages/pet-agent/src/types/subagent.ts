@@ -50,68 +50,18 @@ export type SubagentRuntimeEvent = {
   data: unknown;
 };
 
-/**
- * Lets a subagent persist a capability artifact from inside the loop and have
- * the ref reach `state.sessionCapabilityArtifacts`. `recordCapabilityArtifact` is the
- * sink supplied by the orchestrator (it pushes into the shared artifacts array
- * that becomes `SubagentResult.artifacts`); the ids address a write. A
- * capability holds its own `CapabilityArtifactStore` by closure for the bytes;
- * this only carries what the subagent loop cannot otherwise see.
- *
- * This is the single artifact-sink shape shared by every layer that can persist
- * an artifact — the in-loop context rewrite path, the afterRun middleware
- * (`CapabilityMiddlewareContext`), and toolkit tools (`ToolkitContext`) all
- * expose the same `recordCapabilityArtifact` + addressing ids.
- */
-export type CapabilityArtifactSink = {
-  recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
-  threadId?: string | null;
-  delegationId?: string;
-  runId?: string;
-};
-
-export type ContextManagementContext = {
-  iterationCount: number;
-  operations: Record<string, SubagentToolOperationMetadata>;
-  contextWindowTokens?: number;
-  artifactSink?: CapabilityArtifactSink;
-};
-
-/** @deprecated Use ContextManagementContext. */
-export type ContextPolicyContext = ContextManagementContext;
-
-export type SubagentContextManagement = {
-  evictToolResults?: {
-    keepRecent: number;
-    defaultMode?: 'evict' | 'truncate';
-    minSizeChars?: number;
-    keepFailures?: boolean;
-    perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
-  };
-  rewrite?: (messages: BaseMessage[], ctx: ContextManagementContext) => BaseMessage[];
-  rewriteAsync?: (messages: BaseMessage[], ctx: ContextManagementContext) => BaseMessage[] | Promise<BaseMessage[]>;
-};
-
-/** @deprecated Use SubagentContextManagement. */
-export type SubagentContextPolicy = SubagentContextManagement;
-
 export type SubagentInputState = {
   instructions: string[];
   operations?: Record<string, SubagentToolOperationMetadata>;
   messages: BaseMessage[];
   maxIterations?: number;
   contextWindowTokens?: number;
-  /** Uses the built-in context management defaults when omitted. */
-  contextManagement?: SubagentContextManagement | false;
   artifacts?: CapabilityArtifactRef[];
-  artifactSink?: CapabilityArtifactSink;
 };
 
 export type SubagentRunInput = SubagentInputState & {
   model: BaseChatModel;
   tools: StructuredTool[];
-  /** @deprecated Use contextManagement. */
-  contextPolicy?: SubagentContextManagement;
   middleware?: AnyAgentMiddleware[];
   runnableConfig?: RunnableConfig;
   signal?: AbortSignal;

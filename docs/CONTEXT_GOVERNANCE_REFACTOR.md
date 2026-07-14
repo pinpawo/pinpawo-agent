@@ -1,6 +1,6 @@
 # Context Governance 重构指导（issue #115）
 
-> 状态：Spec v1（issue #115 讨论定稿）
+> 状态：L1 已于 2026-07-14 修订；旧的 capability context policy / tool-result eviction 方案已替代
 > 日期：2026-06-13
 > 关联：#115（本文档的事实来源）、#117（已合并，L2 的读取侧前置）、#75（explore，依赖 L1/L2）、#77（availableToolkits）。#114（L3 止血补丁）不合并——直接由 L4 取代，见第 5 节。
 
@@ -10,22 +10,22 @@
 
 | 层 | 症状 | 状态 |
 |---|---|---|
-| L1 子代理模型窗口 | `createSubagent` 是裸循环，无淘汰；每轮重发全量历史，token O(n²)，高迭代任务顶穿窗口 | 待实现 |
+| L1 子代理模型窗口 | `createSubagent` 根据 `contextWindowTokens` 默认启用持久化摘要 | 已实现 |
 | L2 orchestrator state | lane 全量工具流水合入 `state.messages`；污染 compaction 触发逻辑；膨胀每个 checkpoint | #117 已做读取侧隔离；写侧折叠待实现 |
 | L3 checkpoint 数量 | 每 super-step 全量快照，数量无界 | 不单独做——根因（全量快照）由 L4 内容寻址消除；#114 不合并 |
 | L4 落盘 | 单 thread 拼一个 JSON 字符串，撞 V8 字符串上限 | git 式内容寻址布局为终态方案，直接落地 |
 
 三条设计不变量，所有改动必须服从：
 
-1. **结论过境，流水不过境**：原始工具输出只活在产生它的那一层；穿过边界的必须是结论形态（模型笔记、announce、handoff 的 previousReport），而不是工具流水。结论的体积由 subagent 上下文改写处理控制；当前刚完成的 announce 不应在父 agent handoff 时再被替换成短 preview。
-2. **改写执行是位置绑定，不是工具属性**：guard 只判断是否触发；触发后的淘汰、摘要、存根化由调用位置绑定的 handler/executor 决定。未绑定处理时保持全保留，现有能力零行为变化。
+1. **结论过境，流水不过境**：原始工具输出只活在产生它的那一层；穿过边界的必须是结论形态（模型摘要、announce、handoff 的 previousReport），而不是工具流水。当前刚完成的 announce 不应在父 agent handoff 时再被替换成短 preview。
+2. **窗口预算属于 subagent runtime，不属于 capability/tool**：调用方只传 `contextWindowTokens`；`createSubagent` 统一派生摘要触发线和保留预算。capability 和 toolkit 不声明淘汰规则，也不接收 rewrite callback。
 3. **state 层与 memory 层分离**：checkpoint 是精确寻址、事务性、短生命周期的 KV；语义检索（explored memory）属于另一层，本文档不涉及。
 
 ## 2. 现状代码地图
 
 | 关注点 | 位置 |
 |---|---|
-| 子代理执行循环（无淘汰、无窗口保护） | `packages/pet-agent/src/subagent/createSubagent.ts` |
+| 子代理执行循环与默认摘要 middleware | `packages/pet-agent/src/subagent/createSubagent.ts` |
 | lane 合入 / announce 标记 | `packages/pet-agent/src/agent/orchestrator/messageLanes.ts` 的 `tagNewLaneMessages`、`laneMessages` |
 | 委派状态更新（completed/progress） | `packages/pet-agent/src/agent/orchestrator/delegations.ts` 的 `updateTurnDelegationResult` |
 | general/capability 节点（合入点） | `packages/pet-agent/src/agent/createAgentRuntime.ts` 的 `generalNode` / `capabilityNode` |
@@ -66,50 +66,52 @@
 - HITL 回归：委派中途 review interrupt → resume 正常（子代理内部状态在 checkpointer 的子 namespace 里，不受 state.messages 折叠影响——用 `npm run eval:hitl -w pinpawo-local-agent` 验证这个假设）。
 - compaction 触发不再被 lane 噪音点燃（构造大量 lane 消息 + 少量主线消息，断言不触发）。
 
-## 4. L1：上下文风险处理（全局 + 子代理改写）
+## 4. L1：上下文风险处理（orchestrator + subagent）
 
-### 4.1 上下文风险处理（所有能力，故障处理而非遗忘）
+### 4.1 Orchestrator 主线
 
-不再在本地估算 messages token。上下文治理依赖 provider 实际返回的
-`usage_metadata.input_tokens` 作为 prompt 水位信号：turn 开始的主线 compaction 用最近主线 AIMessage
-的 input_tokens 与上下文窗口阈值比较；子代理上下文改写在最近一次 subagent model call 的
-input_tokens 过阈值后，才对旧的大工具输出做 evict/truncate。真实窗口超限仍由 provider/model
-返回错误；本地只保留不会伪装成 token 的结构性裁剪。
+主线 compaction 仍是 orchestrator 图节点级行为。它读取最近主线 provider
+`usage_metadata.input_tokens`，通过 guard 判断是否达到窗口水位，再由
+`compactOrchestratorMessages` 执行。它不是 `createAgent` 的标准循环，不能直接换成 agent middleware。
 
-实现边界：判断由 guard 负责；触发后的压缩/改写由 position 绑定的 handler 或 executor 负责。
+### 4.2 Subagent 默认摘要
 
-### 4.2 子代理上下文改写处理
+所有通过 `createSubagent()` 运行的 general/capability subagent 都使用同一条规则：
 
-#### 设计前提：改写规则属于执行位置，不属于工具定义
+1. 调用方只传 `contextWindowTokens`；subagent 模型窗口与主模型不同时使用
+   `subagentContextWindowTokens`。
+2. `createSubagent()` 根据窗口派生内部 trigger/keep token budget。
+3. LangChain `summarizationMiddleware` 在每次 model call 前计算消息体积；达到 trigger 后，用当前
+   subagent model 总结较早消息，并通过 `RemoveMessage` 持久化替换 state。
+4. 摘要保留当前任务、已完成工作、关键发现、决策、失败、待办及精确来源；近期消息保持原样。
 
-同一个工具在不同能力里的上下文价值不同：一次 `grep_search` 在探索代码结构时可能只是可重跑的中间材料，在排错能力里也可能是关键证据。工具自身很难判断"旧结果是否可以被遗忘"；这个决策应由调用 guard 的 position 绑定 handler/executor。工具 metadata 只提供 `summarizeInput` / `summarizeOutput` 这类中性摘要能力，不承载淘汰策略。
+trigger/keep 比例属于 runtime 内部保守常量，不进入 `CapabilityRuntime`。这样 system prompt、tool schema
+和下一次模型输出始终有预留空间，同时公共配置只有一个窗口字段。
 
-触发条件：`latestProviderInputTokens >= floor(contextWindowTokens * 0.75)`。
-`latestProviderInputTokens` 来自最近一次 provider model call 的 `usage_metadata.input_tokens`；因为 subagent
-messages 是累积发送的，这个值就是上一轮实际送进模型的 prompt footprint。没有 provider usage metadata
-时不触发压缩。
+### 4.3 已删除的旧协议
 
-guard 只负责 provider 水位触发这一步；后续是否按工具覆盖、保护失败结果、保留最近 K 次、按体积截断，都是具体 rewrite executor 的内部规则。K 是地板（最近 K 次保留全文），旧的大体积可淘汰项从最老开始动手。
+以下接口不再存在：
 
-**执行器淘汰规则**——淘汰判据不是"旧"，而是"provider usage 水位过阈值，且当前位置绑定了旧工具输出收缩处理"：
+- `SubagentContextPolicy` / `SubagentContextManagement`
+- `ContextPolicyContext` / `ContextManagementContext`
+- `rewrite` / `rewriteAsync` / `evictToolResults`
+- subagent context watermark guard 和 capability 级 context policy
+- 用于 in-loop artifact 写入的 `artifactSink`
 
-- **默认可淘汰**：旧的大体积成功工具输出可被替换为确定性存根：`[evicted: view_file_chunk src/foo.ts:1-200 → 已读；需要时重新调用]`。存根指纹优先复用 tool operation metadata 的 `summarizeInput`，但是否淘汰由对应 handler/executor 决定。
-- **按工具覆盖**：如果某个工具在该能力里必须保留、必须淘汰或只适合截断，由对应 handler/executor 配置。工具定义本身不声明可淘汰性，避免工具越多策略越散。
-- **永不淘汰**：失败结果（stderr/exit code 天然很小，是"别重犯这个错"的载体；判定：`ToolMessage.status === 'error'` 或文本 `^Error` 前缀）、AI 文本消息（模型自己的笔记）、存根本身（连成功调用也留"试过了"的记录）。
-- **破坏性改写**：直接改写子代理消息状态，而不是只裁喂给模型的视图。收益：子代理返回的 transcript 天然有界（L2 的"未决保留窗口"自动有上界）；续跑时模型看到的现场与被打断前自己经历的窗口完全一致。
-- **零 LLM 调用**：纯字符串规则。子代理循环内不做 LLM compaction（额外调用复杂度 + 有损，两条都被否决）。
-- 配套 governing instruction 一行："较早的工具原始输出会被淘汰，重要发现要随时写进你的回复里。"
+工具输出的单次大小仍由 toolset/toolkit 自己负责。subagent 不按工具名配置 keep/evict/truncate；极端窗口压力由摘要整个旧执行上下文处理，而不是静默删除某类工具事实。
 
-### 管道
+### 4.4 扩展边界
 
-`CapabilityRuntime` → `capabilityNode` → subagent graph state。subagent graph state 使用自己的 `contextWindowTokens` 作为统一 watermark budget；当 subagent 模型窗口与主模型不同时，由 `subagentContextWindowTokens` 显式传入。general lane 不声明上下文改写处理，保持全保留。tool operation metadata 随 `SubagentInputState.operations` 进入淘汰器，仅用于生成稳定存根指纹，不决定是否淘汰。
+`SubagentRunInput.middleware` 保留为标准 LangChain middleware escape hatch。需要授权、重试、fallback
+或其他真正的 agent 生命周期行为时，直接使用 `beforeModel`、`wrapModelCall`、`wrapToolCall` 等标准
+hook，不再扩展 context policy DSL。
 
 ### 测试点
 
-- 淘汰规则单测：启用子代理上下文改写的能力里，大的成功结果被存根化；小结果 / 失败 / AI 消息原样保留；K 地板生效；`perTool` 覆盖优先级最高。
-- 缺省存根：用 `summarizeInput` 指纹兜底；没有摘要 metadata 时退回工具名 + 输入 JSON。
-- Guard 规则：上下文 watermark / iteration limit 等控制逻辑统一参考 [Guard Design](./GUARD_DESIGN.md)。
-- 未启用上下文改写处理的能力：行为与现状逐字节一致。
+- 有 `contextWindowTokens` 且消息超过派生 trigger 时，旧历史被带 `lc_source: summarization` 的摘要持久化替换。
+- 低于 trigger 时不产生摘要。
+- general lane 与所有 capability 自动获得同一默认行为，无需 capability 显式配置。
+- 单条 tool result 在未触发摘要时保持原样，输出大小责任仍在 toolkit。
 
 ## 5. L3：checkpoint 数量封顶（不做，直接上 L4）
 
@@ -148,7 +150,7 @@ checkpoint 链与 git commit 模型同构（parent 指针 / 不可变快照 / la
 ```
 ① L2 completed 折叠 + provider usage compaction  （#117 已铺好 delegationId 基础，立即可做）
 ② L1 guard registry 接入（详见 [Guard Design](./GUARD_DESIGN.md)）
-③ L1 子代理上下文改写机制 + 类型管道
+③ L1 subagent 默认 summarization middleware
 ④ L4 git 式 FileSaver                        （取代 L3；带上 F1/F2 约束。与 ①②③ 并行无依赖）
 
 L3 不单独做（见第 5 节）；#114 不合并。
@@ -156,8 +158,7 @@ L3 不单独做（见第 5 节）；#114 不合并。
 
 验收标准（按策略分别适用）：
 
-- 启用旧工具输出收缩处理的能力：30 轮读密集运行不会无限保留旧的大工具输出。
-- 全保留能力：未启用上下文改写处理时保持全量上下文；guard 行为以 [Guard Design](./GUARD_DESIGN.md) 为准。
+- 具有 `contextWindowTokens` 的 subagent：30 轮读密集运行会在窗口预算内生成可继续执行的持久摘要。
 - 已完成委派在 `state.messages` 中只剩 announce 一条（工具消息和中间 AI 笔记均已清除）；checkpoint 体积由会话长度决定，不再由工具调用量决定。
 - 同 turn 续跑（progress/limit_reached）拿到完整（L1 限界后的）现场；新任务从零开始（#117 已保证）。
 - HITL 委派中途 resume 回归通过（`npm run eval:hitl -w pinpawo-local-agent`）。
@@ -165,8 +166,7 @@ L3 不单独做（见第 5 节）；#114 不合并。
 
 ## 8. 明确不做（v1）
 
-- 子代理循环内的 LLM compaction（确定性规则足够，拒绝额外调用与有损摘要）。
-- 全局淘汰策略（默认全保留是正确契约）。
+- capability/tool 级 context policy 或按工具淘汰 DSL。
 - ExploreResult schema 及其 orchestrator 消费链（汇报格式走 instruction 约定，消费方是下一个 LLM）。
 - orchestrator 路由改动（explore 走 description 驱动的现有路由）。
 - memory 层 / 向量化（依赖本重构 + #75 产出"值得记的东西"之后再立项）。

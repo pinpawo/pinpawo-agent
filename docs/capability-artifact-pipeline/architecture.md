@@ -7,7 +7,7 @@
 ```text
 subagent / capability 运行
   ├─ capabilityRuntime 持有 `artifactStore`（持久化写入接口）
-  ├─ 在代码侧（context rewrite/afterRun）产出 ArtifactRef
+  ├─ capability 在 afterRun 侧产出 ArtifactRef
   ├─ 通过 `recordCapabilityArtifact` 落到 `SubagentResult.artifacts`
   ├─ `capabilityNode` 合并到 `state.sessionCapabilityArtifacts`
   ├─ 委派结束时，`buildSubagentHandoff` 将当前 announce 复制到主队列
@@ -32,9 +32,9 @@ subagent / capability 运行
   - 决策节点只注入简短 `ref` 到系统 prompt。
 
 - **能力侧（packages/local-agent/src/capabilities/*）**
-  - 自己决定何时写入 artifact（通常 in-loop ingest 或 `afterRun`）。
+  - 在 `afterRun` 等确定性收尾边界写入 artifact。
   - 负责构造 `kind/mimeType/title/preview` 等元信息。
-  - 通过 `artifactSink.recordCapabilityArtifact` 回传 ref。
+  - 通过 `CapabilityMiddlewareContext.recordCapabilityArtifact` 回传 ref。
 
 - **store 实现（services/local-agent/src/capabilityArtifactStore.ts）**
   - 实现 `CapabilityArtifactStore`。
@@ -44,11 +44,10 @@ subagent / capability 运行
 ## 关键状态与链路
 
 1. `capability.createRuntime()` 时注入 `CapabilityContext.artifactStore`。
-2. `createSubagent()` 运行上下文收到 `artifactSink`（`threadId/delegationId/runId`）。
-3. 子代理上下文改写 hook（如 explore）可在中间过程记录 `pending` 摘要。
-4. `capability.middleware.afterRun` 将最终 `Pending`/`final` 摘要写入 store。
-5. Subagent graph state 的 `artifacts` 与 `artifactSink` 汇总的 refs 回传。
-6. `capabilityNode` 在 `sessionCapabilityArtifacts` 上使用 reducer 合并。
+2. `createSubagent()` 根据 `contextWindowTokens` 独立管理模型上下文，不负责 artifact 写入。
+3. `capability.middleware.afterRun` 收到最终 `SubagentResult` 和稳定寻址 id。
+4. capability 通过 closure 中的 store 写入内容，并调用 `recordCapabilityArtifact` 回传 ref。
+5. `capabilityNode` 将 refs 放入 `SubagentResult.artifacts`，再合并到 `sessionCapabilityArtifacts`。
 
 ## 与旧路径的关系
 

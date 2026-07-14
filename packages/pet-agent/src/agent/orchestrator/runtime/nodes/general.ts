@@ -105,7 +105,7 @@ export function createGeneralNode(params: {
 
     const outputMessages = tagNewLaneMessages(
       result.messages,
-      subagentMessages.length,
+      subagentMessages,
       lane,
       transcriptRunId,
       result.completionReason,

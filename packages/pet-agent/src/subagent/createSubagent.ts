@@ -1,4 +1,5 @@
 import { type BaseMessage } from '@langchain/core/messages';
+import { randomUUID } from 'node:crypto';
 import type {
   SubagentInputState,
   SubagentResult,
@@ -8,15 +9,14 @@ import {
   evaluateGuard,
   type GuardDecisionEmitter,
 } from '../guards';
-import { createAgent, createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import {
-  buildContextManagementStateUpdate,
-  resolveSubagentContextManagement,
-  rewriteMessagesForContextManagement,
-} from './contextManagement';
+  createAgent,
+  createMiddleware,
+  summarizationMiddleware,
+  type AnyAgentMiddleware,
+} from 'langchain';
 import { isGraphRecursionLimitError } from '../utils/graphErrors';
 import {
-  contextMaintenanceGuard,
   SUBAGENT_GUARD_POSITION,
   subagentIterationLimitGuard,
 } from './guardDefinitions';
@@ -26,7 +26,11 @@ import {
 } from './guardStop';
 import { Command, END } from '@langchain/langgraph';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
-import { CONTEXT_MANAGEMENT_GOVERNING_PROMPT } from './prompts/templates/contextManagement.prompt';
+import {
+  SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
+  SUBAGENT_CONTEXT_SUMMARY_PREFIX,
+  SUBAGENT_CONTEXT_SUMMARY_PROMPT,
+} from './prompts/templates/contextSummary.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
@@ -34,6 +38,8 @@ import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt'
 // is a deliberately high last-resort breaker, not a normal control signal.
 const DEFAULT_SUBAGENT_MAX_ITERATIONS = 100;
 const SUBAGENT_HARD_RECURSION_LIMIT = 10_000;
+const SUBAGENT_CONTEXT_SUMMARY_TRIGGER_RATIO = 0.65;
+const SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO = 0.3;
 
 /**
  * Runtime-event name carrying subagent guard decision records. Written to the
@@ -63,51 +69,38 @@ function readResultMessages(result: unknown): BaseMessage[] | null {
   return null;
 }
 
-function buildContextManagementContext(
-  inputState: SubagentInputState,
-  iterationCount: number,
-) {
-  return {
-    iterationCount,
-    operations: inputState.operations ?? {},
-    ...(inputState.contextWindowTokens ? { contextWindowTokens: inputState.contextWindowTokens } : {}),
-    ...(inputState.artifactSink ? { artifactSink: inputState.artifactSink } : {}),
-  };
+function ensureSubagentMessageIds(messages: BaseMessage[]) {
+  for (const message of messages) {
+    if (!message.id) message.id = randomUUID();
+  }
 }
 
-function createContextManagementMiddleware(
+function createSubagentSummarizationMiddleware(
   inputState: SubagentInputState,
-  emitGuardDecision?: GuardDecisionEmitter,
-) {
-  let iterationCount = 0;
+  model: SubagentRunInput['model'],
+): AnyAgentMiddleware | null {
+  const contextWindowTokens = inputState.contextWindowTokens;
+  if (!contextWindowTokens || !Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
+    return null;
+  }
 
-  return createMiddleware({
-    name: 'SubagentContextManagement',
-    beforeModel: async (state) => {
-      iterationCount += 1;
-      const management = inputState.contextManagement;
-      if (!management) {
-        return undefined;
-      }
-      const messages = state.messages;
-      if (!Array.isArray(messages) || messages.length === 0) {
-        return undefined;
-      }
-      const baseMessages = messages as BaseMessage[];
-      const outcome = evaluateGuard(contextMaintenanceGuard, {
-        state: { messages: baseMessages, contextManagement: management },
-        config: { contextWindowTokens: inputState.contextWindowTokens },
-        position: SUBAGENT_GUARD_POSITION.BEFORE_MODEL_CONTEXT_MANAGEMENT,
-      }, { emit: emitGuardDecision, iteration: iterationCount });
-      if (outcome.kind !== 'maintain') {
-        return undefined;
-      }
-      const context = buildContextManagementContext(inputState, iterationCount);
-      const rewritten = management.rewriteAsync
-        ? await management.rewriteAsync(baseMessages, context)
-        : rewriteMessagesForContextManagement(baseMessages, management, context);
-      return buildContextManagementStateUpdate(baseMessages, rewritten) ?? undefined;
-    },
+  const triggerTokens = Math.max(1, Math.floor(
+    contextWindowTokens * SUBAGENT_CONTEXT_SUMMARY_TRIGGER_RATIO,
+  ));
+  const keepTokens = Math.max(1, Math.floor(
+    contextWindowTokens * SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO,
+  ));
+
+  return summarizationMiddleware({
+    model,
+    trigger: { tokens: triggerTokens },
+    keep: { tokens: keepTokens },
+    // LangChain defaults this to 4k tokens, which would inspect only a small
+    // slice when our model window is large. The derived budget covers the
+    // expected summarized prefix while leaving room for the summary prompt.
+    trimTokensToSummarize: Math.max(1, Math.floor(contextWindowTokens * 0.5)),
+    summaryPrompt: SUBAGENT_CONTEXT_SUMMARY_PROMPT,
+    summaryPrefix: SUBAGENT_CONTEXT_SUMMARY_PREFIX,
   });
 }
 
@@ -145,32 +138,31 @@ function writeSubagentRuntimeEvent(name: string, data: unknown) {
 
 export async function createSubagent(input: SubagentRunInput): Promise<SubagentResult> {
   const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
-  const contextManagement = resolveSubagentContextManagement(
-    input.contextManagement ?? input.contextPolicy,
-  );
+  // Parent lane reconciliation is identity-based because summarization may
+  // replace or shrink the transcript. Stable ids distinguish preserved input
+  // messages from summaries and model responses returned by the child graph.
+  ensureSubagentMessageIds(input.messages);
   const inputState: SubagentInputState = {
     instructions: input.instructions,
     operations: input.operations,
     messages: input.messages,
     maxIterations: input.maxIterations,
     contextWindowTokens: input.contextWindowTokens,
-    contextManagement,
     artifacts: input.artifacts,
-    artifactSink: input.artifactSink,
   };
   const systemPrompt = [
     SUBAGENT_GOVERNING_PROMPT,
-    inputState.contextManagement ? CONTEXT_MANAGEMENT_GOVERNING_PROMPT : null,
+    inputState.contextWindowTokens ? SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT : null,
     ...inputState.instructions,
   ].filter((item): item is string => Boolean(item)).join('\n\n');
   // Decision records must never fail the run.
   const emitGuardDecision: GuardDecisionEmitter = (record) => {
     writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
   };
-  const contextManagementMiddleware = createContextManagementMiddleware(inputState, emitGuardDecision);
+  const contextSummaryMiddleware = createSubagentSummarizationMiddleware(inputState, input.model);
   const iterationGuardMiddleware = createSubagentIterationGuardMiddleware(maxIterations, emitGuardDecision);
   const middleware: AnyAgentMiddleware[] = [
-    contextManagementMiddleware,
+    contextSummaryMiddleware,
     iterationGuardMiddleware,
     ...(input.middleware ?? []),
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
@@ -213,7 +205,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // notice as the FINAL message (via Command goto END). That is a clean "limit
     // reached" stop, not natural completion. Check only the last message — a stop
     // marker buried in the input history must not be misread as our stop, and
-    // Context management may rewrite the list so an index-based slice is unreliable.
+    // Summarization may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
     const stoppedByGuard = lastMessage ? isSubagentGuardStopMessage(lastMessage) : false;
     return {

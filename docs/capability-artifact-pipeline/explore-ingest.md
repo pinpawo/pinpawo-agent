@@ -1,59 +1,50 @@
-# Explore 的两阶段持久化流程
+# Explore 的摘要与 Artifact 流程
 
-## 目标
+## 职责分离
 
-在不丢失关键结论的前提下，压缩旧的原始 tool output，同时保留长期可读能力。
+- subagent 窗口维护：`createSubagent()` 根据 `contextWindowTokens` 自动安装 LangChain
+  `summarizationMiddleware`。
+- Explore 知识交付：`capability.middleware.afterRun` 生成结构化 `summary + evidence` 并写 store。
 
-## 数据结构
+Explore 不再实现 `rewriteOldToolOutput`、`pendingArtifact` 或 in-loop artifact sink。
 
-`ExploreKnowledgeIngest`：
+## Subagent 摘要阶段
 
-- `summary: string`（Markdown）
+达到 runtime 根据窗口派生的 token trigger 后，LangChain middleware：
+
+1. 使用 subagent model 总结较早消息。
+2. 保留任务目标、进展、关键发现、错误、待办及精确来源。
+3. 使用 `RemoveMessage` 持久化替换旧消息。
+4. 给摘要消息标记 `additional_kwargs.lc_source = 'summarization'`。
+5. 保留近期消息原文供后续执行。
+
+该阶段不写 artifact，也不按工具配置 keep/evict/truncate。
+
+## Explore Finalize 阶段
+
+`afterRun` 收集：
+
+- 最新 LangChain context summary；
+- 当前 transcript 中的 tool results；
+- 最终 assistant 输出；
+- 续跑上下文中已有的 `Explore summary:`。
+
+然后调用 `ingestExploreKnowledge()` 生成：
+
+- `summary: string`
 - `evidence: { source, proves, value }[]`
 
-`evidence` 被写进 artifact `metadata.evidence`，可用于复核。
+成功后：
 
-## 两阶段触发
+- 在返回 messages 末尾追加 `Explore summary:`；
+- 写一条 `kind: 'report'`、`mimeType: 'text/markdown'` artifact；
+- 把 evidence 写入 `metadata.evidence`；
+- 通过 `CapabilityMiddlewareContext.recordCapabilityArtifact` 回传 ref。
 
-### 1) 旧输出压缩阶段（`rewriteOldToolOutput`）
-
-- 条件：最近一次 provider `usage_metadata.input_tokens` 达到压缩水位，且存在可压缩的历史 tool 输出（最近 N 条保留原文）。
-  - 水位：`latestProviderInputTokens >= floor(contextWindowTokens * 0.75)`。
-  - `contextWindowTokens` 是 subagent run state 中的上下文窗口；subagent 模型窗口与主模型不同时由 `subagentContextWindowTokens` 显式传入。
-- 提取证据摘要。
-- 调用 `ingestExploreKnowledge()` 产出 `summary + evidence`。
-  - 成功后：
-  - 在消息流里追加 `Explore summary:` 标记与摘要正文。
-  - 用占位 marker 替换老的 tool output（保留最近 N 条）。
-  - 暂存 `pendingArtifact`（仅本 run）
-- 失败：不改变原始上下文（non-fatal）。
-
-### 2) finalize 阶段（`afterRun`）
-
-`SubagentResult` 收尾时，按优先级写 artifact：
-
-1. `pendingArtifact`（旧输出压缩阶段已生成）
-2. 从消息中读取已有 `Explore summary:` marker
-3. `buildFinalExploreIngest()` 重算一次最终摘要
-
-若得到 ingest 结果：
-
-- 写入一条 `kind: 'report'`，`mimeType: 'text/markdown'`
-- 写入 `metadata.evidence`
-- 通过 `recordCapabilityArtifact` 回传
-
-失败不阻断主流程（仅 warn）。
-
-## 与 `additional_kwargs` 的关系
-
-`additional_kwargs.pinpawo` 在 explore 内部只用于元信息标记：
-
-- `exploreRawEvicted`（工具输出已摘要）
-- `exploreIngestFailed`（可用于提前放弃历史读取）
-
-它不是“跨 run 的摘要载体”。持久化内容仍走 `capability artifact`。
+每次 capability run 最多执行一次 finalize artifact 写入。store 写入失败只记录 warning，
+不改变 subagent completion。
 
 ## 与 main agent 的关系
 
-- summarize 结果最终变成可见 `preview` + ref 在 prompt。
-- main agent 想访问完整内容需调用 store（当前主要由 host/工具层按需读取）。
+main agent 只接收 artifact ref/title/preview 和最终 announce。完整报告保存在
+`CapabilityArtifactStore`，不会重新注入主线 messages。

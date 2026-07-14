@@ -3435,7 +3435,7 @@ test('lane tagging hides subagent messages from route and records completed anno
     new AIMessage('已查到热门动态。'),
   ];
 
-  const tagged = tagNewLaneMessages(messages, 1, 'general', 'turn-1', 'natural', {
+  const tagged = tagNewLaneMessages(messages, [messages[0]], 'general', 'turn-1', 'natural', {
     delegationId: 'task-1',
     task: '查小红书动态',
   });
@@ -3457,6 +3457,63 @@ test('lane tagging hides subagent messages from route and records completed anno
   });
 });
 
+test('lane tagging reconciles a summarized subagent transcript by message identity', () => {
+  const human = new HumanMessage({ id: 'main-human', content: '继续检查项目' });
+  const oldToolCall = new AIMessage({
+    id: 'old-call',
+    content: '',
+    tool_calls: [{ id: 'call-old', name: 'read_file', args: { path: 'src/old.ts' } }],
+  });
+  const oldToolResult = new ToolMessage({
+    id: 'old-result',
+    tool_call_id: 'call-old',
+    content: 'old evidence',
+  });
+  const initialOutput = [human, oldToolCall, oldToolResult];
+  const initialUpdate = tagNewLaneMessages(
+    initialOutput,
+    [human],
+    'general',
+    'turn-1',
+    'limit_reached',
+    { delegationId: 'task-summary', task: '检查项目' },
+  );
+  const stateBeforeSummary = messagesStateReducer([human], initialUpdate);
+  const continuationInput = laneMessages(
+    stateBeforeSummary,
+    'general',
+    'turn-1',
+    'task-summary',
+  );
+  const contextSummary = new HumanMessage({
+    id: 'context-summary',
+    content: 'Earlier subagent context summary:\n\n已检查 src/old.ts。',
+    additional_kwargs: { lc_source: 'summarization' },
+  });
+  const finalAnswer = new AIMessage({ id: 'final-answer', content: '检查完成。' });
+
+  const summarizedUpdate = tagNewLaneMessages(
+    [contextSummary, finalAnswer],
+    continuationInput,
+    'general',
+    'turn-1',
+    'natural',
+    { delegationId: 'task-summary', task: '检查项目' },
+  );
+  const stateAfterSummary = messagesStateReducer(stateBeforeSummary, summarizedUpdate);
+
+  assert.equal(stateAfterSummary.some((message) => message.id === 'main-human'), true);
+  assert.equal(stateAfterSummary.some((message) => message.id === 'old-call'), false);
+  assert.equal(stateAfterSummary.some((message) => message.id === 'old-result'), false);
+  assert.equal(getMessageLane(contextSummary), 'general');
+  assert.equal(getMessageDelegationId(contextSummary), 'task-summary');
+  assert.equal(getMessageIsAnnounce(finalAnswer), true);
+  assert.deepEqual(
+    laneMessages(stateAfterSummary, 'general', 'turn-1', 'task-summary').map((message) => message.id),
+    ['main-human', 'context-summary', 'final-answer'],
+  );
+});
+
 test('lane tagging marks the deliverable as the announce regardless of stop reason', () => {
   const messages = [
     new HumanMessage('读取文件并运行 lint'),
@@ -3465,7 +3522,7 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
 
   // limit_reached is just a stop reason now; the deliverable is still marked as
   // the announce (no completed/progress verdict at tag time).
-  tagNewLaneMessages(messages, 1, 'general', 'turn-1', 'limit_reached', {
+  tagNewLaneMessages(messages, [messages[0]], 'general', 'turn-1', 'limit_reached', {
     delegationId: 'task-2',
     task: '读取文件并运行 lint',
   });
@@ -3648,7 +3705,7 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   const announce = new AIMessage('检查完成，测试脚本是 node --test。');
   const outputMessages = [human, toolCall, toolResult, note, announce];
 
-  const tagged = tagNewLaneMessages(outputMessages, 1, 'general', 'turn-1', 'natural', {
+  const tagged = tagNewLaneMessages(outputMessages, [human], 'general', 'turn-1', 'natural', {
     delegationId: 'task-complete',
     task: '检查项目并汇报',
   });
@@ -3705,7 +3762,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   const oldProgress = new AIMessage('已处理第一个分片，尚未完成。');
   const previousRun = [human, oldToolCall, oldToolResult, oldProgress];
   // First (interrupted) run keeps its whole lane in place — no handoff yet.
-  const previousUpdate = tagNewLaneMessages(previousRun, 1, 'general', 'turn-1', 'limit_reached', {
+  const previousUpdate = tagNewLaneMessages(previousRun, [human], 'general', 'turn-1', 'limit_reached', {
     delegationId: 'task-resume',
     task: '处理所有分片',
   });
@@ -3715,14 +3772,15 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   // Continuation (same delegationId) completes naturally.
   const finalNote = new AIMessage('继续处理剩余分片。');
   const completedAnnounce = new AIMessage('全部分片已处理完成，共 120 条。');
+  const continuationInput = laneMessages(stateWithProgress, 'general', 'turn-1', 'task-resume');
   const continuationOutput = [
-    ...laneMessages(stateWithProgress, 'general', 'turn-1', 'task-resume'),
+    ...continuationInput,
     finalNote,
     completedAnnounce,
   ];
   const taggedContinuation = tagNewLaneMessages(
     continuationOutput,
-    stateWithProgress.length,
+    continuationInput,
     'general',
     'turn-1',
     'natural',
@@ -3767,7 +3825,7 @@ test('lane messages drop unanswered tool calls from interrupted subagent history
   });
   const messages = [human, completeToolCall, toolResult, unansweredToolCall];
 
-  const tagged = tagNewLaneMessages(messages, 1, 'general', 'turn-1', 'limit_reached', {
+  const tagged = tagNewLaneMessages(messages, [human], 'general', 'turn-1', 'limit_reached', {
     delegationId: 'task-3',
     task: '归档 Downloads',
   });
@@ -3808,7 +3866,7 @@ test('lane messages scope to delegation: new task starts clean, reused id carrie
   const task1Answer = new AIMessage('目录已整理完成。');
   const messages = [human, task1ToolCall, task1ToolResult, task1Answer];
 
-  tagNewLaneMessages(messages, 1, 'general', 'turn-1', 'natural', {
+  tagNewLaneMessages(messages, [human], 'general', 'turn-1', 'natural', {
     delegationId: 'task-1',
     task: '整理仓库',
   });

@@ -160,8 +160,11 @@ export const routeMessages = mainConversationMessages;
 
 
 /**
- * Tag new messages from a subagent result: stamp lane/runId/delegationId on each,
- * and mark which message is the announce (the deliverable text). It does NOT judge
+ * Reconcile a subagent result with its input transcript. Messages removed by
+ * child-state summarization are removed from the matching delegation lane;
+ * unlaned main-conversation input is never removed. New messages are stamped
+ * with lane/runId/delegationId, and the deliverable is marked as announce.
+ * It does NOT judge
  * completed/progress — that judgment is the orchestrator's (see handoff). The
  * completionReason is attached to the announce message as a stop-reason hint for
  * the decision node.
@@ -173,7 +176,7 @@ export const routeMessages = mainConversationMessages;
  */
 export function tagNewLaneMessages(
   messages: BaseMessage[],
-  existingCount: number,
+  existingMessages: BaseMessage[],
   lane: MessageLane,
   runId: string,
   completionReason: SubagentCompletionReason,
@@ -182,9 +185,29 @@ export function tagNewLaneMessages(
     task?: string | null;
   },
 ) {
-  const nextMessages = messages.slice(existingCount);
+  const existingRefs = new Set(existingMessages);
+  const existingIds = new Set(
+    existingMessages
+      .map((message) => message.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0),
+  );
+  const resultIds = new Set(
+    messages
+      .map((message) => message.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0),
+  );
+  const removedLaneMessages = existingMessages.flatMap((message) => {
+    if (!message.id || resultIds.has(message.id)) return [];
+    if (getMessageLane(message) !== lane) return [];
+    if (getMessageTurnId(message) !== runId) return [];
+    if (getMessageDelegationId(message) !== (reportMeta?.delegationId ?? null)) return [];
+    return [new RemoveMessage({ id: message.id }) as BaseMessage];
+  });
+  const nextMessages = messages.filter((message) => {
+    if (existingRefs.has(message)) return false;
+    return !message.id || !existingIds.has(message.id);
+  });
   for (const message of nextMessages) {
-    if (message._getType() === 'human') continue;
     ensureMessageId(message);
     setPinpetMeta(message, { lane, runId, delegationId: reportMeta?.delegationId ?? null });
   }
@@ -226,7 +249,7 @@ export function tagNewLaneMessages(
     });
   }
 
-  return toolProtocolSafeMessages(nextMessages);
+  return [...removedLaneMessages, ...toolProtocolSafeMessages(nextMessages)];
 }
 
 /**

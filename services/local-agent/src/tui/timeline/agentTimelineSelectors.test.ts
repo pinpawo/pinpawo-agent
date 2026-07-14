@@ -1,41 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { LocalAgentOperationEvent } from '../../events/localAgentEvent';
-import { localAgentOperationKey } from '../../localAgentTimeline';
+import type { LocalAgentOperationEvent } from '../../events/localAgentRuntimeEvent';
 import {
-  isAgentTimelineMessage,
-  operationTimelineEntryFromEvent,
-  timelineEntryFromMessageCell,
-  timelineEntryIdFromOperationEvent,
-  timelineMessagesFromEntries,
-} from './agentTimeline';
+  localAgentOperationEntryId,
+  localAgentOperationEntryFromEvent,
+  localAgentOperationKey,
+} from '../../localAgentTimeline';
 import {
-  buildTimelineDisplayEntries,
   buildTimelineViewportModel,
   findTimelineOperationEntry,
   selectActiveOperationsFromTimeline,
   selectRunningOperationEntries,
-  splitTimelineDisplayForViewport,
+  splitTimelineForViewport,
 } from './agentTimelineSelectors';
-import type { AgentTimelineEntry } from './agentTimeline';
-
-test('timelineEntryFromMessageCell includes system message cells in the timeline', () => {
-  assert.deepEqual(
-    timelineEntryFromMessageCell({
-      id: 'operation-1',
-      kind: 'system',
-      text: '执行命令：npm test',
-    }),
-    {
-      id: 'message:operation-1',
-      type: 'message',
-      role: 'system',
-      text: '执行命令：npm test',
-      status: 'completed',
-      source: 'live-event',
-    },
-  );
-});
+import type { LocalAgentTimelineEntry } from '../../localAgentSession';
 
 test('operation timeline entries keep stable ids across lifecycle phases', () => {
   const started = operationEvent({
@@ -49,10 +27,10 @@ test('operation timeline entries keep stable ids across lifecycle phases', () =>
     summary: '页面：Example Domain',
   });
 
-  const startedEntry = operationTimelineEntryFromEvent(started, 1000);
-  const completedEntry = operationTimelineEntryFromEvent(completed, 2500, startedEntry);
+  const startedEntry = localAgentOperationEntryFromEvent(started, 1000);
+  const completedEntry = localAgentOperationEntryFromEvent(completed, 2500, startedEntry);
 
-  assert.equal(timelineEntryIdFromOperationEvent(started), 'req-1:operation:call-browser');
+  assert.equal(localAgentOperationEntryId(started), 'req-1:operation:call-browser');
   assert.equal(startedEntry.id, 'req-1:operation:call-browser');
   assert.equal(completedEntry.id, startedEntry.id);
   assert.equal(completedEntry.startedAt, 1000);
@@ -79,8 +57,8 @@ test('operation timeline terminal events preserve previous display fields when p
     source: null,
   });
 
-  const startedEntry = operationTimelineEntryFromEvent(started, 1000);
-  const completedEntry = operationTimelineEntryFromEvent(completed, 2500, startedEntry);
+  const startedEntry = localAgentOperationEntryFromEvent(started, 1000);
+  const completedEntry = localAgentOperationEntryFromEvent(completed, 2500, startedEntry);
 
   assert.equal(completedEntry.id, startedEntry.id);
   assert.equal(completedEntry.phase, 'completed');
@@ -110,8 +88,8 @@ test('operation timeline terminal events merge completed details with previous d
     },
   });
 
-  const startedEntry = operationTimelineEntryFromEvent(started, 1000);
-  const completedEntry = operationTimelineEntryFromEvent(completed, 2500, startedEntry);
+  const startedEntry = localAgentOperationEntryFromEvent(started, 1000);
+  const completedEntry = localAgentOperationEntryFromEvent(completed, 2500, startedEntry);
 
   assert.deepEqual(completedEntry.details, {
     before: 'old',
@@ -139,8 +117,8 @@ test('operation timeline terminal events keep raw input for payload renderers', 
     },
   });
 
-  const startedEntry = operationTimelineEntryFromEvent(started, 1000);
-  const completedEntry = operationTimelineEntryFromEvent(completed, 2500, startedEntry);
+  const startedEntry = localAgentOperationEntryFromEvent(started, 1000);
+  const completedEntry = localAgentOperationEntryFromEvent(completed, 2500, startedEntry);
 
   assert.deepEqual(completedEntry.raw, {
     input: { patch: '*** Begin Patch\n*** Update File: README.md\n-old\n+new\n*** End Patch' },
@@ -158,7 +136,7 @@ test('shared operation projection derives stable keys from operation event field
   });
 
   assert.equal(localAgentOperationKey(event), 'source-call');
-  const entry = operationTimelineEntryFromEvent(event, 1000);
+  const entry = localAgentOperationEntryFromEvent(event, 1000);
   assert.deepEqual({
     operationKey: entry.operationKey,
     kind: entry.kind,
@@ -186,19 +164,19 @@ test('shared operation projection derives stable keys from operation event field
 });
 
 test('timeline selectors derive active operations from running operation entries', () => {
-  const running = operationTimelineEntryFromEvent(operationEvent({
+  const running = localAgentOperationEntryFromEvent(operationEvent({
     phase: 'started',
     target: '.login-btn',
     summary: '点击 .login-btn',
   }), 1000);
-  const otherRun = operationTimelineEntryFromEvent(operationEvent({
+  const otherRun = localAgentOperationEntryFromEvent(operationEvent({
     requestId: 'req-2',
     id: 'call-other',
     phase: 'updated',
     target: 'README.md',
     summary: 'read',
   }), 1200);
-  const completed = operationTimelineEntryFromEvent(operationEvent({
+  const completed = localAgentOperationEntryFromEvent(operationEvent({
     id: 'call-done',
     phase: 'completed',
     target: 'https://example.com',
@@ -224,7 +202,7 @@ test('timeline selectors derive active operations from running operation entries
 });
 
 test('timeline active operation detail keeps payload fields out of status summaries', () => {
-  const running = operationTimelineEntryFromEvent(operationEvent({
+  const running = localAgentOperationEntryFromEvent(operationEvent({
     phase: 'started',
     target: 'README.md',
     summary: 'update',
@@ -242,8 +220,8 @@ test('timeline active operation detail keeps payload fields out of status summar
   }]);
 });
 
-test('splitTimelineDisplayForViewport keeps only the settled display prefix static', () => {
-  const userEntry: AgentTimelineEntry = {
+test('splitTimelineForViewport keeps only the settled prefix static', () => {
+  const userEntry: LocalAgentTimelineEntry = {
     id: 'req-1:user',
     type: 'message',
     role: 'user',
@@ -252,7 +230,7 @@ test('splitTimelineDisplayForViewport keeps only the settled display prefix stat
     status: 'completed',
     source: 'local-input',
   };
-  const streamingAssistantEntry: AgentTimelineEntry = {
+  const streamingAssistantEntry: LocalAgentTimelineEntry = {
     id: 'req-1:assistant:0',
     type: 'message',
     role: 'assistant',
@@ -261,12 +239,12 @@ test('splitTimelineDisplayForViewport keeps only the settled display prefix stat
     status: 'streaming',
     source: 'live-event',
   };
-  const operationEntry = operationTimelineEntryFromEvent(operationEvent({
+  const operationEntry = localAgentOperationEntryFromEvent(operationEvent({
     phase: 'completed',
     target: 'README.md',
     summary: 'read',
   }), 1200);
-  const assistantEntry: AgentTimelineEntry = {
+  const assistantEntry: LocalAgentTimelineEntry = {
     id: 'req-1:assistant',
     type: 'message',
     role: 'assistant',
@@ -276,36 +254,26 @@ test('splitTimelineDisplayForViewport keeps only the settled display prefix stat
     source: 'live-event',
   };
 
-  const streamingDisplayEntries = [
-    { type: 'timeline' as const, id: userEntry.id, entry: userEntry },
-    { type: 'timeline' as const, id: streamingAssistantEntry.id, entry: streamingAssistantEntry },
-    { type: 'timeline' as const, id: operationEntry.id, entry: operationEntry },
-    { type: 'timeline' as const, id: assistantEntry.id, entry: assistantEntry },
-  ];
+  const streamingEntries = [userEntry, streamingAssistantEntry, operationEntry, assistantEntry];
 
-  assert.deepEqual(splitTimelineDisplayForViewport(streamingDisplayEntries), {
-    staticEntries: [streamingDisplayEntries[0]],
-    dynamicEntries: streamingDisplayEntries.slice(1),
+  assert.deepEqual(splitTimelineForViewport(streamingEntries), {
+    staticEntries: [streamingEntries[0]],
+    dynamicEntries: streamingEntries.slice(1),
   });
 
   const completedAssistant = {
     ...streamingAssistantEntry,
     status: 'completed' as const,
   };
-  const completedDisplayEntries = [
-    { type: 'timeline' as const, id: userEntry.id, entry: userEntry },
-    { type: 'timeline' as const, id: completedAssistant.id, entry: completedAssistant },
-    { type: 'timeline' as const, id: operationEntry.id, entry: operationEntry },
-    { type: 'timeline' as const, id: assistantEntry.id, entry: assistantEntry },
-  ];
-  assert.deepEqual(splitTimelineDisplayForViewport(completedDisplayEntries), {
-    staticEntries: completedDisplayEntries,
+  const completedEntries = [userEntry, completedAssistant, operationEntry, assistantEntry];
+  assert.deepEqual(splitTimelineForViewport(completedEntries), {
+    staticEntries: completedEntries,
     dynamicEntries: [],
   });
 });
 
-test('timeline display entries keep system and subagent messages in canonical order', () => {
-  const timeline: AgentTimelineEntry[] = [
+test('timeline viewport keeps system and subagent messages in canonical order', () => {
+  const timeline: LocalAgentTimelineEntry[] = [
     {
       id: 'message:user-1',
       type: 'message',
@@ -352,9 +320,7 @@ test('timeline display entries keep system and subagent messages in canonical or
       source: 'live-event',
     },
   ];
-  const displayEntries = buildTimelineDisplayEntries(timeline);
-
-  assert.deepEqual(displayEntries.map((entry) => entry.id), [
+  assert.deepEqual(timeline.map((entry) => entry.id), [
     'message:user-1',
     'notice-1',
     'req-1:operation:tool',
@@ -362,20 +328,20 @@ test('timeline display entries keep system and subagent messages in canonical or
     'req-1:assistant:0',
   ]);
 
-  const displaySplit = splitTimelineDisplayForViewport(displayEntries);
-  assert.deepEqual(displaySplit.staticEntries.map((entry) => entry.id), [
+  const split = splitTimelineForViewport(timeline);
+  assert.deepEqual(split.staticEntries.map((entry) => entry.id), [
     'message:user-1',
     'notice-1',
     'req-1:operation:tool',
   ]);
-  assert.deepEqual(displaySplit.dynamicEntries.map((entry) => entry.id), [
+  assert.deepEqual(split.dynamicEntries.map((entry) => entry.id), [
     'req-1:subagent-output',
     'req-1:assistant:0',
   ]);
 });
 
 test('buildTimelineViewportModel derives display entries and viewport split together', () => {
-  const timeline: AgentTimelineEntry[] = [
+  const timeline: LocalAgentTimelineEntry[] = [
     {
       id: 'message:user-1',
       type: 'message',
@@ -458,56 +424,3 @@ function operationEvent(params: {
     },
   };
 }
-
-test('timeline messages include message roles and operation entries', () => {
-  const operationEntry = operationTimelineEntryFromEvent(operationEvent({
-    phase: 'started',
-    target: 'pwd',
-    summary: 'pwd',
-  }), 1);
-  const entries: AgentTimelineEntry[] = [
-    {
-      id: 'user-1',
-      type: 'message',
-      role: 'user',
-      text: 'hello',
-      status: 'completed',
-      source: 'local-input',
-    },
-    {
-      id: 'assistant-1',
-      type: 'message',
-      role: 'assistant',
-      text: 'hi',
-      status: 'streaming',
-      source: 'live-event',
-    },
-    {
-      id: 'system-1',
-      type: 'message',
-      role: 'system',
-      text: 'notice',
-      status: 'completed',
-      source: 'live-event',
-    },
-    {
-      id: 'subagent-1',
-      type: 'message',
-      role: 'subagent',
-      requestId: 'req-1',
-      text: 'working',
-      status: 'streaming',
-      source: 'live-event',
-    },
-    operationEntry,
-  ];
-
-  assert.deepEqual(timelineMessagesFromEntries(entries).map((entry) => entry.id), [
-    'user-1',
-    'assistant-1',
-    'system-1',
-    'subagent-1',
-    operationEntry.id,
-  ]);
-  assert.equal(isAgentTimelineMessage(entries[2]!), true);
-});

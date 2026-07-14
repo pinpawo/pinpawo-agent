@@ -1,9 +1,8 @@
-import type { ReviewResponse, ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
-import type { LocalAgentEvent } from '../../events/localAgentEvent';
+import type { ReviewResponse, ReviewSpec } from '@pinpawo/pet-agent';
+import type { LocalAgentRuntimeEvent } from '../../events/localAgentRuntimeEvent';
 import type {
   LocalAgentActorView,
   LocalAgentReviewAction,
-  LocalAgentRun,
   LocalAgentRuntimeView,
   LocalAgentSession,
   LocalAgentSessionSnapshot,
@@ -60,12 +59,6 @@ export type SessionModel = Omit<
   actor: LocalAgentActorView;
   runtime: LocalAgentRuntimeView;
 };
-
-export type ActiveRunModel = LocalAgentRun;
-
-export type TuiRunModel = LocalAgentRun;
-
-export type TokenUsageModel = TokenUsageSnapshot;
 
 export type MessageCellModel = {
   id: string;
@@ -211,20 +204,9 @@ export type TuiAction =
     }
   | {
       type: 'event.received';
-      event: LocalAgentEvent;
+      event: LocalAgentRuntimeEvent;
       now: number;
       messageCell?: MessageCellMeta;
-    }
-  | {
-      type: 'server.interrupting';
-      requestId: RunId;
-      statusMessage: string;
-    }
-  | {
-      type: 'server.interrupted';
-      requestId: RunId;
-      messageCell: MessageCellMeta;
-      statusMessage: string;
     }
   | {
       type: 'server.studio_response';

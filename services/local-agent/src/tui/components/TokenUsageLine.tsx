@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text } from 'ink';
+import type { TokenUsageSnapshot } from '@pinpawo/pet-agent';
 import { TUI_TEXT } from '../render/text';
-import type { TokenUsageModel } from '../state/tuiState';
 
 const LOCALE_FORMATTER = new Intl.NumberFormat('zh-CN');
 
@@ -9,7 +9,7 @@ function formatTokenUsage(value: number) {
   return LOCALE_FORMATTER.format(Math.max(0, Math.round(value)));
 }
 
-export function TokenUsageLine({ tokenUsage }: { tokenUsage: TokenUsageModel }) {
+export function TokenUsageLine({ tokenUsage }: { tokenUsage: TokenUsageSnapshot }) {
   const ratio = tokenUsage.scope !== 'run' && tokenUsage.contextWindow
     ? `${((tokenUsage.totalTokens / tokenUsage.contextWindow) * 100).toFixed(1)}%`
     : null;

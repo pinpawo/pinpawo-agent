@@ -35,7 +35,7 @@ import {
 } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
-import type { LocalAgentEvent } from './events/localAgentEvent';
+import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
 import {
   buildHumanReviewRejectResume,
   buildHumanReviewResume,
@@ -531,7 +531,7 @@ export class LocalAgentAppChatHandler {
     };
   }
 
-  private recordReviewActionRoute(event: LocalAgentEvent, userId: string) {
+  private recordReviewActionRoute(event: LocalAgentRuntimeEvent, userId: string) {
     if (event.type !== 'human_review.requested' || !event.review?.id) {
       return;
     }
@@ -697,7 +697,7 @@ export class LocalAgentAppChatHandler {
     this.reduceRemoteSession(userId, { type: 'run.finished', requestId });
   }
 
-  private emitRemoteEvent(ws: WebSocket, userId: string, event: LocalAgentEvent) {
+  private emitRemoteEvent(ws: WebSocket, userId: string, event: LocalAgentRuntimeEvent) {
     const safeEvent = sanitizeLocalAgentRemoteEvent(event);
     if (!this.projectRemoteEvent(userId, safeEvent)) {
       return false;
@@ -706,7 +706,7 @@ export class LocalAgentAppChatHandler {
     return sendLocalAgentEvent(ws, safeEvent);
   }
 
-  private projectRemoteEvent(userId: string, event: LocalAgentEvent) {
+  private projectRemoteEvent(userId: string, event: LocalAgentRuntimeEvent) {
     return this.applyRemoteSessionInput(userId, { type: 'runtime.event', event }).changed;
   }
 

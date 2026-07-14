@@ -17,8 +17,8 @@ import type {
 } from './state/tuiState';
 import {
   buildTimelineViewportModel,
-  type AgentTimelineDisplayEntry,
 } from './timeline/agentTimelineSelectors';
+import type { LocalAgentTimelineEntry } from '../localAgentSession';
 import type { ActiveOperation } from './types';
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
@@ -32,9 +32,9 @@ export type TuiScreenModel = {
   activeOperations: ActiveOperation[];
   regions: {
     timeline: {
-      entries: AgentTimelineDisplayEntry[];
-      staticEntries: AgentTimelineDisplayEntry[];
-      dynamicEntries: AgentTimelineDisplayEntry[];
+      entries: LocalAgentTimelineEntry[];
+      staticEntries: LocalAgentTimelineEntry[];
+      dynamicEntries: LocalAgentTimelineEntry[];
       renderKey: string;
       staticBoundaryKey: string;
       scrollStrategy: 'preserveStaticOutputUntilHostReset';
@@ -143,6 +143,6 @@ function formatViewportRenderKey(epoch: number) {
   return String(epoch);
 }
 
-function formatViewportBoundaryKey(entries: AgentTimelineDisplayEntry[]) {
+function formatViewportBoundaryKey(entries: LocalAgentTimelineEntry[]) {
   return entries.map((entry) => entry.id).join('\u001F');
 }

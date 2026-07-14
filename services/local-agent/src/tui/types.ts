@@ -1,19 +1,12 @@
-import type {
-  ApprovalRequestModel,
-  MessageCellModel,
-} from './state/tuiState';
+import type { MessageCellModel } from './state/tuiState';
 
 export type MessageRole = MessageCellModel['kind'];
-
-export type MessageEntry = MessageCellModel;
 
 export type PendingUiState = {
   startedAt: number;
   phase: 'thinking' | 'replying' | 'interrupting';
   charCount: number;
 };
-
-export type PendingApproval = ApprovalRequestModel;
 
 export type ActiveOperation = {
   name: string;

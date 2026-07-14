@@ -10,7 +10,7 @@ import type { AgentChannelSetup } from './agentChannel';
 import type { AgentContext } from './contextLoader';
 import { InflightRequestController } from './inflightRequestController';
 import { LocalAgentAppChatHandler } from './localAgentAppChatHandler';
-import type { LocalAgentRuntimeEvent } from './events/localAgentEvent';
+import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
 import { createInitialTuiState, createSession } from './tui/state/tuiState';
 import { tuiStateReducer } from './tui/state/tuiStateReducer';
 

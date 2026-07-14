@@ -453,8 +453,7 @@ function isOperationPhase(value: unknown): value is LocalAgentOperationEntry['ph
 }
 
 function isActiveRunPhase(value: unknown): value is LocalAgentRunPhase {
-  return value === 'starting'
-    || value === 'thinking'
+  return value === 'thinking'
     || value === 'using_tool'
     || value === 'streaming'
     || value === 'waiting_human'

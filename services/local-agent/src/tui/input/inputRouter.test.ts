@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  resolveLegacyTuiInputAction,
   resolveTuiInputAction,
   resolveTuiInputCommand,
   resolveTuiInputOwner,
-  toLegacyTuiInputCommand,
 } from './inputRouter';
 
 test('resolveTuiInputOwner applies TUI focus priority', () => {
@@ -381,31 +379,5 @@ test('resolveTuiInputCommand routes composer history only at textarea boundaries
       },
     ),
     { target: 'textarea', command: { type: 'moveUp' } },
-  );
-});
-
-test('legacy input command conversion keeps keymap compatibility shape', () => {
-  assert.deepEqual(
-    toLegacyTuiInputCommand({ target: 'textarea', command: { type: 'deleteForward' } }),
-    { type: 'composer.edit' },
-  );
-  assert.deepEqual(
-    toLegacyTuiInputCommand({ target: 'composerHistory', action: 'previous' }),
-    { type: 'composer.history.previous' },
-  );
-  assert.deepEqual(
-    toLegacyTuiInputCommand({ target: 'commandPalette', action: 'accept' }),
-    { type: 'commandPalette.accept' },
-  );
-  assert.deepEqual(
-    toLegacyTuiInputCommand({ target: 'fileMention', action: 'accept' }),
-    { type: 'fileMention.accept' },
-  );
-  assert.deepEqual(
-    resolveLegacyTuiInputAction(
-      { type: 'submit' },
-      { ready: true, busy: false, hasPendingApproval: true, hasResumePicker: false },
-    ),
-    { type: 'approval.submit' },
   );
 });

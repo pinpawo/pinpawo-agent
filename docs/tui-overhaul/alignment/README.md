@@ -1,5 +1,11 @@
 # TUI PR Alignment Docs
 
+> **Historical archive — superseded 2026-07-14.** These records document the
+> completed overhaul series and no longer define current implementation rules.
+> In particular, the run registry and reconciliation terminology in this
+> directory has been replaced by the model in
+> [`LOCAL_AGENT_SESSION_PROJECTION.md`](../../LOCAL_AGENT_SESSION_PROJECTION.md).
+
 ## Purpose
 
 Every TUI overhaul implementation PR should have one alignment document under this directory.

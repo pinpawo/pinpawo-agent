@@ -2,7 +2,7 @@ import type { TokenUsageSnapshot } from '@pinpawo/pet-agent';
 import type {
   LocalAgentOperationPhase,
   LocalAgentOperationRaw,
-} from './events/localAgentEvent';
+} from './events/localAgentRuntimeEvent';
 import type { ReviewAction } from './reviewAction';
 
 export const LOCAL_AGENT_SESSION_SNAPSHOT_VERSION = 1 as const;
@@ -55,7 +55,6 @@ export type LocalAgentReviewAction = ReviewAction & {
 };
 
 export type LocalAgentRunPhase =
-  | 'starting'
   | 'thinking'
   | 'using_tool'
   | 'streaming'

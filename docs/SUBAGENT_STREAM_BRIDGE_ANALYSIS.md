@@ -150,7 +150,7 @@ adapter `tool` event
                                        serialized-interrupt swallowing)
   → emitToolEvent → ToolOperationTracker (registry join, summary inheritance,
                                           finish-active-on-abort)
-  → LocalAgentOperationInternalEvent
+  → LocalAgentOperationEvent
 ```
 
 `SubagentProtocolToolEventReader` moved out of `createSubagent.ts` into

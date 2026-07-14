@@ -1,9 +1,9 @@
 import type { SubagentToolOperationMetadata } from '@pinpawo/pet-agent';
 import type { StreamToolsPayload } from './agentStreamEvents';
 import type {
-  LocalAgentOperationInternalEvent,
+  LocalAgentOperationEvent,
   LocalAgentOperationPhase,
-} from './events/localAgentEvent';
+} from './events/localAgentRuntimeEvent';
 import type { OperationRegistry } from './events/operationRegistry';
 import { recordOperationActivity } from './operationActivityState';
 import { ToolOperationTracker } from './toolOperationTracker';
@@ -21,7 +21,7 @@ export type TerminalOperationPhase = Extract<
   'completed' | 'failed' | 'interrupted'
 >;
 
-export type EmitOperationEvent = (event: LocalAgentOperationInternalEvent) => void;
+export type EmitOperationEvent = (event: LocalAgentOperationEvent) => void;
 
 export function createInflightOperationRun(
   requestId: string,
@@ -58,12 +58,12 @@ export function clearInflightOperationTimer(run: InflightOperationRun) {
 export function acceptInflightToolEvent(
   run: InflightOperationRun,
   payload: StreamToolsPayload,
-): LocalAgentOperationInternalEvent {
+): LocalAgentOperationEvent {
   return run.operationTracker.accept(payload);
 }
 
 export function emitInflightOperationEvent(
-  event: LocalAgentOperationInternalEvent,
+  event: LocalAgentOperationEvent,
   emit: EmitOperationEvent,
 ) {
   recordOperationActivity(event);

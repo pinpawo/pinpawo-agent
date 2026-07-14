@@ -48,34 +48,6 @@ export type TuiInputCommand =
   | { target: 'textarea'; command: TextAreaCommand }
   | { target: 'none' };
 
-export type TuiLegacyInputCommand =
-  | { type: 'global.ctrl_c' }
-  | { type: 'global.interrupt' }
-  | { type: 'approval.previous' }
-  | { type: 'approval.next' }
-  | { type: 'approval.submit' }
-  | { type: 'resume.previous' }
-  | { type: 'resume.next' }
-  | { type: 'resume.submit' }
-  | { type: 'resume.dismiss' }
-  | { type: 'globalReviewPolicy.previous' }
-  | { type: 'globalReviewPolicy.next' }
-  | { type: 'globalReviewPolicy.submit' }
-  | { type: 'globalReviewPolicy.dismiss' }
-  | { type: 'commandPalette.previous' }
-  | { type: 'commandPalette.next' }
-  | { type: 'commandPalette.accept' }
-  | { type: 'commandPalette.submit' }
-  | { type: 'fileMention.previous' }
-  | { type: 'fileMention.next' }
-  | { type: 'fileMention.accept' }
-  | { type: 'composer.submit' }
-  | { type: 'composer.clear' }
-  | { type: 'composer.history.previous' }
-  | { type: 'composer.history.next' }
-  | { type: 'composer.edit' }
-  | { type: 'none' };
-
 export function resolveTuiInputAction(
   event: CanonicalInputEvent,
   context: TuiInputRouteContext,
@@ -88,13 +60,6 @@ export function resolveTuiInputAction(
   return resolveTuiInputCommand(event, owner, {
     composerHistory: context.composerHistory,
   });
-}
-
-export function resolveLegacyTuiInputAction(
-  event: CanonicalInputEvent,
-  context: TuiInputRouteContext,
-): TuiLegacyInputCommand {
-  return toLegacyTuiInputCommand(resolveTuiInputAction(event, context));
 }
 
 export function resolveTuiInputOwner(context: TuiInputRouteContext): TuiInputOwner {
@@ -177,31 +142,6 @@ export function resolveTuiInputCommand(
       if (isControlSequence) return { target: 'none' };
       if (event.type === 'noop') return { target: 'none' };
       return routeTextAreaCommand(event);
-  }
-}
-
-export function toLegacyTuiInputCommand(command: TuiInputCommand): TuiLegacyInputCommand {
-  switch (command.target) {
-    case 'global':
-      return { type: `global.${command.action}` };
-    case 'approval':
-      return { type: `approval.${command.action}` };
-    case 'resume':
-      return { type: `resume.${command.action}` };
-    case 'globalReviewPolicy':
-      return { type: `globalReviewPolicy.${command.action}` };
-    case 'commandPalette':
-      return { type: `commandPalette.${command.action}` };
-    case 'fileMention':
-      return { type: `fileMention.${command.action}` };
-    case 'composer':
-      return { type: `composer.${command.action}` };
-    case 'composerHistory':
-      return { type: `composer.history.${command.action}` };
-    case 'textarea':
-      return { type: 'composer.edit' };
-    case 'none':
-      return { type: 'none' };
   }
 }
 

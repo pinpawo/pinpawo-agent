@@ -13,10 +13,10 @@ import {
   OPERATION_STATUS_DOT,
 } from './agentTimelineRendering';
 import type {
-  AgentMessageEntry,
-  AgentOperationEntry,
-  AgentTimelineEntry,
-} from '../timeline/agentTimeline';
+  LocalAgentMessageEntry,
+  LocalAgentOperationEntry,
+  LocalAgentTimelineEntry,
+} from '../../localAgentSession';
 
 test('buildAgentOperationDisplayLines renders the header as toolName(args) and shows raw output under ⎿', () => {
   const entry = operationEntry({
@@ -26,7 +26,7 @@ test('buildAgentOperationDisplayLines renders the header as toolName(args) and s
     summary: '页面：Example Domain',
     details: { status: 200 },
     operationSource: { provider: 'toolkit', name: 'browser', toolName: '打开网页' },
-  }) as AgentOperationEntry & { raw: { output: string } };
+  }) as LocalAgentOperationEntry & { raw: { output: string } };
   entry.raw = { output: 'Example Domain loaded' };
 
   const lines = buildAgentOperationDisplayLines(entry, 2500, 120);
@@ -308,7 +308,7 @@ test('buildAgentOperationDisplayLines tags the header line with the phase for th
 });
 
 test('AgentOperationItem renders a phase-colored status dot before the header', () => {
-  const dotFor = (phase: AgentOperationEntry['phase']) => {
+  const dotFor = (phase: LocalAgentOperationEntry['phase']) => {
     const element = AgentOperationItem({
       entry: operationEntry({ phase }),
       now: 3000,
@@ -328,7 +328,7 @@ test('AgentOperationItem renders a phase-colored status dot before the header', 
 });
 
 test('AgentTimeline preserves assistant and operation entry order', () => {
-  const entries: AgentTimelineEntry[] = [
+  const entries: LocalAgentTimelineEntry[] = [
     messageEntry('assistant-before-tool', '正在打开页面'),
     operationEntry({
       id: 'req-1:operation:open',
@@ -346,7 +346,7 @@ test('AgentTimeline preserves assistant and operation entry order', () => {
   }) as unknown as { props: { children: unknown } };
 
   const children = Children.toArray(element.props.children as React.ReactNode) as Array<{
-    props: { entry: AgentTimelineEntry };
+    props: { entry: LocalAgentTimelineEntry };
   }>;
 
   assert.deepEqual(children.map((child) => child.props.entry.id), [
@@ -402,7 +402,7 @@ test('MessageBlock renders assistant content through markdown', () => {
 });
 
 test('checkpoint assistant messages render through markdown', () => {
-  const entry: AgentMessageEntry = {
+  const entry: LocalAgentMessageEntry = {
     id: 'message:assistant-checkpoint',
     type: 'message',
     role: 'assistant',
@@ -467,7 +467,7 @@ function findElementsByType(
   ];
 }
 
-function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEntry {
+function operationEntry(params: Partial<LocalAgentOperationEntry>): LocalAgentOperationEntry {
   return {
     id: 'req-1:operation:call-1',
     type: 'operation',
@@ -483,7 +483,7 @@ function operationEntry(params: Partial<AgentOperationEntry>): AgentOperationEnt
   };
 }
 
-function subagentMessage(id: string, text: string): AgentMessageEntry {
+function subagentMessage(id: string, text: string): LocalAgentMessageEntry {
   return {
     id,
     type: 'message',
@@ -495,7 +495,7 @@ function subagentMessage(id: string, text: string): AgentMessageEntry {
   };
 }
 
-function messageEntry(id: string, text: string): AgentMessageEntry {
+function messageEntry(id: string, text: string): LocalAgentMessageEntry {
   return {
     id,
     type: 'message',

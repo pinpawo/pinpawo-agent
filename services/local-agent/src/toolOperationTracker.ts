@@ -4,9 +4,9 @@ import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
 import type {
-  LocalAgentOperationInternalEvent,
+  LocalAgentOperationEvent,
   LocalAgentOperationPhase,
-} from './events/localAgentEvent';
+} from './events/localAgentRuntimeEvent';
 import {
   emptyOperationRegistry,
   overlayOperationRegistry,
@@ -16,7 +16,7 @@ import {
 type ActiveTrackedOperation = {
   id: string;
   name: string;
-  event: LocalAgentOperationInternalEvent;
+  event: LocalAgentOperationEvent;
 };
 
 type TerminalPhase = Extract<LocalAgentOperationPhase, 'completed' | 'failed' | 'interrupted'>;
@@ -46,7 +46,7 @@ export class ToolOperationTracker {
     this.operationRegistry = overlayOperationRegistry(this.operationRegistry, entries);
   }
 
-  accept(payload: StreamToolsPayload): LocalAgentOperationInternalEvent {
+  accept(payload: StreamToolsPayload): LocalAgentOperationEvent {
     const id = this.resolveOperationId(payload);
     const built = buildToolOperationEvent(this.requestId, {
       ...payload,
@@ -57,7 +57,7 @@ export class ToolOperationTracker {
     return event;
   }
 
-  finishActive(phase: TerminalPhase, error?: unknown): LocalAgentOperationInternalEvent[] {
+  finishActive(phase: TerminalPhase, error?: unknown): LocalAgentOperationEvent[] {
     const active = [...this.activeById.values()];
     this.activeById.clear();
     this.activeIdsByName.clear();
@@ -81,9 +81,9 @@ export class ToolOperationTracker {
    * event so the completed line keeps showing which file/url was touched.
    */
   private inheritStartedSummary(
-    event: LocalAgentOperationInternalEvent,
+    event: LocalAgentOperationEvent,
     id: string,
-  ): LocalAgentOperationInternalEvent {
+  ): LocalAgentOperationEvent {
     if (event.phase === 'started') return event;
     const previous = this.activeById.get(id)?.event.operation;
     if (!previous) return event;
@@ -112,7 +112,7 @@ export class ToolOperationTracker {
     return `tool-${this.sequence}`;
   }
 
-  private track(event: LocalAgentOperationInternalEvent, name: string, id: string) {
+  private track(event: LocalAgentOperationEvent, name: string, id: string) {
     if (event.phase === 'started') {
       this.activeById.set(id, { id, name, event });
       const ids = this.activeIdsByName.get(name) ?? [];

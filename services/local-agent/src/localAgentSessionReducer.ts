@@ -1,5 +1,5 @@
 import type { TokenUsageSnapshot } from '@pinpawo/pet-agent';
-import type { LocalAgentRuntimeEvent } from './events/localAgentEvent';
+import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
 import type {
   LocalAgentMessageEntry,
   LocalAgentOperationEntry,

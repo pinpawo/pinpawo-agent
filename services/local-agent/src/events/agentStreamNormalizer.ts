@@ -4,9 +4,9 @@ import type {
 } from '@pinpawo/pet-agent';
 import { readJsonRecord } from '@pinpawo/pet-agent';
 import type {
-  LocalAgentOperationInternalEvent,
+  LocalAgentOperationEvent,
   LocalAgentOperationPhase,
-} from './localAgentEvent';
+} from './localAgentRuntimeEvent';
 import {
   emptyOperationRegistry,
   type OperationRegistry,
@@ -145,7 +145,7 @@ export function normalizeToolStreamEvent(
   requestId: string,
   payload: StreamToolsPayload,
   registry: OperationRegistry = emptyOperationRegistry,
-): LocalAgentOperationInternalEvent {
+): LocalAgentOperationEvent {
   const metadata = payload.operation
     ? {
         ...payload.operation,

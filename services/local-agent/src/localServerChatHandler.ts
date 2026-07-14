@@ -26,7 +26,7 @@ import {
 } from './localServerTuiSessions';
 import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
-import type { LocalAgentEvent } from './events/localAgentEvent';
+import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
 import {
   buildHumanReviewRejectResume,
   buildHumanReviewResume,
@@ -52,14 +52,14 @@ type LocalServerRunSource =
 type ReviewActionRoute = HumanReviewActionRoute & {
   rejectOptionId?: string;
   sessionId?: string;
-  actor?: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['actor'];
+  actor?: Extract<LocalAgentRuntimeEvent, { type: 'human_review.requested' }>['actor'];
 };
 
 export type ReviewActionSnapshot = {
   requestId: string;
   sessionId?: string;
   reviewAction: ReviewAction;
-  actor?: Extract<LocalAgentEvent, { type: 'human_review.requested' }>['actor'];
+  actor?: Extract<LocalAgentRuntimeEvent, { type: 'human_review.requested' }>['actor'];
 };
 
 const MAX_CONSUMED_PENDING_REVIEW_REQUEST_IDS = 1000;
@@ -117,7 +117,7 @@ export class LocalServerChatHandler {
   }
 
   private recordReviewActionRoute(
-    event: LocalAgentEvent,
+    event: LocalAgentRuntimeEvent,
     deps: LocalServerDeps,
   ) {
     if (event.type !== 'human_review.requested' || !event.review?.id) {

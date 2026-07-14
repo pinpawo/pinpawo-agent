@@ -15,7 +15,7 @@ import {
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { LocalAgentGraphService } from './agentGraphService';
-import type { LocalAgentEvent } from './events/localAgentEvent';
+import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
 import {
   readFinalMessageText,
   type StreamToolsPayload,
@@ -46,7 +46,7 @@ export type ChatSessionAdapterOptions = {
   graphService: LocalAgentGraphService;
   isCurrent: () => boolean;
   finishInterrupted: () => void;
-  emitEvent: (event: LocalAgentEvent) => void;
+  emitEvent: (event: LocalAgentRuntimeEvent) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
   /**
    * Receives a delegation's `subagent_operations` announcement so the
@@ -68,7 +68,7 @@ function emitHumanReviewRequested(params: {
   interruptId?: string;
   reviews: ReviewSpec[];
   requestId: string;
-  emitEvent: (event: LocalAgentEvent) => void;
+  emitEvent: (event: LocalAgentRuntimeEvent) => void;
 }) {
   const review = params.reviews[0];
   if (!review) {

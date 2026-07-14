@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {
   LocalAgentOperationEvent,
-  LocalAgentOperationInternalEvent,
-} from './events/localAgentEvent';
+} from './events/localAgentRuntimeEvent';
 import {
   configureInflightOperationRegistry,
   createInflightOperationRun,
@@ -38,7 +37,7 @@ test('emitLocalServerToolOperationEvent emits one operation for a normal tool ev
 
 test('emitLocalServerToolOperationEvent maps human review tool errors to interrupted operations', () => {
   const run = createInflightOperationRun('req-1');
-  const emitted: LocalAgentOperationInternalEvent[] = [];
+  const emitted: LocalAgentOperationEvent[] = [];
 
   emitLocalServerToolOperationEvent({
     run,

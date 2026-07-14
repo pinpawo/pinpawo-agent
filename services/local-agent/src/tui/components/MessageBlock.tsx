@@ -2,10 +2,10 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import Markdown from '@inkkit/ink-markdown';
 import { normalizeAssistantMessageMarkdown } from '../render/messageText';
-import type { MessageEntry } from '../types';
+import type { MessageCellModel } from '../state/tuiState';
 
 export function MessageBlock(props: {
-  entry: Pick<MessageEntry, 'kind' | 'timestamp' | 'text'>;
+  entry: Pick<MessageCellModel, 'kind' | 'timestamp' | 'text'>;
   petName: string;
   width: number;
 }) {

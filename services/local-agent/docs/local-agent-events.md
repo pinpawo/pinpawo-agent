@@ -143,10 +143,9 @@ type LocalAgentOperationEvent = {
 };
 ```
 
-The legacy type alias `LocalAgentOperationInternalEvent` is preserved for
-existing imports but is identical to `LocalAgentOperationEvent`: the
-"internal vs external" split is now enforced at the **transport** layer
-(`includeRaw` flag), not at the **type** layer.
+`LocalAgentOperationEvent` is the canonical operation event type. The trusted
+local vs remote split is enforced at the **transport** layer (`includeRaw`
+flag), not through separate internal and external event types.
 
 ## Adding a new transport
 

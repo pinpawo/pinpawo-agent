@@ -1,5 +1,10 @@
 # Local Agent TUI Architecture
 
+> **Historical design record — superseded 2026-07-15.** The state types and
+> boundaries in this draft describe an earlier TUI architecture. Use
+> [`LOCAL_AGENT_SESSION_PROJECTION.md`](./LOCAL_AGENT_SESSION_PROJECTION.md)
+> for the current canonical session, snapshot, timeline, and active-run contract.
+
 > 状态：Draft v2
 > 日期：2026-05-29
 

@@ -25,6 +25,7 @@ type StartInflightRequestOptions = {
   interruptPrevious?: boolean;
   notifyPrevious?: boolean;
   previousPhase?: TerminalOperationPhase;
+  observeOperation?: (event: LocalAgentOperationInternalEvent) => void;
 };
 
 type InterruptInflightRequestOptions = {
@@ -38,6 +39,10 @@ export class InflightRequestController<TKey> {
   private readonly sendControl: (key: TKey, message: InflightInterruptMessage) => void;
   private readonly log: (message: string) => void;
   private readonly logPrefix: string;
+  private readonly operationObservers = new WeakMap<
+    InflightOperationRun,
+    (event: LocalAgentOperationInternalEvent) => void
+  >();
 
   constructor(options: InflightRequestControllerOptions<TKey>) {
     this.forceInterruptMs = options.forceInterruptMs;
@@ -68,6 +73,9 @@ export class InflightRequestController<TKey> {
     }
 
     const run = createInflightOperationRun(requestId);
+    if (options.observeOperation) {
+      this.operationObservers.set(run, options.observeOperation);
+    }
     this.requests.set(key, run);
     return run;
   }
@@ -89,6 +97,7 @@ export class InflightRequestController<TKey> {
       return;
     }
     this.clearTimer(run);
+    this.operationObservers.delete(run);
     if (this.requests.get(key) === run) {
       this.requests.delete(key);
     }
@@ -100,6 +109,7 @@ export class InflightRequestController<TKey> {
     }
     this.clearTimer(run);
     run.controller.abort();
+    this.operationObservers.delete(run);
     if (this.requests.get(key) === run) {
       this.requests.delete(key);
     }
@@ -113,6 +123,7 @@ export class InflightRequestController<TKey> {
   ) {
     finishInflightOperations(run, phase, (event) => {
       this.emitOperation(key, event);
+      this.operationObservers.get(run)?.(event);
     }, error);
   }
 

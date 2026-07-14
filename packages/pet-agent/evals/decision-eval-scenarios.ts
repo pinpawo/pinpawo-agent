@@ -152,7 +152,6 @@ function plannerScenarios(): DecisionEvalScenario[] {
         userIntentContext: buildPreparedRequestContext({
           latestUserRequest: testCase.input.userGoal,
           recentMessages: [new HumanMessage(testCase.input.userGoal)],
-          recentAnnounces: [],
         }),
         remainingPlan: testCase.input.remainingPlan ?? [],
         latestHandoff: testCase.input.latestHandoff ?? null,
@@ -282,7 +281,6 @@ function outcomeScenarios(): DecisionEvalScenario[] {
         userIntentContext: buildPreparedRequestContext({
           latestUserRequest: testCase.input.userGoal,
           recentMessages: [new HumanMessage(testCase.input.userGoal)],
-          recentAnnounces: [],
         }),
         currentTaskContext: buildDelegationOutcomeCurrentTaskContext({
           id: delegationId,

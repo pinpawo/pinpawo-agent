@@ -23,16 +23,16 @@ test('snapshot adapter converts server messages into checkpoint timeline message
     },
   });
 
-  assert.equal(snapshot.sessionId, 'chat:pet');
-  assert.deepEqual(snapshot.timeline.map((entry) => [entry.id, entry.type, entry.source]), [
+  assert.equal(snapshot.session.sessionId, 'chat:pet');
+  assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.id, entry.type, entry.source]), [
     ['message:user-1', 'message', 'checkpoint'],
     ['message:assistant-1', 'message', 'checkpoint'],
   ]);
-  assert.deepEqual(snapshot.timeline.map((entry) => [entry.type === 'message' ? entry.role : '', entry.type === 'message' ? entry.text : '']), [
+  assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.type === 'message' ? entry.role : '', entry.type === 'message' ? entry.text : '']), [
     ['user', 'hello'],
     ['assistant', 'hi'],
   ]);
-  assert.deepEqual(snapshot.runtime, {
+  assert.deepEqual(snapshot.session.runtime, {
     model: 'gpt-test',
     cwd: '/tmp/work',
     stateRoot: '/tmp/work/.pinpawo',
@@ -51,10 +51,19 @@ test('snapshot adapter projects snapshot timeline into current UI timeline entri
       type: 'operation',
       requestId: 'req-1',
       operationKey: 'tool',
+      kind: 'tool',
       phase: 'completed',
       source: 'checkpoint',
       title: 'Run tool',
+      target: 'https://example.com',
       summary: 'done',
+      details: { status: 200 },
+      operationSource: {
+        provider: 'toolkit',
+        name: 'browser',
+        toolName: 'browser_open',
+        callId: 'call-1',
+      },
       startedAt: 10,
       updatedAt: 20,
       completedAt: 20,
@@ -66,4 +75,26 @@ test('snapshot adapter projects snapshot timeline into current UI timeline entri
     ['req-1:operation:tool', 'operation'],
   ]);
   assert.equal(entries[1]?.type === 'operation' ? entries[1].title : undefined, 'Run tool');
+  assert.deepEqual(entries[1], {
+    id: 'req-1:operation:tool',
+    type: 'operation',
+    requestId: 'req-1',
+    operationKey: 'tool',
+    kind: 'tool',
+    phase: 'completed',
+    source: 'checkpoint',
+    title: 'Run tool',
+    target: 'https://example.com',
+    summary: 'done',
+    details: { status: 200 },
+    operationSource: {
+      provider: 'toolkit',
+      name: 'browser',
+      toolName: 'browser_open',
+      callId: 'call-1',
+    },
+    startedAt: 10,
+    updatedAt: 20,
+    completedAt: 20,
+  });
 });

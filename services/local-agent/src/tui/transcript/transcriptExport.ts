@@ -21,7 +21,7 @@ export async function exportSessionTranscript(params: {
   const filePath = resolveTranscriptExportPath({
     requestedPath: params.requestedPath,
     cwd: params.cwd ?? process.cwd(),
-    sessionId: params.session.id,
+    sessionId: params.session.sessionId,
     now,
   });
   const content = formatTranscriptMarkdown(params.session, now);
@@ -58,7 +58,7 @@ export function formatTranscriptMarkdown(session: SessionModel, exportedAt: Date
   const lines = [
     `# PinPawo TUI Transcript`,
     '',
-    `- Session: ${session.id}`,
+    `- Session: ${session.sessionId}`,
     `- Kind: ${session.kind}`,
     `- Actor: ${session.actor.label}`,
     `- Exported: ${exportedAt.toISOString()}`,

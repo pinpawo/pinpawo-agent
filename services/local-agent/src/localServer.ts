@@ -22,7 +22,7 @@ import { attachLocalServerWebSocketTransport } from './localServerWsTransport';
 import { ensureLocalServerAuthToken } from './localServerAuth';
 import { LocalServerChatHandler } from './localServerChatHandler';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
-import { buildLocalServerTuiSnapshot } from './localServerTuiSnapshot';
+import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
 import { createLocalServerRuntimeDepsStore, type LocalServerDeps } from './localServerTypes';
 
 export type { LocalServerDeps };
@@ -75,7 +75,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
           const messages = await tuiSessions.loadHistory(requestDeps);
           const pendingReview = await chatHandler.readReviewActionSnapshot(requestDeps);
           const sessionId = tuiSessions.getActiveSessionId(requestDeps.actorId);
-          return buildLocalServerTuiSnapshot({
+          return buildLocalAgentSessionSnapshot({
             sessionId,
             kind: 'chat',
             messages,
@@ -93,7 +93,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
               kind: 'chat',
             },
             messages: result.messages,
-            snapshot: buildLocalServerTuiSnapshot({
+            snapshot: buildLocalAgentSessionSnapshot({
               sessionId: result.session.id,
               kind: 'chat',
               messages: result.messages,

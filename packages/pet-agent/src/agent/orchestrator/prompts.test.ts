@@ -43,7 +43,6 @@ test('start-loop router request context includes compaction summaries outside re
   const requestContext = buildPreparedRequestContext({
     latestUserRequest: '继续推进',
     recentMessages: recentMessages(8),
-    recentAnnounces: [],
     contextSummaries: ['更早任务摘要：已完成删除旧 pet-bot，PR 已打开，待修 router context。'],
   });
 
@@ -68,7 +67,6 @@ test('decision recent messages label delegation briefings as scheduling context'
   const requestContext = buildPreparedRequestContext({
     latestUserRequest: '完成 A 和 B',
     recentMessages: [briefing],
-    recentAnnounces: [],
   });
 
   assert.match(requestContext, /<role>委派简报<\/role>/);
@@ -100,7 +98,6 @@ test('request contexts include bounded capability artifact refs', () => {
   const requestContext = buildPreparedRequestContext({
     latestUserRequest: '继续刚才的探索',
     recentMessages: [],
-    recentAnnounces: [],
     capabilityArtifacts: [{
       id: 'artifact-1',
       threadId: 'thread-1',

@@ -8,7 +8,6 @@ import { formatNow } from './render/terminalText';
 import { TuiLocalServerClient } from './tuiLocalServerClient';
 import { TuiLocalWebSocketClient } from './tuiLocalWebSocketClient';
 import { buildTuiActionsFromServerMessage } from './tuiServerMessageActions';
-import { TUI_CORE_TARGET_ACTIONS } from './contracts/tuiCoreContract';
 import {
   selectFocusedActiveRun,
   selectFocusedBusy,
@@ -473,7 +472,7 @@ export class TuiRuntimeController {
         return false;
       }
       this.options.dispatch({
-        type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+        type: 'session.snapshot.loaded',
         source,
         snapshot,
         now: Date.now(),

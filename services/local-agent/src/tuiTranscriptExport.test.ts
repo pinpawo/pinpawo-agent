@@ -17,9 +17,9 @@ test('formatTranscriptMarkdown writes session metadata and messages', () => {
     id: 'chat:pet-a',
     actor: { label: 'Momo' },
     timeline: [
-      { id: 'u1', type: 'message', role: 'user', text: 'hello', status: 'completed', createdAt: '09:00:00' },
-      { id: 'a1', type: 'message', role: 'assistant', text: 'hi', status: 'completed', createdAt: '09:00:01' },
-      { id: 's1', type: 'message', role: 'system', text: 'tool ok', status: 'completed' },
+      { id: 'u1', type: 'message', role: 'user', text: 'hello', status: 'completed', source: 'local-input', createdAt: '09:00:00' },
+      { id: 'a1', type: 'message', role: 'assistant', text: 'hi', status: 'completed', source: 'live-event', createdAt: '09:00:01' },
+      { id: 's1', type: 'message', role: 'system', text: 'tool ok', status: 'completed', source: 'live-event' },
     ],
   });
 
@@ -97,7 +97,7 @@ test('exportSessionTranscript creates parent directories and writes markdown', a
     id: 'chat:pet-a',
     actor: { label: 'Momo' },
     timeline: [
-      { id: 'u1', type: 'message', role: 'user', text: 'hello', status: 'completed' },
+      { id: 'u1', type: 'message', role: 'user', text: 'hello', status: 'completed', source: 'local-input' },
     ],
   });
 

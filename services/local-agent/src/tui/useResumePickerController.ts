@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react';
-import { TUI_CORE_TARGET_ACTIONS } from './contracts/tuiCoreContract';
 import { TUI_TEXT } from './render/text';
 import type { TuiAction } from './state/tuiState';
 import type { TuiRuntimeController } from './TuiRuntimeController';
@@ -90,7 +89,7 @@ export function useResumePickerController(options: ResumePickerControllerOptions
       options.resetStudioMode();
       options.resetTimelineView();
       options.dispatch({
-        type: TUI_CORE_TARGET_ACTIONS.sessionSnapshotLoaded,
+        type: 'session.snapshot.loaded',
         source: 'resume',
         snapshot,
         now: Date.now(),

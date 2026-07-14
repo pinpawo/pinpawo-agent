@@ -84,7 +84,7 @@ function buildOperationStatus(entry: AgentOperationEntry, now: number) {
     case 'started':
       return TUI_TEXT.operationStarted;
     case 'updated': {
-      const elapsed = formatElapsed(entry.startedAt, now);
+      const elapsed = formatElapsed(entry.startedAt ?? entry.updatedAt ?? now, now);
       return `${TUI_TEXT.operationRunning} ${elapsed ?? TUI_TEXT.elapsedUnavailable}`;
     }
     case 'completed':
@@ -104,8 +104,8 @@ function buildOperationBody(entry: AgentOperationEntry) {
 
 /** The tool name shown as the header label, e.g. `apply_patch` or `打开网页`. */
 function operationToolLabel(entry: AgentOperationEntry) {
-  return entry.source?.toolName?.trim()
-    || entry.source?.name?.trim()
+  return entry.operationSource?.toolName?.trim()
+    || entry.operationSource?.name?.trim()
     || entry.title?.trim()
     || entry.kind;
 }
@@ -201,7 +201,7 @@ function buildPatchDiffLines(
 }
 
 function isApplyPatchOperation(entry: AgentOperationEntry) {
-  return entry.source?.toolName === 'apply_patch'
+  return entry.operationSource?.toolName === 'apply_patch'
     || entry.kind.endsWith('.apply_patch')
     || entry.kind === 'apply_patch';
 }

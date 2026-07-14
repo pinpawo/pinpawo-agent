@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { LocalAgentOperationEvent } from '../../events/localAgentEvent';
+import { localAgentOperationKey } from '../../localAgentTimeline';
 import {
   isAgentTimelineMessage,
   operationTimelineEntryFromEvent,
@@ -16,7 +17,6 @@ import {
   selectRunningOperationEntries,
   splitTimelineDisplayForViewport,
 } from './agentTimelineSelectors';
-import { buildOperationPresentation, getOperationPresentationKey } from './operationPresentation';
 import type { AgentTimelineEntry } from './agentTimeline';
 
 test('timelineEntryFromMessageCell includes system message cells in the timeline', () => {
@@ -32,6 +32,7 @@ test('timelineEntryFromMessageCell includes system message cells in the timeline
       role: 'system',
       text: '执行命令：npm test',
       status: 'completed',
+      source: 'live-event',
     },
   );
 });
@@ -147,7 +148,7 @@ test('operation timeline terminal events keep raw input for payload renderers', 
   });
 });
 
-test('operation presentation derives stable keys from operation event fields', () => {
+test('shared operation projection derives stable keys from operation event fields', () => {
   const event = operationEvent({
     id: null,
     callId: 'source-call',
@@ -156,8 +157,18 @@ test('operation presentation derives stable keys from operation event fields', (
     summary: undefined,
   });
 
-  assert.equal(getOperationPresentationKey(event), 'source-call');
-  assert.deepEqual(buildOperationPresentation(event), {
+  assert.equal(localAgentOperationKey(event), 'source-call');
+  const entry = operationTimelineEntryFromEvent(event, 1000);
+  assert.deepEqual({
+    operationKey: entry.operationKey,
+    kind: entry.kind,
+    title: entry.title,
+    phase: entry.phase,
+    target: entry.target,
+    summary: entry.summary,
+    details: entry.details,
+    source: entry.operationSource,
+  }, {
     operationKey: 'source-call',
     kind: 'browser.browser_open',
     title: '打开网页',
@@ -239,6 +250,7 @@ test('splitTimelineDisplayForViewport keeps only the settled display prefix stat
     requestId: 'req-1',
     text: 'hello',
     status: 'completed',
+    source: 'local-input',
   };
   const streamingAssistantEntry: AgentTimelineEntry = {
     id: 'req-1:assistant:0',
@@ -247,6 +259,7 @@ test('splitTimelineDisplayForViewport keeps only the settled display prefix stat
     requestId: 'req-1',
     text: 'working',
     status: 'streaming',
+    source: 'live-event',
   };
   const operationEntry = operationTimelineEntryFromEvent(operationEvent({
     phase: 'completed',
@@ -260,6 +273,7 @@ test('splitTimelineDisplayForViewport keeps only the settled display prefix stat
     requestId: 'req-1',
     text: 'done',
     status: 'completed',
+    source: 'live-event',
   };
 
   const streamingDisplayEntries = [
@@ -298,6 +312,7 @@ test('timeline display entries keep system and subagent messages in canonical or
       role: 'user',
       text: 'hello',
       status: 'completed',
+      source: 'local-input',
     },
     {
       id: 'notice-1',
@@ -305,6 +320,7 @@ test('timeline display entries keep system and subagent messages in canonical or
       role: 'system',
       text: 'after user',
       status: 'completed',
+      source: 'live-event',
     },
     {
       id: 'req-1:operation:tool',
@@ -314,6 +330,7 @@ test('timeline display entries keep system and subagent messages in canonical or
       kind: 'tool',
       title: 'Tool',
       phase: 'completed',
+      source: 'live-event',
       startedAt: 1000,
       updatedAt: 1100,
     },
@@ -324,6 +341,7 @@ test('timeline display entries keep system and subagent messages in canonical or
       requestId: 'req-1',
       text: 'working',
       status: 'streaming',
+      source: 'live-event',
     },
     {
       id: 'req-1:assistant:0',
@@ -331,6 +349,7 @@ test('timeline display entries keep system and subagent messages in canonical or
       role: 'assistant',
       text: 'done',
       status: 'streaming',
+      source: 'live-event',
     },
   ];
   const displayEntries = buildTimelineDisplayEntries(timeline);
@@ -363,6 +382,7 @@ test('buildTimelineViewportModel derives display entries and viewport split toge
       role: 'user',
       text: 'hello',
       status: 'completed',
+      source: 'local-input',
     },
     {
       id: 'notice-1',
@@ -370,6 +390,7 @@ test('buildTimelineViewportModel derives display entries and viewport split toge
       role: 'system',
       text: 'after user',
       status: 'completed',
+      source: 'live-event',
     },
     {
       id: 'req-1:assistant:0',
@@ -377,6 +398,7 @@ test('buildTimelineViewportModel derives display entries and viewport split toge
       role: 'assistant',
       text: 'working',
       status: 'streaming',
+      source: 'live-event',
     },
   ];
 
@@ -450,6 +472,7 @@ test('timeline messages include message roles and operation entries', () => {
       role: 'user',
       text: 'hello',
       status: 'completed',
+      source: 'local-input',
     },
     {
       id: 'assistant-1',
@@ -457,6 +480,7 @@ test('timeline messages include message roles and operation entries', () => {
       role: 'assistant',
       text: 'hi',
       status: 'streaming',
+      source: 'live-event',
     },
     {
       id: 'system-1',
@@ -464,6 +488,7 @@ test('timeline messages include message roles and operation entries', () => {
       role: 'system',
       text: 'notice',
       status: 'completed',
+      source: 'live-event',
     },
     {
       id: 'subagent-1',
@@ -472,6 +497,7 @@ test('timeline messages include message roles and operation entries', () => {
       requestId: 'req-1',
       text: 'working',
       status: 'streaming',
+      source: 'live-event',
     },
     operationEntry,
   ];

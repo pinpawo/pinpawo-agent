@@ -44,16 +44,11 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
 test('buildTuiScreenModel marks composer and status state while busy', () => {
   const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
   state.connection = { status: 'ready', message: '正在思考' };
-  state.runs.run1 = {
+  state.sessions['chat:pet'].activeRun = {
     requestId: 'run1',
-    sessionId: 'chat:pet',
-    kind: 'chat',
     phase: 'thinking',
-    timelineEntryIds: [],
     startedAt: 0,
-    charCount: 0,
   };
-  state.sessions['chat:pet'].activeRunId = 'run1';
 
   const model = buildTuiScreenModel({
     state,
@@ -97,24 +92,18 @@ test('buildTuiScreenModel keeps approval status visible while composer accepts r
     view: { kind: 'plain' as const, body: 'Need review' },
     options: [],
   };
-  state.runs.run1 = {
+  state.sessions['chat:pet'].activeRun = {
     requestId: 'run1',
-    sessionId: 'chat:pet',
-    kind: 'chat',
     phase: 'waiting_human',
-    timelineEntryIds: [],
     reviewAction: {
-      requestId: 'run1',
       actionId: 'interrupt-1',
       status: 'waiting',
       petId: 'pet-1',
       reviews: [review],
-      draft: { actionId: 'interrupt-1', decisions: [] },
     },
     startedAt: 0,
-    charCount: 0,
   };
-  state.sessions['chat:pet'].activeRunId = 'run1';
+  state.reviewDrafts['interrupt-1'] = { actionId: 'interrupt-1', decisions: [] };
 
   const model = buildTuiScreenModel({
     state,
@@ -264,6 +253,7 @@ function message(
     requestId: 'run1',
     text,
     status,
+    source: 'live-event',
   };
 }
 
@@ -279,6 +269,7 @@ function operation(
     kind: 'tool',
     title: 'Tool',
     phase,
+    source: 'live-event',
     startedAt: 1000,
     updatedAt: phase === 'completed' ? 2000 : 1000,
     ...(phase === 'completed' ? { completedAt: 2000 } : {}),

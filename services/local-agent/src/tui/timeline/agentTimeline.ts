@@ -1,17 +1,21 @@
+import type { LocalAgentOperationEvent } from '../../events/localAgentEvent';
 import type {
-  LocalAgentOperationEvent,
-  LocalAgentOperationPhase,
-  LocalAgentOperationRaw,
-} from '../../events/localAgentEvent';
+  LocalAgentMessageEntry,
+  LocalAgentOperationEntry,
+  LocalAgentTimelineEntry,
+} from '../../localAgentSession';
 import type { MessageCellModel } from '../state/tuiState';
 import {
-  buildOperationPresentation,
-  type OperationPresentation,
-} from './operationPresentation';
+  localAgentOperationEntryFromEvent,
+  localAgentOperationEntryId,
+} from '../../localAgentTimeline';
 
-export type AgentTimelineEntry =
-  | AgentMessageEntry
-  | AgentOperationEntry;
+export {
+  isRunningOperationPhase,
+  isTerminalOperationPhase,
+} from '../../localAgentTimeline';
+
+export type AgentTimelineEntry = LocalAgentTimelineEntry;
 
 export type AgentTimelineMessage =
   | AgentUserTimelineMessage
@@ -20,73 +24,30 @@ export type AgentTimelineMessage =
   | AgentSubagentTimelineMessage
   | AgentToolTimelineMessage;
 
-export type AgentUserTimelineMessage = {
-  id: string;
-  type: 'message';
+export type AgentUserTimelineMessage = LocalAgentMessageEntry & {
   role: 'user';
-  requestId?: string;
-  text: string;
   status: 'completed';
-  createdAt?: string;
-  updatedAt?: string;
 };
 
-export type AgentAssistantTimelineMessage = {
-  id: string;
-  type: 'message';
+export type AgentAssistantTimelineMessage = LocalAgentMessageEntry & {
   role: 'assistant';
-  requestId?: string;
-  text: string;
-  status: 'completed' | 'streaming';
-  createdAt?: string;
-  updatedAt?: string;
 };
 
-export type AgentSystemTimelineMessage = {
-  id: string;
-  type: 'message';
+export type AgentSystemTimelineMessage = LocalAgentMessageEntry & {
   role: 'system';
-  requestId?: string;
-  text: string;
   status: 'completed';
-  createdAt?: string;
-  updatedAt?: string;
 };
 
-export type AgentSubagentTimelineMessage = {
-  id: string;
-  type: 'message';
+export type AgentSubagentTimelineMessage = LocalAgentMessageEntry & {
   role: 'subagent';
   requestId: string;
-  text: string;
-  status: 'completed' | 'streaming';
-  createdAt?: string;
-  updatedAt?: string;
 };
 
 export type AgentToolTimelineMessage = AgentOperationEntry;
 
-export type AgentMessageEntry = {
-  id: string;
-  type: 'message';
-  role: 'user' | 'assistant' | 'system' | 'subagent';
-  requestId?: string;
-  text: string;
-  status: 'completed' | 'streaming';
-  createdAt?: string;
-  updatedAt?: string;
-};
+export type AgentMessageEntry = LocalAgentMessageEntry;
 
-export type AgentOperationEntry = OperationPresentation & {
-  id: string;
-  type: 'operation';
-  requestId: string;
-  phase: LocalAgentOperationPhase;
-  startedAt: number;
-  updatedAt: number;
-  completedAt?: number;
-  raw?: LocalAgentOperationRaw;
-};
+export type AgentOperationEntry = LocalAgentOperationEntry;
 
 export function timelineEntryIdFromMessageCell(cell: Pick<MessageCellModel, 'id'>) {
   return `message:${cell.id}`;
@@ -108,12 +69,13 @@ export function timelineEntryFromMessageCell(cell: MessageCellModel): AgentMessa
     ...(cell.requestId ? { requestId: cell.requestId } : {}),
     text: cell.text,
     status: 'completed',
+    source: cell.kind === 'user' ? 'local-input' : 'live-event',
     ...(cell.timestamp ? { createdAt: cell.timestamp } : {}),
   };
 }
 
 export function timelineEntryIdFromOperationEvent(event: LocalAgentOperationEvent) {
-  return `${event.requestId}:operation:${buildOperationPresentation(event).operationKey}`;
+  return localAgentOperationEntryId(event);
 }
 
 export function operationTimelineEntryFromEvent(
@@ -121,81 +83,5 @@ export function operationTimelineEntryFromEvent(
   now: number,
   previous?: AgentOperationEntry,
 ): AgentOperationEntry {
-  const presentation = buildOperationPresentation(event);
-  const mergedPresentation = previous
-    ? mergeOperationPresentation(event, presentation, previous)
-    : presentation;
-  return {
-    ...mergedPresentation,
-    id: previous?.id ?? timelineEntryIdFromOperationEvent(event),
-    type: 'operation',
-    requestId: event.requestId,
-    phase: event.phase,
-    startedAt: previous?.startedAt ?? now,
-    updatedAt: now,
-    ...(isTerminalOperationPhase(event.phase) ? { completedAt: now } : {}),
-    ...rawField(mergeOperationRaw(previous?.raw, event.raw)),
-  };
-}
-
-function mergeOperationPresentation(
-  event: LocalAgentOperationEvent,
-  presentation: OperationPresentation,
-  previous: AgentOperationEntry,
-): OperationPresentation {
-  return {
-    ...presentation,
-    title: event.operation.title !== undefined ? presentation.title : previous.title,
-    target: event.operation.target !== undefined ? presentation.target : previous.target,
-    summary: event.operation.summary !== undefined ? presentation.summary : previous.summary,
-    details: event.operation.details !== undefined
-      ? mergeOperationDetails(previous.details, presentation.details)
-      : previous.details,
-    source: event.operation.source !== undefined ? presentation.source : previous.source,
-  };
-}
-
-function mergeOperationDetails(
-  previous: Record<string, unknown> | undefined,
-  next: Record<string, unknown> | undefined,
-) {
-  if (!previous) return next;
-  if (!next) return previous;
-  return { ...previous, ...next };
-}
-
-function mergeOperationRaw(
-  previous: LocalAgentOperationRaw | undefined,
-  next: LocalAgentOperationRaw | undefined,
-) {
-  if (!previous) return next;
-  if (!next) return previous;
-  return {
-    ...previous,
-    ...definedRawFields(next),
-  };
-}
-
-function rawField(raw: LocalAgentOperationRaw | undefined) {
-  return raw ? { raw } : {};
-}
-
-function definedRawFields(raw: LocalAgentOperationRaw) {
-  return {
-    ...(raw.input !== undefined ? { input: raw.input } : {}),
-    ...(raw.output !== undefined ? { output: raw.output } : {}),
-    ...(raw.error !== undefined ? { error: raw.error } : {}),
-  };
-}
-
-export function isTerminalOperationPhase(
-  phase: LocalAgentOperationPhase,
-): phase is Extract<LocalAgentOperationPhase, 'completed' | 'failed' | 'interrupted'> {
-  return phase === 'completed' || phase === 'failed' || phase === 'interrupted';
-}
-
-export function isRunningOperationPhase(
-  phase: LocalAgentOperationPhase,
-): phase is Extract<LocalAgentOperationPhase, 'started' | 'updated'> {
-  return phase === 'started' || phase === 'updated';
+  return localAgentOperationEntryFromEvent(event, now, previous);
 }

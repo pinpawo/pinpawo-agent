@@ -6,11 +6,14 @@ import {
 } from '../localServerAuth';
 import type { MessageCellModel } from './state/tuiState';
 import type {
-  TuiCoreOperationTimelineEntry,
-  TuiCoreRunSnapshot,
-  TuiCoreSessionSnapshot,
-  TuiCoreTimelineEntry,
-} from './contracts/tuiCoreContract';
+  LocalAgentOperationEntry,
+  LocalAgentRun,
+  LocalAgentRunPhase,
+  LocalAgentSession,
+  LocalAgentSessionSnapshot,
+  LocalAgentTimelineEntry,
+} from '../localAgentSession';
+import { LOCAL_AGENT_SESSION_SNAPSHOT_VERSION } from '../localAgentSession';
 import { buildTuiSessionSnapshotFromMessages } from './snapshot/tuiSessionSnapshot';
 import type { ResumeSessionSummary } from './types';
 import { reviewActionId, reviewActionReviews } from '../reviewAction';
@@ -79,8 +82,8 @@ export class TuiLocalServerClient {
 
   async readSessionSnapshot(params: {
     sessionId: string;
-    kind: TuiCoreSessionSnapshot['kind'];
-  }): Promise<TuiCoreSessionSnapshot> {
+    kind: LocalAgentSession['kind'];
+  }): Promise<LocalAgentSessionSnapshot> {
     const [serverSnapshot, runtime] = await Promise.all([
       this.readServerSnapshot().catch((err) => {
         if (err instanceof LocalServerHttpError && err.status === 404) {
@@ -91,7 +94,7 @@ export class TuiLocalServerClient {
       this.readRuntime().catch(() => null),
     ]);
     if (serverSnapshot) {
-      const nativeSnapshot = parseTuiCoreSessionSnapshot(serverSnapshot);
+      const nativeSnapshot = parseLocalAgentSessionSnapshot(serverSnapshot);
       if (nativeSnapshot) {
         return mergeSnapshotRuntime(nativeSnapshot, runtime);
       }
@@ -148,7 +151,7 @@ export class TuiLocalServerClient {
 
   async resumeSession(sessionId: string): Promise<{
     session: ResumeSessionSummary;
-    snapshot: TuiCoreSessionSnapshot;
+    snapshot: LocalAgentSessionSnapshot;
   }> {
     const res = await this.fetchAuth(
       this.url(`/sessions/resume?sessionId=${encodeURIComponent(sessionId)}`),
@@ -166,7 +169,7 @@ export class TuiLocalServerClient {
       throw new Error('invalid resume session payload');
     }
     const messages = parseHistoryMessages(payload.messages);
-    const nativeSnapshot = parseTuiCoreSessionSnapshot(payload.snapshot);
+    const nativeSnapshot = parseLocalAgentSessionSnapshot(payload.snapshot);
     return {
       session,
       snapshot: nativeSnapshot ?? buildTuiSessionSnapshotFromMessages({
@@ -212,7 +215,7 @@ type LocalServerSnapshotPayload = {
 
 type ParsedSnapshotSession = {
   id: string;
-  kind?: TuiCoreSessionSnapshot['kind'];
+  kind?: LocalAgentSession['kind'];
 };
 
 type ParsedPendingReview = {
@@ -227,10 +230,10 @@ function buildSessionSnapshotFromServerPayload(
   payload: LocalServerSnapshotPayload,
   options: {
     fallbackSessionId: string;
-    fallbackKind: TuiCoreSessionSnapshot['kind'];
+    fallbackKind: LocalAgentSession['kind'];
     runtime?: LocalServerRuntimeSnapshot | null;
   },
-): TuiCoreSessionSnapshot | null {
+): LocalAgentSessionSnapshot | null {
   const session = parseSnapshotSession(payload.session);
   const sessionId = session?.id ?? options.fallbackSessionId;
   const kind = session?.kind ?? options.fallbackKind;
@@ -250,38 +253,85 @@ function buildSessionSnapshotFromServerPayload(
   }
   return {
     ...snapshot,
-    runs: [{
-      requestId: pendingReview.requestId,
-      sessionId: pendingReview.sessionId ?? sessionId,
-      kind,
-      phase: 'waiting_human',
-      timelineEntryIds: snapshot.timeline.map((entry) => entry.id),
-      reviewAction: {
-        actionId: pendingReview.actionId,
-        status: 'waiting',
-        reviews: pendingReview.reviews,
-        ...(pendingReview.petId ? { petId: pendingReview.petId } : {}),
+    session: {
+      ...snapshot.session,
+      activeRun: {
+        requestId: pendingReview.requestId,
+        phase: 'waiting_human',
+        reviewAction: {
+          actionId: pendingReview.actionId,
+          status: 'waiting',
+          reviews: pendingReview.reviews,
+          ...(pendingReview.petId ? { petId: pendingReview.petId } : {}),
+        },
       },
-    }],
-    activeRunId: pendingReview.requestId,
-  };
-}
-
-function mergeSnapshotRuntime(
-  snapshot: TuiCoreSessionSnapshot,
-  runtime: LocalServerRuntimeSnapshot | null,
-): TuiCoreSessionSnapshot {
-  if (!runtime) return snapshot;
-  return {
-    ...snapshot,
-    runtime: {
-      ...runtime,
-      ...(snapshot.runtime ?? {}),
     },
   };
 }
 
-function parseTuiCoreSessionSnapshot(value: unknown): TuiCoreSessionSnapshot | null {
+function mergeSnapshotRuntime(
+  snapshot: LocalAgentSessionSnapshot,
+  runtime: LocalServerRuntimeSnapshot | null,
+): LocalAgentSessionSnapshot {
+  if (!runtime) return snapshot;
+  return {
+    ...snapshot,
+    session: {
+      ...snapshot.session,
+      runtime: {
+        ...runtime,
+        ...(snapshot.session.runtime ?? {}),
+      },
+    },
+  };
+}
+
+function parseLocalAgentSessionSnapshot(value: unknown): LocalAgentSessionSnapshot | null {
+  if (!isRecord(value)) return null;
+  if (value.version === LOCAL_AGENT_SESSION_SNAPSHOT_VERSION) {
+    const session = parseLocalAgentSession(value.session);
+    return session
+      ? { version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION, session }
+      : null;
+  }
+  return parseLegacyTuiCoreSessionSnapshot(value);
+}
+
+function parseLocalAgentSession(value: unknown): LocalAgentSession | null {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.sessionId !== 'string'
+    || !isSessionKind(value.kind)
+    || !Array.isArray(value.timeline)
+    || (value.activeRun !== null && !isRecord(value.activeRun))
+  ) {
+    return null;
+  }
+  const timeline = value.timeline.flatMap((entry) => {
+    const parsed = parseLocalAgentTimelineEntry(entry);
+    return parsed ? [parsed] : [];
+  });
+  if (timeline.length !== value.timeline.length) return null;
+  const activeRun = value.activeRun === null ? null : parseLocalAgentRun(value.activeRun);
+  if (value.activeRun !== null && !activeRun) return null;
+  const actor = isRecord(value.actor)
+    && typeof value.actor.label === 'string'
+    && typeof value.actor.summary === 'string'
+    ? { label: value.actor.label, summary: value.actor.summary }
+    : null;
+  if (value.actor !== undefined && !actor) return null;
+  return {
+    sessionId: value.sessionId,
+    kind: value.kind,
+    timeline,
+    activeRun,
+    ...(actor ? { actor } : {}),
+    ...(isRecord(value.runtime) ? { runtime: value.runtime as LocalAgentSession['runtime'] } : {}),
+    ...(isTokenUsageSnapshot(value.tokenUsage) ? { tokenUsage: value.tokenUsage } : {}),
+  };
+}
+
+function parseLegacyTuiCoreSessionSnapshot(value: unknown): LocalAgentSessionSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   if (
@@ -293,28 +343,34 @@ function parseTuiCoreSessionSnapshot(value: unknown): TuiCoreSessionSnapshot | n
     return null;
   }
   const timeline = record.timeline.flatMap((entry) => {
-    const parsed = parseTuiCoreTimelineEntry(entry);
+    const parsed = parseLocalAgentTimelineEntry(entry);
     return parsed ? [parsed] : [];
   });
   const runs = record.runs.flatMap((run) => {
-    const parsed = parseTuiCoreRunSnapshot(run);
+    const parsed = parseLegacyTuiCoreRunSnapshot(run);
     return parsed ? [parsed] : [];
   });
   if (timeline.length !== record.timeline.length || runs.length !== record.runs.length) {
     return null;
   }
+  const activeRunId = typeof record.activeRunId === 'string' ? record.activeRunId : undefined;
+  const activeRun = runs.find((run) => run.requestId === activeRunId && isActiveRunPhase(run.phase))
+    ?? runs.find((run) => isActiveRunPhase(run.phase))
+    ?? null;
   return {
-    sessionId: record.sessionId,
-    kind: record.kind,
-    timeline,
-    runs,
-    ...(typeof record.activeRunId === 'string' ? { activeRunId: record.activeRunId } : {}),
-    ...(isRecord(record.runtime) ? { runtime: record.runtime as TuiCoreSessionSnapshot['runtime'] } : {}),
-    ...(isTokenUsageSnapshot(record.tokenUsage) ? { tokenUsage: record.tokenUsage } : {}),
+    version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
+    session: {
+      sessionId: record.sessionId,
+      kind: record.kind,
+      timeline,
+      activeRun: activeRun ? toLocalAgentRun(activeRun) : null,
+      ...(isRecord(record.runtime) ? { runtime: record.runtime as LocalAgentSession['runtime'] } : {}),
+      ...(isTokenUsageSnapshot(record.tokenUsage) ? { tokenUsage: record.tokenUsage } : {}),
+    },
   };
 }
 
-function parseTuiCoreTimelineEntry(value: unknown): TuiCoreTimelineEntry | null {
+function parseLocalAgentTimelineEntry(value: unknown): LocalAgentTimelineEntry | null {
   if (!isRecord(value) || typeof value.id !== 'string' || !isTimelineSource(value.source)) {
     return null;
   }
@@ -347,27 +403,80 @@ function parseTuiCoreTimelineEntry(value: unknown): TuiCoreTimelineEntry | null 
       typeof value.requestId !== 'string'
       || typeof value.operationKey !== 'string'
       || !isOperationPhase(value.phase)
+      || (value.raw !== undefined && !isRecord(value.raw))
     ) {
       return null;
     }
+    const operationSource = parseOperationSource(value.operationSource);
+    if (value.operationSource !== undefined && !operationSource) return null;
     return {
       id: value.id,
       type: 'operation',
       requestId: value.requestId,
       operationKey: value.operationKey,
+      kind: typeof value.kind === 'string' ? value.kind : value.operationKey,
+      title: typeof value.title === 'string' ? value.title : value.operationKey,
       phase: value.phase,
       source: value.source,
-      ...(typeof value.title === 'string' ? { title: value.title } : {}),
+      ...(typeof value.target === 'string' ? { target: value.target } : {}),
       ...(typeof value.summary === 'string' ? { summary: value.summary } : {}),
+      ...(isRecord(value.details) ? { details: value.details } : {}),
+      ...(operationSource ? { operationSource } : {}),
       ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
       ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
       ...(typeof value.completedAt === 'number' ? { completedAt: value.completedAt } : {}),
-    } satisfies TuiCoreOperationTimelineEntry;
+      ...(isRecord(value.raw) ? {
+        raw: {
+          ...('input' in value.raw ? { input: value.raw.input } : {}),
+          ...('output' in value.raw ? { output: value.raw.output } : {}),
+          ...('error' in value.raw ? { error: value.raw.error } : {}),
+        },
+      } : {}),
+    } satisfies LocalAgentOperationEntry;
   }
   return null;
 }
 
-function parseTuiCoreRunSnapshot(value: unknown): TuiCoreRunSnapshot | null {
+function parseOperationSource(
+  value: unknown,
+): LocalAgentOperationEntry['operationSource'] | null {
+  if (
+    !isRecord(value)
+    || (value.provider !== 'toolkit' && value.provider !== 'toolset' && value.provider !== 'runtime')
+    || typeof value.name !== 'string'
+    || (value.toolName !== undefined && typeof value.toolName !== 'string')
+    || (value.callId !== undefined && typeof value.callId !== 'string')
+  ) {
+    return null;
+  }
+  return {
+    provider: value.provider,
+    name: value.name,
+    ...(typeof value.toolName === 'string' ? { toolName: value.toolName } : {}),
+    ...(typeof value.callId === 'string' ? { callId: value.callId } : {}),
+  };
+}
+
+type LegacyTuiCoreRunSnapshot = LocalAgentRun & {
+  phase: LocalAgentRunPhase | 'completed' | 'failed' | 'interrupted';
+};
+
+function parseLocalAgentRun(value: unknown): LocalAgentRun | null {
+  if (!isRecord(value) || typeof value.requestId !== 'string' || !isActiveRunPhase(value.phase)) {
+    return null;
+  }
+  const reviewAction = parseNativeReviewAction(value.reviewAction);
+  if (value.reviewAction !== undefined && !reviewAction) return null;
+  return {
+    requestId: value.requestId,
+    phase: value.phase,
+    ...(reviewAction ? { reviewAction } : {}),
+    ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
+    ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
+  };
+}
+
+function parseLegacyTuiCoreRunSnapshot(value: unknown): LegacyTuiCoreRunSnapshot | null {
   if (
     !isRecord(value)
     || typeof value.requestId !== 'string'
@@ -388,18 +497,24 @@ function parseTuiCoreRunSnapshot(value: unknown): TuiCoreRunSnapshot | null {
   const normalizedReviewAction = reviewAction ?? legacyReviewAction;
   return {
     requestId: value.requestId,
-    sessionId: value.sessionId,
-    kind: value.kind,
     phase: value.phase,
-    timelineEntryIds: value.timelineEntryIds,
     ...(normalizedReviewAction ? { reviewAction: normalizedReviewAction } : {}),
     ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
     ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
-    ...(typeof value.finishedAt === 'number' ? { finishedAt: value.finishedAt } : {}),
   };
 }
 
-function parseNativeReviewAction(value: unknown): TuiCoreRunSnapshot['reviewAction'] | null {
+function toLocalAgentRun(run: LegacyTuiCoreRunSnapshot): LocalAgentRun {
+  return {
+    requestId: run.requestId,
+    phase: run.phase as LocalAgentRunPhase,
+    ...(run.reviewAction ? { reviewAction: run.reviewAction } : {}),
+    ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
+    ...(run.updatedAt !== undefined ? { updatedAt: run.updatedAt } : {}),
+  };
+}
+
+function parseNativeReviewAction(value: unknown): LocalAgentRun['reviewAction'] | null {
   if (!isRecord(value)) return null;
   const reviews = readReviewSpecs(value.reviews);
   if (typeof value.actionId !== 'string' || !isReviewActionStatus(value.status) || !reviews) {
@@ -416,7 +531,7 @@ function parseNativeReviewAction(value: unknown): TuiCoreRunSnapshot['reviewActi
 function parseLegacyPendingReview(
   value: unknown,
   requestId: string,
-): TuiCoreRunSnapshot['reviewAction'] | null {
+): LocalAgentRun['reviewAction'] | null {
   if (!isRecord(value) || value.requestId !== requestId) return null;
   const review = isRecord(value.review) && typeof value.review.id === 'string'
     ? value.review as ReviewSpec
@@ -638,15 +753,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isSessionKind(value: unknown): value is TuiCoreSessionSnapshot['kind'] {
+function isSessionKind(value: unknown): value is LocalAgentSession['kind'] {
   return value === 'chat' || value === 'studio';
 }
 
-function isTimelineSource(value: unknown): value is TuiCoreTimelineEntry['source'] {
+function isTimelineSource(value: unknown): value is LocalAgentTimelineEntry['source'] {
   return value === 'checkpoint' || value === 'live-event' || value === 'local-input';
 }
 
-function isOperationPhase(value: unknown): value is TuiCoreOperationTimelineEntry['phase'] {
+function isOperationPhase(value: unknown): value is LocalAgentOperationEntry['phase'] {
   return value === 'started'
     || value === 'updated'
     || value === 'completed'
@@ -654,7 +769,7 @@ function isOperationPhase(value: unknown): value is TuiCoreOperationTimelineEntr
     || value === 'interrupted';
 }
 
-function isRunPhase(value: unknown): value is TuiCoreRunSnapshot['phase'] {
+function isRunPhase(value: unknown): value is LegacyTuiCoreRunSnapshot['phase'] {
   return value === 'starting'
     || value === 'thinking'
     || value === 'using_tool'
@@ -666,7 +781,16 @@ function isRunPhase(value: unknown): value is TuiCoreRunSnapshot['phase'] {
     || value === 'interrupted';
 }
 
-function isReviewActionStatus(value: unknown): value is NonNullable<TuiCoreRunSnapshot['reviewAction']>['status'] {
+function isActiveRunPhase(value: unknown): value is LocalAgentRunPhase {
+  return value === 'starting'
+    || value === 'thinking'
+    || value === 'using_tool'
+    || value === 'streaming'
+    || value === 'waiting_human'
+    || value === 'interrupting';
+}
+
+function isReviewActionStatus(value: unknown): value is NonNullable<LocalAgentRun['reviewAction']>['status'] {
   return value === 'waiting' || value === 'submitting' || value === 'canceling';
 }
 

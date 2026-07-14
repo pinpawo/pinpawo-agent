@@ -281,7 +281,6 @@ function buildCapabilityPlanningContext(params: {
   const userIntentContext = buildPreparedRequestContext({
     latestUserRequest: latestHumanRequest,
     recentMessages: mainMessagesWithoutCompaction(state.messages),
-    recentAnnounces: [],
     contextSummaries: readContextCompactionSummaries(state.messages),
   });
   const capabilityList = getInvokeOptions(runnableConfig).capabilities ?? [];
@@ -338,7 +337,6 @@ function buildDecisionContext(params: {
   const userIntentContext = buildPreparedRequestContext({
     latestUserRequest: latestHumanRequest,
     recentMessages: mainMessagesWithoutCompaction(state.messages),
-    recentAnnounces: [],
     contextSummaries: readContextCompactionSummaries(state.messages),
   });
   const activeDelegation = state.taskActiveDelegation;

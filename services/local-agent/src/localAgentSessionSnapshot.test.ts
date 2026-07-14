@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildLocalServerTuiSnapshot } from './localServerTuiSnapshot';
+import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
 import type { LocalServerDeps } from './localServerTypes';
 
-test('buildLocalServerTuiSnapshot returns native core snapshot shape', () => {
-  const snapshot = buildLocalServerTuiSnapshot({
+test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot', () => {
+  const snapshot = buildLocalAgentSessionSnapshot({
     sessionId: 'chat:pet-a',
     kind: 'chat',
     messages: [
@@ -56,22 +56,23 @@ test('buildLocalServerTuiSnapshot returns native core snapshot shape', () => {
     },
   });
 
-  assert.equal(snapshot.sessionId, 'chat:pet-a');
-  assert.deepEqual(snapshot.timeline.map((entry) => [entry.id, entry.type, entry.type === 'message' ? entry.role : '']), [
+  assert.equal(snapshot.version, 1);
+  assert.equal(snapshot.session.sessionId, 'chat:pet-a');
+  assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.id, entry.type, entry.type === 'message' ? entry.role : '']), [
     ['message:0:user', 'message', 'user'],
     ['message:2:assistant', 'message', 'assistant'],
   ]);
   assert.equal(
-    snapshot.timeline[0]?.type === 'message' ? snapshot.timeline[0].createdAt : undefined,
+    snapshot.session.timeline[0]?.type === 'message' ? snapshot.session.timeline[0].createdAt : undefined,
     '2026-06-01T01:00:00.000Z',
   );
-  assert.equal(snapshot.activeRunId, 'req-review');
-  assert.equal(snapshot.runs[0]?.reviewAction?.reviews[0]?.id, 'review-1');
-  assert.equal(snapshot.runs[0]?.reviewAction?.petId, 'pet-a');
-  assert.equal(snapshot.runtime?.model, 'test-model');
-  assert.equal(snapshot.runtime?.contextWindow, 32000);
-  assert.equal(snapshot.runtime?.cwd, '/tmp/work');
-  assert.equal(snapshot.runtime?.workspaceId, 'workspace-test');
-  assert.equal(snapshot.runtime?.workspaceName, 'Workspace Test');
-  assert.equal(snapshot.runtime?.workspaceRoot, '/tmp/work');
+  assert.equal(snapshot.session.activeRun?.requestId, 'req-review');
+  assert.equal(snapshot.session.activeRun?.reviewAction?.reviews[0]?.id, 'review-1');
+  assert.equal(snapshot.session.activeRun?.reviewAction?.petId, 'pet-a');
+  assert.equal(snapshot.session.runtime?.model, 'test-model');
+  assert.equal(snapshot.session.runtime?.contextWindow, 32000);
+  assert.equal(snapshot.session.runtime?.cwd, '/tmp/work');
+  assert.equal(snapshot.session.runtime?.workspaceId, 'workspace-test');
+  assert.equal(snapshot.session.runtime?.workspaceName, 'Workspace Test');
+  assert.equal(snapshot.session.runtime?.workspaceRoot, '/tmp/work');
 });

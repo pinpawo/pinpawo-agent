@@ -8,8 +8,10 @@ Use [Guard Design](./GUARD_DESIGN.md) instead.
 
 Current direction:
 
-- Guard rules are registered through the shared guard registry.
-- Token watermarks use provider `usage_metadata.input_tokens`, not local token estimation.
-- Context rewrite/compaction execution remains policy or handler work, not the guard rule itself.
+- Subagent iteration limits use the explicit iteration guard.
+- Subagent context windows use LangChain `summarizationMiddleware`, configured
+  only from `contextWindowTokens`.
+- Capability-level context policy, rewrite callbacks and tool-result eviction are removed.
+- Orchestrator compaction remains a separate graph-level guard/executor flow.
 - Repeated-input detection is not part of the current guard layer.
 - LangGraph `recursionLimit` remains a runtime hard breaker, not our guard contract.

@@ -173,7 +173,7 @@ conclusions cross boundaries and transcripts do not:
 | `forced_capability_seed` | `orchestrator.capability_discovery` | `derive` | seeded candidate names |
 | `delegation_outcome_decision` | `orchestrator.delegation_outcome_decision` | `derive` | `completionReason`, resulting `canHandoffActiveDelegation` |
 | `run_iteration_limit` | `orchestrator.delegation_outcome_iteration` | `stop` | `runIterationCount`, `runIterationLimit` |
-| `context_rewrite_watermark` | `subagent.before_model_context_policy` | `maintain` | `latestInputTokens`, `watermarkTokens` |
+| `context_maintenance` | `subagent.before_model_context_management` | `maintain` | provider watermark details |
 | `iteration_limit` | `subagent.before_model_iteration` | `stop` | `iterationCount`, `maxIterations` |
 
 Notes:
@@ -184,8 +184,8 @@ Notes:
   graph state. Under `pass`/`block` this was a contradiction; as a `derive` it is
   simply the rule doing its job. When it derives "handoff not allowed", the
   reason is `active_delegation_limit_reached`.
-- The two `stop` guards and the two `maintain` guards share decision helpers
-  (limit comparison, `checkProviderInputWatermark`), not guard objects.
+- The two `stop` guards share limit-comparison helpers. Orchestrator context
+  compaction remains the only token-watermark `maintain` guard.
 
 ## What There Is No More
 
@@ -205,9 +205,10 @@ Notes:
 
 Unchanged from the previous design, restated in the new vocabulary:
 
-- Compaction/rewrite **execution** is not the guard. The guard produces
-  `maintain`; the executor (`compactOrchestratorMessages`, the context rewrite
-  executor) is position-owned effect code.
+- Orchestrator compaction **execution** is not the guard. The guard produces
+  `maintain`; `compactOrchestratorMessages` is the position-owned effect code.
+- Subagent summarization is not a custom guard. LangChain
+  `summarizationMiddleware` owns its token trigger and persistent state update.
 - LangGraph `recursionLimit` is not a guard. It stays as a deliberately high
   hard breaker after `stop` guards have had their chance.
 - Node precondition assertions are not guards. A capability/general node that
@@ -217,17 +218,15 @@ Unchanged from the previous design, restated in the new vocabulary:
 
 ## Token Signals
 
-Token-triggered `maintain` decisions read provider usage metadata:
-
-- Orchestrator compaction reads the latest main-conversation AI message input
-  tokens.
-- Subagent context rewrite reads the latest provider input tokens from the
-  subagent messages.
-
-Both compare against the context window through the shared decision helper
+The orchestrator token-triggered `maintain` decision reads the latest
+main-conversation AI message provider usage and compares it through
 `checkProviderInputWatermark(latestInputTokens, contextWindowTokens)`
 (threshold ratio 0.75). When there is no provider usage or no context window,
 the rule proceeds.
+
+Subagents use LangChain's pre-model approximate token counting with an absolute
+trigger derived from `contextWindowTokens`; they do not emit a guard decision
+for summarization.
 
 ## Stop Semantics
 

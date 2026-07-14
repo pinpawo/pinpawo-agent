@@ -134,19 +134,10 @@ export function createCapabilityNode(params: {
       messages: scopedMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
-      contextPolicy: runtime.contextPolicy,
       middleware: usedToolkitResources.middleware,
       runnableConfig,
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,
-      artifactSink: {
-        recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
-          artifactRefs.push(ref);
-        },
-        threadId,
-        delegationId: runNextDelegation.id,
-        runId: transcriptRunId,
-      },
     };
     validateUniqueToolNames(subagentInput.tools);
 
@@ -171,7 +162,7 @@ export function createCapabilityNode(params: {
 
     const laneOutputMessages = tagNewLaneMessages(
       result.messages,
-      subagentInput.messages.length,
+      subagentInput.messages,
       lane,
       transcriptRunId,
       result.completionReason,

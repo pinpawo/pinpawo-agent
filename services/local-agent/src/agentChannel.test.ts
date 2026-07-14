@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { ToolMessage } from '@langchain/core/messages';
+import { AIMessage } from '@langchain/core/messages';
 import { buildDecisionStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
 import type { AgentContext } from './contextLoader';
 import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
@@ -272,30 +272,17 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
     messages: [],
     availableToolkits: [],
   });
-  const rewritten = await runtime.contextPolicy?.rewriteAsync?.([
-    new ToolMessage({
-      content: `old raw output\n${'x'.repeat(1200)}`,
-      tool_call_id: 'call-1',
-      name: 'view_file_chunk',
-    }),
-    new ToolMessage({
-      content: `old raw output\n${'y'.repeat(1200)}`,
-      tool_call_id: 'call-2',
-      name: 'view_file_chunk',
-    }),
-    new ToolMessage({
-      content: `old raw output\n${'z'.repeat(1200)}`,
-      tool_call_id: 'call-3',
-      name: 'view_file_chunk',
-    }),
-  ], {
-    iterationCount: 2,
-    operations: {},
-    contextWindowTokens: 1000,
+  const result = await runtime.middleware?.afterRun?.({
+    messages: [new AIMessage('final explore evidence')],
+    artifacts: [],
+    completionReason: 'natural',
+  }, {
+    capabilityId: 'explore',
+    delegationId: 'dg-1',
+    runId: 'run-1',
   });
 
-  assert.equal(rewritten?.length, 4);
-  assert.match(String(rewritten?.[3]?.content ?? ''), /summary with viewed files/);
+  assert.match(String(result?.messages.at(-1)?.content ?? ''), /summary with viewed files/);
   assert.deepEqual(capturedOptions, {
     name: 'explore_knowledge_ingest',
     method: 'jsonMode',

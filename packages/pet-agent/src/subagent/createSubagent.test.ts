@@ -48,15 +48,21 @@ class NeverConvergingModel extends BaseChatModel {
   }
 }
 
-function usageMessage(content: string, inputTokens: number) {
-  return new AIMessage({
-    content,
-    usage_metadata: {
-      input_tokens: inputTokens,
-      output_tokens: 10,
-      total_tokens: inputTokens + 10,
-    },
-  });
+class FailingSummaryModel extends BaseChatModel {
+  callCount = 0;
+
+  _llmType() {
+    return 'failing-summary';
+  }
+
+  async _generate(): Promise<never> {
+    this.callCount += 1;
+    throw new Error('summary service unavailable');
+  }
+
+  bindTools() {
+    return this;
+  }
 }
 
 /**
@@ -164,79 +170,139 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
   assert.equal(announced?.read_file?.title, 'Read File');
 });
 
-test('createSubagent contextPolicy rewrites persisted subagent transcript', async () => {
-  const readFile = tool(async () => `file output\n${'x'.repeat(2600)}`, {
-    name: 'view_file_chunk',
-    description: 'read file chunk',
+test('createSubagent summarizes persisted history from contextWindowTokens', async () => {
+  const oldContext = `old investigation evidence\n${'x'.repeat(800)}`;
+  const result = await createSubagent({
+    model: new FakeListChatModel({
+      responses: [
+        'preserved summary with src/a.ts and the pending verification step',
+        'subagent result',
+      ],
+      sleep: 0,
+    }),
+    tools: [],
+    instructions: [],
+    contextWindowTokens: 1000,
+    messages: [
+      new HumanMessage(oldContext),
+      new AIMessage(`The next step is to verify src/a.ts.\n${'y'.repeat(800)}`),
+      new HumanMessage(`Check the earlier implementation details.\n${'z'.repeat(800)}`),
+      new AIMessage(`The verification step is still pending.\n${'w'.repeat(800)}`),
+      new HumanMessage('Continue the delegated task.'),
+    ],
+    maxIterations: 4,
+  });
+
+  assert.equal(result.completionReason, 'natural');
+  const summary = result.messages.find(
+    (message) => message.additional_kwargs?.lc_source === 'summarization',
+  );
+  assert.ok(summary);
+  assert.match(String(summary.content), /Earlier subagent context summary:/);
+  assert.match(String(summary.content), /preserved summary with src\/a\.ts/);
+  assert.equal(result.messages.some((message) => message.content === oldContext), false);
+});
+
+test('createSubagent throws instead of committing an error summary', async () => {
+  const model = new FailingSummaryModel({});
+
+  await assert.rejects(
+    createSubagent({
+      model,
+      tools: [],
+      instructions: [],
+      contextWindowTokens: 1000,
+      messages: [
+        new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
+        new AIMessage(`pending verification\n${'y'.repeat(800)}`),
+        new HumanMessage(`continue investigation\n${'z'.repeat(800)}`),
+        new AIMessage(`more findings\n${'w'.repeat(800)}`),
+        new HumanMessage('Finish the delegated task.'),
+      ],
+      maxIterations: 4,
+    }),
+    /Subagent context summarization failed: Error generating summary: Error: summary service unavailable/,
+  );
+  // The only model call was the failed summary; the main subagent model call
+  // must not continue after an invalid state update.
+  assert.equal(model.callCount, 1);
+});
+
+test('createSubagent throws when history cannot be trimmed into a summary', async () => {
+  await assert.rejects(
+    createSubagent({
+      model: new FakeListChatModel({ responses: ['must not continue'], sleep: 0 }),
+      tools: [],
+      instructions: [],
+      contextWindowTokens: 1000,
+      messages: [
+        new HumanMessage(`single oversized context\n${'x'.repeat(4_000)}`),
+        new AIMessage('Continue.'),
+        new HumanMessage('Finish the delegated task.'),
+      ],
+      maxIterations: 4,
+    }),
+    /Subagent context summarization failed: Previous conversation was too long to summarize/,
+  );
+});
+
+test('createSubagent throws on an empty context summary', async () => {
+  await assert.rejects(
+    createSubagent({
+      model: new FakeListChatModel({ responses: ['', 'must not continue'], sleep: 0 }),
+      tools: [],
+      instructions: [],
+      contextWindowTokens: 1000,
+      messages: [
+        new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
+        new AIMessage(`pending verification\n${'y'.repeat(800)}`),
+        new HumanMessage(`continue investigation\n${'z'.repeat(800)}`),
+        new AIMessage(`more findings\n${'w'.repeat(800)}`),
+        new HumanMessage('Finish the delegated task.'),
+      ],
+      maxIterations: 4,
+    }),
+    /Subagent context summarization failed: empty summary/,
+  );
+});
+
+test('createSubagent leaves single-result sizing to the toolkit below the watermark', async () => {
+  const readFile = tool(async () => 'x'.repeat(20_001), {
+    name: 'read_file',
+    description: 'read a large file',
     schema: z.object({ path: z.string() }),
   });
   const result = await createSubagent({
     model: new FakeToolCallingModel({
       toolCalls: [
-        [{
-          id: 'call-read',
-          name: 'view_file_chunk',
-          args: { path: 'src/a.ts' },
-        }],
+        [{ id: 'call-large', name: 'read_file', args: { path: 'large.log' } }],
         [],
       ],
     }),
     tools: [readFile],
     instructions: [],
-    operations: {
-      view_file_chunk: {
-        summarizeInput: (input) => ({ target: (input as { path?: string }).path }),
-      },
-    },
-    contextPolicy: {
-      evictToolResults: {
-        keepRecent: 0,
-        minSizeChars: 2000,
-      },
-    },
-    contextWindowTokens: 1000,
-    messages: [
-      new HumanMessage('read the file'),
-      usageMessage('上一轮模型调用已经接近上下文触发线。', 900),
-    ],
-    maxIterations: 8,
+    messages: [new HumanMessage('read the file')],
+    maxIterations: 4,
   });
 
-  assert.equal(result.completionReason, 'natural');
-  const toolMessages = result.messages.filter((message) => message._getType() === 'tool');
-  assert.equal(toolMessages.length, 1);
-  assert.equal(toolMessages[0]?.content, '[evicted: view_file_chunk src/a.ts -> 已读；需要时重新调用]');
+  const toolResult = result.messages.find((message) => message._getType() === 'tool');
+  assert.ok(toolResult);
+  assert.equal(String(toolResult.content).length, 20_001);
 });
 
-test('createSubagent custom context rewrite runs only after watermark guard blocks', async () => {
-  const run = (inputTokens: number) => createSubagent({
-    model: new FakeListChatModel({
-      responses: ['subagent result'],
-      sleep: 0,
-    }),
+test('createSubagent does not summarize history below the derived token trigger', async () => {
+  const result = await createSubagent({
+    model: new FakeListChatModel({ responses: ['done'], sleep: 0 }),
     tools: [],
     instructions: [],
-    contextPolicy: {
-      rewrite: () => [new HumanMessage('custom rewritten context')],
-    },
-    messages: [
-      new HumanMessage('do the task'),
-      usageMessage('previous provider usage', inputTokens),
-    ],
+    messages: [new HumanMessage('small delegated task context')],
     contextWindowTokens: 1000,
     maxIterations: 4,
   });
 
-  const belowWatermark = await run(400);
   assert.equal(
-    belowWatermark.messages.some((message) => message.content === 'custom rewritten context'),
+    result.messages.some((message) => message.additional_kwargs?.lc_source === 'summarization'),
     false,
-  );
-
-  const aboveWatermark = await run(900);
-  assert.equal(
-    aboveWatermark.messages.some((message) => message.content === 'custom rewritten context'),
-    true,
   );
 });
 

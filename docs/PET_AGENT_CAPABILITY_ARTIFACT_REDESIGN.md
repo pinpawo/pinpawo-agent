@@ -69,9 +69,8 @@ There is **no** `capability_artifact` toolkit (no `_write` / `_read` / `_list`
 tools handed to the model). It was removed: writes are deterministic in code, and
 nothing needs the model to read its own just-written artifact back —
 
-- during old-output ingest, the summary is inlined back into the model context
-  and the summary names its sources, so the subagent re-queries a source with
-  `view_file` etc. rather than reading the artifact through a tool;
+- during long runs, shared subagent summarization keeps a source-aware summary
+  in model context, so the subagent can re-query a source with `view_file` etc.;
 - cross-turn "has this been explored before" is served by the artifact ref +
   preview that already lands in `state.capabilityArtifacts` and the orchestrator
   prompt, not by a toolkit.
@@ -79,10 +78,9 @@ nothing needs the model to read its own just-written artifact back —
 ## Contracts
 
 - `SubagentResult.artifacts` carries refs produced during the subagent run.
-- `recordCapabilityArtifact(ref)` is the single artifact sink, exposed under that
-  name on every layer that can persist: `CapabilityMiddlewareContext` (afterRun),
-  the in-loop context rewrite path (old-output ingest), and `ToolkitContext`
-  (if a toolkit ever needs it). All push into the same
+- `recordCapabilityArtifact(ref)` is the artifact-ref sink exposed by
+  `CapabilityMiddlewareContext` (`afterRun`) and `ToolkitContext` (when a toolkit
+  owns a durable result). Both push into the same
   `artifactRefs` array that becomes `SubagentResult.artifacts`.
 - `CapabilityContext.artifactStore` is the store a capability uses to write bytes.
 - `state.capabilityArtifacts` is the only cross-turn artifact state channel.
@@ -181,44 +179,33 @@ instructing the model to call a write tool inside the loop:
   a `kind: "result"` artifact via `ctx.artifactStore`. No model-facing write tool
   and no write instruction — the persistence is unconditional code.
 - `capability_creator` does the same via `afterRun` (uses `['bash']`).
-- `explore` persists through `afterRun` only: old-output ingest computes
-  a reusable `summary + evidence` payload, and `afterRun` writes that payload as a
-  `kind: "report"` artifact once per completed run. If no old-output ingest
-  payload exists, `afterRun` performs a final lightweight re-ingest from the
-  final run evidence and still attempts one artifact write.
+- `explore` persists through `afterRun` only. It performs one structured ingest
+  from the shared LangChain context summary, recent tool results and final answer,
+  then writes a `kind: "report"` artifact.
 
 ## Explore ingest
 
-Explore's summarization includes an **old-output ingest** path for compression and a
-**finalize** path for durable run summaries.
+Explore consumes the shared subagent summary and owns only the **finalize** path
+for durable run summaries.
 
 **Trigger.**
 
-- **Old-output ingest** runs from the in-loop context rewrite handler when older
-  large successful tool outputs are eligible. It summarizes and evicts selected
-  tool outputs, and stores the summary candidate in-memory.
-- **Finalize persistence** runs once in `afterRun` after the subagent completes; if
-  old-output ingest did not already produce a structured summary, it runs a final
-  re-ingest on the final result evidence and writes one `kind: "report"` artifact
-  with evidence metadata when the re-ingest succeeds.
+- Shared LangChain `summarizationMiddleware` runs before subagent model calls when
+  the token trigger derived from `contextWindowTokens` is reached. It persistently
+  replaces older execution context and marks the summary with
+  `lc_source: summarization`; it does not write artifacts.
+- **Finalize persistence** runs once in `afterRun`, re-ingests the latest context
+  summary, recent tool results and final answer, and writes one `kind: "report"`
+  artifact with evidence metadata.
 
-**What ingest does.** It is a *complete summary of what came before*, not a
-lossy in-place compression:
-
-- Summarize the earlier portion of the transcript; **keep the most recent N raw
-  tool outputs** verbatim.
-- The summarized earlier raw outputs are **removed from the model context**
-  (they no longer cost tokens); they survive only as the artifact below.
-- The ingest output is **summary + evidence**, persisted as one artifact:
+**What final ingest does.** It normalizes the compacted execution record into
+**summary + evidence**, persisted as one artifact:
   - `kind: "report"`, `mimeType: "text/markdown"` — the prose summary.
   - structured **evidence** list, where each entry is `{ source, proves, value }`
     — the reference source, what it established, and why it matters to the
     reasoning. (Carried in the artifact's structured content / metadata; the
     markdown body holds the readable summary.)
 
-This uses a two-step (or single-step) flow:
-- old-output ingest path: computes candidate summary in `rewriteOldToolOutput`;
-- finalize path: computes final candidate in `afterRun` if old-output ingest did not produce one.
 (`status`, `summary`, `nextSteps`) is still not persisted as a `kind: "result"`
 artifact; it is persisted as a `kind: "report"` artifact body (`content`) with
 optional evidence metadata.
@@ -226,10 +213,9 @@ optional evidence metadata.
 **Implemented shape.** `ingestExploreKnowledge` returns
 `{ summary, evidence: { source, proves, value }[] }`. `afterRun` writes the
 latest ingest payload via
-`recordExploreIngestArtifact(ctx.artifactStore, ctx.artifactSink, ingest)`
+`recordExploreIngestArtifact(artifactStore, middlewareContext, ingest)`
 (summary → markdown content, evidence → metadata).
 
-**Failure-safe.** Old-output ingest keeps raw outputs on ingest failures
-(model rate-limit/timeout, structured-output parse error) and never aborts the turn.
-`afterRun` also catches finalize persistence/write errors; failed finalize writes are
-non-fatal and the run keeps returning normal completion state.
+**Failure-safe.** If final structured ingest fails, Explore falls back to an
+existing Explore/LangChain summary when available. `afterRun` catches store errors;
+failed writes are non-fatal and the run keeps returning normal completion state.

@@ -3,9 +3,7 @@ import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage }
 import { clipForPrompt, invokeStructuredOutput } from '@pinpawo/pet-agent';
 import type {
   AgentCapability,
-  CapabilityArtifactSink,
   CapabilityArtifactStore,
-  ContextPolicyContext,
   CapabilityMiddlewareContext,
   OrchestrationDecisionStructuredOutputConfig,
   SubagentResult,
@@ -36,11 +34,6 @@ export const exploreResultSchema = z.object({
   nextSteps: z.array(z.string().min(1)),
 });
 
-type PendingExploreArtifact = {
-  summary: string;
-  evidence: ExploreEvidenceItem[];
-};
-
 const exploreEvidenceItemSchema = z.object({
   source: z.string().min(1),
   proves: z.string().min(1),
@@ -55,15 +48,10 @@ const exploreKnowledgeIngestSchema = z.object({
 export type ExploreEvidenceItem = z.infer<typeof exploreEvidenceItemSchema>;
 export type ExploreKnowledgeIngest = z.infer<typeof exploreKnowledgeIngestSchema>;
 
-const EXPLORE_COMPRESS_KEEP_RECENT_TOOL_RESULTS = 2;
-const EXPLORE_COMPRESS_MIN_TOOL_CHARS = 800;
 const EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS = 18_000;
 const EXPLORE_SUMMARY_MESSAGE_MAX_CHARS = 2_000;
 const EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS = 18_000;
-const EXPLORE_RAW_EVICTED = '[explore raw tool output evicted after ingest]';
 const EXPLORE_SUMMARY_MESSAGE_PREFIX = 'Explore summary:';
-
-type ExploreIngestReason = 'old_tool_output' | 'finalize';
 
 function readMessageText(message: { content?: unknown }): string {
   const content = message.content;
@@ -78,25 +66,6 @@ function readMessageText(message: { content?: unknown }): string {
       return '';
     })
     .join('');
-}
-
-function readPinpawoMetadata(message: BaseMessage): Record<string, unknown> | null {
-  const pinpawo = message.additional_kwargs?.pinpawo;
-  return pinpawo && typeof pinpawo === 'object'
-    ? pinpawo as Record<string, unknown>
-    : null;
-}
-
-function mergePinpawoMetadata(
-  message: BaseMessage,
-  patch: Record<string, unknown>,
-): Record<string, unknown> {
-  return {
-    ...(message.additional_kwargs?.pinpawo && typeof message.additional_kwargs.pinpawo === 'object'
-      ? message.additional_kwargs.pinpawo as Record<string, unknown>
-      : {}),
-    ...patch,
-  };
 }
 
 function extractExploreSummaryFromContent(content: string): string | null {
@@ -138,36 +107,31 @@ function readExploreSummary(message: BaseMessage): string | null {
 
 function readLatestExploreSummary(messages: BaseMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const metadata = readPinpawoMetadata(messages[index]);
-    if (metadata?.exploreIngestFailed === true) return null;
     const summary = readExploreSummary(messages[index]);
     if (summary) return summary;
   }
   return null;
 }
 
-function hasExploreIngestFailure(messages: BaseMessage[]): boolean {
+function readLatestSubagentContextSummary(messages: BaseMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const metadata = readPinpawoMetadata(messages[index]);
-    if (readExploreSummary(messages[index]) !== null) {
-      return false;
-    }
-    if (metadata?.exploreIngestFailed === true) {
-      return true;
-    }
+    const message = messages[index];
+    if (message.additional_kwargs?.lc_source !== 'summarization') continue;
+    const summary = readMessageText(message).trim();
+    if (summary) return summary;
   }
-  return false;
+  return null;
 }
 
 /**
  * Persist the latest explore summary as a report artifact: markdown summary as
  * content, structured evidence ({source, proves, value}[]) in metadata.
- * Record into state via the subagent's artifact sink so the ref is visible
- * across runs. No-op when the store/sink/thread context is unavailable.
+ * Record into state via capability afterRun so the ref is visible across runs.
+ * No-op when the store or addressing context is unavailable.
  */
 async function recordExploreIngestArtifact(
   store: CapabilityArtifactStore | undefined,
-  sink: CapabilityArtifactSink | undefined,
+  sink: CapabilityMiddlewareContext | undefined,
   ingest: ExploreKnowledgeIngest,
 ): Promise<void> {
   if (!store || !sink?.recordCapabilityArtifact || !sink.threadId || !sink.delegationId || !sink.runId) {
@@ -224,7 +188,6 @@ async function ingestExploreKnowledge(params: {
   structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   previousSummary: string | null;
   evidence: string;
-  reason: ExploreIngestReason;
 }): Promise<ExploreKnowledgeIngest> {
   const evidence = clipForPrompt(params.evidence, EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS);
   if (!evidence.trim()) {
@@ -245,8 +208,7 @@ async function ingestExploreKnowledge(params: {
     messages: [
       new SystemMessage([
         '你是 explore capability 的知识 ingest 模块。',
-        '当较早的大型工具输出需要压缩或对话完成时，你会被调用来对关键来源做一次完整总结，',
-        '使较早原始工具输出可以从上下文中移除，只保留你的总结和最新若干条原文。',
+        '你会在 explore 执行完成时，把压缩后的执行上下文和近期结果整理成可交付知识。',
         '输入包括上一版 summary 和需要被总结的 evidence。你必须更新 summary，必要时修正旧结论。',
         'summary 必须用 Markdown，包含：目标、已查看文件、关键知识点 / 概念、已确认事实、未确认 / 风险、下一步。',
         'summary 要让下一轮 agent 不重复探索已看过的内容。',
@@ -258,7 +220,7 @@ async function ingestExploreKnowledge(params: {
         '不要编造未查看过的文件、URL、issue、PR 或命令结果。',
       ].join('\n')),
       new HumanMessage([
-        `触发原因：${params.reason}`,
+        '触发原因：finalize',
         '上一版 summary：',
         params.previousSummary ?? '[无]',
         '需要总结的 evidence：',
@@ -272,83 +234,6 @@ async function ingestExploreKnowledge(params: {
   };
 }
 
-function replaceToolMessageContent(
-  message: ToolMessage,
-  content: string,
-  pinpawoPatch: Record<string, unknown> = {},
-): ToolMessage {
-  return new ToolMessage({
-    id: message.id,
-    name: message.name,
-    content,
-    tool_call_id: message.tool_call_id,
-    status: message.status,
-    artifact: message.artifact,
-    metadata: message.metadata,
-    additional_kwargs: {
-      ...message.additional_kwargs,
-      pinpawo: mergePinpawoMetadata(message, pinpawoPatch),
-    },
-    response_metadata: message.response_metadata,
-  });
-}
-
-function isCompressedExploreToolOutput(message: ToolMessage) {
-  return readPinpawoMetadata(message)?.exploreRawEvicted === true;
-}
-
-function collectCompressibleToolResultIndexes(messages: BaseMessage[]): number[] {
-  const toolIndexes = messages
-    .map((message, index) => ({ message, index }))
-    .filter((item): item is { message: ToolMessage; index: number } => ToolMessage.isInstance(item.message));
-  const protectedIndexes = new Set(
-    toolIndexes.slice(-EXPLORE_COMPRESS_KEEP_RECENT_TOOL_RESULTS).map((item) => item.index),
-  );
-
-  return toolIndexes
-    .filter(({ message, index }) => {
-      if (protectedIndexes.has(index)) return false;
-      if (message.status === 'error') return false;
-      const text = readMessageText(message);
-      if (isCompressedExploreToolOutput(message)) return false;
-      return text.length >= EXPLORE_COMPRESS_MIN_TOOL_CHARS;
-    })
-    .map((item) => item.index);
-}
-
-/**
- * Builds the evidence string the summarizer sees, and returns the exact set of
- * tool-output indexes that string actually covers. Only those covered indexes
- * may be evicted afterwards — outputs dropped by the char-budget `break` were
- * never shown to the summarizer, so evicting them would lose findings silently
- * (review finding #3).
- */
-function buildOldToolOutputEvidence(messages: BaseMessage[], toolIndexes: number[]) {
-  const selected = new Set(toolIndexes);
-  const lines: string[] = [];
-  const coveredIndexes: number[] = [];
-  let totalLength = 0;
-
-  for (const [index, message] of messages.entries()) {
-    if (!selected.has(index)) continue;
-    const text = readMessageText(message);
-    if (!text) continue;
-    const entry = [
-      `[tool_result] ${typeof (message as ToolMessage).name === 'string' ? (message as ToolMessage).name : 'tool'}`,
-      clipForPrompt(text, EXPLORE_SUMMARY_MESSAGE_MAX_CHARS),
-    ].join('\n');
-    totalLength += entry.length;
-    if (totalLength > EXPLORE_SUMMARY_TRANSCRIPT_MAX_CHARS) break;
-    lines.push(entry);
-    coveredIndexes.push(index);
-  }
-
-  return {
-    evidence: lines.length > 0 ? `[old_tool_output]\n${lines.join('\n\n')}` : '',
-    coveredIndexes,
-  };
-}
-
 function collectAnyToolResultIndexes(messages: BaseMessage[]): number[] {
   return messages
     .map((message, index) => ({ message, index }))
@@ -357,24 +242,29 @@ function collectAnyToolResultIndexes(messages: BaseMessage[]): number[] {
 }
 
 function buildFinalExploreEvidence(messages: BaseMessage[]): string {
-  const finalIndexes = new Set<number>(collectAnyToolResultIndexes(messages));
+  const toolResultIndexes = collectAnyToolResultIndexes(messages);
+  const latestContextSummaryIndex = [...messages.entries()]
+    .reverse()
+    .find(([, message]) => message.additional_kwargs?.lc_source === 'summarization')?.[0];
   const latestAssistantIndex = [...messages.entries()]
     .reverse()
     .find(([index, message]) => !ToolMessage.isInstance(message) && message._getType() === 'ai' && readMessageText(message))?.[0];
 
-  if (latestAssistantIndex !== undefined) {
-    finalIndexes.add(latestAssistantIndex);
-  }
-
-  if (finalIndexes.size === 0) {
+  const priorityIndexes = [
+    latestContextSummaryIndex,
+    latestAssistantIndex,
+    ...toolResultIndexes.reverse(),
+  ].filter((index): index is number => index !== undefined);
+  if (priorityIndexes.length === 0) {
     return '';
   }
 
-  const lines: string[] = [];
+  const selectedEntries = new Map<number, string>();
   let totalLength = 0;
-
-  for (const [index, message] of messages.entries()) {
-    if (!finalIndexes.has(index)) continue;
+  for (const index of priorityIndexes) {
+    if (selectedEntries.has(index)) continue;
+    const message = messages[index];
+    if (!message) continue;
     const text = readMessageText(message);
     if (!text) continue;
 
@@ -384,11 +274,14 @@ function buildFinalExploreEvidence(messages: BaseMessage[]): string {
         : `[${message._getType()}] #${index}`,
       clipForPrompt(text, EXPLORE_SUMMARY_MESSAGE_MAX_CHARS),
     ].join('\n');
+    if (totalLength + entry.length > EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS) continue;
     totalLength += entry.length;
-    if (totalLength > EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS) break;
-    lines.push(entry);
+    selectedEntries.set(index, entry);
   }
 
+  const lines = [...selectedEntries.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, entry]) => entry);
   return lines.length > 0 ? `[finalize]\n${lines.join('\n\n')}` : '';
 }
 
@@ -406,22 +299,6 @@ async function buildFinalExploreIngest(params: {
     structuredOutput: params.structuredOutput,
     previousSummary: params.previousSummary,
     evidence,
-    reason: 'finalize',
-  });
-}
-
-function replaceCompressedToolOutputs(
-  messages: BaseMessage[],
-  toolIndexes: number[],
-): BaseMessage[] {
-  if (toolIndexes.length === 0) return messages;
-  const selected = new Set(toolIndexes);
-  return messages.map((message, index) => {
-    if (!selected.has(index) || !ToolMessage.isInstance(message)) return message;
-    const content = `${EXPLORE_RAW_EVICTED}\nSee the later compressed explore summary for findings.`;
-    return replaceToolMessageContent(message, content, {
-      exploreRawEvicted: true,
-    });
   });
 }
 
@@ -438,48 +315,8 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       const available = new Set(context.availableToolkits?.map((item) => item.name) ?? []);
       const ingestModel = context.models.observe ?? context.models.subagent ?? context.models.act;
       const artifactStore = context.artifactStore;
-      let currentSummary = readLatestExploreSummary(context.messages);
-      let pendingArtifact: PendingExploreArtifact | null = null;
-      const rewriteOldToolOutput = async (
-        messages: BaseMessage[],
-        _ctx: ContextPolicyContext,
-      ): Promise<BaseMessage[]> => {
-        const toolIndexes = collectCompressibleToolResultIndexes(messages);
-        if (toolIndexes.length === 0) {
-          return messages;
-        }
-        const { evidence, coveredIndexes } = buildOldToolOutputEvidence(messages, toolIndexes);
-        if (!evidence.trim() || coveredIndexes.length === 0) {
-          return messages;
-        }
-        try {
-          const ingest = await ingestExploreKnowledge({
-            model: ingestModel,
-            structuredOutput: options.structuredOutput,
-            previousSummary: currentSummary,
-            evidence,
-            reason: 'old_tool_output',
-          });
-          pendingArtifact = {
-            summary: ingest.summary,
-            evidence: ingest.evidence,
-          };
-          // Only evict outputs the summarizer actually saw (finding #3).
-          const rewritten = withExploreSummaryMessage(
-            replaceCompressedToolOutputs(messages, coveredIndexes),
-            ingest.summary,
-          );
-          currentSummary = ingest.summary;
-          return rewritten;
-        } catch (error) {
-          console.warn(
-            `[explore] old-output ingest failed, keeping raw outputs this round: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          return messages;
-        }
-      };
+      const previousSummary = readLatestExploreSummary(context.messages)
+        ?? readLatestSubagentContextSummary(context.messages);
 
       const middleware: {
         afterRun: (result: SubagentResult, middlewareCtx: CapabilityMiddlewareContext) => Promise<SubagentResult>;
@@ -487,31 +324,22 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
         afterRun: async (result, middlewareCtx) => {
           const messagesFromMetadata = result.messages;
           const summaryFromMetadata = readLatestExploreSummary(messagesFromMetadata);
-          let ingest: ExploreKnowledgeIngest | null = null;
-          let nextMessages = messagesFromMetadata;
-
-          if (hasExploreIngestFailure(result.messages)) {
-            return result;
-          }
-
-          if (pendingArtifact) {
-            ingest = pendingArtifact;
-          } else if (summaryFromMetadata) {
-            ingest = { summary: summaryFromMetadata, evidence: [] };
-          } else {
-            ingest = await buildFinalExploreIngest({
+          const contextSummary = readLatestSubagentContextSummary(messagesFromMetadata);
+          const ingest = await buildFinalExploreIngest({
               model: ingestModel,
               structuredOutput: options.structuredOutput,
-              previousSummary: currentSummary,
+              previousSummary: summaryFromMetadata ?? contextSummary ?? previousSummary,
               resultMessages: messagesFromMetadata,
-            }).catch(() => null);
-          }
+            }).catch(() => null)
+            ?? (summaryFromMetadata || contextSummary
+              ? { summary: summaryFromMetadata ?? contextSummary ?? '', evidence: [] }
+              : null);
 
           if (!ingest) {
             return result;
           }
 
-          nextMessages = summaryFromMetadata
+          const nextMessages = summaryFromMetadata === ingest.summary.trim()
             ? messagesFromMetadata
             : withExploreSummaryMessage(messagesFromMetadata, ingest.summary);
 
@@ -521,6 +349,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
               {
                 recordCapabilityArtifact: middlewareCtx.recordCapabilityArtifact,
                 threadId: middlewareCtx.threadId,
+                capabilityId: middlewareCtx.capabilityId,
                 delegationId: middlewareCtx.delegationId,
                 runId: middlewareCtx.runId,
               },
@@ -540,16 +369,13 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       return {
         uses: DEFAULT_EXPLORE_TOOLKITS.filter((name) => available.has(name)),
         middleware,
-        contextPolicy: {
-          rewriteAsync: rewriteOldToolOutput,
-        },
         instructions: [
           '你是通用探索 capability。只读取、检查、搜索、观察和总结上下文。',
           '不要修改文件，不要提交、推送、删除、写入、发送消息、发布内容，或执行任何外部真实副作用。',
           '使用可用工具在执行过程中自行规划探索；createRuntime 阶段不做额外模型规划。',
           '优先先确认候选范围，再读取详细内容；避免无界浏览或无目的扫描。',
           '代码 review、PR review、pull request review、diff 审查和仓库变更评审必须优先使用 git toolkit，尤其是 gh_pr_view、gh_pr_diff、git_diff、git_show；不要使用 browser、http_fetch 或 download_file 拉取 GitHub PR 页面、diff 或评论。',
-          '运行中会保留最近的完整工具输出；较早的大型工具输出会被知识摘要替换并沉淀为知识 artifact。摘要会写明来源，需要细节时用 view_file 等工具按来源回查。',
+          '重要发现必须保留精确来源；运行时可能把较早执行上下文总结为摘要，需要细节时用 view_file 等工具按来源回查。',
           '结论必须包含简洁探索摘要、已查看文件列表、关键发现、证据引用（文件路径、URL、issue/PR 编号或命令输出来源）和建议下一步。',
         ],
       };

@@ -50,54 +50,13 @@ export type SubagentRuntimeEvent = {
   data: unknown;
 };
 
-/**
- * Lets a subagent persist a capability artifact from inside the loop and have
- * the ref reach `state.sessionCapabilityArtifacts`. `recordCapabilityArtifact` is the
- * sink supplied by the orchestrator (it pushes into the shared artifacts array
- * that becomes `SubagentResult.artifacts`); the ids address a write. A
- * capability holds its own `CapabilityArtifactStore` by closure for the bytes;
- * this only carries what the subagent loop cannot otherwise see.
- *
- * This is the single artifact-sink shape shared by every layer that can persist
- * an artifact — the in-loop context rewrite path, the afterRun middleware
- * (`CapabilityMiddlewareContext`), and toolkit tools (`ToolkitContext`) all
- * expose the same `recordCapabilityArtifact` + addressing ids.
- */
-export type CapabilityArtifactSink = {
-  recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
-  threadId?: string | null;
-  delegationId?: string;
-  runId?: string;
-};
-
-export type ContextPolicyContext = {
-  iterationCount: number;
-  operations: Record<string, SubagentToolOperationMetadata>;
-  contextWindowTokens?: number;
-  artifactSink?: CapabilityArtifactSink;
-};
-
-export type SubagentContextPolicy = {
-  evictToolResults?: {
-    keepRecent: number;
-    defaultMode?: 'evict' | 'truncate';
-    minSizeChars?: number;
-    keepFailures?: boolean;
-    perTool?: Record<string, 'keep' | 'evict' | 'truncate'>;
-  };
-  rewrite?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[];
-  rewriteAsync?: (messages: BaseMessage[], ctx: ContextPolicyContext) => BaseMessage[] | Promise<BaseMessage[]>;
-};
-
 export type SubagentInputState = {
   instructions: string[];
   operations?: Record<string, SubagentToolOperationMetadata>;
   messages: BaseMessage[];
   maxIterations?: number;
   contextWindowTokens?: number;
-  contextPolicy?: SubagentContextPolicy;
   artifacts?: CapabilityArtifactRef[];
-  artifactSink?: CapabilityArtifactSink;
 };
 
 export type SubagentRunInput = SubagentInputState & {

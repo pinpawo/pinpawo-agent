@@ -74,6 +74,9 @@ export type RootStreamChatEvent =
  * depth >= 2 child scopes, so lane echoes are dropped — as legacy does.
  */
 const DELEGATION_LANE_NODE_NAMES = new Set(['capability', 'general']);
+const INTERNAL_SUBAGENT_MESSAGE_NODE_NAMES = new Set([
+  'SummarizationMiddleware.before_model',
+]);
 
 export function readNamespaceNode(namespace: string[] | undefined, index = 0): string | null {
   const segment = namespace?.[index];
@@ -187,6 +190,16 @@ export function readRootStreamChatEvent(
       }
 
       if (namespace.length >= 2) {
+        const childNode = readNamespaceNode(namespace, 1);
+        if (childNode && INTERNAL_SUBAGENT_MESSAGE_NODE_NAMES.has(childNode)) {
+          // The summarization model call is an implementation detail of the
+          // child agent. Its output becomes persisted context, not ambient
+          // progress shown to the user.
+          if (data.event === 'message-finish') {
+            current.buffer = '';
+          }
+          return null;
+        }
         // Subagent scope: buffer deltas, emit the whole message on finish.
         const text = readTextDelta(data);
         if (text) {

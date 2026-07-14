@@ -56,6 +56,7 @@ priority over older results.
 ## Failure Policy
 
 - LangChain summarization is part of the shared subagent runtime, not Explore.
+- A summarization error aborts the subagent before its `RemoveMessage` state update is committed.
 - If final structured ingest fails and an earlier Explore/LangChain summary exists,
   `afterRun` uses that summary as a best-effort artifact payload.
 - If no summary or final evidence is available, no artifact is written.

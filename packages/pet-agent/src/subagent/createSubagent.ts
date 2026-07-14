@@ -40,6 +40,11 @@ const DEFAULT_SUBAGENT_MAX_ITERATIONS = 100;
 const SUBAGENT_HARD_RECURSION_LIMIT = 10_000;
 const SUBAGENT_CONTEXT_SUMMARY_TRIGGER_RATIO = 0.65;
 const SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO = 0.3;
+const INVALID_CONTEXT_SUMMARY_MESSAGES = new Set([
+  'No previous conversation history.',
+  'Previous conversation was too long to summarize.',
+]);
+const CONTEXT_SUMMARY_ERROR_PREFIX = 'Error generating summary:';
 
 /**
  * Runtime-event name carrying subagent guard decision records. Written to the
@@ -75,6 +80,74 @@ function ensureSubagentMessageIds(messages: BaseMessage[]) {
   }
 }
 
+function readMessageText(message: BaseMessage): string {
+  if (typeof message.content === 'string') {
+    return message.content;
+  }
+  return message.content
+    .map((item) => {
+      if (typeof item === 'string') return item;
+      if (typeof item === 'object' && item !== null && 'text' in item) {
+        return typeof item.text === 'string' ? item.text : '';
+      }
+      return '';
+    })
+    .join('');
+}
+
+function assertValidContextSummaryUpdate(update: unknown) {
+  if (!update || typeof update !== 'object' || !('messages' in update)) {
+    return;
+  }
+  const messages = (update as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) {
+    return;
+  }
+  const summary = messages.find(
+    (message): message is BaseMessage => typeof message === 'object'
+      && message !== null
+      && 'content' in message
+      && 'additional_kwargs' in message
+      && (message as BaseMessage).additional_kwargs?.lc_source === 'summarization',
+  );
+  if (!summary) {
+    return;
+  }
+
+  const content = readMessageText(summary);
+  const prefix = `${SUBAGENT_CONTEXT_SUMMARY_PREFIX}\n\n`;
+  const summaryText = content.startsWith(prefix) ? content.slice(prefix.length) : content;
+  if (
+    summaryText.trim().length === 0
+    || INVALID_CONTEXT_SUMMARY_MESSAGES.has(summaryText)
+    || summaryText.startsWith(CONTEXT_SUMMARY_ERROR_PREFIX)
+  ) {
+    throw new Error(`Subagent context summarization failed: ${summaryText || 'empty summary'}`);
+  }
+}
+
+function failFastOnInvalidContextSummary(
+  middleware: AnyAgentMiddleware,
+): AnyAgentMiddleware {
+  const beforeModel = middleware.beforeModel;
+  if (!beforeModel) {
+    throw new Error('LangChain summarization middleware has no beforeModel hook.');
+  }
+  const hook = typeof beforeModel === 'function' ? beforeModel : beforeModel.hook;
+  const wrappedHook: typeof hook = async (state, runtime) => {
+    const update = await hook(state, runtime);
+    // LangChain currently represents summarization failures as summary text
+    // inside a destructive RemoveMessage update. Reject that update before the
+    // graph can commit it, preserving the existing transcript on failure.
+    assertValidContextSummaryUpdate(update);
+    return update;
+  };
+  middleware.beforeModel = typeof beforeModel === 'function'
+    ? wrappedHook
+    : { ...beforeModel, hook: wrappedHook };
+  return middleware;
+}
+
 function createSubagentSummarizationMiddleware(
   inputState: SubagentInputState,
   model: SubagentRunInput['model'],
@@ -91,7 +164,7 @@ function createSubagentSummarizationMiddleware(
     contextWindowTokens * SUBAGENT_CONTEXT_SUMMARY_KEEP_RATIO,
   ));
 
-  return summarizationMiddleware({
+  return failFastOnInvalidContextSummary(summarizationMiddleware({
     model,
     trigger: { tokens: triggerTokens },
     keep: { tokens: keepTokens },
@@ -101,7 +174,7 @@ function createSubagentSummarizationMiddleware(
     trimTokensToSummarize: Math.max(1, Math.floor(contextWindowTokens * 0.5)),
     summaryPrompt: SUBAGENT_CONTEXT_SUMMARY_PROMPT,
     summaryPrefix: SUBAGENT_CONTEXT_SUMMARY_PREFIX,
-  });
+  }));
 }
 
 function createSubagentIterationGuardMiddleware(

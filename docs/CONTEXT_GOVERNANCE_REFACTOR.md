@@ -84,6 +84,7 @@
 3. LangChain `summarizationMiddleware` 在每次 model call 前计算消息体积；达到 trigger 后，用当前
    subagent model 总结较早消息，并通过 `RemoveMessage` 持久化替换 state。
 4. 摘要保留当前任务、已完成工作、关键发现、决策、失败、待办及精确来源；近期消息保持原样。
+5. 摘要模型异常或无法生成有效摘要时直接抛错，不提交包含 `RemoveMessage` 的 state update；不得用错误占位文本替换旧历史。
 
 trigger/keep 比例属于 runtime 内部保守常量，不进入 `CapabilityRuntime`。这样 system prompt、tool schema
 和下一次模型输出始终有预留空间，同时公共配置只有一个窗口字段。
@@ -110,6 +111,7 @@ hook，不再扩展 context policy DSL。
 
 - 有 `contextWindowTokens` 且消息超过派生 trigger 时，旧历史被带 `lc_source: summarization` 的摘要持久化替换。
 - 低于 trigger 时不产生摘要。
+- 摘要失败时 subagent 直接失败，旧历史不会被错误占位摘要替换。
 - general lane 与所有 capability 自动获得同一默认行为，无需 capability 显式配置。
 - 单条 tool result 在未触发摘要时保持原样，输出大小责任仍在 toolkit。
 

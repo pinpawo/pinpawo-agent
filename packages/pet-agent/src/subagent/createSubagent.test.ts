@@ -48,6 +48,23 @@ class NeverConvergingModel extends BaseChatModel {
   }
 }
 
+class FailingSummaryModel extends BaseChatModel {
+  callCount = 0;
+
+  _llmType() {
+    return 'failing-summary';
+  }
+
+  async _generate(): Promise<never> {
+    this.callCount += 1;
+    throw new Error('summary service unavailable');
+  }
+
+  bindTools() {
+    return this;
+  }
+}
+
 /**
  * The production shape (#322 Phase 4): a parent graph node runs createSubagent
  * with the parent config passed through, and every run signal — tool
@@ -184,6 +201,69 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
   assert.match(String(summary.content), /Earlier subagent context summary:/);
   assert.match(String(summary.content), /preserved summary with src\/a\.ts/);
   assert.equal(result.messages.some((message) => message.content === oldContext), false);
+});
+
+test('createSubagent throws instead of committing an error summary', async () => {
+  const model = new FailingSummaryModel({});
+
+  await assert.rejects(
+    createSubagent({
+      model,
+      tools: [],
+      instructions: [],
+      contextWindowTokens: 1000,
+      messages: [
+        new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
+        new AIMessage(`pending verification\n${'y'.repeat(800)}`),
+        new HumanMessage(`continue investigation\n${'z'.repeat(800)}`),
+        new AIMessage(`more findings\n${'w'.repeat(800)}`),
+        new HumanMessage('Finish the delegated task.'),
+      ],
+      maxIterations: 4,
+    }),
+    /Subagent context summarization failed: Error generating summary: Error: summary service unavailable/,
+  );
+  // The only model call was the failed summary; the main subagent model call
+  // must not continue after an invalid state update.
+  assert.equal(model.callCount, 1);
+});
+
+test('createSubagent throws when history cannot be trimmed into a summary', async () => {
+  await assert.rejects(
+    createSubagent({
+      model: new FakeListChatModel({ responses: ['must not continue'], sleep: 0 }),
+      tools: [],
+      instructions: [],
+      contextWindowTokens: 1000,
+      messages: [
+        new HumanMessage(`single oversized context\n${'x'.repeat(4_000)}`),
+        new AIMessage('Continue.'),
+        new HumanMessage('Finish the delegated task.'),
+      ],
+      maxIterations: 4,
+    }),
+    /Subagent context summarization failed: Previous conversation was too long to summarize/,
+  );
+});
+
+test('createSubagent throws on an empty context summary', async () => {
+  await assert.rejects(
+    createSubagent({
+      model: new FakeListChatModel({ responses: ['', 'must not continue'], sleep: 0 }),
+      tools: [],
+      instructions: [],
+      contextWindowTokens: 1000,
+      messages: [
+        new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
+        new AIMessage(`pending verification\n${'y'.repeat(800)}`),
+        new HumanMessage(`continue investigation\n${'z'.repeat(800)}`),
+        new AIMessage(`more findings\n${'w'.repeat(800)}`),
+        new HumanMessage('Finish the delegated task.'),
+      ],
+      maxIterations: 4,
+    }),
+    /Subagent context summarization failed: empty summary/,
+  );
 });
 
 test('createSubagent leaves single-result sizing to the toolkit below the watermark', async () => {

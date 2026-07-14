@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
@@ -9,7 +9,7 @@ import {
   START,
   END,
 } from '@langchain/langgraph';
-import { GUARD_DECISION_EVENT } from '@pinpawo/pet-agent';
+import { createSubagent, GUARD_DECISION_EVENT } from '@pinpawo/pet-agent';
 import {
   adaptRootStream,
   readRootStreamChatEvent,
@@ -47,9 +47,9 @@ function streamingNode(model: FakeListChatModel) {
 
 async function collectChatEvents(graph: {
   streamEvents: (input: unknown, options: unknown) => Promise<AsyncIterable<RootProtocolEvent>>;
-}): Promise<RootStreamChatEvent[]> {
+}, messages: BaseMessage[] = [new HumanMessage('hi')]): Promise<RootStreamChatEvent[]> {
   const run = await graph.streamEvents(
-    { messages: [new HumanMessage('hi')] },
+    { messages },
     { version: 'v3' },
   );
   const events: RootStreamChatEvent[] = [];
@@ -135,6 +135,49 @@ test('adapter emits one completed subagent message per child lifecycle across mu
     .join('');
   assert.ok(assistantText.includes('主回复'));
   assert.ok(!assistantText.includes('foo'), `assistant text leaked subagent output: ${JSON.stringify(assistantText)}`);
+});
+
+test('adapter hides context-summary model output and keeps the final subagent message', async () => {
+  const summaryText = 'INTERNAL_SUMMARY_CONTENT';
+  const finalText = 'FINAL_SUBAGENT_CONTENT';
+  const general = async (
+    state: typeof MessagesAnnotation.State,
+    config?: RunnableConfig,
+  ) => {
+    const result = await createSubagent({
+      model: new FakeListChatModel({ responses: [summaryText, finalText], sleep: 0 }),
+      tools: [],
+      instructions: [],
+      messages: state.messages,
+      contextWindowTokens: 1000,
+      maxIterations: 4,
+      runnableConfig: config,
+    });
+    const finalMessage = result.messages.at(-1);
+    assert.ok(finalMessage);
+    return { messages: [finalMessage] };
+  };
+  const graph = new StateGraph(MessagesAnnotation)
+    .addNode('general', general)
+    .addEdge(START, 'general')
+    .addEdge('general', END)
+    .compile();
+  const messages = [
+    new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
+    new AIMessage(`pending verification\n${'y'.repeat(800)}`),
+    new HumanMessage(`continue investigation\n${'z'.repeat(800)}`),
+    new AIMessage(`more findings\n${'w'.repeat(800)}`),
+    new HumanMessage('Finish the delegated task.'),
+  ];
+
+  const events = await collectChatEvents(graph as never, messages);
+  const subagentMessages = events
+    .filter((event): event is Extract<RootStreamChatEvent, { type: 'subagent.message' }> => event.type === 'subagent.message')
+    .map((event) => event.text);
+
+  assert.deepEqual(subagentMessages, [finalText]);
+  assert.ok(events.every((event) => event.type !== 'subagent.message'
+    || !event.text.includes(summaryText)));
 });
 
 test('adapter surfaces guard decision records written to the stream writer', async () => {

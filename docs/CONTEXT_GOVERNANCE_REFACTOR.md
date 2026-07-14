@@ -28,7 +28,7 @@
 | 子代理执行循环与默认摘要 middleware | `packages/pet-agent/src/subagent/createSubagent.ts` |
 | lane 合入 / announce 标记 | `packages/pet-agent/src/agent/orchestrator/messageLanes.ts` 的 `tagNewLaneMessages`、`laneMessages` |
 | 委派状态更新（completed/progress） | `packages/pet-agent/src/agent/orchestrator/delegations.ts` 的 `updateTurnDelegationResult` |
-| general/capability 节点（合入点） | `packages/pet-agent/src/agent/createAgentRuntime.ts` 的 `generalNode` / `capabilityNode` |
+| general/capability 节点（合入点） | `packages/pet-agent/src/agent/orchestrator/runtime/nodes/general.ts` / `capability.ts` |
 | compaction（只在 turn 开始跑） | `packages/pet-agent/src/agent/orchestrator/contextCompaction.ts` |
 | 上下文窗口配置 | `services/local-agent/src/llmContextWindow.ts` |
 | checkpoint 落盘 | `services/local-agent/src/fileSaver.ts` |

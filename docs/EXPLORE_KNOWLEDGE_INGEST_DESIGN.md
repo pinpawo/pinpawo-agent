@@ -41,16 +41,17 @@ createSubagent(contextWindowTokens)
   -> Explore continues with the summary plus recent raw messages
 
 Explore afterRun
-  -> collect the latest LangChain summary, recent tool results and final answer
+  -> collect the latest LangChain summary, newest tool results and final answer
   -> run one structured final ingest
-  -> append `Explore summary:` to the returned transcript
+  -> append `Explore summary:` when the ingest produced a new version
   -> write one `kind: "report"` artifact through CapabilityArtifactStore
   -> record the returned ref through CapabilityMiddlewareContext
 ```
 
 The final ingest prompt preserves file paths, URLs, issue/PR identifiers, commands,
 errors and other source references. It may refine an earlier Explore summary from a
-continued delegation.
+continued delegation. When the evidence budget is reached, newer tool results take
+priority over older results.
 
 ## Failure Policy
 

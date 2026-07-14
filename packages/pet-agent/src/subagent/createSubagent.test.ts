@@ -154,7 +154,7 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
 });
 
 test('createSubagent summarizes persisted history from contextWindowTokens', async () => {
-  const oldContext = `old investigation evidence\n${'x'.repeat(4000)}`;
+  const oldContext = `old investigation evidence\n${'x'.repeat(800)}`;
   const result = await createSubagent({
     model: new FakeListChatModel({
       responses: [
@@ -168,7 +168,9 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
     contextWindowTokens: 1000,
     messages: [
       new HumanMessage(oldContext),
-      new AIMessage('The next step is to verify src/a.ts.'),
+      new AIMessage(`The next step is to verify src/a.ts.\n${'y'.repeat(800)}`),
+      new HumanMessage(`Check the earlier implementation details.\n${'z'.repeat(800)}`),
+      new AIMessage(`The verification step is still pending.\n${'w'.repeat(800)}`),
       new HumanMessage('Continue the delegated task.'),
     ],
     maxIterations: 4,

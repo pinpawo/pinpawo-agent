@@ -223,6 +223,57 @@ test('explore afterRun uses the previous summary when final ingest fails', async
   assert.equal(returned?.messages.length, 2);
 });
 
+test('explore afterRun appends a refreshed summary after a continuation', async () => {
+  const previous = '旧摘要：已检查 src/old.ts。';
+  const refreshed = '新摘要：已检查 src/old.ts 和 src/new.ts。';
+  const runtime = await createRuntime(fakeSummaryModel(refreshed), {
+    messages: [summaryMessage(previous)],
+  });
+
+  const returned = await runtime.middleware?.afterRun?.({
+    messages: [summaryMessage(previous), new AIMessage('new evidence from src/new.ts')],
+    artifacts: [],
+    completionReason: 'natural',
+  }, {
+    recordCapabilityArtifact: () => {},
+    threadId: 'thread-refresh',
+    capabilityId: 'explore',
+    delegationId: 'dg-refresh',
+    runId: 'run-refresh',
+  });
+
+  assert.equal(returned?.messages.length, 3);
+  assert.match(String(returned?.messages.at(-1)?.content ?? ''), /新摘要/);
+  assert.deepEqual(readExploreResult(returned?.messages ?? [])?.summary, refreshed);
+});
+
+test('explore final ingest keeps the newest tool results within its evidence budget', async () => {
+  let capturedHuman = '';
+  const runtime = await createRuntime(fakeSummaryModel('budgeted summary', ({ messages }) => {
+    capturedHuman = String(messages.at(-1)?.content ?? '');
+  }));
+  const toolResults = Array.from({ length: 12 }, (_, index) => new ToolMessage({
+    tool_call_id: `call-${index}`,
+    name: 'view_file_chunk',
+    content: `result-${index}\n${String(index).repeat(2_000)}`,
+  }));
+
+  await runtime.middleware?.afterRun?.({
+    messages: [...toolResults, new AIMessage('final answer')],
+    artifacts: [],
+    completionReason: 'natural',
+  }, {
+    recordCapabilityArtifact: () => {},
+    threadId: 'thread-budget',
+    capabilityId: 'explore',
+    delegationId: 'dg-budget',
+    runId: 'run-budget',
+  });
+
+  assert.match(capturedHuman, /result-11/);
+  assert.doesNotMatch(capturedHuman, /result-0\n/);
+});
+
 test('explore artifact persistence failure is non-fatal', async () => {
   const summary = 'final summary';
   const runtime = await createRuntime(fakeSummaryModel(summary), {

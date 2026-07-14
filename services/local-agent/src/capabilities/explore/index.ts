@@ -242,7 +242,7 @@ function collectAnyToolResultIndexes(messages: BaseMessage[]): number[] {
 }
 
 function buildFinalExploreEvidence(messages: BaseMessage[]): string {
-  const finalIndexes = new Set<number>(collectAnyToolResultIndexes(messages));
+  const toolResultIndexes = collectAnyToolResultIndexes(messages);
   const latestContextSummaryIndex = [...messages.entries()]
     .reverse()
     .find(([, message]) => message.additional_kwargs?.lc_source === 'summarization')?.[0];
@@ -250,22 +250,21 @@ function buildFinalExploreEvidence(messages: BaseMessage[]): string {
     .reverse()
     .find(([index, message]) => !ToolMessage.isInstance(message) && message._getType() === 'ai' && readMessageText(message))?.[0];
 
-  if (latestContextSummaryIndex !== undefined) {
-    finalIndexes.add(latestContextSummaryIndex);
-  }
-  if (latestAssistantIndex !== undefined) {
-    finalIndexes.add(latestAssistantIndex);
-  }
-
-  if (finalIndexes.size === 0) {
+  const priorityIndexes = [
+    latestContextSummaryIndex,
+    latestAssistantIndex,
+    ...toolResultIndexes.reverse(),
+  ].filter((index): index is number => index !== undefined);
+  if (priorityIndexes.length === 0) {
     return '';
   }
 
-  const lines: string[] = [];
+  const selectedEntries = new Map<number, string>();
   let totalLength = 0;
-
-  for (const [index, message] of messages.entries()) {
-    if (!finalIndexes.has(index)) continue;
+  for (const index of priorityIndexes) {
+    if (selectedEntries.has(index)) continue;
+    const message = messages[index];
+    if (!message) continue;
     const text = readMessageText(message);
     if (!text) continue;
 
@@ -275,11 +274,14 @@ function buildFinalExploreEvidence(messages: BaseMessage[]): string {
         : `[${message._getType()}] #${index}`,
       clipForPrompt(text, EXPLORE_SUMMARY_MESSAGE_MAX_CHARS),
     ].join('\n');
+    if (totalLength + entry.length > EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS) continue;
     totalLength += entry.length;
-    if (totalLength > EXPLORE_FINAL_SUMMARY_EVIDENCE_MAX_CHARS) break;
-    lines.push(entry);
+    selectedEntries.set(index, entry);
   }
 
+  const lines = [...selectedEntries.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, entry]) => entry);
   return lines.length > 0 ? `[finalize]\n${lines.join('\n\n')}` : '';
 }
 
@@ -337,7 +339,7 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
             return result;
           }
 
-          const nextMessages = summaryFromMetadata
+          const nextMessages = summaryFromMetadata === ingest.summary.trim()
             ? messagesFromMetadata
             : withExploreSummaryMessage(messagesFromMetadata, ingest.summary);
 

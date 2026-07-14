@@ -25,7 +25,7 @@ Explore 不再实现 `rewriteOldToolOutput`、`pendingArtifact` 或 in-loop arti
 `afterRun` 收集：
 
 - 最新 LangChain context summary；
-- 当前 transcript 中的 tool results；
+- 当前 transcript 中的 tool results（达到 evidence 预算时优先保留最新结果）；
 - 最终 assistant 输出；
 - 续跑上下文中已有的 `Explore summary:`。
 
@@ -36,7 +36,7 @@ Explore 不再实现 `rewriteOldToolOutput`、`pendingArtifact` 或 in-loop arti
 
 成功后：
 
-- 在返回 messages 末尾追加 `Explore summary:`；
+- ingest 生成新版 summary 时，在返回 messages 末尾追加新的 `Explore summary:`；
 - 写一条 `kind: 'report'`、`mimeType: 'text/markdown'` artifact；
 - 把 evidence 写入 `metadata.evidence`；
 - 通过 `CapabilityMiddlewareContext.recordCapabilityArtifact` 回传 ref。

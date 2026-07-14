@@ -208,12 +208,23 @@ function ghApiArgs(target: ResolvedGhIssueTarget, endpoint: string) {
 function truncateBody(value: unknown) {
   const body = typeof value === 'string' ? value : '';
   const truncated = body.length > MAX_GH_BODY_CHARS;
+  let returnedChars = truncated ? MAX_GH_BODY_CHARS : body.length;
+  if (
+    truncated
+    && returnedChars > 0
+    && body.charCodeAt(returnedChars - 1) >= 0xd800
+    && body.charCodeAt(returnedChars - 1) <= 0xdbff
+    && body.charCodeAt(returnedChars) >= 0xdc00
+    && body.charCodeAt(returnedChars) <= 0xdfff
+  ) {
+    returnedChars -= 1;
+  }
   return {
-    body: truncated ? body.slice(0, MAX_GH_BODY_CHARS) : body,
+    body: truncated ? body.slice(0, returnedChars) : body,
     bodyTruncation: {
       truncated,
       originalChars: body.length,
-      returnedChars: truncated ? MAX_GH_BODY_CHARS : body.length,
+      returnedChars,
     },
   };
 }

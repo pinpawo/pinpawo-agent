@@ -78,8 +78,8 @@ test('gh_issue_view paginates comments, reports truncation, and returns error st
   const fakeGh = createFakeGh(t, `
 case "$*" in
   "api repos/pinpawo/pinpawo-agent/issues/377")
-    long_body=$(awk 'BEGIN { for (i = 0; i < 60001; i++) printf "x" }')
-    printf '{"number":377,"title":"Toolkit issue","state":"open","user":{"login":"octocat"},"labels":[],"assignees":[],"milestone":null,"html_url":"${issueUrl}","body":"%s","comments":3}\\n' "$long_body"
+    long_body=$(awk 'BEGIN { for (i = 0; i < 59999; i++) printf "x" }')
+    printf '{"number":377,"title":"Toolkit issue","state":"open","user":{"login":"octocat"},"labels":[],"assignees":[],"milestone":null,"html_url":"${issueUrl}","body":"%s😀","comments":3}\\n' "$long_body"
     ;;
   "api repos/pinpawo/pinpawo-agent/issues/377/comments?per_page=2&page=2")
     printf '[{"id":3,"user":{"login":"reviewer"},"body":"last comment","created_at":"2026-07-14T00:00:00Z","updated_at":"2026-07-14T00:00:00Z","html_url":"${issueUrl}#issuecomment-3"}]\\n'
@@ -108,11 +108,11 @@ esac`);
       hasNextPage: boolean;
     };
   };
-  assert.equal(output.body.length, 60_000);
+  assert.equal(output.body, 'x'.repeat(59_999));
   assert.deepEqual(output.bodyTruncation, {
     truncated: true,
     originalChars: 60_001,
-    returnedChars: 60_000,
+    returnedChars: 59_999,
   });
   assert.equal(output.comments[0]?.body, 'last comment');
   assert.equal(output.comments[0]?.bodyTruncation.truncated, false);

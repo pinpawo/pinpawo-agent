@@ -4,6 +4,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
+import { ToolMessage } from '@langchain/core/messages';
 import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
 import {
   gitAddTool,
@@ -72,23 +73,76 @@ test('git_add requires explicit pathspecs', async () => {
   );
 });
 
-test('gh_issue_view uses structured output and propagates command failures', async (t) => {
-  const fakeGh = createFakeGh(t, 'printf \'%s\\n\' "$*"');
+test('gh_issue_view paginates comments, reports truncation, and returns error status', async (t) => {
+  const issueUrl = 'https://github.com/pinpawo/pinpawo-agent/issues/377';
+  const fakeGh = createFakeGh(t, `
+case "$*" in
+  "api repos/pinpawo/pinpawo-agent/issues/377")
+    long_body=$(awk 'BEGIN { for (i = 0; i < 60001; i++) printf "x" }')
+    printf '{"number":377,"title":"Toolkit issue","state":"open","user":{"login":"octocat"},"labels":[],"assignees":[],"milestone":null,"html_url":"${issueUrl}","body":"%s","comments":3}\\n' "$long_body"
+    ;;
+  "api repos/pinpawo/pinpawo-agent/issues/377/comments?per_page=2&page=2")
+    printf '[{"id":3,"user":{"login":"reviewer"},"body":"last comment","created_at":"2026-07-14T00:00:00Z","updated_at":"2026-07-14T00:00:00Z","html_url":"${issueUrl}#issuecomment-3"}]\\n'
+    ;;
+  *)
+    printf 'unexpected gh arguments: %s\\n' "$*" >&2
+    exit 2
+    ;;
+esac`);
 
-  assert.equal(
-    await ghIssueViewTool.invoke({ issue: '377', cwd: process.cwd() }),
-    'issue view 377 --json number,title,state,author,labels,comments,assignees,milestone,body,url',
-  );
+  const output = JSON.parse(String(await ghIssueViewTool.invoke({
+    issue: issueUrl,
+    cwd: process.cwd(),
+    commentsPage: 2,
+    commentsPerPage: 2,
+  }))) as {
+    body: string;
+    bodyTruncation: { truncated: boolean; originalChars: number; returnedChars: number };
+    comments: Array<{ body: string; bodyTruncation: { truncated: boolean } }>;
+    commentsPagination: {
+      page: number;
+      perPage: number;
+      returnedCount: number;
+      totalCount: number;
+      hasPreviousPage: boolean;
+      hasNextPage: boolean;
+    };
+  };
+  assert.equal(output.body.length, 60_000);
+  assert.deepEqual(output.bodyTruncation, {
+    truncated: true,
+    originalChars: 60_001,
+    returnedChars: 60_000,
+  });
+  assert.equal(output.comments[0]?.body, 'last comment');
+  assert.equal(output.comments[0]?.bodyTruncation.truncated, false);
+  assert.deepEqual(output.commentsPagination, {
+    page: 2,
+    perPage: 2,
+    returnedCount: 1,
+    totalCount: 3,
+    hasPreviousPage: true,
+    hasNextPage: false,
+  });
 
   writeFileSync(fakeGh, '#!/bin/sh\nprintf \'auth failed\\n\' >&2\nexit 1\n', 'utf-8');
   await assert.rejects(
-    () => ghIssueViewTool.invoke({ issue: '377', cwd: process.cwd() }),
+    () => ghIssueViewTool.invoke({ issue: issueUrl, cwd: process.cwd() }),
     /gh command failed \(exit 1\):\nauth failed/,
   );
 
+  const toolError = await ghIssueViewTool.invoke({
+    name: 'gh_issue_view',
+    args: { issue: issueUrl, cwd: process.cwd() },
+    id: 'call-error',
+    type: 'tool_call',
+  }, { toolCallId: 'call-error' } as never);
+  assert.equal(ToolMessage.isInstance(toolError), true);
+  assert.equal(ToolMessage.isInstance(toolError) ? toolError.status : null, 'error');
+
   writeFileSync(fakeGh, '#!/bin/sh\nexit 0\n', 'utf-8');
   await assert.rejects(
-    () => ghIssueViewTool.invoke({ issue: '377', cwd: process.cwd() }),
+    () => ghIssueViewTool.invoke({ issue: issueUrl, cwd: process.cwd() }),
     /gh command returned no output/,
   );
 });

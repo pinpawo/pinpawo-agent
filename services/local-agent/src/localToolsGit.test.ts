@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
 import {
   gitAddTool,
   gitCommitTool,
   gitDiffTool,
+  ghIssueViewTool,
   gitStatusTool,
 } from './toolkits/local/gitTools';
 
@@ -18,6 +19,24 @@ function createRepo() {
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
   execFileSync('git', ['config', 'user.name', 'PinPawo Test'], { cwd: dir });
   return dir;
+}
+
+function createFakeGh(t: TestContext, script: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'pinpawo-gh-tool-'));
+  const executable = join(dir, 'gh');
+  const originalPath = process.env.PATH;
+  writeFileSync(executable, `#!/bin/sh\n${script}\n`, 'utf-8');
+  chmodSync(executable, 0o755);
+  process.env.PATH = `${dir}:${originalPath ?? ''}`;
+  t.after(() => {
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+  return executable;
 }
 
 test('git tools inspect and stage a repository without shell command strings', async () => {
@@ -50,6 +69,27 @@ test('git_add requires explicit pathspecs', async () => {
   await assert.rejects(
     () => gitAddTool.invoke({ pathspecs: [] }),
     /Too small|at least/,
+  );
+});
+
+test('gh_issue_view uses structured output and propagates command failures', async (t) => {
+  const fakeGh = createFakeGh(t, 'printf \'%s\\n\' "$*"');
+
+  assert.equal(
+    await ghIssueViewTool.invoke({ issue: '377', cwd: process.cwd() }),
+    'issue view 377 --json number,title,state,author,labels,comments,assignees,milestone,body,url',
+  );
+
+  writeFileSync(fakeGh, '#!/bin/sh\nprintf \'auth failed\\n\' >&2\nexit 1\n', 'utf-8');
+  await assert.rejects(
+    () => ghIssueViewTool.invoke({ issue: '377', cwd: process.cwd() }),
+    /gh command failed \(exit 1\):\nauth failed/,
+  );
+
+  writeFileSync(fakeGh, '#!/bin/sh\nexit 0\n', 'utf-8');
+  await assert.rejects(
+    () => ghIssueViewTool.invoke({ issue: '377', cwd: process.cwd() }),
+    /gh command returned no output/,
   );
 });
 

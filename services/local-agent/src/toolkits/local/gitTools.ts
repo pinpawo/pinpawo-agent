@@ -11,6 +11,18 @@ import { readBoolean, readRecord, readString } from '../operationMetadata';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
 const MAX_GIT_OUTPUT_CHARS = 30_000;
+const GH_ISSUE_VIEW_FIELDS = [
+  'number',
+  'title',
+  'state',
+  'author',
+  'labels',
+  'comments',
+  'assignees',
+  'milestone',
+  'body',
+  'url',
+].join(',');
 const execFileAsync = promisify(execFile);
 
 type GitCommandResult = {
@@ -47,6 +59,26 @@ function formatGitResult(result: GitCommandResult) {
   return truncateOutput(output || '(no output)');
 }
 
+function formatGhError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return new Error(`gh command failed: ${String(error)}`);
+  }
+
+  const errorRecord = error as Error & {
+    stdout?: unknown;
+    stderr?: unknown;
+    code?: unknown;
+  };
+  const stdout = typeof errorRecord.stdout === 'string' ? errorRecord.stdout.trimEnd() : '';
+  const stderr = typeof errorRecord.stderr === 'string' ? errorRecord.stderr.trimEnd() : '';
+  const output = truncateOutput([stdout, stderr].filter(Boolean).join('\n'));
+  const prefix = typeof errorRecord.code === 'number'
+    ? `gh command failed (exit ${errorRecord.code})`
+    : `gh command failed: ${error.message}`;
+
+  return new Error(output ? `${prefix}:\n${output}` : prefix);
+}
+
 export async function runGit(args: string[], cwd?: string) {
   const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
   try {
@@ -75,28 +107,23 @@ export async function runGit(args: string[], cwd?: string) {
 
 async function runGh(args: string[], cwd?: string) {
   const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
+  let result: GitCommandResult;
   try {
-    const result = await execFileAsync('gh', args, {
+    result = await execFileAsync('gh', args, {
       cwd: repo,
       encoding: 'utf-8',
       timeout: 20_000,
       maxBuffer: 1024 * 512,
     });
-    return formatGitResult(result);
   } catch (err) {
-    if (err instanceof Error && ('stdout' in err || 'stderr' in err)) {
-      const errorRecord = err as Error & { stdout?: unknown; stderr?: unknown; code?: unknown };
-      return formatGitResult({
-        stdout: errorRecord.stdout,
-        stderr: errorRecord.stderr,
-        status: typeof errorRecord.code === 'number'
-          ? errorRecord.code
-          : null,
-        error: errorRecord,
-      });
-    }
-    return formatGitResult({ error: err instanceof Error ? err : new Error(String(err)) });
+    throw formatGhError(err);
   }
+
+  const output = formatGitResult(result);
+  if (output === '(no output)') {
+    throw new Error('gh command returned no output');
+  }
+  return output;
 }
 
 function normalizeGhTarget(value: string | undefined, label: string) {
@@ -275,7 +302,13 @@ export const ghPrDiffTool = tool(
 
 export const ghIssueViewTool = tool(
   async ({ cwd, issue }: { cwd?: string; issue: string }) =>
-    runGh(['issue', 'view', normalizeGhTarget(issue, 'issue'), '--comments'], cwd),
+    runGh([
+      'issue',
+      'view',
+      normalizeGhTarget(issue, 'issue'),
+      '--json',
+      GH_ISSUE_VIEW_FIELDS,
+    ], cwd),
   {
     name: 'gh_issue_view',
     description: '使用 GitHub CLI 查看 issue 元数据、描述和评论。issue 可为 issue 编号或 URL；默认当前 workdir 仓库。',

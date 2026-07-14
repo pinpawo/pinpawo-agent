@@ -5,9 +5,9 @@ import {
   OPERATION_STATUS_DOT,
 } from './agentTimelineRendering';
 import { patchToneToInkProps } from './applyPatchDisplay';
-import type { AgentOperationEntry } from '../timeline/agentTimeline';
+import type { LocalAgentOperationEntry } from '../../localAgentSession';
 
-type OperationPhase = AgentOperationEntry['phase'];
+type OperationPhase = LocalAgentOperationEntry['phase'];
 
 /**
  * Status-dot color per phase, matching the gray/green/red convention:
@@ -29,7 +29,7 @@ function statusDotColor(phase: OperationPhase): string | undefined {
 }
 
 export function AgentOperationItem(props: {
-  entry: AgentOperationEntry;
+  entry: LocalAgentOperationEntry;
   now: number;
   width: number;
 }) {

@@ -1,11 +1,11 @@
 import React from 'react';
 import { MessageBlock } from './MessageBlock';
 import { formatMessageTimestamp } from '../render/terminalText';
-import type { AgentMessageEntry } from '../timeline/agentTimeline';
+import type { LocalAgentMessageEntry } from '../../localAgentSession';
 import { SubagentMessageItem } from './SubagentMessageItem';
 
 export function AgentMessageItem(props: {
-  entry: AgentMessageEntry;
+  entry: LocalAgentMessageEntry;
   petName: string;
   width: number;
 }) {

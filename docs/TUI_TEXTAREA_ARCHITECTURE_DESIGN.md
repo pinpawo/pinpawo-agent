@@ -233,11 +233,11 @@ opencode 对这些边界给了清晰位置：
 
 因此建议短中期保留 Ink，把 opencode 的结构思想移植过来。
 
-### 4.2 LocalAgentEvent 协议不应受 textarea 重构影响
+### 4.2 LocalAgentRuntimeEvent 协议不应受 textarea 重构影响
 
 textarea 是 terminal client 内部交互层，不应改变：
 
-- `LocalAgentEvent`
+- `LocalAgentRuntimeEvent`
 - local-agent WebSocket message
 - chat/studio run model
 - human review protocol

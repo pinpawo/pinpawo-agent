@@ -1,13 +1,13 @@
 import { isHumanReviewInterrupt } from '@pinpawo/pet-agent';
 import type { StreamToolsPayload } from './agentStreamEvents';
-import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
+import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
 import {
   acceptInflightToolEvent,
   emitInflightOperationEvent,
   type InflightOperationRun,
 } from './inflightOperationRun';
 
-type EmitEvent = (event: LocalAgentOperationInternalEvent) => void;
+type EmitEvent = (event: LocalAgentOperationEvent) => void;
 type Log = (message: string) => void;
 
 function maybeTrimForLog(value: string | undefined, max = 300) {
@@ -68,7 +68,7 @@ export function emitLocalServerToolOperationEvent(options: {
   const event = acceptInflightToolEvent(run, payload);
 
   if (event.phase === 'failed' && isHumanReviewInterruptError(payload.error)) {
-    const interruptedEvent: LocalAgentOperationInternalEvent = {
+    const interruptedEvent: LocalAgentOperationEvent = {
       ...event,
       phase: 'interrupted' as const,
       raw: {

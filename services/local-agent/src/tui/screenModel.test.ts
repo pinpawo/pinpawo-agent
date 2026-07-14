@@ -6,7 +6,7 @@ import {
   createSession,
   type TuiState,
 } from './state/tuiState';
-import type { AgentTimelineEntry } from './timeline/agentTimeline';
+import type { LocalAgentTimelineEntry } from '../localAgentSession';
 
 test('buildTuiScreenModel exposes explicit layout regions', () => {
   const state = createInitialTuiState(createSession({
@@ -245,7 +245,7 @@ function message(
   role: 'user' | 'assistant' | 'system' | 'subagent',
   text: string,
   status: 'streaming' | 'completed',
-): AgentTimelineEntry {
+): LocalAgentTimelineEntry {
   return {
     id,
     type: 'message',
@@ -260,7 +260,7 @@ function message(
 function operation(
   id: string,
   phase: 'started' | 'completed',
-): AgentTimelineEntry {
+): LocalAgentTimelineEntry {
   return {
     id,
     type: 'operation',

@@ -4,7 +4,7 @@ import test from 'node:test';
 import { emitInflightToolEvent } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import type { LocalAgentControlServerMessage } from './localAgentProtocol';
-import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
 
 function createTestController(options: { forceInterruptMs?: number } = {}) {
   const controls: LocalAgentControlServerMessage[] = [];

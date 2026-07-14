@@ -1,9 +1,9 @@
 import type { ActiveOperation } from '../types';
-import {
-  isRunningOperationPhase,
-  type AgentOperationEntry,
-  type AgentTimelineEntry,
-} from './agentTimeline';
+import { isRunningOperationPhase } from '../../localAgentTimeline';
+import type {
+  LocalAgentOperationEntry,
+  LocalAgentTimelineEntry,
+} from '../../localAgentSession';
 
 const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
   'after',
@@ -14,22 +14,22 @@ const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
 ]);
 
 export function selectOperationTimelineEntries(
-  entries: AgentTimelineEntry[],
-): AgentOperationEntry[] {
-  return entries.filter((entry): entry is AgentOperationEntry => entry.type === 'operation');
+  entries: LocalAgentTimelineEntry[],
+): LocalAgentOperationEntry[] {
+  return entries.filter((entry): entry is LocalAgentOperationEntry => entry.type === 'operation');
 }
 
 export function selectRunningOperationEntries(
-  entries: AgentTimelineEntry[],
+  entries: LocalAgentTimelineEntry[],
   requestId?: string,
-): AgentOperationEntry[] {
+): LocalAgentOperationEntry[] {
   return selectOperationTimelineEntries(entries).filter((entry) =>
     isRunningOperationPhase(entry.phase)
       && (requestId === undefined || entry.requestId === requestId));
 }
 
 export function selectActiveOperationsFromTimeline(
-  entries: AgentTimelineEntry[],
+  entries: LocalAgentTimelineEntry[],
   requestId?: string,
 ): ActiveOperation[] {
   return selectRunningOperationEntries(entries, requestId).map((entry) => ({
@@ -41,65 +41,48 @@ export function selectActiveOperationsFromTimeline(
 }
 
 export function findTimelineOperationEntry(
-  entries: AgentTimelineEntry[],
+  entries: LocalAgentTimelineEntry[],
   operationId: string,
-): AgentOperationEntry | null {
+): LocalAgentOperationEntry | null {
   return selectOperationTimelineEntries(entries).find((entry) =>
     entry.id === operationId || entry.operationKey === operationId) ?? null;
 }
 
-export type AgentTimelineDisplayEntry = {
-  type: 'timeline';
-  id: string;
-  entry: AgentTimelineEntry;
-};
-
 export type AgentTimelineViewportModel = {
-  entries: AgentTimelineDisplayEntry[];
-  staticEntries: AgentTimelineDisplayEntry[];
-  dynamicEntries: AgentTimelineDisplayEntry[];
+  entries: LocalAgentTimelineEntry[];
+  staticEntries: LocalAgentTimelineEntry[];
+  dynamicEntries: LocalAgentTimelineEntry[];
 };
 
 export function buildTimelineViewportModel(
-  entries: AgentTimelineEntry[],
+  entries: LocalAgentTimelineEntry[],
 ): AgentTimelineViewportModel {
-  const displayEntries = buildTimelineDisplayEntries(entries);
   return {
-    entries: displayEntries,
-    ...splitTimelineDisplayForViewport(displayEntries),
+    entries,
+    ...splitTimelineForViewport(entries),
   };
 }
 
-export function buildTimelineDisplayEntries(
-  entries: AgentTimelineEntry[],
-): AgentTimelineDisplayEntry[] {
-  return entries.map((entry) => ({ type: 'timeline', id: entry.id, entry }));
-}
-
-export function splitTimelineDisplayForViewport(
-  displayEntries: AgentTimelineDisplayEntry[],
+export function splitTimelineForViewport(
+  entries: LocalAgentTimelineEntry[],
 ): {
-  staticEntries: AgentTimelineDisplayEntry[];
-  dynamicEntries: AgentTimelineDisplayEntry[];
+  staticEntries: LocalAgentTimelineEntry[];
+  dynamicEntries: LocalAgentTimelineEntry[];
 } {
-  const firstDynamicIndex = displayEntries.findIndex((entry) => !isSettledDisplayEntry(entry));
+  const firstDynamicIndex = entries.findIndex((entry) => !isSettledTimelineEntry(entry));
   if (firstDynamicIndex < 0) {
     return {
-      staticEntries: displayEntries,
+      staticEntries: entries,
       dynamicEntries: [],
     };
   }
   return {
-    staticEntries: displayEntries.slice(0, firstDynamicIndex),
-    dynamicEntries: displayEntries.slice(firstDynamicIndex),
+    staticEntries: entries.slice(0, firstDynamicIndex),
+    dynamicEntries: entries.slice(firstDynamicIndex),
   };
 }
 
-function isSettledDisplayEntry(entry: AgentTimelineDisplayEntry) {
-  return isSettledTimelineEntry(entry.entry);
-}
-
-function isSettledTimelineEntry(entry: AgentTimelineEntry) {
+function isSettledTimelineEntry(entry: LocalAgentTimelineEntry) {
   switch (entry.type) {
     case 'message':
       return entry.status === 'completed';
@@ -108,7 +91,7 @@ function isSettledTimelineEntry(entry: AgentTimelineEntry) {
   }
 }
 
-function formatOperationTimelineDetail(entry: AgentOperationEntry) {
+function formatOperationTimelineDetail(entry: LocalAgentOperationEntry) {
   const details = formatDetails(entry.details);
   return [entry.target, entry.summary, details]
     .filter((item): item is string => Boolean(item))

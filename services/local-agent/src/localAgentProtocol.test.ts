@@ -6,7 +6,7 @@ import {
   sendLocalAgentEvent,
   sendLocalAgentMessage,
 } from './localAgentProtocol';
-import type { LocalAgentOperationInternalEvent } from './events/localAgentEvent';
+import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
 
 test('parseLocalAgentClientMessage accepts valid chat requests and rejects malformed payloads', () => {
   assert.deepEqual(
@@ -657,7 +657,7 @@ test('sendLocalAgentEvent strips operation.raw by default (remote-safe)', () => 
     role: 'assistant',
     text: 'done',
   }), true);
-  const internalOperationEvent: LocalAgentOperationInternalEvent = {
+  const internalOperationEvent: LocalAgentOperationEvent = {
     type: 'operation',
     requestId: 'req-1',
     phase: 'started',
@@ -716,7 +716,7 @@ test('sendLocalAgentEvent forwards operation.raw when includeRaw is true (truste
       sent.push(data);
     },
   };
-  const event: LocalAgentOperationInternalEvent = {
+  const event: LocalAgentOperationEvent = {
     type: 'operation',
     requestId: 'req-1',
     phase: 'completed',

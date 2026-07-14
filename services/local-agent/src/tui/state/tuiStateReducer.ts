@@ -1,4 +1,4 @@
-import type { LocalAgentRuntimeEvent } from '../../events/localAgentEvent';
+import type { LocalAgentRuntimeEvent } from '../../events/localAgentRuntimeEvent';
 import type { LocalAgentRun, LocalAgentSession } from '../../localAgentSession';
 import {
   applySessionSnapshot,
@@ -26,7 +26,6 @@ import type {
   SessionId,
   SessionModel,
   TuiAction,
-  TuiRunModel,
   TuiState,
 } from './tuiState';
 import { createSession } from './tuiState';
@@ -342,7 +341,7 @@ function activeRunToPendingUi(session: SessionModel, run: LocalAgentRun | null) 
   };
 }
 
-function activeRunToPendingApproval(state: TuiState, run: TuiRunModel | null) {
+function activeRunToPendingApproval(state: TuiState, run: LocalAgentRun | null) {
   if (!run?.reviewAction || run.reviewAction.status !== 'waiting') return null;
   const draft = state.reviewDrafts[run.reviewAction.actionId];
   if (!draft) return null;
@@ -545,8 +544,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         ? state
         : { ...nextState, connection: { ...nextState.connection, message: action.statusMessage } };
     }
-    case 'run.interrupting':
-    case 'server.interrupting': {
+    case 'run.interrupting': {
       const owner = findSessionForRun(state, action.requestId);
       if (!owner) return state;
       const actionId = owner.session.activeRun?.reviewAction?.actionId;
@@ -569,16 +567,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       );
     case 'event.received':
       return reduceRuntimeEvent(state, action);
-    case 'server.interrupted':
-      return finishRun(state, action.requestId, action.statusMessage, [
-        messageInput(
-          'assistant',
-          TUI_TEXT.interrupted,
-          action.messageCell,
-          `${action.requestId}:interrupted`,
-          action.requestId,
-        ),
-      ]);
     case 'server.studio_response': {
       const messages = [
         action.reply.trim()

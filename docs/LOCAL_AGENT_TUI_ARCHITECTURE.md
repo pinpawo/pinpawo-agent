@@ -1,5 +1,10 @@
 # Local Agent TUI Architecture
 
+> **Historical design record — superseded 2026-07-15.** The state types and
+> boundaries in this draft describe an earlier TUI architecture. Use
+> [`LOCAL_AGENT_SESSION_PROJECTION.md`](./LOCAL_AGENT_SESSION_PROJECTION.md)
+> for the current canonical session, snapshot, timeline, and active-run contract.
+
 > 状态：Draft v2
 > 日期：2026-05-29
 
@@ -7,12 +12,12 @@
 
 ## 1. 文档目标
 
-这份文档用于对齐 `services/local-agent/` 中 TUI 的后续重构方向。当前基线是：TUI 以 `type: 'event'` 的 `LocalAgentEvent` 作为 agent run activity 的主事件输入。
+这份文档用于对齐 `services/local-agent/` 中 TUI 的后续重构方向。当前基线是：TUI 以 `type: 'event'` 的 `LocalAgentRuntimeEvent` 作为 agent run activity 的主事件输入。
 
 后续重构先明确以下设计事实，再进入拆分实现：
 
 1. TUI 在 local-agent 架构中的职责边界。
-2. TUI 如何消费 `LocalAgentEvent`，以及如何维护自己的 UI 状态。
+2. TUI 如何消费 `LocalAgentRuntimeEvent`，以及如何维护自己的 UI 状态。
 3. app / TUI / macOS companion 未来共享哪些协议与运行态语义。
 4. command、keymap、composer、approval、history、status、diff 等模块应如何分阶段落地。
 
@@ -36,7 +41,7 @@ services/local-agent/src/commands/tui.tsx
 
 - WebSocket 连接 local-agent server。
 - 支持 chat / studio 请求。
-- 消费 `LocalAgentEventMessage`：
+- 消费 `LocalAgentRuntimeEventEnvelope`：
   - `message.delta`
   - `message.completed`
   - `operation`
@@ -56,7 +61,7 @@ services/local-agent/src/commands/tui.tsx
 - slash command 已收敛为 `tui/input/commandRegistry.ts`，统一承载 help metadata。
 - key handling 已收敛为 `tui/input/keymap.ts`，统一表达 global、composer、approval、resume picker 快捷键。
 - message history、active operation、pending review、connection state 已收敛到 `tui/state/tuiStateReducer.ts`。
-- terminal render adapter 位于 `tui/render/`：`eventText.ts` 面向 `LocalAgentEvent` 展示字段，`messageText.ts` 处理 assistant Markdown 到终端可读文本的预处理，`text.ts` 集中 TUI 文案。
+- terminal render adapter 位于 `tui/render/`：`eventText.ts` 面向 `LocalAgentRuntimeEvent` 展示字段，`messageText.ts` 处理 assistant Markdown 到终端可读文本的预处理，`text.ts` 集中 TUI 文案。
 
 ## 3. 设计原则
 
@@ -66,7 +71,7 @@ TUI 是 local-agent 的 terminal client。它负责终端交互、键盘输入�
 
 ```txt
 agent runtime / studio runtime / capability runtime
-  -> LocalAgentEvent
+  -> LocalAgentRuntimeEvent
   -> local-agent protocol
   -> TUI client
   -> terminal UI state
@@ -75,28 +80,28 @@ agent runtime / studio runtime / capability runtime
 
 TUI 的输入边界：
 
-- `LocalAgentEvent`
+- `LocalAgentRuntimeEvent`
 - local-agent server message
 - TUI 自己的 UI state
 - terminal 输入和布局
 
-以下信息属于 local-agent normalizer 上游输入，进入 TUI 前会收敛为 `LocalAgentEvent`：
+以下信息属于 local-agent normalizer 上游输入，进入 TUI 前会收敛为 `LocalAgentRuntimeEvent`：
 
 - pet-agent 内部节点名
 - LangGraph stream 原始结构
 - 具体 tool 的 raw input/output 结构
 - capability 内部实现细节
 
-### 3.2 LocalAgentEvent 是协议边界
+### 3.2 LocalAgentRuntimeEvent 是协议边界
 
-`LocalAgentEvent` 是 local-agent 对 app / TUI / macOS companion 的 public event API。它是 agent run 对外可观察状态的稳定边界，负责承载 assistant token、最终回复、operation、human review、studio progress、system notice 和 error。
+`LocalAgentRuntimeEvent` 是 local-agent 对 app / TUI / macOS companion 的 public event API。它是 agent run 对外可观察状态的稳定边界，负责承载 assistant token、最终回复、operation、human review、studio progress、system notice 和 error。
 
 统一流向：
 
 ```txt
 pet-agent runtime / studio runtime / capability runtime
   -> local-agent event normalizer
-  -> LocalAgentEvent
+  -> LocalAgentRuntimeEvent
       -> local-agent WebSocket
           -> TUI
       -> API-facing adapter / bridge
@@ -112,13 +117,13 @@ TUI 路径是本机直连路径：
 
 ```txt
 local-agent runtime
-  -> LocalAgentEventMessage { type: 'event', requestId, event }
+  -> LocalAgentRuntimeEventEnvelope { type: 'event', requestId, event }
   -> WebSocket ws://127.0.0.1:<localServerPort>
   -> TUI state
   -> Ink UI
 ```
 
-TUI 可以额外处理少量 control message，例如 `interrupting`、`interrupted`、`studio_response`、`studio_error`。这些 control message 表示 transport/session 控制结果，`LocalAgentEvent` 仍然是 agent run activity 的主事件模型。
+TUI 可以额外处理少量 control message，例如 `interrupting`、`interrupted`、`studio_response`、`studio_error`。这些 control message 表示 transport/session 控制结果，`LocalAgentRuntimeEvent` 仍然是 agent run activity 的主事件模型。
 
 #### chat 与 studio 是两类不同的 run（TUI 只留空间，不定义内部链路）
 
@@ -140,15 +145,15 @@ app 路径通过 API-facing adapter / bridge 转发：
 
 ```txt
 local-agent runtime
-  -> LocalAgentEvent
+  -> LocalAgentRuntimeEvent
   -> API-facing transport
   -> app API stream envelope
   -> mobile app run state
 ```
 
-当前实现：local-agent runtime/TUI/app-facing WS 都只发送 `LocalAgentEvent` envelope，本仓库已经删除 legacy 派生兼容层。`pinpawo-app` app/API 需要在 app 仓库消费该 envelope 后再完成端到端验证。
+当前实现：local-agent runtime/TUI/app-facing WS 都只发送 `LocalAgentRuntimeEvent` envelope，本仓库已经删除 legacy 派生兼容层。`pinpawo-app` app/API 需要在 app 仓库消费该 envelope 后再完成端到端验证。
 
-API 层负责用户、pet、session、鉴权和网络 envelope。它可以把 `LocalAgentEvent` 包进 HTTP/SSE/WS 响应格式，但应保留这些语义字段：
+API 层负责用户、pet、session、鉴权和网络 envelope。它可以把 `LocalAgentRuntimeEvent` 包进 HTTP/SSE/WS 响应格式，但应保留这些语义字段：
 
 - `requestId`
 - `event.type`
@@ -161,9 +166,9 @@ API 层负责用户、pet、session、鉴权和网络 envelope。它可以把 `L
 
 这样 TUI 和 app 可以拥有不同 UI，但对 agent run 的理解保持一致。
 
-### 3.5 LocalAgentEvent 协议约束
+### 3.5 LocalAgentRuntimeEvent 协议约束
 
-`LocalAgentEvent` 作为边界协议时，需要保持这些约束：
+`LocalAgentRuntimeEvent` 作为边界协议时，需要保持这些约束：
 
 - `type: 'event'` 是 agent run activity 的统一 server message envelope。
 - `requestId` 贯穿 TUI 直连路径和 API 转发路径，用于忽略迟到事件、关联 interrupt / approval / final response。
@@ -172,7 +177,7 @@ API 层负责用户、pet、session、鉴权和网络 envelope。它可以把 `L
 - `operation` 表示工具、capability 或 runtime activity，`phase` 表示生命周期，`operation` 字段承载展示摘要。
 - `human_review.requested` 表示 agent 主动等待用户确认或补充，approval UI 和 app HITL UI 都基于它进入 waiting_human。
 - token usage / context usage 是 session 级可观测数据。**当前协议还没有这个字段**——`message.completed.metadata` 现在只有 `mood` / `topic` / `tags`，没有 token 用量。要在 TUI 展示用量，需要先定义来源：要么扩 `message.completed.metadata.usage`，要么加一个独立的 `usage` 事件。在来源落地前，§5 的 `tokenUsage` 字段是预留位，应保持为 `null` 并在 UI 上不展示。
-- API 层可以包一层自己的 HTTP/SSE/WS envelope，但保留 `LocalAgentEvent` 的事件语义。
+- API 层可以包一层自己的 HTTP/SSE/WS envelope，但保留 `LocalAgentRuntimeEvent` 的事件语义。
 - TUI 直连路径使用默认 server parser，只接受新协议 event/control message；local-agent 不再为 TUI 或新客户端提供 legacy wire shape 解析。
 
 ### 3.6 Operation 展示语义
@@ -194,7 +199,7 @@ tuiStateReducer.ts
 它的职责是把 local-agent event、control message 和用户输入动作合并成 TUI state：
 
 ```txt
-LocalAgentEvent / ServerControlMessage / UserInputAction
+LocalAgentRuntimeEvent / ServerControlMessage / UserInputAction
   -> TuiAction
   -> TuiState
 ```
@@ -210,7 +215,7 @@ LocalAgentEvent / ServerControlMessage / UserInputAction
 
 app / TUI / macOS companion 可以共享：
 
-- `LocalAgentEvent` 类型。
+- `LocalAgentRuntimeEvent` 类型。
 - operation metadata 语义。
 - active run 阶段模型。
 - approval / interrupt 的结构化协议。
@@ -254,7 +259,7 @@ services/local-agent/src/
       keymap.ts              # global/composer/approval key bindings
 
     render/
-      eventText.ts           # LocalAgentEvent / studio.progress -> terminal text props
+      eventText.ts           # LocalAgentRuntimeEvent / studio.progress -> terminal text props
       messageText.ts         # assistant Markdown -> terminal-stable Markdown/text preprocessing
       text.ts                # TUI_TEXT: 当前中文 TUI 文本入口；完整 i18n 后续单独设计
 
@@ -472,14 +477,14 @@ Composer 是 terminal 输入系统的承载层。后续需要支持：
 
 render adapter 的职责：
 
-- 消费 normalized `LocalAgentEvent` 字段。
+- 消费 normalized `LocalAgentRuntimeEvent` 字段。
 - 集中维护 TUI 终端文案。
 - 保持 TUI 文案与 app 文案独立演进。
 
 分层（去掉了初稿里的中间 model）：
 
 ```txt
-LocalAgentEvent
+LocalAgentRuntimeEvent
   -> render adapter(eventText.ts):直接映射成组件 props + 终端文案
   -> Ink components
 ```
@@ -489,7 +494,7 @@ LocalAgentEvent
 app 后续可以有自己的：
 
 ```txt
-LocalAgentEvent
+LocalAgentRuntimeEvent
   -> mobile run state
   -> app copy / gif / compact activity strip
 ```
@@ -529,7 +534,7 @@ LocalAgentEvent
 
 - 新增 `src/tui/` 目录，`commands/tui.tsx` 变成 thin entry。
 - 移出 `MessageBlock`、`SmartTextInput`、`InterruptSelector`、status/active operation/layout helpers 到 `tui/components/` 或 `tui/layout`。
-- event render adapter 收敛为 `tui/render/eventText.ts`，只面向 `LocalAgentEvent` / `studio.progress`。
+- event render adapter 收敛为 `tui/render/eventText.ts`，只面向 `LocalAgentRuntimeEvent` / `studio.progress`。
 - 本阶段完成后，后续阶段已继续引入 session-keyed reducer 和 controller/client 副作用层。
 
 验收：
@@ -549,7 +554,7 @@ LocalAgentEvent
 
 - 新增 `tui/state/tuiState.ts`、`tui/state/tuiStateReducer.ts`。
 - state 采用 `sessions + focusedSessionId + runRoute`，但 `sessions` 通常只有一个当前 session。
-- 把 `LocalAgentEvent`、control message、user action 映射成 `TuiAction`。
+- 把 `LocalAgentRuntimeEvent`、control message、user action 映射成 `TuiAction`。
 - chat 的 `message.completed` 与 studio 的 `studio_response` / `studio_error` 收敛到同一个"run 结束"动作。
 - 动画时钟（spinner / now）留在组件 local state，不进 reducer。
 - network 副作用、session snapshot 应用和重连策略已在阶段 1C 收敛到 controller/client。
@@ -636,9 +641,9 @@ LocalAgentEvent
 - 继续使用 Ink。
 - local-agent server 只按必要接口适配，完整 server 拆分归入后续 local-agent 架构阶段。
 - pet-agent runtime 保持现状。
-- app chat UI 通过 `LocalAgentEvent` 语义对齐，页面重做归入 app 侧独立阶段。
+- app chat UI 通过 `LocalAgentRuntimeEvent` 语义对齐，页面重做归入 app 侧独立阶段。
 - TUI formatter 保持 terminal adapter 定位。
-- 新 TUI 路径以 `LocalAgentEvent` 为主事件模型。
+- 新 TUI 路径以 `LocalAgentRuntimeEvent` 为主事件模型。
 
 与同一次重构对齐的其他部分：
 

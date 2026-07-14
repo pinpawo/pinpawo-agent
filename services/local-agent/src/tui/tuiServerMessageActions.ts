@@ -36,7 +36,7 @@ export function buildTuiActionsFromServerMessage(
     return {
       clearInterrupt: false,
       actions: [{
-        type: 'server.interrupting',
+        type: 'run.interrupting',
         requestId: message.requestId,
         statusMessage: TUI_TEXT.interrupting,
       }],
@@ -44,12 +44,18 @@ export function buildTuiActionsFromServerMessage(
   }
 
   if (message.type === 'interrupted') {
+    const messageCell = options.makeMessageCell();
     return {
       clearInterrupt: true,
       actions: [{
-        type: 'server.interrupted',
+        type: 'run.finish',
         requestId: message.requestId,
-        messageCell: options.makeMessageCell(),
+        messages: [{
+          ...messageCell,
+          kind: 'assistant',
+          text: TUI_TEXT.interrupted,
+          requestId: message.requestId,
+        }],
         statusMessage: TUI_TEXT.interruptedStatus,
       }],
     };

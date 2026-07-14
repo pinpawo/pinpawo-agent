@@ -37,7 +37,7 @@ import { createInitialTuiState, createSession } from './state/tuiState';
 import {
   tuiStateReducer,
 } from './state/tuiStateReducer';
-import type { AgentTimelineDisplayEntry } from './timeline/agentTimelineSelectors';
+import type { LocalAgentTimelineEntry } from '../localAgentSession';
 import { TuiRuntimeController } from './TuiRuntimeController';
 import { useResumePickerController } from './useResumePickerController';
 import { useTextAreaController } from './useTextAreaController';
@@ -52,7 +52,7 @@ const SPINNER_FRAMES = ['-', '\\', '|', '/'];
 const CLEAR_SCREEN = '\x1B[2J\x1B[3J\x1B[H';
 
 function renderTimelineDisplayEntry(
-  displayEntry: AgentTimelineDisplayEntry,
+  entry: LocalAgentTimelineEntry,
   props: {
     petName: string;
     now: number;
@@ -61,8 +61,8 @@ function renderTimelineDisplayEntry(
 ) {
   return (
     <AgentTimelineItem
-      key={displayEntry.id}
-      entry={displayEntry.entry}
+      key={entry.id}
+      entry={entry}
       petName={props.petName}
       now={props.now}
       width={props.width}

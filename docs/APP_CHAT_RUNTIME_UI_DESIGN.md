@@ -100,11 +100,11 @@ HITL 和 interrupt 分开处理。
 - interrupt 是用户主动停止当前 run。
 - HITL 是 agent 主动请求用户确认、选择或提供信息。
 
-服务端输出 `LocalAgentEvent`：`human_review.requested`。app 进入 `waiting_human`，在输入框上方展示确认面板，支持批准、拒绝和直接输入补充说明。确认后携带 resume 继续同一个任务上下文；补充说明不做前端文本映射，交给 local-agent 侧按当前 pending interrupt 解释。
+服务端输出 `LocalAgentRuntimeEvent`：`human_review.requested`。app 进入 `waiting_human`，在输入框上方展示确认面板，支持批准、拒绝和直接输入补充说明。确认后携带 resume 继续同一个任务上下文；补充说明不做前端文本映射，交给 local-agent 侧按当前 pending interrupt 解释。
 
 ## Event Evolution
 
-目标事件模型以 `LocalAgentEvent` 为准：
+目标事件模型以 `LocalAgentRuntimeEvent` 为准：
 
 - `message.delta`
 - `message.completed`
@@ -113,7 +113,7 @@ HITL 和 interrupt 分开处理。
 - `system.notice`
 - `error`
 
-`pinpawo-app` app/API 需要消费 `LocalAgentEvent` envelope；local-agent 不再发送旧运行态消息。
+`pinpawo-app` app/API 需要消费 `LocalAgentRuntimeEvent` envelope；local-agent 不再发送旧运行态消息。
 
 app run state 可以在 API envelope 中补充这些控制字段：
 

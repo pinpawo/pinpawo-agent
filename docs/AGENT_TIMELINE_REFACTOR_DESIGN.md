@@ -1,5 +1,10 @@
 # Agent Timeline Refactor Design
 
+> **Historical design record — superseded 2026-07-14.** Type names and state
+> boundaries in this proposal describe an earlier TUI implementation. Use
+> [`LOCAL_AGENT_SESSION_PROJECTION.md`](./LOCAL_AGENT_SESSION_PROJECTION.md)
+> for the current canonical timeline/session contract.
+
 > 状态：Draft v1
 > 日期：2026-06-19
 > 关联：[#216 Clarify operation metadata contract and TUI rendering semantics](https://github.com/pinpawo/pinpawo-agent/issues/216)

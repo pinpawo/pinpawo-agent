@@ -9,12 +9,6 @@ export type LocalAgentRuntimeEvent =
   | LocalAgentSystemNoticeEvent
   | LocalAgentErrorEvent;
 
-/**
- * @deprecated Use `LocalAgentRuntimeEvent` when modeling local-agent runtime
- * facts. The wire envelope is defined separately in `localAgentProtocol.ts`.
- */
-export type LocalAgentEvent = LocalAgentRuntimeEvent;
-
 export type LocalAgentAssistantMessageEvent =
   | LocalAgentMessageDeltaEvent
   | LocalAgentMessageCompletedEvent;
@@ -78,13 +72,6 @@ export type LocalAgentOperationEvent = {
    */
   raw?: LocalAgentOperationRaw;
 };
-
-/**
- * @deprecated Alias kept for compatibility. `raw` is now a regular optional
- * field on `LocalAgentOperationEvent`; whether it crosses the wire is decided
- * by the transport (see `sendLocalAgentEvent`'s `includeRaw` flag).
- */
-export type LocalAgentOperationInternalEvent = LocalAgentOperationEvent;
 
 export type LocalAgentHumanReviewRequestedEvent = {
   type: 'human_review.requested';

@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { LocalAgentOperationEvent } from './events/localAgentEvent';
-import type { LocalAgentRun, LocalAgentSessionSnapshot } from './localAgentSession';
-import type { AgentMessageEntry } from './tui/timeline/agentTimeline';
+import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
+import type {
+  LocalAgentMessageEntry,
+  LocalAgentRun,
+  LocalAgentSessionSnapshot,
+} from './localAgentSession';
 import { createInitialTuiState, createSession, type TuiState } from './tui/state/tuiState';
 import {
   selectFocusedActiveOperations,
@@ -13,7 +16,6 @@ import {
   selectFocusedTimeline,
   tuiStateReducer,
 } from './tui/state/tuiStateReducer';
-import { buildTimelineDisplayEntries } from './tui/timeline/agentTimelineSelectors';
 
 function initialState(sessionId = 'chat:pet') {
   return createInitialTuiState(createSession({
@@ -79,7 +81,7 @@ function transcriptTimeline(state: TuiState, sessionId = 'chat:pet') {
 }
 
 function timelineMessagesByRole(state: TuiState, role: 'system' | 'subagent', sessionId = 'chat:pet') {
-  return state.sessions[sessionId]?.timeline.filter((entry): entry is AgentMessageEntry =>
+  return state.sessions[sessionId]?.timeline.filter((entry): entry is LocalAgentMessageEntry =>
     entry.type === 'message' && entry.role === role) ?? [];
 }
 
@@ -622,7 +624,7 @@ test('tuiStateReducer orders subagent messages by live event arrival', () => {
   });
 
   assert.deepEqual(
-    buildTimelineDisplayEntries(selectFocusedTimeline(state)).map((entry) => entry.id),
+    selectFocusedTimeline(state).map((entry) => entry.id),
     [
       'message:req-1:user',
       'req-1:assistant:0',

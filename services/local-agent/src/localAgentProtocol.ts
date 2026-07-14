@@ -11,7 +11,7 @@ import type {
   LocalAgentOperationPhase,
   LocalAgentOperationRaw,
   LocalAgentRuntimeEvent,
-} from './events/localAgentEvent';
+} from './events/localAgentRuntimeEvent';
 
 export type ChatRequestMessage = {
   type: 'chat_request';
@@ -79,12 +79,6 @@ export type LocalAgentRuntimeEventEnvelope = {
   event: LocalAgentRuntimeEvent;
 };
 
-/**
- * @deprecated Use `LocalAgentRuntimeEventEnvelope` for websocket event
- * envelopes. The runtime event itself lives at `event`.
- */
-export type LocalAgentEventMessage = LocalAgentRuntimeEventEnvelope;
-
 export type LocalAgentControlServerMessage =
   | { type: 'pong' }
   | { type: 'interrupting'; requestId: string; message?: string }
@@ -104,7 +98,7 @@ export type LocalAgentControlServerMessage =
   | { type: 'studio_error'; requestId: string; message: string };
 
 export type LocalAgentServerMessage =
-  | LocalAgentEventMessage
+  | LocalAgentRuntimeEventEnvelope
   | LocalAgentControlServerMessage;
 
 export type LocalAgentClientMessageEnvelope = {
@@ -519,7 +513,7 @@ export function sendLocalAgentEvent(
     type: 'event',
     requestId: wireEvent.requestId,
     event: wireEvent,
-  } satisfies LocalAgentEventMessage));
+  } satisfies LocalAgentRuntimeEventEnvelope));
   return true;
 }
 

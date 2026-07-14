@@ -1,7 +1,7 @@
 import type {
   LocalAgentOperationEvent,
   LocalAgentOperationPhase,
-} from './events/localAgentEvent';
+} from './events/localAgentRuntimeEvent';
 
 type ActiveOperationState = {
   kind: string;

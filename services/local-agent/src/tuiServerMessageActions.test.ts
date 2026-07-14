@@ -87,7 +87,7 @@ test('buildTuiActionsFromServerMessage maps control messages to TUI actions', ()
     {
       clearInterrupt: false,
       actions: [{
-        type: 'server.interrupting',
+        type: 'run.interrupting',
         requestId: 'req-1',
         statusMessage: '正在打断',
       }],
@@ -106,12 +106,15 @@ test('buildTuiActionsFromServerMessage maps control messages to TUI actions', ()
     {
       clearInterrupt: true,
       actions: [{
-        type: 'server.interrupted',
+        type: 'run.finish',
         requestId: 'req-1',
-        messageCell: {
+        messages: [{
           id: 'cell-1',
           timestamp: '10:00:01',
-        },
+          kind: 'assistant',
+          text: '[interrupted]',
+          requestId: 'req-1',
+        }],
         statusMessage: '已打断',
       }],
     },

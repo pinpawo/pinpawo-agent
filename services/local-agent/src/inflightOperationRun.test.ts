@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { LocalAgentOperationEvent } from './events/localAgentEvent';
+import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
 import {
   clearInflightOperationTimer,
   configureInflightOperationRegistry,

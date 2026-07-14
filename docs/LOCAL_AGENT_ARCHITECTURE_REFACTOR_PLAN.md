@@ -2,7 +2,7 @@
 
 > 状态：Draft v2
 > 日期：2026-05-29
-> 更新：local-agent runtime/TUI/app-facing WS 出口已经切到 `LocalAgentEvent` / `operation` first；本仓库不再派发旧运行态兼容消息。剩余跨仓库迁移见 issue #19（本仓库侧的 adapter 已移除，#19 仅表示 pinpawo-app / API 仓库侧协议迁移）。
+> 更新：local-agent runtime/TUI/app-facing WS 出口已经切到 `LocalAgentRuntimeEvent` / `operation` first；本仓库不再派发旧运行态兼容消息。剩余跨仓库迁移见 issue #19（本仓库侧的 adapter 已移除，#19 仅表示 pinpawo-app / API 仓库侧协议迁移）。
 
 ## 1. 文档目标
 
@@ -29,7 +29,7 @@ local-agent 的定位是：
 
 旧协议曾直接对外暴露工具名、工具输入输出和工具生命周期。这会让 app / TUI 被迫理解内部 `read_file`、`grep_search`、`run_shell` 等工具名和输入输出结构。
 
-问题不在于 formatter 放在哪个文件，而是协议层没有稳定的 local-agent event。只要协议仍然暴露内部 tool call，presentation 层就会自然变成内部工具 formatter。当前 local-agent runtime/TUI/app-facing WS 已改为 `LocalAgentEvent` / `operation`；本仓库不再保留 legacy wire compatibility layer。
+问题不在于 formatter 放在哪个文件，而是协议层没有稳定的 local-agent event。只要协议仍然暴露内部 tool call，presentation 层就会自然变成内部工具 formatter。当前 local-agent runtime/TUI/app-facing WS 已改为 `LocalAgentRuntimeEvent` / `operation`；本仓库不再保留 legacy wire compatibility layer。
 
 ### 2.2 local-agent 承担了过多职责
 
@@ -62,12 +62,12 @@ local-agent 仍然包含多类职责：
 ```txt
 agent runtime/internal stream
   -> local-agent event normalizer
-  -> LocalAgentEvent
+  -> LocalAgentRuntimeEvent
   -> protocol serializer
   -> app / TUI adapters
 ```
 
-presentation 只能面向 `LocalAgentEvent`，不能面向内部 toolName。
+presentation 只能面向 `LocalAgentRuntimeEvent`，不能面向内部 toolName。
 
 ## 3. 设计原则
 
@@ -76,7 +76,7 @@ presentation 只能面向 `LocalAgentEvent`，不能面向内部 toolName。
 local-agent 可以定义稳定的事件外壳：
 
 ```ts
-type LocalAgentEvent = {
+type LocalAgentRuntimeEvent = {
   type: string;
   requestId: string;
   timestamp?: string;
@@ -179,10 +179,10 @@ adapter 可以有自己的 i18n / copy，但不能重新解析内部 tool input/
 新协议使用统一 server message：
 
 ```ts
-type LocalAgentEventMessage = {
+type LocalAgentRuntimeEventEnvelope = {
   type: 'event';
   requestId: string;
-  event: LocalAgentEvent;
+  event: LocalAgentRuntimeEvent;
 };
 ```
 
@@ -190,9 +190,9 @@ type LocalAgentEventMessage = {
 
 当前迁移边界：
 
-1. runtime / server 内部产出 `LocalAgentEvent`。
+1. runtime / server 内部产出 `LocalAgentRuntimeEvent`。
 2. TUI 本地链路直接消费 `type: 'event'`。
-3. app-facing WS 发送出口只发送 `LocalAgentEvent`。
+3. app-facing WS 发送出口只发送 `LocalAgentRuntimeEvent`。
 4. app/API 在 `pinpawo-app` 仓库消费新 envelope 并完成端到端验证。
 
 ## 4. 目标分层
@@ -209,7 +209,7 @@ services/local-agent/src/
     HumanReviewBroker.ts
 
   events/
-    LocalAgentEvent.ts
+    LocalAgentRuntimeEvent.ts
     AgentStreamNormalizer.ts
     OperationRegistry.ts
 
@@ -253,12 +253,12 @@ services/local-agent/src/
 
 这不是要求一次性搬完，而是后续 PR 的目标方向。
 
-## 5. LocalAgentEvent 草案
+## 5. LocalAgentRuntimeEvent 草案
 
 事件 envelope 由 local-agent 定义，operation 语义开放。
 
 ```ts
-type LocalAgentEvent =
+type LocalAgentRuntimeEvent =
   | LocalAgentRunEvent
   | LocalAgentMessageEvent
   | LocalAgentOperationEvent
@@ -267,7 +267,7 @@ type LocalAgentEvent =
   | LocalAgentSystemEvent;
 ```
 
-### 5.0 LangGraph stream 到 LocalAgentEvent 的映射
+### 5.0 LangGraph stream 到 LocalAgentRuntimeEvent 的映射
 
 local-agent 内部可以参考 LangGraph `astream` 的返回形态，但不能把它原样暴露给客户端。
 
@@ -283,27 +283,27 @@ values   -> final graph state 或 interrupt state
 
 ```txt
 astream messages
-  -> LocalAgentEvent message.delta
+  -> LocalAgentRuntimeEvent message.delta
 
 astream values final messages
-  -> LocalAgentEvent message.completed
+  -> LocalAgentRuntimeEvent message.completed
 
 root stream protocol tools/custom events
-  -> LocalAgentEvent operation
+  -> LocalAgentRuntimeEvent operation
 
 astream values __interrupt__
-  -> LocalAgentEvent human_review.requested
+  -> LocalAgentRuntimeEvent human_review.requested
 
 studio runtime progress
-  -> LocalAgentEvent studio.progress
+  -> LocalAgentRuntimeEvent studio.progress
 ```
 
-local-agent 对外只发送 `LocalAgentEvent` envelope。`pinpawo-app` app/API 旧路径需要在 app 仓库迁移到该 envelope 后再对接；本仓库不再从 `LocalAgentEvent` 派生旧运行态消息。
+local-agent 对外只发送 `LocalAgentRuntimeEvent` envelope。`pinpawo-app` app/API 旧路径需要在 app 仓库迁移到该 envelope 后再对接；本仓库不再从 `LocalAgentRuntimeEvent` 派生旧运行态消息。
 
 原则：
 
 - LangGraph stream 是 runtime internal API。
-- `LocalAgentEvent` 是 local-agent 对 app/TUI/macOS companion 的 public event API。
+- `LocalAgentRuntimeEvent` 是 local-agent 对 app/TUI/macOS companion 的 public event API。
 - `sendLocalAgentMessage` 和 `sendLocalAgentEvent` 不接受 legacy 输出开关。
 - `parseLocalAgentServerMessage` 只解析新协议 event/control message；local-agent 不再提供通用 legacy server message parser，避免 TUI 或新客户端重新依赖 legacy wire shape。
 - `raw.input/output/error` 仅保留为 local-agent 内部调试数据，`sendLocalAgentEvent` 发送 public event 前会剥离 raw。
@@ -466,13 +466,13 @@ type OperationRegistry = {
 
 ### 阶段 1：引入事件模型并切换 local-agent 出口
 
-状态：已完成。runtime 主链路产出 `LocalAgentEvent`。
+状态：已完成。runtime 主链路产出 `LocalAgentRuntimeEvent`。
 
-目标：新增 `LocalAgentEvent` 和 normalizer，并开始输出 `type: 'event'`。
+目标：新增 `LocalAgentRuntimeEvent` 和 normalizer，并开始输出 `type: 'event'`。
 
 工作项：
 
-- 新增 `events/LocalAgentEvent.ts`。
+- 新增 `events/LocalAgentRuntimeEvent.ts`。
 - 新增 `events/OperationRegistry.ts`。
 - 新增 `events/AgentStreamNormalizer.ts`。
 - 运行链路改为走 root `streamEvents(v3)` protocol tools/custom events -> `LocalAgentOperationEvent`。
@@ -484,9 +484,9 @@ type OperationRegistry = {
 - 不让 legacy messages 继续成为 primary event model。
 - 不让 presentation 直接读内部 toolName。
 
-### 阶段 2：TUI 切到 LocalAgentEvent
+### 阶段 2：TUI 切到 LocalAgentRuntimeEvent
 
-状态：已完成。TUI 本地路径消费 `LocalAgentEvent`，operation activity 使用 `operation` 展示语义。
+状态：已完成。TUI 本地路径消费 `LocalAgentRuntimeEvent`，operation activity 使用 `operation` 展示语义。
 
 目标：TUI 不再对内部 toolName 做 formatter。
 
@@ -499,15 +499,15 @@ type OperationRegistry = {
 产出：
 
 - `commands/tui.tsx` 只处理 TUI 状态和输入。
-- `adapters/tui/renderEvent.ts` 面向 `LocalAgentEvent`。
+- `adapters/tui/renderEvent.ts` 面向 `LocalAgentRuntimeEvent`。
 
-### 阶段 3：App/API 切到 LocalAgentEvent
+### 阶段 3：App/API 切到 LocalAgentRuntimeEvent
 
 状态：本仓库侧已完成 local-agent 发送出口切换；`pinpawo-app` app/API 仍需要迁移，见 issue #19（范围仅限 app/API 侧）。
 
 迁移仓库：`~/Develop/src/pinpawo/pinpawo-app`。本仓库只维护 local-agent 新协议和迁移说明；app/API 代码迁移在 `pinpawo-app` 侧单独推进。
 
-目标：app 不再依赖旧运行态消息，只消费 `LocalAgentEvent` envelope。
+目标：app 不再依赖旧运行态消息，只消费 `LocalAgentRuntimeEvent` envelope。
 
 工作项：
 
@@ -573,7 +573,7 @@ type OperationRegistry = {
 推荐拆分：
 
 1. `docs: add local-agent architecture refactor plan`
-2. `events: introduce LocalAgentEvent and operation registry`
+2. `events: introduce LocalAgentRuntimeEvent and operation registry`
 3. `events: normalize LangGraph astream events and emit type:event`
 4. `tui: render operation events instead of internal tool logs`
 5. `protocol: expose typed local-agent events for app`
@@ -601,10 +601,10 @@ type OperationRegistry = {
 
 已确认：
 
-1. 新协议使用 `type: 'event'` message，agent run activity 以 `LocalAgentEvent` 为 primary event model。
+1. 新协议使用 `type: 'event'` message，agent run activity 以 `LocalAgentRuntimeEvent` 为 primary event model。
 2. local-agent 不再发送旧运行态消息；`pinpawo-app` app/API 迁移是剩余跨仓库工作。
 3. LangGraph `astream` 的 `messages/tools/values` 只作为 internal stream source，不能作为 app/TUI public protocol。
-4. public `LocalAgentEvent` 不发送 `raw.input/output/error`；这些字段只在 local-agent 内部 adapter/logging 使用。
+4. public `LocalAgentRuntimeEvent` 不发送 `raw.input/output/error`；这些字段只在 local-agent 内部 adapter/logging 使用。
 
 仍待确认：
 

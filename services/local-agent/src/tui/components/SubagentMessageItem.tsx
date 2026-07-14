@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { formatSubagentMessage } from '../render/eventText';
 import { wrapLine } from '../render/terminalText';
-import type { AgentMessageEntry } from '../timeline/agentTimeline';
+import type { LocalAgentMessageEntry } from '../../localAgentSession';
 
 function wrapText(text: string, width: number) {
   return text
@@ -12,7 +12,7 @@ function wrapText(text: string, width: number) {
 }
 
 export function SubagentMessageItem(props: {
-  entry: AgentMessageEntry;
+  entry: LocalAgentMessageEntry;
   width: number;
 }) {
   const text = formatSubagentMessage(props.entry.text);

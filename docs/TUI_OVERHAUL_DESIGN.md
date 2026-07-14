@@ -1,5 +1,11 @@
 # TUI Overhaul Design
 
+> **Historical design record — superseded 2026-07-14.** The run-registry,
+> `runs[] + activeRunId`, history-restore, and reconciliation models below are
+> not current contracts. Use [`LOCAL_AGENT_SESSION_PROJECTION.md`](./LOCAL_AGENT_SESSION_PROJECTION.md)
+> for the current checkpoint/snapshot/timeline/session model. Keep this file
+> only as implementation history.
+
 > 状态：Draft v1
 > 日期：2026-06-20
 > 基线：`main` 已合入 PR #230 `Improve TUI status footer and slash submit`

@@ -1,7 +1,7 @@
 import type {
   LocalAgentSystemNoticeEvent,
   LocalAgentStudioProgressEvent,
-} from '../../events/localAgentEvent';
+} from '../../events/localAgentRuntimeEvent';
 import { TUI_TEXT } from './text';
 import { elapsedMsSince, formatElapsed } from './terminalText';
 import type { ActiveOperation, PendingUiState } from '../types';

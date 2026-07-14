@@ -2,7 +2,7 @@ import type {
   LocalAgentOperationEvent,
   LocalAgentOperationPhase,
   LocalAgentOperationRaw,
-} from './events/localAgentEvent';
+} from './events/localAgentRuntimeEvent';
 import type { LocalAgentOperationEntry } from './localAgentSession';
 
 export function localAgentOperationKey(event: LocalAgentOperationEvent) {

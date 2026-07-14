@@ -645,7 +645,7 @@ Phase 2 在 `services/local-agent/` 落地 Studio。配置层、运行时层、�
 
 ### ws 协议
 
-Studio 客户端消息保持 `studio_request` 起手；server 端 agent run activity 统一走 `LocalAgentEventMessage { type: 'event', requestId, event }`。Studio 编排进度使用 `event.type: 'studio.progress'`，pet HITL 使用 `event.type: 'human_review.requested'`。
+Studio 客户端消息保持 `studio_request` 起手；server 端 agent run activity 统一走 `LocalAgentRuntimeEventEnvelope { type: 'event', requestId, event }`。Studio 编排进度使用 `event.type: 'studio.progress'`，pet HITL 使用 `event.type: 'human_review.requested'`。
 
 | 消息 | 方向 | 用途 |
 |------|------|------|
@@ -676,7 +676,7 @@ const humanReviewer = createWsHumanReviewer({
 //   这样 pet HITL 的答复就经由现有 chat_request.resume 机制回到 pet runtime
 ```
 
-Studio 内 pet HITL 跟单 pet chat HITL 用同一条答复链路。local-agent 对外只发送 `LocalAgentEvent`；`pinpawo-app` app/API 需要在 app 仓库消费该 envelope。
+Studio 内 pet HITL 跟单 pet chat HITL 用同一条答复链路。local-agent 对外只发送 `LocalAgentRuntimeEvent`；`pinpawo-app` app/API 需要在 app 仓库消费该 envelope。
 
 ### TUI 集成
 

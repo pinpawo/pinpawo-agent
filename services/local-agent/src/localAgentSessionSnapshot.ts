@@ -8,17 +8,17 @@ import type {
 import { LOCAL_AGENT_SESSION_SNAPSHOT_VERSION } from './localAgentSession';
 import type { ReviewActionSnapshot } from './localServerChatHandler';
 import type { LocalServerDeps } from './localServerTypes';
-import type { TuiHistoryMessage } from './localServerTuiSessions';
+import type { TuiCheckpointMessage } from './localServerTuiSessions';
 import { buildLocalRuntimeProjection } from './localConfigProjection';
 
 export function buildLocalAgentSessionSnapshot(params: {
   sessionId: string;
   kind: LocalAgentSession['kind'];
-  messages: TuiHistoryMessage[];
+  messages: TuiCheckpointMessage[];
   deps: LocalServerDeps;
   pendingReview?: ReviewActionSnapshot | null;
 }): LocalAgentSessionSnapshot {
-  const timeline = timelineFromHistoryMessages(params.messages);
+  const timeline = timelineFromCheckpointMessages(params.messages);
   const pendingReview = params.pendingReview ?? null;
   return {
     version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
@@ -58,7 +58,7 @@ export function buildLocalAgentRuntimeView(
   };
 }
 
-function timelineFromHistoryMessages(messages: TuiHistoryMessage[]): LocalAgentTimelineEntry[] {
+function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): LocalAgentTimelineEntry[] {
   return messages.flatMap((message, index) => {
     if (message.role !== 'user' && message.role !== 'assistant') {
       return [];

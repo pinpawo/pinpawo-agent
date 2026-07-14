@@ -23,13 +23,11 @@ import { buildLocalHttpRuntimeProjection } from './localConfigProjection';
 
 type LocalHttpHandlerOptions = {
   authToken: string;
-  loadHistory: () => Promise<Array<{ role: string; text: string }>>;
-  loadSnapshot?: () => Promise<unknown>;
+  loadSnapshot: () => Promise<unknown>;
   listSessions: () => Promise<Array<Record<string, unknown>>>;
   resumeSession: (sessionId: string) => Promise<{
     session: Record<string, unknown>;
-    messages: Array<{ role: string; text: string }>;
-    snapshot?: unknown;
+    snapshot: unknown;
   }>;
   updateCapabilities?: (patch: LocalServerCapabilityStatePatch) => LocalServerDeps;
 };
@@ -162,22 +160,7 @@ export function handleLocalHttpRequest(
     return true;
   }
 
-  if (pathname === '/history') {
-    options.loadHistory().then((messages) => {
-      writeJson(res, 200, { messages });
-    }).catch((err) => {
-      writeJson(res, 500, {
-        error: err instanceof Error ? err.message : 'history load failed',
-      });
-    });
-    return true;
-  }
-
   if (pathname === '/snapshot') {
-    if (!options.loadSnapshot) {
-      writeJson(res, 404, { error: 'snapshot unavailable' });
-      return true;
-    }
     options.loadSnapshot().then((snapshot) => {
       writeJson(res, 200, snapshot);
     }).catch((err) => {

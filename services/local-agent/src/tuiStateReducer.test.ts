@@ -752,7 +752,7 @@ test('tuiStateReducer clears session token usage when clearing session state', (
   });
 });
 
-test('tuiStateReducer loads authoritative session snapshots', () => {
+test('tuiStateReducer materializes timeline state from a checkpoint snapshot', () => {
   let state = initialState('chat:pet');
   state = {
     ...state,
@@ -785,7 +785,7 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
 
   state = tuiStateReducer(state, {
     type: 'session.snapshot.loaded',
-    source: 'startup',
+    reason: 'startup',
     snapshot: sessionSnapshot({
       sessionId: 'chat:pet',
       kind: 'chat',
@@ -850,11 +850,11 @@ test('tuiStateReducer loads authoritative session snapshots', () => {
   assert.equal(state.sessions['chat:other']?.activeRun?.requestId, 'other-req');
 });
 
-test('tuiStateReducer normalizes active run startedAt from reconnect snapshots', () => {
+test('tuiStateReducer normalizes active run startedAt when applying a snapshot', () => {
   const now = 1_719_999_999_000;
   const state = tuiStateReducer(initialState('chat:pet'), {
     type: 'session.snapshot.loaded',
-    source: 'reconcile',
+    reason: 'completion',
     now,
     snapshot: sessionSnapshot({
       sessionId: 'chat:pet',
@@ -871,10 +871,10 @@ test('tuiStateReducer normalizes active run startedAt from reconnect snapshots',
   assert.equal(selectFocusedActiveRun(state)?.startedAt, 1_719_999_939_000);
 });
 
-test('tuiStateReducer restores completed reconnect output without a terminal active run', () => {
+test('tuiStateReducer applies completed output before reconnect without a terminal active run', () => {
   const state = tuiStateReducer(initialState('chat:pet'), {
     type: 'session.snapshot.loaded',
-    source: 'reconnect',
+    reason: 'reconnect',
     snapshot: sessionSnapshot({
       sessionId: 'chat:pet',
       kind: 'chat',
@@ -928,7 +928,7 @@ test('tuiStateReducer resumes a session from snapshot while clearing previous ru
 
   state = tuiStateReducer(state, {
     type: 'session.snapshot.loaded',
-    source: 'resume',
+    reason: 'resume',
     snapshot: sessionSnapshot({
       sessionId: 'chat:new',
       kind: 'studio',
@@ -982,7 +982,7 @@ test('tuiStateReducer preserves reconnect token usage when snapshot omits usage'
 
   state = tuiStateReducer(state, {
     type: 'session.snapshot.loaded',
-    source: 'reconnect',
+    reason: 'reconnect',
     snapshot: sessionSnapshot({
       sessionId: 'chat:pet',
       kind: 'chat',
@@ -999,7 +999,7 @@ test('tuiStateReducer preserves reconnect token usage when snapshot omits usage'
 
   state = tuiStateReducer(state, {
     type: 'session.snapshot.loaded',
-    source: 'startup',
+    reason: 'startup',
     snapshot: sessionSnapshot({
       sessionId: 'chat:pet',
       kind: 'chat',
@@ -1011,7 +1011,7 @@ test('tuiStateReducer preserves reconnect token usage when snapshot omits usage'
   assert.equal(state.sessions['chat:pet']?.tokenUsage, undefined);
 });
 
-test('tuiStateReducer preserves reconcile token usage when snapshot omits usage', () => {
+test('tuiStateReducer preserves observed token usage on completion snapshot', () => {
   let state = initialState('chat:pet');
   state = {
     ...state,
@@ -1030,7 +1030,7 @@ test('tuiStateReducer preserves reconcile token usage when snapshot omits usage'
 
   state = tuiStateReducer(state, {
     type: 'session.snapshot.loaded',
-    source: 'reconcile',
+    reason: 'completion',
     snapshot: sessionSnapshot({
       sessionId: 'chat:pet',
       kind: 'chat',
@@ -1046,7 +1046,7 @@ test('tuiStateReducer preserves reconcile token usage when snapshot omits usage'
   });
 });
 
-test('tuiStateReducer replaces live-only system messages during snapshot reconciliation', () => {
+test('tuiStateReducer replaces live-only operation and subagent entries on completion', () => {
   let state = initialState('chat:pet');
   state = {
     ...state,
@@ -1056,10 +1056,21 @@ test('tuiStateReducer replaces live-only system messages during snapshot reconci
         ...state.sessions['chat:pet']!,
         timeline: [
           {
-            id: 'message:live-system',
+            id: 'operation:live-tool',
+            type: 'operation',
+            requestId: 'req-1',
+            operationKey: 'live-tool',
+            kind: 'shell',
+            title: 'Run command',
+            phase: 'completed',
+            source: 'live-event',
+          },
+          {
+            id: 'message:live-subagent',
             type: 'message',
-            role: 'system',
-            text: 'live only',
+            role: 'subagent',
+            requestId: 'req-1',
+            text: 'live subagent detail',
             status: 'completed',
             source: 'live-event',
           },
@@ -1070,7 +1081,7 @@ test('tuiStateReducer replaces live-only system messages during snapshot reconci
 
   state = tuiStateReducer(state, {
     type: 'session.snapshot.loaded',
-    source: 'reconnect',
+    reason: 'completion',
     snapshot: sessionSnapshot({
       sessionId: 'chat:pet',
       kind: 'chat',
@@ -1089,12 +1100,12 @@ test('tuiStateReducer replaces live-only system messages during snapshot reconci
   assert.deepEqual(state.sessions['chat:pet']?.timeline.map((entry) => entry.id), ['message:user-1']);
 });
 
-test('tuiStateReducer restores pending approval from authoritative session snapshots', () => {
+test('tuiStateReducer restores checkpoint-owned pending approval from a snapshot', () => {
   let state = initialState('chat:pet');
 
   state = tuiStateReducer(state, {
     type: 'session.snapshot.loaded',
-    source: 'reconnect',
+    reason: 'reconnect',
     snapshot: sessionSnapshot({
       sessionId: 'chat:pet',
       kind: 'chat',
@@ -1222,7 +1233,7 @@ test('tuiStateReducer ignores late terminal events after interrupt release and s
   });
   state = tuiStateReducer(state, {
     type: 'session.snapshot.loaded',
-    source: 'reconnect',
+    reason: 'reconnect',
     snapshot: sessionSnapshot({
       sessionId: 'chat:pet',
       kind: 'chat',
@@ -1611,7 +1622,7 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
 
   state = tuiStateReducer(state, {
     type: 'session.snapshot.loaded',
-    source: 'reconnect',
+    reason: 'reconnect',
     snapshot: sessionSnapshot({
       sessionId: 'chat:pet',
       kind: 'chat',

@@ -5,13 +5,13 @@ import test from 'node:test';
 import { createEmptyTuiSessionState } from './tuiSessionRegistry';
 import {
   LocalServerTuiSessionService,
-  readTuiHistoryMessages,
-  summarizeTuiHistoryMessages,
+  readTuiCheckpointMessages,
+  summarizeTuiCheckpointMessages,
   type TuiSessionCheckpointer,
 } from './localServerTuiSessions';
 import { createLocalServerRuntimeDepsStore } from './localServerTypes';
 
-test('readTuiHistoryMessages keeps visible user/assistant messages only', () => {
+test('readTuiCheckpointMessages keeps visible user/assistant messages only', () => {
   const userMessage = stampMessageCreatedAtUtc(
     new HumanMessage(' hello '),
     '2026-06-01T01:00:00.000Z',
@@ -20,7 +20,7 @@ test('readTuiHistoryMessages keeps visible user/assistant messages only', () => 
     new AIMessage('assistant reply'),
     '2026-06-01T01:00:01.000Z',
   );
-  const messages = readTuiHistoryMessages([
+  const messages = readTuiCheckpointMessages([
     new SystemMessage('system'),
     userMessage,
     new AIMessage({
@@ -36,8 +36,8 @@ test('readTuiHistoryMessages keeps visible user/assistant messages only', () => 
   ]);
 });
 
-test('summarizeTuiHistoryMessages derives title from first user message', () => {
-  const summary = summarizeTuiHistoryMessages([
+test('summarizeTuiCheckpointMessages derives title from first user message', () => {
+  const summary = summarizeTuiCheckpointMessages([
     { role: 'assistant', text: '先回答' },
     { role: 'user', text: '  标题   带   空格  ' },
   ], '2026-06-02T00:00:00.000Z');
@@ -47,7 +47,7 @@ test('summarizeTuiHistoryMessages derives title from first user message', () => 
     messageCount: 2,
     updatedAt: '2026-06-02T00:00:00.000Z',
   });
-  assert.equal(summarizeTuiHistoryMessages([], '2026-06-02T00:00:00.000Z').title, '空会话');
+  assert.equal(summarizeTuiCheckpointMessages([], '2026-06-02T00:00:00.000Z').title, '空会话');
 });
 
 test('LocalServerTuiSessionService creates and resets active sessions', async () => {
@@ -167,7 +167,7 @@ test('runtime config updates reach the next chat setup through the normalized de
   assert.equal(after.input.globalReviewPolicy?.mode, 'auto_authorization');
 });
 
-test('LocalServerTuiSessionService reads active pending review from checkpoint interrupt', async () => {
+test('LocalServerTuiSessionService reads one checkpoint point for messages and pending review', async () => {
   const state = createEmptyTuiSessionState();
   const review = {
     id: 'review-current',
@@ -176,6 +176,7 @@ test('LocalServerTuiSessionService reads active pending review from checkpoint i
     options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
   };
   let capturedThreadId: string | undefined;
+  let readCount = 0;
   const checkpointer = {
     deleteThread: async () => {},
   } as unknown as TuiSessionCheckpointer;
@@ -185,9 +186,10 @@ test('LocalServerTuiSessionService reads active pending review from checkpoint i
     checkpointer,
     graphService: {
       readThreadState: async (setup: { input: { threadId?: string } }) => {
+        readCount += 1;
         capturedThreadId = setup.input.threadId;
         return {
-          messages: [],
+          messages: [new HumanMessage('checkpoint prompt')],
           pendingHumanReview: { review },
           hasPendingContinuation: true,
         };
@@ -214,7 +216,7 @@ test('LocalServerTuiSessionService reads active pending review from checkpoint i
   });
 
   const session = service.getActiveSession('pet-a');
-  const pendingReview = await service.readActivePendingReview({
+  const checkpoint = await service.readActiveCheckpointPoint({
     actorId: 'pet-a',
     llmConfig: {
       apiKey: 'test',
@@ -223,9 +225,11 @@ test('LocalServerTuiSessionService reads active pending review from checkpoint i
     },
   } as never);
 
-  assert.deepEqual(pendingReview, {
+  assert.deepEqual(checkpoint.pendingReview, {
     sessionId: session.id,
     review,
   });
+  assert.deepEqual(checkpoint.messages, [{ role: 'user', text: 'checkpoint prompt' }]);
   assert.equal(capturedThreadId, session.threadId);
+  assert.equal(readCount, 1);
 });

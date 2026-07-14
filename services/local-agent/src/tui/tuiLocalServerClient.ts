@@ -1,10 +1,8 @@
-import { randomUUID } from 'node:crypto';
 import { isTokenUsageSnapshot, type ReviewSpec } from '@pinpawo/pet-agent';
 import {
   buildLocalServerAuthHeaders,
   readLocalServerAuthToken,
 } from '../localServerAuth';
-import type { MessageCellModel } from './state/tuiState';
 import type {
   LocalAgentOperationEntry,
   LocalAgentRun,
@@ -14,9 +12,7 @@ import type {
   LocalAgentTimelineEntry,
 } from '../localAgentSession';
 import { LOCAL_AGENT_SESSION_SNAPSHOT_VERSION } from '../localAgentSession';
-import { buildTuiSessionSnapshotFromMessages } from './snapshot/tuiSessionSnapshot';
 import type { ResumeSessionSummary } from './types';
-import { reviewActionId, reviewActionReviews } from '../reviewAction';
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 1500;
 
@@ -69,60 +65,13 @@ export class TuiLocalServerClient {
     }
   }
 
-  async readHistory(): Promise<MessageCellModel[]> {
-    const res = await this.fetchAuth(this.url('/history'));
-    if (!res.ok) {
-      throw new LocalServerHttpError(res.status);
-    }
-    const payload = await res.json() as {
-      messages?: Array<{ role?: string; text?: string }>;
-    };
-    return parseHistoryMessages(payload.messages);
-  }
-
-  async readSessionSnapshot(params: {
-    sessionId: string;
-    kind: LocalAgentSession['kind'];
-  }): Promise<LocalAgentSessionSnapshot> {
-    const [serverSnapshot, runtime] = await Promise.all([
-      this.readServerSnapshot().catch((err) => {
-        if (err instanceof LocalServerHttpError && err.status === 404) {
-          return null;
-        }
-        throw err;
-      }),
-      this.readRuntime().catch(() => null),
-    ]);
-    if (serverSnapshot) {
-      const nativeSnapshot = parseLocalAgentSessionSnapshot(serverSnapshot);
-      if (nativeSnapshot) {
-        return mergeSnapshotRuntime(nativeSnapshot, runtime);
-      }
-      const legacySnapshot = buildSessionSnapshotFromServerPayload(serverSnapshot as LocalServerSnapshotPayload, {
-        fallbackSessionId: params.sessionId,
-        fallbackKind: params.kind,
-        runtime,
-      });
-      if (legacySnapshot) {
-        return legacySnapshot;
-      }
-      throw new Error('invalid local server snapshot payload');
-    }
-    const messages = await this.readHistory();
-    return buildTuiSessionSnapshotFromMessages({
-      sessionId: params.sessionId,
-      kind: params.kind,
-      messages,
-      runtime,
-    });
-  }
-
-  private async readServerSnapshot(): Promise<unknown> {
+  async readSessionSnapshot(): Promise<LocalAgentSessionSnapshot> {
     const res = await this.fetchAuth(this.url('/snapshot'));
-    if (!res.ok) {
-      throw new LocalServerHttpError(res.status);
-    }
-    return await res.json() as LocalServerSnapshotPayload;
+    if (!res.ok) throw new LocalServerHttpError(res.status);
+    const serverSnapshot = await res.json() as unknown;
+    const snapshot = parseLocalAgentSessionSnapshot(serverSnapshot);
+    if (!snapshot) throw new Error('invalid local server snapshot payload');
+    return snapshot;
   }
 
   async readRuntime(timeoutMs = DEFAULT_HEALTH_TIMEOUT_MS): Promise<LocalServerRuntimeSnapshot | null> {
@@ -161,22 +110,23 @@ export class TuiLocalServerClient {
     }
     const payload = await res.json() as {
       session?: unknown;
-      messages?: Array<{ role?: string; text?: string }>;
       snapshot?: unknown;
     };
     const session = parseResumeSessionSummary(payload.session);
     if (!session) {
       throw new Error('invalid resume session payload');
     }
-    const messages = parseHistoryMessages(payload.messages);
-    const nativeSnapshot = parseLocalAgentSessionSnapshot(payload.snapshot);
+    const snapshot = parseLocalAgentSessionSnapshot(payload.snapshot);
+    if (
+      !snapshot
+      || snapshot.session.sessionId !== session.id
+      || (session.kind !== undefined && snapshot.session.kind !== session.kind)
+    ) {
+      throw new Error('invalid resume session snapshot');
+    }
     return {
       session,
-      snapshot: nativeSnapshot ?? buildTuiSessionSnapshotFromMessages({
-        sessionId: session.id,
-        kind: session.kind ?? parseSnapshotSession(payload.session)?.kind ?? 'chat',
-        messages,
-      }),
+      snapshot,
     };
   }
 
@@ -207,94 +157,13 @@ export class TuiLocalServerClient {
   }
 }
 
-type LocalServerSnapshotPayload = {
-  session?: unknown;
-  messages?: Array<{ role?: string; text?: string }>;
-  pendingReview?: unknown;
-};
-
-type ParsedSnapshotSession = {
-  id: string;
-  kind?: LocalAgentSession['kind'];
-};
-
-type ParsedPendingReview = {
-  requestId: string;
-  actionId: string;
-  sessionId?: string;
-  reviews: ReviewSpec[];
-  petId?: string;
-};
-
-function buildSessionSnapshotFromServerPayload(
-  payload: LocalServerSnapshotPayload,
-  options: {
-    fallbackSessionId: string;
-    fallbackKind: LocalAgentSession['kind'];
-    runtime?: LocalServerRuntimeSnapshot | null;
-  },
-): LocalAgentSessionSnapshot | null {
-  const session = parseSnapshotSession(payload.session);
-  const sessionId = session?.id ?? options.fallbackSessionId;
-  const kind = session?.kind ?? options.fallbackKind;
-  const pendingReview = parsePendingReviewSnapshot(payload.pendingReview);
-  if (!Array.isArray(payload.messages) && !pendingReview) {
-    return null;
-  }
-  const messages = parseHistoryMessages(payload.messages);
-  const snapshot = buildTuiSessionSnapshotFromMessages({
-    sessionId,
-    kind,
-    messages,
-    runtime: options.runtime,
-  });
-  if (!pendingReview) {
-    return snapshot;
-  }
-  return {
-    ...snapshot,
-    session: {
-      ...snapshot.session,
-      activeRun: {
-        requestId: pendingReview.requestId,
-        phase: 'waiting_human',
-        reviewAction: {
-          actionId: pendingReview.actionId,
-          status: 'waiting',
-          reviews: pendingReview.reviews,
-          ...(pendingReview.petId ? { petId: pendingReview.petId } : {}),
-        },
-      },
-    },
-  };
-}
-
-function mergeSnapshotRuntime(
-  snapshot: LocalAgentSessionSnapshot,
-  runtime: LocalServerRuntimeSnapshot | null,
-): LocalAgentSessionSnapshot {
-  if (!runtime) return snapshot;
-  return {
-    ...snapshot,
-    session: {
-      ...snapshot.session,
-      runtime: {
-        ...runtime,
-        ...(snapshot.session.runtime ?? {}),
-      },
-    },
-  };
-}
-
 function parseLocalAgentSessionSnapshot(value: unknown): LocalAgentSessionSnapshot | null {
   if (!isRecord(value)) return null;
-  if (value.version === LOCAL_AGENT_SESSION_SNAPSHOT_VERSION) {
-    const session = parseLocalAgentSession(value.session);
-    return session
-      ? { version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION, session }
-      : null;
-  }
-  return parseLegacyTuiCoreSessionSnapshot(value);
+  if (value.version !== LOCAL_AGENT_SESSION_SNAPSHOT_VERSION) return null;
+  const session = parseLocalAgentSession(value.session);
+  return session
+    ? { version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION, session }
+    : null;
 }
 
 function parseLocalAgentSession(value: unknown): LocalAgentSession | null {
@@ -328,45 +197,6 @@ function parseLocalAgentSession(value: unknown): LocalAgentSession | null {
     ...(actor ? { actor } : {}),
     ...(isRecord(value.runtime) ? { runtime: value.runtime as LocalAgentSession['runtime'] } : {}),
     ...(isTokenUsageSnapshot(value.tokenUsage) ? { tokenUsage: value.tokenUsage } : {}),
-  };
-}
-
-function parseLegacyTuiCoreSessionSnapshot(value: unknown): LocalAgentSessionSnapshot | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.sessionId !== 'string'
-    || !isSessionKind(record.kind)
-    || !Array.isArray(record.timeline)
-    || !Array.isArray(record.runs)
-  ) {
-    return null;
-  }
-  const timeline = record.timeline.flatMap((entry) => {
-    const parsed = parseLocalAgentTimelineEntry(entry);
-    return parsed ? [parsed] : [];
-  });
-  const runs = record.runs.flatMap((run) => {
-    const parsed = parseLegacyTuiCoreRunSnapshot(run);
-    return parsed ? [parsed] : [];
-  });
-  if (timeline.length !== record.timeline.length || runs.length !== record.runs.length) {
-    return null;
-  }
-  const activeRunId = typeof record.activeRunId === 'string' ? record.activeRunId : undefined;
-  const activeRun = runs.find((run) => run.requestId === activeRunId && isActiveRunPhase(run.phase))
-    ?? runs.find((run) => isActiveRunPhase(run.phase))
-    ?? null;
-  return {
-    version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
-    session: {
-      sessionId: record.sessionId,
-      kind: record.kind,
-      timeline,
-      activeRun: activeRun ? toLocalAgentRun(activeRun) : null,
-      ...(isRecord(record.runtime) ? { runtime: record.runtime as LocalAgentSession['runtime'] } : {}),
-      ...(isTokenUsageSnapshot(record.tokenUsage) ? { tokenUsage: record.tokenUsage } : {}),
-    },
   };
 }
 
@@ -457,10 +287,6 @@ function parseOperationSource(
   };
 }
 
-type LegacyTuiCoreRunSnapshot = LocalAgentRun & {
-  phase: LocalAgentRunPhase | 'completed' | 'failed' | 'interrupted';
-};
-
 function parseLocalAgentRun(value: unknown): LocalAgentRun | null {
   if (!isRecord(value) || typeof value.requestId !== 'string' || !isActiveRunPhase(value.phase)) {
     return null;
@@ -473,44 +299,6 @@ function parseLocalAgentRun(value: unknown): LocalAgentRun | null {
     ...(reviewAction ? { reviewAction } : {}),
     ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
     ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
-  };
-}
-
-function parseLegacyTuiCoreRunSnapshot(value: unknown): LegacyTuiCoreRunSnapshot | null {
-  if (
-    !isRecord(value)
-    || typeof value.requestId !== 'string'
-    || typeof value.sessionId !== 'string'
-    || !isSessionKind(value.kind)
-    || !isRunPhase(value.phase)
-    || !Array.isArray(value.timelineEntryIds)
-    || !value.timelineEntryIds.every((item) => typeof item === 'string')
-  ) {
-    return null;
-  }
-  const reviewAction = parseNativeReviewAction(value.reviewAction);
-  if (value.reviewAction !== undefined && !reviewAction) return null;
-  const legacyReviewAction = reviewAction
-    ? null
-    : parseLegacyPendingReview(value.pendingReview, value.requestId);
-  if (!reviewAction && value.pendingReview !== undefined && !legacyReviewAction) return null;
-  const normalizedReviewAction = reviewAction ?? legacyReviewAction;
-  return {
-    requestId: value.requestId,
-    phase: value.phase,
-    ...(normalizedReviewAction ? { reviewAction: normalizedReviewAction } : {}),
-    ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
-    ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
-  };
-}
-
-function toLocalAgentRun(run: LegacyTuiCoreRunSnapshot): LocalAgentRun {
-  return {
-    requestId: run.requestId,
-    phase: run.phase as LocalAgentRunPhase,
-    ...(run.reviewAction ? { reviewAction: run.reviewAction } : {}),
-    ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
-    ...(run.updatedAt !== undefined ? { updatedAt: run.updatedAt } : {}),
   };
 }
 
@@ -528,96 +316,12 @@ function parseNativeReviewAction(value: unknown): LocalAgentRun['reviewAction'] 
   };
 }
 
-function parseLegacyPendingReview(
-  value: unknown,
-  requestId: string,
-): LocalAgentRun['reviewAction'] | null {
-  if (!isRecord(value) || value.requestId !== requestId) return null;
-  const review = isRecord(value.review) && typeof value.review.id === 'string'
-    ? value.review as ReviewSpec
-    : null;
-  const reviews = readReviewSpecs(value.reviews) ?? (review ? [review] : null);
-  if (!reviews || !isLegacyPendingReviewStatus(value.status)) return null;
-  const interruptId = typeof value.interruptId === 'string' ? value.interruptId : undefined;
-  return {
-    actionId: reviewActionId({ requestId, ...(interruptId ? { interruptId } : {}), reviews }),
-    reviews,
-    status: value.status === 'waiting'
-      ? 'waiting'
-      : value.status === 'answered'
-        ? 'submitting'
-        : 'canceling',
-    ...(typeof value.petId === 'string' ? { petId: value.petId } : {}),
-  };
-}
-
-function parseSnapshotSession(value: unknown): ParsedSnapshotSession | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (typeof record.id !== 'string') return null;
-  const kind = record.kind === 'chat' || record.kind === 'studio'
-    ? record.kind
-    : undefined;
-  return {
-    id: record.id,
-    ...(kind ? { kind } : {}),
-  };
-}
-
-function parsePendingReviewSnapshot(value: unknown): ParsedPendingReview | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  const action = isRecord(record.reviewAction) ? record.reviewAction : null;
-  const actionReviews = action ? readReviewSpecs(action.reviews) : null;
-  if (typeof record.requestId === 'string' && action && typeof action.actionId === 'string' && actionReviews?.length) {
-    return {
-      requestId: record.requestId,
-      actionId: action.actionId,
-      ...(typeof record.sessionId === 'string' ? { sessionId: record.sessionId } : {}),
-      reviews: actionReviews,
-      ...(readPendingReviewPetId(record) ? { petId: readPendingReviewPetId(record) } : {}),
-    };
-  }
-  const review = record.review;
-  if (
-    typeof record.requestId !== 'string'
-    || typeof record.reviewId !== 'string'
-    || !review
-    || typeof review !== 'object'
-    || Array.isArray(review)
-    || typeof (review as Record<string, unknown>).id !== 'string'
-  ) {
-    return null;
-  }
-  const reviews = readReviewSpecs(record.reviews);
-  const normalizedReviews = reviewActionReviews(review as ReviewSpec, reviews ?? undefined);
-  return {
-    requestId: record.requestId,
-    actionId: reviewActionId({
-      requestId: record.requestId,
-      ...(typeof record.interruptId === 'string' ? { interruptId: record.interruptId } : {}),
-      reviews: normalizedReviews,
-    }),
-    ...(typeof record.sessionId === 'string' ? { sessionId: record.sessionId } : {}),
-    reviews: normalizedReviews,
-    ...(readPendingReviewPetId(record) ? { petId: readPendingReviewPetId(record) } : {}),
-  };
-}
-
 function readReviewSpecs(value: unknown): ReviewSpec[] | null {
   if (!Array.isArray(value)) return null;
   const reviews = value.filter((item): item is ReviewSpec =>
     Boolean(item && typeof item === 'object' && !Array.isArray(item)
       && typeof (item as Record<string, unknown>).id === 'string'));
   return reviews.length === value.length && reviews.length > 0 ? reviews : null;
-}
-
-function readPendingReviewPetId(record: Record<string, unknown>) {
-  if (typeof record.petId === 'string') return record.petId;
-  const actor = record.actor;
-  if (!actor || typeof actor !== 'object' || Array.isArray(actor)) return undefined;
-  const petId = (actor as Record<string, unknown>).petId;
-  return typeof petId === 'string' ? petId : undefined;
 }
 
 function normalizeHeaders(headers: RequestInit['headers']): Record<string, string> {
@@ -629,27 +333,6 @@ function normalizeHeaders(headers: RequestInit['headers']): Record<string, strin
     return Object.fromEntries(headers);
   }
   return headers as Record<string, string>;
-}
-
-export function parseHistoryMessages(
-  messages: Array<{ role?: string; text?: string }> | undefined,
-): MessageCellModel[] {
-  return Array.isArray(messages)
-    ? messages.flatMap((item) => {
-        if (
-          (item.role === 'user' || item.role === 'assistant' || item.role === 'system')
-          && typeof item.text === 'string'
-          && item.text.trim()
-        ) {
-          return [{
-            id: randomUUID(),
-            kind: item.role,
-            text: item.text,
-          } satisfies MessageCellModel];
-        }
-        return [];
-      })
-    : [];
 }
 
 export function parseResumeSessionSummary(value: unknown): ResumeSessionSummary | null {
@@ -769,18 +452,6 @@ function isOperationPhase(value: unknown): value is LocalAgentOperationEntry['ph
     || value === 'interrupted';
 }
 
-function isRunPhase(value: unknown): value is LegacyTuiCoreRunSnapshot['phase'] {
-  return value === 'starting'
-    || value === 'thinking'
-    || value === 'using_tool'
-    || value === 'streaming'
-    || value === 'waiting_human'
-    || value === 'interrupting'
-    || value === 'completed'
-    || value === 'failed'
-    || value === 'interrupted';
-}
-
 function isActiveRunPhase(value: unknown): value is LocalAgentRunPhase {
   return value === 'starting'
     || value === 'thinking'
@@ -792,8 +463,4 @@ function isActiveRunPhase(value: unknown): value is LocalAgentRunPhase {
 
 function isReviewActionStatus(value: unknown): value is NonNullable<LocalAgentRun['reviewAction']>['status'] {
   return value === 'waiting' || value === 'submitting' || value === 'canceling';
-}
-
-function isLegacyPendingReviewStatus(value: unknown) {
-  return value === 'waiting' || value === 'answered' || value === 'interrupted';
 }

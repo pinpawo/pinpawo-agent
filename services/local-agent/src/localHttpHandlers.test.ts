@@ -46,7 +46,7 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
 
   assert.equal(handleLocalHttpRequest(makeReq('/sessions', 'Bearer secret'), listRes, deps, {
     authToken: 'secret',
-    loadHistory: async () => [],
+    loadSnapshot: async () => ({}),
     listSessions: async () => [{
       id: 'pet-a:one',
       title: 'first',
@@ -76,11 +76,11 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
   const resumeRes = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/sessions/resume?sessionId=pet-a%3Aone', 'Bearer secret'), resumeRes, deps, {
     authToken: 'secret',
-    loadHistory: async () => [],
+    loadSnapshot: async () => ({}),
     listSessions: async () => [],
     resumeSession: async (sessionId) => ({
       session: { id: sessionId, title: 'first' },
-      messages: [{ role: 'user', text: 'hello' }],
+      snapshot: { version: 1 },
     }),
   }), true);
 
@@ -88,7 +88,7 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
   assert.equal(resumeRes.statusCode, 200);
   assert.deepEqual(JSON.parse(resumeRes.body), {
     session: { id: 'pet-a:one', title: 'first' },
-    messages: [{ role: 'user', text: 'hello' }],
+    snapshot: { version: 1 },
   });
 });
 
@@ -98,9 +98,6 @@ test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
 
   assert.equal(handleLocalHttpRequest(makeReq('/snapshot', 'Bearer secret'), snapshotRes, deps, {
     authToken: 'secret',
-    loadHistory: async () => {
-      throw new Error('not called');
-    },
     loadSnapshot: async () => ({
       version: 1,
       session: {
@@ -143,11 +140,23 @@ test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
   });
 });
 
+test('handleLocalHttpRequest does not expose the removed history endpoint', () => {
+  const res = makeRes();
+  assert.equal(handleLocalHttpRequest(makeReq('/history', 'Bearer secret'), res, {} as LocalServerDeps, {
+    authToken: 'secret',
+    loadSnapshot: async () => ({}),
+    listSessions: async () => [],
+    resumeSession: async () => {
+      throw new Error('not called');
+    },
+  }), false);
+});
+
 test('handleLocalHttpRequest rejects requests without a valid local token', async () => {
   const deps = {} as LocalServerDeps;
   const options = {
     authToken: 'secret',
-    loadHistory: async () => {
+    loadSnapshot: async () => {
       throw new Error('not called');
     },
     listSessions: async () => {
@@ -194,7 +203,7 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
     actorName: '羊',
   } as LocalServerDeps, {
     authToken: 'secret',
-    loadHistory: async () => [],
+    loadSnapshot: async () => ({}),
     listSessions: async () => [],
     resumeSession: async () => {
       throw new Error('not called');
@@ -250,7 +259,7 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
     before,
     {
       authToken: 'secret',
-      loadHistory: async () => [],
+      loadSnapshot: async () => ({}),
       listSessions: async () => [],
       resumeSession: async () => {
         throw new Error('not called');
@@ -292,7 +301,7 @@ test('capability refresh updates frozen runtime lists with copy-on-write', async
     before,
     {
       authToken: 'secret',
-      loadHistory: async () => [],
+      loadSnapshot: async () => ({}),
       listSessions: async () => [],
       resumeSession: async () => {
         throw new Error('not called');
@@ -343,7 +352,7 @@ test('handleLocalHttpRequest exposes workdir Studio config source on runtime end
     },
   } as LocalServerDeps, {
     authToken: 'secret',
-    loadHistory: async () => [],
+    loadSnapshot: async () => ({}),
     listSessions: async () => [],
     resumeSession: async () => {
       throw new Error('not called');
@@ -407,7 +416,7 @@ test('handleLocalHttpRequest serves studio due-runs trace when scheduler is avai
     } as unknown as LocalServerDeps['studioDueRunScheduler'],
   } as LocalServerDeps, {
     authToken: 'secret',
-    loadHistory: async () => [],
+    loadSnapshot: async () => ({}),
     listSessions: async () => [],
     resumeSession: async () => {
       throw new Error('not called');
@@ -497,7 +506,7 @@ test('handleLocalHttpRequest filters studio due-runs trace by status and limit',
     } as unknown as LocalServerDeps['studioDueRunScheduler'],
   } as LocalServerDeps, {
     authToken: 'secret',
-    loadHistory: async () => [],
+    loadSnapshot: async () => ({}),
     listSessions: async () => [],
     resumeSession: async () => {
       throw new Error('not called');
@@ -539,7 +548,7 @@ test('handleLocalHttpRequest rejects invalid studio_due_runs limit', async () =>
     } as unknown as LocalServerDeps['studioDueRunScheduler'],
   } as LocalServerDeps, {
     authToken: 'secret',
-    loadHistory: async () => [],
+    loadSnapshot: async () => ({}),
     listSessions: async () => [],
     resumeSession: async () => {
       throw new Error('not called');
@@ -564,7 +573,7 @@ test('handleLocalHttpRequest returns 404 when studio due-runs scheduler is unava
     workdir: '/tmp/workspace',
   } as LocalServerDeps, {
     authToken: 'secret',
-    loadHistory: async () => [],
+    loadSnapshot: async () => ({}),
     listSessions: async () => [],
     resumeSession: async () => {
       throw new Error('not called');
@@ -644,7 +653,7 @@ test('handleLocalHttpRequest returns due-run metrics when include=metrics', asyn
     studioDueRunScheduler: scheduler,
   } as LocalServerDeps, {
     authToken: 'secret',
-    loadHistory: async () => [],
+    loadSnapshot: async () => ({}),
     listSessions: async () => [],
     resumeSession: async () => {
       throw new Error('not called');

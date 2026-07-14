@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { LocalAgentSession } from './localAgentSession';
 import {
-  reconcileSessionSnapshot,
+  applySessionSnapshot,
   reduceSession,
   type LocalAgentSessionInput,
 } from './localAgentSessionReducer';
@@ -195,7 +195,7 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
   assert.equal(session.activeRun?.reviewAction, undefined);
 });
 
-test('reconcileSessionSnapshot explicitly replaces live-only timeline state', () => {
+test('applySessionSnapshot rematerializes timeline state from a checkpoint point', () => {
   const live = replay(createDomainSession(), [
     {
       input: {
@@ -205,6 +205,22 @@ test('reconcileSessionSnapshot explicitly replaces live-only timeline state', ()
         text: 'hello',
       },
       observedAt: 1_700_000_000_000,
+    },
+    {
+      input: {
+        type: 'runtime.event',
+        event: {
+          type: 'operation',
+          requestId: 'req-1',
+          phase: 'started',
+          operation: {
+            id: 'tool-1',
+            kind: 'shell',
+            title: 'Run command',
+          },
+        },
+      },
+      observedAt: 1_700_000_000_050,
     },
     {
       input: {
@@ -243,17 +259,25 @@ test('reconcileSessionSnapshot explicitly replaces live-only timeline state', ()
     },
   };
 
-  const reconnected = reconcileSessionSnapshot(
+  assert.deepEqual(live.timeline.map((entry) => entry.type), [
+    'message',
+    'operation',
+    'message',
+  ]);
+
+  const completed = applySessionSnapshot(
     withUsage,
     snapshot,
-    'reconnect',
-    { observedAt: 1_700_000_000_200 },
+    {
+      observedAt: 1_700_000_000_200,
+      preserveOmittedTokenUsage: true,
+    },
   );
-  assert.deepEqual(reconnected.timeline, snapshot.session.timeline);
-  assert.equal(reconnected.activeRun?.startedAt, 1_700_000_000_000);
-  assert.deepEqual(reconnected.tokenUsage, withUsage.tokenUsage);
+  assert.deepEqual(completed.timeline, snapshot.session.timeline);
+  assert.equal(completed.activeRun?.startedAt, 1_700_000_000_000);
+  assert.deepEqual(completed.tokenUsage, withUsage.tokenUsage);
 
-  const started = reconcileSessionSnapshot(withUsage, snapshot, 'startup', {
+  const started = applySessionSnapshot(withUsage, snapshot, {
     observedAt: 1_700_000_000_200,
   });
   assert.equal(started.tokenUsage, undefined);

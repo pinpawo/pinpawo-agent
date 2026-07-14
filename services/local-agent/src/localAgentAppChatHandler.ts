@@ -47,7 +47,7 @@ import { reviewActionId, reviewActionReviews } from './reviewAction';
 import type { LocalAgentSession } from './localAgentSession';
 import { LOCAL_AGENT_SESSION_SNAPSHOT_VERSION } from './localAgentSession';
 import {
-  reconcileSessionSnapshot,
+  applySessionSnapshot,
   reduceSession,
   type LocalAgentSessionInput,
 } from './localAgentSessionReducer';
@@ -730,7 +730,10 @@ export class LocalAgentAppChatHandler {
     };
     this.storeRemoteSession(
       threadId,
-      reconcileSessionSnapshot(session, snapshot, 'reconcile', { observedAt: this.now() }),
+      applySessionSnapshot(session, snapshot, {
+        observedAt: this.now(),
+        preserveOmittedTokenUsage: true,
+      }),
     );
   }
 

@@ -322,7 +322,7 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
   });
 });
 
-test('readReviewActionSnapshot exposes routeable review action request ids', async () => {
+test('buildReviewActionSnapshot exposes routeable review action request ids', () => {
   const review = {
     id: 'review-current',
     schemaVersion: 1,
@@ -354,7 +354,7 @@ test('readReviewActionSnapshot exposes routeable review action request ids', asy
     actor: { petId: 'pet-a' },
   }, { actorId: 'pet-1' });
 
-  assert.deepEqual(await handler.readReviewActionSnapshot({ actorId: 'pet-1' } as never), {
+  assert.deepEqual(handler.buildReviewActionSnapshot({ actorId: 'pet-1' } as never, null), {
     requestId: 'req-existing',
     sessionId: 'sess-active',
     reviewAction: {
@@ -376,7 +376,7 @@ test('readReviewActionSnapshot exposes routeable review action request ids', asy
     reviews: [review],
   }, { actorId: 'pet-1' });
 
-  assert.deepEqual(await handler.readReviewActionSnapshot({ actorId: 'pet-1' } as never), {
+  assert.deepEqual(handler.buildReviewActionSnapshot({ actorId: 'pet-1' } as never, null), {
     requestId: 'req-action',
     sessionId: 'sess-active',
     reviewAction: {
@@ -388,7 +388,10 @@ test('readReviewActionSnapshot exposes routeable review action request ids', asy
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).reviewActionRoutes.clear();
-  assert.deepEqual(await handler.readReviewActionSnapshot({ actorId: 'pet-1' } as never), {
+  assert.deepEqual(handler.buildReviewActionSnapshot({ actorId: 'pet-1' } as never, {
+    sessionId: 'sess-active',
+    review,
+  }), {
     requestId: 'snapshot:sess-active:review-current',
     sessionId: 'sess-active',
     reviewAction: {

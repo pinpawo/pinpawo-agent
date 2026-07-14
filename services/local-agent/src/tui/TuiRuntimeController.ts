@@ -13,13 +13,13 @@ import {
   selectFocusedBusy,
   selectFocusedPendingApproval,
 } from './state/tuiStateReducer';
-import type { TuiAction, TuiState } from './state/tuiState';
+import type { TuiAction, TuiSnapshotApplyReason, TuiState } from './state/tuiState';
 
 const LOCAL_SERVER_CONNECT_RETRIES = 5;
 const LOCAL_SERVER_CONNECT_RETRY_DELAY_MS = 2000;
 const LOCAL_SERVER_RECONNECT_RETRIES = 5;
 const LOCAL_SERVER_RECONNECT_DELAY_MS = 2000;
-const REVIEW_RECONCILIATION_ERROR_CODES = new Set([
+const REVIEW_SNAPSHOT_REFRESH_ERROR_CODES = new Set([
   'review_closed',
   'review_stale',
   'review_wrong_session',
@@ -54,20 +54,20 @@ function makeMessageMeta() {
   };
 }
 
-type SnapshotRestoreSource = 'startup' | 'reconnect' | 'reconcile';
-type SnapshotReconciliationSource = Exclude<SnapshotRestoreSource, 'startup'>;
+type RuntimeSnapshotApplyReason = Exclude<TuiSnapshotApplyReason, 'resume'>;
+type RuntimeSnapshotRefreshReason = 'completion' | 'review-refresh';
 
-function getSnapshotReconciliationSource(
+function getSnapshotRefreshReason(
   message: LocalAgentServerMessage,
-): SnapshotReconciliationSource | null {
+): RuntimeSnapshotRefreshReason | null {
   if (message.type !== 'event') return null;
-  if (message.event.type === 'message.completed') return 'reconcile';
+  if (message.event.type === 'message.completed') return 'completion';
   if (
     message.event.type === 'error'
     && message.event.code
-    && REVIEW_RECONCILIATION_ERROR_CODES.has(message.event.code)
+    && REVIEW_SNAPSHOT_REFRESH_ERROR_CODES.has(message.event.code)
   ) {
-    return 'reconnect';
+    return 'review-refresh';
   }
   return null;
 }
@@ -416,7 +416,7 @@ export class TuiRuntimeController {
     const connected = await this.waitForLocalServer();
     if (this.disposed || !connected) return;
 
-    await this.restoreSessionSnapshot('startup');
+    await this.applyLatestSessionSnapshot('startup');
     if (this.disposed) return;
 
     this.connectWebSocket();
@@ -462,27 +462,24 @@ export class TuiRuntimeController {
     return false;
   }
 
-  private async restoreSessionSnapshot(source: SnapshotRestoreSource) {
+  private async applyLatestSessionSnapshot(reason: RuntimeSnapshotApplyReason) {
     try {
-      const state = this.options.getState();
-      const sessionId = state.focusedSessionId ?? 'chat:default';
-      const kind = state.sessions[sessionId]?.kind ?? 'chat';
-      const snapshot = await this.localServerClient.readSessionSnapshot({ sessionId, kind });
-      if (source === 'reconcile' && selectFocusedBusy(this.options.getState())) {
+      const snapshot = await this.localServerClient.readSessionSnapshot();
+      if (reason === 'completion' && selectFocusedBusy(this.options.getState())) {
         return false;
       }
       this.options.dispatch({
         type: 'session.snapshot.loaded',
-        source,
+        reason,
         snapshot,
         now: Date.now(),
       });
       return true;
     } catch (err) {
-      if (source === 'reconnect') {
+      if (reason === 'reconnect' || reason === 'review-refresh') {
         throw err;
       }
-      // snapshot restore is best-effort
+      // Startup and post-completion refresh are best-effort.
       return false;
     }
   }
@@ -543,16 +540,16 @@ export class TuiRuntimeController {
       return;
     }
 
-    await this.restoreSessionSnapshot('reconnect');
+    await this.applyLatestSessionSnapshot('reconnect');
     if (this.disposed || this.wsClient.hasSocket()) return;
 
     this.options.resetTimelineView();
     this.connectWebSocket();
   }
 
-  private async reconcileSnapshotAfterReviewError() {
+  private async refreshSnapshotAfterReviewError() {
     try {
-      const restored = await this.restoreSessionSnapshot('reconnect');
+      const restored = await this.applyLatestSessionSnapshot('review-refresh');
       if (restored && !this.disposed) {
         this.options.resetTimelineView();
       }
@@ -563,8 +560,8 @@ export class TuiRuntimeController {
     }
   }
 
-  private async reconcileSnapshotAfterCompletedMessage() {
-    const restored = await this.restoreSessionSnapshot('reconcile');
+  private async refreshSnapshotAfterCompletedMessage() {
+    const restored = await this.applyLatestSessionSnapshot('completion');
     if (restored && !this.disposed) {
       this.options.resetTimelineView();
     }
@@ -628,12 +625,12 @@ export class TuiRuntimeController {
     for (const action of result.actions) {
       this.options.dispatch(action);
     }
-    const reconcileSource = getSnapshotReconciliationSource(msg);
-    if (reconcileSource === 'reconnect') {
-      void this.reconcileSnapshotAfterReviewError();
+    const refreshReason = getSnapshotRefreshReason(msg);
+    if (refreshReason === 'review-refresh') {
+      void this.refreshSnapshotAfterReviewError();
     }
-    if (reconcileSource === 'reconcile') {
-      void this.reconcileSnapshotAfterCompletedMessage();
+    if (refreshReason === 'completion') {
+      void this.refreshSnapshotAfterCompletedMessage();
     }
   }
 

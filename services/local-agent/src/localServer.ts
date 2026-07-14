@@ -70,15 +70,16 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
       const requestDeps = runtimeDeps.get();
       const handled = handleLocalHttpRequest(req, res, requestDeps, {
         authToken,
-        loadHistory: () => tuiSessions.loadHistory(requestDeps),
         loadSnapshot: async () => {
-          const messages = await tuiSessions.loadHistory(requestDeps);
-          const pendingReview = await chatHandler.readReviewActionSnapshot(requestDeps);
-          const sessionId = tuiSessions.getActiveSessionId(requestDeps.actorId);
+          const checkpoint = await tuiSessions.readActiveCheckpointPoint(requestDeps);
+          const pendingReview = chatHandler.buildReviewActionSnapshot(
+            requestDeps,
+            checkpoint.pendingReview,
+          );
           return buildLocalAgentSessionSnapshot({
-            sessionId,
+            sessionId: checkpoint.sessionId,
             kind: 'chat',
-            messages,
+            messages: checkpoint.messages,
             deps: requestDeps,
             pendingReview,
           });
@@ -86,13 +87,15 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
         listSessions: () => tuiSessions.listSessions(requestDeps),
         resumeSession: async (sessionId) => {
           const result = await tuiSessions.resumeSession(requestDeps, sessionId);
-          const pendingReview = await chatHandler.readReviewActionSnapshot(requestDeps);
+          const pendingReview = chatHandler.buildReviewActionSnapshot(
+            requestDeps,
+            result.pendingReview,
+          );
           return {
             session: {
               ...result.session,
               kind: 'chat',
             },
-            messages: result.messages,
             snapshot: buildLocalAgentSessionSnapshot({
               sessionId: result.session.id,
               kind: 'chat',

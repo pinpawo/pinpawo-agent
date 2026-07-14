@@ -94,10 +94,17 @@ export type MessageCellMeta = {
   timestamp?: string;
 };
 
+export type TuiSnapshotApplyReason =
+  | 'startup'
+  | 'reconnect'
+  | 'resume'
+  | 'completion'
+  | 'review-refresh';
+
 export type TuiAction =
   | {
       type: 'session.snapshot.loaded';
-      source: 'startup' | 'reconnect' | 'resume' | 'reconcile';
+      reason: TuiSnapshotApplyReason;
       snapshot: LocalAgentSessionSnapshot;
       now?: number;
     }

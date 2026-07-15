@@ -134,22 +134,18 @@ function reduceRuntimeEvent(
             decisions: [],
           },
         },
-        connection: {
-          ...next.connection,
-          message: TUI_TEXT.approvalWaiting(reviewAction.petId),
-        },
       };
     }
   } else if (event.type === 'message.completed') {
-    next = {
-      ...removeReviewDraft(next, previousReviewActionId),
-      connection: { ...next.connection, message: TUI_TEXT.statusReady },
-    };
+    const withoutDraft = removeReviewDraft(next, previousReviewActionId);
+    next = owner.sessionId === next.focusedSessionId
+      ? { ...withoutDraft, statusNotice: null }
+      : withoutDraft;
   } else if (event.type === 'error') {
-    next = {
-      ...removeReviewDraft(next, previousReviewActionId),
-      connection: { ...next.connection, message: TUI_TEXT.statusErrorRecovered },
-    };
+    const withoutDraft = removeReviewDraft(next, previousReviewActionId);
+    next = owner.sessionId === next.focusedSessionId
+      ? { ...withoutDraft, statusNotice: TUI_TEXT.statusErrorRecovered }
+      : withoutDraft;
   }
   return next;
 }
@@ -212,6 +208,7 @@ function applyLoadedSessionSnapshot(
     sessions,
     reviewDrafts,
     focusedSessionId: incoming.sessionId,
+    statusNotice: action.reason === 'resume' ? null : state.statusNotice,
     ui: action.reason === 'resume'
       ? { mode: 'chat' as const, studioConversationId: null, externalEditorOpen: false }
       : state.ui,
@@ -221,7 +218,7 @@ function applyLoadedSessionSnapshot(
 function finishRun(
   state: TuiState,
   requestId: string,
-  statusMessage: string,
+  statusNotice: string | undefined,
   messages: LocalAgentSessionMessageInput[] = [],
   observedAt = 0,
 ) {
@@ -236,7 +233,9 @@ function finishRun(
   const withoutDraft = removeReviewDraft(nextState, actionId);
   return {
     ...withoutDraft,
-    connection: { ...withoutDraft.connection, message: statusMessage },
+    statusNotice: owner.sessionId === withoutDraft.focusedSessionId
+      ? statusNotice ?? null
+      : withoutDraft.statusNotice,
   };
 }
 
@@ -284,7 +283,10 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     case 'connection.set':
       return {
         ...state,
-        connection: { status: action.status, message: action.message },
+        connection: {
+          status: action.status,
+          ...(action.detail ? { detail: action.detail } : {}),
+        },
       };
     case 'session.configured':
     case 'message.appended': {
@@ -304,9 +306,9 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       const nextState = applySessionInput({
         ...state,
         ui: { mode: 'chat', studioConversationId: null, externalEditorOpen: false },
-        connection: action.statusMessage
-          ? { ...state.connection, message: action.statusMessage }
-          : state.connection,
+        statusNotice: sessionId === state.focusedSessionId
+          ? action.statusNotice ?? null
+          : state.statusNotice,
       }, sessionId, { type: 'session.cleared' }, 0);
       return removeReviewDraft(nextState, actionId);
     }
@@ -372,7 +374,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       const previousActionId = state.sessions[sessionId]?.activeRun?.reviewAction?.actionId;
       const nextState = applySessionInput({
         ...state,
-        connection: { ...state.connection, message: action.statusMessage },
+        statusNotice: sessionId === state.focusedSessionId ? null : state.statusNotice,
         input: clearTextAreaTransientInputState({
           ...state.input,
           text: '',
@@ -407,7 +409,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
             decisions: [...draft.decisions, action.decision],
           },
         },
-        connection: { ...state.connection, message: action.statusMessage },
         input: clearTextAreaTransientInputState({
           ...state.input,
           text: '',
@@ -431,7 +432,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
             decisions: [...draft.decisions, action.decision],
           },
         },
-        connection: { ...state.connection, message: action.statusMessage },
         input: clearTextAreaTransientInputState({
           ...state.input,
           text: '',
@@ -453,9 +453,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         requestId: action.requestId,
         actionId: action.actionId,
       }, 0);
-      return nextState === state
-        ? state
-        : { ...nextState, connection: { ...nextState.connection, message: action.statusMessage } };
+      return nextState;
     }
     case 'run.interrupting': {
       const owner = findSessionForRun(state, action.requestId);
@@ -466,16 +464,13 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         requestId: action.requestId,
       }, 0);
       const withoutDraft = removeReviewDraft(nextState, actionId);
-      return {
-        ...withoutDraft,
-        connection: { ...withoutDraft.connection, message: action.statusMessage },
-      };
+      return withoutDraft;
     }
     case 'run.finish':
       return finishRun(
         state,
         action.requestId,
-        action.statusMessage,
+        action.statusNotice,
         action.messages,
       );
     case 'event.received':

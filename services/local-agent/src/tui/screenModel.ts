@@ -54,6 +54,7 @@ export type TuiScreenModel = {
     };
     statusBar: {
       activityStatus: string | null;
+      statusNotice: string | null;
       connectionStatus: string;
       width: number;
     };
@@ -84,7 +85,7 @@ export function buildTuiScreenModel(input: {
     : pendingApproval
       ? TUI_TEXT.approvalWaiting(pendingApproval.petId)
       : null;
-  const connectionStatus = formatConnectionStatus(input.state.connection, Boolean(activityStatus));
+  const connectionStatus = formatConnectionStatus(input.state.connection);
   const composerFocused = ready && !busy;
 
   return {
@@ -118,6 +119,7 @@ export function buildTuiScreenModel(input: {
       },
       statusBar: {
         activityStatus,
+        statusNotice: activityStatus ? null : input.state.statusNotice,
         connectionStatus,
         width: contentWidth,
       },
@@ -125,14 +127,10 @@ export function buildTuiScreenModel(input: {
   };
 }
 
-function formatConnectionStatus(connection: TuiConnectionState, hasActivityStatus: boolean) {
-  const message = connection.message.trim();
-  if (connection.status === 'ready') {
-    return !hasActivityStatus && message && message !== TUI_TEXT.statusReady
-      ? message
-      : TUI_TEXT.statusReady;
-  }
-  if (message) return message;
+function formatConnectionStatus(connection: TuiConnectionState) {
+  const detail = connection.detail?.trim();
+  if (detail) return detail;
+  if (connection.status === 'ready') return TUI_TEXT.statusReady;
   if (connection.status === 'initializing') return TUI_TEXT.statusInitializing;
   if (connection.status === 'connecting') return TUI_TEXT.connectionConnecting;
   if (connection.status === 'disconnected') return TUI_TEXT.connectionDisconnected;

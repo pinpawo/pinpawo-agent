@@ -17,7 +17,7 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
       message('m2', 'assistant', 'typing', 'streaming'),
     ],
   }));
-  state.connection = { status: 'ready', message: '就绪' };
+  state.connection = { status: 'ready' };
 
   const model = buildTuiScreenModel({
     state,
@@ -33,6 +33,7 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
   assert.equal(model.regions.timeline.width, 96);
   assert.equal(model.regions.composer.textAreaWidth, 92);
   assert.equal(model.regions.statusBar.activityStatus, null);
+  assert.equal(model.regions.statusBar.statusNotice, null);
   assert.equal(model.regions.statusBar.connectionStatus, '就绪');
   assert.equal(model.regions.timeline.renderKey, '3');
   assert.equal(model.regions.timeline.staticBoundaryKey, 'm1');
@@ -43,7 +44,8 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
 
 test('buildTuiScreenModel marks composer and status state while busy', () => {
   const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
-  state.connection = { status: 'ready', message: '正在思考' };
+  state.connection = { status: 'ready' };
+  state.statusNotice = '旧提示';
   state.sessions['chat:pet'].activeRun = {
     requestId: 'run1',
     phase: 'thinking',
@@ -64,12 +66,14 @@ test('buildTuiScreenModel marks composer and status state while busy', () => {
   assert.equal(model.regions.composer.width, 26);
   assert.equal(model.regions.overlay.width, 26);
   assert.match(model.regions.statusBar.activityStatus ?? '', /正在思考|仍在处理中/);
+  assert.equal(model.regions.statusBar.statusNotice, null);
   assert.equal(model.regions.statusBar.connectionStatus, '就绪');
 });
 
-test('buildTuiScreenModel preserves recovered ready connection messages', () => {
+test('buildTuiScreenModel keeps status notices separate from ready connection state', () => {
   const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
-  state.connection = { status: 'ready', message: '出错，已恢复输入' };
+  state.connection = { status: 'ready' };
+  state.statusNotice = '出错，已恢复输入';
 
   const model = buildTuiScreenModel({
     state,
@@ -80,12 +84,33 @@ test('buildTuiScreenModel preserves recovered ready connection messages', () => 
   });
 
   assert.equal(model.regions.statusBar.activityStatus, null);
-  assert.equal(model.regions.statusBar.connectionStatus, '出错，已恢复输入');
+  assert.equal(model.regions.statusBar.statusNotice, '出错，已恢复输入');
+  assert.equal(model.regions.statusBar.connectionStatus, '就绪');
+});
+
+test('buildTuiScreenModel renders transport detail only as connection status', () => {
+  const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
+  state.connection = {
+    status: 'connecting',
+    detail: '2s 后重试 1/5',
+  };
+
+  const model = buildTuiScreenModel({
+    state,
+    terminalColumns: 80,
+    now: 2500,
+    animationFrame: 0,
+    timelineRenderEpoch: 0,
+  });
+
+  assert.equal(model.regions.statusBar.activityStatus, null);
+  assert.equal(model.regions.statusBar.statusNotice, null);
+  assert.equal(model.regions.statusBar.connectionStatus, '2s 后重试 1/5');
 });
 
 test('buildTuiScreenModel keeps approval status visible while composer accepts reply text', () => {
   const state = createInitialTuiState(createSession({ id: 'chat:pet' }));
-  state.connection = { status: 'ready', message: '等待你的决定(pet-1)' };
+  state.connection = { status: 'ready' };
   const review = {
     id: 'review-1',
     schemaVersion: 1,

@@ -49,6 +49,13 @@ interaction state. Input routing and visible overlay selection both consume that
 same owner. Their priority order lives only in `resolveTuiInteractionOwner`;
 routers and render models must not infer a second owner from open-state flags.
 
+TUI transport connection state contains only connection status and optional
+transport detail. Current run and review activity is derived from the focused
+session. Presentation copy that cannot be derived, such as a recovered error or
+completed interrupt notice, lives in the focused TUI's separate `statusNotice`
+field and must not be written into connection state or updated by background
+session events.
+
 ## Local snapshot transport
 
 - `/snapshot` returns the current versioned snapshot for the active session.

@@ -248,7 +248,6 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
       source: 'local-input',
     },
     now: 1000,
-    statusMessage: 'working',
   });
   for (const envelope of eventMessages) {
     tuiState = tuiStateReducer(tuiState, {
@@ -326,7 +325,6 @@ test('LocalAgentAppChatHandler settles projected operations when a run is interr
       source: 'local-input',
     },
     now: 1000,
-    statusMessage: 'working',
   });
   tuiState = tuiStateReducer(tuiState, {
     type: 'event.received',
@@ -336,7 +334,6 @@ test('LocalAgentAppChatHandler settles projected operations when a run is interr
   tuiState = tuiStateReducer(tuiState, {
     type: 'run.interrupting',
     requestId: 'req-interrupt',
-    statusMessage: 'interrupting',
   });
   tuiState = tuiStateReducer(tuiState, {
     type: 'event.received',
@@ -346,7 +343,6 @@ test('LocalAgentAppChatHandler settles projected operations when a run is interr
   tuiState = tuiStateReducer(tuiState, {
     type: 'run.finish',
     requestId: 'req-interrupt',
-    statusMessage: 'interrupted',
   });
   assert.deepEqual(tuiState.sessions[projection.sessionId]?.timeline, projection.timeline);
   assert.deepEqual(tuiState.sessions[projection.sessionId]?.activeRun, projection.activeRun);

@@ -602,6 +602,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
 
   const statusBarModel = useMemo(() => buildStatusBarModel({
     activityStatus: screenModel.regions.statusBar.activityStatus,
+    statusNotice: screenModel.regions.statusBar.statusNotice,
     connectionStatus: screenModel.regions.statusBar.connectionStatus,
     mode: uiMode,
     session: focusedSession,
@@ -613,6 +614,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     overlayModel.current?.label,
     screenModel.regions.statusBar.activityStatus,
     screenModel.regions.statusBar.connectionStatus,
+    screenModel.regions.statusBar.statusNotice,
     uiMode,
   ]);
 

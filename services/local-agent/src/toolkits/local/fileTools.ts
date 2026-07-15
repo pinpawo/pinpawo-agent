@@ -98,6 +98,63 @@ function readUtf8TextFile(filePath: string) {
   return readFileSync(filePath, 'utf-8');
 }
 
+export function readTextFileChunkResult({
+  path,
+  startLine,
+  endLine,
+  maxChars,
+}: {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+  maxChars?: number;
+}) {
+  const filePath = resolveUserPath(path);
+  const content = readUtf8TextFile(filePath);
+  const lines = content.split('\n');
+  const start = Math.max(1, startLine ?? 1);
+  const end = Math.min(lines.length, endLine ?? Math.min(start + 199, lines.length));
+  if (end < start) {
+    throw new Error(`invalid line range ${start}-${end}`);
+  }
+
+  const selectedLines: string[] = [];
+  let selectedChars = 0;
+  for (let lineNumber = start; lineNumber <= end; lineNumber += 1) {
+    const formattedLine = `${lineNumber}: ${lines[lineNumber - 1] ?? ''}`;
+    const nextChars = selectedChars + (selectedLines.length > 0 ? 1 : 0) + formattedLine.length;
+    if (maxChars !== undefined && nextChars > maxChars) {
+      if (selectedLines.length === 0) {
+        throw new Error(`line ${lineNumber} exceeds the ${maxChars}-character chunk budget`);
+      }
+      break;
+    }
+    selectedLines.push(formattedLine);
+    selectedChars = nextChars;
+  }
+
+  const chunkContent = selectedLines.join('\n');
+  const returnedEndLine = start + selectedLines.length - 1;
+  const hasMore = returnedEndLine < lines.length;
+  return {
+    content: chunkContent,
+    startLine: start,
+    endLine: returnedEndLine,
+    nextStartLine: hasMore ? returnedEndLine + 1 : null,
+    totalLines: lines.length,
+    hasMore,
+    returnedChars: chunkContent.length,
+  };
+}
+
+export function readTextFileChunk(input: {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+}) {
+  return readTextFileChunkResult(input).content;
+}
+
 function mergeOperationOutputSummary(
   target: string | undefined,
   details?: Record<string, unknown>,
@@ -165,18 +222,7 @@ export const viewFileChunkTool = tool(
     endLine?: number;
   }) => {
     try {
-      const filePath = resolveUserPath(path);
-      const content = readUtf8TextFile(filePath);
-      const lines = content.split('\n');
-      const start = Math.max(1, startLine ?? 1);
-      const end = Math.min(lines.length, endLine ?? Math.min(start + 199, lines.length));
-      if (end < start) {
-        return `Error: invalid line range ${start}-${end}`;
-      }
-      return lines
-        .slice(start - 1, end)
-        .map((line, index) => `${start + index}: ${line}`)
-        .join('\n');
+      return readTextFileChunk({ path, startLine, endLine });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }

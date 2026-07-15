@@ -1,6 +1,10 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { tool } from '@langchain/core/tools';
+import { ToolMessage } from '@langchain/core/messages';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import {
   type NamedStructuredTool,
   type ToolOperationMetadataMapFor,
@@ -8,9 +12,19 @@ import {
 import { z } from 'zod';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
+import { readTextFileChunkResult } from './fileTools';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
 const MAX_GIT_OUTPUT_CHARS = 30_000;
+const MAX_GH_BODY_CHARS = 60_000;
+const MAX_INLINE_GH_COMMENTS_CHARS = 100_000;
+const MAX_GH_MARKDOWN_LINE_CHARS = 2_000;
+const MAX_GH_CONTENT_CHARS = 60_000;
+const DEFAULT_GH_CONTENT_LINE_COUNT = 100;
+const MAX_GH_CONTENT_LINE_COUNT = 200;
+const DEFAULT_GH_COMMENTS_PER_PAGE = 3;
+const MAX_GH_COMMENTS_PER_PAGE = 5;
+const MAX_GH_BUFFER_BYTES = 1024 * 1024 * 4;
 const execFileAsync = promisify(execFile);
 
 type GitCommandResult = {
@@ -47,6 +61,37 @@ function formatGitResult(result: GitCommandResult) {
   return truncateOutput(output || '(no output)');
 }
 
+function formatGhError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return new Error(`gh command failed: ${String(error)}`);
+  }
+
+  const errorRecord = error as Error & {
+    stdout?: unknown;
+    stderr?: unknown;
+    code?: unknown;
+  };
+  const stdout = typeof errorRecord.stdout === 'string' ? errorRecord.stdout.trimEnd() : '';
+  const stderr = typeof errorRecord.stderr === 'string' ? errorRecord.stderr.trimEnd() : '';
+  const output = truncateOutput([stdout, stderr].filter(Boolean).join('\n'));
+  const prefix = typeof errorRecord.code === 'number'
+    ? `gh command failed (exit ${errorRecord.code})`
+    : `gh command failed: ${error.message}`;
+
+  return new Error(output ? `${prefix}:\n${output}` : prefix);
+}
+
+function createGhToolError(name: string, error: unknown, runtime: ToolRuntime) {
+  const formatted = error instanceof Error ? error : new Error(String(error));
+  if (!runtime.toolCallId) throw formatted;
+  return new ToolMessage({
+    status: 'error',
+    content: `Error: ${formatted.message}`,
+    name,
+    tool_call_id: runtime.toolCallId,
+  });
+}
+
 export async function runGit(args: string[], cwd?: string) {
   const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
   try {
@@ -73,30 +118,355 @@ export async function runGit(args: string[], cwd?: string) {
   }
 }
 
-async function runGh(args: string[], cwd?: string) {
-  const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
+function resolveGhWorkdir(cwd?: string) {
+  return cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
+}
+
+async function executeGh(args: string[], cwd?: string) {
+  const repo = resolveGhWorkdir(cwd);
+  let result: GitCommandResult;
   try {
-    const result = await execFileAsync('gh', args, {
+    result = await execFileAsync('gh', args, {
       cwd: repo,
       encoding: 'utf-8',
       timeout: 20_000,
-      maxBuffer: 1024 * 512,
+      maxBuffer: MAX_GH_BUFFER_BYTES,
     });
-    return formatGitResult(result);
   } catch (err) {
-    if (err instanceof Error && ('stdout' in err || 'stderr' in err)) {
-      const errorRecord = err as Error & { stdout?: unknown; stderr?: unknown; code?: unknown };
-      return formatGitResult({
-        stdout: errorRecord.stdout,
-        stderr: errorRecord.stderr,
-        status: typeof errorRecord.code === 'number'
-          ? errorRecord.code
-          : null,
-        error: errorRecord,
-      });
-    }
-    return formatGitResult({ error: err instanceof Error ? err : new Error(String(err)) });
+    throw formatGhError(err);
   }
+
+  return result;
+}
+
+async function runGh(args: string[], cwd?: string, emptyOutput?: string) {
+  const result = await executeGh(args, cwd);
+
+  const output = formatGitResult(result);
+  if (output === '(no output)') {
+    if (emptyOutput !== undefined) return emptyOutput;
+    throw new Error('gh command returned no output');
+  }
+  return output;
+}
+
+async function runGhJson(args: string[], cwd?: string) {
+  const result = await executeGh(args, cwd);
+  const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : '';
+  if (!stdout) {
+    throw new Error('gh command returned no output');
+  }
+  try {
+    return JSON.parse(stdout) as unknown;
+  } catch (error) {
+    throw new Error(`gh command returned invalid JSON: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+type ResolvedGhIssueTarget = {
+  hostname: string;
+  repository: string;
+  issueNumber: number;
+};
+
+function parseGhIssueUrl(value: string): ResolvedGhIssueTarget | null {
+  try {
+    const url = new URL(value);
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts.length !== 4 || parts[2] !== 'issues' || !/^\d+$/.test(parts[3])) {
+      return null;
+    }
+    return {
+      hostname: url.hostname,
+      repository: `${parts[0]}/${parts[1]}`,
+      issueNumber: Number(parts[3]),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveGhIssueTarget(issue: string, cwd?: string): Promise<ResolvedGhIssueTarget> {
+  const target = normalizeGhTarget(issue, 'issue');
+  const urlTarget = parseGhIssueUrl(target);
+  if (urlTarget) return urlTarget;
+  if (!/^\d+$/.test(target)) {
+    throw new Error('issue must be an issue number or URL');
+  }
+
+  const repository = readRecord(await runGhJson([
+    'repo',
+    'view',
+    '--json',
+    'nameWithOwner,url',
+  ], cwd));
+  const nameWithOwner = readString(repository, 'nameWithOwner');
+  const repositoryUrl = readString(repository, 'url');
+  if (!nameWithOwner || !repositoryUrl) {
+    throw new Error('unable to resolve the current GitHub repository');
+  }
+
+  return {
+    hostname: new URL(repositoryUrl).hostname,
+    repository: nameWithOwner,
+    issueNumber: Number(target),
+  };
+}
+
+function ghApiArgs(target: ResolvedGhIssueTarget, endpoint: string) {
+  return target.hostname === 'github.com'
+    ? ['api', endpoint]
+    : ['api', '--hostname', target.hostname, endpoint];
+}
+
+function truncateBody(value: unknown) {
+  const body = typeof value === 'string' ? value : '';
+  const truncated = body.length > MAX_GH_BODY_CHARS;
+  let returnedChars = truncated ? MAX_GH_BODY_CHARS : body.length;
+  if (
+    truncated
+    && returnedChars > 0
+    && body.charCodeAt(returnedChars - 1) >= 0xd800
+    && body.charCodeAt(returnedChars - 1) <= 0xdbff
+    && body.charCodeAt(returnedChars) >= 0xdc00
+    && body.charCodeAt(returnedChars) <= 0xdfff
+  ) {
+    returnedChars -= 1;
+  }
+  return {
+    body: truncated ? body.slice(0, returnedChars) : body,
+    bodyTruncation: {
+      truncated,
+      originalChars: body.length,
+      returnedChars,
+    },
+  };
+}
+
+function normalizeGhUser(value: unknown) {
+  const user = readRecord(value);
+  return user ? { login: readString(user, 'login') } : null;
+}
+
+function normalizeGhLabels(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const label = readRecord(item);
+    return {
+      name: readString(label, 'name'),
+      color: readString(label, 'color'),
+      description: readString(label, 'description'),
+    };
+  });
+}
+
+function normalizeGhAssignees(value: unknown) {
+  return Array.isArray(value) ? value.map(normalizeGhUser).filter(Boolean) : [];
+}
+
+function normalizeGhComment(value: unknown) {
+  const comment = readRecord(value);
+  return {
+    id: typeof comment?.id === 'number' ? comment.id : null,
+    author: normalizeGhUser(comment?.user),
+    createdAt: readString(comment, 'created_at'),
+    updatedAt: readString(comment, 'updated_at'),
+    url: readString(comment, 'html_url'),
+    body: readString(comment, 'body') ?? '',
+  };
+}
+
+async function loadGhIssue(issue: string, cwd?: string) {
+  const target = await resolveGhIssueTarget(issue, cwd);
+  const issueEndpoint = `repos/${target.repository}/issues/${target.issueNumber}`;
+  const issueRecord = readRecord(await runGhJson(ghApiArgs(target, issueEndpoint), cwd));
+  if (!issueRecord) throw new Error('gh issue response was not an object');
+  return { target, issueEndpoint, issue: issueRecord };
+}
+
+function ghContentRoot(cwd?: string) {
+  return resolve(resolveGhWorkdir(cwd), '.pinpawo', 'tmp', 'gh');
+}
+
+function resolveGhContentPath(path: string, cwd?: string) {
+  const root = ghContentRoot(cwd);
+  const filePath = resolveUserPath(path);
+  const relativePath = relative(root, filePath);
+  if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
+    throw new Error(`gh_read_content only reads files under ${root}`);
+  }
+  return filePath;
+}
+
+function safeGhFileSegment(value: string) {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'github';
+}
+
+function wrapGhMarkdownBody(body: string) {
+  return body.split('\n').flatMap((line) => {
+    if (line.length <= MAX_GH_MARKDOWN_LINE_CHARS) return [line];
+    const chunks: string[] = [];
+    let offset = 0;
+    while (offset < line.length) {
+      let end = Math.min(offset + MAX_GH_MARKDOWN_LINE_CHARS, line.length);
+      const finalCodeUnit = line.charCodeAt(end - 1);
+      const nextCodeUnit = line.charCodeAt(end);
+      if (
+        end < line.length
+        && finalCodeUnit >= 0xd800
+        && finalCodeUnit <= 0xdbff
+        && nextCodeUnit >= 0xdc00
+        && nextCodeUnit <= 0xdfff
+      ) {
+        end -= 1;
+      }
+      chunks.push(line.slice(offset, end));
+      offset = end;
+    }
+    return chunks;
+  }).join('\n');
+}
+
+function formatGhCommentsMarkdown(input: {
+  target: ResolvedGhIssueTarget;
+  issue: Record<string, unknown>;
+  comments: ReturnType<typeof normalizeGhComment>[];
+  page: number;
+  perPage: number;
+}) {
+  const issueTitle = (readString(input.issue, 'title') ?? '').replace(/\s+/g, ' ').trim();
+  const lines = [
+    `# ${input.target.repository} issue #${input.target.issueNumber} comments`,
+    '',
+    `- Title: ${issueTitle || '(untitled)'}`,
+    `- Page: ${input.page}`,
+    `- Per page: ${input.perPage}`,
+    '',
+  ];
+  input.comments.forEach((comment, index) => {
+    lines.push(
+      `## Comment ${(input.page - 1) * input.perPage + index + 1}`,
+      '',
+      `- ID: ${comment.id ?? '(unknown)'}`,
+      `- Author: ${comment.author?.login ?? '(unknown)'}`,
+      `- Created: ${comment.createdAt ?? '(unknown)'}`,
+      `- Updated: ${comment.updatedAt ?? '(unknown)'}`,
+      `- URL: ${comment.url ?? '(unknown)'}`,
+      '',
+      wrapGhMarkdownBody(comment.body) || '(empty body)',
+      '',
+    );
+  });
+  return `${lines.join('\n')}\n`;
+}
+
+function writeGhCommentsContent(input: {
+  cwd?: string;
+  target: ResolvedGhIssueTarget;
+  issue: Record<string, unknown>;
+  comments: ReturnType<typeof normalizeGhComment>[];
+  page: number;
+  perPage: number;
+}) {
+  const root = ghContentRoot(input.cwd);
+  mkdirSync(root, { recursive: true });
+  const repository = safeGhFileSegment(`${input.target.hostname}-${input.target.repository}`);
+  const content = formatGhCommentsMarkdown(input);
+  const contentHash = createHash('sha256').update(content).digest('hex').slice(0, 12);
+  const filePath = resolve(
+    root,
+    `${repository}-issue-${input.target.issueNumber}-comments-page-${input.page}-per-page-${input.perPage}-${contentHash}.md`,
+  );
+  writeFileSync(filePath, content, 'utf-8');
+  return {
+    delivery: 'file',
+    format: 'markdown',
+    path: filePath,
+    cwd: resolveGhWorkdir(input.cwd),
+    chars: content.length,
+    bytes: Buffer.byteLength(content, 'utf-8'),
+    truncated: false,
+    longLinesWrappedAtChars: MAX_GH_MARKDOWN_LINE_CHARS,
+    readWith: 'gh_read_content',
+  };
+}
+
+async function viewGhIssue(input: { cwd?: string; issue: string }) {
+  const { target, issue } = await loadGhIssue(input.issue, input.cwd);
+
+  const body = truncateBody(issue.body);
+  const milestone = readRecord(issue.milestone);
+  return JSON.stringify({
+    number: typeof issue.number === 'number' ? issue.number : target.issueNumber,
+    title: readString(issue, 'title'),
+    state: readString(issue, 'state'),
+    author: normalizeGhUser(issue.user),
+    labels: normalizeGhLabels(issue.labels),
+    assignees: normalizeGhAssignees(issue.assignees),
+    milestone: milestone
+      ? {
+          number: typeof milestone.number === 'number' ? milestone.number : null,
+          title: readString(milestone, 'title'),
+          state: readString(milestone, 'state'),
+        }
+      : null,
+    url: readString(issue, 'html_url'),
+    ...body,
+    commentsTotal: typeof issue.comments === 'number' ? issue.comments : 0,
+  });
+}
+
+async function viewGhIssueComments(input: {
+  cwd?: string;
+  issue: string;
+  page: number;
+  perPage: number;
+}) {
+  const { target, issueEndpoint, issue } = await loadGhIssue(input.issue, input.cwd);
+  const totalComments = typeof issue.comments === 'number' ? issue.comments : 0;
+  const commentsEndpoint = `${issueEndpoint}/comments?per_page=${input.perPage}&page=${input.page}`;
+  const rawComments = totalComments > 0
+    ? await runGhJson(ghApiArgs(target, commentsEndpoint), input.cwd)
+    : [];
+  if (!Array.isArray(rawComments)) throw new Error('gh issue comments response was not an array');
+
+  const comments = rawComments.map(normalizeGhComment);
+  const inlineComments = comments.map(({ body, ...metadata }) => ({
+    ...metadata,
+    ...truncateBody(body),
+  }));
+  const inlineChars = JSON.stringify(inlineComments).length;
+  const useContentFile = inlineChars > MAX_INLINE_GH_COMMENTS_CHARS
+    || comments.some((comment) => comment.body.length > MAX_GH_BODY_CHARS);
+  const returnedComments = useContentFile
+    ? comments.map(({ body, ...metadata }) => ({ ...metadata, bodyChars: body.length }))
+    : inlineComments;
+  const commentsContent = useContentFile
+    ? writeGhCommentsContent({ ...input, target, issue, comments })
+    : {
+        delivery: 'inline',
+        format: 'json',
+        chars: inlineChars,
+        truncated: false,
+      };
+
+  return JSON.stringify({
+    issue: {
+      number: typeof issue.number === 'number' ? issue.number : target.issueNumber,
+      title: readString(issue, 'title'),
+      url: readString(issue, 'html_url'),
+    },
+    comments: returnedComments,
+    commentsPagination: {
+      page: input.page,
+      perPage: input.perPage,
+      returnedCount: returnedComments.length,
+      totalCount: totalComments,
+      hasPreviousPage: totalComments > 0 && input.page > 1,
+      hasNextPage: input.page * input.perPage < totalComments,
+    },
+    commentsContent,
+  });
 }
 
 function normalizeGhTarget(value: string | undefined, label: string) {
@@ -248,8 +618,13 @@ export const gitCommitTool = tool(
 );
 
 export const ghPrViewTool = tool(
-  async ({ cwd, pr }: { cwd?: string; pr: string }) =>
-    runGh(['pr', 'view', normalizeGhTarget(pr, 'pr'), '--comments'], cwd),
+  async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
+    try {
+      return await runGh(['pr', 'view', normalizeGhTarget(pr, 'pr'), '--comments'], cwd);
+    } catch (error) {
+      return createGhToolError('gh_pr_view', error, runtime);
+    }
+  },
   {
     name: 'gh_pr_view',
     description: '使用 GitHub CLI 查看 PR 元数据、描述、review 和评论。pr 可为 PR 编号、URL 或分支名；默认当前 workdir 仓库。',
@@ -261,8 +636,17 @@ export const ghPrViewTool = tool(
 );
 
 export const ghPrDiffTool = tool(
-  async ({ cwd, pr }: { cwd?: string; pr: string }) =>
-    runGh(['pr', 'diff', normalizeGhTarget(pr, 'pr'), '--patch'], cwd),
+  async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
+    try {
+      return await runGh(
+        ['pr', 'diff', normalizeGhTarget(pr, 'pr'), '--patch'],
+        cwd,
+        '(empty diff)',
+      );
+    } catch (error) {
+      return createGhToolError('gh_pr_diff', error, runtime);
+    }
+  },
   {
     name: 'gh_pr_diff',
     description: '使用 GitHub CLI 查看 PR patch diff。pr 可为 PR 编号、URL 或分支名；用于代码 review，不要用 browser/http_fetch 拉取 PR diff。',
@@ -274,14 +658,89 @@ export const ghPrDiffTool = tool(
 );
 
 export const ghIssueViewTool = tool(
-  async ({ cwd, issue }: { cwd?: string; issue: string }) =>
-    runGh(['issue', 'view', normalizeGhTarget(issue, 'issue'), '--comments'], cwd),
+  async ({ cwd, issue }: { cwd?: string; issue: string }, runtime: ToolRuntime) => {
+    try {
+      return await viewGhIssue({ cwd, issue });
+    } catch (error) {
+      return createGhToolError('gh_issue_view', error, runtime);
+    }
+  },
   {
     name: 'gh_issue_view',
-    description: '使用 GitHub CLI 查看 issue 元数据、描述和评论。issue 可为 issue 编号或 URL；默认当前 workdir 仓库。',
+    description: '使用 GitHub CLI 查看 issue 元数据、描述和评论总数，不自动读取评论正文。需要评论时继续调用 gh_issue_comments；issue 可为 issue 编号或 URL，默认当前 workdir 仓库。',
     schema: z.object({
       cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
       issue: z.string().min(1).describe('Issue 编号或 URL'),
+    }),
+  },
+);
+
+export const ghIssueCommentsTool = tool(
+  async ({
+    cwd,
+    issue,
+    page = 1,
+    perPage = DEFAULT_GH_COMMENTS_PER_PAGE,
+  }: {
+    cwd?: string;
+    issue: string;
+    page?: number;
+    perPage?: number;
+  }, runtime: ToolRuntime) => {
+    try {
+      return await viewGhIssueComments({ cwd, issue, page, perPage });
+    } catch (error) {
+      return createGhToolError('gh_issue_comments', error, runtime);
+    }
+  },
+  {
+    name: 'gh_issue_comments',
+    description: '分页读取 GitHub issue 评论，默认每页 3 条、最多 5 条。普通页面直接返回正文；页面过大时完整内容写入 Markdown，并返回可交给 gh_read_content 的路径。',
+    schema: z.object({
+      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+      issue: z.string().min(1).describe('Issue 编号或 URL'),
+      page: z.number().int().positive().optional()
+        .describe('评论页码，默认 1；根据 commentsPagination.hasNextPage 继续翻页'),
+      perPage: z.number().int().positive().max(MAX_GH_COMMENTS_PER_PAGE).optional()
+        .describe(`每页评论数，默认 ${DEFAULT_GH_COMMENTS_PER_PAGE}，最大 ${MAX_GH_COMMENTS_PER_PAGE}`),
+    }),
+  },
+);
+
+export const ghReadContentTool = tool(
+  async ({
+    cwd,
+    path,
+    startLine = 1,
+    lineCount = DEFAULT_GH_CONTENT_LINE_COUNT,
+  }: {
+    cwd?: string;
+    path: string;
+    startLine?: number;
+    lineCount?: number;
+  }, runtime: ToolRuntime) => {
+    try {
+      const filePath = resolveGhContentPath(path, cwd);
+      const chunk = readTextFileChunkResult({
+        path: filePath,
+        startLine,
+        endLine: startLine + lineCount - 1,
+        maxChars: MAX_GH_CONTENT_CHARS,
+      });
+      return JSON.stringify({ path: filePath, ...chunk });
+    } catch (error) {
+      return createGhToolError('gh_read_content', error, runtime);
+    }
+  },
+  {
+    name: 'gh_read_content',
+    description: `按行读取 gh_issue_comments 生成的临时 Markdown。默认请求 ${DEFAULT_GH_CONTENT_LINE_COUNT} 行、最多 ${MAX_GH_CONTENT_LINE_COUNT} 行，但每次最多返回 ${MAX_GH_CONTENT_CHARS} 字符；根据 nextStartLine 继续读取。仅允许读取对应 cwd 下 .pinpawo/tmp/gh 中的文件。`,
+    schema: z.object({
+      cwd: z.string().optional().describe('生成内容时返回的 cwd；默认当前 workdir'),
+      path: z.string().min(1).describe('gh_issue_comments 返回的 commentsContent.path'),
+      startLine: z.number().int().positive().optional().describe('起始行号，默认 1'),
+      lineCount: z.number().int().positive().max(MAX_GH_CONTENT_LINE_COUNT).optional()
+        .describe(`读取行数，默认 ${DEFAULT_GH_CONTENT_LINE_COUNT}，最大 ${MAX_GH_CONTENT_LINE_COUNT}`),
     }),
   },
 );
@@ -297,6 +756,8 @@ export const gitTools = [
   ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
   ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
   ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
+  ghIssueCommentsTool as NamedStructuredTool<'gh_issue_comments'>,
+  ghReadContentTool as NamedStructuredTool<'gh_read_content'>,
 ] as const;
 
 export const gitOperationMetadata = {
@@ -380,6 +841,24 @@ export const gitOperationMetadata = {
       const record = readRecord(input);
       return {
         target: readString(record, 'issue') ?? readString(record, 'cwd'),
+      };
+    },
+  },
+  gh_issue_comments: {
+    title: '查看 GitHub issue 评论',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'issue') ?? readString(record, 'cwd'),
+      };
+    },
+  },
+  gh_read_content: {
+    title: '读取 GitHub 临时内容',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'path'),
       };
     },
   },

@@ -474,7 +474,7 @@ test('tuiStateReducer preserves engine textarea state and clears transient state
 test('tuiStateReducer infers usage context window from runtime when missing', () => {
   let state = startRun(initialState(), 'req-1');
   state = tuiStateReducer(state, {
-    type: 'session.set_runtime',
+    type: 'session.configured',
     runtime: { contextWindow: 1024 },
   });
   const usage = {

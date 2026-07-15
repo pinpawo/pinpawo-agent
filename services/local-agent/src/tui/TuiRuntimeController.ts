@@ -338,7 +338,7 @@ export class TuiRuntimeController {
 
   appendSystemMessage(text: string) {
     this.options.dispatch({
-      type: 'message.append',
+      type: 'message.appended',
       message: createTuiMessage({
         role: 'system',
         text,
@@ -372,7 +372,7 @@ export class TuiRuntimeController {
     }
 
     this.options.dispatch({
-      type: 'session.set_runtime',
+      type: 'session.configured',
       runtime: {
         ...(model ? { model } : {}),
         ...(payload.contextWindow !== undefined ? { contextWindow: payload.contextWindow } : {}),
@@ -602,7 +602,7 @@ export class TuiRuntimeController {
       const context = await loadAgentContext(this.options.actorId);
       if (this.disposed) return;
       this.options.dispatch({
-        type: 'session.set_actor',
+        type: 'session.configured',
         actor: {
           label: context.pet.name,
           summary: buildPetSummary(context),

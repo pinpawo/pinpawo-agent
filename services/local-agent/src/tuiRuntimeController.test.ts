@@ -129,7 +129,7 @@ test('TuiRuntimeController uses configured workdir when runtime payload omits cw
   });
 
   assert.deepEqual(actions, [{
-    type: 'session.set_runtime',
+    type: 'session.configured',
     runtime: {
       model: 'test-model',
       cwd: '/tmp/pinpawo-tui-workdir',
@@ -246,7 +246,9 @@ test('TuiRuntimeController blocks empty required review input', () => {
 
   assert.equal(submitted, false);
   assert.deepEqual(sent, []);
-  assert.equal(actions.some((action) => action.type === 'message.append'), true);
+  assert.equal(actions.some((action) =>
+    action.type === 'message.appended'
+  ), true);
 });
 
 test('TuiRuntimeController requests review cancellation separately from run interruption', () => {

@@ -156,7 +156,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
 
   const appendMessage = (role: MessageRole, text: string) => {
     dispatch({
-      type: 'message.append',
+      type: 'message.appended',
       message: createTuiMessage({
         role,
         text,

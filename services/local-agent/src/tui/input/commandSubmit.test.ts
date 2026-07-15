@@ -91,7 +91,7 @@ test('submitCurrentInputFromController enters studio mode with one conversation 
 
   assert.equal(harness.mode, 'studio');
   assert.equal(typeof harness.studioConversationId, 'string');
-  assert.deepEqual(harness.actions.map((action) => action.type), ['session.set_kind']);
+  assert.deepEqual(harness.actions.map((action) => action.type), ['session.configured']);
   assert.deepEqual(harness.sent, [`studio:${harness.studioConversationId}`]);
 });
 
@@ -106,7 +106,7 @@ test('submitCurrentInputFromController exits studio mode for /chat', () => {
 
   assert.equal(harness.mode, 'chat');
   assert.equal(harness.studioConversationId, null);
-  assert.deepEqual(harness.actions.map((action) => action.type), ['session.set_kind']);
+  assert.deepEqual(harness.actions.map((action) => action.type), ['session.configured']);
   assert.deepEqual(harness.sent, ['clear']);
 });
 
@@ -120,7 +120,7 @@ test('submitCurrentInputFromController clears studio mode before /resume and /ne
 
   assert.equal(resumeHarness.mode, 'chat');
   assert.equal(resumeHarness.studioConversationId, null);
-  assert.deepEqual(resumeHarness.actions.map((action) => action.type), ['session.set_kind']);
+  assert.deepEqual(resumeHarness.actions.map((action) => action.type), ['session.configured']);
   assert.deepEqual(resumeHarness.sent, ['resume', 'clear']);
 
   const newHarness = createSubmitHarness({

@@ -70,7 +70,10 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
 
     if (parsed.name === 'resume') {
       options.exitStudioMode();
-      options.dispatch({ type: 'session.set_kind', kind: 'chat' });
+      options.dispatch({
+        type: 'session.configured',
+        kind: 'chat',
+      });
       options.openResumePicker();
       options.clearInputValue();
       return;
@@ -85,7 +88,10 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
     if (parsed.name === 'chat') {
       if (options.mode === 'studio') {
         options.exitStudioMode();
-        options.dispatch({ type: 'session.set_kind', kind: 'chat' });
+        options.dispatch({
+          type: 'session.configured',
+          kind: 'chat',
+        });
         options.appendSystemMessage(TUI_TEXT.studioExitedToChat);
       } else {
         options.appendSystemMessage(TUI_TEXT.studioNotActive);
@@ -99,7 +105,10 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
       if (!userRequest && options.mode === 'studio') {
         // toggle 退出
         options.exitStudioMode();
-        options.dispatch({ type: 'session.set_kind', kind: 'chat' });
+        options.dispatch({
+          type: 'session.configured',
+          kind: 'chat',
+        });
         options.appendSystemMessage(TUI_TEXT.studioExited);
         options.clearInputValue();
         return;
@@ -117,7 +126,10 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
       if (options.mode !== 'studio' || !studioConversationId) {
         studioConversationId = randomUUID();
         options.enterStudioMode(studioConversationId);
-        options.dispatch({ type: 'session.set_kind', kind: 'studio' });
+        options.dispatch({
+          type: 'session.configured',
+          kind: 'studio',
+        });
         options.appendSystemMessage(
           TUI_TEXT.studioModeEntered(studioConversationId),
         );

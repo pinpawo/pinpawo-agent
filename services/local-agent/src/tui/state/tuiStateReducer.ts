@@ -286,21 +286,16 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         ...state,
         connection: { status: action.status, message: action.message },
       };
-    case 'session.set_actor':
-      return applySessionInput(state, resolveSessionId(state, action.sessionId), {
-        type: 'session.configured',
-        actor: action.actor,
-      }, 0);
-    case 'session.set_runtime':
-      return applySessionInput(state, resolveSessionId(state, action.sessionId), {
-        type: 'session.configured',
-        runtime: action.runtime,
-      }, 0);
-    case 'session.set_kind':
-      return applySessionInput(state, resolveSessionId(state, action.sessionId), {
-        type: 'session.configured',
-        kind: action.kind,
-      }, 0);
+    case 'session.configured':
+    case 'message.appended': {
+      const { sessionId, ...input } = action;
+      return applySessionInput(
+        state,
+        resolveSessionId(state, sessionId),
+        input,
+        0,
+      );
+    }
     case 'session.clear': {
       const sessionId = resolveSessionId(state, action.sessionId);
       const actionId = sessionId
@@ -371,11 +366,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         }),
       };
     }
-    case 'message.append':
-      return applySessionInput(state, resolveSessionId(state, action.sessionId), {
-        type: 'message.appended',
-        message: action.message,
-      }, 0);
     case 'run.start': {
       const sessionId = resolveSessionId(state, action.sessionId);
       if (!sessionId) return state;

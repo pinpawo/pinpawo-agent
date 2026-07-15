@@ -9,6 +9,8 @@ import type {
   LocalAgentSessionSnapshot,
   LocalAgentTimelineEntry,
 } from '../../localAgentSession';
+import type { LocalAgentSessionInput } from '../../localAgentSessionReducer';
+import type { ReviewDraft } from '../../reviewAction';
 import {
   createComposerHistoryState,
   type ComposerHistoryDirection,
@@ -16,7 +18,6 @@ import {
 } from '../input/composerHistory';
 import type { TextAreaModel } from '../input/textarea/engine';
 import { TUI_TEXT } from '../render/text';
-import type { ReviewDraft } from '../../reviewAction';
 
 export type RunId = string;
 export type SessionId = string;
@@ -75,6 +76,10 @@ export type TuiSnapshotApplyReason =
   | 'review-refresh';
 
 export type TuiAction =
+  | (Extract<
+      LocalAgentSessionInput,
+      { type: 'session.configured' | 'message.appended' }
+    > & { sessionId?: SessionId })
   | {
       type: 'session.snapshot.loaded';
       reason: TuiSnapshotApplyReason;
@@ -85,21 +90,6 @@ export type TuiAction =
       type: 'connection.set';
       status: TuiConnectionStatus;
       message: string;
-    }
-  | {
-      type: 'session.set_actor';
-      sessionId?: SessionId;
-      actor: SessionModel['actor'];
-    }
-  | {
-      type: 'session.set_runtime';
-      sessionId?: SessionId;
-      runtime: Partial<SessionModel['runtime']>;
-    }
-  | {
-      type: 'session.set_kind';
-      sessionId?: SessionId;
-      kind: SessionModel['kind'];
     }
   | {
       type: 'session.clear';
@@ -130,11 +120,6 @@ export type TuiAction =
   | {
       type: 'input.history.navigate';
       direction: ComposerHistoryDirection;
-    }
-  | {
-      type: 'message.append';
-      sessionId?: SessionId;
-      message: LocalAgentSessionMessageInput;
     }
   | {
       type: 'run.start';

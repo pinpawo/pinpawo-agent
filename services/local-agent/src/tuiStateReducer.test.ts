@@ -67,7 +67,6 @@ function startRun(state: TuiState, requestId = 'req-1', sessionId?: string) {
       createdAt: new Date(1000).toISOString(),
     },
     now: 1000,
-    statusMessage: '等待回复',
   });
 }
 
@@ -123,6 +122,45 @@ test('tuiStateReducer updates mode and external editor owner state', () => {
   assert.equal(state.ui.mode, 'chat');
   assert.equal(state.ui.studioConversationId, null);
   assert.equal(state.ui.externalEditorOpen, true);
+});
+
+test('tuiStateReducer keeps transport connection detail separate from run status', () => {
+  let state = initialState();
+  state = tuiStateReducer(state, {
+    type: 'connection.set',
+    status: 'ready',
+    detail: 'transport detail',
+  });
+
+  state = startRun(state, 'req-1');
+  state = tuiStateReducer(state, {
+    type: 'run.interrupting',
+    requestId: 'req-1',
+  });
+
+  assert.deepEqual(state.connection, { status: 'ready', detail: 'transport detail' });
+  assert.equal(state.statusNotice, null);
+  assert.equal(selectFocusedActiveRun(state)?.phase, 'interrupting');
+});
+
+test('tuiStateReducer keeps background session events out of the focused status notice', () => {
+  let state = initialState();
+  state.statusNotice = 'focused notice';
+  state.sessions['chat:other'] = createSession({ id: 'chat:other' });
+
+  state = startRun(state, 'req-other', 'chat:other');
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'error',
+      requestId: 'req-other',
+      message: 'background failure',
+    },
+    now: 1200,
+  });
+
+  assert.equal(state.statusNotice, 'focused notice');
+  assert.equal(state.sessions['chat:other']?.activeRun, null);
 });
 
 test('tuiStateReducer handles streaming chat completion with token usage', () => {
@@ -372,7 +410,6 @@ test('tuiStateReducer records composer prompt history only for run starts', () =
     kind: 'chat',
     message: { role: 'user', text: ' hello ' },
     now: 1000,
-    statusMessage: '等待回复',
   });
   assert.deepEqual(state.input.history.entries, ['hello']);
   assert.equal(state.input.text, '');
@@ -384,7 +421,6 @@ test('tuiStateReducer records composer prompt history only for run starts', () =
     kind: 'chat',
     message: { role: 'user', text: 'hello' },
     now: 2000,
-    statusMessage: '等待回复',
   });
   assert.deepEqual(state.input.history.entries, ['hello']);
 
@@ -393,7 +429,6 @@ test('tuiStateReducer records composer prompt history only for run starts', () =
     requestId: 'req-2',
     actionId: 'request:req-2:reviews:unknown',
     decision: { reviewId: 'review-2', selectedOptionId: 'approve' },
-    statusMessage: '继续执行',
   });
   assert.deepEqual(state.input.history.entries, ['hello']);
 });
@@ -408,7 +443,6 @@ test('tuiStateReducer navigates composer prompt history and restores draft', () 
     kind: 'chat',
     message: { role: 'user', text: 'second' },
     now: 2000,
-    statusMessage: '等待回复',
   });
   state = tuiStateReducer(state, { type: 'input.set', value: 'draft' });
 
@@ -464,7 +498,6 @@ test('tuiStateReducer preserves engine textarea state and clears transient state
     kind: 'chat',
     message: { role: 'user', text: 'second' },
     now: 1000,
-    statusMessage: '等待回复',
   });
   assert.equal(state.input.selection, undefined);
   assert.equal(state.input.editHistory, undefined);
@@ -1198,7 +1231,7 @@ test('tuiStateReducer ignores late terminal events after local interrupt release
   state = tuiStateReducer(state, {
     type: 'run.finish',
     requestId: 'req-1',
-    statusMessage: '已请求打断',
+    statusNotice: '已请求打断',
     messages: [{
       id: 'message:req-1:interrupt-local-release',
       role: 'system',
@@ -1231,7 +1264,7 @@ test('tuiStateReducer ignores late terminal events after interrupt release and s
   state = tuiStateReducer(state, {
     type: 'run.finish',
     requestId: 'req-1',
-    statusMessage: '已请求打断',
+    statusNotice: '已请求打断',
     messages: [{
       id: 'message:req-1:interrupt-local-release',
       role: 'system',
@@ -1548,7 +1581,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     decisions: [],
     petId: 'pet-a',
   });
-  assert.equal(state.connection.message, '等待你的决定(pet-a)');
+  assert.equal(state.statusNotice, null);
   assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'req-1:review:review-1'), false);
 
   const activeRunBefore = selectFocusedActiveRun(state);
@@ -1557,7 +1590,6 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
     decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
-    statusMessage: '提交确认',
   });
 
   assert.equal(selectFocusedBusy(state), true);
@@ -1571,11 +1603,10 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   state = tuiStateReducer(state, {
     type: 'run.interrupting',
     requestId: 'req-1',
-    statusMessage: '正在打断',
   });
 
   assert.equal(selectFocusedActiveRun(state)?.phase, 'interrupting');
-  assert.equal(state.connection.message, '正在打断');
+  assert.equal(state.statusNotice, null);
 });
 
 test('tuiStateReducer keeps batch draft local and out of the conversation timeline', () => {
@@ -1604,7 +1635,6 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
     requestId: 'req-1',
     actionId: 'interrupt-stale',
     decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
-    statusMessage: '不应应用',
   });
   assert.equal(stateAfterStaleDecision, state);
 
@@ -1613,7 +1643,6 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
     requestId: 'req-1',
     actionId: 'interrupt-1',
     decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
-    statusMessage: '等待下一项',
   });
 
   assert.equal(selectFocusedPendingApproval(state)?.review.id, 'review-2');
@@ -1666,7 +1695,6 @@ test('tuiStateReducer marks review cancellation separately from run interruption
     type: 'review.action.cancel',
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
-    statusMessage: '正在打断',
   });
 
   assert.equal(selectFocusedActiveRun(state)?.phase, 'interrupting');
@@ -1697,7 +1725,6 @@ test('tuiStateReducer review.action.submit preserves the owning run', () => {
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
     decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
-    statusMessage: '提交确认',
   });
 
   assert.equal(state.sessions['chat:pet']?.activeRun?.requestId, 'req-1');
@@ -1787,7 +1814,7 @@ test('tuiStateReducer finishes error and terminal messages', () => {
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
-  assert.equal(state.connection.message, '出错，已恢复输入');
+  assert.equal(state.statusNotice, '出错，已恢复输入');
   assert.equal(timelineMessagesByRole(state, 'system').at(-1)?.text, '出错：boom');
 
   state = startRun(state, 'studio-req');
@@ -1803,7 +1830,6 @@ test('tuiStateReducer finishes error and terminal messages', () => {
       text: '[studio] stopped: done enough',
       requestId: 'studio-req',
     }],
-    statusMessage: '就绪',
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
@@ -1821,10 +1847,10 @@ test('tuiStateReducer finishes error and terminal messages', () => {
       text: '[studio 出错] planner failed',
       requestId: 'studio-error',
     }],
-    statusMessage: 'Studio 出错，已恢复输入',
+    statusNotice: 'Studio 出错，已恢复输入',
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
-  assert.equal(state.connection.message, 'Studio 出错，已恢复输入');
+  assert.equal(state.statusNotice, 'Studio 出错，已恢复输入');
   assert.equal(timelineMessagesByRole(state, 'system').at(-1)?.text, '[studio 出错] planner failed');
 });

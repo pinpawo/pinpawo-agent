@@ -32,6 +32,7 @@ export type FormattedStatusBarPart = {
 
 export function buildStatusBarModel(input: {
   activityStatus?: string | null;
+  statusNotice?: string | null;
   connectionStatus: string;
   mode: TuiInteractionMode;
   session: SessionModel | null;
@@ -39,6 +40,7 @@ export function buildStatusBarModel(input: {
   overlayOwner?: string | null;
 }): StatusBarModel {
   const runtime = input.session?.runtime;
+  const hasPrimaryStatus = Boolean(input.activityStatus || input.statusNotice);
   return {
     segments: [
       ...(input.activityStatus ? [{
@@ -48,11 +50,18 @@ export function buildStatusBarModel(input: {
         tone: statusTone(input.activityStatus),
         truncation: 'truncate' as const,
       }] : []),
+      ...(input.statusNotice ? [{
+        id: 'notice',
+        value: input.statusNotice,
+        priority: 99,
+        tone: statusTone(input.statusNotice),
+        truncation: 'truncate' as const,
+      }] : []),
       {
         id: 'connection',
-        ...(input.activityStatus ? { label: '连接' } : {}),
+        ...(hasPrimaryStatus ? { label: '连接' } : {}),
         value: input.connectionStatus,
-        priority: input.activityStatus ? 95 : 100,
+        priority: hasPrimaryStatus ? 95 : 100,
         tone: statusTone(input.connectionStatus),
         truncation: 'truncate',
       },

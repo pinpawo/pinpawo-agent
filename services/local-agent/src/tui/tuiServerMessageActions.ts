@@ -47,7 +47,6 @@ export function buildTuiActionsFromServerMessage(
       actions: [{
         type: 'run.interrupting',
         requestId: message.requestId,
-        statusMessage: TUI_TEXT.interrupting,
       }],
     };
   }
@@ -64,7 +63,7 @@ export function buildTuiActionsFromServerMessage(
           requestId: message.requestId,
           source: 'live-event',
         })],
-        statusMessage: TUI_TEXT.interruptedStatus,
+        statusNotice: TUI_TEXT.interruptedStatus,
       }],
     };
   }
@@ -91,7 +90,6 @@ export function buildTuiActionsFromServerMessage(
         type: 'run.finish',
         requestId: message.requestId,
         messages,
-        statusMessage: TUI_TEXT.statusReady,
       }],
     };
   }
@@ -107,7 +105,7 @@ export function buildTuiActionsFromServerMessage(
         requestId: message.requestId,
         source: 'live-event',
       })],
-      statusMessage: TUI_TEXT.studioErrorRecovered,
+      statusNotice: TUI_TEXT.studioErrorRecovered,
     }],
   };
 }

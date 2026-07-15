@@ -176,7 +176,6 @@ test('buildTuiActionsFromServerMessage maps control messages to TUI actions', ()
       actions: [{
         type: 'run.interrupting',
         requestId: 'req-1',
-        statusMessage: '正在打断',
       }],
     },
   );
@@ -203,7 +202,7 @@ test('buildTuiActionsFromServerMessage maps control messages to TUI actions', ()
           requestId: 'req-1',
           source: 'live-event',
         }],
-        statusMessage: '已打断',
+        statusNotice: '已打断',
       }],
     },
   );
@@ -241,7 +240,6 @@ test('buildTuiActionsFromServerMessage maps studio control messages', () => {
           requestId: 'studio-1',
           source: 'live-event',
         }],
-        statusMessage: '就绪',
       }],
     },
   );
@@ -268,7 +266,7 @@ test('buildTuiActionsFromServerMessage maps studio control messages', () => {
           requestId: 'studio-2',
           source: 'live-event',
         }],
-        statusMessage: 'Studio 出错，已恢复输入',
+        statusNotice: 'Studio 出错，已恢复输入',
       }],
     },
   );

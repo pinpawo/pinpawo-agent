@@ -298,7 +298,6 @@ test('TUI actions preserve the shared session reducer projection', () => {
       createdAt: new Date(1_000).toISOString(),
     },
     now: 1_000,
-    statusMessage: 'working',
   });
   let shared = reduceSession(tuiInitial.sessions['chat:pet'], {
     type: 'user.accepted',

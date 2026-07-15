@@ -12,7 +12,8 @@ function pendingReviewState(): TuiState {
     options: [],
   };
   return {
-    connection: { status: 'ready', message: 'ready' },
+    connection: { status: 'ready' },
+    statusNotice: null,
     focusedSessionId: 'sess-1',
     reviewDrafts: {
       'interrupt-1': { actionId: 'interrupt-1', decisions: [] },
@@ -185,7 +186,6 @@ test('TuiRuntimeController queues review action decisions until the final approv
   if (advance?.type === 'review.draft.record') {
     assert.equal(advance.requestId, 'req-1');
     assert.deepEqual(advance.decision, { reviewId: 'review-1', selectedOptionId: 'approve' });
-    assert.equal(advance.statusMessage, '等待你的决定');
   }
 
   const final = createController(pendingReviewActionState(1));
@@ -266,7 +266,6 @@ test('TuiRuntimeController requests review cancellation separately from run inte
     type: 'review.action.cancel',
     requestId: 'req-1',
     actionId: 'interrupt-1',
-    statusMessage: '正在打断',
   });
 });
 
@@ -283,7 +282,6 @@ test('TuiRuntimeController interrupts the run after review submission starts', (
   assert.deepEqual(actions.find((action) => action.type === 'run.interrupting'), {
     type: 'run.interrupting',
     requestId: 'req-1',
-    statusMessage: '正在打断',
   });
 });
 
@@ -300,7 +298,7 @@ test('TuiRuntimeController releases input locally after interrupt timeout', () =
     assert.equal(finish?.type, 'run.finish');
     if (finish?.type !== 'run.finish') return;
     assert.equal(finish.requestId, 'req-1');
-    assert.equal(finish.statusMessage, '已请求打断');
+    assert.equal(finish.statusNotice, '已请求打断');
     assert.deepEqual(
       finish.messages?.map((message) => [message.role, message.text]),
       [['system', '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。']],
@@ -318,7 +316,7 @@ test('TuiRuntimeController resets static timeline view for new sessions', () => 
   assert.equal(harness.resetCount, 1);
   assert.deepEqual(harness.actions.slice(0, 2), [
     { type: 'input.set', value: '' },
-    { type: 'session.clear', statusMessage: '已创建新会话' },
+    { type: 'session.clear', statusNotice: '已创建新会话' },
   ]);
   assert.deepEqual(harness.sent, [{ type: 'new_session' }]);
 });

@@ -97,7 +97,7 @@ export class TuiRuntimeController {
       this.options.dispatch({
         type: 'connection.set',
         status: 'error',
-        message: TUI_TEXT.initializationFailed(message),
+        detail: TUI_TEXT.initializationFailed(message),
       });
     });
   }
@@ -141,7 +141,6 @@ export class TuiRuntimeController {
         source: 'local-input',
       }, now),
       now,
-      statusMessage: TUI_TEXT.waitingForReply,
     });
 
     this.wsClient.send({
@@ -176,7 +175,6 @@ export class TuiRuntimeController {
         source: 'local-input',
       }, now),
       now,
-      statusMessage: TUI_TEXT.studioRunning,
     });
     this.wsClient.send({
       type: 'studio_request',
@@ -232,7 +230,6 @@ export class TuiRuntimeController {
         requestId,
         actionId: currentApproval.actionId,
         decision: response,
-        statusMessage: TUI_TEXT.approvalWaiting(currentApproval.petId),
       });
       return true;
     }
@@ -242,7 +239,6 @@ export class TuiRuntimeController {
       requestId,
       actionId: currentApproval.actionId,
       decision: response,
-      statusMessage: TUI_TEXT.reviewSubmitting,
     });
 
     this.wsClient.send({
@@ -276,7 +272,6 @@ export class TuiRuntimeController {
         type: 'review.action.cancel',
         requestId: activeRun.requestId,
         actionId: waitingReviewAction.actionId,
-        statusMessage: TUI_TEXT.interrupting,
       });
     } else {
       this.wsClient.send({
@@ -286,7 +281,6 @@ export class TuiRuntimeController {
       this.options.dispatch({
         type: 'run.interrupting',
         requestId: activeRun.requestId,
-        statusMessage: TUI_TEXT.interrupting,
       });
     }
     this.clearInterruptTimeout();
@@ -301,7 +295,7 @@ export class TuiRuntimeController {
       this.options.dispatch({
         type: 'run.finish',
         requestId: interruptRequestId,
-        statusMessage: TUI_TEXT.interruptRequestedStatus,
+        statusNotice: TUI_TEXT.interruptRequestedStatus,
         messages: [createTuiMessage({
           id: `message:${interruptRequestId}:interrupt-local-release`,
           role: 'system',
@@ -323,7 +317,7 @@ export class TuiRuntimeController {
     });
     this.options.dispatch({
       type: 'session.clear',
-      statusMessage: TUI_TEXT.newSessionCreated,
+      statusNotice: TUI_TEXT.newSessionCreated,
     });
 
     if (this.wsClient.isConnected()) {
@@ -411,7 +405,6 @@ export class TuiRuntimeController {
     this.options.dispatch({
       type: 'connection.set',
       status: 'connecting',
-      message: TUI_TEXT.connectionConnecting,
     });
 
     const connected = await this.waitForLocalServer();
@@ -441,7 +434,6 @@ export class TuiRuntimeController {
           this.options.dispatch({
             type: 'connection.set',
             status: 'disconnected',
-            message: TUI_TEXT.connectionDisconnected,
           });
           return false;
         }
@@ -454,7 +446,7 @@ export class TuiRuntimeController {
         this.options.dispatch({
           type: 'connection.set',
           status: 'connecting',
-          message: retryText,
+          detail: retryText,
         });
         this.appendSystemMessage(retryText);
         await sleep(LOCAL_SERVER_CONNECT_RETRY_DELAY_MS);
@@ -501,7 +493,7 @@ export class TuiRuntimeController {
       this.options.dispatch({
         type: 'connection.set',
         status: 'disconnected',
-        message: TUI_TEXT.connectionReconnectFailed,
+        detail: TUI_TEXT.connectionReconnectFailed,
       });
       return;
     }
@@ -516,7 +508,7 @@ export class TuiRuntimeController {
     this.options.dispatch({
       type: 'connection.set',
       status: 'connecting',
-      message: retryText,
+      detail: retryText,
     });
 
     this.reconnectTimeout = setTimeout(() => {
@@ -577,7 +569,6 @@ export class TuiRuntimeController {
     this.options.dispatch({
       type: 'connection.set',
       status: 'ready',
-      message: TUI_TEXT.statusReady,
     });
     this.sendRuntimeConfigUpdate();
   }
@@ -587,7 +578,7 @@ export class TuiRuntimeController {
     this.options.dispatch({
       type: 'connection.set',
       status: 'disconnected',
-      message: TUI_TEXT.connectionClosed,
+      detail: TUI_TEXT.connectionClosed,
     });
     this.scheduleReconnect();
   }

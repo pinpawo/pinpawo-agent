@@ -130,6 +130,26 @@ test('buildStatusBarModel keeps activity and connection as separate segments', (
   assert.equal(formatStatusBarText(model, 34), '正在思考 · 2s · 连接:连接断开，10…');
 });
 
+test('buildStatusBarModel keeps status notices separate from connection', () => {
+  const model = buildStatusBarModel({
+    statusNotice: '出错，已恢复输入',
+    connectionStatus: '就绪',
+    mode: 'chat',
+    session: createSession({ id: 'chat:pet' }),
+    globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
+  });
+
+  assert.deepEqual(
+    model.segments.slice(0, 3).map((segment) => [segment.id, segment.label, segment.value]),
+    [
+      ['notice', undefined, '出错，已恢复输入'],
+      ['connection', '连接', '就绪'],
+      ['mode', undefined, 'Chat'],
+    ],
+  );
+  assert.match(formatStatusBarText(model, 80), /^出错，已恢复输入 · 连接:就绪/);
+});
+
 test('formatStatusBarParts preserves segment tones for rendering', () => {
   const model = buildStatusBarModel({
     activityStatus: '正在思考 · 2s',

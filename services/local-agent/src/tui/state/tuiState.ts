@@ -31,11 +31,12 @@ export type TuiConnectionStatus =
 
 export type TuiConnectionState = {
   status: TuiConnectionStatus;
-  message: string;
+  detail?: string;
 };
 
 export type TuiState = {
   connection: TuiConnectionState;
+  statusNotice: string | null;
   sessions: Record<SessionId, SessionModel>;
   focusedSessionId: SessionId | null;
   reviewDrafts: Record<string, ReviewDraft>;
@@ -89,12 +90,12 @@ export type TuiAction =
   | {
       type: 'connection.set';
       status: TuiConnectionStatus;
-      message: string;
+      detail?: string;
     }
   | {
       type: 'session.clear';
       sessionId?: SessionId;
-      statusMessage?: string;
+      statusNotice?: string;
     }
   | {
       type: 'ui.mode.set';
@@ -128,7 +129,6 @@ export type TuiAction =
       kind: SessionModel['kind'];
       message: LocalAgentSessionMessageInput & { role: 'user' };
       now: number;
-      statusMessage: string;
     }
   | {
       // The user answered a HITL review. Server resumes the same LangGraph
@@ -140,30 +140,26 @@ export type TuiAction =
       requestId: RunId;
       actionId: string;
       decision: ReviewResponse;
-      statusMessage: string;
     }
   | {
       type: 'review.draft.record';
       requestId: RunId;
       actionId: string;
       decision: ReviewResponse;
-      statusMessage: string;
     }
   | {
       type: 'review.action.cancel';
       requestId: RunId;
       actionId: string;
-      statusMessage: string;
     }
   | {
       type: 'run.interrupting';
       requestId: RunId;
-      statusMessage: string;
     }
   | {
       type: 'run.finish';
       requestId: RunId;
-      statusMessage: string;
+      statusNotice?: string;
       messages?: LocalAgentSessionMessageInput[];
     }
   | {
@@ -177,8 +173,8 @@ export function createInitialTuiState(defaultSession: SessionModel): TuiState {
   return {
     connection: {
       status: 'initializing',
-      message: TUI_TEXT.statusInitializing,
     },
+    statusNotice: null,
     sessions: {
       [defaultSession.sessionId]: defaultSession,
     },

@@ -5,21 +5,12 @@ import type {
   LocalAgentOperationEntry,
   LocalAgentRun,
   LocalAgentSession,
+  LocalAgentSessionMessageInput,
   LocalAgentSessionSnapshot,
   LocalAgentTimelineEntry,
-  LocalAgentTimelineSource,
 } from './localAgentSession';
 import { localAgentOperationEntryFromEvent, localAgentOperationEntryId } from './localAgentTimeline';
 import { reviewActionId, reviewActionReviews } from './reviewAction';
-
-export type LocalAgentSessionMessageInput = {
-  id?: string;
-  role: LocalAgentMessageEntry['role'];
-  text: string;
-  requestId?: string;
-  source?: LocalAgentTimelineSource;
-  createdAt?: string;
-};
 
 export type LocalAgentSessionInput =
   | {

@@ -34,6 +34,11 @@ A session owns one ordered timeline and zero or one active run. Local snapshot r
 
 Partial `ReviewDraft` decisions are client-local interaction state and are not part of the shared snapshot.
 
+Live TUI actions carry `LocalAgentSessionMessageInput` directly; there is no
+second `MessageCell` model. Message `createdAt` / `updatedAt` values use ISO
+timestamps in state, and terminal-local time formatting happens only while
+rendering.
+
 ## Local snapshot transport
 
 - `/snapshot` returns the current versioned snapshot for the active session.

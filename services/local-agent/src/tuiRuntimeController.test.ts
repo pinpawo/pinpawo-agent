@@ -300,7 +300,7 @@ test('TuiRuntimeController releases input locally after interrupt timeout', () =
     assert.equal(finish.requestId, 'req-1');
     assert.equal(finish.statusMessage, '已请求打断');
     assert.deepEqual(
-      finish.messages?.map((message) => [message.kind, message.text]),
+      finish.messages?.map((message) => [message.role, message.text]),
       [['system', '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。']],
     );
   } finally {

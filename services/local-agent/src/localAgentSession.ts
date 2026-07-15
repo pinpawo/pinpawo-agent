@@ -50,6 +50,15 @@ export type LocalAgentTimelineEntry =
   | LocalAgentMessageEntry
   | LocalAgentOperationEntry;
 
+export type LocalAgentSessionMessageInput = {
+  id?: string;
+  role: LocalAgentMessageEntry['role'];
+  text: string;
+  requestId?: string;
+  source?: LocalAgentTimelineSource;
+  createdAt?: string;
+};
+
 export type LocalAgentReviewAction = ReviewAction & {
   petId?: string;
 };

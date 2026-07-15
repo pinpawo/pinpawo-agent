@@ -1,22 +1,31 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import Markdown from '@inkkit/ink-markdown';
+import type { LocalAgentMessageEntry } from '../../localAgentSession';
 import { normalizeAssistantMessageMarkdown } from '../render/messageText';
-import type { MessageCellModel } from '../state/tuiState';
+import { formatMessageTimestamp } from '../render/terminalText';
+
+type MessageBlockEntry = Pick<
+  LocalAgentMessageEntry,
+  'text' | 'createdAt' | 'updatedAt'
+> & {
+  role: Exclude<LocalAgentMessageEntry['role'], 'subagent'>;
+};
 
 export function MessageBlock(props: {
-  entry: Pick<MessageCellModel, 'kind' | 'timestamp' | 'text'>;
+  entry: MessageBlockEntry;
   petName: string;
   width: number;
 }) {
-  const timestamp = props.entry.timestamp ? `[${props.entry.timestamp}]` : '';
+  const rawTimestamp = props.entry.updatedAt ?? props.entry.createdAt;
+  const timestamp = rawTimestamp ? `[${formatMessageTimestamp(rawTimestamp)}]` : '';
   const contentWidth = Math.max(20, props.width - 4);
 
-  if (props.entry.kind === 'system') {
+  if (props.entry.role === 'system') {
     return (
       <Box flexDirection="column" marginBottom={1}>
         {props.entry.text.split('\n').map((line, index) => (
-          <Text key={`${props.entry.timestamp ?? 'system'}-${index}`} color="yellow" dimColor>
+          <Text key={`${rawTimestamp ?? 'system'}-${index}`} color="yellow" dimColor>
             {index === 0 ? `${timestamp} system  ` : '                 '}
             {line || ' '}
           </Text>
@@ -25,7 +34,7 @@ export function MessageBlock(props: {
     );
   }
 
-  if (props.entry.kind === 'user') {
+  if (props.entry.role === 'user') {
     const label = `${timestamp} 你`;
     return (
       <Box flexDirection="column" marginBottom={1}>
@@ -34,7 +43,7 @@ export function MessageBlock(props: {
           <Text color="green" dimColor>&gt; </Text>
           <Box flexDirection="column" width={contentWidth}>
             {props.entry.text.split('\n').map((line, index) => (
-              <Text key={`${props.entry.timestamp ?? 'user'}-${index}`} color="green">
+              <Text key={`${rawTimestamp ?? 'user'}-${index}`} color="green">
                 {line || ' '}
               </Text>
             ))}

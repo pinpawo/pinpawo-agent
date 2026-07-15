@@ -1,6 +1,12 @@
+import type { LocalAgentRuntimeEvent } from '../events/localAgentRuntimeEvent';
+import type { LocalAgentSessionMessageInput } from '../localAgentSession';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
+import {
+  formatStudioProgressEvent,
+  formatSystemNoticeEvent,
+} from './render/eventText';
 import { TUI_TEXT } from './render/text';
-import type { MessageCellMeta, TuiAction } from './state/tuiState';
+import type { TuiAction } from './state/tuiState';
 
 export type TuiServerMessageActionResult = {
   actions: TuiAction[];
@@ -9,7 +15,9 @@ export type TuiServerMessageActionResult = {
 
 export type TuiServerMessageActionOptions = {
   now: number;
-  makeMessageCell: () => MessageCellMeta;
+  createMessage: (
+    input: Omit<LocalAgentSessionMessageInput, 'createdAt'>,
+  ) => LocalAgentSessionMessageInput;
 };
 
 export function buildTuiActionsFromServerMessage(
@@ -21,13 +29,14 @@ export function buildTuiActionsFromServerMessage(
   }
 
   if (message.type === 'event') {
+    const normalizedMessage = runtimeEventMessage(message.event, options.createMessage);
     return {
       clearInterrupt: shouldClearInterruptForEvent(message.event.type),
       actions: [{
         type: 'event.received',
         event: message.event,
         now: options.now,
-        messageCell: options.makeMessageCell(),
+        ...(normalizedMessage ? { message: normalizedMessage } : {}),
       }],
     };
   }
@@ -44,34 +53,44 @@ export function buildTuiActionsFromServerMessage(
   }
 
   if (message.type === 'interrupted') {
-    const messageCell = options.makeMessageCell();
     return {
       clearInterrupt: true,
       actions: [{
         type: 'run.finish',
         requestId: message.requestId,
-        messages: [{
-          ...messageCell,
-          kind: 'assistant',
+        messages: [options.createMessage({
+          role: 'assistant',
           text: TUI_TEXT.interrupted,
           requestId: message.requestId,
-        }],
+          source: 'live-event',
+        })],
         statusMessage: TUI_TEXT.interruptedStatus,
       }],
     };
   }
 
   if (message.type === 'studio_response') {
+    const reply = message.reply.trim();
+    const messages = [options.createMessage({
+      role: reply ? 'assistant' : 'system',
+      text: reply || TUI_TEXT.studioEmptyTurn(message.outcome),
+      requestId: message.requestId,
+      source: 'live-event',
+    })];
+    if (message.outcome === 'stopped' && message.reason) {
+      messages.push(options.createMessage({
+        role: 'system',
+        text: TUI_TEXT.studioStoppedReason(message.reason),
+        requestId: message.requestId,
+        source: 'live-event',
+      }));
+    }
     return {
       clearInterrupt: true,
       actions: [{
-        type: 'server.studio_response',
+        type: 'run.finish',
         requestId: message.requestId,
-        outcome: message.outcome,
-        reply: message.reply,
-        reason: message.reason,
-        messageCell: options.makeMessageCell(),
-        stoppedReasonCell: options.makeMessageCell(),
+        messages,
         statusMessage: TUI_TEXT.statusReady,
       }],
     };
@@ -80,13 +99,56 @@ export function buildTuiActionsFromServerMessage(
   return {
     clearInterrupt: true,
     actions: [{
-      type: 'server.studio_error',
+      type: 'run.finish',
       requestId: message.requestId,
-      message: message.message,
-      messageCell: options.makeMessageCell(),
+      messages: [options.createMessage({
+        role: 'system',
+        text: TUI_TEXT.studioErrorLine(message.message || 'studio error'),
+        requestId: message.requestId,
+        source: 'live-event',
+      })],
       statusMessage: TUI_TEXT.studioErrorRecovered,
     }],
   };
+}
+
+function runtimeEventMessage(
+  event: LocalAgentRuntimeEvent,
+  createMessage: TuiServerMessageActionOptions['createMessage'],
+) {
+  switch (event.type) {
+    case 'system.notice': {
+      const text = formatSystemNoticeEvent(event);
+      return text
+        ? createMessage({
+            role: 'system',
+            requestId: event.requestId,
+            text,
+            source: 'live-event',
+          })
+        : undefined;
+    }
+    case 'studio.progress': {
+      const text = formatStudioProgressEvent(event);
+      return text
+        ? createMessage({
+            role: 'system',
+            requestId: event.requestId,
+            text,
+            source: 'live-event',
+          })
+        : undefined;
+    }
+    case 'error':
+      return createMessage({
+        role: 'system',
+        requestId: event.requestId,
+        text: TUI_TEXT.errorLine(event.message || 'internal error'),
+        source: 'live-event',
+      });
+    default:
+      return undefined;
+  }
 }
 
 function shouldClearInterruptForEvent(type: string) {

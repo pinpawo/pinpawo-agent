@@ -240,9 +240,14 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     type: 'run.start',
     requestId: 'req-1',
     kind: 'chat',
-    userText: 'hello',
+    message: {
+      id: 'message:req-1:user',
+      role: 'user',
+      text: 'hello',
+      requestId: 'req-1',
+      source: 'local-input',
+    },
     now: 1000,
-    userCell: { id: 'req-1:user' },
     statusMessage: 'working',
   });
   for (const envelope of eventMessages) {
@@ -313,9 +318,14 @@ test('LocalAgentAppChatHandler settles projected operations when a run is interr
     type: 'run.start',
     requestId: 'req-interrupt',
     kind: 'chat',
-    userText: 'run tests',
+    message: {
+      id: 'message:req-interrupt:user',
+      role: 'user',
+      text: 'run tests',
+      requestId: 'req-interrupt',
+      source: 'local-input',
+    },
     now: 1000,
-    userCell: { id: 'req-interrupt:user' },
     statusMessage: 'working',
   });
   tuiState = tuiStateReducer(tuiState, {

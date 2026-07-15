@@ -58,9 +58,15 @@ function startRun(state: TuiState, requestId = 'req-1', sessionId?: string) {
     ...(sessionId ? { sessionId } : {}),
     requestId,
     kind: 'chat',
-    userText: 'hello',
+    message: {
+      id: `message:${requestId}:user`,
+      role: 'user',
+      text: 'hello',
+      requestId,
+      source: 'local-input',
+      createdAt: new Date(1000).toISOString(),
+    },
     now: 1000,
-    userCell: { id: `${requestId}:user`, timestamp: '10:00:00' },
     statusMessage: '等待回复',
   });
 }
@@ -137,7 +143,6 @@ test('tuiStateReducer handles streaming chat completion with token usage', () =>
       text: '我先检查一下仓库状态。',
     },
     now: 1100,
-    messageCell: { id: 'assistant-delta-1', timestamp: '10:00:01' },
   });
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -148,7 +153,6 @@ test('tuiStateReducer handles streaming chat completion with token usage', () =>
       text: '检查完毕，下面汇总。',
     },
     now: 1200,
-    messageCell: { id: 'assistant-delta-2', timestamp: '10:00:02' },
   });
 
   const focusedRun = selectFocusedActiveRun(state);
@@ -171,7 +175,6 @@ test('tuiStateReducer handles streaming chat completion with token usage', () =>
       usage,
     },
     now: 1300,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:03' },
   });
 
   const session = state.sessions['chat:pet']!;
@@ -183,7 +186,7 @@ test('tuiStateReducer handles streaming chat completion with token usage', () =>
       ? [entry.createdAt, entry.updatedAt]
       : []
   )).filter((item) => item.length > 0), [
-    ['10:00:01', '10:00:03'],
+    [new Date(1100).toISOString(), new Date(1300).toISOString()],
   ]);
   assert.deepEqual(transcriptTimeline(state), [
     ['user', 'hello'],
@@ -216,7 +219,6 @@ test('tuiStateReducer finalizes completed messages from the session active run',
       },
     },
     now: 1300,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
@@ -256,7 +258,6 @@ test('tuiStateReducer finalizes completed messages after the active run is clear
       text: 'completed after pointer cleanup',
     },
     now: 1300,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   assert.equal(activeRun(state, 'req-1'), undefined);
@@ -294,7 +295,6 @@ test('tuiStateReducer recovers completed messages from timeline ownership when t
       },
     },
     now: 1300,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   assert.equal((state.sessions['chat:pet']?.activeRun?.requestId ?? null), null);
@@ -352,7 +352,6 @@ test('tuiStateReducer keeps the current review draft when an older request compl
       text: 'late old answer',
     },
     now: 1300,
-    messageCell: { id: 'assistant-old', timestamp: '10:00:01' },
   });
 
   assert.equal(state.sessions['chat:pet']?.activeRun?.requestId, 'req-new');
@@ -371,9 +370,8 @@ test('tuiStateReducer records composer prompt history only for run starts', () =
     type: 'run.start',
     requestId: 'req-1',
     kind: 'chat',
-    userText: ' hello ',
+    message: { role: 'user', text: ' hello ' },
     now: 1000,
-    userCell: { id: 'req-1:user' },
     statusMessage: '等待回复',
   });
   assert.deepEqual(state.input.history.entries, ['hello']);
@@ -384,9 +382,8 @@ test('tuiStateReducer records composer prompt history only for run starts', () =
     type: 'run.start',
     requestId: 'req-2',
     kind: 'chat',
-    userText: 'hello',
+    message: { role: 'user', text: 'hello' },
     now: 2000,
-    userCell: { id: 'req-2:user' },
     statusMessage: '等待回复',
   });
   assert.deepEqual(state.input.history.entries, ['hello']);
@@ -409,9 +406,8 @@ test('tuiStateReducer navigates composer prompt history and restores draft', () 
     type: 'run.start',
     requestId: 'req-2',
     kind: 'chat',
-    userText: 'second',
+    message: { role: 'user', text: 'second' },
     now: 2000,
-    userCell: { id: 'req-2:user' },
     statusMessage: '等待回复',
   });
   state = tuiStateReducer(state, { type: 'input.set', value: 'draft' });
@@ -466,9 +462,8 @@ test('tuiStateReducer preserves engine textarea state and clears transient state
     type: 'run.start',
     requestId: 'req-transient',
     kind: 'chat',
-    userText: 'second',
+    message: { role: 'user', text: 'second' },
     now: 1000,
-    userCell: { id: 'req-transient:user' },
     statusMessage: '等待回复',
   });
   assert.equal(state.input.selection, undefined);
@@ -498,7 +493,6 @@ test('tuiStateReducer infers usage context window from runtime when missing', ()
       usage,
     },
     now: 1300,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
@@ -533,7 +527,6 @@ test('tuiStateReducer falls back to assistant timeline text when completed text 
       text: '   ',
     },
     now: 1200,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
@@ -588,7 +581,6 @@ test('tuiStateReducer displays subagent deltas as timeline message entries', () 
       text: '最终答复',
     },
     now: 1300,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   assert.deepEqual(transcriptTimeline(state), [
@@ -644,7 +636,14 @@ test('tuiStateReducer stores notice and studio progress events as system timelin
       message: '授权已更新',
     },
     now: 1100,
-    messageCell: { id: 'notice-1', timestamp: '10:00:01' },
+    message: {
+      id: 'message:notice-1',
+      role: 'system',
+      text: '授权已更新',
+      requestId: 'req-1',
+      source: 'live-event',
+      createdAt: new Date(1100).toISOString(),
+    },
   });
 
   state = tuiStateReducer(state, {
@@ -658,7 +657,14 @@ test('tuiStateReducer stores notice and studio progress events as system timelin
       },
     },
     now: 1200,
-    messageCell: { id: 'studio-progress-1', timestamp: '10:00:02' },
+    message: {
+      id: 'message:studio-progress-1',
+      role: 'system',
+      text: '[studio] tasks queued：2 项',
+      requestId: 'req-1',
+      source: 'live-event',
+      createdAt: new Date(1200).toISOString(),
+    },
   });
 
   assert.deepEqual(timelineMessagesByRole(state, 'system').slice(-2), [
@@ -670,7 +676,7 @@ test('tuiStateReducer stores notice and studio progress events as system timelin
       status: 'completed',
       source: 'live-event',
       requestId: 'req-1',
-      createdAt: '10:00:01',
+      createdAt: new Date(1100).toISOString(),
     },
     {
       id: 'message:studio-progress-1',
@@ -680,7 +686,7 @@ test('tuiStateReducer stores notice and studio progress events as system timelin
       status: 'completed',
       source: 'live-event',
       requestId: 'req-1',
-      createdAt: '10:00:02',
+      createdAt: new Date(1200).toISOString(),
     },
   ]);
   assert.deepEqual(selectFocusedTimeline(state).map((entry) => entry.id), [
@@ -710,7 +716,6 @@ test('tuiStateReducer stores usage on completed message', () => {
       usage,
     },
     now: 1300,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
 
   const session = state.sessions['chat:pet']!;
@@ -1195,8 +1200,8 @@ test('tuiStateReducer ignores late terminal events after local interrupt release
     requestId: 'req-1',
     statusMessage: '已请求打断',
     messages: [{
-      id: 'req-1:interrupt-local-release',
-      kind: 'system',
+      id: 'message:req-1:interrupt-local-release',
+      role: 'system',
       text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
     }],
   });
@@ -1228,8 +1233,8 @@ test('tuiStateReducer ignores late terminal events after interrupt release and s
     requestId: 'req-1',
     statusMessage: '已请求打断',
     messages: [{
-      id: 'req-1:interrupt-local-release',
-      kind: 'system',
+      id: 'message:req-1:interrupt-local-release',
+      role: 'system',
       text: '打断请求已发送，本地先释放输入；迟到的旧响应会被忽略。',
     }],
   });
@@ -1375,7 +1380,6 @@ test('tuiStateReducer tracks operation lifecycle in timeline without terminal me
       },
     },
     now: 1400,
-    messageCell: { id: 'op-complete' },
   });
 
   activeRun = selectFocusedActiveRun(state);
@@ -1402,7 +1406,6 @@ test('tuiStateReducer keeps final assistant output after operations', () => {
       text: '我先看一下文件。',
     },
     now: 1100,
-    messageCell: { id: 'assistant-delta-1', timestamp: '10:00:01' },
   });
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -1418,7 +1421,6 @@ test('tuiStateReducer keeps final assistant output after operations', () => {
       },
     },
     now: 1200,
-    messageCell: { id: 'operation-started', timestamp: '10:00:02' },
   });
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -1435,7 +1437,6 @@ test('tuiStateReducer keeps final assistant output after operations', () => {
       },
     },
     now: 1300,
-    messageCell: { id: 'operation-completed', timestamp: '10:00:03' },
   });
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -1446,7 +1447,6 @@ test('tuiStateReducer keeps final assistant output after operations', () => {
       text: '文件检查完了，这是结果。',
     },
     now: 1400,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:04' },
   });
 
   assert.deepEqual(selectFocusedTimeline(state).map((entry) => entry.id), [
@@ -1460,10 +1460,10 @@ test('tuiStateReducer keeps final assistant output after operations', () => {
       ? [entry.type, entry.role, entry.status, entry.createdAt, entry.updatedAt, entry.text]
       : [entry.type, entry.phase, entry.summary]
   )), [
-    ['message', 'user', 'completed', '10:00:00', undefined, 'hello'],
-    ['message', 'assistant', 'completed', '10:00:01', undefined, '我先看一下文件。'],
+    ['message', 'user', 'completed', new Date(1000).toISOString(), undefined, 'hello'],
+    ['message', 'assistant', 'completed', new Date(1100).toISOString(), undefined, '我先看一下文件。'],
     ['operation', 'completed', '完成'],
-    ['message', 'assistant', 'completed', '10:00:04', undefined, '文件检查完了，这是结果。'],
+    ['message', 'assistant', 'completed', new Date(1400).toISOString(), undefined, '文件检查完了，这是结果。'],
   ]);
 });
 
@@ -1767,7 +1767,7 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
   });
 });
 
-test('tuiStateReducer finishes error and studio control messages', () => {
+test('tuiStateReducer finishes error and terminal messages', () => {
   let state = startRun(initialState(), 'chat-req');
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -1777,7 +1777,13 @@ test('tuiStateReducer finishes error and studio control messages', () => {
       message: 'boom',
     },
     now: 1200,
-    messageCell: { id: 'chat-error' },
+    message: {
+      role: 'system',
+      text: '出错：boom',
+      requestId: 'chat-req',
+      source: 'live-event',
+      createdAt: new Date(1200).toISOString(),
+    },
   });
 
   assert.equal(selectFocusedActiveRun(state), null);
@@ -1786,13 +1792,17 @@ test('tuiStateReducer finishes error and studio control messages', () => {
 
   state = startRun(state, 'studio-req');
   state = tuiStateReducer(state, {
-    type: 'server.studio_response',
+    type: 'run.finish',
     requestId: 'studio-req',
-    outcome: 'stopped',
-    reply: '',
-    reason: 'done enough',
-    messageCell: { id: 'studio-empty' },
-    stoppedReasonCell: { id: 'studio-stopped' },
+    messages: [{
+      role: 'system',
+      text: '[studio] turn stopped (无最终输出)',
+      requestId: 'studio-req',
+    }, {
+      role: 'system',
+      text: '[studio] stopped: done enough',
+      requestId: 'studio-req',
+    }],
     statusMessage: '就绪',
   });
 
@@ -1804,10 +1814,13 @@ test('tuiStateReducer finishes error and studio control messages', () => {
 
   state = startRun(state, 'studio-error');
   state = tuiStateReducer(state, {
-    type: 'server.studio_error',
+    type: 'run.finish',
     requestId: 'studio-error',
-    message: 'planner failed',
-    messageCell: { id: 'studio-error-cell' },
+    messages: [{
+      role: 'system',
+      text: '[studio 出错] planner failed',
+      requestId: 'studio-error',
+    }],
     statusMessage: 'Studio 出错，已恢复输入',
   });
 

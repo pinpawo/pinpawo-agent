@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { formatSubagentMessage } from '../render/eventText';
-import { wrapLine } from '../render/terminalText';
+import { formatMessageTimestamp, wrapLine } from '../render/terminalText';
 import type { LocalAgentMessageEntry } from '../../localAgentSession';
 
 function wrapText(text: string, width: number) {
@@ -19,7 +19,7 @@ export function SubagentMessageItem(props: {
   if (!text) return null;
 
   const timestamp = props.entry.updatedAt ?? props.entry.createdAt;
-  const label = timestamp ? `[${timestamp}] subagent` : 'subagent';
+  const label = timestamp ? `[${formatMessageTimestamp(timestamp)}] subagent` : 'subagent';
   const contentWidth = Math.max(20, props.width - 4);
 
   return (

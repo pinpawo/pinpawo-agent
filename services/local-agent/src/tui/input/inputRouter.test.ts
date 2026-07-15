@@ -3,83 +3,13 @@ import test from 'node:test';
 import {
   resolveTuiInputAction,
   resolveTuiInputCommand,
-  resolveTuiInputOwner,
 } from './inputRouter';
-
-test('resolveTuiInputOwner applies TUI focus priority', () => {
-  assert.deepEqual(
-    resolveTuiInputOwner({
-      ready: false,
-      busy: false,
-      hasPendingApproval: false,
-      hasResumePicker: false,
-      hasExternalEditor: true,
-    }),
-    { type: 'externalEditor' },
-  );
-  assert.deepEqual(
-    resolveTuiInputOwner({ ready: false, busy: true, hasPendingApproval: true, hasResumePicker: true }),
-    { type: 'unready' },
-  );
-  assert.deepEqual(
-    resolveTuiInputOwner({ ready: true, busy: true, hasPendingApproval: true, hasResumePicker: true }),
-    { type: 'resumePicker' },
-  );
-  assert.deepEqual(
-    resolveTuiInputOwner({
-      ready: true,
-      busy: true,
-      hasPendingApproval: false,
-      hasResumePicker: false,
-      hasGlobalReviewPolicyPicker: true,
-    }),
-    { type: 'globalReviewPolicyPicker' },
-  );
-  assert.deepEqual(
-    resolveTuiInputOwner({ ready: true, busy: true, hasPendingApproval: true, hasResumePicker: false }),
-    { type: 'approval', freeTextActive: false },
-  );
-  assert.deepEqual(
-    resolveTuiInputOwner({
-      ready: true,
-      busy: false,
-      hasPendingApproval: true,
-      hasResumePicker: false,
-      hasGlobalReviewPolicyPicker: true,
-    }),
-    { type: 'approval', freeTextActive: false },
-  );
-  assert.deepEqual(
-    resolveTuiInputOwner({
-      ready: true,
-      busy: true,
-      hasPendingApproval: true,
-      approvalFreeTextActive: true,
-      hasResumePicker: false,
-    }),
-    { type: 'approval', freeTextActive: true },
-  );
-  assert.deepEqual(
-    resolveTuiInputOwner({ ready: true, busy: true, hasPendingApproval: false, hasResumePicker: false }),
-    { type: 'busy' },
-  );
-  assert.deepEqual(
-    resolveTuiInputOwner({ ready: true, busy: false, hasPendingApproval: false, hasResumePicker: false }),
-    { type: 'composer' },
-  );
-});
 
 test('resolveTuiInputAction leaves external editor input owned by the editor', () => {
   assert.deepEqual(
     resolveTuiInputAction(
       { type: 'interrupt' },
-      {
-        ready: true,
-        busy: true,
-        hasPendingApproval: true,
-        hasResumePicker: true,
-        hasExternalEditor: true,
-      },
+      { type: 'externalEditor' },
     ),
     { target: 'none' },
   );
@@ -93,7 +23,7 @@ test('resolveTuiInputAction keeps Ctrl+C global before owner routing', () => {
   assert.deepEqual(
     resolveTuiInputAction(
       { type: 'interrupt' },
-      { ready: false, busy: false, hasPendingApproval: false, hasResumePicker: false },
+      { type: 'unready' },
     ),
     { target: 'global', action: 'ctrl_c' },
   );
@@ -258,16 +188,6 @@ test('resolveTuiInputCommand routes busy and composer commands', () => {
 
 test('resolveTuiInputCommand routes file mention popup commands before composer editing', () => {
   assert.deepEqual(
-    resolveTuiInputOwner({
-      ready: true,
-      busy: false,
-      hasPendingApproval: false,
-      hasResumePicker: false,
-      hasFileMention: true,
-    }),
-    { type: 'fileMention' },
-  );
-  assert.deepEqual(
     resolveTuiInputCommand({ type: 'cursor.up' }, { type: 'fileMention' }),
     { target: 'fileMention', action: 'previous' },
   );
@@ -295,16 +215,6 @@ test('resolveTuiInputCommand routes file mention popup commands before composer 
 
 test('resolveTuiInputCommand routes command palette commands before composer editing', () => {
   assert.deepEqual(
-    resolveTuiInputOwner({
-      ready: true,
-      busy: false,
-      hasPendingApproval: false,
-      hasResumePicker: false,
-      hasCommandPalette: true,
-    }),
-    { type: 'commandPalette' },
-  );
-  assert.deepEqual(
     resolveTuiInputCommand({ type: 'cursor.up' }, { type: 'commandPalette' }),
     { target: 'commandPalette', action: 'previous' },
   );
@@ -323,20 +233,6 @@ test('resolveTuiInputCommand routes command palette commands before composer edi
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'text.insert', text: 'n' }, { type: 'commandPalette' }),
     { target: 'textarea', command: { type: 'insert', text: 'n' } },
-  );
-});
-
-test('resolveTuiInputOwner prefers command palette over file mention when both are open', () => {
-  assert.deepEqual(
-    resolveTuiInputOwner({
-      ready: true,
-      busy: false,
-      hasPendingApproval: false,
-      hasResumePicker: false,
-      hasCommandPalette: true,
-      hasFileMention: true,
-    }),
-    { type: 'commandPalette' },
   );
 });
 

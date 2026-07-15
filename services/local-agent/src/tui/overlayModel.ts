@@ -1,20 +1,12 @@
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import type { CommandPaletteModel } from './input/commandPalette';
 import type { FileMentionModel } from './input/fileMention';
+import type { TuiInteractionOwner } from './interactionOwner';
 import type { ApprovalRequestModel } from './state/tuiState';
 import type { ResumeSessionSummary } from './types';
 
-export type TuiOverlayOwner =
-  | 'resumePicker'
-  | 'approval'
-  | 'globalReviewPolicyPicker'
-  | 'commandPalette'
-  | 'fileMention';
-
 export type TuiOverlayModel = {
   current: TuiOverlay | null;
-  owner: TuiOverlayOwner | null;
-  ownerLabel: string | null;
   width: number;
 };
 
@@ -51,6 +43,7 @@ export type TuiOverlay =
 
 export function buildTuiOverlayModel(input: {
   width: number;
+  owner: TuiInteractionOwner;
   resumePicker: {
     open: boolean;
     sessions: ResumeSessionSummary[];
@@ -72,51 +65,57 @@ export function buildTuiOverlayModel(input: {
   const current = resolveCurrentOverlay(input);
   return {
     current,
-    owner: current?.type ?? null,
-    ownerLabel: current?.label ?? null,
     width: input.width,
   };
 }
 
 function resolveCurrentOverlay(input: Parameters<typeof buildTuiOverlayModel>[0]): TuiOverlay | null {
-  if (input.resumePicker.open) {
-    return {
-      type: 'resumePicker',
-      label: 'Resume',
-      sessions: input.resumePicker.sessions,
-      selectedIndex: input.resumePicker.selectedIndex,
-      loading: input.resumePicker.loading,
-    };
+  switch (input.owner.type) {
+    case 'resumePicker':
+      return input.resumePicker.open
+        ? {
+            type: 'resumePicker',
+            label: 'Resume',
+            sessions: input.resumePicker.sessions,
+            selectedIndex: input.resumePicker.selectedIndex,
+            loading: input.resumePicker.loading,
+          }
+        : null;
+    case 'approval':
+      return input.approval.request
+        ? {
+            type: 'approval',
+            label: 'Approval',
+            request: input.approval.request,
+            selectedIndex: input.approval.selectedIndex,
+          }
+        : null;
+    case 'globalReviewPolicyPicker':
+      return input.globalReviewPolicyPicker.open
+        ? {
+            type: 'globalReviewPolicyPicker',
+            label: 'Policy',
+            currentMode: input.globalReviewPolicyPicker.currentMode,
+            selectedIndex: input.globalReviewPolicyPicker.selectedIndex,
+          }
+        : null;
+    case 'commandPalette':
+      return input.commandPalette.open
+        ? {
+            type: 'commandPalette',
+            label: 'Command',
+            model: input.commandPalette,
+          }
+        : null;
+    case 'fileMention':
+      return input.fileMention.open
+        ? {
+            type: 'fileMention',
+            label: 'File',
+            model: input.fileMention,
+          }
+        : null;
+    default:
+      return null;
   }
-  if (input.approval.request) {
-    return {
-      type: 'approval',
-      label: 'Approval',
-      request: input.approval.request,
-      selectedIndex: input.approval.selectedIndex,
-    };
-  }
-  if (input.globalReviewPolicyPicker.open) {
-    return {
-      type: 'globalReviewPolicyPicker',
-      label: 'Policy',
-      currentMode: input.globalReviewPolicyPicker.currentMode,
-      selectedIndex: input.globalReviewPolicyPicker.selectedIndex,
-    };
-  }
-  if (input.commandPalette.open) {
-    return {
-      type: 'commandPalette',
-      label: 'Command',
-      model: input.commandPalette,
-    };
-  }
-  if (input.fileMention.open) {
-    return {
-      type: 'fileMention',
-      label: 'File',
-      model: input.fileMention,
-    };
-  }
-  return null;
 }

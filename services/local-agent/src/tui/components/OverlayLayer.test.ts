@@ -27,8 +27,6 @@ test('OverlayLayer renders nothing when no overlay owns the slot', () => {
   assert.equal(OverlayLayer({
     model: {
       current: null,
-      owner: null,
-      ownerLabel: null,
       width: 80,
     },
   }), null);
@@ -92,8 +90,6 @@ function assertOverlayComponent(model: TuiOverlayModel, expectedType: unknown) {
 function overlayModel(current: NonNullable<TuiOverlayModel['current']>): TuiOverlayModel {
   return {
     current,
-    owner: current.type,
-    ownerLabel: current.label,
     width: 80,
   };
 }

@@ -98,6 +98,29 @@ function readUtf8TextFile(filePath: string) {
   return readFileSync(filePath, 'utf-8');
 }
 
+export function readTextFileChunk({
+  path,
+  startLine,
+  endLine,
+}: {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+}) {
+  const filePath = resolveUserPath(path);
+  const content = readUtf8TextFile(filePath);
+  const lines = content.split('\n');
+  const start = Math.max(1, startLine ?? 1);
+  const end = Math.min(lines.length, endLine ?? Math.min(start + 199, lines.length));
+  if (end < start) {
+    throw new Error(`invalid line range ${start}-${end}`);
+  }
+  return lines
+    .slice(start - 1, end)
+    .map((line, index) => `${start + index}: ${line}`)
+    .join('\n');
+}
+
 function mergeOperationOutputSummary(
   target: string | undefined,
   details?: Record<string, unknown>,
@@ -165,18 +188,7 @@ export const viewFileChunkTool = tool(
     endLine?: number;
   }) => {
     try {
-      const filePath = resolveUserPath(path);
-      const content = readUtf8TextFile(filePath);
-      const lines = content.split('\n');
-      const start = Math.max(1, startLine ?? 1);
-      const end = Math.min(lines.length, endLine ?? Math.min(start + 199, lines.length));
-      if (end < start) {
-        return `Error: invalid line range ${start}-${end}`;
-      }
-      return lines
-        .slice(start - 1, end)
-        .map((line, index) => `${start + index}: ${line}`)
-        .join('\n');
+      return readTextFileChunk({ path, startLine, endLine });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }

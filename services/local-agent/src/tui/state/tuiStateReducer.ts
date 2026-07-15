@@ -1,10 +1,13 @@
 import type { LocalAgentRuntimeEvent } from '../../events/localAgentRuntimeEvent';
-import type { LocalAgentRun, LocalAgentSession } from '../../localAgentSession';
+import type {
+  LocalAgentRun,
+  LocalAgentSession,
+  LocalAgentSessionMessageInput,
+} from '../../localAgentSession';
 import {
   applySessionSnapshot,
   reduceSession,
   type LocalAgentSessionInput,
-  type LocalAgentSessionMessageInput,
 } from '../../localAgentSessionReducer';
 import { currentReview } from '../../reviewAction';
 import {
@@ -12,22 +15,9 @@ import {
   recordComposerHistoryEntry,
   resetComposerHistoryNavigation,
 } from '../input/composerHistory';
-import {
-  formatStudioProgressEvent,
-  formatSystemNoticeEvent,
-} from '../render/eventText';
 import { TUI_TEXT } from '../render/text';
 import { selectActiveOperationsFromTimeline } from '../timeline/agentTimelineSelectors';
-import type {
-  MessageCellDraft,
-  MessageCellMeta,
-  MessageCellModel,
-  RunId,
-  SessionId,
-  SessionModel,
-  TuiAction,
-  TuiState,
-} from './tuiState';
+import type { RunId, SessionId, SessionModel, TuiAction, TuiState } from './tuiState';
 import { createSession } from './tuiState';
 
 function resolveSessionId(state: TuiState, sessionId?: SessionId) {
@@ -96,73 +86,6 @@ function findSessionForRuntimeEvent(state: TuiState, event: LocalAgentRuntimeEve
       : null);
 }
 
-function messageInputFromDraft(draft: MessageCellDraft): LocalAgentSessionMessageInput {
-  return {
-    id: `message:${draft.id}`,
-    role: draft.kind,
-    text: draft.text,
-    source: draft.kind === 'user' ? 'local-input' : 'live-event',
-    ...(draft.requestId ? { requestId: draft.requestId } : {}),
-    ...(draft.timestamp ? { createdAt: draft.timestamp } : {}),
-  };
-}
-
-function messageInput(
-  role: MessageCellModel['kind'],
-  text: string,
-  meta: MessageCellMeta | undefined,
-  fallbackId: string,
-  requestId?: string,
-): LocalAgentSessionMessageInput {
-  return {
-    id: `message:${meta?.id ?? fallbackId}`,
-    role,
-    text,
-    source: role === 'user' ? 'local-input' : 'live-event',
-    ...(requestId ? { requestId } : {}),
-    ...(meta?.timestamp ? { createdAt: meta.timestamp } : {}),
-  };
-}
-
-function runtimeMessageInput(
-  event: LocalAgentRuntimeEvent,
-  meta: MessageCellMeta | undefined,
-): LocalAgentSessionMessageInput | undefined {
-  switch (event.type) {
-    case 'message.delta':
-    case 'message.completed':
-      return {
-        role: 'assistant',
-        requestId: event.requestId,
-        text: event.text,
-        source: 'live-event',
-        ...(meta?.timestamp ? { createdAt: meta.timestamp } : {}),
-      };
-    case 'system.notice': {
-      const text = formatSystemNoticeEvent(event);
-      return text
-        ? messageInput('system', text, meta, `${event.requestId}:notice`, event.requestId)
-        : undefined;
-    }
-    case 'studio.progress': {
-      const text = formatStudioProgressEvent(event);
-      return text
-        ? messageInput('system', text, meta, `${event.requestId}:studio-progress`, event.requestId)
-        : undefined;
-    }
-    case 'error':
-      return messageInput(
-        'system',
-        TUI_TEXT.errorLine(event.message || 'internal error'),
-        meta,
-        `${event.requestId}:event-error`,
-        event.requestId,
-      );
-    default:
-      return undefined;
-  }
-}
-
 function removeReviewDraft(state: TuiState, actionId: string | undefined) {
   if (!actionId || !state.reviewDrafts[actionId]) return state;
   const { [actionId]: _removed, ...reviewDrafts } = state.reviewDrafts;
@@ -190,11 +113,10 @@ function reduceRuntimeEvent(
     ? owner.session.activeRun
     : null;
   const previousReviewActionId = previousRun?.reviewAction?.actionId;
-  const message = runtimeMessageInput(event, action.messageCell);
   const nextState = applySessionInput(state, owner.sessionId, {
     type: 'runtime.event',
     event,
-    ...(message ? { message } : {}),
+    ...(action.message ? { message: action.message } : {}),
   }, action.now);
   if (nextState === state) return state;
 
@@ -452,7 +374,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
     case 'message.append':
       return applySessionInput(state, resolveSessionId(state, action.sessionId), {
         type: 'message.appended',
-        message: messageInputFromDraft(action.cell),
+        message: action.message,
       }, 0);
     case 'run.start': {
       const sessionId = resolveSessionId(state, action.sessionId);
@@ -465,16 +387,17 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           ...state.input,
           text: '',
           cursorOffset: 0,
-          history: recordComposerHistoryEntry(state.input.history, action.userText),
+          history: recordComposerHistoryEntry(state.input.history, action.message.text),
         }),
       }, sessionId, {
         type: 'user.accepted',
         requestId: action.requestId,
         kind: action.kind,
-        text: action.userText,
+        text: action.message.text,
         message: {
-          id: `message:${action.userCell.id}`,
-          ...(action.userCell.timestamp ? { createdAt: action.userCell.timestamp } : {}),
+          ...(action.message.id ? { id: action.message.id } : {}),
+          ...(action.message.source ? { source: action.message.source } : {}),
+          ...(action.message.createdAt ? { createdAt: action.message.createdAt } : {}),
         },
       }, action.now);
       return removeReviewDraft(nextState, previousActionId);
@@ -563,49 +486,10 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         state,
         action.requestId,
         action.statusMessage,
-        action.messages?.map(messageInputFromDraft),
+        action.messages,
       );
     case 'event.received':
       return reduceRuntimeEvent(state, action);
-    case 'server.studio_response': {
-      const messages = [
-        action.reply.trim()
-          ? messageInput(
-              'assistant',
-              action.reply.trim(),
-              action.messageCell,
-              `${action.requestId}:studio-response`,
-              action.requestId,
-            )
-          : messageInput(
-              'system',
-              TUI_TEXT.studioEmptyTurn(action.outcome),
-              action.messageCell,
-              `${action.requestId}:studio-empty`,
-              action.requestId,
-            ),
-      ];
-      if (action.outcome === 'stopped' && action.reason) {
-        messages.push(messageInput(
-          'system',
-          TUI_TEXT.studioStoppedReason(action.reason),
-          action.stoppedReasonCell,
-          `${action.requestId}:studio-stopped`,
-          action.requestId,
-        ));
-      }
-      return finishRun(state, action.requestId, action.statusMessage, messages);
-    }
-    case 'server.studio_error':
-      return finishRun(state, action.requestId, action.statusMessage, [
-        messageInput(
-          'system',
-          TUI_TEXT.studioErrorLine(action.message || 'studio error'),
-          action.messageCell,
-          `${action.requestId}:studio-error`,
-          action.requestId,
-        ),
-      ]);
     default:
       return state;
   }

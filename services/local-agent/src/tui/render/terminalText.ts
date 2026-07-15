@@ -2,15 +2,6 @@ import stringWidth from 'string-width';
 
 export const MAX_REASONABLE_ELAPSED_MS = 24 * 60 * 60 * 1000;
 
-export function formatNow() {
-  return new Date().toLocaleTimeString('zh-CN', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
-
 export function formatMessageTimestamp(timestamp: string) {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return timestamp;

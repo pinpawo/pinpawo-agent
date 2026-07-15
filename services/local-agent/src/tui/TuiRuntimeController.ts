@@ -4,9 +4,9 @@ import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { getConfig, setConfig } from '../config';
 import { TUI_TEXT } from './render/text';
-import { formatNow } from './render/terminalText';
 import { TuiLocalServerClient } from './tuiLocalServerClient';
 import { TuiLocalWebSocketClient } from './tuiLocalWebSocketClient';
+import { createTuiMessage } from './tuiMessage';
 import { buildTuiActionsFromServerMessage } from './tuiServerMessageActions';
 import {
   selectFocusedActiveRun,
@@ -45,13 +45,6 @@ function buildPetSummary(context: Awaited<ReturnType<typeof loadAgentContext>>) 
   const pet = context.pet;
   const pieces = [pet.species || TUI_TEXT.unknownSpecies, pet.stage || TUI_TEXT.unknownStage];
   return pieces.join(' · ');
-}
-
-function makeMessageMeta() {
-  return {
-    id: randomUUID(),
-    timestamp: formatNow(),
-  };
 }
 
 type RuntimeSnapshotApplyReason = Exclude<TuiSnapshotApplyReason, 'resume'>;
@@ -141,9 +134,13 @@ export class TuiRuntimeController {
       type: 'run.start',
       requestId,
       kind: 'chat',
-      userText: message,
+      message: createTuiMessage({
+        role: 'user',
+        text: message,
+        requestId,
+        source: 'local-input',
+      }, now),
       now,
-      userCell: makeMessageMeta(),
       statusMessage: TUI_TEXT.waitingForReply,
     });
 
@@ -172,9 +169,13 @@ export class TuiRuntimeController {
       type: 'run.start',
       requestId,
       kind: 'studio',
-      userText: TUI_TEXT.studioUserMessage(userRequest),
+      message: createTuiMessage({
+        role: 'user',
+        text: TUI_TEXT.studioUserMessage(userRequest),
+        requestId,
+        source: 'local-input',
+      }, now),
       now,
-      userCell: makeMessageMeta(),
       statusMessage: TUI_TEXT.studioRunning,
     });
     this.wsClient.send({
@@ -301,12 +302,13 @@ export class TuiRuntimeController {
         type: 'run.finish',
         requestId: interruptRequestId,
         statusMessage: TUI_TEXT.interruptRequestedStatus,
-        messages: [{
-          ...makeMessageMeta(),
-          id: `${interruptRequestId}:interrupt-local-release`,
-          kind: 'system',
+        messages: [createTuiMessage({
+          id: `message:${interruptRequestId}:interrupt-local-release`,
+          role: 'system',
           text: TUI_TEXT.interruptRequestedLocalRelease,
-        }],
+          requestId: interruptRequestId,
+          source: 'live-event',
+        })],
       });
     }, 1800);
     return true;
@@ -337,12 +339,11 @@ export class TuiRuntimeController {
   appendSystemMessage(text: string) {
     this.options.dispatch({
       type: 'message.append',
-      cell: {
-        id: randomUUID(),
-        kind: 'system',
-        timestamp: formatNow(),
+      message: createTuiMessage({
+        role: 'system',
         text,
-      },
+        source: 'live-event',
+      }),
     });
   }
 
@@ -615,9 +616,10 @@ export class TuiRuntimeController {
   }
 
   private handleServerMessage(msg: LocalAgentServerMessage) {
+    const now = Date.now();
     const result = buildTuiActionsFromServerMessage(msg, {
-      now: Date.now(),
-      makeMessageCell: makeMessageMeta,
+      now,
+      createMessage: (input) => createTuiMessage(input, now),
     });
     if (result.clearInterrupt) {
       this.clearInterruptTimeout();

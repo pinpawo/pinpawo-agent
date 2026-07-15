@@ -1,6 +1,5 @@
 import React from 'react';
 import { MessageBlock } from './MessageBlock';
-import { formatMessageTimestamp } from '../render/terminalText';
 import type { LocalAgentMessageEntry } from '../../localAgentSession';
 import { SubagentMessageItem } from './SubagentMessageItem';
 
@@ -12,13 +11,13 @@ export function AgentMessageItem(props: {
   if (props.entry.role === 'subagent') {
     return <SubagentMessageItem entry={props.entry} width={props.width} />;
   }
-  const timestamp = props.entry.updatedAt ?? props.entry.createdAt;
   return (
     <MessageBlock
       entry={{
-        kind: props.entry.role,
-        timestamp: timestamp ? formatMessageTimestamp(timestamp) : undefined,
+        role: props.entry.role,
         text: props.entry.text,
+        createdAt: props.entry.createdAt,
+        updatedAt: props.entry.updatedAt,
       }}
       petName={props.petName}
       width={props.width}

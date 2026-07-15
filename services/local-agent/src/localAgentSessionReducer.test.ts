@@ -289,9 +289,15 @@ test('TUI actions preserve the shared session reducer projection', () => {
     type: 'run.start',
     requestId: 'req-1',
     kind: 'chat',
-    userText: 'hello',
+    message: {
+      id: 'message:user-1',
+      role: 'user',
+      text: 'hello',
+      requestId: 'req-1',
+      source: 'local-input',
+      createdAt: new Date(1_000).toISOString(),
+    },
     now: 1_000,
-    userCell: { id: 'user-1', timestamp: '10:00:00' },
     statusMessage: 'working',
   });
   let shared = reduceSession(tuiInitial.sessions['chat:pet'], {
@@ -299,7 +305,7 @@ test('TUI actions preserve the shared session reducer projection', () => {
     requestId: 'req-1',
     kind: 'chat',
     text: 'hello',
-    message: { id: 'message:user-1', createdAt: '10:00:00' },
+    message: { id: 'message:user-1', createdAt: new Date(1_000).toISOString() },
   }, { observedAt: 1_000 });
 
   const delta = {
@@ -312,7 +318,6 @@ test('TUI actions preserve the shared session reducer projection', () => {
     type: 'event.received',
     event: delta,
     now: 1_100,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:01' },
   });
   shared = reduceSession(shared, {
     type: 'runtime.event',
@@ -322,7 +327,7 @@ test('TUI actions preserve the shared session reducer projection', () => {
       requestId: 'req-1',
       text: 'hi',
       source: 'live-event',
-      createdAt: '10:00:01',
+      createdAt: new Date(1_100).toISOString(),
     },
   }, { observedAt: 1_100 });
 
@@ -336,7 +341,6 @@ test('TUI actions preserve the shared session reducer projection', () => {
     type: 'event.received',
     event: completed,
     now: 1_200,
-    messageCell: { id: 'assistant-1', timestamp: '10:00:02' },
   });
   shared = reduceSession(shared, {
     type: 'runtime.event',
@@ -346,7 +350,7 @@ test('TUI actions preserve the shared session reducer projection', () => {
       requestId: 'req-1',
       text: 'hi there',
       source: 'live-event',
-      createdAt: '10:00:02',
+      createdAt: new Date(1_200).toISOString(),
     },
   }, { observedAt: 1_200 });
 

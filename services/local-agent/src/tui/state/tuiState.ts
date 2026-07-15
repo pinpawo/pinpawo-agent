@@ -5,6 +5,7 @@ import type {
   LocalAgentReviewAction,
   LocalAgentRuntimeView,
   LocalAgentSession,
+  LocalAgentSessionMessageInput,
   LocalAgentSessionSnapshot,
   LocalAgentTimelineEntry,
 } from '../../localAgentSession';
@@ -60,31 +61,10 @@ export type SessionModel = Omit<
   runtime: LocalAgentRuntimeView;
 };
 
-export type MessageCellModel = {
-  id: string;
-  kind: 'user' | 'assistant' | 'system';
-  text: string;
-  requestId?: RunId;
-  timestamp?: string;
-};
-
 export type ApprovalRequestModel = LocalAgentReviewAction & {
   requestId: RunId;
   review: ReviewSpec;
   decisions: ReviewResponse[];
-};
-
-export type MessageCellDraft = {
-  id: string;
-  kind: MessageCellModel['kind'];
-  text: string;
-  requestId?: RunId;
-  timestamp?: string;
-};
-
-export type MessageCellMeta = {
-  id: string;
-  timestamp?: string;
 };
 
 export type TuiSnapshotApplyReason =
@@ -154,16 +134,15 @@ export type TuiAction =
   | {
       type: 'message.append';
       sessionId?: SessionId;
-      cell: MessageCellDraft;
+      message: LocalAgentSessionMessageInput;
     }
   | {
       type: 'run.start';
       sessionId?: SessionId;
       requestId: RunId;
       kind: SessionModel['kind'];
-      userText: string;
+      message: LocalAgentSessionMessageInput & { role: 'user' };
       now: number;
-      userCell: MessageCellMeta;
       statusMessage: string;
     }
   | {
@@ -200,30 +179,13 @@ export type TuiAction =
       type: 'run.finish';
       requestId: RunId;
       statusMessage: string;
-      messages?: MessageCellDraft[];
+      messages?: LocalAgentSessionMessageInput[];
     }
   | {
       type: 'event.received';
       event: LocalAgentRuntimeEvent;
       now: number;
-      messageCell?: MessageCellMeta;
-    }
-  | {
-      type: 'server.studio_response';
-      requestId: RunId;
-      outcome: 'done' | 'stopped';
-      reply: string;
-      reason?: string;
-      messageCell: MessageCellMeta;
-      stoppedReasonCell?: MessageCellMeta;
-      statusMessage: string;
-    }
-  | {
-      type: 'server.studio_error';
-      requestId: RunId;
-      message: string;
-      messageCell: MessageCellMeta;
-      statusMessage: string;
+      message?: LocalAgentSessionMessageInput;
     };
 
 export function createInitialTuiState(defaultSession: SessionModel): TuiState {

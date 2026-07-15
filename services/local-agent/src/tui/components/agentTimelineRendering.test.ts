@@ -8,6 +8,7 @@ import { AgentOperationItem } from './AgentOperationItem';
 import { AgentTimeline } from './AgentTimeline';
 import { MessageBlock } from './MessageBlock';
 import { SubagentMessageItem } from './SubagentMessageItem';
+import { formatMessageTimestamp } from '../render/terminalText';
 import {
   buildAgentOperationDisplayLines,
   OPERATION_STATUS_DOT,
@@ -357,10 +358,11 @@ test('AgentTimeline preserves assistant and operation entry order', () => {
 });
 
 test('MessageBlock renders user messages in green', () => {
+  const createdAt = '2026-07-15T02:00:00.000Z';
   const element = MessageBlock({
     entry: {
-      kind: 'user',
-      timestamp: '10:00:00',
+      role: 'user',
+      createdAt,
       text: '请更新 timeline 颜色',
     },
     petName: '小派',
@@ -370,7 +372,8 @@ test('MessageBlock renders user messages in green', () => {
   const textNodes = findElementsByType(element, Text);
 
   assert.ok(textNodes.some((node) =>
-    node.props.children === '[10:00:00] 你' && node.props.color === 'green'
+    node.props.children === `[${formatMessageTimestamp(createdAt)}] 你`
+      && node.props.color === 'green'
   ));
   assert.ok(textNodes.some((node) =>
     node.props.children === '> ' && node.props.color === 'green' && node.props.dimColor
@@ -383,7 +386,7 @@ test('MessageBlock renders user messages in green', () => {
 test('MessageBlock renders assistant content through markdown', () => {
   const element = MessageBlock({
     entry: {
-      kind: 'assistant',
+      role: 'assistant',
       text: '| A | B |\n| - | - |\n| **one** | `two` |',
     },
     petName: '小派',
@@ -402,20 +405,17 @@ test('MessageBlock renders assistant content through markdown', () => {
 });
 
 test('checkpoint assistant messages render through markdown', () => {
-  const entry: LocalAgentMessageEntry = {
+  const entry = {
     id: 'message:assistant-checkpoint',
     type: 'message',
     role: 'assistant',
     text: '**历史回答**\n\n- 第一项\n- 第二项',
     status: 'completed',
     source: 'checkpoint',
-  };
+  } satisfies LocalAgentMessageEntry;
 
   const element = MessageBlock({
-    entry: {
-      kind: 'assistant',
-      text: entry.text,
-    },
+    entry,
     petName: '小派',
     width: 80,
   });
@@ -427,12 +427,16 @@ test('checkpoint assistant messages render through markdown', () => {
 
 test('SubagentMessageItem renders a subagent timeline message entry', () => {
   const message = subagentMessage('req-1:subagent-output', '先检查文件');
+  message.createdAt = '2026-07-15T02:00:00.000Z';
   const element = SubagentMessageItem({
     entry: message,
     width: 80,
   });
 
   assert.ok(isValidElement(element));
+  assert.ok(findElementsByType(element, Text).some((node) =>
+    node.props.children === `[${formatMessageTimestamp(message.createdAt!)}] subagent`
+  ));
 });
 
 function findElementByType(

@@ -1,6 +1,6 @@
-import type { MessageCellModel } from './state/tuiState';
+import type { LocalAgentMessageEntry } from '../localAgentSession';
 
-export type MessageRole = MessageCellModel['kind'];
+export type MessageRole = Exclude<LocalAgentMessageEntry['role'], 'subagent'>;
 
 export type PendingUiState = {
   startedAt: number;

@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
@@ -29,7 +28,6 @@ import {
 import { buildTuiOverlayModel } from './overlayModel';
 import { resolveTuiInputAction } from './input/inputRouter';
 import { submitCurrentInputFromController } from './input/commandSubmit';
-import { formatNow } from './render/terminalText';
 import { TUI_TEXT } from './render/text';
 import { buildTuiScreenModel } from './screenModel';
 import { buildStatusBarModel } from './statusBarModel';
@@ -39,6 +37,7 @@ import {
 } from './state/tuiStateReducer';
 import type { LocalAgentTimelineEntry } from '../localAgentSession';
 import { TuiRuntimeController } from './TuiRuntimeController';
+import { createTuiMessage } from './tuiMessage';
 import { useResumePickerController } from './useResumePickerController';
 import { useTextAreaController } from './useTextAreaController';
 import {
@@ -158,12 +157,11 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const appendMessage = (role: MessageRole, text: string) => {
     dispatch({
       type: 'message.append',
-      cell: {
-        id: randomUUID(),
-        kind: role,
-        timestamp: formatNow(),
+      message: createTuiMessage({
+        role,
         text,
-      },
+        source: role === 'user' ? 'local-input' : 'live-event',
+      }),
     });
   };
 

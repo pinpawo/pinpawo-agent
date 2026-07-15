@@ -98,14 +98,16 @@ function readUtf8TextFile(filePath: string) {
   return readFileSync(filePath, 'utf-8');
 }
 
-export function readTextFileChunk({
+export function readTextFileChunkResult({
   path,
   startLine,
   endLine,
+  maxChars,
 }: {
   path: string;
   startLine?: number;
   endLine?: number;
+  maxChars?: number;
 }) {
   const filePath = resolveUserPath(path);
   const content = readUtf8TextFile(filePath);
@@ -115,10 +117,42 @@ export function readTextFileChunk({
   if (end < start) {
     throw new Error(`invalid line range ${start}-${end}`);
   }
-  return lines
-    .slice(start - 1, end)
-    .map((line, index) => `${start + index}: ${line}`)
-    .join('\n');
+
+  const selectedLines: string[] = [];
+  let selectedChars = 0;
+  for (let lineNumber = start; lineNumber <= end; lineNumber += 1) {
+    const formattedLine = `${lineNumber}: ${lines[lineNumber - 1] ?? ''}`;
+    const nextChars = selectedChars + (selectedLines.length > 0 ? 1 : 0) + formattedLine.length;
+    if (maxChars !== undefined && nextChars > maxChars) {
+      if (selectedLines.length === 0) {
+        throw new Error(`line ${lineNumber} exceeds the ${maxChars}-character chunk budget`);
+      }
+      break;
+    }
+    selectedLines.push(formattedLine);
+    selectedChars = nextChars;
+  }
+
+  const chunkContent = selectedLines.join('\n');
+  const returnedEndLine = start + selectedLines.length - 1;
+  const hasMore = returnedEndLine < lines.length;
+  return {
+    content: chunkContent,
+    startLine: start,
+    endLine: returnedEndLine,
+    nextStartLine: hasMore ? returnedEndLine + 1 : null,
+    totalLines: lines.length,
+    hasMore,
+    returnedChars: chunkContent.length,
+  };
+}
+
+export function readTextFileChunk(input: {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+}) {
+  return readTextFileChunkResult(input).content;
 }
 
 function mergeOperationOutputSummary(

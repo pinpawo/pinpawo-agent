@@ -173,16 +173,59 @@ esac`);
   assert.equal(fileOutput.comments[0]?.body, undefined);
   assert.equal(fileOutput.comments[0]?.bodyChars, 60_000);
   assert.equal(existsSync(fileOutput.commentsContent.path), true);
+  assert.match(
+    fileOutput.commentsContent.path,
+    /comments-page-1-per-page-2-[0-9a-f]{12}\.md$/,
+  );
   assert.equal(
     readFileSync(fileOutput.commentsContent.path, 'utf-8').match(/x/g)?.length,
     120_000,
   );
-  assert.match(String(await ghReadContentTool.invoke({
+  const firstChunk = JSON.parse(String(await ghReadContentTool.invoke({
     cwd: workdir,
     path: fileOutput.commentsContent.path,
     startLine: 1,
     lineCount: 7,
-  })), /1: # pinpawo\/pinpawo-agent issue #377 comments[\s\S]*7: ## Comment 1/);
+  }))) as {
+    content: string;
+    startLine: number;
+    endLine: number;
+    nextStartLine: number | null;
+    hasMore: boolean;
+    returnedChars: number;
+  };
+  assert.match(firstChunk.content, /1: # pinpawo\/pinpawo-agent issue #377 comments[\s\S]*7: ## Comment 1/);
+  assert.equal(firstChunk.startLine, 1);
+  assert.equal(firstChunk.endLine, 7);
+  assert.equal(firstChunk.nextStartLine, 8);
+  assert.equal(firstChunk.hasMore, true);
+
+  const budgetedChunk = JSON.parse(String(await ghReadContentTool.invoke({
+    cwd: workdir,
+    path: fileOutput.commentsContent.path,
+    startLine: 1,
+    lineCount: 200,
+  }))) as {
+    content: string;
+    endLine: number;
+    nextStartLine: number | null;
+    totalLines: number;
+    hasMore: boolean;
+    returnedChars: number;
+  };
+  assert.equal(budgetedChunk.returnedChars, budgetedChunk.content.length);
+  assert.equal(budgetedChunk.returnedChars <= 60_000, true);
+  assert.equal(budgetedChunk.hasMore, true);
+  assert.equal(budgetedChunk.endLine < budgetedChunk.totalLines, true);
+  assert.equal(budgetedChunk.nextStartLine, budgetedChunk.endLine + 1);
+  await assert.rejects(
+    () => ghReadContentTool.invoke({
+      cwd: workdir,
+      path: fileOutput.commentsContent.path,
+      lineCount: 201,
+    }),
+    /Too big|less than or equal to 200/,
+  );
   await assert.rejects(
     () => ghReadContentTool.invoke({ cwd: workdir, path: join(workdir, 'outside.md') }),
     /only reads files under/,

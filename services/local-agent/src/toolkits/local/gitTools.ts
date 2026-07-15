@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -11,15 +12,16 @@ import {
 import { z } from 'zod';
 import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
-import { readTextFileChunk } from './fileTools';
+import { readTextFileChunkResult } from './fileTools';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
 const MAX_GIT_OUTPUT_CHARS = 30_000;
 const MAX_GH_BODY_CHARS = 60_000;
 const MAX_INLINE_GH_COMMENTS_CHARS = 100_000;
 const MAX_GH_MARKDOWN_LINE_CHARS = 2_000;
-const DEFAULT_GH_CONTENT_LINE_COUNT = 20;
-const MAX_GH_CONTENT_LINE_COUNT = 20;
+const MAX_GH_CONTENT_CHARS = 60_000;
+const DEFAULT_GH_CONTENT_LINE_COUNT = 100;
+const MAX_GH_CONTENT_LINE_COUNT = 200;
 const DEFAULT_GH_COMMENTS_PER_PAGE = 3;
 const MAX_GH_COMMENTS_PER_PAGE = 5;
 const MAX_GH_BUFFER_BYTES = 1024 * 1024 * 4;
@@ -369,11 +371,12 @@ function writeGhCommentsContent(input: {
   const root = ghContentRoot(input.cwd);
   mkdirSync(root, { recursive: true });
   const repository = safeGhFileSegment(`${input.target.hostname}-${input.target.repository}`);
+  const content = formatGhCommentsMarkdown(input);
+  const contentHash = createHash('sha256').update(content).digest('hex').slice(0, 12);
   const filePath = resolve(
     root,
-    `${repository}-issue-${input.target.issueNumber}-comments-page-${input.page}.md`,
+    `${repository}-issue-${input.target.issueNumber}-comments-page-${input.page}-per-page-${input.perPage}-${contentHash}.md`,
   );
-  const content = formatGhCommentsMarkdown(input);
   writeFileSync(filePath, content, 'utf-8');
   return {
     delivery: 'file',
@@ -717,18 +720,21 @@ export const ghReadContentTool = tool(
     lineCount?: number;
   }, runtime: ToolRuntime) => {
     try {
-      return readTextFileChunk({
-        path: resolveGhContentPath(path, cwd),
+      const filePath = resolveGhContentPath(path, cwd);
+      const chunk = readTextFileChunkResult({
+        path: filePath,
         startLine,
         endLine: startLine + lineCount - 1,
+        maxChars: MAX_GH_CONTENT_CHARS,
       });
+      return JSON.stringify({ path: filePath, ...chunk });
     } catch (error) {
       return createGhToolError('gh_read_content', error, runtime);
     }
   },
   {
     name: 'gh_read_content',
-    description: '按行读取 gh_issue_comments 生成的临时 Markdown。仅允许读取对应 cwd 下 .pinpawo/tmp/gh 中的文件；内部复用本地文本分块读取实现。',
+    description: `按行读取 gh_issue_comments 生成的临时 Markdown。默认请求 ${DEFAULT_GH_CONTENT_LINE_COUNT} 行、最多 ${MAX_GH_CONTENT_LINE_COUNT} 行，但每次最多返回 ${MAX_GH_CONTENT_CHARS} 字符；根据 nextStartLine 继续读取。仅允许读取对应 cwd 下 .pinpawo/tmp/gh 中的文件。`,
     schema: z.object({
       cwd: z.string().optional().describe('生成内容时返回的 cwd；默认当前 workdir'),
       path: z.string().min(1).describe('gh_issue_comments 返回的 commentsContent.path'),

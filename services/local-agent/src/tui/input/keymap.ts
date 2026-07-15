@@ -14,8 +14,10 @@ export {
 export {
   resolveTuiInputAction,
   resolveTuiInputCommand,
-  resolveTuiInputOwner,
   type TuiInputCommand,
-  type TuiInputOwner,
-  type TuiInputRouteContext,
 } from './inputRouter';
+export {
+  resolveTuiInteractionOwner,
+  type TuiInteractionOwner,
+  type TuiInteractionState,
+} from '../interactionOwner';

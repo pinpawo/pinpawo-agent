@@ -25,6 +25,7 @@ import {
   completeFileMentionInput,
   moveFileMentionSelection,
 } from './input/fileMention';
+import { resolveTuiInteractionOwner } from './interactionOwner';
 import { buildTuiOverlayModel } from './overlayModel';
 import { resolveTuiInputAction } from './input/inputRouter';
 import { submitCurrentInputFromController } from './input/commandSubmit';
@@ -234,8 +235,30 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
         }, fileMentionRoot, fileMentionIndex)
       : buildFileMentionModel({ text: '', cursorOffset: 0 }, fileMentionRoot)
   ), [fileMentionIndex, fileMentionRoot, inputFocused, inputValue, pendingApproval, textArea.cursorOffset]);
+  const interactionOwner = useMemo(() => resolveTuiInteractionOwner({
+    ready,
+    busy,
+    pendingApproval: Boolean(pendingApproval),
+    approvalFreeTextActive: Boolean(pendingApproval && inputValue.trim()),
+    resumePickerOpen,
+    globalReviewPolicyPickerOpen,
+    commandPaletteOpen: commandPalette.open,
+    fileMentionOpen: fileMention.open,
+    externalEditorOpen,
+  }), [
+    busy,
+    commandPalette.open,
+    externalEditorOpen,
+    fileMention.open,
+    globalReviewPolicyPickerOpen,
+    inputValue,
+    pendingApproval,
+    ready,
+    resumePickerOpen,
+  ]);
   const overlayModel = useMemo(() => buildTuiOverlayModel({
     width: screenModel.regions.overlay.width,
+    owner: interactionOwner,
     resumePicker: {
       open: resumePickerOpen,
       sessions: resumePicker.sessions,
@@ -260,6 +283,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     globalReviewPolicyIndex,
     globalReviewPolicyMode,
     globalReviewPolicyPickerOpen,
+    interactionOwner,
     pendingApproval,
     resumePicker.sessions,
     resumePicker.selectedIndex,
@@ -383,16 +407,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
       return;
     }
     const inputEvent = toCanonicalInputEvent(normalized.event);
-    const action = resolveTuiInputAction(inputEvent, {
-      ready,
-      busy,
-      hasPendingApproval: Boolean(pendingApproval),
-      approvalFreeTextActive: Boolean(pendingApproval && inputValue.trim()),
-      hasResumePicker: resumePickerOpen,
-      hasGlobalReviewPolicyPicker: globalReviewPolicyPickerOpen,
-      hasCommandPalette: commandPalette.open,
-      hasFileMention: fileMention.open,
-      hasExternalEditor: externalEditorOpen,
+    const action = resolveTuiInputAction(inputEvent, interactionOwner, {
       composerHistory: {
         boundary: textArea.historyBoundary,
         available: getComposerHistoryAvailability(tuiState.input.history),
@@ -591,11 +606,11 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     mode: uiMode,
     session: focusedSession,
     globalReviewPolicyMode,
-    overlayOwner: overlayModel.ownerLabel,
+    overlayOwner: overlayModel.current?.label ?? null,
   }), [
     focusedSession,
     globalReviewPolicyMode,
-    overlayModel.ownerLabel,
+    overlayModel.current?.label,
     screenModel.regions.statusBar.activityStatus,
     screenModel.regions.statusBar.connectionStatus,
     uiMode,

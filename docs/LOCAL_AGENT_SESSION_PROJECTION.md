@@ -44,6 +44,11 @@ TUI actions. Separate TUI action vocabulary remains for TUI-only state and where
 a domain intent also changes composer, review-draft, ownership, or status-copy
 state.
 
+The TUI resolves one `TuiInteractionOwner` for each render from current
+interaction state. Input routing and visible overlay selection both consume that
+same owner. Their priority order lives only in `resolveTuiInteractionOwner`;
+routers and render models must not infer a second owner from open-state flags.
+
 ## Local snapshot transport
 
 - `/snapshot` returns the current versioned snapshot for the active session.

@@ -7,34 +7,11 @@ import {
   toTextAreaCommand,
   type TextAreaCommand,
 } from './textarea/commands';
-
-export type TuiInputRouteContext = {
-  ready: boolean;
-  busy: boolean;
-  hasPendingApproval: boolean;
-  approvalFreeTextActive?: boolean;
-  hasResumePicker: boolean;
-  hasGlobalReviewPolicyPicker?: boolean;
-  hasCommandPalette?: boolean;
-  hasFileMention?: boolean;
-  hasExternalEditor?: boolean;
-  composerHistory?: ComposerHistoryRouteState | null;
-};
+import type { TuiInteractionOwner } from '../interactionOwner';
 
 export type TuiInputRouterState = {
   composerHistory?: ComposerHistoryRouteState | null;
 };
-
-export type TuiInputOwner =
-  | { type: 'externalEditor' }
-  | { type: 'unready' }
-  | { type: 'resumePicker' }
-  | { type: 'globalReviewPolicyPicker' }
-  | { type: 'approval'; freeTextActive: boolean }
-  | { type: 'busy' }
-  | { type: 'commandPalette' }
-  | { type: 'fileMention' }
-  | { type: 'composer' };
 
 export type TuiInputCommand =
   | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
@@ -50,35 +27,19 @@ export type TuiInputCommand =
 
 export function resolveTuiInputAction(
   event: CanonicalInputEvent,
-  context: TuiInputRouteContext,
+  owner: TuiInteractionOwner,
+  routerState: TuiInputRouterState = {},
 ): TuiInputCommand {
-  const owner = resolveTuiInputOwner(context);
   if (event.type === 'interrupt' && owner.type !== 'externalEditor') {
     return { target: 'global', action: 'ctrl_c' };
   }
 
-  return resolveTuiInputCommand(event, owner, {
-    composerHistory: context.composerHistory,
-  });
-}
-
-export function resolveTuiInputOwner(context: TuiInputRouteContext): TuiInputOwner {
-  if (context.hasExternalEditor) return { type: 'externalEditor' };
-  if (!context.ready) return { type: 'unready' };
-  if (context.hasResumePicker) return { type: 'resumePicker' };
-  if (context.hasPendingApproval) {
-    return { type: 'approval', freeTextActive: Boolean(context.approvalFreeTextActive) };
-  }
-  if (context.hasGlobalReviewPolicyPicker) return { type: 'globalReviewPolicyPicker' };
-  if (context.busy) return { type: 'busy' };
-  if (context.hasCommandPalette) return { type: 'commandPalette' };
-  if (context.hasFileMention) return { type: 'fileMention' };
-  return { type: 'composer' };
+  return resolveTuiInputCommand(event, owner, routerState);
 }
 
 export function resolveTuiInputCommand(
   event: CanonicalInputEvent,
-  owner: TuiInputOwner,
+  owner: TuiInteractionOwner,
   routerState: TuiInputRouterState = {},
 ): TuiInputCommand {
   const isReturn = event.type === 'submit';
@@ -152,7 +113,7 @@ function routeTextAreaCommand(event: CanonicalInputEvent): TuiInputCommand {
 
 function routeApprovalInputCommand(
   event: CanonicalInputEvent,
-  owner: Extract<TuiInputOwner, { type: 'approval' }>,
+  owner: Extract<TuiInteractionOwner, { type: 'approval' }>,
 ): TuiInputCommand {
   const optionNavigation = resolveApprovalOptionNavigation(event, owner);
   if (optionNavigation) return { target: 'approval', action: optionNavigation };
@@ -166,7 +127,7 @@ function routeApprovalInputCommand(
 
 function resolveApprovalOptionNavigation(
   event: CanonicalInputEvent,
-  owner: Extract<TuiInputOwner, { type: 'approval' }>,
+  owner: Extract<TuiInteractionOwner, { type: 'approval' }>,
 ): 'previous' | 'next' | null {
   if (owner.freeTextActive) return null;
   if (event.type === 'cursor.up') return 'previous';

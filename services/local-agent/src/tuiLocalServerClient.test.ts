@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  parseLocalServerRuntime,
   parseResumeSessionSummary,
   TuiLocalServerClient,
 } from './tui/tuiLocalServerClient';
@@ -27,40 +26,6 @@ test('parseResumeSessionSummary validates resume session payloads', () => {
   assert.equal(parseResumeSessionSummary({ id: 'missing-title' }), null);
 });
 
-test('parseLocalServerRuntime reads workdir-scoped runtime paths', () => {
-  assert.deepEqual(parseLocalServerRuntime({
-    llm_model: 'deepseek-v4-pro',
-    llm_context_window_tokens: '64000',
-    workdir: '/tmp/workspace',
-    workspace_id: 'workspace-test',
-    workspace_name: 'Workspace Test',
-    workspace_root: '/tmp/workspace',
-    state_root: '/tmp/workspace/.pinpawo',
-    studio_config_path: '/tmp/workspace/.pinpawo/studio.json',
-    studio_due_runs_path: '/tmp/workspace/.pinpawo/studio-due-runs.json',
-    studio_config_source: 'legacy_home',
-    studio_config_active_path: '/home/user/.pinpawo/studio.json',
-    legacy_studio_config_path: '/home/user/.pinpawo/studio.json',
-    pets_dir: '/tmp/workspace/.pinpawo/pets',
-    studio_wiki_base_dir: '/tmp/workspace/.pinpawo/studio-wiki',
-  }), {
-    model: 'deepseek-v4-pro',
-    contextWindow: 64000,
-    cwd: '/tmp/workspace',
-    workspaceId: 'workspace-test',
-    workspaceName: 'Workspace Test',
-    workspaceRoot: '/tmp/workspace',
-    stateRoot: '/tmp/workspace/.pinpawo',
-    studioConfigPath: '/tmp/workspace/.pinpawo/studio.json',
-    studioDueRunsPath: '/tmp/workspace/.pinpawo/studio-due-runs.json',
-    studioConfigSource: 'legacy_home',
-    studioConfigActivePath: '/home/user/.pinpawo/studio.json',
-    legacyStudioConfigPath: '/home/user/.pinpawo/studio.json',
-    petsDir: '/tmp/workspace/.pinpawo/pets',
-    studioWikiBaseDir: '/tmp/workspace/.pinpawo/studio-wiki',
-  });
-});
-
 test('TuiLocalServerClient reads current snapshots, sessions, resume, and health', async () => {
   const seenUrls: string[] = [];
   const seenAuth: Array<string | undefined> = [];
@@ -72,7 +37,6 @@ test('TuiLocalServerClient reads current snapshots, sessions, resume, and health
     seenAuth.push((init?.headers as Record<string, string> | undefined)?.Authorization);
     if (url.endsWith('/health')) return jsonResponse({ ok: true });
     if (url.endsWith('/snapshot')) return jsonResponse(snapshot);
-    if (url.endsWith('/runtime')) return jsonResponse({ model: 'gpt-test', workdir: '/tmp/work' });
     if (url.endsWith('/sessions')) {
       return jsonResponse({
         sessions: [{
@@ -115,7 +79,6 @@ test('TuiLocalServerClient reads current snapshots, sessions, resume, and health
   assert.equal(loaded.session.activeRun.reviewAction.actionId, 'interrupt-1');
   assert.equal('status' in loaded.session.activeRun.reviewAction, false);
   assert.equal(loaded.session.timeline[1]?.type, 'operation');
-  assert.equal((await client.readRuntime())?.model, 'gpt-test');
   assert.deepEqual((await client.listResumeSessions()).map((item) => item.id), ['chat:one']);
   const resumed = await client.resumeSession('chat:one');
   assert.equal(resumed.session.active, true);
@@ -124,11 +87,10 @@ test('TuiLocalServerClient reads current snapshots, sessions, resume, and health
   assert.deepEqual(seenUrls, [
     'http://127.0.0.1:3210/health',
     'http://127.0.0.1:3210/snapshot',
-    'http://127.0.0.1:3210/runtime',
     'http://127.0.0.1:3210/sessions',
     'http://127.0.0.1:3210/sessions/resume?sessionId=chat%3Aone',
   ]);
-  assert.deepEqual(seenAuth, Array(5).fill('Bearer secret'));
+  assert.deepEqual(seenAuth, Array(4).fill('Bearer secret'));
 });
 
 test('TuiLocalServerClient rejects non-versioned snapshot payloads without history fallback', async () => {
@@ -138,7 +100,6 @@ test('TuiLocalServerClient rejects non-versioned snapshot payloads without histo
     fetchImpl: (async (url: RequestInfo | URL) => {
       const href = String(url);
       seenUrls.push(href);
-      if (href.endsWith('/runtime')) return jsonResponse({});
       if (href.endsWith('/snapshot')) {
         return jsonResponse({
           sessionId: 'chat:legacy',
@@ -159,7 +120,6 @@ test('TuiLocalServerClient rejects malformed current snapshots', async () => {
   const client = new TuiLocalServerClient({
     port: 3210,
     fetchImpl: (async (url: RequestInfo | URL) => {
-      if (String(url).endsWith('/runtime')) return jsonResponse({});
       return jsonResponse({
         version: 2,
         session: {
@@ -180,6 +140,31 @@ test('TuiLocalServerClient rejects malformed current snapshots', async () => {
   });
 
   await assert.rejects(() => client.readSessionSnapshot(), /invalid local server snapshot payload/);
+});
+
+test('TuiLocalServerClient rejects malformed runtime facts in current snapshots', async () => {
+  const invalidRuntimes = [
+    { model: 42 },
+    { cwd: ['/tmp/work'] },
+    { contextWindow: '64000' },
+    { studioConfigSource: 'unknown' },
+  ];
+
+  for (const runtime of invalidRuntimes) {
+    const snapshot = sessionSnapshot('chat:pet');
+    const client = new TuiLocalServerClient({
+      port: 3210,
+      fetchImpl: (async () => jsonResponse({
+        ...snapshot,
+        session: { ...snapshot.session, runtime },
+      })) as typeof fetch,
+    });
+
+    await assert.rejects(
+      () => client.readSessionSnapshot(),
+      /invalid local server snapshot payload/,
+    );
+  }
 });
 
 test('TuiLocalServerClient rejects legacy and structurally invalid active run views', async () => {

@@ -8,6 +8,7 @@ import type {
   LocalAgentReviewAction,
   LocalAgentRunActivity,
   LocalAgentRunView,
+  LocalAgentRuntimeView,
   LocalAgentSession,
   LocalAgentSessionSnapshot,
   LocalAgentTimelineEntry,
@@ -29,23 +30,6 @@ type TuiLocalServerClientOptions = {
   port: number;
   fetchImpl?: FetchLike;
   tokenProvider?: () => string | null;
-};
-
-export type LocalServerRuntimeSnapshot = {
-  model?: string;
-  contextWindow?: number;
-  cwd?: string;
-  workspaceId?: string;
-  workspaceName?: string;
-  workspaceRoot?: string;
-  stateRoot?: string;
-  studioConfigPath?: string;
-  studioDueRunsPath?: string;
-  studioConfigSource?: string;
-  studioConfigActivePath?: string;
-  legacyStudioConfigPath?: string;
-  petsDir?: string;
-  studioWikiBaseDir?: string;
 };
 
 export class TuiLocalServerClient {
@@ -73,16 +57,6 @@ export class TuiLocalServerClient {
     const snapshot = parseLocalAgentSessionSnapshot(serverSnapshot);
     if (!snapshot) throw new Error('invalid local server snapshot payload');
     return snapshot;
-  }
-
-  async readRuntime(timeoutMs = DEFAULT_HEALTH_TIMEOUT_MS): Promise<LocalServerRuntimeSnapshot | null> {
-    try {
-      const res = await this.fetchWithTimeout(this.url('/runtime'), timeoutMs);
-      if (!res.ok) return null;
-      return parseLocalServerRuntime(await res.json());
-    } catch {
-      return null;
-    }
   }
 
   async listResumeSessions(): Promise<ResumeSessionSummary[]> {
@@ -190,14 +164,74 @@ function parseLocalAgentSession(value: unknown): LocalAgentSession | null {
     ? { label: value.actor.label, summary: value.actor.summary }
     : null;
   if (value.actor !== undefined && !actor) return null;
+  const runtime = value.runtime === undefined
+    ? undefined
+    : parseLocalAgentRuntime(value.runtime);
+  if (value.runtime !== undefined && !runtime) return null;
   return {
     sessionId: value.sessionId,
     kind: value.kind,
     timeline,
     activeRun,
     ...(actor ? { actor } : {}),
-    ...(isRecord(value.runtime) ? { runtime: value.runtime as LocalAgentSession['runtime'] } : {}),
+    ...(runtime ? { runtime } : {}),
     ...(isTokenUsageSnapshot(value.tokenUsage) ? { tokenUsage: value.tokenUsage } : {}),
+  };
+}
+
+function parseLocalAgentRuntime(value: unknown): LocalAgentRuntimeView | null {
+  if (!isRecord(value)) return null;
+  const stringFields = [
+    'model',
+    'cwd',
+    'workspaceId',
+    'workspaceName',
+    'workspaceRoot',
+    'stateRoot',
+    'studioConfigPath',
+    'studioDueRunsPath',
+    'studioConfigActivePath',
+    'legacyStudioConfigPath',
+    'petsDir',
+    'studioWikiBaseDir',
+  ] as const;
+  if (stringFields.some((field) =>
+    value[field] !== undefined && typeof value[field] !== 'string')) {
+    return null;
+  }
+  if (
+    value.studioConfigSource !== undefined
+    && value.studioConfigSource !== 'workdir'
+    && value.studioConfigSource !== 'legacy_home'
+    && value.studioConfigSource !== 'missing'
+  ) {
+    return null;
+  }
+  if (
+    value.contextWindow !== undefined
+    && (
+      typeof value.contextWindow !== 'number'
+      || !Number.isSafeInteger(value.contextWindow)
+      || value.contextWindow <= 0
+    )
+  ) {
+    return null;
+  }
+  return {
+    ...(typeof value.model === 'string' ? { model: value.model } : {}),
+    ...(typeof value.cwd === 'string' ? { cwd: value.cwd } : {}),
+    ...(typeof value.workspaceId === 'string' ? { workspaceId: value.workspaceId } : {}),
+    ...(typeof value.workspaceName === 'string' ? { workspaceName: value.workspaceName } : {}),
+    ...(typeof value.workspaceRoot === 'string' ? { workspaceRoot: value.workspaceRoot } : {}),
+    ...(typeof value.stateRoot === 'string' ? { stateRoot: value.stateRoot } : {}),
+    ...(typeof value.studioConfigPath === 'string' ? { studioConfigPath: value.studioConfigPath } : {}),
+    ...(typeof value.studioDueRunsPath === 'string' ? { studioDueRunsPath: value.studioDueRunsPath } : {}),
+    ...(typeof value.studioConfigSource === 'string' ? { studioConfigSource: value.studioConfigSource } : {}),
+    ...(typeof value.studioConfigActivePath === 'string' ? { studioConfigActivePath: value.studioConfigActivePath } : {}),
+    ...(typeof value.legacyStudioConfigPath === 'string' ? { legacyStudioConfigPath: value.legacyStudioConfigPath } : {}),
+    ...(typeof value.petsDir === 'string' ? { petsDir: value.petsDir } : {}),
+    ...(typeof value.studioWikiBaseDir === 'string' ? { studioWikiBaseDir: value.studioWikiBaseDir } : {}),
+    ...(typeof value.contextWindow === 'number' ? { contextWindow: value.contextWindow } : {}),
   };
 }
 
@@ -364,81 +398,6 @@ export function parseResumeSessionSummary(value: unknown): ResumeSessionSummary 
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     active: record.active === true,
-  };
-}
-
-function parsePositiveInteger(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
-    return value;
-  }
-
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number(value);
-    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
-  }
-
-  return undefined;
-}
-
-function pickString(record: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
-  return undefined;
-}
-
-export function parseLocalServerRuntime(payload: unknown): LocalServerRuntimeSnapshot | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  const record = payload as Record<string, unknown>;
-  const llmConfig = record.llmConfig;
-  const nested =
-    typeof llmConfig === 'object' && llmConfig !== null && !Array.isArray(llmConfig)
-      ? llmConfig as Record<string, unknown>
-      : null;
-  const rawModel = pickString(record, ['llm_model', 'llmModel', 'model']);
-  const rawWorkdir = pickString(record, ['workdir', 'workDir', 'cwd', 'work_dir']);
-  const rawWorkspaceId = pickString(record, ['workspace_id', 'workspaceId']);
-  const rawWorkspaceName = pickString(record, ['workspace_name', 'workspaceName']);
-  const rawWorkspaceRoot = pickString(record, ['workspace_root', 'workspaceRoot']);
-  const rawStateRoot = pickString(record, ['state_root', 'stateRoot']);
-  const rawStudioConfigPath = pickString(record, ['studio_config_path', 'studioConfigPath']);
-  const rawStudioDueRunsPath = pickString(record, ['studio_due_runs_path', 'studioDueRunsPath']);
-  const rawStudioConfigSource = pickString(record, ['studio_config_source', 'studioConfigSource']);
-  const rawStudioConfigActivePath = pickString(record, ['studio_config_active_path', 'studioConfigActivePath']);
-  const rawLegacyStudioConfigPath = pickString(record, ['legacy_studio_config_path', 'legacyStudioConfigPath']);
-  const rawPetsDir = pickString(record, ['pets_dir', 'petsDir']);
-  const rawStudioWikiBaseDir = pickString(record, ['studio_wiki_base_dir', 'studioWikiBaseDir']);
-  const rawContextWindow =
-    pickString(record, ['llm_context_window_tokens', 'llmContextWindowTokens', 'contextWindow', 'context_window_tokens'])
-    ?? record.llm_context_window_tokens
-    ?? record.llmContextWindowTokens
-    ?? record.contextWindow
-    ?? record.context_window_tokens;
-  const nestedContextWindow = nested
-    ? (parsePositiveInteger(nested.contextWindow)
-      ?? parsePositiveInteger(nested.context_window_tokens)
-      ?? parsePositiveInteger(nested.context_window))
-    : undefined;
-  const nestedModel = nested ? pickString(nested, ['model', 'llmModel']) : undefined;
-
-  return {
-    model: rawModel ?? nestedModel,
-    contextWindow: parsePositiveInteger(rawContextWindow) ?? nestedContextWindow,
-    cwd: rawWorkdir ?? pickString(nested ?? {}, ['workdir', 'cwd']),
-    workspaceId: rawWorkspaceId,
-    workspaceName: rawWorkspaceName,
-    workspaceRoot: rawWorkspaceRoot,
-    stateRoot: rawStateRoot,
-    studioConfigPath: rawStudioConfigPath,
-    studioDueRunsPath: rawStudioDueRunsPath,
-    studioConfigSource: rawStudioConfigSource,
-    studioConfigActivePath: rawStudioConfigActivePath,
-    legacyStudioConfigPath: rawLegacyStudioConfigPath,
-    petsDir: rawPetsDir,
-    studioWikiBaseDir: rawStudioWikiBaseDir,
   };
 }
 

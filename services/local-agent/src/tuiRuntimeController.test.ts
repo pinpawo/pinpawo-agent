@@ -121,36 +121,22 @@ function createController(state: TuiState, options: { sendResult?: boolean } = {
   return { controller, actions, sent, get resetCount() { return resetCount; } };
 }
 
-test('TuiRuntimeController uses configured workdir when runtime payload omits cwd', () => {
-  const actions: TuiAction[] = [];
-  const controller = new TuiRuntimeController({
-    actorId: 'pet-1',
-    localServerPort: 0,
-    workdir: '/tmp/pinpawo-tui-workdir',
-    dispatch: (action) => actions.push(action),
-    getState: () => pendingReviewState(),
-    resetTimelineView: () => {},
-    setNow: () => {},
-  });
+test('TuiRuntimeController startup health check does not read runtime separately', async () => {
+  const harness = createController(pendingReviewState());
+  const calls: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (harness.controller as any).localServerClient = {
+    isHealthy: async () => {
+      calls.push('health');
+      return true;
+    },
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (controller as any).setRuntimeFromHealth({
-    model: 'test-model',
-    workspaceId: 'workspace-test',
-    workspaceName: 'Workspace Test',
-    workspaceRoot: '/tmp/pinpawo-tui-workdir',
-  });
+  const connected = await (harness.controller as any).waitForLocalServer();
 
-  assert.deepEqual(actions, [{
-    type: 'session.configured',
-    runtime: {
-      model: 'test-model',
-      cwd: '/tmp/pinpawo-tui-workdir',
-      workspaceId: 'workspace-test',
-      workspaceName: 'Workspace Test',
-      workspaceRoot: '/tmp/pinpawo-tui-workdir',
-    },
-  }]);
+  assert.equal(connected, true);
+  assert.deepEqual(calls, ['health']);
 });
 
 test('TuiRuntimeController submits canonical review responses without legacy resume extras', () => {

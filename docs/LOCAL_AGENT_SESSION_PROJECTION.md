@@ -82,7 +82,7 @@ session events.
 - `/sessions/resume` switches the active thread and returns its current versioned snapshot.
 - There is no `/history` restore endpoint or message-only fallback.
 - The server reads one LangGraph checkpoint point and derives both checkpoint messages and pending review state from it before building the snapshot.
-- The snapshot contains current runtime facts; the client does not compose it from a second `/runtime` request.
+- The snapshot contains current runtime facts; the client validates them at this boundary and does not compose them from a second `/runtime` request.
 
 ## Shared reduction
 

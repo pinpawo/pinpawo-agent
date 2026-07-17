@@ -90,13 +90,15 @@ separate client-side pending domain state.
 
 The server preserves client command order through a server-local
 `RunCommandSequencer`. If `run.interrupt` arrives while a preceding review
-resolution is still being validated or remains pending in checkpoint state,
-the sequencer queues it behind that resolution. The interrupt is released only
-after a graph state boundary confirms that the original pending review has been
-removed from the checkpoint; registering an inflight run or observing an
-arbitrary stream event is not sufficient. If that boundary contains a new
-pending review, the earlier interrupt is consumed without canceling the new
-review. Sequencer state is transport control state and is never
+resolution is still being validated, the sequencer queues it behind that
+resolution. Once the resumed run is registered, `run.interrupt` follows the
+ordinary inflight interruption path even if checkpoint consumption has not yet
+been confirmed. A queued interrupt is released only after a graph state boundary
+confirms that the original pending review has been removed from the checkpoint;
+registering an inflight run or observing an arbitrary stream event is not
+sufficient. If that boundary contains a new pending review, the earlier
+interrupt is consumed without canceling the new review. Sequencer state is
+transport control state and is never
 projected into `LocalAgentSession` or a snapshot. Long-running agent execution
 does not block later client commands from entering the sequencer.
 

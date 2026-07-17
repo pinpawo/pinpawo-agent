@@ -11,7 +11,6 @@ export function buildLocalLlmConfig(overrides: Partial<AgentLlmConfig> = {}): Ag
     model: config.llmModel,
     observeModel: config.llmModel,
     contextWindowTokens: config.llmContextWindowTokens,
-    temperature: 0.7,
     timeoutMs: 120000,
     maxRetries: 2,
     subagentThinking: stored.subagent_thinking ?? false,

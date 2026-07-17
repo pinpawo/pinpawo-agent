@@ -181,7 +181,6 @@ function buildModel(params: {
 }) {
   return new ChatOpenAI({
     model: params.model,
-    temperature: 0,
     timeout: params.timeoutMs,
     maxRetries: 0,
     apiKey: params.apiKey,

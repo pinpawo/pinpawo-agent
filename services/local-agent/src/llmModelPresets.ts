@@ -119,6 +119,23 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     ],
   },
   {
+    key: 'kimi-code',
+    label: 'Kimi Code K3',
+    provider: 'kimi-code',
+    model: 'k3',
+    baseUrl: 'https://api.kimi.com/coding/v1',
+    contextWindowTokens: 1_048_576,
+    structuredOutputMethod: 'functionCalling',
+    thinkingControl: 'always_enabled',
+    aliases: [
+      'k3',
+    ],
+    officialDocs: [
+      'https://www.kimi.com/code/docs/',
+      'https://www.kimi.com/code/docs/kimi-code/models.html',
+    ],
+  },
+  {
     key: 'kimi',
     label: 'Kimi K2.7 Code',
     provider: 'moonshot',

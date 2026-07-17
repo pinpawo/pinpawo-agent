@@ -16,7 +16,9 @@ export function buildLocalAgentModels(llmConfig: AgentLlmConfig): AgentModels {
 
     return new ChatOpenAI({
       model,
-      temperature: role === 'observe' ? 0.3 : (llmConfig.temperature ?? 0.7),
+      ...(typeof llmConfig.temperature === 'number'
+        ? { temperature: llmConfig.temperature }
+        : {}),
       timeout: llmConfig.timeoutMs ?? 45000,
       maxRetries: llmConfig.maxRetries ?? 2,
       apiKey: llmConfig.apiKey,

@@ -117,6 +117,12 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
 
   assert.deepEqual(buildDecisionStructuredOutput({
     apiKey: 'test-key',
+    baseUrl: 'https://api.kimi.com/coding/v1',
+    model: 'k3',
+  }), { method: 'jsonSchema' });
+
+  assert.deepEqual(buildDecisionStructuredOutput({
+    apiKey: 'test-key',
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-5.5',
   }), { method: 'jsonSchema' });

@@ -125,7 +125,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     model: 'k3',
     baseUrl: 'https://api.kimi.com/coding/v1',
     contextWindowTokens: 1_048_576,
-    structuredOutputMethod: 'functionCalling',
+    structuredOutputMethod: 'jsonSchema',
     thinkingControl: 'always_enabled',
     aliases: [
       'k3',

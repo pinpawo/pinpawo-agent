@@ -130,6 +130,14 @@ export class TuiRuntimeController {
 
     const requestId = randomUUID();
     const now = Date.now();
+    if (!this.wsClient.send({
+      type: 'chat_request',
+      requestId,
+      message,
+    })) {
+      this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
+      return false;
+    }
     this.options.setNow(now);
     this.options.dispatch({
       type: 'run.start',
@@ -144,11 +152,6 @@ export class TuiRuntimeController {
       now,
     });
 
-    this.wsClient.send({
-      type: 'chat_request',
-      requestId,
-      message,
-    });
     return true;
   }
 
@@ -164,6 +167,15 @@ export class TuiRuntimeController {
 
     const requestId = randomUUID();
     const now = Date.now();
+    if (!this.wsClient.send({
+      type: 'studio_request',
+      requestId,
+      userRequest,
+      ...(conversationId ? { conversationId } : {}),
+    })) {
+      this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
+      return false;
+    }
     this.options.setNow(now);
     this.options.dispatch({
       type: 'run.start',
@@ -176,12 +188,6 @@ export class TuiRuntimeController {
         source: 'local-input',
       }, now),
       now,
-    });
-    this.wsClient.send({
-      type: 'studio_request',
-      requestId,
-      userRequest,
-      ...(conversationId ? { conversationId } : {}),
     });
     return true;
   }
@@ -266,7 +272,7 @@ export class TuiRuntimeController {
     this.clearInterruptTimeout();
 
     const resolutionSent = selectFocusedReviewResolutionSent(state);
-    const waitingReviewAction = activeRun.phase === 'waiting_human' && !resolutionSent
+    const waitingReviewAction = activeRun.state === 'waiting_review' && !resolutionSent
       ? activeRun.reviewAction
       : null;
     if (waitingReviewAction) {

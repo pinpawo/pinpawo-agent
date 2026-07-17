@@ -32,14 +32,14 @@ function pendingReviewState(): TuiState {
         runtime: {},
         timeline: [],
         activeRun: {
-        requestId: 'req-1',
-        phase: 'waiting_human',
-        reviewAction: {
-          actionId: 'interrupt-1',
-          reviews: [review],
+          requestId: 'req-1',
+          state: 'waiting_review',
+          reviewAction: {
+            actionId: 'interrupt-1',
+            reviews: [review],
+          },
+          startedAt: 1,
         },
-        startedAt: 1,
-      },
       },
     },
   };
@@ -61,7 +61,9 @@ function pendingReviewActionState(reviewIndex = 0): TuiState {
       options: [],
     },
   ];
-  state.sessions['sess-1']!.activeRun!.reviewAction = {
+  const activeRun = state.sessions['sess-1']!.activeRun;
+  if (activeRun?.state !== 'waiting_review') assert.fail('expected waiting review');
+  activeRun.reviewAction = {
     actionId: 'interrupt-1',
     reviews,
   };
@@ -78,9 +80,17 @@ function busyRunState(): TuiState {
   const state = pendingReviewState();
   state.sessions['sess-1']!.activeRun = {
     requestId: 'req-1',
-    phase: 'thinking',
+    state: 'running',
+    activity: 'thinking',
     startedAt: 1,
   };
+  return state;
+}
+
+function idleState(): TuiState {
+  const state = pendingReviewState();
+  state.sessions['sess-1']!.activeRun = null;
+  state.reviewDrafts = {};
   return state;
 }
 
@@ -311,6 +321,27 @@ test('TuiRuntimeController keeps new runs gated after a review resolution was se
   assert.equal(actions.some((action) => action.type === 'run.start'), false);
 });
 
+test('TuiRuntimeController projects chat and studio runs only after transport accepts them', () => {
+  const chat = createController(idleState(), { sendResult: false });
+  assert.equal(chat.controller.sendChatRequest('hello'), false);
+  assert.equal(chat.actions.some((action) => action.type === 'run.start'), false);
+
+  const studio = createController(idleState(), { sendResult: false });
+  assert.equal(studio.controller.sendStudioRequest('investigate', 'studio-1'), false);
+  assert.equal(studio.actions.some((action) => action.type === 'run.start'), false);
+
+  assert.equal(
+    chat.actions.some((action) =>
+      action.type === 'message.appended' && action.message.text === '未连接，无法发送'),
+    true,
+  );
+  assert.equal(
+    studio.actions.some((action) =>
+      action.type === 'message.appended' && action.message.text === '未连接，无法发送'),
+    true,
+  );
+});
+
 test('TuiRuntimeController releases input locally after interrupt timeout', () => {
   mock.timers.enable({ apis: ['setTimeout'], now: 0 });
   try {
@@ -357,7 +388,7 @@ test('TuiRuntimeController applies the latest snapshot before opening websocket'
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        version: 1,
+        version: 2,
         session: {
           sessionId: 'sess-1',
           kind: 'chat',
@@ -407,7 +438,7 @@ test('TuiRuntimeController refreshes from the latest snapshot after stale review
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        version: 1,
+        version: 2,
         session: {
           sessionId: 'sess-1',
           kind: 'chat',
@@ -461,7 +492,7 @@ test('TuiRuntimeController applies the latest snapshot after completed messages'
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        version: 1,
+        version: 2,
         session: {
           sessionId: 'sess-1',
           kind: 'chat',

@@ -639,7 +639,7 @@ test('LocalAgentAppChatHandler recovers a batch review route from app-chat check
   ];
   const runRequests: unknown[] = [];
   let stateReads = 0;
-  let phaseDuringResume: string | undefined;
+  let stateDuringResume: string | undefined;
   let reviewActionDuringResume: string | undefined;
   let fixture: ReturnType<typeof createHandler>;
   fixture = createHandler({
@@ -666,8 +666,10 @@ test('LocalAgentAppChatHandler recovers a batch review route from app-chat check
     runChat: async (options) => {
       runRequests.push(options.request);
       const projection = fixture.handler.readSessionProjection('user-1');
-      phaseDuringResume = projection?.activeRun?.phase;
-      reviewActionDuringResume = projection?.activeRun?.reviewAction?.actionId;
+      stateDuringResume = projection?.activeRun?.state;
+      reviewActionDuringResume = projection?.activeRun?.state === 'waiting_review'
+        ? projection.activeRun.reviewAction.actionId
+        : undefined;
       return { status: 'completed', reply: 'done after recovery' };
     },
   });
@@ -697,7 +699,7 @@ test('LocalAgentAppChatHandler recovers a batch review route from app-chat check
       },
     },
   }]);
-  assert.equal(phaseDuringResume, 'waiting_human');
+  assert.equal(stateDuringResume, 'waiting_review');
   assert.equal(reviewActionDuringResume, 'interrupt-recovered');
   assert.equal(fixture.handler.readSessionProjection('user-1')?.activeRun, null);
 

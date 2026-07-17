@@ -110,8 +110,10 @@ test('TuiLocalServerClient reads current snapshots, sessions, resume, and health
   assert.equal(loaded.session.sessionId, 'chat:pet');
   assert.equal(loaded.session.runtime?.model, 'snapshot-model');
   assert.equal(loaded.session.runtime?.cwd, '/tmp/snapshot-work');
-  assert.equal(loaded.session.activeRun?.reviewAction?.actionId, 'interrupt-1');
-  assert.equal('status' in (loaded.session.activeRun?.reviewAction ?? {}), false);
+  assert.equal(loaded.session.activeRun?.state, 'waiting_review');
+  if (loaded.session.activeRun?.state !== 'waiting_review') assert.fail('expected waiting review');
+  assert.equal(loaded.session.activeRun.reviewAction.actionId, 'interrupt-1');
+  assert.equal('status' in loaded.session.activeRun.reviewAction, false);
   assert.equal(loaded.session.timeline[1]?.type, 'operation');
   assert.equal((await client.readRuntime())?.model, 'gpt-test');
   assert.deepEqual((await client.listResumeSessions()).map((item) => item.id), ['chat:one']);
@@ -159,7 +161,7 @@ test('TuiLocalServerClient rejects malformed current snapshots', async () => {
     fetchImpl: (async (url: RequestInfo | URL) => {
       if (String(url).endsWith('/runtime')) return jsonResponse({});
       return jsonResponse({
-        version: 1,
+        version: 2,
         session: {
           sessionId: 'chat:pet',
           kind: 'chat',
@@ -175,6 +177,86 @@ test('TuiLocalServerClient rejects malformed current snapshots', async () => {
         },
       });
     }) as typeof fetch,
+  });
+
+  await assert.rejects(() => client.readSessionSnapshot(), /invalid local server snapshot payload/);
+});
+
+test('TuiLocalServerClient rejects legacy and structurally invalid active run views', async () => {
+  const reviewAction = sessionSnapshot('chat:pet').session.activeRun.reviewAction;
+  const invalidRuns = [
+    {
+      requestId: 'req-review',
+      phase: 'waiting_human',
+      reviewAction,
+    },
+    {
+      requestId: 'req-review',
+      state: 'waiting_review',
+    },
+    {
+      requestId: 'req-running',
+      state: 'running',
+      activity: 'thinking',
+      reviewAction,
+    },
+    {
+      requestId: 'req-interrupting',
+      state: 'interrupting',
+      activity: 'thinking',
+    },
+  ];
+
+  for (const activeRun of invalidRuns) {
+    const snapshot = sessionSnapshot('chat:pet');
+    const client = new TuiLocalServerClient({
+      port: 3210,
+      fetchImpl: (async () => jsonResponse({
+        ...snapshot,
+        session: { ...snapshot.session, activeRun },
+      })) as typeof fetch,
+    });
+    await assert.rejects(
+      () => client.readSessionSnapshot(),
+      /invalid local server snapshot payload/,
+    );
+  }
+});
+
+test('TuiLocalServerClient accepts every legal non-review active run view', async () => {
+  const activeRuns = [
+    {
+      requestId: 'req-running',
+      state: 'running',
+      activity: 'using_tool',
+      startedAt: 1000,
+    },
+    {
+      requestId: 'req-interrupting',
+      state: 'interrupting',
+      startedAt: 1000,
+    },
+  ];
+
+  for (const activeRun of activeRuns) {
+    const snapshot = sessionSnapshot('chat:pet');
+    const client = new TuiLocalServerClient({
+      port: 3210,
+      fetchImpl: (async () => jsonResponse({
+        ...snapshot,
+        session: { ...snapshot.session, activeRun },
+      })) as typeof fetch,
+    });
+    const loaded = await client.readSessionSnapshot();
+    assert.deepEqual(loaded.session.activeRun, activeRun);
+  }
+});
+
+test('TuiLocalServerClient rejects the previous snapshot schema version', async () => {
+  const snapshot = sessionSnapshot('chat:pet');
+  const client = new TuiLocalServerClient({
+    port: 3210,
+    fetchImpl: (async () => jsonResponse({ ...snapshot, version: 1 })) as typeof fetch,
   });
 
   await assert.rejects(() => client.readSessionSnapshot(), /invalid local server snapshot payload/);
@@ -229,7 +311,7 @@ test('TuiLocalServerClient treats health errors as unhealthy', async () => {
 
 function sessionSnapshot(sessionId: string) {
   return {
-    version: 1,
+    version: 2,
     session: {
       sessionId,
       kind: 'chat',
@@ -256,7 +338,7 @@ function sessionSnapshot(sessionId: string) {
       ],
       activeRun: {
         requestId: 'req-review',
-        phase: 'waiting_human',
+        state: 'waiting_review',
         reviewAction: {
           actionId: 'interrupt-1',
           status: 'waiting',

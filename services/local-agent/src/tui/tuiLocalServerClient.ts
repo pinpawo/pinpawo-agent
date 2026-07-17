@@ -5,8 +5,9 @@ import {
 } from '../localServerAuth';
 import type {
   LocalAgentOperationEntry,
-  LocalAgentRun,
-  LocalAgentRunPhase,
+  LocalAgentReviewAction,
+  LocalAgentRunActivity,
+  LocalAgentRunView,
   LocalAgentSession,
   LocalAgentSessionSnapshot,
   LocalAgentTimelineEntry,
@@ -287,22 +288,32 @@ function parseOperationSource(
   };
 }
 
-function parseLocalAgentRun(value: unknown): LocalAgentRun | null {
-  if (!isRecord(value) || typeof value.requestId !== 'string' || !isActiveRunPhase(value.phase)) {
+function parseLocalAgentRun(value: unknown): LocalAgentRunView | null {
+  if (!isRecord(value) || typeof value.requestId !== 'string') {
     return null;
   }
-  const reviewAction = parseNativeReviewAction(value.reviewAction);
-  if (value.reviewAction !== undefined && !reviewAction) return null;
-  return {
+  const base = {
     requestId: value.requestId,
-    phase: value.phase,
-    ...(reviewAction ? { reviewAction } : {}),
     ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
     ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
   };
+  if (value.state === 'running') {
+    if (!isRunActivity(value.activity) || value.reviewAction !== undefined) return null;
+    return { ...base, state: 'running', activity: value.activity };
+  }
+  if (value.state === 'waiting_review') {
+    const reviewAction = parseNativeReviewAction(value.reviewAction);
+    if (!reviewAction || value.activity !== undefined) return null;
+    return { ...base, state: 'waiting_review', reviewAction };
+  }
+  if (value.state === 'interrupting') {
+    if (value.activity !== undefined || value.reviewAction !== undefined) return null;
+    return { ...base, state: 'interrupting' };
+  }
+  return null;
 }
 
-function parseNativeReviewAction(value: unknown): LocalAgentRun['reviewAction'] | null {
+function parseNativeReviewAction(value: unknown): LocalAgentReviewAction | null {
   if (!isRecord(value)) return null;
   const reviews = readReviewSpecs(value.reviews);
   if (typeof value.actionId !== 'string' || !reviews) {
@@ -451,10 +462,8 @@ function isOperationPhase(value: unknown): value is LocalAgentOperationEntry['ph
     || value === 'interrupted';
 }
 
-function isActiveRunPhase(value: unknown): value is LocalAgentRunPhase {
+function isRunActivity(value: unknown): value is LocalAgentRunActivity {
   return value === 'thinking'
     || value === 'using_tool'
-    || value === 'streaming'
-    || value === 'waiting_human'
-    || value === 'interrupting';
+    || value === 'streaming';
 }

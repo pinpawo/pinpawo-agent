@@ -55,7 +55,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     },
   });
 
-  assert.equal(snapshot.version, 1);
+  assert.equal(snapshot.version, 2);
   assert.equal(snapshot.session.sessionId, 'chat:pet-a');
   assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.id, entry.type, entry.type === 'message' ? entry.role : '']), [
     ['message:0:user', 'message', 'user'],
@@ -66,8 +66,10 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     '2026-06-01T01:00:00.000Z',
   );
   assert.equal(snapshot.session.activeRun?.requestId, 'req-review');
-  assert.equal(snapshot.session.activeRun?.reviewAction?.reviews[0]?.id, 'review-1');
-  assert.equal(snapshot.session.activeRun?.reviewAction?.petId, 'pet-a');
+  assert.equal(snapshot.session.activeRun?.state, 'waiting_review');
+  if (snapshot.session.activeRun?.state !== 'waiting_review') assert.fail('expected waiting review');
+  assert.equal(snapshot.session.activeRun.reviewAction.reviews[0]?.id, 'review-1');
+  assert.equal(snapshot.session.activeRun.reviewAction.petId, 'pet-a');
   assert.equal(snapshot.session.runtime?.model, 'test-model');
   assert.equal(snapshot.session.runtime?.contextWindow, 32000);
   assert.equal(snapshot.session.runtime?.cwd, '/tmp/work');

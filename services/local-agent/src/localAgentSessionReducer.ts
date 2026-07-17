@@ -3,7 +3,7 @@ import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
 import type {
   LocalAgentMessageEntry,
   LocalAgentOperationEntry,
-  LocalAgentRun,
+  LocalAgentRunView,
   LocalAgentSession,
   LocalAgentSessionMessageInput,
   LocalAgentSessionSnapshot,
@@ -87,15 +87,11 @@ export function reduceSession(
     case 'runtime.event':
       return reduceRuntimeEvent(session, input.event, input.message, context);
     case 'run.interrupting':
-      return updateOwnedRun(session, input.requestId, (run) => {
-        const { reviewAction: _reviewAction, ...runWithoutReview } = run;
-        void _reviewAction;
-        return {
-          ...runWithoutReview,
-          phase: 'interrupting',
-          ...observedAtUpdate(context),
-        };
-      });
+      return updateOwnedRun(session, input.requestId, (run) => ({
+        ...runViewBase(run),
+        state: 'interrupting',
+        ...observedAtUpdate(context),
+      }));
     case 'run.finished':
       return finishOwnedRun(
         session,
@@ -152,7 +148,8 @@ function acceptUserInput(
     kind: input.kind,
     activeRun: {
       requestId: input.requestId,
-      phase: 'thinking',
+      state: 'running',
+      activity: 'thinking',
       startedAt: context.observedAt,
       updatedAt: context.observedAt,
     },
@@ -245,8 +242,9 @@ function appendAssistantDelta(
     });
   }
   return updateOwnedRun({ ...session, timeline: nextTimeline }, requestId, (run) => ({
-    ...omitReviewAction(run),
-    phase: 'streaming',
+    ...runViewBase(run),
+    state: 'running',
+    activity: 'streaming',
     ...observedAtUpdate(context),
   }));
 }
@@ -289,15 +287,28 @@ function applyOperationEvent(
     ...settledSession,
     timeline: upsertTimelineEntry(settledSession.timeline, operation),
   };
-  return updateOwnedRun(withOperation, event.requestId, (run) => ({
-    ...omitReviewAction(run),
-    phase: event.phase === 'started' || event.phase === 'updated'
-      ? 'using_tool'
-      : run.phase === 'waiting_human'
-        ? 'thinking'
-        : run.phase,
-    ...observedAtUpdate(context),
-  }));
+  return updateOwnedRun(withOperation, event.requestId, (run) => {
+    if (event.phase === 'started' || event.phase === 'updated') {
+      return {
+        ...runViewBase(run),
+        state: 'running',
+        activity: 'using_tool',
+        ...observedAtUpdate(context),
+      };
+    }
+    if (run.state === 'waiting_review') {
+      return {
+        ...runViewBase(run),
+        state: 'running',
+        activity: 'thinking',
+        ...observedAtUpdate(context),
+      };
+    }
+    return {
+      ...run,
+      ...observedAtUpdate(context),
+    };
+  });
 }
 
 function appendSubagentDelta(
@@ -328,8 +339,9 @@ function appendSubagentDelta(
     timeline: upsertTimelineEntry(session.timeline, entry),
   };
   return updateOwnedRun(withMessage, requestId, (run) => ({
-    ...omitReviewAction(run),
-    phase: 'streaming',
+    ...runViewBase(run),
+    state: 'running',
+    activity: 'streaming',
     ...observedAtUpdate(context),
   }));
 }
@@ -347,8 +359,8 @@ function applyReviewRequest(
   });
   const petId = event.actor?.petId;
   return updateOwnedRun(session, event.requestId, (run) => ({
-    ...run,
-    phase: 'waiting_human',
+    ...runViewBase(run),
+    state: 'waiting_review',
     reviewAction: {
       actionId,
       reviews,
@@ -358,10 +370,12 @@ function applyReviewRequest(
   }));
 }
 
-function omitReviewAction(run: LocalAgentRun): LocalAgentRun {
-  const { reviewAction: _reviewAction, ...runWithoutReview } = run;
-  void _reviewAction;
-  return runWithoutReview;
+function runViewBase(run: LocalAgentRunView) {
+  return {
+    requestId: run.requestId,
+    ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
+    ...(run.updatedAt !== undefined ? { updatedAt: run.updatedAt } : {}),
+  };
 }
 
 function finishOwnedRun(
@@ -480,7 +494,7 @@ function omitTokenUsage(session: LocalAgentSession): LocalAgentSession {
 function updateOwnedRun(
   session: LocalAgentSession,
   requestId: string,
-  update: (run: LocalAgentRun) => LocalAgentRun,
+  update: (run: LocalAgentRunView) => LocalAgentRunView,
 ) {
   if (!ownsRun(session, requestId) || !session.activeRun) return session;
   const nextRun = update(session.activeRun);
@@ -558,10 +572,10 @@ function cloneTimelineEntry(entry: LocalAgentTimelineEntry): LocalAgentTimelineE
 const MAX_RECONCILED_RUN_AGE_MS = 24 * 60 * 60 * 1000;
 
 function normalizeSnapshotRun(
-  incoming: LocalAgentRun,
-  existing: LocalAgentRun | null,
+  incoming: LocalAgentRunView,
+  existing: LocalAgentRunView | null,
   context: LocalAgentSessionReductionContext | undefined,
-): LocalAgentRun {
+): LocalAgentRunView {
   const observedAt = context?.observedAt;
   const startedAt = normalizeSnapshotTimestamp(incoming.startedAt, observedAt)
     ?? (existing?.requestId === incoming.requestId

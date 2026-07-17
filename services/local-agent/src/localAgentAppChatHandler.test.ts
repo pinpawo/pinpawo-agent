@@ -640,7 +640,7 @@ test('LocalAgentAppChatHandler recovers a batch review route from app-chat check
   const runRequests: unknown[] = [];
   let stateReads = 0;
   let phaseDuringResume: string | undefined;
-  let reviewStatusDuringResume: string | undefined;
+  let reviewActionDuringResume: string | undefined;
   let fixture: ReturnType<typeof createHandler>;
   fixture = createHandler({
     checkpoint: createCheckpoint([
@@ -667,7 +667,7 @@ test('LocalAgentAppChatHandler recovers a batch review route from app-chat check
       runRequests.push(options.request);
       const projection = fixture.handler.readSessionProjection('user-1');
       phaseDuringResume = projection?.activeRun?.phase;
-      reviewStatusDuringResume = projection?.activeRun?.reviewAction?.status;
+      reviewActionDuringResume = projection?.activeRun?.reviewAction?.actionId;
       return { status: 'completed', reply: 'done after recovery' };
     },
   });
@@ -697,8 +697,8 @@ test('LocalAgentAppChatHandler recovers a batch review route from app-chat check
       },
     },
   }]);
-  assert.equal(phaseDuringResume, 'thinking');
-  assert.equal(reviewStatusDuringResume, 'submitting');
+  assert.equal(phaseDuringResume, 'waiting_human');
+  assert.equal(reviewActionDuringResume, 'interrupt-recovered');
   assert.equal(fixture.handler.readSessionProjection('user-1')?.activeRun, null);
 
   await fixture.handler.handleHumanReviewResponse(fixture.ws, {
@@ -716,6 +716,72 @@ test('LocalAgentAppChatHandler recovers a batch review route from app-chat check
   assert.equal(runRequests.length, 1);
   const duplicateResponse = fixture.sent.at(-1) as { event?: { type?: string } };
   assert.equal(duplicateResponse.event?.type, 'error');
+});
+
+test('LocalAgentAppChatHandler waits for review resolution checkpointing before applying an interrupt', async () => {
+  const review = {
+    id: 'review-order',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  let notifyReadStarted!: () => void;
+  const readStarted = new Promise<void>((resolve) => {
+    notifyReadStarted = resolve;
+  });
+  let releaseRead!: () => void;
+  const readReleased = new Promise<void>((resolve) => {
+    releaseRead = resolve;
+  });
+  let runCount = 0;
+  const { handler, ws, sent } = createHandler({
+    checkpoint: createCheckpoint(['petbot:chat:pet:pet-a:user:user-1']),
+    graphService: {
+      async readThreadState() {
+        notifyReadStarted();
+        await readReleased;
+        return {
+          messages: [],
+          pendingHumanReview: {
+            interruptId: 'interrupt-order',
+            review,
+          },
+          hasPendingContinuation: true,
+        };
+      },
+    } as unknown as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['graphService'],
+    runChat: async (options) => {
+      runCount += 1;
+      assert.equal(options.setup.input.signal?.aborted, false);
+      options.onResumeCheckpointed?.({ canInterrupt: true });
+      assert.equal(options.setup.input.signal?.aborted, true);
+      options.finishInterrupted();
+      return { status: 'interrupted' };
+    },
+  });
+
+  const resolution = handler.handleHumanReviewResponse(ws, {
+    type: 'human_review_response',
+    requestId: 'req-order',
+    actionId: 'interrupt-order',
+    reviewId: review.id,
+    selectedOptionId: 'approve',
+  });
+  await readStarted;
+  handler.handleRunInterrupt(ws, {
+    type: 'run.interrupt',
+    requestId: 'req-order',
+  });
+  releaseRead();
+  await resolution;
+
+  assert.equal(runCount, 1);
+  assert.deepEqual(sent.filter((message) => (
+    message as { type?: string }
+  ).type !== 'event'), [
+    { type: 'interrupting', requestId: 'req-order', message: 'interrupting' },
+    { type: 'interrupted', requestId: 'req-order', message: 'interrupted' },
+  ]);
 });
 
 test('LocalAgentAppChatHandler claims a recovered review by actionId across requestIds', async () => {

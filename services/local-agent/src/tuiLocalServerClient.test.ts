@@ -111,6 +111,7 @@ test('TuiLocalServerClient reads current snapshots, sessions, resume, and health
   assert.equal(loaded.session.runtime?.model, 'snapshot-model');
   assert.equal(loaded.session.runtime?.cwd, '/tmp/snapshot-work');
   assert.equal(loaded.session.activeRun?.reviewAction?.actionId, 'interrupt-1');
+  assert.equal('status' in (loaded.session.activeRun?.reviewAction ?? {}), false);
   assert.equal(loaded.session.timeline[1]?.type, 'operation');
   assert.equal((await client.readRuntime())?.model, 'gpt-test');
   assert.deepEqual((await client.listResumeSessions()).map((item) => item.id), ['chat:one']);

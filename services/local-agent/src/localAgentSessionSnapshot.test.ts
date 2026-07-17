@@ -45,7 +45,6 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
       actor: { petId: 'pet-a' },
       reviewAction: {
         actionId: 'interrupt-1',
-        status: 'waiting',
         reviews: [{
           id: 'review-1',
           schemaVersion: 1,

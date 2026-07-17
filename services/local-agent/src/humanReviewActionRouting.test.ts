@@ -30,7 +30,6 @@ function reviewSpec(id: string): ReviewSpec {
 function reviewRoute(ids: string[], interruptId?: string) {
   return {
     actionId: interruptId ?? `request:req-1:reviews:${ids.join(',')}`,
-    status: 'waiting' as const,
     ...(interruptId ? { interruptId } : {}),
     reviews: ids.map(reviewSpec),
   };

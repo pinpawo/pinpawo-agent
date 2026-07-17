@@ -425,7 +425,7 @@ test('tuiStateReducer records composer prompt history only for run starts', () =
   assert.deepEqual(state.input.history.entries, ['hello']);
 
   state = tuiStateReducer(state, {
-    type: 'review.action.submit',
+    type: 'review.resolution.sent',
     requestId: 'req-2',
     actionId: 'request:req-2:reviews:unknown',
     decision: { reviewId: 'review-2', selectedOptionId: 'approve' },
@@ -1166,7 +1166,6 @@ test('tuiStateReducer restores checkpoint-owned pending approval from a snapshot
         startedAt: 1000,
         reviewAction: {
           actionId: 'interrupt-1',
-          status: 'waiting',
           petId: 'pet-a',
           reviews: [{
             id: 'review-1',
@@ -1565,7 +1564,6 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.deepEqual(selectFocusedPendingApproval(state), {
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
-    status: 'waiting',
     review: {
       id: 'review-1',
       schemaVersion: 1,
@@ -1586,15 +1584,18 @@ test('tuiStateReducer handles human review and interrupt state', () => {
 
   const activeRunBefore = selectFocusedActiveRun(state);
   state = tuiStateReducer(state, {
-    type: 'review.action.submit',
+    type: 'review.resolution.sent',
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
     decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
   });
 
   assert.equal(selectFocusedBusy(state), true);
-  assert.equal(selectFocusedActiveRun(state)?.phase, 'thinking');
-  // resume preserves the same run identity (same startedAt, same requestId)
+  assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
+  assert.equal(selectFocusedActiveRun(state)?.reviewAction?.actionId, 'request:req-1:reviews:review-1');
+  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, true);
+  // The client-local resolution preserves the shared run until the server
+  // observes resumed activity.
   assert.equal(selectFocusedActiveRun(state)?.requestId, 'req-1');
   assert.equal(selectFocusedActiveRun(state)?.startedAt, activeRunBefore?.startedAt);
   assert.equal(selectFocusedPendingApproval(state), null);
@@ -1664,7 +1665,6 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
         reviewAction: {
           actionId: 'interrupt-1',
           reviews,
-          status: 'waiting',
         },
       },
     }),
@@ -1674,7 +1674,7 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
   assert.equal(selectFocusedPendingApproval(state)?.review.id, 'review-1');
 });
 
-test('tuiStateReducer marks review cancellation separately from run interruption', () => {
+test('tuiStateReducer keeps a sent review resolution local until the server responds', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -1692,17 +1692,38 @@ test('tuiStateReducer marks review cancellation separately from run interruption
     now: 1200,
   });
   state = tuiStateReducer(state, {
-    type: 'review.action.cancel',
+    type: 'review.resolution.sent',
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
   });
 
-  assert.equal(selectFocusedActiveRun(state)?.phase, 'interrupting');
-  assert.equal(selectFocusedActiveRun(state)?.reviewAction?.status, 'canceling');
+  assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
+  assert.equal(selectFocusedActiveRun(state)?.reviewAction?.actionId, 'request:req-1:reviews:review-1');
+  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, true);
+  assert.equal(selectFocusedBusy(state), true);
   assert.equal(selectFocusedPendingApproval(state), null);
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'human_review.requested',
+      requestId: 'req-1',
+      review: {
+        id: 'review-1',
+        schemaVersion: 1,
+        view: { kind: 'plain', body: 'Approve?' },
+        options: [],
+      },
+    },
+    now: 1300,
+  });
+
+  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, undefined);
+  assert.equal(selectFocusedBusy(state), false);
+  assert.equal(selectFocusedPendingApproval(state)?.review.id, 'review-1');
 });
 
-test('tuiStateReducer review.action.submit preserves the owning run', () => {
+test('tuiStateReducer sent review resolution preserves the owning run', () => {
   let state = startRun(initialState(), 'req-1');
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -1721,7 +1742,7 @@ test('tuiStateReducer review.action.submit preserves the owning run', () => {
   });
 
   state = tuiStateReducer(state, {
-    type: 'review.action.submit',
+    type: 'review.resolution.sent',
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
     decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
@@ -1729,7 +1750,23 @@ test('tuiStateReducer review.action.submit preserves the owning run', () => {
 
   assert.equal(state.sessions['chat:pet']?.activeRun?.requestId, 'req-1');
   assert.equal(selectFocusedPendingApproval(state), null);
+  assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
+  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, true);
+
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: { id: 'tool-1', kind: 'shell' },
+    },
+    now: 1300,
+  });
+
   assert.equal(selectFocusedActiveRun(state)?.phase, 'thinking');
+  assert.equal(selectFocusedActiveRun(state)?.reviewAction, undefined);
+  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1'], undefined);
 });
 
 test('tuiStateReducer accepts canonical human review specs without legacy payload', () => {
@@ -1761,7 +1798,6 @@ test('tuiStateReducer accepts canonical human review specs without legacy payloa
   assert.deepEqual(selectFocusedPendingApproval(state), {
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
-    status: 'waiting',
     review: {
       id: 'review-1',
       schemaVersion: 1,

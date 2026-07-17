@@ -305,12 +305,11 @@ function parseLocalAgentRun(value: unknown): LocalAgentRun | null {
 function parseNativeReviewAction(value: unknown): LocalAgentRun['reviewAction'] | null {
   if (!isRecord(value)) return null;
   const reviews = readReviewSpecs(value.reviews);
-  if (typeof value.actionId !== 'string' || !isReviewActionStatus(value.status) || !reviews) {
+  if (typeof value.actionId !== 'string' || !reviews) {
     return null;
   }
   return {
     actionId: value.actionId,
-    status: value.status,
     reviews,
     ...(typeof value.petId === 'string' ? { petId: value.petId } : {}),
   };
@@ -458,8 +457,4 @@ function isActiveRunPhase(value: unknown): value is LocalAgentRunPhase {
     || value === 'streaming'
     || value === 'waiting_human'
     || value === 'interrupting';
-}
-
-function isReviewActionStatus(value: unknown): value is NonNullable<LocalAgentRun['reviewAction']>['status'] {
-  return value === 'waiting' || value === 'submitting' || value === 'canceling';
 }

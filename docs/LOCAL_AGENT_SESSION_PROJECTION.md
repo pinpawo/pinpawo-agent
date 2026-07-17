@@ -32,7 +32,10 @@ Startup, reconnect, resume, completion, and review-state refresh are reasons a c
 
 A session owns one ordered timeline and zero or one active run. Local snapshot readers accept only the current versioned `LocalAgentSessionSnapshot`; the previous `runs[] + activeRunId`, legacy pending-review payloads, and message-only restore shapes are unsupported.
 
-Partial `ReviewDraft` decisions are client-local interaction state and are not part of the shared snapshot.
+Partial `ReviewDraft` decisions and the one-shot `resolutionSent` marker are
+client-local interaction state and are not part of the shared snapshot.
+`ReviewAction` contains only the checkpoint-derived batch identity and ordered
+review specifications; it does not contain review-command progress.
 
 Live TUI actions carry `LocalAgentSessionMessageInput` directly. The TUI no
 longer defines a separate `MessageCell` model. Message `createdAt` / `updatedAt`
@@ -66,15 +69,49 @@ session events.
 
 ## Shared reduction
 
-`reduceSession(session, input, { observedAt })` is the deterministic, client-neutral transition boundary for accepted user input, runtime events, review actions, interrupt state, and terminal run state. Callers supply observation time explicitly; the reducer does not read clocks, sockets, files, or UI state.
+`reduceSession(session, input, { observedAt })` is the deterministic,
+client-neutral transition boundary for accepted user input, server-observed
+runtime events, interrupt state, and terminal run state. Sending a review
+resolution does not mutate this shared projection; subsequent server events or
+a snapshot provide the next shared fact. Callers supply observation time
+explicitly; the reducer does not read clocks, sockets, files, or UI state.
 
 `applySessionSnapshot(session, snapshot, options)` replaces the ordered timeline and active run with the materialized snapshot value. Its options describe application policy, such as whether omitted token usage should retain a process-local observation; they do not classify the snapshot.
 
-The TUI reducer adapts TUI actions and presentation text into these inputs. Composer history, focus, connection copy, partial review drafts, and viewport state remain TUI-owned and are not part of the shared projection.
+The TUI reducer adapts TUI actions and presentation text into these inputs.
+Composer history, focus, connection copy, partial review drafts, the one-shot
+review-resolution send marker, and viewport state remain TUI-owned and are
+not part of the shared projection. After a review resolution is sent and before
+the next server fact arrives, that marker gates composer input and routes a
+further interrupt request to `run.interrupt`; there is no cancellable
+review-submission lifecycle. It is cleared when server-observed state diverges
+from the waiting review action. A user-triggered run interrupt does not add a
+separate client-side pending domain state.
+
+The server preserves client command order through a server-local
+`RunCommandSequencer`. If `run.interrupt` arrives while a preceding review
+resolution is still being validated, the sequencer queues it behind that
+resolution. Once the resumed run is registered, `run.interrupt` follows the
+ordinary inflight interruption path even if checkpoint consumption has not yet
+been confirmed. A queued interrupt is released only after a graph state boundary
+confirms that the original pending review has been removed from the checkpoint;
+registering an inflight run or observing an arbitrary stream event is not
+sufficient. If that boundary contains a new pending review, the earlier
+interrupt is consumed without canceling the new review. Sequencer state is
+transport control state and is never
+projected into `LocalAgentSession` or a snapshot. Long-running agent execution
+does not block later client commands from entering the sequencer.
 
 ## Hosted chat adapter
 
-The hosted chat adapter folds accepted user input, runtime events, review actions, interrupts, and terminal state through the same reducer as the TUI. Runtime events rejected by the shared ownership rules are not forwarded to the hosted wire. The process-local projection evicts least-recently-updated idle sessions above its retention limit while always retaining active runs; the existing event and control wire protocol remains compatible and does not add session patches or revision numbers.
+The hosted chat adapter folds accepted user input, runtime events, server
+interrupt progress, and terminal state through the same reducer as the TUI.
+Review-resolution commands do not optimistically advance the hosted projection.
+Runtime events rejected by the shared ownership rules are not forwarded to the
+hosted wire. The process-local projection evicts least-recently-updated idle
+sessions above its retention limit while always retaining active runs; the
+existing event and control wire protocol remains compatible and does not add
+session patches or revision numbers.
 
 Before an operation event reaches either the hosted projection or the wire, the adapter removes `raw`. Hosted clients derive operation UI from `title`, `target`, `summary`, and `details`.
 

@@ -44,6 +44,7 @@ import {
   type HumanReviewActionRoute,
 } from './humanReviewActionRouting';
 import { reviewActionId, reviewActionReviews } from './reviewAction';
+import { RunCommandSequencer } from './runCommandSequencer';
 import type { LocalAgentSession } from './localAgentSession';
 import { LOCAL_AGENT_SESSION_SNAPSHOT_VERSION } from './localAgentSession';
 import {
@@ -123,6 +124,7 @@ export class LocalAgentAppChatHandler {
   private readonly reviewActionRoutes = new Map<string, ReviewActionRoute>();
   private readonly consumedReviewActionIds = new Set<string>();
   private readonly activeReviewActions = new Map<string, string>();
+  private readonly runCommandSequencer = new RunCommandSequencer();
   private readonly sessionStartedAtByThreadId = new Map<string, string>();
   private readonly sessionsByThreadId = new Map<string, LocalAgentSession>();
   private sessionResetPromise: Promise<void> = Promise.resolve();
@@ -176,6 +178,8 @@ export class LocalAgentAppChatHandler {
         type: 'run.interrupting',
         requestId: msg.requestId,
       });
+    } else {
+      this.runCommandSequencer.queueRunInterrupt(msg.requestId);
     }
   }
 
@@ -183,24 +187,32 @@ export class LocalAgentAppChatHandler {
     if (!this.canUseSocket(ws)) {
       return;
     }
-    const route = await this.readReviewActionRoute({
-      requestId: msg.requestId,
-      actionId: msg.actionId,
-    });
-    if (!route) {
+    if (!this.runCommandSequencer.beginReviewResolution(msg.requestId)) {
       this.sendClosedReviewError(ws, msg.requestId);
       return;
     }
-    if (!matchesHumanReviewAction(route, msg.actionId)) {
-      sendLocalAgentEvent(ws, {
-        type: 'error',
+    try {
+      const route = await this.readReviewActionRoute({
         requestId: msg.requestId,
-        message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
-        code: 'review_stale',
+        actionId: msg.actionId,
       });
-      return;
+      if (!route) {
+        this.sendClosedReviewError(ws, msg.requestId);
+        return;
+      }
+      if (!matchesHumanReviewAction(route, msg.actionId)) {
+        sendLocalAgentEvent(ws, {
+          type: 'error',
+          requestId: msg.requestId,
+          message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
+          code: 'review_stale',
+        });
+        return;
+      }
+      await this.handlePendingReviewCancel(ws, msg, route);
+    } finally {
+      this.clearPendingReviewResolution(msg.requestId);
     }
-    await this.handlePendingReviewCancel(ws, msg, route);
   }
 
   async handleHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
@@ -210,67 +222,70 @@ export class LocalAgentAppChatHandler {
     if (!this.canUseSocket(ws)) {
       return;
     }
-    const route = await this.readReviewActionRoute({
-      requestId: msg.requestId,
-      actionId: msg.actionId,
-      reviewId: msg.reviewId,
-    });
-    if (!route) {
+    if (!this.runCommandSequencer.beginReviewResolution(msg.requestId)) {
       this.sendClosedReviewError(ws, msg.requestId);
       return;
     }
-    if (!matchesHumanReviewAction(route, msg.actionId)) {
-      sendLocalAgentEvent(ws, {
-        type: 'error',
-        requestId: msg.requestId,
-        message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
-        code: 'review_stale',
-      });
-      return;
-    }
-    let decisions: ReviewResponse[];
     try {
-      decisions = validateHumanReviewDecisions(route, msg);
-    } catch (err) {
-      console.warn(
-        `[local-agent-app] human_review_response rejected: reviewId=${msg.reviewId} `
-        + `does not match pending review action=${route.reviews.map((review) => review.id).join(',')} `
-        + (err instanceof Error ? err.message : String(err)),
-      );
-      sendLocalAgentEvent(ws, {
-        type: 'error',
+      const route = await this.readReviewActionRoute({
         requestId: msg.requestId,
-        message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
-        code: 'review_stale',
-      });
-      return;
-    }
-    if (!this.claimReviewAction(route)) {
-      this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
-      this.sendClosedReviewError(ws, msg.requestId);
-      return;
-    }
-
-    this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
-    this.reduceRemoteSession(route.userId, {
-      type: 'review.submitted',
-      requestId: msg.requestId,
-      actionId: route.actionId,
-    });
-    let outcome: AppChatRunOutcome = 'failed';
-    try {
-      outcome = await this.runChatRequest(ws, {
-        kind: 'resume',
-        requestId: msg.requestId,
-        resume: buildHumanReviewResume(route, decisions),
-      }, route.userId, {
-        type: 'human_review_response',
+        actionId: msg.actionId,
         reviewId: msg.reviewId,
-        selectedOptionId: msg.selectedOptionId,
-        decisionCount: decisions.length,
       });
+      if (!route) {
+        this.sendClosedReviewError(ws, msg.requestId);
+        return;
+      }
+      if (!matchesHumanReviewAction(route, msg.actionId)) {
+        sendLocalAgentEvent(ws, {
+          type: 'error',
+          requestId: msg.requestId,
+          message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
+          code: 'review_stale',
+        });
+        return;
+      }
+      let decisions: ReviewResponse[];
+      try {
+        decisions = validateHumanReviewDecisions(route, msg);
+      } catch (err) {
+        console.warn(
+          `[local-agent-app] human_review_response rejected: reviewId=${msg.reviewId} `
+          + `does not match pending review action=${route.reviews.map((review) => review.id).join(',')} `
+          + (err instanceof Error ? err.message : String(err)),
+        );
+        sendLocalAgentEvent(ws, {
+          type: 'error',
+          requestId: msg.requestId,
+          message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
+          code: 'review_stale',
+        });
+        return;
+      }
+      if (!this.claimReviewAction(route)) {
+        this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
+        this.sendClosedReviewError(ws, msg.requestId);
+        return;
+      }
+
+      this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
+      let outcome: AppChatRunOutcome = 'failed';
+      try {
+        outcome = await this.runChatRequest(ws, {
+          kind: 'resume',
+          requestId: msg.requestId,
+          resume: buildHumanReviewResume(route, decisions),
+        }, route.userId, {
+          type: 'human_review_response',
+          reviewId: msg.reviewId,
+          selectedOptionId: msg.selectedOptionId,
+          decisionCount: decisions.length,
+        });
+      } finally {
+        this.settleReviewAction(route.actionId, outcome);
+      }
     } finally {
-      this.settleReviewAction(route.actionId, outcome);
+      this.clearPendingReviewResolution(msg.requestId);
     }
   }
 
@@ -346,11 +361,6 @@ export class LocalAgentAppChatHandler {
     }
 
     this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
-    this.reduceRemoteSession(route.userId, {
-      type: 'review.canceled',
-      requestId: msg.requestId,
-      actionId: route.actionId,
-    });
     const firstReview = route.reviews[0]!;
     let outcome: AppChatRunOutcome = 'failed';
     try {
@@ -451,6 +461,24 @@ export class LocalAgentAppChatHandler {
         acceptDelegationOperations: (operations) => {
           overlayInflightDelegationOperations(inflight, operations);
         },
+        ...(source.type !== 'chat_request'
+          ? {
+            onResumeCheckpointed: ({ canInterrupt }: { canInterrupt: boolean }) => {
+              const interruptQueued = this.runCommandSequencer
+                .markReviewResolutionCheckpointed(requestId);
+              if (!canInterrupt || !interruptQueued) {
+                return;
+              }
+              const interrupted = this.inflightRequests.interrupt(ws, { requestId });
+              if (interrupted) {
+                this.reduceSessionForRequest(requestId, {
+                  type: 'run.interrupting',
+                  requestId,
+                });
+              }
+            },
+          }
+          : {}),
       });
       if (result.status === 'waiting_human') {
         this.inflightRequests.finish(ws, inflight, 'interrupted');
@@ -525,7 +553,6 @@ export class LocalAgentAppChatHandler {
         ...(interruptId ? { interruptId } : {}),
         reviews: actionReviews,
       }),
-      status: 'waiting',
       ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
       reviews: actionReviews,
     };
@@ -723,7 +750,6 @@ export class LocalAgentAppChatHandler {
           reviewAction: {
             actionId: route.actionId,
             reviews: route.reviews,
-            status: 'waiting' as const,
           },
         },
       },
@@ -756,6 +782,10 @@ export class LocalAgentAppChatHandler {
       if (!oldest) break;
       this.consumedReviewActionIds.delete(oldest);
     }
+  }
+
+  private clearPendingReviewResolution(requestId: string) {
+    this.runCommandSequencer.abandonReviewResolution(requestId);
   }
 
   private isReviewActionUnavailable(actionId: string) {

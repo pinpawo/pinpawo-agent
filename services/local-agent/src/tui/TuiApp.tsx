@@ -79,7 +79,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const defaultSessionId = useMemo(() => `chat:${props.actorId}`, [props.actorId]);
-  const [tuiState, dispatch] = useReducer(
+  const [tuiState, reactDispatch] = useReducer(
     tuiStateReducer,
     defaultSessionId,
     (sessionId) => createInitialTuiState(createSession({ id: sessionId })),
@@ -103,6 +103,10 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   );
 
   const stateRef = useRef<TuiState>(tuiState);
+  const dispatch = useCallback((action: Parameters<typeof tuiStateReducer>[1]) => {
+    stateRef.current = tuiStateReducer(stateRef.current, action);
+    reactDispatch(action);
+  }, [reactDispatch]);
   const inputBufferRef = useRef(createInitialTuiInputBufferState());
   const lastInterruptAtRef = useRef(0);
   const localServerPort = config.localServerPort;
@@ -136,10 +140,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const reviewOptions = pendingApproval?.review.options ?? [];
   const uiMode = tuiState.ui.mode;
   const externalEditorOpen = tuiState.ui.externalEditorOpen;
-
-  useEffect(() => {
-    stateRef.current = tuiState;
-  }, [tuiState]);
 
   useEffect(() => {
     setApprovalIndex(0);

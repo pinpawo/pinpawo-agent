@@ -450,6 +450,7 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
 test('runChatSession resumes explicit response after state update clears interrupt payload', async () => {
   const emittedEvents: LocalAgentRuntimeEvent[] = [];
   const streamInputs: unknown[] = [];
+  let resumeCheckpointedCount = 0;
   const resume = { reviewId: 'review-1', selectedOptionId: 'approve' };
   const finalMessages = [new AIMessage('approved')];
   const setup = {
@@ -495,6 +496,9 @@ test('runChatSession resumes explicit response after state update clears interru
       emittedEvents.push(event);
     },
     emitToolEvent: () => {},
+    onResumeCheckpointed: () => {
+      resumeCheckpointedCount += 1;
+    },
   });
 
   assert.deepEqual(result, { status: 'completed', reply: 'approved' });
@@ -503,10 +507,196 @@ test('runChatSession resumes explicit response after state update clears interru
     value: resume,
   }]);
   assert.deepEqual(setup.input.messages, []);
+  assert.equal(resumeCheckpointedCount, 1);
   assert.equal(
     emittedEvents.some((event) => event.type === 'human_review.requested'),
     false,
   );
+});
+
+test('runChatSession does not confirm a review resolution while checkpoint keeps the original review', async () => {
+  const review = {
+    id: 'review-original',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  const pending = {
+    interruptId: 'interrupt-original',
+    review,
+  };
+  const finalMessages = [new AIMessage('continued')];
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  let reads = 0;
+  let boundary = 0;
+  const confirmedAt: number[] = [];
+  const graphService = {
+    async readThreadState() {
+      reads += 1;
+      if (reads <= 2) {
+        return { messages: [], pendingHumanReview: pending, hasPendingContinuation: true };
+      }
+      return { messages: finalMessages, pendingHumanReview: null, hasPendingContinuation: false };
+    },
+    buildResumeCommand(value: unknown) {
+      return value;
+    },
+    streamEvents() {
+      return (async function* () {
+        boundary = 1;
+        yield protocolEvent('values', { messages: [] });
+        boundary = 2;
+        yield protocolEvent('values', { messages: finalMessages });
+      })();
+    },
+  };
+
+  const result = await runChatSession({
+    request: { kind: 'resume', requestId: 'req-1', resume: { approved: true } },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => { throw new Error('should not interrupt'); },
+    emitEvent: () => {},
+    emitToolEvent: () => {},
+    onResumeCheckpointed: () => {
+      confirmedAt.push(boundary);
+    },
+  });
+
+  assert.deepEqual(result, { status: 'completed', reply: 'continued' });
+  assert.deepEqual(confirmedAt, [2]);
+});
+
+test('runChatSession confirms the original resolution without interrupting a newly pending review', async () => {
+  const originalReview = {
+    id: 'review-original',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'First approval?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  const nextReview = {
+    ...originalReview,
+    id: 'review-next',
+    view: { kind: 'plain' as const, body: 'Second approval?' },
+  };
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  let reads = 0;
+  const confirmations: Array<{ canInterrupt: boolean }> = [];
+  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const graphService = {
+    async readThreadState() {
+      reads += 1;
+      return reads === 1
+        ? {
+          messages: [],
+          pendingHumanReview: { interruptId: 'interrupt-original', review: originalReview },
+          hasPendingContinuation: true,
+        }
+        : {
+          messages: [],
+          pendingHumanReview: { interruptId: 'interrupt-next', review: nextReview },
+          hasPendingContinuation: true,
+        };
+    },
+    buildResumeCommand(value: unknown) {
+      return value;
+    },
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('values', {
+          __interrupt__: [{
+            id: 'interrupt-next',
+            value: { kind: 'review', review: nextReview },
+          }],
+        });
+      })();
+    },
+  };
+
+  const result = await runChatSession({
+    request: { kind: 'resume', requestId: 'req-1', resume: { approved: true } },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => { throw new Error('should not interrupt'); },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+    onResumeCheckpointed: (confirmation) => {
+      confirmations.push(confirmation);
+    },
+  });
+
+  assert.deepEqual(result, { status: 'waiting_human' });
+  assert.deepEqual(confirmations, [{ canInterrupt: false }]);
+  assert.equal(emittedEvents[0]?.type, 'human_review.requested');
+  assert.equal(
+    emittedEvents[0]?.type === 'human_review.requested'
+      ? emittedEvents[0].review.id
+      : null,
+    'review-next',
+  );
+});
+
+test('runChatSession does not confirm a review resolution when graph execution fails first', async () => {
+  const review = {
+    id: 'review-original',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
+  };
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  let confirmations = 0;
+  const graphService = {
+    async readThreadState() {
+      return {
+        messages: [],
+        pendingHumanReview: { interruptId: 'interrupt-original', review },
+        hasPendingContinuation: true,
+      };
+    },
+    buildResumeCommand(value: unknown) {
+      return value;
+    },
+    streamEvents() {
+      return (async function* () {
+        throw new Error('resume failed');
+        // eslint-disable-next-line no-unreachable
+        yield protocolEvent('values', {});
+      })();
+    },
+  };
+
+  await assert.rejects(
+    runChatSession({
+      request: { kind: 'resume', requestId: 'req-1', resume: { approved: true } },
+      setup,
+      graphService: graphService as unknown as LocalAgentGraphService,
+      isCurrent: () => true,
+      finishInterrupted: () => { throw new Error('should not interrupt'); },
+      emitEvent: () => {},
+      emitToolEvent: () => {},
+      onResumeCheckpointed: () => {
+        confirmations += 1;
+      },
+    }),
+    /resume failed/,
+  );
+  assert.equal(confirmations, 0);
 });
 
 test('runChatSession allows a user message after an aborted non-review run leaves pending continuation', async () => {

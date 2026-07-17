@@ -104,6 +104,25 @@ test('TuiLocalWebSocketClient disconnects current socket without dispatching clo
   assert.deepEqual(events, ['open', 'open']);
 });
 
+test('TuiLocalWebSocketClient reports synchronous send failures', () => {
+  const events: string[] = [];
+  const socket = new FakeWebSocket();
+  const client = new TuiLocalWebSocketClient({
+    port: 3210,
+    handlers: createHandlers(events),
+    webSocketFactory: () => socket as unknown as WebSocket,
+  });
+
+  client.connect();
+  socket.open();
+  socket.send = () => {
+    throw new Error('write failed');
+  };
+
+  assert.equal(client.send({ type: 'new_session' }), false);
+  assert.deepEqual(events, ['open', 'error:write failed']);
+});
+
 function createHandlers(events: string[]): TuiLocalWebSocketClientHandlers {
   return {
     onOpen: () => {

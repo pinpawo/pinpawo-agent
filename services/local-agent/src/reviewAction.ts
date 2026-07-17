@@ -1,16 +1,14 @@
 import type { ReviewResponse, ReviewSpec } from '@pinpawo/pet-agent';
 
-export type ReviewActionStatus = 'waiting' | 'submitting' | 'canceling';
-
 export type ReviewAction = {
   actionId: string;
   reviews: ReviewSpec[];
-  status: ReviewActionStatus;
 };
 
 export type ReviewDraft = {
   actionId: string;
   decisions: ReviewResponse[];
+  resolutionSent?: true;
 };
 
 export function reviewActionId(params: {

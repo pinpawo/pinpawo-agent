@@ -5,7 +5,7 @@ import type {
 } from './events/localAgentRuntimeEvent';
 import type { ReviewAction } from './reviewAction';
 
-export const LOCAL_AGENT_SESSION_SNAPSHOT_VERSION = 1 as const;
+export const LOCAL_AGENT_SESSION_SNAPSHOT_VERSION = 2 as const;
 
 export type LocalAgentTimelineSource = 'checkpoint' | 'live-event' | 'local-input';
 
@@ -63,20 +63,29 @@ export type LocalAgentReviewAction = ReviewAction & {
   petId?: string;
 };
 
-export type LocalAgentRunPhase =
+export type LocalAgentRunActivity =
   | 'thinking'
   | 'using_tool'
-  | 'streaming'
-  | 'waiting_human'
-  | 'interrupting';
+  | 'streaming';
 
-export type LocalAgentRun = {
+type LocalAgentRunViewBase = {
   requestId: string;
-  phase: LocalAgentRunPhase;
-  reviewAction?: LocalAgentReviewAction;
   startedAt?: number;
   updatedAt?: number;
 };
+
+export type LocalAgentRunView =
+  | LocalAgentRunViewBase & {
+      state: 'running';
+      activity: LocalAgentRunActivity;
+    }
+  | LocalAgentRunViewBase & {
+      state: 'waiting_review';
+      reviewAction: LocalAgentReviewAction;
+    }
+  | LocalAgentRunViewBase & {
+      state: 'interrupting';
+    };
 
 export type LocalAgentActorView = {
   label: string;
@@ -105,7 +114,7 @@ export type LocalAgentSession = {
   kind: 'chat' | 'studio';
   actor?: LocalAgentActorView;
   timeline: LocalAgentTimelineEntry[];
-  activeRun: LocalAgentRun | null;
+  activeRun: LocalAgentRunView | null;
   runtime?: LocalAgentRuntimeView;
   tokenUsage?: TokenUsageSnapshot;
 };

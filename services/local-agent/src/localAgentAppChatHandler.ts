@@ -746,7 +746,7 @@ export class LocalAgentAppChatHandler {
         ...session,
         activeRun: {
           requestId,
-          phase: 'waiting_human' as const,
+          state: 'waiting_review' as const,
           reviewAction: {
             actionId: route.actionId,
             reviews: route.reviews,

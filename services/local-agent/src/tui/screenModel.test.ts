@@ -48,7 +48,8 @@ test('buildTuiScreenModel marks composer and status state while busy', () => {
   state.statusNotice = '旧提示';
   state.sessions['chat:pet'].activeRun = {
     requestId: 'run1',
-    phase: 'thinking',
+    state: 'running',
+    activity: 'thinking',
     startedAt: 0,
   };
 
@@ -119,7 +120,7 @@ test('buildTuiScreenModel keeps approval status visible while composer accepts r
   };
   state.sessions['chat:pet'].activeRun = {
     requestId: 'run1',
-    phase: 'waiting_human',
+    state: 'waiting_review',
     reviewAction: {
       actionId: 'interrupt-1',
       petId: 'pet-1',

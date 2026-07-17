@@ -172,10 +172,9 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
     },
   }, { observedAt: 1_100 });
 
-  assert.equal(
-    session.activeRun?.reviewAction?.actionId,
-    'request:req-1:reviews:review-1',
-  );
+  assert.equal(session.activeRun?.state, 'waiting_review');
+  if (session.activeRun?.state !== 'waiting_review') assert.fail('expected waiting review');
+  assert.equal(session.activeRun.reviewAction.actionId, 'request:req-1:reviews:review-1');
   const unknownRun = reduceSession(session, {
     type: 'run.interrupting',
     requestId: 'req-other',
@@ -194,15 +193,16 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
       },
     },
   }, { observedAt: 1_200 });
-  assert.equal(session.activeRun?.phase, 'thinking');
-  assert.equal(session.activeRun?.reviewAction, undefined);
+  assert.equal(session.activeRun?.state, 'running');
+  assert.equal(session.activeRun?.state === 'running' ? session.activeRun.activity : null, 'thinking');
+  assert.equal(session.activeRun && 'reviewAction' in session.activeRun, false);
 
   session = reduceSession(session, {
     type: 'run.interrupting',
     requestId: 'req-1',
   }, { observedAt: 1_300 });
-  assert.equal(session.activeRun?.phase, 'interrupting');
-  assert.equal(session.activeRun?.reviewAction, undefined);
+  assert.equal(session.activeRun?.state, 'interrupting');
+  assert.equal(session.activeRun && 'reviewAction' in session.activeRun, false);
 });
 
 test('applySessionSnapshot rematerializes timeline state from a checkpoint point', () => {
@@ -249,7 +249,7 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
     tokenUsage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
   };
   const snapshot = {
-    version: 1 as const,
+    version: 2 as const,
     session: {
       sessionId: 'chat:pet',
       kind: 'chat' as const,
@@ -263,7 +263,8 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
       }],
       activeRun: {
         requestId: 'req-1',
-        phase: 'thinking' as const,
+        state: 'running' as const,
+        activity: 'thinking' as const,
         startedAt: 1_700_000_000,
       },
     },

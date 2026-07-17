@@ -80,7 +80,7 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
     listSessions: async () => [],
     resumeSession: async (sessionId) => ({
       session: { id: sessionId, title: 'first' },
-      snapshot: { version: 1 },
+      snapshot: { version: 2 },
     }),
   }), true);
 
@@ -88,7 +88,7 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
   assert.equal(resumeRes.statusCode, 200);
   assert.deepEqual(JSON.parse(resumeRes.body), {
     session: { id: 'pet-a:one', title: 'first' },
-    snapshot: { version: 1 },
+    snapshot: { version: 2 },
   });
 });
 
@@ -99,7 +99,7 @@ test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
   assert.equal(handleLocalHttpRequest(makeReq('/snapshot', 'Bearer secret'), snapshotRes, deps, {
     authToken: 'secret',
     loadSnapshot: async () => ({
-      version: 1,
+      version: 2,
       session: {
         sessionId: 'chat:pet-a',
         kind: 'chat',
@@ -123,7 +123,7 @@ test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
   await Promise.resolve();
   assert.equal(snapshotRes.statusCode, 200);
   assert.deepEqual(JSON.parse(snapshotRes.body), {
-    version: 1,
+    version: 2,
     session: {
       sessionId: 'chat:pet-a',
       kind: 'chat',

@@ -30,7 +30,24 @@ Startup, reconnect, resume, completion, and review-state refresh are reasons a c
 
 ## Shape
 
-A session owns one ordered timeline and zero or one active run. Local snapshot readers accept only the current versioned `LocalAgentSessionSnapshot`; the previous `runs[] + activeRunId`, legacy pending-review payloads, and message-only restore shapes are unsupported.
+A session owns one ordered timeline and zero or one active run. Snapshot version 2
+represents that run as exactly one of three projection facts:
+
+- `running` carries one runtime `activity`: `thinking`, `using_tool`, or `streaming`;
+- `waiting_review` structurally carries its checkpoint-derived `ReviewAction`;
+- `interrupting` means the server run controller has begun interruption.
+
+The union cannot represent a running or interrupting run with review content, or
+a waiting review without review content. The initial `running` / `thinking` view
+is created only after the outbound run command is accepted by the transport.
+Later activity changes come from server runtime events; elapsed-time presentation
+such as busy-copy escalation remains in the render layer. Sending
+`run.interrupt` does not optimistically create the `interrupting` view.
+
+Local snapshot readers accept only the current versioned
+`LocalAgentSessionSnapshot`; snapshot version 1, the previous
+`runs[] + activeRunId`, legacy pending-review payloads, and message-only restore
+shapes are unsupported.
 
 Partial `ReviewDraft` decisions and the one-shot `resolutionSent` marker are
 client-local interaction state and are not part of the shared snapshot.

@@ -1,5 +1,5 @@
 import type {
-  LocalAgentRun,
+  LocalAgentRunView,
   LocalAgentRuntimeView,
   LocalAgentSession,
   LocalAgentSessionSnapshot,
@@ -81,11 +81,11 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): Local
 
 function runFromPendingReview(params: {
   pendingReview: ReviewActionSnapshot;
-}): LocalAgentRun {
+}): LocalAgentRunView {
   const petId = params.pendingReview.actor?.petId;
   return {
     requestId: params.pendingReview.requestId,
-    phase: 'waiting_human',
+    state: 'waiting_review',
     reviewAction: {
       ...params.pendingReview.reviewAction,
       ...(petId ? { petId } : {}),

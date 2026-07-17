@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
 import type {
   LocalAgentMessageEntry,
-  LocalAgentRun,
+  LocalAgentRunView,
   LocalAgentSessionSnapshot,
 } from './localAgentSession';
 import { createInitialTuiState, createSession, type TuiState } from './tui/state/tuiState';
@@ -31,16 +31,24 @@ function activeRun(state: TuiState, requestId: string) {
   return Object.values(state.sessions).find((session) => session.activeRun?.requestId === requestId)?.activeRun;
 }
 
+function activeRunActivity(run: LocalAgentRunView | null | undefined) {
+  return run?.state === 'running' ? run.activity : undefined;
+}
+
+function activeReviewAction(run: LocalAgentRunView | null | undefined) {
+  return run?.state === 'waiting_review' ? run.reviewAction : null;
+}
+
 function sessionSnapshot(input: {
   sessionId: string;
   kind: 'chat' | 'studio';
   timeline: LocalAgentSessionSnapshot['session']['timeline'];
-  activeRun?: LocalAgentRun | null;
+  activeRun?: LocalAgentRunView | null;
   runtime?: LocalAgentSessionSnapshot['session']['runtime'];
   tokenUsage?: LocalAgentSessionSnapshot['session']['tokenUsage'];
 }): LocalAgentSessionSnapshot {
   return {
-    version: 1,
+    version: 2,
     session: {
       sessionId: input.sessionId,
       kind: input.kind,
@@ -140,7 +148,7 @@ test('tuiStateReducer keeps transport connection detail separate from run status
 
   assert.deepEqual(state.connection, { status: 'ready', detail: 'transport detail' });
   assert.equal(state.statusNotice, null);
-  assert.equal(selectFocusedActiveRun(state)?.phase, 'interrupting');
+  assert.equal(selectFocusedActiveRun(state)?.state, 'interrupting');
 });
 
 test('tuiStateReducer keeps background session events out of the focused status notice', () => {
@@ -194,7 +202,7 @@ test('tuiStateReducer handles streaming chat completion with token usage', () =>
   });
 
   const focusedRun = selectFocusedActiveRun(state);
-  assert.equal(focusedRun?.phase, 'streaming');
+  assert.equal(activeRunActivity(focusedRun), 'streaming');
   assert.equal(state.sessions['chat:pet']?.activeRun, focusedRun);
   assert.equal(state.sessions['chat:pet']?.kind, 'chat');
   assert.equal(selectFocusedPendingUi(state)?.charCount, '我先检查一下仓库状态。检查完毕，下面汇总。'.length);
@@ -393,7 +401,7 @@ test('tuiStateReducer keeps the current review draft when an older request compl
   });
 
   assert.equal(state.sessions['chat:pet']?.activeRun?.requestId, 'req-new');
-  assert.equal(state.sessions['chat:pet']?.activeRun?.phase, 'waiting_human');
+  assert.equal(state.sessions['chat:pet']?.activeRun?.state, 'waiting_review');
   assert.deepEqual(state.reviewDrafts[actionId], {
     actionId,
     decisions: [],
@@ -592,7 +600,7 @@ test('tuiStateReducer displays subagent deltas as timeline message entries', () 
     now: 1200,
   });
 
-  assert.equal(selectFocusedActiveRun(state)?.phase, 'streaming');
+  assert.equal(activeRunActivity(selectFocusedActiveRun(state)), 'streaming');
   assert.equal(selectFocusedPendingUi(state)?.charCount, '先检查文件，再整理结果。'.length);
   assert.deepEqual(timelineMessagesByRole(state, 'subagent').at(-1), {
     id: 'req-1:subagent-output',
@@ -802,16 +810,18 @@ test('tuiStateReducer materializes timeline state from a checkpoint snapshot', (
         ...createSession({ id: 'chat:other' }),
         activeRun: {
           requestId: 'other-req',
-          phase: 'thinking',
+          state: 'running',
+          activity: 'thinking',
           startedAt: 1,
         },
       },
       'chat:pet': {
         ...state.sessions['chat:pet']!,
         activeRun: {
-        requestId: 'old-req',
-        phase: 'thinking',
-        startedAt: 1,
+          requestId: 'old-req',
+          state: 'running',
+          activity: 'thinking',
+          startedAt: 1,
         },
         runtime: { model: 'old-model', cwd: '/old' },
         tokenUsage: {
@@ -851,7 +861,8 @@ test('tuiStateReducer materializes timeline state from a checkpoint snapshot', (
       ],
       activeRun: {
         requestId: 'req-1',
-        phase: 'streaming',
+        state: 'running',
+        activity: 'streaming',
         startedAt: 1000,
       },
       runtime: {
@@ -885,7 +896,7 @@ test('tuiStateReducer materializes timeline state from a checkpoint snapshot', (
     totalTokens: 30,
   });
   assert.equal(session.activeRun?.requestId, 'req-1');
-  assert.equal(activeRun(state, 'req-1')?.phase, 'streaming');
+  assert.equal(activeRunActivity(activeRun(state, 'req-1')), 'streaming');
   assert.equal(activeRun(state, 'old-req'), undefined);
   assert.equal(state.sessions['chat:other']?.activeRun?.requestId, 'other-req');
 });
@@ -902,7 +913,8 @@ test('tuiStateReducer normalizes active run startedAt when applying a snapshot',
       timeline: [],
       activeRun: {
         requestId: 'req-1',
-        phase: 'streaming',
+        state: 'running',
+        activity: 'streaming',
         startedAt: 1_719_999_939,
       },
     }),
@@ -1162,7 +1174,7 @@ test('tuiStateReducer restores checkpoint-owned pending approval from a snapshot
       ],
       activeRun: {
         requestId: 'req-review',
-        phase: 'waiting_human',
+        state: 'waiting_review',
         startedAt: 1000,
         reviewAction: {
           actionId: 'interrupt-1',
@@ -1180,7 +1192,7 @@ test('tuiStateReducer restores checkpoint-owned pending approval from a snapshot
 
   const pending = selectFocusedPendingApproval(state);
   assert.equal((state.sessions['chat:pet']?.activeRun?.requestId ?? null), 'req-review');
-  assert.equal(activeRun(state, 'req-review')?.reviewAction?.reviews[0]?.id, 'review-1');
+  assert.equal(activeReviewAction(activeRun(state, 'req-review'))?.reviews[0]?.id, 'review-1');
   assert.equal(pending?.requestId, 'req-review');
   assert.equal(pending?.review.id, 'review-1');
   assert.equal(pending?.petId, 'pet-a');
@@ -1364,7 +1376,7 @@ test('tuiStateReducer tracks operation lifecycle in timeline without terminal me
   });
 
   let activeRun = selectFocusedActiveRun(state);
-  assert.equal(activeRun?.phase, 'using_tool');
+  assert.equal(activeRunActivity(activeRun), 'using_tool');
   assert.deepEqual(
     selectFocusedTimeline(state).filter((entry) => entry.requestId === 'req-1').map((entry) => entry.id),
     ['message:req-1:user', 'req-1:operation:tool-1'],
@@ -1560,7 +1572,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   });
 
   assert.equal(selectFocusedBusy(state), false);
-  assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
+  assert.equal(selectFocusedActiveRun(state)?.state, 'waiting_review');
   assert.deepEqual(selectFocusedPendingApproval(state), {
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
@@ -1591,8 +1603,8 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   });
 
   assert.equal(selectFocusedBusy(state), true);
-  assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
-  assert.equal(selectFocusedActiveRun(state)?.reviewAction?.actionId, 'request:req-1:reviews:review-1');
+  assert.equal(selectFocusedActiveRun(state)?.state, 'waiting_review');
+  assert.equal(activeReviewAction(selectFocusedActiveRun(state))?.actionId, 'request:req-1:reviews:review-1');
   assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, true);
   // The client-local resolution preserves the shared run until the server
   // observes resumed activity.
@@ -1606,7 +1618,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
     requestId: 'req-1',
   });
 
-  assert.equal(selectFocusedActiveRun(state)?.phase, 'interrupting');
+  assert.equal(selectFocusedActiveRun(state)?.state, 'interrupting');
   assert.equal(state.statusNotice, null);
 });
 
@@ -1661,7 +1673,7 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
       timeline: [],
       activeRun: {
         requestId: 'req-1',
-        phase: 'waiting_human',
+        state: 'waiting_review',
         reviewAction: {
           actionId: 'interrupt-1',
           reviews,
@@ -1697,8 +1709,8 @@ test('tuiStateReducer keeps a sent review resolution local until the server resp
     actionId: 'request:req-1:reviews:review-1',
   });
 
-  assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
-  assert.equal(selectFocusedActiveRun(state)?.reviewAction?.actionId, 'request:req-1:reviews:review-1');
+  assert.equal(selectFocusedActiveRun(state)?.state, 'waiting_review');
+  assert.equal(activeReviewAction(selectFocusedActiveRun(state))?.actionId, 'request:req-1:reviews:review-1');
   assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, true);
   assert.equal(selectFocusedBusy(state), true);
   assert.equal(selectFocusedPendingApproval(state), null);
@@ -1750,7 +1762,7 @@ test('tuiStateReducer sent review resolution preserves the owning run', () => {
 
   assert.equal(state.sessions['chat:pet']?.activeRun?.requestId, 'req-1');
   assert.equal(selectFocusedPendingApproval(state), null);
-  assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
+  assert.equal(selectFocusedActiveRun(state)?.state, 'waiting_review');
   assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, true);
 
   state = tuiStateReducer(state, {
@@ -1764,8 +1776,8 @@ test('tuiStateReducer sent review resolution preserves the owning run', () => {
     now: 1300,
   });
 
-  assert.equal(selectFocusedActiveRun(state)?.phase, 'thinking');
-  assert.equal(selectFocusedActiveRun(state)?.reviewAction, undefined);
+  assert.equal(activeRunActivity(selectFocusedActiveRun(state)), 'thinking');
+  assert.equal(activeReviewAction(selectFocusedActiveRun(state)), null);
   assert.equal(state.reviewDrafts['request:req-1:reviews:review-1'], undefined);
 });
 

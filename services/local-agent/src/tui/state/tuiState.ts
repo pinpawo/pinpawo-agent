@@ -132,10 +132,10 @@ export type TuiAction =
     }
   | {
       // The user answered a HITL review. Server resumes the same LangGraph
-      // run from its checkpoint, so this is modeled as resuming the existing
-      // activeRun (phase: 'waiting_human' → 'thinking'), not starting a new
-      // run. requestId stays the same as the human_review.requested it
-      // answers.
+      // run from its checkpoint. The TUI records only local resolution
+      // progress here; the shared activeRun remains server-observed until a
+      // runtime event or snapshot advances it. requestId stays the same as
+      // the human_review.requested event this answers.
       type: 'review.action.submit';
       requestId: RunId;
       actionId: string;

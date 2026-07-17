@@ -108,7 +108,6 @@ export class LocalServerChatHandler {
         ...(params.interruptId ? { interruptId: params.interruptId } : {}),
         reviews,
       }),
-      status: 'waiting',
       ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
       ...(params.sessionId ? { sessionId: params.sessionId } : {}),
       reviews,
@@ -218,7 +217,6 @@ export class LocalServerChatHandler {
         reviewAction: {
           actionId: route.actionId,
           reviews: route.reviews,
-          status: route.status,
         },
         ...(route.actor ? { actor: route.actor } : {}),
       };
@@ -242,7 +240,6 @@ export class LocalServerChatHandler {
       reviewAction: {
         actionId: route.actionId,
         reviews: route.reviews,
-        status: route.status,
       },
     };
   }

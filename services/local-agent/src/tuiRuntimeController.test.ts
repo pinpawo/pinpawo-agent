@@ -36,7 +36,6 @@ function pendingReviewState(): TuiState {
         phase: 'waiting_human',
         reviewAction: {
           actionId: 'interrupt-1',
-          status: 'waiting',
           reviews: [review],
         },
         startedAt: 1,
@@ -64,7 +63,6 @@ function pendingReviewActionState(reviewIndex = 0): TuiState {
   ];
   state.sessions['sess-1']!.activeRun!.reviewAction = {
     actionId: 'interrupt-1',
-    status: 'waiting',
     reviews,
   };
   state.reviewDrafts['interrupt-1'] = {
@@ -271,7 +269,7 @@ test('TuiRuntimeController requests review cancellation separately from run inte
 
 test('TuiRuntimeController interrupts the run after review submission starts', () => {
   const state = pendingReviewState();
-  state.sessions['sess-1']!.activeRun!.reviewAction!.status = 'submitting';
+  state.reviewDrafts['interrupt-1']!.resolution = 'submitting';
   const { controller, actions, sent } = createController(state);
 
   assert.equal(controller.requestInterrupt(), true);
@@ -279,10 +277,31 @@ test('TuiRuntimeController interrupts the run after review submission starts', (
     type: 'run.interrupt',
     requestId: 'req-1',
   }]);
-  assert.deepEqual(actions.find((action) => action.type === 'run.interrupting'), {
-    type: 'run.interrupting',
+  assert.equal(actions.some((action) => action.type === 'run.interrupting'), false);
+});
+
+test('TuiRuntimeController interrupts the run after review cancellation starts', () => {
+  const state = pendingReviewState();
+  state.reviewDrafts['interrupt-1']!.resolution = 'canceling';
+  const { controller, actions, sent } = createController(state);
+
+  assert.equal(controller.requestInterrupt(), true);
+  assert.deepEqual(sent, [{
+    type: 'run.interrupt',
     requestId: 'req-1',
-  });
+  }]);
+  assert.equal(actions.some((action) => action.type === 'review.action.cancel'), false);
+  assert.equal(actions.some((action) => action.type === 'run.interrupting'), false);
+});
+
+test('TuiRuntimeController keeps new runs gated while a review resolution is pending', () => {
+  const state = pendingReviewState();
+  state.reviewDrafts['interrupt-1']!.resolution = 'submitting';
+  const { controller, actions, sent } = createController(state);
+
+  assert.equal(controller.sendChatRequest('start another run'), false);
+  assert.deepEqual(sent, []);
+  assert.equal(actions.some((action) => action.type === 'run.start'), false);
 });
 
 test('TuiRuntimeController releases input locally after interrupt timeout', () => {

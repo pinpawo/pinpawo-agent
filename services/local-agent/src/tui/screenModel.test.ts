@@ -122,7 +122,6 @@ test('buildTuiScreenModel keeps approval status visible while composer accepts r
     phase: 'waiting_human',
     reviewAction: {
       actionId: 'interrupt-1',
-      status: 'waiting',
       petId: 'pet-1',
       reviews: [review],
     },

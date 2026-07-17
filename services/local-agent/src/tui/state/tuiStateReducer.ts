@@ -93,6 +93,15 @@ function removeReviewDraft(state: TuiState, actionId: string | undefined) {
   return { ...state, reviewDrafts };
 }
 
+function reviewResolutionForRun(state: TuiState, run: LocalAgentRun | null) {
+  if (!run?.reviewAction) return null;
+  return state.reviewDrafts[run.reviewAction.actionId]?.resolution ?? null;
+}
+
+function isWaitingForReviewAction(run: LocalAgentRun | null, actionId: string) {
+  return run?.phase === 'waiting_human' && run.reviewAction?.actionId === actionId;
+}
+
 function clearTextAreaTransientInputState(input: TuiState['input']): TuiState['input'] {
   return {
     ...input,
@@ -136,7 +145,17 @@ function reduceRuntimeEvent(
         },
       };
     }
-  } else if (event.type === 'message.completed') {
+  } else if (
+    previousReviewActionId
+    && !isWaitingForReviewAction(
+      next.sessions[owner.sessionId]?.activeRun ?? null,
+      previousReviewActionId,
+    )
+  ) {
+    next = removeReviewDraft(next, previousReviewActionId);
+  }
+
+  if (event.type === 'message.completed') {
     const withoutDraft = removeReviewDraft(next, previousReviewActionId);
     next = owner.sessionId === next.focusedSessionId
       ? { ...withoutDraft, statusNotice: null }
@@ -263,9 +282,9 @@ function activeRunToPendingUi(session: SessionModel, run: LocalAgentRun | null) 
 }
 
 function activeRunToPendingApproval(state: TuiState, run: LocalAgentRun | null) {
-  if (!run?.reviewAction || run.reviewAction.status !== 'waiting') return null;
+  if (run?.phase !== 'waiting_human' || !run.reviewAction) return null;
   const draft = state.reviewDrafts[run.reviewAction.actionId];
-  if (!draft) return null;
+  if (!draft || draft.resolution) return null;
   const review = currentReview(run.reviewAction, draft);
   if (!review) return null;
   return {
@@ -400,6 +419,7 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (!reviewAction || reviewAction.actionId !== action.actionId) return state;
       const draft = state.reviewDrafts[action.actionId]
         ?? { actionId: action.actionId, decisions: [] };
+      if (draft.resolution) return state;
       return {
         ...state,
         reviewDrafts: {
@@ -423,13 +443,15 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
       if (!owner || !reviewAction || reviewAction.actionId !== action.actionId) return state;
       const draft = state.reviewDrafts[action.actionId]
         ?? { actionId: action.actionId, decisions: [] };
-      const nextState = applySessionInput({
+      if (draft.resolution) return state;
+      return {
         ...state,
         reviewDrafts: {
           ...state.reviewDrafts,
           [action.actionId]: {
             ...draft,
             decisions: [...draft.decisions, action.decision],
+            resolution: 'submitting',
           },
         },
         input: clearTextAreaTransientInputState({
@@ -438,22 +460,25 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
           cursorOffset: 0,
           history: resetComposerHistoryNavigation(state.input.history),
         }),
-      }, owner.sessionId, {
-        type: 'review.submitted',
-        requestId: action.requestId,
-        actionId: action.actionId,
-      }, 0);
-      return nextState;
+      };
     }
     case 'review.action.cancel': {
       const owner = findSessionForRun(state, action.requestId);
-      if (!owner) return state;
-      const nextState = applySessionInput(state, owner.sessionId, {
-        type: 'review.canceled',
-        requestId: action.requestId,
-        actionId: action.actionId,
-      }, 0);
-      return nextState;
+      const reviewAction = owner?.session.activeRun?.reviewAction;
+      if (!reviewAction || reviewAction.actionId !== action.actionId) return state;
+      const draft = state.reviewDrafts[action.actionId]
+        ?? { actionId: action.actionId, decisions: [] };
+      if (draft.resolution) return state;
+      return {
+        ...state,
+        reviewDrafts: {
+          ...state.reviewDrafts,
+          [action.actionId]: {
+            ...draft,
+            resolution: 'canceling',
+          },
+        },
+      };
     }
     case 'run.interrupting': {
       const owner = findSessionForRun(state, action.requestId);
@@ -494,7 +519,14 @@ export function selectFocusedActiveRun(state: TuiState) {
 
 export function selectFocusedBusy(state: TuiState) {
   const activeRun = selectFocusedActiveRun(state);
-  return Boolean(activeRun && activeRun.phase !== 'waiting_human');
+  return Boolean(
+    reviewResolutionForRun(state, activeRun)
+    || (activeRun && activeRun.phase !== 'waiting_human'),
+  );
+}
+
+export function selectFocusedReviewResolution(state: TuiState) {
+  return reviewResolutionForRun(state, selectFocusedActiveRun(state));
 }
 
 export function selectFocusedPendingUi(state: TuiState) {

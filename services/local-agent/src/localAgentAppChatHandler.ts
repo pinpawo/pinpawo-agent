@@ -252,11 +252,6 @@ export class LocalAgentAppChatHandler {
     }
 
     this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
-    this.reduceRemoteSession(route.userId, {
-      type: 'review.submitted',
-      requestId: msg.requestId,
-      actionId: route.actionId,
-    });
     let outcome: AppChatRunOutcome = 'failed';
     try {
       outcome = await this.runChatRequest(ws, {
@@ -346,11 +341,6 @@ export class LocalAgentAppChatHandler {
     }
 
     this.deleteCachedReviewActionRoute(msg.requestId, route.actionId);
-    this.reduceRemoteSession(route.userId, {
-      type: 'review.canceled',
-      requestId: msg.requestId,
-      actionId: route.actionId,
-    });
     const firstReview = route.reviews[0]!;
     let outcome: AppChatRunOutcome = 'failed';
     try {
@@ -525,7 +515,6 @@ export class LocalAgentAppChatHandler {
         ...(interruptId ? { interruptId } : {}),
         reviews: actionReviews,
       }),
-      status: 'waiting',
       ...(rejectOption ? { rejectOptionId: rejectOption.id } : {}),
       reviews: actionReviews,
     };
@@ -723,7 +712,6 @@ export class LocalAgentAppChatHandler {
           reviewAction: {
             actionId: route.actionId,
             reviews: route.reviews,
-            status: 'waiting' as const,
           },
         },
       },

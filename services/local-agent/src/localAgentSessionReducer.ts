@@ -39,16 +39,6 @@ export type LocalAgentSessionInput =
       message?: LocalAgentSessionMessageInput;
     }
   | {
-      type: 'review.submitted';
-      requestId: string;
-      actionId: string;
-    }
-  | {
-      type: 'review.canceled';
-      requestId: string;
-      actionId: string;
-    }
-  | {
       type: 'run.interrupting';
       requestId: string;
     }
@@ -96,26 +86,6 @@ export function reduceSession(
       return appendMessage(session, input.message, context);
     case 'runtime.event':
       return reduceRuntimeEvent(session, input.event, input.message, context);
-    case 'review.submitted':
-      return updateOwnedRun(session, input.requestId, (run) => {
-        if (run.reviewAction?.actionId !== input.actionId) return run;
-        return {
-          ...run,
-          phase: 'thinking',
-          reviewAction: { ...run.reviewAction, status: 'submitting' },
-          ...observedAtUpdate(context),
-        };
-      });
-    case 'review.canceled':
-      return updateOwnedRun(session, input.requestId, (run) => {
-        if (run.reviewAction?.actionId !== input.actionId) return run;
-        return {
-          ...run,
-          phase: 'interrupting',
-          reviewAction: { ...run.reviewAction, status: 'canceling' },
-          ...observedAtUpdate(context),
-        };
-      });
     case 'run.interrupting':
       return updateOwnedRun(session, input.requestId, (run) => {
         const { reviewAction: _reviewAction, ...runWithoutReview } = run;
@@ -275,7 +245,7 @@ function appendAssistantDelta(
     });
   }
   return updateOwnedRun({ ...session, timeline: nextTimeline }, requestId, (run) => ({
-    ...run,
+    ...omitReviewAction(run),
     phase: 'streaming',
     ...observedAtUpdate(context),
   }));
@@ -320,8 +290,12 @@ function applyOperationEvent(
     timeline: upsertTimelineEntry(settledSession.timeline, operation),
   };
   return updateOwnedRun(withOperation, event.requestId, (run) => ({
-    ...run,
-    phase: event.phase === 'started' || event.phase === 'updated' ? 'using_tool' : run.phase,
+    ...omitReviewAction(run),
+    phase: event.phase === 'started' || event.phase === 'updated'
+      ? 'using_tool'
+      : run.phase === 'waiting_human'
+        ? 'thinking'
+        : run.phase,
     ...observedAtUpdate(context),
   }));
 }
@@ -354,8 +328,8 @@ function appendSubagentDelta(
     timeline: upsertTimelineEntry(session.timeline, entry),
   };
   return updateOwnedRun(withMessage, requestId, (run) => ({
-    ...run,
-    phase: run.phase === 'waiting_human' ? run.phase : 'streaming',
+    ...omitReviewAction(run),
+    phase: 'streaming',
     ...observedAtUpdate(context),
   }));
 }
@@ -378,11 +352,16 @@ function applyReviewRequest(
     reviewAction: {
       actionId,
       reviews,
-      status: 'waiting',
       ...(petId ? { petId } : {}),
     },
     ...observedAtUpdate(context),
   }));
+}
+
+function omitReviewAction(run: LocalAgentRun): LocalAgentRun {
+  const { reviewAction: _reviewAction, ...runWithoutReview } = run;
+  void _reviewAction;
+  return runWithoutReview;
 }
 
 function finishOwnedRun(

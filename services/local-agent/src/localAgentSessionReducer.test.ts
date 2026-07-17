@@ -172,7 +172,10 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
     },
   }, { observedAt: 1_100 });
 
-  const actionId = 'request:req-1:reviews:review-1';
+  assert.equal(
+    session.activeRun?.reviewAction?.actionId,
+    'request:req-1:reviews:review-1',
+  );
   const unknownRun = reduceSession(session, {
     type: 'run.interrupting',
     requestId: 'req-other',
@@ -180,12 +183,19 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
   assert.equal(unknownRun, session);
 
   session = reduceSession(session, {
-    type: 'review.submitted',
-    requestId: 'req-1',
-    actionId,
+    type: 'runtime.event',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+      },
+    },
   }, { observedAt: 1_200 });
   assert.equal(session.activeRun?.phase, 'thinking');
-  assert.equal(session.activeRun?.reviewAction?.status, 'submitting');
+  assert.equal(session.activeRun?.reviewAction, undefined);
 
   session = reduceSession(session, {
     type: 'run.interrupting',

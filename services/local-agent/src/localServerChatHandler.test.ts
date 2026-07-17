@@ -360,7 +360,6 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
     reviewAction: {
       actionId: 'interrupt-1',
       reviews: [review],
-      status: 'waiting',
     },
     actor: { petId: 'pet-a' },
   });
@@ -382,7 +381,6 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
     reviewAction: {
       actionId: 'interrupt-1',
       reviews: [review],
-      status: 'waiting',
     },
   });
 
@@ -397,7 +395,6 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
     reviewAction: {
       actionId: 'request:snapshot:sess-active:review-current:reviews:review-current',
       reviews: [review],
-      status: 'waiting',
     },
   });
 });

@@ -12,6 +12,7 @@ import {
   selectFocusedActiveRun,
   selectFocusedBusy,
   selectFocusedPendingApproval,
+  selectFocusedReviewResolution,
 } from './state/tuiStateReducer';
 import type { TuiAction, TuiSnapshotApplyReason, TuiState } from './state/tuiState';
 
@@ -254,12 +255,14 @@ export class TuiRuntimeController {
   }
 
   requestInterrupt() {
-    const activeRun = selectFocusedActiveRun(this.options.getState());
+    const state = this.options.getState();
+    const activeRun = selectFocusedActiveRun(state);
     if (!this.wsClient.isConnected() || !activeRun) {
       return false;
     }
 
-    const waitingReviewAction = activeRun.reviewAction?.status === 'waiting'
+    const reviewResolution = selectFocusedReviewResolution(state);
+    const waitingReviewAction = activeRun.phase === 'waiting_human' && !reviewResolution
       ? activeRun.reviewAction
       : null;
     if (waitingReviewAction) {
@@ -276,10 +279,6 @@ export class TuiRuntimeController {
     } else {
       this.wsClient.send({
         type: 'run.interrupt',
-        requestId: activeRun.requestId,
-      });
-      this.options.dispatch({
-        type: 'run.interrupting',
         requestId: activeRun.requestId,
       });
     }

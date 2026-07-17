@@ -32,10 +32,10 @@ Startup, reconnect, resume, completion, and review-state refresh are reasons a c
 
 A session owns one ordered timeline and zero or one active run. Local snapshot readers accept only the current versioned `LocalAgentSessionSnapshot`; the previous `runs[] + activeRunId`, legacy pending-review payloads, and message-only restore shapes are unsupported.
 
-Partial `ReviewDraft` decisions and in-flight review resolution state are
+Partial `ReviewDraft` decisions and the one-shot `resolutionSent` marker are
 client-local interaction state and are not part of the shared snapshot.
 `ReviewAction` contains only the checkpoint-derived batch identity and ordered
-review specifications; it does not contain submitting or canceling state.
+review specifications; it does not contain review-command progress.
 
 Live TUI actions carry `LocalAgentSessionMessageInput` directly. The TUI no
 longer defines a separate `MessageCell` model. Message `createdAt` / `updatedAt`
@@ -79,13 +79,26 @@ explicitly; the reducer does not read clocks, sockets, files, or UI state.
 `applySessionSnapshot(session, snapshot, options)` replaces the ordered timeline and active run with the materialized snapshot value. Its options describe application policy, such as whether omitted token usage should retain a process-local observation; they do not classify the snapshot.
 
 The TUI reducer adapts TUI actions and presentation text into these inputs.
-Composer history, focus, connection copy, partial review drafts, review
-submission/cancellation progress, and viewport state remain TUI-owned and are
-not part of the shared projection. While a review resolution is in flight, that
-local state gates composer input and routes a further interrupt request to
-`run.interrupt`; it is cleared when server-observed state diverges from the
-waiting review action. A user-triggered run interrupt does not add a separate
-client-side pending domain state.
+Composer history, focus, connection copy, partial review drafts, the one-shot
+review-resolution send marker, and viewport state remain TUI-owned and are
+not part of the shared projection. After a review resolution is sent and before
+the next server fact arrives, that marker gates composer input and routes a
+further interrupt request to `run.interrupt`; there is no cancellable
+review-submission lifecycle. It is cleared when server-observed state diverges
+from the waiting review action. A user-triggered run interrupt does not add a
+separate client-side pending domain state.
+
+The server preserves client command order through a server-local
+`RunCommandSequencer`. If `run.interrupt` arrives while a preceding review
+resolution is still being validated or remains pending in checkpoint state,
+the sequencer queues it behind that resolution. The interrupt is released only
+after a graph state boundary confirms that the original pending review has been
+removed from the checkpoint; registering an inflight run or observing an
+arbitrary stream event is not sufficient. If that boundary contains a new
+pending review, the earlier interrupt is consumed without canceling the new
+review. Sequencer state is transport control state and is never
+projected into `LocalAgentSession` or a snapshot. Long-running agent execution
+does not block later client commands from entering the sequencer.
 
 ## Hosted chat adapter
 

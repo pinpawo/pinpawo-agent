@@ -125,7 +125,7 @@ export function startLocalServer(port: number, deps: LocalServerDeps): Promise<v
       },
       onReviewCancel: (ws, msg) => chatHandler.handleReviewCancel(ws, msg, runtimeDeps.get()),
       onRunInterrupt: (ws, msg) => {
-        const inflight = inflightRequests.interrupt(ws, { requestId: msg.requestId });
+        const inflight = chatHandler.handleRunInterrupt(ws, msg);
         if (inflight) {
           console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
         }

@@ -8,7 +8,7 @@ export type ReviewAction = {
 export type ReviewDraft = {
   actionId: string;
   decisions: ReviewResponse[];
-  resolution?: 'submitting' | 'canceling';
+  resolutionSent?: true;
 };
 
 export function reviewActionId(params: {

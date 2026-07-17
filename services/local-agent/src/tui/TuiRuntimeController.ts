@@ -12,7 +12,7 @@ import {
   selectFocusedActiveRun,
   selectFocusedBusy,
   selectFocusedPendingApproval,
-  selectFocusedReviewResolution,
+  selectFocusedReviewResolutionSent,
 } from './state/tuiStateReducer';
 import type { TuiAction, TuiSnapshotApplyReason, TuiState } from './state/tuiState';
 
@@ -235,14 +235,7 @@ export class TuiRuntimeController {
       return true;
     }
 
-    this.options.dispatch({
-      type: 'review.action.submit',
-      requestId,
-      actionId: currentApproval.actionId,
-      decision: response,
-    });
-
-    this.wsClient.send({
+    const sent = this.wsClient.send({
       type: 'human_review_response',
       requestId,
       actionId: currentApproval.actionId,
@@ -250,6 +243,16 @@ export class TuiRuntimeController {
       selectedOptionId: option.id,
       ...(option.input?.kind === 'text' ? { input: { [option.input.key]: inputText } } : {}),
       decisions,
+    });
+    if (!sent) {
+      this.appendSystemMessage(TUI_TEXT.reviewDisconnectedCannotSubmit);
+      return false;
+    }
+    this.options.dispatch({
+      type: 'review.resolution.sent',
+      requestId,
+      actionId: currentApproval.actionId,
+      decision: response,
     });
     return true;
   }
@@ -260,30 +263,36 @@ export class TuiRuntimeController {
     if (!this.wsClient.isConnected() || !activeRun) {
       return false;
     }
+    this.clearInterruptTimeout();
 
-    const reviewResolution = selectFocusedReviewResolution(state);
-    const waitingReviewAction = activeRun.phase === 'waiting_human' && !reviewResolution
+    const resolutionSent = selectFocusedReviewResolutionSent(state);
+    const waitingReviewAction = activeRun.phase === 'waiting_human' && !resolutionSent
       ? activeRun.reviewAction
       : null;
     if (waitingReviewAction) {
-      this.wsClient.send({
+      const sent = this.wsClient.send({
         type: 'review.cancel',
         requestId: activeRun.requestId,
         actionId: waitingReviewAction.actionId,
       });
+      if (!sent) {
+        this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
+        return false;
+      }
       this.options.dispatch({
-        type: 'review.action.cancel',
+        type: 'review.resolution.sent',
         requestId: activeRun.requestId,
         actionId: waitingReviewAction.actionId,
       });
     } else {
-      this.wsClient.send({
+      if (!this.wsClient.send({
         type: 'run.interrupt',
         requestId: activeRun.requestId,
-      });
+      })) {
+        this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
+        return false;
+      }
     }
-    this.clearInterruptTimeout();
-
     const interruptRequestId = activeRun.requestId;
     this.interruptTimeout = setTimeout(() => {
       const state = this.options.getState();

@@ -131,26 +131,19 @@ export type TuiAction =
       now: number;
     }
   | {
-      // The user answered a HITL review. Server resumes the same LangGraph
-      // run from its checkpoint. The TUI records only local resolution
-      // progress here; the shared activeRun remains server-observed until a
-      // runtime event or snapshot advances it. requestId stays the same as
-      // the human_review.requested event this answers.
-      type: 'review.action.submit';
+      // A review resolution is a one-shot command. The TUI records only that
+      // it was sent, while the shared activeRun remains server-observed until
+      // a runtime event or snapshot advances it.
+      type: 'review.resolution.sent';
       requestId: RunId;
       actionId: string;
-      decision: ReviewResponse;
+      decision?: ReviewResponse;
     }
   | {
       type: 'review.draft.record';
       requestId: RunId;
       actionId: string;
       decision: ReviewResponse;
-    }
-  | {
-      type: 'review.action.cancel';
-      requestId: RunId;
-      actionId: string;
     }
   | {
       type: 'run.interrupting';

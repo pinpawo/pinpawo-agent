@@ -79,7 +79,13 @@ export class TuiLocalWebSocketClient {
 
   send(message: LocalAgentClientMessage) {
     const ws = this.getOpenSocket();
-    return ws ? sendLocalAgentMessage(ws, message) : false;
+    if (!ws) return false;
+    try {
+      return sendLocalAgentMessage(ws, message);
+    } catch (err) {
+      this.options.handlers.onError(err instanceof Error ? err : new Error(String(err)));
+      return false;
+    }
   }
 
   isConnected() {

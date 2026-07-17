@@ -425,7 +425,7 @@ test('tuiStateReducer records composer prompt history only for run starts', () =
   assert.deepEqual(state.input.history.entries, ['hello']);
 
   state = tuiStateReducer(state, {
-    type: 'review.action.submit',
+    type: 'review.resolution.sent',
     requestId: 'req-2',
     actionId: 'request:req-2:reviews:unknown',
     decision: { reviewId: 'review-2', selectedOptionId: 'approve' },
@@ -1584,7 +1584,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
 
   const activeRunBefore = selectFocusedActiveRun(state);
   state = tuiStateReducer(state, {
-    type: 'review.action.submit',
+    type: 'review.resolution.sent',
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
     decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
@@ -1593,7 +1593,7 @@ test('tuiStateReducer handles human review and interrupt state', () => {
   assert.equal(selectFocusedBusy(state), true);
   assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
   assert.equal(selectFocusedActiveRun(state)?.reviewAction?.actionId, 'request:req-1:reviews:review-1');
-  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolution, 'submitting');
+  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, true);
   // The client-local resolution preserves the shared run until the server
   // observes resumed activity.
   assert.equal(selectFocusedActiveRun(state)?.requestId, 'req-1');
@@ -1674,7 +1674,7 @@ test('tuiStateReducer keeps batch draft local and out of the conversation timeli
   assert.equal(selectFocusedPendingApproval(state)?.review.id, 'review-1');
 });
 
-test('tuiStateReducer keeps review cancellation local until the server responds', () => {
+test('tuiStateReducer keeps a sent review resolution local until the server responds', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
@@ -1692,14 +1692,14 @@ test('tuiStateReducer keeps review cancellation local until the server responds'
     now: 1200,
   });
   state = tuiStateReducer(state, {
-    type: 'review.action.cancel',
+    type: 'review.resolution.sent',
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
   });
 
   assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
   assert.equal(selectFocusedActiveRun(state)?.reviewAction?.actionId, 'request:req-1:reviews:review-1');
-  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolution, 'canceling');
+  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, true);
   assert.equal(selectFocusedBusy(state), true);
   assert.equal(selectFocusedPendingApproval(state), null);
 
@@ -1718,12 +1718,12 @@ test('tuiStateReducer keeps review cancellation local until the server responds'
     now: 1300,
   });
 
-  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolution, undefined);
+  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, undefined);
   assert.equal(selectFocusedBusy(state), false);
   assert.equal(selectFocusedPendingApproval(state)?.review.id, 'review-1');
 });
 
-test('tuiStateReducer review.action.submit preserves the owning run', () => {
+test('tuiStateReducer sent review resolution preserves the owning run', () => {
   let state = startRun(initialState(), 'req-1');
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -1742,7 +1742,7 @@ test('tuiStateReducer review.action.submit preserves the owning run', () => {
   });
 
   state = tuiStateReducer(state, {
-    type: 'review.action.submit',
+    type: 'review.resolution.sent',
     requestId: 'req-1',
     actionId: 'request:req-1:reviews:review-1',
     decision: { reviewId: 'review-1', selectedOptionId: 'approve' },
@@ -1751,7 +1751,7 @@ test('tuiStateReducer review.action.submit preserves the owning run', () => {
   assert.equal(state.sessions['chat:pet']?.activeRun?.requestId, 'req-1');
   assert.equal(selectFocusedPendingApproval(state), null);
   assert.equal(selectFocusedActiveRun(state)?.phase, 'waiting_human');
-  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolution, 'submitting');
+  assert.equal(state.reviewDrafts['request:req-1:reviews:review-1']?.resolutionSent, true);
 
   state = tuiStateReducer(state, {
     type: 'event.received',

@@ -11,6 +11,77 @@ test('isToolProtocolHistoryError recognizes LangGraph tool history protocol fail
   assert.equal(isToolProtocolHistoryError(new Error('ordinary model error')), false);
 });
 
+test('run interrupt waits until the review resolution is checkpointed', async () => {
+  const controls: unknown[] = [];
+  let runCount = 0;
+  const fakeWs = {
+    readyState: WebSocket.OPEN,
+    send: () => undefined,
+  } as unknown as WebSocket;
+  const inflightRequests = new InflightRequestController<WebSocket>({
+    forceInterruptMs: 1000,
+    emitOperation: () => undefined,
+    sendControl: (_ws, message) => {
+      controls.push(message);
+    },
+  });
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      readActivePendingReview: async () => null,
+      buildChatSetup: () => ({
+        graphKey: 'test',
+        graphConfig: {},
+        input: { messages: [] },
+      }),
+    } as never,
+    inflightRequests,
+    loadContext: async () => ({} as never),
+    runChat: async (options) => {
+      runCount += 1;
+      assert.equal(options.setup.input.signal?.aborted, false);
+      options.onResumeCheckpointed?.({ canInterrupt: true });
+      assert.equal(options.setup.input.signal?.aborted, true);
+      options.finishInterrupted();
+      return { status: 'interrupted' };
+    },
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).recordReviewActionRoute({
+    type: 'human_review.requested',
+    interruptId: 'interrupt-1',
+    requestId: 'req-1',
+    review: {
+      id: 'review-current',
+      schemaVersion: 1,
+      view: { kind: 'plain', body: 'Approve?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    },
+  }, { actorId: 'pet-1' });
+
+  const resolution = handler.handleHumanReviewResponse(fakeWs, {
+    type: 'human_review_response',
+    requestId: 'req-1',
+    actionId: 'interrupt-1',
+    reviewId: 'review-current',
+    selectedOptionId: 'approve',
+  }, { actorId: 'pet-1' } as never);
+  assert.equal(handler.handleRunInterrupt(fakeWs, {
+    type: 'run.interrupt',
+    requestId: 'req-1',
+  }), null);
+
+  await resolution;
+
+  assert.equal(runCount, 1);
+  assert.deepEqual(controls, [
+    { type: 'interrupting', requestId: 'req-1', message: 'interrupting' },
+    { type: 'interrupted', requestId: 'req-1', message: 'interrupted' },
+  ]);
+});
+
 test('handleHumanReviewResponse rejects stale canonical reviewId before forwarding', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];

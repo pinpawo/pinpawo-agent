@@ -6,6 +6,7 @@ import {
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
   type ReviewCancelMessage,
+  type RunInterruptMessage,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
 import {
@@ -39,10 +40,12 @@ import {
   reviewActionReviews,
   type ReviewAction,
 } from './reviewAction';
+import { RunCommandSequencer } from './runCommandSequencer';
 
 type InflightRequest = InflightOperationRun;
 
 type LocalServerRunRequest = ChatSessionRequest;
+type RunChatSession = typeof runChatSession;
 
 type LocalServerRunSource =
   | { type: 'chat_request' }
@@ -77,18 +80,25 @@ export class LocalServerChatHandler {
   private readonly graphService: LocalAgentGraphService;
   private readonly tuiSessions: LocalServerTuiSessionService;
   private readonly inflightRequests: InflightRequestController<WebSocket>;
+  private readonly loadContext: typeof loadAgentContext;
+  private readonly runChat: RunChatSession;
   private readonly reviewActionRoutes = new Map<string, ReviewActionRoute>();
   private readonly consumedPendingReviewRequestIds = new Set<string>();
   private readonly activePendingReviewRequestIds = new Set<string>();
+  private readonly runCommandSequencer = new RunCommandSequencer();
 
   constructor(options: {
     graphService: LocalAgentGraphService;
     tuiSessions: LocalServerTuiSessionService;
     inflightRequests: InflightRequestController<WebSocket>;
+    loadContext?: typeof loadAgentContext;
+    runChat?: RunChatSession;
   }) {
     this.graphService = options.graphService;
     this.tuiSessions = options.tuiSessions;
     this.inflightRequests = options.inflightRequests;
+    this.loadContext = options.loadContext ?? loadAgentContext;
+    this.runChat = options.runChat ?? runChatSession;
   }
 
   private buildReviewActionRoute(params: {
@@ -184,11 +194,13 @@ export class LocalServerChatHandler {
       return false;
     }
     this.activePendingReviewRequestIds.add(requestId);
+    this.runCommandSequencer.beginReviewResolution(requestId);
     return true;
   }
 
   private releasePendingReviewRequest(requestId: string) {
     this.activePendingReviewRequestIds.delete(requestId);
+    this.runCommandSequencer.abandonReviewResolution(requestId);
   }
 
   private markPendingReviewConsumed(requestId: string) {
@@ -265,6 +277,15 @@ export class LocalServerChatHandler {
     }, deps, { type: 'chat_request' });
   }
 
+  handleRunInterrupt(ws: WebSocket, msg: RunInterruptMessage) {
+    const inflight = this.inflightRequests.interrupt(ws, { requestId: msg.requestId });
+    if (inflight) {
+      return inflight;
+    }
+    this.runCommandSequencer.queueRunInterrupt(msg.requestId);
+    return null;
+  }
+
   private async runChatRequest(
     ws: WebSocket,
     request: LocalServerRunRequest,
@@ -310,7 +331,7 @@ export class LocalServerChatHandler {
     };
 
     try {
-      const ctx = await loadAgentContext(deps.actorId);
+      const ctx = await this.loadContext(deps.actorId);
       if (!isCurrent()) {
         finishInterrupted();
         return;
@@ -322,7 +343,7 @@ export class LocalServerChatHandler {
         createOperationRegistryForAgentSetup(setup),
       );
       setup.input.signal = controller.signal;
-      const result = await runChatSession({
+      const result = await this.runChat({
         request,
         setup,
         graphService: this.graphService,
@@ -338,6 +359,17 @@ export class LocalServerChatHandler {
         acceptDelegationOperations: (operations) => {
           overlayInflightDelegationOperations(inflight, operations);
         },
+        ...(source.type !== 'chat_request'
+          ? {
+            onResumeCheckpointed: ({ canInterrupt }: { canInterrupt: boolean }) => {
+              const interruptQueued = this.runCommandSequencer
+                .markReviewResolutionCheckpointed(requestId);
+              if (canInterrupt && interruptQueued) {
+                this.inflightRequests.interrupt(ws, { requestId });
+              }
+            },
+          }
+          : {}),
       });
       if (result.status === 'waiting_human') {
         this.inflightRequests.finish(ws, inflight, 'interrupted');
@@ -465,16 +497,20 @@ export class LocalServerChatHandler {
 
     this.markPendingReviewConsumed(msg.requestId);
 
-    await this.runChatRequest(ws, {
-      kind: 'resume',
-      requestId: msg.requestId,
-      resume: buildHumanReviewResume(route, decisions),
-    }, deps, {
-      type: 'human_review_response',
-      reviewId: msg.reviewId,
-      selectedOptionId: msg.selectedOptionId,
-      decisionCount: decisions.length,
-    });
+    try {
+      await this.runChatRequest(ws, {
+        kind: 'resume',
+        requestId: msg.requestId,
+        resume: buildHumanReviewResume(route, decisions),
+      }, deps, {
+        type: 'human_review_response',
+        reviewId: msg.reviewId,
+        selectedOptionId: msg.selectedOptionId,
+        decisionCount: decisions.length,
+      });
+    } finally {
+      this.runCommandSequencer.abandonReviewResolution(msg.requestId);
+    }
   }
 
   async handleReviewCancel(
@@ -482,12 +518,18 @@ export class LocalServerChatHandler {
     msg: ReviewCancelMessage,
     deps: LocalServerDeps,
   ) {
+    if (!this.claimPendingReviewRequest(msg.requestId)) {
+      this.sendClosedReviewError(ws, msg.requestId);
+      return;
+    }
     const route = await this.readReviewActionRoute(msg.requestId, deps);
     if (!route) {
+      this.releasePendingReviewRequest(msg.requestId);
       this.sendClosedReviewError(ws, msg.requestId);
       return;
     }
     if (!matchesHumanReviewAction(route, msg.actionId)) {
+      this.releasePendingReviewRequest(msg.requestId);
       sendLocalAgentEvent(ws, {
         type: 'error',
         requestId: msg.requestId,
@@ -496,10 +538,6 @@ export class LocalServerChatHandler {
       });
       return;
     }
-    if (!this.claimPendingReviewRequest(msg.requestId)) {
-      return;
-    }
-
     const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
     if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
       this.releasePendingReviewRequest(msg.requestId);
@@ -544,16 +582,20 @@ export class LocalServerChatHandler {
       `[local-server] cancel pending human_review requestId=${msg.requestId} actionId=${route.actionId}`,
     );
 
-    await this.runChatRequest(ws, {
-      kind: 'resume',
-      requestId: msg.requestId,
-      resume: buildHumanReviewRejectResume(route, route.rejectOptionId),
-    }, deps, {
-      type: 'review.cancel',
-      reviewId: firstReview.id,
-      selectedOptionId: route.rejectOptionId,
-      decisionCount: 1,
-    });
+    try {
+      await this.runChatRequest(ws, {
+        kind: 'resume',
+        requestId: msg.requestId,
+        resume: buildHumanReviewRejectResume(route, route.rejectOptionId),
+      }, deps, {
+        type: 'review.cancel',
+        reviewId: firstReview.id,
+        selectedOptionId: route.rejectOptionId,
+        decisionCount: 1,
+      });
+    } finally {
+      this.runCommandSequencer.abandonReviewResolution(msg.requestId);
+    }
   }
 
   private sendStreamToolOperationEvent(

@@ -14,7 +14,11 @@ import {
   type SubagentToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
-import type { LocalAgentGraphService } from './agentGraphService';
+import type {
+  LocalAgentGraphPendingHumanReview,
+  LocalAgentGraphService,
+  LocalAgentGraphThreadState,
+} from './agentGraphService';
 import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
 import {
   readFinalMessageText,
@@ -48,6 +52,8 @@ export type ChatSessionAdapterOptions = {
   finishInterrupted: () => void;
   emitEvent: (event: LocalAgentRuntimeEvent) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
+  /** Called once checkpoint state no longer contains the original review. */
+  onResumeCheckpointed?: (result: { canInterrupt: boolean }) => void;
   /**
    * Receives a delegation's `subagent_operations` announcement so the
    * caller's operation registry can join display metadata for
@@ -62,6 +68,32 @@ function throwUnexpectedInterruptPayload(): never {
 
 function normalizeReviewList(review: ReviewSpec, reviews?: ReviewSpec[]): ReviewSpec[] {
   return reviews?.length ? reviews : [review];
+}
+
+function pendingReviewSpecIdentity(pending: LocalAgentGraphPendingHumanReview) {
+  const reviews = normalizeReviewList(pending.review, pending.reviews);
+  return reviews.map((review) => encodeURIComponent(review.id)).join(',');
+}
+
+function isSamePendingReview(
+  initial: LocalAgentGraphPendingHumanReview,
+  current: LocalAgentGraphPendingHumanReview | null,
+) {
+  if (!current) return false;
+  if (initial.interruptId && current.interruptId) {
+    return initial.interruptId === current.interruptId;
+  }
+  return pendingReviewSpecIdentity(initial) === pendingReviewSpecIdentity(current);
+}
+
+function originalReviewWasCheckpointed(
+  initial: LocalAgentGraphThreadState,
+  current: LocalAgentGraphThreadState,
+) {
+  if (initial.pendingHumanReview) {
+    return !isSamePendingReview(initial.pendingHumanReview, current.pendingHumanReview);
+  }
+  return current.pendingHumanReview !== null || !current.hasPendingContinuation;
 }
 
 function emitHumanReviewRequested(params: {
@@ -265,10 +297,37 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   let finalMessages: BaseMessage[] = [];
   let streamedReply = '';
+  let resumeCheckpointed = false;
+  const confirmResumeCheckpoint = (state: LocalAgentGraphThreadState, runIsActive: boolean) => {
+    if (
+      !isResumeRequest
+      || !options.onResumeCheckpointed
+      || resumeCheckpointed
+      || !originalReviewWasCheckpointed(initialThreadState, state)
+    ) {
+      return;
+    }
+    resumeCheckpointed = true;
+    options.onResumeCheckpointed?.({
+      canInterrupt: runIsActive && state.pendingHumanReview === null,
+    });
+  };
+  const readResumeCheckpointAtBoundary = async () => {
+    if (!isResumeRequest || !options.onResumeCheckpointed || resumeCheckpointed) return;
+    try {
+      confirmResumeCheckpoint(await graphService.readThreadState(setup), true);
+    } catch {
+      // Checkpoint confirmation is best-effort while the stream is active. A
+      // failed read must not cancel an otherwise valid review resolution.
+    }
+  };
   try {
     const run = await graphService.streamEvents(setup, graphInput);
     const toolReader = new NamespacedProtocolToolEventReader();
     for await (const chatEvent of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) {
+      if (chatEvent.type === 'values' || chatEvent.type === 'interrupt') {
+        await readResumeCheckpointAtBoundary();
+      }
       if (!isCurrent()) {
         finishInterrupted();
         return { status: 'interrupted' };
@@ -374,6 +433,7 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
   }
 
   const finalThreadState = await graphService.readThreadState(setup);
+  confirmResumeCheckpoint(finalThreadState, false);
   if (!isCurrent()) {
     finishInterrupted();
     return { status: 'interrupted' };

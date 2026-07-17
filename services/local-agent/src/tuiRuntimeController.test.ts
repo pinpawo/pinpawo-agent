@@ -84,7 +84,7 @@ function busyRunState(): TuiState {
   return state;
 }
 
-function createController(state: TuiState) {
+function createController(state: TuiState, options: { sendResult?: boolean } = {}) {
   const actions: TuiAction[] = [];
   const sent: unknown[] = [];
   let resetCount = 0;
@@ -101,7 +101,11 @@ function createController(state: TuiState) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (controller as any).wsClient = {
     isConnected: () => true,
-    send: (message: unknown) => sent.push(message),
+    send: (message: unknown) => {
+      if (options.sendResult === false) return false;
+      sent.push(message);
+      return true;
+    },
     disconnect: () => {},
   };
   return { controller, actions, sent, get resetCount() { return resetCount; } };
@@ -165,7 +169,7 @@ test('TuiRuntimeController submits canonical review responses without legacy res
       },
     ],
   }]);
-  assert.equal(actions.some((action) => action.type === 'review.action.submit'), true);
+  assert.equal(actions.some((action) => action.type === 'review.resolution.sent'), true);
 });
 
 test('TuiRuntimeController queues review action decisions until the final approval', () => {
@@ -205,7 +209,7 @@ test('TuiRuntimeController queues review action decisions until the final approv
       { reviewId: 'review-2', selectedOptionId: 'approve' },
     ],
   }]);
-  assert.equal(final.actions.some((action) => action.type === 'review.action.submit'), true);
+  assert.equal(final.actions.some((action) => action.type === 'review.resolution.sent'), true);
 });
 
 test('TuiRuntimeController sends a review action response when the first review is rejected', () => {
@@ -228,7 +232,7 @@ test('TuiRuntimeController sends a review action response when the first review 
       { reviewId: 'review-1', selectedOptionId: 'reject' },
     ],
   }]);
-  assert.equal(actions.some((action) => action.type === 'review.action.submit'), true);
+  assert.equal(actions.some((action) => action.type === 'review.resolution.sent'), true);
   assert.equal(actions.some((action) => action.type === 'review.draft.record'), false);
 });
 
@@ -249,6 +253,23 @@ test('TuiRuntimeController blocks empty required review input', () => {
   ), true);
 });
 
+test('TuiRuntimeController keeps review open when the resolution cannot be sent', () => {
+  const { controller, actions, sent } = createController(pendingReviewState(), {
+    sendResult: false,
+  });
+
+  const submitted = controller.submitReviewResponse({
+    id: 'approve',
+    label: 'Approve',
+    decision: { type: 'approve' },
+  });
+
+  assert.equal(submitted, false);
+  assert.deepEqual(sent, []);
+  assert.equal(actions.some((action) => action.type === 'review.resolution.sent'), false);
+  assert.equal(actions.some((action) => action.type === 'message.appended'), true);
+});
+
 test('TuiRuntimeController requests review cancellation separately from run interruption', () => {
   const { controller, actions, sent } = createController(pendingReviewState());
 
@@ -260,16 +281,16 @@ test('TuiRuntimeController requests review cancellation separately from run inte
     requestId: 'req-1',
     actionId: 'interrupt-1',
   }]);
-  assert.deepEqual(actions.find((action) => action.type === 'review.action.cancel'), {
-    type: 'review.action.cancel',
+  assert.deepEqual(actions.find((action) => action.type === 'review.resolution.sent'), {
+    type: 'review.resolution.sent',
     requestId: 'req-1',
     actionId: 'interrupt-1',
   });
 });
 
-test('TuiRuntimeController interrupts the run after review submission starts', () => {
+test('TuiRuntimeController interrupts the resumed run after a review resolution was sent', () => {
   const state = pendingReviewState();
-  state.reviewDrafts['interrupt-1']!.resolution = 'submitting';
+  state.reviewDrafts['interrupt-1']!.resolutionSent = true;
   const { controller, actions, sent } = createController(state);
 
   assert.equal(controller.requestInterrupt(), true);
@@ -280,23 +301,9 @@ test('TuiRuntimeController interrupts the run after review submission starts', (
   assert.equal(actions.some((action) => action.type === 'run.interrupting'), false);
 });
 
-test('TuiRuntimeController interrupts the run after review cancellation starts', () => {
+test('TuiRuntimeController keeps new runs gated after a review resolution was sent', () => {
   const state = pendingReviewState();
-  state.reviewDrafts['interrupt-1']!.resolution = 'canceling';
-  const { controller, actions, sent } = createController(state);
-
-  assert.equal(controller.requestInterrupt(), true);
-  assert.deepEqual(sent, [{
-    type: 'run.interrupt',
-    requestId: 'req-1',
-  }]);
-  assert.equal(actions.some((action) => action.type === 'review.action.cancel'), false);
-  assert.equal(actions.some((action) => action.type === 'run.interrupting'), false);
-});
-
-test('TuiRuntimeController keeps new runs gated while a review resolution is pending', () => {
-  const state = pendingReviewState();
-  state.reviewDrafts['interrupt-1']!.resolution = 'submitting';
+  state.reviewDrafts['interrupt-1']!.resolutionSent = true;
   const { controller, actions, sent } = createController(state);
 
   assert.equal(controller.sendChatRequest('start another run'), false);

@@ -6,7 +6,7 @@ import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason } from '../../types/subagent';
-import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
+import type { AgentToolkit, AgentToolset, ToolkitReviewCapabilities } from '../../types/toolkit';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { DelegationOutcomeDecision } from './schemas';
@@ -120,6 +120,8 @@ export type OrchestratorInvokeOptions = {
    * selected subagent as an optional discovery shortcut, never to entryDecision.
    */
   artifactDiscoveryRoot?: string;
+  /** Host-owned read-only tools used to inspect artifactDiscoveryRoot. */
+  artifactDiscoveryToolset?: AgentToolset;
   runtimeEnvironment?: string;
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;

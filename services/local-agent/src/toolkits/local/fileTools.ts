@@ -1,5 +1,5 @@
-import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, extname, resolve } from 'node:path';
+import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { tool } from '@langchain/core/tools';
 import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
@@ -697,6 +697,77 @@ export const listDirTool = tool(
     schema: z.object({ path: z.string().describe('目录路径，默认 "." 表示当前目录') }),
   },
 );
+
+function resolveArtifactDiscoveryPath(root: string, inputPath: string) {
+  const rootPath = resolveUserPath(root);
+  const targetPath = resolve(rootPath, inputPath || '.');
+  const relativePath = relative(rootPath, targetPath);
+  if (
+    relativePath === '..'
+    || relativePath.startsWith(`..${sep}`)
+    || isAbsolute(relativePath)
+  ) {
+    throw new Error('path must stay inside the current thread artifact root');
+  }
+  const canonicalRoot = realpathSync(rootPath);
+  const canonicalTarget = realpathSync(targetPath);
+  const canonicalRelativePath = relative(canonicalRoot, canonicalTarget);
+  if (
+    canonicalRelativePath === '..'
+    || canonicalRelativePath.startsWith(`..${sep}`)
+    || isAbsolute(canonicalRelativePath)
+  ) {
+    throw new Error('path must stay inside the current thread artifact root');
+  }
+  return canonicalTarget;
+}
+
+export function createArtifactDiscoveryFileTools(root: string) {
+  const scopedListDirTool = tool(
+    async ({ path }: { path: string }) => {
+      try {
+        return await listDirTool.invoke({
+          path: resolveArtifactDiscoveryPath(root, path),
+        });
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
+      }
+    },
+    {
+      name: 'list_dir',
+      description: '列出当前 thread artifact 根目录内的目录内容。',
+      schema: z.object({ path: z.string().describe('artifact 根目录或其内部目录路径') }),
+    },
+  );
+  const scopedViewFileChunkTool = tool(
+    async ({ path, startLine, endLine }: {
+      path: string;
+      startLine?: number;
+      endLine?: number;
+    }) => {
+      try {
+        return await viewFileChunkTool.invoke({
+          path: resolveArtifactDiscoveryPath(root, path),
+          startLine,
+          endLine,
+        });
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
+      }
+    },
+    {
+      name: 'view_file_chunk',
+      description: '按行读取当前 thread artifact 根目录内的文本文件片段。',
+      schema: z.object({
+        path: z.string().describe('artifact 根目录内的文件路径'),
+        startLine: z.number().int().positive().optional().describe('起始行号，默认 1'),
+        endLine: z.number().int().positive().optional().describe('结束行号，默认最多返回 200 行'),
+      }),
+    },
+  );
+
+  return [scopedListDirTool, scopedViewFileChunkTool];
+}
 
 export const fileOperationMetadata: Record<string, ToolkitOperationMetadata> = {
   read_file: {

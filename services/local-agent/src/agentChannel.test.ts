@@ -246,6 +246,27 @@ test('buildLocalChatAgentInput exposes only the current-thread artifact root', (
     setup.input.artifactDiscoveryRoot,
     '/tmp/work/.pinpawo/capability-artifacts/threads/thread%2Fwith%20space',
   );
+  assert.deepEqual(
+    setup.input.artifactDiscoveryToolset?.tools.map((toolItem) => toolItem.name),
+    ['list_dir', 'view_file_chunk'],
+  );
+});
+
+test('artifact discovery tools reject paths outside the current thread root', async () => {
+  const setup = buildLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    threadId: 'thread-1',
+    capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
+  });
+  const listDir = setup.input.artifactDiscoveryToolset?.tools
+    .find((toolItem) => toolItem.name === 'list_dir');
+
+  assert.ok(listDir);
+  assert.match(
+    String(await listDir.invoke({ path: '/tmp' })),
+    /path must stay inside the current thread artifact root/,
+  );
 });
 
 test('buildLocalChatAgentInput uses caller-provided stable session time', () => {

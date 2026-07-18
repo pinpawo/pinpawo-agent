@@ -3,6 +3,12 @@ import { setPinpetMeta } from '../messageLanes';
 import { indentXmlBlock, xmlTextBlock } from '../prompts/shared';
 
 export const ARTIFACT_DISCOVERY_CONTEXT_SOURCE = 'artifact_discovery_context';
+export const ARTIFACT_DISCOVERY_TOOL_NAMES = ['list_dir', 'view_file_chunk'] as const;
+
+export function hasArtifactDiscoveryTools(tools: ReadonlyArray<{ name: string }>): boolean {
+  const names = new Set(tools.map((toolItem) => toolItem.name));
+  return ARTIFACT_DISCOVERY_TOOL_NAMES.every((name) => names.has(name));
+}
 
 export function buildArtifactDiscoveryContextMessage(root: string): AIMessage | null {
   const artifactRoot = root.trim();

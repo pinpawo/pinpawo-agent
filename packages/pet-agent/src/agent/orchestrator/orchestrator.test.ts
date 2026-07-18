@@ -1072,7 +1072,7 @@ test('answer retries and never persists a delegation briefing reply', async () =
     invoke: async () => {
       answerCallCount += 1;
       return new AIMessage(answerCallCount === 1
-        ? '【委派简报】\n- 当前任务：错误回复'
+        ? '<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">\n  <task>错误回复</task>\n</delegation_briefing>'
         : '这是正常的用户可见回复。');
     },
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
@@ -1091,7 +1091,10 @@ test('answer retries and never persists a delegation briefing reply', async () =
 
   assert.equal(answerCallCount, 2);
   assert.equal(state.messages.at(-1)?.content, '这是正常的用户可见回复。');
-  assert.doesNotMatch(String(state.messages.at(-1)?.content), /^【委派简报/);
+  assert.doesNotMatch(
+    String(state.messages.at(-1)?.content),
+    /^(?:【委派简报|<delegation_briefing)/,
+  );
 });
 
 test('answer falls back safely when retry also returns a delegation briefing', async () => {
@@ -1357,6 +1360,64 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
   });
 
   assert.deepEqual(runtimeToolkitNames, ['bash', 'browser', 'artifact']);
+});
+
+test('artifact discovery tools reach a selected capability without broadening its toolkit uses', async () => {
+  let decisionCallCount = 0;
+  let capabilityToolNames: string[] = [];
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        decisionCallCount += 1;
+        if (decisionCallCount === 1) return nextTaskDecision('inspect browser state');
+        if (decisionCallCount === 2) return routeCapabilityDecision('browser_like');
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({ toolCalls: [[]] });
+  const bindTools = subagentModel.bindTools.bind(subagentModel);
+  (subagentModel as unknown as {
+    bindTools: (tools: Array<{ name: string }>) => unknown;
+  }).bindTools = (tools) => {
+    capabilityToolNames = tools.map((toolItem) => toolItem.name);
+    return bindTools(tools as never);
+  };
+  const graph = createOrchestratorGraph({
+    models: { act: routeModel, observe: routeModel, subagent: subagentModel },
+    actor: testActor,
+  });
+
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
+    configurable: {
+      thread_id: 'capability-artifact-discovery-tools',
+      actor: testActor,
+      capabilities: [{
+        name: 'browser_like',
+        description: 'browser-only capability',
+        createRuntime: () => ({ uses: ['browser'] }),
+      }],
+      toolkits: [{
+        name: 'browser',
+        description: 'browser toolkit',
+        tools: [mockTool('browser_open')],
+      }],
+      forcedCapabilityNames: ['browser_like'],
+      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/tool-test',
+      artifactDiscoveryToolset: defineToolset({
+        name: 'artifact_discovery',
+        tools: [mockTool('list_dir'), mockTool('view_file_chunk')],
+      }),
+    },
+  });
+
+  assert.deepEqual(capabilityToolNames, [
+    'browser_open',
+    'list_dir',
+    'view_file_chunk',
+  ]);
 });
 
 test('toolkit exposure can hide tools from the general lane', async () => {
@@ -1643,7 +1704,7 @@ test('capability result artifacts are represented only as refs in state', async 
   assert.equal(state.sessionCapabilityArtifacts[0]?.schema?.name, 'daily_post.result');
 });
 
-test('runAgent omits empty toolkit arrays and forwards artifact discovery root', async () => {
+test('runAgent omits empty toolkit arrays and forwards artifact discovery resources', async () => {
   const calls: Array<{ configurable?: Record<string, unknown> }> = [];
   const graph = {
     invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
@@ -1652,10 +1713,15 @@ test('runAgent omits empty toolkit arrays and forwards artifact discovery root',
     },
   };
 
+  const artifactDiscoveryToolset = defineToolset({
+    name: 'artifact_discovery',
+    tools: [mockTool('list_dir'), mockTool('view_file_chunk')],
+  });
   const result = await runAgent(graph as never, {
     messages: [new HumanMessage('hello')],
     toolkits: [],
     artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/thread-1',
+    artifactDiscoveryToolset,
   });
 
   assert.equal(result.reply, 'done');
@@ -1665,6 +1731,7 @@ test('runAgent omits empty toolkit arrays and forwards artifact discovery root',
     calls[0]?.configurable?.artifactDiscoveryRoot,
     '/repo/.pinpawo/capability-artifacts/threads/thread-1',
   );
+  assert.equal(calls[0]?.configurable?.artifactDiscoveryToolset, artifactDiscoveryToolset);
 });
 
 test('capability toolset runtimes expose operation metadata', async () => {
@@ -3519,6 +3586,45 @@ test('lane tagging hides subagent messages from route and records completed anno
   });
 });
 
+test('lane tagging treats briefing-like subagent output as a deliverable, not internal state', () => {
+  const human = new HumanMessage('检查委派简报格式');
+  const outputText = '<delegation_briefing mode="initial">\n  <task>这是 subagent 实际返回的低质量结果</task>\n</delegation_briefing>';
+  const output = new AIMessage(outputText);
+
+  const tagged = tagNewLaneMessages(
+    [human, output],
+    [human],
+    'general',
+    'turn-briefing-output',
+    'natural',
+    { delegationId: 'task-briefing-output', task: '检查委派简报格式' },
+  );
+
+  assert.equal(tagged.length, 1);
+  assert.equal(getMessageIsAnnounce(output), true);
+  assert.equal(
+    readLatestAnnounce(tagged, { delegationId: 'task-briefing-output' })?.text,
+    outputText,
+  );
+});
+
+test('main conversation preserves accepted handoffs that begin with briefing formats', () => {
+  const handoffs = [
+    new AIMessage('【委派简报】\n- 这是已经验收的普通 handoff 内容'),
+    new AIMessage('<delegation_briefing mode="initial">\n  <task>已验收结果</task>\n</delegation_briefing>'),
+  ];
+  for (const handoff of handoffs) {
+    setPinpetMeta(handoff, {
+      handoffFrom: 'general',
+      delegationId: 'task-accepted-briefing',
+      runId: 'turn-accepted-briefing',
+      task: '返回简报格式示例',
+    });
+  }
+
+  assert.deepEqual(mainConversationMessages(handoffs), handoffs);
+});
+
 test('lane tagging reconciles a summarized subagent transcript by message identity', () => {
   const human = new HumanMessage({ id: 'main-human', content: '继续检查项目' });
   const oldToolCall = new AIMessage({
@@ -4052,6 +4158,10 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
       capabilities: [capability('ops', '仓库运维：issue 操作、文件清理。')],
       forcedCapabilityNames: ['ops'],
       artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/briefing-a-plus-b',
+      artifactDiscoveryToolset: defineToolset({
+        name: 'artifact_discovery',
+        tools: [mockTool('list_dir'), mockTool('view_file_chunk')],
+      }),
     },
     callbacks: recorder.callbacks,
   }) as OrchestratorStateType;
@@ -4069,9 +4179,9 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
   const [firstInput, secondInput] = recorder.subagentInputs;
   const briefingA = String(firstInput.find(isDelegationBriefingMessage)?.content ?? '');
   const briefingB = String(secondInput.filter(isDelegationBriefingMessage).at(-1)?.content ?? '');
-  assert.match(briefingA, /【委派简报】/);
-  assert.match(briefingA, /当前任务：关闭 GitHub Issue #272。/);
-  assert.match(briefingB, /当前任务：删除 packages\/goat 目录。/);
+  assert.match(briefingA, /^<delegation_briefing[^>]*mode="initial">/);
+  assert.match(briefingA, /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/);
+  assert.match(briefingB, /<task>[\s\S]*删除 packages\/goat 目录。[\s\S]*<\/task>/);
   assert.doesNotMatch(briefingB, /计划进度|剩余计划|\[已完成\]/);
 
   // The original user request is intact — no copy, rewrite, or demotion.
@@ -4081,8 +4191,8 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
 
   // Subagent model input: the briefing is the latest orchestrator message and
   // no synthetic HumanMessage is appended.
-  assert.match(String(firstInput.at(-1)?.content), /【委派简报】[\s\S]*关闭 GitHub Issue #272/);
-  assert.match(String(secondInput.at(-1)?.content), /【委派简报】[\s\S]*删除 packages\/goat 目录/);
+  assert.match(String(firstInput.at(-1)?.content), /<delegation_briefing[\s\S]*关闭 GitHub Issue #272/);
+  assert.match(String(secondInput.at(-1)?.content), /<delegation_briefing[\s\S]*删除 packages\/goat 目录/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /Issue #272 已关闭。/);
   assert.match(secondInputText, /<artifact_discovery_context[\s\S]*briefing-a-plus-b/);
@@ -4154,14 +4264,14 @@ test('continue outcome appends a continuation briefing carrying the gap note', a
   const continuation = String(
     recorder.subagentInputs[1].filter(isDelegationBriefingMessage).at(-1)?.content ?? '',
   );
-  assert.match(continuation, /【委派简报·继续】/);
-  assert.match(continuation, /任务仍然是：关闭 GitHub Issue #272。/);
-  assert.match(continuation, /上轮缺口：未验证 issue 状态，请确认已关闭。/);
+  assert.match(continuation, /^<delegation_briefing[^>]*mode="continue">/);
+  assert.match(continuation, /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/);
+  assert.match(continuation, /<gap_note>[\s\S]*未验证 issue 状态，请确认已关闭。[\s\S]*<\/gap_note>/);
 
   // The continuation run keeps the same delegation transcript and reads the
   // continuation briefing as the latest message.
   const secondInput = recorder.subagentInputs[1];
-  assert.match(String(secondInput.at(-1)?.content), /【委派简报·继续】/);
+  assert.match(String(secondInput.at(-1)?.content), /^<delegation_briefing[^>]*mode="continue">/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /已尝试关闭 issue。/);
 });

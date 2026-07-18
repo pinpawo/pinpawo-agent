@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { walkFiles, DEFAULT_WALK_IGNORED_DIRS } from './fileSystemUtils';
-import { listDirTool, viewFileChunkTool } from './fileTools';
+import {
+  createArtifactDiscoveryFileTools,
+  listDirTool,
+  viewFileChunkTool,
+} from './fileTools';
 import { globSearchTool, grepSearchTool } from './searchTools';
 
 function makeTree() {
@@ -95,10 +99,11 @@ test('glob_search ignores .pinpawo and finds real files', async () => {
 
 test('explicit file tools can inspect a scoped artifact path under .pinpawo', async () => {
   const root = makeTree();
-  const artifactDir = resolve(
+  const threadRoot = resolve(
     root,
-    '.pinpawo/capability-artifacts/threads/thread-1/delegation-1',
+    '.pinpawo/capability-artifacts/threads/thread-1',
   );
+  const artifactDir = resolve(threadRoot, 'delegation-1');
   mkdirSync(artifactDir, { recursive: true });
   writeFileSync(resolve(artifactDir, 'manifest.json'), '{"title":"artifact shortcut"}\n');
 
@@ -109,4 +114,16 @@ test('explicit file tools can inspect a scoped artifact path under .pinpawo', as
 
   assert.match(listing, /manifest\.json/);
   assert.match(content, /artifact shortcut/);
+
+  const scopedTools = createArtifactDiscoveryFileTools(threadRoot);
+  const scopedListDir = scopedTools.find((toolItem) => toolItem.name === 'list_dir');
+  const scopedViewFileChunk = scopedTools.find(
+    (toolItem) => toolItem.name === 'view_file_chunk',
+  );
+  assert.ok(scopedListDir);
+  assert.ok(scopedViewFileChunk);
+  assert.match(String(await scopedListDir.invoke({ path: artifactDir })), /manifest\.json/);
+  assert.match(String(await scopedViewFileChunk.invoke({
+    path: resolve(artifactDir, 'manifest.json'),
+  })), /artifact shortcut/);
 });

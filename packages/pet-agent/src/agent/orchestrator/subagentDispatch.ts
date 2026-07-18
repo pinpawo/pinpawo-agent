@@ -138,8 +138,18 @@ export function collectToolsetOperations(
 
 export function collectGeneralOperations(
   toolkits: AgentToolkit[],
+  toolsets?: AgentToolset[],
 ): Record<string, SubagentToolOperationMetadata> {
-  return collectToolkitOperations(toolkits);
+  const operations = collectToolkitOperations(toolkits);
+
+  for (const [toolName, metadata] of Object.entries(collectToolsetOperations(toolsets))) {
+    if (operations[toolName]) {
+      continue;
+    }
+    operations[toolName] = metadata;
+  }
+
+  return operations;
 }
 
 export function collectCapabilityOperations(

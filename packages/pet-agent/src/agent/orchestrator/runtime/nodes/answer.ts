@@ -30,7 +30,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
     // The full main conversation queue. Subagent results already live here as
     // handoff copies (first-class, lane-free), so the answer node just reads main
     // — no need to dig announces out of lanes. Context-compaction summaries are
-    // kept; mainConversationMessages drops lane-tagged and legacy briefing
+    // kept; mainConversationMessages drops lane-tagged and internal briefing
     // messages only. After compaction, a summary may be the sole surviving
     // record of older accepted results.
     const history = mainConversationMessages(state.messages);
@@ -57,7 +57,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       response = await config.models.act.invoke([
         ...answerMessages,
         new SystemMessage([
-          '上一候选回复因使用内部【委派简报】格式而被拒绝，不能发送给用户。',
+          '上一候选回复因使用内部 delegation briefing 格式（<delegation_briefing> 或旧版【委派简报】）而被拒绝，不能发送给用户。',
           '请重新生成普通的用户可见回复；直接回答当前请求，不要输出调度消息、委派简报或内部协议。',
         ].join('\n')),
       ], runnableConfig);

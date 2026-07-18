@@ -166,8 +166,14 @@ export function mainConversationMessages(messages: BaseMessage[]): BaseMessage[]
  */
 export function isDelegationBriefingLikeMessage(message: BaseMessage): boolean {
   if (message._getType() !== 'ai') return false;
+  // An accepted handoff is a first-class main AIMessage. Its deliverable text
+  // may legitimately quote or even begin with the legacy briefing marker; the
+  // provenance wins over content-shape compatibility filtering.
+  if (getMessageHandoffSource(message)) return false;
   if (getPinpetMeta(message).source === 'delegation_briefing') return true;
-  return /^【委派简报(?:·继续)?】/.test(readMessageText(message).trimStart());
+  const text = readMessageText(message).trimStart();
+  return /^【委派简报(?:·继续)?】/.test(text)
+    || /^<delegation_briefing(?:\s|>)/.test(text);
 }
 
 export const routeMessages = mainConversationMessages;
@@ -234,7 +240,6 @@ export function tagNewLaneMessages(
       nextMessages[i]._getType() === 'ai'
       && !messageHasToolCalls(nextMessages[i])
       && getPinpetMeta(nextMessages[i]).synthetic !== true
-      && !isDelegationBriefingLikeMessage(nextMessages[i])
       && readMessageText(nextMessages[i])
     ) {
       announceIndex = i;
@@ -249,7 +254,6 @@ export function tagNewLaneMessages(
         (type === 'ai' || type === 'tool')
         && !messageHasToolCalls(nextMessages[i])
         && getPinpetMeta(nextMessages[i]).synthetic !== true
-        && !isDelegationBriefingLikeMessage(nextMessages[i])
         && readMessageText(nextMessages[i])
       ) {
         announceIndex = i;

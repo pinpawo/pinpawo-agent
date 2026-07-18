@@ -4,6 +4,7 @@ import { HumanMessage } from '@langchain/core/messages';
 import {
   ARTIFACT_DISCOVERY_CONTEXT_SOURCE,
   buildArtifactDiscoveryContextMessage,
+  hasArtifactDiscoveryTools,
   withArtifactDiscoveryContext,
 } from './discovery';
 import { getPinpetMeta } from '../messageLanes';
@@ -31,4 +32,13 @@ test('artifact discovery context is prepended only when a root is configured', (
   assert.equal(getPinpetMeta(withContext[0]).source, ARTIFACT_DISCOVERY_CONTEXT_SOURCE);
   assert.equal(withContext[1], messages[0]);
   assert.equal(withArtifactDiscoveryContext(messages, null), messages);
+});
+
+test('artifact discovery requires both read-only file tools', () => {
+  const listDir = { name: 'list_dir' };
+  const viewFileChunk = { name: 'view_file_chunk' };
+
+  assert.equal(hasArtifactDiscoveryTools([listDir, viewFileChunk]), true);
+  assert.equal(hasArtifactDiscoveryTools([listDir]), false);
+  assert.equal(hasArtifactDiscoveryTools([viewFileChunk]), false);
 });

@@ -3,12 +3,14 @@ import {
   defineToolkit,
   ReviewPolicies,
   type AgentToolkit,
+  type AgentToolset,
 } from '@pinpawo/pet-agent';
 import { createOperationRegistryFromToolkits } from '../../events/operationRegistry';
 import type { LocalAgentPlugin } from '../../pluginLoader';
 import {
   applyPatchTool,
   copyPathTool,
+  createArtifactDiscoveryFileTools,
   listDirTool,
   mkdirPathTool,
   movePathTool,
@@ -53,6 +55,18 @@ const coreLocalTools: StructuredTool[] = [
   getCurrentTimeTool,
   runShellTool,
 ];
+
+export function createArtifactDiscoveryToolset(root: string): AgentToolset {
+  return {
+    name: 'artifact_discovery',
+    description: '只读列出并分块读取当前 thread 的 capability artifacts。',
+    tools: createArtifactDiscoveryFileTools(root),
+    operations: {
+      list_dir: fileOperationMetadata.list_dir,
+      view_file_chunk: fileOperationMetadata.view_file_chunk,
+    },
+  };
+}
 
 const bashToolkitInstructions = [
   '你可以使用本地文件、搜索、下载和 shell 工具完成任务。',

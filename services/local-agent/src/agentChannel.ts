@@ -34,6 +34,7 @@ import {
 } from './chatInterface';
 import { inferLlmStructuredOutputMethod } from './llmModelPresets';
 import { resolveCapabilityArtifactThreadRoot } from './capabilityArtifactStore';
+import { createArtifactDiscoveryToolset } from './toolkits/local';
 
 function buildActor(context: AgentContext) {
   return {
@@ -256,6 +257,9 @@ export function buildLocalChatAgentInput(params: {
   for (const { meta, capability } of params.userCapabilities ?? []) {
     if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
   }
+  const artifactDiscoveryRoot = params.threadId && params.capabilityArtifactRoot
+    ? resolveCapabilityArtifactThreadRoot(params.capabilityArtifactRoot, params.threadId)
+    : undefined;
 
   return {
     graphKey: buildGraphKey([
@@ -289,8 +293,9 @@ export function buildLocalChatAgentInput(params: {
         dryRun: params.dryRun,
       },
       workdir: params.workdir,
-      artifactDiscoveryRoot: params.threadId && params.capabilityArtifactRoot
-        ? resolveCapabilityArtifactThreadRoot(params.capabilityArtifactRoot, params.threadId)
+      artifactDiscoveryRoot,
+      artifactDiscoveryToolset: artifactDiscoveryRoot
+        ? createArtifactDiscoveryToolset(artifactDiscoveryRoot)
         : undefined,
       runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir, {
         sessionStartedAt: params.sessionStartedAt,

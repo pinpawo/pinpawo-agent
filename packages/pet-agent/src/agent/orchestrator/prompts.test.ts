@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HumanMessage } from '@langchain/core/messages';
-import { buildDelegationBriefingMessage } from './delegationBriefing';
+import { materializeDelegation } from './delegationBriefing';
 import {
   buildAnswerSystemPrompt,
   buildCapabilityArtifactContext,
@@ -55,13 +55,14 @@ test('start-loop router request context includes compaction summaries outside re
 });
 
 test('decision recent messages label delegation briefings as scheduling context', () => {
-  const briefing = buildDelegationBriefingMessage({
+  const [briefing] = materializeDelegation({
+    mode: 'initial',
     lane: 'general',
     runId: 'run-1',
     delegationId: 'delegation-1',
     task: '只完成任务 A',
-    contextSummary: null,
-  });
+    essentialContext: null,
+  }).laneMessages;
   const requestContext = buildPreparedRequestContext({
     latestUserRequest: '完成 A 和 B',
     recentMessages: [briefing],

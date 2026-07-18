@@ -52,11 +52,7 @@ import {
   appendRunDelegationSummary,
   resumeRunDelegationSummary,
 } from '../../delegations';
-import {
-  buildContinuationBriefingMessage,
-  buildDelegationBriefingMessage,
-  buildDelegationPlanMessage,
-} from '../../delegationBriefing';
+import { materializeDelegation } from '../../delegationBriefing';
 import {
   ACTIVE_DELEGATION_LIMIT_REACHED,
   delegationOutcomeDecisionGuard,
@@ -668,24 +664,23 @@ function buildCapabilityDecisionResult(params: {
   // is the single point where both entry direct_task and planner next_task
   // become a real delegation; bail-out paths above never leave a stale
   // "当前执行 X" briefing behind. See issue #362.
-  const briefingMessage = buildDelegationBriefingMessage({
+  const materializedDelegation = materializeDelegation({
+    mode: 'initial',
     lane: runNextDelegation.lane,
     runId: nextTaskActiveDelegation.transcriptRunId,
     delegationId: runNextDelegation.id,
     task: runNextDelegation.task,
     // Pre-fallback value: the '继续完成用户当前请求。' placeholder that pads
     // runNextDelegation.contextSummary carries no execution guidance, so the
-    // briefing omits its context line rather than rendering filler.
-    contextSummary: pendingTask.contextSummary,
-  });
-  const planMessage = buildDelegationPlanMessage({
-    runId: nextTaskActiveDelegation.transcriptRunId,
-    delegationId: runNextDelegation.id,
-    task: runNextDelegation.task,
+    // briefing omits its context element rather than rendering filler.
+    essentialContext: pendingTask.contextSummary,
   });
 
   return {
-    messages: [planMessage, briefingMessage],
+    messages: [
+      ...materializedDelegation.mainMessages,
+      ...materializedDelegation.laneMessages,
+    ],
     runNextDelegation,
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,
@@ -769,7 +764,8 @@ function buildContinueDelegationResult(params: {
   // reviewer's gap note — a rejected announce without a reason would leave the
   // subagent re-announcing the same conclusion. gapNote may be null (e.g.
   // limit_reached), where continuing is self-evident from the transcript.
-  const briefingMessage = buildContinuationBriefingMessage({
+  const materializedDelegation = materializeDelegation({
+    mode: 'continue',
     lane: activeDelegation.lane,
     runId: activeDelegation.transcriptRunId,
     delegationId: runNextDelegation.id,
@@ -777,7 +773,7 @@ function buildContinueDelegationResult(params: {
     gapNote,
   });
   return {
-    messages: [briefingMessage],
+    messages: materializedDelegation.laneMessages,
     runNextDelegation,
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,

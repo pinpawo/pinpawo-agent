@@ -133,13 +133,12 @@ function parseTuiSessionState(value: unknown): TuiSessionState {
     return createEmptyTuiSessionState();
   }
   const record = value as Record<string, unknown>;
-  if (record.version === 2) {
-    return parseVersionedState(record);
-  }
-  return parseV1SuffixMap(record);
+  return record.version === 2
+    ? parseCurrentState(record)
+    : createEmptyTuiSessionState();
 }
 
-function parseVersionedState(record: Record<string, unknown>): TuiSessionState {
+function parseCurrentState(record: Record<string, unknown>): TuiSessionState {
   const state = createEmptyTuiSessionState();
   const activeSessionIds = readRecord(record.activeSessionIds);
   const sessions = readRecord(record.sessions);
@@ -162,42 +161,39 @@ function parseVersionedState(record: Record<string, unknown>): TuiSessionState {
   return state;
 }
 
-function parseV1SuffixMap(record: Record<string, unknown>): TuiSessionState {
-  const state = createEmptyTuiSessionState();
-  const now = new Date().toISOString();
-  for (const [petId, suffix] of Object.entries(record)) {
-    if (typeof suffix !== 'string' || !suffix) continue;
-    const id = `${petId}:${suffix}`;
-    state.sessions[id] = {
-      id,
-      petId,
-      suffix,
-      threadId: buildTuiChatThreadId({ petId, sessionSuffix: suffix }),
-      title: '已恢复会话',
-      messageCount: 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-    state.activeSessionIds[petId] = id;
-  }
-  return state;
-}
-
 function parseSessionRecord(id: string, value: unknown): TuiSessionRecord | null {
   const record = readRecord(value);
   if (!record) return null;
+  const recordId = readString(record.id);
   const petId = readString(record.petId);
   const suffix = readString(record.suffix);
+  const threadId = readString(record.threadId);
+  const title = readString(record.title);
+  const messageCount = readNonNegativeInteger(record.messageCount);
   const createdAt = readString(record.createdAt);
   const updatedAt = readString(record.updatedAt);
-  if (!petId || !suffix || !createdAt || !updatedAt) return null;
+  if (
+    !recordId
+    || recordId !== id
+    || !petId
+    || !suffix
+    || recordId !== `${petId}:${suffix}`
+    || !threadId
+    || threadId !== buildTuiChatThreadId({ petId, sessionSuffix: suffix })
+    || !title
+    || messageCount === null
+    || !createdAt
+    || !updatedAt
+  ) {
+    return null;
+  }
   return {
-    id: readString(record.id) || id,
+    id: recordId,
     petId,
     suffix,
-    threadId: readString(record.threadId) || buildTuiChatThreadId({ petId, sessionSuffix: suffix }),
-    title: readString(record.title) || '已恢复会话',
-    messageCount: readNumber(record.messageCount) ?? 0,
+    threadId,
+    title,
+    messageCount,
     createdAt,
     updatedAt,
   };
@@ -213,6 +209,8 @@ function readString(value: unknown) {
   return typeof value === 'string' ? value : null;
 }
 
-function readNumber(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+function readNonNegativeInteger(value: unknown) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
 }

@@ -158,7 +158,6 @@ function acceptUserInput(
     role: 'user',
     requestId: input.requestId,
     text: input.text,
-    source: message.source ?? 'local-input',
   }, context);
 }
 
@@ -189,7 +188,6 @@ function reduceRuntimeEvent(
         role: 'system',
         requestId: event.requestId,
         text: message?.text ?? event.message ?? 'internal error',
-        source: message?.source ?? 'live-event',
       }], undefined, context);
   }
 }
@@ -207,7 +205,6 @@ function appendRuntimeSystemMessage(
     role: 'system',
     requestId,
     text: message?.text ?? text,
-    source: message?.source ?? 'live-event',
   }, context);
 }
 
@@ -237,7 +234,6 @@ function appendAssistantDelta(
       requestId,
       text: token,
       status: 'streaming',
-      source: 'live-event',
       ...(createdAt ? { createdAt } : {}),
     });
   }
@@ -330,7 +326,6 @@ function appendSubagentDelta(
     requestId,
     text,
     status: 'streaming',
-    source: 'live-event',
     ...(previous?.createdAt ? { createdAt: previous.createdAt } : {}),
     ...(previous?.updatedAt ? { updatedAt: previous.updatedAt } : {}),
   };
@@ -414,7 +409,6 @@ function appendMessage(
     role: message.role,
     text: message.text,
     status: 'completed',
-    source: message.source ?? 'live-event',
     ...(message.requestId ? { requestId: message.requestId } : {}),
     ...createdAtField(message.createdAt, context),
   };
@@ -447,7 +441,6 @@ function finalizeAssistantMessage(
       requestId,
       text,
       status: 'completed',
-      source: 'live-event',
       ...createdAtField(message?.createdAt, context),
     });
   }

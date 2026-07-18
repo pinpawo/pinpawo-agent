@@ -278,7 +278,6 @@ function message(
     requestId: 'run1',
     text,
     status,
-    source: 'live-event',
   };
 }
 
@@ -294,7 +293,6 @@ function operation(
     kind: 'tool',
     title: 'Tool',
     phase,
-    source: 'live-event',
     startedAt: 1000,
     updatedAt: phase === 'completed' ? 2000 : 1000,
     ...(phase === 'completed' ? { completedAt: 2000 } : {}),

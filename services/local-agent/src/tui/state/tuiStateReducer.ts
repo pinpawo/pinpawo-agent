@@ -233,7 +233,7 @@ function applyLoadedSessionSnapshot(
     focusedSessionId: incoming.sessionId,
     statusNotice: action.reason === 'resume' ? null : state.statusNotice,
     ui: action.reason === 'resume'
-      ? { mode: 'chat' as const, studioConversationId: null, externalEditorOpen: false }
+      ? { composerTarget: 'chat' as const, studioConversationId: null, externalEditorOpen: false }
       : state.ui,
   };
 }
@@ -328,28 +328,28 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         : undefined;
       const nextState = applySessionInput({
         ...state,
-        ui: { mode: 'chat', studioConversationId: null, externalEditorOpen: false },
+        ui: { composerTarget: 'chat', studioConversationId: null, externalEditorOpen: false },
         statusNotice: sessionId === state.focusedSessionId
           ? action.statusNotice ?? null
           : state.statusNotice,
       }, sessionId, { type: 'session.cleared' }, 0);
       return removeReviewDraft(nextState, actionId);
     }
-    case 'ui.mode.set':
+    case 'ui.composer_target.set':
       return {
         ...state,
         ui: {
           ...state.ui,
-          mode: action.mode,
-          studioConversationId: action.mode === 'studio'
+          composerTarget: action.composerTarget,
+          studioConversationId: action.composerTarget === 'studio'
             ? action.studioConversationId ?? state.ui.studioConversationId
             : null,
         },
       };
-    case 'ui.mode.reset':
+    case 'ui.composer_target.reset':
       return {
         ...state,
-        ui: { ...state.ui, mode: 'chat', studioConversationId: null },
+        ui: { ...state.ui, composerTarget: 'chat', studioConversationId: null },
       };
     case 'ui.external_editor.set_open':
       return {
@@ -411,7 +411,6 @@ export function tuiStateReducer(state: TuiState, action: TuiAction): TuiState {
         text: action.message.text,
         message: {
           ...(action.message.id ? { id: action.message.id } : {}),
-          ...(action.message.source ? { source: action.message.source } : {}),
           ...(action.message.createdAt ? { createdAt: action.message.createdAt } : {}),
         },
       }, action.now);

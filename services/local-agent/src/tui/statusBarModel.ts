@@ -2,7 +2,7 @@ import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import stringWidth from 'string-width';
 import { formatGlobalReviewPolicyMode } from './globalReviewPolicyPicker';
 import { truncateLine } from './render/terminalText';
-import type { SessionModel, TuiInteractionMode } from './state/tuiState';
+import type { SessionModel, TuiComposerTarget } from './state/tuiState';
 
 const LOCALE_FORMATTER = new Intl.NumberFormat('zh-CN');
 const STATUS_SEPARATOR = ' · ';
@@ -34,7 +34,7 @@ export function buildStatusBarModel(input: {
   activityStatus?: string | null;
   statusNotice?: string | null;
   connectionStatus: string;
-  mode: TuiInteractionMode;
+  composerTarget: TuiComposerTarget;
   session: SessionModel | null;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   overlayOwner?: string | null;
@@ -66,10 +66,10 @@ export function buildStatusBarModel(input: {
         truncation: 'truncate',
       },
       {
-        id: 'mode',
-        value: formatInteractionMode(input.mode),
+        id: 'composer-target',
+        value: formatComposerTarget(input.composerTarget),
         priority: 90,
-        tone: input.mode === 'studio' ? 'info' : 'muted',
+        tone: input.composerTarget === 'studio' ? 'info' : 'muted',
         truncation: 'preserve',
       },
       ...(input.overlayOwner ? [{
@@ -261,8 +261,8 @@ function formatSegment(segment: StatusSegment) {
   return segment.label ? `${segment.label}:${segment.value}` : segment.value;
 }
 
-function formatInteractionMode(mode: TuiInteractionMode) {
-  return mode === 'studio' ? 'Studio' : 'Chat';
+function formatComposerTarget(target: TuiComposerTarget) {
+  return target === 'studio' ? 'Studio' : 'Chat';
 }
 
 function statusTone(status: string): StatusSegmentTone {

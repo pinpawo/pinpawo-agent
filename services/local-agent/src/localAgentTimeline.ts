@@ -31,7 +31,6 @@ export function localAgentOperationEntryFromEvent(
     kind: operation.kind,
     title: operation.title ?? previous?.title ?? operation.kind,
     phase: event.phase,
-    source: 'live-event',
     ...(operation.target !== undefined
       ? { target: operation.target }
       : previous?.target !== undefined

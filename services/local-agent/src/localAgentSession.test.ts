@@ -17,7 +17,6 @@ test('LocalAgentSession snapshot owns one active run and one ordered timeline', 
         role: 'assistant',
         text: 'final answer',
         status: 'completed',
-        source: 'checkpoint',
         requestId: 'req-1',
       }],
       activeRun: null,
@@ -30,7 +29,7 @@ test('LocalAgentSession snapshot owns one active run and one ordered timeline', 
     },
   };
 
-  assert.equal(snapshot.version, 2);
+  assert.equal(snapshot.version, 3);
   assert.equal(snapshot.session.timeline[0]?.type, 'message');
   assert.equal(snapshot.session.activeRun, null);
 });

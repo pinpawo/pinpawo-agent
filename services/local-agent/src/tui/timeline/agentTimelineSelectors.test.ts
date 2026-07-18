@@ -228,7 +228,6 @@ test('splitTimelineForViewport keeps only the settled prefix static', () => {
     requestId: 'req-1',
     text: 'hello',
     status: 'completed',
-    source: 'local-input',
   };
   const streamingAssistantEntry: LocalAgentTimelineEntry = {
     id: 'req-1:assistant:0',
@@ -237,7 +236,6 @@ test('splitTimelineForViewport keeps only the settled prefix static', () => {
     requestId: 'req-1',
     text: 'working',
     status: 'streaming',
-    source: 'live-event',
   };
   const operationEntry = localAgentOperationEntryFromEvent(operationEvent({
     phase: 'completed',
@@ -251,7 +249,6 @@ test('splitTimelineForViewport keeps only the settled prefix static', () => {
     requestId: 'req-1',
     text: 'done',
     status: 'completed',
-    source: 'live-event',
   };
 
   const streamingEntries = [userEntry, streamingAssistantEntry, operationEntry, assistantEntry];
@@ -280,7 +277,6 @@ test('timeline viewport keeps system and subagent messages in canonical order', 
       role: 'user',
       text: 'hello',
       status: 'completed',
-      source: 'local-input',
     },
     {
       id: 'notice-1',
@@ -288,7 +284,6 @@ test('timeline viewport keeps system and subagent messages in canonical order', 
       role: 'system',
       text: 'after user',
       status: 'completed',
-      source: 'live-event',
     },
     {
       id: 'req-1:operation:tool',
@@ -298,7 +293,6 @@ test('timeline viewport keeps system and subagent messages in canonical order', 
       kind: 'tool',
       title: 'Tool',
       phase: 'completed',
-      source: 'live-event',
       startedAt: 1000,
       updatedAt: 1100,
     },
@@ -309,7 +303,6 @@ test('timeline viewport keeps system and subagent messages in canonical order', 
       requestId: 'req-1',
       text: 'working',
       status: 'streaming',
-      source: 'live-event',
     },
     {
       id: 'req-1:assistant:0',
@@ -317,7 +310,6 @@ test('timeline viewport keeps system and subagent messages in canonical order', 
       role: 'assistant',
       text: 'done',
       status: 'streaming',
-      source: 'live-event',
     },
   ];
   assert.deepEqual(timeline.map((entry) => entry.id), [
@@ -348,7 +340,6 @@ test('buildTimelineViewportModel derives display entries and viewport split toge
       role: 'user',
       text: 'hello',
       status: 'completed',
-      source: 'local-input',
     },
     {
       id: 'notice-1',
@@ -356,7 +347,6 @@ test('buildTimelineViewportModel derives display entries and viewport split toge
       role: 'system',
       text: 'after user',
       status: 'completed',
-      source: 'live-event',
     },
     {
       id: 'req-1:assistant:0',
@@ -364,7 +354,6 @@ test('buildTimelineViewportModel derives display entries and viewport split toge
       role: 'assistant',
       text: 'working',
       status: 'streaming',
-      source: 'live-event',
     },
   ];
 

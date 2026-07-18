@@ -61,7 +61,6 @@ export function buildTuiActionsFromServerMessage(
           role: 'assistant',
           text: TUI_TEXT.interrupted,
           requestId: message.requestId,
-          source: 'live-event',
         })],
         statusNotice: TUI_TEXT.interruptedStatus,
       }],
@@ -74,14 +73,12 @@ export function buildTuiActionsFromServerMessage(
       role: reply ? 'assistant' : 'system',
       text: reply || TUI_TEXT.studioEmptyTurn(message.outcome),
       requestId: message.requestId,
-      source: 'live-event',
     })];
     if (message.outcome === 'stopped' && message.reason) {
       messages.push(options.createMessage({
         role: 'system',
         text: TUI_TEXT.studioStoppedReason(message.reason),
         requestId: message.requestId,
-        source: 'live-event',
       }));
     }
     return {
@@ -103,7 +100,6 @@ export function buildTuiActionsFromServerMessage(
         role: 'system',
         text: TUI_TEXT.studioErrorLine(message.message || 'studio error'),
         requestId: message.requestId,
-        source: 'live-event',
       })],
       statusNotice: TUI_TEXT.studioErrorRecovered,
     }],
@@ -122,7 +118,6 @@ function runtimeEventMessage(
             role: 'system',
             requestId: event.requestId,
             text,
-            source: 'live-event',
           })
         : undefined;
     }
@@ -133,7 +128,6 @@ function runtimeEventMessage(
             role: 'system',
             requestId: event.requestId,
             text,
-            source: 'live-event',
           })
         : undefined;
     }
@@ -142,7 +136,6 @@ function runtimeEventMessage(
         role: 'system',
         requestId: event.requestId,
         text: TUI_TEXT.errorLine(event.message || 'internal error'),
-        source: 'live-event',
       });
     default:
       return undefined;

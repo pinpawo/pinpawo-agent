@@ -16,7 +16,7 @@ type ResumePickerControllerOptions = {
   clearInputValue: () => void;
   dispatch: (action: TuiAction) => void;
   resetTimelineView: () => void;
-  resetStudioMode: () => void;
+  resetComposerTarget: () => void;
   runtimeController: Pick<TuiRuntimeController, 'listResumeSessions' | 'resumeSession'>;
 };
 
@@ -86,7 +86,7 @@ export function useResumePickerController(options: ResumePickerControllerOptions
     }));
     void options.runtimeController.resumeSession(selected.id).then(({ session, snapshot }) => {
       if (resumeRequestIdRef.current !== requestId) return;
-      options.resetStudioMode();
+      options.resetComposerTarget();
       options.resetTimelineView();
       options.dispatch({
         type: 'session.snapshot.loaded',

@@ -121,7 +121,7 @@ test('TuiLocalServerClient rejects malformed current snapshots', async () => {
     port: 3210,
     fetchImpl: (async (url: RequestInfo | URL) => {
       return jsonResponse({
-        version: 2,
+        version: 3,
         session: {
           sessionId: 'chat:pet',
           kind: 'chat',
@@ -131,7 +131,6 @@ test('TuiLocalServerClient rejects malformed current snapshots', async () => {
             role: 'subagent',
             text: 'working',
             status: 'streaming',
-            source: 'live-event',
           }],
           activeRun: null,
         },
@@ -241,7 +240,7 @@ test('TuiLocalServerClient rejects the previous snapshot schema version', async 
   const snapshot = sessionSnapshot('chat:pet');
   const client = new TuiLocalServerClient({
     port: 3210,
-    fetchImpl: (async () => jsonResponse({ ...snapshot, version: 1 })) as typeof fetch,
+    fetchImpl: (async () => jsonResponse({ ...snapshot, version: 2 })) as typeof fetch,
   });
 
   await assert.rejects(() => client.readSessionSnapshot(), /invalid local server snapshot payload/);
@@ -296,7 +295,7 @@ test('TuiLocalServerClient treats health errors as unhealthy', async () => {
 
 function sessionSnapshot(sessionId: string) {
   return {
-    version: 2,
+    version: 3,
     session: {
       sessionId,
       kind: 'chat',
@@ -307,7 +306,6 @@ function sessionSnapshot(sessionId: string) {
           role: 'user',
           text: 'restored from checkpoint',
           status: 'completed',
-          source: 'checkpoint',
           requestId: 'req-review',
         },
         {
@@ -318,7 +316,6 @@ function sessionSnapshot(sessionId: string) {
           kind: 'browser.open',
           title: 'Open page',
           phase: 'completed',
-          source: 'live-event',
         },
       ],
       activeRun: {

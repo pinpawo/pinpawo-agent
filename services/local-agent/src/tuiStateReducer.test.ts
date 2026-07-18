@@ -48,7 +48,7 @@ function sessionSnapshot(input: {
   tokenUsage?: LocalAgentSessionSnapshot['session']['tokenUsage'];
 }): LocalAgentSessionSnapshot {
   return {
-    version: 2,
+    version: 3,
     session: {
       sessionId: input.sessionId,
       kind: input.kind,
@@ -71,7 +71,6 @@ function startRun(state: TuiState, requestId = 'req-1', sessionId?: string) {
       role: 'user',
       text: 'hello',
       requestId,
-      source: 'local-input',
       createdAt: new Date(1000).toISOString(),
     },
     now: 1000,
@@ -102,18 +101,18 @@ test('tuiStateReducer initializes reducer-owned UI owner state', () => {
   const state = initialState();
 
   assert.deepEqual(state.ui, {
-    mode: 'chat',
+    composerTarget: 'chat',
     studioConversationId: null,
     externalEditorOpen: false,
   });
 });
 
-test('tuiStateReducer updates mode and external editor owner state', () => {
+test('tuiStateReducer updates composer target and external editor owner state', () => {
   let state = initialState();
 
   state = tuiStateReducer(state, {
-    type: 'ui.mode.set',
-    mode: 'studio',
+    type: 'ui.composer_target.set',
+    composerTarget: 'studio',
     studioConversationId: 'conversation-1',
   });
   state = tuiStateReducer(state, {
@@ -121,13 +120,13 @@ test('tuiStateReducer updates mode and external editor owner state', () => {
     open: true,
   });
 
-  assert.equal(state.ui.mode, 'studio');
+  assert.equal(state.ui.composerTarget, 'studio');
   assert.equal(state.ui.studioConversationId, 'conversation-1');
   assert.equal(state.ui.externalEditorOpen, true);
 
-  state = tuiStateReducer(state, { type: 'ui.mode.reset' });
+  state = tuiStateReducer(state, { type: 'ui.composer_target.reset' });
 
-  assert.equal(state.ui.mode, 'chat');
+  assert.equal(state.ui.composerTarget, 'chat');
   assert.equal(state.ui.studioConversationId, null);
   assert.equal(state.ui.externalEditorOpen, true);
 });
@@ -609,7 +608,6 @@ test('tuiStateReducer displays subagent deltas as timeline message entries', () 
     requestId: 'req-1',
     text: '先检查文件，再整理结果。',
     status: 'streaming',
-    source: 'live-event',
   });
   assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'req-1:subagent-output'), true);
 
@@ -682,7 +680,6 @@ test('tuiStateReducer stores notice and studio progress events as system timelin
       role: 'system',
       text: '授权已更新',
       requestId: 'req-1',
-      source: 'live-event',
       createdAt: new Date(1100).toISOString(),
     },
   });
@@ -703,7 +700,6 @@ test('tuiStateReducer stores notice and studio progress events as system timelin
       role: 'system',
       text: '[studio] tasks queued：2 项',
       requestId: 'req-1',
-      source: 'live-event',
       createdAt: new Date(1200).toISOString(),
     },
   });
@@ -715,7 +711,6 @@ test('tuiStateReducer stores notice and studio progress events as system timelin
       role: 'system',
       text: '授权已更新',
       status: 'completed',
-      source: 'live-event',
       requestId: 'req-1',
       createdAt: new Date(1100).toISOString(),
     },
@@ -725,7 +720,6 @@ test('tuiStateReducer stores notice and studio progress events as system timelin
       role: 'system',
       text: '[studio] tasks queued：2 项',
       status: 'completed',
-      source: 'live-event',
       requestId: 'req-1',
       createdAt: new Date(1200).toISOString(),
     },
@@ -769,7 +763,7 @@ test('tuiStateReducer clears session token usage when clearing session state', (
   state = {
     ...state,
     ui: {
-      mode: 'studio',
+      composerTarget: 'studio',
       studioConversationId: 'conversation-1',
       externalEditorOpen: true,
     },
@@ -794,7 +788,7 @@ test('tuiStateReducer clears session token usage when clearing session state', (
   assert.equal(state.sessions['chat:pet']?.tokenUsage, undefined);
   assert.equal(state.sessions['chat:pet']?.kind, 'chat');
   assert.deepEqual(state.ui, {
-    mode: 'chat',
+    composerTarget: 'chat',
     studioConversationId: null,
     externalEditorOpen: false,
   });
@@ -846,7 +840,6 @@ test('tuiStateReducer materializes timeline state from a checkpoint snapshot', (
           role: 'user',
           text: 'hello',
           status: 'completed',
-          source: 'checkpoint',
           requestId: 'req-1',
         },
         {
@@ -855,7 +848,6 @@ test('tuiStateReducer materializes timeline state from a checkpoint snapshot', (
           role: 'assistant',
           text: 'hi',
           status: 'completed',
-          source: 'checkpoint',
           requestId: 'req-1',
         },
       ],
@@ -937,7 +929,6 @@ test('tuiStateReducer applies completed output before reconnect without a termin
           role: 'user',
           text: 'hello',
           status: 'completed',
-          source: 'checkpoint',
           requestId: 'req-done',
         },
         {
@@ -946,7 +937,6 @@ test('tuiStateReducer applies completed output before reconnect without a termin
           role: 'assistant',
           text: 'done',
           status: 'completed',
-          source: 'checkpoint',
           requestId: 'req-done',
         },
       ],
@@ -972,7 +962,7 @@ test('tuiStateReducer resumes a session from snapshot while clearing previous ru
   state = {
     ...state,
     ui: {
-      mode: 'studio',
+      composerTarget: 'studio',
       studioConversationId: 'conversation-1',
       externalEditorOpen: true,
     },
@@ -991,7 +981,6 @@ test('tuiStateReducer resumes a session from snapshot while clearing previous ru
           role: 'user',
           text: 'resumed',
           status: 'completed',
-          source: 'checkpoint',
         },
       ],
       activeRun: null,
@@ -1002,7 +991,7 @@ test('tuiStateReducer resumes a session from snapshot while clearing previous ru
   assert.equal(activeRun(state, 'old-req'), undefined);
   assert.equal((state.sessions['chat:old']?.activeRun?.requestId ?? null), null);
   assert.deepEqual(state.ui, {
-    mode: 'chat',
+    composerTarget: 'chat',
     studioConversationId: null,
     externalEditorOpen: false,
   });
@@ -1115,7 +1104,6 @@ test('tuiStateReducer replaces live-only operation and subagent entries on compl
             kind: 'shell',
             title: 'Run command',
             phase: 'completed',
-            source: 'live-event',
           },
           {
             id: 'message:live-subagent',
@@ -1124,7 +1112,6 @@ test('tuiStateReducer replaces live-only operation and subagent entries on compl
             requestId: 'req-1',
             text: 'live subagent detail',
             status: 'completed',
-            source: 'live-event',
           },
         ],
       },
@@ -1143,7 +1130,6 @@ test('tuiStateReducer replaces live-only operation and subagent entries on compl
         role: 'user',
         text: 'hello',
         status: 'completed',
-        source: 'checkpoint',
       }],
       activeRun: null,
     }),
@@ -1168,7 +1154,6 @@ test('tuiStateReducer restores checkpoint-owned pending approval from a snapshot
           role: 'user',
           text: 'needs approval',
           status: 'completed',
-          source: 'checkpoint',
           requestId: 'req-review',
         },
       ],
@@ -1294,7 +1279,6 @@ test('tuiStateReducer ignores late terminal events after interrupt release and s
         role: 'user',
         text: 'hello',
         status: 'completed',
-        source: 'checkpoint',
       }],
       activeRun: null,
     }),
@@ -1856,7 +1840,6 @@ test('tuiStateReducer finishes error and terminal messages', () => {
       role: 'system',
       text: '出错：boom',
       requestId: 'chat-req',
-      source: 'live-event',
       createdAt: new Date(1200).toISOString(),
     },
   });

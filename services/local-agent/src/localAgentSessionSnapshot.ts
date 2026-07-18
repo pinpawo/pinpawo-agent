@@ -73,7 +73,6 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): Local
       role: message.role,
       text,
       status: 'completed',
-      source: 'checkpoint',
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),
     } satisfies LocalAgentTimelineEntry];
   });

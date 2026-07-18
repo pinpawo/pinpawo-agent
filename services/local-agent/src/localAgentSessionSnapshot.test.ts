@@ -55,7 +55,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     },
   });
 
-  assert.equal(snapshot.version, 2);
+  assert.equal(snapshot.version, 3);
   assert.equal(snapshot.session.sessionId, 'chat:pet-a');
   assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.id, entry.type, entry.type === 'message' ? entry.role : '']), [
     ['message:0:user', 'message', 'user'],

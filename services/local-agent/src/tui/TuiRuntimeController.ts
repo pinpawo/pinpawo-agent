@@ -147,7 +147,6 @@ export class TuiRuntimeController {
         role: 'user',
         text: message,
         requestId,
-        source: 'local-input',
       }, now),
       now,
     });
@@ -185,7 +184,6 @@ export class TuiRuntimeController {
         role: 'user',
         text: TUI_TEXT.studioUserMessage(userRequest),
         requestId,
-        source: 'local-input',
       }, now),
       now,
     });
@@ -315,7 +313,6 @@ export class TuiRuntimeController {
           role: 'system',
           text: TUI_TEXT.interruptRequestedLocalRelease,
           requestId: interruptRequestId,
-          source: 'live-event',
         })],
       });
     }, 1800);
@@ -350,7 +347,6 @@ export class TuiRuntimeController {
       message: createTuiMessage({
         role: 'system',
         text,
-        source: 'live-event',
       }),
     });
   }

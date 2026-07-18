@@ -138,7 +138,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const contentWidth = screenModel.regions.timeline.width;
   const textAreaWidth = screenModel.regions.composer.textAreaWidth;
   const reviewOptions = pendingApproval?.review.options ?? [];
-  const uiMode = tuiState.ui.mode;
+  const composerTarget = tuiState.ui.composerTarget;
   const externalEditorOpen = tuiState.ui.externalEditorOpen;
 
   useEffect(() => {
@@ -161,7 +161,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
       message: createTuiMessage({
         role,
         text,
-        source: role === 'user' ? 'local-input' : 'live-event',
       }),
     });
   };
@@ -170,20 +169,20 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     dispatch({ type: 'input.set', value: '', cursorOffset: 0 });
   };
 
-  const resetStudioMode = () => {
-    dispatch({ type: 'ui.mode.reset' });
+  const resetComposerTarget = () => {
+    dispatch({ type: 'ui.composer_target.reset' });
   };
 
-  const enterStudioMode = (conversationId: string) => {
+  const selectStudioComposerTarget = (conversationId: string) => {
     dispatch({
-      type: 'ui.mode.set',
-      mode: 'studio',
+      type: 'ui.composer_target.set',
+      composerTarget: 'studio',
       studioConversationId: conversationId,
     });
   };
 
-  const exitStudioMode = () => {
-    dispatch({ type: 'ui.mode.reset' });
+  const selectChatComposerTarget = () => {
+    dispatch({ type: 'ui.composer_target.reset' });
   };
 
   const {
@@ -199,7 +198,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     appendSystemMessage: (text) => appendMessage('system', text),
     clearInputValue,
     dispatch,
-    resetStudioMode,
+    resetComposerTarget,
     resetTimelineView,
     runtimeController,
   });
@@ -350,10 +349,10 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     submitCurrentInputFromController({
       inputValue: value,
       focusedSession,
-      mode: uiMode,
+      composerTarget,
       studioConversationId: tuiState.ui.studioConversationId,
-      enterStudioMode,
-      exitStudioMode,
+      selectStudioComposerTarget,
+      selectChatComposerTarget,
       openResumePicker,
       openGlobalReviewPolicyPicker,
       openExternalEditor,
@@ -604,7 +603,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     activityStatus: screenModel.regions.statusBar.activityStatus,
     statusNotice: screenModel.regions.statusBar.statusNotice,
     connectionStatus: screenModel.regions.statusBar.connectionStatus,
-    mode: uiMode,
+    composerTarget,
     session: focusedSession,
     globalReviewPolicyMode,
     overlayOwner: overlayModel.current?.label ?? null,
@@ -615,7 +614,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     screenModel.regions.statusBar.activityStatus,
     screenModel.regions.statusBar.connectionStatus,
     screenModel.regions.statusBar.statusNotice,
-    uiMode,
+    composerTarget,
   ]);
 
   return (

@@ -35,16 +35,62 @@ test('tui session registry creates, lists, and resumes sessions without deleting
   ]);
 });
 
-test('tui session registry migrates v1 petId to suffix map', async () => {
+test('tui session registry rejects unversioned and unsupported persisted state', async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
   const filePath = path.join(tmp, 'tui-sessions.json');
-  await writeFile(filePath, JSON.stringify({ 'pet-a': 'abc12345' }), 'utf8');
+  const unsupportedStates = [
+    { 'pet-a': 'abc12345' },
+    { version: 1, activeSessionIds: {}, sessions: {} },
+    { version: 3, activeSessionIds: {}, sessions: {} },
+  ];
 
-  const state = loadTuiSessionState(filePath);
-  const activeId = state.activeSessionIds['pet-a'];
+  for (const persisted of unsupportedStates) {
+    await writeFile(filePath, JSON.stringify(persisted), 'utf8');
+    assert.deepEqual(loadTuiSessionState(filePath), {
+      version: 2,
+      activeSessionIds: {},
+      sessions: {},
+    });
+  }
+});
 
-  assert.equal(activeId, 'pet-a:abc12345');
-  assert.equal(state.sessions['pet-a:abc12345']?.threadId, 'petbot:tui:pet:pet-a:abc12345');
+test('tui session registry drops non-canonical current records', async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
+  const filePath = path.join(tmp, 'tui-sessions.json');
+  const sessionId = 'pet-a:abc12345';
+  const currentRecord = {
+    id: sessionId,
+    petId: 'pet-a',
+    suffix: 'abc12345',
+    threadId: 'petbot:tui:pet:pet-a:abc12345',
+    title: 'Current session',
+    messageCount: 1,
+    createdAt: '2026-06-01T01:00:00.000Z',
+    updatedAt: '2026-06-01T01:01:00.000Z',
+  };
+  const invalidRecords = [
+    { ...currentRecord, id: undefined },
+    { ...currentRecord, id: 'pet-a:different' },
+    { ...currentRecord, threadId: undefined },
+    { ...currentRecord, threadId: 'wrong-thread' },
+    { ...currentRecord, title: undefined },
+    { ...currentRecord, messageCount: undefined },
+    { ...currentRecord, messageCount: -1 },
+    { ...currentRecord, messageCount: 1.5 },
+  ];
+
+  for (const record of invalidRecords) {
+    await writeFile(filePath, JSON.stringify({
+      version: 2,
+      activeSessionIds: { 'pet-a': sessionId },
+      sessions: { [sessionId]: record },
+    }), 'utf8');
+    assert.deepEqual(loadTuiSessionState(filePath), {
+      version: 2,
+      activeSessionIds: {},
+      sessions: {},
+    });
+  }
 });
 
 test('tui session registry persists versioned state', async () => {

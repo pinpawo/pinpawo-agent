@@ -180,7 +180,7 @@ function buildTaskDecisionContext(params: {
       config.decisionStructuredOutput?.method,
     ),
   });
-  const decisionContextMessage = new AIMessage(buildTaskDecisionInput({
+  const decisionContextMessage = new HumanMessage(buildTaskDecisionInput({
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
     runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
   }));

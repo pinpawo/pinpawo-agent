@@ -127,3 +127,20 @@ test('explicit file tools can inspect a scoped artifact path under .pinpawo', as
     path: resolve(artifactDir, 'manifest.json'),
   })), /artifact shortcut/);
 });
+
+test('artifact discovery tools report a clean result when the thread root is missing', async () => {
+  const missingThreadRoot = resolve(makeTree(), 'threads/missing-thread');
+  const scopedTools = createArtifactDiscoveryFileTools(missingThreadRoot);
+  const scopedListDir = scopedTools.find((toolItem) => toolItem.name === 'list_dir');
+  const scopedViewFileChunk = scopedTools.find(
+    (toolItem) => toolItem.name === 'view_file_chunk',
+  );
+  assert.ok(scopedListDir);
+  assert.ok(scopedViewFileChunk);
+
+  const listing = String(await scopedListDir.invoke({ path: '.' }));
+  const content = String(await scopedViewFileChunk.invoke({ path: 'manifest.json' }));
+  assert.match(listing, /current thread has no artifacts/);
+  assert.match(content, /current thread has no artifacts/);
+  assert.doesNotMatch(`${listing}\n${content}`, /ENOENT/);
+});

@@ -709,7 +709,15 @@ function resolveArtifactDiscoveryPath(root: string, inputPath: string) {
   ) {
     throw new Error('path must stay inside the current thread artifact root');
   }
-  const canonicalRoot = realpathSync(rootPath);
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = realpathSync(rootPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error('current thread has no artifacts');
+    }
+    throw err;
+  }
   const canonicalTarget = realpathSync(targetPath);
   const canonicalRelativePath = relative(canonicalRoot, canonicalTarget);
   if (

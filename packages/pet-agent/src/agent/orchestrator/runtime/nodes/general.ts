@@ -110,7 +110,9 @@ export function createGeneralNode(params: {
     ].filter((line) => line !== null) as string[];
 
     const canExploreArtifacts = Boolean(
-      artifactDiscoveryRoot && hasArtifactDiscoveryTools(toolList),
+      artifactDiscoveryRoot
+      && artifactDiscoveryToolset
+      && hasArtifactDiscoveryTools(toolList, artifactDiscoveryToolset.tools),
     );
     const subagentMessages = withArtifactDiscoveryContext(
       scopedMessages,

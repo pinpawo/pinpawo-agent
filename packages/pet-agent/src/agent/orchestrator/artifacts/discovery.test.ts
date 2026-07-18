@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { HumanMessage } from '@langchain/core/messages';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import {
   ARTIFACT_DISCOVERY_CONTEXT_SOURCE,
   buildArtifactDiscoveryContextMessage,
@@ -8,6 +8,7 @@ import {
   withArtifactDiscoveryContext,
 } from './discovery';
 import { getPinpetMeta } from '../messageLanes';
+import { materializeDelegation } from '../delegationBriefing';
 
 test('artifact discovery context exposes only a non-authoritative scoped root', () => {
   const context = buildArtifactDiscoveryContextMessage(
@@ -24,21 +25,39 @@ test('artifact discovery context exposes only a non-authoritative scoped root', 
   assert.doesNotMatch(String(context.content), /manifest\.json|artifact body|preview/);
 });
 
-test('artifact discovery context is prepended only when a root is configured', () => {
-  const messages = [new HumanMessage('检查当前任务')];
+test('artifact discovery context stays before the latest briefing without displacing system', () => {
+  const [briefing] = materializeDelegation({
+    mode: 'initial',
+    lane: 'general',
+    runId: 'run-1',
+    delegationId: 'delegation-1',
+    task: '检查当前任务',
+    essentialContext: null,
+  }).laneMessages;
+  const system = new SystemMessage('压缩摘要');
+  const human = new HumanMessage('检查当前任务');
+  const messages = [system, human, briefing];
   const withContext = withArtifactDiscoveryContext(messages, '/repo/.pinpawo/artifacts');
 
-  assert.equal(withContext.length, 2);
-  assert.equal(getPinpetMeta(withContext[0]).source, ARTIFACT_DISCOVERY_CONTEXT_SOURCE);
-  assert.equal(withContext[1], messages[0]);
+  assert.equal(withContext.length, 4);
+  assert.equal(withContext[0], system);
+  assert.equal(withContext[1], human);
+  assert.equal(getPinpetMeta(withContext[2]).source, ARTIFACT_DISCOVERY_CONTEXT_SOURCE);
+  assert.equal(withContext[3], briefing);
   assert.equal(withArtifactDiscoveryContext(messages, null), messages);
 });
 
-test('artifact discovery requires both read-only file tools', () => {
-  const listDir = { name: 'list_dir' };
-  const viewFileChunk = { name: 'view_file_chunk' };
+test('artifact discovery requires the selected scoped tool instances', () => {
+  const scopedListDir = { name: 'list_dir' };
+  const scopedViewFileChunk = { name: 'view_file_chunk' };
+  const discoveryTools = [scopedListDir, scopedViewFileChunk];
+  const foreignListDir = { name: 'list_dir' };
+  const foreignViewFileChunk = { name: 'view_file_chunk' };
 
-  assert.equal(hasArtifactDiscoveryTools([listDir, viewFileChunk]), true);
-  assert.equal(hasArtifactDiscoveryTools([listDir]), false);
-  assert.equal(hasArtifactDiscoveryTools([viewFileChunk]), false);
+  assert.equal(hasArtifactDiscoveryTools(discoveryTools, discoveryTools), true);
+  assert.equal(hasArtifactDiscoveryTools([scopedListDir], discoveryTools), false);
+  assert.equal(
+    hasArtifactDiscoveryTools([foreignListDir, foreignViewFileChunk], discoveryTools),
+    false,
+  );
 });

@@ -263,7 +263,7 @@ test('task decision reads full canonical main messages and excludes lane announc
 
   assert.deepEqual(
     taskDecisionMessages.map((message) => message._getType?.()),
-    ['system', 'ai', 'ai', 'human', 'ai', 'ai', 'human'],
+    ['system', 'human', 'ai', 'human', 'ai', 'ai', 'human'],
   );
   const contextText = String(taskDecisionMessages[1]?.content ?? '');
   assert.match(contextText, /<entry_decision_context[^>]*>/);

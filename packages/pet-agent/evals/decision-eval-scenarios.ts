@@ -82,11 +82,11 @@ const actor = {
   species: null,
 };
 
-function messages(target: DecisionEvalTarget, prompt: RenderedDecisionPrompt) {
+function messages(prompt: RenderedDecisionPrompt) {
   return prompt.conversationMessages
     ? [
         new SystemMessage(prompt.system),
-        target === 'entry' ? new AIMessage(prompt.input) : new HumanMessage(prompt.input),
+        new HumanMessage(prompt.input),
         ...prompt.conversationMessages,
       ]
     : [new SystemMessage(prompt.system), new HumanMessage(prompt.input)];
@@ -123,7 +123,7 @@ function entryScenarios(): DecisionEvalScenario[] {
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages('entry', render(method)));
+        ).invoke(messages(render(method)));
         const decision = schema.parse(raw);
         const mode = adaptTaskDecisionMode(decision.action);
         const boundaryCount = mode === 'direct_task' ? 1 : 0;
@@ -174,7 +174,7 @@ function plannerScenarios(): DecisionEvalScenario[] {
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages('planner', render(method)));
+        ).invoke(messages(render(method)));
         const decision = schema.parse(raw);
         const remainingPlan = decision.remaining_plan.map((item) => ({
           objective: item.objective,
@@ -254,7 +254,7 @@ function capabilityScenarios(): DecisionEvalScenario[] {
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages('capability', render(method)));
+        ).invoke(messages(render(method)));
         const decision = schema.parse(raw);
         const candidateNames = candidates.map(({ name }) => name);
         const output = { lane: decision.lane, candidateNames };
@@ -322,7 +322,7 @@ function outcomeScenarios(): DecisionEvalScenario[] {
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages('outcome', render(method)));
+        ).invoke(messages(render(method)));
         const decision = schema.parse(raw);
         const output = { outcome: decision.outcome, gapNote: decision.gap_note ?? null };
         return {

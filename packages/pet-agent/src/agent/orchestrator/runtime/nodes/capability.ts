@@ -135,7 +135,9 @@ export function createCapabilityNode(params: {
       : runtime;
     const selectedTools = selectCapabilityTools(effectiveRuntime, usedToolkitResources.tools);
     const canExploreArtifacts = Boolean(
-      artifactDiscoveryRoot && hasArtifactDiscoveryTools(selectedTools),
+      artifactDiscoveryRoot
+      && artifactDiscoveryToolset
+      && hasArtifactDiscoveryTools(selectedTools, artifactDiscoveryToolset.tools),
     );
     const executionInstruction = buildSubagentExecutionInstruction({
       lane,

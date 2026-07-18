@@ -1,5 +1,6 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import { statSync } from 'node:fs';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   stampMessageCreatedAtUtc,
@@ -35,6 +36,14 @@ import {
 import { inferLlmStructuredOutputMethod } from './llmModelPresets';
 import { resolveCapabilityArtifactThreadRoot } from './capabilityArtifactStore';
 import { createArtifactDiscoveryToolset } from './toolkits/local';
+
+function isExistingDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 function buildActor(context: AgentContext) {
   return {
@@ -257,8 +266,12 @@ export function buildLocalChatAgentInput(params: {
   for (const { meta, capability } of params.userCapabilities ?? []) {
     if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
   }
-  const artifactDiscoveryRoot = params.threadId && params.capabilityArtifactRoot
+  const artifactDiscoveryRootCandidate = params.threadId && params.capabilityArtifactRoot
     ? resolveCapabilityArtifactThreadRoot(params.capabilityArtifactRoot, params.threadId)
+    : undefined;
+  const artifactDiscoveryRoot = artifactDiscoveryRootCandidate
+    && isExistingDirectory(artifactDiscoveryRootCandidate)
+    ? artifactDiscoveryRootCandidate
     : undefined;
 
   return {

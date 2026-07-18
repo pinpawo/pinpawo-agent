@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage } from '@langchain/core/messages';
@@ -234,30 +237,48 @@ test('buildLocalChatAgentInput uses caller-provided workdir', () => {
   assert.doesNotMatch(setup.input.runtimeEnvironment ?? '', /进程 cwd/);
 });
 
-test('buildLocalChatAgentInput exposes only the current-thread artifact root', () => {
+test('buildLocalChatAgentInput exposes only an existing current-thread artifact root', (t) => {
+  const artifactRoot = mkdtempSync(resolve(tmpdir(), 'pinpawo-agent-channel-artifacts-'));
+  t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
+  const threadRoot = resolve(artifactRoot, 'threads/thread%2Fwith%20space');
+  mkdirSync(threadRoot, { recursive: true });
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     threadId: 'thread/with space',
-    capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
+    capabilityArtifactRoot: artifactRoot,
   });
 
-  assert.equal(
-    setup.input.artifactDiscoveryRoot,
-    '/tmp/work/.pinpawo/capability-artifacts/threads/thread%2Fwith%20space',
-  );
+  assert.equal(setup.input.artifactDiscoveryRoot, threadRoot);
   assert.deepEqual(
     setup.input.artifactDiscoveryToolset?.tools.map((toolItem) => toolItem.name),
     ['list_dir', 'view_file_chunk'],
   );
 });
 
-test('artifact discovery tools reject paths outside the current thread root', async () => {
+test('buildLocalChatAgentInput omits artifact discovery for a new empty thread', (t) => {
+  const artifactRoot = mkdtempSync(resolve(tmpdir(), 'pinpawo-agent-channel-empty-artifacts-'));
+  t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
+  const setup = buildLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    threadId: 'new-thread',
+    capabilityArtifactRoot: artifactRoot,
+  });
+
+  assert.equal(setup.input.artifactDiscoveryRoot, undefined);
+  assert.equal(setup.input.artifactDiscoveryToolset, undefined);
+});
+
+test('artifact discovery tools reject paths outside the current thread root', async (t) => {
+  const artifactRoot = mkdtempSync(resolve(tmpdir(), 'pinpawo-agent-channel-scoped-artifacts-'));
+  t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
+  mkdirSync(resolve(artifactRoot, 'threads/thread-1'), { recursive: true });
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     threadId: 'thread-1',
-    capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
+    capabilityArtifactRoot: artifactRoot,
   });
   const listDir = setup.input.artifactDiscoveryToolset?.tools
     .find((toolItem) => toolItem.name === 'list_dir');

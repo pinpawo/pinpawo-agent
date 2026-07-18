@@ -355,58 +355,6 @@ export class TuiRuntimeController {
     });
   }
 
-  private setRuntimeFromHealth(payload: {
-    model?: string;
-    contextWindow?: number;
-    cwd?: string;
-    workspaceId?: string;
-    workspaceName?: string;
-    workspaceRoot?: string;
-    stateRoot?: string;
-    studioConfigPath?: string;
-    studioDueRunsPath?: string;
-    studioConfigSource?: string;
-    studioConfigActivePath?: string;
-    legacyStudioConfigPath?: string;
-    petsDir?: string;
-    studioWikiBaseDir?: string;
-  }) {
-    const config = getConfig();
-    const model = payload.model ?? config.llmModel;
-    const cwd = payload.cwd ?? this.options.workdir ?? config.workdir;
-
-    if (!model && !cwd && !payload.contextWindow) {
-      return;
-    }
-
-    this.options.dispatch({
-      type: 'session.configured',
-      runtime: {
-        ...(model ? { model } : {}),
-        ...(payload.contextWindow !== undefined ? { contextWindow: payload.contextWindow } : {}),
-        ...(cwd ? { cwd } : {}),
-        ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
-        ...(payload.workspaceName ? { workspaceName: payload.workspaceName } : {}),
-        ...(payload.workspaceRoot ? { workspaceRoot: payload.workspaceRoot } : {}),
-        ...(payload.stateRoot ? { stateRoot: payload.stateRoot } : {}),
-        ...(payload.studioConfigPath ? { studioConfigPath: payload.studioConfigPath } : {}),
-        ...(payload.studioDueRunsPath ? { studioDueRunsPath: payload.studioDueRunsPath } : {}),
-        ...(payload.studioConfigSource ? { studioConfigSource: payload.studioConfigSource } : {}),
-        ...(payload.studioConfigActivePath ? { studioConfigActivePath: payload.studioConfigActivePath } : {}),
-        ...(payload.legacyStudioConfigPath ? { legacyStudioConfigPath: payload.legacyStudioConfigPath } : {}),
-        ...(payload.petsDir ? { petsDir: payload.petsDir } : {}),
-        ...(payload.studioWikiBaseDir ? { studioWikiBaseDir: payload.studioWikiBaseDir } : {}),
-      },
-    });
-  }
-
-  private async fetchLocalRuntime() {
-    const payload = await this.localServerClient.readRuntime();
-    if (!payload) return false;
-    this.setRuntimeFromHealth(payload);
-    return true;
-  }
-
   async listResumeSessions() {
     return this.localServerClient.listResumeSessions();
   }
@@ -437,7 +385,6 @@ export class TuiRuntimeController {
       try {
         const health = await this.checkLocalServerHealth();
         if (!health) throw new Error('health check failed');
-        await this.fetchLocalRuntime();
         return true;
       } catch {
         if (this.disposed) return false;

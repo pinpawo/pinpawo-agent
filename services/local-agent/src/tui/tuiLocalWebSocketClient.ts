@@ -7,24 +7,20 @@ import {
   parseLocalAgentServerMessage,
   sendLocalAgentMessage,
   type LocalAgentClientMessage,
-  type LocalAgentServerMessage,
 } from '../localAgentProtocol';
-
-export type TuiLocalWebSocketClientHandlers = {
-  onOpen: () => void;
-  onServerMessage: (message: LocalAgentServerMessage) => void;
-  onClose: () => void;
-  onError: (error: Error) => void;
-};
+import type {
+  LocalAgentConnection,
+  LocalAgentConnectionHandlers,
+} from './localAgentConnection';
 
 export type TuiLocalWebSocketClientOptions = {
   port: number;
-  handlers: TuiLocalWebSocketClientHandlers;
+  handlers: LocalAgentConnectionHandlers;
   webSocketFactory?: (url: string, options: ClientOptions) => WebSocket;
   tokenProvider?: () => string | null;
 };
 
-export class TuiLocalWebSocketClient {
+export class TuiLocalWebSocketClient implements LocalAgentConnection {
   private readonly webSocketFactory: (url: string, options: ClientOptions) => WebSocket;
   private readonly tokenProvider: () => string | null;
   private ws: WebSocket | null = null;
@@ -53,7 +49,7 @@ export class TuiLocalWebSocketClient {
       if (this.ws !== ws) return;
       const message = parseLocalAgentServerMessage(data);
       if (message) {
-        this.options.handlers.onServerMessage(message);
+        this.options.handlers.onMessage(message);
       }
     });
 
@@ -92,7 +88,7 @@ export class TuiLocalWebSocketClient {
     return Boolean(this.getOpenSocket());
   }
 
-  hasSocket() {
+  hasConnection() {
     return Boolean(this.ws);
   }
 

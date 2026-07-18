@@ -4,8 +4,8 @@ import test from 'node:test';
 import { WebSocket, type ClientOptions } from 'ws';
 import {
   TuiLocalWebSocketClient,
-  type TuiLocalWebSocketClientHandlers,
 } from './tui/tuiLocalWebSocketClient';
+import type { LocalAgentConnectionHandlers } from './tui/localAgentConnection';
 
 class FakeWebSocket extends EventEmitter {
   readyState: number = WebSocket.CONNECTING;
@@ -50,7 +50,7 @@ test('TuiLocalWebSocketClient connects, sends messages, and dispatches socket ev
 
   assert.deepEqual(urls, ['ws://127.0.0.1:3210']);
   assert.deepEqual(wsOptions.map((item) => item.headers), [{ Authorization: 'Bearer secret' }]);
-  assert.equal(client.hasSocket(), true);
+  assert.equal(client.hasConnection(), true);
   assert.equal(client.isConnected(), false);
   assert.equal(client.send({ type: 'new_session' }), false);
 
@@ -71,7 +71,7 @@ test('TuiLocalWebSocketClient connects, sends messages, and dispatches socket ev
   sockets[0]?.close();
 
   assert.deepEqual(events, ['open', 'message:pong', 'error:boom', 'close']);
-  assert.equal(client.hasSocket(), false);
+  assert.equal(client.hasConnection(), false);
   assert.equal(client.isConnected(), false);
 });
 
@@ -94,7 +94,7 @@ test('TuiLocalWebSocketClient disconnects current socket without dispatching clo
 
   assert.equal(sockets[0]?.closed, true);
   assert.deepEqual(events, ['open']);
-  assert.equal(client.hasSocket(), false);
+  assert.equal(client.hasConnection(), false);
 
   client.connect();
   assert.equal(sockets.length, 2);
@@ -123,12 +123,12 @@ test('TuiLocalWebSocketClient reports synchronous send failures', () => {
   assert.deepEqual(events, ['open', 'error:write failed']);
 });
 
-function createHandlers(events: string[]): TuiLocalWebSocketClientHandlers {
+function createHandlers(events: string[]): LocalAgentConnectionHandlers {
   return {
     onOpen: () => {
       events.push('open');
     },
-    onServerMessage: (message) => {
+    onMessage: (message) => {
       events.push(`message:${message.type}`);
     },
     onClose: () => {

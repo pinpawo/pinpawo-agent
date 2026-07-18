@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 import { TuiRuntimeController } from './tui/TuiRuntimeController';
+import type { LocalAgentClientMessage } from './localAgentProtocol';
+import type {
+  LocalAgentConnection,
+  LocalAgentConnectionHandlers,
+} from './tui/localAgentConnection';
 import { createComposerHistoryState } from './tui/input/composerHistory';
 import type { TuiAction, TuiState } from './tui/state/tuiState';
 
@@ -94,10 +99,35 @@ function idleState(): TuiState {
   return state;
 }
 
-function createController(state: TuiState, options: { sendResult?: boolean } = {}) {
+function createController(
+  state: TuiState,
+  options: {
+    connected?: boolean;
+    sendResult?: boolean;
+    onConnect?: () => void;
+  } = {},
+) {
   const actions: TuiAction[] = [];
-  const sent: unknown[] = [];
+  const sent: LocalAgentClientMessage[] = [];
   let resetCount = 0;
+  let connected = options.connected ?? true;
+  const connectionHandlerCalls: LocalAgentConnectionHandlers[] = [];
+  const connection: LocalAgentConnection = {
+    isConnected: () => connected,
+    hasConnection: () => connected,
+    connect: () => {
+      connected = true;
+      options.onConnect?.();
+    },
+    send: (message) => {
+      if (options.sendResult === false) return false;
+      sent.push(message);
+      return true;
+    },
+    disconnect: () => {
+      connected = false;
+    },
+  };
   const controller = new TuiRuntimeController({
     actorId: 'pet-1',
     localServerPort: 0,
@@ -107,18 +137,21 @@ function createController(state: TuiState, options: { sendResult?: boolean } = {
       resetCount += 1;
     },
     setNow: () => {},
-  });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (controller as any).wsClient = {
-    isConnected: () => true,
-    send: (message: unknown) => {
-      if (options.sendResult === false) return false;
-      sent.push(message);
-      return true;
+    connectionFactory: (handlers) => {
+      connectionHandlerCalls.push(handlers);
+      return connection;
     },
-    disconnect: () => {},
+  });
+  const connectionHandlers = connectionHandlerCalls[0];
+  if (!connectionHandlers) assert.fail('expected connection handlers');
+  return {
+    controller,
+    actions,
+    sent,
+    connection,
+    connectionHandlers,
+    get resetCount() { return resetCount; },
   };
-  return { controller, actions, sent, get resetCount() { return resetCount; } };
 }
 
 test('TuiRuntimeController startup health check does not read runtime separately', async () => {
@@ -137,6 +170,39 @@ test('TuiRuntimeController startup health check does not read runtime separately
 
   assert.equal(connected, true);
   assert.deepEqual(calls, ['health']);
+});
+
+test('TuiRuntimeController routes injected connection lifecycle and messages', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  const harness = createController(busyRunState());
+  try {
+    harness.connectionHandlers.onOpen();
+    harness.connectionHandlers.onMessage({
+      type: 'interrupting',
+      requestId: 'req-1',
+    });
+    harness.connectionHandlers.onError(new Error('transport failed'));
+    harness.connection.disconnect();
+    harness.connectionHandlers.onClose();
+
+    assert.deepEqual(harness.actions.find((action) => action.type === 'connection.set'), {
+      type: 'connection.set',
+      status: 'ready',
+    });
+    assert.equal(harness.sent[0]?.type, 'runtime_config.update');
+    assert.equal(harness.actions.some((action) => action.type === 'run.interrupting'), true);
+    assert.equal(harness.actions.some((action) => (
+      action.type === 'message.appended'
+      && action.message.text === '连接出错：transport failed'
+    )), true);
+    assert.equal(harness.actions.some((action) => (
+      action.type === 'connection.set'
+      && action.status === 'disconnected'
+    )), true);
+  } finally {
+    harness.controller.dispose();
+    mock.timers.reset();
+  }
 });
 
 test('TuiRuntimeController submits canonical review responses without legacy resume extras', () => {
@@ -364,10 +430,13 @@ test('TuiRuntimeController resets static timeline view for new sessions', () => 
   assert.deepEqual(harness.sent, [{ type: 'new_session' }]);
 });
 
-test('TuiRuntimeController applies the latest snapshot before opening websocket', async () => {
+test('TuiRuntimeController applies the latest snapshot before opening its connection', async () => {
   const state = pendingReviewState();
-  const harness = createController(state);
   const events: string[] = [];
+  const harness = createController(state, {
+    connected: false,
+    onConnect: () => events.push('connect'),
+  });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (harness.controller as any).localServerClient = {
     isHealthy: async () => true,
@@ -390,17 +459,6 @@ test('TuiRuntimeController applies the latest snapshot before opening websocket'
       };
     },
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (harness.controller as any).wsClient = {
-    hasSocket: () => false,
-    isConnected: () => false,
-    connect: () => {
-      events.push('connect');
-    },
-    send: (message: unknown) => harness.sent.push(message),
-    disconnect: () => {},
-  };
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (harness.controller as any).reconnect();
 

@@ -3,9 +3,12 @@ import type { BuiltinGlobalReviewPolicyMode, ReviewOption, ReviewResponse } from
 import { loadAgentContext } from '../contextLoader';
 import type { LocalAgentServerMessage } from '../localAgentProtocol';
 import { getConfig, setConfig } from '../config';
+import type {
+  LocalAgentConnection,
+  LocalAgentConnectionFactory,
+} from './localAgentConnection';
 import { TUI_TEXT } from './render/text';
 import { TuiLocalServerClient } from './tuiLocalServerClient';
-import { TuiLocalWebSocketClient } from './tuiLocalWebSocketClient';
 import { createTuiMessage } from './tuiMessage';
 import { buildTuiActionsFromServerMessage } from './tuiServerMessageActions';
 import {
@@ -34,6 +37,7 @@ type TuiRuntimeControllerOptions = {
   getState: () => TuiState;
   resetTimelineView: () => void;
   setNow: (now: number) => void;
+  connectionFactory: LocalAgentConnectionFactory;
 };
 
 function sleep(ms: number) {
@@ -72,20 +76,17 @@ export class TuiRuntimeController {
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private readonly localServerClient: TuiLocalServerClient;
-  private readonly wsClient: TuiLocalWebSocketClient;
+  private readonly connection: LocalAgentConnection;
 
   constructor(private readonly options: TuiRuntimeControllerOptions) {
     this.localServerClient = new TuiLocalServerClient({
       port: options.localServerPort,
     });
-    this.wsClient = new TuiLocalWebSocketClient({
-      port: options.localServerPort,
-      handlers: {
-        onOpen: () => this.handleWebSocketOpen(),
-        onServerMessage: (message) => this.handleServerMessage(message),
-        onClose: () => this.handleWebSocketClose(),
-        onError: (err) => this.handleWebSocketError(err),
-      },
+    this.connection = options.connectionFactory({
+      onOpen: () => this.handleConnectionOpen(),
+      onMessage: (message) => this.handleServerMessage(message),
+      onClose: () => this.handleConnectionClose(),
+      onError: (err) => this.handleConnectionError(err),
     });
   }
 
@@ -107,11 +108,11 @@ export class TuiRuntimeController {
     this.disposed = true;
     this.clearInterruptTimeout();
     this.clearReconnectTimeout();
-    this.wsClient.disconnect();
+    this.connection.disconnect();
   }
 
   isConnected() {
-    return this.wsClient.isConnected();
+    return this.connection.isConnected();
   }
 
   isBusy() {
@@ -119,7 +120,7 @@ export class TuiRuntimeController {
   }
 
   sendChatRequest(message: string) {
-    if (!this.wsClient.isConnected()) {
+    if (!this.connection.isConnected()) {
       this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
     }
@@ -130,7 +131,7 @@ export class TuiRuntimeController {
 
     const requestId = randomUUID();
     const now = Date.now();
-    if (!this.wsClient.send({
+    if (!this.connection.send({
       type: 'chat_request',
       requestId,
       message,
@@ -155,7 +156,7 @@ export class TuiRuntimeController {
   }
 
   sendStudioRequest(userRequest: string, conversationId: string | null) {
-    if (!this.wsClient.isConnected()) {
+    if (!this.connection.isConnected()) {
       this.appendSystemMessage(TUI_TEXT.disconnectedCannotSend);
       return false;
     }
@@ -166,7 +167,7 @@ export class TuiRuntimeController {
 
     const requestId = randomUUID();
     const now = Date.now();
-    if (!this.wsClient.send({
+    if (!this.connection.send({
       type: 'studio_request',
       requestId,
       userRequest,
@@ -197,7 +198,7 @@ export class TuiRuntimeController {
       : option.label.trim();
     if (!decision) return false;
 
-    if (!this.wsClient.isConnected()) {
+    if (!this.connection.isConnected()) {
       this.appendSystemMessage(TUI_TEXT.reviewDisconnectedCannotSubmit);
       return false;
     }
@@ -239,7 +240,7 @@ export class TuiRuntimeController {
       return true;
     }
 
-    const sent = this.wsClient.send({
+    const sent = this.connection.send({
       type: 'human_review_response',
       requestId,
       actionId: currentApproval.actionId,
@@ -264,7 +265,7 @@ export class TuiRuntimeController {
   requestInterrupt() {
     const state = this.options.getState();
     const activeRun = selectFocusedActiveRun(state);
-    if (!this.wsClient.isConnected() || !activeRun) {
+    if (!this.connection.isConnected() || !activeRun) {
       return false;
     }
     this.clearInterruptTimeout();
@@ -274,7 +275,7 @@ export class TuiRuntimeController {
       ? activeRun.reviewAction
       : null;
     if (waitingReviewAction) {
-      const sent = this.wsClient.send({
+      const sent = this.connection.send({
         type: 'review.cancel',
         requestId: activeRun.requestId,
         actionId: waitingReviewAction.actionId,
@@ -289,7 +290,7 @@ export class TuiRuntimeController {
         actionId: waitingReviewAction.actionId,
       });
     } else {
-      if (!this.wsClient.send({
+      if (!this.connection.send({
         type: 'run.interrupt',
         requestId: activeRun.requestId,
       })) {
@@ -331,8 +332,8 @@ export class TuiRuntimeController {
       statusNotice: TUI_TEXT.newSessionCreated,
     });
 
-    if (this.wsClient.isConnected()) {
-      this.wsClient.send({ type: 'new_session' });
+    if (this.connection.isConnected()) {
+      this.connection.send({ type: 'new_session' });
     }
   }
 
@@ -371,7 +372,7 @@ export class TuiRuntimeController {
     await this.applyLatestSessionSnapshot('startup');
     if (this.disposed) return;
 
-    this.connectWebSocket();
+    this.connect();
     await this.loadActorContext();
   }
 
@@ -434,9 +435,9 @@ export class TuiRuntimeController {
     }
   }
 
-  private connectWebSocket() {
+  private connect() {
     this.clearReconnectTimeout();
-    this.wsClient.connect();
+    this.connection.connect();
   }
 
   private async checkLocalServerHealth() {
@@ -444,7 +445,7 @@ export class TuiRuntimeController {
   }
 
   private scheduleReconnect() {
-    if (this.disposed || this.reconnectTimeout || this.wsClient.hasSocket()) return;
+    if (this.disposed || this.reconnectTimeout || this.connection.hasConnection()) return;
 
     if (this.reconnectAttempt >= LOCAL_SERVER_RECONNECT_RETRIES) {
       this.options.dispatch({
@@ -480,10 +481,10 @@ export class TuiRuntimeController {
   }
 
   private async reconnect() {
-    if (this.disposed || this.wsClient.hasSocket()) return;
+    if (this.disposed || this.connection.hasConnection()) return;
 
     const health = await this.checkLocalServerHealth();
-    if (this.disposed || this.wsClient.hasSocket()) return;
+    if (this.disposed || this.connection.hasConnection()) return;
 
     if (!health) {
       this.scheduleReconnect();
@@ -491,10 +492,10 @@ export class TuiRuntimeController {
     }
 
     await this.applyLatestSessionSnapshot('reconnect');
-    if (this.disposed || this.wsClient.hasSocket()) return;
+    if (this.disposed || this.connection.hasConnection()) return;
 
     this.options.resetTimelineView();
-    this.connectWebSocket();
+    this.connect();
   }
 
   private async refreshSnapshotAfterReviewError() {
@@ -517,9 +518,9 @@ export class TuiRuntimeController {
     }
   }
 
-  private handleWebSocketOpen() {
+  private handleConnectionOpen() {
     if (this.disposed) {
-      this.wsClient.disconnect();
+      this.connection.disconnect();
       return;
     }
     this.reconnectAttempt = 0;
@@ -530,7 +531,7 @@ export class TuiRuntimeController {
     this.sendRuntimeConfigUpdate();
   }
 
-  private handleWebSocketClose() {
+  private handleConnectionClose() {
     if (this.disposed) return;
     this.options.dispatch({
       type: 'connection.set',
@@ -540,9 +541,9 @@ export class TuiRuntimeController {
     this.scheduleReconnect();
   }
 
-  private handleWebSocketError(err: Error) {
+  private handleConnectionError(err: Error) {
     if (this.disposed) return;
-    this.appendSystemMessage(TUI_TEXT.websocketError(err.message));
+    this.appendSystemMessage(TUI_TEXT.connectionError(err.message));
   }
 
   private async loadActorContext() {
@@ -603,12 +604,12 @@ export class TuiRuntimeController {
   }
 
   private sendRuntimeConfigUpdate() {
-    if (!this.wsClient.isConnected()) {
+    if (!this.connection.isConnected()) {
       return false;
     }
-    return Boolean(this.wsClient.send({
+    return this.connection.send({
       type: 'runtime_config.update',
       globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
-    }));
+    });
   }
 }

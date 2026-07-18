@@ -38,6 +38,7 @@ import {
 } from './state/tuiStateReducer';
 import type { LocalAgentTimelineEntry } from '../localAgentSession';
 import { TuiRuntimeController } from './TuiRuntimeController';
+import { TuiLocalWebSocketClient } from './tuiLocalWebSocketClient';
 import { createTuiMessage } from './tuiMessage';
 import { useResumePickerController } from './useResumePickerController';
 import { useTextAreaController } from './useTextAreaController';
@@ -123,6 +124,10 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     resetTimelineView,
     setNow,
     workdir,
+    connectionFactory: (handlers) => new TuiLocalWebSocketClient({
+      port: localServerPort,
+      handlers,
+    }),
   }), [props.actorId, localServerPort, dispatch, resetTimelineView, setNow, workdir]);
   const screenModel = useMemo(() => buildTuiScreenModel({
     state: tuiState,

@@ -49,7 +49,7 @@ export const TUI_TEXT = {
   connectionUnavailable: (port: number) =>
     `无法连接本地服务（port ${port}），请先运行 pinpawo-agent run`,
   initializationFailed: (message: string) => `初始化失败：${message}`,
-  websocketError: (message: string) => `WebSocket 出错：${message}`,
+  connectionError: (message: string) => `连接出错：${message}`,
   reconnectFailed: (message: string) => `重连失败：${message}`,
   actorContextUnavailable: '无法加载宠物信息，使用默认名称',
   unknownCommand: (raw: string) => `未知命令：${raw}`,

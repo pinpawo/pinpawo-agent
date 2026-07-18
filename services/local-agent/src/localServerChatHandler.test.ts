@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { WebSocket } from 'ws';
 import { isToolProtocolHistoryError, LocalServerChatHandler } from './localServerChatHandler';
 import { InflightRequestController } from './inflightRequestController';
+import type { LocalServerPeer } from './localServerPeer';
+
+function createFakePeer(sent: unknown[] = []): LocalServerPeer {
+  return {
+    isConnected: () => true,
+    send: (message) => {
+      sent.push(message);
+      return true;
+    },
+  };
+}
 
 test('isToolProtocolHistoryError recognizes LangGraph tool history protocol failures', () => {
   assert.equal(isToolProtocolHistoryError(new Error('INVALID_TOOL_RESULTS')), true);
@@ -14,14 +24,11 @@ test('isToolProtocolHistoryError recognizes LangGraph tool history protocol fail
 test('run interrupt waits until the review resolution is checkpointed', async () => {
   const controls: unknown[] = [];
   let runCount = 0;
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: () => undefined,
-  } as unknown as WebSocket;
-  const inflightRequests = new InflightRequestController<WebSocket>({
+  const fakePeer = createFakePeer();
+  const inflightRequests = new InflightRequestController<LocalServerPeer>({
     forceInterruptMs: 1000,
     emitOperation: () => undefined,
-    sendControl: (_ws, message) => {
+    sendControl: (_peer, message) => {
       controls.push(message);
     },
   });
@@ -61,14 +68,14 @@ test('run interrupt waits until the review resolution is checkpointed', async ()
     },
   }, { actorId: 'pet-1' });
 
-  const resolution = handler.handleHumanReviewResponse(fakeWs, {
+  const resolution = handler.handleHumanReviewResponse(fakePeer, {
     type: 'human_review_response',
     requestId: 'req-1',
     actionId: 'interrupt-1',
     reviewId: 'review-current',
     selectedOptionId: 'approve',
   }, { actorId: 'pet-1' } as never);
-  assert.equal(handler.handleRunInterrupt(fakeWs, {
+  assert.equal(handler.handleRunInterrupt(fakePeer, {
     type: 'run.interrupt',
     requestId: 'req-1',
   }), null);
@@ -85,12 +92,7 @@ test('run interrupt waits until the review resolution is checkpointed', async ()
 test('handleHumanReviewResponse rejects stale canonical reviewId before forwarding', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
@@ -132,7 +134,7 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
   }, { actorId: 'pet-1' });
 
   await handler.handleHumanReviewResponse(
-    fakeWs,
+    fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
@@ -158,12 +160,7 @@ test('handleHumanReviewResponse rejects stale canonical reviewId before forwardi
 test('handleHumanReviewResponse consumes matching canonical review route once', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
@@ -201,8 +198,8 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     reviewId: 'review-current',
     selectedOptionId: 'approve',
   };
-  await handler.handleHumanReviewResponse(fakeWs, message, { actorId: 'pet-1' } as never);
-  await handler.handleHumanReviewResponse(fakeWs, message, { actorId: 'pet-1' } as never);
+  await handler.handleHumanReviewResponse(fakePeer, message, { actorId: 'pet-1' } as never);
+  await handler.handleHumanReviewResponse(fakePeer, message, { actorId: 'pet-1' } as never);
 
   assert.equal(handleChatCalls.length, 1, 'matching review response should be forwarded once');
   const forwardedMessage = (handleChatCalls[0] as unknown[])[1] as {
@@ -237,7 +234,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   assert.equal(event.event?.code, 'review_closed');
 
   await handler.handleReviewCancel(
-    fakeWs,
+    fakePeer,
     {
       type: 'review.cancel',
       requestId: 'req-1',
@@ -251,12 +248,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
 test('handleHumanReviewResponse keeps single-review review as batch resume shape', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
   const review = {
     id: 'review-current',
     schemaVersion: 1,
@@ -290,7 +282,7 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
   }, { actorId: 'pet-1' });
 
   await handler.handleHumanReviewResponse(
-    fakeWs,
+    fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
@@ -328,12 +320,7 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
 test('handleHumanReviewResponse recovers missing route from active checkpoint review', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
@@ -362,7 +349,7 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
   };
 
   await handler.handleHumanReviewResponse(
-    fakeWs,
+    fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
@@ -473,12 +460,7 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
 test('handleReviewCancel resumes pending review with canonical reject option', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
@@ -525,7 +507,7 @@ test('handleReviewCancel resumes pending review with canonical reject option', a
   }, { actorId: 'pet-1' });
 
   await handler.handleReviewCancel(
-    fakeWs,
+    fakePeer,
     {
       type: 'review.cancel',
       requestId: 'req-1',
@@ -562,7 +544,7 @@ test('handleReviewCancel resumes pending review with canonical reject option', a
   });
 
   await handler.handleHumanReviewResponse(
-    fakeWs,
+    fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
@@ -584,12 +566,7 @@ test('handleReviewCancel resumes pending review with canonical reject option', a
 test('handleReviewCancel recovers missing route from active checkpoint review', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
@@ -621,7 +598,7 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
   };
 
   await handler.handleReviewCancel(
-    fakeWs,
+    fakePeer,
     {
       type: 'review.cancel',
       requestId: 'req-1',
@@ -661,12 +638,7 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
 test('handleReviewCancel restores pending review when no reject option exists', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
@@ -698,7 +670,7 @@ test('handleReviewCancel restores pending review when no reject option exists', 
   }, { actorId: 'pet-1' });
 
   await handler.handleReviewCancel(
-    fakeWs,
+    fakePeer,
     {
       type: 'review.cancel',
       requestId: 'req-1',
@@ -721,7 +693,7 @@ test('handleReviewCancel restores pending review when no reject option exists', 
   assert.equal(reviewEvent.event?.review?.id, 'review-current');
 
   await handler.handleHumanReviewResponse(
-    fakeWs,
+    fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
@@ -737,12 +709,7 @@ test('handleReviewCancel restores pending review when no reject option exists', 
 test('handleHumanReviewResponse forwards canonical selected option without resolving it', async () => {
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
     getChatThreadId: () => 'thread-x',
@@ -779,7 +746,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
   }, { actorId: 'pet-1' });
 
   await handler.handleHumanReviewResponse(
-    fakeWs,
+    fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
@@ -822,12 +789,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   let activeSessionId = 'sess-origin';
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
   const tuiSessions = {
     getActiveSessionId: () => activeSessionId,
     getChatThreadId: () => 'thread-x',
@@ -860,7 +822,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
   activeSessionId = 'sess-other';
 
   await handler.handleHumanReviewResponse(
-    fakeWs,
+    fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
@@ -883,12 +845,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const updateStateCalls: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
 
   const handler = new LocalServerChatHandler({
     graphService: {
@@ -943,7 +900,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
   }, { actorId: 'pet-1' }, {} as never);
 
   await handler.handleHumanReviewResponse(
-    fakeWs,
+    fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',
@@ -1009,12 +966,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const updateStateCalls: unknown[] = [];
-  const fakeWs = {
-    readyState: WebSocket.OPEN,
-    send: (data: string) => {
-      sentEvents.push(JSON.parse(data));
-    },
-  } as unknown as WebSocket;
+  const fakePeer = createFakePeer(sentEvents);
 
   const handler = new LocalServerChatHandler({
     graphService: {
@@ -1063,7 +1015,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
   }, { actorId: 'pet-1' }, {} as never);
 
   await handler.handleHumanReviewResponse(
-    fakeWs,
+    fakePeer,
     {
       type: 'human_review_response',
       requestId: 'req-1',

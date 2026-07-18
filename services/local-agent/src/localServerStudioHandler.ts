@@ -1,7 +1,5 @@
-import { WebSocket } from 'ws';
 import {
-  sendLocalAgentEvent,
-  sendLocalAgentMessage,
+  type LocalAgentServerMessage,
   type HumanReviewResponseMessage,
   type StudioRequestMessage,
 } from './localAgentProtocol';
@@ -20,6 +18,7 @@ import {
   type StudioRunServiceResult,
 } from './studioRunService';
 import type { StudioTurnEvent } from '@pinpawo/pet-agent';
+import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
 
 type InflightRequest = InflightOperationRun;
 type StudioHandleResult = StudioRunServiceResult | LocalStudioDueRunCompletion;
@@ -35,57 +34,65 @@ type StudioHandleCompletion = {
   reason?: string;
 };
 
-export class LocalServerStudioHandler {
-  private readonly reviewRouter: LocalServerStudioReviewRouter<WebSocket>;
-  private readonly inflightRequests: InflightRequestController<WebSocket>;
+export type LocalServerStudioOutbound<Peer extends object> = {
+  sendMessage: (peer: Peer, message: LocalAgentServerMessage) => boolean;
+  sendEvent: (peer: Peer, event: LocalAgentRuntimeEvent) => boolean;
+};
+
+export class LocalServerStudioHandler<Peer extends object> {
+  private readonly reviewRouter: LocalServerStudioReviewRouter<Peer>;
+  private readonly inflightRequests: InflightRequestController<Peer>;
+  private readonly outbound: LocalServerStudioOutbound<Peer>;
   private readonly studioRunService: StudioRunService;
   private readonly studioDueRunScheduler?: LocalStudioDueRunScheduler;
-  private readonly studioRequestQueue = new WeakMap<WebSocket, Promise<unknown>>();
-  private readonly studioConnectionState = new WeakMap<WebSocket, { closed: boolean }>();
+  private readonly studioRequestQueue = new WeakMap<Peer, Promise<unknown>>();
+  private readonly studioConnectionState = new WeakMap<Peer, { closed: boolean }>();
 
   constructor(options: {
-    reviewRouter: LocalServerStudioReviewRouter<WebSocket>;
-    inflightRequests: InflightRequestController<WebSocket>;
+    reviewRouter: LocalServerStudioReviewRouter<Peer>;
+    inflightRequests: InflightRequestController<Peer>;
+    outbound: LocalServerStudioOutbound<Peer>;
     studioRunService?: StudioRunService;
     buildStudio?: BuildStudioForTurn;
     studioDueRunScheduler?: LocalStudioDueRunScheduler;
   }) {
     this.reviewRouter = options.reviewRouter;
     this.inflightRequests = options.inflightRequests;
+    this.outbound = options.outbound;
     this.studioRunService = options.studioRunService ?? new StudioRunService({
       buildStudio: options.buildStudio,
     });
     this.studioDueRunScheduler = options.studioDueRunScheduler;
   }
 
-  routeHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
-    return this.reviewRouter.routeResponse(ws, msg);
+  routeHumanReviewResponse(peer: Peer, msg: HumanReviewResponseMessage) {
+    return this.reviewRouter.routeResponse(peer, msg);
   }
 
-  rejectDisconnected(ws: WebSocket) {
-    this.reviewRouter.rejectAndDelete(ws, new Error('ws disconnected'));
-    this.markStudioConnectionClosed(ws);
+  rejectDisconnected(peer: Peer) {
+    this.reviewRouter.rejectAndDelete(peer, new Error('peer disconnected'));
+    this.markStudioConnectionClosed(peer);
   }
 
-  private markStudioConnectionClosed(ws: WebSocket) {
-    const state = this.studioConnectionState.get(ws);
+  private markStudioConnectionClosed(peer: Peer) {
+    const state = this.studioConnectionState.get(peer);
     if (state) {
       state.closed = true;
       return;
     }
-    this.studioConnectionState.set(ws, { closed: true });
+    this.studioConnectionState.set(peer, { closed: true });
   }
 
   async handleStudioRequest(
-    ws: WebSocket,
+    peer: Peer,
     msg: StudioRequestMessage,
     deps: LocalServerDeps,
   ) {
-    return this.withQueuedStudioRequest(ws, () => this.handleStudioRequestInternal(ws, msg, deps));
+    return this.withQueuedStudioRequest(peer, () => this.handleStudioRequestInternal(peer, msg, deps));
   }
 
   private async handleStudioRequestInternal(
-    ws: WebSocket,
+    peer: Peer,
     msg: StudioRequestMessage,
     deps: LocalServerDeps,
   ) {
@@ -96,24 +103,24 @@ export class LocalServerStudioHandler {
     console.log(`[local-server] studio_request requestId=${requestId} userRequest="${userRequest.slice(0, 80)}"`);
 
     // 取消已有 inflight(避免跟 chat 重叠)
-    const inflight = this.inflightRequests.start(ws, requestId, {
+    const inflight = this.inflightRequests.start(peer, requestId, {
       interruptPrevious: false,
     });
     const { controller } = inflight;
 
     // 重置 review slot(防止上一 turn 残留)
-    const slot = this.reviewRouter.getOrCreateSlot(ws);
+    const slot = this.reviewRouter.getOrCreateSlot(peer);
     if (slot.current) {
-      this.reviewRouter.rejectPending(ws, new Error('superseded by new studio_request'));
+      this.reviewRouter.rejectPending(peer, new Error('superseded by new studio_request'));
     }
 
     const send = (envelope: unknown) => {
       if (!envelope || typeof envelope !== 'object') return;
-      sendLocalAgentMessage(ws, envelope as Parameters<typeof sendLocalAgentMessage>[1]);
+      this.outbound.sendMessage(peer, envelope as LocalAgentServerMessage);
     };
 
     const onProgress = (event: StudioTurnEvent) => {
-      sendLocalAgentEvent(ws, {
+      this.outbound.sendEvent(peer, {
         type: 'studio.progress',
         requestId,
         event,
@@ -146,12 +153,12 @@ export class LocalServerStudioHandler {
       const completion = this.toCompletion(result);
 
       if (controller.signal.aborted) {
-        this.inflightRequests.finish(ws, inflight, 'interrupted');
+        this.inflightRequests.finish(peer, inflight, 'interrupted');
         send({ type: 'studio_error', requestId, message: 'aborted by client' });
         return;
       }
 
-      this.inflightRequests.finish(ws, inflight, 'completed');
+      this.inflightRequests.finish(peer, inflight, 'completed');
       if (completion.outcome === 'done') {
         send({
           type: 'studio_response',
@@ -178,7 +185,7 @@ export class LocalServerStudioHandler {
         });
       }
     } catch (err) {
-      this.inflightRequests.finish(ws, inflight, 'failed', err);
+      this.inflightRequests.finish(peer, inflight, 'failed', err);
       if (err instanceof StudioNotConfiguredError) {
         send({
           type: 'studio_error',
@@ -198,26 +205,26 @@ export class LocalServerStudioHandler {
       }
     } finally {
       if (slot.current) {
-        this.reviewRouter.rejectPending(ws, new Error('studio turn ended with unresolved review'));
+        this.reviewRouter.rejectPending(peer, new Error('studio turn ended with unresolved review'));
       }
-      this.inflightRequests.clear(ws, inflight);
+      this.inflightRequests.clear(peer, inflight);
     }
   }
 
   private withQueuedStudioRequest<T>(
-    ws: WebSocket,
+    peer: Peer,
     run: () => Promise<T>,
   ): Promise<T> {
-    const state = this.studioConnectionState.get(ws) ?? { closed: false };
-    this.studioConnectionState.set(ws, state);
-    const previous = this.studioRequestQueue.get(ws) ?? Promise.resolve();
+    const state = this.studioConnectionState.get(peer) ?? { closed: false };
+    this.studioConnectionState.set(peer, state);
+    const previous = this.studioRequestQueue.get(peer) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(async () => {
       if (state.closed) {
         return undefined as unknown as T;
       }
       return run();
     });
-    this.studioRequestQueue.set(ws, current.then(() => undefined, () => undefined));
+    this.studioRequestQueue.set(peer, current.then(() => undefined, () => undefined));
     return current;
   }
 

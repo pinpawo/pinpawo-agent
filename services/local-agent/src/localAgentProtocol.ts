@@ -500,6 +500,18 @@ export type SendLocalAgentEventOptions = {
   includeRaw?: boolean;
 };
 
+export function buildLocalAgentEventEnvelope(
+  event: LocalAgentRuntimeEvent,
+  options: SendLocalAgentEventOptions = {},
+): LocalAgentRuntimeEventEnvelope {
+  const wireEvent = options.includeRaw ? event : sanitizeLocalAgentRemoteEvent(event);
+  return {
+    type: 'event',
+    requestId: wireEvent.requestId,
+    event: wireEvent,
+  };
+}
+
 export function sendLocalAgentEvent(
   ws: WsLike,
   event: LocalAgentRuntimeEvent,
@@ -508,12 +520,7 @@ export function sendLocalAgentEvent(
   if (ws.readyState !== WS_OPEN) {
     return false;
   }
-  const wireEvent = options.includeRaw ? event : sanitizeLocalAgentRemoteEvent(event);
-  ws.send(JSON.stringify({
-    type: 'event',
-    requestId: wireEvent.requestId,
-    event: wireEvent,
-  } satisfies LocalAgentRuntimeEventEnvelope));
+  ws.send(JSON.stringify(buildLocalAgentEventEnvelope(event, options)));
   return true;
 }
 

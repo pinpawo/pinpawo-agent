@@ -57,6 +57,7 @@ services/local-agent/src/commands/tui.tsx
 - `commands/tui.tsx` 是 CLI entry，主要负责加载配置并挂载 TUI app。
 - `tui/TuiApp.tsx` 负责 Ink layout、输入组合、命令分发和 hooks/components 组装。
 - `tui/TuiRuntimeController.ts` 负责 transport-neutral connection lifecycle、发送 typed client message 和 session snapshot 应用；当前 WebSocket adapter 位于 `tui/tuiLocalWebSocketClient.ts`，本地 HTTP 访问由 `tui/tuiLocalServerClient.ts` 承担。
+- server-side handlers 通过 `LocalServerPeer` 标识 transport-local inflight delivery、Studio per-peer queue 和 outbound channel；review 是否有效仍由 session/checkpoint 派生的 action route 判断。WebSocket Upgrade、认证、Origin、readyState 和 framing 只属于 `localServerWsTransport.ts`。
 - `/resume` picker 的 modal 状态、sessions 加载和恢复流程由 `tui/useResumePickerController.ts` 承担。
 - slash command 已收敛为 `tui/input/commandRegistry.ts`，统一承载 help metadata。
 - key handling 已收敛为 `tui/input/keymap.ts`，统一表达 global、composer、approval、resume picker 快捷键。
@@ -208,6 +209,7 @@ LocalAgentRuntimeEvent / ServerControlMessage / UserInputAction
 
 - wire message 的解析与序列化属于 protocol/transport boundary；controller 只接收 typed server messages。
 - `LocalAgentConnection.send()` 返回 `true` 仅表示当前 transport 已接受消息用于发送，不表示 server 或 graph 已经处理消息。
+- `LocalServerPeer` 只表达一个连接对端的对象身份、可用性与 typed outbound sink，不进入 session、timeline、snapshot 或 review domain state。
 - 协议版本适配属于 protocol adapter。
 - agent runtime stream normalization 属于 local-agent event normalizer。
 - terminal 文案格式化属于 TUI render adapter。

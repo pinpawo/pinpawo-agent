@@ -58,7 +58,7 @@ export class LocalAgentRuntime {
     logPrefix: 'local-agent',
   });
   private readonly studioReviewRouter = new LocalServerStudioReviewRouter<WebSocket>();
-  private readonly studioHandler: LocalServerStudioHandler;
+  private readonly studioHandler: LocalServerStudioHandler<WebSocket>;
   private appWsClient: LocalAgentAppWsClient | null = null;
   private readonly appChatHandler: LocalAgentAppChatHandler;
 
@@ -78,6 +78,10 @@ export class LocalAgentRuntime {
     this.studioHandler = new LocalServerStudioHandler({
       reviewRouter: this.studioReviewRouter,
       inflightRequests: this.inflightRequests,
+      outbound: {
+        sendMessage: (ws, message) => sendLocalAgentMessage(ws, message),
+        sendEvent: (ws, event) => sendLocalAgentEvent(ws, event),
+      },
       studioDueRunScheduler: this.studioDueRunScheduler,
     });
     this.chatCheckpointer = new FileSaver(runtimeConfig.checkpointPath);
@@ -103,9 +107,7 @@ export class LocalAgentRuntime {
         await this.studioHandler.handleStudioRequest(ws, message, this.buildLocalServerDeps());
       },
       routeStudioHumanReviewResponse: (ws, msg) => this.studioHandler.routeHumanReviewResponse(ws, msg),
-      rejectStudioPendingReview: (ws) => {
-        this.studioReviewRouter.rejectAndDelete(ws, new Error('app websocket closed'));
-      },
+      rejectStudioPendingReview: (ws) => this.studioHandler.rejectDisconnected(ws),
     });
   }
 
@@ -276,6 +278,7 @@ export class LocalAgentRuntime {
         this.inflightRequests.finish(ws, inflight, 'interrupted');
       }
       this.inflightRequests.abortAndClear(ws, inflight);
+      this.studioHandler.rejectDisconnected(ws);
     }
     client?.disconnect();
     this.appWsClient = null;

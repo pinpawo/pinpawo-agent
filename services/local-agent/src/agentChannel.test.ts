@@ -234,6 +234,20 @@ test('buildLocalChatAgentInput uses caller-provided workdir', () => {
   assert.doesNotMatch(setup.input.runtimeEnvironment ?? '', /进程 cwd/);
 });
 
+test('buildLocalChatAgentInput exposes only the current-thread artifact root', () => {
+  const setup = buildLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    threadId: 'thread/with space',
+    capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
+  });
+
+  assert.equal(
+    setup.input.artifactDiscoveryRoot,
+    '/tmp/work/.pinpawo/capability-artifacts/threads/thread%2Fwith%20space',
+  );
+});
+
 test('buildLocalChatAgentInput uses caller-provided stable session time', () => {
   const params = {
     context: createContext(),

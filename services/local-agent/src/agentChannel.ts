@@ -33,6 +33,7 @@ import {
   type LocalAgentInterfaceKind,
 } from './chatInterface';
 import { inferLlmStructuredOutputMethod } from './llmModelPresets';
+import { resolveCapabilityArtifactThreadRoot } from './capabilityArtifactStore';
 
 function buildActor(context: AgentContext) {
   return {
@@ -202,6 +203,8 @@ export function buildLocalChatAgentInput(params: {
   userCapabilities?: LoadedUserCapability[];
   /** Store handed to capabilities so they can deterministically persist result artifacts */
   capabilityArtifactStore?: CapabilityArtifactStore;
+  /** Root directory backing the capability artifact store. */
+  capabilityArtifactRoot?: string;
   /** Effective agent workdir for prompt context and relative tool paths. */
   workdir?: string;
   /** Fixed session/thread start timestamp used as a stable relative-time anchor. */
@@ -286,6 +289,9 @@ export function buildLocalChatAgentInput(params: {
         dryRun: params.dryRun,
       },
       workdir: params.workdir,
+      artifactDiscoveryRoot: params.threadId && params.capabilityArtifactRoot
+        ? resolveCapabilityArtifactThreadRoot(params.capabilityArtifactRoot, params.threadId)
+        : undefined,
       runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir, {
         sessionStartedAt: params.sessionStartedAt,
         timezone: params.timezone,

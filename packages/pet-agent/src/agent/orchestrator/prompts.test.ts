@@ -61,8 +61,6 @@ test('decision recent messages label delegation briefings as scheduling context'
     delegationId: 'delegation-1',
     task: '只完成任务 A',
     contextSummary: null,
-    runDelegationSummaries: [],
-    remainingPlan: [],
   });
   const requestContext = buildPreparedRequestContext({
     latestUserRequest: '完成 A 和 B',
@@ -135,7 +133,7 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
   assert.match(prompt, /委派简报（delegation briefing）/);
-  assert.match(prompt, /物化 delegation 时向主对话写入委派简报/);
+  assert.match(prompt, /向 main 写入简短计划，并向对应 delegation lane 写入完整委派简报/);
   assert.match(prompt, /当前阶段：entryDecision/);
   assert.match(prompt, /决策条件/);
   assert.match(prompt, /answer、direct_task 或 needs_plan/);
@@ -143,7 +141,7 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(prompt, /后续 task 必须等待前一次 announce/);
   assert.match(prompt, /分别选择 capability、分别执行并分别验收/);
   assert.doesNotMatch(prompt, /plan_draft|task_plan_draft/);
-  assert.match(input, /<entry_decision_context>/);
+  assert.match(input, /<entry_decision_context role="fact" source="runtime_state" trust="read_only">/);
   assert.match(input, /run_delegation_summaries/);
   assert.match(input, /<runtime_context/);
   assert.match(prompt, /assistant 角色的 compaction context/);
@@ -151,6 +149,7 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.doesNotMatch(input, /<user_request>|<recent_messages>|<recent_subagent_announces>/);
   assert.doesNotMatch(prompt, /\/repo|run_delegations/);
   assert.doesNotMatch(input, /<task_plan_draft/);
+  assert.doesNotMatch(input, /capability_artifacts|artifact 短引用/);
   assert.doesNotMatch(input, /<instruction>/);
   assert.doesNotMatch(input, /重新规划/);
 });

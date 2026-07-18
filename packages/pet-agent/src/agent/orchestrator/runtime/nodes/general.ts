@@ -32,6 +32,7 @@ import {
   createTaskActiveDelegation,
   resolveDelegationTranscriptRunId,
 } from '../decisions/delegationLifecycle';
+import { withArtifactDiscoveryContext } from '../../artifacts/discovery';
 
 export function createGeneralNode(params: {
   config: OrchestratorConfig;
@@ -41,7 +42,15 @@ export function createGeneralNode(params: {
 
   // Node: general — reads tools from configurable
   return async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const { toolkits, execution, workdir, runtimeEnvironment, reviewCapabilities, globalReviewPolicy } = getInvokeOptions(runnableConfig);
+    const {
+      toolkits,
+      execution,
+      workdir,
+      artifactDiscoveryRoot,
+      runtimeEnvironment,
+      reviewCapabilities,
+      globalReviewPolicy,
+    } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
@@ -89,7 +98,7 @@ export function createGeneralNode(params: {
       '使用可用工具完成任务，优先调用工具获取准确信息，再给出结果。',
     ].filter((line) => line !== null) as string[];
 
-    const subagentMessages = scopedMessages;
+    const subagentMessages = withArtifactDiscoveryContext(scopedMessages, artifactDiscoveryRoot);
     const result = await createSubagent({
       model: config.models.subagent ?? config.models.act,
       tools: toolList,

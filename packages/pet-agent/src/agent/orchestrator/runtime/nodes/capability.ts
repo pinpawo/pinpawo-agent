@@ -37,6 +37,7 @@ import {
   readCapabilityNameFromLane,
   resolveDelegationTranscriptRunId,
 } from '../decisions/delegationLifecycle';
+import { withArtifactDiscoveryContext } from '../../artifacts/discovery';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -52,6 +53,7 @@ export function createCapabilityNode(params: {
       execution,
       workdir,
       runtimeEnvironment,
+      artifactDiscoveryRoot,
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
@@ -126,12 +128,13 @@ export function createCapabilityNode(params: {
       workdir: workdir ?? null,
     });
 
+    const subagentMessages = withArtifactDiscoveryContext(scopedMessages, artifactDiscoveryRoot);
     let subagentInput: SubagentRunInput = {
       model: config.models.subagent ?? config.models.act,
       tools: selectCapabilityTools(runtime, usedToolkitResources.tools),
       instructions: [executionInstruction, ...usedToolkitResources.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
       operations: collectCapabilityOperations(usedToolkitResources.toolkits, runtime),
-      messages: scopedMessages,
+      messages: subagentMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
       middleware: usedToolkitResources.middleware,

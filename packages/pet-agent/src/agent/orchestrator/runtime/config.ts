@@ -27,6 +27,9 @@ export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorI
     toolkits: (cfg.toolkits ?? []) as AgentToolkit[],
     execution: cfg.execution as AgentExecution | undefined,
     workdir: cfg.workdir as string | undefined,
+    artifactDiscoveryRoot: typeof cfg.artifactDiscoveryRoot === 'string'
+      ? cfg.artifactDiscoveryRoot
+      : undefined,
     runtimeEnvironment: cfg.runtimeEnvironment as string | undefined,
     reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
     globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),

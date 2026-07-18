@@ -82,8 +82,6 @@ test('orchestrator context compaction excludes delegation briefings from summary
     delegationId: 'delegation-1',
     task: '不要把这段调度文本写入摘要',
     contextSummary: null,
-    runDelegationSummaries: [],
-    remainingPlan: [],
   });
   const messages: BaseMessage[] = [
     new HumanMessage('完成任务'),

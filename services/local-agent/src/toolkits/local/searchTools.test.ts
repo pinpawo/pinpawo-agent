@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { walkFiles, DEFAULT_WALK_IGNORED_DIRS } from './fileSystemUtils';
+import { listDirTool, viewFileChunkTool } from './fileTools';
 import { globSearchTool, grepSearchTool } from './searchTools';
 
 function makeTree() {
@@ -90,4 +91,22 @@ test('glob_search ignores .pinpawo and finds real files', async () => {
 
   assert.ok(output.includes('src/app.ts'));
   assert.ok(!output.includes('.pinpawo'), 'glob must not surface checkpoint storage');
+});
+
+test('explicit file tools can inspect a scoped artifact path under .pinpawo', async () => {
+  const root = makeTree();
+  const artifactDir = resolve(
+    root,
+    '.pinpawo/capability-artifacts/threads/thread-1/delegation-1',
+  );
+  mkdirSync(artifactDir, { recursive: true });
+  writeFileSync(resolve(artifactDir, 'manifest.json'), '{"title":"artifact shortcut"}\n');
+
+  const listing = String(await listDirTool.invoke({ path: artifactDir }));
+  const content = String(await viewFileChunkTool.invoke({
+    path: resolve(artifactDir, 'manifest.json'),
+  }));
+
+  assert.match(listing, /manifest\.json/);
+  assert.match(content, /artifact shortcut/);
 });

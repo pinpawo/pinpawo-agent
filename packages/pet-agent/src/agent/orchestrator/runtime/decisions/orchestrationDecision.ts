@@ -55,6 +55,7 @@ import {
 import {
   buildContinuationBriefingMessage,
   buildDelegationBriefingMessage,
+  buildDelegationPlanMessage,
 } from '../../delegationBriefing';
 import {
   ACTIVE_DELEGATION_LIMIT_REACHED,
@@ -71,6 +72,7 @@ import {
   readLatestAnnounce,
   readLatestAnnounceCompletionReason,
   readLatestHumanRequest,
+  setPinpetMeta,
 } from '../../messageLanes';
 import { resolveToolkitResources } from '../../subagentDispatch';
 import {
@@ -182,11 +184,14 @@ function buildTaskDecisionContext(params: {
       config.decisionStructuredOutput?.method,
     ),
   });
-  const decisionContextMessage = new SystemMessage(buildTaskDecisionInput({
-    capabilityArtifacts: state.sessionCapabilityArtifacts,
+  const decisionContextMessage = new AIMessage(buildTaskDecisionInput({
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
     runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
   }));
+  setPinpetMeta(decisionContextMessage, {
+    source: 'entry_decision_context',
+    synthetic: true,
+  });
 
   return {
     conversationMessages,
@@ -659,7 +664,7 @@ function buildCapabilityDecisionResult(params: {
   const nextTaskActiveDelegation = createTaskActiveDelegation(runNextDelegation, state.runId);
 
   // Delegation briefing: the deterministic projection of the materialized
-  // delegation into main messages. Written here — and only here — because this
+  // delegation into its private lane. Written here — and only here — because this
   // is the single point where both entry direct_task and planner next_task
   // become a real delegation; bail-out paths above never leave a stale
   // "当前执行 X" briefing behind. See issue #362.
@@ -672,12 +677,15 @@ function buildCapabilityDecisionResult(params: {
     // runNextDelegation.contextSummary carries no execution guidance, so the
     // briefing omits its context line rather than rendering filler.
     contextSummary: pendingTask.contextSummary,
-    runDelegationSummaries,
-    remainingPlan: state.runCapabilityPlan,
+  });
+  const planMessage = buildDelegationPlanMessage({
+    runId: nextTaskActiveDelegation.transcriptRunId,
+    delegationId: runNextDelegation.id,
+    task: runNextDelegation.task,
   });
 
   return {
-    messages: [briefingMessage],
+    messages: [planMessage, briefingMessage],
     runNextDelegation,
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,
@@ -762,6 +770,7 @@ function buildContinueDelegationResult(params: {
   // subagent re-announcing the same conclusion. gapNote may be null (e.g.
   // limit_reached), where continuing is self-evident from the transcript.
   const briefingMessage = buildContinuationBriefingMessage({
+    lane: activeDelegation.lane,
     runId: activeDelegation.transcriptRunId,
     delegationId: runNextDelegation.id,
     task: runNextDelegation.task,

@@ -2,6 +2,7 @@ import { AIMessage, SystemMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   getMessageHandoffSource,
+  isDelegationBriefingLikeMessage,
   mainConversationMessages,
   readLatestAnnounceCompletionReason,
   stampMessageCreatedAtUtc,
@@ -29,8 +30,9 @@ export function createAnswerNode(config: OrchestratorConfig) {
     // The full main conversation queue. Subagent results already live here as
     // handoff copies (first-class, lane-free), so the answer node just reads main
     // — no need to dig announces out of lanes. Context-compaction summaries are
-    // kept (mainConversationMessages only drops lane-tagged messages), since after
-    // compaction a summary may be the only surviving record of older results.
+    // kept; mainConversationMessages drops lane-tagged and legacy briefing
+    // messages only. After compaction, a summary may be the sole surviving
+    // record of older accepted results.
     const history = mainConversationMessages(state.messages);
     const latestMainMessage = history.at(-1);
     const latestHandoffSource = latestMainMessage
@@ -42,17 +44,31 @@ export function createAnswerNode(config: OrchestratorConfig) {
         ?? readRunIterationLimit(config.maxRunIterations)
         ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
     );
-    const response = await config.models.act.invoke(
-      [
-        new SystemMessage(buildAnswerSystemPrompt({ actor, workdir, runtimeEnvironment })),
-        ...history,
-        ...(latestHandoffSource
-          ? [new SystemMessage(buildDelegationCompletionAnswerContext(latestHandoffSource))]
-          : []),
-        ...(terminalContext ? [new SystemMessage(terminalContext)] : []),
-      ],
-      runnableConfig,
-    );
+    const answerMessages = [
+      new SystemMessage(buildAnswerSystemPrompt({ actor, workdir, runtimeEnvironment })),
+      ...history,
+      ...(latestHandoffSource
+        ? [new SystemMessage(buildDelegationCompletionAnswerContext(latestHandoffSource))]
+        : []),
+      ...(terminalContext ? [new SystemMessage(terminalContext)] : []),
+    ];
+    let response = await config.models.act.invoke(answerMessages, runnableConfig);
+    if (isDelegationBriefingLikeMessage(response)) {
+      response = await config.models.act.invoke([
+        ...answerMessages,
+        new SystemMessage([
+          '上一候选回复因使用内部【委派简报】格式而被拒绝，不能发送给用户。',
+          '请重新生成普通的用户可见回复；直接回答当前请求，不要输出调度消息、委派简报或内部协议。',
+        ].join('\n')),
+      ], runnableConfig);
+    }
+    if (isDelegationBriefingLikeMessage(response)) {
+      const fallback = new AIMessage('刚才的回复混入了内部调度格式，已被阻止发送。请再试一次。');
+      return {
+        messages: [stampMessageCreatedAtUtc(fallback)],
+        ...buildAnswerCleanup(),
+      };
+    }
     if (!readMessageText(response).trim()) {
       const fallback = new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。');
       return {

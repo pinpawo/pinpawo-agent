@@ -8,7 +8,6 @@ function messages() {
     role: 'user' | 'assistant' | 'system' | 'subagent';
     text: string;
     requestId?: string;
-    source?: 'checkpoint' | 'live-event' | 'local-input';
   }) => {
     index += 1;
     return {
@@ -108,7 +107,6 @@ test('buildTuiActionsFromServerMessage normalizes displayable runtime events', (
           role: 'system',
           text,
           requestId: 'req-1',
-          source: 'live-event',
         },
       },
     );
@@ -200,7 +198,6 @@ test('buildTuiActionsFromServerMessage maps control messages to TUI actions', ()
           role: 'assistant',
           text: '[interrupted]',
           requestId: 'req-1',
-          source: 'live-event',
         }],
         statusNotice: '已打断',
       }],
@@ -231,14 +228,12 @@ test('buildTuiActionsFromServerMessage maps studio control messages', () => {
           role: 'system',
           text: '[studio] turn stopped (无最终输出)',
           requestId: 'studio-1',
-          source: 'live-event',
         }, {
           id: 'message:cell-2',
           createdAt: '2026-07-15T02:00:02.000Z',
           role: 'system',
           text: '[studio] stopped: done enough',
           requestId: 'studio-1',
-          source: 'live-event',
         }],
       }],
     },
@@ -264,7 +259,6 @@ test('buildTuiActionsFromServerMessage maps studio control messages', () => {
           role: 'system',
           text: '[studio 出错] planner failed',
           requestId: 'studio-2',
-          source: 'live-event',
         }],
         statusNotice: 'Studio 出错，已恢复输入',
       }],

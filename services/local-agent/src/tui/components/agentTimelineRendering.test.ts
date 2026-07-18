@@ -411,7 +411,6 @@ test('checkpoint assistant messages render through markdown', () => {
     role: 'assistant',
     text: '**历史回答**\n\n- 第一项\n- 第二项',
     status: 'completed',
-    source: 'checkpoint',
   } satisfies LocalAgentMessageEntry;
 
   const element = MessageBlock({
@@ -480,7 +479,6 @@ function operationEntry(params: Partial<LocalAgentOperationEntry>): LocalAgentOp
     kind: 'browser.open',
     title: '打开网页',
     phase: 'started',
-    source: 'live-event',
     startedAt: 1000,
     updatedAt: 1000,
     ...params,
@@ -495,7 +493,6 @@ function subagentMessage(id: string, text: string): LocalAgentMessageEntry {
     requestId: 'req-1',
     text,
     status: 'streaming',
-    source: 'live-event',
   };
 }
 
@@ -507,6 +504,5 @@ function messageEntry(id: string, text: string): LocalAgentMessageEntry {
     requestId: 'req-1',
     text,
     status: 'completed',
-    source: 'live-event',
   };
 }

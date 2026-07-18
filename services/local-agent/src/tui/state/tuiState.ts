@@ -47,10 +47,10 @@ export type TuiState = {
   };
 };
 
-export type TuiInteractionMode = 'chat' | 'studio';
+export type TuiComposerTarget = 'chat' | 'studio';
 
 export type TuiUiState = {
-  mode: TuiInteractionMode;
+  composerTarget: TuiComposerTarget;
   studioConversationId: string | null;
   externalEditorOpen: boolean;
 };
@@ -98,12 +98,12 @@ export type TuiAction =
       statusNotice?: string;
     }
   | {
-      type: 'ui.mode.set';
-      mode: TuiInteractionMode;
+      type: 'ui.composer_target.set';
+      composerTarget: TuiComposerTarget;
       studioConversationId?: string | null;
     }
   | {
-      type: 'ui.mode.reset';
+      type: 'ui.composer_target.reset';
     }
   | {
       type: 'ui.external_editor.set_open';
@@ -174,7 +174,7 @@ export function createInitialTuiState(defaultSession: SessionModel): TuiState {
     focusedSessionId: defaultSession.sessionId,
     reviewDrafts: {},
     ui: {
-      mode: 'chat',
+      composerTarget: 'chat',
       studioConversationId: null,
       externalEditorOpen: false,
     },

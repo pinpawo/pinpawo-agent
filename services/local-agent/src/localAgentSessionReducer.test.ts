@@ -130,7 +130,6 @@ test('reduceSession deterministically replays canonical run inputs', () => {
     kind: 'shell',
     title: 'Run command',
     phase: 'completed',
-    source: 'live-event',
     target: 'npm test',
     summary: 'running tests',
     details: { cwd: '/repo', exitCode: 0 },
@@ -249,7 +248,7 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
     tokenUsage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
   };
   const snapshot = {
-    version: 2 as const,
+    version: 3 as const,
     session: {
       sessionId: 'chat:pet',
       kind: 'chat' as const,
@@ -259,7 +258,6 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
         role: 'user' as const,
         text: 'checkpoint message',
         status: 'completed' as const,
-        source: 'checkpoint' as const,
       }],
       activeRun: {
         requestId: 'req-1',
@@ -305,7 +303,6 @@ test('TUI actions preserve the shared session reducer projection', () => {
       role: 'user',
       text: 'hello',
       requestId: 'req-1',
-      source: 'local-input',
       createdAt: new Date(1_000).toISOString(),
     },
     now: 1_000,
@@ -336,7 +333,6 @@ test('TUI actions preserve the shared session reducer projection', () => {
       role: 'assistant',
       requestId: 'req-1',
       text: 'hi',
-      source: 'live-event',
       createdAt: new Date(1_100).toISOString(),
     },
   }, { observedAt: 1_100 });
@@ -359,7 +355,6 @@ test('TUI actions preserve the shared session reducer projection', () => {
       role: 'assistant',
       requestId: 'req-1',
       text: 'hi there',
-      source: 'live-event',
       createdAt: new Date(1_200).toISOString(),
     },
   }, { observedAt: 1_200 });

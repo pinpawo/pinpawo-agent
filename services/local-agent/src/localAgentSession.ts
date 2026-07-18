@@ -5,9 +5,7 @@ import type {
 } from './events/localAgentRuntimeEvent';
 import type { ReviewAction } from './reviewAction';
 
-export const LOCAL_AGENT_SESSION_SNAPSHOT_VERSION = 2 as const;
-
-export type LocalAgentTimelineSource = 'checkpoint' | 'live-event' | 'local-input';
+export const LOCAL_AGENT_SESSION_SNAPSHOT_VERSION = 3 as const;
 
 export type LocalAgentMessageEntry = {
   id: string;
@@ -15,7 +13,6 @@ export type LocalAgentMessageEntry = {
   role: 'user' | 'assistant' | 'system' | 'subagent';
   text: string;
   status: 'streaming' | 'completed';
-  source: LocalAgentTimelineSource;
   requestId?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -29,7 +26,6 @@ export type LocalAgentOperationEntry = {
   kind: string;
   title: string;
   phase: LocalAgentOperationPhase;
-  source: LocalAgentTimelineSource;
   target?: string;
   summary?: string;
   details?: Record<string, unknown>;
@@ -55,7 +51,6 @@ export type LocalAgentSessionMessageInput = {
   role: LocalAgentMessageEntry['role'];
   text: string;
   requestId?: string;
-  source?: LocalAgentTimelineSource;
   createdAt?: string;
 };
 

@@ -236,7 +236,7 @@ function parseLocalAgentRuntime(value: unknown): LocalAgentRuntimeView | null {
 }
 
 function parseLocalAgentTimelineEntry(value: unknown): LocalAgentTimelineEntry | null {
-  if (!isRecord(value) || typeof value.id !== 'string' || !isTimelineSource(value.source)) {
+  if (!isRecord(value) || typeof value.id !== 'string') {
     return null;
   }
   if (value.type === 'message') {
@@ -257,7 +257,6 @@ function parseLocalAgentTimelineEntry(value: unknown): LocalAgentTimelineEntry |
       role: value.role,
       text: value.text,
       status: value.status,
-      source: value.source,
       ...(typeof value.requestId === 'string' ? { requestId: value.requestId } : {}),
       ...(typeof value.createdAt === 'string' ? { createdAt: value.createdAt } : {}),
       ...(typeof value.updatedAt === 'string' ? { updatedAt: value.updatedAt } : {}),
@@ -282,7 +281,6 @@ function parseLocalAgentTimelineEntry(value: unknown): LocalAgentTimelineEntry |
       kind: typeof value.kind === 'string' ? value.kind : value.operationKey,
       title: typeof value.title === 'string' ? value.title : value.operationKey,
       phase: value.phase,
-      source: value.source,
       ...(typeof value.target === 'string' ? { target: value.target } : {}),
       ...(typeof value.summary === 'string' ? { summary: value.summary } : {}),
       ...(isRecord(value.details) ? { details: value.details } : {}),
@@ -407,10 +405,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isSessionKind(value: unknown): value is LocalAgentSession['kind'] {
   return value === 'chat' || value === 'studio';
-}
-
-function isTimelineSource(value: unknown): value is LocalAgentTimelineEntry['source'] {
-  return value === 'checkpoint' || value === 'live-event' || value === 'local-input';
 }
 
 function isOperationPhase(value: unknown): value is LocalAgentOperationEntry['phase'] {

@@ -28,7 +28,7 @@ test('buildStatusBarModel derives explicit prioritized segments', () => {
 
   const model = buildStatusBarModel({
     connectionStatus: '就绪',
-    mode: 'studio',
+    composerTarget: 'studio',
     session,
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
@@ -37,7 +37,7 @@ test('buildStatusBarModel derives explicit prioritized segments', () => {
     model.segments.map((segment) => [segment.id, segment.label, segment.value, segment.priority]),
     [
       ['connection', undefined, '就绪', 100],
-      ['mode', undefined, 'Studio', 90],
+      ['composer-target', undefined, 'Studio', 90],
       ['policy', '授权', '需要授权', 80],
       ['cwd', '目录', '/Users/mac/project', 60],
       ['model', '模型', 'gpt-test', 50],
@@ -50,7 +50,7 @@ test('formatStatusBarText keeps cwd visible at normal widths without displacing 
   const model: StatusBarModel = {
     segments: [
       segment('connection', '连接断开，10s 后重连', 100),
-      segment('mode', 'Chat', 90),
+      segment('composer-target', 'Chat', 90),
       segment('policy', '批准执行', 80, '授权'),
       segment('cwd', '/Users/mac/Develop/pinpawo-agent', 60, '目录'),
       segment('model', 'very-long-model-name', 50, '模型'),
@@ -68,7 +68,7 @@ test('formatStatusBarText keeps cwd visible at normal widths without displacing 
 test('buildStatusBarModel includes current overlay owner when present', () => {
   const model = buildStatusBarModel({
     connectionStatus: '就绪',
-    mode: 'chat',
+    composerTarget: 'chat',
     session: createSession({ id: 'chat:pet' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION,
     overlayOwner: 'Approval',
@@ -78,7 +78,7 @@ test('buildStatusBarModel includes current overlay owner when present', () => {
     model.segments.map((segment) => [segment.id, segment.label, segment.value, segment.priority]),
     [
       ['connection', undefined, '就绪', 100],
-      ['mode', undefined, 'Chat', 90],
+      ['composer-target', undefined, 'Chat', 90],
       ['overlay', '浮层', 'Approval', 85],
       ['policy', '授权', '自动授权', 80],
       ['cwd', '目录', '未提供', 60],
@@ -88,29 +88,29 @@ test('buildStatusBarModel includes current overlay owner when present', () => {
   );
 });
 
-test('buildStatusBarModel follows reducer-owned submit mode over session kind', () => {
+test('buildStatusBarModel follows reducer-owned composer target over session kind', () => {
   const studioSubmitModel = buildStatusBarModel({
     connectionStatus: '就绪',
-    mode: 'studio',
+    composerTarget: 'studio',
     session: createSession({ id: 'chat:pet', kind: 'chat' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
   const chatSubmitModel = buildStatusBarModel({
     connectionStatus: '就绪',
-    mode: 'chat',
+    composerTarget: 'chat',
     session: createSession({ id: 'chat:pet', kind: 'studio' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
 
-  assert.equal(studioSubmitModel.segments.find((segment) => segment.id === 'mode')?.value, 'Studio');
-  assert.equal(chatSubmitModel.segments.find((segment) => segment.id === 'mode')?.value, 'Chat');
+  assert.equal(studioSubmitModel.segments.find((segment) => segment.id === 'composer-target')?.value, 'Studio');
+  assert.equal(chatSubmitModel.segments.find((segment) => segment.id === 'composer-target')?.value, 'Chat');
 });
 
 test('buildStatusBarModel keeps activity and connection as separate segments', () => {
   const model = buildStatusBarModel({
     activityStatus: '正在思考 · 2s',
     connectionStatus: '连接断开，10s 后重连',
-    mode: 'chat',
+    composerTarget: 'chat',
     session: createSession({ id: 'chat:pet' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
@@ -120,7 +120,7 @@ test('buildStatusBarModel keeps activity and connection as separate segments', (
     [
       ['activity', undefined, '正在思考 · 2s', 100],
       ['connection', '连接', '连接断开，10s 后重连', 95],
-      ['mode', undefined, 'Chat', 90],
+      ['composer-target', undefined, 'Chat', 90],
     ],
   );
   const normal = formatStatusBarText(model, 80);
@@ -134,7 +134,7 @@ test('buildStatusBarModel keeps status notices separate from connection', () => 
   const model = buildStatusBarModel({
     statusNotice: '出错，已恢复输入',
     connectionStatus: '就绪',
-    mode: 'chat',
+    composerTarget: 'chat',
     session: createSession({ id: 'chat:pet' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
@@ -144,7 +144,7 @@ test('buildStatusBarModel keeps status notices separate from connection', () => 
     [
       ['notice', undefined, '出错，已恢复输入'],
       ['connection', '连接', '就绪'],
-      ['mode', undefined, 'Chat'],
+      ['composer-target', undefined, 'Chat'],
     ],
   );
   assert.match(formatStatusBarText(model, 80), /^出错，已恢复输入 · 连接:就绪/);
@@ -154,7 +154,7 @@ test('formatStatusBarParts preserves segment tones for rendering', () => {
   const model = buildStatusBarModel({
     activityStatus: '正在思考 · 2s',
     connectionStatus: '未连接',
-    mode: 'chat',
+    composerTarget: 'chat',
     session: createSession({ id: 'chat:pet' }),
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });
@@ -170,7 +170,7 @@ test('formatStatusBarParts preserves segment tones for rendering', () => {
     [
       ['activity', 'warning'],
       ['connection', 'danger'],
-      ['mode', 'muted'],
+      ['composer-target', 'muted'],
     ],
   );
   assert.ok(parts.filter((part) => part.separator).every((part) => part.tone === 'muted'));
@@ -192,7 +192,7 @@ test('formatStatusBarParts distinguishes retrying and failed connection tones', 
   for (const [connectionStatus, expectedTone] of cases) {
     const model = buildStatusBarModel({
       connectionStatus,
-      mode: 'chat',
+      composerTarget: 'chat',
       session: createSession({ id: 'chat:pet' }),
       globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
     });
@@ -209,7 +209,7 @@ test('formatStatusBarText truncates by display width for CJK text', () => {
   const model: StatusBarModel = {
     segments: [
       segment('activity', '正在思考', 100),
-      segment('mode', 'Studio', 90),
+      segment('composer-target', 'Studio', 90),
       segment('cwd', '/tmp/含中文目录/工作区', 20, '目录'),
     ],
   };
@@ -233,7 +233,7 @@ test('formatStatusBarText stays within 80 and 120 columns with CJK cwd', () => {
   const activeModel = buildStatusBarModel({
     activityStatus: '正在调用能力或工具 · 12s',
     connectionStatus: '连接断开，10s 后重连 1/5',
-    mode: 'studio',
+    composerTarget: 'studio',
     session: activeSession,
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
     overlayOwner: 'Approval',
@@ -250,7 +250,7 @@ test('formatStatusBarText stays within 80 and 120 columns with CJK cwd', () => {
   };
   const cwdModel = buildStatusBarModel({
     connectionStatus: '就绪',
-    mode: 'chat',
+    composerTarget: 'chat',
     session: cwdSession,
     globalReviewPolicyMode: GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
   });

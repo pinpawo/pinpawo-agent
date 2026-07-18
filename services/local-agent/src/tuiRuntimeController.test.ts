@@ -19,7 +19,7 @@ function pendingReviewState(): TuiState {
       'interrupt-1': { actionId: 'interrupt-1', decisions: [] },
     },
     ui: {
-      mode: 'chat',
+      composerTarget: 'chat',
       studioConversationId: null,
       externalEditorOpen: false,
     },
@@ -374,7 +374,7 @@ test('TuiRuntimeController applies the latest snapshot before opening websocket'
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        version: 2,
+        version: 3,
         session: {
           sessionId: 'sess-1',
           kind: 'chat',
@@ -384,7 +384,6 @@ test('TuiRuntimeController applies the latest snapshot before opening websocket'
             role: 'user',
             text: 'hello',
             status: 'completed',
-            source: 'checkpoint',
           }],
           activeRun: null,
         },
@@ -424,7 +423,7 @@ test('TuiRuntimeController refreshes from the latest snapshot after stale review
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        version: 2,
+        version: 3,
         session: {
           sessionId: 'sess-1',
           kind: 'chat',
@@ -434,7 +433,6 @@ test('TuiRuntimeController refreshes from the latest snapshot after stale review
             role: 'user',
             text: 'hello',
             status: 'completed',
-            source: 'checkpoint',
           }],
           activeRun: null,
         },
@@ -478,7 +476,7 @@ test('TuiRuntimeController applies the latest snapshot after completed messages'
     readSessionSnapshot: async () => {
       events.push('snapshot');
       return {
-        version: 2,
+        version: 3,
         session: {
           sessionId: 'sess-1',
           kind: 'chat',
@@ -488,7 +486,6 @@ test('TuiRuntimeController applies the latest snapshot after completed messages'
             role: 'assistant',
             text: 'final',
             status: 'completed',
-            source: 'checkpoint',
             requestId: 'req-1',
           }],
           activeRun: null,

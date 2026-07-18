@@ -30,7 +30,7 @@ Startup, reconnect, resume, completion, and review-state refresh are reasons a c
 
 ## Shape
 
-A session owns one ordered timeline and zero or one active run. Snapshot version 2
+A session owns one ordered timeline and zero or one active run. Snapshot version 3
 represents that run as exactly one of three projection facts:
 
 - `running` carries one runtime `activity`: `thinking`, `using_tool`, or `streaming`;
@@ -45,9 +45,9 @@ such as busy-copy escalation remains in the render layer. Sending
 `run.interrupt` does not optimistically create the `interrupting` view.
 
 Local snapshot readers accept only the current versioned
-`LocalAgentSessionSnapshot`; snapshot version 1, the previous
-`runs[] + activeRunId`, legacy pending-review payloads, and message-only restore
-shapes are unsupported.
+`LocalAgentSessionSnapshot`. Snapshot versions 1 and 2 are unsupported, as are
+the previous `runs[] + activeRunId`, legacy pending-review payloads, and
+message-only restore shapes.
 
 Partial `ReviewDraft` decisions and the one-shot `resolutionSent` marker are
 client-local interaction state and are not part of the shared snapshot.
@@ -63,6 +63,27 @@ Direct domain-only mutations use canonical `LocalAgentSessionInput` variants as
 TUI actions. Separate TUI action vocabulary remains for TUI-only state and where
 a domain intent also changes composer, review-draft, ownership, or status-copy
 state.
+
+The TUI names the destination for the next composer submission
+`ui.composerTarget`. It is a UI routing choice (`chat | studio`), not the same
+concept as `session.kind`, which classifies the focused session projection.
+Commands that switch between Chat and Studio update both facts when appropriate,
+but consumers must not derive one from the other.
+
+The TUI intentionally retains `sessions + focusedSessionId`. Switchable/resumable
+sessions are already a product capability, and session-keyed state keeps late or
+background runtime events scoped to their owning session instead of allowing
+them to mutate the focused session. The current terminal UI still renders one
+focused session over one local connection; retaining the map does not imply
+multiple visible panes or a second durable store. Background session events may
+update their session projection but must not replace focused-session notices or
+interaction state.
+
+Timeline entries do not carry a required checkpoint/live/local-input provenance
+field. That field had no production consumer, and the path by which an entry was
+observed is not part of its canonical identity. A future debug/export feature
+that needs provenance must define and consume its own explicit diagnostic
+contract instead of making every timeline entry carry write-only metadata.
 
 The TUI resolves one `TuiInteractionOwner` for each render from current
 interaction state. Input routing and visible overlay selection both consume that

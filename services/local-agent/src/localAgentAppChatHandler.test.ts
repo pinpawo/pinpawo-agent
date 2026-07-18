@@ -245,7 +245,6 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
       role: 'user',
       text: 'hello',
       requestId: 'req-1',
-      source: 'local-input',
     },
     now: 1000,
   });
@@ -322,7 +321,6 @@ test('LocalAgentAppChatHandler settles projected operations when a run is interr
       role: 'user',
       text: 'run tests',
       requestId: 'req-interrupt',
-      source: 'local-input',
     },
     now: 1000,
   });

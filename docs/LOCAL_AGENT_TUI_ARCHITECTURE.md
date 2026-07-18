@@ -56,7 +56,7 @@ services/local-agent/src/commands/tui.tsx
 
 - `commands/tui.tsx` 是 CLI entry，主要负责加载配置并挂载 TUI app。
 - `tui/TuiApp.tsx` 负责 Ink layout、输入组合、命令分发和 hooks/components 组装。
-- `tui/TuiRuntimeController.ts` 负责 websocket lifecycle、发送 client message 和 session snapshot 应用；本地 HTTP 访问由 `tui/tuiLocalServerClient.ts` 承担。
+- `tui/TuiRuntimeController.ts` 负责 transport-neutral connection lifecycle、发送 typed client message 和 session snapshot 应用；当前 WebSocket adapter 位于 `tui/tuiLocalWebSocketClient.ts`，本地 HTTP 访问由 `tui/tuiLocalServerClient.ts` 承担。
 - `/resume` picker 的 modal 状态、sessions 加载和恢复流程由 `tui/useResumePickerController.ts` 承担。
 - slash command 已收敛为 `tui/input/commandRegistry.ts`，统一承载 help metadata。
 - key handling 已收敛为 `tui/input/keymap.ts`，统一表达 global、composer、approval、resume picker 快捷键。
@@ -206,7 +206,8 @@ LocalAgentRuntimeEvent / ServerControlMessage / UserInputAction
 
 职责边界：
 
-- WebSocket JSON 解析属于 protocol/client boundary；controller 只接收 typed server messages。
+- wire message 的解析与序列化属于 protocol/transport boundary；controller 只接收 typed server messages。
+- `LocalAgentConnection.send()` 返回 `true` 仅表示当前 transport 已接受消息用于发送，不表示 server 或 graph 已经处理消息。
 - 协议版本适配属于 protocol adapter。
 - agent runtime stream normalization 属于 local-agent event normalizer。
 - terminal 文案格式化属于 TUI render adapter。
@@ -286,7 +287,7 @@ services/local-agent/src/
 - `commands/tui.tsx` 最终收敛为 CLI entry。
 - `tui/render/*` 面向 normalized event fields。
 - `tui/state/*` 保持纯状态计算（不含网络副作用，也不含动画时钟，见 §5）。
-- `TuiRuntimeController` 负责运行时编排、重连策略和 action dispatch；HTTP payload 解析在 `TuiLocalServerClient`，WS socket lifecycle 和 server message parsing 在 `TuiLocalWebSocketClient`，server message 到 reducer action 的纯映射在 `tuiServerMessageActions.ts`。
+- `TuiRuntimeController` 负责运行时编排、重连策略和 action dispatch，并只依赖注入的 `LocalAgentConnection`；HTTP payload 解析在 `TuiLocalServerClient`，WebSocket lifecycle、wire parsing 和 serialization 在 `TuiLocalWebSocketClient` adapter，server message 到 reducer action 的纯映射在 `tuiServerMessageActions.ts`。
 - `useResumePickerController` 负责 `/resume` 的 picker 状态、异步加载和恢复 action 编排；`TuiApp` 只负责把它接入命令和 keymap。
 
 ## 5. TUI State 草案

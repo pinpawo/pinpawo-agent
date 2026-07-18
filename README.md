@@ -217,6 +217,7 @@ The published package installs a `pinpawo-agent` binary.
 | `pinpawo-agent login` | Interactive setup for credentials and LLM settings. |
 | `pinpawo-agent actor` | Chooses the pet actor used by the local agent. |
 | `pinpawo-agent run` | Starts the local agent service. |
+| `pinpawo-agent run --stdio` | Starts one local-agent peer over JSONL stdio. |
 | `pinpawo-agent tui` | Starts the interactive terminal UI. |
 | `pinpawo-agent tui --dry-run` | Runs the TUI without writing generated post changes. |
 | `pinpawo-agent detect` | Prints local browser/backend detection as JSON. |

@@ -10,7 +10,7 @@ import type { StudioMigrateOptions } from './commands/studio';
 type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
   runActorSelect?: () => Promise<void> | void;
-  runAgent?: (opts: { workdir?: string }) => Promise<void> | void;
+  runAgent?: (opts: { workdir?: string; stdio: boolean }) => Promise<void> | void;
   runTui?: (opts: { dryRun: boolean; workdir?: string }) => Promise<void> | void;
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
@@ -99,10 +99,12 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .command('run')
     .description('Start the local agent service')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
-    .action(async (options: { workdir?: string }) => {
+    .option('--stdio', 'use one-peer JSONL stdio instead of the local HTTP/WebSocket server')
+    .action(async (options: { workdir?: string; stdio?: boolean }) => {
       const runAgent = handlers.runAgent ?? (await import('./commands/run')).runAgent;
       await runAgent({
         workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
+        stdio: options.stdio ?? false,
       });
     });
 

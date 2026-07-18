@@ -494,6 +494,11 @@ export class LocalServerChatHandler {
       return;
     }
 
+    if (!peer.isConnected()) {
+      this.releasePendingReviewRequest(msg.requestId);
+      return;
+    }
+
     this.markPendingReviewConsumed(msg.requestId);
 
     try {
@@ -572,6 +577,11 @@ export class LocalServerChatHandler {
         reviews: route.reviews,
         ...(route.actor ? { actor: route.actor } : {}),
       });
+      return;
+    }
+
+    if (!peer.isConnected()) {
+      this.releasePendingReviewRequest(msg.requestId);
       return;
     }
 

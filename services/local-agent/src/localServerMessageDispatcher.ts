@@ -66,7 +66,7 @@ export function runLocalServerPeerHandler(
   handler: () => MaybePromise<void>,
   logError: LocalServerLogError,
 ) {
-  Promise.resolve()
+  return Promise.resolve()
     .then(handler)
     .catch((err) => {
       logError(`[local-server] ${name} error:`, err);
@@ -85,27 +85,47 @@ export function dispatchLocalServerMessage(
     if (!msg) {
       logWarn(formatMalformedClientMessage('[local-server]', data));
       sendMalformedClientMessageError(peer, data);
-      return;
+      return Promise.resolve();
     }
 
     if (msg.type === 'chat_request') {
-      runLocalServerPeerHandler('handleChatRequest', () => handlers.onChatRequest(peer, msg), logError);
+      return runLocalServerPeerHandler(
+        'handleChatRequest',
+        () => handlers.onChatRequest(peer, msg),
+        logError,
+      );
     } else if (msg.type === 'studio_request') {
-      runLocalServerPeerHandler('handleStudioRequest', () => handlers.onStudioRequest(peer, msg), logError);
+      return runLocalServerPeerHandler(
+        'handleStudioRequest',
+        () => handlers.onStudioRequest(peer, msg),
+        logError,
+      );
     } else if (msg.type === 'human_review_response') {
-      runLocalServerPeerHandler(
+      return runLocalServerPeerHandler(
         'handleHumanReviewResponse',
         () => handlers.onHumanReviewResponse(peer, msg),
         logError,
       );
     } else if (msg.type === 'review.cancel') {
-      runLocalServerPeerHandler('handleReviewCancel', () => handlers.onReviewCancel(peer, msg), logError);
+      return runLocalServerPeerHandler(
+        'handleReviewCancel',
+        () => handlers.onReviewCancel(peer, msg),
+        logError,
+      );
     } else if (msg.type === 'run.interrupt') {
-      runLocalServerPeerHandler('handleRunInterrupt', () => handlers.onRunInterrupt(peer, msg), logError);
+      return runLocalServerPeerHandler(
+        'handleRunInterrupt',
+        () => handlers.onRunInterrupt(peer, msg),
+        logError,
+      );
     } else if (msg.type === 'new_session') {
-      runLocalServerPeerHandler('handleNewSession', () => handlers.onNewSession(peer, msg), logError);
+      return runLocalServerPeerHandler(
+        'handleNewSession',
+        () => handlers.onNewSession(peer, msg),
+        logError,
+      );
     } else if (msg.type === 'runtime_config.update') {
-      runLocalServerPeerHandler(
+      return runLocalServerPeerHandler(
         'handleRuntimeConfigUpdate',
         () => handlers.onRuntimeConfigUpdate(peer, msg),
         logError,
@@ -116,4 +136,5 @@ export function dispatchLocalServerMessage(
   } catch (err) {
     logError('[local-server] failed to dispatch client message:', err);
   }
+  return Promise.resolve();
 }

@@ -58,6 +58,7 @@ services/local-agent/src/commands/tui.tsx
 - `tui/TuiApp.tsx` 负责 Ink layout、输入组合、命令分发和 hooks/components 组装。
 - `tui/TuiRuntimeController.ts` 负责 transport-neutral connection lifecycle、发送 typed client message 和 session snapshot 应用；当前 WebSocket adapter 位于 `tui/tuiLocalWebSocketClient.ts`，本地 HTTP 访问由 `tui/tuiLocalServerClient.ts` 承担。
 - server-side handlers 通过 `LocalServerPeer` 标识 transport-local inflight delivery、Studio per-peer queue 和 outbound channel；review 是否有效仍由 session/checkpoint 派生的 action route 判断。WebSocket Upgrade、认证、Origin、readyState 和 framing 只属于 `localServerWsTransport.ts`。
+- `localServerStdioTransport.ts` 提供单进程单 peer 的 JSONL adapter：stdin 每行一个 client message，stdout 每行一个 server message，diagnostics 只写 stderr；它与 WebSocket adapter 复用同一组 typed handlers。snapshot/session commands 是否进入 stdio 属于独立的下一阶段决策。
 - `/resume` picker 的 modal 状态、sessions 加载和恢复流程由 `tui/useResumePickerController.ts` 承担。
 - slash command 已收敛为 `tui/input/commandRegistry.ts`，统一承载 help metadata。
 - key handling 已收敛为 `tui/input/keymap.ts`，统一表达 global、composer、approval、resume picker 快捷键。

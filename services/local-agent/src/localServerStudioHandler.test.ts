@@ -1,24 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { WebSocket } from 'ws';
-import {
-  sendLocalAgentEvent,
-  sendLocalAgentMessage,
-} from './localAgentProtocol';
 import { InflightRequestController } from './inflightRequestController';
-import { LocalServerStudioHandler } from './localServerStudioHandler';
+import {
+  LocalServerStudioHandler,
+  type LocalServerStudioOutbound,
+} from './localServerStudioHandler';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
 import { StudioNotConfiguredError, type BuildStudioInput, type BuildStudioResult } from './studio/studioRuntime';
 import type { LocalServerDeps } from './localServerTypes';
+import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
 
-function createFakeWebSocket(sent: unknown[]) {
+const PEER_OUTBOUND: LocalServerStudioOutbound<LocalServerPeer> = {
+  sendMessage: (peer, message) => peer.send(message),
+  sendEvent: (peer, event) => sendLocalServerPeerEvent(peer, event),
+};
+
+function createFakePeer(sent: unknown[]): LocalServerPeer {
   return {
-    readyState: 1,
-    send(data: string) {
-      sent.push(JSON.parse(data) as unknown);
+    isConnected: () => true,
+    send(message) {
+      sent.push(message);
+      return true;
     },
-  } as unknown as WebSocket;
+  };
 }
 
 function deferred<T>() {
@@ -30,10 +35,10 @@ function deferred<T>() {
 }
 
 function createInflightController() {
-  return new InflightRequestController<WebSocket>({
+  return new InflightRequestController<LocalServerPeer>({
     forceInterruptMs: 1,
-    emitOperation: (ws, event) => sendLocalAgentEvent(ws, event),
-    sendControl: (ws, message) => sendLocalAgentMessage(ws, message),
+    emitOperation: (peer, event) => sendLocalServerPeerEvent(peer, event),
+    sendControl: (peer, message) => peer.send(message),
     log: () => undefined,
   });
 }
@@ -87,11 +92,12 @@ function createDeps(): LocalServerDeps {
 
 test('LocalServerStudioHandler emits progress and done response', async () => {
   const sent: unknown[] = [];
-  const ws = createFakeWebSocket(sent);
+  const peer = createFakePeer(sent);
   const buildInputs: BuildStudioInput[] = [];
   const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
     inflightRequests: createInflightController(),
+    outbound: PEER_OUTBOUND,
     buildStudio: async (input) => {
       buildInputs.push(input);
       return {
@@ -117,7 +123,7 @@ test('LocalServerStudioHandler emits progress and done response', async () => {
     },
   });
 
-  await handler.handleStudioRequest(ws, {
+  await handler.handleStudioRequest(peer, {
     type: 'studio_request',
     requestId: 'studio-1',
     runId: 'run-100',
@@ -153,15 +159,16 @@ test('LocalServerStudioHandler emits progress and done response', async () => {
   });
 });
 
-test('LocalServerStudioHandler serializes studio requests per websocket', async () => {
+test('LocalServerStudioHandler serializes studio requests per peer', async () => {
   const sent: unknown[] = [];
-  const ws = createFakeWebSocket(sent);
+  const peer = createFakePeer(sent);
   const firstStarted = deferred<void>();
   const firstContinue = deferred<void>();
   const invocationEvents: string[] = [];
   const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
     inflightRequests: createInflightController(),
+    outbound: PEER_OUTBOUND,
     buildStudio: async () => ({
       resolved: {} as BuildStudioResult['resolved'],
       orchestrator: {
@@ -197,14 +204,14 @@ test('LocalServerStudioHandler serializes studio requests per websocket', async 
     }),
   });
 
-  const firstRequest = handler.handleStudioRequest(ws, {
+  const firstRequest = handler.handleStudioRequest(peer, {
     type: 'studio_request',
     requestId: 'studio-1',
     userRequest: 'first',
   }, createDeps());
   await firstStarted.promise;
 
-  const secondRequest = handler.handleStudioRequest(ws, {
+  const secondRequest = handler.handleStudioRequest(peer, {
     type: 'studio_request',
     requestId: 'studio-2',
     userRequest: 'second',
@@ -236,15 +243,16 @@ test('LocalServerStudioHandler serializes studio requests per websocket', async 
   assert.equal(studioResponses[1]?.requestId, 'studio-2');
 });
 
-test('LocalServerStudioHandler discards queued studio requests after websocket disconnect', async () => {
+test('LocalServerStudioHandler discards queued studio requests after peer disconnect', async () => {
   const sent: unknown[] = [];
-  const ws = createFakeWebSocket(sent);
+  const peer = createFakePeer(sent);
   const firstStarted = deferred<void>();
   const firstContinue = deferred<void>();
   const invocationEvents: string[] = [];
   const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
     inflightRequests: createInflightController(),
+    outbound: PEER_OUTBOUND,
     buildStudio: async () => ({
       resolved: {} as BuildStudioResult['resolved'],
       orchestrator: {
@@ -280,20 +288,20 @@ test('LocalServerStudioHandler discards queued studio requests after websocket d
     }),
   });
 
-  const firstRequest = handler.handleStudioRequest(ws, {
+  const firstRequest = handler.handleStudioRequest(peer, {
     type: 'studio_request',
     requestId: 'studio-1',
     userRequest: 'first',
   }, createDeps());
   await firstStarted.promise;
 
-  const secondRequest = handler.handleStudioRequest(ws, {
+  const secondRequest = handler.handleStudioRequest(peer, {
     type: 'studio_request',
     requestId: 'studio-2',
     userRequest: 'second',
   }, createDeps());
 
-  handler.rejectDisconnected(ws);
+  handler.rejectDisconnected(peer);
   firstContinue.resolve();
 
   await Promise.all([firstRequest, secondRequest]);
@@ -309,16 +317,17 @@ test('LocalServerStudioHandler discards queued studio requests after websocket d
 
 test('LocalServerStudioHandler maps missing studio config to studio_error', async () => {
   const sent: unknown[] = [];
-  const ws = createFakeWebSocket(sent);
+  const peer = createFakePeer(sent);
   const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
     inflightRequests: createInflightController(),
+    outbound: PEER_OUTBOUND,
     buildStudio: async () => {
       throw new StudioNotConfiguredError('/tmp/studio.json');
     },
   });
 
-  await handler.handleStudioRequest(ws, {
+  await handler.handleStudioRequest(peer, {
     type: 'studio_request',
     requestId: 'studio-2',
     userRequest: 'plan this',
@@ -333,11 +342,12 @@ test('LocalServerStudioHandler maps missing studio config to studio_error', asyn
 
 test('LocalServerStudioHandler fills runId and conversationId defaults', async () => {
   const sent: unknown[] = [];
-  const ws = createFakeWebSocket(sent);
+  const peer = createFakePeer(sent);
   const buildInputs: BuildStudioInput[] = [];
   const handler = new LocalServerStudioHandler({
-    reviewRouter: new LocalServerStudioReviewRouter<WebSocket>(),
+    reviewRouter: new LocalServerStudioReviewRouter<LocalServerPeer>(),
     inflightRequests: createInflightController(),
+    outbound: PEER_OUTBOUND,
     buildStudio: async (input) => {
       buildInputs.push(input);
       return {
@@ -356,7 +366,7 @@ test('LocalServerStudioHandler fills runId and conversationId defaults', async (
     },
   });
 
-  await handler.handleStudioRequest(ws, {
+  await handler.handleStudioRequest(peer, {
     type: 'studio_request',
     requestId: 'studio-default',
     userRequest: 'plan default ids',

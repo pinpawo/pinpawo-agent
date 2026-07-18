@@ -4,126 +4,47 @@ import {
   isAllowedLocalServerOrigin,
   isAuthorizedLocalServerRequest,
 } from './localServerAuth';
+import { sendLocalAgentMessage } from './localAgentProtocol';
 import {
-  parseLocalAgentClientMessage,
-  readLocalAgentClientMessageEnvelope,
-  sendLocalAgentEvent,
-  sendLocalAgentMessage,
-  type ChatRequestMessage,
-  type HumanReviewResponseMessage,
-  type NewSessionMessage,
-  type ReviewCancelMessage,
-  type RunInterruptMessage,
-  type RuntimeConfigUpdateMessage,
-  type StudioRequestMessage,
-} from './localAgentProtocol';
-
-type MaybePromise<T> = T | Promise<T>;
-type LogError = (message: string, error: unknown) => void;
-type LogWarn = (message: string) => void;
-
-export type LocalServerWsHandlers = {
-  onChatRequest: (ws: WebSocket, message: ChatRequestMessage) => MaybePromise<void>;
-  onStudioRequest: (ws: WebSocket, message: StudioRequestMessage) => MaybePromise<void>;
-  onHumanReviewResponse: (ws: WebSocket, message: HumanReviewResponseMessage) => MaybePromise<void>;
-  onReviewCancel: (ws: WebSocket, message: ReviewCancelMessage) => MaybePromise<void>;
-  onRunInterrupt: (ws: WebSocket, message: RunInterruptMessage) => MaybePromise<void>;
-  onNewSession: (ws: WebSocket, message: NewSessionMessage) => MaybePromise<void>;
-  onRuntimeConfigUpdate: (ws: WebSocket, message: RuntimeConfigUpdateMessage) => MaybePromise<void>;
-  onClose: (ws: WebSocket) => MaybePromise<void>;
-  log?: (message: string) => void;
-  logError?: LogError;
-  logWarn?: LogWarn;
-};
+  defaultLocalServerLogError,
+  defaultLocalServerLogWarn,
+  dispatchLocalServerMessage,
+  runLocalServerPeerHandler,
+  type LocalServerLogError,
+  type LocalServerPeerHandlers,
+} from './localServerMessageDispatcher';
+import type { LocalServerPeer } from './localServerPeer';
 
 export type LocalServerWsTransportOptions = {
   authToken: string;
   port: number;
 };
 
-function defaultLogError(message: string, error: unknown) {
-  console.error(message, error instanceof Error ? error.message : error);
-}
-
-function defaultLogWarn(message: string) {
-  console.warn(message);
-}
-
-function formatMalformedClientMessage(prefix: string, data: Buffer | string) {
-  const envelope = readLocalAgentClientMessageEnvelope(data);
-  return `${prefix} ignored malformed client message `
-    + `type=${envelope?.type ?? 'unknown'} requestId=${envelope?.requestId ?? 'unknown'}`;
-}
-
-function sendMalformedClientMessageError(ws: WebSocket, data: Buffer | string) {
-  const envelope = readLocalAgentClientMessageEnvelope(data);
-  if (!envelope?.requestId) {
-    return;
-  }
-  sendLocalAgentEvent(ws, {
-    type: 'error',
-    requestId: envelope.requestId,
-    message: '客户端消息协议不兼容或格式无效，请升级客户端后重试。',
-  });
-}
-
-function runHandler(
-  name: string,
-  handler: () => MaybePromise<void>,
-  logError: LogError,
-) {
-  Promise.resolve()
-    .then(handler)
-    .catch((err) => {
-      logError(`[local-server] ${name} error:`, err);
-    });
-}
-
-export function dispatchLocalServerWebSocketMessage(
+export function createLocalServerWebSocketPeer(
   ws: WebSocket,
-  data: Buffer | string,
-  handlers: LocalServerWsHandlers,
-  logError: LogError = handlers.logError ?? defaultLogError,
-  logWarn: LogWarn = handlers.logWarn ?? defaultLogWarn,
-) {
-  try {
-    const msg = parseLocalAgentClientMessage(data);
-    if (!msg) {
-      logWarn(formatMalformedClientMessage('[local-server]', data));
-      sendMalformedClientMessageError(ws, data);
-      return;
-    }
-
-    if (msg.type === 'chat_request') {
-      runHandler('handleChatRequest', () => handlers.onChatRequest(ws, msg), logError);
-    } else if (msg.type === 'studio_request') {
-      runHandler('handleStudioRequest', () => handlers.onStudioRequest(ws, msg), logError);
-    } else if (msg.type === 'human_review_response') {
-      runHandler('handleHumanReviewResponse', () => handlers.onHumanReviewResponse(ws, msg), logError);
-    } else if (msg.type === 'review.cancel') {
-      runHandler('handleReviewCancel', () => handlers.onReviewCancel(ws, msg), logError);
-    } else if (msg.type === 'run.interrupt') {
-      runHandler('handleRunInterrupt', () => handlers.onRunInterrupt(ws, msg), logError);
-    } else if (msg.type === 'new_session') {
-      runHandler('handleNewSession', () => handlers.onNewSession(ws, msg), logError);
-    } else if (msg.type === 'runtime_config.update') {
-      runHandler('handleRuntimeConfigUpdate', () => handlers.onRuntimeConfigUpdate(ws, msg), logError);
-    } else if (msg.type === 'ping') {
-      sendLocalAgentMessage(ws, { type: 'pong' });
-    }
-  } catch (err) {
-    logError('[local-server] failed to dispatch websocket message:', err);
-  }
+  logError: LocalServerLogError = defaultLocalServerLogError,
+): LocalServerPeer {
+  return {
+    isConnected: () => ws.readyState === WebSocket.OPEN,
+    send: (message) => {
+      try {
+        return sendLocalAgentMessage(ws, message);
+      } catch (err) {
+        logError('[local-server] failed to send websocket message:', err);
+        return false;
+      }
+    },
+  };
 }
 
 export function attachLocalServerWebSocketTransport(
   server: Server,
-  handlers: LocalServerWsHandlers,
+  handlers: LocalServerPeerHandlers,
   options: LocalServerWsTransportOptions,
 ) {
   const log = handlers.log ?? console.log;
-  const logError = handlers.logError ?? defaultLogError;
-  const logWarn = handlers.logWarn ?? defaultLogWarn;
+  const logError = handlers.logError ?? defaultLocalServerLogError;
+  const logWarn = handlers.logWarn ?? defaultLocalServerLogWarn;
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
@@ -147,14 +68,15 @@ export function attachLocalServerWebSocketTransport(
   });
 
   wss.on('connection', (ws) => {
+    const peer = createLocalServerWebSocketPeer(ws, logError);
     log('[local-server] TUI client connected');
 
     ws.on('message', (data: Buffer | string) => {
-      dispatchLocalServerWebSocketMessage(ws, data, handlers, logError, logWarn);
+      dispatchLocalServerMessage(peer, data, handlers, logError, logWarn);
     });
 
     ws.on('close', () => {
-      runHandler('handleClose', () => handlers.onClose(ws), logError);
+      runLocalServerPeerHandler('handleClose', () => handlers.onClose(peer), logError);
       log('[local-server] TUI client disconnected');
     });
 

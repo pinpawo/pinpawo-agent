@@ -473,7 +473,7 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 
 - 新增 `StudioRunService`，输入显式包含 `LocalServerDeps.runtimeConfig`、`runId`、
   `conversationId`、review bridge 和事件回调。
-- `LocalServerStudioHandler` 只保留 WebSocket、inflight 和 review routing 逻辑，
+- `LocalServerStudioHandler` 只保留 peer identity、inflight 和 review routing 逻辑，并通过注入的 typed outbound sink 发消息，
   实际 Studio turn 交给 `StudioRunService`。
 - `StudioRunService` 使用 `runId` 作为 Studio `turnId`，并派生稳定
   `studio:<conversationId>:run:<runId>` idempotency key，供未来 scheduler/job 表持久化使用。

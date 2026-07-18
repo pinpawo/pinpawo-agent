@@ -1,8 +1,6 @@
-import { WebSocket } from 'ws';
 import type { ReviewResponse, ReviewSpec } from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
 import {
-  sendLocalAgentEvent,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
   type ReviewCancelMessage,
@@ -41,6 +39,7 @@ import {
   type ReviewAction,
 } from './reviewAction';
 import { RunCommandSequencer } from './runCommandSequencer';
+import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
 
 type InflightRequest = InflightOperationRun;
 
@@ -79,7 +78,7 @@ export function isToolProtocolHistoryError(value: unknown): boolean {
 export class LocalServerChatHandler {
   private readonly graphService: LocalAgentGraphService;
   private readonly tuiSessions: LocalServerTuiSessionService;
-  private readonly inflightRequests: InflightRequestController<WebSocket>;
+  private readonly inflightRequests: InflightRequestController<LocalServerPeer>;
   private readonly loadContext: typeof loadAgentContext;
   private readonly runChat: RunChatSession;
   private readonly reviewActionRoutes = new Map<string, ReviewActionRoute>();
@@ -90,7 +89,7 @@ export class LocalServerChatHandler {
   constructor(options: {
     graphService: LocalAgentGraphService;
     tuiSessions: LocalServerTuiSessionService;
-    inflightRequests: InflightRequestController<WebSocket>;
+    inflightRequests: InflightRequestController<LocalServerPeer>;
     loadContext?: typeof loadAgentContext;
     runChat?: RunChatSession;
   }) {
@@ -256,8 +255,8 @@ export class LocalServerChatHandler {
     };
   }
 
-  private sendClosedReviewError(ws: WebSocket, requestId: string) {
-    sendLocalAgentEvent(ws, {
+  private sendClosedReviewError(peer: LocalServerPeer, requestId: string) {
+    sendLocalServerPeerEvent(peer, {
       type: 'error',
       requestId,
       message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
@@ -266,19 +265,19 @@ export class LocalServerChatHandler {
   }
 
   async handleChatRequest(
-    ws: WebSocket,
+    peer: LocalServerPeer,
     msg: ChatRequestMessage,
     deps: LocalServerDeps,
   ) {
-    return this.runChatRequest(ws, {
+    return this.runChatRequest(peer, {
       kind: 'user_message',
       requestId: msg.requestId,
       message: msg.message,
     }, deps, { type: 'chat_request' });
   }
 
-  handleRunInterrupt(ws: WebSocket, msg: RunInterruptMessage) {
-    const inflight = this.inflightRequests.interrupt(ws, { requestId: msg.requestId });
+  handleRunInterrupt(peer: LocalServerPeer, msg: RunInterruptMessage) {
+    const inflight = this.inflightRequests.interrupt(peer, { requestId: msg.requestId });
     if (inflight) {
       return inflight;
     }
@@ -287,7 +286,7 @@ export class LocalServerChatHandler {
   }
 
   private async runChatRequest(
-    ws: WebSocket,
+    peer: LocalServerPeer,
     request: LocalServerRunRequest,
     deps: LocalServerDeps,
     source: LocalServerRunSource,
@@ -312,8 +311,8 @@ export class LocalServerChatHandler {
     }
     recordAgentRunActivity('thinking', requestId);
 
-    const previousInflight = this.inflightRequests.get(ws);
-    const inflight = this.inflightRequests.start(ws, requestId, {
+    const previousInflight = this.inflightRequests.get(peer);
+    const inflight = this.inflightRequests.start(peer, requestId, {
       interruptPrevious: true,
       notifyPrevious: true,
     });
@@ -321,13 +320,13 @@ export class LocalServerChatHandler {
       console.warn(`[local-server] abort previous inflight requestId=${previousInflight.requestId} before starting requestId=${requestId}`);
     }
     const { controller } = inflight;
-    const isCurrent = () => this.inflightRequests.isCurrentActive(ws, inflight);
+    const isCurrent = () => this.inflightRequests.isCurrentActive(peer, inflight);
     const finishInterrupted = () => {
       if (!controller.signal.aborted) {
         return;
       }
-      this.inflightRequests.sendInterrupted(ws, inflight);
-      this.inflightRequests.clear(ws, inflight);
+      this.inflightRequests.sendInterrupted(peer, inflight);
+      this.inflightRequests.clear(peer, inflight);
     };
 
     try {
@@ -351,10 +350,10 @@ export class LocalServerChatHandler {
         finishInterrupted,
         emitEvent: (event) => {
           this.recordReviewActionRoute(event, deps);
-          sendLocalAgentEvent(ws, event);
+          sendLocalServerPeerEvent(peer, event);
         },
         emitToolEvent: (event) => {
-          this.sendStreamToolOperationEvent(ws, inflight, event);
+          this.sendStreamToolOperationEvent(peer, inflight, event);
         },
         acceptDelegationOperations: (operations) => {
           overlayInflightDelegationOperations(inflight, operations);
@@ -365,40 +364,40 @@ export class LocalServerChatHandler {
               const interruptQueued = this.runCommandSequencer
                 .markReviewResolutionCheckpointed(requestId);
               if (canInterrupt && interruptQueued) {
-                this.inflightRequests.interrupt(ws, { requestId });
+                this.inflightRequests.interrupt(peer, { requestId });
               }
             },
           }
           : {}),
       });
       if (result.status === 'waiting_human') {
-        this.inflightRequests.finish(ws, inflight, 'interrupted');
+        this.inflightRequests.finish(peer, inflight, 'interrupted');
         await this.tuiSessions.refreshActiveSessionSummary(deps);
         console.log(`[local-server] human_review.requested requestId=${requestId}`);
-        this.inflightRequests.clear(ws, inflight);
+        this.inflightRequests.clear(peer, inflight);
         return;
       }
       if (result.status === 'interrupted') {
         return;
       }
-      this.inflightRequests.finish(ws, inflight, 'completed');
-      this.inflightRequests.clear(ws, inflight);
+      this.inflightRequests.finish(peer, inflight, 'completed');
+      this.inflightRequests.clear(peer, inflight);
       await this.tuiSessions.refreshActiveSessionSummary(deps);
 
       console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
     } catch (err) {
-      const isStillCurrent = this.inflightRequests.isCurrent(ws, inflight);
+      const isStillCurrent = this.inflightRequests.isCurrent(peer, inflight);
       const aborted = controller.signal.aborted
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
         console.warn(`[local-server] chat interrupted requestId=${requestId}`);
-        this.inflightRequests.sendInterrupted(ws, inflight);
+        this.inflightRequests.sendInterrupted(peer, inflight);
         recordAgentRunActivity('interrupted', requestId, 2_500);
-        this.inflightRequests.clear(ws, inflight);
+        this.inflightRequests.clear(peer, inflight);
         return;
       }
-      this.inflightRequests.finish(ws, inflight, 'failed', err);
-      this.inflightRequests.clear(ws, inflight);
+      this.inflightRequests.finish(peer, inflight, 'failed', err);
+      this.inflightRequests.clear(peer, inflight);
       recordAgentRunActivity('error', requestId, 5_000);
       console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
       const recoveredFromToolProtocolError = isToolProtocolHistoryError(err);
@@ -415,9 +414,9 @@ export class LocalServerChatHandler {
           );
         }
       }
-      if (isStillCurrent && ws.readyState === WebSocket.OPEN) {
+      if (isStillCurrent && peer.isConnected()) {
         const message = err instanceof Error ? err.message : 'internal error';
-        sendLocalAgentEvent(ws, {
+        sendLocalServerPeerEvent(peer, {
           type: 'error',
           requestId,
           message: recoveredFromToolProtocolError
@@ -429,7 +428,7 @@ export class LocalServerChatHandler {
   }
 
   async handleHumanReviewResponse(
-    ws: WebSocket,
+    peer: LocalServerPeer,
     msg: HumanReviewResponseMessage,
     deps: LocalServerDeps,
   ) {
@@ -437,7 +436,7 @@ export class LocalServerChatHandler {
       console.warn(
         `[local-server] human_review_response rejected: pending review request already consumed or active requestId=${msg.requestId}`,
       );
-      this.sendClosedReviewError(ws, msg.requestId);
+      this.sendClosedReviewError(peer, msg.requestId);
       return;
     }
 
@@ -447,12 +446,12 @@ export class LocalServerChatHandler {
       console.warn(
         `[local-server] human_review_response rejected: no pending review route for requestId=${msg.requestId}`,
       );
-      this.sendClosedReviewError(ws, msg.requestId);
+      this.sendClosedReviewError(peer, msg.requestId);
       return;
     }
     if (!matchesHumanReviewAction(route, msg.actionId)) {
       this.releasePendingReviewRequest(msg.requestId);
-      sendLocalAgentEvent(ws, {
+      sendLocalServerPeerEvent(peer, {
         type: 'error',
         requestId: msg.requestId,
         message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
@@ -470,7 +469,7 @@ export class LocalServerChatHandler {
         + `does not match pending review action=${route.reviews.map((review) => review.id).join(',')} `
         + (err instanceof Error ? err.message : String(err)),
       );
-      sendLocalAgentEvent(ws, {
+      sendLocalServerPeerEvent(peer, {
         type: 'error',
         requestId: msg.requestId,
         message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
@@ -486,7 +485,7 @@ export class LocalServerChatHandler {
         `[local-server] human_review_response rejected: route sessionId=${route.sessionId} `
         + `does not match active session=${activeSessionId}`,
       );
-      sendLocalAgentEvent(ws, {
+      sendLocalServerPeerEvent(peer, {
         type: 'error',
         requestId: msg.requestId,
         message: '请回到发起该 review 的会话再应答。',
@@ -498,7 +497,7 @@ export class LocalServerChatHandler {
     this.markPendingReviewConsumed(msg.requestId);
 
     try {
-      await this.runChatRequest(ws, {
+      await this.runChatRequest(peer, {
         kind: 'resume',
         requestId: msg.requestId,
         resume: buildHumanReviewResume(route, decisions),
@@ -514,23 +513,23 @@ export class LocalServerChatHandler {
   }
 
   async handleReviewCancel(
-    ws: WebSocket,
+    peer: LocalServerPeer,
     msg: ReviewCancelMessage,
     deps: LocalServerDeps,
   ) {
     if (!this.claimPendingReviewRequest(msg.requestId)) {
-      this.sendClosedReviewError(ws, msg.requestId);
+      this.sendClosedReviewError(peer, msg.requestId);
       return;
     }
     const route = await this.readReviewActionRoute(msg.requestId, deps);
     if (!route) {
       this.releasePendingReviewRequest(msg.requestId);
-      this.sendClosedReviewError(ws, msg.requestId);
+      this.sendClosedReviewError(peer, msg.requestId);
       return;
     }
     if (!matchesHumanReviewAction(route, msg.actionId)) {
       this.releasePendingReviewRequest(msg.requestId);
-      sendLocalAgentEvent(ws, {
+      sendLocalServerPeerEvent(peer, {
         type: 'error',
         requestId: msg.requestId,
         message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
@@ -545,7 +544,7 @@ export class LocalServerChatHandler {
         `[local-server] review.cancel rejected: route sessionId=${route.sessionId} `
         + `does not match active session=${activeSessionId}`,
       );
-      sendLocalAgentEvent(ws, {
+      sendLocalServerPeerEvent(peer, {
         type: 'error',
         requestId: msg.requestId,
         message: '请回到发起该 review 的会话再打断。',
@@ -560,12 +559,12 @@ export class LocalServerChatHandler {
       console.warn(
         `[local-server] review.cancel rejected: review action=${route.actionId} has no reject option`,
       );
-      sendLocalAgentEvent(ws, {
+      sendLocalServerPeerEvent(peer, {
         type: 'system.notice',
         requestId: msg.requestId,
         message: '当前 review 没有可用的拒绝选项，无法自动取消。',
       });
-      sendLocalAgentEvent(ws, {
+      sendLocalServerPeerEvent(peer, {
         type: 'human_review.requested',
         requestId: msg.requestId,
         ...(route.interruptId ? { interruptId: route.interruptId } : {}),
@@ -583,7 +582,7 @@ export class LocalServerChatHandler {
     );
 
     try {
-      await this.runChatRequest(ws, {
+      await this.runChatRequest(peer, {
         kind: 'resume',
         requestId: msg.requestId,
         resume: buildHumanReviewRejectResume(route, route.rejectOptionId),
@@ -599,15 +598,15 @@ export class LocalServerChatHandler {
   }
 
   private sendStreamToolOperationEvent(
-    ws: WebSocket,
+    peer: LocalServerPeer,
     inflight: InflightRequest,
     payload: StreamToolsPayload,
   ) {
     emitLocalServerToolOperationEvent({
       run: inflight,
       payload,
-      // Local TUI socket: include raw input/output so the UI can render diffs etc.
-      emit: (event) => sendLocalAgentEvent(ws, event, { includeRaw: true }),
+      // Trusted local peer: include raw input/output so the UI can render diffs etc.
+      emit: (event) => sendLocalServerPeerEvent(peer, event, { includeRaw: true }),
     });
   }
 }

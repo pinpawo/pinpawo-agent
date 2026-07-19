@@ -1,6 +1,7 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { clipForPrompt, invokeStructuredOutput } from '@pinpawo/pet-agent';
+import { randomUUID } from 'node:crypto';
 import type {
   AgentCapability,
   CapabilityArtifactStore,
@@ -85,15 +86,10 @@ function extractExploreSummaryFromContent(content: string): string | null {
 }
 
 function createExploreSummaryMessage(summary: string): AIMessage {
-  return new AIMessage(`${EXPLORE_SUMMARY_MESSAGE_PREFIX}\n\n${summary.trim()}`);
-}
-
-function withExploreSummaryMessage(messages: BaseMessage[], summary: string): BaseMessage[] {
-  const trimmed = summary.trim();
-  if (!trimmed) {
-    return messages;
-  }
-  return [...messages, createExploreSummaryMessage(trimmed)];
+  return new AIMessage({
+    id: randomUUID(),
+    content: `${EXPLORE_SUMMARY_MESSAGE_PREFIX}\n\n${summary.trim()}`,
+  });
 }
 
 function readExploreSummary(message: BaseMessage): string | null {
@@ -339,9 +335,12 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
             return result;
           }
 
-          const nextMessages = summaryFromMetadata === ingest.summary.trim()
-            ? messagesFromMetadata
-            : withExploreSummaryMessage(messagesFromMetadata, ingest.summary);
+          const generatedSummaryMessage = summaryFromMetadata === ingest.summary.trim()
+            ? null
+            : createExploreSummaryMessage(ingest.summary);
+          const nextMessages = generatedSummaryMessage
+            ? [...messagesFromMetadata, generatedSummaryMessage]
+            : messagesFromMetadata;
 
           try {
             await recordExploreIngestArtifact(
@@ -362,7 +361,13 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
               }`,
             );
           }
-          return { ...result, messages: nextMessages };
+          return {
+            ...result,
+            messages: nextMessages,
+            announceMessageId: result.announceMessageId
+              ?? generatedSummaryMessage?.id
+              ?? null,
+          };
         },
       };
 

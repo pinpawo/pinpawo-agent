@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -16,6 +16,38 @@ const REQUIRED_ENV = {
   HASURA_JWT: 'hasura-jwt',
   LLM_API_KEY: 'llm-key',
 };
+
+function readGlobalReviewPolicyMode(
+  home: string,
+  env: Record<string, string> = {},
+) {
+  return execFileSync(process.execPath, [
+    '--import',
+    'tsx',
+    '-e',
+    [
+      `const { getConfig } = await import(${JSON.stringify(CONFIG_IMPORT_PATH)});`,
+      'process.stdout.write(getConfig().globalReviewPolicyMode);',
+    ].join('\n'),
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ...REQUIRED_ENV,
+      HOME: home,
+      PINPAWO_GLOBAL_REVIEW_POLICY: '',
+      PINPAWO_REVIEW_POLICY_STRATEGY: '',
+      ...env,
+    },
+    encoding: 'utf8',
+  });
+}
+
+function writeStoredConfig(home: string, config: Record<string, unknown>) {
+  const configDir = resolve(home, '.pinpawo');
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(resolve(configDir, 'config.json'), JSON.stringify(config));
+}
 
 async function loadConfigHelpers() {
   for (const [key, value] of Object.entries(REQUIRED_ENV)) {
@@ -100,6 +132,40 @@ test('PINPAWO_LOCAL_ONLY disables hosted API even when credentials are present',
   assert.equal(parsed.apiConnected, false);
   assert.equal(parsed.localOnlyMode, true);
   assert.match(parsed.apiSetupMessage, /Local-only mode is enabled/);
+});
+
+test('config ignores the removed PINPAWO_REVIEW_POLICY_STRATEGY environment alias', () => {
+  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  assert.equal(
+    readGlobalReviewPolicyMode(home, { PINPAWO_REVIEW_POLICY_STRATEGY: 'full_access' }),
+    'require_authorization',
+  );
+});
+
+test('config ignores the removed review_policy_strategy stored key', () => {
+  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  writeStoredConfig(home, {
+    review_policy_strategy: 'full_access',
+  });
+
+  assert.equal(readGlobalReviewPolicyMode(home), 'require_authorization');
+});
+
+test('config still accepts the canonical global review policy setting', () => {
+  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  assert.equal(
+    readGlobalReviewPolicyMode(home, { PINPAWO_GLOBAL_REVIEW_POLICY: 'auto_authorization' }),
+    'auto_authorization',
+  );
+});
+
+test('config still accepts the canonical global_review_policy stored key', () => {
+  const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
+  writeStoredConfig(home, {
+    global_review_policy: 'full_access',
+  });
+
+  assert.equal(readGlobalReviewPolicyMode(home), 'full_access');
 });
 
 test('setConfig replaces the current frozen snapshot without mutating previous snapshots', async () => {

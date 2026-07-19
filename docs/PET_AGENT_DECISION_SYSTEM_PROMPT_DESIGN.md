@@ -28,6 +28,8 @@ prompt 使用相同语义。
 - run state 的 route/guard 条件由代码处理，不翻译成 prompt 规则。
 - schema 是字段形状的 source of truth；prompt 不维护第二份 JSON 字段字典。
 - 示例默认不进入生产 prompt；只有 eval 证明某个边界持续混淆时才增加最小示例。
+- message role、lane、announce 与 handoff 身份由 metadata / message ID / provenance 决定；
+  harness 不根据正文前缀、XML 标签或其他输出文本形状做路由、过滤、重试或替换。
 
 ## 2. 有效提示词组装
 
@@ -106,9 +108,13 @@ action=needs_plan
 
 ### 4.2 注入事实
 
-- 第一条 system message 是静态节点契约和 structured-output 约束。
-- 第二条 system message 的 `entry_decision_context` 只注入事实：`runtime_context`、
-  artifact 短引用和 `run_delegation_summaries`。
+- 唯一的 system message 是静态节点契约和 structured-output 约束。
+- `<entry_decision_context>` 作为带 `source=entry_decision_context` metadata 的 synthetic
+  `HumanMessage` 注入，只包含 `runtime_context` 和 `run_delegation_summaries` 事实；它不是第二条
+  system instruction。
+- entryDecision 不接收 session artifact inventory、artifact preview 或 artifact body。completed
+  work 通过 main handoff / compaction summary 表达；历史 artifact 的探索入口只在 executor 选定后
+  提供给 selected subagent。
 - 如果发生过 compaction，更早的 main conversation summary 以 assistant context message 注入，
   不提升为 system policy；该摘要不包含任何 lane message 或 announce。
 - 随后的 canonical main messages 保持原生 human/assistant 角色和时间顺序，是本节点理解用户目标、

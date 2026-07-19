@@ -7,6 +7,9 @@
 > `PET_AGENT_CAPABILITY_ARTIFACT_REDESIGN.md` 为准。本文保留为设计背景；
 > 其中“模型调用 artifact toolkit 写入”和“orchestrator 读取 artifact 全文”
 > 的早期方案已被 deterministic capability write + bounded ref preview 取代。
+> 2026-07-19：entryDecision 不再接收 artifact inventory；selected subagent 只在需要时
+> 通过当前 thread 的 scoped `list_dir` / `view_file_chunk` 自主发现。下文 Phase/State 示例是历史草案，
+> 不作为当前接口定义。
 
 ## 1. 背景
 
@@ -156,7 +159,7 @@ v1 使用独立 artifact store，不耦合 `FileSaver` 的内部 CAS 目录。�
   capability-artifacts/
     threads/
       <encodedThreadId>/
-        <delegationId>/
+        <encodedDelegationId>/
           manifest.json
           result.json
           report.md
@@ -194,16 +197,16 @@ const OrchestratorState = Annotation.Root({
   // existing
   messages: Annotation<BaseMessage[]>({ ... }),
 
-  capabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
+  sessionCapabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
     reducer: mergeCapabilityArtifactRefs,
     default: () => [],
   }),
 });
 ```
 
-`capabilityArtifacts` 是当前 thread 可引用的 capability 产物索引，内容只存 refs。结构化 result 也是 `kind: 'result'` 的 artifact，不再有单独的 `capabilityResult` state channel。
+`sessionCapabilityArtifacts` 是当前 thread 可引用的 capability 产物索引，内容只存 refs。结构化 result 也是 `kind: 'result'` 的 artifact，不再有单独的 `capabilityResult` state channel。
 
-`buildTurnStateReset()` 不应重置 `capabilityArtifacts`。否则下一轮对话看不到前序 artifact refs。
+`buildRunStateReset()` 不应重置 `sessionCapabilityArtifacts`。否则下一轮对话看不到前序 artifact refs。
 
 `turnDelegations` 可以记录本次 delegation 产出的 artifact ids，用于 UI 和 trace，但不作为长期索引的唯一来源。
 
@@ -243,12 +246,13 @@ capability 节点结束时：
 
 1. `capability_artifact_write` 在 subagent loop 内直接调用 host artifact store。
 2. 写入成功后返回 `CapabilityArtifactRef`，并通过 subagent artifact sink 记录到 `SubagentResult.artifacts`。
-3. `capabilityNode` 不扫描 message metadata，只把 `result.artifacts` merge 进 `state.capabilityArtifacts`。
+3. `capabilityNode` 不扫描 message metadata，只把 `result.artifacts` merge 进 `state.sessionCapabilityArtifacts`。
 4. 对 `kind: 'result'` 且 capability 声明了 `resultSchema` 的写入，在 `capability_artifact_write` 执行前校验 schema。
 
 ### 10.3 prompt 使用
 
-orchestrator prompt 默认只注入 artifact 的 bounded view：
+entryDecision 不注入 artifact inventory。当前 active delegation 的 outcomeDecision 可以读取
+该任务的 bounded refs；selected subagent 可通过 scoped file discovery 自主按需读取历史 artifact：
 
 ```text
 最近 capability artifacts:
@@ -264,7 +268,7 @@ orchestrator prompt 默认只注入 artifact 的 bounded view：
 
 预算规则：
 
-- route prompt 只看最近或相关的 artifact refs。
+- entryDecision 不看 artifact refs；outcomeDecision 只看当前 active delegation 的 refs。
 - delegation outcome decision 可以看本次 delegation 新产出的 artifact refs。
 - 不把 artifact 完整内容拼进 prompt。
 - preview 超预算时裁剪，而不是读取文件内容压缩。
@@ -332,7 +336,7 @@ capability_artifact_search({
 
 - `resultSchema` 定义 `kind: 'result'`、`mimeType: 'application/json'` 的 artifact payload。
 - schema 校验成功后，payload 持久化为 JSON artifact。
-- host 需要结构化结果时，从 `state.capabilityArtifacts` 按
+- host 需要结构化结果时，从 `state.sessionCapabilityArtifacts` 按
   `capabilityId` / `delegationId` / `turnId` / `schema` / `metadata`
   选择匹配的 `kind: 'result'` ref，再通过 artifact store 读取并用调用方
   schema parse；不存在跨所有 capability 的全局 latest result。
@@ -443,15 +447,15 @@ v1 不需要复杂 GC。只要确保 session 删除时不会留下无限增长�
 ### Phase 1：contract 与本地 store
 
 - 新增公开 `CapabilityArtifactRef` / `CapabilityArtifactWritePayload` 类型。
-- 新增 `capabilityArtifacts` state channel，持久跨 turn，不被 `buildTurnStateReset()` 清空。
-- 新增 local-agent `CapabilityArtifactStore`，默认落盘到 `<workdir>/.pinpawo/capability-artifacts/threads/<threadId>/...`。
+- 新增 `sessionCapabilityArtifacts` state channel，持久跨 run，不被 `buildRunStateReset()` 清空。
+- 新增 local-agent `CapabilityArtifactStore`，默认落盘到 `<workdir>/.pinpawo/capability-artifacts/threads/<encoded-thread-id>/<encoded-delegation-id>/...`。
 - `SubagentResult` 增加 `artifacts: CapabilityArtifactRef[]`。
 - `capability_artifact_write` 写入 store 后回填 ref 到 subagent artifact sink。
 
 ### Phase 2：读取工具与 prompt bounded view
 
 - 提供 `capability_artifact_list` / `capability_artifact_read`。
-- route / delegation outcome prompt 注入 bounded artifact refs。
+- entryDecision 不注入 artifact inventory；delegation outcome 只注入当前任务的 bounded refs。
 - 对 prompt 注入做预算测试，确保不会因为大量 refs 膨胀。
 
 ### Phase 3：迁移现有 capability
@@ -477,7 +481,7 @@ v1 不需要复杂 GC。只要确保 session 删除时不会留下无限增长�
 - 大 markdown report 不进入 state，只能通过 read tool 读取。
 - 图片 artifact 可以 inline bytes 落盘，或以 `externalUri` 保存远程引用；state 中不出现绝对路径。
 - 多个 artifact refs 跨 turn 保留，`buildTurnStateReset()` 不清空。
-- route prompt 对 artifact refs 有预算裁剪。
+- outcomeDecision 对当前 delegation artifact refs 有预算裁剪，entryDecision 无 artifact inventory。
 - `read` 工具 obey `maxBytes`。
 - 删除 thread/session 时 artifact 目录被清理。
 - host structured result 调用按 capability/delegation/turn/schema/metadata
@@ -486,6 +490,6 @@ v1 不需要复杂 GC。只要确保 session 删除时不会留下无限增长�
 
 ## 20. 未决问题
 
-1. `capabilityArtifacts` state 是否设全局 ref 数量上限，还是只靠 prompt budget 和 artifact store GC。
+1. `sessionCapabilityArtifacts` state 是否设全局 ref 数量上限，还是只靠 prompt budget 和 artifact store GC。
 2. Studio wiki 与 capability artifact 是否需要互相引用，还是保持 wiki 是 curated knowledge、artifact 是原始产物。
 3. app-chat 远端同步时，artifact store 是本地优先还是需要上传到后端对象存储。

@@ -36,6 +36,8 @@ export const delegationOutcomeDecisionGuard = defineGuard<
         completionReason: null,
       });
     }
+    // The subagent runtime stamps completionReason on the explicitly identified
+    // announce; losing that announce provenance would silently disable this guard.
     const completionReason = readLatestAnnounceCompletionReason(state.messages, {
       runId: activeDelegation.transcriptRunId,
       delegationId: activeDelegation.id,

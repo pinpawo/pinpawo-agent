@@ -191,6 +191,7 @@ export function createCapabilityNode(params: {
       {
         delegationId: runNextDelegation.id,
         task: runNextDelegation.task,
+        announceMessageId: result.announceMessageId,
       },
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runNextDelegation.id });

@@ -391,7 +391,10 @@ function buildDecisionContext(params: {
           );
           if (!latestCopy) return proposedMessages;
 
-          return readMessageText(latestCopy) === readMessageText(proposedCopy)
+          const latestSource = getMessageHandoffSource(latestCopy);
+          const proposedSource = getMessageHandoffSource(proposedCopy);
+          return latestSource?.announceMessageId
+            && latestSource.announceMessageId === proposedSource?.announceMessageId
             ? null
             : proposedMessages;
         })()

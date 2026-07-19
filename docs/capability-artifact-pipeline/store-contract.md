@@ -70,7 +70,7 @@ capability-artifact://thread/{encodeURIComponent(threadId)}/delegation/{encodeUR
 ## 本地实现（FileCapabilityArtifactStore）要点
 
 - 根目录：`{workdir}/.pinpawo/capability-artifacts/`
-- 组织结构：`threads/{threadId}/{delegationId}/manifest.json + artifact files`
+- 组织结构：`threads/{encodeURIComponent(threadId)}/{encodeURIComponent(delegationId)}/manifest.json + artifact files`
 - `writeArtifacts` 会做分组加锁，保证同 delegation 的并发安全。
 - 同一输入条件下（能力、delegation、`content/externalUri`）是幂等写入。
 - `getDownloadUri`

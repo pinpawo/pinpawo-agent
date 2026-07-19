@@ -18,7 +18,7 @@ capability code (in-loop ingest candidate compute -> afterRun persistence)
   -> CapabilityArtifactRef
   -> recordCapabilityArtifact(ref)  (artifact sink)
   -> SubagentResult.artifacts
-  -> state.capabilityArtifacts
+  -> state.sessionCapabilityArtifacts
 ```
 
 The orchestrator only consumes `CapabilityArtifactRef[]`. It does not parse
@@ -71,9 +71,10 @@ nothing needs the model to read its own just-written artifact back —
 
 - during long runs, shared subagent summarization keeps a source-aware summary
   in model context, so the subagent can re-query a source with `view_file` etc.;
-- cross-turn "has this been explored before" is served by the artifact ref +
-  preview that already lands in `state.capabilityArtifacts` and the orchestrator
-  prompt, not by a toolkit.
+- cross-turn exploration does not inject a session inventory into entryDecision. After executor
+  selection, local-agent may expose the existing current-thread artifact directory plus scoped
+  read-only `list_dir` / `view_file_chunk` instances. The selected subagent decides whether to
+  inspect it; this remains ordinary file discovery, not a dedicated artifact toolkit.
 
 ## Contracts
 
@@ -83,13 +84,13 @@ nothing needs the model to read its own just-written artifact back —
   owns a durable result). Both push into the same
   `artifactRefs` array that becomes `SubagentResult.artifacts`.
 - `CapabilityContext.artifactStore` is the store a capability uses to write bytes.
-- `state.capabilityArtifacts` is the only cross-turn artifact state channel.
+- `state.sessionCapabilityArtifacts` is the only cross-turn artifact state channel.
 - `capabilityResult` is removed. Structured result consumers select a matching
   `kind: "result"` artifact ref by scope/schema and parse it with their schema.
 
 ### Multiple result artifacts
 
-`state.capabilityArtifacts` is an index of refs, not a singleton result slot. A
+`state.sessionCapabilityArtifacts` is an index of refs, not a singleton result slot. A
 single graph run may contain several `kind: "result"` artifacts because multiple
 capabilities ran, one capability ran more than once, or one run intentionally
 produced several structured outputs.

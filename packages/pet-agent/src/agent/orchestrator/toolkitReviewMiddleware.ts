@@ -780,15 +780,11 @@ function buildCancellationFinalMessage(params: {
 }
 
 function readCancellationReason(content: string) {
-  try {
-    const parsed = JSON.parse(content) as { reason?: unknown };
-    if (typeof parsed.reason === 'string' && parsed.reason.trim()) {
-      return parsed.reason.trim();
-    }
-  } catch {
-    // Keep cancellation finalization robust if an older checkpoint has plain text.
+  const parsed = JSON.parse(content) as { reason?: unknown };
+  if (typeof parsed.reason === 'string' && parsed.reason.trim()) {
+    return parsed.reason.trim();
   }
-  return 'tool call cancelled';
+  throw new Error('Toolkit review cancellation is missing its required reason.');
 }
 
 async function reviewToolkitToolCalls(params: {

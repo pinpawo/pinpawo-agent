@@ -32,6 +32,7 @@ import {
   SUBAGENT_CONTEXT_SUMMARY_PROMPT,
 } from './prompts/templates/contextSummary.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
+import { messageHasToolCalls } from '../utils/messages';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -93,6 +94,22 @@ function readMessageText(message: BaseMessage): string {
       return '';
     })
     .join('');
+}
+
+function findLatestDeliverableMessageId(
+  messages: BaseMessage[],
+  inputMessageIds: ReadonlySet<string>,
+): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.id && inputMessageIds.has(message.id)) continue;
+    if (message._getType() !== 'ai') continue;
+    if (isSubagentGuardStopMessage(message)) continue;
+    if (messageHasToolCalls(message)) continue;
+    if (!readMessageText(message).trim()) continue;
+    return message.id ?? null;
+  }
+  return null;
 }
 
 function assertValidContextSummaryUpdate(update: unknown) {
@@ -223,6 +240,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     contextWindowTokens: input.contextWindowTokens,
     artifacts: input.artifacts,
   };
+  const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
   const systemPrompt = [
     SUBAGENT_GOVERNING_PROMPT,
     inputState.contextWindowTokens ? SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT : null,
@@ -273,6 +291,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
       },
     );
     latestMessages = readResultMessages(result) ?? latestMessages;
+    ensureSubagentMessageIds(latestMessages);
 
     // A guard may have gracefully ended the agent by appending its stop
     // notice as the FINAL message (via Command goto END). That is a clean "limit
@@ -281,20 +300,29 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // Summarization may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
     const stoppedByGuard = lastMessage ? isSubagentGuardStopMessage(lastMessage) : false;
+    const announceMessageId = stoppedByGuard
+      ? findLatestDeliverableMessageId(latestMessages, inputMessageIds)
+      : lastMessage?._getType() === 'ai'
+        && !messageHasToolCalls(lastMessage)
+        ? lastMessage.id ?? null
+        : null;
     return {
       messages: latestMessages,
       artifacts: inputState.artifacts ?? [],
       completionReason: stoppedByGuard ? 'limit_reached' : 'natural',
+      announceMessageId,
     };
   } catch (err) {
     // The agent's hard recursion breaker (recursionLimit) fired. The iteration
     // guard is meant to stop before this, but keep it as a graceful last-resort:
     // degrade to limit_reached instead of throwing through the orchestrator.
     if (isGraphRecursionLimitError(err)) {
+      ensureSubagentMessageIds(latestMessages);
       return {
         messages: latestMessages,
         artifacts: inputState.artifacts ?? [],
         completionReason: 'limit_reached',
+        announceMessageId: findLatestDeliverableMessageId(latestMessages, inputMessageIds),
       };
     }
     throw err;

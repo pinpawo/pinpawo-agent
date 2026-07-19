@@ -252,7 +252,7 @@ test('buildLocalChatAgentInput exposes only an existing current-thread artifact 
   assert.equal(setup.input.artifactDiscoveryRoot, threadRoot);
   assert.deepEqual(
     setup.input.artifactDiscoveryToolset?.tools.map((toolItem) => toolItem.name),
-    ['list_dir', 'view_file_chunk'],
+    ['artifact_list_dir', 'artifact_view_file_chunk'],
   );
 });
 
@@ -281,7 +281,7 @@ test('artifact discovery tools reject paths outside the current thread root', as
     capabilityArtifactRoot: artifactRoot,
   });
   const listDir = setup.input.artifactDiscoveryToolset?.tools
-    .find((toolItem) => toolItem.name === 'list_dir');
+    .find((toolItem) => toolItem.name === 'artifact_list_dir');
 
   assert.ok(listDir);
   assert.match(

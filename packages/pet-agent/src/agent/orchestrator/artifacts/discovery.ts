@@ -3,7 +3,12 @@ import { getPinpetMeta, setPinpetMeta } from '../messageLanes';
 import { indentXmlBlock, xmlTextBlock } from '../prompts/shared';
 
 export const ARTIFACT_DISCOVERY_CONTEXT_SOURCE = 'artifact_discovery_context';
-export const ARTIFACT_DISCOVERY_TOOL_NAMES = ['list_dir', 'view_file_chunk'] as const;
+export const ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME = 'artifact_list_dir';
+export const ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME = 'artifact_view_file_chunk';
+export const ARTIFACT_DISCOVERY_TOOL_NAMES = [
+  ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
+  ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
+] as const;
 
 export function hasArtifactDiscoveryTools(
   selectedTools: ReadonlyArray<{ name: string }>,

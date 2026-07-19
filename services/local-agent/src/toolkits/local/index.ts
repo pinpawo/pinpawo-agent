@@ -1,5 +1,7 @@
 import type { StructuredTool } from '@langchain/core/tools';
 import {
+  ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
+  ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
   defineToolkit,
   ReviewPolicies,
   type AgentToolkit,
@@ -62,8 +64,8 @@ export function createArtifactDiscoveryToolset(root: string): AgentToolset {
     description: '只读列出并分块读取当前 thread 的 capability artifacts。',
     tools: createArtifactDiscoveryFileTools(root),
     operations: {
-      list_dir: fileOperationMetadata.list_dir,
-      view_file_chunk: fileOperationMetadata.view_file_chunk,
+      [ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME]: fileOperationMetadata.list_dir,
+      [ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME]: fileOperationMetadata.view_file_chunk,
     },
   };
 }

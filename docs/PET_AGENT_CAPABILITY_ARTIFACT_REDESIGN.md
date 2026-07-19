@@ -73,8 +73,9 @@ nothing needs the model to read its own just-written artifact back —
   in model context, so the subagent can re-query a source with `view_file` etc.;
 - cross-turn exploration does not inject a session inventory into entryDecision. After executor
   selection, local-agent may expose the existing current-thread artifact directory plus scoped
-  read-only `list_dir` / `view_file_chunk` instances. The selected subagent decides whether to
-  inspect it; this remains ordinary file discovery, not a dedicated artifact toolkit.
+  read-only `artifact_list_dir` / `artifact_view_file_chunk` instances. The selected subagent
+  decides whether to inspect it; their distinct names let them coexist with ordinary workspace
+  `list_dir` / `view_file_chunk` tools without weakening the artifact-root boundary.
 
 ## Contracts
 

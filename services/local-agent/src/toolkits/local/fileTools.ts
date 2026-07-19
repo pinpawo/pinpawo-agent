@@ -1,7 +1,11 @@
 import { closeSync, cpSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { tool } from '@langchain/core/tools';
-import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
+import {
+  ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
+  ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
+  type ToolkitOperationMetadata,
+} from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { tryStat } from './fileSystemUtils';
 import {
@@ -742,8 +746,8 @@ export function createArtifactDiscoveryFileTools(root: string) {
       }
     },
     {
-      name: 'list_dir',
-      description: '列出当前 thread artifact 根目录内的目录内容。',
+      name: ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
+      description: '仅列出当前 thread artifact 根目录内的目录内容；普通工作区目录请使用 list_dir。',
       schema: z.object({ path: z.string().describe('artifact 根目录或其内部目录路径') }),
     },
   );
@@ -764,8 +768,8 @@ export function createArtifactDiscoveryFileTools(root: string) {
       }
     },
     {
-      name: 'view_file_chunk',
-      description: '按行读取当前 thread artifact 根目录内的文本文件片段。',
+      name: ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
+      description: '仅按行读取当前 thread artifact 根目录内的文本文件片段；普通工作区文件请使用 view_file_chunk。',
       schema: z.object({
         path: z.string().describe('artifact 根目录内的文件路径'),
         startLine: z.number().int().positive().optional().describe('起始行号，默认 1'),

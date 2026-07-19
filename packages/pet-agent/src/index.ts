@@ -103,6 +103,11 @@ export {
   validateUniqueToolNames,
 } from './agent/createAgentRuntime';
 export {
+  ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
+  ARTIFACT_DISCOVERY_TOOL_NAMES,
+  ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
+} from './agent/orchestrator/artifacts/discovery';
+export {
   createTokenUsageSnapshot,
   isTokenUsageSnapshot,
   parseTokenUsageSnapshot,

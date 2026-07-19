@@ -1424,16 +1424,77 @@ test('artifact discovery tools reach a selected capability without broadening it
       artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/tool-test',
       artifactDiscoveryToolset: defineToolset({
         name: 'artifact_discovery',
-        tools: [mockTool('list_dir'), mockTool('view_file_chunk')],
+        tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
       }),
     },
   });
 
   assert.deepEqual(capabilityToolNames, [
     'browser_open',
+    'artifact_list_dir',
+    'artifact_view_file_chunk',
+  ]);
+});
+
+test('general lane keeps workspace file tools alongside scoped artifact discovery tools', async () => {
+  let routeCallCount = 0;
+  let generalToolNames: string[] = [];
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        return routeCallCount === 1
+          ? nextTaskDecision('inspect workspace and prior artifacts')
+          : goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({ toolCalls: [[]] });
+  const bindTools = subagentModel.bindTools.bind(subagentModel);
+  (subagentModel as unknown as {
+    bindTools: (tools: Array<{ name: string }>) => unknown;
+  }).bindTools = (tools) => {
+    generalToolNames = tools.map((toolItem) => toolItem.name);
+    return bindTools(tools as never);
+  };
+  const recorder = createSubagentInputRecorder();
+  const graph = createOrchestratorGraph({
+    models: { act: routeModel, observe: routeModel, subagent: subagentModel },
+    actor: testActor,
+  });
+
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
+    configurable: {
+      thread_id: 'general-artifact-discovery-tools',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [{
+        name: 'bash',
+        description: 'workspace file tools',
+        tools: [mockTool('list_dir'), mockTool('view_file_chunk')],
+      }],
+      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/general-tool-test',
+      artifactDiscoveryToolset: defineToolset({
+        name: 'artifact_discovery',
+        tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
+      }),
+    },
+    callbacks: recorder.callbacks,
+  });
+
+  assert.deepEqual(generalToolNames, [
     'list_dir',
     'view_file_chunk',
+    'artifact_list_dir',
+    'artifact_view_file_chunk',
   ]);
+  assert.equal(recorder.subagentInputs.length, 1);
+  assert.match(
+    recorder.subagentInputs[0].map((message) => String(message.content)).join('\n'),
+    /<artifact_discovery_context[\s\S]*general-tool-test/,
+  );
 });
 
 test('toolkit exposure can hide tools from the general lane', async () => {
@@ -1731,7 +1792,7 @@ test('runAgent omits empty toolkit arrays and forwards artifact discovery resour
 
   const artifactDiscoveryToolset = defineToolset({
     name: 'artifact_discovery',
-    tools: [mockTool('list_dir'), mockTool('view_file_chunk')],
+    tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
   });
   const result = await runAgent(graph as never, {
     messages: [new HumanMessage('hello')],
@@ -4332,7 +4393,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
       artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/briefing-a-plus-b',
       artifactDiscoveryToolset: defineToolset({
         name: 'artifact_discovery',
-        tools: [mockTool('list_dir'), mockTool('view_file_chunk')],
+        tools: [mockTool('artifact_list_dir'), mockTool('artifact_view_file_chunk')],
       }),
     },
     callbacks: recorder.callbacks,

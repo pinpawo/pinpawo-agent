@@ -8,7 +8,7 @@
 > 其中“模型调用 artifact toolkit 写入”和“orchestrator 读取 artifact 全文”
 > 的早期方案已被 deterministic capability write + bounded ref preview 取代。
 > 2026-07-19：entryDecision 不再接收 artifact inventory；selected subagent 只在需要时
-> 通过当前 thread 的 scoped `list_dir` / `view_file_chunk` 自主发现。下文 Phase/State 示例是历史草案，
+> 通过当前 thread 的 scoped `artifact_list_dir` / `artifact_view_file_chunk` 自主发现。下文 Phase/State 示例是历史草案，
 > 不作为当前接口定义。
 
 ## 1. 背景

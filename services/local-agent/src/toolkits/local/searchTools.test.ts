@@ -116,9 +116,9 @@ test('explicit file tools can inspect a scoped artifact path under .pinpawo', as
   assert.match(content, /artifact shortcut/);
 
   const scopedTools = createArtifactDiscoveryFileTools(threadRoot);
-  const scopedListDir = scopedTools.find((toolItem) => toolItem.name === 'list_dir');
+  const scopedListDir = scopedTools.find((toolItem) => toolItem.name === 'artifact_list_dir');
   const scopedViewFileChunk = scopedTools.find(
-    (toolItem) => toolItem.name === 'view_file_chunk',
+    (toolItem) => toolItem.name === 'artifact_view_file_chunk',
   );
   assert.ok(scopedListDir);
   assert.ok(scopedViewFileChunk);
@@ -131,9 +131,9 @@ test('explicit file tools can inspect a scoped artifact path under .pinpawo', as
 test('artifact discovery tools report a clean result when the thread root is missing', async () => {
   const missingThreadRoot = resolve(makeTree(), 'threads/missing-thread');
   const scopedTools = createArtifactDiscoveryFileTools(missingThreadRoot);
-  const scopedListDir = scopedTools.find((toolItem) => toolItem.name === 'list_dir');
+  const scopedListDir = scopedTools.find((toolItem) => toolItem.name === 'artifact_list_dir');
   const scopedViewFileChunk = scopedTools.find(
-    (toolItem) => toolItem.name === 'view_file_chunk',
+    (toolItem) => toolItem.name === 'artifact_view_file_chunk',
   );
   assert.ok(scopedListDir);
   assert.ok(scopedViewFileChunk);

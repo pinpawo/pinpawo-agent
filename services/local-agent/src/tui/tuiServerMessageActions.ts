@@ -28,6 +28,17 @@ export function buildTuiActionsFromServerMessage(
     return { actions: [], clearInterrupt: false };
   }
 
+  if (
+    message.type === 'session.snapshot.result'
+    || message.type === 'session.list.result'
+    || message.type === 'session.resume.result'
+    || message.type === 'session.error'
+  ) {
+    // Request/response clients own correlation; session results are not live
+    // run events and must never enter the timeline reducer.
+    return { actions: [], clearInterrupt: false };
+  }
+
   if (message.type === 'event') {
     const normalizedMessage = runtimeEventMessage(message.event, options.createMessage);
     return {

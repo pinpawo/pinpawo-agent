@@ -92,11 +92,26 @@ pinpawo-agent capability install ./my-capability
 `pinpawo-agent run --stdio` starts one logical local-agent peer over newline-delimited
 JSON. It reads one `LocalAgentClientMessage` per stdin line and writes one
 `LocalAgentServerMessage` per stdout line. Stdout is reserved for protocol messages;
-diagnostics go to stderr. This stage carries live messages only: the existing HTTP
-snapshot/session endpoints are not started in stdio mode, pending the separate
-snapshot/session command boundary decision in #386. Stdin EOF closes the peer and
-aborts its active work before the process exits. Input framing rejects a JSONL line
-larger than 8 MiB so malformed input cannot grow process memory without bound.
+diagnostics go to stderr. Stdin EOF closes the peer and aborts its active work before
+the process exits. Input framing rejects a JSONL line larger than 8 MiB so malformed
+input cannot grow process memory without bound.
+
+The stdio process is self-contained and does not start an HTTP side channel. Use
+`ping` / `pong` for liveness. Checkpoint-backed session operations use correlated
+request/result messages:
+
+- `session.snapshot.get` → `session.snapshot.result`
+- `session.list` → `session.list.result`
+- `session.resume` → `session.resume.result`
+- failures return `session.error` with the same `requestId`
+
+Session commands from one peer execute in wire arrival order. Chat and review-run
+admission waits for preceding session commands, while interrupts remain immediate.
+`session.resume` fails with `session.error` if that peer already owns an active run.
+
+These messages only transport the existing session summary and point-in-time
+`LocalAgentSessionSnapshot`. They do not introduce another timeline, recovery model,
+or source of authority; LangGraph checkpoints remain authoritative.
 
 ## Publishing
 

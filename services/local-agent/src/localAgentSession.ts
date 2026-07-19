@@ -118,3 +118,13 @@ export type LocalAgentSessionSnapshot = {
   version: typeof LOCAL_AGENT_SESSION_SNAPSHOT_VERSION;
   session: LocalAgentSession;
 };
+
+export type LocalAgentSessionSummary = {
+  id: string;
+  kind: LocalAgentSession['kind'];
+  title: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+  active: boolean;
+};

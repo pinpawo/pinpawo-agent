@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  parseResumeSessionSummary,
-  TuiLocalServerClient,
-} from './tui/tuiLocalServerClient';
+import { parseLocalAgentSessionSummary } from './localAgentSessionParser';
+import { TuiLocalServerClient } from './tui/tuiLocalServerClient';
 
-test('parseResumeSessionSummary validates resume session payloads', () => {
-  assert.deepEqual(parseResumeSessionSummary({
+test('parseLocalAgentSessionSummary validates resume session payloads', () => {
+  assert.deepEqual(parseLocalAgentSessionSummary({
     id: 'chat:pet-a',
     kind: 'chat',
     title: 'Pet chat',
@@ -23,7 +21,7 @@ test('parseResumeSessionSummary validates resume session payloads', () => {
     updatedAt: '2026-06-03T00:01:00.000Z',
     active: true,
   });
-  assert.equal(parseResumeSessionSummary({ id: 'missing-title' }), null);
+  assert.equal(parseLocalAgentSessionSummary({ id: 'missing-title' }), null);
 });
 
 test('TuiLocalServerClient reads current snapshots, sessions, resume, and health', async () => {
@@ -43,8 +41,10 @@ test('TuiLocalServerClient reads current snapshots, sessions, resume, and health
           id: 'chat:one',
           kind: 'chat',
           title: 'One',
+          messageCount: 0,
           createdAt: '2026-06-03T00:00:00.000Z',
           updatedAt: '2026-06-03T00:01:00.000Z',
+          active: false,
         }],
       });
     }
@@ -54,6 +54,7 @@ test('TuiLocalServerClient reads current snapshots, sessions, resume, and health
           id: 'chat:one',
           kind: 'chat',
           title: 'One',
+          messageCount: 0,
           createdAt: '2026-06-03T00:00:00.000Z',
           updatedAt: '2026-06-03T00:01:00.000Z',
           active: true,
@@ -254,8 +255,10 @@ test('TuiLocalServerClient requires a current snapshot in resume responses', asy
         id: 'chat:one',
         kind: 'chat',
         title: 'One',
+        messageCount: 0,
         createdAt: '2026-06-03T00:00:00.000Z',
         updatedAt: '2026-06-03T00:01:00.000Z',
+        active: false,
       },
       messages: [{ role: 'assistant', text: 'legacy fallback' }],
     })) as typeof fetch,
@@ -272,8 +275,10 @@ test('TuiLocalServerClient rejects a resume snapshot for a different session', a
         id: 'chat:one',
         kind: 'chat',
         title: 'One',
+        messageCount: 0,
         createdAt: '2026-06-03T00:00:00.000Z',
         updatedAt: '2026-06-03T00:01:00.000Z',
+        active: false,
       },
       snapshot: sessionSnapshot('chat:other'),
     })) as typeof fetch,

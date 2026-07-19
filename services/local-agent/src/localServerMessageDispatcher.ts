@@ -7,6 +7,9 @@ import {
   type ReviewCancelMessage,
   type RunInterruptMessage,
   type RuntimeConfigUpdateMessage,
+  type SessionListMessage,
+  type SessionResumeMessage,
+  type SessionSnapshotGetMessage,
   type StudioRequestMessage,
 } from './localAgentProtocol';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
@@ -29,6 +32,12 @@ export type LocalServerPeerHandlers = {
     peer: LocalServerPeer,
     message: RuntimeConfigUpdateMessage,
   ) => MaybePromise<void>;
+  onSessionSnapshotGet: (
+    peer: LocalServerPeer,
+    message: SessionSnapshotGetMessage,
+  ) => MaybePromise<void>;
+  onSessionList: (peer: LocalServerPeer, message: SessionListMessage) => MaybePromise<void>;
+  onSessionResume: (peer: LocalServerPeer, message: SessionResumeMessage) => MaybePromise<void>;
   onClose: (peer: LocalServerPeer) => MaybePromise<void>;
   log?: (message: string) => void;
   logError?: LocalServerLogError;
@@ -52,6 +61,22 @@ function formatMalformedClientMessage(prefix: string, data: Buffer | string) {
 function sendMalformedClientMessageError(peer: LocalServerPeer, data: Buffer | string) {
   const envelope = readLocalAgentClientMessageEnvelope(data);
   if (!envelope?.requestId) {
+    return;
+  }
+  const sessionOperation = envelope.type === 'session.snapshot.get'
+    ? 'snapshot'
+    : envelope.type === 'session.list'
+      ? 'list'
+      : envelope.type === 'session.resume'
+        ? 'resume'
+        : null;
+  if (sessionOperation) {
+    peer.send({
+      type: 'session.error',
+      requestId: envelope.requestId,
+      operation: sessionOperation,
+      message: '客户端 session 消息协议不兼容或格式无效，请升级客户端后重试。',
+    });
     return;
   }
   sendLocalServerPeerEvent(peer, {
@@ -128,6 +153,24 @@ export function dispatchLocalServerMessage(
       return runLocalServerPeerHandler(
         'handleRuntimeConfigUpdate',
         () => handlers.onRuntimeConfigUpdate(peer, msg),
+        logError,
+      );
+    } else if (msg.type === 'session.snapshot.get') {
+      return runLocalServerPeerHandler(
+        'handleSessionSnapshotGet',
+        () => handlers.onSessionSnapshotGet(peer, msg),
+        logError,
+      );
+    } else if (msg.type === 'session.list') {
+      return runLocalServerPeerHandler(
+        'handleSessionList',
+        () => handlers.onSessionList(peer, msg),
+        logError,
+      );
+    } else if (msg.type === 'session.resume') {
+      return runLocalServerPeerHandler(
+        'handleSessionResume',
+        () => handlers.onSessionResume(peer, msg),
         logError,
       );
     } else if (msg.type === 'ping') {

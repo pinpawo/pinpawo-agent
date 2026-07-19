@@ -1,4 +1,7 @@
-import type { LocalAgentMessageEntry } from '../localAgentSession';
+import type {
+  LocalAgentMessageEntry,
+  LocalAgentSessionSummary,
+} from '../localAgentSession';
 
 export type MessageRole = Exclude<LocalAgentMessageEntry['role'], 'subagent'>;
 
@@ -15,12 +18,4 @@ export type ActiveOperation = {
   startedAt: number;
 };
 
-export type ResumeSessionSummary = {
-  id: string;
-  kind?: 'chat' | 'studio';
-  title: string;
-  messageCount: number;
-  createdAt: string;
-  updatedAt: string;
-  active: boolean;
-};
+export type ResumeSessionSummary = LocalAgentSessionSummary;

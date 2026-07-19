@@ -20,6 +20,9 @@ function createHandlers(
     onRunInterrupt: () => undefined,
     onNewSession: () => undefined,
     onRuntimeConfigUpdate: () => undefined,
+    onSessionSnapshotGet: () => undefined,
+    onSessionList: () => undefined,
+    onSessionResume: () => undefined,
     onClose: () => undefined,
     ...overrides,
   };
@@ -135,6 +138,76 @@ test('stdio JSONL dispatch matches typed WebSocket behavior and closes one stabl
   assert.equal(peers[0], peers[1]);
   assert.match(readDiagnostics(), /type=chat_request requestId=chat-old/);
   assert.match(readDiagnostics(), /type=unknown requestId=unknown/);
+});
+
+test('stdio carries correlated session results without routing them as live events', async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const readOutput = collectText(output);
+  const transport = attachLocalServerStdioTransport(createHandlers({
+    onSessionList: (peer, message) => {
+      peer.send({
+        type: 'session.list.result',
+        requestId: message.requestId,
+        sessions: [{
+          id: 'chat:one',
+          kind: 'chat',
+          title: 'One',
+          messageCount: 2,
+          createdAt: '2026-07-01T00:00:00.000Z',
+          updatedAt: '2026-07-01T00:01:00.000Z',
+          active: true,
+        }],
+      });
+    },
+    onSessionResume: (peer, message) => {
+      peer.send({
+        type: 'session.error',
+        requestId: message.requestId,
+        operation: 'resume',
+        message: 'session not found',
+      });
+    },
+  }), {
+    input,
+    output,
+    diagnostics: new PassThrough(),
+  });
+
+  input.write(`${JSON.stringify({ type: 'session.list', requestId: 'sessions-1' })}\n`);
+  input.write(`${JSON.stringify({
+    type: 'session.resume',
+    requestId: 'resume-1',
+    sessionId: 'chat:missing',
+  })}\n`);
+
+  await assertEventually(() => {
+    assert.equal(parseJsonLines(readOutput()).length, 2);
+  });
+  input.end();
+  await transport.closed;
+
+  assert.deepEqual(parseJsonLines(readOutput()), [
+    {
+      type: 'session.list.result',
+      requestId: 'sessions-1',
+      sessions: [{
+        id: 'chat:one',
+        kind: 'chat',
+        title: 'One',
+        messageCount: 2,
+        createdAt: '2026-07-01T00:00:00.000Z',
+        updatedAt: '2026-07-01T00:01:00.000Z',
+        active: true,
+      }],
+    },
+    {
+      type: 'session.error',
+      requestId: 'resume-1',
+      operation: 'resume',
+      message: 'session not found',
+    },
+  ]);
 });
 
 test('stdio framing handles split chunks, CRLF, and a final line without newline', async () => {

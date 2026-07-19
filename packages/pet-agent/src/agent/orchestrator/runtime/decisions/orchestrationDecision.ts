@@ -52,10 +52,7 @@ import {
   appendRunDelegationSummary,
   resumeRunDelegationSummary,
 } from '../../delegations';
-import {
-  buildContinuationBriefingMessage,
-  buildDelegationBriefingMessage,
-} from '../../delegationBriefing';
+import { materializeDelegation } from '../../delegationBriefing';
 import {
   ACTIVE_DELEGATION_LIMIT_REACHED,
   delegationOutcomeDecisionGuard,
@@ -71,6 +68,7 @@ import {
   readLatestAnnounce,
   readLatestAnnounceCompletionReason,
   readLatestHumanRequest,
+  setPinpetMeta,
 } from '../../messageLanes';
 import { resolveToolkitResources } from '../../subagentDispatch';
 import {
@@ -182,11 +180,14 @@ function buildTaskDecisionContext(params: {
       config.decisionStructuredOutput?.method,
     ),
   });
-  const decisionContextMessage = new SystemMessage(buildTaskDecisionInput({
-    capabilityArtifacts: state.sessionCapabilityArtifacts,
+  const decisionContextMessage = new HumanMessage(buildTaskDecisionInput({
     runDelegationContext: buildRunDelegationSummaryContext(state.runDelegationSummaries),
     runtimeContext: buildRuntimeContext(workdir, runtimeEnvironment),
   }));
+  setPinpetMeta(decisionContextMessage, {
+    source: 'entry_decision_context',
+    synthetic: true,
+  });
 
   return {
     conversationMessages,
@@ -659,25 +660,27 @@ function buildCapabilityDecisionResult(params: {
   const nextTaskActiveDelegation = createTaskActiveDelegation(runNextDelegation, state.runId);
 
   // Delegation briefing: the deterministic projection of the materialized
-  // delegation into main messages. Written here — and only here — because this
+  // delegation into its private lane. Written here — and only here — because this
   // is the single point where both entry direct_task and planner next_task
   // become a real delegation; bail-out paths above never leave a stale
   // "当前执行 X" briefing behind. See issue #362.
-  const briefingMessage = buildDelegationBriefingMessage({
+  const materializedDelegation = materializeDelegation({
+    mode: 'initial',
     lane: runNextDelegation.lane,
     runId: nextTaskActiveDelegation.transcriptRunId,
     delegationId: runNextDelegation.id,
     task: runNextDelegation.task,
     // Pre-fallback value: the '继续完成用户当前请求。' placeholder that pads
     // runNextDelegation.contextSummary carries no execution guidance, so the
-    // briefing omits its context line rather than rendering filler.
-    contextSummary: pendingTask.contextSummary,
-    runDelegationSummaries,
-    remainingPlan: state.runCapabilityPlan,
+    // briefing omits its context element rather than rendering filler.
+    essentialContext: pendingTask.contextSummary,
   });
 
   return {
-    messages: [briefingMessage],
+    messages: [
+      ...materializedDelegation.mainMessages,
+      ...materializedDelegation.laneMessages,
+    ],
     runNextDelegation,
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,
@@ -761,14 +764,16 @@ function buildContinueDelegationResult(params: {
   // reviewer's gap note — a rejected announce without a reason would leave the
   // subagent re-announcing the same conclusion. gapNote may be null (e.g.
   // limit_reached), where continuing is self-evident from the transcript.
-  const briefingMessage = buildContinuationBriefingMessage({
+  const materializedDelegation = materializeDelegation({
+    mode: 'continue',
+    lane: activeDelegation.lane,
     runId: activeDelegation.transcriptRunId,
     delegationId: runNextDelegation.id,
     task: runNextDelegation.task,
     gapNote,
   });
   return {
-    messages: [briefingMessage],
+    messages: materializedDelegation.laneMessages,
     runNextDelegation,
     runPendingTask: null,
     taskActiveDelegation: nextTaskActiveDelegation,

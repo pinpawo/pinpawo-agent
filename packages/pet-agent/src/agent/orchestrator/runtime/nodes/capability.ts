@@ -37,6 +37,10 @@ import {
   readCapabilityNameFromLane,
   resolveDelegationTranscriptRunId,
 } from '../decisions/delegationLifecycle';
+import {
+  hasArtifactDiscoveryTools,
+  withArtifactDiscoveryContext,
+} from '../../artifacts/discovery';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -52,6 +56,8 @@ export function createCapabilityNode(params: {
       execution,
       workdir,
       runtimeEnvironment,
+      artifactDiscoveryRoot,
+      artifactDiscoveryToolset,
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
@@ -121,17 +127,33 @@ export function createCapabilityNode(params: {
       availableToolkits,
     }, execution);
     const middleware = runtime.middleware;
+    const effectiveRuntime = artifactDiscoveryRoot && artifactDiscoveryToolset
+      ? {
+          ...runtime,
+          toolsets: [...(runtime.toolsets ?? []), artifactDiscoveryToolset],
+        }
+      : runtime;
+    const selectedTools = selectCapabilityTools(effectiveRuntime, usedToolkitResources.tools);
+    const canExploreArtifacts = Boolean(
+      artifactDiscoveryRoot
+      && artifactDiscoveryToolset
+      && hasArtifactDiscoveryTools(selectedTools, artifactDiscoveryToolset.tools),
+    );
     const executionInstruction = buildSubagentExecutionInstruction({
       lane,
       workdir: workdir ?? null,
     });
 
+    const subagentMessages = withArtifactDiscoveryContext(
+      scopedMessages,
+      canExploreArtifacts ? artifactDiscoveryRoot : null,
+    );
     let subagentInput: SubagentRunInput = {
       model: config.models.subagent ?? config.models.act,
-      tools: selectCapabilityTools(runtime, usedToolkitResources.tools),
+      tools: selectedTools,
       instructions: [executionInstruction, ...usedToolkitResources.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
-      operations: collectCapabilityOperations(usedToolkitResources.toolkits, runtime),
-      messages: scopedMessages,
+      operations: collectCapabilityOperations(usedToolkitResources.toolkits, effectiveRuntime),
+      messages: subagentMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
       middleware: usedToolkitResources.middleware,

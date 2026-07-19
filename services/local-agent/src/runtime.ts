@@ -101,6 +101,7 @@ export class LocalAgentRuntime {
       getLocalCapabilities: () => this.capabilityRegistry.getLocalCapabilities(),
       getUserCapabilities: () => this.capabilityRegistry.getUserCapabilities(),
       getCapabilityArtifactStore: () => this.capabilityRegistry.getCapabilityArtifactStore(),
+      getCapabilityArtifactRoot: () => this.runtimeConfig.capabilityArtifactRoot,
       getWorkdir: () => this.runtimeConfig.workdir,
       getActorName: () => this.actorName,
       runStudioRequest: async (ws, message) => {

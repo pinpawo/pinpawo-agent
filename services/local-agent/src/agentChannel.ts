@@ -1,5 +1,6 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
+import { statSync } from 'node:fs';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   stampMessageCreatedAtUtc,
@@ -33,6 +34,16 @@ import {
   type LocalAgentInterfaceKind,
 } from './chatInterface';
 import { inferLlmStructuredOutputMethod } from './llmModelPresets';
+import { resolveCapabilityArtifactThreadRoot } from './capabilityArtifactStore';
+import { createArtifactDiscoveryToolset } from './toolkits/local';
+
+function isExistingDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 function buildActor(context: AgentContext) {
   return {
@@ -202,6 +213,8 @@ export function buildLocalChatAgentInput(params: {
   userCapabilities?: LoadedUserCapability[];
   /** Store handed to capabilities so they can deterministically persist result artifacts */
   capabilityArtifactStore?: CapabilityArtifactStore;
+  /** Root directory backing the capability artifact store. */
+  capabilityArtifactRoot?: string;
   /** Effective agent workdir for prompt context and relative tool paths. */
   workdir?: string;
   /** Fixed session/thread start timestamp used as a stable relative-time anchor. */
@@ -253,6 +266,13 @@ export function buildLocalChatAgentInput(params: {
   for (const { meta, capability } of params.userCapabilities ?? []) {
     if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
   }
+  const artifactDiscoveryRootCandidate = params.threadId && params.capabilityArtifactRoot
+    ? resolveCapabilityArtifactThreadRoot(params.capabilityArtifactRoot, params.threadId)
+    : undefined;
+  const artifactDiscoveryRoot = artifactDiscoveryRootCandidate
+    && isExistingDirectory(artifactDiscoveryRootCandidate)
+    ? artifactDiscoveryRootCandidate
+    : undefined;
 
   return {
     graphKey: buildGraphKey([
@@ -286,6 +306,10 @@ export function buildLocalChatAgentInput(params: {
         dryRun: params.dryRun,
       },
       workdir: params.workdir,
+      artifactDiscoveryRoot,
+      artifactDiscoveryToolset: artifactDiscoveryRoot
+        ? createArtifactDiscoveryToolset(artifactDiscoveryRoot)
+        : undefined,
       runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir, {
         sessionStartedAt: params.sessionStartedAt,
         timezone: params.timezone,

@@ -4,6 +4,11 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { walkFiles, DEFAULT_WALK_IGNORED_DIRS } from './fileSystemUtils';
+import {
+  createArtifactDiscoveryFileTools,
+  listDirTool,
+  viewFileChunkTool,
+} from './fileTools';
 import { globSearchTool, grepSearchTool } from './searchTools';
 
 function makeTree() {
@@ -90,4 +95,52 @@ test('glob_search ignores .pinpawo and finds real files', async () => {
 
   assert.ok(output.includes('src/app.ts'));
   assert.ok(!output.includes('.pinpawo'), 'glob must not surface checkpoint storage');
+});
+
+test('explicit file tools can inspect a scoped artifact path under .pinpawo', async () => {
+  const root = makeTree();
+  const threadRoot = resolve(
+    root,
+    '.pinpawo/capability-artifacts/threads/thread-1',
+  );
+  const artifactDir = resolve(threadRoot, 'delegation-1');
+  mkdirSync(artifactDir, { recursive: true });
+  writeFileSync(resolve(artifactDir, 'manifest.json'), '{"title":"artifact shortcut"}\n');
+
+  const listing = String(await listDirTool.invoke({ path: artifactDir }));
+  const content = String(await viewFileChunkTool.invoke({
+    path: resolve(artifactDir, 'manifest.json'),
+  }));
+
+  assert.match(listing, /manifest\.json/);
+  assert.match(content, /artifact shortcut/);
+
+  const scopedTools = createArtifactDiscoveryFileTools(threadRoot);
+  const scopedListDir = scopedTools.find((toolItem) => toolItem.name === 'list_dir');
+  const scopedViewFileChunk = scopedTools.find(
+    (toolItem) => toolItem.name === 'view_file_chunk',
+  );
+  assert.ok(scopedListDir);
+  assert.ok(scopedViewFileChunk);
+  assert.match(String(await scopedListDir.invoke({ path: artifactDir })), /manifest\.json/);
+  assert.match(String(await scopedViewFileChunk.invoke({
+    path: resolve(artifactDir, 'manifest.json'),
+  })), /artifact shortcut/);
+});
+
+test('artifact discovery tools report a clean result when the thread root is missing', async () => {
+  const missingThreadRoot = resolve(makeTree(), 'threads/missing-thread');
+  const scopedTools = createArtifactDiscoveryFileTools(missingThreadRoot);
+  const scopedListDir = scopedTools.find((toolItem) => toolItem.name === 'list_dir');
+  const scopedViewFileChunk = scopedTools.find(
+    (toolItem) => toolItem.name === 'view_file_chunk',
+  );
+  assert.ok(scopedListDir);
+  assert.ok(scopedViewFileChunk);
+
+  const listing = String(await scopedListDir.invoke({ path: '.' }));
+  const content = String(await scopedViewFileChunk.invoke({ path: 'manifest.json' }));
+  assert.match(listing, /current thread has no artifacts/);
+  assert.match(content, /current thread has no artifacts/);
+  assert.doesNotMatch(`${listing}\n${content}`, /ENOENT/);
 });

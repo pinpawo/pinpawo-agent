@@ -28,6 +28,12 @@ function buildConfigurable(setup: AgentChannelSetup) {
   if (setup.input.toolkits && setup.input.toolkits.length > 0) configurable.toolkits = setup.input.toolkits;
   if (setup.input.execution) configurable.execution = setup.input.execution;
   if (setup.input.workdir) configurable.workdir = setup.input.workdir;
+  if (setup.input.artifactDiscoveryRoot) {
+    configurable.artifactDiscoveryRoot = setup.input.artifactDiscoveryRoot;
+  }
+  if (setup.input.artifactDiscoveryToolset) {
+    configurable.artifactDiscoveryToolset = setup.input.artifactDiscoveryToolset;
+  }
   if (setup.input.runtimeEnvironment) configurable.runtimeEnvironment = setup.input.runtimeEnvironment;
   if (setup.input.globalReviewPolicy) configurable.globalReviewPolicy = setup.input.globalReviewPolicy;
   if (setup.interfaceContext?.kind) {

@@ -47,6 +47,10 @@ function encodePathSegment(value: string) {
   return encodeURIComponent(value || '__empty__');
 }
 
+export function resolveCapabilityArtifactThreadRoot(rootDir: string, threadId: string) {
+  return join(rootDir, 'threads', encodePathSegment(threadId));
+}
+
 function atomicWriteFile(path: string, data: string | Uint8Array) {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
@@ -153,7 +157,7 @@ export class FileCapabilityArtifactStore implements CapabilityArtifactStore {
   constructor(private readonly rootDir = DEFAULT_CAPABILITY_ARTIFACT_ROOT) {}
 
   private threadDir(threadId: string) {
-    return join(this.rootDir, 'threads', encodePathSegment(threadId));
+    return resolveCapabilityArtifactThreadRoot(this.rootDir, threadId);
   }
 
   private delegationDir(threadId: string, delegationId: string) {

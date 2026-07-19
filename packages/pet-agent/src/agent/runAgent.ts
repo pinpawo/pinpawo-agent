@@ -1,7 +1,7 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution } from '../types/agent';
-import type { AgentToolkit } from '../types/toolkit';
+import type { AgentToolkit, AgentToolset } from '../types/toolkit';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
 import {
   buildOrchestratorRunInput,
@@ -19,6 +19,10 @@ export type AgentInvokeInput = {
   signal?: AbortSignal;
   /** Agent working directory passed into system prompt so the agent knows its file scope. */
   workdir?: string;
+  /** Host-resolved current-thread capability artifact directory. */
+  artifactDiscoveryRoot?: string;
+  /** Host-owned read-only tools used to inspect artifactDiscoveryRoot. */
+  artifactDiscoveryToolset?: AgentToolset;
   /** Runtime environment summary injected into system prompts. Must not contain secrets. */
   runtimeEnvironment?: string;
   globalReviewPolicy?: GlobalReviewPolicy;
@@ -45,6 +49,10 @@ export async function runAgent(
   if (input.toolkits && input.toolkits.length > 0) configurable.toolkits = input.toolkits;
   if (input.execution) configurable.execution = input.execution;
   if (input.workdir) configurable.workdir = input.workdir;
+  if (input.artifactDiscoveryRoot) configurable.artifactDiscoveryRoot = input.artifactDiscoveryRoot;
+  if (input.artifactDiscoveryToolset) {
+    configurable.artifactDiscoveryToolset = input.artifactDiscoveryToolset;
+  }
   if (input.runtimeEnvironment) configurable.runtimeEnvironment = input.runtimeEnvironment;
   if (input.globalReviewPolicy) configurable.globalReviewPolicy = input.globalReviewPolicy;
 

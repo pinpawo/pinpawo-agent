@@ -11,7 +11,7 @@ import {
   readContextCompactionSummaries,
 } from './contextCompaction';
 import { setPinpetMeta } from './messageLanes';
-import { buildDelegationBriefingMessage } from './delegationBriefing';
+import { materializeDelegation } from './delegationBriefing';
 
 function fakeSummaryModel(summary = '旧上下文摘要', onInvoke?: (messages: unknown[], config?: RunnableConfig) => void) {
   return {
@@ -76,15 +76,14 @@ test('orchestrator context compaction summarizes old messages and keeps recent s
 
 test('orchestrator context compaction excludes delegation briefings from summary input', async () => {
   let summaryInput = '';
-  const briefing = buildDelegationBriefingMessage({
+  const [briefing] = materializeDelegation({
+    mode: 'initial',
     lane: 'general',
     runId: 'run-1',
     delegationId: 'delegation-1',
     task: '不要把这段调度文本写入摘要',
-    contextSummary: null,
-    runDelegationSummaries: [],
-    remainingPlan: [],
-  });
+    essentialContext: null,
+  }).laneMessages;
   const messages: BaseMessage[] = [
     new HumanMessage('完成任务'),
     briefing,

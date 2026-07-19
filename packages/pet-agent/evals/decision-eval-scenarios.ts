@@ -84,7 +84,11 @@ const actor = {
 
 function messages(prompt: RenderedDecisionPrompt) {
   return prompt.conversationMessages
-    ? [new SystemMessage(prompt.system), new SystemMessage(prompt.input), ...prompt.conversationMessages]
+    ? [
+        new SystemMessage(prompt.system),
+        new HumanMessage(prompt.input),
+        ...prompt.conversationMessages,
+      ]
     : [new SystemMessage(prompt.system), new HumanMessage(prompt.input)];
 }
 

@@ -397,7 +397,7 @@ async function runOne(params: {
     );
     const raw = await structuredModel.invoke([
       new SystemMessage(systemPrompt),
-      new SystemMessage(input),
+      new HumanMessage(input),
       ...(params.testCase.recentMessages ?? []),
       new HumanMessage(params.testCase.latestUserRequest),
     ]);

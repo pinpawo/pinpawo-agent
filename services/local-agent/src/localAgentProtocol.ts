@@ -452,18 +452,6 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
     const actionId = readString(record, 'actionId');
     return requestId && actionId ? { type, requestId, actionId } : null;
   }
-  // Compatibility boundary for clients predating the split control messages.
-  // Normalize immediately so downstream code never infers intent from actionId?.
-  if (type === 'interrupt_request') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'actionId'])) return null;
-    const requestId = readString(record, 'requestId');
-    const actionId = readOptionalString(record, 'actionId');
-    if (record.actionId !== undefined && !actionId) return null;
-    if (!requestId) return null;
-    return actionId
-      ? { type: 'review.cancel', requestId, actionId }
-      : { type: 'run.interrupt', requestId };
-  }
   if (type === 'new_session') {
     return {
       type,

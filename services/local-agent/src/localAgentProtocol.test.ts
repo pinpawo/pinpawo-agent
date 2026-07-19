@@ -136,25 +136,6 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
   );
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({
-      type: 'interrupt_request',
-      requestId: 'legacy-review',
-      actionId: 'interrupt-legacy',
-    })),
-    {
-      type: 'review.cancel',
-      requestId: 'legacy-review',
-      actionId: 'interrupt-legacy',
-    },
-  );
-  assert.deepEqual(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'interrupt_request',
-      requestId: 'legacy-run',
-    })),
-    { type: 'run.interrupt', requestId: 'legacy-run' },
-  );
-  assert.deepEqual(
-    parseLocalAgentClientMessage(JSON.stringify({
       type: 'human_review_response',
       requestId: 'req-1',
       reviewId: 'review-2',
@@ -216,6 +197,24 @@ test('parseLocalAgentClientMessage accepts canonical human review response field
     null,
   );
   assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
+});
+
+test('parseLocalAgentClientMessage rejects legacy interrupt_request control messages', () => {
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'interrupt_request',
+      requestId: 'legacy-review',
+      actionId: 'interrupt-legacy',
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'interrupt_request',
+      requestId: 'legacy-run',
+    })),
+    null,
+  );
 });
 
 test('parseLocalAgentClientMessage accepts runtime config updates for built-in review policy modes', () => {

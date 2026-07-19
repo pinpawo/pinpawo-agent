@@ -50,10 +50,6 @@ type ToolReviewOperationSummary = {
 };
 
 type GlobalReviewRuntimeContext = {
-  /** Recent original user requests; the only authority evidence for intent alignment. */
-  userRequests?: string[];
-  /** Current execution task, separate from incidental recent messages. */
-  task?: string | null;
   /** Effective workdir used to interpret relative paths and mutation scope. */
   workdir?: string | null;
 };
@@ -61,6 +57,7 @@ type GlobalReviewRuntimeContext = {
 export type GlobalReviewPolicyContext = GlobalReviewRuntimeContext & {
   models: AgentModels;
   actor: AgentActor;
+  /** Custom policy context only; built-in auto authorization never forwards messages to its model. */
   messages: BaseMessage[];
   toolkitName: string;
   toolName: string;
@@ -81,6 +78,7 @@ export type GlobalReviewPolicyBatchItem = Omit<
 export type GlobalReviewPolicyBatchContext = GlobalReviewRuntimeContext & {
   models: AgentModels;
   actor: AgentActor;
+  /** Custom policy context only; built-in auto authorization never forwards messages to its model. */
   messages: BaseMessage[];
   reviews: GlobalReviewPolicyBatchItem[];
 };
@@ -114,7 +112,6 @@ const AUTO_REVIEW_DECISION_SCHEMA = z.object({
     GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
   ]),
   risk_level: z.enum(['low', 'medium', 'high']),
-  intent_alignment: z.enum(['explicit', 'implied', 'unclear', 'conflicts']),
   scope_assessment: z.enum([
     'workdir',
     'outside_workdir',
@@ -122,6 +119,18 @@ const AUTO_REVIEW_DECISION_SCHEMA = z.object({
     'broad',
     'unknown',
   ]),
+  risk_factors: z.array(z.enum([
+    'destructive_change',
+    'broad_scope',
+    'outside_workdir',
+    'sensitive_data',
+    'permission_or_security_change',
+    'software_install',
+    'financial_action',
+    'external_side_effect',
+    'publish_or_repository_write',
+    'unclear_effect',
+  ])).max(6).default([]),
   reason: z.string().min(1).max(500),
   concerns: z.array(z.string().max(200)).max(4).default([]),
   confidence: z.enum(['low', 'medium', 'high']),
@@ -138,18 +147,13 @@ function normalizeReason(reason: string | undefined, fallback: string) {
 }
 
 async function resolveAutoAuthorization(
-  options: ResolveGlobalReviewBatchPolicyOptions,
+  options: Pick<
+    ResolveGlobalReviewBatchPolicyOptions,
+    'models' | 'policy' | 'reviews' | 'workdir'
+  >,
 ): Promise<GlobalReviewPolicyResolution> {
   const model = options.models.observe ?? options.models.act;
-  if (!options.userRequests?.some((request) => request.trim())) {
-    return {
-      type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
-      reason: 'Auto review has no original user request to establish authorization intent.',
-    };
-  }
   const prompt = buildAutoReviewPrompt({
-    userRequests: options.userRequests,
-    task: options.task,
     workdir: options.workdir,
     reviews: options.reviews,
   });
@@ -178,11 +182,11 @@ async function resolveAutoAuthorization(
     });
 
     const decisionIsConsistent = decision.risk_level === 'low'
-      && (decision.intent_alignment === 'explicit' || decision.intent_alignment === 'implied')
       && decision.scope_assessment !== 'outside_workdir'
       && decision.scope_assessment !== 'broad'
       && decision.scope_assessment !== 'unknown'
       && (decision.scope_assessment !== 'workdir' || Boolean(options.workdir?.trim()))
+      && decision.risk_factors.length === 0
       && decision.confidence !== 'low';
     if (
       decision.decision === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE
@@ -238,8 +242,6 @@ export async function resolveGlobalReviewBatchPolicy(
           models: options.models,
           actor: options.actor,
           messages: options.messages,
-          userRequests: options.userRequests,
-          task: options.task,
           workdir: options.workdir,
           ...review,
         });
@@ -272,8 +274,6 @@ export async function resolveGlobalReviewPolicy(
     models,
     actor,
     messages,
-    task,
-    userRequests,
     workdir,
     ...review
   } = options;
@@ -282,8 +282,6 @@ export async function resolveGlobalReviewPolicy(
     models,
     actor,
     messages,
-    task,
-    userRequests,
     workdir,
     reviews: [review],
   });

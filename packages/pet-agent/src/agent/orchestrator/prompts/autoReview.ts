@@ -9,37 +9,12 @@ import {
 const MAX_PROMPT_CHARS = 8_000;
 const MAX_ACTIONS_CHARS = 3_000;
 const MAX_REVIEW_ACTIONS = 6;
-const MAX_USER_REQUESTS = 2;
-const MAX_USER_REQUEST_CHARS = 700;
 const LARGE_VALUE_KEY = /(?:content|body|text|data|patch|before|after|preview|output|html|markdown)$/i;
 
 function clipText(value: string, limit: number) {
   return value.length <= limit
     ? value
     : `${value.slice(0, limit)}\n[truncated ${value.length - limit} chars]`;
-}
-
-function formatUserRequests(userRequests: string[]) {
-  const requests = userRequests
-    .map((request) => request.trim())
-    .filter(Boolean)
-    .slice(-MAX_USER_REQUESTS);
-  if (requests.length === 0) return { text: null, complete: false };
-  if (requests.some((request) => request.length > MAX_USER_REQUEST_CHARS)) {
-    return { text: null, complete: false };
-  }
-  return {
-    text: [
-      '<user_requests authority="user">',
-      ...requests.map((request, index) => xmlTextBlock(
-        'request',
-        request,
-        ` index="${index + 1}"`,
-      )),
-      '</user_requests>',
-    ].join('\n'),
-    complete: true,
-  };
 }
 
 function summarizeLargeValue(value: unknown) {
@@ -83,27 +58,18 @@ function readOperationSummary(item: GlobalReviewPolicyBatchItem) {
 function formatAutoReviewItem(item: GlobalReviewPolicyBatchItem, index: number, limit: number) {
   const summary = readOperationSummary(item);
   const identity = `Action ${index + 1}: ${clipText(item.toolkitName, 80)}.${clipText(item.toolName, 100)}`;
-  const commonLines = [
+  const contextLines = [
     identity,
     item.operation?.title ? `Title: ${clipText(item.operation.title, 120)}` : null,
     summary?.target ? `Target: ${clipText(summary.target, 500)}` : null,
     summary?.summary ? `Summary: ${clipText(summary.summary, 400)}` : null,
+    summary?.details ? `Facts: ${safeJson(summary.details, 400)}` : null,
+    !summary ? `Review: ${clipText(reviewViewToText(item.review.view), 400)}` : null,
   ].filter((line): line is string => Boolean(line));
-
-  if (summary) {
-    const used = commonLines.join('\n').length;
-    const detailsBudget = Math.max(0, limit - used - 10);
-    const details = summary.details && detailsBudget >= 80
-      ? `Facts: ${safeJson(summary.details, detailsBudget)}`
-      : null;
-    return clipText([...commonLines, details].filter(Boolean).join('\n'), limit);
-  }
-
-  const reviewBody = clipText(reviewViewToText(item.review.view), 400);
-  const inputBudget = Math.max(120, limit - commonLines.join('\n').length - reviewBody.length - 30);
+  const inputBudget = Math.max(140, Math.floor(limit * 0.4));
+  const contextBudget = Math.max(120, limit - inputBudget - 20);
   return clipText([
-    ...commonLines,
-    `Review: ${reviewBody}`,
+    clipText(contextLines.join('\n'), contextBudget),
     `Input facts: ${safeJson(item.input, inputBudget)}`,
   ].join('\n'), limit);
 }
@@ -127,23 +93,16 @@ export function buildAutoReviewSystemPrompt() {
 }
 
 export function buildAutoReviewPrompt(params: {
-  userRequests: string[];
-  task?: string | null;
   workdir?: string | null;
   reviews: GlobalReviewPolicyBatchItem[];
 }) {
   const actions = formatAutoReviewItems(params.reviews);
-  const userRequests = formatUserRequests(params.userRequests);
-  if (!actions.complete || !userRequests.complete) {
+  if (!actions.complete) {
     return { text: '', complete: false };
   }
   const text = AUTO_REVIEW_INPUT_PROMPT.render({
     workdirBlock: promptBlock(params.workdir?.trim()
       ? xmlTextBlock('workdir', clipText(params.workdir.trim(), 400), ' authority="runtime"')
-      : null, 2),
-    userRequestsBlock: promptBlock(userRequests.text, 2),
-    derivedTaskBlock: promptBlock(params.task?.trim()
-      ? xmlTextBlock('derived_task', clipText(params.task.trim(), 600), ' authority="none"')
       : null, 2),
     batchSize: params.reviews.length.toString(),
     actionsBlock: promptBlock(xmlTextBlock('actions', actions.text, ' role="data"'), 2),

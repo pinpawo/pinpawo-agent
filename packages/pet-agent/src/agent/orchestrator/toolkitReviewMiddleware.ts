@@ -705,8 +705,6 @@ async function resolvePreparedToolkitReviews(params: {
     models: params.ctx.models,
     actor: params.ctx.actor,
     messages: params.ctx.messages,
-    userRequests: params.ctx.reviewContext?.userRequests,
-    task: params.ctx.reviewContext?.task,
     workdir: params.ctx.reviewContext?.workdir,
     reviews: params.prepared.reviews,
   });

@@ -2002,9 +2002,9 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
         return {
           decision: 'authorize',
           risk_level: 'low',
-          intent_alignment: 'explicit',
           scope_assessment: 'workdir',
-          reason: 'Small scoped file write requested by the user.',
+          risk_factors: [],
+          reason: 'Small scoped file write inside the workdir.',
           concerns: [],
           confidence: 'high',
         };
@@ -2017,8 +2017,6 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
     actor: testActor,
     messages: [new HumanMessage('subagent context')],
     reviewContext: {
-      userRequests: ['write notes.md in the repository'],
-      task: 'Write the requested notes file',
       workdir: '/repo',
     },
     reviewCapabilities: {
@@ -2041,13 +2039,12 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.equal(autoReviewCount, 1);
   const systemPrompt = (autoReviewMessages as Array<{ content?: unknown }>)[0]?.content;
   assert.match(String(systemPrompt), /untrusted evidence/);
-  assert.match(String(systemPrompt), /Only user_requests records original user authorization intent/);
+  assert.match(String(systemPrompt), /fallback risk review/);
   assert.match(String(systemPrompt), /Decision policy:/);
   const reviewPrompt = String((autoReviewMessages as Array<{ content?: unknown }>)[1]?.content);
-  assert.match(reviewPrompt, /<derived_task authority="none">[\s\S]*Write the requested notes file/);
   assert.match(reviewPrompt, /<workdir authority="runtime">[\s\S]*\/repo/);
-  assert.match(reviewPrompt, /write notes\.md in the repository/);
   assert.doesNotMatch(reviewPrompt, /subagent context/);
+  assert.doesNotMatch(reviewPrompt, /user_requests|derived_task/);
   assert.doesNotMatch(reviewPrompt, /Decision policy:/);
   assert.doesNotMatch(reviewPrompt, /Test actor/);
   assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
@@ -2094,8 +2091,8 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
         return {
           decision: 'authorize',
           risk_level: 'low',
-          intent_alignment: 'explicit',
           scope_assessment: 'workdir',
+          risk_factors: [],
           reason: 'Both writes are narrow and expected.',
           concerns: [],
           confidence: 'high',
@@ -2109,8 +2106,6 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
     actor: testActor,
     messages: [new HumanMessage('write both files')],
     reviewContext: {
-      userRequests: ['write both files'],
-      task: 'Write both requested files',
       workdir: '/repo',
     },
     reviewCapabilities: {
@@ -2181,8 +2176,8 @@ test('global review policy auto_authorization requires human authorization when 
       invoke: async () => ({
         decision: 'require_authorization',
         risk_level: 'medium',
-        intent_alignment: 'unclear',
         scope_assessment: 'broad',
+        risk_factors: ['broad_scope'],
         reason: 'The write looks too broad.',
         concerns: ['Broad rewrite'],
         confidence: 'high',
@@ -2195,8 +2190,6 @@ test('global review policy auto_authorization requires human authorization when 
     actor: testActor,
     messages: [new HumanMessage('rewrite the project')],
     reviewContext: {
-      userRequests: ['rewrite the project'],
-      task: 'Rewrite the project',
       workdir: '/repo',
     },
     reviewCapabilities: {

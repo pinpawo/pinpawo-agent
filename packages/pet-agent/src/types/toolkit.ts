@@ -20,8 +20,6 @@ export type ToolkitContext = {
   messages: BaseMessage[];
   /** Reviewer-only runtime facts; tools must not treat these as authorization. */
   reviewContext?: {
-    userRequests: string[];
-    task?: string | null;
     workdir?: string | null;
   };
   threadId?: string | null;

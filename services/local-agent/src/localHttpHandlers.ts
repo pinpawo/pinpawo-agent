@@ -191,7 +191,13 @@ export function handleLocalHttpRequest(
     options.resumeSession(sessionId).then((result) => {
       writeJson(res, 200, result);
     }).catch((err) => {
-      writeJson(res, 404, {
+      const statusCode = err
+        && typeof err === 'object'
+        && 'code' in err
+        && err.code === 'session_resume_conflict'
+        ? 409
+        : 404;
+      writeJson(res, statusCode, {
         error: err instanceof Error ? err.message : 'session resume failed',
       });
     });

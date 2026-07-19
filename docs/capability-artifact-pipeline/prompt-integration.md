@@ -15,7 +15,7 @@ entryDecision
 
 selected subagent
   -> optional current-thread artifact discovery root
-  -> scoped read-only list_dir / view_file_chunk
+  -> scoped read-only artifact_list_dir / artifact_view_file_chunk
   -> the subagent decides whether and what to inspect
 
 outcomeDecision / main / answer
@@ -51,8 +51,11 @@ local-agent 从配置的 artifact store root 解析当前 thread 的精确目录
 
 1. 当前 thread artifact 目录真实存在；
 2. host 已创建限制在该目录内的只读 toolset；
-3. selected subagent 实际装配的是该 toolset 中的 `list_dir` 和
-   `view_file_chunk` 工具实例，而不只是同名工具。
+3. selected subagent 实际装配的是该 toolset 中的 `artifact_list_dir` 和
+   `artifact_view_file_chunk` 工具实例。
+
+这两个专用名称与普通工作区的 `list_dir` / `view_file_chunk` 并存，避免 toolkit
+按工具名去重时丢弃 scoped artifact 工具。
 
 满足条件时，runtime 在最新 `<delegation_briefing>` 之前插入一条 synthetic
 `AIMessage`：
@@ -86,7 +89,7 @@ runtime 不把正文反向解析回结构化 refs。
 
 ## 安全边界
 
-- scoped `list_dir` / `view_file_chunk` 先做词法 containment，再对真实路径做 symlink
+- scoped `artifact_list_dir` / `artifact_view_file_chunk` 先做词法 containment，再对真实路径做 symlink
   containment 校验；
 - discovery tools 只读；
 - `.pinpawo` 继续被通用递归搜索忽略；

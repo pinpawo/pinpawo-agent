@@ -3,6 +3,8 @@ import test from 'node:test';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import {
   ARTIFACT_DISCOVERY_CONTEXT_SOURCE,
+  ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
+  ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
   buildArtifactDiscoveryContextMessage,
   hasArtifactDiscoveryTools,
   withArtifactDiscoveryContext,
@@ -48,11 +50,11 @@ test('artifact discovery context stays before the latest briefing without displa
 });
 
 test('artifact discovery requires the selected scoped tool instances', () => {
-  const scopedListDir = { name: 'list_dir' };
-  const scopedViewFileChunk = { name: 'view_file_chunk' };
+  const scopedListDir = { name: ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME };
+  const scopedViewFileChunk = { name: ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME };
   const discoveryTools = [scopedListDir, scopedViewFileChunk];
-  const foreignListDir = { name: 'list_dir' };
-  const foreignViewFileChunk = { name: 'view_file_chunk' };
+  const foreignListDir = { name: ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME };
+  const foreignViewFileChunk = { name: ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME };
 
   assert.equal(hasArtifactDiscoveryTools(discoveryTools, discoveryTools), true);
   assert.equal(hasArtifactDiscoveryTools([scopedListDir], discoveryTools), false);

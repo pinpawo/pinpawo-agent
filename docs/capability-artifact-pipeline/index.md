@@ -18,10 +18,9 @@
   - [架构概览](./architecture.md)
 - 我想知道每个文件字段和接口是什么：
   - [持久化契约](./store-contract.md)
-- 我想看 main agent 提示词如何拿到 artifact：
+- 我想看哪些决策能看到 artifact refs，以及 selected subagent 如何按需发现历史 artifact：
   - [主流程中的上下文注入](./prompt-integration.md)
 - 我想核对 explore 的上下文压缩方案：
   - [Explore 的压缩与摘要持久化](./explore-ingest.md)
 - 我想确认 `additional_kwargs`、`ToolMessage.artifact` 是否是长期协议：
   - [兼容与非持久元数据](./compatibility-notes.md)
-

@@ -73,4 +73,5 @@ export type SubagentResult = {
   messages: BaseMessage[];
   artifacts: CapabilityArtifactRef[];
   completionReason: SubagentCompletionReason;
+  announceMessageId: string | null;
 };

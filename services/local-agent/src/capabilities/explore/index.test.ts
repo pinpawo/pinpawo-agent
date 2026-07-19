@@ -159,6 +159,7 @@ test('explore final ingest includes LangChain context summaries and persists one
     ],
     artifacts: [],
     completionReason: 'natural' as const,
+    announceMessageId: null,
   };
 
   const returned = await runtime.middleware?.afterRun?.(result, {
@@ -211,6 +212,7 @@ test('explore afterRun uses the previous summary when final ingest fails', async
     messages: [summaryMessage(previous), new AIMessage('new final answer')],
     artifacts: [],
     completionReason: 'natural',
+    announceMessageId: null,
   }, {
     recordCapabilityArtifact: () => {},
     threadId: 'thread-fallback',
@@ -234,6 +236,7 @@ test('explore afterRun appends a refreshed summary after a continuation', async 
     messages: [summaryMessage(previous), new AIMessage('new evidence from src/new.ts')],
     artifacts: [],
     completionReason: 'natural',
+    announceMessageId: null,
   }, {
     recordCapabilityArtifact: () => {},
     threadId: 'thread-refresh',
@@ -262,6 +265,7 @@ test('explore final ingest keeps the newest tool results within its evidence bud
     messages: [...toolResults, new AIMessage('final answer')],
     artifacts: [],
     completionReason: 'natural',
+    announceMessageId: null,
   }, {
     recordCapabilityArtifact: () => {},
     threadId: 'thread-budget',
@@ -288,6 +292,7 @@ test('explore artifact persistence failure is non-fatal', async () => {
     messages: [new AIMessage('final evidence')],
     artifacts: [],
     completionReason: 'natural',
+    announceMessageId: null,
   }, {
     recordCapabilityArtifact: () => {},
     threadId: 'thread-error',

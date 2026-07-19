@@ -1,10 +1,12 @@
 # Pet Agent Capability Runtime Design
 
-> 状态：Draft v3
+> 状态：Current v4
 > 日期：2026-03-30
 > 2026-06-19 对齐：结构化 capability result 已迁移为
 > `CapabilityArtifactRef` / `kind: "result"` artifact；subagent completed
 > announce 是返回给父 agent 的自然语言 handoff 结果，不是短 preview。
+> 2026-07-19 对齐：delegation briefing 进入私有 lane；announce 通过显式
+> `announceMessageId` 交付；answer/main 只按 lane 与 provenance 划分消息。
 
 ## 1. 文档目标
 
@@ -123,6 +125,7 @@ orchestrator 是 capability 之间唯一的数据中介。
 type AgentCapability = {
   name: string;
   description: string;
+  availability?: CapabilityAvailabilityConfig;
   createRuntime: (ctx: CapabilityContext) => CapabilityRuntime | Promise<CapabilityRuntime>;
   resultSchema?: ZodType;
 };
@@ -130,7 +133,8 @@ type AgentCapability = {
 
 - `name`：唯一标识
 - `description`：描述该能力做什么，供 orchestrator 判断何时调用
-- `createRuntime`：在 subagent 创建时调用，生成 toolsets / tools fallback + instructions
+- `availability`：可选的 host 启动期可用性检查；不可用的 capability 不进入 registry
+- `createRuntime`：在 subagent 创建时调用，生成 uses/toolsets/instructions/middleware
 - `resultSchema`：可选，定义该 capability 的 `kind: "result"` JSON artifact
   payload schema。schema 约束的是结构化 artifact 内容，不替代 subagent
   announce。
@@ -143,10 +147,13 @@ type CapabilityContext = {
   actor: AgentActor;
   messages: BaseMessage[];
   execution?: AgentExecution;
+  availableToolkits?: ReadonlyArray<{ name: string; description: string }>;
+  artifactStore?: CapabilityArtifactStore;
 };
 ```
 
-context 只包含 agent 级别的公共信息。不包含其他 capability 的引用或状态。
+context 只包含 agent 级别的公共信息、当前可用 toolkit 描述和可选 artifact store port。
+它不包含其他 capability 的私有 runtime 或 transcript。
 
 ### 4.3 CapabilityRuntime
 
@@ -168,7 +175,10 @@ runtime 是 subagent 的配置：它使用哪些 toolkit、带哪些 capability-
 ```typescript
 type CapabilityMiddleware = {
   beforeRun?: (input: SubagentRunInput) => SubagentRunInput | Promise<SubagentRunInput>;
-  afterRun?: (result: SubagentResult) => SubagentResult | Promise<SubagentResult>;
+  afterRun?: (
+    result: SubagentResult,
+    ctx: CapabilityMiddlewareContext,
+  ) => SubagentResult | Promise<SubagentResult>;
 };
 ```
 
@@ -213,6 +223,7 @@ type SubagentResult = {
   messages: BaseMessage[];
   artifacts: CapabilityArtifactRef[];
   completionReason: 'natural' | 'limit_reached' | 'error';
+  announceMessageId: string | null;
 };
 ```
 
@@ -229,131 +240,101 @@ subagent 不跨调用保留状态。
 补充约束：
 
 - checkpoint 只属于 orchestrator graph，不进入 subagent
-- `threadId` 只用于 orchestrator graph 的 checkpoint 作用域
+- `threadId` 不作为 subagent checkpoint；host 还可用它限定 artifact store/discovery 的当前 thread 目录
 - subagent 不暴露 `onEvent` 这类框架事件接口
-- subagent 的稳定输出是 `messages / artifacts / completionReason`。completed
-  announce 由返回消息中的最后结果文本标记出来，作为父 agent 的 handoff
-  结果；`artifacts` 只携带 refs，不携带大 payload。
+- subagent 的稳定输出是 `messages / artifacts / completionReason / announceMessageId`。
+- `completionReason` 只表达停止原因；它不直接判定 delegated task 是否完成。
+- 自然结束时，只有最终消息是无 tool call 的 `AIMessage` 才会成为 announce，
+  `createSubagent` 返回该消息的 ID。orchestrator 后续按 ID 标记、验收和 handoff，
+  不根据消息正文或“最后一条有文本的消息”推断。
+- `artifacts` 只携带 refs，不携带大 payload。
 
 ## 6. orchestrator 的结构
 
-orchestrator 使用 LangGraph StateGraph 实现，包含三个节点和条件路由。
+orchestrator 使用 LangGraph StateGraph，把入口判断、规划、能力选择、执行、验收和最终回复拆成
+垂直节点。当前主路径是：
 
-### 6.1 StateGraph 结构
-
-```
-START → route → (conditional) → capability → END
-                              → direct    → END
-```
-
-- **route 节点**：作为主 orchestrator agent 运行；如果需要 capability，则调用 `delegate_capability` 工具；否则直接生成自由文本回复
-- **capability 节点**：创建 subagent 执行对应 capability（装配 capability tools + global tools）
-- **direct 节点**：不创建 subagent；只把 route 节点已经生成的自由文本回复写入最终 `messages`
-
-### 6.2 OrchestratorState
-
-```typescript
-const OrchestratorState = Annotation.Root({
-  messages: Annotation<BaseMessage[]>({
-    reducer: messagesStateReducer,
-    default: () => [],
-  }),
-  routeMode: Annotation<'direct' | 'capability'>({
-    reducer: (_prev, next) => next,
-    default: () => 'direct',
-  }),
-  activeCapability: Annotation<string | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  directReply: Annotation<string | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  capabilityTask: Annotation<string | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  capabilityContextSummary: Annotation<string | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  capabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
-    reducer: (prev, next) => mergeCapabilityArtifactRefs(prev, next),
-    default: () => [],
-  }),
-});
+```text
+START → prepare → compactContext
+  → entryDecision
+      ├─ answer → END
+      ├─ capabilityPlanner → capabilityDecision
+      └─ capabilityDecision
+  → capability | general
+  → delegationOutcomeIterationGuard
+  → delegationOutcomeDecision
+      ├─ continue → capability | general
+      ├─ task_done → capabilityPlanner
+      └─ goal_done → answer → END
 ```
 
-- `messages`：动态的对话消息，每次调用传入
-- `routeMode`：当前走 direct 还是 capability
-- `activeCapability`：route 节点委托的 capability 名称
-- `directReply`：route 节点直接生成的自由文本回复
-- `capabilityTask`：交给 capability 的明确任务
-- `capabilityContextSummary`：交给 capability 的简短上下文摘要
-- `capabilityArtifacts`：capability 执行写入的 artifact refs；结构化 result
-  也是 `kind: "result"` ref
+- `entryDecision` 只选择 `answer | direct_task | needs_plan`。
+- `capabilityPlanner` 只维护 capability execution boundaries。
+- `capabilityDecision` 搜索并选择 custom capability 或 general executor。
+- `capability/general` 创建隔离 subagent 并执行当前 delegation。
+- `delegationOutcomeDecision` 验收 announce，决定继续、完成当前 task 或完成总目标。
+- `answer` 是唯一生成用户可见最终回复的节点。
 
-静态配置（models，以及可选的 actor）通过闭包持有。tools、capabilities 通过每次 invoke 的 configurable 输入提供，不放在 state 中。
+### 6.1 当前 state 分层
 
-### 6.3 graph 构建与调用分离
+`messages` 是唯一未带生命周期前缀的 LangGraph channel；其余 state 按 session/task/run 分层：
 
-- **`createOrchestratorGraph(config)`**：channel 在初始化时调用一次，构建并编译 StateGraph
-- **`runAgent(graph, input)`**：每次消息到达时调用，invoke 已编译的 graph
+- session：`sessionCapabilityArtifacts`、`sessionToolAuthorizations`
+- task：`taskActiveDelegation`
+- run：`runNextDelegation`、`runPendingTask`、`runCapabilityPlan`、
+  `runDelegationSummaries`、`runIterationCount`、`runId`
 
-这个分离确保 graph 不会在每次消息时重建。
+完整命名与 reset 纪律见
+[PET_AGENT_STATE_LIFECYCLE_REFACTOR.md](./PET_AGENT_STATE_LIFECYCLE_REFACTOR.md) 和
+[PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md](./PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md)。
 
-### 6.4 route 节点的 system prompt
+### 6.2 main queue、delegation lane 与 briefing
 
-route 节点的 system prompt 包含：
+同一 `messages` channel 物理承载 main queue 和 delegation lanes，但消费者按 metadata 建立不同视图：
 
-- 宠物角色信息（名称、性格）
-- 直接回复与 capability 委托规则
-- 可用 capability 的名称和描述
-- `delegate_capability` 工具的使用约束
+- `mainConversationMessages()` 只返回无 lane 消息。
+- `laneMessages()` 返回 main 基础上下文与当前 lane+runId+delegationId 的私有 transcript。
+- 消息身份由 lane、message ID 和 handoff provenance 决定，不从正文内容推断。
 
-route 节点不是轻量分类器，而是主 orchestrator agent 的一次推理。
+`DelegationSpec` 是向下派发的事实来源。`materializeDelegation()` 确定性地产生两个投影：
 
-它的行为只有两种：
+- initial delegation：main 中一条简短计划；selected lane 中一条 XML
+  `<delegation_briefing>`。
+- continuation：只向原 lane 写入新的 briefing/gap，不重复 main 计划。
 
-1. 直接回复用户，生成自由文本
-2. 调用 `delegate_capability`，给出：
-   - `capability`
-   - `task`
-   - `context_summary`
+XML 只是给执行模型读取的投影，不被 runtime 反向解析。稳定执行规则留在 subagent governing
+prompt；briefing 只承载 task、必要上下文或 continuation gap。
 
-它不再输出五字段 JSON 路由结果。
+### 6.3 announce 与 handoff
 
-### 6.5 orchestrator 与 capability runtime
+subagent 通过 `announceMessageId` 明确交付候选。outcomeDecision 验收完成后：
 
-capability 的 instructions 和 tools 在 subagent 内部生效，不注入 orchestrator。
+1. 把 announce 复制为普通、无 lane 的 main `AIMessage`。
+2. 在 metadata 中记录 `handoffFrom/delegationId/runId/task/announceMessageId`。
+3. 清空该 lane+runId+delegationId 的原 announce 与执行 transcript。
 
-orchestrator 自身不持有任何 capability 的 tools。
+未完成或达到执行限制时不 handoff，lane 保留用于续跑。answer 只读取 main queue，不扫描 lane，
+也不对输出正文做 briefing 文本匹配、重试或替换。缺少当前身份字段的旧 checkpoint 不通过正文
+猜测兼容。
 
-当前版本补充：
+### 6.4 orchestrator 与 capability runtime
 
-- global tools 由 channel 作为动态输入提供
-- capability 节点创建 subagent 时会装配 `global tools + capability tools`
-- direct 路径不创建 subagent，因此不会在 direct 回复阶段调用 global tools
-
-如果 capability runtime 提供了 `middleware`：
-
-- 由 orchestrator 在调用 `createSubagent(...)` 前后执行
-- 作用域仍然局限在当前 capability runtime
-- 不改变 orchestrator 的路由职责
+capability 的 instructions、toolkits、private toolsets 和 middleware 只在 selected subagent 内生效；
+orchestrator decision/answer 节点不持有这些执行工具。host 可以给 selected subagent 额外装配
+受限的 artifact discovery tools，但它们不进入 entryDecision。
 
 ## 7. capability 间数据流
 
 ### 7.1 数据通过 orchestrator 传递
 
-capability 之间不共享 state。数据流转通过 orchestrator 的 messages 自然发生。
+capability 之间不共享私有 transcript。一次 run 可以由 planner 组织多个串行 delegation：
 
-在当前 StateGraph 模型中，每次 graph invoke 只执行一个 capability（或 direct）。多 capability 协作通过多轮对话实现：
+1. capability A 执行当前 task，在自己的 lane 中形成 announce。
+2. outcomeDecision 验收后把 announce handoff 到 main，并清空 A 的 lane。
+3. boundary planner 基于完整 handoff 修订 future tail，materialize 下一个 task。
+4. capabilityDecision 为下一个 task 重新选择 executor，capability B 只看到 main 结论和自己的 briefing。
 
-1. 第一轮消息 → route 判断调用 trend_observe → subagent 执行，返回结果进入 messages
-2. 第二轮消息（包含上轮结果）→ route 判断调用 daily_post → subagent 从 messages 获取热点信息，执行写动态
-
-LLM 作为数据中介，通过 message history 自然传递 capability 之间的信息。
+因此 capability 间传递的是 main handoff 结论与显式 artifact refs，不是另一能力的工具流水。
 
 ### 7.2 业务规则的归属
 
@@ -398,20 +379,20 @@ announce；只有需要结构化数据或大 payload 时才读取 result artifac
 3. capability 代码在折叠前校验 payload，并写入 `kind: "result"` artifact
 4. 写入成功后返回 `CapabilityArtifactRef`，经 artifact sink 进入
    `SubagentResult.artifacts`
-5. orchestrator 将 ref 合入最终 graph state 的 `capabilityArtifacts`
-6. host 在 graph invoke 完成后从 `capabilityArtifacts` 找到目标 ref，再通过
+5. orchestrator 将 ref 合入 graph state 的 `sessionCapabilityArtifacts`
+6. host 在 graph invoke 完成后从 `sessionCapabilityArtifacts` 找到目标 ref，再通过
    artifact store 读取和 parse
 
 ### 8.2.1 多个 result 的选择规则
 
-`capabilityArtifacts` 是全局 ref 索引，不是单个 result 槽。一次 graph
+`sessionCapabilityArtifacts` 是 session 级 ref 索引，不是单个 result 槽。一次 graph
 invoke 里可以有多个 `kind: "result"` artifact：不同 capability 各自写入、
 同一 capability 多次委派、或一个 capability 写入多个结构化产物。
 
 host 读取结构化结果时必须带选择范围，例如：
 
 - 按 `capabilityId` 选择某个 capability 的 result
-- 按 `delegationId` / `turnId` 选择某次执行的 result
+- 按 `delegationId` / `runId` 选择某次执行的 result
 - 按 `schema.name` / `schema.version` 选择某个 contract 的 result
 - 当一个 capability 写多个 result 时，按 `metadata.role` 等小字段区分语义
 
@@ -424,7 +405,7 @@ capability 的“全局 latest result”语义。
 - 它属于 graph invoke 的最终 state，而不是 `runAgent` 的标准返回值
 - chat 场景通常只消费 `reply / messages`
 - task / scheduler 场景如果需要结构化结果，应通过 graph service 读取最终
-  state 中的 `capabilityArtifacts`，再读取对应 artifact 内容
+  state 中的 `sessionCapabilityArtifacts`，再读取对应 artifact 内容
 
 ## 9. graph 构建与运行入口
 
@@ -435,7 +416,7 @@ capability 的“全局 latest result”语义。
 它负责：
 
 - 接收 `OrchestratorConfig`（models, actor?, checkpoint）
-- 构建 StateGraph（route → capability/direct 条件路由）
+- 构建 entry/planner/capability/outcome/answer StateGraph
 - 编译 graph（绑定 checkpointer）
 - 返回已编译的 `OrchestratorGraph`
 
@@ -473,7 +454,7 @@ type AgentRunResult = {
 };
 ```
 
-capability results 不经过 `runAgent` 返回值。需要结构化结果时，应读取最终 graph state 中的 `capabilityArtifacts`，再通过 artifact store 读取对应 `kind: "result"` artifact。
+capability results 不经过 `runAgent` 返回值。需要结构化结果时，应读取最终 graph state 中的 `sessionCapabilityArtifacts`，再通过 artifact store 读取对应 `kind: "result"` artifact。
 
 actor 规则：
 

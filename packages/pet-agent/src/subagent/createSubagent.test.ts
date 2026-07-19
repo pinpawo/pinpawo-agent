@@ -194,6 +194,7 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
   });
 
   assert.equal(result.completionReason, 'natural');
+  assert.equal(result.announceMessageId, result.messages.at(-1)?.id);
   const summary = result.messages.find(
     (message) => message.additional_kwargs?.lc_source === 'summarization',
   );
@@ -327,6 +328,7 @@ test('createSubagent ignores a stop marker that arrives in the input history', a
   });
 
   assert.equal(result.completionReason, 'natural');
+  assert.equal(result.announceMessageId, result.messages.at(-1)?.id);
   // The final message is the fresh model answer, not the stale marker.
   assert.equal(readSubagentGuardStopReason(result.messages.at(-1) as BaseMessage), null);
 });
@@ -350,6 +352,7 @@ test('createSubagent default iteration budget is a soft model-call guard', async
   });
 
   assert.equal(result.completionReason, 'limit_reached');
+  assert.equal(result.announceMessageId, null);
   assert.ok(
     model.callCount > 20,
     `expected the raised default budget to allow many model calls, got ${model.callCount}`,

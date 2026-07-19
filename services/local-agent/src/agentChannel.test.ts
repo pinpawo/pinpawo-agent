@@ -338,6 +338,7 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
     messages: [new AIMessage('final explore evidence')],
     artifacts: [],
     completionReason: 'natural',
+    announceMessageId: null,
   }, {
     capabilityId: 'explore',
     delegationId: 'dg-1',

@@ -129,7 +129,8 @@ export function toolProtocolSafeMessages(messages: BaseMessage[]) {
  * carries its own transcript back; a new task in the same lane gets a fresh
  * delegationId and starts clean — conclusions cross task boundaries via
  * runDelegationSummaries/announces, transcripts don't.
- * Lane messages without a delegationId (legacy checkpoints) are excluded.
+ * A delegation-lane message without a delegationId violates the current
+ * message protocol. Orchestrator-lane messages are outside subagent transcripts.
  * For orchestration decisions, use mainConversationMessages() instead.
  */
 export function laneMessages(
@@ -141,6 +142,10 @@ export function laneMessages(
   return toolProtocolSafeMessages(messages.filter((message) => {
     const messageLane = getMessageLane(message);
     if (!messageLane) return true;
+    if (!isDelegationLane(messageLane)) return false;
+    if (!getMessageDelegationId(message)) {
+      throw new Error(`Lane message ${message.id ?? '(missing id)'} is missing delegationId.`);
+    }
     return messageLane === lane
       && getMessageTurnId(message) === runId
       && getMessageDelegationId(message) === delegationId;
@@ -155,25 +160,7 @@ export function laneMessages(
  * from lane-tagged messages.
  */
 export function mainConversationMessages(messages: BaseMessage[]): BaseMessage[] {
-  return messages.filter((message) =>
-    !getMessageLane(message) && !isDelegationBriefingLikeMessage(message));
-}
-
-/**
- * Compatibility filter for briefing messages written before they were scoped
- * to delegation lanes. Metadata is preferred, while the text-prefix check also
- * catches early untagged checkpoints observed in production traces.
- */
-export function isDelegationBriefingLikeMessage(message: BaseMessage): boolean {
-  if (message._getType() !== 'ai') return false;
-  // An accepted handoff is a first-class main AIMessage. Its deliverable text
-  // may legitimately quote or even begin with the legacy briefing marker; the
-  // provenance wins over content-shape compatibility filtering.
-  if (getMessageHandoffSource(message)) return false;
-  if (getPinpetMeta(message).source === 'delegation_briefing') return true;
-  const text = readMessageText(message).trimStart();
-  return /^【委派简报(?:·继续)?】/.test(text)
-    || /^<delegation_briefing(?:\s|>)/.test(text);
+  return messages.filter((message) => !getMessageLane(message));
 }
 
 export const routeMessages = mainConversationMessages;
@@ -183,16 +170,12 @@ export const routeMessages = mainConversationMessages;
  * Reconcile a subagent result with its input transcript. Messages removed by
  * child-state summarization are removed from the matching delegation lane;
  * unlaned main-conversation input is never removed. New messages are stamped
- * with lane/runId/delegationId, and the deliverable is marked as announce.
+ * with lane/runId/delegationId. The subagent runtime explicitly identifies the
+ * deliverable by message id; this function does not infer it from message text.
  * It does NOT judge
  * completed/progress — that judgment is the orchestrator's (see handoff). The
  * completionReason is attached to the announce message as a stop-reason hint for
  * the decision node.
- *
- * Announce selection: prefer the last tool-call-free AI message with text (the
- * natural deliverable). As a defensive fallback, allow the last AI/tool message
- * with text as a best-effort deliverable; for limit_reached runs we avoid tool
- * fallback because interrupted tool output is more likely to be protocol noise.
  */
 export function tagNewLaneMessages(
   messages: BaseMessage[],
@@ -203,6 +186,7 @@ export function tagNewLaneMessages(
   reportMeta?: {
     delegationId?: string | null;
     task?: string | null;
+    announceMessageId?: string | null;
   },
 ) {
   const existingRefs = new Set(existingMessages);
@@ -232,39 +216,12 @@ export function tagNewLaneMessages(
     setPinpetMeta(message, { lane, runId, delegationId: reportMeta?.delegationId ?? null });
   }
 
-  // Find the announce message: prefer the last tool-call-free AI message with
-  // text; fall back to the last AI/tool message with text.
-  let announceIndex = -1;
-  for (let i = nextMessages.length - 1; i >= 0; i--) {
-    if (
-      nextMessages[i]._getType() === 'ai'
-      && !messageHasToolCalls(nextMessages[i])
-      && getPinpetMeta(nextMessages[i]).synthetic !== true
-      && readMessageText(nextMessages[i])
-    ) {
-      announceIndex = i;
-      break;
-    }
-  }
-  const allowFallbackToRawMessage = completionReason !== 'limit_reached';
-  if (announceIndex < 0 && allowFallbackToRawMessage) {
-    for (let i = nextMessages.length - 1; i >= 0; i--) {
-      const type = nextMessages[i]._getType();
-      if (
-        (type === 'ai' || type === 'tool')
-        && !messageHasToolCalls(nextMessages[i])
-        && getPinpetMeta(nextMessages[i]).synthetic !== true
-        && readMessageText(nextMessages[i])
-      ) {
-        announceIndex = i;
-        break;
-      }
-    }
-  }
-
-  if (announceIndex >= 0) {
-    setMessageIsAnnounce(nextMessages[announceIndex]);
-    setPinpetMeta(nextMessages[announceIndex], {
+  const announceMessage = reportMeta?.announceMessageId
+    ? nextMessages.find((message) => message.id === reportMeta.announceMessageId)
+    : null;
+  if (announceMessage) {
+    setMessageIsAnnounce(announceMessage);
+    setPinpetMeta(announceMessage, {
       delegationId: reportMeta?.delegationId ?? null,
       task: reportMeta?.task ?? null,
       completionReason,
@@ -283,17 +240,33 @@ export type HandoffSource = {
   delegationId: string;
   runId: string;
   task: string | null;
+  announceMessageId: string;
 };
 
 export function getMessageHandoffSource(message: BaseMessage): HandoffSource | null {
   const meta = getPinpetMeta(message);
   const handoffFrom = meta.handoffFrom;
-  if (typeof handoffFrom !== 'string') return null;
+  const delegationId = meta.delegationId;
+  const runId = meta.runId;
+  const announceMessageId = meta.announceMessageId;
+  if (
+    typeof handoffFrom !== 'string'
+    || !isDelegationLane(handoffFrom as PinpetMessageLane)
+    || typeof delegationId !== 'string'
+    || !delegationId
+    || typeof runId !== 'string'
+    || !runId
+    || typeof announceMessageId !== 'string'
+    || !announceMessageId
+  ) {
+    return null;
+  }
   return {
     handoffFrom: handoffFrom as MessageLane,
-    delegationId: typeof meta.delegationId === 'string' ? meta.delegationId : '',
-    runId: typeof meta.runId === 'string' ? meta.runId : '',
+    delegationId,
+    runId,
     task: typeof meta.task === 'string' ? meta.task : null,
+    announceMessageId,
   };
 }
 
@@ -330,6 +303,10 @@ export function buildSubagentHandoff(params: {
   });
   const announceText = announceMessage ? readMessageText(announceMessage) : '';
   if (!announceText.trim()) return null;
+  const announceMessageId = announceMessage?.id;
+  if (!announceMessageId) {
+    throw new Error('Delegation announce is missing the required message id.');
+  }
 
   const task = announceMessage ? getMessageDelegatedTask(announceMessage) : null;
   const artifactRefFooter = params.artifactRefs && params.artifactRefs.length > 0
@@ -347,10 +324,9 @@ export function buildSubagentHandoff(params: {
       if (getMessageLane(message) !== params.lane) return [];
       if (getMessageTurnId(message) !== params.runId) return [];
       if (getMessageDelegationId(message) !== params.delegationId) return [];
-      // Legacy checkpointed lane messages may predate message ids; LangGraph
-      // RemoveMessage cannot target them, so those old messages are left as
-      // residual history instead of risking an invalid delete.
-      if (!message.id) return [];
+      if (!message.id) {
+        throw new Error('Delegation lane message is missing the required message id.');
+      }
       return [new RemoveMessage({ id: message.id }) as BaseMessage];
     })
     : [];
@@ -368,6 +344,7 @@ export function buildSubagentHandoff(params: {
     delegationId: params.delegationId,
     runId: params.runId,
     task,
+    announceMessageId,
   });
 
   return [

@@ -32,6 +32,7 @@ import {
   SUBAGENT_CONTEXT_SUMMARY_PROMPT,
 } from './prompts/templates/contextSummary.prompt';
 import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
+import { messageHasToolCalls } from '../utils/messages';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -273,6 +274,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
       },
     );
     latestMessages = readResultMessages(result) ?? latestMessages;
+    ensureSubagentMessageIds(latestMessages);
 
     // A guard may have gracefully ended the agent by appending its stop
     // notice as the FINAL message (via Command goto END). That is a clean "limit
@@ -281,10 +283,16 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // Summarization may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
     const stoppedByGuard = lastMessage ? isSubagentGuardStopMessage(lastMessage) : false;
+    const announceMessageId = !stoppedByGuard
+      && lastMessage?._getType() === 'ai'
+      && !messageHasToolCalls(lastMessage)
+      ? lastMessage.id ?? null
+      : null;
     return {
       messages: latestMessages,
       artifacts: inputState.artifacts ?? [],
       completionReason: stoppedByGuard ? 'limit_reached' : 'natural',
+      announceMessageId,
     };
   } catch (err) {
     // The agent's hard recursion breaker (recursionLimit) fired. The iteration
@@ -295,6 +303,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
         messages: latestMessages,
         artifacts: inputState.artifacts ?? [],
         completionReason: 'limit_reached',
+        announceMessageId: null,
       };
     }
     throw err;

@@ -140,6 +140,7 @@ export function createGeneralNode(params: {
       {
         delegationId: runNextDelegation.id,
         task: runNextDelegation.task,
+        announceMessageId: result.announceMessageId,
       },
     );
     const delegationAnnounce = readLatestAnnounce(outputMessages, { delegationId: runNextDelegation.id });

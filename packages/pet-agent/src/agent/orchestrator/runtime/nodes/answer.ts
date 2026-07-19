@@ -2,7 +2,6 @@ import { AIMessage, SystemMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   getMessageHandoffSource,
-  isDelegationBriefingLikeMessage,
   mainConversationMessages,
   readLatestAnnounceCompletionReason,
   stampMessageCreatedAtUtc,
@@ -52,23 +51,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
         : []),
       ...(terminalContext ? [new SystemMessage(terminalContext)] : []),
     ];
-    let response = await config.models.act.invoke(answerMessages, runnableConfig);
-    if (isDelegationBriefingLikeMessage(response)) {
-      response = await config.models.act.invoke([
-        ...answerMessages,
-        new SystemMessage([
-          '上一候选回复因使用内部 delegation briefing 格式（<delegation_briefing> 或旧版【委派简报】）而被拒绝，不能发送给用户。',
-          '请重新生成普通的用户可见回复；直接回答当前请求，不要输出调度消息、委派简报或内部协议。',
-        ].join('\n')),
-      ], runnableConfig);
-    }
-    if (isDelegationBriefingLikeMessage(response)) {
-      const fallback = new AIMessage('刚才的回复混入了内部调度格式，已被阻止发送。请再试一次。');
-      return {
-        messages: [stampMessageCreatedAtUtc(fallback)],
-        ...buildAnswerCleanup(),
-      };
-    }
+    const response = await config.models.act.invoke(answerMessages, runnableConfig);
     if (!readMessageText(response).trim()) {
       const fallback = new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。');
       return {

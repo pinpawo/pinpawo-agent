@@ -13,7 +13,8 @@ subagent / capability 运行
   ├─ 委派结束时，`buildSubagentHandoff` 将当前 announce 复制到主队列
   └─ 主队列 announce copy 在正文末尾追加该委派的 `artifact refs` 预览
 
-决策节点默认继续使用短引用（<run> / <lane> / <artifact uri> / preview），但任务级归属信息优先通过：
+entryDecision 和 capabilityPlanner 不接收 session-wide artifact inventory。当前 task 的
+outcomeDecision 可以使用该 active delegation 的 bounded refs，任务级归属信息通过：
 
 - `currentTaskContext`
 - `subagent_announce`（含当前任务 `artifact refs`）
@@ -29,7 +30,7 @@ subagent / capability 运行
   - 不关心产物内部字节。
   - 注入 `artifactStore`，并在执行时提供 `recordCapabilityArtifact`。
   - 维护 `sessionCapabilityArtifacts`（跨 turn 不清空）。
-  - 决策节点只注入简短 `ref` 到系统 prompt。
+  - 只在 active delegation 的 outcomeDecision 注入当前任务的 bounded refs；不把 session inventory 注入 entryDecision。
 
 - **能力侧（packages/local-agent/src/capabilities/*）**
   - 在 `afterRun` 等确定性收尾边界写入 artifact。

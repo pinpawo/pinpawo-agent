@@ -261,7 +261,7 @@ test('answer prompt owns the user-visible reply', () => {
   });
 
   assert.match(prompt, /主对话中的 handoff 结论/);
-  assert.match(prompt, /忽略主对话中的委派简报/);
+  assert.doesNotMatch(prompt, /delegation_briefing|【委派简报】|忽略主对话中的委派简报/);
   assert.match(prompt, /不要把紧邻的执行器\/subagent 结果原文整体复制一遍/);
   assert.match(prompt, /明确提出当前需要用户回答的问题/);
   assert.match(prompt, /不要输出 JSON、动作字段/);

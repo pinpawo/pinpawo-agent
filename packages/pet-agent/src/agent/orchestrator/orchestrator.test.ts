@@ -2001,7 +2001,11 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
         autoReviewMessages = messages;
         return {
           decision: 'authorize',
+          risk_level: 'low',
+          intent_alignment: 'explicit',
+          scope_assessment: 'workdir',
           reason: 'Small scoped file write requested by the user.',
+          concerns: [],
           confidence: 'high',
         };
       },
@@ -2011,7 +2015,12 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   const resources = await resolveToolkitResources(toolkits, ['local'], {
     models: { act: autoModel },
     actor: testActor,
-    messages: [new HumanMessage('write notes.md')],
+    messages: [new HumanMessage('subagent context')],
+    reviewContext: {
+      userRequests: ['write notes.md in the repository'],
+      task: 'Write the requested notes file',
+      workdir: '/repo',
+    },
     reviewCapabilities: {
       humanReview: false,
       sessionAuthorization: false,
@@ -2031,7 +2040,16 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.equal(callCount, 1);
   assert.equal(autoReviewCount, 1);
   const systemPrompt = (autoReviewMessages as Array<{ content?: unknown }>)[0]?.content;
-  assert.match(String(systemPrompt), /JSON object/);
+  assert.match(String(systemPrompt), /untrusted evidence/);
+  assert.match(String(systemPrompt), /Only user_requests records original user authorization intent/);
+  assert.match(String(systemPrompt), /Decision policy:/);
+  const reviewPrompt = String((autoReviewMessages as Array<{ content?: unknown }>)[1]?.content);
+  assert.match(reviewPrompt, /<derived_task authority="none">[\s\S]*Write the requested notes file/);
+  assert.match(reviewPrompt, /<workdir authority="runtime">[\s\S]*\/repo/);
+  assert.match(reviewPrompt, /write notes\.md in the repository/);
+  assert.doesNotMatch(reviewPrompt, /subagent context/);
+  assert.doesNotMatch(reviewPrompt, /Decision policy:/);
+  assert.doesNotMatch(reviewPrompt, /Test actor/);
   assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
 });
 
@@ -2075,7 +2093,11 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
         autoReviewMessages = messages;
         return {
           decision: 'authorize',
+          risk_level: 'low',
+          intent_alignment: 'explicit',
+          scope_assessment: 'workdir',
           reason: 'Both writes are narrow and expected.',
+          concerns: [],
           confidence: 'high',
         };
       },
@@ -2086,6 +2108,11 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
     models: { act: autoModel },
     actor: testActor,
     messages: [new HumanMessage('write both files')],
+    reviewContext: {
+      userRequests: ['write both files'],
+      task: 'Write both requested files',
+      workdir: '/repo',
+    },
     reviewCapabilities: {
       humanReview: false,
       sessionAuthorization: false,
@@ -2115,9 +2142,9 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
   assert.equal(secondCallCount, 1);
   assert.equal(autoReviewCount, 1);
   const reviewPrompt = String((autoReviewMessages as Array<{ content?: unknown }>)[1]?.content);
-  assert.match(reviewPrompt, /Batch size: 2/);
-  assert.match(reviewPrompt, /Tool: first_write/);
-  assert.match(reviewPrompt, /Tool: second_write/);
+  assert.match(reviewPrompt, /<batch_size>2<\/batch_size>/);
+  assert.match(reviewPrompt, /local\.first_write/);
+  assert.match(reviewPrompt, /local\.second_write/);
   assert.match(reviewPrompt, /a\.txt/);
   assert.match(reviewPrompt, /b\.txt/);
   const authorizationEvent = runtimeEvents[0] as {
@@ -2153,7 +2180,12 @@ test('global review policy auto_authorization requires human authorization when 
     withStructuredOutput: () => ({
       invoke: async () => ({
         decision: 'require_authorization',
+        risk_level: 'medium',
+        intent_alignment: 'unclear',
+        scope_assessment: 'broad',
         reason: 'The write looks too broad.',
+        concerns: ['Broad rewrite'],
+        confidence: 'high',
       }),
     }),
   } as unknown as AgentModels['act'];
@@ -2162,6 +2194,11 @@ test('global review policy auto_authorization requires human authorization when 
     models: { act: autoModel },
     actor: testActor,
     messages: [new HumanMessage('rewrite the project')],
+    reviewContext: {
+      userRequests: ['rewrite the project'],
+      task: 'Rewrite the project',
+      workdir: '/repo',
+    },
     reviewCapabilities: {
       humanReview: false,
       sessionAuthorization: false,

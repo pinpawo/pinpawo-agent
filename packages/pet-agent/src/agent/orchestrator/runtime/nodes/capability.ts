@@ -37,6 +37,7 @@ import {
   readCapabilityNameFromLane,
   resolveDelegationTranscriptRunId,
 } from '../decisions/delegationLifecycle';
+import { selectReviewUserRequests } from '../../review/reviewContext';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -95,6 +96,11 @@ export function createCapabilityNode(params: {
       models: config.models,
       actor,
       messages: scopedMessages,
+      reviewContext: {
+        userRequests: selectReviewUserRequests(state.messages),
+        task: runNextDelegation.task,
+        workdir: workdir ?? null,
+      },
       threadId,
       capabilityId: capability.name,
       resultSchema: capability.resultSchema,

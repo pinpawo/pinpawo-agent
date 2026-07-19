@@ -113,6 +113,27 @@ test('local websocket transport keeps one peer identity through message and clos
         Authorization: 'Bearer secret',
       },
     });
+    const pong = waitForWebSocketMessage(ws);
+    ws.send(JSON.stringify({ type: 'ping' }));
+    assert.deepEqual(await pong, { type: 'pong' });
+
+    const malformedError = waitForWebSocketMessage(ws);
+    ws.send(JSON.stringify({
+      type: 'chat_request',
+      requestId: 'chat-old',
+      message: 'Approve',
+      resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
+    }));
+    assert.deepEqual(await malformedError, {
+      type: 'event',
+      requestId: 'chat-old',
+      event: {
+        type: 'error',
+        requestId: 'chat-old',
+        message: '客户端消息协议不兼容或格式无效，请升级客户端后重试。',
+      },
+    });
+
     ws.send(JSON.stringify({
       type: 'chat_request',
       requestId: 'chat-1',
@@ -143,6 +164,7 @@ function createHandlers(): LocalServerPeerHandlers {
     onRuntimeConfigUpdate: () => undefined,
     onClose: () => undefined,
     log: () => undefined,
+    logWarn: () => undefined,
   };
 }
 
@@ -176,6 +198,14 @@ function openWebSocket(url: string, options?: ClientOptions) {
       resolve(ws);
     });
     ws.once('error', reject);
+  });
+}
+
+function waitForWebSocketMessage(ws: WebSocket) {
+  return new Promise<unknown>((resolve) => {
+    ws.once('message', (data) => {
+      resolve(JSON.parse(data.toString()) as unknown);
+    });
   });
 }
 

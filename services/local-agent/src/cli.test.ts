@@ -56,15 +56,33 @@ test('local agent CLI runs setup guide handler', async () => {
 });
 
 test('local agent CLI applies run workdir option before handler', async () => {
-  let received: string | undefined;
+  let received: { workdir?: string; stdio: boolean } | null = null;
   const program = createLocalAgentCli({
     runAgent: (options) => {
-      received = options.workdir;
+      received = options;
     },
   });
 
   await program.parseAsync(['node', 'pinpawo-agent', 'run', '--workdir', '/tmp/pinpawo-workdir']);
-  assert.equal(received, '/tmp/pinpawo-workdir');
+  assert.deepEqual(received, {
+    workdir: '/tmp/pinpawo-workdir',
+    stdio: false,
+  });
+});
+
+test('local agent CLI enables the single-peer JSONL stdio transport', async () => {
+  let received: { workdir?: string; stdio: boolean } | null = null;
+  const program = createLocalAgentCli({
+    runAgent: (options) => {
+      received = options;
+    },
+  });
+
+  await program.parseAsync(['node', 'pinpawo-agent', 'run', '--stdio']);
+  assert.deepEqual(received, {
+    workdir: undefined,
+    stdio: true,
+  });
 });
 
 test('local agent CLI passes studio migrate options to the handler', async () => {

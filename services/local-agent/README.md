@@ -81,12 +81,22 @@ pinpawo-agent login
 pinpawo-agent setup
 pinpawo-agent actor
 pinpawo-agent run
+pinpawo-agent run --stdio
 pinpawo-agent tui
 pinpawo-agent detect
 pinpawo-agent capability list
 pinpawo-agent capability validate ./my-capability
 pinpawo-agent capability install ./my-capability
 ```
+
+`pinpawo-agent run --stdio` starts one logical local-agent peer over newline-delimited
+JSON. It reads one `LocalAgentClientMessage` per stdin line and writes one
+`LocalAgentServerMessage` per stdout line. Stdout is reserved for protocol messages;
+diagnostics go to stderr. This stage carries live messages only: the existing HTTP
+snapshot/session endpoints are not started in stdio mode, pending the separate
+snapshot/session command boundary decision in #386. Stdin EOF closes the peer and
+aborts its active work before the process exits. Input framing rejects a JSONL line
+larger than 8 MiB so malformed input cannot grow process memory without bound.
 
 ## Publishing
 

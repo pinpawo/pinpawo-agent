@@ -4,9 +4,12 @@ import { isToolProtocolHistoryError, LocalServerChatHandler } from './localServe
 import { InflightRequestController } from './inflightRequestController';
 import type { LocalServerPeer } from './localServerPeer';
 
-function createFakePeer(sent: unknown[] = []): LocalServerPeer {
+function createFakePeer(
+  sent: unknown[] = [],
+  isConnected: () => boolean = () => true,
+): LocalServerPeer {
   return {
-    isConnected: () => true,
+    isConnected,
     send: (message) => {
       sent.push(message);
       return true;
@@ -378,6 +381,51 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
       },
     },
   });
+});
+
+test('handleHumanReviewResponse releases a recovered review when its peer disconnects', async () => {
+  let connected = false;
+  const handleChatCalls: unknown[] = [];
+  const fakePeer = createFakePeer([], () => connected);
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      readActivePendingReview: async () => ({
+        sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
+        review: {
+          id: 'review-current',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        },
+      }),
+    } as never,
+    inflightRequests: new InflightRequestController({
+      forceInterruptMs: 1000,
+      emitOperation: () => {},
+      sendControl: () => {},
+    }),
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (handler as any).runChatRequest = async (...args: unknown[]) => {
+    handleChatCalls.push(args);
+  };
+  const message = {
+    type: 'human_review_response' as const,
+    requestId: 'req-1',
+    reviewId: 'review-current',
+    selectedOptionId: 'approve',
+  };
+
+  await handler.handleHumanReviewResponse(fakePeer, message, { actorId: 'pet-1' } as never);
+  assert.equal(handleChatCalls.length, 0);
+
+  connected = true;
+  await handler.handleHumanReviewResponse(fakePeer, message, { actorId: 'pet-1' } as never);
+  assert.equal(handleChatCalls.length, 1);
 });
 
 test('buildReviewActionSnapshot exposes routeable review action request ids', () => {

@@ -24,9 +24,9 @@ import { buildLocalHttpRuntimeProjection } from './localConfigProjection';
 type LocalHttpHandlerOptions = {
   authToken: string;
   loadSnapshot: () => Promise<unknown>;
-  listSessions: () => Promise<Array<Record<string, unknown>>>;
+  listSessions: () => Promise<unknown[]>;
   resumeSession: (sessionId: string) => Promise<{
-    session: Record<string, unknown>;
+    session: unknown;
     snapshot: unknown;
   }>;
   updateCapabilities?: (patch: LocalServerCapabilityStatePatch) => LocalServerDeps;

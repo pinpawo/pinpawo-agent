@@ -246,6 +246,38 @@ test('parseLocalAgentClientMessage accepts runtime config updates for built-in r
   );
 });
 
+test('parseLocalAgentClientMessage accepts explicit session request messages', () => {
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'session.snapshot.get',
+      requestId: 'snapshot-1',
+    })),
+    { type: 'session.snapshot.get', requestId: 'snapshot-1' },
+  );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'session.list',
+      requestId: 'sessions-1',
+    })),
+    { type: 'session.list', requestId: 'sessions-1' },
+  );
+  assert.deepEqual(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'session.resume',
+      requestId: 'resume-1',
+      sessionId: 'chat:one',
+    })),
+    { type: 'session.resume', requestId: 'resume-1', sessionId: 'chat:one' },
+  );
+  assert.equal(
+    parseLocalAgentClientMessage(JSON.stringify({
+      type: 'session.resume',
+      requestId: 'resume-1',
+    })),
+    null,
+  );
+});
+
 test('parseLocalAgentServerMessage rejects legacy server messages by default', () => {
   assert.equal(
     parseLocalAgentServerMessage(JSON.stringify({
@@ -256,6 +288,76 @@ test('parseLocalAgentServerMessage rejects legacy server messages by default', (
       input: '{"path":"README.md"}',
     })),
     null,
+  );
+});
+
+test('parseLocalAgentServerMessage accepts session results and validates resumed identity', () => {
+  const snapshot = {
+    version: 3,
+    session: {
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+    },
+  };
+  const session = {
+    id: 'chat:one',
+    kind: 'chat',
+    title: 'One',
+    messageCount: 2,
+    createdAt: '2026-07-01T00:00:00.000Z',
+    updatedAt: '2026-07-01T00:01:00.000Z',
+    active: true,
+  };
+
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'session.snapshot.result',
+      requestId: 'snapshot-1',
+      snapshot,
+    })),
+    { type: 'session.snapshot.result', requestId: 'snapshot-1', snapshot },
+  );
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'session.list.result',
+      requestId: 'sessions-1',
+      sessions: [session],
+    })),
+    { type: 'session.list.result', requestId: 'sessions-1', sessions: [session] },
+  );
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'session.resume.result',
+      requestId: 'resume-1',
+      session,
+      snapshot,
+    })),
+    { type: 'session.resume.result', requestId: 'resume-1', session, snapshot },
+  );
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'session.resume.result',
+      requestId: 'resume-1',
+      session: { ...session, id: 'chat:other' },
+      snapshot,
+    })),
+    null,
+  );
+  assert.deepEqual(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'session.error',
+      requestId: 'resume-1',
+      operation: 'resume',
+      message: 'session not found',
+    })),
+    {
+      type: 'session.error',
+      requestId: 'resume-1',
+      operation: 'resume',
+      message: 'session not found',
+    },
   );
 });
 

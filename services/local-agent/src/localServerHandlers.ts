@@ -3,9 +3,16 @@ import { FileStudioDueRunStore } from '@pinpawo/pet-agent';
 import { LocalAgentGraphService } from './agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
 import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
+import type {
+  LocalAgentSessionSummary,
+} from './localAgentSession';
+import type {
+  LocalAgentSessionServerMessage,
+} from './localAgentProtocol';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
 import type { LocalServerPeerHandlers } from './localServerMessageDispatcher';
+import { LocalServerSessionCommandQueue } from './localServerSessionCommandQueue';
 import { LocalServerChatHandler } from './localServerChatHandler';
 import { LocalServerStudioHandler } from './localServerStudioHandler';
 import { LocalServerStudioReviewRouter } from './localServerStudioReviews';
@@ -28,10 +35,27 @@ export type LocalServerHandlers = {
   close: () => void;
 };
 
+type SessionSummarySource = Pick<
+  LocalAgentSessionSummary,
+  'id' | 'title' | 'messageCount' | 'createdAt' | 'updatedAt' | 'active'
+>;
+
+function projectChatSessionSummary(session: SessionSummarySource): LocalAgentSessionSummary {
+  return {
+    id: session.id,
+    kind: 'chat',
+    title: session.title,
+    messageCount: session.messageCount,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    active: session.active,
+  };
+}
+
 /**
  * Compose the shared local-agent handlers once, then attach any transport at
- * the outer boundary. HTTP remains available to the WebSocket server until
- * the snapshot/session command boundary is settled separately.
+ * the outer boundary. HTTP endpoints and stdio session commands call the same
+ * checkpoint-backed operations below.
  */
 export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHandlers {
   const runtimeDeps = createLocalServerRuntimeDepsStore(deps);
@@ -72,28 +96,107 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
     },
     studioDueRunScheduler,
   });
+  const sessionCommands = new LocalServerSessionCommandQueue();
+
+  const loadSnapshot = async () => {
+    const requestDeps = runtimeDeps.get();
+    const checkpoint = await tuiSessions.readActiveCheckpointPoint(requestDeps);
+    const pendingReview = chatHandler.buildReviewActionSnapshot(
+      requestDeps,
+      checkpoint.pendingReview,
+    );
+    return buildLocalAgentSessionSnapshot({
+      sessionId: checkpoint.sessionId,
+      kind: 'chat',
+      messages: checkpoint.messages,
+      deps: requestDeps,
+      pendingReview,
+    });
+  };
+
+  const listSessions = async () => {
+    const sessions = await tuiSessions.listSessions(runtimeDeps.get());
+    return sessions.map(projectChatSessionSummary);
+  };
+
+  const resumeSession = async (sessionId: string) => {
+    const requestDeps = runtimeDeps.get();
+    const result = await tuiSessions.resumeSession(requestDeps, sessionId);
+    const pendingReview = chatHandler.buildReviewActionSnapshot(
+      requestDeps,
+      result.pendingReview,
+    );
+    return {
+      session: projectChatSessionSummary(result.session),
+      snapshot: buildLocalAgentSessionSnapshot({
+        sessionId: result.session.id,
+        kind: 'chat',
+        messages: result.messages,
+        deps: requestDeps,
+        pendingReview,
+      }),
+    };
+  };
+
+  const respondToSessionRequest = async (
+    peer: LocalServerPeer,
+    requestId: string,
+    operation: 'snapshot' | 'list' | 'resume',
+    load: () => Promise<LocalAgentSessionServerMessage>,
+  ) => {
+    try {
+      peer.send(await load());
+    } catch (error) {
+      peer.send({
+        type: 'session.error',
+        requestId,
+        operation,
+        message: error instanceof Error ? error.message : `${operation} failed`,
+      });
+    }
+  };
+
+  const afterSessionCommands = async (
+    peer: LocalServerPeer,
+    admit: () => Promise<void>,
+  ) => {
+    await sessionCommands.waitForIdle(peer);
+    if (!peer.isConnected()) {
+      return;
+    }
+    await admit();
+  };
 
   const peerHandlers: LocalServerPeerHandlers = {
-    onChatRequest: (client, message) => chatHandler.handleChatRequest(
+    onChatRequest: (client, message) => afterSessionCommands(
       client,
-      message,
-      runtimeDeps.get(),
+      () => chatHandler.handleChatRequest(
+        client,
+        message,
+        runtimeDeps.get(),
+      ),
     ),
     onStudioRequest: (client, message) => studioHandler.handleStudioRequest(
       client,
       message,
       runtimeDeps.get(),
     ),
-    onHumanReviewResponse: (client, message) => {
+    onHumanReviewResponse: async (client, message) => {
       if (studioHandler.routeHumanReviewResponse(client, message)) {
         return;
       }
-      return chatHandler.handleHumanReviewResponse(client, message, runtimeDeps.get());
+      return afterSessionCommands(
+        client,
+        () => chatHandler.handleHumanReviewResponse(client, message, runtimeDeps.get()),
+      );
     },
-    onReviewCancel: (client, message) => chatHandler.handleReviewCancel(
+    onReviewCancel: (client, message) => afterSessionCommands(
       client,
-      message,
-      runtimeDeps.get(),
+      () => chatHandler.handleReviewCancel(
+        client,
+        message,
+        runtimeDeps.get(),
+      ),
     ),
     onRunInterrupt: (client, message) => {
       const inflight = chatHandler.handleRunInterrupt(client, message);
@@ -112,7 +215,52 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
       });
       console.log(`[local-server] global review policy set to ${message.globalReviewPolicyMode}`);
     },
+    onSessionSnapshotGet: (client, message) => sessionCommands.enqueue(
+      client,
+      () => respondToSessionRequest(
+        client,
+        message.requestId,
+        'snapshot',
+        async () => ({
+          type: 'session.snapshot.result',
+          requestId: message.requestId,
+          snapshot: await loadSnapshot(),
+        }),
+      ),
+    ),
+    onSessionList: (client, message) => sessionCommands.enqueue(
+      client,
+      () => respondToSessionRequest(
+        client,
+        message.requestId,
+        'list',
+        async () => ({
+          type: 'session.list.result',
+          requestId: message.requestId,
+          sessions: await listSessions(),
+        }),
+      ),
+    ),
+    onSessionResume: (client, message) => sessionCommands.enqueue(
+      client,
+      () => respondToSessionRequest(
+        client,
+        message.requestId,
+        'resume',
+        async () => {
+          if (inflightRequests.get(client)) {
+            throw new Error('cannot resume a session while a run is active');
+          }
+          return {
+            type: 'session.resume.result',
+            requestId: message.requestId,
+            ...await resumeSession(message.sessionId),
+          };
+        },
+      ),
+    ),
     onClose: (client) => {
+      sessionCommands.clear(client);
       inflightRequests.abortAndClear(client);
       studioHandler.rejectDisconnected(client);
     },
@@ -129,41 +277,9 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
       const requestDeps = runtimeDeps.get();
       return handleLocalHttpRequest(req, res, requestDeps, {
         authToken,
-        loadSnapshot: async () => {
-          const checkpoint = await tuiSessions.readActiveCheckpointPoint(requestDeps);
-          const pendingReview = chatHandler.buildReviewActionSnapshot(
-            requestDeps,
-            checkpoint.pendingReview,
-          );
-          return buildLocalAgentSessionSnapshot({
-            sessionId: checkpoint.sessionId,
-            kind: 'chat',
-            messages: checkpoint.messages,
-            deps: requestDeps,
-            pendingReview,
-          });
-        },
-        listSessions: () => tuiSessions.listSessions(requestDeps),
-        resumeSession: async (sessionId) => {
-          const result = await tuiSessions.resumeSession(requestDeps, sessionId);
-          const pendingReview = chatHandler.buildReviewActionSnapshot(
-            requestDeps,
-            result.pendingReview,
-          );
-          return {
-            session: {
-              ...result.session,
-              kind: 'chat',
-            },
-            snapshot: buildLocalAgentSessionSnapshot({
-              sessionId: result.session.id,
-              kind: 'chat',
-              messages: result.messages,
-              deps: requestDeps,
-              pendingReview,
-            }),
-          };
-        },
+        loadSnapshot,
+        listSessions,
+        resumeSession,
         updateCapabilities: (patch) => runtimeDeps.updateCapabilities(patch),
       });
     },

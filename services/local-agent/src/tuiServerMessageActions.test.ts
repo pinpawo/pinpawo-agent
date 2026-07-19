@@ -28,6 +28,21 @@ test('buildTuiActionsFromServerMessage ignores pong messages', () => {
   );
 });
 
+test('buildTuiActionsFromServerMessage keeps session command responses out of reducers', () => {
+  assert.deepEqual(
+    buildTuiActionsFromServerMessage({
+      type: 'session.error',
+      requestId: 'resume-1',
+      operation: 'resume',
+      message: 'session not found',
+    }, {
+      now: 1000,
+      createMessage: messages(),
+    }),
+    { actions: [], clearInterrupt: false },
+  );
+});
+
 test('buildTuiActionsFromServerMessage maps local-agent events to event.received actions', () => {
   const message = {
     type: 'event' as const,

@@ -12,6 +12,14 @@ import type {
   LocalAgentOperationRaw,
   LocalAgentRuntimeEvent,
 } from './events/localAgentRuntimeEvent';
+import type {
+  LocalAgentSessionSnapshot,
+  LocalAgentSessionSummary,
+} from './localAgentSession';
+import {
+  parseLocalAgentSessionSnapshot,
+  parseLocalAgentSessionSummary,
+} from './localAgentSessionParser';
 
 export type ChatRequestMessage = {
   type: 'chat_request';
@@ -63,6 +71,22 @@ export type HumanReviewResponseMessage = {
   decisions?: ReviewResponse[];
 };
 
+export type SessionSnapshotGetMessage = {
+  type: 'session.snapshot.get';
+  requestId: string;
+};
+
+export type SessionListMessage = {
+  type: 'session.list';
+  requestId: string;
+};
+
+export type SessionResumeMessage = {
+  type: 'session.resume';
+  requestId: string;
+  sessionId: string;
+};
+
 export type LocalAgentClientMessage =
   | ChatRequestMessage
   | RunInterruptMessage
@@ -71,6 +95,9 @@ export type LocalAgentClientMessage =
   | RuntimeConfigUpdateMessage
   | StudioRequestMessage
   | HumanReviewResponseMessage
+  | SessionSnapshotGetMessage
+  | SessionListMessage
+  | SessionResumeMessage
   | { type: 'ping' };
 
 export type LocalAgentRuntimeEventEnvelope = {
@@ -97,9 +124,34 @@ export type LocalAgentControlServerMessage =
     }
   | { type: 'studio_error'; requestId: string; message: string };
 
+export type LocalAgentSessionServerMessage =
+  | {
+      type: 'session.snapshot.result';
+      requestId: string;
+      snapshot: LocalAgentSessionSnapshot;
+    }
+  | {
+      type: 'session.list.result';
+      requestId: string;
+      sessions: LocalAgentSessionSummary[];
+    }
+  | {
+      type: 'session.resume.result';
+      requestId: string;
+      session: LocalAgentSessionSummary;
+      snapshot: LocalAgentSessionSnapshot;
+    }
+  | {
+      type: 'session.error';
+      requestId: string;
+      operation: 'snapshot' | 'list' | 'resume';
+      message: string;
+    };
+
 export type LocalAgentServerMessage =
   | LocalAgentRuntimeEventEnvelope
-  | LocalAgentControlServerMessage;
+  | LocalAgentControlServerMessage
+  | LocalAgentSessionServerMessage;
 
 export type LocalAgentClientMessageEnvelope = {
   type?: string;
@@ -343,6 +395,17 @@ export function parseLocalAgentClientMessage(raw: unknown): LocalAgentClientMess
   if (!record) return null;
   const type = readString(record, 'type');
   if (type === 'ping') return { type: 'ping' };
+  if (type === 'session.snapshot.get' || type === 'session.list') {
+    if (!hasOnlyKeys(record, ['type', 'requestId'])) return null;
+    const requestId = readString(record, 'requestId');
+    return requestId ? { type, requestId } : null;
+  }
+  if (type === 'session.resume') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessionId'])) return null;
+    const requestId = readString(record, 'requestId');
+    const sessionId = readString(record, 'sessionId');
+    return requestId && sessionId ? { type, requestId, sessionId } : null;
+  }
   if (type === 'chat_request') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'message', 'petId', 'userId'])) return null;
     const requestId = readString(record, 'requestId');
@@ -438,6 +501,48 @@ function parseLocalAgentServerRecord(record: Record<string, unknown>): LocalAgen
   if (type === 'pong') return { type };
   const requestId = readString(record, 'requestId');
   if (!requestId) return null;
+  if (type === 'session.snapshot.result') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'snapshot'])) return null;
+    const snapshot = parseLocalAgentSessionSnapshot(record.snapshot);
+    return snapshot ? { type, requestId, snapshot } : null;
+  }
+  if (type === 'session.list.result') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'sessions'])) return null;
+    if (!Array.isArray(record.sessions)) return null;
+    const sessions = record.sessions.flatMap((value) => {
+      const session = parseLocalAgentSessionSummary(value);
+      return session ? [session] : [];
+    });
+    return sessions.length === record.sessions.length
+      ? { type, requestId, sessions }
+      : null;
+  }
+  if (type === 'session.resume.result') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'session', 'snapshot'])) return null;
+    const session = parseLocalAgentSessionSummary(record.session);
+    const snapshot = parseLocalAgentSessionSnapshot(record.snapshot);
+    if (
+      !session
+      || !snapshot
+      || snapshot.session.sessionId !== session.id
+      || snapshot.session.kind !== session.kind
+    ) {
+      return null;
+    }
+    return { type, requestId, session, snapshot };
+  }
+  if (type === 'session.error') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'operation', 'message'])) return null;
+    const operation = readString(record, 'operation');
+    const message = readString(record, 'message');
+    if (
+      (operation !== 'snapshot' && operation !== 'list' && operation !== 'resume')
+      || message === null
+    ) {
+      return null;
+    }
+    return { type, requestId, operation, message };
+  }
   if (type === 'event') {
     const eventRecord = readRecord(record, 'event');
     const event = eventRecord ? readLocalAgentEvent(eventRecord) : null;

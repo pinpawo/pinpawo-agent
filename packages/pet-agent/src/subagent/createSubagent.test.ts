@@ -5,7 +5,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { tool } from '@langchain/core/tools';
-import { FakeToolCallingModel } from 'langchain';
+import { createMiddleware, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import {
   MessagesAnnotation,
@@ -342,19 +342,56 @@ test('createSubagent default iteration budget is a soft model-call guard', async
     schema: z.object({}),
   });
   const model = new NeverConvergingModel({});
+  const progress = new AIMessage({
+    id: 'limit-progress',
+    content: '已完成前置检查，后续工具步骤仍未完成。',
+  });
+  let progressInjected = false;
+  const progressMiddleware = createMiddleware({
+    name: 'LimitProgressProbe',
+    beforeModel: () => {
+      if (progressInjected) return;
+      progressInjected = true;
+      return { messages: [progress] };
+    },
+  });
 
   const result = await createSubagent({
     model: model as unknown as BaseChatModel,
     tools: [noop],
+    middleware: [progressMiddleware],
     instructions: [],
     messages: [new HumanMessage('go')],
     // no maxIterations -> default budget
   });
 
   assert.equal(result.completionReason, 'limit_reached');
-  assert.equal(result.announceMessageId, null);
+  assert.equal(result.announceMessageId, progress.id);
   assert.ok(
     model.callCount > 20,
     `expected the raised default budget to allow many model calls, got ${model.callCount}`,
   );
+});
+
+test('createSubagent reports no announce when a limited run has no AI text deliverable', async () => {
+  const noop = tool(async () => 'x', {
+    name: 'noop',
+    description: 'no-op',
+    schema: z.object({}),
+  });
+
+  const result = await createSubagent({
+    model: new NeverConvergingModel({}) as unknown as BaseChatModel,
+    tools: [noop],
+    instructions: [],
+    messages: [
+      new HumanMessage('go'),
+      new AIMessage('上一轮的交付不能充当本轮 announce。'),
+      new HumanMessage('continue'),
+    ],
+    maxIterations: 1,
+  });
+
+  assert.equal(result.completionReason, 'limit_reached');
+  assert.equal(result.announceMessageId, null);
 });

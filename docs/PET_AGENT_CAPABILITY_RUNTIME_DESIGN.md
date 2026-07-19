@@ -247,6 +247,8 @@ subagent 不跨调用保留状态。
 - 自然结束时，只有最终消息是无 tool call 的 `AIMessage` 才会成为 announce，
   `createSubagent` 返回该消息的 ID。orchestrator 后续按 ID 标记、验收和 handoff，
   不根据消息正文或“最后一条有文本的消息”推断。
+- guard/recursion limit 停止时，`createSubagent` 从尾部回找最近一条非 guard、无 tool call、
+  有非空文本的 `AIMessage`；若本轮没有可交付文本，则 `announceMessageId` 为 `null`。
 - `artifacts` 只携带 refs，不携带大 payload。
 
 ## 6. orchestrator 的结构
@@ -292,7 +294,9 @@ START → prepare → compactContext
 
 同一 `messages` channel 物理承载 main queue 和 delegation lanes，但消费者按 metadata 建立不同视图：
 
-- `mainConversationMessages()` 只返回无 lane 消息。
+- `mainConversationMessages()` 返回无 lane 的 main 消息，并按系统写入的
+  `source: delegation_briefing` provenance 排除 pre-lane briefing；带 handoff provenance 的
+  已验收副本仍保留。
 - `laneMessages()` 返回 main 基础上下文与当前 lane+runId+delegationId 的私有 transcript。
 - 消息身份由 lane、message ID 和 handoff provenance 决定，不从正文内容推断。
 

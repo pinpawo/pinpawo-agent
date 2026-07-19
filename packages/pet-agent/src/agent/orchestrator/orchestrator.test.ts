@@ -5,7 +5,7 @@ import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool } from '@langchain/core/tools';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { Command, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
-import { FakeToolCallingModel } from 'langchain';
+import { createMiddleware, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
@@ -3662,6 +3662,7 @@ test('main conversation preserves accepted handoffs that begin with briefing for
   ];
   for (const [index, handoff] of handoffs.entries()) {
     setPinpetMeta(handoff, {
+      source: 'delegation_briefing',
       handoffFrom: 'general',
       delegationId: 'task-accepted-briefing',
       runId: 'turn-accepted-briefing',
@@ -3670,7 +3671,10 @@ test('main conversation preserves accepted handoffs that begin with briefing for
     });
   }
 
-  assert.deepEqual(mainConversationMessages(handoffs), handoffs);
+  const legacyBriefing = new AIMessage('旧 checkpoint 中未打 lane 标的简报。');
+  setPinpetMeta(legacyBriefing, { source: 'delegation_briefing' });
+
+  assert.deepEqual(mainConversationMessages([...handoffs, legacyBriefing]), handoffs);
 });
 
 test('lane tagging reconciles a summarized subagent transcript by message identity', () => {
@@ -3755,6 +3759,109 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
     task: '读取文件并运行 lint',
     text: '文件读取完成，lint 还没跑。',
   });
+});
+
+test('limit-reached subagent announce reaches the outcome decision input', async () => {
+  const baseInput = buildOrchestratorRunInput([new HumanMessage('继续探查 repo')]);
+  const progress = new AIMessage({
+    id: 'limit-chain-progress',
+    content: '已完成依赖检查，剩余源码还需要继续探查。',
+  });
+  let progressInjected = false;
+  const progressMiddleware = createMiddleware({
+    name: 'LimitChainProgressProbe',
+    beforeModel: () => {
+      if (progressInjected) return;
+      progressInjected = true;
+      return { messages: [progress] };
+    },
+  });
+  const noop = tool(async () => 'ok', {
+    name: 'noop',
+    description: 'no-op',
+    schema: z.object({}),
+  });
+  const result = await createSubagent({
+    model: new FakeToolCallingModel({
+      toolCalls: [[{ id: 'limit-chain-call', name: 'noop', args: {} }]],
+    }),
+    tools: [noop],
+    middleware: [progressMiddleware],
+    instructions: [],
+    messages: baseInput.messages,
+    maxIterations: 1,
+  });
+
+  assert.equal(result.completionReason, 'limit_reached');
+  assert.equal(result.announceMessageId, progress.id);
+  const delegationId = 'limit-chain-delegation';
+  const tagged = tagNewLaneMessages(
+    result.messages,
+    baseInput.messages,
+    'general',
+    baseInput.runId,
+    result.completionReason,
+    {
+      delegationId,
+      task: '继续探查 repo',
+      announceMessageId: result.announceMessageId,
+    },
+  );
+  const messages = messagesStateReducer(baseInput.messages, tagged);
+  const taggedProgress = messages.find((message) => message.id === progress.id);
+  assert.ok(taggedProgress);
+  assert.equal(getMessageIsAnnounce(taggedProgress), true);
+  assert.equal(getPinpetMeta(taggedProgress).completionReason, 'limit_reached');
+
+  let outcomeDecisionInput = '';
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async (inputMessages: BaseMessage[]) => {
+        outcomeDecisionInput = inputMessages.map((message) => String(message.content)).join('\n');
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: { act: routeModel, observe: routeModel },
+    actor: testActor,
+  });
+  const activeDelegation: TaskActiveDelegation = {
+    id: delegationId,
+    lane: 'general',
+    task: '继续探查 repo',
+    contextSummary: null,
+    transcriptRunId: baseInput.runId,
+    status: 'awaiting_decision',
+    resultPreview: String(progress.content),
+  };
+
+  await graph.invoke({
+    ...baseInput,
+    messages,
+    taskActiveDelegation: activeDelegation,
+    runDelegationSummaries: [{
+      id: delegationId,
+      lane: 'general',
+      task: activeDelegation.task,
+      status: 'progress',
+      resultPreview: activeDelegation.resultPreview,
+    }],
+  }, {
+    configurable: {
+      thread_id: 'limit-chain-outcome-input',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [],
+    },
+  });
+
+  assert.match(outcomeDecisionInput, /<subagent_announce>/);
+  assert.match(outcomeDecisionInput, /<stop_reason>limit_reached<\/stop_reason>/);
 });
 
 test('delegation outcome does not handoff a limit_reached announce', async () => {

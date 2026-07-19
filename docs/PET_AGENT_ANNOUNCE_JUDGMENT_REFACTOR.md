@@ -6,15 +6,16 @@
 > 状态生命周期命名与 task/run 拆分见 `docs/PET_AGENT_STATE_LIFECYCLE_REFACTOR.md`。本文只描述 announce/handoff 语义。
 
 本文只依赖消息身份与 metadata，不根据消息正文是否类似
-`<delegation_briefing>`、`【委派简报】` 或其他文本形状判断消息角色。当前协议不为缺少
-lane、delegationId、message id 或 handoff provenance 的旧 checkpoint 猜测身份。
+`<delegation_briefing>`、`【委派简报】` 或其他文本形状判断消息角色。pre-lane briefing
+仅通过系统写入的 `source: delegation_briefing` provenance 排除；缺少 metadata、message id
+或 handoff provenance 的旧 checkpoint 不再猜测身份。
 
 ## 1. 问题的本质：两条独立的 message queue，handoff 边界模糊
 
 main agent 的 messages 和 subagent 的 messages **本质是两条独立的 queue**。当前为了用一套 LangGraph state/checkpoint 统一管理，把它们**物理塞进同一个 `state.messages` 数组，靠 lane 区分**：
 
 - subagent 启动：`laneMessages(state.messages, lane, runId, delegationId)` 从数组里按身份切出 subagent 该看的 queue。
-- main 视图：`mainConversationMessages`（无 lane 的那条）。
+- main 视图：`mainConversationMessages`（无 lane，且不是仅带 briefing provenance 的旧消息）。
 
 **lane 是存储层的复用技巧，不是概念层的真相。概念层是两条独立 queue。**
 
@@ -25,9 +26,9 @@ main agent 的 messages 和 subagent 的 messages **本质是两条独立的 que
 
 ## 2. 术语澄清（避免歧义）
 
-- **announce**：subagent 自然结束时明确选定的交付消息。`createSubagent` 只在最终消息是
-  无 tool call 的 `AIMessage` 时返回其 `announceMessageId`；后续节点按该 ID 标记和交付，
-  不再扫描“最后一条有文本的 AI 消息”。
+- **announce**：subagent 明确选定的交付消息。自然结束时取最终无 tool call 的
+  `AIMessage`；guard/recursion limit 停止时，从尾部回找最近一条非 guard、无 tool call、
+  有非空文本的 `AIMessage`。后续节点只按返回的 `announceMessageId` 标记和交付。
 - **delegation briefing**：orchestrator 向 selected subagent 派发的任务边界。`DelegationSpec`
   是事实来源，`materializeDelegation()` 确定性渲染 lane-scoped XML；runtime 不反向解析 XML。
 - **main plan**：initial delegation 同时写入 main 的简短用户可见计划。continuation 只更新原
@@ -93,7 +94,9 @@ handoff 复制出的 main 消息，`additional_kwargs.pinpawo` 带：
 - answer node 本身保留（#233 引入，decision 不再自出 answer）。
 - `answerConversationMessages`（#233 引入，去 lane 里捞 completed+progress announce）**删除**；answer node 直接读 main queue，因为 announce 已被 handoff 复制进 main。
 - 当前实现统一读 `mainConversationMessages()`：按 lane metadata 排除执行器私有消息，同时保留
-  main compaction summary。answer 不解析 briefing 正文，也不对模型输出做 briefing 文本匹配、重试或替换。
+  main compaction summary；pre-lane briefing 仅按 `source: delegation_briefing` provenance 排除，
+  已验收 handoff provenance 优先保留。answer 不解析 briefing 正文，也不对模型输出做 briefing
+  文本匹配、重试或替换。
 
 **D6 — 未完成流程不交付。** outcomeDecision 返回 `continue` 或 subagent
 `limit_reached` 尚不可 handoff 时，不向 main 写入交付，原 lane 保留用于续跑。

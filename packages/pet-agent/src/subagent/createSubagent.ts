@@ -96,6 +96,22 @@ function readMessageText(message: BaseMessage): string {
     .join('');
 }
 
+function findLatestDeliverableMessageId(
+  messages: BaseMessage[],
+  inputMessageIds: ReadonlySet<string>,
+): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.id && inputMessageIds.has(message.id)) continue;
+    if (message._getType() !== 'ai') continue;
+    if (isSubagentGuardStopMessage(message)) continue;
+    if (messageHasToolCalls(message)) continue;
+    if (!readMessageText(message).trim()) continue;
+    return message.id ?? null;
+  }
+  return null;
+}
+
 function assertValidContextSummaryUpdate(update: unknown) {
   if (!update || typeof update !== 'object' || !('messages' in update)) {
     return;
@@ -224,6 +240,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     contextWindowTokens: input.contextWindowTokens,
     artifacts: input.artifacts,
   };
+  const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
   const systemPrompt = [
     SUBAGENT_GOVERNING_PROMPT,
     inputState.contextWindowTokens ? SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT : null,
@@ -283,11 +300,12 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // Summarization may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
     const stoppedByGuard = lastMessage ? isSubagentGuardStopMessage(lastMessage) : false;
-    const announceMessageId = !stoppedByGuard
-      && lastMessage?._getType() === 'ai'
-      && !messageHasToolCalls(lastMessage)
-      ? lastMessage.id ?? null
-      : null;
+    const announceMessageId = stoppedByGuard
+      ? findLatestDeliverableMessageId(latestMessages, inputMessageIds)
+      : lastMessage?._getType() === 'ai'
+        && !messageHasToolCalls(lastMessage)
+        ? lastMessage.id ?? null
+        : null;
     return {
       messages: latestMessages,
       artifacts: inputState.artifacts ?? [],
@@ -299,11 +317,12 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // guard is meant to stop before this, but keep it as a graceful last-resort:
     // degrade to limit_reached instead of throwing through the orchestrator.
     if (isGraphRecursionLimitError(err)) {
+      ensureSubagentMessageIds(latestMessages);
       return {
         messages: latestMessages,
         artifacts: inputState.artifacts ?? [],
         completionReason: 'limit_reached',
-        announceMessageId: null,
+        announceMessageId: findLatestDeliverableMessageId(latestMessages, inputMessageIds),
       };
     }
     throw err;

@@ -154,13 +154,20 @@ export function laneMessages(
 
 /**
  * Build message list for orchestration decision nodes.
- * Decision nodes see the user-facing conversation only — i.e. everything that is
- * not lane-tagged. A completed subagent's announce reaches this view because
- * handoff copies it into the main queue (untagged); there is no separate recall
- * from lane-tagged messages.
+ * Decision nodes see the user-facing conversation only: lane-tagged messages
+ * are hidden, as are pre-lane delegation briefings identified by system-written
+ * provenance. A completed subagent's announce reaches this view because handoff
+ * copies it into the main queue with handoff provenance; there is no separate
+ * recall from lane-tagged messages.
  */
 export function mainConversationMessages(messages: BaseMessage[]): BaseMessage[] {
-  return messages.filter((message) => !getMessageLane(message));
+  return messages.filter((message) => (
+    !getMessageLane(message)
+    && !(
+      getPinpetMeta(message).source === 'delegation_briefing'
+      && !getMessageHandoffSource(message)
+    )
+  ));
 }
 
 export const routeMessages = mainConversationMessages;
@@ -216,6 +223,8 @@ export function tagNewLaneMessages(
     setPinpetMeta(message, { lane, runId, delegationId: reportMeta?.delegationId ?? null });
   }
 
+  // announceMessageId must identify a message produced by this invocation;
+  // existing transcript messages are deliberately ineligible for re-tagging.
   const announceMessage = reportMeta?.announceMessageId
     ? nextMessages.find((message) => message.id === reportMeta.announceMessageId)
     : null;

@@ -235,7 +235,9 @@ A `stop` outcome is applied by its position:
 - Subagent `iteration_limit`: `wrapModelCall` appends the marked stop notice
   and returns `Command({ goto: END })`. `createSubagent` treats the final
   message as a guard stop only if it carries the closed marker from
-  `subagent/guardStop.ts`, and reports `completionReason: 'limit_reached'`.
+  `subagent/guardStop.ts`, reports `completionReason: 'limit_reached'`, and
+  preserves the latest eligible AI text message as the explicit announce when
+  one exists.
 - Orchestrator `run_iteration_limit`: the guard node patches in the limit
   notice, resets the run iteration counter, and forces an inline final reply
   while keeping the active delegation resumable.

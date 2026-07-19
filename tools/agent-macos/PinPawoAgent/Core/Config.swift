@@ -44,10 +44,6 @@ struct AgentConfig: Codable {
     case capabilityDirs = "capability_dirs"
   }
 
-  enum LegacyCodingKeys: String, CodingKey {
-    case reviewPolicyStrategy = "review_policy_strategy"
-  }
-
   init(
     apiBaseUrl: String, hasuraEndpoint: String,
     agentToken: String?, hasuraJwt: String?,
@@ -84,7 +80,6 @@ struct AgentConfig: Codable {
   // even when the JSON was written by an older version or the TypeScript agent.
   init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
-    let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
     apiBaseUrl      = try c.decodeIfPresent(String.self, forKey: .apiBaseUrl)      ?? "https://a.ai.hughub.cn"
     hasuraEndpoint  = try c.decodeIfPresent(String.self, forKey: .hasuraEndpoint)  ?? ""
     agentToken      = try c.decodeIfPresent(String.self, forKey: .agentToken)
@@ -99,7 +94,6 @@ struct AgentConfig: Codable {
     browserBackend  = try c.decodeIfPresent(String.self, forKey: .browserBackend)
     workdir         = try c.decodeIfPresent(String.self, forKey: .workdir)
     globalReviewPolicy = try c.decodeIfPresent(String.self, forKey: .globalReviewPolicy)
-      ?? legacy.decodeIfPresent(String.self, forKey: .reviewPolicyStrategy)
     subagentThinking = try c.decodeIfPresent(Bool.self, forKey: .subagentThinking)
     capabilities    = try c.decodeIfPresent([String: Bool].self, forKey: .capabilities)
     capabilityDirs  = try c.decodeIfPresent([String].self, forKey: .capabilityDirs)

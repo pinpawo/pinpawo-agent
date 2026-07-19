@@ -111,12 +111,8 @@ function resolveGlobalReviewPolicyMode(raw: string | undefined): BuiltinGlobalRe
 
 function getGlobalReviewPolicyMode(): BuiltinGlobalReviewPolicyMode {
   return resolveGlobalReviewPolicyMode(process.env.PINPAWO_GLOBAL_REVIEW_POLICY)
-    ?? resolveGlobalReviewPolicyMode(process.env.PINPAWO_REVIEW_POLICY_STRATEGY)
     ?? resolveGlobalReviewPolicyMode(typeof stored.global_review_policy === 'string'
       ? stored.global_review_policy
-      : undefined)
-    ?? resolveGlobalReviewPolicyMode(typeof stored.review_policy_strategy === 'string'
-      ? stored.review_policy_strategy
       : undefined)
     ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
 }

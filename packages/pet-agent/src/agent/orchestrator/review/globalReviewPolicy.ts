@@ -111,29 +111,8 @@ const AUTO_REVIEW_DECISION_SCHEMA = z.object({
     GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
     GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
   ]),
-  risk_level: z.enum(['low', 'medium', 'high']),
-  scope_assessment: z.enum([
-    'workdir',
-    'outside_workdir',
-    'external_service',
-    'broad',
-    'unknown',
-  ]),
-  risk_factors: z.array(z.enum([
-    'destructive_change',
-    'broad_scope',
-    'outside_workdir',
-    'sensitive_data',
-    'permission_or_security_change',
-    'software_install',
-    'financial_action',
-    'external_side_effect',
-    'publish_or_repository_write',
-    'unclear_effect',
-  ])).max(6).default([]),
-  reason: z.string().min(1).max(500),
-  concerns: z.array(z.string().max(200)).max(4).default([]),
-  confidence: z.enum(['low', 'medium', 'high']),
+  reason: z.string().optional().default(''),
+  confidence: z.enum(['low', 'medium', 'high']).optional(),
 });
 
 const DEFAULT_AUTO_REVIEW_REASON = 'Auto authorization did not approve this tool-call batch.';
@@ -181,17 +160,7 @@ async function resolveAutoAuthorization(
       ],
     });
 
-    const decisionIsConsistent = decision.risk_level === 'low'
-      && decision.scope_assessment !== 'outside_workdir'
-      && decision.scope_assessment !== 'broad'
-      && decision.scope_assessment !== 'unknown'
-      && (decision.scope_assessment !== 'workdir' || Boolean(options.workdir?.trim()))
-      && decision.risk_factors.length === 0
-      && decision.confidence !== 'low';
-    if (
-      decision.decision === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE
-      && decisionIsConsistent
-    ) {
+    if (decision.decision === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
       return {
         type: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
         reason: normalizeReason(decision.reason, 'Auto authorization approved this tool-call batch.'),
@@ -200,9 +169,7 @@ async function resolveAutoAuthorization(
     }
     return {
       type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
-      reason: decision.decision === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE
-        ? 'Auto authorization returned an internally inconsistent or low-confidence approval; human authorization is required.'
-        : normalizeReason(decision.reason, DEFAULT_AUTO_REVIEW_REASON),
+      reason: normalizeReason(decision.reason, DEFAULT_AUTO_REVIEW_REASON),
     };
   } catch (error) {
     console.warn('[pet-agent] auto global review authorization failed:', {

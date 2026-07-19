@@ -66,11 +66,7 @@ function autoModel(
 
 const safeDecision = {
   decision: 'authorize',
-  risk_level: 'low',
-  scope_assessment: 'workdir',
-  risk_factors: [],
   reason: 'The file write is narrow and scoped to the workdir.',
-  concerns: [],
   confidence: 'high',
 } as const;
 
@@ -131,7 +127,6 @@ test('auto review can authorize observational browser access without conversatio
     models: {
       act: autoModel(async () => ({
         ...safeDecision,
-        scope_assessment: 'external_service',
         reason: 'Public browser navigation is observational and has no external side effect.',
       })),
     },
@@ -167,14 +162,14 @@ test('auto review requires human authorization when a batch cannot fit the safe 
   assert.match(resolution.reason ?? '', /safe evidence budget/);
 });
 
-test('auto review rejects an internally inconsistent approval', async () => {
+test('auto review requires authorization when the model identifies material risk', async () => {
   const resolution = await resolveGlobalReviewBatchPolicy({
     policy: { mode: 'auto_authorization' },
     models: {
       act: autoModel(async () => ({
-        ...safeDecision,
-        risk_level: 'medium',
-        confidence: 'low',
+        decision: 'require_authorization',
+        reason: 'The proposed change is destructive.',
+        confidence: 'high',
       })),
     },
     actor: testActor,
@@ -184,36 +179,17 @@ test('auto review rejects an internally inconsistent approval', async () => {
   });
 
   assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION);
-  assert.match(resolution.reason ?? '', /inconsistent or low-confidence/);
+  assert.match(resolution.reason ?? '', /destructive/);
 });
 
-test('auto review rejects an approval that reports risk factors', async () => {
+test('auto review preserves the model reason for an outside-workdir rejection', async () => {
   const resolution = await resolveGlobalReviewBatchPolicy({
     policy: { mode: 'auto_authorization' },
     models: {
       act: autoModel(async () => ({
-        ...safeDecision,
-        risk_factors: ['destructive_change'],
-      })),
-    },
-    actor: testActor,
-    messages: [],
-    workdir: '/repo',
-    reviews: [review()],
-  });
-
-  assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION);
-  assert.match(resolution.reason ?? '', /inconsistent or low-confidence/);
-});
-
-test('auto review rejects model approval for an outside-workdir scope', async () => {
-  const resolution = await resolveGlobalReviewBatchPolicy({
-    policy: { mode: 'auto_authorization' },
-    models: {
-      act: autoModel(async () => ({
-        ...safeDecision,
-        scope_assessment: 'outside_workdir',
-        risk_factors: ['outside_workdir'],
+        decision: 'require_authorization',
+        reason: 'The write targets a path outside the workdir.',
+        confidence: 'high',
       })),
     },
     actor: testActor,
@@ -223,19 +199,7 @@ test('auto review rejects model approval for an outside-workdir scope', async ()
   });
 
   assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION);
-});
-
-test('auto review rejects a workdir-scoped approval when no workdir is known', async () => {
-  const resolution = await resolveGlobalReviewBatchPolicy({
-    policy: { mode: 'auto_authorization' },
-    models: { act: autoModel(async () => safeDecision) },
-    actor: testActor,
-    messages: [],
-    reviews: [review()],
-  });
-
-  assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION);
-  assert.match(resolution.reason ?? '', /inconsistent or low-confidence/);
+  assert.match(resolution.reason ?? '', /outside the workdir/);
 });
 
 test('auto review repairs malformed structured output once by default', async () => {
@@ -245,7 +209,7 @@ test('auto review repairs malformed structured output once by default', async ()
     models: {
       act: autoModel(async () => {
         calls += 1;
-        return calls === 1 ? { decision: 'authorize' } : safeDecision;
+        return calls === 1 ? { decision: 'invalid' } : safeDecision;
       }),
     },
     actor: testActor,

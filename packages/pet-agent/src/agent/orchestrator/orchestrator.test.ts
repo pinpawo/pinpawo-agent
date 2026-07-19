@@ -2001,11 +2001,7 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
         autoReviewMessages = messages;
         return {
           decision: 'authorize',
-          risk_level: 'low',
-          scope_assessment: 'workdir',
-          risk_factors: [],
           reason: 'Small scoped file write inside the workdir.',
-          concerns: [],
           confidence: 'high',
         };
       },
@@ -2090,11 +2086,7 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
         autoReviewMessages = messages;
         return {
           decision: 'authorize',
-          risk_level: 'low',
-          scope_assessment: 'workdir',
-          risk_factors: [],
           reason: 'Both writes are narrow and expected.',
-          concerns: [],
           confidence: 'high',
         };
       },
@@ -2175,11 +2167,7 @@ test('global review policy auto_authorization requires human authorization when 
     withStructuredOutput: () => ({
       invoke: async () => ({
         decision: 'require_authorization',
-        risk_level: 'medium',
-        scope_assessment: 'broad',
-        risk_factors: ['broad_scope'],
         reason: 'The write looks too broad.',
-        concerns: ['Broad rewrite'],
         confidence: 'high',
       }),
     }),

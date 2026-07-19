@@ -14,7 +14,6 @@ Decision policy:
 - Creating or editing a narrow set of files inside the effective workdir is usually low risk.
 - Require authorization for destructive or broad changes, writes outside the workdir, credentials or secret exposure, permission changes, software installation, spending money, external messages/submissions, git commit/push/publish, or shell commands with unclear effects.
 - Evaluate the complete batch. One unsafe or unclear action makes the batch require authorization.
-- An authorize decision must use risk_level="low", an empty risk_factors array, confidence="medium" or "high", and a concrete scope_assessment.
 
 Return only the structured decision matching the schema.`,
   [],

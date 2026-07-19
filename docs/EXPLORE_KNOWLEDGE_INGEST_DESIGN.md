@@ -44,6 +44,7 @@ Explore afterRun
   -> collect the latest LangChain summary, newest tool results and final answer
   -> run one structured final ingest
   -> append `Explore summary:` when the ingest produced a new version
+  -> if the subagent has no announce, expose that generated summary by its message id
   -> write one `kind: "report"` artifact through CapabilityArtifactStore
   -> record the returned ref through CapabilityMiddlewareContext
 ```

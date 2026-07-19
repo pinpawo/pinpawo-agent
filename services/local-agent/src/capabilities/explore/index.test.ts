@@ -185,6 +185,60 @@ test('explore final ingest includes LangChain context summaries and persists one
   assert.equal(recorded.length, 1);
   assert.match(String(returned?.messages.at(-1)?.content ?? ''), /Explore summary:/);
   assert.match(String(returned?.messages.at(-1)?.content ?? ''), /最终归纳/);
+  assert.ok(returned?.messages.at(-1)?.id);
+  assert.equal(returned?.announceMessageId, returned?.messages.at(-1)?.id);
+});
+
+test('explore afterRun exposes a generated limit summary as the announce', async () => {
+  const runtime = await createRuntime(fakeSummaryModel('进度摘要：已完成依赖检查，源码仍待继续读取。'));
+  const returned = await runtime.middleware?.afterRun?.({
+    messages: [
+      new HumanMessage('继续探查 repo'),
+      new AIMessage({
+        content: '先读取依赖信息。',
+        tool_calls: [{ id: 'call-limit', name: 'view_file_chunk', args: { path: 'package.json' } }],
+      }),
+      new ToolMessage({
+        tool_call_id: 'call-limit',
+        name: 'view_file_chunk',
+        content: '已确认 package.json 中的主要依赖。',
+      }),
+    ],
+    artifacts: [],
+    completionReason: 'limit_reached',
+    announceMessageId: null,
+  }, {
+    recordCapabilityArtifact: () => {},
+    threadId: 'thread-limit',
+    capabilityId: 'explore',
+    delegationId: 'dg-limit',
+    runId: 'run-limit',
+  });
+
+  const generatedSummary = returned?.messages.at(-1);
+  assert.equal(returned?.completionReason, 'limit_reached');
+  assert.match(String(generatedSummary?.content ?? ''), /进度摘要/);
+  assert.ok(generatedSummary?.id);
+  assert.equal(returned?.announceMessageId, generatedSummary?.id);
+});
+
+test('explore afterRun preserves an existing subagent announce', async () => {
+  const runtime = await createRuntime(fakeSummaryModel('整理后的 Explore summary。'));
+  const returned = await runtime.middleware?.afterRun?.({
+    messages: [new AIMessage({ id: 'subagent-announce', content: '原始交付。' })],
+    artifacts: [],
+    completionReason: 'natural',
+    announceMessageId: 'subagent-announce',
+  }, {
+    recordCapabilityArtifact: () => {},
+    threadId: 'thread-natural',
+    capabilityId: 'explore',
+    delegationId: 'dg-natural',
+    runId: 'run-natural',
+  });
+
+  assert.match(String(returned?.messages.at(-1)?.content ?? ''), /整理后的 Explore summary/);
+  assert.equal(returned?.announceMessageId, 'subagent-announce');
 });
 
 test('explore afterRun uses the previous summary when final ingest fails', async () => {

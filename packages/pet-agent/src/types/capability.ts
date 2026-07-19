@@ -46,6 +46,10 @@ export type CapabilityMiddlewareContext = {
 
 export type CapabilityMiddleware = {
   beforeRun?: (input: SubagentRunInput) => SubagentRunInput | Promise<SubagentRunInput>;
+  /**
+   * A middleware that creates a deliverable message must also return that
+   * message's id as announceMessageId; lane tagging never infers identity.
+   */
   afterRun?: (
     result: SubagentResult,
     ctx: CapabilityMiddlewareContext,

@@ -1,4 +1,4 @@
-import type { ReviewResponse, ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
 import {
   type ChatRequestMessage,
@@ -27,11 +27,10 @@ import type { LocalServerDeps } from './localServerTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
 import {
-  buildHumanReviewRejectResume,
-  buildHumanReviewResume,
-  matchesHumanReviewAction,
-  validateHumanReviewDecisions,
+  resolveHumanReviewAction,
   type HumanReviewActionRoute,
+  type HumanReviewResolutionOutcome,
+  type HumanReviewResolutionSource,
 } from './humanReviewActionRouting';
 import {
   reviewActionId,
@@ -48,8 +47,7 @@ type RunChatSession = typeof runChatSession;
 
 type LocalServerRunSource =
   | { type: 'chat_request' }
-  | { type: 'human_review_response'; reviewId: string; selectedOptionId: string; decisionCount?: number }
-  | { type: 'review.cancel'; reviewId: string; selectedOptionId: string; decisionCount?: number };
+  | HumanReviewResolutionSource;
 
 type ReviewActionRoute = HumanReviewActionRoute & {
   requestId: string;
@@ -165,17 +163,6 @@ export class LocalServerChatHandler {
     }
   }
 
-  private beginReviewResolution(
-    requestId: string,
-    actionId: string | undefined,
-    deps: LocalServerDeps,
-  ) {
-    return this.reviewResolutions.begin(
-      { requestId, ...(actionId ? { actionId } : {}) },
-      () => this.recoverReviewActionRoute(requestId, deps),
-    );
-  }
-
   buildReviewActionSnapshot(
     deps: LocalServerDeps,
     pending: ActivePendingReview | null,
@@ -234,7 +221,7 @@ export class LocalServerChatHandler {
     msg: ChatRequestMessage,
     deps: LocalServerDeps,
   ) {
-    return this.runChatRequest(peer, {
+    await this.runChatRequest(peer, {
       kind: 'user_message',
       requestId: msg.requestId,
       message: msg.message,
@@ -255,7 +242,7 @@ export class LocalServerChatHandler {
     request: LocalServerRunRequest,
     deps: LocalServerDeps,
     source: LocalServerRunSource,
-  ) {
+  ): Promise<HumanReviewResolutionOutcome> {
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';
 
@@ -298,7 +285,7 @@ export class LocalServerChatHandler {
       const ctx = await this.loadContext(deps.actorId);
       if (!isCurrent()) {
         finishInterrupted();
-        return;
+        return 'interrupted';
       }
 
       const setup = this.tuiSessions.buildChatSetup(deps, ctx);
@@ -339,16 +326,17 @@ export class LocalServerChatHandler {
         await this.tuiSessions.refreshActiveSessionSummary(deps);
         console.log(`[local-server] human_review.requested requestId=${requestId}`);
         this.inflightRequests.clear(peer, inflight);
-        return;
+        return 'waiting_human';
       }
       if (result.status === 'interrupted') {
-        return;
+        return 'interrupted';
       }
       this.inflightRequests.finish(peer, inflight, 'completed');
       this.inflightRequests.clear(peer, inflight);
       await this.tuiSessions.refreshActiveSessionSummary(deps);
 
       console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
+      return 'completed';
     } catch (err) {
       const isStillCurrent = this.inflightRequests.isCurrent(peer, inflight);
       const aborted = controller.signal.aborted
@@ -358,7 +346,7 @@ export class LocalServerChatHandler {
         this.inflightRequests.sendInterrupted(peer, inflight);
         recordAgentRunActivity('interrupted', requestId, 2_500);
         this.inflightRequests.clear(peer, inflight);
-        return;
+        return 'interrupted';
       }
       this.inflightRequests.finish(peer, inflight, 'failed', err);
       this.inflightRequests.clear(peer, inflight);
@@ -388,6 +376,7 @@ export class LocalServerChatHandler {
             : message,
         });
       }
+      return 'failed';
     }
   }
 
@@ -396,82 +385,7 @@ export class LocalServerChatHandler {
     msg: HumanReviewResponseMessage,
     deps: LocalServerDeps,
   ) {
-    const resolution = await this.beginReviewResolution(msg.requestId, msg.actionId, deps);
-    if (!resolution) {
-      console.warn(
-        `[local-server] human_review_response rejected: pending review request already consumed or active requestId=${msg.requestId}`,
-      );
-      this.sendClosedReviewError(peer, msg.requestId);
-      return;
-    }
-
-    const { actionId, route } = resolution;
-    if (!matchesHumanReviewAction(route, msg.actionId)) {
-      this.reviewResolutions.abandon(actionId);
-      sendLocalServerPeerEvent(peer, {
-        type: 'error',
-        requestId: msg.requestId,
-        message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
-        code: 'review_stale',
-      });
-      return;
-    }
-    let decisions: ReviewResponse[];
-    try {
-      decisions = validateHumanReviewDecisions(route, msg);
-    } catch (err) {
-      this.reviewResolutions.abandon(actionId);
-      console.warn(
-        `[local-server] human_review_response rejected: reviewId=${msg.reviewId} `
-        + `does not match pending review action=${route.reviews.map((review) => review.id).join(',')} `
-        + (err instanceof Error ? err.message : String(err)),
-      );
-      sendLocalServerPeerEvent(peer, {
-        type: 'error',
-        requestId: msg.requestId,
-        message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
-        code: 'review_stale',
-      });
-      return;
-    }
-
-    const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
-    if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
-      this.reviewResolutions.abandon(actionId);
-      console.warn(
-        `[local-server] human_review_response rejected: route sessionId=${route.sessionId} `
-        + `does not match active session=${activeSessionId}`,
-      );
-      sendLocalServerPeerEvent(peer, {
-        type: 'error',
-        requestId: msg.requestId,
-        message: '请回到发起该 review 的会话再应答。',
-        code: 'review_wrong_session',
-      });
-      return;
-    }
-
-    if (!peer.isConnected()) {
-      this.reviewResolutions.abandon(actionId);
-      return;
-    }
-
-    this.reviewResolutions.consume(actionId);
-
-    try {
-      await this.runChatRequest(peer, {
-        kind: 'resume',
-        requestId: msg.requestId,
-        resume: buildHumanReviewResume(route, decisions),
-      }, deps, {
-        type: 'human_review_response',
-        reviewId: msg.reviewId,
-        selectedOptionId: msg.selectedOptionId,
-        decisionCount: decisions.length,
-      });
-    } finally {
-      this.reviewResolutions.abandon(actionId);
-    }
+    await this.resolveReviewAction(peer, msg, deps);
   }
 
   async handleReviewCancel(
@@ -479,85 +393,86 @@ export class LocalServerChatHandler {
     msg: ReviewCancelMessage,
     deps: LocalServerDeps,
   ) {
-    const resolution = await this.beginReviewResolution(msg.requestId, msg.actionId, deps);
-    if (!resolution) {
-      this.sendClosedReviewError(peer, msg.requestId);
-      return;
-    }
-    const { actionId, route } = resolution;
-    if (!matchesHumanReviewAction(route, msg.actionId)) {
-      this.reviewResolutions.abandon(actionId);
-      sendLocalServerPeerEvent(peer, {
-        type: 'error',
+    await this.resolveReviewAction(peer, msg, deps);
+  }
+
+  private async resolveReviewAction(
+    peer: LocalServerPeer,
+    msg: HumanReviewResponseMessage | ReviewCancelMessage,
+    deps: LocalServerDeps,
+  ) {
+    await resolveHumanReviewAction({
+      lifecycle: this.reviewResolutions,
+      message: msg,
+      recover: () => this.recoverReviewActionRoute(msg.requestId, deps),
+      emitClosed: () => {
+        if (msg.type === 'human_review_response') {
+          console.warn(
+            `[local-server] human_review_response rejected: pending review request already consumed or active requestId=${msg.requestId}`,
+          );
+        }
+        this.sendClosedReviewError(peer, msg.requestId);
+      },
+      emitEvent: (event) => {
+        sendLocalServerPeerEvent(peer, event);
+      },
+      acceptRoute: (route) => this.acceptReviewRoute(peer, route, msg, deps),
+      isConnected: peer.isConnected,
+      restorePending: (route) => this.restorePendingReview(peer, msg.requestId, route),
+      run: (route, resume, source) => this.runChatRequest(peer, {
+        kind: 'resume',
         requestId: msg.requestId,
-        message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
-        code: 'review_stale',
-      });
-      return;
-    }
+        resume,
+      }, deps, source),
+    });
+  }
+
+  private acceptReviewRoute(
+    peer: LocalServerPeer,
+    route: ReviewActionRoute,
+    message: HumanReviewResponseMessage | ReviewCancelMessage,
+    deps: LocalServerDeps,
+  ) {
     const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
     if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
-      this.reviewResolutions.abandon(actionId);
       console.warn(
-        `[local-server] review.cancel rejected: route sessionId=${route.sessionId} `
+        `[local-server] ${message.type} rejected: route sessionId=${route.sessionId} `
         + `does not match active session=${activeSessionId}`,
       );
       sendLocalServerPeerEvent(peer, {
         type: 'error',
-        requestId: msg.requestId,
-        message: '请回到发起该 review 的会话再打断。',
+        requestId: message.requestId,
+        message: message.type === 'review.cancel'
+          ? '请回到发起该 review 的会话再打断。'
+          : '请回到发起该 review 的会话再应答。',
         code: 'review_wrong_session',
       });
-      return;
+      return false;
     }
+    return true;
+  }
 
-    if (!route.rejectOptionId) {
-      const firstReview = route.reviews[0];
-      this.reviewResolutions.abandon(actionId);
-      console.warn(
-        `[local-server] review.cancel rejected: review action=${route.actionId} has no reject option`,
-      );
-      sendLocalServerPeerEvent(peer, {
-        type: 'system.notice',
-        requestId: msg.requestId,
-        message: '当前 review 没有可用的拒绝选项，无法自动取消。',
-      });
-      sendLocalServerPeerEvent(peer, {
-        type: 'human_review.requested',
-        requestId: msg.requestId,
-        ...(route.interruptId ? { interruptId: route.interruptId } : {}),
-        review: firstReview!,
-        reviews: route.reviews,
-        ...(route.actor ? { actor: route.actor } : {}),
-      });
-      return;
-    }
-
-    if (!peer.isConnected()) {
-      this.reviewResolutions.abandon(actionId);
-      return;
-    }
-
-    this.reviewResolutions.consume(actionId);
-    const firstReview = route.reviews[0]!;
-    console.log(
-      `[local-server] cancel pending human_review requestId=${msg.requestId} actionId=${route.actionId}`,
+  private restorePendingReview(
+    peer: LocalServerPeer,
+    requestId: string,
+    route: ReviewActionRoute,
+  ) {
+    console.warn(
+      `[local-server] review.cancel rejected: review action=${route.actionId} has no reject option`,
     );
-
-    try {
-      await this.runChatRequest(peer, {
-        kind: 'resume',
-        requestId: msg.requestId,
-        resume: buildHumanReviewRejectResume(route, route.rejectOptionId),
-      }, deps, {
-        type: 'review.cancel',
-        reviewId: firstReview.id,
-        selectedOptionId: route.rejectOptionId,
-        decisionCount: 1,
-      });
-    } finally {
-      this.reviewResolutions.abandon(actionId);
-    }
+    sendLocalServerPeerEvent(peer, {
+      type: 'system.notice',
+      requestId,
+      message: '当前 review 没有可用的拒绝选项，无法自动取消。',
+    });
+    sendLocalServerPeerEvent(peer, {
+      type: 'human_review.requested',
+      requestId,
+      ...(route.interruptId ? { interruptId: route.interruptId } : {}),
+      review: route.reviews[0]!,
+      reviews: route.reviews,
+      ...(route.actor ? { actor: route.actor } : {}),
+    });
   }
 
   private sendStreamToolOperationEvent(

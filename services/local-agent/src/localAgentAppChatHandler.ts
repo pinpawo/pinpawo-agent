@@ -4,7 +4,6 @@ import type {
   AgentCapability,
   AgentToolkit,
   CapabilityArtifactStore,
-  ReviewResponse,
   ReviewSpec,
 } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput, type AgentChannelSetup } from './agentChannel';
@@ -37,11 +36,10 @@ import { InflightRequestController } from './inflightRequestController';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
 import {
-  buildHumanReviewRejectResume,
-  buildHumanReviewResume,
-  matchesHumanReviewAction,
-  validateHumanReviewDecisions,
+  resolveHumanReviewAction,
   type HumanReviewActionRoute,
+  type HumanReviewResolutionOutcome,
+  type HumanReviewResolutionSource,
 } from './humanReviewActionRouting';
 import { reviewActionId, reviewActionReviews } from './reviewAction';
 import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
@@ -60,8 +58,7 @@ type BuildChatSetup = typeof buildLocalChatAgentInput;
 type AppChatRunRequest = ChatSessionRequest;
 type AppChatRunSource =
   | { type: 'chat_request' }
-  | { type: 'human_review_response'; reviewId: string; selectedOptionId: string; decisionCount?: number }
-  | { type: 'review.cancel'; reviewId: string; selectedOptionId: string; decisionCount?: number };
+  | HumanReviewResolutionSource;
 type RunStudioRequest = (ws: WebSocket, message: StudioRequestMessage) => Promise<void>;
 type RouteStudioReviewResponse = (ws: WebSocket, message: HumanReviewResponseMessage) => boolean;
 type ReviewActionRoute = HumanReviewActionRoute & {
@@ -69,8 +66,6 @@ type ReviewActionRoute = HumanReviewActionRoute & {
   userId: string;
   rejectOptionId?: string;
 };
-type AppChatRunOutcome = 'completed' | 'waiting_human' | 'interrupted' | 'failed';
-
 const MAX_HOSTED_SESSION_PROJECTIONS = 100;
 
 export type LocalAgentAppChatHandlerOptions = {
@@ -187,32 +182,7 @@ export class LocalAgentAppChatHandler {
     if (!this.canUseSocket(ws)) {
       return;
     }
-    const resolution = await this.reviewResolutions.begin(
-      { requestId: msg.requestId, actionId: msg.actionId },
-      () => this.recoverReviewActionRoute({
-        requestId: msg.requestId,
-        actionId: msg.actionId,
-      }),
-    );
-    if (!resolution) {
-      this.sendClosedReviewError(ws, msg.requestId);
-      return;
-    }
-    const { actionId, route } = resolution;
-    try {
-      if (!matchesHumanReviewAction(route, msg.actionId)) {
-        sendLocalAgentEvent(ws, {
-          type: 'error',
-          requestId: msg.requestId,
-          message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
-          code: 'review_stale',
-        });
-        return;
-      }
-      await this.handlePendingReviewCancel(ws, msg, route, actionId);
-    } finally {
-      this.reviewResolutions.abandon(actionId);
-    }
+    await this.resolveReviewAction(ws, msg);
   }
 
   async handleHumanReviewResponse(ws: WebSocket, msg: HumanReviewResponseMessage) {
@@ -222,67 +192,31 @@ export class LocalAgentAppChatHandler {
     if (!this.canUseSocket(ws)) {
       return;
     }
-    const resolution = await this.reviewResolutions.begin(
-      { requestId: msg.requestId, ...(msg.actionId ? { actionId: msg.actionId } : {}) },
-      () => this.recoverReviewActionRoute({
+    await this.resolveReviewAction(ws, msg);
+  }
+
+  private async resolveReviewAction(
+    ws: WebSocket,
+    msg: HumanReviewResponseMessage | ReviewCancelMessage,
+  ) {
+    await resolveHumanReviewAction({
+      lifecycle: this.reviewResolutions,
+      message: msg,
+      recover: () => this.recoverReviewActionRoute({
         requestId: msg.requestId,
         actionId: msg.actionId,
-        reviewId: msg.reviewId,
+        ...(msg.type === 'human_review_response' ? { reviewId: msg.reviewId } : {}),
       }),
-    );
-    if (!resolution) {
-      this.sendClosedReviewError(ws, msg.requestId);
-      return;
-    }
-    const { actionId, route } = resolution;
-    try {
-      if (!matchesHumanReviewAction(route, msg.actionId)) {
-        sendLocalAgentEvent(ws, {
-          type: 'error',
-          requestId: msg.requestId,
-          message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
-          code: 'review_stale',
-        });
-        return;
-      }
-      let decisions: ReviewResponse[];
-      try {
-        decisions = validateHumanReviewDecisions(route, msg);
-      } catch (err) {
-        console.warn(
-          `[local-agent-app] human_review_response rejected: reviewId=${msg.reviewId} `
-          + `does not match pending review action=${route.reviews.map((review) => review.id).join(',')} `
-          + (err instanceof Error ? err.message : String(err)),
-        );
-        sendLocalAgentEvent(ws, {
-          type: 'error',
-          requestId: msg.requestId,
-          message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
-          code: 'review_stale',
-        });
-        return;
-      }
-      let outcome: AppChatRunOutcome = 'failed';
-      try {
-        outcome = await this.runChatRequest(ws, {
-          kind: 'resume',
-          requestId: msg.requestId,
-          resume: buildHumanReviewResume(route, decisions),
-        }, route.userId, {
-          type: 'human_review_response',
-          reviewId: msg.reviewId,
-          selectedOptionId: msg.selectedOptionId,
-          decisionCount: decisions.length,
-        });
-      } finally {
-        this.reviewResolutions.settle(
-          actionId,
-          outcome === 'completed' || outcome === 'waiting_human',
-        );
-      }
-    } finally {
-      this.reviewResolutions.abandon(actionId);
-    }
+      emitClosed: () => this.sendClosedReviewError(ws, msg.requestId),
+      emitEvent: (event) => sendLocalAgentEvent(ws, event),
+      isConnected: () => this.canUseSocket(ws),
+      restorePending: (route) => this.restorePendingReview(ws, msg.requestId, route),
+      run: (route, resume, source) => this.runChatRequest(ws, {
+        kind: 'resume',
+        requestId: msg.requestId,
+        resume,
+      }, route.userId, source),
+    });
   }
 
   handleClose(ws: WebSocket) {
@@ -329,47 +263,23 @@ export class LocalAgentAppChatHandler {
     }, userId, { type: 'chat_request' });
   }
 
-  private async handlePendingReviewCancel(
+  private restorePendingReview(
     ws: WebSocket,
-    msg: ReviewCancelMessage,
+    requestId: string,
     route: ReviewActionRoute,
-    actionId: string,
   ) {
-    if (!route.rejectOptionId) {
-      const firstReview = route.reviews[0];
-      sendLocalAgentEvent(ws, {
-        type: 'system.notice',
-        requestId: msg.requestId,
-        message: '当前 review 没有可用的拒绝选项，无法自动取消。',
-      });
-      sendLocalAgentEvent(ws, {
-        type: 'human_review.requested',
-        requestId: msg.requestId,
-        ...(route.interruptId ? { interruptId: route.interruptId } : {}),
-        review: firstReview!,
-        reviews: route.reviews,
-      });
-      return;
-    }
-    const firstReview = route.reviews[0]!;
-    let outcome: AppChatRunOutcome = 'failed';
-    try {
-      outcome = await this.runChatRequest(ws, {
-        kind: 'resume',
-        requestId: msg.requestId,
-        resume: buildHumanReviewRejectResume(route, route.rejectOptionId),
-      }, route.userId, {
-        type: 'review.cancel',
-        reviewId: firstReview.id,
-        selectedOptionId: route.rejectOptionId,
-        decisionCount: 1,
-      });
-    } finally {
-      this.reviewResolutions.settle(
-        actionId,
-        outcome === 'completed' || outcome === 'waiting_human',
-      );
-    }
+    sendLocalAgentEvent(ws, {
+      type: 'system.notice',
+      requestId,
+      message: '当前 review 没有可用的拒绝选项，无法自动取消。',
+    });
+    sendLocalAgentEvent(ws, {
+      type: 'human_review.requested',
+      requestId,
+      ...(route.interruptId ? { interruptId: route.interruptId } : {}),
+      review: route.reviews[0]!,
+      reviews: route.reviews,
+    });
   }
 
   private async runChatRequest(
@@ -377,7 +287,7 @@ export class LocalAgentAppChatHandler {
     request: AppChatRunRequest,
     userId: string,
     source: AppChatRunSource,
-  ): Promise<AppChatRunOutcome> {
+  ): Promise<HumanReviewResolutionOutcome> {
     const { requestId } = request;
     const message = request.kind === 'user_message' ? request.message : '';
 

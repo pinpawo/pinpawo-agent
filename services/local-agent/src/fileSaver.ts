@@ -6,7 +6,6 @@ import {
   renameSync,
   rmSync,
   statSync,
-  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -14,11 +13,9 @@ import { basename, dirname, extname, join } from 'node:path';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   BaseCheckpointSaver,
-  TASKS,
   WRITES_IDX_MAP,
   copyCheckpoint,
   getCheckpointId,
-  maxChannelVersion,
   type Checkpoint,
   type CheckpointListOptions,
   type CheckpointMetadata,
@@ -26,21 +23,6 @@ import {
   type CheckpointTuple,
   type PendingWrite,
 } from '@langchain/langgraph-checkpoint';
-
-type MemorySaverData = {
-  storage: Record<string, Record<string, Record<string, [string, string, string | undefined]>>>;
-  writes: Record<string, Record<string, [string, string, string]>>;
-};
-
-// Legacy day/thread shard format read only during migration. `bucket` is no
-// longer meaningful in the content-addressed layout; it is parsed for
-// back-compat and otherwise ignored.
-type ThreadShardData = {
-  threadId: string;
-  bucket: string;
-  storage: Record<string, Record<string, [string, string, string | undefined]>>;
-  writes: Record<string, Record<string, [string, string, string]>>;
-};
 
 type CheckpointManifest = {
   version: 1;
@@ -50,10 +32,7 @@ type CheckpointManifest = {
   parentCheckpointId?: string;
   checkpointShellHash: string;
   metadataHash: string;
-  // Older manifest format: a flat channel->hash map. Still read for back-compat,
-  // but new manifests are written with `channelValueRefs` instead.
-  channelValueHashes?: Record<string, string>;
-  channelValueRefs?: Record<string, ChannelValueRef>;
+  channelValueRefs: Record<string, ChannelValueRef>;
 };
 
 type WritesManifest = {
@@ -77,32 +56,8 @@ type ChannelValueRef =
 
 const ROOT_NAMESPACE_SEGMENT = '__root__';
 
-function base64ToUint8(b64: string): Uint8Array {
-  return new Uint8Array(Buffer.from(b64, 'base64'));
-}
-
 function generateWriteKey(threadId: string, checkpointNamespace: string | undefined, checkpointId: string) {
   return JSON.stringify([threadId, checkpointNamespace, checkpointId]);
-}
-
-function parseWriteKey(key: string): { threadId: string; namespace: string | undefined; checkpointId: string } | null {
-  try {
-    const parsed = JSON.parse(key) as unknown;
-    if (
-      Array.isArray(parsed)
-      && typeof parsed[0] === 'string'
-      && typeof parsed[2] === 'string'
-    ) {
-      return {
-        threadId: parsed[0],
-        namespace: typeof parsed[1] === 'string' ? parsed[1] : undefined,
-        checkpointId: parsed[2],
-      };
-    }
-  } catch {
-    // ignore malformed keys
-  }
-  return null;
 }
 
 function encodePathSegment(value: string) {
@@ -151,6 +106,30 @@ function isChannelValueRef(value: unknown): value is ChannelValueRef {
     || (record.kind === 'array' && Array.isArray(record.itemHashes) && record.itemHashes.every((hash) => typeof hash === 'string'));
 }
 
+function isCheckpointManifest(value: unknown): value is CheckpointManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (
+    record.version !== 1
+    || typeof record.threadId !== 'string'
+    || typeof record.namespace !== 'string'
+    || typeof record.checkpointId !== 'string'
+    || typeof record.checkpointShellHash !== 'string'
+    || typeof record.metadataHash !== 'string'
+    || (record.parentCheckpointId !== undefined && typeof record.parentCheckpointId !== 'string')
+    || !record.channelValueRefs
+    || typeof record.channelValueRefs !== 'object'
+    || Array.isArray(record.channelValueRefs)
+  ) {
+    return false;
+  }
+  return Object.values(record.channelValueRefs).every(isChannelValueRef);
+}
+
+function isSupportedCheckpointVersion(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 4;
+}
+
 /**
  * Content-addressed checkpoint saver.
  *
@@ -166,9 +145,6 @@ function isChannelValueRef(value: unknown): value is ChannelValueRef {
  */
 export class FileSaver extends BaseCheckpointSaver {
   private _loadedThreadCount = 0;
-  private readonly legacyRootDir: string;
-  private readonly legacyBaseName: string;
-  private readonly legacyExt: string;
   private readonly casRootDir: string;
   /**
    * Per-checkpoint write locks. LangGraph fans out putWrites for multiple tasks
@@ -198,12 +174,10 @@ export class FileSaver extends BaseCheckpointSaver {
     }
   }
 
-  constructor(private readonly filePath: string) {
+  constructor(filePath: string) {
     super();
-    this.legacyRootDir = dirname(this.filePath);
-    this.legacyExt = extname(this.filePath) || '.json';
-    this.legacyBaseName = basename(this.filePath, this.legacyExt);
-    this.casRootDir = join(this.legacyRootDir, this.legacyBaseName);
+    const extension = extname(filePath) || '.json';
+    this.casRootDir = join(dirname(filePath), basename(filePath, extension));
     this.load();
   }
 
@@ -235,17 +209,6 @@ export class FileSaver extends BaseCheckpointSaver {
     return hash;
   }
 
-  private listLegacyShardFiles() {
-    if (!existsSync(this.legacyRootDir)) {
-      return [];
-    }
-    const prefix = `${this.legacyBaseName}.`;
-    const legacyFileName = basename(this.filePath);
-    return readdirSync(this.legacyRootDir)
-      .filter((name) => name !== legacyFileName && name.startsWith(prefix) && name.endsWith(this.legacyExt))
-      .map((name) => join(this.legacyRootDir, name));
-  }
-
   private threadDir(threadId: string) {
     return join(this.casRootDir, 'threads', encodePathSegment(threadId));
   }
@@ -272,12 +235,17 @@ export class FileSaver extends BaseCheckpointSaver {
     return join(this.threadDir(threadId), 'refs', encodePathSegment(namespace));
   }
 
-  private readManifest(path: string): CheckpointManifest | null {
+  private readManifest(path: string): CheckpointManifest {
+    let parsed: unknown;
     try {
-      return JSON.parse(readFileSync(path, 'utf-8')) as CheckpointManifest;
-    } catch {
-      return null;
+      parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+    } catch (error) {
+      throw new Error(`checkpoint manifest is unreadable: ${path}`, { cause: error });
     }
+    if (!isCheckpointManifest(parsed)) {
+      throw new Error(`checkpoint manifest uses an unsupported format: ${path}`);
+    }
+    return parsed;
   }
 
   private readWritesManifest(path: string): WritesManifest | null {
@@ -303,16 +271,11 @@ export class FileSaver extends BaseCheckpointSaver {
       ? { ...(checkpointShell as Record<string, unknown>) }
       : {};
     const channelValues: Record<string, unknown> = {};
-    for (const [channel, ref] of Object.entries(manifest.channelValueRefs ?? {})) {
+    for (const [channel, ref] of Object.entries(manifest.channelValueRefs)) {
       if (!isChannelValueRef(ref)) continue;
       channelValues[channel] = ref.kind === 'array'
         ? ref.itemHashes.map((hash) => bytesToJson(readObject(this.casRootDir, hash)))
         : bytesToJson(readObject(this.casRootDir, ref.hash));
-    }
-    for (const [channel, hash] of Object.entries(manifest.channelValueHashes ?? {})) {
-      if (!(channel in channelValues)) {
-        channelValues[channel] = bytesToJson(readObject(this.casRootDir, hash));
-      }
     }
     checkpoint.channel_values = channelValues;
     return [
@@ -337,28 +300,11 @@ export class FileSaver extends BaseCheckpointSaver {
     return pendingWrites;
   }
 
-  private async migratePendingSends(
-    mutableCheckpoint: Checkpoint,
-    threadId: string,
-    checkpointNs: string,
-    parentCheckpointId: string,
-  ) {
-    const pendingSends = (await this.pendingWritesFor(threadId, checkpointNs, parentCheckpointId))
-      .filter(([_taskId, channel]) => channel === TASKS)
-      .map(([_taskId, _channel, value]) => value);
-    mutableCheckpoint.channel_values ??= {};
-    mutableCheckpoint.channel_values[TASKS] = pendingSends;
-    mutableCheckpoint.channel_versions ??= {};
-    mutableCheckpoint.channel_versions[TASKS] = Object.keys(mutableCheckpoint.channel_versions).length > 0
-      ? maxChannelVersion(...Object.values(mutableCheckpoint.channel_versions))
-      : this.getNextVersion(undefined);
-  }
-
   private async tupleFromManifest(manifest: CheckpointManifest, config: RunnableConfig): Promise<CheckpointTuple> {
     const [checkpointBytes, metadataBytes, parentCheckpointId] = this.checkpointTupleBytes(manifest);
     const checkpoint = await this.serde.loadsTyped('json', checkpointBytes) as Checkpoint;
-    if (checkpoint.v < 4 && parentCheckpointId !== undefined) {
-      await this.migratePendingSends(checkpoint, manifest.threadId, manifest.namespace, parentCheckpointId);
+    if (!isSupportedCheckpointVersion(checkpoint.v)) {
+      throw new Error(`checkpoint ${manifest.checkpointId} uses unsupported version ${checkpoint.v}`);
     }
     const checkpointTuple: CheckpointTuple = {
       config,
@@ -450,89 +396,6 @@ export class FileSaver extends BaseCheckpointSaver {
     atomicWriteFile(this.writesPath(threadId, normalizedNamespace, checkpointId), JSON.stringify(writeManifest));
   }
 
-  private migrateLegacyThreadShard(data: ThreadShardData) {
-    const threadId = data.threadId;
-    if (!threadId) return;
-    for (const [namespace, checkpoints] of Object.entries(data.storage ?? {})) {
-      for (const [checkpointId, tuple] of Object.entries(checkpoints)) {
-        this.writeCheckpointTuple(threadId, namespace, checkpointId, [
-          base64ToUint8(tuple[0]),
-          base64ToUint8(tuple[1]),
-          tuple[2],
-        ]);
-      }
-    }
-    for (const [outerKey, writes] of Object.entries(data.writes ?? {})) {
-      const parsed = parseWriteKey(outerKey);
-      if (!parsed) continue;
-      const restored: Record<string, [string, string, Uint8Array]> = {};
-      for (const [innerKey, tuple] of Object.entries(writes)) {
-        restored[innerKey] = [tuple[0], tuple[1], base64ToUint8(tuple[2])];
-      }
-      this.writeWritesManifest(parsed.threadId, parsed.namespace, parsed.checkpointId, outerKey, restored);
-    }
-  }
-
-  private migrateLegacy() {
-    const shardFiles = this.listLegacyShardFiles();
-    if (shardFiles.length > 0) {
-      const migratedFiles: string[] = [];
-      for (const file of shardFiles) {
-        try {
-          const raw = readFileSync(file, 'utf-8');
-          this.migrateLegacyThreadShard(JSON.parse(raw) as ThreadShardData);
-          migratedFiles.push(file);
-        } catch {
-          // ignore corrupt shard files
-        }
-      }
-      for (const shardFile of migratedFiles) {
-        if (existsSync(shardFile)) {
-          unlinkSync(shardFile);
-        }
-      }
-      return;
-    }
-
-    try {
-      const raw = readFileSync(this.filePath, 'utf-8');
-      const data = JSON.parse(raw) as MemorySaverData;
-      let migrated = false;
-      for (const [threadId, namespaces] of Object.entries(data.storage ?? {})) {
-        const threadWrites: Record<string, Record<string, [string, string, string]>> = {};
-        for (const [outerKey, writes] of Object.entries(data.writes ?? {})) {
-          if (parseWriteKey(outerKey)?.threadId === threadId) {
-            threadWrites[outerKey] = writes;
-          }
-        }
-        this.migrateLegacyThreadShard({
-          threadId,
-          bucket: '',
-          storage: namespaces,
-          writes: threadWrites,
-        });
-        migrated = true;
-      }
-      if (migrated && existsSync(this.filePath)) {
-        unlinkSync(this.filePath);
-      }
-    } catch {
-      // No file or corrupt legacy checkpoint store.
-    }
-  }
-
-  private contentAddressedManifestCount() {
-    let count = 0;
-    const threadsDir = join(this.casRootDir, 'threads');
-    for (const threadSegment of safeReadDir(threadsDir)) {
-      const manifestsDir = join(threadsDir, threadSegment, 'manifests');
-      for (const namespaceSegment of safeReadDir(manifestsDir)) {
-        count += safeReadDir(join(manifestsDir, namespaceSegment)).filter((name) => name.endsWith('.json')).length;
-      }
-    }
-    return count;
-  }
-
   /** Re-scan the threads directory and reset the known-thread set + count. */
   private seedKnownThreads() {
     const threadsDir = join(this.casRootDir, 'threads');
@@ -550,9 +413,6 @@ export class FileSaver extends BaseCheckpointSaver {
   }
 
   private load() {
-    if (this.contentAddressedManifestCount() === 0 || this.listLegacyShardFiles().length > 0) {
-      this.migrateLegacy();
-    }
     this.seedKnownThreads();
     this.gcObjects();
   }
@@ -563,8 +423,9 @@ export class FileSaver extends BaseCheckpointSaver {
     const checkpointNamespace = config.configurable?.checkpoint_ns ?? '';
     const checkpointId = getCheckpointId(config) || this.readLatestCheckpointId(threadId, checkpointNamespace);
     if (!checkpointId) return undefined;
-    const manifest = this.readManifest(this.manifestPath(threadId, checkpointNamespace, checkpointId));
-    if (!manifest) return undefined;
+    const manifestPath = this.manifestPath(threadId, checkpointNamespace, checkpointId);
+    if (!existsSync(manifestPath)) return undefined;
+    const manifest = this.readManifest(manifestPath);
 
     return this.tupleFromManifest(manifest, {
       configurable: {
@@ -591,7 +452,6 @@ export class FileSaver extends BaseCheckpointSaver {
         for (const fileName of safeReadDir(namespaceDir)) {
           if (!fileName.endsWith('.json')) continue;
           const manifest = this.readManifest(join(namespaceDir, fileName));
-          if (!manifest) continue;
           if (requestedThreadIds && !requestedThreadIds.includes(manifest.threadId)) continue;
           if (requestedNamespace !== undefined && manifest.namespace !== requestedNamespace) continue;
           if (requestedCheckpointId && manifest.checkpointId !== requestedCheckpointId) continue;
@@ -634,6 +494,9 @@ export class FileSaver extends BaseCheckpointSaver {
     const checkpointNamespace = config.configurable?.checkpoint_ns ?? '';
     if (threadId === undefined) {
       throw new Error('Failed to put checkpoint. The passed RunnableConfig is missing a required "thread_id" field in its "configurable" property. When using a checkpointer, you must pass a "thread_id" so the checkpointer knows which conversation thread to persist state for. Example: graph.stream(input, { configurable: { thread_id: "my-thread-id" } })');
+    }
+    if (!isSupportedCheckpointVersion(checkpoint.v)) {
+      throw new Error(`Failed to put checkpoint. Version ${checkpoint.v} is unsupported; FileSaver requires v4 or newer.`);
     }
 
     const preparedCheckpoint = copyCheckpoint(checkpoint);
@@ -707,14 +570,6 @@ export class FileSaver extends BaseCheckpointSaver {
     this.gcObjects();
   }
 
-  flush() {
-    // Kept as a no-op compatibility hook for callers that dispose old savers.
-  }
-
-  dispose() {
-    this.flush();
-  }
-
   private collectReachableObjectHashes() {
     const hashes = new Set<string>();
     const threadsDir = join(this.casRootDir, 'threads');
@@ -726,10 +581,9 @@ export class FileSaver extends BaseCheckpointSaver {
         for (const fileName of safeReadDir(namespaceDir)) {
           if (!fileName.endsWith('.json')) continue;
           const manifest = this.readManifest(join(namespaceDir, fileName));
-          if (!manifest) continue;
           hashes.add(manifest.checkpointShellHash);
           hashes.add(manifest.metadataHash);
-          for (const ref of Object.values(manifest.channelValueRefs ?? {})) {
+          for (const ref of Object.values(manifest.channelValueRefs)) {
             if (!isChannelValueRef(ref)) continue;
             if (ref.kind === 'array') {
               for (const hash of ref.itemHashes) {
@@ -738,9 +592,6 @@ export class FileSaver extends BaseCheckpointSaver {
             } else {
               hashes.add(ref.hash);
             }
-          }
-          for (const hash of Object.values(manifest.channelValueHashes ?? {})) {
-            hashes.add(hash);
           }
         }
       }

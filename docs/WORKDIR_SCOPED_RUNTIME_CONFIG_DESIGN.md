@@ -82,10 +82,14 @@ effective workdir 下新增工作区级目录：
 ├── studio-curator.md
 ├── studio-wiki/
 ├── capability-artifacts/
-├── checkpoints.json
-├── checkpoints-tui.json
+├── checkpoints/
+├── checkpoints-tui/
 └── tui-sessions.json
 ```
+
+`checkpointPath` / `tuiCheckpointPath` 仍使用 `.json` anchor 命名；`FileSaver`
+将其映射为同名的无扩展名 content-addressed 目录。runtime 只读取当前 manifest、
+object、ref 和 writes 布局，不扫描或迁移旧 monolith/shard 文件。
 
 Workdir State Root 存放工作区级配置和产物：
 
@@ -488,7 +492,7 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 
 - import-time singleton `config` 是最大风险。只改 CLI option 但不处理 import 顺序，会让 `--workdir` 看似存在但不生效。
 - prompt workdir 和 tool workdir 必须同时改，否则模型看到的工作目录和工具实际目录会不一致。
-- checkpoint 迁移会影响历史会话可见性。迁移期应允许读取旧 checkpoint 或明确提示“这是新的工作区会话”。
+- 旧 checkpoint 格式不由 runtime 自动恢复；需要历史会话时，应在升级前使用对应旧版本导出或执行一次性外部迁移。
 - capability/plugin 安装目录先不跟 workdir 迁移，避免用户在不同项目重复安装同一 capability。
 - 浏览器 session 先保留全局，避免同站点登录态被工作区切分。若后续需要项目级浏览器 session，再单独加 `browserSessionRoot`。
 

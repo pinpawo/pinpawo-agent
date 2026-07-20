@@ -7,8 +7,10 @@ sources:
   - ../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts
+  - https://github.com/pinpawo/pinpawo-agent/issues/418
 related:
   - concepts/prompt-knowledge-layers.md
+  - concepts/system-prompt-authoring-principles.md
   - concepts/decision-node-ownership.md
   - concepts/message-context-and-provenance.md
   - decisions/delegation-completion-acknowledgement.md
@@ -39,19 +41,46 @@ flowchart LR
   M --> A
 ```
 
-Four relationships organize the current knowledge:
+Five relationships organize the current knowledge:
 
 1. [Prompt knowledge layers](concepts/prompt-knowledge-layers.md) distinguish
    stable contracts, conditional provider protocol, injected facts, and code
    enforcement.
-2. [Decision node ownership](concepts/decision-node-ownership.md) keeps semantic
+2. [System prompt authoring principles](concepts/system-prompt-authoring-principles.md)
+   define positive-first behavior contracts, the valid scope of negative
+   constraints, and when enforcement belongs to the harness.
+3. [Decision node ownership](concepts/decision-node-ownership.md) keeps semantic
    judgments vertical: entry shape, plan boundary, executor choice, and outcome
    acceptance have different owners.
-3. [Message context and provenance](concepts/message-context-and-provenance.md)
+4. [Message context and provenance](concepts/message-context-and-provenance.md)
    determines which messages each actor sees and how briefing, announce, and
    handoff identities are established.
-4. [The answer close](decisions/delegation-completion-acknowledgement.md) provides
+5. [The answer close](decisions/delegation-completion-acknowledgement.md) provides
    a fixed post-delegation message shape rather than repeating the deliverable.
+
+## Prompt Contract Map
+
+This table is the traceability map. One row represents one stable behavior
+contract, not one sentence in a prompt. The map intentionally has only five
+relations: contract, owner, design source, implementation, and verification.
+
+| Contract | Owner | Design source | Implementation | Verification |
+|---|---|---|---|---|
+| `decision.structured-judgment` — decision nodes return their owned structured judgment; the graph performs execution and user-visible delivery | [shared decision infrastructure](concepts/prompt-knowledge-layers.md) | [Prompt knowledge layers](concepts/prompt-knowledge-layers.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`sharedPrefix.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts), [`orchestrationDecision.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts) | [`template.test.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/template.test.ts), [`schemas.test.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.test.ts) |
+| `entry.execution-shape` — choose `answer`, one execution boundary, or multiple execution boundaries from the available evidence | [`entryDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [State-query investigation](investigations/entry-decision-state-query-routing.md), [#416](https://github.com/pinpawo/pinpawo-agent/issues/416) | [`entryDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`entry-decision-basics.ts`](../../packages/pet-agent/evals/datasets/entry-decision-basics.ts), [`orchestrator-route.eval.ts`](../../packages/pet-agent/evals/orchestrator-route.eval.ts) |
+| `planner.execution-boundary` — materialize one independently executable current task and retain only the future tail | [`capabilityPlanner`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`capabilityPlanner.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`capability-planning-basics.ts`](../../packages/pet-agent/evals/datasets/capability-planning-basics.ts) |
+| `capability.executor-selection` — select one available executor for the immutable current task | [`capabilityDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`capabilityDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`capability-decision-basics.ts`](../../packages/pet-agent/evals/datasets/capability-decision-basics.ts) |
+| `outcome.announce-verdict` — validate the current announce as continue, current-task completion, or user-goal completion | [`outcomeDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [message context and provenance](concepts/message-context-and-provenance.md) | [`outcomeDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`outcome-decision-basics.ts`](../../packages/pet-agent/evals/datasets/outcome-decision-basics.ts), [`orchestrator-flow.mock-subagent.eval.ts`](../../packages/pet-agent/evals/orchestrator-flow.mock-subagent.eval.ts) |
+| `answer.user-visible-close` — produce the user-visible response and preserve the fixed post-delegation acknowledgement shape | [`answer`](concepts/decision-node-ownership.md#vertical-decisions) | [Delegation completion acknowledgement](decisions/delegation-completion-acknowledgement.md), [message context and provenance](concepts/message-context-and-provenance.md) | [`answer.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts), [`answer.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts) | [`orchestrator.test.ts`](../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts) |
+
+Maintenance stays deliberately small:
+
+- add or split a row only when a stable behavior contract gains a distinct owner;
+- update a row when its meaning, owner, design source, implementation, or
+  verification changes;
+- do not inventory individual prompt sentences, model-specific tuning notes, or
+  historical clause versions here; those remain in prompt files, source pages,
+  issues, evals, and Git history.
 
 ## Evolution, not replacement
 
@@ -78,13 +107,22 @@ questions about recent status as `answer`. This is recorded as a migration
 regression, not a reason to redesign unrelated answer, handoff, or provenance
 mechanisms.
 
+The accepted follow-up structure is tracked by
+[issue #418](https://github.com/pinpawo/pinpawo-agent/issues/418):
+
+- [#416](https://github.com/pinpawo/pinpawo-agent/issues/416) owns the narrow,
+  domain-independent evidence/execution semantic correction;
+- [#417](https://github.com/pinpawo/pinpawo-agent/issues/417) owns the incremental
+  positive-first prompt refactor;
+- [#415](https://github.com/pinpawo/pinpawo-agent/issues/415) owns the Prompt
+  Contract Map and maintenance workflow.
+
 ## Knowledge health
 
 The source set is unusually strong on historical design, but weaker on:
 
 - a canonical definition of “new execution result” at run entry;
-- an explicit traceability map from each production prompt clause to a design
-  decision and eval;
+- complete verification coverage for each stable behavior contract in the map;
 - page-level freshness/dependency checks when implementation changes;
 - a consistent status distinction among current, pinned, draft, superseded, and
   historical top-level documents.

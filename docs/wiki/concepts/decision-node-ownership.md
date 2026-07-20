@@ -9,6 +9,7 @@ sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
 related:
   - prompt-knowledge-layers.md
+  - system-prompt-authoring-principles.md
   - message-context-and-provenance.md
   - ../investigations/entry-decision-state-query-routing.md
 ---

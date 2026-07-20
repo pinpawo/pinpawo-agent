@@ -10,6 +10,7 @@ the original design and reference documents. Maintenance rules live in
 
 - [Documentation wiki](wiki/index.md)
 - [System prompt design knowledge map](wiki/overview.md)
+- [System prompt authoring principles](wiki/concepts/system-prompt-authoring-principles.md)
 - [Documentation wiki management plan](wiki/migrations/docs-wiki-management-plan.md)
 
 ## Pet Agent API
@@ -109,3 +110,4 @@ the original design and reference documents. Maintenance rules live in
 
 - [OpenClaw agent loop reference](references/OPENCLAW_AGENT_LOOP_REFERENCE.md)
 - [Karpathy LLM Wiki method](wiki/sources/karpathy-llm-wiki.md)
+- [Model prompting and harness references](wiki/sources/model-prompting-and-harness-references.md)

@@ -6,9 +6,14 @@ updated: 2026-07-20
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts
+  - https://github.com/pinpawo/pinpawo-agent/issues/415
+  - https://github.com/pinpawo/pinpawo-agent/issues/416
+  - https://github.com/pinpawo/pinpawo-agent/issues/417
+  - https://github.com/pinpawo/pinpawo-agent/issues/418
 related:
   - ../overview.md
   - ../investigations/entry-decision-state-query-routing.md
+  - model-prompting-and-harness-references.md
 ---
 
 # System Prompt Source Registry
@@ -56,9 +61,17 @@ behavioral claims:
 - [PR #398 — context boundary isolation](https://github.com/pinpawo/pinpawo-agent/pull/398)
 - [PR #404 — message provenance finalization](https://github.com/pinpawo/pinpawo-agent/pull/404)
 
-## External method source
+## Active follow-up work
+
+- [Issue #418 — system prompt evolution umbrella](https://github.com/pinpawo/pinpawo-agent/issues/418)
+- [Issue #416 — entryDecision evidence/execution boundary](https://github.com/pinpawo/pinpawo-agent/issues/416)
+- [Issue #417 — positive-first authoring refactor V1](https://github.com/pinpawo/pinpawo-agent/issues/417)
+- [Issue #415 — Prompt Contract Map](https://github.com/pinpawo/pinpawo-agent/issues/415)
+
+## External method and comparison sources
 
 - [Karpathy LLM Wiki](karpathy-llm-wiki.md)
+- [Current model prompting and agent harness references](model-prompting-and-harness-references.md)
 
 ## Trace observation
 

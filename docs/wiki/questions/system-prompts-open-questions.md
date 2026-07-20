@@ -9,6 +9,7 @@ sources:
 related:
   - ../overview.md
   - ../concepts/prompt-knowledge-layers.md
+  - ../concepts/system-prompt-authoring-principles.md
   - ../migrations/docs-wiki-management-plan.md
 ---
 
@@ -41,14 +42,21 @@ Closure evidence:
 
 ## P1 — prompt traceability
 
-### How should production clauses map to design decisions and evals?
+### Is the minimal Prompt Contract Map sufficient?
 
 Current knowledge is spread across prompt files, design documents, PRs, and tests.
-The wiki now synthesizes it, but there is no machine-checkable map from a clause
-to its owner and coverage.
+The [initial map](../overview.md#prompt-contract-map) now records one row per
+stable behavior contract.
 
-Candidate direction: a lightweight manifest listing node, clause identifier,
-design page, schema field, and eval cases. This requires design before tooling.
+The first version deliberately has only five columns: contract, owner, design
+source, implementation, and verification. It does not inventory every clause or
+introduce a manifest, lifecycle model, model-scope field, or dedicated lint tool.
+
+Closure evidence:
+
+- reviewers can follow every current node contract to code and evals;
+- #416 and #417 can update the map without creating clause-level churn;
+- no missing relationship requires adding another persistent field.
 
 ### Does the repository need configurable product policy in prompts?
 

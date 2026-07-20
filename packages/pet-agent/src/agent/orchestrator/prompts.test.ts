@@ -222,8 +222,7 @@ test('capability planner prompt owns entry and boundary materialization', () => 
   });
   assert.match(prompt, /确定本轮的 next_task，并维护之后的 remaining_plan/);
   assert.match(prompt, /具体执行器由 capabilityDecision 选择/);
-  assert.match(prompt, /规划方式：[^]*计划结构：[^]*任务边界：[^]*结束条件：/);
-  assert.match(prompt, /mode=entry：[^]*mode=boundary：/);
+  assert.match(prompt, /mode：[^]*entry：[^]*boundary：[^]*result：[^]*next_task：[^]*answer：[^]*任务规则：/);
   assert.match(prompt, /remaining_plan 只包含 next_task 之后/);
   assert.match(prompt, /依赖未来结果的任务保持 deferred/);
   assert.doesNotMatch(prompt, /不要选择具体 capability id/);

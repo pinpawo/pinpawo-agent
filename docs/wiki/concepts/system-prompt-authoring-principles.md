@@ -250,7 +250,7 @@ The second #417 implementation candidate applies the same review lens to
   remain one execution task.
 
 For one canonical planning case, prompt preview changed from approximately 1,424
-to 1,261 tokens. This is a size measurement, not a claim of behavioral
+to 1,246 tokens. This is a size measurement, not a claim of behavioral
 improvement. Real-model comparison remains required before this page can become
 `validated`.
 

@@ -4,8 +4,11 @@ import type { ReviewSpec } from '@pinpawo/pet-agent';
 import {
   buildHumanReviewRejectResume,
   buildHumanReviewResume,
+  resolveHumanReviewAction,
   validateHumanReviewDecisions,
 } from './humanReviewActionRouting';
+import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
 
 function reviewSpec(id: string): ReviewSpec {
   return {
@@ -127,4 +130,130 @@ test('human review action routing fails closed when the interrupt identity is mi
       { reviewId: 'review-2', selectedOptionId: 'reject' },
     ],
   });
+});
+
+test('human review action resolution owns validation, resume, and consumption', async () => {
+  const route = {
+    ...reviewRoute(['review-1'], 'interrupt-1'),
+    requestId: 'req-1',
+    rejectOptionId: 'reject',
+  };
+  const lifecycle = new ReviewResolutionLifecycle<typeof route>();
+  lifecycle.register(route);
+  const runs: unknown[] = [];
+  const events: LocalAgentRuntimeEvent[] = [];
+  let closed = 0;
+  const message = {
+    type: 'human_review_response' as const,
+    requestId: 'req-1',
+    actionId: 'interrupt-1',
+    reviewId: 'review-1',
+    selectedOptionId: 'approve',
+  };
+  const resolve = () => resolveHumanReviewAction({
+    lifecycle,
+    message,
+    recover: async () => null,
+    emitClosed: () => {
+      closed += 1;
+    },
+    emitEvent: (event) => {
+      events.push(event);
+    },
+    isConnected: () => true,
+    restorePending: () => undefined,
+    run: async (_route, resume, source) => {
+      runs.push({ resume, source });
+      return 'completed';
+    },
+  });
+
+  await resolve();
+  await resolve();
+
+  assert.deepEqual(runs, [{
+    resume: {
+      'interrupt-1': {
+        decisions: [{ reviewId: 'review-1', selectedOptionId: 'approve' }],
+      },
+    },
+    source: {
+      type: 'human_review_response',
+      reviewId: 'review-1',
+      selectedOptionId: 'approve',
+      decisionCount: 1,
+    },
+  }]);
+  assert.deepEqual(events, []);
+  assert.equal(closed, 1);
+});
+
+test('human review response validation runs before the route boundary guard', async () => {
+  const route = {
+    ...reviewRoute(['review-1'], 'interrupt-1'),
+    requestId: 'req-1',
+  };
+  const lifecycle = new ReviewResolutionLifecycle<typeof route>();
+  lifecycle.register(route);
+  const events: LocalAgentRuntimeEvent[] = [];
+  let guardCalls = 0;
+
+  await resolveHumanReviewAction({
+    lifecycle,
+    message: {
+      type: 'human_review_response',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+      reviewId: 'review-stale',
+      selectedOptionId: 'approve',
+    },
+    recover: async () => null,
+    emitClosed: () => undefined,
+    emitEvent: (event) => {
+      events.push(event);
+    },
+    acceptRoute: () => {
+      guardCalls += 1;
+      return false;
+    },
+    isConnected: () => true,
+    restorePending: () => undefined,
+    run: async () => 'completed',
+  });
+
+  assert.equal(guardCalls, 0);
+  assert.equal(
+    (events[0] as Extract<LocalAgentRuntimeEvent, { type: 'error' }> | undefined)?.code,
+    'review_stale',
+  );
+});
+
+test('human review cancellation restores a route without a reject option', async () => {
+  const route = {
+    ...reviewRoute(['review-1'], 'interrupt-1'),
+    requestId: 'req-1',
+  };
+  const lifecycle = new ReviewResolutionLifecycle<typeof route>();
+  lifecycle.register(route);
+  let restored = 0;
+
+  await resolveHumanReviewAction({
+    lifecycle,
+    message: {
+      type: 'review.cancel',
+      requestId: 'req-1',
+      actionId: 'interrupt-1',
+    },
+    recover: async () => null,
+    emitClosed: () => undefined,
+    emitEvent: () => undefined,
+    isConnected: () => true,
+    restorePending: () => {
+      restored += 1;
+    },
+    run: async () => 'completed',
+  });
+
+  assert.equal(restored, 1);
+  assert.deepEqual(lifecycle.routes(), [route]);
 });

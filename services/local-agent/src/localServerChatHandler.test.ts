@@ -538,6 +538,7 @@ test('handleReviewCancel resumes pending review with canonical reject option', a
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).runChatRequest = async (...args: unknown[]) => {
     handleChatCalls.push(args);
+    return 'completed';
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordReviewActionRoute({

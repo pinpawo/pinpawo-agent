@@ -1,11 +1,19 @@
 import {
-  resolveHumanReviewResponse,
+  resolveHumanReviewResponse as resolveHumanReviewDecision,
   ReviewResponseResolutionError,
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
-import type { HumanReviewResponseMessage } from './localAgentProtocol';
+import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import type {
+  HumanReviewResponseMessage,
+  ReviewCancelMessage,
+} from './localAgentProtocol';
 import type { ReviewAction } from './reviewAction';
+import {
+  ReviewResolutionLifecycle,
+  type ReviewResolutionRoute,
+} from './reviewResolutionLifecycle';
 
 export type HumanReviewActionRoute = ReviewAction & {
   interruptId?: string;
@@ -70,7 +78,7 @@ export function validateHumanReviewDecisions(
         `Human review decision "${decision.reviewId}" does not match pending review "${review.id}".`,
       );
     }
-    const resolution = resolveHumanReviewResponse({ reviewSpec: review }, decision);
+    const resolution = resolveHumanReviewDecision({ reviewSpec: review }, decision);
     const isFinalDecision = index === decisions.length - 1;
     if (resolution.decision.type !== 'approve' && !isFinalDecision) {
       throw new ReviewResponseResolutionError(
@@ -147,4 +155,151 @@ export function buildHumanReviewRejectResume(
     reviewId: firstReview.id,
     selectedOptionId: rejectOptionId,
   }]);
+}
+
+export type HumanReviewResolutionOutcome =
+  | 'completed'
+  | 'waiting_human'
+  | 'interrupted'
+  | 'failed';
+
+export type HumanReviewResolutionSource =
+  | {
+      type: 'human_review_response';
+      reviewId: string;
+      selectedOptionId: string;
+      decisionCount: number;
+    }
+  | {
+      type: 'review.cancel';
+      reviewId: string;
+      selectedOptionId: string;
+      decisionCount: 1;
+    };
+
+type HumanReviewResolutionMessage = HumanReviewResponseMessage | ReviewCancelMessage;
+
+type ResolvableHumanReviewRoute = HumanReviewActionRoute & ReviewResolutionRoute & {
+  rejectOptionId?: string;
+};
+
+type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
+  lifecycle: ReviewResolutionLifecycle<TRoute>;
+  message: HumanReviewResolutionMessage;
+  recover: () => Promise<TRoute | null>;
+  emitClosed: () => void;
+  emitEvent: (event: LocalAgentRuntimeEvent) => void;
+  acceptRoute?: (
+    route: TRoute,
+    message: HumanReviewResolutionMessage,
+  ) => boolean | Promise<boolean>;
+  isConnected: () => boolean;
+  restorePending: (route: TRoute) => void;
+  run: (
+    route: TRoute,
+    resume: ReturnType<typeof buildHumanReviewResume>,
+    source: HumanReviewResolutionSource,
+  ) => Promise<HumanReviewResolutionOutcome>;
+};
+
+/**
+ * Executes the transport-independent review resolution flow. Route recovery,
+ * session/user scoping, event delivery, and the resumed run stay at the handler
+ * boundary; lifecycle transitions and response validation stay here.
+ */
+export async function resolveHumanReviewAction<
+  TRoute extends ResolvableHumanReviewRoute,
+>(options: HumanReviewResolutionOptions<TRoute>) {
+  const { lifecycle, message } = options;
+  const resolution = await lifecycle.begin(
+    {
+      requestId: message.requestId,
+      ...(message.actionId ? { actionId: message.actionId } : {}),
+    },
+    options.recover,
+  );
+  if (!resolution) {
+    options.emitClosed();
+    return;
+  }
+
+  const { actionId, route } = resolution;
+  try {
+    if (!matchesHumanReviewAction(route, message.actionId)) {
+      options.emitEvent({
+        type: 'error',
+        requestId: message.requestId,
+        message: '这个 review action 已经过期，请等待当前确认面板刷新后再操作。',
+        code: 'review_stale',
+      });
+      return;
+    }
+    let resume: ReturnType<typeof buildHumanReviewResume>;
+    let source: HumanReviewResolutionSource;
+    if (message.type === 'human_review_response') {
+      let decisions: ReviewResponse[];
+      try {
+        decisions = validateHumanReviewDecisions(route, message);
+      } catch (err) {
+        console.warn(
+          `[human-review] response rejected: reviewId=${message.reviewId} `
+          + `does not match pending review action=${route.reviews.map((review) => review.id).join(',')} `
+          + (err instanceof Error ? err.message : String(err)),
+        );
+        options.emitEvent({
+          type: 'error',
+          requestId: message.requestId,
+          message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
+          code: 'review_stale',
+        });
+        return;
+      }
+      if (options.acceptRoute && !(await options.acceptRoute(route, message))) {
+        return;
+      }
+      resume = buildHumanReviewResume(route, decisions);
+      source = {
+        type: 'human_review_response',
+        reviewId: message.reviewId,
+        selectedOptionId: message.selectedOptionId,
+        decisionCount: decisions.length,
+      };
+    } else {
+      if (options.acceptRoute && !(await options.acceptRoute(route, message))) {
+        return;
+      }
+      if (!route.rejectOptionId) {
+        options.restorePending(route);
+        return;
+      }
+      const firstReview = route.reviews[0];
+      if (!firstReview) {
+        options.emitClosed();
+        return;
+      }
+      resume = buildHumanReviewRejectResume(route, route.rejectOptionId);
+      source = {
+        type: 'review.cancel',
+        reviewId: firstReview.id,
+        selectedOptionId: route.rejectOptionId,
+        decisionCount: 1,
+      };
+    }
+
+    if (!options.isConnected()) {
+      return;
+    }
+
+    let outcome: HumanReviewResolutionOutcome = 'failed';
+    try {
+      outcome = await options.run(route, resume, source);
+    } finally {
+      lifecycle.settle(
+        actionId,
+        outcome === 'completed' || outcome === 'waiting_human',
+      );
+    }
+  } finally {
+    lifecycle.abandon(actionId);
+  }
 }

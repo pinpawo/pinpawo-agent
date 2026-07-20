@@ -192,6 +192,12 @@ test('capability decision prompt owns capability selection', () => {
   assert.match(prompt, /唯一基准/);
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
+  assert.match(prompt, /从 route_targets 中选择最适合执行当前 task 的 lane/);
+  assert.match(prompt, /匹配的专用 capability 比 general 更合适/);
+  assert.match(prompt, /执行参数暂缺不改变匹配结果/);
+  assert.doesNotMatch(prompt, /不要改写 task，不要回答用户，不要执行工具/);
+  assert.doesNotMatch(prompt, /每次只选择一个执行 capability/);
+  assert.doesNotMatch(prompt, /只能从其中选择执行 capability/);
   assert.doesNotMatch(prompt, /capability\.explore/);
   assert.doesNotMatch(prompt, /delegate_capability\.explore/);
   assert.match(input, /<capability_decision_input>/);

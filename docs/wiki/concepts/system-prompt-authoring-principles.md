@@ -2,7 +2,7 @@
 title: System Prompt Authoring Principles
 page_type: concept
 status: draft
-updated: 2026-07-20
+updated: 2026-07-21
 sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
@@ -208,6 +208,30 @@ clause.
 Each item must be evaluated independently. A clause should not be removed merely
 because it is negative, and the current entryDecision issue must not become a
 reason to rewrite unrelated node semantics.
+
+## CapabilityDecision pilot evidence
+
+The first #417 implementation candidate applies the review lens to
+`capabilityDecision` only:
+
+- the production prompt states one task: choose the lane that best matches the
+  already-defined current task;
+- the model-visible rules retain custom capability preference, the `general`
+  fallback, and the semantic treatment of missing execution parameters;
+- the lane schema owns single-choice output and the current candidate enum;
+- runtime validation owns rejection of unavailable capabilities and preserves
+  the current task when materializing the delegation;
+- a dedicated eval case covers a matching capability whose execution parameters
+  still need clarification.
+
+For one canonical capability-routing case, prompt preview changed from
+approximately 1,328 to 1,283 tokens. This is a size measurement, not a claim of
+behavioral improvement. Real-model comparison remains required before this page
+can become `validated`.
+
+The stable capability-selection contract, owner, implementation, and verification
+links did not change, so the Prompt Contract Map does not gain a wording-only
+revision.
 
 ## Application to the current entryDecision issue
 

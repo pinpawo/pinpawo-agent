@@ -61,3 +61,13 @@ lint passes, and documentation migrations.
   validation open before promoting the investigation to `validated`.
 - Preserved answer ownership, message provenance, and the fixed delegation
   completion acknowledgement.
+
+## [2026-07-21] pilot | CapabilityDecision positive-first authoring
+
+- Replaced the node anti-list with one capability-selection task and three short
+  positive selection rules.
+- Kept single-lane and available-candidate enforcement in schema and runtime
+  validation instead of repeating those mechanics in prompt text.
+- Added an eval case for a matching capability with missing execution parameters.
+- Recorded the prompt-size measurement without changing the stable Prompt
+  Contract Map row or claiming behavior improvement before real-model evaluation.

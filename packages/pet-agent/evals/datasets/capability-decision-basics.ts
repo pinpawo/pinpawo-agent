@@ -84,6 +84,36 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
     metadata: { difficulty: 'easy', reason: 'Positive custom capability route.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.missing-execution-parameters-keep-capability-match`,
+    name: 'missing-execution-parameters-keep-capability-match',
+    suite: SUITE,
+    tags: ['capability_search', 'capability_decision'],
+    input: {
+      task: '为小白准备一条宠物日常内容。',
+      baselineSearchQuery: '宠物日常|内容创作',
+      availableCapabilities: [
+        {
+          name: 'daily_post',
+          description: 'Generate daily social media drafts for a pet profile and clarify missing publishing details.',
+          keywords: ['宠物日常', '内容创作', '草稿'],
+        },
+        {
+          name: 'browser',
+          description: 'Open websites and inspect page content.',
+          keywords: ['浏览器', '网页', '打开'],
+        },
+      ],
+      generalToolsAvailable: ['read_file'],
+    },
+    expected: {
+      expectedLane: 'capability.daily_post',
+      expectedCandidateNames: ['daily_post'],
+      expectedSearchQueryTerms: ['宠物日常', '内容创作'],
+      reason: 'Missing platform or publishing details should not hide an otherwise matching capability.',
+    },
+    metadata: { difficulty: 'medium', reason: 'Capability matching stays stable when execution parameters need clarification.', source: SOURCE_FILE },
+  },
+  {
     id: `${SUITE}.file-read-falls-back-to-general`,
     name: 'file-read-falls-back-to-general',
     suite: SUITE,

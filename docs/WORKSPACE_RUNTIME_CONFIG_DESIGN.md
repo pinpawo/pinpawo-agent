@@ -90,10 +90,15 @@ Workspace-owned config and runtime state stays under the workspace root:
 ├── studio-run-queue.json
 ├── studio-due-runs.json
 ├── capability-artifacts/
-├── checkpoints.json
-├── checkpoints-tui.json
+├── checkpoints/
+├── checkpoints-tui/
 └── tui-sessions.json
 ```
+
+The runtime config keeps `.json` checkpoint anchor names, while `FileSaver`
+maps them to extensionless content-addressed directories. The runtime reads only
+the current manifest/object/ref/writes layout and does not scan legacy monolith
+or shard checkpoint files.
 
 `workspace.json` is optional at first. When present, it can hold display metadata and project background that should be injected into future chat/studio context.
 

@@ -359,6 +359,10 @@ State ownership:
 | Wiki files | Studio curator | Shared knowledge for future dispatches. |
 | Business data | PinPawo backend/app store | Posts, points, interactions, and production records. |
 
+Local graph checkpoints use the current content-addressed FileSaver layout.
+Legacy monolith, shard, pre-v4, and older CAS manifest formats are not migrated
+or restored by the runtime.
+
 Current implementation note: Studio wiki support is present in the local runtime. The capability artifact store is documented as the intended durable-output boundary and should be wired before relying on artifact refs as product state.
 
 ## Documentation Map

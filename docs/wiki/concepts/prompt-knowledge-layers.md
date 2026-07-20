@@ -9,6 +9,7 @@ sources:
 related:
   - decision-node-ownership.md
   - message-context-and-provenance.md
+  - system-prompt-authoring-principles.md
   - ../questions/system-prompts-open-questions.md
 ---
 
@@ -70,3 +71,6 @@ Before adding a prompt clause, ask:
    scope, and conflict model; do not add a free-form prompt rule by default.
 5. Is it only a response to one failing example? If yes, express the general
    semantic boundary and keep the example in evals.
+
+For clause-level writing and review, apply
+[System Prompt Authoring Principles](system-prompt-authoring-principles.md).

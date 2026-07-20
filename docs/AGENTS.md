@@ -113,6 +113,19 @@ For historical intent, link to the design document, issue, PR, or commit.
    inference in the answer.
 4. File durable new synthesis back into the wiki when it adds reusable knowledge.
 
+### Prompt Contract Map
+
+The minimal Prompt Contract Map lives in `docs/wiki/overview.md`. One row
+represents one stable behavior contract, not one prompt sentence.
+
+Update a row when a change alters its behavior meaning, owner, design source,
+implementation link, or verification link. Leave the map unchanged for
+wording-only prompt edits that preserve the same contract and links. Add or split
+a row only when a stable behavior contract gains a distinct semantic owner.
+
+The map is an index. Do not turn it into a clause inventory, runtime prompt
+source, lifecycle database, or substitute for semantic evals.
+
 ### Lint
 
 Check for:

@@ -23,6 +23,9 @@ explicitly migrated.
   map.
 - [Prompt knowledge layers](concepts/prompt-knowledge-layers.md) — static contract,
   conditional protocol, injected facts, and deterministic enforcement.
+- [System prompt authoring principles](concepts/system-prompt-authoring-principles.md)
+  — positive-first contracts, narrow negative boundaries, harness ownership, and
+  eval-backed prompt changes.
 - [Decision node ownership](concepts/decision-node-ownership.md) — semantic owner
   of each orchestrator decision.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —
@@ -33,6 +36,8 @@ explicitly migrated.
   — current regression analysis around `answer` versus new execution.
 - [System prompt source registry](sources/system-prompts-source-registry.md) — source
   coverage and authority.
+- [Model prompting and harness references](sources/model-prompting-and-harness-references.md)
+  — current official model guidance and primary ACI evidence.
 - [Open questions](questions/system-prompts-open-questions.md) — unresolved prompt
   architecture questions.
 

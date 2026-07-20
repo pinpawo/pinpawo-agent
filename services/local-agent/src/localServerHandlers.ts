@@ -97,6 +97,9 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
     studioDueRunScheduler,
   });
   const sessionCommands = new LocalServerSessionCommandQueue();
+  // Actor-wide admission: a session switch and chat operations never overlap.
+  let activeChatOperations = 0;
+  let sessionSwitch: Promise<void> | null = null;
 
   const loadSnapshot = async () => {
     const requestDeps = runtimeDeps.get();
@@ -120,22 +123,42 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
   };
 
   const resumeSession = async (sessionId: string) => {
-    const requestDeps = runtimeDeps.get();
-    const result = await tuiSessions.resumeSession(requestDeps, sessionId);
-    const pendingReview = chatHandler.buildReviewActionSnapshot(
-      requestDeps,
-      result.pendingReview,
-    );
-    return {
-      session: projectChatSessionSummary(result.session),
-      snapshot: buildLocalAgentSessionSnapshot({
-        sessionId: result.session.id,
-        kind: 'chat',
-        messages: result.messages,
-        deps: requestDeps,
-        pendingReview,
-      }),
-    };
+    while (sessionSwitch) {
+      await sessionSwitch;
+    }
+    if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
+      throw Object.assign(
+        new Error('cannot resume a session while a run is active'),
+        { code: 'session_resume_conflict' },
+      );
+    }
+
+    let releaseSessionSwitch!: () => void;
+    const currentSwitch = new Promise<void>((resolve) => {
+      releaseSessionSwitch = resolve;
+    });
+    sessionSwitch = currentSwitch;
+    try {
+      const requestDeps = runtimeDeps.get();
+      const result = await tuiSessions.resumeSession(requestDeps, sessionId);
+      const pendingReview = chatHandler.buildReviewActionSnapshot(
+        requestDeps,
+        result.pendingReview,
+      );
+      return {
+        session: projectChatSessionSummary(result.session),
+        snapshot: buildLocalAgentSessionSnapshot({
+          sessionId: result.session.id,
+          kind: 'chat',
+          messages: result.messages,
+          deps: requestDeps,
+          pendingReview,
+        }),
+      };
+    } finally {
+      sessionSwitch = null;
+      releaseSessionSwitch();
+    }
   };
 
   const respondToSessionRequest = async (
@@ -161,10 +184,18 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
     admit: () => Promise<void>,
   ) => {
     await sessionCommands.waitForIdle(peer);
+    while (sessionSwitch) {
+      await sessionSwitch;
+    }
     if (!peer.isConnected()) {
       return;
     }
-    await admit();
+    activeChatOperations += 1;
+    try {
+      await admit();
+    } finally {
+      activeChatOperations -= 1;
+    }
   };
 
   const peerHandlers: LocalServerPeerHandlers = {
@@ -248,9 +279,6 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
         message.requestId,
         'resume',
         async () => {
-          if (inflightRequests.get(client)) {
-            throw new Error('cannot resume a session while a run is active');
-          }
           return {
             type: 'session.resume.result',
             requestId: message.requestId,

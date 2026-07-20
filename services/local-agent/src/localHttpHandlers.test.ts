@@ -92,6 +92,31 @@ test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', asy
   });
 });
 
+test('handleLocalHttpRequest reports an active-run resume conflict', async () => {
+  const res = makeRes();
+  handleLocalHttpRequest(
+    makeReq('/sessions/resume?sessionId=pet-a%3Aone', 'Bearer secret'),
+    res,
+    {} as LocalServerDeps,
+    {
+      authToken: 'secret',
+      loadSnapshot: async () => ({}),
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw Object.assign(new Error('cannot resume a session while a run is active'), {
+          code: 'session_resume_conflict',
+        });
+      },
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(JSON.parse(res.body), {
+    error: 'cannot resume a session while a run is active',
+  });
+});
+
 test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
   const deps = {} as LocalServerDeps;
   const snapshotRes = makeRes();

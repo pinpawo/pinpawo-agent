@@ -461,7 +461,7 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
   }, { actorId: 'pet-1' });
 
   assert.deepEqual(handler.buildReviewActionSnapshot({ actorId: 'pet-1' } as never, null), {
-    requestId: 'req-existing',
+    requestId: 'interrupt-1',
     sessionId: 'sess-active',
     reviewAction: {
       actionId: 'interrupt-1',
@@ -471,7 +471,7 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).reviewActionRoutes.clear();
+  (handler as any).reviewResolutions.clear();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (handler as any).recordReviewActionRoute({
     type: 'human_review.requested',
@@ -482,7 +482,7 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
   }, { actorId: 'pet-1' });
 
   assert.deepEqual(handler.buildReviewActionSnapshot({ actorId: 'pet-1' } as never, null), {
-    requestId: 'req-action',
+    requestId: 'interrupt-1',
     sessionId: 'sess-active',
     reviewAction: {
       actionId: 'interrupt-1',
@@ -491,15 +491,16 @@ test('buildReviewActionSnapshot exposes routeable review action request ids', ()
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (handler as any).reviewActionRoutes.clear();
+  (handler as any).reviewResolutions.clear();
   assert.deepEqual(handler.buildReviewActionSnapshot({ actorId: 'pet-1' } as never, {
     sessionId: 'sess-active',
+    interruptId: 'interrupt-1',
     review,
   }), {
-    requestId: 'snapshot:sess-active:review-current',
+    requestId: 'interrupt-1',
     sessionId: 'sess-active',
     reviewAction: {
-      actionId: 'request:snapshot:sess-active:review-current:reviews:review-current',
+      actionId: 'interrupt-1',
       reviews: [review],
     },
   });

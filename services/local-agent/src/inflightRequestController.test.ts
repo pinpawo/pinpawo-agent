@@ -100,3 +100,15 @@ test('InflightRequestController abortAndClear drops active request without termi
   assert.deepEqual(controls, []);
   assert.deepEqual(operations, []);
 });
+
+test('InflightRequestController reports active requests across keys', () => {
+  const { controller } = createTestController();
+  assert.equal(controller.hasActiveRequest(), false);
+
+  const run = controller.start('peer-1', 'req-1');
+  assert.equal(controller.hasActiveRequest(), true);
+  assert.equal(controller.get('peer-2'), null);
+
+  controller.clear('peer-1', run);
+  assert.equal(controller.hasActiveRequest(), false);
+});

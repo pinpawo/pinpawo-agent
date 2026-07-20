@@ -68,13 +68,19 @@ test('route decision schema owns capability lane enum', () => {
 test('delegation outcome decision schema is verdict-only', () => {
   const schema = buildDelegationOutcomeDecisionSchema();
   assert.equal(schema.safeParse({ outcome: 'continue', gap_note: '缺少测试结果' }).success, true);
-  assert.equal(schema.safeParse({ outcome: 'task_done' }).success, true);
+  const taskDoneWithoutGap = schema.safeParse({ outcome: 'task_done' });
+  assert.equal(taskDoneWithoutGap.success, true);
+  if (taskDoneWithoutGap.success) {
+    assert.equal(taskDoneWithoutGap.data.gap_note, null);
+  }
+  assert.equal(schema.safeParse({ outcome: 'task_done', gap_note: null }).success, true);
   assert.equal(schema.safeParse({ outcome: 'goal_done', gap_note: null }).success, true);
   assert.equal(schema.safeParse({ outcome: 'next_task' }).success, false);
   assert.equal(schema.safeParse({ action: 'answer' }).success, false);
 
   const parsed = schema.safeParse({
     outcome: 'task_done',
+    gap_note: null,
     task: 't',
     context_summary: 'c',
     search_keywords: 'k',
@@ -100,9 +106,18 @@ test('delegation outcome schema keeps gap_note on continue and strips it elsewhe
     assert.equal(continueWithGap.data.gap_note, '未验证 issue 状态。');
   }
 
-  // limit_reached continues legitimately omit the gap; stays valid.
+  // limit_reached continues legitimately have no new gap; every empty input
+  // shape normalizes to null.
   const continueWithoutGap = schema.safeParse({ outcome: 'continue' });
   assert.equal(continueWithoutGap.success, true);
+  if (continueWithoutGap.success) {
+    assert.equal(continueWithoutGap.data.gap_note, null);
+  }
+  const continueWithBlankGap = schema.safeParse({ outcome: 'continue', gap_note: '   ' });
+  assert.equal(continueWithBlankGap.success, true);
+  if (continueWithBlankGap.success) {
+    assert.equal(continueWithBlankGap.data.gap_note, null);
+  }
 
   // Stray gap_note on a terminal outcome is harmless model noise: normalized
   // away instead of failing the run (autoRepair defaults to zero retries).
@@ -206,5 +221,7 @@ test('decision output instructions add schema shape only for jsonMode', () => {
   const jsonModeOutcomeInstruction = buildDelegationOutcomeDecisionOutputInstruction('jsonMode');
   assert.match(jsonModeOutcomeInstruction, /"outcome"/);
   assert.match(jsonModeOutcomeInstruction, /"gap_note"/);
+  assert.match(jsonModeOutcomeInstruction, /"required":\["outcome"\]/);
+  assert.doesNotMatch(jsonModeOutcomeInstruction, /"required":\["outcome","gap_note"\]/);
   assert.doesNotMatch(jsonModeOutcomeInstruction, /delegate_capability\.browser/);
 });

@@ -47,6 +47,13 @@ test('task decision schema separates task birth from route selection', () => {
   assert.equal(schema.safeParse({ lane: 'capability.browser' }).success, false);
 });
 
+test('task decision schema describes the evidence and execution boundary', () => {
+  const instruction = buildTaskDecisionOutputInstruction('jsonMode');
+  assert.match(instruction, /answer=已有证据足够且不需要新的 execution result/);
+  assert.match(instruction, /direct_task=需要一次 capability 执行产生新结果/);
+  assert.match(instruction, /needs_plan=需要两个或更多独立 execution boundaries/);
+});
+
 test('route decision schema owns capability lane enum', () => {
   const schema = buildRouteDecisionSchema({
     capabilityCandidates: [{ name: 'browser' }],

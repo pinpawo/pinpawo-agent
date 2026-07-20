@@ -2,11 +2,12 @@
 title: EntryDecision State Query Routing
 page_type: investigation
 status: draft
-updated: 2026-07-20
+updated: 2026-07-21
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts
   - ../../../packages/pet-agent/evals/datasets/entry-decision-basics.ts
+  - https://github.com/pinpawo/pinpawo-agent/issues/416
 related:
   - ../concepts/prompt-knowledge-layers.md
   - ../concepts/decision-node-ownership.md
@@ -26,10 +27,11 @@ The exported run was an entry decision, not the later user-visible answer. Its
 choice still matters because answer has no execution tools and can only synthesize
 the conversation it receives.
 
-## Current clause
+## Superseded clause
 
-The production entry prompt currently lists questions about existing context,
-recent task status, or previous results under `action=answer`.
+Before the #416 implementation candidate, the production entry prompt listed
+questions about existing context, recent task status, or previous results under
+`action=answer`.
 
 That category combines two different evidence requirements:
 
@@ -52,19 +54,46 @@ of reading/searching/running/external access as execution was no longer explicit
 gap from taskDecision to entryDecision, not evidence that answer, handoff, shared
 prefix, or provenance architecture should be redesigned together.
 
-## Proposed generalized boundary
+## Implementation candidate
 
-The stable action meanings should express execution shape rather than question
-topic:
+The #416 branch now expresses stable action meanings by evidence and execution
+shape rather than question topic:
 
-- `answer`: the existing canonical conversation and accepted handoffs are enough;
-  no new capability execution result is required.
-- `direct_task`: one new capability execution result is required. Reading,
-  searching, observation, verification, calculation, modification, running, and
-  external access all count as execution.
+- `answer`: canonical main messages, including accepted handoffs, contain
+  sufficient evidence; no new execution result is required. An intention or plan
+  is not completion evidence.
+- `direct_task`: one new execution result is required. Observation, reading,
+  searching, lookup, verification, calculation, command/tool results, and
+  external or current-state checks all count as execution, including read-only
+  work.
 - `needs_plan`: multiple meaningful execution boundaries are required.
 
-Git and commit language belongs in eval cases, not the production prompt.
+Freshness is part of evidence sufficiency when the user asks about current state.
+The classification does not depend on the topic, interrogative form, or words
+such as “existing” and “recent.” Git and commit language remains in eval cases,
+not the production prompt.
+
+The structured-output schema description uses the same three meanings. The
+action enum, graph transitions, message lanes, answer ownership, and fixed
+delegation-completion acknowledgement are unchanged.
+
+## Verification status
+
+The entryDecision dataset now covers:
+
+- explicit completion evidence and replay;
+- intent without completion evidence;
+- absent local and remote current-state evidence;
+- stale evidence;
+- clarification before execution;
+- a new calculation result;
+- one shared execution boundary and multiple independent boundaries.
+
+Prompt/schema contract tests pass locally. Prompt preview measurement for the
+regression case changed from approximately 1,666 to 1,918 tokens for the full
+system, structured context, and conversation input. The added semantic boundary
+therefore has an explicit token cost; correctness must be evaluated before any
+claim of improvement.
 
 ## Evidence still needed
 
@@ -73,6 +102,8 @@ Git and commit language belongs in eval cases, not the production prompt.
   questions whose answer is explicitly recorded in handoff metadata or text.
 - Define what evidence is sufficient for a state claim without creating a
   domain-specific freshness policy inside the prompt.
+- Compare route accuracy, unnecessary execution, latency, and cost before
+  promoting this investigation or the authoring principles to `validated`.
 
 ## Explicitly unaffected decision
 

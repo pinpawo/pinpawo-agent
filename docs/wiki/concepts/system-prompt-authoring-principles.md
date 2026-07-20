@@ -257,6 +257,28 @@ improvement. Real-model comparison remains required before this page can become
 The stable planner contract and its ownership links did not change, so the
 Prompt Contract Map does not gain a wording-only revision.
 
+## OutcomeDecision pilot evidence
+
+The third #417 implementation candidate applies the same ownership split to
+`outcomeDecision`:
+
+- the production prompt defines which context provides the current-task and
+  user-goal evidence;
+- the model-visible schema defines the three verdicts and a
+  required-but-nullable `gap_note`;
+- schema normalization removes terminal-outcome gap noise, while runtime graph
+  code owns continuation, planner handoff, and answer routing;
+- eval cases cover a completed sibling task that cannot replace the current
+  announce and a run that requires user input before it can continue.
+
+For one canonical outcome case, prompt preview changed from approximately 1,718
+to 1,169 tokens. This is a size measurement, not a claim of behavioral
+improvement. Real-model comparison remains required before this page can become
+`validated`.
+
+The stable verdict contract and ownership links did not change, so the Prompt
+Contract Map does not gain a wording-only revision.
+
 ## Application to the current entryDecision issue
 
 The recent `answer` regression should not be repaired with a case-specific

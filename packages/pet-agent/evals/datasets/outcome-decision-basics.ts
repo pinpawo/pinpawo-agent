@@ -58,6 +58,39 @@ const cases: AgentEvalCase<OutcomeDecisionInput, OutcomeDecisionExpected>[] = [
     expected: { outcome: 'goal_done', reason: 'The announce directly and clearly completes the user goal.' },
     metadata: { difficulty: 'easy', reason: 'Goal-complete short circuit.', source: SOURCE_FILE },
   },
+  {
+    id: `${SUITE}.other-results-do-not-complete-current-task`,
+    name: 'other-results-do-not-complete-current-task',
+    suite: SUITE,
+    tags: ['outcome_decision', 'delegation_control'],
+    input: {
+      userGoal: '运行单元测试和集成测试，并汇总结果。',
+      currentTask: '运行集成测试并记录结果。',
+      announce: '集成测试已经启动，但尚未结束，目前没有最终状态。',
+      completedHandoffs: ['单元测试已完成，全部通过。'],
+    },
+    expected: {
+      outcome: 'continue',
+      reason: 'A completed sibling task does not replace evidence for the incomplete current task.',
+    },
+    metadata: { difficulty: 'medium', reason: 'Current-announce evidence boundary.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.required-user-input-stops-autonomous-execution`,
+    name: 'required-user-input-stops-autonomous-execution',
+    suite: SUITE,
+    tags: ['outcome_decision', 'context_synthesis'],
+    input: {
+      userGoal: '根据我的选择，把报告发送到邮件或项目群。',
+      currentTask: '确认发送渠道并发送已经完成的报告。',
+      announce: '报告已经完成，但用户尚未选择邮件或项目群，当前无法继续发送。',
+    },
+    expected: {
+      outcome: 'goal_done',
+      reason: 'The run must return to the user because autonomous execution cannot continue without their choice.',
+    },
+    metadata: { difficulty: 'medium', reason: 'User-input stopping boundary.', source: SOURCE_FILE },
+  },
 ];
 
 export const outcomeDecisionBasicsDataset: AgentEvalDataset<OutcomeDecisionInput, OutcomeDecisionExpected> = {

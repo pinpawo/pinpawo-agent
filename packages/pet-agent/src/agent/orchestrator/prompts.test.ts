@@ -262,11 +262,12 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
   assert.match(prompt, /不编造执行事实/);
   assert.match(prompt, /系统 handoff/);
   assert.match(prompt, /当前阶段：delegationOutcomeDecision/);
-  assert.match(prompt, /决策条件/);
-  assert.match(prompt, /outcome=continue：[^]*outcome=task_done：[^]*outcome=goal_done：/);
-  assert.match(prompt, /系统 handoff 后由 capabilityPlanner/);
-  assert.match(prompt, /不再自主执行，交给 answer/);
-  assert.match(prompt, /唯一职责/);
+  assert.match(prompt, /current_delegation 定义当前 task 要完成什么/);
+  assert.match(prompt, /当前 subagent_announce 提供验收证据/);
+  assert.match(prompt, /结合当前 announce 和 other_delegations 判断整个目标/);
+  assert.doesNotMatch(prompt, /节点边界/);
+  assert.doesNotMatch(prompt, /outcome=continue：/);
+  assert.doesNotMatch(prompt, /动态上下文内容/);
 });
 
 test('answer prompt owns the user-visible reply', () => {

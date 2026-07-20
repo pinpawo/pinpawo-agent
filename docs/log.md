@@ -92,3 +92,12 @@ lint passes, and documentation migrations.
   `next_task` required-but-nullable for a stable output shape.
 - Retained cross-field validation in runtime and semantic planning judgments in
   the node prompt.
+
+## [2026-07-21] pilot | OutcomeDecision evidence ownership
+
+- Reduced the production prompt to the evidence roles needed to judge the
+  current task and overall user goal.
+- Moved verdict and `gap_note` meanings into the model-visible schema and made
+  `gap_note` required-but-nullable.
+- Retained terminal gap normalization and graph transitions in runtime code.
+- Added eval cases for sibling-result isolation and required user input.

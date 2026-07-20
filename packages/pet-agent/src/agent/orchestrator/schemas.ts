@@ -30,7 +30,7 @@ export type CapabilityPlanningDecision = {
 
 export type DelegationOutcomeDecision = {
   outcome: 'continue' | 'task_done' | 'goal_done';
-  gap_note?: string | null;
+  gap_note: string | null;
 };
 
 export type RouteDecision = {
@@ -128,18 +128,17 @@ export function buildCapabilityPlanningDecisionSchema() {
 export function buildDelegationOutcomeDecisionSchema() {
   return z.object({
     outcome: z.enum(['continue', 'task_done', 'goal_done']).describe(
-      '验收结论。continue=当前 task 未达标，同一 capability 继续；task_done=当前 task 达标但不能明确断言总目标完成，后续交 planner；goal_done=不再自主执行，交给 answer，通常因为目标已满足或需要用户澄清/确认。',
+      'continue=当前 task 未达标且同一 capability 可以继续；task_done=当前 task 达标但不能明确断言用户目标已经完成；goal_done=用户目标已经完成，或继续前需要用户补充、澄清、确认。',
     ),
-    gap_note: z.string().nullable().optional().describe(
-      '仅 outcome=continue 时填写：当前结果未达标的缺口说明，会作为继续执行的依据交给执行者；其他 outcome 为 null 或省略。',
+    gap_note: z.string().trim().min(1).nullable().describe(
+      'outcome=continue 时为当前 task 的具体缺口；没有可补充的具体缺口时为 null。其他 outcome 为 null。',
     ),
     // Normalize instead of reject: gap_note is advisory and outcome is the
     // authoritative field, so a stray gap_note on task_done/goal_done is
     // harmless model noise — stripping it keeps the continue-only contract
     // structural without turning noise into a failed run (autoRepair defaults
-    // to zero retries). A missing gap on continue stays valid: the schema
-    // cannot see completionReason, and limit_reached continues legitimately
-    // omit it.
+    // to zero retries). A null gap on continue stays valid: the schema cannot
+    // see completionReason, and limit_reached can continue without a new gap.
   }).transform((decision) => (
     decision.outcome === 'continue'
       ? decision

@@ -18,6 +18,11 @@ export type ToolkitContext = {
   models: AgentModels;
   actor: AgentActor;
   messages: BaseMessage[];
+  /** Reviewer-only runtime facts; tools must not treat these as authorization. */
+  reviewContext?: {
+    task?: string | null;
+    workdir?: string | null;
+  };
   threadId?: string | null;
   capabilityId?: string | null;
   resultSchema?: ZodType;

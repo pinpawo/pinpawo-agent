@@ -585,7 +585,6 @@ async function emitGlobalReviewAuthorizationEvent(params: {
         toolName: review.toolName,
         toolkitName: review.toolkitName,
       })),
-      ...(params.resolution.confidence ? { confidence: params.resolution.confidence } : {}),
       ...(params.reviews.length === 1 && firstReview
         ? {
             toolName: firstReview.toolName,
@@ -705,6 +704,8 @@ async function resolvePreparedToolkitReviews(params: {
     models: params.ctx.models,
     actor: params.ctx.actor,
     messages: params.ctx.messages,
+    task: params.ctx.reviewContext?.task,
+    workdir: params.ctx.reviewContext?.workdir,
     reviews: params.prepared.reviews,
   });
 

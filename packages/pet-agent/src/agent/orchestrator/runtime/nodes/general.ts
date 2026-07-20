@@ -59,11 +59,19 @@ export function createGeneralNode(params: {
     const actor = resolveActor(config, runnableConfig);
     const toolkitList = generalLaneToolkits(toolkits ?? []);
     validateUniqueToolkitNames(toolkitList);
+    const runNextDelegation = state.runNextDelegation;
+    if (!runNextDelegation || runNextDelegation.lane !== 'general') {
+      throw new Error('General node cannot run without a pending general delegation.');
+    }
     const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
     const toolkitResources = await resolveToolkitResources(toolkitList, undefined, {
       models: config.models,
       actor,
       messages: state.messages,
+      reviewContext: {
+        task: runNextDelegation.task,
+        workdir: workdir ?? null,
+      },
       threadId: readThreadId(runnableConfig),
       execution,
       reviewCapabilities,
@@ -89,10 +97,6 @@ export function createGeneralNode(params: {
     }
 
     const lane: MessageLane = 'general';
-    const runNextDelegation = state.runNextDelegation;
-    if (!runNextDelegation || runNextDelegation.lane !== 'general') {
-      throw new Error('General node cannot run without a pending general delegation.');
-    }
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
     const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
     const executionInstruction = buildSubagentExecutionInstruction({

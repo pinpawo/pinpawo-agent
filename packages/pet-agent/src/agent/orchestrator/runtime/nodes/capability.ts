@@ -101,6 +101,10 @@ export function createCapabilityNode(params: {
       models: config.models,
       actor,
       messages: scopedMessages,
+      reviewContext: {
+        task: runNextDelegation.task,
+        workdir: workdir ?? null,
+      },
       threadId,
       capabilityId: capability.name,
       resultSchema: capability.resultSchema,

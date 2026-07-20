@@ -67,7 +67,6 @@ function autoModel(
 const safeDecision = {
   decision: 'authorize',
   reason: 'The file write is narrow and scoped to the workdir.',
-  confidence: 'high',
 } as const;
 
 test('auto review prompt contains only runtime scope and tool behavior facts', async () => {
@@ -169,7 +168,6 @@ test('auto review requires authorization when the model identifies material risk
       act: autoModel(async () => ({
         decision: 'require_authorization',
         reason: 'The proposed change is destructive.',
-        confidence: 'high',
       })),
     },
     actor: testActor,
@@ -189,7 +187,6 @@ test('auto review preserves the model reason for an outside-workdir rejection', 
       act: autoModel(async () => ({
         decision: 'require_authorization',
         reason: 'The write targets a path outside the workdir.',
-        confidence: 'high',
       })),
     },
     actor: testActor,

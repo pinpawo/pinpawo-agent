@@ -585,7 +585,6 @@ async function emitGlobalReviewAuthorizationEvent(params: {
         toolName: review.toolName,
         toolkitName: review.toolkitName,
       })),
-      ...(params.resolution.confidence ? { confidence: params.resolution.confidence } : {}),
       ...(params.reviews.length === 1 && firstReview
         ? {
             toolName: firstReview.toolName,

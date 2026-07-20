@@ -2002,7 +2002,6 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
         return {
           decision: 'authorize',
           reason: 'Small scoped file write inside the workdir.',
-          confidence: 'high',
         };
       },
     }),
@@ -2087,7 +2086,6 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
         return {
           decision: 'authorize',
           reason: 'Both writes are narrow and expected.',
-          confidence: 'high',
         };
       },
     }),
@@ -2168,7 +2166,6 @@ test('global review policy auto_authorization requires human authorization when 
       invoke: async () => ({
         decision: 'require_authorization',
         reason: 'The write looks too broad.',
-        confidence: 'high',
       }),
     }),
   } as unknown as AgentModels['act'];

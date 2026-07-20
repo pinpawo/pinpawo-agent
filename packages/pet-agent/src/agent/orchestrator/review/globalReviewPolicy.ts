@@ -36,7 +36,7 @@ export type GlobalReviewPolicyStructuredOutputConfig = Omit<StructuredOutputOpti
 
 export type GlobalReviewPolicyResolution =
   | { type: typeof GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION; reason?: string }
-  | { type: typeof GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE; reason: string; confidence?: 'low' | 'medium' | 'high' };
+  | { type: typeof GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE; reason: string };
 
 type ToolReviewOperationMetadata = {
   title?: string;
@@ -112,7 +112,6 @@ const AUTO_REVIEW_DECISION_SCHEMA = z.object({
     GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
   ]),
   reason: z.string().optional().default(''),
-  confidence: z.enum(['low', 'medium', 'high']).optional(),
 });
 
 const DEFAULT_AUTO_REVIEW_REASON = 'Auto authorization did not approve this tool-call batch.';
@@ -164,7 +163,6 @@ async function resolveAutoAuthorization(
       return {
         type: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
         reason: normalizeReason(decision.reason, 'Auto authorization approved this tool-call batch.'),
-        ...(decision.confidence ? { confidence: decision.confidence } : {}),
       };
     }
     return {

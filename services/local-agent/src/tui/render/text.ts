@@ -89,8 +89,8 @@ export const TUI_TEXT = {
   statusInitializing: '初始化中',
   statusReady: '就绪',
   statusErrorRecovered: '出错，已恢复输入',
-  runtimeInfoLine: (model: string, cwd: string, studioConfigPath: string, studioConfigSource: string, contextWindow: string) =>
-    `模型: ${model} · 工作目录: ${cwd} · Studio 配置: ${studioConfigPath} (${studioConfigSource}) · 上下文窗口上限: ${contextWindow}`,
+  runtimeInfoLine: (model: string, cwd: string, studioConfigPath: string, contextWindow: string) =>
+    `模型: ${model} · 工作目录: ${cwd} · Studio 配置: ${studioConfigPath} · 上下文窗口上限: ${contextWindow}`,
   tokenUsageLine: (
     inputTokens: string,
     outputTokens: string,

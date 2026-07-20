@@ -1,6 +1,4 @@
-import { existsSync } from 'node:fs';
 import type { LocalServerDeps } from './localServerTypes';
-import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
 
 export type LocalRuntimeProjection = {
   model: string;
@@ -14,25 +12,10 @@ export type LocalRuntimeProjection = {
   studioDueRunsPath?: string;
   petsDir?: string;
   studioWikiBaseDir?: string;
-  studioConfigSource: 'workdir' | 'legacy_home' | 'missing';
-  studioConfigActivePath: string;
-  legacyStudioConfigPath: string;
 };
 
-export type LocalRuntimeProjectionOptions = {
-  legacyStudioConfigPath?: string;
-};
-
-export function buildLocalRuntimeProjection(
-  deps: LocalServerDeps,
-  options: LocalRuntimeProjectionOptions = {},
-): LocalRuntimeProjection {
+export function buildLocalRuntimeProjection(deps: LocalServerDeps): LocalRuntimeProjection {
   const runtimeConfig = deps.runtimeConfig;
-  const legacyStudioConfigPath = options.legacyStudioConfigPath ?? DEFAULT_STUDIO_CONFIG_PATH;
-  const preferredPath = runtimeConfig?.studioConfigPath ?? legacyStudioConfigPath;
-  const preferredAvailable = existsSync(preferredPath);
-  const legacyAvailable = preferredPath !== legacyStudioConfigPath
-    && existsSync(legacyStudioConfigPath);
 
   return {
     model: deps.llmConfig.model,
@@ -52,17 +35,6 @@ export function buildLocalRuntimeProjection(
       petsDir: runtimeConfig.petsDir,
       studioWikiBaseDir: runtimeConfig.studioWikiBaseDir,
     } : {}),
-    studioConfigSource: preferredAvailable
-      ? (runtimeConfig ? 'workdir' : 'legacy_home')
-      : legacyAvailable
-        ? 'legacy_home'
-        : 'missing',
-    studioConfigActivePath: preferredAvailable
-      ? preferredPath
-      : legacyAvailable
-        ? legacyStudioConfigPath
-        : preferredPath,
-    legacyStudioConfigPath,
   };
 }
 
@@ -82,8 +54,5 @@ export function buildLocalHttpRuntimeProjection(deps: LocalServerDeps) {
     ...(runtime.studioDueRunsPath ? { studio_due_runs_path: runtime.studioDueRunsPath } : {}),
     ...(runtime.petsDir ? { pets_dir: runtime.petsDir } : {}),
     ...(runtime.studioWikiBaseDir ? { studio_wiki_base_dir: runtime.studioWikiBaseDir } : {}),
-    studio_config_source: runtime.studioConfigSource,
-    studio_config_active_path: runtime.studioConfigActivePath,
-    legacy_studio_config_path: runtime.legacyStudioConfigPath,
   };
 }

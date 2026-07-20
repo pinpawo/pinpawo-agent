@@ -1,16 +1,14 @@
 import { promises as fs } from 'node:fs';
-import { homedir } from 'node:os';
-import path from 'node:path';
 
 import type { PetLocalConfig } from './petConfig';
 
 /**
- * Studio 本地配置——单 host 单 studio,放在 `~/.pinpawo/studio.json`。
+ * Studio 本地配置——单 workdir 单 studio,放在 `<workdir>/.pinpawo/studio.json`。
  *
  * 设计立场:
- * - 一台主机只有一份 studio 配置(不支持多 studio 共存)。
+ * - 一个 workdir 只有一份 studio 配置。
  * - 通过 plannerPetId / agents 引用 PetLocalConfig.petId,Pet 配置在
- *   `~/.pinpawo/pets/<petId>.json` 单独维护。
+ *   `<workdir>/.pinpawo/pets/<petId>.json` 单独维护。
  * - capability 可用性检查由 PetAgentRuntime 自行处理,loader 只做结构性
  *   一致性校验(引用存在性、planner 在 agents 中、无重复)。
  */
@@ -39,8 +37,6 @@ export type StudioLocalConfig = {
   /** 单 task 的 retry 上限,默认 2 */
   maxRetryPerTask?: number;
 };
-
-export const DEFAULT_STUDIO_CONFIG_PATH = path.join(homedir(), '.pinpawo', 'studio.json');
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
@@ -122,7 +118,7 @@ export function parseStudioLocalConfig(raw: unknown, source: string): StudioLoca
  * - 文件不存在 → 返回 null(caller 自行决定要不要报错)
  * - JSON 无法解析或 schema 不合法 → 抛错
  */
-export async function loadStudioLocalConfig(filePath: string = DEFAULT_STUDIO_CONFIG_PATH): Promise<StudioLocalConfig | null> {
+export async function loadStudioLocalConfig(filePath: string): Promise<StudioLocalConfig | null> {
   let content: string;
   try {
     content = await fs.readFile(filePath, 'utf8');
@@ -187,7 +183,7 @@ export function resolveStudio(
     const pet = petById.get(agentId);
     if (!pet) {
       throw new Error(
-        `studio "${studio.studioId}": agent "${agentId}" has no matching pet config in ~/.pinpawo/pets/`,
+        `studio "${studio.studioId}": agent "${agentId}" has no matching pet config in the configured pets directory`,
       );
     }
     resolvedAgents.push(pet);

@@ -97,7 +97,7 @@ export function createWsHumanReviewer(opts: {
  * 从本地 pet 配置合成 AgentActor。
  *
  * Studio 模式下 pet 身份是**本地 source of truth**——pet 名称 / personality 等都
- * 来自 `~/.pinpawo/pets/<petId>.json`,不依赖服务端 pet 记录。`ownerUserId` 通常为 null
+ * 来自 `<workdir>/.pinpawo/pets/<petId>.json`,不依赖服务端 pet 记录。`ownerUserId` 通常为 null
  * (纯离线模式);若 local-agent 已登录服务端,可传入对应 user id 用于 trace / attribution。
  */
 export function buildPetActorFromLocalConfig(

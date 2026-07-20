@@ -52,9 +52,6 @@ export function buildLocalAgentRuntimeView(
     ...(runtime.studioDueRunsPath ? { studioDueRunsPath: runtime.studioDueRunsPath } : {}),
     ...(runtime.petsDir ? { petsDir: runtime.petsDir } : {}),
     ...(runtime.studioWikiBaseDir ? { studioWikiBaseDir: runtime.studioWikiBaseDir } : {}),
-    studioConfigSource: runtime.studioConfigSource,
-    studioConfigActivePath: runtime.studioConfigActivePath,
-    legacyStudioConfigPath: runtime.legacyStudioConfigPath,
   };
 }
 

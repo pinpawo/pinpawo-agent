@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { handleLocalHttpRequest } from './localHttpHandlers';
@@ -316,7 +316,7 @@ test('capability refresh updates frozen runtime lists with copy-on-write', async
   assert.equal(Object.isFrozen(after.localCapabilities), true);
 });
 
-test('handleLocalHttpRequest exposes workdir Studio config source on runtime endpoint', async () => {
+test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime endpoint', async () => {
   const workdir = await fs.mkdtemp(join(tmpdir(), 'pinpawo-runtime-'));
   const stateRoot = join(workdir, '.pinpawo');
   const studioConfigPath = join(stateRoot, 'studio.json');
@@ -370,9 +370,6 @@ test('handleLocalHttpRequest exposes workdir Studio config source on runtime end
     studio_due_runs_path: join(stateRoot, 'studio-due-runs.json'),
     pets_dir: join(stateRoot, 'pets'),
     studio_wiki_base_dir: join(stateRoot, 'studio-wiki'),
-    studio_config_source: 'workdir',
-    studio_config_active_path: studioConfigPath,
-    legacy_studio_config_path: join(homedir(), '.pinpawo', 'studio.json'),
   });
 });
 

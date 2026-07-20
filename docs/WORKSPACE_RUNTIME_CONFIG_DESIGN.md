@@ -172,7 +172,7 @@ Studio should resolve config from the active workspace:
 <workspace.rootPath>/.pinpawo/studio-wiki/
 ```
 
-The current legacy fallback to `~/.pinpawo/studio.json` should become migration-only behavior. In workspace-aware mode, missing workspace Studio config should produce an explicit "Studio not configured for this workspace" error with a migration hint.
+The runtime does not probe `~/.pinpawo/studio.json` as a fallback. In workspace-aware mode, missing workspace Studio config should produce an explicit "Studio not configured for this workspace" error naming the canonical path. Users who need historical data must copy it before upgrading rather than relying on a resident runtime migration path.
 
 Studio run identity and due-run trace should include workspace id as well as workdir:
 

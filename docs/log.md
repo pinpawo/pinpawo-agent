@@ -57,7 +57,7 @@ lint passes, and documentation migrations.
   graph transitions.
 - Added cross-domain cases for explicit, absent, and stale evidence; replay;
   clarification; calculation; and one versus multiple execution boundaries.
-- Recorded the prompt-size increase and kept real-model route, latency, and cost
+- Recorded the prompt-size measurement and kept real-model route, latency, and cost
   validation open before promoting the investigation to `validated`.
 - Preserved answer ownership, message provenance, and the fixed delegation
   completion acknowledgement.

@@ -90,10 +90,9 @@ The entryDecision dataset now covers:
 - one shared execution boundary and multiple independent boundaries.
 
 Prompt/schema contract tests pass locally. Prompt preview measurement for the
-regression case changed from approximately 1,666 to 1,918 tokens for the full
-system, structured context, and conversation input. The added semantic boundary
-therefore has an explicit token cost; correctness must be evaluated before any
-claim of improvement.
+regression case changed from approximately 1,666 to 1,637 tokens for the full
+system, structured context, and conversation input. This small reduction is not
+itself evidence of improvement; route correctness still requires evaluation.
 
 ## Evidence still needed
 

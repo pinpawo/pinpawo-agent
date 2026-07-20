@@ -709,7 +709,7 @@ test('entry decision schema does not advertise capability actions', async () => 
 
   assert.equal(schemaAllowsBrowser, false);
   assert.match(decisionSystemPrompt, /entry decision 节点/);
-  assert.match(decisionSystemPrompt, /capabilityDecision 负责选择执行器/);
+  assert.match(decisionSystemPrompt, /具体 capability、用户回复和工具执行由后续节点处理/);
   assert.match(decisionSystemPrompt, /direct_task/);
   assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.browser/);
 });

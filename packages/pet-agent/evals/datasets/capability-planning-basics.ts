@@ -142,6 +142,27 @@ const cases: AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected>[
     },
     metadata: { difficulty: 'hard', reason: 'Separated next_task and future tail.', source: SOURCE_FILE },
   },
+  {
+    id: `${SUITE}.entry-groups-related-actions-by-capability`,
+    name: 'entry-groups-related-actions-by-capability',
+    suite: SUITE,
+    tags: ['capability_planning', 'entry_decision'],
+    input: {
+      mode: 'entry',
+      userGoal: '读取 package.json 的依赖，运行 npm test，并汇总检查结果。',
+      capabilityRegistry: ['general_workspace_execution', 'general'],
+    },
+    expected: {
+      result: 'next_task',
+      nextTaskTerms: ['package.json', 'npm test', '汇总'],
+      capabilityIntent: 'general_workspace_execution',
+      remainingPlan: [],
+      planEffect: 'created',
+      rubberStamp: false,
+      reason: 'Related actions that one capability can complete remain one execution task.',
+    },
+    metadata: { difficulty: 'medium', reason: 'Capability-boundary grouping.', source: SOURCE_FILE },
+  },
 ];
 
 export const capabilityPlanningBasicsDataset: AgentEvalDataset<CapabilityPlanningInput, CapabilityPlanningExpected> = {

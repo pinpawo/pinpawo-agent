@@ -220,10 +220,14 @@ test('capability planner prompt owns entry and boundary materialization', () => 
     latestHandoff: '发现 token validation 循环依赖。',
     capabilityRegistryContext: 'explore: codebase exploration',
   });
-  assert.match(prompt, /capability planning decision 节点/);
-  assert.match(prompt, /不绑定 registry 中的具体 capability id/);
-  assert.match(prompt, /mode=entry：[^]*mode=boundary：[^]*result=next_task：[^]*result=answer：/);
-  assert.match(prompt, /remaining_plan 只包含 next_task 之后/);
+  assert.match(prompt, /根据 mode 确定现在要执行的任务，并更新后续计划/);
+  assert.match(prompt, /mode：[^]*entry：[^]*boundary：[^]*任务规则：/);
+  assert.match(prompt, /依赖未来结果的任务保持 deferred/);
+  assert.doesNotMatch(prompt, /^result：/m);
+  assert.doesNotMatch(prompt, /capability_intent 概括/);
+  assert.doesNotMatch(prompt, /具体执行器由 capabilityDecision 选择/);
+  assert.doesNotMatch(prompt, /不要选择具体 capability id/);
+  assert.doesNotMatch(prompt, /不要验收 announce/);
   assert.match(input, /<mode>boundary<\/mode>/);
   assert.match(input, /token validation/);
   assert.match(input, /code_modification/);

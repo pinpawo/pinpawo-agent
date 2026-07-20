@@ -233,6 +233,30 @@ The stable capability-selection contract, owner, implementation, and verificatio
 links did not change, so the Prompt Contract Map does not gain a wording-only
 revision.
 
+## CapabilityPlanner pilot evidence
+
+The second #417 implementation candidate applies the same review lens to
+`capabilityPlanner` only:
+
+- the production prompt keeps the entry/boundary planning judgment, task
+  grouping, and the condition for keeping work `deferred`;
+- the model-visible schema defines `result`, the relationship among
+  `next_task` and `remaining_plan`, and a required-but-nullable `next_task`;
+- runtime schema validation owns cross-field validity and exact duplicate
+  rejection;
+- runtime code materializes the current task, while `capabilityDecision` chooses
+  its executor;
+- a dedicated eval case checks that related actions completed by one capability
+  remain one execution task.
+
+For one canonical planning case, prompt preview changed from approximately 1,424
+to 1,135 tokens. This is a size measurement, not a claim of behavioral
+improvement. Real-model comparison remains required before this page can become
+`validated`.
+
+The stable planner contract and its ownership links did not change, so the
+Prompt Contract Map does not gain a wording-only revision.
+
 ## Application to the current entryDecision issue
 
 The recent `answer` regression should not be repaired with a case-specific

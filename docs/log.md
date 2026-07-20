@@ -71,3 +71,24 @@ lint passes, and documentation migrations.
 - Added an eval case for a matching capability with missing execution parameters.
 - Recorded the prompt-size measurement without changing the stable Prompt
   Contract Map row or claiming behavior improvement before real-model evaluation.
+
+## [2026-07-21] pilot | CapabilityPlanner positive-first authoring
+
+- Replaced the mixed anti-list and implementation terminology with the direct
+  relationship among `next_task`, `remaining_plan`, and `deferred` work.
+- Kept output-shape and duplicate enforcement in the schema, current-task
+  materialization in runtime code, and executor selection in
+  `capabilityDecision`.
+- Added an eval case for grouping related actions into one capability execution
+  task.
+- Recorded the prompt-size measurement without changing the stable Prompt
+  Contract Map row or claiming behavior improvement before real-model evaluation.
+
+## [2026-07-21] refinement | CapabilityPlanner schema ownership
+
+- Removed `result` and field-shape explanations from the production system
+  prompt.
+- Moved those relationships into model-visible schema descriptions and made
+  `next_task` required-but-nullable for a stable output shape.
+- Retained cross-field validation in runtime and semantic planning judgments in
+  the node prompt.

@@ -25,7 +25,7 @@ export type CapabilityPlanTaskDecision = {
 export type CapabilityPlanningDecision = {
   result: 'next_task' | 'answer';
   remaining_plan: CapabilityPlanTaskDecision[];
-  next_task?: { objective: string; capability_intent: string } | null;
+  next_task: { objective: string; capability_intent: string } | null;
 };
 
 export type DelegationOutcomeDecision = {
@@ -97,19 +97,21 @@ export function buildTaskDecisionSchema() {
 
 export function buildCapabilityPlanningDecisionSchema() {
   const planTask = z.object({
-    objective: z.string().trim().min(1).describe('尚未开始的 future task 目标。'),
-    capability_intent: z.string().trim().min(1).describe('所需能力类型，不是 registry capability id。'),
-    status: z.enum(['concrete', 'deferred']).describe('concrete=现在已可定义；deferred=仍依赖未来 handoff。'),
+    objective: z.string().trim().min(1).describe('后续尚未开始的任务目标。'),
+    capability_intent: z.string().trim().min(1).describe('任务需要的能力类型。'),
+    status: z.enum(['concrete', 'deferred']).describe('concrete=现在可以执行；deferred=仍依赖未来结果。'),
   });
   return z.object({
-    result: z.enum(['next_task', 'answer']).describe('next_task=materialize 一个 current task；answer=不再自主执行。'),
-    remaining_plan: z.array(planTask).describe('next_task 之后尚未开始的 future tail；不得重复 next_task。'),
+    result: z.enum(['next_task', 'answer']).describe('next_task=输出本轮要执行的任务；answer=没有后续执行。'),
+    remaining_plan: z.array(planTask).describe(
+      'result=next_task 时只包含 next_task 之后尚未开始的任务；result=answer 时为空数组。',
+    ),
     next_task: z.object({
-      objective: z.string().trim().min(1).describe('本轮唯一 materialize 的 current task。'),
-      capability_intent: z.string().trim().min(1).describe('current task 所需能力类型，不是 registry capability id。'),
-    }).nullable().optional().describe('result=next_task 时必填；result=answer 时为 null。'),
+      objective: z.string().trim().min(1).describe('本轮唯一的当前任务，应当可以直接执行并得到可验收结果。'),
+      capability_intent: z.string().trim().min(1).describe('当前任务需要的能力类型。'),
+    }).nullable().describe('result=next_task 时为当前任务；result=answer 时为 null。'),
   }).superRefine((decision, ctx) => {
-    if (decision.result === 'next_task' && !decision.next_task?.objective.trim()) {
+    if (decision.result === 'next_task' && !decision.next_task) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['next_task'], message: 'next_task result requires a concrete next_task.' });
     }
     if (decision.next_task && decision.remaining_plan.some((item) =>

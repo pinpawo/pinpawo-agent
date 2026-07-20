@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildDelegationOutcomeDecisionOutputInstruction,
   buildDelegationOutcomeDecisionSchema,
+  buildCapabilityPlanningDecisionOutputInstruction,
   buildCapabilityPlanningDecisionSchema,
   buildRouteCapabilityLane,
   buildRouteDecisionOutputInstruction,
@@ -140,6 +141,17 @@ test('capability planner schema materializes a concrete next task without capabi
     next_task: { objective: '调查 auth', capability_intent: 'codebase_exploration' },
   }).success, false);
   assert.equal(schema.safeParse({ result: 'next_task', remaining_plan: [], next_task: null }).success, false);
+  assert.equal(schema.safeParse({ result: 'answer', remaining_plan: [] }).success, false);
+  assert.equal(schema.safeParse({
+    result: 'answer',
+    remaining_plan: [{ objective: '调查 auth', capability_intent: 'codebase_exploration', status: 'concrete' }],
+    next_task: null,
+  }).success, false);
+  assert.equal(schema.safeParse({
+    result: 'answer',
+    remaining_plan: [],
+    next_task: { objective: '调查 auth', capability_intent: 'codebase_exploration' },
+  }).success, false);
   assert.equal(schema.safeParse({
     result: 'next_task',
     remaining_plan: [{ objective: '调查 auth', capability_intent: '   ', status: 'concrete' }],
@@ -178,6 +190,10 @@ test('decision output instructions add schema shape only for jsonMode', () => {
   assert.match(jsonModeTaskInstruction, /JSON Schema/);
   assert.match(jsonModeTaskInstruction, /"action"/);
   assert.doesNotMatch(jsonModeTaskInstruction, /"plan_draft"/);
+
+  const jsonModePlannerInstruction = buildCapabilityPlanningDecisionOutputInstruction('jsonMode');
+  assert.match(jsonModePlannerInstruction, /result=answer 时为空数组/);
+  assert.match(jsonModePlannerInstruction, /"required":\["result","remaining_plan","next_task"\]/);
 
   const jsonModeRouteInstruction = buildRouteDecisionOutputInstruction({
     capabilityCandidates: [{ name: 'browser' }],

@@ -96,6 +96,7 @@ export function createCapabilityNode(params: {
       actor,
       messages: scopedMessages,
       reviewContext: {
+        task: runNextDelegation.task,
         workdir: workdir ?? null,
       },
       threadId,

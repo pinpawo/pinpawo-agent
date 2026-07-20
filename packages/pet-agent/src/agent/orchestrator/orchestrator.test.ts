@@ -2012,6 +2012,7 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
     actor: testActor,
     messages: [new HumanMessage('subagent context')],
     reviewContext: {
+      task: 'Write the requested notes file',
       workdir: '/repo',
     },
     reviewCapabilities: {
@@ -2037,6 +2038,7 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.match(String(systemPrompt), /fallback risk review/);
   assert.match(String(systemPrompt), /Decision policy:/);
   const reviewPrompt = String((autoReviewMessages as Array<{ content?: unknown }>)[1]?.content);
+  assert.match(reviewPrompt, /<current_task role="context" authority="none">[\s\S]*Write the requested notes file/);
   assert.match(reviewPrompt, /<workdir authority="runtime">[\s\S]*\/repo/);
   assert.doesNotMatch(reviewPrompt, /subagent context/);
   assert.doesNotMatch(reviewPrompt, /user_requests|derived_task/);
@@ -2096,6 +2098,7 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
     actor: testActor,
     messages: [new HumanMessage('write both files')],
     reviewContext: {
+      task: 'Write both requested files',
       workdir: '/repo',
     },
     reviewCapabilities: {
@@ -2175,6 +2178,7 @@ test('global review policy auto_authorization requires human authorization when 
     actor: testActor,
     messages: [new HumanMessage('rewrite the project')],
     reviewContext: {
+      task: 'Rewrite the project',
       workdir: '/repo',
     },
     reviewCapabilities: {

@@ -9,6 +9,7 @@ import {
 const MAX_PROMPT_CHARS = 8_000;
 const MAX_ACTIONS_CHARS = 3_000;
 const MAX_REVIEW_ACTIONS = 6;
+const MAX_TASK_CHARS = 500;
 const LARGE_VALUE_KEY = /(?:content|body|text|data|patch|before|after|preview|output|html|markdown)$/i;
 
 function clipText(value: string, limit: number) {
@@ -93,6 +94,7 @@ export function buildAutoReviewSystemPrompt() {
 }
 
 export function buildAutoReviewPrompt(params: {
+  task?: string | null;
   workdir?: string | null;
   reviews: GlobalReviewPolicyBatchItem[];
 }) {
@@ -101,6 +103,9 @@ export function buildAutoReviewPrompt(params: {
     return { text: '', complete: false };
   }
   const text = AUTO_REVIEW_INPUT_PROMPT.render({
+    taskBlock: promptBlock(params.task?.trim()
+      ? xmlTextBlock('current_task', clipText(params.task.trim(), MAX_TASK_CHARS), ' role="context" authority="none"')
+      : null, 2),
     workdirBlock: promptBlock(params.workdir?.trim()
       ? xmlTextBlock('workdir', clipText(params.workdir.trim(), 400), ' authority="runtime"')
       : null, 2),

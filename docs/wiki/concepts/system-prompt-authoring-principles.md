@@ -264,10 +264,11 @@ The third #417 implementation candidate applies the same ownership split to
 
 - the production prompt defines which context provides the current-task and
   user-goal evidence;
-- the model-visible schema defines the three verdicts and a
-  required-but-nullable `gap_note`;
-- schema normalization removes terminal-outcome gap noise, while runtime graph
-  code owns continuation, planner handoff, and answer routing;
+- the model-visible schema defines the three verdicts and accepts compatible
+  optional or nullable `gap_note` input;
+- schema normalization produces a stable nullable `gap_note` and removes
+  terminal-outcome gap noise, while runtime graph code owns continuation,
+  planner handoff, and answer routing;
 - eval cases cover a completed sibling task that cannot replace the current
   announce and a run that requires user input before it can continue.
 

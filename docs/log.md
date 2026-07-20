@@ -101,3 +101,9 @@ lint passes, and documentation migrations.
   `gap_note` required-but-nullable.
 - Retained terminal gap normalization and graph transitions in runtime code.
 - Added eval cases for sibling-result isolation and required user input.
+
+## [2026-07-21] correction | OutcomeDecision gap compatibility
+
+- Restored optional and nullable provider input for advisory `gap_note` values.
+- Normalized missing, blank, and terminal-outcome gap values to `null` so the
+  runtime output shape remains stable without rejecting compatible providers.

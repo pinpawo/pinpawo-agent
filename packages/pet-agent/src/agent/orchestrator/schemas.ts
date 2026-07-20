@@ -130,20 +130,20 @@ export function buildDelegationOutcomeDecisionSchema() {
     outcome: z.enum(['continue', 'task_done', 'goal_done']).describe(
       'continue=当前 task 未达标且同一 capability 可以继续；task_done=当前 task 达标但不能明确断言用户目标已经完成；goal_done=用户目标已经完成，或继续前需要用户补充、澄清、确认。',
     ),
-    gap_note: z.string().trim().min(1).nullable().describe(
-      'outcome=continue 时为当前 task 的具体缺口；没有可补充的具体缺口时为 null。其他 outcome 为 null。',
+    gap_note: z.string().trim().nullable().optional().describe(
+      'outcome=continue 时为当前 task 的具体缺口；没有可补充的具体缺口时可为 null 或省略。其他 outcome 可为 null 或省略。',
     ),
     // Normalize instead of reject: gap_note is advisory and outcome is the
     // authoritative field, so a stray gap_note on task_done/goal_done is
     // harmless model noise — stripping it keeps the continue-only contract
     // structural without turning noise into a failed run (autoRepair defaults
-    // to zero retries). A null gap on continue stays valid: the schema cannot
-    // see completionReason, and limit_reached can continue without a new gap.
-  }).transform((decision) => (
-    decision.outcome === 'continue'
-      ? decision
-      : { ...decision, gap_note: null }
-  ));
+    // to zero retries). A missing, null, or blank gap on continue stays valid:
+    // the schema cannot see completionReason, and limit_reached can continue
+    // without a new gap. Normalize every accepted shape for stable runtime use.
+  }).transform((decision) => ({
+    ...decision,
+    gap_note: decision.outcome === 'continue' ? decision.gap_note || null : null,
+  }));
 }
 
 export function buildRouteDecisionSchema(params: OrchestrationDecisionSchemaParams) {

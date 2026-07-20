@@ -51,27 +51,17 @@ test('HTTP and TUI projections expose the same normalized runtime values', () =>
   const http = buildLocalHttpRuntimeProjection(deps);
 
   assert.equal(runtime.workdir, runtimeConfig.workdir);
-  assert.equal(runtime.studioConfigSource, 'workdir');
   assert.equal(http.workdir, runtime.workdir);
   assert.equal(http.workspace_id, runtime.workspaceId);
   assert.equal(http.state_root, runtime.stateRoot);
   assert.equal(http.studio_config_path, runtime.studioConfigPath);
   assert.equal(http.studio_due_runs_path, runtime.studioDueRunsPath);
-  assert.equal(http.studio_config_source, runtime.studioConfigSource);
-  assert.equal(http.studio_config_active_path, runtime.studioConfigActivePath);
 });
 
-test('projection without runtime config preserves the legacy home contract', () => {
-  const home = mkdtempSync(join(tmpdir(), 'pinpawo-legacy-home-'));
-  const legacyStudioConfigPath = join(home, '.pinpawo', 'studio.json');
-  const runtime = buildLocalRuntimeProjection(createDeps('/tmp/legacy-workdir'), {
-    legacyStudioConfigPath,
-  });
+test('projection without runtime config does not synthesize Studio paths', () => {
+  const runtime = buildLocalRuntimeProjection(createDeps('/tmp/runtime-without-config'));
 
-  assert.equal(runtime.workdir, '/tmp/legacy-workdir');
+  assert.equal(runtime.workdir, '/tmp/runtime-without-config');
   assert.equal(runtime.stateRoot, undefined);
   assert.equal(runtime.studioConfigPath, undefined);
-  assert.equal(runtime.studioConfigActivePath, legacyStudioConfigPath);
-  assert.equal(runtime.legacyStudioConfigPath, legacyStudioConfigPath);
-  assert.equal(runtime.studioConfigSource, 'missing');
 });

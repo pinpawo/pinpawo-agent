@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { buildStudioForTurn } from './studioRuntime';
+import { buildStudioForTurn, StudioNotConfiguredError } from './studioRuntime';
 import { createPendingReviewSlot } from './studioBridge';
 import type { AgentLlmConfig } from '../agentConfig';
 async function mkTempDir(prefix: string): Promise<string> {
@@ -16,6 +16,27 @@ const llmConfig: AgentLlmConfig = {
   baseUrl: 'http://127.0.0.1:1/v1',
   model: 'gpt-test',
 };
+
+test('buildStudioForTurn requires the workdir-scoped Studio config', async () => {
+  const workdir = await mkTempDir('pinpawo-studio-runtime-missing-');
+  const expectedConfigPath = path.join(workdir, '.pinpawo', 'studio.json');
+
+  await assert.rejects(
+    () => buildStudioForTurn({
+      llmConfig,
+      capabilities: [],
+      ownerUserId: null,
+      workdir,
+      bridge: {
+        send: () => {},
+        requestId: 'req-missing',
+        slot: createPendingReviewSlot(),
+      },
+    }),
+    (error: unknown) => error instanceof StudioNotConfiguredError
+      && error.configPath === expectedConfigPath,
+  );
+});
 
 test('buildStudioForTurn defaults Studio paths from effective runtime workdir', async () => {
   const previousWorkdir = process.env.PINPAWO_WORKDIR;

@@ -4,7 +4,6 @@ import { resolve } from 'node:path';
 import { buildLocalAgentRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
 import type { StoredConfig } from './storage';
 import { configPath } from './storage';
-import { DEFAULT_STUDIO_CONFIG_PATH } from './studio/studioConfig';
 
 export type SetupCheckStatus = 'ok' | 'missing' | 'warning';
 
@@ -180,19 +179,12 @@ function buildStudioConfigCheck(runtimeConfig: LocalAgentRuntimeConfig): SetupCh
     };
   }
 
-  const legacyAvailable = runtimeConfig.studioConfigPath !== DEFAULT_STUDIO_CONFIG_PATH
-    && existsSync(DEFAULT_STUDIO_CONFIG_PATH);
-
   return {
     id: 'studio-config',
     label: 'Studio config',
     status: 'warning',
-    detail: legacyAvailable
-      ? `No Studio config at ${runtimeConfig.studioConfigPath}. Legacy config exists at ${DEFAULT_STUDIO_CONFIG_PATH}.`
-      : `No Studio config at ${runtimeConfig.studioConfigPath}. Studio mode will stay disabled until this file exists.`,
-    nextStep: legacyAvailable
-      ? `Run "pinpawo-agent studio migrate --workdir ${runtimeConfig.workdir}" to copy legacy Studio config into this workdir.`
-      : `Create ${runtimeConfig.studioConfigPath} or run "pinpawo-agent studio migrate --workdir ${runtimeConfig.workdir}" after setting up legacy Studio config.`,
+    detail: `No Studio config at ${runtimeConfig.studioConfigPath}. Studio mode will stay disabled until this file exists.`,
+    nextStep: `Create ${runtimeConfig.studioConfigPath}.`,
   };
 }
 

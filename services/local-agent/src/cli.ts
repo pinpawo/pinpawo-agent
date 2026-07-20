@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
 import type { InitCommandOptions } from './commands/init';
-import type { StudioMigrateOptions } from './commands/studio';
 
 type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
@@ -15,7 +14,6 @@ type LocalAgentCliHandlers = {
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
   runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
-  runStudioMigrate?: (opts: StudioMigrateOptions) => Promise<void> | void;
 };
 
 function readPackageVersion(): string {
@@ -127,23 +125,6 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .action(async () => {
       const runDetect = handlers.runDetect ?? (await import('./commands/detect')).runDetect;
       await runDetect();
-    });
-
-  program
-    .command('studio <action>')
-    .description('Manage workdir-scoped Studio runtime config')
-    .option('--workdir <directory>', 'target workdir')
-    .option('--force', 'overwrite existing workdir-scoped Studio files')
-    .action(async (action: string, options: { workdir?: string; force?: boolean }) => {
-      if (action !== 'migrate') {
-        throw new Error(`Unknown studio command: ${action}`);
-      }
-      const runStudioMigrate = handlers.runStudioMigrate
-        ?? (await import('./commands/studio')).runStudioMigrate;
-      await runStudioMigrate({
-        workdir: options.workdir?.trim() ? resolveWorkdirOption(options.workdir) : undefined,
-        force: options.force ?? false,
-      });
     });
 
   registerCapabilityCommand(program);

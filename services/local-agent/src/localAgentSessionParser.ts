@@ -100,21 +100,11 @@ function parseLocalAgentRuntime(value: unknown): LocalAgentRuntimeView | null {
     'stateRoot',
     'studioConfigPath',
     'studioDueRunsPath',
-    'studioConfigActivePath',
-    'legacyStudioConfigPath',
     'petsDir',
     'studioWikiBaseDir',
   ] as const;
   if (stringFields.some((field) =>
     value[field] !== undefined && typeof value[field] !== 'string')) {
-    return null;
-  }
-  if (
-    value.studioConfigSource !== undefined
-    && value.studioConfigSource !== 'workdir'
-    && value.studioConfigSource !== 'legacy_home'
-    && value.studioConfigSource !== 'missing'
-  ) {
     return null;
   }
   if (
@@ -136,9 +126,6 @@ function parseLocalAgentRuntime(value: unknown): LocalAgentRuntimeView | null {
     ...(typeof value.stateRoot === 'string' ? { stateRoot: value.stateRoot } : {}),
     ...(typeof value.studioConfigPath === 'string' ? { studioConfigPath: value.studioConfigPath } : {}),
     ...(typeof value.studioDueRunsPath === 'string' ? { studioDueRunsPath: value.studioDueRunsPath } : {}),
-    ...(typeof value.studioConfigSource === 'string' ? { studioConfigSource: value.studioConfigSource } : {}),
-    ...(typeof value.studioConfigActivePath === 'string' ? { studioConfigActivePath: value.studioConfigActivePath } : {}),
-    ...(typeof value.legacyStudioConfigPath === 'string' ? { legacyStudioConfigPath: value.legacyStudioConfigPath } : {}),
     ...(typeof value.petsDir === 'string' ? { petsDir: value.petsDir } : {}),
     ...(typeof value.studioWikiBaseDir === 'string' ? { studioWikiBaseDir: value.studioWikiBaseDir } : {}),
     ...(typeof value.contextWindow === 'number' ? { contextWindow: value.contextWindow } : {}),

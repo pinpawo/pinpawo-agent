@@ -2,7 +2,7 @@
 
 ## 背景
 
-当前 local-agent 的配置分成两类来源，但边界还不清晰：
+这份设计最初用于收敛 local-agent 的 workdir 边界。改造前的主要问题是：
 
 - `~/.pinpawo/config.json` 和环境变量提供 LLM、API、actor、`workdir` 等进程级配置。
 - 普通 chat/pet runtime 会把 `config.workdir` 注入 graph prompt 和部分运行产物路径。
@@ -22,7 +22,7 @@
 - 普通 chat/pet runtime 的 prompt、tool path resolution、artifact root、checkpoint root 使用同一个 effective workdir。
 - Studio 配置、pet 配置、wiki 和 Studio 运行产物默认跟随 effective workdir。
 - 保留全局账号/密钥配置，不把 token、LLM key、Hasura/JWT 等复制到工作区。
-- 支持平滑迁移旧的 `~/.pinpawo/studio.json` 和 `~/.pinpawo/pets/`。
+- Studio 只读取 workdir-scoped canonical 路径，不在 runtime 中保留旧 home fallback 或迁移入口。
 - 设计可迭代，每一阶段都能独立验证和回滚。
 
 ## 迭代推进（当前）
@@ -36,7 +36,7 @@
 - 下一步：
   - 在 API/scheduler 服务层落地 `studio_due_runs` 持久表，使用 `idempotencyKey` 做去重和并发领取（`pending -> claimed -> running -> success/failed`）。
   - 为 scheduler 增加重试策略与 `workdir` 映射、告警可观测指标（claim 延迟、失败原因、重试次数）。
-  - 将 `/runtime` 与 App 客户端展示中的运行来源（legacy_home/workdir-scoped）与 scheduler trace 打通，形成可追溯链路。
+  - 将 `/runtime` 与 App 客户端展示中的 canonical workdir 路径和 scheduler trace 打通，形成可追溯链路。
 
 ## 非目标
 
@@ -232,43 +232,19 @@ agent.invoke({
 
 这样 Studio 内 pet 的 prompt、tool path resolution、artifact root 与普通 pet runtime 保持一致。
 
-## 兼容与迁移
+## 当前路径契约
 
-第一阶段保留旧路径 fallback，但必须可观测：
-
-```text
-primary:  <workdir>/.pinpawo/studio.json
-fallback: ~/.pinpawo/studio.json
-```
-
-如果命中 fallback：
-
-- 打印 warning。
-- `/runtime` 返回 `studio_config_source: "legacy_home"`，并给出
-  `studio_config_active_path`。
-- 后续提供迁移命令或 setup 提示。
-
-迁移命令可以后续补：
-
-```bash
-pinpawo-agent studio migrate --workdir /path/to/project
-```
-
-迁移内容：
+Studio runtime 只读取当前 effective workdir 下的 canonical 路径：
 
 ```text
-~/.pinpawo/studio.json       -> <workdir>/.pinpawo/studio.json
-~/.pinpawo/pets/             -> <workdir>/.pinpawo/pets/
-~/.pinpawo/studio-wiki/      -> <workdir>/.pinpawo/studio-wiki/
+<workdir>/.pinpawo/studio.json
+<workdir>/.pinpawo/pets/
+<workdir>/.pinpawo/studio-wiki/
 ```
 
-默认不删除旧文件。
-
-当前 local-agent 已提供该迁移命令。默认跳过已有目标文件，传 `--force`
-时才覆盖目标 workdir 下的 Studio 配置、pets 配置和 wiki 目录。
-`/runtime` 也会返回 `studio_config_source`、`studio_config_active_path` 和
-`legacy_studio_config_path`，TUI runtime info 会显示实际使用的 Studio 配置路径
-及来源（工作区 / 旧全局 / 缺失）。
+runtime 不再探测 `~/.pinpawo` 旧路径，也不提供常驻迁移命令。需要保留旧数据时，
+用户应在升级前显式复制到目标 workdir。`/runtime` 暴露 canonical
+`studio_config_path`，TUI 直接展示该路径。
 
 ## CLI 和服务启动
 
@@ -419,35 +395,33 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 - `loadPetLocalConfigs()` 支持 caller 传入 petsDir，local handler 传 `<workdir>/.pinpawo/pets`。
 - `wikiBaseDir` 默认 `<workdir>/.pinpawo/studio-wiki`。
 - Studio 内 `createPetAgentRuntime` 传入 workdir。
-- 旧 `~/.pinpawo/studio.json` fallback 加 warning。
+- 缺少 workdir-scoped `studio.json` 时明确拒绝启动 Studio，不回退到 home 路径。
 
 验收：
 
 - 在两个不同 workdir 下放不同 `studio.json`，同一个 local-agent 版本分别启动后读取各自 Studio。
 - Studio 内 pet 使用相同 workdir 解析工具相对路径。
 
-### Phase 4: TUI 状态和迁移工具
+### Phase 4: TUI 状态和 setup 指引
 
-目标：用户能看见当前 workdir，并能迁移旧 Studio 配置。
+目标：用户能看见当前 workdir 和 canonical Studio 配置路径。
 
 任务：
 
 - TUI runtime info 展示 effective workdir。
 - `setup` 检查 `<workdir>/.pinpawo/studio.json` 是否存在。
-- 可选新增 `studio migrate` 或在 `init --dir` 中生成 workdir-scoped Studio scaffold。
+- 缺少配置时直接提示创建 workdir-scoped Studio 配置。
 
 验收：
 
 - 用户不需要猜当前读取的是哪个 studio config。
-- 旧配置可复制到新工作区，不自动删除旧配置。
+- 不把旧 home 配置误报为当前 workdir 的有效配置。
 
 当前实现：
 
 - TUI 从 local server `/runtime` 读取 effective workdir 和
   `<workdir>/.pinpawo/studio.json` 路径并展示。
-- `setup --workdir <dir>` 检查该 workdir 下的 Studio 配置，缺失时提示迁移命令。
-- `studio migrate --workdir <dir> [--force]` 将旧 `~/.pinpawo` Studio 三件套复制到
-  `<workdir>/.pinpawo/`。
+- `setup --workdir <dir>` 检查该 workdir 下的 Studio 配置，缺失时提示创建 canonical 文件。
 
 ### Phase 5: API/Scheduler 工作区化
 
@@ -508,7 +482,7 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
 回归测试：
 
 - 未传 `--workdir` 时保留现有默认行为。
-- 旧 `~/.pinpawo/studio.json` fallback 仍能启动 Studio，但有 warning。
+- 缺少 canonical Studio 配置时明确返回未配置错误，不读取旧 home 路径。
 
 ## 风险和注意事项
 
@@ -524,7 +498,7 @@ App/API 侧也应传递同样的 workdir 概念，但第一阶段只做 local-ag
   - 在断连场景明确队列内待执行的 `studio_request` 处理策略（默认快速失败）。
   - 增加本地集成测试：断连后不会继续执行尚未开始的排队请求。
 - 优先级 2：可观测性
-  - `/runtime` 暴露 `studio_config_source`、`studio_config_active_path`、`legacy_studio_config_path`。
+  - `/runtime` 暴露 canonical `studio_config_path` 和 effective workdir。
   - 记录 `studio_request` 入队/出队时延与 `interrupted`、`failed` 明细。
 - 优先级 3：Scheduler 落地前置
   - 在 App/API 侧约定 `studio_due_runs` 的 `idempotencyKey` 唯一键与重试行为。

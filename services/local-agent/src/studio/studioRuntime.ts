@@ -20,9 +20,8 @@ import type { AgentLlmConfig } from '../agentConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
 import { createExploreCapability } from '../capabilities/explore';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
-import { DEFAULT_PETS_DIR, loadPetLocalConfigs } from './petConfig';
+import { loadPetLocalConfigs } from './petConfig';
 import {
-  DEFAULT_STUDIO_CONFIG_PATH,
   loadStudioLocalConfig,
   resolveStudio,
   type ResolvedStudio,
@@ -34,7 +33,7 @@ import {
 } from './studioBridge';
 
 /**
- * 没有 ~/.pinpawo/studio.json 时抛此错。
+ * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
  * ws handler 捕获后可以友好提示用户去创建配置。
  */
 export class StudioNotConfiguredError extends Error {
@@ -121,28 +120,14 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
   const workdirStateRoot = path.join(effectiveWorkdir, '.pinpawo');
   const preferredStudioConfigPath = input.studioConfigPath
     ?? path.join(workdirStateRoot, 'studio.json');
-  let studioConfigPath = preferredStudioConfigPath;
-  let studio = await loadStudioLocalConfig(studioConfigPath);
-  if (!studio && preferredStudioConfigPath !== DEFAULT_STUDIO_CONFIG_PATH) {
-    const legacyStudio = await loadStudioLocalConfig(DEFAULT_STUDIO_CONFIG_PATH);
-    if (legacyStudio) {
-      console.warn(
-        `[studio] using legacy Studio config at ${DEFAULT_STUDIO_CONFIG_PATH}; `
-        + `create ${preferredStudioConfigPath} to scope Studio config to the active workdir.`,
-      );
-      studioConfigPath = DEFAULT_STUDIO_CONFIG_PATH;
-      studio = legacyStudio;
-    }
-  }
+  const studioConfigPath = preferredStudioConfigPath;
+  const studio = await loadStudioLocalConfig(studioConfigPath);
   if (!studio) {
     throw new StudioNotConfiguredError(preferredStudioConfigPath);
   }
   const studioConfigDir = path.dirname(studioConfigPath);
 
-  const petsDir = input.petsDir
-    ?? (studioConfigPath === DEFAULT_STUDIO_CONFIG_PATH
-      ? DEFAULT_PETS_DIR
-      : path.join(path.dirname(studioConfigPath), 'pets'));
+  const petsDir = input.petsDir ?? path.join(path.dirname(studioConfigPath), 'pets');
   const pets = await loadPetLocalConfigs(petsDir);
   const resolved = resolveStudio(studio, pets);
 

@@ -1,9 +1,8 @@
 import { promises as fs } from 'node:fs';
-import { homedir } from 'node:os';
 import path from 'node:path';
 
 /**
- * Pet 本地配置——用户在 `~/.pinpawo/pets/<petId>.json` 自行维护。
+ * Pet 本地配置——用户在 `<workdir>/.pinpawo/pets/<petId>.json` 自行维护。
  *
  * 设计立场:
  * - 本地配置是 source of truth(pet 行为完全由此决定)。
@@ -31,8 +30,6 @@ export type PetLocalConfig = {
     petId: string;
   };
 };
-
-export const DEFAULT_PETS_DIR = path.join(homedir(), '.pinpawo', 'pets');
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
@@ -118,7 +115,7 @@ export function parsePetLocalConfig(raw: unknown, source: string): PetLocalConfi
  * - 单个文件解析失败 → 抛错并附文件路径
  * - 同一 petId 出现两次 → 抛错
  */
-export async function loadPetLocalConfigs(dir: string = DEFAULT_PETS_DIR): Promise<PetLocalConfig[]> {
+export async function loadPetLocalConfigs(dir: string): Promise<PetLocalConfig[]> {
   let entries: string[];
   try {
     entries = await fs.readdir(dir);

@@ -147,7 +147,6 @@ test('TuiLocalServerClient rejects malformed runtime facts in current snapshots'
     { model: 42 },
     { cwd: ['/tmp/work'] },
     { contextWindow: '64000' },
-    { studioConfigSource: 'unknown' },
   ];
 
   for (const runtime of invalidRuntimes) {

@@ -343,9 +343,9 @@ Important local paths:
 | `~/.pinpawo/.env` | Environment-style local config scaffold. |
 | `~/.pinpawo/capabilities/` | Installed user capabilities. |
 | `~/.pinpawo/plugins/` | Local external plugin modules. |
-| `~/.pinpawo/studio.json` | Local Studio configuration. |
-| `~/.pinpawo/pets/` | Local per-pet Studio config files. |
-| `~/.pinpawo/studio-wiki/conv/<conversationId>/wiki/` | Current local Studio Whiteboard wiki default. |
+| `<workdir>/.pinpawo/studio.json` | Local Studio configuration. |
+| `<workdir>/.pinpawo/pets/` | Local per-pet Studio config files. |
+| `<workdir>/.pinpawo/studio-wiki/conv/<conversationId>/wiki/` | Current local Studio Whiteboard wiki default. |
 | `{artifactStore}/studio/<studioId>/conv/<conversationId>/artifacts/` | Design target for the capability artifact store. |
 
 State ownership:

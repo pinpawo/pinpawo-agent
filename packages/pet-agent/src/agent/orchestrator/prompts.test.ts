@@ -139,8 +139,12 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(prompt, /决策条件/);
   assert.match(prompt, /answer、direct_task 或 needs_plan/);
   assert.match(prompt, /action=answer：[^]*action=direct_task：[^]*action=needs_plan：/);
+  assert.match(prompt, /对话中已有足够信息，可以直接回复/);
+  assert.match(prompt, /新结果包括通过读取、查询、检查或计算得到的结果/);
+  assert.match(prompt, /已有结论直接复用/);
   assert.match(prompt, /后续 task 必须等待前一次 announce/);
   assert.match(prompt, /分别选择 capability、分别执行并分别验收/);
+  assert.doesNotMatch(prompt, /用户在询问已有上下文、最近任务状态或之前结果/);
   assert.doesNotMatch(prompt, /plan_draft|task_plan_draft/);
   assert.match(input, /<entry_decision_context role="fact" source="runtime_state" trust="read_only">/);
   assert.match(input, /run_delegation_summaries/);

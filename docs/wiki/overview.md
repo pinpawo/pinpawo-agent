@@ -2,7 +2,7 @@
 title: System Prompt Design Knowledge Map
 page_type: overview
 status: draft
-updated: 2026-07-20
+updated: 2026-07-21
 sources:
   - ../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
@@ -102,10 +102,11 @@ an action or message role.
 The [entryDecision state-query investigation](investigations/entry-decision-state-query-routing.md)
 found a semantic gap introduced during the planner prompt refactor: the older
 taskDecision contract explicitly classified reading, searching, running, and
-external access as execution, while the current entry prompt broadly classifies
-questions about recent status as `answer`. This is recorded as a migration
-regression, not a reason to redesign unrelated answer, handoff, or provenance
-mechanisms.
+external access as execution, while the migrated entry prompt broadly classified
+questions about recent status as `answer`. The #416 implementation candidate now
+defines the boundary through sufficient existing evidence versus one or multiple
+new execution results. This remains a migration regression under evaluation, not
+a reason to redesign unrelated answer, handoff, or provenance mechanisms.
 
 The accepted follow-up structure is tracked by
 [issue #418](https://github.com/pinpawo/pinpawo-agent/issues/418):
@@ -121,7 +122,8 @@ The accepted follow-up structure is tracked by
 
 The source set is unusually strong on historical design, but weaker on:
 
-- a canonical definition of “new execution result” at run entry;
+- real-model validation of the candidate “new execution result” definition at
+  run entry;
 - complete verification coverage for each stable behavior contract in the map;
 - page-level freshness/dependency checks when implementation changes;
 - a consistent status distinction among current, pinned, draft, superseded, and

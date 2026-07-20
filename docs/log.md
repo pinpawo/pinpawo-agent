@@ -48,3 +48,16 @@ lint passes, and documentation migrations.
   traceability.
 - Deferred dedicated lifecycle, model-scope, manifest, and lint concepts until a
   concrete missing relationship proves they are needed.
+
+## [2026-07-21] implementation candidate | EntryDecision evidence boundary
+
+- Replaced the broad recent-status-to-`answer` rule with a domain-independent
+  sufficient-evidence versus new-execution boundary.
+- Aligned the structured-output action description without changing the enum or
+  graph transitions.
+- Added cross-domain cases for explicit, absent, and stale evidence; replay;
+  clarification; calculation; and one versus multiple execution boundaries.
+- Recorded the prompt-size measurement and kept real-model route, latency, and cost
+  validation open before promoting the investigation to `validated`.
+- Preserved answer ownership, message provenance, and the fixed delegation
+  completion acknowledgement.

@@ -892,6 +892,9 @@ test('a completed subagent announce reaches the decision, while answer node only
   assert.match(answerInput, /END_OF_FULL_SUBAGENT_RESULT/);
   assert.ok(answerInput.includes('A'.repeat(1400)), 'answer node should still see complete main history');
   assert.match(answerInput, /delegation completion acknowledgement/);
+  assert.match(answerInput, /本条消息用于关闭 delegation 生命周期/);
+  assert.match(answerInput, /内容限定为：本次处理了哪类 delegation task/);
+  assert.doesNotMatch(answerInput, /不要把回复写成对任务处理结果正文的二次总结/);
   assert.match(answerInput, /delegation run：/);
   assert.match(answerInput, /delegated task：读取文件并运行 lint/);
 });

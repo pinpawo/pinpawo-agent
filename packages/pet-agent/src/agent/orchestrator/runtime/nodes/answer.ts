@@ -81,7 +81,7 @@ function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLi
     return [
       '当前 task loop 已达到本 run 的迭代上限。',
       `当前 delegated task 仍保留为待续跑状态：${activeDelegation.task}`,
-      '请基于已有对话如实说明当前进度与限制，不要声称目标已经完成。',
+      '请基于已有对话如实说明当前进度与限制，并明确目标尚未完成。',
     ].join('\n');
   }
 
@@ -94,14 +94,14 @@ function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLi
       return [
         '当前 capability subagent 已达到自身执行限制，尚无可交接的完成结果。',
         `当前 delegated task 仍保留为待续跑状态：${activeDelegation.task}`,
-        '请基于已有对话如实说明当前进度与限制，不要声称目标已经完成。',
+        '请基于已有对话如实说明当前进度与限制，并明确目标尚未完成。',
       ].join('\n');
     }
 
     return [
       '当前 delegated task 尚无可交接的完成结果，任务边界没有完成切换。',
       `当前 delegated task 仍保留为待续跑状态：${activeDelegation.task}`,
-      '请基于已有对话如实说明当前状态，不要声称目标已经完成。',
+      '请基于已有对话如实说明当前状态，并明确目标尚未完成。',
     ].join('\n');
   }
 
@@ -109,7 +109,7 @@ function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLi
     return [
       '当前 task 没有匹配到可执行的 capability subagent。',
       `未执行的 task：${state.runPendingTask.task}`,
-      '请如实说明当前无法执行这一步，不要编造执行结果。',
+      '请如实说明当前无法执行这一步以及尚未完成的任务。',
     ].join('\n');
   }
 
@@ -119,9 +119,8 @@ function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLi
 function buildDelegationCompletionAnswerContext(source: HandoffSource) {
   return [
     '当前最终回复模式：delegation completion acknowledgement。',
-    '刚刚跑完了一次 delegation task。请看近期消息记录，简短总结本次 delegation task 的完成情况。',
-    '回复重点是 orchestrator/delegation 层面的完成状态：做了哪类交接、是否已经完成、是否需要用户继续指示。',
-    '不要把回复写成对任务处理结果正文的二次总结；不要重复列出 handoff 中的完整结论、数据、文件内容或执行细节。',
+    '近期 handoff 已经承载任务结果正文；本条消息用于关闭 delegation 生命周期。',
+    '输出一条简短完成说明，内容限定为：本次处理了哪类 delegation task、当前完成状态、是否需要用户继续指示。',
     `delegation 来源：${source.handoffFrom}`,
     ...(source.runId ? [`delegation run：${source.runId}`] : []),
     ...(source.task ? [`delegated task：${source.task}`] : []),

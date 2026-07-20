@@ -107,3 +107,14 @@ lint passes, and documentation migrations.
 - Restored optional and nullable provider input for advisory `gap_note` values.
 - Normalized missing, blank, and terminal-outcome gap values to `null` so the
   runtime output shape remains stable without rejecting compatible providers.
+
+## [2026-07-21] pilot | Answer positive-first authoring
+
+- Replaced static answer anti-rules with direct, handoff-synthesis, historical
+  replay, and user-question reply modes.
+- Preserved the provenance-triggered delegation completion acknowledgement as a
+  distinct final main message.
+- Rephrased completion and terminal contexts around their required content and
+  status instead of repeated exclusions.
+- Recorded the static prompt-size measurement without claiming behavioral
+  improvement before real-model evaluation.

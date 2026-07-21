@@ -23,7 +23,7 @@
     "test:live": "node --import tsx --test tests/live-agent.test.ts",
     "test:unit": "node --import tsx --test $(find src -name '*.test.ts' | sort)",
     "eval:hitl": "node --env-file=.env --import tsx/esm evals/hitl-resume.eval.ts",
-    "build": "tsup && node --import tsx/esm scripts/gen-manifest.ts",
+    "build": "tsup && node --import tsx/esm scripts/gen-manifest.ts && npm --prefix ../../tools/chrome-extension run build && node --import tsx/esm scripts/copy-browser-extension.ts",
     "typecheck": "tsc --noEmit",
     "pack:dry": "npm pack --dry-run",
     "prepublishOnly": "npm run typecheck && npm run test:unit && npm run build"

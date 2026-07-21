@@ -11,7 +11,14 @@ test('browser snapshot payload returns more than 10000 characters when within th
     title: 'Long page',
     url: 'https://example.com/long',
     text,
-    interactive: [{ index: 1, tag: 'a', text: 'first' }],
+    interactive: [{
+      index: 1,
+      tag: 'a',
+      text: 'first',
+      type: null,
+      placeholder: null,
+      hint: 'text=first',
+    }],
     interactiveCount: 3,
   });
 

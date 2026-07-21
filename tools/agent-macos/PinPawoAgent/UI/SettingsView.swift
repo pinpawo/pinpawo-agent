@@ -395,7 +395,8 @@ private struct BrowserOptionStatus {
   let playwrightCorePath: String?
 
   var supportsPlaywright: Bool { playwrightCorePath != nil && chromeAvailable }
-  var hasAnyExternalSupport: Bool { supportsPlaywright }
+  var supportsExtension: Bool { chromeAvailable }
+  var hasAnyExternalSupport: Bool { supportsPlaywright || supportsExtension }
 
   static let fallback = BrowserOptionStatus(
     chromePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -875,6 +876,9 @@ private struct BrowserConfigView: View {
           if browserSupport.supportsPlaywright {
             Text("Playwright + Chrome").tag("playwright")
           }
+          if browserSupport.supportsExtension {
+            Text("Chrome 扩展（实验性）").tag("extension")
+          }
         }
         .pickerStyle(.automatic)
         .disabled(!browserSupport.hasAnyExternalSupport)
@@ -883,6 +887,8 @@ private struct BrowserConfigView: View {
           switch value {
           case "playwright" where browserSupport.supportsPlaywright:
             normalized = "playwright"
+          case "extension" where browserSupport.supportsExtension:
+            normalized = "extension"
           default:
             normalized = "auto"
           }
@@ -892,6 +898,7 @@ private struct BrowserConfigView: View {
 
         VStack(alignment: .leading, spacing: 4) {
           availabilityRow("Playwright + Chrome", available: browserSupport.supportsPlaywright)
+          availabilityRow("Chrome 扩展", available: browserSupport.supportsExtension)
         }
         .font(.callout)
 
@@ -920,7 +927,7 @@ private struct BrowserConfigView: View {
           .help("重新检测")
         }
       } footer: {
-        Text("Playwright 需要系统 Chrome 和 playwright-core。安装后点击刷新重新检测，修改引擎后需重启 Agent 生效。")
+        Text("扩展模式需先加载 PinPawo 扩展并注册 Native Host；P0 支持打开、快照和断开。修改引擎后需重启 Agent 生效。")
       }
 
       // ── Session profiles ───────────────────────────────────────────
@@ -1001,6 +1008,10 @@ private struct BrowserConfigView: View {
       await refreshBrowserSupport(refreshRunningAgent: false)
       browserBackend = Config.shared.load().browserBackend ?? "auto"
       if browserBackend == "playwright" && !browserSupport.supportsPlaywright {
+        browserBackend = "auto"
+        Config.shared.update { $0.browserBackend = nil }
+      }
+      if browserBackend == "extension" && !browserSupport.supportsExtension {
         browserBackend = "auto"
         Config.shared.update { $0.browserBackend = nil }
       }

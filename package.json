@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "npm run build -w pinpawo-local-agent",
-    "test": "npm run test -w @pinpawo/pet-agent && npm run test:unit -w pinpawo-local-agent",
+    "test": "npm run test -w @pinpawo/pet-agent && npm run test:unit -w pinpawo-local-agent && npm --prefix tools/chrome-extension test",
     "typecheck": "npm run typecheck -w @pinpawo/pet-agent && npm run typecheck -w pinpawo-local-agent",
     "langfuse:env": "bash infra/langfuse/bootstrap-env.sh",
     "langfuse:up": "npm run langfuse:env && docker compose --env-file infra/langfuse/.env -f infra/langfuse/docker-compose.yml up -d",

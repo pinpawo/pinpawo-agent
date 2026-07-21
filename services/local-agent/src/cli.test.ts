@@ -84,3 +84,28 @@ test('local agent CLI enables the single-peer JSONL stdio transport', async () =
     stdio: true,
   });
 });
+
+test('local agent CLI passes Chrome extension registration options to the handler', async () => {
+  let received: unknown = null;
+  const program = createLocalAgentCli({
+    runBrowser: (target, action, options) => {
+      received = { target, action, options };
+    },
+  });
+
+  await program.parseAsync([
+    'node',
+    'pinpawo-agent',
+    'browser',
+    'extension',
+    'register',
+    '--extension-id',
+    'abcdefghijklmnopabcdefghijklmnop',
+  ]);
+
+  assert.deepEqual(received, {
+    target: 'extension',
+    action: 'register',
+    options: { extensionId: 'abcdefghijklmnopabcdefghijklmnop' },
+  });
+});

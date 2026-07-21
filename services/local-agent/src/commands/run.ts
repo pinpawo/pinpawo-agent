@@ -2,7 +2,7 @@ import { LocalAgentRuntime } from '../runtime';
 import { startLocalServer } from '../localServer';
 import { getConfig } from '../config';
 import { ensureActorSelected } from '../actorSelection';
-import { browserSession } from '../toolkits/browser';
+import { browserRuntime, browserSession } from '../toolkits/browser';
 import { applyRuntimeWorkdir } from '../runtimeWorkdir';
 import { logStartupConfig } from '../startupConfigLog';
 import {
@@ -27,6 +27,7 @@ export async function runAgent(options: RunAgentOptions = {}) {
   let stopping = false;
   let runtime: LocalAgentRuntime | null = null;
   let closeLocalTransport: (() => void) | null = null;
+  let browserRuntimeStarted = false;
   const handleSigint = () => {
     if (stopping) {
       console.log('\n[local-agent] force exit now');
@@ -53,6 +54,9 @@ export async function runAgent(options: RunAgentOptions = {}) {
     await ensureActorSelected({ interactive: !options.stdio });
     const runtimeConfig = buildRunAgentRuntimeConfig(options);
     runtime = new LocalAgentRuntime(runtimeConfig);
+
+    await browserRuntime.start();
+    browserRuntimeStarted = true;
 
     // Init runtime first to load plugins and the effective LLM config.
     await runtime.init();
@@ -102,6 +106,11 @@ export async function runAgent(options: RunAgentOptions = {}) {
     await browserSession.close().catch((error) => {
       console.warn('[local-agent] failed to close browser session:', error instanceof Error ? error.message : error);
     });
+    if (browserRuntimeStarted) {
+      await browserRuntime.stop().catch((error) => {
+        console.warn('[local-agent] failed to stop browser runtime:', error instanceof Error ? error.message : error);
+      });
+    }
     restoreConsole();
   }
 }

@@ -20,6 +20,7 @@ import {
   type LocalServerDeps,
 } from './localServerTypes';
 import { buildLocalHttpRuntimeProjection } from './localConfigProjection';
+import { browserRuntime } from './toolkits/browser';
 
 type LocalHttpHandlerOptions = {
   authToken: string;
@@ -448,5 +449,6 @@ function readBrowserHealthFields() {
         ? 'available'
         : 'none',
     browser_detail: availability.detail ?? availability.reason,
+    ...browserRuntime.getHealthFields(mode),
   };
 }

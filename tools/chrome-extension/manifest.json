@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "PinPawo Browser Bridge",
+  "version": "0.1.0",
+  "description": "Connects an explicitly approved Chrome tab to the local PinPawo agent.",
+  "permissions": [
+    "debugger",
+    "nativeMessaging",
+    "storage",
+    "tabs"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Bind this tab to PinPawo"
+  }
+}

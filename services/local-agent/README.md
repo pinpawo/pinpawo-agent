@@ -29,7 +29,7 @@ npx pinpawo-local-agent tui
 - `~/.pinpawo/capabilities/` for user capabilities.
 - `~/.pinpawo/capabilities/hello-pinpawo/` as a minimal capability that validates and loads.
 
-Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Use `pinpawo-agent login` for interactive credential setup, `pinpawo-agent setup` to check missing config and next steps, or edit `~/.pinpawo/.env` directly. Set `PINPAWO_LOCAL_ONLY=1` to start without hosted API, WebSocket relay, or Hasura GraphQL connections even when saved server credentials exist. Browser automation uses Playwright with Google Chrome.
+Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Use `pinpawo-agent login` for interactive credential setup, `pinpawo-agent setup` to check missing config and next steps, or edit `~/.pinpawo/.env` directly. Set `PINPAWO_LOCAL_ONLY=1` to start without hosted API, WebSocket relay, or Hasura GraphQL connections even when saved server credentials exist. Browser automation defaults to Playwright detection; the opt-in Chrome extension backend is selected with `PINPAWO_BROWSER_BACKEND=extension`.
 
 For a local repository smoke test:
 
@@ -84,10 +84,15 @@ pinpawo-agent run
 pinpawo-agent run --stdio
 pinpawo-agent tui
 pinpawo-agent detect
+pinpawo-agent browser extension status
+pinpawo-agent browser extension register --extension-id <id>
+pinpawo-agent browser extension unregister
 pinpawo-agent capability list
 pinpawo-agent capability validate ./my-capability
 pinpawo-agent capability install ./my-capability
 ```
+
+The packaged extension directory is printed by `browser extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, select the `extension` backend, and restart the agent. The Chrome extension is a Browser capability driver, with its Native Messaging host kept as a driver-private companion process. Extension P0 supports opening, snapshotting and detaching one approved Chrome tab.
 
 `pinpawo-agent run --stdio` starts one logical local-agent peer over newline-delimited
 JSON. It reads one `LocalAgentClientMessage` per stdin line and writes one

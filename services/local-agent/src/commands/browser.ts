@@ -2,21 +2,25 @@ import {
   getBrowserExtensionHostStatus,
   registerBrowserExtensionHost,
   unregisterBrowserExtensionHost,
-} from '../browserExtension/install';
+} from '../toolkits/browser/drivers/chromeExtension/nativeHost/install';
 import { existsSync } from 'node:fs';
 import {
   DEFAULT_BROWSER_BRIDGE_SOCKET_PATH,
   DEFAULT_BROWSER_BRIDGE_TOKEN_PATH,
-} from '../toolkits/browser/localAgentBrowserBridge';
+} from '../toolkits/browser/drivers/chromeExtension/bridge';
 
-export type BrowserExtensionCommandOptions = {
+export type BrowserCommandOptions = {
   extensionId?: string;
 };
 
-export async function runBrowserExtensionCommand(
+export async function runBrowserCommand(
+  target: string,
   action: string,
-  options: BrowserExtensionCommandOptions = {},
+  options: BrowserCommandOptions = {},
 ) {
+  if (target !== 'extension') {
+    throw new Error(`Unknown browser integration: ${target}`);
+  }
   if (action === 'register') {
     if (!options.extensionId) {
       throw new Error('Missing --extension-id. Copy it from chrome://extensions after loading the unpacked extension.');
@@ -50,5 +54,5 @@ export async function runBrowserExtensionCommand(
     }, null, 2) + '\n');
     return;
   }
-  throw new Error(`Unknown browser-extension action: ${action}`);
+  throw new Error(`Unknown browser extension action: ${action}`);
 }

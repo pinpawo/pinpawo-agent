@@ -5,7 +5,7 @@ import {
   parseAgentToExtensionMessage,
   parseBridgeHelloMessage,
   parseExtensionToAgentMessage,
-} from './extensionProtocol';
+} from './protocol';
 
 test('browser extension protocol validates register and deduplicates capabilities', () => {
   const message = parseExtensionToAgentMessage({

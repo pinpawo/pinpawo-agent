@@ -19,7 +19,7 @@ import {
   type BrowserResultMessage,
   parseBridgeHelloMessage,
   parseExtensionToAgentMessage,
-} from './extensionProtocol';
+} from './protocol';
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_BRIDGE_LINE_BYTES = 4 * 1024 * 1024;

@@ -84,15 +84,15 @@ pinpawo-agent run
 pinpawo-agent run --stdio
 pinpawo-agent tui
 pinpawo-agent detect
-pinpawo-agent browser-extension status
-pinpawo-agent browser-extension register --extension-id <id>
-pinpawo-agent browser-extension unregister
+pinpawo-agent browser extension status
+pinpawo-agent browser extension register --extension-id <id>
+pinpawo-agent browser extension unregister
 pinpawo-agent capability list
 pinpawo-agent capability validate ./my-capability
 pinpawo-agent capability install ./my-capability
 ```
 
-The packaged extension directory is printed by `browser-extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, select the `extension` backend, and restart the agent. Extension P0 supports opening, snapshotting and detaching one approved Chrome tab.
+The packaged extension directory is printed by `browser extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, select the `extension` backend, and restart the agent. The Chrome extension is a Browser capability driver, with its Native Messaging host kept as a driver-private companion process. Extension P0 supports opening, snapshotting and detaching one approved Chrome tab.
 
 `pinpawo-agent run --stdio` starts one logical local-agent peer over newline-delimited
 JSON. It reads one `LocalAgentClientMessage` per stdin line and writes one

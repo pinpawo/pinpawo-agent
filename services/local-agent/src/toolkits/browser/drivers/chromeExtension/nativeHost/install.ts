@@ -9,7 +9,7 @@ import { homedir, platform } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { BROWSER_NATIVE_HOST_NAME } from '../toolkits/browser/extensionProtocol';
+import { BROWSER_NATIVE_HOST_NAME } from '../protocol';
 
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
 
@@ -68,7 +68,7 @@ export function resolveBrowserExtensionInstallPaths(
       resolve(homeDir, '.config', 'chromium', 'NativeMessagingHosts', manifestName),
     ];
   } else {
-    throw new Error('browser-extension registration currently supports macOS and Linux');
+    throw new Error('Chrome extension driver registration currently supports macOS and Linux');
   }
   return {
     wrapperPath: resolve(homeDir, '.pinpawo', 'native-host', 'pinpawo-browser-native-host'),

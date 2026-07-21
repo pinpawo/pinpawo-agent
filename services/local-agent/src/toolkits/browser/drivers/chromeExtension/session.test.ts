@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ChromeExtensionBrowserSession } from './session';
-import { BrowserBridgeError } from './localAgentBrowserBridge';
+import { BrowserBridgeError } from './bridge';
 
 const rawSnapshot = {
   title: 'Example',

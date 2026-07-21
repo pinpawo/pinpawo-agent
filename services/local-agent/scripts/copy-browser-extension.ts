@@ -7,4 +7,4 @@ const destination = resolve(process.cwd(), 'dist', 'chrome-extension');
 await rm(destination, { recursive: true, force: true });
 await mkdir(destination, { recursive: true });
 await cp(source, destination, { recursive: true });
-console.log(`[browser-extension] copied ${source} -> ${destination}`);
+console.log(`[browser:extension] copied ${source} -> ${destination}`);

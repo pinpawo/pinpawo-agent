@@ -2,6 +2,8 @@
 
 The Chrome extension backend is an opt-in P0 path for using an existing Chrome installation and its login state. It is deliberately smaller than the Playwright backend: it supports `browser_open`, `browser_snapshot` and `browser_close` (debugger detach). Click, type, wait, extract, named sessions, custom profiles and headless mode are not part of P0.
 
+Architecturally, the extension is a driver of the Browser capability, not a top-level local-agent subsystem. Its Native Messaging host is a private companion process of that driver. Local-agent lifecycle and health code depend only on the Browser runtime boundary; no generic host-server abstraction is introduced until another concrete integration proves the shared contract.
+
 ## Fixed backend selection
 
 Set `PINPAWO_BROWSER_BACKEND=extension` (or save `browser_backend: "extension"`). A `BrowserSession` selects one implementation for its lifetime. There is no dynamic router, runtime fallback or provider abstraction.
@@ -11,7 +13,7 @@ Set `PINPAWO_BROWSER_BACKEND=extension` (or save `browser_backend: "extension"`)
 ## Process boundary
 
 ```text
-local-agent BrowserSession
+local-agent Browser runtime / BrowserSession
         │ versioned JSONL + per-run token
         ▼
 Unix socket (~/.pinpawo/run/browser-bridge.sock)
@@ -61,12 +63,12 @@ npm run build
 Then:
 
 1. Open `chrome://extensions` and enable Developer mode.
-2. Load `tools/chrome-extension/dist` as an unpacked extension. For an installed npm package, use the bundled `extensionPath` printed by `pinpawo-agent browser-extension status`.
+2. Load `tools/chrome-extension/dist` as an unpacked extension. For an installed npm package, use the bundled `extensionPath` printed by `pinpawo-agent browser extension status`.
 3. Copy the extension ID shown by Chrome.
 4. Register the exact allowed extension origin:
 
    ```bash
-   pinpawo-agent browser-extension register --extension-id <id>
+   pinpawo-agent browser extension register --extension-id <id>
    ```
 
 5. Set `PINPAWO_BROWSER_BACKEND=extension` and restart the agent.
@@ -74,10 +76,10 @@ Then:
 Inspect host registration and bridge runtime-file diagnostics with:
 
 ```bash
-pinpawo-agent browser-extension status
+pinpawo-agent browser extension status
 ```
 
-The running local-agent HTTP health response exposes separate host, extension, debugger and target fields while extension mode is selected. Remove registration with `pinpawo-agent browser-extension unregister`.
+The running local-agent HTTP health response exposes separate host, extension, debugger and target fields while extension mode is selected. Remove registration with `pinpawo-agent browser extension unregister`.
 
 ## Attribution
 

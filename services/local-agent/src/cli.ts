@@ -14,7 +14,8 @@ type LocalAgentCliHandlers = {
   runDetect?: () => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
   runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
-  runBrowserExtension?: (
+  runBrowser?: (
+    target: string,
     action: string,
     opts: { extensionId?: string },
   ) => Promise<void> | void;
@@ -131,14 +132,18 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
       await runDetect();
     });
 
-  program
-    .command('browser-extension <action>')
-    .description('Register, inspect or unregister the Chrome Native Messaging host')
+  const browserCommand = program
+    .command('browser')
+    .description('Manage browser integrations');
+
+  browserCommand
+    .command('extension <action>')
+    .description('Register, inspect or unregister the Chrome extension driver')
     .option('--extension-id <id>', 'Chrome extension ID shown by chrome://extensions')
     .action(async (action: string, options: { extensionId?: string }) => {
-      const runBrowserExtension = handlers.runBrowserExtension
-        ?? (await import('./commands/browserExtension')).runBrowserExtensionCommand;
-      await runBrowserExtension(action, options);
+      const runBrowser = handlers.runBrowser
+        ?? (await import('./commands/browser')).runBrowserCommand;
+      await runBrowser('extension', action, options);
     });
 
   registerCapabilityCommand(program);

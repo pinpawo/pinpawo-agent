@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { encodeNativeMessage, NativeMessageDecoder } from './nativeMessaging';
+import { encodeNativeMessage, NativeMessageDecoder } from './framing';
 
 test('native messaging decoder handles split and combined Chrome frames', () => {
   const first = encodeNativeMessage({ id: 1 });

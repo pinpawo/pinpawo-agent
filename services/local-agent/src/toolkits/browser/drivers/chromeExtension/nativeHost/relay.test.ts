@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { NativeHostRelay } from './nativeHost';
-import { encodeNativeMessage, NativeMessageDecoder } from './nativeMessaging';
-import { BROWSER_EXTENSION_PROTOCOL_VERSION } from '../toolkits/browser/extensionProtocol';
-import { LocalAgentBrowserBridge } from '../toolkits/browser/localAgentBrowserBridge';
+import { NativeHostRelay } from './relay';
+import { encodeNativeMessage, NativeMessageDecoder } from './framing';
+import { BROWSER_EXTENSION_PROTOCOL_VERSION } from '../protocol';
+import { LocalAgentBrowserBridge } from '../bridge';
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 1_000) {
   const deadline = Date.now() + timeoutMs;

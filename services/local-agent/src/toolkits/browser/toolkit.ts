@@ -3,7 +3,7 @@ import { loadStoredConfig } from '../../storage';
 import { detectBrowserStatus } from './session';
 import { browserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
-import { localAgentBrowserBridge } from './localAgentBrowserBridge';
+import { browserRuntime } from './runtime';
 
 export const BROWSER_TOOLKIT_NAME = 'browser';
 
@@ -37,7 +37,7 @@ export async function checkBrowserAvailability(): Promise<CapabilityAvailability
 
   const status = await detectBrowserStatus();
   const bridge = status.mode === 'extension'
-    ? localAgentBrowserBridge.getStatus()
+    ? browserRuntime.getExtensionStatus()
     : undefined;
   return {
     available: status.mode !== 'none',

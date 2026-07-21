@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { connect, type Socket } from 'node:net';
 import test from 'node:test';
-import { BROWSER_EXTENSION_PROTOCOL_VERSION } from './extensionProtocol';
-import { BrowserBridgeError, LocalAgentBrowserBridge } from './localAgentBrowserBridge';
+import { BROWSER_EXTENSION_PROTOCOL_VERSION } from './protocol';
+import { BrowserBridgeError, LocalAgentBrowserBridge } from './bridge';
 
 type LinePeer = {
   socket: Socket;

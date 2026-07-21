@@ -4,13 +4,13 @@ import {
   BROWSER_EXTENSION_PROTOCOL_VERSION,
   parseAgentToExtensionMessage,
   parseExtensionToAgentMessage,
-} from '../toolkits/browser/extensionProtocol';
+} from '../protocol';
 import {
   DEFAULT_BROWSER_BRIDGE_SOCKET_PATH,
   DEFAULT_BROWSER_BRIDGE_TOKEN_PATH,
   readBrowserBridgeToken,
-} from '../toolkits/browser/localAgentBrowserBridge';
-import { encodeNativeMessage, NativeMessageDecoder } from './nativeMessaging';
+} from '../bridge';
+import { encodeNativeMessage, NativeMessageDecoder } from './framing';
 
 const MAX_QUEUED_MESSAGES = 32;
 const RECONNECT_DELAY_MS = 1_000;

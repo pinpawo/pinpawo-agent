@@ -218,9 +218,9 @@ The published package installs a `pinpawo-agent` binary.
 | `pinpawo-agent actor` | Chooses the pet actor used by the local agent. |
 | `pinpawo-agent run` | Starts the local agent service. |
 | `pinpawo-agent run --stdio` | Starts one local-agent peer over JSONL stdio. |
-| `pinpawo-agent browser-extension register --extension-id <id>` | Registers the Chrome Native Messaging host for an unpacked PinPawo extension. |
-| `pinpawo-agent browser-extension status` | Shows Native Host registration and local bridge runtime-file diagnostics. |
-| `pinpawo-agent browser-extension unregister` | Removes the PinPawo Native Messaging host registration. |
+| `pinpawo-agent browser extension register --extension-id <id>` | Registers the Chrome Native Messaging host for the Browser extension driver. |
+| `pinpawo-agent browser extension status` | Shows the Browser extension driver's host registration and runtime-file diagnostics. |
+| `pinpawo-agent browser extension unregister` | Removes the Browser extension driver's Native Messaging host registration. |
 | `pinpawo-agent tui` | Starts the interactive terminal UI. |
 | `pinpawo-agent tui --dry-run` | Runs the TUI without writing generated post changes. |
 | `pinpawo-agent detect` | Prints local browser/backend detection as JSON. |

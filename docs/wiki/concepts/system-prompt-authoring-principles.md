@@ -280,6 +280,29 @@ improvement. Real-model comparison remains required before this page can become
 The stable verdict contract and ownership links did not change, so the Prompt
 Contract Map does not gain a wording-only revision.
 
+## Answer pilot evidence
+
+The fourth #417 implementation candidate applies positive-first wording to the
+user-visible answer boundary:
+
+- the static prompt defines four reply modes: direct answer, handoff synthesis,
+  faithful historical replay, and a focused user question;
+- the provenance-triggered delegation completion acknowledgement remains a
+  distinct final main message;
+- its dynamic context now states the acknowledgement's bounded content and the
+  handoff's ownership of the task-result body;
+- terminal contexts positively require an accurate incomplete-status report;
+- runtime tests continue to cover full main-history access, compacted historical
+  replay, provenance-selected completion mode, and unchanged final model output.
+
+For the rendered static answer prompt, preview changed from approximately 303 to
+187 tokens. This is a size measurement, not a claim of behavioral improvement.
+Real-model comparison remains required before this page can become `validated`.
+
+The accepted completion lifecycle and the stable answer contract did not change,
+so neither the completion decision page nor the Prompt Contract Map requires a
+semantic revision.
+
 ## Application to the current entryDecision issue
 
 The recent `answer` regression should not be repaired with a case-specific

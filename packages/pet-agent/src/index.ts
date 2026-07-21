@@ -108,6 +108,7 @@ export {
   ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
 } from './agent/orchestrator/artifacts/discovery';
 export {
+  PROVIDER_INPUT_WATERMARK_RATIO,
   createTokenUsageSnapshot,
   isTokenUsageSnapshot,
   parseTokenUsageSnapshot,

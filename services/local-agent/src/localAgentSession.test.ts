@@ -26,10 +26,17 @@ test('LocalAgentSession snapshot owns one active run and one ordered timeline', 
         outputTokens: 20,
         totalTokens: 30,
       },
+      sessionTokenUsage: {
+        inputTokens: 30,
+        outputTokens: 40,
+        totalTokens: 70,
+        scope: 'session',
+      },
     },
   };
 
   assert.equal(snapshot.version, 3);
   assert.equal(snapshot.session.timeline[0]?.type, 'message');
   assert.equal(snapshot.session.activeRun, null);
+  assert.equal(snapshot.session.sessionTokenUsage?.totalTokens, 70);
 });

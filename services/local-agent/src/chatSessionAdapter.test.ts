@@ -1136,6 +1136,7 @@ test('runChatSession emits provider token usage from new state messages', async 
     inputTokens: 123,
     outputTokens: 45,
     totalTokens: 168,
+    latestInputTokens: 123,
     contextWindow: 64000,
     updatedAt: completed.usage?.updatedAt,
     source: 'provider',

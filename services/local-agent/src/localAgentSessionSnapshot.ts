@@ -16,10 +16,20 @@ export function buildLocalAgentSessionSnapshot(params: {
   kind: LocalAgentSession['kind'];
   messages: TuiCheckpointMessage[];
   deps: LocalServerDeps;
+  sessionTokenUsage?: LocalAgentSession['sessionTokenUsage'] | null;
   pendingReview?: ReviewActionSnapshot | null;
 }): LocalAgentSessionSnapshot {
   const timeline = timelineFromCheckpointMessages(params.messages);
   const pendingReview = params.pendingReview ?? null;
+  const runtime = buildLocalAgentRuntimeView(params.deps);
+  const sessionTokenUsage = params.sessionTokenUsage
+    ? {
+        ...params.sessionTokenUsage,
+        ...(params.sessionTokenUsage.contextWindow === undefined && runtime.contextWindow !== undefined
+          ? { contextWindow: runtime.contextWindow }
+          : {}),
+      }
+    : null;
   return {
     version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
     session: {
@@ -31,7 +41,8 @@ export function buildLocalAgentSessionSnapshot(params: {
           pendingReview,
         })
         : null,
-      runtime: buildLocalAgentRuntimeView(params.deps),
+      runtime,
+      ...(sessionTokenUsage ? { sessionTokenUsage } : {}),
     },
   };
 }

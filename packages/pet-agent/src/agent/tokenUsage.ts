@@ -1,10 +1,12 @@
 export type TokenUsageSource = 'provider';
-export type TokenUsageScope = 'run';
+export type TokenUsageScope = 'run' | 'session';
 
 export type TokenUsageSnapshot = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** Latest provider prompt footprint, used for context-compaction headroom. */
+  latestInputTokens?: number;
   contextWindow?: number;
   updatedAt?: string;
   source?: TokenUsageSource;
@@ -52,6 +54,7 @@ export function parseTokenUsageSnapshot(value: unknown): TokenUsageSnapshot | nu
     return null;
   }
 
+  const latestInputTokens = readNumber(value, 'latestInputTokens');
   const contextWindow = readNumber(value, 'contextWindow');
   const updatedAt = readString(value, 'updatedAt');
   const rawSource = readString(value, 'source');
@@ -60,10 +63,11 @@ export function parseTokenUsageSnapshot(value: unknown): TokenUsageSnapshot | nu
     inputTokens,
     outputTokens,
     totalTokens,
+    ...(latestInputTokens !== undefined ? { latestInputTokens } : {}),
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     ...(updatedAt !== undefined ? { updatedAt } : {}),
     ...(rawSource === 'provider' ? { source: rawSource } : {}),
-    ...(rawScope === 'run' ? { scope: rawScope } : {}),
+    ...(rawScope === 'run' || rawScope === 'session' ? { scope: rawScope } : {}),
   };
 }
 
@@ -189,6 +193,7 @@ export function readMessagesTokenUsage(messages: Iterable<unknown>): ProviderTok
 export function createTokenUsageSnapshot(
   usage: ProviderTokenUsage | null,
   contextWindow?: number,
+  latestInputTokens?: number | null,
 ): TokenUsageSnapshot | null {
   if (!usage) {
     return null;
@@ -197,6 +202,9 @@ export function createTokenUsageSnapshot(
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     totalTokens: usage.totalTokens,
+    ...(latestInputTokens !== undefined && latestInputTokens !== null
+      ? { latestInputTokens: positiveOrZero(latestInputTokens) }
+      : {}),
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     updatedAt: new Date().toISOString(),
     source: 'provider',

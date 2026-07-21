@@ -39,6 +39,13 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
         capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
       },
     } as LocalServerDeps,
+    sessionTokenUsage: {
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+      source: 'provider',
+      scope: 'session',
+    },
     pendingReview: {
       requestId: 'req-review',
       sessionId: 'chat:pet-a',
@@ -76,4 +83,12 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
   assert.equal(snapshot.session.runtime?.workspaceId, 'workspace-test');
   assert.equal(snapshot.session.runtime?.workspaceName, 'Workspace Test');
   assert.equal(snapshot.session.runtime?.workspaceRoot, '/tmp/work');
+  assert.deepEqual(snapshot.session.sessionTokenUsage, {
+    inputTokens: 100,
+    outputTokens: 20,
+    totalTokens: 120,
+    contextWindow: 32000,
+    source: 'provider',
+    scope: 'session',
+  });
 });

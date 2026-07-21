@@ -40,6 +40,36 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
   assert.equal(model.regions.timeline.scrollStrategy, 'preserveStaticOutputUntilHostReset');
   assert.deepEqual(model.regions.timeline.staticEntries.map((entry) => entry.id), ['m1']);
   assert.deepEqual(model.regions.timeline.dynamicEntries.map((entry) => entry.id), ['m2']);
+  assert.equal(model.regions.timeline.emptyState, null);
+});
+
+test('buildTuiScreenModel owns the timeline welcome empty state', () => {
+  const session = createSession({
+    id: 'chat:pet',
+    actor: { label: '豆包', summary: '本地协作伙伴' },
+  });
+  session.runtime = {
+    model: 'gpt-test',
+    cwd: '/Users/mac/project',
+  };
+  const state = createInitialTuiState(session);
+  state.connection = { status: 'ready' };
+
+  const model = buildTuiScreenModel({
+    state,
+    terminalColumns: 80,
+    now: 1000,
+    animationFrame: 0,
+    timelineRenderEpoch: 0,
+  });
+
+  assert.equal(model.regions.timeline.entries.length, 0);
+  assert.equal(model.regions.timeline.emptyState?.greeting, '和 豆包 一起完成当前项目里的任务。');
+  assert.equal(model.regions.timeline.emptyState?.ready, true);
+  assert.deepEqual(model.regions.timeline.emptyState?.details, [
+    { label: '模型', value: 'gpt-test' },
+    { label: '目录', value: '/Users/mac/project' },
+  ]);
 });
 
 test('buildTuiScreenModel marks composer and status state while busy', () => {

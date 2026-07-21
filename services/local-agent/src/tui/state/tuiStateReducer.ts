@@ -195,6 +195,11 @@ function applyLoadedSessionSnapshot(
           action.reason === 'reconnect'
           || action.reason === 'completion'
           || action.reason === 'review-refresh',
+        preserveOmittedSessionTokenUsage:
+          action.reason === 'reconnect'
+          || action.reason === 'resume'
+          || action.reason === 'completion'
+          || action.reason === 'review-refresh',
       },
     ),
     baseSession,

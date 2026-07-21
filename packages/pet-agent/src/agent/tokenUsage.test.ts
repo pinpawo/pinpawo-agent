@@ -20,6 +20,7 @@ test('parseTokenUsageSnapshot validates canonical token usage snapshots', () => 
     inputTokens: 10,
     outputTokens: 5,
     totalTokens: 15,
+    latestInputTokens: 12,
     contextWindow: 64000,
     updatedAt: '2026-06-24T10:00:00.000Z',
     source: 'provider',
@@ -30,12 +31,20 @@ test('parseTokenUsageSnapshot validates canonical token usage snapshots', () => 
     inputTokens: 10,
     outputTokens: 5,
     totalTokens: 15,
+    latestInputTokens: 12,
     contextWindow: 64000,
     updatedAt: '2026-06-24T10:00:00.000Z',
     source: 'provider',
     scope: 'run',
   });
   assert.equal(isTokenUsageSnapshot(usage), true);
+
+  assert.equal(parseTokenUsageSnapshot({
+    inputTokens: 20,
+    outputTokens: 10,
+    totalTokens: 30,
+    scope: 'session',
+  })?.scope, 'session');
 });
 
 test('parseTokenUsageSnapshot rejects incomplete token usage snapshots', () => {
@@ -109,11 +118,12 @@ test('readMessagesTokenUsage aggregates provider usage from messages', () => {
     outputTokens: 6,
     totalTokens: 19,
   });
-  const snapshot = createTokenUsageSnapshot(usage, 64000);
+  const snapshot = createTokenUsageSnapshot(usage, 64000, 13);
   assert.deepEqual(snapshot, {
     inputTokens: 13,
     outputTokens: 6,
     totalTokens: 19,
+    latestInputTokens: 13,
     contextWindow: 64000,
     updatedAt: snapshot?.updatedAt,
     source: 'provider',

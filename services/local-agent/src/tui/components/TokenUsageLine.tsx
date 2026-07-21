@@ -10,7 +10,7 @@ function formatTokenUsage(value: number) {
 }
 
 export function TokenUsageLine({ tokenUsage }: { tokenUsage: TokenUsageSnapshot }) {
-  const ratio = tokenUsage.scope !== 'run' && tokenUsage.contextWindow
+  const ratio = tokenUsage.scope === undefined && tokenUsage.contextWindow
     ? `${((tokenUsage.totalTokens / tokenUsage.contextWindow) * 100).toFixed(1)}%`
     : null;
 

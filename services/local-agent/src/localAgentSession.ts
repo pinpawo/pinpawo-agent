@@ -108,7 +108,10 @@ export type LocalAgentSession = {
   timeline: LocalAgentTimelineEntry[];
   activeRun: LocalAgentRunView | null;
   runtime?: LocalAgentRuntimeView;
+  /** Latest completed run usage, when the provider reports it. */
   tokenUsage?: TokenUsageSnapshot;
+  /** Process-observed cumulative usage for this session. */
+  sessionTokenUsage?: TokenUsageSnapshot & { scope: 'session' };
 };
 
 export type LocalAgentSessionSnapshot = {

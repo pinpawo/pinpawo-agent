@@ -1,4 +1,7 @@
-import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
+import {
+  PROVIDER_INPUT_WATERMARK_RATIO,
+  type BuiltinGlobalReviewPolicyMode,
+} from '@pinpawo/pet-agent';
 import stringWidth from 'string-width';
 import { formatGlobalReviewPolicyMode } from './globalReviewPolicyPicker';
 import { truncateLine } from './render/terminalText';
@@ -14,13 +17,20 @@ export type StatusSegment = {
   id: string;
   label?: string;
   value: string;
+  compactValue?: string;
   priority: number;
   tone?: StatusSegmentTone;
   truncation: StatusSegmentTruncation;
 };
 
-export type StatusBarModel = {
+export type StatusBarLine = {
+  id: 'primary' | 'session';
+  muted: boolean;
   segments: StatusSegment[];
+};
+
+export type StatusBarModel = {
+  lines: StatusBarLine[];
 };
 
 export type FormattedStatusBarPart = {
@@ -28,6 +38,12 @@ export type FormattedStatusBarPart = {
   tone: StatusSegmentTone;
   segmentId?: string;
   separator?: boolean;
+};
+
+export type FormattedStatusBarLine = {
+  id: StatusBarLine['id'];
+  muted: boolean;
+  parts: FormattedStatusBarPart[];
 };
 
 export function buildStatusBarModel(input: {
@@ -42,90 +58,118 @@ export function buildStatusBarModel(input: {
   const runtime = input.session?.runtime;
   const hasPrimaryStatus = Boolean(input.activityStatus || input.statusNotice);
   return {
-    segments: [
-      ...(input.activityStatus ? [{
-        id: 'activity',
-        value: input.activityStatus,
-        priority: 100,
-        tone: statusTone(input.activityStatus),
-        truncation: 'truncate' as const,
-      }] : []),
-      ...(input.statusNotice ? [{
-        id: 'notice',
-        value: input.statusNotice,
-        priority: 99,
-        tone: statusTone(input.statusNotice),
-        truncation: 'truncate' as const,
-      }] : []),
+    lines: [
       {
-        id: 'connection',
-        ...(hasPrimaryStatus ? { label: '连接' } : {}),
-        value: input.connectionStatus,
-        priority: hasPrimaryStatus ? 95 : 100,
-        tone: statusTone(input.connectionStatus),
-        truncation: 'truncate',
+        id: 'primary',
+        muted: false,
+        segments: [
+          ...(input.activityStatus ? [{
+            id: 'activity',
+            value: input.activityStatus,
+            priority: 100,
+            tone: statusTone(input.activityStatus),
+            truncation: 'truncate' as const,
+          }] : []),
+          ...(input.statusNotice ? [{
+            id: 'notice',
+            value: input.statusNotice,
+            priority: 99,
+            tone: statusTone(input.statusNotice),
+            truncation: 'truncate' as const,
+          }] : []),
+          {
+            id: 'connection',
+            ...(hasPrimaryStatus ? { label: '连接' } : {}),
+            value: input.connectionStatus,
+            priority: hasPrimaryStatus ? 95 : 100,
+            tone: statusTone(input.connectionStatus),
+            truncation: 'truncate',
+          },
+          {
+            id: 'composer-target',
+            value: formatComposerTarget(input.composerTarget),
+            priority: 90,
+            tone: input.composerTarget === 'studio' ? 'info' : 'muted',
+            truncation: 'preserve',
+          },
+          ...(input.overlayOwner ? [{
+            id: 'overlay',
+            label: '浮层',
+            value: input.overlayOwner,
+            priority: 85,
+            tone: 'info' as const,
+            truncation: 'preserve' as const,
+          }] : []),
+          {
+            id: 'policy',
+            label: '授权',
+            value: formatGlobalReviewPolicyMode(input.globalReviewPolicyMode),
+            priority: 80,
+            tone: 'muted',
+            truncation: 'preserve',
+          },
+        ],
       },
       {
-        id: 'composer-target',
-        value: formatComposerTarget(input.composerTarget),
-        priority: 90,
-        tone: input.composerTarget === 'studio' ? 'info' : 'muted',
-        truncation: 'preserve',
-      },
-      ...(input.overlayOwner ? [{
-        id: 'overlay',
-        label: '浮层',
-        value: input.overlayOwner,
-        priority: 85,
-        tone: 'info' as const,
-        truncation: 'preserve' as const,
-      }] : []),
-      {
-        id: 'policy',
-        label: '授权',
-        value: formatGlobalReviewPolicyMode(input.globalReviewPolicyMode),
-        priority: 80,
-        tone: 'muted',
-        truncation: 'preserve',
-      },
-      {
-        id: 'cwd',
-        label: '目录',
-        value: fallback(runtime?.cwd),
-        priority: 60,
-        tone: 'muted',
-        truncation: 'truncate',
-      },
-      {
-        id: 'model',
-        label: '模型',
-        value: fallback(runtime?.model),
-        priority: 50,
-        tone: 'muted',
-        truncation: 'truncate',
-      },
-      {
-        id: 'context',
-        label: '上下文',
-        value: formatContext(input.session),
-        priority: 40,
-        tone: 'muted',
-        truncation: 'preserve',
+        id: 'session',
+        muted: true,
+        segments: [
+          {
+            id: 'tokens',
+            label: 'Token',
+            value: formatTokenUsage(input.session),
+            compactValue: formatCompactTokenUsage(input.session),
+            priority: 100,
+            tone: 'muted',
+            truncation: 'truncate',
+          },
+          {
+            id: 'model',
+            label: '模型',
+            value: fallback(runtime?.model),
+            priority: 90,
+            tone: 'muted',
+            truncation: 'preserve',
+          },
+          {
+            id: 'cwd',
+            label: '目录',
+            value: fallback(runtime?.cwd),
+            priority: 70,
+            tone: 'muted',
+            truncation: 'preserve',
+          },
+        ],
       },
     ],
   };
 }
 
 export function formatStatusBarText(model: StatusBarModel, width: number) {
-  return formatStatusBarParts(model, width).map((part) => part.text).join('');
+  return formatStatusBarLines(model, width)
+    .map((line) => line.parts.map((part) => part.text).join(''))
+    .join('\n');
 }
 
-export function formatStatusBarParts(model: StatusBarModel, width: number): FormattedStatusBarPart[] {
+export function formatStatusBarLines(model: StatusBarModel, width: number): FormattedStatusBarLine[] {
+  return model.lines.map((line) => ({
+    id: line.id,
+    muted: line.muted,
+    parts: formatStatusLineParts(line.segments, width),
+  }));
+}
+
+function formatStatusLineParts(segments: StatusSegment[], width: number): FormattedStatusBarPart[] {
   const maxWidth = Math.max(0, width);
   if (maxWidth === 0) return [];
 
-  const orderedSegments = model.segments
-    .map((segment, order) => ({ segment, order }))
+  const orderedSegments = segments
+    .map((segment, order) => ({
+      segment: width < 56 && segment.compactValue
+        ? { ...segment, value: segment.compactValue }
+        : segment,
+      order,
+    }))
     .filter(({ segment }) => Boolean(segment.value.trim()));
   if (orderedSegments.length === 0) return [];
 
@@ -279,29 +323,47 @@ function fallback(value: string | undefined) {
   return text ? text : '未提供';
 }
 
-function formatContext(session: SessionModel | null) {
-  const usage = session?.tokenUsage;
+function formatTokenUsage(session: SessionModel | null) {
+  const usage = session?.sessionTokenUsage;
   const contextWindow = usage?.contextWindow ?? session?.runtime.contextWindow;
-  if (usage?.scope === 'run') {
-    return `${formatCount(usage.totalTokens)} tokens/run`;
-  }
-  if (usage && contextWindow) {
-    return `${formatCount(usage.totalTokens)}/${formatCount(contextWindow)} (${formatRatio(usage.totalTokens, contextWindow)})`;
-  }
   if (usage) {
-    return `${formatCount(usage.totalTokens)} tokens`;
+    const remaining = formatCompactionRemaining(usage.latestInputTokens, contextWindow);
+    return [
+      `in/out ${formatCount(usage.inputTokens)}/${formatCount(usage.outputTokens)}`,
+      ...(remaining ? [`compact余${remaining}`] : []),
+    ].join(' · ');
   }
   if (contextWindow) {
-    return formatCount(contextWindow);
+    return `暂无 · 上限${formatCount(contextWindow)}`;
   }
-  return '未提供';
+  return '暂无';
+}
+
+function formatCompactTokenUsage(session: SessionModel | null) {
+  const usage = session?.sessionTokenUsage;
+  const contextWindow = usage?.contextWindow ?? session?.runtime.contextWindow;
+  if (usage) {
+    const remaining = formatCompactionRemaining(usage.latestInputTokens, contextWindow);
+    return [
+      `${formatCount(usage.inputTokens)}/${formatCount(usage.outputTokens)}`,
+      ...(remaining ? [`C余${remaining}`] : []),
+    ].join(' · ');
+  }
+  if (contextWindow) {
+    return `暂无 · 上限${formatCount(contextWindow)}`;
+  }
+  return '暂无';
+}
+
+function formatCompactionRemaining(
+  latestInputTokens: number | undefined,
+  contextWindow: number | undefined,
+) {
+  if (latestInputTokens === undefined || !contextWindow) return null;
+  const watermark = Math.max(1, Math.floor(contextWindow * PROVIDER_INPUT_WATERMARK_RATIO));
+  return formatCount(Math.max(0, watermark - latestInputTokens));
 }
 
 function formatCount(value: number) {
   return LOCALE_FORMATTER.format(Math.max(0, Math.round(value)));
-}
-
-function formatRatio(total: number, contextWindow: number) {
-  if (!contextWindow) return '0.0%';
-  return `${((total / contextWindow) * 100).toFixed(1)}%`;
 }

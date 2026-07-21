@@ -78,6 +78,10 @@ function parseLocalAgentSession(value: unknown): LocalAgentSession | null {
     ? undefined
     : parseLocalAgentRuntime(value.runtime);
   if (value.runtime !== undefined && !runtime) return null;
+  const sessionTokenUsage = isTokenUsageSnapshot(value.sessionTokenUsage)
+    && value.sessionTokenUsage.scope === 'session'
+    ? value.sessionTokenUsage as LocalAgentSession['sessionTokenUsage']
+    : undefined;
   return {
     sessionId: value.sessionId,
     kind: value.kind,
@@ -86,6 +90,7 @@ function parseLocalAgentSession(value: unknown): LocalAgentSession | null {
     ...(actor ? { actor } : {}),
     ...(runtime ? { runtime } : {}),
     ...(isTokenUsageSnapshot(value.tokenUsage) ? { tokenUsage: value.tokenUsage } : {}),
+    ...(sessionTokenUsage ? { sessionTokenUsage } : {}),
   };
 }
 

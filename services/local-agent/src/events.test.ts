@@ -182,6 +182,19 @@ test('createGitToolkit exposes git operation metadata with the toolkit definitio
   assert.equal(toolkit.operations?.git_commit?.title, '创建 git commit');
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_add), true);
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_commit), true);
+  assert.match(toolkit.policy?.autoReview?.allow ?? '', /normal non-force push/);
+  assert.match(toolkit.policy?.autoReview?.ask ?? '', /force pushes/);
+});
+
+test('createBashToolkit exposes shell auto-review risk context', () => {
+  const toolkit = createBashToolkit();
+
+  assert.match(toolkit.policy?.autoReview?.allow ?? '', /build, test, typecheck, lint, format/);
+  assert.match(toolkit.policy?.autoReview?.allow ?? '', /deletion of explicitly named non-sensitive/);
+  assert.match(toolkit.policy?.autoReview?.ask ?? '', /deletes recursively/);
+  assert.match(toolkit.policy?.autoReview?.ask ?? '', /deletes user data or sensitive files/);
+  assert.match(toolkit.policy?.autoReview?.ask ?? '', /elevates privileges/);
+  assert.match(toolkit.policy?.autoReview?.ask ?? '', /publishes or deploys artifacts/);
 });
 
 test('createBrowserToolkit exposes browser operation metadata', () => {

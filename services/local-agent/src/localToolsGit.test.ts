@@ -10,8 +10,11 @@ import {
   gitAddTool,
   gitCommitTool,
   gitDiffTool,
+  gitPushTool,
+  ghIssueCreateTool,
   ghIssueCommentsTool,
   ghIssueViewTool,
+  ghPrCreateTool,
   ghPrDiffTool,
   ghReadContentTool,
   gitStatusTool,
@@ -65,7 +68,7 @@ test('git tools inspect and stage a repository without shell command strings', a
 
   assert.match(
     String(await gitCommitTool.invoke({ cwd: repo, message: 'test: add readme' })),
-    /requires human review/,
+    /test: add readme/,
   );
 });
 
@@ -73,6 +76,74 @@ test('git_add requires explicit pathspecs', async () => {
   await assert.rejects(
     () => gitAddTool.invoke({ pathspecs: [] }),
     /Too small|at least/,
+  );
+});
+
+test('git_push performs a normal push without exposing force or delete options', async (t) => {
+  const repo = createRepo();
+  const remote = mkdtempSync(join(tmpdir(), 'pinpawo-git-remote-'));
+  t.after(() => {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(remote, { recursive: true, force: true });
+  });
+
+  writeFileSync(join(repo, 'README.md'), 'hello\n', 'utf-8');
+  execFileSync('git', ['add', 'README.md'], { cwd: repo });
+  execFileSync('git', ['commit', '-m', 'test: initial commit'], { cwd: repo, stdio: 'ignore' });
+  execFileSync('git', ['init', '--bare'], { cwd: remote, stdio: 'ignore' });
+  const branch = execFileSync('git', ['branch', '--show-current'], { cwd: repo, encoding: 'utf-8' }).trim();
+
+  assert.match(
+    String(await gitPushTool.invoke({ cwd: repo, remote })),
+    /new branch/,
+  );
+  assert.equal(
+    execFileSync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: remote, encoding: 'utf-8' }).trim().length,
+    40,
+  );
+  await assert.rejects(
+    () => gitPushTool.invoke({ cwd: repo, remote, refspec: '+HEAD:main' }),
+    /force and delete refspecs are not supported/,
+  );
+});
+
+test('GitHub create tools pass structured arguments to gh without a shell', async (t) => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-gh-create-'));
+  t.after(() => rmSync(workdir, { recursive: true, force: true }));
+  createFakeGh(t, `
+case "$*" in
+  "pr create --title Fix --body Details --base main --head codex/fix --repo pinpawo/pinpawo-agent --draft")
+    printf 'https://github.com/pinpawo/pinpawo-agent/pull/12\\n'
+    ;;
+  "issue create --title Bug --body Reproduction --repo pinpawo/pinpawo-agent")
+    printf 'https://github.com/pinpawo/pinpawo-agent/issues/34\\n'
+    ;;
+  *)
+    printf 'unexpected gh arguments: %s\\n' "$*" >&2
+    exit 2
+    ;;
+esac`);
+
+  assert.equal(
+    await ghPrCreateTool.invoke({
+      cwd: workdir,
+      title: 'Fix',
+      body: 'Details',
+      base: 'main',
+      head: 'codex/fix',
+      repository: 'pinpawo/pinpawo-agent',
+      draft: true,
+    }),
+    'https://github.com/pinpawo/pinpawo-agent/pull/12',
+  );
+  assert.equal(
+    await ghIssueCreateTool.invoke({
+      cwd: workdir,
+      title: 'Bug',
+      body: 'Reproduction',
+      repository: 'pinpawo/pinpawo-agent',
+    }),
+    'https://github.com/pinpawo/pinpawo-agent/issues/34',
   );
 });
 
@@ -270,6 +341,9 @@ test('loadCoreLocalTools keeps git tools available for toolkit composition', asy
 
   assert.equal(tools.some((item) => item.name === 'git_status'), true);
   assert.equal(tools.some((item) => item.name === 'git_commit'), true);
+  assert.equal(tools.some((item) => item.name === 'git_push'), true);
+  assert.equal(tools.some((item) => item.name === 'gh_pr_create'), true);
+  assert.equal(tools.some((item) => item.name === 'gh_issue_create'), true);
 });
 
 test('createGitToolkit exposes a dedicated git capability surface', async () => {
@@ -287,8 +361,11 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
       'git_show',
       'git_add',
       'git_commit',
+      'git_push',
+      'gh_pr_create',
       'gh_pr_view',
       'gh_pr_diff',
+      'gh_issue_create',
       'gh_issue_view',
       'gh_issue_comments',
       'gh_read_content',
@@ -296,12 +373,17 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
   );
   assert.equal(toolkit.operations?.git_diff?.title, '查看 git diff');
   assert.equal(toolkit.operations?.git_commit?.title, '创建 git commit');
+  assert.equal(toolkit.operations?.git_push?.title, '推送 git 分支');
+  assert.equal(toolkit.operations?.gh_pr_create?.title, '创建 GitHub PR');
   assert.equal(toolkit.operations?.gh_pr_view?.title, '查看 GitHub PR');
   assert.equal(toolkit.operations?.gh_pr_diff?.title, '查看 GitHub PR diff');
   assert.equal(toolkit.operations?.gh_issue_comments?.title, '查看 GitHub issue 评论');
   assert.equal(toolkit.operations?.gh_read_content?.title, '读取 GitHub 临时内容');
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_add), true);
   assert.equal(Boolean(toolkit.policy?.toolReview?.git_commit), true);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.git_push), true);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.gh_pr_create), true);
+  assert.equal(Boolean(toolkit.policy?.toolReview?.gh_issue_create), true);
 
   const review = await toolkit.policy?.toolReview?.git_commit?.request({
     models: {} as never,

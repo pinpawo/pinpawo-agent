@@ -89,8 +89,32 @@ function formatAutoReviewItems(items: GlobalReviewPolicyBatchItem[]) {
   };
 }
 
-export function buildAutoReviewSystemPrompt() {
-  return AUTO_REVIEW_SYSTEM_PROMPT.render({});
+function formatToolkitAutoReviewPolicies(items: GlobalReviewPolicyBatchItem[]) {
+  const policies = new Map<string, NonNullable<GlobalReviewPolicyBatchItem['autoReviewContext']>>();
+
+  for (const item of items) {
+    if (item.autoReviewContext && !policies.has(item.toolkitName)) {
+      policies.set(item.toolkitName, item.autoReviewContext);
+    }
+  }
+
+  if (policies.size === 0) return '';
+
+  return [
+    '',
+    'Registered toolkit auto-review policies:',
+    ...[...policies.entries()].flatMap(([toolkitName, policy]) => [
+      `Toolkit ${toolkitName}:`,
+      `- Allow: ${policy.allow}`,
+      `- Ask: ${policy.ask}`,
+    ]),
+  ].join('\n');
+}
+
+export function buildAutoReviewSystemPrompt(reviews: GlobalReviewPolicyBatchItem[] = []) {
+  return AUTO_REVIEW_SYSTEM_PROMPT.render({
+    toolkitPolicyBlock: formatToolkitAutoReviewPolicies(reviews),
+  });
 }
 
 export function buildAutoReviewPrompt(params: {

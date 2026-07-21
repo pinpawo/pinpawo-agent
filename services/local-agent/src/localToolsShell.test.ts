@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { homedir } from 'node:os';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import {
   buildCurrentTimeSnapshot,
@@ -118,6 +120,16 @@ test('runShellTool executes safe commands and rejects shell write fallbacks', as
     String(await runShellTool.invoke({ command: 'cat > file.txt' })),
     /write_file/,
   );
+});
+
+test('runShellTool relies on toolkit review instead of a second interface gate', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'pinpawo-shell-review-'));
+  const file = join(dir, 'generated.tmp');
+  writeFileSync(file, 'generated', 'utf-8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  assert.equal(await runShellTool.invoke({ command: `rm ${file}` }), '(no output)');
+  assert.equal(existsSync(file), false);
 });
 
 test('runShellTool separates stderr and reports exit codes', async () => {

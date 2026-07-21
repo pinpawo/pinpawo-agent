@@ -3,7 +3,6 @@ import { promisify } from 'node:util';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
-import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { readRecord, readString } from '../operationMetadata';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
 
@@ -170,12 +169,6 @@ export const runShellTool = tool(
     const blockedReason = getBlockedShellReason(shellAction.command);
     if (blockedReason) {
       return `Error: ${blockedReason}`;
-    }
-
-    const confirmationRisk = getShellConfirmationRisk(shellAction.command);
-    const { capabilities } = getCurrentLocalAgentInterface();
-    if (confirmationRisk && !capabilities.humanReview) {
-      return `Error: shell command requires human review before execution: ${confirmationRisk}`;
     }
 
     const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);

@@ -41,3 +41,26 @@ export default {};
   assert.deepEqual(result.plugins, []);
   assert.deepEqual(result.toolkits, []);
 });
+
+test('loadPluginsFromDir fails startup for an oversized toolkit auto-review policy', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-policy-'));
+  await fs.writeFile(path.join(root, 'invalid-policy-plugin.mjs'), `
+export const toolkits = [{
+  name: 'invalid_policy_toolkit',
+  description: 'Invalid policy toolkit',
+  tools: [],
+  policy: {
+    autoReview: {
+      allow: 'x'.repeat(2001),
+      ask: 'Ask for risky operations.',
+    },
+  },
+}];
+export default { name: 'invalid-policy-plugin' };
+`, 'utf8');
+
+  await assert.rejects(
+    () => loadPluginsFromDir(root),
+    /Toolkit\/toolset "invalid_policy_toolkit" auto-review allow exceeds 2000 characters/,
+  );
+});

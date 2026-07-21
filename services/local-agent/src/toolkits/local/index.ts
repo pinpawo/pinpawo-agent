@@ -90,13 +90,13 @@ const bashToolkitOperations = {
 };
 
 const gitToolkitInstructions = [
-  '你可以使用 git_status、git_diff、git_log、git_branch、git_show、git_add、git_commit 处理本地 git 仓库。',
-  '你可以使用 gh_pr_view、gh_pr_diff、gh_issue_view、gh_issue_comments、gh_read_content 通过 GitHub CLI 渐进式只读查看 GitHub PR/issue。',
+  '你可以使用 git_status、git_diff、git_log、git_branch、git_show、git_add、git_commit、git_push 处理本地 git 仓库和普通分支推送。',
+  '你可以使用 gh_pr_create、gh_pr_view、gh_pr_diff、gh_issue_create、gh_issue_view、gh_issue_comments、gh_read_content 创建或渐进式查看 GitHub PR/issue。',
   '先用 gh_issue_view 查看 issue 正文和评论总数；只有确实需要评论时才用 gh_issue_comments 小页翻阅；它返回文件交付时用 gh_read_content 分块读取。',
   '查看状态、diff、历史和提交内容时优先使用这些 git 工具，不要用 run_shell 包装 git 命令。',
   '做代码 review、PR review 或 diff 审查时，优先使用 gh_pr_view 和 gh_pr_diff；不要用 browser 或 http_fetch 拉取 GitHub PR 页面/diff。',
   'git_add 必须显式传 pathspecs；不要隐式暂存整个仓库。',
-  'git_commit 只创建本地提交，不会 push。',
+  'git_commit 只创建本地提交；需要推送时继续使用 git_push。git_push 不支持 force push 或删除远端引用。',
 ];
 
 export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): AgentToolkit {
@@ -107,6 +107,10 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     instructions: bashToolkitInstructions,
     operations: bashToolkitOperations,
     policy: {
+      autoReview: {
+        allow: 'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands confined to the current workspace as eligible for automatic authorization when their effects are clear and limited, such as build, test, typecheck, lint, format, inspection, other reversible development operations, and deletion of explicitly named non-sensitive files inside the current workspace.',
+        ask: 'Ask when a command has broad or unclear effects, deletes recursively, deletes outside the current workspace, deletes user data or sensitive files, elevates privileges, changes permissions or system services, installs or executes untrusted software, exposes credentials or data, publishes or deploys artifacts, or rewrites shared version-control history.',
+      },
       toolReview: {
         write_file: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
         apply_patch: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
@@ -124,14 +128,21 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
 export function createGitToolkit(): AgentToolkit {
   return defineToolkit({
     name: 'git',
-    description: '本地 git 仓库查看、GitHub CLI PR/issue 只读查看、暂存和本地提交工具。',
+    description: '本地 git 仓库查看、暂存、提交和普通推送，以及 GitHub PR/issue 创建与查看工具。',
     tools: gitTools,
     instructions: gitToolkitInstructions,
     operations: gitOperationMetadata,
     policy: {
+      autoReview: {
+        allow: 'Treat routine, scoped version-control collaboration as eligible for automatic authorization, including staging files, creating a local commit, a normal non-force push, and creating a pull request or issue.',
+        ask: 'Ask for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting or closing remote resources, and publishing packages or releases.',
+      },
       toolReview: {
         git_add: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
         git_commit: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+        git_push: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+        gh_pr_create: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+        gh_issue_create: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
       },
     },
   });

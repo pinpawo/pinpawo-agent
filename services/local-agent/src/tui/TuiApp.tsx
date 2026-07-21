@@ -7,6 +7,7 @@ import { AgentTimelineItem } from './components/AgentTimelineItem';
 import { BottomStatusLine } from './components/BottomStatusLine';
 import { Composer } from './components/Composer';
 import { OverlayLayer } from './components/OverlayLayer';
+import { WelcomePanel } from './components/WelcomePanel';
 import {
   createInitialTuiInputBufferState,
   normalizeTuiInputEvent,
@@ -624,8 +625,8 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {screenModel.regions.timeline.entries.length === 0 ? (
-        <Text dimColor>{screenModel.regions.timeline.emptyText}</Text>
+      {screenModel.regions.timeline.emptyState ? (
+        <WelcomePanel model={screenModel.regions.timeline.emptyState} />
       ) : null}
       <Static key={screenModel.regions.timeline.renderKey} items={screenModel.regions.timeline.staticEntries}>
         {(entry) => renderTimelineDisplayEntry(entry, {

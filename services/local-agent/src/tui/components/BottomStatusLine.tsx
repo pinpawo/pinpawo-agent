@@ -1,7 +1,7 @@
 import React from 'react';
-import { Text } from 'ink';
+import { Box, Text } from 'ink';
 import {
-  formatStatusBarParts,
+  formatStatusBarLines,
   type FormattedStatusBarPart,
   type StatusBarModel,
 } from '../statusBarModel';
@@ -10,15 +10,19 @@ export function BottomStatusLine(props: {
   model: StatusBarModel;
   width: number;
 }) {
-  const parts = formatStatusBarParts(props.model, props.width);
+  const lines = formatStatusBarLines(props.model, props.width);
   return (
-    <Text>
-      {parts.map((part, index) => (
-        <Text key={`${part.segmentId ?? 'separator'}-${index}`} {...toneProps(part)}>
-          {part.text}
+    <Box flexDirection="column">
+      {lines.map((line) => (
+        <Text key={line.id} dimColor={line.muted}>
+          {line.parts.map((part, index) => (
+            <Text key={`${part.segmentId ?? 'separator'}-${index}`} {...toneProps(part)}>
+              {part.text}
+            </Text>
+          ))}
         </Text>
       ))}
-    </Text>
+    </Box>
   );
 }
 

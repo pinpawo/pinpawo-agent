@@ -5,6 +5,19 @@ export const TUI_TEXT = {
   unknownStage: '未知阶段',
   growthValue: (value: number) => `成长值 ${value}`,
   emptyHistory: (petName: string) => `和 ${petName} 聊天吧。`,
+  welcomeTitle: 'PinPawo',
+  welcomeSubtitle: 'Local Agent',
+  welcomeGreeting: (petName: string) => `和 ${petName} 一起完成当前项目里的任务。`,
+  welcomeCompactGreeting: (petName: string) => `和 ${petName} 一起开始吧。`,
+  welcomeModelLabel: '模型',
+  welcomeDirectoryLabel: '目录',
+  welcomeReadyAction: '直接描述任务，按 Enter 发送',
+  welcomeCompactReadyAction: '输入任务，按 Enter 发送',
+  welcomePreparingAction: '正在准备本地会话…',
+  welcomeFileShortcut: '引用文件',
+  welcomeCommandShortcut: '打开命令',
+  welcomeResumeShortcut: '恢复会话',
+  valueLoading: '加载中…',
   helpIdle: '/new 新会话 · /policy 授权 · /resume 恢复 · /help 帮助 · /quit 退出',
   helpBusy: 'Ctrl+C 打断 · 再按一次退出',
   commandPaletteTitle: '命令',
@@ -98,10 +111,10 @@ export const TUI_TEXT = {
     contextWindow: string | null,
     ratio: string | null,
     source: 'provider' | undefined,
-    scope: 'run' | undefined,
+    scope: 'run' | 'session' | undefined,
   ) => {
     const label = source === 'provider' ? 'API Token 用量' : 'Token 用量';
-    const scopeLabel = scope === 'run' ? '本轮累计' : null;
+    const scopeLabel = scope === 'run' ? '本轮累计' : scope === 'session' ? '会话累计' : null;
     const prefix = scopeLabel ? `${label}（${scopeLabel}）` : label;
     return ratio
       ? `${prefix}：入/出/总 = ${inputTokens} / ${outputTokens} / ${totalTokens} (${ratio}，上下文上限 ${contextWindow})`

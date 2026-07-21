@@ -56,6 +56,7 @@ export type LocalAgentSessionReductionContext = {
 export type LocalAgentSessionSnapshotApplyOptions = {
   observedAt?: number;
   preserveOmittedTokenUsage?: boolean;
+  preserveOmittedSessionTokenUsage?: boolean;
 };
 
 export function reduceSession(
@@ -75,7 +76,7 @@ export function reduceSession(
       };
     case 'session.cleared':
       return {
-        ...omitTokenUsage(session),
+        ...omitAllTokenUsage(session),
         kind: 'chat',
         timeline: [],
         activeRun: null,
@@ -117,6 +118,8 @@ export function applySessionSnapshot(
     ...(incoming.runtime ?? {}),
   };
   const actor = incoming.actor ?? session.actor;
+  const preserveSessionTokenUsage = options.preserveOmittedSessionTokenUsage
+    ?? options.preserveOmittedTokenUsage;
   return {
     sessionId: incoming.sessionId,
     kind: incoming.kind,
@@ -133,6 +136,11 @@ export function applySessionSnapshot(
       : options.preserveOmittedTokenUsage && session.tokenUsage
         ? { tokenUsage: session.tokenUsage }
         : {}),
+    ...(incoming.sessionTokenUsage
+      ? { sessionTokenUsage: incoming.sessionTokenUsage }
+      : preserveSessionTokenUsage && session.sessionTokenUsage
+        ? { sessionTokenUsage: session.sessionTokenUsage }
+        : {}),
   };
 }
 
@@ -141,7 +149,7 @@ function acceptUserInput(
   input: Extract<LocalAgentSessionInput, { type: 'user.accepted' }>,
   context: LocalAgentSessionReductionContext,
 ) {
-  const withoutUsage = omitTokenUsage(session);
+  const withoutUsage = omitRunTokenUsage(session);
   const message = input.message ?? {};
   return appendMessage({
     ...withoutUsage,
@@ -393,7 +401,7 @@ function finishOwnedRun(
     }, context);
   }
   if (tokenUsage === undefined) return nextSession;
-  if (tokenUsage === null) return omitTokenUsage(nextSession);
+  if (tokenUsage === null) return omitRunTokenUsage(nextSession);
   return applyTokenUsage(nextSession, tokenUsage);
 }
 
@@ -469,18 +477,57 @@ function applyTokenUsage(session: LocalAgentSession, usage: TokenUsageSnapshot) 
     ? session.runtime.contextWindow
     : usage.contextWindow;
   const tokenUsage = contextWindow === undefined ? usage : { ...usage, contextWindow };
+  const sessionTokenUsage = accumulateSessionTokenUsage(
+    session.sessionTokenUsage,
+    tokenUsage,
+    session.runtime?.contextWindow,
+  );
   return {
     ...session,
     ...(contextWindow === undefined
       ? {}
       : { runtime: { ...(session.runtime ?? {}), contextWindow } }),
     tokenUsage,
+    sessionTokenUsage,
   };
 }
 
-function omitTokenUsage(session: LocalAgentSession): LocalAgentSession {
+function accumulateSessionTokenUsage(
+  current: LocalAgentSession['sessionTokenUsage'],
+  usage: TokenUsageSnapshot,
+  runtimeContextWindow: number | undefined,
+): NonNullable<LocalAgentSession['sessionTokenUsage']> {
+  if (usage.scope === 'session') {
+    return { ...usage, scope: 'session' };
+  }
+  const contextWindow = usage.contextWindow ?? current?.contextWindow ?? runtimeContextWindow;
+  const latestInputTokens = usage.latestInputTokens ?? current?.latestInputTokens;
+  return {
+    inputTokens: (current?.inputTokens ?? 0) + usage.inputTokens,
+    outputTokens: (current?.outputTokens ?? 0) + usage.outputTokens,
+    totalTokens: (current?.totalTokens ?? 0) + usage.totalTokens,
+    ...(latestInputTokens !== undefined ? { latestInputTokens } : {}),
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(usage.updatedAt !== undefined ? { updatedAt: usage.updatedAt } : {}),
+    ...(usage.source !== undefined ? { source: usage.source } : {}),
+    scope: 'session',
+  };
+}
+
+function omitRunTokenUsage(session: LocalAgentSession): LocalAgentSession {
   const { tokenUsage: _tokenUsage, ...withoutUsage } = session;
   void _tokenUsage;
+  return withoutUsage;
+}
+
+function omitAllTokenUsage(session: LocalAgentSession): LocalAgentSession {
+  const {
+    tokenUsage: _tokenUsage,
+    sessionTokenUsage: _sessionTokenUsage,
+    ...withoutUsage
+  } = session;
+  void _tokenUsage;
+  void _sessionTokenUsage;
   return withoutUsage;
 }
 

@@ -148,6 +148,77 @@ test('reduceSession deterministically replays canonical run inputs', () => {
     totalTokens: 14,
     contextWindow: 128_000,
   });
+  assert.deepEqual(first.sessionTokenUsage, {
+    inputTokens: 10,
+    outputTokens: 4,
+    totalTokens: 14,
+    contextWindow: 128_000,
+    scope: 'session',
+  });
+});
+
+test('reduceSession accumulates usage across runs and clears only run usage on submit', () => {
+  let session = reduceSession(createDomainSession(), {
+    type: 'user.accepted',
+    requestId: 'req-1',
+    kind: 'chat',
+    text: 'first',
+  }, { observedAt: 1_000 });
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-1',
+      role: 'assistant',
+      text: 'first answer',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        totalTokens: 14,
+        latestInputTokens: 9,
+        scope: 'run',
+      },
+    },
+  }, { observedAt: 1_100 });
+
+  session = reduceSession(session, {
+    type: 'user.accepted',
+    requestId: 'req-2',
+    kind: 'chat',
+    text: 'second',
+  }, { observedAt: 1_200 });
+  assert.equal(session.tokenUsage, undefined);
+  assert.equal(session.sessionTokenUsage?.totalTokens, 14);
+
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'message.completed',
+      requestId: 'req-2',
+      role: 'assistant',
+      text: 'second answer',
+      usage: {
+        inputTokens: 8,
+        outputTokens: 3,
+        totalTokens: 11,
+        latestInputTokens: 15,
+        scope: 'run',
+      },
+    },
+  }, { observedAt: 1_300 });
+
+  assert.deepEqual(session.sessionTokenUsage, {
+    inputTokens: 18,
+    outputTokens: 7,
+    totalTokens: 25,
+    latestInputTokens: 15,
+    contextWindow: 128_000,
+    scope: 'session',
+  });
+
+  session = reduceSession(session, { type: 'session.cleared' }, { observedAt: 1_400 });
+  assert.equal(session.tokenUsage, undefined);
+  assert.equal(session.sessionTokenUsage, undefined);
 });
 
 test('reduceSession keeps review and terminal control scoped to the owning run', () => {
@@ -246,6 +317,12 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
   const withUsage = {
     ...live,
     tokenUsage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+    sessionTokenUsage: {
+      inputTokens: 13,
+      outputTokens: 7,
+      totalTokens: 20,
+      scope: 'session' as const,
+    },
   };
   const snapshot = {
     version: 3 as const,
@@ -285,11 +362,20 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
   assert.deepEqual(completed.timeline, snapshot.session.timeline);
   assert.equal(completed.activeRun?.startedAt, 1_700_000_000_000);
   assert.deepEqual(completed.tokenUsage, withUsage.tokenUsage);
+  assert.deepEqual(completed.sessionTokenUsage, withUsage.sessionTokenUsage);
 
   const started = applySessionSnapshot(withUsage, snapshot, {
     observedAt: 1_700_000_000_200,
   });
   assert.equal(started.tokenUsage, undefined);
+  assert.equal(started.sessionTokenUsage, undefined);
+
+  const resumed = applySessionSnapshot(withUsage, snapshot, {
+    observedAt: 1_700_000_000_200,
+    preserveOmittedSessionTokenUsage: true,
+  });
+  assert.equal(resumed.tokenUsage, undefined);
+  assert.deepEqual(resumed.sessionTokenUsage, withUsage.sessionTokenUsage);
 });
 
 test('TUI actions preserve the shared session reducer projection', () => {

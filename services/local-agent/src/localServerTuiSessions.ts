@@ -1,6 +1,12 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import { readMessageCreatedAtUtc, type ReviewSpec } from '@pinpawo/pet-agent';
+import {
+  readMessageCreatedAtUtc,
+  readLatestProviderInputTokens,
+  readMessagesTokenUsage,
+  type ReviewSpec,
+  type TokenUsageSnapshot,
+} from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
@@ -37,6 +43,7 @@ export type ActivePendingReview = {
 export type TuiCheckpointPoint = {
   sessionId: string;
   messages: TuiCheckpointMessage[];
+  sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
   pendingReview: ActivePendingReview | null;
 };
 
@@ -45,16 +52,8 @@ type TuiSessionGraphService = Pick<LocalAgentGraphService, 'readThreadState'>;
 
 export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpointMessage[] {
   return messages.flatMap((message) => {
+    if (!isTuiCheckpointMessage(message)) return [];
     const type = message._getType();
-    if (type !== 'human' && type !== 'ai') {
-      return [];
-    }
-    if (type === 'ai') {
-      const pinpawo = message.additional_kwargs?.pinpawo;
-      if (pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo) {
-        return [];
-      }
-    }
     const text = readFinalMessageText(message);
     if (!text) {
       return [];
@@ -66,6 +65,31 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
       ...(createdAt ? { createdAt } : {}),
     }];
   });
+}
+
+export function readTuiCheckpointTokenUsage(
+  messages: BaseMessage[],
+): TuiCheckpointPoint['sessionTokenUsage'] {
+  const usage = readMessagesTokenUsage(messages);
+  const latestInputTokens = readLatestProviderInputTokens(messages);
+  return usage
+    ? {
+        ...usage,
+        ...(latestInputTokens !== null
+          ? { latestInputTokens }
+          : {}),
+        source: 'provider',
+        scope: 'session',
+      }
+    : null;
+}
+
+function isTuiCheckpointMessage(message: BaseMessage) {
+  const type = message._getType();
+  if (type !== 'human' && type !== 'ai') return false;
+  if (type !== 'ai') return true;
+  const pinpawo = message.additional_kwargs?.pinpawo;
+  return !(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
 }
 
 export function summarizeTuiCheckpointMessages(
@@ -192,6 +216,7 @@ export class LocalServerTuiSessionService {
     return {
       sessionId: session.id,
       messages: readTuiCheckpointMessages(state.messages),
+      sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
       pendingReview,
     };
   }
@@ -280,6 +305,7 @@ export class LocalServerTuiSessionService {
         active: true,
       },
       messages: checkpoint.messages,
+      sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview: checkpoint.pendingReview,
     };
   }

@@ -113,6 +113,7 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
       kind: 'chat',
       messages: checkpoint.messages,
       deps: requestDeps,
+      sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingReview,
     });
   };
@@ -152,6 +153,7 @@ export function createLocalServerHandlers(deps: LocalServerDeps): LocalServerHan
           kind: 'chat',
           messages: result.messages,
           deps: requestDeps,
+          sessionTokenUsage: result.sessionTokenUsage,
           pendingReview,
         }),
       };

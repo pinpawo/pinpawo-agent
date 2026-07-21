@@ -116,6 +116,18 @@ explicitly; the reducer does not read clocks, sockets, files, or UI state.
 
 `applySessionSnapshot(session, snapshot, options)` replaces the ordered timeline and active run with the materialized snapshot value. Its options describe application policy, such as whether omitted token usage should retain a process-local observation; they do not classify the snapshot.
 
+Token usage keeps two scopes explicit in the projection: `tokenUsage` is the
+latest provider-reported run snapshot, while `sessionTokenUsage` accumulates
+the runs observed by the current process for that session. Starting another
+run clears only `tokenUsage`; clearing the session clears both. Snapshot
+materialization reconstructs `sessionTokenUsage` from provider usage metadata
+stored on the session's checkpoint messages, so reconnect and resume can restore
+the cumulative value. When a provider or historical checkpoint has no usage
+metadata, the field remains absent until a completed run reports usage.
+`sessionTokenUsage.latestInputTokens` retains the latest provider prompt
+footprint separately from cumulative input/output totals; the TUI uses it to
+show remaining tokens before the shared 75% context-compaction watermark.
+
 The TUI reducer adapts TUI actions and presentation text into these inputs.
 Composer history, focus, connection copy, partial review drafts, the one-shot
 review-resolution send marker, and viewport state remain TUI-owned and are

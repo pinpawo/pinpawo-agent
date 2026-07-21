@@ -46,6 +46,7 @@ function sessionSnapshot(input: {
   activeRun?: LocalAgentRunView | null;
   runtime?: LocalAgentSessionSnapshot['session']['runtime'];
   tokenUsage?: LocalAgentSessionSnapshot['session']['tokenUsage'];
+  sessionTokenUsage?: LocalAgentSessionSnapshot['session']['sessionTokenUsage'];
 }): LocalAgentSessionSnapshot {
   return {
     version: 3,
@@ -56,6 +57,7 @@ function sessionSnapshot(input: {
       activeRun: input.activeRun ?? null,
       ...(input.runtime ? { runtime: input.runtime } : {}),
       ...(input.tokenUsage ? { tokenUsage: input.tokenUsage } : {}),
+      ...(input.sessionTokenUsage ? { sessionTokenUsage: input.sessionTokenUsage } : {}),
     },
   };
 }
@@ -226,6 +228,10 @@ test('tuiStateReducer handles streaming chat completion with token usage', () =>
   assert.equal(session.activeRun, null);
   assert.equal(activeRun(state, 'req-1'), undefined);
   assert.deepEqual(session.tokenUsage, usage);
+  assert.deepEqual(session.sessionTokenUsage, {
+    ...usage,
+    scope: 'session',
+  });
   assert.deepEqual(session.timeline.map((entry) => (
     entry.type === 'message' && entry.role === 'assistant'
       ? [entry.createdAt, entry.updatedAt]
@@ -756,6 +762,10 @@ test('tuiStateReducer stores usage on completed message', () => {
   const session = state.sessions['chat:pet']!;
   assert.equal(session.activeRun, null);
   assert.deepEqual(session.tokenUsage, usage);
+  assert.deepEqual(session.sessionTokenUsage, {
+    ...usage,
+    scope: 'session',
+  });
 });
 
 test('tuiStateReducer clears session token usage when clearing session state', () => {
@@ -777,6 +787,12 @@ test('tuiStateReducer clears session token usage when clearing session state', (
           outputTokens: 50,
           totalTokens: 150,
         },
+        sessionTokenUsage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          totalTokens: 150,
+          scope: 'session',
+        },
       },
     },
   };
@@ -786,6 +802,7 @@ test('tuiStateReducer clears session token usage when clearing session state', (
   });
 
   assert.equal(state.sessions['chat:pet']?.tokenUsage, undefined);
+  assert.equal(state.sessions['chat:pet']?.sessionTokenUsage, undefined);
   assert.equal(state.sessions['chat:pet']?.kind, 'chat');
   assert.deepEqual(state.ui, {
     composerTarget: 'chat',
@@ -822,6 +839,12 @@ test('tuiStateReducer materializes timeline state from a checkpoint snapshot', (
           inputTokens: 10,
           outputTokens: 5,
           totalTokens: 15,
+        },
+        sessionTokenUsage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+          scope: 'session',
         },
       },
     },
@@ -1017,6 +1040,12 @@ test('tuiStateReducer preserves reconnect token usage when snapshot omits usage'
           outputTokens: 5,
           totalTokens: 15,
         },
+        sessionTokenUsage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+          scope: 'session',
+        },
       },
     },
   };
@@ -1037,6 +1066,7 @@ test('tuiStateReducer preserves reconnect token usage when snapshot omits usage'
     outputTokens: 5,
     totalTokens: 15,
   });
+  assert.equal(state.sessions['chat:pet']?.sessionTokenUsage?.totalTokens, 15);
 
   state = tuiStateReducer(state, {
     type: 'session.snapshot.loaded',
@@ -1050,6 +1080,7 @@ test('tuiStateReducer preserves reconnect token usage when snapshot omits usage'
   });
 
   assert.equal(state.sessions['chat:pet']?.tokenUsage, undefined);
+  assert.equal(state.sessions['chat:pet']?.sessionTokenUsage, undefined);
 });
 
 test('tuiStateReducer preserves observed token usage on completion snapshot', () => {

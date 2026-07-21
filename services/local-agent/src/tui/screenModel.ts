@@ -20,6 +20,7 @@ import {
 } from './timeline/agentTimelineSelectors';
 import type { LocalAgentTimelineEntry } from '../localAgentSession';
 import type { ActiveOperation } from './types';
+import { buildWelcomePanelModel, type WelcomePanelModel } from './welcomePanelModel';
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
 
@@ -39,7 +40,7 @@ export type TuiScreenModel = {
       staticBoundaryKey: string;
       scrollStrategy: 'preserveStaticOutputUntilHostReset';
       width: number;
-      emptyText: string;
+      emptyState: WelcomePanelModel | null;
     };
     overlay: {
       width: number;
@@ -87,6 +88,14 @@ export function buildTuiScreenModel(input: {
       : null;
   const connectionStatus = formatConnectionStatus(input.state.connection);
   const composerFocused = ready && !busy;
+  const timelineEmptyState = timelineViewport.entries.length === 0
+    ? buildWelcomePanelModel({
+        session,
+        width: contentWidth,
+        ready,
+        connectionStatus,
+      })
+    : null;
 
   return {
     session,
@@ -104,7 +113,7 @@ export function buildTuiScreenModel(input: {
         staticBoundaryKey: formatViewportBoundaryKey(timelineViewport.staticEntries),
         scrollStrategy: 'preserveStaticOutputUntilHostReset',
         width: contentWidth,
-        emptyText: TUI_TEXT.emptyHistory(petName),
+        emptyState: timelineEmptyState,
       },
       overlay: {
         width: contentWidth,

@@ -6,6 +6,7 @@ import { createEmptyTuiSessionState } from './tuiSessionRegistry';
 import {
   LocalServerTuiSessionService,
   readTuiCheckpointMessages,
+  readTuiCheckpointTokenUsage,
   summarizeTuiCheckpointMessages,
   type TuiSessionCheckpointer,
 } from './localServerTuiSessions';
@@ -34,6 +35,34 @@ test('readTuiCheckpointMessages keeps visible user/assistant messages only', () 
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);
+});
+
+test('readTuiCheckpointTokenUsage aggregates every provider call in the session', () => {
+  const usage = readTuiCheckpointTokenUsage([
+    new HumanMessage('hello'),
+    new AIMessage({
+      content: '',
+      usage_metadata: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
+    }),
+    new AIMessage({
+      content: 'answer',
+      usage_metadata: { input_tokens: 15, output_tokens: 3, total_tokens: 18 },
+    }),
+    new AIMessage({
+      content: 'hidden lane',
+      additional_kwargs: { pinpawo: { lane: 'subagent' } },
+      usage_metadata: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+    }),
+  ]);
+
+  assert.deepEqual(usage, {
+    inputTokens: 125,
+    outputTokens: 55,
+    totalTokens: 180,
+    latestInputTokens: 100,
+    source: 'provider',
+    scope: 'session',
+  });
 });
 
 test('summarizeTuiCheckpointMessages derives title from first user message', () => {
@@ -230,6 +259,7 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
     review,
   });
   assert.deepEqual(checkpoint.messages, [{ role: 'user', text: 'checkpoint prompt' }]);
+  assert.equal(checkpoint.sessionTokenUsage, null);
   assert.equal(capturedThreadId, session.threadId);
   assert.equal(readCount, 1);
 });

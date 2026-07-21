@@ -7,6 +7,7 @@ import {
   isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
   NamespacedProtocolToolEventReader,
+  readLatestProviderInputTokens,
   readMessagesTokenUsage,
   stampMessageCreatedAtUtc,
   SUBAGENT_OPERATIONS_EVENT,
@@ -235,6 +236,7 @@ function readRunTokenUsage(params: {
   return createTokenUsageSnapshot(
     readMessagesTokenUsage(runMessages),
     params.contextWindow,
+    readLatestProviderInputTokens(params.finalMessages),
   );
 }
 

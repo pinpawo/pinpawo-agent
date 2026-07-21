@@ -12,12 +12,24 @@ import {
   buildSnapshotExpression,
   originOf,
 } from './snapshot.js';
+import {
+  buildExtractExpression,
+  buildResolveTargetExpression,
+  normalizeElementTarget,
+  normalizeHumanization,
+  randomDelayMs,
+} from './interaction.js';
 
 const CDP_VERSION = '1.3';
 const ALLOWED_CDP_COMMANDS = new Set([
   'Accessibility.getFullAXTree',
+  'DOM.getBoxModel',
+  'DOM.scrollIntoViewIfNeeded',
   'Page.getNavigationHistory',
   'Page.navigate',
+  'Page.captureScreenshot',
+  'Input.dispatchKeyEvent',
+  'Input.dispatchMouseEvent',
   'Runtime.evaluate',
 ]);
 const SESSION_KEY = 'pinpawoBrowserTarget';
@@ -230,6 +242,239 @@ async function readSnapshot(tabId, approvedOrigin) {
   return snapshot;
 }
 
+async function evaluateValue(tabId, expression) {
+  const evaluation = await cdp(tabId, 'Runtime.evaluate', {
+    expression,
+    returnByValue: true,
+    awaitPromise: true,
+  });
+  if (evaluation.exceptionDetails || !evaluation.result || !('value' in evaluation.result)) {
+    throw new ExtensionError(
+      'runtime_evaluation_failed',
+      evaluation.exceptionDetails?.text || 'Runtime.evaluate returned no value',
+      true,
+    );
+  }
+  return evaluation.result.value;
+}
+
+function requirePageResult(value) {
+  if (!value || typeof value !== 'object' || value.ok !== true) {
+    throw new ExtensionError(
+      typeof value?.code === 'string' ? value.code : 'page_operation_failed',
+      typeof value?.message === 'string' ? value.message : 'The page operation failed',
+      value?.code === 'element_not_found',
+    );
+  }
+  return value;
+}
+
+function ensureCommandAlive(deadlineAt) {
+  if (Date.now() > Date.parse(deadlineAt)) {
+    throw new ExtensionError('command_expired', 'Browser command expired during execution', true);
+  }
+}
+
+async function delay(ms, deadlineAt) {
+  ensureCommandAlive(deadlineAt);
+  if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
+  ensureCommandAlive(deadlineAt);
+}
+
+async function resolveTarget(tabId, target) {
+  const normalized = normalizeElementTarget(target);
+  const accessibilityRef = normalized.ref
+    ? /^ax:(\d+):([a-z]+)$/.exec(normalized.ref)
+    : null;
+  if (accessibilityRef) {
+    const backendNodeId = Number(accessibilityRef[1]);
+    await cdp(tabId, 'DOM.scrollIntoViewIfNeeded', { backendNodeId });
+    const model = await cdp(tabId, 'DOM.getBoxModel', { backendNodeId });
+    const quad = model.model?.border;
+    if (!Array.isArray(quad) || quad.length !== 8) {
+      throw new ExtensionError('element_not_visible', 'The accessibility element has no visible box');
+    }
+    return {
+      ok: true,
+      x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4,
+      y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4,
+      tag: accessibilityRef[2],
+      editable: ['textbox', 'searchbox', 'combobox', 'spinbutton'].includes(accessibilityRef[2]),
+    };
+  }
+  return requirePageResult(await evaluateValue(tabId, buildResolveTargetExpression(normalized)));
+}
+
+async function dispatchClick(tabId, target, humanization, deadlineAt) {
+  const point = await resolveTarget(tabId, normalizeElementTarget(target));
+  await delay(randomDelayMs(humanization.preDelayMinMs, humanization.preDelayMaxMs), deadlineAt);
+  await cdp(tabId, 'Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: point.x,
+    y: point.y,
+    button: 'none',
+  });
+  await delay(randomDelayMs(humanization.hoverMinMs, humanization.hoverMaxMs), deadlineAt);
+  await cdp(tabId, 'Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: point.x,
+    y: point.y,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
+  });
+  await delay(randomDelayMs(25, 70), deadlineAt);
+  await cdp(tabId, 'Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: point.x,
+    y: point.y,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1,
+  });
+  return point;
+}
+
+async function dispatchKey(tabId, key, params = {}) {
+  const { text, ...keyParams } = params;
+  await cdp(tabId, 'Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key,
+    ...keyParams,
+  });
+  if (typeof text === 'string') {
+    await cdp(tabId, 'Input.dispatchKeyEvent', {
+      type: 'char',
+      key,
+      text,
+      ...keyParams,
+    });
+  }
+  await cdp(tabId, 'Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key,
+    code: keyParams.code,
+  });
+}
+
+async function dispatchType(tabId, params, deadlineAt, approvedOrigin) {
+  if (typeof params.text !== 'string' || params.text.length > 500) {
+    throw new ExtensionError('invalid_type_text', 'Type text must be a string of at most 500 characters');
+  }
+  const humanization = normalizeHumanization(params.humanization);
+  const point = await dispatchClick(tabId, params.target, humanization, deadlineAt);
+  if (!point.editable) {
+    throw new ExtensionError('element_not_editable', 'The target element is not editable');
+  }
+  await assertApprovedOrigin(tabId, approvedOrigin);
+  await dispatchKey(tabId, 'a', { code: 'KeyA', commands: ['SelectAll'] });
+  await dispatchKey(tabId, 'Backspace', { code: 'Backspace', windowsVirtualKeyCode: 8 });
+  for (const character of Array.from(params.text)) {
+    ensureCommandAlive(deadlineAt);
+    await assertApprovedOrigin(tabId, approvedOrigin);
+    if (character === '\n') {
+      await dispatchKey(tabId, 'Enter', { code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 });
+    } else {
+      await dispatchKey(tabId, character, { text: character });
+    }
+    await delay(randomDelayMs(humanization.keyDelayMinMs, humanization.keyDelayMaxMs), deadlineAt);
+  }
+  if (params.submit === true) {
+    await assertApprovedOrigin(tabId, approvedOrigin);
+    await dispatchKey(tabId, 'Enter', { code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 });
+  }
+}
+
+function boundedScrollDelta(value, name) {
+  if (value === undefined) return 0;
+  if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > 10_000) {
+    throw new ExtensionError('invalid_scroll_delta', `${name} must be between -10000 and 10000`);
+  }
+  return value;
+}
+
+async function dispatchScroll(tabId, params, deadlineAt) {
+  const deltaX = boundedScrollDelta(params.deltaX, 'deltaX');
+  const deltaY = boundedScrollDelta(params.deltaY, 'deltaY');
+  if (deltaX === 0 && deltaY === 0) {
+    throw new ExtensionError('invalid_scroll_delta', 'At least one scroll delta must be non-zero');
+  }
+  const point = params.target
+    ? await resolveTarget(tabId, normalizeElementTarget(params.target))
+    : { x: 1, y: 1 };
+  await cdp(tabId, 'Input.dispatchMouseEvent', {
+    type: 'mouseWheel',
+    x: point.x,
+    y: point.y,
+    deltaX,
+    deltaY,
+  });
+  await delay(150, deadlineAt);
+}
+
+async function waitForPageCondition(tabId, params, deadlineAt) {
+  const timeoutMs = params.timeoutMs ?? 3_000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 30_000) {
+    throw new ExtensionError('invalid_wait_timeout', 'timeoutMs must be between 1 and 30000');
+  }
+  const waitDeadline = Math.min(Date.now() + timeoutMs, Date.parse(deadlineAt));
+  if (!params.target) {
+    await delay(Math.max(0, waitDeadline - Date.now()), deadlineAt);
+    return;
+  }
+  const target = normalizeElementTarget(params.target);
+  while (Date.now() < waitDeadline) {
+    try {
+      await resolveTarget(tabId, target);
+      return;
+    } catch (error) {
+      if (!(error instanceof ExtensionError) || error.code !== 'element_not_found') throw error;
+    }
+    await delay(100, deadlineAt);
+  }
+  throw new ExtensionError('wait_timeout', 'The target did not become visible before timeout', true);
+}
+
+async function readExtract(tabId, params, approvedOrigin) {
+  const offset = params.offset ?? 0;
+  const limit = params.limit ?? 50_000;
+  await assertApprovedOrigin(tabId, approvedOrigin);
+  const result = requirePageResult(await evaluateValue(
+    tabId,
+    buildExtractExpression(params.selector, offset, limit),
+  ));
+  validateSnapshotOrigin(result, approvedOrigin);
+  await assertApprovedOrigin(tabId, approvedOrigin);
+  const { ok: _ok, ...raw } = result;
+  return raw;
+}
+
+async function captureScreenshot(tabId, approvedOrigin) {
+  await assertApprovedOrigin(tabId, approvedOrigin);
+  for (const quality of [75, 55, 35]) {
+    const result = await cdp(tabId, 'Page.captureScreenshot', {
+      format: 'jpeg',
+      quality,
+      fromSurface: true,
+      captureBeyondViewport: false,
+      optimizeForSpeed: true,
+    });
+    if (typeof result.data !== 'string') {
+      throw new ExtensionError('screenshot_unavailable', 'Chrome returned no screenshot data', true);
+    }
+    const estimatedBytes = Math.floor(result.data.length * 3 / 4);
+    if (estimatedBytes <= 700_000) {
+      await assertApprovedOrigin(tabId, approvedOrigin);
+      return { mimeType: 'image/jpeg', data: result.data };
+    }
+  }
+  throw new ExtensionError(
+    'screenshot_too_large',
+    'The viewport screenshot exceeds the Native Messaging safety limit',
+    true,
+  );
+}
+
 async function executeCommand(command) {
   if (Date.now() > Date.parse(command.deadlineAt)) {
     throw new ExtensionError('command_expired', 'Browser command deadline has already passed', true);
@@ -238,12 +483,45 @@ async function executeCommand(command) {
 
   const activeTarget = await ensureTarget();
   await attach(activeTarget.tabId);
+  const approvedOrigin = command.params.approvedOrigin;
   if (command.command === 'snapshot') {
-    return await readSnapshot(activeTarget.tabId, command.params.approvedOrigin);
+    return await readSnapshot(activeTarget.tabId, approvedOrigin);
+  }
+  if (command.command === 'extract') {
+    return await readExtract(activeTarget.tabId, command.params, approvedOrigin);
+  }
+  if (command.command === 'screenshot') {
+    return await captureScreenshot(activeTarget.tabId, approvedOrigin);
+  }
+  if (command.command === 'click') {
+    await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
+    await dispatchClick(
+      activeTarget.tabId,
+      command.params.target,
+      normalizeHumanization(command.params.humanization),
+      command.deadlineAt,
+    );
+    await delay(150, command.deadlineAt);
+    return await readSnapshot(activeTarget.tabId, approvedOrigin);
+  }
+  if (command.command === 'type') {
+    await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
+    await dispatchType(activeTarget.tabId, command.params, command.deadlineAt, approvedOrigin);
+    await delay(100, command.deadlineAt);
+    return await readSnapshot(activeTarget.tabId, approvedOrigin);
+  }
+  if (command.command === 'scroll') {
+    await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
+    await dispatchScroll(activeTarget.tabId, command.params, command.deadlineAt);
+    return await readSnapshot(activeTarget.tabId, approvedOrigin);
+  }
+  if (command.command === 'wait') {
+    await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
+    await waitForPageCondition(activeTarget.tabId, command.params, command.deadlineAt);
+    return await readSnapshot(activeTarget.tabId, approvedOrigin);
   }
 
   const url = command.params.url;
-  const approvedOrigin = command.params.approvedOrigin;
   if (typeof url !== 'string' || originOf(url) !== approvedOrigin) {
     throw new ExtensionError('origin_approval_mismatch', 'Navigation URL does not match its approved origin');
   }

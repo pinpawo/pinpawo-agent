@@ -4,6 +4,20 @@ import { z } from 'zod';
 import { browserSession } from './session';
 import type { BrowserExtractOptions } from './session';
 
+type BrowserTargetInput = { selector?: string; ref?: string };
+
+const browserTargetFields = {
+  selector: z.string().min(1).optional().describe('CSS 或 text=... 选择器；与 ref 二选一'),
+  ref: z.string().min(1).optional().describe('最近一次 snapshot 返回的稳定元素 ref；与 selector 二选一'),
+};
+
+function readBrowserTarget(input: BrowserTargetInput) {
+  if ((input.selector ? 1 : 0) + (input.ref ? 1 : 0) !== 1) {
+    throw new Error('exactly one of selector or ref is required');
+  }
+  return { selector: input.selector, ref: input.ref };
+}
+
 const browserOpenTool = tool(
   async ({ url, headless }: { url: string; headless?: boolean }) => {
     try {
@@ -107,9 +121,9 @@ const browserSnapshotTool = tool(
 );
 
 const browserClickTool = tool(
-  async ({ selector }: { selector: string }) => {
+  async (input: BrowserTargetInput) => {
     try {
-      return await browserSession.click(selector);
+      return await browserSession.click(readBrowserTarget(input));
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
@@ -117,48 +131,77 @@ const browserClickTool = tool(
   {
     name: 'browser_click',
     description:
-      '点击当前页面上的元素。selector 支持 CSS 选择器或 text=... 形式。',
-    schema: z.object({
-      selector: z
-        .string()
-        .min(1)
-        .describe('元素选择器，例如 "#submit" 或 "text=登录"'),
-    }),
+      '点击当前页面上的元素。优先使用最近 snapshot 返回的 ref；也支持 CSS 或 text=... selector。',
+    schema: z.object(browserTargetFields).refine(
+      (value) => Boolean(value.selector) !== Boolean(value.ref),
+      { message: 'exactly one of selector or ref is required' },
+    ),
   },
 );
 
 const browserTypeTool = tool(
-  async ({ selector, text, submit }: { selector: string; text: string; submit?: boolean }) => {
+  async ({ selector, ref, text, submit }: BrowserTargetInput & { text: string; submit?: boolean }) => {
     try {
-      return await browserSession.type(selector, text, submit ?? false);
+      return await browserSession.type(readBrowserTarget({ selector, ref }), text, submit ?? false);
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
   },
   {
     name: 'browser_type',
-    description: '在页面输入框中输入文本；submit=true 代表输入后按 Enter 提交。',
+    description: '在页面输入框中输入文本；优先使用最近 snapshot 返回的 ref；submit=true 代表输入后按 Enter 提交。',
     schema: z.object({
-      selector: z.string().min(1).describe('输入框选择器'),
+      ...browserTargetFields,
       text: z.string().describe('要输入的文本'),
       submit: z.boolean().optional().describe('输入后是否按 Enter 提交，默认 false'),
-    }),
+    }).refine(
+      (value) => Boolean(value.selector) !== Boolean(value.ref),
+      { message: 'exactly one of selector or ref is required' },
+    ),
+  },
+);
+
+const browserScrollTool = tool(
+  async ({ deltaX, deltaY, selector, ref }: BrowserTargetInput & { deltaX?: number; deltaY?: number }) => {
+    try {
+      const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
+      return await browserSession.scroll({
+        deltaX: deltaX ?? 0,
+        deltaY: deltaY ?? 600,
+        target,
+      });
+    } catch (err) {
+      return `Error: ${err instanceof Error ? err.message : err}`;
+    }
+  },
+  {
+    name: 'browser_scroll',
+    description: '滚动当前页面；默认向下滚动 600 CSS 像素。可指定 ref/selector，将指针移到该元素后滚动。',
+    schema: z.object({
+      deltaX: z.number().min(-10000).max(10000).optional().describe('水平滚动量，默认 0'),
+      deltaY: z.number().min(-10000).max(10000).optional().describe('垂直滚动量，默认 600'),
+      ...browserTargetFields,
+    }).refine(
+      (value) => !(value.selector && value.ref),
+      { message: 'selector and ref cannot both be provided' },
+    ),
   },
 );
 
 const browserWaitTool = tool(
-  async ({ selector, timeoutMs }: { selector?: string; timeoutMs?: number }) => {
+  async ({ selector, ref, timeoutMs }: BrowserTargetInput & { timeoutMs?: number }) => {
     try {
-      return await browserSession.wait(selector, timeoutMs ?? 3_000);
+      const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
+      return await browserSession.wait(target, timeoutMs ?? 3_000);
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
   },
   {
     name: 'browser_wait',
-    description: '等待页面稳定。可等待某个 selector 出现，或等待指定毫秒数。',
+    description: '等待页面稳定。可等待某个 ref/selector 对应的元素出现，或等待指定毫秒数。',
     schema: z.object({
-      selector: z.string().optional().describe('等待出现的选择器'),
+      ...browserTargetFields,
       timeoutMs: z
         .number()
         .int()
@@ -166,7 +209,10 @@ const browserWaitTool = tool(
         .max(30000)
         .optional()
         .describe('等待毫秒数，默认 3000'),
-    }),
+    }).refine(
+      (value) => !(value.selector && value.ref),
+      { message: 'selector and ref cannot both be provided' },
+    ),
   },
 );
 
@@ -219,6 +265,21 @@ const browserCloseTool = tool(
   },
 );
 
+const browserScreenshotTool = tool(
+  async () => {
+    try {
+      return await browserSession.screenshot();
+    } catch (err) {
+      return `Error: ${err instanceof Error ? err.message : err}`;
+    }
+  },
+  {
+    name: 'browser_screenshot',
+    description: '截取当前可见浏览器视口并保存到当前 workdir 的 .pinpawo/browser/screenshots 目录。',
+    schema: z.object({}),
+  },
+);
+
 const browserSessionTool = tool(
   async ({ action }: { action: 'list' }) => {
     try {
@@ -254,8 +315,10 @@ export const browserTools: StructuredTool[] = [
   browserSnapshotTool,
   browserClickTool,
   browserTypeTool,
+  browserScrollTool,
   browserWaitTool,
   browserExtractTool,
+  browserScreenshotTool,
   browserCloseTool,
   browserSessionTool,
 ];

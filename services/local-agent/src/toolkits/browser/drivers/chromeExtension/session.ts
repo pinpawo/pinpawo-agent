@@ -1,6 +1,13 @@
-import type { BrowserOpenOptions } from '../../session';
+import type {
+  BrowserElementTarget,
+  BrowserOpenOptions,
+  BrowserScrollOptions,
+} from '../../session';
 import {
+  buildBrowserExtractPayloadFromRaw,
   buildBrowserSnapshotPayload,
+  normalizeBrowserExtractOptions,
+  parseBrowserRawExtract,
   parseBrowserRawSnapshot,
   type BrowserExtractOptions,
 } from '../../snapshotPayload';
@@ -9,6 +16,7 @@ import {
   localAgentBrowserBridge,
   type LocalAgentBrowserBridge,
 } from './bridge';
+import { persistBrowserScreenshot } from '../../screenshot';
 
 const DEFAULT_SESSION = 'default';
 
@@ -20,10 +28,15 @@ function approvedOriginFor(url: string): string {
   return parsed.origin;
 }
 
-function unsupportedExtensionOperation(operation: string): never {
-  throw new Error(
-    `Chrome extension backend P0 does not support ${operation}; use navigate, snapshot or close/detach.`,
-  );
+function normalizeTarget(target: string | BrowserElementTarget): BrowserElementTarget {
+  const normalized = typeof target === 'string' ? { selector: target.trim() } : {
+    selector: target.selector?.trim(),
+    ref: target.ref?.trim(),
+  };
+  if ((normalized.selector ? 1 : 0) + (normalized.ref ? 1 : 0) !== 1) {
+    throw new Error('browser element target requires exactly one of selector or ref');
+  }
+  return normalized;
 }
 
 export class ChromeExtensionBrowserSession {
@@ -65,6 +78,13 @@ export class ChromeExtensionBrowserSession {
     return JSON.stringify(buildBrowserSnapshotPayload(snapshot), null, 2);
   }
 
+  private requireApprovedOrigin(): string {
+    if (!this.approvedOrigin) {
+      throw new Error('No approved Chrome extension page. Use browser_open first.');
+    }
+    return this.approvedOrigin;
+  }
+
   async open(url: string, opts: BrowserOpenOptions = {}): Promise<string> {
     this.validateOpenOptions(opts);
     const approvedOrigin = approvedOriginFor(url);
@@ -78,28 +98,81 @@ export class ChromeExtensionBrowserSession {
   }
 
   async snapshot(): Promise<string> {
-    if (!this.approvedOrigin) {
-      throw new Error('No approved Chrome extension page. Use browser_open first.');
-    }
+    const approvedOrigin = this.requireApprovedOrigin();
     return this.buildSnapshot(await this.bridge.sendCommand('snapshot', {
-      approvedOrigin: this.approvedOrigin,
-    }), this.approvedOrigin);
+      approvedOrigin,
+    }), approvedOrigin);
   }
 
-  async click(_selector: string): Promise<string> {
-    return unsupportedExtensionOperation('click');
+  async click(target: string | BrowserElementTarget): Promise<string> {
+    const approvedOrigin = this.requireApprovedOrigin();
+    return this.buildSnapshot(await this.bridge.sendCommand('click', {
+      approvedOrigin,
+      target: normalizeTarget(target),
+    }), approvedOrigin);
   }
 
-  async type(_selector: string, _text: string, _submit = false): Promise<string> {
-    return unsupportedExtensionOperation('type');
+  async type(target: string | BrowserElementTarget, text: string, submit = false): Promise<string> {
+    const approvedOrigin = this.requireApprovedOrigin();
+    return this.buildSnapshot(await this.bridge.sendCommand('type', {
+      approvedOrigin,
+      target: normalizeTarget(target),
+      text,
+      submit,
+    }), approvedOrigin);
   }
 
-  async wait(_selector?: string, _timeoutMs = 3_000): Promise<string> {
-    return unsupportedExtensionOperation('wait');
+  async scroll(options: BrowserScrollOptions = {}): Promise<string> {
+    const approvedOrigin = this.requireApprovedOrigin();
+    return this.buildSnapshot(await this.bridge.sendCommand('scroll', {
+      approvedOrigin,
+      deltaX: options.deltaX ?? 0,
+      deltaY: options.deltaY ?? 600,
+      ...(options.target ? { target: normalizeTarget(options.target) } : {}),
+    }), approvedOrigin);
   }
 
-  async extract(_options: BrowserExtractOptions = {}): Promise<string> {
-    return unsupportedExtensionOperation('extract');
+  async wait(target?: string | BrowserElementTarget, timeoutMs = 3_000): Promise<string> {
+    const approvedOrigin = this.requireApprovedOrigin();
+    return this.buildSnapshot(await this.bridge.sendCommand('wait', {
+      approvedOrigin,
+      timeoutMs,
+      ...(target ? { target: normalizeTarget(target) } : {}),
+    }), approvedOrigin);
+  }
+
+  async extract(options: BrowserExtractOptions = {}): Promise<string> {
+    const approvedOrigin = this.requireApprovedOrigin();
+    const window = normalizeBrowserExtractOptions(options);
+    const raw = parseBrowserRawExtract(await this.bridge.sendCommand('extract', {
+      approvedOrigin,
+      selector: options.selector,
+      ...window,
+    }));
+    if (approvedOriginFor(raw.url) !== approvedOrigin) {
+      throw new BrowserBridgeError(
+        'origin_changed',
+        `Chrome extension extract origin changed from ${approvedOrigin} to ${approvedOriginFor(raw.url)}.`,
+      );
+    }
+    return JSON.stringify(buildBrowserExtractPayloadFromRaw(raw), null, 2);
+  }
+
+  async screenshot(): Promise<string> {
+    const approvedOrigin = this.requireApprovedOrigin();
+    const value = await this.bridge.sendCommand('screenshot', { approvedOrigin });
+    if (
+      !value
+      || typeof value !== 'object'
+      || (value as Record<string, unknown>).mimeType !== 'image/jpeg'
+      || typeof (value as Record<string, unknown>).data !== 'string'
+    ) {
+      throw new Error('Chrome extension returned an invalid screenshot');
+    }
+    return persistBrowserScreenshot({
+      mimeType: 'image/jpeg',
+      data: (value as Record<string, string>).data,
+    });
   }
 
   async close(): Promise<string> {

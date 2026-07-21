@@ -1,3 +1,5 @@
+import { ELEMENT_REGISTRY_KEY } from './interaction.js';
+
 export const MAX_RAW_INTERACTIVE_ELEMENTS = 200;
 export const MAX_RAW_TEXT_BYTES = 1_000_000;
 
@@ -22,6 +24,10 @@ export function assertSnapshotApprovedOrigin(snapshot, approvedOrigin) {
 export function buildSnapshotExpression(maxInteractive = MAX_RAW_INTERACTIVE_ELEMENTS) {
   return `(() => {
     const maxInteractive = ${JSON.stringify(maxInteractive)};
+    const snapshotId = globalThis.crypto?.randomUUID?.()
+      || Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const elementRegistry = new Map();
+    globalThis[${JSON.stringify(ELEMENT_REGISTRY_KEY)}] = elementRegistry;
     const trim = (value, length) => value.length <= length
       ? value
       : value.slice(0, length) + '...';
@@ -64,8 +70,11 @@ export function buildSnapshotExpression(maxInteractive = MAX_RAW_INTERACTIVE_ELE
     });
     const interactive = candidates.slice(0, maxInteractive).map((element, offset) => {
       const index = offset + 1;
+      const ref = snapshotId + ':' + index;
+      elementRegistry.set(ref, element);
       return {
         index,
+        ref,
         tag: element.tagName.toLowerCase(),
         text: trim((element.textContent || element.value || '').trim(), 80),
         type: element.getAttribute('type'),
@@ -121,6 +130,9 @@ export function buildAccessibilitySnapshot(nodes, url) {
     const name = axValue(node, 'name');
     return {
       index,
+      ...(Number.isInteger(node.backendDOMNodeId) && node.backendDOMNodeId > 0
+        ? { ref: `ax:${node.backendDOMNodeId}:${role}` }
+        : {}),
       tag: role,
       text: name,
       type: null,

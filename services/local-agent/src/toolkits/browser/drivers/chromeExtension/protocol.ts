@@ -1,9 +1,15 @@
-export const BROWSER_EXTENSION_PROTOCOL_VERSION = 1 as const;
+export const BROWSER_EXTENSION_PROTOCOL_VERSION = 2 as const;
 export const BROWSER_NATIVE_HOST_NAME = 'com.pinpawo.browser_bridge';
 
 export const BROWSER_EXTENSION_CAPABILITIES = [
   'navigate',
   'snapshot',
+  'click',
+  'type',
+  'scroll',
+  'wait',
+  'extract',
+  'screenshot',
   'detach',
 ] as const;
 

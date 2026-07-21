@@ -37,6 +37,8 @@ test('runtime snapshot expression carries numbered interactive hints', () => {
   assert.match(expression, /'\[' \+ index \+ '\] '/);
   assert.match(expression, /interactiveCount: candidates\.length/);
   assert.match(expression, /textLength: bodyText\.length/);
+  assert.match(expression, /elementRegistry\.set\(ref, element\)/);
+  assert.match(expression, /ref,/);
 });
 
 test('accessibility fallback returns a raw backend snapshot', () => {
@@ -50,5 +52,6 @@ test('accessibility fallback returns a raw backend snapshot', () => {
   assert.equal(result.text, 'Readable text');
   assert.equal(result.textSource, 'Accessibility.getFullAXTree');
   assert.equal(result.interactive[0].index, 1);
+  assert.equal(result.interactive[0].ref, 'ax:9:button');
   assert.equal(result.interactive[0].backendNodeId, 9);
 });

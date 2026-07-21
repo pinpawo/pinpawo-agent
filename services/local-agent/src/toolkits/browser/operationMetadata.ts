@@ -151,12 +151,15 @@ function browserOpenWithProfileInputSummary(input: unknown): ToolkitOperationSum
 function selectorInputSummary(action: string, input: unknown): ToolkitOperationSummary | null {
   const record = readJsonRecord(input);
   const selector = readString(record, 'selector');
-  return selector
+  const ref = readString(record, 'ref');
+  const target = ref ?? selector;
+  return target
     ? {
-        target: selector,
-        summary: `${action} ${selector}`,
+        target,
+        summary: `${action} ${target}`,
         details: {
           selector,
+          ...(ref ? { ref } : {}),
         },
       }
     : null;
@@ -165,14 +168,17 @@ function selectorInputSummary(action: string, input: unknown): ToolkitOperationS
 function typeInputSummary(input: unknown): ToolkitOperationSummary | null {
   const record = readJsonRecord(input);
   const selector = readString(record, 'selector');
+  const ref = readString(record, 'ref');
   const text = readString(record, 'text');
   const submit = readBoolean(record, 'submit');
-  return selector
+  const target = ref ?? selector;
+  return target
     ? {
-        target: selector,
-        summary: `输入到 ${selector}`,
+        target,
+        summary: `输入到 ${target}`,
         details: {
           selector,
+          ...(ref ? { ref } : {}),
           submit,
           textLength: text?.length,
         },
@@ -183,14 +189,31 @@ function typeInputSummary(input: unknown): ToolkitOperationSummary | null {
 function waitInputSummary(input: unknown): ToolkitOperationSummary | null {
   const record = readJsonRecord(input);
   const selector = readString(record, 'selector');
+  const ref = readString(record, 'ref');
   const timeoutMs = readNumber(record, 'timeoutMs');
+  const target = ref ?? selector;
   return {
-    target: selector,
-    summary: selector ? `等待 ${selector}` : '等待页面',
+    target,
+    summary: target ? `等待 ${target}` : '等待页面',
     details: {
       selector,
+      ...(ref ? { ref } : {}),
       timeoutMs,
     },
+  };
+}
+
+function scrollInputSummary(input: unknown): ToolkitOperationSummary | null {
+  const record = readJsonRecord(input);
+  const selector = readString(record, 'selector');
+  const ref = readString(record, 'ref');
+  const deltaX = readNumber(record, 'deltaX');
+  const deltaY = readNumber(record, 'deltaY');
+  const target = ref ?? selector;
+  return {
+    target,
+    summary: `滚动页面 ${deltaY ?? 600}px`,
+    details: { selector, ref, deltaX, deltaY },
   };
 }
 
@@ -244,6 +267,12 @@ export const browserOperationMetadata: Record<string, ToolkitOperationMetadata> 
     summarizeOutput: browserSnapshotSummary,
     summarizeError: browserErrorSummary,
   },
+  browser_scroll: {
+    title: '滚动页面',
+    summarizeInput: scrollInputSummary,
+    summarizeOutput: browserSnapshotSummary,
+    summarizeError: browserErrorSummary,
+  },
   browser_wait: {
     title: '等待页面',
     summarizeInput: waitInputSummary,
@@ -254,6 +283,12 @@ export const browserOperationMetadata: Record<string, ToolkitOperationMetadata> 
     title: '提取页面文本',
     summarizeInput: browserExtractInputSummary,
     summarizeOutput: browserExtractOutputSummary,
+    summarizeError: browserErrorSummary,
+  },
+  browser_screenshot: {
+    title: '截取页面',
+    summarizeInput: () => ({ summary: '截取当前浏览器视口' }),
+    summarizeOutput: rawStringOutputSummary,
     summarizeError: browserErrorSummary,
   },
   browser_close: {

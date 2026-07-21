@@ -199,7 +199,7 @@ Common configuration keys:
 | `LLM_MODEL` | Default model used by the local agent. |
 | `LLM_CONTEXT_WINDOW_TOKENS` | Optional explicit context-window override for custom models. |
 | `PINPAWO_WORKDIR` | Default local working directory for tools that need one. |
-| `PINPAWO_BROWSER_BACKEND` | Browser backend mode: `auto` (Playwright detection), `playwright`, or the opt-in `extension` backend. |
+| `PINPAWO_BROWSER_BACKEND` | Browser backend mode: `auto` (connected extension first for compatible operations, otherwise Playwright), `playwright`, or `extension`. |
 | `LOCAL_SERVER_PORT` | Local HTTP/WebSocket server port. |
 | `MEDIACRAWLER_DIR` | Optional MediaCrawler checkout path. |
 | `XHS_COOKIE` | Optional Xiaohongshu cookie for crawler-backed workflows. |
@@ -229,7 +229,7 @@ The published package installs a `pinpawo-agent` binary.
 | `pinpawo-agent capability install <dir>` | Installs a capability into `~/.pinpawo/capabilities/`. |
 | `pinpawo-agent capability install <dir> --link` | Links a capability in place instead of copying it. |
 
-See [Chrome extension browser backend](docs/BROWSER_EXTENSION_BACKEND.md) for its P0 scope, setup, security model and snapshot contract.
+See [Chrome extension browser backend](docs/BROWSER_EXTENSION_BACKEND.md) for setup, P1 interaction scope, security model and snapshot contract.
 
 Local development equivalents:
 

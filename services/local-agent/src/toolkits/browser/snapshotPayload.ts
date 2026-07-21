@@ -11,8 +11,21 @@ export interface BrowserExtractOptions {
   limit?: number;
 }
 
+export type BrowserRawExtract = {
+  title: string;
+  url: string;
+  selector?: string;
+  text: string;
+  textLength: number;
+  offset: number;
+  limit: number;
+  textSource?: string;
+};
+
 export type BrowserInteractiveElement = {
   index: number;
+  /** Opaque reference valid until the next page-changing operation or snapshot. */
+  ref?: string;
   tag: string;
   text: string;
   type: string | null;
@@ -78,12 +91,15 @@ function parseInteractiveElement(value: unknown): BrowserInteractiveElement {
   if (!isRecord(value)) {
     throw new Error('browser snapshot interactive entry must be an object');
   }
-  const { index, tag, text, hint, backendNodeId, frameId } = value;
+  const { index, ref, tag, text, hint, backendNodeId, frameId } = value;
   if (!Number.isInteger(index) || (index as number) <= 0) {
     throw new Error('browser snapshot interactive.index must be a positive integer');
   }
   if (typeof tag !== 'string' || typeof text !== 'string' || typeof hint !== 'string') {
     throw new Error('browser snapshot interactive tag, text and hint must be strings');
+  }
+  if (ref !== undefined && (typeof ref !== 'string' || !ref.trim() || ref.length > 200)) {
+    throw new Error('browser snapshot interactive.ref must be a non-empty bounded string');
   }
   if (backendNodeId !== undefined && (!Number.isInteger(backendNodeId) || (backendNodeId as number) <= 0)) {
     throw new Error('browser snapshot interactive.backendNodeId must be a positive integer');
@@ -93,6 +109,7 @@ function parseInteractiveElement(value: unknown): BrowserInteractiveElement {
   }
   return {
     index: index as number,
+    ref: ref as string | undefined,
     tag,
     text,
     type: readNullableString(value, 'type'),
@@ -145,7 +162,7 @@ export function parseBrowserRawSnapshot(value: unknown): BrowserRawSnapshot {
   };
 }
 
-function normalizeTextWindow(options: BrowserExtractOptions = {}): TextWindow {
+export function normalizeBrowserExtractOptions(options: BrowserExtractOptions = {}): TextWindow {
   const offset = options.offset ?? 0;
   const limit = options.limit ?? DEFAULT_BROWSER_EXTRACT_TEXT_LIMIT;
 
@@ -165,7 +182,7 @@ export function buildBrowserTextChunk(
   text: string,
   options: BrowserExtractOptions = {},
 ): BrowserTextChunk {
-  const { offset, limit } = normalizeTextWindow(options);
+  const { offset, limit } = normalizeBrowserExtractOptions(options);
   const safeOffset = Math.min(offset, text.length);
   const textEndOffset = Math.min(safeOffset + limit, text.length);
   const chunk = text.slice(safeOffset, textEndOffset);
@@ -246,5 +263,67 @@ export function buildBrowserExtractPayload(
     selector: input.selector,
     textSource: input.textSource,
     ...chunk,
+  };
+}
+
+export function parseBrowserRawExtract(value: unknown): BrowserRawExtract {
+  if (!isRecord(value)) {
+    throw new Error('browser extract result must be an object');
+  }
+  const { title, url, selector, text, textLength, offset, limit, textSource } = value;
+  if (typeof title !== 'string' || typeof url !== 'string' || typeof text !== 'string') {
+    throw new Error('browser extract title, url and text must be strings');
+  }
+  if (selector !== undefined && typeof selector !== 'string') {
+    throw new Error('browser extract selector must be a string');
+  }
+  if (textSource !== undefined && typeof textSource !== 'string') {
+    throw new Error('browser extract textSource must be a string');
+  }
+  if (!Number.isInteger(textLength) || (textLength as number) < 0) {
+    throw new Error('browser extract textLength must be a non-negative integer');
+  }
+  if (!Number.isInteger(offset) || (offset as number) < 0) {
+    throw new Error('browser extract offset must be a non-negative integer');
+  }
+  if (
+    !Number.isInteger(limit)
+    || (limit as number) <= 0
+    || (limit as number) > MAX_BROWSER_EXTRACT_TEXT_LIMIT
+  ) {
+    throw new Error(`browser extract limit must be between 1 and ${MAX_BROWSER_EXTRACT_TEXT_LIMIT}`);
+  }
+  if ((offset as number) > (textLength as number) || (offset as number) + text.length > (textLength as number)) {
+    throw new Error('browser extract text window must fit within textLength');
+  }
+  return {
+    title,
+    url,
+    selector: selector as string | undefined,
+    text,
+    textLength: textLength as number,
+    offset: offset as number,
+    limit: limit as number,
+    textSource: textSource as string | undefined,
+  };
+}
+
+export function buildBrowserExtractPayloadFromRaw(input: BrowserRawExtract) {
+  const textEndOffset = input.offset + input.text.length;
+  const hasMore = textEndOffset < input.textLength;
+  return {
+    title: input.title,
+    url: input.url,
+    selector: input.selector,
+    textSource: input.textSource,
+    offset: input.offset,
+    limit: input.limit,
+    text: input.text,
+    textLength: input.textLength,
+    returnedTextLength: input.text.length,
+    textEndOffset,
+    truncated: input.offset > 0 || hasMore,
+    hasMore,
+    nextOffset: hasMore ? textEndOffset : null,
   };
 }

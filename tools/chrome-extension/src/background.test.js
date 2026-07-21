@@ -29,3 +29,23 @@ test('snapshot reads enforce snapshot URL and post-read committed origin checks'
     'readSnapshot must check the committed origin before and after snapshot collection',
   );
 });
+
+test('P1 interactions stay on the CDP allowlist and re-snapshot through the origin guard', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+
+  for (const method of [
+    'Input.dispatchMouseEvent',
+    'Input.dispatchKeyEvent',
+    'Page.captureScreenshot',
+  ]) {
+    assert.match(source, new RegExp(`'${method.replace('.', '\\.')}'`));
+  }
+  assert.match(source, /command\.command === 'click'[\s\S]*?dispatchClick[\s\S]*?readSnapshot/);
+  assert.match(source, /command\.command === 'type'[\s\S]*?dispatchType[\s\S]*?readSnapshot/);
+  assert.match(source, /command\.command === 'scroll'[\s\S]*?dispatchScroll[\s\S]*?readSnapshot/);
+  assert.match(source, /async function captureScreenshot[\s\S]*?assertApprovedOrigin[\s\S]*?Page\.captureScreenshot[\s\S]*?assertApprovedOrigin/);
+  assert.match(source, /for \(const character of Array\.from\(params\.text\)\)[\s\S]*?assertApprovedOrigin\(tabId, approvedOrigin\)[\s\S]*?dispatchKey/);
+});

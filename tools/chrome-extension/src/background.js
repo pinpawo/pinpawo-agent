@@ -7,6 +7,7 @@ import {
   successResult,
 } from './protocol.js';
 import {
+  assertSnapshotApprovedOrigin,
   buildAccessibilitySnapshot,
   buildSnapshotExpression,
   originOf,
@@ -178,6 +179,17 @@ async function assertApprovedOrigin(tabId, approvedOrigin) {
   return url;
 }
 
+function validateSnapshotOrigin(snapshot, approvedOrigin) {
+  try {
+    return assertSnapshotApprovedOrigin(snapshot, approvedOrigin);
+  } catch {
+    throw new ExtensionError(
+      'origin_changed',
+      `The snapshot did not come from the approved origin (${approvedOrigin}); approve the current URL before reading it.`,
+    );
+  }
+}
+
 async function waitForTab(tabId, deadlineAt) {
   while (Date.now() < Date.parse(deadlineAt)) {
     const tab = await chrome.tabs.get(tabId);
@@ -188,7 +200,8 @@ async function waitForTab(tabId, deadlineAt) {
 }
 
 async function readSnapshot(tabId, approvedOrigin) {
-  const url = await assertApprovedOrigin(tabId, approvedOrigin);
+  await assertApprovedOrigin(tabId, approvedOrigin);
+  let snapshot;
   try {
     const evaluation = await cdp(tabId, 'Runtime.evaluate', {
       expression: buildSnapshotExpression(),
@@ -198,11 +211,12 @@ async function readSnapshot(tabId, approvedOrigin) {
     if (evaluation.exceptionDetails || !evaluation.result?.value) {
       throw new Error(evaluation.exceptionDetails?.text || 'Runtime.evaluate returned no value');
     }
-    return evaluation.result.value;
+    snapshot = evaluation.result.value;
   } catch (runtimeError) {
+    const fallbackUrl = await assertApprovedOrigin(tabId, approvedOrigin);
     try {
       const tree = await cdp(tabId, 'Accessibility.getFullAXTree');
-      return buildAccessibilitySnapshot(tree.nodes || [], url);
+      snapshot = buildAccessibilitySnapshot(tree.nodes || [], fallbackUrl);
     } catch (accessibilityError) {
       throw new ExtensionError(
         'snapshot_unavailable',
@@ -211,6 +225,9 @@ async function readSnapshot(tabId, approvedOrigin) {
       );
     }
   }
+  validateSnapshotOrigin(snapshot, approvedOrigin);
+  await assertApprovedOrigin(tabId, approvedOrigin);
+  return snapshot;
 }
 
 async function executeCommand(command) {

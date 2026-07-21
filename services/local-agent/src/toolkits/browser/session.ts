@@ -16,6 +16,7 @@ import {
   type BrowserRawSnapshot,
 } from './snapshotPayload';
 import {
+  BrowserBridgeError,
   localAgentBrowserBridge,
   type LocalAgentBrowserBridge,
 } from './localAgentBrowserBridge';
@@ -454,8 +455,24 @@ export class ChromeExtensionBrowserSession {
     }
   }
 
-  private buildSnapshot(value: unknown): string {
-    return JSON.stringify(buildBrowserSnapshotPayload(parseBrowserRawSnapshot(value)), null, 2);
+  private buildSnapshot(value: unknown, approvedOrigin: string): string {
+    const snapshot = parseBrowserRawSnapshot(value);
+    let snapshotOrigin: string;
+    try {
+      snapshotOrigin = approvedOriginFor(snapshot.url);
+    } catch {
+      throw new BrowserBridgeError(
+        'origin_changed',
+        'Chrome extension returned a snapshot without an approved http(s) URL.',
+      );
+    }
+    if (snapshotOrigin !== approvedOrigin) {
+      throw new BrowserBridgeError(
+        'origin_changed',
+        `Chrome extension snapshot origin changed from ${approvedOrigin} to ${snapshotOrigin}.`,
+      );
+    }
+    return JSON.stringify(buildBrowserSnapshotPayload(snapshot), null, 2);
   }
 
   async open(url: string, opts: BrowserOpenOptions = {}): Promise<string> {
@@ -465,8 +482,9 @@ export class ChromeExtensionBrowserSession {
       url,
       approvedOrigin,
     });
+    const snapshot = this.buildSnapshot(raw, approvedOrigin);
     this.approvedOrigin = approvedOrigin;
-    return this.buildSnapshot(raw);
+    return snapshot;
   }
 
   async snapshot(): Promise<string> {
@@ -475,7 +493,7 @@ export class ChromeExtensionBrowserSession {
     }
     return this.buildSnapshot(await this.bridge.sendCommand('snapshot', {
       approvedOrigin: this.approvedOrigin,
-    }));
+    }), this.approvedOrigin);
   }
 
   async click(_selector: string): Promise<string> {

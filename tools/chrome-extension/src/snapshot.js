@@ -9,6 +9,16 @@ export function originOf(url) {
   return parsed.origin;
 }
 
+export function assertSnapshotApprovedOrigin(snapshot, approvedOrigin) {
+  if (!snapshot || typeof snapshot !== 'object' || typeof snapshot.url !== 'string') {
+    throw new Error('snapshot URL is unavailable');
+  }
+  if (originOf(snapshot.url) !== approvedOrigin) {
+    throw new Error('snapshot URL does not match the approved origin');
+  }
+  return snapshot;
+}
+
 export function buildSnapshotExpression(maxInteractive = MAX_RAW_INTERACTIVE_ELEMENTS) {
   return `(() => {
     const maxInteractive = ${JSON.stringify(maxInteractive)};

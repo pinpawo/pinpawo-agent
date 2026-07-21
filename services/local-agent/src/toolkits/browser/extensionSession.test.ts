@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ChromeExtensionBrowserSession } from './session';
+import { BrowserBridgeError } from './localAgentBrowserBridge';
 
 const rawSnapshot = {
   title: 'Example',
@@ -56,4 +57,22 @@ test('extension session rejects unsupported modes and operations explicitly', as
   await assert.rejects(session.open('file:///tmp/page.html'), /only supports http/);
   await assert.rejects(session.open('https://example.com', { headless: true }), /does not support headless/);
   await assert.rejects(session.click('#submit'), /does not support click/);
+});
+
+test('extension session rejects raw snapshots outside the approved origin', async () => {
+  const session = new ChromeExtensionBrowserSession({
+    async sendCommand() {
+      return {
+        ...rawSnapshot,
+        url: 'https://unapproved.example/private',
+      };
+    },
+  });
+
+  await assert.rejects(
+    session.open('https://example.com/page'),
+    (error: unknown) => error instanceof BrowserBridgeError
+      && error.code === 'origin_changed',
+  );
+  await assert.rejects(session.snapshot(), /Use browser_open first/);
 });

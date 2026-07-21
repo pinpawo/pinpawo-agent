@@ -47,7 +47,7 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - `browser_open` creates an agent-owned tab if none is bound.
 - Clicking the extension action explicitly binds the current user tab. The health response distinguishes `agent` and `user` ownership.
 - Each navigation carries an origin already authorized by the local-agent review policy.
-- Immediately before every snapshot, the extension reads the current top-level URL through CDP and refuses data access if the origin changed.
+- Before and after every snapshot, the extension reads the committed top-level URL through CDP and refuses data access if the origin changed. The extension also checks the snapshot's own URL, and local-agent repeats that check before building the final payload.
 - Only `Page.navigate`, `Page.getNavigationHistory`, `Runtime.evaluate` and `Accessibility.getFullAXTree` are issued in P0, plus debugger attach/detach.
 - The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the local-agent stops.
 - Protocol messages include `protocolVersion`, `connectionId`, `requestId` and `deadlineAt`; malformed, stale and oversized messages fail closed.

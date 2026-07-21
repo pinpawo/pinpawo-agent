@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  assertSnapshotApprovedOrigin,
   buildAccessibilitySnapshot,
   buildSnapshotExpression,
   originOf,
@@ -10,6 +11,23 @@ test('origin guard accepts only http and https origins', () => {
   assert.equal(originOf('https://example.com/path'), 'https://example.com');
   assert.equal(originOf('http://localhost:3000/'), 'http://localhost:3000');
   assert.throws(() => originOf('chrome://settings'), /unsupported page protocol/);
+});
+
+test('snapshot origin guard rejects missing, invalid and cross-origin URLs', () => {
+  const snapshot = { url: 'https://example.com/page' };
+  assert.equal(assertSnapshotApprovedOrigin(snapshot, 'https://example.com'), snapshot);
+  assert.throws(
+    () => assertSnapshotApprovedOrigin(snapshot, 'https://other.example'),
+    /does not match/,
+  );
+  assert.throws(
+    () => assertSnapshotApprovedOrigin({}, 'https://example.com'),
+    /unavailable/,
+  );
+  assert.throws(
+    () => assertSnapshotApprovedOrigin({ url: 'chrome://settings' }, 'https://example.com'),
+    /unsupported page protocol/,
+  );
 });
 
 test('runtime snapshot expression carries numbered interactive hints', () => {

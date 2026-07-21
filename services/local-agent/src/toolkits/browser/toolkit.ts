@@ -3,6 +3,7 @@ import { loadStoredConfig } from '../../storage';
 import { detectBrowserStatus } from './session';
 import { browserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
+import { localAgentBrowserBridge } from './localAgentBrowserBridge';
 
 export const BROWSER_TOOLKIT_NAME = 'browser';
 
@@ -14,6 +15,7 @@ const browserToolkitInstructions = [
   '如果用户明确提供了本机浏览器 profile 或 user-data-dir 路径，使用 browser_open_with_profile；不要把本机 profile 路径填到 browser_open 的 session 参数里。',
   '浏览器会话名称不是本机 Chrome profile 名；本机 Chrome user-data-dir 只能走 browser_open_with_profile。',
   '需要登录、验证码或用户手动操作时保持可见浏览器窗口；纯读取或抓取时可以使用 headless。',
+  '当 PINPAWO_BROWSER_BACKEND=extension 时，P0 只支持 browser_open、browser_snapshot 和 browser_close；不要调用命名 session、profile、headless、click、type、wait 或 extract。',
   'browser_open、browser_snapshot、点击、输入和等待返回的是页面预览；如果结果里的 truncated 或 hasMore 为 true，说明模型只看到了片段。',
   '长文章、Gist、文档、GitHub 页面或搜索结果页在总结、引用、判断前，必须用 browser_extract({ offset, limit }) 按 nextOffset 分块读取，直到 hasMore 为 false。',
   'browser_extract 不给 selector 时会读取当前页面正文全文分块；不要为了绕过截断而从不完整 snapshot 里猜 selector。',
@@ -34,6 +36,9 @@ export async function checkBrowserAvailability(): Promise<CapabilityAvailability
   }
 
   const status = await detectBrowserStatus();
+  const bridge = status.mode === 'extension'
+    ? localAgentBrowserBridge.getStatus()
+    : undefined;
   return {
     available: status.mode !== 'none',
     reason: status.mode === 'none' ? status.detail : undefined,
@@ -41,6 +46,14 @@ export async function checkBrowserAvailability(): Promise<CapabilityAvailability
     metadata: {
       mode: status.mode,
       configured: status.configured,
+      ...(bridge ? {
+        hostConnected: bridge.hostConnected,
+        extensionConnected: bridge.extensionConnected,
+        debuggerAttached: bridge.debuggerAttached,
+        targetAlive: bridge.targetAlive,
+        activeTabOwnership: bridge.activeTabOwnership,
+        extensionId: bridge.extensionId,
+      } : {}),
     },
   };
 }

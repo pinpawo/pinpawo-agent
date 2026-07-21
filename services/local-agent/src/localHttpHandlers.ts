@@ -20,6 +20,7 @@ import {
   type LocalServerDeps,
 } from './localServerTypes';
 import { buildLocalHttpRuntimeProjection } from './localConfigProjection';
+import { localAgentBrowserBridge } from './toolkits/browser/localAgentBrowserBridge';
 
 type LocalHttpHandlerOptions = {
   authToken: string;
@@ -441,6 +442,9 @@ function readBrowserHealthFields() {
   if (!availability) return {};
 
   const mode = availability.metadata?.mode;
+  const extension = mode === 'extension'
+    ? localAgentBrowserBridge.getStatus()
+    : null;
   return {
     browser_mode: typeof mode === 'string'
       ? mode
@@ -448,5 +452,13 @@ function readBrowserHealthFields() {
         ? 'available'
         : 'none',
     browser_detail: availability.detail ?? availability.reason,
+    ...(extension ? {
+      browser_host_connected: extension.hostConnected,
+      browser_extension_connected: extension.extensionConnected,
+      browser_debugger_attached: extension.debuggerAttached,
+      browser_target_alive: extension.targetAlive,
+      browser_active_tab_ownership: extension.activeTabOwnership,
+      browser_extension_id: extension.extensionId,
+    } : {}),
   };
 }

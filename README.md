@@ -199,7 +199,7 @@ Common configuration keys:
 | `LLM_MODEL` | Default model used by the local agent. |
 | `LLM_CONTEXT_WINDOW_TOKENS` | Optional explicit context-window override for custom models. |
 | `PINPAWO_WORKDIR` | Default local working directory for tools that need one. |
-| `PINPAWO_BROWSER_BACKEND` | Browser backend mode; `auto` is the quick-start default, `playwright` forces Playwright + Chrome. |
+| `PINPAWO_BROWSER_BACKEND` | Browser backend mode: `auto` (Playwright detection), `playwright`, or the opt-in `extension` backend. |
 | `LOCAL_SERVER_PORT` | Local HTTP/WebSocket server port. |
 | `MEDIACRAWLER_DIR` | Optional MediaCrawler checkout path. |
 | `XHS_COOKIE` | Optional Xiaohongshu cookie for crawler-backed workflows. |
@@ -218,6 +218,9 @@ The published package installs a `pinpawo-agent` binary.
 | `pinpawo-agent actor` | Chooses the pet actor used by the local agent. |
 | `pinpawo-agent run` | Starts the local agent service. |
 | `pinpawo-agent run --stdio` | Starts one local-agent peer over JSONL stdio. |
+| `pinpawo-agent browser-extension register --extension-id <id>` | Registers the Chrome Native Messaging host for an unpacked PinPawo extension. |
+| `pinpawo-agent browser-extension status` | Shows Native Host registration and local bridge runtime-file diagnostics. |
+| `pinpawo-agent browser-extension unregister` | Removes the PinPawo Native Messaging host registration. |
 | `pinpawo-agent tui` | Starts the interactive terminal UI. |
 | `pinpawo-agent tui --dry-run` | Runs the TUI without writing generated post changes. |
 | `pinpawo-agent detect` | Prints local browser/backend detection as JSON. |
@@ -225,6 +228,8 @@ The published package installs a `pinpawo-agent` binary.
 | `pinpawo-agent capability validate <dir>` | Validates a capability directory. |
 | `pinpawo-agent capability install <dir>` | Installs a capability into `~/.pinpawo/capabilities/`. |
 | `pinpawo-agent capability install <dir> --link` | Links a capability in place instead of copying it. |
+
+See [Chrome extension browser backend](docs/BROWSER_EXTENSION_BACKEND.md) for its P0 scope, setup, security model and snapshot contract.
 
 Local development equivalents:
 

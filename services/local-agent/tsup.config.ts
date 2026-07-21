@@ -15,7 +15,10 @@ const CJS_EXTERNALS = [
 ];
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: {
+    index: 'src/index.ts',
+    'native-host': 'src/browserExtension/nativeHostMain.ts',
+  },
   format: ['esm'],
   platform: 'node',
   target: 'node20',

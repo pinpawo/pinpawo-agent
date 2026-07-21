@@ -194,8 +194,8 @@ final class AgentProcess: ObservableObject {
     var env = ProcessInfo.processInfo.environment
     env["NODE_ENV"] = "production"
     let cfg = Config.shared.load()
-    if cfg.browserBackend == "playwright" {
-      env["PINPAWO_BROWSER_BACKEND"] = "playwright"
+    if let backend = cfg.browserBackend, backend == "playwright" || backend == "extension" {
+      env["PINPAWO_BROWSER_BACKEND"] = backend
     }
     if let workdir = cfg.workdir, !workdir.isEmpty {
       env["PINPAWO_WORKDIR"] = workdir

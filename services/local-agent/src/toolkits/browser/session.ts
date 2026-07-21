@@ -6,6 +6,26 @@ import { isAbsolute, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { getLocalToolsWorkdir } from '../local/pathUtils';
+import {
+  buildBrowserExtractPayload,
+  buildBrowserSnapshotPayload,
+  MAX_BROWSER_INTERACTIVE_ELEMENTS,
+  parseBrowserRawSnapshot,
+  type BrowserExtractOptions,
+  type BrowserInteractiveElement,
+  type BrowserRawSnapshot,
+} from './snapshotPayload';
+import {
+  localAgentBrowserBridge,
+  type LocalAgentBrowserBridge,
+} from './localAgentBrowserBridge';
+
+export {
+  buildBrowserExtractPayload,
+  buildBrowserSnapshotPayload,
+  buildBrowserTextChunk,
+} from './snapshotPayload';
+export type { BrowserExtractOptions } from './snapshotPayload';
 const execFileAsync = promisify(execFile);
 
 const nodeRequire = createRequire(import.meta.url);
@@ -29,136 +49,11 @@ type Page = import('playwright-core').Page;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const DEFAULT_TIMEOUT_MS = 15_000;
-const MAX_TEXT_LENGTH = 50_000;
-const MAX_INTERACTIVE_ELEMENTS = 20;
-const DEFAULT_EXTRACT_TEXT_LIMIT = 50_000;
-const MAX_EXTRACT_TEXT_LIMIT = 100_000;
 const DEFAULT_CHROME_EXECUTABLE_PATH =
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const SESSIONS_DIR = resolve(homedir(), '.pinpawo', 'sessions');
 const DEFAULT_SESSION = 'default';
 const SAFE_SESSION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-export interface BrowserExtractOptions {
-  selector?: string;
-  offset?: number;
-  limit?: number;
-}
-
-type TextWindow = {
-  offset: number;
-  limit: number;
-};
-
-type TextChunk = TextWindow & {
-  text: string;
-  textLength: number;
-  returnedTextLength: number;
-  textEndOffset: number;
-  truncated: boolean;
-  hasMore: boolean;
-  nextOffset: number | null;
-};
-
-function normalizeTextWindow(options: BrowserExtractOptions = {}): TextWindow {
-  const offset = options.offset ?? 0;
-  const limit = options.limit ?? DEFAULT_EXTRACT_TEXT_LIMIT;
-
-  if (!Number.isInteger(offset) || offset < 0) {
-    throw new Error('browser_extract offset must be a non-negative integer');
-  }
-  if (!Number.isInteger(limit) || limit <= 0 || limit > MAX_EXTRACT_TEXT_LIMIT) {
-    throw new Error(`browser_extract limit must be an integer between 1 and ${MAX_EXTRACT_TEXT_LIMIT}`);
-  }
-
-  return { offset, limit };
-}
-
-export function buildBrowserTextChunk(
-  text: string,
-  options: BrowserExtractOptions = {},
-): TextChunk {
-  const { offset, limit } = normalizeTextWindow(options);
-  const safeOffset = Math.min(offset, text.length);
-  const textEndOffset = Math.min(safeOffset + limit, text.length);
-  const chunk = text.slice(safeOffset, textEndOffset);
-  const hasMore = textEndOffset < text.length;
-
-  return {
-    offset: safeOffset,
-    limit,
-    text: chunk,
-    textLength: text.length,
-    returnedTextLength: chunk.length,
-    textEndOffset,
-    truncated: safeOffset > 0 || hasMore,
-    hasMore,
-    nextOffset: hasMore ? textEndOffset : null,
-  };
-}
-
-function buildSnapshotTextFields(text: string) {
-  const chunk = buildBrowserTextChunk(text, { offset: 0, limit: MAX_TEXT_LENGTH });
-  return {
-    text: chunk.text,
-    textLength: chunk.textLength,
-    returnedTextLength: chunk.returnedTextLength,
-    textOffset: chunk.offset,
-    textEndOffset: chunk.textEndOffset,
-    textLimit: MAX_TEXT_LENGTH,
-    truncated: chunk.hasMore,
-    hasMore: chunk.hasMore,
-    nextTextOffset: chunk.nextOffset,
-  };
-}
-
-export function buildBrowserSnapshotPayload<TInteractive>(
-  input: {
-    title: string;
-    url: string;
-    text: string;
-    interactive: TInteractive[];
-    interactiveCount?: number;
-    textSource?: string;
-    textUnavailableReason?: string;
-  },
-) {
-  const interactiveCount = input.interactiveCount ?? input.interactive.length;
-  return {
-    title: input.title,
-    url: input.url,
-    interactive: input.interactive,
-    interactiveCount,
-    returnedInteractiveCount: input.interactive.length,
-    interactiveTruncated: interactiveCount > input.interactive.length,
-    ...buildSnapshotTextFields(input.text),
-    textSource: input.textSource,
-    textUnavailableReason: input.textUnavailableReason,
-  };
-}
-
-export function buildBrowserExtractPayload(
-  input: {
-    title: string;
-    url: string;
-    text: string;
-    selector?: string;
-    offset?: number;
-    limit?: number;
-    textSource?: string;
-  },
-) {
-  const chunk = buildBrowserTextChunk(input.text, input);
-  return {
-    title: input.title,
-    url: input.url,
-    selector: input.selector,
-    textSource: input.textSource,
-    ...chunk,
-  };
-}
 
 function sessionDir(name: string): string {
   const trimmed = name.trim();
@@ -185,9 +80,9 @@ function listSessionNames(): string[] {
 
 // ── Backend detection ─────────────────────────────────────────────────────────
 
-type BrowserBackend = 'playwright';
+export type BrowserBackend = 'extension' | 'playwright';
 export type BrowserStatus = {
-  mode: 'playwright' | 'none';
+  mode: BrowserBackend | 'none';
   detail: string;
   configured: string;
 };
@@ -203,8 +98,13 @@ async function detectBackend(): Promise<BrowserBackend> {
   if (forced === 'agent-browser') {
     throw new Error(
       'Browser backend "agent-browser" is no longer supported.\n' +
-        '  Set PINPAWO_BROWSER_BACKEND=auto or "playwright", and ensure playwright-core plus Google Chrome are installed.',
+        '  Set PINPAWO_BROWSER_BACKEND=auto, "playwright", or the explicitly installed "extension" backend.',
     );
+  }
+
+  if (forced === 'extension') {
+    console.log('[browser] using Chrome extension (forced)');
+    return 'extension';
   }
 
   if (forced === 'playwright') {
@@ -217,6 +117,12 @@ async function detectBackend(): Promise<BrowserBackend> {
     }
     console.log('[browser] using playwright (forced)');
     return 'playwright';
+  }
+
+  if (forced !== 'auto') {
+    throw new Error(
+      `Unknown browser backend "${forced}". Use auto, playwright, or extension.`,
+    );
   }
 
   // auto-detect
@@ -340,23 +246,6 @@ function openSessionPath(opts: BrowserOpenOptions): string {
 
 // ── Playwright implementation ─────────────────────────────────────────────────
 
-type PlaywrightInteractiveSnapshot = {
-  index: number;
-  tag: string;
-  text: string;
-  type: string | null;
-  placeholder: string | null;
-  hint: string;
-};
-
-type PlaywrightSnapshotSource = {
-  title: string;
-  url: string;
-  text: string;
-  interactiveCount: number;
-  interactive: PlaywrightInteractiveSnapshot[];
-};
-
 class PlaywrightBrowserSession {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
@@ -416,7 +305,7 @@ class PlaywrightBrowserSession {
   }
 
   private async buildSnapshot(page: Page): Promise<string> {
-    const snapshot = await page.evaluate<PlaywrightSnapshotSource>(`
+    const snapshot = await page.evaluate<BrowserRawSnapshot>(`
       (() => {
         const trim = (v, n) => v.length <= n ? v : v.slice(0, n) + '...';
         const hintFor = (el) => {
@@ -434,7 +323,7 @@ class PlaywrightBrowserSession {
         )
           .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
         const interactive = interactiveElements
-          .slice(0, ${MAX_INTERACTIVE_ELEMENTS})
+          .slice(0, ${MAX_BROWSER_INTERACTIVE_ELEMENTS})
           .map((el, i) => ({
             index: i + 1, tag: el.tagName.toLowerCase(),
             text: trim((el.textContent || '').trim(), 80),
@@ -455,7 +344,7 @@ class PlaywrightBrowserSession {
       url: snapshot.url,
       text: snapshot.text,
       textSource: 'document.body.innerText',
-      interactive: snapshot.interactive,
+      interactive: snapshot.interactive as BrowserInteractiveElement[],
       interactiveCount: snapshot.interactiveCount,
     }), null, 2);
   }
@@ -530,9 +419,95 @@ class PlaywrightBrowserSession {
   listSessions(): string[] { return listSessionNames(); }
 }
 
+// ── Chrome extension implementation ──────────────────────────────────────────
+
+function approvedOriginFor(url: string): string {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('Chrome extension browser backend only supports http:// and https:// URLs.');
+  }
+  return parsed.origin;
+}
+
+function unsupportedExtensionOperation(operation: string): never {
+  throw new Error(
+    `Chrome extension backend P0 does not support ${operation}; use navigate, snapshot or close/detach.`,
+  );
+}
+
+export class ChromeExtensionBrowserSession {
+  private approvedOrigin: string | null = null;
+
+  constructor(
+    private readonly bridge: Pick<LocalAgentBrowserBridge, 'sendCommand'> = localAgentBrowserBridge,
+  ) {}
+
+  private validateOpenOptions(opts: BrowserOpenOptions) {
+    if (opts.headless === true) {
+      throw new Error('Chrome extension backend uses visible Chrome tabs and does not support headless mode.');
+    }
+    if (opts.userDataDir) {
+      throw new Error('Chrome extension backend cannot select a Chrome user-data-dir.');
+    }
+    if (opts.session && opts.session !== DEFAULT_SESSION) {
+      throw new Error('Chrome extension backend does not support named browser sessions.');
+    }
+  }
+
+  private buildSnapshot(value: unknown): string {
+    return JSON.stringify(buildBrowserSnapshotPayload(parseBrowserRawSnapshot(value)), null, 2);
+  }
+
+  async open(url: string, opts: BrowserOpenOptions = {}): Promise<string> {
+    this.validateOpenOptions(opts);
+    const approvedOrigin = approvedOriginFor(url);
+    const raw = await this.bridge.sendCommand('navigate', {
+      url,
+      approvedOrigin,
+    });
+    this.approvedOrigin = approvedOrigin;
+    return this.buildSnapshot(raw);
+  }
+
+  async snapshot(): Promise<string> {
+    if (!this.approvedOrigin) {
+      throw new Error('No approved Chrome extension page. Use browser_open first.');
+    }
+    return this.buildSnapshot(await this.bridge.sendCommand('snapshot', {
+      approvedOrigin: this.approvedOrigin,
+    }));
+  }
+
+  async click(_selector: string): Promise<string> {
+    return unsupportedExtensionOperation('click');
+  }
+
+  async type(_selector: string, _text: string, _submit = false): Promise<string> {
+    return unsupportedExtensionOperation('type');
+  }
+
+  async wait(_selector?: string, _timeoutMs = 3_000): Promise<string> {
+    return unsupportedExtensionOperation('wait');
+  }
+
+  async extract(_options: BrowserExtractOptions = {}): Promise<string> {
+    return unsupportedExtensionOperation('extract');
+  }
+
+  async close(): Promise<string> {
+    this.approvedOrigin = null;
+    const result = await this.bridge.sendCommand('detach', {});
+    return `Chrome extension browser detached: ${JSON.stringify(result)}`;
+  }
+
+  listSessions(): string[] {
+    return [];
+  }
+}
+
 // ── Facade ────────────────────────────────────────────────────────────────────
 
-type BrowserImpl = PlaywrightBrowserSession;
+type BrowserImpl = PlaywrightBrowserSession | ChromeExtensionBrowserSession;
 
 export class BrowserSession {
   private impl: BrowserImpl | null = null;
@@ -541,8 +516,10 @@ export class BrowserSession {
   private ensureImpl(): Promise<BrowserImpl> {
     if (this.impl) return Promise.resolve(this.impl);
     if (!this.initPromise) {
-      this.initPromise = detectBackend().then(() => {
-        this.impl = new PlaywrightBrowserSession();
+      this.initPromise = detectBackend().then((backend) => {
+        this.impl = backend === 'extension'
+          ? new ChromeExtensionBrowserSession()
+          : new PlaywrightBrowserSession();
         return this.impl;
       }).catch((error) => {
         this.initPromise = null;
@@ -599,10 +576,27 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
       configured,
     };
   }
+  if (configured === 'extension') {
+    const status = localAgentBrowserBridge.getStatus();
+    return {
+      mode: 'extension',
+      detail: status.extensionConnected
+        ? `connected extension ${status.extensionId ?? '(unknown)'}`
+        : `configured; waiting for extension via ${status.socketPath}`,
+      configured,
+    };
+  }
   if (configured === 'agent-browser') {
     return {
       mode: 'none',
       detail: 'configured agent-browser but that backend is no longer supported',
+      configured,
+    };
+  }
+  if (configured !== 'auto') {
+    return {
+      mode: 'none',
+      detail: `unknown browser backend "${configured}"; use auto, playwright, or extension`,
       configured,
     };
   }

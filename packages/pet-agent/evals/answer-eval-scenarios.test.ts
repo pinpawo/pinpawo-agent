@@ -15,11 +15,10 @@ function answerModel(text: string, unmetCriteria: string[] = []) {
           acceptanceCriteria: Array<{ id: string }>;
         };
         return {
-          criteria: input.acceptanceCriteria.map(({ id }) => ({
-            id,
+          criteria: Object.fromEntries(input.acceptanceCriteria.map(({ id }) => [id, {
             met: !unmetCriteria.includes(id),
             reason: unmetCriteria.includes(id) ? 'criterion not met' : 'criterion met',
-          })),
+          }])),
           summary: unmetCriteria.length === 0 ? 'goal achieved' : 'goal not achieved',
         };
       },

@@ -81,13 +81,12 @@ function longestSharedSpan(left: string, right: string): number {
 
 function buildAnswerGoalEvaluationSchema(criterionIds: string[]) {
   if (criterionIds.length === 0) throw new Error('Answer evaluation requires acceptance criteria.');
-  const ids = criterionIds as [string, ...string[]];
+  const criteriaShape = Object.fromEntries(criterionIds.map((id) => [id, z.object({
+    met: z.boolean(),
+    reason: z.string(),
+  }).strict()]));
   return z.object({
-    criteria: z.array(z.object({
-      id: z.enum(ids),
-      met: z.boolean(),
-      reason: z.string(),
-    }).strict()),
+    criteria: z.object(criteriaShape).strict(),
     summary: z.string(),
   }).strict();
 }
@@ -133,29 +132,9 @@ async function evaluateGoal(
     })),
   ], judge.config);
   const evaluation = schema.parse(raw);
-  const duplicateIds = evaluation.criteria
-    .map(({ id }) => id)
-    .filter((id, index, ids) => ids.indexOf(id) !== index);
-  if (duplicateIds.length > 0) {
-    throw new Error(`Answer evaluator returned duplicate criterion ids: ${duplicateIds.join(', ')}`);
-  }
-  const byId = new Map(evaluation.criteria.map((criterion) => [criterion.id, criterion]));
-  const expectedIds = new Set(testCase.expected.acceptanceCriteria.map(({ id }) => id));
-  const unexpectedIds = evaluation.criteria
-    .map(({ id }) => id)
-    .filter((id) => !expectedIds.has(id));
-  if (unexpectedIds.length > 0) {
-    throw new Error(`Answer evaluator returned unexpected criterion ids: ${unexpectedIds.join(', ')}`);
-  }
-  const missingIds = testCase.expected.acceptanceCriteria
-    .map(({ id }) => id)
-    .filter((id) => !byId.has(id));
-  if (missingIds.length > 0) {
-    throw new Error(`Answer evaluator omitted criterion ids: ${missingIds.join(', ')}`);
-  }
   return {
     scores: testCase.expected.acceptanceCriteria.map((criterion) => {
-      const result = byId.get(criterion.id)!;
+      const result = evaluation.criteria[criterion.id];
       return {
         key: criterion.id,
         statement: criterion.statement,

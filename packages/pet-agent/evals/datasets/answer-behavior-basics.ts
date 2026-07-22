@@ -128,6 +128,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
         acceptanceCriteria: [
           { id: 'asks_for_missing_information', statement: '明确询问执行更新所缺少的目标、配置项或期望变更。' },
           { id: 'no_false_completion_claim', statement: '没有声称生产配置已经更新或变更已经完成。' },
+          { id: 'user_facing_language', statement: '回复面向用户，不暴露 orchestrator、handoff、delegation 等内部执行语言。' },
         ],
         expectedBehavior: 'ask_user',
         diagnostics: { referenceMaxCharacters: 220 },

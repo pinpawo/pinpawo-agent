@@ -22,7 +22,9 @@
     "eval:flow:mock-subagent": "node --env-file=.env --import tsx/esm evals/orchestrator-flow.mock-subagent.eval.ts",
     "eval:subagent": "node --env-file=.env --import tsx/esm evals/subagent.eval.ts",
     "eval:task-decision": "node --env-file-if-exists=.env --import tsx/esm evals/task-decision.eval.ts",
-    "eval:decision-stability": "node --env-file-if-exists=.env --import tsx/esm evals/scripts/run-decision-stability.eval.ts",
+    "eval:decision-stability": "PROMPT_EVAL_DEFAULT_TARGETS=entry,planner,capability,outcome node --env-file-if-exists=.env --import tsx/esm evals/scripts/run-decision-stability.eval.ts",
+    "eval:prompt-stability": "node --env-file-if-exists=.env --import tsx/esm evals/scripts/run-decision-stability.eval.ts",
+    "eval:prompt-compare": "node --import tsx/esm evals/scripts/compare-prompt-stability.eval.ts",
     "prompt:preview": "node --import tsx/esm evals/scripts/preview-decision-prompts.ts",
     "eval:structured-output": "LANGCHAIN_TRACING_V2=false node --env-file=.env --import tsx/esm evals/structured-output-compat.eval.ts"
   },

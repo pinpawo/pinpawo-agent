@@ -1,4 +1,5 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import type { RunnableConfig } from '@langchain/core/runnables';
 import { searchCapabilities } from '../src/agent/orchestrator/capabilitySearch.ts';
 import {
   buildCapabilityPlanningDecisionInput,
@@ -70,7 +71,11 @@ export type DecisionEvalScenario = {
   caseName: string;
   expectedSummary: string;
   render(method?: StructuredOutputMethod): RenderedDecisionPrompt;
-  run(model: AgentModels['act'], method?: StructuredOutputMethod): Promise<DecisionEvalRunResult>;
+  run(
+    model: AgentModels['act'],
+    method?: StructuredOutputMethod,
+    config?: RunnableConfig,
+  ): Promise<DecisionEvalRunResult>;
 };
 
 const actor = {
@@ -118,12 +123,12 @@ function entryScenarios(): DecisionEvalScenario[] {
       caseName: testCase.name,
       expectedSummary: testCase.expected.mode,
       render,
-      async run(model, method) {
+      async run(model, method, config) {
         const schema = buildTaskDecisionSchema();
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)));
+        ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
         const mode = adaptTaskDecisionMode(decision.action);
         const boundaryCount = mode === 'direct_task' ? 1 : 0;
@@ -169,12 +174,12 @@ function plannerScenarios(): DecisionEvalScenario[] {
       caseName: testCase.name,
       expectedSummary: `${testCase.input.mode}:${testCase.expected.result}`,
       render,
-      async run(model, method) {
+      async run(model, method, config) {
         const schema = buildCapabilityPlanningDecisionSchema();
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)));
+        ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
         const remainingPlan = decision.remaining_plan.map((item) => ({
           objective: item.objective,
@@ -249,12 +254,12 @@ function capabilityScenarios(): DecisionEvalScenario[] {
       caseName: testCase.name,
       expectedSummary: testCase.expected.expectedLane,
       render,
-      async run(model, method) {
+      async run(model, method, config) {
         const schema = buildRouteDecisionSchema(schemaParams);
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)));
+        ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
         const candidateNames = candidates.map(({ name }) => name);
         const output = { lane: decision.lane, candidateNames };
@@ -317,12 +322,12 @@ function outcomeScenarios(): DecisionEvalScenario[] {
       caseName: testCase.name,
       expectedSummary: testCase.expected.outcome,
       render,
-      async run(model, method) {
+      async run(model, method, config) {
         const schema = buildDelegationOutcomeDecisionSchema();
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)));
+        ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
         const output = { outcome: decision.outcome, gapNote: decision.gap_note ?? null };
         return {

@@ -16,7 +16,7 @@ test('decision eval scenarios cover every canonical prompt distribution', () => 
     planner: getDecisionEvalScenarios('planner').length,
     capability: getDecisionEvalScenarios('capability').length,
     outcome: getDecisionEvalScenarios('outcome').length,
-  }, { entry: 12, planner: 6, capability: 5, outcome: 5 });
+  }, { entry: 12, planner: 6, capability: 6, outcome: 5 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
@@ -50,14 +50,17 @@ test('decision stability summary separates schema and invocation failures', () =
     {
       target: 'outcome', caseId: 'case-1', repeat: 1, ok: true, durationMs: 10,
       verdict: 'goal_done', outputShape: 'gapNote=0', outputFingerprint: 'a', failedScores: [], failureKind: null, error: null,
+      usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 }, estimatedCostUsd: 0.001,
     },
     {
       target: 'outcome', caseId: 'case-1', repeat: 2, ok: false, durationMs: 20,
       verdict: 'task_done', outputShape: 'gapNote=1', outputFingerprint: 'b', failedScores: ['outcome_correct'], failureKind: null, error: null,
+      usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 }, estimatedCostUsd: 0.002,
     },
     {
       target: 'outcome', caseId: 'case-1', repeat: 3, ok: false, durationMs: 30,
       verdict: null, outputShape: null, outputFingerprint: null, failedScores: [], failureKind: 'schema', error: 'invalid output',
+      usage: null, estimatedCostUsd: null,
     },
   ])[0];
   assert.equal(summary.passed, 1);

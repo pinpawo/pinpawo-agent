@@ -116,7 +116,7 @@ function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLi
   return null;
 }
 
-function buildDelegationCompletionAnswerContext(source: HandoffSource) {
+export function buildDelegationCompletionAnswerContext(source: HandoffSource) {
   return [
     '当前最终回复模式：delegation completion acknowledgement。',
     '近期 handoff 已经承载任务结果正文；本条消息用于关闭 delegation 生命周期。',

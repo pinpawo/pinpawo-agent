@@ -1,0 +1,101 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  comparePromptEvalReports,
+  createPromptEvalReport,
+  type PromptEvalReport,
+} from './prompt-eval-report.ts';
+
+function report(input: { commit: string; passed: boolean; meanDurationMs: number }): PromptEvalReport {
+  const result = {
+    target: 'entry' as const,
+    caseId: 'case-1',
+    repeat: 1,
+    ok: input.passed,
+    durationMs: input.meanDurationMs,
+    verdict: 'answer',
+    outputShape: 'task=0',
+    outputFingerprint: '{}',
+    failedScores: input.passed ? [] : ['entry_mode_correct'],
+    failureKind: null,
+    error: null,
+    usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+    estimatedCostUsd: 0.001,
+  };
+  return createPromptEvalReport({
+    revision: {
+      commit: input.commit,
+      harnessCommit: 'harness',
+      dirty: false,
+      workingTreeDiffSha256: null,
+      changedPaths: [],
+    },
+    model: {
+      provider: 'test',
+      family: 'test-family',
+      model: 'test-model',
+      baseUrl: 'https://example.test',
+      temperature: 0,
+      reasoningEffort: 'low',
+      timeoutMs: 1000,
+    },
+    structuredOutputMethod: 'jsonSchema',
+    pricing: { inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 2 },
+    selection: { targets: ['entry'], caseIds: ['case-1'], datasets: ['dataset'], repeats: 1 },
+    results: [result],
+    summaries: [{
+      target: 'entry',
+      caseId: 'case-1',
+      runs: 1,
+      passed: input.passed ? 1 : 0,
+      schemaFailures: 0,
+      invokeFailures: 0,
+      outputVariants: 1,
+      meanDurationMs: input.meanDurationMs,
+      verdictDistribution: { answer: 1 },
+      outputShapeDistribution: { 'task=0': 1 },
+      failedScoreDistribution: input.passed ? {} : { entry_mode_correct: 1 },
+      usageRuns: 1,
+      inputTokens: 10,
+      outputTokens: 2,
+      totalTokens: 12,
+      estimatedCostUsd: 0.001,
+    }],
+  });
+}
+
+test('report totals preserve usage and cost coverage', () => {
+  const value = report({ commit: 'baseline', passed: true, meanDurationMs: 20 });
+  assert.equal(value.reportVersion, 1);
+  assert.deepEqual(value.totals, {
+    runs: 1,
+    passed: 1,
+    schemaFailures: 0,
+    invokeFailures: 0,
+    usageRuns: 1,
+    inputTokens: 10,
+    outputTokens: 2,
+    totalTokens: 12,
+    estimatedCostUsd: 0.001,
+  });
+});
+
+test('comparison reports pass, latency, and token deltas for matching cases', () => {
+  const comparison = comparePromptEvalReports(
+    report({ commit: 'baseline', passed: false, meanDurationMs: 20 }),
+    report({ commit: 'candidate', passed: true, meanDurationMs: 25 }),
+  );
+  assert.equal(comparison.compatible, true);
+  assert.equal(comparison.rows[0].passRateDelta, 1);
+  assert.equal(comparison.rows[0].meanDurationDeltaMs, 5);
+  assert.equal(comparison.rows[0].meanTokensDelta, 0);
+});
+
+test('comparison rejects different harness revisions', () => {
+  const baseline = report({ commit: 'baseline', passed: true, meanDurationMs: 20 });
+  const candidate = report({ commit: 'candidate', passed: true, meanDurationMs: 20 });
+  candidate.revision.harnessCommit = 'different-harness';
+  const comparison = comparePromptEvalReports(baseline, candidate);
+  assert.equal(comparison.compatible, false);
+  assert.ok(comparison.compatibilityNotes.includes('harness commit differs'));
+});

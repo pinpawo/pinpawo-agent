@@ -118,3 +118,14 @@ lint passes, and documentation migrations.
   status instead of repeated exclusions.
 - Recorded the static prompt-size measurement without claiming behavioral
   improvement before real-model evaluation.
+
+## [2026-07-21] pilot | Shared decision-prefix ownership
+
+- Reduced the shared decision prefix to invocation-context use,
+  structured-judgment scope, and graph/answer ownership.
+- Removed the duplicated node sequence, verdict definitions, handoff mechanics,
+  and glossary from the global production prompt.
+- Added a focused prompt test for the retained shared contract and updated the
+  accepted prefix reference document.
+- Recorded per-node prompt-size measurements without claiming behavioral
+  improvement before real-model evaluation.

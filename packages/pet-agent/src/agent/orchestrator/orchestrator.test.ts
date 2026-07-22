@@ -1231,9 +1231,9 @@ test('limit-reached progress announce lets model choose the same capability dele
 
   assert.equal(capabilityRunCount, 1);
   assert.equal(decisionCallCount, 1);
-  // The active task context carries the lane, while the verdict schema stays
-  // static and does not expand full target context.
-  assert.match(decisionSystemPrompt, /continue/);
+  // The system prompt owns verdict evidence, while the structured-output schema
+  // owns verdict values and the active task context carries the lane.
+  assert.match(decisionSystemPrompt, /当前 subagent_announce 提供验收证据/);
   assert.doesNotMatch(decisionSystemPrompt, /业务 capability 候选/);
   assert.match(decisionInput, /<lane>capability:inspect_repo<\/lane>/);
   assert.match(decisionInput, /先调查仓库，再修复注册链路/);

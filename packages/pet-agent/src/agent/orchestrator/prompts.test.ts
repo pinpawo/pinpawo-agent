@@ -20,6 +20,7 @@ import {
   buildTaskDecisionInput,
   buildTaskDecisionSystemPrompt,
 } from './prompts';
+import { buildOrchestratorDecisionPromptPrefix } from './prompts/shared';
 import {
   buildRouteDecisionOutputInstruction,
   buildCapabilityPlanningDecisionOutputInstruction,
@@ -38,6 +39,18 @@ const testActor = {
   stage: 'adult',
   species: 'cat',
 };
+
+test('shared decision prompt prefix owns only the cross-node contract', () => {
+  const prompt = buildOrchestratorDecisionPromptPrefix();
+
+  assert.match(prompt, /围绕用户目标运行 task loop/);
+  assert.match(prompt, /根据当前调用提供的上下文/);
+  assert.match(prompt, /graph 负责推进执行和状态转换/);
+  assert.match(prompt, /answer 基于主对话生成用户可见回复/);
+  assert.doesNotMatch(prompt, /task loop 流程|术语：/);
+  assert.doesNotMatch(prompt, /entryDecision：|capabilityPlanner：|capabilityDecision：|outcomeDecision（决策）/);
+  assert.doesNotMatch(prompt, /委派简报|gap_note|handoff/);
+});
 
 test('start-loop router request context includes compaction summaries outside recent message window', () => {
   const requestContext = buildPreparedRequestContext({
@@ -130,11 +143,6 @@ test('entry decision prompt owns execution mode selection', () => {
 
   assert.match(prompt, /entry decision 节点/);
   assert.match(prompt, /task loop/);
-  assert.match(prompt, /唯一基准/);
-  assert.match(prompt, /不编造执行事实/);
-  assert.match(prompt, /系统 handoff/);
-  assert.match(prompt, /委派简报（delegation briefing）/);
-  assert.match(prompt, /向 main 写入简短计划，并向对应 delegation lane 写入完整委派简报/);
   assert.match(prompt, /当前阶段：entryDecision/);
   assert.match(prompt, /决策条件/);
   assert.match(prompt, /answer、direct_task 或 needs_plan/);
@@ -189,9 +197,6 @@ test('capability decision prompt owns capability selection', () => {
 
   assert.match(prompt, /capability decision 节点/);
   assert.match(prompt, /task loop/);
-  assert.match(prompt, /唯一基准/);
-  assert.match(prompt, /不编造执行事实/);
-  assert.match(prompt, /系统 handoff/);
   assert.match(prompt, /从 route_targets 中选择最适合执行当前 task 的 lane/);
   assert.match(prompt, /匹配的专用 capability 比 general 更合适/);
   assert.match(prompt, /执行参数暂缺不改变匹配结果/);
@@ -258,9 +263,6 @@ test('delegation outcome prompt does not depend on concrete tool context', () =>
   assert.doesNotMatch(prompt, /ask_user/);
   assert.doesNotMatch(prompt, /delegate_capability/);
   assert.match(prompt, /task loop/);
-  assert.match(prompt, /唯一基准/);
-  assert.match(prompt, /不编造执行事实/);
-  assert.match(prompt, /系统 handoff/);
   assert.match(prompt, /当前阶段：delegationOutcomeDecision/);
   assert.match(prompt, /current_delegation 定义当前 task 要完成什么/);
   assert.match(prompt, /当前 subagent_announce 提供验收证据/);

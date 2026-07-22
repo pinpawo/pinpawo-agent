@@ -198,7 +198,7 @@ clause.
 
 | Area | Observation | Review direction |
 |---|---|---|
-| [`sharedPrefix.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts) | The common decision-node contract combines a positive output rule with several global prohibitions | Keep the shared positive invariant; verify which exclusions are already guaranteed by schema, graph routing, and tool availability |
+| [`sharedPrefix.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts) | The common decision-node contract now contains only invocation-context use, the structured-judgment role, and graph/answer ownership | Keep node flow, field semantics, completion criteria, and runtime transitions with their narrower prompt, schema, or graph owner |
 | [`entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts) | Node ownership and action meanings are mixed with repeated “do not answer / choose capability / execute” wording | Make the existing-evidence versus new-execution boundary primary; express non-ownership as a compact handoff to the owning node |
 | [`capabilityPlanner.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts) | Several useful planning invariants are phrased only as prohibitions | Define the valid relationship among `next_task`, `remaining_plan`, and an execution boundary first; retain narrow non-duplication constraints if evals need them |
 | [`capabilityDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts) | The node boundary is mostly an anti-list even though the schema has one positive responsibility | Lead with selecting exactly one available executor for the immutable current task; let schema and graph ownership carry the mechanical exclusions |
@@ -303,6 +303,36 @@ The accepted completion lifecycle and the stable answer contract did not change,
 so neither the completion decision page nor the Prompt Contract Map requires a
 semantic revision.
 
+## Shared-prefix pilot evidence
+
+The final #417 prompt-ownership candidate reduces the common decision prefix to
+the facts every decision node needs:
+
+- decisions use the context supplied to the current invocation;
+- each node returns only its owned structured judgment;
+- the graph advances execution and state, while `answer` owns the user-visible
+  reply.
+
+The node sequence, completion criteria, verdict definitions, `gap_note`, handoff
+mechanics, and delegation terminology were removed from the shared prefix
+because they already have narrower prompt, schema, or runtime owners. A
+dedicated prompt test guards both the retained cross-node contract and the
+absence of a global flow/glossary inventory.
+
+For one canonical case per decision node, prompt preview changed as follows:
+
+| Node | Before | Candidate |
+|---|---:|---:|
+| `entryDecision` | approximately 1,637 tokens | approximately 971 tokens |
+| `capabilityPlanner` | approximately 1,135 tokens | approximately 470 tokens |
+| `capabilityDecision` | approximately 1,283 tokens | approximately 618 tokens |
+| `outcomeDecision` | approximately 1,169 tokens | approximately 504 tokens |
+
+The shared prefix now occupies approximately 8–24% of these system prompts,
+down from 52–80%. These are model-independent size measurements, not claims of
+behavioral improvement. The stable shared contract did not change, so the Prompt
+Contract Map needs only its verification link updated rather than a new row.
+
 ## Application to the current entryDecision issue
 
 The recent `answer` regression should not be repaired with a case-specific
@@ -319,10 +349,10 @@ separate owner, documented in
 
 ## Acceptance status
 
-This page is a **draft synthesis**, not yet a production prompt change. It should
-become `validated` after the team accepts the authoring contract, maps current
-prompt clauses to owners, and evaluates the first prompt refactor against at
-least two supported model families. Implementation and validation are tracked in
+This page remains a **draft synthesis**. Implementation candidates now cover the
+four decision nodes, the shared decision prefix, and `answer`; real-model
+comparison is still required before claiming behavioral improvement or promoting
+the page to `validated`. Implementation and validation are tracked in
 [issue #417](https://github.com/pinpawo/pinpawo-agent/issues/417), with contract
 traceability tracked separately in
 [issue #415](https://github.com/pinpawo/pinpawo-agent/issues/415).

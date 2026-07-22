@@ -165,7 +165,7 @@ function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLi
   return null;
 }
 
-export function buildDelegationCompletionAnswerContext(
+function buildDelegationCompletionAnswerContext(
   source: HandoffSource,
   userGoal: string | null = null,
 ) {

@@ -180,7 +180,7 @@ export function buildDelegationCompletionAnswerContext(
     '上一条消息已经完整呈现工作结果。',
     '',
     '本次回复目标：',
-    '使用以下结束说明：',
+    '逐字输出以下一行：',
     `${JSON.stringify(completedWork)}已完成。如需继续，请告诉我。`,
   ].join('\n');
 }

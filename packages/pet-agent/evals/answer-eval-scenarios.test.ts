@@ -47,7 +47,7 @@ test('answer eval renders the production prompt and fixed completion context', (
   assert.match(text, /本次用户目标（已完成）/);
   assert.match(text, /汇总本周发布风险/);
   assert.match(text, /上一条消息已经完整呈现工作结果/);
-  assert.match(text, /使用以下结束说明/);
+  assert.match(text, /逐字输出以下一行/);
   assert.match(text, /"汇总本周发布风险"已完成。如需继续，请告诉我/);
   assert.doesNotMatch(text, /orchestrator|handoff|delegation|subagent/);
   assert.match(text, /RESULT_BODY_START/);

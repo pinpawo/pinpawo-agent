@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildBrowserExtractPayloadFromRaw,
   buildBrowserSnapshotPayload,
+  parseBrowserRawExtract,
   parseBrowserRawSnapshot,
 } from './snapshotPayload';
 
@@ -13,6 +15,7 @@ test('raw browser snapshots are validated and normalized before payload building
     textSource: 'Runtime.evaluate',
     interactive: [{
       index: 1,
+      ref: 'snapshot:1',
       tag: 'button',
       text: 'Go',
       type: 'submit',
@@ -24,7 +27,29 @@ test('raw browser snapshots are validated and normalized before payload building
   });
 
   assert.equal(raw.interactive[0]?.backendNodeId, 12);
+  assert.equal(raw.interactive[0]?.ref, 'snapshot:1');
   assert.equal(buildBrowserSnapshotPayload(raw).textSource, 'Runtime.evaluate');
+});
+
+test('raw extension extract windows are validated and normalized locally', () => {
+  const raw = parseBrowserRawExtract({
+    title: 'Example',
+    url: 'https://example.com/',
+    text: 'world',
+    textLength: 11,
+    offset: 6,
+    limit: 5,
+    textSource: 'document.body.innerText',
+  });
+  const payload = buildBrowserExtractPayloadFromRaw(raw);
+  assert.equal(payload.text, 'world');
+  assert.equal(payload.textEndOffset, 11);
+  assert.equal(payload.hasMore, false);
+  assert.equal(payload.truncated, true);
+  assert.throws(() => parseBrowserRawExtract({
+    ...raw,
+    offset: 9,
+  }), /fit within textLength/);
 });
 
 test('snapshot builder applies the canonical interactive preview cap', () => {

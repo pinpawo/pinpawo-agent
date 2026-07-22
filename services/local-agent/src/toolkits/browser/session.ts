@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { getConfig } from '../../config';
 import { homedir } from 'node:os';
@@ -16,6 +17,7 @@ import {
 } from './snapshotPayload';
 import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
 import { browserRuntime } from './runtime';
+import { persistBrowserScreenshot } from './screenshot';
 
 export {
   buildBrowserExtractPayload,
@@ -43,6 +45,7 @@ async function execLoginShellLine(command: string, timeoutMs = 3_000): Promise<s
 type PlaywrightCore = typeof import('playwright-core');
 type BrowserContext = import('playwright-core').BrowserContext;
 type Page = import('playwright-core').Page;
+type PageElementHandle = import('playwright-core').ElementHandle<HTMLElement | SVGElement>;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -84,7 +87,19 @@ export type BrowserStatus = {
   configured: string;
 };
 
-async function detectBackend(): Promise<BrowserBackend> {
+export function selectAutoBrowserBackend(input: {
+  extensionConnected: boolean;
+  extensionListening?: boolean;
+  playwrightAvailable: boolean;
+  requiresPlaywright?: boolean;
+}): BrowserBackend | null {
+  if (!input.requiresPlaywright && input.extensionConnected) return 'extension';
+  if (input.playwrightAvailable) return 'playwright';
+  if (!input.requiresPlaywright && input.extensionListening) return 'extension';
+  return null;
+}
+
+async function detectBackend(requiresPlaywright = false): Promise<BrowserBackend> {
   // Env var takes precedence; falls back to stored config (written by Settings UI)
   const fromEnv = process.env.PINPAWO_BROWSER_BACKEND?.trim();
   const fromConfig = getConfig().browserBackend;
@@ -123,7 +138,18 @@ async function detectBackend(): Promise<BrowserBackend> {
   }
 
   // auto-detect
-  if (await canUsePlaywright()) { console.log('[browser] using playwright (auto)'); return 'playwright'; }
+  const extensionStatus = browserRuntime.getExtensionStatus();
+  const playwrightAvailable = await canUsePlaywright();
+  const autoBackend = selectAutoBrowserBackend({
+    extensionConnected: extensionStatus.extensionConnected,
+    extensionListening: extensionStatus.listening,
+    playwrightAvailable,
+    requiresPlaywright,
+  });
+  if (autoBackend) {
+    console.log(`[browser] using ${autoBackend === 'extension' ? 'Chrome extension' : 'playwright'} (auto)`);
+    return autoBackend;
+  }
   throw new Error(
       'No browser backend available.\n' +
       '  Install external playwright-core (for example: npm install -g playwright-core)\n' +
@@ -221,6 +247,28 @@ export interface BrowserOpenOptions {
   userDataDir?: string;
 }
 
+export type BrowserElementTarget = {
+  selector?: string;
+  ref?: string;
+};
+
+export type BrowserScrollOptions = {
+  deltaX?: number;
+  deltaY?: number;
+  target?: BrowserElementTarget;
+};
+
+function normalizeBrowserElementTarget(target: string | BrowserElementTarget): BrowserElementTarget {
+  const normalized = typeof target === 'string' ? { selector: target.trim() } : {
+    selector: target.selector?.trim(),
+    ref: target.ref?.trim(),
+  };
+  if ((normalized.selector ? 1 : 0) + (normalized.ref ? 1 : 0) !== 1) {
+    throw new Error('browser element target requires exactly one of selector or ref');
+  }
+  return normalized;
+}
+
 function resolveUserDataDir(userDataDir: string): string {
   const trimmed = userDataDir.trim();
   if (!trimmed) {
@@ -248,6 +296,8 @@ class PlaywrightBrowserSession {
   private page: Page | null = null;
   private activeHeadless = false;
   private activeSessionDir = sessionDir(DEFAULT_SESSION);
+  private readonly refAttribute = `data-pinpawo-ref-${randomUUID()}`;
+  private readonly refElements = new Map<string, PageElementHandle>();
 
   private readExecutablePath() {
     return process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
@@ -301,9 +351,22 @@ class PlaywrightBrowserSession {
     return this.page;
   }
 
+  private async clearRefElements(): Promise<void> {
+    const handles = [...this.refElements.values()];
+    this.refElements.clear();
+    await Promise.all(handles.map((handle) => handle.dispose().catch(() => {})));
+  }
+
   private async buildSnapshot(page: Page): Promise<string> {
+    await this.clearRefElements();
     const snapshot = await page.evaluate<BrowserRawSnapshot>(`
       (() => {
+        const refAttribute = ${JSON.stringify(this.refAttribute)};
+        document.querySelectorAll('[' + refAttribute + ']').forEach((element) => {
+          element.removeAttribute(refAttribute);
+        });
+        const snapshotId = globalThis.crypto?.randomUUID?.()
+          || Date.now().toString(36) + Math.random().toString(36).slice(2);
         const trim = (v, n) => v.length <= n ? v : v.slice(0, n) + '...';
         const hintFor = (el) => {
           const id = el.getAttribute('id'); if (id) return '#' + id;
@@ -321,12 +384,16 @@ class PlaywrightBrowserSession {
           .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
         const interactive = interactiveElements
           .slice(0, ${MAX_BROWSER_INTERACTIVE_ELEMENTS})
-          .map((el, i) => ({
-            index: i + 1, tag: el.tagName.toLowerCase(),
-            text: trim((el.textContent || '').trim(), 80),
-            type: el.getAttribute('type'), placeholder: el.getAttribute('placeholder'),
-            hint: hintFor(el),
-          }));
+          .map((el, i) => {
+            const ref = snapshotId + ':' + (i + 1);
+            el.setAttribute(refAttribute, ref);
+            return {
+              index: i + 1, ref, tag: el.tagName.toLowerCase(),
+              text: trim((el.textContent || '').trim(), 80),
+              type: el.getAttribute('type'), placeholder: el.getAttribute('placeholder'),
+              hint: hintFor(el),
+            };
+          });
         return {
           title: document.title,
           url: window.location.href,
@@ -336,12 +403,27 @@ class PlaywrightBrowserSession {
         };
       })()
     `);
+    try {
+      for (const element of snapshot.interactive) {
+        if (!element.ref) continue;
+        const locator = page.locator(`[${this.refAttribute}="${element.ref}"]`);
+        if (await locator.count() !== 1) continue;
+        const handle = await locator.elementHandle();
+        if (handle) this.refElements.set(element.ref, handle);
+      }
+    } finally {
+      await page.evaluate((refAttribute) => {
+        document.querySelectorAll(`[${refAttribute}]`).forEach((element) => {
+          element.removeAttribute(refAttribute);
+        });
+      }, this.refAttribute).catch(() => {});
+    }
     return JSON.stringify(buildBrowserSnapshotPayload({
       title: snapshot.title,
       url: snapshot.url,
       text: snapshot.text,
       textSource: 'document.body.innerText',
-      interactive: snapshot.interactive as BrowserInteractiveElement[],
+      interactive: snapshot.interactive,
       interactiveCount: snapshot.interactiveCount,
     }), null, 2);
   }
@@ -361,16 +443,34 @@ class PlaywrightBrowserSession {
 
   async snapshot(): Promise<string> { return this.buildSnapshot(await this.requirePage()); }
 
-  async click(selector: string): Promise<string> {
+  private resolveTarget(target: string | BrowserElementTarget):
+    | { selector: string }
+    | { element: PageElementHandle } {
+    const normalized = normalizeBrowserElementTarget(target);
+    if (normalized.selector) return { selector: normalized.selector };
+    const element = this.refElements.get(normalized.ref!);
+    if (!element) {
+      throw new Error('Stale browser element reference. Take a new browser_snapshot and retry.');
+    }
+    return { element };
+  }
+
+  async click(target: string | BrowserElementTarget): Promise<string> {
     const page = await this.requirePage();
-    await page.locator(selector).first().click({ timeout: DEFAULT_TIMEOUT_MS });
+    const resolved = this.resolveTarget(target);
+    if ('selector' in resolved) {
+      await page.locator(resolved.selector).first().click({ timeout: DEFAULT_TIMEOUT_MS });
+    } else {
+      await resolved.element.click({ timeout: DEFAULT_TIMEOUT_MS });
+    }
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT_MS }).catch(() => {});
     return this.buildSnapshot(page);
   }
 
-  async type(selector: string, text: string, submit = false): Promise<string> {
+  async type(target: string | BrowserElementTarget, text: string, submit = false): Promise<string> {
     const page = await this.requirePage();
-    const loc = page.locator(selector).first();
+    const resolved = this.resolveTarget(target);
+    const loc = 'selector' in resolved ? page.locator(resolved.selector).first() : resolved.element;
     await loc.fill(text, { timeout: DEFAULT_TIMEOUT_MS });
     if (submit) {
       await loc.press('Enter', { timeout: DEFAULT_TIMEOUT_MS });
@@ -379,10 +479,30 @@ class PlaywrightBrowserSession {
     return this.buildSnapshot(page);
   }
 
-  async wait(selector?: string, timeoutMs = 3_000): Promise<string> {
+  async scroll(options: BrowserScrollOptions = {}): Promise<string> {
     const page = await this.requirePage();
-    if (selector) {
-      await page.locator(selector).first().waitFor({ state: 'visible', timeout: timeoutMs });
+    if (options.target) {
+      const resolved = this.resolveTarget(options.target);
+      if ('selector' in resolved) {
+        await page.locator(resolved.selector).first().hover({ timeout: DEFAULT_TIMEOUT_MS });
+      } else {
+        await resolved.element.hover({ timeout: DEFAULT_TIMEOUT_MS });
+      }
+    }
+    await page.mouse.wheel(options.deltaX ?? 0, options.deltaY ?? 600);
+    await page.waitForTimeout(150);
+    return this.buildSnapshot(page);
+  }
+
+  async wait(target?: string | BrowserElementTarget, timeoutMs = 3_000): Promise<string> {
+    const page = await this.requirePage();
+    if (target) {
+      const resolved = this.resolveTarget(target);
+      if ('selector' in resolved) {
+        await page.locator(resolved.selector).first().waitFor({ state: 'visible', timeout: timeoutMs });
+      } else {
+        await resolved.element.waitForElementState('visible', { timeout: timeoutMs });
+      }
     } else {
       await page.waitForTimeout(timeoutMs);
     }
@@ -405,7 +525,18 @@ class PlaywrightBrowserSession {
     }), null, 2);
   }
 
+  async screenshot(): Promise<string> {
+    const page = await this.requirePage();
+    const bytes = await page.screenshot({
+      type: 'jpeg',
+      quality: 75,
+      fullPage: false,
+    });
+    return persistBrowserScreenshot({ mimeType: 'image/jpeg', data: bytes.toString('base64') });
+  }
+
   async close(): Promise<string> {
+    await this.clearRefElements();
     await this.page?.close().catch(() => {});
     await this.context?.close().catch(() => {});
     this.page = null;
@@ -424,10 +555,10 @@ export class BrowserSession {
   private impl: BrowserImpl | null = null;
   private initPromise: Promise<BrowserImpl> | null = null;
 
-  private ensureImpl(): Promise<BrowserImpl> {
+  private ensureImpl(requiresPlaywright = false): Promise<BrowserImpl> {
     if (this.impl) return Promise.resolve(this.impl);
     if (!this.initPromise) {
-      this.initPromise = detectBackend().then((backend) => {
+      this.initPromise = detectBackend(requiresPlaywright).then((backend) => {
         this.impl = backend === 'extension'
           ? new ChromeExtensionBrowserSession()
           : new PlaywrightBrowserSession();
@@ -440,19 +571,28 @@ export class BrowserSession {
     return this.initPromise;
   }
 
-  async open(url: string, opts?: BrowserOpenOptions) { return (await this.ensureImpl()).open(url, opts); }
+  async open(url: string, opts?: BrowserOpenOptions) {
+    const requiresPlaywright = Boolean(
+      opts?.headless
+      || opts?.userDataDir
+      || (opts?.session && opts.session !== DEFAULT_SESSION),
+    );
+    return (await this.ensureImpl(requiresPlaywright)).open(url, opts);
+  }
   async openWithProfile(url: string, userDataDir: string, opts?: Omit<BrowserOpenOptions, 'session' | 'userDataDir'>) {
-    return (await this.ensureImpl()).open(url, { ...opts, userDataDir });
+    return (await this.ensureImpl(true)).open(url, { ...opts, userDataDir });
   }
   async snapshot() { return (await this.ensureImpl()).snapshot(); }
-  async click(selector: string) { return (await this.ensureImpl()).click(selector); }
-  async type(selector: string, text: string, submit?: boolean) {
-    return (await this.ensureImpl()).type(selector, text, submit);
+  async click(target: string | BrowserElementTarget) { return (await this.ensureImpl()).click(target); }
+  async type(target: string | BrowserElementTarget, text: string, submit?: boolean) {
+    return (await this.ensureImpl()).type(target, text, submit);
   }
-  async wait(selector?: string, timeoutMs?: number) {
-    return (await this.ensureImpl()).wait(selector, timeoutMs);
+  async scroll(options?: BrowserScrollOptions) { return (await this.ensureImpl()).scroll(options); }
+  async wait(target?: string | BrowserElementTarget, timeoutMs?: number) {
+    return (await this.ensureImpl()).wait(target, timeoutMs);
   }
   async extract(options?: BrowserExtractOptions) { return (await this.ensureImpl()).extract(options); }
+  async screenshot() { return (await this.ensureImpl()).screenshot(); }
   async close() {
     const impl = this.impl ?? (this.initPromise ? await this.initPromise : null);
     if (!impl) return 'browser session closed';
@@ -513,8 +653,23 @@ export async function detectBrowserStatus(): Promise<BrowserStatus> {
   }
 
   // auto-detect
+  const extension = browserRuntime.getExtensionStatus();
+  if (extension.extensionConnected) {
+    return {
+      mode: 'extension',
+      detail: `connected extension ${extension.extensionId ?? '(unknown)'}`,
+      configured,
+    };
+  }
   if (await canUsePlaywright()) {
     return { mode: 'playwright', detail: chromeExecPath, configured };
+  }
+  if (extension.listening) {
+    return {
+      mode: 'extension',
+      detail: `waiting for extension via ${extension.socketPath}`,
+      configured,
+    };
   }
   return { mode: 'none', detail: `missing playwright-core or Chrome at ${chromeExecPath}`, configured };
 }

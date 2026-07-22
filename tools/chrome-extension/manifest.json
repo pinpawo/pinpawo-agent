@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "PinPawo Browser Bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "minimum_chrome_version": "118",
   "description": "Connects an explicitly approved Chrome tab to the local PinPawo agent.",
   "permissions": [
     "debugger",

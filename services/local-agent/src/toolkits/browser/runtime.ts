@@ -8,7 +8,7 @@ class BrowserRuntime {
   private started = false;
 
   async start(): Promise<void> {
-    if (getConfig().browserBackend !== 'extension') return;
+    if (!shouldStartBrowserExtensionBridge(getConfig().browserBackend)) return;
     await localAgentBrowserBridge.start();
     this.started = true;
   }
@@ -38,6 +38,10 @@ class BrowserRuntime {
       browser_extension_id: status.extensionId,
     };
   }
+}
+
+export function shouldStartBrowserExtensionBridge(backend: string): boolean {
+  return backend === 'auto' || backend === 'extension';
 }
 
 export const browserRuntime = new BrowserRuntime();

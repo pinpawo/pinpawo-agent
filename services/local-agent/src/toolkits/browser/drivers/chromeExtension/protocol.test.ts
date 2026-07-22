@@ -13,12 +13,21 @@ test('browser extension protocol validates register and deduplicates capabilitie
     protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
     connectionId: 'connection-1',
     extensionId: 'extension-1',
-    capabilities: ['navigate', 'snapshot', 'snapshot', 'detach'],
+    capabilities: ['navigate', 'snapshot', 'click', 'type', 'scroll', 'extract', 'screenshot', 'snapshot', 'detach'],
     activeTab: { tabId: 42, ownership: 'user' },
   });
 
   assert.equal(message.type, 'browser.register');
-  assert.deepEqual(message.capabilities, ['navigate', 'snapshot', 'detach']);
+  assert.deepEqual(message.capabilities, [
+    'navigate',
+    'snapshot',
+    'click',
+    'type',
+    'scroll',
+    'extract',
+    'screenshot',
+    'detach',
+  ]);
   assert.deepEqual(message.activeTab, { tabId: 42, ownership: 'user' });
 });
 
@@ -26,7 +35,7 @@ test('browser extension protocol rejects mismatched versions and malformed resul
   assert.throws(
     () => parseExtensionToAgentMessage({
       type: 'browser.register',
-      protocolVersion: 2,
+      protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION + 1,
       connectionId: 'connection-1',
       extensionId: 'extension-1',
       capabilities: [],
@@ -37,7 +46,7 @@ test('browser extension protocol rejects mismatched versions and malformed resul
   assert.throws(
     () => parseExtensionToAgentMessage({
       type: 'browser.result',
-      protocolVersion: 1,
+      protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
       connectionId: 'connection-1',
       requestId: 'request-1',
       ok: false,
@@ -49,7 +58,7 @@ test('browser extension protocol rejects mismatched versions and malformed resul
 test('browser extension protocol validates commands and bridge authentication messages', () => {
   const command = parseAgentToExtensionMessage({
     type: 'browser.command',
-    protocolVersion: 1,
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
     connectionId: 'connection-1',
     requestId: 'request-1',
     command: 'snapshot',
@@ -60,7 +69,7 @@ test('browser extension protocol validates commands and bridge authentication me
 
   const hello = parseBridgeHelloMessage({
     type: 'bridge.hello',
-    protocolVersion: 1,
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
     token: 'secret',
     hostPid: 123,
   });

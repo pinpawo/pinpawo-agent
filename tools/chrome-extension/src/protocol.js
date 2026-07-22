@@ -1,6 +1,16 @@
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const NATIVE_HOST_NAME = 'com.pinpawo.browser_bridge';
-export const CAPABILITIES = ['navigate', 'snapshot', 'detach'];
+export const CAPABILITIES = [
+  'navigate',
+  'snapshot',
+  'click',
+  'type',
+  'scroll',
+  'wait',
+  'extract',
+  'screenshot',
+  'detach',
+];
 
 export function parseBrowserCommand(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

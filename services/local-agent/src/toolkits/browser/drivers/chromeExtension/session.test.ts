@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import test from 'node:test';
 import { ChromeExtensionBrowserSession } from './session';
 import { BrowserBridgeError } from './bridge';
+import { getLocalToolsWorkdir, setLocalToolsWorkdir } from '../../../local/pathUtils';
 
 const rawSnapshot = {
   title: 'Example',
@@ -9,6 +13,7 @@ const rawSnapshot = {
   text: 'Readable page',
   interactive: [{
     index: 1,
+    ref: 'snapshot-1:1',
     tag: 'button',
     text: 'Continue',
     type: null,
@@ -48,7 +53,7 @@ test('extension session uses one approved origin and the shared payload builder'
   assert.equal(calls[2]?.command, 'detach');
 });
 
-test('extension session rejects unsupported modes and operations explicitly', async () => {
+test('extension session rejects unsupported modes and requires an approved page for actions', async () => {
   const session = new ChromeExtensionBrowserSession({
     async sendCommand() {
       return rawSnapshot;
@@ -56,7 +61,61 @@ test('extension session rejects unsupported modes and operations explicitly', as
   });
   await assert.rejects(session.open('file:///tmp/page.html'), /only supports http/);
   await assert.rejects(session.open('https://example.com', { headless: true }), /does not support headless/);
-  await assert.rejects(session.click('#submit'), /does not support click/);
+  await assert.rejects(session.click('#submit'), /Use browser_open first/);
+});
+
+test('extension session maps P1 interactions and normalizes extract and screenshot results', async (t) => {
+  const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
+  const previousWorkdir = getLocalToolsWorkdir();
+  const workdir = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-p1-'));
+  setLocalToolsWorkdir(workdir);
+  t.after(() => setLocalToolsWorkdir(previousWorkdir));
+  const session = new ChromeExtensionBrowserSession({
+    async sendCommand(command, params) {
+      calls.push({ command, params });
+      if (command === 'extract') {
+        return {
+          title: 'Example',
+          url: 'https://example.com/page',
+          selector: undefined,
+          text: 'page',
+          textLength: 9,
+          offset: 0,
+          limit: 4,
+          textSource: 'document.body.innerText',
+        };
+      }
+      if (command === 'screenshot') {
+        return { mimeType: 'image/jpeg', data: 'AQ==' };
+      }
+      return rawSnapshot;
+    },
+  });
+
+  await session.open('https://example.com/page');
+  await session.click({ ref: 'snapshot-1:1' });
+  await session.type({ selector: '#name' }, 'PinPawo', true);
+  await session.scroll({ deltaY: 480 });
+  await session.wait({ selector: '#ready' }, 2_000);
+  const extracted = JSON.parse(await session.extract({ offset: 0, limit: 4 })) as {
+    text: string;
+    hasMore: boolean;
+    nextOffset: number;
+  };
+  const screenshot = JSON.parse(await session.screenshot()) as { path: string; byteLength: number };
+
+  assert.equal(extracted.text, 'page');
+  assert.equal(extracted.hasMore, true);
+  assert.equal(extracted.nextOffset, 4);
+  assert.equal(screenshot.byteLength, 1);
+  assert.match(screenshot.path, /\.pinpawo\/browser\/screenshots\/.*\.jpg$/);
+  assert.deepEqual(calls.slice(1, 5).map((call) => call.command), [
+    'click',
+    'type',
+    'scroll',
+    'wait',
+  ]);
+  assert.deepEqual(calls[1]?.params.target, { selector: undefined, ref: 'snapshot-1:1' });
 });
 
 test('extension session rejects raw snapshots outside the approved origin', async () => {
@@ -75,4 +134,25 @@ test('extension session rejects raw snapshots outside the approved origin', asyn
       && error.code === 'origin_changed',
   );
   await assert.rejects(session.snapshot(), /Use browser_open first/);
+});
+
+test('extension session preserves long browser_type input and budgets enough driver time', async () => {
+  const calls: Array<{
+    command: string;
+    params: Record<string, unknown>;
+    timeoutMs: number | undefined;
+  }> = [];
+  const session = new ChromeExtensionBrowserSession({
+    async sendCommand(command, params, timeoutMs) {
+      calls.push({ command, params, timeoutMs });
+      return rawSnapshot;
+    },
+  });
+  const text = '🙂'.repeat(4_001);
+
+  await session.open('https://example.com/page');
+  await session.type('#message', text);
+
+  assert.equal(calls[1]?.params.text, text);
+  assert.ok((calls[1]?.timeoutMs ?? 0) > 30_000);
 });

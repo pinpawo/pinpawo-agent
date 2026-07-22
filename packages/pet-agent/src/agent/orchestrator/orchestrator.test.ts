@@ -891,10 +891,10 @@ test('a completed subagent announce reaches the decision, while answer node only
   // tells it to close the delegation turn instead of re-summarizing the result.
   assert.match(answerInput, /END_OF_FULL_SUBAGENT_RESULT/);
   assert.ok(answerInput.includes('A'.repeat(1400)), 'answer node should still see complete main history');
-  assert.match(answerInput, /本次用户目标（引用）/);
+  assert.match(answerInput, /本次用户目标（已完成）/);
   assert.match(answerInput, /读取文件并运行 lint/);
   assert.match(answerInput, /上一条消息已经完整呈现工作结果/);
-  assert.match(answerInput, /简短确认"读取文件并运行 lint"已经完成/);
+  assert.match(answerInput, /"读取文件并运行 lint"已完成。如需继续，请告诉我/);
   assert.doesNotMatch(answerInput, /orchestrator|handoff|delegation|subagent/);
 });
 
@@ -1005,7 +1005,7 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
   assert.equal(finalMessageText, '执行器已经交付结果，我这边已完成收尾。');
   assert.match(answerInput, new RegExp(announceMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(answerInput, /上一条消息已经完整呈现工作结果/);
-  assert.match(answerInput, /简短确认"搜索并整理 vibecoding 模型排行榜。"已经完成/);
+  assert.match(answerInput, /"搜索并整理 vibecoding 模型排行榜。"已完成。如需继续，请告诉我/);
   assert.doesNotMatch(answerInput, /orchestrator|handoff|delegation|subagent/);
 });
 

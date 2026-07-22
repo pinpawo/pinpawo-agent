@@ -169,7 +169,7 @@ export function buildDelegationCompletionAnswerContext(
   const completedWork = source.task?.trim() || '本次工作';
   return [
     ...(userGoal ? [
-      '本次用户目标（引用）：',
+      '本次用户目标（已完成）：',
       JSON.stringify(userGoal),
       '',
     ] : []),
@@ -177,6 +177,7 @@ export function buildDelegationCompletionAnswerContext(
     '上一条消息已经完整呈现工作结果。',
     '',
     '本次回复目标：',
-    `简短确认${JSON.stringify(completedWork)}已经完成，并询问用户是否需要继续。`,
+    '使用以下结束说明：',
+    `${JSON.stringify(completedWork)}已完成。如需继续，请告诉我。`,
   ].join('\n');
 }

@@ -628,14 +628,14 @@ export const gitPushTool = tool(
     refspec?: string;
     setUpstream?: boolean;
   }) => {
-    const args = ['push'];
+    const args = ['-c', 'protocol.ext.allow=never', 'push'];
     if (setUpstream) args.push('--set-upstream');
     args.push('--', remote.trim(), refspec.trim());
     return runGit(args, cwd, GIT_PUSH_TIMEOUT_MS);
   },
   {
     name: 'git_push',
-    description: '执行普通、非 force 的 git push。默认将当前 HEAD 推送到 origin 并设置 upstream；不提供 force、删除远端引用或额外参数入口。',
+    description: '执行普通、非 force 的 git push。默认将当前 HEAD 推送到 origin 并设置 upstream；不提供 force、删除远端引用、ext command transport 或额外参数入口。',
     schema: z.object({
       cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
       remote: z.string().trim().min(1).optional().describe('远端名称或地址，默认 origin'),

@@ -82,6 +82,7 @@ test('git_add requires explicit pathspecs', async () => {
 test('git_push performs a normal push without exposing force or delete options', async (t) => {
   const repo = createRepo();
   const remote = mkdtempSync(join(tmpdir(), 'pinpawo-git-remote-'));
+  const extMarker = join(repo, 'ext-helper-ran');
   t.after(() => {
     rmSync(repo, { recursive: true, force: true });
     rmSync(remote, { recursive: true, force: true });
@@ -105,6 +106,22 @@ test('git_push performs a normal push without exposing force or delete options',
     () => gitPushTool.invoke({ cwd: repo, remote, refspec: '+HEAD:main' }),
     /force and delete refspecs are not supported/,
   );
+
+  assert.match(
+    String(await gitPushTool.invoke({
+      cwd: repo,
+      remote: `ext::touch ${extMarker}`,
+    })),
+    /transport 'ext' not allowed/,
+  );
+  assert.equal(existsSync(extMarker), false);
+
+  execFileSync('git', ['remote', 'add', 'unsafe-ext', `ext::touch ${extMarker}`], { cwd: repo });
+  assert.match(
+    String(await gitPushTool.invoke({ cwd: repo, remote: 'unsafe-ext' })),
+    /transport 'ext' not allowed/,
+  );
+  assert.equal(existsSync(extMarker), false);
 });
 
 test('GitHub create tools pass structured arguments to gh without a shell', async (t) => {

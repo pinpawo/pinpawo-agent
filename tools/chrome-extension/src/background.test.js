@@ -23,7 +23,7 @@ test('snapshot reads enforce snapshot URL and post-read committed origin checks'
     /async function readSnapshot\(tabId, approvedOrigin\) \{([\s\S]*?)\n\}/,
   )?.[1] ?? '';
 
-  assert.match(readSnapshot, /validateSnapshotOrigin\(snapshot, approvedOrigin\)/);
+  assert.match(readSnapshot, /validateSnapshotOrigin\(snapshot, approvedOrigin, tabId\)/);
   assert.ok(
     (readSnapshot.match(/await assertApprovedOrigin\(tabId, approvedOrigin\)/g) ?? []).length >= 2,
     'readSnapshot must check the committed origin before and after snapshot collection',
@@ -60,7 +60,39 @@ test('commands and target changes share the extension-owned serial queue', async
 
   assert.match(source, /onMessage\.addListener[\s\S]*?enqueueExtensionWork\(\(\) => handleCommand\(message\)\)/);
   assert.match(source, /action\.onClicked\.addListener[\s\S]*?enqueueExtensionWork/);
+  assert.match(source, /tabs\.onCreated\.addListener[\s\S]*?enqueueExtensionWork/);
   assert.match(source, /tabs\.onRemoved\.addListener[\s\S]*?enqueueExtensionWork/);
+});
+
+test('popup tabs are followed inside the extension target lifecycle', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+
+  assert.match(source, /followPopupAfterAction\(activeTarget, command\.deadlineAt\)/);
+  assert.match(source, /switchToPopup[\s\S]*?rememberCurrent: true[\s\S]*?waitForTab/);
+  assert.match(source, /switchToPopup[\s\S]*?rollbackPopupSwitch/);
+  assert.match(source, /tabs\.onCreated\.addListener[\s\S]*?POPUP_NAVIGATION_TIMEOUT_MS[\s\S]*?switchToPopup/);
+  assert.match(source, /targets\.remove\(tabId\)[\s\S]*?saveTarget\(removed\.current\)/);
+  assert.match(source, /originChangedError[\s\S]*?manualActionRequired: true[\s\S]*?complete_popup_manually/);
+  assert.match(source, /readInteractionResult[\s\S]*?interactionDispatched: true/);
+  assert.doesNotMatch(source, /approve the new URL before reading it/);
+});
+
+test('selector actions use a bounded extension-side retry without retrying stale refs', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+  const resolveTargetForAction = source.match(
+    /async function resolveTargetForAction\([\s\S]*?\n\}/,
+  )?.[0] ?? '';
+
+  assert.match(resolveTargetForAction, /Date\.now\(\) \+ 1_000/);
+  assert.match(resolveTargetForAction, /normalized\.selector/);
+  assert.match(resolveTargetForAction, /element_not_found/);
+  assert.doesNotMatch(resolveTargetForAction, /stale_element_reference/);
 });
 
 test('trusted input checks the approved origin before each browser event', async () => {
@@ -83,4 +115,20 @@ test('trusted input checks the approved origin before each browser event', async
     (dispatchKey.match(/assertApprovedOrigin\(tabId, approvedOrigin\)/g) ?? []).length >= 3,
     'key input must re-check origin before down, char, and up',
   );
+});
+
+test('trusted pointer input activates the bound target inside the extension', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+  const dispatchClick = source.match(
+    /async function dispatchClick\([\s\S]*?\n\}/,
+  )?.[0] ?? '';
+  const dispatchScroll = source.match(
+    /async function dispatchScroll\([\s\S]*?\n\}/,
+  )?.[0] ?? '';
+
+  assert.match(dispatchClick, /await activateTarget\(tabId\)/);
+  assert.match(dispatchScroll, /await activateTarget\(tabId\)/);
 });

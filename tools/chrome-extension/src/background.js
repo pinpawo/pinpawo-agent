@@ -22,6 +22,7 @@ import {
   normalizeHumanization,
   randomDelayMs,
 } from './interaction.js';
+import { createTargetStack } from './targetLifecycle.js';
 
 const CDP_VERSION = '1.3';
 const ALLOWED_CDP_COMMANDS = new Set([
@@ -38,18 +39,21 @@ const ALLOWED_CDP_COMMANDS = new Set([
 ]);
 const SESSION_KEY = 'pinpawoBrowserTarget';
 const RECONNECT_DELAY_MS = 1_000;
+const POPUP_NAVIGATION_TIMEOUT_MS = 15_000;
 const connectionId = crypto.randomUUID();
 let port = null;
 let reconnectTimer = null;
-let target = null;
 let attachedTabId = null;
 const enqueueExtensionWork = createSerialExecutor();
+const targets = createTargetStack();
+const recentPopupByOpener = new Map();
 
 class ExtensionError extends Error {
-  constructor(code, message, retryable = false) {
+  constructor(code, message, retryable = false, details) {
     super(message);
     this.code = code;
     this.retryable = retryable;
+    this.details = details;
   }
 }
 
@@ -59,20 +63,21 @@ async function restoreTarget() {
   if (!candidate || !Number.isInteger(candidate.tabId)) return;
   try {
     await chrome.tabs.get(candidate.tabId);
-    target = candidate;
+    targets.bind(candidate, { resetHistory: true });
   } catch {
     await chrome.storage.local.remove(SESSION_KEY);
   }
 }
 
-async function saveTarget(nextTarget) {
-  target = nextTarget;
+async function saveTarget(nextTarget, options = {}) {
+  const target = targets.bind(nextTarget, options);
   if (target) await chrome.storage.local.set({ [SESSION_KEY]: target });
   else await chrome.storage.local.remove(SESSION_KEY);
   sendRegister();
 }
 
 function registerMessage() {
+  const target = targets.current();
   return {
     type: 'browser.register',
     protocolVersion: PROTOCOL_VERSION,
@@ -143,6 +148,19 @@ async function attach(tabId) {
   }
 }
 
+async function activateTarget(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.active) await chrome.tabs.update(tabId, { active: true });
+  } catch (error) {
+    throw new ExtensionError(
+      'target_activation_failed',
+      `Unable to activate the browser target: ${error instanceof Error ? error.message : String(error)}`,
+      true,
+    );
+  }
+}
+
 async function detach() {
   if (attachedTabId === null) return { detached: false };
   const tabId = attachedTabId;
@@ -159,6 +177,7 @@ async function detach() {
 }
 
 async function ensureTarget() {
+  const target = targets.current();
   if (target) {
     try {
       await chrome.tabs.get(target.tabId);
@@ -172,7 +191,92 @@ async function ensureTarget() {
     throw new ExtensionError('target_create_failed', 'Chrome did not return a tab id');
   }
   await saveTarget({ tabId: tab.id, ownership: 'agent' });
-  return target;
+  return targets.current();
+}
+
+async function rollbackPopupSwitch(tabId) {
+  await detach();
+  const removed = targets.remove(tabId);
+  if (!removed.closedCurrent) return removed.current;
+  await saveTarget(removed.current);
+  if (removed.current) await attach(removed.current.tabId);
+  return removed.current;
+}
+
+async function switchToPopup(tabId, parentTarget, deadlineAt) {
+  if (targets.current()?.tabId !== parentTarget.tabId) return targets.current();
+  try {
+    await chrome.tabs.get(tabId);
+  } catch {
+    return targets.current();
+  }
+  await detach();
+  try {
+    await saveTarget(
+      { tabId, ownership: parentTarget.ownership },
+      { rememberCurrent: true },
+    );
+    await attach(tabId);
+    await waitForTab(tabId, deadlineAt);
+    return targets.current();
+  } catch (error) {
+    try {
+      await rollbackPopupSwitch(tabId);
+    } catch (rollbackError) {
+      console.warn(
+        '[pinpawo-extension] failed to restore popup parent:',
+        rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+      );
+    }
+    throw error;
+  }
+}
+
+async function handleRemovedTarget(tabId) {
+  const removed = targets.remove(tabId);
+  if (!removed.closedCurrent) return removed.current;
+  if (attachedTabId === tabId) attachedTabId = null;
+  await saveTarget(removed.current);
+  if (removed.current) {
+    await attach(removed.current.tabId);
+    return removed.current;
+  }
+  port?.postMessage({
+    type: 'browser.event',
+    protocolVersion: PROTOCOL_VERSION,
+    connectionId,
+    event: 'target.closed',
+    tabId,
+  });
+  return null;
+}
+
+async function requireLiveResultTarget(candidate) {
+  if (!candidate) {
+    throw new ExtensionError('target_closed', 'The active browser target was closed', true);
+  }
+  try {
+    await chrome.tabs.get(candidate.tabId);
+    return candidate;
+  } catch {
+    const fallback = await handleRemovedTarget(candidate.tabId);
+    if (fallback) return fallback;
+    throw new ExtensionError('target_closed', 'The active browser target was closed', true);
+  }
+}
+
+async function followPopupAfterAction(parentTarget, deadlineAt) {
+  const waitDeadline = Math.min(Date.now() + 300, Date.parse(deadlineAt));
+  while (Date.now() <= waitDeadline) {
+    ensureCommandAlive(deadlineAt);
+    const popup = recentPopupByOpener.get(parentTarget.tabId);
+    if (popup) {
+      recentPopupByOpener.delete(parentTarget.tabId);
+      return await switchToPopup(popup.tabId, parentTarget, deadlineAt);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return targets.current();
 }
 
 async function currentUrl(tabId) {
@@ -184,28 +288,47 @@ async function currentUrl(tabId) {
   return entry.url;
 }
 
+function originChangedError(tabId, approvedOrigin, actualOrigin) {
+  const manualActionRequired = targets.current()?.tabId === tabId
+    && targets.history().length > 0;
+  return new ExtensionError(
+    'origin_changed',
+    manualActionRequired
+      ? 'Cross-origin popup access is blocked. Ask the user to complete it manually, then retry after it closes or returns to the approved origin.'
+      : `The tab navigated outside the approved origin (${approvedOrigin}). Use browser_open with an approved URL before reading it.`,
+    false,
+    {
+      approvedOrigin,
+      ...(typeof actualOrigin === 'string' ? { actualOrigin } : {}),
+      ...(manualActionRequired ? {
+        manualActionRequired: true,
+        recovery: 'complete_popup_manually',
+      } : {}),
+    },
+  );
+}
+
 async function assertApprovedOrigin(tabId, approvedOrigin) {
   if (typeof approvedOrigin !== 'string' || !approvedOrigin) {
     throw new ExtensionError('origin_approval_missing', 'No approved origin was supplied');
   }
   const url = await currentUrl(tabId);
-  if (originOf(url) !== approvedOrigin) {
-    throw new ExtensionError(
-      'origin_changed',
-      `The tab navigated outside the approved origin (${approvedOrigin}); approve the new URL before reading it.`,
-    );
+  const actualOrigin = originOf(url);
+  if (actualOrigin !== approvedOrigin) {
+    throw originChangedError(tabId, approvedOrigin, actualOrigin);
   }
   return url;
 }
 
-function validateSnapshotOrigin(snapshot, approvedOrigin) {
+function validateSnapshotOrigin(snapshot, approvedOrigin, tabId) {
   try {
     return assertSnapshotApprovedOrigin(snapshot, approvedOrigin);
   } catch {
-    throw new ExtensionError(
-      'origin_changed',
-      `The snapshot did not come from the approved origin (${approvedOrigin}); approve the current URL before reading it.`,
-    );
+    let actualOrigin;
+    try {
+      actualOrigin = originOf(snapshot?.url);
+    } catch {}
+    throw originChangedError(tabId, approvedOrigin, actualOrigin);
   }
 }
 
@@ -244,9 +367,25 @@ async function readSnapshot(tabId, approvedOrigin) {
       );
     }
   }
-  validateSnapshotOrigin(snapshot, approvedOrigin);
+  validateSnapshotOrigin(snapshot, approvedOrigin, tabId);
   await assertApprovedOrigin(tabId, approvedOrigin);
   return snapshot;
+}
+
+async function readInteractionResult(tabId, approvedOrigin) {
+  try {
+    return await readSnapshot(tabId, approvedOrigin);
+  } catch (error) {
+    if (error instanceof ExtensionError && error.code === 'origin_changed') {
+      throw new ExtensionError(
+        error.code,
+        error.message,
+        error.retryable,
+        { ...error.details, interactionDispatched: true },
+      );
+    }
+    throw error;
+  }
 }
 
 async function evaluateValue(tabId, expression) {
@@ -312,8 +451,32 @@ async function resolveTarget(tabId, target) {
   return requirePageResult(await evaluateValue(tabId, buildResolveTargetExpression(normalized)));
 }
 
+async function resolveTargetForAction(tabId, target, deadlineAt, approvedOrigin) {
+  const normalized = normalizeElementTarget(target);
+  const retryDeadline = Math.min(Date.now() + 1_000, Date.parse(deadlineAt));
+  while (true) {
+    ensureCommandAlive(deadlineAt);
+    await assertApprovedOrigin(tabId, approvedOrigin);
+    try {
+      return await resolveTarget(tabId, normalized);
+    } catch (error) {
+      const retryableSelectorState = normalized.selector
+        && error instanceof ExtensionError
+        && ['element_not_found', 'element_not_visible'].includes(error.code);
+      if (!retryableSelectorState || Date.now() >= retryDeadline) throw error;
+      await delay(100, deadlineAt);
+    }
+  }
+}
+
 async function dispatchClick(tabId, target, humanization, deadlineAt, approvedOrigin) {
-  const point = await resolveTarget(tabId, normalizeElementTarget(target));
+  await activateTarget(tabId);
+  const point = await resolveTargetForAction(
+    tabId,
+    target,
+    deadlineAt,
+    approvedOrigin,
+  );
   await delay(randomDelayMs(humanization.preDelayMinMs, humanization.preDelayMaxMs), deadlineAt);
   await assertApprovedOrigin(tabId, approvedOrigin);
   await cdp(tabId, 'Input.dispatchMouseEvent', {
@@ -437,13 +600,19 @@ function boundedScrollDelta(value, name) {
 }
 
 async function dispatchScroll(tabId, params, deadlineAt, approvedOrigin) {
+  await activateTarget(tabId);
   const deltaX = boundedScrollDelta(params.deltaX, 'deltaX');
   const deltaY = boundedScrollDelta(params.deltaY, 'deltaY');
   if (deltaX === 0 && deltaY === 0) {
     throw new ExtensionError('invalid_scroll_delta', 'At least one scroll delta must be non-zero');
   }
   const point = params.target
-    ? await resolveTarget(tabId, normalizeElementTarget(params.target))
+    ? await resolveTargetForAction(
+      tabId,
+      params.target,
+      deadlineAt,
+      approvedOrigin,
+    )
     : { x: 1, y: 1 };
   await assertApprovedOrigin(tabId, approvedOrigin);
   await cdp(tabId, 'Input.dispatchMouseEvent', {
@@ -462,6 +631,10 @@ async function waitForPageCondition(tabId, params, deadlineAt, approvedOrigin) {
     throw new ExtensionError('invalid_wait_timeout', 'timeoutMs must be between 1 and 30000');
   }
   const waitDeadline = Math.min(Date.now() + timeoutMs, Date.parse(deadlineAt));
+  const state = params.state ?? 'visible';
+  if (state !== 'visible' && state !== 'hidden') {
+    throw new ExtensionError('invalid_wait_state', 'state must be visible or hidden');
+  }
   if (!params.target) {
     await delay(Math.max(0, waitDeadline - Date.now()), deadlineAt);
     return;
@@ -471,13 +644,30 @@ async function waitForPageCondition(tabId, params, deadlineAt, approvedOrigin) {
     try {
       await assertApprovedOrigin(tabId, approvedOrigin);
       await resolveTarget(tabId, target);
-      return;
+      if (state === 'visible') return;
     } catch (error) {
-      if (!(error instanceof ExtensionError) || error.code !== 'element_not_found') throw error;
+      if (
+        state === 'hidden'
+        && error instanceof ExtensionError
+        && [
+          'element_not_found',
+          'element_not_visible',
+          'stale_element_reference',
+        ].includes(error.code)
+      ) return;
+      if (
+        !(error instanceof ExtensionError)
+        || !['element_not_found', 'element_not_visible'].includes(error.code)
+      ) throw error;
     }
     await delay(100, deadlineAt);
   }
-  throw new ExtensionError('wait_timeout', 'The target did not become visible before timeout', true);
+  throw new ExtensionError(
+    'wait_timeout',
+    `The target did not become ${state} before timeout`,
+    true,
+    { state, timeoutMs },
+  );
 }
 
 async function readExtract(tabId, params, approvedOrigin) {
@@ -488,7 +678,7 @@ async function readExtract(tabId, params, approvedOrigin) {
     tabId,
     buildExtractExpression(params.selector, offset, limit),
   ));
-  validateSnapshotOrigin(result, approvedOrigin);
+  validateSnapshotOrigin(result, approvedOrigin, tabId);
   await assertApprovedOrigin(tabId, approvedOrigin);
   const { ok: _ok, ...raw } = result;
   return raw;
@@ -548,13 +738,17 @@ async function executeCommand(command) {
       approvedOrigin,
     );
     await delay(150, command.deadlineAt);
-    return await readSnapshot(activeTarget.tabId, approvedOrigin);
+    const followedTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
+    const resultTarget = await requireLiveResultTarget(followedTarget ?? activeTarget);
+    return await readInteractionResult(resultTarget.tabId, approvedOrigin);
   }
   if (command.command === 'type') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
     await dispatchType(activeTarget.tabId, command.params, command.deadlineAt, approvedOrigin);
     await delay(100, command.deadlineAt);
-    return await readSnapshot(activeTarget.tabId, approvedOrigin);
+    const followedTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
+    const resultTarget = await requireLiveResultTarget(followedTarget ?? activeTarget);
+    return await readInteractionResult(resultTarget.tabId, approvedOrigin);
   }
   if (command.command === 'scroll') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
@@ -613,22 +807,38 @@ chrome.action.onClicked.addListener(async (tab) => {
   if (!Number.isInteger(tab.id)) return;
   await enqueueExtensionWork(async () => {
     await detach();
-    await saveTarget({ tabId: tab.id, ownership: 'user' });
+    await saveTarget(
+      { tabId: tab.id, ownership: 'user' },
+      { resetHistory: true },
+    );
+  });
+});
+
+chrome.tabs.onCreated.addListener((tab) => {
+  if (!Number.isInteger(tab.id) || !Number.isInteger(tab.openerTabId)) return;
+  if (targets.current()?.tabId !== tab.openerTabId) return;
+  recentPopupByOpener.set(tab.openerTabId, { tabId: tab.id });
+  void enqueueExtensionWork(async () => {
+    const pendingPopup = recentPopupByOpener.get(tab.openerTabId);
+    if (pendingPopup?.tabId === tab.id) {
+      recentPopupByOpener.delete(tab.openerTabId);
+    }
+    const target = targets.current();
+    if (target?.tabId !== tab.openerTabId) return;
+    const deadlineAt = new Date(Date.now() + POPUP_NAVIGATION_TIMEOUT_MS).toISOString();
+    await switchToPopup(tab.id, target, deadlineAt);
+  }).catch((error) => {
+    console.warn(
+      '[pinpawo-extension] failed to follow popup:',
+      error instanceof Error ? error.message : String(error),
+    );
   });
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   await enqueueExtensionWork(async () => {
-    if (target?.tabId !== tabId) return;
-    attachedTabId = null;
-    await saveTarget(null);
-    port?.postMessage({
-      type: 'browser.event',
-      protocolVersion: PROTOCOL_VERSION,
-      connectionId,
-      event: 'target.closed',
-      tabId,
-    });
+    recentPopupByOpener.delete(tabId);
+    await handleRemovedTarget(tabId);
   });
 });
 

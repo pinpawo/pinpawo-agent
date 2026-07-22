@@ -4,6 +4,8 @@ import {
   BROWSER_EXTENSION_PROTOCOL_VERSION,
   parseAgentToExtensionMessage,
   parseExtensionToAgentMessage,
+  type BrowserRegisterMessage,
+  type ExtensionToAgentMessage,
 } from '../protocol';
 import {
   DEFAULT_BROWSER_BRIDGE_SOCKET_PATH,
@@ -40,7 +42,8 @@ export class NativeHostRelay {
   private socketBuffer = '';
   private reconnectTimer: NodeJS.Timeout | null = null;
   private stopped = false;
-  private queued: unknown[] = [];
+  private queued: ExtensionToAgentMessage[] = [];
+  private registration: BrowserRegisterMessage | null = null;
 
   constructor(options: NativeHostOptions = {}) {
     this.input = options.input ?? process.stdin;
@@ -79,6 +82,7 @@ export class NativeHostRelay {
     try {
       for (const value of this.decoder.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))) {
         const message = parseExtensionToAgentMessage(value);
+        if (message.type === 'browser.register') this.registration = message;
         if (this.socketReady && this.socket && !this.socket.destroyed) {
           this.socket.write(`${JSON.stringify(message)}\n`);
         } else {
@@ -161,7 +165,11 @@ export class NativeHostRelay {
           throw new Error('local bridge protocol version mismatch');
         }
         this.socketReady = true;
+        if (this.registration) {
+          socket.write(`${JSON.stringify(this.registration)}\n`);
+        }
         for (const message of this.queued) {
+          if (this.registration && message.type === 'browser.register') continue;
           socket.write(`${JSON.stringify(message)}\n`);
         }
         this.queued = [];

@@ -115,6 +115,33 @@ test('local browser bridge authenticates, registers and resolves commands', asyn
     result: { title: 'Example' },
   });
   assert.deepEqual(await resultPromise, { title: 'Example' });
+
+  const failedPromise = bridge.sendCommand('snapshot', {
+    approvedOrigin: 'https://example.com',
+  });
+  const failedCommand = await peer.nextLine();
+  peer.send({
+    type: 'browser.result',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    requestId: failedCommand.requestId,
+    ok: false,
+    error: {
+      code: 'origin_changed',
+      message: 'Origin changed',
+      retryable: false,
+      details: {
+        approvedOrigin: 'https://example.com',
+        actualOrigin: 'https://login.example.com',
+      },
+    },
+  });
+  await assert.rejects(
+    failedPromise,
+    (error: unknown) => error instanceof BrowserBridgeError
+      && error.code === 'origin_changed'
+      && error.details?.actualOrigin === 'https://login.example.com',
+  );
 });
 
 test('local browser bridge rejects wrong tokens and reports disconnected extension', async (t) => {

@@ -96,7 +96,7 @@ test('extension session maps P1 interactions and normalizes extract and screensh
   await session.click({ ref: 'snapshot-1:1' });
   await session.type({ selector: '#name' }, 'PinPawo', true);
   await session.scroll({ deltaY: 480 });
-  await session.wait({ selector: '#ready' }, 2_000);
+  await session.wait({ selector: '#ready' }, 2_000, 'hidden');
   const extracted = JSON.parse(await session.extract({ offset: 0, limit: 4 })) as {
     text: string;
     hasMore: boolean;
@@ -116,6 +116,12 @@ test('extension session maps P1 interactions and normalizes extract and screensh
     'wait',
   ]);
   assert.deepEqual(calls[1]?.params.target, { selector: undefined, ref: 'snapshot-1:1' });
+  assert.deepEqual(calls[4]?.params, {
+    approvedOrigin: 'https://example.com',
+    timeoutMs: 2_000,
+    state: 'hidden',
+    target: { selector: '#ready', ref: undefined },
+  });
 });
 
 test('extension session rejects raw snapshots outside the approved origin', async () => {
@@ -131,7 +137,8 @@ test('extension session rejects raw snapshots outside the approved origin', asyn
   await assert.rejects(
     session.open('https://example.com/page'),
     (error: unknown) => error instanceof BrowserBridgeError
-      && error.code === 'origin_changed',
+      && error.code === 'origin_changed'
+      && error.details?.actualOrigin === 'https://unapproved.example',
   );
   await assert.rejects(session.snapshot(), /Use browser_open first/);
 });

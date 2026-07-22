@@ -27,7 +27,7 @@ MV3 service worker ── chrome.debugger / allowlisted CDP ── one Chrome ta
 
 The local-agent owns commands, deadlines, authorization context and final payload normalization. The native host only translates Chrome's length-prefixed messages to authenticated Unix-socket JSONL. The extension owns tab binding and the narrow CDP execution allowlist.
 
-Only one native-host/extension connection is active. Reconnection replaces the old `connectionId` and rejects its pending requests; commands are never replayed across a connection change.
+Only one native-host/extension connection is active. Reconnection replaces the old `connectionId` and rejects its pending requests; commands are never replayed across a connection change. If the local-agent bridge restarts while the native host remains alive, the host replays only the latest extension registration so the new bridge can recover the connection safely.
 
 ## Snapshot contract
 
@@ -47,9 +47,10 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 ## P1 interaction contract
 
 - `browser_click`, `browser_type` and selector-based `browser_wait` accept either the opaque `ref` from the latest snapshot or a CSS / `text=...` selector. Prefer `ref`; take a new snapshot after `stale_element_reference`.
-- Click sends mouse move, hover delay, press and release through CDP `Input.dispatchMouseEvent`.
+- Click activates the bound target inside the extension, then sends mouse move, hover delay, press and release through CDP `Input.dispatchMouseEvent`. This keeps trusted pointer input reliable if the user switched tabs after binding.
 - Type focuses through the trusted click path and selects existing text with a CDP editing command. Normal input uses per-character `Input.dispatchKeyEvent` sequences; large input uses bounded `Input.insertText` chunks so the public `browser_type` contract does not gain a backend-specific length limit.
 - Scroll uses `Input.dispatchMouseEvent` with `mouseWheel`; it can be targeted at an element or use the page viewport.
+- Wait supports backend-neutral `visible` and `hidden` target conditions. Extension selector waits poll within the caller deadline; stale refs remain explicit except that a detached stale ref already satisfies `hidden`.
 - Extract slices text inside the page before IPC and local-agent validates and builds the final chunk metadata.
 - Screenshot captures the exact attached viewport through allowlisted CDP, retries with bounded JPEG quality, then local-agent stores the image under `.pinpawo/browser/screenshots/` with mode `0600`.
 
@@ -59,17 +60,25 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - `browser_open` creates an agent-owned tab if none is bound.
 - Clicking the extension action explicitly binds the current user tab. The health response distinguishes `agent` and `user` ownership.
 - Browser commands and target-binding changes run through one extension-owned serial queue. The local-agent tool layer remains backend-neutral and does not impose extension scheduling semantics.
+- A popup/new tab whose `openerTabId` is the current target becomes the active browser target. The extension keeps a bounded in-memory target history so closing a popup can return to its live parent; Playwright applies the same active-target behavior inside its own driver.
+- Same-origin popups remain fully readable and interactive. A cross-origin popup is followed only for lifecycle recovery: its content, screenshots and trusted input remain blocked, and the user must complete that step manually in visible Chrome. After the popup closes or returns to the previously approved origin, the agent can take a new snapshot and continue.
+- Cross-origin popup errors are non-retryable and include `manualActionRequired: true`; a post-click/type failure also includes `interactionDispatched: true` so callers do not replay an interaction that was already sent. There is intentionally no API for silently adopting the popup origin in this phase.
 - Each navigation carries an origin already authorized by the local-agent review policy.
 - Before and after every read, interaction result and screenshot, the extension reads the committed top-level URL through CDP and refuses access if the origin changed. Trusted mouse/key events and bulk text chunks also re-check the origin immediately before dispatch. The extension checks returned payload URLs, and local-agent repeats that check before building final payloads.
 - CDP remains allowlisted. Protocol v2 adds only the `Input.dispatch*`, viewport screenshot and DOM box/scroll commands required by the declared Browser operations; arbitrary CDP is never relayed.
 - The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the local-agent stops.
 - Protocol messages include `protocolVersion`, `connectionId`, `requestId` and `deadlineAt`; malformed, stale and oversized messages fail closed.
+- Driver failures retain structured `code`, `retryable` and safe `details` fields through the bridge. Cross-origin failures expose origins only, never an unapproved URL path or query.
 
 ## Build and install
 
 ```bash
 npm run build
+npm run test:browser-smoke -w pinpawo-local-agent
+npm run test:browser-extension-smoke -w pinpawo-local-agent
 ```
+
+The first smoke test uses headless Playwright against a local fixture. The extension smoke requires the unpacked extension and registered native host, then verifies parent page → popup → parent fallback, conditional waits and bridge restart recovery in the user's Chrome.
 
 Then:
 

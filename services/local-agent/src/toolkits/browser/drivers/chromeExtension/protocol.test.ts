@@ -55,6 +55,37 @@ test('browser extension protocol rejects mismatched versions and malformed resul
   );
 });
 
+test('browser extension protocol validates structured error details', () => {
+  const message = parseExtensionToAgentMessage({
+    type: 'browser.result',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    requestId: 'request-1',
+    ok: false,
+    error: {
+      code: 'origin_changed',
+      message: 'Origin changed',
+      retryable: false,
+      details: {
+        approvedOrigin: 'https://example.com',
+        actualOrigin: 'https://login.example.com',
+        manualActionRequired: true,
+        recovery: 'complete_popup_manually',
+        interactionDispatched: true,
+      },
+    },
+  });
+
+  assert.equal(message.type, 'browser.result');
+  assert.deepEqual(message.error?.details, {
+    approvedOrigin: 'https://example.com',
+    actualOrigin: 'https://login.example.com',
+    manualActionRequired: true,
+    recovery: 'complete_popup_manually',
+    interactionDispatched: true,
+  });
+});
+
 test('browser extension protocol validates commands and bridge authentication messages', () => {
   const command = parseAgentToExtensionMessage({
     type: 'browser.command',

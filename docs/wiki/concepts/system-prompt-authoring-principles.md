@@ -396,12 +396,12 @@ This is an application of the existing static-contract, injected-fact, and
 deterministic-runtime split. It does not add a free-form policy channel or a new
 Prompt Contract Map entry.
 
-Using GLM-5.2 with the same `b4d3422` eval harness, three repeats per case, and
-the same goal evaluator, the comparable result changed from 12/15 to 15/15
-goals achieved. Completion acknowledgement changed from 0/3 to 3/3, while the
-other four answer behaviors remained 3/3. The completion outputs were identical
-across the three candidate runs. This is evidence for the current provider and
-model, not cross-model validation.
+Using GLM-5.2 with the same lifecycle-aligned eval harness revision, three
+repeats per case, and the same goal evaluator, the comparable result changed
+from 12/15 to 15/15 goals achieved. Completion acknowledgement changed from 0/3
+to 3/3, while the other four answer behaviors remained 3/3. The completion
+outputs were identical across the three candidate runs. This is evidence for
+the current provider and model, not cross-model validation.
 
 ## Shared-prefix pilot evidence
 

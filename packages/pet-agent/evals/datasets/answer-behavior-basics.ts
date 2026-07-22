@@ -72,8 +72,9 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
       tags: ['context_synthesis'],
       input: {
         messages: [
-          { role: 'user', text: '根据调研结果告诉我推荐方案和主要风险。' },
+          { role: 'user', text: '调研 Aurora 方案并记录推荐结论和主要风险。' },
           { role: 'assistant', text: '调研结论：首选方案是 Aurora；主要风险是 migration-window-17。' },
+          { role: 'user', text: '根据上面的调研结果告诉我推荐方案和主要风险。' },
         ],
       },
       expected: {

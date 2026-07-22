@@ -2,8 +2,7 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langc
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { z } from 'zod';
-import { buildAnswerSystemPrompt } from '../src/agent/orchestrator/prompts.ts';
-import { buildDelegationCompletionAnswerContext } from '../src/agent/orchestrator/runtime/nodes/answer.ts';
+import { buildAnswerInvocationMessages } from '../src/agent/orchestrator/runtime/nodes/answer.ts';
 import { readMessageText } from '../src/agent/orchestrator/utils.ts';
 import type { AgentModels } from '../src/types/agent.ts';
 import {
@@ -163,23 +162,21 @@ function collectDiagnostics(
 }
 
 function render(testCase: AnswerBehaviorCase): BaseMessage[] {
-  return [
-    new SystemMessage(buildAnswerSystemPrompt({
-      actor,
-      workdir: '/workspace',
-      runtimeEnvironment: 'Node.js answer eval',
-    })),
-    ...testCase.input.messages.map((message) => message.role === 'user'
+  return buildAnswerInvocationMessages({
+    actor,
+    workdir: '/workspace',
+    runtimeEnvironment: 'Node.js answer eval',
+    history: testCase.input.messages.map((message) => message.role === 'user'
       ? new HumanMessage(message.text)
       : new AIMessage(message.text)),
-    ...(testCase.input.completionContext
-      ? [new SystemMessage(buildDelegationCompletionAnswerContext({
+    completionSource: testCase.input.completionContext
+      ? {
           ...testCase.input.completionContext,
           delegationId: 'answer-eval-delegation',
           announceMessageId: 'answer-eval-announce',
-        }))]
-      : []),
-  ];
+        }
+      : null,
+  });
 }
 
 export function getAnswerEvalScenarios(): AnswerEvalScenario[] {

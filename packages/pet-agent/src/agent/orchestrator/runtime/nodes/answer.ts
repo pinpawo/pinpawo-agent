@@ -1,4 +1,4 @@
-import { AIMessage, SystemMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   getMessageHandoffSource,
@@ -33,24 +33,19 @@ export function createAnswerNode(config: OrchestratorConfig) {
     // messages only. After compaction, a summary may be the sole surviving
     // record of older accepted results.
     const history = mainConversationMessages(state.messages);
-    const latestMainMessage = history.at(-1);
-    const latestHandoffSource = latestMainMessage
-      ? getMessageHandoffSource(latestMainMessage)
-      : null;
     const terminalContext = buildTerminalAnswerContext(
       state,
       maxRunIterations
         ?? readRunIterationLimit(config.maxRunIterations)
         ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
     );
-    const answerMessages = [
-      new SystemMessage(buildAnswerSystemPrompt({ actor, workdir, runtimeEnvironment })),
-      ...history,
-      ...(latestHandoffSource
-        ? [new SystemMessage(buildDelegationCompletionAnswerContext(latestHandoffSource))]
-        : []),
-      ...(terminalContext ? [new SystemMessage(terminalContext)] : []),
-    ];
+    const answerMessages = buildAnswerInvocationMessages({
+      actor,
+      history,
+      workdir,
+      runtimeEnvironment,
+      terminalContext,
+    });
     const response = await config.models.act.invoke(answerMessages, runnableConfig);
     if (!readMessageText(response).trim()) {
       const fallback = new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。');
@@ -64,6 +59,32 @@ export function createAnswerNode(config: OrchestratorConfig) {
       ...buildAnswerCleanup(),
     };
   };
+}
+
+export function buildAnswerInvocationMessages(params: {
+  actor: NonNullable<OrchestratorConfig['actor']>;
+  history: BaseMessage[];
+  workdir?: string;
+  runtimeEnvironment?: string;
+  completionSource?: HandoffSource | null;
+  terminalContext?: string | null;
+}): BaseMessage[] {
+  const latestMainMessage = params.history.at(-1);
+  const completionSource = params.completionSource === undefined
+    ? latestMainMessage ? getMessageHandoffSource(latestMainMessage) : null
+    : params.completionSource;
+  return [
+    new SystemMessage(buildAnswerSystemPrompt({
+      actor: params.actor,
+      workdir: params.workdir,
+      runtimeEnvironment: params.runtimeEnvironment,
+    })),
+    ...params.history,
+    ...(completionSource
+      ? [new SystemMessage(buildDelegationCompletionAnswerContext(completionSource))]
+      : []),
+    ...(params.terminalContext ? [new SystemMessage(params.terminalContext)] : []),
+  ];
 }
 
 function buildAnswerCleanup() {

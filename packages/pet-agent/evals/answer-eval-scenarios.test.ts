@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage } from '@langchain/core/messages';
-import { getAnswerEvalScenarios } from './answer-eval-scenarios.ts';
+import {
+  buildAnswerGoalEvaluatorPrompt,
+  getAnswerEvalScenarios,
+} from './answer-eval-scenarios.ts';
 
 function answerModel(text: string, unmetCriteria: string[] = []) {
   return {
@@ -23,6 +26,16 @@ function answerModel(text: string, unmetCriteria: string[] = []) {
     }),
   } as never;
 }
+
+test('answer evaluator exposes its schema to jsonMode providers', () => {
+  const prompt = buildAnswerGoalEvaluatorPrompt('jsonMode', ['criterion_one', 'criterion_two']);
+  assert.match(prompt, /Return one JSON object matching this schema/);
+  assert.match(prompt, /"criteria"/);
+  assert.match(prompt, /"met"/);
+  assert.match(prompt, /"summary"/);
+  assert.match(prompt, /"criterion_one"/);
+  assert.match(prompt, /"criterion_two"/);
+});
 
 test('answer eval renders the production prompt and fixed completion context', () => {
   const scenario = getAnswerEvalScenarios().find(

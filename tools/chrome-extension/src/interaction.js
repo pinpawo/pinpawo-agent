@@ -1,4 +1,6 @@
 export const ELEMENT_REGISTRY_KEY = '__pinpawoBrowserElementsV1';
+export const HUMANIZED_TYPE_CHARACTER_LIMIT = 500;
+export const TRUSTED_INSERT_CHUNK_CHARACTERS = 2_000;
 
 const DEFAULT_HUMANIZATION = Object.freeze({
   preDelayMinMs: 40,
@@ -40,6 +42,31 @@ export function normalizeHumanization(value = {}) {
 export function randomDelayMs(minimum, maximum, random = Math.random) {
   if (maximum <= minimum) return minimum;
   return minimum + Math.floor(random() * (maximum - minimum + 1));
+}
+
+export function createSerialExecutor() {
+  let tail = Promise.resolve();
+  return function enqueue(work) {
+    const result = tail.then(work, work);
+    tail = result.then(() => undefined, () => undefined);
+    return result;
+  };
+}
+
+export function chunkTrustedInsertText(
+  text,
+  chunkCharacters = TRUSTED_INSERT_CHUNK_CHARACTERS,
+) {
+  if (typeof text !== 'string') throw new Error('browser type text must be a string');
+  if (!Number.isInteger(chunkCharacters) || chunkCharacters <= 0) {
+    throw new Error('trusted insert chunk size must be a positive integer');
+  }
+  const characters = Array.from(text);
+  const chunks = [];
+  for (let offset = 0; offset < characters.length; offset += chunkCharacters) {
+    chunks.push(characters.slice(offset, offset + chunkCharacters).join(''));
+  }
+  return chunks;
 }
 
 export function normalizeElementTarget(value) {

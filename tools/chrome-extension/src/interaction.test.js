@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   buildExtractExpression,
   buildResolveTargetExpression,
+  chunkTrustedInsertText,
+  createSerialExecutor,
   normalizeElementTarget,
   normalizeHumanization,
   randomDelayMs,
@@ -35,4 +37,39 @@ test('humanization hooks clamp defaults and produce bounded delays', () => {
   });
   assert.equal(randomDelayMs(10, 20, () => 0), 10);
   assert.equal(randomDelayMs(10, 20, () => 0.999), 20);
+});
+
+test('extension work is serialized and a rejection does not block the queue', async () => {
+  const enqueue = createSerialExecutor();
+  const events = [];
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+
+  const first = enqueue(async () => {
+    events.push('first:start');
+    await firstGate;
+    events.push('first:end');
+    throw new Error('expected failure');
+  });
+  const second = enqueue(async () => {
+    events.push('second');
+    return 'done';
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(events, ['first:start']);
+  releaseFirst();
+  await assert.rejects(first, /expected failure/);
+  assert.equal(await second, 'done');
+  assert.deepEqual(events, ['first:start', 'first:end', 'second']);
+});
+
+test('trusted insertion chunks long text without splitting Unicode code points', () => {
+  const text = `${'a'.repeat(2_001)}🙂${'b'.repeat(2_000)}`;
+  const chunks = chunkTrustedInsertText(text);
+
+  assert.deepEqual(chunks.map((chunk) => Array.from(chunk).length), [2_000, 2_000, 2]);
+  assert.equal(chunks.join(''), text);
 });

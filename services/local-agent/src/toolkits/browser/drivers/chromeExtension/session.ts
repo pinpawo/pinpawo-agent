@@ -19,6 +19,21 @@ import {
 import { persistBrowserScreenshot } from '../../screenshot';
 
 const DEFAULT_SESSION = 'default';
+const DEFAULT_EXTENSION_COMMAND_TIMEOUT_MS = 30_000;
+const MAX_EXTENSION_TYPE_TIMEOUT_MS = 300_000;
+const HUMANIZED_TYPE_CHARACTER_LIMIT = 500;
+const TRUSTED_INSERT_CHUNK_CHARACTERS = 2_000;
+
+function extensionTypeCommandTimeoutMs(text: string): number {
+  const characterCount = Array.from(text).length;
+  const estimatedMs = characterCount <= HUMANIZED_TYPE_CHARACTER_LIMIT
+    ? 15_000 + characterCount * 150
+    : 30_000 + Math.ceil(characterCount / TRUSTED_INSERT_CHUNK_CHARACTERS) * 100;
+  return Math.min(
+    MAX_EXTENSION_TYPE_TIMEOUT_MS,
+    Math.max(DEFAULT_EXTENSION_COMMAND_TIMEOUT_MS, estimatedMs),
+  );
+}
 
 function approvedOriginFor(url: string): string {
   const parsed = new URL(url);
@@ -119,7 +134,7 @@ export class ChromeExtensionBrowserSession {
       target: normalizeTarget(target),
       text,
       submit,
-    }), approvedOrigin);
+    }, extensionTypeCommandTimeoutMs(text)), approvedOrigin);
   }
 
   async scroll(options: BrowserScrollOptions = {}): Promise<string> {

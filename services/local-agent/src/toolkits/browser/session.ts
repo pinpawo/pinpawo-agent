@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { getConfig } from '../../config';
 import { homedir } from 'node:os';
@@ -44,6 +45,7 @@ async function execLoginShellLine(command: string, timeoutMs = 3_000): Promise<s
 type PlaywrightCore = typeof import('playwright-core');
 type BrowserContext = import('playwright-core').BrowserContext;
 type Page = import('playwright-core').Page;
+type PageElementHandle = import('playwright-core').ElementHandle<HTMLElement | SVGElement>;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -294,7 +296,8 @@ class PlaywrightBrowserSession {
   private page: Page | null = null;
   private activeHeadless = false;
   private activeSessionDir = sessionDir(DEFAULT_SESSION);
-  private readonly refSelectors = new Map<string, string>();
+  private readonly refAttribute = `data-pinpawo-ref-${randomUUID()}`;
+  private readonly refElements = new Map<string, PageElementHandle>();
 
   private readExecutablePath() {
     return process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
@@ -348,11 +351,20 @@ class PlaywrightBrowserSession {
     return this.page;
   }
 
+  private async clearRefElements(): Promise<void> {
+    const handles = [...this.refElements.values()];
+    this.refElements.clear();
+    await Promise.all(handles.map((handle) => handle.dispose().catch(() => {})));
+  }
+
   private async buildSnapshot(page: Page): Promise<string> {
-    const snapshot = await page.evaluate<Omit<BrowserRawSnapshot, 'interactive'> & {
-      interactive: Array<BrowserInteractiveElement & { locator: string }>;
-    }>(`
+    await this.clearRefElements();
+    const snapshot = await page.evaluate<BrowserRawSnapshot>(`
       (() => {
+        const refAttribute = ${JSON.stringify(this.refAttribute)};
+        document.querySelectorAll('[' + refAttribute + ']').forEach((element) => {
+          element.removeAttribute(refAttribute);
+        });
         const snapshotId = globalThis.crypto?.randomUUID?.()
           || Date.now().toString(36) + Math.random().toString(36).slice(2);
         const trim = (v, n) => v.length <= n ? v : v.slice(0, n) + '...';
@@ -366,34 +378,22 @@ class PlaywrightBrowserSession {
           if (text) return 'text=' + trim(text, 48);
           return el.tagName.toLowerCase();
         };
-        const locatorFor = (el) => {
-          const parts = [];
-          let current = el;
-          while (current && current.nodeType === Node.ELEMENT_NODE && current !== document.documentElement) {
-            let position = 1;
-            let sibling = current.previousElementSibling;
-            while (sibling) {
-              if (sibling.tagName === current.tagName) position += 1;
-              sibling = sibling.previousElementSibling;
-            }
-            parts.unshift(current.tagName.toLowerCase() + ':nth-of-type(' + position + ')');
-            current = current.parentElement;
-          }
-          parts.unshift('html');
-          return parts.join(' > ');
-        };
         const interactiveElements = Array.from(
           document.querySelectorAll('a,button,input,textarea,select,[role="button"]')
         )
           .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
         const interactive = interactiveElements
           .slice(0, ${MAX_BROWSER_INTERACTIVE_ELEMENTS})
-          .map((el, i) => ({
-            index: i + 1, ref: snapshotId + ':' + (i + 1), tag: el.tagName.toLowerCase(),
-            text: trim((el.textContent || '').trim(), 80),
-            type: el.getAttribute('type'), placeholder: el.getAttribute('placeholder'),
-            hint: hintFor(el), locator: locatorFor(el),
-          }));
+          .map((el, i) => {
+            const ref = snapshotId + ':' + (i + 1);
+            el.setAttribute(refAttribute, ref);
+            return {
+              index: i + 1, ref, tag: el.tagName.toLowerCase(),
+              text: trim((el.textContent || '').trim(), 80),
+              type: el.getAttribute('type'), placeholder: el.getAttribute('placeholder'),
+              hint: hintFor(el),
+            };
+          });
         return {
           title: document.title,
           url: window.location.href,
@@ -403,16 +403,27 @@ class PlaywrightBrowserSession {
         };
       })()
     `);
-    this.refSelectors.clear();
-    for (const element of snapshot.interactive) {
-      this.refSelectors.set(element.ref!, element.locator);
+    try {
+      for (const element of snapshot.interactive) {
+        if (!element.ref) continue;
+        const locator = page.locator(`[${this.refAttribute}="${element.ref}"]`);
+        if (await locator.count() !== 1) continue;
+        const handle = await locator.elementHandle();
+        if (handle) this.refElements.set(element.ref, handle);
+      }
+    } finally {
+      await page.evaluate((refAttribute) => {
+        document.querySelectorAll(`[${refAttribute}]`).forEach((element) => {
+          element.removeAttribute(refAttribute);
+        });
+      }, this.refAttribute).catch(() => {});
     }
     return JSON.stringify(buildBrowserSnapshotPayload({
       title: snapshot.title,
       url: snapshot.url,
       text: snapshot.text,
       textSource: 'document.body.innerText',
-      interactive: snapshot.interactive.map(({ locator: _locator, ...element }) => element),
+      interactive: snapshot.interactive,
       interactiveCount: snapshot.interactiveCount,
     }), null, 2);
   }
@@ -432,28 +443,34 @@ class PlaywrightBrowserSession {
 
   async snapshot(): Promise<string> { return this.buildSnapshot(await this.requirePage()); }
 
-  private resolveTarget(target: string | BrowserElementTarget): string {
+  private resolveTarget(target: string | BrowserElementTarget):
+    | { selector: string }
+    | { element: PageElementHandle } {
     const normalized = normalizeBrowserElementTarget(target);
-    if (normalized.selector) return normalized.selector;
-    const selector = this.refSelectors.get(normalized.ref!);
-    if (!selector) {
+    if (normalized.selector) return { selector: normalized.selector };
+    const element = this.refElements.get(normalized.ref!);
+    if (!element) {
       throw new Error('Stale browser element reference. Take a new browser_snapshot and retry.');
     }
-    return selector;
+    return { element };
   }
 
   async click(target: string | BrowserElementTarget): Promise<string> {
     const page = await this.requirePage();
-    const selector = this.resolveTarget(target);
-    await page.locator(selector).first().click({ timeout: DEFAULT_TIMEOUT_MS });
+    const resolved = this.resolveTarget(target);
+    if ('selector' in resolved) {
+      await page.locator(resolved.selector).first().click({ timeout: DEFAULT_TIMEOUT_MS });
+    } else {
+      await resolved.element.click({ timeout: DEFAULT_TIMEOUT_MS });
+    }
     await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT_MS }).catch(() => {});
     return this.buildSnapshot(page);
   }
 
   async type(target: string | BrowserElementTarget, text: string, submit = false): Promise<string> {
     const page = await this.requirePage();
-    const selector = this.resolveTarget(target);
-    const loc = page.locator(selector).first();
+    const resolved = this.resolveTarget(target);
+    const loc = 'selector' in resolved ? page.locator(resolved.selector).first() : resolved.element;
     await loc.fill(text, { timeout: DEFAULT_TIMEOUT_MS });
     if (submit) {
       await loc.press('Enter', { timeout: DEFAULT_TIMEOUT_MS });
@@ -465,7 +482,12 @@ class PlaywrightBrowserSession {
   async scroll(options: BrowserScrollOptions = {}): Promise<string> {
     const page = await this.requirePage();
     if (options.target) {
-      await page.locator(this.resolveTarget(options.target)).first().hover({ timeout: DEFAULT_TIMEOUT_MS });
+      const resolved = this.resolveTarget(options.target);
+      if ('selector' in resolved) {
+        await page.locator(resolved.selector).first().hover({ timeout: DEFAULT_TIMEOUT_MS });
+      } else {
+        await resolved.element.hover({ timeout: DEFAULT_TIMEOUT_MS });
+      }
     }
     await page.mouse.wheel(options.deltaX ?? 0, options.deltaY ?? 600);
     await page.waitForTimeout(150);
@@ -475,7 +497,12 @@ class PlaywrightBrowserSession {
   async wait(target?: string | BrowserElementTarget, timeoutMs = 3_000): Promise<string> {
     const page = await this.requirePage();
     if (target) {
-      await page.locator(this.resolveTarget(target)).first().waitFor({ state: 'visible', timeout: timeoutMs });
+      const resolved = this.resolveTarget(target);
+      if ('selector' in resolved) {
+        await page.locator(resolved.selector).first().waitFor({ state: 'visible', timeout: timeoutMs });
+      } else {
+        await resolved.element.waitForElementState('visible', { timeout: timeoutMs });
+      }
     } else {
       await page.waitForTimeout(timeoutMs);
     }
@@ -509,11 +536,11 @@ class PlaywrightBrowserSession {
   }
 
   async close(): Promise<string> {
+    await this.clearRefElements();
     await this.page?.close().catch(() => {});
     await this.context?.close().catch(() => {});
     this.page = null;
     this.context = null;
-    this.refSelectors.clear();
     return 'browser session closed';
   }
 

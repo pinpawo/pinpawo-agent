@@ -13,3 +13,5 @@ This MV3 extension connects one Chrome tab to a running PinPawo local agent thro
 `browser_open` creates a dedicated agent-owned tab by default. To bind a user tab explicitly, focus it and click the extension action. Chrome shows its debugger disclosure while PinPawo is attached.
 
 The extension refuses to read or interact with a tab after it leaves the origin approved for the current browser operation. Interaction commands prefer the opaque `ref` returned by the latest snapshot and fall back to CSS or `text=...` selectors. Re-snapshot after a stale reference error.
+
+The service worker serializes browser commands and tab-binding changes. Normal typing uses trusted key events; large text is inserted in bounded trusted chunks without changing the `browser_type` tool contract.

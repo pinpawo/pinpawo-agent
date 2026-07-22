@@ -13,8 +13,11 @@ import {
   originOf,
 } from './snapshot.js';
 import {
+  HUMANIZED_TYPE_CHARACTER_LIMIT,
   buildExtractExpression,
   buildResolveTargetExpression,
+  chunkTrustedInsertText,
+  createSerialExecutor,
   normalizeElementTarget,
   normalizeHumanization,
   randomDelayMs,
@@ -28,6 +31,7 @@ const ALLOWED_CDP_COMMANDS = new Set([
   'Page.getNavigationHistory',
   'Page.navigate',
   'Page.captureScreenshot',
+  'Input.insertText',
   'Input.dispatchKeyEvent',
   'Input.dispatchMouseEvent',
   'Runtime.evaluate',
@@ -39,6 +43,7 @@ let port = null;
 let reconnectTimer = null;
 let target = null;
 let attachedTabId = null;
+const enqueueExtensionWork = createSerialExecutor();
 
 class ExtensionError extends Error {
   constructor(code, message, retryable = false) {
@@ -95,7 +100,9 @@ function connectNativeHost() {
   try {
     const nextPort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
     port = nextPort;
-    nextPort.onMessage.addListener((message) => void handleCommand(message));
+    nextPort.onMessage.addListener((message) => {
+      void enqueueExtensionWork(() => handleCommand(message));
+    });
     nextPort.onDisconnect.addListener(() => {
       if (port !== nextPort) return;
       port = null;
@@ -305,9 +312,10 @@ async function resolveTarget(tabId, target) {
   return requirePageResult(await evaluateValue(tabId, buildResolveTargetExpression(normalized)));
 }
 
-async function dispatchClick(tabId, target, humanization, deadlineAt) {
+async function dispatchClick(tabId, target, humanization, deadlineAt, approvedOrigin) {
   const point = await resolveTarget(tabId, normalizeElementTarget(target));
   await delay(randomDelayMs(humanization.preDelayMinMs, humanization.preDelayMaxMs), deadlineAt);
+  await assertApprovedOrigin(tabId, approvedOrigin);
   await cdp(tabId, 'Input.dispatchMouseEvent', {
     type: 'mouseMoved',
     x: point.x,
@@ -315,6 +323,7 @@ async function dispatchClick(tabId, target, humanization, deadlineAt) {
     button: 'none',
   });
   await delay(randomDelayMs(humanization.hoverMinMs, humanization.hoverMaxMs), deadlineAt);
+  await assertApprovedOrigin(tabId, approvedOrigin);
   await cdp(tabId, 'Input.dispatchMouseEvent', {
     type: 'mousePressed',
     x: point.x,
@@ -324,6 +333,7 @@ async function dispatchClick(tabId, target, humanization, deadlineAt) {
     clickCount: 1,
   });
   await delay(randomDelayMs(25, 70), deadlineAt);
+  await assertApprovedOrigin(tabId, approvedOrigin);
   await cdp(tabId, 'Input.dispatchMouseEvent', {
     type: 'mouseReleased',
     x: point.x,
@@ -335,14 +345,16 @@ async function dispatchClick(tabId, target, humanization, deadlineAt) {
   return point;
 }
 
-async function dispatchKey(tabId, key, params = {}) {
+async function dispatchKey(tabId, key, params = {}, approvedOrigin) {
   const { text, ...keyParams } = params;
+  await assertApprovedOrigin(tabId, approvedOrigin);
   await cdp(tabId, 'Input.dispatchKeyEvent', {
     type: 'keyDown',
     key,
     ...keyParams,
   });
   if (typeof text === 'string') {
+    await assertApprovedOrigin(tabId, approvedOrigin);
     await cdp(tabId, 'Input.dispatchKeyEvent', {
       type: 'char',
       key,
@@ -350,6 +362,7 @@ async function dispatchKey(tabId, key, params = {}) {
       ...keyParams,
     });
   }
+  await assertApprovedOrigin(tabId, approvedOrigin);
   await cdp(tabId, 'Input.dispatchKeyEvent', {
     type: 'keyUp',
     key,
@@ -358,30 +371,60 @@ async function dispatchKey(tabId, key, params = {}) {
 }
 
 async function dispatchType(tabId, params, deadlineAt, approvedOrigin) {
-  if (typeof params.text !== 'string' || params.text.length > 500) {
-    throw new ExtensionError('invalid_type_text', 'Type text must be a string of at most 500 characters');
+  if (typeof params.text !== 'string') {
+    throw new ExtensionError('invalid_type_text', 'Type text must be a string');
   }
   const humanization = normalizeHumanization(params.humanization);
-  const point = await dispatchClick(tabId, params.target, humanization, deadlineAt);
+  const point = await dispatchClick(
+    tabId,
+    params.target,
+    humanization,
+    deadlineAt,
+    approvedOrigin,
+  );
   if (!point.editable) {
     throw new ExtensionError('element_not_editable', 'The target element is not editable');
   }
   await assertApprovedOrigin(tabId, approvedOrigin);
-  await dispatchKey(tabId, 'a', { code: 'KeyA', commands: ['SelectAll'] });
-  await dispatchKey(tabId, 'Backspace', { code: 'Backspace', windowsVirtualKeyCode: 8 });
-  for (const character of Array.from(params.text)) {
-    ensureCommandAlive(deadlineAt);
-    await assertApprovedOrigin(tabId, approvedOrigin);
-    if (character === '\n') {
-      await dispatchKey(tabId, 'Enter', { code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 });
-    } else {
-      await dispatchKey(tabId, character, { text: character });
+  await dispatchKey(tabId, 'a', { code: 'KeyA', commands: ['SelectAll'] }, approvedOrigin);
+  await dispatchKey(
+    tabId,
+    'Backspace',
+    { code: 'Backspace', windowsVirtualKeyCode: 8 },
+    approvedOrigin,
+  );
+  const characters = Array.from(params.text);
+  if (characters.length <= HUMANIZED_TYPE_CHARACTER_LIMIT) {
+    for (const character of characters) {
+      ensureCommandAlive(deadlineAt);
+      if (character === '\n') {
+        await dispatchKey(
+          tabId,
+          'Enter',
+          { code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 },
+          approvedOrigin,
+        );
+      } else {
+        await dispatchKey(tabId, character, { text: character }, approvedOrigin);
+      }
+      await delay(randomDelayMs(humanization.keyDelayMinMs, humanization.keyDelayMaxMs), deadlineAt);
     }
-    await delay(randomDelayMs(humanization.keyDelayMinMs, humanization.keyDelayMaxMs), deadlineAt);
+  } else {
+    for (const chunk of chunkTrustedInsertText(params.text)) {
+      ensureCommandAlive(deadlineAt);
+      await assertApprovedOrigin(tabId, approvedOrigin);
+      await cdp(tabId, 'Input.insertText', { text: chunk });
+      await assertApprovedOrigin(tabId, approvedOrigin);
+      await delay(randomDelayMs(humanization.keyDelayMinMs, humanization.keyDelayMaxMs), deadlineAt);
+    }
   }
   if (params.submit === true) {
-    await assertApprovedOrigin(tabId, approvedOrigin);
-    await dispatchKey(tabId, 'Enter', { code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 });
+    await dispatchKey(
+      tabId,
+      'Enter',
+      { code: 'Enter', text: '\r', windowsVirtualKeyCode: 13 },
+      approvedOrigin,
+    );
   }
 }
 
@@ -393,7 +436,7 @@ function boundedScrollDelta(value, name) {
   return value;
 }
 
-async function dispatchScroll(tabId, params, deadlineAt) {
+async function dispatchScroll(tabId, params, deadlineAt, approvedOrigin) {
   const deltaX = boundedScrollDelta(params.deltaX, 'deltaX');
   const deltaY = boundedScrollDelta(params.deltaY, 'deltaY');
   if (deltaX === 0 && deltaY === 0) {
@@ -402,6 +445,7 @@ async function dispatchScroll(tabId, params, deadlineAt) {
   const point = params.target
     ? await resolveTarget(tabId, normalizeElementTarget(params.target))
     : { x: 1, y: 1 };
+  await assertApprovedOrigin(tabId, approvedOrigin);
   await cdp(tabId, 'Input.dispatchMouseEvent', {
     type: 'mouseWheel',
     x: point.x,
@@ -412,7 +456,7 @@ async function dispatchScroll(tabId, params, deadlineAt) {
   await delay(150, deadlineAt);
 }
 
-async function waitForPageCondition(tabId, params, deadlineAt) {
+async function waitForPageCondition(tabId, params, deadlineAt, approvedOrigin) {
   const timeoutMs = params.timeoutMs ?? 3_000;
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 30_000) {
     throw new ExtensionError('invalid_wait_timeout', 'timeoutMs must be between 1 and 30000');
@@ -425,6 +469,7 @@ async function waitForPageCondition(tabId, params, deadlineAt) {
   const target = normalizeElementTarget(params.target);
   while (Date.now() < waitDeadline) {
     try {
+      await assertApprovedOrigin(tabId, approvedOrigin);
       await resolveTarget(tabId, target);
       return;
     } catch (error) {
@@ -500,6 +545,7 @@ async function executeCommand(command) {
       command.params.target,
       normalizeHumanization(command.params.humanization),
       command.deadlineAt,
+      approvedOrigin,
     );
     await delay(150, command.deadlineAt);
     return await readSnapshot(activeTarget.tabId, approvedOrigin);
@@ -512,12 +558,22 @@ async function executeCommand(command) {
   }
   if (command.command === 'scroll') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
-    await dispatchScroll(activeTarget.tabId, command.params, command.deadlineAt);
+    await dispatchScroll(
+      activeTarget.tabId,
+      command.params,
+      command.deadlineAt,
+      approvedOrigin,
+    );
     return await readSnapshot(activeTarget.tabId, approvedOrigin);
   }
   if (command.command === 'wait') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
-    await waitForPageCondition(activeTarget.tabId, command.params, command.deadlineAt);
+    await waitForPageCondition(
+      activeTarget.tabId,
+      command.params,
+      command.deadlineAt,
+      approvedOrigin,
+    );
     return await readSnapshot(activeTarget.tabId, approvedOrigin);
   }
 
@@ -555,20 +611,24 @@ async function handleCommand(value) {
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!Number.isInteger(tab.id)) return;
-  await detach();
-  await saveTarget({ tabId: tab.id, ownership: 'user' });
+  await enqueueExtensionWork(async () => {
+    await detach();
+    await saveTarget({ tabId: tab.id, ownership: 'user' });
+  });
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
-  if (target?.tabId !== tabId) return;
-  attachedTabId = null;
-  await saveTarget(null);
-  port?.postMessage({
-    type: 'browser.event',
-    protocolVersion: PROTOCOL_VERSION,
-    connectionId,
-    event: 'target.closed',
-    tabId,
+  await enqueueExtensionWork(async () => {
+    if (target?.tabId !== tabId) return;
+    attachedTabId = null;
+    await saveTarget(null);
+    port?.postMessage({
+      type: 'browser.event',
+      protocolVersion: PROTOCOL_VERSION,
+      connectionId,
+      event: 'target.closed',
+      tabId,
+    });
   });
 });
 

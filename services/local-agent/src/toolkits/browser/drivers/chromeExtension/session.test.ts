@@ -135,3 +135,24 @@ test('extension session rejects raw snapshots outside the approved origin', asyn
   );
   await assert.rejects(session.snapshot(), /Use browser_open first/);
 });
+
+test('extension session preserves long browser_type input and budgets enough driver time', async () => {
+  const calls: Array<{
+    command: string;
+    params: Record<string, unknown>;
+    timeoutMs: number | undefined;
+  }> = [];
+  const session = new ChromeExtensionBrowserSession({
+    async sendCommand(command, params, timeoutMs) {
+      calls.push({ command, params, timeoutMs });
+      return rawSnapshot;
+    },
+  });
+  const text = '🙂'.repeat(4_001);
+
+  await session.open('https://example.com/page');
+  await session.type('#message', text);
+
+  assert.equal(calls[1]?.params.text, text);
+  assert.ok((calls[1]?.timeoutMs ?? 0) > 30_000);
+});

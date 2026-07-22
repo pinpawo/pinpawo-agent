@@ -39,6 +39,7 @@ test('P1 interactions stay on the CDP allowlist and re-snapshot through the orig
   for (const method of [
     'Input.dispatchMouseEvent',
     'Input.dispatchKeyEvent',
+    'Input.insertText',
     'Page.captureScreenshot',
   ]) {
     assert.match(source, new RegExp(`'${method.replace('.', '\\.')}'`));
@@ -47,5 +48,39 @@ test('P1 interactions stay on the CDP allowlist and re-snapshot through the orig
   assert.match(source, /command\.command === 'type'[\s\S]*?dispatchType[\s\S]*?readSnapshot/);
   assert.match(source, /command\.command === 'scroll'[\s\S]*?dispatchScroll[\s\S]*?readSnapshot/);
   assert.match(source, /async function captureScreenshot[\s\S]*?assertApprovedOrigin[\s\S]*?Page\.captureScreenshot[\s\S]*?assertApprovedOrigin/);
-  assert.match(source, /for \(const character of Array\.from\(params\.text\)\)[\s\S]*?assertApprovedOrigin\(tabId, approvedOrigin\)[\s\S]*?dispatchKey/);
+  assert.match(source, /const characters = Array\.from\(params\.text\)[\s\S]*?for \(const character of characters\)[\s\S]*?dispatchKey\([\s\S]*?approvedOrigin/);
+  assert.match(source, /chunkTrustedInsertText\(params\.text\)[\s\S]*?assertApprovedOrigin\(tabId, approvedOrigin\)[\s\S]*?Input\.insertText[\s\S]*?assertApprovedOrigin\(tabId, approvedOrigin\)/);
+});
+
+test('commands and target changes share the extension-owned serial queue', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+
+  assert.match(source, /onMessage\.addListener[\s\S]*?enqueueExtensionWork\(\(\) => handleCommand\(message\)\)/);
+  assert.match(source, /action\.onClicked\.addListener[\s\S]*?enqueueExtensionWork/);
+  assert.match(source, /tabs\.onRemoved\.addListener[\s\S]*?enqueueExtensionWork/);
+});
+
+test('trusted input checks the approved origin before each browser event', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+  const dispatchClick = source.match(
+    /async function dispatchClick\([\s\S]*?\n\}/,
+  )?.[0] ?? '';
+  const dispatchKey = source.match(
+    /async function dispatchKey\([\s\S]*?\n\}/,
+  )?.[0] ?? '';
+
+  assert.ok(
+    (dispatchClick.match(/assertApprovedOrigin\(tabId, approvedOrigin\)/g) ?? []).length >= 3,
+    'click must re-check origin before move, press, and release',
+  );
+  assert.ok(
+    (dispatchKey.match(/assertApprovedOrigin\(tabId, approvedOrigin\)/g) ?? []).length >= 3,
+    'key input must re-check origin before down, char, and up',
+  );
 });

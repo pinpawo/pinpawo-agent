@@ -48,7 +48,7 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 
 - `browser_click`, `browser_type` and selector-based `browser_wait` accept either the opaque `ref` from the latest snapshot or a CSS / `text=...` selector. Prefer `ref`; take a new snapshot after `stale_element_reference`.
 - Click sends mouse move, hover delay, press and release through CDP `Input.dispatchMouseEvent`.
-- Type focuses through the trusted click path, selects existing text with a CDP editing command, then sends per-character `Input.dispatchKeyEvent` sequences. Delay ranges are bounded protocol hooks so behavior can be tuned without exposing arbitrary CDP.
+- Type focuses through the trusted click path and selects existing text with a CDP editing command. Normal input uses per-character `Input.dispatchKeyEvent` sequences; large input uses bounded `Input.insertText` chunks so the public `browser_type` contract does not gain a backend-specific length limit.
 - Scroll uses `Input.dispatchMouseEvent` with `mouseWheel`; it can be targeted at an element or use the page viewport.
 - Extract slices text inside the page before IPC and local-agent validates and builds the final chunk metadata.
 - Screenshot captures the exact attached viewport through allowlisted CDP, retries with bounded JPEG quality, then local-agent stores the image under `.pinpawo/browser/screenshots/` with mode `0600`.
@@ -58,8 +58,9 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - The extension requests `debugger`, `nativeMessaging`, `storage` and `tabs`; it has no broad host permission.
 - `browser_open` creates an agent-owned tab if none is bound.
 - Clicking the extension action explicitly binds the current user tab. The health response distinguishes `agent` and `user` ownership.
+- Browser commands and target-binding changes run through one extension-owned serial queue. The local-agent tool layer remains backend-neutral and does not impose extension scheduling semantics.
 - Each navigation carries an origin already authorized by the local-agent review policy.
-- Before and after every read, interaction result and screenshot, the extension reads the committed top-level URL through CDP and refuses access if the origin changed. The extension also checks returned payload URLs, and local-agent repeats that check before building final payloads.
+- Before and after every read, interaction result and screenshot, the extension reads the committed top-level URL through CDP and refuses access if the origin changed. Trusted mouse/key events and bulk text chunks also re-check the origin immediately before dispatch. The extension checks returned payload URLs, and local-agent repeats that check before building final payloads.
 - CDP remains allowlisted. Protocol v2 adds only the `Input.dispatch*`, viewport screenshot and DOM box/scroll commands required by the declared Browser operations; arbitrary CDP is never relayed.
 - The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the local-agent stops.
 - Protocol messages include `protocolVersion`, `connectionId`, `requestId` and `deadlineAt`; malformed, stale and oversized messages fail closed.

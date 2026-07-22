@@ -56,7 +56,10 @@ test('answer eval renders the current user goal for an ordinary reply', () => {
   assert.ok(scenario);
   const messages = scenario.render();
   assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human']);
-  assert.match(String(messages[0].content), /只回答这个问题：2 \+ 3 等于多少/);
+  const systemText = String(messages[0].content);
+  assert.match(systemText, /主对话中最近一条用户消息所表达的目标/);
+  assert.doesNotMatch(systemText, /只回答这个问题：2 \+ 3 等于多少/);
+  assert.equal(String(messages[1].content), '只回答这个问题：2 + 3 等于多少？');
 });
 
 test('answer eval derives goal result from evaluator criteria', async () => {

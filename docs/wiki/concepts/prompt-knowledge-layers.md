@@ -48,6 +48,8 @@ the applicable reply objective from conversation provenance or terminal state.
 The static prompt therefore does not need the vocabulary of the full execution
 flow. The stable contract and this state-derived context are composed into the
 leading system message, followed by the canonical role-ordered conversation.
+The system context references the latest user message without copying its text,
+so user input retains its original message role and authority.
 
 Deterministic conditions should be enforced in code even if the prompt mentions
 them for context. The model is not the sole guard for availability, iteration

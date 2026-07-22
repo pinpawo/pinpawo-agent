@@ -74,10 +74,10 @@ export function buildAnswerInvocationMessages(params: {
   const completionSource = params.completionSource === undefined
     ? latestMainMessage ? getMessageHandoffSource(latestMainMessage) : null
     : params.completionSource;
-  const userGoal = readLatestHumanRequest(params.history);
+  const hasUserGoal = Boolean(readLatestHumanRequest(params.history));
   const replyContext = completionSource
-    ? buildDelegationCompletionAnswerContext(completionSource, userGoal)
-    : userGoal ? buildAnswerReplyContext(userGoal) : null;
+    ? buildDelegationCompletionAnswerContext(completionSource, hasUserGoal)
+    : hasUserGoal ? buildAnswerReplyContext() : null;
   const systemContext = [
     buildAnswerSystemPrompt({
       actor: params.actor,
@@ -93,10 +93,10 @@ export function buildAnswerInvocationMessages(params: {
   ];
 }
 
-export function buildAnswerReplyContext(userGoal: string) {
+function buildAnswerReplyContext() {
   return [
-    '本次用户目标（引用）：',
-    JSON.stringify(userGoal),
+    '本次用户目标：',
+    '主对话中最近一条用户消息所表达的目标。',
     '',
     '本次回复目标：',
     '根据主对话已有信息完成该用户目标。',
@@ -167,13 +167,13 @@ function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLi
 
 function buildDelegationCompletionAnswerContext(
   source: HandoffSource,
-  userGoal: string | null = null,
+  hasUserGoal = false,
 ) {
   const completedWork = source.task?.trim() || '本次工作';
   return [
-    ...(userGoal ? [
+    ...(hasUserGoal ? [
       '本次用户目标（已完成）：',
-      JSON.stringify(userGoal),
+      '主对话中最近一条用户消息所表达的目标。',
       '',
     ] : []),
     '当前状态：',

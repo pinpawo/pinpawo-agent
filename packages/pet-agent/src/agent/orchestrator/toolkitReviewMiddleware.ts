@@ -457,6 +457,7 @@ async function prepareToolkitToolReview(params: {
       toolName: binding.toolName,
       input: currentInput,
       operation: binding.operation,
+      autoReviewContext: binding.toolkit.policy?.autoReview,
       review: reviewPayload.review,
       reviewPayload,
     },

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
-import type { AgentToolkit } from '@pinpawo/pet-agent';
+import { type AgentToolkit, validateToolkitDefinition } from '@pinpawo/pet-agent';
 import type { DailyPostPayload } from './capabilities/dailyPost';
 
 export type LocalAgentPluginHooks = {
@@ -53,6 +53,8 @@ export async function loadPluginsFromDir(pluginsDir: string): Promise<{ toolkits
       console.warn(`[plugins] failed to load ${file}:`, err instanceof Error ? err.message : err);
     }
   }
+
+  toolkits.forEach(validateToolkitDefinition);
 
   return { toolkits, plugins };
 }

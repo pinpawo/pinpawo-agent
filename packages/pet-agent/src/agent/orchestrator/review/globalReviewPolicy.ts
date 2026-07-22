@@ -56,6 +56,11 @@ type GlobalReviewRuntimeContext = {
   workdir?: string | null;
 };
 
+type ToolkitAutoReviewContext = {
+  allow: string;
+  ask: string;
+};
+
 export type GlobalReviewPolicyContext = GlobalReviewRuntimeContext & {
   models: AgentModels;
   actor: AgentActor;
@@ -65,6 +70,7 @@ export type GlobalReviewPolicyContext = GlobalReviewRuntimeContext & {
   toolName: string;
   input: unknown;
   operation?: ToolReviewOperationMetadata;
+  autoReviewContext?: ToolkitAutoReviewContext;
   review: ReviewSpec;
 };
 
@@ -157,7 +163,7 @@ async function resolveAutoAuthorization(
           : undefined),
       },
       messages: [
-        new SystemMessage(buildAutoReviewSystemPrompt()),
+        new SystemMessage(buildAutoReviewSystemPrompt(options.reviews)),
         new HumanMessage(prompt.text),
       ],
     });

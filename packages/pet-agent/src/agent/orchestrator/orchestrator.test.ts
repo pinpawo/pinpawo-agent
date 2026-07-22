@@ -2308,6 +2308,10 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
     description: 'local tools',
     tools: [firstTool, secondTool],
     policy: {
+      autoReview: {
+        allow: 'Allow narrow writes to user-requested files.',
+        ask: 'Ask before broad or destructive writes.',
+      },
       toolReview: {
         first_write: ReviewPolicies.localMutation(),
         second_write: ReviewPolicies.localMutation(),
@@ -2363,12 +2367,24 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
   assert.equal(firstCallCount, 1);
   assert.equal(secondCallCount, 1);
   assert.equal(autoReviewCount, 1);
-  const reviewPrompt = String((autoReviewMessages as Array<{ content?: unknown }>)[1]?.content);
+  const [systemMessage, humanMessage] = autoReviewMessages as Array<{ content?: unknown }>;
+  const systemPrompt = String(systemMessage?.content);
+  const reviewPrompt = String(humanMessage?.content);
   assert.match(reviewPrompt, /<batch_size>2<\/batch_size>/);
   assert.match(reviewPrompt, /local\.first_write/);
   assert.match(reviewPrompt, /local\.second_write/);
   assert.match(reviewPrompt, /a\.txt/);
   assert.match(reviewPrompt, /b\.txt/);
+  assert.match(systemPrompt, /Toolkit local:/);
+  assert.equal(
+    systemPrompt.match(/Allow narrow writes to user-requested files\./g)?.length,
+    1,
+  );
+  assert.equal(
+    systemPrompt.match(/Ask before broad or destructive writes\./g)?.length,
+    1,
+  );
+  assert.doesNotMatch(reviewPrompt, /Toolkit local:|Allow narrow writes/);
   const authorizationEvent = runtimeEvents[0] as {
     name?: unknown;
     data?: { batchSize?: unknown; toolCalls?: unknown[] };

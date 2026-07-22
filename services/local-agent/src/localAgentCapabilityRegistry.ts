@@ -1,5 +1,9 @@
 import type { StructuredTool } from '@langchain/core/tools';
-import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
+import {
+  type AgentCapability,
+  type AgentToolkit,
+  validateToolkitDefinition,
+} from '@pinpawo/pet-agent';
 import { loadUserCapabilities, type LoadedUserCapability } from './capabilityLoader';
 import {
   resolveAvailableCapabilities,
@@ -86,6 +90,7 @@ export class LocalAgentCapabilityRegistry {
   async load() {
     this.localTools = await this.deps.loadLocalTools();
     this.localToolkitDefinitions = this.deps.createLocalToolkits(this.localTools);
+    this.localToolkitDefinitions.forEach(validateToolkitDefinition);
     this.localToolkits = await this.deps.resolveAvailableToolkits(this.localToolkitDefinitions);
     this.localCapabilityDefinitions = this.deps.createLocalCapabilities();
     this.localCapabilities = await this.deps.resolveAvailableCapabilities(this.localCapabilityDefinitions);

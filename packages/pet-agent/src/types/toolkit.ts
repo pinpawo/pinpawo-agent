@@ -85,8 +85,23 @@ export type ToolkitToolReviewPolicy = {
   ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
 };
 
+export type ToolkitAutoReviewPolicy = {
+  /**
+   * Toolkit-owned auto-review boundaries.
+   *
+   * `allow` describes calls eligible for automatic authorization; `ask`
+   * describes calls that should be sent to human review. The global policy
+   * validates the whole batch and takes precedence on conflicts.
+   */
+  allow: string;
+  ask: string;
+};
+
+export const TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS = 2_000;
+
 export type ToolkitPolicy = {
   toolReview?: Record<string, ToolkitToolReviewPolicy>;
+  autoReview?: ToolkitAutoReviewPolicy;
 };
 
 export type ToolOperationSummary = {
@@ -172,6 +187,7 @@ function assertStaticToolsetDefinition(
   >,
 ) {
   const ownerName = definition.name ?? 'anonymous';
+  assertToolkitAutoReviewPolicy(ownerName, definition.policy?.autoReview);
   const toolNames = new Set<string>();
 
   for (const tool of definition.tools) {
@@ -192,6 +208,29 @@ function assertStaticToolsetDefinition(
       throw new Error(`Toolkit/toolset "${ownerName}" review policy references unknown tool "${reviewKey}"`);
     }
   }
+}
+
+function assertToolkitAutoReviewPolicy(
+  ownerName: string,
+  policy: ToolkitAutoReviewPolicy | undefined,
+) {
+  if (!policy) return;
+
+  for (const field of ['allow', 'ask'] as const) {
+    const value = policy[field];
+    if (typeof value !== 'string') {
+      throw new Error(`Toolkit/toolset "${ownerName}" auto-review ${field} must be a string`);
+    }
+    if (value.length > TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS) {
+      throw new Error(
+        `Toolkit/toolset "${ownerName}" auto-review ${field} exceeds ${TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS.toString()} characters`,
+      );
+    }
+  }
+}
+
+export function validateToolkitDefinition(toolkit: AgentToolkit) {
+  assertToolkitAutoReviewPolicy(toolkit.name, toolkit.policy?.autoReview);
 }
 
 export function defineToolset<

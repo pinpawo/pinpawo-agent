@@ -1,6 +1,6 @@
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentCapability } from '../../types/capability';
-import type { AgentToolkit } from '../../types/toolkit';
+import { type AgentToolkit, validateToolkitDefinition } from '../../types/toolkit';
 
 export function validateUniqueCapabilityNames(capabilities: AgentCapability[]) {
   const seen = new Set<string>();
@@ -25,6 +25,7 @@ export function validateUniqueToolNames(tools: StructuredTool[]) {
 export function validateUniqueToolkitNames(toolkits: AgentToolkit[]) {
   const seen = new Set<string>();
   for (const toolkit of toolkits) {
+    validateToolkitDefinition(toolkit);
     if (seen.has(toolkit.name)) {
       throw new Error(`Duplicate toolkit name: ${toolkit.name}`);
     }

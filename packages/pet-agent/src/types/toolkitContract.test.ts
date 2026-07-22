@@ -2,7 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { NamedStructuredTool, ToolkitToolReviewPolicy } from './toolkit';
-import { defineToolkit, defineToolset, hasToolOperationMetadata } from './toolkit';
+import {
+  defineToolkit,
+  defineToolset,
+  hasToolOperationMetadata,
+  TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS,
+  validateToolkitDefinition,
+} from './toolkit';
 
 const alphaTool = { name: 'alpha_tool' } as NamedStructuredTool<'alpha_tool'>;
 const betaTool = { name: 'beta_tool' } as NamedStructuredTool<'beta_tool'>;
@@ -53,6 +59,39 @@ test('defineToolset rejects review policy for unknown tools at runtime', () => {
   );
 });
 
+test('toolkit registration rejects oversized auto-review fields', () => {
+  const oversized = 'x'.repeat(TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS + 1);
+
+  assert.throws(
+    () => defineToolkit({
+      name: 'oversized_auto_review',
+      description: 'Invalid auto-review policy.',
+      tools: [alphaTool] as const,
+      policy: {
+        autoReview: {
+          allow: oversized,
+          ask: 'Ask for risky operations.',
+        },
+      },
+    }),
+    /auto-review allow exceeds 2000 characters/,
+  );
+
+  assert.throws(
+    () => validateToolkitDefinition({
+      name: 'runtime_registered_toolkit',
+      description: 'Plugin-style toolkit definition.',
+      policy: {
+        autoReview: {
+          allow: 'Allow routine operations.',
+          ask: oversized,
+        },
+      },
+    }),
+    /auto-review ask exceeds 2000 characters/,
+  );
+});
+
 test('defineToolkit preserves valid tool metadata and review policy', () => {
   const toolkit = defineToolkit({
     name: 'valid_toolkit',
@@ -62,6 +101,10 @@ test('defineToolkit preserves valid tool metadata and review policy', () => {
       alpha_tool: { title: 'Alpha' },
     },
     policy: {
+      autoReview: {
+        allow: 'Allow alpha operations when explicitly requested.',
+        ask: 'Ask before beta operations that delete data.',
+      },
       toolReview: {
         beta_tool: reviewPolicy,
       },
@@ -72,6 +115,10 @@ test('defineToolkit preserves valid tool metadata and review policy', () => {
   assert.deepEqual(toolkit.tools.map((tool) => tool.name), ['alpha_tool', 'beta_tool']);
   assert.equal(toolkit.operations?.alpha_tool?.title, 'Alpha');
   assert.equal(toolkit.policy?.toolReview?.beta_tool, reviewPolicy);
+  assert.deepEqual(toolkit.policy?.autoReview, {
+    allow: 'Allow alpha operations when explicitly requested.',
+    ask: 'Ask before beta operations that delete data.',
+  });
 });
 
 test('hasToolOperationMetadata treats empty operation maps as absent', () => {

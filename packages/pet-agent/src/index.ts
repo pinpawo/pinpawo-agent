@@ -73,6 +73,7 @@ export type {
   ToolOperationMetadataMap,
   ToolOperationMetadataMapFor,
   ToolOperationSummary,
+  ToolkitAutoReviewPolicy,
   ToolkitContext,
   ToolkitOperationMetadata,
   ToolkitOperationSummary,
@@ -87,7 +88,13 @@ export type {
   ToolkitToolReviewPolicyMapFor,
   ToolkitToolReviewResult,
 } from './types/toolkit';
-export { defineToolkit, defineToolset, hasToolOperationMetadata } from './types/toolkit';
+export {
+  defineToolkit,
+  defineToolset,
+  hasToolOperationMetadata,
+  TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS,
+  validateToolkitDefinition,
+} from './types/toolkit';
 
 export {
   buildOrchestratorRunInput,

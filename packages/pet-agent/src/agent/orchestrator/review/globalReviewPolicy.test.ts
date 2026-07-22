@@ -8,7 +8,6 @@ import {
   GLOBAL_REVIEW_POLICY_RESOLUTION,
   resolveGlobalReviewBatchPolicy,
 } from './globalReviewPolicy';
-
 const testActor = {
   petId: 'pet-1',
   userId: 'user-1',
@@ -249,4 +248,104 @@ test('auto review repairs malformed structured output once by default', async ()
 
   assert.equal(calls, 2);
   assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE);
+});
+
+test('auto review puts registered toolkit policy in the trusted system prompt', async () => {
+  let capturedMessages: unknown;
+  const resolution = await resolveGlobalReviewBatchPolicy({
+    policy: { mode: 'auto_authorization' },
+    models: {
+      act: autoModel(async (messages) => {
+        capturedMessages = messages;
+        return {
+          decision: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
+          reason: 'The collaboration action is scoped and auditable.',
+        };
+      }),
+    },
+    actor: testActor,
+    messages: [new HumanMessage('Conversation context must not reach the risk reviewer.')],
+    reviews: [{
+      toolkitName: 'git',
+      toolName: 'gh_pr_create',
+      input: { title: 'Fix review policy', head: 'codex/review-policy' },
+      autoReviewContext: {
+        allow: 'Allow normal non-force pushes and creating a pull request or issue.',
+        ask: 'Ask before force pushes and merging a pull request.',
+      },
+      review: buildReviewSpec({
+        id: 'review-toolkit-policy',
+        view: { kind: 'plain', body: 'Create pull request Fix review policy' },
+        options: [],
+      }),
+    }],
+  });
+
+  assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE);
+  const [systemMessage, humanMessage] = capturedMessages as Array<{ content?: unknown }>;
+  const systemPrompt = String(systemMessage?.content);
+  const humanPrompt = String(humanMessage?.content);
+  assert.match(systemPrompt, /Registered toolkit auto-review policies:/);
+  assert.match(systemPrompt, /Toolkit git:/);
+  assert.match(systemPrompt, /Allow: Allow normal non-force pushes/);
+  assert.match(systemPrompt, /Ask: Ask before force pushes/);
+  assert.doesNotMatch(humanPrompt, /Registered toolkit auto-review policies|normal non-force pushes/);
+  assert.doesNotMatch(humanPrompt, /Conversation context/);
+});
+
+test('auto review has no toolkit policy block when none is registered', async () => {
+  let capturedMessages: unknown;
+  const resolution = await resolveGlobalReviewBatchPolicy({
+    policy: { mode: 'auto_authorization' },
+    models: {
+      act: autoModel(async (messages) => {
+        capturedMessages = messages;
+        return {
+          decision: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION,
+          reason: 'Force push can rewrite shared history.',
+        };
+      }),
+    },
+    actor: testActor,
+    messages: [],
+    reviews: [{
+      ...review({ command: 'git push --force origin main' }),
+      toolName: 'run_shell',
+    }],
+  });
+
+  assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION);
+  const systemPrompt = String((capturedMessages as Array<{ content?: unknown }>)[0]?.content);
+  assert.doesNotMatch(systemPrompt, /Registered toolkit auto-review policies:/);
+});
+
+test('auto review deduplicates toolkit policy across a batch', async () => {
+  let capturedMessages: unknown;
+  const policy = {
+    allow: 'Allow routine repository collaboration.',
+    ask: 'Ask before history-rewriting repository operations.',
+  };
+
+  await resolveGlobalReviewBatchPolicy({
+    policy: { mode: 'auto_authorization' },
+    models: {
+      act: autoModel(async (messages) => {
+        capturedMessages = messages;
+        return safeDecision;
+      }),
+    },
+    actor: testActor,
+    messages: [],
+    reviews: ['git_add', 'git_commit'].map((toolName) => ({
+      ...review(),
+      toolkitName: 'git',
+      toolName,
+      autoReviewContext: policy,
+    })),
+  });
+
+  const systemPrompt = String((capturedMessages as Array<{ content?: unknown }>)[0]?.content);
+  assert.equal(systemPrompt.match(/Toolkit git:/g)?.length, 1);
+  assert.equal(systemPrompt.match(/Allow routine repository collaboration/g)?.length, 1);
+  assert.equal(systemPrompt.match(/Ask before history-rewriting repository operations/g)?.length, 1);
 });

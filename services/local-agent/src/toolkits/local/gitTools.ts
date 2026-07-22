@@ -10,7 +10,6 @@ import {
   type ToolOperationMetadataMapFor,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
-import { getCurrentLocalAgentInterface } from '../../chatInterface';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
 import { readTextFileChunkResult } from './fileTools';
 import { getLocalToolsWorkdir, resolveUserPath } from './pathUtils';
@@ -25,6 +24,8 @@ const MAX_GH_CONTENT_LINE_COUNT = 200;
 const DEFAULT_GH_COMMENTS_PER_PAGE = 3;
 const MAX_GH_COMMENTS_PER_PAGE = 5;
 const MAX_GH_BUFFER_BYTES = 1024 * 1024 * 4;
+const DEFAULT_GIT_TIMEOUT_MS = 15_000;
+const GIT_PUSH_TIMEOUT_MS = 120_000;
 const execFileAsync = promisify(execFile);
 
 type GitCommandResult = {
@@ -92,13 +93,17 @@ function createGhToolError(name: string, error: unknown, runtime: ToolRuntime) {
   });
 }
 
-export async function runGit(args: string[], cwd?: string) {
+export async function runGit(
+  args: string[],
+  cwd?: string,
+  timeoutMs = DEFAULT_GIT_TIMEOUT_MS,
+) {
   const repo = cwd?.trim() ? resolveUserPath(cwd.trim()) : getLocalToolsWorkdir();
   try {
     const result = await execFileAsync('git', args, {
       cwd: repo,
       encoding: 'utf-8',
-      timeout: 15_000,
+      timeout: timeoutMs,
       maxBuffer: 1024 * 256,
     });
     return formatGitResult(result);
@@ -599,12 +604,6 @@ export const gitCommitTool = tool(
   async ({ cwd, message }: { cwd?: string; message: string }) => {
     const trimmed = message.trim();
     if (!trimmed) return 'Error: git_commit requires a non-empty message';
-
-    const { capabilities } = getCurrentLocalAgentInterface();
-    if (!capabilities.humanReview) {
-      return 'Error: git_commit requires human review before execution.';
-    }
-
     return runGit(['commit', '-m', trimmed], cwd);
   },
   {
@@ -613,6 +612,100 @@ export const gitCommitTool = tool(
     schema: z.object({
       cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
       message: z.string().min(1).describe('commit message'),
+    }),
+  },
+);
+
+export const gitPushTool = tool(
+  async ({
+    cwd,
+    remote = 'origin',
+    refspec = 'HEAD',
+    setUpstream = true,
+  }: {
+    cwd?: string;
+    remote?: string;
+    refspec?: string;
+    setUpstream?: boolean;
+  }) => {
+    const args = ['-c', 'protocol.ext.allow=never', 'push'];
+    if (setUpstream) args.push('--set-upstream');
+    args.push('--', remote.trim(), refspec.trim());
+    return runGit(args, cwd, GIT_PUSH_TIMEOUT_MS);
+  },
+  {
+    name: 'git_push',
+    description: '执行普通、非 force 的 git push。默认将当前 HEAD 推送到 origin 并设置 upstream；不提供 force、删除远端引用、ext command transport 或额外参数入口。',
+    schema: z.object({
+      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+      remote: z.string().trim().min(1).optional().describe('远端名称或地址，默认 origin'),
+      refspec: z.string().trim().min(1).refine((value) => !value.startsWith('+') && !value.startsWith(':'), {
+        message: 'force and delete refspecs are not supported',
+      }).optional().describe('要推送的 refspec，默认 HEAD；不支持 force 或删除 refspec'),
+      setUpstream: z.boolean().optional().describe('是否设置 upstream，默认 true'),
+    }),
+  },
+);
+
+export const ghPrCreateTool = tool(
+  async ({ cwd, title, body = '', base, head, repository, draft = false }: {
+    cwd?: string;
+    title: string;
+    body?: string;
+    base?: string;
+    head?: string;
+    repository?: string;
+    draft?: boolean;
+  }, runtime: ToolRuntime) => {
+    try {
+      const args = ['pr', 'create', '--title', title.trim(), '--body', body];
+      if (base?.trim()) args.push('--base', base.trim());
+      if (head?.trim()) args.push('--head', head.trim());
+      if (repository?.trim()) args.push('--repo', repository.trim());
+      if (draft) args.push('--draft');
+      return await runGh(args, cwd);
+    } catch (error) {
+      return createGhToolError('gh_pr_create', error, runtime);
+    }
+  },
+  {
+    name: 'gh_pr_create',
+    description: '使用 GitHub CLI 创建 pull request。必须显式提供标题，正文可为空；默认使用当前仓库、当前分支和仓库默认 base。',
+    schema: z.object({
+      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+      title: z.string().trim().min(1).describe('PR 标题'),
+      body: z.string().optional().describe('PR 正文；默认空字符串'),
+      base: z.string().trim().min(1).optional().describe('目标分支；默认仓库默认分支'),
+      head: z.string().trim().min(1).optional().describe('来源分支；默认当前分支'),
+      repository: z.string().trim().min(1).optional().describe('目标仓库 owner/name；默认当前仓库'),
+      draft: z.boolean().optional().describe('是否创建为 draft PR，默认 false'),
+    }),
+  },
+);
+
+export const ghIssueCreateTool = tool(
+  async ({ cwd, title, body = '', repository }: {
+    cwd?: string;
+    title: string;
+    body?: string;
+    repository?: string;
+  }, runtime: ToolRuntime) => {
+    try {
+      const args = ['issue', 'create', '--title', title.trim(), '--body', body];
+      if (repository?.trim()) args.push('--repo', repository.trim());
+      return await runGh(args, cwd);
+    } catch (error) {
+      return createGhToolError('gh_issue_create', error, runtime);
+    }
+  },
+  {
+    name: 'gh_issue_create',
+    description: '使用 GitHub CLI 创建 issue。必须显式提供标题，正文可为空；默认使用当前仓库。',
+    schema: z.object({
+      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+      title: z.string().trim().min(1).describe('Issue 标题'),
+      body: z.string().optional().describe('Issue 正文；默认空字符串'),
+      repository: z.string().trim().min(1).optional().describe('目标仓库 owner/name；默认当前仓库'),
     }),
   },
 );
@@ -753,8 +846,11 @@ export const gitTools = [
   gitShowTool as NamedStructuredTool<'git_show'>,
   gitAddTool as NamedStructuredTool<'git_add'>,
   gitCommitTool as NamedStructuredTool<'git_commit'>,
+  gitPushTool as NamedStructuredTool<'git_push'>,
+  ghPrCreateTool as NamedStructuredTool<'gh_pr_create'>,
   ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
   ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
+  ghIssueCreateTool as NamedStructuredTool<'gh_issue_create'>,
   ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
   ghIssueCommentsTool as NamedStructuredTool<'gh_issue_comments'>,
   ghReadContentTool as NamedStructuredTool<'gh_read_content'>,
@@ -817,6 +913,33 @@ export const gitOperationMetadata = {
       };
     },
   },
+  git_push: {
+    title: '推送 git 分支',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'remote') ?? 'origin',
+        summary: readString(record, 'refspec') ?? 'HEAD',
+        details: {
+          setUpstream: readBoolean(record, 'setUpstream') ?? true,
+        },
+      };
+    },
+  },
+  gh_pr_create: {
+    title: '创建 GitHub PR',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'repository') ?? readString(record, 'base') ?? readString(record, 'cwd'),
+        summary: readString(record, 'title'),
+        details: {
+          head: readString(record, 'head'),
+          draft: readBoolean(record, 'draft'),
+        },
+      };
+    },
+  },
   gh_pr_view: {
     title: '查看 GitHub PR',
     summarizeInput: (input) => {
@@ -832,6 +955,16 @@ export const gitOperationMetadata = {
       const record = readRecord(input);
       return {
         target: readString(record, 'pr') ?? readString(record, 'cwd'),
+      };
+    },
+  },
+  gh_issue_create: {
+    title: '创建 GitHub issue',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'repository') ?? readString(record, 'cwd'),
+        summary: readString(record, 'title'),
       };
     },
   },

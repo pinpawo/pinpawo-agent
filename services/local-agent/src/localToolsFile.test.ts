@@ -14,6 +14,7 @@ import {
   statPathTool,
   validateStructuredFileTool,
   viewFileChunkTool,
+  VIEW_FILE_CHUNK_MAX_BYTES,
   writeFileTool,
 } from './toolkits/local/fileTools';
 import { parsePatch, PatchParseError } from './toolkits/local/applyPatch';
@@ -66,12 +67,91 @@ test('file tools write, view, and stat text files', async (t) => {
   );
   assert.equal(
     await viewFileChunkTool.invoke({ path: filePath, startLine: 2, endLine: 3 }),
-    '2: beta\n3: gamma',
+    '2: beta\n3: gamma\n\n[lines 2-3 of 4; nextStartLine=4]',
   );
 
   const stat = readJsonOutput(await statPathTool.invoke({ path: filePath }));
   assert.equal(stat.type, 'file');
   assert.equal(stat.path, filePath);
+});
+
+test('view_file_chunk reports resumable actual ranges and completion', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'long.txt');
+  writeFileSync(
+    filePath,
+    Array.from({ length: 450 }, (_, index) => `line ${index + 1}`).join('\n'),
+    'utf-8',
+  );
+
+  const first = String(await viewFileChunkTool.invoke({ path: filePath }));
+  assert.match(first, /\[lines 1-200 of 450; nextStartLine=201\]$/);
+
+  const last = String(await viewFileChunkTool.invoke({
+    path: filePath,
+    startLine: 401,
+  }));
+  assert.match(last, /\[lines 401-450 of 450; complete\]$/);
+});
+
+test('view_file_chunk reports totalLines when startLine is out of range', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'short.txt');
+  writeFileSync(filePath, 'one\ntwo\nthree', 'utf-8');
+
+  const output = String(await viewFileChunkTool.invoke({ path: filePath, startLine: 4 }));
+  assert.equal(output, 'Error: startLine 4 is outside the file; totalLines=3');
+});
+
+test('view_file_chunk bounds an oversized single line without a false cursor', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'minified.js');
+  writeFileSync(filePath, `const value = '${'界'.repeat(80_000)}';`, 'utf-8');
+
+  const output = String(await viewFileChunkTool.invoke({ path: filePath }));
+  assert.ok(
+    Buffer.byteLength(output, 'utf-8') <= VIEW_FILE_CHUNK_MAX_BYTES,
+    `output exceeded ${VIEW_FILE_CHUNK_MAX_BYTES} bytes`,
+  );
+  assert.match(output, /incomplete: line 1 cannot fit within 50000-byte result limit/);
+  assert.match(output, /nextStartLine=unavailable/);
+  assert.doesNotMatch(output, /complete\]$/);
+});
+
+test('view_file_chunk byte truncation returns a cursor that advances', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'wide.txt');
+  writeFileSync(
+    filePath,
+    Array.from({ length: 100 }, (_, index) => `${index + 1} ${'界'.repeat(400)}`).join('\n'),
+    'utf-8',
+  );
+
+  const first = String(await viewFileChunkTool.invoke({ path: filePath }));
+  assert.ok(Buffer.byteLength(first, 'utf-8') <= VIEW_FILE_CHUNK_MAX_BYTES);
+  const cursor = /nextStartLine=(\d+)/.exec(first)?.[1];
+  assert.ok(cursor, 'expected a resumable nextStartLine');
+  assert.match(first, /stopped at 50000-byte limit/);
+
+  const resumed = String(await viewFileChunkTool.invoke({
+    path: filePath,
+    startLine: Number(cursor),
+  }));
+  assert.match(resumed, new RegExp(`^${cursor}: `));
+});
+
+test('view_file_chunk reserves space for the final byte-limit footer', async (t) => {
+  const root = createFileFixture(t);
+  const filePath = resolve(root, 'footer-boundary.txt');
+  writeFileSync(
+    filePath,
+    Array.from({ length: 62 }, () => 'x'.repeat(814)).join('\n'),
+    'utf-8',
+  );
+
+  const output = String(await viewFileChunkTool.invoke({ path: filePath }));
+  assert.ok(Buffer.byteLength(output, 'utf-8') <= VIEW_FILE_CHUNK_MAX_BYTES);
+  assert.match(output, /nextStartLine=\d+; stopped at 50000-byte limit/);
 });
 
 test('bash toolkit reviews write_file with preset policy', async (t) => {

@@ -39,6 +39,7 @@
     "@langchain/openai": "^1.5.3",
     "@pinpawo/pet-agent": "*",
     "@tavily/core": "^0.7.1",
+    "@vscode/ripgrep": "1.18.0",
     "commander": "^12.1.0",
     "ink": "^6.8.0",
     "ink-text-input": "^6.0.0",

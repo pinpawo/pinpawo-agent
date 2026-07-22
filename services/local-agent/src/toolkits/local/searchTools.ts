@@ -1,128 +1,88 @@
-import { readFileSync } from 'node:fs';
-import { basename } from 'node:path';
-import { tool } from '@langchain/core/tools';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import type { ToolkitOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readRecord, readString } from '../operationMetadata';
 import { resolveUserPath } from './pathUtils';
-import { walkFiles, wildcardToRegExp } from './fileSystemUtils';
+import { ripgrepSearchBackend } from './searchBackend';
+import { formatGlobSearchResult, formatGrepSearchResult } from './searchFormatter';
 
-// Byte-level guards for grep_search. Line count alone does not bound output: a
-// single matched line can be hundreds of KB (e.g. a minified bundle, a lockfile,
-// or — as seen in production — a serialized checkpoint JSON of ~493KB per line).
-// Without these, one grep_search returned 4.3M chars and blew up the context
-// window. See docs/GUARD_DESIGN.md for current guard boundaries.
-const GREP_MAX_LINE_CHARS = 2_000;
-const GREP_MAX_TOTAL_CHARS = 50_000;
-
-function truncateMatchLine(line: string) {
-  if (line.length <= GREP_MAX_LINE_CHARS) {
-    return line;
-  }
-  const omitted = line.length - GREP_MAX_LINE_CHARS;
-  return `${line.slice(0, GREP_MAX_LINE_CHARS)} …[+${omitted.toString()} chars truncated]`;
-}
+const DEFAULT_SEARCH_LIMIT = 100;
+const MAX_SEARCH_LIMIT = 200;
+const MAX_SEARCH_CONTEXT = 10;
 
 export const globSearchTool = tool(
-  async ({ path, pattern, limit }: { path?: string; pattern: string; limit?: number }) => {
+  async (
+    { path, pattern, limit }: { path?: string; pattern: string; limit?: number },
+    runtime: ToolRuntime,
+  ) => {
     try {
       const rootPath = resolveUserPath(path ?? '.');
-      const regex = wildcardToRegExp(pattern);
-      const maxResults = Math.max(1, Math.min(limit ?? 50, 200));
-      const matches: string[] = [];
-
-      walkFiles(rootPath, (filePath) => {
-        const relative = filePath.startsWith(`${rootPath}/`)
-          ? filePath.slice(rootPath.length + 1)
-          : basename(filePath);
-        if (regex.test(relative) || regex.test(basename(filePath))) {
-          matches.push(filePath);
-        }
-        return matches.length < maxResults;
+      const maxResults = Math.max(1, Math.min(limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT));
+      const result = await ripgrepSearchBackend.glob({
+        rootPath,
+        pattern,
+        maxResults: maxResults + 1,
+        signal: runtime.signal,
       });
-
-      return matches.length > 0 ? matches.join('\n') : '(no matches)';
+      return formatGlobSearchResult(result, { limit: maxResults });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
   },
   {
     name: 'glob_search',
-    description: '按通配符模式递归搜索文件。适合查找某类文件，如 *.md、src/**/*.ts 的简化匹配。返回匹配到的文件路径列表。',
+    description: '使用 ripgrep 按 glob 模式递归搜索文件。返回相对搜索根目录的稳定路径；遵守 .gitignore，包含未被忽略的 hidden 文件，但始终排除 .pinpawo、.git、node_modules。结果受数量和 50000 字节上限约束。',
     schema: z.object({
       path: z.string().optional().describe('搜索起点目录，默认 "."'),
-      pattern: z.string().describe('通配符模式，支持 * 和 ?'),
-      limit: z.number().int().positive().max(200).optional().describe('最多返回多少条，默认 50'),
+      pattern: z.string().min(1).describe('glob 模式，支持 *、**、?，如 *.md、src/**/*.ts'),
+      limit: z.number().int().positive().max(MAX_SEARCH_LIMIT).optional().describe(`最多返回多少条，默认 ${DEFAULT_SEARCH_LIMIT}`),
     }),
   },
 );
 
 export const grepSearchTool = tool(
-  async ({ path, query, limit, caseSensitive }: {
+  async ({ path, query, limit, caseSensitive, literal, glob, context }: {
     path?: string;
     query: string;
     limit?: number;
     caseSensitive?: boolean;
-  }) => {
+    literal?: boolean;
+    glob?: string;
+    context?: number;
+  }, runtime: ToolRuntime) => {
     try {
       const rootPath = resolveUserPath(path ?? '.');
-      const maxResults = Math.max(1, Math.min(limit ?? 50, 200));
-      const needle = caseSensitive ? query : query.toLowerCase();
-      const results: string[] = [];
-      let totalChars = 0;
-      let truncatedByBytes = false;
-
-      walkFiles(rootPath, (filePath) => {
-        let content: string;
-        try {
-          content = readFileSync(filePath, 'utf-8');
-        } catch {
-          return results.length < maxResults;
-        }
-
-        const lines = content.split('\n');
-        for (let i = 0; i < lines.length; i += 1) {
-          const line = lines[i] ?? '';
-          const haystack = caseSensitive ? line : line.toLowerCase();
-          if (!haystack.includes(needle)) {
-            continue;
-          }
-          const entry = `${filePath}:${i + 1}: ${truncateMatchLine(line)}`;
-          // Stop on the total-bytes budget so a few huge matches can't blow up
-          // the context window even when the line count stays under maxResults.
-          if (totalChars + entry.length > GREP_MAX_TOTAL_CHARS) {
-            truncatedByBytes = true;
-            return false;
-          }
-          results.push(entry);
-          totalChars += entry.length + 1;
-          if (results.length >= maxResults) {
-            return false;
-          }
-        }
-
-        return results.length < maxResults;
+      const maxResults = Math.max(1, Math.min(limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT));
+      const contextLines = Math.max(0, Math.min(context ?? 0, MAX_SEARCH_CONTEXT));
+      const result = await ripgrepSearchBackend.grep({
+        rootPath,
+        query,
+        literal: literal ?? true,
+        caseSensitive: caseSensitive ?? false,
+        glob,
+        context: contextLines,
+        maxMatches: maxResults + 1,
+        signal: runtime.signal,
       });
-
-      if (results.length === 0) {
-        return '(no matches)';
-      }
-      const body = results.join('\n');
-      return truncatedByBytes
-        ? `${body}\n[结果已达 ${GREP_MAX_TOTAL_CHARS.toString()} 字符上限并截断，请收窄 query 或 path]`
-        : body;
+      return formatGrepSearchResult(result, {
+        limit: maxResults,
+        context: contextLines,
+      });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
   },
   {
     name: 'grep_search',
-    description: '递归搜索文件内容，返回匹配行及其文件路径和行号。适合定位某个词、函数名或报错文本。',
+    description: '使用 ripgrep 递归搜索文本内容，返回相对搜索根目录的路径、行号和匹配行。默认 literal 匹配；literal=false 启用正则。遵守 .gitignore，包含未被忽略的 hidden 文件，跳过二进制文件，并始终排除 .pinpawo、.git、node_modules。支持 glob/context，结果受匹配数和 50000 字节上限约束。',
     schema: z.object({
       path: z.string().optional().describe('搜索起点目录，默认 "."'),
-      query: z.string().describe('要搜索的文本'),
-      limit: z.number().int().positive().max(200).optional().describe('最多返回多少条，默认 50'),
+      query: z.string().min(1).describe('要搜索的文本；literal=false 时为 ripgrep 正则'),
+      limit: z.number().int().positive().max(MAX_SEARCH_LIMIT).optional().describe(`最多返回多少个匹配，默认 ${DEFAULT_SEARCH_LIMIT}`),
       caseSensitive: z.boolean().optional().describe('是否区分大小写，默认 false'),
+      literal: z.boolean().optional().describe('是否按字面文本搜索，默认 true；false 表示正则'),
+      glob: z.string().min(1).optional().describe('限制候选文件的 glob，支持 *、**、?，如 *.ts 或 src/**'),
+      context: z.number().int().min(0).max(MAX_SEARCH_CONTEXT).optional().describe(`匹配前后文行数，默认 0，最大 ${MAX_SEARCH_CONTEXT}`),
     }),
   },
 );

@@ -78,15 +78,18 @@ export function buildAnswerInvocationMessages(params: {
   const replyContext = completionSource
     ? buildDelegationCompletionAnswerContext(completionSource, userGoal)
     : userGoal ? buildAnswerReplyContext(userGoal) : null;
-  return [
-    new SystemMessage(buildAnswerSystemPrompt({
+  const systemContext = [
+    buildAnswerSystemPrompt({
       actor: params.actor,
       workdir: params.workdir,
       runtimeEnvironment: params.runtimeEnvironment,
-    })),
+    }),
+    replyContext,
+    params.terminalContext,
+  ].filter((value): value is string => Boolean(value)).join('\n\n');
+  return [
+    new SystemMessage(systemContext),
     ...params.history,
-    ...(replyContext ? [new SystemMessage(replyContext)] : []),
-    ...(params.terminalContext ? [new SystemMessage(params.terminalContext)] : []),
   ];
 }
 

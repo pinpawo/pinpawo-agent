@@ -41,7 +41,9 @@ test('answer eval renders the production prompt and fixed completion context', (
     ({ caseName }) => caseName === 'delegation-completion-acknowledgement',
   );
   assert.ok(scenario);
-  const text = scenario.render().map((message) => String(message.content)).join('\n');
+  const messages = scenario.render();
+  const text = messages.map((message) => String(message.content)).join('\n');
+  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human', 'ai']);
   assert.match(text, /本次用户目标（已完成）/);
   assert.match(text, /汇总本周发布风险/);
   assert.match(text, /上一条消息已经完整呈现工作结果/);

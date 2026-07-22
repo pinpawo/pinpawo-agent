@@ -39,6 +39,7 @@ const ALLOWED_CDP_COMMANDS = new Set([
 ]);
 const SESSION_KEY = 'pinpawoBrowserTarget';
 const RECONNECT_DELAY_MS = 1_000;
+const POPUP_NAVIGATION_TIMEOUT_MS = 15_000;
 const connectionId = crypto.randomUUID();
 let port = null;
 let reconnectTimer = null;
@@ -193,7 +194,16 @@ async function ensureTarget() {
   return targets.current();
 }
 
-async function switchToPopup(tabId, parentTarget) {
+async function rollbackPopupSwitch(tabId) {
+  await detach();
+  const removed = targets.remove(tabId);
+  if (!removed.closedCurrent) return removed.current;
+  await saveTarget(removed.current);
+  if (removed.current) await attach(removed.current.tabId);
+  return removed.current;
+}
+
+async function switchToPopup(tabId, parentTarget, deadlineAt) {
   if (targets.current()?.tabId !== parentTarget.tabId) return targets.current();
   try {
     await chrome.tabs.get(tabId);
@@ -201,12 +211,25 @@ async function switchToPopup(tabId, parentTarget) {
     return targets.current();
   }
   await detach();
-  await saveTarget(
-    { tabId, ownership: parentTarget.ownership },
-    { rememberCurrent: true },
-  );
-  await attach(tabId);
-  return targets.current();
+  try {
+    await saveTarget(
+      { tabId, ownership: parentTarget.ownership },
+      { rememberCurrent: true },
+    );
+    await attach(tabId);
+    await waitForTab(tabId, deadlineAt);
+    return targets.current();
+  } catch (error) {
+    try {
+      await rollbackPopupSwitch(tabId);
+    } catch (rollbackError) {
+      console.warn(
+        '[pinpawo-extension] failed to restore popup parent:',
+        rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+      );
+    }
+    throw error;
+  }
 }
 
 async function handleRemovedTarget(tabId) {
@@ -249,11 +272,7 @@ async function followPopupAfterAction(parentTarget, deadlineAt) {
     const popup = recentPopupByOpener.get(parentTarget.tabId);
     if (popup) {
       recentPopupByOpener.delete(parentTarget.tabId);
-      const nextTarget = await switchToPopup(popup.tabId, parentTarget);
-      if (nextTarget?.tabId !== parentTarget.tabId) {
-        await waitForTab(nextTarget.tabId, deadlineAt);
-      }
-      return nextTarget;
+      return await switchToPopup(popup.tabId, parentTarget, deadlineAt);
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
@@ -768,10 +787,14 @@ chrome.tabs.onCreated.addListener((tab) => {
   if (targets.current()?.tabId !== tab.openerTabId) return;
   recentPopupByOpener.set(tab.openerTabId, { tabId: tab.id });
   void enqueueExtensionWork(async () => {
+    const pendingPopup = recentPopupByOpener.get(tab.openerTabId);
+    if (pendingPopup?.tabId === tab.id) {
+      recentPopupByOpener.delete(tab.openerTabId);
+    }
     const target = targets.current();
     if (target?.tabId !== tab.openerTabId) return;
-    recentPopupByOpener.delete(tab.openerTabId);
-    await switchToPopup(tab.id, target);
+    const deadlineAt = new Date(Date.now() + POPUP_NAVIGATION_TIMEOUT_MS).toISOString();
+    await switchToPopup(tab.id, target, deadlineAt);
   }).catch((error) => {
     console.warn(
       '[pinpawo-extension] failed to follow popup:',

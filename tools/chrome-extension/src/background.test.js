@@ -71,7 +71,9 @@ test('popup tabs are followed inside the extension target lifecycle', async () =
   );
 
   assert.match(source, /followPopupAfterAction\(activeTarget, command\.deadlineAt\)/);
-  assert.match(source, /switchToPopup[\s\S]*?rememberCurrent: true/);
+  assert.match(source, /switchToPopup[\s\S]*?rememberCurrent: true[\s\S]*?waitForTab/);
+  assert.match(source, /switchToPopup[\s\S]*?rollbackPopupSwitch/);
+  assert.match(source, /tabs\.onCreated\.addListener[\s\S]*?POPUP_NAVIGATION_TIMEOUT_MS[\s\S]*?switchToPopup/);
   assert.match(source, /targets\.remove\(tabId\)[\s\S]*?saveTarget\(removed\.current\)/);
 });
 

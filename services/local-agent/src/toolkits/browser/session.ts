@@ -298,6 +298,7 @@ class PlaywrightBrowserSession {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private readonly trackedPages = new WeakSet<Page>();
+  private readonly parentPages = new WeakMap<Page, Page>();
   private activeHeadless = false;
   private activeSessionDir = sessionDir(DEFAULT_SESSION);
   private readonly refAttribute = `data-pinpawo-ref-${randomUUID()}`;
@@ -307,16 +308,23 @@ class PlaywrightBrowserSession {
     return process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
   }
 
-  private activatePage(page: Page): Page {
+  private liveParentFor(page: Page): Page | null {
+    let parent = this.parentPages.get(page) ?? null;
+    while (parent?.isClosed()) {
+      parent = this.parentPages.get(parent) ?? null;
+    }
+    return parent;
+  }
+
+  private activatePage(page: Page, parent?: Page): Page {
     if (page.isClosed()) return page;
+    if (parent && parent !== page) this.parentPages.set(page, parent);
     if (!this.trackedPages.has(page)) {
       this.trackedPages.add(page);
       page.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
       page.on('close', () => {
         if (this.page !== page) return;
-        const fallback = this.context?.pages()
-          .filter((candidate) => !candidate.isClosed())
-          .at(-1) ?? null;
+        const fallback = this.liveParentFor(page);
         this.page = fallback;
         if (fallback) {
           this.activatePage(fallback);
@@ -332,7 +340,7 @@ class PlaywrightBrowserSession {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, followWindowMs));
     const activePage = this.page && !this.page.isClosed()
       ? this.page
-      : this.context?.pages().filter((candidate) => !candidate.isClosed()).at(-1);
+      : this.liveParentFor(previousPage);
     if (!activePage) {
       throw new BrowserOperationError(
         'target_closed',
@@ -384,8 +392,17 @@ class PlaywrightBrowserSession {
     const initialPage = existing[0] ?? (await this.context.newPage());
     const activePage = this.activatePage(initialPage);
     this.context.on('page', (page) => {
-      this.activatePage(page);
-      if (!this.activeHeadless) void page.bringToFront().catch(() => {});
+      const activeAtCreation = this.page;
+      void page.opener().then((opener) => {
+        if (
+          !activeAtCreation
+          || opener !== activeAtCreation
+          || this.page !== activeAtCreation
+          || page.isClosed()
+        ) return;
+        this.activatePage(page, activeAtCreation);
+        if (!this.activeHeadless) void page.bringToFront().catch(() => {});
+      }).catch(() => {});
     });
 
     // When running inside the app bundle the parent process has no foreground
@@ -399,9 +416,7 @@ class PlaywrightBrowserSession {
 
   private async requirePage(): Promise<Page> {
     if (this.page && !this.page.isClosed()) return this.page;
-    const fallback = this.context?.pages()
-      .filter((candidate) => !candidate.isClosed())
-      .at(-1);
+    const fallback = this.page ? this.liveParentFor(this.page) : null;
     if (fallback) return this.activatePage(fallback);
     throw new BrowserOperationError(
       'browser_not_open',

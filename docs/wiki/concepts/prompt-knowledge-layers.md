@@ -46,7 +46,8 @@ and the injected objective cannot add a new behavior outside the node's accepted
 contract. For `answer`, the runtime identifies the latest user goal and selects
 the applicable reply objective from conversation provenance or terminal state.
 The static prompt therefore does not need the vocabulary of the full execution
-flow.
+flow. The stable contract and this state-derived context are composed into the
+leading system message, followed by the canonical role-ordered conversation.
 
 Deterministic conditions should be enforced in code even if the prompt mentions
 them for context. The model is not the sole guard for availability, iteration

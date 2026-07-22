@@ -162,5 +162,11 @@ lint passes, and documentation migrations.
 - Derived the current user goal, reply objective, and terminal status from
   runtime state without exposing orchestration vocabulary or identifiers to the
   answer model.
+- Composed static and state-derived answer context into the leading system
+  message so compatible chat providers receive one authoritative instruction
+  boundary before the role-ordered conversation.
+- Improved the comparable GLM-5.2 answer eval from 12/15 to 15/15 goals achieved;
+  completion acknowledgement improved from 0/3 to 3/3 without regressing the
+  other four answer behaviors.
 - Kept the change within the existing `answer.user-visible-close` contract and
   prompt knowledge layers rather than adding another Wiki concept.

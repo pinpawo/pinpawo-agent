@@ -2,11 +2,12 @@
 title: System Prompt Authoring Principles
 page_type: concept
 status: draft
-updated: 2026-07-21
+updated: 2026-07-22
 sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - https://github.com/pinpawo/pinpawo-agent/issues/417
+  - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
   - ../overview.md
   - prompt-knowledge-layers.md
@@ -191,28 +192,29 @@ The durable [Prompt Contract Map](../overview.md#prompt-contract-map) records on
 stable behavior contracts. It does not store this checklist for every prompt
 sentence.
 
-## Initial repository review targets
+## V1 repository review results
 
-This is a classification backlog, not an instruction to delete every matching
-clause.
+The initial classification backlog has been applied one node at a time. These
+rows describe the current ownership split, not another instruction to shorten
+the prompts.
 
 | Area | Observation | Review direction |
 |---|---|---|
 | [`sharedPrefix.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts) | The common decision-node contract now contains only invocation-context use, the structured-judgment role, and graph/answer ownership | Keep node flow, field semantics, completion criteria, and runtime transitions with their narrower prompt, schema, or graph owner |
-| [`entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts) | Node ownership and action meanings are mixed with repeated “do not answer / choose capability / execute” wording | Make the existing-evidence versus new-execution boundary primary; express non-ownership as a compact handoff to the owning node |
-| [`capabilityPlanner.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts) | Several useful planning invariants are phrased only as prohibitions | Define the valid relationship among `next_task`, `remaining_plan`, and an execution boundary first; retain narrow non-duplication constraints if evals need them |
-| [`capabilityDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts) | The node boundary is mostly an anti-list even though the schema has one positive responsibility | Lead with selecting exactly one available executor for the immutable current task; let schema and graph ownership carry the mechanical exclusions |
-| [`outcomeDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts) | The densest anti-list repeats what several other nodes own | Define verdict evidence and the transition owned by each outcome, then remove exclusions already made impossible by the schema or runtime |
-| [`answer.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts) | The accepted completion shape is partly expressed as “do not repeat” | Preserve the fixed completion acknowledgement, but describe what the close should contain and when historical content should be replayed |
+| [`entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts) | The prompt defines `answer`, one execution boundary, and multiple execution boundaries by evidence sufficiency and execution shape | Validate unnecessary execution and unsupported answers across models before changing the production boundary |
+| [`capabilityPlanner.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts) | The prompt owns mode-specific planning, task grouping, and deferred-work judgment; the schema owns output relationships | Validate grouping, cancellation, and future-tail preservation across models |
+| [`capabilityDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts) | The prompt selects the best executor for the current task; schema and runtime own available-lane enforcement | Validate custom/general selection and missing-parameter behavior across models |
+| [`outcomeDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts) | The prompt identifies verdict evidence; the schema owns verdict meanings and `gap_note`; runtime owns transitions | Validate task acceptance, sibling-result isolation, and stopping behavior across models |
+| [`answer.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts) | The prompt defines direct reply, handoff synthesis, historical replay, and user-question modes; runtime retains the fixed completion acknowledgement | Validate answer quality, replay fidelity, and repetition without changing the accepted close structure |
 
-Each item must be evaluated independently. A clause should not be removed merely
-because it is negative, and the current entryDecision issue must not become a
-reason to rewrite unrelated node semantics.
+Future changes still evaluate each node independently. A shorter prompt is not a
+standing objective, and one node's measured regression is not authority to
+rewrite unrelated node semantics.
 
 ## CapabilityDecision pilot evidence
 
-The first #417 implementation candidate applies the review lens to
-`capabilityDecision` only:
+The first merged #417 change applied the review lens to `capabilityDecision`
+only:
 
 - the production prompt states one task: choose the lane that best matches the
   already-defined current task;
@@ -235,7 +237,7 @@ revision.
 
 ## CapabilityPlanner pilot evidence
 
-The second #417 implementation candidate applies the same review lens to
+The second merged #417 change applied the same review lens to
 `capabilityPlanner` only:
 
 - the production prompt keeps the entry/boundary planning judgment, task
@@ -259,7 +261,7 @@ Prompt Contract Map does not gain a wording-only revision.
 
 ## OutcomeDecision pilot evidence
 
-The third #417 implementation candidate applies the same ownership split to
+The third merged #417 change applied the same ownership split to
 `outcomeDecision`:
 
 - the production prompt defines which context provides the current-task and
@@ -282,8 +284,8 @@ Contract Map does not gain a wording-only revision.
 
 ## Answer pilot evidence
 
-The fourth #417 implementation candidate applies positive-first wording to the
-user-visible answer boundary:
+The fourth merged #417 change applied positive-first wording to the user-visible
+answer boundary:
 
 - the static prompt defines four reply modes: direct answer, handoff synthesis,
   faithful historical replay, and a focused user question;
@@ -305,8 +307,8 @@ semantic revision.
 
 ## Shared-prefix pilot evidence
 
-The final #417 prompt-ownership candidate reduces the common decision prefix to
-the facts every decision node needs:
+The final merged #417 change reduced the common decision prefix to the facts
+every decision node needs:
 
 - decisions use the context supplied to the current invocation;
 - each node returns only its owned structured judgment;
@@ -321,7 +323,7 @@ absence of a global flow/glossary inventory.
 
 For one canonical case per decision node, prompt preview changed as follows:
 
-| Node | Before | Candidate |
+| Node | Before | Merged V1 |
 |---|---:|---:|
 | `entryDecision` | approximately 1,637 tokens | approximately 971 tokens |
 | `capabilityPlanner` | approximately 1,135 tokens | approximately 470 tokens |
@@ -349,10 +351,11 @@ separate owner, documented in
 
 ## Acceptance status
 
-This page remains a **draft synthesis**. Implementation candidates now cover the
-four decision nodes, the shared decision prefix, and `answer`; real-model
-comparison is still required before claiming behavioral improvement or promoting
-the page to `validated`. Implementation and validation are tracked in
-[issue #417](https://github.com/pinpawo/pinpawo-agent/issues/417), with contract
-traceability tracked separately in
+The V1 implementation is complete across the four decision nodes, the shared
+decision prefix, and `answer`. This page remains a **draft synthesis** because
+local contract coverage and prompt-size measurements do not establish real-model
+behavioral improvement. Cross-model accuracy, unnecessary execution, replay,
+latency, token, and cost validation is deferred to
+[issue #435](https://github.com/pinpawo/pinpawo-agent/issues/435). Contract
+traceability is maintained by the map established in
 [issue #415](https://github.com/pinpawo/pinpawo-agent/issues/415).

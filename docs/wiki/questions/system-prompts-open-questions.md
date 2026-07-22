@@ -2,10 +2,11 @@
 title: System Prompt Design Open Questions
 page_type: question
 status: draft
-updated: 2026-07-20
+updated: 2026-07-22
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../investigations/entry-decision-state-query-routing.md
+  - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
   - ../overview.md
   - ../concepts/prompt-knowledge-layers.md
@@ -15,48 +16,47 @@ related:
 
 # System Prompt Design Open Questions
 
-## P0 — action semantics and evidence
+## Resolved for V1
 
-### What exactly counts as a new execution result?
+### What counts as a new execution result?
 
-The design needs a stable, domain-independent definition that covers read-only
-observation without adding examples for every mutable system.
+[PR #421](https://github.com/pinpawo/pinpawo-agent/pull/421) established a
+stable, domain-independent contract: a new observation, read, search, lookup,
+verification, calculation, command, tool result, or external/current-state
+check is execution when the evidence is not already in the canonical
+conversation. Read-only work still counts as execution.
 
-Closure evidence:
+The remaining provider-level validation is tracked in
+[issue #435](https://github.com/pinpawo/pinpawo-agent/issues/435), rather than
+reopening this design question.
 
-- agreed contract wording;
-- cross-domain entryDecision evals;
-- no regression in explicit-context summary cases.
+### Is the minimal Prompt Contract Map sufficient?
+
+Yes for the current V1 scope. [Issue
+#415](https://github.com/pinpawo/pinpawo-agent/issues/415) established one row
+per stable behavior contract with five relations: contract, owner, design
+source, implementation, and verification. The #416 and #417 changes were
+represented without adding a clause manifest or another persistent field.
+
+Revisit the map shape only when a concrete contract cannot be traced with these
+relations.
+
+## P1 — evidence validation
 
 ### What evidence makes an existing-state answer safe?
 
 A handoff may explicitly report a fact, while an ordinary assistant message may
-only repeat an intention. The boundary between sufficient recorded evidence and
-required re-observation is not yet canonical.
+only repeat an intention. The production boundary is now canonical, but
+provider-level sufficiency and freshness behavior still needs measured evidence.
 
-Closure evidence:
+Validation evidence:
 
 - evidence-role definition tied to message provenance;
 - evals for explicit handoff evidence, stale observations, and unsupported
-  inference.
+  inference;
+- route accuracy and unnecessary-execution comparison across supported models.
 
-## P1 — prompt traceability
-
-### Is the minimal Prompt Contract Map sufficient?
-
-Current knowledge is spread across prompt files, design documents, PRs, and tests.
-The [initial map](../overview.md#prompt-contract-map) now records one row per
-stable behavior contract.
-
-The first version deliberately has only five columns: contract, owner, design
-source, implementation, and verification. It does not inventory every clause or
-introduce a manifest, lifecycle model, model-scope field, or dedicated lint tool.
-
-Closure evidence:
-
-- reviewers can follow every current node contract to code and evals;
-- #416 and #417 can update the map without creating clause-level churn;
-- no missing relationship requires adding another persistent field.
+## P1 — prompt governance
 
 ### Does the repository need configurable product policy in prompts?
 

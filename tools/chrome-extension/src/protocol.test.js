@@ -42,6 +42,9 @@ test('extension errors preserve structured recovery details', () => {
     details: {
       approvedOrigin: 'https://example.com',
       actualOrigin: 'https://login.example.com',
+      manualActionRequired: true,
+      recovery: 'complete_popup_manually',
+      interactionDispatched: true,
     },
   });
 
@@ -52,6 +55,9 @@ test('extension errors preserve structured recovery details', () => {
     details: {
       approvedOrigin: 'https://example.com',
       actualOrigin: 'https://login.example.com',
+      manualActionRequired: true,
+      recovery: 'complete_popup_manually',
+      interactionDispatched: true,
     },
   });
 });

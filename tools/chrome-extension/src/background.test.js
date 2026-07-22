@@ -23,7 +23,7 @@ test('snapshot reads enforce snapshot URL and post-read committed origin checks'
     /async function readSnapshot\(tabId, approvedOrigin\) \{([\s\S]*?)\n\}/,
   )?.[1] ?? '';
 
-  assert.match(readSnapshot, /validateSnapshotOrigin\(snapshot, approvedOrigin\)/);
+  assert.match(readSnapshot, /validateSnapshotOrigin\(snapshot, approvedOrigin, tabId\)/);
   assert.ok(
     (readSnapshot.match(/await assertApprovedOrigin\(tabId, approvedOrigin\)/g) ?? []).length >= 2,
     'readSnapshot must check the committed origin before and after snapshot collection',
@@ -75,6 +75,9 @@ test('popup tabs are followed inside the extension target lifecycle', async () =
   assert.match(source, /switchToPopup[\s\S]*?rollbackPopupSwitch/);
   assert.match(source, /tabs\.onCreated\.addListener[\s\S]*?POPUP_NAVIGATION_TIMEOUT_MS[\s\S]*?switchToPopup/);
   assert.match(source, /targets\.remove\(tabId\)[\s\S]*?saveTarget\(removed\.current\)/);
+  assert.match(source, /originChangedError[\s\S]*?manualActionRequired: true[\s\S]*?complete_popup_manually/);
+  assert.match(source, /readInteractionResult[\s\S]*?interactionDispatched: true/);
+  assert.doesNotMatch(source, /approve the new URL before reading it/);
 });
 
 test('selector actions use a bounded extension-side retry without retrying stale refs', async () => {

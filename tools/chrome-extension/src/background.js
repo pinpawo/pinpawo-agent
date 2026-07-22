@@ -288,6 +288,26 @@ async function currentUrl(tabId) {
   return entry.url;
 }
 
+function originChangedError(tabId, approvedOrigin, actualOrigin) {
+  const manualActionRequired = targets.current()?.tabId === tabId
+    && targets.history().length > 0;
+  return new ExtensionError(
+    'origin_changed',
+    manualActionRequired
+      ? 'Cross-origin popup access is blocked. Ask the user to complete it manually, then retry after it closes or returns to the approved origin.'
+      : `The tab navigated outside the approved origin (${approvedOrigin}). Use browser_open with an approved URL before reading it.`,
+    false,
+    {
+      approvedOrigin,
+      ...(typeof actualOrigin === 'string' ? { actualOrigin } : {}),
+      ...(manualActionRequired ? {
+        manualActionRequired: true,
+        recovery: 'complete_popup_manually',
+      } : {}),
+    },
+  );
+}
+
 async function assertApprovedOrigin(tabId, approvedOrigin) {
   if (typeof approvedOrigin !== 'string' || !approvedOrigin) {
     throw new ExtensionError('origin_approval_missing', 'No approved origin was supplied');
@@ -295,24 +315,20 @@ async function assertApprovedOrigin(tabId, approvedOrigin) {
   const url = await currentUrl(tabId);
   const actualOrigin = originOf(url);
   if (actualOrigin !== approvedOrigin) {
-    throw new ExtensionError(
-      'origin_changed',
-      `The tab navigated outside the approved origin (${approvedOrigin}); approve the new URL before reading it.`,
-      false,
-      { approvedOrigin, actualOrigin },
-    );
+    throw originChangedError(tabId, approvedOrigin, actualOrigin);
   }
   return url;
 }
 
-function validateSnapshotOrigin(snapshot, approvedOrigin) {
+function validateSnapshotOrigin(snapshot, approvedOrigin, tabId) {
   try {
     return assertSnapshotApprovedOrigin(snapshot, approvedOrigin);
   } catch {
-    throw new ExtensionError(
-      'origin_changed',
-      `The snapshot did not come from the approved origin (${approvedOrigin}); approve the current URL before reading it.`,
-    );
+    let actualOrigin;
+    try {
+      actualOrigin = originOf(snapshot?.url);
+    } catch {}
+    throw originChangedError(tabId, approvedOrigin, actualOrigin);
   }
 }
 
@@ -351,9 +367,25 @@ async function readSnapshot(tabId, approvedOrigin) {
       );
     }
   }
-  validateSnapshotOrigin(snapshot, approvedOrigin);
+  validateSnapshotOrigin(snapshot, approvedOrigin, tabId);
   await assertApprovedOrigin(tabId, approvedOrigin);
   return snapshot;
+}
+
+async function readInteractionResult(tabId, approvedOrigin) {
+  try {
+    return await readSnapshot(tabId, approvedOrigin);
+  } catch (error) {
+    if (error instanceof ExtensionError && error.code === 'origin_changed') {
+      throw new ExtensionError(
+        error.code,
+        error.message,
+        error.retryable,
+        { ...error.details, interactionDispatched: true },
+      );
+    }
+    throw error;
+  }
 }
 
 async function evaluateValue(tabId, expression) {
@@ -646,7 +678,7 @@ async function readExtract(tabId, params, approvedOrigin) {
     tabId,
     buildExtractExpression(params.selector, offset, limit),
   ));
-  validateSnapshotOrigin(result, approvedOrigin);
+  validateSnapshotOrigin(result, approvedOrigin, tabId);
   await assertApprovedOrigin(tabId, approvedOrigin);
   const { ok: _ok, ...raw } = result;
   return raw;
@@ -708,7 +740,7 @@ async function executeCommand(command) {
     await delay(150, command.deadlineAt);
     const followedTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
     const resultTarget = await requireLiveResultTarget(followedTarget ?? activeTarget);
-    return await readSnapshot(resultTarget.tabId, approvedOrigin);
+    return await readInteractionResult(resultTarget.tabId, approvedOrigin);
   }
   if (command.command === 'type') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
@@ -716,7 +748,7 @@ async function executeCommand(command) {
     await delay(100, command.deadlineAt);
     const followedTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
     const resultTarget = await requireLiveResultTarget(followedTarget ?? activeTarget);
-    return await readSnapshot(resultTarget.tabId, approvedOrigin);
+    return await readInteractionResult(resultTarget.tabId, approvedOrigin);
   }
   if (command.command === 'scroll') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);

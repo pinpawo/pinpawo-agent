@@ -69,6 +69,9 @@ test('browser extension protocol validates structured error details', () => {
       details: {
         approvedOrigin: 'https://example.com',
         actualOrigin: 'https://login.example.com',
+        manualActionRequired: true,
+        recovery: 'complete_popup_manually',
+        interactionDispatched: true,
       },
     },
   });
@@ -77,6 +80,9 @@ test('browser extension protocol validates structured error details', () => {
   assert.deepEqual(message.error?.details, {
     approvedOrigin: 'https://example.com',
     actualOrigin: 'https://login.example.com',
+    manualActionRequired: true,
+    recovery: 'complete_popup_manually',
+    interactionDispatched: true,
   });
 });
 

@@ -2,7 +2,7 @@
 title: Delegation Completion Acknowledgement
 page_type: decision
 status: validated
-updated: 2026-07-20
+updated: 2026-07-23
 sources:
   - ../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts
   - https://github.com/pinpawo/pinpawo-agent/pull/338
@@ -34,12 +34,19 @@ The implementation is
 [`buildDelegationCompletionAnswerContext()`](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts).
 It is selected from handoff provenance rather than message text.
 
+Provenance remains a runtime concern. The context shown to the answer model uses
+the user goal, the completed work, and the required user-visible close; it does
+not require the model to understand handoff, delegation, run identifiers, or the
+rest of the orchestration flow.
+
 ## Constraints
 
 - Keep the completion acknowledgement as a distinct final main message.
 - Keep accepted handoff content in main as the task result.
 - Do not collapse the acknowledgement into the handoff merely to reduce tokens.
 - Do not infer completion mode from wording in the handoff body.
+- Express the model-visible reply objective in user-facing task and status terms;
+  keep lifecycle identifiers in runtime provenance.
 - Changes to wording may be considered separately, but must preserve the stable
   message lifecycle and the non-repetition purpose.
 

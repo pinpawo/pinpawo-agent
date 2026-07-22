@@ -42,10 +42,21 @@ test('answer eval renders the production prompt and fixed completion context', (
   );
   assert.ok(scenario);
   const text = scenario.render().map((message) => String(message.content)).join('\n');
-  assert.match(text, /orchestrator 的最终回复节点/);
-  assert.match(text, /delegation completion acknowledgement/);
-  assert.match(text, /delegated task：汇总本周发布风险/);
+  assert.match(text, /本次用户目标（引用）/);
+  assert.match(text, /汇总本周发布风险/);
+  assert.match(text, /上一条消息已经完整呈现工作结果/);
+  assert.match(text, /简短确认"汇总本周发布风险"已经完成/);
+  assert.doesNotMatch(text, /orchestrator|handoff|delegation|subagent/);
   assert.match(text, /RESULT_BODY_START/);
+});
+
+test('answer eval renders the current user goal for an ordinary reply', () => {
+  const scenario = getAnswerEvalScenarios().find(({ caseName }) => caseName === 'direct-answer');
+  assert.ok(scenario);
+  const text = scenario.render().map((message) => String(message.content)).join('\n');
+  assert.match(text, /本次用户目标（引用）/);
+  assert.match(text, /只回答这个问题：2 \+ 3 等于多少/);
+  assert.match(text, /根据主对话已有信息完成该用户目标/);
 });
 
 test('answer eval distinguishes requested historical replay from completion-body repetition', async () => {

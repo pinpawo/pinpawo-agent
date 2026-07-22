@@ -2,7 +2,7 @@
 title: Prompt Knowledge Layers
 page_type: concept
 status: draft
-updated: 2026-07-20
+updated: 2026-07-23
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md
@@ -39,6 +39,14 @@ longer has one contract.
 Injected facts must not become a second instruction channel. Dynamic task or
 candidate content describes the current situation; it does not get to redefine
 the node.
+
+A runtime may materialize a stable contract for the current typed state. Such
+context remains bounded by code: callers cannot supply arbitrary policy text,
+and the injected objective cannot add a new behavior outside the node's accepted
+contract. For `answer`, the runtime identifies the latest user goal and selects
+the applicable reply objective from conversation provenance or terminal state.
+The static prompt therefore does not need the vocabulary of the full execution
+flow.
 
 Deterministic conditions should be enforced in code even if the prompt mentions
 them for context. The model is not the sole guard for availability, iteration

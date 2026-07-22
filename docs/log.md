@@ -152,3 +152,15 @@ lint passes, and documentation migrations.
   task success.
 - Mapped entry, planner, capability, outcome, and answer contracts to their
   concrete goal evidence, error taxonomy, and non-gating runtime metrics.
+
+## [2026-07-23] refinement | Answer reply objective
+
+- Kept the fixed post-delegation acknowledgement as a distinct final main
+  message.
+- Reduced the static answer prompt to its user-visible responsibility and
+  canonical conversation evidence.
+- Derived the current user goal, reply objective, and terminal status from
+  runtime state without exposing orchestration vocabulary or identifiers to the
+  answer model.
+- Kept the change within the existing `answer.user-visible-close` contract and
+  prompt knowledge layers rather than adding another Wiki concept.

@@ -891,12 +891,11 @@ test('a completed subagent announce reaches the decision, while answer node only
   // tells it to close the delegation turn instead of re-summarizing the result.
   assert.match(answerInput, /END_OF_FULL_SUBAGENT_RESULT/);
   assert.ok(answerInput.includes('A'.repeat(1400)), 'answer node should still see complete main history');
-  assert.match(answerInput, /delegation completion acknowledgement/);
-  assert.match(answerInput, /本条消息用于关闭 delegation 生命周期/);
-  assert.match(answerInput, /内容限定为：本次处理了哪类 delegation task/);
-  assert.doesNotMatch(answerInput, /不要把回复写成对任务处理结果正文的二次总结/);
-  assert.match(answerInput, /delegation run：/);
-  assert.match(answerInput, /delegated task：读取文件并运行 lint/);
+  assert.match(answerInput, /本次用户目标（引用）/);
+  assert.match(answerInput, /读取文件并运行 lint/);
+  assert.match(answerInput, /上一条消息已经完整呈现工作结果/);
+  assert.match(answerInput, /简短确认"读取文件并运行 lint"已经完成/);
+  assert.doesNotMatch(answerInput, /orchestrator|handoff|delegation|subagent/);
 });
 
 test('answer node still sees compacted older results when the user asks to re-show them', async () => {
@@ -1005,9 +1004,9 @@ test('delegation outcome answer asks LLM for a short delegation completion reply
 
   assert.equal(finalMessageText, '执行器已经交付结果，我这边已完成收尾。');
   assert.match(answerInput, new RegExp(announceMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(answerInput, /delegation completion acknowledgement/);
-  assert.match(answerInput, /delegation 来源：general/);
-  assert.match(answerInput, /delegated task：搜索并整理 vibecoding 模型排行榜。/);
+  assert.match(answerInput, /上一条消息已经完整呈现工作结果/);
+  assert.match(answerInput, /简短确认"搜索并整理 vibecoding 模型排行榜。"已经完成/);
+  assert.doesNotMatch(answerInput, /orchestrator|handoff|delegation|subagent/);
 });
 
 test('answer decision emits no reply itself and routes to the dedicated answer node', async () => {
@@ -3441,8 +3440,8 @@ test('terminal outcome decision keeps active delegation when handoff cannot be b
   assert.equal(state.taskActiveDelegation?.id, 'active-1');
   assert.equal(state.taskActiveDelegation?.lane, 'capability:explore');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.id), ['active-1']);
-  assert.doesNotMatch(answerSystemContext, /达到本 run 的迭代上限/);
-  assert.match(answerSystemContext, /尚无可交接的完成结果/);
+  assert.doesNotMatch(answerSystemContext, /达到执行上限/);
+  assert.match(answerSystemContext, /暂时没有可交付结果/);
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /暂不能完成任务边界切换/);
 });
 
@@ -4111,7 +4110,7 @@ test('delegation outcome uses a unified run-iteration guard before invoking deci
     },
   }) as OrchestratorStateType;
 
-  assert.match(answerSystemContext, /task loop 已达到本 run 的迭代上限/);
+  assert.match(answerSystemContext, /本次处理已达到执行上限/);
   assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
   assert.equal(state.runIterationCount, 0);
   assert.equal(state.runPendingTask, null);

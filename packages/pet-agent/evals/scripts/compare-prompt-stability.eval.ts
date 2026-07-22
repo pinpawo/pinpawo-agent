@@ -47,7 +47,7 @@ function main() {
   for (const row of comparison.rows) {
     console.log(
       `- ${row.target}/${row.caseId}: `
-      + `pass ${formatPercent(row.baselinePassRate)} -> ${formatPercent(row.candidatePassRate)} `
+      + `goal achievement ${formatPercent(row.baselinePassRate)} -> ${formatPercent(row.candidatePassRate)} `
       + `(${signed(row.passRateDelta * 100, 1)}pp); `
       + `latency ${signed(row.meanDurationDeltaMs)}ms; `
       + `tokens ${row.meanTokensDelta === null ? 'n/a' : signed(row.meanTokensDelta, 1)}`,

@@ -223,14 +223,24 @@ The prompt stability runner extends decision coverage with the production
 npm run eval:prompt-stability
 ```
 
-It writes a versioned JSON report under `.eval-results/`. Each report records the
-exact tested Git commit, harness commit, dirty state and diff hash, changed paths,
-provider, model family and model id,
+It writes a versioned JSON report under `.eval-results/`. Each case instantiates
+an existing Prompt Contract as one concrete objective with explicit acceptance
+criteria. The report records goal achievement separately from invocation/schema
+status and non-gating diagnostics such as length, overlap, latency, and output
+variation. It also records the exact tested Git commit, harness commit, dirty
+state and diff hash, changed paths, provider, model family and model id,
 temperature, reasoning effort, structured-output method, selected datasets and
-cases, repetitions, semantic scores, schema/invocation failures, latency, and
-provider-reported token usage. The runner requires a clean worktree by default;
+cases, repetitions, and provider-reported token usage. The runner requires a clean worktree by default;
 `PROMPT_EVAL_ALLOW_DIRTY=1` is available for exploratory runs, whose reports stay
 marked as dirty.
+
+Decision-node objectives use deterministic contract criteria. Free-form `answer`
+objectives are evaluated against the canonical conversation and case-specific
+acceptance criteria by the same configured model using the versioned
+`answer-goal-v1` evaluator. The report records that evaluator configuration and
+keeps answer-generation usage separate from evaluator usage. A malformed or
+failed evaluator call makes the run not evaluable; it does not count as a failed
+answer objective.
 
 The answer cases keep two different contracts separate:
 
@@ -286,10 +296,10 @@ npm run eval:prompt-compare -- \
   .eval-results/candidate.json
 ```
 
-The comparison prints pass-rate, mean-latency, and mean-token deltas for the
+The comparison prints goal-achievement-rate, mean-latency, and mean-token deltas for the
 intersection of cases. It reports baseline-only and candidate-only cases
 separately, and rejects comparisons whose provider, model, reasoning effort,
-temperature, or structured-output settings differ. Reports are evidence inputs;
+temperature, structured-output, or evaluator settings differ. Reports are evidence inputs;
 they do not update production prompts or establish a cross-model improvement on
 their own.
 

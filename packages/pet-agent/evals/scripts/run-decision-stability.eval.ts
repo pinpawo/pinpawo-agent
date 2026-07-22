@@ -4,7 +4,11 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { getAnswerEvalScenarios } from '../answer-eval-scenarios.ts';
+import {
+  AnswerEvalJudgeError,
+  getAnswerEvalScenarios,
+  type AnswerEvalJudge,
+} from '../answer-eval-scenarios.ts';
 import {
   getDecisionEvalScenarios,
   type DecisionEvalRunResult,
@@ -29,6 +33,8 @@ const DEFAULT_REPEATS = 5;
 
 type PromptEvalScenario = {
   target: PromptEvalTarget;
+  contract: string;
+  objective: string;
   datasetName: string;
   caseId: string;
   caseName: string;
@@ -36,7 +42,8 @@ type PromptEvalScenario = {
     model: AgentModels['act'],
     method: StructuredOutputMethod | undefined,
     config: RunnableConfig,
-  ): Promise<DecisionEvalRunResult>;
+    judge: AnswerEvalJudge,
+  ): Promise<DecisionEvalRunResult & { diagnostics?: Record<string, unknown> }>;
 };
 
 function splitList(value: string | undefined): string[] {
@@ -65,12 +72,17 @@ function readTargets(): PromptEvalTarget[] {
   return validateTargets(requested, 'PROMPT_EVAL_TARGETS');
 }
 
-function compactError(error: unknown): { kind: 'schema' | 'invoke'; message: string } {
+function compactError(error: unknown): {
+  kind: 'schema' | 'invoke' | 'evaluation';
+  message: string;
+} {
   const name = error instanceof Error ? error.name : typeof error;
   const message = error instanceof Error ? error.message : String(error);
-  const kind = name === 'ZodError' || /structured output|schema|validation/i.test(message)
-    ? 'schema'
-    : 'invoke';
+  const kind = error instanceof AnswerEvalJudgeError
+    ? 'evaluation'
+    : name === 'ZodError' || /structured output|schema|validation/i.test(message)
+      ? 'schema'
+      : 'invoke';
   return { kind, message: `${name}: ${message}`.slice(0, 500) };
 }
 
@@ -140,6 +152,7 @@ function getPromptEvalScenarios(): PromptEvalScenario[] {
         model: AgentModels['act'],
         method: StructuredOutputMethod | undefined,
         config: RunnableConfig,
+        _judge: AnswerEvalJudge,
       ) => scenario.run(model, method, config),
     })),
     ...getAnswerEvalScenarios().map((scenario) => ({
@@ -148,7 +161,8 @@ function getPromptEvalScenarios(): PromptEvalScenario[] {
         model: AgentModels['act'],
         _method: StructuredOutputMethod | undefined,
         config: RunnableConfig,
-      ) => scenario.run(model, config),
+        judge: AnswerEvalJudge,
+      ) => scenario.run(model, config, judge),
     })),
   ];
 }
@@ -179,6 +193,19 @@ async function main() {
   const structuredOutputMethod = targets.some((target) => target !== 'answer')
     ? modelConfig.method ?? 'provider-default'
     : 'not-applicable';
+  const evaluator = targets.includes('answer')
+    ? {
+        mode: 'subject-model' as const,
+        version: 'answer-goal-v1' as const,
+        model: modelConfig.metadata,
+        structuredOutputMethod: modelConfig.method ?? 'provider-default' as const,
+      }
+    : {
+        mode: 'not-applicable' as const,
+        version: 'not-applicable' as const,
+        model: null,
+        structuredOutputMethod: 'not-applicable' as const,
+      };
   console.log('Orchestrator prompt stability eval');
   console.log(`Revision: ${revision.commit}${revision.dirty ? ' (dirty)' : ''}`);
   console.log(`Harness revision: ${revision.harnessCommit}`);
@@ -186,6 +213,9 @@ async function main() {
   console.log(`Model family: ${modelConfig.metadata.family}`);
   console.log(`Reasoning effort: ${modelConfig.metadata.reasoningEffort}`);
   console.log(`Structured output method: ${structuredOutputMethod}`);
+  if (evaluator.mode !== 'not-applicable') {
+    console.log(`Evaluator: ${evaluator.version} (${evaluator.mode}, ${evaluator.structuredOutputMethod})`);
+  }
   console.log(`Targets: ${targets.join(', ')}`);
   console.log(`Repeats: ${repeats.toString()}`);
   console.log(`Cases: ${scenarios.length.toString()}`);
@@ -196,6 +226,7 @@ async function main() {
     for (let repeat = 1; repeat <= repeats; repeat += 1) {
       const started = performance.now();
       const usageCollector = createPromptEvalUsageCollector();
+      const evaluationUsageCollector = createPromptEvalUsageCollector();
       try {
         const result = await scenario.run(modelConfig.model, modelConfig.method, {
           callbacks: [usageCollector.callback],
@@ -205,48 +236,81 @@ async function main() {
             promptEvalCaseId: scenario.caseId,
             promptEvalRepeat: repeat,
           },
+        }, {
+          model: modelConfig.model,
+          method: modelConfig.method,
+          config: {
+            callbacks: [evaluationUsageCollector.callback],
+            runName: `prompt-eval-judge-${scenario.target}-${scenario.caseName}`,
+            metadata: {
+              promptEvalRevision: revision.commit,
+              promptEvalCaseId: scenario.caseId,
+              promptEvalRepeat: repeat,
+              promptEvalEvaluator: 'answer-goal-v1',
+            },
+          },
         });
         const usage = usageCollector.read();
-        const failedScores = result.scores.filter(({ score }) => score !== 1).map(({ key }) => key);
-        const ok = failedScores.length === 0;
+        const evaluationUsage = evaluationUsageCollector.read();
+        const failedCriteria = result.scores.filter(({ score }) => score !== 1).map(({ key }) => key);
+        const goalAchieved = failedCriteria.length === 0;
         results.push({
           target: scenario.target,
           caseId: scenario.caseId,
+          contract: scenario.contract,
+          objective: scenario.objective,
           repeat,
-          ok,
+          goalAchieved,
           durationMs: Math.round(performance.now() - started),
           verdict: result.verdict,
           outputShape: result.shape,
           outputFingerprint: fingerprint(result.output),
-          failedScores,
+          criteria: result.scores,
+          failedCriteria,
+          diagnostics: result.diagnostics ?? {},
           failureKind: null,
           error: null,
           usage,
           estimatedCostUsd: estimatePromptEvalCost(usage, modelConfig.pricing),
+          evaluationUsage,
+          evaluationEstimatedCostUsd: estimatePromptEvalCost(
+            evaluationUsage,
+            modelConfig.pricing,
+          ),
         });
         console.log(
-          `[${ok ? 'PASS' : 'FAIL'}] ${scenario.target}/${scenario.caseName} `
+          `[${goalAchieved ? 'ACHIEVED' : 'NOT ACHIEVED'}] ${scenario.target}/${scenario.caseName} `
           + `repeat=${repeat.toString()} verdict=${result.verdict}`
-          + (failedScores.length > 0 ? ` failed=${failedScores.join(',')}` : '')
+          + (failedCriteria.length > 0 ? ` failed=${failedCriteria.join(',')}` : '')
           + ` output=${previewOutput(result.output)}`,
         );
       } catch (error) {
         const failure = compactError(error);
         const usage = usageCollector.read();
+        const evaluationUsage = evaluationUsageCollector.read();
         results.push({
           target: scenario.target,
           caseId: scenario.caseId,
+          contract: scenario.contract,
+          objective: scenario.objective,
           repeat,
-          ok: false,
+          goalAchieved: null,
           durationMs: Math.round(performance.now() - started),
           verdict: null,
           outputShape: null,
           outputFingerprint: null,
-          failedScores: [],
+          criteria: [],
+          failedCriteria: [],
+          diagnostics: {},
           failureKind: failure.kind,
           error: failure.message,
           usage,
           estimatedCostUsd: estimatePromptEvalCost(usage, modelConfig.pricing),
+          evaluationUsage,
+          evaluationEstimatedCostUsd: estimatePromptEvalCost(
+            evaluationUsage,
+            modelConfig.pricing,
+          ),
         });
         console.log(
           `[ERROR] ${scenario.target}/${scenario.caseName} repeat=${repeat.toString()} `
@@ -260,17 +324,21 @@ async function main() {
   const summaries = summarizeDecisionStability(results);
   for (const summary of summaries) {
     console.log(
-      `- ${summary.target}/${summary.caseId}: ${summary.passed.toString()}/${summary.runs.toString()} passed; `
+      `- ${summary.target}/${summary.caseId}: ${summary.goalsAchieved.toString()}/${summary.runs.toString()} goals achieved; `
       + `verdicts=[${formatDistribution(summary.verdictDistribution)}]; `
       + `shapes=[${formatDistribution(summary.outputShapeDistribution)}]; `
       + `variants=${summary.outputVariants.toString()}; `
       + `schemaErrors=${summary.schemaFailures.toString()}; `
       + `invokeErrors=${summary.invokeFailures.toString()}; `
+      + `evaluationErrors=${summary.evaluationFailures.toString()}; `
       + `meanMs=${summary.meanDurationMs.toString()}; `
       + `tokens=${summary.usageRuns.toString()}/${summary.runs.toString()} runs,${summary.totalTokens.toString()} total`
+      + (summary.evaluationUsageRuns > 0
+        ? `; evaluationTokens=${summary.evaluationUsageRuns.toString()}/${summary.runs.toString()} runs,${summary.evaluationTotalTokens.toString()} total`
+        : '')
       + (summary.estimatedCostUsd === null ? '' : `; estimatedCostUsd=${summary.estimatedCostUsd.toString()}`)
-      + (Object.keys(summary.failedScoreDistribution).length > 0
-        ? `; failedScores=[${formatDistribution(summary.failedScoreDistribution)}]`
+      + (Object.keys(summary.failedCriterionDistribution).length > 0
+        ? `; failedCriteria=[${formatDistribution(summary.failedCriterionDistribution)}]`
         : ''),
     );
   }
@@ -279,6 +347,7 @@ async function main() {
     revision,
     model: modelConfig.metadata,
     structuredOutputMethod,
+    evaluator,
     pricing: modelConfig.pricing,
     selection: {
       targets,
@@ -296,10 +365,12 @@ async function main() {
   mkdirSync(dirname(reportPath), { recursive: true });
   writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 
-  const failed = results.filter(({ ok }) => !ok).length;
-  console.log(`\nOverall: ${(results.length - failed).toString()}/${results.length.toString()} passed.`);
+  const achieved = results.filter(({ goalAchieved }) => goalAchieved === true).length;
+  const notEvaluable = results.filter(({ goalAchieved }) => goalAchieved === null).length;
+  console.log(`\nOverall: ${achieved.toString()}/${results.length.toString()} goals achieved.`);
+  if (notEvaluable > 0) console.log(`Not evaluable: ${notEvaluable.toString()}.`);
   console.log(`Report: ${reportPath}`);
-  if (failed > 0) process.exitCode = 1;
+  if (achieved < results.length) process.exitCode = 1;
 }
 
 main().catch((error) => {

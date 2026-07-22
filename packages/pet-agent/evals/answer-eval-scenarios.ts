@@ -1,9 +1,14 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { z } from 'zod';
 import { buildAnswerSystemPrompt } from '../src/agent/orchestrator/prompts.ts';
 import { buildDelegationCompletionAnswerContext } from '../src/agent/orchestrator/runtime/nodes/answer.ts';
 import { readMessageText } from '../src/agent/orchestrator/utils.ts';
 import type { AgentModels } from '../src/types/agent.ts';
+import {
+  buildOrchestrationDecisionStructuredOutputOptions,
+} from '../src/agent/orchestrator/schemas.ts';
+import type { StructuredOutputMethod } from '../src/utils/structuredOutput.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
 import {
   answerBehaviorBasicsDataset,
@@ -16,16 +21,37 @@ export type AnswerEvalRunResult = {
   scores: DecisionContractScore[];
   verdict: string;
   shape: string;
+  diagnostics: Record<string, unknown>;
 };
+
+export type AnswerEvalJudge = {
+  model: AgentModels['act'];
+  method?: StructuredOutputMethod;
+  config?: RunnableConfig;
+};
+
+export class AnswerEvalJudgeError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'AnswerEvalJudgeError';
+    this.cause = cause;
+  }
+}
 
 export type AnswerEvalScenario = {
   target: 'answer';
+  contract: AnswerBehaviorExpectation['contract'];
+  objective: string;
   datasetName: string;
   caseId: string;
   caseName: string;
   expectedSummary: string;
   render(): BaseMessage[];
-  run(model: AgentModels['act'], config?: RunnableConfig): Promise<AnswerEvalRunResult>;
+  run(
+    model: AgentModels['act'],
+    config?: RunnableConfig,
+    judge?: AnswerEvalJudge,
+  ): Promise<AnswerEvalRunResult>;
 };
 
 const actor = {
@@ -52,47 +78,90 @@ function longestSharedSpan(left: string, right: string): number {
   return longest;
 }
 
-function scoreText(
+const answerGoalEvaluationSchema = z.object({
+  criteria: z.array(z.object({
+    id: z.string(),
+    met: z.boolean(),
+    reason: z.string(),
+  }).strict()),
+  summary: z.string(),
+}).strict();
+
+const ANSWER_GOAL_EVALUATOR_PROMPT = [
+  'Evaluate whether a candidate answer achieves the supplied user-visible objective.',
+  'Judge every acceptance criterion independently using only the supplied conversation, runtime context, and candidate answer.',
+  'Accuracy and grounding require support from the supplied evidence. Treat unsupported additions as a failure when they affect a criterion.',
+  'Return exactly one result for every criterion id. Keep each reason concise and evidence-based.',
+].join('\n');
+
+async function evaluateGoal(
+  judge: AnswerEvalJudge,
+  testCase: AnswerBehaviorCase,
+  candidateAnswer: string,
+): Promise<{ scores: DecisionContractScore[]; summary: string }> {
+  const raw = await judge.model.withStructuredOutput(
+    answerGoalEvaluationSchema,
+    buildOrchestrationDecisionStructuredOutputOptions({ method: judge.method }),
+  ).invoke([
+    new SystemMessage(ANSWER_GOAL_EVALUATOR_PROMPT),
+    new HumanMessage(JSON.stringify({
+      contract: testCase.expected.contract,
+      objective: testCase.expected.objective,
+      acceptanceCriteria: testCase.expected.acceptanceCriteria,
+      conversation: testCase.input.messages,
+      runtimeContext: testCase.input.completionContext ?? null,
+      candidateAnswer,
+    })),
+  ], judge.config);
+  const evaluation = answerGoalEvaluationSchema.parse(raw);
+  const duplicateIds = evaluation.criteria
+    .map(({ id }) => id)
+    .filter((id, index, ids) => ids.indexOf(id) !== index);
+  if (duplicateIds.length > 0) {
+    throw new Error(`Answer evaluator returned duplicate criterion ids: ${duplicateIds.join(', ')}`);
+  }
+  const byId = new Map(evaluation.criteria.map((criterion) => [criterion.id, criterion]));
+  const expectedIds = new Set(testCase.expected.acceptanceCriteria.map(({ id }) => id));
+  const unexpectedIds = evaluation.criteria
+    .map(({ id }) => id)
+    .filter((id) => !expectedIds.has(id));
+  if (unexpectedIds.length > 0) {
+    throw new Error(`Answer evaluator returned unexpected criterion ids: ${unexpectedIds.join(', ')}`);
+  }
+  const missingIds = testCase.expected.acceptanceCriteria
+    .map(({ id }) => id)
+    .filter((id) => !byId.has(id));
+  if (missingIds.length > 0) {
+    throw new Error(`Answer evaluator omitted criterion ids: ${missingIds.join(', ')}`);
+  }
+  return {
+    scores: testCase.expected.acceptanceCriteria.map((criterion) => {
+      const result = byId.get(criterion.id)!;
+      return {
+        key: criterion.id,
+        statement: criterion.statement,
+        score: result.met ? 1 : 0,
+        comment: result.reason,
+      };
+    }),
+    summary: evaluation.summary,
+  };
+}
+
+function collectDiagnostics(
   text: string,
   expected: AnswerBehaviorExpectation,
   priorAssistantText: string,
-): DecisionContractScore[] {
-  const requiredAll = expected.requiredAll ?? [];
-  const requiredAny = expected.requiredAny ?? [];
-  const forbidden = expected.forbidden ?? [];
-  const normalizedText = text.toLowerCase();
-  const priorAssistantVerbatimSpan = longestSharedSpan(text, priorAssistantText);
-  return [
-    {
-      key: 'required_content_present',
-      score: requiredAll.every((item) => text.includes(item))
-        && (requiredAny.length === 0 || requiredAny.some((item) => text.includes(item))) ? 1 : 0,
-      comment: 'Answer should contain the case-specific facts or response signal.',
-    },
-    {
-      key: 'forbidden_content_absent',
-      score: forbidden.every((item) => !normalizedText.includes(item.toLowerCase())) ? 1 : 0,
-      comment: 'Answer should not expose internal terms, claim unperformed work, or replay forbidden result details.',
-    },
-    {
-      key: 'length_within_boundary',
-      score: expected.maxCharacters === undefined || text.length <= expected.maxCharacters ? 1 : 0,
-      comment: expected.maxCharacters === undefined
-        ? 'No case-specific length boundary.'
-        : `Answer should stay within ${expected.maxCharacters.toString()} characters.`,
-    },
-    {
-      key: 'prior_result_repetition_correct',
-      score: (
-        expected.minPriorAssistantVerbatimSpan === undefined
-        || priorAssistantVerbatimSpan >= expected.minPriorAssistantVerbatimSpan
-      ) && (
-        expected.maxPriorAssistantVerbatimSpan === undefined
-        || priorAssistantVerbatimSpan <= expected.maxPriorAssistantVerbatimSpan
-      ) ? 1 : 0,
-      comment: `longest shared span with prior assistant content=${priorAssistantVerbatimSpan.toString()}`,
-    },
-  ];
+): Record<string, unknown> {
+  const diagnostics: Record<string, unknown> = { characters: text.length };
+  if (expected.diagnostics?.referenceMaxCharacters !== undefined) {
+    diagnostics.referenceMaxCharacters = expected.diagnostics.referenceMaxCharacters;
+    diagnostics.withinReferenceLength = text.length <= expected.diagnostics.referenceMaxCharacters;
+  }
+  if (expected.diagnostics?.comparePriorAssistantText) {
+    diagnostics.longestPriorAssistantVerbatimSpan = longestSharedSpan(text, priorAssistantText);
+  }
+  return diagnostics;
 }
 
 function render(testCase: AnswerBehaviorCase): BaseMessage[] {
@@ -118,26 +187,36 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
 export function getAnswerEvalScenarios(): AnswerEvalScenario[] {
   return answerBehaviorBasicsDataset.cases.map((testCase) => ({
     target: 'answer',
+    contract: testCase.expected.contract,
+    objective: testCase.expected.objective,
     datasetName: answerBehaviorBasicsDataset.name,
     caseId: testCase.id,
     caseName: testCase.name,
     expectedSummary: testCase.expected.expectedBehavior,
     render: () => render(testCase),
-    async run(model, config) {
+    async run(model, config, judge) {
       const response = await model.invoke(render(testCase), config);
       const text = readMessageText(response).trim();
       const priorAssistantText = testCase.input.messages
         .filter(({ role }) => role === 'assistant')
         .map(({ text: messageText }) => messageText)
         .join('\n');
-      const scores = scoreText(text, testCase.expected, priorAssistantText);
+      const evaluation = await evaluateGoal(judge ?? { model, config }, testCase, text)
+        .catch((error: unknown) => {
+          throw new AnswerEvalJudgeError(error);
+        });
+      const diagnostics = collectDiagnostics(text, testCase.expected, priorAssistantText);
       return {
         output: { text },
-        scores,
-        verdict: scores.every(({ score }) => score === 1)
+        scores: evaluation.scores,
+        verdict: evaluation.scores.every(({ score }) => score === 1)
           ? testCase.expected.expectedBehavior
-          : 'behavior_mismatch',
+          : 'goal_not_achieved',
         shape: `characters=${text.length.toString()}`,
+        diagnostics: {
+          ...diagnostics,
+          evaluationSummary: evaluation.summary,
+        },
       };
     },
   }));

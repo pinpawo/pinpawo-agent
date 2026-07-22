@@ -10,17 +10,27 @@ function report(input: { commit: string; passed: boolean; meanDurationMs: number
   const result = {
     target: 'entry' as const,
     caseId: 'case-1',
+    contract: 'entry.execution-shape',
+    objective: 'Select answer from sufficient evidence.',
     repeat: 1,
-    ok: input.passed,
+    goalAchieved: input.passed,
     durationMs: input.meanDurationMs,
     verdict: 'answer',
     outputShape: 'task=0',
     outputFingerprint: '{}',
-    failedScores: input.passed ? [] : ['entry_mode_correct'],
+    criteria: [{
+      key: 'entry_mode_correct',
+      score: input.passed ? 1 as const : 0 as const,
+      comment: 'expected answer',
+    }],
+    failedCriteria: input.passed ? [] : ['entry_mode_correct'],
+    diagnostics: {},
     failureKind: null,
     error: null,
     usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
     estimatedCostUsd: 0.001,
+    evaluationUsage: null,
+    evaluationEstimatedCostUsd: null,
   };
   return createPromptEvalReport({
     revision: {
@@ -40,6 +50,12 @@ function report(input: { commit: string; passed: boolean; meanDurationMs: number
       timeoutMs: 1000,
     },
     structuredOutputMethod: 'jsonSchema',
+    evaluator: {
+      mode: 'not-applicable',
+      version: 'not-applicable',
+      model: null,
+      structuredOutputMethod: 'not-applicable',
+    },
     pricing: { inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 2 },
     selection: { targets: ['entry'], caseIds: ['case-1'], datasets: ['dataset'], repeats: 1 },
     results: [result],
@@ -47,36 +63,52 @@ function report(input: { commit: string; passed: boolean; meanDurationMs: number
       target: 'entry',
       caseId: 'case-1',
       runs: 1,
-      passed: input.passed ? 1 : 0,
+      goalsAchieved: input.passed ? 1 : 0,
+      goalsNotAchieved: input.passed ? 0 : 1,
+      goalsNotEvaluable: 0,
       schemaFailures: 0,
       invokeFailures: 0,
+      evaluationFailures: 0,
       outputVariants: 1,
       meanDurationMs: input.meanDurationMs,
       verdictDistribution: { answer: 1 },
       outputShapeDistribution: { 'task=0': 1 },
-      failedScoreDistribution: input.passed ? {} : { entry_mode_correct: 1 },
+      failedCriterionDistribution: input.passed ? {} : { entry_mode_correct: 1 },
       usageRuns: 1,
       inputTokens: 10,
       outputTokens: 2,
       totalTokens: 12,
       estimatedCostUsd: 0.001,
+      evaluationUsageRuns: 0,
+      evaluationInputTokens: 0,
+      evaluationOutputTokens: 0,
+      evaluationTotalTokens: 0,
+      evaluationEstimatedCostUsd: null,
     }],
   });
 }
 
 test('report totals preserve usage and cost coverage', () => {
   const value = report({ commit: 'baseline', passed: true, meanDurationMs: 20 });
-  assert.equal(value.reportVersion, 1);
+  assert.equal(value.reportVersion, 2);
   assert.deepEqual(value.totals, {
     runs: 1,
-    passed: 1,
+    goalsAchieved: 1,
+    goalsNotAchieved: 0,
+    goalsNotEvaluable: 0,
     schemaFailures: 0,
     invokeFailures: 0,
+    evaluationFailures: 0,
     usageRuns: 1,
     inputTokens: 10,
     outputTokens: 2,
     totalTokens: 12,
     estimatedCostUsd: 0.001,
+    evaluationUsageRuns: 0,
+    evaluationInputTokens: 0,
+    evaluationOutputTokens: 0,
+    evaluationTotalTokens: 0,
+    evaluationEstimatedCostUsd: null,
   });
 });
 
@@ -98,4 +130,18 @@ test('comparison rejects different harness revisions', () => {
   const comparison = comparePromptEvalReports(baseline, candidate);
   assert.equal(comparison.compatible, false);
   assert.ok(comparison.compatibilityNotes.includes('harness commit differs'));
+});
+
+test('comparison rejects different evaluator settings', () => {
+  const baseline = report({ commit: 'baseline', passed: true, meanDurationMs: 20 });
+  const candidate = report({ commit: 'candidate', passed: true, meanDurationMs: 20 });
+  candidate.evaluator = {
+    mode: 'subject-model',
+    version: 'answer-goal-v1',
+    model: candidate.model,
+    structuredOutputMethod: 'jsonSchema',
+  };
+  const comparison = comparePromptEvalReports(baseline, candidate);
+  assert.equal(comparison.compatible, false);
+  assert.ok(comparison.compatibilityNotes.includes('evaluator mode differs'));
 });

@@ -175,6 +175,76 @@ For a model upgrade:
 5. record model-specific clauses as conditional protocol rather than changing the
    shared meaning of an action.
 
+## Evaluation targets derived from Prompt Contracts
+
+The repository does not maintain an independent catalog of eval-quality
+dimensions. A real-model eval starts from an existing stable behavior in the
+[Prompt Contract Map](../overview.md#prompt-contract-map), then turns that
+contract into a concrete task objective. This keeps evaluation aligned with the
+same semantic owner as the production prompt.
+
+The current contracts produce three evaluation forms; these are applications of
+existing node ownership, not new prompt concepts:
+
+| Existing owned behavior | Eval target form | Current prompts |
+|---|---|---|
+| Choose the correct contract-defined judgment from supplied evidence | Judgment objective | `entryDecision`, `capabilityDecision`, `outcomeDecision` |
+| Materialize the contract-defined artifact while preserving its semantic relationships | Materialization objective | `capabilityPlanner` |
+| Fulfil the current user-visible communication objective from canonical conversation evidence | User-visible fulfilment objective | `answer` |
+
+The shared decision prefix has no independent task objective. Its structured
+judgment and graph/answer ownership are exercised through the decision nodes and
+verified mechanically where possible.
+
+### Case and result contract
+
+Every semantic case defines:
+
+1. the Prompt Contract row it instantiates;
+2. one concrete objective within that owner's scope;
+3. acceptance criteria that explain what completing the objective means for the
+   supplied evidence;
+4. the evaluator responsible for each criterion.
+
+The result keeps three layers distinct:
+
+- **Run status** records whether invocation and parsing produced an evaluable
+  output.
+- **Goal judgment** records whether the case objective was achieved; this is the
+  semantic pass/fail result.
+- **Evidence and diagnostics** record criterion findings, error classifications,
+  tokens, latency, cost, output size, variation, overlap, and provider metadata.
+
+A diagnostic does not become a goal criterion merely because it is easy to
+measure. For example, response length can reveal verbosity, but a character
+threshold cannot fail a clarification task unless a bounded response length is
+part of the accepted product behavior. Likewise, overlap can help explain
+repetition, but the completion-acknowledgement objective—not a global overlap
+threshold—determines whether the lifecycle was closed correctly.
+
+Deterministic evaluators own exact structured decisions and mechanical
+invariants. Free-form answer evaluation judges the objective against the user
+request, canonical evidence, and acceptance criteria; keyword presence alone is
+not sufficient evidence of completion. Evaluator identity and revision are part
+of the reproducible harness because changing the judge changes the experiment.
+
+### Current prompt objectives and metrics
+
+The primary metric for every node is goal success across representative cases.
+The remaining metrics either classify a failed objective or describe the run:
+
+| Prompt contract | Case objective | Goal-gating evidence | Error classification | Non-gating run diagnostics |
+|---|---|---|---|---|
+| `entry.execution-shape` | Select whether the request can be answered now, needs one execution boundary, or needs planning | Chosen action matches the evidence requirement; a direct task expresses the required boundary | unsupported answer, unnecessary execution, wrong boundary count | schema/invocation status, variants, tokens, latency, cost |
+| `planner.execution-boundary` | Materialize the next independently executable task and preserve only the valid future tail | Current task, cancellation, grouping, deferral, and tail relationships satisfy the supplied goal and handoff | wrong grouping, obsolete work retained, valid work dropped, premature concretization | schema/invocation status, plan shape, variants, tokens, latency, cost |
+| `capability.executor-selection` | Select the best currently available executor for the immutable task | Selected lane fits the task and belongs to the supplied candidate set or valid general fallback | missed custom match, wrong custom match, incorrect general fallback, unavailable lane | schema/invocation status, candidate set, variants, tokens, latency, cost |
+| `outcome.announce-verdict` | Judge the current announce against the current task and overall user goal | Verdict reflects current-task sufficiency, remaining work, and required user input without sibling-result substitution | premature completion, missed completion, sibling contamination, missed user-input stop | schema/invocation status, gap-note shape, variants, tokens, latency, cost |
+| `answer.user-visible-close` | Fulfil the current reply objective: direct response, handoff synthesis, requested replay, focused user question, or completion acknowledgement | Case-specific criteria establish correctness, evidence fidelity, and the accepted close behavior | missing requested content, unsupported claim, false status, wrong reply mode, unrequested result replay | invocation status, length, overlap, variants, tokens, latency, cost |
+
+Metrics are aggregated only after case-level goal judgments. A combined pass rate
+must not be manufactured by treating diagnostic thresholds as interchangeable
+proxies for task completion.
+
 ## Clause review template
 
 This is a review lens, not a persistent metadata schema. A prompt change should

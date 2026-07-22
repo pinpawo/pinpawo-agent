@@ -10,7 +10,7 @@ the original design and reference documents. Maintenance rules live in
 
 - [Documentation wiki](wiki/index.md)
 - [System prompt design knowledge map](wiki/overview.md)
-- [System prompt authoring principles](wiki/concepts/system-prompt-authoring-principles.md)
+- [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
 - [Documentation wiki management plan](wiki/migrations/docs-wiki-management-plan.md)
 
 ## Pet Agent API

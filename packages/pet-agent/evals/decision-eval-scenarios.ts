@@ -66,6 +66,11 @@ export type DecisionEvalRunResult = {
 
 export type DecisionEvalScenario = {
   target: DecisionEvalTarget;
+  contract: 'entry.execution-shape'
+    | 'planner.execution-boundary'
+    | 'capability.executor-selection'
+    | 'outcome.announce-verdict';
+  objective: string;
   datasetName: string;
   caseId: string;
   caseName: string;
@@ -118,6 +123,8 @@ function entryScenarios(): DecisionEvalScenario[] {
     };
     return {
       target: 'entry',
+      contract: 'entry.execution-shape',
+      objective: `Select ${testCase.expected.mode} for this request. ${testCase.expected.reason}`,
       datasetName: entryDecisionBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
@@ -169,6 +176,8 @@ function plannerScenarios(): DecisionEvalScenario[] {
     });
     return {
       target: 'planner',
+      contract: 'planner.execution-boundary',
+      objective: `Produce ${testCase.expected.result} at this planning boundary. ${testCase.expected.reason}`,
       datasetName: capabilityPlanningBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
@@ -249,6 +258,8 @@ function capabilityScenarios(): DecisionEvalScenario[] {
     });
     return {
       target: 'capability',
+      contract: 'capability.executor-selection',
+      objective: `Select ${testCase.expected.expectedLane} for the immutable current task. ${testCase.expected.reason}`,
       datasetName: capabilityDecisionBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
@@ -317,6 +328,8 @@ function outcomeScenarios(): DecisionEvalScenario[] {
     });
     return {
       target: 'outcome',
+      contract: 'outcome.announce-verdict',
+      objective: `Judge the current announce as ${testCase.expected.outcome}. ${testCase.expected.reason}`,
       datasetName: outcomeDecisionBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,

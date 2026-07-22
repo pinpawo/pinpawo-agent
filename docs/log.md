@@ -140,3 +140,15 @@ lint passes, and documentation migrations.
   its Wiki investigation in draft validation status.
 - Moved cross-model accuracy, unnecessary-execution, repetition, token, latency,
   and cost validation to issue #435.
+
+## [2026-07-22] refinement | Objective-derived eval targets
+
+- Kept evaluation guidance inside the existing Prompt Contract Map and system
+  prompt authoring principles instead of adding another Wiki concept.
+- Defined case objectives as concrete instances of stable behavior contracts and
+  made goal achievement the semantic pass/fail result.
+- Separated run status, acceptance evidence, error classification, and
+  diagnostics so measurable proxies such as length or overlap do not redefine
+  task success.
+- Mapped entry, planner, capability, outcome, and answer contracts to their
+  concrete goal evidence, error taxonomy, and non-gating runtime metrics.

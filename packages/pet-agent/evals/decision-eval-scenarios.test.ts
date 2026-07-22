@@ -48,29 +48,34 @@ test('decision eval scenarios render complete production messages', () => {
 test('decision stability summary separates schema and invocation failures', () => {
   const summary = summarizeDecisionStability([
     {
-      target: 'outcome', caseId: 'case-1', repeat: 1, ok: true, durationMs: 10,
-      verdict: 'goal_done', outputShape: 'gapNote=0', outputFingerprint: 'a', failedScores: [], failureKind: null, error: null,
+      target: 'outcome', caseId: 'case-1', contract: 'outcome.announce-verdict', objective: 'Complete the goal.', repeat: 1, goalAchieved: true, durationMs: 10,
+      verdict: 'goal_done', outputShape: 'gapNote=0', outputFingerprint: 'a', criteria: [], failedCriteria: [], diagnostics: {}, failureKind: null, error: null,
       usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 }, estimatedCostUsd: 0.001,
+      evaluationUsage: null, evaluationEstimatedCostUsd: null,
     },
     {
-      target: 'outcome', caseId: 'case-1', repeat: 2, ok: false, durationMs: 20,
-      verdict: 'task_done', outputShape: 'gapNote=1', outputFingerprint: 'b', failedScores: ['outcome_correct'], failureKind: null, error: null,
+      target: 'outcome', caseId: 'case-1', contract: 'outcome.announce-verdict', objective: 'Complete the goal.', repeat: 2, goalAchieved: false, durationMs: 20,
+      verdict: 'task_done', outputShape: 'gapNote=1', outputFingerprint: 'b', criteria: [], failedCriteria: ['outcome_correct'], diagnostics: {}, failureKind: null, error: null,
       usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 }, estimatedCostUsd: 0.002,
+      evaluationUsage: null, evaluationEstimatedCostUsd: null,
     },
     {
-      target: 'outcome', caseId: 'case-1', repeat: 3, ok: false, durationMs: 30,
-      verdict: null, outputShape: null, outputFingerprint: null, failedScores: [], failureKind: 'schema', error: 'invalid output',
+      target: 'outcome', caseId: 'case-1', contract: 'outcome.announce-verdict', objective: 'Complete the goal.', repeat: 3, goalAchieved: null, durationMs: 30,
+      verdict: null, outputShape: null, outputFingerprint: null, criteria: [], failedCriteria: [], diagnostics: {}, failureKind: 'schema', error: 'invalid output',
       usage: null, estimatedCostUsd: null,
+      evaluationUsage: null, evaluationEstimatedCostUsd: null,
     },
   ])[0];
-  assert.equal(summary.passed, 1);
+  assert.equal(summary.goalsAchieved, 1);
+  assert.equal(summary.goalsNotAchieved, 1);
+  assert.equal(summary.goalsNotEvaluable, 1);
   assert.equal(summary.schemaFailures, 1);
   assert.equal(summary.invokeFailures, 0);
   assert.equal(summary.outputVariants, 2);
   assert.equal(summary.meanDurationMs, 20);
   assert.deepEqual(summary.verdictDistribution, { goal_done: 1, task_done: 1, error: 1 });
   assert.deepEqual(summary.outputShapeDistribution, { 'gapNote=0': 1, 'gapNote=1': 1, error: 1 });
-  assert.deepEqual(summary.failedScoreDistribution, { outcome_correct: 1 });
+  assert.deepEqual(summary.failedCriterionDistribution, { outcome_correct: 1 });
 });
 
 test('decision eval scenarios invoke, parse, normalize, and score each target', async () => {

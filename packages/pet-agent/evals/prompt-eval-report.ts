@@ -6,7 +6,7 @@ import type {
 } from './decision-stability.ts';
 import type { PromptEvalPricing } from './prompt-eval-usage.ts';
 
-export const PROMPT_EVAL_REPORT_VERSION = 1;
+export const PROMPT_EVAL_REPORT_VERSION = 2;
 
 export type PromptEvalRevision = {
   commit: string;
@@ -33,6 +33,12 @@ export type PromptEvalReport = {
   revision: PromptEvalRevision;
   model: PromptEvalModelMetadata;
   structuredOutputMethod: StructuredOutputMethod | 'provider-default' | 'not-applicable';
+  evaluator: {
+    mode: 'subject-model' | 'not-applicable';
+    version: 'answer-goal-v1' | 'not-applicable';
+    model: PromptEvalModelMetadata | null;
+    structuredOutputMethod: StructuredOutputMethod | 'provider-default' | 'not-applicable';
+  };
   pricing: PromptEvalPricing | null;
   selection: {
     targets: PromptEvalTarget[];
@@ -44,14 +50,22 @@ export type PromptEvalReport = {
   summaries: DecisionStabilitySummary[];
   totals: {
     runs: number;
-    passed: number;
+    goalsAchieved: number;
+    goalsNotAchieved: number;
+    goalsNotEvaluable: number;
     schemaFailures: number;
     invokeFailures: number;
+    evaluationFailures: number;
     usageRuns: number;
     inputTokens: number;
     outputTokens: number;
     totalTokens: number;
     estimatedCostUsd: number | null;
+    evaluationUsageRuns: number;
+    evaluationInputTokens: number;
+    evaluationOutputTokens: number;
+    evaluationTotalTokens: number;
+    evaluationEstimatedCostUsd: number | null;
   };
 };
 
@@ -60,8 +74,14 @@ export function createPromptEvalReport(input: Omit<
   'reportVersion' | 'kind' | 'createdAt' | 'totals'
 >): PromptEvalReport {
   const usages = input.results.flatMap(({ usage }) => usage ? [usage] : []);
+  const evaluationUsages = input.results.flatMap(({ evaluationUsage }) => (
+    evaluationUsage ? [evaluationUsage] : []
+  ));
   const costs = input.results.flatMap(({ estimatedCostUsd }) => (
     estimatedCostUsd === null ? [] : [estimatedCostUsd]
+  ));
+  const evaluationCosts = input.results.flatMap(({ evaluationEstimatedCostUsd }) => (
+    evaluationEstimatedCostUsd === null ? [] : [evaluationEstimatedCostUsd]
   ));
   return {
     reportVersion: PROMPT_EVAL_REPORT_VERSION,
@@ -70,15 +90,26 @@ export function createPromptEvalReport(input: Omit<
     ...input,
     totals: {
       runs: input.results.length,
-      passed: input.results.filter(({ ok }) => ok).length,
+      goalsAchieved: input.results.filter(({ goalAchieved }) => goalAchieved === true).length,
+      goalsNotAchieved: input.results.filter(({ goalAchieved }) => goalAchieved === false).length,
+      goalsNotEvaluable: input.results.filter(({ goalAchieved }) => goalAchieved === null).length,
       schemaFailures: input.results.filter(({ failureKind }) => failureKind === 'schema').length,
       invokeFailures: input.results.filter(({ failureKind }) => failureKind === 'invoke').length,
+      evaluationFailures: input.results.filter(({ failureKind }) => failureKind === 'evaluation').length,
       usageRuns: usages.length,
       inputTokens: usages.reduce((sum, usage) => sum + usage.inputTokens, 0),
       outputTokens: usages.reduce((sum, usage) => sum + usage.outputTokens, 0),
       totalTokens: usages.reduce((sum, usage) => sum + usage.totalTokens, 0),
       estimatedCostUsd: costs.length === input.results.length
         ? Number(costs.reduce((sum, cost) => sum + cost, 0).toFixed(8))
+        : null,
+      evaluationUsageRuns: evaluationUsages.length,
+      evaluationInputTokens: evaluationUsages.reduce((sum, usage) => sum + usage.inputTokens, 0),
+      evaluationOutputTokens: evaluationUsages.reduce((sum, usage) => sum + usage.outputTokens, 0),
+      evaluationTotalTokens: evaluationUsages.reduce((sum, usage) => sum + usage.totalTokens, 0),
+      evaluationEstimatedCostUsd: evaluationUsages.length > 0
+        && evaluationCosts.length === evaluationUsages.length
+        ? Number(evaluationCosts.reduce((sum, cost) => sum + cost, 0).toFixed(8))
         : null,
     },
   };
@@ -124,6 +155,18 @@ export function comparePromptEvalReports(
   if (baseline.structuredOutputMethod !== candidate.structuredOutputMethod) {
     blockingNotes.push('structured output method differs');
   }
+  if (baseline.evaluator.mode !== candidate.evaluator.mode) blockingNotes.push('evaluator mode differs');
+  if (baseline.evaluator.version !== candidate.evaluator.version) {
+    blockingNotes.push('evaluator version differs');
+  }
+  if (baseline.evaluator.model?.provider !== candidate.evaluator.model?.provider
+    || baseline.evaluator.model?.model !== candidate.evaluator.model?.model
+    || baseline.evaluator.model?.baseUrl !== candidate.evaluator.model?.baseUrl
+    || baseline.evaluator.model?.temperature !== candidate.evaluator.model?.temperature
+    || baseline.evaluator.model?.reasoningEffort !== candidate.evaluator.model?.reasoningEffort
+    || baseline.evaluator.structuredOutputMethod !== candidate.evaluator.structuredOutputMethod) {
+    blockingNotes.push('evaluator configuration differs');
+  }
   if (baseline.model.temperature !== candidate.model.temperature) blockingNotes.push('temperature differs');
   if (baseline.selection.repeats !== candidate.selection.repeats) notes.push('repeat count differs');
   notes.push(...blockingNotes);
@@ -136,8 +179,8 @@ export function comparePromptEvalReports(
   const rows = [...baselineByKey.entries()].flatMap(([key, baselineSummary]) => {
     const candidateSummary = candidateByKey.get(key);
     if (!candidateSummary) return [];
-    const baselinePassRate = baselineSummary.passed / baselineSummary.runs;
-    const candidatePassRate = candidateSummary.passed / candidateSummary.runs;
+    const baselinePassRate = baselineSummary.goalsAchieved / baselineSummary.runs;
+    const candidatePassRate = candidateSummary.goalsAchieved / candidateSummary.runs;
     const baselineMeanTokens = baselineSummary.usageRuns === baselineSummary.runs
       ? baselineSummary.totalTokens / baselineSummary.runs
       : null;

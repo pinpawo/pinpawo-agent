@@ -2,12 +2,13 @@
 title: EntryDecision State Query Routing
 page_type: investigation
 status: draft
-updated: 2026-07-21
+updated: 2026-07-22
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts
   - ../../../packages/pet-agent/evals/datasets/entry-decision-basics.ts
   - https://github.com/pinpawo/pinpawo-agent/issues/416
+  - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
   - ../concepts/prompt-knowledge-layers.md
   - ../concepts/decision-node-ownership.md
@@ -54,10 +55,11 @@ of reading/searching/running/external access as execution was no longer explicit
 gap from taskDecision to entryDecision, not evidence that answer, handoff, shared
 prefix, or provenance architecture should be redesigned together.
 
-## Implementation candidate
+## Implemented contract
 
-The #416 branch now expresses stable action meanings by evidence and execution
-shape rather than question topic:
+The implementation merged in
+[PR #421](https://github.com/pinpawo/pinpawo-agent/pull/421) expresses stable
+action meanings by evidence and execution shape rather than question topic:
 
 - `answer`: canonical main messages, including accepted handoffs, contain
   sufficient evidence; no new execution result is required. An intention or plan
@@ -77,7 +79,7 @@ The structured-output schema description uses the same three meanings. The
 action enum, graph transitions, message lanes, answer ownership, and fixed
 delegation-completion acknowledgement are unchanged.
 
-## Verification status
+## Deterministic verification status
 
 The entryDecision dataset now covers:
 
@@ -94,7 +96,11 @@ regression case changed from approximately 1,666 to 1,637 tokens for the full
 system, structured context, and conversation input. This small reduction is not
 itself evidence of improvement; route correctness still requires evaluation.
 
-## Evidence still needed
+## Deferred model evidence
+
+Real-model validation is tracked separately in
+[issue #435](https://github.com/pinpawo/pinpawo-agent/issues/435) so the accepted
+production contract is not conflated with provider evaluation work. It must:
 
 - Run the expanded entryDecision eval set across supported models/providers.
 - Check whether removing the broad status clause causes unnecessary execution for

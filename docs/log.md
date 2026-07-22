@@ -129,3 +129,14 @@ lint passes, and documentation migrations.
   accepted prefix reference document.
 - Recorded per-node prompt-size measurements without claiming behavioral
   improvement before real-model evaluation.
+
+## [2026-07-22] follow-up | System prompt V1 implementation closure
+
+- Marked the node-by-node V1 ownership refactor as implemented after PRs
+  #421, #423, #424, #426, #427, and #428 merged.
+- Replaced the stale initial review backlog with the current prompt, schema, and
+  runtime ownership split.
+- Recorded the entry evidence boundary as an implemented contract while keeping
+  its Wiki investigation in draft validation status.
+- Moved cross-model accuracy, unnecessary-execution, repetition, token, latency,
+  and cost validation to issue #435.

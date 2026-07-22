@@ -60,7 +60,34 @@ test('commands and target changes share the extension-owned serial queue', async
 
   assert.match(source, /onMessage\.addListener[\s\S]*?enqueueExtensionWork\(\(\) => handleCommand\(message\)\)/);
   assert.match(source, /action\.onClicked\.addListener[\s\S]*?enqueueExtensionWork/);
+  assert.match(source, /tabs\.onCreated\.addListener[\s\S]*?enqueueExtensionWork/);
   assert.match(source, /tabs\.onRemoved\.addListener[\s\S]*?enqueueExtensionWork/);
+});
+
+test('popup tabs are followed inside the extension target lifecycle', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+
+  assert.match(source, /followPopupAfterAction\(activeTarget, command\.deadlineAt\)/);
+  assert.match(source, /switchToPopup[\s\S]*?rememberCurrent: true/);
+  assert.match(source, /targets\.remove\(tabId\)[\s\S]*?saveTarget\(removed\.current\)/);
+});
+
+test('selector actions use a bounded extension-side retry without retrying stale refs', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+  const resolveTargetForAction = source.match(
+    /async function resolveTargetForAction\([\s\S]*?\n\}/,
+  )?.[0] ?? '';
+
+  assert.match(resolveTargetForAction, /Date\.now\(\) \+ 1_000/);
+  assert.match(resolveTargetForAction, /normalized\.selector/);
+  assert.match(resolveTargetForAction, /element_not_found/);
+  assert.doesNotMatch(resolveTargetForAction, /stale_element_reference/);
 });
 
 test('trusted input checks the approved origin before each browser event', async () => {

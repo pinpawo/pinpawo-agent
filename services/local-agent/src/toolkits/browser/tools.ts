@@ -3,6 +3,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { browserSession } from './session';
 import type { BrowserExtractOptions } from './session';
+import { formatBrowserToolError } from './errors';
 
 type BrowserTargetInput = { selector?: string; ref?: string };
 
@@ -23,7 +24,7 @@ const browserOpenTool = tool(
     try {
       return await browserSession.open(url, { headless });
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -48,7 +49,7 @@ const browserOpenWithSessionTool = tool(
     try {
       return await browserSession.open(url, { headless, session: session.trim() });
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -78,7 +79,7 @@ const browserOpenWithProfileTool = tool(
     try {
       return await browserSession.openWithProfile(url, userDataDir, { headless });
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -108,7 +109,7 @@ const browserSnapshotTool = tool(
     try {
       return await browserSession.snapshot();
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -125,7 +126,7 @@ const browserClickTool = tool(
     try {
       return await browserSession.click(readBrowserTarget(input));
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -144,7 +145,7 @@ const browserTypeTool = tool(
     try {
       return await browserSession.type(readBrowserTarget({ selector, ref }), text, submit ?? false);
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -171,7 +172,7 @@ const browserScrollTool = tool(
         target,
       });
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -194,7 +195,7 @@ const browserWaitTool = tool(
       const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
       return await browserSession.wait(target, timeoutMs ?? 3_000);
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -221,7 +222,7 @@ const browserExtractTool = tool(
     try {
       return await browserSession.extract({ selector, offset, limit });
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -255,7 +256,7 @@ const browserCloseTool = tool(
     try {
       return await browserSession.close();
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -270,7 +271,7 @@ const browserScreenshotTool = tool(
     try {
       return await browserSession.screenshot();
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {
@@ -291,9 +292,13 @@ const browserSessionTool = tool(
         return `已保存的浏览器会话：\n${sessions.map((s) => `  - ${s}`).join('\n')}`;
       }
 
-      return 'Error: unknown action';
+      return formatBrowserToolError({
+        code: 'invalid_browser_session_action',
+        message: 'Unknown browser session action',
+        retryable: false,
+      });
     } catch (err) {
-      return `Error: ${err instanceof Error ? err.message : err}`;
+      return formatBrowserToolError(err);
     }
   },
   {

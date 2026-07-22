@@ -131,7 +131,8 @@ test('extension session rejects raw snapshots outside the approved origin', asyn
   await assert.rejects(
     session.open('https://example.com/page'),
     (error: unknown) => error instanceof BrowserBridgeError
-      && error.code === 'origin_changed',
+      && error.code === 'origin_changed'
+      && error.details?.actualOrigin === 'https://unapproved.example',
   );
   await assert.rejects(session.snapshot(), /Use browser_open first/);
 });

@@ -18,6 +18,7 @@ import {
 import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
 import { browserRuntime } from './runtime';
 import { persistBrowserScreenshot } from './screenshot';
+import { BrowserOperationError } from './errors';
 
 export {
   buildBrowserExtractPayload,
@@ -294,6 +295,7 @@ function openSessionPath(opts: BrowserOpenOptions): string {
 class PlaywrightBrowserSession {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
+  private readonly trackedPages = new WeakSet<Page>();
   private activeHeadless = false;
   private activeSessionDir = sessionDir(DEFAULT_SESSION);
   private readonly refAttribute = `data-pinpawo-ref-${randomUUID()}`;
@@ -301,6 +303,49 @@ class PlaywrightBrowserSession {
 
   private readExecutablePath() {
     return process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
+  }
+
+  private activatePage(page: Page): Page {
+    if (page.isClosed()) return page;
+    if (!this.trackedPages.has(page)) {
+      this.trackedPages.add(page);
+      page.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
+      page.on('close', () => {
+        if (this.page !== page) return;
+        const fallback = this.context?.pages()
+          .filter((candidate) => !candidate.isClosed())
+          .at(-1) ?? null;
+        this.page = fallback;
+        if (fallback) {
+          this.activatePage(fallback);
+          void fallback.bringToFront().catch(() => {});
+        }
+      });
+    }
+    this.page = page;
+    return page;
+  }
+
+  private async settleActivePage(previousPage: Page, followWindowMs = 300): Promise<Page> {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, followWindowMs));
+    const activePage = this.page && !this.page.isClosed()
+      ? this.page
+      : this.context?.pages().filter((candidate) => !candidate.isClosed()).at(-1);
+    if (!activePage) {
+      throw new BrowserOperationError(
+        'target_closed',
+        'Browser target closed before the operation completed.',
+        true,
+      );
+    }
+    this.activatePage(activePage);
+    await activePage.waitForLoadState('domcontentloaded', {
+      timeout: DEFAULT_TIMEOUT_MS,
+    }).catch(() => {});
+    if (activePage !== previousPage && !this.activeHeadless) {
+      await activePage.bringToFront().catch(() => {});
+    }
+    return activePage;
   }
 
   private async ensurePage(headless: boolean, sessionPath: string): Promise<Page> {
@@ -334,21 +379,33 @@ class PlaywrightBrowserSession {
       executablePath,
     });
     const existing = this.context.pages();
-    this.page = existing[0] ?? (await this.context.newPage());
-    this.page.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
+    const initialPage = existing[0] ?? (await this.context.newPage());
+    const activePage = this.activatePage(initialPage);
+    this.context.on('page', (page) => {
+      this.activatePage(page);
+      if (!this.activeHeadless) void page.bringToFront().catch(() => {});
+    });
 
     // When running inside the app bundle the parent process has no foreground
     // privileges, so Chrome won't come to front automatically. Bring it forward.
     if (!headless) {
-      await this.page.bringToFront().catch(() => {});
+      await activePage.bringToFront().catch(() => {});
     }
 
-    return this.page;
+    return activePage;
   }
 
   private async requirePage(): Promise<Page> {
-    if (!this.page) throw new Error('No active browser page. Use browser_open first.');
-    return this.page;
+    if (this.page && !this.page.isClosed()) return this.page;
+    const fallback = this.context?.pages()
+      .filter((candidate) => !candidate.isClosed())
+      .at(-1);
+    if (fallback) return this.activatePage(fallback);
+    throw new BrowserOperationError(
+      'browser_not_open',
+      'No active browser page. Use browser_open first.',
+      true,
+    );
   }
 
   private async clearRefElements(): Promise<void> {
@@ -450,7 +507,11 @@ class PlaywrightBrowserSession {
     if (normalized.selector) return { selector: normalized.selector };
     const element = this.refElements.get(normalized.ref!);
     if (!element) {
-      throw new Error('Stale browser element reference. Take a new browser_snapshot and retry.');
+      throw new BrowserOperationError(
+        'stale_element_reference',
+        'Stale browser element reference. Take a new browser_snapshot and retry.',
+        true,
+      );
     }
     return { element };
   }
@@ -463,8 +524,8 @@ class PlaywrightBrowserSession {
     } else {
       await resolved.element.click({ timeout: DEFAULT_TIMEOUT_MS });
     }
-    await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT_MS }).catch(() => {});
-    return this.buildSnapshot(page);
+    const activePage = await this.settleActivePage(page);
+    return this.buildSnapshot(activePage);
   }
 
   async type(target: string | BrowserElementTarget, text: string, submit = false): Promise<string> {
@@ -474,7 +535,8 @@ class PlaywrightBrowserSession {
     await loc.fill(text, { timeout: DEFAULT_TIMEOUT_MS });
     if (submit) {
       await loc.press('Enter', { timeout: DEFAULT_TIMEOUT_MS });
-      await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT_MS }).catch(() => {});
+      const activePage = await this.settleActivePage(page);
+      return this.buildSnapshot(activePage);
     }
     return this.buildSnapshot(page);
   }

@@ -21,6 +21,7 @@
     "tui": "tsx src/index.ts tui",
     "tui:dry": "tsx src/index.ts tui --dry-run",
     "test:live": "node --import tsx --test tests/live-agent.test.ts",
+    "test:browser-smoke": "node --import tsx scripts/browser-target-lifecycle-smoke.ts",
     "test:unit": "node --import tsx --test $(find src -name '*.test.ts' | sort)",
     "eval:hitl": "node --env-file=.env --import tsx/esm evals/hitl-resume.eval.ts",
     "build": "tsup && node --import tsx/esm scripts/gen-manifest.ts && npm --prefix ../../tools/chrome-extension run build && node --import tsx/esm scripts/copy-browser-extension.ts",

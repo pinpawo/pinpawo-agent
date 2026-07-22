@@ -17,6 +17,7 @@ import {
   type LocalAgentBrowserBridge,
 } from './bridge';
 import { persistBrowserScreenshot } from '../../screenshot';
+import { BrowserOperationError } from '../../errors';
 
 const DEFAULT_SESSION = 'default';
 const DEFAULT_EXTENSION_COMMAND_TIMEOUT_MS = 30_000;
@@ -82,12 +83,16 @@ export class ChromeExtensionBrowserSession {
       throw new BrowserBridgeError(
         'origin_changed',
         'Chrome extension returned a snapshot without an approved http(s) URL.',
+        false,
+        { approvedOrigin },
       );
     }
     if (snapshotOrigin !== approvedOrigin) {
       throw new BrowserBridgeError(
         'origin_changed',
         `Chrome extension snapshot origin changed from ${approvedOrigin} to ${snapshotOrigin}.`,
+        false,
+        { approvedOrigin, actualOrigin: snapshotOrigin },
       );
     }
     return JSON.stringify(buildBrowserSnapshotPayload(snapshot), null, 2);
@@ -95,7 +100,11 @@ export class ChromeExtensionBrowserSession {
 
   private requireApprovedOrigin(): string {
     if (!this.approvedOrigin) {
-      throw new Error('No approved Chrome extension page. Use browser_open first.');
+      throw new BrowserOperationError(
+        'browser_not_open',
+        'No approved Chrome extension page. Use browser_open first.',
+        true,
+      );
     }
     return this.approvedOrigin;
   }

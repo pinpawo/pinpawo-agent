@@ -59,17 +59,22 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - `browser_open` creates an agent-owned tab if none is bound.
 - Clicking the extension action explicitly binds the current user tab. The health response distinguishes `agent` and `user` ownership.
 - Browser commands and target-binding changes run through one extension-owned serial queue. The local-agent tool layer remains backend-neutral and does not impose extension scheduling semantics.
+- A popup/new tab whose `openerTabId` is the current target becomes the active browser target. The extension keeps a bounded in-memory target history so closing a popup can return to its live parent; Playwright applies the same active-target behavior inside its own driver.
 - Each navigation carries an origin already authorized by the local-agent review policy.
 - Before and after every read, interaction result and screenshot, the extension reads the committed top-level URL through CDP and refuses access if the origin changed. Trusted mouse/key events and bulk text chunks also re-check the origin immediately before dispatch. The extension checks returned payload URLs, and local-agent repeats that check before building final payloads.
 - CDP remains allowlisted. Protocol v2 adds only the `Input.dispatch*`, viewport screenshot and DOM box/scroll commands required by the declared Browser operations; arbitrary CDP is never relayed.
 - The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the local-agent stops.
 - Protocol messages include `protocolVersion`, `connectionId`, `requestId` and `deadlineAt`; malformed, stale and oversized messages fail closed.
+- Driver failures retain structured `code`, `retryable` and safe `details` fields through the bridge. Cross-origin failures expose origins only, never an unapproved URL path or query.
 
 ## Build and install
 
 ```bash
 npm run build
+npm run test:browser-smoke -w pinpawo-local-agent
 ```
+
+The smoke test uses headless Playwright against a local fixture to verify parent page → popup → parent fallback target lifecycle. Extension acceptance uses the same fixture behavior after reloading the unpacked extension.
 
 Then:
 

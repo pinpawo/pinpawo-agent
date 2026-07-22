@@ -58,6 +58,9 @@ export function errorResult(command, error) {
       code: typeof error?.code === 'string' ? error.code : 'browser_extension_error',
       message: error instanceof Error ? error.message : String(error),
       retryable: error?.retryable === true,
+      ...(error?.details && typeof error.details === 'object'
+        ? { details: error.details }
+        : {}),
     },
   };
 }

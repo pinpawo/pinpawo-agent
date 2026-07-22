@@ -73,6 +73,7 @@ export class BrowserBridgeError extends Error {
     public readonly code: string,
     message: string,
     public readonly retryable = false,
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'BrowserBridgeError';
@@ -425,6 +426,7 @@ export class LocalAgentBrowserBridge {
       message.error!.code,
       message.error!.message,
       message.error!.retryable ?? false,
+      message.error!.details,
     ));
   }
 

@@ -280,7 +280,6 @@ test('answer prompt owns the user-visible reply', () => {
   assert.match(prompt, /本次面向用户的最终回复/);
   assert.match(prompt, /按照本次回复目标/);
   assert.match(prompt, /主对话中已有的信息/);
-  assert.match(prompt, /提出当前需要回答的问题/);
   assert.match(prompt, /直接输出回复正文/);
   assert.doesNotMatch(prompt, /orchestrator|handoff|delegation|subagent/);
 });

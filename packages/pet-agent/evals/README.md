@@ -53,6 +53,8 @@ recreate datasets.
 - `agent-interruption-recovery-basics`: resume, changed-intent, approval-resume, and natural-completion-after-resume cases.
 - `agent-permission-control-basics`: HITL, auto-authorization, scoped authorization, and permission-memory cases.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
+- `agent-answer-behavior-basics`: direct reply, handoff synthesis, historical replay,
+  clarification, and fixed completion-acknowledgement behavior.
 - `agent-entry-decision-basics`: eval contract for `answer | direct_task | needs_plan`.
 - `agent-capability-decision-basics`: end-to-end capability search and selection from a current task.
 - `agent-outcome-decision-basics`: `continue | task_done | goal_done` verdict boundaries.
@@ -211,6 +213,95 @@ DECISION_EVAL_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:decision-stability
 Model configuration is resolved from `LLM_*`, then `~/.pinpawo/.env`, then
 `~/.pinpawo/config.json`. Entry scoring covers mode and direct-task content;
 planner scoring owns plan boundary count and plan contents.
+
+## Cross-Model Prompt Evaluation
+
+The prompt stability runner extends decision coverage with the production
+`answer` prompt and its runtime-injected delegation completion context:
+
+```sh
+npm run eval:prompt-stability
+```
+
+It writes a versioned JSON report under `.eval-results/`. Each case instantiates
+an existing Prompt Contract as one concrete objective with explicit acceptance
+criteria. The report records goal achievement separately from invocation/schema
+status and non-gating diagnostics such as length, overlap, latency, and output
+variation. It also records the exact tested Git commit, harness commit, dirty
+state and diff hash, changed paths, provider, model family and model id,
+temperature, reasoning effort, structured-output method, selected datasets and
+cases, repetitions, and provider-reported token usage. The runner requires a clean worktree by default;
+`PROMPT_EVAL_ALLOW_DIRTY=1` is available for exploratory runs, whose reports stay
+marked as dirty.
+
+Decision-node objectives use deterministic contract criteria. Free-form `answer`
+objectives are evaluated against the canonical conversation and case-specific
+acceptance criteria by the same configured model using the versioned
+`answer-goal-v1` evaluator. The report records that evaluator configuration and
+keeps answer-generation usage separate from evaluator usage. A malformed or
+failed evaluator call makes the run not evaluable; it does not count as a failed
+answer objective.
+
+The answer cases keep two different contracts separate:
+
+- explicit requests to replay prior content must preserve the requested facts;
+- the fixed post-delegation acknowledgement must close the lifecycle without
+  copying the already-delivered result body.
+
+Use explicit metadata when endpoint or model names do not identify the provider
+and family unambiguously:
+
+```sh
+PROMPT_EVAL_PROVIDER=openai \
+PROMPT_EVAL_MODEL_FAMILY=gpt-5 \
+PROMPT_EVAL_REASONING_EFFORT=low \
+PROMPT_EVAL_TARGETS=entry,answer \
+PROMPT_EVAL_REPEATS=5 \
+PROMPT_EVAL_REPORT_PATH=.eval-results/gpt-candidate.json \
+  npm run eval:prompt-stability
+```
+
+Pricing is never embedded in the harness. To include an estimated cost, pass
+both current rates for the selected provider/model; otherwise cost remains
+`null` while token usage is still reported:
+
+```sh
+PROMPT_EVAL_INPUT_USD_PER_MILLION="$CURRENT_INPUT_RATE" \
+PROMPT_EVAL_OUTPUT_USD_PER_MILLION="$CURRENT_OUTPUT_RATE" \
+  npm run eval:prompt-stability
+```
+
+For a prompt change, run the same target, cases, model settings, and repetitions
+against the relevant pre-change parent commit and the merged or candidate commit.
+Do this separately for at least two supported model families when access permits.
+A single synthetic baseline is not valid when different nodes changed in
+different PRs.
+
+After this harness is merged, a historical commit will not contain it. Create a
+worktree at the historical commit, apply only the harness commit there without
+committing it, and run with both
+`PROMPT_EVAL_ALLOW_DIRTY=1` and
+`PROMPT_EVAL_HARNESS_REVISION=<merged-harness-commit>`. The report keeps the
+historical commit as the tested revision and records the complete harness overlay
+as changed paths plus a SHA-256 diff hash. Review those paths before accepting
+the baseline: production prompt, schema, and runtime behavior files must remain
+at the historical revision. Run the candidate with the same harness revision;
+the comparator rejects different harness revisions.
+
+Compare the resulting reports with:
+
+```sh
+npm run eval:prompt-compare -- \
+  .eval-results/baseline.json \
+  .eval-results/candidate.json
+```
+
+The comparison prints goal-achievement-rate, mean-latency, and mean-token deltas for the
+intersection of cases. It reports baseline-only and candidate-only cases
+separately, and rejects comparisons whose provider, model, reasoning effort,
+temperature, structured-output, or evaluator settings differ. Reports are evidence inputs;
+they do not update production prompts or establish a cross-model improvement on
+their own.
 
 ## Langfuse Tool-Review Reject Runner
 

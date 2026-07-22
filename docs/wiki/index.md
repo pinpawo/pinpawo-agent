@@ -24,8 +24,8 @@ explicitly migrated.
 - [Prompt knowledge layers](concepts/prompt-knowledge-layers.md) — static contract,
   conditional protocol, injected facts, and deterministic enforcement.
 - [System prompt authoring principles](concepts/system-prompt-authoring-principles.md)
-  — positive-first contracts, narrow negative boundaries, harness ownership, and
-  eval-backed prompt changes.
+  — positive-first contracts, narrow negative boundaries, harness ownership,
+  objective-derived eval targets, and eval-backed prompt changes.
 - [Decision node ownership](concepts/decision-node-ownership.md) — semantic owner
   of each orchestrator decision.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —

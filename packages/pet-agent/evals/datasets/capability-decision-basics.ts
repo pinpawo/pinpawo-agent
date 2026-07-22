@@ -168,6 +168,35 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
     },
     metadata: { difficulty: 'easy', reason: 'Browser capability route.', source: SOURCE_FILE },
   },
+  {
+    id: `${SUITE}.unavailable-capability-falls-back-to-general`,
+    name: 'unavailable-capability-falls-back-to-general',
+    suite: SUITE,
+    tags: ['capability_search', 'capability_decision'],
+    input: {
+      task: '在团队日历中创建明天下午三点的发布复盘会议。',
+      baselineSearchQuery: '团队日历|创建会议|日程安排',
+      availableCapabilities: [
+        {
+          name: 'browser',
+          description: 'Open websites, interact with pages, and extract page content.',
+          keywords: ['浏览器', '网页', '打开', '页面内容'],
+        },
+      ],
+      generalToolsAvailable: ['ask_user'],
+    },
+    expected: {
+      expectedLane: 'general',
+      expectedCandidateNames: [],
+      expectedSearchQueryTerms: ['日历', '会议'],
+      reason: 'The requested calendar capability is unavailable and must not be invented as a route.',
+    },
+    metadata: {
+      difficulty: 'medium',
+      reason: 'Unavailable capabilities remain outside the model-visible lane enum.',
+      source: SOURCE_FILE,
+    },
+  },
 ];
 
 export const capabilityDecisionBasicsDataset: AgentEvalDataset<

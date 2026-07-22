@@ -15,3 +15,4 @@ tools/agent-macos/release.env
 
 # logs
 *.log
+.eval-results/

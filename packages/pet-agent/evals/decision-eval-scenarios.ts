@@ -1,4 +1,5 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import type { RunnableConfig } from '@langchain/core/runnables';
 import { searchCapabilities } from '../src/agent/orchestrator/capabilitySearch.ts';
 import {
   buildCapabilityPlanningDecisionInput,
@@ -65,12 +66,21 @@ export type DecisionEvalRunResult = {
 
 export type DecisionEvalScenario = {
   target: DecisionEvalTarget;
+  contract: 'entry.execution-shape'
+    | 'planner.execution-boundary'
+    | 'capability.executor-selection'
+    | 'outcome.announce-verdict';
+  objective: string;
   datasetName: string;
   caseId: string;
   caseName: string;
   expectedSummary: string;
   render(method?: StructuredOutputMethod): RenderedDecisionPrompt;
-  run(model: AgentModels['act'], method?: StructuredOutputMethod): Promise<DecisionEvalRunResult>;
+  run(
+    model: AgentModels['act'],
+    method?: StructuredOutputMethod,
+    config?: RunnableConfig,
+  ): Promise<DecisionEvalRunResult>;
 };
 
 const actor = {
@@ -113,17 +123,19 @@ function entryScenarios(): DecisionEvalScenario[] {
     };
     return {
       target: 'entry',
+      contract: 'entry.execution-shape',
+      objective: `Select ${testCase.expected.mode} for this request. ${testCase.expected.reason}`,
       datasetName: entryDecisionBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
       expectedSummary: testCase.expected.mode,
       render,
-      async run(model, method) {
+      async run(model, method, config) {
         const schema = buildTaskDecisionSchema();
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)));
+        ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
         const mode = adaptTaskDecisionMode(decision.action);
         const boundaryCount = mode === 'direct_task' ? 1 : 0;
@@ -164,17 +176,19 @@ function plannerScenarios(): DecisionEvalScenario[] {
     });
     return {
       target: 'planner',
+      contract: 'planner.execution-boundary',
+      objective: `Produce ${testCase.expected.result} at this planning boundary. ${testCase.expected.reason}`,
       datasetName: capabilityPlanningBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
       expectedSummary: `${testCase.input.mode}:${testCase.expected.result}`,
       render,
-      async run(model, method) {
+      async run(model, method, config) {
         const schema = buildCapabilityPlanningDecisionSchema();
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)));
+        ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
         const remainingPlan = decision.remaining_plan.map((item) => ({
           objective: item.objective,
@@ -244,17 +258,19 @@ function capabilityScenarios(): DecisionEvalScenario[] {
     });
     return {
       target: 'capability',
+      contract: 'capability.executor-selection',
+      objective: `Select ${testCase.expected.expectedLane} for the immutable current task. ${testCase.expected.reason}`,
       datasetName: capabilityDecisionBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
       expectedSummary: testCase.expected.expectedLane,
       render,
-      async run(model, method) {
+      async run(model, method, config) {
         const schema = buildRouteDecisionSchema(schemaParams);
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)));
+        ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
         const candidateNames = candidates.map(({ name }) => name);
         const output = { lane: decision.lane, candidateNames };
@@ -312,17 +328,19 @@ function outcomeScenarios(): DecisionEvalScenario[] {
     });
     return {
       target: 'outcome',
+      contract: 'outcome.announce-verdict',
+      objective: `Judge the current announce as ${testCase.expected.outcome}. ${testCase.expected.reason}`,
       datasetName: outcomeDecisionBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
       expectedSummary: testCase.expected.outcome,
       render,
-      async run(model, method) {
+      async run(model, method, config) {
         const schema = buildDelegationOutcomeDecisionSchema();
         const raw = await model.withStructuredOutput(
           schema,
           buildOrchestrationDecisionStructuredOutputOptions({ method }),
-        ).invoke(messages(render(method)));
+        ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
         const output = { outcome: decision.outcome, gapNote: decision.gap_note ?? null };
         return {

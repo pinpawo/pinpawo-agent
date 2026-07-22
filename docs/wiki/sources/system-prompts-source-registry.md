@@ -36,6 +36,11 @@ behavioral claims:
 - [`messageLanes.ts`](../../../packages/pet-agent/src/agent/orchestrator/messageLanes.ts)
 - [`orchestrator.test.ts`](../../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts)
 - [`entry-decision-basics.ts`](../../../packages/pet-agent/evals/datasets/entry-decision-basics.ts)
+- [`answer-behavior-basics.ts`](../../../packages/pet-agent/evals/datasets/answer-behavior-basics.ts)
+- [`decision-eval-scenarios.ts`](../../../packages/pet-agent/evals/decision-eval-scenarios.ts)
+- [`answer-eval-scenarios.ts`](../../../packages/pet-agent/evals/answer-eval-scenarios.ts)
+- [`prompt-eval-report.ts`](../../../packages/pet-agent/evals/prompt-eval-report.ts)
+- [`run-decision-stability.eval.ts`](../../../packages/pet-agent/evals/scripts/run-decision-stability.eval.ts)
 
 ## Current and pinned design sources
 

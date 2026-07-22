@@ -6,6 +6,7 @@ import type { OutcomeDecisionExpected } from './datasets/outcome-decision-basics
 
 export type DecisionContractScore = {
   key: string;
+  statement?: string;
   score: 0 | 1;
   comment: string;
 };

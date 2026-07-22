@@ -147,6 +147,19 @@ async function attach(tabId) {
   }
 }
 
+async function activateTarget(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.active) await chrome.tabs.update(tabId, { active: true });
+  } catch (error) {
+    throw new ExtensionError(
+      'target_activation_failed',
+      `Unable to activate the browser target: ${error instanceof Error ? error.message : String(error)}`,
+      true,
+    );
+  }
+}
+
 async function detach() {
   if (attachedTabId === null) return { detached: false };
   const tabId = attachedTabId;
@@ -194,6 +207,39 @@ async function switchToPopup(tabId, parentTarget) {
   );
   await attach(tabId);
   return targets.current();
+}
+
+async function handleRemovedTarget(tabId) {
+  const removed = targets.remove(tabId);
+  if (!removed.closedCurrent) return removed.current;
+  if (attachedTabId === tabId) attachedTabId = null;
+  await saveTarget(removed.current);
+  if (removed.current) {
+    await attach(removed.current.tabId);
+    return removed.current;
+  }
+  port?.postMessage({
+    type: 'browser.event',
+    protocolVersion: PROTOCOL_VERSION,
+    connectionId,
+    event: 'target.closed',
+    tabId,
+  });
+  return null;
+}
+
+async function requireLiveResultTarget(candidate) {
+  if (!candidate) {
+    throw new ExtensionError('target_closed', 'The active browser target was closed', true);
+  }
+  try {
+    await chrome.tabs.get(candidate.tabId);
+    return candidate;
+  } catch {
+    const fallback = await handleRemovedTarget(candidate.tabId);
+    if (fallback) return fallback;
+    throw new ExtensionError('target_closed', 'The active browser target was closed', true);
+  }
 }
 
 async function followPopupAfterAction(parentTarget, deadlineAt) {
@@ -373,6 +419,7 @@ async function resolveTargetForAction(tabId, target, deadlineAt, approvedOrigin)
 }
 
 async function dispatchClick(tabId, target, humanization, deadlineAt, approvedOrigin) {
+  await activateTarget(tabId);
   const point = await resolveTargetForAction(
     tabId,
     target,
@@ -502,6 +549,7 @@ function boundedScrollDelta(value, name) {
 }
 
 async function dispatchScroll(tabId, params, deadlineAt, approvedOrigin) {
+  await activateTarget(tabId);
   const deltaX = boundedScrollDelta(params.deltaX, 'deltaX');
   const deltaY = boundedScrollDelta(params.deltaY, 'deltaY');
   if (deltaX === 0 && deltaY === 0) {
@@ -532,6 +580,10 @@ async function waitForPageCondition(tabId, params, deadlineAt, approvedOrigin) {
     throw new ExtensionError('invalid_wait_timeout', 'timeoutMs must be between 1 and 30000');
   }
   const waitDeadline = Math.min(Date.now() + timeoutMs, Date.parse(deadlineAt));
+  const state = params.state ?? 'visible';
+  if (state !== 'visible' && state !== 'hidden') {
+    throw new ExtensionError('invalid_wait_state', 'state must be visible or hidden');
+  }
   if (!params.target) {
     await delay(Math.max(0, waitDeadline - Date.now()), deadlineAt);
     return;
@@ -541,8 +593,17 @@ async function waitForPageCondition(tabId, params, deadlineAt, approvedOrigin) {
     try {
       await assertApprovedOrigin(tabId, approvedOrigin);
       await resolveTarget(tabId, target);
-      return;
+      if (state === 'visible') return;
     } catch (error) {
+      if (
+        state === 'hidden'
+        && error instanceof ExtensionError
+        && [
+          'element_not_found',
+          'element_not_visible',
+          'stale_element_reference',
+        ].includes(error.code)
+      ) return;
       if (
         !(error instanceof ExtensionError)
         || !['element_not_found', 'element_not_visible'].includes(error.code)
@@ -550,7 +611,12 @@ async function waitForPageCondition(tabId, params, deadlineAt, approvedOrigin) {
     }
     await delay(100, deadlineAt);
   }
-  throw new ExtensionError('wait_timeout', 'The target did not become visible before timeout', true);
+  throw new ExtensionError(
+    'wait_timeout',
+    `The target did not become ${state} before timeout`,
+    true,
+    { state, timeoutMs },
+  );
 }
 
 async function readExtract(tabId, params, approvedOrigin) {
@@ -621,15 +687,17 @@ async function executeCommand(command) {
       approvedOrigin,
     );
     await delay(150, command.deadlineAt);
-    const resultTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
-    return await readSnapshot(resultTarget?.tabId ?? activeTarget.tabId, approvedOrigin);
+    const followedTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
+    const resultTarget = await requireLiveResultTarget(followedTarget ?? activeTarget);
+    return await readSnapshot(resultTarget.tabId, approvedOrigin);
   }
   if (command.command === 'type') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
     await dispatchType(activeTarget.tabId, command.params, command.deadlineAt, approvedOrigin);
     await delay(100, command.deadlineAt);
-    const resultTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
-    return await readSnapshot(resultTarget?.tabId ?? activeTarget.tabId, approvedOrigin);
+    const followedTarget = await followPopupAfterAction(activeTarget, command.deadlineAt);
+    const resultTarget = await requireLiveResultTarget(followedTarget ?? activeTarget);
+    return await readSnapshot(resultTarget.tabId, approvedOrigin);
   }
   if (command.command === 'scroll') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);
@@ -715,18 +783,7 @@ chrome.tabs.onCreated.addListener((tab) => {
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   await enqueueExtensionWork(async () => {
     recentPopupByOpener.delete(tabId);
-    const removed = targets.remove(tabId);
-    if (!removed.closedCurrent) return;
-    attachedTabId = null;
-    await saveTarget(removed.current);
-    if (removed.current) return;
-    port?.postMessage({
-      type: 'browser.event',
-      protocolVersion: PROTOCOL_VERSION,
-      connectionId,
-      event: 'target.closed',
-      tabId,
-    });
+    await handleRemovedTarget(tabId);
   });
 });
 

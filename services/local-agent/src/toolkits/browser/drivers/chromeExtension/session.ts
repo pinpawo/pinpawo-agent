@@ -2,6 +2,7 @@ import type {
   BrowserElementTarget,
   BrowserOpenOptions,
   BrowserScrollOptions,
+  BrowserWaitState,
 } from '../../session';
 import {
   buildBrowserExtractPayloadFromRaw,
@@ -156,11 +157,16 @@ export class ChromeExtensionBrowserSession {
     }), approvedOrigin);
   }
 
-  async wait(target?: string | BrowserElementTarget, timeoutMs = 3_000): Promise<string> {
+  async wait(
+    target?: string | BrowserElementTarget,
+    timeoutMs = 3_000,
+    state: BrowserWaitState = 'visible',
+  ): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
     return this.buildSnapshot(await this.bridge.sendCommand('wait', {
       approvedOrigin,
       timeoutMs,
+      state,
       ...(target ? { target: normalizeTarget(target) } : {}),
     }), approvedOrigin);
   }

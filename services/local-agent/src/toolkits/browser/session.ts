@@ -259,6 +259,8 @@ export type BrowserScrollOptions = {
   target?: BrowserElementTarget;
 };
 
+export type BrowserWaitState = 'visible' | 'hidden';
+
 function normalizeBrowserElementTarget(target: string | BrowserElementTarget): BrowserElementTarget {
   const normalized = typeof target === 'string' ? { selector: target.trim() } : {
     selector: target.selector?.trim(),
@@ -556,14 +558,18 @@ class PlaywrightBrowserSession {
     return this.buildSnapshot(page);
   }
 
-  async wait(target?: string | BrowserElementTarget, timeoutMs = 3_000): Promise<string> {
+  async wait(
+    target?: string | BrowserElementTarget,
+    timeoutMs = 3_000,
+    state: BrowserWaitState = 'visible',
+  ): Promise<string> {
     const page = await this.requirePage();
     if (target) {
       const resolved = this.resolveTarget(target);
       if ('selector' in resolved) {
-        await page.locator(resolved.selector).first().waitFor({ state: 'visible', timeout: timeoutMs });
+        await page.locator(resolved.selector).first().waitFor({ state, timeout: timeoutMs });
       } else {
-        await resolved.element.waitForElementState('visible', { timeout: timeoutMs });
+        await resolved.element.waitForElementState(state, { timeout: timeoutMs });
       }
     } else {
       await page.waitForTimeout(timeoutMs);
@@ -650,8 +656,12 @@ export class BrowserSession {
     return (await this.ensureImpl()).type(target, text, submit);
   }
   async scroll(options?: BrowserScrollOptions) { return (await this.ensureImpl()).scroll(options); }
-  async wait(target?: string | BrowserElementTarget, timeoutMs?: number) {
-    return (await this.ensureImpl()).wait(target, timeoutMs);
+  async wait(
+    target?: string | BrowserElementTarget,
+    timeoutMs?: number,
+    state?: BrowserWaitState,
+  ) {
+    return (await this.ensureImpl()).wait(target, timeoutMs, state);
   }
   async extract(options?: BrowserExtractOptions) { return (await this.ensureImpl()).extract(options); }
   async screenshot() { return (await this.ensureImpl()).screenshot(); }

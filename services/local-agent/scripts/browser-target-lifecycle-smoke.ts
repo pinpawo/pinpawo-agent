@@ -17,7 +17,9 @@ const server = createServer((request, response) => {
   }
   response.end(`<!doctype html>
     <title>Popup parent</title>
-    <button id="open-popup" onclick="window.open('/child', '_blank')">Open popup</button>`);
+    <button id="open-popup" onclick="window.open('/child', '_blank')">Open popup</button>
+    <div id="delayed" hidden>Ready</div>
+    <script>setTimeout(() => { document.querySelector('#delayed').hidden = false; }, 250)</script>`);
 });
 
 await new Promise<void>((resolvePromise, rejectPromise) => {
@@ -39,12 +41,14 @@ try {
     headless: true,
   })) as Snapshot;
   assert.equal(new URL(opened.url).pathname, '/parent');
+  await browser.wait('#delayed', 2_000, 'visible');
 
   const child = JSON.parse(await browser.click('#open-popup')) as Snapshot;
   assert.equal(new URL(child.url).pathname, '/child');
 
   const returned = JSON.parse(await browser.click('#close-popup')) as Snapshot;
   assert.equal(new URL(returned.url).pathname, '/parent');
+  await browser.wait('#close-popup', 2_000, 'hidden');
   console.log('[browser-smoke] popup follow and parent fallback passed');
 } finally {
   await browser.close();

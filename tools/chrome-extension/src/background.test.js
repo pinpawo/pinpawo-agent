@@ -111,3 +111,19 @@ test('trusted input checks the approved origin before each browser event', async
     'key input must re-check origin before down, char, and up',
   );
 });
+
+test('trusted pointer input activates the bound target inside the extension', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.js'),
+    'utf8',
+  );
+  const dispatchClick = source.match(
+    /async function dispatchClick\([\s\S]*?\n\}/,
+  )?.[0] ?? '';
+  const dispatchScroll = source.match(
+    /async function dispatchScroll\([\s\S]*?\n\}/,
+  )?.[0] ?? '';
+
+  assert.match(dispatchClick, /await activateTarget\(tabId\)/);
+  assert.match(dispatchScroll, /await activateTarget\(tabId\)/);
+});

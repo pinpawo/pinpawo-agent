@@ -70,3 +70,43 @@ test('native host relays framed Chrome messages to the authenticated local bridg
   }));
   assert.deepEqual(await resultPromise, { title: 'Relayed' });
 });
+
+test('native host replays extension registration when the local bridge restarts', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-native-host-restart-'));
+  const socketPath = resolve(root, 'bridge.sock');
+  const tokenPath = resolve(root, 'bridge.token');
+  const logger = { info() {}, warn() {}, error() {} };
+  const firstBridge = new LocalAgentBrowserBridge({ socketPath, tokenPath, logger });
+  await firstBridge.start();
+
+  const input = new PassThrough();
+  const relay = new NativeHostRelay({
+    input,
+    output: new PassThrough(),
+    socketPath,
+    tokenPath,
+    reconnectDelayMs: 5,
+    logger,
+  });
+  relay.start();
+  t.after(() => relay.stop());
+
+  input.write(encodeNativeMessage({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'extension-worker-restart',
+    extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+    capabilities: ['navigate', 'snapshot', 'detach'],
+    activeTab: { tabId: 8, ownership: 'agent' },
+  }));
+  await waitUntil(() => firstBridge.getStatus().extensionConnected);
+  await firstBridge.stop();
+
+  const secondBridge = new LocalAgentBrowserBridge({ socketPath, tokenPath, logger });
+  await secondBridge.start();
+  t.after(async () => secondBridge.stop());
+  await waitUntil(() => secondBridge.getStatus().extensionConnected);
+
+  assert.equal(secondBridge.getStatus().connectionId, 'extension-worker-restart');
+  assert.equal(secondBridge.getStatus().activeTabId, 8);
+});

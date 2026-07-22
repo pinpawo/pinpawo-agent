@@ -2,7 +2,7 @@ import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { browserSession } from './session';
-import type { BrowserExtractOptions } from './session';
+import type { BrowserExtractOptions, BrowserWaitState } from './session';
 import { formatBrowserToolError } from './errors';
 
 type BrowserTargetInput = { selector?: string; ref?: string };
@@ -190,17 +190,20 @@ const browserScrollTool = tool(
 );
 
 const browserWaitTool = tool(
-  async ({ selector, ref, timeoutMs }: BrowserTargetInput & { timeoutMs?: number }) => {
+  async ({ selector, ref, timeoutMs, state }: BrowserTargetInput & {
+    timeoutMs?: number;
+    state?: BrowserWaitState;
+  }) => {
     try {
       const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
-      return await browserSession.wait(target, timeoutMs ?? 3_000);
+      return await browserSession.wait(target, timeoutMs ?? 3_000, state ?? 'visible');
     } catch (err) {
       return formatBrowserToolError(err);
     }
   },
   {
     name: 'browser_wait',
-    description: '等待页面稳定。可等待某个 ref/selector 对应的元素出现，或等待指定毫秒数。',
+    description: '等待页面条件。可等待某个 ref/selector 对应的元素变为 visible（默认）或 hidden；不指定目标时等待指定毫秒数。',
     schema: z.object({
       ...browserTargetFields,
       timeoutMs: z
@@ -210,6 +213,10 @@ const browserWaitTool = tool(
         .max(30000)
         .optional()
         .describe('等待毫秒数，默认 3000'),
+      state: z
+        .enum(['visible', 'hidden'])
+        .optional()
+        .describe('目标等待状态，默认 visible；hidden 可用于等待遮罩、loading 或 popup 元素消失'),
     }).refine(
       (value) => !(value.selector && value.ref),
       { message: 'selector and ref cannot both be provided' },

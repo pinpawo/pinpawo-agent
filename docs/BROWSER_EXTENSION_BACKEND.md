@@ -27,7 +27,7 @@ MV3 service worker ── chrome.debugger / allowlisted CDP ── one Chrome ta
 
 The local-agent owns commands, deadlines, authorization context and final payload normalization. The native host only translates Chrome's length-prefixed messages to authenticated Unix-socket JSONL. The extension owns tab binding and the narrow CDP execution allowlist.
 
-Only one native-host/extension connection is active. Reconnection replaces the old `connectionId` and rejects its pending requests; commands are never replayed across a connection change.
+Only one native-host/extension connection is active. Reconnection replaces the old `connectionId` and rejects its pending requests; commands are never replayed across a connection change. If the local-agent bridge restarts while the native host remains alive, the host replays only the latest extension registration so the new bridge can recover the connection safely.
 
 ## Snapshot contract
 
@@ -47,9 +47,10 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 ## P1 interaction contract
 
 - `browser_click`, `browser_type` and selector-based `browser_wait` accept either the opaque `ref` from the latest snapshot or a CSS / `text=...` selector. Prefer `ref`; take a new snapshot after `stale_element_reference`.
-- Click sends mouse move, hover delay, press and release through CDP `Input.dispatchMouseEvent`.
+- Click activates the bound target inside the extension, then sends mouse move, hover delay, press and release through CDP `Input.dispatchMouseEvent`. This keeps trusted pointer input reliable if the user switched tabs after binding.
 - Type focuses through the trusted click path and selects existing text with a CDP editing command. Normal input uses per-character `Input.dispatchKeyEvent` sequences; large input uses bounded `Input.insertText` chunks so the public `browser_type` contract does not gain a backend-specific length limit.
 - Scroll uses `Input.dispatchMouseEvent` with `mouseWheel`; it can be targeted at an element or use the page viewport.
+- Wait supports backend-neutral `visible` and `hidden` target conditions. Extension selector waits poll within the caller deadline; stale refs remain explicit except that a detached stale ref already satisfies `hidden`.
 - Extract slices text inside the page before IPC and local-agent validates and builds the final chunk metadata.
 - Screenshot captures the exact attached viewport through allowlisted CDP, retries with bounded JPEG quality, then local-agent stores the image under `.pinpawo/browser/screenshots/` with mode `0600`.
 
@@ -72,9 +73,10 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 ```bash
 npm run build
 npm run test:browser-smoke -w pinpawo-local-agent
+npm run test:browser-extension-smoke -w pinpawo-local-agent
 ```
 
-The smoke test uses headless Playwright against a local fixture to verify parent page → popup → parent fallback target lifecycle. Extension acceptance uses the same fixture behavior after reloading the unpacked extension.
+The first smoke test uses headless Playwright against a local fixture. The extension smoke requires the unpacked extension and registered native host, then verifies parent page → popup → parent fallback, conditional waits and bridge restart recovery in the user's Chrome.
 
 Then:
 

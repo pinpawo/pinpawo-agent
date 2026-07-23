@@ -7,13 +7,10 @@ import {
   localAgentOperationKey,
 } from '../../localAgentTimeline';
 import {
-  buildTimelineViewportModel,
   findTimelineOperationEntry,
   selectActiveOperationsFromTimeline,
   selectRunningOperationEntries,
-  splitTimelineForViewport,
 } from './agentTimelineSelectors';
-import type { LocalAgentTimelineEntry } from '../../localAgentSession';
 
 test('operation timeline entries keep stable ids across lifecycle phases', () => {
   const started = operationEvent({
@@ -218,159 +215,6 @@ test('timeline active operation detail keeps payload fields out of status summar
     detail: 'README.md · update · mode=patch',
     startedAt: 1000,
   }]);
-});
-
-test('splitTimelineForViewport keeps only the settled prefix static', () => {
-  const userEntry: LocalAgentTimelineEntry = {
-    id: 'req-1:user',
-    type: 'message',
-    role: 'user',
-    requestId: 'req-1',
-    text: 'hello',
-    status: 'completed',
-  };
-  const streamingAssistantEntry: LocalAgentTimelineEntry = {
-    id: 'req-1:assistant:0',
-    type: 'message',
-    role: 'assistant',
-    requestId: 'req-1',
-    text: 'working',
-    status: 'streaming',
-  };
-  const operationEntry = localAgentOperationEntryFromEvent(operationEvent({
-    phase: 'completed',
-    target: 'README.md',
-    summary: 'read',
-  }), 1200);
-  const assistantEntry: LocalAgentTimelineEntry = {
-    id: 'req-1:assistant',
-    type: 'message',
-    role: 'assistant',
-    requestId: 'req-1',
-    text: 'done',
-    status: 'completed',
-  };
-
-  const streamingEntries = [userEntry, streamingAssistantEntry, operationEntry, assistantEntry];
-
-  assert.deepEqual(splitTimelineForViewport(streamingEntries), {
-    staticEntries: [streamingEntries[0]],
-    dynamicEntries: streamingEntries.slice(1),
-  });
-
-  const completedAssistant = {
-    ...streamingAssistantEntry,
-    status: 'completed' as const,
-  };
-  const completedEntries = [userEntry, completedAssistant, operationEntry, assistantEntry];
-  assert.deepEqual(splitTimelineForViewport(completedEntries), {
-    staticEntries: completedEntries,
-    dynamicEntries: [],
-  });
-});
-
-test('timeline viewport keeps system and subagent messages in canonical order', () => {
-  const timeline: LocalAgentTimelineEntry[] = [
-    {
-      id: 'message:user-1',
-      type: 'message',
-      role: 'user',
-      text: 'hello',
-      status: 'completed',
-    },
-    {
-      id: 'notice-1',
-      type: 'message',
-      role: 'system',
-      text: 'after user',
-      status: 'completed',
-    },
-    {
-      id: 'req-1:operation:tool',
-      type: 'operation',
-      requestId: 'req-1',
-      operationKey: 'tool',
-      kind: 'tool',
-      title: 'Tool',
-      phase: 'completed',
-      startedAt: 1000,
-      updatedAt: 1100,
-    },
-    {
-      id: 'req-1:subagent-output',
-      type: 'message',
-      role: 'subagent',
-      requestId: 'req-1',
-      text: 'working',
-      status: 'streaming',
-    },
-    {
-      id: 'req-1:assistant:0',
-      type: 'message',
-      role: 'assistant',
-      text: 'done',
-      status: 'streaming',
-    },
-  ];
-  assert.deepEqual(timeline.map((entry) => entry.id), [
-    'message:user-1',
-    'notice-1',
-    'req-1:operation:tool',
-    'req-1:subagent-output',
-    'req-1:assistant:0',
-  ]);
-
-  const split = splitTimelineForViewport(timeline);
-  assert.deepEqual(split.staticEntries.map((entry) => entry.id), [
-    'message:user-1',
-    'notice-1',
-    'req-1:operation:tool',
-  ]);
-  assert.deepEqual(split.dynamicEntries.map((entry) => entry.id), [
-    'req-1:subagent-output',
-    'req-1:assistant:0',
-  ]);
-});
-
-test('buildTimelineViewportModel derives display entries and viewport split together', () => {
-  const timeline: LocalAgentTimelineEntry[] = [
-    {
-      id: 'message:user-1',
-      type: 'message',
-      role: 'user',
-      text: 'hello',
-      status: 'completed',
-    },
-    {
-      id: 'notice-1',
-      type: 'message',
-      role: 'system',
-      text: 'after user',
-      status: 'completed',
-    },
-    {
-      id: 'req-1:assistant:0',
-      type: 'message',
-      role: 'assistant',
-      text: 'working',
-      status: 'streaming',
-    },
-  ];
-
-  const viewport = buildTimelineViewportModel(timeline);
-
-  assert.deepEqual(viewport.entries.map((entry) => entry.id), [
-    'message:user-1',
-    'notice-1',
-    'req-1:assistant:0',
-  ]);
-  assert.deepEqual(viewport.staticEntries.map((entry) => entry.id), [
-    'message:user-1',
-    'notice-1',
-  ]);
-  assert.deepEqual(viewport.dynamicEntries.map((entry) => entry.id), [
-    'req-1:assistant:0',
-  ]);
 });
 
 function operationEvent(params: {

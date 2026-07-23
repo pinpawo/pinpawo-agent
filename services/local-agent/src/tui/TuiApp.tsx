@@ -52,15 +52,12 @@ import type { TuiState } from './state/tuiState';
 import type { MessageRole } from './types';
 import {
   createTimelineScrollState,
-  scrollTimelineByLines,
   scrollTimelineByPage,
   updateTimelineScrollMetrics,
 } from './timeline/timelineScroll';
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
 const CLEAR_SCREEN = '\x1B[2J\x1B[3J\x1B[H';
-const ENABLE_MOUSE_WHEEL = '\x1B[?1000h\x1B[?1006h';
-const DISABLE_MOUSE_WHEEL = '\x1B[?1006l\x1B[?1000l';
 
 function renderTimelineDisplayEntry(
   entry: LocalAgentTimelineEntry,
@@ -121,14 +118,10 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   }, [reactDispatch]);
   const inputBufferRef = useRef(createInitialTuiInputBufferState());
   const lastInterruptAtRef = useRef(0);
-  const frozenTimelineRef = useRef<LocalAgentTimelineEntry[] | null>(null);
-  const frozenTimelineNowRef = useRef<number | null>(null);
   const localServerPort = config.localServerPort;
   const workdir = props.workdir ?? config.workdir;
   const resetTimelineView = useCallback(() => {
     stdout.write(CLEAR_SCREEN);
-    frozenTimelineRef.current = null;
-    frozenTimelineNowRef.current = null;
     setTimelineScroll(createTimelineScrollState());
     setTimelineRenderEpoch((current) => current + 1);
   }, [stdout]);
@@ -153,6 +146,8 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     timelineRenderEpoch,
   }), [animationFrame, now, terminalSize.columns, timelineRenderEpoch, tuiState]);
   const focusedSession = screenModel.session;
+  const activeRequestId = focusedSession?.activeRun?.requestId ?? null;
+  const lastTimelineRequestIdRef = useRef(activeRequestId);
   const ready = screenModel.ready;
   const busy = screenModel.busy;
   const pendingApproval = screenModel.pendingApproval;
@@ -165,6 +160,13 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   useEffect(() => {
     setApprovalIndex(0);
   }, [pendingApproval?.requestId, pendingApproval?.review.id]);
+
+  useEffect(() => {
+    if (activeRequestId && activeRequestId !== lastTimelineRequestIdRef.current) {
+      setTimelineScroll(createTimelineScrollState());
+    }
+    lastTimelineRequestIdRef.current = activeRequestId;
+  }, [activeRequestId]);
 
   useEffect(() => {
     if (globalReviewPolicyPickerOpen && (busy || pendingApproval)) {
@@ -416,20 +418,6 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   }, [stdout]);
 
   useEffect(() => {
-    if (!stdout.isTTY) return;
-    stdout.write(ENABLE_MOUSE_WHEEL);
-    return () => {
-      stdout.write(DISABLE_MOUSE_WHEEL);
-    };
-  }, [stdout]);
-
-  useEffect(() => {
-    if (timelineScroll.offset > 0) return;
-    frozenTimelineRef.current = null;
-    frozenTimelineNowRef.current = null;
-  }, [timelineScroll.offset]);
-
-  useEffect(() => {
     runtimeController.start();
     return () => runtimeController.dispose();
   }, [runtimeController]);
@@ -472,21 +460,10 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
         return;
 
       case 'timeline':
-        if (
-          (action.action === 'page_up' || action.action === 'scroll_up')
-          && timelineScroll.offset === 0
-        ) {
-          frozenTimelineRef.current = [...screenModel.regions.timeline.entries];
-          frozenTimelineNowRef.current = now;
-        }
-        setTimelineScroll((current) => {
-          const direction = action.action === 'page_up' || action.action === 'scroll_up'
-            ? 'up'
-            : 'down';
-          return action.action === 'page_up' || action.action === 'page_down'
-            ? scrollTimelineByPage(current, direction)
-            : scrollTimelineByLines(current, direction, 3);
-        });
+        setTimelineScroll((current) => scrollTimelineByPage(
+          current,
+          action.action === 'page_up' ? 'up' : 'down',
+        ));
         return;
 
       case 'approval':
@@ -671,12 +648,22 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     composerTarget,
     timelineScroll.offset,
   ]);
-  const displayedTimelineEntries = timelineScroll.offset > 0 && frozenTimelineRef.current
-    ? frozenTimelineRef.current
-    : screenModel.regions.timeline.entries;
-  const displayedTimelineNow = timelineScroll.offset > 0 && frozenTimelineNowRef.current
-    ? frozenTimelineNowRef.current
-    : now;
+  const emptyTimelineVersion = screenModel.regions.timeline.emptyState
+    ? JSON.stringify(screenModel.regions.timeline.emptyState)
+    : '';
+  const timelineLayoutVersion = useMemo(() => ({
+    terminalColumns: terminalSize.columns,
+    terminalRows: terminalSize.rows,
+    composerRows: textArea.layout.rows.length,
+    overlay: overlayModel.current,
+    emptyTimelineVersion,
+  }), [
+    emptyTimelineVersion,
+    overlayModel.current,
+    terminalSize.columns,
+    terminalSize.rows,
+    textArea.layout.rows.length,
+  ]);
   const handleTimelineMetricsChange = useCallback((metrics: {
     contentHeight: number;
     viewportHeight: number;
@@ -693,6 +680,8 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     >
       <TimelineViewport
         key={screenModel.regions.timeline.renderKey}
+        contentVersion={screenModel.regions.timeline.entries}
+        layoutVersion={timelineLayoutVersion}
         scrollOffset={timelineScroll.offset}
         onMetricsChange={handleTimelineMetricsChange}
       >
@@ -701,11 +690,11 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
             <WelcomePanel model={screenModel.regions.timeline.emptyState} />
           </Box>
         ) : null}
-        {displayedTimelineEntries.map((entry) => (
+        {screenModel.regions.timeline.entries.map((entry) => (
           <Box key={entry.id} flexShrink={0}>
             {renderTimelineDisplayEntry(entry, {
               petName: screenModel.petName,
-              now: displayedTimelineNow,
+              now,
               width: contentWidth,
             })}
           </Box>

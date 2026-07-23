@@ -21,8 +21,6 @@ export type CanonicalInputEvent =
   | { type: 'cursor.line.end' }
   | { type: 'viewport.page.up' }
   | { type: 'viewport.page.down' }
-  | { type: 'viewport.scroll.up' }
-  | { type: 'viewport.scroll.down' }
   | { type: 'selection.left' }
   | { type: 'selection.right' }
   | { type: 'selection.up' }
@@ -77,8 +75,6 @@ export function toCanonicalInputEvent(
   if (isRawShiftEndInput(input)) return { type: 'selection.line.end' };
   if (isRawPageUpInput(input)) return { type: 'viewport.page.up' };
   if (isRawPageDownInput(input)) return { type: 'viewport.page.down' };
-  const mouseWheelDirection = readMouseWheelDirection(input);
-  if (mouseWheelDirection) return { type: `viewport.scroll.${mouseWheelDirection}` };
   if (isRawCursorInput(input, 'D')) return { type: 'cursor.left' };
   if (isRawCursorInput(input, 'C')) return { type: 'cursor.right' };
   if (isRawCursorInput(input, 'A')) return { type: 'cursor.up' };
@@ -183,16 +179,6 @@ function isRawPageUpInput(input: string) {
 
 function isRawPageDownInput(input: string) {
   return /^(?:\x1b)?\[(?:6|6;1)~$/.test(input);
-}
-
-function readMouseWheelDirection(input: string): 'up' | 'down' | null {
-  const matches = Array.from(input.matchAll(/(?:\x1b)?\[<(\d+);\d+;\d+[mM]/g));
-  if (matches.length === 0) return null;
-  const mouseInput = matches.map((match) => match[0]).join('');
-  if (mouseInput !== input) return null;
-  const buttonCode = Number(matches.at(-1)?.[1]);
-  if ((buttonCode & 64) === 0) return null;
-  return (buttonCode & 1) === 0 ? 'up' : 'down';
 }
 
 function isBracketedPasteInput(input: string) {

@@ -36,10 +36,7 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
   assert.equal(model.regions.statusBar.statusNotice, null);
   assert.equal(model.regions.statusBar.connectionStatus, '就绪');
   assert.equal(model.regions.timeline.renderKey, '3');
-  assert.equal(model.regions.timeline.staticBoundaryKey, 'm1');
-  assert.equal(model.regions.timeline.scrollStrategy, 'applicationOwnedViewport');
-  assert.deepEqual(model.regions.timeline.staticEntries.map((entry) => entry.id), ['m1']);
-  assert.deepEqual(model.regions.timeline.dynamicEntries.map((entry) => entry.id), ['m2']);
+  assert.deepEqual(model.regions.timeline.entries.map((entry) => entry.id), ['m1', 'm2']);
   assert.equal(model.regions.timeline.emptyState, null);
 });
 
@@ -209,91 +206,6 @@ test('buildTuiScreenModel keeps timeline viewport ids stable across resize', () 
     narrow.regions.timeline.entries.map((entry) => entry.id),
     wide.regions.timeline.entries.map((entry) => entry.id),
   );
-  assert.deepEqual(
-    narrow.regions.timeline.staticEntries.map((entry) => entry.id),
-    ['m1', 'notice-1', 'm2'],
-  );
-  assert.deepEqual(
-    narrow.regions.timeline.dynamicEntries.map((entry) => entry.id),
-    ['activity-1', 'm3'],
-  );
-  assert.deepEqual(
-    narrow.regions.timeline.dynamicEntries.map((entry) => entry.id),
-    wide.regions.timeline.dynamicEntries.map((entry) => entry.id),
-  );
-});
-
-test('buildTuiScreenModel moves completed entries across the viewport boundary once', () => {
-  const state = createInitialTuiState(createSession({
-    id: 'chat:pet',
-    timeline: [
-      message('m1', 'user', 'hello', 'completed'),
-      message('m2', 'assistant', 'working', 'streaming'),
-    ],
-  }));
-  const streaming = buildTuiScreenModel({
-    state,
-    terminalColumns: 80,
-    now: 1000,
-    animationFrame: 0,
-    timelineRenderEpoch: 1,
-  });
-
-  state.sessions['chat:pet'].timeline = [
-    message('m1', 'user', 'hello', 'completed'),
-    message('m2', 'assistant', 'done', 'completed'),
-  ];
-  const completed = buildTuiScreenModel({
-    state,
-    terminalColumns: 80,
-    now: 1000,
-    animationFrame: 0,
-    timelineRenderEpoch: 1,
-  });
-
-  assert.deepEqual(streaming.regions.timeline.staticEntries.map((entry) => entry.id), ['m1']);
-  assert.deepEqual(streaming.regions.timeline.dynamicEntries.map((entry) => entry.id), ['m2']);
-  assert.deepEqual(completed.regions.timeline.entries.map((entry) => entry.id), ['m1', 'm2']);
-  assert.deepEqual(completed.regions.timeline.staticEntries.map((entry) => entry.id), ['m1', 'm2']);
-  assert.deepEqual(completed.regions.timeline.dynamicEntries.map((entry) => entry.id), []);
-  assert.equal(completed.regions.timeline.staticBoundaryKey, 'm1\u001Fm2');
-});
-
-test('buildTuiScreenModel keeps operation viewport boundary stable across completion', () => {
-  const state = createInitialTuiState(createSession({
-    id: 'chat:pet',
-    timeline: [
-      message('m1', 'user', 'hello', 'completed'),
-      operation('op1', 'started'),
-    ],
-  }));
-  const running = buildTuiScreenModel({
-    state,
-    terminalColumns: 80,
-    now: 1000,
-    animationFrame: 0,
-    timelineRenderEpoch: 1,
-  });
-
-  state.sessions['chat:pet'].timeline = [
-    message('m1', 'user', 'hello', 'completed'),
-    operation('op1', 'completed'),
-  ];
-  const completed = buildTuiScreenModel({
-    state,
-    terminalColumns: 80,
-    now: 1000,
-    animationFrame: 0,
-    timelineRenderEpoch: 1,
-  });
-
-  assert.deepEqual(running.regions.timeline.entries.map((entry) => entry.id), ['m1', 'op1']);
-  assert.deepEqual(running.regions.timeline.staticEntries.map((entry) => entry.id), ['m1']);
-  assert.deepEqual(running.regions.timeline.dynamicEntries.map((entry) => entry.id), ['op1']);
-  assert.deepEqual(completed.regions.timeline.entries.map((entry) => entry.id), ['m1', 'op1']);
-  assert.deepEqual(completed.regions.timeline.staticEntries.map((entry) => entry.id), ['m1', 'op1']);
-  assert.deepEqual(completed.regions.timeline.dynamicEntries.map((entry) => entry.id), []);
-  assert.equal(completed.regions.timeline.staticBoundaryKey, 'm1\u001Fop1');
 });
 
 function message(
@@ -309,23 +221,5 @@ function message(
     requestId: 'run1',
     text,
     status,
-  };
-}
-
-function operation(
-  id: string,
-  phase: 'started' | 'completed',
-): LocalAgentTimelineEntry {
-  return {
-    id,
-    type: 'operation',
-    requestId: 'run1',
-    operationKey: id,
-    kind: 'tool',
-    title: 'Tool',
-    phase,
-    startedAt: 1000,
-    updatedAt: phase === 'completed' ? 2000 : 1000,
-    ...(phase === 'completed' ? { completedAt: 2000 } : {}),
   };
 }

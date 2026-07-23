@@ -3,6 +3,8 @@ import { Box, measureElement, type DOMElement } from 'ink';
 
 export function TimelineViewport(props: {
   children: React.ReactNode;
+  contentVersion: unknown;
+  layoutVersion: unknown;
   scrollOffset: number;
   onMetricsChange: (metrics: {
     contentHeight: number;
@@ -18,7 +20,7 @@ export function TimelineViewport(props: {
       contentHeight: measureElement(contentRef.current).height,
       viewportHeight: measureElement(viewportRef.current).height,
     });
-  });
+  }, [props.contentVersion, props.layoutVersion, props.onMetricsChange]);
 
   return (
     <Box

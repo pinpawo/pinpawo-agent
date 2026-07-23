@@ -12,7 +12,12 @@ test('TimelineViewport follows the tail and can reveal earlier terminal rows', (
   ));
   const renderViewport = (scrollOffset: number) => renderToString(
     <Box height={5} flexDirection="column">
-      <TimelineViewport scrollOffset={scrollOffset} onMetricsChange={() => undefined}>
+      <TimelineViewport
+        contentVersion={rows}
+        layoutVersion={5}
+        scrollOffset={scrollOffset}
+        onMetricsChange={() => undefined}
+      >
         {rows}
       </TimelineViewport>
     </Box>,

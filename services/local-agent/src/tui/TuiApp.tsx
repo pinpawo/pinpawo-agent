@@ -52,12 +52,15 @@ import type { TuiState } from './state/tuiState';
 import type { MessageRole } from './types';
 import {
   createTimelineScrollState,
+  scrollTimelineByLines,
   scrollTimelineByPage,
   updateTimelineScrollMetrics,
 } from './timeline/timelineScroll';
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
 const CLEAR_SCREEN = '\x1B[2J\x1B[3J\x1B[H';
+const ENABLE_MOUSE_WHEEL = '\x1B[?1000h\x1B[?1006h';
+const DISABLE_MOUSE_WHEEL = '\x1B[?1006l\x1B[?1000l';
 
 function renderTimelineDisplayEntry(
   entry: LocalAgentTimelineEntry,
@@ -418,6 +421,14 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   }, [stdout]);
 
   useEffect(() => {
+    if (!stdout.isTTY) return;
+    stdout.write(ENABLE_MOUSE_WHEEL);
+    return () => {
+      stdout.write(DISABLE_MOUSE_WHEEL);
+    };
+  }, [stdout]);
+
+  useEffect(() => {
     runtimeController.start();
     return () => runtimeController.dispose();
   }, [runtimeController]);
@@ -460,10 +471,14 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
         return;
 
       case 'timeline':
-        setTimelineScroll((current) => scrollTimelineByPage(
-          current,
-          action.action === 'page_up' ? 'up' : 'down',
-        ));
+        setTimelineScroll((current) => {
+          const direction = action.action === 'page_up' || action.action === 'scroll_up'
+            ? 'up'
+            : 'down';
+          return action.action === 'page_up' || action.action === 'page_down'
+            ? scrollTimelineByPage(current, direction)
+            : scrollTimelineByLines(current, direction, 3);
+        });
         return;
 
       case 'approval':

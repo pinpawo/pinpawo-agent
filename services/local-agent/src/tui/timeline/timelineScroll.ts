@@ -54,10 +54,19 @@ export function scrollTimelineByPage(
   direction: TimelineScrollDirection,
 ): TimelineScrollState {
   const pageSize = Math.max(1, state.viewportHeight - 1);
+  return scrollTimelineByLines(state, direction, pageSize);
+}
+
+export function scrollTimelineByLines(
+  state: TimelineScrollState,
+  direction: TimelineScrollDirection,
+  lineCount: number,
+): TimelineScrollState {
+  const distance = Math.max(1, Math.floor(lineCount));
   const maxOffset = maxTimelineScrollOffset(state.contentHeight, state.viewportHeight);
   const offset = direction === 'up'
-    ? Math.min(maxOffset, state.offset + pageSize)
-    : Math.max(0, state.offset - pageSize);
+    ? Math.min(maxOffset, state.offset + distance)
+    : Math.max(0, state.offset - distance);
   const followingTail = direction === 'up' ? false : state.followingTail;
 
   return offset === state.offset && followingTail === state.followingTail

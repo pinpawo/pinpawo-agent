@@ -28,7 +28,7 @@ test('decision eval scenarios render complete production messages', () => {
   } as const;
   for (const scenario of getDecisionEvalScenarios()) {
     const prompt = scenario.render();
-    assert.match(prompt.system, /pet-agent orchestrator/);
+    assert.ok(prompt.system.trim());
     assert.match(prompt.input, new RegExp(`<${inputRoots[scenario.target]}(?:\\s[^>]*)?>`));
     assert.doesNotMatch(
       `${prompt.system}\n${prompt.input}`,

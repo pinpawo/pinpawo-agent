@@ -2,7 +2,7 @@
 title: System Prompt Authoring Principles
 page_type: concept
 status: draft
-updated: 2026-07-22
+updated: 2026-07-23
 sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
@@ -275,7 +275,7 @@ the prompts.
 | [`capabilityPlanner.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts) | The prompt owns mode-specific planning, task grouping, and deferred-work judgment; the schema owns output relationships | Validate grouping, cancellation, and future-tail preservation across models |
 | [`capabilityDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts) | The prompt selects the best executor for the current task; schema and runtime own available-lane enforcement | Validate custom/general selection and missing-parameter behavior across models |
 | [`outcomeDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts) | The prompt identifies verdict evidence; the schema owns verdict meanings and `gap_note`; runtime owns transitions | Validate task acceptance, sibling-result isolation, and stopping behavior across models |
-| [`answer.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts) | The prompt defines direct reply, handoff synthesis, historical replay, and user-question modes; runtime retains the fixed completion acknowledgement | Validate answer quality, replay fidelity, and repetition without changing the accepted close structure |
+| [`answer.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/answer.prompt.ts) | The prompt defines the user-visible reply boundary and evidence source; runtime supplies the current user goal and reply objective, including the fixed completion acknowledgement | Validate answer quality, replay fidelity, and repetition without changing the accepted close structure |
 
 Future changes still evaluate each node independently. A shorter prompt is not a
 standing objective, and one node's measured regression is not authority to
@@ -374,6 +374,34 @@ Real-model comparison remains required before this page can become `validated`.
 The accepted completion lifecycle and the stable answer contract did not change,
 so neither the completion decision page nor the Prompt Contract Map requires a
 semantic revision.
+
+## Answer reply-objective follow-up
+
+The answer eval isolated a failure in the completion acknowledgement rather than
+the general answer boundary: direct replies, existing-result synthesis,
+historical replay, and clarification all met their objectives, while completion
+repeated the delivered result and exposed internal lifecycle terms.
+
+The follow-up keeps the accepted two-message close and narrows model-visible
+knowledge:
+
+- the static prompt states the user-visible responsibility and canonical
+  conversation evidence;
+- runtime context identifies the current user goal, state, and reply objective;
+- provenance still selects completion mode, but internal flow vocabulary and
+  identifiers stay in code;
+- terminal states use the same current-state and reply-objective structure.
+
+This is an application of the existing static-contract, injected-fact, and
+deterministic-runtime split. It does not add a free-form policy channel or a new
+Prompt Contract Map entry.
+
+Using GLM-5.2 with the same lifecycle-aligned eval harness revision, three
+repeats per case, and the same goal evaluator, the comparable result changed
+from 12/15 to 15/15 goals achieved. Completion acknowledgement changed from 0/3
+to 3/3, while the other four answer behaviors remained 3/3. The completion
+outputs were identical across the three candidate runs. This is evidence for
+the current provider and model, not cross-model validation.
 
 ## Shared-prefix pilot evidence
 

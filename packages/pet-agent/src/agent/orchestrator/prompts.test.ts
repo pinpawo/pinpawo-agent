@@ -277,14 +277,11 @@ test('answer prompt owns the user-visible reply', () => {
     actor: testActor,
   });
 
-  assert.match(prompt, /主对话中的 handoff 结论/);
-  assert.doesNotMatch(prompt, /delegation_briefing|【委派简报】|忽略主对话中的委派简报/);
-  assert.match(prompt, /需要使用 handoff 结论：提炼用户需要的结论、关键依据和必要后续建议/);
-  assert.match(prompt, /用户要求查看原文、完整内容、复述、重发或继续历史结果/);
-  assert.match(prompt, /明确提出当前需要用户回答的问题/);
-  assert.match(prompt, /直接输出用户可见的回复正文/);
-  assert.doesNotMatch(prompt, /不要把紧邻的执行器\/subagent 结果原文整体复制一遍/);
-  assert.doesNotMatch(prompt, /不要输出 JSON、动作字段/);
+  assert.match(prompt, /本次面向用户的最终回复/);
+  assert.match(prompt, /按照本次回复目标/);
+  assert.match(prompt, /主对话中已有的信息/);
+  assert.match(prompt, /直接输出回复正文/);
+  assert.doesNotMatch(prompt, /orchestrator|handoff|delegation|subagent/);
 });
 
 test('delegation outcome input carries current task context separately', () => {

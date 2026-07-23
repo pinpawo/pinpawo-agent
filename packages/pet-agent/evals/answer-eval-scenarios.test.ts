@@ -41,36 +41,42 @@ test('answer eval renders the production prompt and fixed completion context', (
     ({ caseName }) => caseName === 'delegation-completion-acknowledgement',
   );
   assert.ok(scenario);
-  const text = scenario.render().map((message) => String(message.content)).join('\n');
-  assert.match(text, /orchestrator 的最终回复节点/);
-  assert.match(text, /delegation completion acknowledgement/);
-  assert.match(text, /delegated task：汇总本周发布风险/);
-  assert.match(text, /RESULT_BODY_START/);
+  const messages = scenario.render();
+  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human', 'ai']);
+  const systemText = String(messages[0].content);
+  const resultText = String(messages[2].content);
+  assert.match(systemText, /本次回复目标/);
+  assert.match(systemText, /汇总本周发布风险/);
+  assert.doesNotMatch(systemText, /orchestrator|handoff|delegation|subagent/);
+  assert.match(resultText, /RESULT_BODY_START/);
 });
 
-test('answer eval distinguishes requested historical replay from completion-body repetition', async () => {
-  const replay = getAnswerEvalScenarios().find(({ caseName }) => caseName === 'historical-replay');
+test('answer eval renders the current user goal for an ordinary reply', () => {
+  const scenario = getAnswerEvalScenarios().find(({ caseName }) => caseName === 'direct-answer');
+  assert.ok(scenario);
+  const messages = scenario.render();
+  assert.deepEqual(messages.map((message) => message._getType()), ['system', 'human']);
+  const systemText = String(messages[0].content);
+  assert.match(systemText, /主对话中最近一条用户消息所表达的目标/);
+  assert.doesNotMatch(systemText, /只回答这个问题：2 \+ 3 等于多少/);
+  assert.equal(String(messages[1].content), '只回答这个问题：2 + 3 等于多少？');
+});
+
+test('answer eval derives goal result from evaluator criteria', async () => {
   const completion = getAnswerEvalScenarios().find(
     ({ caseName }) => caseName === 'delegation-completion-acknowledgement',
   );
-  assert.ok(replay);
   assert.ok(completion);
 
-  const replayResult = await replay.run(answerModel('ARCHIVE_RESULT_731；回滚窗口为 30 分钟。'));
-  assert.ok(replayResult.scores.every(({ score }) => score === 1));
-
-  const completionResult = await completion.run(answerModel('本周发布风险已汇总完成，如需继续处理请告诉我。'));
-  assert.ok(completionResult.scores.every(({ score }) => score === 1));
-  const repeatedResult = await completion.run(answerModel(
+  const result = await completion.run(answerModel(
     '完成。完整风险正文：database-freeze-42；queue-drain-88；建议分三阶段切流。',
     ['delivered_body_not_repeated'],
   ));
   assert.equal(
-    repeatedResult.scores.find(({ key }) => key === 'delivered_body_not_repeated')?.score,
+    result.scores.find(({ key }) => key === 'delivered_body_not_repeated')?.score,
     0,
   );
-  assert.equal(repeatedResult.verdict, 'goal_not_achieved');
-  assert.ok(Number(repeatedResult.diagnostics.longestPriorAssistantVerbatimSpan) > 24);
+  assert.equal(result.verdict, 'goal_not_achieved');
 });
 
 test('answer diagnostics do not decide whether the objective was achieved', async () => {

@@ -15,7 +15,7 @@ export type TuiInputRouterState = {
 
 export type TuiInputCommand =
   | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
-  | { target: 'timeline'; action: 'page_up' | 'page_down' }
+  | { target: 'timeline'; action: 'page_up' | 'page_down' | 'scroll_up' | 'scroll_down' }
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'globalReviewPolicy'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
@@ -71,8 +71,8 @@ export function resolveTuiInputCommand(
       return routeApprovalInputCommand(event, owner);
 
     case 'busy':
-      if (event.type === 'viewport.page.up') return { target: 'timeline', action: 'page_up' };
-      if (event.type === 'viewport.page.down') return { target: 'timeline', action: 'page_down' };
+      if (isTimelineScrollUp(event)) return { target: 'timeline', action: scrollUpAction(event) };
+      if (isTimelineScrollDown(event)) return { target: 'timeline', action: scrollDownAction(event) };
       if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
       return { target: 'none' };
 
@@ -96,8 +96,8 @@ export function resolveTuiInputCommand(
       return routeTextAreaCommand(event);
 
     case 'composer':
-      if (event.type === 'viewport.page.up') return { target: 'timeline', action: 'page_up' };
-      if (event.type === 'viewport.page.down') return { target: 'timeline', action: 'page_down' };
+      if (isTimelineScrollUp(event)) return { target: 'timeline', action: scrollUpAction(event) };
+      if (isTimelineScrollDown(event)) return { target: 'timeline', action: scrollDownAction(event) };
       {
         const historyRoute = resolveComposerHistoryRoute(event, routerState.composerHistory);
         if (historyRoute) return { target: 'composerHistory', action: historyRoute };
@@ -141,9 +141,37 @@ function resolveApprovalOptionNavigation(
 }
 
 function isPreviousNavigation(event: CanonicalInputEvent) {
-  return event.type === 'cursor.up' || event.type === 'viewport.page.up';
+  return event.type === 'cursor.up'
+    || event.type === 'viewport.page.up'
+    || event.type === 'viewport.scroll.up';
 }
 
 function isNextNavigation(event: CanonicalInputEvent) {
-  return event.type === 'cursor.down' || event.type === 'viewport.page.down';
+  return event.type === 'cursor.down'
+    || event.type === 'viewport.page.down'
+    || event.type === 'viewport.scroll.down';
+}
+
+function isTimelineScrollUp(event: CanonicalInputEvent) {
+  return event.type === 'viewport.page.up' || event.type === 'viewport.scroll.up';
+}
+
+function isTimelineScrollDown(event: CanonicalInputEvent) {
+  return event.type === 'viewport.page.down' || event.type === 'viewport.scroll.down';
+}
+
+function scrollUpAction(
+  event: Extract<CanonicalInputEvent, {
+    type: 'viewport.page.up' | 'viewport.scroll.up';
+  }>,
+): 'page_up' | 'scroll_up' {
+  return event.type === 'viewport.page.up' ? 'page_up' : 'scroll_up';
+}
+
+function scrollDownAction(
+  event: Extract<CanonicalInputEvent, {
+    type: 'viewport.page.down' | 'viewport.scroll.down';
+  }>,
+): 'page_down' | 'scroll_down' {
+  return event.type === 'viewport.page.down' ? 'page_down' : 'scroll_down';
 }

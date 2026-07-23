@@ -246,13 +246,13 @@ cases, repetitions, and provider-reported token usage. The runner requires a cle
 `PROMPT_EVAL_ALLOW_DIRTY=1` is available for exploratory runs, whose reports stay
 marked as dirty.
 
-Decision-node objectives use deterministic contract criteria. Free-form `answer`
-objectives are evaluated against the canonical conversation and case-specific
-acceptance criteria by the same configured model using the versioned
-`answer-goal-v1` evaluator. The report records that evaluator configuration and
-keeps answer-generation usage separate from evaluator usage. A malformed or
-failed evaluator call makes the run not evaluable; it does not count as a failed
-answer objective.
+Exact actions, verdicts, enums, and mechanical plan relationships use
+deterministic contract criteria. Free-form entry tasks, planner task/tail
+objectives, and `answer` outputs use the same configured model with the
+versioned `prompt-goal-v1` evaluator. The report records that evaluator
+configuration and keeps subject-model usage separate from evaluator usage. A
+malformed or failed evaluator call makes the run not evaluable; it does not
+count as a failed objective.
 
 Every criterion result records whether it was evaluated deterministically or by
 the LLM judge. Goal criteria contain only behavior owned by the prompt contract.

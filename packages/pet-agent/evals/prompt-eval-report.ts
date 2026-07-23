@@ -35,7 +35,7 @@ export type PromptEvalReport = {
   structuredOutputMethod: StructuredOutputMethod | 'provider-default' | 'not-applicable';
   evaluator: {
     mode: 'subject-model' | 'not-applicable';
-    version: 'answer-goal-v1' | 'not-applicable';
+    version: 'prompt-goal-v1' | 'not-applicable';
     model: PromptEvalModelMetadata | null;
     structuredOutputMethod: StructuredOutputMethod | 'provider-default' | 'not-applicable';
   };

@@ -139,7 +139,7 @@ test('comparison rejects different evaluator settings', () => {
   const candidate = report({ commit: 'candidate', passed: true, meanDurationMs: 20 });
   candidate.evaluator = {
     mode: 'subject-model',
-    version: 'answer-goal-v1',
+    version: 'prompt-goal-v1',
     model: candidate.model,
     structuredOutputMethod: 'jsonSchema',
   };

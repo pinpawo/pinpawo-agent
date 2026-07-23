@@ -27,24 +27,8 @@ function exact(
   };
 }
 
-function containsTerms(
-  key: string,
-  statement: string,
-  value: string | null | undefined,
-  terms: string[],
-): DecisionContractScore {
-  const missing = terms.filter((term) => !value?.toLowerCase().includes(term.toLowerCase()));
-  return {
-    key,
-    statement,
-    evaluator: 'deterministic',
-    score: missing.length === 0 ? 1 : 0,
-    comment: missing.length === 0 ? value ?? '' : `missing=${missing.join(',')}; actual=${value ?? ''}`,
-  };
-}
-
 export function scoreEntryDecision(
-  output: { mode: string; task?: string | null },
+  output: { mode: string },
   expected: EntryDecisionExpected,
 ): DecisionContractScore[] {
   return [
@@ -54,14 +38,6 @@ export function scoreEntryDecision(
       output.mode,
       expected.mode,
     ),
-    ...(expected.expectedTaskTerms?.length
-      ? [containsTerms(
-          'direct_task_content_correct',
-          `The direct task preserves the required boundary content: ${expected.expectedTaskTerms.join(', ')}.`,
-          output.task,
-          expected.expectedTaskTerms,
-        )]
-      : []),
   ];
 }
 
@@ -108,18 +84,13 @@ export function scoreCapabilityPlanning(
     remainingPlan: Array<{ objective: string; capabilityIntent: string; status: 'concrete' | 'deferred' }>;
   },
   expected: CapabilityPlanningExpected,
-  input: CapabilityPlanningInput,
 ): DecisionContractScore[] {
-  const metrics = derivePlanningMetrics(input, output.remainingPlan, output.nextTask && output.capabilityIntent
-    ? { objective: output.nextTask, capabilityIntent: output.capabilityIntent }
-    : null);
   const remainingPlanMatches = output.remainingPlan.length === expected.remainingPlan.length
     && output.remainingPlan.every((item, index) => {
       const expectedItem = expected.remainingPlan[index];
       return Boolean(expectedItem)
         && item.capabilityIntent === expectedItem.capabilityIntent
-        && item.status === expectedItem.status
-        && expectedItem.objectiveTerms.every((term) => item.objective.toLowerCase().includes(term.toLowerCase()));
+        && item.status === expectedItem.status;
     });
   return [
     exact(
@@ -128,15 +99,9 @@ export function scoreCapabilityPlanning(
       output.result,
       expected.result,
     ),
-    exact(
-      'plan_effect_correct',
-      `Apply the expected ${expected.planEffect} effect to the current plan.`,
-      metrics.planEffect,
-      expected.planEffect,
-    ),
     {
-      key: 'remaining_plan_correct',
-      statement: 'Preserve only the valid future tail after the current task.',
+      key: 'remaining_plan_structure_correct',
+      statement: 'Preserve the expected number, order, status, and capability intent of future tasks.',
       evaluator: 'deterministic',
       score: remainingPlanMatches ? 1 : 0,
       comment: JSON.stringify(output.remainingPlan),
@@ -148,12 +113,6 @@ export function scoreCapabilityPlanning(
             `Assign the materialized task the capability intent ${expected.capabilityIntent ?? 'null'}.`,
             output.capabilityIntent ?? null,
             expected.capabilityIntent ?? null,
-          ),
-          containsTerms(
-            'materialized_task_correct',
-            `Materialize a task containing the required evidence: ${(expected.nextTaskTerms ?? []).join(', ')}.`,
-            output.nextTask,
-            expected.nextTaskTerms ?? [],
           ),
         ]
       : []),

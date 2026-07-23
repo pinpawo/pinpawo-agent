@@ -16,14 +16,15 @@ function allPass(scores: Array<{ score: number }>) {
   return scores.every((score) => score.score === 1);
 }
 
-test('entry scorer treats textual steps as one task when the execution boundary is shared', () => {
+test('entry scorer gates only the structured execution shape', () => {
   const testCase = entryDecisionBasicsDataset.cases.find((item) => item.name === 'multiple-actions-one-capability-call');
   assert.ok(testCase);
   assert.equal(testCase.expected.expectedBoundaryCount, 1);
-  assert.ok(allPass(scoreEntryDecision({
+  const scores = scoreEntryDecision({
     mode: 'direct_task',
-    task: '读取 package.json 的依赖，运行 npm test，并汇总结果。',
-  }, testCase.expected)));
+  }, testCase.expected);
+  assert.deepEqual(scores.map(({ key }) => key), ['entry_mode_correct']);
+  assert.ok(allPass(scores));
 });
 
 test('entryDecision adapter exposes the planning mode', () => {
@@ -72,7 +73,7 @@ test('planning datasets cover entry and boundary distributions', () => {
   assert.ok(capabilityPlanningBasicsDataset.cases.some((testCase) => testCase.expected.planEffect === 'cancelled'));
 });
 
-test('planner scorer derives cancellation instead of trusting a label', () => {
+test('planner scorer rejects a future-tail structure that contradicts answer', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find((item) => item.name === 'boundary-cancels-obsolete-task');
   assert.ok(testCase);
   const scores = scoreCapabilityPlanning({
@@ -80,9 +81,8 @@ test('planner scorer derives cancellation instead of trusting a label', () => {
     nextTask: null,
     capabilityIntent: null,
     remainingPlan: testCase.input.remainingPlan ?? [],
-  }, testCase.expected, testCase.input);
-  assert.equal(scores.find((score) => score.key === 'plan_effect_correct')?.score, 0);
-  assert.equal(scores.find((score) => score.key === 'remaining_plan_correct')?.score, 0);
+  }, testCase.expected);
+  assert.equal(scores.find((score) => score.key === 'remaining_plan_structure_correct')?.score, 0);
 });
 
 test('planner scorer reconstructs an unchanged plan from next task plus future tail', () => {
@@ -95,6 +95,6 @@ test('planner scorer reconstructs an unchanged plan from next task plus future t
     nextTask: materialized.objective,
     capabilityIntent: materialized.capabilityIntent,
     remainingPlan: [],
-  }, testCase.expected, testCase.input);
+  }, testCase.expected);
   assert.ok(allPass(scores));
 });

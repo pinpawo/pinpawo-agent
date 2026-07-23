@@ -92,7 +92,7 @@ async function runCase(testCase: typeof capabilityPlanningBasicsDataset.cases[nu
     nextTask: parsed.next_task?.objective ?? null,
     capabilityIntent: parsed.next_task?.capability_intent ?? null,
   };
-  const scores = scoreCapabilityPlanning(output, testCase.expected, testCase.input);
+  const scores = scoreCapabilityPlanning(output, testCase.expected);
   return {
     output: {
       ...output,

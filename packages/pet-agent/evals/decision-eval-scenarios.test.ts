@@ -10,6 +10,27 @@ function structuredModel(output: Record<string, unknown>) {
   } as never;
 }
 
+function goalJudge() {
+  return {
+    model: {
+      withStructuredOutput: () => ({
+        invoke: async (messages: Array<{ content: unknown }>) => {
+          const input = JSON.parse(String(messages.at(-1)?.content)) as {
+            acceptanceCriteria: Array<{ id: string }>;
+          };
+          return {
+            criteria: Object.fromEntries(input.acceptanceCriteria.map(({ id }) => [id, {
+              met: true,
+              reason: 'criterion met',
+            }])),
+            summary: 'goal achieved',
+          };
+        },
+      }),
+    } as never,
+  };
+}
+
 test('decision eval scenarios cover every canonical prompt distribution', () => {
   assert.deepEqual({
     entry: getDecisionEvalScenarios('entry').length,
@@ -137,7 +158,12 @@ test('decision eval keeps runtime and shape evidence outside goal criteria', asy
       capability_intent: 'message_delivery',
     },
     remaining_plan: [],
-  }));
+  }), undefined, undefined, goalJudge());
+  assert.equal(plannerResult.diagnostics?.planEffect, 'unchanged');
   assert.equal(plannerResult.diagnostics?.rubberStamp, true);
   assert.ok(plannerResult.scores.every(({ key }) => key !== 'rubber_stamp_correct'));
+  assert.equal(
+    plannerResult.scores.find(({ key }) => key === 'materialized_task_correct')?.evaluator,
+    'llm-judge',
+  );
 });

@@ -223,10 +223,11 @@ repetition, but the completion-acknowledgement objective—not a global overlap
 threshold—determines whether the lifecycle was closed correctly.
 
 Deterministic evaluators own exact structured decisions and mechanical
-invariants. Free-form answer evaluation judges the objective against the user
-request, canonical evidence, and acceptance criteria; keyword presence alone is
-not sufficient evidence of completion. Evaluator identity and revision are part
-of the reproducible harness because changing the judge changes the experiment.
+invariants. Free-form entry tasks, planner task/tail objectives, and answers are
+judged against their objective, canonical evidence, and acceptance criteria;
+keyword presence alone is not sufficient evidence of completion. Evaluator
+identity and revision are part of the reproducible harness because changing the
+judge changes the experiment.
 Each criterion result records that evaluator ownership. Candidate recall,
 rubber-stamp status, output shape, and similar runtime measurements remain
 diagnostics; schema-owned field and enum constraints remain run-status evidence

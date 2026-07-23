@@ -48,6 +48,11 @@ import {
   outcomeDecisionBasicsDataset,
 } from './datasets/index.ts';
 import type { CapabilityDecisionBasicsInput } from './datasets/capability-decision-basics.ts';
+import {
+  evaluatePromptGoal,
+  type PromptEvalJudge,
+  type PromptGoalAcceptanceCriterion,
+} from './prompt-goal-evaluator.ts';
 
 export type DecisionEvalTarget = 'entry' | 'planner' | 'capability' | 'outcome';
 
@@ -81,6 +86,7 @@ export type DecisionEvalScenario = {
     model: AgentModels['act'],
     method?: StructuredOutputMethod,
     config?: RunnableConfig,
+    judge?: PromptEvalJudge,
   ): Promise<DecisionEvalRunResult>;
 };
 
@@ -105,6 +111,7 @@ function messages(prompt: RenderedDecisionPrompt) {
 
 function entryScenarios(): DecisionEvalScenario[] {
   return entryDecisionBasicsDataset.cases.map((testCase) => {
+    const objective = `Select ${testCase.expected.mode} for this request. ${testCase.expected.reason}`;
     const render = (method?: StructuredOutputMethod): RenderedDecisionPrompt => {
       const conversationMessages = [
         ...(testCase.input.conversationContext?.map((text) => new AIMessage(text)) ?? []),
@@ -125,13 +132,13 @@ function entryScenarios(): DecisionEvalScenario[] {
     return {
       target: 'entry',
       contract: 'entry.execution-shape',
-      objective: `Select ${testCase.expected.mode} for this request. ${testCase.expected.reason}`,
+      objective,
       datasetName: entryDecisionBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
       expectedSummary: testCase.expected.mode,
       render,
-      async run(model, method, config) {
+      async run(model, method, config, judge) {
         const schema = buildTaskDecisionSchema();
         const raw = await model.withStructuredOutput(
           schema,
@@ -144,13 +151,36 @@ function entryScenarios(): DecisionEvalScenario[] {
           task: decision.task ?? null,
           contextSummary: decision.context_summary ?? null,
         };
+        const semanticCriteria: PromptGoalAcceptanceCriterion[] = testCase.expected.expectedTaskTerms?.length
+          ? [{
+              id: 'direct_task_content_correct',
+              statement: [
+                'The direct task preserves all executable work required by the user request in one boundary.',
+                `Required anchors: ${testCase.expected.expectedTaskTerms.join(', ')}.`,
+              ].join(' '),
+            }]
+          : [];
+        const semanticEvaluation = semanticCriteria.length > 0
+          ? await evaluatePromptGoal({
+              judge: judge ?? { model, method, config },
+              contract: 'entry.execution-shape',
+              objective,
+              acceptanceCriteria: semanticCriteria,
+              evidence: testCase.input,
+              candidateOutput: output,
+            })
+          : null;
         return {
           output,
-          scores: scoreEntryDecision({ mode, task: decision.task }, testCase.expected),
+          scores: [
+            ...scoreEntryDecision({ mode }, testCase.expected),
+            ...(semanticEvaluation?.scores ?? []),
+          ],
           verdict: decision.action,
           shape: decision.task ? 'task=1' : 'task=0',
           diagnostics: {
             expectedBoundaryCount: testCase.expected.expectedBoundaryCount,
+            ...(semanticEvaluation ? { evaluationSummary: semanticEvaluation.summary } : {}),
           },
         };
       },
@@ -160,6 +190,7 @@ function entryScenarios(): DecisionEvalScenario[] {
 
 function plannerScenarios(): DecisionEvalScenario[] {
   return capabilityPlanningBasicsDataset.cases.map((testCase) => {
+    const objective = `Produce ${testCase.expected.result} at this planning boundary. ${testCase.expected.reason}`;
     const render = (method?: StructuredOutputMethod): RenderedDecisionPrompt => ({
       system: buildCapabilityPlanningDecisionSystemPrompt({
         actor,
@@ -179,13 +210,13 @@ function plannerScenarios(): DecisionEvalScenario[] {
     return {
       target: 'planner',
       contract: 'planner.execution-boundary',
-      objective: `Produce ${testCase.expected.result} at this planning boundary. ${testCase.expected.reason}`,
+      objective,
       datasetName: capabilityPlanningBasicsDataset.name,
       caseId: testCase.id,
       caseName: testCase.name,
       expectedSummary: `${testCase.input.mode}:${testCase.expected.result}`,
       render,
-      async run(model, method, config) {
+      async run(model, method, config, judge) {
         const schema = buildCapabilityPlanningDecisionSchema();
         const raw = await model.withStructuredOutput(
           schema,
@@ -211,13 +242,51 @@ function plannerScenarios(): DecisionEvalScenario[] {
           remainingPlan,
           ...metrics,
         };
+        const semanticCriteria: PromptGoalAcceptanceCriterion[] = [
+          ...(testCase.expected.result === 'next_task'
+            ? [{
+                id: 'materialized_task_correct',
+                statement: [
+                  'The next task is the one independently executable current task required at this boundary.',
+                  'It preserves the required work and incorporates relevant handoff evidence without absorbing future tasks.',
+                  `Expected anchors: ${(testCase.expected.nextTaskTerms ?? []).join(', ')}.`,
+                ].join(' '),
+              }]
+            : []),
+          ...(testCase.expected.remainingPlan.length > 0
+            ? [{
+                id: 'remaining_plan_objectives_correct',
+                statement: [
+                  'The remaining plan objectives preserve exactly the required future work after the current task.',
+                  `Expected objective anchors: ${testCase.expected.remainingPlan
+                    .map(({ objectiveTerms }) => objectiveTerms.join(', '))
+                    .join(' | ')}.`,
+                ].join(' '),
+              }]
+            : []),
+        ];
+        const semanticEvaluation = semanticCriteria.length > 0
+          ? await evaluatePromptGoal({
+              judge: judge ?? { model, method, config },
+              contract: 'planner.execution-boundary',
+              objective,
+              acceptanceCriteria: semanticCriteria,
+              evidence: testCase.input,
+              candidateOutput: output,
+            })
+          : null;
         return {
           output,
-          scores: scoreCapabilityPlanning(output, testCase.expected, testCase.input),
+          scores: [
+            ...scoreCapabilityPlanning(output, testCase.expected),
+            ...(semanticEvaluation?.scores ?? []),
+          ],
           verdict: decision.result,
           shape: `tasks=${(nextTask ? 1 : 0) + remainingPlan.length},tail=${remainingPlan.length},rubberStamp=${metrics.rubberStamp.toString()}`,
           diagnostics: {
+            planEffect: metrics.planEffect,
             rubberStamp: metrics.rubberStamp,
+            ...(semanticEvaluation ? { evaluationSummary: semanticEvaluation.summary } : {}),
           },
         };
       },

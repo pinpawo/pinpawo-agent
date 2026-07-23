@@ -106,7 +106,38 @@ test('decision eval scenarios invoke, parse, normalize, and score each target', 
     assert.ok(scenario);
     const result = await scenario.run(structuredModel(item.output));
     assert.ok(result.scores.every(({ score }) => score === 1));
+    assert.ok(result.scores.every(({ statement }) => statement.trim()));
+    assert.ok(result.scores.every(({ evaluator }) => evaluator === 'deterministic'));
     assert.ok(result.verdict);
     assert.ok(result.shape);
   }
+});
+
+test('decision eval keeps runtime and shape evidence outside goal criteria', async () => {
+  const capability = getDecisionEvalScenarios('capability').find(
+    ({ caseName }) => caseName === 'auth-structure-routes-to-explore',
+  );
+  assert.ok(capability);
+  const capabilityResult = await capability.run(structuredModel({ lane: 'capability.explore' }));
+  assert.deepEqual(
+    capabilityResult.scores.map(({ key }) => key),
+    ['capability_selection_correct'],
+  );
+  assert.deepEqual(capabilityResult.diagnostics?.candidateNames, ['explore']);
+  assert.equal(capabilityResult.diagnostics?.candidateRecallCorrect, true);
+
+  const planner = getDecisionEvalScenarios('planner').find(
+    ({ caseName }) => caseName === 'boundary-keeps-valid-concrete-task',
+  );
+  assert.ok(planner);
+  const plannerResult = await planner.run(structuredModel({
+    result: 'next_task',
+    next_task: {
+      objective: '把完成的报告发送给项目负责人',
+      capability_intent: 'message_delivery',
+    },
+    remaining_plan: [],
+  }));
+  assert.equal(plannerResult.diagnostics?.rubberStamp, true);
+  assert.ok(plannerResult.scores.every(({ key }) => key !== 'rubber_stamp_correct'));
 });

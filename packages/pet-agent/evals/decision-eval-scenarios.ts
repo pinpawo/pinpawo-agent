@@ -62,6 +62,7 @@ export type DecisionEvalRunResult = {
   scores: DecisionContractScore[];
   verdict: string;
   shape: string;
+  diagnostics?: Record<string, unknown>;
 };
 
 export type DecisionEvalScenario = {
@@ -138,7 +139,6 @@ function entryScenarios(): DecisionEvalScenario[] {
         ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
         const mode = adaptTaskDecisionMode(decision.action);
-        const boundaryCount = mode === 'direct_task' ? 1 : 0;
         const output = {
           action: decision.action,
           task: decision.task ?? null,
@@ -146,10 +146,12 @@ function entryScenarios(): DecisionEvalScenario[] {
         };
         return {
           output,
-          scores: scoreEntryDecision({ mode, task: decision.task, boundaryCount }, testCase.expected)
-            .filter(({ key }) => key !== 'task_boundary_count_correct'),
+          scores: scoreEntryDecision({ mode, task: decision.task }, testCase.expected),
           verdict: decision.action,
           shape: decision.task ? 'task=1' : 'task=0',
+          diagnostics: {
+            expectedBoundaryCount: testCase.expected.expectedBoundaryCount,
+          },
         };
       },
     };
@@ -214,6 +216,9 @@ function plannerScenarios(): DecisionEvalScenario[] {
           scores: scoreCapabilityPlanning(output, testCase.expected, testCase.input),
           verdict: decision.result,
           shape: `tasks=${(nextTask ? 1 : 0) + remainingPlan.length},tail=${remainingPlan.length},rubberStamp=${metrics.rubberStamp.toString()}`,
+          diagnostics: {
+            rubberStamp: metrics.rubberStamp,
+          },
         };
       },
     };
@@ -273,16 +278,22 @@ function capabilityScenarios(): DecisionEvalScenario[] {
         ).invoke(messages(render(method)), config);
         const decision = schema.parse(raw);
         const candidateNames = candidates.map(({ name }) => name);
-        const output = { lane: decision.lane, candidateNames };
+        const output = { lane: decision.lane };
+        const candidateRecallCorrect = candidateNames.length === testCase.expected.expectedCandidateNames.length
+          && candidateNames.every((name) => testCase.expected.expectedCandidateNames.includes(name));
         return {
           output,
           scores: scoreCapabilityDecision(
-            { selectedLane: decision.lane, candidateNames },
+            { selectedLane: decision.lane },
             testCase.expected,
-            capabilityList.map(({ name }) => name),
           ),
           verdict: decision.lane,
           shape: `candidates=${candidateNames.length.toString()}`,
+          diagnostics: {
+            candidateNames,
+            expectedCandidateNames: testCase.expected.expectedCandidateNames,
+            candidateRecallCorrect,
+          },
         };
       },
     };
@@ -348,6 +359,9 @@ function outcomeScenarios(): DecisionEvalScenario[] {
           scores: scoreOutcomeDecision({ outcome: decision.outcome }, testCase.expected),
           verdict: decision.outcome,
           shape: decision.gap_note ? 'gapNote=1' : 'gapNote=0',
+          diagnostics: {
+            gapNotePresent: Boolean(decision.gap_note),
+          },
         };
       },
     };

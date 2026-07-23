@@ -20,6 +20,8 @@ function report(input: { commit: string; passed: boolean; meanDurationMs: number
     outputFingerprint: '{}',
     criteria: [{
       key: 'entry_mode_correct',
+      statement: 'Select answer from sufficient evidence.',
+      evaluator: 'deterministic' as const,
       score: input.passed ? 1 as const : 0 as const,
       comment: 'expected answer',
     }],
@@ -90,7 +92,7 @@ function report(input: { commit: string; passed: boolean; meanDurationMs: number
 
 test('report totals preserve usage and cost coverage', () => {
   const value = report({ commit: 'baseline', passed: true, meanDurationMs: 20 });
-  assert.equal(value.reportVersion, 2);
+  assert.equal(value.reportVersion, 3);
   assert.deepEqual(value.totals, {
     runs: 1,
     goalsAchieved: 1,

@@ -227,6 +227,16 @@ invariants. Free-form answer evaluation judges the objective against the user
 request, canonical evidence, and acceptance criteria; keyword presence alone is
 not sufficient evidence of completion. Evaluator identity and revision are part
 of the reproducible harness because changing the judge changes the experiment.
+Each criterion result records that evaluator ownership. Candidate recall,
+rubber-stamp status, output shape, and similar runtime measurements remain
+diagnostics; schema-owned field and enum constraints remain run-status evidence
+rather than duplicated prompt-goal criteria.
+
+Validation proceeds in two stages. First, one supported model runs the complete
+contract profile until objectives, criteria, evaluator ownership, case
+selection, and repetitions are stable. The unchanged profile is then repeated
+across additional model families. Cross-model breadth does not precede a
+reproducible single-model baseline.
 
 ### Current prompt objectives and metrics
 

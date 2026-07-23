@@ -83,16 +83,22 @@ async function runCase(testCase: typeof capabilityDecisionBasicsDataset.cases[nu
   const decision = await structured.invoke([new SystemMessage(system), new HumanMessage(routeInput)]);
   const lane = typeof decision === 'object' && decision && 'lane' in decision ? String(decision.lane) : '';
   const candidateNames = candidates.map((candidate) => candidate.name);
+  const candidateRecallCorrect = candidateNames.length === testCase.expected.expectedCandidateNames.length
+    && candidateNames.every((name) => testCase.expected.expectedCandidateNames.includes(name));
   const scores: LangfuseEvalScore[] = [
     {
       key: 'search_query_correct',
       score: containsTerms(input.baselineSearchQuery, testCase.expected.expectedSearchQueryTerms) ? 1 : 0,
       comment: input.baselineSearchQuery,
     },
+    {
+      key: 'candidate_recall_correct',
+      score: candidateRecallCorrect ? 1 : 0,
+      comment: `expected=${testCase.expected.expectedCandidateNames.join(',')}; actual=${candidateNames.join(',')}`,
+    },
     ...scoreCapabilityDecision(
-      { selectedLane: lane, candidateNames },
+      { selectedLane: lane },
       testCase.expected,
-      capabilityList.map(({ name }) => name),
     ),
   ];
   return { output: { query: input.baselineSearchQuery, candidateNames, lane }, scores };

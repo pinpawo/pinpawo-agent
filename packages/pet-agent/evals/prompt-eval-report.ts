@@ -6,7 +6,7 @@ import type {
 } from './decision-stability.ts';
 import type { PromptEvalPricing } from './prompt-eval-usage.ts';
 
-export const PROMPT_EVAL_REPORT_VERSION = 2;
+export const PROMPT_EVAL_REPORT_VERSION = 3;
 
 export type PromptEvalRevision = {
   commit: string;

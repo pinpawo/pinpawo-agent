@@ -76,6 +76,8 @@ test('answer eval derives goal result from evaluator criteria', async () => {
     result.scores.find(({ key }) => key === 'delivered_body_not_repeated')?.score,
     0,
   );
+  assert.ok(result.scores.every(({ evaluator }) => evaluator === 'llm-judge'));
+  assert.ok(result.scores.every(({ statement }) => statement.trim()));
   assert.equal(result.verdict, 'goal_not_achieved');
 });
 

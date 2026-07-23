@@ -137,6 +137,7 @@ async function evaluateGoal(
       return {
         key: criterion.id,
         statement: criterion.statement,
+        evaluator: 'llm-judge',
         score: result.met ? 1 : 0,
         comment: result.reason,
       };

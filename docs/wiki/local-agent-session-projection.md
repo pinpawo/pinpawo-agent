@@ -1,0 +1,117 @@
+---
+title: Local-Agent Session Projection
+page_type: system
+status: validated
+updated: 2026-07-23
+sources:
+  - ../LOCAL_AGENT_SESSION_PROJECTION.md
+  - ../../services/local-agent/src/localAgentSession.ts
+  - ../../services/local-agent/src/localAgentSessionReducer.ts
+  - ../../services/local-agent/src/localAgentSessionParser.ts
+  - ../../services/local-agent/src/reviewResolutionLifecycle.ts
+  - ../../services/local-agent/src/localServerStdioTransport.ts
+  - https://github.com/pinpawo/pinpawo-agent/issues/355
+  - https://github.com/pinpawo/pinpawo-agent/issues/377
+  - https://github.com/pinpawo/pinpawo-agent/issues/385
+  - https://github.com/pinpawo/pinpawo-agent/issues/386
+  - https://github.com/pinpawo/pinpawo-agent/issues/390
+related:
+  - concepts/checkpoint-snapshot-timeline.md
+  - concepts/session-projection-ownership.md
+  - concepts/local-agent-transport-boundary.md
+  - decisions/run-view-discriminated-union.md
+  - decisions/review-resolution-is-client-local.md
+  - questions/session-projection-open-questions.md
+---
+
+# Local-Agent Session Projection
+
+## What this system is
+
+`LocalAgentSession` is one client-neutral, in-memory projection of a conversation,
+consumed by the local TUI and the hosted chat adapter. It is **not** a second
+durable conversation store — LangGraph checkpoints remain the durable authority.
+The canonical contract is
+[`LOCAL_AGENT_SESSION_PROJECTION.md`](../LOCAL_AGENT_SESSION_PROJECTION.md);
+this page is the navigable synthesis over it and its implementation.
+
+The projection replaced several overlapping, TUI-specific session and snapshot
+shapes with one shared model (Decision, issue #355). A session owns one ordered
+timeline and zero-or-one active run. The shared reducer that transitions it has
+no Ink, React, WebSocket, filesystem, singleton, or wall-clock dependency
+([`localAgentSessionReducer.ts`](../../services/local-agent/src/localAgentSessionReducer.ts)).
+
+## How the pieces fit
+
+```text
+LangGraph checkpoint  (durable authority)
+   │  materialize one checkpoint point + current runtime facts
+   ▼
+LocalAgentSessionSnapshot  (versioned point value; v3)
+   │  applySessionSnapshot()
+   ▼
+LocalAgentSession  (timeline + zero/one activeRun)
+   ▲  reduceSession(session, input, { observedAt })
+   │
+server-observed runtime/control events + accepted user input
+```
+
+- **Shared reducer** — `reduceSession` and `applySessionSnapshot` in
+  [`localAgentSessionReducer.ts`](../../services/local-agent/src/localAgentSessionReducer.ts).
+  Both the TUI and the hosted adapter fold their inputs through the same reducer.
+- **Wire/snapshot parser** — transport-neutral parsing lives in
+  [`localAgentSessionParser.ts`](../../services/local-agent/src/localAgentSessionParser.ts),
+  reused by the HTTP client and the stdio session commands rather than duplicated
+  per client.
+- **Server-local review lifecycle** — one `actionId`-keyed
+  [`ReviewResolutionLifecycle`](../../services/local-agent/src/reviewResolutionLifecycle.ts)
+  owns route, claim, consumption, and interrupt ordering, shared by both chat
+  handlers through `resolveHumanReviewAction`.
+- **Transport adapters** — WebSocket and JSONL stdio both attach to the same
+  composed handlers behind a `LocalServerPeer` identity; no transport concept
+  enters the session model.
+
+## The four domain terms (must stay distinct)
+
+See [Checkpoint, snapshot, timeline, and timeline state](concepts/checkpoint-snapshot-timeline.md).
+Briefly: **checkpoint** is durable authority; **snapshot** is a materialized
+point value with no inherent recovery meaning; **timeline** is the ordered UI
+container; **timeline state** is its current mutable instance. Applying a
+snapshot after `message.completed` intentionally replaces live-only operation and
+subagent entries — they are session-scoped presentation state, not durable
+history.
+
+## Active-run shape
+
+Snapshot version 3 represents the active run as a discriminated union of exactly
+three facts — `running(activity)`, `waiting_review(reviewAction)`, `interrupting`
+— so illegal combinations are unrepresentable. See
+[Run view as a discriminated union](decisions/run-view-discriminated-union.md).
+
+## Ownership boundaries
+
+What is shared/server-observed versus TUI-local versus server transport-control
+is deliberately partitioned. See
+[Session projection ownership boundaries](concepts/session-projection-ownership.md)
+and [Review resolution is client-local](decisions/review-resolution-is-client-local.md).
+
+## Transport
+
+The projection is transport-neutral. WebSocket and one-peer JSONL stdio both
+carry the same typed messages, and snapshot/session/list/resume operations exist
+on both the HTTP side channel and the stdio wire, backed by one server-side
+implementation. See
+[Local-agent transport boundary](concepts/local-agent-transport-boundary.md).
+
+## Status of the work (as of 2026-07-23)
+
+**Fact.** The projection refactor line is materially complete. Umbrella #355 and
+its sub-issues #377, #385, #386, #390 are closed. The only open follow-up in this
+area is a small overlay state-ownership cleanup
+([issue #408](https://github.com/pinpawo/pinpawo-agent/issues/408)).
+
+**Inference.** Open forward-looking concerns — a future public/API projection,
+migrating the TUI's session operations from the HTTP side channel onto the wire
+`session.*` channel, and snapshot version strategy once a third-party consumer
+exists — are collected in
+[open questions](questions/session-projection-open-questions.md).

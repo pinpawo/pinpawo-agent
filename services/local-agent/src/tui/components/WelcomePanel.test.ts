@@ -6,7 +6,7 @@ import { createSession } from '../state/tuiState';
 import { buildWelcomePanelModel } from '../welcomePanelModel';
 import { WelcomePanel } from './WelcomePanel';
 
-test('WelcomePanel stacks title and status before they can collide', () => {
+test('WelcomePanel stays borderless and stacks title and status before they can collide', () => {
   const columns = 40;
   const model = buildWelcomePanelModel({
     session: createSession({ id: 'chat:pet' }),
@@ -25,7 +25,13 @@ test('WelcomePanel stacks title and status before they can collide', () => {
   const lines = output.split('\n');
 
   assert.equal(model.stackHeader, true);
+  assert.equal(output.includes('╭'), false);
+  assert.equal(output.includes('╰'), false);
   assert.ok(lines.some((line) => line.includes('PinPawo Local Agent')));
+  assert.ok(lines.some((line) => line.includes('▄█▄ ▄█▄')));
+  assert.ok(lines.some((line) => line.includes('PinPawo · 宠物')));
+  assert.ok(lines.some((line) => /版本  v\d+\.\d+\.\d+/.test(line)));
   assert.ok(lines.some((line) => line.includes('· 本地服务暂不…')));
   assert.equal(lines.some((line) => line.includes('Agent本地服务')), false);
+  assert.ok(lines.length <= 18);
 });

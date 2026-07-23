@@ -1,10 +1,9 @@
-import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isAbsolute, resolve } from 'node:path';
 import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
 import type { InitCommandOptions } from './commands/init';
+import { readLocalAgentPackageVersion } from './packageVersion';
 
 type LocalAgentCliHandlers = {
   runLogin?: () => Promise<void> | void;
@@ -20,16 +19,6 @@ type LocalAgentCliHandlers = {
     opts: { extensionId?: string },
   ) => Promise<void> | void;
 };
-
-function readPackageVersion(): string {
-  try {
-    const packagePath = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
-    const pkg = JSON.parse(readFileSync(packagePath, 'utf-8')) as { version?: unknown };
-    return typeof pkg.version === 'string' ? pkg.version : '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-}
 
 function readErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
@@ -53,7 +42,7 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
   program
     .name('pinpawo-agent')
     .description('PinPawo local agent CLI')
-    .version(readPackageVersion());
+    .version(readLocalAgentPackageVersion());
 
   program
     .command('init')

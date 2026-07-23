@@ -11,8 +11,6 @@ export function WelcomePanel(props: {
   return (
     <Box
       flexDirection="column"
-      borderStyle="round"
-      borderColor={model.ready ? 'cyan' : 'gray'}
       paddingX={1}
     >
       <Box
@@ -28,12 +26,23 @@ export function WelcomePanel(props: {
         </Text>
       </Box>
 
-      <Box flexDirection="column" marginTop={1}>
-        <Text bold>{model.greeting}</Text>
+      <Box flexDirection="column" alignItems="center">
+        {model.pawLines.map((line, index) => (
+          <Text key={`${line}:${index}`} color="cyan" bold>{line}</Text>
+        ))}
+        <Text>
+          <Text color="cyan" bold>{model.title}</Text>
+          <Text dimColor> · </Text>
+          <Text bold>{model.petName}</Text>
+        </Text>
+      </Box>
+
+      <Box flexDirection="column" marginTop={model.compact ? 0 : 1}>
+        <Text>{model.greeting}</Text>
         {model.summary ? <Text dimColor>{model.summary}</Text> : null}
       </Box>
 
-      <Box flexDirection="column" marginTop={1}>
+      <Box flexDirection="column">
         {model.details.map((detail) => (
           <Text key={detail.label}>
             <Text dimColor>{detail.label.padEnd(4, ' ')}</Text>

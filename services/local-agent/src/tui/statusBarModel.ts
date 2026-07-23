@@ -54,6 +54,7 @@ export function buildStatusBarModel(input: {
   session: SessionModel | null;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   overlayOwner?: string | null;
+  timelineScrollOffset?: number;
 }): StatusBarModel {
   const runtime = input.session?.runtime;
   const hasPrimaryStatus = Boolean(input.activityStatus || input.statusNotice);
@@ -63,6 +64,14 @@ export function buildStatusBarModel(input: {
         id: 'primary',
         muted: false,
         segments: [
+          ...(input.timelineScrollOffset ? [{
+            id: 'timeline-scroll',
+            value: `浏览历史 · 上移 ${input.timelineScrollOffset} 行 · PgDn 下翻`,
+            compactValue: `历史 ↑${input.timelineScrollOffset} · PgDn 下翻`,
+            priority: 110,
+            tone: 'info' as const,
+            truncation: 'truncate' as const,
+          }] : []),
           ...(input.activityStatus ? [{
             id: 'activity',
             value: input.activityStatus,

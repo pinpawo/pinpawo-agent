@@ -221,7 +221,7 @@ export function readRootStreamChatEvent(
           return {
             type: 'subagent.message',
             namespace,
-            messageId: current.messageId,
+            messageId: current.messageId || `${key}:${event.seq}`,
             text: message,
           };
         }

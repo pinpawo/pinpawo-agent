@@ -572,14 +572,16 @@ test('parseLocalAgentServerMessage accepts studio_response with workdir metadata
   );
 });
 
-test('parseLocalAgentServerMessage accepts subagent message delta events', () => {
+test('parseLocalAgentServerMessage accepts completed subagent message events', () => {
   assert.deepEqual(
     parseLocalAgentServerMessage(JSON.stringify({
       type: 'event',
       requestId: 'req-1',
       event: {
-        type: 'subagent.message.delta',
+        type: 'subagent.message.completed',
         requestId: 'req-1',
+        messageId: 'child-1',
+        namespace: ['general:t1', 'model_request:t2'],
         text: 'subagent output',
       },
     })),
@@ -587,8 +589,10 @@ test('parseLocalAgentServerMessage accepts subagent message delta events', () =>
       type: 'event',
       requestId: 'req-1',
       event: {
-        type: 'subagent.message.delta',
+        type: 'subagent.message.completed',
         requestId: 'req-1',
+        messageId: 'child-1',
+        namespace: ['general:t1', 'model_request:t2'],
         text: 'subagent output',
       },
     },
@@ -598,9 +602,22 @@ test('parseLocalAgentServerMessage accepts subagent message delta events', () =>
       type: 'event',
       requestId: 'req-1',
       event: {
-        type: 'subagent.message.delta',
+        type: 'subagent.message.completed',
         requestId: 'other',
         text: 'wrong route',
+      },
+    })),
+    null,
+  );
+  assert.equal(
+    parseLocalAgentServerMessage(JSON.stringify({
+      type: 'event',
+      requestId: 'req-1',
+      event: {
+        type: 'subagent.message.completed',
+        requestId: 'req-1',
+        namespace: ['general:t1', 42],
+        text: 'invalid namespace',
       },
     })),
     null,

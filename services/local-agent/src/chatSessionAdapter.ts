@@ -351,8 +351,10 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
           // One completed subagent message per child model lifecycle — the
           // ambient progress feed is block-level by design (see the adapter).
           emitEvent({
-            type: 'subagent.message.delta',
+            type: 'subagent.message.completed',
             requestId,
+            messageId: chatEvent.messageId,
+            namespace: chatEvent.namespace,
             text: chatEvent.text,
           });
           break;

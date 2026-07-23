@@ -187,6 +187,14 @@ function readOptionalString(record: Record<string, unknown>, key: string) {
   return typeof value === 'string' ? value : undefined;
 }
 
+function readOptionalStringArray(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+    ? value as string[]
+    : null;
+}
+
 function readRecord(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -289,9 +297,18 @@ function readLocalAgentEvent(record: Record<string, unknown>): LocalAgentRuntime
       ? { type, requestId, role, text }
       : null;
   }
-  if (type === 'subagent.message.delta') {
+  if (type === 'subagent.message.completed') {
     const text = readString(record, 'text');
-    return text != null ? { type, requestId, text } : null;
+    const namespace = readOptionalStringArray(record, 'namespace');
+    const messageId = readString(record, 'messageId');
+    if (text == null || !messageId || !namespace) return null;
+    return {
+      type,
+      requestId,
+      messageId,
+      namespace,
+      text,
+    };
   }
   if (type === 'message.completed') {
     const role = readString(record, 'role');

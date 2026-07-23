@@ -2,7 +2,7 @@ import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
 
 export type LocalAgentRuntimeEvent =
   | LocalAgentAssistantMessageEvent
-  | LocalAgentSubagentMessageDeltaEvent
+  | LocalAgentSubagentMessageCompletedEvent
   | LocalAgentOperationEvent
   | LocalAgentHumanReviewRequestedEvent
   | LocalAgentStudioProgressEvent
@@ -20,9 +20,13 @@ export type LocalAgentMessageDeltaEvent = {
   text: string;
 };
 
-export type LocalAgentSubagentMessageDeltaEvent = {
-  type: 'subagent.message.delta';
+export type LocalAgentSubagentMessageCompletedEvent = {
+  type: 'subagent.message.completed';
   requestId: string;
+  /** The upstream child-model lifecycle id for this completed message block. */
+  messageId: string;
+  /** Namespace disambiguates model lifecycle ids reused by child scopes. */
+  namespace: string[];
   text: string;
 };
 

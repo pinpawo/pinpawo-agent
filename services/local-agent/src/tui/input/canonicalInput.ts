@@ -19,6 +19,8 @@ export type CanonicalInputEvent =
   | { type: 'cursor.down' }
   | { type: 'cursor.line.start' }
   | { type: 'cursor.line.end' }
+  | { type: 'viewport.page.up' }
+  | { type: 'viewport.page.down' }
   | { type: 'selection.left' }
   | { type: 'selection.right' }
   | { type: 'selection.up' }
@@ -40,6 +42,8 @@ export function toCanonicalInputEvent(
   const controlEvent = toCanonicalControlKey(input, key);
   if (controlEvent) return controlEvent;
 
+  if (key.pageUp) return { type: 'viewport.page.up' };
+  if (key.pageDown) return { type: 'viewport.page.down' };
   if (key.leftArrow) return key.shift ? { type: 'selection.left' } : { type: 'cursor.left' };
   if (key.rightArrow) return key.shift ? { type: 'selection.right' } : { type: 'cursor.right' };
   if (key.upArrow) return key.shift ? { type: 'selection.up' } : { type: 'cursor.up' };
@@ -69,6 +73,8 @@ export function toCanonicalInputEvent(
   if (isRawShiftCursorInput(input, 'B')) return { type: 'selection.down' };
   if (isRawShiftHomeInput(input)) return { type: 'selection.line.start' };
   if (isRawShiftEndInput(input)) return { type: 'selection.line.end' };
+  if (isRawPageUpInput(input)) return { type: 'viewport.page.up' };
+  if (isRawPageDownInput(input)) return { type: 'viewport.page.down' };
   if (isRawCursorInput(input, 'D')) return { type: 'cursor.left' };
   if (isRawCursorInput(input, 'C')) return { type: 'cursor.right' };
   if (isRawCursorInput(input, 'A')) return { type: 'cursor.up' };
@@ -165,6 +171,14 @@ function isRawEndInput(input: string) {
 
 function isRawShiftEndInput(input: string) {
   return /^(?:\x1b)?\[(?:1;2F|8;2~)$/.test(input);
+}
+
+function isRawPageUpInput(input: string) {
+  return /^(?:\x1b)?\[(?:5|5;1)~$/.test(input);
+}
+
+function isRawPageDownInput(input: string) {
+  return /^(?:\x1b)?\[(?:6|6;1)~$/.test(input);
 }
 
 function isBracketedPasteInput(input: string) {

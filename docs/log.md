@@ -171,6 +171,23 @@ lint passes, and documentation migrations.
 - Kept the change within the existing `answer.user-visible-close` contract and
   prompt knowledge layers rather than adding another Wiki concept.
 
+## [2026-07-23] ingest | Local-agent session projection
+
+- Registered `LOCAL_AGENT_SESSION_PROJECTION.md` as the canonical topic contract
+  and the projection implementation (`localAgentSession.ts`,
+  `localAgentSessionReducer.ts`, `localAgentSessionParser.ts`,
+  `reviewResolutionLifecycle.ts`, `localServerStdioTransport.ts`) as authoritative
+  for runtime behavior.
+- Ingested the closed issue history for the refactor line: umbrella #355 and
+  sub-issues #377, #385, #386, #390, plus PRs #388/#389/#411/#425.
+- Created a system overview page plus concept pages for the checkpoint/snapshot/
+  timeline distinction, ownership boundaries, and the transport boundary; decision
+  pages for the discriminated run-view union and client-local review resolution;
+  and an open-questions page (TUI wire migration, future API projection guardrails,
+  deferred snapshot coordinate, overlay cleanup #408).
+- Added a current-authority banner to the source contract and updated both the
+  root catalog and the wiki index. Did not modify the source's technical content.
+
 ## [2026-07-23] eval | GLM-5.2 V1 prompt contract baseline
 
 - Fixed the canonical V1 profile at 34 cases across all five prompt contracts,

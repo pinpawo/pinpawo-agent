@@ -417,7 +417,7 @@ test('TuiRuntimeController releases input locally after interrupt timeout', () =
   }
 });
 
-test('TuiRuntimeController resets static timeline view for new sessions', () => {
+test('TuiRuntimeController resets the timeline viewport for new sessions', () => {
   const harness = createController(pendingReviewState());
 
   harness.controller.startNewSession();

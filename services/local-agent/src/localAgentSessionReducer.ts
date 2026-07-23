@@ -182,8 +182,8 @@ function reduceRuntimeEvent(
       return completeAssistantMessage(session, event.requestId, event.text, event.usage, message, context);
     case 'operation':
       return applyOperationEvent(session, event, context);
-    case 'subagent.message.delta':
-      return appendSubagentDelta(session, event.requestId, event.text, context);
+    case 'subagent.message.completed':
+      return appendSubagentMessage(session, event, context);
     case 'human_review.requested':
       return applyReviewRequest(session, event, context);
     case 'system.notice':
@@ -315,33 +315,33 @@ function applyOperationEvent(
   });
 }
 
-function appendSubagentDelta(
+function appendSubagentMessage(
   session: LocalAgentSession,
-  requestId: string,
-  token: string,
+  event: Extract<LocalAgentRuntimeEvent, { type: 'subagent.message.completed' }>,
   context: LocalAgentSessionReductionContext,
 ) {
-  if (!token || !ownsRun(session, requestId)) return session;
-  const id = `${requestId}:subagent-output`;
-  const previous = session.timeline.find((entry): entry is LocalAgentMessageEntry =>
-    entry.type === 'message' && entry.role === 'subagent' && entry.id === id);
-  const text = (previous?.text ?? '') + token;
-  if (!text.trim()) return session;
+  if (!event.text.trim() || !ownsRun(session, event.requestId)) return session;
+  const namespace = event.namespace.filter(Boolean).join('|');
+  const sourceId = event.messageId.trim();
+  const id = `${event.requestId}:subagent:${namespace ? `${namespace}:` : ''}${sourceId}`;
+  const previous = session.timeline.find((candidate): candidate is LocalAgentMessageEntry =>
+    candidate.type === 'message' && candidate.id === id);
   const entry: LocalAgentMessageEntry = {
     id,
     type: 'message',
     role: 'subagent',
-    requestId,
-    text,
-    status: 'streaming',
-    ...(previous?.createdAt ? { createdAt: previous.createdAt } : {}),
-    ...(previous?.updatedAt ? { updatedAt: previous.updatedAt } : {}),
+    requestId: event.requestId,
+    text: event.text,
+    status: 'completed',
+    ...(previous?.createdAt
+      ? { createdAt: previous.createdAt }
+      : createdAtField(undefined, context)),
   };
   const withMessage = {
     ...session,
     timeline: upsertTimelineEntry(session.timeline, entry),
   };
-  return updateOwnedRun(withMessage, requestId, (run) => ({
+  return updateOwnedRun(withMessage, event.requestId, (run) => ({
     ...runViewBase(run),
     state: 'running',
     activity: 'streaming',

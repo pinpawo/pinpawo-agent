@@ -583,14 +583,16 @@ test('tuiStateReducer falls back to assistant timeline text when completed text 
   ]);
 });
 
-test('tuiStateReducer displays subagent deltas as timeline message entries', () => {
+test('tuiStateReducer keeps completed subagent message blocks interleaved with operations', () => {
   let state = startRun(initialState(), 'req-1');
 
   state = tuiStateReducer(state, {
     type: 'event.received',
     event: {
-      type: 'subagent.message.delta',
+      type: 'subagent.message.completed',
       requestId: 'req-1',
+      messageId: 'child-1',
+      namespace: ['general:t1', 'model_request:t2'],
       text: '先检查文件',
     },
     now: 1100,
@@ -598,8 +600,36 @@ test('tuiStateReducer displays subagent deltas as timeline message entries', () 
   state = tuiStateReducer(state, {
     type: 'event.received',
     event: {
-      type: 'subagent.message.delta',
+      type: 'operation',
       requestId: 'req-1',
+      phase: 'started',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+      },
+    },
+    now: 1150,
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'operation',
+      requestId: 'req-1',
+      phase: 'completed',
+      operation: {
+        id: 'tool-1',
+        kind: 'shell',
+      },
+    },
+    now: 1175,
+  });
+  state = tuiStateReducer(state, {
+    type: 'event.received',
+    event: {
+      type: 'subagent.message.completed',
+      requestId: 'req-1',
+      messageId: 'child-2',
+      namespace: ['general:t1', 'model_request:t2'],
       text: '，再整理结果。',
     },
     now: 1200,
@@ -607,15 +637,22 @@ test('tuiStateReducer displays subagent deltas as timeline message entries', () 
 
   assert.equal(activeRunActivity(selectFocusedActiveRun(state)), 'streaming');
   assert.equal(selectFocusedPendingUi(state)?.charCount, '先检查文件，再整理结果。'.length);
-  assert.deepEqual(timelineMessagesByRole(state, 'subagent').at(-1), {
-    id: 'req-1:subagent-output',
-    type: 'message',
-    role: 'subagent',
-    requestId: 'req-1',
-    text: '先检查文件，再整理结果。',
-    status: 'streaming',
-  });
-  assert.equal(selectFocusedTimeline(state).some((entry) => entry.id === 'req-1:subagent-output'), true);
+  assert.deepEqual(
+    selectFocusedTimeline(state).map((entry) => [entry.type, entry.id]),
+    [
+      ['message', 'message:req-1:user'],
+      ['message', 'req-1:subagent:general:t1|model_request:t2:child-1'],
+      ['operation', 'req-1:operation:tool-1'],
+      ['message', 'req-1:subagent:general:t1|model_request:t2:child-2'],
+    ],
+  );
+  assert.deepEqual(
+    timelineMessagesByRole(state, 'subagent').map((entry) => [entry.text, entry.status]),
+    [
+      ['先检查文件', 'completed'],
+      ['，再整理结果。', 'completed'],
+    ],
+  );
 
   state = tuiStateReducer(state, {
     type: 'event.received',
@@ -632,9 +669,10 @@ test('tuiStateReducer displays subagent deltas as timeline message entries', () 
     ['user', 'hello'],
     ['assistant', '最终答复'],
   ]);
-  const subagentMessage = timelineMessagesByRole(state, 'subagent')
-    .find((entry) => entry.id === 'req-1:subagent-output');
-  assert.equal(subagentMessage?.status, 'completed');
+  assert.equal(
+    timelineMessagesByRole(state, 'subagent').every((entry) => entry.status === 'completed'),
+    true,
+  );
 });
 
 test('tuiStateReducer orders subagent messages by live event arrival', () => {
@@ -653,8 +691,10 @@ test('tuiStateReducer orders subagent messages by live event arrival', () => {
   state = tuiStateReducer(state, {
     type: 'event.received',
     event: {
-      type: 'subagent.message.delta',
+      type: 'subagent.message.completed',
       requestId: 'req-1',
+      messageId: 'child-1',
+      namespace: [],
       text: 'subagent announce',
     },
     now: 1200,
@@ -665,7 +705,7 @@ test('tuiStateReducer orders subagent messages by live event arrival', () => {
     [
       'message:req-1:user',
       'req-1:assistant:0',
-      'req-1:subagent-output',
+      'req-1:subagent:child-1',
     ],
   );
 });

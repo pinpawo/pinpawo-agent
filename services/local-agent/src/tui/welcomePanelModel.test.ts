@@ -26,11 +26,22 @@ test('buildWelcomePanelModel exposes identity, runtime, and high-value shortcuts
 
   assert.equal(model.compact, false);
   assert.equal(model.stackHeader, false);
+  assert.deepEqual(model.pawLines, [
+    '   ▄█▄ ▄█▄   ',
+    '   ███ ███   ',
+    '▄█▄ ▀   ▀ ▄█▄',
+    '██▀ ▄███▄ ▀██',
+    '  ▄███████▄  ',
+    ' ███████████ ',
+    '  ▀███▀███▀  ',
+  ]);
+  assert.equal(model.petName, '豆包');
   assert.equal(model.greeting, '和 豆包 一起完成当前项目里的任务。');
   assert.equal(model.summary, '擅长拆解任务的本地搭档');
   assert.equal(model.status, '就绪');
   assert.equal(model.action, '直接描述任务，按 Enter 发送');
-  assert.deepEqual(model.details, [
+  assert.match(model.details[0]?.value ?? '', /^v\d+\.\d+\.\d+/);
+  assert.deepEqual(model.details.slice(1), [
     { label: '模型', value: 'gpt-test' },
     { label: '目录', value: 'PinPawo Agent · /Users/mac/Develop/pinpawo-agent' },
   ]);
@@ -52,6 +63,6 @@ test('buildWelcomePanelModel stays useful while initializing in a narrow termina
   assert.equal(model.greeting, '和 宠物 一起开始吧。');
   assert.equal(model.summary, null);
   assert.equal(model.action, '正在准备本地会话…');
-  assert.equal(model.details[0]?.value, '加载中…');
+  assert.equal(model.details[1]?.value, '加载中…');
   assert.match(model.status, /…$/);
 });

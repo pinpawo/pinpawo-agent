@@ -163,6 +163,43 @@ test('resolveTuiInputAction routes global, approval, busy, and composer keys', (
     { target: 'resume', action: 'next' },
   );
   assert.deepEqual(
+    resolveRawTuiInputAction('', { pageUp: true }, { ready: true, busy: true, pendingApproval: false, resumePickerOpen: false }),
+    { target: 'timeline', action: 'page_up' },
+  );
+  assert.deepEqual(
+    resolveRawTuiInputAction('', { pageUp: true }, { ready: true, busy: false, pendingApproval: false, resumePickerOpen: true }),
+    { target: 'resume', action: 'previous' },
+  );
+  assert.deepEqual(
+    resolveRawTuiInputAction('', { pageDown: true }, {
+      ready: true,
+      busy: false,
+      pendingApproval: true,
+      resumePickerOpen: false,
+    }),
+    { target: 'approval', action: 'next' },
+  );
+  assert.deepEqual(
+    resolveRawTuiInputAction('', { pageUp: true }, {
+      ready: true,
+      busy: false,
+      pendingApproval: false,
+      resumePickerOpen: false,
+      commandPaletteOpen: true,
+    }),
+    { target: 'commandPalette', action: 'previous' },
+  );
+  assert.deepEqual(
+    resolveRawTuiInputAction('', { pageDown: true }, {
+      ready: true,
+      busy: false,
+      pendingApproval: false,
+      resumePickerOpen: false,
+      fileMentionOpen: true,
+    }),
+    { target: 'fileMention', action: 'next' },
+  );
+  assert.deepEqual(
     resolveRawTuiInputAction('', { return: true }, { ready: true, busy: false, pendingApproval: false, resumePickerOpen: true }),
     { target: 'resume', action: 'submit' },
   );

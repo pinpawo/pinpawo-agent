@@ -15,6 +15,7 @@ export type TuiInputRouterState = {
 
 export type TuiInputCommand =
   | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
+  | { target: 'timeline'; action: 'page_up' | 'page_down' }
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'globalReviewPolicy'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
@@ -53,15 +54,15 @@ export function resolveTuiInputCommand(
       return { target: 'none' };
 
     case 'resumePicker':
-      if (event.type === 'cursor.up') return { target: 'resume', action: 'previous' };
-      if (event.type === 'cursor.down') return { target: 'resume', action: 'next' };
+      if (isPreviousNavigation(event)) return { target: 'resume', action: 'previous' };
+      if (isNextNavigation(event)) return { target: 'resume', action: 'next' };
       if (isReturn) return { target: 'resume', action: 'submit' };
       if (event.type === 'escape') return { target: 'resume', action: 'dismiss' };
       return { target: 'none' };
 
     case 'globalReviewPolicyPicker':
-      if (event.type === 'cursor.up') return { target: 'globalReviewPolicy', action: 'previous' };
-      if (event.type === 'cursor.down') return { target: 'globalReviewPolicy', action: 'next' };
+      if (isPreviousNavigation(event)) return { target: 'globalReviewPolicy', action: 'previous' };
+      if (isNextNavigation(event)) return { target: 'globalReviewPolicy', action: 'next' };
       if (isReturn) return { target: 'globalReviewPolicy', action: 'submit' };
       if (event.type === 'escape') return { target: 'globalReviewPolicy', action: 'dismiss' };
       return { target: 'none' };
@@ -70,12 +71,14 @@ export function resolveTuiInputCommand(
       return routeApprovalInputCommand(event, owner);
 
     case 'busy':
+      if (event.type === 'viewport.page.up') return { target: 'timeline', action: 'page_up' };
+      if (event.type === 'viewport.page.down') return { target: 'timeline', action: 'page_down' };
       if (event.type === 'escape') return { target: 'global', action: 'interrupt' };
       return { target: 'none' };
 
     case 'commandPalette':
-      if (event.type === 'cursor.up') return { target: 'commandPalette', action: 'previous' };
-      if (event.type === 'cursor.down') return { target: 'commandPalette', action: 'next' };
+      if (isPreviousNavigation(event)) return { target: 'commandPalette', action: 'previous' };
+      if (isNextNavigation(event)) return { target: 'commandPalette', action: 'next' };
       if (event.type === 'tab') return { target: 'commandPalette', action: 'accept' };
       if (event.type === 'escape') return { target: 'composer', action: 'clear' };
       if (isReturn) return { target: 'commandPalette', action: 'submit' };
@@ -84,8 +87,8 @@ export function resolveTuiInputCommand(
       return routeTextAreaCommand(event);
 
     case 'fileMention':
-      if (event.type === 'cursor.up') return { target: 'fileMention', action: 'previous' };
-      if (event.type === 'cursor.down') return { target: 'fileMention', action: 'next' };
+      if (isPreviousNavigation(event)) return { target: 'fileMention', action: 'previous' };
+      if (isNextNavigation(event)) return { target: 'fileMention', action: 'next' };
       if (event.type === 'tab' || isReturn) return { target: 'fileMention', action: 'accept' };
       if (event.type === 'escape') return { target: 'composer', action: 'clear' };
       if (isControlSequence) return { target: 'none' };
@@ -93,6 +96,8 @@ export function resolveTuiInputCommand(
       return routeTextAreaCommand(event);
 
     case 'composer':
+      if (event.type === 'viewport.page.up') return { target: 'timeline', action: 'page_up' };
+      if (event.type === 'viewport.page.down') return { target: 'timeline', action: 'page_down' };
       {
         const historyRoute = resolveComposerHistoryRoute(event, routerState.composerHistory);
         if (historyRoute) return { target: 'composerHistory', action: historyRoute };
@@ -130,7 +135,15 @@ function resolveApprovalOptionNavigation(
   owner: Extract<TuiInteractionOwner, { type: 'approval' }>,
 ): 'previous' | 'next' | null {
   if (owner.freeTextActive) return null;
-  if (event.type === 'cursor.up') return 'previous';
-  if (event.type === 'cursor.down') return 'next';
+  if (isPreviousNavigation(event)) return 'previous';
+  if (isNextNavigation(event)) return 'next';
   return null;
+}
+
+function isPreviousNavigation(event: CanonicalInputEvent) {
+  return event.type === 'cursor.up' || event.type === 'viewport.page.up';
+}
+
+function isNextNavigation(event: CanonicalInputEvent) {
+  return event.type === 'cursor.down' || event.type === 'viewport.page.down';
 }

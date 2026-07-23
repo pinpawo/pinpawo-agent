@@ -48,49 +48,6 @@ export function findTimelineOperationEntry(
     entry.id === operationId || entry.operationKey === operationId) ?? null;
 }
 
-export type AgentTimelineViewportModel = {
-  entries: LocalAgentTimelineEntry[];
-  staticEntries: LocalAgentTimelineEntry[];
-  dynamicEntries: LocalAgentTimelineEntry[];
-};
-
-export function buildTimelineViewportModel(
-  entries: LocalAgentTimelineEntry[],
-): AgentTimelineViewportModel {
-  return {
-    entries,
-    ...splitTimelineForViewport(entries),
-  };
-}
-
-export function splitTimelineForViewport(
-  entries: LocalAgentTimelineEntry[],
-): {
-  staticEntries: LocalAgentTimelineEntry[];
-  dynamicEntries: LocalAgentTimelineEntry[];
-} {
-  const firstDynamicIndex = entries.findIndex((entry) => !isSettledTimelineEntry(entry));
-  if (firstDynamicIndex < 0) {
-    return {
-      staticEntries: entries,
-      dynamicEntries: [],
-    };
-  }
-  return {
-    staticEntries: entries.slice(0, firstDynamicIndex),
-    dynamicEntries: entries.slice(firstDynamicIndex),
-  };
-}
-
-function isSettledTimelineEntry(entry: LocalAgentTimelineEntry) {
-  switch (entry.type) {
-    case 'message':
-      return entry.status === 'completed';
-    case 'operation':
-      return !isRunningOperationPhase(entry.phase);
-  }
-}
-
 function formatOperationTimelineDetail(entry: LocalAgentOperationEntry) {
   const details = formatDetails(entry.details);
   return [entry.target, entry.summary, details]

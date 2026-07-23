@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
+import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import { getConfig } from '../config';
 import { loadStoredConfig, saveStoredConfig } from '../storage';
@@ -7,6 +7,7 @@ import { AgentTimelineItem } from './components/AgentTimelineItem';
 import { BottomStatusLine } from './components/BottomStatusLine';
 import { Composer } from './components/Composer';
 import { OverlayLayer } from './components/OverlayLayer';
+import { TimelineViewport } from './components/TimelineViewport';
 import { WelcomePanel } from './components/WelcomePanel';
 import {
   createInitialTuiInputBufferState,
@@ -49,6 +50,11 @@ import {
 } from './globalReviewPolicyPicker';
 import type { TuiState } from './state/tuiState';
 import type { MessageRole } from './types';
+import {
+  createTimelineScrollState,
+  scrollTimelineByPage,
+  updateTimelineScrollMetrics,
+} from './timeline/timelineScroll';
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'];
 const CLEAR_SCREEN = '\x1B[2J\x1B[3J\x1B[H';
@@ -96,6 +102,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const [approvalIndex, setApprovalIndex] = useState(0);
   const [commandPaletteIndex, setCommandPaletteIndex] = useState(0);
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
+  const [timelineScroll, setTimelineScroll] = useState(createTimelineScrollState);
   const [globalReviewPolicyMode, setGlobalReviewPolicyMode] = useState<BuiltinGlobalReviewPolicyMode>(
     () => config.globalReviewPolicyMode,
   );
@@ -115,6 +122,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   const workdir = props.workdir ?? config.workdir;
   const resetTimelineView = useCallback(() => {
     stdout.write(CLEAR_SCREEN);
+    setTimelineScroll(createTimelineScrollState());
     setTimelineRenderEpoch((current) => current + 1);
   }, [stdout]);
   const runtimeController = useMemo(() => new TuiRuntimeController({
@@ -138,6 +146,8 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     timelineRenderEpoch,
   }), [animationFrame, now, terminalSize.columns, timelineRenderEpoch, tuiState]);
   const focusedSession = screenModel.session;
+  const activeRequestId = focusedSession?.activeRun?.requestId ?? null;
+  const lastTimelineRequestIdRef = useRef(activeRequestId);
   const ready = screenModel.ready;
   const busy = screenModel.busy;
   const pendingApproval = screenModel.pendingApproval;
@@ -150,6 +160,13 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
   useEffect(() => {
     setApprovalIndex(0);
   }, [pendingApproval?.requestId, pendingApproval?.review.id]);
+
+  useEffect(() => {
+    if (activeRequestId && activeRequestId !== lastTimelineRequestIdRef.current) {
+      setTimelineScroll(createTimelineScrollState());
+    }
+    lastTimelineRequestIdRef.current = activeRequestId;
+  }, [activeRequestId]);
 
   useEffect(() => {
     if (globalReviewPolicyPickerOpen && (busy || pendingApproval)) {
@@ -442,6 +459,13 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
         runtimeController.requestInterrupt();
         return;
 
+      case 'timeline':
+        setTimelineScroll((current) => scrollTimelineByPage(
+          current,
+          action.action === 'page_up' ? 'up' : 'down',
+        ));
+        return;
+
       case 'approval':
         if (action.action === 'previous') {
           setApprovalIndex((current) => Math.max(0, current - 1));
@@ -613,6 +637,7 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     session: focusedSession,
     globalReviewPolicyMode,
     overlayOwner: overlayModel.current?.label ?? null,
+    timelineScrollOffset: timelineScroll.offset,
   }), [
     focusedSession,
     globalReviewPolicyMode,
@@ -621,29 +646,67 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
     screenModel.regions.statusBar.connectionStatus,
     screenModel.regions.statusBar.statusNotice,
     composerTarget,
+    timelineScroll.offset,
   ]);
+  const emptyTimelineVersion = screenModel.regions.timeline.emptyState
+    ? JSON.stringify(screenModel.regions.timeline.emptyState)
+    : '';
+  const timelineLayoutVersion = useMemo(() => ({
+    terminalColumns: terminalSize.columns,
+    terminalRows: terminalSize.rows,
+    composerRows: textArea.layout.rows.length,
+    overlay: overlayModel.current,
+    emptyTimelineVersion,
+  }), [
+    emptyTimelineVersion,
+    overlayModel.current,
+    terminalSize.columns,
+    terminalSize.rows,
+    textArea.layout.rows.length,
+  ]);
+  const handleTimelineMetricsChange = useCallback((metrics: {
+    contentHeight: number;
+    viewportHeight: number;
+  }) => {
+    setTimelineScroll((current) => updateTimelineScrollMetrics(current, metrics));
+  }, []);
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      {screenModel.regions.timeline.emptyState ? (
-        <WelcomePanel model={screenModel.regions.timeline.emptyState} />
-      ) : null}
-      <Static key={screenModel.regions.timeline.renderKey} items={screenModel.regions.timeline.staticEntries}>
-        {(entry) => renderTimelineDisplayEntry(entry, {
-          petName: screenModel.petName,
-          now,
-          width: contentWidth,
-        })}
-      </Static>
-      {screenModel.regions.timeline.dynamicEntries.map((entry) => renderTimelineDisplayEntry(entry, {
-        petName: screenModel.petName,
-        now,
-        width: contentWidth,
-      }))}
-      <OverlayLayer model={overlayModel} />
+    <Box
+      flexDirection="column"
+      height={Math.max(8, terminalSize.rows)}
+      overflow="hidden"
+      paddingX={1}
+    >
+      <TimelineViewport
+        key={screenModel.regions.timeline.renderKey}
+        contentVersion={screenModel.regions.timeline.entries}
+        layoutVersion={timelineLayoutVersion}
+        scrollOffset={timelineScroll.offset}
+        onMetricsChange={handleTimelineMetricsChange}
+      >
+        {screenModel.regions.timeline.emptyState ? (
+          <Box flexShrink={0}>
+            <WelcomePanel model={screenModel.regions.timeline.emptyState} />
+          </Box>
+        ) : null}
+        {screenModel.regions.timeline.entries.map((entry) => (
+          <Box key={entry.id} flexShrink={0}>
+            {renderTimelineDisplayEntry(entry, {
+              petName: screenModel.petName,
+              now,
+              width: contentWidth,
+            })}
+          </Box>
+        ))}
+      </TimelineViewport>
+      <Box flexShrink={0}>
+        <OverlayLayer model={overlayModel} />
+      </Box>
       <Box
         borderStyle="round"
         borderColor={screenModel.regions.composer.borderColor}
+        flexShrink={0}
         paddingX={1}
         marginTop={screenModel.regions.composer.marginTop}
       >
@@ -658,10 +721,12 @@ export function TuiApp(props: { actorId: string; workdir?: string }) {
           </>
         )}
       </Box>
-      <BottomStatusLine
-        model={statusBarModel}
-        width={screenModel.regions.statusBar.width}
-      />
+      <Box flexShrink={0}>
+        <BottomStatusLine
+          model={statusBarModel}
+          width={screenModel.regions.statusBar.width}
+        />
+      </Box>
     </Box>
   );
 }

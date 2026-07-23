@@ -1,6 +1,27 @@
 import { truncateLine } from './render/terminalText';
+import { renderHalfBlockRaster } from './render/terminalRaster';
 import { TUI_TEXT } from './render/text';
 import type { SessionModel } from './state/tuiState';
+import { readLocalAgentPackageVersion } from '../packageVersion';
+
+const PAW_RASTER = [
+  '.....#...#......',
+  '....###.###.....',
+  '....###.###.....',
+  '....###.###.....',
+  '..#..#...#..#...',
+  '.###.......###..',
+  '.###..###..###..',
+  '.##..#####..##..',
+  '....#######.....',
+  '...#########....',
+  '..###########...',
+  '..###########...',
+  '...#########....',
+  '....###.###.....',
+] as const;
+
+const PAW_LINES = renderHalfBlockRaster(PAW_RASTER);
 
 export type WelcomePanelDetail = {
   label: string;
@@ -15,8 +36,10 @@ export type WelcomePanelShortcut = {
 export type WelcomePanelModel = {
   compact: boolean;
   stackHeader: boolean;
+  pawLines: readonly string[];
   title: string;
   subtitle: string;
+  petName: string;
   greeting: string;
   summary: string | null;
   status: string;
@@ -45,8 +68,10 @@ export function buildWelcomePanelModel(input: {
   return {
     compact,
     stackHeader,
+    pawLines: PAW_LINES,
     title: TUI_TEXT.welcomeTitle,
     subtitle: TUI_TEXT.welcomeSubtitle,
+    petName,
     greeting: compact
       ? TUI_TEXT.welcomeCompactGreeting(petName)
       : TUI_TEXT.welcomeGreeting(petName),
@@ -59,6 +84,10 @@ export function buildWelcomePanelModel(input: {
         : TUI_TEXT.welcomeReadyAction
       : TUI_TEXT.welcomePreparingAction,
     details: [
+      {
+        label: TUI_TEXT.welcomeVersionLabel,
+        value: `v${readLocalAgentPackageVersion()}`,
+      },
       {
         label: TUI_TEXT.welcomeModelLabel,
         value: truncateLine(fallback(runtime?.model, TUI_TEXT.valueLoading), valueWidth),

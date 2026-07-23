@@ -15,9 +15,6 @@ import type {
   SessionModel,
   TuiState,
 } from './state/tuiState';
-import {
-  buildTimelineViewportModel,
-} from './timeline/agentTimelineSelectors';
 import type { LocalAgentTimelineEntry } from '../localAgentSession';
 import type { ActiveOperation } from './types';
 import { buildWelcomePanelModel, type WelcomePanelModel } from './welcomePanelModel';
@@ -34,11 +31,7 @@ export type TuiScreenModel = {
   regions: {
     timeline: {
       entries: LocalAgentTimelineEntry[];
-      staticEntries: LocalAgentTimelineEntry[];
-      dynamicEntries: LocalAgentTimelineEntry[];
       renderKey: string;
-      staticBoundaryKey: string;
-      scrollStrategy: 'preserveStaticOutputUntilHostReset';
       width: number;
       emptyState: WelcomePanelModel | null;
     };
@@ -78,7 +71,6 @@ export function buildTuiScreenModel(input: {
   const pendingApproval = selectFocusedPendingApproval(input.state);
   const contentWidth = Math.max(20, input.terminalColumns - 4);
   const textAreaWidth = Math.max(8, contentWidth - 4);
-  const timelineViewport = buildTimelineViewportModel(timeline);
   const petName = session?.actor.label ?? TUI_TEXT.defaultPetName;
   const spinnerFrame = SPINNER_FRAMES[input.animationFrame % SPINNER_FRAMES.length] ?? SPINNER_FRAMES[0];
   const activityStatus = pendingUi
@@ -88,7 +80,7 @@ export function buildTuiScreenModel(input: {
       : null;
   const connectionStatus = formatConnectionStatus(input.state.connection);
   const composerFocused = ready && !busy;
-  const timelineEmptyState = timelineViewport.entries.length === 0
+  const timelineEmptyState = timeline.length === 0
     ? buildWelcomePanelModel({
         session,
         width: contentWidth,
@@ -106,12 +98,8 @@ export function buildTuiScreenModel(input: {
     activeOperations,
     regions: {
       timeline: {
-        entries: timelineViewport.entries,
-        staticEntries: timelineViewport.staticEntries,
-        dynamicEntries: timelineViewport.dynamicEntries,
+        entries: timeline,
         renderKey: formatViewportRenderKey(input.timelineRenderEpoch),
-        staticBoundaryKey: formatViewportBoundaryKey(timelineViewport.staticEntries),
-        scrollStrategy: 'preserveStaticOutputUntilHostReset',
         width: contentWidth,
         emptyState: timelineEmptyState,
       },
@@ -148,8 +136,4 @@ function formatConnectionStatus(connection: TuiConnectionState) {
 
 function formatViewportRenderKey(epoch: number) {
   return String(epoch);
-}
-
-function formatViewportBoundaryKey(entries: LocalAgentTimelineEntry[]) {
-  return entries.map((entry) => entry.id).join('\u001F');
 }

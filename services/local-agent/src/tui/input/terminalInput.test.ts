@@ -51,4 +51,5 @@ test('terminal input helpers classify complete control sequences and prefixes', 
   assert.equal(isTerminalControlSequencePrefix('\x1b['), true);
   assert.equal(isTerminalControlSequencePrefix('[27;2;13'), true);
   assert.equal(isTerminalControlSequencePrefix('[27;2;13~'), false);
+
 });

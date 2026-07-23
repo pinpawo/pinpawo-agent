@@ -80,6 +80,31 @@ test('grep_search truncates a single huge matched line', async () => {
   assert.ok(output.length < 100_000, `single match should be bounded, got ${output.length}`);
 });
 
+test('grep_search supports a single file search root with and without context', async () => {
+  const root = makeTree();
+  const filePath = resolve(root, 'single.ts');
+  writeFileSync(filePath, [
+    'before',
+    'needle',
+    'after',
+  ].join('\n'));
+
+  const plain = String(await grepSearchTool.invoke({
+    path: filePath,
+    query: 'needle',
+  }));
+  assert.match(plain, /^single\.ts:2: needle$/m);
+
+  const withContext = String(await grepSearchTool.invoke({
+    path: filePath,
+    query: 'needle',
+    context: 1,
+  }));
+  assert.match(withContext, /^single\.ts-1- before$/m);
+  assert.match(withContext, /^single\.ts:2: needle$/m);
+  assert.match(withContext, /^single\.ts-3- after$/m);
+});
+
 test('grep_search stops at the total-bytes budget across many big lines', async () => {
   const root = makeTree();
   for (let i = 0; i < 200; i += 1) {

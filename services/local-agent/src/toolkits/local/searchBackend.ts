@@ -207,6 +207,7 @@ export const ripgrepSearchBackend: SearchBackend = {
     const args = [
       ...commonArgs(),
       '--null',
+      '--with-filename',
       '--line-number',
       '--no-heading',
       '--color',

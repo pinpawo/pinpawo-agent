@@ -482,7 +482,10 @@ The profile also exposed and removed an evaluator false negative: enriching a
 valid concrete task with `/tmp/report.pdf` changed string-level plan diagnostics
 but still achieved the materialization objective. Plan-effect and rubber-stamp
 measurements therefore remain diagnostics, while free-form task semantics use
-the goal evaluator.
+the goal evaluator. A planner-only rerun after removing those derived
+diagnostics from the judge input preserved the same 15/18 result at
+`294fd26b292dda73232cfbbc7410d0c35e5d4e9c`; only the capability-grouping
+criterion failed.
 
 ## Application to the current entryDecision issue
 

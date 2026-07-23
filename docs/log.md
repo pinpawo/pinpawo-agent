@@ -186,3 +186,6 @@ lint passes, and documentation migrations.
 - Isolated stable failures in entry evidence freshness and planner task grouping,
   plus one variable answer clarification failure, without changing production
   prompts in the eval change.
+- Confirmed in a final planner-only rerun that excluding derived plan diagnostics
+  from judge input preserved the 15/18 semantic result and the same sole
+  capability-grouping failure.

@@ -126,6 +126,8 @@ From the repository root:
 npm run typecheck
 npm test
 npm run build
+npm pack --dry-run -w @pinpawo/pet-agent
 npm run pack:dry -w pinpawo-local-agent
-npm publish -w pinpawo-local-agent
+npm publish -w @pinpawo/pet-agent --access public
+npm publish -w pinpawo-local-agent --access public
 ```

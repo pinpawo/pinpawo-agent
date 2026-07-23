@@ -5,7 +5,12 @@
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "outDir": "dist",
-    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@pinpawo/pet-agent": [
+        "../../packages/pet-agent/src/index.ts"
+      ]
+    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true

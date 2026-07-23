@@ -469,6 +469,7 @@ Before publishing or cutting a public release:
 npm run typecheck
 npm test
 npm run build
+npm pack --dry-run -w @pinpawo/pet-agent
 npm run pack:dry -w pinpawo-local-agent
 ```
 
@@ -484,10 +485,12 @@ From the repository root:
 npm run typecheck
 npm test
 npm run build
+npm pack --dry-run -w @pinpawo/pet-agent
 npm run pack:dry -w pinpawo-local-agent
-npm publish -w pinpawo-local-agent
+npm publish -w @pinpawo/pet-agent --access public
+npm publish -w pinpawo-local-agent --access public
 ```
 
 ## License
 
-No license file is currently present in this repository. Add an explicit `LICENSE` file before distributing the project as a fully open-source package.
+This project is licensed under the [MIT License](LICENSE).

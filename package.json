@@ -1,15 +1,16 @@
 {
   "name": "pinpawo-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Open-source PinPawo agent runtime, local agent, and desktop companion.",
+  "license": "MIT",
   "type": "module",
   "workspaces": [
     "packages/*",
     "services/local-agent"
   ],
   "scripts": {
-    "build": "npm run build -w pinpawo-local-agent",
+    "build": "npm run build -w @pinpawo/pet-agent && npm run build -w pinpawo-local-agent",
     "test": "npm run test -w @pinpawo/pet-agent && npm run test:unit -w pinpawo-local-agent && npm --prefix tools/chrome-extension test",
     "typecheck": "npm run typecheck -w @pinpawo/pet-agent && npm run typecheck -w pinpawo-local-agent",
     "langfuse:env": "bash infra/langfuse/bootstrap-env.sh",

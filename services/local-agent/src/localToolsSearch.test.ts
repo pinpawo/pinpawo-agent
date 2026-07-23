@@ -29,8 +29,9 @@ test('globSearchTool searches recursively and respects limit', async (t) => {
   }));
 
   const matches = output.split('\n').filter(Boolean);
-  assert.equal(matches.length, 1);
+  assert.equal(matches.length, 2);
   assert.match(matches[0] ?? '', /\.ts$/);
+  assert.match(matches[1] ?? '', /result limit 1/);
 });
 
 test('grepSearchTool searches file content with case sensitivity controls', async (t) => {

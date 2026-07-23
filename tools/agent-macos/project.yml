@@ -51,6 +51,7 @@ targets:
       - name: Copy agent runtime into bundle
         script: |
           AGENT_SRC="${SRCROOT}/../../services/local-agent"
+          WORKSPACE_ROOT="$(cd "$AGENT_SRC/../.." && pwd)"
           RES_DIR="${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources"
           RELEASE_ENV_FILE="${SRCROOT}/release.env"
           mkdir -p "$RES_DIR"
@@ -124,6 +125,15 @@ targets:
             echo "error: update PINPAWO_NODE_PATH or your local Node installation to match .nvmrc." >&2
             exit 1
           fi
+          NODE_ARCH="$("$NODE_SRC" -p 'process.arch' 2>/dev/null || true)"
+          case "$NODE_ARCH" in
+            x64) NODE_MACH_ARCH="x86_64" ;;
+            arm64) NODE_MACH_ARCH="arm64" ;;
+            *)
+              echo "error: bundled Node architecture must be x64 or arm64, got '${NODE_ARCH:-unknown}' from $NODE_SRC." >&2
+              exit 1
+              ;;
+          esac
           NODE_DST="${RES_DIR}/bin/node"
           NODE_ENTITLEMENTS="${SRCROOT}/PinPawoAgent/NodeRuntime.entitlements"
           mkdir -p "$(dirname "$NODE_DST")"
@@ -144,8 +154,43 @@ targets:
           mkdir -p "$DIST_DST"
           rsync -a --delete "$AGENT_SRC/dist/" "$DIST_DST/"
 
-          # node_modules: only copy local-agent runtime deps.
-          # Do not bundle workspace-root node_modules or external browser helpers.
+          # node_modules: copy local-agent runtime deps plus explicitly externalized
+          # workspace-root packages. Do not copy the complete workspace dependency tree.
           NM_DST="${RES_DIR}/node_modules"
           mkdir -p "$NM_DST"
           rsync -a --delete "$AGENT_SRC/node_modules/" "$NM_DST/"
+
+          RG_PACKAGE_SRC="${WORKSPACE_ROOT}/node_modules/@vscode/ripgrep"
+          RG_PLATFORM_PACKAGE="ripgrep-darwin-${NODE_ARCH}"
+          RG_PLATFORM_SRC="${WORKSPACE_ROOT}/node_modules/@vscode/${RG_PLATFORM_PACKAGE}"
+          if [ ! -d "$RG_PACKAGE_SRC" ] || [ ! -d "$RG_PLATFORM_SRC" ]; then
+            echo "error: missing @vscode/ripgrep package for bundled Node architecture ${NODE_ARCH}." >&2
+            echo "error: install workspace dependencies with a Node/npm target matching $NODE_SRC." >&2
+            exit 1
+          fi
+          mkdir -p "$NM_DST/@vscode"
+          rsync -a --delete "$RG_PACKAGE_SRC/" "$NM_DST/@vscode/ripgrep/"
+          rsync -a --delete "$RG_PLATFORM_SRC/" "$NM_DST/@vscode/${RG_PLATFORM_PACKAGE}/"
+
+          RG_BIN="$NM_DST/@vscode/${RG_PLATFORM_PACKAGE}/bin/rg"
+          RG_ARCHS="$(/usr/bin/lipo -archs "$RG_BIN" 2>/dev/null || true)"
+          case " $RG_ARCHS " in
+            *" $NODE_MACH_ARCH "*) ;;
+            *)
+              echo "error: bundled ripgrep architectures '${RG_ARCHS:-unknown}' do not include Node architecture $NODE_MACH_ARCH." >&2
+              exit 1
+              ;;
+          esac
+          chmod 755 "$RG_BIN"
+          /usr/bin/codesign \
+            --force \
+            --sign "$SIGN_IDENTITY" \
+            --options runtime \
+            "$RG_BIN"
+          "$RG_BIN" --version >/dev/null
+          (
+            cd "$RES_DIR"
+            npm_config_arch="$NODE_ARCH" "$NODE_DST" --input-type=module --eval \
+              "const { realpathSync } = await import('node:fs'); const { rgPath } = await import('@vscode/ripgrep'); if (realpathSync(rgPath) !== realpathSync(process.argv[1])) throw new Error(\`unexpected ripgrep path: \${rgPath}\`);" \
+              "$RG_BIN"
+          )

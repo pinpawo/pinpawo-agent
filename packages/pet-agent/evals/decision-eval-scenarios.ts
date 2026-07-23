@@ -240,7 +240,6 @@ function plannerScenarios(): DecisionEvalScenario[] {
           nextTask,
           capabilityIntent,
           remainingPlan,
-          ...metrics,
         };
         const semanticCriteria: PromptGoalAcceptanceCriterion[] = [
           ...(testCase.expected.result === 'next_task'

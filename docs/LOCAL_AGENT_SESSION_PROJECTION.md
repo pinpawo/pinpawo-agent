@@ -1,5 +1,9 @@
 # Local-agent session projection
 
+> **Current authority for this topic.** This document is the canonical contract.
+> The synthesized, navigable knowledge layer over it lives at
+> [`docs/wiki/local-agent-session-projection.md`](wiki/local-agent-session-projection.md).
+
 `LocalAgentSession` is the client-neutral, in-memory projection consumed by the local TUI and hosted chat adapter. It is not a second durable conversation store.
 
 ## Domain model

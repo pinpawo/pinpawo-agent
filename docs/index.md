@@ -81,7 +81,8 @@ the original design and reference documents. Maintenance rules live in
 ## Local agent and runtime configuration
 
 - [Local agent architecture refactor](LOCAL_AGENT_ARCHITECTURE_REFACTOR_PLAN.md)
-- [Local agent session projection](LOCAL_AGENT_SESSION_PROJECTION.md)
+- [Local agent session projection](LOCAL_AGENT_SESSION_PROJECTION.md) — canonical
+  contract; ingested into [wiki](wiki/local-agent-session-projection.md).
 - [Workspace runtime configuration](WORKSPACE_RUNTIME_CONFIG_DESIGN.md)
 - [Workdir-scoped runtime configuration](WORKDIR_SCOPED_RUNTIME_CONFIG_DESIGN.md)
 

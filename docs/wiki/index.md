@@ -41,6 +41,24 @@ explicitly migrated.
 - [Open questions](questions/system-prompts-open-questions.md) — unresolved prompt
   architecture questions.
 
+## Local-agent session projection
+
+- [Local-agent session projection](local-agent-session-projection.md) — system
+  synthesis: how checkpoint, snapshot, shared reducer, review lifecycle, and
+  transports fit together.
+- [Checkpoint, snapshot, timeline, and timeline state](concepts/checkpoint-snapshot-timeline.md)
+  — the four distinct domain terms and the completion-replaces-timeline lifecycle.
+- [Session projection ownership boundaries](concepts/session-projection-ownership.md)
+  — one owner per fact: shared/checkpoint, TUI-local, and server transport-control.
+- [Local-agent transport boundary](concepts/local-agent-transport-boundary.md) —
+  peer identity, WebSocket/stdio parity, and one-implementation session commands.
+- [Active run view as a discriminated union](decisions/run-view-discriminated-union.md)
+  — making illegal `running / waiting_review / interrupting` states unrepresentable.
+- [Review resolution progress is client-local](decisions/review-resolution-is-client-local.md)
+  — why `ReviewAction` carries no status and the server lifecycle stays unprojected.
+- [Session projection open questions](questions/session-projection-open-questions.md)
+  — TUI wire migration, a future API projection, and deferred snapshot coordinates.
+
 ## Documentation management
 
 - [Karpathy LLM Wiki source](sources/karpathy-llm-wiki.md) — method adopted and

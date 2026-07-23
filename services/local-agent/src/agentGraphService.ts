@@ -9,6 +9,7 @@ import {
   type OrchestratorGraph,
   type OrchestratorStateType,
   type ReviewSpec,
+  compileAgentRegistry,
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command, type GraphRunStream } from '@langchain/langgraph';
@@ -22,10 +23,19 @@ const HEADLESS_REVIEW_CAPABILITIES = {
 
 function buildConfigurable(setup: AgentChannelSetup) {
   const configurable: Record<string, unknown> = {};
+  const toolkits = [
+    ...(setup.input.toolkits ?? []),
+    ...(setup.input.artifactDiscoveryRoot && setup.input.artifactDiscoveryToolkit
+      ? [setup.input.artifactDiscoveryToolkit]
+      : []),
+  ];
+  configurable.registry = compileAgentRegistry({
+    toolkits,
+    capabilities: setup.input.capabilities ?? [],
+    generalUses: setup.input.generalUses,
+  });
   configurable.actor = setup.input.actor;
   if (setup.input.threadId) configurable.thread_id = setup.input.threadId;
-  if (setup.input.capabilities) configurable.capabilities = setup.input.capabilities;
-  if (setup.input.toolkits && setup.input.toolkits.length > 0) configurable.toolkits = setup.input.toolkits;
   if (setup.input.execution) configurable.execution = setup.input.execution;
   if (setup.input.workdir) configurable.workdir = setup.input.workdir;
   if (setup.input.artifactDiscoveryRoot) {

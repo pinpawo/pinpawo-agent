@@ -171,6 +171,8 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       serviceSummary: petConfig.serviceSummary ?? null,
       capabilities: capsForThisPet,
       toolkits: input.toolkits,
+      generalUses: ['bash', 'git'].filter((name) =>
+        (input.toolkits ?? []).some((toolkit) => toolkit.name === name)),
       contextWindowTokens: input.llmConfig.contextWindowTokens,
       subagentContextWindowTokens: input.llmConfig.subagentContextWindowTokens ?? input.llmConfig.contextWindowTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,

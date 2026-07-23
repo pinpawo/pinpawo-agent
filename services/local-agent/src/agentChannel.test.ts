@@ -52,7 +52,19 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
     setup.input.toolkits?.map((item) => item.name),
     ['pet_profile', 'daily_post', 'capability_creator', 'general-toolkit'],
   );
+  assert.deepEqual(setup.input.generalUses, ['pet_profile']);
   assert.equal('capabilityToolkits' in setup.input, false);
+});
+
+test('buildLocalChatAgentInput honors an explicit general Toolkit authorization', () => {
+  const setup = buildLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    toolkits: [{ name: 'general-toolkit' } as AgentToolkit],
+    generalUses: ['general-toolkit'],
+  });
+
+  assert.deepEqual(setup.input.generalUses, ['general-toolkit']);
 });
 
 test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
@@ -255,6 +267,7 @@ test('buildLocalChatAgentInput exposes only an existing current-thread artifact 
     setup.input.artifactDiscoveryToolkit?.tools.map((definition) => definition.tool.name),
     ['artifact_list_dir', 'artifact_view_file_chunk'],
   );
+  assert.deepEqual(setup.input.generalUses, ['pet_profile', 'artifact_discovery']);
 });
 
 test('buildLocalChatAgentInput omits artifact discovery for a new empty thread', (t) => {

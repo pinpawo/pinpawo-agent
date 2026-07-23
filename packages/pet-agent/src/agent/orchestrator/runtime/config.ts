@@ -1,7 +1,7 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { AgentActor, AgentExecution } from '../../../types/agent';
-import type { AgentCapability } from '../../../types/capability';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../../types/toolkit';
+import type { CompiledAgentRegistry } from '../registry';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   type GlobalReviewPolicy,
@@ -11,20 +11,12 @@ import {
 } from '../review/globalReviewPolicy';
 import type { OrchestratorConfig, OrchestratorInvokeOptions } from '../types';
 
-export function generalLaneToolkits(toolkits: AgentToolkit[]) {
-  return toolkits;
-}
-
-export function capabilityLaneToolkits(toolkits: AgentToolkit[]) {
-  return toolkits;
-}
-
 export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOptions {
   const cfg = runnableConfig?.configurable ?? {};
+  const registry = cfg.registry as CompiledAgentRegistry | undefined;
   return {
     actor: cfg.actor as AgentActor | undefined,
-    capabilities: (cfg.capabilities ?? []) as AgentCapability[],
-    toolkits: (cfg.toolkits ?? []) as AgentToolkit[],
+    registry,
     execution: cfg.execution as AgentExecution | undefined,
     workdir: cfg.workdir as string | undefined,
     artifactDiscoveryRoot: typeof cfg.artifactDiscoveryRoot === 'string'
@@ -41,6 +33,16 @@ export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorI
       )
       : undefined,
   };
+}
+
+export function getInvokeRegistry(runnableConfig?: RunnableConfig): CompiledAgentRegistry {
+  const registry = getInvokeOptions(runnableConfig).registry;
+  if (!registry) {
+    throw new Error(
+      'Orchestrator requires a host-compiled registry. Use runAgent or pass configurable.registry.',
+    );
+  }
+  return registry;
 }
 
 function readGlobalReviewPolicyMode(value: unknown): GlobalReviewPolicyMode | null {

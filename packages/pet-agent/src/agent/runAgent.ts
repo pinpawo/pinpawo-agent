@@ -2,6 +2,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution } from '../types/agent';
 import type { AgentToolkit } from '../types/toolkit';
+import { compileAgentRegistry } from './orchestrator/registry';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
 import {
   buildOrchestratorRunInput,
@@ -15,6 +16,8 @@ export type AgentInvokeInput = {
   threadId?: string;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
+  /** Explicit Toolkit permission boundary for the general executor. */
+  generalUses: readonly string[];
   execution?: AgentExecution;
   signal?: AbortSignal;
   /** Agent working directory passed into system prompt so the agent knows its file scope. */
@@ -43,10 +46,19 @@ export async function runAgent(
   input: AgentInvokeInput,
 ): Promise<AgentRunResult> {
   const configurable: Record<string, unknown> = {};
+  const toolkits = [
+    ...(input.toolkits ?? []),
+    ...(input.artifactDiscoveryRoot && input.artifactDiscoveryToolkit
+      ? [input.artifactDiscoveryToolkit]
+      : []),
+  ];
+  configurable.registry = compileAgentRegistry({
+    toolkits,
+    capabilities: input.capabilities ?? [],
+    generalUses: input.generalUses,
+  });
   if (input.actor) configurable.actor = input.actor;
   if (input.threadId) configurable.thread_id = input.threadId;
-  if (input.capabilities) configurable.capabilities = input.capabilities;
-  if (input.toolkits && input.toolkits.length > 0) configurable.toolkits = input.toolkits;
   if (input.execution) configurable.execution = input.execution;
   if (input.workdir) configurable.workdir = input.workdir;
   if (input.artifactDiscoveryRoot) configurable.artifactDiscoveryRoot = input.artifactDiscoveryRoot;

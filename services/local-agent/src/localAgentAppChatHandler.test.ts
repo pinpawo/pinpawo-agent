@@ -38,6 +38,7 @@ function createSetup(): AgentChannelSetup {
     graphConfig: {} as AgentChannelSetup['graphConfig'],
     input: {
       messages: [],
+      generalUses: ['local-toolkit'],
       toolkits: [{
         name: 'local-toolkit',
         description: 'local toolkit',

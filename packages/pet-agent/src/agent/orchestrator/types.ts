@@ -7,6 +7,7 @@ import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent'
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason } from '../../types/subagent';
 import type { AgentToolkit, ToolkitReviewCapabilities } from '../../types/toolkit';
+import type { CompiledAgentRegistry } from './registry';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { DelegationOutcomeDecision } from './schemas';
@@ -111,8 +112,8 @@ export type OrchestratorConfig = {
 
 export type OrchestratorInvokeOptions = {
   actor?: AgentActor;
-  capabilities?: AgentCapability[];
-  toolkits?: AgentToolkit[];
+  /** Host-compiled executable registry. Required by routing and executor nodes. */
+  registry?: CompiledAgentRegistry;
   execution?: AgentExecution;
   workdir?: string;
   /**

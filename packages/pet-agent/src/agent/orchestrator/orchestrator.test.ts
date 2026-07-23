@@ -16,7 +16,11 @@ import type {
 } from '../../types/toolkit';
 import { createSubagent } from '../../subagent/createSubagent';
 import { runAgent } from '../runAgent';
-import { buildOrchestratorRunInput, createOrchestratorGraph } from '../createAgentRuntime';
+import {
+  buildOrchestratorRunInput,
+  createOrchestratorGraph as createRuntimeOrchestratorGraph,
+} from '../createAgentRuntime';
+import { compileAgentRegistry } from './registry';
 import {
   searchCapabilities,
   splitCapabilitySearchTerms,
@@ -72,6 +76,49 @@ function capability(
     uses,
     createRuntime: () => ({}),
   };
+}
+
+function createOrchestratorGraph(
+  config: Parameters<typeof createRuntimeOrchestratorGraph>[0],
+): ReturnType<typeof createRuntimeOrchestratorGraph> {
+  const graph = createRuntimeOrchestratorGraph(config);
+  const withRegistry = (options: {
+    configurable?: Record<string, unknown>;
+  } = {}) => {
+    const configurable = options.configurable ?? {};
+    const artifactDiscoveryRoot = typeof configurable.artifactDiscoveryRoot === 'string'
+      ? configurable.artifactDiscoveryRoot
+      : undefined;
+    const artifactDiscoveryToolkit = configurable.artifactDiscoveryToolkit as AgentToolkit | undefined;
+    const toolkits = [
+      ...((configurable.toolkits ?? []) as AgentToolkit[]),
+      ...(artifactDiscoveryRoot && artifactDiscoveryToolkit
+        ? [artifactDiscoveryToolkit]
+        : []),
+    ];
+    return {
+      ...options,
+      configurable: {
+        ...configurable,
+        registry: compileAgentRegistry({
+          toolkits,
+          capabilities: (configurable.capabilities ?? []) as AgentCapability[],
+          generalUses: (configurable.generalUses ?? []) as string[],
+        }),
+      },
+    };
+  };
+  return new Proxy(graph, {
+    get(target, property, receiver) {
+      if (property === 'invoke' || property === 'streamEvents') {
+        return (input: unknown, options: {
+          configurable?: Record<string, unknown>;
+        } = {}) => target[property](input as never, withRegistry(options) as never);
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 function mockTool(name: string) {
@@ -394,6 +441,48 @@ test('capability decision searches candidates from the pending task', async () =
   assert.equal(decisionCallCount, 3);
 });
 
+test('capability decision excludes a Capability whose required Toolkit is missing', async () => {
+  let routeInput = '';
+  let decisionCallCount = 0;
+  const model = {
+    invoke: async () => new AIMessage(''),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        decisionCallCount += 1;
+        routeInput = String((messages.at(-1) as { content?: unknown })?.content ?? '');
+        return { lane: 'general' };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const runCapabilityDecision = createCapabilityDecisionRunner({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+  const input = buildOrchestratorRunInput([new HumanMessage('use missing service')]);
+  input.runPendingTask = {
+    task: 'use missing service',
+    contextSummary: null,
+    searchKeywords: 'broken',
+  };
+
+  await runCapabilityDecision(input as OrchestratorStateType, {
+    configurable: {
+      actor: testActor,
+      registry: compileAgentRegistry({
+        capabilities: [capability('broken', 'Broken service capability.', ['missing'])],
+        toolkits: [],
+        generalUses: [],
+      }),
+    },
+  });
+
+  assert.equal(decisionCallCount, 0);
+  assert.equal(routeInput, '');
+});
+
 test('task_done reroutes through capabilityPlanner before the next task', async () => {
   let structuredCallCount = 0;
   const taskDecisionInputs: string[] = [];
@@ -686,8 +775,11 @@ test('route decision rejects missing pending task as an invariant violation', as
       configurable: {
         thread_id: 'route-missing-task-invariant',
         actor: testActor,
-        capabilities: [],
-        toolkits: [],
+        registry: compileAgentRegistry({
+          capabilities: [],
+          toolkits: [],
+          generalUses: [],
+        }),
       },
     }),
     /capabilityDecision requires runPendingTask/,
@@ -1326,7 +1418,7 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
   ]);
 });
 
-test('capability runtime receives available toolkit metadata and fixed uses still resolve normally', async () => {
+test('capability runtime sees metadata only for Toolkits authorized by fixed uses', async () => {
   let routeCallCount = 0;
   let runtimeToolkitNames: string[] = [];
   const routeModel = {
@@ -1396,7 +1488,7 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
     },
   });
 
-  assert.deepEqual(runtimeToolkitNames, ['bash', 'browser', 'artifact']);
+  assert.deepEqual(runtimeToolkitNames, ['bash']);
 });
 
 test('artifact discovery tools reach a selected capability only when declared in uses', async () => {
@@ -1496,6 +1588,7 @@ test('general lane keeps workspace file tools alongside scoped artifact discover
       thread_id: 'general-artifact-discovery-tools',
       actor: testActor,
       capabilities: [],
+      generalUses: ['bash', 'artifact_discovery'],
       toolkits: [{
         name: 'bash',
         description: 'workspace file tools',
@@ -1568,6 +1661,7 @@ test('toolkit registration does not rely on lane authorization flags', async () 
       thread_id: 'general-toolkit-registration',
       actor: testActor,
       capabilities: [],
+      generalUses: ['visible', 'artifact'],
       toolkits: [
         {
           name: 'visible',
@@ -1812,7 +1906,7 @@ test('capability result middleware stores only artifact refs in state', async ()
   assert.equal(state.sessionCapabilityArtifacts[0]?.schema?.name, 'daily_post.result');
 });
 
-test('runAgent omits empty toolkit arrays and forwards artifact discovery resources', async () => {
+test('runAgent compiles the registry and forwards artifact discovery context', async () => {
   const calls: Array<{ configurable?: Record<string, unknown> }> = [];
   const graph = {
     invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
@@ -1832,13 +1926,19 @@ test('runAgent omits empty toolkit arrays and forwards artifact discovery resour
   const result = await runAgent(graph as never, {
     messages: [new HumanMessage('hello')],
     toolkits: [],
+    generalUses: ['artifact_discovery'],
     artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/thread-1',
     artifactDiscoveryToolkit,
   });
 
   assert.equal(result.reply, 'done');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.configurable?.toolkits, undefined);
+  const registry = calls[0]?.configurable?.registry as {
+    toolkits?: AgentToolkit[];
+    general?: { toolkits?: AgentToolkit[] };
+  };
+  assert.deepEqual(registry.toolkits?.map(({ name }) => name), ['artifact_discovery']);
+  assert.deepEqual(registry.general?.toolkits?.map(({ name }) => name), ['artifact_discovery']);
   assert.equal(
     calls[0]?.configurable?.artifactDiscoveryRoot,
     '/repo/.pinpawo/capability-artifacts/threads/thread-1',
@@ -2582,6 +2682,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
       thread_id: 'canonical-review-runtime-auth',
       actor: testActor,
       capabilities: [],
+      generalUses: ['local'],
       toolkits,
     },
   };
@@ -2716,6 +2817,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
       thread_id: 'plain-review-runtime-state',
       actor: testActor,
       capabilities: [],
+      generalUses: ['local'],
       toolkits,
     },
   };
@@ -2860,6 +2962,7 @@ test('toolkit review policy stops after human reject without requesting another 
       thread_id: 'human-reject-stops-review-loop',
       actor: testActor,
       capabilities: [],
+      generalUses: ['local'],
       toolkits,
     },
   };
@@ -2980,6 +3083,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
       thread_id: 'multi-tool-review-runtime-state',
       actor: testActor,
       capabilities: [],
+      generalUses: ['local'],
       toolkits,
     },
   };
@@ -3480,6 +3584,7 @@ test('delegation outcome continue decision can re-enter main and finalize handof
       thread_id: 'delegation-continue-copy-preserve-lane',
       actor: testActor,
       capabilities: [],
+      generalUses: ['local'],
       toolkits: [{
         name: 'local',
         description: 'local tools',
@@ -3566,6 +3671,7 @@ test('delegation outcome continuation path rechecks run iteration guard before n
       actor: testActor,
       capabilities: [],
       maxRunIterations: 1,
+      generalUses: ['local'],
       toolkits: [{
         name: 'local',
         description: 'local tools',
@@ -3651,6 +3757,7 @@ test('delegation_outcome does not append duplicate handoff copies for unchanged 
       actor: testActor,
       capabilities: [],
       maxRunIterations: 10,
+      generalUses: ['local'],
       toolkits: [{
         name: 'local',
         description: 'local tools',

@@ -18,13 +18,13 @@ import type {
   OrchestratorConfig,
 } from '../../types';
 import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
-import { validateUniqueToolkitNames, validateUniqueToolNames } from '../../validation';
+import { validateUniqueToolNames } from '../../validation';
 import { createToolAuthorizationRecorder } from '../authorization';
 import {
   GENERAL_SUBAGENT_MAX_ITERATIONS,
 } from '../constants';
 import {
-  generalLaneToolkits,
+  getInvokeRegistry,
   getInvokeOptions,
   resolveActor,
 } from '../config';
@@ -46,7 +46,6 @@ export function createGeneralNode(params: {
   // Node: general — reads tools from configurable
   return async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
-      toolkits,
       workdir,
       artifactDiscoveryRoot,
       artifactDiscoveryToolkit,
@@ -55,35 +54,34 @@ export function createGeneralNode(params: {
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const toolkitList = [
-      ...generalLaneToolkits(toolkits ?? []),
-      ...(artifactDiscoveryRoot && artifactDiscoveryToolkit
-        ? [artifactDiscoveryToolkit]
-        : []),
-    ];
-    validateUniqueToolkitNames(toolkitList);
+    const registry = getInvokeRegistry(runnableConfig);
+    const toolkitList = [...registry.general.toolkits];
     const runNextDelegation = state.runNextDelegation;
     if (!runNextDelegation || runNextDelegation.lane !== 'general') {
       throw new Error('General node cannot run without a pending general delegation.');
     }
     const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
-    const toolkitExecution = await resolveToolkitExecution(toolkitList, undefined, {
-      models: config.models,
-      actor,
-      messages: state.messages,
-      reviewContext: {
-        task: runNextDelegation.task,
-        workdir: workdir ?? null,
+    const toolkitExecution = await resolveToolkitExecution(
+      toolkitList,
+      toolkitList.map(({ name }) => name),
+      {
+        models: config.models,
+        actor,
+        messages: state.messages,
+        reviewContext: {
+          task: runNextDelegation.task,
+          workdir: workdir ?? null,
+        },
+        reviewCapabilities,
+        globalReviewPolicy,
+        toolAuthorizations: authorizationRecorder.active,
+        recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
+        // Runtime events (authorization notices) surface as `custom` protocol
+        // events on the root stream (#322); review emits from afterModel
+        // middleware, where the writer is reachable at call time.
+        emitRuntimeEvent: emitRuntimeEventToStreamWriter,
       },
-      reviewCapabilities,
-      globalReviewPolicy,
-      toolAuthorizations: authorizationRecorder.active,
-      recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
-      // Runtime events (authorization notices) surface as `custom` protocol
-      // events on the root stream (#322); review emits from afterModel
-      // middleware, where the writer is reachable at call time.
-      emitRuntimeEvent: emitRuntimeEventToStreamWriter,
-    });
+    );
     const toolList = selectCapabilityTools(toolkitExecution.tools);
     validateUniqueToolNames(toolList);
 

@@ -86,10 +86,11 @@ explicit general-executor Toolkit list grant tool access.
   Capability Creator, Studio Plan, and Artifact Discovery.
 - Explore-style environment-dependent tool filtering becomes explicit Capability
   scenarios with deterministic `uses`.
-- Workstream 1 is implemented on the migration branch: the static V2 types and
-  breaking Toolset removal are in place. Registry compilation,
-  `CAPABILITY.md`, prompt sections, and the final cutover remain pending and
-  must not be described as complete.
+- Workstreams 1 and 2 are implemented on the migration branch: the static V2
+  types, breaking Toolset removal, host-compiled registry, pre-route dependency
+  filtering, run-scoped Toolkit registration, and explicit general executor
+  authorization are in place. `CAPABILITY.md`, prompt sections, and the final
+  cutover remain pending and must not be described as complete.
 - V2 ships as one breaking cutover. It does not retain a legacy loader, deprecated
   runtime fields, Toolset adapters, dual authoring protocols, or automatic
   conversion of old Capability plugins.

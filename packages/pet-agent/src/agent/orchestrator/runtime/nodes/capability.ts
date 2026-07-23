@@ -21,13 +21,13 @@ import type {
   OrchestratorConfig,
 } from '../../types';
 import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
-import { validateUniqueToolkitNames, validateUniqueToolNames } from '../../validation';
+import { validateUniqueToolNames } from '../../validation';
 import { createToolAuthorizationRecorder } from '../authorization';
 import {
   CAPABILITY_SUBAGENT_MAX_ITERATIONS,
 } from '../constants';
 import {
-  capabilityLaneToolkits,
+  getInvokeRegistry,
   getInvokeOptions,
   readThreadId,
   resolveActor,
@@ -51,8 +51,6 @@ export function createCapabilityNode(params: {
   // Node: capability — reads capabilities, tools, execution from configurable
   return async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
-      capabilities,
-      toolkits,
       execution,
       workdir,
       runtimeEnvironment,
@@ -62,13 +60,7 @@ export function createCapabilityNode(params: {
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const toolkitList = [
-      ...capabilityLaneToolkits(toolkits ?? []),
-      ...(artifactDiscoveryRoot && artifactDiscoveryToolkit
-        ? [artifactDiscoveryToolkit]
-        : []),
-    ];
-    validateUniqueToolkitNames(toolkitList);
+    const registry = getInvokeRegistry(runnableConfig);
     const runNextDelegation = state.runNextDelegation;
     if (!runNextDelegation) {
       throw new Error('Capability node cannot run without a pending capability delegation.');
@@ -77,10 +69,15 @@ export function createCapabilityNode(params: {
     if (!capabilityName) {
       throw new Error('Capability node received a non-capability delegation lane.');
     }
-    const capability = capabilities?.find((c) => c.name === capabilityName);
-    if (!capability) {
-      throw new Error(`Capability node cannot resolve capability "${capabilityName}".`);
+    const compiledCapability = registry.capabilities
+      .find(({ capability }) => capability.name === capabilityName);
+    if (!compiledCapability) {
+      throw new Error(
+        `Capability node cannot resolve an available capability "${capabilityName}".`,
+      );
     }
+    const { capability } = compiledCapability;
+    const toolkitList = [...compiledCapability.toolkits];
     const lane: MessageLane = `capability:${capability.name}`;
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
     const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
@@ -119,7 +116,7 @@ export function createCapabilityNode(params: {
       // middleware, where the writer is reachable at call time.
       emitRuntimeEvent: emitRuntimeEventToStreamWriter,
     };
-    const toolkitNames = [...capability.uses];
+    const toolkitNames = compiledCapability.toolkits.map(({ name }) => name);
     const usedResolvedToolkitExecution = await resolveToolkitExecution(toolkitList, toolkitNames, toolkitContext);
     const runtimeInstructions = await resolveInstructions(runtime, {
       models: config.models,

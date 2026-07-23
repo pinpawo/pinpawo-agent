@@ -96,9 +96,19 @@ export {
   ORCHESTRATOR_RECURSION_LIMIT,
   streamOrchestratorGraph,
   streamOrchestratorGraphWithTokenUsage,
+  compileAgentRegistry,
+  ExecutorCompilationError,
+  formatExecutorCompilationIssues,
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,
   validateUniqueToolNames,
+} from './agent/createAgentRuntime';
+export type {
+  CompiledAgentRegistry,
+  CompiledCapability,
+  CompiledExecutor,
+  ExecutorCompilationIssue,
+  UnavailableCapability,
 } from './agent/createAgentRuntime';
 export {
   ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,

@@ -7,11 +7,11 @@ import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import { createBrowserToolkit } from './toolkits/browser';
 
-function capability(name: string): AgentCapability {
+function capability(name: string, uses: readonly string[] = []): AgentCapability {
   return {
     name,
     description: `${name} capability`,
-    uses: [],
+    uses,
     createRuntime: () => ({}),
   };
 }
@@ -55,8 +55,9 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
       },
     ],
     createLocalCapabilities: () => [
-      capability('available-local-cap'),
+      capability('available-local-cap', ['available-toolkit']),
       capability('unavailable-local-cap'),
+      capability('missing-toolkit-local-cap', ['unavailable-toolkit']),
     ],
     resolveAvailableToolkits: async (toolkits: AgentToolkit[]) =>
       toolkits.filter((toolkit) => toolkit.name !== 'unavailable-toolkit'),
@@ -86,6 +87,7 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
   assert.deepEqual(registry.getLocalCapabilityDefinitions().map((item) => item.name), [
     'available-local-cap',
     'unavailable-local-cap',
+    'missing-toolkit-local-cap',
   ]);
   assert.deepEqual(registry.getLocalCapabilities().map((item) => item.name), ['available-local-cap']);
   assert.deepEqual(registry.getUserCapabilityDefinitions().map((item) => item.meta.id), [

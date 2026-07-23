@@ -213,3 +213,15 @@ lint passes, and documentation migrations.
 - Reduced Toolkit instructions to one optional static string and separated
   Toolkit availability and review-time context from Capability/runtime
   infrastructure.
+
+## [2026-07-24] implementation | Capability and Toolkit Registry V2
+
+- Added a deterministic compiled registry for general and Capability executors.
+- Moved registry compilation to host run setup; orchestrator routing and executor
+  nodes consume the same compiled result.
+- Made general executor Toolkit access explicit through `generalUses`; Toolkit
+  registration alone no longer grants access.
+- Excluded Capabilities with missing Toolkit dependencies or effective tool-name
+  conflicts before route selection.
+- Included run-scoped Artifact Discovery, Studio Plan, and Wiki Read Toolkits in
+  the same dependency-resolution path.

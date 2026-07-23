@@ -15,6 +15,7 @@ import type {
 import {
   buildOrchestratorRunInput,
   createOrchestratorGraph,
+  compileAgentRegistry,
   type OrchestratorConfig,
   type OrchestratorGraph,
 } from '../createAgentRuntime';
@@ -39,6 +40,8 @@ export type PetAgentRuntimeConfig = {
   capabilities?: AgentCapability[];
   capabilityAvailability?: Record<string, CapabilityAvailability>;
   toolkits?: AgentToolkit[];
+  /** Explicit Toolkit permission boundary for the general executor. */
+  generalUses: readonly string[];
   execution?: AgentExecution;
   workdir?: string;
   /**
@@ -144,11 +147,19 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       ...(input.toolkits ?? []),
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
+    const capabilities = [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])];
+    const registry = compileAgentRegistry({
+      toolkits,
+      capabilities,
+      generalUses: [
+        ...config.generalUses,
+        ...(input.wikiRoot && !config.generalUses.includes('wiki_read') ? ['wiki_read'] : []),
+      ],
+    });
     const configurable: Record<string, unknown> = {
       actor: config.actor,
       thread_id: input.threadId,
-      capabilities: [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])],
-      toolkits,
+      registry,
       execution: input.execution ?? config.execution,
       workdir: input.workdir ?? config.workdir,
       runtimeEnvironment: input.runtimeEnvironment,

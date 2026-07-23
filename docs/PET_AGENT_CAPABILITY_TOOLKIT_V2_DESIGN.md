@@ -2,7 +2,7 @@
 
 > 状态：Accepted design target
 > 决策日期：2026-07-24
-> 实现状态：Workstream 1 已完成；Workstream 2–4 仍待实现
+> 实现状态：Workstream 1–2 已完成；Workstream 3–4 仍待实现
 
 ## 1. 决策摘要
 
@@ -600,16 +600,16 @@ explore_github  uses [git, github]
 
 ### Workstream 2：Toolkit-only tools 与 Registry
 
-- registry 启动时解析依赖；
-- capability route 只看到依赖可满足的 Capability。
-- 将四个生产 Toolset 迁移成 Toolkit；
-- 将现有 Toolkit 的 tools、operations、tool review maps 合并为
+- [x] registry 启动时解析依赖；
+- [x] capability route 只看到依赖可满足的 Capability；
+- [x] 将四个生产 Toolset 迁移成 Toolkit；
+- [x] 将现有 Toolkit 的 tools、operations、tool review maps 合并为
   `ToolDefinition[]`；
-- 将动态 Toolkit resource 改为宿主工厂创建完整 Toolkit 实例；
-- 将 review/runtime 基础设施从 Toolkit 定义上下文中移出；
-- run setup 支持注册 run-scoped Toolkit；
-- 删除 capability node 的 toolset 合并路径；
-- general executor 改成显式 `generalUses`。
+- [x] 将动态 Toolkit resource 改为宿主工厂创建完整 Toolkit 实例；
+- [x] 将 review/runtime 基础设施从 Toolkit 定义上下文中移出；
+- [x] run setup 支持注册 run-scoped Toolkit；
+- [x] 删除 capability node 的 toolset 合并路径；
+- [x] general executor 改成显式 `generalUses`。
 
 ### Workstream 3：`CAPABILITY.md` 与 Prompt
 
@@ -631,24 +631,24 @@ explore_github  uses [git, github]
 
 ### 契约
 
-- [ ] Capability 类型没有 tool/toolset 字段。
-- [ ] Toolkit 是 tool、operation metadata 和 review policy 的唯一 owner。
-- [ ] Toolkit 的每个工具由一个 `ToolDefinition` 完整描述。
-- [ ] `AgentToolkit.tools` 必填、非空且 tool name 唯一。
-- [ ] 公共 Toolkit 契约中不存在 `ToolkitResource`、`ToolkitContext` 或
+- [x] Capability 类型没有 tool/toolset 字段。
+- [x] Toolkit 是 tool、operation metadata 和 review policy 的唯一 owner。
+- [x] Toolkit 的每个工具由一个 `ToolDefinition` 完整描述。
+- [x] `AgentToolkit.tools` 必填、非空且 tool name 唯一。
+- [x] 公共 Toolkit 契约中不存在 `ToolkitResource`、`ToolkitContext` 或
   `exposure`。
-- [ ] Toolkit instructions 是可选静态字符串。
-- [ ] Toolkit availability 不复用 Capability availability 或暴露缓存策略。
-- [ ] `AgentCapability.uses` 是必填静态强依赖。
-- [ ] `uses` 不支持 optional。
+- [x] Toolkit instructions 是可选静态字符串。
+- [x] Toolkit availability 不复用 Capability availability 或暴露缓存策略。
+- [x] `AgentCapability.uses` 是必填静态强依赖。
+- [x] `uses` 不支持 optional。
 - [ ] Capability instructions 是一个 Markdown document，而不是数组。
 
 ### Registry
 
-- [ ] 缺少任一 Toolkit 时，Capability 在路由前被标记 unavailable。
-- [ ] 注册 Toolkit 不会自动扩大 general executor 工具面。
-- [ ] run-scoped Toolkit 可以被当前 run 的 Capability 解析。
-- [ ] 同一 executor 内同名 tool 在运行前 fail-fast。
+- [x] 缺少任一 Toolkit 时，Capability 在路由前被标记 unavailable。
+- [x] 注册 Toolkit 不会自动扩大 general executor 工具面。
+- [x] run-scoped Toolkit 可以被当前 run 的 Capability 解析。
+- [x] 同一 executor 内同名 tool 在运行前 fail-fast。
 
 ### Prompt
 
@@ -666,10 +666,10 @@ explore_github  uses [git, github]
 
 ### 迁移
 
-- [ ] Daily Post、Capability Creator、Studio Plan、Artifact Discovery 不再使用
+- [x] Daily Post、Capability Creator、Studio Plan、Artifact Discovery 不再使用
   Toolset。
-- [ ] Explore 不再运行时过滤 `uses`。
-- [ ] 所有现有单元测试、typecheck 和 build 通过。
+- [x] Explore 不再运行时过滤 `uses`。
+- [x] 所有现有单元测试、typecheck 和 build 通过。
 - [ ] 新增依赖解析、工具冲突、Markdown loader 和 prompt 注入测试。
 
 ## 13. 非目标

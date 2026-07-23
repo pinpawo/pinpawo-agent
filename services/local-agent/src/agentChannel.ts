@@ -41,6 +41,12 @@ import { inferLlmStructuredOutputMethod } from './llmModelPresets';
 import { resolveCapabilityArtifactThreadRoot } from './capabilityArtifactStore';
 import { createArtifactDiscoveryToolkit } from './toolkits/local';
 
+const DEFAULT_GENERAL_TOOLKIT_NAMES = [
+  'pet_profile',
+  'bash',
+  'git',
+] as const;
+
 function isExistingDirectory(path: string): boolean {
   try {
     return statSync(path).isDirectory();
@@ -207,6 +213,8 @@ export function buildLocalChatAgentInput(params: {
   userMessage: string;
   llmConfig?: AgentLlmConfig;
   toolkits?: AgentToolkit[];
+  /** Explicit Toolkit authorization for the general executor. */
+  generalUses?: readonly string[];
   threadId?: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
   dryRun?: boolean;
@@ -283,6 +291,15 @@ export function buildLocalChatAgentInput(params: {
     && isExistingDirectory(artifactDiscoveryRootCandidate)
     ? artifactDiscoveryRootCandidate
     : undefined;
+  const toolkits = [...sharedToolkits, ...(params.toolkits ?? [])];
+  const registeredToolkitNames = new Set(toolkits.map(({ name }) => name));
+  const generalUses = [
+    ...(params.generalUses
+      ?? DEFAULT_GENERAL_TOOLKIT_NAMES.filter((name) => registeredToolkitNames.has(name))),
+  ];
+  if (artifactDiscoveryRoot && !generalUses.includes('artifact_discovery')) {
+    generalUses.push('artifact_discovery');
+  }
 
   return {
     graphKey: buildGraphKey([
@@ -311,7 +328,8 @@ export function buildLocalChatAgentInput(params: {
       ],
       threadId: params.threadId,
       capabilities,
-      toolkits: [...sharedToolkits, ...(params.toolkits ?? [])],
+      toolkits,
+      generalUses,
       execution: {
         dryRun: params.dryRun,
       },

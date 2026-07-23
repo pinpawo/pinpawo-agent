@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createTimelineScrollState,
+  scrollTimelineByLines,
   scrollTimelineByPage,
   updateTimelineScrollMetrics,
 } from './timelineScroll';
@@ -66,6 +67,20 @@ test('timeline history remains visually anchored while live content grows', () =
   });
   assert.equal(state.offset, 11);
   assert.equal(54 - 10 - 13, 54 - 12 - 11);
+});
+
+test('timeline wheel scrolling moves a small line increment without resuming follow', () => {
+  let state = updateTimelineScrollMetrics(createTimelineScrollState(), {
+    contentHeight: 50,
+    viewportHeight: 10,
+  });
+
+  state = scrollTimelineByLines(state, 'up', 3);
+  assert.equal(state.offset, 3);
+  assert.equal(state.followingTail, false);
+  state = scrollTimelineByLines(state, 'down', 3);
+  assert.equal(state.offset, 0);
+  assert.equal(state.followingTail, false);
 });
 
 test('timeline continues following the live tail while content grows at offset zero', () => {

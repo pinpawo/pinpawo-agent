@@ -167,7 +167,25 @@ test('resolveTuiInputAction routes global, approval, busy, and composer keys', (
     { target: 'timeline', action: 'page_up' },
   );
   assert.deepEqual(
+    resolveRawTuiInputAction('[<65;20;10M', {}, {
+      ready: true,
+      busy: false,
+      pendingApproval: false,
+      resumePickerOpen: false,
+    }),
+    { target: 'timeline', action: 'scroll_down' },
+  );
+  assert.deepEqual(
     resolveRawTuiInputAction('', { pageUp: true }, { ready: true, busy: false, pendingApproval: false, resumePickerOpen: true }),
+    { target: 'resume', action: 'previous' },
+  );
+  assert.deepEqual(
+    resolveRawTuiInputAction('[<64;20;10M', {}, {
+      ready: true,
+      busy: false,
+      pendingApproval: false,
+      resumePickerOpen: true,
+    }),
     { target: 'resume', action: 'previous' },
   );
   assert.deepEqual(

@@ -14,9 +14,6 @@ import { z } from 'zod';
 const DEFAULT_EXPLORE_TOOLKITS = [
   'bash',
   'git',
-  'browser',
-  'github',
-  'gmail',
 ] as const;
 
 export type ExploreResult = {
@@ -27,6 +24,7 @@ export type ExploreResult = {
 
 export type ExploreCapabilityOptions = {
   structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
+  uses?: readonly string[];
 };
 
 export const exploreResultSchema = z.object({
@@ -307,8 +305,8 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       '代码 review、代码审查、PR review、pull request review、diff 审查和仓库变更评审也走这个 capability，即使请求里包含 GitHub URL 或网页链接。',
       '只做只读调查和总结，不修改文件、不执行外部真实副作用。',
     ].join(' '),
+    uses: options.uses ?? DEFAULT_EXPLORE_TOOLKITS,
     createRuntime: async (context) => {
-      const available = new Set(context.availableToolkits?.map((item) => item.name) ?? []);
       const ingestModel = context.models.observe ?? context.models.subagent ?? context.models.act;
       const artifactStore = context.artifactStore;
       const previousSummary = readLatestExploreSummary(context.messages)
@@ -372,7 +370,6 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       };
 
       return {
-        uses: DEFAULT_EXPLORE_TOOLKITS.filter((name) => available.has(name)),
         middleware,
         instructions: [
           '你是通用探索 capability。只读取、检查、搜索、观察和总结上下文。',

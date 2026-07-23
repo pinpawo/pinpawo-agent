@@ -21,6 +21,7 @@ export function createCapability() {
   return {
     name: ${JSON.stringify(capabilityName)},
     description: 'Description for ${id}',
+    uses: ['bash'],
     createRuntime: async () => ({ instructions: ['test'] }),
   };
 }

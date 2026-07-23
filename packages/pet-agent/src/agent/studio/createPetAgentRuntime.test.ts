@@ -6,6 +6,7 @@ import { isCommand } from '@langchain/langgraph';
 import { createPetAgentRuntime } from './createPetAgentRuntime';
 import type { OrchestratorGraph } from '../createAgentRuntime';
 import type { AgentActor, AgentModels } from '../../types/agent';
+import type { NamedStructuredTool } from '../../types/toolkit';
 import type { HumanReviewerRequest } from './types';
 
 function fakeModels(): AgentModels {
@@ -243,6 +244,8 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
     { messages: [new AIMessage('done')] },
   ]);
 
+  const pluginTool = { name: 'plugin_tool' } as NamedStructuredTool<'plugin_tool'>;
+  const invokeTool = { name: 'invoke_tool' } as NamedStructuredTool<'invoke_tool'>;
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
@@ -250,11 +253,12 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
     toolkits: [{
       name: 'plugin_toolkit',
       description: 'plugin toolkit',
-      operations: {
-        plugin_tool: {
+      tools: [{
+        tool: pluginTool,
+        operation: {
           title: 'Plugin Tool',
         },
-      },
+      }],
     }],
   });
 
@@ -264,18 +268,22 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
     toolkits: [{
       name: 'invoke_toolkit',
       description: 'invoke toolkit',
-      operations: {
-        invoke_tool: {
+      tools: [{
+        tool: invokeTool,
+        operation: {
           title: 'Invoke Tool',
         },
-      },
+      }],
     }],
   });
 
   assert.equal(result.reply, 'done');
   const configurable = (calls[0]?.options as {
     configurable?: {
-      toolkits?: Array<{ name?: string; operations?: Record<string, { title?: string }> }>;
+      toolkits?: Array<{
+        name?: string;
+        tools?: Array<{ tool?: { name?: string }; operation?: { title?: string } }>;
+      }>;
     };
   } | undefined)?.configurable;
   assert.ok(configurable, 'graph should receive configurable');
@@ -283,10 +291,16 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   const pluginToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'plugin_toolkit');
   const invokeToolkit = configurable.toolkits?.find((toolkit) => toolkit.name === 'invoke_toolkit');
   assert.ok(pluginToolkit, 'config toolkits should be forwarded to runtime invoke');
-  assert.equal(pluginToolkit.operations?.plugin_tool?.title, 'Plugin Tool');
+  assert.equal(pluginToolkit.tools?.[0]?.operation?.title, 'Plugin Tool');
   assert.ok(invokeToolkit, 'invoke toolkits should be forwarded to runtime invoke');
-  assert.equal(invokeToolkit.operations?.invoke_tool?.title, 'Invoke Tool');
+  assert.equal(invokeToolkit.tools?.[0]?.operation?.title, 'Invoke Tool');
   assert.ok(wikiToolkit, 'wikiRoot should install wiki_read as a toolkit');
-  assert.equal(wikiToolkit.operations?.wiki_read_cat?.title, '读取知识库文件');
-  assert.equal(wikiToolkit.operations?.wiki_read_grep?.title, '搜索知识库内容');
+  assert.equal(
+    wikiToolkit.tools?.find((item) => item.tool?.name === 'wiki_read_cat')?.operation?.title,
+    '读取知识库文件',
+  );
+  assert.equal(
+    wikiToolkit.tools?.find((item) => item.tool?.name === 'wiki_read_grep')?.operation?.title,
+    '搜索知识库内容',
+  );
 });

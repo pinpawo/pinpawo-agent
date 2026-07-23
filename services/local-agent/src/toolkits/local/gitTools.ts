@@ -7,7 +7,7 @@ import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import {
   type NamedStructuredTool,
-  type ToolOperationMetadataMapFor,
+  type ToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
@@ -995,4 +995,4 @@ export const gitOperationMetadata = {
       };
     },
   },
-} satisfies ToolOperationMetadataMapFor<typeof gitTools>;
+} satisfies Record<(typeof gitTools)[number]['name'], ToolOperationMetadata>;

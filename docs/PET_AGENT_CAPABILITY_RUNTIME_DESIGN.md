@@ -2,6 +2,9 @@
 
 > 状态：Current v4
 > 日期：2026-03-30
+> 说明：本文描述当前实现。已接受的下一代目标契约见
+> [Capability / Toolkit Contract V2](./PET_AGENT_CAPABILITY_TOOLKIT_V2_DESIGN.md)；
+> 在迁移完成前，两者必须明确区分为 implementation fact 与 design target。
 > 2026-06-19 对齐：结构化 capability result 已迁移为
 > `CapabilityArtifactRef` / `kind: "result"` artifact；subagent completed
 > announce 是返回给父 agent 的自然语言 handoff 结果，不是短 preview。

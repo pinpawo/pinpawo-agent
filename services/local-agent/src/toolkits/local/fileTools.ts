@@ -4,7 +4,7 @@ import { tool } from '@langchain/core/tools';
 import {
   ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
   ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
-  type ToolkitOperationMetadata,
+  type ToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { tryStat } from './fileSystemUtils';
@@ -206,7 +206,7 @@ export const readFileTool = tool(
         size: stat.size,
         readableAsText: false,
         reason: 'No document reader is registered for this non-text file.',
-        recommendation: 'Install or enable a document/image reader plugin or toolset that can handle this file type.',
+        recommendation: 'Install or enable a document/image reader toolkit that can handle this file type.',
       });
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : err}`;
@@ -781,7 +781,7 @@ export function createArtifactDiscoveryFileTools(root: string) {
   return [scopedListDirTool, scopedViewFileChunkTool];
 }
 
-export const fileOperationMetadata: Record<string, ToolkitOperationMetadata> = {
+export const fileOperationMetadata: Record<string, ToolOperationMetadata> = {
   read_file: {
     title: '析文档',
     summarizeInput: pathInputSummary,

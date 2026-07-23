@@ -1,7 +1,10 @@
 # Pet Agent Toolkit Composition Design
 
-> 状态：Draft v1
+> 状态：Historical draft / current implementation background
 > 日期：2026-05-14
+> 后续方向：本文保留 Toolkit 组合的历史理由。已接受的目标契约见
+> [Capability / Toolkit Contract V2](./PET_AGENT_CAPABILITY_TOOLKIT_V2_DESIGN.md)，
+> 其中 Capability 只能通过静态强依赖 `uses` 获得 Toolkit，并删除 Toolset。
 
 ## 1. 背景
 

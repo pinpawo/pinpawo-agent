@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
-  defineToolset,
+  defineToolkit,
   extractCapabilityKeywords,
   readRecord,
   readString,
@@ -13,9 +13,9 @@ import {
   resultStatusSummary,
   searchCapabilities,
   splitCapabilitySearchTerms,
-  type AgentToolset,
+  type AgentToolkit,
   type NamedStructuredTool,
-  type ToolkitOperationMetadata,
+  type ToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import {
   capabilityCreatorResultSchema,
@@ -131,7 +131,7 @@ const capabilityCreatorOperationMetadata = {
   },
 } satisfies Record<
   'scaffold_capability_plugin' | 'validate_capability_plugin' | 'check_capability_keywords',
-  ToolkitOperationMetadata
+  ToolOperationMetadata
 >;
 
 function renderManifest(params: {
@@ -161,6 +161,7 @@ function renderIndexJs(params: {
   return {
     name: ${JSON.stringify(params.id)},
     description: ${JSON.stringify(params.description)},
+    uses: ['bash'],
     availability: {
       cache: 'startup',
       check: async () => ({
@@ -169,7 +170,6 @@ function renderIndexJs(params: {
       }),
     },
     createRuntime: async () => ({
-      uses: ['bash'],
       instructions: [
         ${JSON.stringify(`你负责：${params.task}`)},
         ${JSON.stringify('先把用户目标拆成明确步骤，再决定要读取、写入或更新哪些文件。')},
@@ -261,6 +261,7 @@ function renderPackageJson(id: string) {
 type PluginCapabilityShape = {
   name?: string;
   description?: string;
+  uses?: unknown;
   availability?: {
     check?: (...args: unknown[]) => unknown;
     cache?: unknown;
@@ -293,6 +294,7 @@ function checkCapabilityKeywordQueries(params: {
   const capability = {
     name: params.name,
     description: params.description,
+    uses: [],
     createRuntime: () => ({}),
   };
   const keywords = extractCapabilityKeywords(`${params.name} ${params.description}`);
@@ -448,13 +450,18 @@ export function createValidateCapabilityPluginTool(): StructuredTool {
           });
         }
 
-        if (!capability?.name || typeof capability.createRuntime !== 'function') {
+        if (
+          !capability?.name
+          || !Array.isArray(capability.uses)
+          || capability.uses.some((name) => typeof name !== 'string' || !name.trim())
+          || typeof capability.createRuntime !== 'function'
+        ) {
           return toolResult({
             status: 'failed',
             capabilityId: null,
             rootDir: dir,
             files: [manifestPath, indexPath],
-            note: 'createCapability() 返回的对象必须包含 name 和 createRuntime。',
+            note: 'createCapability() 返回的对象必须包含 name、uses 和 createRuntime。',
           });
         }
         if (typeof capability.description !== 'string' || !capability.description.trim()) {
@@ -609,16 +616,18 @@ export function buildCapabilityCreatorTools(): StructuredTool[] {
   ];
 }
 
-export function createCapabilityCreatorToolset(): AgentToolset {
+export function createCapabilityCreatorToolkit(): AgentToolkit {
   const tools = buildCapabilityCreatorTools() as [
     NamedStructuredTool<'scaffold_capability_plugin'>,
     NamedStructuredTool<'validate_capability_plugin'>,
     NamedStructuredTool<'check_capability_keywords'>,
   ];
-  return defineToolset({
+  return defineToolkit({
     name: 'capability_creator',
-    description: '生成、验证和检查 capability 插件模板的 capability-private toolset。',
-    tools,
-    operations: capabilityCreatorOperationMetadata,
+    description: '生成、验证和检查 capability 插件模板。',
+    tools: tools.map((toolItem) => ({
+      tool: toolItem,
+      operation: capabilityCreatorOperationMetadata[toolItem.name],
+    })),
   });
 }

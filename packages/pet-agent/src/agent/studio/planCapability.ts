@@ -3,8 +3,12 @@ import { z } from 'zod';
 
 import type { AgentCapability } from '../../types/capability';
 import type { PetAgentStatus } from '../../types/studio';
-import { defineToolset } from '../../types/toolkit';
-import type { AgentToolset, NamedStructuredTool, ToolkitOperationMetadata } from '../../types/toolkit';
+import { defineToolkit } from '../../types/toolkit';
+import type {
+  AgentToolkit,
+  NamedStructuredTool,
+  ToolOperationMetadata,
+} from '../../types/toolkit';
 import type { StudioPlannerTaskInput } from './types';
 
 /**
@@ -114,9 +118,11 @@ const planCapabilityOperationMetadata = {
       }
     },
   },
-} satisfies Record<string, ToolkitOperationMetadata>;
+} satisfies Record<string, ToolOperationMetadata>;
 
-function createPlanToolset(options: Pick<CreatePlanCapabilityOptions, 'listPets' | 'enqueueTasks'>): AgentToolset {
+export function createPlanToolkit(
+  options: Pick<CreatePlanCapabilityOptions, 'listPets' | 'enqueueTasks'>,
+): AgentToolkit {
   const listPets = tool(
     async () => {
       const pets = await options.listPets?.() ?? [];
@@ -150,19 +156,28 @@ function createPlanToolset(options: Pick<CreatePlanCapabilityOptions, 'listPets'
     },
   ) as NamedStructuredTool<'enqueue_tasks'>;
 
-  return defineToolset({
+  return defineToolkit({
     name: 'studio_plan',
-    description: 'Studio planner 提交任务计划的 capability-private toolset。',
-    tools: [listPets, enqueueTasks] as const,
-    operations: planCapabilityOperationMetadata,
+    description: 'Studio planner 查询可用 pets 并提交任务计划。',
+    tools: [
+      {
+        tool: listPets,
+        operation: planCapabilityOperationMetadata.list_pets,
+      },
+      {
+        tool: enqueueTasks,
+        operation: planCapabilityOperationMetadata.enqueue_tasks,
+      },
+    ] as const,
   });
 }
 
-export function createPlanCapability(options: CreatePlanCapabilityOptions): AgentCapability {
+export function createPlanCapability(): AgentCapability {
   return {
     name: 'studio_plan',
     description: 'Planner 唯一的目标:把用户请求拆解为 worker tasks 并加入 Studio runner queue。'
       + 'tasks 入队后 planner 退出,workers 接手执行 —— planner 本身不做实际工作。',
+    uses: ['studio_plan'],
     createRuntime() {
       const instructions = [
         // 角色定位:规划者,不是执行者
@@ -195,7 +210,6 @@ export function createPlanCapability(options: CreatePlanCapabilityOptions): Agen
       ];
 
       return {
-        toolsets: [createPlanToolset(options)],
         instructions,
       };
     },

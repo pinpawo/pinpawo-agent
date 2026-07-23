@@ -58,7 +58,7 @@ export const SUBAGENT_GUARD_DECISION_EVENT = 'subagent_guard_decision';
  * Runtime-event name announcing the per-delegation tool-operation display
  * metadata (`SubagentRunInput.operations`). Root `tools` protocol events only
  * carry `tool_call_id`/`tool_name`; a consumer that joins display metadata
- * from a registry merges this map in so delegation-scoped toolset operations
+ * from a registry merges this map in so delegation-scoped toolkit operations
  * (which are not in any statically known toolkit) still resolve.
  */
 export const SUBAGENT_OPERATIONS_EVENT = 'subagent_operations';

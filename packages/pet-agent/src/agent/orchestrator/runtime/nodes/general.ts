@@ -10,7 +10,7 @@ import {
 import {
   buildSubagentExecutionInstruction,
   collectGeneralOperations,
-  resolveToolkitResources,
+  resolveToolkitExecution,
   selectCapabilityTools,
 } from '../../subagentDispatch';
 import type {
@@ -26,7 +26,6 @@ import {
 import {
   generalLaneToolkits,
   getInvokeOptions,
-  readThreadId,
   resolveActor,
 } from '../config';
 import {
@@ -48,23 +47,27 @@ export function createGeneralNode(params: {
   return async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
       toolkits,
-      execution,
       workdir,
       artifactDiscoveryRoot,
-      artifactDiscoveryToolset,
+      artifactDiscoveryToolkit,
       runtimeEnvironment,
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const toolkitList = generalLaneToolkits(toolkits ?? []);
+    const toolkitList = [
+      ...generalLaneToolkits(toolkits ?? []),
+      ...(artifactDiscoveryRoot && artifactDiscoveryToolkit
+        ? [artifactDiscoveryToolkit]
+        : []),
+    ];
     validateUniqueToolkitNames(toolkitList);
     const runNextDelegation = state.runNextDelegation;
     if (!runNextDelegation || runNextDelegation.lane !== 'general') {
       throw new Error('General node cannot run without a pending general delegation.');
     }
     const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
-    const toolkitResources = await resolveToolkitResources(toolkitList, undefined, {
+    const toolkitExecution = await resolveToolkitExecution(toolkitList, undefined, {
       models: config.models,
       actor,
       messages: state.messages,
@@ -72,8 +75,6 @@ export function createGeneralNode(params: {
         task: runNextDelegation.task,
         workdir: workdir ?? null,
       },
-      threadId: readThreadId(runnableConfig),
-      execution,
       reviewCapabilities,
       globalReviewPolicy,
       toolAuthorizations: authorizationRecorder.active,
@@ -83,13 +84,7 @@ export function createGeneralNode(params: {
       // middleware, where the writer is reachable at call time.
       emitRuntimeEvent: emitRuntimeEventToStreamWriter,
     });
-    const discoveryToolsets = artifactDiscoveryRoot && artifactDiscoveryToolset
-      ? [artifactDiscoveryToolset]
-      : [];
-    const toolList = selectCapabilityTools(
-      { toolsets: discoveryToolsets },
-      toolkitResources.tools,
-    );
+    const toolList = selectCapabilityTools(toolkitExecution.tools);
     validateUniqueToolNames(toolList);
 
     if (toolList.length === 0) {
@@ -115,8 +110,11 @@ export function createGeneralNode(params: {
 
     const canExploreArtifacts = Boolean(
       artifactDiscoveryRoot
-      && artifactDiscoveryToolset
-      && hasArtifactDiscoveryTools(toolList, artifactDiscoveryToolset.tools),
+      && artifactDiscoveryToolkit
+      && hasArtifactDiscoveryTools(
+        toolList,
+        artifactDiscoveryToolkit.tools.map((definition) => definition.tool),
+      ),
     );
     const subagentMessages = withArtifactDiscoveryContext(
       scopedMessages,
@@ -125,12 +123,12 @@ export function createGeneralNode(params: {
     const result = await createSubagent({
       model: config.models.subagent ?? config.models.act,
       tools: toolList,
-      instructions: [executionInstruction, ...toolkitResources.instructions, ...instructions],
-      operations: collectGeneralOperations(toolkitResources.toolkits, discoveryToolsets),
+      instructions: [executionInstruction, ...toolkitExecution.instructions, ...instructions],
+      operations: collectGeneralOperations(toolkitExecution.toolkits),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
-      middleware: toolkitResources.middleware,
+      middleware: toolkitExecution.middleware,
       runnableConfig,
       signal: runnableConfig?.signal,
     });

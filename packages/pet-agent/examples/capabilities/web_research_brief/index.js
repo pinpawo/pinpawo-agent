@@ -2,6 +2,7 @@ export function createCapability() {
   return {
     name: 'web_research_brief',
     description: '公开网页和 URL 调研，HTTP 内容抓取，多来源摘要，事实核查，引用链接整理；适合阅读用户提供的网页、API JSON、RSS 或静态公开页面并输出结构化简报',
+    uses: ['bash'],
     availability: {
       cache: 'startup',
       check: async () => ({
@@ -10,7 +11,6 @@ export function createCapability() {
       }),
     },
     createRuntime: async () => ({
-      uses: ['bash'],
       instructions: [
         '你是网页调研简报 capability 的执行器，只负责阅读公开 URL、API JSON、RSS 或静态网页并输出结构化简报。',
         '如果用户没有提供 URL 或明确来源，先要求用户补充来源；不要凭空编造网页内容。',

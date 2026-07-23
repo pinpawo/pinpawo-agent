@@ -124,6 +124,15 @@ function assertPluginCapability(meta: CapabilityMeta, capability: AgentCapabilit
   if (typeof capability.description !== 'string' || !capability.description.trim()) {
     throw new Error(`${source}: capability.description must be a non-empty string`);
   }
+  if (
+    !Array.isArray(capability.uses)
+    || capability.uses.some((name) => typeof name !== 'string' || !name.trim())
+  ) {
+    throw new Error(`${source}: capability.uses must be an array of non-empty Toolkit names`);
+  }
+  if (new Set(capability.uses).size !== capability.uses.length) {
+    throw new Error(`${source}: capability.uses must not contain duplicate Toolkit names`);
+  }
   if (typeof capability.createRuntime !== 'function') {
     throw new Error(`${source}: capability.createRuntime must be a function`);
   }

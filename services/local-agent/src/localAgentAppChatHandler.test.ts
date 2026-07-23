@@ -41,8 +41,9 @@ function createSetup(): AgentChannelSetup {
       toolkits: [{
         name: 'local-toolkit',
         description: 'local toolkit',
-        operations: {
-          read_file: {
+        tools: [{
+          tool: { name: 'read_file' } as never,
+          operation: {
             title: '读文件',
             summarizeInput: (input: unknown) => {
               const path = input && typeof input === 'object' && 'path' in input
@@ -51,7 +52,7 @@ function createSetup(): AgentChannelSetup {
               return typeof path === 'string' ? { target: path } : null;
             },
           },
-        },
+        }],
       }],
     } as AgentChannelSetup['input'],
   };

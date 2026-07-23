@@ -70,7 +70,7 @@ import {
   readLatestHumanRequest,
   setPinpetMeta,
 } from '../../messageLanes';
-import { resolveToolkitResources } from '../../subagentDispatch';
+import { resolveToolkitExecution } from '../../subagentDispatch';
 import {
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,
@@ -207,7 +207,6 @@ async function buildCapabilityDecisionContext(params: {
   const {
     capabilities,
     toolkits,
-    execution,
     workdir,
     runtimeEnvironment,
     reviewCapabilities,
@@ -216,16 +215,15 @@ async function buildCapabilityDecisionContext(params: {
   const actor = resolveActor(config, runnableConfig);
   const toolkitList = generalLaneToolkits(toolkits ?? []);
   validateUniqueToolkitNames(toolkitList);
-  const generalToolkitResources = await resolveToolkitResources(toolkitList, undefined, {
+  const generalResolvedToolkitExecution = await resolveToolkitExecution(toolkitList, undefined, {
     models: config.models,
     actor,
     messages: state.messages,
-    execution,
     reviewCapabilities,
     globalReviewPolicy,
     toolAuthorizations: state.sessionToolAuthorizations,
   }, { includeInstructions: false });
-  const generalTools = generalToolkitResources.tools;
+  const generalTools = generalResolvedToolkitExecution.tools;
   validateUniqueToolNames(generalTools);
 
   const capabilityList = capabilities ?? [];

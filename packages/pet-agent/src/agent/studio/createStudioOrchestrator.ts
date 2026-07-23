@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import type { StudioAgent, StudioContext } from '../../types/studio';
-import { createPlanCapability } from './planCapability';
+import { createPlanCapability, createPlanToolkit } from './planCapability';
 import type { StudioPlanPetListItem } from './planCapability';
 import type {
   PetAgentRuntime,
@@ -492,7 +492,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       throw new Error(`plannerPetId "${config.plannerPetId}" not found in registered agents`);
     }
     let capturedTaskBatch: StudioQueuedTaskBatch | null = null;
-    const planCapability = createPlanCapability({
+    const planToolkit = createPlanToolkit({
       enqueueTasks: (tasks) => {
         capturedTaskBatch = normalizeQueuedTaskBatch({
           tasks: tasks.map((task) => ({
@@ -505,6 +505,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       },
       listPets: petRegistry.listPlanningPets,
     });
+    const planCapability = createPlanCapability();
 
     const result = await planner.invoke({
       brief: params.userRequest,
@@ -513,6 +514,7 @@ export function createStudioOrchestrator(config: StudioOrchestratorConfig): Stud
       threadId: `studio:${config.studioId}:thread:${params.conversationId}:planner`,
       workdir: config.workdir,
       extraCapabilities: [planCapability],
+      toolkits: [planToolkit],
       // 强制 planCapability 成为 routeDecision 候选,绕过 keyword 搜索 ——
       // 用户请求文本(例如"做一支秋日食材短视频")无法匹到 studio_plan 描述,
       // 不强制注入就会被错误地 delegate 到 general lane,planner 永远不会

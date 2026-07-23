@@ -35,6 +35,17 @@ type StudioPlannerStubRequestInput = StudioSubmitRequestInput & {
 
 const pendingPlannerStubBatches = new Map<string, PlannerStubTaskBatch>();
 
+function findInjectedToolkitTool(
+  input: PetAgentRuntimeInvokeInput,
+  toolkitName: string,
+  toolName: string,
+) {
+  return input.toolkits
+    ?.find((toolkit) => toolkit.name === toolkitName)
+    ?.tools.find((definition) => definition.tool.name === toolName)
+    ?.tool;
+}
+
 function runtime(params: {
   petId: string;
   name: string;
@@ -65,11 +76,7 @@ function runtime(params: {
       const plannerStubBatch = pendingPlannerStubBatches.get(input.brief);
       if (plannerStubBatch && input.extraCapabilities?.some((cap) => cap.name === 'studio_plan')) {
         pendingPlannerStubBatches.delete(input.brief);
-        const planCap = input.extraCapabilities.find((cap) => cap.name === 'studio_plan');
-        const planRuntime = await planCap!.createRuntime({} as never);
-        const enqueueTool = planRuntime.toolsets
-          ?.flatMap((toolset) => toolset.tools)
-          .find((tool) => tool.name === 'enqueue_tasks');
+        const enqueueTool = findInjectedToolkitTool(input, 'studio_plan', 'enqueue_tasks');
         assert.ok(enqueueTool, 'studio_plan should expose enqueue_tasks');
         await enqueueTool!.invoke({
           tasks: plannerStubBatch.tasks.map((task) => ({
@@ -526,10 +533,7 @@ test('studio invokes planner agent when no explicit plan, captures submitted pla
         (cap: AgentCapability) => cap.name === 'studio_plan',
       );
       assert.ok(planCap, 'planner should receive studio_plan capability');
-      const runtime = await planCap!.createRuntime({} as never);
-      const listPetsTool = runtime.toolsets
-        ?.flatMap((toolset) => toolset.tools)
-        .find((t) => t.name === 'list_pets');
+      const listPetsTool = findInjectedToolkitTool(input, 'studio_plan', 'list_pets');
       assert.ok(listPetsTool, 'list_pets tool should be available');
       const petsOutput = await listPetsTool!.invoke({});
       const pets = (JSON.parse(petsOutput as string) as {
@@ -549,9 +553,7 @@ test('studio invokes planner agent when no explicit plan, captures submitted pla
           status: 'degraded',
         },
       );
-      const enqueueTool = runtime.toolsets
-        ?.flatMap((toolset) => toolset.tools)
-        .find((t) => t.name === 'enqueue_tasks');
+      const enqueueTool = findInjectedToolkitTool(input, 'studio_plan', 'enqueue_tasks');
       assert.ok(enqueueTool, 'enqueue_tasks tool should be available');
       // 模拟 LLM 调 tool 提交 tasks
       await enqueueTool!.invoke({
@@ -764,10 +766,7 @@ test('studio request planning is not serialized through the worker task queue', 
         (cap: AgentCapability) => cap.name === 'studio_plan',
       );
       assert.ok(planCap, 'planner should receive studio_plan capability');
-      const runtime = await planCap!.createRuntime({} as never);
-      const enqueueTool = runtime.toolsets
-        ?.flatMap((toolset) => toolset.tools)
-        .find((t) => t.name === 'enqueue_tasks');
+      const enqueueTool = findInjectedToolkitTool(input, 'studio_plan', 'enqueue_tasks');
       assert.ok(enqueueTool, 'enqueue_tasks tool should be available');
       await enqueueTool!.invoke({
         tasks: [
@@ -1127,10 +1126,7 @@ test('studio submitRequest accepts immediately and exposes run state through get
         (cap: AgentCapability) => cap.name === 'studio_plan',
       );
       assert.ok(planCap, 'planner should receive studio_plan capability');
-      const runtime = await planCap!.createRuntime({} as never);
-      const enqueueTool = runtime.toolsets
-        ?.flatMap((toolset) => toolset.tools)
-        .find((t) => t.name === 'enqueue_tasks');
+      const enqueueTool = findInjectedToolkitTool(input, 'studio_plan', 'enqueue_tasks');
       assert.ok(enqueueTool, 'enqueue_tasks tool should be available');
       await enqueueTool!.invoke({
         tasks: [
@@ -1493,10 +1489,7 @@ test('studio cancelRun aborts planning and prevents tasks from being queued afte
         (cap: AgentCapability) => cap.name === 'studio_plan',
       );
       assert.ok(planCap, 'planner should receive studio_plan capability');
-      const runtime = await planCap!.createRuntime({} as never);
-      const enqueueTool = runtime.toolsets
-        ?.flatMap((toolset) => toolset.tools)
-        .find((t) => t.name === 'enqueue_tasks');
+      const enqueueTool = findInjectedToolkitTool(input, 'studio_plan', 'enqueue_tasks');
       assert.ok(enqueueTool, 'enqueue_tasks tool should be available');
       await enqueueTool!.invoke({
         tasks: [

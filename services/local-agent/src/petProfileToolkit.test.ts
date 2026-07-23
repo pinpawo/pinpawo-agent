@@ -17,6 +17,6 @@ test('pet profile toolkit exposes local operation metadata', () => {
 
   assert.equal(toolkit.name, 'pet_profile');
   assert.ok(Array.isArray(toolkit.tools));
-  assert.equal(toolkit.tools[0]?.name, 'describe_pet_profile');
-  assert.equal(toolkit.operations?.describe_pet_profile?.title, '读取宠物资料');
+  assert.equal(toolkit.tools[0]?.tool.name, 'describe_pet_profile');
+  assert.equal(toolkit.tools[0]?.operation?.title, '读取宠物资料');
 });

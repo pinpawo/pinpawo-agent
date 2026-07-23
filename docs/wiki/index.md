@@ -2,7 +2,7 @@
 title: Documentation Wiki Index
 page_type: overview
 status: draft
-updated: 2026-07-20
+updated: 2026-07-24
 sources:
   - ../AGENTS.md
 related:
@@ -16,6 +16,12 @@ This is the synthesized knowledge layer for the repository documentation. Start
 with an overview, then follow concept, decision, investigation, and source links.
 Existing files outside `docs/wiki/` remain source material until they are
 explicitly migrated.
+
+## Capability and Toolkit architecture
+
+- [Capability and Toolkit Contract V2](decisions/capability-toolkit-contract-v2.md)
+  — accepted target that makes Toolkit the only tool owner and Capability a
+  Skill-style `CAPABILITY.md` contract with static required `uses`.
 
 ## System prompt design
 

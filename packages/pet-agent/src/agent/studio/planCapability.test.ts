@@ -1,23 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createPlanCapability } from './planCapability';
+import { createPlanToolkit } from './planCapability';
 import type { StudioPlannerTaskInput } from './types';
 
 test('enqueue_tasks tool captures tasks in submission order', async () => {
   let submitted: StudioPlannerTaskInput[] | null = null;
-  const cap = createPlanCapability({
+  const toolkit = createPlanToolkit({
     enqueueTasks: (tasks) => { submitted = tasks; },
   });
-  const runtime = await cap.createRuntime({} as never);
-  const planToolset = runtime.toolsets![0];
-  const enqueueTasksTool = planToolset.tools.find((t) => t.name === 'enqueue_tasks');
-  assert.equal(planToolset.name, 'studio_plan');
-  assert.equal(planToolset.operations?.list_pets?.title, '查看 pets');
-  assert.equal(planToolset.operations?.enqueue_tasks?.title, '加入任务队列');
+  const enqueueTasksDefinition = toolkit.tools.find((item) => item.tool.name === 'enqueue_tasks');
+  const enqueueTasksTool = enqueueTasksDefinition?.tool;
+  assert.equal(toolkit.name, 'studio_plan');
+  assert.equal(
+    toolkit.tools.find((item) => item.tool.name === 'list_pets')?.operation?.title,
+    '查看 pets',
+  );
+  assert.equal(enqueueTasksDefinition?.operation?.title, '加入任务队列');
   assert.ok(enqueueTasksTool, 'enqueue_tasks tool should be available');
 
-  const summary = planToolset.operations?.enqueue_tasks?.summarizeInput?.({
+  const summary = enqueueTasksDefinition?.operation?.summarizeInput?.({
     tasks: [
       { petId: 'script', brief: '写脚本' },
       { petId: 'audio', brief: '配音' },
@@ -49,11 +51,11 @@ test('enqueue_tasks tool captures tasks in submission order', async () => {
 
 test('enqueue_tasks tool rejects empty tasks array via zod min(1)', async () => {
   let submitted: StudioPlannerTaskInput[] | null = null;
-  const cap = createPlanCapability({
+  const toolkit = createPlanToolkit({
     enqueueTasks: (tasks) => { submitted = tasks; },
   });
-  const runtime = await cap.createRuntime({} as never);
-  const enqueueTasksTool = runtime.toolsets![0].tools.find((t) => t.name === 'enqueue_tasks');
+  const enqueueTasksTool = toolkit.tools.find((item) =>
+    item.tool.name === 'enqueue_tasks')?.tool;
   assert.ok(enqueueTasksTool, 'enqueue_tasks tool should be available');
 
   // schema 要求至少 1 个 task;空数组让 zod 校验失败 → langchain tool 抛错。
@@ -67,7 +69,7 @@ test('enqueue_tasks tool rejects empty tasks array via zod min(1)', async () => 
 });
 
 test('list_pets tool returns current pets from injected closure', async () => {
-  const cap = createPlanCapability({
+  const toolkit = createPlanToolkit({
     enqueueTasks: () => {},
     listPets: () => [
       {
@@ -84,12 +86,11 @@ test('list_pets tool returns current pets from injected closure', async () => {
       },
     ],
   });
-  const runtime = await cap.createRuntime({} as never);
-  const planToolset = runtime.toolsets![0];
-  const listPetsTool = planToolset.tools.find((t) => t.name === 'list_pets');
+  const listPetsDefinition = toolkit.tools.find((item) => item.tool.name === 'list_pets');
+  const listPetsTool = listPetsDefinition?.tool;
   assert.ok(listPetsTool, 'list_pets tool should be available');
 
-  const summary = planToolset.operations?.list_pets?.summarizeInput?.({});
+  const summary = listPetsDefinition?.operation?.summarizeInput?.({});
   assert.equal(summary?.summary, '查看 Studio pets');
 
   const output = await listPetsTool!.invoke({});
@@ -116,6 +117,6 @@ test('list_pets tool returns current pets from injected closure', async () => {
     },
   ]);
 
-  const outputSummary = planToolset.operations?.list_pets?.summarizeOutput?.(output);
+  const outputSummary = listPetsDefinition?.operation?.summarizeOutput?.(output);
   assert.equal(outputSummary?.summary, '看到 2 个 pet');
 });

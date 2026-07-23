@@ -40,7 +40,7 @@ export class ToolOperationTracker {
 
   /**
    * Merge a per-delegation `subagent_operations` announcement (#322 Phase 4)
-   * so delegation-scoped toolset operations resolve display metadata.
+   * so delegation-scoped toolkit operations resolve display metadata.
    */
   overlayOperations(entries: Record<string, SubagentToolOperationMetadata>) {
     this.operationRegistry = overlayOperationRegistry(this.operationRegistry, entries);

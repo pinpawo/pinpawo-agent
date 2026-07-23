@@ -5,14 +5,16 @@ import type { CapabilityRuntime } from '../../types/capability';
 import type { AgentExecution } from '../../types/agent';
 import type {
   AgentToolkit,
-  AgentToolset,
-  ToolkitContext,
 } from '../../types/toolkit';
 import type { SubagentToolOperationMetadata } from '../../types/subagent';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
 } from './review/globalReviewPolicy';
-import { createToolkitReviewMiddleware, type ToolkitReviewBinding } from './toolkitReviewMiddleware';
+import {
+  createToolkitReviewMiddleware,
+  type ToolkitReviewBinding,
+  type ToolkitReviewRuntimeContext,
+} from './toolkitReviewMiddleware';
 import { DELEGATION_BRIEFING_PROTOCOL } from './delegationBriefing';
 import {
   ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
@@ -73,7 +75,7 @@ export async function resolveInstructions(
   return runtime.instructions;
 }
 
-export function selectCapabilityTools(runtime: CapabilityRuntime, toolkitTools: StructuredTool[]) {
+export function selectCapabilityTools(toolkitTools: StructuredTool[]) {
   const selectedTools: StructuredTool[] = [];
   const selectedNames = new Set<string>();
 
@@ -89,12 +91,6 @@ export function selectCapabilityTools(runtime: CapabilityRuntime, toolkitTools: 
     addTool(toolItem);
   }
 
-  for (const toolset of runtime.toolsets ?? []) {
-    for (const toolItem of toolset.tools) {
-      addTool(toolItem);
-    }
-  }
-
   return selectedTools;
 }
 
@@ -104,9 +100,13 @@ export function collectToolkitOperations(
   const operations: Record<string, SubagentToolOperationMetadata> = {};
 
   for (const toolkit of toolkits) {
-    for (const [toolName, metadata] of Object.entries(toolkit.operations ?? {})) {
+    for (const definition of toolkit.tools) {
+      if (!definition.operation) {
+        continue;
+      }
+      const toolName = definition.tool.name;
       operations[toolName] = {
-        ...metadata,
+        ...definition.operation,
         source: {
           provider: 'toolkit',
           name: toolkit.name,
@@ -119,77 +119,22 @@ export function collectToolkitOperations(
   return operations;
 }
 
-export function collectToolsetOperations(
-  toolsets: AgentToolset[] | undefined,
-): Record<string, SubagentToolOperationMetadata> {
-  const operations: Record<string, SubagentToolOperationMetadata> = {};
-
-  for (const toolset of toolsets ?? []) {
-    for (const [toolName, metadata] of Object.entries(toolset.operations ?? {})) {
-      operations[toolName] = {
-        ...metadata,
-        source: {
-          provider: 'toolset',
-          name: toolset.name ?? 'toolset',
-          toolName,
-        },
-      };
-    }
-  }
-
-  return operations;
-}
-
 export function collectGeneralOperations(
   toolkits: AgentToolkit[],
-  toolsets?: AgentToolset[],
 ): Record<string, SubagentToolOperationMetadata> {
-  const operations = collectToolkitOperations(toolkits);
-
-  for (const [toolName, metadata] of Object.entries(collectToolsetOperations(toolsets))) {
-    if (operations[toolName]) {
-      continue;
-    }
-    operations[toolName] = metadata;
-  }
-
-  return operations;
+  return collectToolkitOperations(toolkits);
 }
 
 export function collectCapabilityOperations(
   toolkits: AgentToolkit[],
-  runtime: CapabilityRuntime,
 ): Record<string, SubagentToolOperationMetadata> {
-  const operations = collectToolkitOperations(toolkits);
-
-  for (const [toolName, metadata] of Object.entries(collectToolsetOperations(runtime.toolsets))) {
-    if (operations[toolName]) {
-      continue;
-    }
-    operations[toolName] = metadata;
-  }
-
-  return operations;
+  return collectToolkitOperations(toolkits);
 }
 
-async function resolveToolkitTools(toolkit: AgentToolkit, ctx: ToolkitContext) {
-  if (!toolkit.tools) return [];
-  return typeof toolkit.tools === 'function'
-    ? await toolkit.tools(ctx)
-    : toolkit.tools;
-}
-
-async function resolveToolkitInstructions(toolkit: AgentToolkit, ctx: ToolkitContext) {
-  if (!toolkit.instructions) return [];
-  return typeof toolkit.instructions === 'function'
-    ? await toolkit.instructions(ctx)
-    : toolkit.instructions;
-}
-
-export async function resolveToolkitResources(
+export async function resolveToolkitExecution(
   toolkits: AgentToolkit[],
   names: string[] | undefined,
-  ctx: ToolkitContext,
+  ctx: ToolkitReviewRuntimeContext,
   options: { includeInstructions?: boolean } = {},
 ) {
   const selectedToolkits = names === undefined
@@ -206,24 +151,23 @@ export async function resolveToolkitResources(
   const instructions: string[] = [];
   const reviewBindings: ToolkitReviewBinding[] = [];
   for (const toolkit of selectedToolkits) {
-    const toolkitTools = await resolveToolkitTools(toolkit, ctx);
+    const toolkitTools = toolkit.tools.map((definition) => definition.tool);
     tools.push(...toolkitTools);
     if (ctx.globalReviewPolicy?.mode !== GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS) {
-      for (const toolItem of toolkitTools) {
-        const reviewPolicy = toolkit.policy?.toolReview?.[toolItem.name];
-        if (!reviewPolicy) {
+      for (const definition of toolkit.tools) {
+        if (!definition.review) {
           continue;
         }
         reviewBindings.push({
           toolkit,
-          toolName: toolItem.name,
-          reviewPolicy,
-          operation: toolkit.operations?.[toolItem.name],
+          toolName: definition.tool.name,
+          reviewPolicy: definition.review,
+          operation: definition.operation,
         });
       }
     }
-    if (options.includeInstructions !== false) {
-      instructions.push(...await resolveToolkitInstructions(toolkit, ctx));
+    if (options.includeInstructions !== false && toolkit.instructions) {
+      instructions.push(toolkit.instructions);
     }
   }
   const reviewMiddleware = createToolkitReviewMiddleware(reviewBindings, ctx, selectedToolkits);

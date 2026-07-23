@@ -1,4 +1,9 @@
-import type { AgentCapability, AgentToolkit, CapabilityAvailability } from '@pinpawo/pet-agent';
+import type {
+  AgentCapability,
+  AgentToolkit,
+  CapabilityAvailability,
+  ToolkitAvailability,
+} from '@pinpawo/pet-agent';
 
 export type CapabilityAvailabilityRecord = {
   capability: AgentCapability;
@@ -7,7 +12,7 @@ export type CapabilityAvailabilityRecord = {
 
 export type ToolkitAvailabilityRecord = {
   toolkit: AgentToolkit;
-  availability: CapabilityAvailability;
+  availability: ToolkitAvailability;
 };
 
 const defaultAvailable: CapabilityAvailability = {
@@ -15,10 +20,21 @@ const defaultAvailable: CapabilityAvailability = {
   reason: 'no availability check',
 };
 
+const defaultToolkitAvailable: ToolkitAvailability = {
+  available: true,
+};
+
 const cachedAvailability = new Map<string, CapabilityAvailabilityRecord>();
 const cachedToolkitAvailability = new Map<string, ToolkitAvailabilityRecord>();
 
 function unavailableFromError(error: unknown): CapabilityAvailability {
+  return {
+    available: false,
+    reason: error instanceof Error ? error.message : 'availability check failed',
+  };
+}
+
+function unavailableToolkitFromError(error: unknown): ToolkitAvailability {
   return {
     available: false,
     reason: error instanceof Error ? error.message : 'availability check failed',
@@ -66,20 +82,17 @@ export async function resolveToolkitAvailability(
   toolkit: AgentToolkit,
   options: { force?: boolean } = {},
 ): Promise<ToolkitAvailabilityRecord> {
-  const cacheMode = toolkit.availability?.cache ?? 'startup';
-  if (!options.force && cacheMode !== 'none') {
+  if (!options.force) {
     const cached = cachedToolkitAvailability.get(toolkit.name);
     if (cached) return cached;
   }
 
   const availability = toolkit.availability
-    ? await Promise.resolve(toolkit.availability.check()).catch(unavailableFromError)
-    : defaultAvailable;
+    ? await Promise.resolve(toolkit.availability()).catch(unavailableToolkitFromError)
+    : defaultToolkitAvailable;
 
   const record = { toolkit, availability };
-  if (cacheMode !== 'none') {
-    cachedToolkitAvailability.set(toolkit.name, record);
-  }
+  cachedToolkitAvailability.set(toolkit.name, record);
   return record;
 }
 

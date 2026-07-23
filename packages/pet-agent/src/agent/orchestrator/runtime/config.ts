@@ -1,7 +1,7 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { AgentActor, AgentExecution } from '../../../types/agent';
 import type { AgentCapability } from '../../../types/capability';
-import type { AgentToolkit, AgentToolset, ToolkitReviewCapabilities } from '../../../types/toolkit';
+import type { AgentToolkit, ToolkitReviewCapabilities } from '../../../types/toolkit';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   type GlobalReviewPolicy,
@@ -12,11 +12,11 @@ import {
 import type { OrchestratorConfig, OrchestratorInvokeOptions } from '../types';
 
 export function generalLaneToolkits(toolkits: AgentToolkit[]) {
-  return toolkits.filter((toolkitItem) => toolkitItem.exposure?.general !== false);
+  return toolkits;
 }
 
 export function capabilityLaneToolkits(toolkits: AgentToolkit[]) {
-  return toolkits.filter((toolkitItem) => toolkitItem.exposure?.capability !== false);
+  return toolkits;
 }
 
 export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOptions {
@@ -30,7 +30,7 @@ export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorI
     artifactDiscoveryRoot: typeof cfg.artifactDiscoveryRoot === 'string'
       ? cfg.artifactDiscoveryRoot
       : undefined,
-    artifactDiscoveryToolset: cfg.artifactDiscoveryToolset as AgentToolset | undefined,
+    artifactDiscoveryToolkit: cfg.artifactDiscoveryToolkit as AgentToolkit | undefined,
     runtimeEnvironment: cfg.runtimeEnvironment as string | undefined,
     reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
     globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),

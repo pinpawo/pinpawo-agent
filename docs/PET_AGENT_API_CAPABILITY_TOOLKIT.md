@@ -1,5 +1,8 @@
 # 能力与工具契约 API
 
+> 本文描述当前已实现 API。已接受但尚未完成迁移的 V2 目标见
+> [Capability / Toolkit Contract V2](./PET_AGENT_CAPABILITY_TOOLKIT_V2_DESIGN.md)。
+
 ## 1. 能力定义
 
 ```ts

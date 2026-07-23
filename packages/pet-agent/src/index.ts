@@ -66,33 +66,24 @@ export {
 } from './guards';
 
 export type {
-  AgentToolset,
   AgentToolkit,
   NamedStructuredTool,
+  ToolAuthorizationMatcherContext,
+  ToolDefinition,
   ToolOperationMetadata,
-  ToolOperationMetadataMap,
-  ToolOperationMetadataMapFor,
   ToolOperationSummary,
-  ToolkitAutoReviewPolicy,
-  ToolkitContext,
-  ToolkitOperationMetadata,
-  ToolkitOperationSummary,
-  ToolkitToolName,
-  ToolkitPolicy,
-  ToolkitResource,
+  ToolReviewBlock,
+  ToolReviewContext,
+  ToolReviewPolicy,
+  ToolReviewResult,
+  ToolkitAvailability,
+  ToolkitAvailabilityCheck,
   ToolkitReviewCapabilities,
-  ToolkitToolAuthorizationMatcherContext,
-  ToolkitToolReviewBlock,
-  ToolkitToolReviewContext,
-  ToolkitToolReviewPolicy,
-  ToolkitToolReviewPolicyMapFor,
-  ToolkitToolReviewResult,
+  ToolkitReviewGuidance,
 } from './types/toolkit';
 export {
   defineToolkit,
-  defineToolset,
-  hasToolOperationMetadata,
-  TOOLKIT_AUTO_REVIEW_FIELD_MAX_CHARS,
+  TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS,
   validateToolkitDefinition,
 } from './types/toolkit';
 

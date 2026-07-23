@@ -11,10 +11,14 @@ import {
   type CapabilityArtifactStore,
   type OrchestratorConfig,
 } from '@pinpawo/pet-agent';
-import { createCapabilityCreatorCapability } from './capabilities/capabilityCreator';
+import {
+  createCapabilityCreatorCapability,
+  createCapabilityCreatorToolkit,
+} from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
 import {
   createDailyPostCapability,
+  createDailyPostToolkit,
   type DailyImagePlan,
   type DailyPostPayload,
   type TrendPromptItem,
@@ -35,7 +39,7 @@ import {
 } from './chatInterface';
 import { inferLlmStructuredOutputMethod } from './llmModelPresets';
 import { resolveCapabilityArtifactThreadRoot } from './capabilityArtifactStore';
-import { createArtifactDiscoveryToolset } from './toolkits/local';
+import { createArtifactDiscoveryToolkit } from './toolkits/local';
 
 function isExistingDirectory(path: string): boolean {
   try {
@@ -225,8 +229,9 @@ export function buildLocalChatAgentInput(params: {
   const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const actor = buildActor(params.context);
+  const models = buildLocalAgentModels(llmConfig);
   const trendItems = toTrendPromptItems(params.context.context.trendItems);
-  const sharedToolkits = [
+  const sharedToolkits: AgentToolkit[] = [
     createPetProfileToolkit({
       actor,
       profileText: params.context.context.petMemoryText,
@@ -242,7 +247,11 @@ export function buildLocalChatAgentInput(params: {
   }
 
   if (isCapabilityEnabled('daily_post')) {
-    appendCapability(capabilities, createDailyPostCapability({
+    appendCapability(capabilities, createDailyPostCapability());
+    sharedToolkits.push(createDailyPostToolkit({
+      actor,
+      models,
+      dryRun: params.dryRun,
       recentDaily: toRecentDaily(params.context.context.recentDaily),
       trendItems,
       savePost: saveDailyPost,
@@ -256,6 +265,7 @@ export function buildLocalChatAgentInput(params: {
 
   if (isCapabilityEnabled('capability_creator')) {
     appendCapability(capabilities, createCapabilityCreatorCapability());
+    sharedToolkits.push(createCapabilityCreatorToolkit());
   }
 
   for (const capability of params.extraCapabilities ?? []) {
@@ -286,7 +296,7 @@ export function buildLocalChatAgentInput(params: {
       params.checkpoint ? 'checkpoint' : 'memory',
     ]),
     graphConfig: {
-      models: buildLocalAgentModels(llmConfig),
+      models,
       actor,
       checkpoint: params.checkpoint,
       decisionStructuredOutput,
@@ -307,8 +317,8 @@ export function buildLocalChatAgentInput(params: {
       },
       workdir: params.workdir,
       artifactDiscoveryRoot,
-      artifactDiscoveryToolset: artifactDiscoveryRoot
-        ? createArtifactDiscoveryToolset(artifactDiscoveryRoot)
+      artifactDiscoveryToolkit: artifactDiscoveryRoot
+        ? createArtifactDiscoveryToolkit(artifactDiscoveryRoot)
         : undefined,
       runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir, {
         sessionStartedAt: params.sessionStartedAt,

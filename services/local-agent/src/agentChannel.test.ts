@@ -50,7 +50,7 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
 
   assert.deepEqual(
     setup.input.toolkits?.map((item) => item.name),
-    ['pet_profile', 'general-toolkit'],
+    ['pet_profile', 'daily_post', 'capability_creator', 'general-toolkit'],
   );
   assert.equal('capabilityToolkits' in setup.input, false);
 });
@@ -59,6 +59,7 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
   const extraExplore: AgentCapability = {
     name: 'explore',
     description: 'extra explore capability',
+    uses: [],
     createRuntime: () => ({}),
   };
 
@@ -251,7 +252,7 @@ test('buildLocalChatAgentInput exposes only an existing current-thread artifact 
 
   assert.equal(setup.input.artifactDiscoveryRoot, threadRoot);
   assert.deepEqual(
-    setup.input.artifactDiscoveryToolset?.tools.map((toolItem) => toolItem.name),
+    setup.input.artifactDiscoveryToolkit?.tools.map((definition) => definition.tool.name),
     ['artifact_list_dir', 'artifact_view_file_chunk'],
   );
 });
@@ -267,7 +268,7 @@ test('buildLocalChatAgentInput omits artifact discovery for a new empty thread',
   });
 
   assert.equal(setup.input.artifactDiscoveryRoot, undefined);
-  assert.equal(setup.input.artifactDiscoveryToolset, undefined);
+  assert.equal(setup.input.artifactDiscoveryToolkit, undefined);
 });
 
 test('artifact discovery tools reject paths outside the current thread root', async (t) => {
@@ -280,8 +281,9 @@ test('artifact discovery tools reject paths outside the current thread root', as
     threadId: 'thread-1',
     capabilityArtifactRoot: artifactRoot,
   });
-  const listDir = setup.input.artifactDiscoveryToolset?.tools
-    .find((toolItem) => toolItem.name === 'artifact_list_dir');
+  const listDir = setup.input.artifactDiscoveryToolkit?.tools
+    .find((definition) => definition.tool.name === 'artifact_list_dir')
+    ?.tool;
 
   assert.ok(listDir);
   assert.match(

@@ -5,7 +5,8 @@ import {
   defineToolkit,
   ReviewPolicies,
   type AgentToolkit,
-  type AgentToolset,
+  type ToolOperationMetadata,
+  type ToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import { createOperationRegistryFromToolkits } from '../../events/operationRegistry';
 import type { LocalAgentPlugin } from '../../pluginLoader';
@@ -58,16 +59,27 @@ const coreLocalTools: StructuredTool[] = [
   runShellTool,
 ];
 
-export function createArtifactDiscoveryToolset(root: string): AgentToolset {
-  return {
+function createToolDefinitions(
+  tools: readonly StructuredTool[],
+  operations: Record<string, ToolOperationMetadata> = {},
+  reviews: Record<string, ToolReviewPolicy> = {},
+) {
+  return tools.map((toolItem) => ({
+    tool: toolItem,
+    operation: operations[toolItem.name],
+    review: reviews[toolItem.name],
+  }));
+}
+
+export function createArtifactDiscoveryToolkit(root: string): AgentToolkit {
+  return defineToolkit({
     name: 'artifact_discovery',
     description: '只读列出并分块读取当前 thread 的 capability artifacts。',
-    tools: createArtifactDiscoveryFileTools(root),
-    operations: {
+    tools: createToolDefinitions(createArtifactDiscoveryFileTools(root), {
       [ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME]: fileOperationMetadata.list_dir,
       [ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME]: fileOperationMetadata.view_file_chunk,
-    },
-  };
+    }),
+  });
 }
 
 const bashToolkitInstructions = [
@@ -100,50 +112,44 @@ const gitToolkitInstructions = [
 ];
 
 export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): AgentToolkit {
-  return {
+  const reviews = {
+    write_file: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+    apply_patch: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+    move_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+    copy_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+    mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+    http_fetch: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+    download_file: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+    run_shell: ReviewPolicies.commandExecution({ authorization: 'exact_args' }),
+  };
+  return defineToolkit({
     name: 'bash',
     description: '本地文件读写、目录操作、代码搜索、补丁应用、HTTP 下载，以及受控 shell 命令执行。',
-    tools,
-    instructions: bashToolkitInstructions,
-    operations: bashToolkitOperations,
-    policy: {
-      autoReview: {
-        allow: 'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands confined to the current workspace as eligible for automatic authorization when their effects are clear and limited, such as build, test, typecheck, lint, format, inspection, other reversible development operations, and deletion of explicitly named non-sensitive files inside the current workspace.',
-        ask: 'Ask when a command has broad or unclear effects, deletes recursively, deletes outside the current workspace, deletes user data or sensitive files, elevates privileges, changes permissions or system services, installs or executes untrusted software, exposes credentials or data, publishes or deploys artifacts, or rewrites shared version-control history.',
-      },
-      toolReview: {
-        write_file: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-        apply_patch: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-        move_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-        copy_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-        mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-        http_fetch: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-        download_file: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-        run_shell: ReviewPolicies.commandExecution({ authorization: 'exact_args' }),
-      },
+    tools: createToolDefinitions(tools, bashToolkitOperations, reviews),
+    instructions: bashToolkitInstructions.join('\n'),
+    reviewGuidance: {
+      allow: 'A shell invocation is an execution mechanism, so its risk comes from the concrete command and scope. Treat commands confined to the current workspace as eligible for automatic authorization when their effects are clear and limited, such as build, test, typecheck, lint, format, inspection, other reversible development operations, and deletion of explicitly named non-sensitive files inside the current workspace.',
+      ask: 'Ask when a command has broad or unclear effects, deletes recursively, deletes outside the current workspace, deletes user data or sensitive files, elevates privileges, changes permissions or system services, installs or executes untrusted software, exposes credentials or data, publishes or deploys artifacts, or rewrites shared version-control history.',
     },
-  };
+  });
 }
 
 export function createGitToolkit(): AgentToolkit {
+  const reviews = {
+    git_add: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+    git_commit: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
+    git_push: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+    gh_pr_create: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+    gh_issue_create: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
+  };
   return defineToolkit({
     name: 'git',
     description: '本地 git 仓库查看、暂存、提交和普通推送，以及 GitHub PR/issue 创建与查看工具。',
-    tools: gitTools,
-    instructions: gitToolkitInstructions,
-    operations: gitOperationMetadata,
-    policy: {
-      autoReview: {
-        allow: 'Treat routine, scoped version-control collaboration as eligible for automatic authorization, including staging files, creating a local commit, a normal non-force push, and creating a pull request or issue.',
-        ask: 'Ask for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting or closing remote resources, and publishing packages or releases.',
-      },
-      toolReview: {
-        git_add: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-        git_commit: ReviewPolicies.localMutation({ authorization: 'exact_args' }),
-        git_push: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-        gh_pr_create: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-        gh_issue_create: ReviewPolicies.externalAccess({ authorization: 'exact_args' }),
-      },
+    tools: createToolDefinitions(gitTools, gitOperationMetadata, reviews),
+    instructions: gitToolkitInstructions.join('\n'),
+    reviewGuidance: {
+      allow: 'Treat routine, scoped version-control collaboration as eligible for automatic authorization, including staging files, creating a local commit, a normal non-force push, and creating a pull request or issue.',
+      ask: 'Ask for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting or closing remote resources, and publishing packages or releases.',
     },
   });
 }

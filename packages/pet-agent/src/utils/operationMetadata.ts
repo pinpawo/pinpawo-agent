@@ -6,7 +6,7 @@
  *  - This file owns schema-safe readers and common capability-host summaries.
  *  - Tool kind values are still defined by each toolkit/capability provider.
  */
-import type { ToolkitOperationSummary } from '../types/toolkit';
+import type { ToolOperationSummary } from '../types/toolkit';
 
 export function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -59,7 +59,7 @@ export function readToolArtifactRecord(output: unknown): Record<string, unknown>
 export function resultStatusSummary(
   output: unknown,
   labels: Record<string, string>,
-): ToolkitOperationSummary | null {
+): ToolOperationSummary | null {
   const record = readToolArtifactRecord(output);
   if (!record) return null;
   const status = readString(record, 'status');

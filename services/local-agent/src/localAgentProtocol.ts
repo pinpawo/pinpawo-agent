@@ -652,8 +652,7 @@ function isOperationPhase(value: string | null): value is LocalAgentOperationPha
     || value === 'interrupted';
 }
 
-function normalizeOperationSourceProvider(value: string | null): 'toolkit' | 'toolset' | 'runtime' | null {
-  if (value === 'toolkit' || value === 'toolset' || value === 'runtime') return value;
-  if (value === 'capability') return 'toolset';
+function normalizeOperationSourceProvider(value: string | null): 'toolkit' | 'runtime' | null {
+  if (value === 'toolkit' || value === 'runtime') return value;
   return null;
 }

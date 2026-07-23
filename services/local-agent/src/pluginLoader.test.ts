@@ -13,10 +13,10 @@ export const tools = [{ name: 'legacy_tool' }];
 export const toolkits = [{
   name: 'sample_toolkit',
   description: 'Sample toolkit',
-  tools: [{ name: 'sample_tool' }],
-  operations: {
-    sample_tool: { title: 'Sample Tool' },
-  },
+  tools: [{
+    tool: { name: 'sample_tool' },
+    operation: { title: 'Sample Tool' },
+  }],
 }];
 export default { name: 'valid-plugin' };
 `, 'utf8');
@@ -25,7 +25,7 @@ export default { name: 'valid-plugin' };
 
   assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['valid-plugin']);
   assert.deepEqual(result.toolkits.map((toolkit) => toolkit.name), ['sample_toolkit']);
-  assert.equal(result.toolkits[0]?.operations?.sample_tool?.title, 'Sample Tool');
+  assert.equal(result.toolkits[0]?.tools[0]?.operation?.title, 'Sample Tool');
 });
 
 test('loadPluginsFromDir skips tools and toolkits from invalid plugin modules', async () => {
@@ -48,12 +48,10 @@ test('loadPluginsFromDir fails startup for an oversized toolkit auto-review poli
 export const toolkits = [{
   name: 'invalid_policy_toolkit',
   description: 'Invalid policy toolkit',
-  tools: [],
-  policy: {
-    autoReview: {
-      allow: 'x'.repeat(2001),
-      ask: 'Ask for risky operations.',
-    },
+  tools: [{ tool: { name: 'sample_tool' } }],
+  reviewGuidance: {
+    allow: 'x'.repeat(2001),
+    ask: 'Ask for risky operations.',
   },
 }];
 export default { name: 'invalid-policy-plugin' };
@@ -61,6 +59,6 @@ export default { name: 'invalid-policy-plugin' };
 
   await assert.rejects(
     () => loadPluginsFromDir(root),
-    /Toolkit\/toolset "invalid_policy_toolkit" auto-review allow exceeds 2000 characters/,
+    /Toolkit "invalid_policy_toolkit" review guidance allow exceeds 2000 characters/,
   );
 });

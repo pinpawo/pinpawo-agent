@@ -224,6 +224,7 @@ function capabilities(input: CapabilityDecisionBasicsInput): AgentCapability[] {
   return input.availableCapabilities.map((item) => ({
     name: item.name,
     description: `${item.description} Keywords: ${item.keywords.join('|')}`,
+    uses: [],
     createRuntime: () => ({ instructions: [], tools: [] }),
   }));
 }

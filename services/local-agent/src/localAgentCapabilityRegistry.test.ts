@@ -11,6 +11,7 @@ function capability(name: string): AgentCapability {
   return {
     name,
     description: `${name} capability`,
+    uses: [],
     createRuntime: () => ({}),
   };
 }
@@ -45,11 +46,12 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
       {
         name: 'available-toolkit',
         description: 'available toolkit',
-        tools: localTools,
+        tools: localTools.map((tool) => ({ tool })),
       },
       {
         name: 'unavailable-toolkit',
         description: 'unavailable toolkit',
+        tools: [{ tool: localTool }],
       },
     ],
     createLocalCapabilities: () => [
@@ -101,8 +103,9 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
 });
 
 test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async () => {
+  const localTool = { name: 'local-tool' } as StructuredTool;
   const registry = new LocalAgentCapabilityRegistry({
-    loadLocalTools: async () => [],
+    loadLocalTools: async () => [localTool],
     loadUserCapabilities: async () => [],
     createLocalToolkits: (localTools) => [
       createBashToolkit(localTools),

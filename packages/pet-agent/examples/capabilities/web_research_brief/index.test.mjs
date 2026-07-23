@@ -11,7 +11,7 @@ const availability = await capability.availability.check();
 assert.equal(availability.available, true);
 
 const runtime = await capability.createRuntime({});
-assert.deepEqual(runtime.uses, ['bash']);
+assert.deepEqual(capability.uses, ['bash']);
 assert.ok(Array.isArray(runtime.instructions));
 
 const instructions = runtime.instructions.join('\n');

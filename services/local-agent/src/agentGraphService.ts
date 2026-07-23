@@ -31,8 +31,8 @@ function buildConfigurable(setup: AgentChannelSetup) {
   if (setup.input.artifactDiscoveryRoot) {
     configurable.artifactDiscoveryRoot = setup.input.artifactDiscoveryRoot;
   }
-  if (setup.input.artifactDiscoveryToolset) {
-    configurable.artifactDiscoveryToolset = setup.input.artifactDiscoveryToolset;
+  if (setup.input.artifactDiscoveryToolkit) {
+    configurable.artifactDiscoveryToolkit = setup.input.artifactDiscoveryToolkit;
   }
   if (setup.input.runtimeEnvironment) configurable.runtimeEnvironment = setup.input.runtimeEnvironment;
   if (setup.input.globalReviewPolicy) configurable.globalReviewPolicy = setup.input.globalReviewPolicy;

@@ -15,7 +15,7 @@ test('capability_creator keeps artifact persistence out of model tool calls', as
   const runtime = await capability.createRuntime({} as never);
 
   // Still needs bash, but no longer relies on the model calling capability_artifact_write (issue #137).
-  assert.deepEqual(runtime.uses, ['bash']);
+  assert.deepEqual(capability.uses, ['bash', 'capability_creator']);
   assert.ok(Array.isArray(runtime.instructions));
   assert.ok(!runtime.instructions.some((line) => line.includes('capability_artifact_write')));
   assert.equal(runtime.middleware?.afterRun, undefined);

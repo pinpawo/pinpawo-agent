@@ -27,22 +27,26 @@ const actor = {
 const generalToolkit = defineToolkit({
   name: 'multi_task_eval_general',
   description: 'General capability marker for deterministic multi-task flow evaluation.',
-  tools: [tool(async () => 'ok', {
-    name: 'eval_noop',
-    description: 'No-op tool used only to make the general capability available.',
-    schema: z.object({}),
-  })],
+  tools: [{
+    tool: tool(async () => 'ok', {
+      name: 'eval_noop',
+      description: 'No-op tool used only to make the general capability available.',
+      schema: z.object({}),
+    }),
+  }],
 });
 
 const capabilities: AgentCapability[] = [
   {
     name: 'explore',
     description: '代码库调查、结构分析、依赖和风险探索。Keywords: 代码库|auth|调查|结构',
+    uses: ['multi_task_eval_general'],
     createRuntime: () => ({ instructions: ['Investigate the requested codebase task.'] }),
   },
   {
     name: 'code_modify',
     description: '代码修改与重构。Keywords: 代码修改|auth|重构|token validation',
+    uses: ['multi_task_eval_general'],
     createRuntime: () => ({ instructions: ['Implement the requested code changes.'] }),
   },
 ];

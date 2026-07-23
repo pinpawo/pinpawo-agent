@@ -380,6 +380,7 @@ Start with these documents:
 - [Capability Artifact Store Design](docs/PET_AGENT_CAPABILITY_ARTIFACT_STORE_DESIGN.md)
 - [Capability Artifact Pipeline (API 风格)](docs/capability-artifact-pipeline/index.md)
 - [Capability Runtime Design](docs/PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md)
+- [Capability / Toolkit Contract V2](docs/PET_AGENT_CAPABILITY_TOOLKIT_V2_DESIGN.md)
 - [Toolkit Composition Design](docs/PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)
 - [Context Governance Refactor](docs/CONTEXT_GOVERNANCE_REFACTOR.md)
 - [Explore Knowledge Ingest Design](docs/EXPLORE_KNOWLEDGE_INGEST_DESIGN.md)

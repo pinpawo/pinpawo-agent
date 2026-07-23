@@ -13,7 +13,7 @@ import {
   buildSubagentExecutionInstruction,
   collectCapabilityOperations,
   resolveInstructions,
-  resolveToolkitResources,
+  resolveToolkitExecution,
   selectCapabilityTools,
 } from '../../subagentDispatch';
 import type {
@@ -57,12 +57,17 @@ export function createCapabilityNode(params: {
       workdir,
       runtimeEnvironment,
       artifactDiscoveryRoot,
-      artifactDiscoveryToolset,
+      artifactDiscoveryToolkit,
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
     const actor = resolveActor(config, runnableConfig);
-    const toolkitList = capabilityLaneToolkits(toolkits ?? []);
+    const toolkitList = [
+      ...capabilityLaneToolkits(toolkits ?? []),
+      ...(artifactDiscoveryRoot && artifactDiscoveryToolkit
+        ? [artifactDiscoveryToolkit]
+        : []),
+    ];
     validateUniqueToolkitNames(toolkitList);
     const runNextDelegation = state.runNextDelegation;
     if (!runNextDelegation) {
@@ -105,25 +110,17 @@ export function createCapabilityNode(params: {
         task: runNextDelegation.task,
         workdir: workdir ?? null,
       },
-      threadId,
-      capabilityId: capability.name,
-      resultSchema: capability.resultSchema,
-      delegationId: runNextDelegation.id,
-      runId: transcriptRunId,
-      execution,
       reviewCapabilities,
       globalReviewPolicy,
       toolAuthorizations: authorizationRecorder.active,
       recordToolAuthorization: authorizationRecorder.recordToolAuthorization,
-      recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
-        artifactRefs.push(ref);
-      },
       // Runtime events (authorization notices) surface as `custom` protocol
       // events on the root stream (#322); review emits from afterModel
       // middleware, where the writer is reachable at call time.
       emitRuntimeEvent: emitRuntimeEventToStreamWriter,
     };
-    const usedToolkitResources = await resolveToolkitResources(toolkitList, runtime.uses ?? [], toolkitContext);
+    const toolkitNames = [...capability.uses];
+    const usedResolvedToolkitExecution = await resolveToolkitExecution(toolkitList, toolkitNames, toolkitContext);
     const runtimeInstructions = await resolveInstructions(runtime, {
       models: config.models,
       actor,
@@ -131,17 +128,14 @@ export function createCapabilityNode(params: {
       availableToolkits,
     }, execution);
     const middleware = runtime.middleware;
-    const effectiveRuntime = artifactDiscoveryRoot && artifactDiscoveryToolset
-      ? {
-          ...runtime,
-          toolsets: [...(runtime.toolsets ?? []), artifactDiscoveryToolset],
-        }
-      : runtime;
-    const selectedTools = selectCapabilityTools(effectiveRuntime, usedToolkitResources.tools);
+    const selectedTools = selectCapabilityTools(usedResolvedToolkitExecution.tools);
     const canExploreArtifacts = Boolean(
       artifactDiscoveryRoot
-      && artifactDiscoveryToolset
-      && hasArtifactDiscoveryTools(selectedTools, artifactDiscoveryToolset.tools),
+      && artifactDiscoveryToolkit
+      && hasArtifactDiscoveryTools(
+        selectedTools,
+        artifactDiscoveryToolkit.tools.map((definition) => definition.tool),
+      ),
     );
     const executionInstruction = buildSubagentExecutionInstruction({
       lane,
@@ -155,12 +149,12 @@ export function createCapabilityNode(params: {
     let subagentInput: SubagentRunInput = {
       model: config.models.subagent ?? config.models.act,
       tools: selectedTools,
-      instructions: [executionInstruction, ...usedToolkitResources.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
-      operations: collectCapabilityOperations(usedToolkitResources.toolkits, effectiveRuntime),
+      instructions: [executionInstruction, ...usedResolvedToolkitExecution.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
+      operations: collectCapabilityOperations(usedResolvedToolkitExecution.toolkits),
       messages: subagentMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
-      middleware: usedToolkitResources.middleware,
+      middleware: usedResolvedToolkitExecution.middleware,
       runnableConfig,
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,

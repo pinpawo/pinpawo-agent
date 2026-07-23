@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { ToolMessage } from '@langchain/core/messages';
+import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { createBashToolkit, createGitToolkit, loadCoreLocalTools } from './toolkits/local';
 import {
   gitAddTool,
@@ -19,6 +20,10 @@ import {
   ghReadContentTool,
   gitStatusTool,
 } from './toolkits/local/gitTools';
+
+function definition(toolkit: AgentToolkit, toolName: string) {
+  return toolkit.tools.find((item) => item.tool.name === toolName);
+}
 
 function createRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'pinpawo-git-tools-'));
@@ -346,11 +351,10 @@ test('createBashToolkit does not own git tools or operation metadata', () => {
   const toolkit = createBashToolkit();
   assert.equal(Array.isArray(toolkit.tools), true);
   const tools = Array.isArray(toolkit.tools) ? toolkit.tools : [];
-  assert.equal(tools.some((item) => item.name === 'git_status'), false);
-  assert.equal(tools.some((item) => item.name === 'git_commit'), false);
-  assert.equal(toolkit.operations?.git_status, undefined);
-  assert.equal(toolkit.operations?.git_commit, undefined);
-  assert.equal(toolkit.policy?.toolReview?.git_commit, undefined);
+  assert.equal(tools.some((item) => item.tool.name === 'git_status'), false);
+  assert.equal(tools.some((item) => item.tool.name === 'git_commit'), false);
+  assert.equal(definition(toolkit, 'git_status'), undefined);
+  assert.equal(definition(toolkit, 'git_commit'), undefined);
 });
 
 test('loadCoreLocalTools keeps git tools available for toolkit composition', async () => {
@@ -369,7 +373,7 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
   assert.equal(Array.isArray(toolkit.tools), true);
   const tools = Array.isArray(toolkit.tools) ? toolkit.tools : [];
   assert.deepEqual(
-    tools.map((item) => item.name),
+    tools.map((item) => item.tool.name),
     [
       'git_status',
       'git_diff',
@@ -388,28 +392,25 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
       'gh_read_content',
     ],
   );
-  assert.equal(toolkit.operations?.git_diff?.title, '查看 git diff');
-  assert.equal(toolkit.operations?.git_commit?.title, '创建 git commit');
-  assert.equal(toolkit.operations?.git_push?.title, '推送 git 分支');
-  assert.equal(toolkit.operations?.gh_pr_create?.title, '创建 GitHub PR');
-  assert.equal(toolkit.operations?.gh_pr_view?.title, '查看 GitHub PR');
-  assert.equal(toolkit.operations?.gh_pr_diff?.title, '查看 GitHub PR diff');
-  assert.equal(toolkit.operations?.gh_issue_comments?.title, '查看 GitHub issue 评论');
-  assert.equal(toolkit.operations?.gh_read_content?.title, '读取 GitHub 临时内容');
-  assert.equal(Boolean(toolkit.policy?.toolReview?.git_add), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.git_commit), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.git_push), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.gh_pr_create), true);
-  assert.equal(Boolean(toolkit.policy?.toolReview?.gh_issue_create), true);
+  assert.equal(definition(toolkit, 'git_diff')?.operation?.title, '查看 git diff');
+  assert.equal(definition(toolkit, 'git_commit')?.operation?.title, '创建 git commit');
+  assert.equal(definition(toolkit, 'git_push')?.operation?.title, '推送 git 分支');
+  assert.equal(definition(toolkit, 'gh_pr_create')?.operation?.title, '创建 GitHub PR');
+  assert.equal(definition(toolkit, 'gh_pr_view')?.operation?.title, '查看 GitHub PR');
+  assert.equal(definition(toolkit, 'gh_pr_diff')?.operation?.title, '查看 GitHub PR diff');
+  assert.equal(definition(toolkit, 'gh_issue_comments')?.operation?.title, '查看 GitHub issue 评论');
+  assert.equal(definition(toolkit, 'gh_read_content')?.operation?.title, '读取 GitHub 临时内容');
+  assert.equal(Boolean(definition(toolkit, 'git_add')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'git_commit')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'git_push')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'gh_pr_create')?.review), true);
+  assert.equal(Boolean(definition(toolkit, 'gh_issue_create')?.review), true);
 
-  const review = await toolkit.policy?.toolReview?.git_commit?.request({
-    models: {} as never,
-    actor: {} as never,
-    messages: [],
+  const review = await definition(toolkit, 'git_commit')?.review?.request({
     toolkitName: 'git',
     toolName: 'git_commit',
     input: { cwd: '/repo', message: 'test: commit' },
-    operation: toolkit.operations?.git_commit,
+    operation: definition(toolkit, 'git_commit')?.operation,
     reviewCapabilities: {
       humanReview: true,
       sessionAuthorization: true,

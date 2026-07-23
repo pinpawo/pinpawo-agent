@@ -155,10 +155,9 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
   const toolkits = [defineToolkit({
     name: 'eval_general',
     description: 'Mock general tools for reviewed tool-call rejection eval.',
-    tools: [reviewedTool],
-    policy: {
-      toolReview: {
-        [input.reviewedTool]: {
+    tools: [{
+      tool: reviewedTool,
+      review: {
           request: () => buildReviewSpec({
             view: { kind: 'plain', body: `Approve ${input.reviewedTool}?` },
             options: [
@@ -174,9 +173,8 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
               },
             ],
           }),
-        },
       },
-    },
+    }],
   })];
 
   const routeModel = createRouteModel(input.delegatedTask);

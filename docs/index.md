@@ -9,6 +9,7 @@ the original design and reference documents. Maintenance rules live in
 ## Synthesized wiki
 
 - [Documentation wiki](wiki/index.md)
+- [Capability and Toolkit Contract V2 decision](wiki/decisions/capability-toolkit-contract-v2.md)
 - [System prompt design knowledge map](wiki/overview.md)
 - [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
 - [Documentation wiki management plan](wiki/migrations/docs-wiki-management-plan.md)
@@ -50,6 +51,7 @@ the original design and reference documents. Maintenance rules live in
 
 ## Capabilities, toolkits, and artifacts
 
+- [Capability and Toolkit Contract V2 — accepted target](PET_AGENT_CAPABILITY_TOOLKIT_V2_DESIGN.md)
 - [Capability runtime design](PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md)
 - [Toolkit composition design](PET_AGENT_TOOLKIT_COMPOSITION_DESIGN.md)
 - [Daily post capability](PET_AGENT_DAILY_POST_CAPABILITY.md)

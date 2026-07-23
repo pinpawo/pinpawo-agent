@@ -187,3 +187,29 @@ lint passes, and documentation migrations.
   deferred snapshot coordinate, overlay cleanup #408).
 - Added a current-authority banner to the source contract and updated both the
   root catalog and the wiki index. Did not modify the source's technical content.
+
+## [2026-07-24] decision | Capability and Toolkit Contract V2
+
+- Accepted Capability and Toolkit as the only author-facing extension concepts.
+- Made Toolkit the only tool owner and static `AgentCapability.uses` the required
+  dependency and permission boundary.
+- Rejected optional Toolkit dependencies and runtime Toolkit filtering in favor
+  of explicit Capability scenarios.
+- Chose Skill-style `CAPABILITY.md` authoring with a single Markdown instruction
+  document and optional narrow code hooks.
+- Recorded removal targets for AgentToolset, defineToolset, runtime uses/toolsets,
+  implicit general-lane Toolkit exposure, and legacy capability scaffolding.
+- Fixed delivery as one breaking cutover with no compatibility layer, deprecated
+  dual runtime, legacy loader, Toolset adapter, or automatic plugin conversion.
+- Kept GitHub Issue #447 as the single umbrella design source; implementation
+  work may use linked child issues without creating a parallel contract.
+- Defined `ToolDefinition` as the complete tool implementation, operation
+  metadata, and review policy unit owned by a Toolkit.
+- Removed `ToolkitResource`, public `ToolkitContext`, Toolkit `exposure`, and
+  parallel per-tool metadata maps from the V2 target.
+- Made Toolkit instances complete and immutable within a registry generation;
+  host factories capture application, session, or run dependencies before
+  registration.
+- Reduced Toolkit instructions to one optional static string and separated
+  Toolkit availability and review-time context from Capability/runtime
+  infrastructure.

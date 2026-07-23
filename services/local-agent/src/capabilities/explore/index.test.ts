@@ -54,8 +54,10 @@ async function createRuntime(
   });
 }
 
-test('explore capability uses shared subagent summarization and filters host toolkits', async () => {
-  const capability = createExploreCapability();
+test('explore capability uses shared subagent summarization and declares host toolkits statically', async () => {
+  const capability = createExploreCapability({
+    uses: ['bash', 'git', 'browser'],
+  });
   const runtime = await capability.createRuntime({
     models: {} as never,
     actor: {} as never,
@@ -67,7 +69,7 @@ test('explore capability uses shared subagent summarization and filters host too
     ],
   });
 
-  assert.deepEqual(runtime.uses, ['bash', 'git', 'browser']);
+  assert.deepEqual(capability.uses, ['bash', 'git', 'browser']);
   assert.equal(Array.isArray(runtime.instructions), true);
   const instructions = Array.isArray(runtime.instructions) ? runtime.instructions.join('\n') : '';
   assert.match(instructions, /只读取、检查、搜索、观察和总结上下文/);

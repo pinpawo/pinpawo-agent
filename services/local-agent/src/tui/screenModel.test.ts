@@ -37,7 +37,7 @@ test('buildTuiScreenModel exposes explicit layout regions', () => {
   assert.equal(model.regions.statusBar.connectionStatus, '就绪');
   assert.equal(model.regions.timeline.renderKey, '3');
   assert.equal(model.regions.timeline.staticBoundaryKey, 'm1');
-  assert.equal(model.regions.timeline.scrollStrategy, 'preserveStaticOutputUntilHostReset');
+  assert.equal(model.regions.timeline.scrollStrategy, 'applicationOwnedViewport');
   assert.deepEqual(model.regions.timeline.staticEntries.map((entry) => entry.id), ['m1']);
   assert.deepEqual(model.regions.timeline.dynamicEntries.map((entry) => entry.id), ['m2']);
   assert.equal(model.regions.timeline.emptyState, null);
@@ -66,7 +66,8 @@ test('buildTuiScreenModel owns the timeline welcome empty state', () => {
   assert.equal(model.regions.timeline.entries.length, 0);
   assert.equal(model.regions.timeline.emptyState?.greeting, '和 豆包 一起完成当前项目里的任务。');
   assert.equal(model.regions.timeline.emptyState?.ready, true);
-  assert.deepEqual(model.regions.timeline.emptyState?.details, [
+  assert.match(model.regions.timeline.emptyState?.details[0]?.value ?? '', /^v\d+\.\d+\.\d+/);
+  assert.deepEqual(model.regions.timeline.emptyState?.details.slice(1), [
     { label: '模型', value: 'gpt-test' },
     { label: '目录', value: '/Users/mac/project' },
   ]);

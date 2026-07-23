@@ -15,6 +15,7 @@ export type TuiInputRouterState = {
 
 export type TuiInputCommand =
   | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
+  | { target: 'timeline'; action: 'page_up' | 'page_down' | 'scroll_up' | 'scroll_down' }
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'globalReviewPolicy'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
@@ -32,6 +33,18 @@ export function resolveTuiInputAction(
 ): TuiInputCommand {
   if (event.type === 'interrupt' && owner.type !== 'externalEditor') {
     return { target: 'global', action: 'ctrl_c' };
+  }
+  if (owner.type !== 'externalEditor' && event.type === 'viewport.page.up') {
+    return { target: 'timeline', action: 'page_up' };
+  }
+  if (owner.type !== 'externalEditor' && event.type === 'viewport.page.down') {
+    return { target: 'timeline', action: 'page_down' };
+  }
+  if (owner.type !== 'externalEditor' && event.type === 'viewport.scroll.up') {
+    return { target: 'timeline', action: 'scroll_up' };
+  }
+  if (owner.type !== 'externalEditor' && event.type === 'viewport.scroll.down') {
+    return { target: 'timeline', action: 'scroll_down' };
   }
 
   return resolveTuiInputCommand(event, owner, routerState);

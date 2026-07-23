@@ -59,9 +59,11 @@ export function normalizeTuiInputEvent(
 }
 
 export function isTerminalControlSequence(input: string) {
-  return /^(?:\x1b)?\[[0-9;?]*[A-Za-z~]$/.test(input);
+  return /^(?:\x1b)?\[[0-9;?]*[A-Za-z~]$/.test(input)
+    || /^(?:(?:\x1b)?\[<\d+;\d+;\d+[mM])+$/.test(input);
 }
 
 export function isTerminalControlSequencePrefix(input: string) {
-  return /^(?:\x1b)?\[[0-9;?]*$/.test(input);
+  return /^(?:\x1b)?\[[0-9;?]*$/.test(input)
+    || /^(?:\x1b)?\[<[\d;]*$/.test(input);
 }

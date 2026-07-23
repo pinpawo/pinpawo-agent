@@ -5,6 +5,8 @@ export type TuiKeyInput = {
   escape?: boolean;
   upArrow?: boolean;
   downArrow?: boolean;
+  pageUp?: boolean;
+  pageDown?: boolean;
   leftArrow?: boolean;
   rightArrow?: boolean;
   tab?: boolean;

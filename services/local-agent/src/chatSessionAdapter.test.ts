@@ -254,7 +254,7 @@ test('runChatSession maps authorization runtime events to system notices', async
   );
 });
 
-test('runChatSession emits one subagent delta per child model message lifecycle', async () => {
+test('runChatSession emits one completed subagent block per child model message lifecycle', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: LocalAgentRuntimeEvent[] = [];
   const setup = {
@@ -312,10 +312,12 @@ test('runChatSession emits one subagent delta per child model message lifecycle'
   assert.deepEqual(result, { status: 'completed', reply: 'done' });
   assert.deepEqual(emittedTools, []);
   assert.deepEqual(
-    emittedEvents.filter((event) => event.type === 'subagent.message.delta'),
+    emittedEvents.filter((event) => event.type === 'subagent.message.completed'),
     [{
-      type: 'subagent.message.delta',
+      type: 'subagent.message.completed',
       requestId: 'req-1',
+      messageId: 'child-1',
+      namespace: ['general:t1', 'model_request:t2'],
       text: '正在整理',
     }],
   );

@@ -93,8 +93,10 @@ test('reduceSession deterministically replays canonical run inputs', () => {
       input: {
         type: 'runtime.event',
         event: {
-          type: 'subagent.message.delta',
+          type: 'subagent.message.completed',
           requestId: 'req-1',
+          messageId: 'child-1',
+          namespace: ['general:t1', 'model_request:t2'],
           text: 'worker output',
         },
       },
@@ -140,7 +142,7 @@ test('reduceSession deterministically replays canonical run inputs', () => {
   });
   assert.equal(first.timeline[2]?.id, 'req-1:assistant:0');
   assert.equal(first.timeline[2]?.type === 'message' ? first.timeline[2].status : undefined, 'completed');
-  assert.equal(first.timeline[3]?.id, 'req-1:subagent-output');
+  assert.equal(first.timeline[3]?.id, 'req-1:subagent:general:t1|model_request:t2:child-1');
   assert.equal(first.timeline[3]?.type === 'message' ? first.timeline[3].status : undefined, 'completed');
   assert.deepEqual(first.tokenUsage, {
     inputTokens: 10,
@@ -306,8 +308,10 @@ test('applySessionSnapshot rematerializes timeline state from a checkpoint point
       input: {
         type: 'runtime.event',
         event: {
-          type: 'subagent.message.delta',
+          type: 'subagent.message.completed',
           requestId: 'req-1',
+          messageId: 'child-ephemeral',
+          namespace: ['general:t1', 'model_request:t2'],
           text: 'ephemeral',
         },
       },

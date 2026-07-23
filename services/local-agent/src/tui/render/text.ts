@@ -11,6 +11,7 @@ export const TUI_TEXT = {
   welcomeCompactGreeting: (petName: string) => `和 ${petName} 一起开始吧。`,
   welcomeModelLabel: '模型',
   welcomeDirectoryLabel: '目录',
+  welcomeVersionLabel: '版本',
   welcomeReadyAction: '直接描述任务，按 Enter 发送',
   welcomeCompactReadyAction: '输入任务，按 Enter 发送',
   welcomePreparingAction: '正在准备本地会话…',

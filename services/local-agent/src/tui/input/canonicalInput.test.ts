@@ -114,6 +114,29 @@ test('toCanonicalInputEvent maps shifted cursor keys to selection events', () =>
   );
 });
 
+test('toCanonicalInputEvent maps page keys and mouse wheel input to viewport events', () => {
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '', key: { pageUp: true } }),
+    { type: 'viewport.page.up' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '[6~', key: {} }),
+    { type: 'viewport.page.down' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '[<64;20;10M', key: {} }),
+    { type: 'viewport.scroll.up' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '\x1b[<65;20;10M', key: {} }),
+    { type: 'viewport.scroll.down' },
+  );
+  assert.deepEqual(
+    toCanonicalInputEvent({ input: '[<64;20;10M\x1b[<64;20;10M', key: {} }),
+    { type: 'viewport.scroll.up' },
+  );
+});
+
 test('toCanonicalInputEvent maps raw shifted cursor sequences to selection events', () => {
   assert.deepEqual(
     toCanonicalInputEvent({ input: '\x1b[1;2D', key: {} }),

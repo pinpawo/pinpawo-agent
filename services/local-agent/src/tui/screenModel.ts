@@ -38,7 +38,7 @@ export type TuiScreenModel = {
       dynamicEntries: LocalAgentTimelineEntry[];
       renderKey: string;
       staticBoundaryKey: string;
-      scrollStrategy: 'preserveStaticOutputUntilHostReset';
+      scrollStrategy: 'applicationOwnedViewport';
       width: number;
       emptyState: WelcomePanelModel | null;
     };
@@ -111,7 +111,7 @@ export function buildTuiScreenModel(input: {
         dynamicEntries: timelineViewport.dynamicEntries,
         renderKey: formatViewportRenderKey(input.timelineRenderEpoch),
         staticBoundaryKey: formatViewportBoundaryKey(timelineViewport.staticEntries),
-        scrollStrategy: 'preserveStaticOutputUntilHostReset',
+        scrollStrategy: 'applicationOwnedViewport',
         width: contentWidth,
         emptyState: timelineEmptyState,
       },

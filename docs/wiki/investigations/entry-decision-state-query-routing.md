@@ -96,19 +96,24 @@ regression case changed from approximately 1,666 to 1,637 tokens for the full
 system, structured context, and conversation input. This small reduction is not
 itself evidence of improvement; route correctness still requires evaluation.
 
-## Deferred model evidence
+## GLM-5.2 model evidence
 
-Real-model validation is tracked separately in
-[issue #435](https://github.com/pinpawo/pinpawo-agent/issues/435) so the accepted
-production contract is not conflated with provider evaluation work. It must:
+The canonical V1 profile at
+`d54c6e38e8a26f5a6c0453112b8017ed0467170a` ran every entry case three times
+with GLM-5.2. Existing explicit completion evidence, current local and remote
+lookups, clarification, calculation, one-boundary work, and multi-boundary
+planning passed. Two evidence boundaries failed consistently:
 
-- Run the expanded entryDecision eval set across supported models/providers.
-- Check whether removing the broad status clause causes unnecessary execution for
-  questions whose answer is explicitly recorded in handoff metadata or text.
-- Define what evidence is sufficient for a state claim without creating a
-  domain-specific freshness policy inside the prompt.
-- Compare route accuracy, unnecessary execution, latency, and cost before
-  promoting this investigation or the authoring principles to `validated`.
+- an intention to commit was treated as completion evidence in all three runs;
+- a deployment observation from the previous day was treated as sufficient
+  evidence for current state in all three runs.
+
+This isolates the remaining issue to evidence sufficiency and freshness rather
+than the broad `answer | direct_task | needs_plan` structure. Historical
+before/after comparison and additional-model validation remain tracked in
+[issue #435](https://github.com/pinpawo/pinpawo-agent/issues/435). A future
+production change must address this shared evidence boundary and rerun the same
+cases; it must not add commit- or deployment-specific rules.
 
 ## Explicitly unaffected decision
 

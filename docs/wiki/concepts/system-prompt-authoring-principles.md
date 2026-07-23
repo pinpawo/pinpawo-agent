@@ -223,10 +223,21 @@ repetition, but the completion-acknowledgement objective—not a global overlap
 threshold—determines whether the lifecycle was closed correctly.
 
 Deterministic evaluators own exact structured decisions and mechanical
-invariants. Free-form answer evaluation judges the objective against the user
-request, canonical evidence, and acceptance criteria; keyword presence alone is
-not sufficient evidence of completion. Evaluator identity and revision are part
-of the reproducible harness because changing the judge changes the experiment.
+invariants. Free-form entry tasks, planner task/tail objectives, and answers are
+judged against their objective, canonical evidence, and acceptance criteria;
+keyword presence alone is not sufficient evidence of completion. Evaluator
+identity and revision are part of the reproducible harness because changing the
+judge changes the experiment.
+Each criterion result records that evaluator ownership. Candidate recall,
+rubber-stamp status, output shape, and similar runtime measurements remain
+diagnostics; schema-owned field and enum constraints remain run-status evidence
+rather than duplicated prompt-goal criteria.
+
+Validation proceeds in two stages. First, one supported model runs the complete
+contract profile until objectives, criteria, evaluator ownership, case
+selection, and repetitions are stable. The unchanged profile is then repeated
+across additional model families. Cross-model breadth does not precede a
+reproducible single-model baseline.
 
 ### Current prompt objectives and metrics
 
@@ -433,6 +444,49 @@ down from 52–80%. These are model-independent size measurements, not claims of
 behavioral improvement. The stable shared contract did not change, so the Prompt
 Contract Map needs only its verification link updated rather than a new row.
 
+## GLM-5.2 V1 contract coverage
+
+The canonical single-model profile ran the merged V1 prompt contracts before
+starting cross-model comparison:
+
+- revision and harness: `d54c6e38e8a26f5a6c0453112b8017ed0467170a`;
+- provider/model: DashScope `glm-5.2`, temperature `0`,
+  provider-default reasoning effort, JSON Mode;
+- evaluator: `prompt-goal-v1` using the same configured model;
+- selection: 34 canonical cases across all five prompt contracts, three repeats
+  per case.
+
+| Target | Goals achieved | Stable evidence |
+|---|---:|---|
+| `entry` | 30/36 | Existing evidence, local/remote lookup, clarification, calculation, one-boundary work, and planning passed |
+| `planner` | 15/18 | Materialization, cancellation, valid concrete work, and future-tail preservation passed |
+| `capability` | 18/18 | Custom selection, general fallback, missing parameters, browser, and unavailable capability passed |
+| `outcome` | 15/15 | Continue, task completion, goal completion, sibling isolation, and user-input stopping passed |
+| `answer` | 14/15 | Direct, synthesis, replay, and completion acknowledgement passed; clarification varied |
+
+Overall, 92/102 goals were achieved. All 102 subject runs reported token usage:
+68,151 input tokens and 25,662 output tokens. The 51 semantic-evaluator calls
+used 53,101 additional tokens. No schema, invocation, or evaluator errors
+occurred. Cost remains unreported because no pricing snapshot was supplied.
+
+The failures are bounded evidence for later prompt work, not authority to add
+global clauses in this eval change:
+
+- `entry` treated an intention as completion evidence in 0/3 successful goals;
+- `entry` treated stale deployment evidence as current in 0/3 successful goals;
+- `planner` split related work for one capability into three tasks in 0/3
+  successful goals;
+- `answer` asked for missing production-config information in 2/3 runs.
+
+The profile also exposed and removed an evaluator false negative: enriching a
+valid concrete task with `/tmp/report.pdf` changed string-level plan diagnostics
+but still achieved the materialization objective. Plan-effect and rubber-stamp
+measurements therefore remain diagnostics, while free-form task semantics use
+the goal evaluator. A planner-only rerun after removing those derived
+diagnostics from the judge input preserved the same 15/18 result at
+`294fd26b292dda73232cfbbc7410d0c35e5d4e9c`; only the capability-grouping
+criterion failed.
+
 ## Application to the current entryDecision issue
 
 The recent `answer` regression should not be repaired with a case-specific
@@ -450,10 +504,11 @@ separate owner, documented in
 ## Acceptance status
 
 The V1 implementation is complete across the four decision nodes, the shared
-decision prefix, and `answer`. This page remains a **draft synthesis** because
-local contract coverage and prompt-size measurements do not establish real-model
-behavioral improvement. Cross-model accuracy, unnecessary execution, replay,
-latency, token, and cost validation is deferred to
+decision prefix, and `answer`. The GLM-5.2 profile now establishes a reproducible
+current-state baseline and identifies bounded failures, but it does not yet
+establish per-change improvement or cross-model behavior. This page therefore
+remains a **draft synthesis**. Historical comparisons, additional-model
+validation, and priced cost evidence remain tracked by
 [issue #435](https://github.com/pinpawo/pinpawo-agent/issues/435). Contract
 traceability is maintained by the map established in
 [issue #415](https://github.com/pinpawo/pinpawo-agent/issues/415).

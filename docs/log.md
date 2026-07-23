@@ -187,3 +187,22 @@ lint passes, and documentation migrations.
   deferred snapshot coordinate, overlay cleanup #408).
 - Added a current-authority banner to the source contract and updated both the
   root catalog and the wiki index. Did not modify the source's technical content.
+
+## [2026-07-23] eval | GLM-5.2 V1 prompt contract baseline
+
+- Fixed the canonical V1 profile at 34 cases across all five prompt contracts,
+  with three repeats per case.
+- Recorded evaluator ownership per criterion and kept schema failures, candidate
+  recall, plan-shape measurements, output variation, tokens, and latency outside
+  semantic goal judgment.
+- Used deterministic scoring for exact structured decisions and
+  `prompt-goal-v1` for free-form entry tasks, planner artifacts, and answers.
+- Ran revision and harness
+  `d54c6e38e8a26f5a6c0453112b8017ed0467170a` with GLM-5.2: 92/102 goals
+  achieved, with no schema, invocation, or evaluator errors.
+- Isolated stable failures in entry evidence freshness and planner task grouping,
+  plus one variable answer clarification failure, without changing production
+  prompts in the eval change.
+- Confirmed in a final planner-only rerun that excluding derived plan diagnostics
+  from judge input preserved the 15/18 semantic result and the same sole
+  capability-grouping failure.

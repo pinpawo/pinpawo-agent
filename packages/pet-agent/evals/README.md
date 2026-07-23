@@ -214,7 +214,7 @@ Model configuration is resolved from `LLM_*`, then `~/.pinpawo/.env`, then
 `~/.pinpawo/config.json`. Entry scoring covers mode and direct-task content;
 planner scoring owns plan boundary count and plan contents.
 
-## Cross-Model Prompt Evaluation
+## Prompt Contract Evaluation
 
 The prompt stability runner extends decision coverage with the production
 `answer` prompt and its runtime-injected delegation completion context:
@@ -222,6 +222,18 @@ The prompt stability runner extends decision coverage with the production
 ```sh
 npm run eval:prompt-stability
 ```
+
+The canonical V1 single-model profile fixes the complete contract selection and
+repeat count before comparing providers:
+
+```sh
+npm run eval:prompt-v1
+```
+
+It runs 34 canonical cases across `entry`, `planner`, `capability`, `outcome`,
+and `answer`, with three repeats per case. Model and provider configuration still
+come from `LLM_*`, `~/.pinpawo/.env`, or `~/.pinpawo/config.json`; the generated
+report records the resolved values.
 
 It writes a versioned JSON report under `.eval-results/`. Each case instantiates
 an existing Prompt Contract as one concrete objective with explicit acceptance
@@ -234,13 +246,19 @@ cases, repetitions, and provider-reported token usage. The runner requires a cle
 `PROMPT_EVAL_ALLOW_DIRTY=1` is available for exploratory runs, whose reports stay
 marked as dirty.
 
-Decision-node objectives use deterministic contract criteria. Free-form `answer`
-objectives are evaluated against the canonical conversation and case-specific
-acceptance criteria by the same configured model using the versioned
-`answer-goal-v1` evaluator. The report records that evaluator configuration and
-keeps answer-generation usage separate from evaluator usage. A malformed or
-failed evaluator call makes the run not evaluable; it does not count as a failed
-answer objective.
+Exact actions, verdicts, enums, and mechanical plan relationships use
+deterministic contract criteria. Free-form entry tasks, planner task/tail
+objectives, and `answer` outputs use the same configured model with the
+versioned `prompt-goal-v1` evaluator. The report records that evaluator
+configuration and keeps subject-model usage separate from evaluator usage. A
+malformed or failed evaluator call makes the run not evaluable; it does not
+count as a failed objective.
+
+Every criterion result records whether it was evaluated deterministically or by
+the LLM judge. Goal criteria contain only behavior owned by the prompt contract.
+Candidate recall, planner rubber-stamp status, gap-note presence, output shape,
+and similar measurements remain diagnostics. Schema-owned field and enum
+constraints remain schema failures rather than duplicated prompt-goal criteria.
 
 The answer cases keep two different contracts separate:
 
@@ -271,11 +289,12 @@ PROMPT_EVAL_OUTPUT_USD_PER_MILLION="$CURRENT_OUTPUT_RATE" \
   npm run eval:prompt-stability
 ```
 
-For a prompt change, run the same target, cases, model settings, and repetitions
-against the relevant pre-change parent commit and the merged or candidate commit.
-Do this separately for at least two supported model families when access permits.
-A single synthetic baseline is not valid when different nodes changed in
-different PRs.
+For a prompt change, first stabilize the objectives, criteria, evaluator
+ownership, case selection, and repetitions on one supported model. Run the same
+profile against the relevant pre-change parent commit and the merged or
+candidate commit. Only after that evidence is reproducible should the unchanged
+profile be repeated across additional model families. A single synthetic
+baseline is not valid when different nodes changed in different PRs.
 
 After this harness is merged, a historical commit will not contain it. Create a
 worktree at the historical commit, apply only the harness commit there without

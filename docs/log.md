@@ -225,3 +225,13 @@ lint passes, and documentation migrations.
   conflicts before route selection.
 - Included run-scoped Artifact Discovery, Studio Plan, and Wiki Read Toolkits in
   the same dependency-resolution path.
+
+## [2026-07-24] decision | Capability has no code entry
+
+- Removed the planned optional Capability `entry` / `index.js` extension path.
+- Fixed Capability as a pure Markdown/declared routing and instruction contract.
+- Assigned hooks, middleware, availability checks, executable schemas,
+  persistence, ingest, and all side effects to Toolkit code or
+  capability-agnostic framework runtime.
+- Made Capability availability entirely derived from whether every Toolkit in
+  static `uses` resolves and is available in the current registry generation.

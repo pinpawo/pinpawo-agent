@@ -9,7 +9,7 @@
 Pet Agent 的扩展框架只保留两个面向作者的核心概念：
 
 1. **Capability**：Skill 风格的任务与行为定义，负责路由语义、Toolkit
-   依赖、执行 instructions 和结果契约。
+   依赖和执行 instructions；它是纯 Markdown/声明，不包含可执行代码。
 2. **Toolkit**：由代码实现的工具能力集合，负责 tools、tool schema、
    operation metadata、review policy 和 availability。
 
@@ -25,6 +25,10 @@ V2 固定以下规则：
 - Capability instructions 是一份完整 Markdown 文档，不再是字符串数组。
 - Capability 的标准作者入口是 `CAPABILITY.md`，其正文只在该 Capability
   被选中后注入 subagent system prompt。
+- Capability 不支持 `entry`、`index.js`、hooks、middleware、availability
+  check 或 executable result schema。
+- 需要代码的行为一律由 Toolkit 实现；Capability availability 只由其
+  `uses` 中 Toolkit 的可用性派生。
 - Toolkit 保持代码定义，不引入 Toolkit Markdown 文件协议。
 - Toolkit 由静态、完整的 `ToolDefinition` 组成；tool implementation、
   operation metadata 和 review policy 在同一定义中绑定。
@@ -107,7 +111,7 @@ tool definition
 
 capability
   Skill 风格的执行协议。
-  拥有路由描述、uses、CAPABILITY.md instructions、结果契约和可选 hooks。
+  拥有路由描述、uses 和 CAPABILITY.md instructions；不拥有代码。
 
 toolkit registry
   当前运行环境可解析的 Toolkit inventory。
@@ -233,9 +237,6 @@ type AgentCapability = {
   description: string;
   uses: readonly string[];
   instructions: InstructionDocument;
-  availability?: CapabilityAvailabilityConfig;
-  resultSchema?: CapabilityResultSchema;
-  hooks?: CapabilityHooks;
 };
 
 type InstructionDocument = {
@@ -252,8 +253,12 @@ type InstructionDocument = {
 - `uses` 是静态强依赖；不得由运行时消息、actor 或模型动态改变。
 - Capability 不包含 `tools`、`toolsets`、inline Toolkit 或 tool policy。
 - `instructions.content` 是完整 Markdown 行为协议。
-- `hooks` 只处理高级生命周期需求，不得添加、移除或替换 Toolkit/tool。
-- `resultSchema` 描述 Capability 的结果 artifact，不属于 Toolkit。
+- Capability 不包含 `createRuntime`、hooks、middleware、availability check、
+  executable schema 或任何 JavaScript/TypeScript 入口。
+- 输出要求写在 Markdown 正文中；结构化写入、校验、持久化和外部副作用
+  必须由 Toolkit tool 实现。
+- Capability availability 完全由静态 `uses` 是否都能在当前 registry
+  generation 中解析且 available 派生。
 
 ### 4.3 `uses` 的确定语义
 
@@ -305,8 +310,7 @@ type CapabilityRuntime = {
 capabilities/
 └── web-research/
     ├── CAPABILITY.md
-    ├── references/          # 可选，V2 初期不自动注入
-    └── index.js             # 可选，仅用于高级 hooks/schema
+    └── references/          # 可选，V2 初期不自动注入
 ```
 
 大多数 Capability 应只需要 `CAPABILITY.md`。
@@ -334,7 +338,7 @@ defaultEnabled: true
 - `uses`：强依赖 Toolkit 名称列表；
 - `version`：Capability authoring contract 版本；
 - `icon`、`color`、`defaultEnabled`：可选 host/UI metadata；
-- `entry`：可选高级代码入口。
+- 不支持 `entry` 或任何代码入口。
 
 `builtIn` 不应由 Capability 作者声明；它由安装来源决定。
 
@@ -364,11 +368,11 @@ Capability loader 在启动或显式 rescan 时：
 2. 校验 `name`、`description`、`uses` 和正文非空；
 3. 拒绝重复 Capability 名称；
 4. 解析并校验全部 Toolkit 依赖；
-5. 校验 `entry` 和 reference 路径不能逃出 Capability root；
+5. 校验 reference 路径不能逃出 Capability root；
 6. 对正文设置大小上限；
 7. 计算内容 digest；
 8. 将不可用原因保存在 registry descriptor 中；
-9. 只向 routing 暴露 name、description 和 availability；
+9. 只向 routing 暴露 name、description 和派生 availability；
 10. 仅在 Capability 被选择后向 subagent 注入正文。
 
 初始实现可以启动时读取并缓存全文。未来若引入延迟加载，必须保证同一
@@ -467,36 +471,22 @@ type CompiledCapability = {
 
 运行阶段只能执行 `CompiledCapability`，不得再次改变 Toolkit 集合。
 
-## 9. 高级代码入口
+## 9. Capability 无代码边界
 
-Capability 默认是纯 Markdown。只有以下场景允许可选代码入口：
+Capability 始终是纯 Markdown/声明对象，不存在“高级代码入口”例外。
 
-- capability-specific result schema；
-- afterRun artifact persistence；
+需要以下行为时必须由 Toolkit 或框架通用 runtime 承担：
+
+- 结构化输入/输出校验；
+- artifact 写入和持久化；
 - deterministic ingest；
-- before/after lifecycle hook；
-- 非 Toolkit 依赖的业务 availability。
+- 外部服务、credential 或 binary availability；
+- before/after tool lifecycle；
+- 任何文件、网络、数据库或应用副作用。
 
-代码入口只导出受限 hooks/schema：
-
-```ts
-export function createCapabilityExtension(): CapabilityExtension {
-  return {
-    resultSchema,
-    hooks: {
-      afterRun,
-    },
-  };
-}
-```
-
-代码入口不得：
-
-- 返回或修改 `uses`；
-- 创建 tools；
-- 注入 toolsets；
-- 替换 `CAPABILITY.md` instructions；
-- 递归调用其他 Capability。
+不得通过 `entry`、`index.js`、动态 import、hook 或 middleware 把代码重新
+引入 Capability。若一段代码只服务于一个 Capability，也应实现为命名
+Toolkit；复用范围小不是破坏所有权边界的理由。
 
 ## 10. 现有实现迁移
 
@@ -513,7 +503,7 @@ export function createCapabilityExtension(): CapabilityExtension {
 | Toolkit 复用 Capability availability | 独立 `ToolkitAvailabilityCheck` |
 | `string[] instructions` | 单一 Markdown `InstructionDocument` |
 | capability plugin `manifest.json` | `CAPABILITY.md` frontmatter |
-| capability `index.js` 必需 | 默认不需要；高级 hooks 可选 |
+| capability `index.js` / `entry` | 删除；Capability 不允许代码入口 |
 | general lane 装配全部 Toolkit | `generalUses` 显式依赖 |
 | capability node 临时解析 Toolkit | registry compile 阶段解析 |
 
@@ -528,6 +518,7 @@ createDailyPostToolset(options)
 daily_post Capability
 → uses: [daily_post]
 → instructions: capabilities/daily-post/CAPABILITY.md
+→ structured save/validation remains in daily_post Toolkit tools
 ```
 
 ### 10.2 Capability Creator
@@ -539,6 +530,7 @@ createCapabilityCreatorToolset()
 capability_creator Capability
 → uses: [bash, capability_creator]
 → instructions: capabilities/capability-creator/CAPABILITY.md
+→ scaffold/validation code remains in capability_creator Toolkit tools
 ```
 
 Capability Creator 生成的模板必须改为 `CAPABILITY.md`。
@@ -583,6 +575,10 @@ explore_github  uses [git, github]
 ```
 
 同名 Capability 不得因环境不同而静默获得不同工具集合。
+
+当前 Explore 的 afterRun ingest、artifact persistence 和 executable result
+schema 不得迁入 Capability Markdown loader。它们必须改为 Explore 专用
+Toolkit tool，或提升为对所有 Capability 一致适用的框架通用产物处理。
 
 ## 11. 破坏式重构工作流
 

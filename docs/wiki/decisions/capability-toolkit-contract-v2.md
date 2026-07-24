@@ -25,8 +25,9 @@ Capability and Toolkit.
 - Each Toolkit tool is represented by one framework-level `ToolDefinition` that
   binds its executable tool, operation metadata, and review policy.
 - A Capability is a Skill-style behavior definition. It owns routing metadata,
-  a static list of required Toolkit names, one Markdown instruction document,
-  an optional result contract, and narrowly scoped lifecycle hooks.
+  a static list of required Toolkit names and one Markdown instruction document.
+  It owns no executable code, hooks, middleware, availability check, or executable
+  result schema.
 - A Capability never owns or creates a tool. Every tool visible to its subagent
   comes from a Toolkit named in its static `uses` contract.
 
@@ -54,6 +55,10 @@ to capture application, session, or run dependencies. The returned
 Static instructions and dynamic runtime facts remain separate prompt-knowledge
 layers. A system-prompt compiler combines framework, runtime, Toolkit, and selected
 Capability sections in a deterministic order.
+
+There is no advanced Capability code entry. Any structured validation,
+artifact persistence, ingest, external dependency, or side effect is implemented
+by a Toolkit or by capability-agnostic framework runtime.
 
 ## Registry semantics
 

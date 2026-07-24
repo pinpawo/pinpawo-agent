@@ -49,6 +49,9 @@ function formatStat(path: string) {
 
 const MAX_FILE_DIFF_PREVIEW_CHARS = 6_000;
 const TEXT_FILE_SAMPLE_BYTES = 8_192;
+export const VIEW_FILE_CHUNK_MAX_BYTES = 50_000;
+// Covers the controlled footer and the blank-line separator before it.
+const VIEW_FILE_CHUNK_FOOTER_RESERVE_BYTES = 1_000;
 
 function truncateForOperationDetails(content: string) {
   if (content.length <= MAX_FILE_DIFF_PREVIEW_CHARS) {
@@ -102,53 +105,150 @@ function readUtf8TextFile(filePath: string) {
   return readFileSync(filePath, 'utf-8');
 }
 
+export type TextFileChunkLimitReason = 'byte_limit' | 'line_too_long';
+
+export type TextFileChunkResult = {
+  content: string;
+  startLine: number;
+  endLine: number;
+  nextStartLine: number | null;
+  totalLines: number;
+  hasMore: boolean;
+  returnedChars: number;
+  returnedBytes: number;
+  limitReason: TextFileChunkLimitReason | null;
+  truncatedLine: number | null;
+  maxBytes: number;
+};
+
+function utf8Bytes(value: string) {
+  return Buffer.byteLength(value, 'utf-8');
+}
+
+function truncateUtf8(value: string, maxBytes: number) {
+  if (utf8Bytes(value) <= maxBytes) return value;
+  if (maxBytes <= 0) return '';
+
+  const codePoints = Array.from(value);
+  let low = 0;
+  let high = codePoints.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (utf8Bytes(codePoints.slice(0, middle).join('')) <= maxBytes) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return codePoints.slice(0, low).join('');
+}
+
+export function formatTextFileChunkFooter(result: TextFileChunkResult) {
+  if (result.limitReason === 'line_too_long') {
+    return `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}; incomplete: line ${result.truncatedLine} cannot fit within ${result.maxBytes}-byte result limit; nextStartLine=unavailable because this tool cannot resume within a line; use grep_search to locate an anchor or a byte-range reader]`;
+  }
+
+  const continuation = result.hasMore
+    ? `nextStartLine=${result.nextStartLine}`
+    : 'complete';
+  const limit = result.limitReason === 'byte_limit'
+    ? `; stopped at ${result.maxBytes}-byte limit`
+    : '';
+  return `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}; ${continuation}${limit}]`;
+}
+
+export function formatTextFileChunkResult(result: TextFileChunkResult) {
+  return `${result.content}\n\n${formatTextFileChunkFooter(result)}`;
+}
+
 export function readTextFileChunkResult({
   path,
   startLine,
   endLine,
-  maxChars,
+  maxBytes: configuredMaxBytes,
 }: {
   path: string;
   startLine?: number;
   endLine?: number;
-  maxChars?: number;
-}) {
+  maxBytes?: number;
+}): TextFileChunkResult {
   const filePath = resolveUserPath(path);
   const content = readUtf8TextFile(filePath);
   const lines = content.split('\n');
   const start = Math.max(1, startLine ?? 1);
-  const end = Math.min(lines.length, endLine ?? Math.min(start + 199, lines.length));
-  if (end < start) {
-    throw new Error(`invalid line range ${start}-${end}`);
+  const totalLines = lines.length;
+  if (start > totalLines) {
+    throw new Error(`startLine ${start} is outside the file; totalLines=${totalLines}`);
   }
+  const requestedEnd = endLine ?? start + 199;
+  if (requestedEnd < start) {
+    throw new Error(`invalid line range ${start}-${requestedEnd}; totalLines=${totalLines}`);
+  }
+  const end = Math.min(totalLines, requestedEnd);
+  const maxBytes = Math.max(1, configuredMaxBytes ?? VIEW_FILE_CHUNK_MAX_BYTES);
+  const bodyMaxBytes = Math.max(0, maxBytes - VIEW_FILE_CHUNK_FOOTER_RESERVE_BYTES);
 
   const selectedLines: string[] = [];
-  let selectedChars = 0;
+  let selectedBytes = 0;
+  let limitReason: TextFileChunkLimitReason | null = null;
+
+  const makeResult = (
+    returnedEndLine: number,
+    body: string,
+    reason: TextFileChunkLimitReason | null,
+    line: number | null,
+  ): TextFileChunkResult => {
+    const hasMore = reason === 'line_too_long' || returnedEndLine < totalLines;
+    return {
+      content: body,
+      startLine: start,
+      endLine: returnedEndLine,
+      nextStartLine: reason === 'line_too_long'
+        ? null
+        : hasMore
+          ? returnedEndLine + 1
+          : null,
+      totalLines,
+      hasMore,
+      returnedChars: body.length,
+      returnedBytes: utf8Bytes(body),
+      limitReason: reason,
+      truncatedLine: line,
+      maxBytes,
+    };
+  };
+
+  const makeTruncatedLineResult = (lineNumber: number): TextFileChunkResult => {
+    const formattedLine = `${lineNumber}: ${lines[lineNumber - 1] ?? ''}`;
+    const ellipsis = ' …';
+    const truncated = truncateUtf8(
+      formattedLine,
+      Math.max(0, bodyMaxBytes - utf8Bytes(ellipsis)),
+    );
+    const body = bodyMaxBytes >= utf8Bytes(ellipsis)
+      ? `${truncated}${ellipsis}`
+      : truncateUtf8(formattedLine, bodyMaxBytes);
+    return makeResult(lineNumber, body, 'line_too_long', lineNumber);
+  };
+
   for (let lineNumber = start; lineNumber <= end; lineNumber += 1) {
     const formattedLine = `${lineNumber}: ${lines[lineNumber - 1] ?? ''}`;
-    const nextChars = selectedChars + (selectedLines.length > 0 ? 1 : 0) + formattedLine.length;
-    if (maxChars !== undefined && nextChars > maxChars) {
-      if (selectedLines.length === 0) {
-        throw new Error(`line ${lineNumber} exceeds the ${maxChars}-character chunk budget`);
+    const lineBytes = utf8Bytes(formattedLine);
+    const candidateBytes = selectedBytes + (selectedLines.length > 0 ? 1 : 0) + lineBytes;
+    if (candidateBytes > bodyMaxBytes) {
+      if (selectedLines.length > 0) {
+        limitReason = 'byte_limit';
+        break;
       }
-      break;
+      return makeTruncatedLineResult(lineNumber);
     }
     selectedLines.push(formattedLine);
-    selectedChars = nextChars;
+    selectedBytes = candidateBytes;
   }
 
   const chunkContent = selectedLines.join('\n');
   const returnedEndLine = start + selectedLines.length - 1;
-  const hasMore = returnedEndLine < lines.length;
-  return {
-    content: chunkContent,
-    startLine: start,
-    endLine: returnedEndLine,
-    nextStartLine: hasMore ? returnedEndLine + 1 : null,
-    totalLines: lines.length,
-    hasMore,
-    returnedChars: chunkContent.length,
-  };
+  return makeResult(returnedEndLine, chunkContent, limitReason, null);
 }
 
 export function readTextFileChunk(input: {
@@ -156,7 +256,7 @@ export function readTextFileChunk(input: {
   startLine?: number;
   endLine?: number;
 }) {
-  return readTextFileChunkResult(input).content;
+  return formatTextFileChunkResult(readTextFileChunkResult(input));
 }
 
 function mergeOperationOutputSummary(
@@ -233,7 +333,7 @@ export const viewFileChunkTool = tool(
   },
   {
     name: 'view_file_chunk',
-    description: '按行读取文件片段。适合查看大文件的局部内容，返回带行号的文本。',
+    description: `按行读取文件片段，返回带行号正文以及实际范围、总行数和 nextStartLine/complete。默认最多 200 行，单次模型可见结果最多 ${VIEW_FILE_CHUNK_MAX_BYTES} 字节。`,
     schema: z.object({
       path: z.string().describe('文件路径'),
       startLine: z.number().int().positive().optional().describe('起始行号，默认 1'),

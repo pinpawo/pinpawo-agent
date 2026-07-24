@@ -39,6 +39,7 @@ behavioral claims:
 - [`answer-behavior-basics.ts`](../../../packages/pet-agent/evals/datasets/answer-behavior-basics.ts)
 - [`decision-eval-scenarios.ts`](../../../packages/pet-agent/evals/decision-eval-scenarios.ts)
 - [`answer-eval-scenarios.ts`](../../../packages/pet-agent/evals/answer-eval-scenarios.ts)
+- [`prompt-goal-evaluator.ts`](../../../packages/pet-agent/evals/prompt-goal-evaluator.ts)
 - [`prompt-eval-report.ts`](../../../packages/pet-agent/evals/prompt-eval-report.ts)
 - [`run-decision-stability.eval.ts`](../../../packages/pet-agent/evals/scripts/run-decision-stability.eval.ts)
 

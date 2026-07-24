@@ -1,20 +1,18 @@
-import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { toJsonSchema } from '@langchain/core/utils/json_schema';
-import { z } from 'zod';
 import { buildAnswerInvocationMessages } from '../src/agent/orchestrator/runtime/nodes/answer.ts';
 import { readMessageText } from '../src/agent/orchestrator/utils.ts';
 import type { AgentModels } from '../src/types/agent.ts';
-import {
-  buildOrchestrationDecisionStructuredOutputOptions,
-} from '../src/agent/orchestrator/schemas.ts';
-import type { StructuredOutputMethod } from '../src/utils/structuredOutput.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
 import {
   answerBehaviorBasicsDataset,
   type AnswerBehaviorCase,
   type AnswerBehaviorExpectation,
 } from './datasets/answer-behavior-basics.ts';
+import {
+  evaluatePromptGoal,
+  type PromptEvalJudge,
+} from './prompt-goal-evaluator.ts';
 
 export type AnswerEvalRunResult = {
   output: Record<string, unknown>;
@@ -23,20 +21,6 @@ export type AnswerEvalRunResult = {
   shape: string;
   diagnostics: Record<string, unknown>;
 };
-
-export type AnswerEvalJudge = {
-  model: AgentModels['act'];
-  method?: StructuredOutputMethod;
-  config?: RunnableConfig;
-};
-
-export class AnswerEvalJudgeError extends Error {
-  constructor(cause: unknown) {
-    super(cause instanceof Error ? cause.message : String(cause));
-    this.name = 'AnswerEvalJudgeError';
-    this.cause = cause;
-  }
-}
 
 export type AnswerEvalScenario = {
   target: 'answer';
@@ -50,7 +34,7 @@ export type AnswerEvalScenario = {
   run(
     model: AgentModels['act'],
     config?: RunnableConfig,
-    judge?: AnswerEvalJudge,
+    judge?: PromptEvalJudge,
   ): Promise<AnswerEvalRunResult>;
 };
 
@@ -78,71 +62,22 @@ function longestSharedSpan(left: string, right: string): number {
   return longest;
 }
 
-function buildAnswerGoalEvaluationSchema(criterionIds: string[]) {
-  if (criterionIds.length === 0) throw new Error('Answer evaluation requires acceptance criteria.');
-  const criteriaShape = Object.fromEntries(criterionIds.map((id) => [id, z.object({
-    met: z.boolean(),
-    reason: z.string(),
-  }).strict()]));
-  return z.object({
-    criteria: z.object(criteriaShape).strict(),
-    summary: z.string(),
-  }).strict();
-}
-
-export function buildAnswerGoalEvaluatorPrompt(
-  method?: StructuredOutputMethod,
-  criterionIds: string[] = ['criterion_id'],
-): string {
-  const instructions = [
-    'Evaluate whether a candidate answer achieves the supplied user-visible objective.',
-    'Judge every acceptance criterion independently using only the supplied conversation, runtime context, and candidate answer.',
-    'Accuracy and grounding require support from the supplied evidence. Treat unsupported additions as a failure when they affect a criterion.',
-    'Return exactly one result for every criterion id. Keep each reason concise and evidence-based.',
-  ];
-  if (method === 'jsonMode') {
-    instructions.push(
-      'Return one JSON object matching this schema:',
-      JSON.stringify(toJsonSchema(buildAnswerGoalEvaluationSchema(criterionIds))),
-    );
-  }
-  return instructions.join('\n');
-}
-
 async function evaluateGoal(
-  judge: AnswerEvalJudge,
+  judge: PromptEvalJudge,
   testCase: AnswerBehaviorCase,
   candidateAnswer: string,
 ): Promise<{ scores: DecisionContractScore[]; summary: string }> {
-  const criterionIds = testCase.expected.acceptanceCriteria.map(({ id }) => id);
-  const schema = buildAnswerGoalEvaluationSchema(criterionIds);
-  const raw = await judge.model.withStructuredOutput(
-    schema,
-    buildOrchestrationDecisionStructuredOutputOptions({ method: judge.method }),
-  ).invoke([
-    new SystemMessage(buildAnswerGoalEvaluatorPrompt(judge.method, criterionIds)),
-    new HumanMessage(JSON.stringify({
-      contract: testCase.expected.contract,
-      objective: testCase.expected.objective,
-      acceptanceCriteria: testCase.expected.acceptanceCriteria,
+  return evaluatePromptGoal({
+    judge,
+    contract: testCase.expected.contract,
+    objective: testCase.expected.objective,
+    acceptanceCriteria: testCase.expected.acceptanceCriteria,
+    evidence: {
       conversation: testCase.input.messages,
       runtimeContext: testCase.input.completionContext ?? null,
-      candidateAnswer,
-    })),
-  ], judge.config);
-  const evaluation = schema.parse(raw);
-  return {
-    scores: testCase.expected.acceptanceCriteria.map((criterion) => {
-      const result = evaluation.criteria[criterion.id];
-      return {
-        key: criterion.id,
-        statement: criterion.statement,
-        score: result.met ? 1 : 0,
-        comment: result.reason,
-      };
-    }),
-    summary: evaluation.summary,
-  };
+    },
+    candidateOutput: { text: candidateAnswer },
+  });
 }
 
 function collectDiagnostics(
@@ -196,10 +131,7 @@ export function getAnswerEvalScenarios(): AnswerEvalScenario[] {
         .filter(({ role }) => role === 'assistant')
         .map(({ text: messageText }) => messageText)
         .join('\n');
-      const evaluation = await evaluateGoal(judge ?? { model, config }, testCase, text)
-        .catch((error: unknown) => {
-          throw new AnswerEvalJudgeError(error);
-        });
+      const evaluation = await evaluateGoal(judge ?? { model, config }, testCase, text);
       const diagnostics = collectDiagnostics(text, testCase.expected, priorAssistantText);
       return {
         output: { text },

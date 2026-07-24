@@ -6,36 +6,38 @@ import type { OutcomeDecisionExpected } from './datasets/outcome-decision-basics
 
 export type DecisionContractScore = {
   key: string;
-  statement?: string;
+  statement: string;
+  evaluator: 'deterministic' | 'llm-judge';
   score: 0 | 1;
   comment: string;
 };
 
-function exact(key: string, actual: unknown, expected: unknown): DecisionContractScore {
+function exact(
+  key: string,
+  statement: string,
+  actual: unknown,
+  expected: unknown,
+): DecisionContractScore {
   return {
     key,
+    statement,
+    evaluator: 'deterministic',
     score: actual === expected ? 1 : 0,
     comment: `expected=${String(expected)}, actual=${String(actual)}`,
   };
 }
 
-function containsTerms(key: string, value: string | null | undefined, terms: string[] = []): DecisionContractScore {
-  const missing = terms.filter((term) => !value?.toLowerCase().includes(term.toLowerCase()));
-  return {
-    key,
-    score: missing.length === 0 ? 1 : 0,
-    comment: missing.length === 0 ? value ?? '' : `missing=${missing.join(',')}; actual=${value ?? ''}`,
-  };
-}
-
 export function scoreEntryDecision(
-  output: { mode: string; task?: string | null; boundaryCount: number },
+  output: { mode: string },
   expected: EntryDecisionExpected,
 ): DecisionContractScore[] {
   return [
-    exact('entry_mode_correct', output.mode, expected.mode),
-    exact('task_boundary_count_correct', output.boundaryCount, expected.expectedBoundaryCount),
-    containsTerms('direct_task_content_correct', output.task, expected.expectedTaskTerms),
+    exact(
+      'entry_mode_correct',
+      `Select ${expected.mode} from the supplied evidence and requested execution shape.`,
+      output.mode,
+      expected.mode,
+    ),
   ];
 }
 
@@ -47,43 +49,30 @@ export function adaptTaskDecisionMode(
 }
 
 export function scoreCapabilityDecision(
-  output: { selectedLane: string; candidateNames: string[] },
+  output: { selectedLane: string },
   expected: CapabilityDecisionBasicsExpected,
-  registryNames: string[],
 ): DecisionContractScore[] {
-  const selectedName = output.selectedLane.startsWith('capability.')
-    ? output.selectedLane.slice('capability.'.length)
-    : null;
-  const candidatesMatch = output.candidateNames.length === expected.expectedCandidateNames.length
-    && output.candidateNames.every((name) => expected.expectedCandidateNames.includes(name));
   return [
-    {
-      key: 'candidate_recall_correct',
-      score: candidatesMatch ? 1 : 0,
-      comment: `expected=${expected.expectedCandidateNames.join(',')}; actual=${output.candidateNames.join(',')}`,
-    },
-    exact('capability_selection_correct', output.selectedLane, expected.expectedLane),
-    {
-      key: 'selected_capability_registered',
-      score: selectedName === null || registryNames.includes(selectedName) ? 1 : 0,
-      comment: selectedName ?? 'general',
-    },
+    exact(
+      'capability_selection_correct',
+      `Select ${expected.expectedLane} from the executor choices supplied to the model.`,
+      output.selectedLane,
+      expected.expectedLane,
+    ),
   ];
 }
 
 export function scoreOutcomeDecision(
-  output: Record<string, unknown> & { outcome?: string },
+  output: { outcome?: string },
   expected: OutcomeDecisionExpected,
 ): DecisionContractScore[] {
-  const ownsForbiddenOutput = ['task', 'next_task', 'capability', 'capabilityId']
-    .some((key) => output[key] !== undefined && output[key] !== null);
   return [
-    exact('outcome_correct', output.outcome, expected.outcome),
-    {
-      key: 'outcome_ownership_correct',
-      score: ownsForbiddenOutput ? 0 : 1,
-      comment: ownsForbiddenOutput ? 'Outcome output contains task or capability fields.' : 'Verdict-only output.',
-    },
+    exact(
+      'outcome_correct',
+      `Judge the current announce as ${expected.outcome} from current-task and user-goal evidence.`,
+      output.outcome,
+      expected.outcome,
+    ),
   ];
 }
 
@@ -92,39 +81,41 @@ export function scoreCapabilityPlanning(
     result: string;
     nextTask?: string | null;
     capabilityIntent?: string | null;
-    capabilityId?: string | null;
     remainingPlan: Array<{ objective: string; capabilityIntent: string; status: 'concrete' | 'deferred' }>;
   },
   expected: CapabilityPlanningExpected,
-  input: CapabilityPlanningInput,
 ): DecisionContractScore[] {
-  const metrics = derivePlanningMetrics(input, output.remainingPlan, output.nextTask && output.capabilityIntent
-    ? { objective: output.nextTask, capabilityIntent: output.capabilityIntent }
-    : null);
   const remainingPlanMatches = output.remainingPlan.length === expected.remainingPlan.length
     && output.remainingPlan.every((item, index) => {
       const expectedItem = expected.remainingPlan[index];
       return Boolean(expectedItem)
         && item.capabilityIntent === expectedItem.capabilityIntent
-        && item.status === expectedItem.status
-        && expectedItem.objectiveTerms.every((term) => item.objective.toLowerCase().includes(term.toLowerCase()));
+        && item.status === expectedItem.status;
     });
   return [
-    exact('planner_result_correct', output.result, expected.result),
-    exact('plan_effect_correct', metrics.planEffect, expected.planEffect),
-    exact('rubber_stamp_correct', metrics.rubberStamp, expected.rubberStamp),
+    exact(
+      'planner_result_correct',
+      `Return ${expected.result} at this planning boundary.`,
+      output.result,
+      expected.result,
+    ),
     {
-      key: 'remaining_plan_correct',
+      key: 'remaining_plan_structure_correct',
+      statement: 'Preserve the expected number, order, status, and capability intent of future tasks.',
+      evaluator: 'deterministic',
       score: remainingPlanMatches ? 1 : 0,
       comment: JSON.stringify(output.remainingPlan),
     },
-    exact('capability_intent_correct', output.capabilityIntent ?? null, expected.capabilityIntent ?? null),
-    containsTerms('materialized_task_correct', output.nextTask, expected.nextTaskTerms),
-    {
-      key: 'planner_does_not_bind_capability_id',
-      score: output.capabilityId ? 0 : 1,
-      comment: output.capabilityId ?? 'No concrete capability id.',
-    },
+    ...(expected.result === 'next_task'
+      ? [
+          exact(
+            'capability_intent_correct',
+            `Assign the materialized task the capability intent ${expected.capabilityIntent ?? 'null'}.`,
+            output.capabilityIntent ?? null,
+            expected.capabilityIntent ?? null,
+          ),
+        ]
+      : []),
   ];
 }
 

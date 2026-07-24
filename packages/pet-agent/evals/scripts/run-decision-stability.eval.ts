@@ -4,11 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import {
-  AnswerEvalJudgeError,
-  getAnswerEvalScenarios,
-  type AnswerEvalJudge,
-} from '../answer-eval-scenarios.ts';
+import { getAnswerEvalScenarios } from '../answer-eval-scenarios.ts';
 import {
   getDecisionEvalScenarios,
   type DecisionEvalRunResult,
@@ -24,6 +20,10 @@ import {
   createPromptEvalUsageCollector,
   estimatePromptEvalCost,
 } from '../prompt-eval-usage.ts';
+import {
+  PromptEvalJudgeError,
+  type PromptEvalJudge,
+} from '../prompt-goal-evaluator.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../../src/utils/structuredOutput.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
@@ -42,7 +42,7 @@ type PromptEvalScenario = {
     model: AgentModels['act'],
     method: StructuredOutputMethod | undefined,
     config: RunnableConfig,
-    judge: AnswerEvalJudge,
+    judge: PromptEvalJudge,
   ): Promise<DecisionEvalRunResult & { diagnostics?: Record<string, unknown> }>;
 };
 
@@ -78,7 +78,7 @@ function compactError(error: unknown): {
 } {
   const name = error instanceof Error ? error.name : typeof error;
   const message = error instanceof Error ? error.message : String(error);
-  const kind = error instanceof AnswerEvalJudgeError
+  const kind = error instanceof PromptEvalJudgeError
     ? 'evaluation'
     : name === 'ZodError' || /structured output|schema|validation/i.test(message)
       ? 'schema'
@@ -152,8 +152,8 @@ function getPromptEvalScenarios(): PromptEvalScenario[] {
         model: AgentModels['act'],
         method: StructuredOutputMethod | undefined,
         config: RunnableConfig,
-        _judge: AnswerEvalJudge,
-      ) => scenario.run(model, method, config),
+        judge: PromptEvalJudge,
+      ) => scenario.run(model, method, config, judge),
     })),
     ...getAnswerEvalScenarios().map((scenario) => ({
       ...scenario,
@@ -161,7 +161,7 @@ function getPromptEvalScenarios(): PromptEvalScenario[] {
         model: AgentModels['act'],
         _method: StructuredOutputMethod | undefined,
         config: RunnableConfig,
-        judge: AnswerEvalJudge,
+        judge: PromptEvalJudge,
       ) => scenario.run(model, config, judge),
     })),
   ];
@@ -193,10 +193,10 @@ async function main() {
   const structuredOutputMethod = targets.some((target) => target !== 'answer')
     ? modelConfig.method ?? 'provider-default'
     : 'not-applicable';
-  const evaluator = targets.includes('answer')
+  const evaluator = targets.some((target) => target === 'entry' || target === 'planner' || target === 'answer')
     ? {
         mode: 'subject-model' as const,
-        version: 'answer-goal-v1' as const,
+        version: 'prompt-goal-v1' as const,
         model: modelConfig.metadata,
         structuredOutputMethod: modelConfig.method ?? 'provider-default' as const,
       }
@@ -246,7 +246,7 @@ async function main() {
               promptEvalRevision: revision.commit,
               promptEvalCaseId: scenario.caseId,
               promptEvalRepeat: repeat,
-              promptEvalEvaluator: 'answer-goal-v1',
+              promptEvalEvaluator: 'prompt-goal-v1',
             },
           },
         });

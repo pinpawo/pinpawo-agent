@@ -16,15 +16,15 @@ function allPass(scores: Array<{ score: number }>) {
   return scores.every((score) => score.score === 1);
 }
 
-test('entry scorer treats textual steps as one task when the execution boundary is shared', () => {
+test('entry scorer gates only the structured execution shape', () => {
   const testCase = entryDecisionBasicsDataset.cases.find((item) => item.name === 'multiple-actions-one-capability-call');
   assert.ok(testCase);
   assert.equal(testCase.expected.expectedBoundaryCount, 1);
-  assert.ok(allPass(scoreEntryDecision({
+  const scores = scoreEntryDecision({
     mode: 'direct_task',
-    task: '读取 package.json 的依赖，运行 npm test，并汇总结果。',
-    boundaryCount: 1,
-  }, testCase.expected)));
+  }, testCase.expected);
+  assert.deepEqual(scores.map(({ key }) => key), ['entry_mode_correct']);
+  assert.ok(allPass(scores));
 });
 
 test('entryDecision adapter exposes the planning mode', () => {
@@ -48,21 +48,22 @@ test('entryDecision dataset covers the evidence sufficiency matrix', () => {
   assert.ok(names.has('calculation-needs-execution'));
 });
 
-test('capability scorer rejects an unregistered selected capability', () => {
+test('capability scorer gates only the model-owned executor selection', () => {
   const testCase = capabilityDecisionBasicsDataset.cases[0];
   assert.ok(testCase);
   const scores = scoreCapabilityDecision({
-    selectedLane: 'capability.fabricated',
-    candidateNames: testCase.expected.expectedCandidateNames,
-  }, testCase.expected, testCase.input.availableCapabilities.map(({ name }) => name));
-  assert.equal(scores.find((score) => score.key === 'selected_capability_registered')?.score, 0);
+    selectedLane: testCase.expected.expectedLane,
+  }, testCase.expected);
+  assert.deepEqual(scores.map(({ key }) => key), ['capability_selection_correct']);
+  assert.ok(allPass(scores));
 });
 
-test('outcome scorer rejects next-task generation', () => {
+test('outcome scorer gates only the model-owned verdict', () => {
   const testCase = outcomeDecisionBasicsDataset.cases[1];
   assert.ok(testCase);
-  const scores = scoreOutcomeDecision({ outcome: 'task_done', next_task: '修改 auth 模块' }, testCase.expected);
-  assert.equal(scores.find((score) => score.key === 'outcome_ownership_correct')?.score, 0);
+  const scores = scoreOutcomeDecision({ outcome: 'task_done' }, testCase.expected);
+  assert.deepEqual(scores.map(({ key }) => key), ['outcome_correct']);
+  assert.ok(allPass(scores));
 });
 
 test('planning datasets cover entry and boundary distributions', () => {
@@ -72,24 +73,7 @@ test('planning datasets cover entry and boundary distributions', () => {
   assert.ok(capabilityPlanningBasicsDataset.cases.some((testCase) => testCase.expected.planEffect === 'cancelled'));
 });
 
-test('planner scorer rejects binding a concrete capability id', () => {
-  const testCase = capabilityPlanningBasicsDataset.cases[0];
-  assert.ok(testCase);
-  const scores = scoreCapabilityPlanning({
-    result: testCase.expected.result,
-    nextTask: '调查 auth 模块的结构和风险',
-    capabilityIntent: testCase.expected.capabilityIntent,
-    capabilityId: 'explore',
-    remainingPlan: testCase.expected.remainingPlan.map((item) => ({
-      objective: item.objectiveTerms.join(' '),
-      capabilityIntent: item.capabilityIntent,
-      status: item.status,
-    })),
-  }, testCase.expected, testCase.input);
-  assert.equal(scores.find((score) => score.key === 'planner_does_not_bind_capability_id')?.score, 0);
-});
-
-test('planner scorer derives cancellation instead of trusting a label', () => {
+test('planner scorer rejects a future-tail structure that contradicts answer', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find((item) => item.name === 'boundary-cancels-obsolete-task');
   assert.ok(testCase);
   const scores = scoreCapabilityPlanning({
@@ -97,9 +81,8 @@ test('planner scorer derives cancellation instead of trusting a label', () => {
     nextTask: null,
     capabilityIntent: null,
     remainingPlan: testCase.input.remainingPlan ?? [],
-  }, testCase.expected, testCase.input);
-  assert.equal(scores.find((score) => score.key === 'plan_effect_correct')?.score, 0);
-  assert.equal(scores.find((score) => score.key === 'remaining_plan_correct')?.score, 0);
+  }, testCase.expected);
+  assert.equal(scores.find((score) => score.key === 'remaining_plan_structure_correct')?.score, 0);
 });
 
 test('planner scorer reconstructs an unchanged plan from next task plus future tail', () => {
@@ -112,6 +95,6 @@ test('planner scorer reconstructs an unchanged plan from next task plus future t
     nextTask: materialized.objective,
     capabilityIntent: materialized.capabilityIntent,
     remainingPlan: [],
-  }, testCase.expected, testCase.input);
+  }, testCase.expected);
   assert.ok(allPass(scores));
 });

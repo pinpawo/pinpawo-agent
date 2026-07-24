@@ -818,7 +818,7 @@ export const ghReadContentTool = tool(
         path: filePath,
         startLine,
         endLine: startLine + lineCount - 1,
-        maxChars: MAX_GH_CONTENT_CHARS,
+        maxBytes: MAX_GH_CONTENT_CHARS,
       });
       return JSON.stringify({ path: filePath, ...chunk });
     } catch (error) {
@@ -827,7 +827,7 @@ export const ghReadContentTool = tool(
   },
   {
     name: 'gh_read_content',
-    description: `按行读取 gh_issue_comments 生成的临时 Markdown。默认请求 ${DEFAULT_GH_CONTENT_LINE_COUNT} 行、最多 ${MAX_GH_CONTENT_LINE_COUNT} 行，但每次最多返回 ${MAX_GH_CONTENT_CHARS} 字符；根据 nextStartLine 继续读取。仅允许读取对应 cwd 下 .pinpawo/tmp/gh 中的文件。`,
+    description: `按行读取 gh_issue_comments 生成的临时 Markdown。默认请求 ${DEFAULT_GH_CONTENT_LINE_COUNT} 行、最多 ${MAX_GH_CONTENT_LINE_COUNT} 行，但每次正文最多返回 ${MAX_GH_CONTENT_CHARS} 字节；根据 nextStartLine 继续读取。仅允许读取对应 cwd 下 .pinpawo/tmp/gh 中的文件。`,
     schema: z.object({
       cwd: z.string().optional().describe('生成内容时返回的 cwd；默认当前 workdir'),
       path: z.string().min(1).describe('gh_issue_comments 返回的 commentsContent.path'),

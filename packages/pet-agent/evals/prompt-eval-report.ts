@@ -6,7 +6,7 @@ import type {
 } from './decision-stability.ts';
 import type { PromptEvalPricing } from './prompt-eval-usage.ts';
 
-export const PROMPT_EVAL_REPORT_VERSION = 2;
+export const PROMPT_EVAL_REPORT_VERSION = 3;
 
 export type PromptEvalRevision = {
   commit: string;
@@ -35,7 +35,7 @@ export type PromptEvalReport = {
   structuredOutputMethod: StructuredOutputMethod | 'provider-default' | 'not-applicable';
   evaluator: {
     mode: 'subject-model' | 'not-applicable';
-    version: 'answer-goal-v1' | 'not-applicable';
+    version: 'prompt-goal-v1' | 'not-applicable';
     model: PromptEvalModelMetadata | null;
     structuredOutputMethod: StructuredOutputMethod | 'provider-default' | 'not-applicable';
   };

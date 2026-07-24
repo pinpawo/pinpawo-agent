@@ -76,10 +76,10 @@ function validateCapabilityCandidateNames(params: OrchestrationDecisionSchemaPar
 export function buildTaskDecisionSchema() {
   return z.object({
     action: z.enum(['answer', 'direct_task', 'needs_plan']).describe(
-      'run 入口执行形态。answer=不进入 capability execution；direct_task=执行一个 boundary；needs_plan=先规划多个 boundaries。',
+      'run 入口执行形态。answer=不需要 capability execution；direct_task=需要 execution 且无需先 plan；needs_plan=需要 execution 且必须先 plan。',
     ),
     task: z.string().nullable().optional().describe(
-      'action=direct_task 时要执行的 capability execution boundary；其他 action 为 null 或省略。',
+      'action=direct_task 时要执行的完整任务；其他 action 为 null 或省略。',
     ),
     context_summary: z.string().nullable().optional().describe(
       'action=direct_task 时执行器需要的简短上下文；其他 action 为 null 或省略。',

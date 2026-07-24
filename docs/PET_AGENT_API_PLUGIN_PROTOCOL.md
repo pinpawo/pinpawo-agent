@@ -1,45 +1,77 @@
-# 能力插件协议
+# Capability 目录协议
 
-## 1. 插件结构
+## 1. 目录结构
 
 ```text
-<plugin-dir>/
-├─ manifest.json
-└─ index.js
+<capability-dir>/
+├─ CAPABILITY.md
+├─ references/      # 可选，当前不会自动注入
+└─ index.js         # 可选，仅用于 lifecycle.finalize
 ```
 
-### `manifest.json` 字段
+纯 Markdown Capability 只需要 `CAPABILITY.md`。
 
-1. `id: string`（必填）→ 与 `capability.name` 必须一致
-2. `name: string`（必填）
-3. `description: string`（必填）
-4. `icon: string`（必填）
-5. `color: string`（必填）
-6. `defaultEnabled: boolean`（必填）
-7. `builtIn: boolean`（用户插件必须是 `false`）
-8. `comingSoon?: boolean`（可选）
+## 2. CAPABILITY.md
 
-## 2. `index.js` 约束
+```md
+---
+name: web_research
+description: 调查网页资料、核验来源并输出带引用的研究结论。
+uses:
+  - browser
+  - web_search
+version: 1
+icon: magnifyingglass
+color: blue
+defaultEnabled: true
+---
 
-1. 必须导出 `createCapability()` 或 `default()`（返回 `AgentCapability`）。
-2. `AgentCapability.name` 与 `manifest.id` 一致。
-3. `createRuntime` 必须是函数。
-4. 若包含 `availability`，只允许 `cache: 'startup' | 'none'`。
+# Web Research
 
-## 3. 加载与安装入口
+## 目标
+...
+```
 
-1. 默认目录：`~/.pinpawo/capabilities/`
-2. 额外目录：
-   - 环境变量 `PINPAWO_CAPABILITY_DIRS`
-   - 本地配置 `capability_dirs`
-3. 安装命令：
-   - `pinpawo-agent capability install <directory>`
-   - `--link` 为软链接安装；否则拷贝（可重命名同名目录）
-4. 验证命令：
-   - `pinpawo-agent capability validate <directory>`
+必填字段：
 
-## 4. 扩展行为
+- `name`：稳定 ID；
+- `description`：用于 search / routing 的描述；
+- `uses`：required Toolkit 名称列表，可以为空；
+- `version`：当前必须为 `1`；
+- Markdown 正文：非空，最大 64 KiB。
 
-1. 插件缺失文件时直接被跳过或报错（install/validate 行为不同）。
-2. 同 ID 插件按扫描顺序 first-win。
-3. 重复 ID 在扫描阶段会跳过后者。
+可选字段：`icon`、`color`、`defaultEnabled`、`entry`。
+
+`builtIn` 由安装来源决定，作者不能声明。Loader 会计算正文 SHA-256
+digest，并在一次 registry generation 内保持内容不变。
+
+## 3. 可选 entry
+
+frontmatter 可声明：
+
+```yaml
+entry: ./index.js
+```
+
+entry 路径必须留在 Capability 目录内，不能通过 `..`、绝对路径或 symlink
+逃逸。模块只能导出：
+
+```js
+export const lifecycle = {
+  async finalize(result, context) {
+    // deterministic result ingest / artifact finalization only
+  },
+};
+```
+
+额外导出、`createRuntime`、Capability-owned tools 或通用 middleware 都会被拒绝。
+
+## 4. 加载与安装
+
+- 默认目录：`~/.pinpawo/capabilities/`
+- 额外目录：`PINPAWO_CAPABILITY_DIRS` 或本地配置 `capability_dirs`
+- 安装：`pinpawo-agent capability install <directory>`
+- 验证：`pinpawo-agent capability validate <directory>`
+- 同名 Capability 按扫描顺序 first-win，后者会被跳过并记录警告。
+
+旧 `manifest.json + createCapability()` 协议不再加载，也没有兼容层。

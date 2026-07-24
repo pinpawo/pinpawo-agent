@@ -121,7 +121,25 @@ export function createGeneralNode(params: {
     const result = await createSubagent({
       model: config.models.subagent ?? config.models.act,
       tools: toolList,
-      instructions: [executionInstruction, ...toolkitExecution.instructions, ...instructions],
+      promptSections: [
+        {
+          id: 'delegation-context',
+          owner: 'framework',
+          content: executionInstruction,
+        },
+        ...toolkitExecution.toolkits
+          .filter((toolkit) => Boolean(toolkit.instructions?.trim()))
+          .map((toolkit) => ({
+            id: `toolkit:${toolkit.name}`,
+            owner: toolkit.name,
+            content: toolkit.instructions as string,
+          })),
+        {
+          id: 'general-executor',
+          owner: 'framework',
+          content: instructions.join('\n'),
+        },
+      ],
       operations: collectGeneralOperations(toolkitExecution.toolkits),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,

@@ -1,17 +1,20 @@
-import { type AgentCapability } from '@pinpawo/pet-agent';
+import {
+  defineCapability,
+  defineInstructionDocument,
+  type AgentCapability,
+} from '@pinpawo/pet-agent';
 import { capabilityCreatorInstructions } from './instructions';
-import { capabilityCreatorResultSchema } from './schemas';
 
 export function createCapabilityCreatorCapability(): AgentCapability {
-  return {
+  return defineCapability({
     name: 'capability_creator',
-    description: '生成、修改并验证用户自定义 capability 插件模板。',
+    description: '生成、修改并验证用户自定义 CAPABILITY.md 目录。',
     uses: ['bash', 'capability_creator'],
-    createRuntime: async () => ({
-      instructions: capabilityCreatorInstructions,
+    instructions: defineInstructionDocument({
+      content: capabilityCreatorInstructions,
+      source: { kind: 'inline', id: 'builtin:capability_creator' },
     }),
-    resultSchema: capabilityCreatorResultSchema,
-  };
+  });
 }
 
 export { createCapabilityCreatorToolkit } from './tools';

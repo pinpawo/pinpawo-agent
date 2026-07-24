@@ -1,6 +1,7 @@
 # Pet Agent Toolkit Composition Design
 
-> 状态：Historical draft / current implementation background
+> 状态：Historical。V2 使用 Toolkit-owned `ToolDefinition` 和静态 required
+> `AgentCapability.uses`；下文 Toolset / `createRuntime` 示例不再有效。
 > 日期：2026-05-14
 > 后续方向：本文保留 Toolkit 组合的历史理由。已接受的目标契约见
 > [Capability / Toolkit Contract V2](./PET_AGENT_CAPABILITY_TOOLKIT_V2_DESIGN.md)，

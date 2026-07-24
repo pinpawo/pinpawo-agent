@@ -1,8 +1,4 @@
-import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
-import type { AgentActor, AgentModels } from '../../types/agent';
-import type { CapabilityRuntime } from '../../types/capability';
-import type { AgentExecution } from '../../types/agent';
 import type {
   AgentToolkit,
 } from '../../types/toolkit';
@@ -50,29 +46,6 @@ export function buildSubagentExecutionInstruction(params: {
   ].filter((line): line is string => line !== null);
 
   return lines.join('\n');
-}
-
-export async function resolveInstructions(
-  runtime: CapabilityRuntime,
-  params: {
-    models: AgentModels;
-    actor: AgentActor;
-    messages?: BaseMessage[];
-    availableToolkits?: ReadonlyArray<{ name: string; description: string }>;
-  },
-  execution?: AgentExecution,
-): Promise<string[]> {
-  if (!runtime.instructions) return [];
-  if (typeof runtime.instructions === 'function') {
-    return runtime.instructions({
-      models: params.models,
-      actor: params.actor,
-      messages: params.messages ?? [],
-      execution,
-      availableToolkits: params.availableToolkits,
-    });
-  }
-  return runtime.instructions;
 }
 
 export function selectCapabilityTools(toolkitTools: StructuredTool[]) {
@@ -135,7 +108,6 @@ export async function resolveToolkitExecution(
   toolkits: AgentToolkit[],
   names: string[] | undefined,
   ctx: ToolkitReviewRuntimeContext,
-  options: { includeInstructions?: boolean } = {},
 ) {
   const selectedToolkits = names === undefined
     ? toolkits
@@ -148,7 +120,6 @@ export async function resolveToolkitExecution(
     });
 
   const tools: StructuredTool[] = [];
-  const instructions: string[] = [];
   const reviewBindings: ToolkitReviewBinding[] = [];
   for (const toolkit of selectedToolkits) {
     const toolkitTools = toolkit.tools.map((definition) => definition.tool);
@@ -166,16 +137,12 @@ export async function resolveToolkitExecution(
         });
       }
     }
-    if (options.includeInstructions !== false && toolkit.instructions) {
-      instructions.push(toolkit.instructions);
-    }
   }
   const reviewMiddleware = createToolkitReviewMiddleware(reviewBindings, ctx, selectedToolkits);
 
   return {
     toolkits: selectedToolkits,
     tools,
-    instructions,
     middleware: reviewMiddleware ? [reviewMiddleware] : [],
   };
 }

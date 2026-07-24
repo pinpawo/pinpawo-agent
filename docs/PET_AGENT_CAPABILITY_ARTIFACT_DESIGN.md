@@ -1,6 +1,7 @@
 # Pet Agent Capability Artifact Design
 
-> 状态：Draft v1
+> 状态：Historical draft。下文 Capability `resultSchema`、`CapabilityContext`
+> 和 `afterRun` 早于 V2 cutover；当前使用窄化的 `lifecycle.finalize`。
 > 日期：2026-06-16
 > 关联：`PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md`、`CONTEXT_GOVERNANCE_REFACTOR.md`、`EXPLORE_KNOWLEDGE_INGEST_DESIGN.md`
 > 后续对齐：当前实现以

@@ -8,7 +8,11 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { AIMessage } from '@langchain/core/messages';
 import { buildDecisionStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
 import type { AgentContext } from './contextLoader';
-import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+  type AgentToolkit,
+} from '@pinpawo/pet-agent';
 
 function createContext(): AgentContext {
   return {
@@ -72,7 +76,10 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
     name: 'explore',
     description: 'extra explore capability',
     uses: [],
-    createRuntime: () => ({}),
+    instructions: defineInstructionDocument({
+      content: 'Explore.',
+      source: { kind: 'inline', id: 'test:explore' },
+    }),
   };
 
   const setup = buildLocalChatAgentInput({
@@ -343,24 +350,23 @@ test('buildLocalChatAgentInput passes model structured output strategy to explor
       };
     },
   } as unknown as BaseChatModel;
-  const runtime = await explore.createRuntime({
-    models: { act: model },
-    actor: {} as never,
-    messages: [],
-    availableToolkits: [],
-  });
-  const result = await runtime.middleware?.afterRun?.({
+  const finalize = explore.lifecycle?.finalize;
+  assert.ok(finalize);
+  const result = await finalize({
     messages: [new AIMessage('final explore evidence')],
     artifacts: [],
     completionReason: 'natural',
     announceMessageId: null,
   }, {
+    models: { act: model },
+    actor: {} as never,
+    messages: [],
     capabilityId: 'explore',
     delegationId: 'dg-1',
     runId: 'run-1',
   });
 
-  assert.match(String(result?.messages.at(-1)?.content ?? ''), /summary with viewed files/);
+  assert.match(String(result?.messages?.at(-1)?.content ?? ''), /summary with viewed files/);
   assert.deepEqual(capturedOptions, {
     name: 'explore_knowledge_ingest',
     method: 'jsonMode',

@@ -1,6 +1,9 @@
 # Capability Artifact Redesign
 
 > Date: 2026-06-17
+>
+> Historical: Capability `afterRun`, `CapabilityContext`, and executable
+> `resultSchema` were replaced by the V2 `lifecycle.finalize` boundary.
 > Status: Implemented (PR #140, on top of PR #134)
 
 ## Decision

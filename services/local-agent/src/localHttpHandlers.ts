@@ -1,5 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { StudioDueRunStatus, StudioDueRunStoreTrace } from '@pinpawo/pet-agent';
+import type {
+  AgentToolkit,
+  StudioDueRunStatus,
+  StudioDueRunStoreTrace,
+} from '@pinpawo/pet-agent';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
   getCachedCapabilityAvailability,
@@ -324,7 +328,11 @@ async function refreshRuntimeCapability(
   deps: LocalServerDeps,
   name: string,
 ): Promise<LocalServerCapabilityStatePatch | null> {
-  const localRecord = await refreshCapability(deps.localCapabilityDefinitions ?? [], name);
+  const localRecord = await refreshCapability(
+    deps.localCapabilityDefinitions ?? [],
+    name,
+    deps.localToolkits,
+  );
   const localToolkitRecord = await refreshToolkit(deps.localToolkitDefinitions ?? [], name);
   if (localRecord || localToolkitRecord) {
     return {
@@ -341,6 +349,7 @@ async function refreshRuntimeCapability(
   const userRecord = await refreshCapability(
     deps.userCapabilityDefinitions?.map((item) => item.capability) ?? [],
     userDefinition.capability.name,
+    deps.localToolkits,
   );
   return replaceUserCapability(deps, name, userRecord);
 }
@@ -352,12 +361,16 @@ function isCapabilityEnabled(id: string) {
 
 async function filterAvailableUserCapabilities(
   loaded: LoadedUserCapability[],
+  availableToolkits: readonly AgentToolkit[],
   options: { force?: boolean } = {},
 ): Promise<LoadedUserCapability[]> {
   const records = await Promise.all(
     loaded.map(async (item) => ({
       item,
-      availability: await resolveCapabilityAvailability(item.capability, options),
+      availability: await resolveCapabilityAvailability(item.capability, {
+        ...options,
+        availableToolkits,
+      }),
     })),
   );
   return records
@@ -371,7 +384,11 @@ async function rescanUserCapabilities(deps: LocalServerDeps) {
     : null;
   const definitions = runtimeRescan?.userCapabilityDefinitions ?? await loadUserCapabilities();
   const available = runtimeRescan?.userCapabilities
-    ?? await filterAvailableUserCapabilities(definitions, { force: true });
+    ?? await filterAvailableUserCapabilities(
+      definitions,
+      deps.localToolkits ?? [],
+      { force: true },
+    );
   return {
     patch: {
       userCapabilityDefinitions: definitions,

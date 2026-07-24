@@ -27,7 +27,10 @@ import {
   type OrchestrationDecisionStructuredOutputConfig,
 } from '../src/agent/createAgentRuntime';
 import type { AgentActor, AgentModels } from '../src/types/agent';
-import type { AgentCapability } from '../src/types/capability';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
 import { inferStructuredOutputMethod } from '../src/utils/structuredOutput';
 import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
@@ -382,40 +385,43 @@ const mockGeneralToolkit = defineToolkit({
   tools: mockTools,
 });
 
+function evalCapability(
+  name: string,
+  description: string,
+  instructions: string,
+): AgentCapability {
+  return {
+    name,
+    description,
+    uses: ['eval_general'],
+    instructions: defineInstructionDocument({
+      content: instructions,
+      source: { kind: 'inline', id: `eval:${name}` },
+    }),
+  };
+}
+
 const mockCapabilities: AgentCapability[] = [
-  {
-    name: 'explore',
-    description: '通用探索、调查、资料检索和代码库理解 capability。适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。',
-    createRuntime: () => ({
-      uses: ['eval_general'],
-      instructions: ['负责只读探索、代码库理解、资料检索和证据汇总。'],
-      tools: [],
-    }),
-  },
-  {
-    name: 'daily_post',
-    description: '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿，并产出本轮动态处理结果。',
-    createRuntime: () => ({
-      instructions: ['负责宠物日常内容生成、草稿保存和发布前确认。'],
-      tools: [],
-    }),
-  },
-  {
-    name: 'trend_observe',
-    description: '浏览或搜索最新的小红书热点/内容趋势，并选出适合宠物账号继续处理的一条。',
-    createRuntime: () => ({
-      instructions: ['负责观察内容趋势并给出适合宠物账号的候选主题。'],
-      tools: [],
-    }),
-  },
-  {
-    name: 'browser',
-    description: '使用本机浏览器打开网页、复用登录态、操作页面、等待页面变化并提取页面内容。',
-    createRuntime: () => ({
-      instructions: ['负责浏览器页面访问、交互和内容提取。'],
-      tools: [],
-    }),
-  },
+  evalCapability(
+    'explore',
+    '通用探索、调查、资料检索和代码库理解 capability。适合大量阅读、搜索、检查上下文、梳理证据、先探索再决定下一步的任务。',
+    '负责只读探索、代码库理解、资料检索和证据汇总。',
+  ),
+  evalCapability(
+    'daily_post',
+    '生成、保存或跳过宠物 daily post、小红书日常动态、宠物发帖草稿，并产出本轮动态处理结果。',
+    '负责宠物日常内容生成、草稿保存和发布前确认。',
+  ),
+  evalCapability(
+    'trend_observe',
+    '浏览或搜索最新的小红书热点/内容趋势，并选出适合宠物账号继续处理的一条。',
+    '负责观察内容趋势并给出适合宠物账号的候选主题。',
+  ),
+  evalCapability(
+    'browser',
+    '使用本机浏览器打开网页、复用登录态、操作页面、等待页面变化并提取页面内容。',
+    '负责浏览器页面访问、交互和内容提取。',
+  ),
 ];
 
 function resolveCapabilityList(pack: unknown): AgentCapability[] {

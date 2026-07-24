@@ -1,10 +1,10 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
+  defineInstructionDocument,
   defineToolkit,
   extractCapabilityKeywords,
   readRecord,
@@ -17,6 +17,7 @@ import {
   type NamedStructuredTool,
   type ToolOperationMetadata,
 } from '@pinpawo/pet-agent';
+import { validateCapabilityPlugin } from '../../capabilityLoader';
 import {
   capabilityCreatorResultSchema,
   checkCapabilityKeywordsInputSchema,
@@ -134,54 +135,42 @@ const capabilityCreatorOperationMetadata = {
   ToolOperationMetadata
 >;
 
-function renderManifest(params: {
+function renderCapabilityDocument(params: {
   id: string;
   name: string;
   description: string;
   icon: string;
   color: string;
-}) {
-  return `${json({
-    id: params.id,
-    name: params.name,
-    description: params.description,
-    icon: params.icon,
-    color: params.color,
-    defaultEnabled: true,
-    builtIn: false,
-  })}\n`;
-}
-
-function renderIndexJs(params: {
-  id: string;
-  description: string;
   task: string;
 }) {
-  return `export function createCapability() {
-  return {
-    name: ${JSON.stringify(params.id)},
-    description: ${JSON.stringify(params.description)},
-    uses: ['bash'],
-    availability: {
-      cache: 'startup',
-      check: async () => ({
-        available: true,
-        reason: 'template capability has no external runtime dependency',
-      }),
-    },
-    createRuntime: async () => ({
-      instructions: [
-        ${JSON.stringify(`你负责：${params.task}`)},
-        ${JSON.stringify('先把用户目标拆成明确步骤，再决定要读取、写入或更新哪些文件。')},
-        ${JSON.stringify('修改文件前先确认目录和现有内容；可读文本优先使用 view_file_chunk；PDF、Word、表格、图片等非文本文件才用 read_file；编辑优先使用 apply_patch，只有需要整体重写时才用 write_file。')},
-        ${JSON.stringify('如果需要新增或调整 capability 插件文件，保持 manifest.json 的 id 与这里导出的 name 完全一致。')},
-        ${JSON.stringify('完成后总结产出的文件、验证结果，以及用户接下来需要手动确认或补充的内容。')},
-      ],
-    }),
-  };
-}
+  return `---
+name: ${params.id}
+description: ${JSON.stringify(params.description)}
+uses:
+  - bash
+version: 1
+icon: ${JSON.stringify(params.icon)}
+color: ${JSON.stringify(params.color)}
+defaultEnabled: true
+---
 
-export default createCapability;
+# ${params.name}
+
+## 目标
+
+${params.task}
+
+## 工作流程
+
+1. 先把用户目标拆成明确步骤，再决定要读取、写入或更新哪些文件。
+2. 修改文件前先确认目录和现有内容。
+3. 可读文本优先使用 \`view_file_chunk\`；PDF、Word、表格、图片等非文本文件才使用对应工具。
+4. 编辑优先使用 \`apply_patch\`，只有需要整体重写时才使用 \`write_file\`。
+5. 完成后总结产出的文件、验证结果，以及用户接下来需要手动确认或补充的内容。
+
+## 约束与边界
+
+所有工具都来自 frontmatter 的 \`uses\` 所声明的 Toolkit。不要在 Capability 中创建、替换或动态注入工具。
 `;
 }
 
@@ -197,9 +186,9 @@ function renderReadme(params: {
 ${params.description}
 
 ## Files
-- \`manifest.json\`: UI metadata and capability id
-- \`index.js\`: runtime entry loaded by local-agent
-- \`index.test.mjs\`: dependency-free smoke test
+- \`CAPABILITY.md\`: routing metadata, Toolkit dependencies, and immutable instructions
+- \`index.js\`: optional finalize-only lifecycle entry, only when declared by frontmatter
+- \`index.test.mjs\`: dependency-free document smoke test
 
 ## Install location
 \`${params.rootDir}\`
@@ -212,8 +201,8 @@ node ${JSON.stringify(resolve(params.rootDir, 'index.test.mjs'))}
 ## Notes
 - This template is intentionally dependency-free so it can be loaded from \`~/.pinpawo/capabilities\` without a local \`node_modules\`.
 - If you later need custom tools or typed source files, either add local dependencies inside this plugin directory, or place the plugin inside a repo path and append that path to \`capability_dirs\`.
-- Keep \`manifest.json.id\` and \`createCapability().name\` identical.
-- \`availability.check\` runs when local-agent starts, and again only on explicit refresh. Return \`available: false\` if required files, binaries, credentials, or services are missing.
+- Capability availability is derived from the Toolkits required by \`uses\`.
+- Model-invoked actions and external business effects must be implemented by Toolkit tools.
 
 ## Capability goal
 ${params.description}
@@ -221,27 +210,15 @@ ${params.description}
 }
 
 function renderSmokeTest(params: { id: string; rootDir: string }) {
-  const manifestPath = resolve(params.rootDir, 'manifest.json');
+  const capabilityPath = resolve(params.rootDir, 'CAPABILITY.md');
   return `import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createCapability } from './index.js';
 
-const capability = createCapability();
-assert.equal(capability.name, ${JSON.stringify(params.id)});
-assert.equal(typeof capability.description, 'string');
-assert.equal(typeof capability.createRuntime, 'function');
-if (capability.availability) {
-  assert.equal(typeof capability.availability.check, 'function');
-  const availability = await capability.availability.check();
-  assert.equal(typeof availability.available, 'boolean');
-}
-
-const runtime = await capability.createRuntime({});
-assert.ok(Array.isArray(runtime.instructions), 'runtime.instructions should be an array');
-
-const manifest = JSON.parse(await readFile(${JSON.stringify(manifestPath)}, 'utf-8'));
-assert.equal(manifest.id, capability.name);
-assert.equal(manifest.builtIn, false);
+const document = await readFile(${JSON.stringify(capabilityPath)}, 'utf-8');
+assert.match(document, /^---\\n/);
+assert.match(document, /name:\\s*${params.id}/);
+assert.match(document, /uses:\\n(?:\\s+-\\s+.+\\n)+/);
+assert.match(document, /\\n---\\n\\n# /);
 
 console.log('capability scaffold ok');
 `;
@@ -256,26 +233,6 @@ function renderPackageJson(id: string) {
       test: 'node index.test.mjs',
     },
   })}\n`;
-}
-
-type PluginCapabilityShape = {
-  name?: string;
-  description?: string;
-  uses?: unknown;
-  availability?: {
-    check?: (...args: unknown[]) => unknown;
-    cache?: unknown;
-  };
-  createRuntime?: (...args: unknown[]) => unknown;
-};
-
-async function readPluginCapability(indexPath: string): Promise<PluginCapabilityShape | null> {
-  const mod = await import(`${pathToFileURL(indexPath).href}?t=${Date.now()}`) as {
-    createCapability?: () => PluginCapabilityShape;
-    default?: () => PluginCapabilityShape;
-  };
-  const factory = mod.createCapability ?? mod.default;
-  return typeof factory === 'function' ? factory() : null;
 }
 
 function defaultKeywordQueries(params: { name: string; description: string; keywords: string[] }) {
@@ -295,7 +252,10 @@ function checkCapabilityKeywordQueries(params: {
     name: params.name,
     description: params.description,
     uses: [],
-    createRuntime: () => ({}),
+    instructions: defineInstructionDocument({
+      content: 'Keyword search fixture.',
+      source: { kind: 'inline', id: `keyword-check:${params.name}` },
+    }),
   };
   const keywords = extractCapabilityKeywords(`${params.name} ${params.description}`);
   const queries = (params.queries?.length ? params.queries : defaultKeywordQueries({
@@ -345,16 +305,12 @@ export function createScaffoldCapabilityPluginTool(): StructuredTool {
 
         const rootDir = resolveCapabilityRoot(input.rootDir, capabilityId);
         const files = [
-          { path: resolve(rootDir, 'manifest.json'), content: renderManifest({
+          { path: resolve(rootDir, 'CAPABILITY.md'), content: renderCapabilityDocument({
             id: capabilityId,
             name: input.name.trim(),
             description: input.description.trim(),
             icon: input.icon?.trim() || 'wand.and.stars',
             color: input.color?.trim() || 'purple',
-          }) },
-          { path: resolve(rootDir, 'index.js'), content: renderIndexJs({
-            id: capabilityId,
-            description: input.description.trim(),
             task: input.task.trim(),
           }) },
           ...((input.includeReadme ?? true)
@@ -412,7 +368,7 @@ export function createScaffoldCapabilityPluginTool(): StructuredTool {
     },
     {
       name: 'scaffold_capability_plugin',
-      description: '在本地生成一个可加载的 PinPawo capability 插件模板。默认写到 ~/.pinpawo/capabilities/<id>/，并生成 manifest.json、index.js、README.md、index.test.mjs、package.json。',
+      description: '在本地生成一个可加载的 PinPawo CAPABILITY.md 模板。默认写到 ~/.pinpawo/capabilities/<id>/；只有确定需要 finalize 时才应另加代码 entry。',
       schema: scaffoldCapabilityPluginInputSchema,
       responseFormat: 'content_and_artifact',
     },
@@ -424,81 +380,38 @@ export function createValidateCapabilityPluginTool(): StructuredTool {
     async ({ rootDir }) => {
       try {
         const dir = resolve(expandHome(rootDir));
-        const manifestPath = resolve(dir, 'manifest.json');
-        const indexPath = resolve(dir, 'index.js');
-        const warnings: string[] = [];
-
-        if (!existsSync(manifestPath) || !existsSync(indexPath)) {
+        const validation = await validateCapabilityPlugin(dir);
+        if (!validation.ok || !validation.capability) {
           return toolResult({
             status: 'failed',
             capabilityId: null,
             rootDir: dir,
-            files: [manifestPath, indexPath].filter((path) => existsSync(path)),
-            note: 'manifest.json 或 index.js 缺失，无法验证。',
+            files: [
+              validation.capabilityPath,
+              ...(validation.entryPath ? [validation.entryPath] : []),
+            ].filter((path) => existsSync(path)),
+            note: validation.errors.join('; '),
           });
         }
 
-        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>;
-        const capability = await readPluginCapability(indexPath);
-        if (!capability) {
-          return toolResult({
-            status: 'failed',
-            capabilityId: null,
-            rootDir: dir,
-            files: [manifestPath, indexPath],
-            note: 'index.js 必须导出 createCapability() 或默认导出。',
-          });
-        }
-
-        if (
-          !capability?.name
-          || !Array.isArray(capability.uses)
-          || capability.uses.some((name) => typeof name !== 'string' || !name.trim())
-          || typeof capability.createRuntime !== 'function'
-        ) {
-          return toolResult({
-            status: 'failed',
-            capabilityId: null,
-            rootDir: dir,
-            files: [manifestPath, indexPath],
-            note: 'createCapability() 返回的对象必须包含 name、uses 和 createRuntime。',
-          });
-        }
-        if (typeof capability.description !== 'string' || !capability.description.trim()) {
-          warnings.push('capability.description 不能为空；capability_search 依赖 name + description 做候选发现');
-        }
+        const capability = validation.capability;
+        const warnings = [...validation.warnings];
         const keywordResult = checkCapabilityKeywordQueries({
           name: capability.name,
-          description: capability.description ?? '',
+          description: capability.description,
         });
         if (keywordResult.keywords.length < 3) {
           warnings.push('capability.description 可检索关键词偏少；建议加入用户会说的核心短语，并用逗号/顿号分隔');
-        }
-
-        if (manifest.id !== capability.name) {
-          warnings.push(`manifest.id (${String(manifest.id)}) 与 capability.name (${capability.name}) 不一致`);
-        }
-        if (manifest.builtIn !== false) {
-          warnings.push('建议用户插件的 manifest.json 中显式写 builtIn: false');
-        }
-        if (capability.availability) {
-          if (typeof capability.availability.check !== 'function') {
-            warnings.push('capability.availability.check 必须是函数，否则 local-agent 无法做启动期可用性判断');
-          }
-          if (
-            capability.availability.cache !== undefined
-            && capability.availability.cache !== 'startup'
-            && capability.availability.cache !== 'none'
-          ) {
-            warnings.push('capability.availability.cache 只支持 startup 或 none');
-          }
         }
 
         return toolResult({
           status: 'validated',
           capabilityId: capability.name,
           rootDir: dir,
-          files: [manifestPath, indexPath],
+          files: [
+            validation.capabilityPath,
+            ...(validation.entryPath ? [validation.entryPath] : []),
+          ],
           note: `验证完成：${basename(dir)}`,
           warnings,
           keywords: keywordResult.keywords,
@@ -515,7 +428,7 @@ export function createValidateCapabilityPluginTool(): StructuredTool {
     },
     {
       name: 'validate_capability_plugin',
-      description: '验证某个 capability 插件目录是否包含有效的 manifest.json 和 index.js，并检查 createCapability 导出和 id 对齐情况。',
+      description: '验证某个 capability 目录是否包含有效的 CAPABILITY.md；如声明 entry，同时检查它只导出 lifecycle.finalize。',
       schema: validateCapabilityPluginInputSchema,
       responseFormat: 'content_and_artifact',
     },
@@ -527,37 +440,27 @@ export function createCheckCapabilityKeywordsTool(): StructuredTool {
     async (input) => {
       try {
         const dir = input.rootDir ? resolve(expandHome(input.rootDir)) : null;
-        const indexPath = dir ? resolve(dir, 'index.js') : null;
-        const manifestPath = dir ? resolve(dir, 'manifest.json') : null;
         let capabilityId = input.name?.trim() || null;
         let description = input.description?.trim() || '';
         const files: string[] = [];
 
         if (dir) {
-          if (!indexPath || !existsSync(indexPath)) {
+          const validation = await validateCapabilityPlugin(dir);
+          if (!validation.ok || !validation.capability) {
             return toolResult({
               status: 'failed',
               capabilityId: null,
               rootDir: dir,
-              files,
-              note: 'index.js 缺失，无法读取 capability.name/description。',
+              files: existsSync(validation.capabilityPath)
+                ? [validation.capabilityPath]
+                : [],
+              note: validation.errors.join('; '),
             });
           }
-          files.push(indexPath);
-          if (manifestPath && existsSync(manifestPath)) files.push(manifestPath);
-
-          const capability = await readPluginCapability(indexPath);
-          if (!capability?.name) {
-            return toolResult({
-              status: 'failed',
-              capabilityId: null,
-              rootDir: dir,
-              files,
-              note: 'index.js 必须导出 createCapability() 或默认导出，并返回 name。',
-            });
-          }
-          capabilityId = capability.name;
-          description = typeof capability.description === 'string' ? capability.description : '';
+          files.push(validation.capabilityPath);
+          if (validation.entryPath) files.push(validation.entryPath);
+          capabilityId = validation.capability.name;
+          description = validation.capability.description;
         }
 
         if (!capabilityId || !description) {

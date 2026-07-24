@@ -17,7 +17,7 @@ export type ToolkitAvailabilityRecord = {
 
 const defaultAvailable: CapabilityAvailability = {
   available: true,
-  reason: 'no availability check',
+  reason: 'Capability availability is derived from required Toolkits',
 };
 
 const defaultToolkitAvailable: ToolkitAvailability = {
@@ -26,13 +26,6 @@ const defaultToolkitAvailable: ToolkitAvailability = {
 
 const cachedAvailability = new Map<string, CapabilityAvailabilityRecord>();
 const cachedToolkitAvailability = new Map<string, ToolkitAvailabilityRecord>();
-
-function unavailableFromError(error: unknown): CapabilityAvailability {
-  return {
-    available: false,
-    reason: error instanceof Error ? error.message : 'availability check failed',
-  };
-}
 
 function unavailableToolkitFromError(error: unknown): ToolkitAvailability {
   return {
@@ -47,28 +40,40 @@ export function getCachedCapabilityAvailability(name: string): CapabilityAvailab
 
 export async function resolveCapabilityAvailability(
   capability: AgentCapability,
-  options: { force?: boolean } = {},
+  options: {
+    force?: boolean;
+    availableToolkits?: readonly AgentToolkit[];
+  } = {},
 ): Promise<CapabilityAvailabilityRecord> {
-  const cacheMode = capability.availability?.cache ?? 'startup';
-  if (!options.force && cacheMode !== 'none') {
+  if (!options.force) {
     const cached = cachedAvailability.get(capability.name);
     if (cached) return cached;
   }
 
-  const availability = capability.availability
-    ? await Promise.resolve(capability.availability.check()).catch(unavailableFromError)
+  const availableToolkitNames = options.availableToolkits
+    ? new Set(options.availableToolkits.map((toolkit) => toolkit.name))
+    : null;
+  const missingToolkits = availableToolkitNames
+    ? capability.uses.filter((name) => !availableToolkitNames.has(name))
+    : [];
+  const availability: CapabilityAvailability = missingToolkits.length > 0
+    ? {
+        available: false,
+        reason: `required Toolkit unavailable: ${missingToolkits.join(', ')}`,
+        metadata: { missingToolkitCount: missingToolkits.length },
+      }
     : defaultAvailable;
-
   const record = { capability, availability };
-  if (cacheMode !== 'none') {
-    cachedAvailability.set(capability.name, record);
-  }
+  cachedAvailability.set(capability.name, record);
   return record;
 }
 
 export async function resolveAvailableCapabilities(
   capabilities: AgentCapability[],
-  options: { force?: boolean } = {},
+  options: {
+    force?: boolean;
+    availableToolkits?: readonly AgentToolkit[];
+  } = {},
 ): Promise<AgentCapability[]> {
   const records = await Promise.all(
     capabilities.map((capability) => resolveCapabilityAvailability(capability, options)),
@@ -111,10 +116,14 @@ export async function resolveAvailableToolkits(
 export async function refreshCapability(
   capabilities: AgentCapability[],
   name: string,
+  availableToolkits?: readonly AgentToolkit[],
 ): Promise<CapabilityAvailabilityRecord | null> {
   const capability = capabilities.find((item) => item.name === name);
   if (!capability) return null;
-  return resolveCapabilityAvailability(capability, { force: true });
+  return resolveCapabilityAvailability(capability, {
+    force: true,
+    availableToolkits,
+  });
 }
 
 export async function refreshToolkit(

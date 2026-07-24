@@ -2,7 +2,7 @@
 
 ## 版本信息
 
-- 日期：`2026-06-25`
+- 日期：`2026-07-24`
 - 目标：`packages/pet-agent` 与 `services/local-agent` 的接口边界
 - 适用：Open Source 公开文档版本（代码行为请以实现为准）
 
@@ -16,8 +16,8 @@
    - `pinpawo-agent` CLI
    - `capability` 子命令
 3. **扩展协议**
-   - 用户能力插件（manifest + index.js）
-   - toolkit/capability 运行时契约
+   - 用户 Capability（`CAPABILITY.md`）
+   - Toolkit / Capability V2 静态契约
 
 ## 核心边界
 

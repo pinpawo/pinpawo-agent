@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { StructuredTool } from '@langchain/core/tools';
-import type { AgentCapability, AgentToolkit } from '@pinpawo/pet-agent';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+  type AgentToolkit,
+} from '@pinpawo/pet-agent';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
@@ -12,7 +16,10 @@ function capability(name: string, uses: readonly string[] = []): AgentCapability
     name,
     description: `${name} capability`,
     uses,
-    createRuntime: () => ({}),
+    instructions: defineInstructionDocument({
+      content: `Execute ${name}.`,
+      source: { kind: 'inline', id: `test:${name}` },
+    }),
   };
 }
 

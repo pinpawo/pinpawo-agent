@@ -1,13 +1,17 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import { clipForPrompt, invokeStructuredOutput } from '@pinpawo/pet-agent';
+import {
+  clipForPrompt,
+  defineCapability,
+  defineInstructionDocument,
+  invokeStructuredOutput,
+} from '@pinpawo/pet-agent';
 import { randomUUID } from 'node:crypto';
 import type {
   AgentCapability,
   CapabilityArtifactStore,
-  CapabilityMiddlewareContext,
+  CapabilityFinalizeContext,
   OrchestrationDecisionStructuredOutputConfig,
-  SubagentResult,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 
@@ -26,12 +30,6 @@ export type ExploreCapabilityOptions = {
   structuredOutput?: OrchestrationDecisionStructuredOutputConfig;
   uses?: readonly string[];
 };
-
-export const exploreResultSchema = z.object({
-  status: z.enum(['progress', 'completed']),
-  summary: z.string().min(1),
-  nextSteps: z.array(z.string().min(1)),
-});
 
 const exploreEvidenceItemSchema = z.object({
   source: z.string().min(1),
@@ -99,7 +97,7 @@ function readExploreSummary(message: BaseMessage): string | null {
   return extractExploreSummaryFromContent(content);
 }
 
-function readLatestExploreSummary(messages: BaseMessage[]): string | null {
+function readLatestExploreSummary(messages: readonly BaseMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const summary = readExploreSummary(messages[index]);
     if (summary) return summary;
@@ -107,7 +105,7 @@ function readLatestExploreSummary(messages: BaseMessage[]): string | null {
   return null;
 }
 
-function readLatestSubagentContextSummary(messages: BaseMessage[]): string | null {
+function readLatestSubagentContextSummary(messages: readonly BaseMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.additional_kwargs?.lc_source !== 'summarization') continue;
@@ -120,12 +118,12 @@ function readLatestSubagentContextSummary(messages: BaseMessage[]): string | nul
 /**
  * Persist the latest explore summary as a report artifact: markdown summary as
  * content, structured evidence ({source, proves, value}[]) in metadata.
- * Record into state via capability afterRun so the ref is visible across runs.
+ * Record into state via capability finalize so the ref is visible across runs.
  * No-op when the store or addressing context is unavailable.
  */
 async function recordExploreIngestArtifact(
   store: CapabilityArtifactStore | undefined,
-  sink: CapabilityMiddlewareContext | undefined,
+  sink: CapabilityFinalizeContext | undefined,
   ingest: ExploreKnowledgeIngest,
 ): Promise<void> {
   if (!store || !sink?.recordCapabilityArtifact || !sink.threadId || !sink.delegationId || !sink.runId) {
@@ -164,7 +162,7 @@ function readMessageStatus(message: BaseMessage): ExploreResult['status'] | null
   return null;
 }
 
-function readLatestStatus(messages: BaseMessage[]): ExploreResult['status'] {
+function readLatestStatus(messages: readonly BaseMessage[]): ExploreResult['status'] {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const status = readMessageStatus(messages[index]);
     if (status) return status;
@@ -172,7 +170,7 @@ function readLatestStatus(messages: BaseMessage[]): ExploreResult['status'] {
   return 'completed';
 }
 
-export function readExploreResult(messages: BaseMessage[]): ExploreResult | null {
+export function readExploreResult(messages: readonly BaseMessage[]): ExploreResult | null {
   const summary = readLatestExploreSummary(messages);
   return summary ? { status: readLatestStatus(messages), summary, nextSteps: [] } : null;
 }
@@ -297,7 +295,7 @@ async function buildFinalExploreIngest(params: {
 }
 
 export function createExploreCapability(options: ExploreCapabilityOptions = {}): AgentCapability {
-  return {
+  return defineCapability({
     name: 'explore',
     description: [
       '通用探索、调查、资料检索和代码库理解 capability。',
@@ -306,16 +304,42 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
       '只做只读调查和总结，不修改文件、不执行外部真实副作用。',
     ].join(' '),
     uses: options.uses ?? DEFAULT_EXPLORE_TOOLKITS,
-    createRuntime: async (context) => {
-      const ingestModel = context.models.observe ?? context.models.subagent ?? context.models.act;
-      const artifactStore = context.artifactStore;
-      const previousSummary = readLatestExploreSummary(context.messages)
-        ?? readLatestSubagentContextSummary(context.messages);
+    instructions: defineInstructionDocument({
+      source: { kind: 'inline', id: 'builtin:explore' },
+      content: `# Explore
 
-      const middleware: {
-        afterRun: (result: SubagentResult, middlewareCtx: CapabilityMiddlewareContext) => Promise<SubagentResult>;
-      } = {
-        afterRun: async (result, middlewareCtx) => {
+## 目标
+
+只读取、检查、搜索、观察和总结上下文。
+
+## 工作流程
+
+使用可用工具在执行过程中自行规划探索。优先确认候选范围，再读取详细
+内容；避免无界浏览或无目的扫描。
+
+代码 review、PR review、pull request review、diff 审查和仓库变更评审
+必须优先使用 git Toolkit，尤其是 \`gh_pr_view\`、\`gh_pr_diff\`、
+\`git_diff\`、\`git_show\`；不要使用 browser、\`http_fetch\` 或
+\`download_file\` 拉取 GitHub PR 页面、diff 或评论。
+
+## 约束与边界
+
+不要修改文件，不要提交、推送、删除、写入、发送消息、发布内容，或执行
+任何外部真实副作用。
+
+重要发现必须保留精确来源。运行时可能把较早执行上下文总结为摘要，需要
+细节时用 \`view_file\` 等工具按来源回查。
+
+## 输出要求
+
+结论必须包含简洁探索摘要、已查看文件列表、关键发现、证据引用（文件路径、
+URL、issue / PR 编号或命令输出来源）和建议下一步。`,
+    }),
+    lifecycle: {
+      finalize: async (result, context) => {
+          const ingestModel = context.models.observe ?? context.models.subagent ?? context.models.act;
+          const previousSummary = readLatestExploreSummary(context.messages)
+            ?? readLatestSubagentContextSummary(context.messages);
           const messagesFromMetadata = result.messages;
           const summaryFromMetadata = readLatestExploreSummary(messagesFromMetadata);
           const contextSummary = readLatestSubagentContextSummary(messagesFromMetadata);
@@ -342,14 +366,8 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
 
           try {
             await recordExploreIngestArtifact(
-              artifactStore,
-              {
-                recordCapabilityArtifact: middlewareCtx.recordCapabilityArtifact,
-                threadId: middlewareCtx.threadId,
-                capabilityId: middlewareCtx.capabilityId,
-                delegationId: middlewareCtx.delegationId,
-                runId: middlewareCtx.runId,
-              },
+              context.artifactStore,
+              context,
               ingest,
             );
           } catch (error) {
@@ -360,28 +378,12 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
             );
           }
           return {
-            ...result,
             messages: nextMessages,
             announceMessageId: result.announceMessageId
               ?? generatedSummaryMessage?.id
               ?? null,
           };
         },
-      };
-
-      return {
-        middleware,
-        instructions: [
-          '你是通用探索 capability。只读取、检查、搜索、观察和总结上下文。',
-          '不要修改文件，不要提交、推送、删除、写入、发送消息、发布内容，或执行任何外部真实副作用。',
-          '使用可用工具在执行过程中自行规划探索；createRuntime 阶段不做额外模型规划。',
-          '优先先确认候选范围，再读取详细内容；避免无界浏览或无目的扫描。',
-          '代码 review、PR review、pull request review、diff 审查和仓库变更评审必须优先使用 git toolkit，尤其是 gh_pr_view、gh_pr_diff、git_diff、git_show；不要使用 browser、http_fetch 或 download_file 拉取 GitHub PR 页面、diff 或评论。',
-          '重要发现必须保留精确来源；运行时可能把较早执行上下文总结为摘要，需要细节时用 view_file 等工具按来源回查。',
-          '结论必须包含简洁探索摘要、已查看文件列表、关键发现、证据引用（文件路径、URL、issue/PR 编号或命令输出来源）和建议下一步。',
-        ],
-      };
     },
-    resultSchema: exploreResultSchema,
-  };
+  });
 }

@@ -1,7 +1,11 @@
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 
-import type { AgentCapability } from '../../types/capability';
+import {
+  defineCapability,
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../../types/capability';
 import type { PetAgentStatus } from '../../types/studio';
 import { defineToolkit } from '../../types/toolkit';
 import type {
@@ -173,13 +177,14 @@ export function createPlanToolkit(
 }
 
 export function createPlanCapability(): AgentCapability {
-  return {
+  return defineCapability({
     name: 'studio_plan',
     description: 'Planner 唯一的目标:把用户请求拆解为 worker tasks 并加入 Studio runner queue。'
       + 'tasks 入队后 planner 退出,workers 接手执行 —— planner 本身不做实际工作。',
     uses: ['studio_plan'],
-    createRuntime() {
-      const instructions = [
+    instructions: defineInstructionDocument({
+      source: { kind: 'inline', id: 'builtin:studio_plan' },
+      content: [
         // 角色定位:规划者,不是执行者
         '【你的角色】你是 Studio 的 **planner**。'
           + '你的产出是写入 Studio runner queue 的 worker tasks。'
@@ -207,11 +212,7 @@ export function createPlanCapability(): AgentCapability {
 
         // 真无法规划
         '【无法规划】如果用户请求完全超出 Studio 能力范围或意图根本不明,可以选 finish 说明,turn 会被视为 stop,用户可在下一 turn 补充后重新触发。',
-      ];
-
-      return {
-        instructions,
-      };
-    },
-  };
+      ].join('\n\n'),
+    }),
+  });
 }

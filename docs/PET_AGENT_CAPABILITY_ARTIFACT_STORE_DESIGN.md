@@ -1,5 +1,9 @@
 # Capability Artifact Store 设计（文档版）
 
+> V2 注记：Capability 代码现在只通过窄化的
+> `CapabilityFinalizeContext` 接收 store；下文 `CapabilityContext` /
+> `afterRun` 是迁移前 API。
+
 本文档是 `Pet Agent` 体系里“产物持久化”层的单文件说明。  
 目标：把可复用的持久内容和执行时日志明确分离，避免把 `lane` 级临时消息当成可长期依赖的存储。
 

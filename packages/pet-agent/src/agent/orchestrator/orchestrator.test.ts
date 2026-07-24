@@ -7,7 +7,10 @@ import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { Command, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
 import { createMiddleware, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
-import type { AgentCapability } from '../../types/capability';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../../types/capability';
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type {
   AgentToolkit,
@@ -74,7 +77,10 @@ function capability(
     name,
     description,
     uses,
-    createRuntime: () => ({}),
+    instructions: defineInstructionDocument({
+      content: `Execute the ${name} capability.`,
+      source: { kind: 'inline', id: `test:${name}` },
+    }),
   };
 }
 
@@ -164,7 +170,7 @@ async function runToolkitToolCall(
     }),
     tools: resources.tools,
     middleware: resources.middleware,
-    instructions: [],
+    promptSections: [],
     operations: collectGeneralOperations(resources.toolkits),
     messages: [new HumanMessage(`call ${toolCalls.map((call) => call.name).join(', ')}`)],
   });
@@ -1293,9 +1299,14 @@ test('limit-reached progress announce lets model choose the same capability dele
     name: 'inspect_repo',
     description: 'Inspect repository.',
     uses: [],
-    createRuntime: () => {
-      capabilityRunCount += 1;
-      return {};
+    instructions: defineInstructionDocument({
+      content: 'Inspect the repository.',
+      source: { kind: 'inline', id: 'test:inspect_repo' },
+    }),
+    lifecycle: {
+      finalize: () => {
+        capabilityRunCount += 1;
+      },
     },
   };
   const graph = createOrchestratorGraph({
@@ -1393,7 +1404,7 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
   });
 
   assert.deepEqual(browserExecution.tools.map((toolItem) => toolItem.name), ['browser_open']);
-  assert.deepEqual(browserExecution.instructions, ['browser rules']);
+  assert.equal(browserExecution.toolkits[0]?.instructions, 'browser rules');
   assert.deepEqual(allExecution.tools.map((toolItem) => toolItem.name), ['browser_open', 'read_file']);
 
   const selectedTools = selectCapabilityTools([
@@ -1418,9 +1429,9 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
   ]);
 });
 
-test('capability runtime sees metadata only for Toolkits authorized by fixed uses', async () => {
+test('capability receives tools only from Toolkits authorized by fixed uses', async () => {
   let routeCallCount = 0;
-  let runtimeToolkitNames: string[] = [];
+  let capabilityToolNames: string[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -1440,18 +1451,21 @@ test('capability runtime sees metadata only for Toolkits authorized by fixed use
     }),
   } as unknown as AgentModels['act'];
   const subagentModel = new FakeToolCallingModel({ toolCalls: [[]] });
+  const bindTools = subagentModel.bindTools.bind(subagentModel);
+  (subagentModel as unknown as {
+    bindTools: (tools: Array<{ name: string }>) => unknown;
+  }).bindTools = (tools) => {
+    capabilityToolNames = tools.map((toolItem) => toolItem.name);
+    return bindTools(tools as never);
+  };
   const runtimeCapability: AgentCapability = {
     name: 'inspect_repo',
     description: 'Inspect repository with bash tools.',
     uses: ['bash'],
-    createRuntime: async (ctx) => {
-      runtimeToolkitNames = ctx.availableToolkits?.map((item) => item.name) ?? [];
-      return {
-        instructions: (instructionCtx) => [
-          `available=${instructionCtx.availableToolkits?.map((item) => item.name).join(',') ?? ''}`,
-        ],
-      };
-    },
+    instructions: defineInstructionDocument({
+      content: 'Inspect the repository with the authorized tools.',
+      source: { kind: 'inline', id: 'test:inspect_repo' },
+    }),
   };
   const graph = createOrchestratorGraph({
     models: {
@@ -1488,7 +1502,7 @@ test('capability runtime sees metadata only for Toolkits authorized by fixed use
     },
   });
 
-  assert.deepEqual(runtimeToolkitNames, ['bash']);
+  assert.deepEqual(capabilityToolNames, ['read_file']);
 });
 
 test('artifact discovery tools reach a selected capability only when declared in uses', async () => {
@@ -1527,7 +1541,10 @@ test('artifact discovery tools reach a selected capability only when declared in
         name: 'browser_like',
         description: 'browser-only capability',
         uses: ['browser', 'artifact_discovery'],
-        createRuntime: () => ({}),
+        instructions: defineInstructionDocument({
+          content: 'Inspect browser state and related artifacts.',
+          source: { kind: 'inline', id: 'test:browser_like' },
+        }),
       }],
       toolkits: [{
         name: 'browser',
@@ -1731,7 +1748,7 @@ test('general operations are collected from toolkits', () => {
   });
 });
 
-test('capability middleware artifact refs are merged into state', async () => {
+test('capability finalize artifact refs are merged into state', async () => {
   let routeCallCount = 0;
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
@@ -1765,9 +1782,12 @@ test('capability middleware artifact refs are merged into state', async () => {
     name: 'explore',
     description: 'Explore issue context.',
     uses: ['artifact'],
-    createRuntime: () => ({
-      middleware: {
-        afterRun: async (result, ctx) => {
+    instructions: defineInstructionDocument({
+      content: 'Explore issue context.',
+      source: { kind: 'inline', id: 'test:explore-artifact' },
+    }),
+    lifecycle: {
+      finalize: async (_result, ctx) => {
         const ref = {
           id: 'artifact-1',
           threadId: ctx.threadId ?? 'missing-thread',
@@ -1785,13 +1805,9 @@ test('capability middleware artifact refs are merged into state', async () => {
           metadata: { sourceCount: 2 },
         };
         await ctx.recordCapabilityArtifact?.(ref);
-          return {
-            ...result,
-            artifacts: [...result.artifacts, ref],
-          };
-        },
+        return { artifactRefs: [ref] };
       },
-    }),
+    },
   };
   const graph = createOrchestratorGraph({
     models: {
@@ -1820,7 +1836,7 @@ test('capability middleware artifact refs are merged into state', async () => {
   assert.equal(state.sessionCapabilityArtifacts[0]?.capabilityId, 'explore');
 });
 
-test('capability result middleware stores only artifact refs in state', async () => {
+test('capability finalize stores only artifact refs in state', async () => {
   let routeCallCount = 0;
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
@@ -1854,9 +1870,12 @@ test('capability result middleware stores only artifact refs in state', async ()
     name: 'daily_post',
     description: 'Create post.',
     uses: ['artifact'],
-    createRuntime: () => ({
-      middleware: {
-        afterRun: async (result, ctx) => {
+    instructions: defineInstructionDocument({
+      content: 'Create a post.',
+      source: { kind: 'inline', id: 'test:daily-post-artifact' },
+    }),
+    lifecycle: {
+      finalize: async (_result, ctx) => {
         const ref = {
           id: 'result-1',
           threadId: ctx.threadId ?? 'missing-thread',
@@ -1873,13 +1892,9 @@ test('capability result middleware stores only artifact refs in state', async ()
           schema: { name: 'daily_post.result', version: 1 },
         };
         await ctx.recordCapabilityArtifact?.(ref);
-          return {
-            ...result,
-            artifacts: [...result.artifacts, ref],
-          };
-        },
+        return { artifactRefs: [ref] };
       },
-    }),
+    },
   };
   const graph = createOrchestratorGraph({
     models: {
@@ -2197,7 +2212,7 @@ test('toolkit review cancellation ends subagent without retrying tools', async (
     }),
     tools: resources.tools,
     middleware: resources.middleware,
-    instructions: [],
+    promptSections: [],
     operations: collectGeneralOperations(resources.toolkits),
     messages: [new HumanMessage('try guarded work')],
   });
@@ -3962,7 +3977,7 @@ test('limit-reached subagent announce reaches the outcome decision input', async
     }),
     tools: [noop],
     middleware: [progressMiddleware],
-    instructions: [],
+    promptSections: [],
     messages: baseInput.messages,
     maxIterations: 1,
   });

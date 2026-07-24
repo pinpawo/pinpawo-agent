@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type { AgentCapability } from '../../types/capability';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../../types/capability';
 import { defineToolkit } from '../../types/toolkit';
 import {
   compileAgentRegistry,
@@ -22,7 +25,10 @@ function capability(name: string, uses: readonly string[]): AgentCapability {
     name,
     description: `${name} capability`,
     uses,
-    createRuntime: () => ({}),
+    instructions: defineInstructionDocument({
+      content: `Execute the ${name} capability.`,
+      source: { kind: 'inline', id: `test:${name}` },
+    }),
   };
 }
 

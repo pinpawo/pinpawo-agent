@@ -12,7 +12,6 @@ import {
 import {
   buildSubagentExecutionInstruction,
   collectCapabilityOperations,
-  resolveInstructions,
   resolveToolkitExecution,
   selectCapabilityTools,
 } from '../../subagentDispatch';
@@ -83,20 +82,6 @@ export function createCapabilityNode(params: {
     const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
     const threadId = readThreadId(runnableConfig);
 
-    const availableToolkits = toolkitList.map(({ name, description }) => ({
-      name,
-      description,
-    }));
-
-    const runtime = await capability.createRuntime({
-      models: config.models,
-      actor,
-      messages: scopedMessages,
-      execution,
-      availableToolkits,
-      artifactStore: config.capabilityArtifactStore,
-    });
-
     const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
     const artifactRefs: CapabilityArtifactRef[] = [];
     const toolkitContext = {
@@ -118,13 +103,6 @@ export function createCapabilityNode(params: {
     };
     const toolkitNames = compiledCapability.toolkits.map(({ name }) => name);
     const usedResolvedToolkitExecution = await resolveToolkitExecution(toolkitList, toolkitNames, toolkitContext);
-    const runtimeInstructions = await resolveInstructions(runtime, {
-      models: config.models,
-      actor,
-      messages: scopedMessages,
-      availableToolkits,
-    }, execution);
-    const middleware = runtime.middleware;
     const selectedTools = selectCapabilityTools(usedResolvedToolkitExecution.tools);
     const canExploreArtifacts = Boolean(
       artifactDiscoveryRoot
@@ -143,10 +121,35 @@ export function createCapabilityNode(params: {
       scopedMessages,
       canExploreArtifacts ? artifactDiscoveryRoot : null,
     );
-    let subagentInput: SubagentRunInput = {
+    const subagentInput: SubagentRunInput = {
       model: config.models.subagent ?? config.models.act,
       tools: selectedTools,
-      instructions: [executionInstruction, ...usedResolvedToolkitExecution.instructions, ...(runtimeEnvironment ? [runtimeEnvironment] : []), ...runtimeInstructions],
+      promptSections: [
+        {
+          id: 'delegation-context',
+          owner: 'framework',
+          content: executionInstruction,
+        },
+        ...usedResolvedToolkitExecution.toolkits
+          .filter((toolkit) => Boolean(toolkit.instructions?.trim()))
+          .map((toolkit) => ({
+            id: `toolkit:${toolkit.name}`,
+            owner: toolkit.name,
+            content: toolkit.instructions as string,
+          })),
+        {
+          id: `capability:${capability.name}`,
+          owner: capability.name,
+          content: capability.instructions.content,
+        },
+        ...(runtimeEnvironment
+          ? [{
+              id: 'runtime-environment',
+              owner: 'host',
+              content: runtimeEnvironment,
+            }]
+          : []),
+      ],
       operations: collectCapabilityOperations(usedResolvedToolkitExecution.toolkits),
       messages: subagentMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
@@ -158,15 +161,15 @@ export function createCapabilityNode(params: {
     };
     validateUniqueToolNames(subagentInput.tools);
 
-    if (middleware?.beforeRun) {
-      subagentInput = await middleware.beforeRun(subagentInput);
-      validateUniqueToolNames(subagentInput.tools);
-    }
-
     let result = await createSubagent(subagentInput);
 
-    if (middleware?.afterRun) {
-      result = await middleware.afterRun(result, {
+    if (capability.lifecycle?.finalize) {
+      const finalized = await capability.lifecycle.finalize(result, {
+        models: config.models,
+        actor,
+        messages: scopedMessages,
+        execution,
+        artifactStore: config.capabilityArtifactStore,
         recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
           artifactRefs.push(ref);
         },
@@ -175,6 +178,18 @@ export function createCapabilityNode(params: {
         delegationId: runNextDelegation.id,
         runId: transcriptRunId,
       });
+      const artifactsById = new Map(
+        [...result.artifacts, ...artifactRefs, ...(finalized?.artifactRefs ?? [])]
+          .map((ref) => [ref.id, ref]),
+      );
+      result = {
+        ...result,
+        ...(finalized?.messages ? { messages: finalized.messages } : {}),
+        ...(finalized?.announceMessageId !== undefined
+          ? { announceMessageId: finalized.announceMessageId }
+          : {}),
+        artifacts: [...artifactsById.values()],
+      };
     }
 
     const laneOutputMessages = tagNewLaneMessages(

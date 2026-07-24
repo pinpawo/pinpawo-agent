@@ -1,6 +1,9 @@
 # Pet Agent Capability Runtime Design
 
-> 状态：Current v4
+> 状态：Historical v4。V2 已删除 `createRuntime`、动态 instructions、通用
+> Capability middleware、Capability availability 和 executable
+> `resultSchema`。当前契约见
+> [Capability / Toolkit Contract V2](./PET_AGENT_CAPABILITY_TOOLKIT_V2_DESIGN.md)。
 > 日期：2026-03-30
 > 说明：本文描述当前实现。已接受的下一代目标契约见
 > [Capability / Toolkit Contract V2](./PET_AGENT_CAPABILITY_TOOLKIT_V2_DESIGN.md)；

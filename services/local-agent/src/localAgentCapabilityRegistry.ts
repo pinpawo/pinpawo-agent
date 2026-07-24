@@ -96,6 +96,7 @@ export class LocalAgentCapabilityRegistry {
     this.localCapabilityDefinitions = this.deps.createLocalCapabilities();
     const availableLocalCapabilities = await this.deps.resolveAvailableCapabilities(
       this.localCapabilityDefinitions,
+      { availableToolkits: this.localToolkits },
     );
     this.localCapabilities = compileAgentRegistry({
       toolkits: this.localToolkits,
@@ -105,7 +106,10 @@ export class LocalAgentCapabilityRegistry {
     this.userCapabilityDefinitions = await this.deps.loadUserCapabilities();
     this.userCapabilities = await filterAvailableUserCapabilities(
       this.userCapabilityDefinitions,
-      this.deps.resolveCapabilityAvailability,
+      (capability, options) => this.deps.resolveCapabilityAvailability(capability, {
+        ...options,
+        availableToolkits: this.localToolkits,
+      }),
     );
   }
 
@@ -152,7 +156,10 @@ export class LocalAgentCapabilityRegistry {
     this.userCapabilityDefinitions = await this.deps.loadUserCapabilities();
     this.userCapabilities = await filterAvailableUserCapabilities(
       this.userCapabilityDefinitions,
-      this.deps.resolveCapabilityAvailability,
+      (capability, options) => this.deps.resolveCapabilityAvailability(capability, {
+        ...options,
+        availableToolkits: this.localToolkits,
+      }),
       { force: true },
     );
     return {

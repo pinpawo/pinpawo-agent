@@ -103,9 +103,8 @@ export type OrchestratorConfig = {
   subagentContextWindowTokens?: number;
   /**
    * Artifact store (a port; the host supplies the concrete adapter). Injected
-   * into each capability's `CapabilityContext` so capabilities can persist
-   * artifacts without the host threading the store through every capability
-   * factory. Optional — surfaces without a store (e.g. tests, studio) skip writes.
+   * into the selected capability's narrow `CapabilityFinalizeContext`.
+   * Optional — surfaces without a store (e.g. tests, studio) skip writes.
    */
   capabilityArtifactStore?: CapabilityArtifactStore;
 };

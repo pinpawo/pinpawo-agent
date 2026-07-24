@@ -238,3 +238,18 @@ lint passes, and documentation migrations.
   business side effects, and Toolkit availability in Toolkit/framework code.
 - Made Capability availability entirely derived from whether every Toolkit in
   static `uses` resolves and is available in the current registry generation.
+
+## [2026-07-24] implementation | Capability contract V2 cutover
+
+- Replaced `createRuntime` with immutable `InstructionDocument` definitions and
+  an optional narrow `lifecycle.finalize`.
+- Migrated built-in, Studio, test, and eval Capabilities to static required
+  Toolkit dependencies and Markdown instructions.
+- Replaced the user `manifest.json + index.js` loader with `CAPABILITY.md`,
+  including frontmatter validation, a 64 KiB body limit, SHA-256 digest,
+  contained entry paths, and finalize-only module exports.
+- Changed Capability availability to derive from the available Toolkit registry.
+- Added provenance-bearing prompt sections and a metadata-only
+  `subagent_prompt_sections` runtime event.
+- Updated Capability Creator, `pinpawo-agent init`, the complete example, and
+  public API documentation to generate and describe V2 only.

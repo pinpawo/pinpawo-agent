@@ -24,16 +24,21 @@ export type {
 export type {
   AgentCapability,
   CapabilityAvailability,
-  CapabilityAvailabilityConfig,
-  CapabilityContext,
-  CapabilityInstructionContext,
-  CapabilityMiddleware,
-  CapabilityMiddlewareContext,
-  CapabilityRuntime,
+  CapabilityFinalizeContext,
+  CapabilityFinalizeHook,
+  CapabilityFinalizeResult,
+  CapabilityLifecycle,
+  InstructionDocument,
+  InstructionDocumentSource,
+} from './types/capability';
+export {
+  defineCapability,
+  defineInstructionDocument,
 } from './types/capability';
 
 export type {
   SubagentInputState,
+  SubagentPromptSection,
   SubagentResult,
   SubagentRunInput,
   SubagentRuntimeEvent,
@@ -274,6 +279,7 @@ export {
   createSubagent,
   SUBAGENT_GUARD_DECISION_EVENT,
   SUBAGENT_OPERATIONS_EVENT,
+  SUBAGENT_PROMPT_SECTIONS_EVENT,
 } from './subagent/createSubagent';
 export {
   NamespacedProtocolToolEventReader,

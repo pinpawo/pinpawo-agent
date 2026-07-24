@@ -686,9 +686,9 @@ explore_github  uses [git, github]
 - [x] Toolkit availability 不复用 Capability availability 或暴露缓存策略。
 - [x] `AgentCapability.uses` 是必填静态强依赖。
 - [x] `uses` 不支持 optional。
-- [ ] Capability instructions 是一个 Markdown document，而不是数组。
-- [ ] Capability 可选代码入口只能导出窄化的 `lifecycle.finalize`。
-- [ ] `finalize` 不能访问或修改 tools、Toolkit、review policy、
+- [x] Capability instructions 是一个 Markdown document，而不是数组。
+- [x] Capability 可选代码入口只能导出窄化的 `lifecycle.finalize`。
+- [x] `finalize` 不能访问或修改 tools、Toolkit、review policy、
   authorization、system instructions 或 `SubagentRunInput`。
 
 ### Registry
@@ -700,17 +700,18 @@ explore_github  uses [git, github]
 
 ### Prompt
 
-- [ ] 未选中的 Capability 正文不会进入模型上下文。
-- [ ] 选中的 `CAPABILITY.md` 正文只注入一次。
-- [ ] system prompt section 顺序确定且可观测。
-- [ ] 动态 runtime facts 与静态 Capability instructions 分离。
+- [x] 未选中的 Capability 正文不会进入模型上下文。
+- [x] 选中的 `CAPABILITY.md` 正文只注入一次。
+- [x] system prompt section 顺序确定且可观测。
+- [x] 动态 runtime facts 与静态 Capability instructions 分离。
 
 ### 扩展体验
 
-- [ ] 一个无代码 `CAPABILITY.md` 可以安装、验证、列出和执行。
-- [ ] Capability Creator 默认生成 V2 目录。
-- [ ] Toolkit 继续通过 TypeScript/JavaScript 代码插件定义。
-- [ ] Loader 对路径逃逸、空正文、重复名称和未知 Toolkit 给出明确错误。
+- [x] 一个无代码 `CAPABILITY.md` 可以安装、验证、列出和执行。
+- [x] Capability Creator 默认生成 V2 目录。
+- [x] Toolkit 继续通过 TypeScript/JavaScript 代码插件定义。
+- [x] Loader / registry 对路径逃逸、空正文、重复名称和未知 Toolkit
+  给出明确错误或 unavailable descriptor。
 
 ### 迁移
 
@@ -718,7 +719,7 @@ explore_github  uses [git, github]
   Toolset。
 - [x] Explore 不再运行时过滤 `uses`。
 - [x] 所有现有单元测试、typecheck 和 build 通过。
-- [ ] 新增依赖解析、工具冲突、Markdown loader 和 prompt 注入测试。
+- [x] 新增依赖解析、工具冲突、Markdown loader 和 prompt 注入测试。
 
 ## 13. 非目标
 
@@ -743,7 +744,8 @@ Toolkit 决定“有哪些可调用动作”。
 Capability 只能通过静态 uses 获得 Toolkit。
 所有 uses 都是强依赖和权限边界。
 所有 tool 都有且只有一个 Toolkit owner。
-CAPABILITY.md 是 Capability instructions 的唯一静态来源。
+Capability instructions 始终是不可变 InstructionDocument：
+目录型来源使用 CAPABILITY.md，代码注册来源在 registry 构建期静态定义。
 Toolkit registry 是 inventory，不是授权列表。
 orchestrator 是唯一 Capability 编排者。
 ```

@@ -1,7 +1,10 @@
-import { type AgentCapability } from '@pinpawo/pet-agent';
+import {
+  defineCapability,
+  defineInstructionDocument,
+  type AgentCapability,
+} from '@pinpawo/pet-agent';
 import type { DailyPostPayload } from './types';
 import { dailyPostInstructions } from './instructions';
-import { dailyPostResultSchema } from './schemas';
 
 export { dailyPostResultSchema } from './schemas';
 export { buildDailyPostTaskMessage } from './task';
@@ -21,21 +24,21 @@ export type DailyPostResult = {
 };
 
 export type DailyPostCapabilityOptions = {
-  instructions?: string[];
+  instructions?: string;
 };
 
 export function createDailyPostCapability(
   options: DailyPostCapabilityOptions = {},
 ): AgentCapability {
-  return {
+  return defineCapability({
     name: 'daily_post',
     description: '生成、保存或跳过 daily post，并产出本轮动态处理结果。',
     uses: ['daily_post'],
-    createRuntime: async () => ({
-      instructions: options.instructions ?? dailyPostInstructions,
+    instructions: defineInstructionDocument({
+      content: options.instructions ?? dailyPostInstructions,
+      source: { kind: 'inline', id: 'builtin:daily_post' },
     }),
-    resultSchema: dailyPostResultSchema,
-  };
+  });
 }
 
 export { createDailyPostToolkit } from './tools';

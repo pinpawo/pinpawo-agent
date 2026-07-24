@@ -21,14 +21,16 @@
 ### 1.3 插件级
 
 1. `Capability plugin invalid`
-2. `manifest.id mismatch`
-3. `missing manifest.json / index.js`
+2. `missing CAPABILITY.md`
+3. frontmatter / 空正文 / entry 路径或导出不合法
+4. required Toolkit 缺失，Capability 在 registry generation 中 unavailable
 
 ## 2. 观测建议
 
 1. 工具行为观测：消费 root `streamEvents(v3)`，经 adapter 归一化为工具生命周期 / `operation` 日志。
 2. 编排状态观测：消费 `onTurnEvent`（turn_started/tasks_queued/task_started/task_finished/turn_finished 等）。
-3. 能力行为观测：在能力层记录 `resultSchema` 与 `capabilityArtifacts`，避免仅靠文本判断成功。
+3. 能力行为观测：记录 instruction digest、`subagent_prompt_sections` metadata
+   与 `capabilityArtifacts`；结构化业务写入由 Toolkit tool contract 校验。
 4. 中断排障：记录 `reviewId`、`selectedOptionId`、`pendingAction`。
 
 ## 3. 回复风格建议

@@ -9,7 +9,8 @@
 Pet Agent 的扩展框架只保留两个面向作者的核心概念：
 
 1. **Capability**：Skill 风格的任务与行为定义，负责路由语义、Toolkit
-   依赖和执行 instructions；它是纯 Markdown/声明，不包含可执行代码。
+   依赖和执行 instructions；可以带一个窄化的确定性收尾 hook，但不拥有
+   tool 或任意 runtime middleware。
 2. **Toolkit**：由代码实现的工具能力集合，负责 tools、tool schema、
    operation metadata、review policy 和 availability。
 
@@ -22,13 +23,18 @@ V2 固定以下规则：
   不可用。
 - `uses` 从 `CapabilityRuntime` 提升到 `AgentCapability`。
 - 删除 `AgentToolset`、`defineToolset()` 和 `CapabilityRuntime.toolsets`。
-- Capability instructions 是一份完整 Markdown 文档，不再是字符串数组。
-- Capability 的标准作者入口是 `CAPABILITY.md`，其正文只在该 Capability
-  被选中后注入 subagent system prompt。
-- Capability 不支持 `entry`、`index.js`、hooks、middleware、availability
-  check 或 executable result schema。
-- 需要代码的行为一律由 Toolkit 实现；Capability availability 只由其
-  `uses` 中 Toolkit 的可用性派生。
+- Capability instructions 是一份完整 Markdown 文档，不再是字符串数组；
+  文档可以来自 `CAPABILITY.md`，也可以由代码在 registry 构建期静态定义。
+- `CAPABILITY.md` 是目录型 Capability 的标准作者入口，其正文只在该
+  Capability 被选中后注入 subagent system prompt。
+- Capability 可以通过可选 `entry` 提供 `lifecycle.finalize`，用于必须
+  确定执行的结果整理、ingest 和 artifact 收尾。
+- 删除宽泛的 `createRuntime`、动态 instructions、`beforeRun` middleware、
+  Capability availability check 和当前无消费者的 executable result schema。
+- `lifecycle.finalize` 不能访问或修改 tools、`uses`、Toolkit、review policy
+  或 system instructions。
+- 需要被模型主动调用的代码和所有外部副作用仍一律由 Toolkit tool 实现；
+  Capability availability 只由其 `uses` 中 Toolkit 的可用性派生。
 - Toolkit 保持代码定义，不引入 Toolkit Markdown 文件协议。
 - Toolkit 由静态、完整的 `ToolDefinition` 组成；tool implementation、
   operation metadata 和 review policy 在同一定义中绑定。
@@ -111,7 +117,7 @@ tool definition
 
 capability
   Skill 风格的执行协议。
-  拥有路由描述、uses 和 CAPABILITY.md instructions；不拥有代码。
+  拥有路由描述、uses、Markdown instructions，以及可选的窄化 finalize hook。
 
 toolkit registry
   当前运行环境可解析的 Toolkit inventory。
@@ -237,13 +243,23 @@ type AgentCapability = {
   description: string;
   uses: readonly string[];
   instructions: InstructionDocument;
+  lifecycle?: {
+    finalize?: CapabilityFinalizeHook;
+  };
 };
 
 type InstructionDocument = {
   content: string;
-  sourcePath: string;
+  source:
+    | { kind: 'file'; path: string }
+    | { kind: 'inline'; id: string };
   digest: string;
 };
+
+type CapabilityFinalizeHook = (
+  result: Readonly<SubagentResult>,
+  context: CapabilityFinalizeContext,
+) => Promise<CapabilityFinalizeResult>;
 ```
 
 规则：
@@ -253,10 +269,13 @@ type InstructionDocument = {
 - `uses` 是静态强依赖；不得由运行时消息、actor 或模型动态改变。
 - Capability 不包含 `tools`、`toolsets`、inline Toolkit 或 tool policy。
 - `instructions.content` 是完整 Markdown 行为协议。
-- Capability 不包含 `createRuntime`、hooks、middleware、availability check、
-  executable schema 或任何 JavaScript/TypeScript 入口。
-- 输出要求写在 Markdown 正文中；结构化写入、校验、持久化和外部副作用
-  必须由 Toolkit tool 实现。
+- Capability 不包含宽泛的 `createRuntime`、动态 instructions、
+  `beforeRun` middleware、availability check 或 executable result schema。
+- 可选代码入口只能导出 `lifecycle.finalize`，其输入和返回值均由框架
+  窄化；不能接触 `SubagentRunInput` 或工具装配。
+- 输出要求写在 Markdown 正文中；结构化外部写入和业务副作用必须由
+  Toolkit tool 实现。`finalize` 只允许整理已有执行结果、生成 ingest、
+  写 Capability artifact 和修正 announce。
 - Capability availability 完全由静态 `uses` 是否都能在当前 registry
   generation 中解析且 available 派生。
 
@@ -310,10 +329,13 @@ type CapabilityRuntime = {
 capabilities/
 └── web-research/
     ├── CAPABILITY.md
-    └── references/          # 可选，V2 初期不自动注入
+    ├── references/          # 可选，V2 初期不自动注入
+    └── index.js             # 可选，只能导出 lifecycle.finalize
 ```
 
-大多数 Capability 应只需要 `CAPABILITY.md`。
+大多数外部 Capability 应只需要 `CAPABILITY.md`。内置或宿主注册的
+Capability 也可以用代码定义，但 instructions 必须在 registry generation
+内形成不可变的 `InstructionDocument`，不能按消息动态生成。
 
 ### 5.2 Frontmatter
 
@@ -338,7 +360,7 @@ defaultEnabled: true
 - `uses`：强依赖 Toolkit 名称列表；
 - `version`：Capability authoring contract 版本；
 - `icon`、`color`、`defaultEnabled`：可选 host/UI metadata；
-- 不支持 `entry` 或任何代码入口。
+- `entry`：可选代码入口，只能导出窄化的 `lifecycle.finalize`。
 
 `builtIn` 不应由 Capability 作者声明；它由安装来源决定。
 
@@ -368,7 +390,7 @@ Capability loader 在启动或显式 rescan 时：
 2. 校验 `name`、`description`、`uses` 和正文非空；
 3. 拒绝重复 Capability 名称；
 4. 解析并校验全部 Toolkit 依赖；
-5. 校验 reference 路径不能逃出 Capability root；
+5. 校验 `entry` 和 reference 路径不能逃出 Capability root；
 6. 对正文设置大小上限；
 7. 计算内容 digest；
 8. 将不可用原因保存在 registry descriptor 中；
@@ -377,6 +399,9 @@ Capability loader 在启动或显式 rescan 时：
 
 初始实现可以启动时读取并缓存全文。未来若引入延迟加载，必须保证同一
 registry generation 内 digest 和内容不发生漂移。
+
+代码注册的 Capability 不经过目录 loader，但必须经过相同的 definition、
+依赖和 digest 校验。它不是 legacy `manifest.json + index.js` 协议的兼容层。
 
 ## 6. System prompt 装配
 
@@ -471,22 +496,42 @@ type CompiledCapability = {
 
 运行阶段只能执行 `CompiledCapability`，不得再次改变 Toolkit 集合。
 
-## 9. Capability 无代码边界
+## 9. 窄化 Capability 代码入口
 
-Capability 始终是纯 Markdown/声明对象，不存在“高级代码入口”例外。
+Capability 不要求是纯 Markdown，但代码入口只有一个明确用途：在
+subagent 完成后执行 Capability 专属、必须确定发生的收尾逻辑。
 
-需要以下行为时必须由 Toolkit 或框架通用 runtime 承担：
+```ts
+export const lifecycle: CapabilityLifecycle = {
+  finalize: async (result, context) => {
+    // 整理结果、生成 ingest、写 artifact、修正 announce
+    return {
+      messages: result.messages,
+      announceMessageId: result.announceMessageId,
+    };
+  },
+};
+```
 
-- 结构化输入/输出校验；
-- artifact 写入和持久化；
-- deterministic ingest；
-- 外部服务、credential 或 binary availability；
-- before/after tool lifecycle；
-- 任何文件、网络、数据库或应用副作用。
+`finalize` 可以：
 
-不得通过 `entry`、`index.js`、动态 import、hook 或 middleware 把代码重新
-引入 Capability。若一段代码只服务于一个 Capability，也应实现为命名
-Toolkit；复用范围小不是破坏所有权边界的理由。
+- 读取本次 Capability 的只读执行结果和只读历史；
+- 使用框架明确提供的 observe model；
+- 写入当前 Capability scope 下的 artifact；
+- 追加或整理结果消息；
+- 返回明确的 `announceMessageId`。
+
+`finalize` 不可以：
+
+- 创建、增加、删除或替换 tool；
+- 修改 `uses` 或 Toolkit 集合；
+- 访问或修改 review policy、authorization 或 `SubagentRunInput`；
+- 动态替换 Capability 或 Toolkit instructions；
+- 执行本应由 Toolkit tool 表达的文件、网络、数据库或应用副作用；
+- 调度另一个 Capability。
+
+V2 初期不提供 `beforeRun`。如果未来确有需要，必须为具体、窄化的数据
+变换定义新 hook，不能恢复通用 middleware。
 
 ## 10. 现有实现迁移
 
@@ -503,7 +548,7 @@ Toolkit；复用范围小不是破坏所有权边界的理由。
 | Toolkit 复用 Capability availability | 独立 `ToolkitAvailabilityCheck` |
 | `string[] instructions` | 单一 Markdown `InstructionDocument` |
 | capability plugin `manifest.json` | `CAPABILITY.md` frontmatter |
-| capability `index.js` / `entry` | 删除；Capability 不允许代码入口 |
+| capability `index.js` / `entry` | 可选；只能导出 `lifecycle.finalize` |
 | general lane 装配全部 Toolkit | `generalUses` 显式依赖 |
 | capability node 临时解析 Toolkit | registry compile 阶段解析 |
 
@@ -576,9 +621,9 @@ explore_github  uses [git, github]
 
 同名 Capability 不得因环境不同而静默获得不同工具集合。
 
-当前 Explore 的 afterRun ingest、artifact persistence 和 executable result
-schema 不得迁入 Capability Markdown loader。它们必须改为 Explore 专用
-Toolkit tool，或提升为对所有 Capability 一致适用的框架通用产物处理。
+当前 Explore 的 `afterRun` ingest 和 artifact 收尾迁移为窄化的
+`lifecycle.finalize`。当前无运行时消费者的 executable `resultSchema`
+删除；实际结构化外部写入继续由 Toolkit tool 负责。
 
 ## 11. 破坏式重构工作流
 
@@ -611,6 +656,10 @@ Toolkit tool，或提升为对所有 Capability 一致适用的框架通用产�
 
 - 实现 frontmatter parser、路径校验、digest 和缓存；
 - 支持无 JavaScript 的纯 Markdown Capability；
+- 支持代码注册的静态 `InstructionDocument` 和可选
+  `lifecycle.finalize`；
+- 删除 `createRuntime`、动态 instructions 和通用 `beforeRun/afterRun`
+  middleware；
 - 将内置 Capability instructions 迁移为 Markdown；
 - Capability Creator 生成 V2 模板；
 - 删除 legacy manifest/index loader 和 scaffold。
@@ -638,6 +687,9 @@ Toolkit tool，或提升为对所有 Capability 一致适用的框架通用产�
 - [x] `AgentCapability.uses` 是必填静态强依赖。
 - [x] `uses` 不支持 optional。
 - [ ] Capability instructions 是一个 Markdown document，而不是数组。
+- [ ] Capability 可选代码入口只能导出窄化的 `lifecycle.finalize`。
+- [ ] `finalize` 不能访问或修改 tools、Toolkit、review policy、
+  authorization、system instructions 或 `SubagentRunInput`。
 
 ### Registry
 

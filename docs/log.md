@@ -226,12 +226,15 @@ lint passes, and documentation migrations.
 - Included run-scoped Artifact Discovery, Studio Plan, and Wiki Read Toolkits in
   the same dependency-resolution path.
 
-## [2026-07-24] decision | Capability has no code entry
+## [2026-07-24] decision | Capability code entry is finalize-only
 
-- Removed the planned optional Capability `entry` / `index.js` extension path.
-- Fixed Capability as a pure Markdown/declared routing and instruction contract.
-- Assigned hooks, middleware, availability checks, executable schemas,
-  persistence, ingest, and all side effects to Toolkit code or
-  capability-agnostic framework runtime.
+- Kept an optional Capability `entry` / `index.js`, restricted to a narrow
+  `lifecycle.finalize` hook.
+- Removed broad `createRuntime`, dynamic instructions, `beforeRun` middleware,
+  Capability-owned availability checks, and the unused executable result schema.
+- Limited finalization to deterministic result ingest, Capability artifact
+  persistence, message normalization, and explicit announce selection.
+- Kept tools, model-invoked actions, review policy, authorization, external
+  business side effects, and Toolkit availability in Toolkit/framework code.
 - Made Capability availability entirely derived from whether every Toolkit in
   static `uses` resolves and is available in the current registry generation.

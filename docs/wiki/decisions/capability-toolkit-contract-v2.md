@@ -26,8 +26,9 @@ Capability and Toolkit.
   binds its executable tool, operation metadata, and review policy.
 - A Capability is a Skill-style behavior definition. It owns routing metadata,
   a static list of required Toolkit names and one Markdown instruction document.
-  It owns no executable code, hooks, middleware, availability check, or executable
-  result schema.
+  It may expose one narrow `lifecycle.finalize` hook for deterministic result
+  ingest and artifact finalization. It does not own tools, broad middleware,
+  availability checks, dynamic instructions, or executable result schemas.
 - A Capability never owns or creates a tool. Every tool visible to its subagent
   comes from a Toolkit named in its static `uses` contract.
 
@@ -37,10 +38,15 @@ Toolkit names.
 
 ## Instruction ownership
 
-`CAPABILITY.md` is the canonical authoring surface for Capability metadata and
-instructions. Its frontmatter declares name, routing description, Toolkit uses,
-and display metadata; its Markdown body is injected only after the Capability is
-selected.
+`CAPABILITY.md` is the canonical directory authoring surface for Capability
+metadata and instructions. Its frontmatter declares name, routing description,
+Toolkit uses, display metadata, and an optional finalize-only code entry. Its
+Markdown body is injected only after the Capability is selected.
+
+Built-in or host-registered Capabilities may define the same immutable Markdown
+`InstructionDocument` in code during registry construction. They do not use the
+legacy manifest/index plugin protocol, and instructions cannot be generated from
+per-run messages.
 
 Toolkit definitions remain code-owned. They may include concise code-defined
 usage instructions, but do not participate in the `CAPABILITY.md` file protocol.
@@ -56,9 +62,11 @@ Static instructions and dynamic runtime facts remain separate prompt-knowledge
 layers. A system-prompt compiler combines framework, runtime, Toolkit, and selected
 Capability sections in a deterministic order.
 
-There is no advanced Capability code entry. Any structured validation,
-artifact persistence, ingest, external dependency, or side effect is implemented
-by a Toolkit or by capability-agnostic framework runtime.
+An optional Capability code entry may export only `lifecycle.finalize`. The hook
+receives a read-only execution result and narrow finalization services; it cannot
+access or mutate tools, Toolkit dependencies, review policy, authorizations,
+system instructions, or `SubagentRunInput`. Model-invoked actions and external
+business side effects remain Toolkit responsibilities.
 
 ## Registry semantics
 

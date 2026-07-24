@@ -1,6 +1,6 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { AgentActor, AgentExecution } from '../../../types/agent';
-import type { AgentToolkit, ToolkitReviewCapabilities } from '../../../types/toolkit';
+import type { ToolkitReviewCapabilities } from '../../../types/toolkit';
 import type { CompiledAgentRegistry } from '../registry';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
@@ -19,10 +19,6 @@ export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorI
     registry,
     execution: cfg.execution as AgentExecution | undefined,
     workdir: cfg.workdir as string | undefined,
-    artifactDiscoveryRoot: typeof cfg.artifactDiscoveryRoot === 'string'
-      ? cfg.artifactDiscoveryRoot
-      : undefined,
-    artifactDiscoveryToolkit: cfg.artifactDiscoveryToolkit as AgentToolkit | undefined,
     runtimeEnvironment: cfg.runtimeEnvironment as string | undefined,
     reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
     globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),

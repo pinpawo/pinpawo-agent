@@ -302,8 +302,11 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
   assert.equal(Object.isFrozen(after.userCapabilities), true);
 });
 
-test('capability refresh updates frozen runtime lists with copy-on-write', async () => {
-  const capability = { name: 'dynamic-test' } as NonNullable<LocalServerDeps['localCapabilities']>[number];
+test('Toolkit refresh updates frozen runtime lists with copy-on-write', async () => {
+  const toolkit = {
+    name: 'dynamic-test',
+    availability: () => ({ available: true as const }),
+  } as NonNullable<LocalServerDeps['localToolkits']>[number];
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     actorId: 'pet-a',
     llmConfig: {
@@ -312,14 +315,14 @@ test('capability refresh updates frozen runtime lists with copy-on-write', async
       model: 'test-model',
     },
     workdir: '/tmp/pinpawo-capability-refresh',
-    localCapabilityDefinitions: [capability],
-    localCapabilities: [],
+    localToolkitDefinitions: [toolkit],
+    localToolkits: [],
   });
   const before = runtimeDeps.get();
   const res = makeRes();
 
   handleLocalHttpRequest(
-    makeReq('/health?refresh_capability=dynamic-test', 'Bearer secret'),
+    makeReq('/health?refresh_toolkit=dynamic-test', 'Bearer secret'),
     res,
     before,
     {
@@ -336,9 +339,9 @@ test('capability refresh updates frozen runtime lists with copy-on-write', async
   await new Promise((resolve) => setTimeout(resolve, 0));
   const after = runtimeDeps.get();
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(before.localCapabilities, []);
-  assert.equal(after.localCapabilities?.[0], capability);
-  assert.equal(Object.isFrozen(after.localCapabilities), true);
+  assert.deepEqual(before.localToolkits, []);
+  assert.equal(after.localToolkits?.[0], toolkit);
+  assert.equal(Object.isFrozen(after.localToolkits), true);
 });
 
 test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime endpoint', async () => {

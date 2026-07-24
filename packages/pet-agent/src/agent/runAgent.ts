@@ -22,10 +22,6 @@ export type AgentInvokeInput = {
   signal?: AbortSignal;
   /** Agent working directory passed into system prompt so the agent knows its file scope. */
   workdir?: string;
-  /** Host-resolved current-thread capability artifact directory. */
-  artifactDiscoveryRoot?: string;
-  /** Host-owned read-only tools used to inspect artifactDiscoveryRoot. */
-  artifactDiscoveryToolkit?: AgentToolkit;
   /** Runtime environment summary injected into system prompts. Must not contain secrets. */
   runtimeEnvironment?: string;
   globalReviewPolicy?: GlobalReviewPolicy;
@@ -46,14 +42,8 @@ export async function runAgent(
   input: AgentInvokeInput,
 ): Promise<AgentRunResult> {
   const configurable: Record<string, unknown> = {};
-  const toolkits = [
-    ...(input.toolkits ?? []),
-    ...(input.artifactDiscoveryRoot && input.artifactDiscoveryToolkit
-      ? [input.artifactDiscoveryToolkit]
-      : []),
-  ];
   configurable.registry = compileAgentRegistry({
-    toolkits,
+    toolkits: input.toolkits ?? [],
     capabilities: input.capabilities ?? [],
     generalUses: input.generalUses,
   });
@@ -61,10 +51,6 @@ export async function runAgent(
   if (input.threadId) configurable.thread_id = input.threadId;
   if (input.execution) configurable.execution = input.execution;
   if (input.workdir) configurable.workdir = input.workdir;
-  if (input.artifactDiscoveryRoot) configurable.artifactDiscoveryRoot = input.artifactDiscoveryRoot;
-  if (input.artifactDiscoveryToolkit) {
-    configurable.artifactDiscoveryToolkit = input.artifactDiscoveryToolkit;
-  }
   if (input.runtimeEnvironment) configurable.runtimeEnvironment = input.runtimeEnvironment;
   if (input.globalReviewPolicy) configurable.globalReviewPolicy = input.globalReviewPolicy;
 

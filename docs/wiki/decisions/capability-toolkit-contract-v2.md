@@ -2,7 +2,7 @@
 title: Capability and Toolkit Contract V2
 page_type: decision
 status: validated
-updated: 2026-07-24
+updated: 2026-07-25
 sources:
   - ../../PET_AGENT_CAPABILITY_TOOLKIT_V2_DESIGN.md
   - ../../../packages/pet-agent/src/types/capability.ts
@@ -77,6 +77,16 @@ Toolkit list grant access.
 Dependency resolution, availability derivation, duplicate tool detection, policy
 binding, and operation metadata binding happen before capability execution. The
 orchestrator executes a compiled Capability and does not mutate its Toolkit set.
+An invalid Capability executor is isolated in `unavailableCapabilities`; it does
+not prevent healthy Capability executors or thread state reads from working.
+Invalid general-executor authorization and invalid registered Toolkit definitions
+remain fail-fast host configuration errors.
+
+Run-scoped Toolkit registration is independent from whether that Toolkit
+currently has data. In particular, Artifact Discovery is registered from an
+artifact store plus thread scope. An empty thread is an empty discovery result,
+not Toolkit unavailability. Capabilities that need it declare the required
+`artifact_discovery` dependency statically.
 
 Toolkit registration and tool authorization remain separate. The V2 Toolkit
 contract therefore removes Toolkit `exposure`; only Capability `uses` and the
@@ -99,11 +109,11 @@ explicit general-executor Toolkit list grant tool access.
   Capability Creator, Studio Plan, and Artifact Discovery.
 - Explore-style environment-dependent tool filtering becomes explicit Capability
   scenarios with deterministic `uses`.
-- Workstreams 1 and 2 are implemented on the migration branch: the static V2
-  types, breaking Toolset removal, host-compiled registry, pre-route dependency
-  filtering, run-scoped Toolkit registration, and explicit general executor
-  authorization are in place. `CAPABILITY.md`, prompt sections, and the final
-  cutover remain pending and must not be described as complete.
+- The migration branch implements the complete V2 cutover: static V2 types,
+  breaking Toolset removal, `CAPABILITY.md`, immutable prompt sections,
+  host-compiled registries, pre-route dependency filtering, run-scoped Toolkit
+  registration, explicit general-executor authorization, and the final removal
+  of the legacy runtime/loader contract.
 - V2 ships as one breaking cutover. It does not retain a legacy loader, deprecated
   runtime fields, Toolset adapters, dual authoring protocols, or automatic
   conversion of old Capability plugins.

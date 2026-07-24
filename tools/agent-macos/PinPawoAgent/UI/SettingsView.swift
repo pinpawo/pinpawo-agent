@@ -1028,7 +1028,7 @@ private struct BrowserConfigView: View {
   private func refreshBrowserSupport(refreshRunningAgent: Bool = true) async {
     browserSupport = BrowserOptionStatus.detect()
     guard refreshRunningAgent, appState.agent.isRunning else { return }
-    guard let url = URL(string: "http://127.0.0.1:3210/health?refresh_capability=browser") else { return }
+    guard let url = URL(string: "http://127.0.0.1:3210/health?refresh_toolkit=browser") else { return }
     var req = URLRequest(url: url)
     req.timeoutInterval = 4
     LocalServerAuth.authorize(&req)

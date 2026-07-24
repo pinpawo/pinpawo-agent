@@ -152,15 +152,6 @@ export function compileAgentRegistry(params: {
   for (const capability of capabilityDefinitions) {
     const result = compileExecutor(capability.uses, toolkitsByName);
     if (!result.executor) {
-      const hasContractError = result.issues.some(
-        (issue) => issue.code !== 'unknown_toolkit',
-      );
-      if (hasContractError) {
-        throw new ExecutorCompilationError(
-          `Capability "${capability.name}"`,
-          result.issues,
-        );
-      }
       unavailableCapabilities.push({
         capability,
         issues: result.issues,

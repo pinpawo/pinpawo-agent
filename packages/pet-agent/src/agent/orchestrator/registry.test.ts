@@ -91,7 +91,7 @@ test('registry rejects invalid explicit general authorization', () => {
   );
 });
 
-test('registry fails fast on duplicate tools within one effective executor', () => {
+test('registry isolates a Capability whose Toolkits expose duplicate tools', () => {
   const first = defineToolkit({
     name: 'first',
     description: 'First toolkit.',
@@ -102,20 +102,41 @@ test('registry fails fast on duplicate tools within one effective executor', () 
     description: 'Second toolkit.',
     tools: [{ tool: mockTool('shared_tool') }],
   });
+  const registry = compileAgentRegistry({
+    toolkits: [first, second],
+    capabilities: [
+      capability('conflicted', ['first', 'second']),
+      capability('healthy', ['first']),
+    ],
+    generalUses: ['first'],
+  });
+
+  assert.deepEqual(registry.capabilities.map(({ capability: item }) => item.name), ['healthy']);
+  assert.deepEqual(registry.unavailableCapabilities[0]?.issues, [{
+    code: 'duplicate_tool',
+    toolName: 'shared_tool',
+    toolkitNames: ['first', 'second'],
+  }]);
+});
+
+test('registry still fails fast when the general executor has duplicate tools', () => {
+  const first = defineToolkit({
+    name: 'first',
+    description: 'First toolkit.',
+    tools: [{ tool: mockTool('shared_tool') }],
+  });
+  const second = defineToolkit({
+    name: 'second',
+    description: 'Second toolkit.',
+    tools: [{ tool: mockTool('shared_tool') }],
+  });
+
   assert.throws(
     () => compileAgentRegistry({
       toolkits: [first, second],
-      capabilities: [capability('conflicted', ['first', 'second'])],
-      generalUses: ['first'],
+      capabilities: [],
+      generalUses: ['first', 'second'],
     }),
-    (error: unknown) => {
-      assert.ok(error instanceof ExecutorCompilationError);
-      assert.deepEqual(error.issues, [{
-        code: 'duplicate_tool',
-        toolName: 'shared_tool',
-        toolkitNames: ['first', 'second'],
-      }]);
-      return true;
-    },
+    ExecutorCompilationError,
   );
 });

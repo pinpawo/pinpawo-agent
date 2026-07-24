@@ -106,7 +106,6 @@ export {
   formatExecutorCompilationIssues,
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,
-  validateUniqueToolNames,
 } from './agent/createAgentRuntime';
 export type {
   CompiledAgentRegistry,
@@ -116,9 +115,10 @@ export type {
   UnavailableCapability,
 } from './agent/createAgentRuntime';
 export {
-  ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
+  ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
+  ARTIFACT_DISCOVERY_READ_TOOL_NAME,
   ARTIFACT_DISCOVERY_TOOL_NAMES,
-  ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
+  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
 } from './agent/orchestrator/artifacts/discovery';
 export {
   PROVIDER_INPUT_WATERMARK_RATIO,

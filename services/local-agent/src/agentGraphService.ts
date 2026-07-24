@@ -23,14 +23,8 @@ const HEADLESS_REVIEW_CAPABILITIES = {
 
 function buildConfigurable(setup: AgentChannelSetup) {
   const configurable: Record<string, unknown> = {};
-  const toolkits = [
-    ...(setup.input.toolkits ?? []),
-    ...(setup.input.artifactDiscoveryRoot && setup.input.artifactDiscoveryToolkit
-      ? [setup.input.artifactDiscoveryToolkit]
-      : []),
-  ];
   configurable.registry = compileAgentRegistry({
-    toolkits,
+    toolkits: setup.input.toolkits ?? [],
     capabilities: setup.input.capabilities ?? [],
     generalUses: setup.input.generalUses,
   });
@@ -38,12 +32,6 @@ function buildConfigurable(setup: AgentChannelSetup) {
   if (setup.input.threadId) configurable.thread_id = setup.input.threadId;
   if (setup.input.execution) configurable.execution = setup.input.execution;
   if (setup.input.workdir) configurable.workdir = setup.input.workdir;
-  if (setup.input.artifactDiscoveryRoot) {
-    configurable.artifactDiscoveryRoot = setup.input.artifactDiscoveryRoot;
-  }
-  if (setup.input.artifactDiscoveryToolkit) {
-    configurable.artifactDiscoveryToolkit = setup.input.artifactDiscoveryToolkit;
-  }
   if (setup.input.runtimeEnvironment) configurable.runtimeEnvironment = setup.input.runtimeEnvironment;
   if (setup.input.globalReviewPolicy) configurable.globalReviewPolicy = setup.input.globalReviewPolicy;
   if (setup.interfaceContext?.kind) {

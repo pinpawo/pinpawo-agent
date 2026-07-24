@@ -29,11 +29,8 @@ import {
   splitCapabilitySearchTerms,
 } from './capabilitySearch';
 import {
-  collectCapabilityOperations,
-  collectGeneralOperations,
   collectToolkitOperations,
   resolveToolkitExecution,
-  selectCapabilityTools,
 } from './subagentDispatch';
 import { buildReviewSpec } from './review/reviewSpec';
 import { isToolActionAuthorized } from './review/reviewAuthorizations';
@@ -92,22 +89,12 @@ function createOrchestratorGraph(
     configurable?: Record<string, unknown>;
   } = {}) => {
     const configurable = options.configurable ?? {};
-    const artifactDiscoveryRoot = typeof configurable.artifactDiscoveryRoot === 'string'
-      ? configurable.artifactDiscoveryRoot
-      : undefined;
-    const artifactDiscoveryToolkit = configurable.artifactDiscoveryToolkit as AgentToolkit | undefined;
-    const toolkits = [
-      ...((configurable.toolkits ?? []) as AgentToolkit[]),
-      ...(artifactDiscoveryRoot && artifactDiscoveryToolkit
-        ? [artifactDiscoveryToolkit]
-        : []),
-    ];
     return {
       ...options,
       configurable: {
         ...configurable,
         registry: compileAgentRegistry({
-          toolkits,
+          toolkits: (configurable.toolkits ?? []) as AgentToolkit[],
           capabilities: (configurable.capabilities ?? []) as AgentCapability[],
           generalUses: (configurable.generalUses ?? []) as string[],
         }),
@@ -171,7 +158,7 @@ async function runToolkitToolCall(
     tools: resources.tools,
     middleware: resources.middleware,
     promptSections: [],
-    operations: collectGeneralOperations(resources.toolkits),
+    operations: collectToolkitOperations(resources.toolkits),
     messages: [new HumanMessage(`call ${toolCalls.map((call) => call.name).join(', ')}`)],
   });
 }
@@ -1376,7 +1363,6 @@ test('limit-reached progress announce lets model choose the same capability dele
 test('toolkits compose tools and instructions for capability runtimes', async () => {
   const browserOpen = mockTool('browser_open');
   const readFile = mockTool('read_file');
-  const customTool = mockTool('custom_tool');
   const toolkits: AgentToolkit[] = [
     {
       name: 'browser',
@@ -1407,26 +1393,6 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
   assert.equal(browserExecution.toolkits[0]?.instructions, 'browser rules');
   assert.deepEqual(allExecution.tools.map((toolItem) => toolItem.name), ['browser_open', 'read_file']);
 
-  const selectedTools = selectCapabilityTools([
-    ...browserExecution.tools,
-    customTool,
-  ]);
-
-  assert.deepEqual(selectedTools.map((toolItem) => toolItem.name), [
-    'browser_open',
-    'custom_tool',
-  ]);
-
-  const dedupedTools = selectCapabilityTools([
-    ...browserExecution.tools,
-    customTool,
-    customTool,
-  ]);
-
-  assert.deepEqual(dedupedTools.map((toolItem) => toolItem.name), [
-    'browser_open',
-    'custom_tool',
-  ]);
 });
 
 test('capability receives tools only from Toolkits authorized by fixed uses', async () => {
@@ -1546,28 +1512,29 @@ test('artifact discovery tools reach a selected capability only when declared in
           source: { kind: 'inline', id: 'test:browser_like' },
         }),
       }],
-      toolkits: [{
-        name: 'browser',
-        description: 'browser toolkit',
-        tools: toolDefinitions(mockTool('browser_open')),
-      }],
+      toolkits: [
+        {
+          name: 'browser',
+          description: 'browser toolkit',
+          tools: toolDefinitions(mockTool('browser_open')),
+        },
+        {
+          name: 'artifact_discovery',
+          description: 'artifact discovery toolkit',
+          tools: toolDefinitions(
+            mockTool('artifact_list'),
+            mockTool('artifact_read'),
+          ),
+        },
+      ],
       forcedCapabilityNames: ['browser_like'],
-      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/tool-test',
-      artifactDiscoveryToolkit: {
-        name: 'artifact_discovery',
-        description: 'artifact discovery toolkit',
-        tools: toolDefinitions(
-          mockTool('artifact_list_dir'),
-          mockTool('artifact_view_file_chunk'),
-        ),
-      },
     },
   });
 
   assert.deepEqual(capabilityToolNames, [
     'browser_open',
-    'artifact_list_dir',
-    'artifact_view_file_chunk',
+    'artifact_list',
+    'artifact_read',
   ]);
 });
 
@@ -1606,20 +1573,21 @@ test('general lane keeps workspace file tools alongside scoped artifact discover
       actor: testActor,
       capabilities: [],
       generalUses: ['bash', 'artifact_discovery'],
-      toolkits: [{
-        name: 'bash',
-        description: 'workspace file tools',
-        tools: toolDefinitions(mockTool('list_dir'), mockTool('view_file_chunk')),
-      }],
-      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/general-tool-test',
-      artifactDiscoveryToolkit: {
-        name: 'artifact_discovery',
-        description: 'artifact discovery toolkit',
-        tools: toolDefinitions(
-          mockTool('artifact_list_dir'),
-          mockTool('artifact_view_file_chunk'),
-        ),
-      },
+      toolkits: [
+        {
+          name: 'bash',
+          description: 'workspace file tools',
+          tools: toolDefinitions(mockTool('list_dir'), mockTool('view_file_chunk')),
+        },
+        {
+          name: 'artifact_discovery',
+          description: 'artifact discovery toolkit',
+          tools: toolDefinitions(
+            mockTool('artifact_list'),
+            mockTool('artifact_read'),
+          ),
+        },
+      ],
     },
     callbacks: recorder.callbacks,
   });
@@ -1627,13 +1595,13 @@ test('general lane keeps workspace file tools alongside scoped artifact discover
   assert.deepEqual(generalToolNames, [
     'list_dir',
     'view_file_chunk',
-    'artifact_list_dir',
-    'artifact_view_file_chunk',
+    'artifact_list',
+    'artifact_read',
   ]);
   assert.equal(recorder.subagentInputs.length, 1);
   assert.match(
     recorder.subagentInputs[0].map((message) => String(message.content)).join('\n'),
-    /<artifact_discovery_context[\s\S]*general-tool-test/,
+    /<artifact_discovery_context[\s\S]*current_thread/,
   );
 });
 
@@ -1723,16 +1691,15 @@ test('toolkit ToolDefinition operations are collected with their source', () => 
     toolName: 'read_file',
   });
 
-  const capabilityOperations = collectCapabilityOperations(toolkits);
-  assert.deepEqual(capabilityOperations.shared_tool?.source, {
+  assert.deepEqual(toolkitOperations.shared_tool?.source, {
     provider: 'toolkit',
     name: 'bash',
     toolName: 'shared_tool',
   });
 });
 
-test('general operations are collected from toolkits', () => {
-  const generalOperations = collectGeneralOperations([{
+test('executor operations are collected from toolkits', () => {
+  const generalOperations = collectToolkitOperations([{
     name: 'bash',
     description: 'bash toolkit',
     tools: [{
@@ -1921,7 +1888,7 @@ test('capability finalize stores only artifact refs in state', async () => {
   assert.equal(state.sessionCapabilityArtifacts[0]?.schema?.name, 'daily_post.result');
 });
 
-test('runAgent compiles the registry and forwards artifact discovery context', async () => {
+test('runAgent compiles the registered artifact discovery Toolkit', async () => {
   const calls: Array<{ configurable?: Record<string, unknown> }> = [];
   const graph = {
     invoke: async (_input: unknown, options?: { configurable?: Record<string, unknown> }) => {
@@ -1934,16 +1901,14 @@ test('runAgent compiles the registry and forwards artifact discovery context', a
     name: 'artifact_discovery',
     description: 'artifact discovery toolkit',
     tools: toolDefinitions(
-      mockTool('artifact_list_dir'),
-      mockTool('artifact_view_file_chunk'),
+      mockTool('artifact_list'),
+      mockTool('artifact_read'),
     ),
   };
   const result = await runAgent(graph as never, {
     messages: [new HumanMessage('hello')],
-    toolkits: [],
+    toolkits: [artifactDiscoveryToolkit],
     generalUses: ['artifact_discovery'],
-    artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/thread-1',
-    artifactDiscoveryToolkit,
   });
 
   assert.equal(result.reply, 'done');
@@ -1954,11 +1919,8 @@ test('runAgent compiles the registry and forwards artifact discovery context', a
   };
   assert.deepEqual(registry.toolkits?.map(({ name }) => name), ['artifact_discovery']);
   assert.deepEqual(registry.general?.toolkits?.map(({ name }) => name), ['artifact_discovery']);
-  assert.equal(
-    calls[0]?.configurable?.artifactDiscoveryRoot,
-    '/repo/.pinpawo/capability-artifacts/threads/thread-1',
-  );
-  assert.equal(calls[0]?.configurable?.artifactDiscoveryToolkit, artifactDiscoveryToolkit);
+  assert.equal(calls[0]?.configurable?.artifactDiscoveryRoot, undefined);
+  assert.equal(calls[0]?.configurable?.artifactDiscoveryToolkit, undefined);
 });
 
 test('capability Toolkit exposes ToolDefinition operation metadata', () => {
@@ -1995,7 +1957,7 @@ test('capability Toolkit exposes ToolDefinition operation metadata', () => {
 
   const definition = draftToolkit.tools[0];
   assert.equal(definition?.operation?.title, '保存草稿');
-  assert.deepEqual(collectCapabilityOperations([draftToolkit]).save_draft?.source, {
+  assert.deepEqual(collectToolkitOperations([draftToolkit]).save_draft?.source, {
     provider: 'toolkit',
     name: 'draft_writer',
     toolName: 'save_draft',
@@ -2213,7 +2175,7 @@ test('toolkit review cancellation ends subagent without retrying tools', async (
     tools: resources.tools,
     middleware: resources.middleware,
     promptSections: [],
-    operations: collectGeneralOperations(resources.toolkits),
+    operations: collectToolkitOperations(resources.toolkits),
     messages: [new HumanMessage('try guarded work')],
   });
 
@@ -4523,15 +4485,14 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
         ['artifact_discovery'],
       )],
       forcedCapabilityNames: ['ops'],
-      artifactDiscoveryRoot: '/repo/.pinpawo/capability-artifacts/threads/briefing-a-plus-b',
-      artifactDiscoveryToolkit: {
+      toolkits: [{
         name: 'artifact_discovery',
         description: 'artifact discovery toolkit',
         tools: toolDefinitions(
-          mockTool('artifact_list_dir'),
-          mockTool('artifact_view_file_chunk'),
+          mockTool('artifact_list'),
+          mockTool('artifact_read'),
         ),
-      },
+      }],
     },
     callbacks: recorder.callbacks,
   }) as OrchestratorStateType;
@@ -4565,7 +4526,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
   assert.match(String(secondInput.at(-1)?.content), /<delegation_briefing[\s\S]*删除 packages\/goat 目录/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /Issue #272 已关闭。/);
-  assert.match(secondInputText, /<artifact_discovery_context[\s\S]*briefing-a-plus-b/);
+  assert.match(secondInputText, /<artifact_discovery_context[\s\S]*current_thread/);
   assert.doesNotMatch(
     state.messages.map((message) => String(message.content)).join('\n'),
     /artifact_discovery_context/,

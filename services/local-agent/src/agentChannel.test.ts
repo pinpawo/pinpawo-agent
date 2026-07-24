@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -9,10 +9,13 @@ import { AIMessage } from '@langchain/core/messages';
 import { buildDecisionStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
 import type { AgentContext } from './contextLoader';
 import {
+  compileAgentRegistry,
   defineInstructionDocument,
   type AgentCapability,
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
+import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { createBashToolkit, createGitToolkit } from './toolkits/local';
 
 function createContext(): AgentContext {
   return {
@@ -257,58 +260,107 @@ test('buildLocalChatAgentInput uses caller-provided workdir', () => {
   assert.doesNotMatch(setup.input.runtimeEnvironment ?? '', /进程 cwd/);
 });
 
-test('buildLocalChatAgentInput exposes only an existing current-thread artifact root', (t) => {
+test('buildLocalChatAgentInput registers artifact discovery for an empty thread', async (t) => {
   const artifactRoot = mkdtempSync(resolve(tmpdir(), 'pinpawo-agent-channel-artifacts-'));
   t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
-  const threadRoot = resolve(artifactRoot, 'threads/thread%2Fwith%20space');
-  mkdirSync(threadRoot, { recursive: true });
+  const store = new FileCapabilityArtifactStore(artifactRoot);
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     threadId: 'thread/with space',
-    capabilityArtifactRoot: artifactRoot,
+    capabilityArtifactStore: store,
+    toolkits: [createBashToolkit(), createGitToolkit()],
   });
+  const toolkit = setup.input.toolkits?.find(({ name }) => name === 'artifact_discovery');
 
-  assert.equal(setup.input.artifactDiscoveryRoot, threadRoot);
+  assert.ok(toolkit);
   assert.deepEqual(
-    setup.input.artifactDiscoveryToolkit?.tools.map((definition) => definition.tool.name),
-    ['artifact_list_dir', 'artifact_view_file_chunk'],
+    toolkit.tools.map((definition) => definition.tool.name),
+    ['artifact_list', 'artifact_read'],
   );
-  assert.deepEqual(setup.input.generalUses, ['pet_profile', 'artifact_discovery']);
+  assert.deepEqual(
+    setup.input.generalUses,
+    ['pet_profile', 'bash', 'git', 'artifact_discovery'],
+  );
+  assert.ok(
+    setup.input.capabilities
+      ?.find(({ name }) => name === 'explore')
+      ?.uses.includes('artifact_discovery'),
+  );
+  const registry = compileAgentRegistry({
+    toolkits: setup.input.toolkits ?? [],
+    capabilities: setup.input.capabilities ?? [],
+    generalUses: setup.input.generalUses,
+  });
+  assert.ok(
+    registry.capabilities.some(({ capability }) => capability.name === 'explore'),
+    'an empty thread must not make Explore unavailable',
+  );
+
+  const list = toolkit.tools.find(({ tool }) => tool.name === 'artifact_list')?.tool;
+  assert.ok(list);
+  assert.match(String(await list.invoke({})), /no artifacts/);
 });
 
-test('buildLocalChatAgentInput omits artifact discovery for a new empty thread', (t) => {
+test('artifact discovery sees artifacts written after Toolkit registration', async (t) => {
   const artifactRoot = mkdtempSync(resolve(tmpdir(), 'pinpawo-agent-channel-empty-artifacts-'));
   t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
+  const store = new FileCapabilityArtifactStore(artifactRoot);
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     threadId: 'new-thread',
-    capabilityArtifactRoot: artifactRoot,
+    capabilityArtifactStore: store,
+  });
+  const toolkit = setup.input.toolkits?.find(({ name }) => name === 'artifact_discovery');
+  const list = toolkit?.tools.find(({ tool }) => tool.name === 'artifact_list')?.tool;
+  assert.ok(list);
+
+  const ref = await store.writeArtifact({
+    threadId: 'new-thread',
+    capabilityId: 'explore',
+    delegationId: 'delegation-1',
+    runId: 'run-1',
+    artifact: {
+      kind: 'report',
+      mimeType: 'text/markdown',
+      content: '# Historical report',
+    },
   });
 
-  assert.equal(setup.input.artifactDiscoveryRoot, undefined);
-  assert.equal(setup.input.artifactDiscoveryToolkit, undefined);
+  assert.match(String(await list.invoke({})), new RegExp(ref.id));
 });
 
-test('artifact discovery tools reject paths outside the current thread root', async (t) => {
+test('artifact discovery rejects an artifact URI from another thread', async (t) => {
   const artifactRoot = mkdtempSync(resolve(tmpdir(), 'pinpawo-agent-channel-scoped-artifacts-'));
   t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
-  mkdirSync(resolve(artifactRoot, 'threads/thread-1'), { recursive: true });
+  const store = new FileCapabilityArtifactStore(artifactRoot);
+  const ref = await store.writeArtifact({
+    threadId: 'thread-2',
+    capabilityId: 'explore',
+    delegationId: 'delegation-1',
+    runId: 'run-1',
+    artifact: {
+      kind: 'report',
+      mimeType: 'text/markdown',
+      content: '# Other thread',
+    },
+  });
   const setup = buildLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     threadId: 'thread-1',
-    capabilityArtifactRoot: artifactRoot,
+    capabilityArtifactStore: store,
   });
-  const listDir = setup.input.artifactDiscoveryToolkit?.tools
-    .find((definition) => definition.tool.name === 'artifact_list_dir')
+  const read = setup.input.toolkits
+    ?.find(({ name }) => name === 'artifact_discovery')
+    ?.tools.find(({ tool }) => tool.name === 'artifact_read')
     ?.tool;
 
-  assert.ok(listDir);
+  assert.ok(read);
   assert.match(
-    String(await listDir.invoke({ path: '/tmp' })),
-    /path must stay inside the current thread artifact root/,
+    String(await read.invoke({ uri: ref.uri })),
+    /belongs to another thread/,
   );
 });
 

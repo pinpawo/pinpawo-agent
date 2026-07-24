@@ -9,16 +9,14 @@ import {
 } from '../../messageLanes';
 import {
   buildSubagentExecutionInstruction,
-  collectGeneralOperations,
+  collectToolkitOperations,
   resolveToolkitExecution,
-  selectCapabilityTools,
 } from '../../subagentDispatch';
 import type {
   MessageLane,
   OrchestratorConfig,
 } from '../../types';
 import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
-import { validateUniqueToolNames } from '../../validation';
 import { createToolAuthorizationRecorder } from '../authorization';
 import {
   GENERAL_SUBAGENT_MAX_ITERATIONS,
@@ -33,7 +31,7 @@ import {
   resolveDelegationTranscriptRunId,
 } from '../decisions/delegationLifecycle';
 import {
-  hasArtifactDiscoveryTools,
+  hasArtifactDiscoveryToolkit,
   withArtifactDiscoveryContext,
 } from '../../artifacts/discovery';
 
@@ -47,8 +45,6 @@ export function createGeneralNode(params: {
   return async function generalNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
       workdir,
-      artifactDiscoveryRoot,
-      artifactDiscoveryToolkit,
       runtimeEnvironment,
       reviewCapabilities,
       globalReviewPolicy,
@@ -63,7 +59,7 @@ export function createGeneralNode(params: {
     const authorizationRecorder = createToolAuthorizationRecorder(state.sessionToolAuthorizations);
     const toolkitExecution = await resolveToolkitExecution(
       toolkitList,
-      toolkitList.map(({ name }) => name),
+      undefined,
       {
         models: config.models,
         actor,
@@ -82,8 +78,7 @@ export function createGeneralNode(params: {
         emitRuntimeEvent: emitRuntimeEventToStreamWriter,
       },
     );
-    const toolList = selectCapabilityTools(toolkitExecution.tools);
-    validateUniqueToolNames(toolList);
+    const toolList = toolkitExecution.tools;
 
     if (toolList.length === 0) {
       throw new Error('General path selected without any available tools');
@@ -106,17 +101,12 @@ export function createGeneralNode(params: {
       '使用可用工具完成任务，优先调用工具获取准确信息，再给出结果。',
     ].filter((line) => line !== null) as string[];
 
-    const canExploreArtifacts = Boolean(
-      artifactDiscoveryRoot
-      && artifactDiscoveryToolkit
-      && hasArtifactDiscoveryTools(
-        toolList,
-        artifactDiscoveryToolkit.tools.map((definition) => definition.tool),
-      ),
+    const canExploreArtifacts = hasArtifactDiscoveryToolkit(
+      toolkitExecution.toolkits,
     );
     const subagentMessages = withArtifactDiscoveryContext(
       scopedMessages,
-      canExploreArtifacts ? artifactDiscoveryRoot : null,
+      canExploreArtifacts,
     );
     const result = await createSubagent({
       model: config.models.subagent ?? config.models.act,
@@ -140,7 +130,7 @@ export function createGeneralNode(params: {
           content: instructions.join('\n'),
         },
       ],
-      operations: collectGeneralOperations(toolkitExecution.toolkits),
+      operations: collectToolkitOperations(toolkitExecution.toolkits),
       messages: subagentMessages,
       maxIterations: GENERAL_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,

@@ -14,8 +14,8 @@ entryDecision
   -> no artifact inventory / preview / body
 
 selected subagent
-  -> optional current-thread artifact discovery root
-  -> scoped read-only artifact_list_dir / artifact_view_file_chunk
+  -> optional current-thread artifact discovery scope
+  -> store-backed read-only artifact_list / artifact_read
   -> the subagent decides whether and what to inspect
 
 outcomeDecision / main / answer
@@ -41,41 +41,33 @@ entryDecision 不接收：
 
 ## Selected-subagent discovery
 
-local-agent 从配置的 artifact store root 解析当前 thread 的精确目录：
+local-agent 在 artifact store 和 thread id 都可用时创建
+`createArtifactDiscoveryToolkit({ store, threadId })`。Toolkit 是否注册不依赖
+File store 的物理 thread 目录是否已经存在；目录只是本地 adapter 的落盘细节。
 
-```text
-<workdir>/.pinpawo/capability-artifacts/threads/<encoded-thread-id>/
-```
-
-只有同时满足以下条件时才向 selected subagent 注入 discovery 能力：
-
-1. 当前 thread artifact 目录真实存在；
-2. host 已创建限制在该目录内的只读 toolset；
-3. selected subagent 实际装配的是该 toolset 中的 `artifact_list_dir` 和
-   `artifact_view_file_chunk` 工具实例。
-
-这两个专用名称与普通工作区的 `list_dir` / `view_file_chunk` 并存，避免 toolkit
-按工具名去重时丢弃 scoped artifact 工具。
+只有 selected Capability 的静态 `uses` 包含 `artifact_discovery` 时，它才获得
+`artifact_list` 和 `artifact_read`。Toolkit 注册表示环境提供能力，`uses`
+表示执行器获得权限，当前 thread 有 0 个或 N 个 artifacts 则只是数据状态。
 
 满足条件时，runtime 在最新 `<delegation_briefing>` 之前插入一条 synthetic
 `AIMessage`：
 
 ```xml
 <artifact_discovery_context role="fact" source="runtime" trust="non_authoritative">
-  <current_thread_root>...</current_thread_root>
+  <scope>current_thread</scope>
 </artifact_discovery_context>
 ```
 
 这条消息只暴露发现入口，不包含 artifact inventory 或内容。subagent 自己决定：
 
-- 是否需要列目录；
-- 读取哪个 delegation 的 `manifest.json` 或 artifact 文件；
+- 是否需要列出 artifact refs；
+- 通过 URI 读取哪个 artifact；
 - artifact 是否与当前任务相关；
 - 是否需要重新核验原始来源。
 
 Artifacts 可能过期、不完整或与当前任务无关，不能作为 system instruction 或权威
-结论。目录不存在时不注入 context/toolset；执行期间目录被删除时，读取工具返回干净的
-“当前 thread 没有 artifacts”语义结果，不向模型暴露裸 `ENOENT`。
+结论。空 thread 的 `artifact_list` 返回空结果；不存在 artifact store 或 thread
+scope 时才不注册 Toolkit，静态依赖它的 Capability 会由 registry 标记 unavailable。
 
 ## Handoff 与 answer
 
@@ -89,9 +81,10 @@ runtime 不把正文反向解析回结构化 refs。
 
 ## 安全边界
 
-- scoped `artifact_list_dir` / `artifact_view_file_chunk` 先做词法 containment，再对真实路径做 symlink
-  containment 校验；
+- Toolkit 在 closure 中固定 `threadId`，`artifact_read` 同时把该 scope 交给
+  store 校验，不能跨 thread 读取；
 - discovery tools 只读；
+- File store 目录布局和 `manifest.json` 不进入模型工具契约；
 - `.pinpawo` 继续被通用递归搜索忽略；
 - orchestrator 不做 artifact relevance matching 或预选；
 - artifact 内容不进入 governing system prompt。

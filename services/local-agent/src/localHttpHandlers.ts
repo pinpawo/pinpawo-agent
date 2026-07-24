@@ -1,20 +1,17 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
-  AgentToolkit,
+  AgentCapability,
   StudioDueRunStatus,
   StudioDueRunStoreTrace,
 } from '@pinpawo/pet-agent';
+import { ARTIFACT_DISCOVERY_TOOLKIT_NAME } from '@pinpawo/pet-agent';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
-  getCachedCapabilityAvailability,
-  refreshCapability,
+  getCachedToolkitAvailability,
   refreshToolkit,
-  resolveCapabilityAvailability,
-  type CapabilityAvailabilityRecord,
   type ToolkitAvailabilityRecord,
-} from './capabilities/capabilityAvailability';
+} from './toolkits/toolkitAvailability';
 import { loadUserCapabilities, readUserCapabilityManifests } from './capabilityLoader';
-import type { LoadedUserCapability } from './capabilityLoader';
 import { loadStoredConfig } from './storage';
 import { readAgentActivityHealthFields } from './operationActivityState';
 import { isAuthorizedLocalServerRequest } from './localServerAuth';
@@ -66,14 +63,13 @@ export function handleLocalHttpRequest(
       });
     };
 
-    const refreshCapabilityName = url.searchParams.get('refresh_capability')
-      ?? (url.searchParams.get('refresh_browser') === '1' ? 'browser' : null);
-    if (refreshCapabilityName) {
-      refreshRuntimeCapability(deps, refreshCapabilityName).then((patch) => {
+    const refreshToolkitName = url.searchParams.get('refresh_toolkit');
+    if (refreshToolkitName) {
+      refreshRuntimeToolkit(deps, refreshToolkitName).then((patch) => {
         if (patch) applyCapabilityUpdate(patch);
         writeHealth();
       }).catch(() => {
-        applyCapabilityUpdate(removeRuntimeCapability(deps, refreshCapabilityName));
+        applyCapabilityUpdate(removeRuntimeToolkit(deps, refreshToolkitName));
         writeHealth();
       });
       return true;
@@ -269,19 +265,6 @@ function replaceListItem<T>(
   return items.map((item, itemIndex) => itemIndex === index ? replacement : item);
 }
 
-function replaceLocalCapability(
-  deps: LocalServerDeps,
-  name: string,
-  record: CapabilityAvailabilityRecord | null,
-): LocalServerCapabilityStatePatch {
-  const localCapabilities = replaceListItem(
-    deps.localCapabilities,
-    (item) => item.name === name,
-    record?.availability.available ? record.capability : null,
-  );
-  return localCapabilities ? { localCapabilities } : {};
-}
-
 function replaceLocalToolkit(
   deps: LocalServerDeps,
   name: string,
@@ -295,63 +278,21 @@ function replaceLocalToolkit(
   return localToolkits ? { localToolkits } : {};
 }
 
-function replaceUserCapability(
-  deps: LocalServerDeps,
-  name: string,
-  record: CapabilityAvailabilityRecord | null,
-): LocalServerCapabilityStatePatch {
-  const definition = record?.availability.available
-    ? deps.userCapabilityDefinitions?.find((item) =>
-      item.meta.id === name || item.capability.name === name,
-    ) ?? null
-    : null;
-  const userCapabilities = replaceListItem(
-    deps.userCapabilities,
-    (item) => item.meta.id === name || item.capability.name === name,
-    definition,
-  );
-  return userCapabilities ? { userCapabilities } : {};
-}
-
-function removeRuntimeCapability(
+function removeRuntimeToolkit(
   deps: LocalServerDeps,
   name: string,
 ): LocalServerCapabilityStatePatch {
-  return {
-    ...replaceLocalCapability(deps, name, null),
-    ...replaceLocalToolkit(deps, name, null),
-    ...replaceUserCapability(deps, name, null),
-  };
+  return replaceLocalToolkit(deps, name, null);
 }
 
-async function refreshRuntimeCapability(
+async function refreshRuntimeToolkit(
   deps: LocalServerDeps,
   name: string,
 ): Promise<LocalServerCapabilityStatePatch | null> {
-  const localRecord = await refreshCapability(
-    deps.localCapabilityDefinitions ?? [],
-    name,
-    deps.localToolkits,
-  );
   const localToolkitRecord = await refreshToolkit(deps.localToolkitDefinitions ?? [], name);
-  if (localRecord || localToolkitRecord) {
-    return {
-      ...(localRecord ? replaceLocalCapability(deps, name, localRecord) : {}),
-      ...(localToolkitRecord ? replaceLocalToolkit(deps, name, localToolkitRecord) : {}),
-    };
-  }
-
-  const userDefinition = deps.userCapabilityDefinitions?.find((item) =>
-    item.meta.id === name || item.capability.name === name,
-  );
-  if (!userDefinition) return null;
-
-  const userRecord = await refreshCapability(
-    deps.userCapabilityDefinitions?.map((item) => item.capability) ?? [],
-    userDefinition.capability.name,
-    deps.localToolkits,
-  );
-  return replaceUserCapability(deps, name, userRecord);
+  return localToolkitRecord
+    ? replaceLocalToolkit(deps, name, localToolkitRecord)
+    : null;
 }
 
 function isCapabilityEnabled(id: string) {
@@ -359,36 +300,12 @@ function isCapabilityEnabled(id: string) {
   return !caps || !(id in caps) ? true : caps[id] === true;
 }
 
-async function filterAvailableUserCapabilities(
-  loaded: LoadedUserCapability[],
-  availableToolkits: readonly AgentToolkit[],
-  options: { force?: boolean } = {},
-): Promise<LoadedUserCapability[]> {
-  const records = await Promise.all(
-    loaded.map(async (item) => ({
-      item,
-      availability: await resolveCapabilityAvailability(item.capability, {
-        ...options,
-        availableToolkits,
-      }),
-    })),
-  );
-  return records
-    .filter((record) => record.availability.availability.available)
-    .map((record) => record.item);
-}
-
 async function rescanUserCapabilities(deps: LocalServerDeps) {
   const runtimeRescan = deps.rescanUserCapabilities
     ? await deps.rescanUserCapabilities()
     : null;
   const definitions = runtimeRescan?.userCapabilityDefinitions ?? await loadUserCapabilities();
-  const available = runtimeRescan?.userCapabilities
-    ?? await filterAvailableUserCapabilities(
-      definitions,
-      deps.localToolkits ?? [],
-      { force: true },
-    );
+  const available = runtimeRescan?.userCapabilities ?? definitions;
   return {
     patch: {
       userCapabilityDefinitions: definitions,
@@ -402,49 +319,53 @@ async function rescanUserCapabilities(deps: LocalServerDeps) {
 }
 
 function buildCapabilitiesPayload(deps: LocalServerDeps) {
-  const localCapabilityIds = new Set((deps.localCapabilities ?? []).map((item) => item.name));
   const localDefinitionIds = new Set((deps.localCapabilityDefinitions ?? []).map((item) => item.name));
   const userDefinitions = deps.userCapabilityDefinitions ?? [];
   const userDefinitionIds = new Set(userDefinitions.flatMap((item) => [item.meta.id, item.capability.name]));
-  const userAvailableIds = new Set(
-    (deps.userCapabilities ?? []).flatMap((item) => [item.meta.id, item.capability.name]),
-  );
+  const availableToolkitNames = new Set([
+    ...(deps.localToolkits ?? []).map(({ name }) => name),
+    ...(deps.pluginToolkits ?? []).map(({ name }) => name),
+    ...(deps.capabilityArtifactStore ? [ARTIFACT_DISCOVERY_TOOLKIT_NAME] : []),
+  ]);
+  const resolveAvailability = (capability: AgentCapability | undefined) => {
+    if (!capability) return null;
+    const missingToolkits = capability.uses.filter((name) => !availableToolkitNames.has(name));
+    return missingToolkits.length === 0
+      ? {
+          available: true,
+          reason: 'Capability availability is derived from required Toolkits',
+        }
+      : {
+          available: false,
+          reason: `required Toolkit unavailable: ${missingToolkits.join(', ')}`,
+          metadata: { missingToolkitCount: missingToolkits.length },
+        };
+  };
 
   const builtIns = BUILT_IN_CAPABILITY_REGISTRY.map((meta) => {
-    const availability = getCachedCapabilityAvailability(meta.id);
+    const definition = deps.localCapabilityDefinitions?.find(({ name }) => name === meta.id);
+    const availability = resolveAvailability(definition);
     const isHostRuntimeCapability = localDefinitionIds.has(meta.id);
     return {
       ...meta,
       enabled: isCapabilityEnabled(meta.id),
       loaded: true,
-      available: isHostRuntimeCapability ? localCapabilityIds.has(meta.id) : isCapabilityEnabled(meta.id),
-      availability: availability
-        ? {
-          available: availability.available,
-          reason: availability.reason,
-          detail: availability.detail,
-          metadata: availability.metadata,
-        }
-        : null,
+      available: isHostRuntimeCapability
+        ? Boolean(availability?.available)
+        : isCapabilityEnabled(meta.id),
+      availability,
     };
   });
 
   const userManifests = readUserCapabilityManifests().map((meta) => {
     const definition = userDefinitions.find((item) => item.meta.id === meta.id);
-    const availability = definition ? getCachedCapabilityAvailability(definition.capability.name) : null;
+    const availability = resolveAvailability(definition?.capability);
     return {
       ...meta,
       enabled: isCapabilityEnabled(meta.id),
       loaded: userDefinitionIds.has(meta.id),
-      available: userAvailableIds.has(meta.id),
-      availability: availability
-        ? {
-          available: availability.available,
-          reason: availability.reason,
-          detail: availability.detail,
-          metadata: availability.metadata,
-        }
-        : null,
+      available: Boolean(availability?.available),
+      availability,
     };
   });
 
@@ -455,17 +376,12 @@ function buildCapabilitiesPayload(deps: LocalServerDeps) {
 }
 
 function readBrowserHealthFields() {
-  const availability = getCachedCapabilityAvailability('browser');
+  const availability = getCachedToolkitAvailability('browser');
   if (!availability) return {};
 
-  const mode = availability.metadata?.mode;
   return {
-    browser_mode: typeof mode === 'string'
-      ? mode
-      : availability.available
-        ? 'available'
-        : 'none',
-    browser_detail: availability.detail ?? availability.reason,
-    ...browserRuntime.getHealthFields(mode),
+    browser_mode: availability.available ? 'available' : 'none',
+    browser_detail: availability.available ? undefined : availability.reason,
+    ...browserRuntime.getHealthFields(availability.available ? 'available' : 'none'),
   };
 }

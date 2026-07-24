@@ -595,8 +595,7 @@ Studio 在 planner run setup 阶段注册 run-scoped Toolkit。
 ### 10.4 Artifact Discovery
 
 ```text
-createArtifactDiscoveryToolset(root)
-→ createArtifactDiscoveryToolkit(root)
+createArtifactDiscoveryToolkit({ store, threadId })
 ```
 
 需要 artifact discovery 的最终 Capability 场景显式包含：
@@ -605,8 +604,16 @@ createArtifactDiscoveryToolset(root)
 uses: ['artifact_discovery']
 ```
 
-不存在 artifact store 的环境注册另一份不包含该依赖的 Capability 场景；
-运行时不得静默增加或移除工具权限。
+host 在 artifact store 和 thread scope 可用时注册 run-scoped Toolkit。当前
+thread 是否已经写入 artifact、File store 的物理 thread 目录是否已经创建，
+都只是数据状态，不是 Toolkit availability。空 thread 的 `artifact_list`
+返回空结果，不能导致依赖它的 Capability 被排除。
+
+`artifact_discovery` 通过 `CapabilityArtifactStore.listArtifacts()` /
+`readArtifact()` 工作，不把 File store 的目录布局升级为 Toolkit 契约。
+不存在 artifact store 或 thread scope 的环境不注册该 Toolkit；依赖它的
+Capability 由 registry 标记 unavailable。运行时不得静默增加或移除
+Capability 的 Toolkit 权限，也不引入 optional dependency。
 
 ### 10.5 Explore
 
@@ -614,7 +621,7 @@ uses: ['artifact_discovery']
 或由 host 在构建期创建拥有确定 `uses` 的最终 Capability，例如：
 
 ```text
-explore_local   uses [bash, git]
+explore_local   uses [bash, git, artifact_discovery]
 explore_web     uses [browser, web_search]
 explore_github  uses [git, github]
 ```

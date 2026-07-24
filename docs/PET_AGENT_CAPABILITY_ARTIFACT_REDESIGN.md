@@ -74,11 +74,12 @@ nothing needs the model to read its own just-written artifact back —
 
 - during long runs, shared subagent summarization keeps a source-aware summary
   in model context, so the subagent can re-query a source with `view_file` etc.;
-- cross-turn exploration does not inject a session inventory into entryDecision. After executor
-  selection, local-agent may expose the existing current-thread artifact directory plus scoped
-  read-only `artifact_list_dir` / `artifact_view_file_chunk` instances. The selected subagent
-  decides whether to inspect it; their distinct names let them coexist with ordinary workspace
-  `list_dir` / `view_file_chunk` tools without weakening the artifact-root boundary.
+- cross-turn exploration does not inject a session inventory into entryDecision. The host
+  registers a thread-scoped, read-only `artifact_discovery` Toolkit backed by
+  `CapabilityArtifactStore`; a selected Capability receives `artifact_list` /
+  `artifact_read` only when its static `uses` declares that Toolkit. The selected
+  subagent decides whether to inspect refs or content. An empty thread returns an
+  empty list and does not make the Toolkit unavailable.
 
 ## Contracts
 

@@ -50,6 +50,21 @@ test('defineCapability rejects names that cannot form a stable route id', () => 
   );
 });
 
+test('defineCapability reports a contract error for a non-string name', () => {
+  assert.throws(
+    () => defineCapability({
+      name: 42,
+      description: 'Inspect a repository.',
+      uses: ['git'],
+      instructions: defineInstructionDocument({
+        content: '# Inspect\n\nRead the repository.',
+        source: { kind: 'inline', id: 'test:inspect' },
+      }),
+    } as never),
+    /Capability name must be non-empty/,
+  );
+});
+
 test('defineCapability rejects an InstructionDocument whose content drifted from its digest', () => {
   const instructions = defineInstructionDocument({
     content: '# Inspect\n\nRead the repository.',

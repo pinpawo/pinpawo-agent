@@ -1,7 +1,7 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import { statSync } from 'node:fs';
 import {
+  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   GLOBAL_REVIEW_POLICY_MODE,
   stampMessageCreatedAtUtc,
   type AgentCapability,
@@ -38,7 +38,6 @@ import {
   type LocalAgentInterfaceKind,
 } from './chatInterface';
 import { inferLlmStructuredOutputMethod } from './llmModelPresets';
-import { resolveCapabilityArtifactThreadRoot } from './capabilityArtifactStore';
 import { createArtifactDiscoveryToolkit } from './toolkits/local';
 
 const DEFAULT_GENERAL_TOOLKIT_NAMES = [
@@ -46,14 +45,6 @@ const DEFAULT_GENERAL_TOOLKIT_NAMES = [
   'bash',
   'git',
 ] as const;
-
-function isExistingDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
 
 function buildActor(context: AgentContext) {
   return {
@@ -225,8 +216,6 @@ export function buildLocalChatAgentInput(params: {
   userCapabilities?: LoadedUserCapability[];
   /** Store handed to capabilities so they can deterministically persist result artifacts */
   capabilityArtifactStore?: CapabilityArtifactStore;
-  /** Root directory backing the capability artifact store. */
-  capabilityArtifactRoot?: string;
   /** Effective agent workdir for prompt context and relative tool paths. */
   workdir?: string;
   /** Fixed session/thread start timestamp used as a stable relative-time anchor. */
@@ -284,21 +273,24 @@ export function buildLocalChatAgentInput(params: {
   for (const { meta, capability } of params.userCapabilities ?? []) {
     if (isCapabilityEnabled(meta.id)) appendCapability(capabilities, capability);
   }
-  const artifactDiscoveryRootCandidate = params.threadId && params.capabilityArtifactRoot
-    ? resolveCapabilityArtifactThreadRoot(params.capabilityArtifactRoot, params.threadId)
+  const artifactDiscoveryToolkit = params.threadId && params.capabilityArtifactStore
+    ? createArtifactDiscoveryToolkit({
+        store: params.capabilityArtifactStore,
+        threadId: params.threadId,
+      })
     : undefined;
-  const artifactDiscoveryRoot = artifactDiscoveryRootCandidate
-    && isExistingDirectory(artifactDiscoveryRootCandidate)
-    ? artifactDiscoveryRootCandidate
-    : undefined;
-  const toolkits = [...sharedToolkits, ...(params.toolkits ?? [])];
+  const toolkits = [
+    ...sharedToolkits,
+    ...(params.toolkits ?? []),
+    ...(artifactDiscoveryToolkit ? [artifactDiscoveryToolkit] : []),
+  ];
   const registeredToolkitNames = new Set(toolkits.map(({ name }) => name));
   const generalUses = [
     ...(params.generalUses
       ?? DEFAULT_GENERAL_TOOLKIT_NAMES.filter((name) => registeredToolkitNames.has(name))),
   ];
-  if (artifactDiscoveryRoot && !generalUses.includes('artifact_discovery')) {
-    generalUses.push('artifact_discovery');
+  if (artifactDiscoveryToolkit && !generalUses.includes(ARTIFACT_DISCOVERY_TOOLKIT_NAME)) {
+    generalUses.push(ARTIFACT_DISCOVERY_TOOLKIT_NAME);
   }
 
   return {
@@ -334,10 +326,6 @@ export function buildLocalChatAgentInput(params: {
         dryRun: params.dryRun,
       },
       workdir: params.workdir,
-      artifactDiscoveryRoot,
-      artifactDiscoveryToolkit: artifactDiscoveryRoot
-        ? createArtifactDiscoveryToolkit(artifactDiscoveryRoot)
-        : undefined,
       runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir, {
         sessionStartedAt: params.sessionStartedAt,
         timezone: params.timezone,

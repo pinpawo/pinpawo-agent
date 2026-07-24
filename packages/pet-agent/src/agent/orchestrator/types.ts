@@ -115,13 +115,6 @@ export type OrchestratorInvokeOptions = {
   registry?: CompiledAgentRegistry;
   execution?: AgentExecution;
   workdir?: string;
-  /**
-   * Host-resolved, current-thread artifact directory. This is exposed to the
-   * selected subagent as an optional discovery shortcut, never to entryDecision.
-   */
-  artifactDiscoveryRoot?: string;
-  /** Host-owned read-only tools used to inspect artifactDiscoveryRoot. */
-  artifactDiscoveryToolkit?: AgentToolkit;
   runtimeEnvironment?: string;
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;

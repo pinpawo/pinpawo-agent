@@ -1,6 +1,7 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import {
+  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   clipForPrompt,
   defineCapability,
   defineInstructionDocument,
@@ -18,6 +19,7 @@ import { z } from 'zod';
 const DEFAULT_EXPLORE_TOOLKITS = [
   'bash',
   'git',
+  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
 ] as const;
 
 export type ExploreResult = {
@@ -354,7 +356,7 @@ URL、issue / PR 编号或命令输出来源）和建议下一步。`,
               : null);
 
           if (!ingest) {
-            return result;
+            return;
           }
 
           const generatedSummaryMessage = summaryFromMetadata === ingest.summary.trim()

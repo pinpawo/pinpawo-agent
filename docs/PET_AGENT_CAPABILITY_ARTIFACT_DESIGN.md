@@ -8,8 +8,10 @@
 > `PET_AGENT_CAPABILITY_ARTIFACT_REDESIGN.md` 为准。本文保留为设计背景；
 > 其中“模型调用 artifact toolkit 写入”和“orchestrator 读取 artifact 全文”
 > 的早期方案已被 deterministic capability write + bounded ref preview 取代。
-> 2026-07-19：entryDecision 不再接收 artifact inventory；selected subagent 只在需要时
-> 通过当前 thread 的 scoped `artifact_list_dir` / `artifact_view_file_chunk` 自主发现。下文 Phase/State 示例是历史草案，
+> 2026-07-25：entryDecision 不再接收 artifact inventory；声明
+> `uses: ['artifact_discovery']` 的 selected Capability 通过 store-backed
+> `artifact_list` / `artifact_read` 自主发现当前 thread artifacts。下文
+> Phase/State 示例是历史草案，
 > 不作为当前接口定义。
 
 ## 1. 背景

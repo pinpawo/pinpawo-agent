@@ -68,6 +68,11 @@ export type AgentCapability = {
   readonly lifecycle?: CapabilityLifecycle;
 };
 
+const validatedInstructionDocuments = new WeakMap<
+  object,
+  { content: string; digest: string }
+>();
+
 export function defineInstructionDocument(params: {
   content: string;
   source: InstructionDocumentSource;
@@ -93,7 +98,7 @@ export function defineCapability(capability: AgentCapability): AgentCapability {
   if (!capability || typeof capability !== 'object' || Array.isArray(capability)) {
     throw new Error('Capability definition must be an object');
   }
-  if (!capability.name.trim()) {
+  if (typeof capability.name !== 'string' || !capability.name.trim()) {
     throw new Error('Capability name must be non-empty');
   }
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(capability.name)) {
@@ -101,7 +106,7 @@ export function defineCapability(capability: AgentCapability): AgentCapability {
       `Capability name "${capability.name}" must use lowercase letters, numbers, "_" or "-"`,
     );
   }
-  if (!capability.description.trim()) {
+  if (typeof capability.description !== 'string' || !capability.description.trim()) {
     throw new Error(`Capability "${capability.name}" description must be non-empty`);
   }
   if (
@@ -122,11 +127,21 @@ export function defineCapability(capability: AgentCapability): AgentCapability {
   ) {
     throw new Error(`Capability "${capability.name}" instructions must be an InstructionDocument`);
   }
-  const expectedDigest = createHash('sha256')
-    .update(capability.instructions.content, 'utf8')
-    .digest('hex');
-  if (capability.instructions.digest !== expectedDigest) {
-    throw new Error(`Capability "${capability.name}" instruction digest does not match content`);
+  const cachedInstructions = validatedInstructionDocuments.get(capability);
+  if (
+    cachedInstructions?.content !== capability.instructions.content
+    || cachedInstructions.digest !== capability.instructions.digest
+  ) {
+    const expectedDigest = createHash('sha256')
+      .update(capability.instructions.content, 'utf8')
+      .digest('hex');
+    if (capability.instructions.digest !== expectedDigest) {
+      throw new Error(`Capability "${capability.name}" instruction digest does not match content`);
+    }
+    validatedInstructionDocuments.set(capability, {
+      content: capability.instructions.content,
+      digest: capability.instructions.digest,
+    });
   }
   if (capability.lifecycle?.finalize && typeof capability.lifecycle.finalize !== 'function') {
     throw new Error(`Capability "${capability.name}" lifecycle.finalize must be a function`);

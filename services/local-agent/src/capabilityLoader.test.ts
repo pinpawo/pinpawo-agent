@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  CAPABILITY_DOCUMENT_MAX_BYTES,
+  parseFrontmatterDocument,
+} from './capabilityLoader';
 
 async function mkCapability(
   root: string,
@@ -119,4 +123,135 @@ export function createRuntime() {}
 
   assert.equal(result.ok, false);
   assert.match(result.errors.join('\n'), /may only export lifecycle/);
+});
+
+test('parseFrontmatterDocument accepts supported list forms and body delimiters', () => {
+  const inline = parseFrontmatterDocument(`---
+name: inline_capability
+description: Inline uses
+uses: [bash, git]
+version: 1
+---
+
+# Inline
+
+Body may contain a later delimiter:
+---
+still body
+`, '/tmp/inline/CAPABILITY.md');
+  assert.deepEqual(inline.frontmatter.uses, ['bash', 'git']);
+  assert.match(inline.body, /still body/);
+
+  const block = parseFrontmatterDocument(`---
+name: block_capability
+description: Block uses
+uses:
+\t- bash
+\t- git
+version: 1
+---
+
+# Block
+`, '/tmp/block/CAPABILITY.md');
+  assert.deepEqual(block.frontmatter.uses, ['bash', 'git']);
+});
+
+const invalidFrontmatterCases: Array<{
+  name: string;
+  header: string;
+  expected: RegExp;
+  replacesUses?: boolean;
+  replacesVersion?: boolean;
+}> = [
+  {
+    name: 'unknown snake_case field',
+    header: 'default_enabled: true',
+    expected: /unsupported frontmatter field.*default_enabled/,
+  },
+  {
+    name: 'duplicate Toolkit dependency',
+    header: 'uses: [bash, bash]',
+    expected: /must not contain duplicate Toolkit names/,
+    replacesUses: true,
+  },
+  {
+    name: 'unsupported version',
+    header: 'version: 2',
+    expected: /"version" must be 1/,
+    replacesVersion: true,
+  },
+];
+
+for (const fixture of invalidFrontmatterCases) {
+  test(`parseFrontmatterDocument rejects ${fixture.name}`, () => {
+    const uses = fixture.replacesUses ? fixture.header : 'uses: [bash]';
+    const version = fixture.replacesVersion ? fixture.header : 'version: 1';
+    const extra = fixture.replacesUses || fixture.replacesVersion ? '' : `${fixture.header}\n`;
+    assert.throws(
+      () => parseFrontmatterDocument(`---
+name: invalid_capability
+description: Invalid fixture
+${uses}
+${version}
+${extra}---
+
+# Invalid
+`, '/tmp/invalid/CAPABILITY.md'),
+      fixture.expected,
+    );
+  });
+}
+
+test('parseFrontmatterDocument rejects an empty or oversized Markdown body', () => {
+  const header = `---
+name: sized_capability
+description: Sized fixture
+uses: []
+version: 1
+---
+`;
+  assert.throws(
+    () => parseFrontmatterDocument(header, '/tmp/empty/CAPABILITY.md'),
+    /Markdown body must not be empty/,
+  );
+  assert.throws(
+    () => parseFrontmatterDocument(
+      `${header}\n${'x'.repeat(CAPABILITY_DOCUMENT_MAX_BYTES + 1)}`,
+      '/tmp/oversized/CAPABILITY.md',
+    ),
+    /Markdown body exceeds/,
+  );
+});
+
+test('legacy capability directories emit one migration warning instead of disappearing', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-legacy-'));
+  const legacyDir = path.join(root, 'legacy_capability');
+  await fs.mkdir(legacyDir, { recursive: true });
+  await fs.writeFile(path.join(legacyDir, 'manifest.json'), '{}\n', 'utf8');
+  await fs.writeFile(path.join(legacyDir, 'index.js'), 'export default {};\n', 'utf8');
+
+  const previousDirs = process.env.PINPAWO_CAPABILITY_DIRS;
+  const previousWarn = console.warn;
+  const warnings: string[] = [];
+  process.env.PINPAWO_CAPABILITY_DIRS = root;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(' '));
+  };
+  try {
+    const { loadUserCapabilities, readUserCapabilityManifests } = await import('./capabilityLoader');
+    assert.deepEqual(await loadUserCapabilities(), []);
+    assert.deepEqual(readUserCapabilityManifests(), []);
+  } finally {
+    console.warn = previousWarn;
+    if (previousDirs === undefined) {
+      delete process.env.PINPAWO_CAPABILITY_DIRS;
+    } else {
+      process.env.PINPAWO_CAPABILITY_DIRS = previousDirs;
+    }
+  }
+
+  const legacyWarnings = warnings.filter((warning) => warning.includes('legacy_capability'));
+  assert.equal(legacyWarnings.length, 1);
+  assert.match(legacyWarnings[0], /removed manifest\.json\/index\.js format/);
+  assert.match(legacyWarnings[0], /migrate it to CAPABILITY\.md/);
 });

@@ -112,7 +112,7 @@ function parseUsesInline(raw: string): string[] {
     .filter(Boolean);
 }
 
-function parseFrontmatterDocument(
+export function parseFrontmatterDocument(
   source: string,
   path: string,
 ): { frontmatter: CapabilityFrontmatter; body: string } {
@@ -144,7 +144,7 @@ function parseFrontmatterDocument(
       continue;
     }
 
-    const field = line.match(/^([A-Za-z][A-Za-z0-9]*):(?:\s*(.*))?$/);
+    const field = line.match(/^([A-Za-z][A-Za-z0-9_]*):(?:\s*(.*))?$/);
     if (!field) {
       throw new Error(`${path}:${String(index + 2)}: unsupported frontmatter syntax`);
     }
@@ -324,10 +324,13 @@ async function loadCapabilitiesFromDir(
   const loaded: LoadedUserCapability[] = [];
 
   for (const entry of entries) {
-    const validation = await validateCapabilityPlugin(resolve(dir, entry.name));
+    const capabilityDir = resolve(dir, entry.name);
+    const validation = await validateCapabilityPlugin(capabilityDir);
     if (!validation.ok || !validation.meta || !validation.capability) {
       if (existsSync(validation.capabilityPath)) {
         console.warn(`[capabilities] "${entry.name}" invalid: ${validation.errors.join('; ')}`);
+      } else {
+        warnLegacyCapabilityDirectory(capabilityDir, entry.name);
       }
       continue;
     }
@@ -342,6 +345,22 @@ async function loadCapabilitiesFromDir(
     });
   }
   return loaded;
+}
+
+const warnedLegacyCapabilityDirs = new Set<string>();
+
+function warnLegacyCapabilityDirectory(dir: string, name: string) {
+  if (
+    warnedLegacyCapabilityDirs.has(dir)
+    || (!existsSync(resolve(dir, 'manifest.json')) && !existsSync(resolve(dir, 'index.js')))
+  ) {
+    return;
+  }
+  warnedLegacyCapabilityDirs.add(dir);
+  console.warn(
+    `[capabilities] "${name}" uses the removed manifest.json/index.js format and was skipped; `
+    + 'migrate it to CAPABILITY.md',
+  );
 }
 
 export async function loadUserCapabilities(): Promise<LoadedUserCapability[]> {
@@ -361,8 +380,12 @@ export function readUserCapabilityManifests(): CapabilityMeta[] {
     const entries = readdirSync(dir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() || (entry.isSymbolicLink() && isDirectoryEntry(dir, entry.name)));
     for (const entry of entries) {
-      const capabilityPath = resolve(dir, entry.name, CAPABILITY_DOCUMENT_NAME);
-      if (!existsSync(capabilityPath)) continue;
+      const capabilityDir = resolve(dir, entry.name);
+      const capabilityPath = resolve(capabilityDir, CAPABILITY_DOCUMENT_NAME);
+      if (!existsSync(capabilityPath)) {
+        warnLegacyCapabilityDirectory(capabilityDir, entry.name);
+        continue;
+      }
       try {
         const { frontmatter } = parseFrontmatterDocument(
           readFileSync(capabilityPath, 'utf8'),

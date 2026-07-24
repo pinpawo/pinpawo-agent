@@ -11,16 +11,14 @@ import {
 } from '../../messageLanes';
 import {
   buildSubagentExecutionInstruction,
-  collectCapabilityOperations,
+  collectToolkitOperations,
   resolveToolkitExecution,
-  selectCapabilityTools,
 } from '../../subagentDispatch';
 import type {
   MessageLane,
   OrchestratorConfig,
 } from '../../types';
 import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
-import { validateUniqueToolNames } from '../../validation';
 import { createToolAuthorizationRecorder } from '../authorization';
 import {
   CAPABILITY_SUBAGENT_MAX_ITERATIONS,
@@ -37,7 +35,7 @@ import {
   resolveDelegationTranscriptRunId,
 } from '../decisions/delegationLifecycle';
 import {
-  hasArtifactDiscoveryTools,
+  hasArtifactDiscoveryToolkit,
   withArtifactDiscoveryContext,
 } from '../../artifacts/discovery';
 
@@ -53,8 +51,6 @@ export function createCapabilityNode(params: {
       execution,
       workdir,
       runtimeEnvironment,
-      artifactDiscoveryRoot,
-      artifactDiscoveryToolkit,
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
@@ -101,16 +97,14 @@ export function createCapabilityNode(params: {
       // middleware, where the writer is reachable at call time.
       emitRuntimeEvent: emitRuntimeEventToStreamWriter,
     };
-    const toolkitNames = compiledCapability.toolkits.map(({ name }) => name);
-    const usedResolvedToolkitExecution = await resolveToolkitExecution(toolkitList, toolkitNames, toolkitContext);
-    const selectedTools = selectCapabilityTools(usedResolvedToolkitExecution.tools);
-    const canExploreArtifacts = Boolean(
-      artifactDiscoveryRoot
-      && artifactDiscoveryToolkit
-      && hasArtifactDiscoveryTools(
-        selectedTools,
-        artifactDiscoveryToolkit.tools.map((definition) => definition.tool),
-      ),
+    const usedResolvedToolkitExecution = await resolveToolkitExecution(
+      toolkitList,
+      undefined,
+      toolkitContext,
+    );
+    const selectedTools = usedResolvedToolkitExecution.tools;
+    const canExploreArtifacts = hasArtifactDiscoveryToolkit(
+      usedResolvedToolkitExecution.toolkits,
     );
     const executionInstruction = buildSubagentExecutionInstruction({
       lane,
@@ -119,7 +113,7 @@ export function createCapabilityNode(params: {
 
     const subagentMessages = withArtifactDiscoveryContext(
       scopedMessages,
-      canExploreArtifacts ? artifactDiscoveryRoot : null,
+      canExploreArtifacts,
     );
     const subagentInput: SubagentRunInput = {
       model: config.models.subagent ?? config.models.act,
@@ -150,7 +144,7 @@ export function createCapabilityNode(params: {
             }]
           : []),
       ],
-      operations: collectCapabilityOperations(usedResolvedToolkitExecution.toolkits),
+      operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
       messages: subagentMessages,
       maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
       contextWindowTokens: subagentContextWindowTokens,
@@ -159,8 +153,6 @@ export function createCapabilityNode(params: {
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,
     };
-    validateUniqueToolNames(subagentInput.tools);
-
     let result = await createSubagent(subagentInput);
 
     if (capability.lifecycle?.finalize) {

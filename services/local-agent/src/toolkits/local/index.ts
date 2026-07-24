@@ -1,10 +1,12 @@
 import type { StructuredTool } from '@langchain/core/tools';
 import {
-  ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME,
-  ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME,
+  ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
+  ARTIFACT_DISCOVERY_READ_TOOL_NAME,
+  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   defineToolkit,
   ReviewPolicies,
   type AgentToolkit,
+  type CapabilityArtifactStore,
   type ToolOperationMetadata,
   type ToolReviewPolicy,
 } from '@pinpawo/pet-agent';
@@ -13,7 +15,6 @@ import type { LocalAgentPlugin } from '../../pluginLoader';
 import {
   applyPatchTool,
   copyPathTool,
-  createArtifactDiscoveryFileTools,
   listDirTool,
   mkdirPathTool,
   movePathTool,
@@ -24,6 +25,7 @@ import {
   writeFileTool,
   fileOperationMetadata,
 } from './fileTools';
+import { createArtifactDiscoveryTools } from './artifactDiscoveryTools';
 import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
 import { gitTools, gitOperationMetadata } from './gitTools';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
@@ -71,13 +73,20 @@ function createToolDefinitions(
   }));
 }
 
-export function createArtifactDiscoveryToolkit(root: string): AgentToolkit {
+export function createArtifactDiscoveryToolkit(params: {
+  store: CapabilityArtifactStore;
+  threadId: string;
+}): AgentToolkit {
   return defineToolkit({
-    name: 'artifact_discovery',
-    description: '只读列出并分块读取当前 thread 的 capability artifacts。',
-    tools: createToolDefinitions(createArtifactDiscoveryFileTools(root), {
-      [ARTIFACT_DISCOVERY_LIST_DIR_TOOL_NAME]: fileOperationMetadata.list_dir,
-      [ARTIFACT_DISCOVERY_VIEW_FILE_CHUNK_TOOL_NAME]: fileOperationMetadata.view_file_chunk,
+    name: ARTIFACT_DISCOVERY_TOOLKIT_NAME,
+    description: '只读列出并读取当前 thread 的 capability artifacts。',
+    tools: createToolDefinitions(createArtifactDiscoveryTools(params), {
+      [ARTIFACT_DISCOVERY_LIST_TOOL_NAME]: {
+        title: '列出历史产物',
+      },
+      [ARTIFACT_DISCOVERY_READ_TOOL_NAME]: {
+        title: '读取历史产物',
+      },
     }),
   });
 }

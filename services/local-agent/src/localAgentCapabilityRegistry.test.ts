@@ -44,7 +44,6 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
     [loadedUserCapability('enabled-user-cap'), loadedUserCapability('disabled-user-cap')],
     [loadedUserCapability('rescanned-user-cap')],
   ];
-  const availabilityForceValues: Array<boolean | undefined> = [];
 
   const registry = new LocalAgentCapabilityRegistry({
     loadLocalTools: async () => [localTool],
@@ -68,17 +67,6 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
     ],
     resolveAvailableToolkits: async (toolkits: AgentToolkit[]) =>
       toolkits.filter((toolkit) => toolkit.name !== 'unavailable-toolkit'),
-    resolveAvailableCapabilities: async (capabilities: AgentCapability[]) =>
-      capabilities.filter((item) => item.name !== 'unavailable-local-cap'),
-    resolveCapabilityAvailability: async (capabilityItem, options) => {
-      availabilityForceValues.push(options?.force);
-      return {
-        capability: capabilityItem,
-        availability: {
-          available: capabilityItem.name !== 'disabled-user-cap',
-        },
-      };
-    },
   });
 
   await registry.load();
@@ -96,19 +84,25 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
     'unavailable-local-cap',
     'missing-toolkit-local-cap',
   ]);
-  assert.deepEqual(registry.getLocalCapabilities().map((item) => item.name), ['available-local-cap']);
+  assert.deepEqual(registry.getLocalCapabilities().map((item) => item.name), [
+    'available-local-cap',
+    'unavailable-local-cap',
+    'missing-toolkit-local-cap',
+  ]);
   assert.deepEqual(registry.getUserCapabilityDefinitions().map((item) => item.meta.id), [
     'enabled-user-cap',
     'disabled-user-cap',
   ]);
-  assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), ['enabled-user-cap']);
+  assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), [
+    'enabled-user-cap',
+    'disabled-user-cap',
+  ]);
 
   const rescanned = await registry.rescanUserCapabilities();
 
   assert.deepEqual(rescanned.userCapabilityDefinitions.map((item) => item.meta.id), ['rescanned-user-cap']);
   assert.deepEqual(rescanned.userCapabilities.map((item) => item.meta.id), ['rescanned-user-cap']);
   assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), ['rescanned-user-cap']);
-  assert.deepEqual(availabilityForceValues, [undefined, undefined, true]);
 });
 
 test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async () => {
@@ -122,11 +116,6 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
       createBrowserToolkit(),
     ],
     resolveAvailableToolkits: async (toolkits) => toolkits,
-    resolveAvailableCapabilities: async (capabilities) => capabilities,
-    resolveCapabilityAvailability: async (capabilityItem) => ({
-      capability: capabilityItem,
-      availability: { available: true },
-    }),
   });
 
   await registry.load();

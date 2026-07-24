@@ -219,3 +219,11 @@ lint passes, and documentation migrations.
   (`36/36` goals achieved).
 - Updated the existing prompt contract, ownership, authoring-principles, and
   state-query investigation pages without introducing a new wiki concept.
+
+## [2026-07-25] maintenance | Prompt test ownership
+
+- Removed deterministic assertions that treated natural-language prompt clauses
+  as proof of routing, planning, verdict, or reply behavior.
+- Kept unit coverage for prompt assembly, structured input shape, and separation
+  of dynamic runtime facts from static system instructions.
+- Assigned semantic prompt verification to the existing goal-based model evals.

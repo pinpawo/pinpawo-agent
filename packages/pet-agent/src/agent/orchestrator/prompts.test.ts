@@ -3,13 +3,11 @@ import assert from 'node:assert/strict';
 import { HumanMessage } from '@langchain/core/messages';
 import { materializeDelegation } from './delegationBriefing';
 import {
-  buildAnswerSystemPrompt,
   buildCapabilityArtifactContext,
   buildCapabilityPlanningDecisionInput,
   buildCapabilityPlanningDecisionSystemPrompt,
   buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
-  buildDelegationOutcomeDecisionSystemPrompt,
   buildDelegationOutcomeOtherTasksContext,
   buildPreparedRequestContext,
   buildRouteDecisionInput,
@@ -20,12 +18,6 @@ import {
   buildTaskDecisionInput,
   buildTaskDecisionSystemPrompt,
 } from './prompts';
-import { buildOrchestratorDecisionPromptPrefix } from './prompts/shared';
-import {
-  buildRouteDecisionOutputInstruction,
-  buildCapabilityPlanningDecisionOutputInstruction,
-  buildTaskDecisionOutputInstruction,
-} from './schemas';
 
 function recentMessages(count: number) {
   return Array.from({ length: count }, (_, index) => new HumanMessage(`recent-${index}`));
@@ -39,18 +31,6 @@ const testActor = {
   stage: 'adult',
   species: 'cat',
 };
-
-test('shared decision prompt prefix owns only the cross-node contract', () => {
-  const prompt = buildOrchestratorDecisionPromptPrefix();
-
-  assert.match(prompt, /围绕用户目标运行 task loop/);
-  assert.match(prompt, /根据当前调用提供的上下文/);
-  assert.match(prompt, /graph 负责推进执行和状态转换/);
-  assert.match(prompt, /answer 基于主对话生成用户可见回复/);
-  assert.doesNotMatch(prompt, /task loop 流程|术语：/);
-  assert.doesNotMatch(prompt, /entryDecision：|capabilityPlanner：|capabilityDecision：|outcomeDecision（决策）/);
-  assert.doesNotMatch(prompt, /委派简报|gap_note|handoff/);
-});
 
 test('start-loop router request context includes compaction summaries outside recent message window', () => {
   const requestContext = buildPreparedRequestContext({
@@ -131,37 +111,20 @@ test('request contexts include bounded capability artifact refs', () => {
   assert.match(requestContext, /继续刚才的探索/);
 });
 
-test('entry decision prompt owns execution mode selection', () => {
+test('entry decision keeps runtime state in the input context', () => {
   const prompt = buildTaskDecisionSystemPrompt({
     actor: testActor,
-    outputInstruction: buildTaskDecisionOutputInstruction(),
+    outputInstruction: 'ENTRY_OUTPUT_INSTRUCTION',
   });
   const input = buildTaskDecisionInput({
     runDelegationContext: '<run_delegations><none>true</none></run_delegations>',
     runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });
 
-  assert.match(prompt, /entryDecision 每个 run 只执行一次/);
-  assert.match(prompt, /task loop/);
-  assert.match(prompt, /决策顺序/);
-  assert.match(prompt, /answer、direct_task 或 needs_plan/);
-  const executionIndex = prompt.indexOf('是否需要新的 capability execution');
-  const targetIndex = prompt.indexOf('执行目标是否已经唯一确定');
-  const planningIndex = prompt.indexOf('判断是否必须先 plan');
-  assert.ok(executionIndex >= 0);
-  assert.ok(executionIndex < targetIndex);
-  assert.ok(targetIndex < planningIndex);
-  assert.match(prompt, /已有结果[^]*answer/);
-  assert.match(prompt, /多个候选[^]*answer[^]*询问用户/);
-  assert.match(prompt, /一个 current task[^]*内部动作[^]*needs_plan[^]*direct_task/);
-  assert.doesNotMatch(prompt, /用户在询问已有上下文、最近任务状态或之前结果/);
-  assert.doesNotMatch(prompt, /对话中已有足够信息|已有结论直接复用/);
-  assert.doesNotMatch(prompt, /plan_draft|task_plan_draft/);
+  assert.match(prompt, /ENTRY_OUTPUT_INSTRUCTION/);
   assert.match(input, /<entry_decision_context role="fact" source="runtime_state" trust="read_only">/);
   assert.match(input, /run_delegation_summaries/);
   assert.match(input, /<runtime_context/);
-  assert.match(prompt, /entry_decision_context[^]*只读[^]*main messages[^]*角色和时间顺序/);
-  assert.doesNotMatch(prompt, /不存在独立 recent announce|unfinished delegation/);
   assert.doesNotMatch(input, /context_summaries/);
   assert.doesNotMatch(input, /<user_request>|<recent_messages>|<recent_subagent_announces>/);
   assert.doesNotMatch(prompt, /\/repo|run_delegations/);
@@ -171,7 +134,7 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.doesNotMatch(input, /重新规划/);
 });
 
-test('capability decision prompt owns capability selection', () => {
+test('capability decision keeps task and candidates in the input context', () => {
   const targetsContext = buildRouteTargetsContext({
     generalTools: [],
     capabilityCandidates: [{
@@ -185,9 +148,7 @@ test('capability decision prompt owns capability selection', () => {
   });
   const prompt = buildRouteDecisionSystemPrompt({
     actor: testActor,
-    outputInstruction: buildRouteDecisionOutputInstruction({
-      capabilityCandidates: [{ name: 'explore' }],
-    }),
+    outputInstruction: 'CAPABILITY_OUTPUT_INSTRUCTION',
   });
   const input = buildRouteDecisionInput({
     pendingTask: {
@@ -199,28 +160,18 @@ test('capability decision prompt owns capability selection', () => {
     runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });
 
-  assert.match(prompt, /capability decision 节点/);
-  assert.match(prompt, /task loop/);
-  assert.match(prompt, /从 route_targets 中选择最适合执行当前 task 的 lane/);
-  assert.match(prompt, /匹配的专用 capability 比 general 更合适/);
-  assert.match(prompt, /执行参数暂缺不改变匹配结果/);
-  assert.doesNotMatch(prompt, /不要改写 task，不要回答用户，不要执行工具/);
-  assert.doesNotMatch(prompt, /每次只选择一个执行 capability/);
-  assert.doesNotMatch(prompt, /只能从其中选择执行 capability/);
-  assert.doesNotMatch(prompt, /capability\.explore/);
-  assert.doesNotMatch(prompt, /delegate_capability\.explore/);
+  assert.match(prompt, /CAPABILITY_OUTPUT_INSTRUCTION/);
   assert.match(input, /<capability_decision_input>/);
   assert.match(input, /在本地仓库检索相关实现/);
   assert.match(input, /capability\.explore/);
   assert.match(input, /<runtime_context/);
-  assert.doesNotMatch(input, /只根据下面/);
-  assert.doesNotMatch(input, /如果匹配，优先/);
+  assert.doesNotMatch(prompt, /在本地仓库检索相关实现|capability\.explore|\/repo/);
 });
 
-test('capability planner prompt owns entry and boundary materialization', () => {
+test('capability planner keeps planning state in the input context', () => {
   const prompt = buildCapabilityPlanningDecisionSystemPrompt({
     actor: testActor,
-    outputInstruction: buildCapabilityPlanningDecisionOutputInstruction(),
+    outputInstruction: 'PLANNER_OUTPUT_INSTRUCTION',
   });
   const input = buildCapabilityPlanningDecisionInput({
     mode: 'boundary',
@@ -229,17 +180,12 @@ test('capability planner prompt owns entry and boundary materialization', () => 
     latestHandoff: '发现 token validation 循环依赖。',
     capabilityRegistryContext: 'explore: codebase exploration',
   });
-  assert.match(prompt, /根据 mode 确定现在要执行的任务，并更新后续计划/);
-  assert.match(prompt, /mode：[^]*entry：[^]*boundary：[^]*任务规则：/);
-  assert.match(prompt, /依赖未来结果的任务保持 deferred/);
-  assert.doesNotMatch(prompt, /^result：/m);
-  assert.doesNotMatch(prompt, /capability_intent 概括/);
-  assert.doesNotMatch(prompt, /具体执行器由 capabilityDecision 选择/);
-  assert.doesNotMatch(prompt, /不要选择具体 capability id/);
-  assert.doesNotMatch(prompt, /不要验收 announce/);
+  assert.match(prompt, /PLANNER_OUTPUT_INSTRUCTION/);
   assert.match(input, /<mode>boundary<\/mode>/);
   assert.match(input, /token validation/);
   assert.match(input, /code_modification/);
+  assert.match(input, /explore: codebase exploration/);
+  assert.doesNotMatch(prompt, /token validation|code_modification|explore: codebase exploration/);
 });
 
 test('loop-internal router input stays focused on current run announce context', () => {
@@ -254,38 +200,6 @@ test('loop-internal router input stays focused on current run announce context',
   assert.doesNotMatch(input, /压缩任务上下文/);
   assert.match(input, /先完成调查，再修复/);
   assert.match(input, /<subagent_announce>/);
-});
-
-test('delegation outcome prompt does not depend on concrete tool context', () => {
-  const prompt = buildDelegationOutcomeDecisionSystemPrompt({
-    actor: testActor,
-    outputInstruction: '输出 JSON。',
-  });
-
-  assert.doesNotMatch(prompt, /Delegate targets/);
-  assert.doesNotMatch(prompt, /run_shell/);
-  assert.doesNotMatch(prompt, /ask_user/);
-  assert.doesNotMatch(prompt, /delegate_capability/);
-  assert.match(prompt, /task loop/);
-  assert.match(prompt, /当前阶段：delegationOutcomeDecision/);
-  assert.match(prompt, /current_delegation 定义当前 task 要完成什么/);
-  assert.match(prompt, /当前 subagent_announce 提供验收证据/);
-  assert.match(prompt, /结合当前 announce 和 other_delegations 判断整个目标/);
-  assert.doesNotMatch(prompt, /节点边界/);
-  assert.doesNotMatch(prompt, /outcome=continue：/);
-  assert.doesNotMatch(prompt, /动态上下文内容/);
-});
-
-test('answer prompt owns the user-visible reply', () => {
-  const prompt = buildAnswerSystemPrompt({
-    actor: testActor,
-  });
-
-  assert.match(prompt, /本次面向用户的最终回复/);
-  assert.match(prompt, /按照本次回复目标/);
-  assert.match(prompt, /主对话中已有的信息/);
-  assert.match(prompt, /直接输出回复正文/);
-  assert.doesNotMatch(prompt, /orchestrator|handoff|delegation|subagent/);
 });
 
 test('delegation outcome input carries current task context separately', () => {

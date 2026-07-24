@@ -708,9 +708,6 @@ test('entry decision schema does not advertise capability actions', async () => 
   });
 
   assert.equal(schemaAllowsBrowser, false);
-  assert.match(decisionSystemPrompt, /entryDecision 每个 run 只执行一次/);
-  assert.match(decisionSystemPrompt, /具体执行和用户回复由后续节点处理/);
-  assert.match(decisionSystemPrompt, /direct_task/);
   assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.browser/);
 });
 
@@ -1230,9 +1227,8 @@ test('limit-reached progress announce lets model choose the same capability dele
 
   assert.equal(capabilityRunCount, 1);
   assert.equal(decisionCallCount, 1);
-  // The system prompt owns verdict evidence, while the structured-output schema
-  // owns verdict values and the active task context carries the lane.
-  assert.match(decisionSystemPrompt, /当前 subagent_announce 提供验收证据/);
+  // Capability candidates stay out of outcome judgment while the active task
+  // context carries the lane.
   assert.doesNotMatch(decisionSystemPrompt, /业务 capability 候选/);
   assert.match(decisionInput, /<lane>capability:inspect_repo<\/lane>/);
   assert.match(decisionInput, /先调查仓库，再修复注册链路/);

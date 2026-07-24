@@ -175,6 +175,20 @@ For a model upgrade:
 5. record model-specific clauses as conditional protocol rather than changing the
    shared meaning of an action.
 
+### 10. Test contracts and behavior, not prompt prose
+
+Deterministic tests should protect template rendering, structured input shape,
+message role and order, provenance, boundedness, schema constraints, and the
+separation of dynamic facts from static instructions. They should not use the
+presence or absence of natural-language clauses as a proxy for model behavior.
+Such assertions are brittle under equivalent rewrites and can still pass when
+the assembled prompt contains contradictory guidance.
+
+Use goal-based model evals for routing, planning, selection, verdict, and reply
+semantics. Keep text-level negative assertions only when they protect an
+operational boundary such as sensitive-data leakage, untrusted dynamic content
+entering a system prompt, or an input lane that must remain excluded.
+
 ## Evaluation targets derived from Prompt Contracts
 
 The repository does not maintain an independent catalog of eval-quality
@@ -426,9 +440,9 @@ every decision node needs:
 
 The node sequence, completion criteria, verdict definitions, `gap_note`, handoff
 mechanics, and delegation terminology were removed from the shared prefix
-because they already have narrower prompt, schema, or runtime owners. A
-dedicated prompt test guards both the retained cross-node contract and the
-absence of a global flow/glossary inventory.
+because they already have narrower prompt, schema, or runtime owners. Prompt
+input tests guard structured context and dynamic-data boundaries; goal-based
+evals guard the retained cross-node behavior.
 
 For one canonical case per decision node, prompt preview changed as follows:
 

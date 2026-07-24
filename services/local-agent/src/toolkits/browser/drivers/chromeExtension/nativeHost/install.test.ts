@@ -5,11 +5,13 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import {
   getBrowserExtensionHostStatus,
+  PINPAWO_CHROME_WEB_STORE_EXTENSION_ID,
   registerBrowserExtensionHost,
   unregisterBrowserExtensionHost,
 } from './install';
 
 const EXTENSION_ID = 'abcdefghijklmnopabcdefghijklmnop';
+const SECOND_EXTENSION_ID = 'ponmlkjihgfedcbaponmlkjihgfedcba';
 
 test('native host registration writes exact-origin manifests and an executable wrapper', async () => {
   const homeDir = await mkdtemp(resolve(tmpdir(), 'pinpawo-extension-install-'));
@@ -44,4 +46,32 @@ test('native host registration rejects non-Chrome extension IDs', async () => {
     registerBrowserExtensionHost({ extensionId: 'not-an-extension-id' }),
     /32 lowercase letters/,
   );
+});
+
+test('native host registration defaults to the Web Store ID and preserves dev IDs', async () => {
+  const homeDir = await mkdtemp(resolve(tmpdir(), 'pinpawo-extension-install-'));
+  const baseOptions = {
+    homeDir,
+    platform: 'darwin' as const,
+    nodePath: '/node',
+    nativeHostEntryPath: '/package/dist/native-host.js',
+  };
+  await registerBrowserExtensionHost({
+    ...baseOptions,
+    extensionId: SECOND_EXTENSION_ID,
+  });
+  const paths = await registerBrowserExtensionHost(baseOptions);
+  const manifest = JSON.parse(await readFile(paths.manifestPaths[0]!, 'utf8')) as {
+    allowed_origins: string[];
+  };
+  assert.deepEqual(manifest.allowed_origins, [
+    `chrome-extension://${PINPAWO_CHROME_WEB_STORE_EXTENSION_ID}/`,
+    `chrome-extension://${SECOND_EXTENSION_ID}/`,
+  ].sort());
+
+  const status = await getBrowserExtensionHostStatus(baseOptions);
+  assert.deepEqual(status.extensionIds.sort(), [
+    PINPAWO_CHROME_WEB_STORE_EXTENSION_ID,
+    SECOND_EXTENSION_ID,
+  ].sort());
 });

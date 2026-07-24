@@ -12,6 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { BROWSER_NATIVE_HOST_NAME } from '../protocol';
 
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/;
+const EXTENSION_ORIGIN_PATTERN = /^chrome-extension:\/\/([a-p]{32})\/$/;
+
+export const PINPAWO_CHROME_WEB_STORE_EXTENSION_ID = 'dkbghohaagjejhckdigepccecifkbklo';
 
 export type BrowserExtensionInstallPaths = {
   wrapperPath: string;
@@ -20,7 +23,7 @@ export type BrowserExtensionInstallPaths = {
 };
 
 export type BrowserExtensionInstallOptions = {
-  extensionId: string;
+  extensionId?: string;
   homeDir?: string;
   platform?: NodeJS.Platform;
   nodePath?: string;
@@ -83,6 +86,21 @@ function validateExtensionId(extensionId: string) {
   }
 }
 
+async function readAllowedOrigins(path: string): Promise<string[]> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as {
+      allowed_origins?: unknown;
+    };
+    if (!Array.isArray(parsed.allowed_origins)) return [];
+    return parsed.allowed_origins.filter(
+      (origin): origin is string => typeof origin === 'string'
+        && EXTENSION_ORIGIN_PATTERN.test(origin),
+    );
+  } catch {
+    return [];
+  }
+}
+
 async function unlinkIfPresent(path: string) {
   await unlink(path).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'ENOENT') throw error;
@@ -90,9 +108,10 @@ async function unlinkIfPresent(path: string) {
 }
 
 export async function registerBrowserExtensionHost(
-  options: BrowserExtensionInstallOptions,
+  options: BrowserExtensionInstallOptions = {},
 ): Promise<BrowserExtensionInstallPaths> {
-  validateExtensionId(options.extensionId);
+  const extensionId = options.extensionId ?? PINPAWO_CHROME_WEB_STORE_EXTENSION_ID;
+  validateExtensionId(extensionId);
   const paths = resolveBrowserExtensionInstallPaths(
     options.homeDir,
     options.platform,
@@ -103,12 +122,20 @@ export async function registerBrowserExtensionHost(
   await writeFile(paths.wrapperPath, wrapper, { mode: 0o755 });
   await chmod(paths.wrapperPath, 0o755);
 
+  const allowedOrigins = new Set<string>([
+    `chrome-extension://${extensionId}/`,
+  ]);
+  for (const manifestPath of paths.manifestPaths) {
+    for (const origin of await readAllowedOrigins(manifestPath)) {
+      allowedOrigins.add(origin);
+    }
+  }
   const manifest = JSON.stringify({
     name: BROWSER_NATIVE_HOST_NAME,
     description: 'PinPawo Chrome extension native messaging bridge',
     path: paths.wrapperPath,
     type: 'stdio',
-    allowed_origins: [`chrome-extension://${options.extensionId}/`],
+    allowed_origins: [...allowedOrigins].sort(),
   }, null, 2) + '\n';
   for (const manifestPath of paths.manifestPaths) {
     await mkdir(dirname(manifestPath), { recursive: true });
@@ -147,7 +174,7 @@ export async function getBrowserExtensionHostStatus(
       if (Array.isArray(parsed.allowed_origins)) {
         for (const origin of parsed.allowed_origins) {
           const match = typeof origin === 'string'
-            ? /^chrome-extension:\/\/([a-p]{32})\/$/.exec(origin)
+            ? EXTENSION_ORIGIN_PATTERN.exec(origin)
             : null;
           if (match?.[1]) extensionIds.add(match[1]);
         }

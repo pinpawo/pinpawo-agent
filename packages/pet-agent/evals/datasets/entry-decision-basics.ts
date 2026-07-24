@@ -165,15 +165,15 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'capability_planning'],
     input: {
-      userRequest: '读取 package.json 的依赖列表，然后运行 npm test，并告诉我结果。',
+      userRequest: '在当前仓库运行 npm test；运行前读取 package.json 确认测试脚本，完成后汇总测试结果。',
     },
     expected: {
       mode: 'direct_task',
       expectedTaskTerms: ['package.json', 'npm test'],
       expectedBoundaryCount: 1,
-      reason: 'Both related actions can be completed naturally in one workspace capability execution.',
+      reason: 'Reading the test script, running it, and reporting the result form one workspace execution.',
     },
-    metadata: { difficulty: 'medium', reason: 'Textual steps must not force task splitting.', source: SOURCE_FILE },
+    metadata: { difficulty: 'medium', reason: 'Preparatory and reporting steps must not force task splitting.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.latest-review-overrides-older-published-work`,

@@ -96,7 +96,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'route_control'],
     input: {
-      userRequest: '线上 issue #417 现在还是 open 吗？',
+      userRequest: 'pinpawo/pinpawo-agent 的 issue #417 现在还是 open 吗？',
     },
     expected: {
       mode: 'direct_task',
@@ -132,7 +132,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'context_synthesis'],
     input: {
-      userRequest: '把它发布掉。',
+      userRequest: '把其中一个发布掉。',
       conversationContext: ['当前候选项目是 web-console 和 distribution-worker，两者都尚未发布。'],
     },
     expected: {

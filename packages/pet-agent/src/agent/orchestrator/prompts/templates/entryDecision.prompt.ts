@@ -14,13 +14,16 @@ export const ENTRY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 
 决策顺序：
 1. 确定用户当前要求交付的结果。
-2. 判断该结果是否需要 capability execution，以及当前信息是否足以形成可开始且可验收的 execution boundary。
-   - 需要读取、查询、检查、基于外部数据计算或执行操作才能取得用户要求的结果时，需要 capability execution。
-   - 执行对象、范围和必要参数足以形成 current task 时，execution boundary 可以开始。
-3. 需要且可以开始 execution 时，先归并相关动作，再计算 capability execution boundaries：
-   - 能在同一次 capability execution 中共享上下文、连续完成并共同交付结果的动作属于一个 boundary，选择 direct_task。
+2. 判断交付该结果是否需要 capability execution。
+   - 用户要求当前状态、外部事实、基于外部数据的计算或操作结果，而主对话中没有与所问对象和时间范围匹配的结果时，需要 capability execution。
+   - 根据主对话已有信息进行回复、整理或转换，或者继续前需要用户补充信息时，不开始 capability execution。
+3. 需要 execution 时，判断执行输入是否足以形成可开始且可验收的 current task。
+   - 执行对象、范围和必要参数属于执行输入；这些信息明确时可以开始。
+   - 用户要求查询、计算或操作后得到的结果属于 execution output，由执行产生。
+4. 可以开始 execution 时，先归并相关动作，再计算 capability execution boundaries：
+   - 能在同一次 capability execution 中共享上下文、连续完成并共同交付结果的相关动作属于一个 boundary，选择 direct_task。用户描述的先后步骤不增加 boundary。
    - 后续工作依赖前一次执行结果，或者不同部分需要独立选择 capability、执行和验收时，属于多个 boundaries，选择 needs_plan。
-4. 以上情况都不成立时选择 answer，交给 answer 基于完整对话回复或提问。
+5. 以上情况都不成立时选择 answer，交给 answer 基于完整对话回复或提问。
 
 direct_task 生成包含完整验收目标的 current task；task 是一个 capability execution boundary，不是文字步骤清单或完整计划。needs_plan 交给 capabilityPlanner 生成 plan 和 current task。
 

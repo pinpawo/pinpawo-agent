@@ -147,11 +147,14 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(prompt, /决策顺序/);
   assert.match(prompt, /answer、direct_task 或 needs_plan/);
   assert.match(prompt, /用户当前要求交付的结果/);
-  assert.match(prompt, /是否需要 capability execution/);
-  assert.match(prompt, /信息是否足以形成可开始且可验收的 execution boundary/);
-  assert.match(prompt, /执行对象、范围和必要参数/);
+  assert.match(prompt, /交付该结果是否需要 capability execution/);
+  assert.match(prompt, /与所问对象和时间范围匹配的结果/);
+  assert.match(prompt, /执行输入是否足以形成可开始且可验收的 current task/);
+  assert.match(prompt, /执行对象、范围和必要参数属于执行输入/);
+  assert.match(prompt, /结果属于 execution output，由执行产生/);
   assert.match(prompt, /先归并相关动作，再计算 capability execution boundaries/);
-  assert.match(prompt, /共享上下文、连续完成并共同交付结果的动作属于一个 boundary[^]*选择 direct_task/);
+  assert.match(prompt, /共享上下文、连续完成并共同交付结果的相关动作属于一个 boundary[^]*选择 direct_task/);
+  assert.match(prompt, /先后步骤不增加 boundary/);
   assert.match(prompt, /依赖前一次执行结果/);
   assert.match(prompt, /独立选择 capability、执行和验收/);
   assert.match(prompt, /多个 boundaries[^]*选择 needs_plan/);

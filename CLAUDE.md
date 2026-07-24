@@ -12,12 +12,10 @@ npm workspaces monorepo (Node 20.x, ESM-only, TypeScript). Two published package
 
 The architectural boundary is enforced by convention: anything that touches the machine (FS, shell, network, browser, ~/.pinpawo) belongs in `services/local-agent` or `tools/agent-macos`; anything reusable on a server belongs in `packages/pet-agent`.
 
-## Documentation workflow
+## Wiki ingest
 
-- Keep ordinary documents under `docs/` updated as raw source material during normal development.
-- Reading the Wiki or changing code/raw documents does not authorize a Wiki ingest.
-- Do not update `docs/wiki/` or append ingest records to `docs/log.md` unless the user explicitly asks to ingest or update the Wiki.
-- While an architecture is incomplete, keep progress and open questions in the relevant raw document and defer Wiki ingest until the design is stable and explicitly requested.
+- Do not modify `docs/wiki/` or `docs/log.md` unless the user explicitly asks to ingest.
+- During normal development, update raw documents under `docs/` instead. Keep incomplete designs there until ingest is explicitly requested.
 
 ## Commands
 

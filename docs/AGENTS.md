@@ -20,22 +20,11 @@ The documentation model has three layers:
 `docs/index.md` is the content-oriented catalog. `docs/log.md` is the append-only
 chronology of wiki maintenance.
 
-## Default Development Workflow
+## Ingest Gate
 
-Normal development updates code, tests, and the relevant source documents. Treat
-ordinary documents outside `docs/wiki/` as raw source material: they may describe
-work in progress, alternatives, open questions, and incomplete architecture.
-
-Wiki ingest is an explicit operation, not an automatic consequence of changing
-code or documentation:
-
-- Reading or querying the Wiki does not authorize writing to it.
-- Updating a raw document does not require synchronizing its claims into the Wiki.
-- Do not update synthesized pages under `docs/wiki/` or append an ingest entry to
-  `docs/log.md` unless the user explicitly asks to ingest or update the Wiki.
-- When the design is unsettled, continue refining the raw document and defer
-  ingest. Ingest only after the design is sufficiently stable and the user has
-  explicitly requested it.
+Do not modify `docs/wiki/` or `docs/log.md` unless the user explicitly asks to
+ingest. Normal development updates raw documents; incomplete designs stay there
+until ingest is explicitly requested.
 
 ## Evidence And Authority
 
@@ -115,9 +104,7 @@ For historical intent, link to the design document, issue, PR, or commit.
 
 ### Ingest
 
-Run this workflow only when the user has explicitly requested a Wiki ingest or
-Wiki update. A normal implementation or documentation task is not sufficient
-authorization.
+Run this workflow only when the user explicitly requests ingest.
 
 1. Register the source and its role.
 2. Read the relevant existing wiki pages before creating a new page.
@@ -132,17 +119,12 @@ authorization.
 2. Follow related pages and source links.
 3. Distinguish current implementation, accepted intent, historical context, and
    inference in the answer.
-4. Report durable new synthesis in the answer. File it back into the Wiki only
-   when the user explicitly authorizes ingest.
+4. Do not write query results back into the Wiki without an explicit ingest request.
 
 ### Prompt Contract Map
 
 The minimal Prompt Contract Map lives in `docs/wiki/overview.md`. One row
 represents one stable behavior contract, not one prompt sentence.
-
-Apply the following maintenance rules only during an explicitly authorized Wiki
-ingest. During normal prompt or harness development, update the relevant raw
-design document and tests without synchronizing the map.
 
 Update a row when a change alters its behavior meaning, owner, design source,
 implementation link, or verification link. Leave the map unchanged for
@@ -179,8 +161,6 @@ Migration of existing `docs/` files is incremental:
 5. Prefer one topic migration at a time, with link and lint verification.
 
 ## Creation Rules
-
-These rules apply during an explicitly authorized Wiki ingest.
 
 Create a new page when the subject is a distinct concept, system, decision, or
 investigation that other pages should link to. Update an existing page when the

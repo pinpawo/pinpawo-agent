@@ -201,7 +201,10 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
       owner,
       digestLength: digest.length,
     })),
-    [{ id: 'capability:read', owner: 'read', digestLength: 64 }],
+    [
+      { id: 'framework:governing', owner: 'framework', digestLength: 64 },
+      { id: 'capability:read', owner: 'read', digestLength: 64 },
+    ],
   );
 });
 

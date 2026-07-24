@@ -96,6 +96,11 @@ export function defineCapability(capability: AgentCapability): AgentCapability {
   if (!capability.name.trim()) {
     throw new Error('Capability name must be non-empty');
   }
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(capability.name)) {
+    throw new Error(
+      `Capability name "${capability.name}" must use lowercase letters, numbers, "_" or "-"`,
+    );
+  }
   if (!capability.description.trim()) {
     throw new Error(`Capability "${capability.name}" description must be non-empty`);
   }

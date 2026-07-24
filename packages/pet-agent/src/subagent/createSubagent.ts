@@ -242,8 +242,23 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     artifacts: input.artifacts,
   };
   const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
+  const systemPromptSections = [
+    {
+      id: 'framework:governing',
+      owner: 'framework',
+      content: SUBAGENT_GOVERNING_PROMPT,
+    },
+    ...(inputState.contextWindowTokens
+      ? [{
+          id: 'framework:context-summary',
+          owner: 'framework',
+          content: SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
+        }]
+      : []),
+    ...inputState.promptSections,
+  ];
   const sectionIds = new Set<string>();
-  for (const section of inputState.promptSections) {
+  for (const section of systemPromptSections) {
     if (!section.id.trim()) {
       throw new Error('Subagent prompt section id must be non-empty');
     }
@@ -255,11 +270,9 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     }
     sectionIds.add(section.id);
   }
-  const systemPrompt = [
-    SUBAGENT_GOVERNING_PROMPT,
-    inputState.contextWindowTokens ? SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT : null,
-    ...inputState.promptSections.map((section) => section.content),
-  ].filter((item): item is string => Boolean(item)).join('\n\n');
+  const systemPrompt = systemPromptSections
+    .map((section) => section.content)
+    .join('\n\n');
   // Decision records must never fail the run.
   const emitGuardDecision: GuardDecisionEmitter = (record) => {
     writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
@@ -283,7 +296,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   });
 
   writeSubagentRuntimeEvent(SUBAGENT_PROMPT_SECTIONS_EVENT, {
-    sections: inputState.promptSections.map((section) => ({
+    sections: systemPromptSections.map((section) => ({
       id: section.id,
       owner: section.owner ?? null,
       digest: createHash('sha256').update(section.content, 'utf8').digest('hex'),

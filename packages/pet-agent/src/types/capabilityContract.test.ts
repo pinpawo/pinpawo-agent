@@ -35,6 +35,21 @@ test('defineCapability rejects duplicate required Toolkit dependencies', () => {
   );
 });
 
+test('defineCapability rejects names that cannot form a stable route id', () => {
+  assert.throws(
+    () => defineCapability({
+      name: 'inspect.repo',
+      description: 'Inspect a repository.',
+      uses: ['git'],
+      instructions: defineInstructionDocument({
+        content: '# Inspect\n\nRead the repository.',
+        source: { kind: 'inline', id: 'test:inspect' },
+      }),
+    }),
+    /must use lowercase letters/,
+  );
+});
+
 test('defineCapability rejects an InstructionDocument whose content drifted from its digest', () => {
   const instructions = defineInstructionDocument({
     content: '# Inspect\n\nRead the repository.',

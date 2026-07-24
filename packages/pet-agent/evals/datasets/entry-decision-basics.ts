@@ -79,7 +79,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'route_control'],
     input: {
-      userRequest: '现在仓库里还有未提交的改动吗？',
+      userRequest: '请检查当前仓库，确认现在还有没有未提交的改动。',
       conversationContext: ['之前已经完成代码修改，但没有读取之后的工作区状态。'],
     },
     expected: {
@@ -96,7 +96,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'route_control'],
     input: {
-      userRequest: 'pinpawo/pinpawo-agent 的 issue #417 现在还是 open 吗？',
+      userRequest: '请查询 pinpawo/pinpawo-agent 的 issue #417，确认现在是否仍为 open。',
     },
     expected: {
       mode: 'direct_task',
@@ -112,7 +112,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'route_control'],
     input: {
-      userRequest: '部署现在恢复了吗？',
+      userRequest: '请查询 deployment run #8450 的最新状态，确认部署现在是否恢复。',
       conversationContext: [
         '昨天 18:00 查询 deployment run #8421，状态为 failed。',
         '今天 09:30 已重新触发 deployment run #8450，但还没有查询新 run 的状态。',

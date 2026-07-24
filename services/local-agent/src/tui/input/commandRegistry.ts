@@ -5,6 +5,7 @@ export type TuiCommandName =
   | 'studio'
   | 'new'
   | 'policy'
+  | 'transcript'
   | 'export'
   | 'edit'
   | 'resume';
@@ -71,6 +72,13 @@ const COMMANDS: TuiCommandDefinition[] = [
     usage: '/help',
     description: '显示帮助',
     helpText: '/help',
+  },
+  {
+    name: 'transcript',
+    aliases: ['history'],
+    usage: '/transcript',
+    description: '全屏浏览当前会话 transcript',
+    helpText: '/transcript 浏览历史',
   },
   {
     name: 'export',

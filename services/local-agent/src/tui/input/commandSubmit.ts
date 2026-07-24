@@ -15,6 +15,7 @@ type TuiCommandSubmitInput = {
   selectChatComposerTarget: () => void;
   openResumePicker: () => void;
   openGlobalReviewPolicyPicker: () => void;
+  openTranscriptViewer: () => void;
   openExternalEditor?: (initialText: string) => void;
   exit: () => void;
   appendSystemMessage: (text: string) => void;
@@ -55,6 +56,12 @@ export function submitCurrentInputFromController(options: TuiCommandSubmitInput)
         const message = err instanceof Error ? err.message : String(err);
         options.appendSystemMessage(TUI_TEXT.exportFailed(message));
       });
+      return;
+    }
+
+    if (parsed.name === 'transcript') {
+      options.clearInputValue();
+      options.openTranscriptViewer();
       return;
     }
 

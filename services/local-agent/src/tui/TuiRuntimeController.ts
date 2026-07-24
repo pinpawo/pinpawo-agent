@@ -322,7 +322,6 @@ export class TuiRuntimeController {
 
   startNewSession() {
     this.clearInterruptTimeout();
-    this.options.resetTimelineView();
     this.options.dispatch({
       type: 'input.set',
       value: '',
@@ -331,6 +330,7 @@ export class TuiRuntimeController {
       type: 'session.clear',
       statusNotice: TUI_TEXT.newSessionCreated,
     });
+    this.options.resetTimelineView();
 
     if (this.connection.isConnected()) {
       this.connection.send({ type: 'new_session' });
@@ -494,16 +494,12 @@ export class TuiRuntimeController {
     await this.applyLatestSessionSnapshot('reconnect');
     if (this.disposed || this.connection.hasConnection()) return;
 
-    this.options.resetTimelineView();
     this.connect();
   }
 
   private async refreshSnapshotAfterReviewError() {
     try {
-      const restored = await this.applyLatestSessionSnapshot('review-refresh');
-      if (restored && !this.disposed) {
-        this.options.resetTimelineView();
-      }
+      await this.applyLatestSessionSnapshot('review-refresh');
     } catch (err) {
       if (this.disposed) return;
       const message = err instanceof Error ? err.message : String(err);
@@ -512,10 +508,7 @@ export class TuiRuntimeController {
   }
 
   private async refreshSnapshotAfterCompletedMessage() {
-    const restored = await this.applyLatestSessionSnapshot('completion');
-    if (restored && !this.disposed) {
-      this.options.resetTimelineView();
-    }
+    await this.applyLatestSessionSnapshot('completion');
   }
 
   private handleConnectionOpen() {

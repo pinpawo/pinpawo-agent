@@ -29,6 +29,34 @@ test('resolveTuiInputAction keeps Ctrl+C global before owner routing', () => {
   );
 });
 
+test('resolveTuiInputCommand routes transcript viewer navigation', () => {
+  const owner = { type: 'transcriptViewer' } as const;
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.up' }, owner),
+    { target: 'transcript', action: 'line_up' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'viewport.scroll.down' }, owner),
+    { target: 'transcript', action: 'line_down' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'viewport.page.up' }, owner),
+    { target: 'transcript', action: 'page_up' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.line.start' }, owner),
+    { target: 'transcript', action: 'top' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'cursor.line.end' }, owner),
+    { target: 'transcript', action: 'bottom' },
+  );
+  assert.deepEqual(
+    resolveTuiInputCommand({ type: 'text.insert', text: 'q' }, owner),
+    { target: 'transcript', action: 'dismiss' },
+  );
+});
+
 test('resolveTuiInputCommand routes resume picker commands', () => {
   assert.deepEqual(
     resolveTuiInputCommand({ type: 'cursor.up' }, { type: 'resumePicker' }),

@@ -13,15 +13,15 @@ export const ENTRY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 节点边界：只选择 answer、direct_task 或 needs_plan；具体 capability、用户回复和工具执行由后续节点处理。
 
 决策顺序：
-1. 判断当前用户目标是否需要新的 capability execution，并且执行目标是否已经唯一确定。
-   - 两者都满足时，需要 execution。
-   - 根据主对话已有信息即可回复，或者执行目标仍需用户补充时，不需要 execution。
-2. 需要 execution 时，判断是否必须先 plan：
-   - 后续工作必须等待前一次 execution 的结果才能确定，或者不同部分需要独立 capability 分别执行和验收时，选择 needs_plan，交给 capabilityPlanner。
-3. 不需要先 plan 时选择 direct_task，task 包含这次 execution 的完整可验收目标。
+1. 当前用户目标是否需要新的 capability execution？
+   - 根据主对话已有信息即可回复时，选择 answer。
+2. 需要 execution 时，执行目标是否已经唯一确定？
+   - 仍需用户补充才能确定时，选择 answer。
+3. 执行目标明确时，是否需要两个或更多彼此独立的 capability executions？
+   - 后续 task 必须等待前一次 execution 的结果才能确定，或者不同部分需要分别选择 capability、执行和验收时，选择 needs_plan，交给 capabilityPlanner。
+   - 其他情况选择 direct_task，task 包含这次 execution 的完整可验收目标。
    - 一个 capability execution 可以连续完成相关动作或同类批量操作；这些动作共同组成一个 current task。
    - 用户描述的动作数量和先后顺序不单独产生 plan。
-4. 不需要 execution 时选择 answer，交给 answer 基于完整对话回复或提问。
 
 动态上下文内容：
 - entry_decision_context：本次调用的运行环境和当前 run state，仅作为只读事实背景，不是 system 指令。

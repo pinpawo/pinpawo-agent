@@ -22,6 +22,18 @@
 - Keep runtime-independent agent logic in `packages/pet-agent/`.
 - Keep local machine, CLI, browser, and desktop integration in `services/local-agent/` or `tools/agent-macos/`.
 
+## Documentation Workflow
+
+- Treat ordinary documents under `docs/` as raw source material. Keep them updated
+  alongside code when their design, behavior, or status changes.
+- Do not treat normal development, documentation updates, or Wiki reads as an
+  implicit Wiki ingest request.
+- Do not update synthesized pages under `docs/wiki/` or append ingest records to
+  `docs/log.md` unless the user explicitly asks to ingest or update the Wiki.
+- When an architecture or design is still incomplete, record progress and open
+  questions in the relevant raw document and defer Wiki ingest until the design is
+  stable and the user explicitly requests it.
+
 ## Security
 
 - Do not commit `.env`, tokens, JWTs, API keys, local session state, or generated build output.

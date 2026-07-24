@@ -181,7 +181,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'context_synthesis'],
     input: {
-      userRequest: 'OK，把这些问题也发 issue 帮我。',
+      userRequest: 'OK，把刚刚这次 review 的发现作为同一批 GitHub issues 发出来。',
       conversationContext: [
         '更早的全仓库架构审查已经发布了 10 个 GitHub issues。',
         '刚完成 packages/distribution-worker 专项 review，新发现 Prisma raw SQL 绕过类型安全、模块职责越界和 shared-events 接入缺失；这些发现尚未发布 issue。',

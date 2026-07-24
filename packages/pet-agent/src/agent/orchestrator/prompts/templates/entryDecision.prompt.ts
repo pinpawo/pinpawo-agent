@@ -16,7 +16,7 @@ export const ENTRY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 1. 当前用户目标是否需要新的 capability execution？
    - 根据主对话已有信息即可回复时，选择 answer。
 2. 需要 execution 时，执行目标是否已经唯一确定？
-   - 仍需用户补充才能确定时，选择 answer。
+   - 有多个候选且上下文没有选择依据时，选择 answer，让 answer 询问用户。
 3. 执行目标明确时，是否需要两个或更多彼此独立的 capability executions？
    - 后续 task 必须等待前一次 execution 的结果才能确定，或者不同部分需要分别选择 capability、执行和验收时，选择 needs_plan，交给 capabilityPlanner。
    - 其他情况选择 direct_task，task 包含这次 execution 的完整可验收目标。

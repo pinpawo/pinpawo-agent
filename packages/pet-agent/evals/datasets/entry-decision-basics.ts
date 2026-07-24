@@ -133,7 +133,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     tags: ['entry_decision', 'context_synthesis'],
     input: {
       userRequest: '把其中一个发布掉。',
-      conversationContext: ['当前候选项目是 web-console 和 distribution-worker，两者都尚未发布。'],
+      conversationContext: ['当前候选项目是 web-console 和 distribution-worker，两者都尚未发布，也没有默认项或其他选择依据。'],
     },
     expected: {
       mode: 'answer',

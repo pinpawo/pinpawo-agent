@@ -148,7 +148,8 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(prompt, /answer、direct_task 或 needs_plan/);
   assert.match(prompt, /是否需要新的 capability execution/);
   assert.match(prompt, /执行目标是否已经唯一确定/);
-  assert.match(prompt, /仍需用户补充才能确定时，选择 answer/);
+  assert.match(prompt, /多个候选且上下文没有选择依据时，选择 answer/);
+  assert.match(prompt, /让 answer 询问用户/);
   assert.match(prompt, /是否需要两个或更多彼此独立的 capability executions/);
   assert.match(prompt, /等待前一次 execution 的结果/);
   assert.match(prompt, /分别选择 capability、执行和验收[^]*选择 needs_plan/);

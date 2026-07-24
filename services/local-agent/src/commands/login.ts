@@ -208,7 +208,7 @@ export async function runLogin() {
 
     console.log(`\nConfig saved to: ${configPath()}`);
     console.log(`LLM: ${llmModel} @ ${llmBaseUrl}`);
-    console.log('Run "pinpawo-agent actor" to choose an actor, then "pinpawo-agent run" to start the agent.\n');
+    console.log('Run "pinpawo actor" to choose an actor, then "pinpawo run" to start the agent.\n');
   } finally {
     rl.close();
   }

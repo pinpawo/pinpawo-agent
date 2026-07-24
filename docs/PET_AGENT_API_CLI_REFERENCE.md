@@ -2,25 +2,25 @@
 
 ## 1. 命令入口
 
-主命令：`pinpawo-agent`（来自 `services/local-agent/src/cli.ts`）
+主命令：`pinpawo`（来自 `services/local-agent/src/cli.ts`）
 
-默认行为：无子命令时等价执行 `pinpawo-agent run`。
+默认行为：无子命令时等价执行 `pinpawo run`。
 
 ## 2. 命令列表
 
-1. `pinpawo-agent init`
+1. `pinpawo init`
    - `--dir <directory>`：目标配置目录，默认 `~/.pinpawo`
    - `--force`：覆盖已有 scaffold
    - `--no-example-capability`：不生成示例能力
-2. `pinpawo-agent login`
-3. `pinpawo-agent actor`
-4. `pinpawo-agent run`
-5. `pinpawo-agent tui`
+2. `pinpawo login`
+3. `pinpawo actor`
+4. `pinpawo run`
+5. `pinpawo tui`
    - `--dry-run`：不落盘
-6. `pinpawo-agent detect`
-7. `pinpawo-agent capability list`
-8. `pinpawo-agent capability validate <directory>`
-9. `pinpawo-agent capability install <directory>`
+6. `pinpawo detect`
+7. `pinpawo capability list`
+8. `pinpawo capability validate <directory>`
+9. `pinpawo capability install <directory>`
    - `--overwrite`：覆盖同 ID 插件
    - `--link`：安装为软链接
 
@@ -37,7 +37,7 @@
 ## 4. 运行方式
 
 1. `npm run tui` 实际启动本地 TUI（开发脚本）
-2. 生产分发建议使用 CLI 可执行文件 `dist/index.js`（`bin` 中 `pinpawo-agent`）
+2. 生产分发建议使用 CLI 可执行文件 `dist/index.js`（`bin` 中 `pinpawo`）
 
 ## 5. 与 API 的关系
 

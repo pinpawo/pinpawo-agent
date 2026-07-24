@@ -33,10 +33,10 @@
    - 环境变量 `PINPAWO_CAPABILITY_DIRS`
    - 本地配置 `capability_dirs`
 3. 安装命令：
-   - `pinpawo-agent capability install <directory>`
+   - `pinpawo capability install <directory>`
    - `--link` 为软链接安装；否则拷贝（可重命名同名目录）
 4. 验证命令：
-   - `pinpawo-agent capability validate <directory>`
+   - `pinpawo capability validate <directory>`
 
 ## 4. 扩展行为
 

@@ -171,8 +171,8 @@ export async function ensureActorSelected(options?: {
   if (!interactive || !process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error(
       storedActorId
-        ? 'Configured actor is no longer available. Run "pinpawo-agent actor select" to choose a new actor.'
-        : 'No actor selected. Run "pinpawo-agent actor select" or start the agent in an interactive terminal.'
+        ? 'Configured actor is no longer available. Run "pinpawo actor select" to choose a new actor.'
+        : 'No actor selected. Run "pinpawo actor select" or start the agent in an interactive terminal.'
     );
   }
 

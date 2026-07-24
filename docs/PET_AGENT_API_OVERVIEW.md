@@ -13,7 +13,7 @@
    - `createPetAgentRuntime`
    - `createStudioOrchestrator`
 2. **命令 API**
-   - `pinpawo-agent` CLI
+   - `pinpawo` CLI
    - `capability` 子命令
 3. **扩展协议**
    - 用户能力插件（manifest + index.js）

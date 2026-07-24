@@ -2,7 +2,7 @@
 title: Orchestrator Decision Node Ownership
 page_type: concept
 status: validated
-updated: 2026-07-20
+updated: 2026-07-24
 sources:
   - ../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md
@@ -45,9 +45,12 @@ The original taskDecision contract treated reading, searching, modifying,
 running, external access, and specialized capability calls as execution. The
 current three-way entry contract must preserve that semantic distinction:
 
-- `answer` means no new capability execution result is required;
-- `direct_task` means one new capability execution boundary is required;
-- `needs_plan` means multiple meaningful boundaries are required.
+- `answer` means no new capability execution is required or the execution target
+  still requires user clarification;
+- `direct_task` means execution is required and can proceed as one current task
+  without prior planning;
+- `needs_plan` means execution is required and must first be organized into
+  independently executable tasks.
 
 Whether the user phrased a request as a question is not itself an execution-shape
 decision.

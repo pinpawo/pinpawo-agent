@@ -2,7 +2,7 @@
 title: System Prompt Design Knowledge Map
 page_type: overview
 status: draft
-updated: 2026-07-22
+updated: 2026-07-24
 sources:
   - ../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
@@ -67,7 +67,7 @@ relations: contract, owner, design source, implementation, and verification.
 | Contract | Owner | Design source | Implementation | Verification |
 |---|---|---|---|---|
 | `decision.structured-judgment` — decision nodes return their owned structured judgment; the graph advances execution and state, and `answer` produces the user-visible reply | [shared decision infrastructure](concepts/prompt-knowledge-layers.md) | [Prompt knowledge layers](concepts/prompt-knowledge-layers.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`sharedPrefix.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts), [`orchestrationDecision.ts`](../../packages/pet-agent/src/agent/orchestrator/runtime/decisions/orchestrationDecision.ts) | [`prompts.test.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts.test.ts), [`schemas.test.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.test.ts) |
-| `entry.execution-shape` — choose `answer`, one execution boundary, or multiple execution boundaries from the available evidence | [`entryDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [State-query investigation](investigations/entry-decision-state-query-routing.md), [#416](https://github.com/pinpawo/pinpawo-agent/issues/416) | [`entryDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`entry-decision-basics.ts`](../../packages/pet-agent/evals/datasets/entry-decision-basics.ts), [`orchestrator-route.eval.ts`](../../packages/pet-agent/evals/orchestrator-route.eval.ts) |
+| `entry.execution-shape` — choose `answer`, `direct_task`, or `needs_plan` by whether new execution is required, its target is determined, and it requires prior planning | [`entryDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [State-query investigation](investigations/entry-decision-state-query-routing.md), [#416](https://github.com/pinpawo/pinpawo-agent/issues/416) | [`entryDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`entry-decision-basics.ts`](../../packages/pet-agent/evals/datasets/entry-decision-basics.ts), [`orchestrator-route.eval.ts`](../../packages/pet-agent/evals/orchestrator-route.eval.ts) |
 | `planner.execution-boundary` — materialize one independently executable current task and retain only the future tail | [`capabilityPlanner`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`capabilityPlanner.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`capability-planning-basics.ts`](../../packages/pet-agent/evals/datasets/capability-planning-basics.ts) |
 | `capability.executor-selection` — select one available executor for the immutable current task | [`capabilityDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [decision prompt design](../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md) | [`capabilityDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`capability-decision-basics.ts`](../../packages/pet-agent/evals/datasets/capability-decision-basics.ts) |
 | `outcome.announce-verdict` — validate the current announce as continue, current-task completion, or user-goal completion | [`outcomeDecision`](concepts/decision-node-ownership.md#vertical-decisions) | [Decision node ownership](concepts/decision-node-ownership.md), [message context and provenance](concepts/message-context-and-provenance.md) | [`outcomeDecision.prompt.ts`](../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts), [`schemas.ts`](../../packages/pet-agent/src/agent/orchestrator/schemas.ts) | [`outcome-decision-basics.ts`](../../packages/pet-agent/evals/datasets/outcome-decision-basics.ts), [`orchestrator-flow.mock-subagent.eval.ts`](../../packages/pet-agent/evals/orchestrator-flow.mock-subagent.eval.ts) |
@@ -118,16 +118,15 @@ New work should state which of these accepted decisions it extends, revises, or
 supersedes. An isolated prompt edit is not enough when it changes the meaning of
 an action or message role.
 
-## Current investigation
+## Validated entryDecision follow-up
 
 The [entryDecision state-query investigation](investigations/entry-decision-state-query-routing.md)
 found a semantic gap introduced during the planner prompt refactor: the older
 taskDecision contract explicitly classified reading, searching, running, and
 external access as execution, while the migrated entry prompt broadly classified
-questions about recent status as `answer`. The #416 implementation candidate now
-defines the boundary through sufficient existing evidence versus one or multiple
-new execution results. This remains a migration regression under evaluation, not
-a reason to redesign unrelated answer, handoff, or provenance mechanisms.
+questions about recent status as `answer`. The validated follow-up now applies an
+ordered execution → target → plan decision and passes all 36 GLM-5.2 entry runs.
+It does not redesign unrelated answer, handoff, or provenance mechanisms.
 
 The accepted follow-up structure is tracked by
 [issue #418](https://github.com/pinpawo/pinpawo-agent/issues/418):
@@ -143,8 +142,7 @@ The accepted follow-up structure is tracked by
 
 The source set is unusually strong on historical design, but weaker on:
 
-- real-model validation of the candidate “new execution result” definition at
-  run entry;
+- cross-model validation of the now-stable GLM-5.2 entry profile;
 - complete verification coverage for each stable behavior contract in the map;
 - page-level freshness/dependency checks when implementation changes;
 - a consistent status distinction among current, pinned, draft, superseded, and

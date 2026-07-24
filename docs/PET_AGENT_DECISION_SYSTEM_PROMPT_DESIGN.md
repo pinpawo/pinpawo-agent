@@ -83,28 +83,24 @@ shared prefix 不包含：
 
 目标：在 run 入口一次性选择执行形态。
 
-决策条件按 action 完整归组：
+决策采用排除式顺序：
 
 ```text
-action=answer
-  - 当前事实已经足以回应，不需要 capability subagent 执行。
-  - 用户在询问已有上下文、最近任务状态或之前结果。
-  - 目标无法判断，或继续前需要用户补充、澄清、确认。
-
-action=direct_task
-  - 目标需要执行，但一次 capability subagent 执行可以自然完成，并形成整体可验收结果。
-  - 多个文字动作能在同一次执行中共享上下文并连续完成。
-  - 输出一个完整 current task，不输出步骤清单或计划。
-
-action=needs_plan
-  - 目标需要两次或更多彼此独立的 capability subagent 执行。
-  - 后续 task 必须等待前一次 announce 才能确定。
-  - 或不同部分需要分别选择 capability、分别执行并分别验收。
-  - 本节点不生成 plan 或 current task，交给 capabilityPlanner。
+1. 当前目标是否需要新的 capability execution？
+   - 需要读取、查询、检查、计算或操作才能得到当前结果：继续判断。
+   - 主对话已有结果足以回复：answer。
+2. 执行目标是否已经唯一确定？
+   - 多个候选且没有选择依据：answer，由 answer 询问用户。
+3. 是否必须先 plan？
+   - 一个 current task 可以包含连续的准备、操作、验证、汇总和同类批量处理；
+     内部动作可以使用前面动作的结果。
+   - 一个 task 完成后仍有独立 task，或后续 task 必须等待前一个 task 的结果
+     才能确定：needs_plan。
+   - 其他执行目标：direct_task，并输出完整的可验收 task。
 ```
 
-本节点不选择具体 capability，也不生成用户回复。所有 action 都结合用户目标、已有委托结论和
-对话上下文判断，且不得重复已完成工作。
+这个顺序先确定是否需要执行，再排除尚不能形成 task 的目标，最后判断执行是否需要 plan。
+本节点不选择具体 capability，也不生成用户回复。
 
 ### 4.2 注入事实
 
@@ -123,6 +119,9 @@ action=needs_plan
   unfinished delegation 由 outcomeDecision 处理。
 - lane transcript、tool message、internal/system message 不进入 entryDecision 的原生对话序列。
 
+这些是 harness 的数据流约束。生产 system prompt 只保留两条与判断直接相关的说明：
+`entry_decision_context` 是只读事实，main messages 的角色和时间顺序是判断目标与已有结果的主要依据。
+
 ### 4.3 Schema
 
 ```ts
@@ -133,6 +132,8 @@ action=needs_plan
 }
 ```
 
+`action` 的 schema description 只说明三种结构结果：不需要 execution、需要 execution 且无需
+plan、需要 execution 且必须先 plan。具体判定顺序由 system prompt 定义，不在 schema 中重复。
 `direct_task` 必须有非空 task；其他 action 的执行字段被忽略。schema 不包含 capability 枚举、
 search keywords 或 plan。
 
@@ -299,7 +300,9 @@ schema 不包含 task、plan、search keywords、lane、capability 或用户回�
 
 模型 eval：
 
-- entryDecision：answer、单 capability 多动作 direct、explore→implementation plan、独立能力边界。
+- entryDecision：已有结果 answer、意图与结果区分、当前本地/远程状态读取、陈旧证据刷新、
+  歧义目标澄清、计算执行、单 task 多动作、最近上下文指代、explore→implementation plan
+  和独立能力边界。
 - capabilityPlanner(entry)：创建 concrete head + deferred tail，不过度拆分。
 - capabilityPlanner(boundary)：结合完整 handoff 具体化、取消或保留 tail。
 - capabilityDecision：candidate recall、custom/general selection、未注册 capability fallback。

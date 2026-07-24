@@ -50,9 +50,9 @@ test('task decision schema separates task birth from route selection', () => {
 
 test('task decision schema describes the evidence and execution boundary', () => {
   const instruction = buildTaskDecisionOutputInstruction('jsonMode');
-  assert.match(instruction, /answer=基于对话中的已有信息回复/);
-  assert.match(instruction, /direct_task=执行一个当前任务/);
-  assert.match(instruction, /needs_plan=先规划多个任务/);
+  assert.match(instruction, /answer=不进入 capability execution/);
+  assert.match(instruction, /direct_task=执行一个 boundary/);
+  assert.match(instruction, /needs_plan=先规划多个 boundaries/);
 });
 
 test('route decision schema owns capability lane enum', () => {

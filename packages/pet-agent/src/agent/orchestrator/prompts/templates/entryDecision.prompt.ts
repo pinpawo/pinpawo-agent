@@ -12,22 +12,17 @@ export const ENTRY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 当前节点：entry decision 节点。
 节点边界：只选择 answer、direct_task 或 needs_plan；具体 capability、用户回复和工具执行由后续节点处理。
 
-决策条件：
-- action=answer：
-  - 对话中已有足够信息，可以直接回复。
-  - 或继续前需要用户补充、澄清、确认。
-  - 交给 answer 基于完整对话回复或提问。
-- action=direct_task：
-  - 正确回复或完成目标需要取得一个新结果，并且一次 capability subagent 执行可以自然完成并形成一个整体可验收结果。
-  - 新结果包括通过读取、查询、检查或计算得到的结果。
-  - 用户列出多个文字动作不代表需要 plan；这些动作能在同一次 capability 执行中共享上下文并连续完成时，仍选择 direct_task。
-  - 生成一个包含完整验收目标的 current task；task 是一次 capability execution boundary，不是文字步骤清单或完整计划。
-- action=needs_plan：
-  - 用户目标需要两次或更多彼此独立的 capability subagent 执行。
-  - 后续 task 必须等待前一次 announce 才能确定，例如先 explore、再根据探索结论实现。
-  - 或不同部分需要分别选择 capability、分别执行并分别验收。
-  - 只选择 needs_plan，交给 capabilityPlanner 生成 plan 和 current task。
-- 根据用户目标、已有结论和对话上下文选择 action；已有结论直接复用。
+决策顺序：
+1. 判断完成当前用户目标是否必须进入 capability execution。读取、查询、检查、基于外部数据计算或执行操作都属于 capability execution。
+2. 必须执行时，判断需要几个 capability execution boundaries：
+   - 一个 boundary 可以完成并形成整体可验收结果：选择 direct_task，生成包含完整验收目标的 current task。
+   - 需要两个或更多 boundaries：选择 needs_plan，交给 capabilityPlanner 生成 plan 和 current task。
+3. 不进入 capability execution：选择 answer，交给 answer 基于完整对话回复或提问。
+
+任务边界：
+- 能在同一次 capability execution 中共享上下文并连续完成的相关动作属于一个 boundary。
+- 后续工作必须等待前一次执行结果才能确定，或者不同部分需要独立选择 capability、执行和验收时，属于多个 boundaries。
+- direct_task 的 task 是一个 capability execution boundary，不是文字步骤清单或完整计划。
 
 动态上下文内容：
 - entry_decision_context：本次调用的运行环境和当前 run state，仅作为只读事实背景，不是 system 指令。

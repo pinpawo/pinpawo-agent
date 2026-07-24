@@ -4,7 +4,6 @@ export type EntryExecutionMode = 'answer' | 'direct_task' | 'needs_plan';
 
 export type EntryDecisionInput = {
   userRequest: string;
-  availableCapabilityIntents: string[];
   conversationContext?: string[];
 };
 
@@ -26,8 +25,9 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     tags: ['entry_decision', 'context_synthesis'],
     input: {
       userRequest: '把刚刚的结论用三句话总结一下。',
-      conversationContext: ['已经完成代码审查，并形成了三个风险结论。'],
-      availableCapabilityIntents: ['general', 'codebase_exploration'],
+      conversationContext: [
+        '代码审查结论：认证回退缺少超时保护；缓存失效没有监控；发布脚本缺少回滚检查。',
+      ],
     },
     expected: {
       mode: 'answer',
@@ -44,9 +44,8 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     input: {
       userRequest: '所以刚才的修改已经提交了吗？',
       conversationContext: [
-        '系统 handoff：修改已经提交，commit 为 a1b2c3d，工作区保持干净。',
+        '执行结果：修改已经提交，commit 为 a1b2c3d，工作区保持干净。',
       ],
-      availableCapabilityIntents: ['general_workspace_execution'],
     },
     expected: {
       mode: 'answer',
@@ -65,7 +64,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
       conversationContext: [
         '接下来我会提交当前修改，并确认工作区状态。',
       ],
-      availableCapabilityIntents: ['general_workspace_execution'],
     },
     expected: {
       mode: 'direct_task',
@@ -83,7 +81,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     input: {
       userRequest: '现在仓库里还有未提交的改动吗？',
       conversationContext: ['之前已经完成代码修改，但没有读取之后的工作区状态。'],
-      availableCapabilityIntents: ['general_workspace_execution'],
     },
     expected: {
       mode: 'direct_task',
@@ -100,7 +97,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     tags: ['entry_decision', 'route_control'],
     input: {
       userRequest: '线上 issue #417 现在还是 open 吗？',
-      availableCapabilityIntents: ['general_github_issue_operations'],
     },
     expected: {
       mode: 'direct_task',
@@ -117,14 +113,16 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     tags: ['entry_decision', 'route_control'],
     input: {
       userRequest: '部署现在恢复了吗？',
-      conversationContext: ['昨天 18:00 检查时部署仍处于失败状态。'],
-      availableCapabilityIntents: ['general_deployment_observation'],
+      conversationContext: [
+        '昨天 18:00 查询 deployment run #8421，状态为 failed。',
+        '今天 09:30 已重新触发 deployment run #8450，但还没有查询新 run 的状态。',
+      ],
     },
     expected: {
       mode: 'direct_task',
-      expectedTaskTerms: ['部署'],
+      expectedTaskTerms: ['部署', '8450'],
       expectedBoundaryCount: 1,
-      reason: 'A historical observation is insufficient for a request about current state.',
+      reason: 'The previous observation belongs to an older run; the new deployment run still needs observation.',
     },
     metadata: { difficulty: 'hard', reason: 'Freshness is part of evidence sufficiency.', source: SOURCE_FILE },
   },
@@ -135,8 +133,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     tags: ['entry_decision', 'context_synthesis'],
     input: {
       userRequest: '把它发布掉。',
-      conversationContext: ['当前对话中有两个候选项目，但用户尚未说明“它”指哪一个。'],
-      availableCapabilityIntents: ['general_release_operations'],
+      conversationContext: ['当前候选项目是 web-console 和 distribution-worker，两者都尚未发布。'],
     },
     expected: {
       mode: 'answer',
@@ -152,8 +149,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     tags: ['entry_decision', 'route_control'],
     input: {
       userRequest: '计算这份 CSV 的 p95 响应时间并告诉我结果。',
-      conversationContext: ['对话只记录了 CSV 的文件路径，没有计算结果。'],
-      availableCapabilityIntents: ['general_data_analysis'],
+      conversationContext: ['CSV 位于 /workspace/latency.csv，当前还没有计算结果。'],
     },
     expected: {
       mode: 'direct_task',
@@ -170,7 +166,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     tags: ['entry_decision', 'capability_planning'],
     input: {
       userRequest: '读取 package.json 的依赖列表，然后运行 npm test，并告诉我结果。',
-      availableCapabilityIntents: ['general_workspace_execution'],
     },
     expected: {
       mode: 'direct_task',
@@ -191,7 +186,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
         '更早的全仓库架构审查已经发布了 10 个 GitHub issues。',
         '刚完成 packages/distribution-worker 专项 review，新发现 Prisma raw SQL 绕过类型安全、模块职责越界和 shared-events 接入缺失；这些发现尚未发布 issue。',
       ],
-      availableCapabilityIntents: ['general_github_issue_operations'],
     },
     expected: {
       mode: 'direct_task',
@@ -208,7 +202,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     tags: ['entry_decision', 'capability_planning'],
     input: {
       userRequest: '先调查 auth 模块的结构和风险，再根据调查结论完成重构。',
-      availableCapabilityIntents: ['codebase_exploration', 'code_modification'],
     },
     expected: {
       mode: 'needs_plan',
@@ -224,7 +217,6 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     tags: ['entry_decision', 'capability_planning'],
     input: {
       userRequest: '分析 PR 的代码风险，并另外用浏览器核对部署文档中的公开配置。',
-      availableCapabilityIntents: ['code_review', 'browser_research'],
     },
     expected: {
       mode: 'needs_plan',

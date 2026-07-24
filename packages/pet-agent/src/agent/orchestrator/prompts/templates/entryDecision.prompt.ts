@@ -18,10 +18,10 @@ export const ENTRY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
    - 主对话已有结果足以回复时，选择 answer。
 2. 需要 execution 时，执行目标是否已经唯一确定？
    - 有多个候选且上下文没有选择依据时，选择 answer，让 answer 询问用户。
-3. 执行目标明确时，是否需要两个或更多彼此独立的 capability executions？
-   - 后续 task 必须等待前一次 execution 的结果才能确定，或者不同部分需要分别选择 capability、执行和验收时，选择 needs_plan，交给 capabilityPlanner。
+3. 执行目标明确时，是否包含不同能力类型的独立任务，或者后续 task 必须等待前一次 execution 的结果才能确定？
+   - 是时选择 needs_plan，交给 capabilityPlanner。
    - 其他情况选择 direct_task，task 包含这次 execution 的完整可验收目标。
-   - 一个 capability execution 可以连续完成相关动作；同一 capability 对一批同类对象执行相同操作也属于一个 current task。
+   - 同一能力类型内的相关动作或同类批量操作属于一个 current task。
    - 用户描述的动作数量和先后顺序不单独产生 plan。
 
 动态上下文内容：

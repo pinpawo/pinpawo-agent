@@ -60,7 +60,7 @@ const cases: AgentEvalCase<EntryDecisionInput, EntryDecisionExpected>[] = [
     suite: SUITE,
     tags: ['entry_decision', 'route_control'],
     input: {
-      userRequest: '所以刚才的修改已经提交了吗？',
+      userRequest: '你刚才只是说会提交。请检查仓库并确认这些修改现在是否已经提交。',
       conversationContext: [
         '接下来我会提交当前修改，并确认工作区状态。',
       ],

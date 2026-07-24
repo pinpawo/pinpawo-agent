@@ -141,9 +141,8 @@ test('entry decision prompt owns execution mode selection', () => {
     runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });
 
-  assert.match(prompt, /entry decision 节点/);
+  assert.match(prompt, /entryDecision 每个 run 只执行一次/);
   assert.match(prompt, /task loop/);
-  assert.match(prompt, /当前阶段：entryDecision/);
   assert.match(prompt, /决策顺序/);
   assert.match(prompt, /answer、direct_task 或 needs_plan/);
   assert.match(prompt, /是否需要新的 capability execution/);
@@ -166,6 +165,9 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(input, /run_delegation_summaries/);
   assert.match(input, /<runtime_context/);
   assert.match(prompt, /assistant 角色的 compaction context/);
+  assert.match(prompt, /entry_decision_context 提供只读的运行环境和任务事实/);
+  assert.match(prompt, /main messages 保留角色和时间顺序/);
+  assert.doesNotMatch(prompt, /不存在独立 recent announce|unfinished delegation/);
   assert.doesNotMatch(input, /context_summaries/);
   assert.doesNotMatch(input, /<user_request>|<recent_messages>|<recent_subagent_announces>/);
   assert.doesNotMatch(prompt, /\/repo|run_delegations/);

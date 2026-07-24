@@ -147,6 +147,8 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(prompt, /决策顺序/);
   assert.match(prompt, /answer、direct_task 或 needs_plan/);
   assert.match(prompt, /是否需要新的 capability execution/);
+  assert.match(prompt, /读取、查询、检查、计算或操作才能获得当前结果/);
+  assert.match(prompt, /主对话已有结果足以回复时，选择 answer/);
   assert.match(prompt, /执行目标是否已经唯一确定/);
   assert.match(prompt, /多个候选且上下文没有选择依据时，选择 answer/);
   assert.match(prompt, /让 answer 询问用户/);
@@ -154,8 +156,8 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(prompt, /等待前一次 execution 的结果/);
   assert.match(prompt, /分别选择 capability、执行和验收[^]*选择 needs_plan/);
   assert.match(prompt, /其他情况选择 direct_task/);
-  assert.match(prompt, /一个 capability execution 可以连续完成相关动作或同类批量操作/);
-  assert.match(prompt, /这些动作共同组成一个 current task/);
+  assert.match(prompt, /一个 capability execution 可以连续完成相关动作/);
+  assert.match(prompt, /同一 capability 对一批同类对象执行相同操作也属于一个 current task/);
   assert.match(prompt, /动作数量和先后顺序不单独产生 plan/);
   assert.doesNotMatch(prompt, /用户在询问已有上下文、最近任务状态或之前结果/);
   assert.doesNotMatch(prompt, /对话中已有足够信息|已有结论直接复用/);

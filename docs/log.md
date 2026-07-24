@@ -227,3 +227,20 @@ lint passes, and documentation migrations.
 - Kept unit coverage for prompt assembly, structured input shape, and separation
   of dynamic runtime facts from static system instructions.
 - Assigned semantic prompt verification to the existing goal-based model evals.
+
+## [2026-07-25] synthesis | Orchestrator practical-reasoning philosophy
+
+- Added a draft philosophy that starts from the orchestrator's human problem:
+  purpose, interpretation, situated knowledge, practical judgment,
+  consequential action, distributed responsibility, time, and completion.
+- Kept epistemic, causal, and normative boundaries as a compact technical
+  projection within the philosophy rather than creating a competing ontology
+  from the current capability architecture.
+- Derived task, planning, result, handoff, outcome, and answer responsibilities
+  from practical reasoning and goal acceptance rather than operation
+  inventories.
+- Reclassified the entryDecision follow-up as contested: its `36/36` GLM-5.2
+  result remains valid for the explicit cases but does not establish
+  generalization.
+- Reopened the execution-boundary question for natural-language paired evals and
+  a first-principles prompt revision.

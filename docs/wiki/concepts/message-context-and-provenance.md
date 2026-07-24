@@ -2,13 +2,14 @@
 title: Message Context And Provenance
 page_type: concept
 status: validated
-updated: 2026-07-20
+updated: 2026-07-25
 sources:
   - ../../PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md
   - ../../PET_AGENT_CAPABILITY_RUNTIME_DESIGN.md
   - ../../capability-artifact-pipeline/prompt-integration.md
   - ../../../packages/pet-agent/src/agent/orchestrator/messageLanes.ts
 related:
+  - orchestrator-practical-reasoning.md
   - decision-node-ownership.md
   - ../decisions/delegation-completion-acknowledgement.md
 ---

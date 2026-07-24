@@ -2,13 +2,14 @@
 title: System Prompt Design Open Questions
 page_type: question
 status: draft
-updated: 2026-07-22
+updated: 2026-07-25
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../investigations/entry-decision-state-query-routing.md
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
   - ../overview.md
+  - ../concepts/orchestrator-practical-reasoning.md
   - ../concepts/prompt-knowledge-layers.md
   - ../concepts/system-prompt-authoring-principles.md
   - ../migrations/docs-wiki-management-plan.md
@@ -16,19 +17,25 @@ related:
 
 # System Prompt Design Open Questions
 
-## Resolved for V1
+## Reopened by boundary-model review
 
 ### What counts as a new execution result?
 
-[PR #421](https://github.com/pinpawo/pinpawo-agent/pull/421) established a
-stable, domain-independent contract: a new observation, read, search, lookup,
-verification, calculation, command, tool result, or external/current-state
-check is execution when the evidence is not already in the canonical
-conversation. Read-only work still counts as execution.
+[PR #421](https://github.com/pinpawo/pinpawo-agent/pull/421) restored the
+important distinction between answering and obtaining a new result. The later
+exclusion-flow candidate passed its explicit GLM-5.2 cases, but operation lists
+do not define a future capability-independent boundary and “sufficient existing
+evidence” remains underspecified.
 
-The remaining provider-level validation is tracked in
-[issue #435](https://github.com/pinpawo/pinpawo-agent/issues/435), rather than
-reopening this design question.
+The draft [practical-reasoning philosophy](../concepts/orchestrator-practical-reasoning.md)
+reframes execution as crossing an epistemic or causal boundary: obtaining
+required external evidence or producing a required external effect. Closure
+requires natural-language paired cases, a revised production prompt, and
+provider validation. Issue
+[#435](https://github.com/pinpawo/pinpawo-agent/issues/435) continues to track the
+provider-level profile.
+
+## Resolved for V1
 
 ### Is the minimal Prompt Contract Map sufficient?
 

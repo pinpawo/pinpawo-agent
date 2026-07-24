@@ -2,11 +2,12 @@
 title: Prompt Knowledge Layers
 page_type: concept
 status: draft
-updated: 2026-07-23
+updated: 2026-07-25
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md
 related:
+  - orchestrator-practical-reasoning.md
   - decision-node-ownership.md
   - message-context-and-provenance.md
   - system-prompt-authoring-principles.md

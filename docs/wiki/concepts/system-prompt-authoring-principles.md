@@ -2,7 +2,7 @@
 title: System Prompt Authoring Principles
 page_type: concept
 status: draft
-updated: 2026-07-24
+updated: 2026-07-25
 sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
@@ -10,6 +10,7 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
   - ../overview.md
+  - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
   - decision-node-ownership.md
   - ../questions/system-prompts-open-questions.md
@@ -501,7 +502,7 @@ diagnostics from the judge input preserved the same 15/18 result at
 `294fd26b292dda73232cfbbc7410d0c35e5d4e9c`; only the capability-grouping
 criterion failed.
 
-## Entry exclusion-flow validation
+## Entry exclusion-flow bounded result
 
 The entry follow-up at
 `6e10c8a641489889ab8c414e8e371678b5562a3e` applied the authoring principles
@@ -518,8 +519,11 @@ without adding domain-specific commit or deployment rules:
 
 With the same DashScope `glm-5.2`, JSON Mode, provider-default reasoning, and
 `prompt-goal-v1` evaluator profile, all 12 entry cases passed across three
-repeats (`36/36`). This is bounded single-model evidence for the entry contract;
-it does not replace the still-pending cross-model profile.
+repeats (`36/36`). This is valid evidence for those inputs, but not yet for a
+general execution boundary: several cases explicitly name query, check, or run
+operations also named by the prompt. Natural-language paired cases derived from
+the [practical-reasoning philosophy](orchestrator-practical-reasoning.md)
+remain required before provider expansion.
 
 ## Application to the current entryDecision issue
 
@@ -539,10 +543,10 @@ separate owner, documented in
 
 The V1 implementation is complete across the four decision nodes, the shared
 decision prefix, and `answer`. The GLM-5.2 baseline identifies bounded failures,
-and the entry exclusion-flow rerun establishes per-change evidence for that one
-contract. It does not yet establish cross-model behavior. This page therefore
-remains a **draft synthesis**. Historical comparisons, additional-model
-validation, and priced cost evidence remain tracked by
+and the entry exclusion-flow rerun establishes per-change evidence for its
+explicit dataset, not yet for the generalized contract. This page therefore
+remains a **draft synthesis**. Natural-language paired cases, historical
+comparisons, additional-model validation, and priced cost evidence remain tracked by
 [issue #435](https://github.com/pinpawo/pinpawo-agent/issues/435). Contract
 traceability is maintained by the map established in
 [issue #415](https://github.com/pinpawo/pinpawo-agent/issues/415).

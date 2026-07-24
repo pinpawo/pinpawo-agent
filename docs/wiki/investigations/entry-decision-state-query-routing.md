@@ -1,8 +1,8 @@
 ---
 title: EntryDecision State Query Routing
 page_type: investigation
-status: validated
-updated: 2026-07-24
+status: contested
+updated: 2026-07-25
 sources:
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
   - ../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts
@@ -10,6 +10,7 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/issues/416
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
+  - ../concepts/orchestrator-practical-reasoning.md
   - ../concepts/prompt-knowledge-layers.md
   - ../concepts/decision-node-ownership.md
   - ../decisions/delegation-completion-acknowledgement.md
@@ -55,11 +56,11 @@ of reading/searching/running/external access as execution was no longer explicit
 gap from taskDecision to entryDecision, not evidence that answer, handoff, shared
 prefix, or provenance architecture should be redesigned together.
 
-## Validated contract
+## Candidate contract
 
 The implementation merged in
 [PR #421](https://github.com/pinpawo/pinpawo-agent/pull/421) established the
-evidence/execution boundary. The current validated candidate applies it as an
+evidence/execution boundary. The current candidate applies it as an
 ordered decision:
 
 1. Decide whether the current result requires new execution. Reading, lookup,
@@ -135,6 +136,20 @@ calculation, one current task with internal actions, recent-context resolution,
 result-dependent planning, and independent-task planning. Cases no longer rely
 on a hidden capability assignment or combine context recency with an unrelated
 batch-boundary judgment.
+
+This result is valid for the evaluated inputs but does not establish the
+candidate as a general execution boundary. Several requests now explicitly say
+“query,” “check,” or “run,” and the production prompt names a similar operation
+inventory. The model can therefore pass by aligning verbs rather than by
+generalizing across unseen capabilities. The phrase “existing results are
+sufficient” also leaves the central evidence correspondence judgment
+underspecified.
+
+The investigation is therefore **contested**, not validated. The next candidate
+must derive execution from external evidence and effect requirements, restore
+natural-language paraphrases that do not name an operation, and preserve paired
+cases for completion, intention, freshness, and target identity. See the draft
+[practical-reasoning philosophy](../concepts/orchestrator-practical-reasoning.md).
 
 ## Explicitly unaffected decision
 

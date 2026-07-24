@@ -2,12 +2,13 @@
 title: Orchestrator Decision Node Ownership
 page_type: concept
 status: validated
-updated: 2026-07-24
+updated: 2026-07-25
 sources:
   - ../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
 related:
+  - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
   - system-prompt-authoring-principles.md
   - message-context-and-provenance.md
@@ -38,6 +39,12 @@ the user request. Related actions belong together when one executor can naturall
 complete and validate them. Separate boundaries are justified by dependency on a
 future handoff, different capability intent, or a meaningful independent
 acceptance point.
+
+The draft [practical-reasoning philosophy](orchestrator-practical-reasoning.md)
+defines the underlying reason for execution: the user goal requires evidence or
+an effect beyond the current conversational boundary. This principle is broader
+than any fixed inventory of read, search, calculation, command, or mutation
+operations.
 
 ## Entry execution shape
 

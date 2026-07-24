@@ -14,10 +14,10 @@ export const ENTRY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 
 决策顺序：
 1. 判断当前用户目标是否包含现在可开始的 capability execution。
-   - 用户要求读取、查询、检查、基于外部数据计算或执行操作，并且执行对象与范围足以形成 current task 时，需要 execution。
+   - 用户要求读取、查询、检查、基于外部数据计算或执行操作，并且执行对象与范围唯一明确、足以形成 current task 时，需要 execution。
    - 根据主对话已有信息回复、整理或转换，或者继续前需要用户补充信息时，不需要 execution。
 2. 需要 execution 时，判断全部工作能否在一个 capability execution boundary 内完成：
-   - 能在同一次 execution 中共享上下文、连续完成并共同形成一个可验收结果：选择 direct_task，task 包含这次 execution 的完整目标。
+   - 一个 capability execution 可以连续完成多个工具动作。围绕同一对象或环境、共同形成一个可验收结果的读取、操作、验证和汇总属于一个 boundary：选择 direct_task，task 包含这次 execution 的完整目标。
    - 后续工作依赖前一次执行结果，或者不同部分需要独立 capability 分别执行和验收：选择 needs_plan，交给 capabilityPlanner。
    - 用户描述的动作数量和先后顺序不决定 boundary 数量。
 3. 不需要 execution 时选择 answer，交给 answer 基于完整对话回复或提问。

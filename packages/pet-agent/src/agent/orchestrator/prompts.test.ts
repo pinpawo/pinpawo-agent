@@ -152,11 +152,13 @@ test('entry decision prompt owns execution mode selection', () => {
   assert.match(prompt, /执行目标是否已经唯一确定/);
   assert.match(prompt, /多个候选且上下文没有选择依据时，选择 answer/);
   assert.match(prompt, /让 answer 询问用户/);
-  assert.match(prompt, /是否包含不同执行环境中分别验收的独立任务/);
-  assert.match(prompt, /等待前一次 execution 的结果/);
-  assert.match(prompt, /是时选择 needs_plan/);
+  assert.match(prompt, /判断是否必须先 plan/);
+  assert.match(prompt, /准备、操作、验证、汇总和同类批量处理/);
+  assert.match(prompt, /内部动作可以使用前面动作的结果/);
+  assert.match(prompt, /一个 task 完成后仍有需要单独执行和验收的 task/);
+  assert.match(prompt, /后续 task 的内容必须等待前一个 task 的结果/);
+  assert.match(prompt, /选择 needs_plan/);
   assert.match(prompt, /其他情况选择 direct_task/);
-  assert.match(prompt, /围绕同一目标和执行环境的相关动作或同类批量操作属于一个 current task/);
   assert.doesNotMatch(prompt, /用户在询问已有上下文、最近任务状态或之前结果/);
   assert.doesNotMatch(prompt, /对话中已有足够信息|已有结论直接复用/);
   assert.doesNotMatch(prompt, /plan_draft|task_plan_draft/);

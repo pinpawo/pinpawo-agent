@@ -6,7 +6,10 @@ import path from 'node:path';
 
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
-import type { AgentToolkit } from '../../types/toolkit';
+import {
+  filterAvailableToolkits,
+  type AgentToolkit,
+} from '../../types/toolkit';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -58,6 +61,9 @@ export type PetAgentRuntimeConfig = {
 };
 
 function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
+  // descriptor() is synchronous and therefore reports static dependency
+  // resolution against the configured Toolkit inventory. Runtime availability
+  // is evaluated for each async invoke generation below.
   const registry = compileAgentRegistry({
     toolkits: config.toolkits ?? [],
     capabilities: config.capabilities ?? [],
@@ -156,11 +162,12 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     }
 
     const messages = await buildInvokeMessages(input.brief, input.wikiRoot);
-    const toolkits = [
+    const toolkitDefinitions = [
       ...(config.toolkits ?? []),
       ...(input.toolkits ?? []),
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
     ];
+    const toolkits = await filterAvailableToolkits(toolkitDefinitions);
     const capabilities = [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])];
     const registry = compileAgentRegistry({
       toolkits,

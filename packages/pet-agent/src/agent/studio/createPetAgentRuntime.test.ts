@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AIMessage } from '@langchain/core/messages';
+import { tool } from '@langchain/core/tools';
 import { isCommand } from '@langchain/langgraph';
+import { z } from 'zod';
 
 import { createPetAgentRuntime } from './createPetAgentRuntime';
 import type { OrchestratorGraph } from '../createAgentRuntime';
@@ -24,6 +26,14 @@ function fakeActor(): AgentActor {
     stage: null,
     species: null,
   };
+}
+
+function mockTool<const TName extends string>(name: TName): NamedStructuredTool<TName> {
+  return tool(async () => 'ok', {
+    name,
+    description: `${name} test tool`,
+    schema: z.object({}),
+  }) as NamedStructuredTool<TName>;
 }
 
 function makeStubGraph(responses: unknown[]): {
@@ -86,6 +96,63 @@ test('descriptor derives Capability status from registry compilation', () => {
     available: false,
     reason: 'unknown Toolkit "git"',
   }]);
+});
+
+test('invoke evaluates Toolkit availability before compiling its registry generation', async () => {
+  let availabilityChecks = 0;
+  const { graph, calls } = makeStubGraph([
+    { messages: [new AIMessage('done')] },
+  ]);
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    capabilities: [{
+      name: 'inspect',
+      description: 'Inspect a repository.',
+      uses: ['offline'],
+      instructions: defineInstructionDocument({
+        content: '# Inspect',
+      }),
+    }],
+    toolkits: [{
+      name: 'offline',
+      description: 'Unavailable Toolkit.',
+      tools: [{ tool: mockTool('offline_tool') }],
+      availability: () => {
+        availabilityChecks += 1;
+        return { available: false, reason: 'offline' };
+      },
+    }],
+    generalUses: [],
+    graph,
+  });
+
+  // Synchronous descriptors report static dependency resolution only.
+  assert.equal(runtime.descriptor().capabilities[0]?.available, true);
+
+  await runtime.invoke({ brief: 'inspect' });
+
+  const registry = (calls[0]?.options as {
+    configurable?: {
+      registry?: {
+        capabilities?: Array<{ capability: { name: string } }>;
+        unavailableCapabilities?: Array<{
+          capability: { name: string };
+          issues: Array<{ code: string; toolkitName?: string }>;
+        }>;
+      };
+    };
+  } | undefined)?.configurable?.registry;
+  assert.equal(availabilityChecks, 1);
+  assert.deepEqual(registry?.capabilities, []);
+  assert.equal(
+    registry?.unavailableCapabilities?.[0]?.capability.name,
+    'inspect',
+  );
+  assert.deepEqual(
+    registry?.unavailableCapabilities?.[0]?.issues,
+    [{ code: 'unknown_toolkit', toolkitName: 'offline' }],
+  );
 });
 
 test('humanReviewer: single interrupt → approve → reply', async () => {
@@ -276,8 +343,8 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
     { messages: [new AIMessage('done')] },
   ]);
 
-  const pluginTool = { name: 'plugin_tool' } as NamedStructuredTool<'plugin_tool'>;
-  const invokeTool = { name: 'invoke_tool' } as NamedStructuredTool<'invoke_tool'>;
+  const pluginTool = mockTool('plugin_tool');
+  const invokeTool = mockTool('invoke_tool');
   const runtime = createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),

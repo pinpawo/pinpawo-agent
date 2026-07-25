@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
 
 import type { NamedStructuredTool, ToolReviewPolicy } from './toolkit';
 import {
@@ -10,8 +12,16 @@ import {
   validateToolkitDefinition,
 } from './toolkit';
 
-const alphaTool = { name: 'alpha_tool' } as NamedStructuredTool<'alpha_tool'>;
-const betaTool = { name: 'beta_tool' } as NamedStructuredTool<'beta_tool'>;
+function mockTool<const TName extends string>(name: TName): NamedStructuredTool<TName> {
+  return tool(async () => 'ok', {
+    name,
+    description: `${name} test tool`,
+    schema: z.object({}),
+  }) as NamedStructuredTool<TName>;
+}
+
+const alphaTool = mockTool('alpha_tool');
+const betaTool = mockTool('beta_tool');
 
 const reviewPolicy = {
   request: () => null,
@@ -87,6 +97,42 @@ test('toolkit registration rejects malformed static contract fields', () => {
       tools: [{ tool: alphaTool, review: {} }],
     } as never),
     /review must define request\(\)/,
+  );
+
+  assert.throws(
+    () => validateToolkitDefinition({
+      name: 'non_executable_tool',
+      description: 'A name alone is not a StructuredTool.',
+      tools: [{ tool: { name: 'noop' } }],
+    } as never),
+    /must be an executable StructuredTool/,
+  );
+
+  assert.throws(
+    () => validateToolkitDefinition({
+      name: 'invalid_operation_callback',
+      description: 'Operation callbacks must be callable.',
+      tools: [{
+        tool: alphaTool,
+        operation: { summarizeInput: 1 },
+      }],
+    } as never),
+    /operation\.summarizeInput must be a function/,
+  );
+
+  assert.throws(
+    () => validateToolkitDefinition({
+      name: 'invalid_review_callback',
+      description: 'Optional review callbacks must be callable.',
+      tools: [{
+        tool: alphaTool,
+        review: {
+          request: () => null,
+          buildAuthorizationMatcher: 1,
+        },
+      }],
+    } as never),
+    /review\.buildAuthorizationMatcher must be a function/,
   );
 });
 

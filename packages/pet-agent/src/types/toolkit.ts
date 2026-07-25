@@ -1,4 +1,7 @@
-import type { StructuredTool } from '@langchain/core/tools';
+import {
+  isStructuredTool,
+  type StructuredTool,
+} from '@langchain/core/tools';
 import type {
   PendingReviewAction,
   ReviewEffect,
@@ -187,6 +190,15 @@ function assertToolkitReviewGuidance(
   }
 }
 
+function assertOptionalFunction(
+  owner: string,
+  value: unknown,
+) {
+  if (value !== undefined && typeof value !== 'function') {
+    throw new Error(`${owner} must be a function`);
+  }
+}
+
 export function validateToolkitDefinition(toolkit: AgentToolkit) {
   if (!toolkit || typeof toolkit !== 'object' || Array.isArray(toolkit)) {
     throw new Error('Toolkit definition must be an object');
@@ -215,6 +227,14 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
     if (typeof toolName !== 'string' || !toolName.trim()) {
       throw new Error(`Toolkit "${toolkit.name}" contains a tool without a name`);
     }
+    if (
+      !isStructuredTool(definition.tool)
+      || typeof definition.tool.invoke !== 'function'
+    ) {
+      throw new Error(
+        `Toolkit "${toolkit.name}" tool "${toolName}" must be an executable StructuredTool`,
+      );
+    }
     if (toolNames.has(toolName)) {
       throw new Error(`Toolkit "${toolkit.name}" defines duplicate tool "${toolName}"`);
     }
@@ -224,6 +244,21 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
     ) {
       throw new Error(
         `Toolkit "${toolkit.name}" tool "${toolName}" operation must be an object`,
+      );
+    }
+    if (definition.operation) {
+      const owner = `Toolkit "${toolkit.name}" tool "${toolName}" operation`;
+      assertOptionalFunction(
+        `${owner}.summarizeInput`,
+        definition.operation.summarizeInput,
+      );
+      assertOptionalFunction(
+        `${owner}.summarizeOutput`,
+        definition.operation.summarizeOutput,
+      );
+      assertOptionalFunction(
+        `${owner}.summarizeError`,
+        definition.operation.summarizeError,
       );
     }
     if (
@@ -236,6 +271,12 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
     ) {
       throw new Error(
         `Toolkit "${toolkit.name}" tool "${toolName}" review must define request()`,
+      );
+    }
+    if (definition.review) {
+      assertOptionalFunction(
+        `Toolkit "${toolkit.name}" tool "${toolName}" review.buildAuthorizationMatcher`,
+        definition.review.buildAuthorizationMatcher,
       );
     }
     toolNames.add(toolName);

@@ -70,12 +70,6 @@ import {
   readLatestHumanRequest,
   setPinpetMeta,
 } from '../../messageLanes';
-import { resolveToolkitResources } from '../../subagentDispatch';
-import {
-  validateUniqueCapabilityNames,
-  validateUniqueToolkitNames,
-  validateUniqueToolNames,
-} from '../../validation';
 import { readMessageText } from '../../utils';
 import { searchCapabilities } from '../../capabilitySearch';
 import { invokeStructuredOutput } from '../../../../utils/structuredOutput';
@@ -86,7 +80,7 @@ import {
   createTaskActiveDelegation,
 } from './delegationLifecycle';
 import {
-  generalLaneToolkits,
+  getInvokeRegistry,
   getInvokeOptions,
   resolveActor,
 } from '../config';
@@ -205,31 +199,13 @@ async function buildCapabilityDecisionContext(params: {
 }) {
   const { config, state, runnableConfig } = params;
   const {
-    capabilities,
-    toolkits,
-    execution,
     workdir,
     runtimeEnvironment,
-    reviewCapabilities,
-    globalReviewPolicy,
   } = getInvokeOptions(runnableConfig);
   const actor = resolveActor(config, runnableConfig);
-  const toolkitList = generalLaneToolkits(toolkits ?? []);
-  validateUniqueToolkitNames(toolkitList);
-  const generalToolkitResources = await resolveToolkitResources(toolkitList, undefined, {
-    models: config.models,
-    actor,
-    messages: state.messages,
-    execution,
-    reviewCapabilities,
-    globalReviewPolicy,
-    toolAuthorizations: state.sessionToolAuthorizations,
-  }, { includeInstructions: false });
-  const generalTools = generalToolkitResources.tools;
-  validateUniqueToolNames(generalTools);
-
-  const capabilityList = capabilities ?? [];
-  validateUniqueCapabilityNames(capabilityList);
+  const registry = getInvokeRegistry(runnableConfig);
+  const generalTools = [...registry.general.tools];
+  const capabilityList = registry.capabilities.map(({ capability }) => capability);
   const query = [state.runPendingTask?.task, state.runPendingTask?.contextSummary]
     .map((item) => item?.trim())
     .filter((item): item is string => Boolean(item))
@@ -284,8 +260,9 @@ function buildCapabilityPlanningContext(params: {
     recentMessages: mainMessagesWithoutCompaction(state.messages),
     contextSummaries: readContextCompactionSummaries(state.messages),
   });
-  const capabilityList = getInvokeOptions(runnableConfig).capabilities ?? [];
-  validateUniqueCapabilityNames(capabilityList);
+  const capabilityList = getInvokeRegistry(runnableConfig)
+    .capabilities
+    .map(({ capability }) => capability);
   const latestCompletedDelegation = [...state.runDelegationSummaries]
     .reverse()
     .find((item) => item.status === 'completed');

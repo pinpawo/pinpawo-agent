@@ -5,10 +5,12 @@ import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type {
   AgentToolkit,
-  ToolkitContext,
-  ToolkitToolReviewPolicy,
+  ToolkitReviewCapabilities,
+  ToolReviewPolicy,
   ToolOperationMetadata,
 } from '../../types/toolkit';
+import type { AgentActor, AgentModels } from '../../types/agent';
+import type { SubagentRuntimeEvent } from '../../types/subagent';
 import {
   applyReviewEffects,
   ReviewEffectApplicationError,
@@ -34,9 +36,25 @@ import {
   GLOBAL_REVIEW_POLICY_RESOLUTION,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   resolveGlobalReviewBatchPolicy,
+  type GlobalReviewPolicy,
   type GlobalReviewPolicyBatchItem,
   type GlobalReviewPolicyResolution,
 } from './review/globalReviewPolicy';
+
+export type ToolkitReviewRuntimeContext = {
+  models: AgentModels;
+  actor: AgentActor;
+  messages: BaseMessage[];
+  reviewContext?: {
+    task?: string | null;
+    workdir?: string | null;
+  };
+  reviewCapabilities?: ToolkitReviewCapabilities;
+  globalReviewPolicy?: GlobalReviewPolicy;
+  toolAuthorizations?: ToolAuthorizationRecord[];
+  recordToolAuthorization?: (authorization: ToolAuthorizationRecord) => void | Promise<void>;
+  emitRuntimeEvent?: (event: SubagentRuntimeEvent) => void | Promise<void>;
+};
 
 function buildCancelledToolResult(params: {
   toolName: string;
@@ -56,7 +74,7 @@ function buildCancelledToolResult(params: {
   });
 }
 
-function reviewCapabilitiesForGlobalPolicy(ctx: ToolkitContext) {
+function reviewCapabilitiesForGlobalPolicy(ctx: ToolkitReviewRuntimeContext) {
   const mode = ctx.globalReviewPolicy?.mode ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
   if (
     mode !== GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
@@ -74,7 +92,7 @@ function reviewCapabilitiesForGlobalPolicy(ctx: ToolkitContext) {
   };
 }
 
-function runtimeCanCollectHumanReview(ctx: ToolkitContext) {
+function runtimeCanCollectHumanReview(ctx: ToolkitReviewRuntimeContext) {
   return ctx.reviewCapabilities?.humanReview !== false;
 }
 
@@ -288,7 +306,7 @@ async function buildRuntimeReviewAuthorizations(params: {
 }
 
 async function recordToolAuthorizations(
-  ctx: ToolkitContext,
+  ctx: ToolkitReviewRuntimeContext,
   authorizations: ToolAuthorizationRecord[],
 ) {
   if (authorizations.length === 0) {
@@ -313,7 +331,7 @@ async function recordToolAuthorizations(
 export type ToolkitReviewBinding = {
   toolkit: AgentToolkit;
   toolName: string;
-  reviewPolicy: ToolkitToolReviewPolicy;
+  reviewPolicy: ToolReviewPolicy;
   operation?: ToolOperationMetadata;
 };
 
@@ -406,7 +424,7 @@ function buildToolMessage(toolCall: ToolCall, content: string) {
 
 async function prepareToolkitToolReview(params: {
   binding: ToolkitReviewBinding;
-  ctx: ToolkitContext;
+  ctx: ToolkitReviewRuntimeContext;
   toolCall: ToolCall;
   approvedReviewIds: Set<string>;
 }): Promise<ToolkitReviewPreparation> {
@@ -416,12 +434,12 @@ async function prepareToolkitToolReview(params: {
   }
   const currentInput = toolCall.args;
   const reviewSpec = await binding.reviewPolicy.request({
-    ...ctx,
-    reviewCapabilities: reviewCapabilitiesForGlobalPolicy(ctx),
     toolkitName: binding.toolkit.name,
     toolName: binding.toolName,
     input: currentInput,
     operation: binding.operation,
+    reviewCapabilities: reviewCapabilitiesForGlobalPolicy(ctx),
+    toolAuthorizations: ctx.toolAuthorizations,
   });
 
   if (!reviewSpec) {
@@ -457,7 +475,7 @@ async function prepareToolkitToolReview(params: {
       toolName: binding.toolName,
       input: currentInput,
       operation: binding.operation,
-      autoReviewContext: binding.toolkit.policy?.autoReview,
+      autoReviewContext: binding.toolkit.reviewGuidance,
       review: reviewPayload.review,
       reviewPayload,
     },
@@ -565,7 +583,7 @@ function buildCancelledOutcomeForReview(
 }
 
 async function emitGlobalReviewAuthorizationEvent(params: {
-  ctx: ToolkitContext;
+  ctx: ToolkitReviewRuntimeContext;
   resolution: Extract<GlobalReviewPolicyResolution, { type: typeof GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE }>;
   reviews: PreparedToolkitReview[];
 }) {
@@ -599,7 +617,7 @@ async function emitGlobalReviewAuthorizationEvent(params: {
 async function prepareToolkitReviews(params: {
   toolCalls: ToolCall[];
   bindingsByToolName: Map<string, ToolkitReviewBinding>;
-  ctx: ToolkitContext;
+  ctx: ToolkitReviewRuntimeContext;
   approvedReviewIds: Set<string>;
 }): Promise<PreparedToolkitReviews> {
   const preparedReviews: PreparedToolkitReview[] = [];
@@ -682,7 +700,7 @@ async function resolveHumanToolkitReviews(params: {
 
 async function resolvePreparedToolkitReviews(params: {
   prepared: PreparedToolkitReviews;
-  ctx: ToolkitContext;
+  ctx: ToolkitReviewRuntimeContext;
   toolkits: AgentToolkit[];
 }): Promise<ToolkitReviewResolution> {
   if (params.prepared.cancellation) {
@@ -792,7 +810,7 @@ function readCancellationReason(content: string) {
 async function reviewToolkitToolCalls(params: {
   toolCalls: ToolCall[];
   bindingsByToolName: Map<string, ToolkitReviewBinding>;
-  ctx: ToolkitContext;
+  ctx: ToolkitReviewRuntimeContext;
   toolkits: AgentToolkit[];
   approvedReviewIds: Set<string>;
 }): Promise<ToolkitReviewResults> {
@@ -861,7 +879,7 @@ function buildToolkitReviewStateUpdate(params: {
 
 export function createToolkitReviewMiddleware(
   bindings: ToolkitReviewBinding[],
-  ctx: ToolkitContext,
+  ctx: ToolkitReviewRuntimeContext,
   toolkits: AgentToolkit[],
 ): AnyAgentMiddleware | null {
   if (bindings.length === 0) {

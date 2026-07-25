@@ -8,23 +8,24 @@ import {
   readToolAuthorizationMatcher,
   ReviewEffectApplicationError,
 } from './review/reviewAuthorizations';
-import type { AgentToolkit } from '../../types/toolkit';
+import type { AgentToolkit, NamedStructuredTool } from '../../types/toolkit';
+
+const runShellTool = { name: 'run_shell' } as NamedStructuredTool<'run_shell'>;
 
 test('applyReviewEffects builds policy-derived authorization records', async () => {
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    policy: {
-      toolReview: {
-        run_shell: {
+    tools: [{
+      tool: runShellTool,
+      review: {
           request: () => null,
           buildAuthorizationMatcher: ({ input }) => ({
             type: 'shell_pattern',
             value: (input as { command: string }).command,
           }),
-        },
       },
-    },
+    }],
   }];
 
   const applied = await applyReviewEffects({
@@ -129,14 +130,13 @@ test('applyReviewEffects rejects policy hooks that return undeclared matcher str
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    policy: {
-      toolReview: {
-        run_shell: {
+    tools: [{
+      tool: runShellTool,
+      review: {
           request: () => null,
           buildAuthorizationMatcher: () => ({ type: 'path_glob', value: '*.ts' }) as never,
-        },
       },
-    },
+    }],
   }];
 
   await assert.rejects(

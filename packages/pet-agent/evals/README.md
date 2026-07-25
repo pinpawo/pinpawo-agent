@@ -60,7 +60,7 @@ recreate datasets.
 - `agent-outcome-decision-basics`: `continue | await_user | task_done | goal_done` verdict boundaries.
 - `agent-capability-planning-basics`: production `planner@entry` and `planner@boundary` contracts.
 - `agent-multi-task-flow-basics`: real graph baseline across meaningful task boundaries.
-- `agent-tool-review-reject-runtime`: runtime regression case for reviewed tool-call rejection stopping subagent execution and handing off the cancellation announce.
+- `agent-tool-review-reject-runtime`: runtime regression case for reviewed tool-call rejection retaining the active lane and reusing it on follow-up.
 
 The `agent-*` datasets are seed coverage for future runners. They are meant to
 make the expected behavior explicit before each runner is migrated to Langfuse.
@@ -334,7 +334,9 @@ npm run eval:langfuse:tool-review-reject
 
 It covers the reviewed-tool rejection path: the first run must interrupt for
 human review, the reject resume must finish without executing or retrying the
-tool, and the cancellation announce must be handed off into main messages.
+tool, and the cancellation announce must remain in the active delegation lane.
+A follow-up run must reuse that transcript, then clear it through the normal
+completed handoff path.
 
 ## Task Decision Stability Runner
 

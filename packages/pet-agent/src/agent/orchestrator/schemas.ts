@@ -29,7 +29,7 @@ export type CapabilityPlanningDecision = {
 };
 
 export type DelegationOutcomeDecision = {
-  outcome: 'continue' | 'await_user' | 'task_done' | 'goal_done';
+  outcome: 'continue' | 'task_done' | 'goal_done';
   gap_note: string | null;
 };
 
@@ -127,11 +127,11 @@ export function buildCapabilityPlanningDecisionSchema() {
 
 export function buildDelegationOutcomeDecisionSchema() {
   return z.object({
-    outcome: z.enum(['continue', 'await_user', 'task_done', 'goal_done']).describe(
-      'continue=当前 task 未达标且同一 capability 可以继续；await_user=当前 task 未完成且继续前需要用户补充、澄清或确认；task_done=当前 task 达标但不能明确断言用户目标已经完成；goal_done=用户目标已经完成。',
+    outcome: z.enum(['continue', 'task_done', 'goal_done']).describe(
+      'continue=当前 task 未达标且同一 capability 可以继续；task_done=当前 task 达标但不能明确断言用户目标已经完成；goal_done=用户目标已经完成，或继续前需要用户补充、澄清、确认。',
     ),
     gap_note: z.string().trim().nullable().optional().describe(
-      'outcome=continue 时为当前 task 的具体缺口；outcome=await_user 时为需要用户补充或确认的内容。没有具体补充时可为 null 或省略。',
+      'outcome=continue 时为当前 task 的具体缺口；没有可补充的具体缺口时可为 null 或省略。其他 outcome 可为 null 或省略。',
     ),
     // Normalize instead of reject: gap_note is advisory and outcome is the
     // authoritative field, so a stray gap_note on task_done/goal_done is
@@ -142,9 +142,7 @@ export function buildDelegationOutcomeDecisionSchema() {
     // without a new gap. Normalize every accepted shape for stable runtime use.
   }).transform((decision) => ({
     ...decision,
-    gap_note: decision.outcome === 'continue' || decision.outcome === 'await_user'
-      ? decision.gap_note || null
-      : null,
+    gap_note: decision.outcome === 'continue' ? decision.gap_note || null : null,
   }));
 }
 

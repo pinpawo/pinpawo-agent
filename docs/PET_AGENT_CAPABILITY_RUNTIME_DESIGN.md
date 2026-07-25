@@ -186,6 +186,11 @@ type CapabilityMiddleware = {
 
 - middleware 只用于 subagent 输入/输出调整
 - middleware 不负责 capability activation 或 tool 可见性控制
+- toolkit review 在 subagent middleware 内暂停，也必须在同一 subagent
+  invocation 内恢复。拒绝只为 pending tool calls 生成协议完整的
+  `ToolMessage`，不合成 final `AIMessage`、不把 tool cancellation 提升为
+  delegation cancellation；middleware 通过结构化 `jumpTo: model` 回到 child
+  model，subagent 读取拒绝原因后继续自己的 agent loop。
 
 ### 4.4 capability result schema
 
@@ -266,7 +271,6 @@ START → prepare → compactContext
   → delegationOutcomeIterationGuard
   → delegationOutcomeDecision
       ├─ continue → capability | general
-      ├─ await_user → answer（保留 active delegation + lane）
       ├─ task_done → capabilityPlanner
       └─ goal_done → answer → END
 ```

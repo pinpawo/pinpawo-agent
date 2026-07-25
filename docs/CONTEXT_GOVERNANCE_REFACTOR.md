@@ -50,21 +50,21 @@
 - outcomeDecision 判定 task 完成时，`buildSubagentHandoff` 把该 announce 复制为无 lane 的 main
   `AIMessage`，携带 `handoffFrom/delegationId/runId/task/announceMessageId` provenance；随后按
   lane+runId+delegationId 清空原 announce 与全部中间 transcript。
-- `progress` / `limit_reached` / `cancelled`，或 outcomeDecision 判定 `continue/await_user` 时不 handoff、不清 lane，原现场继续服务下一次执行。
+- `progress` / `limit_reached` 或 outcomeDecision 判定继续时不 handoff、不清 lane，原现场继续服务下一次执行。
 - runtime 不根据 `<delegation_briefing>`、`【委派简报】` 等文本形状识别、过滤或修复消息；
   pre-lane briefing 仅按 `source: delegation_briefing` provenance 排除，缺少当前 message ID /
   provenance 的旧 checkpoint 不在此协议中兼容。
 - **超出 announce 的收割走 `resultSchema` / result artifact，不要回头保留笔记**：announce 是给人/下游 LLM 读的自然语言结论，`kind: "result"` artifact（schema 校验后以 `CapabilityArtifactRef` 进 state）是给程序读的结构化收割通道——两者都在折叠前定型。将来 memory 层若要收割探索发现，正确做法是给该能力定义 `resultSchema`（与 #75 "ExploreResult schema 延后到需要时再做"对齐），而不是改折叠逻辑。折叠清掉的只是产生 announce / result 的过程性废料。
-- **当前 announce candidate 是完整交付结果，不是 preview**：outcomeDecision 必须能读取刚返回 announce 的完整文本来判断 `continue/await_user/task_done/goal_done`。`resultPreview`、最近任务列表、compaction summary 和 artifact preview 可以有界裁剪，但它们不能替代当前 announce 的文本。
+- **当前 announce candidate 是完整交付结果，不是 preview**：outcomeDecision 必须能读取刚返回 announce 的完整文本来判断 `continue/task_done/goal_done`。`resultPreview`、最近任务列表、compaction summary 和 artifact preview 可以有界裁剪，但它们不能替代当前 announce 的文本。
 - **artifact 不替代 announce，而是承载 announce 放不下或不该放的本体**：长结构化 JSON、长报告、图片/视频/PDF/文件包、跨 turn 复用资料，应在折叠前写成 `CapabilityArtifactRef`。此时 announce 仍要说明用户可读结论、关键发现、以及相关 artifact ref/title/preview；父 agent 默认只读 bounded artifact preview，不读 artifact 全文。
 - 回收时机选 outcomeDecision 验收 handoff，而不是 subagent 自行停止时或 run 结束时。
 
 ### 实现要点
 
 1. execution node 把新消息写入对应 lane，并记录显式 `announceMessageId`。
-2. outcomeDecision 读取当前 active delegation 的 announce 与停止原因，决定 `continue | await_user | task_done | goal_done`。
+2. outcomeDecision 读取当前 active delegation 的 announce 与停止原因，决定 `continue | task_done | goal_done`。
 3. `task_done/goal_done` 构造 handoff copy，并为该 delegation 的所有 lane 消息返回
-   `RemoveMessage`；`continue/await_user` 保持 lane 原样。
+   `RemoveMessage`；`continue` 保持 lane 原样。
 4. handoff 幂等判断比较 `announceMessageId`，不比较正文内容。
 
 ### 配套修正

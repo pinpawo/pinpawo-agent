@@ -10,10 +10,7 @@ import { buildReviewSpec } from '../../src/agent/orchestrator/review/reviewSpec'
 import {
   getMessageHandoffSource,
   mainConversationMessages,
-  readLatestAnnounce,
-  readLatestAnnounceCompletionReason,
 } from '../../src/agent/orchestrator/messageLanes';
-import { isToolReviewCancellationMessage } from '../../src/subagent/completionReason';
 import { defineToolkit } from '../../src/types/toolkit';
 import {
   toolReviewRejectRuntimeDataset,
@@ -36,15 +33,9 @@ type EvalOutput = {
   firstReviewId: string | null;
   finalInterrupt: boolean;
   toolRunCount: number;
-  retryToolResultPresent: boolean;
-  cancellationHandoffPresent: boolean;
-  activeDelegationRetained: boolean;
-  cancellationCompletionReason: string | null;
-  cancelledToolResultRetained: boolean;
-  cancellationAnnounceText: string;
-  followUpReusedTranscript: boolean;
-  completedHandoffPresent: boolean;
-  finalActiveDelegationPresent: boolean;
+  rejectedToolResultSeenBySubagent: boolean;
+  handoffPresent: boolean;
+  handoffText: string;
   authorizationCount: number;
   finalReply: string;
 };
@@ -74,16 +65,10 @@ const scoreKeys = [
   'interrupted_correct',
   'final_interrupt_correct',
   'tool_run_count_correct',
-  'retry_tool_result_correct',
-  'cancellation_handoff_correct',
-  'active_delegation_retained',
-  'cancellation_completion_reason_correct',
-  'cancelled_tool_result_retained',
-  'follow_up_reused_transcript',
-  'completed_handoff_correct',
-  'final_active_delegation_correct',
+  'rejected_tool_result_seen_by_subagent',
+  'handoff_correct',
   'authorization_count_correct',
-  'cancellation_announce_correct',
+  'final_announce_correct',
 ];
 
 function splitList(value: string | undefined): string[] {
@@ -124,18 +109,6 @@ function createRouteModel(task: string): AgentModels['act'] {
             context_summary: null,
           };
         }
-        if (decisionCount === 2) {
-          return {
-            outcome: 'await_user',
-            gap_note: '工具调用已取消，保留现有执行上下文。',
-          };
-        }
-        if (decisionCount === 3) {
-          return {
-            outcome: 'continue',
-            gap_note: '不要重试工具，直接整理已有结果。',
-          };
-        }
         return { outcome: 'goal_done', gap_note: null };
       },
     }),
@@ -163,20 +136,16 @@ function readInterruptPayload(value: unknown): {
     : null;
 }
 
-function readToolResult(messages: BaseMessage[], toolCallId: string) {
-  return messages.find((message): message is ToolMessage =>
-    ToolMessage.isInstance(message)
-    && message.tool_call_id === toolCallId);
-}
-
 function readLastText(messages: BaseMessage[]): string {
   const content = messages.at(-1)?.content;
   return typeof content === 'string' ? content : '';
 }
 
-function findHandoff(messages: BaseMessage[]) {
-  return mainConversationMessages(messages).find((message) =>
+function findHandoffText(messages: BaseMessage[]): string {
+  const handoff = mainConversationMessages(messages).find((message) =>
     Boolean(getMessageHandoffSource(message)));
+  const content = handoff?.content;
+  return typeof content === 'string' ? content : '';
 }
 
 async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> {
@@ -225,11 +194,6 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
         name: input.reviewedTool,
         args: input.firstToolCall.args,
       }],
-      [{
-        id: input.retryToolCall.id,
-        name: input.reviewedTool,
-        args: input.retryToolCall.args,
-      }],
       [],
     ],
   });
@@ -266,15 +230,9 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
       firstReviewId,
       finalInterrupt: false,
       toolRunCount,
-      retryToolResultPresent: false,
-      cancellationHandoffPresent: false,
-      activeDelegationRetained: false,
-      cancellationCompletionReason: null,
-      cancelledToolResultRetained: false,
-      cancellationAnnounceText: '',
-      followUpReusedTranscript: false,
-      completedHandoffPresent: false,
-      finalActiveDelegationPresent: false,
+      rejectedToolResultSeenBySubagent: false,
+      handoffPresent: false,
+      handoffText: '',
       authorizationCount: 0,
       finalReply: '',
     };
@@ -293,74 +251,30 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
   for await (const _event of resumedRun) {
     // Drain the stream so the final graph output is materialized.
   }
-  const cancellationState = await resumedRun.output as {
+  const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
     messages?: BaseMessage[];
     sessionToolAuthorizations?: unknown[];
-    taskActiveDelegation?: {
-      id: string;
-      transcriptRunId: string;
-    } | null;
   };
-  const cancellationMessages = Array.isArray(cancellationState.messages)
-    ? cancellationState.messages
-    : [];
-  const activeDelegation = cancellationState.taskActiveDelegation ?? null;
-  const cancellationAnnounce = activeDelegation
-    ? readLatestAnnounce(cancellationMessages, {
-        runId: activeDelegation.transcriptRunId,
-        delegationId: activeDelegation.id,
-      })
-    : null;
-  const cancellationCompletionReason = activeDelegation
-    ? readLatestAnnounceCompletionReason(cancellationMessages, {
-        runId: activeDelegation.transcriptRunId,
-        delegationId: activeDelegation.id,
-      })
-    : null;
-
-  // The next turn must resume the retained lane, not start a fresh delegation.
-  // Skip the fake model's deliberately forbidden retry proposal so the resumed
-  // invocation emits a tool-free deliverable and completes normally.
-  subagentModel.index = 2;
-  const completedState = await graph.invoke(
-    buildOrchestratorRunInput([new HumanMessage(input.followUpMessage)]),
-    config,
-  ) as {
-    __interrupt__?: unknown;
-    messages?: BaseMessage[];
-    sessionToolAuthorizations?: unknown[];
-    taskActiveDelegation?: unknown;
-  };
-  const completedMessages = Array.isArray(completedState.messages)
-    ? completedState.messages
+  const messages = Array.isArray(finalState.messages)
+    ? finalState.messages
     : [];
   const resumedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
-  const followUpReusedTranscript = resumedSubagentInput.some((message) =>
+  const rejectedToolResultSeenBySubagent = resumedSubagentInput.some((message) =>
     ToolMessage.isInstance(message)
-    && message.tool_call_id === input.firstToolCall.id)
-    && resumedSubagentInput.some(isToolReviewCancellationMessage);
+    && message.tool_call_id === input.firstToolCall.id);
+  const handoffText = findHandoffText(messages);
 
   return {
     interrupted: true,
     firstReviewId,
-    finalInterrupt: Boolean(cancellationState.__interrupt__ || completedState.__interrupt__),
+    finalInterrupt: Boolean(finalState.__interrupt__),
     toolRunCount,
-    retryToolResultPresent: Boolean(
-      readToolResult(cancellationMessages, input.retryToolCall.id),
-    ),
-    cancellationHandoffPresent: Boolean(findHandoff(cancellationMessages)),
-    activeDelegationRetained: Boolean(activeDelegation),
-    cancellationCompletionReason,
-    cancelledToolResultRetained: Boolean(
-      readToolResult(cancellationMessages, input.firstToolCall.id),
-    ),
-    cancellationAnnounceText: cancellationAnnounce?.text ?? '',
-    followUpReusedTranscript,
-    completedHandoffPresent: Boolean(findHandoff(completedMessages)),
-    finalActiveDelegationPresent: Boolean(completedState.taskActiveDelegation),
-    authorizationCount: completedState.sessionToolAuthorizations?.length ?? 0,
-    finalReply: readLastText(completedMessages),
+    rejectedToolResultSeenBySubagent,
+    handoffPresent: Boolean(handoffText),
+    handoffText,
+    authorizationCount: finalState.sessionToolAuthorizations?.length ?? 0,
+    finalReply: readLastText(messages),
   };
 }
 
@@ -378,18 +292,18 @@ function exactScore(
   };
 }
 
-function cancellationAnnounceScore(
+function finalAnnounceScore(
   output: Partial<EvalOutput>,
   expected: ToolReviewRejectRuntimeExpected,
 ): ScoreResult {
-  const text = output.cancellationAnnounceText ?? '';
-  const missing = expected.expectedCancellationAnnounceIncludes.filter((item) => !text.includes(item));
+  const text = output.handoffText ?? '';
+  const missing = expected.expectedFinalAnnounceIncludes.filter((item) => !text.includes(item));
   return {
-    key: 'cancellation_announce_correct',
+    key: 'final_announce_correct',
     score: missing.length === 0 ? 1 : 0,
     comment: missing.length === 0
       ? 'Cancellation announce contains all expected terms.'
-      : `Missing terms in retained cancellation announce: ${missing.join(', ')}`,
+      : `Missing terms in final handoff announce: ${missing.join(', ')}`,
   };
 }
 
@@ -401,44 +315,14 @@ function runEvaluators(
     exactScore('interrupted_correct', output.interrupted, expected.expectedInterrupted),
     exactScore('final_interrupt_correct', output.finalInterrupt, expected.expectedFinalInterrupt),
     exactScore('tool_run_count_correct', output.toolRunCount, expected.expectedToolRunCount),
-    exactScore('retry_tool_result_correct', output.retryToolResultPresent, expected.expectedRetryToolResultPresent),
     exactScore(
-      'cancellation_handoff_correct',
-      output.cancellationHandoffPresent,
-      expected.expectedCancellationHandoffPresent,
+      'rejected_tool_result_seen_by_subagent',
+      output.rejectedToolResultSeenBySubagent,
+      expected.expectedRejectedToolResultSeenBySubagent,
     ),
-    exactScore(
-      'active_delegation_retained',
-      output.activeDelegationRetained,
-      expected.expectedActiveDelegationRetained,
-    ),
-    exactScore(
-      'cancellation_completion_reason_correct',
-      output.cancellationCompletionReason,
-      expected.expectedCancellationCompletionReason,
-    ),
-    exactScore(
-      'cancelled_tool_result_retained',
-      output.cancelledToolResultRetained,
-      expected.expectedCancelledToolResultRetained,
-    ),
-    exactScore(
-      'follow_up_reused_transcript',
-      output.followUpReusedTranscript,
-      expected.expectedFollowUpReusedTranscript,
-    ),
-    exactScore(
-      'completed_handoff_correct',
-      output.completedHandoffPresent,
-      expected.expectedCompletedHandoffPresent,
-    ),
-    exactScore(
-      'final_active_delegation_correct',
-      output.finalActiveDelegationPresent,
-      expected.expectedFinalActiveDelegationPresent,
-    ),
+    exactScore('handoff_correct', output.handoffPresent, expected.expectedHandoffPresent),
     exactScore('authorization_count_correct', output.authorizationCount, expected.expectedAuthorizationCount),
-    cancellationAnnounceScore(output, expected),
+    finalAnnounceScore(output, expected),
   ];
 }
 

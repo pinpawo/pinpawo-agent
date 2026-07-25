@@ -8,28 +8,17 @@ export type ToolReviewRejectRuntimeInput = {
     id: string;
     args: { command: string };
   };
-  retryToolCall: {
-    id: string;
-    args: { command: string };
-  };
   rejectOptionId: string;
-  followUpMessage: string;
 };
 
 export type ToolReviewRejectRuntimeExpected = {
   expectedInterrupted: boolean;
   expectedFinalInterrupt: boolean;
   expectedToolRunCount: number;
-  expectedRetryToolResultPresent: boolean;
-  expectedCancellationHandoffPresent: boolean;
-  expectedActiveDelegationRetained: boolean;
-  expectedCancellationCompletionReason: 'cancelled';
-  expectedCancelledToolResultRetained: boolean;
-  expectedFollowUpReusedTranscript: boolean;
-  expectedCompletedHandoffPresent: boolean;
-  expectedFinalActiveDelegationPresent: boolean;
+  expectedRejectedToolResultSeenBySubagent: boolean;
+  expectedHandoffPresent: boolean;
   expectedAuthorizationCount: number;
-  expectedCancellationAnnounceIncludes: string[];
+  expectedFinalAnnounceIncludes: string[];
   reason: string;
 };
 
@@ -50,28 +39,17 @@ const cases: AgentEvalCase<ToolReviewRejectRuntimeInput, ToolReviewRejectRuntime
         id: 'call-rejected',
         args: { command: 'git status' },
       },
-      retryToolCall: {
-        id: 'call-after-reject',
-        args: { command: 'git status' },
-      },
       rejectOptionId: 'reject',
-      followUpMessage: '不要再运行命令，直接给我现有结果。',
     },
     expected: {
       expectedInterrupted: true,
       expectedFinalInterrupt: false,
       expectedToolRunCount: 0,
-      expectedRetryToolResultPresent: false,
-      expectedCancellationHandoffPresent: false,
-      expectedActiveDelegationRetained: true,
-      expectedCancellationCompletionReason: 'cancelled',
-      expectedCancelledToolResultRetained: true,
-      expectedFollowUpReusedTranscript: true,
-      expectedCompletedHandoffPresent: true,
-      expectedFinalActiveDelegationPresent: false,
+      expectedRejectedToolResultSeenBySubagent: true,
+      expectedHandoffPresent: true,
       expectedAuthorizationCount: 0,
-      expectedCancellationAnnounceIncludes: ['已停止', 'run_shell', '用户拒绝'],
-      reason: 'Rejecting a reviewed tool call must retain the active lane without handoff, then reuse that transcript on follow-up and clear it only after genuine completion.',
+      expectedFinalAnnounceIncludes: ['tool call rejected by user'],
+      reason: 'Rejecting a reviewed tool call must resume the same subagent with a cancellation ToolMessage, then hand off only the subagent’s real final result.',
     },
     metadata: {
       difficulty: 'hard',
@@ -86,7 +64,7 @@ export const toolReviewRejectRuntimeDataset: AgentEvalDataset<
   ToolReviewRejectRuntimeExpected
 > = {
   name: SUITE,
-  description: 'Runtime eval for reviewed tool-call rejection: reject must retain the active delegation transcript for follow-up.',
+  description: 'Runtime eval for reviewed tool-call rejection: reject must resume the same subagent invocation before normal handoff.',
   cases,
   metadata: {
     owner: 'pet-agent',

@@ -30,12 +30,12 @@
 - **D2 — 重命名遵守前缀规范**（#308 issue 正文里建议的 `nextDelegation`/`routePendingDelegation` 不合规，以本表为准），见 §3。
 - **D3（再次修订 2026-07-12）— 不恢复自然语言 plan_draft；评估 capability-aware plan。** Stage B 当前仍以「用户原始请求 + 当前 task/委托 + 已完成任务结论（handoff copy + `runDelegationSummaries`）」作为 baseline，`task_done` 回 taskDecision。issue #349 的后续方向是独立 capabilityPlanner：plan 描述 capability execution boundaries、依赖和 deferred task，不是文字步骤清单。新纪律是：plan 只有 capabilityPlanner 一个写方；entryDecision 不写 plan，outcomeDecision 不读 plan；guard/预算只读 task 总数、plan 修订次数等计数，不读 plan 内容做分支。Phase 1 先建立 `planner@entry` / `planner@boundary` eval，Phase 2 才修改生产 graph。
 - **D4 — 图重构为 task → search → route 三段管道。** task 先出生，capability search 用 task 文本（+ 决策顺带输出的 `search_keywords`）做 query，路由决策最后落 lane。`capabilityDiscovery` 节点删除——它唯一的职责（LLM 从原始请求提炼 query）被"task 即 query"取代。
-- **D5（修订 2026-07-26）— delegation outcome 决策验收化**：四态 `continue | await_user | task_done | goal_done` + 可选 `gap_note`，**不携带任何 task 文本字段**，也不携带 capability 枚举（枚举只在 routeDecision 小 schema）。它只回答一个问题——"这次 announce 的结果是否符合目标"：`continue` = 当前任务没达标，同 lane 继续（`gap_note` 说缺什么）；`await_user` = 当前任务未完成且继续前需要用户输入，保留 active delegation/lane；`task_done` = 这步达标但总目标未完；`goal_done` = 总目标满足。旧契约里的 `next_task`（验收节点顺手写下一个 task）被否决：那让它同时干验收和规划两件事，prompt 会越写越长、稳定性下降。
+- **D5（修订 2026-07-09）— delegation outcome 决策验收化**：三态 `continue | task_done | goal_done` + 可选 `gap_note`，**不携带任何 task 文本字段**，也不携带 capability 枚举（枚举只在 routeDecision 小 schema）。它只回答一个问题——"这次 announce 的结果是否符合目标"：`continue` = 当前任务没达标，同 lane 继续（`gap_note` 说缺什么）；`task_done` = 这步达标但总目标未完；`goal_done` = 总目标满足。原三态里的 `next_task`（验收节点顺手写下一个 task）被否决：那让它同时干验收和规划两件事，prompt 会越写越长、稳定性下降。
 - **D6 — routeDecision 只在零候选时走确定性 fallback**（直接 `general`），有候选一律过 LLM。不做"单一高分候选跳过 LLM"：词法打分置信度不足以定阈值。
 - **D7 — 删除 `recoverTaskActiveDelegationFromRunState`。** 它原本只服务 `taskActiveDelegation` 上线前的旧 checkpoint，但本轮把旧 `runDelegations` channel 改名为 `runDelegationSummaries` 后，旧 checkpoint 的 `runDelegations` 会被新图当作未知 channel 忽略；保留该 recovery 只会形成永远返回 null 的死代码。不做 checkpoint 迁移，旧 interrupt resume 重新决策。
 - **D8 — 单步任务约束随图重构落地**（进 taskDecision / outcomeDecision 的 prompt），不作为独立的 prompt-only PR。粒度标准："同一执行器、同一工具域内能连续完成的相邻动作算一步"，并明确禁止过度拆分。
 - **D9 — `canHandoffActiveDelegation` 整字段删除，不改名。** 它是存进 state 的派生值：guard 逻辑是 `(taskActiveDelegation, messages)` 的纯函数（announce completionReason === 'limit_reached' → false），写者到唯一读者只有一跳，且派生输入在这一跳间不可变；decision context 已在为 announce context 计算同一个 completionReason。改法：`buildDecisionContext` 在 delegation_outcome 时就地 `evaluateGuard(delegationOutcomeDecisionGuard, ...)`（guard 定义与决策事件保留，观测面不丢），连带删除 `delegationOutcomeDecisionGuard` 图节点（薄包装）与 `prepareUserIntentDecision` 图节点（全部职责是写 true，而 run reset 已置 true、user_intent 读者硬编码忽略 state——双重死代码）。
-- **D10（修订 2026-07-26）— 删除 `runPendingFinalReply` 与 inline/finalizeRun 链路；所有用户可见终态统一经过 answer。** taskDecision 和 routeDecision 的下一跳可由已有业务 state 推导：有 `runPendingTask` 才进入 search，否则 answer；有 `runNextDelegation` 才进入 capability subagent，否则 answer。iteration guard 同样由 guard/state 决定 outcomeDecision 或 answer。outcomeDecision 的四态 verdict 既决定 state update 又决定下一节点，按 LangGraph 官方边界窄用 `Command({ update, goto })`：`continue` 回当前 capability，`await_user` 保留 active delegation/lane 后去 answer，`task_done` 去 taskDecision，`goal_done` 去 answer；node 声明有限 `ends`，不引入新的 route state。删除 `runPendingFinalReply` channel/type/reset、`'inline'`、`buildInlineStopResult`、`finalizeRun` 及相关 route 分支。可预期终止由 answer 根据现有 state/guard 事实生成回复；真正 invariant violation 抛错或进入恢复，不由 decision/guard 代码直接写用户可见 `AIMessage`。
+- **D10（修订 2026-07-10）— 删除 `runPendingFinalReply` 与 inline/finalizeRun 链路；所有用户可见终态统一经过 answer。** taskDecision 和 routeDecision 的下一跳可由已有业务 state 推导：有 `runPendingTask` 才进入 search，否则 answer；有 `runNextDelegation` 才进入 capability subagent，否则 answer。iteration guard 同样由 guard/state 决定 outcomeDecision 或 answer。outcomeDecision 的三态 verdict 既决定 state update 又决定下一节点，按 LangGraph 官方边界窄用 `Command({ update, goto })`：`continue` 回当前 capability，`task_done` 去 taskDecision，`goal_done` 去 answer；node 声明有限 `ends`，不引入新的 route state。删除 `runPendingFinalReply` channel/type/reset、`'inline'`、`buildInlineStopResult`、`finalizeRun` 及相关 route 分支。可预期终止由 answer 根据现有 state/guard 事实生成回复；真正 invariant violation 抛错或进入恢复，不由 decision/guard 代码直接写用户可见 `AIMessage`。
 - **D11（修订 2026-07-11）— taskDecision 是唯一 task 出生点；`task_done` 无条件回环 taskDecision。** 垂直化推到底的结构结论：规划（"下一步怎么做"）全部收口在 taskDecision，验收（"结果符不符合目标"）全部收口在 outcomeDecision。任务边界流转为 `outcomeDecision(task_done) → handoff + 清 taskActiveDelegation + 重置 runCapabilitySearchState → taskDecision（用户目标 + 新结论）→ answer 或 capabilitySearch → routeDecision`。代价：每个 task_done 边界固定多一次 taskDecision LLM 调用；这正是规划/验收职责分离的结构成本。
 - **D12（2026-07-12，取代 D4/D11 的当前 graph 结论）— capability-aware planning。** `entryDecision` 每个 run 只执行一次，选择 `answer | direct_task | needs_plan`；`capabilityPlanner` 是 plan 内容的唯一写方，在 entry/boundary 两种输入分布下维护 capability execution boundaries，并分别输出 materialized `next_task` 与尚未开始的 `remaining_plan` tail。运行时只把两者机械写入 `runPendingTask` / `runCapabilityPlan`；boundary 读取完整 handoff 和 tail，不会把刚完成的 task 重新标成 remaining。`capabilityDecision` 在单节点内部完成搜索与 custom/general 选择；`task_done → handoff → capabilityPlanner(boundary)`，`goal_done → handoff → answer`。outcomeDecision 与 guard 均不读取 plan 内容。
 
@@ -119,10 +119,9 @@ capabilityDecision（单节点内完成确定性 search + LLM selection）
 
 delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
   输入：当前 task + announce 原文 + 用户原始请求（不读取 plan）
-  输出 { outcome: 'continue' | 'await_user' | 'task_done' | 'goal_done', gap_note? }
+  输出 { outcome: 'continue' | 'task_done' | 'goal_done', gap_note? }
   ── continue：当前任务未达标，同 lane 直达执行节点（复用 taskActiveDelegation.id/transcriptRunId，
                不重搜；gap_note 作为续跑提示）
-  ── await_user：当前任务未完成且需要用户输入 → answer（保留 taskActiveDelegation 和 lane）
   ── task_done：当前 task 达标 → 完整 handoff + 清 taskActiveDelegation
                 → Command(goto: capabilityPlanner boundary)
                 → planner 修订 tail、materialize next task 或进入 answer
@@ -144,7 +143,7 @@ delegationOutcomeDecision (LLM，静态 schema) —— 验收节点（D5）
 - entryDecision：`{ action: 'answer' | 'direct_task' | 'needs_plan', task?, context_summary? }`；不含 capability 枚举或 search keywords。
 - capabilityPlanner：`{ result: 'next_task' | 'answer', remaining_plan, next_task? }`；task 以 `objective + capability_intent + concrete/deferred` 表达，不绑定 registry capability id。
 - capabilityDecision：`{ lane: 'general' | 'capability.<name>' }`；动态枚举仅来自节点内部当次局部候选，不写入 state。
-- outcomeDecision：`{ outcome: 'continue' | 'await_user' | 'task_done' | 'goal_done', gap_note? }`；不含 task、plan 或 capability 字段。
+- outcomeDecision：`{ outcome: 'continue' | 'task_done' | 'goal_done', gap_note? }`；不含 task、plan 或 capability 字段。
 - 旧 `delegate_*` 动作枚举、`search_keywords` 模型输出和 `runCapabilitySearchState` 全部退出当前生产契约。
 - `parseAction` / `buildCapabilityActionName` / `STATIC_ACTION_KINDS` 随之收缩或删除。
 

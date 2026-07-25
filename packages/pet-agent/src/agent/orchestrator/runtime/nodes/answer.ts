@@ -3,7 +3,6 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   getMessageHandoffSource,
   mainConversationMessages,
-  readLatestAnnounce,
   readLatestAnnounceCompletionReason,
   readLatestHumanRequest,
   stampMessageCreatedAtUtc,
@@ -140,22 +139,6 @@ function buildTerminalAnswerContext(state: OrchestratorStateType, runIterationLi
         '本次回复目标：',
         '根据已有信息说明当前进度、执行限制和待继续的工作。',
       ].join('\n');
-    }
-
-    if (completionReason === 'cancelled') {
-      const cancellation = readLatestAnnounce(state.messages, {
-        runId: activeDelegation.transcriptRunId,
-        delegationId: activeDelegation.id,
-      });
-      return [
-        '当前状态：',
-        '用户取消了当前 delegation 中的一次工具调用；任务尚未完成，已有执行上下文仍被保留。',
-        `当前任务：${activeDelegation.task}`,
-        cancellation?.text ? `取消说明：${cancellation.text}` : null,
-        '',
-        '本次回复目标：',
-        '确认本次工具调用已停止，并根据取消说明告知用户接下来将如何继续，或需要用户补充什么。',
-      ].filter((line): line is string => line !== null).join('\n');
     }
 
     return [

@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { AIMessage, RemoveMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
 import { REMOVE_ALL_MESSAGES, interrupt } from '@langchain/langgraph';
-import { markToolReviewCancellationMessage } from '../../subagent/completionReason';
 import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type {
@@ -361,7 +360,6 @@ type MaterializedToolCallMessage = {
 type ToolkitReviewResults = {
   cancelledToolCallIds: Set<string>;
   toolMessages: ToolMessage[];
-  finalMessage: AIMessage | null;
   newlyApprovedReviewIds: Set<string>;
 };
 
@@ -759,35 +757,8 @@ function buildCancelledToolCallResults(
   return {
     cancelledToolCallIds,
     toolMessages,
-    finalMessage: buildCancellationFinalMessage({
-      cancellation,
-      toolCallCount: toolCalls.length,
-    }),
     newlyApprovedReviewIds: new Set<string>(),
   };
-}
-
-function buildCancellationFinalMessage(params: {
-  cancellation: ToolkitReviewCancellation;
-  toolCallCount: number;
-}) {
-  const rawReason = readCancellationReason(params.cancellation.content);
-  const reason = rawReason === 'tool call rejected by user'
-    ? '用户拒绝了本次工具调用'
-    : rawReason;
-  const toolName = params.cancellation.toolCall.name || 'tool';
-  const content = params.toolCallCount > 1
-    ? `已停止本次工具调用请求；${params.toolCallCount} 个工具调用均未执行。触发项：${toolName}。原因：${reason}`
-    : `已停止执行工具调用：${toolName}。原因：${reason}`;
-  return markToolReviewCancellationMessage(new AIMessage({ content }));
-}
-
-function readCancellationReason(content: string) {
-  const parsed = JSON.parse(content) as { reason?: unknown };
-  if (typeof parsed.reason === 'string' && parsed.reason.trim()) {
-    return parsed.reason.trim();
-  }
-  throw new Error('Toolkit review cancellation is missing its required reason.');
 }
 
 async function reviewToolkitToolCalls(params: {
@@ -817,7 +788,6 @@ async function reviewToolkitToolCalls(params: {
   return {
     cancelledToolCallIds: new Set<string>(),
     toolMessages: [],
-    finalMessage: null,
     newlyApprovedReviewIds: resolution.newlyApprovedReviewIds,
   };
 }
@@ -846,16 +816,17 @@ function buildToolkitReviewStateUpdate(params: {
         : {};
   }
 
-  const appendedMessages = reviewResults.finalMessage
-    ? [...reviewResults.toolMessages, reviewResults.finalMessage]
-    : reviewResults.toolMessages;
+  const cancellationUpdate = reviewResults.cancelledToolCallIds.size > 0
+    ? { jumpTo: 'model' as const }
+    : {};
   return {
     ...approvalUpdate,
+    ...cancellationUpdate,
     messages: replaceMessageInState(
       params.messages,
       params.aiMessageIndex,
       reviewedMessage.message,
-      appendedMessages,
+      reviewResults.toolMessages,
     ),
   };
 }
@@ -901,6 +872,7 @@ export function createToolkitReviewMiddleware(
           reviewResults,
         });
       },
+      canJumpTo: ['model'],
     },
   });
 }

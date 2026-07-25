@@ -4,7 +4,6 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { evaluateGuard } from '../../guards';
 import {
-  ACTIVE_DELEGATION_CANCELLED,
   ACTIVE_DELEGATION_LIMIT_REACHED,
   contextCompactionWatermarkGuard,
   delegationOutcomeDecisionGuard,
@@ -153,29 +152,6 @@ test('delegation outcome guard derives handoff refusal for a limit_reached activ
   });
   assert.equal(outcome.kind, 'derive');
   assert.equal(outcome.kind === 'derive' && outcome.reason, ACTIVE_DELEGATION_LIMIT_REACHED);
-});
-
-test('delegation outcome guard derives handoff refusal for a cancelled active delegation', () => {
-  const announce = new AIMessage('cancelled');
-  setPinpetMeta(announce, {
-    lane: 'general',
-    isAnnounce: true,
-    completionReason: 'cancelled',
-    runId: 'run-1',
-    delegationId: 'd1',
-  });
-  const state = baseState({
-    taskActiveDelegation: activeDelegation,
-    messages: [announce],
-  });
-
-  const outcome = evaluateGuard(delegationOutcomeDecisionGuard, {
-    state,
-    config: {},
-    position: ORCHESTRATOR_GUARD_POSITION.DELEGATION_OUTCOME_DECISION,
-  });
-  assert.equal(outcome.kind, 'derive');
-  assert.equal(outcome.kind === 'derive' && outcome.reason, ACTIVE_DELEGATION_CANCELLED);
 });
 
 test('guard routes push decision records onto the LangGraph custom stream writer', () => {

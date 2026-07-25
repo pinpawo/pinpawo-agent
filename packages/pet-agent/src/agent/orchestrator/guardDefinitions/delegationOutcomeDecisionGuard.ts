@@ -12,7 +12,6 @@ import {
 } from './types';
 
 export const ACTIVE_DELEGATION_LIMIT_REACHED = 'active_delegation_limit_reached';
-export const ACTIVE_DELEGATION_CANCELLED = 'active_delegation_cancelled';
 export const DELEGATION_HANDOFF_ALLOWED = 'delegation_handoff_allowed';
 
 export type DelegationOutcomeDecisionGuardState =
@@ -43,21 +42,14 @@ export const delegationOutcomeDecisionGuard = defineGuard<
       runId: activeDelegation.transcriptRunId,
       delegationId: activeDelegation.id,
     });
-    if (completionReason === 'limit_reached') {
-      return guardDerive(ACTIVE_DELEGATION_LIMIT_REACHED, {
+    return completionReason === 'limit_reached'
+      ? guardDerive(ACTIVE_DELEGATION_LIMIT_REACHED, {
         canHandoffActiveDelegation: false,
         completionReason,
-      });
-    }
-    if (completionReason === 'cancelled') {
-      return guardDerive(ACTIVE_DELEGATION_CANCELLED, {
-        canHandoffActiveDelegation: false,
+      })
+      : guardDerive(DELEGATION_HANDOFF_ALLOWED, {
+        canHandoffActiveDelegation: true,
         completionReason,
       });
-    }
-    return guardDerive(DELEGATION_HANDOFF_ALLOWED, {
-      canHandoffActiveDelegation: true,
-      completionReason,
-    });
   },
 });

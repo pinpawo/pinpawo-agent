@@ -469,7 +469,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
           return {
             result: 'next_task',
             remaining_plan: [
-              { objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration', status: 'deferred' },
+              { objective: '检索本地实现与 git log。', capability_intent: 'codebase_exploration' },
             ],
             next_task: { objective: '读取 issue #269 并提炼需求点。', capability_intent: 'codebase_exploration' },
           };
@@ -533,6 +533,7 @@ test('task_done returns to capabilityPlanner until the remaining goal is complet
   assert.ok(plannerInputs.every((input) => /capability_planning_input/.test(input)));
   assert.match(plannerInputs[1], /<remaining_plan[^]*?检索本地实现与 git log[^]*?<\/remaining_plan>/);
   assert.doesNotMatch(plannerInputs[1], /<remaining_plan[^]*?读取 issue #269[^]*?<\/remaining_plan>/);
+  assert.match(plannerInputs[1], /<completed_tasks[^]*?读取 issue #269[^]*?issue #269 需求点：需要检查本地实现[^]*?<\/completed_tasks>/);
   assert.match(plannerInputs[1], /完整 handoff 末尾约束：必须检查兼容性/);
   assert.equal(String(state.messages.at(-1)?.content ?? ''), 'final answer');
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
@@ -4395,7 +4396,7 @@ test('delegation briefing is lane-scoped while concise plans remain in main', as
           return {
             result: 'next_task',
             remaining_plan: [
-              { objective: '汇总执行结果。', capability_intent: 'summary', status: 'deferred' },
+              { objective: '汇总执行结果。', capability_intent: 'summary' },
             ],
             next_task: { objective: '删除 packages/goat 目录。', capability_intent: 'file_cleanup' },
           };

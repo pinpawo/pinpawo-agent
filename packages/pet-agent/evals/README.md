@@ -140,8 +140,14 @@ These evals exercise the production Phase 2 decision contracts:
 
 4. `capabilityPlanner` cases are split into `planner@entry` and
    `planner@boundary`. They define plan creation, materialization, cancellation,
-   and rubber-stamp expectations. The runner imports the production planner
-   prompt and schema:
+   and rubber-stamp expectations. Result is a deterministic contract; schema
+   validates the output shape, while task boundaries, order, objectives, and
+   capability intents are evaluated semantically. Task counts remain
+   diagnostics rather than fixed answers. Boundary cases include completed task
+   facts, the latest handoff, and the unstarted tail. Executor identity remains
+   owned by `capabilityDecision`. The runner imports the production planner
+   prompt and schema; its LLM mode uses the same goal evaluator as
+   `eval:prompt-stability`:
 
    ```sh
    npm run eval:langfuse:capability-planning

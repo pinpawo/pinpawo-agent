@@ -127,12 +127,12 @@ test('delegation outcome schema keeps gap_note on continue and strips it elsewhe
   }
 });
 
-test('capability planner schema materializes a concrete next task without capability ids', () => {
+test('capability planner schema materializes a next task without capability ids', () => {
   const schema = buildCapabilityPlanningDecisionSchema();
   assert.equal(schema.safeParse({
     result: 'next_task',
     remaining_plan: [
-      { objective: '根据结论重构 auth', capability_intent: 'code_modification', status: 'deferred' },
+      { objective: '根据结论重构 auth', capability_intent: 'code_modification' },
     ],
     next_task: { objective: '调查 auth', capability_intent: 'codebase_exploration' },
   }).success, true);
@@ -144,7 +144,7 @@ test('capability planner schema materializes a concrete next task without capabi
   assert.equal(schema.safeParse({
     result: 'next_task',
     remaining_plan: [
-      { objective: '调查 auth', capability_intent: 'codebase_exploration', status: 'concrete' },
+      { objective: '调查 auth', capability_intent: 'codebase_exploration' },
     ],
     next_task: { objective: '调查 auth', capability_intent: 'codebase_exploration' },
   }).success, false);
@@ -152,7 +152,7 @@ test('capability planner schema materializes a concrete next task without capabi
   assert.equal(schema.safeParse({ result: 'answer', remaining_plan: [] }).success, false);
   assert.equal(schema.safeParse({
     result: 'answer',
-    remaining_plan: [{ objective: '调查 auth', capability_intent: 'codebase_exploration', status: 'concrete' }],
+    remaining_plan: [{ objective: '调查 auth', capability_intent: 'codebase_exploration' }],
     next_task: null,
   }).success, false);
   assert.equal(schema.safeParse({
@@ -162,7 +162,7 @@ test('capability planner schema materializes a concrete next task without capabi
   }).success, false);
   assert.equal(schema.safeParse({
     result: 'next_task',
-    remaining_plan: [{ objective: '调查 auth', capability_intent: '   ', status: 'concrete' }],
+    remaining_plan: [{ objective: '调查 auth', capability_intent: '   ' }],
     next_task: { objective: '调查 auth', capability_intent: '   ' },
   }).success, false);
   const parsed = schema.parse({

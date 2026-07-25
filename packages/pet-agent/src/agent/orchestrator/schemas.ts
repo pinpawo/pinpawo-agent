@@ -19,7 +19,6 @@ export type TaskDecision = {
 export type CapabilityPlanTaskDecision = {
   objective: string;
   capability_intent: string;
-  status: 'concrete' | 'deferred';
 };
 
 export type CapabilityPlanningDecision = {
@@ -97,14 +96,13 @@ export function buildTaskDecisionSchema() {
 
 export function buildCapabilityPlanningDecisionSchema() {
   const planTask = z.object({
-    objective: z.string().trim().min(1).describe('后续尚未开始的任务目标。'),
+    objective: z.string().trim().min(1).describe('为达成用户目标，后续仍需独立执行的任务目标。'),
     capability_intent: z.string().trim().min(1).describe('任务需要的能力类型。'),
-    status: z.enum(['concrete', 'deferred']).describe('concrete=现在可以执行；deferred=仍依赖未来结果。'),
   });
   return z.object({
     result: z.enum(['next_task', 'answer']).describe('next_task=输出本轮要执行的任务；answer=没有后续执行。'),
     remaining_plan: z.array(planTask).describe(
-      'result=next_task 时只包含 next_task 之后尚未开始的任务；result=answer 时为空数组。',
+      'result=next_task 时只包含 next_task 之后，为达成用户目标仍需独立执行的任务；result=answer 时为空数组。',
     ),
     next_task: z.object({
       objective: z.string().trim().min(1).describe('本轮唯一的当前任务，应当可以直接执行并得到可验收结果。'),
@@ -112,7 +110,7 @@ export function buildCapabilityPlanningDecisionSchema() {
     }).nullable().describe('result=next_task 时为当前任务；result=answer 时为 null。'),
   }).superRefine((decision, ctx) => {
     if (decision.result === 'next_task' && !decision.next_task) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['next_task'], message: 'next_task result requires a concrete next_task.' });
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['next_task'], message: 'next_task result requires next_task.' });
     }
     if (decision.next_task && decision.remaining_plan.some((item) =>
       item.objective === decision.next_task?.objective

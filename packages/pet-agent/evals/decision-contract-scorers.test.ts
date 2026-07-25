@@ -74,20 +74,8 @@ test('planning datasets cover entry and boundary distributions', () => {
   assert.ok(capabilityPlanningBasicsDataset.cases.some((testCase) => testCase.expected.planEffect === 'cancelled'));
 });
 
-test('planner scorer rejects a future-tail structure that contradicts answer', () => {
-  const testCase = capabilityPlanningBasicsDataset.cases.find((item) => item.name === 'boundary-cancels-obsolete-task');
-  assert.ok(testCase);
-  const scores = scoreCapabilityPlanning({
-    result: 'answer',
-    nextTask: null,
-    capabilityIntent: null,
-    remainingPlan: testCase.input.remainingPlan ?? [],
-  }, testCase.expected);
-  assert.equal(scores.find((score) => score.key === 'remaining_plan_structure_correct')?.score, 0);
-});
-
 test('planner scorer reconstructs an unchanged plan from next task plus future tail', () => {
-  const testCase = capabilityPlanningBasicsDataset.cases.find((item) => item.name === 'boundary-keeps-valid-concrete-task');
+  const testCase = capabilityPlanningBasicsDataset.cases.find((item) => item.name === 'boundary-keeps-valid-next-task');
   assert.ok(testCase);
   const materialized = testCase.input.remainingPlan?.[0];
   assert.ok(materialized);
@@ -98,4 +86,24 @@ test('planner scorer reconstructs an unchanged plan from next task plus future t
     remainingPlan: [],
   }, testCase.expected);
   assert.ok(allPass(scores));
+});
+
+test('planner deterministic scorer does not treat capability intent as executor identity', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases.find(
+    (item) => item.name === 'boundary-keeps-valid-next-task',
+  );
+  assert.ok(testCase);
+  const materialized = testCase.input.remainingPlan?.[0];
+  assert.ok(materialized);
+  const scores = scoreCapabilityPlanning({
+    result: 'next_task',
+    nextTask: materialized.objective,
+    capabilityIntent: 'deliver a completed document to its intended recipient',
+    remainingPlan: [],
+  }, testCase.expected);
+  assert.ok(allPass(scores));
+  assert.deepEqual(
+    scores.map(({ key }) => key),
+    ['planner_result_correct'],
+  );
 });

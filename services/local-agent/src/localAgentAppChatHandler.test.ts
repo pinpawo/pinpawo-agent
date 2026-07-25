@@ -106,7 +106,9 @@ function createHandler(overrides: Partial<ConstructorParameters<typeof LocalAgen
       apiKey: 'test-key',
       baseUrl: 'https://example.test/v1',
     } as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLlmConfig'] extends () => infer T ? T : never),
+    getPluginToolkitDefinitions: () => [{ name: 'plugin-definition' }] as NonNullable<ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginToolkitDefinitions']> extends () => infer T ? T : never,
     getPluginToolkits: () => [{ name: 'plugin-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getPluginToolkits'] extends () => infer T ? T : never,
+    getLocalToolkitDefinitions: () => [{ name: 'local-definition' }] as NonNullable<ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalToolkitDefinitions']> extends () => infer T ? T : never,
     getLocalToolkits: () => [{ name: 'local-toolkit' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalToolkits'] extends () => infer T ? T : never,
     getLocalCapabilities: () => [{ name: 'browser' }] as ConstructorParameters<typeof LocalAgentAppChatHandler>[0]['getLocalCapabilities'] extends () => infer T ? T : never,
     getUserCapabilities: () => [{
@@ -218,6 +220,11 @@ test('LocalAgentAppChatHandler runs app chat with typed events and operation out
     'plugin-toolkit',
     'local-toolkit',
   ]);
+  assert.deepEqual(
+    (buildInputs[0]?.toolkitDefinitions as Array<{ name?: string }>).map((toolkit) => toolkit.name),
+    ['plugin-definition', 'local-definition'],
+  );
+  assert.equal(typeof buildInputs[0]?.reportCapabilityDiagnostics, 'function');
 
   const eventMessages = sent.filter((item): item is {
     type: 'event';

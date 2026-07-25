@@ -16,7 +16,6 @@ import {
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
-import { createBrowserToolkit } from './toolkits/browser';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
 
 function createContext(): AgentContext {
@@ -284,11 +283,7 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
     userMessage: 'hello',
     threadId: 'thread/with space',
     capabilityArtifactStore: store,
-    toolkits: [
-      createBashToolkit(),
-      createGitToolkit(),
-      createBrowserToolkit(),
-    ],
+    toolkits: [createBashToolkit(), createGitToolkit()],
   });
   const toolkit = setup.input.toolkits?.find(({ name }) => name === 'artifact_discovery');
 
@@ -314,26 +309,6 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
   const list = toolkit.tools.find(({ tool }) => tool.name === 'artifact_list')?.tool;
   assert.ok(list);
   assert.match(String(await list.invoke({})), /no artifacts/);
-});
-
-test('Explore requires the browser Toolkit declared by its static contract', (t) => {
-  const artifactRoot = mkdtempSync(resolve(tmpdir(), 'pinpawo-agent-channel-browser-'));
-  t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
-  const setup = buildLocalChatAgentInput({
-    context: createContext(),
-    userMessage: 'hello',
-    threadId: 'thread-without-browser',
-    capabilityArtifactStore: new FileCapabilityArtifactStore(artifactRoot),
-    toolkits: [createBashToolkit(), createGitToolkit()],
-  });
-  const unavailable = setup.registry.unavailableCapabilities
-    .find(({ capability }) => capability.name === 'explore');
-
-  assert.ok(unavailable);
-  assert.deepEqual(unavailable.issues, [{
-    code: 'unknown_toolkit',
-    toolkitName: 'browser',
-  }]);
 });
 
 test('artifact discovery sees artifacts written after Toolkit registration', async (t) => {

@@ -40,7 +40,7 @@ import {
 import { inferLlmStructuredOutputMethod } from './llmModelPresets';
 import {
   prepareAgentRegistry,
-  reportUnavailableCapabilities,
+  type CapabilityDiagnosticReporter,
 } from './agentRegistryPreparation';
 
 const DEFAULT_GENERAL_TOOLKIT_NAMES = [
@@ -208,6 +208,10 @@ export function buildLocalChatAgentInput(params: {
   userMessage: string;
   llmConfig?: AgentLlmConfig;
   toolkits?: AgentToolkit[];
+  /** Complete host Toolkit definitions, including currently unavailable instances. */
+  toolkitDefinitions?: readonly AgentToolkit[];
+  /** Host-owned diagnostic reporter whose dedupe state follows the host lifecycle. */
+  reportCapabilityDiagnostics?: CapabilityDiagnosticReporter;
   /** Explicit Toolkit authorization for the general executor. */
   generalUses?: readonly string[];
   threadId?: string;
@@ -294,7 +298,10 @@ export function buildLocalChatAgentInput(params: {
     capabilityArtifactStore: params.capabilityArtifactStore,
     authorizeArtifactDiscoveryForGeneral: true,
   });
-  reportUnavailableCapabilities(preparedRegistry.registry);
+  params.reportCapabilityDiagnostics?.(
+    preparedRegistry.registry,
+    params.toolkitDefinitions,
+  );
 
   return {
     graphKey: buildGraphKey([

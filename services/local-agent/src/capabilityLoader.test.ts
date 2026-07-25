@@ -155,6 +155,40 @@ version: 1
   assert.deepEqual(block.frontmatter.uses, ['bash', 'git']);
 });
 
+test('parseFrontmatterDocument accepts CRLF documents', () => {
+  const parsed = parseFrontmatterDocument([
+    '---',
+    'name: crlf_capability',
+    'description: CRLF document',
+    'uses: [bash]',
+    'version: 1',
+    '---',
+    '',
+    '# CRLF',
+    '',
+    'Execute the requested task.',
+    '',
+  ].join('\r\n'), '/tmp/crlf/CAPABILITY.md');
+
+  assert.equal(parsed.frontmatter.name, 'crlf_capability');
+  assert.deepEqual(parsed.frontmatter.uses, ['bash']);
+  assert.match(parsed.body, /Execute the requested task/);
+});
+
+test('parseFrontmatterDocument rejects a missing closing delimiter', () => {
+  assert.throws(
+    () => parseFrontmatterDocument(`---
+name: unclosed_capability
+description: Missing closing delimiter
+uses: [bash]
+version: 1
+
+# This is still frontmatter
+`, '/tmp/unclosed/CAPABILITY.md'),
+    /frontmatter closing delimiter is missing/,
+  );
+});
+
 const invalidFrontmatterCases: Array<{
   name: string;
   header: string;

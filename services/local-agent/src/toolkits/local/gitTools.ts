@@ -103,6 +103,10 @@ export async function runGit(
     const result = await execFileAsync('git', args, {
       cwd: repo,
       encoding: 'utf-8',
+      env: {
+        ...process.env,
+        LC_ALL: 'C',
+      },
       timeout: timeoutMs,
       maxBuffer: 1024 * 256,
     });

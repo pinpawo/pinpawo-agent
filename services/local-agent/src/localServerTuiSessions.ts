@@ -8,6 +8,7 @@ import {
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
 import { buildLocalChatAgentInput } from './agentChannel';
+import { createCapabilityDiagnosticReporter } from './agentRegistryPreparation';
 import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
 import { loadAgentContext } from './contextLoader';
@@ -114,6 +115,7 @@ export class LocalServerTuiSessionService {
   private readonly checkpointer: TuiSessionCheckpointer;
   private readonly graphService: TuiSessionGraphService;
   private readonly loadContext: typeof loadAgentContext;
+  private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
 
   constructor(options: {
     state?: TuiSessionState;
@@ -181,6 +183,11 @@ export class LocalServerTuiSessionService {
       userMessage: '',
       llmConfig: deps.llmConfig,
       toolkits: [...(deps.pluginToolkits ?? []), ...(deps.localToolkits ?? [])],
+      toolkitDefinitions: [
+        ...(deps.pluginToolkitDefinitions ?? []),
+        ...(deps.localToolkitDefinitions ?? []),
+      ],
+      reportCapabilityDiagnostics: this.reportCapabilityDiagnostics,
       extraCapabilities: deps.localCapabilities,
       threadId,
       interfaceKind: 'tui',

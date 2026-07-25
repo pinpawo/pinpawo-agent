@@ -11,6 +11,12 @@ export type ToolkitAvailabilityRecord = {
 
 const cachedToolkitAvailability = new WeakMap<AgentToolkit, ToolkitAvailability>();
 
+export function getCachedToolkitAvailability(
+  toolkit: AgentToolkit,
+): ToolkitAvailability | null {
+  return cachedToolkitAvailability.get(toolkit) ?? null;
+}
+
 export async function resolveToolkitAvailability(
   toolkit: AgentToolkit,
   options: { force?: boolean } = {},

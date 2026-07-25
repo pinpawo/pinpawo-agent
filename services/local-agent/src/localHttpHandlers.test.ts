@@ -20,6 +20,7 @@ import {
 import type { LoadedUserCapability } from './capabilityLoader';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import { checkBrowserAvailability } from './toolkits/browser';
+import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
 
 function makeReq(url: string, authorization?: string): IncomingMessage {
   return {
@@ -477,6 +478,64 @@ test('/capabilities exposes registry compilation issues instead of recomputing m
     toolName: 'duplicate_tool',
     toolkitNames: ['first', 'second'],
   }]);
+});
+
+test('/capabilities attaches the cached reason for a known unavailable Toolkit', async () => {
+  const offlineToolkit: AgentToolkit = {
+    name: 'offline-test',
+    description: 'Unavailable test Toolkit',
+    tools: [],
+    availability: () => ({
+      available: false,
+      reason: 'test dependency is offline',
+    }),
+  };
+  await resolveToolkitAvailability(offlineToolkit);
+  const res = makeRes();
+
+  handleLocalHttpRequest(
+    makeReq('/capabilities', 'Bearer secret'),
+    res,
+    {
+      actorId: 'pet-a',
+      llmConfig: {
+        apiKey: 'test',
+        baseUrl: 'http://localhost',
+        model: 'test-model',
+      },
+      workdir: '/tmp/pinpawo-capability-unavailable-toolkit',
+      localCapabilities: [{
+        name: 'explore',
+        description: 'explore capability',
+        uses: [offlineToolkit.name],
+        instructions: defineInstructionDocument({
+          content: '# Explore',
+        }),
+      }],
+      localToolkitDefinitions: [offlineToolkit],
+      localToolkits: [],
+    } as LocalServerDeps,
+    {
+      authToken: 'secret',
+      loadSnapshot: async () => ({}),
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+    },
+  );
+
+  const routability = JSON.parse(res.body).builtIns
+    .find((item: { id: string }) => item.id === 'explore')
+    .routability;
+  assert.deepEqual(routability, {
+    status: 'unavailable',
+    issues: [{
+      code: 'unavailable_toolkit',
+      toolkitName: 'offline-test',
+      reason: 'test dependency is offline',
+    }],
+  });
 });
 
 test('Toolkit refresh updates frozen runtime lists with copy-on-write', async () => {

@@ -23,7 +23,10 @@ import {
   browserRuntime,
   getCachedBrowserAvailability,
 } from './toolkits/browser';
-import { prepareAgentRegistry } from './agentRegistryPreparation';
+import {
+  prepareAgentRegistry,
+  projectExecutorCompilationIssues,
+} from './agentRegistryPreparation';
 
 type LocalHttpHandlerOptions = {
   authToken: string;
@@ -408,7 +411,13 @@ function buildCapabilitiesPayload(
     if (unavailable) {
       return {
         status: 'unavailable' as const,
-        issues: unavailable.issues,
+        issues: projectExecutorCompilationIssues(
+          unavailable.issues,
+          [
+            ...(deps.pluginToolkitDefinitions ?? []),
+            ...(deps.localToolkitDefinitions ?? []),
+          ],
+        ),
       };
     }
     return compiledNames.has(capabilityName)

@@ -7,9 +7,11 @@ import {
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import {
+  createCapabilityDiagnosticReporter,
   prepareAgentRegistry,
-  reportUnavailableCapabilities,
+  projectExecutorCompilationIssues,
 } from './agentRegistryPreparation';
+import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
 
 function artifactCapability(name: string): AgentCapability {
   return {
@@ -57,17 +59,67 @@ test('prepareAgentRegistry compiles artifact discovery once run scope is complet
   );
 });
 
-test('reportUnavailableCapabilities warns once for the same diagnostics fingerprint', () => {
+test('capability diagnostics report state transitions without module-global suppression', () => {
+  const unavailable = prepareAgentRegistry({
+    toolkits: [],
+    capabilities: [artifactCapability('warning_state_test')],
+    generalUses: [],
+  });
+  const available = prepareAgentRegistry({
+    toolkits: [],
+    capabilities: [artifactCapability('warning_state_test')],
+    generalUses: [],
+    threadId: 'thread-warning-state',
+    capabilityArtifactStore: {} as CapabilityArtifactStore,
+  });
+  const warnings: string[] = [];
+  const report = createCapabilityDiagnosticReporter((message) => warnings.push(message));
+
+  report(unavailable.registry);
+  report(unavailable.registry);
+  report(available.registry);
+  report(unavailable.registry);
+
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0] ?? '', /warning_state_test.*unknown Toolkit "artifact_discovery"/);
+  assert.match(warnings[1] ?? '', /warning_state_test.*unknown Toolkit "artifact_discovery"/);
+});
+
+test('capability diagnostics preserve a known unavailable Toolkit reason', async () => {
+  const toolkit = {
+    name: 'offline_toolkit',
+    description: 'offline toolkit',
+    tools: [],
+    availability: () => ({
+      available: false as const,
+      reason: 'test backend is offline',
+    }),
+  };
+  await resolveToolkitAvailability(toolkit);
   const prepared = prepareAgentRegistry({
     toolkits: [],
-    capabilities: [artifactCapability('warn_once_unique_test')],
+    capabilities: [{
+      ...artifactCapability('offline_capability'),
+      uses: [toolkit.name],
+    }],
     generalUses: [],
   });
   const warnings: string[] = [];
+  createCapabilityDiagnosticReporter((message) => warnings.push(message))(
+    prepared.registry,
+    [toolkit],
+  );
 
-  reportUnavailableCapabilities(prepared.registry, (message) => warnings.push(message));
-  reportUnavailableCapabilities(prepared.registry, (message) => warnings.push(message));
-
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0] ?? '', /warn_once_unique_test.*unknown Toolkit "artifact_discovery"/);
+  assert.deepEqual(
+    projectExecutorCompilationIssues([{
+      code: 'unknown_toolkit',
+      toolkitName: toolkit.name,
+    }], [toolkit]),
+    [{
+      code: 'unavailable_toolkit',
+      toolkitName: toolkit.name,
+      reason: 'test backend is offline',
+    }],
+  );
+  assert.match(warnings[0] ?? '', /offline_toolkit.*test backend is offline/);
 });

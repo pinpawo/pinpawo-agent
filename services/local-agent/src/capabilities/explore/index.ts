@@ -19,7 +19,6 @@ import { z } from 'zod';
 const DEFAULT_EXPLORE_TOOLKITS = [
   'bash',
   'git',
-  'browser',
   ARTIFACT_DISCOVERY_TOOLKIT_NAME,
 ] as const;
 

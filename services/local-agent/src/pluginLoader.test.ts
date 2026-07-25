@@ -6,15 +6,34 @@ import path from 'node:path';
 
 import { loadPluginsFromDir } from './pluginLoader';
 
+const langchainToolsModuleUrl = import.meta.resolve('@langchain/core/tools');
+const zodModuleUrl = import.meta.resolve('zod');
+
+function toolModulePrelude(): string {
+  return `
+import { tool } from ${JSON.stringify(langchainToolsModuleUrl)};
+import { z } from ${JSON.stringify(zodModuleUrl)};
+
+const defineTestTool = (name) => tool(
+  async () => \`\${name} result\`,
+  {
+    name,
+    description: \`\${name} test tool\`,
+    schema: z.object({}),
+  },
+);
+`;
+}
+
 test('loadPluginsFromDir loads plugin toolkits and ignores unsupported tools exports', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-'));
-  await fs.writeFile(path.join(root, 'valid-plugin.mjs'), `
+  await fs.writeFile(path.join(root, 'valid-plugin.mjs'), `${toolModulePrelude()}
 export const tools = [{ name: 'legacy_tool' }];
 export const toolkits = [{
   name: 'sample_toolkit',
   description: 'Sample toolkit',
   tools: [{
-    tool: { name: 'sample_tool' },
+    tool: defineTestTool('sample_tool'),
     operation: { title: 'Sample Tool' },
   }],
 }];
@@ -44,11 +63,11 @@ export default {};
 
 test('loadPluginsFromDir excludes a plugin Toolkit whose availability check fails', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-offline-'));
-  await fs.writeFile(path.join(root, 'offline-plugin.mjs'), `
+  await fs.writeFile(path.join(root, 'offline-plugin.mjs'), `${toolModulePrelude()}
 export const toolkits = [{
   name: 'offline_toolkit',
   description: 'Offline toolkit',
-  tools: [{ tool: { name: 'offline_tool' } }],
+  tools: [{ tool: defineTestTool('offline_tool') }],
   availability: () => ({ available: false, reason: 'service offline' }),
 }];
 export default { name: 'offline-plugin' };
@@ -62,11 +81,11 @@ export default { name: 'offline-plugin' };
 
 test('loadPluginsFromDir fails startup for an oversized toolkit auto-review policy', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-policy-'));
-  await fs.writeFile(path.join(root, 'invalid-policy-plugin.mjs'), `
+  await fs.writeFile(path.join(root, 'invalid-policy-plugin.mjs'), `${toolModulePrelude()}
 export const toolkits = [{
   name: 'invalid_policy_toolkit',
   description: 'Invalid policy toolkit',
-  tools: [{ tool: { name: 'sample_tool' } }],
+  tools: [{ tool: defineTestTool('sample_tool') }],
   reviewGuidance: {
     allow: 'x'.repeat(2001),
     ask: 'Ask for risky operations.',

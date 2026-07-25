@@ -4,12 +4,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { tool } from '@langchain/core/tools';
 import {
   defineInstructionDocument,
   type AgentCapability,
   type AgentToolkit,
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
+import { z } from 'zod';
 import { handleLocalHttpRequest } from './localHttpHandlers';
 import {
   createLocalServerRuntimeDepsStore,
@@ -385,7 +387,16 @@ test('/capabilities exposes registry compilation issues instead of recomputing m
   const duplicateToolkits = ['first', 'second'].map((name) => ({
     name,
     description: `${name} Toolkit`,
-    tools: [{ tool: { name: 'duplicate_tool' } }],
+    tools: [{
+      tool: tool(
+        async () => 'duplicate result',
+        {
+          name: 'duplicate_tool',
+          description: 'Duplicate test tool.',
+          schema: z.object({}),
+        },
+      ),
+    }],
   })) as unknown as AgentToolkit[];
   const explore: AgentCapability = {
     name: 'explore',

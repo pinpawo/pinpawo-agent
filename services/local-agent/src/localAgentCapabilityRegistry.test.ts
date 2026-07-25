@@ -1,15 +1,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { StructuredTool } from '@langchain/core/tools';
+import { tool, type StructuredTool } from '@langchain/core/tools';
 import {
   defineInstructionDocument,
   type AgentCapability,
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
+import { z } from 'zod';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { LocalAgentCapabilityRegistry } from './localAgentCapabilityRegistry';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
 import { createBrowserToolkit } from './toolkits/browser';
+
+function mockTool(name: string): StructuredTool {
+  return tool(
+    async () => `${name} result`,
+    {
+      name,
+      description: `${name} test tool`,
+      schema: z.object({}),
+    },
+  );
+}
 
 function capability(name: string, uses: readonly string[] = []): AgentCapability {
   return {
@@ -38,7 +50,7 @@ function loadedUserCapability(name: string): LoadedUserCapability {
 }
 
 test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities', async () => {
-  const localTool = { name: 'local-tool' } as StructuredTool;
+  const localTool = mockTool('local-tool');
   const userCapabilityBatches = [
     [loadedUserCapability('enabled-user-cap'), loadedUserCapability('disabled-user-cap')],
     [loadedUserCapability('rescanned-user-cap')],
@@ -95,7 +107,7 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
 });
 
 test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async () => {
-  const localTool = { name: 'local-tool' } as StructuredTool;
+  const localTool = mockTool('local-tool');
   const registry = new LocalAgentCapabilityRegistry({
     loadLocalTools: async () => [localTool],
     loadUserCapabilities: async () => [],

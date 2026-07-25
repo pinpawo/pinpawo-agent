@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { WebSocket } from 'ws';
+import { tool } from '@langchain/core/tools';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import { compileAgentRegistry } from '@pinpawo/pet-agent';
+import { z } from 'zod';
 import {
   sendLocalAgentEvent,
   sendLocalAgentMessage,
@@ -34,11 +36,19 @@ function createInflightController() {
 }
 
 function createSetup(): AgentChannelSetup {
+  const readFileTool = tool(
+    async ({ path }: { path?: string }) => path ?? '',
+    {
+      name: 'read_file',
+      description: 'Read a test file.',
+      schema: z.object({ path: z.string().optional() }),
+    },
+  );
   const toolkit = {
     name: 'local-toolkit',
     description: 'local toolkit',
     tools: [{
-      tool: { name: 'read_file' } as never,
+      tool: readFileTool,
       operation: {
         title: '读文件',
         summarizeInput: (input: unknown) => {

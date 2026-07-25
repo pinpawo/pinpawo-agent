@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { tool } from '@langchain/core/tools';
 import type {
   AgentToolkit,
-  NamedStructuredTool,
 } from '@pinpawo/pet-agent';
+import { z } from 'zod';
 import { resolveToolkitAvailability } from './toolkitAvailability';
 
-const testTool = { name: 'test_tool' } as NamedStructuredTool<'test_tool'>;
+const testTool = tool(
+  async () => 'test result',
+  {
+    name: 'test_tool',
+    description: 'Test tool.',
+    schema: z.object({}),
+  },
+);
 
 function toolkit(
   description: string,

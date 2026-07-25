@@ -2,11 +2,11 @@ import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import {
-  filterAvailableToolkits,
   type AgentToolkit,
   validateToolkitDefinition,
 } from '@pinpawo/pet-agent';
 import type { DailyPostPayload } from './capabilities/dailyPost';
+import { resolveToolkitAvailability } from './toolkits/toolkitAvailability';
 
 export type LocalAgentPluginHooks = {
   beforeCrawl?: () => Promise<void>;
@@ -20,15 +20,29 @@ export type LocalAgentPlugin = {
 
 const PLUGINS_DIR = resolve(homedir(), '.pinpawo', 'plugins');
 
-export async function loadPlugins(): Promise<{ toolkits: AgentToolkit[]; plugins: LocalAgentPlugin[] }> {
+export type LoadedLocalPlugins = {
+  toolkitDefinitions: AgentToolkit[];
+  toolkits: AgentToolkit[];
+  plugins: LocalAgentPlugin[];
+};
+
+function emptyLocalPlugins(): LoadedLocalPlugins {
+  return {
+    toolkitDefinitions: [],
+    toolkits: [],
+    plugins: [],
+  };
+}
+
+export async function loadPlugins(): Promise<LoadedLocalPlugins> {
   return loadPluginsFromDir(PLUGINS_DIR);
 }
 
-export async function loadPluginsFromDir(pluginsDir: string): Promise<{ toolkits: AgentToolkit[]; plugins: LocalAgentPlugin[] }> {
-  if (!existsSync(pluginsDir)) return { toolkits: [], plugins: [] };
+export async function loadPluginsFromDir(pluginsDir: string): Promise<LoadedLocalPlugins> {
+  if (!existsSync(pluginsDir)) return emptyLocalPlugins();
 
   const files = readdirSync(pluginsDir).filter((file) => file.endsWith('.mjs') || file.endsWith('.js'));
-  if (files.length === 0) return { toolkits: [], plugins: [] };
+  if (files.length === 0) return emptyLocalPlugins();
 
   const toolkits: AgentToolkit[] = [];
   const plugins: LocalAgentPlugin[] = [];
@@ -59,9 +73,22 @@ export async function loadPluginsFromDir(pluginsDir: string): Promise<{ toolkits
   }
 
   toolkits.forEach(validateToolkitDefinition);
+  const availabilityRecords = await Promise.all(
+    toolkits.map((toolkit) => resolveToolkitAvailability(toolkit)),
+  );
+  for (const { toolkit, availability } of availabilityRecords) {
+    if (!availability.available) {
+      console.warn(
+        `[plugins] Toolkit "${toolkit.name}" unavailable: ${availability.reason}`,
+      );
+    }
+  }
 
   return {
-    toolkits: await filterAvailableToolkits(toolkits),
+    toolkitDefinitions: toolkits,
+    toolkits: availabilityRecords
+      .filter(({ availability }) => availability.available)
+      .map(({ toolkit }) => toolkit),
     plugins,
   };
 }

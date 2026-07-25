@@ -12,6 +12,15 @@ import { browserRuntime } from './runtime';
 
 export const BROWSER_TOOLKIT_NAME = 'browser';
 
+export type BrowserAvailabilitySnapshot = {
+  available: boolean;
+  reason?: string;
+  detail?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+};
+
+let latestBrowserAvailability: BrowserAvailabilitySnapshot | null = null;
+
 const browserToolkitInstructions = [
   '你负责需要真实浏览器参与的网页访问、页面交互、登录态复用、JS 渲染内容读取和页面内容提取。',
   '优先使用 browser_open 打开目标页面，再根据页面状态使用 browser_snapshot、browser_click、browser_type、browser_scroll、browser_wait、browser_extract 或 browser_screenshot。',
@@ -31,7 +40,18 @@ const browserToolkitInstructions = [
   '完成后返回你实际打开、操作或提取到的内容；不要声称完成未通过工具确认的页面操作。',
 ];
 
-function disabledAvailability() {
+function rememberBrowserAvailability(
+  availability: BrowserAvailabilitySnapshot,
+): BrowserAvailabilitySnapshot {
+  latestBrowserAvailability = availability;
+  return availability;
+}
+
+export function getCachedBrowserAvailability(): BrowserAvailabilitySnapshot | null {
+  return latestBrowserAvailability;
+}
+
+function disabledAvailability(): BrowserAvailabilitySnapshot {
   return {
     available: false,
     reason: 'browser Toolkit disabled by config',
@@ -41,30 +61,39 @@ function disabledAvailability() {
 export async function checkBrowserAvailability() {
   const storedCaps = loadStoredConfig().capabilities;
   if (storedCaps?.browser === false) {
-    return disabledAvailability();
+    return rememberBrowserAvailability(disabledAvailability());
   }
 
-  const status = await detectBrowserStatus();
-  const bridge = status.mode === 'extension'
-    ? browserRuntime.getExtensionStatus()
-    : undefined;
-  return {
-    available: status.mode !== 'none',
-    reason: status.mode === 'none' ? status.detail : undefined,
-    detail: status.detail,
-    metadata: {
-      mode: status.mode,
-      configured: status.configured,
-      ...(bridge ? {
-        hostConnected: bridge.hostConnected,
-        extensionConnected: bridge.extensionConnected,
-        debuggerAttached: bridge.debuggerAttached,
-        targetAlive: bridge.targetAlive,
-        activeTabOwnership: bridge.activeTabOwnership,
-        extensionId: bridge.extensionId,
-      } : {}),
-    },
-  };
+  try {
+    const status = await detectBrowserStatus();
+    const bridge = status.mode === 'extension'
+      ? browserRuntime.getExtensionStatus()
+      : undefined;
+    return rememberBrowserAvailability({
+      available: status.mode !== 'none',
+      reason: status.mode === 'none' ? status.detail : undefined,
+      detail: status.detail,
+      metadata: {
+        mode: status.mode,
+        configured: status.configured,
+        ...(bridge ? {
+          hostConnected: bridge.hostConnected,
+          extensionConnected: bridge.extensionConnected,
+          debuggerAttached: bridge.debuggerAttached,
+          targetAlive: bridge.targetAlive,
+          activeTabOwnership: bridge.activeTabOwnership,
+          extensionId: bridge.extensionId,
+        } : {}),
+      },
+    });
+  } catch (error) {
+    return rememberBrowserAvailability({
+      available: false,
+      reason: error instanceof Error
+        ? error.message
+        : 'browser availability check failed',
+    });
+  }
 }
 
 export function createBrowserToolkit(): AgentToolkit {

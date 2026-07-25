@@ -10,14 +10,6 @@ export type ToolkitAvailabilityRecord = {
 };
 
 const cachedToolkitAvailability = new WeakMap<AgentToolkit, ToolkitAvailability>();
-const latestToolkitAvailabilityByName = new Map<
-  string,
-  ToolkitAvailabilityRecord
->();
-
-export function getCachedToolkitAvailability(name: string): ToolkitAvailability | null {
-  return latestToolkitAvailabilityByName.get(name)?.availability ?? null;
-}
 
 export async function resolveToolkitAvailability(
   toolkit: AgentToolkit,
@@ -32,7 +24,6 @@ export async function resolveToolkitAvailability(
 
   const record = { toolkit, availability };
   cachedToolkitAvailability.set(toolkit, availability);
-  latestToolkitAvailabilityByName.set(toolkit.name, record);
   return record;
 }
 

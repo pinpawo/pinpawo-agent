@@ -75,7 +75,7 @@ async function createFinalizeHarness(
 test('explore capability declares immutable instructions and host Toolkits statically', () => {
   assert.deepEqual(
     createExploreCapability().uses,
-    ['bash', 'git', 'artifact_discovery'],
+    ['bash', 'git', 'browser', 'artifact_discovery'],
   );
   const capability = createExploreCapability({
     uses: ['bash', 'git', 'browser'],

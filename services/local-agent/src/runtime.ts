@@ -43,6 +43,7 @@ export class LocalAgentRuntime {
   private actorName: string | null = null;
   private llmConfig: AgentLlmConfig | null = null;
   private hooks: ReturnType<typeof collectPluginHooks> | null = null;
+  private pluginToolkitDefinitions: AgentToolkit[] = [];
   private pluginToolkits: AgentToolkit[] = [];
   private readonly capabilityRegistry: LocalAgentCapabilityRegistry;
   private readonly chatCheckpointer: FileSaver;
@@ -121,6 +122,7 @@ export class LocalAgentRuntime {
       studioDueRunScheduler: this.studioDueRunScheduler,
       localToolkitDefinitions: this.getLocalToolkitDefinitions(),
       localToolkits: this.getLocalToolkits(),
+      pluginToolkitDefinitions: this.getPluginToolkitDefinitions(),
       pluginToolkits: this.getPluginToolkits(),
       localCapabilities: this.getLocalCapabilities(),
       userCapabilities: this.getUserCapabilities(),
@@ -134,8 +136,9 @@ export class LocalAgentRuntime {
   }
 
   async init() {
-    const { plugins, toolkits } = await loadPlugins();
+    const { plugins, toolkitDefinitions, toolkits } = await loadPlugins();
     this.llmConfig = buildLocalLlmConfig();
+    this.pluginToolkitDefinitions = toolkitDefinitions;
     this.pluginToolkits = toolkits;
     await this.capabilityRegistry.load();
     this.hooks = collectPluginHooks(plugins);
@@ -163,6 +166,10 @@ export class LocalAgentRuntime {
 
   getPluginToolkits(): AgentToolkit[] {
     return this.pluginToolkits;
+  }
+
+  getPluginToolkitDefinitions(): AgentToolkit[] {
+    return this.pluginToolkitDefinitions;
   }
 
   getLocalToolkits(): AgentToolkit[] {

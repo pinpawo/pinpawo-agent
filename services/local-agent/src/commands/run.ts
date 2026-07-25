@@ -74,6 +74,7 @@ export async function runAgent(options: RunAgentOptions = {}) {
       runtimeConfig,
       localToolkitDefinitions: runtime.getLocalToolkitDefinitions(),
       localToolkits: runtime.getLocalToolkits(),
+      pluginToolkitDefinitions: runtime.getPluginToolkitDefinitions(),
       pluginToolkits: runtime.getPluginToolkits(),
       localCapabilities: runtime.getLocalCapabilities(),
       userCapabilities: runtime.getUserCapabilities(),

@@ -13,6 +13,7 @@ export type LocalServerDeps = {
   studioDueRunScheduler?: LocalStudioDueRunScheduler;
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];
+  pluginToolkitDefinitions?: AgentToolkit[];
   pluginToolkits?: AgentToolkit[];
   localCapabilities?: AgentCapability[];
   userCapabilities?: LoadedUserCapability[];
@@ -28,6 +29,8 @@ export type NormalizedLocalServerDeps = Readonly<Omit<LocalServerDeps, 'workdir'
 export type LocalServerCapabilityStatePatch = Partial<Pick<LocalServerDeps,
   | 'localToolkitDefinitions'
   | 'localToolkits'
+  | 'pluginToolkitDefinitions'
+  | 'pluginToolkits'
   | 'localCapabilities'
   | 'userCapabilities'
 >>;
@@ -47,6 +50,7 @@ function freezeCapabilityLists<T extends LocalServerDeps>(deps: T): T {
     ...deps,
     localToolkitDefinitions: freezeList(deps.localToolkitDefinitions),
     localToolkits: freezeList(deps.localToolkits),
+    pluginToolkitDefinitions: freezeList(deps.pluginToolkitDefinitions),
     pluginToolkits: freezeList(deps.pluginToolkits),
     localCapabilities: freezeList(deps.localCapabilities),
     userCapabilities: freezeList(deps.userCapabilities),

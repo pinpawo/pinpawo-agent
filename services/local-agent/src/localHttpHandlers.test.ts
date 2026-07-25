@@ -19,6 +19,7 @@ import {
 } from './localServerTypes';
 import type { LoadedUserCapability } from './capabilityLoader';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
+import { checkBrowserAvailability } from './toolkits/browser';
 
 function makeReq(url: string, authorization?: string): IncomingMessage {
   return {
@@ -253,6 +254,44 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
   clearAgentRunActivity('req-1');
 });
 
+test('handleLocalHttpRequest preserves browser availability diagnostics', async () => {
+  const availability = await checkBrowserAvailability();
+  const res = makeRes();
+
+  handleLocalHttpRequest(
+    makeReq('/health', 'Bearer secret'),
+    res,
+    {
+      actorId: 'pet-a',
+      llmConfig: { model: 'test-model' },
+      workdir: '/tmp/pinpawo-browser-health',
+    } as LocalServerDeps,
+    {
+      authToken: 'secret',
+      loadSnapshot: async () => ({}),
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+    },
+  );
+
+  const payload = JSON.parse(res.body);
+  const mode = availability.metadata?.mode;
+  assert.equal(
+    payload.browser_mode,
+    typeof mode === 'string'
+      ? mode
+      : availability.available
+        ? 'available'
+        : 'none',
+  );
+  assert.equal(
+    payload.browser_detail,
+    availability.detail ?? availability.reason,
+  );
+});
+
 test('capability rescan replaces frozen runtime capability snapshots', async () => {
   const definition = {
     meta: {
@@ -480,6 +519,49 @@ test('Toolkit refresh updates frozen runtime lists with copy-on-write', async ()
   assert.deepEqual(before.localToolkits, []);
   assert.equal(after.localToolkits?.[0], toolkit);
   assert.equal(Object.isFrozen(after.localToolkits), true);
+});
+
+test('Toolkit refresh can restore an unavailable plugin Toolkit', async () => {
+  const toolkit = {
+    name: 'dynamic-plugin-test',
+    availability: () => ({ available: true as const }),
+  } as NonNullable<LocalServerDeps['pluginToolkitDefinitions']>[number];
+  const runtimeDeps = createLocalServerRuntimeDepsStore({
+    actorId: 'pet-a',
+    llmConfig: {
+      apiKey: 'test',
+      baseUrl: 'http://localhost',
+      model: 'test-model',
+    },
+    workdir: '/tmp/pinpawo-plugin-toolkit-refresh',
+    pluginToolkitDefinitions: [toolkit],
+    pluginToolkits: [],
+  });
+  const before = runtimeDeps.get();
+  const res = makeRes();
+
+  handleLocalHttpRequest(
+    makeReq('/health?refresh_toolkit=dynamic-plugin-test', 'Bearer secret'),
+    res,
+    before,
+    {
+      authToken: 'secret',
+      loadSnapshot: async () => ({}),
+      listSessions: async () => [],
+      resumeSession: async () => {
+        throw new Error('not called');
+      },
+      updateCapabilities: (patch) => runtimeDeps.updateCapabilities(patch),
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const after = runtimeDeps.get();
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(before.pluginToolkits, []);
+  assert.equal(Object.isFrozen(before.pluginToolkitDefinitions), true);
+  assert.equal(after.pluginToolkits?.[0], toolkit);
+  assert.equal(Object.isFrozen(after.pluginToolkits), true);
 });
 
 test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime endpoint', async () => {

@@ -6,7 +6,6 @@ import {
 } from '@pinpawo/pet-agent';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
-  getCachedToolkitAvailability,
   refreshToolkit,
   type ToolkitAvailabilityRecord,
 } from './toolkits/toolkitAvailability';
@@ -20,7 +19,10 @@ import {
   type LocalServerDeps,
 } from './localServerTypes';
 import { buildLocalHttpRuntimeProjection } from './localConfigProjection';
-import { browserRuntime } from './toolkits/browser';
+import {
+  browserRuntime,
+  getCachedBrowserAvailability,
+} from './toolkits/browser';
 import { prepareAgentRegistry } from './agentRegistryPreparation';
 
 type LocalHttpHandlerOptions = {
@@ -285,11 +287,27 @@ function replaceLocalToolkit(
   return localToolkits ? { localToolkits } : {};
 }
 
+function replacePluginToolkit(
+  deps: LocalServerDeps,
+  name: string,
+  record: ToolkitAvailabilityRecord | null,
+): LocalServerCapabilityStatePatch {
+  const pluginToolkits = replaceListItem(
+    deps.pluginToolkits,
+    (item) => item.name === name,
+    record?.availability.available ? record.toolkit : null,
+  );
+  return pluginToolkits ? { pluginToolkits } : {};
+}
+
 function removeRuntimeToolkit(
   deps: LocalServerDeps,
   name: string,
 ): LocalServerCapabilityStatePatch {
-  return replaceLocalToolkit(deps, name, null);
+  return {
+    ...replaceLocalToolkit(deps, name, null),
+    ...replacePluginToolkit(deps, name, null),
+  };
 }
 
 async function refreshRuntimeToolkit(
@@ -297,8 +315,15 @@ async function refreshRuntimeToolkit(
   name: string,
 ): Promise<LocalServerCapabilityStatePatch | null> {
   const localToolkitRecord = await refreshToolkit(deps.localToolkitDefinitions ?? [], name);
-  return localToolkitRecord
-    ? replaceLocalToolkit(deps, name, localToolkitRecord)
+  if (localToolkitRecord) {
+    return replaceLocalToolkit(deps, name, localToolkitRecord);
+  }
+  const pluginToolkitRecord = await refreshToolkit(
+    deps.pluginToolkitDefinitions ?? [],
+    name,
+  );
+  return pluginToolkitRecord
+    ? replacePluginToolkit(deps, name, pluginToolkitRecord)
     : null;
 }
 
@@ -423,12 +448,17 @@ function buildCapabilitiesPayload(
 }
 
 function readBrowserHealthFields() {
-  const availability = getCachedToolkitAvailability('browser');
+  const availability = getCachedBrowserAvailability();
   if (!availability) return {};
 
+  const mode = availability.metadata?.mode;
   return {
-    browser_mode: availability.available ? 'available' : 'none',
-    browser_detail: availability.available ? undefined : availability.reason,
-    ...browserRuntime.getHealthFields(availability.available ? 'available' : 'none'),
+    browser_mode: typeof mode === 'string'
+      ? mode
+      : availability.available
+        ? 'available'
+        : 'none',
+    browser_detail: availability.detail ?? availability.reason,
+    ...browserRuntime.getHealthFields(mode),
   };
 }

@@ -43,6 +43,10 @@ export default { name: 'valid-plugin' };
   const result = await loadPluginsFromDir(root);
 
   assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['valid-plugin']);
+  assert.deepEqual(
+    result.toolkitDefinitions.map((toolkit) => toolkit.name),
+    ['sample_toolkit'],
+  );
   assert.deepEqual(result.toolkits.map((toolkit) => toolkit.name), ['sample_toolkit']);
   assert.equal(result.toolkits[0]?.tools[0]?.operation?.title, 'Sample Tool');
 });
@@ -58,6 +62,7 @@ export default {};
   const result = await loadPluginsFromDir(root);
 
   assert.deepEqual(result.plugins, []);
+  assert.deepEqual(result.toolkitDefinitions, []);
   assert.deepEqual(result.toolkits, []);
 });
 
@@ -76,6 +81,10 @@ export default { name: 'offline-plugin' };
   const result = await loadPluginsFromDir(root);
 
   assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['offline-plugin']);
+  assert.deepEqual(
+    result.toolkitDefinitions.map((toolkit) => toolkit.name),
+    ['offline_toolkit'],
+  );
   assert.deepEqual(result.toolkits, []);
 });
 

@@ -4,19 +4,8 @@ import type { AgentActor, AgentExecution, AgentModels } from './agent';
 import type { SubagentResult } from './subagent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from './artifact';
 
-export type InstructionDocumentSource =
-  | {
-      readonly kind: 'file';
-      readonly path: string;
-    }
-  | {
-      readonly kind: 'inline';
-      readonly id: string;
-    };
-
 export type InstructionDocument = {
   readonly content: string;
-  readonly source: InstructionDocumentSource;
   readonly digest: string;
 };
 
@@ -49,13 +38,6 @@ export type CapabilityLifecycle = {
   finalize?: CapabilityFinalizeHook;
 };
 
-export type CapabilityAvailability = {
-  available: boolean;
-  reason?: string;
-  detail?: string;
-  metadata?: Record<string, string | number | boolean | null>;
-};
-
 export type AgentCapability = {
   readonly name: string;
   readonly description: string;
@@ -68,30 +50,17 @@ export type AgentCapability = {
   readonly lifecycle?: CapabilityLifecycle;
 };
 
-const validatedInstructionDocuments = new WeakMap<
-  object,
-  { content: string; digest: string }
->();
-
 export function defineInstructionDocument(params: {
   content: string;
-  source: InstructionDocumentSource;
 }): InstructionDocument {
   const content = params.content.trim();
   if (!content) {
     throw new Error('Capability instructions must be a non-empty Markdown document');
   }
-  const sourceValue = params.source.kind === 'file'
-    ? params.source.path
-    : params.source.id;
-  if (!sourceValue.trim()) {
-    throw new Error(`Capability instruction ${params.source.kind} source must be non-empty`);
-  }
-  return {
+  return Object.freeze({
     content,
-    source: params.source,
     digest: createHash('sha256').update(content, 'utf8').digest('hex'),
-  };
+  });
 }
 
 export function defineCapability(capability: AgentCapability): AgentCapability {
@@ -127,21 +96,11 @@ export function defineCapability(capability: AgentCapability): AgentCapability {
   ) {
     throw new Error(`Capability "${capability.name}" instructions must be an InstructionDocument`);
   }
-  const cachedInstructions = validatedInstructionDocuments.get(capability);
-  if (
-    cachedInstructions?.content !== capability.instructions.content
-    || cachedInstructions.digest !== capability.instructions.digest
-  ) {
-    const expectedDigest = createHash('sha256')
-      .update(capability.instructions.content, 'utf8')
-      .digest('hex');
-    if (capability.instructions.digest !== expectedDigest) {
-      throw new Error(`Capability "${capability.name}" instruction digest does not match content`);
-    }
-    validatedInstructionDocuments.set(capability, {
-      content: capability.instructions.content,
-      digest: capability.instructions.digest,
-    });
+  const expectedDigest = createHash('sha256')
+    .update(capability.instructions.content, 'utf8')
+    .digest('hex');
+  if (capability.instructions.digest !== expectedDigest) {
+    throw new Error(`Capability "${capability.name}" instruction digest does not match content`);
   }
   if (capability.lifecycle?.finalize && typeof capability.lifecycle.finalize !== 'function') {
     throw new Error(`Capability "${capability.name}" lifecycle.finalize must be a function`);

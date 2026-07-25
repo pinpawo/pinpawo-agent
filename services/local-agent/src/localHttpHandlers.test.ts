@@ -268,7 +268,6 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
       uses: [],
       instructions: defineInstructionDocument({
         content: '# Custom Test',
-        source: { kind: 'inline', id: 'test:rescan-custom-test' },
       }),
     },
   } as LoadedUserCapability;
@@ -280,12 +279,8 @@ test('capability rescan replaces frozen runtime capability snapshots', async () 
       model: 'test-model',
     },
     workdir: '/tmp/pinpawo-capability-rescan',
-    userCapabilityDefinitions: [],
     userCapabilities: [],
-    rescanUserCapabilities: async () => ({
-      userCapabilityDefinitions: [definition],
-      userCapabilities: [definition],
-    }),
+    rescanUserCapabilities: async () => [definition],
   });
   const before = runtimeDeps.get();
   const res = makeRes();
@@ -323,14 +318,13 @@ test('/capabilities projects run-scoped routability from the compiled registry',
     uses: ['artifact_discovery'],
     instructions: defineInstructionDocument({
       content: '# Explore',
-      source: { kind: 'inline', id: 'test:http-explore' },
     }),
   };
   const deps = {
     actorId: 'pet-a',
     llmConfig: { model: 'test-model' },
     workdir: '/tmp/pinpawo-capability-routability',
-    localCapabilityDefinitions: [explore],
+    localCapabilities: [explore],
     capabilityArtifactStore: {} as CapabilityArtifactStore,
   } as LocalServerDeps;
   const options = {
@@ -354,6 +348,23 @@ test('/capabilities projects run-scoped routability from the compiled registry',
   assert.deepEqual(unscopedExplore.routability, {
     status: 'requires_scope',
     required: ['threadId'],
+  });
+
+  const missingAllScopeRes = makeRes();
+  handleLocalHttpRequest(
+    makeReq('/capabilities', 'Bearer secret'),
+    missingAllScopeRes,
+    {
+      ...deps,
+      capabilityArtifactStore: undefined,
+    },
+    options,
+  );
+  const missingAllScopeExplore = JSON.parse(missingAllScopeRes.body).builtIns
+    .find((item: { id: string }) => item.id === 'explore');
+  assert.deepEqual(missingAllScopeExplore.routability, {
+    status: 'requires_scope',
+    required: ['threadId', 'capabilityArtifactStore'],
   });
 
   const scopedRes = makeRes();
@@ -382,7 +393,6 @@ test('/capabilities exposes registry compilation issues instead of recomputing m
     uses: ['first', 'second'],
     instructions: defineInstructionDocument({
       content: '# Explore',
-      source: { kind: 'inline', id: 'test:http-duplicate-tool' },
     }),
   };
   const res = makeRes();
@@ -394,7 +404,7 @@ test('/capabilities exposes registry compilation issues instead of recomputing m
       actorId: 'pet-a',
       llmConfig: { model: 'test-model' },
       workdir: '/tmp/pinpawo-capability-duplicate-tool',
-      localCapabilityDefinitions: [explore],
+      localCapabilities: [explore],
       localToolkits: duplicateToolkits,
     } as LocalServerDeps,
     {

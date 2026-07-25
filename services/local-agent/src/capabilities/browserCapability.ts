@@ -12,7 +12,6 @@ export function createBrowserCapability(): AgentCapability {
     uses: [BROWSER_TOOLKIT_NAME],
     instructions: defineInstructionDocument({
       content: '你是浏览器任务执行器；当前任务已经明确需要浏览器能力，不要重新做路由判断。',
-      source: { kind: 'inline', id: 'builtin:browser' },
     }),
   });
 }

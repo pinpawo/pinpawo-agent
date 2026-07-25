@@ -183,7 +183,6 @@ export function createPlanCapability(): AgentCapability {
       + 'tasks 入队后 planner 退出,workers 接手执行 —— planner 本身不做实际工作。',
     uses: ['studio_plan'],
     instructions: defineInstructionDocument({
-      source: { kind: 'inline', id: 'builtin:studio_plan' },
       content: [
         // 角色定位:规划者,不是执行者
         '【你的角色】你是 Studio 的 **planner**。'

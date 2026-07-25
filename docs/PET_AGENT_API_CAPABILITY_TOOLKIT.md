@@ -18,9 +18,6 @@ type AgentCapability = {
 
 type InstructionDocument = {
   readonly content: string;
-  readonly source:
-    | { readonly kind: 'file'; readonly path: string }
-    | { readonly kind: 'inline'; readonly id: string };
   readonly digest: string;
 };
 ```
@@ -34,7 +31,8 @@ type InstructionDocument = {
 1. `uses` 是静态强依赖，也是 Capability 的完整工具权限边界。
 2. Capability 不拥有 tools、inline Toolkit、review policy 或 availability check。
 3. instructions 是一个不可变 Markdown document，不按消息动态生成。
-4. 缺少任一 required Toolkit 时，Capability 在路由前 unavailable。
+4. 缺少任一 required Toolkit 时，compiler 在路由前记录 diagnostics，并
+   从可执行 registry 中排除该 Capability。
 
 ## 2. finalize-only 生命周期
 

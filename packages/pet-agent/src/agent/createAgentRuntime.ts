@@ -13,10 +13,7 @@ export {
 } from './orchestrator/registry';
 export type {
   CompiledAgentRegistry,
-  CompiledCapability,
-  CompiledExecutor,
   ExecutorCompilationIssue,
-  UnavailableCapability,
 } from './orchestrator/registry';
 export { ORCHESTRATOR_RECURSION_LIMIT } from './orchestrator/controlPrimitives';
 export {

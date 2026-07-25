@@ -9,28 +9,7 @@ import {
 } from '@pinpawo/pet-agent';
 import { createArtifactDiscoveryToolkit } from './toolkits/local';
 
-export type AgentRegistryScopeRequirement =
-  | 'threadId'
-  | 'capabilityArtifactStore';
-
-export type PreparedAgentRegistry = {
-  registry: CompiledAgentRegistry;
-  toolkits: readonly AgentToolkit[];
-  generalUses: readonly string[];
-  scopeRequirements: ReadonlyMap<string, readonly AgentRegistryScopeRequirement[]>;
-};
-
 const reportedDiagnosticFingerprints = new Set<string>();
-
-function requiredArtifactDiscoveryScope(params: {
-  threadId?: string;
-  capabilityArtifactStore?: CapabilityArtifactStore;
-}): AgentRegistryScopeRequirement[] {
-  const required: AgentRegistryScopeRequirement[] = [];
-  if (!params.threadId) required.push('threadId');
-  if (!params.capabilityArtifactStore) required.push('capabilityArtifactStore');
-  return required;
-}
 
 export function prepareAgentRegistry(params: {
   toolkits: readonly AgentToolkit[];
@@ -39,7 +18,7 @@ export function prepareAgentRegistry(params: {
   threadId?: string;
   capabilityArtifactStore?: CapabilityArtifactStore;
   authorizeArtifactDiscoveryForGeneral?: boolean;
-}): PreparedAgentRegistry {
+}) {
   const toolkits = [...params.toolkits];
   let hasArtifactDiscoveryToolkit = toolkits.some(
     ({ name }) => name === ARTIFACT_DISCOVERY_TOOLKIT_NAME,
@@ -66,19 +45,6 @@ export function prepareAgentRegistry(params: {
     generalUses.push(ARTIFACT_DISCOVERY_TOOLKIT_NAME);
   }
 
-  const scopeRequirements = new Map<
-    string,
-    readonly AgentRegistryScopeRequirement[]
-  >();
-  if (!hasArtifactDiscoveryToolkit) {
-    const required = requiredArtifactDiscoveryScope(params);
-    for (const capability of params.capabilities) {
-      if (capability.uses.includes(ARTIFACT_DISCOVERY_TOOLKIT_NAME)) {
-        scopeRequirements.set(capability.name, required);
-      }
-    }
-  }
-
   return {
     registry: compileAgentRegistry({
       toolkits,
@@ -87,7 +53,6 @@ export function prepareAgentRegistry(params: {
     }),
     toolkits,
     generalUses,
-    scopeRequirements,
   };
 }
 

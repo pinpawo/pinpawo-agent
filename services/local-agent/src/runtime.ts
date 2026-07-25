@@ -122,9 +122,7 @@ export class LocalAgentRuntime {
       localToolkitDefinitions: this.getLocalToolkitDefinitions(),
       localToolkits: this.getLocalToolkits(),
       pluginToolkits: this.getPluginToolkits(),
-      localCapabilityDefinitions: this.getLocalCapabilityDefinitions(),
       localCapabilities: this.getLocalCapabilities(),
-      userCapabilityDefinitions: this.getUserCapabilityDefinitions(),
       userCapabilities: this.getUserCapabilities(),
       capabilityArtifactStore: this.capabilityRegistry.getCapabilityArtifactStore(),
       rescanUserCapabilities: () => this.rescanUserCapabilities(),
@@ -183,22 +181,11 @@ export class LocalAgentRuntime {
     return this.capabilityRegistry.getCapabilityArtifactStore();
   }
 
-  getLocalCapabilityDefinitions(): AgentCapability[] {
-    return this.capabilityRegistry.getLocalCapabilityDefinitions();
-  }
-
   getUserCapabilities(): LoadedUserCapability[] {
     return this.capabilityRegistry.getUserCapabilities();
   }
 
-  getUserCapabilityDefinitions(): LoadedUserCapability[] {
-    return this.capabilityRegistry.getUserCapabilityDefinitions();
-  }
-
-  async rescanUserCapabilities(): Promise<{
-    userCapabilityDefinitions: LoadedUserCapability[];
-    userCapabilities: LoadedUserCapability[];
-  }> {
+  async rescanUserCapabilities(): Promise<LoadedUserCapability[]> {
     return this.capabilityRegistry.rescanUserCapabilities();
   }
 

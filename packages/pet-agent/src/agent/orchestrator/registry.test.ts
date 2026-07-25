@@ -27,7 +27,6 @@ function capability(name: string, uses: readonly string[]): AgentCapability {
     uses,
     instructions: defineInstructionDocument({
       content: `Execute the ${name} capability.`,
-      source: { kind: 'inline', id: `test:${name}` },
     }),
   };
 }

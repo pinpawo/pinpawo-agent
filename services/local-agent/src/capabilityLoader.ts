@@ -302,7 +302,6 @@ export async function validateCapabilityPlugin(
       uses: frontmatter.uses,
       instructions: defineInstructionDocument({
         content: body,
-        source: { kind: 'file', path: capabilityPath },
       }),
       ...(lifecycle ? { lifecycle } : {}),
     });

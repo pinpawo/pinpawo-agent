@@ -74,7 +74,7 @@ Toolkit registration means that a Toolkit is present in the current environment;
 it does not grant tool access. Capability `uses` and an explicit general-executor
 Toolkit list grant access.
 
-Dependency resolution, availability derivation, duplicate tool detection, policy
+Dependency resolution, executor compilation, duplicate tool detection, policy
 binding, and operation metadata binding happen before capability execution. The
 orchestrator executes a compiled Capability and does not mutate its Toolkit set.
 An invalid Capability executor is isolated in `unavailableCapabilities`; it does
@@ -84,9 +84,10 @@ remain fail-fast host configuration errors.
 
 The host assembles run-scoped Toolkits and compiles the registry once for an
 agent run setup. Routing, execution, thread-state reads, and diagnostics consume
-that same compiled value. Host availability projections use the same preparation
-and compiler for their explicitly declared scope instead of reimplementing
-dependency checks. Core registry compilation remains pure: the host reports
+that same compiled value. Host status projections use the same compiler result
+for their explicitly declared scope instead of reimplementing dependency
+checks. These projections are host API representations, not a third extension
+concept. Core registry compilation remains pure: the host reports
 `unavailableCapabilities` once per stable diagnostics fingerprint instead of
 logging during compilation.
 
@@ -96,11 +97,11 @@ artifact store plus thread scope. An empty thread is an empty discovery result,
 not Toolkit unavailability. Capabilities that need it declare the required
 `artifact_discovery` dependency statically.
 
-A host projection without complete run scope reports `requires_scope`; it must
-not guess that the Capability is available or reinterpret a missing run-scoped
-Toolkit as an optional dependency. With complete scope, the projection is
-derived directly from `CompiledAgentRegistry`, including duplicate-tool and
-unknown-Toolkit issues.
+The local host can report `requires_scope` for Artifact Discovery when its HTTP
+inventory request has no thread or store scope. This artifact-specific projection
+must not become a generic Capability dependency contract. With complete scope,
+the projection is derived directly from `CompiledAgentRegistry`, including
+duplicate-tool and unknown-Toolkit issues.
 
 Toolkit registration and tool authorization remain separate. The V2 Toolkit
 contract therefore removes Toolkit `exposure`; only Capability `uses` and the
@@ -117,8 +118,7 @@ explicit general-executor Toolkit list grant tool access.
 - Parallel tool, operation metadata, and per-tool review maps become one
   `ToolDefinition[]`.
 - Toolkit availability uses a dedicated check whose lifecycle is owned by the
-  registry, rather than reusing Capability availability and exposing cache
-  policy.
+  host registry and does not create a Capability availability contract.
 - Existing private Toolsets become named Toolkits, including Daily Post,
   Capability Creator, Studio Plan, and Artifact Discovery.
 - Explore-style environment-dependent tool filtering becomes explicit Capability

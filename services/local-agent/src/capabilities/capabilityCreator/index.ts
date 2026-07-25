@@ -12,7 +12,6 @@ export function createCapabilityCreatorCapability(): AgentCapability {
     uses: ['bash', 'capability_creator'],
     instructions: defineInstructionDocument({
       content: capabilityCreatorInstructions,
-      source: { kind: 'inline', id: 'builtin:capability_creator' },
     }),
   });
 }

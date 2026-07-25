@@ -44,7 +44,6 @@ test('loadUserCapabilities loads a code-free CAPABILITY.md', async () => {
     const item = loaded.find(({ meta }) => meta.id === 'unit_test_capability');
 
     assert.ok(item);
-    assert.equal(item.capability.instructions.source.kind, 'file');
     assert.match(item.capability.instructions.content, /Execute the requested task/);
     assert.match(item.capability.instructions.digest, /^[a-f0-9]{64}$/);
     assert.equal(item.capability.lifecycle, undefined);

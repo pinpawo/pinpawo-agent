@@ -79,7 +79,8 @@ UI 主显示是 **pet agent 面板**。Studio 呈现为**控制面状态显示**
 - `tools`: 该 pet 可用的通用工具。
 - `startupMode`: `standby`、`lazy` 或 `disabled`。
 - `status`: `standby`、`active`、`degraded`、`unavailable` 等运行状态。
-- `capabilityAvailability`: local-agent 启动检查得到的 capability snapshot。
+- `capabilities` 的 descriptor 状态：从绑定的 Toolkit 和编译 diagnostics
+  派生。
 
 `PetAgentRuntime` 被创建后不主动调用模型；只有 `StudioOrchestrator` 派发任务时才执行。
 
@@ -90,7 +91,8 @@ UI 主显示是 **pet agent 面板**。Studio 呈现为**控制面状态显示**
 - 不知道跨 agent 协作链路。
 - 只消费本次 dispatch 的 task、context summary、artifact refs 和自身 capability/tool 配置。
 
-注意:`capabilityAvailability` 是 runtime 内部决定能否执行 / 是否 degrade 的信号,**不会注入到 pet 的模型上下文**。pet 模型只看到本次任务相关的输入。
+Capability 编译 diagnostics 不会注入 pet 的模型上下文；pet 模型只看到
+本次任务相关的输入。
 
 ### StudioOrchestrator
 

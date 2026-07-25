@@ -43,8 +43,8 @@ type PetAgentRuntimeConfig = {
   startupMode?: 'standby' | 'lazy' | 'disabled';
   status?: PetAgentStatus;
   capabilities?: AgentCapability[];
-  capabilityAvailability?: Record<string, CapabilityAvailability>;
   toolkits?: AgentToolkit[];
+  generalUses: readonly string[];
   execution?: AgentExecution;
   workdir?: string;
   humanReviewer?: HumanReviewer;
@@ -63,6 +63,8 @@ type PetAgentRuntimeConfig = {
 3. `extraCapabilities` 仅在本次调用生效，与 runtime 级能力合并。
 4. `forcedCapabilityNames` 触发本次调用的 routeDecision 强制 capability 候选。
 5. `invoke()` 是最终结果接口，不接收工具事件 callback；需要实时工具/运行时事件的宿主应消费 root `streamEvents(v3)` 并通过 adapter 投影。
+6. descriptor 中的 Capability 状态由 `capabilities`、`toolkits` 经
+   `compileAgentRegistry()` 派生，不接受独立 availability snapshot。
 
 ## 4. 返回值与行为
 

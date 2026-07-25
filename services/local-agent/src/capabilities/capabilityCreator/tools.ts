@@ -201,7 +201,7 @@ node ${JSON.stringify(resolve(params.rootDir, 'index.test.mjs'))}
 ## Notes
 - This template is intentionally dependency-free so it can be loaded from \`~/.pinpawo/capabilities\` without a local \`node_modules\`.
 - If you later need custom tools or typed source files, either add local dependencies inside this plugin directory, or place the plugin inside a repo path and append that path to \`capability_dirs\`.
-- Capability availability is derived from the Toolkits required by \`uses\`.
+- Capability executability is derived by compiling the Toolkits required by \`uses\`.
 - Model-invoked actions and external business effects must be implemented by Toolkit tools.
 
 ## Capability goal
@@ -254,7 +254,6 @@ function checkCapabilityKeywordQueries(params: {
     uses: [],
     instructions: defineInstructionDocument({
       content: 'Keyword search fixture.',
-      source: { kind: 'inline', id: `keyword-check:${params.name}` },
     }),
   };
   const keywords = extractCapabilityKeywords(`${params.name} ${params.description}`);

@@ -2,7 +2,7 @@
 
 > 状态：Accepted design target
 > 决策日期：2026-07-24
-> 实现状态：Workstream 1–2 已完成；Workstream 3–4 仍待实现
+> 实现状态：Completed in the V2 cutover branch
 
 ## 1. 决策摘要
 
@@ -34,7 +34,7 @@ V2 固定以下规则：
 - `lifecycle.finalize` 不能访问或修改 tools、`uses`、Toolkit、review policy
   或 system instructions。
 - 需要被模型主动调用的代码和所有外部副作用仍一律由 Toolkit tool 实现；
-  Capability availability 只由其 `uses` 中 Toolkit 的可用性派生。
+  Capability 是否可编译执行只由其静态 `uses` 和当前 registry 决定。
 - Toolkit 保持代码定义，不引入 Toolkit Markdown 文件协议。
 - Toolkit 由静态、完整的 `ToolDefinition` 组成；tool implementation、
   operation metadata 和 review policy 在同一定义中绑定。
@@ -219,8 +219,7 @@ Review 所需的运行时输入通过窄化的 `ToolReviewContext` 在 review �
 标识、artifact recorder、authorization recorder 和 runtime event emitter
 属于 orchestrator/review middleware，不属于 Toolkit 定义。
 
-Toolkit availability 使用独立契约，不复用
-`CapabilityAvailabilityConfig`：
+Toolkit availability 是 Toolkit 自身的独立契约：
 
 ```ts
 type ToolkitAvailability =
@@ -250,9 +249,6 @@ type AgentCapability = {
 
 type InstructionDocument = {
   content: string;
-  source:
-    | { kind: 'file'; path: string }
-    | { kind: 'inline'; id: string };
   digest: string;
 };
 
@@ -276,8 +272,8 @@ type CapabilityFinalizeHook = (
 - 输出要求写在 Markdown 正文中；结构化外部写入和业务副作用必须由
   Toolkit tool 实现。`finalize` 只允许整理已有执行结果、生成 ingest、
   写 Capability artifact 和修正 announce。
-- Capability availability 完全由静态 `uses` 是否都能在当前 registry
-  generation 中解析且 available 派生。
+- Capability 是否进入可执行 registry 完全由静态 `uses` 是否都能在当前
+  registry generation 中解析，以及 effective executor 是否有效决定。
 
 ### 4.3 `uses` 的确定语义
 
@@ -302,24 +298,6 @@ V2 不提供：
 如果不同运行环境需要不同工具组合，应创建明确的 Capability 场景定义或
 通过构建期 preset 生成不同的最终 Capability。最终注册的 Capability
 必须拥有确定的 `uses`。
-
-### 4.4 CapabilityRuntime
-
-V2 不再通过 CapabilityRuntime 声明工具依赖或 instructions。若保留
-runtime 对象，仅允许承载本次执行才产生的非权限信息：
-
-```ts
-type CapabilityRuntime = {
-  runtimeContext?: string;
-  middleware?: CapabilityMiddleware;
-};
-```
-
-其中：
-
-- `runtimeContext` 只包含 actor、workdir、time anchor 等本次运行事实；
-- `middleware` 不得改变 tools、Toolkit 依赖或 system contract；
-- 稳定行为说明必须进入 `CAPABILITY.md`，不能在每次执行时重新生成。
 
 ## 5. `CAPABILITY.md` 作者协议
 
@@ -393,8 +371,8 @@ Capability loader 在启动或显式 rescan 时：
 5. 校验 `entry` 和 reference 路径不能逃出 Capability root；
 6. 对正文设置大小上限；
 7. 计算内容 digest；
-8. 将不可用原因保存在 registry descriptor 中；
-9. 只向 routing 暴露 name、description 和派生 availability；
+8. 将依赖编译问题保存在 registry diagnostics 中；
+9. 只向 routing 暴露 name、description 和 registry 派生状态；
 10. 仅在 Capability 被选择后向 subagent 注入正文。
 
 初始实现可以启动时读取并缓存全文。未来若引入延迟加载，必须保证同一
@@ -480,7 +458,7 @@ load Toolkit definitions
 → bind each tool implementation, operation, and review policy from ToolDefinition
 → load CAPABILITY.md definitions
 → resolve capability.uses
-→ derive Capability availability
+→ compile each Capability executor or record diagnostics
 → validate unique tool names for each effective executor
 → produce CompiledCapability
 ```
@@ -489,8 +467,8 @@ load Toolkit definitions
 type CompiledCapability = {
   capability: AgentCapability;
   toolkits: readonly AgentToolkit[];
+  tools: readonly StructuredTool[];
   toolNames: readonly string[];
-  systemInstructionDocument: InstructionDocument;
 };
 ```
 
@@ -502,21 +480,16 @@ Host 完成 run-scoped Toolkit 装配后只编译一次 registry，并把同一�
 diagnostics；由 host 按稳定 diagnostics 指纹去重告警，而不是由 core
 compiler 决定日志策略。
 
-对外的 Capability 状态投影也必须来自同一编译结果：
+local HTTP/UI 可以把同一编译结果投影成 `available` 或带
+`ExecutorCompilationIssue[]` 的 `unavailable`。这个 routability 字段只是
+host API 表示，不是 Capability/Toolkit 核心契约。对于
+`artifact_discovery` 这类 run-scoped Toolkit，local host 在缺少 thread 或
+store 时可以额外返回 `requires_scope`；该状态同样只属于 host 投影，不会
+进入 `AgentCapability` 或 core registry。
 
-```ts
-type CapabilityRoutability =
-  | { status: 'available' }
-  | { status: 'unavailable'; issues: ExecutorCompilationIssue[] }
-  | {
-      status: 'requires_scope';
-      required: ('threadId' | 'capabilityArtifactStore')[];
-    };
-```
-
-缺少 run scope 时不能用第二套 Toolkit name 比较算法猜测可用性。
-scope 完整后，`unknown_toolkit`、`duplicate_tool` 等状态直接投影
-registry diagnostics。
+缺少 run scope 时不能用第二套 Toolkit name 比较算法猜测可用性。scope
+完整后，`unknown_toolkit`、`duplicate_tool` 等状态直接投影 registry
+diagnostics。
 
 ## 9. 窄化 Capability 代码入口
 
@@ -567,7 +540,7 @@ V2 初期不提供 `beforeRun`。如果未来确有需要，必须为具体、�
 | Toolkit `exposure` | 删除；授权只由 `uses` / `generalUses` 决定 |
 | `tools` + `operations` + `policy.toolReview` 并行结构 | 合并为 `ToolDefinition[]` |
 | Toolkit `string[]` / dynamic instructions | 可选静态 `string` |
-| Toolkit 复用 Capability availability | 独立 `ToolkitAvailabilityCheck` |
+| Toolkit 复用旧 Capability availability 类型 | 独立 `ToolkitAvailabilityCheck` |
 | `string[] instructions` | 单一 Markdown `InstructionDocument` |
 | capability plugin `manifest.json` | `CAPABILITY.md` frontmatter |
 | capability `index.js` / `entry` | 可选；只能导出 `lifecycle.finalize` |
@@ -717,7 +690,7 @@ explore_github  uses [git, github]
 - [x] 公共 Toolkit 契约中不存在 `ToolkitResource`、`ToolkitContext` 或
   `exposure`。
 - [x] Toolkit instructions 是可选静态字符串。
-- [x] Toolkit availability 不复用 Capability availability 或暴露缓存策略。
+- [x] Toolkit availability 只描述 Toolkit 自身，不暴露缓存策略。
 - [x] `AgentCapability.uses` 是必填静态强依赖。
 - [x] `uses` 不支持 optional。
 - [x] Capability instructions 是一个 Markdown document，而不是数组。
@@ -733,7 +706,7 @@ explore_github  uses [git, github]
 - [x] 同一 executor 内同名 tool 在运行前 fail-fast。
 - [x] 一个 run setup 只编译一次 registry，routing、执行和状态读取复用。
 - [x] `unavailableCapabilities` 由 host 去重报告，不在 core compiler 打日志。
-- [x] host 可用性投影复用 registry diagnostics；缺 scope 时明确返回
+- [x] host 状态投影复用 registry diagnostics；缺 scope 时明确返回
   `requires_scope`。
 
 ### Prompt

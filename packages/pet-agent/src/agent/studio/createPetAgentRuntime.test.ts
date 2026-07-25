@@ -6,6 +6,7 @@ import { isCommand } from '@langchain/langgraph';
 import { createPetAgentRuntime } from './createPetAgentRuntime';
 import type { OrchestratorGraph } from '../createAgentRuntime';
 import type { AgentActor, AgentModels } from '../../types/agent';
+import { defineInstructionDocument } from '../../types/capability';
 import type { NamedStructuredTool } from '../../types/toolkit';
 import type { HumanReviewerRequest } from './types';
 
@@ -62,6 +63,30 @@ const sampleReviewInterrupt = {
     args: { foo: 2 },
   },
 };
+
+test('descriptor derives Capability status from registry compilation', () => {
+  const runtime = createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    capabilities: [{
+      name: 'inspect',
+      description: 'Inspect a repository.',
+      uses: ['git'],
+      instructions: defineInstructionDocument({
+        content: '# Inspect',
+      }),
+    }],
+    generalUses: [],
+    graph: makeStubGraph([]).graph,
+  });
+
+  assert.deepEqual(runtime.descriptor().capabilities, [{
+    name: 'inspect',
+    description: 'Inspect a repository.',
+    available: false,
+    reason: 'unknown Toolkit "git"',
+  }]);
+});
 
 test('humanReviewer: single interrupt → approve → reply', async () => {
   const requests: HumanReviewerRequest[] = [];

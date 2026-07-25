@@ -46,7 +46,6 @@ const capabilities: AgentCapability[] = [
     uses: ['multi_task_eval_general'],
     instructions: defineInstructionDocument({
       content: 'Investigate the requested codebase task.',
-      source: { kind: 'inline', id: 'eval:explore' },
     }),
   },
   {
@@ -55,7 +54,6 @@ const capabilities: AgentCapability[] = [
     uses: ['multi_task_eval_general'],
     instructions: defineInstructionDocument({
       content: 'Implement the requested code changes.',
-      source: { kind: 'inline', id: 'eval:code_modify' },
     }),
   },
 ];

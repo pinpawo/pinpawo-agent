@@ -33,11 +33,6 @@ export type AgentRunResult = {
   messages: BaseMessage[];
 };
 
-export type AgentRunOptions = {
-  /** Host-precompiled registry. Reused as-is when the host owns run preparation. */
-  registry?: CompiledAgentRegistry;
-};
-
 function readReply(messages: BaseMessage[]): string {
   const last = messages.at(-1);
   return typeof last?.content === 'string' ? last.content.trim() : '';
@@ -46,7 +41,10 @@ function readReply(messages: BaseMessage[]): string {
 export async function runAgent(
   graph: OrchestratorGraph,
   input: AgentInvokeInput,
-  options: AgentRunOptions = {},
+  options: {
+    /** Host-precompiled registry. Reused as-is when the host owns run preparation. */
+    registry?: CompiledAgentRegistry;
+  } = {},
 ): Promise<AgentRunResult> {
   const configurable: Record<string, unknown> = {};
   configurable.registry = options.registry ?? compileAgentRegistry({

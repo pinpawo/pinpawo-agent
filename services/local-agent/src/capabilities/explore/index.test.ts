@@ -88,7 +88,6 @@ test('explore capability declares immutable instructions and host Toolkits stati
   assert.match(instructions, /不要使用 browser[\s\S]*http_fetch[\s\S]*download_file/);
   assert.match(instructions, /较早执行上下文总结为摘要/);
   assert.match(instructions, /已查看文件列表/);
-  assert.equal(capability.instructions.source.kind, 'inline');
   assert.match(capability.instructions.digest, /^[a-f0-9]{64}$/);
   assert.equal(typeof capability.lifecycle?.finalize, 'function');
 });

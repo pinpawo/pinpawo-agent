@@ -96,7 +96,6 @@ test('buildLocalChatAgentInput dedupes built-in capabilities by name', () => {
     uses: [],
     instructions: defineInstructionDocument({
       content: 'Explore.',
-      source: { kind: 'inline', id: 'test:explore' },
     }),
   };
 

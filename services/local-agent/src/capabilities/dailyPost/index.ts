@@ -36,7 +36,6 @@ export function createDailyPostCapability(
     uses: ['daily_post'],
     instructions: defineInstructionDocument({
       content: options.instructions ?? dailyPostInstructions,
-      source: { kind: 'inline', id: 'builtin:daily_post' },
     }),
   });
 }

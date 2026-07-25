@@ -396,7 +396,6 @@ function evalCapability(
     uses: ['eval_general'],
     instructions: defineInstructionDocument({
       content: instructions,
-      source: { kind: 'inline', id: `eval:${name}` },
     }),
   };
 }

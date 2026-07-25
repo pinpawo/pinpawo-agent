@@ -18,22 +18,17 @@ function artifactCapability(name: string): AgentCapability {
     uses: [ARTIFACT_DISCOVERY_TOOLKIT_NAME],
     instructions: defineInstructionDocument({
       content: `# ${name}`,
-      source: { kind: 'inline', id: `test:${name}` },
     }),
   };
 }
 
-test('prepareAgentRegistry records missing run scope without making the dependency optional', () => {
+test('prepareAgentRegistry keeps missing run-scoped Toolkits as compiler diagnostics', () => {
   const prepared = prepareAgentRegistry({
     toolkits: [],
     capabilities: [artifactCapability('scope_required_test')],
     generalUses: [],
   });
 
-  assert.deepEqual(
-    prepared.scopeRequirements.get('scope_required_test'),
-    ['threadId', 'capabilityArtifactStore'],
-  );
   assert.equal(prepared.registry.capabilities.length, 0);
   assert.equal(
     prepared.registry.unavailableCapabilities[0]?.issues[0]?.code,
@@ -56,7 +51,6 @@ test('prepareAgentRegistry compiles artifact discovery once run scope is complet
     [ARTIFACT_DISCOVERY_TOOLKIT_NAME],
   );
   assert.deepEqual(prepared.generalUses, [ARTIFACT_DISCOVERY_TOOLKIT_NAME]);
-  assert.equal(prepared.scopeRequirements.size, 0);
   assert.equal(
     prepared.registry.capabilities[0]?.capability.name,
     'scope_ready_test',

@@ -45,9 +45,7 @@ export class LocalAgentCapabilityRegistry {
   private localTools: StructuredTool[] = [];
   private localToolkitDefinitions: AgentToolkit[] = [];
   private localToolkits: AgentToolkit[] = [];
-  private localCapabilityDefinitions: AgentCapability[] = [];
   private localCapabilities: AgentCapability[] = [];
-  private userCapabilityDefinitions: LoadedUserCapability[] = [];
   private userCapabilities: LoadedUserCapability[] = [];
   private readonly deps: LocalAgentCapabilityRegistryDeps;
   private readonly capabilityArtifactStore: FileCapabilityArtifactStore;
@@ -66,13 +64,8 @@ export class LocalAgentCapabilityRegistry {
     this.localToolkitDefinitions = this.deps.createLocalToolkits(this.localTools);
     this.localToolkitDefinitions.forEach(validateToolkitDefinition);
     this.localToolkits = await this.deps.resolveAvailableToolkits(this.localToolkitDefinitions);
-    this.localCapabilityDefinitions = this.deps.createLocalCapabilities();
-    // Capability availability is scoped to a compiled registry generation.
-    // Keep definitions here; run-scoped Toolkits are registered by the host
-    // immediately before compileAgentRegistry().
-    this.localCapabilities = [...this.localCapabilityDefinitions];
-    this.userCapabilityDefinitions = await this.deps.loadUserCapabilities();
-    this.userCapabilities = [...this.userCapabilityDefinitions];
+    this.localCapabilities = this.deps.createLocalCapabilities();
+    this.userCapabilities = await this.deps.loadUserCapabilities();
   }
 
   getLocalTools(): StructuredTool[] {
@@ -99,27 +92,12 @@ export class LocalAgentCapabilityRegistry {
     return this.localCapabilities;
   }
 
-  getLocalCapabilityDefinitions(): AgentCapability[] {
-    return this.localCapabilityDefinitions;
-  }
-
   getUserCapabilities(): LoadedUserCapability[] {
     return this.userCapabilities;
   }
 
-  getUserCapabilityDefinitions(): LoadedUserCapability[] {
-    return this.userCapabilityDefinitions;
-  }
-
-  async rescanUserCapabilities(): Promise<{
-    userCapabilityDefinitions: LoadedUserCapability[];
-    userCapabilities: LoadedUserCapability[];
-  }> {
-    this.userCapabilityDefinitions = await this.deps.loadUserCapabilities();
-    this.userCapabilities = [...this.userCapabilityDefinitions];
-    return {
-      userCapabilityDefinitions: this.userCapabilityDefinitions,
-      userCapabilities: this.userCapabilities,
-    };
+  async rescanUserCapabilities(): Promise<LoadedUserCapability[]> {
+    this.userCapabilities = await this.deps.loadUserCapabilities();
+    return this.userCapabilities;
   }
 }

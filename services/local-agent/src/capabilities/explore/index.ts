@@ -307,7 +307,6 @@ export function createExploreCapability(options: ExploreCapabilityOptions = {}):
     ].join(' '),
     uses: options.uses ?? DEFAULT_EXPLORE_TOOLKITS,
     instructions: defineInstructionDocument({
-      source: { kind: 'inline', id: 'builtin:explore' },
       content: `# Explore
 
 ## 目标

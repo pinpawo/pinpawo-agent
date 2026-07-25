@@ -115,6 +115,7 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
         id: 'capability:read',
         owner: 'read',
         content: 'Read the requested file.',
+        digest: 'a'.repeat(64),
       }],
       operations: {
         read_file: {
@@ -206,6 +207,10 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
       { id: 'capability:read', owner: 'read', digestLength: 64 },
     ],
   );
+  const capabilitySection = (promptEvents[0]?.data as {
+    sections?: Array<{ id: string; digest: string }>;
+  }).sections?.find(({ id }) => id === 'capability:read');
+  assert.equal(capabilitySection?.digest, 'a'.repeat(64));
 });
 
 test('createSubagent summarizes persisted history from contextWindowTokens', async () => {

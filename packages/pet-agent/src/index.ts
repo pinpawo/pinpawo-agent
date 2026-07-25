@@ -23,13 +23,11 @@ export type {
 
 export type {
   AgentCapability,
-  CapabilityAvailability,
   CapabilityFinalizeContext,
   CapabilityFinalizeHook,
   CapabilityFinalizeResult,
   CapabilityLifecycle,
   InstructionDocument,
-  InstructionDocumentSource,
 } from './types/capability';
 export {
   defineCapability,
@@ -109,10 +107,7 @@ export {
 } from './agent/createAgentRuntime';
 export type {
   CompiledAgentRegistry,
-  CompiledCapability,
-  CompiledExecutor,
   ExecutorCompilationIssue,
-  UnavailableCapability,
 } from './agent/createAgentRuntime';
 export {
   ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
@@ -276,7 +271,6 @@ export {
 export { runAgent } from './agent/runAgent';
 export type {
   AgentInvokeInput,
-  AgentRunOptions,
   AgentRunResult,
 } from './agent/runAgent';
 export {

@@ -76,7 +76,6 @@ function capability(
     uses,
     instructions: defineInstructionDocument({
       content: `Execute the ${name} capability.`,
-      source: { kind: 'inline', id: `test:${name}` },
     }),
   };
 }
@@ -1288,7 +1287,6 @@ test('limit-reached progress announce lets model choose the same capability dele
     uses: [],
     instructions: defineInstructionDocument({
       content: 'Inspect the repository.',
-      source: { kind: 'inline', id: 'test:inspect_repo' },
     }),
     lifecycle: {
       finalize: () => {
@@ -1430,7 +1428,6 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
     uses: ['bash'],
     instructions: defineInstructionDocument({
       content: 'Inspect the repository with the authorized tools.',
-      source: { kind: 'inline', id: 'test:inspect_repo' },
     }),
   };
   const graph = createOrchestratorGraph({
@@ -1509,7 +1506,6 @@ test('artifact discovery tools reach a selected capability only when declared in
         uses: ['browser', 'artifact_discovery'],
         instructions: defineInstructionDocument({
           content: 'Inspect browser state and related artifacts.',
-          source: { kind: 'inline', id: 'test:browser_like' },
         }),
       }],
       toolkits: [
@@ -1751,7 +1747,6 @@ test('capability finalize artifact refs are merged into state', async () => {
     uses: ['artifact'],
     instructions: defineInstructionDocument({
       content: 'Explore issue context.',
-      source: { kind: 'inline', id: 'test:explore-artifact' },
     }),
     lifecycle: {
       finalize: async (_result, ctx) => {
@@ -1839,7 +1834,6 @@ test('capability finalize stores only artifact refs in state', async () => {
     uses: ['artifact'],
     instructions: defineInstructionDocument({
       content: 'Create a post.',
-      source: { kind: 'inline', id: 'test:daily-post-artifact' },
     }),
     lifecycle: {
       finalize: async (_result, ctx) => {

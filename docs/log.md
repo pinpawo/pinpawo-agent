@@ -239,6 +239,22 @@ lint passes, and documentation migrations.
 - Hardened artifact path segments so `.` and `..` remain encoded data and added
   storage-root containment checks.
 
+## [2026-07-25] cleanup | Capability / Toolkit V2 concept closure
+
+- Removed the stale public `CapabilityAvailability` contract and derive Studio
+  Capability summaries from registry compilation.
+- Collapsed local and user Capability definition/available mirrors into one
+  inventory for each source.
+- Kept `requires_scope` as an Artifact Discovery-specific local HTTP projection
+  instead of a generic Capability dependency type.
+- Internalized compiled executor helper types and the one-off `runAgent` options
+  carrier while retaining `CompiledAgentRegistry` and structured diagnostics.
+- Reduced `InstructionDocument` to immutable content plus digest and reused that
+  digest in prompt provenance events.
+- Removed the hypothetical `CapabilityRuntime` target from the V2 design and
+  documented routability as a host projection rather than a third extension
+  concept.
+
 ## [2026-07-24] decision | Capability code entry is finalize-only
 
 - Kept an optional Capability `entry` / `index.js`, restricted to a narrow

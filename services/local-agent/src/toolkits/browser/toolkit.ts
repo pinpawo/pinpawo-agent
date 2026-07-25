@@ -2,7 +2,6 @@ import {
   defineToolkit,
   ReviewPolicies,
   type AgentToolkit,
-  type CapabilityAvailability,
   type ToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import { loadStoredConfig } from '../../storage';
@@ -32,14 +31,14 @@ const browserToolkitInstructions = [
   '完成后返回你实际打开、操作或提取到的内容；不要声称完成未通过工具确认的页面操作。',
 ];
 
-function disabledAvailability(): CapabilityAvailability {
+function disabledAvailability() {
   return {
     available: false,
-    reason: 'browser capability disabled by config',
+    reason: 'browser Toolkit disabled by config',
   };
 }
 
-export async function checkBrowserAvailability(): Promise<CapabilityAvailability> {
+export async function checkBrowserAvailability() {
   const storedCaps = loadStoredConfig().capabilities;
   if (storedCaps?.browser === false) {
     return disabledAvailability();

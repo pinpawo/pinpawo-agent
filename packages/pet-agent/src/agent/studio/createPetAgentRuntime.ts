@@ -4,7 +4,7 @@ import { Command } from '@langchain/langgraph';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import type { AgentCapability, CapabilityAvailability } from '../../types/capability';
+import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { AgentToolkit } from '../../types/toolkit';
 import type {
@@ -16,6 +16,7 @@ import {
   buildOrchestratorRunInput,
   createOrchestratorGraph,
   compileAgentRegistry,
+  formatExecutorCompilationIssues,
   type OrchestratorConfig,
   type OrchestratorGraph,
 } from '../createAgentRuntime';
@@ -38,7 +39,6 @@ export type PetAgentRuntimeConfig = {
   startupMode?: PetAgentStartupMode;
   status?: PetAgentStatus;
   capabilities?: AgentCapability[];
-  capabilityAvailability?: Record<string, CapabilityAvailability>;
   toolkits?: AgentToolkit[];
   /** Explicit Toolkit permission boundary for the general executor. */
   generalUses: readonly string[];
@@ -58,13 +58,27 @@ export type PetAgentRuntimeConfig = {
 };
 
 function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
+  const registry = compileAgentRegistry({
+    toolkits: config.toolkits ?? [],
+    capabilities: config.capabilities ?? [],
+    generalUses: [],
+  });
+  const availableNames = new Set(
+    registry.capabilities.map(({ capability }) => capability.name),
+  );
+  const unavailableByName = new Map(
+    registry.unavailableCapabilities.map(({ capability, issues }) => [
+      capability.name,
+      formatExecutorCompilationIssues(issues),
+    ]),
+  );
   return (config.capabilities ?? []).map((capability) => {
-    const availability = config.capabilityAvailability?.[capability.name];
+    const available = availableNames.has(capability.name);
     return {
       name: capability.name,
       description: capability.description,
-      available: availability?.available ?? true,
-      reason: availability?.reason ?? null,
+      available,
+      reason: available ? null : unavailableByName.get(capability.name) ?? null,
     };
   });
 }

@@ -21,17 +21,17 @@ export type ExecutorCompilationIssue =
       toolkitNames: readonly [string, string];
     };
 
-export type CompiledExecutor = {
+type CompiledExecutor = {
   toolkits: readonly AgentToolkit[];
   tools: readonly StructuredTool[];
   toolNames: readonly string[];
 };
 
-export type CompiledCapability = CompiledExecutor & {
+type CompiledCapability = CompiledExecutor & {
   capability: AgentCapability;
 };
 
-export type UnavailableCapability = {
+type UnavailableCapability = {
   capability: AgentCapability;
   issues: readonly ExecutorCompilationIssue[];
 };

@@ -303,7 +303,6 @@ function capabilities(input: CapabilityDecisionBasicsInput): AgentCapability[] {
     uses: [],
     instructions: defineInstructionDocument({
       content: `Execute the ${item.name} capability.`,
-      source: { kind: 'inline', id: `eval:${item.name}` },
     }),
   }));
 }

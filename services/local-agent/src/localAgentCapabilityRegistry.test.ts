@@ -18,7 +18,6 @@ function capability(name: string, uses: readonly string[] = []): AgentCapability
     uses,
     instructions: defineInstructionDocument({
       content: `Execute ${name}.`,
-      source: { kind: 'inline', id: `test:${name}` },
     }),
   };
 }
@@ -79,19 +78,10 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
   assert.deepEqual(registry.getLocalToolkits().map((item) => item.name), [
     'available-toolkit',
   ]);
-  assert.deepEqual(registry.getLocalCapabilityDefinitions().map((item) => item.name), [
-    'available-local-cap',
-    'unavailable-local-cap',
-    'missing-toolkit-local-cap',
-  ]);
   assert.deepEqual(registry.getLocalCapabilities().map((item) => item.name), [
     'available-local-cap',
     'unavailable-local-cap',
     'missing-toolkit-local-cap',
-  ]);
-  assert.deepEqual(registry.getUserCapabilityDefinitions().map((item) => item.meta.id), [
-    'enabled-user-cap',
-    'disabled-user-cap',
   ]);
   assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), [
     'enabled-user-cap',
@@ -100,8 +90,7 @@ test('LocalAgentCapabilityRegistry loads resources and rescans user capabilities
 
   const rescanned = await registry.rescanUserCapabilities();
 
-  assert.deepEqual(rescanned.userCapabilityDefinitions.map((item) => item.meta.id), ['rescanned-user-cap']);
-  assert.deepEqual(rescanned.userCapabilities.map((item) => item.meta.id), ['rescanned-user-cap']);
+  assert.deepEqual(rescanned.map((item) => item.meta.id), ['rescanned-user-cap']);
   assert.deepEqual(registry.getUserCapabilities().map((item) => item.meta.id), ['rescanned-user-cap']);
 });
 
@@ -125,7 +114,7 @@ test('LocalAgentCapabilityRegistry default toolkits include git toolkit', async 
     ['bash', 'git', 'browser'],
   );
   assert.ok(
-    registry.getLocalCapabilityDefinitions().some((item) => item.name === 'explore'),
+    registry.getLocalCapabilities().some((item) => item.name === 'explore'),
     'default local capabilities should include explore',
   );
 });

@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type {
-  StudioDueRunStatus,
-  StudioDueRunStoreTrace,
+import {
+  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
+  type StudioDueRunStatus,
+  type StudioDueRunStoreTrace,
 } from '@pinpawo/pet-agent';
 import { BUILT_IN_CAPABILITY_REGISTRY } from './capabilityRegistry';
 import {
@@ -307,19 +308,15 @@ function isCapabilityEnabled(id: string) {
 }
 
 async function rescanUserCapabilities(deps: LocalServerDeps) {
-  const runtimeRescan = deps.rescanUserCapabilities
+  const userCapabilities = deps.rescanUserCapabilities
     ? await deps.rescanUserCapabilities()
-    : null;
-  const definitions = runtimeRescan?.userCapabilityDefinitions ?? await loadUserCapabilities();
-  const available = runtimeRescan?.userCapabilities ?? definitions;
+    : await loadUserCapabilities();
   return {
     patch: {
-      userCapabilityDefinitions: definitions,
-      userCapabilities: available,
+      userCapabilities,
     } satisfies LocalServerCapabilityStatePatch,
     summary: {
-      loaded: definitions.length,
-      available: available.length,
+      loaded: userCapabilities.length,
     },
   };
 }
@@ -328,13 +325,15 @@ function buildCapabilitiesPayload(
   deps: LocalServerDeps,
   threadId?: string,
 ) {
-  const localDefinitionIds = new Set((deps.localCapabilityDefinitions ?? []).map((item) => item.name));
-  const userDefinitions = deps.userCapabilityDefinitions ?? [];
-  const userDefinitionIds = new Set(userDefinitions.flatMap((item) => [item.meta.id, item.capability.name]));
-  const capabilityDefinitions = [...(deps.localCapabilityDefinitions ?? [])];
-  for (const { capability } of userDefinitions) {
-    if (!capabilityDefinitions.some(({ name }) => name === capability.name)) {
-      capabilityDefinitions.push(capability);
+  const localCapabilityIds = new Set((deps.localCapabilities ?? []).map((item) => item.name));
+  const userCapabilities = deps.userCapabilities ?? [];
+  const userCapabilityIds = new Set(
+    userCapabilities.flatMap((item) => [item.meta.id, item.capability.name]),
+  );
+  const capabilities = [...(deps.localCapabilities ?? [])];
+  for (const { capability } of userCapabilities) {
+    if (!capabilities.some(({ name }) => name === capability.name)) {
+      capabilities.push(capability);
     }
   }
   const prepared = prepareAgentRegistry({
@@ -342,11 +341,21 @@ function buildCapabilitiesPayload(
       ...(deps.pluginToolkits ?? []),
       ...(deps.localToolkits ?? []),
     ],
-    capabilities: capabilityDefinitions,
+    capabilities,
     generalUses: [],
     threadId,
     capabilityArtifactStore: deps.capabilityArtifactStore,
   });
+  const hasArtifactDiscoveryToolkit = prepared.toolkits.some(
+    ({ name }) => name === ARTIFACT_DISCOVERY_TOOLKIT_NAME,
+  );
+  const missingArtifactDiscoveryScope = [
+    ...(!threadId ? ['threadId' as const] : []),
+    ...(!deps.capabilityArtifactStore ? ['capabilityArtifactStore' as const] : []),
+  ];
+  const capabilitiesByName = new Map(
+    capabilities.map((capability) => [capability.name, capability]),
+  );
   const compiledNames = new Set(
     prepared.registry.capabilities.map(({ capability }) => capability.name),
   );
@@ -359,11 +368,15 @@ function buildCapabilitiesPayload(
   const resolveRoutability = (
     capabilityName: string,
   ) => {
-    const required = prepared.scopeRequirements.get(capabilityName);
-    if (required) {
+    const capability = capabilitiesByName.get(capabilityName);
+    if (
+      !hasArtifactDiscoveryToolkit
+      && missingArtifactDiscoveryScope.length > 0
+      && capability?.uses.includes(ARTIFACT_DISCOVERY_TOOLKIT_NAME)
+    ) {
       return {
         status: 'requires_scope' as const,
-        required,
+        required: missingArtifactDiscoveryScope,
       };
     }
     const unavailable = unavailableByName.get(capabilityName);
@@ -379,26 +392,26 @@ function buildCapabilitiesPayload(
   };
 
   const builtIns = BUILT_IN_CAPABILITY_REGISTRY.map((meta) => {
-    const definition = deps.localCapabilityDefinitions?.find(({ name }) => name === meta.id);
-    const isHostRuntimeCapability = localDefinitionIds.has(meta.id);
+    const capability = deps.localCapabilities?.find(({ name }) => name === meta.id);
+    const isHostRuntimeCapability = localCapabilityIds.has(meta.id);
     return {
       ...meta,
       enabled: isCapabilityEnabled(meta.id),
       loaded: true,
       routability: isHostRuntimeCapability
-        ? resolveRoutability(definition?.name ?? meta.id)
+        ? resolveRoutability(capability?.name ?? meta.id)
         : null,
     };
   });
 
   const userManifests = readUserCapabilityManifests().map((meta) => {
-    const definition = userDefinitions.find((item) => item.meta.id === meta.id);
+    const loadedCapability = userCapabilities.find((item) => item.meta.id === meta.id);
     return {
       ...meta,
       enabled: isCapabilityEnabled(meta.id),
-      loaded: userDefinitionIds.has(meta.id),
-      routability: definition
-        ? resolveRoutability(definition.capability.name)
+      loaded: userCapabilityIds.has(meta.id),
+      routability: loadedCapability
+        ? resolveRoutability(loadedCapability.capability.name)
         : null,
     };
   });

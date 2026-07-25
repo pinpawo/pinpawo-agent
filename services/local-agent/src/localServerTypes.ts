@@ -14,15 +14,10 @@ export type LocalServerDeps = {
   localToolkitDefinitions?: AgentToolkit[];
   localToolkits?: AgentToolkit[];
   pluginToolkits?: AgentToolkit[];
-  localCapabilityDefinitions?: AgentCapability[];
   localCapabilities?: AgentCapability[];
-  userCapabilityDefinitions?: LoadedUserCapability[];
   userCapabilities?: LoadedUserCapability[];
   capabilityArtifactStore?: CapabilityArtifactStore;
-  rescanUserCapabilities?: () => Promise<{
-    userCapabilityDefinitions: LoadedUserCapability[];
-    userCapabilities: LoadedUserCapability[];
-  }>;
+  rescanUserCapabilities?: () => Promise<LoadedUserCapability[]>;
 };
 
 export type NormalizedLocalServerDeps = Readonly<Omit<LocalServerDeps, 'workdir' | 'runtimeConfig'> & {
@@ -33,9 +28,7 @@ export type NormalizedLocalServerDeps = Readonly<Omit<LocalServerDeps, 'workdir'
 export type LocalServerCapabilityStatePatch = Partial<Pick<LocalServerDeps,
   | 'localToolkitDefinitions'
   | 'localToolkits'
-  | 'localCapabilityDefinitions'
   | 'localCapabilities'
-  | 'userCapabilityDefinitions'
   | 'userCapabilities'
 >>;
 
@@ -55,9 +48,7 @@ function freezeCapabilityLists<T extends LocalServerDeps>(deps: T): T {
     localToolkitDefinitions: freezeList(deps.localToolkitDefinitions),
     localToolkits: freezeList(deps.localToolkits),
     pluginToolkits: freezeList(deps.pluginToolkits),
-    localCapabilityDefinitions: freezeList(deps.localCapabilityDefinitions),
     localCapabilities: freezeList(deps.localCapabilities),
-    userCapabilityDefinitions: freezeList(deps.userCapabilityDefinitions),
     userCapabilities: freezeList(deps.userCapabilities),
   };
 }

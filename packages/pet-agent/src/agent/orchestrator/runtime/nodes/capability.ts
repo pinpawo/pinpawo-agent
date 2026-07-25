@@ -135,6 +135,7 @@ export function createCapabilityNode(params: {
           id: `capability:${capability.name}`,
           owner: capability.name,
           content: capability.instructions.content,
+          digest: capability.instructions.digest,
         },
         ...(runtimeEnvironment
           ? [{

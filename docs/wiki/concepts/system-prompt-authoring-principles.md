@@ -265,7 +265,7 @@ The remaining metrics either classify a failed objective or describe the run:
 |---|---|---|---|---|
 | `entry.execution-shape` | Select `answer`, `direct_task`, or `needs_plan` by whether new execution is required, its target is determined, and prior planning is required | Chosen action matches the evidence and execution requirement; a direct task preserves the complete current-task objective | unsupported answer, unnecessary execution, ambiguous-target execution, wrong task grouping | schema/invocation status, variants, tokens, latency, cost |
 | `planner.execution-boundary` | Use completed facts and returned results to materialize the next independently executable task and preserve only the valid unstarted tail | Current task, capability intents, justified boundaries, cancellation, grouping, ordering, and future-goal preservation satisfy the supplied goal and handoff | wrong grouping, completed work replanned, obsolete work retained, valid work dropped, future purpose lost | schema/invocation status, plan shape and task count, plan effect, rubber-stamp behavior, variants, tokens, latency, cost |
-| `capability.executor-selection` | Select the best currently available executor for the immutable task | Selected lane fits the task and belongs to the supplied candidate set or valid general fallback | missed custom match, wrong custom match, incorrect general fallback, unavailable lane | schema/invocation status, candidate set, variants, tokens, latency, cost |
+| `capability.executor-selection` | Select an available executor that can complete the immutable task and best fits it, or return `unavailable` | Selection matches actual executor availability and whole-task ability; a retrieved custom candidate is not accepted solely because it matched search | missed capable executor, selected incomplete executor, false `unavailable`, invented executor | schema/invocation status, candidate set, deterministic fast path, variants, tokens, latency, cost |
 | `outcome.announce-verdict` | Judge the current announce against the current task and overall user goal | Verdict reflects current-task sufficiency, remaining work, and required user input without sibling-result substitution | premature completion, missed completion, sibling contamination, missed user-input stop | schema/invocation status, gap-note shape, variants, tokens, latency, cost |
 | `answer.user-visible-close` | Fulfil the current reply objective: direct response, handoff synthesis, requested replay, focused user question, or completion acknowledgement | Case-specific criteria establish correctness, evidence fidelity, and the accepted close behavior | missing requested content, unsupported claim, false status, wrong reply mode, unrequested result replay | invocation status, length, overlap, variants, tokens, latency, cost |
 
@@ -530,6 +530,31 @@ general execution boundary: several cases explicitly name query, check, or run
 operations also named by the prompt. Natural-language paired cases derived from
 the [practical-reasoning philosophy](orchestrator-practical-reasoning.md)
 remain required before provider expansion.
+
+## Capability selection contract evidence
+
+The capabilityDecision follow-up made the output and runtime contract describe
+the actual choice rather than a graph lane:
+
+- `selection` represents the executor decision; `lane` is materialized only
+  after a real executor is selected;
+- `general` appears in the schema only when general tools actually exist;
+- custom choices are limited to the current search candidates, while a search
+  match remains only relevance evidence;
+- `unavailable` explicitly represents that none of the supplied executors can
+  complete the whole task;
+- zero custom candidates use the same deterministic `general | unavailable`
+  fast path in production and evals.
+
+The unchanged profile was run against DashScope `glm-5.2`, temperature `0`,
+provider-default reasoning effort, and JSON Mode. Eight cases ran three times
+each (`24/24` goals achieved) with no schema, invocation, or evaluation errors.
+Six cases exercised the model (`18/18` model invocations); two zero-candidate
+cases exercised the deterministic fast path (`6/6` runs, no model call). The
+model correctly rejected a search-matched but incomplete custom executor in
+both forms: selecting capable general tools when present and `unavailable` when
+they were absent. This validates the current GLM-5.2 profile, not cross-model
+generality.
 
 ## Application to the current entryDecision issue
 

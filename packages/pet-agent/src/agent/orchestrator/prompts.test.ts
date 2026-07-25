@@ -4,15 +4,15 @@ import { HumanMessage } from '@langchain/core/messages';
 import { materializeDelegation } from './delegationBriefing';
 import {
   buildCapabilityArtifactContext,
+  buildCapabilityDecisionInput,
+  buildCapabilityDecisionSystemPrompt,
+  buildCapabilityDecisionAvailableExecutorsContext,
   buildCapabilityPlanningDecisionInput,
   buildCapabilityPlanningDecisionSystemPrompt,
   buildDelegationOutcomeCurrentTaskContext,
   buildDelegationOutcomeDecisionInput,
   buildDelegationOutcomeOtherTasksContext,
   buildPreparedRequestContext,
-  buildRouteDecisionInput,
-  buildRouteDecisionSystemPrompt,
-  buildRouteTargetsContext,
   buildRuntimeContext,
   buildSubagentAnnounceContext,
   buildTaskDecisionInput,
@@ -135,7 +135,7 @@ test('entry decision keeps runtime state in the input context', () => {
 });
 
 test('capability decision keeps task and candidates in the input context', () => {
-  const targetsContext = buildRouteTargetsContext({
+  const availableExecutorsContext = buildCapabilityDecisionAvailableExecutorsContext({
     generalTools: [],
     capabilityCandidates: [{
       name: 'explore',
@@ -143,20 +143,17 @@ test('capability decision keeps task and candidates in the input context', () =>
       score: 8,
       matchedTerms: ['代码库理解'],
     }],
-    capabilitySearchAttempted: true,
-    capabilitySearchQuery: '代码库理解',
   });
-  const prompt = buildRouteDecisionSystemPrompt({
+  const prompt = buildCapabilityDecisionSystemPrompt({
     actor: testActor,
     outputInstruction: 'CAPABILITY_OUTPUT_INSTRUCTION',
   });
-  const input = buildRouteDecisionInput({
+  const input = buildCapabilityDecisionInput({
     pendingTask: {
       task: '在本地仓库检索相关实现。',
       contextSummary: '用户需要判断 issue 是否已实现。',
-      searchKeywords: '代码库理解',
     },
-    targetsContext,
+    availableExecutorsContext,
     runtimeContext: buildRuntimeContext('/repo', 'Node 20'),
   });
 
@@ -164,7 +161,9 @@ test('capability decision keeps task and candidates in the input context', () =>
   assert.match(input, /<capability_decision_input>/);
   assert.match(input, /在本地仓库检索相关实现/);
   assert.match(input, /capability\.explore/);
+  assert.match(input, /<available_executors role="fact" source="runtime">/);
   assert.match(input, /<runtime_context/);
+  assert.doesNotMatch(input, /search_keywords|matchedTerms|匹配词/);
   assert.doesNotMatch(prompt, /在本地仓库检索相关实现|capability\.explore|\/repo/);
 });
 

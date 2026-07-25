@@ -54,40 +54,29 @@ export function buildRunDelegationSummaryContext(runDelegationSummaries: RunDele
   return lines.join('\n');
 }
 
-export function buildRouteTargetsContext(params: {
+export function buildCapabilityDecisionAvailableExecutorsContext(params: {
   generalTools: StructuredTool[];
   capabilityCandidates: CapabilityCandidate[];
-  capabilitySearchAttempted: boolean;
-  capabilitySearchQuery: string | null;
-  capabilityRegistryAvailable?: boolean;
 }): string {
-  const lines = ['Capability decision facts：'];
+  const lines = ['当前可用执行能力：'];
   if (params.generalTools.length > 0) {
-    lines.push('', 'general capability（可使用下列通用工具）：');
+    lines.push('', 'general（可使用下列通用工具）：');
     for (const toolItem of params.generalTools) {
       lines.push(`- ${toolItem.name}: ${clipForPrompt(toolItem.description, 140)}`);
     }
-  } else {
-    lines.push('', 'general capability：不可用');
   }
 
   if (params.capabilityCandidates.length > 0) {
-    lines.push('', 'custom capability 候选：');
+    lines.push('', 'custom capabilities：');
     for (const candidate of params.capabilityCandidates) {
-      const matchedTerms = candidate.matchedTerms.length > 0
-        ? `；匹配：${candidate.matchedTerms.join('|')}`
-        : '';
-      lines.push(`- capability.${candidate.name}：${clipForPrompt(candidate.description, 180)}${matchedTerms}`);
+      lines.push(
+        `- capability.${candidate.name}：${clipForPrompt(candidate.description, 180)}`,
+      );
     }
-  } else if (params.capabilitySearchAttempted) {
-    lines.push('', 'custom capability：已搜索，未找到匹配候选。');
-    if (params.capabilitySearchQuery) {
-      lines.push(`- 搜索 query：${clipForPrompt(params.capabilitySearchQuery, 120)}`);
-    }
-  } else if (params.capabilityRegistryAvailable) {
-    lines.push('', 'custom capability：当前没有候选。');
-  } else {
-    lines.push('', 'custom capability：不可用');
+  }
+
+  if (params.generalTools.length === 0 && params.capabilityCandidates.length === 0) {
+    lines.push('- 无');
   }
   return lines.join('\n');
 }

@@ -3,19 +3,17 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 export type CapabilityDecisionBasicsInput = {
   task: string;
   contextSummary?: string | null;
-  baselineSearchQuery: string;
   availableCapabilities: Array<{
     name: string;
     description: string;
     keywords: string[];
   }>;
-  generalToolsAvailable?: string[];
+  generalToolsAvailable: string[];
 };
 
 export type CapabilityDecisionBasicsExpected = {
-  expectedLane: string;
+  expectedSelection: string;
   expectedCandidateNames: string[];
-  expectedSearchQueryTerms: string[];
   reason: string;
 };
 
@@ -30,7 +28,6 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
     tags: ['capability_search', 'capability_decision'],
     input: {
       task: '调查 auth 模块当前的代码结构、关键入口和依赖关系，为后续重构形成证据。',
-      baselineSearchQuery: '代码库理解|代码结构|调查|auth 模块|repository exploration',
       availableCapabilities: [
         {
           name: 'explore',
@@ -46,12 +43,11 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
       generalToolsAvailable: ['read_file', 'search_files', 'shell'],
     },
     expected: {
-      expectedLane: 'capability.explore',
+      expectedSelection: 'capability.explore',
       expectedCandidateNames: ['explore'],
-      expectedSearchQueryTerms: ['代码结构', '调查', 'auth'],
-      reason: 'Repository exploration should use the dedicated explore capability instead of the general lane.',
+      reason: 'Repository exploration should use the dedicated explore capability.',
     },
-    metadata: { difficulty: 'medium', reason: 'Codebase investigation is the canonical explore route.', source: SOURCE_FILE },
+    metadata: { difficulty: 'medium', reason: 'Canonical dedicated capability selection.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.pet-post-routes-to-custom-capability`,
@@ -60,7 +56,6 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
     tags: ['capability_search', 'capability_decision'],
     input: {
       task: '为小白生成今天的小红书宠物日常草稿。',
-      baselineSearchQuery: '宠物发帖|小红书|日常草稿',
       availableCapabilities: [
         {
           name: 'daily_post',
@@ -76,12 +71,11 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
       generalToolsAvailable: ['read_file'],
     },
     expected: {
-      expectedLane: 'capability.daily_post',
+      expectedSelection: 'capability.daily_post',
       expectedCandidateNames: ['daily_post'],
-      expectedSearchQueryTerms: ['宠物', '小红书'],
-      reason: 'A domain capability is a better executor than general tools.',
+      reason: 'The domain capability covers the complete task.',
     },
-    metadata: { difficulty: 'easy', reason: 'Positive custom capability route.', source: SOURCE_FILE },
+    metadata: { difficulty: 'easy', reason: 'Positive custom capability selection.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.missing-execution-parameters-keep-capability-match`,
@@ -90,11 +84,10 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
     tags: ['capability_search', 'capability_decision'],
     input: {
       task: '为小白准备一条宠物日常内容。',
-      baselineSearchQuery: '宠物日常|内容创作',
       availableCapabilities: [
         {
           name: 'daily_post',
-          description: 'Generate daily social media drafts for a pet profile and clarify missing publishing details.',
+          description: 'Generate daily social media drafts for a pet profile and obtain ordinary publishing details while executing.',
           keywords: ['宠物日常', '内容创作', '草稿'],
         },
         {
@@ -106,12 +99,11 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
       generalToolsAvailable: ['read_file'],
     },
     expected: {
-      expectedLane: 'capability.daily_post',
+      expectedSelection: 'capability.daily_post',
       expectedCandidateNames: ['daily_post'],
-      expectedSearchQueryTerms: ['宠物日常', '内容创作'],
-      reason: 'Missing platform or publishing details should not hide an otherwise matching capability.',
+      reason: 'Ordinary execution details do not make a matching executor unavailable.',
     },
-    metadata: { difficulty: 'medium', reason: 'Capability matching stays stable when execution parameters need clarification.', source: SOURCE_FILE },
+    metadata: { difficulty: 'medium', reason: 'Execution details are not executor requirements.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.file-read-falls-back-to-general`,
@@ -120,7 +112,6 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
     tags: ['capability_search', 'capability_decision'],
     input: {
       task: '读取 src/index.ts 并返回文件内容。',
-      baselineSearchQuery: '读取文件|TypeScript|src/index.ts',
       availableCapabilities: [
         {
           name: 'daily_post',
@@ -131,12 +122,11 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
       generalToolsAvailable: ['read_file', 'search_files'],
     },
     expected: {
-      expectedLane: 'general',
+      expectedSelection: 'general',
       expectedCandidateNames: [],
-      expectedSearchQueryTerms: ['读取文件', 'index.ts'],
-      reason: 'No custom capability matches; built-in general tools can execute the task.',
+      reason: 'An empty custom search can be handled by available general tools.',
     },
-    metadata: { difficulty: 'easy', reason: 'General fallback after an empty capability search.', source: SOURCE_FILE },
+    metadata: { difficulty: 'easy', reason: 'Deterministic general fallback.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.browser-task-routes-to-browser`,
@@ -145,7 +135,6 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
     tags: ['capability_search', 'capability_decision'],
     input: {
       task: '用浏览器打开 https://example.com，返回页面标题和主要内容。',
-      baselineSearchQuery: '浏览器|打开网页|页面内容',
       availableCapabilities: [
         {
           name: 'browser',
@@ -161,21 +150,65 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
       generalToolsAvailable: ['web_search'],
     },
     expected: {
-      expectedLane: 'capability.browser',
+      expectedSelection: 'capability.browser',
       expectedCandidateNames: ['browser'],
-      expectedSearchQueryTerms: ['浏览器', '网页'],
-      reason: 'Interactive browser work should use the browser capability.',
+      reason: 'Interactive browser work is fully covered by the browser capability.',
     },
-    metadata: { difficulty: 'easy', reason: 'Browser capability route.', source: SOURCE_FILE },
+    metadata: { difficulty: 'easy', reason: 'Browser capability selection.', source: SOURCE_FILE },
   },
   {
-    id: `${SUITE}.unavailable-capability-falls-back-to-general`,
-    name: 'unavailable-capability-falls-back-to-general',
+    id: `${SUITE}.false-positive-custom-candidate-uses-general`,
+    name: 'false-positive-custom-candidate-uses-general',
+    suite: SUITE,
+    tags: ['capability_search', 'capability_decision'],
+    input: {
+      task: '读取并修改 src/index.ts 的导出，然后运行相关测试。',
+      availableCapabilities: [
+        {
+          name: 'code_review',
+          description: 'Review an existing src/index.ts change and return comments; it cannot edit files or run tests.',
+          keywords: ['src/index.ts', '代码审查'],
+        },
+      ],
+      generalToolsAvailable: ['read_file', 'write_file', 'shell'],
+    },
+    expected: {
+      expectedSelection: 'general',
+      expectedCandidateNames: ['code_review'],
+      reason: 'Candidate retrieval is not proof that the candidate can execute the complete task.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Reject a retrieved but incomplete custom executor.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.false-positive-custom-candidate-is-unavailable`,
+    name: 'false-positive-custom-candidate-is-unavailable',
+    suite: SUITE,
+    tags: ['capability_search', 'capability_decision'],
+    input: {
+      task: '读取并修改 src/index.ts 的导出，然后运行相关测试。',
+      availableCapabilities: [
+        {
+          name: 'code_review',
+          description: 'Review an existing src/index.ts change and return comments; it cannot edit files or run tests.',
+          keywords: ['src/index.ts', '代码审查'],
+        },
+      ],
+      generalToolsAvailable: [],
+    },
+    expected: {
+      expectedSelection: 'unavailable',
+      expectedCandidateNames: ['code_review'],
+      reason: 'No supplied executor can perform the complete task.',
+    },
+    metadata: { difficulty: 'hard', reason: 'Explicit unavailable selection after candidate retrieval.', source: SOURCE_FILE },
+  },
+  {
+    id: `${SUITE}.no-executor-is-unavailable`,
+    name: 'no-executor-is-unavailable',
     suite: SUITE,
     tags: ['capability_search', 'capability_decision'],
     input: {
       task: '在团队日历中创建明天下午三点的发布复盘会议。',
-      baselineSearchQuery: '团队日历|创建会议|日程安排',
       availableCapabilities: [
         {
           name: 'browser',
@@ -183,19 +216,14 @@ const cases: AgentEvalCase<CapabilityDecisionBasicsInput, CapabilityDecisionBasi
           keywords: ['浏览器', '网页', '打开', '页面内容'],
         },
       ],
-      generalToolsAvailable: ['ask_user'],
+      generalToolsAvailable: [],
     },
     expected: {
-      expectedLane: 'general',
+      expectedSelection: 'unavailable',
       expectedCandidateNames: [],
-      expectedSearchQueryTerms: ['日历', '会议'],
-      reason: 'The requested calendar capability is unavailable and must not be invented as a route.',
+      reason: 'No matching custom capability or general executor is available.',
     },
-    metadata: {
-      difficulty: 'medium',
-      reason: 'Unavailable capabilities remain outside the model-visible lane enum.',
-      source: SOURCE_FILE,
-    },
+    metadata: { difficulty: 'medium', reason: 'Deterministic unavailable fallback.', source: SOURCE_FILE },
   },
 ];
 
@@ -204,7 +232,7 @@ export const capabilityDecisionBasicsDataset: AgentEvalDataset<
   CapabilityDecisionBasicsExpected
 > = {
   name: SUITE,
-  description: 'Evaluates capability resolution from an already-defined current task. baselineSearchQuery exists only for the current production search + routeDecision adapter.',
+  description: 'Evaluates capability search plus executor selection from the current task and actual runtime availability.',
   cases,
   metadata: {
     owner: 'pet-agent',

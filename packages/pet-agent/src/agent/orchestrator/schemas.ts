@@ -6,9 +6,15 @@ import type {
   OrchestrationDecisionStructuredOutputOptions,
 } from './types';
 
-const ROUTE_CAPABILITY_PREFIX = 'capability.' as const;
+const CUSTOM_CAPABILITY_SELECTION_PREFIX = 'capability.' as const;
+export const CAPABILITY_UNAVAILABLE_SELECTION = 'unavailable' as const;
 
-export type RouteCapabilityLane = `${typeof ROUTE_CAPABILITY_PREFIX}${string}`;
+export type CustomCapabilitySelection =
+  `${typeof CUSTOM_CAPABILITY_SELECTION_PREFIX}${string}`;
+export type CapabilitySelection =
+  | typeof CAPABILITY_UNAVAILABLE_SELECTION
+  | 'general'
+  | CustomCapabilitySelection;
 
 export type TaskDecision = {
   action: 'answer' | 'direct_task' | 'needs_plan';
@@ -32,32 +38,42 @@ export type DelegationOutcomeDecision = {
   gap_note: string | null;
 };
 
-export type RouteDecision = {
-  lane: 'general' | RouteCapabilityLane;
+export type CapabilityDecision = {
+  selection: CapabilitySelection;
 };
 
-export type OrchestrationDecisionSchemaParams = {
+export type CapabilityDecisionSchemaParams = {
   capabilityCandidates: ReadonlyArray<{ name: string }>;
+  generalAvailable: boolean;
 };
 
-export function buildRouteCapabilityLane(capabilityName: string): RouteCapabilityLane {
-  return `${ROUTE_CAPABILITY_PREFIX}${capabilityName}` as RouteCapabilityLane;
+export function buildCustomCapabilitySelection(
+  capabilityName: string,
+): CustomCapabilitySelection {
+  return `${CUSTOM_CAPABILITY_SELECTION_PREFIX}${capabilityName}` as CustomCapabilitySelection;
 }
 
-export function parseRouteLane(lane: string): {
-  kind: 'general' | 'capability';
+export function parseCapabilitySelection(selection: string): {
+  kind: 'unavailable' | 'general' | 'capability' | 'invalid';
   capabilityName: string | null;
 } {
-  if (lane.startsWith(ROUTE_CAPABILITY_PREFIX)) {
+  if (selection === CAPABILITY_UNAVAILABLE_SELECTION) {
+    return { kind: 'unavailable', capabilityName: null };
+  }
+  if (selection.startsWith(CUSTOM_CAPABILITY_SELECTION_PREFIX)) {
     return {
       kind: 'capability',
-      capabilityName: lane.slice(ROUTE_CAPABILITY_PREFIX.length) || null,
+      capabilityName:
+        selection.slice(CUSTOM_CAPABILITY_SELECTION_PREFIX.length) || null,
     };
   }
-  return { kind: 'general', capabilityName: null };
+  if (selection === 'general') {
+    return { kind: 'general', capabilityName: null };
+  }
+  return { kind: 'invalid', capabilityName: null };
 }
 
-function validateCapabilityCandidateNames(params: OrchestrationDecisionSchemaParams) {
+function validateCapabilityCandidateNames(params: CapabilityDecisionSchemaParams) {
   const seen = new Set<string>();
   for (const candidate of params.capabilityCandidates) {
     if (candidate.name.includes('.')) {
@@ -144,19 +160,18 @@ export function buildDelegationOutcomeDecisionSchema() {
   }));
 }
 
-export function buildRouteDecisionSchema(params: OrchestrationDecisionSchemaParams) {
+export function buildCapabilityDecisionSchema(params: CapabilityDecisionSchemaParams) {
   validateCapabilityCandidateNames(params);
-  const laneValues = [
-    'general',
-    ...params.capabilityCandidates.map((c) => buildRouteCapabilityLane(c.name)),
-  ] as [string, ...string[]];
-  const capabilityLaneValues = params.capabilityCandidates.map((c) => buildRouteCapabilityLane(c.name));
+  const selectionValues = [
+    CAPABILITY_UNAVAILABLE_SELECTION,
+    ...(params.generalAvailable ? ['general'] : []),
+    ...params.capabilityCandidates.map((candidate) =>
+      buildCustomCapabilitySelection(candidate.name)),
+  ] as const;
 
   return z.object({
-    lane: z.enum(laneValues).describe(
-      capabilityLaneValues.length > 0
-        ? `选择执行当前 task 的 capability；结果用 lane 编码。当前 capability lane：${capabilityLaneValues.join('、')}。`
-        : '选择执行当前 task 的 capability；结果用 lane 编码。当前没有可选 capability lane。',
+    selection: z.enum(selectionValues).describe(
+      '当前 task 的执行能力；unavailable=提供的执行能力都不能承担完整 task。',
     ),
   });
 }
@@ -199,11 +214,15 @@ export function buildCapabilityPlanningDecisionOutputInstruction(method?: Struct
   );
 }
 
-export function buildRouteDecisionOutputInstruction(
-  params: OrchestrationDecisionSchemaParams,
+export function buildCapabilityDecisionOutputInstruction(
+  params: CapabilityDecisionSchemaParams,
   method?: StructuredOutputMethod,
 ): string {
-  return buildDecisionOutputInstruction('route decision', buildRouteDecisionSchema(params), method);
+  return buildDecisionOutputInstruction(
+    'capability decision',
+    buildCapabilityDecisionSchema(params),
+    method,
+  );
 }
 
 export function buildDelegationOutcomeDecisionOutputInstruction(method?: StructuredOutputMethod): string {

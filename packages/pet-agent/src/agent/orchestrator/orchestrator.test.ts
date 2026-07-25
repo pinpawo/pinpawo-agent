@@ -126,7 +126,6 @@ const testActor: AgentActor = {
 function nextTaskDecision(
   task: string,
   contextSummary: string | null = null,
-  _searchKeywords: string | null = null,
 ) {
   return {
     action: 'direct_task',
@@ -136,11 +135,11 @@ function nextTaskDecision(
 }
 
 function routeCapabilityDecision(capabilityName: string) {
-  return { lane: `capability.${capabilityName}` };
+  return { selection: `capability.${capabilityName}` };
 }
 
 function routeGeneralDecision() {
-  return { lane: 'general' };
+  return { selection: 'general' };
 }
 
 function goalDoneDecision() {
@@ -305,7 +304,6 @@ test('capability decision searches candidates from the pending task', async () =
           return nextTaskDecision(
             '继续调查 pet-app 仓库中 local-agent 的 capability 注册链路。',
             '上一轮 explore 调查仍处于 progress 状态。',
-            '代码库理解|调查|capability 注册链路',
           );
         }
         if (decisionCallCount > 2) {
@@ -313,7 +311,7 @@ test('capability decision searches candidates from the pending task', async () =
         }
         schemaAllowsExplore = Boolean(
           (schema as { safeParse?: (value: unknown) => { success: boolean } }).safeParse?.({
-            lane: 'capability.explore',
+            selection: 'capability.explore',
           }).success,
         );
         routeSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
@@ -358,8 +356,8 @@ test('capability decision searches candidates from the pending task', async () =
   assert.doesNotMatch(routeSystemPrompt, /delegate_capability\.explore/);
   assert.match(routeInput, /<capability_decision_input>/);
   assert.match(routeInput, /继续调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
-  assert.match(routeInput, /匹配：继续调查 pet-app 仓库中 local-agent 的 capability 注册链路/);
   assert.match(routeInput, /capability\.explore/);
+  assert.doesNotMatch(routeInput, /匹配：|search_keywords/);
   assert.doesNotMatch(routeInput, /delegate_capability\.explore/);
   assert.equal(decisionCallCount, 3);
 });
@@ -380,7 +378,7 @@ test('task_done reroutes through capabilityPlanner before the next task', async 
         const inputText = String((messages.at(-1) as { content?: unknown })?.content ?? '');
         if (structuredCallCount === 1) {
           taskDecisionInputs.push(inputText);
-          return nextTaskDecision('读取 issue #269 并提炼需求点。', null, 'issue|需求分析');
+          return nextTaskDecision('读取 issue #269 并提炼需求点。');
         }
         if (structuredCallCount === 2) {
           routeInputs.push(inputText);
@@ -637,7 +635,63 @@ test('missing executable capability routes through the answer node', async () =>
   assert.equal(state.runPendingTask, null);
 });
 
-test('route decision rejects missing pending task as an invariant violation', async () => {
+test('capability decision can reject a retrieved candidate when no executor covers the task', async () => {
+  let structuredCallCount = 0;
+  let capabilityDecisionInput = '';
+  const model = {
+    invoke: async () => new AIMessage('当前没有能够完成文件修改和测试的执行能力。'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage(''),
+    }),
+    withStructuredOutput: () => ({
+      invoke: async (messages: unknown[]) => {
+        structuredCallCount += 1;
+        if (structuredCallCount === 1) {
+          return nextTaskDecision('读取并修改 src/index.ts 的导出，然后运行相关测试。');
+        }
+        capabilityDecisionInput = String(
+          (messages.at(-1) as { content?: unknown })?.content ?? '',
+        );
+        return { selection: 'unavailable' };
+      },
+    }),
+  } as unknown as AgentModels['act'];
+
+  const graph = createOrchestratorGraph({
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+  });
+
+  const state = await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('修改 src/index.ts 并测试'),
+  ]), {
+    configurable: {
+      thread_id: 'retrieved-candidate-unavailable',
+      actor: testActor,
+      capabilities: [
+        capability(
+          'code_review',
+          'Review an existing src/index.ts change and return comments; it cannot edit files or run tests.',
+        ),
+      ],
+      toolkits: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(structuredCallCount, 2);
+  assert.match(capabilityDecisionInput, /capability\.code_review/);
+  assert.doesNotMatch(capabilityDecisionInput, /\ngeneral（/);
+  assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /没有能够完成/);
+  assert.equal(state.runNextDelegation, null);
+  assert.equal(state.runPendingTask, null);
+  assert.equal(state.runDelegationSummaries.length, 0);
+});
+
+test('capability decision rejects missing pending task as an invariant violation', async () => {
   const model = new FakeListChatModel({ responses: ['unused'] }) as unknown as AgentModels['act'];
   const runCapabilityDecision = createCapabilityDecisionRunner({
     models: { act: model, observe: model },
@@ -712,7 +766,7 @@ test('entry decision schema does not advertise capability actions', async () => 
   assert.doesNotMatch(decisionSystemPrompt, /delegate_capability\.browser/);
 });
 
-test('forcedCapabilityNames pre-seeds route candidates without keyword search', async () => {
+test('forcedCapabilityNames pre-seeds capability candidates without keyword search', async () => {
   let legacyToolPathCalled = false;
   let routeSystemPrompt = '';
   let routeInput = '';
@@ -729,7 +783,7 @@ test('forcedCapabilityNames pre-seeds route candidates without keyword search', 
       invoke: async (messages: unknown[]) => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return nextTaskDecision('规划一支讲秋日食材的短视频。', null, '短视频|Planner');
+          return nextTaskDecision('规划一支讲秋日食材的短视频。');
         }
         if (structuredCallCount === 2) {
           routeSystemPrompt = String((messages.at(0) as { content?: unknown })?.content ?? '');
@@ -1315,7 +1369,7 @@ test('capability runtime receives available toolkit metadata and fixed uses stil
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('inspect repository', null, 'inspect repository');
+          return nextTaskDecision('inspect repository');
         }
         if (routeCallCount === 2) {
           return routeCapabilityDecision('inspect_repo');
@@ -1626,7 +1680,7 @@ test('capability artifact refs recorded by subagent tools are merged into state'
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('inspect issue context', null, 'explore issue');
+          return nextTaskDecision('inspect issue context');
         }
         if (routeCallCount === 2) {
           return routeCapabilityDecision('explore');
@@ -1710,7 +1764,7 @@ test('capability result artifacts are represented only as refs in state', async 
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return nextTaskDecision('create post', null, 'daily post');
+          return nextTaskDecision('create post');
         }
         if (routeCallCount === 2) {
           return routeCapabilityDecision('daily_post');

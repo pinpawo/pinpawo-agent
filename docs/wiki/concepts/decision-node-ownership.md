@@ -26,7 +26,7 @@ Each decision node owns one semantic question:
 |---|---|---|
 | `entryDecision` | Whether the run can answer now, needs one execution boundary, or needs planning | Capability selection, plan creation, tool execution, user reply |
 | `capabilityPlanner` | Capability execution boundaries and materialization of the next task | Concrete capability ID, announce acceptance, user reply |
-| `capabilityDecision` | Which currently available executor best fits the already-defined task | Task rewriting, planning, completion judgment |
+| `capabilityDecision` | Which currently available executor can complete and best fits the already-defined task, or that none can | Task rewriting, replanning, completion judgment, user reply |
 | `outcomeDecision` | Whether the current announce is sufficient for the current task and whether autonomous work continues | Next-task generation, capability selection, user reply |
 | `answer` | The fixed user-visible close for a terminal run state | Tool execution and graph-state decisions |
 
@@ -69,6 +69,28 @@ current three-way entry contract must preserve that semantic distinction:
 
 Whether the user phrased a request as a question is not itself an execution-shape
 decision.
+
+## Capability selection boundary
+
+`general` and custom capabilities are peer executor forms. Their registration
+source and breadth differ, but `general` is not the failure state of custom
+selection. The decision compares the actual descriptions of all choices exposed
+for the invocation and selects an executor only when it can complete the whole
+immutable task.
+
+Capability search narrows the custom candidate set; a search hit is evidence of
+relevance, not proof of executability. The runtime therefore exposes only the
+current custom candidates, exposes `general` only when general tools actually
+exist, and always permits the explicit `unavailable` result. If no custom
+candidate exists, code skips the model and deterministically selects `general`
+or `unavailable` from actual general-tool availability.
+
+`unavailable` creates no delegation and sends the run to `answer` with the
+unexecuted task still visible as terminal context. It does not authorize
+`capabilityDecision` to split the task, change the plan, partially execute the
+task, or invent an executor. Capability descriptions support selection; after
+selection, execution behavior remains owned by the selected capability's
+runtime instructions and tools.
 
 ## Ownership change discipline
 

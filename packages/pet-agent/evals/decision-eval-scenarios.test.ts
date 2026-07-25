@@ -38,7 +38,7 @@ test('decision eval scenarios cover every canonical prompt distribution', () => 
     planner: getDecisionEvalScenarios('planner').length,
     capability: getDecisionEvalScenarios('capability').length,
     outcome: getDecisionEvalScenarios('outcome').length,
-  }, { entry: 13, planner: 6, capability: 6, outcome: 5 });
+  }, { entry: 13, planner: 6, capability: 8, outcome: 5 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
@@ -115,7 +115,7 @@ test('decision eval scenarios invoke, parse, normalize, and score each target', 
     {
       target: 'capability' as const,
       name: 'file-read-falls-back-to-general',
-      output: { lane: 'general' },
+      output: { selection: 'general' },
     },
     {
       target: 'outcome' as const,
@@ -140,7 +140,7 @@ test('decision eval keeps runtime and shape evidence outside goal criteria', asy
     ({ caseName }) => caseName === 'auth-structure-routes-to-explore',
   );
   assert.ok(capability);
-  const capabilityResult = await capability.run(structuredModel({ lane: 'capability.explore' }));
+  const capabilityResult = await capability.run(structuredModel({ selection: 'capability.explore' }));
   assert.deepEqual(
     capabilityResult.scores.map(({ key }) => key),
     ['capability_selection_correct'],

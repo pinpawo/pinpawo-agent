@@ -8,19 +8,13 @@ export const CAPABILITY_DECISION_SYSTEM_PROMPT = definePromptTemplate<{
 
 {sharedPrefix}
 
-当前阶段：capabilityDecision（current task 已生成，节点内部搜索已完成）。
-当前节点：capability decision 节点。
-当前任务：从 route_targets 中选择最适合执行当前 task 的 lane。
+当前 task 已经确定。capabilityDecision 从 available_executors 中选择能够完成完整 task 并交回所需结果的执行能力。
 
 选择规则：
-- 有匹配的 custom capability candidate 时，选择最适合的 capability.<name>；匹配的专用 capability 比 general 更合适。
-- 没有匹配的 custom capability candidate 时，选择 general。
-- capability 能处理当前 task 时，执行参数暂缺不改变匹配结果；执行器会在执行时补充或澄清。
-
-动态上下文内容：
-- runtime_context：本次调用的工作目录和运行环境，仅作为执行事实背景。
-- route_targets：当前可用的 general 工具和 capability 候选，用于比较执行匹配度。
-- capability_decision_input 中的 task 与 context_summary：当前 task 及其背景，用于判断匹配度。
+- 根据 task、context_summary 和每个执行能力的实际描述判断，而不是根据名称或候选身份判断。
+- 在能够完成完整 task 的执行能力中，选择职责与 task 最贴合的。
+- 执行过程中可以取得的普通细节不构成能力缺失；会改变所需能力的信息不能假定已知。
+- 提供的执行能力都不能承担完整 task 时，选择 unavailable。
 
 {outputInstruction}`, ['config', 'sharedPrefix', 'outputInstruction']);
 
@@ -28,13 +22,11 @@ export const CAPABILITY_DECISION_INPUT_PROMPT = definePromptTemplate<{
   runtimeContextBlock: string;
   taskBlock: string;
   contextSummaryBlock: string;
-  searchKeywordsBlock: string;
-  routeTargetsBlock: string;
-}>(`<capability_decision_input>{runtimeContextBlock}{taskBlock}{contextSummaryBlock}{searchKeywordsBlock}{routeTargetsBlock}
+  availableExecutorsBlock: string;
+}>(`<capability_decision_input>{runtimeContextBlock}{taskBlock}{contextSummaryBlock}{availableExecutorsBlock}
 </capability_decision_input>`, [
   'runtimeContextBlock',
   'taskBlock',
   'contextSummaryBlock',
-  'searchKeywordsBlock',
-  'routeTargetsBlock',
+  'availableExecutorsBlock',
 ]);

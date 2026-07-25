@@ -53,7 +53,7 @@ test('capability scorer gates only the model-owned executor selection', () => {
   const testCase = capabilityDecisionBasicsDataset.cases[0];
   assert.ok(testCase);
   const scores = scoreCapabilityDecision({
-    selectedLane: testCase.expected.expectedLane,
+    selection: testCase.expected.expectedSelection,
   }, testCase.expected);
   assert.deepEqual(scores.map(({ key }) => key), ['capability_selection_correct']);
   assert.ok(allPass(scores));

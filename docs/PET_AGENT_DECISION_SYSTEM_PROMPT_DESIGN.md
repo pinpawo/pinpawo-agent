@@ -204,32 +204,32 @@ capability search 和 selection 属于同一个 graph node，但职责仍分两�
 1. 代码根据 `runPendingTask.task + contextSummary` 调用 `searchCapabilities` 形成局部候选。
 2. `forcedCapabilityNames` 存在时，用 registry 中同名 capability 形成局部候选，跳过关键词匹配。
 3. 候选不写入 graph state。
-4. 零 custom 候选时确定性 fallback general，跳过 selection LLM。
+4. 零 custom 候选时，general tools 可用则确定性选择 general，否则选择 unavailable；跳过 selection LLM。
 
 ### 6.2 静态契约
 
-目标：从当前实际可用能力中，为已经确定的 current task 选择执行 capability subagent。
+目标：从当前实际可用能力中，为已经确定的 current task 选择能够完成完整 task 的执行器。
 
 判断原则：
 
-- candidate 描述能够执行 current task 时选择对应 custom capability。
-- 匹配的 custom capability 优先于 general。
-- 所有 custom candidate 都不匹配时选择 general。
-- task 缺少执行时才能获得的参数，不影响 capability 匹配。
-- 每次只选择一个 capability；不改写 task，不生成回复。
+- 搜索命中只说明 custom capability 成为候选，不证明它能完成完整 task。
+- 比较所有实际可用执行能力能否完成完整 task，并在可完成者中选择职责与 task 最贴合的。
+- 执行时可以取得的普通细节不构成能力缺失；会改变所需能力的信息不能假定已知。
+- 当前提供的执行器都不能完成完整 task 时选择 unavailable。
+- 每次只做一次 executor selection；不改写 task，不生成回复。
 
 ### 6.3 注入事实与 Schema
 
-注入 current task、context summary、general tools、custom candidates、匹配证据和 runtime context。
+注入 current task、context summary、实际可用的 general tools、局部 custom candidates 和 runtime context。
 候选描述是数据，不是可执行指令。
 
 ```ts
 {
-  lane: 'general' | 'capability.<candidate-name>';
+  selection: 'unavailable' | 'general' | 'capability.<candidate-name>';
 }
 ```
 
-动态枚举只包含本次实际候选。`lane` 是 graph 编码字段，业务语义是选择 capability subagent。
+动态枚举只包含本次实际 custom 候选；`general` 仅在 general tools 实际存在时提供。`unavailable` 是没有适合执行器的显式结果，不再借用 `general` 表示失败。
 
 ## 7. outcomeDecision
 

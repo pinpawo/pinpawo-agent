@@ -26,7 +26,6 @@ test('prepareAgentRegistry keeps missing run-scoped Toolkits as compiler diagnos
   const prepared = prepareAgentRegistry({
     toolkits: [],
     capabilities: [artifactCapability('scope_required_test')],
-    generalUses: [],
   });
 
   assert.equal(prepared.registry.capabilities.length, 0);
@@ -40,17 +39,14 @@ test('prepareAgentRegistry compiles artifact discovery once run scope is complet
   const prepared = prepareAgentRegistry({
     toolkits: [],
     capabilities: [artifactCapability('scope_ready_test')],
-    generalUses: [],
     threadId: 'thread-1',
     capabilityArtifactStore: {} as CapabilityArtifactStore,
-    authorizeArtifactDiscoveryForGeneral: true,
   });
 
   assert.deepEqual(
     prepared.toolkits.map(({ name }) => name),
     [ARTIFACT_DISCOVERY_TOOLKIT_NAME],
   );
-  assert.deepEqual(prepared.generalUses, [ARTIFACT_DISCOVERY_TOOLKIT_NAME]);
   assert.equal(
     prepared.registry.capabilities[0]?.capability.name,
     'scope_ready_test',
@@ -61,7 +57,6 @@ test('reportUnavailableCapabilities warns once for the same diagnostics fingerpr
   const prepared = prepareAgentRegistry({
     toolkits: [],
     capabilities: [artifactCapability('warn_once_unique_test')],
-    generalUses: [],
   });
   const warnings: string[] = [];
 

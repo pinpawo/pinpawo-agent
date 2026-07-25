@@ -71,16 +71,16 @@ business side effects remain Toolkit responsibilities.
 ## Registry semantics
 
 Toolkit registration means that a Toolkit is present in the current environment;
-it does not grant tool access. Capability `uses` and an explicit general-executor
-Toolkit list grant access.
+it does not grant tool access. Capability `uses` is the only Toolkit permission
+boundary. The `general` fallback is an ordinary Capability with its own `uses`.
 
 Dependency resolution, executor compilation, duplicate tool detection, policy
 binding, and operation metadata binding happen before capability execution. The
 orchestrator executes a compiled Capability and does not mutate its Toolkit set.
 An invalid Capability executor is isolated in `unavailableCapabilities`; it does
 not prevent healthy Capability executors or thread state reads from working.
-Invalid general-executor authorization and invalid registered Toolkit definitions
-remain fail-fast host configuration errors.
+Invalid registered Toolkit definitions remain fail-fast host configuration
+errors.
 
 The host assembles run-scoped Toolkits and compiles the registry once for an
 agent run setup. Routing, execution, thread-state reads, and diagnostics consume
@@ -104,8 +104,8 @@ the projection is derived directly from `CompiledAgentRegistry`, including
 duplicate-tool and unknown-Toolkit issues.
 
 Toolkit registration and tool authorization remain separate. The V2 Toolkit
-contract therefore removes Toolkit `exposure`; only Capability `uses` and the
-explicit general-executor Toolkit list grant tool access.
+contract therefore removes Toolkit `exposure`; only Capability `uses` grants
+tool access.
 
 ## Consequences
 
@@ -126,7 +126,7 @@ explicit general-executor Toolkit list grant tool access.
 - The migration branch implements the complete V2 cutover: static V2 types,
   breaking Toolset removal, `CAPABILITY.md`, immutable prompt sections,
   host-compiled registries, pre-route dependency filtering, run-scoped Toolkit
-  registration, explicit general-executor authorization, and the final removal
+  registration, a regular `general` fallback Capability, and the final removal
   of the legacy runtime/loader contract.
 - V2 ships as one breaking cutover. It does not retain a legacy loader, deprecated
   runtime fields, Toolset adapters, dual authoring protocols, or automatic

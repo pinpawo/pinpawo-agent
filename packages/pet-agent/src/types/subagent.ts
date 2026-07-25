@@ -54,8 +54,6 @@ export type SubagentPromptSection = {
   readonly id: string;
   readonly owner?: string;
   readonly content: string;
-  /** Precomputed content digest when the section comes from an immutable document. */
-  readonly digest?: string;
 };
 
 export type SubagentInputState = {

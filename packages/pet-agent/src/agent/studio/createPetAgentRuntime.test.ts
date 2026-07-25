@@ -64,8 +64,8 @@ const sampleReviewInterrupt = {
   },
 };
 
-test('descriptor derives Capability status from registry compilation', () => {
-  const runtime = createPetAgentRuntime({
+test('descriptor derives Capability status from registry compilation', async () => {
+  const runtime = await createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
     capabilities: [{
@@ -76,7 +76,6 @@ test('descriptor derives Capability status from registry compilation', () => {
         content: '# Inspect',
       }),
     }],
-    generalUses: [],
     graph: makeStubGraph([]).graph,
   });
 
@@ -88,6 +87,81 @@ test('descriptor derives Capability status from registry compilation', () => {
   }]);
 });
 
+test('descriptor excludes a Toolkit that is unavailable at runtime creation', async () => {
+  const runtime = await createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    capabilities: [{
+      name: 'inspect',
+      description: 'Inspect a repository.',
+      uses: ['offline'],
+      instructions: defineInstructionDocument({
+        content: '# Inspect',
+      }),
+    }],
+    toolkits: [{
+      name: 'offline',
+      description: 'Offline Toolkit.',
+      tools: [{ tool: { name: 'offline_tool' } as NamedStructuredTool }],
+      availability: () => ({ available: false, reason: 'service offline' }),
+    }],
+    graph: makeStubGraph([]).graph,
+  });
+
+  assert.deepEqual(runtime.descriptor().capabilities, [{
+    name: 'inspect',
+    description: 'Inspect a repository.',
+    available: false,
+    reason: 'unknown Toolkit "offline"',
+  }]);
+});
+
+test('invoke rechecks configured Toolkit availability for a new registry generation', async () => {
+  let available = false;
+  const { graph, calls } = makeStubGraph([
+    { messages: [new AIMessage('recovered')] },
+  ]);
+  const runtime = await createPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    capabilities: [{
+      name: 'inspect',
+      description: 'Inspect a repository.',
+      uses: ['recoverable'],
+      instructions: defineInstructionDocument({
+        content: '# Inspect',
+      }),
+    }],
+    toolkits: [{
+      name: 'recoverable',
+      description: 'Recoverable Toolkit.',
+      tools: [{ tool: { name: 'recoverable_tool' } as NamedStructuredTool }],
+      availability: () => (
+        available
+          ? { available: true }
+          : { available: false, reason: 'service offline' }
+      ),
+    }],
+    graph,
+  });
+
+  assert.equal(runtime.descriptor().capabilities[0]?.available, false);
+  available = true;
+  await runtime.invoke({ brief: 'inspect' });
+
+  const configurable = (calls[0]?.options as {
+    configurable?: {
+      registry?: {
+        capabilities?: Array<{ capability?: { name?: string } }>;
+      };
+    };
+  } | undefined)?.configurable;
+  assert.deepEqual(
+    configurable?.registry?.capabilities?.map(({ capability }) => capability?.name),
+    ['inspect'],
+  );
+});
+
 test('humanReviewer: single interrupt → approve → reply', async () => {
   const requests: HumanReviewerRequest[] = [];
   const { graph } = makeStubGraph([
@@ -95,10 +169,9 @@ test('humanReviewer: single interrupt → approve → reply', async () => {
     { messages: [new AIMessage('all done')] },
   ]);
 
-  const runtime = createPetAgentRuntime({
+  const runtime = await createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async (req) => {
       requests.push(req);
@@ -124,10 +197,9 @@ test('humanReviewer: multi-round interrupt loops until resolved', async () => {
     { messages: [new AIMessage('done after two reviews')] },
   ]);
 
-  const runtime = createPetAgentRuntime({
+  const runtime = await createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async (req) => {
       requests.push(req);
@@ -150,10 +222,9 @@ test('humanReviewer: canonical review interrupt → approve → reply', async ()
     { messages: [new AIMessage('direct done')] },
   ]);
 
-  const runtime = createPetAgentRuntime({
+  const runtime = await createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async (req) => {
       requests.push(req);
@@ -177,10 +248,9 @@ test('humanReviewer: missing reviewer + interrupt → invoke throws', async () =
     { __interrupt__: [{ value: sampleReviewInterrupt }], messages: [] },
   ]);
 
-  const runtime = createPetAgentRuntime({
+  const runtime = await createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
   });
 
@@ -196,10 +266,9 @@ test('humanReviewer: resume call passes canonical response Command', async () =>
     { messages: [new AIMessage('approved')] },
   ]);
 
-  const runtime = createPetAgentRuntime({
+  const runtime = await createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async () => ({
       reviewId: 'review-direct',
@@ -227,10 +296,9 @@ test('humanReviewer: unknown interrupt is not treated as HITL', async () => {
     { __interrupt__: [{ value: { kind: 'other_kind' } }], messages: [] },
   ]);
 
-  const runtime = createPetAgentRuntime({
+  const runtime = await createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async (req) => {
       reviewerCalled = true;
@@ -252,10 +320,9 @@ test('humanReviewer: malformed review interrupt is not treated as HITL', async (
     { __interrupt__: [{ value: { kind: 'review' } }], messages: [] },
   ]);
 
-  const runtime = createPetAgentRuntime({
+  const runtime = await createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
     humanReviewer: async (req) => {
       reviewerCalled = true;
@@ -278,11 +345,18 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
 
   const pluginTool = { name: 'plugin_tool' } as NamedStructuredTool<'plugin_tool'>;
   const invokeTool = { name: 'invoke_tool' } as NamedStructuredTool<'invoke_tool'>;
-  const runtime = createPetAgentRuntime({
+  const runtime = await createPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
-    generalUses: [],
     graph,
+    capabilities: [{
+      name: 'general',
+      description: 'General fallback capability.',
+      uses: [],
+      instructions: defineInstructionDocument({
+        content: '# General',
+      }),
+    }],
     toolkits: [{
       name: 'plugin_toolkit',
       description: 'plugin toolkit',
@@ -318,7 +392,10 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
           name?: string;
           tools?: Array<{ tool?: { name?: string }; operation?: { title?: string } }>;
         }>;
-        general?: { toolkits?: Array<{ name?: string }> };
+        capabilities?: Array<{
+          capability?: { name?: string };
+          toolkits?: Array<{ name?: string }>;
+        }>;
       };
     };
   } | undefined)?.configurable;
@@ -332,8 +409,17 @@ test('pet runtime passes wiki read tools and operation metadata when wikiRoot is
   assert.equal(invokeToolkit.tools?.[0]?.operation?.title, 'Invoke Tool');
   assert.ok(wikiToolkit, 'wikiRoot should install wiki_read as a toolkit');
   assert.deepEqual(
-    configurable.registry?.general?.toolkits?.map((toolkit) => toolkit.name),
+    configurable.registry?.capabilities
+      ?.find(({ capability }) => capability?.name === 'wiki')
+      ?.toolkits?.map((toolkit) => toolkit.name),
     ['wiki_read'],
+  );
+  assert.deepEqual(
+    configurable.registry?.capabilities
+      ?.find(({ capability }) => capability?.name === 'general')
+      ?.toolkits?.map((toolkit) => toolkit.name),
+    [],
+    'wikiRoot must not rewrite the general Capability permission boundary',
   );
   assert.equal(
     wikiToolkit.tools?.find((item) => item.tool?.name === 'wiki_read_cat')?.operation?.title,

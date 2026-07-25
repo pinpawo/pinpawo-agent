@@ -42,8 +42,8 @@ V2 固定以下规则：
   `exposure`。
 - 注册到 Toolkit registry 不等于获得使用权；Capability 只有通过
   `uses` 才能看到相应 Toolkit。
-- general executor 也必须显式声明 Toolkit 依赖，不再默认获得全部已注册
-  Toolkit。
+- `general` 是普通的 fallback Capability，通过自己的静态 `uses` 获得
+  Toolkit；它不是第二种 executor。
 
 该决策替代 `AgentToolset` 作为 capability-private tool 容器的目标设计，
 并通过一次破坏式 cutover 直接替换现有契约。
@@ -97,9 +97,9 @@ toolset policy 虽然出现在类型中，却没有进入 Toolkit review middlew
 
 ### 2.4 Toolkit 注册和工具授权被混淆
 
-当前 general lane 默认获得所有符合 exposure 的 Toolkit。对于扩展框架，
-registry 应仅表示“当前运行环境有哪些 Toolkit”，而 `uses` 才表示“当前
-executor 被授权使用哪些 Toolkit”。
+旧实现让 general lane 默认获得所有符合 exposure 的 Toolkit。V2 中 registry
+仅表示“当前运行环境有哪些 Toolkit”，而每个 Capability 的 `uses` 才表示
+“当前 executor 被授权使用哪些 Toolkit”。
 
 ## 3. 领域模型
 
@@ -438,13 +438,20 @@ studio_plan Capability
 Capability 不关心 Toolkit 来自全局安装还是当前 run。只要 registry
 可以解析且 available，契约就成立。
 
-general executor 也必须有显式 Toolkit 列表，例如：
+fallback 路由使用一个普通 Capability，例如：
 
 ```ts
-generalUses: ['bash', 'git']
+defineCapability({
+  name: 'general',
+  uses: ['bash', 'git'],
+  instructions: defineInstructionDocument({
+    content: GENERAL_CAPABILITY_INSTRUCTIONS,
+  }),
+})
 ```
 
-不得把“注册到 registry”作为 general executor 的隐式授权。
+`general` 只在“没有更具体的 Capability”时被 orchestrator 选为 fallback；
+其编译、prompt 和执行路径与其他 Capability 完全相同。
 
 ## 8. 编译与验证阶段
 
@@ -537,14 +544,14 @@ V2 初期不提供 `beforeRun`。如果未来确有需要，必须为具体、�
 | `AgentToolset` | 删除 |
 | `defineToolset()` | 删除 |
 | `ToolkitResource` / `ToolkitContext` | 从公共 Toolkit 契约删除 |
-| Toolkit `exposure` | 删除；授权只由 `uses` / `generalUses` 决定 |
+| Toolkit `exposure` | 删除；授权只由 Capability `uses` 决定 |
 | `tools` + `operations` + `policy.toolReview` 并行结构 | 合并为 `ToolDefinition[]` |
 | Toolkit `string[]` / dynamic instructions | 可选静态 `string` |
 | Toolkit 复用旧 Capability availability 类型 | 独立 `ToolkitAvailabilityCheck` |
 | `string[] instructions` | 单一 Markdown `InstructionDocument` |
 | capability plugin `manifest.json` | `CAPABILITY.md` frontmatter |
 | capability `index.js` / `entry` | 可选；只能导出 `lifecycle.finalize` |
-| general lane 装配全部 Toolkit | `generalUses` 显式依赖 |
+| 独立 general executor | 普通 `general` fallback Capability |
 | capability node 临时解析 Toolkit | registry compile 阶段解析 |
 
 具体迁移：
@@ -657,7 +664,7 @@ explore_github  uses [git, github]
 - [x] 将 review/runtime 基础设施从 Toolkit 定义上下文中移出；
 - [x] run setup 支持注册 run-scoped Toolkit；
 - [x] 删除 capability node 的 toolset 合并路径；
-- [x] general executor 改成显式 `generalUses`。
+- [x] 删除独立 general executor；fallback 复用普通 Capability 契约和节点。
 
 ### Workstream 3：`CAPABILITY.md` 与 Prompt
 
@@ -701,7 +708,7 @@ explore_github  uses [git, github]
 ### Registry
 
 - [x] 缺少任一 Toolkit 时，Capability 在路由前被标记 unavailable。
-- [x] 注册 Toolkit 不会自动扩大 general executor 工具面。
+- [x] 注册 Toolkit 不会自动扩大 `general` Capability 工具面。
 - [x] run-scoped Toolkit 可以被当前 run 的 Capability 解析。
 - [x] 同一 executor 内同名 tool 在运行前 fail-fast。
 - [x] 一个 run setup 只编译一次 registry，routing、执行和状态读取复用。

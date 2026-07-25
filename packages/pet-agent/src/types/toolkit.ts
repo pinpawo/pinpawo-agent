@@ -85,9 +85,9 @@ export type NamedStructuredTool<TName extends string = string> = StructuredTool 
 export type ToolDefinition<
   TTool extends NamedStructuredTool = NamedStructuredTool,
 > = {
-  tool: TTool;
-  operation?: ToolOperationMetadata;
-  review?: ToolReviewPolicy;
+  readonly tool: TTool;
+  readonly operation?: ToolOperationMetadata;
+  readonly review?: ToolReviewPolicy;
 };
 
 export type ToolkitAvailability =
@@ -98,13 +98,64 @@ export type ToolkitAvailabilityCheck = () =>
   | ToolkitAvailability
   | Promise<ToolkitAvailability>;
 
+export async function evaluateToolkitAvailability(
+  toolkit: AgentToolkit,
+): Promise<ToolkitAvailability> {
+  if (!toolkit.availability) {
+    return { available: true };
+  }
+  try {
+    const availability = await toolkit.availability();
+    if (availability?.available === true) {
+      return { available: true };
+    }
+    if (
+      availability?.available === false
+      && typeof availability.reason === 'string'
+      && availability.reason.trim()
+    ) {
+      return {
+        available: false,
+        reason: availability.reason,
+      };
+    }
+    return {
+      available: false,
+      reason: `Toolkit "${toolkit.name}" availability returned an invalid result`,
+    };
+  } catch (error) {
+    return {
+      available: false,
+      reason: error instanceof Error ? error.message : 'availability check failed',
+    };
+  }
+}
+
+/**
+ * Resolve one complete Toolkit inventory for the registry generation being
+ * assembled. This function deliberately has no cross-generation cache.
+ */
+export async function filterAvailableToolkits(
+  toolkits: readonly AgentToolkit[],
+): Promise<AgentToolkit[]> {
+  const records = await Promise.all(
+    toolkits.map(async (toolkit) => ({
+      toolkit,
+      availability: await evaluateToolkitAvailability(toolkit),
+    })),
+  );
+  return records
+    .filter(({ availability }) => availability.available)
+    .map(({ toolkit }) => toolkit);
+}
+
 export type AgentToolkit = {
-  name: string;
-  description: string;
-  tools: readonly ToolDefinition[];
-  instructions?: string;
-  availability?: ToolkitAvailabilityCheck;
-  reviewGuidance?: ToolkitReviewGuidance;
+  readonly name: string;
+  readonly description: string;
+  readonly tools: readonly ToolDefinition[];
+  readonly instructions?: string;
+  readonly availability?: ToolkitAvailabilityCheck;
+  readonly reviewGuidance?: ToolkitReviewGuidance;
 };
 
 function assertToolkitReviewGuidance(

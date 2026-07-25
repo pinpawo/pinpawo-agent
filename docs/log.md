@@ -219,7 +219,7 @@ lint passes, and documentation migrations.
 - Added a deterministic compiled registry for general and Capability executors.
 - Moved registry compilation to host run setup; orchestrator routing and executor
   nodes consume the same compiled result.
-- Made general executor Toolkit access explicit through `generalUses`; Toolkit
+- Replaced the separate general executor with a regular `general` fallback Capability; Toolkit
   registration alone no longer grants access.
 - Excluded Capabilities with missing Toolkit dependencies or effective tool-name
   conflicts before route selection.

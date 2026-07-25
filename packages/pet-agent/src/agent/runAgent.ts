@@ -1,7 +1,10 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution } from '../types/agent';
-import type { AgentToolkit } from '../types/toolkit';
+import {
+  filterAvailableToolkits,
+  type AgentToolkit,
+} from '../types/toolkit';
 import { compileAgentRegistry } from './orchestrator/registry';
 import type { CompiledAgentRegistry } from './orchestrator/registry';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
@@ -17,8 +20,6 @@ export type AgentInvokeInput = {
   threadId?: string;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
-  /** Explicit Toolkit permission boundary for the general executor. */
-  generalUses: readonly string[];
   execution?: AgentExecution;
   signal?: AbortSignal;
   /** Agent working directory passed into system prompt so the agent knows its file scope. */
@@ -48,9 +49,8 @@ export async function runAgent(
 ): Promise<AgentRunResult> {
   const configurable: Record<string, unknown> = {};
   configurable.registry = options.registry ?? compileAgentRegistry({
-    toolkits: input.toolkits ?? [],
+    toolkits: await filterAvailableToolkits(input.toolkits ?? []),
     capabilities: input.capabilities ?? [],
-    generalUses: input.generalUses,
   });
   if (input.actor) configurable.actor = input.actor;
   if (input.threadId) configurable.thread_id = input.threadId;

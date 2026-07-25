@@ -324,6 +324,7 @@ function capabilityScenarios(): DecisionEvalScenario[] {
           searchKeywords: testCase.input.baselineSearchQuery,
         },
         targetsContext: buildRouteTargetsContext({
+          generalCapabilityAvailable: (testCase.input.generalToolsAvailable?.length ?? 0) > 0,
           generalTools: (testCase.input.generalToolsAvailable ?? []).map((name) => ({
             name,
             description: `General tool ${name}`,

@@ -16,6 +16,7 @@ import {
   createCapabilityCreatorToolkit,
 } from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
+import { createGeneralCapability } from './capabilities/general';
 import {
   createDailyPostCapability,
   createDailyPostToolkit,
@@ -208,8 +209,6 @@ export function buildLocalChatAgentInput(params: {
   userMessage: string;
   llmConfig?: AgentLlmConfig;
   toolkits?: AgentToolkit[];
-  /** Explicit Toolkit authorization for the general executor. */
-  generalUses?: readonly string[];
   threadId?: string;
   interfaceKind?: LocalAgentInterfaceKind | null;
   dryRun?: boolean;
@@ -282,17 +281,17 @@ export function buildLocalChatAgentInput(params: {
     ...(params.toolkits ?? []),
   ];
   const registeredToolkitNames = new Set(baseToolkits.map(({ name }) => name));
-  const baseGeneralUses = [
-    ...(params.generalUses
-      ?? DEFAULT_GENERAL_TOOLKIT_NAMES.filter((name) => registeredToolkitNames.has(name))),
-  ];
+  appendCapability(
+    capabilities,
+    createGeneralCapability(
+      DEFAULT_GENERAL_TOOLKIT_NAMES.filter((name) => registeredToolkitNames.has(name)),
+    ),
+  );
   const preparedRegistry = prepareAgentRegistry({
     toolkits: baseToolkits,
     capabilities,
-    generalUses: baseGeneralUses,
     threadId: params.threadId,
     capabilityArtifactStore: params.capabilityArtifactStore,
-    authorizeArtifactDiscoveryForGeneral: true,
   });
   reportUnavailableCapabilities(preparedRegistry.registry);
 
@@ -325,7 +324,6 @@ export function buildLocalChatAgentInput(params: {
       threadId: params.threadId,
       capabilities,
       toolkits: [...preparedRegistry.toolkits],
-      generalUses: [...preparedRegistry.generalUses],
       execution: {
         dryRun: params.dryRun,
       },

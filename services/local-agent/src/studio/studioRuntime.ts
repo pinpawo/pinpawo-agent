@@ -19,6 +19,7 @@ import { buildLocalAgentModels } from '../agentModels';
 import type { AgentLlmConfig } from '../agentConfig';
 import { buildDecisionStructuredOutput } from '../agentChannel';
 import { createExploreCapability } from '../capabilities/explore';
+import { createGeneralCapability } from '../capabilities/general';
 import { buildLocalAgentRuntimeConfig } from '../runtimeConfig';
 import { loadPetLocalConfigs } from './petConfig';
 import {
@@ -138,7 +139,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
   const globalDecisionStructuredOutput = buildDecisionStructuredOutput(input.llmConfig);
   const capabilitiesByName = new Map(input.capabilities.map((c) => [c.name, c]));
 
-  const petAgents: PetAgentRuntime[] = resolved.agents.map((petConfig) => {
+  const petAgents: PetAgentRuntime[] = await Promise.all(resolved.agents.map(async (petConfig) => {
     // 每个 pet 按需挑 model:pet 自己声明了就 build pet-级 models + 重算 decisionStructuredOutput
     const petLlmConfig = petConfig.model
       ? { ...input.llmConfig, model: petConfig.model }
@@ -164,15 +165,19 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
       return cap;
     });
 
+    const generalToolkitNames = ['bash', 'git'].filter((name) =>
+      (input.toolkits ?? []).some((toolkit) => toolkit.name === name));
+
     return createPetAgentRuntime({
       models: petModels,
       actor: buildPetActorFromLocalConfig(petConfig, input.ownerUserId),
       role: petConfig.role ?? null,
       serviceSummary: petConfig.serviceSummary ?? null,
-      capabilities: capsForThisPet,
+      capabilities: [
+        createGeneralCapability(generalToolkitNames),
+        ...capsForThisPet,
+      ],
       toolkits: input.toolkits,
-      generalUses: ['bash', 'git'].filter((name) =>
-        (input.toolkits ?? []).some((toolkit) => toolkit.name === name)),
       contextWindowTokens: input.llmConfig.contextWindowTokens,
       subagentContextWindowTokens: input.llmConfig.subagentContextWindowTokens ?? input.llmConfig.contextWindowTokens,
       decisionStructuredOutput: petDecisionStructuredOutput,
@@ -184,7 +189,7 @@ export async function buildStudioForTurn(input: BuildStudioInput): Promise<Build
         slot: input.bridge.slot,
       }),
     });
-  });
+  }));
 
   const promptProvider: CuratorPromptProvider = studio.curator?.promptPath
     ? fileReadPromptProvider(path.resolve(studioConfigDir, studio.curator.promptPath))

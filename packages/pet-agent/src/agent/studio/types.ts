@@ -42,7 +42,8 @@ export type PetAgentRuntimeDescriptor = AgentActor & {
  *
  * - brief: Studio 撰写的任务文本(自然语言),pet 作为唯一输入。
  * - wikiRoot: 共享知识库目录绝对路径。提供时 wiki middleware 会自动读取
- *   {wikiRoot}/index.md 注入到 system prompt,并装备 wiki_read toolkit。
+ *   {wikiRoot}/index.md 注入到 system prompt,并注册使用 wiki_read Toolkit 的
+ *   普通 wiki Capability；不会改写 general 或其他 Capability 的 uses。
  * - signal: Studio 取消信号。
  * - threadId / execution / workdir: 运行时透传字段。
  * - toolkits: 本次 invoke 临时注入的 toolkit,会与 runtime config toolkits 合并。

@@ -2,6 +2,7 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import { createSubagent } from '../../../../subagent/createSubagent';
 import type { CapabilityArtifactRef } from '../../../../types/artifact';
 import type { SubagentRunInput } from '../../../../types/subagent';
+import { GENERAL_CAPABILITY_NAME } from '../../../../types/capability';
 import type { OrchestratorStateType } from '../../state';
 import { updateRunDelegationSummaryResult } from '../../delegations';
 import {
@@ -60,7 +61,9 @@ export function createCapabilityNode(params: {
     if (!runNextDelegation) {
       throw new Error('Capability node cannot run without a pending capability delegation.');
     }
-    const capabilityName = readCapabilityNameFromLane(runNextDelegation.lane);
+    const capabilityName = runNextDelegation.lane === 'general'
+      ? GENERAL_CAPABILITY_NAME
+      : readCapabilityNameFromLane(runNextDelegation.lane);
     if (!capabilityName) {
       throw new Error('Capability node received a non-capability delegation lane.');
     }
@@ -73,7 +76,7 @@ export function createCapabilityNode(params: {
     }
     const { capability } = compiledCapability;
     const toolkitList = [...compiledCapability.toolkits];
-    const lane: MessageLane = `capability:${capability.name}`;
+    const lane: MessageLane = runNextDelegation.lane;
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
     const scopedMessages = laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id);
     const threadId = readThreadId(runnableConfig);
@@ -135,7 +138,6 @@ export function createCapabilityNode(params: {
           id: `capability:${capability.name}`,
           owner: capability.name,
           content: capability.instructions.content,
-          digest: capability.instructions.digest,
         },
         ...(runtimeEnvironment
           ? [{

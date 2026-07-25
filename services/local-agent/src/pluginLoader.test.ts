@@ -42,6 +42,24 @@ export default {};
   assert.deepEqual(result.toolkits, []);
 });
 
+test('loadPluginsFromDir excludes a plugin Toolkit whose availability check fails', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-offline-'));
+  await fs.writeFile(path.join(root, 'offline-plugin.mjs'), `
+export const toolkits = [{
+  name: 'offline_toolkit',
+  description: 'Offline toolkit',
+  tools: [{ tool: { name: 'offline_tool' } }],
+  availability: () => ({ available: false, reason: 'service offline' }),
+}];
+export default { name: 'offline-plugin' };
+`, 'utf8');
+
+  const result = await loadPluginsFromDir(root);
+
+  assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['offline-plugin']);
+  assert.deepEqual(result.toolkits, []);
+});
+
 test('loadPluginsFromDir fails startup for an oversized toolkit auto-review policy', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-policy-'));
   await fs.writeFile(path.join(root, 'invalid-policy-plugin.mjs'), `

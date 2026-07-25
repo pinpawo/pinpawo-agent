@@ -213,7 +213,7 @@ const wikiBaseDir = input.wikiBaseDir ?? path.join(stateRoot, 'studio-wiki');
 Studio 内每个 pet runtime 也必须收到同一个 workdir：
 
 ```ts
-createPetAgentRuntime({
+await createPetAgentRuntime({
   // existing config...
   workdir: input.workdir,
 });

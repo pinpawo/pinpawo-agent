@@ -14,13 +14,11 @@ const reportedDiagnosticFingerprints = new Set<string>();
 export function prepareAgentRegistry(params: {
   toolkits: readonly AgentToolkit[];
   capabilities: readonly AgentCapability[];
-  generalUses: readonly string[];
   threadId?: string;
   capabilityArtifactStore?: CapabilityArtifactStore;
-  authorizeArtifactDiscoveryForGeneral?: boolean;
 }) {
   const toolkits = [...params.toolkits];
-  let hasArtifactDiscoveryToolkit = toolkits.some(
+  const hasArtifactDiscoveryToolkit = toolkits.some(
     ({ name }) => name === ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   );
 
@@ -33,26 +31,14 @@ export function prepareAgentRegistry(params: {
       store: params.capabilityArtifactStore,
       threadId: params.threadId,
     }));
-    hasArtifactDiscoveryToolkit = true;
-  }
-
-  const generalUses = [...params.generalUses];
-  if (
-    hasArtifactDiscoveryToolkit
-    && params.authorizeArtifactDiscoveryForGeneral
-    && !generalUses.includes(ARTIFACT_DISCOVERY_TOOLKIT_NAME)
-  ) {
-    generalUses.push(ARTIFACT_DISCOVERY_TOOLKIT_NAME);
   }
 
   return {
     registry: compileAgentRegistry({
       toolkits,
       capabilities: params.capabilities,
-      generalUses,
     }),
     toolkits,
-    generalUses,
   };
 }
 

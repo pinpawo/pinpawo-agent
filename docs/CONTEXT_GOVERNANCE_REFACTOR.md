@@ -128,7 +128,8 @@ hook，不再扩展 context policy DSL。
 - 有 `contextWindowTokens` 且消息超过派生 trigger 时，旧历史被带 `lc_source: summarization` 的摘要持久化替换。
 - 低于 trigger 时不产生摘要。
 - 摘要失败时 subagent 直接失败，旧历史不会被错误占位摘要替换。
-- general lane 与所有 capability 自动获得同一默认行为，无需 capability 显式配置。
+- fallback lane 与其他 Capability 共享框架默认行为；领域行为仍由
+  `general` Capability 显式配置。
 - 单条 tool result 在未触发摘要时保持原样，输出大小责任仍在 toolkit。
 
 ## 5. L3：checkpoint 数量封顶（不做，直接上 L4）

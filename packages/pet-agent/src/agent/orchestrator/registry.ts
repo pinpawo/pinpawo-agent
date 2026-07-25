@@ -1,6 +1,11 @@
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AgentCapability } from '../../types/capability';
-import type { AgentToolkit } from '../../types/toolkit';
+import type {
+  AgentToolkit,
+  ToolDefinition,
+  ToolOperationMetadata,
+  ToolReviewPolicy,
+} from '../../types/toolkit';
 import {
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,
@@ -21,14 +26,11 @@ export type ExecutorCompilationIssue =
       toolkitNames: readonly [string, string];
     };
 
-type CompiledExecutor = {
+type CompiledCapability = {
+  capability: AgentCapability;
   toolkits: readonly AgentToolkit[];
   tools: readonly StructuredTool[];
   toolNames: readonly string[];
-};
-
-type CompiledCapability = CompiledExecutor & {
-  capability: AgentCapability;
 };
 
 type UnavailableCapability = {
@@ -38,20 +40,9 @@ type UnavailableCapability = {
 
 export type CompiledAgentRegistry = {
   toolkits: readonly AgentToolkit[];
-  general: CompiledExecutor;
   capabilities: readonly CompiledCapability[];
   unavailableCapabilities: readonly UnavailableCapability[];
 };
-
-export class ExecutorCompilationError extends Error {
-  readonly issues: readonly ExecutorCompilationIssue[];
-
-  constructor(owner: string, issues: readonly ExecutorCompilationIssue[]) {
-    super(`${owner} Toolkit dependencies are invalid: ${formatExecutorCompilationIssues(issues)}`);
-    this.name = 'ExecutorCompilationError';
-    this.issues = issues;
-  }
-}
 
 function formatExecutorCompilationIssue(issue: ExecutorCompilationIssue) {
   if (issue.code === 'duplicate_toolkit_dependency') {
@@ -72,7 +63,10 @@ export function formatExecutorCompilationIssues(
 function compileExecutor(
   toolkitNames: readonly string[],
   toolkitsByName: ReadonlyMap<string, AgentToolkit>,
-): { executor: CompiledExecutor | null; issues: ExecutorCompilationIssue[] } {
+): {
+  executor: Omit<CompiledCapability, 'capability'> | null;
+  issues: ExecutorCompilationIssue[];
+} {
   const issues: ExecutorCompilationIssue[] = [];
   const selectedToolkits: AgentToolkit[] = [];
   const seenToolkitNames = new Set<string>();
@@ -123,51 +117,92 @@ function compileExecutor(
 
   return {
     executor: {
-      toolkits: selectedToolkits,
-      tools,
-      toolNames: tools.map((tool) => tool.name),
+      toolkits: Object.freeze(selectedToolkits),
+      tools: Object.freeze(tools),
+      toolNames: Object.freeze(tools.map((tool) => tool.name)),
     },
     issues,
   };
 }
 
+function snapshotOperation(
+  operation: ToolOperationMetadata | undefined,
+): ToolOperationMetadata | undefined {
+  return operation ? Object.freeze({ ...operation }) : undefined;
+}
+
+function snapshotReview(
+  review: ToolReviewPolicy | undefined,
+): ToolReviewPolicy | undefined {
+  return review ? Object.freeze({ ...review }) : undefined;
+}
+
+function snapshotToolDefinition(definition: ToolDefinition): ToolDefinition {
+  return Object.freeze({
+    tool: definition.tool,
+    ...(definition.operation
+      ? { operation: snapshotOperation(definition.operation) }
+      : {}),
+    ...(definition.review
+      ? { review: snapshotReview(definition.review) }
+      : {}),
+  });
+}
+
+function snapshotToolkit(toolkit: AgentToolkit): AgentToolkit {
+  return Object.freeze({
+    ...toolkit,
+    tools: Object.freeze(toolkit.tools.map(snapshotToolDefinition)),
+    ...(toolkit.reviewGuidance
+      ? { reviewGuidance: Object.freeze({ ...toolkit.reviewGuidance }) }
+      : {}),
+  });
+}
+
+function snapshotCapability(capability: AgentCapability): AgentCapability {
+  return Object.freeze({
+    ...capability,
+    uses: Object.freeze([...capability.uses]),
+    instructions: Object.freeze({ ...capability.instructions }),
+    ...(capability.lifecycle
+      ? { lifecycle: Object.freeze({ ...capability.lifecycle }) }
+      : {}),
+  });
+}
+
 export function compileAgentRegistry(params: {
   toolkits: readonly AgentToolkit[];
   capabilities: readonly AgentCapability[];
-  generalUses: readonly string[];
 }): CompiledAgentRegistry {
-  const toolkits = [...params.toolkits];
-  const capabilityDefinitions = [...params.capabilities];
-  validateUniqueToolkitNames(toolkits);
-  validateUniqueCapabilityNames(capabilityDefinitions);
+  const toolkitDefinitions = [...params.toolkits];
+  const rawCapabilityDefinitions = [...params.capabilities];
+  validateUniqueToolkitNames(toolkitDefinitions);
+  validateUniqueCapabilityNames(rawCapabilityDefinitions);
 
+  const toolkits = toolkitDefinitions.map(snapshotToolkit);
+  const capabilityDefinitions = rawCapabilityDefinitions.map(snapshotCapability);
   const toolkitsByName = new Map(toolkits.map((toolkit) => [toolkit.name, toolkit]));
-  const generalResult = compileExecutor(params.generalUses, toolkitsByName);
-  if (!generalResult.executor) {
-    throw new ExecutorCompilationError('General executor', generalResult.issues);
-  }
 
   const capabilities: CompiledCapability[] = [];
   const unavailableCapabilities: UnavailableCapability[] = [];
   for (const capability of capabilityDefinitions) {
     const result = compileExecutor(capability.uses, toolkitsByName);
     if (!result.executor) {
-      unavailableCapabilities.push({
+      unavailableCapabilities.push(Object.freeze({
         capability,
-        issues: result.issues,
-      });
+        issues: Object.freeze(result.issues),
+      }));
       continue;
     }
-    capabilities.push({
+    capabilities.push(Object.freeze({
       capability,
       ...result.executor,
-    });
+    }));
   }
 
-  return {
-    toolkits,
-    general: generalResult.executor,
-    capabilities,
-    unavailableCapabilities,
-  };
+  return Object.freeze({
+    toolkits: Object.freeze(toolkits),
+    capabilities: Object.freeze(capabilities),
+    unavailableCapabilities: Object.freeze(unavailableCapabilities),
+  });
 }

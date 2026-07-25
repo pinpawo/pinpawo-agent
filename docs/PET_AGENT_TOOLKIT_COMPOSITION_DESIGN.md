@@ -82,10 +82,10 @@ capability.createRuntime()
   -> createSubagent(...)
 ```
 
-general lane 使用所有已注册 toolkit：
+旧设计曾让 general lane 使用所有已注册 Toolkit：
 
 ```txt
-general subagent
+general fallback Capability
   tools = global tools + all toolkit tools
   instructions = handoff + all toolkit instructions + general instructions
 ```
@@ -98,7 +98,8 @@ capability subagent
   instructions = handoff + declared toolkit instructions + capability instructions
 ```
 
-general lane 默认接收 host 注册的所有 toolkit。capability lane 只有显式声明 `uses` 时才接收对应 toolkit，避免业务能力隐式继承过宽的工具面。
+当前模型不再保留这条差异：`general` 是普通 fallback Capability，和其他
+Capability 一样，只有显式声明 `uses` 时才接收对应 Toolkit。
 
 ## 5. Toolkit Policy 与 HITL
 
@@ -248,7 +249,7 @@ const capabilityCreator = {
 - invoke/configurable 中传入 `toolkits`。
 - browser toolkit + browser capability 薄包装。
 - bash toolkit，封装 local-agent 的本地文件和 shell 工具。
-- general lane 装配所有已注册 toolkit tools。
+- `general` fallback Capability 只装配其 `uses` 声明的 Toolkit tools。
 - capability lane 按 `uses` 装配 toolkit tools。
 - toolkit policy wrapper 可对单个工具调用执行 allow/deny/HITL review。
 

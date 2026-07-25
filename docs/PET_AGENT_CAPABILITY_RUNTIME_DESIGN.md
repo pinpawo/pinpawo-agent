@@ -278,7 +278,8 @@ START → prepare → compactContext
 
 - `entryDecision` 只选择 `answer | direct_task | needs_plan`。
 - `capabilityPlanner` 只维护 capability execution boundaries。
-- `capabilityDecision` 搜索并选择 custom capability 或 general executor。
+- `capabilityDecision` 搜索具体 Capability；没有匹配时选择普通的
+  `general` fallback Capability。
 - `capability/general` 创建隔离 subagent 并执行当前 delegation。
 - `delegationOutcomeDecision` 验收 announce，决定继续、完成当前 task 或完成总目标。
 - `answer` 是唯一生成用户可见最终回复的节点。

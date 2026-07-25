@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
@@ -115,7 +116,6 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
         id: 'capability:read',
         owner: 'read',
         content: 'Read the requested file.',
-        digest: 'a'.repeat(64),
       }],
       operations: {
         read_file: {
@@ -210,7 +210,10 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
   const capabilitySection = (promptEvents[0]?.data as {
     sections?: Array<{ id: string; digest: string }>;
   }).sections?.find(({ id }) => id === 'capability:read');
-  assert.equal(capabilitySection?.digest, 'a'.repeat(64));
+  assert.equal(
+    capabilitySection?.digest,
+    createHash('sha256').update('Read the requested file.', 'utf8').digest('hex'),
+  );
 });
 
 test('createSubagent summarizes persisted history from contextWindowTokens', async () => {

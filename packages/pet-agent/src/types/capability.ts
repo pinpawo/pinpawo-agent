@@ -45,10 +45,16 @@ export type AgentCapability = {
    * Required Toolkit dependencies and the complete tool permission boundary
    * for this Capability.
    */
-  uses: readonly string[];
-  instructions: InstructionDocument;
+  readonly uses: readonly string[];
+  readonly instructions: InstructionDocument;
   readonly lifecycle?: CapabilityLifecycle;
 };
+
+/**
+ * Reserved routing fallback. It is an ordinary AgentCapability; the name only
+ * lets the orchestrator select it when no more specific Capability matches.
+ */
+export const GENERAL_CAPABILITY_NAME = 'general';
 
 export function defineInstructionDocument(params: {
   content: string;

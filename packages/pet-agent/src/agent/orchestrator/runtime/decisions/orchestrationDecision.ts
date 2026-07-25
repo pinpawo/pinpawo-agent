@@ -1,5 +1,6 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { GENERAL_CAPABILITY_NAME } from '../../../../types/capability';
 import { Command } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import { evaluateGuard } from '../../../../guards';
@@ -204,8 +205,15 @@ async function buildCapabilityDecisionContext(params: {
   } = getInvokeOptions(runnableConfig);
   const actor = resolveActor(config, runnableConfig);
   const registry = getInvokeRegistry(runnableConfig);
-  const generalTools = [...registry.general.tools];
-  const capabilityList = registry.capabilities.map(({ capability }) => capability);
+  const generalCapability = registry.capabilities.find(
+    ({ capability }) => capability.name === GENERAL_CAPABILITY_NAME,
+  );
+  const generalTools = [
+    ...(generalCapability?.tools ?? []),
+  ];
+  const capabilityList = registry.capabilities
+    .map(({ capability }) => capability)
+    .filter(({ name }) => name !== GENERAL_CAPABILITY_NAME);
   const query = [state.runPendingTask?.task, state.runPendingTask?.contextSummary]
     .map((item) => item?.trim())
     .filter((item): item is string => Boolean(item))
@@ -218,6 +226,7 @@ async function buildCapabilityDecisionContext(params: {
         .map((capability) => ({ name: capability.name, description: capability.description, score: 1, matchedTerms: ['forced'] }))
     : query ? searchCapabilities(query, capabilityList) : [];
   const targetsContext = buildRouteTargetsContext({
+    generalCapabilityAvailable: Boolean(generalCapability),
     generalTools,
     capabilityCandidates: decisionCapabilityCandidates,
     capabilitySearchAttempted: true,
@@ -241,6 +250,7 @@ async function buildCapabilityDecisionContext(params: {
     capabilityList,
     decisionCapabilityCandidates,
     decisionInputMessage,
+    generalCapabilityAvailable: Boolean(generalCapability),
     generalTools,
     pendingTask: state.runPendingTask,
     systemPrompt,
@@ -620,7 +630,7 @@ function buildCapabilityDecisionResult(params: {
   if (!delegationLane) {
     throw new Error(`capabilityDecision selected unavailable capability: ${parsedLane.capabilityName ?? ''}`);
   }
-  if (delegationLane === 'general' && context.generalTools.length === 0) {
+  if (delegationLane === 'general' && !context.generalCapabilityAvailable) {
     return {
       runNextDelegation: null,
       runPendingTask: pendingTask,
@@ -682,7 +692,7 @@ function buildDelegationOutcomeDecisionResult(params: {
 
   if (decision.outcome === 'continue') {
     return {
-      goto: activeDelegation.lane === 'general' ? 'general' as const : 'capability' as const,
+      goto: 'capability' as const,
       update: buildContinueDelegationResult({
         state,
         activeDelegation,
@@ -809,7 +819,7 @@ function buildCompletedTaskResult(params: {
   };
 }
 
-type DelegationOutcomeDestination = 'capability' | 'general' | 'capabilityPlanner' | 'answer';
+type DelegationOutcomeDestination = 'capability' | 'capabilityPlanner' | 'answer';
 
 type DelegationOutcomeTransition = {
   goto: DelegationOutcomeDestination;

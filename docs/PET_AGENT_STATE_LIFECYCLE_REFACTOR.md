@@ -237,7 +237,7 @@ taskActiveDelegation = {
 
 ### Subagent returns
 
-When `generalNode` or `capabilityNode` returns:
+When the unified Capability execution node returns:
 
 1. Append lane messages tagged with `taskActiveDelegation.transcriptRunId`.
 2. Clear `runNextDelegation`.

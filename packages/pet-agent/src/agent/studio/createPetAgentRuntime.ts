@@ -6,7 +6,10 @@ import path from 'node:path';
 
 import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
-import type { AgentToolkit } from '../../types/toolkit';
+import {
+  filterAvailableToolkits,
+  type AgentToolkit,
+} from '../../types/toolkit';
 import type {
   PetAgentCapabilitySummary,
   PetAgentStartupMode,
@@ -29,6 +32,7 @@ import type {
   PetAgentRuntimeInvokeInput,
   PetAgentRuntimeInvokeResult,
 } from './types';
+import { createWikiReadCapability } from './wikiReadCapability';
 import { createWikiReadToolkit } from './wikiReadToolkit';
 
 export type PetAgentRuntimeConfig = {
@@ -40,8 +44,6 @@ export type PetAgentRuntimeConfig = {
   status?: PetAgentStatus;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
-  /** Explicit Toolkit permission boundary for the general executor. */
-  generalUses: readonly string[];
   execution?: AgentExecution;
   workdir?: string;
   /**
@@ -57,11 +59,13 @@ export type PetAgentRuntimeConfig = {
   subagentContextWindowTokens?: OrchestratorConfig['subagentContextWindowTokens'];
 };
 
-function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
+function buildCapabilitySummaries(
+  config: PetAgentRuntimeConfig,
+  toolkits: readonly AgentToolkit[],
+): PetAgentCapabilitySummary[] {
   const registry = compileAgentRegistry({
-    toolkits: config.toolkits ?? [],
+    toolkits,
     capabilities: config.capabilities ?? [],
-    generalUses: [],
   });
   const availableNames = new Set(
     registry.capabilities.map(({ capability }) => capability.name),
@@ -127,7 +131,10 @@ async function buildInvokeMessages(brief: string, wikiRoot: string | undefined):
   return messages;
 }
 
-export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRuntime {
+export async function createPetAgentRuntime(
+  config: PetAgentRuntimeConfig,
+): Promise<PetAgentRuntime> {
+  const descriptorToolkits = await filterAvailableToolkits(config.toolkits ?? []);
   let status = initialStatus(config);
   const startupMode = config.startupMode ?? 'standby';
   const graph = config.graph ?? createOrchestratorGraph({
@@ -146,7 +153,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       serviceSummary: config.serviceSummary ?? null,
       startupMode,
       status,
-      capabilities: buildCapabilitySummaries(config),
+      capabilities: buildCapabilitySummaries(config, descriptorToolkits),
     };
   }
 
@@ -156,19 +163,23 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     }
 
     const messages = await buildInvokeMessages(input.brief, input.wikiRoot);
-    const toolkits = [
+    const toolkits = await filterAvailableToolkits([
       ...(config.toolkits ?? []),
       ...(input.toolkits ?? []),
       ...(input.wikiRoot ? [createWikiReadToolkit(input.wikiRoot)] : []),
+    ]);
+    const configuredCapabilities = [
+      ...(config.capabilities ?? []),
+      ...(input.extraCapabilities ?? []),
     ];
-    const capabilities = [...(config.capabilities ?? []), ...(input.extraCapabilities ?? [])];
+    const capabilities = input.wikiRoot
+      && !configuredCapabilities.some((capability) =>
+        capability.uses.includes('wiki_read'))
+      ? [...configuredCapabilities, createWikiReadCapability()]
+      : configuredCapabilities;
     const registry = compileAgentRegistry({
       toolkits,
       capabilities,
-      generalUses: [
-        ...config.generalUses,
-        ...(input.wikiRoot && !config.generalUses.includes('wiki_read') ? ['wiki_read'] : []),
-      ],
     });
     const configurable: Record<string, unknown> = {
       actor: config.actor,

@@ -32,6 +32,7 @@ export type {
 export {
   defineCapability,
   defineInstructionDocument,
+  GENERAL_CAPABILITY_NAME,
 } from './types/capability';
 
 export type {
@@ -86,6 +87,8 @@ export type {
 } from './types/toolkit';
 export {
   defineToolkit,
+  evaluateToolkitAvailability,
+  filterAvailableToolkits,
   TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS,
   validateToolkitDefinition,
 } from './types/toolkit';
@@ -100,7 +103,6 @@ export {
   streamOrchestratorGraph,
   streamOrchestratorGraphWithTokenUsage,
   compileAgentRegistry,
-  ExecutorCompilationError,
   formatExecutorCompilationIssues,
   validateUniqueCapabilityNames,
   validateUniqueToolkitNames,

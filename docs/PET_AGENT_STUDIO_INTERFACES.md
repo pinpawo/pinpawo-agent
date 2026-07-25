@@ -75,7 +75,8 @@ interface PetAgentRuntime {
 pet runtime 在 Studio 模式下会注入 wiki middleware：
 
 1. 读取 `{wikiRoot}/index.md` 并前置到 system prompt。
-2. 挂载 `wiki_read` toolkit（`ls / cat / grep / find / head / tail`，只读）。
+2. 注册 `wiki_read` Toolkit（`ls / cat / grep / find / head / tail`，只读）
+   以及声明 `uses: ['wiki_read']` 的普通 `wiki` Capability。
 
 system prompt 片段示例:
 
@@ -86,7 +87,7 @@ system prompt 片段示例:
 {index.md 原文}
 --------------------
 
-使用 wiki_read 工具检索详情。
+由 `wiki` Capability 使用 `wiki_read` 工具检索详情；`general` 不获得隐式权限。
 ```
 
 效果:

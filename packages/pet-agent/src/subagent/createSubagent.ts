@@ -299,8 +299,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     sections: systemPromptSections.map((section) => ({
       id: section.id,
       owner: section.owner ?? null,
-      digest: section.digest
-        ?? createHash('sha256').update(section.content, 'utf8').digest('hex'),
+      digest: createHash('sha256').update(section.content, 'utf8').digest('hex'),
     })),
   });
   if (inputState.operations && Object.keys(inputState.operations).length > 0) {

@@ -79,6 +79,7 @@ async function runCase(testCase: typeof capabilityDecisionBasicsDataset.cases[nu
       searchKeywords: input.baselineSearchQuery,
     },
     targetsContext: buildRouteTargetsContext({
+      generalCapabilityAvailable: (input.generalToolsAvailable?.length ?? 0) > 0,
       generalTools: (input.generalToolsAvailable ?? []).map((name) => ({ name, description: `General tool ${name}` })) as never,
       capabilityCandidates: candidates,
       capabilitySearchAttempted: true,

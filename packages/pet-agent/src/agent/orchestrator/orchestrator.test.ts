@@ -95,7 +95,6 @@ function createOrchestratorGraph(
         registry: compileAgentRegistry({
           toolkits: (configurable.toolkits ?? []) as AgentToolkit[],
           capabilities: (configurable.capabilities ?? []) as AgentCapability[],
-          generalUses: (configurable.generalUses ?? []) as string[],
         }),
       },
     };
@@ -466,7 +465,6 @@ test('capability decision excludes a Capability whose required Toolkit is missin
       registry: compileAgentRegistry({
         capabilities: [capability('broken', 'Broken service capability.', ['missing'])],
         toolkits: [],
-        generalUses: [],
       }),
     },
   });
@@ -747,6 +745,34 @@ test('missing executable capability routes through the answer node', async () =>
   assert.equal(state.runPendingTask, null);
 });
 
+test('instructions-only general Capability remains an executable fallback', async () => {
+  const model = new FakeListChatModel({ responses: ['unused'] }) as unknown as AgentModels['act'];
+  const runCapabilityDecision = createCapabilityDecisionRunner({
+    models: { act: model, observe: model },
+    actor: testActor,
+  });
+  const input = buildOrchestratorRunInput([new HumanMessage('summarize this')]);
+  const result = await runCapabilityDecision({
+    ...input,
+    runPendingTask: {
+      task: 'Summarize the supplied text.',
+      contextSummary: null,
+      searchKeywords: null,
+    },
+  } as OrchestratorStateType, {
+    configurable: {
+      registry: compileAgentRegistry({
+        toolkits: [],
+        capabilities: [
+          capability('general', 'General fallback capability.'),
+        ],
+      }),
+    },
+  });
+
+  assert.equal(result.runNextDelegation?.lane, 'general');
+});
+
 test('route decision rejects missing pending task as an invariant violation', async () => {
   const model = new FakeListChatModel({ responses: ['unused'] }) as unknown as AgentModels['act'];
   const runCapabilityDecision = createCapabilityDecisionRunner({
@@ -770,7 +796,6 @@ test('route decision rejects missing pending task as an invariant violation', as
         registry: compileAgentRegistry({
           capabilities: [],
           toolkits: [],
-          generalUses: [],
         }),
       },
     }),
@@ -1534,7 +1559,7 @@ test('artifact discovery tools reach a selected capability only when declared in
   ]);
 });
 
-test('general lane keeps workspace file tools alongside scoped artifact discovery tools', async () => {
+test('general fallback Capability composes its declared Toolkits', async () => {
   let routeCallCount = 0;
   let generalToolNames: string[] = [];
   const routeModel = {
@@ -1567,8 +1592,9 @@ test('general lane keeps workspace file tools alongside scoped artifact discover
     configurable: {
       thread_id: 'general-artifact-discovery-tools',
       actor: testActor,
-      capabilities: [],
-      generalUses: ['bash', 'artifact_discovery'],
+      capabilities: [
+        capability('general', 'General fallback capability.', ['bash', 'artifact_discovery']),
+      ],
       toolkits: [
         {
           name: 'bash',
@@ -1641,8 +1667,9 @@ test('toolkit registration does not rely on lane authorization flags', async () 
     configurable: {
       thread_id: 'general-toolkit-registration',
       actor: testActor,
-      capabilities: [],
-      generalUses: ['visible', 'artifact'],
+      capabilities: [
+        capability('general', 'General fallback capability.', ['visible', 'artifact']),
+      ],
       toolkits: [
         {
           name: 'visible',
@@ -1901,13 +1928,24 @@ test('runAgent reuses a host-precompiled artifact discovery registry', async () 
   };
   const preparedRegistry = compileAgentRegistry({
     toolkits: [artifactDiscoveryToolkit],
-    capabilities: [],
-    generalUses: ['artifact_discovery'],
+    capabilities: [
+      capability(
+        'general',
+        'General fallback capability.',
+        ['artifact_discovery'],
+      ),
+    ],
   });
   const result = await runAgent(graph as never, {
     messages: [new HumanMessage('hello')],
     toolkits: [artifactDiscoveryToolkit],
-    generalUses: ['artifact_discovery'],
+    capabilities: [
+      capability(
+        'general',
+        'General fallback capability.',
+        ['artifact_discovery'],
+      ),
+    ],
   }, {
     registry: preparedRegistry,
   });
@@ -1916,11 +1954,19 @@ test('runAgent reuses a host-precompiled artifact discovery registry', async () 
   assert.equal(calls.length, 1);
   const registry = calls[0]?.configurable?.registry as {
     toolkits?: AgentToolkit[];
-    general?: { toolkits?: AgentToolkit[] };
+    capabilities?: Array<{
+      capability: AgentCapability;
+      toolkits: AgentToolkit[];
+    }>;
   };
   assert.equal(registry, preparedRegistry);
   assert.deepEqual(registry.toolkits?.map(({ name }) => name), ['artifact_discovery']);
-  assert.deepEqual(registry.general?.toolkits?.map(({ name }) => name), ['artifact_discovery']);
+  assert.deepEqual(
+    registry.capabilities?.find(
+      ({ capability: item }) => item.name === 'general',
+    )?.toolkits.map(({ name }) => name),
+    ['artifact_discovery'],
+  );
   assert.equal(calls[0]?.configurable?.artifactDiscoveryRoot, undefined);
   assert.equal(calls[0]?.configurable?.artifactDiscoveryToolkit, undefined);
 });
@@ -2660,8 +2706,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
     configurable: {
       thread_id: 'canonical-review-runtime-auth',
       actor: testActor,
-      capabilities: [],
-      generalUses: ['local'],
+      capabilities: [capability('general', 'General fallback capability.', ['local'])],
       toolkits,
     },
   };
@@ -2795,8 +2840,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     configurable: {
       thread_id: 'plain-review-runtime-state',
       actor: testActor,
-      capabilities: [],
-      generalUses: ['local'],
+      capabilities: [capability('general', 'General fallback capability.', ['local'])],
       toolkits,
     },
   };
@@ -2940,8 +2984,7 @@ test('toolkit review policy stops after human reject without requesting another 
     configurable: {
       thread_id: 'human-reject-stops-review-loop',
       actor: testActor,
-      capabilities: [],
-      generalUses: ['local'],
+      capabilities: [capability('general', 'General fallback capability.', ['local'])],
       toolkits,
     },
   };
@@ -3061,8 +3104,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
     configurable: {
       thread_id: 'multi-tool-review-runtime-state',
       actor: testActor,
-      capabilities: [],
-      generalUses: ['local'],
+      capabilities: [capability('general', 'General fallback capability.', ['local'])],
       toolkits,
     },
   };
@@ -3562,8 +3604,7 @@ test('delegation outcome continue decision can re-enter main and finalize handof
     configurable: {
       thread_id: 'delegation-continue-copy-preserve-lane',
       actor: testActor,
-      capabilities: [],
-      generalUses: ['local'],
+      capabilities: [capability('general', 'General fallback capability.', ['local'])],
       toolkits: [{
         name: 'local',
         description: 'local tools',
@@ -3648,9 +3689,8 @@ test('delegation outcome continuation path rechecks run iteration guard before n
     configurable: {
       thread_id: 'delegation-outcome-to-iteration-guard',
       actor: testActor,
-      capabilities: [],
+      capabilities: [capability('general', 'General fallback capability.', ['local'])],
       maxRunIterations: 1,
-      generalUses: ['local'],
       toolkits: [{
         name: 'local',
         description: 'local tools',
@@ -3734,9 +3774,8 @@ test('delegation_outcome does not append duplicate handoff copies for unchanged 
     configurable: {
       thread_id: 'delegation-outcome-no-duplicate-handoff',
       actor: testActor,
-      capabilities: [],
+      capabilities: [capability('general', 'General fallback capability.', ['local'])],
       maxRunIterations: 10,
-      generalUses: ['local'],
       toolkits: [{
         name: 'local',
         description: 'local tools',

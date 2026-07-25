@@ -55,6 +55,7 @@ export function buildRunDelegationSummaryContext(runDelegationSummaries: RunDele
 }
 
 export function buildRouteTargetsContext(params: {
+  generalCapabilityAvailable: boolean;
   generalTools: StructuredTool[];
   capabilityCandidates: CapabilityCandidate[];
   capabilitySearchAttempted: boolean;
@@ -62,11 +63,13 @@ export function buildRouteTargetsContext(params: {
   capabilityRegistryAvailable?: boolean;
 }): string {
   const lines = ['Capability decision facts：'];
-  if (params.generalTools.length > 0) {
+  if (params.generalCapabilityAvailable && params.generalTools.length > 0) {
     lines.push('', 'general capability（可使用下列通用工具）：');
     for (const toolItem of params.generalTools) {
       lines.push(`- ${toolItem.name}: ${clipForPrompt(toolItem.description, 140)}`);
     }
+  } else if (params.generalCapabilityAvailable) {
+    lines.push('', 'general capability：可用（仅 instructions，无 Toolkit tools）');
   } else {
     lines.push('', 'general capability：不可用');
   }

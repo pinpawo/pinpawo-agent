@@ -494,7 +494,8 @@ curator prompt 通过 `promptProvider` 注入到 `createLLMWikiCurator({ models,
 
 ### Pet 端 wiki_read Toolkit
 
-pet 在 Studio 模式下默认装备 `wiki_read` toolkit,根目录锁定到本 conversation 的 wiki/ 目录:
+pet 在 Studio 模式下注册普通 `wiki` Capability；它静态声明
+`uses: ['wiki_read']`，对应 Toolkit 的根目录锁定到本 conversation 的 wiki/ 目录:
 
 ```ts
 const wikiReadToolkit = {
@@ -782,10 +783,11 @@ LLM 调用集中在两处:**planner pet agent run** 和 **wiki_curator run**(每
 
 - 增加 `StudioContext`、`PetAgentRuntime`、`StudioOrchestrator` 类型和 skeleton。
 - 实现 `PetAgentRuntime.invoke({ brief, wiki, artifactRefs, signal })` 签名与 wiki middleware(详见 INTERFACES 文档)。
-- 实现 wiki middleware:读 `{wikiRoot}/index.md` → 粘进 system prompt + 绑定 wiki_read toolkit。
+- 实现 wiki middleware:读 `{wikiRoot}/index.md` → 粘进 system prompt + 注册普通
+  `wiki` Capability 及其声明使用的 `wiki_read` Toolkit。
 - 实现 obtainPlan(planner agent + studio_plan capability)+ queue runner + wiki_curator,执行单元拼成一个 turn 编排函数。`ExecuteAction` 由 zod 校验。
 - 实现 Studio Whiteboard 文件目录与 wiki_curator 节点(curator prompt 用默认值)。
-- 实现 wiki_read toolkit,在 Studio 模式下由 wiki middleware 装备到 pet。
+- 实现 wiki_read Toolkit，在 Studio 模式下只通过 Capability 的静态 `uses` 暴露。
 - pet runtime 不透传工具 callback；工具/runtime 事件走 root stream Boundary 2,HITL 通过构造时注入的 `humanReviewer` 桥(Boundary 3)消化(详见 INTERFACES 文档)。
 - 支持显式 plan 顺序派发多个 standby pet agent。
 - dispatch 结果保存在 `StudioDispatchState.resultText`,artifact refs 保存在 `StudioDispatchState.artifacts`。

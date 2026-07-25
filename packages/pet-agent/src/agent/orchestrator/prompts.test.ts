@@ -169,6 +169,7 @@ test('entry decision prompt owns execution mode selection', () => {
 
 test('capability decision prompt owns capability selection', () => {
   const targetsContext = buildRouteTargetsContext({
+    generalCapabilityAvailable: false,
     generalTools: [],
     capabilityCandidates: [{
       name: 'explore',

@@ -5,7 +5,7 @@
 ### 工厂
 
 ```ts
-createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRuntime
+createPetAgentRuntime(config: PetAgentRuntimeConfig): Promise<PetAgentRuntime>
 ```
 
 ### 核心类型
@@ -44,7 +44,6 @@ type PetAgentRuntimeConfig = {
   status?: PetAgentStatus;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
-  generalUses: readonly string[];
   execution?: AgentExecution;
   workdir?: string;
   humanReviewer?: HumanReviewer;
@@ -56,10 +55,16 @@ type PetAgentRuntimeConfig = {
 };
 ```
 
+需要通用 fallback 时，在 `capabilities` 中注册一个普通的
+`name: 'general'` Capability。它通过自己的静态 `uses` 获得 Toolkit，
+不存在独立的 general executor 配置。
+
 ## 3. 调用契约
 
 1. 入参 `brief` 为必填自然语言任务文本。
-2. `wikiRoot` 可选；存在时会读取 `{wikiRoot}/index.md`，注入 `SystemMessage`。
+2. `wikiRoot` 可选；存在时会读取 `{wikiRoot}/index.md`，注入 `SystemMessage`，
+   并注册普通 `wiki` Capability 使用 `wiki_read` Toolkit；不会给 `general`
+   或其他 Capability 隐式追加 Toolkit 权限。
 3. `extraCapabilities` 仅在本次调用生效，与 runtime 级能力合并。
 4. `forcedCapabilityNames` 触发本次调用的 routeDecision 强制 capability 候选。
 5. `invoke()` 是最终结果接口，不接收工具事件 callback；需要实时工具/运行时事件的宿主应消费 root `streamEvents(v3)` 并通过 adapter 投影。
@@ -76,7 +81,7 @@ type PetAgentRuntimeConfig = {
 ## 5. 示例
 
 ```ts
-const runtime = createPetAgentRuntime({
+const runtime = await createPetAgentRuntime({
   models,
   actor,
   capabilities,

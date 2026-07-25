@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import type { NamedStructuredTool, ToolReviewPolicy } from './toolkit';
 import {
   defineToolkit,
+  evaluateToolkitAvailability,
+  filterAvailableToolkits,
   TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS,
   validateToolkitDefinition,
 } from './toolkit';
@@ -117,5 +119,38 @@ test('defineToolkit keeps implementation, operation, and review in one ToolDefin
   assert.deepEqual(toolkit.reviewGuidance, {
     allow: 'Allow alpha operations when explicitly requested.',
     ask: 'Ask before beta operations that delete data.',
+  });
+});
+
+test('filterAvailableToolkits excludes unavailable and failed checks for one generation', async () => {
+  const available = defineToolkit({
+    name: 'available',
+    description: 'Available Toolkit.',
+    tools: [{ tool: alphaTool }],
+    availability: async () => ({ available: true }),
+  });
+  const unavailable = defineToolkit({
+    name: 'unavailable',
+    description: 'Unavailable Toolkit.',
+    tools: [{ tool: betaTool }],
+    availability: () => ({ available: false, reason: 'offline' }),
+  });
+  const failed = defineToolkit({
+    name: 'failed',
+    description: 'Failed availability check.',
+    tools: [{ tool: betaTool }],
+    availability: () => {
+      throw new Error('check failed');
+    },
+  });
+
+  assert.deepEqual(
+    (await filterAvailableToolkits([available, unavailable, failed]))
+      .map(({ name }) => name),
+    ['available'],
+  );
+  assert.deepEqual(await evaluateToolkitAvailability(failed), {
+    available: false,
+    reason: 'check failed',
   });
 });

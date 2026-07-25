@@ -162,5 +162,6 @@ test('compiled registry snapshots Toolkit definitions for one generation', () =>
     ['original'],
   );
   assert.deepEqual(registry.capabilities[0]?.toolNames, ['original']);
+  assert.equal(registry.capabilities[0]?.tools[0], original);
   assert.ok(Object.isFrozen(registry.capabilities[0]?.toolkits[0]?.tools));
 });

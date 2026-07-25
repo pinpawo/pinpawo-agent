@@ -296,6 +296,7 @@ export {
   createLLMWikiCurator,
   createPetAgentRuntime,
   createPlanCapability,
+  createPlanToolkit,
   createSkeletonWikiCurator,
   createStudioOrchestrator,
   createWikiReadToolkit,
@@ -314,7 +315,7 @@ export {
   FileStudioRunQueueStore,
 } from './agent/studio/index';
 export type {
-  CreatePlanCapabilityOptions,
+  CreatePlanToolkitOptions,
   StudioDueRunEvent,
   StudioDueRunRecord,
   StudioDueRunStatus,

@@ -79,7 +79,11 @@ export type ToolkitReviewGuidance = {
 export const TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS = 2_000;
 
 export type NamedStructuredTool<TName extends string = string> = StructuredTool & {
-  name: TName;
+  /**
+   * Stable identity for one registry generation. Hosts must not rename an
+   * executable Tool after it has been registered.
+   */
+  readonly name: TName;
 };
 
 export type ToolDefinition<

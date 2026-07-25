@@ -2,7 +2,23 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createPlanToolkit } from './planCapability';
+import {
+  createPlanCapability as createPlanCapabilityFromPublicApi,
+  createPlanToolkit as createPlanToolkitFromPublicApi,
+  type CreatePlanToolkitOptions,
+} from '../../index';
 import type { StudioPlannerTaskInput } from './types';
+
+test('public API exposes the Studio plan Capability and its required Toolkit factory', () => {
+  const options: CreatePlanToolkitOptions = {
+    enqueueTasks: () => {},
+  };
+  const capability = createPlanCapabilityFromPublicApi();
+  const toolkit = createPlanToolkitFromPublicApi(options);
+
+  assert.deepEqual(capability.uses, ['studio_plan']);
+  assert.equal(toolkit.name, 'studio_plan');
+});
 
 test('enqueue_tasks tool captures tasks in submission order', async () => {
   let submitted: StudioPlannerTaskInput[] | null = null;

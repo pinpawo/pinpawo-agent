@@ -24,7 +24,7 @@ import type { StudioPlannerTaskInput } from './types';
  *
  * 这条 capability 不依赖 LLM 整理逻辑——planner 输出什么就捕获什么。
  */
-export type CreatePlanCapabilityOptions = {
+export type CreatePlanToolkitOptions = {
   enqueueTasks: (tasks: StudioPlannerTaskInput[]) => void;
   listPets?: () => StudioPlanPetListItem[] | Promise<StudioPlanPetListItem[]>;
 };
@@ -125,7 +125,7 @@ const planCapabilityOperationMetadata = {
 } satisfies Record<string, ToolOperationMetadata>;
 
 export function createPlanToolkit(
-  options: Pick<CreatePlanCapabilityOptions, 'listPets' | 'enqueueTasks'>,
+  options: CreatePlanToolkitOptions,
 ): AgentToolkit {
   const listPets = tool(
     async () => {

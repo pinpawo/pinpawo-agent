@@ -4,11 +4,11 @@ import test from 'node:test';
 import { emitInflightToolEvent } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import type { LocalAgentControlServerMessage } from './localAgentProtocol';
-import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
+import type { AgentOperationEvent } from '@pinpawo/agent-session';
 
 function createTestController(options: { forceInterruptMs?: number } = {}) {
   const controls: LocalAgentControlServerMessage[] = [];
-  const operations: LocalAgentOperationEvent[] = [];
+  const operations: AgentOperationEvent[] = [];
   const logs: string[] = [];
   const controller = new InflightRequestController<string>({
     forceInterruptMs: options.forceInterruptMs ?? 10,
@@ -28,7 +28,7 @@ function createTestController(options: { forceInterruptMs?: number } = {}) {
 
 test('InflightRequestController replaces previous request without notifying when requested', () => {
   const { controller, controls, operations } = createTestController();
-  const observedOperations: LocalAgentOperationEvent[] = [];
+  const observedOperations: AgentOperationEvent[] = [];
   const first = controller.start('client', 'req-1', {
     observeOperation: (event) => observedOperations.push(event),
   });

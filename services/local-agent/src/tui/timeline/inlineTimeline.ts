@@ -1,13 +1,13 @@
-import type { LocalAgentTimelineEntry } from '../../localAgentSession';
+import type { AgentTimelineEntry } from '@pinpawo/agent-session';
 
 export type InlineTimelinePartition = {
-  committedEntries: LocalAgentTimelineEntry[];
-  liveEntries: LocalAgentTimelineEntry[];
+  committedEntries: AgentTimelineEntry[];
+  liveEntries: AgentTimelineEntry[];
 };
 
 export function advanceInlineTimeline(
-  previousCommittedEntries: LocalAgentTimelineEntry[],
-  entries: LocalAgentTimelineEntry[],
+  previousCommittedEntries: AgentTimelineEntry[],
+  entries: AgentTimelineEntry[],
 ): InlineTimelinePartition {
   const settledPrefix = partitionInlineTimeline(entries).committedEntries;
   const committedIds = new Set(previousCommittedEntries.map((entry) => entry.id));
@@ -27,7 +27,7 @@ export function advanceInlineTimeline(
 }
 
 export function partitionInlineTimeline(
-  entries: LocalAgentTimelineEntry[],
+  entries: AgentTimelineEntry[],
 ): InlineTimelinePartition {
   const firstLiveIndex = entries.findIndex((entry) => !isTimelineEntrySettled(entry));
   if (firstLiveIndex < 0) {
@@ -42,7 +42,7 @@ export function partitionInlineTimeline(
   };
 }
 
-export function isTimelineEntrySettled(entry: LocalAgentTimelineEntry) {
+export function isTimelineEntrySettled(entry: AgentTimelineEntry) {
   if (entry.type === 'message') {
     return entry.status === 'completed';
   }

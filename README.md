@@ -41,8 +41,11 @@ packages/pet-agent/       Shared agent runtime, orchestrator, capability contrac
                           subagent execution, review policy, Studio primitives,
                           and examples.
 
+packages/agent-session/   Runtime-neutral session domain, event projection,
+                          versioned snapshot contract, parsers, and protocol types.
+
 services/local-agent/     Local CLI/TUI, local server, local config, plugin loading,
-                          browser/local toolkits, and app-facing event protocol.
+                          browser/local toolkits, and transport adapters.
 
 tools/agent-macos/        macOS desktop companion for running and configuring
                           the local agent.
@@ -56,6 +59,7 @@ docs/                     Public architecture, capability, Studio, artifact stor
 | Package | Location | Purpose |
 |---|---|---|
 | `@pinpawo/pet-agent` | `packages/pet-agent/` | Core runtime, orchestrator, capability and toolkit contracts. |
+| `@pinpawo/agent-session` | `packages/agent-session/` | Canonical session projection, versioned snapshot contract, and boundary parsers. |
 | `pinpawo` | `services/local-agent/` | CLI/TUI and local server package published with the `pinpawo` binary. |
 
 The repository root is an npm workspace. The root package is private; publishable packages live under workspace directories.
@@ -440,7 +444,8 @@ Before opening a pull request:
 
 1. Keep changes scoped to the relevant package or design document.
 2. Follow existing TypeScript style: 2-space indentation, semicolons, and single quotes.
-3. Prefer runtime-independent agent logic in `packages/pet-agent/`.
+3. Keep runtime-independent agent logic in `packages/pet-agent/` and shared
+   session projection/protocol logic in `packages/agent-session/`.
 4. Keep local machine, CLI, browser, and desktop integration in `services/local-agent/` or `tools/agent-macos/`.
 5. Run the relevant checks:
 

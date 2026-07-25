@@ -6,7 +6,11 @@ import {
   sendLocalAgentEvent,
   sendLocalAgentMessage,
 } from './localAgentProtocol';
-import type { LocalAgentOperationEvent } from './events/localAgentRuntimeEvent';
+import {
+  createAgentSessionSnapshot,
+  type AgentSession,
+  type AgentOperationEvent,
+} from '@pinpawo/agent-session';
 
 test('parseLocalAgentClientMessage accepts valid chat requests and rejects malformed payloads', () => {
   assert.deepEqual(
@@ -20,7 +24,6 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
       type: 'chat_request',
       requestId: 'req-1',
       message: 'hello',
-      petId: undefined,
       userId: 'user-1',
     },
   );
@@ -392,12 +395,9 @@ test('parseLocalAgentServerMessage accepts typed local-agent event messages and 
         requestId: 'req-1',
         phase: 'started',
         operation: {
-          id: undefined,
           kind: 'bash.read_file',
           title: '读文件',
           target: 'README.md',
-          summary: undefined,
-          details: undefined,
           source: {
             provider: 'toolkit',
             name: 'bash',
@@ -507,8 +507,6 @@ test('parseLocalAgentServerMessage accepts studio_response with scheduler metada
       outcome: 'done',
       reply: 'all done',
       finalPetRunId: 'pet-run-1',
-      reason: undefined,
-      workdir: undefined,
       runId: 'run-1',
       conversationId: 'conv-1',
       idempotencyKey: 'studio:conv-1:run:run-1',
@@ -534,8 +532,6 @@ test('parseLocalAgentServerMessage accepts studio_response with finalPetRunId on
       outcome: 'done',
       reply: 'all done',
       finalPetRunId: 'pet-run-1',
-      reason: undefined,
-      workdir: undefined,
       runId: 'run-1',
       conversationId: 'conv-1',
       idempotencyKey: 'studio:conv-1:run:run-1',
@@ -563,7 +559,6 @@ test('parseLocalAgentServerMessage accepts studio_response with workdir metadata
       outcome: 'done',
       reply: 'all done',
       finalPetRunId: 'pet-run-1',
-      reason: undefined,
       workdir: '/tmp/project/.pinpawo',
       runId: 'run-1',
       conversationId: 'conv-1',
@@ -754,7 +749,38 @@ test('sendLocalAgentMessage writes only when websocket-like object is open', () 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [{ type: 'pong' }]);
 });
 
-test('sendLocalAgentEvent strips operation.raw by default (remote-safe)', () => {
+test('sendLocalAgentMessage omits remote message deltas and preserves trusted local deltas', () => {
+  const remoteSent: string[] = [];
+  const trustedSent: string[] = [];
+  const eventMessage = {
+    type: 'event' as const,
+    requestId: 'req-1',
+    event: {
+      type: 'message.delta' as const,
+      requestId: 'req-1',
+      role: 'assistant' as const,
+      text: 'Saved to /Users/al',
+    },
+  };
+
+  assert.equal(sendLocalAgentMessage({
+    readyState: 1,
+    send(data: string) {
+      remoteSent.push(data);
+    },
+  }, eventMessage), true);
+  assert.equal(sendLocalAgentMessage({
+    readyState: 1,
+    send(data: string) {
+      trustedSent.push(data);
+    },
+  }, eventMessage, { audience: 'trusted-local' }), true);
+
+  assert.deepEqual(remoteSent, []);
+  assert.deepEqual(trustedSent.map((item) => JSON.parse(item)), [eventMessage]);
+});
+
+test('sendLocalAgentEvent always omits remote deltas and strips remote operation.raw', () => {
   const sent: string[] = [];
   const openWs = {
     readyState: 1,
@@ -770,12 +796,21 @@ test('sendLocalAgentEvent strips operation.raw by default (remote-safe)', () => 
     text: 'hello',
   }), true);
   assert.equal(sendLocalAgentEvent(openWs, {
+    type: 'message.delta',
+    requestId: 'req-1',
+    role: 'assistant',
+    text: 'pre-sanitized',
+  }, {
+    audience: 'remote',
+    alreadySanitized: true,
+  }), true);
+  assert.equal(sendLocalAgentEvent(openWs, {
     type: 'message.completed',
     requestId: 'req-1',
     role: 'assistant',
     text: 'done',
   }), true);
-  const internalOperationEvent: LocalAgentOperationEvent = {
+  const internalOperationEvent: AgentOperationEvent = {
     type: 'operation',
     requestId: 'req-1',
     phase: 'started',
@@ -790,16 +825,6 @@ test('sendLocalAgentEvent strips operation.raw by default (remote-safe)', () => 
   assert.equal(sendLocalAgentEvent(openWs, internalOperationEvent), true);
 
   assert.deepEqual(sent.map((item) => JSON.parse(item)), [
-    {
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        type: 'message.delta',
-        requestId: 'req-1',
-        role: 'assistant',
-        text: 'hello',
-      },
-    },
     {
       type: 'event',
       requestId: 'req-1',
@@ -826,7 +851,7 @@ test('sendLocalAgentEvent strips operation.raw by default (remote-safe)', () => 
   ]);
 });
 
-test('sendLocalAgentEvent forwards operation.raw when includeRaw is true (trusted local transport)', () => {
+test('sendLocalAgentEvent forwards operation.raw for trusted local transport', () => {
   const sent: string[] = [];
   const openWs = {
     readyState: 1,
@@ -834,7 +859,7 @@ test('sendLocalAgentEvent forwards operation.raw when includeRaw is true (truste
       sent.push(data);
     },
   };
-  const event: LocalAgentOperationEvent = {
+  const event: AgentOperationEvent = {
     type: 'operation',
     requestId: 'req-1',
     phase: 'completed',
@@ -844,7 +869,9 @@ test('sendLocalAgentEvent forwards operation.raw when includeRaw is true (truste
       output: 'file contents',
     },
   };
-  assert.equal(sendLocalAgentEvent(openWs, event, { includeRaw: true }), true);
+  assert.equal(sendLocalAgentEvent(openWs, event, {
+    audience: 'trusted-local',
+  }), true);
   assert.deepEqual(JSON.parse(sent[0] ?? '{}'), {
     type: 'event',
     requestId: 'req-1',
@@ -861,7 +888,113 @@ test('sendLocalAgentEvent forwards operation.raw when includeRaw is true (truste
   });
 });
 
-test('sendLocalAgentEvent leaves non-operation events untouched regardless of includeRaw', () => {
+test('remote event adapter redacts local paths while trusted local transport preserves them', () => {
+  const remoteSent: string[] = [];
+  const trustedSent: string[] = [];
+  const remoteWs = {
+    readyState: 1,
+    send(data: string) {
+      remoteSent.push(data);
+    },
+  };
+  const trustedWs = {
+    readyState: 1,
+    send(data: string) {
+      trustedSent.push(data);
+    },
+  };
+  const event: AgentOperationEvent = {
+    type: 'operation',
+    requestId: 'req-1',
+    phase: 'completed',
+    operation: {
+      kind: 'bash.read_file',
+      title: '读文件',
+      target: '/Users/alice/project/private.txt',
+      summary: 'Read /private/tmp/private.txt',
+    },
+    raw: {
+      input: { path: '/Users/alice/project/private.txt' },
+    },
+  };
+
+  assert.equal(sendLocalAgentEvent(remoteWs, event), true);
+  assert.equal(sendLocalAgentEvent(trustedWs, event, {
+    audience: 'trusted-local',
+  }), true);
+
+  const remoteEvent = JSON.parse(remoteSent[0] ?? '{}').event;
+  assert.equal(remoteEvent.raw, undefined);
+  assert.equal(remoteEvent.operation.target, '[local-path]');
+  assert.equal(remoteEvent.operation.summary, 'Read [local-path]');
+
+  const trustedEvent = JSON.parse(trustedSent[0] ?? '{}').event;
+  assert.equal(trustedEvent.operation.target, '/Users/alice/project/private.txt');
+  assert.deepEqual(trustedEvent.raw, {
+    input: { path: '/Users/alice/project/private.txt' },
+  });
+});
+
+test('remote server-message adapter strips local runtime fields without changing trusted snapshots', () => {
+  const remoteSent: string[] = [];
+  const trustedSent: string[] = [];
+  const remoteWs = {
+    readyState: 1,
+    send(data: string) {
+      remoteSent.push(data);
+    },
+  };
+  const trustedWs = {
+    readyState: 1,
+    send(data: string) {
+      trustedSent.push(data);
+    },
+  };
+  const session: AgentSession = {
+    sessionId: 'session-1',
+    kind: 'chat',
+    timeline: [{
+      id: 'message-1',
+      type: 'message',
+      role: 'assistant',
+      text: 'Saved to /Users/alice/project/result.txt',
+      status: 'completed',
+    }],
+    activeRun: null,
+    runtime: {
+      model: 'test-model',
+      cwd: '/Users/alice/project',
+      workspaceRoot: '/Users/alice/project',
+      contextWindow: 100_000,
+    },
+  };
+  const message = {
+    type: 'session.snapshot.result' as const,
+    requestId: 'snapshot-1',
+    snapshot: createAgentSessionSnapshot(session),
+  };
+
+  assert.equal(sendLocalAgentMessage(remoteWs, message), true);
+  assert.equal(sendLocalAgentMessage(trustedWs, message, {
+    audience: 'trusted-local',
+  }), true);
+
+  const remoteSession = JSON.parse(remoteSent[0] ?? '{}').snapshot.session;
+  assert.deepEqual(remoteSession.runtime, {
+    model: 'test-model',
+    contextWindow: 100_000,
+  });
+  assert.equal(remoteSession.timeline[0].text, 'Saved to [local-path]');
+
+  const trustedSession = JSON.parse(trustedSent[0] ?? '{}').snapshot.session;
+  assert.equal(trustedSession.runtime.cwd, '/Users/alice/project');
+  assert.equal(
+    trustedSession.timeline[0].text,
+    'Saved to /Users/alice/project/result.txt',
+  );
+});
+
+test('trusted local event transport preserves streaming message deltas', () => {
   const sent: string[] = [];
   const openWs = {
     readyState: 1,
@@ -874,7 +1007,7 @@ test('sendLocalAgentEvent leaves non-operation events untouched regardless of in
     requestId: 'req-1',
     role: 'assistant',
     text: 'hi',
-  }, { includeRaw: true }), true);
+  }, { audience: 'trusted-local' }), true);
   assert.deepEqual(JSON.parse(sent[0] ?? '{}'), {
     type: 'event',
     requestId: 'req-1',

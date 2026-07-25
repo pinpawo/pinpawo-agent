@@ -1,26 +1,26 @@
 import type { ReviewSpec, TokenUsageSnapshot } from '@pinpawo/pet-agent';
 
-export type LocalAgentRuntimeEvent =
-  | LocalAgentAssistantMessageEvent
-  | LocalAgentSubagentMessageCompletedEvent
-  | LocalAgentOperationEvent
-  | LocalAgentHumanReviewRequestedEvent
-  | LocalAgentStudioProgressEvent
-  | LocalAgentSystemNoticeEvent
-  | LocalAgentErrorEvent;
+export type AgentRuntimeEvent =
+  | AgentAssistantMessageEvent
+  | AgentSubagentMessageCompletedEvent
+  | AgentOperationEvent
+  | AgentHumanReviewRequestedEvent
+  | AgentStudioProgressEvent
+  | AgentSystemNoticeEvent
+  | AgentErrorEvent;
 
-export type LocalAgentAssistantMessageEvent =
-  | LocalAgentMessageDeltaEvent
-  | LocalAgentMessageCompletedEvent;
+export type AgentAssistantMessageEvent =
+  | AgentMessageDeltaEvent
+  | AgentMessageCompletedEvent;
 
-export type LocalAgentMessageDeltaEvent = {
+export type AgentMessageDeltaEvent = {
   type: 'message.delta';
   requestId: string;
   role: 'assistant';
   text: string;
 };
 
-export type LocalAgentSubagentMessageCompletedEvent = {
+export type AgentSubagentMessageCompletedEvent = {
   type: 'subagent.message.completed';
   requestId: string;
   /** The upstream child-model lifecycle id for this completed message block. */
@@ -30,7 +30,7 @@ export type LocalAgentSubagentMessageCompletedEvent = {
   text: string;
 };
 
-export type LocalAgentMessageCompletedEvent = {
+export type AgentMessageCompletedEvent = {
   type: 'message.completed';
   requestId: string;
   role: 'assistant';
@@ -38,23 +38,23 @@ export type LocalAgentMessageCompletedEvent = {
   usage?: TokenUsageSnapshot;
 };
 
-export type LocalAgentOperationPhase =
+export type AgentOperationPhase =
   | 'started'
   | 'updated'
   | 'completed'
   | 'failed'
   | 'interrupted';
 
-export type LocalAgentOperationRaw = {
+export type AgentOperationRaw = {
   input?: unknown;
   output?: unknown;
   error?: unknown;
 };
 
-export type LocalAgentOperationEvent = {
+export type AgentOperationEvent = {
   type: 'operation';
   requestId: string;
-  phase: LocalAgentOperationPhase;
+  phase: AgentOperationPhase;
   operation: {
     id?: string;
     kind: string;
@@ -63,7 +63,7 @@ export type LocalAgentOperationEvent = {
     summary?: string;
     details?: Record<string, unknown>;
     source?: {
-      provider: 'toolkit' | 'toolset' | 'runtime';
+      provider: 'toolkit' | 'runtime';
       name: string;
       toolName?: string;
       callId?: string;
@@ -74,10 +74,10 @@ export type LocalAgentOperationEvent = {
    * transports (e.g. 127.0.0.1 TUI/companion socket). Stripped before sending
    * to remote app channels — remote UI must rely on operation.summary/details.
    */
-  raw?: LocalAgentOperationRaw;
+  raw?: AgentOperationRaw;
 };
 
-export type LocalAgentHumanReviewRequestedEvent = {
+export type AgentHumanReviewRequestedEvent = {
   type: 'human_review.requested';
   requestId: string;
   interruptId?: string;
@@ -88,26 +88,26 @@ export type LocalAgentHumanReviewRequestedEvent = {
   };
 };
 
-export type LocalAgentStudioProgressEvent = {
+export type AgentStudioProgressEvent = {
   type: 'studio.progress';
   requestId: string;
   event: Record<string, unknown>;
 };
 
-export type LocalAgentSystemNoticeEvent = {
+export type AgentSystemNoticeEvent = {
   type: 'system.notice';
   requestId: string;
   message: string;
 };
 
-export type LocalAgentErrorCode =
+export type AgentErrorCode =
   | 'review_closed'
   | 'review_stale'
   | 'review_wrong_session';
 
-export type LocalAgentErrorEvent = {
+export type AgentErrorEvent = {
   type: 'error';
   requestId: string;
   message: string;
-  code?: LocalAgentErrorCode;
+  code?: AgentErrorCode;
 };

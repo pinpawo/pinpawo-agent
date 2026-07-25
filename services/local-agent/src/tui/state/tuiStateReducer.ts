@@ -1,15 +1,15 @@
-import type { LocalAgentRuntimeEvent } from '../../events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type {
-  LocalAgentRunView,
-  LocalAgentSession,
-  LocalAgentSessionMessageInput,
-} from '../../localAgentSession';
+  AgentRunView,
+  AgentSession,
+  AgentSessionMessageInput,
+} from '@pinpawo/agent-session';
 import {
   applySessionSnapshot,
   reduceSession,
-  type LocalAgentSessionInput,
-} from '../../localAgentSessionReducer';
-import { currentReview } from '../../reviewAction';
+  type AgentSessionInput,
+} from '@pinpawo/agent-session';
+import { currentReview } from './reviewDraft';
 import {
   navigateComposerHistory,
   recordComposerHistoryEntry,
@@ -41,7 +41,7 @@ function updateSession(
 }
 
 function normalizeTuiSession(
-  session: LocalAgentSession,
+  session: AgentSession,
   fallback: SessionModel,
 ): SessionModel {
   return {
@@ -54,7 +54,7 @@ function normalizeTuiSession(
 function applySessionInput(
   state: TuiState,
   sessionId: SessionId | null,
-  input: LocalAgentSessionInput,
+  input: AgentSessionInput,
   observedAt: number,
 ) {
   return updateSession(state, sessionId, (session) => {
@@ -79,7 +79,7 @@ function findSessionForTimelineRequest(state: TuiState, requestId: string) {
   return null;
 }
 
-function findSessionForRuntimeEvent(state: TuiState, event: LocalAgentRuntimeEvent) {
+function findSessionForRuntimeEvent(state: TuiState, event: AgentRuntimeEvent) {
   return findSessionForRun(state, event.requestId)
     ?? (event.type === 'message.completed'
       ? findSessionForTimelineRequest(state, event.requestId)
@@ -93,16 +93,16 @@ function removeReviewDraft(state: TuiState, actionId: string | undefined) {
   return { ...state, reviewDrafts };
 }
 
-function reviewActionForRun(run: LocalAgentRunView | null | undefined) {
+function reviewActionForRun(run: AgentRunView | null | undefined) {
   return run?.state === 'waiting_review' ? run.reviewAction : null;
 }
 
-function reviewResolutionWasSent(state: TuiState, run: LocalAgentRunView | null) {
+function reviewResolutionWasSent(state: TuiState, run: AgentRunView | null) {
   if (run?.state !== 'waiting_review') return false;
   return state.reviewDrafts[run.reviewAction.actionId]?.resolutionSent === true;
 }
 
-function isWaitingForReviewAction(run: LocalAgentRunView | null, actionId: string) {
+function isWaitingForReviewAction(run: AgentRunView | null, actionId: string) {
   return run?.state === 'waiting_review' && run.reviewAction.actionId === actionId;
 }
 
@@ -247,7 +247,7 @@ function finishRun(
   state: TuiState,
   requestId: string,
   statusNotice: string | undefined,
-  messages: LocalAgentSessionMessageInput[] = [],
+  messages: AgentSessionMessageInput[] = [],
   observedAt = 0,
 ) {
   const owner = findSessionForRun(state, requestId);
@@ -277,7 +277,7 @@ function countRunOutputChars(session: SessionModel, requestId: string) {
   ), 0);
 }
 
-function activeRunToPendingUi(session: SessionModel, run: LocalAgentRunView | null) {
+function activeRunToPendingUi(session: SessionModel, run: AgentRunView | null) {
   if (!run || run.state === 'waiting_review') return null;
   return {
     startedAt: run.startedAt ?? 0,
@@ -290,7 +290,7 @@ function activeRunToPendingUi(session: SessionModel, run: LocalAgentRunView | nu
   };
 }
 
-function activeRunToPendingApproval(state: TuiState, run: LocalAgentRunView | null) {
+function activeRunToPendingApproval(state: TuiState, run: AgentRunView | null) {
   if (run?.state !== 'waiting_review') return null;
   const draft = state.reviewDrafts[run.reviewAction.actionId];
   if (!draft || draft.resolutionSent) return null;

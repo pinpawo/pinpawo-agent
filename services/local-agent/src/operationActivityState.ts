@@ -1,14 +1,14 @@
 import type {
-  LocalAgentOperationEvent,
-  LocalAgentOperationPhase,
-} from './events/localAgentRuntimeEvent';
+  AgentOperationEvent,
+  AgentOperationPhase,
+} from '@pinpawo/agent-session';
 
 type ActiveOperationState = {
   kind: string;
   title?: string;
   target?: string;
   summary?: string;
-  phase: LocalAgentOperationPhase;
+  phase: AgentOperationPhase;
   updatedAt: number;
   eventId: number;
   expiresAt?: number;
@@ -33,7 +33,7 @@ let activeOperationState: ActiveOperationState | null = null;
 let agentRunState: AgentRunState | null = null;
 let nextOperationEventId = 1;
 
-function setActiveOperation(event: LocalAgentOperationEvent, visibleForMs?: number) {
+function setActiveOperation(event: AgentOperationEvent, visibleForMs?: number) {
   const now = Date.now();
   activeOperationState = {
     kind: event.operation.kind,
@@ -63,7 +63,7 @@ export function clearAgentRunActivity(requestId?: string) {
   activeOperationState = null;
 }
 
-export function recordOperationActivity(event: LocalAgentOperationEvent) {
+export function recordOperationActivity(event: AgentOperationEvent) {
   if (!event.operation.kind) return;
 
   if (event.phase === 'started' || event.phase === 'updated') {

@@ -3,23 +3,19 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "jsx": "react-jsx",
-    "outDir": "dist",
     "baseUrl": ".",
     "paths": {
-      "@pinpawo/agent-session": [
-        "../../packages/agent-session/src/index.ts"
-      ],
       "@pinpawo/pet-agent": [
-        "../../packages/pet-agent/src/index.ts"
+        "../pet-agent/src/index.ts"
       ],
       "@pinpawo/pet-agent/protocol-validation": [
-        "../../packages/pet-agent/src/protocolValidation.ts"
+        "../pet-agent/src/protocolValidation.ts"
       ]
     },
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["node"]
   },
   "include": ["src"]
 }

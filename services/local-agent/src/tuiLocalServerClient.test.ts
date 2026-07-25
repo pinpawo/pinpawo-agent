@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseLocalAgentSessionSummary } from './localAgentSessionParser';
+import { parseAgentSessionSummary } from '@pinpawo/agent-session';
 import { TuiLocalServerClient } from './tui/tuiLocalServerClient';
 
-test('parseLocalAgentSessionSummary validates resume session payloads', () => {
-  assert.deepEqual(parseLocalAgentSessionSummary({
+test('parseAgentSessionSummary validates resume session payloads', () => {
+  assert.deepEqual(parseAgentSessionSummary({
     id: 'chat:pet-a',
     kind: 'chat',
     title: 'Pet chat',
@@ -21,7 +21,7 @@ test('parseLocalAgentSessionSummary validates resume session payloads', () => {
     updatedAt: '2026-06-03T00:01:00.000Z',
     active: true,
   });
-  assert.equal(parseLocalAgentSessionSummary({ id: 'missing-title' }), null);
+  assert.equal(parseAgentSessionSummary({ id: 'missing-title' }), null);
 });
 
 test('TuiLocalServerClient reads current snapshots, sessions, resume, and health', async () => {

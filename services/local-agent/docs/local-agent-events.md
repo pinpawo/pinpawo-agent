@@ -14,11 +14,11 @@ flowchart LR
   end
 
   subgraph local[local-agent service]
-    NORM[agentStreamNormalizer<br/>→ LocalAgentOperationEvent]
+    NORM[agentStreamNormalizer<br/>→ AgentOperationEvent]
     TRK[ToolOperationTracker<br/>(id reuse, finishActive)]
     REG[recordOperationActivity<br/>operationActivityState]
-    APPOUT[sendLocalAgentEvent<br/>(includeRaw=false)]
-    LOCOUT[sendLocalAgentEvent<br/>(includeRaw=true)]
+    APPOUT[sendLocalAgentEvent<br/>(audience=remote)]
+    LOCOUT[sendLocalAgentEvent<br/>(audience=trusted-local)]
   end
 
   subgraph remote[Hosted PinPawo app]
@@ -40,13 +40,15 @@ flowchart LR
 
 Two physical egress points exist:
 
-| Egress | File | Audience | `includeRaw` |
-| --- | --- | --- | --- |
-| App WS relay | `runtime.ts` (`inflightRequests`), `localAgentAppChatHandler.ts` | Hosted PinPawo app over public WSS | **false** (default) |
-| Local HTTP/WS server | `localServer.ts`, `localServerChatHandler.ts`, `localServerStudioHandler.ts` | TUI / companion on `127.0.0.1:3210` | **true** |
+| Egress | File | Audience |
+| --- | --- | --- |
+| App WS relay | `runtime.ts` (`inflightRequests`), `localAgentAppChatHandler.ts` | `remote` (default) |
+| Local HTTP/WS server | `localServer.ts`, `localServerChatHandler.ts`, `localServerStudioHandler.ts` | `trusted-local` |
 
-Both call the same `sendLocalAgentEvent(ws, event, options?)`. The single
-choice they make is whether to pass `includeRaw: true`.
+Both call the same `sendLocalAgentEvent(ws, event, options?)`. The `audience`
+selects the complete disclosure policy: remote delivery strips raw and local
+path details and suppresses unsafe token deltas; trusted-local delivery
+preserves native events.
 
 ## Why two modes
 
@@ -87,10 +89,10 @@ sequenceDiagram
   Track-->>Norm: event { phase:'started', raw:{input} }
   Norm->>Act: recordOperationActivity(event)
   par fan-out to both transports
-    Norm->>Send: emit on local socket (includeRaw=true)
+    Norm->>Send: emit on local socket (audience=trusted-local)
     Send->>Local: { phase, operation, raw:{input} }
   and
-    Norm->>Send: emit on app socket (includeRaw=false)
+    Norm->>Send: emit on app socket (audience=remote)
     Send->>App: { phase, operation }  (no raw)
   end
 
@@ -116,7 +118,7 @@ that didn't naturally complete; they go through the same fan-out.
 ## Wire schema reference
 
 ```ts
-type LocalAgentOperationEvent = {
+type AgentOperationEvent = {
   type: 'operation';
   requestId: string;
   phase: 'started' | 'updated' | 'completed' | 'failed' | 'interrupted';
@@ -128,13 +130,13 @@ type LocalAgentOperationEvent = {
     summary?: string;             // short status, e.g. '已完成'
     details?: Record<string, unknown>; // toolkit-defined structured data
     source?: {
-      provider: 'toolkit' | 'toolset' | 'runtime';
+      provider: 'toolkit' | 'runtime';
       name: string;
       toolName?: string;
       callId?: string;
     };
   };
-  // Only present on transports that opted into `includeRaw: true`.
+  // Only present on trusted-local transports.
   raw?: {
     input?: unknown;
     output?: unknown;
@@ -143,16 +145,24 @@ type LocalAgentOperationEvent = {
 };
 ```
 
-`LocalAgentOperationEvent` is the canonical operation event type. The trusted
-local vs remote split is enforced at the **transport** layer (`includeRaw`
-flag), not through separate internal and external event types.
+`AgentOperationEvent` is the canonical operation event type. The trusted-local
+vs remote split is enforced at the **transport** layer through `audience`, not
+through separate internal and external event types. `alreadySanitized` is only
+an internal optimization for a remote event that was sanitized before being
+projected; it never changes delta suppression.
+
+`buildLocalAgentEventEnvelope` only frames a native event. It does not accept
+an audience or apply disclosure policy. Remote egress must use
+`sendLocalAgentEvent`; `sendLocalServerPeerEvent` is intentionally fixed to
+trusted loopback peers.
 
 ## Adding a new transport
 
-If you build a new egress (e.g. a different IPC, a webhook), pick `includeRaw`
-based on the same rule:
+If you build a new egress (e.g. a different IPC, a webhook), select its
+`audience` using the same rule:
 
-- Trusted, same-machine, bandwidth-rich → `true`.
-- Remote, multi-tenant, or low-bandwidth → `false`.
+- Trusted, same-machine, bandwidth-rich → `trusted-local`.
+- Remote, multi-tenant, or low-bandwidth → `remote`.
 
-If in doubt, default to `false` and add an opt-in later.
+If in doubt, use the default `remote` policy and add an explicit local opt-in
+later.

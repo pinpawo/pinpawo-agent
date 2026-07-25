@@ -95,7 +95,7 @@ test('normalizes tool stream events with event-provided operation metadata first
   assert.equal(event.operation.target, 'custom-target');
   assert.equal(event.operation.summary, 'custom summary');
   assert.deepEqual(event.operation.source, {
-    provider: 'toolset',
+    provider: 'toolkit',
     name: 'private_shell',
     toolName: 'run_shell',
     callId: 'call-1',

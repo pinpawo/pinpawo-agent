@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { LocalAgentTimelineEntry } from '../../localAgentSession';
+import type { AgentTimelineEntry } from '@pinpawo/agent-session';
 import {
   advanceInlineTimeline,
   isTimelineEntrySettled,
@@ -10,7 +10,7 @@ import {
 function message(
   id: string,
   status: 'streaming' | 'completed',
-): LocalAgentTimelineEntry {
+): AgentTimelineEntry {
   return {
     id,
     type: 'message',
@@ -23,7 +23,7 @@ function message(
 function operation(
   id: string,
   phase: 'started' | 'updated' | 'completed' | 'failed' | 'interrupted',
-): LocalAgentTimelineEntry {
+): AgentTimelineEntry {
   return {
     id,
     type: 'operation',

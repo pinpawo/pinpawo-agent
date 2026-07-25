@@ -1,10 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { LocalAgentMessageEntry } from '../../localAgentSession';
+import type { AgentMessageEntry } from '@pinpawo/agent-session';
 import type { SessionModel } from '../state/tuiState';
 
-type TranscriptTimelineEntry = LocalAgentMessageEntry & { role: 'user' | 'assistant' };
+type TranscriptTimelineEntry = AgentMessageEntry & { role: 'user' | 'assistant' };
 
 export type TranscriptExportResult = {
   filePath: string;

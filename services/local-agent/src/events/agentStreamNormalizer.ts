@@ -4,9 +4,9 @@ import type {
 } from '@pinpawo/pet-agent';
 import { readJsonRecord } from '@pinpawo/pet-agent';
 import type {
-  LocalAgentOperationEvent,
-  LocalAgentOperationPhase,
-} from './localAgentRuntimeEvent';
+  AgentOperationEvent,
+  AgentOperationPhase,
+} from '@pinpawo/agent-session';
 import {
   emptyOperationRegistry,
   type OperationRegistry,
@@ -84,7 +84,7 @@ function unwrapToolMessageOutput(output: unknown): unknown {
   return output;
 }
 
-function readToolPhase(event: StreamToolsPayload['event']): LocalAgentOperationPhase {
+function readToolPhase(event: StreamToolsPayload['event']): AgentOperationPhase {
   if (event === 'on_tool_start') return 'started';
   if (event === 'on_tool_end') return 'completed';
   if (event === 'on_tool_error') return 'failed';
@@ -141,11 +141,17 @@ function operationKindFromSource(
   return `${ownerName}.${toolName}`;
 }
 
+function normalizeOperationSourceProvider(
+  provider: NonNullable<SubagentToolOperationMetadata['source']>['provider'] | undefined,
+): 'toolkit' | 'runtime' {
+  return provider === undefined || provider === 'runtime' ? 'runtime' : 'toolkit';
+}
+
 export function normalizeToolStreamEvent(
   requestId: string,
   payload: StreamToolsPayload,
   registry: OperationRegistry = emptyOperationRegistry,
-): LocalAgentOperationEvent {
+): AgentOperationEvent {
   const metadata = payload.operation
     ? {
         ...payload.operation,
@@ -177,7 +183,7 @@ export function normalizeToolStreamEvent(
       summary: summary.summary,
       details: summary.details,
       source: {
-        provider: metadata?.source.provider ?? 'runtime',
+        provider: normalizeOperationSourceProvider(metadata?.source.provider),
         name: metadata?.source.name ?? 'runtime',
         toolName: metadata?.source.toolName ?? payload.name,
         callId: payload.toolCallId,

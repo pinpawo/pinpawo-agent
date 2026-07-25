@@ -34,22 +34,22 @@ import {
 } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
-import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import {
   resolveHumanReviewAction,
   type HumanReviewActionRoute,
   type HumanReviewResolutionOutcome,
   type HumanReviewResolutionSource,
 } from './humanReviewActionRouting';
-import { reviewActionId, reviewActionReviews } from './reviewAction';
+import { reviewActionId, reviewActionReviews } from '@pinpawo/agent-session';
 import { ReviewResolutionLifecycle } from './reviewResolutionLifecycle';
-import type { LocalAgentSession } from './localAgentSession';
-import { LOCAL_AGENT_SESSION_SNAPSHOT_VERSION } from './localAgentSession';
+import type { AgentSession } from '@pinpawo/agent-session';
 import {
   applySessionSnapshot,
   reduceSession,
-  type LocalAgentSessionInput,
-} from './localAgentSessionReducer';
+  type AgentSessionInput,
+} from '@pinpawo/agent-session';
+import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
 
 type InflightRequest = InflightOperationRun;
 type LoadContext = (actorId: string) => Promise<AgentContext>;
@@ -120,7 +120,7 @@ export class LocalAgentAppChatHandler {
   private readonly maxSessionProjections: number;
   private readonly reviewResolutions = new ReviewResolutionLifecycle<ReviewActionRoute>();
   private readonly sessionStartedAtByThreadId = new Map<string, string>();
-  private readonly sessionsByThreadId = new Map<string, LocalAgentSession>();
+  private readonly sessionsByThreadId = new Map<string, AgentSession>();
   private sessionResetPromise: Promise<void> = Promise.resolve();
 
   constructor(options: LocalAgentAppChatHandlerOptions) {
@@ -461,7 +461,7 @@ export class LocalAgentAppChatHandler {
     };
   }
 
-  private recordReviewActionRoute(event: LocalAgentRuntimeEvent, userId: string) {
+  private recordReviewActionRoute(event: AgentRuntimeEvent, userId: string) {
     if (event.type !== 'human_review.requested' || !event.review?.id) {
       return;
     }
@@ -558,7 +558,7 @@ export class LocalAgentAppChatHandler {
     return [...userIds];
   }
 
-  private createRemoteSession(userId: string): LocalAgentSession {
+  private createRemoteSession(userId: string): AgentSession {
     const llmConfig = this.getLlmConfig();
     return {
       sessionId: this.getChatThreadId(userId),
@@ -572,11 +572,11 @@ export class LocalAgentAppChatHandler {
     };
   }
 
-  private reduceRemoteSession(userId: string, input: LocalAgentSessionInput) {
+  private reduceRemoteSession(userId: string, input: AgentSessionInput) {
     return this.applyRemoteSessionInput(userId, input).session;
   }
 
-  private applyRemoteSessionInput(userId: string, input: LocalAgentSessionInput) {
+  private applyRemoteSessionInput(userId: string, input: AgentSessionInput) {
     const threadId = this.getChatThreadId(userId);
     const session = this.sessionsByThreadId.get(threadId) ?? this.createRemoteSession(userId);
     const nextSession = reduceSession(session, input, { observedAt: this.now() });
@@ -584,7 +584,7 @@ export class LocalAgentAppChatHandler {
     return { session: nextSession, changed: nextSession !== session };
   }
 
-  private storeRemoteSession(threadId: string, session: LocalAgentSession) {
+  private storeRemoteSession(threadId: string, session: AgentSession) {
     this.sessionsByThreadId.delete(threadId);
     this.sessionsByThreadId.set(threadId, session);
     while (this.sessionsByThreadId.size > this.maxSessionProjections) {
@@ -596,7 +596,7 @@ export class LocalAgentAppChatHandler {
     }
   }
 
-  private reduceSessionForRequest(requestId: string, input: LocalAgentSessionInput) {
+  private reduceSessionForRequest(requestId: string, input: AgentSessionInput) {
     for (const [threadId, session] of this.sessionsByThreadId) {
       if (session.activeRun?.requestId !== requestId) continue;
       this.storeRemoteSession(threadId, reduceSession(session, input, { observedAt: this.now() }));
@@ -608,36 +608,44 @@ export class LocalAgentAppChatHandler {
     this.reduceRemoteSession(userId, { type: 'run.finished', requestId });
   }
 
-  private emitRemoteEvent(ws: WebSocket, userId: string, event: LocalAgentRuntimeEvent) {
+  private emitRemoteEvent(ws: WebSocket, userId: string, event: AgentRuntimeEvent) {
+    // Path-like text cannot be redacted safely one token chunk at a time.
+    // Until the remote transport owns a stateful stream sanitizer, publish
+    // only the complete assistant message. Trusted local transports keep
+    // their existing message.delta stream.
+    if (event.type === 'message.delta') {
+      return true;
+    }
     const safeEvent = sanitizeLocalAgentRemoteEvent(event);
     if (!this.projectRemoteEvent(userId, safeEvent)) {
       return false;
     }
     this.recordReviewActionRoute(safeEvent, userId);
-    return sendLocalAgentEvent(ws, safeEvent);
+    // safeEvent already passed through the remote disclosure adapter above.
+    return sendLocalAgentEvent(ws, safeEvent, {
+      audience: 'remote',
+      alreadySanitized: true,
+    });
   }
 
-  private projectRemoteEvent(userId: string, event: LocalAgentRuntimeEvent) {
+  private projectRemoteEvent(userId: string, event: AgentRuntimeEvent) {
     return this.applyRemoteSessionInput(userId, { type: 'runtime.event', event }).changed;
   }
 
   private reconcilePendingReviewSession(requestId: string, route: ReviewActionRoute) {
     const threadId = this.getChatThreadId(route.userId);
     const session = this.sessionsByThreadId.get(threadId) ?? this.createRemoteSession(route.userId);
-    const snapshot = {
-      version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
-      session: {
-        ...session,
-        activeRun: {
-          requestId,
-          state: 'waiting_review' as const,
-          reviewAction: {
-            actionId: route.actionId,
-            reviews: route.reviews,
-          },
+    const snapshot = createAgentSessionSnapshot({
+      ...session,
+      activeRun: {
+        requestId,
+        state: 'waiting_review' as const,
+        reviewAction: {
+          actionId: route.actionId,
+          reviews: route.reviews,
         },
       },
-    };
+    });
     this.storeRemoteSession(
       threadId,
       applySessionSnapshot(session, snapshot, {

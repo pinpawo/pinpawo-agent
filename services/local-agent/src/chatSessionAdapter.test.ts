@@ -8,7 +8,7 @@ import {
   SUBAGENT_OPERATIONS_EVENT,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
-import type { LocalAgentRuntimeEvent } from './events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type { LocalAgentGraphService } from './agentGraphService';
 import { runChatSession } from './chatSessionAdapter';
 import { readFinalMessageText, type StreamToolsPayload } from './agentStreamEvents';
@@ -114,7 +114,7 @@ test('runChatSession sources tool operations from the root protocol stream, not 
 });
 
 test('runChatSession falls back to checkpoint final message when stream values omit messages', async () => {
-  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const emittedEvents: AgentRuntimeEvent[] = [];
   const finalMessages = [
     new HumanMessage('hello'),
     new AIMessage('checkpoint answer'),
@@ -163,7 +163,7 @@ test('runChatSession falls back to checkpoint final message when stream values o
   assert.deepEqual(result, { status: 'completed', reply: 'checkpoint answer' });
   assert.equal(readThreadStateCalls, 2);
   const completed = emittedEvents.find(
-    (event): event is Extract<LocalAgentRuntimeEvent, { type: 'message.completed' }> =>
+    (event): event is Extract<AgentRuntimeEvent, { type: 'message.completed' }> =>
       event.type === 'message.completed',
   ) ?? null;
   assert.equal(completed?.text, 'checkpoint answer');
@@ -171,7 +171,7 @@ test('runChatSession falls back to checkpoint final message when stream values o
 
 test('runChatSession maps authorization runtime events to system notices', async () => {
   const emittedTools: StreamToolsPayload[] = [];
-  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphKey: 'test',
     graphConfig: {},
@@ -256,7 +256,7 @@ test('runChatSession maps authorization runtime events to system notices', async
 
 test('runChatSession emits one completed subagent block per child model message lifecycle', async () => {
   const emittedTools: StreamToolsPayload[] = [];
-  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphKey: 'test',
     graphConfig: {},
@@ -379,7 +379,7 @@ test('runChatSession merges subagent_operations announcements through acceptDele
 });
 
 test('runChatSession forwards canonical review interrupt specs unchanged', async () => {
-  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphKey: 'test',
     graphConfig: {},
@@ -450,7 +450,7 @@ test('runChatSession forwards canonical review interrupt specs unchanged', async
 });
 
 test('runChatSession resumes explicit response after state update clears interrupt payload', async () => {
-  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const emittedEvents: AgentRuntimeEvent[] = [];
   const streamInputs: unknown[] = [];
   let resumeCheckpointedCount = 0;
   const resume = { reviewId: 'review-1', selectedOptionId: 'approve' };
@@ -593,7 +593,7 @@ test('runChatSession confirms the original resolution without interrupting a new
   } as unknown as AgentChannelSetup;
   let reads = 0;
   const confirmations: Array<{ canInterrupt: boolean }> = [];
-  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const emittedEvents: AgentRuntimeEvent[] = [];
   const graphService = {
     async readThreadState() {
       reads += 1;
@@ -703,7 +703,7 @@ test('runChatSession does not confirm a review resolution when graph execution f
 
 test('runChatSession allows a user message after an aborted non-review run leaves pending continuation', async () => {
   const finalMessages = [new AIMessage('continued after abort')];
-  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphKey: 'test',
     graphConfig: {},
@@ -797,7 +797,7 @@ test('runChatSession rejects stale resume with user-facing message', async () =>
 
 test('runChatSession does not map pending review free text to review response', async () => {
   const streamInputs: unknown[] = [];
-  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const emittedEvents: AgentRuntimeEvent[] = [];
   const review = {
     id: 'review-respond',
     schemaVersion: 1,
@@ -873,7 +873,7 @@ test('runChatSession does not map pending review free text to review response', 
 });
 
 test('runChatSession degrades a GraphRecursionError to a completed 待续跑 reply', async () => {
-  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphKey: 'test',
     graphConfig: {},
@@ -908,14 +908,14 @@ test('runChatSession degrades a GraphRecursionError to a completed 待续跑 rep
   assert.equal(result.status, 'completed');
   assert.match(result.status === 'completed' ? result.reply : '', /步数已达上限/);
   const completed = emittedEvents.find(
-    (event): event is Extract<LocalAgentRuntimeEvent, { type: 'message.completed' }> =>
+    (event): event is Extract<AgentRuntimeEvent, { type: 'message.completed' }> =>
       event.type === 'message.completed',
   ) ?? null;
   assert.match(completed?.text ?? '', /步数已达上限/);
 });
 
 test('runChatSession keeps the streamed reply when GraphRecursionError fires mid-stream', async () => {
-  const emittedEvents: LocalAgentRuntimeEvent[] = [];
+  const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphKey: 'test',
     graphConfig: {},
@@ -1047,8 +1047,8 @@ test('runChatSession omits token usage when provider usage is unavailable', asyn
   });
 
   assert.deepEqual(result, { status: 'completed', reply: '这里是回执。' });
-  const completed = (emittedEvents as LocalAgentRuntimeEvent[])
-    .find((message): message is LocalAgentRuntimeEvent => message.type === 'message.completed') ?? null;
+  const completed = (emittedEvents as AgentRuntimeEvent[])
+    .find((message): message is AgentRuntimeEvent => message.type === 'message.completed') ?? null;
   assert.equal(completed?.type, 'message.completed');
   assert.equal(completed?.role, 'assistant');
   assert.equal(completed.usage, undefined);
@@ -1131,8 +1131,8 @@ test('runChatSession emits provider token usage from new state messages', async 
     emitToolEvent: () => {},
   });
 
-  const completed = (emittedEvents as LocalAgentRuntimeEvent[])
-    .find((message): message is LocalAgentRuntimeEvent => message.type === 'message.completed') ?? null;
+  const completed = (emittedEvents as AgentRuntimeEvent[])
+    .find((message): message is AgentRuntimeEvent => message.type === 'message.completed') ?? null;
   assert.equal(completed?.type, 'message.completed');
   assert.deepEqual(completed.usage, {
     inputTokens: 123,

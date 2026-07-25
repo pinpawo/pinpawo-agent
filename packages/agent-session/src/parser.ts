@@ -1,31 +1,35 @@
-import { isTokenUsageSnapshot, type ReviewSpec } from '@pinpawo/pet-agent';
+import type { ReviewSpec } from '@pinpawo/pet-agent';
 import {
-  LOCAL_AGENT_SESSION_SNAPSHOT_VERSION,
-  type LocalAgentOperationEntry,
-  type LocalAgentReviewAction,
-  type LocalAgentRunActivity,
-  type LocalAgentRunView,
-  type LocalAgentRuntimeView,
-  type LocalAgentSession,
-  type LocalAgentSessionSnapshot,
-  type LocalAgentSessionSummary,
-  type LocalAgentTimelineEntry,
-} from './localAgentSession';
+  AGENT_SESSION_SNAPSHOT_VERSION,
+  type AgentOperationEntry,
+  type AgentReviewAction,
+  type AgentRunActivity,
+  type AgentRunView,
+  type AgentRuntimeView,
+  type AgentSession,
+  type AgentSessionSummary,
+} from './domain';
+import type {
+  AgentSessionSnapshot,
+  JsonObject,
+} from './snapshot';
+import { isJsonValue } from './snapshot';
+import { isAgentTokenUsageSnapshot } from './validation';
 
-export function parseLocalAgentSessionSnapshot(
+export function parseAgentSessionSnapshot(
   value: unknown,
-): LocalAgentSessionSnapshot | null {
+): AgentSessionSnapshot | null {
   if (!isRecord(value)) return null;
-  if (value.version !== LOCAL_AGENT_SESSION_SNAPSHOT_VERSION) return null;
-  const session = parseLocalAgentSession(value.session);
+  if (value.version !== AGENT_SESSION_SNAPSHOT_VERSION) return null;
+  const session = parseAgentSession(value.session);
   return session
-    ? { version: LOCAL_AGENT_SESSION_SNAPSHOT_VERSION, session }
+    ? { version: AGENT_SESSION_SNAPSHOT_VERSION, session }
     : null;
 }
 
-export function parseLocalAgentSessionSummary(
+export function parseAgentSessionSummary(
   value: unknown,
-): LocalAgentSessionSummary | null {
+): AgentSessionSummary | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.id !== 'string'
@@ -51,7 +55,7 @@ export function parseLocalAgentSessionSummary(
   };
 }
 
-function parseLocalAgentSession(value: unknown): LocalAgentSession | null {
+function parseAgentSession(value: unknown): AgentSession | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.sessionId !== 'string'
@@ -62,11 +66,11 @@ function parseLocalAgentSession(value: unknown): LocalAgentSession | null {
     return null;
   }
   const timeline = value.timeline.flatMap((entry) => {
-    const parsed = parseLocalAgentTimelineEntry(entry);
+    const parsed = parseAgentTimelineEntry(entry);
     return parsed ? [parsed] : [];
   });
   if (timeline.length !== value.timeline.length) return null;
-  const activeRun = value.activeRun === null ? null : parseLocalAgentRun(value.activeRun);
+  const activeRun = value.activeRun === null ? null : parseAgentRun(value.activeRun);
   if (value.activeRun !== null && !activeRun) return null;
   const actor = isRecord(value.actor)
     && typeof value.actor.label === 'string'
@@ -76,11 +80,11 @@ function parseLocalAgentSession(value: unknown): LocalAgentSession | null {
   if (value.actor !== undefined && !actor) return null;
   const runtime = value.runtime === undefined
     ? undefined
-    : parseLocalAgentRuntime(value.runtime);
+    : parseAgentRuntime(value.runtime);
   if (value.runtime !== undefined && !runtime) return null;
-  const sessionTokenUsage = isTokenUsageSnapshot(value.sessionTokenUsage)
+  const sessionTokenUsage = isAgentTokenUsageSnapshot(value.sessionTokenUsage)
     && value.sessionTokenUsage.scope === 'session'
-    ? value.sessionTokenUsage as LocalAgentSession['sessionTokenUsage']
+    ? value.sessionTokenUsage as AgentSession['sessionTokenUsage']
     : undefined;
   return {
     sessionId: value.sessionId,
@@ -89,12 +93,12 @@ function parseLocalAgentSession(value: unknown): LocalAgentSession | null {
     activeRun,
     ...(actor ? { actor } : {}),
     ...(runtime ? { runtime } : {}),
-    ...(isTokenUsageSnapshot(value.tokenUsage) ? { tokenUsage: value.tokenUsage } : {}),
+    ...(isAgentTokenUsageSnapshot(value.tokenUsage) ? { tokenUsage: value.tokenUsage } : {}),
     ...(sessionTokenUsage ? { sessionTokenUsage } : {}),
   };
 }
 
-function parseLocalAgentRuntime(value: unknown): LocalAgentRuntimeView | null {
+function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
   if (!isRecord(value)) return null;
   const stringFields = [
     'model',
@@ -137,7 +141,9 @@ function parseLocalAgentRuntime(value: unknown): LocalAgentRuntimeView | null {
   };
 }
 
-function parseLocalAgentTimelineEntry(value: unknown): LocalAgentTimelineEntry | null {
+function parseAgentTimelineEntry(
+  value: unknown,
+): AgentSession['timeline'][number] | null {
   if (!isRecord(value) || typeof value.id !== 'string') {
     return null;
   }
@@ -170,11 +176,22 @@ function parseLocalAgentTimelineEntry(value: unknown): LocalAgentTimelineEntry |
       || typeof value.operationKey !== 'string'
       || !isOperationPhase(value.phase)
       || (value.raw !== undefined && !isRecord(value.raw))
+      || !isOptionalFiniteNumber(value.startedAt)
+      || !isOptionalFiniteNumber(value.updatedAt)
+      || !isOptionalFiniteNumber(value.completedAt)
     ) {
       return null;
     }
     const operationSource = parseOperationSource(value.operationSource);
     if (value.operationSource !== undefined && !operationSource) return null;
+    const details = value.details === undefined
+      ? undefined
+      : readJsonObject(value.details);
+    if (value.details !== undefined && !details) return null;
+    const raw = value.raw === undefined
+      ? undefined
+      : parseOperationRaw(value.raw);
+    if (value.raw !== undefined && !raw) return null;
     return {
       id: value.id,
       type: 'operation',
@@ -185,29 +202,61 @@ function parseLocalAgentTimelineEntry(value: unknown): LocalAgentTimelineEntry |
       phase: value.phase,
       ...(typeof value.target === 'string' ? { target: value.target } : {}),
       ...(typeof value.summary === 'string' ? { summary: value.summary } : {}),
-      ...(isRecord(value.details) ? { details: value.details } : {}),
+      ...(details ? { details } : {}),
       ...(operationSource ? { operationSource } : {}),
-      ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
-      ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
-      ...(typeof value.completedAt === 'number' ? { completedAt: value.completedAt } : {}),
-      ...(isRecord(value.raw) ? {
-        raw: {
-          ...('input' in value.raw ? { input: value.raw.input } : {}),
-          ...('output' in value.raw ? { output: value.raw.output } : {}),
-          ...('error' in value.raw ? { error: value.raw.error } : {}),
-        },
-      } : {}),
-    } satisfies LocalAgentOperationEntry;
+      ...(isFiniteNumber(value.startedAt) ? { startedAt: value.startedAt } : {}),
+      ...(isFiniteNumber(value.updatedAt) ? { updatedAt: value.updatedAt } : {}),
+      ...(isFiniteNumber(value.completedAt) ? { completedAt: value.completedAt } : {}),
+      ...(raw ? { raw } : {}),
+    } satisfies AgentOperationEntry;
   }
   return null;
 }
 
+function parseOperationRaw(value: unknown) {
+  if (!isRecord(value)) return null;
+  const allowedKeys = ['input', 'output', 'error'];
+  if (Object.keys(value).some((key) => !allowedKeys.includes(key))) return null;
+  const input = 'input' in value && isJsonValue(value.input)
+    ? value.input
+    : undefined;
+  const output = 'output' in value && isJsonValue(value.output)
+    ? value.output
+    : undefined;
+  const error = 'error' in value && isJsonValue(value.error)
+    ? value.error
+    : undefined;
+  if (
+    ('input' in value && input === undefined)
+    || ('output' in value && output === undefined)
+    || ('error' in value && error === undefined)
+  ) {
+    return null;
+  }
+  return {
+    ...(input !== undefined ? { input } : {}),
+    ...(output !== undefined ? { output } : {}),
+    ...(error !== undefined ? { error } : {}),
+  };
+}
+
+function readJsonObject(value: unknown): JsonObject | null {
+  return isRecord(value) && isJsonValue(value)
+    ? value
+    : null;
+}
+
 function parseOperationSource(
   value: unknown,
-): LocalAgentOperationEntry['operationSource'] | null {
+): AgentOperationEntry['operationSource'] | null {
   if (
     !isRecord(value)
-    || (value.provider !== 'toolkit' && value.provider !== 'toolset' && value.provider !== 'runtime')
+    || (
+      value.provider !== 'toolkit'
+      && value.provider !== 'toolset'
+      && value.provider !== 'capability'
+      && value.provider !== 'runtime'
+    )
     || typeof value.name !== 'string'
     || (value.toolName !== undefined && typeof value.toolName !== 'string')
     || (value.callId !== undefined && typeof value.callId !== 'string')
@@ -215,21 +264,26 @@ function parseOperationSource(
     return null;
   }
   return {
-    provider: value.provider,
+    provider: value.provider === 'runtime' ? 'runtime' : 'toolkit',
     name: value.name,
     ...(typeof value.toolName === 'string' ? { toolName: value.toolName } : {}),
     ...(typeof value.callId === 'string' ? { callId: value.callId } : {}),
   };
 }
 
-function parseLocalAgentRun(value: unknown): LocalAgentRunView | null {
-  if (!isRecord(value) || typeof value.requestId !== 'string') {
+function parseAgentRun(value: unknown): AgentRunView | null {
+  if (
+    !isRecord(value)
+    || typeof value.requestId !== 'string'
+    || !isOptionalFiniteNumber(value.startedAt)
+    || !isOptionalFiniteNumber(value.updatedAt)
+  ) {
     return null;
   }
   const base = {
     requestId: value.requestId,
-    ...(typeof value.startedAt === 'number' ? { startedAt: value.startedAt } : {}),
-    ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
+    ...(isFiniteNumber(value.startedAt) ? { startedAt: value.startedAt } : {}),
+    ...(isFiniteNumber(value.updatedAt) ? { updatedAt: value.updatedAt } : {}),
   };
   if (value.state === 'running') {
     if (!isRunActivity(value.activity) || value.reviewAction !== undefined) return null;
@@ -247,7 +301,7 @@ function parseLocalAgentRun(value: unknown): LocalAgentRunView | null {
   return null;
 }
 
-function parseNativeReviewAction(value: unknown): LocalAgentReviewAction | null {
+function parseNativeReviewAction(value: unknown): AgentReviewAction | null {
   if (!isRecord(value)) return null;
   const reviews = readReviewSpecs(value.reviews);
   if (typeof value.actionId !== 'string' || !reviews) {
@@ -264,7 +318,8 @@ function readReviewSpecs(value: unknown): ReviewSpec[] | null {
   if (!Array.isArray(value)) return null;
   const reviews = value.filter((item): item is ReviewSpec =>
     Boolean(item && typeof item === 'object' && !Array.isArray(item)
-      && typeof (item as Record<string, unknown>).id === 'string'));
+      && typeof (item as Record<string, unknown>).id === 'string'
+      && isJsonValue(item)));
   return reviews.length === value.length && reviews.length > 0 ? reviews : null;
 }
 
@@ -272,11 +327,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isSessionKind(value: unknown): value is LocalAgentSession['kind'] {
+function isSessionKind(value: unknown): value is AgentSession['kind'] {
   return value === 'chat' || value === 'studio';
 }
 
-function isOperationPhase(value: unknown): value is LocalAgentOperationEntry['phase'] {
+function isOperationPhase(value: unknown): value is AgentOperationEntry['phase'] {
   return value === 'started'
     || value === 'updated'
     || value === 'completed'
@@ -284,8 +339,16 @@ function isOperationPhase(value: unknown): value is LocalAgentOperationEntry['ph
     || value === 'interrupted';
 }
 
-function isRunActivity(value: unknown): value is LocalAgentRunActivity {
+function isRunActivity(value: unknown): value is AgentRunActivity {
   return value === 'thinking'
     || value === 'using_tool'
     || value === 'streaming';
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isOptionalFiniteNumber(value: unknown) {
+  return value === undefined || isFiniteNumber(value);
 }

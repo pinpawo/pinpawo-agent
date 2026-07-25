@@ -1,16 +1,16 @@
 import type { ReviewResponse, ReviewSpec } from '@pinpawo/pet-agent';
-import type { LocalAgentRuntimeEvent } from '../../events/localAgentRuntimeEvent';
+import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type {
-  LocalAgentActorView,
-  LocalAgentReviewAction,
-  LocalAgentRuntimeView,
-  LocalAgentSession,
-  LocalAgentSessionMessageInput,
-  LocalAgentSessionSnapshot,
-  LocalAgentTimelineEntry,
-} from '../../localAgentSession';
-import type { LocalAgentSessionInput } from '../../localAgentSessionReducer';
-import type { ReviewDraft } from '../../reviewAction';
+  AgentActorView,
+  AgentReviewAction,
+  AgentRuntimeView,
+  AgentSession,
+  AgentSessionMessageInput,
+  AgentSessionSnapshot,
+  AgentTimelineEntry,
+} from '@pinpawo/agent-session';
+import type { AgentSessionInput } from '@pinpawo/agent-session';
+import type { ReviewDraft } from './reviewDraft';
 import {
   createComposerHistoryState,
   type ComposerHistoryDirection,
@@ -56,14 +56,14 @@ export type TuiUiState = {
 };
 
 export type SessionModel = Omit<
-  LocalAgentSession,
+  AgentSession,
   'actor' | 'runtime'
 > & {
-  actor: LocalAgentActorView;
-  runtime: LocalAgentRuntimeView;
+  actor: AgentActorView;
+  runtime: AgentRuntimeView;
 };
 
-export type ApprovalRequestModel = LocalAgentReviewAction & {
+export type ApprovalRequestModel = AgentReviewAction & {
   requestId: RunId;
   review: ReviewSpec;
   decisions: ReviewResponse[];
@@ -78,13 +78,13 @@ export type TuiSnapshotApplyReason =
 
 export type TuiAction =
   | (Extract<
-      LocalAgentSessionInput,
+      AgentSessionInput,
       { type: 'session.configured' | 'message.appended' }
     > & { sessionId?: SessionId })
   | {
       type: 'session.snapshot.loaded';
       reason: TuiSnapshotApplyReason;
-      snapshot: LocalAgentSessionSnapshot;
+      snapshot: AgentSessionSnapshot;
       now?: number;
     }
   | {
@@ -127,7 +127,7 @@ export type TuiAction =
       sessionId?: SessionId;
       requestId: RunId;
       kind: SessionModel['kind'];
-      message: LocalAgentSessionMessageInput & { role: 'user' };
+      message: AgentSessionMessageInput & { role: 'user' };
       now: number;
     }
   | {
@@ -153,13 +153,13 @@ export type TuiAction =
       type: 'run.finish';
       requestId: RunId;
       statusNotice?: string;
-      messages?: LocalAgentSessionMessageInput[];
+      messages?: AgentSessionMessageInput[];
     }
   | {
       type: 'event.received';
-      event: LocalAgentRuntimeEvent;
+      event: AgentRuntimeEvent;
       now: number;
-      message?: LocalAgentSessionMessageInput;
+      message?: AgentSessionMessageInput;
     };
 
 export function createInitialTuiState(defaultSession: SessionModel): TuiState {
@@ -191,7 +191,7 @@ export function createSession(params: {
   id: SessionId;
   kind?: SessionModel['kind'];
   actor?: Partial<SessionModel['actor']>;
-  timeline?: LocalAgentTimelineEntry[];
+  timeline?: AgentTimelineEntry[];
 }): SessionModel {
   return {
     sessionId: params.id,

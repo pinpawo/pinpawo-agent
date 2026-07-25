@@ -2,7 +2,7 @@
 title: System Prompt Authoring Principles
 page_type: concept
 status: draft
-updated: 2026-07-23
+updated: 2026-07-25
 sources:
   - ../sources/model-prompting-and-harness-references.md
   - ../../PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md
@@ -10,6 +10,7 @@ sources:
   - https://github.com/pinpawo/pinpawo-agent/issues/435
 related:
   - ../overview.md
+  - orchestrator-practical-reasoning.md
   - prompt-knowledge-layers.md
   - decision-node-ownership.md
   - ../questions/system-prompts-open-questions.md
@@ -175,6 +176,20 @@ For a model upgrade:
 5. record model-specific clauses as conditional protocol rather than changing the
    shared meaning of an action.
 
+### 10. Test contracts and behavior, not prompt prose
+
+Deterministic tests should protect template rendering, structured input shape,
+message role and order, provenance, boundedness, schema constraints, and the
+separation of dynamic facts from static instructions. They should not use the
+presence or absence of natural-language clauses as a proxy for model behavior.
+Such assertions are brittle under equivalent rewrites and can still pass when
+the assembled prompt contains contradictory guidance.
+
+Use goal-based model evals for routing, planning, selection, verdict, and reply
+semantics. Keep text-level negative assertions only when they protect an
+operational boundary such as sensitive-data leakage, untrusted dynamic content
+entering a system prompt, or an input lane that must remain excluded.
+
 ## Evaluation targets derived from Prompt Contracts
 
 The repository does not maintain an independent catalog of eval-quality
@@ -246,7 +261,7 @@ The remaining metrics either classify a failed objective or describe the run:
 
 | Prompt contract | Case objective | Goal-gating evidence | Error classification | Non-gating run diagnostics |
 |---|---|---|---|---|
-| `entry.execution-shape` | Select whether the request can be answered now, needs one execution boundary, or needs planning | Chosen action matches the evidence requirement; a direct task expresses the required boundary | unsupported answer, unnecessary execution, wrong boundary count | schema/invocation status, variants, tokens, latency, cost |
+| `entry.execution-shape` | Select `answer`, `direct_task`, or `needs_plan` by whether new execution is required, its target is determined, and prior planning is required | Chosen action matches the evidence and execution requirement; a direct task preserves the complete current-task objective | unsupported answer, unnecessary execution, ambiguous-target execution, wrong task grouping | schema/invocation status, variants, tokens, latency, cost |
 | `planner.execution-boundary` | Materialize the next independently executable task and preserve only the valid future tail | Current task, cancellation, grouping, deferral, and tail relationships satisfy the supplied goal and handoff | wrong grouping, obsolete work retained, valid work dropped, premature concretization | schema/invocation status, plan shape, variants, tokens, latency, cost |
 | `capability.executor-selection` | Select the best currently available executor for the immutable task | Selected lane fits the task and belongs to the supplied candidate set or valid general fallback | missed custom match, wrong custom match, incorrect general fallback, unavailable lane | schema/invocation status, candidate set, variants, tokens, latency, cost |
 | `outcome.announce-verdict` | Judge the current announce against the current task and overall user goal | Verdict reflects current-task sufficiency, remaining work, and required user input without sibling-result substitution | premature completion, missed completion, sibling contamination, missed user-input stop | schema/invocation status, gap-note shape, variants, tokens, latency, cost |
@@ -282,7 +297,7 @@ the prompts.
 | Area | Observation | Review direction |
 |---|---|---|
 | [`sharedPrefix.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts) | The common decision-node contract now contains only invocation-context use, the structured-judgment role, and graph/answer ownership | Keep node flow, field semantics, completion criteria, and runtime transitions with their narrower prompt, schema, or graph owner |
-| [`entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts) | The prompt defines `answer`, one execution boundary, and multiple execution boundaries by evidence sufficiency and execution shape | Validate unnecessary execution and unsupported answers across models before changing the production boundary |
+| [`entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts) | The prompt applies the ordered new-execution, unique-target, and plan-requirement judgment | Preserve the validated GLM-5.2 profile and extend it across models before changing the production boundary |
 | [`capabilityPlanner.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityPlanner.prompt.ts) | The prompt owns mode-specific planning, task grouping, and deferred-work judgment; the schema owns output relationships | Validate grouping, cancellation, and future-tail preservation across models |
 | [`capabilityDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/capabilityDecision.prompt.ts) | The prompt selects the best executor for the current task; schema and runtime own available-lane enforcement | Validate custom/general selection and missing-parameter behavior across models |
 | [`outcomeDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/outcomeDecision.prompt.ts) | The prompt identifies verdict evidence; the schema owns verdict meanings and `gap_note`; runtime owns transitions | Validate task acceptance, sibling-result isolation, and stopping behavior across models |
@@ -426,9 +441,9 @@ every decision node needs:
 
 The node sequence, completion criteria, verdict definitions, `gap_note`, handoff
 mechanics, and delegation terminology were removed from the shared prefix
-because they already have narrower prompt, schema, or runtime owners. A
-dedicated prompt test guards both the retained cross-node contract and the
-absence of a global flow/glossary inventory.
+because they already have narrower prompt, schema, or runtime owners. Prompt
+input tests guard structured context and dynamic-data boundaries; goal-based
+evals guard the retained cross-node behavior.
 
 For one canonical case per decision node, prompt preview changed as follows:
 
@@ -487,6 +502,29 @@ diagnostics from the judge input preserved the same 15/18 result at
 `294fd26b292dda73232cfbbc7410d0c35e5d4e9c`; only the capability-grouping
 criterion failed.
 
+## Entry exclusion-flow bounded result
+
+The entry follow-up at
+`6e10c8a641489889ab8c414e8e371678b5562a3e` applied the authoring principles
+without adding domain-specific commit or deployment rules:
+
+- the prompt asks whether new execution is needed, whether its target is
+  determined, and whether execution needs prior planning;
+- schema descriptions retain only the result semantics instead of duplicating
+  the decision conditions;
+- runtime-context language is reduced to the read-only fact boundary and the
+  role of canonical main messages;
+- eval cases isolate evidence, clarification, task grouping, context recency,
+  and planning objectives instead of combining them.
+
+With the same DashScope `glm-5.2`, JSON Mode, provider-default reasoning, and
+`prompt-goal-v1` evaluator profile, all 12 entry cases passed across three
+repeats (`36/36`). This is valid evidence for those inputs, but not yet for a
+general execution boundary: several cases explicitly name query, check, or run
+operations also named by the prompt. Natural-language paired cases derived from
+the [practical-reasoning philosophy](orchestrator-practical-reasoning.md)
+remain required before provider expansion.
+
 ## Application to the current entryDecision issue
 
 The recent `answer` regression should not be repaired with a case-specific
@@ -504,11 +542,11 @@ separate owner, documented in
 ## Acceptance status
 
 The V1 implementation is complete across the four decision nodes, the shared
-decision prefix, and `answer`. The GLM-5.2 profile now establishes a reproducible
-current-state baseline and identifies bounded failures, but it does not yet
-establish per-change improvement or cross-model behavior. This page therefore
-remains a **draft synthesis**. Historical comparisons, additional-model
-validation, and priced cost evidence remain tracked by
+decision prefix, and `answer`. The GLM-5.2 baseline identifies bounded failures,
+and the entry exclusion-flow rerun establishes per-change evidence for its
+explicit dataset, not yet for the generalized contract. This page therefore
+remains a **draft synthesis**. Natural-language paired cases, historical
+comparisons, additional-model validation, and priced cost evidence remain tracked by
 [issue #435](https://github.com/pinpawo/pinpawo-agent/issues/435). Contract
 traceability is maintained by the map established in
 [issue #415](https://github.com/pinpawo/pinpawo-agent/issues/415).

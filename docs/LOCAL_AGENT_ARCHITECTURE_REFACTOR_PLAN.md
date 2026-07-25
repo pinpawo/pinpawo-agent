@@ -583,9 +583,9 @@ type OperationRegistry = {
 
 每个 PR 都必须保持：
 
-- `npm run typecheck -w pinpawo-local-agent`
-- `npm run test:unit -w pinpawo-local-agent`
-- `npm run build -w pinpawo-local-agent`
+- `npm run typecheck -w pinpawo`
+- `npm run test:unit -w pinpawo`
+- `npm run build -w pinpawo`
 
 ## 9. 非目标
 

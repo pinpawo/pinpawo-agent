@@ -156,9 +156,9 @@ These evals exercise the production Phase 2 decision contracts:
    ```
 
 The canonical two-task baseline is `explore auth -> implement from handoff`.
-The package dependency plus test request is intentionally an entryDecision
-single-task case because both actions can be completed naturally in one
-workspace capability execution.
+The package test-script lookup plus test run is intentionally an entryDecision
+single-task case because preparation, execution, and reporting belong to one
+workspace task.
 
 ## Decision Prompt Preview
 
@@ -230,7 +230,7 @@ repeat count before comparing providers:
 npm run eval:prompt-v1
 ```
 
-It runs 34 canonical cases across `entry`, `planner`, `capability`, `outcome`,
+It runs 35 canonical cases across `entry`, `planner`, `capability`, `outcome`,
 and `answer`, with three repeats per case. Model and provider configuration still
 come from `LLM_*`, `~/.pinpawo/.env`, or `~/.pinpawo/config.json`; the generated
 report records the resolved values.

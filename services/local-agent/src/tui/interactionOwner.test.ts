@@ -22,9 +22,19 @@ test('resolveTuiInteractionOwner applies one priority across all interaction own
         ...IDLE,
         ready: false,
         externalEditorOpen: true,
+        transcriptViewerOpen: true,
         resumePickerOpen: true,
       },
       expected: { type: 'externalEditor' },
+    },
+    {
+      state: {
+        ...IDLE,
+        ready: false,
+        busy: true,
+        transcriptViewerOpen: true,
+      },
+      expected: { type: 'transcriptViewer' },
     },
     {
       state: { ...IDLE, ready: false, busy: true, resumePickerOpen: true },

@@ -19,7 +19,7 @@ export const TUI_TEXT = {
   welcomeCommandShortcut: '打开命令',
   welcomeResumeShortcut: '恢复会话',
   valueLoading: '加载中…',
-  helpIdle: '/new 新会话 · /policy 授权 · /resume 恢复 · /help 帮助 · /quit 退出',
+  helpIdle: '/new 新会话 · /transcript 历史 · /policy 授权 · /resume 恢复 · /help 帮助 · /quit 退出',
   helpBusy: 'Ctrl+C 打断 · 再按一次退出',
   commandPaletteTitle: '命令',
   commandPaletteEmpty: '没有匹配命令',
@@ -61,7 +61,7 @@ export const TUI_TEXT = {
   connectionReconnectRetrying: (seconds: number, attempt: number, maxAttempts: number) =>
     `连接断开，${seconds}s 后重连 ${attempt}/${maxAttempts}`,
   connectionUnavailable: (port: number) =>
-    `无法连接本地服务（port ${port}），请先运行 pinpawo-agent run`,
+    `无法连接本地服务（port ${port}），请先运行 pinpawo run`,
   initializationFailed: (message: string) => `初始化失败：${message}`,
   connectionError: (message: string) => `连接出错：${message}`,
   reconnectFailed: (message: string) => `重连失败：${message}`,

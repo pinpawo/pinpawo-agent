@@ -40,7 +40,7 @@ function resolveWorkdirOption(input: string): string {
 export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Command {
   const program = new Command();
   program
-    .name('pinpawo-agent')
+    .name('pinpawo')
     .description('PinPawo local agent CLI')
     .version(readLocalAgentPackageVersion());
 

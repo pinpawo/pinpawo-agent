@@ -430,7 +430,7 @@ test('TuiRuntimeController resets the timeline viewport for new sessions', () =>
   assert.deepEqual(harness.sent, [{ type: 'new_session' }]);
 });
 
-test('TuiRuntimeController applies the latest snapshot before opening its connection', async () => {
+test('TuiRuntimeController applies the latest snapshot without resetting inline output before reconnecting', async () => {
   const state = pendingReviewState();
   const events: string[] = [];
   const harness = createController(state, {
@@ -463,7 +463,7 @@ test('TuiRuntimeController applies the latest snapshot before opening its connec
   await (harness.controller as any).reconnect();
 
   assert.deepEqual(events, ['snapshot', 'connect']);
-  assert.equal(harness.resetCount, 1);
+  assert.equal(harness.resetCount, 0);
   assert.equal(harness.actions[0]?.type, 'session.snapshot.loaded');
   assert.equal(
     harness.actions[0]?.type === 'session.snapshot.loaded'
@@ -473,7 +473,7 @@ test('TuiRuntimeController applies the latest snapshot before opening its connec
   );
 });
 
-test('TuiRuntimeController refreshes from the latest snapshot after stale review errors', async () => {
+test('TuiRuntimeController refreshes stale reviews without resetting inline output', async () => {
   const harness = createController(pendingReviewState());
   const events: string[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -515,7 +515,7 @@ test('TuiRuntimeController refreshes from the latest snapshot after stale review
   });
 
   assert.deepEqual(events, ['snapshot']);
-  assert.equal(harness.resetCount, 1);
+  assert.equal(harness.resetCount, 0);
   assert.equal(harness.actions[0]?.type, 'event.received');
   assert.equal(harness.actions[1]?.type, 'session.snapshot.loaded');
   assert.equal(
@@ -526,7 +526,7 @@ test('TuiRuntimeController refreshes from the latest snapshot after stale review
   );
 });
 
-test('TuiRuntimeController applies the latest snapshot after completed messages', async () => {
+test('TuiRuntimeController applies completed-message snapshots without resetting inline output', async () => {
   const harness = createController(pendingReviewState());
   const events: string[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -574,7 +574,7 @@ test('TuiRuntimeController applies the latest snapshot after completed messages'
   });
 
   assert.deepEqual(events, ['snapshot']);
-  assert.equal(harness.resetCount, 1);
+  assert.equal(harness.resetCount, 0);
   assert.equal(harness.actions[0]?.type, 'event.received');
   assert.equal(harness.actions[1]?.type, 'session.snapshot.loaded');
   assert.equal(

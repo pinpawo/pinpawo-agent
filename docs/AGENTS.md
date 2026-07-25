@@ -20,6 +20,12 @@ The documentation model has three layers:
 `docs/index.md` is the content-oriented catalog. `docs/log.md` is the append-only
 chronology of wiki maintenance.
 
+## Ingest Gate
+
+Do not modify `docs/wiki/` or `docs/log.md` unless the user explicitly asks to
+ingest. Normal development updates raw documents; incomplete designs stay there
+until ingest is explicitly requested.
+
 ## Evidence And Authority
 
 Do not flatten different source roles into one notion of truth.
@@ -98,6 +104,8 @@ For historical intent, link to the design document, issue, PR, or commit.
 
 ### Ingest
 
+Run this workflow only when the user explicitly requests ingest.
+
 1. Register the source and its role.
 2. Read the relevant existing wiki pages before creating a new page.
 3. Extract claims, decisions, relationships, contradictions, and open questions.
@@ -111,7 +119,7 @@ For historical intent, link to the design document, issue, PR, or commit.
 2. Follow related pages and source links.
 3. Distinguish current implementation, accepted intent, historical context, and
    inference in the answer.
-4. File durable new synthesis back into the wiki when it adds reusable knowledge.
+4. Do not write query results back into the Wiki without an explicit ingest request.
 
 ### Prompt Contract Map
 

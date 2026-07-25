@@ -121,7 +121,7 @@ function required(envKey: string, storedKey: keyof typeof stored, label: string)
   const val = get(envKey, storedKey);
   if (!val) {
     throw new Error(
-      `Missing: ${label}\nRun "pinpawo-agent login" or set ${envKey} in .env`
+      `Missing: ${label}\nRun "pinpawo login" or set ${envKey} in .env`
     );
   }
   return val;
@@ -145,7 +145,7 @@ const apiConnected = !localOnlyMode && missingOrPlaceholderApiConfig.length === 
 const apiSetupMessage = localOnlyMode
   ? 'PINPAWO_LOCAL_ONLY is enabled. Local-only mode is enabled; hosted app relay and Hasura-backed context are disabled.'
   : missingOrPlaceholderApiConfig.length > 0
-    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo-agent login" to enable the hosted app, chat relay, and Hasura-backed context.`
+    ? `API login is not configured (${missingOrPlaceholderApiConfig.join(', ')}). Local-only mode is enabled; run "pinpawo login" to enable the hosted app, chat relay, and Hasura-backed context.`
     : '';
 
 const llmPresetKey = optional('LLM_MODEL_PRESET', 'llm_model_preset');

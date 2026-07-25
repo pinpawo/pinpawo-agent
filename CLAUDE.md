@@ -4,13 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Workspaces
 
-npm workspaces monorepo (Node 20.x, ESM-only, TypeScript). Two published packages:
+npm workspaces monorepo (Node.js >=24, validated on Node 24 and 26, ESM-only, TypeScript). Two published packages:
 
 - `packages/pet-agent/` → `@pinpawo/pet-agent` — runtime-independent agent core: orchestrator graph, subagent, studio, capability registry, built-in tools. No CLI, no filesystem, no network beyond what LangChain models need.
-- `services/local-agent/` → `pinpawo-local-agent` (bin: `pinpawo-agent`) — depends on pet-agent. Hosts the CLI/TUI (Ink/React), the local HTTP+WebSocket server (`localServer*`), capability/plugin loader for `~/.pinpawo/capabilities/`, local tool implementations (file/git/shell/network/search), browser tools, and the WS client that talks to the hosted PinPawo app.
+- `services/local-agent/` → `pinpawo` (bin: `pinpawo`) — depends on pet-agent. Hosts the CLI/TUI (Ink/React), the local HTTP+WebSocket server (`localServer*`), capability/plugin loader for `~/.pinpawo/capabilities/`, local tool implementations (file/git/shell/network/search), browser tools, and the WS client that talks to the hosted PinPawo app.
 - `tools/agent-macos/` — macOS desktop companion (not part of the npm workspaces root).
 
 The architectural boundary is enforced by convention: anything that touches the machine (FS, shell, network, browser, ~/.pinpawo) belongs in `services/local-agent` or `tools/agent-macos`; anything reusable on a server belongs in `packages/pet-agent`.
+
+## Wiki ingest
+
+- Do not modify `docs/wiki/` or `docs/log.md` unless the user explicitly asks to ingest.
+- During normal development, update raw documents under `docs/` instead. Keep incomplete designs there until ingest is explicitly requested.
 
 ## Commands
 
@@ -19,7 +24,7 @@ Run from repo root:
 - `npm install` — install all workspaces.
 - `npm run typecheck` — typecheck both packages.
 - `npm test` — pet-agent tests (`node --test` on `src/agent/orchestrator/*.test.ts`, `src/agent/studio/*.test.ts`, `src/subagent/*.test.ts`, `src/tools/*.test.ts`) then local-agent `test:unit`.
-- `npm run build` — tsup-bundles `pinpawo-local-agent` into `services/local-agent/dist/` and generates manifest.
+- `npm run build` — tsup-bundles `pinpawo` into `services/local-agent/dist/` and generates manifest.
 
 Per-workspace (use `-w <pkg>` or `cd`):
 
@@ -29,7 +34,7 @@ Per-workspace (use `-w <pkg>` or `cd`):
 - TUI dev: `cd services/local-agent && npm run tui` (or `npm run tui:dry` for dry-run). `npm run login` first to set credentials.
 - One-shot post: `npm run once` / `npm run once:dry`.
 - Evals (pet-agent, needs `.env`): `npm run eval:route`, `eval:flow:mock-subagent`, `eval:hitl`, `eval:subagent`, `eval:dataset`.
-- Eval (local-agent, needs `.env`): `npm run eval:hitl -w pinpawo-local-agent` — drives `runChatSession` through a fake graph to verify structured-resume + shell authorization extras.
+- Eval (local-agent, needs `.env`): `npm run eval:hitl -w pinpawo` — drives `runChatSession` through a fake graph to verify structured-resume + shell authorization extras.
 
 ## Pet-agent architecture (where to look)
 
@@ -43,7 +48,7 @@ Per-workspace (use `-w <pkg>` or `cd`):
 
 ## Local-agent architecture
 
-- `src/cli.ts` + `src/index.ts` — Commander CLI (`pinpawo-agent login|actor|once|tui|capability ...`).
+- `src/cli.ts` + `src/index.ts` — Commander CLI (`pinpawo login|actor|once|tui|capability ...`).
 - `src/tui/` + `src/chatInterface.ts` — Ink/React TUI. State machine lives in `tuiStateReducer`; resume picker, transcript export, input/keys all have their own files with `.test.ts` siblings.
 - `src/localServer.ts` + `src/localServer*.ts` + `src/localHttpHandlers.ts` + `src/localServerWsTransport.ts` — local HTTP+WS server on `127.0.0.1:3210`. Handles chat, studio reviews, TUI sessions, operation events. Macos companion and remote app talk to it; e.g. `GET /capabilities/rescan` reloads plugins.
 - `src/localAgentAppWsClient.ts` + `src/localAgentAppChatHandler.ts` — WS client back to the hosted PinPawo app, plus its chat handler.
@@ -63,4 +68,4 @@ Per-workspace (use `-w <pkg>` or `cd`):
 
 ## Capability plugins
 
-User capability plugins live in `~/.pinpawo/capabilities/<id>/` and need `manifest.json` + `index.js`. Manage with `pinpawo-agent capability validate|install|list` (`--link` for capabilities with their own deps). A running agent reloads them via `GET http://127.0.0.1:3210/capabilities/rescan`.
+User capability plugins live in `~/.pinpawo/capabilities/<id>/` and need `manifest.json` + `index.js`. Manage with `pinpawo capability validate|install|list` (`--link` for capabilities with their own deps). A running agent reloads them via `GET http://127.0.0.1:3210/capabilities/rescan`.

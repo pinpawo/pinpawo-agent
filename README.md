@@ -56,7 +56,7 @@ docs/                     Public architecture, capability, Studio, artifact stor
 | Package | Location | Purpose |
 |---|---|---|
 | `@pinpawo/pet-agent` | `packages/pet-agent/` | Core runtime, orchestrator, capability and toolkit contracts. |
-| `pinpawo-local-agent` | `services/local-agent/` | CLI/TUI and local server package published with the `pinpawo-agent` binary. |
+| `pinpawo` | `services/local-agent/` | CLI/TUI and local server package published with the `pinpawo` binary. |
 
 The repository root is an npm workspace. The root package is private; publishable packages live under workspace directories.
 
@@ -99,25 +99,28 @@ User request
 
 ## Requirements
 
-- Node.js `20.x`
+- Node.js `>=24` (Node 24 LTS and Node 26 are validated)
 - npm
 - macOS is required only for `tools/agent-macos/`
-- Optional browser automation dependencies are installed through `pinpawo-local-agent` optional dependencies when available.
+- Optional browser automation dependencies are installed through `pinpawo` optional dependencies when available.
+
+The macOS companion currently retains its separate bundled Node 20 toolchain and
+is outside the Node 24/26 npm package compatibility target for this release.
 
 ## Quick Start
 
 Install the local agent globally:
 
 ```bash
-npm install -g pinpawo-local-agent
-pinpawo-agent init
-pinpawo-agent login
-pinpawo-agent setup
-pinpawo-agent capability validate ~/.pinpawo/capabilities/hello-pinpawo
-pinpawo-agent tui
+npm install -g pinpawo
+pinpawo init
+pinpawo login
+pinpawo setup
+pinpawo capability validate ~/.pinpawo/capabilities/hello-pinpawo
+pinpawo tui
 ```
 
-Use `pinpawo-agent init` first even if you plan to log in interactively. It creates:
+Use `pinpawo init` first even if you plan to log in interactively. It creates:
 
 - `~/.pinpawo/.env`
 - `~/.pinpawo/capabilities/`
@@ -126,9 +129,9 @@ Use `pinpawo-agent init` first even if you plan to log in interactively. It crea
 For one-off usage without a global install:
 
 ```bash
-npx pinpawo-local-agent init
-npx pinpawo-local-agent login
-npx pinpawo-local-agent tui
+npx pinpawo init
+npx pinpawo login
+npx pinpawo tui
 ```
 
 ## Local Development
@@ -158,8 +161,8 @@ Run a local package smoke test after building:
 
 ```bash
 npm run build
-node services/local-agent/dist/index.js init --dir /tmp/pinpawo-agent-demo
-node services/local-agent/dist/index.js capability validate /tmp/pinpawo-agent-demo/capabilities/hello-pinpawo
+node services/local-agent/dist/index.js init --dir /tmp/pinpawo-demo
+node services/local-agent/dist/index.js capability validate /tmp/pinpawo-demo/capabilities/hello-pinpawo
 ```
 
 ## Configuration
@@ -173,7 +176,7 @@ The local agent reads configuration from:
 Start with interactive setup:
 
 ```bash
-pinpawo-agent login
+pinpawo login
 ```
 
 For repository development, you can copy the example file:
@@ -206,37 +209,37 @@ Common configuration keys:
 
 ## CLI Reference
 
-The published package installs a `pinpawo-agent` binary.
+The published package installs a `pinpawo` binary.
 
 | Command | Purpose |
 |---|---|
-| `pinpawo-agent` | Starts the local agent service. Equivalent to `pinpawo-agent run`. |
-| `pinpawo-agent init` | Scaffolds local config and a sample capability. |
-| `pinpawo-agent init --dir <dir>` | Scaffolds config into a custom directory. |
-| `pinpawo-agent init --force` | Overwrites generated scaffold files. |
-| `pinpawo-agent login` | Interactive setup for credentials and LLM settings. |
-| `pinpawo-agent actor` | Chooses the pet actor used by the local agent. |
-| `pinpawo-agent run` | Starts the local agent service. |
-| `pinpawo-agent run --stdio` | Starts one local-agent peer over JSONL stdio. |
-| `pinpawo-agent browser extension register --extension-id <id>` | Registers the Chrome Native Messaging host for the Browser extension driver. |
-| `pinpawo-agent browser extension status` | Shows the Browser extension driver's host registration and runtime-file diagnostics. |
-| `pinpawo-agent browser extension unregister` | Removes the Browser extension driver's Native Messaging host registration. |
-| `pinpawo-agent tui` | Starts the interactive terminal UI. |
-| `pinpawo-agent tui --dry-run` | Runs the TUI without writing generated post changes. |
-| `pinpawo-agent detect` | Prints local browser/backend detection as JSON. |
-| `pinpawo-agent capability list` | Lists installed user capabilities. |
-| `pinpawo-agent capability validate <dir>` | Validates a capability directory. |
-| `pinpawo-agent capability install <dir>` | Installs a capability into `~/.pinpawo/capabilities/`. |
-| `pinpawo-agent capability install <dir> --link` | Links a capability in place instead of copying it. |
+| `pinpawo` | Starts the local agent service. Equivalent to `pinpawo run`. |
+| `pinpawo init` | Scaffolds local config and a sample capability. |
+| `pinpawo init --dir <dir>` | Scaffolds config into a custom directory. |
+| `pinpawo init --force` | Overwrites generated scaffold files. |
+| `pinpawo login` | Interactive setup for credentials and LLM settings. |
+| `pinpawo actor` | Chooses the pet actor used by the local agent. |
+| `pinpawo run` | Starts the local agent service. |
+| `pinpawo run --stdio` | Starts one local-agent peer over JSONL stdio. |
+| `pinpawo browser extension register --extension-id <id>` | Registers the Chrome Native Messaging host for the Browser extension driver. |
+| `pinpawo browser extension status` | Shows the Browser extension driver's host registration and runtime-file diagnostics. |
+| `pinpawo browser extension unregister` | Removes the Browser extension driver's Native Messaging host registration. |
+| `pinpawo tui` | Starts the interactive terminal UI. |
+| `pinpawo tui --dry-run` | Runs the TUI without writing generated post changes. |
+| `pinpawo detect` | Prints local browser/backend detection as JSON. |
+| `pinpawo capability list` | Lists installed user capabilities. |
+| `pinpawo capability validate <dir>` | Validates a capability directory. |
+| `pinpawo capability install <dir>` | Installs a capability into `~/.pinpawo/capabilities/`. |
+| `pinpawo capability install <dir> --link` | Links a capability in place instead of copying it. |
 
 See [Chrome extension browser backend](docs/BROWSER_EXTENSION_BACKEND.md) for setup, P1 interaction scope, security model and snapshot contract.
 
 Local development equivalents:
 
 ```bash
-npm run start -w pinpawo-local-agent -- tui
-npm run login -w pinpawo-local-agent
-npm run tui -w pinpawo-local-agent
+npm run start -w pinpawo -- tui
+npm run login -w pinpawo
+npm run tui -w pinpawo
 ```
 
 ## Capabilities and Plugins
@@ -255,10 +258,10 @@ Each capability directory must contain:
 Useful commands:
 
 ```bash
-pinpawo-agent capability list
-pinpawo-agent capability validate ./my-capability
-pinpawo-agent capability install ./my-capability
-pinpawo-agent capability install ./my-capability --link
+pinpawo capability list
+pinpawo capability validate ./my-capability
+pinpawo capability install ./my-capability
+pinpawo capability install ./my-capability --link
 ```
 
 Use `--link` for capabilities that live in a source repository or have their own package dependencies, so their dependency tree stays in one place.
@@ -301,7 +304,7 @@ Capability directories are intentionally small. A minimal generated capability l
 export function createCapability() {
   return {
     name: 'hello-pinpawo',
-    description: 'Minimal example capability generated by pinpawo-agent init.',
+    description: 'Minimal example capability generated by pinpawo init.',
     createRuntime() {
       return {
         instructions: [
@@ -402,9 +405,9 @@ Package-level scripts:
 npm run typecheck -w @pinpawo/pet-agent
 npm run test -w @pinpawo/pet-agent
 
-npm run typecheck -w pinpawo-local-agent
-npm run test:unit -w pinpawo-local-agent
-npm run build -w pinpawo-local-agent
+npm run typecheck -w pinpawo
+npm run test:unit -w pinpawo
+npm run build -w pinpawo
 ```
 
 The pet-agent package also contains evaluation scripts under `packages/pet-agent/evals/`.
@@ -413,12 +416,12 @@ The pet-agent package also contains evaluation scripts under `packages/pet-agent
 
 | Problem | Check |
 |---|---|
-| `pinpawo-agent` command not found | Use `npx pinpawo-local-agent ...` or reinstall with `npm install -g pinpawo-local-agent`. |
+| `pinpawo` command not found | Use `npx pinpawo ...` or reinstall with `npm install -g pinpawo`. |
 | TUI starts but model calls fail | Check `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL`. |
 | Context window errors | Set `LLM_CONTEXT_WINDOW_TOKENS` for custom or unknown models. |
-| Capability does not appear | Run `pinpawo-agent capability validate <dir>` and confirm it is installed under `~/.pinpawo/capabilities/`. |
+| Capability does not appear | Run `pinpawo capability validate <dir>` and confirm it is installed under `~/.pinpawo/capabilities/`. |
 | Linked capability dependency issues | Use `--link` so the capability keeps its own dependency tree. |
-| Browser tools unavailable | Run `pinpawo-agent detect` and check optional browser backend installation. |
+| Browser tools unavailable | Run `pinpawo detect` and check optional browser backend installation. |
 | Local server port conflict | Set `LOCAL_SERVER_PORT` or stop the process using the port. |
 | Studio pet cannot find prior output | Confirm the curator wrote wiki entries and that durable outputs are represented as artifact refs. |
 | HITL appears stuck | Confirm the UI or local server is connected and able to answer `human_review.requested` events. |
@@ -469,7 +472,8 @@ Before publishing or cutting a public release:
 npm run typecheck
 npm test
 npm run build
-npm run pack:dry -w pinpawo-local-agent
+npm pack --dry-run -w @pinpawo/pet-agent
+npm run pack:dry -w pinpawo
 ```
 
 4. Review package contents from `npm pack --dry-run`.
@@ -484,10 +488,12 @@ From the repository root:
 npm run typecheck
 npm test
 npm run build
-npm run pack:dry -w pinpawo-local-agent
-npm publish -w pinpawo-local-agent
+npm pack --dry-run -w @pinpawo/pet-agent
+npm run pack:dry -w pinpawo
+npm publish -w @pinpawo/pet-agent --access public
+npm publish -w pinpawo --access public
 ```
 
 ## License
 
-No license file is currently present in this repository. Add an explicit `LICENSE` file before distributing the project as a fully open-source package.
+This project is licensed under the [MIT License](LICENSE).

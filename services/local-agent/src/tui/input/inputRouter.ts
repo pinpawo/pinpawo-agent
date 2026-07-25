@@ -16,6 +16,7 @@ export type TuiInputRouterState = {
 export type TuiInputCommand =
   | { target: 'global'; action: 'ctrl_c' | 'interrupt' }
   | { target: 'timeline'; action: 'page_up' | 'page_down' | 'scroll_up' | 'scroll_down' }
+  | { target: 'transcript'; action: 'line_up' | 'line_down' | 'page_up' | 'page_down' | 'top' | 'bottom' | 'dismiss' }
   | { target: 'approval'; action: 'previous' | 'next' | 'submit' }
   | { target: 'resume'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
   | { target: 'globalReviewPolicy'; action: 'previous' | 'next' | 'submit' | 'dismiss' }
@@ -48,6 +49,33 @@ export function resolveTuiInputCommand(
 
   switch (owner.type) {
     case 'externalEditor':
+      return { target: 'none' };
+
+    case 'transcriptViewer':
+      if (event.type === 'cursor.up' || event.type === 'viewport.scroll.up') {
+        return { target: 'transcript', action: 'line_up' };
+      }
+      if (event.type === 'cursor.down' || event.type === 'viewport.scroll.down') {
+        return { target: 'transcript', action: 'line_down' };
+      }
+      if (event.type === 'viewport.page.up') {
+        return { target: 'transcript', action: 'page_up' };
+      }
+      if (event.type === 'viewport.page.down') {
+        return { target: 'transcript', action: 'page_down' };
+      }
+      if (event.type === 'cursor.line.start') {
+        return { target: 'transcript', action: 'top' };
+      }
+      if (event.type === 'cursor.line.end') {
+        return { target: 'transcript', action: 'bottom' };
+      }
+      if (
+        event.type === 'escape'
+        || (event.type === 'text.insert' && event.text.toLowerCase() === 'q')
+      ) {
+        return { target: 'transcript', action: 'dismiss' };
+      }
       return { target: 'none' };
 
     case 'unready':

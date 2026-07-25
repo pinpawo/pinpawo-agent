@@ -2,11 +2,12 @@
 title: Documentation Wiki Index
 page_type: overview
 status: draft
-updated: 2026-07-20
+updated: 2026-07-25
 sources:
   - ../AGENTS.md
 related:
   - overview.md
+  - concepts/orchestrator-practical-reasoning.md
   - migrations/docs-wiki-management-plan.md
 ---
 
@@ -21,6 +22,9 @@ explicitly migrated.
 
 - [System prompt knowledge map](overview.md) — current synthesis and relationship
   map.
+- [Orchestrator as practical reasoning](concepts/orchestrator-practical-reasoning.md)
+  — draft philosophical model for purpose, interpretation, knowledge, judgment,
+  action, responsibility, time, and completion.
 - [Prompt knowledge layers](concepts/prompt-knowledge-layers.md) — static contract,
   conditional protocol, injected facts, and deterministic enforcement.
 - [System prompt authoring principles](concepts/system-prompt-authoring-principles.md)

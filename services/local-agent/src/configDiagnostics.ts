@@ -90,7 +90,7 @@ export function buildSetupGuide(options: {
           label: 'LLM API',
           status: 'missing',
           detail: 'LLM_API_KEY is missing. Local chat/TUI cannot run until it is configured.',
-          nextStep: 'Run "pinpawo-agent login" or set LLM_API_KEY in ~/.pinpawo/.env.',
+          nextStep: 'Run "pinpawo login" or set LLM_API_KEY in ~/.pinpawo/.env.',
         },
     localOnlyMode
       ? {
@@ -112,7 +112,7 @@ export function buildSetupGuide(options: {
           label: 'Hosted app/API',
           status: 'warning',
           detail: `Missing or placeholder values: ${missingApiKeys.join(', ')}. Local-only mode can still run, but hosted app relay, heartbeat, scheduled posts, and Hasura context are disabled.`,
-          nextStep: 'Run "pinpawo-agent login" to configure hosted API credentials.',
+          nextStep: 'Run "pinpawo login" to configure hosted API credentials.',
         },
     actorId
       ? {
@@ -129,8 +129,8 @@ export function buildSetupGuide(options: {
             ? 'No hosted actor is selected.'
             : 'No actor is selected. Local-only mode will use the built-in local actor.',
           nextStep: hostedApiEnabled
-            ? 'Run "pinpawo-agent actor" to choose a pet actor.'
-            : 'After hosted login, run "pinpawo-agent actor" to choose a pet actor.',
+            ? 'Run "pinpawo actor" to choose a pet actor.'
+            : 'After hosted login, run "pinpawo actor" to choose a pet actor.',
         },
     buildStudioConfigCheck(runtimeConfig),
   ];
@@ -195,8 +195,8 @@ function buildNextSteps(checks: SetupCheck[]) {
       steps.push(check.nextStep);
     }
   }
-  if (!steps.includes('Run "pinpawo-agent tui" to start the terminal UI.')) {
-    steps.push('Run "pinpawo-agent tui" to start the terminal UI.');
+  if (!steps.includes('Run "pinpawo tui" to start the terminal UI.')) {
+    steps.push('Run "pinpawo tui" to start the terminal UI.');
   }
   return steps;
 }

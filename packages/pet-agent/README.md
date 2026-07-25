@@ -9,7 +9,8 @@ Shared agent runtime, orchestration, capability, and toolkit contracts for
 npm install @pinpawo/pet-agent
 ```
 
-The package is ESM-only and requires Node.js 20.
+The package is ESM-only and requires Node.js 24 or newer. Node 24 LTS and Node 26
+are validated for this release.
 
 ## License
 

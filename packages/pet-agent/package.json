@@ -6,7 +6,7 @@
     "access": "public"
   },
   "engines": {
-    "node": "20.x"
+    "node": ">=24"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -24,7 +24,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean --out-dir dist --platform node --target node20",
+    "build": "tsup src/index.ts --format esm --dts --clean --out-dir dist --platform node --target node24",
     "prepare": "npm run build",
     "prepublishOnly": "npm run typecheck && npm test",
     "typecheck": "tsc --noEmit && npm run typecheck:evals",
@@ -58,7 +58,7 @@
   },
   "devDependencies": {
     "@langchain/openai": "^1.5.3",
-    "@types/node": "^22.0.0",
+    "@types/node": "^24.0.0",
     "langsmith": "^0.5.21",
     "tsup": "^8.5.1",
     "tsx": "^4.19.0",

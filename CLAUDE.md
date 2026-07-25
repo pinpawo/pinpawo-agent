@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Workspaces
 
-npm workspaces monorepo (Node 20.x, ESM-only, TypeScript). Two published packages:
+npm workspaces monorepo (Node.js >=24, validated on Node 24 and 26, ESM-only, TypeScript). Two published packages:
 
 - `packages/pet-agent/` → `@pinpawo/pet-agent` — runtime-independent agent core: orchestrator graph, subagent, studio, capability registry, built-in tools. No CLI, no filesystem, no network beyond what LangChain models need.
 - `services/local-agent/` → `pinpawo` (bin: `pinpawo`) — depends on pet-agent. Hosts the CLI/TUI (Ink/React), the local HTTP+WebSocket server (`localServer*`), capability/plugin loader for `~/.pinpawo/capabilities/`, local tool implementations (file/git/shell/network/search), browser tools, and the WS client that talks to the hosted PinPawo app.

@@ -99,10 +99,13 @@ User request
 
 ## Requirements
 
-- Node.js `20.x`
+- Node.js `>=24` (Node 24 LTS and Node 26 are validated)
 - npm
 - macOS is required only for `tools/agent-macos/`
 - Optional browser automation dependencies are installed through `pinpawo` optional dependencies when available.
+
+The macOS companion currently retains its separate bundled Node 20 toolchain and
+is outside the Node 24/26 npm package compatibility target for this release.
 
 ## Quick Start
 

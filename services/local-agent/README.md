@@ -4,7 +4,8 @@ CLI, terminal UI, and local agent runtime for PinPawo.
 
 ## Quick Install
 
-Requires Node.js 20.x.
+Requires Node.js 24 or newer. Node 24 LTS and Node 26 are validated for this
+release.
 
 ```bash
 npm install -g pinpawo

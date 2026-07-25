@@ -244,3 +244,18 @@ lint passes, and documentation migrations.
   generalization.
 - Reopened the execution-boundary question for natural-language paired evals and
   a first-principles prompt revision.
+
+## [2026-07-26] ingest | CapabilityPlanner result-bounded planning
+
+- Registered the task-horizon design, PR #461 implementation, production prompt,
+  schema/runtime mapping, six-case dataset, and shared semantic evaluator.
+- Added a decision page that separates immutable completed-task facts from the
+  mutable unstarted plan and defines task boundaries by returned results,
+  ability continuity, and independently useful acceptance points.
+- Removed stale Wiki guidance around `concrete | deferred`; current/future
+  position now carries the temporal distinction.
+- Updated the Prompt Contract Map and authoring principles so deterministic
+  checks own exact result/shape while the goal evaluator owns plan semantics;
+  fixed task count remains diagnostic.
+- Recorded the accepted GLM-5.2 single-model baseline of three evaluable passes
+  for each of six cases (`18/18`) and kept cross-model validation open.

@@ -12,6 +12,7 @@ the original design and reference documents. Maintenance rules live in
 - [System prompt design knowledge map](wiki/overview.md)
 - [Orchestrator as practical reasoning](wiki/concepts/orchestrator-practical-reasoning.md)
 - [System prompt authoring and evaluation principles](wiki/concepts/system-prompt-authoring-principles.md)
+- [CapabilityPlanner task boundaries](wiki/decisions/capability-planner-task-boundaries.md)
 - [Documentation wiki management plan](wiki/migrations/docs-wiki-management-plan.md)
 
 ## Pet Agent API
@@ -33,6 +34,7 @@ the original design and reference documents. Maintenance rules live in
 - [State lifecycle refactor](PET_AGENT_STATE_LIFECYCLE_REFACTOR.md)
 - [Decision node ownership audit](PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md)
 - [Decision system prompt design](PET_AGENT_DECISION_SYSTEM_PROMPT_DESIGN.md)
+- [CapabilityPlanner task-horizon design](CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md)
 - [Decision shared prompt prefix](PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md)
 - [Historical orchestrator route design](PET_AGENT_ORCHESTRATOR_ROUTE_DESIGN.md)
 - [Announce judgment and explicit handoff](PET_AGENT_ANNOUNCE_JUDGMENT_REFACTOR.md)

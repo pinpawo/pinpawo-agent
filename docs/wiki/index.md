@@ -2,12 +2,13 @@
 title: Documentation Wiki Index
 page_type: overview
 status: draft
-updated: 2026-07-25
+updated: 2026-07-26
 sources:
   - ../AGENTS.md
 related:
   - overview.md
   - concepts/orchestrator-practical-reasoning.md
+  - decisions/capability-planner-task-boundaries.md
   - migrations/docs-wiki-management-plan.md
 ---
 
@@ -32,6 +33,9 @@ explicitly migrated.
   objective-derived eval targets, and eval-backed prompt changes.
 - [Decision node ownership](concepts/decision-node-ownership.md) — semantic owner
   of each orchestrator decision.
+- [CapabilityPlanner task boundaries](decisions/capability-planner-task-boundaries.md)
+  — completed facts, mutable future work, result-driven replanning, and the
+  current/future task boundary.
 - [Message context and provenance](concepts/message-context-and-provenance.md) —
   canonical main messages, private lanes, announce, handoff, and trusted identity.
 - [Delegation completion acknowledgement](decisions/delegation-completion-acknowledgement.md)

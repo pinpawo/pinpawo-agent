@@ -2,7 +2,7 @@
 title: Orchestrator Decision Node Ownership
 page_type: concept
 status: validated
-updated: 2026-07-25
+updated: 2026-07-26
 sources:
   - ../../PET_AGENT_DELEGATION_STATE_AND_TASK_ROUTING.md
   - ../../PET_AGENT_DECISION_NODE_OWNERSHIP_AUDIT.md
@@ -12,6 +12,7 @@ related:
   - prompt-knowledge-layers.md
   - system-prompt-authoring-principles.md
   - message-context-and-provenance.md
+  - ../decisions/capability-planner-task-boundaries.md
   - ../investigations/entry-decision-state-query-routing.md
 ---
 
@@ -39,6 +40,13 @@ the user request. Related actions belong together when one executor can naturall
 complete and validate them. Separate boundaries are justified by dependency on a
 future handoff, different capability intent, or a meaningful independent
 acceptance point.
+
+The draft
+[CapabilityPlanner task-boundary decision](../decisions/capability-planner-task-boundaries.md)
+refines this ownership without moving it: completed tasks remain immutable
+facts, while the planner uses returned results to revise only `next_task` and
+the unstarted `remaining_plan` tail. Runtime code preserves and maps that state
+but does not decide how the future plan changes.
 
 The draft [practical-reasoning philosophy](orchestrator-practical-reasoning.md)
 defines the underlying reason for execution: the user goal requires evidence or

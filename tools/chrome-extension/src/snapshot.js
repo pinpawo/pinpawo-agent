@@ -43,6 +43,31 @@ export function buildSnapshotExpression(maxInteractive = MAX_RAW_INTERACTIVE_ELE
       }
       return value.slice(0, low);
     };
+    const sensitiveInputTokens = new Set([
+      'cc-csc',
+      'cc-exp',
+      'cc-exp-month',
+      'cc-exp-year',
+      'cc-number',
+      'current-password',
+      'new-password',
+      'one-time-code',
+    ]);
+    const isSensitiveInput = (element) => {
+      if (element.tagName.toLowerCase() !== 'input') return false;
+      if ((element.getAttribute('type') || '').toLowerCase() === 'password') return true;
+      const autocomplete = (element.getAttribute('autocomplete') || '')
+        .toLowerCase()
+        .split(/\\s+/)
+        .filter(Boolean);
+      return autocomplete.some((token) => sensitiveInputTokens.has(token));
+    };
+    const textFor = (element) => {
+      const text = (element.textContent || '').trim();
+      if (text) return text;
+      if (isSensitiveInput(element)) return '[redacted]';
+      return String(element.value || '').trim();
+    };
     const hintFor = (element, index) => {
       const label = element.getAttribute('aria-label');
       const name = element.getAttribute('name');
@@ -76,7 +101,7 @@ export function buildSnapshotExpression(maxInteractive = MAX_RAW_INTERACTIVE_ELE
         index,
         ref,
         tag: element.tagName.toLowerCase(),
-        text: trim((element.textContent || element.value || '').trim(), 80),
+        text: trim(textFor(element), 80),
         type: element.getAttribute('type'),
         placeholder: element.getAttribute('placeholder'),
         hint: hintFor(element, index),

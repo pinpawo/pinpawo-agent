@@ -26,10 +26,9 @@ related:
 These sources describe what currently runs and have the highest authority for
 behavioral claims:
 
-CapabilityPlanner claims added on 2026-07-26 describe the implementation in
-[PR #461](https://github.com/pinpawo/pinpawo-agent/pull/461) until that PR is
-merged. The associated decision page remains `draft`; this registry does not
-silently treat the branch as current `main`.
+CapabilityPlanner claims added on 2026-07-26 describe the implementation merged
+in [PR #461](https://github.com/pinpawo/pinpawo-agent/pull/461) and checked
+against the resulting `main`.
 
 - [`prompts/templates/sharedPrefix.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/sharedPrefix.prompt.ts)
 - [`prompts/templates/entryDecision.prompt.ts`](../../../packages/pet-agent/src/agent/orchestrator/prompts/templates/entryDecision.prompt.ts)

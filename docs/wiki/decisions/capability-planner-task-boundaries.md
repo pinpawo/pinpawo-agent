@@ -1,7 +1,7 @@
 ---
 title: CapabilityPlanner Maintains Result-Bounded Future Work
 page_type: decision
-status: draft
+status: validated
 updated: 2026-07-26
 sources:
   - ../../CAPABILITY_PLANNER_TASK_HORIZON_DRAFT.md
@@ -24,9 +24,9 @@ related:
 
 ## Status and scope
 
-This decision has passed the fixed GLM-5.2 planner profile and is implemented in
-[PR #461](https://github.com/pinpawo/pinpawo-agent/pull/461). The page remains
-`draft` until that implementation is merged and checked against `main`.
+This decision has passed the fixed GLM-5.2 planner profile. Its implementation
+was merged in [PR #461](https://github.com/pinpawo/pinpawo-agent/pull/461) and
+checked against the resulting `main`.
 
 The decision refines the existing `planner.execution-boundary` contract. It does
 not add another orchestrator decision, move executor selection into the planner,

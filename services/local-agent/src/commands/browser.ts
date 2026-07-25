@@ -1,5 +1,6 @@
 import {
   getBrowserExtensionHostStatus,
+  PINPAWO_CHROME_WEB_STORE_EXTENSION_ID,
   registerBrowserExtensionHost,
   unregisterBrowserExtensionHost,
 } from '../toolkits/browser/drivers/chromeExtension/nativeHost/install';
@@ -22,15 +23,15 @@ export async function runBrowserCommand(
     throw new Error(`Unknown browser integration: ${target}`);
   }
   if (action === 'register') {
-    if (!options.extensionId) {
-      throw new Error('Missing --extension-id. Copy it from chrome://extensions after loading the unpacked extension.');
-    }
-    const paths = await registerBrowserExtensionHost({ extensionId: options.extensionId });
+    const extensionId = options.extensionId ?? PINPAWO_CHROME_WEB_STORE_EXTENSION_ID;
+    const paths = await registerBrowserExtensionHost({ extensionId });
+    const status = await getBrowserExtensionHostStatus();
     process.stdout.write(JSON.stringify({
       registered: true,
-      extensionId: options.extensionId,
+      extensionId,
+      extensionIds: status.extensionIds,
       nativeHostEntryPath: paths.nativeHostEntryPath,
-      extensionPath: (await getBrowserExtensionHostStatus()).extensionPath,
+      extensionPath: status.extensionPath,
       manifests: paths.manifestPaths,
     }, null, 2) + '\n');
     return;

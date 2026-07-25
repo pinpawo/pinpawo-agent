@@ -39,6 +39,11 @@ test('runtime snapshot expression carries numbered interactive hints', () => {
   assert.match(expression, /textLength: bodyText\.length/);
   assert.match(expression, /elementRegistry\.set\(ref, element\)/);
   assert.match(expression, /ref,/);
+  assert.match(expression, /current-password/);
+  assert.match(expression, /one-time-code/);
+  assert.match(expression, /cc-number/);
+  assert.match(expression, /\[redacted\]/);
+  assert.doesNotMatch(expression, /element\.textContent \|\| element\.value/);
 });
 
 test('accessibility fallback returns a raw backend snapshot', () => {

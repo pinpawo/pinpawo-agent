@@ -95,6 +95,11 @@ pinpawo capability install ./my-capability
 
 The packaged extension directory is printed by `browser extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, and restart the agent. The Chrome extension is a Browser capability driver, with its Native Messaging host kept as a driver-private companion process. Protocol v2 supports open, snapshot, click, type, scroll, wait, extract, screenshot and detach on one approved Chrome tab.
 
+For the official Chrome Web Store build, run
+`pinpawo browser extension register` without `--extension-id`. The option
+is only needed for an unpacked development build. Registration preserves the
+official Store ID and any previously registered development IDs.
+
 `pinpawo run --stdio` starts one logical local-agent peer over newline-delimited
 JSON. It reads one `LocalAgentClientMessage` per stdin line and writes one
 `LocalAgentServerMessage` per stdout line. Stdout is reserved for protocol messages;

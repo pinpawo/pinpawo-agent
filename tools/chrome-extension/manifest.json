@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PinPawo Browser Bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "minimum_chrome_version": "118",
   "description": "Connects an explicitly approved Chrome tab to the local PinPawo agent.",
   "permissions": [
@@ -10,11 +10,22 @@
     "storage",
     "tabs"
   ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "action": {
-    "default_title": "Bind this tab to PinPawo"
+    "default_title": "Bind this tab to PinPawo",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
   }
 }
